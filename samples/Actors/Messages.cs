@@ -11,8 +11,8 @@ public struct Buy : IForEachEntity<Stock, Sales>
     public int Quantity;
     public bool Sold;
 
-    // Writes Stock (bit 0) and Sales (bit 1): both are stamped and both follow the shop if it moves table.
-    public static int Writes => 0b11;
+    // WriteMask: Stock (bit 0) and Sales (bit 1), both are stamped and both follow the shop if it moves table.
+    public static int WriteMask => 0b11;
 
     public void Execute(Entity shop, ref Stock stock, ref Sales sales)
     {
@@ -39,7 +39,7 @@ public struct Deposit : IForEachEntity<Balance>, INoStructuralChanges
 {
     public long Coins;
 
-    public static int Writes => 1;
+    public static int WriteMask => 1;
 
     public void Execute(Entity bank, ref Balance balance) => balance.Coins += Coins;
 }

@@ -5,7 +5,7 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// Introspection for dashboards and debuggers, on the battle server's world (10,000 units, every status table
-/// populated): <c>world.Describe()</c> lists every table with its columns, rows and bytes; <c>entity.Describe()</c>
+/// populated): <c>world.DescribeTables()</c> lists every table with its columns, rows and bytes; <c>entity.Describe()</c>
 /// lists one entity's components with their values (boxed: a debugging aid, not a tick path);
 /// <c>world.DescribeSchedule()</c> reports the stages of every group with each system's access and waits.
 /// </summary>

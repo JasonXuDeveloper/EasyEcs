@@ -32,7 +32,7 @@ internal static class ComponentType<T> where T : struct, IComponent
     internal static readonly ushort Bit = Register();
 
     /// <summary>
-    /// Bit of the hidden change-tick column of a tracked <typeparamref name="T"/> (<see cref="ITrackChanges"/>); not
+    /// Bit of the hidden change-tick column of a tracked <typeparamref name="T"/> (<see cref="ITracked"/>); not
     /// meaningful for other components. Archetypes having <typeparamref name="T"/> always have it.
     /// </summary>
     internal static readonly ushort TicksBit = (ushort)ComponentInfo.Of(Bit).Companion;
@@ -61,11 +61,11 @@ internal static class ComponentType<T> where T : struct, IComponent
         int index = ComponentInfo.Allocate(new ComponentInfo<T>());
         Collectible.Watch(typeof(T)); // its bit is released when its context unloads
         SavedTypes.Component<T>(); // a type the process uses can be loaded
-        // A tracked component brings a hidden column of change ticks into every archetype that has it: a ChangeTick
+        // A tracked component brings a hidden column of change ticks into every archetype that has it: a RowTick
         // column with a bit of its own, described by the component's type so it is released with it. Not a generic
-        // ChangeTicks<T> registered through ComponentType: the AOT compiler cannot see that such a registration stops
-        // (ComponentType<ChangeTicks<ChangeTicks<...>>>) and warns IL3054 for every program with a tracked component.
-        if (default(T) is ITrackChanges) ComponentInfo.Pair(index, ComponentInfo.Allocate(new ComponentInfo<ChangeTick>(typeof(T))));
+        // RowTicks<T> registered through ComponentType: the AOT compiler cannot see that such a registration stops
+        // (ComponentType<RowTicks<RowTicks<...>>>) and warns IL3054 for every program with a tracked component.
+        if (default(T) is ITracked) ComponentInfo.Pair(index, ComponentInfo.Allocate(new ComponentInfo<RowTick>(typeof(T))));
         return (ushort)index;
     }
 }

@@ -140,7 +140,7 @@ public class ChangedTests
     }
 
     /// <summary>A third tracked component, for the ChangedAny groups.</summary>
-    public record struct Ward(int Value) : IComponent, ITrackChanges;
+    public record struct Ward(int Value) : IComponent, ITracked;
 
     /// <summary>Visits the entities whose armor or shield changed (or both).</summary>
     public class ArmorOrShieldWatch : EcsSystem
@@ -173,7 +173,7 @@ public class ChangedTests
         }
     }
 
-#pragma warning disable EECS037 // the default Writes (every component) stamps the rows: what these jobs stand for
+#pragma warning disable EECS037 // the default WriteMask (every component) stamps the rows: what these jobs stand for
     /// <summary>A struct job that writes armor through a ref.</summary>
     private struct Polish : IForEach<Armor>
     {
@@ -848,8 +848,8 @@ public class ChangedTests
         Assert.Throws<InvalidOperationException>(() => e.SetIfChanged(new Armor(3)));
     }
 
-    public struct Heading : IComponent, ITrackChanges { public float Angle; }     // compared by its bytes
-    public record struct Bearing(float Angle) : IComponent, ITrackChanges;        // compared as floats
+    public struct Heading : IComponent, ITracked { public float Angle; }          // compared by its bytes
+    public record struct Bearing(float Angle) : IComponent, ITracked;             // compared as floats
 
     [Test]
     public void SetIfChangedComparesTheBytesOfATypeWithoutEquality()
@@ -989,6 +989,6 @@ public class ChangedTests
     {
         public void Execute(Entity entity, ref Armor armor) { }
 
-        static int IForEachEntity<Armor>.Writes => 0;
+        static int IForEachEntity<Armor>.WriteMask => 0;
     }
 }

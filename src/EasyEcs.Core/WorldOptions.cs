@@ -35,13 +35,14 @@ public sealed class WorldOptions
     public SystemErrorPolicy SystemErrors { get; init; }
 
     /// <summary>
-    /// Capacity of the destroy log (default 0: off): the last this many destroyed entities, each with the change tick of
-    /// its destruction, which <see cref="World.DestroyedSince"/> reports to readers that each keep their own tick (one
-    /// replication mark per client). Preallocated (16 bytes per record); a destroy then writes one record, and with the
+    /// Capacity of the destroy log (default 0: off): the ids of the last this many destroyed entities (no longer alive: a
+    /// retired one is logged when it is freed), each with the change tick of its destruction, which
+    /// <see cref="World.DestroyedSince"/> reports to readers that each keep their own tick (one replication mark per
+    /// client). Preallocated (16 bytes per record); a destroy then writes one record, and with the
     /// log off it costs nothing. Size it to the destroys of the longest gap a reader may leave between two reads: an
     /// older reader is told to resynchronize (<see cref="World.DestroyLogOldestTick"/>).
     /// </summary>
-    public int DestroyLog { get; init; }
+    public int DestroyLogCapacity { get; init; }
 }
 
 /// <summary>What an exception thrown by a system does (<see cref="WorldOptions.SystemErrors"/>).</summary>

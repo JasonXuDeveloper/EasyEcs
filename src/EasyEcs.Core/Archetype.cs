@@ -95,7 +95,7 @@ internal sealed class Archetype
 
     private readonly bool _tracked; // has change-tick columns
 
-    /// <summary>Whether the table has change-tick columns (an <see cref="ITrackChanges"/> component).</summary>
+    /// <summary>Whether the table has change-tick columns (an <see cref="ITracked"/> component).</summary>
     public bool Tracked => _tracked;
 
     /// <summary>Whether the table has a <see cref="Disabled{T}"/> column (rows may keep a disabled component).</summary>
@@ -430,7 +430,7 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Stamp<T>(int slot, ulong tick) where T : struct, IComponent
     {
-        if (default(T) is ITrackChanges) Ticks<T>(tick, slot, 1UL << slot).Value = tick; // shift is mod 64
+        if (default(T) is ITracked) Ticks<T>(tick, slot, 1UL << slot).Value = tick; // shift is mod 64
     }
 
     /// <summary>
@@ -440,22 +440,22 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void StampVisited<T>(int slot, ulong tick) where T : struct, IComponent
     {
-        if (default(T) is ITrackChanges)
+        if (default(T) is ITracked)
         {
             int column = TicksColumn<T>();
             NoteVisited(column, slot, tick);
-            Unsafe.Add(ref Data<ChangeTick>(column), slot).Value = tick;
+            Unsafe.Add(ref Data<RowTick>(column), slot).Value = tick;
         }
     }
 
     /// <summary>
     /// The summaries of <see cref="StampVisited{T}"/> alone: they then cover any row of the word stamped at
-    /// <paramref name="tick"/> with <see cref="StampTick{T}"/> (a pass notes each word once).
+    /// <paramref name="tick"/> with <see cref="StampRowTick{T}"/> (a pass notes each word once).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void NoteVisited<T>(int slot, ulong tick) where T : struct, IComponent
     {
-        if (default(T) is ITrackChanges) NoteVisited(TicksColumn<T>(), slot, tick);
+        if (default(T) is ITracked) NoteVisited(TicksColumn<T>(), slot, tick);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -487,10 +487,10 @@ internal sealed class Archetype
 
     /// <summary>The row's change tick alone; its word must have been noted at <paramref name="tick"/> (<see cref="NoteVisited{T}"/>).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void StampTick<T>(int slot, ulong tick) where T : struct, IComponent
+    public void StampRowTick<T>(int slot, ulong tick) where T : struct, IComponent
     {
-        if (default(T) is ITrackChanges)
-            Unsafe.Add(ref Data<ChangeTick>(TicksColumn<T>()), slot).Value = tick;
+        if (default(T) is ITracked)
+            Unsafe.Add(ref Data<RowTick>(TicksColumn<T>()), slot).Value = tick;
     }
 
     /// <summary>
@@ -498,7 +498,7 @@ internal sealed class Archetype
     /// <paramref name="tick"/> of rows <paramref name="rows"/> of the row's word.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ref ChangeTick Ticks<T>(ulong tick, int slot, ulong rows) where T : struct, IComponent
+    private ref RowTick Ticks<T>(ulong tick, int slot, ulong rows) where T : struct, IComponent
     {
         int column = TicksColumn<T>();
         // Summaries only grow (LastWrite >= the block's Latest >= Write) and no row holds a later tick than the world's: a
@@ -506,7 +506,7 @@ internal sealed class Archetype
         ref var word = ref Summary(Words, column, slot >> 6);
         if (word.Write == tick) word.Rows |= rows;
         else NoteWord(column, slot, rows, tick);
-        return ref Unsafe.Add(ref Data<ChangeTick>(column), slot);
+        return ref Unsafe.Add(ref Data<RowTick>(column), slot);
     }
 
     /// <summary>
@@ -540,7 +540,7 @@ internal sealed class Archetype
             int t = target.ColumnIndex(source.Components[c]);
             if (t < 0) continue;
             // The copied tick (the row was copied first); it may be older than the target word's latest.
-            target.NoteTick(t, to, Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref target.Data<ChangeTick>(t)), to));
+            target.NoteTick(t, to, Unsafe.Add(ref Unsafe.As<RowTick, ulong>(ref target.Data<RowTick>(t)), to));
         }
     }
 
@@ -550,7 +550,7 @@ internal sealed class Archetype
     /// </summary>
     public void SetTick(int column, int slot, ulong tick)
     {
-        Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref Data<ChangeTick>(column)), slot) = tick;
+        Unsafe.Add(ref Unsafe.As<RowTick, ulong>(ref Data<RowTick>(column)), slot) = tick;
         NoteTick(column, slot, tick);
     }
 
@@ -583,7 +583,7 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void StampRows<T>(int start, int count, ulong tick) where T : struct, IComponent
     {
-        if (default(T) is ITrackChanges && count > 0) StampRange(TicksColumn<T>(), start, count, tick);
+        if (default(T) is ITracked && count > 0) StampRange(TicksColumn<T>(), start, count, tick);
     }
 
     /// <summary>
@@ -593,7 +593,7 @@ internal sealed class Archetype
     private void StampRange(int column, int start, int count, ulong tick)
     {
         int end = start + count;
-        MemoryMarshal.CreateSpan(ref Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref Data<ChangeTick>(column)), start), count).Fill(tick);
+        MemoryMarshal.CreateSpan(ref Unsafe.Add(ref Unsafe.As<RowTick, ulong>(ref Data<RowTick>(column)), start), count).Fill(tick);
         ulong rows = RunMask(start, end, start >> 6);
         ref var head = ref Summary(Words, column, start >> 6);
         if (head.Write == tick) head.Rows |= rows;
@@ -639,7 +639,7 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void StampRemoved<T>(int slot, ulong tick) where T : struct, IComponent
     {
-        if (default(T) is not ITrackChanges) return;
+        if (default(T) is not ITracked) return;
         Stamp<T>(slot, tick);
         NoteRemoved(TicksColumn<T>(), slot, tick);
     }
@@ -651,7 +651,7 @@ internal sealed class Archetype
     private void ClearTicks(int column, int start, int count)
     {
         int end = start + count;
-        MemoryMarshal.CreateSpan(ref Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref Data<ChangeTick>(column)), start), count).Clear();
+        MemoryMarshal.CreateSpan(ref Unsafe.Add(ref Unsafe.As<RowTick, ulong>(ref Data<RowTick>(column)), start), count).Clear();
         for (int w = start >> 6; w <= (end - 1) >> 6; w++) Words[column][w].Rows &= ~RunMask(start, end, w); // rest bounds stay
     }
 
@@ -682,7 +682,7 @@ internal sealed class Archetype
         for (int c = 0; c < Components.Length; c++)
             if (_infos[c].Owner >= 0)
             {
-                MemoryMarshal.CreateSpan(ref Unsafe.As<ChangeTick, ulong>(ref Data<ChangeTick>(c)), Count).Fill(tick);
+                MemoryMarshal.CreateSpan(ref Unsafe.As<RowTick, ulong>(ref Data<RowTick>(c)), Count).Fill(tick);
                 for (int w = 0; w <= (Count - 1) >> 6; w++)
                 {
                     NoteWord(c, w << 6, RunMask(0, Count, w), tick);
@@ -696,7 +696,7 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void StampWord<T>(int word, ulong rows, ulong tick) where T : struct, IComponent
     {
-        if (default(T) is not ITrackChanges || rows == 0) return;
+        if (default(T) is not ITracked || rows == 0) return;
         ref var ticks = ref Ticks<T>(tick, word << 6, rows);
         for (; rows != 0; rows &= rows - 1) Unsafe.Add(ref ticks, BitOperations.TrailingZeroCount(rows)).Value = tick;
     }
@@ -979,7 +979,7 @@ internal sealed class Archetype
     /// The rows of a table at one moment (<see cref="Capture"/>): entities, columns (unmanaged ones as plain bytes),
     /// presence bits. The arrays may be longer than <see cref="Count"/> rows: a capture into an older copy reuses them.
     /// </summary>
-    internal sealed class Rows(Archetype table)
+    internal sealed class TableCopy(Archetype table)
     {
         /// <summary>The table the copy is of: a copy is reused for no other (tables shift when RemoveTypes drops some).</summary>
         public readonly Archetype Table = table;
@@ -994,11 +994,11 @@ internal sealed class Archetype
     /// Copy the rows (a dense table: outside passes) into <paramref name="into"/> (an earlier copy, its arrays reused
     /// when large enough, if it is of this table) or a new copy. O(rows × columns). Inside the structural gate.
     /// </summary>
-    public Rows Capture(Rows into)
+    public TableCopy Capture(TableCopy into)
     {
         int count = Count;
         if (into?.Table != this) into = null;
-        var rows = into ?? new Rows(this);
+        var rows = into ?? new TableCopy(this);
         if (rows.Slots.Length < count) rows.Slots = new EntityId[count];
         Slots.AsSpan(0, count).CopyTo(rows.Slots);
         for (int c = 0; c < Columns.Length; c++)
@@ -1039,7 +1039,7 @@ internal sealed class Archetype
     /// world. With <paramref name="swap"/> the lists of buffer columns change sides (see
     /// <see cref="ComponentInfo.CopyRows"/>). O(rows × columns). Inside the structural gate, outside passes.
     /// </summary>
-    public void Restore(Rows rows, bool swap = false)
+    public void Restore(TableCopy rows, bool swap = false)
     {
         int count = rows?.Count ?? 0;
         if (_hasManaged && Count > count) ReleaseRows(count, Count - count);

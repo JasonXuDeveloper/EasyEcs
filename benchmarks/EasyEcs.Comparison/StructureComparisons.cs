@@ -139,7 +139,7 @@ public class RelationComparison
         _world.CreateEntities(_players, new Fame(0), new DynamicBuffer<Follows>());
         for (int i = 0; i < Players; i++)
             for (int k = 1; k <= Links; k++)
-                _players[i].AddRelation(new Follows(_players[Target(i, k)]));
+                _players[i].Link(new Follows(_players[Target(i, k)]));
         _followers = _world.Relations<Follows>();
         Check(EasyEcs_Relations, p => _followers.Count(_players[p]), p =>
         {
@@ -185,8 +185,8 @@ public class RelationComparison
             var player = _players[NextPlayer()];
             ref readonly var links = ref player.Read<DynamicBuffer<Follows>>();
             var dropped = links[(_next + i) % links.Count].Target;
-            player.RemoveRelation<Follows>(dropped);
-            player.AddRelation(new Follows(_players[NewTarget(i)]));
+            player.Unlink<Follows>(dropped);
+            player.Link(new Follows(_players[NewTarget(i)]));
         }
 
         int total = 0;

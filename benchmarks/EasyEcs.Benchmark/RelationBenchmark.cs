@@ -4,7 +4,7 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// Friend lists as a relation: 10,000 players with 8 <c>Follows</c> links each. Per operation, 100 players unfollow
-/// one player and follow another (<c>RemoveRelation</c> / <c>AddRelation</c>, which keep the index current), then the
+/// one player and follow another (<c>Unlink</c> / <c>Link</c>, which keep the index current), then the
 /// followers of 100 players are counted (<c>Count</c>, O(1)) and walked (<c>Find</c>). Steady state allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
@@ -26,7 +26,7 @@ public class RelationBenchmark
         _world.CreateEntities(_players, new Fame(0), new DynamicBuffer<Follows>());
         for (int i = 0; i < Players; i++)
             for (int k = 1; k <= Links; k++)
-                _players[i].AddRelation(new Follows(_players[(i + k * 97) % Players]));
+                _players[i].Link(new Follows(_players[(i + k * 97) % Players]));
         _followers = _world.Relations<Follows>();
         for (int i = 0; i < 20; i++) FollowAndCount();
     }
@@ -43,8 +43,8 @@ public class RelationBenchmark
             var player = _players[_next];
             ref readonly var links = ref player.Read<DynamicBuffer<Follows>>();
             var dropped = links[(_next + i) % links.Count].Target;
-            player.RemoveRelation<Follows>(dropped);
-            player.AddRelation(new Follows(_players[(_next + i * 31 + 1) % Players]));
+            player.Unlink<Follows>(dropped);
+            player.Link(new Follows(_players[(_next + i * 31 + 1) % Players]));
         }
 
         int total = 0;

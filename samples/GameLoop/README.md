@@ -13,7 +13,7 @@ changed. Read [HelloWorld](../HelloWorld) first.
 - **A value index** (`IIndexed<int>` on `Client`) finds a player by client id: `world.ClientIndex.TryFind(...)`.
 - **Prefabs** in a singleton: systems instantiate `prefabs.Player` and `prefabs.Bullet` with the values that differ
   per instance (`world.Instantiate(prefab, new Client(id), new Position(x, 0))`), one row copy each.
-- **Change tracking** (`ITrackChanges` on `Position`, `[Changed<Position>]`): replication visits only the
+- **Change tracking** (`ITracked` on `Position`, `[Changed<Position>]`): replication visits only the
   entities that moved since it last ran.
 - **Operations**: `--ticks N`, a status line per second, Ctrl+C stops cleanly, per-system run counts and times
   from `WorldOptions.MeasureSystems`.

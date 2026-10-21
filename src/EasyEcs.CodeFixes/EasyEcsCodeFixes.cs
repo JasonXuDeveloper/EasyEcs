@@ -74,9 +74,9 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                         .WithExpressionBody(SyntaxFactory.ArrowExpressionClause(value.WithoutTrivia()).WithArrowToken(
                             SyntaxFactory.Token(SyntaxKind.EqualsGreaterThanToken).WithTrailingTrivia(SyntaxFactory.Space))));
                     break;
-                case "EECS037" when kind == "Writes" && diagnostic.Properties.TryGetValue("Writes", out var writes) && writes != null:
-                    if (Writes(root, node, writes) is { } withWrites)
-                        context.RegisterCodeFix(CodeAction.Create($"Declare Writes => {writes}", _ => Task.FromResult(context.Document.WithSyntaxRoot(withWrites)),
+                case "EECS037" when kind == "WriteMask" && diagnostic.Properties.TryGetValue("WriteMask", out var writes) && writes != null:
+                    if (DeclareWriteMask(root, node, writes) is { } withWrites)
+                        context.RegisterCodeFix(CodeAction.Create($"Declare WriteMask => {writes}", _ => Task.FromResult(context.Document.WithSyntaxRoot(withWrites)),
                             diagnostic.Id), diagnostic);
                     break;
                 case "EECS043" when node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { } key
@@ -190,11 +190,11 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
             : SyntaxFactory.IdentifierName(name).WithTriviaFrom(original));
     }
 
-    /// <summary>EECS037: the job's Writes declared as <paramref name="value"/>, replacing its declaration or as its first member.</summary>
-    private static SyntaxNode? Writes(SyntaxNode root, SyntaxNode node, string value)
+    /// <summary>EECS037: the job's WriteMask declared as <paramref name="value"/>, replacing its declaration or as its first member.</summary>
+    private static SyntaxNode? DeclareWriteMask(SyntaxNode root, SyntaxNode node, string value)
     {
-        var member = (MemberDeclarationSyntax)SyntaxFactory.ParseMemberDeclaration($"public static int Writes => {value};")!;
-        if (node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { Identifier.ValueText: "Writes" } declared)
+        var member = (MemberDeclarationSyntax)SyntaxFactory.ParseMemberDeclaration($"public static int WriteMask => {value};")!;
+        if (node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { Identifier.ValueText: "WriteMask" } declared)
             return root.ReplaceNode(declared, member.WithTriviaFrom(declared));
         if (node.FirstAncestorOrSelf<TypeDeclarationSyntax>() is not { } type) return null;
         var first = type.Members.FirstOrDefault();

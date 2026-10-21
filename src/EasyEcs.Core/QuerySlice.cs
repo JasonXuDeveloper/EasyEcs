@@ -9,29 +9,29 @@ namespace EasyEcs;
 public readonly partial struct QueryFilter
 {
     /// <summary>
-    /// Visit only slice <paramref name="index"/> of <paramref name="count"/> of every matching table's rows: passes with
-    /// each index from 0 to <paramref name="count"/> - 1 in turn visit every row once, each about
-    /// 1 / <paramref name="count"/> of the rows. <c>[ForEach(Slices = N)]</c> methods pass the slice of their system's
+    /// Visit only slice <paramref name="index"/> of <paramref name="of"/> of every matching table's rows: passes with
+    /// each index from 0 to <paramref name="of"/> - 1 in turn visit every row once, each about
+    /// 1 / <paramref name="of"/> of the rows. <c>[ForEach(Slices = N)]</c> methods pass the slice of their system's
     /// run (<see cref="EcsSystem.RunCount"/> mod N). O(1).
     /// <para>A table is cut at multiples of 64 rows (its presence words), from its row count when the pass starts, so a
     /// table of fewer than 64 rows is one piece; table i of the match starts its cut at slice
-    /// (<paramref name="index"/> + i) mod <paramref name="count"/>, so many small tables spread over the slices too.
+    /// (<paramref name="index"/> + i) mod <paramref name="of"/>, so many small tables spread over the slices too.
     /// Rows that move between passes (a swap-remove fills a hole with the table's last row, a structural change moves
     /// an entity to another table, the table grows or shrinks across a cut) may be skipped or visited twice in one
-    /// cycle of <paramref name="count"/> passes; the next cycle sees them again.</para>
+    /// cycle of <paramref name="of"/> passes; the next cycle sees them again.</para>
     /// <para>Honoured by <c>ForEach</c>, <c>ForEachEntity</c>, <c>ForEachBatch</c> and their <c>Parallel</c> forms;
     /// the calls that need every matching row (<c>Query</c>, <c>Read</c>, <c>Count</c>, <c>Any</c>, <c>DestroyAll</c>,
     /// <c>entity.Run</c>, <c>SetAll</c> and the other bulk calls) throw <see cref="ArgumentException"/> for a sliced
-    /// filter. A count of 1 is the whole tables.</para>
+    /// filter. A slice of 1 is the whole tables.</para>
     /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is below 1, or <paramref name="index"/> is
-    /// not in [0, <paramref name="count"/>).</exception>
-    public QueryFilter Slice(int index, int count)
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="of"/> is below 1, or <paramref name="index"/> is
+    /// not in [0, <paramref name="of"/>).</exception>
+    public QueryFilter Slice(int index, int of)
     {
-        if (count < 1 || (uint)index >= (uint)count) ThrowSlice(index, count);
+        if (of < 1 || (uint)index >= (uint)of) ThrowSlice(index, of);
         var filter = this;
-        Unsafe.AsRef(in filter.SliceIndex) = count == 1 ? 0 : index;
-        Unsafe.AsRef(in filter.SliceCount) = count == 1 ? 0 : count;
+        Unsafe.AsRef(in filter.SliceIndex) = of == 1 ? 0 : index;
+        Unsafe.AsRef(in filter.SliceCount) = of == 1 ? 0 : of;
         return filter;
     }
 
@@ -59,8 +59,8 @@ public readonly partial struct QueryFilter
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void ThrowSlice(int index, int count) => throw new ArgumentOutOfRangeException(nameof(index),
-        $"Slice {index} of {count}: the count must be 1 or more, and the index in [0, count).");
+    private static void ThrowSlice(int index, int of) => throw new ArgumentOutOfRangeException(nameof(index),
+        $"Slice {index} of {of}: 'of' must be 1 or more, and the index in [0, of).");
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowSliced() => throw new ArgumentException(

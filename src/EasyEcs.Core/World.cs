@@ -21,13 +21,13 @@ public sealed partial class World : IDisposable
     private int _freeIdCount;
     private int _entityCount;
 
-    // Change tick: stamped into the rows of tracked components (ITrackChanges) on every write. Grows by one per system
+    // Change tick: stamped into the rows of tracked components (ITracked) on every write. Grows by one per system
     // stage, once after each update and once per index catch-up outside a pass that found written rows; 64 bits never
     // wrap.
     private ulong _changeTick = 1;
 
     /// <summary>
-    /// The current change tick, stamped into tracked components' rows on every write (<see cref="ITrackChanges"/>).
+    /// The current change tick, stamped into tracked components' rows on every write (<see cref="ITracked"/>).
     /// </summary>
     public ulong ChangeTick => _changeTick;
 
@@ -44,8 +44,8 @@ public sealed partial class World : IDisposable
         Meta = AllocateMeta(Math.Max(1, _options.InitialEntityCapacity), true);
         _queryLookup = _queryCache.GetAlternateLookup<QueryLookup>();
         _emptyArchetype = GetOrCreateArchetype(default);
-        ArgumentOutOfRangeException.ThrowIfNegative(_options.DestroyLog, nameof(options));
-        if (_options.DestroyLog > 0) _destroyLog = new DestroyRecord[_options.DestroyLog];
+        ArgumentOutOfRangeException.ThrowIfNegative(_options.DestroyLogCapacity, nameof(options));
+        if (_options.DestroyLogCapacity > 0) _destroyLog = new DestroyRecord[_options.DestroyLogCapacity];
         Collectible.Track(this); // held weakly: a world nobody holds stops mentioning its bits
     }
 
@@ -201,7 +201,7 @@ public sealed partial class World : IDisposable
         using (Structural())
         {
             var (source, from) = Source(original);
-            if (sameWorld && source.HasCleanup && Retired(source, from)) ThrowCloneDestroyed();
+            if (sameWorld && source.HasCleanup && Retired(source, from)) ThrowCloneRetired();
             ClaimRows(source, from, 1, 1); // a clone's unique keys are its original's: taken (null keys aside)
             var target = sameWorld ? source : TableFor(source);
             int id = AllocateId(); // may grow Meta: the original's row was read first
@@ -216,9 +216,9 @@ public sealed partial class World : IDisposable
 
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void ThrowCloneDestroyed() =>
+    private static void ThrowCloneRetired() =>
         throw new InvalidOperationException(
-            "The entity was destroyed: it is only kept (tagged Destroyed) until its cleanup components are removed, and cannot be cloned");
+            "The entity is retired: it is only kept alive (tagged Retired) until its cleanup components are removed, and cannot be cloned");
 
     /// <summary>
     /// Place <c>entities.Length</c> new entities in consecutive rows at the end of <paramref name="target"/> (one
@@ -349,7 +349,7 @@ public sealed partial class World : IDisposable
 
     /// <summary>
     /// Destroy an entity whose table has cleanup columns: when the row holds a cleanup component, take its other
-    /// components away and tag it <see cref="Destroyed"/>, keeping it alive; else free it. Like a freed entity, a retired
+    /// components away and tag it <see cref="Retired"/>, keeping it alive; else free it. Like a freed entity, a retired
     /// one reports no removal: its other components leave their indexes, and their change ticks are cleared (not
     /// stamped), so <c>Removed</c> filters do not visit it (the destroy log reports the despawn). Returns false when the
     /// entity was retired already. Inside the structural gate. Cold: tables with cleanup columns only.
@@ -364,7 +364,7 @@ public sealed partial class World : IDisposable
         }
 
         bool retired = Retired(meta.Archetype, meta.Slot);
-        AddBit(ref meta, id, DestroyedBit);
+        AddBit(ref meta, id, RetiredBit);
         var archetype = meta.Archetype;
         int slot = meta.Slot;
         bool removed = false;
@@ -373,7 +373,7 @@ public sealed partial class World : IDisposable
             // Change-tick columns follow their component; a Disabled<T> tag goes with the removal of its component.
             var info = archetype.Info(c);
             ushort bit = archetype.Components[c];
-            if (info.Cleanup || info.Owner >= 0 || info.DisabledOf >= 0 || bit == DestroyedBit) continue;
+            if (info.Cleanup || info.Owner >= 0 || info.DisabledOf >= 0 || bit == RetiredBit) continue;
             if (archetype.MarkAbsent(c, slot))
             {
                 removed = true;
@@ -390,14 +390,14 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>
-    /// Whether row <paramref name="slot"/> of <paramref name="table"/> is a retired entity: destroyed while holding
-    /// cleanup components, tagged <see cref="Destroyed"/> until they go.
+    /// Whether row <paramref name="slot"/> of <paramref name="table"/> is a retired entity: kept alive by <c>Destroy</c>
+    /// for its cleanup components, tagged <see cref="Retired"/> until they go.
     /// </summary>
     internal static bool Retired(Archetype table, int slot) =>
-        table.ColumnIndex(DestroyedBit) is var tag and >= 0 && table.Has(tag, slot);
+        table.ColumnIndex(RetiredBit) is var tag and >= 0 && table.Has(tag, slot);
 
-    /// <summary>Bit of the <see cref="Destroyed"/> tag.</summary>
-    private static readonly ushort DestroyedBit = ComponentType<Destroyed>.Bit;
+    /// <summary>Bit of the <see cref="Retired"/> tag.</summary>
+    private static readonly ushort RetiredBit = ComponentType<Retired>.Bit;
 
     /// <summary>Destroy alive entity <paramref name="id"/> (<paramref name="meta"/> is its record). Inside the structural gate.</summary>
     private void Free(ref EntityMeta meta, int id)
@@ -405,7 +405,7 @@ public sealed partial class World : IDisposable
         var archetype = meta.Archetype;
         int slot = meta.Slot;
         if (_freeIdCount == _freeIds.Length) Array.Resize(ref _freeIds, _freeIds.Length * 2);
-        Forget(ref meta, id, archetype);
+        ReleaseRecord(ref meta, id, archetype);
         archetype.ReleaseBuffers(slot, 1);
         RemoveRow(archetype, slot);
         StorageVersion++;
@@ -418,7 +418,7 @@ public sealed partial class World : IDisposable
     /// for the id in the free list the caller's to make. Inside the structural gate.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void Forget(ref EntityMeta meta, int id, Archetype archetype)
+    private void ReleaseRecord(ref EntityMeta meta, int id, Archetype archetype)
     {
         if (_indexByBit != null) Unindex(archetype, id);
         if (_destroyLog is { } log) LogDestroy(log, new EntityId(id, meta.Version));
@@ -440,7 +440,7 @@ public sealed partial class World : IDisposable
             {
                 var archetype = archetypes[a];
                 if (archetype.AliveCount != 0 && archetype.Count == archetype.AliveCount && !archetype.HasCleanup &&
-                    Volatile.Read(ref Passes) == 0 && new RowFilter(match.Filters[a], since).Mode(archetype) == RowFilter.All)
+                    Volatile.Read(ref PassDepth) == 0 && new RowFilter(match.Filters[a], since).Mode(archetype) == RowFilter.All)
                     destroyed += FreeTable(archetype); // every row goes: no row moves, one clear
             }
 
@@ -481,7 +481,7 @@ public sealed partial class World : IDisposable
         {
             int id = rows[slot].Index;
             Orphaned(rows[slot]);
-            Forget(ref MetaRef(id), id, archetype);
+            ReleaseRecord(ref MetaRef(id), id, archetype);
         }
 
         archetype.ReleaseBuffers(0, count);

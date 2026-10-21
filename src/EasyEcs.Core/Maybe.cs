@@ -82,7 +82,7 @@ public readonly ref struct MaybeColumn<T> where T : struct, IComponent
         if (column < 0) return;
         _first = ref Unsafe.Add(ref table.Data<T>(column), _start);
         _present = table.Bits(column);
-        if (write && default(T) is ITrackChanges) (_table, _tick) = (table, world.ChangeTick);
+        if (write && default(T) is ITracked) (_table, _tick) = (table, world.ChangeTick);
     }
 
     /// <summary>The component of row <paramref name="index"/> of the run, if it has one.</summary>
@@ -94,7 +94,7 @@ public readonly ref struct MaybeColumn<T> where T : struct, IComponent
             if (Unsafe.IsNullRef(ref _first)) return default;
             int row = _start + index;
             if (_present != null && (_present[row >> 6] & (1UL << row)) == 0) return default; // shift is mod 64
-            if (default(T) is ITrackChanges && _table != null) _table.Stamp<T>(row, _tick);
+            if (default(T) is ITracked && _table != null) _table.Stamp<T>(row, _tick);
             return new Maybe<T>(ref Unsafe.Add(ref _first, index));
         }
     }

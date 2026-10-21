@@ -71,7 +71,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         var owner = model.Owner;
         var sb = new StringBuilder(Header).Append('\n');
         if (owner.Namespace.Length > 0) sb.Append("namespace ").Append(owner.Namespace).Append(";\n\n");
-        if (!owner.IsSystem) EmitRunners(sb, model);
+        if (!owner.IsSystem) EmitEntryPoints(sb, model);
 
         // Generic over the owner's type parameters (a generic system or runner type): one instantiation per closed type.
         sb.Append($"file static class __ForEach{owner.TypeParameters}{owner.Constraints}\n{{\n");
@@ -108,7 +108,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// world (the change tick for [Changed&lt;T&gt;] / [Removed&lt;T&gt;]) and the method's context parameters, which
     /// runs the job once.
     /// </summary>
-    private static void EmitRunners(StringBuilder sb, UpdateModel model)
+    private static void EmitEntryPoints(StringBuilder sb, UpdateModel model)
     {
         var owner = model.Owner;
         sb.Append("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
@@ -230,7 +230,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 || p.Kind == Symbols.ParamKind.Entity && !m.Identifies));
         if (alone)
         {
-            sb.Append("            access.RunsAlone();\n        }\n");
+            sb.Append("            access.RunAlone();\n        }\n");
             return;
         }
 
@@ -241,7 +241,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append($"            access.{(p.RefKind == "ref" ? "Write" : "Read")}{kind}<{p.Type}>();\n");
         }
 
-        // [Changed<T>], [Removed<T>] and the ChangedAny / RemovedAny groups read T's change ticks, which writers and
+        // [Changed<T>], [Removed<T>] and the ChangedAny / RemovedAny sets read T's change ticks, which writers and
         // removers of T stamp.
         foreach (var type in model.Methods.SelectMany(m => m.Changed.Concat(m.Removed).Concat(m.ChangedAny).Concat(m.RemovedAny)).Distinct())
             sb.Append($"            access.Read<{type}>();\n");
@@ -341,8 +341,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
             if (queried.Any(p => p.Type == components[k] && p.RefKind == "ref")) writes |= 1 << k;
             if (queried.Any(p => p.Type == components[k] && p.Kind == Symbols.ParamKind.Mutable)) own |= 1 << k;
         }
-        sb.Append($"\n        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.Writes => {writes};\n");
-        if (own != 0) sb.Append($"        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.OwnStamps => {own};\n");
+        sb.Append($"\n        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.WriteMask => {writes};\n");
+        if (own != 0) sb.Append($"        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.SelfStamped => {own};\n");
 
         sb.Append("    }\n\n");
 
@@ -355,7 +355,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// A ChangedAny / RemovedAny group as calls of at most 9 components each (calls join one group): a group of one
+    /// A ChangedAny / RemovedAny set as calls of at most 9 components each (calls join one set): a set of one
     /// (several attributes naming the same type) names it twice.
     /// </summary>
     private static IEnumerable<string> AnyCalls(string kind, EquatableArray<string> types)
@@ -497,7 +497,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var removedAny = new List<string>();
             void Add(Symbols.FilterKind kind, ITypeSymbol filtered)
             {
-                // every [ChangedAny<..>] / [RemovedAny<..>] of a method joins its one group
+                // every [ChangedAny<..>] / [RemovedAny<..>] of a method joins its one set
                 var list = kind switch
                 {
                     Symbols.FilterKind.With => with, Symbols.FilterKind.Without => without, Symbols.FilterKind.WithAny => withAny,
@@ -523,8 +523,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     with.RemoveAt(0);
                 }
             }
-            // The system group's filters ([Without<Inactive>] public struct Gameplay : ISystemGroup, IGroupWith<T> /
-            // IGroupWithout<T>) join every method's (after the queried component is chosen: a group's [With<T>] only filters).
+            // The system group's filters ([Without<Inactive>] public struct Gameplay : ISystemGroup, ISystemGroupWith<T> /
+            // ISystemGroupWithout<T>) join every method's (after the queried component is chosen: a group's [With<T>] only filters).
             foreach (var (kind, type, _, _) in Symbols.GroupFilters(method)) Add(kind, type);
             if (query.Count > 0) with.RemoveAll(query.Contains); // a group's [With<T>] the method already queries
 

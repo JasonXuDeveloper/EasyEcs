@@ -131,7 +131,7 @@ public class HierarchyTests
 
         Assert.That(world.DestroyAll<Health>(), Is.EqualTo(50));     // the matched entities
         Assert.That(world.EntityCount, Is.EqualTo(50));                   // the children with a lease remain, retired
-        Assert.That(world.Count<Lease>(QueryFilter.Create().With<Destroyed>()), Is.EqualTo(50));
+        Assert.That(world.Count<Lease>(QueryFilter.Create().With<Retired>()), Is.EqualTo(50));
         Assert.That(world.Count<ChildOf>(), Is.Zero);                     // the grandchildren went with the retirement
         world.DestroyAll<Lease>();                                   // retired already: no cascade again
         Assert.That(world.EntityCount, Is.EqualTo(50));

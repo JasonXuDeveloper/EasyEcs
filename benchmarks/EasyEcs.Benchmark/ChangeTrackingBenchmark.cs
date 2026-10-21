@@ -79,7 +79,7 @@ public class ChangeTrackingBenchmark
 
     public struct Replication : ISystemGroup;
 
-    public record struct Health(int Value) : IComponent, ITrackChanges;
+    public record struct Health(int Value) : IComponent, ITracked;
 
     /// <summary>The value last sent to clients.</summary>
     public record struct Replica(int Value) : IComponent;
@@ -160,7 +160,7 @@ public class ChangeTrackingWriteBenchmark
     /// <summary>When in a cycle of ten ticks the entity's aim steps.</summary>
     public record struct Phase(int Value) : IComponent;
 
-    public record struct Aim(int Value) : IComponent, ITrackChanges;
+    public record struct Aim(int Value) : IComponent, ITracked;
 
     /// <summary>The aim last sent to clients.</summary>
     public record struct Sent(int Value) : IComponent;

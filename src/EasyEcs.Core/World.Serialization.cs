@@ -553,7 +553,7 @@ public sealed partial class World
         int index = Array.LastIndexOf(_allArchetypes, table); // few tables: a scan, no map
         if (snapshot.Tables.Length <= index) Array.Resize(ref snapshot.Tables, _allArchetypes.Length);
         ref var rows = ref snapshot.Tables[index];
-        if (rows?.Table != table) rows = new Archetype.Rows(table); // a copy of the table this index held before
+        if (rows?.Table != table) rows = new Archetype.TableCopy(table); // a copy of the table this index held before
 
         int count = Count(ref reader, Unsafe.SizeOf<EntityId>());
         int start = rows.Count;
@@ -585,7 +585,7 @@ public sealed partial class World
     }
 
     /// <summary>Read one column slice: its presence bits, then its rows, into rows [<paramref name="start"/>, +<paramref name="count"/>).</summary>
-    private static void LoadColumn(ref Reader reader, ComponentInfo info, Archetype.Rows rows, int column, int start, int count)
+    private static void LoadColumn(ref Reader reader, ComponentInfo info, Archetype.TableCopy rows, int column, int start, int count)
     {
         if (reader.Read<bool>())
         {
@@ -628,7 +628,7 @@ public sealed partial class World
     /// Empty rows an earlier load filled (null: none), keeping their arrays: managed values are cleared (no
     /// references kept alive), presence bits dropped (a load sets them again where rows are absent).
     /// </summary>
-    private static void Empty(Archetype.Rows rows, Archetype table)
+    private static void Empty(Archetype.TableCopy rows, Archetype table)
     {
         if (rows == null) return;
         for (int c = 0; c < rows.Columns.Length; c++)
@@ -644,7 +644,7 @@ public sealed partial class World
     }
 
     /// <summary>Make <paramref name="rows"/> (of <paramref name="table"/>) hold <paramref name="count"/> rows, keeping the rows it has.</summary>
-    private static void GrowRows(Archetype.Rows rows, Archetype table, int count)
+    private static void GrowRows(Archetype.TableCopy rows, Archetype table, int count)
     {
         if (rows.Slots.Length >= count) return;
         Array.Resize(ref rows.Slots, count);

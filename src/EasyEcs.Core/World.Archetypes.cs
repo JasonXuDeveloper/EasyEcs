@@ -326,7 +326,7 @@ public sealed partial class World
     {
         using (Structural())
         {
-            Passes = 0;
+            PassDepth = 0;
             var all = _allArchetypes;
             for (int i = 0; i < all.Length; i++)
                 all[i].FillHoles(Meta);

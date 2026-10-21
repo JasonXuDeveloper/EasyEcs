@@ -45,11 +45,11 @@ public sealed partial class World
     /// <summary>
     /// Put the components <see cref="SaveEntities(System.Buffers.IBufferWriter{byte}, ReadOnlySpan{EntityId})"/> wrote
     /// onto entities that exist already (an actor whose entity was made before its record arrived): the components of
-    /// the i-th saved entity are set on <paramref name="into"/>[i], added or replacing the values it has, each entity
+    /// the i-th saved entity are set on <paramref name="targets"/>[i], added or replacing the values it has, each entity
     /// moving table at most once; components the save does not hold stay as they are. Indexes, groups and change ticks
     /// follow as with <c>Set</c> (every loaded component counts as written); a disabled component arrives disabled
     /// with its value. <see cref="EntityId"/> fields that named an entity of the group name the entity of
-    /// <paramref name="into"/> it became, every other one is <see cref="EntityId.Null"/>, and a <see cref="ChildOf"/>
+    /// <paramref name="targets"/> it became, every other one is <see cref="EntityId.Null"/>, and a <see cref="ChildOf"/>
     /// whose parent stayed behind is not set. Returns how many entities were loaded. O(entities × components). Not
     /// while a pass iterates.
     /// <br/>
@@ -59,39 +59,39 @@ public sealed partial class World
     /// from storage holds what storage has, and "save what changed" saves nothing of it until code writes it).
     /// Components the save does not hold keep their ticks.
     /// </summary>
-    /// <exception cref="ArgumentException"><paramref name="into"/> does not hold one living entity of this world per saved entity, each once.</exception>
+    /// <exception cref="ArgumentException"><paramref name="targets"/> does not hold one living entity of this world per saved entity, each once.</exception>
     /// <exception cref="System.IO.InvalidDataException">The bytes are not a save, or give a unique key to several entities.</exception>
     /// <exception cref="InvalidOperationException">
     /// A loaded unique key (<see cref="IUniqueIndexed{TKey}"/>) is held by another entity than the one it is loaded onto
     /// (checked against the world before the load): nothing is written.
     /// </exception>
-    public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into, bool markWritten = true)
+    public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> targets, bool markWritten = true)
     {
         var source = LoadArrivals(input, nameof(LoadEntitiesInto));
         int count = source._loadOrderCount;
-        if (into.Length != count)
-            throw new ArgumentException($"The save holds {count} entities and {into.Length} were given", nameof(into));
+        if (targets.Length != count)
+            throw new ArgumentException($"The save holds {count} entities and {targets.Length} were given", nameof(targets));
         using (Structural())
         {
-            foreach (var entity in into)
+            foreach (var entity in targets)
                 if (entity.World != this || !IsAlive(entity.Id))
-                    throw new ArgumentException("An entity to load into is stale or of another world", nameof(into));
-            ThrowIfRepeated(into);
+                    throw new ArgumentException("An entity to load into is stale or of another world", nameof(targets));
+            ThrowIfRepeated(targets);
             // Unique keys first, against the world as it is before the load: nothing is written when one is taken.
             if (ComponentInfo.AnyUnique)
                 for (int i = 0; i < count; i++)
                 {
                     ref var saved = ref source.MetaRef(source._loadOrder[i].Index);
-                    ClaimRows(saved.Archetype, saved.Slot, 1, 1, into[i].Index);
+                    ClaimRows(saved.Archetype, saved.Slot, 1, 1, targets[i].Index);
                 }
 
-            // Every saved entity maps to its entity of into: the loaded values' references are rewritten in the source
+            // Every saved entity maps to its entity of targets: the loaded values' references are rewritten in the source
             // first, then copied.
             BeginArrival(source);
             for (int i = 0; i < count; i++)
             {
                 var saved = source._loadOrder[i];
-                _arrived[saved.Index] = into[i].Id;
+                _arrived[saved.Index] = targets[i].Id;
                 Stamp(saved);
             }
 
@@ -102,7 +102,7 @@ public sealed partial class World
             for (int i = 0; i < count; i++)
             {
                 ref var from = ref source.MetaRef(source._loadOrder[i].Index);
-                LoadInto(from.Archetype, from.Slot, into[i].Index, markWritten);
+                LoadInto(from.Archetype, from.Slot, targets[i].Index, markWritten);
             }
 
             StorageVersion++;
@@ -112,17 +112,17 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Throws when an entity appears twice in <paramref name="into"/>: two saved entities would be written onto one, the
+    /// Throws when an entity appears twice in <paramref name="targets"/>: two saved entities would be written onto one, the
     /// second overwriting the first. The arrival stamps of this world mark each entity once (no set is allocated).
     /// Inside the structural gate.
     /// </summary>
-    private void ThrowIfRepeated(ReadOnlySpan<Entity> into)
+    private void ThrowIfRepeated(ReadOnlySpan<Entity> targets)
     {
-        if (into.Length < 2) return;
+        if (targets.Length < 2) return;
         BeginArrival(this);
-        foreach (var entity in into)
+        foreach (var entity in targets)
         {
-            if (HasArrived(entity.Id)) throw new ArgumentException("An entity to load into is given twice", nameof(into));
+            if (HasArrived(entity.Id)) throw new ArgumentException("An entity to load into is given twice", nameof(targets));
             Stamp(entity.Id);
         }
     }
@@ -205,11 +205,11 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Move <paramref name="entities"/> (stale ids, repeats and destroyed entities kept for their cleanup components are
+    /// Move <paramref name="entities"/> (stale ids, repeats and retired entities, kept alive for their cleanup components, are
     /// skipped) into <paramref name="target"/>, another world of this thread: the target gets new entities with their
     /// components, as <see cref="LoadEntities"/> makes them from a save of the group, without encoding it; then they are
     /// destroyed here (their children with them, so move a hierarchy together). Cleanup components
-    /// (<see cref="ICleanupComponent"/>) do not move: they stay behind on the destroyed entity, for the systems of this
+    /// (<see cref="ICleanupComponent"/>) do not move: they stay behind on the entity, now retired, for the systems of this
     /// world to release what they hold, and the new entity does not have them. The new handles are written in order
     /// into <paramref name="moved"/> (as many as fit, <see cref="Entity"/> default for a skipped id); returns how many
     /// moved. A list of ids goes as <c>CollectionsMarshal.AsSpan(list)</c>, no copy. O(entities × components). Owner thread of both worlds; not while a pass iterates in either. Throws

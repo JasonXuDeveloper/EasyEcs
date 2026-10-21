@@ -69,28 +69,28 @@ internal static class FilterOverflow
 }
 
 /// <summary>
-/// The <c>ChangedAny</c> and <c>RemovedAny</c> groups of query filters, interned whole: few filters name them, so a
+/// The <c>ChangedAny</c> and <c>RemovedAny</c> sets of query filters, interned whole: few filters name them, so a
 /// <see cref="QueryFilter"/> holds an id (0: none) instead of two more inline sets, and every other filter stays as small
 /// to copy, compare and hash as one without them. Ids live for the process, one per distinct pair a program builds.
 /// </summary>
-internal static class FilterGroups
+internal static class FilterAnySets
 {
     private static readonly Lock Gate = new();
     private static readonly Dictionary<(BitMask ChangedAny, BitMask RemovedAny), int> Ids = new();
-    private static Entry[] _byId = [new(default, default)]; // id 0: neither group; copy-on-write, read without the lock
+    private static Entry[] _byId = [new(default, default)]; // id 0: neither set; copy-on-write, read without the lock
 
-    /// <summary>The groups of one id: masks and their bits (for row tests). Never changed once interned.</summary>
+    /// <summary>The sets of one id: masks and their bits (for row tests). Never changed once interned.</summary>
     internal sealed class Entry(BitMask changedAny, BitMask removedAny)
     {
         public readonly BitMask ChangedAny = changedAny, RemovedAny = removedAny;
         public readonly ushort[] ChangedAnyBits = changedAny.ToBitArray(), RemovedAnyBits = removedAny.ToBitArray();
     }
 
-    /// <summary>The groups of <paramref name="id"/>.</summary>
+    /// <summary>The sets of <paramref name="id"/>.</summary>
     public static Entry Of(int id) => Volatile.Read(ref _byId)[id];
 
     /// <summary>
-    /// The id of the groups of <paramref name="id"/> with <paramref name="bits"/> added to ChangedAny
+    /// The id of the sets of <paramref name="id"/> with <paramref name="bits"/> added to ChangedAny
     /// (<paramref name="removed"/> false) or RemovedAny. Allocation-free when the pair is known (bits below 256).
     /// </summary>
     public static int With(int id, bool removed, ReadOnlySpan<ushort> bits)

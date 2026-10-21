@@ -7,7 +7,7 @@ namespace EasyEcs.UnitTest;
 public class RunTests
 {
     // Heals by its amount and, once healthy, takes armor (a structural change in the middle of the job).
-#pragma warning disable EECS037 // Armor left out of Writes on purpose: the test checks it is neither carried over nor stamped
+#pragma warning disable EECS037 // Armor left out of WriteMask on purpose: the test checks it is neither carried over nor stamped
     private struct Heal(int amount) : IForEachEntity<Health, Armor>
     {
         public int Runs;
@@ -21,7 +21,7 @@ public class RunTests
             if (amount < 0) throw new InvalidOperationException("refused");
         }
 
-        public static int Writes => 1; // Health only: Armor is read (its writes are not carried over nor stamped)
+        public static int WriteMask => 1; // Health only: Armor is read (its writes are not carried over nor stamped)
     }
 #pragma warning restore EECS037
 
@@ -35,7 +35,7 @@ public class RunTests
             if (Seen < 0) entity.Set(new Frozen()); // breaks its promise
         }
 
-        public static int Writes => 0;
+        public static int WriteMask => 0;
     }
 
     [Test]
@@ -65,7 +65,7 @@ public class RunTests
         var job = new Heal(5);
 
         Assert.That(e.Run<Health, Armor, Heal>(ref job), Is.True);
-        Assert.That((e.Has<Frozen>(), e.Read<Health>().Value, e.Read<Armor>().Value), Is.EqualTo((true, 105, 7))); // Armor is not in Writes
+        Assert.That((e.Has<Frozen>(), e.Read<Health>().Value, e.Read<Armor>().Value), Is.EqualTo((true, 105, 7))); // Armor is not in WriteMask
         Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(tick)), Is.Zero);
 
         e.Remove<Frozen>();

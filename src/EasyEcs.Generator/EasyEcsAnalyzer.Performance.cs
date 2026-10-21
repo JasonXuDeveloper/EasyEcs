@@ -19,12 +19,12 @@ namespace EasyEcs.Generator;
 /// </summary>
 public sealed partial class EasyEcsAnalyzer
 {
-    public static readonly DiagnosticDescriptor ReadOnlyWriteAccess = new("EECS025", "A write access that only reads",
+    public static readonly DiagnosticDescriptor WriteAccessOnlyReads = new("EECS025", "A write access that only reads",
         "{0} is a write access, but the code only reads it: {1}; {2}",
         Category, DiagnosticSeverity.Warning, true,
         "A 'ref' component or singleton parameter (a Span<T> in a batch method) puts the type in the system's write set, " +
         "so no parallel stage runs it beside a system that reads the type, and every row it visits of a tracked " +
-        "component (ITrackChanges) is stamped as changed, so [Changed<T>] systems visit rows nobody changed. " +
+        "component (ITracked) is stamped as changed, so [Changed<T>] systems visit rows nobody changed. " +
         "Entity.Get<T>() of a tracked component stamps the row too. Read with 'in', ReadOnlySpan<T> or Read<T>().",
         helpLinkUri: Help("EECS025"));
 
@@ -51,7 +51,7 @@ public sealed partial class EasyEcsAnalyzer
         "A [ForEach] method runs for every entity it visits and OnUpdate once per update, so garbage there is garbage " +
         "every tick, and the collections it causes pause the world. Objects, arrays, capturing lambdas, LINQ, strings " +
         "built at run time, boxing, enumerators of interfaces and the cold calls of tools (TrimExcess, Capture(), " +
-        "Describe, DescribeSchedule, new Prefab) allocate; code inside a throw, and calls the compiler " +
+        "Describe, DescribeTables, DescribeSchedule, new Prefab) allocate; code inside a throw, and calls the compiler " +
         "removes ([Conditional]), are left out.",
         helpLinkUri: Help("EECS028"));
 
@@ -104,7 +104,7 @@ public sealed partial class EasyEcsAnalyzer
         helpLinkUri: Help("EECS034"));
 
     public static readonly DiagnosticDescriptor UntrackedMut = new("EECS039", "A Mut<T> of a component that is not tracked",
-        "Parameter '{0}' of [ForEach] method '{1}' is a Mut<{2}>, but {2} is not tracked (ITrackChanges): nothing is stamped either way; take it by 'ref'",
+        "Parameter '{0}' of [ForEach] method '{1}' is a Mut<{2}>, but {2} is not tracked (ITracked): nothing is stamped either way; take it by 'ref'",
         Category, DiagnosticSeverity.Info, true,
         "Mut<T> stamps the rows a method writes, one by one, so [Changed<T>] systems visit only those. A component that " +
         "is not tracked has no stamps: a Mut of it is a 'ref' parameter behind a wrapper, Value and Write() where the " +
@@ -113,7 +113,7 @@ public sealed partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor ReadOnlyQuery = new("EECS046", "A query loop that only reads tracked components",
         "This loop only reads what '{0}' hands out, and the query stamps every row it visits of {1}; '{2}' reads them without stamping",
         Category, DiagnosticSeverity.Warning, true,
-        "Query items hand out refs, so every row a query visits of a tracked component (ITrackChanges, DynamicBuffer<T>) " +
+        "Query items hand out refs, so every row a query visits of a tracked component (ITracked, DynamicBuffer<T>) " +
         "counts as written, whether or not the loop writes through it: [Changed<T>] systems then visit rows nobody " +
         "changed. Read<T1..Tn> walks the same rows with ref readonly items and stamps nothing.",
         helpLinkUri: Help("EECS046"));
@@ -203,7 +203,7 @@ public sealed partial class EasyEcsAnalyzer
         }
         else if (Symbols.JobInterface(method) != null)
         {
-            // A hand-written job: its signature is the interface's (EECS037 says what its Writes should be), what it
+            // A hand-written job: its signature is the interface's (EECS037 says what its WriteMask should be), what it
             // looks up and allocates per row costs as in a [ForEach] method.
             AnalyzeLookups(context, core, method, body);
             AnalyzeAllocations(context, method, body, "for every entity its loop visits", true);
@@ -311,7 +311,7 @@ public sealed partial class EasyEcsAnalyzer
                 : Symbols.Implements(type, Symbols.TrackChanges)
                     ? "every row it visits is stamped as changed, so [Changed<" + type.Name + ">] systems visit rows nobody changed"
                     : "the system is scheduled as the component's writer, so no parallel stage runs it beside a reader";
-            context.ReportDiagnostic(Diagnostic.Create(ReadOnlyWriteAccess, location,
+            context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, location,
                 ImmutableDictionary<string, string?>.Empty.Add(FixKind, span ? "ReadOnlySpan" : "In"),
                 $"Parameter '{p.Name}' of [ForEach] method '{method.Name}' ({(span ? "Span<" + type.Name + ">" : "ref")})", cost,
                 span ? "take it as a ReadOnlySpan<" + type.Name + ">" : "take it by 'in'"));
@@ -346,7 +346,7 @@ public sealed partial class EasyEcsAnalyzer
 
         var location = p.Locations.FirstOrDefault();
         if (reads)
-            context.ReportDiagnostic(Diagnostic.Create(ReadOnlyWriteAccess, location, ImmutableDictionary<string, string?>.Empty.Add(FixKind, "MutIn"),
+            context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, location, ImmutableDictionary<string, string?>.Empty.Add(FixKind, "MutIn"),
                 $"Parameter '{p.Name}' of [ForEach] method '{method.Name}' (Mut<{component.Name}>)",
                 "the system is scheduled as the component's writer, so no parallel stage runs it beside a reader", "take it by 'in'"));
         else if (plain && !Symbols.Implements(component, Symbols.TrackChanges))
@@ -490,7 +490,7 @@ public sealed partial class EasyEcsAnalyzer
 
     /// <summary>
     /// The component, singleton or buffer a generated member is for: the type named by the member's name without its
-    /// prefix (Has, Is, TryGet, Write, GetOrAdd, Set, Remove, Disable, Enable, Add, Unlink, Links, In), in the generated class's namespace.
+    /// prefix (Has, Is, TryGet, Write, GetOrAdd, Set, Remove, Disable, Enable, Link, Unlink, Links, In), in the generated class's namespace.
     /// </summary>
     private static ITypeSymbol? Named(ISymbol member, Core core)
     {
@@ -500,7 +500,7 @@ public sealed partial class EasyEcsAnalyzer
         string name = member.Name;
         if (name.StartsWith("Is") && name.EndsWith("Disabled") && name.Length > "IsDisabled".Length) name = name.Substring(2, name.Length - 10);
         if (name.StartsWith("Set") && name.EndsWith("IfChanged") && name.Length > "SetIfChanged".Length) name = name.Substring(0, name.Length - 9);
-        foreach (var prefix in new[] { "", "Has", "Is", "TryGet", "Write", "GetOrAdd", "Set", "Remove", "Disable", "Enable", "Add", "Unlink", "Links", "In" })
+        foreach (var prefix in new[] { "", "Has", "Is", "TryGet", "Write", "GetOrAdd", "Set", "Remove", "Disable", "Enable", "Link", "Unlink", "Links", "In" })
         {
             if (!name.StartsWith(prefix) || name.Length == prefix.Length) continue;
             string type = name.Substring(prefix.Length);
@@ -621,7 +621,8 @@ public sealed partial class EasyEcsAnalyzer
     {
         "TrimExcess" => "the arrays of the tables it shrinks (and the next update grows them again)",
         "Capture" when method.Parameters.Length == 0 => "a new WorldSnapshot (Capture(into) reuses one)",
-        "Describe" => "a description of every " + (method.ContainingType.Name == "Entity" ? "component" : "table") + " (objects and strings)",
+        "Describe" => "a description of every component (objects and strings)",
+        "DescribeTables" => "a description of every table (objects and strings)",
         "DescribeSchedule" => "a description of the schedule (objects and strings)",
         _ => null,
     };
@@ -690,7 +691,7 @@ public sealed partial class EasyEcsAnalyzer
             && !Uses.MayWrite(call))
         {
             string read = access.Expression + "." + access.Name.ToString().Replace("Get", "Read") + "()";
-            context.ReportDiagnostic(Diagnostic.Create(ReadOnlyWriteAccess, call.Syntax.GetLocation(), Fix(read, "Read it with Read<T>()"),
+            context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, call.Syntax.GetLocation(), Fix(read, "Read it with Read<T>()"),
                 $"Get<{method.TypeArguments[0].Name}>()", "it stamps the row as changed, so [Changed<" + method.TypeArguments[0].Name + ">] systems visit it",
                 "read it with Read<" + method.TypeArguments[0].Name + ">()"));
             return;
@@ -702,7 +703,7 @@ public sealed partial class EasyEcsAnalyzer
             string name = method.Name.Substring("Write".Length);
             string read = write.Expression + "." + name;
             if (Binds(model, call.Syntax, read, out var bound) && Symbols.IsGenerated(bound!))
-                context.ReportDiagnostic(Diagnostic.Create(ReadOnlyWriteAccess, call.Syntax.GetLocation(), Fix(read, "Read it with ." + name),
+                context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, call.Syntax.GetLocation(), Fix(read, "Read it with ." + name),
                     method.Name + "()", "it stamps the row as changed, so [Changed<" + name + ">] systems visit it", "read it with ." + name));
             return;
         }

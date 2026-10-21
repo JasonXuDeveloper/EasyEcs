@@ -26,7 +26,7 @@ public class CodeFixTests
         public class Box { public int V; }
         public struct Holder : IComponent { public System.Collections.Generic.List<int> Items; }
         public struct Q : IComponent { public int V; }
-        public struct T : IComponent, ITrackChanges { public int V; }
+        public struct T : IComponent, ITracked { public int V; }
         public struct Boss : IComponent;
 
         """;
@@ -171,7 +171,7 @@ public class CodeFixTests
         "public static class U { public static void F(Entity e) => e.Set(new Boss()); }",
         "=> e.SetBoss();")]
     [TestCase("EECS033", "Use .SetHpIfChanged",
-        "public record struct Hp(int V) : IComponent, ITrackChanges; public static class U { public static bool F(Entity e) => e.SetIfChanged(new Hp(3)); }",
+        "public record struct Hp(int V) : IComponent, ITracked; public static class U { public static bool F(Entity e) => e.SetIfChanged(new Hp(3)); }",
         "=> e.SetHpIfChanged(3);")]
     [TestCase("EECS033", "Use .Clock",
         "public static class U { public static int F(World w) => w.GetSingleton<Clock>().Ticks; }",
@@ -179,12 +179,12 @@ public class CodeFixTests
     [TestCase("EECS033", "Use .P",
         "public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) n += item.Component1.V; return n; } }",
         "n += item.P.V;")]
-    [TestCase("EECS037", "Declare Writes => 0",
+    [TestCase("EECS037", "Declare WriteMask => 0",
         "public struct J : IForEach<T> { public int N; public void Execute(ref T t) => N += t.V; }",
-        "public struct J : IForEach<T> { public static int Writes => 0; public int N;")]
-    [TestCase("EECS037", "Declare Writes => 0b1",
-        "public struct J : IForEach<T>\n{\n    public void Execute(ref T t) => t.V++;\n    public static int Writes => 0;\n}",
-        "    public static int Writes => 0b1;\n}")]
+        "public struct J : IForEach<T> { public static int WriteMask => 0; public int N;")]
+    [TestCase("EECS037", "Declare WriteMask => 0b1",
+        "public struct J : IForEach<T>\n{\n    public void Execute(ref T t) => t.V++;\n    public static int WriteMask => 0;\n}",
+        "    public static int WriteMask => 0b1;\n}")]
     [TestCase("EECS038", "Keep the ref",
         "public static class U { public static void F(Entity e) { var p = e.Get<P>(); p.V = 1; } }",
         "{ ref var p = ref e.Get<P>(); p.V = 1; }")]

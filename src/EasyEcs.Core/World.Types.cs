@@ -179,6 +179,6 @@ public sealed partial class World
         foreach (var key in _queryCache.Keys)
             if (key.Mentions(bit))
                 return true;
-        return GroupingOf(bit) != null || IndexOf(bit) != null;
+        return GroupTablesOf(bit) != null || IndexOf(bit) != null;
     }
 }

@@ -219,7 +219,7 @@ public class QueryTests
     private struct CountRows : IForEach<Health>, INoStructuralChanges
     {
         public int Rows;
-        public static int Writes => 0;
+        public static int WriteMask => 0;
         public void Execute(ref Health health) => Rows += health.Value;
     }
 
@@ -287,7 +287,7 @@ public class QueryTests
             if (item.Health.Value == 5) world.Update();                          // compacts and restarts the count
         }
 #pragma warning restore EECS051
-        Assert.That(world.Passes, Is.Zero);
+        Assert.That(world.PassDepth, Is.Zero);
         Assert.DoesNotThrow(() => world.TrimExcess());                           // no pass is counted as open
         Assert.That(world.Count<Health>(), Is.EqualTo(19));
     }

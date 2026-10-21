@@ -153,7 +153,7 @@ public class BattleServerTests
         foreach (var e in server.World.Entities) alive.Add(e.Id);
         for (int i = 0; i < 10; i++) server.Tick();
 
-        var gone = new EntityId[Units];                                       // WorldOptions.DestroyLog ids
+        var gone = new EntityId[Units];                                       // WorldOptions.DestroyLogCapacity ids
         Assert.That(server.CatchUp(acked, gone, out int updates, out int destroyed), Is.True);
         var changed = new HashSet<Entity>();                                  // any of three changed: a union
         foreach (var item in server.World.Query<Replica>(QueryFilter.Create().Changed<Health>(acked))) changed.Add(item.Entity);
@@ -410,11 +410,13 @@ public class BattleServerTests
     {
         using var server = Run(20);
         Assert.That(server.Slowest().Stats.Runs, Is.Positive);
-        Assert.That(server.World.GetSystem<RegenerationSystem>().Stats.Runs, Is.EqualTo(2));   // every 10th update
-        Assert.That(server.World.GetSystem<ManaSystem>().Stats.Runs, Is.EqualTo(2));           // the same, phase 5
+        Assert.That(server.World.TryGetSystem(out RegenerationSystem regeneration), Is.True);
+        Assert.That(server.World.TryGetSystem(out ManaSystem mana), Is.True);
+        Assert.That(regeneration.Stats.Runs, Is.EqualTo(2));                  // every 10th update
+        Assert.That(mana.Stats.Runs, Is.EqualTo(2));                          // the same, phase 5
         int npcs = server.World.Count<Goal>(QueryFilter.Create().Without<Dead>());
         server.Tick();
-        var planning = server.World.GetSystem<PlanningSystem>();
+        Assert.That(server.World.TryGetSystem(out PlanningSystem planning), Is.True);
         Assert.That(planning.RunCount, Is.EqualTo(21));
         Assert.That(planning.Stats.LastEntities, Is.EqualTo(npcs / 4));      // Slices = 4: a quarter per run
         Assert.That(server.World.HasSingleton<Waypoints>(), Is.True);         // PlanningSystem.OnCreate
@@ -467,10 +469,10 @@ public class BattleServerTests
     }
 
     [Test]
-    public void DestroyedNpcsComeBackThroughTheirCleanupComponent()
+    public void RetiredNpcsComeBackThroughTheirCleanupComponent()
     {
         using var server = Run(300);
-        Assert.That(server.World.Any<Destroyed>(), Is.False);                 // revived within the tick
+        Assert.That(server.World.Any<Retired>(), Is.False);                   // revived within the tick
         Assert.That(server.World.Count<Npc>(), Is.EqualTo(Units - Units / 3)); // as many NPCs as ever
         Assert.That(server.Battle.Deaths, Is.Positive);
     }

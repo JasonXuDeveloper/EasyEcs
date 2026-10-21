@@ -6,10 +6,10 @@ namespace EasyEcs.UnitTest;
 public record struct Lease(int Slot) : ICleanupComponent;   // a resource outside the world, released exactly once
 public record struct Ticket(int Seat) : ICleanupComponent;  // a second one
 
-/// <summary>Releases leases of destroyed entities: the system a cleanup component asks for.</summary>
+/// <summary>Releases leases of retired entities: the system a cleanup component asks for.</summary>
 public class ReleaseLeases : EcsSystem
 {
-    [ForEach, With<Destroyed>, With<Lease>]
+    [ForEach, With<Retired>, With<Lease>]
     static void Release(Entity entity, ref Released released)
     {
         released.Count++;
@@ -27,7 +27,7 @@ public class CleanupTests
         using var world = new World();
         var e = world.CreateEntity(new Lease(3), new Health(10), new Position(1, 2));
         e.Destroy();
-        Assert.That((e.IsAlive, e.Has<Destroyed>(), e.Get<Lease>().Slot), Is.EqualTo((true, true, 3)));
+        Assert.That((e.IsAlive, e.Has<Retired>(), e.Get<Lease>().Slot), Is.EqualTo((true, true, 3)));
         Assert.That((e.Has<Health>(), e.Has<Position>(), world.Count<Health>()), Is.EqualTo((false, false, 0)));
 
         e.Destroy();                                                     // retired already: nothing changes
@@ -62,7 +62,7 @@ public class CleanupTests
     }
 
     [Test]
-    public void ACleanupSystemReleasesBatchDestroyedEntities()
+    public void ACleanupSystemReleasesEntitiesRetiredInABatch()
     {
         using var world = new World();
         world.AddSingleton<Released>();
@@ -71,7 +71,7 @@ public class CleanupTests
         world.CreateEntity(new Health(-1));
         Assert.That(world.DestroyAll<Health>(), Is.EqualTo(101));
         Assert.That(world.DestroyAll<Health>(), Is.Zero);
-        Assert.That((world.EntityCount, world.Count<Lease>(QueryFilter.Create().With<Destroyed>())), Is.EqualTo((100, 100)));
+        Assert.That((world.EntityCount, world.Count<Lease>(QueryFilter.Create().With<Retired>())), Is.EqualTo((100, 100)));
         Assert.That(world.DestroyAll<Lease>(), Is.Zero);            // retired already
         world.Update();
         Assert.That((world.EntityCount, world.GetSingleton<Released>().Count), Is.EqualTo((0, 100)));
@@ -90,7 +90,7 @@ public class CleanupTests
     }
 
     [Test]
-    public void ADestroyedEntityCannotBeCloned()
+    public void ARetiredEntityCannotBeCloned()
     {
         using var world = new World();
         var e = world.CreateEntity(new Lease(1), new Health(1));
@@ -98,12 +98,12 @@ public class CleanupTests
         Assert.That(copy.Read<Lease>().Slot, Is.EqualTo(1));
         e.Destroy();
         var error = Assert.Throws<InvalidOperationException>(() => e.Clone());
-        Assert.That(error!.Message, Does.Contain("destroyed"));
-        Assert.That((world.EntityCount, world.Count<Lease>(QueryFilter.Create().With<Destroyed>())), Is.EqualTo((2, 1)));
+        Assert.That(error!.Message, Does.Contain("retired"));
+        Assert.That((world.EntityCount, world.Count<Lease>(QueryFilter.Create().With<Retired>())), Is.EqualTo((2, 1)));
     }
 
     [Test]
-    public void BulkWritesLeaveDestroyedEntitiesOut()
+    public void BulkWritesLeaveRetiredEntitiesOut()
     {
         using var world = new World();
         var retired = world.CreateEntity(new Lease(1), new Health(1));
@@ -116,7 +116,7 @@ public class CleanupTests
         Assert.That((retired.Read<Lease>().Slot, live.Read<Lease>().Slot), Is.EqualTo((1, 9)));
 
         // Named in the filter, the tag reaches them; RemoveAll always does (removing is how they are released).
-        Assert.That(world.SetAll(new Lease(7), QueryFilter.Create().With<Destroyed>()), Is.EqualTo(1));
+        Assert.That(world.SetAll(new Lease(7), QueryFilter.Create().With<Retired>()), Is.EqualTo(1));
         Assert.That(retired.Read<Lease>().Slot, Is.EqualTo(7));
         Assert.That(world.RemoveAll<Lease>(), Is.EqualTo(2));
         Assert.That((retired.IsAlive, live.IsAlive, world.EntityCount), Is.EqualTo((false, true, 1)));

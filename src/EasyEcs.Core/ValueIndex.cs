@@ -364,7 +364,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     }
 
     /// <inheritdoc cref="World.IUniqueIndex.ClaimLoaded"/>
-    void World.IUniqueIndex.ClaimLoaded(Archetype.Rows rows, int column)
+    void World.IUniqueIndex.ClaimLoaded(Archetype.TableCopy rows, int column)
     {
         var values = rows.Columns[column];
         var present = rows.Present[column];
@@ -523,14 +523,14 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
         _world.ForEachEntity<T, BuildJob>(ref job);
     }
 
-    // Reads every row without stamping it (Writes = 0): building the index is not a change of a tracked T.
+    // Reads every row without stamping it (WriteMask = 0): building the index is not a change of a tracked T.
     private struct BuildJob : IForEachEntity<T>, INoStructuralChanges
     {
         public ValueIndex<T, TKey> Index;
 
         public void Execute(Entity entity, ref T value) => Index.Put(entity.Index, entity.Version, value.Key);
 
-        public static int Writes => 0;
+        public static int WriteMask => 0;
     }
 
     /// <summary>

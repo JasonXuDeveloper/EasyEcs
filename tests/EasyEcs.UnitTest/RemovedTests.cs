@@ -57,7 +57,7 @@ public class RemovedTests
     [Test]
     public void RetiringIsADespawnNotARemoval()
     {
-        using var world = new World(new WorldOptions { DestroyLog = 8 });
+        using var world = new World(new WorldOptions { DestroyLogCapacity = 8 });
         var kept = world.CreateEntity(new Lease(1), new Armor(1));
         var removedFirst = world.CreateEntity(new Lease(2), new Armor(2));
         var plain = world.CreateEntity(new Armor(3));
@@ -68,9 +68,9 @@ public class RemovedTests
         removedFirst.Destroy();
         plain.Destroy();
 
-        // Retired entities are destroyed ones, as freed ones are: no Removed filter visits them.
+        // A retired entity reports no removal, as a freed one does not: no Removed filter visits it.
         var removed = QueryFilter.Create().Removed<Armor>(tick);
-        Assert.That((world.Count<Lease>(removed), world.Count<Lease>(removed.With<Destroyed>())), Is.EqualTo((0, 0)));
+        Assert.That((world.Count<Lease>(removed), world.Count<Lease>(removed.With<Retired>())), Is.EqualTo((0, 0)));
         Assert.That(world.Count<Lease>(QueryFilter.Create().RemovedAny<Armor, Shield>(tick)), Is.Zero);
         Span<EntityId> gone = stackalloc EntityId[8];
         world.DestroyedSince(tick, gone, out int count);
@@ -231,7 +231,7 @@ public class RemovedTests
         }
     }
 
-    // ---- The destroy log (WorldOptions.DestroyLog, world.DestroyedSince) ----
+    // ---- The destroy log (WorldOptions.DestroyLogCapacity, world.DestroyedSince) ----
 
     private static EntityId[] DestroyedSince(World world, ulong since)
     {
@@ -243,7 +243,7 @@ public class RemovedTests
     [Test]
     public void ReadersAtDifferentTicksEachSeeTheirDestroys()
     {
-        using var world = new World(new WorldOptions { DestroyLog = 16 });
+        using var world = new World(new WorldOptions { DestroyLogCapacity = 16 });
         var units = new Entity[6];
         world.CreateEntities(units, new Health(1));
         ulong first = world.ChangeTick;                              // reader A acknowledged here
@@ -272,7 +272,7 @@ public class RemovedTests
     [Test]
     public void AnOverwrittenLogTellsOldReadersToResync()
     {
-        using var world = new World(new WorldOptions { DestroyLog = 4 });
+        using var world = new World(new WorldOptions { DestroyLogCapacity = 4 });
         var units = new Entity[6];
         world.CreateEntities(units, new Health(1));
         ulong old = world.ChangeTick;
@@ -291,7 +291,7 @@ public class RemovedTests
     [Test]
     public void BulkDestroysCascadesAndMovesAreLogged()
     {
-        using var world = new World(new WorldOptions { DestroyLog = 64 });
+        using var world = new World(new WorldOptions { DestroyLogCapacity = 64 });
         using var other = new World();
         var shots = new Entity[3];
         world.CreateEntities(shots, new Stun(1));                    // a whole table: freed at once
@@ -319,10 +319,10 @@ public class RemovedTests
     [Test]
     public void ARetiredEntityIsLoggedWhenItsLastCleanupComponentGoes()
     {
-        using var world = new World(new WorldOptions { DestroyLog = 8 });
+        using var world = new World(new WorldOptions { DestroyLogCapacity = 8 });
         var session = world.CreateEntity(new Lease(1), new Ticket(2), new Health(1));
         ulong mark = world.ChangeTick;
-        session.Destroy();                                           // retired: still alive, Destroyed tag
+        session.Destroy();                                           // retired: still alive, Retired tag
         Assert.That(DestroyedSince(world, mark), Is.Empty);
         session.Remove<Lease>();
         Assert.That(DestroyedSince(world, mark), Is.Empty);          // a cleanup component is left
@@ -335,7 +335,7 @@ public class RemovedTests
     [Test]
     public void RestoreAndLoadLogTheEntitiesTheyTakeAway()
     {
-        using var world = new World(new WorldOptions { DestroyLog = 16 });
+        using var world = new World(new WorldOptions { DestroyLogCapacity = 16 });
         var kept = world.CreateEntity(new Health(1));
         var gone = world.CreateEntity(new Health(2));
         var snapshot = world.Capture();
@@ -370,13 +370,13 @@ public class RemovedTests
         world.CreateEntity(new Health(1)).Destroy();
         Assert.That(world.DestroyLogOldestTick, Is.EqualTo(ulong.MaxValue));
         Assert.Throws<InvalidOperationException>(() => world.DestroyedSince(0, default, out _));
-        Assert.Throws<ArgumentOutOfRangeException>(() => _ = new World(new WorldOptions { DestroyLog = -1 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = new World(new WorldOptions { DestroyLogCapacity = -1 }));
     }
 
     [Test]
     public void DestroysAndReadsOfTheLogDoNotAllocate()
     {
-        using var world = new World(new WorldOptions { DestroyLog = 256 });
+        using var world = new World(new WorldOptions { DestroyLogCapacity = 256 });
         var churned = new Entity[64];
         var into = new EntityId[256];
         var parent = world.CreateEntity(new Health(1));

@@ -16,7 +16,7 @@ public class AccessBenchmark
 {
     public struct Speed : IComponent { public int V; }
     public struct Armor : IComponent { public int V; }
-    public struct Gold : IComponent, ITrackChanges { public int V; }
+    public struct Gold : IComponent, ITracked { public int V; }
     public struct Total : ISingletonComponent { public long V; }
     public struct Step : ISingletonComponent { public int V; }
     public struct Boss : IComponent;

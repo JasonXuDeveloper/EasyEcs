@@ -112,7 +112,7 @@ public abstract class EcsSystem
         Access = default;
         _code = SystemCode.For(GetType(), out bool own);
         foreach (var code in _code) code.Declare(ref Access);
-        if (!own) Access.RunsAlone(); // no generated code of its own: it may override OnUpdate, or have no [ForEach]
+        if (!own) Access.RunAlone(); // no generated code of its own: it may override OnUpdate, or have no [ForEach]
     }
 
     internal void Update()

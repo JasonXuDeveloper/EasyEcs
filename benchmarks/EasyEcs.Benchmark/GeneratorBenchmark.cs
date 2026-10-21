@@ -113,7 +113,7 @@ public class GeneratorBenchmark
             {
                 0 => $"public struct Tag{m}_{c} : IComponent;\n",
                 1 => $"public record struct Score{m}_{c}(int Value) : IComponent, IIndexed<int> {{ public int Key => Value; }}\n",
-                2 or 3 => $"public record struct Tracked{m}_{c}(int V, float W) : IComponent, ITrackChanges;\n",
+                2 or 3 => $"public record struct Tracked{m}_{c}(int V, float W) : IComponent, ITracked;\n",
                 _ => $"public struct Data{m}_{c} : IComponent {{ public int V; public float X, Y; }}\n",
             });
         sb.Append($"public record struct Item{m}(int Id);\n");

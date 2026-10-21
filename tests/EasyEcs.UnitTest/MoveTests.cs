@@ -226,7 +226,7 @@ public class MoveTests
     }
 
     [Test]
-    public void ADestroyedEntityKeptForItsCleanupComponentsDoesNotMove()
+    public void ARetiredEntityDoesNotMove()
     {
         using var from = new World();
         using var to = new World();
@@ -237,7 +237,7 @@ public class MoveTests
         Assert.That(from.MoveEntities(to, [retired.Id, live.Id], moved), Is.EqualTo(1));
         Assert.That((moved[0], moved[1].Read<Health>().Value), Is.EqualTo((default(Entity), 7)));
         Assert.That((to.EntityCount, to.Count<Lease>()), Is.EqualTo((1, 0)));               // not copied: it exists once
-        Assert.That((retired.IsAlive, retired.Has<Destroyed>(), retired.Read<Lease>().Slot), Is.EqualTo((true, true, 1)));
+        Assert.That((retired.IsAlive, retired.Has<Retired>(), retired.Read<Lease>().Slot), Is.EqualTo((true, true, 1)));
         Assert.That((from.EntityCount, live.IsAlive), Is.EqualTo((1, false)));
     }
 
@@ -256,7 +256,7 @@ public class MoveTests
         Assert.That((p.IsAlive, p.Has<Lease>()), Is.EqualTo((true, false)));
         Assert.That((to.Count<Lease>(), to.Count<Ticket>()), Is.EqualTo((0, 0)));
         // The originals are retired with their cleanup components: only this world releases them.
-        Assert.That((e.IsAlive, e.Has<Destroyed>(), e.Read<Lease>().Slot, plain.Read<Lease>().Slot), Is.EqualTo((true, true, 1, 3)));
+        Assert.That((e.IsAlive, e.Has<Retired>(), e.Read<Lease>().Slot, plain.Read<Lease>().Slot), Is.EqualTo((true, true, 1, 3)));
         m.Destroy();                                                         // nothing to release there: freed at once
         Assert.That((m.IsAlive, to.EntityCount), Is.EqualTo((false, 1)));
     }

@@ -47,7 +47,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
         for (int n = 2; n <= MaxArity; n++)
         {
             string tps = TypeParams(n);
-            string cons = Lines(n, i => $"        where T{i} : struct, IComponent, ITrackChanges");
+            string cons = Lines(n, i => $"        where T{i} : struct, IComponent, ITracked");
             string bits = List(n, i => $"ComponentType<T{i}>.Bit");
             filter.Append($$"""
                     /// <summary>
@@ -77,7 +77,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
 
                 """);
-            string attributeCons = Lines(n, i => $"    where T{i} : struct, IComponent, ITrackChanges");
+            string attributeCons = Lines(n, i => $"    where T{i} : struct, IComponent, ITracked");
             attributes.Append($$"""
                 /// <summary>
                 /// The <see cref="ForEachAttribute"/> method visits only entities where at least one of <c>{{tps}}</c> was
@@ -354,20 +354,20 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
     // ---------------- IForEach / ForEach / Query / Count / Any ----------------
 
-    private const string Writes = """
+    private const string JobMasks = """
             /// <summary>
             /// Components the job writes through its refs: bit k - 1 for component k (default: all). When the job changes
             /// the archetype of the entity it visits, ForEach carries those components over from the row the refs point
             /// into to the entity's new row after the job returns. Generated jobs set only their <c>ref</c> parameters.
             /// </summary>
-            static virtual int Writes => -1;
+            static virtual int WriteMask => -1;
 
             /// <summary>
-            /// Components among <see cref="Writes"/> that the job stamps itself, only in the rows it writes (bits like
-            /// <see cref="Writes"/>; default none): the loop leaves their rows unstamped. Generated jobs set their
+            /// Components among <see cref="WriteMask"/> that the job stamps itself, only in the rows it writes (bits like
+            /// <see cref="WriteMask"/>; default none): the loop leaves their rows unstamped. Generated jobs set their
             /// <see cref="Mut{T}"/> parameters.
             /// </summary>
-            static virtual int OwnStamps => 0;
+            static virtual int SelfStamped => 0;
         """;
 
     private static string Queries()
@@ -398,7 +398,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// <summary>One matching entity: its components, by reference (<c>ref</c> writes them in place).</summary>
                     void Execute({{List(n, i => $"ref T{i} c{i}")}});
 
-                {{Writes}}
+                {{JobMasks}}
                 }
 
                 /// <summary>
@@ -416,7 +416,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// </summary>
                     void Execute(EntitySpan entities, {{List(n, i => $"Span<T{i}> c{i}")}});
 
-                {{Writes}}
+                {{JobMasks}}
                 }
 
                 /// <summary>
@@ -430,7 +430,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// <summary>One matching entity: its handle and its components, by reference.</summary>
                     void Execute(Entity entity, {{List(n, i => $"ref T{i} c{i}")}});
 
-                {{Writes}}
+                {{JobMasks}}
                 }
 
 
@@ -597,7 +597,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// <summary>
                 /// Run <paramref name="job"/> on this entity when it has all of <c>{{tps}}</c>, with the refs
                 /// <c>World.ForEachEntity</c> would give it: true when the job ran, false when the entity lacks a
-                /// component or is not alive. The components the job writes (<c>IForEachEntity.Writes</c>) count as
+                /// component or is not alive. The components the job writes (<c>IForEachEntity.WriteMask</c>) count as
                 /// written; a structural change the job makes takes effect at once, and those writes are carried over to
                 /// the entity's new row (also when the job throws). A job implementing <see cref="INoStructuralChanges"/>
                 /// skips that bookkeeping. O(1), allocation-free.
@@ -641,7 +641,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     where TJob : struct, IForEachEntity<{{tps}}>, allows ref struct
                 {
                     var world = _world;
-            {{Lines(n, i => $"        if ((TJob.Writes & ~TJob.OwnStamps & {1 << (i - 1)}) != 0) archetype.Stamp<T{i}>(slot, world.ChangeTick);")}}
+            {{Lines(n, i => $"        if ((TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0) archetype.Stamp<T{i}>(slot, world.ChangeTick);")}}
                     if (typeof(INoStructuralChanges).IsAssignableFrom(typeof(TJob))) // a JIT-time constant
                     {
                         // A broken promise throws instead of moving the row under the refs. The owner's plain freeze:
@@ -675,7 +675,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             ref var meta = ref world.MetaRef(Index);
                             if (meta.Version == Version && meta.Archetype is { } moved)
                             {
-            {{Lines(n, i => $"                    if ((TJob.Writes & {1 << (i - 1)}) != 0) CarryTo(moved, meta.Slot, in r{i});")}}
+            {{Lines(n, i => $"                    if ((TJob.WriteMask & {1 << (i - 1)}) != 0) CarryTo(moved, meta.Slot, in r{i});")}}
                             }
                         }
 
@@ -698,11 +698,11 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
     /// <summary>Stamp row <paramref name="row"/> of every component the job writes (only tracked ones emit code).</summary>
     private static string StampRow(int n, string indent, string row) =>
-        Lines(n, i => $"{indent}    if ((TJob.Writes & ~TJob.OwnStamps & {1 << (i - 1)}) != 0) archetype.StampVisited<T{i}>({row}, _changeTick);");
+        Lines(n, i => $"{indent}    if ((TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0) archetype.StampVisited<T{i}>({row}, _changeTick);");
 
     /// <summary>Stamp a run of rows of every component the job writes.</summary>
     private static string StampRows(int n, string indent, string start, string count) =>
-        Lines(n, i => $"{indent}    if ((TJob.Writes & ~TJob.OwnStamps & {1 << (i - 1)}) != 0) archetype.StampRows<T{i}>({start}, {count}, _changeTick);");
+        Lines(n, i => $"{indent}    if ((TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0) archetype.StampRows<T{i}>({start}, {count}, _changeTick);");
 
     /// <summary>
     /// Drop the per-row advance of the entity rows when the job does not receive the entity (the step becomes 0): a
@@ -756,7 +756,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// Structural changes inside the job are allowed and take effect immediately: an entity is visited at most
                 /// once (entities that enter a matching archetype during the pass are not visited, entities that leave
                 /// before their turn are skipped), and when the job changes the archetype of the entity it visits, its
-                /// writes through the refs are carried over to the entity's new row (<c>{{job}}.Writes</c>). A job
+                /// writes through the refs are carried over to the entity's new row (<c>{{job}}.WriteMask</c>). A job
                 /// implementing <see cref="INoStructuralChanges"/> skips that bookkeeping.
                 /// </summary>
                 // Never inlined: a caller that profile-guided inlining grows to hold this loop runs out of inlining
@@ -816,7 +816,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 if (stop < 0) break; // the rows ran out without a structural change
                                 at = count - (int)stop;
                                 int moved = (int)(stop >> 32);
-                                if (archetype.Slots[at - 1].Index < 0) CarryOver(archetype, at - 1, moved, TJob.Writes, [{{bits}}]);
+                                if (archetype.Slots[at - 1].Index < 0) CarryOver(archetype, at - 1, moved, TJob.WriteMask, [{{bits}}]);
                                 mode = rows.Mode(archetype); // the change may have made rows fail (or pass)
                             }
                         }
@@ -1067,7 +1067,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         }
 
                         if (tombstones) bits &= AliveRows(ref ids, left); // rare: the run loops then test nothing
-            {{Lines(n, i => $"                if ((TJob.Writes & ~TJob.OwnStamps & {1 << (i - 1)}) != 0) archetype.StampWord<T{i}>(w, bits, _changeTick);")}}
+            {{Lines(n, i => $"                if ((TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0) archetype.StampWord<T{i}>(w, bits, _changeTick);")}}
                         while (bits != 0)
                         {
                             int k = BitOperations.TrailingZeroCount(bits);
@@ -1149,7 +1149,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         int chunks = 0;
                         var archetypes = match.Archetypes;
                         // A job writing a tracked component stamps change-tick summaries shared by 4,096 rows (a JIT-time constant).
-                        int size = world.ChunkRows(archetypes, {{List(n, i => $"(TJob.Writes & {1 << (i - 1)}) != 0 && default(T{i}) is ITrackChanges", " || ")}}, filter.SliceCount);
+                        int size = world.ChunkRows(archetypes, {{List(n, i => $"(TJob.WriteMask & {1 << (i - 1)}) != 0 && default(T{i}) is ITracked", " || ")}}, filter.SliceCount);
                         for (int a = 0; a < archetypes.Length; a++)
                         {
                             var archetype = archetypes[a];
@@ -1372,7 +1372,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
     /// component counts as written (a JIT-time constant: no code for queries without tracked components).
     /// </summary>
     private static string Stamping(int n) => $$"""
-                if ({{List(n, i => $"default(T{i}) is ITrackChanges", " || ")}}) Stamp(_walk, (int)_slot);
+                if ({{List(n, i => $"default(T{i}) is ITracked", " || ")}}) Stamp(_walk, (int)_slot);
                 return true;
             }
 
@@ -1388,7 +1388,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     return;
                 }
 
-        {{Lines(n, i => $"        archetype.StampTick<T{i}>(slot, tick);")}}
+        {{Lines(n, i => $"        archetype.StampRowTick<T{i}>(slot, tick);")}}
             }
 
             // The first row of a word: a call in tail position, so the per-row Stamp keeps no register of
@@ -1399,7 +1399,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 walk.StampWord = slot >> 6;
                 walk.StampTick = tick;
         {{Lines(n, i => $"        archetype.NoteVisited<T{i}>(slot, tick);")}}
-        {{Lines(n, i => $"        archetype.StampTick<T{i}>(slot, tick);")}}
+        {{Lines(n, i => $"        archetype.StampRowTick<T{i}>(slot, tick);")}}
             }
         """;
 }

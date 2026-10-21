@@ -163,7 +163,7 @@ public class SingleEntityBenchmark
         else e.Set(new Marked());
     }
 
-    public record struct S1(int V) : IComponent, ITrackChanges;
+    public record struct S1(int V) : IComponent, ITracked;
     public record struct S2(int V) : IComponent;
     public record struct S3(int V) : IComponent;
     public record struct S4(int V) : IComponent;

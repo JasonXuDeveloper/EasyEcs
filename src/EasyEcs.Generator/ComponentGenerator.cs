@@ -15,14 +15,14 @@ namespace EasyEcs.Generator;
 /// <list type="bullet">
 /// <item>component <c>Position</c>: <c>entity.Position</c> (<c>ref</c>, <c>Get</c>), <c>HasPosition</c>,
 /// <c>TryGetPosition(out p)</c>, <c>GetOrAddPosition()</c> (not for indexed components), <c>SetPosition(x, y)</c> (one overload per public constructor, or the public fields),
-/// <c>RemovePosition()</c>. A component the world watches (<c>ITrackChanges</c>, <c>IIndexed&lt;TKey&gt;</c>) gets a
+/// <c>RemovePosition()</c>. A component the world watches (<c>ITracked</c>, <c>IIndexed&lt;TKey&gt;</c>) gets a
 /// <c>ref readonly</c> property (<c>Read</c>): reading it never counts as a write, and writes are <c>Set…</c> calls; a
 /// tracked one that is neither indexed nor grouped also gets <c>WriteHealth()</c> (<c>ref</c>, <c>Get</c>: stamped as
 /// changed); a watched one also gets <c>SetHealthIfChanged(…)</c> (<c>SetIfChanged</c>: an equal value is not written).</item>
 /// <item>buffer element <c>Loot</c> (a struct of this compilation some code names in <c>DynamicBuffer&lt;Loot&gt;</c>):
 /// <c>entity.Loot</c> (<c>ref readonly DynamicBuffer&lt;Loot&gt;</c>), <c>HasLoot</c>, <c>WriteLoot()</c>,
 /// <c>GetOrAddLoot()</c>, <c>RemoveLoot()</c> (a relation's links, indexed, get no <c>ref</c> members: they are
-/// written with <c>AddRelation</c> / <c>RemoveRelation</c>).</item>
+/// written with <c>Link</c> / <c>Unlink</c>).</item>
 /// <item>tag <c>Dead</c> (no fields): <c>entity.IsDead</c>, <c>SetDead()</c>, <c>RemoveDead()</c>.</item>
 /// <item>the same writers on a <c>Prefab</c>, returning it for chaining (<c>new Prefab().SetHealth(100).SetNpc()</c>),
 /// with <c>prefab.Health</c> (read-only), <c>HasHealth</c> and <c>IsDead</c>.</item>
@@ -355,11 +355,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
 
         Open(sb, null, Symbols.GeneratorName, a, m.Path + Classes.Buffer, Ecs(Entity));
         if (Free(Entity, n))
-            Property(sb, $"The entity's buffer of <see cref=\"{e}\"/>, read-only (<c>Read</c>: never a write); write it through <c>{(m.Relation ? "AddRelation / RemoveRelation" : $"Write{n}()")}</c>. Throws if missing.",
+            Property(sb, $"The entity's buffer of <see cref=\"{e}\"/>, read-only (<c>Read</c>: never a write); write it through <c>{(m.Relation ? "Link / Unlink" : $"Write{n}()")}</c>. Throws if missing.",
                 $"ref readonly {t} {Code.Escape(n)}", $"ref @this.Read<{t}>()");
         if (Free(Entity, "Has" + n))
             Property(sb, $"Whether the entity has a buffer of <see cref=\"{e}\"/>.", $"bool Has{n}", $"@this.Has<{t}>()");
-        if (Free(Entity, "Write" + n)) // links are indexed: written with AddRelation / RemoveRelation
+        if (Free(Entity, "Write" + n)) // links are indexed: written with Link / Unlink
             Member(sb, $"The entity's buffer of <see cref=\"{e}\"/> by <c>ref</c> for writing (<c>Get</c>): stamped as changed. Throws if missing.",
                 $"ref {t} Write{n}() => ref @this.Get<{t}>();");
         if (Free(Entity, "GetOrAdd" + n))
@@ -368,16 +368,16 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         if (Free(Entity, "Remove" + n))
             Member(sb, $"Removes the entity's buffer of <see cref=\"{e}\"/> if it has one; returns the entity.",
                 $"global::EasyEcs.Entity Remove{n}() => @this.Remove<{t}>();");
-        if (Free(Entity, "Add" + n))
+        if (Free(Entity, "Link" + n))
             foreach (var setter in m.Setters)
-                Member(sb, $"Links the entity with a <see cref=\"{e}\"/> (<c>AddRelation</c>: the buffer, added if missing, and the index); returns the entity.",
-                    $"global::EasyEcs.Entity Add{n}({setter.Parameters}) => @this.AddRelation({setter.Value});");
+                Member(sb, $"Links the entity with a <see cref=\"{e}\"/> (<c>Link</c>: the buffer, added if missing, and the index); returns the entity.",
+                    $"global::EasyEcs.Entity Link{n}({setter.Parameters}) => @this.Link({setter.Value});");
         if (Free(Entity, "Unlink" + n))
-            Member(sb, $"Drops the entity's <see cref=\"{e}\"/> links to <paramref name=\"target\"/> (<c>RemoveRelation</c>; <c>Remove{n}()</c> drops the whole buffer); returns how many went.",
-                $"int Unlink{n}(global::EasyEcs.EntityId target) => @this.RemoveRelation<{e}>(target);");
+            Member(sb, $"Drops the entity's <see cref=\"{e}\"/> links to <paramref name=\"target\"/> (<c>Unlink</c>; <c>Remove{n}()</c> drops the whole buffer); returns how many went.",
+                $"int Unlink{n}(global::EasyEcs.EntityId target) => @this.Unlink<{e}>(target);");
         if (Free(Entity, "Links" + n))
-            Member(sb, $"Whether the entity links to <paramref name=\"target\"/> with a <see cref=\"{e}\"/> (<c>HasRelation</c>).",
-                $"bool Links{n}(global::EasyEcs.EntityId target) => @this.HasRelation<{e}>(target);");
+            Member(sb, $"Whether the entity links to <paramref name=\"target\"/> with a <see cref=\"{e}\"/> (<c>Links</c>).",
+                $"bool Links{n}(global::EasyEcs.EntityId target) => @this.Links<{e}>(target);");
         sb.Append("    }\n");
 
         if (Free(World, n + "Index"))
@@ -450,7 +450,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             return new Shape(singleton ? Kind.Singleton : Kind.Component, tag, tracked || indexed || grouped,
                 tracked && !indexed && !grouped, grouped, indexed,
                 // A cleanup component and ChildOf are never disabled (EECS048's rule), nor EasyEcs's other own
-                // components; EasyEcs's own tag (Destroyed) is the world's to add and remove: it is only read.
+                // components; EasyEcs's own tag (Retired) is the world's to add and remove: it is only read.
                 Symbols.IsDisableable(type) && !own, !(own && tag),
                 Symbols.IsComparable(type)); // what SetIfChanged compares (EECS040's rule)
         }
@@ -485,7 +485,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 case Kind.Element or Kind.Relation:
                     Add(Entity, n);
                     Add(Entity, "Has" + n);
-                    if (Kind == Kind.Element) // a relation's links are indexed: written with AddRelation / RemoveRelation
+                    if (Kind == Kind.Element) // a relation's links are indexed: written with Link / Unlink
                     {
                         Add(Entity, "Write" + n);
                         Add(Entity, "GetOrAdd" + n);
@@ -494,7 +494,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                     Add(Entity, "Remove" + n);
                     if (Kind == Kind.Relation)
                     {
-                        Add(Entity, "Add" + n);
+                        Add(Entity, "Link" + n);
                         Add(Entity, "Unlink" + n);
                         Add(Entity, "Links" + n);
                         Add(World, n + "Index");
@@ -742,7 +742,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             // EasyEcs, found next to the interface the type implements.
             var easyEcs = type.AllInterfaces.FirstOrDefault(i => Symbols.Named(i, Symbols.Component) || Symbols.Named(i, Symbols.Singleton))?.ContainingNamespace;
             if (easyEcs == null || easyEcs.GetTypeMembers(Entity).Length == 0 || easyEcs.GetTypeMembers(World).Length == 0) return null;
-            // EasyEcs's own components: the public ones (ChildOf, Destroyed) get their members in EasyEcs itself, so every
+            // EasyEcs's own components: the public ones (ChildOf, Retired) get their members in EasyEcs itself, so every
             // assembly referencing it has them; the internal ones get nothing.
             bool core = SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, easyEcs.ContainingAssembly);
             if (core && !isPublic || Shape.Of(type, easyEcs.ContainingAssembly) is not { } shape) return null;

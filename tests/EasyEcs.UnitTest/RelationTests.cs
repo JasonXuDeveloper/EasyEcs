@@ -20,17 +20,17 @@ public class RelationTests
         using var world = new World();
         var red = world.CreateEntity();
         var blue = world.CreateEntity();
-        var a = world.CreateEntity().AddRelation(new MemberOf(red)).AddRelation(new MemberOf(blue));
-        var b = world.CreateEntity().AddRelation(new MemberOf(red));
+        var a = world.CreateEntity().Link(new MemberOf(red)).Link(new MemberOf(blue));
+        var b = world.CreateEntity().Link(new MemberOf(red));
         var parties = world.Relations<MemberOf>();
         Assert.That(All(parties.Find(red)), Is.EquivalentTo(new[] { a, b }));
         Assert.That(All(parties.Find(blue)), Is.EqualTo(new[] { a }));
         Assert.That((parties.Find(red).Count, parties.Find(blue).Count, parties.TargetCount), Is.EqualTo((2, 1, 2)));
-        Assert.That((a.HasRelation<MemberOf>(blue), b.HasRelation<MemberOf>(blue)), Is.EqualTo((true, false)));
+        Assert.That((a.Links<MemberOf>(blue), b.Links<MemberOf>(blue)), Is.EqualTo((true, false)));
 
-        a.AddRelation(new MemberOf(blue));                                // links are counted, like buffer elements
+        a.Link(new MemberOf(blue));                                       // links are counted, like buffer elements
         Assert.That(parties.Count(blue), Is.EqualTo(2));
-        Assert.That(a.RemoveRelation<MemberOf>(blue), Is.EqualTo(2));
+        Assert.That(a.Unlink<MemberOf>(blue), Is.EqualTo(2));
         Assert.That((parties.Count(blue), a.Read<DynamicBuffer<MemberOf>>().Count, parties.TargetCount), Is.EqualTo((0, 1, 1)));
 
         b.Destroy();                                                      // a destroyed source leaves
@@ -45,15 +45,15 @@ public class RelationTests
         using var world = new World();
         var t1 = world.CreateEntity();
         var t2 = world.CreateEntity();
-        var e = world.CreateEntity().AddRelation(new MemberOf(t1));       // before the index exists
+        var e = world.CreateEntity().Link(new MemberOf(t1));              // before the index exists
         var parties = world.Relations<MemberOf>();
         Assert.That(All(parties.Find(t1)), Is.EqualTo(new[] { e }));
 
-        var other = world.CreateEntity().AddRelation(new MemberOf(t2));
+        var other = world.CreateEntity().Link(new MemberOf(t2));
         var copy = other.Clone();                                          // a clone links too
         Assert.That(parties.Count(t2), Is.EqualTo(2));
         e.Set(new DynamicBuffer<MemberOf>());                              // a whole new buffer: no links
-        Assert.That((parties.Count(t1), copy.HasRelation<MemberOf>(t2)), Is.EqualTo((0, true)));
+        Assert.That((parties.Count(t1), copy.Links<MemberOf>(t2)), Is.EqualTo((0, true)));
     }
 
     [Test]
@@ -62,13 +62,13 @@ public class RelationTests
         using var world = new World();
         var parties = world.Relations<MemberOf>();
         var old = world.CreateEntity();
-        var member = world.CreateEntity().AddRelation(new MemberOf(old));
+        var member = world.CreateEntity().Link(new MemberOf(old));
         old.Destroy();
         var next = world.CreateEntity();                                   // reuses the index
         Assert.That(next.Id.Index, Is.EqualTo(old.Id.Index));
-        var joiner = world.CreateEntity().AddRelation(new MemberOf(next));
+        var joiner = world.CreateEntity().Link(new MemberOf(next));
         Assert.That((All(parties.Find(old))[0], All(parties.Find(next))[0]), Is.EqualTo((member, joiner)));
-        member.RemoveRelation<MemberOf>(old);
+        member.Unlink<MemberOf>(old);
         Assert.That((parties.Count(old), parties.Count(next)), Is.EqualTo((0, 1)));
     }
 
@@ -78,9 +78,9 @@ public class RelationTests
         using var world = new World();
         var parties = world.Relations<MemberOf>();
         var target = world.CreateEntity();
-        var a = world.CreateEntity().AddRelation(new MemberOf(target));
+        var a = world.CreateEntity().Link(new MemberOf(target));
         var snapshot = world.Capture();
-        a.RemoveRelation<MemberOf>(target);
+        a.Unlink<MemberOf>(target);
         world.Restore(snapshot);
         Assert.That(All(parties.Find(target)), Is.EqualTo(new[] { a }));
     }
@@ -90,7 +90,7 @@ public class RelationTests
     {
         using var world = new World();
         world.CreateEntity(new Armor(1));
-        var tracked = world.CreateEntity().AddRelation(new MemberOf(world.CreateEntity()));
+        var tracked = world.CreateEntity().Link(new MemberOf(world.CreateEntity()));
         ulong mark = world.ChangeTick + 1;
         world.Update();
         _ = world.Relations<MemberOf>().Count(default);
@@ -103,13 +103,13 @@ public class RelationTests
     {
         using var world = new World();
         var party = world.CreateEntity();
-        var member = world.CreateEntity().AddRelation(new MemberOf(party.Id));
+        var member = world.CreateEntity().Link(new MemberOf(party.Id));
         world.Update();
         var changed = QueryFilter.Create().Changed<DynamicBuffer<MemberOf>>(world.ChangeTick);
-        Assert.That(member.RemoveRelation<MemberOf>(member.Id), Is.Zero);
+        Assert.That(member.Unlink<MemberOf>(member.Id), Is.Zero);
         Assert.That(world.Count<DynamicBuffer<MemberOf>>(changed), Is.Zero);    // no link went: not a write
-        Assert.That(member.HasRelation<MemberOf>(party.Id), Is.True);
-        Assert.That(member.RemoveRelation<MemberOf>(party.Id), Is.EqualTo(1));
+        Assert.That(member.Links<MemberOf>(party.Id), Is.True);
+        Assert.That(member.Unlink<MemberOf>(party.Id), Is.EqualTo(1));
         Assert.That(world.Count<DynamicBuffer<MemberOf>>(changed), Is.EqualTo(1));
     }
 }

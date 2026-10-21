@@ -165,21 +165,21 @@ public class AllocationTests
 
             // Multi-target links: a player joins a party and leaves another, a party lists its members.
             var party = players[next * 7 % players.Length];
-            player.AddRelation(new MemberOf(party));
-            players[(next + 128) % players.Length].RemoveRelation<MemberOf>(players[(next + 128) * 7 % players.Length]);
+            player.Link(new MemberOf(party));
+            players[(next + 128) % players.Length].Unlink<MemberOf>(players[(next + 128) * 7 % players.Length]);
             foreach (var _ in parties.Find(party)) seen++;
 
             // A party disbands while linked and a new one takes its id: both incarnations have links for a while.
             var guild = world.CreateEntity(new Health(3));
             var founder = players[next % players.Length];
-            founder.AddRelation(new MemberOf(guild));
+            founder.Link(new MemberOf(guild));
             var disbanded = guild.Id;
             guild.Destroy();
             var successor = world.CreateEntity(new Health(3));            // the recycled id
             var joiner = players[(next + 1) % players.Length];
-            joiner.AddRelation(new MemberOf(successor));
-            founder.RemoveRelation<MemberOf>(disbanded);
-            joiner.RemoveRelation<MemberOf>(successor);
+            joiner.Link(new MemberOf(successor));
+            founder.Unlink<MemberOf>(disbanded);
+            joiner.Unlink<MemberOf>(successor);
             successor.Destroy();
 
             // Groups: an entity changes zone (a row move between group tables), a zone's rows are walked.
@@ -283,10 +283,10 @@ public class AllocationTests
         world.CreateEntities(new Entity[World.ParallelChunkRows * 4], new ParallelTests.Counter(0), new ParallelTests.Seen(1));
         world.CreateEntities(new Entity[100], new Position(0, 0), new Velocity(1, 1));
         world.AddSystem<ParallelTests.ChunkedIncrement>();
-        world.AddSystem<SystemTests.Moves>();
+        var moves = world.AddSystem<SystemTests.Moves>();
         for (int i = 0; i < 10; i++) world.Update();
         Assert.That(LeastAllocated(world, 500), Is.Zero);
-        Assert.That(world.GetSystem<SystemTests.Moves>().Stats.LastEntities, Is.EqualTo(100));
+        Assert.That(moves.Stats.LastEntities, Is.EqualTo(100));
     }
 
     private struct Churned : IComponent;

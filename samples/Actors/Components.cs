@@ -13,7 +13,7 @@ namespace Actors;
 public struct In<TActor> : IComponent;
 
 /// <summary>What every kind of actor is: key component, index key, system group, and the group's filter.</summary>
-public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>
+public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;
 
 // The key is the actor itself. Implemented explicitly: a public Key property would be printed by the record's
@@ -29,9 +29,9 @@ public readonly record struct Bank(long Id) : IActor<Bank>
 }
 
 // State that persists: tracked, so the host saves only the actors whose state changed.
-public record struct Stock(int Items) : IComponent, ITrackChanges;
+public record struct Stock(int Items) : IComponent, ITracked;
 
-public record struct Balance(long Coins) : IComponent, ITrackChanges;
+public record struct Balance(long Coins) : IComponent, ITracked;
 
 // State that lives only while the actor is active: not in the saved record.
 public record struct Sales(int Count) : IComponent;

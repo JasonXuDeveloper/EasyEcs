@@ -32,7 +32,7 @@ public struct RawStats : IComponent { public int Hp; }
 [NinoType]
 public partial struct Config : ISingletonComponent { public int Rate; }
 public record struct Cache(object Handle) : ISingletonComponent;     // no formatter: a save that writes it throws
-public record struct Balance(int Gold) : IComponent, ITrackChanges;
+public record struct Balance(int Gold) : IComponent, ITracked;
 public record struct Session(object Socket) : IComponent;             // runtime only, no formatter
 
 public class SerializationTests
@@ -212,8 +212,8 @@ public class SerializationTests
             var guild = world.CreateEntity(new Health(100));              // stays behind
             player = world.CreateEntity(new Health(10), new Follows(guild));
             sword = world.CreateEntity(new ChildOf(player), new Follows(player), new Held { Grip = new Grip(player) });
-            world.GetEntity(player).AddRelation(new MemberOf(sword));
-            world.GetEntity(player).AddRelation(new MemberOf(guild));
+            world.GetEntity(player).Link(new MemberOf(sword));
+            world.GetEntity(player).Link(new MemberOf(guild));
             world.SaveEntities(output, [sword, player, EntityId.Null]);   // order kept, an empty id skipped
             bytes = output.WrittenSpan.ToArray();
         }
@@ -368,6 +368,24 @@ public class SerializationTests
         long before = GC.GetAllocatedBytesForCurrentThread();
         world.SaveEntitiesWith(output, [actor.Id], in stored);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+
+    [Test]
+    public void ASaveFromBeforeTheRetiredRenameLoadsItsRetiredEntities()
+    {
+        // Saved by 4.6, when the tag was EasyEcs.Destroyed: Position(1, 2) on entity 0, and entity 1 destroyed while it
+        // held Lease(3), so retired (Lease and the tag left).
+        var bytes = Convert.FromBase64String(
+            "RUVDUwIAAAADAAAAr1cydgAIAAAAILSKXbtg0DsAAQAAAAAAAACw3w35AAQAAABf7quSAgAAAAEAAAABAAAAAAAAAAIAAAABAAAAAAAAAAEAAAAB" +
+            "AAAAAAAAAAkAAAAAAACAPwAAAEADAAAAAQAAAAAAAAACAAAAAQAAAAEAAAABAAAAAgAAAAAAEQAAAAH+/////////wAAQEAAAIBABQAAAAADAAAA" +
+            "AAAAAAAAAAA=");
+        using var world = new World();
+        world.Load(bytes);
+        var retired = world.GetEntity(new EntityId(1, 1));
+        Assert.That((retired.IsAlive, retired.IsRetired, retired.Read<Lease>().Slot, retired.Has<Position>()), Is.EqualTo((true, true, 3, false)));
+        Assert.That(world.GetEntity(new EntityId(0, 1)).Read<Position>(), Is.EqualTo(new Position(1, 2)));
+        retired.Remove<Lease>();                                                // released: the entity is freed
+        Assert.That((retired.IsAlive, world.EntityCount), Is.EqualTo((false, 1)));
     }
 
     [Test]

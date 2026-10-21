@@ -8,7 +8,7 @@ namespace EasyEcs;
 /// An element of a <see cref="DynamicBuffer{T}"/> that links its entity to <see cref="Target"/>: an entity holds any
 /// number of links of one kind (the members of a party, the items a merchant offers, the units a buff applies to), and
 /// <see cref="World.Relations{T}"/> finds the entities linking to a target. Links are written with
-/// <see cref="Entity.AddRelation{T}"/> / <see cref="Entity.RemoveRelation{T}"/> (or <c>Set</c> of a whole buffer), so
+/// <see cref="Entity.Link{T}"/> / <see cref="Entity.Unlink{T}"/> (or <c>Set</c> of a whole buffer), so
 /// the index follows; read them with <c>Read&lt;DynamicBuffer&lt;T&gt;&gt;()</c> or an <c>in</c> parameter. The
 /// analyzer reports writes through a <c>ref</c> (EECS015), as for any indexed component.
 /// </summary>
@@ -208,7 +208,7 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
         _world.ForEachEntity<DynamicBuffer<T>, BuildJob>(ref job);
     }
 
-    // Reads every buffer without stamping it (Writes = 0): building the index is not a change.
+    // Reads every buffer without stamping it (WriteMask = 0): building the index is not a change.
     private struct BuildJob : IForEachEntity<DynamicBuffer<T>>, INoStructuralChanges
     {
         public RelationIndex<T> Index;
@@ -218,7 +218,7 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
             foreach (ref readonly var relation in links.AsReadOnlySpan()) Index.Add(entity.Index, entity.Version, relation.Target);
         }
 
-        public static int Writes => 0;
+        public static int WriteMask => 0;
     }
 
     /// <summary>The list of <paramref name="target"/>, or a null ref when nothing links to it.</summary>

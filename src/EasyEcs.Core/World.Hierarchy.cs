@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 namespace EasyEcs;
 
 /// <summary>
-/// What happens to the links to an entity when it is destroyed (<see cref="TargetRules.WhenTargetDestroyed{T}"/>,
+/// What happens to the links to an entity when it is destroyed (<see cref="TargetPolicyExtensions.WhenTargetDestroyed{T}"/>,
 /// <see cref="RelationIndex{T}.WhenTargetDestroyed"/>).
 /// </summary>
 public enum TargetPolicy
@@ -20,7 +20,7 @@ public enum TargetPolicy
 }
 
 /// <summary>Target policies of components that point at an entity (<see cref="IIndexed{TKey}"/> of <see cref="EntityId"/>).</summary>
-public static class TargetRules
+public static class TargetPolicyExtensions
 {
     /// <summary>
     /// Decide what destroying an entity does to the <typeparamref name="T"/> components whose key is that entity: an
@@ -319,7 +319,7 @@ public sealed partial class World
             foreach (var source in index.Find(target))
             {
                 if (Policy == TargetPolicy.Destroy) world.Destroy(ref world.MetaRef(source.Index), source.Id);
-                else if (source.IsAlive) source.RemoveRelation<T>(target);
+                else if (source.IsAlive) source.Unlink<T>(target);
             }
         }
     }

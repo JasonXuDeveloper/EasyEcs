@@ -4,7 +4,7 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// Sessions holding an outside resource: 10,000 connections; per operation, 1,000 disconnect and 1,000 connect. With a
-/// cleanup component (<c>Socket : ICleanupComponent</c>: a destroyed session keeps it with the <c>Destroyed</c> tag
+/// cleanup component (<c>Socket : ICleanupComponent</c>: a retired session keeps it with the <c>Retired</c> tag
 /// until a [ForEach] pass releases it) against the same churn with a plain component released before the destroy.
 /// Steady state allocates 0 bytes.
 /// </summary>
@@ -76,7 +76,7 @@ public class CleanupBenchmark
 
 public static class Sockets
 {
-    [ForEach, With<Destroyed>]
+    [ForEach, With<Retired>]
     static void Release(Entity session, in CleanupBenchmark.Socket socket, ref int released)
     {
         released += socket.Handle & 1;

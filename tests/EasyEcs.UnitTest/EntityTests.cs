@@ -77,7 +77,7 @@ public class EntityTests
 
         Assert.That(_world.DestroyEntities(parent.Id, leased.Id, child.Id), Is.EqualTo(3));
         Assert.That(parent.IsAlive || child.IsAlive || grandchild.IsAlive, Is.False); // the list and the cascade
-        Assert.That(leased.IsAlive && leased.Has<Destroyed>(), Is.True);              // retired, kept for its cleanup
+        Assert.That(leased.IsAlive && leased.Has<Retired>(), Is.True);                // retired, kept for its cleanup
         Assert.That(_world.DestroyEntities(leased.Id), Is.Zero);                      // retired already
     }
 
@@ -243,11 +243,11 @@ public class EntityTests
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 5000; i++) _world.CreateEntity(new Position(i, 0), new Velocity());
         Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, _world.EntityCount), Is.EqualTo((0L, 5001)));
-        var table = Array.Find(_world.Describe(), t => t.Entities == 5001);
+        var table = Array.Find(_world.DescribeTables(), t => t.Entities == 5001);
         Assert.That(table.Capacity, Is.EqualTo(5056)); // 5,001 rows in whole presence words, not the next power of two
         _world.Reserve<Position, Velocity>(0); // nothing to reserve
         _world.Reserve<Position, Velocity>(-1);
-        Assert.That(Array.Find(_world.Describe(), t => t.Entities == 5001).Capacity, Is.EqualTo(5056));
+        Assert.That(Array.Find(_world.DescribeTables(), t => t.Entities == 5001).Capacity, Is.EqualTo(5056));
     }
 
     [Test]
@@ -271,10 +271,10 @@ public class EntityTests
     public void BulkCreationGrowsToWhatItNeedsAndStillDoubles()
     {
         _world.CreateEntities(new Entity[100], new Health(1));
-        var table = Array.Find(_world.Describe(), t => t.Entities == 100);
+        var table = Array.Find(_world.DescribeTables(), t => t.Entities == 100);
         Assert.That((table.Capacity, _world.Meta.Length), Is.EqualTo((128, 100))); // exact (rows: whole words)
         _world.CreateEntities(new Entity[30], new Health(2));                     // a small batch: one doubling
-        Assert.That((Array.Find(_world.Describe(), t => t.Entities == 130).Capacity, _world.Meta.Length), Is.EqualTo((256, 200)));
+        Assert.That((Array.Find(_world.DescribeTables(), t => t.Entities == 130).Capacity, _world.Meta.Length), Is.EqualTo((256, 200)));
     }
 
     [Test]

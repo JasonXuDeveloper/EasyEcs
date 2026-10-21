@@ -49,7 +49,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     public static readonly DiagnosticDescriptor SystemReference = new("EECS008", "Systems must not reference systems",
         "System '{0}' references system '{1}' through '{2}'; communicate through components or singletons",
         Category, DiagnosticSeverity.Error, true,
-        "Systems that call each other, through a field or World.GetSystem, are coupled: neither can be removed, reordered " +
+        "Systems that call each other, through a field or World.TryGetSystem, are coupled: neither can be removed, reordered " +
         "or tested alone. Write the data another system reads (a component or a singleton).", helpLinkUri: Help("EECS008"));
 
     public static readonly DiagnosticDescriptor MixedBatch = new("EECS009", "Batch [ForEach] mixes spans and per-entity parameters",
@@ -65,7 +65,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "A parallel [ForEach] runs chunks of rows on several threads at once. It must make no structural change, run per " +
         "entity, and write nothing that another row's run reads, such as a singleton.", helpLinkUri: Help("EECS010"));
 
-    public static readonly DiagnosticDescriptor ReadOnlyWrite = new("EECS011", "Write through a read-only parameter",
+    public static readonly DiagnosticDescriptor WriteThroughReadOnly = new("EECS011", "Write through a read-only parameter",
         "[ForEach] method '{0}' changes data that '{1}' holds by reference, but takes '{1}' as read-only; take it by 'ref'",
         Category, DiagnosticSeverity.Error, true,
         "A read-only component or singleton ('in', ReadOnlySpan) is scheduled as a read and never stamped as changed. A " +
@@ -137,7 +137,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "Orderings apply within one group: World.Update() and World.Update<TGroup>() run their groups separately, in the " +
         "order the caller calls them. Order the systems of one group, or move the system into the other's group.", helpLinkUri: Help("EECS020"));
 
-    public static readonly DiagnosticDescriptor RunnerCollision = new("EECS021", "[ForEach] entry point has the method's signature",
+    public static readonly DiagnosticDescriptor EntryPointCollision = new("EECS021", "[ForEach] entry point has the method's signature",
         "The entry point of [ForEach] method '{0}' (the World, {1}the caller's values) would have the signature of a method '{0}' of its type, or of another [ForEach] overload's entry point: rename one of them",
         Category, DiagnosticSeverity.Error, true,
         "Outside a system, the generator writes an overload of a [ForEach] method that takes the World (and the change tick, for [Changed<T>] / [Removed<T>]) followed by the method's context parameters, and runs the method over every matching entity.", helpLinkUri: Help("EECS021"));
@@ -166,7 +166,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "that tick: the rows of the slices not visited would lose their changes. Drop Slices, or read the changes " +
         "every run and spread the work they cause.", helpLinkUri: Help("EECS035"));
 
-    public static readonly DiagnosticDescriptor BadUniqueKey = new("EECS036", "A component that cannot be indexed by its key",
+    public static readonly DiagnosticDescriptor BadIndexKey = new("EECS036", "A component that cannot be indexed by its key",
         "'{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
         "A world indexes a component once, by one key: World.Index throws for a second key (another IIndexed<TKey> or " +
@@ -183,10 +183,10 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
-        MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
-        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision, Unnameable, FilterOutsideGroup, LocalForEach,
-        ReadOnlyWriteAccess, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
-        GeneratedMember, UpdateInSystem, BadSlices, BadUniqueKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
+        MixedBatch, NotParallel, WriteThroughReadOnly, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
+        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, EntryPointCollision, Unnameable, FilterOutsideGroup, LocalForEach,
+        WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
+        GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
         UpdateInPass, CreateThenSet);
 
@@ -277,15 +277,15 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         });
     }
 
-    /// <summary>EECS008: a system that finds another system through <c>World.GetSystem&lt;T&gt;()</c>.</summary>
+    /// <summary>EECS008: a system that finds another system through <c>World.TryGetSystem&lt;T&gt;()</c>.</summary>
     private static void AnalyzeSystemLookup(OperationAnalysisContext context)
     {
         var call = (IInvocationOperation)context.Operation;
-        if (call.TargetMethod is not { Name: "GetSystem", TypeArguments.Length: 1 } method
+        if (call.TargetMethod is not { Name: "TryGetSystem", TypeArguments.Length: 1 } method
             || !Symbols.Named(method.ContainingType, Symbols.World) || method.TypeArguments[0].TypeKind == TypeKind.Error) return;
         if (Symbols.SystemOf(context.ContainingSymbol.ContainingType) is { } system)
             context.ReportDiagnostic(Diagnostic.Create(SystemReference, call.Syntax.GetLocation(), system.Name,
-                method.TypeArguments[0].Name, "World.GetSystem"));
+                method.TypeArguments[0].Name, "World.TryGetSystem"));
     }
 
     /// <summary>
@@ -423,7 +423,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             _ => null,
         };
         if (Symbols.ReadOnlyRoot(target) is { } parameter)
-            context.ReportDiagnostic(Diagnostic.Create(ReadOnlyWrite, context.Operation.Syntax.GetLocation(),
+            context.ReportDiagnostic(Diagnostic.Create(WriteThroughReadOnly, context.Operation.Syntax.GetLocation(),
                 // the parameter: its code fix, unless 'ref' would write a singleton from several threads (EECS010)
                 Symbols.IsParallel((IMethodSymbol)parameter.ContainingSymbol) && Symbols.Classify(parameter) == Symbols.ParamKind.Singleton
                     ? [] : parameter.Locations,
@@ -532,7 +532,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             var keys = type.AllInterfaces.Where(i => Symbols.Named(i.OriginalDefinition, Symbols.Indexed))
                 .Select(i => i.TypeArguments[0]).Distinct<ITypeSymbol>(SymbolEqualityComparer.Default).ToArray();
             if (keys.Length > 1)
-                context.ReportDiagnostic(Diagnostic.Create(BadUniqueKey, location, type.Name,
+                context.ReportDiagnostic(Diagnostic.Create(BadIndexKey, location, type.Name,
                     $"is indexed by {string.Join(" and ", keys.Select(k => $"IIndexed<{Name(k)}>"))}, but a component has one index: World.Index throws for every key but the first it is asked for"));
             return;
         }
@@ -540,12 +540,12 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         var key = unique.TypeArguments[0];
         string keyName = Name(key);
         if (Symbols.Named(key, Symbols.EntityId))
-            context.ReportDiagnostic(Diagnostic.Create(BadUniqueKey, location, type.Name,
+            context.ReportDiagnostic(Diagnostic.Create(BadIndexKey, location, type.Name,
                 $"is IUniqueIndexed<{keyName}>, but an EntityId key cannot be unique: index the relation with IIndexed<EntityId>"));
         foreach (var other in type.AllInterfaces)
             if ((Symbols.Named(other.OriginalDefinition, Symbols.Indexed) || Symbols.Named(other.OriginalDefinition, Symbols.UniqueIndexed))
                 && !SymbolEqualityComparer.Default.Equals(other.TypeArguments[0], key))
-                context.ReportDiagnostic(Diagnostic.Create(BadUniqueKey, location, type.Name,
+                context.ReportDiagnostic(Diagnostic.Create(BadIndexKey, location, type.Name,
                     $"is IUniqueIndexed<{keyName}>, so its key {Name(other.TypeArguments[0])} can never be indexed: one index per component"));
     }
 
@@ -743,8 +743,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         var excluded = Excluded(method, context.CancellationToken);
         if (outside && !method.IsStatic)
             context.ReportDiagnostic(Diagnostic.Create(NotASystem, location, method.Name, method.ContainingType.Name));
-        else if (outside && Symbols.RunnerCollides(method))
-            context.ReportDiagnostic(Diagnostic.Create(RunnerCollision, location, method.Name,
+        else if (outside && Symbols.EntryPointCollides(method))
+            context.ReportDiagnostic(Diagnostic.Create(EntryPointCollision, location, method.Name,
                 Symbols.TracksSince(method) ? "the tick, " : Symbols.Slices(method) > 1 ? "the slice, " : ""));
         if (method.IsGenericMethod && !outside)
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));

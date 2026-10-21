@@ -30,7 +30,7 @@ public static class Report
         foreach (var system in world.Systems)
         {
             string name = system.GetType().Name;
-            double microseconds = system.Stats.Last.TotalMicroseconds;
+            double microseconds = system.Stats.LastTime.TotalMicroseconds;
             long runs = system.Stats.Runs;
             Console.WriteLine($"  {name,-20} {runs,5} runs, {microseconds,8:F1} us last run");
         }

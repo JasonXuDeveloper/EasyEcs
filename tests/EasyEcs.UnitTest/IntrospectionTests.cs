@@ -19,9 +19,9 @@ public class IntrospectionTests
         world.CreateEntity(new Position(0, 0));
         unarmored.Remove<Armor>();                                            // stays in its table, without the column
 
-        var table = world.Describe().Single(t => t.Columns.Any(c => c.Type == typeof(Armor)));
+        var table = world.DescribeTables().Single(t => t.Columns.Any(c => c.Type == typeof(Armor)));
         Assert.That(table.Columns.Select(c => c.Type), Is.EquivalentTo(new[] { typeof(Health), typeof(Armor) })); // no tick column
-        Assert.That(table.Columns.Single(c => c.Type == typeof(Armor)).Without, Is.EqualTo(1));
+        Assert.That(table.Columns.Single(c => c.Type == typeof(Armor)).Absent, Is.EqualTo(1));
         Assert.That((table.Entities, table.Rows), Is.EqualTo((2, 2)));
         Assert.That(table.Capacity, Is.GreaterThanOrEqualTo(2));
         Assert.That(table.Bytes, Is.GreaterThanOrEqualTo(table.Capacity * (8L + sizeof(int) * 2 + sizeof(ulong)))); // slots, values, ticks
@@ -49,7 +49,7 @@ public class IntrospectionTests
         using var world = new World();
         world.GroupBy<Zone>();
         world.CreateEntity(new Zone(7));
-        var table = world.Describe().Single(t => t.Entities == 1);
+        var table = world.DescribeTables().Single(t => t.Entities == 1);
         Assert.That(table.Columns.Single().Group, Is.EqualTo(7));
     }
 
@@ -68,7 +68,7 @@ public class IntrospectionTests
         return entity;
     }
 
-    private static long Bytes(World world) => world.Describe().Sum(t => t.Bytes);
+    private static long Bytes(World world) => world.DescribeTables().Sum(t => t.Bytes);
 
     [Test]
     public void TrimExcessDropsEmptyTablesAndShrinksTheOthers()
@@ -83,14 +83,14 @@ public class IntrospectionTests
 
         world.Update(); // the query caches and edges of a running world
         int c1 = world.Count<C1>();
-        var tables = world.Describe();
+        var tables = world.DescribeTables();
         long bytes = Bytes(world);
         long memory = GC.GetTotalMemory(true);
         Assert.That(tables.Length, Is.GreaterThan(256));
 
         world.TrimExcess();
 
-        var trimmed = world.Describe();
+        var trimmed = world.DescribeTables();
         Assert.That(trimmed.Count(t => t.Entities == 0), Is.EqualTo(1));                       // the empty table only
         Assert.That(trimmed.Length, Is.EqualTo(1 + tables.Count(t => t.Entities > 0)));
         foreach (var table in trimmed)
@@ -113,7 +113,7 @@ public class IntrospectionTests
         Assert.That(world.Count<Health>(), Is.EqualTo(survivors.Count + 10_000));
         Assert.That(world.Count<C1>(), Is.EqualTo(c1 + 5_000));
         Assert.That(world.Count<C1, C8>(), Is.EqualTo(survivors.Count(s => (s.I & 129) == 129) + Enumerable.Range(0, 10_000).Count(i => (i & 129) == 129)));
-        Assert.That(world.Describe().Length, Is.EqualTo(tables.Length));                     // the same tables again
+        Assert.That(world.DescribeTables().Length, Is.EqualTo(tables.Length));               // the same tables again
     }
 
     [Test]
@@ -190,9 +190,9 @@ public class IntrospectionTests
 
         foreach (var entity in entities) entity.Destroy();
         world.Capture(snapshot);                                                              // now it holds no rows
-        int tables = world.Describe().Length;
+        int tables = world.DescribeTables().Length;
         world.TrimExcess();
-        Assert.That(world.Describe().Length, Is.LessThan(tables));
+        Assert.That(world.DescribeTables().Length, Is.LessThan(tables));
         world.Restore(snapshot);                                                              // by the new order
         Assert.That(world.Count<Health>(), Is.Zero);
         Assert.That(world.Count<Position>(), Is.Zero);

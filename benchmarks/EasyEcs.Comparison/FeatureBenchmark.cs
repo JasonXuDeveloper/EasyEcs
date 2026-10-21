@@ -14,7 +14,7 @@ namespace EcsComparison.Features;
 // Each library's setup checks that its result is correct before anything is measured.
 
 /// <summary>EasyEcs change tracking: health is tracked, the replicated copy is not.</summary>
-public record struct Hp(int Value) : EasyEcs.IComponent, ITrackChanges;
+public record struct Hp(int Value) : EasyEcs.IComponent, ITracked;
 
 public record struct Replica(int Value) : EasyEcs.IComponent;
 
@@ -280,7 +280,7 @@ public class ChangeTrackingComparison
 }
 
 /// <summary>EasyEcs removal detection: a buff is tracked, so its removal is a row the next pass can select.</summary>
-public record struct Buff(int Ticks) : EasyEcs.IComponent, ITrackChanges;
+public record struct Buff(int Ticks) : EasyEcs.IComponent, ITracked;
 
 public record struct Expired(int Count) : EasyEcs.IComponent;
 

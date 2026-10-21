@@ -18,7 +18,7 @@ public struct Health : IComponent
     public int Value;
 }
 
-public struct Energy : IComponent, ITrackChanges
+public struct Energy : IComponent, ITracked
 {
     public int Value;
 }

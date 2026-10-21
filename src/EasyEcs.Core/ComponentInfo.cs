@@ -34,7 +34,7 @@ internal abstract class ComponentInfo
         Size = size;
     }
 
-    /// <summary>Bit of the change-tick column of a tracked component (<see cref="ITrackChanges"/>), or -1.</summary>
+    /// <summary>Bit of the change-tick column of a tracked component (<see cref="ITracked"/>), or -1.</summary>
     public int Companion { get; private set; } = -1;
 
     /// <summary>For a change-tick column: bit of the tracked component it belongs to, or -1.</summary>
@@ -81,7 +81,7 @@ internal abstract class ComponentInfo
 
     private static volatile bool _anyTracked;
 
-    /// <summary>Whether the type is an <see cref="ICleanupComponent"/> (kept when its entity is destroyed).</summary>
+    /// <summary>Whether the type is an <see cref="ICleanupComponent"/> (kept by <c>Destroy</c>, which retires its entity).</summary>
     public readonly bool Cleanup;
 
     /// <summary>Whether the type is an <see cref="IGroup"/> (its value may split tables, see <see cref="World.GroupBy{T}"/>).</summary>
@@ -283,7 +283,7 @@ internal abstract class ComponentInfo
 }
 
 /// <param name="owner">
-/// For a change-tick column or a <see cref="Disabled{T}"/> tag (<typeparamref name="T"/> is <see cref="ChangeTick"/> or
+/// For a change-tick column or a <see cref="Disabled{T}"/> tag (<typeparamref name="T"/> is <see cref="RowTick"/> or
 /// <see cref="DisabledTag"/>): the component it belongs to, whose context's unloading releases its bit too
 /// (<see cref="ComponentInfo.Release"/>). Else null.
 /// </param>

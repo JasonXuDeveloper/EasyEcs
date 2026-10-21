@@ -17,8 +17,8 @@ internal static class Symbols
     public const string ForEachAttribute = "EasyEcs.ForEachAttribute";
     public const string WithAttribute = "EasyEcs.WithAttribute<T>";
     public const string WithoutAttribute = "EasyEcs.WithoutAttribute<T>";
-    public const string GroupWith = "EasyEcs.IGroupWith<T>";
-    public const string GroupWithout = "EasyEcs.IGroupWithout<T>";
+    public const string GroupWith = "EasyEcs.ISystemGroupWith<T>";
+    public const string GroupWithout = "EasyEcs.ISystemGroupWithout<T>";
     public const string WithAnyAttribute = "EasyEcs.WithAnyAttribute<T>";
     public const string ChangedAttribute = "EasyEcs.ChangedAttribute<T>";
     public const string RemovedAttribute = "EasyEcs.RemovedAttribute<T>";
@@ -29,7 +29,7 @@ internal static class Symbols
     public const string EntitySpan = "EasyEcs.EntitySpan";
     public const string World = "EasyEcs.World";
     public const string DynamicBuffer = "EasyEcs.DynamicBuffer<T>";
-    public const string TrackChanges = "EasyEcs.ITrackChanges";
+    public const string TrackChanges = "EasyEcs.ITracked";
     public const string Indexed = "EasyEcs.IIndexed<TKey>";
     public const string UniqueIndexed = "EasyEcs.IUniqueIndexed<TKey>";
     public const string Group = "EasyEcs.IGroup";
@@ -154,8 +154,8 @@ internal static class Symbols
     }
 
     /// <summary>
-    /// The filters a group type declares through the interfaces it implements (<c>IGroupWith&lt;T&gt;</c>,
-    /// <c>IGroupWithout&lt;T&gt;</c>, also inherited from its own interfaces): as <c>[With&lt;T&gt;]</c> (true) or
+    /// The filters a group type declares through the interfaces it implements (<c>ISystemGroupWith&lt;T&gt;</c>,
+    /// <c>ISystemGroupWithout&lt;T&gt;</c>, also inherited from its own interfaces): as <c>[With&lt;T&gt;]</c> (true) or
     /// <c>[Without&lt;T&gt;]</c> (false) on the group.
     /// </summary>
     public static IEnumerable<(bool With, ITypeSymbol Type)> GroupInterfaceFilters(ITypeSymbol group)
@@ -192,7 +192,7 @@ internal static class Symbols
         foreach (var face in type.AllInterfaces)
         {
             if (!IsJob(face)) continue;
-            if (found != null) return null; // several jobs in one type: their Writes is shared, nothing to say per Execute
+            if (found != null) return null; // several jobs in one type: their WriteMask is shared, nothing to say per Execute
             found = face;
         }
 
@@ -223,9 +223,9 @@ internal static class Symbols
     public static bool IsDisableable(ITypeSymbol component) =>
         component is ITypeParameterSymbol || !Named(component, "EasyEcs.ChildOf") && !Implements(component, Cleanup);
 
-    /// <summary><c>Destroyed</c> or a <c>Disabled&lt;T&gt;</c>: tags the world adds and removes itself.</summary>
+    /// <summary><c>Retired</c> or a <c>Disabled&lt;T&gt;</c>: tags the world adds and removes itself.</summary>
     public static bool IsWorldTag(ITypeSymbol type) =>
-        Named(type, "EasyEcs.Destroyed") || type is INamedTypeSymbol { IsGenericType: true } named && Named(named.OriginalDefinition, "EasyEcs.Disabled<T>");
+        Named(type, "EasyEcs.Retired") || type is INamedTypeSymbol { IsGenericType: true } named && Named(named.OriginalDefinition, "EasyEcs.Disabled<T>");
 
     /// <summary><paramref name="operation"/> without the conversions around it.</summary>
     public static IOperation? Unwrap(IOperation? operation)
@@ -360,7 +360,7 @@ internal static class Symbols
 
     /// <summary>
     /// A component the world indexes (<c>IIndexed&lt;TKey&gt;</c>, or a <c>DynamicBuffer</c> of <c>IRelation</c> links) or
-    /// groups by (<c>IGroup</c>): written only with Set (and AddRelation / RemoveRelation), so its index or table follows.
+    /// groups by (<c>IGroup</c>): written only with Set (and Link / Unlink), so its index or table follows.
     /// </summary>
     public static bool IsIndexed(ITypeSymbol type) =>
         type.AllInterfaces.Any(i => Named(i.OriginalDefinition, Indexed) || Named(i.OriginalDefinition, Group))
@@ -596,7 +596,7 @@ internal static class Symbols
     /// the same name (the method itself or an overload), or of the entry point of a [ForEach] overload: the World,
     /// the tick with [Changed&lt;T&gt;] / [Removed&lt;T&gt;], then the context parameters.
     /// </summary>
-    public static bool RunnerCollides(IMethodSymbol method)
+    public static bool EntryPointCollides(IMethodSymbol method)
     {
         var expected = EntryPoint(method);
         var members = new List<IMethodSymbol>(); // the type's and its base types' (an inherited one wins over an extension)
@@ -660,7 +660,7 @@ internal static class Symbols
 
     /// <summary>
     /// The filters a system's group adds to each of its [ForEach] methods: the group's filter attributes, then its
-    /// <c>IGroupWith&lt;T&gt;</c> / <c>IGroupWithout&lt;T&gt;</c> (as With / Without, no attribute). None outside a system.
+    /// <c>ISystemGroupWith&lt;T&gt;</c> / <c>ISystemGroupWithout&lt;T&gt;</c> (as With / Without, no attribute). None outside a system.
     /// </summary>
     public static IEnumerable<(FilterKind Kind, ITypeSymbol Type, AttributeData? Attribute, ITypeSymbol Group)> GroupFilters(IMethodSymbol method)
     {
@@ -669,14 +669,14 @@ internal static class Symbols
         foreach (var (with, type) in GroupInterfaceFilters(group)) yield return (with ? FilterKind.With : FilterKind.Without, type, null, group);
     }
 
-    /// <summary>A filter as its declaration reads: <c>[With&lt;P&gt;]</c>, <c>IGroupWith&lt;P&gt;</c>.</summary>
+    /// <summary>A filter as its declaration reads: <c>[With&lt;P&gt;]</c>, <c>ISystemGroupWith&lt;P&gt;</c>.</summary>
     public static string FilterText(FilterKind kind, ITypeSymbol type, bool attribute) =>
-        attribute ? $"[{kind}<{type.Name}>]" : $"{(kind == FilterKind.With ? "IGroupWith" : "IGroupWithout")}<{type.Name}>";
+        attribute ? $"[{kind}<{type.Name}>]" : $"{(kind == FilterKind.With ? "ISystemGroupWith" : "ISystemGroupWithout")}<{type.Name}>";
 
     /// <summary>
     /// What a [ForEach] method's entities must have (its queried components, [With&lt;T&gt;], [Changed&lt;T&gt;], its group's
-    /// [With&lt;T&gt;] and IGroupWith&lt;T&gt;) and must lack ([Without&lt;T&gt;], [Removed&lt;T&gt;], its group's
-    /// [Without&lt;T&gt;] and IGroupWithout&lt;T&gt;), each with how its source reads (<c>parameter 'p'</c>,
+    /// [With&lt;T&gt;] and ISystemGroupWith&lt;T&gt;) and must lack ([Without&lt;T&gt;], [Removed&lt;T&gt;], its group's
+    /// [Without&lt;T&gt;] and ISystemGroupWithout&lt;T&gt;), each with how its source reads (<c>parameter 'p'</c>,
     /// <c>[With&lt;P&gt;] on its group G</c>) and where it is declared (a parameter or the method's own attribute; null
     /// for a group's). EECS016, EECS026 and EECS049 read it.
     /// </summary>
@@ -782,7 +782,7 @@ internal static class Symbols
     {
         var type = method.ContainingType;
         bool outside = IsRunner(method);
-        if (outside && (!method.IsStatic || RunnerCollides(method))) return false;
+        if (outside && (!method.IsStatic || EntryPointCollides(method))) return false;
         if (method.IsGenericMethod && !outside || Unnameable(method) != null) return false; // a system's method gets no type arguments
         if (SlicesProblem(method) != null) return false;
         int components = 0;
@@ -895,7 +895,7 @@ internal static class Symbols
     /// structure.
     /// </summary>
     private static readonly HashSet<string> StructuralEntityMembers =
-        ["Set", "SetIfChanged", "Remove", "Destroy", "GetOrAdd", "Clone", "Disable", "Enable", "AddRelation", "RemoveRelation", "Run"];
+        ["Set", "SetIfChanged", "Remove", "Destroy", "GetOrAdd", "Clone", "Disable", "Enable", "Link", "Unlink", "Run"];
 
     private static readonly HashSet<string> StructuralWorldMembers =
     [

@@ -13,11 +13,11 @@ public readonly record struct ComponentValue(object Value, bool Enabled);
 
 /// <summary>A column of a table (<see cref="TableInfo"/>).</summary>
 /// <param name="Type">The component type.</param>
-/// <param name="Without">Living rows of the table without the component (removed or disabled: no row moved).</param>
+/// <param name="Absent">Living rows of the table without the component (removed or disabled: no row moved).</param>
 /// <param name="Group">The group every row of the table is in, for an <see cref="IGroup"/> component; else 0.</param>
-public readonly record struct ColumnInfo(Type Type, int Without, int Group);
+public readonly record struct ColumnInfo(Type Type, int Absent, int Group);
 
-/// <summary>A table: the entities with one set of component columns (<see cref="World.Describe()"/>).</summary>
+/// <summary>A table: the entities with one set of component columns (<see cref="World.DescribeTables"/>).</summary>
 /// <param name="Columns">The component columns, in bit order (change-tick and <see cref="Disabled{T}"/> columns not listed).</param>
 /// <param name="Entities">Living entities.</param>
 /// <param name="Rows">Rows in use: the entities and the holes a query in progress left (closed when it ends).</param>
@@ -32,15 +32,15 @@ public partial class World
     /// The world's tables, for diagnostics (an admin endpoint, a dashboard): what each holds, how full it is and what it
     /// costs. Cold: allocates the result; any thread (a table being changed at the same time may be read half-way).
     /// </summary>
-    public TableInfo[] Describe()
+    public TableInfo[] DescribeTables()
     {
         var all = Volatile.Read(ref _allArchetypes);
         var tables = new TableInfo[all.Length];
-        for (int i = 0; i < all.Length; i++) tables[i] = Describe(all[i]);
+        for (int i = 0; i < all.Length; i++) tables[i] = DescribeTable(all[i]);
         return tables;
     }
 
-    private static TableInfo Describe(Archetype table)
+    private static TableInfo DescribeTable(Archetype table)
     {
         int capacity = table.Slots.Length;
         long bytes = (long)capacity * Unsafe.SizeOf<EntityId>() + table.Components.Length * (capacity + 63) / 64 * sizeof(ulong);
@@ -65,13 +65,13 @@ public partial class World
     /// </summary>
     public ScheduleInfo DescribeSchedule()
     {
-        var groups = new List<GroupSchedule>();
+        var groups = new List<GroupInfo>();
         foreach (var group in _groups)
             if (group != null && group.Systems.Length > 0) groups.Add(DescribeGroup(group));
         return new ScheduleInfo(groups.ToArray());
     }
 
-    private static GroupSchedule DescribeGroup(SystemSchedule group)
+    private static GroupInfo DescribeGroup(SystemSchedule group)
     {
         var stages = group.Stages;
         var order = group.Systems; // the stages' systems, stage after stage
@@ -135,7 +135,7 @@ public partial class World
             if (conflicts.Length > 0) pairs.Add(new SystemPair(names[i], names[j], conflicts));
         }
 
-        return new GroupSchedule(group.Name, infos, pairs.ToArray());
+        return new GroupInfo(group.Name, infos, pairs.ToArray());
     }
 
     /// <summary>What two systems conflict on (<see cref="SystemAccess.ConflictsWith"/>), by name.</summary>

@@ -25,7 +25,7 @@ public class UnloadTests
         using EasyEcs.UnitTest;
         namespace Plugin;
 
-        public record struct Score(int Value) : IComponent, ITrackChanges;
+        public record struct Score(int Value) : IComponent, ITracked;
         public record struct Badge(int Level) : IComponent, IIndexed<int> { public int Key => Level; }
         public record struct Team(int Id) : IComponent, IGroup { public int Group => Id; }
         public record struct Settings(int Bonus) : ISingletonComponent;
@@ -92,7 +92,7 @@ public class UnloadTests
         Assert.That(world.Systems.Count, Is.Zero);
         Assert.That(players[0].Get<Position>(), Is.EqualTo(new Position(0, 0)), "the host's components stay");
         Assert.That(bystander.Has<Velocity>(), Is.True);
-        Assert.That(world.Describe().SelectMany(t => t.Columns).Any(c => c.Type.Assembly.GetName().Name == "Plugin"), Is.False);
+        Assert.That(world.DescribeTables().SelectMany(t => t.Columns).Any(c => c.Type.Assembly.GetName().Name == "Plugin"), Is.False);
 
         // Version 2 takes the bits version 1 gave back, and the saved values.
         var context = new PluginContext();

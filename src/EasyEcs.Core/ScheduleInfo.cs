@@ -11,7 +11,7 @@ namespace EasyEcs;
 /// (<see cref="ToMermaid"/>); the scheduler does not read it back.
 /// </summary>
 /// <param name="Groups">The groups that hold systems, the default group first.</param>
-public sealed record ScheduleInfo(GroupSchedule[] Groups)
+public sealed record ScheduleInfo(GroupInfo[] Groups)
 {
     /// <summary>The schedule as indented text: per group its stages and systems, then its registration-only pairs.</summary>
     public override string ToString()
@@ -132,7 +132,7 @@ public sealed record ScheduleInfo(GroupSchedule[] Groups)
 /// <param name="RegistrationOrdered">Pairs of systems whose access conflicts and that no chain of
 /// <see cref="UpdateBeforeAttribute{TSystem}"/> / <see cref="UpdateAfterAttribute{TSystem}"/> orders: they run in
 /// registration order, so registering them the other way round changes what the later one sees.</param>
-public sealed record GroupSchedule(string Name, StageInfo[] Stages, SystemPair[] RegistrationOrdered);
+public sealed record GroupInfo(string Name, StageInfo[] Stages, SystemPair[] RegistrationOrdered);
 
 /// <summary>One stage of a group: systems with no ordering and no conflict between them.</summary>
 /// <param name="Systems">The stage's systems in execution order (when the stage runs on one thread).</param>
@@ -159,7 +159,7 @@ public sealed record SystemInfo(string Name, string[] Reads, string[] Writes, st
 /// "runs alone".</param>
 public sealed record StageWait(string System, bool Ordered, string[] Conflicts);
 
-/// <summary>Two conflicting systems in execution order, ordered only by registration (<see cref="GroupSchedule.RegistrationOrdered"/>).</summary>
+/// <summary>Two conflicting systems in execution order, ordered only by registration (<see cref="GroupInfo.RegistrationOrdered"/>).</summary>
 /// <param name="First">The system that runs first.</param>
 /// <param name="Second">The system that runs second.</param>
 /// <param name="Conflicts">The data they conflict on (as in <see cref="StageWait.Conflicts"/>).</param>

@@ -4,7 +4,7 @@ namespace EasyEcs;
 /// The data a system reads and writes, declared once when the system is added. With
 /// <see cref="WorldOptions.ParallelSystems"/>, systems with no order between them whose access does not conflict run at once:
 /// two systems conflict when one writes a component or singleton the other reads or writes, or when either
-/// <see cref="RunsAlone">runs alone</see>.
+/// <see cref="RunAlone">runs alone</see>.
 /// <para>
 /// The generator declares it for every system with <see cref="ForEachAttribute">[ForEach]</see> methods: a
 /// <c>ref</c> parameter is a write, an <c>in</c> parameter a read. A system runs alone when it can reach the world
@@ -33,7 +33,7 @@ public struct SystemAccess
     public void WriteSingleton<T>() where T : struct, ISingletonComponent => WriteSingletons.SetBit(SingletonType<T>.Index);
 
     /// <summary>The system may touch anything (structural changes, any component): it never shares a stage.</summary>
-    public void RunsAlone() => Alone = true;
+    public void RunAlone() => Alone = true;
 
     /// <summary>True when the two systems may not run at the same time.</summary>
     internal readonly bool ConflictsWith(in SystemAccess other) =>

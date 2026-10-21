@@ -10,7 +10,7 @@ namespace EasyEcs;
 /// <summary>
 /// A component of the entity a <c>[ForEach]</c> method visits that counts as written only when the method writes it:
 /// <c>static void Aim(Mut&lt;Target&gt; target, in Position p) =&gt; target.SetIfChanged(new Target(Nearest(p)))</c>.
-/// A <c>ref</c> parameter of a tracked component (<see cref="ITrackChanges"/>) stamps every row the method visits, so
+/// A <c>ref</c> parameter of a tracked component (<see cref="ITracked"/>) stamps every row the method visits, so
 /// <c>[Changed&lt;T&gt;]</c> readers visit rows whose value never changed; through a <see cref="Mut{T}"/> only the rows
 /// the method writes (<see cref="Write"/>, a <see cref="SetIfChanged"/> that changed the value) are stamped, each with
 /// the exact per-row stamp of <see cref="Entity.Get{T}"/>. Reading <see cref="Value"/> stamps nothing.
@@ -67,7 +67,7 @@ public readonly ref struct Mut<T> where T : struct, IComponent
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T Write()
     {
-        if (default(T) is ITrackChanges) // a JIT-time constant: nothing for other components
+        if (default(T) is ITracked) // a JIT-time constant: nothing for other components
         {
             if (_table != null) _table.Stamp<T>(_row, _entity.World.ChangeTick);
             else Entity.Stamp<T>(_entity);

@@ -14,8 +14,8 @@ public sealed partial class World
     // Group 0 is the default group (World.Update()); others are [UpdateInGroup<T>] groups (World.Update<T>()).
     private SystemSchedule[] _groups = [new()];
 
-    /// <summary>Number of completed <see cref="Update()"/> calls (default group).</summary>
-    public long UpdateCount => _groups[0].Updates;
+    /// <summary>Number of completed <see cref="Update()"/> calls: updates of the default group only (<see cref="Update{TGroup}"/> runs are not counted).</summary>
+    public long DefaultUpdateCount => _groups[0].Updates;
 
     /// <summary>Systems of every group, each group in execution order (default group first). Allocation-free.</summary>
     public SystemList Systems => new(_groups);
@@ -62,8 +62,7 @@ public sealed partial class World
     /// <summary>Remove the system of type <typeparamref name="T"/> (calls its <see cref="EcsSystem.OnDestroy"/>).</summary>
     public bool RemoveSystem<T>() where T : EcsSystem
     {
-        var removed = GetSystem<T>();
-        if (removed == null) return false;
+        if (!TryGetSystem<T>(out var removed)) return false;
         RemoveSystem(removed);
         return true;
     }
@@ -75,8 +74,11 @@ public sealed partial class World
         system.World = null;
     }
 
-    /// <summary>Get the system of type <typeparamref name="T"/>, or null.</summary>
-    public T GetSystem<T>() where T : EcsSystem
+    /// <summary>
+    /// Find the system of type <typeparamref name="T"/> (for tools, tests and the code that hosts the world, never from
+    /// another system). Returns false and null when the world has none. O(systems).
+    /// </summary>
+    public bool TryGetSystem<T>(out T system) where T : EcsSystem
     {
         foreach (var group in _groups)
         {
@@ -84,10 +86,14 @@ public sealed partial class World
             var systems = group.Systems;
             for (int i = 0; i < systems.Length; i++)
                 if (systems[i] is T match)
-                    return match;
+                {
+                    system = match;
+                    return true;
+                }
         }
 
-        return null;
+        system = null;
+        return false;
     }
 
     /// <summary>Run one update of every enabled system of the default group (synchronous). Allocation-free.</summary>
@@ -108,7 +114,7 @@ public sealed partial class World
     {
         if (_disposed) throw new ObjectDisposedException(nameof(World));
         // No pass can run across an update: one still counted was interrupted by an exception. Close its tombstones.
-        if (Volatile.Read(ref Passes) != 0) CompactArchetypes();
+        if (Volatile.Read(ref PassDepth) != 0) CompactArchetypes();
 
         long update = ++group.Updates;
         var stages = group.Stages;

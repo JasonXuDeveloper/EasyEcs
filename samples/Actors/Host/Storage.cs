@@ -34,7 +34,7 @@ public sealed class Storage
 
     private int SaveChanged<TActor, TState>(World world, ulong since)
         where TActor : struct, IActor<TActor>, IEquatable<TActor>
-        where TState : struct, IComponent, ITrackChanges
+        where TState : struct, IComponent, ITracked
     {
         var changed = QueryFilter.Create().With<In<TActor>>().Changed<TState>(since);
         var found = new Collect<TState> { Actors = new List<Entity>() };
@@ -54,13 +54,13 @@ public sealed class Storage
         _records[key] = output.WrittenSpan.ToArray();
     }
 
-    // Lists the actors a filter selects, reading nothing (Writes => 0: listing them is not a change).
+    // Lists the actors a filter selects, reading nothing (WriteMask => 0: listing them is not a change).
     private struct Collect<TState> : IForEachEntity<TState>
         where TState : struct, IComponent
     {
         public List<Entity> Actors;
 
-        public static int Writes => 0;
+        public static int WriteMask => 0;
 
         public void Execute(Entity actor, ref TState state) => Actors.Add(actor);
     }

@@ -69,7 +69,7 @@ public class BulkTests
         var kept = world.CreateEntity(new Lease(3));
         retired.Destroy();
         parent.Destroy();                                         // retired too: the child waits for it
-        Assert.That(world.RemoveAll<Lease>(QueryFilter.Create().With<Destroyed>()), Is.EqualTo(2));
+        Assert.That(world.RemoveAll<Lease>(QueryFilter.Create().With<Retired>()), Is.EqualTo(2));
         Assert.That((retired.IsAlive, parent.IsAlive, child.IsAlive, kept.Has<Lease>()), Is.EqualTo((false, false, false, true)));
     }
 

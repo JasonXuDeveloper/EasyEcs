@@ -11,7 +11,7 @@ namespace EasyEcs.Generator;
 /// <summary>
 /// The rules for calls and declarations that compile but do not do what they say (EECS037, EECS038, EECS040-EECS045,
 /// EECS047-EECS051):
-/// a job's <c>Writes</c> that disagrees with its <c>Execute</c>, a changed copy of a component that is dropped,
+/// a job's <c>WriteMask</c> that disagrees with its <c>Execute</c>, a changed copy of a component that is dropped,
 /// <c>SetIfChanged</c> on a type it cannot compare, calls a pass refuses made during one, an indexed component changed
 /// while its index is walked, a record struct key that prints itself, a sliced filter where every row is needed, and
 /// the world's own tags written by hand, a ref used after a structural change, a component that cannot be disabled,
@@ -20,14 +20,14 @@ namespace EasyEcs.Generator;
 /// </summary>
 public sealed partial class EasyEcsAnalyzer
 {
-    public static readonly DiagnosticDescriptor JobWrites = new("EECS037", "A job's Writes does not match what Execute writes",
-        "Job '{0}' {1}; declare 'public static int Writes => {2};'",
+    public static readonly DiagnosticDescriptor JobWrites = new("EECS037", "A job's WriteMask does not match what Execute writes",
+        "Job '{0}' {1}; declare 'public static int WriteMask => {2};'",
         Category, DiagnosticSeverity.Warning, true,
         "A hand-written job (IForEach, IForEachEntity, IForEachBatch) tells the loop which components Execute writes " +
-        "through its static Writes (bit k - 1 for component k; -1, all of them, when it is not declared). The loop " +
+        "through its static WriteMask (bit k - 1 for component k; -1, all of them, when it is not declared). The loop " +
         "stamps those components of every row it visits as changed and carries their values over when Execute moves " +
         "the entity to another table. A written component left out loses both: [Changed<T>] systems miss the write, and " +
-        "a structural change in Execute drops it. A tracked component that Execute only reads, but Writes names, is " +
+        "a structural change in Execute drops it. A tracked component that Execute only reads, but WriteMask names, is " +
         "stamped on every row, so [Changed<T>] systems visit rows nobody changed.", helpLinkUri: Help("EECS037"));
 
     public static readonly DiagnosticDescriptor DroppedCopy = new("EECS038", "A changed copy of a component is dropped",
@@ -58,7 +58,7 @@ public sealed partial class EasyEcsAnalyzer
         Category, DiagnosticSeverity.Error, true,
         "A foreach over an index (Find, Children, Range, Ascending, Descending, Descendants, a relation index's Find) " +
         "reads the index's lists as it goes. Giving an entity the indexed component or a new key (Set, SetIfChanged, " +
-        "GetOrAdd, Enable, SetAll, EnableAll, a creation with it, the generated SetX; AddRelation for a relation) adds it " +
+        "GetOrAdd, Enable, SetAll, EnableAll, a creation with it, the generated SetX; Link for a relation) adds it " +
         "to a key, and an emptied key hands its list to the keys that grow next: the walk skips entities or visits " +
         "others. Removing the component, dropping links and destroying entities leave holes the walk steps past; a " +
         "change followed by a break, return or throw ends the walk first.", helpLinkUri: Help("EECS042"));
@@ -74,16 +74,16 @@ public sealed partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor SlicedFilter = new("EECS044", "A sliced filter where every row is needed",
         "{0}",
         Category, DiagnosticSeverity.Error, true,
-        "QueryFilter.Slice(index, count) cuts each matching table for ForEach passes ([ForEach(Slices = N)], ForEach, " +
+        "QueryFilter.Slice(index, of) cuts each matching table for ForEach passes ([ForEach(Slices = N)], ForEach, " +
         "ForEachEntity, ForEachBatch and their parallel forms). Query, Read, Count, Any, DestroyAll, entity.Run, SetAll, " +
         "RemoveAll, DisableAll and EnableAll need every matching row and throw ArgumentException for a sliced filter; " +
-        "Slice itself throws ArgumentOutOfRangeException for a count below 1 or an index outside [0, count).", helpLinkUri: Help("EECS044"));
+        "Slice itself throws ArgumentOutOfRangeException for 'of' below 1 or an index outside [0, of).", helpLinkUri: Help("EECS044"));
 
     public static readonly DiagnosticDescriptor InternalTag = new("EECS045", "A tag the world keeps written by hand",
         "'{0}' writes '{1}', a tag the world keeps itself: {2}",
         Category, DiagnosticSeverity.Error, true,
-        "Destroyed marks an entity destroyed while cleanup components remain: Destroy adds it, removing the last cleanup " +
-        "component frees the entity. Disabled<T> marks T as disabled: Disable<T> adds it and hides T, Enable<T> " +
+        "Retired marks an entity Destroy kept alive for the cleanup components it holds: Destroy adds it, removing the last " +
+        "cleanup component frees the entity. Disabled<T> marks T as disabled: Disable<T> adds it and hides T, Enable<T> " +
         "removes it and gives T back. Written by hand (Set, GetOrAdd, Remove, SetIfChanged, Disable, Enable, " +
         "CreateEntity, CreateEntities, Instantiate, the bulk calls, a prefab's Set and Remove), they leave a retired " +
         "entity never freed, or a component present and tagged disabled at once. Reading them (Has, IsDisabled, " +
@@ -110,8 +110,8 @@ public sealed partial class EasyEcsAnalyzer
         "[ForEach] method '{0}' requires '{1}' ({2}) and excludes it ({3}): no entity passes both, so the method never runs",
         Category, DiagnosticSeverity.Error, true,
         "A [ForEach] method visits the entities that pass all of its filters and those of its group: its components, " +
-        "[With<T>], [Changed<T>], the group's [With<T>] and IGroupWith<T> require a component, [Without<T>] and " +
-        "IGroupWithout<T> exclude it. A component both required and excluded leaves no entity to visit. Drop one of " +
+        "[With<T>], [Changed<T>], the group's [With<T>] and ISystemGroupWith<T> require a component, [Without<T>] and " +
+        "ISystemGroupWithout<T> exclude it. A component both required and excluded leaves no entity to visit. Drop one of " +
         "them, or move the system to another group.", helpLinkUri: Help("EECS049"));
 
     public static readonly DiagnosticDescriptor SecondGroup = new("EECS050", "A second group in one filter",
@@ -129,8 +129,8 @@ public sealed partial class EasyEcsAnalyzer
         "and closes the holes, which moves rows the loop has not reached yet behind it, so the loop misses them (a loop " +
         "that outlives the update ends as no pass). Record what to do, and update after the loop.", helpLinkUri: Help("EECS051"));
 
-    /// <summary>EECS037's property for its code fix: the Writes value Execute needs (<c>0b101</c>).</summary>
-    public const string WritesValue = "Writes";
+    /// <summary>EECS037's property for its code fix: the WriteMask value Execute needs (<c>0b101</c>).</summary>
+    public const string WriteMaskValue = "WriteMask";
 
     /// <summary>The World members a pass refuses (they throw while one iterates the world).</summary>
     private static readonly HashSet<string> PassRefused =
@@ -150,7 +150,7 @@ public sealed partial class EasyEcsAnalyzer
 
     /// <summary>
     /// The Entity calls that add an entity to a key of an index (Set moves it from its old key to its new one): a key that
-    /// grows can take the list of a key emptied during the walk. Removals (Remove, Disable, RemoveRelation, Destroy)
+    /// grows can take the list of a key emptied during the walk. Removals (Remove, Disable, Unlink, Destroy)
     /// leave holes the walk steps past.
     /// </summary>
     private static readonly HashSet<string> IndexChangers = ["Set", "SetIfChanged", "Enable", "GetOrAdd"];
@@ -171,7 +171,7 @@ public sealed partial class EasyEcsAnalyzer
             start.RegisterOperationAction(c => AnalyzeItemAcrossChange(c, core), OperationKind.Loop);
         });
 
-    // ---------------- EECS037: a hand-written job's Writes ----------------
+    // ---------------- EECS037: a hand-written job's WriteMask ----------------
 
     private static void AnalyzeJob(OperationBlockAnalysisContext context, Core core)
     {
@@ -181,8 +181,8 @@ public sealed partial class EasyEcsAnalyzer
         var type = method.ContainingType;
         int n = job.TypeArguments.Length, offset = job.Name == "IForEach" ? 0 : 1, all = (1 << n) - 1;
         if (method.Parameters.Length != n + offset) return;
-        if (Declared(job, type, "Writes", -1, out var writesSyntax) is not int declared
-            || Declared(job, type, "OwnStamps", 0, out _) is not int own) return;
+        if (Declared(job, type, "WriteMask", -1, out var writesSyntax) is not int declared
+            || Declared(job, type, "SelfStamped", 0, out _) is not int own) return;
 
         int written = 0;
         bool structural = false;
@@ -203,9 +203,9 @@ public sealed partial class EasyEcsAnalyzer
             bool tracked = core.Tracked(component);
             string name = method.Parameters[k + offset].Name;
             if ((written & bit) != 0 && (declared & bit) == 0 && (tracked || structural))
-                problems.Add($"writes '{name}' but its Writes leaves it out, so {(tracked ? $"the write is not stamped and [Changed<{component.Name}>] systems miss it" : "a structural change in Execute does not carry the write over to the entity's new row")}");
+                problems.Add($"writes '{name}' but its WriteMask leaves it out, so {(tracked ? $"the write is not stamped and [Changed<{component.Name}>] systems miss it" : "a structural change in Execute does not carry the write over to the entity's new row")}");
             else if ((written & bit) == 0 && (declared & ~own & bit) != 0 && tracked)
-                problems.Add($"only reads '{name}' but its Writes names it, so every row it visits is stamped as changed");
+                problems.Add($"only reads '{name}' but its WriteMask names it, so every row it visits is stamped as changed");
         }
 
         if (problems.Count == 0) return;
@@ -216,12 +216,12 @@ public sealed partial class EasyEcsAnalyzer
                            .FirstOrDefault(t => t.SyntaxTree == body.Syntax.SyntaxTree)?.Identifier.GetLocation()
                        ?? method.Locations.FirstOrDefault();
         context.ReportDiagnostic(Diagnostic.Create(JobWrites, location,
-            ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Writes").Add(WritesValue, value),
+            ImmutableDictionary<string, string?>.Empty.Add(FixKind, "WriteMask").Add(WriteMaskValue, value),
             type.Name, string.Join("; it ", problems), value));
     }
 
     /// <summary>
-    /// The constant a job's static property <paramref name="name"/> (Writes, OwnStamps) returns: <paramref name="fallback"/>
+    /// The constant a job's static property <paramref name="name"/> (WriteMask, SelfStamped) returns: <paramref name="fallback"/>
     /// when the job keeps the interface's default, null when it is not a constant. <paramref name="syntax"/> is its declaration.
     /// </summary>
     private static int? Declared(INamedTypeSymbol job, INamedTypeSymbol type, string name, int fallback, out PropertyDeclarationSyntax? syntax)
@@ -407,7 +407,7 @@ public sealed partial class EasyEcsAnalyzer
             && method.TypeArguments.FirstOrDefault(Symbols.IsWorldTag) is { } tag)
             context.ReportDiagnostic(Diagnostic.Create(InternalTag, call.Syntax.GetLocation(),
                 method.ContainingType!.Name + "." + method.Name, tag.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-                tag.Name == "Destroyed"
+                tag.Name == "Retired"
                     ? "Destroy adds it while cleanup components remain, and removing the last of them frees the entity; destroy the entity and remove its cleanup components"
                     : $"Disable<{((INamedTypeSymbol)tag).TypeArguments[0].Name}>() adds it and hides the component, Enable<{((INamedTypeSymbol)tag).TypeArguments[0].Name}>() gives it back; call those"));
 
@@ -419,7 +419,7 @@ public sealed partial class EasyEcsAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(NotDisableable, call.Syntax.GetLocation(), Shorten(call.Syntax),
                 hidden.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
                 Symbols.Implements(hidden, Symbols.Cleanup)
-                    ? "a cleanup component, which keeps a destroyed entity until its resources are released"
+                    ? "a cleanup component, which keeps a retired entity alive until its resources are released"
                     : "which a parent's destruction follows to find its children"));
 
         // EECS050: a second group in one filter.
@@ -457,7 +457,7 @@ public sealed partial class EasyEcsAnalyzer
             && call.Arguments[0].Value.ConstantValue is { HasValue: true, Value: int index } && call.Arguments[1].Value.ConstantValue is { HasValue: true, Value: int count }
             && (count < 1 || index < 0 || index >= count))
             context.ReportDiagnostic(Diagnostic.Create(SlicedFilter, call.Syntax.GetLocation(),
-                $"Slice({index}, {count}) throws ArgumentOutOfRangeException: the count is 1 or more and the index in [0, count)"));
+                $"Slice({index}, {count}) throws ArgumentOutOfRangeException: 'of' is 1 or more and the index in [0, of)"));
         if (onWorld && WholeRowCalls.Contains(method.Name) || onEntity && method.Name == "Run")
             foreach (var argument in call.Arguments)
                 if (Symbols.Named(argument.Parameter?.Type, "EasyEcs.QueryFilter") && !argument.IsImplicit && Sliced(argument.Value, 0))
@@ -576,18 +576,18 @@ public sealed partial class EasyEcsAnalyzer
     /// <summary>
     /// The indexed component a call adds to a key (Set, SetIfChanged, GetOrAdd, Enable, the generated SetX / GetOrAddX /
     /// EnableX, SetAll, EnableAll, a creation with the component), or the relation whose index it adds a link to
-    /// (AddRelation, a Set of its DynamicBuffer, the generated AddX), or null.
+    /// (Link, a Set of its DynamicBuffer, the generated LinkX), or null.
     /// </summary>
     private static ITypeSymbol? IndexChange(IInvocationOperation call, Core core)
     {
         var method = call.TargetMethod;
-        if (core.Is(method.ContainingType, core.Entity) && method is { Name: "AddRelation", TypeArguments.Length: 1 })
+        if (core.Is(method.ContainingType, core.Entity) && method is { Name: "Link", TypeArguments.Length: 1 })
             return method.TypeArguments[0];
         if (core.Is(method.ContainingType, core.Entity) && IndexChangers.Contains(method.Name)
             || core.Is(method.ContainingType, core.World) && WorldIndexChangers.Contains(method.Name))
             return method.TypeArguments.Select(Indexing).FirstOrDefault(t => t != null);
         if (Symbols.IsGenerated(method) && Symbols.IsGeneratedWriter(method)
-            && (method.Name.StartsWith("Set") || method.Name.StartsWith("GetOrAdd") || method.Name.StartsWith("Enable") || method.Name.StartsWith("Add"))
+            && (method.Name.StartsWith("Set") || method.Name.StartsWith("GetOrAdd") || method.Name.StartsWith("Enable") || method.Name.StartsWith("Link"))
             && Named(method, core) is { } named && Indexing(named) is { } indexed)
             return indexed;
         return null;
@@ -727,7 +727,7 @@ public sealed partial class EasyEcsAnalyzer
 
     /// <summary>
     /// Whether a structural call leaves rows where they are: <see cref="RowsStay"/>, and the removals and enables, which
-    /// flip a presence bit of the row (Remove, RemoveAll, Enable, EnableAll, RemoveRelation, the generated RemoveX,
+    /// flip a presence bit of the row (Remove, RemoveAll, Enable, EnableAll, Unlink, the generated RemoveX,
     /// EnableX, UnlinkX). RemoveTypes drops tables.
     /// </summary>
     private static bool KeepsRows(IMethodSymbol method) =>

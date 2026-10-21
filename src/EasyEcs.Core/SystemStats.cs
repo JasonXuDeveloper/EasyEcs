@@ -28,13 +28,13 @@ public readonly struct SystemStats
     public long Runs { get; }
 
     /// <summary>Time of the latest run.</summary>
-    public TimeSpan Last => Stopwatch.GetElapsedTime(0, _last);
+    public TimeSpan LastTime => Stopwatch.GetElapsedTime(0, _last);
 
     /// <summary>Time of all measured runs.</summary>
-    public TimeSpan Total => Stopwatch.GetElapsedTime(0, _total);
+    public TimeSpan TotalTime => Stopwatch.GetElapsedTime(0, _total);
 
     /// <summary>Average time per run (zero before the first).</summary>
-    public TimeSpan Average => Runs == 0 ? TimeSpan.Zero : Stopwatch.GetElapsedTime(0, _total / Runs);
+    public TimeSpan AverageTime => Runs == 0 ? TimeSpan.Zero : Stopwatch.GetElapsedTime(0, _total / Runs);
 
     /// <summary>
     /// Bytes the latest run allocated on the managed heap: on the thread that ran the system, plus on the threads that

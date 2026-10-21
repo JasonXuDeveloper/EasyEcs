@@ -19,11 +19,11 @@ public interface IComponent;
 /// the component. A <see cref="Mut{T}"/> parameter counts only the rows it writes, and <c>SetIfChanged</c> only a value
 /// that differs. Costs 8 bytes per row and one store per write; untracked components pay nothing.
 /// </summary>
-public interface ITrackChanges;
+public interface ITracked;
 
 /// <summary>
 /// Marks a component that outlives the destruction of its entity: destroying an entity holding one removes its other
-/// components and adds the <see cref="Destroyed"/> tag instead of freeing it, so a system can release what the
+/// components and adds the <see cref="Retired"/> tag instead of freeing it, so a system can release what the
 /// component stands for (a socket, a reservation, a slot in another service) and then remove it. Removing the entity's
 /// last cleanup component frees it. Use it for resources outside the world that must be released exactly once.
 /// </summary>

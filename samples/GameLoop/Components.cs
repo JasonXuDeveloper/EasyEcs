@@ -23,8 +23,8 @@ public record struct Client(int Id) : IComponent, IIndexed<int>
     public int Key => Id;
 }
 
-// ITrackChanges records every write, so replication can visit only the entities that moved.
-public record struct Position(float X, float Y) : IComponent, ITrackChanges;
+// ITracked records every write, so replication can visit only the entities that moved.
+public record struct Position(float X, float Y) : IComponent, ITracked;
 
 public record struct Velocity(float X, float Y) : IComponent;
 

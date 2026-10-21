@@ -32,7 +32,7 @@ public static class Census
 /// the actor's key component (indexed by itself) and the system group of its type, through one interface.
 /// </summary>
 public struct In<TActor> : IComponent;
-public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>
+public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;
 public readonly partial record struct MapActor(long Id) : IActor<MapActor> { MapActor IIndexed<MapActor>.Key => this; }
 public readonly partial record struct ShopActor(long Id) : IActor<ShopActor> { ShopActor IIndexed<ShopActor>.Key => this; }

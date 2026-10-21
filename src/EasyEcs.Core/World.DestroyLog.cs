@@ -5,7 +5,7 @@ namespace EasyEcs;
 
 public sealed partial class World
 {
-    // The destroy log (WorldOptions.DestroyLog): a ring of the last destroyed entities with the change tick of their
+    // The destroy log (WorldOptions.DestroyLogCapacity): a ring of the last destroyed entities with the change tick of their
     // destruction, oldest overwritten first. Null when off, so a destroy pays one field check and nothing else. Owner
     // thread, like the entity records it follows: written only inside the structural gate, which no thread of a parallel
     // stage takes for a destroy (frozen), so readers on those threads see it still.
@@ -27,7 +27,7 @@ public sealed partial class World
     /// <summary>
     /// The oldest tick <see cref="DestroyedSince"/> can answer for: it reports every entity destroyed at a change tick of
     /// <c>since</c> or later for any <c>since</c> of at least this one, and returns false for an older one (the records
-    /// were overwritten). 0 until the ring of <see cref="WorldOptions.DestroyLog"/> first overwrites a record;
+    /// were overwritten). 0 until the ring of <see cref="WorldOptions.DestroyLogCapacity"/> first overwrites a record;
     /// <see cref="ulong.MaxValue"/> when the log is off. O(1).
     /// </summary>
     public ulong DestroyLogOldestTick => _destroyLog == null ? ulong.MaxValue : _destroyLogFrom;
@@ -35,23 +35,23 @@ public sealed partial class World
     /// <summary>
     /// The entities destroyed at a change tick of <paramref name="since"/> or later (the rule of
     /// <c>QueryFilter.Since</c>: take <see cref="ChangeTick"/> as a mark, pass it later), from the log of
-    /// <see cref="WorldOptions.DestroyLog"/>. Each reader keeps its own mark, so readers that acknowledged different
+    /// <see cref="WorldOptions.DestroyLogCapacity"/>. Each reader keeps its own mark, so readers that acknowledged different
     /// ticks share one log. <paramref name="count"/> is how many there are; the first
     /// <c>min(count, into.Length)</c> are written to <paramref name="into"/>, oldest first, each with the version it had
-    /// (a recycled index names the new entity with another version). A span of <see cref="WorldOptions.DestroyLog"/>
+    /// (a recycled index names the new entity with another version). A span of <see cref="WorldOptions.DestroyLogCapacity"/>
     /// ids always holds them all.
     /// <br/>
     /// An entity counts as destroyed when its id stops being alive (<see cref="IsAlive"/> turns false): at
     /// <c>Destroy</c>, <c>DestroyEntities</c>, <c>DestroyAll</c>, a hierarchy or relation cascade, a <c>MoveEntities</c> out of this world;
-    /// an entity holding <see cref="ICleanupComponent"/>s when its last one is removed (until then it is alive, tagged
-    /// <see cref="Destroyed"/>); a <see cref="Restore(WorldSnapshot)"/> or <c>Load</c> for every entity alive before it and not
+    /// an entity holding <see cref="ICleanupComponent"/>s when its last one is removed (until then it is retired: alive,
+    /// tagged <see cref="Retired"/>); a <see cref="Restore(WorldSnapshot)"/> or <c>Load</c> for every entity alive before it and not
     /// after it (with the same version). <see cref="Dispose"/> records nothing.
     /// <br/>
     /// Returns false, writing nothing and <paramref name="count"/> 0, when <paramref name="since"/> is older than
     /// <see cref="DestroyLogOldestTick"/>: records the reader needs were overwritten, and it must resynchronize (send the
     /// whole state again). O(count). Allocates nothing. Owner thread, or a thread of a parallel stage.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The log is off (<see cref="WorldOptions.DestroyLog"/> is 0).</exception>
+    /// <exception cref="InvalidOperationException">The log is off (<see cref="WorldOptions.DestroyLogCapacity"/> is 0).</exception>
     /// <exception cref="ObjectDisposedException">The world was disposed.</exception>
     public bool DestroyedSince(ulong since, Span<EntityId> into, out int count)
     {
@@ -97,5 +97,5 @@ public sealed partial class World
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowNoDestroyLog() =>
-        throw new InvalidOperationException("The world keeps no destroy log: set WorldOptions.DestroyLog to its capacity");
+        throw new InvalidOperationException("The world keeps no destroy log: set WorldOptions.DestroyLogCapacity above 0");
 }

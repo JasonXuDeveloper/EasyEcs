@@ -79,7 +79,7 @@ public class DynamicBufferBenchmark
 
     public struct Replication : ISystemGroup;
 
-    public record struct ListBag(List<int> Items) : IComponent, ITrackChanges;
+    public record struct ListBag(List<int> Items) : IComponent, ITracked;
 
     /// <summary>A checksum of what clients last received.</summary>
     public record struct Sent(int Sum) : IComponent;

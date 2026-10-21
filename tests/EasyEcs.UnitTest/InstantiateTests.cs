@@ -286,13 +286,13 @@ public class InstantiateTests
         Assert.That((e.Read<Position>(), e.Read<Health>(), e.Read<Armor>(), e.Read<Shield>()),
             Is.EqualTo((new Position(1, 2), new Health(50), new Armor(5), new Shield(3))));
         Assert.That(orc.Read<Health>(), Is.EqualTo(new Health(30)));       // the prefab keeps its value
-        var tables = world.Describe();                                    // the empty table and the final one: no table
+        var tables = world.DescribeTables();                              // the empty table and the final one: no table
         Assert.That(tables.Length, Is.EqualTo(2));                        // of the prefab's components alone
         Assert.That(Array.Find(tables, t => t.Entities == 1).Rows, Is.EqualTo(1));
         var since = QueryFilter.Create().Changed<Armor>(now);             // copied and given values count as written
         Assert.That((world.Count<Armor>(since), world.Count<Shield>(QueryFilter.Create().Changed<Shield>(now))), Is.EqualTo((1, 1)));
         Assert.That(world.Instantiate(orc, new Velocity(1, 1)).Read<Health>(), Is.EqualTo(new Health(30)));
-        Assert.That(world.Describe().Length, Is.EqualTo(3));               // another signature, another final table
+        Assert.That(world.DescribeTables().Length, Is.EqualTo(3));         // another signature, another final table
     }
 
     [Test]
@@ -326,7 +326,7 @@ public class InstantiateTests
         Assert.That(callsigns.TryFind("b", out var found) && found == e, Is.True);
         Assert.That(world.Count<Callsign>(QueryFilter.Create().InGroup<Zone>(2)), Is.EqualTo(1));
         Assert.That(world.Count<Health>(QueryFilter.Create().InGroup<Zone>(1)), Is.EqualTo(3));
-        e.RemoveRelation<MemberOf>(red);                                   // a list of its own
+        e.Unlink<MemberOf>(red);                                           // a list of its own
         Assert.That((scout.Read<DynamicBuffer<MemberOf>>().Count, members.Count(red)), Is.EqualTo((1, 3)));
     }
 

@@ -116,14 +116,14 @@ public class FindLowHealth : EcsSystem
 /// <summary>A batch job that tries a structural change (it must throw: the spans point into the tables).</summary>
 public struct DestroyInBatch : IForEachBatch<Health>
 {
-    public static int Writes => 0;
+    public static int WriteMask => 0;
     public void Execute(EntitySpan entities, System.Span<Health> health) => entities[0].Destroy();
 }
 
 /// <summary>Promises no structural change but destroys the entity it visits (a broken promise the gate catches).</summary>
 public struct DestroyDespitePromise : IForEachEntity<Health>, INoStructuralChanges
 {
-    public static int Writes => 0;
+    public static int WriteMask => 0;
     public void Execute(Entity entity, ref Health health) => entity.Destroy();
 }
 

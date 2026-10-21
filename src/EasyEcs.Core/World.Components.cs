@@ -10,11 +10,11 @@ namespace EasyEcs;
 public sealed partial class World
 {
     /// <summary>
-    /// Passes iterating this world right now (ForEach, query enumerators). While one runs, rows that lose their entity
-    /// become tombstones that keep their data (the pass carries writes through its refs over to the entity's new row)
-    /// instead of being filled by the last row; the last pass to end closes them (<see cref="EndPass"/>).
+    /// How many passes iterate this world right now (ForEach, query enumerators). While one runs, rows that lose their
+    /// entity become tombstones that keep their data (the pass carries writes through its refs over to the entity's new
+    /// row) instead of being filled by the last row; the last pass to end closes them (<see cref="EndPass"/>).
     /// </summary>
-    internal int Passes;
+    internal int PassDepth;
     internal long _stop; // where the last structural row loop stopped (see the generated ForEach loops)
 
     /// <summary>
@@ -45,14 +45,14 @@ public sealed partial class World
     // Row counts of the tables at the start of a structural pass (ForEach with a job that may change structure), one
     // array per nesting depth: a pass takes the array of the passes running when it starts. Structural passes run on
     // the owner thread only (their systems run alone), so nested ones get distinct depths; an interrupted pass leaves
-    // Passes raised until CompactArchetypes, and later passes then use deeper arrays.
+    // PassDepth raised until CompactArchetypes, and later passes then use deeper arrays.
     private int[][] _passCounts = [];
 
     /// <summary>An array of at least <paramref name="tables"/> ints for a structural pass about to begin.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal int[] PassCounts(int tables)
     {
-        int depth = Passes;
+        int depth = PassDepth;
         var stack = _passCounts;
         if ((uint)depth < (uint)stack.Length && stack[depth] is { } counts && counts.Length >= tables) return counts;
         return GrowPassCounts(depth, tables);
@@ -84,13 +84,13 @@ public sealed partial class World
 
     /// <summary>Start a pass (rows that lose their entity become tombstones until it ends).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void BeginPass() => Interlocked.Increment(ref Passes);
+    internal void BeginPass() => Interlocked.Increment(ref PassDepth);
 
     /// <summary>End a pass; the last one to end closes the tombstones left by structural changes during passes.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void EndPass()
     {
-        int left = Interlocked.Decrement(ref Passes);
+        int left = Interlocked.Decrement(ref PassDepth);
         if (left <= 0) EndedLast(left);
     }
 
@@ -107,7 +107,7 @@ public sealed partial class World
             return false;
         }
 
-        Passes++;
+        PassDepth++;
         return true;
     }
 
@@ -116,7 +116,7 @@ public sealed partial class World
     internal void EndPassAlone(bool alone)
     {
         if (!alone) EndPass();
-        else if (--Passes <= 0) EndedLast(Passes);
+        else if (--PassDepth <= 0) EndedLast(PassDepth);
     }
 
     /// <summary>
@@ -126,7 +126,7 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void EndedLast(int left)
     {
-        if (left < 0) Interlocked.CompareExchange(ref Passes, 0, left);
+        if (left < 0) Interlocked.CompareExchange(ref PassDepth, 0, left);
         if (_dirtyCount > 0) CloseTombstones();
     }
 
@@ -135,7 +135,7 @@ public sealed partial class World
     {
         using (Shared())
         {
-            if (Volatile.Read(ref Passes) != 0) return; // a pass started meanwhile: it will close them
+            if (Volatile.Read(ref PassDepth) != 0) return; // a pass started meanwhile: it will close them
             FillDirtyTables();
         }
     }
@@ -158,7 +158,7 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void RemoveRow(Archetype archetype, int slot)
     {
-        if (!archetype.Remove(slot, Meta, Volatile.Read(ref Passes) != 0)) return;
+        if (!archetype.Remove(slot, Meta, Volatile.Read(ref PassDepth) != 0)) return;
         if (_dirtyCount == _dirty.Length) Array.Resize(ref _dirty, _dirty.Length * 2);
         _dirty[_dirtyCount++] = archetype;
     }
@@ -275,7 +275,7 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// After a removal from a table with cleanup columns: a <see cref="Destroyed"/> entity whose last cleanup component
+    /// After a removal from a table with cleanup columns: a <see cref="Retired"/> entity whose last cleanup component
     /// went is freed. Cold: tables with cleanup columns only.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -283,7 +283,7 @@ public sealed partial class World
     {
         var archetype = meta.Archetype;
         int slot = meta.Slot;
-        if (archetype.ColumnIndex(DestroyedBit) is not (var tag and >= 0) || !archetype.Has(tag, slot) || archetype.HoldsCleanup(slot)) return;
+        if (archetype.ColumnIndex(RetiredBit) is not (var tag and >= 0) || !archetype.Has(tag, slot) || archetype.HoldsCleanup(slot)) return;
         var entity = archetype.Slots[slot];
         Free(ref meta, entity.Index);
         Orphaned(entity); // children it gained while retired follow it now

@@ -153,7 +153,7 @@ public sealed partial class World
     /// </summary>
     private void ThrowIfIterating(string call)
     {
-        if (Volatile.Read(ref Passes) != 0) ThrowIterating(call);
+        if (Volatile.Read(ref PassDepth) != 0) ThrowIterating(call);
     }
 
     [DoesNotReturn, MethodImpl(MethodImplOptions.NoInlining)]

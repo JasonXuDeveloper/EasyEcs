@@ -8,7 +8,7 @@ systems, loaded from storage when first needed and saved only when they change. 
 
 - **One type per kind of actor.** `Shop` and `Bank` each implement one generic interface, `IActor<TSelf>`, and so are
   at once the actor's key component (indexed: `world.ShopIndex.TryFind(key, ...)`), the system group of the kind
-  (`world.Update<Shop>()`), and that group's filter (`IGroupWith<In<Shop>>`: the shop systems see only shops).
+  (`world.Update<Shop>()`), and that group's filter (`ISystemGroupWith<In<Shop>>`: the shop systems see only shops).
   Attributes cannot name a type parameter; the interface does it once for every kind.
 - **A message is a job on one entity.** `entity.Run(ref job, filter)` gives the job all its components in one
   lookup, refuses a closed shop through a `static readonly` filter, and keeps the job's refs valid when the job
@@ -17,7 +17,7 @@ systems, loaded from storage when first needed and saved only when they change. 
   persistent components, is loaded onto it with `LoadEntitiesInto(..., markWritten: false)`: it replaces the
   prefab's defaults and loading is not a change. A new actor has no record, so its defaults are its first state and
   the next save writes them.
-- **Save what changed.** The persistent components are `ITrackChanges`; the host saves the actors written since its
+- **Save what changed.** The persistent components are `ITracked`; the host saves the actors written since its
   last save, and an actor nobody wrote costs nothing.
 
 The key is implemented explicitly (`Shop IIndexed<Shop>.Key => this;`): a public `Key => this` property on a record

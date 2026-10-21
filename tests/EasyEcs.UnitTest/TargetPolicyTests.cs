@@ -56,9 +56,9 @@ public class TargetPolicyTests
         world.Relations<MemberOf>().WhenTargetDestroyed(TargetPolicy.Remove);
         var party = world.CreateEntity(new Health(1));
         var guild = world.CreateEntity(new Health(2));
-        var member = world.CreateEntity().AddRelation(new MemberOf(party)).AddRelation(new MemberOf(guild)).AddRelation(new MemberOf(party));
+        var member = world.CreateEntity().Link(new MemberOf(party)).Link(new MemberOf(guild)).Link(new MemberOf(party));
         party.Destroy();
-        Assert.That((member.HasRelation<MemberOf>(party.Id), member.HasRelation<MemberOf>(guild.Id)), Is.EqualTo((false, true)));
+        Assert.That((member.Links<MemberOf>(party.Id), member.Links<MemberOf>(guild.Id)), Is.EqualTo((false, true)));
         Assert.That(world.Relations<MemberOf>().Count(party), Is.Zero);
 
         world.Relations<MemberOf>().WhenTargetDestroyed(TargetPolicy.Destroy);

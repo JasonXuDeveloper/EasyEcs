@@ -62,8 +62,8 @@ public class SystemTests
         measured.AddSystem(a);
         for (int i = 0; i < 4; i++) measured.Update();
         Assert.That(a.Stats.Runs, Is.EqualTo(2));
-        Assert.That(a.Stats.Total, Is.GreaterThanOrEqualTo(a.Stats.Last));
-        Assert.That(a.Stats.Average, Is.GreaterThan(System.TimeSpan.Zero));
+        Assert.That(a.Stats.TotalTime, Is.GreaterThanOrEqualTo(a.Stats.LastTime));
+        Assert.That(a.Stats.AverageTime, Is.GreaterThan(System.TimeSpan.Zero));
 
         using var plain = new World();
         var b = new Logged("b");
@@ -90,7 +90,8 @@ public class SystemTests
         var error = Assert.Throws<InvalidOperationException>(() => world.AddSystem(b));
         Assert.That(error!.Message, Does.Contain("CycleA").And.Contain("CycleB"));
         Assert.That(b.World, Is.Null);
-        Assert.That(world.GetSystem<CycleB>(), Is.Null);
+        Assert.That(world.TryGetSystem(out CycleB found), Is.False);
+        Assert.That(found, Is.Null);
         Assert.That(world.Systems.Count, Is.EqualTo(1));
         Assert.That(Log, Is.EqualTo(new[] { "a.create" }));                   // OnCreate only for the system that joined
     }
@@ -140,9 +141,9 @@ public class SystemTests
 
         Assert.That(Log.FindAll(l => l == "every3.update"), Has.Count.EqualTo(2));
         Assert.That(world.RemoveSystem<Logged>(), Is.True);
-        Assert.That(world.GetSystem<Logged>(), Is.Null);
+        Assert.That(world.TryGetSystem<Logged>(out _), Is.False);
         Assert.That(Log[^1], Is.EqualTo("every3.destroy"));
-        Assert.That(world.UpdateCount, Is.EqualTo(9));
+        Assert.That(world.DefaultUpdateCount, Is.EqualTo(9));
     }
 
     private sealed class Throwing : EcsSystem
@@ -185,8 +186,8 @@ public class SystemTests
         world.Update();
 
         Assert.That(Log.FindAll(l => l.EndsWith(".update")), Is.EqualTo(new[] { "input.update", "input.update", "tick.update" }));
-        Assert.That(world.UpdateCount, Is.EqualTo(1), "UpdateCount counts the default group");
-        Assert.That(world.GetSystem<InInputGroup>(), Is.Not.Null);
+        Assert.That(world.DefaultUpdateCount, Is.EqualTo(1), "DefaultUpdateCount counts the default group");
+        Assert.That(world.TryGetSystem(out InInputGroup input) && input.World == world, Is.True);
         Assert.That(world.RemoveSystem<InInputGroup>(), Is.True);
         world.Update<InputGroup>();
         Assert.That(Log.FindAll(l => l == "input.update"), Has.Count.EqualTo(2));

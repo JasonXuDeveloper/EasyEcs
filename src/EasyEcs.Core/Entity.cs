@@ -87,19 +87,19 @@ public readonly partial struct Entity : IEquatable<Entity>
 
     /// <summary>
     /// Ref to component <typeparamref name="T"/>; throws if the entity does not have it or is not alive. Counts as a
-    /// write of a tracked component (<see cref="ITrackChanges"/>). O(1).
+    /// write of a tracked component (<see cref="ITracked"/>). O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T Get<T>() where T : struct, IComponent
     {
         ref T value = ref Find<T>(true);
-        if (default(T) is ITrackChanges) Touch<T>(_world, Index);
+        if (default(T) is ITracked) Stamp<T>(_world, Index);
         return ref value;
     }
 
     /// <summary>
     /// Read-only ref to component <typeparamref name="T"/>; throws if the entity does not have it or is not alive. Not
-    /// a write: a tracked component (<see cref="ITrackChanges"/>) is not stamped. O(1).
+    /// a write: a tracked component (<see cref="ITracked"/>) is not stamped. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref readonly T Read<T>() where T : struct, IComponent
@@ -117,7 +117,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     {
         ref T value = ref Find<T>(false);
         found = !Unsafe.IsNullRef(ref value);
-        if (default(T) is ITrackChanges && found) Touch<T>(_world, Index);
+        if (default(T) is ITracked && found) Stamp<T>(_world, Index);
         return ref value;
     }
 
@@ -270,13 +270,13 @@ public readonly partial struct Entity : IEquatable<Entity>
     {
         ref T value = ref Find<T>(false);
         if (Unsafe.IsNullRef(ref value)) return ref AddCore<T>(_world, Index, Version); // throws for a handle that is not alive
-        if (default(T) is ITrackChanges) Touch<T>(_world, Index);
+        if (default(T) is ITracked) Stamp<T>(_world, Index);
         return ref value;
     }
 
-    /// <summary>Stamp the entity's row of tracked component <typeparamref name="T"/>, which it has (cold path).</summary>
+    /// <summary>Stamp entity <paramref name="id"/>'s row of tracked component <typeparamref name="T"/>, which it has (cold path).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void Touch<T>(World world, int id) where T : struct, IComponent
+    private static void Stamp<T>(World world, int id) where T : struct, IComponent
     {
         ref var meta = ref world.MetaRef(id);
         meta.Archetype.Stamp<T>(meta.Slot, world.ChangeTick);
@@ -335,11 +335,11 @@ public readonly partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void ThrowIfNotDisableable<T>() where T : struct, IComponent
     {
-        if (default(T) is ICleanupComponent || typeof(T) == typeof(ChildOf)) ThrowNotDisabled<T>(); // JIT-time constants
+        if (default(T) is ICleanupComponent || typeof(T) == typeof(ChildOf)) ThrowNotDisableable<T>(); // JIT-time constants
     }
 
     [DoesNotReturn, MethodImpl(MethodImplOptions.NoInlining)]
-    private static void ThrowNotDisabled<T>() =>
+    private static void ThrowNotDisableable<T>() =>
         throw new InvalidOperationException($"{typeof(T).Name} cannot be disabled: remove it instead");
 
     /// <summary>
@@ -365,7 +365,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     /// not alive. To create entities from a template, use a <see cref="Prefab"/>. O(components). Owner thread only.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// The entity was destroyed and is kept only for its cleanup components (<see cref="Destroyed"/>).
+    /// The entity is retired: kept alive only for its cleanup components (<see cref="Retired"/>).
     /// </exception>
     public Entity Clone()
     {

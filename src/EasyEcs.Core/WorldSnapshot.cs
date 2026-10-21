@@ -15,7 +15,7 @@ public sealed class WorldSnapshot
     internal int NextId;           // the entity records in use: Meta[..NextId]
     internal int[] FreeIds = [];
     internal int FreeCount;        // FreeIds[..FreeCount]
-    internal Archetype.Rows[] Tables = [];
+    internal Archetype.TableCopy[] Tables = [];
     internal int TableCount;       // Tables[..TableCount], by the world's table order
     internal SingletonBox[] Singletons = [];
     internal int TypesRemoved;     // the world's World.TypesRemoved at the capture: its tables still exist while equal

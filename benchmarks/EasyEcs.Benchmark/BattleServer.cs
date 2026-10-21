@@ -14,15 +14,15 @@ namespace EasyEcs.Benchmark.Showcase;
 // #region components
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
-public record struct Health(int Value, int Max) : IComponent, ITrackChanges;    // replicated: writes are tracked
+public record struct Health(int Value, int Max) : IComponent, ITracked;         // replicated: writes are tracked
 public record struct Replica(int Health, bool Burning, int Waypoint) : IComponent;  // what clients last received
 public record struct Mana(int Value, int Max) : IComponent;
 public record struct Attack(int Damage, int Interval, int Cooldown) : IComponent;
-public record struct Burning(int Ticks) : IComponent, ITrackChanges;          // status effects come and go; clients
+public record struct Burning(int Ticks) : IComponent, ITracked;               // status effects come and go; clients
                                                                               // see fires start and go out
 public record struct Frozen(int Ticks) : IComponent;                          // while it lasts, Attack and Velocity
                                                                               // are disabled: no query sees them
-public record struct Goal(int Waypoint) : IComponent, ITrackChanges;         // where an NPC heads: replicated,
+public record struct Goal(int Waypoint) : IComponent, ITracked;              // where an NPC heads: replicated,
                                                                               // re-planned often, rarely different
 public record struct Lifetime(int Ticks) : IComponent;
 public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }  // a table per zone
@@ -236,10 +236,10 @@ public class RespawnSystem : EcsSystem                                        //
             hunter.SetKills(hunter.Kills.Count + 1);                          // the leaderboard follows
         }
 
-        npc.Destroy();                                                        // Spawn stays, with the Destroyed tag
+        npc.Destroy();                                                        // Spawn stays, with the Retired tag
     }
 
-    [ForEach, With<Destroyed>]                                                // what destroyed NPCs left behind
+    [ForEach, With<Retired>]                                                  // what retired NPCs left behind
     static void Revive(Entity old, in Spawn spawn, World world)
     {
         BattleServer.SpawnNpc(world, spawn.At, spawn.Seed);
@@ -329,7 +329,7 @@ public class ReplicationSystem : EcsSystem                                    //
 /// <summary>A hit a client asked for, on one unit (<c>entity.Run</c>): the write is replicated with the next send.</summary>
 public readonly record struct TakeHit(int Damage) : IForEachEntity<Health>, INoStructuralChanges
 {
-    public static int Writes => 1;
+    public static int WriteMask => 1;
 
     public void Execute(Entity unit, ref Health hp) => hp.Value -= Damage;
 }
@@ -439,7 +439,7 @@ public sealed class BattleServer : IDisposable
             ParallelSystems = true,                                           // unordered systems with disjoint data side by side
             MeasureSystems = true,                                            // per-system timings in system.Stats
             SystemErrors = SystemErrorPolicy.Disable,                         // a failing system goes off, the battle goes on
-            DestroyLog = units,                                               // the ids gone while a client lags (CatchUp)
+            DestroyLogCapacity = units,                                       // the ids gone while a client lags (CatchUp)
         });
         World.GroupBy<Zone>();                                                // a zone's players contiguous, in its table
         World.FriendIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // a player who leaves leaves friend lists
@@ -470,8 +470,8 @@ public sealed class BattleServer : IDisposable
             players[i].Velocity = new Velocity((int)(r % 5) - 2, (int)((r >> 8) % 5) - 2);
             players[i].Attack.Cooldown = (int)(r % 6);
             players[i].WriteLoot().EnsureCapacity(BagSize);                   // room once: a full bag never grows
-            players[i].AddFriend(players[(i + 1) % players.Length]);  // each player has two friends
-            players[i].AddFriend(players[(i + 7) % players.Length]);
+            players[i].LinkFriend(players[(i + 1) % players.Length]); // each player has two friends
+            players[i].LinkFriend(players[(i + 7) % players.Length]);
         }
 
         var npcs = new Entity[units - players.Length];
@@ -568,7 +568,7 @@ public sealed class BattleServer : IDisposable
     /// What a client that acknowledged change tick <paramref name="acked"/> (the <see cref="World.ChangeTick"/> of the
     /// update it received) has missed: <paramref name="updates"/> units whose health, fire or goal was written plus
     /// fires that went out, and in <paramref name="gone"/> the ids destroyed since (room for
-    /// <see cref="WorldOptions.DestroyLog"/> ids holds them all). False: the client lags further back than the destroy
+    /// <see cref="WorldOptions.DestroyLogCapacity"/> ids holds them all). False: the client lags further back than the destroy
     /// log reaches, and gets the whole battle again.
     /// </summary>
     public bool CatchUp(ulong acked, Span<EntityId> gone, out int updates, out int destroyed)
@@ -715,7 +715,7 @@ public sealed class BattleServer : IDisposable
 
     // #region diagnostics
     /// <summary>The world's tables: their components, rows and bytes, for a dashboard.</summary>
-    public TableInfo[] Tables() => World.Describe();
+    public TableInfo[] Tables() => World.DescribeTables();
 
     /// <summary>
     /// How the systems run: every group's stages, what each system reads and writes, why it waits. Log it once at
@@ -728,7 +728,7 @@ public sealed class BattleServer : IDisposable
     {
         EcsSystem slowest = null;
         foreach (var system in World.Systems)
-            if (slowest == null || system.Stats.Average > slowest.Stats.Average) slowest = system;
+            if (slowest == null || system.Stats.AverageTime > slowest.Stats.AverageTime) slowest = system;
         return slowest;
     }
 

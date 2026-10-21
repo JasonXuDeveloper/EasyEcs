@@ -7,9 +7,9 @@ namespace EasyEcs;
 public sealed partial class World
 {
     // By component bit: the grouping of that component in this world. Null until the first GroupBy.
-    private IGrouping[] _groupByBit;
+    private IGroupTables[] _groupByBit;
 
-    internal interface IGrouping
+    internal interface IGroupTables
     {
         /// <summary>The group of the value in row <paramref name="slot"/> of <paramref name="table"/>, which has the component.</summary>
         int GroupOf(Archetype table, int slot);
@@ -20,7 +20,7 @@ public sealed partial class World
         int GroupOf(in T value);
     }
 
-    private sealed class Grouping<T> : IGrouping, IGroupOf<T> where T : struct, IComponent, IGroup
+    private sealed class GroupTables<T> : IGroupTables, IGroupOf<T> where T : struct, IComponent, IGroup
     {
         public int GroupOf(Archetype table, int slot) => table.Ref<T>(ComponentType<T>.Bit, slot).Group;
 
@@ -42,7 +42,7 @@ public sealed partial class World
             _groupByBit ??= [];
             if (bit >= _groupByBit.Length) Array.Resize(ref _groupByBit, bit + 1);
             if (_groupByBit[bit] != null) return;
-            _groupByBit[bit] = new Grouping<T>();
+            _groupByBit[bit] = new GroupTables<T>();
             RegroupAll(bit);
         }
     }
@@ -67,7 +67,7 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Regroup<T>(int id, int bit, in T value) where T : struct, IComponent
     {
-        if (GroupingOf(bit) is not { } grouping) return;
+        if (GroupTablesOf(bit) is not { } grouping) return;
         int group = Unsafe.As<IGroupOf<T>>(grouping).GroupOf(in value);
         ref var meta = ref MetaRef(id);
         if (meta.Archetype.GroupOf(bit) != group) MoveTo(ref meta, id, RegroupEdge(meta.Archetype, bit, group));
@@ -82,7 +82,7 @@ public sealed partial class World
         for (int c = 0; c < components.Length; c++)
         {
             ushort bit = components[c];
-            if (GroupingOf(bit) is not { } grouping || !table.Has(c, meta.Slot)) continue;
+            if (GroupTablesOf(bit) is not { } grouping || !table.Has(c, meta.Slot)) continue;
             int group = grouping.GroupOf(table, meta.Slot);
             if (table.GroupOf(bit) == group) continue;
             MoveTo(ref meta, id, RegroupEdge(table, bit, group));
@@ -110,14 +110,14 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal Archetype GroupTarget<T>(Archetype target, ushort bit, in T value) where T : struct, IComponent
     {
-        if (!ComponentType<T>.Grouped || GroupingOf(bit) is not { } grouping) return target;
+        if (!ComponentType<T>.Grouped || GroupTablesOf(bit) is not { } grouping) return target;
         int group = Unsafe.As<IGroupOf<T>>(grouping).GroupOf(in value);
         return target.GroupOf(bit) == group ? target : RegroupEdge(target, bit, group).Target;
     }
 
     /// <summary>How this world groups component <paramref name="bit"/>, or null when it does not.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private IGrouping GroupingOf(int bit) => _groupByBit is { } byBit && (uint)bit < (uint)byBit.Length ? byBit[bit] : null;
+    private IGroupTables GroupTablesOf(int bit) => _groupByBit is { } byBit && (uint)bit < (uint)byBit.Length ? byBit[bit] : null;
 
     private Transition RegroupEdge(Archetype from, int bit, int group)
     {

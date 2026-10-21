@@ -8,7 +8,7 @@ namespace EasyEcs;
 /// <summary>
 /// A list of <typeparamref name="T"/> per entity, held as a component: an inventory, a path, the hits of this tick.
 /// Writes go through a <c>ref</c> to the component (<c>ref</c> parameters of <c>[ForEach]</c> methods and jobs,
-/// <see cref="Entity.Get{T}"/>), so they are tracked like any write of an <see cref="ITrackChanges"/> component and
+/// <see cref="Entity.Get{T}"/>), so they are tracked like any write of an <see cref="ITracked"/> component and
 /// <c>[Changed&lt;DynamicBuffer&lt;T&gt;&gt;]</c> selects the entities whose list changed. Through <c>in</c> or
 /// <see cref="Entity.Read{T}"/> the list is read-only: the mutating methods
 /// (<see cref="DynamicBufferExtensions"/>) take <c>ref this</c>, so a write through a read-only reference does not
@@ -21,7 +21,7 @@ namespace EasyEcs;
 /// lives in an object the component refers to, and a copy of the component would refer to the same list: the analyzer
 /// rejects copies (EECS012), reach the list through the entity.
 /// </remarks>
-public struct DynamicBuffer<T> : IComponent, ITrackChanges, IBuffer
+public struct DynamicBuffer<T> : IComponent, ITracked, IBuffer
 {
     // The only field: snapshots read a column of buffers as a column of BufferStore references (ComponentInfo).
     internal BufferStore<T> Store;

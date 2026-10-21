@@ -145,7 +145,7 @@ public sealed partial class World
         /// may repeat neither within them nor across the batch's other tables. Throws
         /// <see cref="System.IO.InvalidDataException"/>.
         /// </summary>
-        void ClaimLoaded(Archetype.Rows rows, int column);
+        void ClaimLoaded(Archetype.TableCopy rows, int column);
     }
 
     /// <summary>

@@ -3,7 +3,7 @@ namespace EasyEcs.Benchmark.Plugin;
 // A plugin's game logic: components that ride on the host's entities (one tracked, one indexed), a singleton and a
 // system. World.RemoveTypes takes all of it out of a world again.
 
-public record struct Score(int Value) : IComponent, ITrackChanges;
+public record struct Score(int Value) : IComponent, ITracked;
 
 public record struct Badge(int Level) : IComponent, IIndexed<int>
 {
