@@ -71,9 +71,9 @@ method that runs alone: one that takes `Entity` or `World`, or an `OnUpdate`.
 InvalidOperationException: Entity is not alive (destroyed, or a default handle)
 ```
 
-`Get`, `GetOrAdd`, `Set`, `Remove` or `Destroy` was called on a handle whose entity was destroyed (its id may already
+`Get`, `GetOrAdd`, `Set`, `Remove` or `Clone` was called on a handle whose entity was destroyed (its id may already
 belong to another entity: the version tells them apart), or on `default(Entity)`. Questions answer false instead of
-throwing: `IsAlive`, `Has<T>()` and `TryGet<T>()`.
+throwing: `IsAlive`, `Has<T>()` and `TryGet<T>()`; `Destroy` on such a handle does nothing.
 
 **Fix:** check `entity.IsAlive` where an entity may have died since you took its handle, and keep `EntityId`s in
 components, resolving them with `world.TryGetEntity(id, out var entity)`
@@ -228,7 +228,7 @@ ArgumentException: A sliced filter (QueryFilter.Slice) applies to ForEach passes
 `QueryFilter.Slice(index, count)` cuts each table into parts that only `ForEach`, `ForEachEntity`, `ForEachBatch` and
 their parallel forms visit. `Query`, `Count`, `Any`, `DestroyEntities`, `entity.Run`, `SetAll` and the other bulk
 calls need every matching row and refuse it. **Fix:** pass those calls the filter without `Slice`; read the share a
-sliced system visited from `system.Stats.LastEntities` ([slices](/en/docs/guide/systems#update-interval)).
+sliced system visited from `system.Stats.LastEntities` ([slices](/en/docs/guide/systems#slices)).
 
 ## Why does `DestroyedSince` say there is no destroy log? [#no-destroy-log]
 
@@ -239,7 +239,7 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 The destroy log is off by default: it costs 16 bytes per record, allocated with the world. **Fix:** create the world
 with `new WorldOptions { DestroyLog = n }`, `n` the destroys that may happen between two reads of the slowest reader.
 When `DestroyedSince` returns `false`, the reader fell further behind than the log holds: send it the whole state
-([removal detection](/en/docs/guide/change-tracking#removal-detection)).
+([the destroy log](/en/docs/guide/change-tracking#destroy-log)).
 
 ## Why does my system never run? [#system-does-not-run]
 

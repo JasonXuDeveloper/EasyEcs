@@ -138,7 +138,7 @@ bool same = reused.Id == fromClient;                   // false
 
 #### 用 `EntityId` 引用实体 [#entityid-in-components]
 
-组件要指向另一个实体（主人、目标、父节点）时，存 `EntityId`，不要存 `Entity`。`Entity` 里有一个指向 World 的引用，
+组件要指向另一个实体（主人、目标、父实体）时，存 `EntityId`，不要存 `Entity`。`Entity` 里有一个指向 World 的引用，
 组件一旦带上 `Entity` 字段，整列就变成托管列：GC 要扫描它，每次写入都有写屏障，行不能再整块复制，存档也写不了它。
 分析器会给出警告（[EECS017](/zh/docs/guide/analyzer#eecs017)）。
 
@@ -348,7 +348,7 @@ id 不再指向任何实体：World 说它已经不存活。
 | 循环调用 `CreateEntity` / `Destroy` | `CreateEntities(span, …)`、`DestroyEntities<T>(filter)`（[EECS031](/zh/docs/guide/analyzer#eecs031)） | 每波只过一次结构闸门 |
 | 用 `Get<T>()` 读被追踪的组件 | `Read<T>()`、生成的属性、`TryGet<T>()` | `ref` 访问会把这一行记成已写入 |
 | 先 `Has<T>()` 再 `Get<T>()` | `TryGetRef<T>(out found)` | 只查一次 |
-| 每个请求几次 `Get` / `TryGetRef` 再加一次 `Has<Dead>()` | 用 `static readonly` 过滤器调 [`entity.Run`](/zh/docs/guide/queries#run-on-one-entity) | 所有组件只查一次；ref 跨结构变更依然有效 |
+| 每个请求几次 `Get` / `TryGetRef` 再加一次 `Has<Dead>()` | 用 `static readonly` 过滤条件调 [`entity.Run`](/zh/docs/guide/queries#run-on-one-entity) | 所有组件只查一次；ref 跨结构变更依然有效 |
 | 组件里放 `Entity` 字段 | 放 `EntityId` 字段 | 非托管列：GC 不扫描，可整块复制 |
 
 通过句柄逐个访问，每项 1,000 个句柄（`MicroBenchmarks`：`HandleAccess` 通过句柄写 `Position`，`TryGetEntity` 先按 id 查找，

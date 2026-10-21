@@ -77,8 +77,8 @@ summing table counts.
 
 ### Time each system [#timing]
 
-With `WorldOptions.MeasureSystems`, every run of a system (its `OnUpdate` and its `[ForEach]` methods) is timed:
-`system.Stats` holds `Runs`, `Last`, `Total` and `Average`. `world.Systems` lists the systems without allocating, so
+With `WorldOptions.MeasureSystems`, every run of a system (its `OnUpdate` and its `[ForEach]` methods) is measured:
+`system.Stats` holds `Runs`, `Last`, `Total` and `Average`, plus the bytes and entities below. `world.Systems` lists the systems without allocating, so
 a status page can show the slowest one ([measuring systems](/en/docs/guide/systems#measuring-systems)).
 
 ```csharp
@@ -495,7 +495,7 @@ the third update did not stop at the bug.
 | --- | --- | --- |
 | `Describe()` on every tick | On a request or a timer, between updates | It allocates its answer |
 | `entity.Describe()` to test for a component | `HasX`, `TryGetX`, a filter | No boxing, no allocation |
-| A stopwatch around `world.Update()` | `MeasureSystems` and `system.Stats` | Per system, two timestamp reads per run |
+| A stopwatch around `world.Update()` | `MeasureSystems` and `system.Stats` | Per system: two clock and two allocation counter reads per run, one `Count` per `[ForEach]` pass |
 | `GC.GetAllocatedBytesForCurrentThread()` around the whole tick | `system.Stats.LastAllocated` | Names the system, counts its parallel chunks too |
 | Reading `system.Stats` from the exporter's thread | A copy published after each update | The stats belong to the owner thread |
 | Guessing which systems run together | `world.DescribeSchedule()`, logged at startup | Shows the stages and the registration-only pairs |

@@ -68,8 +68,8 @@ foreach (var table in world.Describe())
 
 ### 给每个系统计时 [#timing]
 
-打开 `WorldOptions.MeasureSystems` 后，每个系统的每次运行（`OnUpdate` 加上它的 `[ForEach]` 方法）都会计时：`system.Stats`
-里有 `Runs`、`Last`、`Total` 和 `Average`。`world.Systems` 列出所有系统且不分配内存，状态页可以直接找出最慢的那个
+打开 `WorldOptions.MeasureSystems` 后，每个系统的每次运行（`OnUpdate` 加上它的 `[ForEach]` 方法）都会被统计：`system.Stats`
+里有 `Runs`、`Last`、`Total`、`Average`，还有下面的字节数和实体数。`world.Systems` 列出所有系统且不分配内存，状态页可以直接找出最慢的那个
 （[统计系统耗时](/zh/docs/guide/systems#measuring-systems)）。
 
 ```csharp
@@ -468,7 +468,7 @@ CooldownSystem: 3 runs, off: a cooldown went below zero
 | --- | --- | --- |
 | 每个 tick 都调 `Describe()` | 在请求或定时器里调，放在两次更新之间 | 它会分配返回值 |
 | 用 `entity.Describe()` 判断有没有某个组件 | `HasX`、`TryGetX`、过滤条件 | 不装箱，不分配 |
-| 用秒表包住 `world.Update()` | `MeasureSystems` 和 `system.Stats` | 按系统计时，每次运行读两次时间戳 |
+| 用秒表包住 `world.Update()` | `MeasureSystems` 和 `system.Stats` | 按系统统计：每次运行读两次时钟、两次分配计数器，每次 `[ForEach]` 遍历一次 `Count` |
 | 用 `GC.GetAllocatedBytesForCurrentThread()` 包住整个 tick | `system.Stats.LastAllocated` | 能指出是哪个系统，并行分块也算在内 |
 | 在导出器的线程上读 `system.Stats` | 每次更新后发布一份拷贝 | 统计属于所有者线程 |
 | 猜哪些系统会一起跑 | `world.DescribeSchedule()`，启动时写进日志 | 能看到阶段和只靠注册顺序的系统对 |

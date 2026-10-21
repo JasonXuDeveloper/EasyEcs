@@ -56,7 +56,8 @@ EasyEcs 文档里的术语，每个用几句话讲清，并链接到详细讲解
 
 ## 过滤条件（Filter） [#filter]
 
-组件之外的查询条件：`With`、`Without`、`WithAny`、`Changed`、`Removed` 和 `InGroup`。写在 `[ForEach]` 方法上就是特性，
+组件之外的查询条件：`With`、`Without`、`WithAny`、`Changed`、`Removed`、`ChangedAny`、`RemovedAny`、`InGroup` 和 `Slice`
+（一次遍历只访问一部分行，见[分片](#slice)）。写在 `[ForEach]` 方法上就是特性，
 在其他代码里就是存放在 `static readonly` 字段里的 `QueryFilter`。见[查询与过滤](/zh/docs/guide/queries#filters)。
 
 ## 查询缓存（Query cache） [#query-cache]
@@ -89,19 +90,19 @@ actor 类型各配一个分组）。见[系统](/zh/docs/guide/systems#system-gr
 ## 阶段（Stage） [#stage]
 
 一串相邻、彼此没有顺序约束、[读写](#access-set)也不冲突的系统。打开 `WorldOptions.ParallelSystems` 后，同一阶段的系统同时执行；
-不打开时，每个系统各自是一个阶段。见[多线程](/zh/docs/guide/threading#parallel-systems)。
+不打开时，每个系统各自是一个阶段。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
 
 ## 访问集（Access set） [#access-set]
 
-一个系统读什么、写什么，由生成器根据 `[ForEach]` 参数得出：`ref` 的组件或单例算写，`in` 的算读，`[Changed<T>]`、`[Removed<T>]`
-算读 `T`。一个写了另一个读或写的东西，两个系统就冲突。能碰到整个 World 的系统（带 `Entity` 或 `World` 参数、实例方法、
-重写了 `OnUpdate`）独占运行。只有互不冲突的系统才会进同一个[阶段](#stage)。见[多线程](/zh/docs/guide/threading#parallel-systems)。
+一个系统读什么、写什么，由生成器根据 `[ForEach]` 参数得出：`ref` 的组件或单例算写，`in` 的算读，`Mut<T>` 参数算写 `T`，
+`[Changed<T>]`、`[Removed<T>]` 算读 `T`。一个写了另一个读或写的东西，两个系统就冲突。能碰到整个 World 的系统（带 `Entity` 或 `World` 参数、实例方法、
+重写了 `OnUpdate`）独占运行。只有互不冲突的系统才会进同一个[阶段](#stage)。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
 
 ## 执行器（Runner） [#runner]
 
 World 用来跑并行工作的部件：一个阶段里的系统，或者一个并行方法的各个块。调用线程和最多 `WorldOptions.MaxDegreeOfParallelism - 1`
 个复用的线程池工作项一起领取任务，所以并行执行零分配。只有实测表明帮手线程确实让工作变快时，它才去唤醒它们；执行器正忙时，
-任务留给调用线程自己跑。见[多线程](/zh/docs/guide/threading#parallel-systems)。
+任务留给调用线程自己跑。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
 
 ## 块（Chunk） [#chunk]
 
@@ -112,7 +113,14 @@ World 用来跑并行工作的部件：一个阶段里的系统，或者一个�
 ## 分片（Slice） [#slice]
 
 `[ForEach(Slices = N)]` 方法一次运行访问的那部分行：每张匹配表约 1/N 的行，按 64 行的位字切分，取系统运行次数的第 `RunCount % N` 片。
-每 N 次运行，每行恰好访问一次。见[系统](/zh/docs/guide/systems)。
+每 N 次运行，每行恰好访问一次。见[系统](/zh/docs/guide/systems#slices)。
+
+## 调度（Schedule） [#schedule]
+
+World 执行系统的顺序：每个[分组](#system-group)的[阶段](#stage)，以及各阶段里的系统。`world.DescribeSchedule()` 返回它，
+可以输出文本（`ToString`）或 Mermaid 图（`ToMermaid`），还列出只靠注册顺序排定的系统对：两个系统的[读写](#access-set)冲突，
+却没有 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 链给它们排序，于是按注册顺序执行，反过来注册就会改变后一个看到的数据。
+见[调试与诊断](/zh/docs/guide/diagnostics#schedule)。
 
 ## 结构体 job（Struct job） [#struct-job]
 
@@ -132,6 +140,11 @@ World 用来跑并行工作的部件：一个阶段里的系统，或者一个�
 `[ForEach]` 方法里表示“实体可能没有”的组件参数：方法访问所有具备其他组件的实体，`HasValue` 说明这个实体是否也有 `T`。
 见[系统](/zh/docs/guide/systems#maybe)。
 
+## `Mut<T>` [#mut]
+
+`[ForEach]` 方法里可能被写的组件参数：`Value` 读它，`Write()` 和 `SetIfChanged(value)`（值不同时）写它，只有写过的行才打 tick，
+所以 `[Changed<T>]` 的读取方会跳过值没变的行。调度器把它算作写 `T`。见[变更追踪](/zh/docs/guide/change-tracking#set-if-changed)。
+
 ## 变更 tick（Change tick） [#change-tick]
 
 World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每次更新结束再加一。被追踪的行记下最后一次写入时的 tick，
@@ -145,7 +158,7 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 ## 销毁日志（Destroy log） [#destroy-log]
 
 设置了 `WorldOptions.DestroyLog` 时，World 保存的一个环形缓冲：最近销毁的实体，以及各自被销毁时的变更 tick。
-`world.DestroyedSince(since, …)` 列出某个读取方的 tick 以来销毁的实体，所以每个客户端各自保存自己的标记。见[变更追踪](/zh/docs/guide/change-tracking)。
+`world.DestroyedSince(since, …)` 列出某个读取方的 tick 以来销毁的实体，所以每个客户端各自保存自己的 tick。见[变更追踪](/zh/docs/guide/change-tracking#destroy-log)。
 
 ## 结构变更（Structural change） [#structural-change]
 
@@ -175,17 +188,17 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 每次结构变更都要经过的检查（EasyEcs 内部的 `World.Structural()`）。结构变更只属于[所有者线程](#owner-thread)，所以闸门只是一个
 由所有者置位、清除的普通标志，不用原子指令。变更在闸门内重入，或者发生在结构[冻结](#frozen-structure)期间，它直接抛
 `InvalidOperationException`，而不是把表写坏。别的线程恰好同时做的变更它不一定看得见；分析器能看到的会报出来（EECS013、EECS014）。
-见[多线程](/zh/docs/guide/threading#what-the-world-synchronizes)。
+见[多线程与并行](/zh/docs/guide/threading#what-the-world-synchronizes)。
 
 ## 所有者线程（Owner thread） [#owner-thread]
 
 调用 World 的 `Update`、执行其结构变更的那个线程。一个 World 同一时间只有一个所有者线程；服务器通常每个线程一个 World，
-其他线程的输入通过[邮箱](#mailbox)交给它。见[多线程](/zh/docs/guide/threading#terms-process-world-owner-thread)。
+其他线程的输入通过[邮箱](#mailbox)交给它。见[多线程与并行](/zh/docs/guide/threading#terms-process-world-owner-thread)。
 
 ## 邮箱（Mailbox） [#mailbox]
 
 由你的代码持有的队列，把其他线程（网络、定时器、数据库）的输入送到 World 的所有者线程。EasyEcs 自己不带：其他线程投递消息，
-所有者线程上的一个系统取出消息，把每条变成数据，比如一个请求实体。见[多线程](/zh/docs/guide/threading#input-from-other-threads)。
+所有者线程上的一个系统取出消息，把每条变成数据，比如一个请求实体。见[多线程与并行](/zh/docs/guide/threading#input-from-other-threads)。
 
 ## Actor [#actor]
 
@@ -245,6 +258,12 @@ World 在内存里的一份拷贝：`world.Capture()` 拍下，`world.Restore(sn
 把一个 World 或其中部分实体写成字节：`world.Save` 和 `world.Load`。非托管组件按原始行写出，托管组件经 Nino 序列化（`[NinoType]`）。
 见[存档](/zh/docs/guide/saves)。
 
+## ComponentSet [#component-set]
+
+一组组件和单例类型，建一次，存放在 `static readonly` 字段里：`ComponentSet.Create().With<Bank>().WithSingleton<Rates>()`。
+它指定 `SaveEntities` 写哪些组件（一份只含需要持久化内容的记录），重启时 `Save(output, exclude)` 不写哪些类型，
+以及 `Load(input, keep)` 保留哪些单例。见[存档](/zh/docs/guide/saves#restart)。
+
 ## 迁移（Migration） [#migration]
 
 把一组实体（比如一个玩家和他拥有的东西）搬到另一个 World：经由字节用 `SaveEntities` 和 `LoadEntities`（可以跨进程），
@@ -265,7 +284,7 @@ World 在内存里的一份拷贝：`world.Capture()` 拍下，`world.Restore(sn
   <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
     `[ForEach]`、批量方法和并行方法、分组、顺序和间隔。
   </Card>
-  <Card title="多线程" href="/zh/docs/guide/threading">
+  <Card title="多线程与并行" href="/zh/docs/guide/threading">
     所有者线程、阶段、执行器，以及来自其他线程的输入。
   </Card>
   <Card title="变更追踪" href="/zh/docs/guide/change-tracking">

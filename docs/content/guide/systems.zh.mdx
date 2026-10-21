@@ -443,8 +443,10 @@ Census.CountAlive<Health>(world, ref alive);      // 泛型 runner：先写类�
 
 ### 统计系统耗时 [#measuring-systems]
 
-开启 `WorldOptions.MeasureSystems` 后，系统的每次运行（`OnUpdate` 加它的 `[ForEach]` 方法）都会计时，`system.Stats` 里有 `Runs`、
-`Last`、`Total` 和 `Average`。每次系统运行多读两次时间戳，关闭时零开销。在两次更新之间读取，比如放在诊断接口里：
+开启 `WorldOptions.MeasureSystems` 后，系统的每次运行（`OnUpdate` 加它的 `[ForEach]` 方法）都会被统计：`system.Stats` 里有 `Runs`、
+`Last`、`Total`、`Average`，这次运行分配的字节数（`LastAllocated`、`TotalAllocated`），以及 `[ForEach]` 方法匹配到的实体数
+（`LastEntities`、`TotalEntities`）。每次运行读两次时钟、两次线程的分配计数器，每次 `[ForEach]` 遍历数一次匹配数；
+关闭时每次运行只多一次字段判断。在两次更新之间读取，比如放在诊断接口里：
 
 ```csharp
 var measured = new World(new WorldOptions { MeasureSystems = true });
@@ -620,7 +622,8 @@ run order: MoveSystem
   （其他类型的 actor）不会被这个分组的系统遍历。
 - **单例组件参数**每次遍历只解析一次，不是每个实体一次。
 - **执行顺序**在添加系统时确定：更新时不付任何代价。
-- **`MeasureSystems`** 每次系统运行多读两次时间戳；关闭时零开销。
+- **`MeasureSystems`** 每次系统运行读两次时钟、两次分配计数器，每次 `[ForEach]` 遍历一次 `Count`
+  （[调试与诊断](/zh/docs/guide/diagnostics#what-it-costs)）；关闭时每次运行一次字段判断。
 - **并行方法**第一次更新之后不再分配内存，执行器的工作项会复用。
 - **生成的代码**由模块初始化器注册：系统不需要 `partial`、不需要注册调用，更新时也不用反射。
 

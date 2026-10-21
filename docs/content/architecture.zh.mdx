@@ -22,7 +22,7 @@ flowchart TB
     subgraph W["World（一个所有者线程）"]
         Meta["Meta[id]：EntityMeta，16 B<br/>表 · 版本 · 行"]
         T["表（原型）<br/>Slots[row]：EntityId · 每个组件一列<br/>存在位 · 变更 tick · 添加边"]
-        QC["查询缓存<br/>过滤器 → 表 + 行过滤"]
+        QC["查询缓存<br/>过滤条件 → 表 + 行过滤"]
         S["Singletons[slot]"]
         Sys["调度：每个系统分组一份，<br/>切分成阶段"]
         Idx["值索引与关系索引<br/>（创建后才有）"]
@@ -54,7 +54,7 @@ flowchart TB
   `QueryFilter.InGroup<T>(g)` 只走这个分组的表。
 - **掩码**（`BitMask`）是带溢出区的 256 位 SIMD 位集。组件位是 `ushort`，一个进程最多可用 65,536 种组件：前 256 种内联
   （每次匹配表只需一次 `Vector256` 测试），其余放进溢出数组；溢出数组在第一次建表或建迁移边时分配，从不在热路径上分配。
-  `QueryFilter` 把 255 以后的位保存成一个驻留 id，所以过滤器不持有任何对象引用
+  `QueryFilter` 把 255 以后的位保存成一个驻留 id，所以过滤条件不持有任何对象引用
   （[D18](/zh/docs/decisions#d18-no-interceptors-for-query-calls-filters-carry-no-references)）。
 
 ### 变更 tick [#change-ticks]
@@ -159,14 +159,14 @@ stateDiagram-v2
 flowchart LR
     Call["Query / Count / [ForEach]"] --> Memo{"调用签名的<br/>备忘（4 路）"}
     Memo -->|命中| Entry["缓存项<br/>表 + 行过滤"]
-    Memo -->|未命中| Dict["ConcurrentDictionary<br/>以过滤器为键"]
+    Memo -->|未命中| Dict["ConcurrentDictionary<br/>以过滤条件为键"]
     Dict -->|首次使用：扫描所有表| Entry
     New["新建表"] -->|写时复制| Entry
 ```
 
 查询的键是它的各组组件：必需、排除、`WithAny`、`Changed`、`Removed`，再加分组。缓存项保存一份不可变快照：掩码包含所有必需组件和每个
 `Removed` 组件对应列的表（有 `WithAny` 时还至少要有其中一列），每张表配一个行过滤，指明这次遍历要测哪些列的存在位和 tick。
-排除的组件不会把整张表排除掉，因为表里可能有行缺它，由行过滤去判断。每个调用签名为它最先用到的四个过滤器保留备忘，
+排除的组件不会把整张表排除掉，因为表里可能有行缺它，由行过滤去判断。每个调用签名为它最先用到的四个过滤条件保留备忘，
 热调用通常不用算哈希就能找到缓存项；超出备忘时，字典的 alternate lookup 直接用调用自己的位去探测。
 
 新建表时（在结构闸门内），每个匹配的缓存项都以写时复制的方式替换，并用 `Volatile.Write` 发布：读者从不加锁，也不会看到正在修改的列表。
@@ -266,7 +266,7 @@ flowchart TB
   4,096 行的倍数切块，两个线程不会共用一个块的变更 tick 摘要，因为写入更新这份摘要时不用原子指令。每个 job 和阶段都会测量自己的运行，只有当助手能让一次运行快至少五分之一时才唤醒它们
   （[D22](/zh/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)）。每次更新零分配。
 
-使用者视角的规则见[线程模型](/zh/docs/guide/threading)。
+使用者视角的规则见[多线程与并行](/zh/docs/guide/threading)。
 
 ## 相关页面 [#related]
 

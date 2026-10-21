@@ -103,8 +103,8 @@ test runs the real order. A zero-allocation budget is one more test: count
 The way `dotnet new easyecs` lays it out: components in `Components/` (one file per thing they describe, plain data),
 one system per file in `Systems/` with one job each, and `Program.cs` as the host that builds the world, sets the
 singletons, adds the systems in one place and runs the loop. Groups give each cadence its own update, input from other
-threads goes through a mailbox (a queue in a singleton), and `--tests` adds one test file per system
-([Structuring a real project](/en/docs/guide/project-structure)).
+threads goes through a mailbox (a queue in a `readonly` field of the system that drains it), and `--tests` adds one
+test file per system ([Structuring a real project](/en/docs/guide/project-structure)).
 
 ## How do I debug an ECS world? [#debugging]
 

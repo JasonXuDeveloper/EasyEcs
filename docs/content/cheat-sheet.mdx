@@ -230,7 +230,7 @@ public struct Shop : IActorGroup<Shop>;             // the systems of [UpdateInG
 | `Error` | The exception that disabled it under `SystemErrorPolicy.Disable` |
 | `LastRunTick` | The change tick of its last run |
 | `RunCount` | Runs before the current one (a sliced method visits slice `RunCount % N`) |
-| `Stats` | `Runs`, `Last`, `Total`, `Average`, `LastAllocated` / `TotalAllocated` (bytes), `LastEntities` / `TotalEntities` (visited) with `MeasureSystems` |
+| `Stats` | `Runs`, `Last`, `Total`, `Average`, `LastAllocated` / `TotalAllocated` (bytes), `LastEntities` / `TotalEntities` (matched when its pass starts) with `MeasureSystems` |
 
 Systems keep no state ([EECS007](/en/docs/guide/analyzer#eecs007)) and never reference each other
 ([EECS008](/en/docs/guide/analyzer#eecs008)). Guide: [Systems](/en/docs/guide/systems).
@@ -355,7 +355,9 @@ Guide: [Change tracking](/en/docs/guide/change-tracking).
 
 ```csharp
 var teams = world.TeamIndex;
-foreach (var member in teams.Find(1)) member.SetTeam(2);   // write indexed components with Set
+var moving = new List<Entity>();
+foreach (var member in teams.Find(1)) moving.Add(member);  // collect first: never change Team inside Find
+foreach (var member in moving) member.SetTeam(2);           // write indexed components with Set
 var ship = world.CreateEntity();
 world.CreateEntity(new ChildOf(ship));
 foreach (var child in world.Children(ship)) { }

@@ -132,7 +132,7 @@ world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
 - 加载也算写入：`[Changed<T>]` 方法会看到读进来的组件。如果记录只是恢复原本就有的数据（actor 从数据库重新加载），传
   `markWritten: false`：记录里的每个组件加载后都没有变更 tick，覆盖了默认值（比如来自预制体）的也一样，这样按变更保存或同步组件的
   系统就不会把记录原样写回去。记录里没有的组件保留各自的 tick。
-- `markWritten: false` 的代价：恢复的组件在代码写它之前，所有 `[Changed<T>]` 方法和 `Since` 过滤器都看不到。按变更同步给客户端的
+- `markWritten: false` 的代价：恢复的组件在代码写它之前，所有 `[Changed<T>]` 方法和 `Since` 过滤条件都看不到。按变更同步给客户端的
   系统，遇到还没见过这个实体的客户端，要自己发送完整状态。
 - 所以每类 actor 一个预制体就够了：新 actor 用预制体的默认值作为初始状态（算写入，下次保存会存下来），恢复的 actor 由记录覆盖
   默认值（不算写入）。[Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)就是这么做的。

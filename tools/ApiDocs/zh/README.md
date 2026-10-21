@@ -18,7 +18,7 @@ one `<member name="<doc id>" source="<hash>">` per documented member, with the e
   `<br/>`. A `<see cref>` may carry a Chinese label: ``<see cref="T:EasyEcs.UpdateInGroupAttribute`1">分组</see>``.
 - `<code>` blocks are copied unchanged, comments included.
 - A plain path in the English ("see docs/content/guide/threading.md") becomes a link:
-  `（见<see href="/zh/docs/guide/threading">线程模型</see>）`.
+  `（见<see href="/zh/docs/guide/threading">多线程与并行</see>）`.
 - Wrap lines freely: a line break between two Chinese characters, or next to full-width punctuation, is dropped; between
   Chinese and Latin text it is one space.
 

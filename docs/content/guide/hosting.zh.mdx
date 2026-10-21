@@ -213,7 +213,7 @@ public sealed class ReceiveSpawns(ChannelReader<SpawnRequest> requests) : EcsSys
 在 World 的线程上，在 tick 的中间。回复 `EntityId` 或值的拷贝：处理代码拿着 `Entity` 句柄稍后再用，就是从另一个线程碰 World。
 
 通道要有界（`Channel.CreateBounded`）：World 跟不上时，让调用方等待（`BoundedChannelFullMode.Wait`）或被拒绝（`DropWrite`、
-`TryWrite` 返回 false），而不是无限增长。[多线程](/zh/docs/guide/threading#input-from-other-threads)一页用普通的
+`TryWrite` 返回 false），而不是无限增长。[多线程与并行](/zh/docs/guide/threading#input-from-other-threads)一页用普通的
 `ConcurrentQueue<T>` 展示了同样的做法。读取端放在系统的 `readonly` 字段里，不要放进单例：`World.Save` 会写出每个单例，而通道
 没有格式化器。
 
@@ -221,7 +221,7 @@ public sealed class ReceiveSpawns(ChannelReader<SpawnRequest> requests) : EcsSys
 拿到 `ChannelClosedException`，而不是等一个永远不来的答复（见[完整例子](#full-example)的 `Arena.RunAsync`）。
 
 针对已有实体的请求带上它的 `EntityId`。系统找到这个实体，用 [`entity.Run`](/zh/docs/guide/queries#run-on-one-entity) 在它上面
-跑一个 job：job 的所有组件只查找一次，再用过滤器排除死掉的单位。实体已经不在、过滤器不通过或者缺组件时，`Run` 返回 `false`，
+跑一个 job：job 的所有组件只查找一次，再用过滤条件排除死掉的单位。实体已经不在、过滤条件不通过或者缺组件时，`Run` 返回 `false`，
 这正好就是答复：
 
 ```csharp
@@ -669,7 +669,7 @@ $ curl localhost:5000/status
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="多线程" href="/zh/docs/guide/threading">
+  <Card title="多线程与并行" href="/zh/docs/guide/threading">
     所有者线程、来自其他线程的输入和并行系统。
   </Card>
   <Card title="存档" href="/zh/docs/guide/saves">

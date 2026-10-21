@@ -238,7 +238,7 @@ public void CreateEntities<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Span<Entity> enti
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-创建 `entities.Length` 个带 2 个组件的实体（每个实体的值都一样），直接放进最终的原型，并把句柄写进 `entities`。整批只过一次结构闸门，表最多扩容一次：O(数量 × 2)。只能在所有者线程调用（见[线程模型](/zh/docs/guide/threading)）。
+创建 `entities.Length` 个带 2 个组件的实体（每个实体的值都一样），直接放进最终的原型，并把句柄写进 `entities`。整批只过一次结构闸门，表最多扩容一次：O(数量 × 2)。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：均摊 O(count × n)
 
@@ -248,7 +248,7 @@ public void CreateEntities<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Span<Entity> enti
 public Entity CreateEntity();
 ```
 
-创建一个没有组件的实体。均摊 O(1)。只能在所有者线程调用（见[线程模型](/zh/docs/guide/threading)）。
+创建一个没有组件的实体。均摊 O(1)。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -271,7 +271,7 @@ public Entity CreateEntity<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in T1 c1, in T2 c
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-创建一个带 2 个组件的实体，直接放进最终的原型（中途不搬行）。均摊 O(2)。只能在所有者线程调用（见[线程模型](/zh/docs/guide/threading)）。
+创建一个带 2 个组件的实体，直接放进最终的原型（中途不搬行）。均摊 O(2)。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -327,7 +327,7 @@ public int DestroyEntities<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in QueryFilter fi
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-销毁所有同时拥有 `T1, T2`（并匹配 `filter`）的存活实体，返回销毁的数量。只过一次结构闸门：O(匹配的原型数 + 行数)。只能在所有者线程调用（见[线程模型](/zh/docs/guide/threading)）。
+销毁所有同时拥有 `T1, T2`（并匹配 `filter`）的存活实体，返回销毁的数量。只过一次结构闸门：O(匹配的原型数 + 行数)。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)
 
@@ -409,7 +409,7 @@ public void EnsureCapacity<T1, T2, T3, T4, T5, T6, T7, T8, T9>(int count) where 
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-预先扩好正好有 `T1, T2` 的实体所在的表和实体存储，接下来 `count` 次带这些组件的 `CreateEntity` / `CreateEntities` 都不会再扩容：启动或一波刷怪的扩容开销在循环之前一次付掉。分组（[`World.GroupBy`](/zh/docs/reference/world#groupby)）把实体放进别的表时，扩的是那张表；之后再加组件会把实体搬到别的表，那些表照常自己扩容。O(2) 加一次扩容。只能在所有者线程调用（见[线程模型](/zh/docs/guide/threading)）。
+预先扩好正好有 `T1, T2` 的实体所在的表和实体存储，接下来 `count` 次带这些组件的 `CreateEntity` / `CreateEntities` 都不会再扩容：启动或一波刷怪的扩容开销在循环之前一次付掉。分组（[`World.GroupBy`](/zh/docs/reference/world#groupby)）把实体放进别的表时，扩的是那张表；之后再加组件会把实体搬到别的表，那些表照常自己扩容。O(2) 加一次扩容。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -602,7 +602,7 @@ public ValueIndex<T, TKey> Index<T, TKey>() where T : struct, IComponent, IIndex
 public Entity Instantiate(Prefab prefab);
 ```
 
-创建一个实体，带上 `prefab` 每个组件的副本。值原样复制：[`DynamicBuffer`](/zh/docs/reference/dynamicbuffer) 拿到自己的一份列表，索引收录新实体，被追踪组件算作刚刚写入。O(组件数)：一次行复制，第一个实例之后不再查找表。带成员的预制体会创建所有成员，返回传入的那个预制体对应的实体（O(成员数 × 组件数)）。只能在所有者线程调用（见[线程模型](/zh/docs/guide/threading)）。
+创建一个实体，带上 `prefab` 每个组件的副本。值原样复制：[`DynamicBuffer`](/zh/docs/reference/dynamicbuffer) 拿到自己的一份列表，索引收录新实体，被追踪组件算作刚刚写入。O(组件数)：一次行复制，第一个实例之后不再查找表。带成员的预制体会创建所有成员，返回传入的那个预制体对应的实体（O(成员数 × 组件数)）。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -642,7 +642,7 @@ public Entity Instantiate<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Prefab prefab, in 
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-同时给出 2 个组件的 [`World.Instantiate`](/zh/docs/reference/world#instantiate)：先复制 `prefab` 的每个组件，再写入给出的值（覆盖预制体的值，被禁用的组件像 `Set` 一样启用），实体直接放进两者合起来的那张表（没有中间的移动，一次行复制）。被追踪组件算作刚刚写入，索引和分组收录这些值，给出的 [`ChildOf`](/zh/docs/reference/childof) 链入层级。均摊 O(组件数)，表存在之后零分配。带成员的预制体会创建所有成员，并把这些组件设到传入的那个预制体对应的实体上（它多一次行移动）。只能在所有者线程调用（见[线程模型](/zh/docs/guide/threading)）。
+同时给出 2 个组件的 [`World.Instantiate`](/zh/docs/reference/world#instantiate)：先复制 `prefab` 的每个组件，再写入给出的值（覆盖预制体的值，被禁用的组件像 `Set` 一样启用），实体直接放进两者合起来的那张表（没有中间的移动，一次行复制）。被追踪组件算作刚刚写入，索引和分组收录这些值，给出的 [`ChildOf`](/zh/docs/reference/childof) 链入层级。均摊 O(组件数)，表存在之后零分配。带成员的预制体会创建所有成员，并把这些组件设到传入的那个预制体对应的实体上（它多一次行移动）。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 

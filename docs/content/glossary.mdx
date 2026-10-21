@@ -63,7 +63,8 @@ systems, `world.Query<T…>()`, `Count`, `Any` and struct jobs ask it. See [Quer
 
 ## Filter [#filter]
 
-The conditions of a query beyond its components: `With`, `Without`, `WithAny`, `Changed`, `Removed` and `InGroup`.
+The conditions of a query beyond its components: `With`, `Without`, `WithAny`, `Changed`, `Removed`, `ChangedAny`,
+`RemovedAny`, `InGroup` and `Slice` (the part of the rows one pass visits, [slice](#slice)).
 They are attributes on `[ForEach]` methods, or a `QueryFilter` kept in a `static readonly` field. See
 [Queries and filters](/en/docs/guide/queries#filters).
 
@@ -108,7 +109,7 @@ See [Threading](/en/docs/guide/threading#parallel-systems).
 ## Access set [#access-set]
 
 What a system reads and writes, generated from its `[ForEach]` parameters: a `ref` component or singleton is a
-write, an `in` one a read, and `[Changed<T>]` or `[Removed<T>]` reads `T`. Two systems conflict when one writes what
+write, an `in` one a read, a `Mut<T>` parameter a write of `T`, and `[Changed<T>]` or `[Removed<T>]` reads `T`. Two systems conflict when one writes what
 the other reads or writes. A system that can reach the whole world (an `Entity` or `World` parameter, an instance
 method, an `OnUpdate` override) runs alone. Only systems that do not conflict share a [stage](#stage). See
 [Threading](/en/docs/guide/threading#parallel-systems).
@@ -132,7 +133,15 @@ alone. See [Systems](/en/docs/guide/systems#parallel-methods).
 
 The part of each matching table one run of a `[ForEach(Slices = N)]` method visits: about 1 / N of its rows, cut at
 64-row words, slice `RunCount % N` of the system's runs. Every row is visited once per N runs. See
-[Systems](/en/docs/guide/systems).
+[Systems](/en/docs/guide/systems#slices).
+
+## Schedule [#schedule]
+
+The order in which a world runs its systems: per [group](#system-group), its [stages](#stage) and their systems.
+`world.DescribeSchedule()` returns it, as text (`ToString`) or a Mermaid diagram (`ToMermaid`), with the
+registration-only pairs: two systems whose [access](#access-set) conflicts and that no `[UpdateBefore<T>]` /
+`[UpdateAfter<T>]` chain orders, so they run in registration order and registering them the other way round changes
+what the later one sees. See [Debugging and diagnostics](/en/docs/guide/diagnostics#schedule).
 
 ## Struct job [#struct-job]
 
@@ -155,6 +164,13 @@ the structure is [frozen](#frozen-structure) while it runs. Write one to vectori
 A `[ForEach]` parameter for a component the entity may lack: the method visits every entity with its other
 components, and `HasValue` says whether this one also has `T`. See [Systems](/en/docs/guide/systems#maybe).
 
+## `Mut<T>` [#mut]
+
+A `[ForEach]` parameter for a component the method may write: `Value` reads it, `Write()` and `SetIfChanged(value)`
+(when the value differs) write it, and only the rows written are stamped, so a `[Changed<T>]` reader skips the rows
+whose value stayed the same. The scheduler counts it as a write of `T`. See
+[Change tracking](/en/docs/guide/change-tracking#set-if-changed).
+
 ## Change tick [#change-tick]
 
 A counter of the world (`world.ChangeTick`) that grows once per stage and once after each update. Tracked rows record
@@ -171,7 +187,7 @@ See [Change tracking](/en/docs/guide/change-tracking).
 
 The ring of the last destroyed entities a world keeps when `WorldOptions.DestroyLog` is set, each with the change tick
 of its destruction. `world.DestroyedSince(since, …)` lists those destroyed since a reader's tick, so each client keeps
-its own mark. See [Change tracking](/en/docs/guide/change-tracking).
+its own mark. See [Change tracking](/en/docs/guide/change-tracking#destroy-log).
 
 ## Structural change [#structural-change]
 
@@ -287,6 +303,13 @@ undo, rollback and resetting a world between tests. See [Snapshots](/en/docs/gui
 
 A world, or some of its entities, written as bytes: `world.Save` and `world.Load`. Unmanaged components are written
 as raw rows, managed ones through Nino (`[NinoType]`). See [Saves](/en/docs/guide/saves).
+
+## ComponentSet [#component-set]
+
+A set of component and singleton types, built once and kept in a `static readonly` field:
+`ComponentSet.Create().With<Bank>().WithSingleton<Rates>()`. It names the components `SaveEntities` writes (a record
+of what persists), the types a restart's `Save(output, exclude)` leaves out and the singletons `Load(input, keep)`
+keeps. See [Saves](/en/docs/guide/saves#restart).
 
 ## Migration [#migration]
 

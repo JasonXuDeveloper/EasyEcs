@@ -31,7 +31,7 @@ import { RotateCcwClock, Lightbulb } from 'lucide-react';
   （[D4](/zh/docs/decisions#d4-no-addedt-filter)）。
 - 并行 job 的命令缓冲：并行 job 只写数据，排在它后面的系统做结构变更
   （[D3](/zh/docs/decisions#d3-no-command-buffer-for-parallel-jobs)）。
-- 给查询调用点用拦截器：调用参数照样求值，在调用处构建的过滤器怎么都会被构建
+- 给查询调用点用拦截器：调用参数照样求值，在调用处构建的过滤条件怎么都会被构建
   （[D18](/zh/docs/decisions#d18-no-interceptors-for-query-calls-filters-carry-no-references)）。
   `AddEmbeddedAttributeDefinition`：生成器不生成特性类型（特性都在 EasyEcs.Core 里）。
 - 可赋值的标签属性（`entity.IsDead = true`）：C# 14 不允许在 `foreach` 变量、索引器结果或 `in` 参数的字段上给结构体的扩展属性赋值，
@@ -44,7 +44,7 @@ import { RotateCcwClock, Lightbulb } from 'lucide-react';
 - 读单例时发现缺失就自动添加（`world.X`、`GetSingleton<T>()`、`[ForEach]` 参数）：缺单例说明忘了初始化，而默认值很少是对的
   （步长为零的时钟），所以所有读取都抛异常；确实要默认值的地方用 `GetOrAddX()`
   （[D27](/zh/docs/decisions#d27-reading-a-missing-singleton-throws-everywhere)）。
-- 由特性生成缓存过滤器、按组件生成计数成员（`world.CountPlayer()`）、命名的 `TryGetXRef`：省不下代码，API 面却更大。
+- 由特性生成缓存过滤条件、按组件生成计数成员（`world.CountPlayer()`）、命名的 `TryGetXRef`：省不下代码，API 面却更大。
 - 并行批处理 job、`entity.LastWriteTick<T>()`、公开读写集、多个 World 共享并行预算
   （[D36](/zh/docs/decisions#d36-not-added)）。
 - 运行条件（`[RunIf]`）：什么时候跑哪个分组，系统分组和宿主已经能决定；每个系统一个谓词，是调度器看不见的代码

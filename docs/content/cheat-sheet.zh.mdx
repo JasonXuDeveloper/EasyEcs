@@ -228,7 +228,7 @@ public struct Shop : IActorGroup<Shop>;             // [UpdateInGroup<Shop>] 的
 | `Error` | 在 `SystemErrorPolicy.Disable` 下让它停用的那个异常 |
 | `LastRunTick` | 上次执行时的变更 tick |
 | `RunCount` | 本次之前已经运行的次数（分片方法访问第 `RunCount % N` 片） |
-| `Stats` | 打开 `MeasureSystems` 后的 `Runs`、`Last`、`Total`、`Average`、`LastAllocated` / `TotalAllocated`（字节）、`LastEntities` / `TotalEntities`（访问的实体数） |
+| `Stats` | 打开 `MeasureSystems` 后的 `Runs`、`Last`、`Total`、`Average`、`LastAllocated` / `TotalAllocated`（字节）、`LastEntities` / `TotalEntities`（遍历开始时匹配的实体数） |
 
 系统不保存状态（[EECS007](/zh/docs/guide/analyzer#eecs007)），也从不引用别的系统
 （[EECS008](/zh/docs/guide/analyzer#eecs008)）。指南：[系统](/zh/docs/guide/systems)。
@@ -265,7 +265,7 @@ bool anyDead = world.Any<Dead>();
 | `.With<T>()` / `.Without<T>()` / `.WithAny<T>()` | 按有无组件，和特性相同 |
 | `.Changed<T>(since)` / `.Removed<T>(since)` | 在 tick `since` 及之后被写过、或失去了 `T` |
 | `.ChangedAny<A, B>(since)` / `.RemovedAny<A, B>(since)` | `since` 及之后至少有一个被写过、或被移除 |
-| `.Since(tick)` | 同一个过滤条件换一个 tick：一个过滤器，带着每个客户端的 tick 跑 |
+| `.Since(tick)` | 同一个过滤条件换一个 tick：一个过滤条件，带着每个客户端的 tick 跑 |
 | `.Slice(index, count)` | 每张表 `count` 片里的第 `index` 片，只用于 `ForEach` 系列调用 |
 | `.InGroup<T>(group)` | 分组组件的某一组 |
 
@@ -315,7 +315,7 @@ public class ClampSystem : EcsSystem
 ```
 
 ```csharp
-// 一个过滤器存在字段里，带着每个客户端确认过的 tick 跑。
+// 一个过滤条件存在字段里，带着每个客户端确认过的 tick 跑。
 private static readonly QueryFilter Dirty = QueryFilter.Create().ChangedAny<Health, Mana>(0);
 ```
 
@@ -353,7 +353,9 @@ if (!replicated.DestroyedSince(seen, gone, out int goneCount)) { /* 比日志还
 
 ```csharp
 var teams = world.TeamIndex;
-foreach (var member in teams.Find(1)) member.SetTeam(2);   // 被索引的组件用 Set 写
+var moving = new List<Entity>();
+foreach (var member in teams.Find(1)) moving.Add(member);  // 先收集：别在 Find 循环里改 Team
+foreach (var member in moving) member.SetTeam(2);           // 被索引的组件用 Set 写
 var ship = world.CreateEntity();
 world.CreateEntity(new ChildOf(ship));
 foreach (var child in world.Children(ship)) { }
@@ -470,7 +472,7 @@ next.Load(restart.WrittenSpan, NewConfig, markWritten: false);   // Config 保�
 using var server = new World(new WorldOptions { ParallelSystems = true, SystemErrors = SystemErrorPolicy.Disable });
 ```
 
-指南：[线程模型](/zh/docs/guide/threading)。
+指南：[多线程与并行](/zh/docs/guide/threading)。
 
 放进服务器里跑、检查它的行为：[托管](/zh/docs/guide/hosting)、[测试系统](/zh/docs/guide/testing)、
 [调试与诊断](/zh/docs/guide/diagnostics)。

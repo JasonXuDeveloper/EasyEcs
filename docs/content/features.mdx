@@ -700,7 +700,7 @@ Every result, sorted by lead, with where another library is faster and why:
 | Compile-time analyzer | Yes | No | No | No |
 | Change tracking by tick | Yes | No | No | `WhenChanged<T>()` |
 | Removal detection | `[Removed<T>]` | Events | Events | `WhenRemoved<T>()` |
-| Value index | Yes | Yes | No | `EntityMap` |
+| Value index | Yes | Yes | No | `EntityMultiMap<TKey>` |
 | Relations and hierarchy | Yes | Yes | No | No |
 | Parallel systems | Generated access | No | No | `ParallelSystem<T>` |
 | Snapshots / saves | Both | JSON | No | Text, binary |

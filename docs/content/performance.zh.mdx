@@ -444,7 +444,7 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
   （[EECS027](/zh/docs/guide/analyzer#eecs027)）。
 - **`[ForEach]` 方法用不到系统的任何成员时，不要写成实例方法**：否则它只能单独运行，还要承担结构变化的检查
   （[EECS029](/zh/docs/guide/analyzer#eecs029)）。
-- **不要遍历查询逐个修改、计数或判断实体**：`SetAll`、`DestroyEntities`、`Count`、`Any` 和过滤器按表处理
+- **不要遍历查询逐个修改、计数或判断实体**：`SetAll`、`DestroyEntities`、`Count`、`Any` 和过滤条件按表处理
   （[EECS030](/zh/docs/guide/analyzer#eecs030)、[EECS032](/zh/docs/guide/analyzer#eecs032)）。
 - **不要在别的线程上使用值索引或销毁实体**：索引在所有者线程上跟随这些变化，没有做同步。
 

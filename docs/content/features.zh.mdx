@@ -158,7 +158,7 @@ public class MovementSystem : EcsSystem
 - **别用于：** `[Changed<T>]` / `[Removed<T>]` 方法，它们必须看到每一次变更（[EECS035](/zh/docs/guide/analyzer#eecs035)）；
   每个 tick 必须处理每一行的逻辑。两次运行之间搬动过的行，在一轮里可能被跳过或访问两次。
 - **开销：** 每次运行处理约 1/N 的行，外加遍历表的开销；配合 `UpdateInterval` M，每行每 N × M 次更新访问一次。
-  `Query`、`Count` 和批量调用不接受分片过的过滤器。
+  `Query`、`Count` 和批量调用不接受分片过的过滤条件。
 - **指南：** [系统](/zh/docs/guide/systems)
 
 ### 立即生效的结构变更 [#immediate-structural-changes]
@@ -204,7 +204,7 @@ public class ReplicationSystem : EcsSystem
 
 标了 `ITrackChanges` 的组件，每行记录最后一次写入时的变更 tick（任何给出 `ref` 的访问都算写入）。`[Changed<T>]` 方法只访问本系统上次执行后
 被写过的行，`[ChangedAny<A, B>]` 访问几个组件里至少有一个被写过的行。查询里用 `QueryFilter.Changed<T>(since)` 和
-`ChangedAny<A, B>(since)`：一个过滤器存一份，每个客户端带着自己确认过的 tick 跑一遍（`filter.Since(ack)`），各自拿到自己上次确认以来的变化。
+`ChangedAny<A, B>(since)`：一个过滤条件存一份，每个客户端带着自己确认过的 tick 跑一遍（`filter.Since(ack)`），各自拿到自己上次确认以来的变化。
 
 - **适合：** 向客户端同步、保存脏数据、为移动过的单位更新空间结构；`ChangedAny` 适合“任何一部分变了就整体下发”的快照（血量、法力、护甲）。
 - **别用于：** 大多数行每个 tick 真的都在变的组件（移动中单位的位置），没有可跳过的。每个 tick 都重算、但值很少变的组件不一样：
@@ -365,7 +365,7 @@ var guard = world.Instantiate(goblin, new ChildOf(archer));          // 自带�
 
 内置的 `ChildOf(EntityId Parent)` 组件把子实体链接到父实体。`world.Children(parent)` 列出子实体，
 `world.Descendants(root)` 深度优先走完整棵子树（每个实体排在它的子实体之前，不含根），`.AddTo(ids, includeRoot: true)`
-把它收进列表，供迁移或存档使用，`Set(new ChildOf(other))` 换父节点，
+把它收进列表，供迁移或存档使用，`Set(new ChildOf(other))` 换父实体，
 销毁父实体会连带销毁所有后代。
 
 - **适合：** 一艘船和它的炮塔、一个玩家和挂在身上的物品、一个小队和它的成员。
@@ -466,7 +466,7 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 每张地图或每个场景一个 World，各占一个线程，完全不需要同步。其他线程的输入通过你自己的队列交给它，由一个系统取出处理。
 - **开销：** 4 个各 2.5 万实体的 World 在 4 个线程上一个 tick 耗时 <BenchValue k="tick.fourWorlds" />，一个 10 万实体的 World 是
   <BenchValue k="tick.oneWorld" />。
-- **指南：** [线程模型](/zh/docs/guide/threading)
+- **指南：** [多线程与并行](/zh/docs/guide/threading)
 
 ### 并行系统 [#parallel-systems]
 
@@ -476,7 +476,7 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 几个互相独立的重系统，加上空闲的核。
 - **别用于：** 只处理几千个实体的轻系统：每个阶段都有一次线程池交接的开销。
 - **开销：** 零分配；`MaxDegreeOfParallelism` 限制线程数。
-- **指南：** [线程模型](/zh/docs/guide/threading)
+- **指南：** [多线程与并行](/zh/docs/guide/threading)
 
 ### 并行 [ForEach] [#parallel-foreach]
 
@@ -487,7 +487,7 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 几万个实体以上、每个实体计算量大的工作：转向、寻路跟随、AI 打分。
 - **开销：** 每块 1,024 到 16,384 行，大约每个线程四块，零分配。写被追踪组件的方法按 4,096 行的整数倍切块（变更摘要覆盖的块大小），
   所以表要更大才会被拆开。
-- **指南：** [线程模型](/zh/docs/guide/threading)
+- **指南：** [多线程与并行](/zh/docs/guide/threading)
 
 ### 批量操作 [#bulk-operations]
 
@@ -603,7 +603,7 @@ World 跑在 ASP.NET Core 应用或 Worker Service 里，由一个托管服务�
 | 编译期分析器 | 有 | 无 | 无 | 无 |
 | 按 tick 的变更追踪 | 有 | 无 | 无 | `WhenChanged<T>()` |
 | 移除检测 | `[Removed<T>]` | 事件 | 事件 | `WhenRemoved<T>()` |
-| 值索引 | 有 | 有 | 无 | `EntityMap` |
+| 值索引 | 有 | 有 | 无 | `EntityMultiMap<TKey>` |
 | 关系与层级 | 有 | 有 | 无 | 无 |
 | 并行系统 | 读写集合自动生成 | 无 | 无 | `ParallelSystem<T>` |
 | 快照 / 存档 | 都有 | JSON | 无 | 文本、二进制 |

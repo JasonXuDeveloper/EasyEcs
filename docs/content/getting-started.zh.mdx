@@ -226,7 +226,7 @@ for (int tick = 1; tick <= 100; tick++)
     world.Update();                                                    // 同步执行每个系统
 }
 
-Console.WriteLine($"{world.Arena.Deaths} dead, the scout is at {scout.Position.X}");
+Console.WriteLine($"the scout is at {scout.Position.X}, the others at {units[2].Position.X}");
 ```
 
 `Update()` 把每个启用的系统执行一次，顺序是注册顺序再按 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 调整，整个过程不分配内存。
@@ -254,15 +254,21 @@ public class ReportSystem : EcsSystem
 }
 ```
 
-和其他系统一起注册（`world.AddSystem<ReportSystem>();`），每 20 个 tick 调一次它的分组：
+和其他系统一起注册，每 20 个 tick 调一次它的分组。`Program.cs` 里的更新循环改成：
 
-```csharp
-world.AddSystem<ReportSystem>();
+```csharp title="Program.cs"
+world.AddSystem<ClockSystem>();
+world.AddSystem<ReportSystem>();                                       // [!code ++]
+
+using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));   // 每秒 20 个 tick
 for (int tick = 1; tick <= 100; tick++)
 {
-    world.Update();
-    if (tick % 20 == 0) world.Update<Report>();                        // 20 Hz 下每秒一次
+    await timer.WaitForNextTickAsync();
+    world.Update();                                                    // 默认分组：模拟
+    if (tick % 20 == 0) world.Update<Report>();                        // 每秒一次：战报 [!code ++]
 }
+
+Console.WriteLine($"the scout is at {scout.Position.X}, the others at {units[2].Position.X}");
 ```
 
 真实的服务器里，一个分组在输入到达时处理输入，另一个按固定 tick 跑模拟。
@@ -419,7 +425,7 @@ Console.WriteLine($"the scout is at {scout.Position.X}, the others at {units[2].
 | 按配方刷出各种单位 | [预制体](/zh/docs/guide/prefabs) |
 | 按名字找玩家、找某人拥有的物品 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | 给每个单位一个列表（背包、路径） | [动态缓冲](/zh/docs/guide/dynamic-buffers) |
-| 用满每个核 | [线程模型](/zh/docs/guide/threading) |
+| 用满每个核 | [多线程与并行](/zh/docs/guide/threading) |
 | 存下 World，重启后再加载 | [存档](/zh/docs/guide/saves) |
 | 在 ASP.NET Core 或 Worker Service 里运行 World | [在 .NET 服务器里托管](/zh/docs/guide/hosting) |
 | 测试每个系统和整个 tick | [测试系统](/zh/docs/guide/testing) |

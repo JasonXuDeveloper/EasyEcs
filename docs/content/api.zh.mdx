@@ -9,7 +9,7 @@ import { BookText, Cpu, Gauge } from 'lucide-react';
 
 EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开销。所有类型都在 `namespace EasyEcs` 下。T1..T9 重载各自由一个模板生成
 （见[架构](/zh/docs/architecture#source-generators-and-analyzer-easyecsgenerator)）。每个成员的签名、参数和 XML 文档见自动生成的
-[API 参考](/en/docs/reference)（英文），参考页里引用的复杂度就来自本页。
+[API 参考](/zh/docs/reference)，参考页里引用的复杂度就来自本页。
 
 记号：
 
@@ -20,7 +20,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 - *k*：索引中一个键对应的实体数；*L*：一个实体的关系数。
 - “均摊”：表和实体数组偶尔会翻倍扩容。
 
-除非另有说明，World 预热之后这些调用都不分配内存，而且只能由 World 的所有者线程调用（见[线程模型](/zh/docs/guide/threading)）。
+除非另有说明，World 预热之后这些调用都不分配内存，而且只能由 World 的所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
 
 ## 类型 [#types]
 
@@ -145,13 +145,13 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.Count<T1..Tn>(filter)` | O(M)，需要测位的表再加 S / 64 | 累加表计数，或数存在位（和 tick），AVX-512 下每步 8 个字 |
 | `world.Any<T1..Tn>(filter)` | 最坏 O(M + S / 64) | 找到第一个就停 |
 | `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | 只建一次，放在 `static readonly` 字段里；多个 `WithAny` 组成“至少有一个”的一组 |
-| `filter.Changed<T>(since)` / `[Changed<T>]` | O(1)；遍历跳过 `since` 之前写过的表、4,096 行的块和 64 行的字 | 被追踪的 `T` 在 `since` 及之后被写过的行（[变更追踪](/zh/docs/guide/change-tracking)）；一个过滤器只有一个 tick |
+| `filter.Changed<T>(since)` / `[Changed<T>]` | O(1)；遍历跳过 `since` 之前写过的表、4,096 行的块和 64 行的字 | 被追踪的 `T` 在 `since` 及之后被写过的行（[变更追踪](/zh/docs/guide/change-tracking)）；一个过滤条件只有一个 tick |
 | `filter.Removed<T>(since)` / `[Removed<T>]` | 同 `Changed` | 在 `since` 及之后失去被追踪的 `T`、且现在仍没有它的实体；已销毁的实体不报告（由销毁日志报告） |
-| `filter.ChangedAny<T1..Tn>(since)` / `[ChangedAny<T1..Tn>]` | 构建 O(n)；遍历时跳过这一组列自 `since` 以来都没被写过的表，以及没有任何列写过的块和位字 | 2 到 9 个被追踪组件里至少有一个在 `since` 及之后被写过的行；一个过滤器的所有 `ChangedAny` 调用合成一组，和其他条件按 AND 组合；每个过滤器一个 tick |
+| `filter.ChangedAny<T1..Tn>(since)` / `[ChangedAny<T1..Tn>]` | 构建 O(n)；遍历时跳过这一组列自 `since` 以来都没被写过的表，以及没有任何列写过的块和位字 | 2 到 9 个被追踪组件里至少有一个在 `since` 及之后被写过的行；一个过滤条件的所有 `ChangedAny` 调用合成一组，和其他条件按 AND 组合；每个过滤条件一个 tick |
 | `filter.RemovedAny<T1..Tn>(since)` / `[RemovedAny<T1..Tn>]` | 同 `ChangedAny` | 在 `since` 及之后至少失去其中一个、且现在仍没有它的实体 |
-| `filter.Slice(index, count)` / `[ForEach(Slices = N)]` | O(1)；一次遍历约访问 S / N 行，按 64 行位字切分 | 只用于 `ForEach` 系列调用（`Query`、`Count`、`Any` 和批量调用会抛 `ArgumentException`）；分片方法访问第 `RunCount % N` 片；不能和 `[Changed<T>]` / `[Removed<T>]` 一起用（EECS035） |
+| `filter.Slice(index, count)` / `[ForEach(Slices = N)]` | O(1)；一次遍历约访问 S / N 行，按 64 行位字切分 | 只用于 `ForEach` 系列调用（`Query`、`Count`、`Any`、`DestroyEntities`、`entity.Run(ref job, filter)` 和批量调用会抛 `ArgumentException`）；分片方法访问第 `RunCount % N` 片；不能和 `[Changed<T>]` / `[Removed<T>]` 一起用（EECS035） |
 | `filter.InGroup<T>(group)` | O(1)；遍历只走这个分组的表 | [分组](/zh/docs/guide/groups) |
-| `filter.Since(since)` | O(1) | 把 `Changed`、`Removed`、`ChangedAny` 和 `RemovedAny` 的 tick 换掉，不用重建过滤器：一个过滤器，带着每个客户端的 tick 跑 |
+| `filter.Since(since)` | O(1) | 把 `Changed`、`Removed`、`ChangedAny` 和 `RemovedAny` 的 tick 换掉，不用重建过滤条件：一个过滤条件，带着每个客户端的 tick 跑 |
 
 一种查询形状第一次使用时建缓存项，O(所有表)，在共享闸门内完成。之后的查找要么命中备忘，要么一次哈希探测。新建一张表
 （第一个拥有新组件组合的实体）的开销是 O(表数 + 已缓存的查询形状数)，因为它要加入所有匹配的缓存查询。两者都是冷路径。
@@ -273,7 +273,7 @@ World 保持原样。
 ## 相关页面 [#related]
 
 <Cards>
-  <Card icon={<BookText />} title="API 参考（英文）" href="/en/docs/reference">
+  <Card icon={<BookText />} title="API 参考" href="/zh/docs/reference">
     每个公开类型和成员的签名，由 XML 文档自动生成。
   </Card>
   <Card icon={<Gauge />} title="性能指南" href="/zh/docs/performance">
