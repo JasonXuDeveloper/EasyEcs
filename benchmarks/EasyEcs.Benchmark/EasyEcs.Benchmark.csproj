@@ -11,13 +11,18 @@
 
     <ItemGroup>
         <PackageReference Include="BenchmarkDotNet" Version="0.15.2"/>
+        <!-- GeneratorBenchmark drives the generators and the analyzer through Roslyn -->
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0"/>
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\..\src\EasyEcs.Core\EasyEcs.Core.csproj"/>
         <ProjectReference Include="..\EasyEcs.Benchmark.Plugin\EasyEcs.Benchmark.Plugin.csproj"/>
-        <!-- consumers of the NuGet package get the generator automatically; project references must add it -->
-        <ProjectReference Include="..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+        <!-- consumers of the NuGet package get the generator automatically; project references must add it (as a
+             reference too: GeneratorBenchmark drives it directly) -->
+        <ProjectReference Include="..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true"/>
+        <!-- the battle server's source: part of the code GeneratorBenchmark compiles -->
+        <EmbeddedResource Include="BattleServer.cs" LogicalName="BattleServer.cs"/>
     </ItemGroup>
 
 </Project>
