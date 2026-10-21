@@ -169,11 +169,11 @@ internal sealed class Reference
     {
         public string Slug => Name.Replace('.', '-').ToLowerInvariant();
         public INamedTypeSymbol First => Types[0];
-        /// <summary>A consecutive T1..T9 (or T2..T9) family generated from one template.</summary>
+        /// <summary>A consecutive T1..T9 (or T2..T9) family generated from one template; titled &lt;T1..Tn&gt;, as its types are declared.</summary>
         public bool Arities => Types.Count > 1 && Types[0].Arity > 0 && Types.Select((t, i) => t.Arity == Types[0].Arity + i).All(x => x);
 
         public string Title => Types.Count == 1 ? First.ToDisplayString(TypeName)
-            : Arities ? Name + "<T" + Types[0].Arity + "..T" + Types[^1].Arity + ">" : string.Join(", ", Types.Select(t => t.ToDisplayString(TypeName)));
+            : Arities ? Name + "<T1..T" + Types[^1].Arity + ">" : string.Join(", ", Types.Select(t => t.ToDisplayString(TypeName)));
     }
 
     public SortedDictionary<string, string> Pages()
