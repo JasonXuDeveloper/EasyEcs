@@ -32,8 +32,9 @@ public sealed partial class World
 
     /// <summary>
     /// Remove component <typeparamref name="T"/> from every alive entity having it and matching
-    /// <paramref name="filter"/>, as <c>Remove</c> would one by one (rows stay, presence bits clear). Returns how many.
-    /// O(matching tables + rows). Owner thread only.
+    /// <paramref name="filter"/>, as <c>Remove</c> would one by one (rows stay, presence bits clear): an entity whose
+    /// <typeparamref name="T"/> is disabled loses the kept value and its <see cref="Disabled{T}"/> tag too. Returns how
+    /// many. O(matching tables + rows). Owner thread only.
     /// </summary>
     public int RemoveAll<T>(in QueryFilter filter = default) where T : struct, IComponent
     {
@@ -41,6 +42,14 @@ public sealed partial class World
         using (Structural())
         {
             WalkDown(Bulk<T>(in filter), filter.Tick, ref op);
+            // The disabled ones, as Remove drops them: only once some entity disabled T (no tag bit is made for it).
+            if (ComponentInfo.Of(op.Bit).Disabler >= 0)
+            {
+                var dropped = new DropDisabledOp { Bit = op.Bit };
+                WalkDown(Bulk<Disabled<T>>(in filter), filter.Tick, ref dropped);
+                op.Count += dropped.Count;
+            }
+
             if (_targetCount != 0) FollowLinks(); // a retired entity freed by losing its last cleanup component
         }
 
@@ -211,6 +220,21 @@ public sealed partial class World
             if (!world.TakeBit(table, slot, Bit)) return;
             Count++;
             if (table.HasCleanup) world.Released(ref world.MetaRef(entity.Index));
+        }
+    }
+
+    private struct DropDisabledOp : IRowOp
+    {
+        public ushort Bit;
+        public int Count;
+
+        public readonly bool Words(World world, Archetype table) => false;
+
+        public readonly void ApplyWord(World world, Archetype table, int word, ulong rows) { }
+
+        public void Apply(World world, Archetype table, int slot, EntityId entity)
+        {
+            if (world.TakeBit(table, slot, Bit)) Count++; // the kept value and the tag go
         }
     }
 

@@ -97,4 +97,19 @@ public class RelationTests
         Assert.That(world.Count<DynamicBuffer<MemberOf>>(QueryFilter.Create().Changed<DynamicBuffer<MemberOf>>(mark)), Is.Zero);
         Assert.That(tracked.IsAlive, Is.True);
     }
+
+    [Test]
+    public void RemovingNoLinkWritesNothing()
+    {
+        using var world = new World();
+        var party = world.CreateEntity();
+        var member = world.CreateEntity().AddRelation(new MemberOf(party.Id));
+        world.Update();
+        var changed = QueryFilter.Create().Changed<DynamicBuffer<MemberOf>>(world.ChangeTick);
+        Assert.That(member.RemoveRelation<MemberOf>(member.Id), Is.Zero);
+        Assert.That(world.Count<DynamicBuffer<MemberOf>>(changed), Is.Zero);    // no link went: not a write
+        Assert.That(member.HasRelation<MemberOf>(party.Id), Is.True);
+        Assert.That(member.RemoveRelation<MemberOf>(party.Id), Is.EqualTo(1));
+        Assert.That(world.Count<DynamicBuffer<MemberOf>>(changed), Is.EqualTo(1));
+    }
 }

@@ -357,6 +357,7 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(Entity a) { var b = new DynamicBuffer<int>(); a.Set(b); } }", "EECS012")]
     [TestCase("public record struct Rel(EntityId Target) : IRelation; public partial class S : EcsSystem { [ForEach] static void A(in Handle h) => h.Target.AddRelation(new Rel(default)); }", "EECS013")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Handle h) => h.Target.World.SetAll(new Q()); }", "EECS013")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Handle h) => h.Target.World.TrimExcess(); }", "EECS013")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Handle h) => h.Target.World.LoadEntitiesInto(default, [h.Target], markWritten: false); }", "EECS013")]
     [TestCase("public static class U { public static void F(World world) { System.Threading.Tasks.Task.Run(() => world.RemoveAll<P>()); world.CreateEntity(new P()); } }", "EECS014")]
     [TestCase("public class Base { public static string A(World w) => \"\"; } public class R4 : Base { [ForEach] public static void A(ref P p) { } }", "EECS021")]
@@ -390,6 +391,7 @@ public class GeneratorTests
     [TestCase("public class S(int n) : EcsSystem { public int N => n; }")]
     [TestCase("public class S : EcsSystem { [ForEach(Slices = 1), Changed<T>] static void A(ref P p) { } [ForEach(Slices = 8, Parallel = true)] static void B(ref Q q) { } }")]
     [TestCase("public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; } public static class U { public static Entity F(World w) => w.AccountIndex.Get(1); }")]
+    [TestCase("public static class U { public static bool F(ref DynamicBuffer<int> b) => System.Runtime.CompilerServices.Unsafe.IsNullRef(ref b); }")] // a 'ref readonly' argument is no copy
     public async Task ValidCodeIsNotReported(string source)
     {
         var errors = await Diagnose(Components, source);

@@ -127,4 +127,20 @@ public class DisableTests
         Assert.That((e.DisableHealth(), e.HasHealth, e.IsHealthDisabled), Is.EqualTo((true, false, true)));
         Assert.That((e.EnableHealth(), e.Health.Value, e.IsHealthDisabled), Is.EqualTo((true, 7, false)));
     }
+
+    [Test]
+    public void RemoveAllAlsoDropsADisabledComponentAndGetOrAddEnablesIt()
+    {
+        using var world = new World();
+        var active = world.CreateEntity(new Health(1));
+        var paused = world.CreateEntity(new Health(2));
+        paused.Disable<Health>();
+        Assert.That(world.RemoveAll<Health>(), Is.EqualTo(2));                   // as Remove: the kept value goes too
+        Assert.That((active.Has<Health>(), paused.IsDisabled<Health>(), paused.Enable<Health>()), Is.EqualTo((false, false, false)));
+
+        var kept = world.CreateEntity(new Health(7));
+        kept.Disable<Health>();
+        Assert.That(kept.GetOrAdd<Health>().Value, Is.EqualTo(7));              // enabled with its value, not reset
+        Assert.That(kept.IsDisabled<Health>(), Is.False);
+    }
 }

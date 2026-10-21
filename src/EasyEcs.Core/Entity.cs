@@ -248,6 +248,8 @@ public readonly partial struct Entity : IEquatable<Entity>
         {
             ref var meta = ref world.Live(new Entity(world, id, version));
             ushort bit = ComponentType<T>.Bit;
+            // A disabled T is there, paused: it comes back with the value it kept (as Enable), not reset to default.
+            if (meta.Archetype.HasDisabled && world.EnableRow<T>(ref meta, id, version)) return ref World.Row<T>(ref meta, bit);
             if (ComponentType<T>.Unique) world.Claim(id, default(T)); // the default's key, before the row moves
             world.AddBit(ref meta, id, bit);
             ref T value = ref World.Row<T>(ref meta, bit);
@@ -259,7 +261,8 @@ public readonly partial struct Entity : IEquatable<Entity>
     }
 
     /// <summary>
-    /// Ref to component <typeparamref name="T"/>, adding it (default) first if missing. Counts as a write of a tracked
+    /// Ref to component <typeparamref name="T"/>, adding it (default) first if missing; a disabled
+    /// <typeparamref name="T"/> is enabled with the value it kept (<see cref="Enable{T}"/>). Counts as a write of a tracked
     /// component. O(1); when missing, O(1) if the entity's table has a column for it (the row only gets its presence bit
     /// back), else O(c) amortized: the row moves to the table with the column (c components copied).
     /// </summary>
