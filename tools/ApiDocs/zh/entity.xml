@@ -76,9 +76,10 @@
   <member name="M:EasyEcs.Entity.GetHashCode" source="62084449ca88">
     <summary>由 id 和版本号算出的哈希值。O(1)。</summary>
   </member>
-  <member name="M:EasyEcs.Entity.GetOrAdd``1" source="79fd6476aa98">
+  <member name="M:EasyEcs.Entity.GetOrAdd``1" source="523c6ae23487">
     <summary>
-      组件 <typeparamref name="T" /> 的 ref；没有时先添加（默认值）。对被追踪组件算一次写入。O(1)；缺少这个组件时，
+      组件 <typeparamref name="T" /> 的 ref；没有时先添加（默认值）；<typeparamref name="T" /> 被禁用时，带着它保留的值重新启用
+      （<see cref="M:EasyEcs.Entity.Enable``1" />）。对被追踪组件算一次写入。O(1)；缺少这个组件时，
       实体所在的表已经有这一列就是 O(1)（这一行只是重新置上存在位），否则均摊 O(c)：这一行搬到有这一列的表（复制 c 个组件）。
     </summary>
   </member>
@@ -109,9 +110,9 @@
       （见<see href="/zh/docs/guide/threading">线程模型</see>）。
     </summary>
   </member>
-  <member name="M:EasyEcs.Entity.RemoveRelation``1(EasyEcs.EntityId)" source="aca13801f198">
+  <member name="M:EasyEcs.Entity.RemoveRelation``1(EasyEcs.EntityId)" source="c917b0bb4689">
     <summary>
-      删掉实体指向 <paramref name="target" /> 的 <typeparamref name="T" /> 链接（目标是它的每一个元素）。返回删掉的数量。
+      删掉实体指向 <paramref name="target" /> 的 <typeparamref name="T" /> 链接（目标是它的每一个元素）。返回删掉的数量；只有确实删掉了链接，缓冲区才算写入。
       O(实体的链接数)。实体不存活时抛异常。
     </summary>
   </member>

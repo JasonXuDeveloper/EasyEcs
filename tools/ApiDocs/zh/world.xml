@@ -303,10 +303,11 @@
       （冷路径），之后 O(1)；存进局部变量或字段里复用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.RemoveAll``1(EasyEcs.QueryFilter@)" source="c7af97e33bcb">
+  <member name="M:EasyEcs.World.RemoveAll``1(EasyEcs.QueryFilter@)" source="3be46f8d616b">
     <summary>
       从每个拥有组件 <typeparamref name="T" /> 且匹配 <paramref name="filter" /> 的存活实体上移除它，效果和逐个调用
-      <c>Remove</c> 一样（行留在原处，清掉存在位）。返回处理的数量。O(匹配的表数 + 行数)。只能在所有者线程调用。
+      <c>Remove</c> 一样（行留在原处，清掉存在位）：<typeparamref name="T" /> 被禁用的实体，保留的值和
+      <see cref="T:EasyEcs.Disabled`1" /> 标签也一起去掉。返回处理的数量。O(匹配的表数 + 行数)。只能在所有者线程调用。
     </summary>
   </member>
   <member name="M:EasyEcs.World.RemoveSingleton``1" source="89c98c21f4b6">

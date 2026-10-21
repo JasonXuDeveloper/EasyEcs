@@ -809,7 +809,7 @@ The relation index of `T`: the entities whose [`DynamicBuffer`](/en/docs/referen
 public int RemoveAll<T>(in QueryFilter filter = default) where T : struct, IComponent;
 ```
 
-Remove component `T` from every alive entity having it and matching `filter`, as `Remove` would one by one (rows stay, presence bits clear). Returns how many. O(matching tables + rows). Owner thread only.
+Remove component `T` from every alive entity having it and matching `filter`, as `Remove` would one by one (rows stay, presence bits clear): an entity whose `T` is disabled loses the kept value and its [`Disabled`](/en/docs/reference/disabled) tag too. Returns how many. O(matching tables + rows). Owner thread only.
 
 **Complexity** ([API table](/en/docs/api)): O(M + S)
 

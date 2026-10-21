@@ -141,7 +141,7 @@ A hash of the id and version. O(1).
 public ref T GetOrAdd<T>() where T : struct, IComponent;
 ```
 
-Ref to component `T`, adding it (default) first if missing. Counts as a write of a tracked component. O(1); when missing, O(1) if the entity's table has a column for it (the row only gets its presence bit back), else O(c) amortized: the row moves to the table with the column (c components copied).
+Ref to component `T`, adding it (default) first if missing; a disabled `T` is enabled with the value it kept ([`Entity.Enable`](/en/docs/reference/entity#enable)). Counts as a write of a tracked component. O(1); when missing, O(1) if the entity's table has a column for it (the row only gets its presence bit back), else O(c) amortized: the row moves to the table with the column (c components copied).
 
 **Complexity** ([API table](/en/docs/api)): O(1); when missing, O(1) if the table has a column for `T`, else O(c) amortized
 
@@ -234,7 +234,7 @@ Remove 2 components; missing components are ignored. The entity keeps its row (n
 public int RemoveRelation<T>(EntityId target) where T : struct, IRelation;
 ```
 
-Drop the entity's links of kind `T` to `target` (every element with that target). Returns how many went. O(links of the entity). Throws if the entity is not alive.
+Drop the entity's links of kind `T` to `target` (every element with that target). Returns how many went; the buffer counts as written only when one did. O(links of the entity). Throws if the entity is not alive.
 
 **Complexity** ([API table](/en/docs/api)): O(L)
 

@@ -809,7 +809,7 @@ public RelationIndex<T> Relations<T>() where T : struct, IRelation;
 public int RemoveAll<T>(in QueryFilter filter = default) where T : struct, IComponent;
 ```
 
-从每个拥有组件 `T` 且匹配 `filter` 的存活实体上移除它，效果和逐个调用 `Remove` 一样（行留在原处，清掉存在位）。返回处理的数量。O(匹配的表数 + 行数)。只能在所有者线程调用。
+从每个拥有组件 `T` 且匹配 `filter` 的存活实体上移除它，效果和逐个调用 `Remove` 一样（行留在原处，清掉存在位）：`T` 被禁用的实体，保留的值和 [`Disabled`](/zh/docs/reference/disabled) 标签也一起去掉。返回处理的数量。O(匹配的表数 + 行数)。只能在所有者线程调用。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)
 

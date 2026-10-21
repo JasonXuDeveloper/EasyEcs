@@ -141,7 +141,7 @@ public override int GetHashCode();
 public ref T GetOrAdd<T>() where T : struct, IComponent;
 ```
 
-组件 `T` 的 ref；没有时先添加（默认值）。对被追踪组件算一次写入。O(1)；缺少这个组件时，实体所在的表已经有这一列就是 O(1)（这一行只是重新置上存在位），否则均摊 O(c)：这一行搬到有这一列的表（复制 c 个组件）。
+组件 `T` 的 ref；没有时先添加（默认值）；`T` 被禁用时，带着它保留的值重新启用（[`Entity.Enable`](/zh/docs/reference/entity#enable)）。对被追踪组件算一次写入。O(1)；缺少这个组件时，实体所在的表已经有这一列就是 O(1)（这一行只是重新置上存在位），否则均摊 O(c)：这一行搬到有这一列的表（复制 c 个组件）。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)；缺失时，表里有 `T` 的列为 O(1)，否则均摊 O(c)
 
@@ -234,7 +234,7 @@ public Entity Remove<T1, T2, T3, T4, T5, T6, T7, T8, T9>() where T1 : struct, IC
 public int RemoveRelation<T>(EntityId target) where T : struct, IRelation;
 ```
 
-删掉实体指向 `target` 的 `T` 链接（目标是它的每一个元素）。返回删掉的数量。O(实体的链接数)。实体不存活时抛异常。
+删掉实体指向 `target` 的 `T` 链接（目标是它的每一个元素）。返回删掉的数量；只有确实删掉了链接，缓冲区才算写入。O(实体的链接数)。实体不存活时抛异常。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(L)
 

@@ -132,7 +132,8 @@ caster.EnableCooldown();                // back with Ticks = 3
 | `EnableX()` (generated) / `Enable<T>()` | Gives the kept value back. False if `T` is not disabled |
 | `IsXDisabled` (generated) / `IsDisabled<T>()` | Whether the entity has `Disabled<T>` |
 | `Set(new T(...))` on a disabled `T` | Replaces it: enabled, with the new value |
-| `Remove<T>()` on a disabled `T` | Drops it: nothing left to enable |
+| `GetOrAdd<T>()` on a disabled `T` | Enables it with the kept value (as `Enable`), not a default |
+| `Remove<T>()` / `world.RemoveAll<T>(filter)` on a disabled `T` | Drops it: nothing left to enable |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | The same on every match, in [bulk](/en/docs/guide/bulk) |
 
 A disable counts as a removal for `[Removed<T>]`, and an enable as a write for `[Changed<T>]`, so

@@ -127,7 +127,8 @@ caster.EnableCooldown();                // 回来时 Ticks 仍是 3
 | 生成的 `EnableX()` / `Enable<T>()` | 还回保留的值。`T` 没被禁用时返回 false |
 | 生成的 `IsXDisabled` / `IsDisabled<T>()` | 实体是否带有 `Disabled<T>` |
 | 对被禁用的 `T` 调用 `Set(new T(...))` | 替换它：重新启用，值是新的 |
-| 对被禁用的 `T` 调用 `Remove<T>()` | 丢弃它：没有可启用的了 |
+| 对被禁用的 `T` 调用 `GetOrAdd<T>()` | 带着保留的值重新启用（和 `Enable` 一样），不是默认值 |
+| 对被禁用的 `T` 调用 `Remove<T>()` / `world.RemoveAll<T>(filter)` | 丢弃它：没有可启用的了 |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | 对所有匹配实体做同样的事，见[批量操作](/zh/docs/guide/bulk) |
 
 禁用对 `[Removed<T>]` 来说算一次移除，启用对 `[Changed<T>]` 来说算一次写入，所以[同步](/zh/docs/guide/change-tracking#removal-detection)
