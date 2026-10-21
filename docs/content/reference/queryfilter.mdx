@@ -69,7 +69,7 @@ A filter that matches every entity with the queried components: the start of a c
 public QueryFilter InGroup<T>(int group) where T : struct, IComponent, IGroup;
 ```
 
-Require `T` with group `group`: only the tables of that group are walked ([`World.GroupBy`](/en/docs/reference/world#groupby); in a world that does not group by `T`, every table holds group 0). One group per filter.
+Require `T` with group `group`: only the tables of that group are walked ([`World.GroupBy`](/en/docs/reference/world#groupby); in a world that does not group by `T`, every table holds group 0). One group per filter: naming a second one throws `ArgumentException`.
 
 **Complexity** ([API table](/en/docs/api)): O(1); a pass walks only that group's tables
 

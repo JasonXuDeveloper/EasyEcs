@@ -122,8 +122,12 @@
       O(匹配的表数 + 行数)；一张表的行只搬一次，搬到带这个标签的表。只能在所有者线程调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.Dispose" source="3b0475540520">
-    <summary>销毁所有系统（按相反顺序调用 OnDestroy），然后释放全部存储。</summary>
+  <member name="M:EasyEcs.World.Dispose" source="29fd805099da">
+    <summary>
+      销毁所有系统（按相反顺序调用 OnDestroy），然后释放全部存储。即使某个系统的 OnDestroy 抛出异常，其余系统的 OnDestroy
+      也都会执行，存储也照样释放；在 <see cref="F:EasyEcs.SystemErrorPolicy.Throw" /> 下，最后重新抛出第一个异常。之后的每个结构变更都会抛出
+      <see cref="T:System.ObjectDisposedException" />。
+    </summary>
   </member>
   <member name="M:EasyEcs.World.EnableAll``1(EasyEcs.QueryFilter@)" source="bff27bef605f">
     <summary>

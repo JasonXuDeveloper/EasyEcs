@@ -366,7 +366,7 @@ public int DisableAll<T>(in QueryFilter filter = default) where T : struct, ICom
 public void Dispose();
 ```
 
-Destroy all systems (OnDestroy in reverse order), then release all storage.
+Destroy all systems (OnDestroy in reverse order), then release all storage. Every system's OnDestroy runs and the storage is released even when one throws; under [`SystemErrorPolicy.Throw`](/en/docs/reference/systemerrorpolicy#throw) the first exception is rethrown at the end. Afterwards every structural change throws `ObjectDisposedException`.
 
 **Complexity** ([API table](/en/docs/api)): O(systems + entities + tables)
 

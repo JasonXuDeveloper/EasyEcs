@@ -69,7 +69,7 @@ public static QueryFilter Create();
 public QueryFilter InGroup<T>(int group) where T : struct, IComponent, IGroup;
 ```
 
-要求有 `T`，且分组是 `group`：只遍历这一组的表（[`World.GroupBy`](/zh/docs/reference/world#groupby)；World 没有按 `T` 分组时，所有表都属于第 0 组）。一个过滤条件只能指定一个分组。
+要求有 `T`，且分组是 `group`：只遍历这一组的表（[`World.GroupBy`](/zh/docs/reference/world#groupby)；World 没有按 `T` 分组时，所有表都属于第 0 组）。一个过滤条件只能指定一个分组：再指定另一个分组会抛出 `ArgumentException`。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)；遍历只走这个分组的表
 

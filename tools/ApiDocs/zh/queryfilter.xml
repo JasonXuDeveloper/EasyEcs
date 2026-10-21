@@ -21,10 +21,10 @@
       不加限制的过滤条件：实体只要拥有查询的组件就匹配。链式调用从它开始（<c>Create().Without&lt;Dead&gt;()</c>）。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.QueryFilter.InGroup``1(System.Int32)" source="5721cfd28df3">
+  <member name="M:EasyEcs.QueryFilter.InGroup``1(System.Int32)" source="5bac00e41509">
     <summary>
       要求有 <typeparamref name="T" />，且分组是 <paramref name="group" />：只遍历这一组的表（<see cref="M:EasyEcs.World.GroupBy``1" />；
-      World 没有按 <typeparamref name="T" /> 分组时，所有表都属于第 0 组）。一个过滤条件只能指定一个分组。
+      World 没有按 <typeparamref name="T" /> 分组时，所有表都属于第 0 组）。一个过滤条件只能指定一个分组：再指定另一个分组会抛出 <see cref="T:System.ArgumentException" />。
     </summary>
   </member>
   <member name="M:EasyEcs.QueryFilter.Removed``1(System.UInt64)" source="13a281f71362">

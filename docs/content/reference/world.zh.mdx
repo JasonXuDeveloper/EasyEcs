@@ -366,7 +366,7 @@ public int DisableAll<T>(in QueryFilter filter = default) where T : struct, ICom
 public void Dispose();
 ```
 
-销毁所有系统（按相反顺序调用 OnDestroy），然后释放全部存储。
+销毁所有系统（按相反顺序调用 OnDestroy），然后释放全部存储。即使某个系统的 OnDestroy 抛出异常，其余系统的 OnDestroy 也都会执行，存储也照样释放；在 [`SystemErrorPolicy.Throw`](/zh/docs/reference/systemerrorpolicy#throw) 下，最后重新抛出第一个异常。之后的每个结构变更都会抛出 `ObjectDisposedException`。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(系统数 + 实体数 + 表数)
 
