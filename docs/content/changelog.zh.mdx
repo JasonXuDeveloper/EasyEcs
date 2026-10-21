@@ -80,6 +80,11 @@ icon: RotateCcwClock
 
 ### 修复 [#v4-7-0-fixes]
 
+- 两条分析器规则看到的同一个错误会报两次，两个修法还互相抵消。现在只由一条规则报（EECS038 优先于 EECS025 和 EECS015，EECS016 和
+  EECS049 优先于它们排除的参数的代价，EECS010 优先于 EECS029 和 EECS025，EECS032 和 EECS030 优先于 EECS046，EECS041 和 EECS013
+  优先于 EECS028，EECS045 优先于 EECS030，EECS027 和 EECS052 优先于 EECS033，EECS002 优先于 EECS012），EECS010 也提供 EECS029 的
+  “改成 static”。见 [D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)。
+
 - 在查询循环里调用 `World.Update`（EECS051）后，循环结束时计数会变成负数，下一次更新前 `TrimExcess` 一直抛异常。
   现在这样的循环结束时不再留下计数。
 - 嵌套的组件或缓冲元素和所在命名空间里另一个结构体同名时，仍会生成一部分成员（`DisableX`、`InX`、`world.XIndex`、缓冲的成员），

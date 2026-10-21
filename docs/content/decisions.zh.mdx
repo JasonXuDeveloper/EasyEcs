@@ -1076,6 +1076,37 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 - **带流分析的 EECS047**，跨分支和循环：报得更多，每一条却更不确定，而这条警告会让把警告当错误的构建失败。放弃。
 - **把 EECS048 并进 EECS045**：一个编号对应两种原因和两种修法。放弃。
 
+## D60. 一个错误一条诊断 [#d60-one-diagnostic-per-mistake]
+
+**决定。** 两条分析器规则报同一段代码时，一条让给另一条：由修法能消掉另一条情形的那条来报。没有合并或删除规则，编号不变。
+
+| 代码 | 报告 | 让出 | 为什么是它 |
+| --- | --- | --- | --- |
+| `var t = e.Get<T>(); t.V = 1;`（改了又丢掉的副本） | EECS038 | EECS025、EECS015 | 修法是保留 ref（或用 `Set`）；改成 `Read` 写入照样丢 |
+| `[ForEach, Without<P>] static void A(ref P p, ...)` | EECS049（`[Removed<T>]` 时是 EECS016） | `p` 上的 EECS025、EECS026、EECS015 | 方法永远不跑，参数的代价无从谈起 |
+| `[ForEach(Parallel = true)] void A(ref P p)` | EECS010，附“改成 static” | EECS029 | 修法相同；挡住构建的是这条错误 |
+| `[ForEach(Parallel = true)] static void A(..., ref Clock c)` | EECS010 | EECS025 | 它的消息已经说了“改成 `in`” |
+| 只计数、或对每个实体做同一个修改的查询循环 | EECS032、EECS030 | EECS046 | 修法去掉了循环，没有可读的了 |
+| `[ForEach]` 方法或 job 里的 `w.TrimExcess()` | EECS041、EECS013 | EECS028 | 调用在那里会抛异常，分配根本不会发生 |
+| 查询循环里的 `item.Entity.Remove<Destroyed>()` | EECS045 | EECS030 | 换成 `RemoveAll<Destroyed>` 是同一个错误 |
+| `[ForEach]` 方法或 job 每行都 `e.Get<Q>()` | EECS027 | EECS033 | 修法把这次查找拿掉了 |
+| `var e = w.CreateEntity(a); e.Set(b);` | EECS052 | EECS033 | 修法把 `Set` 并进创建 |
+| `[ForEach] static void A(DynamicBuffer<T> items, ...)` | EECS002 | EECS012 | 修法相同（`in` / `ref`）；EECS002 是错误 |
+
+**原因。**
+- **一个错误两条诊断，读起来像两个问题**，两个修法还可能互相抵消（EECS025 的 `Read` 和 EECS038 的 `ref var`）。让出只发生在另一条规则
+  已经报告的代码上，每条规则自己的情形照报，`GeneratorTests.OneMistakeIsReportedOnce` 把这些情形固定下来。
+- **方法要求什么，只有一份来源。** EECS016、EECS049、参数代价规则和系统生成器读同一个列表（`Symbols.Requirements`：方法的过滤条件、
+  查询的参数、所属组的过滤条件）；分析器各文件和生成器各自复制过的判断（`IsStable`、`SystemOf`、`JobInterface`、`IsDisableable`、
+  `IsWorldTag`、`AlwaysRuns` 等）都放进了 `Symbols`。
+
+**考虑过的做法。**
+- **把 EECS016 并进 EECS049**（都是没有实体能通过的过滤条件）：EECS016 的原因和措辞不同（`[Removed<T>]` 访问的是失去 T 的实体），
+  编号也要稳定。分开保留，读同一个列表。
+- **把 EECS029 并进 EECS010**：EECS029 也管顺序执行的方法，在那里它是代价而不是错误。保留；EECS010 提供它的修法。
+- **保留为两条诊断的：** 组件里存实体的 buffer 字段（EECS012 是复制 buffer，EECS017 是存 `Entity`：两个错误、两个修法），每处写出
+  `DynamicBuffer<Pair>` 的 EECS017，EECS034 旁的 EECS026，以及 EECS032 的存在性判断或另一个表达式上 EECS033 旁的 EECS046（修法可以叠加）。
+
 ## 相关页面 [#related]
 
 <Cards>

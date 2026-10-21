@@ -24,6 +24,10 @@ EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑
   EECS045、EECS048 到 EECS051）指出的是运行时会拒绝的调用：`#pragma` 只应该出现在测试这种拒绝的测试代码里。
 </Callout>
 
+一个错误只报一条诊断：两条规则看到同一段代码时，由修法能消掉另一条情形的那条来报。改了又丢掉的副本报 EECS038，不再同时报
+EECS025 或 EECS015；过滤条件让它永远不跑的方法报 EECS016 或 EECS049，不再同时报参数的代价；并行的实例方法报 EECS010，不再同时报
+EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
+
 ## 全部规则 [#rules]
 
 | 编号 | 级别 | 规则 | 代码修复 |
@@ -36,7 +40,7 @@ EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑
 | [EECS007](#eecs007) | 错误 | 系统无状态 | 只在构造时赋值的字段加 `readonly` |
 | [EECS008](#eecs008) | 错误 | 系统不引用其他系统 | |
 | [EECS009](#eecs009) | 错误 | 批量 `[ForEach]` 方法只接收 span、单例和 `EntitySpan` | |
-| [EECS010](#eecs010) | 错误 | `[ForEach(Parallel = true)]` 方法必须能在多个线程上跑 | 改为单线程运行 |
+| [EECS010](#eecs010) | 错误 | `[ForEach(Parallel = true)]` 方法必须能在多个线程上跑 | 改为单线程运行；改成 static |
 | [EECS011](#eecs011) | 错误 | `[ForEach]` 方法不修改只读参数持有的数据 | 改用 `ref` |
 | [EECS012](#eecs012) | 错误 | `DynamicBuffer<T>` 从不被复制 | `in`，或连同调用方一起改 `ref` |
 | [EECS013](#eecs013) | 错误 | 不接收 `Entity` 或 `World` 的 `[ForEach]` 方法不做结构变更 | |
@@ -294,7 +298,8 @@ public class DriftAllSystem : EcsSystem
 
 ## EECS010 [#eecs010]
 
-**`[ForEach(Parallel = true)]` 不能在多个线程上跑。** 错误。代码修复：去掉 `Parallel = true`。
+**`[ForEach(Parallel = true)]` 不能在多个线程上跑。** 错误。代码修复：去掉 `Parallel = true`；没用到所属系统任何成员的实例方法，
+改成 `static`（即 [EECS029](#eecs029) 的修法，那条规则把并行方法留给本规则）。
 
 并行方法会同时在多个线程上跑一块块的行，所以它不能做结构变更（static、不接收 `World`、`Entity` 只用来读：`Id`、`Has`、`Get` 等；不能调 `entity.Run`，它要做所有者线程上遍历的簿记，它的 job 也可能改结构），
 必须逐实体运行（不能是批量方法），也不能写单例（`ref` 单例会在块之间产生竞争）。

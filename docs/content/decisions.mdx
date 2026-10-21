@@ -1325,6 +1325,42 @@ to an index.
   fails builds that treat warnings as errors. Dropped.
 - **Folding EECS048 into EECS045**: one id for two different causes and fixes. Dropped.
 
+## D60. One diagnostic per mistake [#d60-one-diagnostic-per-mistake]
+
+**Decision.** Where two analyzer rules report the same code, one defers to the other: the rule whose fix removes the
+other's case. No rule was merged or removed, and the ids stay as they are.
+
+| Code | Reported | Deferring | Why that one |
+| --- | --- | --- | --- |
+| `var t = e.Get<T>(); t.V = 1;` (a copy changed and dropped) | EECS038 | EECS025, EECS015 | Keeping the ref (or `Set`) is the fix; `Read` would keep the lost write |
+| `[ForEach, Without<P>] static void A(ref P p, ...)` | EECS049 (EECS016 for `[Removed<T>]`) | EECS025, EECS026, EECS015 on `p` | The method never runs; what its parameter costs is moot |
+| `[ForEach(Parallel = true)] void A(ref P p)` | EECS010, with "Make it static" | EECS029 | Same fix; the error is what stops the build |
+| `[ForEach(Parallel = true)] static void A(..., ref Clock c)` | EECS010 | EECS025 | Its message already says "take it as `in`" |
+| A query loop that counts, or that changes each entity the same way | EECS032, EECS030 | EECS046 | The fix removes the loop, so there is nothing left to read |
+| `w.TrimExcess()` in a `[ForEach]` method or a job | EECS041, EECS013 | EECS028 | The call throws there; its allocation never happens |
+| `item.Entity.Remove<Destroyed>()` in a query loop | EECS045 | EECS030 | `RemoveAll<Destroyed>` would be the same mistake |
+| `e.Get<Q>()` on every row of a `[ForEach]` method or job | EECS027 | EECS033 | The fix takes the lookup away |
+| `var e = w.CreateEntity(a); e.Set(b);` | EECS052 | EECS033 | The fix folds the `Set` into the creation |
+| `[ForEach] static void A(DynamicBuffer<T> items, ...)` | EECS002 | EECS012 | Same fixes (`in` / `ref`); EECS002 is the error |
+
+**Why.**
+- **Two diagnostics for one mistake read as two problems**, and two fixes can undo each other (`Read` for EECS025,
+  `ref var` for EECS038). Deferring keeps every rule's own cases: a rule stays quiet only on code another rule
+  reports, which `GeneratorTests.OneMistakeIsReportedOnce` pins.
+- **One source of truth for what a method requires.** EECS016, EECS049, the parameter costs and the system generator
+  read the same list (`Symbols.Requirements`: method filters, queried parameters, the group's filters), and the
+  helpers the analyzer files and generators each had their own copy of (`IsStable`, `SystemOf`, `JobInterface`,
+  `IsDisableable`, `IsWorldTag`, `AlwaysRuns`, ...) live in `Symbols`.
+
+**Considered.**
+- **Merging EECS016 into EECS049** (both are filters no entity passes): EECS016 has its own wording and cause
+  (`[Removed<T>]` visits entities that lost T), and ids are stable. Kept apart, read from one list.
+- **Merging EECS029 into EECS010**: EECS029 also covers sequential methods, where it is a cost, not an error. Kept;
+  EECS010 offers its fix.
+- **Kept as two diagnostics:** a component's buffer field that holds entities (EECS012 copies a buffer, EECS017 stores
+  an `Entity`: two mistakes, two fixes), EECS017 at each place a `DynamicBuffer<Pair>` is named, EECS026 next to
+  EECS034, and EECS046 next to EECS032's presence test or EECS033 on another expression (the fixes compose).
+
 ## Related [#related]
 
 <Cards>

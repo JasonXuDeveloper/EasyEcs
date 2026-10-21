@@ -106,6 +106,12 @@ major or minor version that needs code changes? The
 
 ### Fixes [#v4-7-0-fixes]
 
+- One mistake that two analyzer rules saw was reported twice, with two fixes that undo each other. Now one rule reports
+  it (EECS038 over EECS025 and EECS015, EECS016 and EECS049 over the costs of a parameter they exclude, EECS010 over
+  EECS029 and EECS025, EECS032 and EECS030 over EECS046, EECS041 and EECS013 over EECS028, EECS045 over EECS030, EECS027
+  and EECS052 over EECS033, EECS002 over EECS012), and EECS010 offers EECS029's "Make it static". See
+  [D60](/en/docs/decisions#d60-one-diagnostic-per-mistake).
+
 - `World.Update` called inside a query loop (EECS051) left the loop counted below zero when it ended, so
   `TrimExcess` threw until the next update. The loop now ends as no loop.
 - A nested component or buffer element named like another struct of its namespace got some generated members

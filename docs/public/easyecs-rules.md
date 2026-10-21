@@ -106,7 +106,7 @@ available as Markdown: add `.md` to its URL.
 
 - An `EECS` warning means the code costs (EECS025 to EECS032, EECS052, and EECS017, EECS018, EECS020), loses a write
   (EECS037, EECS038), stamps rows it only reads (EECS046) or uses a ref after a structural change (EECS047): apply
-  its fix. The suggestions, EECS033 and EECS039, are
+  its fix (one mistake gets one diagnostic: where two rules see the same code, one defers). The suggestions, EECS033 and EECS039, are
   the same cost written shorter. An `EECS` error means the code cannot work.
 - Hot paths allocate nothing: no LINQ, closures, boxing, string formatting or `params object[]` in systems (EECS028).
 - Keep a `QueryFilter` in a `static readonly` field when a query runs every tick.

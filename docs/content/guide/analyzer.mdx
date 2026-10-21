@@ -32,6 +32,11 @@ same package), and only when the result compiles.
   refusal.
 </Callout>
 
+One mistake gets one diagnostic: where two rules see the same code, the one whose fix removes the other's case reports
+it. A copy changed and dropped is EECS038, not also EECS025 or EECS015; a method its filters never run is EECS016 or
+EECS049, not also a cost of its parameters; a parallel instance method is EECS010, not also EECS029
+([D60](/en/docs/decisions#d60-one-diagnostic-per-mistake)).
+
 ## All rules [#rules]
 
 | Id | Severity | Rule | Code fix |
@@ -44,7 +49,7 @@ same package), and only when the result compiles.
 | [EECS007](#eecs007) | Error | Systems are stateless | `readonly` for a field set only at construction |
 | [EECS008](#eecs008) | Error | Systems do not reference systems | |
 | [EECS009](#eecs009) | Error | A batch `[ForEach]` method takes only spans, singletons and an `EntitySpan` | |
-| [EECS010](#eecs010) | Error | A `[ForEach(Parallel = true)]` method can run on several threads | Run it on one thread |
+| [EECS010](#eecs010) | Error | A `[ForEach(Parallel = true)]` method can run on several threads | Run it on one thread; make it static |
 | [EECS011](#eecs011) | Error | A `[ForEach]` method does not change what a read-only parameter holds | Take it by `ref` |
 | [EECS012](#eecs012) | Error | A `DynamicBuffer<T>` is never copied | `in`, or `ref` with the callers |
 | [EECS013](#eecs013) | Error | A `[ForEach]` method that takes no `Entity` or `World` changes no structure | |
@@ -317,7 +322,9 @@ public class DriftAllSystem : EcsSystem
 
 ## EECS010 [#eecs010]
 
-**`[ForEach(Parallel = true)]` cannot run on several threads.** Error. Code fix: removes `Parallel = true`.
+**`[ForEach(Parallel = true)]` cannot run on several threads.** Error. Code fix: removes `Parallel = true`; for an
+instance method that uses nothing of its system, makes it `static` (the fix of [EECS029](#eecs029), which leaves a
+parallel method to this rule).
 
 A parallel method runs chunks of rows on several threads at once, so it must make no structural change (static, no
 `World`, its `Entity` used only to read: `Id`, `Has`, `Get`, ...; not `entity.Run`, which does the owner's pass
