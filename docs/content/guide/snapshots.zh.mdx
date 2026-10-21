@@ -293,7 +293,7 @@ capture 的分配就是新建的那个快照本身；`Capture(into)` 会复用�
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
 | 以为组件里的 `List<T>` 会回滚 | 它是共享的：恢复后还是现在的样子 | 改用 `DynamicBuffer<T>` |
-| 查询遍历期间 capture 或 restore | 抛 `InvalidOperationException` | 运行时 |
+| 查询遍历期间 capture 或 restore | 抛 `InvalidOperationException` | [EECS041](/zh/docs/guide/analyzer#eecs041) |
 | 把快照恢复到另一个 World | 抛 `ArgumentException` | 运行时 |
 | 恢复 [`RemoveTypes`](/zh/docs/guide/migration-and-unload#remove-types) 之前拍的快照 | 抛 `InvalidOperationException`：它的表已经没了 | 运行时：`RemoveTypes` 之后往里重新拍 |
 | 每个 tick 拍一个快照，用来倒带判定命中 | 每个 tick 复制每一行，而且一恢复就全部倒回 | 只记位置的[历史环](#lag-compensation) |

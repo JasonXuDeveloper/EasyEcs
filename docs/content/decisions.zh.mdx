@@ -73,6 +73,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D56](#d56-not-added) | 不加：生成的 `AddSystems()`、从特性生成的缓存过滤条件、按组件的计数成员、命名的 `TryGetXRef` |
 | [D57](#d57-retired-is-destroyed) | 退休的实体就是已销毁的实体 |
 | [D58](#d58-add-singleton) | `AddSingleton` 拒绝已存在的单例 |
+| [D59](#d59-analyzer-rules) | 跨结构变更的 ref、行不通的过滤条件、搬两次的创建：对应的规则 |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -189,6 +190,7 @@ public class BulletSystem : EcsSystem
 
 ```csharp
 var bullet = world.CreateEntity(new Bullet(), new Position(0, 0), new Velocity(4, 0));
+world.Update();                                             // 子弹飞行
 bullet.SetInactive();                                       // 回到对象池：翻一个位，不搬行
 bullet.SetPosition(10, 20).RemoveInactive();                // 重新启用
 
@@ -511,7 +513,8 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 
 **比较过。**
 - **一次一个地添加或移除多个组件**（`e.Set(a); e.Set(b);` 写成 `e.Set(a, b)`）：逐个 500.7 µs，合并 480.7 µs；两个 16 字节的组件
-  是 290.1 对 308.7 µs。转换缓存之后，第二次移动和第一次一样便宜。放弃。
+  是 290.1 对 308.7 µs。转换缓存之后，第二次移动和第一次一样便宜。放弃。创建之后紧跟 `Set` 是另一回事，测出来是有代价的
+  （[D59](#d59-analyzer-rules)）。
 - **把标签作为参数而不是 `[With<T>]`**：37.7 对 38.6 µs；代价在它声明的访问上，而任何没用到的参数 EECS026 都已经报告了。
 - **对不追踪的组件用 `[Changed<T>]`**：特性的约束已经让它编译失败（CS0315）。
 - **对结构变化或很小的工作用 `Parallel = true`**：结构变化是 EECS010；一遍算不算小取决于运行时的实体数量。
@@ -1035,6 +1038,43 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 现在这个调用要么添加，要么说明为什么不能。写入不换存储，所以重置之后 `SingletonRef<T>` 句柄照样指向这个单例。
 
 **考虑过的方案。** **保留重置并写进文档：** 它掩盖的错误要到后来某个值出错时才会显现。
+
+## D59. 跨结构变更的 ref、行不通的过滤条件、搬两次的创建：对应的规则 [#d59-analyzer-rules]
+
+**决定。** 用法规则和性能规则新增六条，EECS042 只报告往索引里加实体的修改。
+
+| 规则 | 级别 | 为什么是这个级别 |
+| --- | --- | --- |
+| EECS047 结构变更之后还在用 ref | 警告 | ref 可能仍然正确（变更移动的是另一张表的行），所以规则只报它能追踪到的情况：同一个块，按顺序，ref、变更和使用之间没有分支、循环或 lambda |
+| EECS048 对清理组件或 `ChildOf` 调用 `Disable` | 错误 | `Disable<T>()` 和 `DisableAll<T>()` 对它们抛 `InvalidOperationException` |
+| EECS049 没有实体能通过的过滤条件 | 错误 | 一个组件既被要求（参数、`[With<T>]`、`[Changed<T>]`、分组的 `[With<T>]` 或 `IGroupWith<T>`）又被排除（`[Without<T>]`、`IGroupWithout<T>`）：方法永远不会运行 |
+| EECS050 一个过滤条件里的第二个分组 | 错误 | 换一个分组（另一个组件或另一个常量值）时 `InGroup` 抛 `ArgumentException` |
+| EECS051 遍历进行中更新 World | 错误 | 更新会填掉遍历留下的空洞、移动它正在走的行，并把遍历计数清零，循环结束时计数变成 -1：下一次更新之前 `TrimExcess` 都会抛异常 |
+| EECS052 创建之后紧跟 `Set` | 警告，有代码修复 | `AccessBenchmark.CreateThenSet`：1,000 次只带一个组件的创建，再 `Set` 另一个组件，加上销毁，44.4 µs；同样的创建直接带两个组件 25.8 µs（1.73 倍），两者都是 0 B |
+
+`AccessBenchmark` 跑在 [D29](#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same) 的那台机器上
+（BenchmarkDotNet，共享的 4 核 2.1 GHz Xeon，.NET 10.0.13）。
+
+**原因。**
+- **每条规则指出的要么是运行时会拒绝的代码，要么是测出来的代价。** EECS048、EECS050 和 EECS051 是运行时会抛异常或破坏 World 状态的调用；
+  EECS049 是能编译却永远不会运行的方法。它们和 EECS040 到 EECS045 一样是错误。EECS047 和 EECS052 是警告：代码在某些 World 里能工作，
+  或者能工作但有代价。
+- **EECS048 用自己的编号。** EECS045 说的是手写 World 自己的标签；这里调用本身是 World 的，被拒绝的是组件。修法也不同（移除组件）。
+- **EECS047 只看直线代码。** 一次变更会不会移动 ref 指向的行，取决于运行时的表；跨分支和循环，规则会报出变更和使用从不一起执行的代码。
+  它跳过不移动行的调用：`Remove` 和 `Enable`（一个存在位）、对 ref 持有的那个组件 `Set`（原地写入）、只复制或调度的成员
+  （`Capture`、`Save`、`AddSystem` 等），以及销毁查询项的实体（遍历期间留下墓碑）。
+- **EECS042 只报告加入。** 索引遍历会跳过空洞：遍历期间移除组件、断开关系、销毁实体都是允许的，层级自己的级联也会在关系遍历中删除链接。
+  会破坏遍历的是增长的键：之前变空的列表会交给下一个增长的键，而它可能正是正在读的列表。修改之后紧跟 `break`、`return` 或 `throw` 时，
+  遍历在读下一个列表之前就结束了，所以也不报。关系遍历（`Find(target)`）和 `Descendants` 与 `Find(key)` 一样覆盖。
+- **EECS052 是代价，两次 `Set` 不是。** 一次一个地添加两个组件，和一次调用的代价差不多（D29，已放弃）；创建之后再 `Set`，行要放两次，
+  第一张表可能只在这一刻存在。修复在能绑定时把值移进创建调用：值来自方法调用或该实体、分组组件、World 自己的标签、已经带了九个组件的创建，
+  都不修。
+
+**考虑过的方案。**
+- **每次调用时内联构造过滤条件**（`world.Count<T>(QueryFilter.Create().With<U>())`）：过滤条件是不含引用的小结构体
+  （[D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references)），构造它也没有测出代价（D29）。不加规则。
+- **带流分析的 EECS047**，跨分支和循环：报得更多，每一条却更不确定，而这条警告会让把警告当错误的构建失败。放弃。
+- **把 EECS048 并进 EECS045**：一个编号对应两种原因和两种修法。放弃。
 
 ## 相关页面 [#related]
 

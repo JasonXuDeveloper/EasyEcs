@@ -314,8 +314,8 @@ group, as a value index and as a plain component a scan compares (`GroupBenchmar
 | Writing the grouped component through a `ref` | The row stays in its old group | [EECS015](/en/docs/guide/analyzer#eecs015) |
 | A group per player, guild or owner | A table per key: memory and fragmentation | Use a [value index](/en/docs/guide/indexes-and-relations#value-indexes) |
 | A value that changes every tick | A row copy per change | Keep it a plain component |
-| Two `InGroup` calls in one filter | A filter holds one group: the last one counts, and both components are still required | Code review |
-| `GroupBy` during a pass | Throws: it moves rows | Call it at setup |
+| Two `InGroup` calls with different groups in one filter | `ArgumentException`: a filter holds one group | [EECS050](/en/docs/guide/analyzer#eecs050): one filter per group |
+| `GroupBy` during a pass | Throws: it moves rows | [EECS041](/en/docs/guide/analyzer#eecs041); call it at setup |
 
 ## Compared with other libraries [#compared]
 

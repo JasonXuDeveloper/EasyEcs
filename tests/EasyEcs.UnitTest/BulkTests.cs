@@ -83,7 +83,9 @@ public class BulkTests
         Assert.That((world.Count<Stun>(), world.Count<Disabled<Stun>>()), Is.EqualTo((0, 130)));
         Assert.That(world.EnableAll<Stun>(), Is.EqualTo(130));
         for (int i = 0; i < entities.Length; i++) Assert.That(entities[i].Get<Stun>().Ticks, Is.EqualTo(i));
+#pragma warning disable EECS048 // the refused call itself
         Assert.Throws<System.InvalidOperationException>(() => world.DisableAll<ChildOf>());
+#pragma warning restore EECS048
     }
 
     [Test]

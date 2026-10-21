@@ -702,9 +702,9 @@ needed, and a method that writes a singleton:
 | A private type in a method's parameters | The generated job cannot name it | [EECS022](/en/docs/guide/analyzer#eecs022) |
 | `[With<T>]`, `[Without<T>]` or `[WithAny<T>]` on a struct that is not a group | Compile error: the filter would do nothing | [EECS023](/en/docs/guide/analyzer#eecs023) |
 | A group's `[With<T>]` or `IGroupWith<T>` with a method's `[Removed<T>]` | Asks for rows that have and lack `T`: the method never runs | [EECS016](/en/docs/guide/analyzer#eecs016) |
-| A group's `[With<X>]` with a method's `[Without<X>]` | No entity matches: the method never runs | Nothing reports it: code review |
+| A group's `[With<X>]` with a method's `[Without<X>]` | No entity matches: the method never runs | [EECS049](/en/docs/guide/analyzer#eecs049) |
 | A group's `[WithAny<A>]` with a method's `[WithAny<B>]`, read as "A and B" | The sets merge: entities with `A` or `B` | Code review |
-| A public `Key => this` on a record struct actor key | `ToString()` prints `Key` forever: stack overflow | Code review: implement `IIndexed<T>.Key` explicitly |
+| A public `Key => this` on a record struct actor key | `ToString()` prints `Key` forever: stack overflow | [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix): implement `IIndexed<T>.Key` explicitly |
 | `ref` on a component the method only reads | Stamps a tracked component, keeps the system out of shared stages | [EECS025](/en/docs/guide/analyzer#eecs025) |
 | An `Entity` or `World` parameter the method never uses | The job keeps its structural bookkeeping | [EECS026](/en/docs/guide/analyzer#eecs026) |
 | An allocation in `OnUpdate` or a `[ForEach]` method | Garbage every update | [EECS028](/en/docs/guide/analyzer#eecs028) |

@@ -503,7 +503,7 @@ CooldownSystem: 3 runs, off: a cooldown went below zero
 | 更新进行中从别的线程读 `Describe()` | 读到正在变的表的中间状态 | 在所有者线程上、两次更新之间读 |
 | 以为实体走了 `Bytes` 就会降 | 表保留容量给下一波实体 | 高峰过后调 `TrimExcess()` |
 | 每个 tick 都调 `TrimExcess()` | 表被丢掉又重建，扩容重新付一遍：tick 上出现分配 | 放进维护任务里调（[常见错误](/zh/docs/guide/common-mistakes#trim-every-tick)） |
-| 在 `Query` 循环或 `[ForEach]` 方法里调 `TrimExcess()` | `InvalidOperationException` | 在两次更新之间调 |
+| 在 `Query` 循环或 `[ForEach]` 方法里调 `TrimExcess()` | `InvalidOperationException` | [EECS041](/zh/docs/guide/analyzer#eecs041)：在两次更新之间调 |
 | 在导出器的线程上读 `system.Stats` | tick 正在写的结构体被读到一半 | 在所有者线程上发布一份拷贝 |
 | 以为 `LastEntities` 会算上 `OnUpdate` 里的查询 | 只统计 `[ForEach]` 遍历 | 真需要就在 `OnUpdate` 里自己数 |
 | 调度里留着只靠注册顺序的系统对 | 调换 `AddSystem` 的顺序，系统看到的数据就变了 | 加上 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |

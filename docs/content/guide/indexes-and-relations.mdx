@@ -548,8 +548,8 @@ follow, then the followers of 100 players counted and walked (`RelationBenchmark
 | --- | --- | --- |
 | Writing an indexed component through `ref`, `Get<T>()` or a query item | The index keeps the old key | [EECS015](/en/docs/guide/analyzer#eecs015) |
 | Storing an `Entity` handle in a component | A managed column, write barriers, not saved | [EECS017](/en/docs/guide/analyzer#eecs017) |
-| Changing the indexed component inside a `Find` loop over it | The walk can read another key's entities (destroying entities is fine) | Code review: collect first, then change |
-| A public `Key => this` on a record struct | `ToString()` prints `Key` forever: a stack overflow | Code review: `Shop IIndexed<Shop>.Key => this;` |
+| Giving entities the indexed component or a new key inside a `Find` loop over it | The walk can read another key's entities (removing the component and destroying entities are fine) | [EECS042](/en/docs/guide/analyzer#eecs042): collect first, then change |
+| A public `Key => this` on a record struct | `ToString()` prints `Key` forever: a stack overflow | [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix): `Shop IIndexed<Shop>.Key => this;` |
 | Using an index from another thread | Indexes belong to the owner thread | [Threading](/en/docs/guide/threading#what-the-world-synchronizes) |
 | Indexing one component by two key types | `InvalidOperationException`: one index per component | At run time |
 | A `null` key (the default of a `string`) | The entity is indexed nowhere | By design |

@@ -227,8 +227,7 @@ public class IndexTests
         using var world = new World();
         var index = world.Index<Callsign, string>();
         var a = world.CreateEntity(new Callsign("x"));
-        var b = world.CreateEntity();
-        b.Set(default(Callsign)); // a null key
+        world.CreateEntity(default(Callsign)); // a null key
         Assert.That(index.Count("x"), Is.EqualTo(1));
         a.Set(default(Callsign)); // moves a out of "x" and indexes it nowhere
         Assert.That(index.Count("x"), Is.Zero);

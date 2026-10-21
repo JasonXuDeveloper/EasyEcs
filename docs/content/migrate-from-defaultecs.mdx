@@ -240,10 +240,10 @@ The two versions of the whole tick, on the same machine:
 | --- | --- | --- |
 | Porting the state object as a field of the system | Systems are stateless | [EECS007](/en/docs/guide/analyzer#eecs007): use a singleton |
 | Taking a component by value in a `[ForEach]` method | A copy: writes are lost | [EECS002](/en/docs/guide/analyzer#eecs002), with a code fix to `ref` / `in` |
-| Adding components one `Set` at a time on creation | One row copy per component | Code review: `world.CreateEntity(a, b, c)` |
+| Adding components one `Set` at a time on creation | One row copy per component | [EECS052](/en/docs/guide/analyzer#eecs052) (warning, with a code fix): `world.CreateEntity(a, b, c)` |
 | A static method without `Entity` or `World` that destroys | It promised no structural change | [EECS013](/en/docs/guide/analyzer#eecs013) |
 | Keeping `NotifyChanged` calls | Nothing to call: there is no such method | Compiler error |
-| Taking a tracked component by `ref` only to read it | Every visited row counts as changed | Code review: declare it `in` |
+| Taking a tracked component by `ref` only to read it | Every visited row counts as changed | [EECS025](/en/docs/guide/analyzer#eecs025) (warning, with a code fix): declare it `in` |
 | Using `GetHashCode()` as an entity id | Ids are recycled | Store `entity.Id` (`EntityId`, with its version) |
 
 ## Related [#related]

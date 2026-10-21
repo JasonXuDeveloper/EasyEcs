@@ -162,8 +162,7 @@ public class PresenceTests
     public void RemovingAComponentKeepsTheRow()
     {
         using var world = new World();
-        var e = world.CreateEntity(new Health(1));
-        e.Set(new Stun(5));                       // a new column: moves into the archetype with Stun
+        var e = world.CreateEntity(new Health(1), new Stun(5)); // the archetype with Stun
         ref var health = ref e.Get<Health>();
 
         e.Remove<Stun>();                         // a bit flip: the row (and the ref) stay where they are

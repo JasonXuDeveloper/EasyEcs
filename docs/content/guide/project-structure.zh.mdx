@@ -381,8 +381,7 @@ public class FireSystem : EcsSystem
     [ForEach]
     static void Fire(World world, Entity request, in FireRequest fire, in Spawner spawner)
     {
-        Entity bullet = world.Instantiate(spawner.Bullet);
-        bullet.SetVelocity(fire.Vx, fire.Vy);
+        world.Instantiate(spawner.Bullet, new Velocity(fire.Vx, fire.Vy));
         request.Destroy();
     }
 }

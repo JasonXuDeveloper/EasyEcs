@@ -394,8 +394,8 @@ turret alive: True, gun alive: False
 | 只用 `Children` 收集整棵树 | 漏掉孙实体 | `Descendants` 会走完每一层 |
 | 用 `Descendants` 遍历成环的 `ChildOf` | 走到环上时抛 `InvalidOperationException` | 运行时 |
 | 沿 `ChildOf` 向上走却不限制步数 | `ChildOf` 成环时死循环 | 用 `world.EntityCount` 限制步数（[向上找祖先](#ancestors)） |
-| 在 `Descendants` 循环里换父实体或解除挂接 | 遍历读的子实体列表正在被改写 | 代码审查：先收集，再修改 |
-| `Disable<ChildOf>()` | 抛 `InvalidOperationException` | 运行时 |
+| 在 `Descendants` 循环里换父实体 | 新的链接让遍历正在读的子实体列表增长（解除挂接的实体会被跳过） | [EECS042](/zh/docs/guide/analyzer#eecs042)：先收集，再修改 |
+| `Disable<ChildOf>()` | 抛 `InvalidOperationException` | [EECS048](/zh/docs/guide/analyzer#eecs048)：改用 `Remove<ChildOf>()` |
 | 没写系统却指望有世界坐标 | 没有内置变换 | 写一个[传播系统](#transform-propagation) |
 
 ## 和其他库的对比 [#compared]

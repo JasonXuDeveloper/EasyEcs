@@ -652,9 +652,9 @@ run order: MoveSystem
 | 方法参数用了 private 类型 | 生成的 job 引用不到它 | [EECS022](/zh/docs/guide/analyzer#eecs022) |
 | `[With<T>]`、`[Without<T>]` 或 `[WithAny<T>]` 写在不是分组的结构体上 | 编译报错：这个过滤不会起任何作用 | [EECS023](/zh/docs/guide/analyzer#eecs023) |
 | 分组的 `[With<T>]` 或 `IGroupWith<T>` 碰上方法的 `[Removed<T>]` | 要求一行既有 `T` 又没有 `T`：方法永远不会运行 | [EECS016](/zh/docs/guide/analyzer#eecs016) |
-| 分组的 `[With<X>]` 碰上方法的 `[Without<X>]` | 没有实体能满足：方法永远不会运行 | 没有规则报告：靠代码审查 |
+| 分组的 `[With<X>]` 碰上方法的 `[Without<X>]` | 没有实体能满足：方法永远不会运行 | [EECS049](/zh/docs/guide/analyzer#eecs049) |
 | 分组的 `[WithAny<A>]` 加方法的 `[WithAny<B>]`，当成“A 且 B” | 两个集合合并：选出有 `A` 或有 `B` 的实体 | 代码审查 |
-| record struct 的 actor 键上写公开的 `Key => this` | `ToString()` 无限打印 `Key`：栈溢出 | 代码审查：显式实现 `IIndexed<T>.Key` |
+| record struct 的 actor 键上写公开的 `Key => this` | `ToString()` 无限打印 `Key`：栈溢出 | [EECS043](/zh/docs/guide/analyzer#eecs043)（有代码修复）：显式实现 `IIndexed<T>.Key` |
 | 只读的组件写成 `ref` | 被追踪的组件被打 tick，系统也没法共享阶段 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
 | 方法从不使用的 `Entity` 或 `World` 参数 | job 保留结构变更簿记 | [EECS026](/zh/docs/guide/analyzer#eecs026) |
 | `OnUpdate` 或 `[ForEach]` 方法里分配内存 | 每次更新都产生垃圾 | [EECS028](/zh/docs/guide/analyzer#eecs028) |

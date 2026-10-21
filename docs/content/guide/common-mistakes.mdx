@@ -463,21 +463,22 @@ No rule catches it. More in [group filters](/en/docs/guide/systems#group-filters
 
 ### Keeping a `ref` across a structural change [#ref-after-change]
 
-```csharp
+```csharp doccheck=expect-EECS047
 ref var life = ref hero.Health;
 hero.SetStunned();                 // the row moves to another table
 life.Value -= 10;                  // writes the old copy
 ```
 
-Adding or removing a component moves the entity's row, and a `ref` taken before points at the old place. Get it again
-after the change:
+Adding a component, disabling one or destroying an entity moves rows, and a `ref` taken before points at the old
+place. Get it again after the change:
 
 ```csharp
 hero.SetStunned();
 hero.Health.Value -= 10;
 ```
 
-No rule catches it. More in [refs across a change](/en/docs/guide/structural-changes#refs-across-a-change).
+Caught by [EECS047](/en/docs/guide/analyzer#eecs047) (warning) when the ref, the change and the use are in one block. More in
+[refs across a change](/en/docs/guide/structural-changes#refs-across-a-change).
 
 ### Keeping a `ref` across an `await` [#ref-across-await]
 
@@ -823,7 +824,7 @@ Caught by [EECS010](/en/docs/guide/analyzer#eecs010). More in
 
 <Cards>
   <Card title="Analyzer rules" href="/en/docs/guide/analyzer">
-    Every rule, EECS002 to EECS046.
+    Every rule, EECS002 to EECS052.
   </Card>
   <Card title="ECS principles" href="/en/docs/ecs-principles">
     The rules these mistakes break.

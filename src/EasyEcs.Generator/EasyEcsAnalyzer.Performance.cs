@@ -10,9 +10,9 @@ using Microsoft.CodeAnalysis.Operations;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// The rules for code that works but does more than it needs (EECS025-EECS033) and EECS034: what a [ForEach] method
-/// declares and does per row, allocations in code that runs every update, structural changes and queries one call could
-/// make, and the generated members. A rule whose code costs is a warning (EECS025-EECS032), the generated member is a
+/// The rules for code that works but does more than it needs (EECS025-EECS033, EECS039, EECS046, EECS052) and EECS034:
+/// what a [ForEach] method declares and does per row, allocations in code that runs every update, structural changes
+/// and queries one call could make, a component added right after its entity is created, and the generated members. A rule whose code costs is a warning (EECS025-EECS032), the generated member is a
 /// suggestion (the same call at the same cost, shorter) and an update inside a system an error. Each is reported only where the cheaper form does the
 /// same thing; the code fixes (EasyEcs.CodeFixes) apply the replacement the analyzer computed, so the analyzer stays
 /// the only place that decides.
@@ -118,6 +118,14 @@ public sealed partial class EasyEcsAnalyzer
         "changed. Read<T1..Tn> walks the same rows with ref readonly items and stamps nothing.",
         helpLinkUri: Help("EECS046"));
 
+    public static readonly DiagnosticDescriptor CreateThenSet = new("EECS052", "A component added right after the entity is created",
+        "'{0}' adds {1} to the entity created just before, so it is placed twice; '{2}' creates it with the component",
+        Category, DiagnosticSeverity.Warning, true,
+        "CreateEntity and Instantiate place the entity in the table of the components they are given. A Set of another " +
+        "component on the next line moves it again: a second row copy, and a table on the way that nothing else may " +
+        "use. Given to the creation, the component lands in the final table with the others.",
+        helpLinkUri: Help("EECS052"));
+
     /// <summary>Property keys of the diagnostics' code fixes: what the analyzer decided, the fix only applies it.</summary>
     public const string FixKind = "Fix", FixTitle = "Title", Replace = "Replace", Insert = "Insert", RemoveOthers = "Remove", WithType = "With";
 
@@ -175,6 +183,7 @@ public sealed partial class EasyEcsAnalyzer
             start.RegisterOperationAction(c => AnalyzeItem(c), OperationKind.PropertyReference);
             start.RegisterOperationAction(c => AnalyzeComparison(c, core), OperationKind.Binary);
             start.RegisterOperationAction(c => AnalyzeLoop(c, core), OperationKind.Loop);
+            start.RegisterOperationAction(c => AnalyzeCreation(c, core), OperationKind.VariableDeclarator);
         });
 
     // ---------------- [ForEach] methods and OnUpdate: parameters, lookups, allocations ----------------
@@ -501,7 +510,7 @@ public sealed partial class EasyEcsAnalyzer
 
     /// <summary>
     /// The component, singleton or buffer a generated member is for: the type named by the member's name without its
-    /// prefix (Has, Is, TryGet, Write, GetOrAdd, Set, Remove, Disable, Enable), in the generated class's namespace.
+    /// prefix (Has, Is, TryGet, Write, GetOrAdd, Set, Remove, Disable, Enable, Add, Unlink, Links, In), in the generated class's namespace.
     /// </summary>
     private static ITypeSymbol? Named(ISymbol member, Core core)
     {
@@ -511,7 +520,7 @@ public sealed partial class EasyEcsAnalyzer
         string name = member.Name;
         if (name.StartsWith("Is") && name.EndsWith("Disabled") && name.Length > "IsDisabled".Length) name = name.Substring(2, name.Length - 10);
         if (name.StartsWith("Set") && name.EndsWith("IfChanged") && name.Length > "SetIfChanged".Length) name = name.Substring(0, name.Length - 9);
-        foreach (var prefix in new[] { "", "Has", "Is", "TryGet", "Write", "GetOrAdd", "Set", "Remove", "Disable", "Enable", "Add", "Links" })
+        foreach (var prefix in new[] { "", "Has", "Is", "TryGet", "Write", "GetOrAdd", "Set", "Remove", "Disable", "Enable", "Add", "Unlink", "Links", "In" })
         {
             if (!name.StartsWith(prefix) || name.Length == prefix.Length) continue;
             string type = name.Substring(prefix.Length);
@@ -927,13 +936,15 @@ public sealed partial class EasyEcsAnalyzer
         string? filter = query.Arguments.FirstOrDefault(a => !a.IsImplicit)?.Value.Syntax.ToString();
         var statement = Single(loop.Body);
 
-        // EECS046: a query that only reads tracked components.
+        // EECS046: a query that only reads tracked components. The fix renames the call; a loop variable typed by hand
+        // (QueryItem<...> item) would need its type changed too, so it gets the fix only when declared with 'var'.
         if (query.TargetMethod.Name == "Query" && item != null && ReadsOnly(loop.Body, item)
             && types.Where(t => Symbols.Implements(t, Symbols.TrackChanges)).Select(t => t.ToMinimalDisplayString(model, at)).ToArray() is { Length: > 0 } tracked
             && query.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name: GenericNameSyntax queried } })
         {
             string read = "Read" + queried.TypeArgumentList;
-            context.ReportDiagnostic(Diagnostic.Create(ReadOnlyQuery, queried.GetLocation(), Fix(read, "Read without stamping"),
+            bool implicitlyTyped = loop.Syntax is not ForEachStatementSyntax { Type: { IsVar: false } };
+            context.ReportDiagnostic(Diagnostic.Create(ReadOnlyQuery, queried.GetLocation(), implicitlyTyped ? Fix(read, "Read without stamping") : null,
                 queried.ToString(), string.Join(", ", tracked), $"{world}.{read}"));
         }
 
@@ -986,7 +997,8 @@ public sealed partial class EasyEcsAnalyzer
             case "Remove" when component != null && call.Arguments.All(a => a.IsImplicit):
                 (bulk, call2, verb) = ("RemoveAll", $"RemoveAll<{T()}>({with})", "removes a component from");
                 break;
-            case "Disable" when component != null:
+            // ChildOf and cleanup components cannot be disabled, by one call or by all (EECS048).
+            case "Disable" when component != null && Disableable(component):
                 (bulk, call2, verb) = ("DisableAll", $"DisableAll<{T()}>({with})", "disables a component of");
                 break;
             case "Enable" when component != null:
@@ -1251,4 +1263,45 @@ public sealed partial class EasyEcsAnalyzer
     private static bool IsCount(IOperation operation, Core core) =>
         Unwrap(operation) is IInvocationOperation { TargetMethod: { Name: "Count", TypeArguments.Length: > 0 } method, Instance: not null }
         && core.Is(method.ContainingType, core.World);
+
+    // ---------------- EECS052: a component added right after the creation ----------------
+
+    /// <summary>
+    /// EECS052: <c>var e = world.CreateEntity(a);</c> (or <c>Instantiate(prefab, …)</c>) followed by <c>e.Set(b)</c> /
+    /// <c>e.SetB(…)</c> of a component the creation does not give. Left out: a grouped component (its value picks
+    /// the table), the world's own tags (EECS045), values that call anything or read the entity (they would run before
+    /// the creation), and creations of nine components already.
+    /// </summary>
+    private static void AnalyzeCreation(OperationAnalysisContext context, Core core)
+    {
+        var declarator = (IVariableDeclaratorOperation)context.Operation;
+        if (declarator.Symbol.RefKind != RefKind.None || Unwrap(declarator.Initializer?.Value) is not IInvocationOperation create
+            || !core.Is(create.TargetMethod.ContainingType, core.World) || create.TargetMethod.Name is not ("CreateEntity" or "Instantiate")
+            || !core.Is(create.TargetMethod.ReturnType, core.Entity) || create.Instance == null
+            || create.TargetMethod.Name == "Instantiate" && create.Arguments.Skip(1).Any(a => a.Parameter?.RefKind != RefKind.In)
+            || create.Syntax is not InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax created } creation
+            || declarator.Parent?.Parent is not IVariableDeclarationGroupOperation { Parent: IBlockOperation block } statement) return;
+        int at = block.Operations.IndexOf(statement);
+        if (at + 1 >= block.Operations.Length || block.Operations[at + 1] is not IExpressionStatementOperation { Operation: IInvocationOperation set } next
+            || Symbols.Receiver(set) is not ILocalReferenceOperation target || !SymbolEqualityComparer.Default.Equals(target.Local, declarator.Symbol)) return;
+
+        var method = set.TargetMethod;
+        bool generated = Symbols.IsGenerated(method) && Symbols.IsGeneratedWriter(method) && method.Name.StartsWith("Set") && !method.Name.EndsWith("IfChanged");
+        if (!generated && !(core.Is(method.ContainingType, core.Entity) && method is { Name: "Set", TypeArguments.Length: 1 } && set.Arguments.Length == 1)) return;
+        var component = generated ? Named(method, core) : method.TypeArguments[0];
+        var given = create.TargetMethod.TypeArguments;
+        if (component is not INamedTypeSymbol || given.Length >= Symbols.MaxComponents || given.Contains(component, SymbolEqualityComparer.Default)
+            || Symbols.Implements(component, Symbols.Group) || IsWorldTag(component)
+            || !Invariant(set.Arguments.Where(a => !a.IsImplicit).Select(a => a.Value), next, declarator.Symbol)) return;
+
+        var model = create.SemanticModel!;
+        int position = create.Syntax.SpanStart;
+        if (SetValue(set, component, generated, model, position) is not { } value) return;
+        string name = created.Name is GenericNameSyntax typed ? typed.Identifier.ValueText : created.Name.ToString(); // CreateEntity<P>(…): inferred again
+        string text = $"{created.Expression}.{name}({string.Join(", ", creation.ArgumentList.Arguments.Select(a => a.ToString()).Append(value))})";
+        var fix = Binds(model, create.Syntax, text, out var bound) && bound is IMethodSymbol { Name: "CreateEntity" or "Instantiate" }
+            ? Fix(text, "Create it with the component").Add(RemoveOthers, "") : null;
+        context.ReportDiagnostic(Diagnostic.Create(CreateThenSet, create.Syntax.GetLocation(), fix is null ? null : [next.Syntax.GetLocation()], fix,
+            Shorten(set.Syntax), component.ToMinimalDisplayString(model, position), Shorten(SyntaxFactory.ParseExpression(text))));
+    }
 }

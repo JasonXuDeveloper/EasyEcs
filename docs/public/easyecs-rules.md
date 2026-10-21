@@ -27,7 +27,8 @@ available as Markdown: add `.md` to its URL.
   `EnsureCapacity(n)` on it (and `world.Reserve<T…>(n)` on the world) before a wave of known size.
 - An external resource (a socket, a seat) lives in an `ICleanupComponent`: destroying the entity keeps it with the
   `Destroyed` tag until a system releases the resource and removes the component. Never set or remove `Destroyed` or
-  `Disabled<T>` yourself (EECS045): `Destroy`, `Disable<T>()` and `Enable<T>()` do.
+  `Disabled<T>` yourself (EECS045): `Destroy`, `Disable<T>()` and `Enable<T>()` do. A cleanup component and `ChildOf`
+  are never disabled (EECS048).
 - An optional component is a `Maybe<T>` parameter, but not in the hottest loops: there, write two methods with
   `[With<T>]` and `[Without<T>]`.
 
@@ -45,7 +46,8 @@ available as Markdown: add `.md` to its URL.
   A `[Removed<T>]` method does not take `T` (EECS016). On a system group struct, for all its systems: `[With<T>]`,
   `[Without<T>]`, `[WithAny<T>]` (on any other struct: EECS023), or `IGroupWith<T>` / `IGroupWithout<T>` implemented
   by the group or an interface it implements; a generic group interface needs the interfaces, as an attribute cannot
-  name a type parameter. `[Changed<T>]` / `[Removed<T>]` go on methods only.
+  name a type parameter. `[Changed<T>]` / `[Removed<T>]` go on methods only. A method never excludes what it or its
+  group requires (EECS049), and a `QueryFilter` names one `InGroup` (EECS050).
 - React to changes with `[Changed<T>]` / `[Removed<T>]` on an `ITrackChanges` component, not with dirty flags.
   For "any of these changed" use `[ChangedAny<A, B>]` / `[RemovedAny<A, B>]` (one attribute, not several `Changed`,
   which mean all of them).
@@ -84,7 +86,8 @@ available as Markdown: add `.md` to its URL.
 
 - A world belongs to one owner thread. Systems, queries and structural changes run there; other threads post work to
   it (EECS014). Use one world per thread for more cores, or `ParallelSystems` / parallel `[ForEach]`.
-- Never keep a `ref` to a component across an `await` or a structural change of another entity; read it again.
+- Never keep a `ref` to a component across an `await` or a structural change; read it again (EECS047). Never call
+  `world.Update()` inside a query loop of that world (EECS051).
 - `Query` results are ref structs: no `await` inside the loop, no storing items, no LINQ over them.
 - A loop that only reads tracked components walks `world.Read<T…>()`, not `Query`: a `Query` item stamps every row
   it visits, so `[Changed<T>]` readers would see rows nobody changed (EECS046).
@@ -95,11 +98,14 @@ available as Markdown: add `.md` to its URL.
 
 ## Performance
 
-- An `EECS` warning means the code costs (EECS025 to EECS032, and EECS017, EECS018, EECS020), loses a write
-  (EECS037, EECS038) or stamps rows it only reads (EECS046): apply its fix. The suggestions, EECS033 and EECS039, are
+- An `EECS` warning means the code costs (EECS025 to EECS032, EECS052, and EECS017, EECS018, EECS020), loses a write
+  (EECS037, EECS038), stamps rows it only reads (EECS046) or uses a ref after a structural change (EECS047): apply
+  its fix. The suggestions, EECS033 and EECS039, are
   the same cost written shorter. An `EECS` error means the code cannot work.
 - Hot paths allocate nothing: no LINQ, closures, boxing, string formatting or `params object[]` in systems (EECS028).
 - Keep a `QueryFilter` in a `static readonly` field when a query runs every tick.
+- Give a new entity its components in `CreateEntity(a, b, c)` / `Instantiate(prefab, a, b)`, not a `Set` right
+  after (EECS052).
 - Prefer `[ForEach]` methods over hand-written `Query` loops; use bulk calls (`SetAll`, `RemoveAll`, `DisableAll`,
   `EnableAll`, `CreateEntities`, `DestroyAll`, `DestroyEntities(ids)`) for many entities at once, not a loop over a query (EECS030), and
   `CreateEntities` or `Reserve` before creating many entities in a loop (EECS031). Ask `world.Any<T>()` and

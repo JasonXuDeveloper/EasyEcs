@@ -35,7 +35,7 @@ public class GeneratorTests
     internal static async Task<Diagnostic[]> Costs(params string[] sources) =>
         (await Analyze(sources)).Where(d => IsPerformance(d.Id) || d.Id == "EECS034").OrderBy(d => d.Location.SourceSpan.Start).ToArray();
 
-    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id is "EECS039" or "EECS046";
+    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id is "EECS039" or "EECS046" or "EECS052";
 
     private static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
     {
@@ -439,6 +439,9 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(Entity e) { if (e.TryGet<P>(out var p)) p.V = 1; } }", "EECS038")]          // TryGet's copy
     [TestCase("public static class U { public static void F(Entity e) { var p = e.P; if (p.V > 0) p.V = 0; } }", "EECS038")]              // read before, not after
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, Maybe<Q> q) { if (!q.HasValue) return; var v = q.Value; v.V = p.V; } }", "EECS038")]
+    [TestCase("public static class U { public static System.Action F(Entity e) => () => { var p = e.Get<P>(); p.V = 1; }; }", "EECS038")]        // in a lambda
+    [TestCase("public static class U { public static void F(Entity e) { void G() { var p = e.P; p.V = 2; } G(); } }", "EECS038")]                  // in a local function
+    [TestCase("public static class U { public static void F(Entity e) { var c = e.Get<Counter>(); c.Bump(); } }", "EECS038")]                      // a mutating method
     // EECS040: SetIfChanged on a type it cannot compare.
     [TestCase("public struct Named : IComponent, ITrackChanges { public string Name; } public static class U { public static bool F(Entity e) => e.SetIfChanged(new Named()); }", "EECS040")]
     [TestCase("public struct Named : IComponent, ITrackChanges { public string Name; } public class S : EcsSystem { [ForEach] static void A(Mut<Named> n, in P p) { if (p.V > 0) n.SetIfChanged(default); } }", "EECS040")]
@@ -452,8 +455,12 @@ public class GeneratorTests
     [TestCase("public struct J : IForEachEntity<P> { public void Execute(Entity e, ref P p) { if (p.V < 0) e.World.TrimExcess(); } }", "EECS041")]
     // EECS042: an indexed component changed while its index is walked.
     [TestCase("public static class U { public static void F(World w) { foreach (var e in w.Index<Owned, EntityId>().Find(default)) e.Set(new Owned()); } }", "EECS042")]
-    [TestCase("public static class U { public static void F(World w) { foreach (var e in w.OwnedIndex.Find(default)) e.RemoveOwned(); } }", "EECS042")]  // generated
-    [TestCase("public static class U { public static void F(World w, EntityId id) { foreach (var c in w.Children(id)) c.Disable<ChildOf>(); } }", "EECS042")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var e in w.OwnedIndex.Find(default)) e.SetOwned(default); } }", "EECS042")]  // generated
+    [TestCase("public static class U { public static void F(World w, EntityId id, EntityId other) { foreach (var c in w.Children(id)) c.Set(new ChildOf(other)); } }", "EECS042")]
+    [TestCase("public static class U { public static void F(World w, EntityId id, EntityId other) { foreach (var c in w.Descendants(id)) c.Set(new ChildOf(other)); } }", "EECS042")]
+    [TestCase("public static class U { public static void F(World w, EntityId a, EntityId b) { foreach (var e in w.Relations<Rel>().Find(a)) e.AddRelation(new Rel(b)); } }", "EECS042")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var e in w.OwnedIndex.Find(default)) w.CreateEntity(new Owned()); } }", "EECS042")] // a creation
+    [TestCase("public static class U { public static void F(World w, EntityId a, EntityId b) { foreach (var e in w.OwnedIndex.Find(a)) { e.Set(new Owned { Owner = b }); if (b.Index > 0) break; } } }", "EECS042")]
     [TestCase("public struct Rank : IComponent, IIndexed<int> { public int V; public readonly int Key => V; } public static class U { public static void F(World w) { foreach (var e in w.RankIndex.Ascending()) e.Set(new Rank { V = 1 }); } }", "EECS042")]
     // EECS043: a record struct key that prints itself.
     [TestCase("public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; }", "EECS043")]
@@ -473,6 +480,33 @@ public class GeneratorTests
     [TestCase("public static class U { public static int F(World w) => w.RemoveAll<Disabled<P>>(); }", "EECS045")]
     [TestCase("public static class U { public static Prefab F() => new Prefab().Set(new Destroyed()); }", "EECS045")]
     [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<Disabled<Q>>(); }", "EECS045")]
+    // EECS047: a ref used after a structural change.
+    [TestCase("public static class U { public static void F(Entity e) { ref var p = ref e.Get<P>(); e.Set(new Q()); p.V = 1; } }", "EECS047")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) { item.Entity.Set(new Q()); item.Component1.V = 1; } } }", "EECS047")]
+    [TestCase("public static class U { public static void F(World w, Entity e) { ref var p = ref e.P; w.CreateEntity(new P()); p.V = 1; } }", "EECS047")]
+    [TestCase("public static class U { public static void F(World w, Entity e) { ref int v = ref e.Get<P>().V; w.Update(); v = 1; } }", "EECS047")]
+    [TestCase("public static class U { public static int F(Entity e) { ref readonly var p = ref e.Read<P>(); e.Set(new Boss()); return p.V; } }", "EECS047")]
+    [TestCase("public static class U { public static void F(Entity e, Entity other) { ref var p = ref e.Get<P>(); other.Destroy(); p.V = 1; } }", "EECS047")] // the last row moves into the hole
+    // EECS048: a component that cannot be disabled.
+    [TestCase("public static class U { public static void F(Entity e) => e.Disable<ChildOf>(); }", "EECS048")]
+    [TestCase("public static class U { public static void F(Entity e) => e.Disable<Lease>(); }", "EECS048")]
+    [TestCase("public static class U { public static int F(World w) => w.DisableAll<ChildOf>(); }", "EECS048")]
+    [TestCase("public static class U { public static void F(World w, EntityId id) { foreach (var c in w.Children(id)) c.Disable<ChildOf>(); } }", "EECS048")]
+    // EECS049: filters no entity passes.
+    [TestCase("public class S : EcsSystem { [ForEach, With<Q>, Without<Q>] static void A(ref P p) => p.V++; }", "EECS049")]
+    [TestCase("public class S : EcsSystem { [ForEach, Without<P>] static void A(ref P p) => p.V++; }", "EECS049")]
+    [TestCase("[With<Q>] public struct G : ISystemGroup; [UpdateInGroup<G>] public class S : EcsSystem { [ForEach, Without<Q>] static void A(ref P p) => p.V++; }", "EECS049")]
+    [TestCase("public struct G : ISystemGroup, IGroupWithout<Q>; [UpdateInGroup<G>] public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) => p.V += q.V; }", "EECS049")]
+    [TestCase("public static class R { [ForEach, Without<T>] static void A(Mut<T> t) => t.Write().V++; }", "EECS049")]
+    [TestCase("public class S : EcsSystem { [ForEach, Changed<T>, Without<T>] static void A(ref P p) => p.V++; }", "EECS049")]
+    // EECS050: a second group in one filter.
+    [TestCase("public static class U { public static QueryFilter F() => QueryFilter.Create().InGroup<Zone>(1).InGroup<Zone>(2); }", "EECS050")]
+    [TestCase("public static class U { public static QueryFilter F(int a) => QueryFilter.Create().InGroup<Zone>(a).With<P>().InGroup<Area>(a); }", "EECS050")]
+    [TestCase("public static class U { public static QueryFilter F() => QueryFilter.Create().InZone(1).InZone(2); }", "EECS050")]  // generated
+    // EECS051: a world update during a pass (EECS034 from a system).
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Read<P>()) w.Update(); } }", "EECS051")]
+    [TestCase("public static class R { [ForEach] static void A(World w, ref P p) { if (p.V < 0) w.Update(); } }", "EECS051")]
+    [TestCase("public class S : EcsSystem { protected override void OnUpdate() { foreach (var item in World.Read<P>()) World.Update(); } }", "EECS034")]
     // EECS036: a plain component with two keys.
     [TestCase("public struct Seat : IComponent, IIndexed<int>, IIndexed<string> { readonly int IIndexed<int>.Key => 0; readonly string IIndexed<string>.Key => \"\"; }", "EECS036")]
     // EECS014: continuations, method groups, timers, and TrimExcess.
@@ -527,10 +561,46 @@ public class GeneratorTests
     [TestCase("public class U { World _w = new(); void Work() => _w.CreateEntity(); public void F() { Work(); _w.CreateEntity(); } }")]         // no hand-off
     [TestCase("public static class U { static void Work(object s) { using var w = new World(); w.CreateEntity(); } public static void F() => System.Threading.ThreadPool.QueueUserWorkItem(Work); }")] // a world of its own
     [TestCase("public static class U { public static void F(Entity e) => e.Set(new DynamicBuffer<EntityId>()); }")]
+    // A 'ref readonly' local reads (EECS037), a readonly method reads and a copy written back is kept (EECS038).
+    [TestCase("public struct J : IForEach<T> { public int N; public void Execute(ref T t) { ref readonly var x = ref t; N += x.V; } public static int Writes => 0; }")]
+    [TestCase("public static class U { public static int F(Entity e) { var c = e.Get<Counter>(); return c.Peek(); } }")]
+    [TestCase("public static class U { public static void F(Entity e) { var c = e.Get<Counter>(); c.Bump(); e.Set(c); } }")]
+    // EECS041 / EECS042: a walk left right after the change, removals, dropped links.
+    [TestCase("public static class U { public static void F(World w, EntityId a, EntityId b) { foreach (var e in w.OwnedIndex.Find(a)) { e.Set(new Owned { Owner = b }); break; } } }")]
+    [TestCase("public static class U { public static Entity F(World w, EntityId a, EntityId b) { foreach (var e in w.OwnedIndex.Find(a)) { e.Set(new Owned { Owner = b }); return e; } return default; } }")]
+    [TestCase("public static class U { public static void F(World w, EntityId a) { foreach (var e in w.OwnedIndex.Find(a)) { if (e.Id.Index > 3) { e.Set(new Owned()); throw new System.InvalidOperationException(); } } } }")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var e in w.OwnedIndex.Find(default)) e.RemoveOwned(); } }")]
+    [TestCase("public static class U { public static void F(World w, EntityId a) { foreach (var e in w.Relations<Rel>().Find(a)) e.RemoveRelation<Rel>(a); } }")]
+    [TestCase("public static class U { public static void F(World w, EntityId id) { foreach (var c in w.Descendants(id)) c.Remove<ChildOf>(); } }")]
+    // EECS043: a record that prints itself its own way.
+    [TestCase("public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; public override string ToString() => $\"Shop {Id}\"; }")]
+    [TestCase("public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; private bool PrintMembers(System.Text.StringBuilder b) { b.Append(Id); return true; } }")]
+    // EECS047: no move (a removal flips a bit, a Set of the component the ref holds overwrites it), a branch, a ref taken again.
+    [TestCase("public static class U { public static void F(Entity e) { ref var p = ref e.Get<P>(); e.Remove<Q>(); p.V = 1; } }")]
+    [TestCase("public static class U { public static void F(Entity e) { ref var p = ref e.Get<P>(); e.Set(new P { V = 2 }); p.V++; } }")]
+    [TestCase("public static class U { public static void F(Entity e) { ref var p = ref e.Get<P>(); if (p.V > 0) e.Set(new Q()); else p.V = 1; } }")]
+    [TestCase("public static class U { public static void F(Entity e) { ref var p = ref e.Get<P>(); e.Set(new Q()); p = ref e.Get<P>(); p.V = 1; } }")]
+    [TestCase("public static class U { public static void F(Entity e) { ref var p = ref e.Get<P>(); p.V = 1; e.Set(new Q()); } }")]
+    [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) { item.Entity.Destroy(); n += item.Component1.V; } return n; } }")] // a hole: the row stays
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) { item.Component1.V = 1; item.Entity.Set(new Q()); } } }")]
+    // EECS048-EECS051: the forms that work.
+    [TestCase("public static class U { public static int F(World w) => w.DisableAll<P>() + w.EnableAll<ChildOf>(); }")]
+    [TestCase("public class S : EcsSystem { [ForEach, With<Q>, Without<Boss>] static void A(ref P p) => p.V++; }")]
+    [TestCase("[Without<Q>] public struct G : ISystemGroup; [UpdateInGroup<G>] public class S : EcsSystem { [ForEach, With<Boss>] static void A(ref P p) => p.V++; }")]
+    [TestCase("public static class U { public static QueryFilter F(int a, int b) => QueryFilter.Create().InGroup<Zone>(1).InGroup<Zone>(1).InGroup<Zone>(a).InZone(b); }")]
+    [TestCase("public static class U { public static void F(World w, World other) { foreach (var item in w.Query<P>()) other.Update(); w.Update(); } }")]
     public async Task UsageValidCodeIsNotReported(string source)
     {
         var errors = await Diagnose(Components, Extra, source);
         Assert.That(errors, Is.Empty);
+    }
+
+    [TestCase("foreach (var item in w.Read<P>()) w.TrimExcess();", "this foreach over Read")]
+    [TestCase("foreach (var item in w.Query<P>()) w.TrimExcess();", "this foreach over Query")]
+    public async Task ARefusedCallNamesTheLoopItRunsIn(string loop, string named)
+    {
+        var diagnostics = await Analyze([Components, "public static class U { public static void F(World w) { " + loop + " } }"]);
+        Assert.That(diagnostics.Single(d => d.Id == "EECS041").GetMessage(), Does.Contain(named));
     }
 
     [Test]
@@ -1212,6 +1282,10 @@ public class GeneratorTests
         public struct Counter : IComponent { public int V; public void Bump() => V++; public readonly int Peek() => V; }
         public struct Boss : IComponent;
         public struct Loot { public int Item; }
+        public record struct Zone(int Id) : IComponent, IGroup { public readonly int Group => Id; }
+        public record struct Area(int Id) : IComponent, IGroup { public readonly int Group => Id; }
+        public record struct Rel(EntityId Target) : IRelation;
+        public struct Lease : ICleanupComponent { public int V; }
         public static class Helpers { public static void Inc(ref int v) => v++; public static int Look(in P p) => p.V; }
         """;
 
@@ -1224,6 +1298,7 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, ref Q q) => p.V = Helpers.Look(q.V == 0 ? p : default); }", "EECS025")]
     [TestCase("public static class U { public static int F(Entity e) => e.Get<T>().V; }", "EECS025")]
     [TestCase("public static class U { public static int F(Entity e) => e.WriteT().V; }", "EECS025")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, ref Clock c) { ref readonly var x = ref t; c.Ticks += x.V; } }", "EECS025")] // a 'ref readonly' local reads
     // EECS026: a parameter the method does not use.
     [TestCase("public class S : EcsSystem { [ForEach] static void A(in P p, ref Clock c) => c.Ticks++; }", "EECS026")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V++; }", "EECS026")]
@@ -1374,6 +1449,12 @@ public class GeneratorTests
     [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<T, P>()) n += item.T.V + item.P.V; return n; } }", "EECS046")]
     [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<DynamicBuffer<P>>()) n += item.Component1.Count; return n; } }", "EECS046")]
     [TestCase("public static class U { public static void F(World w, System.Collections.Generic.List<Entity> all) { foreach (var item in w.Query<T>()) all.Add(item.Entity); } }", "EECS046")]
+    [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<T>()) { ref readonly var t = ref item.Component1; n += t.V; } return n; } }", "EECS033", "EECS046")]
+    [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (QueryItem<T> item in w.Query<T>()) n += item.T.V; return n; } }", "EECS046")] // typed by hand: no fix
+    // EECS052: a component added right after the entity is created.
+    [TestCase("public static class U { public static void F(World w) { var e = w.CreateEntity(new P()); e.Set(new Q { V = 1 }); } }", "EECS052")]
+    [TestCase("public static class U { public static void F(World w) { var e = w.CreateEntity(); e.SetBoss(); } }", "EECS052")]
+    [TestCase("public static class U { public static void F(World w, Prefab p) { Entity e = w.Instantiate(p, new P()); e.Set(new Q()); } }", "EECS052")]
     public async Task UsageCostsAreReported(string source, params string[] ids)
     {
         var costs = await Costs(Components, Extra, source);
@@ -1393,6 +1474,12 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<T, P>()) item.P.V = item.T.V; } }")]           // writes P: a Query
     [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) n += item.P.V; return n; } }")]  // untracked
     [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Read<T>()) n += item.T.V; return n; } }")]   // already Read
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P, ChildOf>()) item.Entity.Disable<ChildOf>(); } }")] // no DisableAll (EECS048)
+    [TestCase("public static class U { public static void F(World w) { var e = w.CreateEntity(new P()); e.Set(new P { V = 1 }); } }")]            // given: overwritten
+    [TestCase("public static class U { public static void F(World w) { var e = w.CreateEntity(new P()); e.Set(new Link { Target = e }); } }")]   // reads the entity
+    [TestCase("public static class U { public static void F(World w) { var e = w.CreateEntity(new P()); e.Set(new Q { V = w.Count<P>() }); } }")] // a call: runs after the creation
+    [TestCase("public static class U { public static void F(World w) { var e = w.CreateEntity(new P()); e.SetZone(2); } }")]               // grouped
+    [TestCase("public static class U { public static void F(World w) { var e = w.CreateEntity(new P()); w.Update(); e.Set(new Q()); } }")]       // not right after
     public async Task UsageCheapCodeIsNotReported(string source)
     {
         var costs = await Costs(Components, Extra, source);
@@ -1410,6 +1497,12 @@ public class GeneratorTests
     [TestCase("EECS043", DiagnosticSeverity.Error)]
     [TestCase("EECS044", DiagnosticSeverity.Error)]
     [TestCase("EECS045", DiagnosticSeverity.Error)]
+    [TestCase("EECS047", DiagnosticSeverity.Warning)]
+    [TestCase("EECS048", DiagnosticSeverity.Error)]
+    [TestCase("EECS049", DiagnosticSeverity.Error)]
+    [TestCase("EECS050", DiagnosticSeverity.Error)]
+    [TestCase("EECS051", DiagnosticSeverity.Error)]
+    [TestCase("EECS052", DiagnosticSeverity.Warning)]
     public void UsageRulesHaveTheirSeverity(string id, DiagnosticSeverity severity) =>
         Assert.That(new EasyEcsAnalyzer().SupportedDiagnostics.Single(d => d.Id == id).DefaultSeverity, Is.EqualTo(severity));
 

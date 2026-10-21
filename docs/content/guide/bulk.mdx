@@ -243,7 +243,7 @@ and entity by entity (`BulkBenchmark`):
 | --- | --- | --- |
 | A bulk call inside a `[ForEach]` method without `Entity` or `World` | A structural change the pass did not plan for | [EECS013](/en/docs/guide/analyzer#eecs013) |
 | A bulk call from another thread | Races with the owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
-| `DisableAll` of a cleanup component or `ChildOf` | `InvalidOperationException` | At run time |
+| `DisableAll` of a cleanup component or `ChildOf` | `InvalidOperationException` | [EECS048](/en/docs/guide/analyzer#eecs048) |
 | `SetAll` with a value that should differ per entity | Every entity gets the same value | Use a `[ForEach]` system |
 | `Set` / `Remove` entity by entity over a query | The same result, one structural change per entity | [EECS030](/en/docs/guide/analyzer#eecs030) |
 | `CreateEntity` or `Instantiate(prefab)` in a counted loop | One creation per entity instead of one per wave | [EECS031](/en/docs/guide/analyzer#eecs031): `CreateEntities`, `Instantiate(prefab, span)` |

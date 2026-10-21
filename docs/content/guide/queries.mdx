@@ -547,8 +547,8 @@ Against Friflo.Engine.ECS on the same world: one component, two components scala
 | Structural change in a batch job | `InvalidOperationException`: the spans point into the tables | At run time ([EECS013](/en/docs/guide/analyzer#eecs013) for `[ForEach]` methods) |
 | A parallel job that writes a singleton or another entity | Races between chunks | Code review ([EECS010](/en/docs/guide/analyzer#eecs010) for `[ForEach]` methods) |
 | `Changed`, `Removed`, `ChangedAny` or `RemovedAny` with different ticks in one filter | `ArgumentException` | At run time |
-| A sliced filter (`Slice`) passed to `Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run` or a bulk call | `ArgumentException`: the call needs every matching row | At run time |
-| `Update()` called from inside a query loop of the same world | Undefined order of passes | Code review; [EECS034](/en/docs/guide/analyzer#eecs034) when called from a system |
+| A sliced filter (`Slice`) passed to `Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run` or a bulk call | `ArgumentException`: the call needs every matching row | [EECS044](/en/docs/guide/analyzer#eecs044) |
+| `Update()` called from inside a query loop of the same world | The update closes the loop's holes under it and the pass count goes below zero: `TrimExcess` throws until the next update | [EECS051](/en/docs/guide/analyzer#eecs051); [EECS034](/en/docs/guide/analyzer#eecs034) when called from a system |
 | An `entity.Run` job without `Writes` | The default (-1) stamps every tracked component the job takes | Declare `Writes` (`0` for a job that only reads) |
 | `INoStructuralChanges` on a `Run` job that changes structure | `InvalidOperationException` at the change | At run time |
 | Treating `false` from `Run` as "dead" | It also means a missing component or a filter that failed | Code review: test `IsAlive` |

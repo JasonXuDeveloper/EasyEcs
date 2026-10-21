@@ -335,9 +335,9 @@ singleton accesses (`MicroBenchmarks`):
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| Changing a copy (`var hp = e.Get<Health>()`) | The table is unchanged | Code review: `ref var` |
+| Changing a copy (`var hp = e.Get<Health>()`) | The table is unchanged | [EECS038](/en/docs/guide/analyzer#eecs038) (warning, with a code fix): `ref var` |
 | A `ref` local across an `await` | Does not compile | The C# compiler |
-| A `ref` kept after a structural change | Points at a stale copy or another entity's row | Code review: get it again |
+| A `ref` kept after a structural change | Points at a stale copy or another entity's row | [EECS047](/en/docs/guide/analyzer#eecs047) (warning) in one block: get it again |
 | A raw index stored instead of the `EntityId` | Names whichever entity reuses the index | Store the `EntityId`; `TryGetEntity` checks the version |
 | An `Entity` stored in a component | A managed column | [EECS017](/en/docs/guide/analyzer#eecs017) (warning) |
 | A `DynamicBuffer<T>` taken by value | Writes go to a shared list, unstamped | [EECS012](/en/docs/guide/analyzer#eecs012) |

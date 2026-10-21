@@ -16,8 +16,8 @@ namespace EasyEcs.CodeFixes;
 /// Code fixes for the diagnostics of EasyEcsAnalyzer that have one mechanical answer: a parameter's modifier, a
 /// missing <c>static</c>, a class that should be a struct, a filter or <c>Parallel = true</c> that cannot apply, a type
 /// the generated code cannot name, a parameter that only reads or is not used, and the replacements the performance
-/// rules computed (a bulk call, a generated member). Each reads the diagnostic's location, its additional locations
-/// and its properties, so the analyzer stays the only place that decides.
+/// rules computed (a bulk call, a generated member, a creation given one more component). Each reads the diagnostic's
+/// location, its additional locations and its properties, so the analyzer stays the only place that decides.
 /// </summary>
 [ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(EasyEcsCodeFixes)), Shared]
 public sealed class EasyEcsCodeFixes : CodeFixProvider
@@ -25,7 +25,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS018", "EECS022", "EECS023", "EECS025", "EECS026", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
-            "EECS038", "EECS039", "EECS043", "EECS046");
+            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 

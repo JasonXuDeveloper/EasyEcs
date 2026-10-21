@@ -61,7 +61,7 @@ dotnet add package EasyEcs        # net10.0 · source generator, analyzer and Ni
 - **Prefabs that stay out of your queries.** A `Prefab` is a recipe of component values that belongs to no world:
   `world.Instantiate(prefab)` spawns from it (a whole wave in one pass), and no system ever has to filter templates
   out. `entity.Clone()` copies a living entity.
-- **Mistakes fail the build.** The bundled analyzer (EECS002-EECS046, with code fixes) reports invalid `[ForEach]`
+- **Mistakes fail the build.** The bundled analyzer (EECS002-EECS052, with code fixes) reports invalid `[ForEach]`
   methods and systems, class components, stateful systems, systems that reference each other, batch methods mixing
   spans with per-entity parameters, parallel methods that would race, writes through read-only parameters, copied
   dynamic buffers, structural changes off the owner thread, indexed components written behind their index's back,
@@ -122,7 +122,7 @@ costs and when to use it).
 | [Errors](https://ecs.xgamedev.net/docs/guide/systems#errors) | `WorldOptions.SystemErrors`, `system.Error` | A failing system throws out of the update, or is switched off with its exception kept while the tick goes on. |
 | [Introspection](https://ecs.xgamedev.net/docs/guide/diagnostics) | `world.Describe()`, `entity.Describe()` | Tables, columns, rows and bytes; an entity's component values, for tools and debuggers. |
 | [Giving memory back](https://ecs.xgamedev.net/docs/guide/diagnostics) | `world.TrimExcess()` | After a peak: drop empty tables, shrink the others, release save and load buffers. |
-| [Analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) | EECS002-EECS046 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
+| [Analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) | EECS002-EECS052 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
 | [Threading and Native AOT](https://ecs.xgamedev.net/docs/guide/threading) | one owner thread per world; no reflection on hot paths | Many worlds per process, one per thread; AOT works with nothing to configure. |
 
 ## Example
@@ -381,7 +381,8 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   back by `SetAll`, reports no removals, and a moved entity leaves its cleanup components behind
   ([cleanup components](https://ecs.xgamedev.net/en/docs/guide/cleanup-and-disable#cleanup-components)).
 - **`AddSingleton` on an existing singleton throws** instead of resetting it; reset with `world.SetX(…)`.
-- **Analyzer rules up to EECS046** (calls that compile but throw or lose writes), and a fix: parallel `[ForEach]` methods that write tracked components no longer
+- **Analyzer rules up to EECS052** (calls that compile but throw, lose writes or keep a ref across a structural
+  change; filters that never match; a `Set` right after a creation), and a fix: parallel `[ForEach]` methods that write tracked components no longer
   lose change stamps. Upgrading: the [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-6-to-v4-7).
 
 ## What's new in 4.6

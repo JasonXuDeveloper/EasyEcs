@@ -323,9 +323,9 @@ Bob 的结果指向 `1v1`，而索引 1 上现在是 `1v2`，所以 `TryGetEntit
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 改副本（`var hp = e.Get<Health>()`） | 表里的值没变 | 代码审查：写成 `ref var` |
+| 改副本（`var hp = e.Get<Health>()`） | 表里的值没变 | [EECS038](/zh/docs/guide/analyzer#eecs038)（警告，有代码修复）：写成 `ref var` |
 | `ref` 局部变量跨过 `await` | 编译不过 | C# 编译器 |
-| 结构变更之后还在用之前的 `ref` | 指向过期副本或别的实体的行 | 代码审查：重新获取 |
+| 结构变更之后还在用之前的 `ref` | 指向过期副本或别的实体的行 | 同一个块里由 [EECS047](/zh/docs/guide/analyzer#eecs047)（警告）报出：重新获取 |
 | 只存原始索引，不存 `EntityId` | 会指向之后复用该索引的实体 | 存 `EntityId`，`TryGetEntity` 会校验版本 |
 | 组件里存 `Entity` | 变成托管列 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告） |
 | 按值拿 `DynamicBuffer<T>` | 写进共享的列表，也不打 tick | [EECS012](/zh/docs/guide/analyzer#eecs012) |

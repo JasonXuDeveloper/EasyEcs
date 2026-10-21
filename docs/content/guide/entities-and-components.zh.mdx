@@ -388,7 +388,7 @@ id 不再指向任何实体：World 说它已经不存活。
 | --- | --- | --- |
 | 用 class 实现 `IComponent` | 编译不过 | [EECS006](/zh/docs/guide/analyzer#eecs006) |
 | 组件里放 `Entity` 字段 | 变成托管列，GC 要扫描，存档写不了 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告） |
-| 改副本：`var hp = e.Get<Health>(); hp.Value--;` | 表里的值没变 | 代码审查：写成 `ref var hp = ref …` |
+| 改副本：`var hp = e.Get<Health>(); hp.Value--;` | 表里的值没变 | [EECS038](/zh/docs/guide/analyzer#eecs038)（警告，有代码修复）：写成 `ref var hp = ref …` |
 | 只存 `id.Index` | 会指向之后复用这个索引的实体 | 存 `EntityId`，`TryGetEntity` 会校验版本 |
 | 用 `Get<T>()` 读被追踪的组件 | 这一行被记成已写入，所有 `[Changed<T>]` 读取方都会访问它 | [EECS025](/zh/docs/guide/analyzer#eecs025)；生成的属性是 `ref readonly` |
 | 通过 `Get<T>()` 写索引组件 | 索引里还是旧键 | [EECS015](/zh/docs/guide/analyzer#eecs015) |

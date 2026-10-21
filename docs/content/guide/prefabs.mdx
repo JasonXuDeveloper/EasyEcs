@@ -417,7 +417,7 @@ destroyed:
 | Filling a `DynamicBuffer<T>` value before `Set` | Every instance shares that list | [EECS012](/en/docs/guide/analyzer#eecs012); use `SetLoot(...)` |
 | `Instantiate(prefab)` in a counted loop | One copy per call instead of one wave | [EECS031](/en/docs/guide/analyzer#eecs031): `Instantiate(prefab, span)` |
 | `Instantiate(prefab, values)` in a counted loop with the same values | One copy per call | [EECS031](/en/docs/guide/analyzer#eecs031): the batch form with the values |
-| `Instantiate` then `Set` of a missing component | A row copy, then a row move | Code review: give it to `Instantiate` |
+| `Instantiate` then `Set` of a missing component | A row copy, then a row move | [EECS052](/en/docs/guide/analyzer#eecs052) (warning, with a code fix): give it to `Instantiate` |
 | A prefab with a unique key instantiated twice, or in a batch of more than one | `InvalidOperationException`, nothing created | Give each instance its own key |
 | `Instantiate` on a thread that does not own the world | Races with the owner | [EECS014](/en/docs/guide/analyzer#eecs014) |
 | `Instantiate` in a `[ForEach]` method without `Entity` or `World` | The pass assumes no structural change | [EECS013](/en/docs/guide/analyzer#eecs013) |

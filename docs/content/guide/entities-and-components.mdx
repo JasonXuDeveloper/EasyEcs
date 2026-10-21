@@ -420,7 +420,7 @@ fighters then lifting it (two structural changes each):
 | --- | --- | --- |
 | A class implementing `IComponent` | Does not compile | [EECS006](/en/docs/guide/analyzer#eecs006) |
 | An `Entity` field in a component | A managed column, scanned by the GC, not saved | [EECS017](/en/docs/guide/analyzer#eecs017) (warning) |
-| Changing a copy: `var hp = e.Get<Health>(); hp.Value--;` | The table is unchanged | Code review: `ref var hp = ref …` |
+| Changing a copy: `var hp = e.Get<Health>(); hp.Value--;` | The table is unchanged | [EECS038](/en/docs/guide/analyzer#eecs038) (warning, with a code fix): `ref var hp = ref …` |
 | Storing `id.Index` alone | Names whichever entity reuses the index | Store the `EntityId`; `TryGetEntity` checks the version |
 | Reading a tracked component with `Get<T>()` | The row counts as written, every `[Changed<T>]` reader visits it | [EECS025](/en/docs/guide/analyzer#eecs025); the generated property is `ref readonly` |
 | Writing an indexed component through `Get<T>()` | The index keeps the old key | [EECS015](/en/docs/guide/analyzer#eecs015) |

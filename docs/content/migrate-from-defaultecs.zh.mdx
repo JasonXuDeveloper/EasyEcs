@@ -236,10 +236,10 @@ world.Update();
 | --- | --- | --- |
 | 把状态对象搬成系统的字段 | 系统必须无状态 | [EECS007](/zh/docs/guide/analyzer#eecs007)：改用单例 |
 | `[ForEach]` 方法按值接组件 | 拿到的是副本，写入丢失 | [EECS002](/zh/docs/guide/analyzer#eecs002)，代码修复改成 `ref` / `in` |
-| 创建时一个一个 `Set` 组件 | 每加一个组件复制一次行 | 代码审查：`world.CreateEntity(a, b, c)` |
+| 创建时一个一个 `Set` 组件 | 每加一个组件复制一次行 | [EECS052](/zh/docs/guide/analyzer#eecs052)（警告，有代码修复）：`world.CreateEntity(a, b, c)` |
 | 不带 `Entity` 或 `World` 的静态方法里做销毁 | 它承诺了不做结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
 | 留着 `NotifyChanged` 调用 | 没有这个方法 | 编译错误 |
-| 被追踪的组件只读却按 `ref` 接 | 访问过的每一行都算变了 | 代码审查：声明成 `in` |
+| 被追踪的组件只读却按 `ref` 接 | 访问过的每一行都算变了 | [EECS025](/zh/docs/guide/analyzer#eecs025)（警告，有代码修复）：声明成 `in` |
 | 拿 `GetHashCode()` 当实体 id | id 会被回收复用 | 存 `entity.Id`（带版本的 `EntityId`） |
 
 ## 相关页面 [#related]

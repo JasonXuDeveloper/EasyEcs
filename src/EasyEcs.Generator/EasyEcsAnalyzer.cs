@@ -187,7 +187,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision, Unnameable, FilterOutsideGroup, LocalForEach,
         ReadOnlyWriteAccess, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadUniqueKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
-        IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag);
+        IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
+        UpdateInPass, CreateThenSet);
 
     public override void Initialize(AnalysisContext context)
     {

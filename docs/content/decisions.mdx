@@ -76,6 +76,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D56](#d56-not-added) | Not added: a generated `AddSystems()`, cached filters from attributes, counting members, a named `TryGetXRef` |
 | [D57](#d57-retired-is-destroyed) | A retired entity is a destroyed one |
 | [D58](#d58-add-singleton) | `AddSingleton` refuses an existing singleton |
+| [D59](#d59-analyzer-rules) | Rules for refs across changes, filters that cannot work and creations moved twice |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -205,6 +206,7 @@ public class BulletSystem : EcsSystem
 
 ```csharp
 var bullet = world.CreateEntity(new Bullet(), new Position(0, 0), new Velocity(4, 0));
+world.Update();                                             // it flies
 bullet.SetInactive();                                       // back to the pool: a bit flip, no row moves
 bullet.SetPosition(10, 20).RemoveInactive();                // reused
 
@@ -601,7 +603,8 @@ allocates nothing.
 **Considered.**
 - **Several components added or removed one call at a time** (`e.Set(a); e.Set(b);` as `e.Set(a, b)`): 500.7 µs one
   by one against 480.7 µs together, and 290.1 against 308.7 µs for two 16-byte components. The second move is as
-  cheap as the first once the transition is cached. Dropped.
+  cheap as the first once the transition is cached. Dropped. A `Set` right after a creation is another case, and is
+  measured as one ([D59](#d59-analyzer-rules)).
 - **A tag taken as a parameter instead of `[With<T>]`**: 37.7 against 38.6 µs; what costs is the access it
   declares, which EECS026 already reports for any unused parameter.
 - **`[Changed<T>]` of an untracked component**: the attribute's constraint already fails it (CS0315).
@@ -1275,6 +1278,52 @@ lost its value. The name says "add": the call now does that or says why it canno
 `SingletonRef<T>` handles still reach the singleton after a reset.
 
 **Considered.** **Keeping the reset and documenting it:** the bug it hides shows only as a value gone wrong later.
+
+## D59. Rules for refs across changes, filters that cannot work and creations moved twice [#d59-analyzer-rules]
+
+**Decision.** Six analyzer rules join the usage and performance rules, and EECS042 reports only the changes that add
+to an index.
+
+| Rule | Severity | Why this severity |
+| --- | --- | --- |
+| EECS047 a ref used after a structural change | Warning | The ref can still be right (the change moved another table's rows), so the rule reports only what it can follow: one block, in order, with no branch, loop or lambda between the ref, the change and the use |
+| EECS048 `Disable` of a cleanup component or `ChildOf` | Error | `Disable<T>()` and `DisableAll<T>()` throw `InvalidOperationException` for them |
+| EECS049 filters no entity passes | Error | A component required (a parameter, `[With<T>]`, `[Changed<T>]`, the group's `[With<T>]` or `IGroupWith<T>`) and excluded (`[Without<T>]`, `IGroupWithout<T>`): the method never runs |
+| EECS050 a second group in one filter | Error | `InGroup` throws `ArgumentException` for another group, of another component or another constant value |
+| EECS051 a world update during a pass | Error | The update closes the pass's holes, moving the rows it walks, and resets the pass count, which the end of the loop takes to -1: `TrimExcess` throws until the next update |
+| EECS052 a `Set` right after a creation | Warning, code fix | `AccessBenchmark.CreateThenSet`: 1,000 creations of one component then a `Set` of another, and their destroy, 44.4 µs; the same creations with both components 25.8 µs (1.73x), 0 B both |
+
+`AccessBenchmark` ran on the machine of [D29](#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)
+(BenchmarkDotNet, a shared 4-core Xeon at 2.1 GHz, .NET 10.0.13).
+
+**Why.**
+- **Each rule names code the runtime refuses or a cost it measured.** EECS048, EECS050 and EECS051 are calls that
+  throw or corrupt the world's state at run time; EECS049 is a method that compiles and never runs. They are errors
+  like EECS040 to EECS045. EECS047 and EECS052 are warnings: the code works in some worlds, or works and costs.
+- **EECS048 has its own id.** EECS045 is about the world's own tags written by hand; here the call is the world's,
+  and the component is what it refuses. The fix differs too (remove the component).
+- **EECS047 keeps to straight-line code.** Whether a change moves the row a ref points into depends on the tables at
+  run time; across branches and loops the rule would report code whose change and use never run together. It skips
+  the calls that move no row: `Remove` and `Enable` (a presence bit), a `Set` of the component the ref holds (written
+  in place), the members that copy or schedule (`Capture`, `Save`, `AddSystem`, ...), and the destroy of a query
+  item's entity (a tombstone during the pass).
+- **EECS042 reports additions.** An index walk steps past holes: removing the component, dropping links and
+  destroying entities during a walk are allowed, and the hierarchy's own cascade removes links during a relation
+  walk. What breaks a walk is a key that grows: a list emptied earlier is handed to the next key that grows, and that
+  can be the list being read. A change followed by `break`, `return` or `throw` ends the walk before it reads another
+  list, so it is not reported either. Relation walks (`Find(target)`) and `Descendants` are covered like `Find(key)`.
+- **EECS052 is a cost, unlike two `Set` calls.** Two components added one call at a time cost about what one call
+  costs (D29, dropped); a creation followed by a `Set` places the row twice, and the first table may exist only for
+  that moment. The fix moves the value into the creation when it can bind it: not for a value computed by a call or
+  from the entity, a grouped component, the world's own tags, or a creation with nine components already.
+
+**Considered.**
+- **A filter built inline at every call** (`world.Count<T>(QueryFilter.Create().With<U>())`): a filter is a small
+  struct with no references ([D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references)), and building
+  one was not measured as a cost (D29). No rule.
+- **EECS047 with flow analysis** across branches and loops: more reports, each one less certain, for a warning that
+  fails builds that treat warnings as errors. Dropped.
+- **Folding EECS048 into EECS045**: one id for two different causes and fixes. Dropped.
 
 ## Related [#related]
 

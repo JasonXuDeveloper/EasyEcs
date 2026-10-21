@@ -90,7 +90,9 @@ public class GroupTests
     [Test]
     public void AFilterNamesOneGroupAndGroupByWaitsForPassesToEnd()
     {
+#pragma warning disable EECS050 // the refused filter itself
         Assert.Throws<ArgumentException>(() => QueryFilter.Create().InGroup<Zone>(1).InGroup<Zone>(2));
+#pragma warning restore EECS050
         Assert.DoesNotThrow(() => QueryFilter.Create().InGroup<Zone>(1).InGroup<Zone>(1));
         using var world = new World();
         world.CreateEntity(new Zone(1));
