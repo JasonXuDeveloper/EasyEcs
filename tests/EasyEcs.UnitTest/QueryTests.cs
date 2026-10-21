@@ -276,6 +276,23 @@ public class QueryTests
     }
 
     [Test]
+    public void AnUpdateDuringALoopLeavesNoPassBehind()
+    {
+        using var world = new World();
+        for (int i = 0; i < 20; i++) world.CreateEntity(new Health(i));
+#pragma warning disable EECS051 // the mistake under test
+        foreach (var item in world.Query<Health>())
+        {
+            if (item.Health.Value == 3) item.Entity.Destroy();                   // a tombstone: the pass is open
+            if (item.Health.Value == 5) world.Update();                          // compacts and restarts the count
+        }
+#pragma warning restore EECS051
+        Assert.That(world.Passes, Is.Zero);
+        Assert.DoesNotThrow(() => world.TrimExcess());                           // no pass is counted as open
+        Assert.That(world.Count<Health>(), Is.EqualTo(19));
+    }
+
+    [Test]
     public void RowsToTestAreVisitedOnceAcrossWordsWhileTheLoopDestroys()
     {
         using var world = new World();

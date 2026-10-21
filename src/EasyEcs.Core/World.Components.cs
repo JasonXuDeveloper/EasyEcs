@@ -90,7 +90,8 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void EndPass()
     {
-        if (Interlocked.Decrement(ref Passes) == 0 && _dirtyCount > 0) CloseTombstones();
+        int left = Interlocked.Decrement(ref Passes);
+        if (left <= 0) EndedLast(left);
     }
 
     /// <summary>
@@ -115,7 +116,18 @@ public sealed partial class World
     internal void EndPassAlone(bool alone)
     {
         if (!alone) EndPass();
-        else if (--Passes == 0 && _dirtyCount > 0) CloseTombstones();
+        else if (--Passes <= 0) EndedLast(Passes);
+    }
+
+    /// <summary>
+    /// The last pass ended: close its tombstones. A count below zero is a pass that outlived an update (an update
+    /// during a pass, EECS051, compacts the tables and restarts the count): it ends as no pass, so the count stays 0.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void EndedLast(int left)
+    {
+        if (left < 0) Interlocked.CompareExchange(ref Passes, 0, left);
+        if (_dirtyCount > 0) CloseTombstones();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
