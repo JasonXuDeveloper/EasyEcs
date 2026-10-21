@@ -75,7 +75,11 @@ public class AssignSeats : EcsSystem
 ```
 
 - 再次销毁已退休的实体没有任何效果。从存活实体上移除清理组件，就只是移除而已。
-- 退休的实体会离开它所在的索引，它的子实体也随之而去。
+- 退休的实体会离开它所在的索引，它的子实体也随之而去。它的其他组件被拿掉，但不算移除：`[Removed<T>]` 不会访问它，
+  就像不会访问任何已销毁的实体一样（[移除检测](/zh/docs/guide/change-tracking#removal-detection)）。
+- 退休的实体不会被带回来：过滤条件没写 `Destroyed`（`With<Destroyed>()`）时 `SetAll` 不会碰它，`Clone()` 会抛异常，
+  `MoveEntities` 会跳过它。清理组件的 `RemoveAll` 会处理到它，因为释放它靠的就是这个。
+- `MoveEntities` 不带走清理组件：原实体带着它们退休，另一个 World 里的新实体没有它们。
 - 清理组件不能被禁用（`Disable<T>()` 会抛异常）：它必须留着等待释放。
 
 ### 清理组件还是销毁日志 [#cleanup-or-destroy-log]

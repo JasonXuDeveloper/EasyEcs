@@ -36,6 +36,8 @@ public bool SetIfChanged(in T value);
 
 只有 `value` 和组件当前的值不同时，才存入它并给这一行打 tick：存了就返回 true。`T` 实现了 `IEquatable` 时（record struct 都实现了）用它判定相等，否则比较非托管 `T` 的字节；没有实现 `IEquatable` 的托管 `T` 抛 `NotSupportedException`。O(T 的大小)，零分配。
 
+字节比较的是存下来的内容，不是它的含义：字段之间的填充字节、`-0.0` 与 `0.0`、负载不同的两个 NaN 都算不同，所以这样的值明明相等也会被写入并打 tick（最多多打一次，绝不会漏掉变化）。带 `float` 或 `double` 字段的组件请写成 `record struct`（或实现 `IEquatable`），按数值比较。
+
 **复杂度**（[API 表](/zh/docs/api)）：O(`T` 的大小)，值不同时再加一次 `Write()`
 
 ### `Write` [#write]

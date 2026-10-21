@@ -17,12 +17,15 @@
   <member name="P:EasyEcs.Mut`1.Value" source="8c2ed22aafca">
     <summary>组件，只读：不算写入，不打 tick。O(1)。</summary>
   </member>
-  <member name="M:EasyEcs.Mut`1.SetIfChanged(`0@)" source="b47ca91b77b3">
+  <member name="M:EasyEcs.Mut`1.SetIfChanged(`0@)" source="60e739e15c80">
     <summary>
       只有 <paramref name="value" /> 和组件当前的值不同时，才存入它并给这一行打 tick：存了就返回 true。<typeparamref name="T" /> 实现了
       <see cref="T:System.IEquatable`1" /> 时（record struct 都实现了）用它判定相等，否则比较非托管 <typeparamref name="T" /> 的字节；
       没有实现 <see cref="T:System.IEquatable`1" /> 的托管 <typeparamref name="T" /> 抛 <see cref="T:System.NotSupportedException" />。
       O(T 的大小)，零分配。
+      <para>字节比较的是存下来的内容，不是它的含义：字段之间的填充字节、<c>-0.0</c> 与 <c>0.0</c>、负载不同的两个 NaN 都算不同，
+      所以这样的值明明相等也会被写入并打 tick（最多多打一次，绝不会漏掉变化）。带 <c>float</c> 或 <c>double</c> 字段的组件请写成
+      <c>record struct</c>（或实现 <see cref="T:System.IEquatable`1" />），按数值比较。</para>
     </summary>
   </member>
   <member name="M:EasyEcs.Mut`1.Write" source="ec0d2e6d8c3c">

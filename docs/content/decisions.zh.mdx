@@ -71,6 +71,8 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D54](#d54-names) | 调用的名字说明它做什么 |
 | [D55](#d55-read) | `Read` 遍历查询不打 tick；EECS046 指出应该这样写的循环 |
 | [D56](#d56-not-added) | 不加：生成的 `AddSystems()`、从特性生成的缓存过滤条件、按组件的计数成员、命名的 `TryGetXRef` |
+| [D57](#d57-retired-is-destroyed) | 退休的实体就是已销毁的实体 |
+| [D58](#d58-add-singleton) | `AddSingleton` 拒绝已存在的单例 |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -994,6 +996,36 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 - **按组件的计数成员**（`world.CountPlayer()`）。`world.Count<Player>()` 字数一样多，意思也一样；每个组件多一个成员只会让补全列表变长，
   一行也没省。
 - **命名的 `TryGetXRef`。** `entity.TryGetRef<T>(out found)` 本来就少用；常用的调用已经有命名成员（`TryGetX`、`entity.X`）。
+
+## D57. 退休的实体就是已销毁的实体 [#d57-retired-is-destroyed]
+
+**决定。** 持有清理组件时被销毁的实体（退休：保持存活、带 `Destroyed` 标签，直到清理组件被移除）在释放之外的每个调用里都按已销毁处理：
+过滤条件没写 `Destroyed` 时 `SetAll` 不碰它，`MoveEntities` 跳过它，`Clone` 抛异常，失去其他组件也不算移除（它们的变更 tick
+被清零，而不是打上新 tick）。被移动的实体，清理组件留在退休的原实体上。`RemoveAll` 仍然会处理到退休的实体。
+
+**原因。**
+- **一份资源只释放一次。** 清理组件代表 World 之外的东西（一个 socket、一个座位）。移动或克隆出它的副本，就会释放两次；
+  退休的实体被移走，就会存在两份。
+- **和被释放的实体答案一致。** 没有清理组件的已销毁实体没有行：哪个过滤条件都找不到它，由销毁日志报告。退休只是为了释放才保留这一行，
+  所以 `[Removed<T>]` 读取方和批量写入看到的不能比被释放的实体更多。
+- **`RemoveAll` 就是释放。** 退休的实体只有清理组件和 `Destroyed`，`RemoveAll` 别的组件根本碰不到它；`RemoveAll` 清理组件正是清理
+  pass 释放它的方式。`DisableAll` 和 `EnableAll` 也碰不到它：清理组件不能被禁用。
+- **代价很小。** `SetAll` 在过滤条件里加上 `Without<Destroyed>`：没有这个标签列的表，每行不多做任何测试。
+  `BulkBenchmark.StunAndLift`（对 10 万个实体 `SetAll` + `RemoveAll`）前后测得一样，差别在运行噪声之内，两者都是 0 B。
+
+**考虑过的方案。**
+- **在批量遍历里逐行测试：** 每张表每行都多一个分支，而排除位在从没有过清理组件的表里毫无代价。
+- **交给过滤条件（手写 `Without<Destroyed>`）：** 默认调用就会让已销毁的实体复活。
+
+## D58. `AddSingleton` 拒绝已存在的单例 [#d58-add-singleton]
+
+**决定。** World 里已经有 `T` 时，`AddSingleton<T>()` 抛 `InvalidOperationException`；重置是一次写入（`world.SetX(…)`、
+`world.X = default`），`GetOrAddX()` 原样取用。
+
+**原因。** 第二次添加多半是初始化跑了两遍，或者 `Load` 已经带回这个单例后又添加了一次，悄无声息的重置会丢掉它的值。名字说的是“添加”：
+现在这个调用要么添加，要么说明为什么不能。写入不换存储，所以重置之后 `SingletonRef<T>` 句柄照样指向这个单例。
+
+**考虑过的方案。** **保留重置并写进文档：** 它掩盖的错误要到后来某个值出错时才会显现。
 
 ## 相关页面 [#related]
 

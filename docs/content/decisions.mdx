@@ -74,6 +74,8 @@ after the change on the machine of the time; they are history, not the current r
 | [D54](#d54-names) | A call's name says what it does |
 | [D55](#d55-read) | `Read` walks a query without stamping; EECS046 points at loops that should |
 | [D56](#d56-not-added) | Not added: a generated `AddSystems()`, cached filters from attributes, counting members, a named `TryGetXRef` |
+| [D57](#d57-retired-is-destroyed) | A retired entity is a destroyed one |
+| [D58](#d58-add-singleton) | `AddSingleton` refuses an existing singleton |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1223,6 +1225,43 @@ reports a `Query` loop of a tracked component that uses its items only for reads
   characters; one more member per component grows completion lists without saving a line.
 - **A named `TryGetXRef`.** `entity.TryGetRef<T>(out found)` is the rare call; the named members cover the common
   ones (`TryGetX`, `entity.X`).
+
+## D57. A retired entity is a destroyed one [#d57-retired-is-destroyed]
+
+**Decision.** An entity destroyed while it holds cleanup components (retired: alive, tagged `Destroyed`, until they
+go) is treated as destroyed by every call that is not its release: `SetAll` leaves it out unless the filter names
+`Destroyed`, `MoveEntities` skips it, `Clone` throws, and losing its other components is no removal (their change
+ticks are cleared, not stamped). A moved entity's cleanup components stay behind on the retired original. `RemoveAll`
+still reaches retired entities.
+
+**Why.**
+- **One release per resource.** A cleanup component stands for something outside the world (a socket, a seat). A
+  copy of it, by a move or a clone, would be released twice; a retired entity moved away would exist twice.
+- **The same answer as a freed entity.** A destroyed entity without cleanup components has no row: no filter finds
+  it, the destroy log reports it. Retiring keeps the row only for the release, so `[Removed<T>]` readers and bulk
+  writes must not see more of it than of a freed entity.
+- **`RemoveAll` is a release.** A retired entity holds cleanup components and `Destroyed` only, so `RemoveAll` of
+  anything else never meets it, and `RemoveAll` of a cleanup component is how a cleanup pass frees it.
+  `DisableAll` and `EnableAll` cannot meet one either: cleanup components cannot be disabled.
+- **Cheap.** `SetAll` adds `Without<Destroyed>` to its filter: a table without the tag's column tests nothing more
+  per row. `BulkBenchmark.StunAndLift` (`SetAll` + `RemoveAll` over 100,000 entities) measured the same before and
+  after, within the noise of the run, 0 B both.
+
+**Considered.**
+- **A per-row test in the bulk walk:** a branch per row for every table, where the excluded bit costs nothing in the
+  tables that never held a cleanup component.
+- **Leaving it to filters (`Without<Destroyed>` by hand):** the default call then revived destroyed entities.
+
+## D58. `AddSingleton` refuses an existing singleton [#d58-add-singleton]
+
+**Decision.** `AddSingleton<T>()` throws `InvalidOperationException` when the world has `T`; a reset is a write
+(`world.SetX(…)`, `world.X = default`), and `GetOrAddX()` takes it as it is.
+
+**Why.** A second add was a setup run twice or an add after a `Load` that brought the singleton, and the silent reset
+lost its value. The name says "add": the call now does that or says why it cannot. Writes keep the storage, so
+`SingletonRef<T>` handles still reach the singleton after a reset.
+
+**Considered.** **Keeping the reset and documenting it:** the bug it hides shows only as a value gone wrong later.
 
 ## Related [#related]
 

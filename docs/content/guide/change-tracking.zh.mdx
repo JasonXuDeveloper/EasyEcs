@@ -165,9 +165,12 @@ world.Update();                     // StepSystem 访问 1,000 个 NPC；同步�
 bool moved = npcs[7].SetPositionIfChanged(1, 0);   // false：走了一步，已经在那儿了
 ```
 
-- **怎么判断相等：** 组件实现了 `IEquatable<T>`（record struct 都实现了）就用它，不装箱；否则非托管组件逐字节比较
-  （字节相同就是值相同；`-0.0` 和 `0.0` 算不同，最多多打一次 tick，绝不会漏打）；再否则 `SetIfChanged` 抛
-  `NotSupportedException`，也不会生成 `SetXIfChanged`。带托管字段的组件请实现 `IEquatable<T>`，或者改成 record struct。
+- **怎么判断相等：** 组件实现了 `IEquatable<T>`（record struct 都实现了）就用它，不装箱；否则非托管组件逐字节比较；
+  再否则 `SetIfChanged` 抛 `NotSupportedException`，也不会生成 `SetXIfChanged`。带托管字段的组件请实现
+  `IEquatable<T>`，或者改成 record struct。
+- **字节不等于值：** 字节相同就是值相同，但值相同的字节未必相同。字段之间的填充字节、`-0.0` 与 `0.0`、负载不同的两个
+  NaN 都会被当成变化：值没变也会写入并给这一行打 tick（最多多打一次，绝不会漏掉变化）。带 `float` 或 `double`
+  字段的组件请改成 record struct，让它按数值比较。
 - **`Mut<T>` 能用在哪：** 逐实体的方法，包括并行方法和会做结构变更的方法（实体挪了行之后再写，打的是新行）。批处理方法
   拿的是 span，不能用（[EECS009](/zh/docs/guide/analyzer#eecs009)）。建了索引或分组的组件从不通过 ref 写入
   （[EECS015](/zh/docs/guide/analyzer#eecs015)），请用 `entity.SetXIfChanged(…)`。没有 `ITrackChanges` 的组件，
@@ -207,7 +210,9 @@ tick。被移除的行和普通行没有区别，方法照样能读写实体的�
   </Accordion>
   <Accordion title="被销毁的实体">
     被销毁的实体已经没有行了，所以 `[Removed<T>]` 不会访问它。它们由[销毁日志](#destroy-log)报告：
-    `world.DestroyedSince(tick, …)` 列出某个 tick 以来被销毁的实体，读取方有多少个都行。
+    `world.DestroyedSince(tick, …)` 列出某个 tick 以来被销毁的实体，读取方有多少个都行。持有
+    [清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)时被销毁的实体会保留它的行直到这些组件被移除，
+    但它失去其他组件同样不算移除：在它被释放、由销毁日志报告之前，什么都不会报告它。
   </Accordion>
   <Accordion title="没有不等于失去">
     创建时就没有 `T`、从[预制体](/zh/docs/guide/prefabs)实例化或克隆出来时就没有 `T` 的实体，从来没有失去过它，所以不会被报告。

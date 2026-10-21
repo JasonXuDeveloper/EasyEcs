@@ -36,6 +36,8 @@ public bool SetIfChanged(in T value);
 
 Store `value` and stamp the row only when it differs from the component's value: true when it did. Equality is `IEquatable` when `T` implements it (record structs do), else the bytes of an unmanaged `T`; a managed `T` without `IEquatable` throws (`NotSupportedException`). O(size of T), allocation-free.
 
+Bytes compare what is stored, not what it means: padding between fields, `-0.0` against `0.0` and two NaNs with different payloads count as different, so such a value is written and stamped although it is equal (a stamp too many, never a change missed). Make a component with `float` or `double` fields a `record struct` (or implement `IEquatable`) to compare its values.
+
 **Complexity** ([API table](/en/docs/api)): O(size of `T`), plus a `Write()` when it differs
 
 ### `Write` [#write]

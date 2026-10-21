@@ -49,6 +49,10 @@ int lifted = world.RemoveAll<Stun>();                        // 所有人解除�
 不带过滤条件时，`RemoveAll<T>()` 从所有拥有 `T` 的实体上移除它，而 `SetAll` 会给每个存活实体都加上，所以要写明选谁
 （`With<Fighter>()`）。任何 `QueryFilter` 都可以用，包括 `Without`、`WithAny`、`Changed` 和 [`InGroup`](/zh/docs/guide/groups)。
 
+持有[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)时被销毁的实体会保持存活、带上 `Destroyed` 标签，
+直到这些组件被释放。`SetAll` 不会碰这样的实体，批量写入永远不会把它带回来，除非过滤条件写明了这个标签
+（`With<Destroyed>()`）。`RemoveAll` 会处理到它们：移除它们的清理组件正是释放它们的方式。
+
 ### 对所有匹配实体禁用和启用 [#disable-all]
 
 `DisableAll<T>(filter)` 和 `EnableAll<T>(filter)` 就是对每个匹配实体执行

@@ -377,6 +377,10 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   ([queries](https://ecs.xgamedev.net/en/docs/guide/queries#read)).
 - **Names that say what a call does**: `Reserve`, `DestroyAll`, `SaveEntitiesWith`, `LoadKeeping`, `UnlinkX(target)`,
   and `DestroyEntities(ids)` for a list of ids.
+- **Destroyed entities stay destroyed.** An entity kept for its cleanup components is not moved, cloned or brought
+  back by `SetAll`, reports no removals, and a moved entity leaves its cleanup components behind
+  ([cleanup components](https://ecs.xgamedev.net/en/docs/guide/cleanup-and-disable#cleanup-components)).
+- **`AddSingleton` on an existing singleton throws** instead of resetting it; reset with `world.SetX(…)`.
 - **Analyzer rules up to EECS046** (calls that compile but throw or lose writes), and a fix: parallel `[ForEach]` methods that write tracked components no longer
   lose change stamps. Upgrading: the [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-6-to-v4-7).
 

@@ -115,7 +115,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.Instantiate(prefab, in T1 … in Tn)` | 均摊 O(c + n) | 预制体的值加上给定的值（覆盖预制体里的，或者新加；给定的组件若在预制体里被禁用则启用），一次行复制直接进最终的表，不经过中间表；给定的 `ChildOf` 会挂上层级，唯一键先检查；预制体组为 O(成员数 × c) 再加一次搬行，组件给传入的那个预制体对应的实体 |
 | `world.Instantiate(prefab, Span<Entity> entities, in T1 … in Tn)` | O(count × (c + n)) | 每个实例都是同样的值；只过一次闸门，表最多扩容一次，每个给定的列一次填满 |
 | `world.Reserve(prefab, count)` | O(c)，外加一次扩容 | 为接下来 `count` 个实例要进的表预留空间，生成波次在 tick 中不再扩容 |
-| `entity.Clone()` | O(c) | 同一 World、同一张表里的新实体，复制全部组件；实体不存活时抛异常 |
+| `entity.Clone()` | O(c) | 同一 World、同一张表里的新实体，复制全部组件；实体不存活或已销毁（因清理组件而保留）时抛异常 |
 
 ## 动态缓冲 [#dynamic-buffers]
 
@@ -170,7 +170,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 
 | API | 复杂度 | 说明 |
 | --- | --- | --- |
-| `world.SetAll(in T value, filter)` | O(M + S) | 对每个匹配做 `Set`，一次处理一个字的行；缺 `T` 的实体只搬一次；返回数量 |
+| `world.SetAll(in T value, filter)` | O(M + S) | 对每个匹配做 `Set`，一次处理一个字的行；缺 `T` 的实体只搬一次；过滤条件没写 `Destroyed` 时不碰因清理组件而保留的已销毁实体；返回数量 |
 | `world.RemoveAll<T>(filter)` | O(M + S) | 行不动，清存在位；返回数量 |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | O(M + S) | 每张表的行只搬一次，搬到带 `Disabled<T>` 列的表；返回数量 |
 
@@ -232,7 +232,7 @@ World 保持原样。
 | `ComponentSet.Create().With<T>()` / `WithSingleton<T>()` / `With(type)` | 每次 O(1)；`With(type)` 一次查找（冷路径） | `With(type)` 接受组件或单例类型；`Contains<T>()` / `ContainsSingleton<T>()` 为 O(1) |
 | `world.LoadEntities(input, entities)` | O(实体数 × 组件数) | 新 id；指向组内实体的 `EntityId` 字段会改写，其他的变成 `EntityId.Null` |
 | `world.LoadEntitiesInto(input, entities, markWritten)` | O(实体数 × 组件数) | 读到已经存在的实体上：每个实体最多换一次表，存档里没有的组件保持不变；`markWritten: false`：加载的组件算作从未写过 |
-| `world.MoveEntities(target, ids, moved)` | O(实体数 × 组件数) | 搬到本线程的另一个 World，不经过编码；原实体被销毁 |
+| `world.MoveEntities(target, ids, moved)` | O(实体数 × 组件数) | 搬到本线程的另一个 World，不经过编码；原实体被销毁，清理组件留在原实体上；已销毁的实体被跳过 |
 | 这些调用的 `ids` / `entities` | 传参 O(1) | span：数组、`[a.Id, b.Id]` 或 `SaveEntities(output, a.Id, b.Id)`（在栈上构造），列表写成 `CollectionsMarshal.AsSpan(list)`：不复制、不分配 |
 
 细节见[快照](/zh/docs/guide/snapshots)、[存档](/zh/docs/guide/saves)、[迁移与卸载](/zh/docs/guide/migration-and-unload)。
@@ -246,7 +246,7 @@ World 保持原样。
 | `world.GetSystem<T>()` | O(系统数) | 不存在时返回 null |
 | `world.Update()` / `world.Update<TGroup>()` | 分组内所有系统之和 | 同步、零分配；`Dispose` 之后调用抛 `ObjectDisposedException` |
 | `world.ChangeTick` | O(1) | 每个系统阶段加一，每次更新结束再加一 |
-| `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` | O(1) | `ref T`；`AddSingleton` 对已有单例原地重置；`GetSingleton` 在缺失时抛异常 |
+| `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` | O(1) | `ref T`；`AddSingleton` 在单例已存在时抛异常；`GetSingleton` 在缺失时抛异常 |
 | `world.SingletonRef<T>()` | O(1) | 稳定句柄；单例没添加时抛异常；`.Value` 一次读取 |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) | 单例不存在时 `RemoveSingleton` 返回 false |
 | 生成的成员：单例 `X` 的 `world.X`、`HasX`、`GetOrAddX()`、`SetX(…)`、`RemoveX()` | 同对应的泛型调用 | |

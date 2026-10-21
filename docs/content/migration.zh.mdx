@@ -13,7 +13,7 @@ icon: CircleArrowUp
 
 四个调用和一个生成成员[改了名](#v4-7-renames)，编译器会找出每一处调用。除此之外，为 4.6 写的代码不用改就能编译，除非某个系统声明了名为
 `RunCount` 的成员，或者某个文件引入的其他命名空间里有和新类型同名的类型。
-有两个调用的行为变了；写被追踪组件的并行遍历切分行的方式也变了。[新的分析器规则](#v4-7-analyzer)会报告会抛异常或丢失写入的代码。
+有三个调用的行为变了；写被追踪组件的并行遍历切分行的方式也变了。[新的分析器规则](#v4-7-analyzer)会报告会抛异常或丢失写入的代码。
 
 ### `SaveEntities` 拒绝含单例的集合 [#v4-7-save-entities]
 
@@ -36,6 +36,30 @@ private static readonly ComponentSet Record = ComponentSet.Create().With<Bank>()
 ```
 
 含单例的集合用在整个 World 的 `SaveWithout(output, in exclude)` 和 `LoadKeeping(input, in keep)` 上（[重启](/zh/docs/guide/saves#restart)）。
+
+### 单例已存在时 `AddSingleton` 抛异常 [#v4-7-add-singleton]
+
+World 里已经有 `T` 时，`world.AddSingleton<T>()` 抛 `InvalidOperationException`，不再把它重置为 `default`：第二次添加多半是
+初始化跑了两遍，或者 `Load` 已经带回了这个单例之后又添加了一次，而重置会悄无声息地丢掉它的值。现在重置要明说：用生成的
+`world.SetX(…)`（或 `world.X = default`）写入新值，存储不变，`SingletonRef<T>` 句柄照样能用。单例可能已经存在的地方（`Load` 之后），
+先查 `world.HasX`，或者用 `GetOrAddX()` 原样取用。
+
+**4.6**
+
+```csharp doccheck=skip
+world.AddSingleton<RoundClock>();  // 新的一局：回到第 0 个 tick（World 里没有 RoundClock 时就添加）
+```
+
+**4.7**
+
+```csharp
+public record struct RoundClock(long Tick) : ISingletonComponent;
+
+public static class Round
+{
+    public static void Restart(World world) => world.SetRoundClock(0);   // 没有就添加，有就替换值
+}
+```
 
 ### `EcsSystem.RunCount` [#v4-7-run-count]
 

@@ -278,7 +278,7 @@ Guide: [Queries and filters](/en/docs/guide/queries).
 
 | Call | Does |
 | --- | --- |
-| `world.AddSingleton<T>()` | Adds (or resets to default), returns `ref T` |
+| `world.AddSingleton<T>()` | Adds it (default), returns `ref T`; throws when it exists |
 | `world.GetSingleton<T>()` / `GetOrAddSingleton<T>()` | `ref T`; the first throws when missing |
 | `world.TryGetSingleton<T>(out copy)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | Copy, presence, removal |
 | `world.SingletonRef<T>()` | A stable handle: `.Value` is `ref T` |

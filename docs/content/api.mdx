@@ -119,7 +119,7 @@ component it has; components the source lacks stay absent and are not removals.
 | `world.Instantiate(prefab, in T1 … in Tn)` | O(c + n) amortized | the prefab's values plus the given ones (replacing the prefab's, or added; a disabled one given is enabled), in one row copy into the final table, no intermediate table; a given `ChildOf` links the hierarchy, a unique key is checked first; O(members × c) plus one move for a group, whose entity of the prefab passed gets the components |
 | `world.Instantiate(prefab, Span<Entity> entities, in T1 … in Tn)` | O(count × (c + n)) | the same values for every instance; one gate pass, at most one table growth, each given column filled at once |
 | `world.Reserve(prefab, count)` | O(c), plus one growth | pre-sizes the tables the next `count` instances go to, so a spawn wave never grows them during a tick |
-| `entity.Clone()` | O(c) | a new entity of the same world and table with a copy of every component; throws if not alive |
+| `entity.Clone()` | O(c) | a new entity of the same world and table with a copy of every component; throws if not alive or destroyed (kept for its cleanup components) |
 
 ## Dynamic buffers [#dynamic-buffers]
 
@@ -176,7 +176,7 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 
 | API | Complexity | Notes |
 | --- | --- | --- |
-| `world.SetAll(in T value, filter)` | O(M + S) | `Set` on every match, a word of rows at a time; an entity lacking `T` moves once; returns how many |
+| `world.SetAll(in T value, filter)` | O(M + S) | `Set` on every match, a word of rows at a time; an entity lacking `T` moves once; destroyed entities kept for their cleanup components are left out unless the filter names `Destroyed`; returns how many |
 | `world.RemoveAll<T>(filter)` | O(M + S) | rows stay, presence bits clear; returns how many |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | O(M + S) | a table's rows move once, to the table with the `Disabled<T>` column; returns how many |
 
@@ -239,7 +239,7 @@ columns); `Load` O(rows). A taken key throws `InvalidOperationException` (a save
 | `ComponentSet.Create().With<T>()` / `WithSingleton<T>()` / `With(type)` | O(1) each; `With(type)` one lookup (cold) | `With(type)` takes a component or a singleton type; `Contains<T>()` / `ContainsSingleton<T>()` O(1) |
 | `world.LoadEntities(input, entities)` | O(entities × components) | new ids; `EntityId` fields naming the group are rewritten, others become `EntityId.Null` |
 | `world.LoadEntitiesInto(input, entities, markWritten)` | O(entities × components) | onto entities that exist: each moves table at most once, the components the save lacks stay; `markWritten: false`: the loaded components count as never written |
-| `world.MoveEntities(target, ids, moved)` | O(entities × components) | to another world of this thread, without encoding; the originals are destroyed |
+| `world.MoveEntities(target, ids, moved)` | O(entities × components) | to another world of this thread, without encoding; the originals are destroyed, keeping their cleanup components; destroyed entities are skipped |
 | the `ids` / `entities` of these calls | O(1) to pass | spans: an array, `[a.Id, b.Id]` or `SaveEntities(output, a.Id, b.Id)` (built on the stack), a list as `CollectionsMarshal.AsSpan(list)`: no copy, no allocation |
 
 Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
@@ -254,7 +254,7 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 | `world.GetSystem<T>()` | O(systems) | null when absent |
 | `world.Update()` / `world.Update<TGroup>()` | Σ systems of the group | synchronous, allocation-free; throws `ObjectDisposedException` after `Dispose` |
 | `world.ChangeTick` | O(1) | grows by one per stage of systems and once after each update |
-| `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` | O(1) | `ref T`; `AddSingleton` resets an existing singleton in place; `GetSingleton` throws when missing |
+| `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` | O(1) | `ref T`; `AddSingleton` throws when the singleton exists; `GetSingleton` throws when missing |
 | `world.SingletonRef<T>()` | O(1) | a stable handle; throws when the singleton was not added; `.Value` is one load |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) | `RemoveSingleton` returns false when it was not added |
 | generated: `world.X`, `HasX`, `GetOrAddX()`, `SetX(…)`, `RemoveX()` for a singleton `X` | as the generic call | |
