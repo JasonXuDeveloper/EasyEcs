@@ -1,0 +1,95 @@
+---
+title: "SaveLoad: saves and migration"
+seoTitle: "Save, Load and Move Entities in C#: SaveLoad Sample"
+description: "Save a whole EasyEcs world and load it back, carry a player and its children to another world through bytes, and move live entities between worlds."
+icon: Save
+---
+
+import { ArrowRightLeft, Globe, Network, Save } from 'lucide-react';
+
+Taking entities out of a world and putting them into another: a restart, a player changing servers, a player walking
+into the next zone. Three players with bags and swords go through all three. Every code block on this page is
+included from [`samples/SaveLoad`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad), which CI
+builds and runs, comparing its output with the one shown below. Read [GameLoop](/en/docs/samples/game-loop) first.
+
+## What you learn [#what-you-learn]
+
+- **A whole world**: [`world.Save(writer)`](/en/docs/guide/saves#save) to a file and
+  [`world.Load(bytes)`](/en/docs/guide/saves#load) into a new world. Ids, components, dynamic buffers and singletons
+  come back as they were.
+- **A group of entities**: [`SaveEntities`](/en/docs/guide/migration-and-unload#save-entities) of a player with the
+  swords that are its [children](/en/docs/guide/hierarchy) (`ChildOf`), then `LoadEntities` into another world, as
+  another server would. The arrivals get new ids, and the links between them follow.
+- **Moving live entities**: [`MoveEntities`](/en/docs/guide/migration-and-unload#move-entities) hands a player from one
+  world to another of the same thread in one call, without encoding anything.
+- **What gets serialized how**: unmanaged components are saved as their bytes; a managed one (`Name` holds a string)
+  is a [`[NinoType]`](/en/docs/guide/saves#declare), serialized by Nino, whose generator comes with the EasyEcs package.
+
+## Run it [#run-it]
+
+```bash
+dotnet run --project samples/SaveLoad
+```
+
+## The data [#data]
+
+Numbers-only components, a sword that is an entity of its own, a bag element for a
+[dynamic buffer](/en/docs/guide/dynamic-buffers), a singleton, and the one managed component.
+
+<include lang="csharp" meta='title="Components.cs"'>../../../samples/SaveLoad/Components.cs</include>
+
+## The players [#players]
+
+`Players.Spawn` creates a player with a bag of three potions and a map, and its swords as children. `Reserve` makes
+room for the swords before the loop that creates them.
+
+<include lang="csharp" meta='title="Players.cs"'>../../../samples/SaveLoad/Players.cs</include>
+
+## The program [#program]
+
+The three steps, each checked: the whole world to a file and back, bob through bytes to another world, carol moved
+there directly. `Checks` and `WorldText`, which print the checks and a world, are in
+[`Support.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/SaveLoad/Support.cs): plumbing, not the
+lesson.
+
+<include lang="csharp" meta='title="Program.cs"'>../../../samples/SaveLoad/Program.cs</include>
+
+## Output [#output]
+
+The process exits with 0 when every check passes and with 1 otherwise.
+
+```text
+zone:     [alice@(1,2) hp 100 item1x3 item2x1 sword+10; bob@(5,5) hp 100 item1x3 item2x1 sword+11 sword+10; carol@(-3,7) hp 100 item1x3 item2x1] clock 1234
+reloaded: [alice@(1,2) hp 100 item1x3 item2x1 sword+10; bob@(5,5) hp 100 item1x3 item2x1 sword+11 sword+10; carol@(-3,7) hp 100 item1x3 item2x1] clock 1234 (425 bytes on disk)
+  ok   a reload has the same entities, values and clock
+  ok   a handle's id names the same entity after a reload
+  ok   the copy has bob's values
+  ok   his swords point at his new id
+other:    [bob@(5,5) hp 100 item1x3 item2x1 sword+10 sword+11] clock 0
+  ok   carol left the zone
+  ok   and arrived with her values
+zone:     [alice@(1,2) hp 100 item1x3 item2x1 sword+10] clock 1234
+other:    [bob@(5,5) hp 100 item1x3 item2x1 sword+10 sword+11; carol@(-3,7) hp 100 item1x3 item2x1] clock 0
+  ok   alice stayed
+all checks passed
+```
+
+The other world's clock is 0: `SaveEntities` carries entities, not singletons. Bob's copy arrives with his swords as
+the children of its new id; in the zone, destroying bob destroys his swords too.
+
+## Related [#related]
+
+<Cards>
+  <Card icon={<Globe />} title="MultiWorld" href="/en/docs/samples/multi-world">
+    The next sample: one world per thread.
+  </Card>
+  <Card icon={<Save />} title="Saves" href="/en/docs/guide/saves">
+    What a save holds, restarts, and components whose shape changes.
+  </Card>
+  <Card icon={<ArrowRightLeft />} title="Migration and unload" href="/en/docs/guide/migration-and-unload">
+    Groups of entities to another world or process.
+  </Card>
+  <Card icon={<Network />} title="Hierarchy" href="/en/docs/guide/hierarchy">
+    ChildOf, children, subtrees and destroy cascades.
+  </Card>
+</Cards>

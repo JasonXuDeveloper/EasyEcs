@@ -1,0 +1,84 @@
+---
+title: "Godot：在 Godot 4 游戏里用 EasyEcs"
+seoTitle: "在 Godot 4 .NET 中使用 EasyEcs：C# ECS 示例"
+description: "在 Godot 4 .NET 项目里用 EasyEcs：根节点持有 World，每个物理 tick 更新一次，用一个 multimesh 画出所有实体，零分配。"
+icon: Gamepad2
+---
+
+import { Clock, HelpCircle, Rocket, Sprout } from 'lucide-react';
+
+在 Godot 4 .NET 项目里用 EasyEcs：场景的根节点持有一个 World，每个物理 tick 更新一次，用一个 multimesh 画出所有实体。一千个点
+在场地里移动，碰到边缘就反弹。本页所有代码都直接引用自
+[`samples/Godot`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Godot)，CI 用 Godot 4.7.2 无窗口构建并运行
+它，把输出和下面给出的对比。建议先读 [HelloWorld](/zh/docs/samples/hello-world) 示例。
+
+## 你会学到 [#what-you-learn]
+
+- **项目目标框架是 net10.0**：Godot 把 C# 项目的程序集加载进项目指定的 .NET 运行时。旧版编辑器建的项目写的是 `net8.0`，
+  改成 `net10.0` 并装好 .NET 10 SDK 即可（[快速上手](/zh/docs/getting-started#create-a-project)、
+  [Unity 和 Godot](/zh/docs/faq#unity-godot)）。
+- **节点是宿主，系统才是游戏**：`Main` 在 `_Ready` 里创建 World，在 `_PhysicsProcess`（Godot 的固定 tick）里调用
+  `world.Update()`，在 `_ExitTree` 里释放它（[托管 World](/zh/docs/guide/hosting#owner)）。
+- **Godot 类型直接做组件字段**：`Position` 和 `Velocity` 存的是 `Vector2`；场地大小和 tick 时长是[单例](/zh/docs/guide/singletons)。
+- **一次调用画出全部数据**：更新完后，节点把所有位置拷进一个 float 缓冲，交给 `RenderingServer.MultimeshSetBuffer`：所有实体
+  一次绘制，不用每个实体一个节点。
+
+## 运行 [#run-it]
+
+用 Godot 4 编辑器（.NET 版）打开这个目录，点运行；或者不开窗口直接跑：
+
+```bash
+dotnet build samples/Godot
+godot --headless --path samples/Godot -- --ticks 120
+```
+
+## 项目 [#project]
+
+就是普通的 Godot 4 .NET 项目：[`project.godot`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/project.godot)
+和场景 [`Main.tscn`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/Main.tscn)，根节点是 `Main`。
+真正要改的只有目标框架这一行。
+
+<include lang="xml" meta='title="Godot.csproj"'>../../../samples/Godot/Godot.csproj</include>
+
+## 数据与系统 [#data]
+
+组件直接用 Godot 的 `Vector2`；系统负责移动和反弹，完全不知道场景的存在。
+
+<include lang="csharp" meta='title="Components.cs"'>../../../samples/Godot/Components.cs</include>
+
+<include lang="csharp" meta='title="Systems.cs"'>../../../samples/Godot/Systems.cs</include>
+
+## 节点 [#node]
+
+`Main` 只在 Godot 和 World 之间搬数据：创建实体，每个物理 tick 更新一次 World，把位置写进 multimesh，离开场景树时释放自己
+创建的东西。`--ticks` 参数和 CI 检查的报告在
+[`Support.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/Support.cs) 里：这是周边代码，不是本课重点。
+
+<include lang="csharp" meta='title="Main.cs"'>../../../samples/Godot/Main.cs</include>
+
+## 输出 [#output]
+
+```text
+120 ticks, 1000 entities, 1000 inside the arena
+updates after the first allocated 0 B
+```
+
+第一次更新会建好查询缓存；之后每个 tick 都不分配内存，在 Godot 里和在服务端一样。CI 在 Linux 上跑这个示例；Godot 导出到其他平台
+（Android、iOS）时用的是 Godot 自带的运行时，这里没有测试。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card icon={<Sprout />} title="HelloWorld" href="/zh/docs/samples/hello-world">
+    最小的 World：组件、系统、一次更新。
+  </Card>
+  <Card icon={<Clock />} title="托管 World" href="/zh/docs/guide/hosting">
+    唯一的所有者、固定步长、随宿主启停。
+  </Card>
+  <Card icon={<Rocket />} title="快速上手" href="/zh/docs/getting-started">
+    装上包，一步步写一个模拟。
+  </Card>
+  <Card icon={<HelpCircle />} title="常见问题" href="/zh/docs/faq#unity-godot">
+    能在哪里跑：Godot、Unity 和其他平台。
+  </Card>
+</Cards>

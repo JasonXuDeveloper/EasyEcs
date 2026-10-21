@@ -1,0 +1,88 @@
+---
+title: "SaveLoad：存档与迁移"
+seoTitle: "C# ECS 存档、读档与实体迁移：SaveLoad 示例"
+description: "保存整个 EasyEcs World 再读回来，把玩家连同子实体通过字节带到另一个 World，以及在 World 之间直接迁移活实体。"
+icon: Save
+---
+
+import { ArrowRightLeft, Globe, Network, Save } from 'lucide-react';
+
+把实体从一个 World 取出、放进另一个：服务器重启、玩家换服、玩家走进相邻区域。三个带背包和剑的玩家把这三种情况都走一遍。
+本页的代码块全部引自 [`samples/SaveLoad`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad)，
+CI 会构建并运行它，把输出和下面列出的比对。建议先读 [GameLoop](/zh/docs/samples/game-loop)。
+
+## 你会学到 [#what-you-learn]
+
+- **整个 World**：[`world.Save(writer)`](/zh/docs/guide/saves#save) 写到文件，再用 [`world.Load(bytes)`](/zh/docs/guide/saves#load)
+  读进新 World。id、组件、动态缓冲和单例都原样回来。
+- **一组实体**：用 [`SaveEntities`](/zh/docs/guide/migration-and-unload#save-entities) 保存一个玩家和作为其[子实体](/zh/docs/guide/hierarchy)
+  （`ChildOf`）的剑，再像另一台服务器那样 `LoadEntities` 进另一个 World。到达的实体拿到新 id，彼此之间的链接跟着改过来。
+- **迁移活实体**：[`MoveEntities`](/zh/docs/guide/migration-and-unload#move-entities) 一次调用把玩家交给同一线程上的另一个
+  World，中间不做任何编码。
+- **各类组件怎么序列化**：非托管组件按原始字节保存；托管组件（`Name` 里有字符串）标成
+  [`[NinoType]`](/zh/docs/guide/saves#declare)，由 Nino 序列化，Nino 的生成器随 EasyEcs 包一起提供。
+
+## 运行 [#run-it]
+
+```bash
+dotnet run --project samples/SaveLoad
+```
+
+## 数据 [#data]
+
+只含数字的组件、本身就是实体的剑、[动态缓冲](/zh/docs/guide/dynamic-buffers)用的背包元素、一个单例，以及唯一的托管组件。
+
+<include lang="csharp" meta='title="Components.cs"'>../../../samples/SaveLoad/Components.cs</include>
+
+## 玩家 [#players]
+
+`Players.Spawn` 创建一个玩家，背包里放三瓶药水和一张地图，剑作为它的子实体。`Reserve` 在创建剑的循环之前先留好空间。
+
+<include lang="csharp" meta='title="Players.cs"'>../../../samples/SaveLoad/Players.cs</include>
+
+## 程序 [#program]
+
+三步，每步都有检查：整个 World 写文件再读回，bob 通过字节去另一个 World，carol 直接迁过去。打印检查结果和 World 的
+`Checks`、`WorldText` 在 [`Support.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/SaveLoad/Support.cs)：
+是管道代码，不是本课重点。
+
+<include lang="csharp" meta='title="Program.cs"'>../../../samples/SaveLoad/Program.cs</include>
+
+## 输出 [#output]
+
+所有检查通过时进程返回 0，否则返回 1。
+
+```text
+zone:     [alice@(1,2) hp 100 item1x3 item2x1 sword+10; bob@(5,5) hp 100 item1x3 item2x1 sword+11 sword+10; carol@(-3,7) hp 100 item1x3 item2x1] clock 1234
+reloaded: [alice@(1,2) hp 100 item1x3 item2x1 sword+10; bob@(5,5) hp 100 item1x3 item2x1 sword+11 sword+10; carol@(-3,7) hp 100 item1x3 item2x1] clock 1234 (425 bytes on disk)
+  ok   a reload has the same entities, values and clock
+  ok   a handle's id names the same entity after a reload
+  ok   the copy has bob's values
+  ok   his swords point at his new id
+other:    [bob@(5,5) hp 100 item1x3 item2x1 sword+10 sword+11] clock 0
+  ok   carol left the zone
+  ok   and arrived with her values
+zone:     [alice@(1,2) hp 100 item1x3 item2x1 sword+10] clock 1234
+other:    [bob@(5,5) hp 100 item1x3 item2x1 sword+10 sword+11; carol@(-3,7) hp 100 item1x3 item2x1] clock 0
+  ok   alice stayed
+all checks passed
+```
+
+另一个 World 的时钟是 0：`SaveEntities` 只带实体，不带单例。bob 的副本到达时，剑是它新 id 的子实体；在原区域里销毁 bob，他的剑也一起销毁。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card icon={<Globe />} title="MultiWorld" href="/zh/docs/samples/multi-world">
+    下一个示例：每个线程一个 World。
+  </Card>
+  <Card icon={<Save />} title="存档" href="/zh/docs/guide/saves">
+    存档里有什么、重启，以及结构会变的组件。
+  </Card>
+  <Card icon={<ArrowRightLeft />} title="迁移与卸载" href="/zh/docs/guide/migration-and-unload">
+    把一组实体带到另一个 World 或进程。
+  </Card>
+  <Card icon={<Network />} title="层级" href="/zh/docs/guide/hierarchy">
+    ChildOf、子实体、子树和级联销毁。
+  </Card>
+</Cards>
