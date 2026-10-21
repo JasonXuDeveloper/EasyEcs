@@ -639,7 +639,7 @@ ship.Destroy();                    // the turret is destroyed with it
 children once, for the world:
 
 ```csharp
-world.Index<ChildOf, EntityId>().WhenTargetDestroyed(TargetPolicy.Remove);   // orphans become roots
+world.ChildOfIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // orphans become roots
 ```
 
 No rule catches it. More in [cascade policy](/en/docs/guide/hierarchy#cascade-policy).

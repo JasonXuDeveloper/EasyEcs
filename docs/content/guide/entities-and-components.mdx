@@ -261,7 +261,11 @@ bool changed = hero.SetArmorIfChanged(6);                  // false: Armor is 6 
 - The analyzer knows these members: `SetX`, `GetOrAddX` and `RemoveX` are structural changes, the rest are reads or
   writes of a value.
 - No members are generated for generic components, components nested in types other code cannot see, and names the
-  receiver already has (`Entity.Id`, `World.Update`); the generic API still works for them.
+  receiver already has (`Entity.Id`, `World.Update`); the generic API still works for them. A nested component or
+  buffer element named like another struct of its namespace (`Npc.State` and `Player.State`) gets none at all: both
+  would get `entity.State`, ambiguous wherever the namespace is imported.
+- EasyEcs's own `ChildOf` has them too (`entity.ChildOf`, `SetChildOf(parent)`, `world.ChildOfIndex`, ...; no
+  `DisableChildOf`), and the `Destroyed` tag has `entity.IsDestroyed`.
 
 ### Tags [#tags]
 

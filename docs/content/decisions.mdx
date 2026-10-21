@@ -69,6 +69,8 @@ after the change on the machine of the time; they are history, not the current r
 | [D49](#d49-changedany-semantics) | `ChangedAny`: one OR group per kind, one tick per filter |
 | [D50](#d50-restart-saves) | A restart save leaves types out; a restart load keeps singletons |
 | [D51](#d51-not-added) | Not added: run conditions, time-based intervals, required components, an entity map, a meter, a checksum, partial snapshots |
+| [D52](#d52-identity-entity) | An `Entity` used only as an identity does not make a system run alone |
+| [D53](#d53-own-members) | EasyEcs's own components get their members in EasyEcs; namesakes get none |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1122,6 +1124,43 @@ a component.
 - **A partial-snapshot API** (capture some components only). A system that copies the needed values into a ring held
   by a singleton (the lag-compensation pattern of [snapshots](/en/docs/guide/snapshots)) copies exactly what is
   needed, with no new storage path.
+
+## D52. An `Entity` used only as an identity does not make a system run alone [#d52-identity-entity]
+
+**Decision.** A `[ForEach]` method whose `Entity` parameter is used only for `Id`, `Version`, `IsAlive`, `==` / `!=`
+or converted to an `EntityId` adds nothing to its system's access; any other use (`Has`, `Get`, another call, passing
+the handle on) keeps the system running alone.
+
+**Why.**
+- **An identity reaches no component.** The id and version are in the handle; `IsAlive` reads the entity's record,
+  which no system of a parallel stage changes (structural changes run alone).
+- **Keying by entity is common** (a per-entity map, a log, a reply to a sender), and those systems lost their stage
+  for a handle they only named.
+- **Syntax first, conservative.** The check reads the method's body: a use it cannot prove harmless keeps the old rule.
+
+**Considered.**
+- **Treating `Has<T>` as a read of `T`:** presence bits change only through structural changes, but `Get<T>` writes
+  and a generic `T` of another component is not known per call; one rule for reads of components stays the parameters.
+
+## D53. EasyEcs's own components get their members in EasyEcs; namesakes get none [#d53-own-members]
+
+**Decision.** `ComponentGenerator` also runs for EasyEcs's public components inside EasyEcs itself: `ChildOf` gets
+the members of an indexed component without `DisableChildOf` / `EnableChildOf` (it cannot be disabled), and the
+`Destroyed` tag gets `entity.IsDestroyed` only (the world adds and removes it). A nested component or buffer element
+named like another struct of its namespace gets no members at all.
+
+**Why.**
+- **One generator, one shape of members.** Users read `entity.ChildOf` as they read `entity.Health`; the members ship
+  in the package and no referencing assembly generates a file for them.
+- **What the world refuses is not offered:** a `DisableChildOf` that always throws would be an API that only fails.
+- **A namesake rule must cover every name.** Two types emitting any member of the same name make every call of it
+  ambiguous, so the nested one gives up all of them, on the entity, the world, the filter and the prefab. Any struct
+  counts, since any struct can be a buffer's element.
+
+**Considered.**
+- **Hand-written members for `ChildOf`:** a second implementation that drifts from the generated ones.
+- **Generating them in each referencing assembly:** a file per assembly and duplicates between assemblies that see
+  each other.
 
 ## Related [#related]
 

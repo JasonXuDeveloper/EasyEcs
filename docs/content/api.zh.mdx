@@ -93,7 +93,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `entity.Remove<T1..Tn>()` | O(n) | 清存在位，行留在原处；缺失的组件忽略；被追踪组件的移除会打 tick（`[Removed<T>]`）；返回实体 |
 | `entity.Disable<T>()` / `Enable<T>()` | O(1)；一张表第一次禁用时搬一次行 | 值保留，但查询、`Has` 和 `Get` 都当它不存在；禁用算移除，启用算写入；无事可做时返回 false |
 | `entity.IsDisabled<T>()` | O(1) | |
-| 生成的成员：`entity.X`、`HasX`、`TryGetX`、`GetOrAddX()`、`SetX(…)`、`SetXIfChanged(…)`、`RemoveX()`、`WriteX()`、`DisableX()`、`EnableX()`、`IsXDisabled`；标签 `IsX`、`SetX()`；`world.XIndex` | 同对应的泛型调用 | 每个组件的 C# 14 扩展成员（[生成的成员](/zh/docs/guide/entities-and-components)）；`entity.X` 等于 `Get`，被追踪或被索引的组件则等于 `Read`，写入改用 `WriteX()` 或 `SetX(…)`；可比较的被追踪、被索引或分组组件还有 `SetXIfChanged(…)` |
+| 生成的成员：`entity.X`、`HasX`、`TryGetX`、`GetOrAddX()`、`SetX(…)`、`SetXIfChanged(…)`、`RemoveX()`、`WriteX()`、`DisableX()`、`EnableX()`、`IsXDisabled`；标签 `IsX`、`SetX()`；`world.XIndex` | 同对应的泛型调用 | 每个组件的 C# 14 扩展成员（[生成的成员](/zh/docs/guide/entities-and-components)）；`entity.X` 等于 `Get`，被追踪或被索引的组件则等于 `Read`，写入改用 `WriteX()` 或 `SetX(…)`；可比较的被追踪、被索引或分组组件还有 `SetXIfChanged(…)`；EasyEcs 自带的 `ChildOf` 也有这些成员（没有 `DisableChildOf` / `EnableChildOf`：它不能被禁用），`Destroyed` 有 `entity.IsDestroyed` |
 
 ## 预制体与克隆 [#prefabs-and-cloning]
 

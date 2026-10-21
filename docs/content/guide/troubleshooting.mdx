@@ -144,7 +144,7 @@ ChildOf(…))` made a parent the child of one of its descendants. EasyEcs does n
 walk up the tree on every `Set`), so the walk finds the cycle when it reaches it.
 
 **Fix:** before re-parenting `child` under `parent`, walk up from `parent` through `ChildOf` and refuse when you meet
-`child`. Detach first (`Remove<ChildOf>()`) when an entity moves under one of its own descendants
+`child`. Detach first (`RemoveChildOf()`) when an entity moves under one of its own descendants
 ([re-parent and detach](/en/docs/guide/hierarchy#reparent)).
 
 ## Why can a component not be disabled? [#cannot-disable]
@@ -282,9 +282,9 @@ look up the entity again by its `EntityId` when it may have been replaced
 ## Why do my systems not run in parallel? [#not-parallel]
 
 With `ParallelSystems`, a system shares a stage only when its access is known and does not conflict. A system runs
-alone when it takes an `Entity` or `World` parameter, has an instance `[ForEach]` method, overrides `OnUpdate`, or has
-no `[ForEach]` method. Two systems conflict when one writes what the other reads or writes, and a `ref` parameter
-counts as a write even when the body only reads it: use `in`
+alone when it takes a `World` parameter or an `Entity` it uses for more than its identity, has an instance
+`[ForEach]` method, overrides `OnUpdate`, or has no `[ForEach]` method. Two systems conflict when one writes what the
+other reads or writes, and a `ref` parameter counts as a write even when the body only reads it: use `in`
 ([parallel systems](/en/docs/guide/threading#parallel-systems)). An ordering (`[UpdateAfter<T>]`) also puts the later
 system in a later stage.
 

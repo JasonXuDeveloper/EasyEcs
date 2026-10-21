@@ -212,8 +212,12 @@ public class CorpseCleanup : EcsSystem
 ```
 
 静态、不带 `World`、`Entity` 参数（如果有）只用来读（`Id`、`IsAlive`、`Has`、`Get`、`Read`、`TryGet`、`TryGetRef`）的方法，
-不可能改变结构：它的 job 实现 `INoStructuralChanges`，遍历每张表时不做逐实体检查，还能和其他系统排进同一个并行阶段。
+不可能改变结构：它的 job 实现 `INoStructuralChanges`，遍历每张表时不做逐实体检查。
 可能改变结构的方法单独运行，每个实体在一次遍历里仍然最多被访问一次（见[结构变更](/zh/docs/guide/structural-changes)）。
+
+只把 `Entity` 当身份用（`Id`、`Version`、`IsAlive`、`==` / `!=`、转换成 `EntityId`）的方法碰不到任何组件，`Entity` 不给系统增加读写：
+系统按其他参数调度，可以和别的系统排进同一个并行阶段。句柄的其他用法（`Has`、`Get`、别的调用、把 `Entity` 传出去）可能碰到任何组件，
+系统就单独运行（见[并行系统](/zh/docs/guide/threading#parallel-systems)）。
 
 方法按源码顺序执行，派生系统先跑基类的 `[ForEach]` 方法。一个系统的方法放在同一个文件里：partial 类分散在多个文件时，顺序只在每个文件内有效。
 

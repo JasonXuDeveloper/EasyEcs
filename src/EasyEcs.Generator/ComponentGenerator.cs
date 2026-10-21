@@ -235,6 +235,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             sb.Append($"        {a} {declaration}\n        {{\n    {Inline}            get => {body};\n        }}\n");
         }
 
+        sb.Append($"/// <summary>The named members of <see cref=\"{t}\"/> (generated).</summary>\n");
         sb.Append($"[global::System.CodeDom.Compiler.GeneratedCode(\"{Symbols.GeneratorName}\", \"{Version}\")]\n");
         sb.Append($"{a} static class {m.Path}EcsExtensions\n{{\n");
         if (m.Singleton)
@@ -281,18 +282,22 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 if (m.IndexKey.Length == 0 && !m.Grouped && Free("GetOrAdd" + n))
                     Member($"The entity's <see cref=\"{t}\"/> by <c>ref</c>, added (default) first if missing (<c>GetOrAdd</c>).",
                         $"ref {t} GetOrAdd{n}() => ref @this.GetOrAdd<{t}>();");
-                if (!m.Cleanup && Free("Disable" + n)) // a cleanup component is never disabled (see Entity.Disable)
+                // A cleanup component and ChildOf (EasyEcs's own) are never disabled (see Entity.Disable).
+                bool disables = !m.Cleanup && !m.Own;
+                if (disables && Free("Disable" + n))
                     Member($"Switches the entity's <see cref=\"{t}\"/> off, keeping its value (<c>Disable</c>); false if it has none enabled.",
                         $"bool Disable{n}() => @this.Disable<{t}>();");
-                if (!m.Cleanup && Free("Enable" + n))
+                if (disables && Free("Enable" + n))
                     Member($"Switches the entity's disabled <see cref=\"{t}\"/> back on with its kept value (<c>Enable</c>); false if none is disabled.",
                         $"bool Enable{n}() => @this.Enable<{t}>();");
-                if (!m.Cleanup && Free("Is" + n + "Disabled"))
+                if (disables && Free("Is" + n + "Disabled"))
                     Property($"Whether the entity holds a disabled <see cref=\"{t}\"/> (<c>IsDisabled</c>); <c>Has{n}</c> is whether it is enabled.",
                         $"bool Is{n}Disabled", $"@this.IsDisabled<{t}>()");
             }
 
-            if (Free("Set" + n))
+            // EasyEcs's own tag (Destroyed) is the world's to add and remove: it is only read.
+            bool writes = !(m.Own && m.Tag);
+            if (writes && Free("Set" + n))
                 foreach (var s in m.Setters)
                     Member($"Adds or overwrites the entity's <see cref=\"{t}\"/> (<c>Set</c>); returns the entity.",
                         $"global::EasyEcs.Entity Set{n}({s.Parameters}) => @this.Set({s.Value});");
@@ -301,12 +306,12 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 foreach (var s in m.Setters)
                     Member($"Sets the entity's <see cref=\"{t}\"/> unless it already has this value (<c>SetIfChanged</c>): true when it set it; an equal value is not written, stamped or indexed.",
                         $"bool Set{n}IfChanged({s.Parameters}) => @this.SetIfChanged({s.Value});");
-            if (Free("Remove" + n))
+            if (writes && Free("Remove" + n))
                 Member($"Removes the entity's <see cref=\"{t}\"/> if it has one; returns the entity.",
                     $"global::EasyEcs.Entity Remove{n}() => @this.Remove<{t}>();");
             sb.Append("    }\n");
 
-            if (m.Grouped)
+            if (m.Grouped && Free("In" + n))
             {
                 sb.Append("\n    extension(global::EasyEcs.QueryFilter @this)\n    {\n");
                 Member($"Also requires <see cref=\"{t}\"/> group <paramref name=\"group\"/> (<c>InGroup&lt;{n}&gt;</c>): in a world that groups by it, the walk visits that group's tables only.",
@@ -314,7 +319,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 sb.Append("    }\n");
             }
 
-            if (m.IndexKey.Length > 0 && !m.WorldTaken)
+            if (m.IndexKey.Length > 0 && Free(n + "Index"))
             {
                 sb.Append("\n    extension(global::EasyEcs.World @this)\n    {\n");
                 Property($"The world's index of <see cref=\"{t}\"/> (<c>Index&lt;{n}, …&gt;()</c>); keep it in a local or field in loops.",
@@ -323,8 +328,10 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             }
 
             // A prefab belongs to no world: its writers change no world's structure, so their class carries another
-            // tool name than the one Symbols.IsGenerated looks for.
+            // tool name than the one Symbols.IsGenerated looks for. A recipe never holds the world's own tag.
+            if (!writes) return sb.Append("}\n").ToString();
             sb.Append("}\n\n");
+            sb.Append($"/// <summary>The named members of <see cref=\"{t}\"/> on a <c>Prefab</c> (generated).</summary>\n");
             sb.Append($"[global::System.CodeDom.Compiler.GeneratedCode(\"{Symbols.GeneratorName}.Prefab\", \"{Version}\")]\n");
             sb.Append($"{a} static class {m.Path}PrefabExtensions\n{{\n");
             sb.Append("    extension(global::EasyEcs.Prefab @this)\n    {\n");
@@ -390,13 +397,13 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             if (Free("Remove" + n))
                 Member($"Drops the entity's <see cref=\"{e}\"/> links to <paramref name=\"target\"/> (<c>RemoveRelation</c>); returns how many went.",
                     $"int Remove{n}(global::EasyEcs.EntityId target) => @this.RemoveRelation<{e}>(target);");
-            if (Free("Has" + n))
+            if (Free("Links" + n))
                 Member($"Whether the entity links to <paramref name=\"target\"/> with a <see cref=\"{e}\"/> (<c>HasRelation</c>).",
                     $"bool Links{n}(global::EasyEcs.EntityId target) => @this.HasRelation<{e}>(target);");
         }
 
         sb.Append("    }\n");
-        if (m.Relation && !m.WorldTaken)
+        if (m.Relation && Free(n + "Index"))
         {
             sb.Append("\n    extension(global::EasyEcs.World @this)\n    {\n");
             sb.Append($"        /// <summary>The world's index of <see cref=\"{e}\"/> links by target (<c>Relations&lt;{n}&gt;()</c>); keep it in a local or field in loops.</summary>\n" +
@@ -435,7 +442,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     /// it and not itself a component or singleton (those have members of their own). Symbol-free.
     /// </summary>
     private sealed record BufferModel(string Namespace, string Element, string Name, string Path, string HintName, bool IsPublic,
-        bool Relation, EquatableArray<Setter> Setters, bool WorldTaken, EquatableArray<string> Taken)
+        bool Relation, EquatableArray<Setter> Setters, EquatableArray<string> Taken)
     {
         public static BufferModel? Create(SemanticModel model, INamedTypeSymbol buffer)
         {
@@ -455,15 +462,19 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             var world = buffer.ContainingNamespace.GetTypeMembers("World").FirstOrDefault();
             if (entity == null || world == null) return null;
             string name = type.Name, fqn = type.ToDisplayString(Symbols.Fqn);
-            var taken = new[] { name, "Has" + name, "Write" + name, "GetOrAdd" + name, "Remove" + name, "Add" + name }
-                .Where(n => entity.GetMembers(n).Length > 0).ToArray();
+            // Every name the element's members take, on the entity, the world (its index) and the prefab: a nested element
+            // named like another struct of its namespace gets none (see ComponentModel.Taken).
+            var members = new[] { name, "Has" + name, "Write" + name, "GetOrAdd" + name, "Remove" + name, "Add" + name, "Links" + name, "Set" + name };
+            var taken = type.ContainingType != null && ComponentModel.HasNamesake(type.ContainingNamespace, type)
+                ? members.Append(name + "Index").ToArray()
+                : members.Where(n => entity.GetMembers(n).Length > 0).Concat(world.GetMembers(name + "Index").Length > 0 ? [name + "Index"] : []).ToArray();
             bool relation = Symbols.Implements(type, "EasyEcs.IRelation");
             var setters = relation // a link is added from what builds it: AddFriend(target) for Friend(EntityId Target)
                 ? ComponentModel.SettersOf(type, fqn, type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray())
                 : [];
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
             return new BufferModel(ns, fqn, name, Symbols.FlatName(type), Symbols.HintName(type), isPublic,
-                relation, new EquatableArray<Setter>(setters), world.GetMembers(name + "Index").Length > 0, new EquatableArray<string>(taken));
+                relation, new EquatableArray<Setter>(setters), new EquatableArray<string>(taken));
         }
     }
 
@@ -526,7 +537,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     /// <summary>One component or singleton, symbol-free so the pipeline caches between edits.</summary>
     private sealed record ComponentModel(
         string Namespace, string Type, string Name, string Path, string HintName, bool IsPublic, bool Singleton, bool Tag,
-        bool Watched, bool Writable, bool Grouped, bool Cleanup, string IndexKey, bool Unique, bool WorldTaken, EquatableArray<Setter> Setters,
+        bool Watched, bool Writable, bool Grouped, bool Cleanup, bool Own, string IndexKey, bool Unique, EquatableArray<Setter> Setters,
         EquatableArray<string> Taken, EquatableArray<string> EntityIds, string Layout, bool Comparable)
     {
         private static readonly SymbolDisplayFormat TypeName = Symbols.Fqn
@@ -551,8 +562,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
 
             var entity = Core(type, "Entity");
             var world = Core(type, "World");
-            if (entity == null || world == null || SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, entity.ContainingAssembly))
-                return null; // EasyEcs's own internal components get nothing
+            if (entity == null || world == null) return null;
+            // EasyEcs's own components: the public ones (ChildOf, Destroyed) get their members in EasyEcs itself, so every
+            // assembly referencing it has them; the internal ones get nothing.
+            bool core = SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, entity.ContainingAssembly);
+            if (core && !isPublic) return null;
             token.ThrowIfCancellationRequested();
 
             string fqn = type.ToDisplayString(Symbols.Fqn);
@@ -561,11 +575,18 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             var setters = SettersOf(type, fqn, fields);
             string name = type.Name;
             var receiver = singleton ? world : entity;
-            var members = new[] { name, "Has" + name, "Is" + name, "TryGet" + name, "GetOrAdd" + name, "Set" + name, "Remove" + name, "Write" + name, "Set" + name + "IfChanged" };
-            // A nested component named like another component of its namespace: both would get entity.X, ambiguous
-            // wherever the namespace is imported, so the nested one gets no members (the generic API still works).
+            var members = new[] { name, "Has" + name, "Is" + name, "TryGet" + name, "GetOrAdd" + name, "Set" + name, "Remove" + name, "Write" + name,
+                "Set" + name + "IfChanged", "Disable" + name, "Enable" + name, "Is" + name + "Disabled" };
+            // The names it takes on other receivers: a group's filter (QueryFilter.InZone) and an index (world.ZoneIndex).
+            var filter = Core(type, "QueryFilter");
+            // A nested component named like another struct of its namespace (a component, a singleton, a buffer's
+            // element): both would get entity.X, ambiguous wherever the namespace is imported, so the nested one gets no
+            // members at all (the generic API still works).
             var taken = type.ContainingType != null && HasNamesake(type.ContainingNamespace, type)
-                ? members : members.Where(n => receiver.GetMembers(n).Length > 0).ToArray();
+                ? members.Append("In" + name).Append(name + "Index").ToArray()
+                : members.Where(n => receiver.GetMembers(n).Length > 0)
+                    .Concat(filter != null && filter.GetMembers("In" + name).Length > 0 ? ["In" + name] : [])
+                    .Concat(world.GetMembers(name + "Index").Length > 0 ? [name + "Index"] : []).ToArray();
             // A unique component's index is by its unique key (another IIndexed key is EECS036).
             var unique = type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == Symbols.UniqueIndexed)?.TypeArguments[0];
             var key = unique ?? type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == Symbols.Indexed)?.TypeArguments[0];
@@ -575,8 +596,8 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
             return new ComponentModel(ns, fqn, name, Symbols.FlatName(type), Symbols.HintName(type), isPublic, singleton,
                 tag, tracked || key != null || grouped, tracked && key == null && !grouped, grouped,
-                Symbols.Implements(type, Symbols.Cleanup), key?.ToDisplayString(Symbols.Fqn) ?? "",
-                unique != null && unique.ToDisplayString() != Symbols.EntityId && unique is not ITypeParameterSymbol, world.GetMembers(name + "Index").Length > 0, new EquatableArray<Setter>(setters), new EquatableArray<string>(taken),
+                Symbols.Implements(type, Symbols.Cleanup), core, key?.ToDisplayString(Symbols.Fqn) ?? "",
+                unique != null && unique.ToDisplayString() != Symbols.EntityId && unique is not ITypeParameterSymbol, new EquatableArray<Setter>(setters), new EquatableArray<string>(taken),
                 new EquatableArray<string>(singleton ? [] : Symbols.EntityIdPaths(type, compilation)), Symbols.LayoutHash(type) ?? "",
                 // SetIfChanged compares through IEquatable<T>, or the bytes of an unmanaged type (Values.Same).
                 type.IsUnmanagedType || type.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == "System.IEquatable<T>"
@@ -649,14 +670,17 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         internal static string Escape(string name) =>
             SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None ? "@" + name : name;
 
-        private static bool HasNamesake(INamespaceSymbol ns, INamedTypeSymbol type)
+        /// <summary>
+        /// Whether another struct of <paramref name="ns"/> (at any depth) is named like <paramref name="type"/>: a
+        /// component, a singleton or a struct some <c>DynamicBuffer</c> may hold, any of which gets members of that name.
+        /// </summary>
+        internal static bool HasNamesake(INamespaceSymbol ns, INamedTypeSymbol type)
         {
             var pending = new Stack<INamedTypeSymbol>(ns.GetTypeMembers());
             while (pending.Count > 0)
             {
                 var t = pending.Pop();
-                if (t.Name == type.Name && !SymbolEqualityComparer.Default.Equals(t, type)
-                    && (Symbols.Implements(t, Symbols.Component) || Symbols.Implements(t, Symbols.Singleton)))
+                if (t.Name == type.Name && t.TypeKind == TypeKind.Struct && !SymbolEqualityComparer.Default.Equals(t, type))
                     return true;
                 foreach (var nested in t.GetTypeMembers()) pending.Push(nested);
             }

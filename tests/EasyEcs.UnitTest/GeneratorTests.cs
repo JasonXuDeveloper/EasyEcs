@@ -122,7 +122,14 @@ public class GeneratorTests
     }
 
     [TestCase("[ForEach] static void A(ref P p, in Q q, in Clock c) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "access.ReadSingleton<global::Clock>();")]
-    [TestCase("[ForEach] static void A(Entity e, in P p) { }", "access.RunsAlone();")]
+    // An Entity used only as an identity (Id, Version, IsAlive, ==, an EntityId) reaches no component: scheduled by the rest.
+    [TestCase("[ForEach] static void A(Entity e, in P p) { }", "access.Read<global::P>();")]
+    [TestCase("[ForEach] static void A(Entity e, ref P p) { if (e.IsAlive && e != default && e.Version > 0) p.V = e.Id.Index; }", "access.Write<global::P>();", "INoStructuralChanges")]
+    [TestCase("[ForEach] static void A(Entity e, ref P p) { EntityId id = e; p.V = Index(e) + id.Index; } static int Index(EntityId id) => id.Index;", "access.Write<global::P>();", "INoStructuralChanges")]
+    [TestCase("[ForEach] static void A(Entity e, ref P p) => p.V = e.Has<Q>() ? 1 : 0;", "access.RunsAlone();")]          // reads another table
+    [TestCase("[ForEach] static void A(Entity e, ref P p) => p.V = e.Equals(default) ? 1 : 0;", "access.RunsAlone();")]    // a call on it
+    [TestCase("[ForEach] static void A(Entity e, ref P p) => p.V = Look(e); static int Look(Entity e) => 0;", "access.RunsAlone();")] // the handle passed on
+    [TestCase("[ForEach] static void A(Entity e, ref P p) => p.V = e.World.EntityCount;", "access.RunsAlone();")]
     [TestCase("[ForEach] static void A(System.Span<P> p, System.ReadOnlySpan<Q> q) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "IForEachBatch<global::P, global::Q>")]
     [TestCase("[ForEach, Changed<DynamicBuffer<int>>] static void A(in DynamicBuffer<int> b, ref P p) { }", ".Changed<global::EasyEcs.DynamicBuffer<int>>(0)", "access.Read<global::EasyEcs.DynamicBuffer<int>>();")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>(0)", "Since(system.LastRunTick + 1)", "Writes => 1;")]
@@ -160,6 +167,13 @@ public class GeneratorTests
         "file static class __ForEach<T> where T : struct, global::EasyEcs.IComponent", "UnsafeAccessorType(\"G`1[[!0]]\")",
         "access.Write<T>();", "RegisterGeneric(typeof(global::G<>), typeof(__ForEach<>.Code));",
         "Register(typeof(global::G<global::P>), new __ForEach<global::P>.Code());", "Register(typeof(global::G<global::Q>), new __ForEach<global::Q>.Code());")]
+    // Target-typed creations and typeof: without a registration, the closed type's code is made by reflection (not AOT-safe).
+    [TestCase("public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void A(ref T t) { } } "
+              + "public static class U { static G<P> field = new(); static G<Q> Property { get; } = new(); static System.Type Type = typeof(G<Settings>); "
+              + "public static void F() { G<T>? local = new(); global::G<Link> qualified = new(); } }",
+        "Register(typeof(global::G<global::P>), new __ForEach<global::P>.Code());", "Register(typeof(global::G<global::Q>), new __ForEach<global::Q>.Code());",
+        "Register(typeof(global::G<global::Settings>), new __ForEach<global::Settings>.Code());", "Register(typeof(global::G<global::T>), new __ForEach<global::T>.Code());",
+        "Register(typeof(global::G<global::Link>), new __ForEach<global::Link>.Code());")]
     [TestCase("public static class R { [ForEach] static void A<T>(in T t, ref int n) where T : struct, IComponent { } }",
         "public static void A<T>(global::EasyEcs.World world, ref int n) where T : struct, global::EasyEcs.IComponent",
         "internal ref struct AJob0<T> : global::EasyEcs.IForEachBatch<T> where T : struct, global::EasyEcs.IComponent",
@@ -791,6 +805,84 @@ public class GeneratorTests
     }
 
     [Test]
+    public void NestedNamesakesGetNoMembers()
+    {
+        // Nested structs named like another struct of their namespace: entity.DisableHealth(), QueryFilter.InHealth,
+        // world.HealthIndex, entity.HasLoot... would be ambiguous (CS0121) wherever the namespace is imported.
+        const string source = """
+            namespace N
+            {
+                public static class O1 { public struct Health : IComponent, IGroup { public int V; public int Group => V; } }
+                public static class O2 { public struct Health : IComponent, IIndexed<int> { public int V; public int Key => V; } }
+                public static class O3 { public record struct Loot(EntityId Target) : IRelation; }
+                public static class O4 { public record struct Loot(EntityId Target) : IRelation; }
+                public record struct Mark(int V);                                    // a buffer's element
+                public static class O5 { public struct Mark : IComponent { public int V; } }
+                public static class O6 { public record struct Health(int V); }      // an element named like components
+                public static class U
+                {
+                    static DynamicBuffer<O3.Loot> a; static DynamicBuffer<O4.Loot> b; static DynamicBuffer<Mark> c; static DynamicBuffer<O6.Health> d;
+                    public static bool Use(Entity e, World w) => e.Disable<O1.Health>() && e.Has<O2.Health>() && e.HasMark
+                        && w.Index<O2.Health, int>().Count(1) > 0 && QueryFilter.Create().InGroup<O1.Health>(1).Equals(default);
+                }
+            }
+            """;
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, source), out var output, out var diagnostics);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+        string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Component.g.cs") || t.FilePath.EndsWith(".Buffer.g.cs")).Select(t => t.ToString()));
+        foreach (var member in new[] { "Health\n", "HasHealth", "DisableHealth", "EnableHealth", "IsHealthDisabled", "InHealth", "HealthIndex", "SetHealth",
+                     "HasLoot", "LinksLoot", "AddLoot", "RemoveLoot", "LootIndex", "global::N.O5.Mark Mark", "SetMark(int" })
+            Assert.That(generated, Does.Not.Contain(member), member);
+        Assert.That(generated, Does.Contain("public bool HasMark"));                        // the top-level element keeps its own
+    }
+
+    [Test]
+    public void ARelationNamedLikeAnEntityMemberKeepsItsOtherMembers()
+    {
+        // Entity.HasRelation takes HasRelation: LinksRelation is another name, still generated.
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
+            public record struct Relation(EntityId Target) : IRelation;
+            public static class U { static DynamicBuffer<Relation> r; public static bool Use(Entity e, Entity f) => e.LinksRelation(f); }
+            """), out var output, out var diagnostics);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+        string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Buffer.g.cs")).Select(t => t.ToString()));
+        Assert.That(generated, Does.Contain("public bool LinksRelation(global::EasyEcs.EntityId target)"));
+        Assert.That(generated, Does.Not.Contain("bool HasRelation").And.Not.Contain("AddRelation(global::EasyEcs.EntityId Target)"));
+    }
+
+    [Test]
+    public void EasyEcsOwnComponentsHaveTheirMembers()
+    {
+        // Generated in EasyEcs itself: every referencing assembly has them, with no generated file of its own.
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
+            public static class U
+            {
+                public static int Use(World w, Entity e, Entity parent)
+                {
+                    e.SetChildOf(parent);
+                    int n = e.HasChildOf && e.TryGetChildOf(out var link) && link.Parent == e.ChildOf.Parent ? w.ChildOfIndex.Count(parent) : 0;
+                    if (e.SetChildOfIfChanged(parent) || e.IsDestroyed) n++;
+                    var recipe = new Prefab().SetChildOf(parent);
+                    return recipe.HasChildOf && recipe.ChildOf.Parent == parent.Id && e.RemoveChildOf().IsAlive ? n : -1;
+                }
+            }
+            """), out var output, out var diagnostics);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+        Assert.That(output.SyntaxTrees.Where(t => t.FilePath.Contains("ChildOf") || t.FilePath.Contains("Destroyed")), Is.Empty);
+
+        // What the world refuses is not offered: ChildOf is never disabled, Destroyed is the world's to add and remove.
+        var extensions = typeof(World).Assembly.GetExportedTypes().Where(t => t.Name is "ChildOfEcsExtensions" or "DestroyedEcsExtensions"
+            or "ChildOfPrefabExtensions" or "DestroyedPrefabExtensions").ToArray();
+        Assert.That(extensions.Select(t => t.Name), Is.EquivalentTo(new[] { "ChildOfEcsExtensions", "ChildOfPrefabExtensions", "DestroyedEcsExtensions" }));
+        var names = extensions.SelectMany(t => t.GetMethods()).Select(m => m.Name).ToArray();
+        Assert.That(names, Has.None.Contains("DisableChildOf").And.None.Contains("EnableChildOf").And.None.Contains("IsChildOfDisabled")
+            .And.None.Contains("SetDestroyed").And.None.Contains("RemoveDestroyed"));
+    }
+
+    [Test]
     public void GroupsGetANamedFilter()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
@@ -958,6 +1050,8 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(Entity e) => e.Remove<P>(); }", "EECS033")]
     [TestCase("public static class U { public static int F(World w) => w.GetSingleton<Clock>().Ticks; }", "EECS033")]
     [TestCase("public static class U { public static int F(World w, Entity e) => w.Index<Owned, EntityId>().Count(e); }", "EECS033")]
+    [TestCase("public static class U { public static EntityId F(Entity e) => e.Read<ChildOf>().Parent; }", "EECS033")]          // EasyEcs's ChildOf has its members
+    [TestCase("public static class U { public static bool F(Entity e) => e.Has<Destroyed>(); }", "EECS033")]
     [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) n += item.Component1.V; return n; } }", "EECS033")]
     [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<DynamicBuffer<Loot>>().Add(new Loot()); static DynamicBuffer<Loot> named; }", "EECS033")]
     // EECS034: a world update from a system.
@@ -1032,7 +1126,7 @@ public class GeneratorTests
     [TestCase("public static class U { public static bool F(World w) => w.Count<P>() > 2; }")]
     [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<DynamicBuffer<Loot>>().Add(new Loot()); }")]          // the only name of the buffer
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p) { } }")]
-    [TestCase("public static class U { public static EntityId F(World w, Entity e) { foreach (var item in w.Query<P, ChildOf>()) _ = item.ChildOf; return e.Read<ChildOf>().Parent; } }")]   // a member of query items only
+    [TestCase("public static class U { public static EntityId F(World w, Entity e) { foreach (var item in w.Query<P, ChildOf>()) _ = item.ChildOf; return e.ChildOf.Parent; } }")]   // EasyEcs's own component, by its members
     public async Task CheapCodeIsNotReported(string source)
     {
         var costs = await Costs(Components, Extra, source);

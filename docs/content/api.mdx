@@ -96,7 +96,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `entity.Remove<T1..Tn>()` | O(n) | clears presence bits, the row stays; missing components are ignored; a tracked component's removal is stamped (`[Removed<T>]`); returns the entity |
 | `entity.Disable<T>()` / `Enable<T>()` | O(1); the first disable in a table moves the row once | keeps the value while queries, `Has` and `Get` see it as gone; a disable counts as a removal, an enable as a write; returns false when there was nothing to do |
 | `entity.IsDisabled<T>()` | O(1) | |
-| generated: `entity.X`, `HasX`, `TryGetX`, `GetOrAddX()`, `SetX(…)`, `SetXIfChanged(…)`, `RemoveX()`, `WriteX()`, `DisableX()`, `EnableX()`, `IsXDisabled`; tags `IsX`, `SetX()`; `world.XIndex` | as the generic call | C# 14 extension members per component ([generated members](/en/docs/guide/entities-and-components)); `entity.X` is `Get`, or `Read` for a tracked or indexed component, whose writes use `WriteX()` or `SetX(…)`; `SetXIfChanged(…)` for a tracked, indexed or grouped component that can be compared |
+| generated: `entity.X`, `HasX`, `TryGetX`, `GetOrAddX()`, `SetX(…)`, `SetXIfChanged(…)`, `RemoveX()`, `WriteX()`, `DisableX()`, `EnableX()`, `IsXDisabled`; tags `IsX`, `SetX()`; `world.XIndex` | as the generic call | C# 14 extension members per component ([generated members](/en/docs/guide/entities-and-components)); `entity.X` is `Get`, or `Read` for a tracked or indexed component, whose writes use `WriteX()` or `SetX(…)`; `SetXIfChanged(…)` for a tracked, indexed or grouped component that can be compared; EasyEcs's own `ChildOf` has them too (no `DisableChildOf` / `EnableChildOf`: it cannot be disabled), and `Destroyed` has `entity.IsDestroyed` |
 
 ## Prefabs and cloning [#prefabs-and-cloning]
 

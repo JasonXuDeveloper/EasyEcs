@@ -12,31 +12,9 @@ public static class UniqueIndexExtensions
 
 Lookups of a unique index ([`IUniqueIndexed`](/en/docs/reference/iuniqueindexed)): the one entity of a key.
 
-## Methods
-
-### `Get` [#get]
-
-```csharp
-public static Entity Get<T, TKey>(this ValueIndex<T, TKey> index, TKey key) where T : struct, IComponent, IUniqueIndexed<TKey> where TKey : IEquatable<TKey>;
-```
-
-The entity whose `T` has key `key`; throws `InvalidOperationException` when none has it. O(1): a hash probe. Owner thread only.
-
-**Complexity** ([API table](/en/docs/api)): O(1): a hash probe
-
-### `TryGet` [#tryget]
-
-```csharp
-public static bool TryGet<T, TKey>(this ValueIndex<T, TKey> index, TKey key, out Entity entity) where T : struct, IComponent, IUniqueIndexed<TKey> where TKey : IEquatable<TKey>;
-```
-
-The entity whose `T` has key `key`, if one has it. O(1): a hash probe. Owner thread only.
-
-**Complexity** ([API table](/en/docs/api)): O(1): a hash probe
-
 ## Extension members
 
-### `Get` [#get-2]
+### `Get` [#get]
 
 ```csharp
 extension<T, TKey>(ValueIndex<T, TKey> index) public Entity Get(TKey key);
@@ -46,7 +24,7 @@ The entity whose `T` has key `key`; throws `InvalidOperationException` when none
 
 **Complexity** ([API table](/en/docs/api)): O(1): a hash probe
 
-### `TryGet` [#tryget-2]
+### `TryGet` [#tryget]
 
 ```csharp
 extension<T, TKey>(ValueIndex<T, TKey> index) public bool TryGet(TKey key, out Entity entity);

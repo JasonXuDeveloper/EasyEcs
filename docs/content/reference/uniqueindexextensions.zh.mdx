@@ -12,31 +12,9 @@ public static class UniqueIndexExtensions
 
 唯一索引（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)）的查找：一个键对应的那一个实体。
 
-## 方法 [#methods]
-
-### `Get` [#get]
-
-```csharp
-public static Entity Get<T, TKey>(this ValueIndex<T, TKey> index, TKey key) where T : struct, IComponent, IUniqueIndexed<TKey> where TKey : IEquatable<TKey>;
-```
-
-`T` 的键为 `key` 的实体；没有实体有这个键时抛 `InvalidOperationException`。O(1)：一次哈希探测。只能在所有者线程调用。
-
-**复杂度**（[API 表](/zh/docs/api)）：O(1)：一次哈希查找
-
-### `TryGet` [#tryget]
-
-```csharp
-public static bool TryGet<T, TKey>(this ValueIndex<T, TKey> index, TKey key, out Entity entity) where T : struct, IComponent, IUniqueIndexed<TKey> where TKey : IEquatable<TKey>;
-```
-
-`T` 的键为 `key` 的实体（如果有）。O(1)：一次哈希探测。只能在所有者线程调用。
-
-**复杂度**（[API 表](/zh/docs/api)）：O(1)：一次哈希查找
-
 ## 扩展成员 [#extension-members]
 
-### `Get` [#get-2]
+### `Get` [#get]
 
 ```csharp
 extension<T, TKey>(ValueIndex<T, TKey> index) public Entity Get(TKey key);
@@ -46,7 +24,7 @@ extension<T, TKey>(ValueIndex<T, TKey> index) public Entity Get(TKey key);
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)：一次哈希查找
 
-### `TryGet` [#tryget-2]
+### `TryGet` [#tryget]
 
 ```csharp
 extension<T, TKey>(ValueIndex<T, TKey> index) public bool TryGet(TKey key, out Entity entity);

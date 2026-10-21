@@ -30,7 +30,7 @@ that greets new players needs to tell them apart: a **`Spawned` tag** marks them
 ### Cleanup components [#cleanup-components]
 
 An entity destroyed while it holds an `ICleanupComponent` is not freed. It loses every other component, gets the
-`Destroyed` tag, and stays alive until its last cleanup component is removed:
+`Destroyed` tag (`entity.IsDestroyed`), and stays alive until its last cleanup component is removed:
 
 ```csharp
 public record struct Seat(int Number) : ICleanupComponent;   // a resource outside the world
@@ -290,7 +290,7 @@ Console.WriteLine($"resumed: {player.Cooldown.Ticks} ticks left");
 
 // The player leaves. It keeps its seat and gets the Destroyed tag; everything else goes.
 player.Destroy();
-Console.WriteLine($"destroyed: alive {player.IsAlive}, tagged {player.Has<Destroyed>()}");
+Console.WriteLine($"destroyed: alive {player.IsAlive}, tagged {player.IsDestroyed}");
 
 world.Update();
 int released = world.Seats.Released;

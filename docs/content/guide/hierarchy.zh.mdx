@@ -77,11 +77,14 @@ foreach (var part in world.Descendants(ship)) parts++;   // 先是炮塔，再�
 
 ### 换父实体、解除挂接 [#reparent]
 
-`ChildOf` 就是一个普通的值：设一个新值就是换父实体，移除它，实体就成了根。
+`ChildOf` 就是一个普通的值：设一个新值就是换父实体，移除它，实体就成了根。它和你自己的组件一样有
+[生成成员](/zh/docs/guide/entities-and-components)：`entity.ChildOf`（只读：它被索引）、`HasChildOf`、`TryGetChildOf(out link)`、
+`SetChildOf(parent)`、`SetChildOfIfChanged(parent)`、`RemoveChildOf()` 和 `world.ChildOfIndex`，预制体上也有
+`SetChildOf` / `RemoveChildOf`。没有 `DisableChildOf`：`ChildOf` 不能被禁用。
 
 ```csharp
-gun.Set(new ChildOf(ship));                // 炮管改挂到船上
-turret.Remove<ChildOf>();                  // 炮塔成了根
+gun.SetChildOf(ship);      // 炮管改挂到船上
+turret.RemoveChildOf();    // 炮塔成了根
 ```
 
 </Step>
@@ -122,7 +125,7 @@ public static class Ancestors
         // 链比 World 的实体数还长，说明 ChildOf 成了环：停下来，不要死循环。
         for (int steps = world.EntityCount; steps > 0; steps--)
         {
-            if (!part.TryGet<ChildOf>(out var link)) return default;              // 到根了：没有这样的祖先
+            if (!part.TryGetChildOf(out var link)) return default;                // 到根了：没有这样的祖先
             if (!world.TryGetEntity(link.Parent, out var parent)) return default; // 父实体已经没了（Keep）
             if (parent.Has<T>()) return parent;
             part = parent;
@@ -137,7 +140,7 @@ public static class Ancestors
         var world = part.World;
         for (int steps = world.EntityCount; steps > 0; steps--)
         {
-            if (!part.TryGet<ChildOf>(out var link) || !world.TryGetEntity(link.Parent, out var parent)) return part;
+            if (!part.TryGetChildOf(out var link) || !world.TryGetEntity(link.Parent, out var parent)) return part;
             part = parent;
         }
 
@@ -167,7 +170,7 @@ Entity top = Ancestors.Root(cannon);                  // 也是护卫舰：它�
 可以按 World 修改：`Remove` 让被销毁父实体的子实体变成根，`Keep` 让它们的 `ChildOf` 继续指向那个死去的 id。
 
 ```csharp
-world.Index<ChildOf, EntityId>().WhenTargetDestroyed(TargetPolicy.Remove);   // 孤儿变成根
+world.ChildOfIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // 孤儿变成根
 ```
 
 - 持有[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)的子实体不会被直接释放，而是“退休”：带着
@@ -328,11 +331,11 @@ foreach (var part in world.Descendants(ship))
 Console.WriteLine();
 
 // 换父实体：设一个新的 ChildOf。摘下来：移除它，实体就成了根。
-gun.Set(new ChildOf(ship));
-turret.Remove<ChildOf>();
+gun.SetChildOf(ship);
+turret.RemoveChildOf();
 
 // ChildOf 是带索引的组件：用它的索引数一个父实体有几个子实体。
-var children = world.Index<ChildOf, EntityId>();
+var children = world.ChildOfIndex;
 Console.WriteLine($"ship: {children.Count(ship)} child, turret: {children.Count(turret)} children");
 
 // 销毁父实体会连带销毁子实体：炮管跟着船一起没了。
@@ -365,7 +368,7 @@ turret alive: True, gun alive: False
 - **做传播时层级尽量浅。** 上面的遍历每个实体查一次 `Children`；扁平的层级（船和它的炮塔）走得最快。
 - **`DestroyEntities<T>()`** 一次销毁整张表，级联照样生效。
 - **预制体生成的子实体直接带上父实体：** `Instantiate(prefab, new ChildOf(parent))` 一步放进最终的表；先 `Instantiate` 再
-  `Set(new ChildOf(...))` 要复制一行，再移动一次。
+  `SetChildOf(...)` 要复制一行，再移动一次。
 - **很多实体每个 tick 都要向上找时，把结果存下来：** 一次[向上找祖先](#ancestors)是 O(深度)。
 
 创建 1,000 支小队（一个队长加 10 个队员），然后销毁队长：队员用 `ChildOf` 挂在队长下（`Cascade`），以及用自己的链接配

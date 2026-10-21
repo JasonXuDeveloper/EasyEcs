@@ -12,51 +12,9 @@ public static class OrderedIndexExtensions
 
 Ordered walks of a value index whose key is comparable (a score, a deadline, a level): ranges and sorted iteration for leaderboards, timers and matchmaking brackets. The first walk sorts the keys once; the index then keeps them sorted as keys appear and disappear (O(log keys) plus a block move each).
 
-## Methods
-
-### `Ascending` [#ascending]
-
-```csharp
-public static ValueIndex<T, TKey>.Ordered Ascending<T, TKey>(this ValueIndex<T, TKey> index) where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>, IComparable<TKey>;
-```
-
-Every indexed entity by ascending key.
-
-**Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(1) per entity
-
-### `Descending` [#descending]
-
-```csharp
-public static ValueIndex<T, TKey>.Ordered Descending<T, TKey>(this ValueIndex<T, TKey> index) where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>, IComparable<TKey>;
-```
-
-Every indexed entity by descending key (the top of a leaderboard first).
-
-**Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(1) per entity
-
-### `Range` [#range]
-
-```csharp
-public static ValueIndex<T, TKey>.Ordered Range<T, TKey>(this ValueIndex<T, TKey> index, TKey min, TKey max) where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>, IComparable<TKey>;
-```
-
-The entities whose key is between `min` and `max` (inclusive), by ascending key.
-
-**Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(log keys) to find `min` and O(1) per entity
-
-### `RangeDescending` [#rangedescending]
-
-```csharp
-public static ValueIndex<T, TKey>.Ordered RangeDescending<T, TKey>(this ValueIndex<T, TKey> index, TKey min, TKey max) where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>, IComparable<TKey>;
-```
-
-The entities whose key is between `min` and `max` (inclusive), by descending key.
-
-**Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(log keys) to find `min` and O(1) per entity
-
 ## Extension members
 
-### `Ascending` [#ascending-2]
+### `Ascending` [#ascending]
 
 ```csharp
 extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered Ascending();
@@ -66,7 +24,7 @@ Every indexed entity by ascending key.
 
 **Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(1) per entity
 
-### `Descending` [#descending-2]
+### `Descending` [#descending]
 
 ```csharp
 extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered Descending();
@@ -76,7 +34,7 @@ Every indexed entity by descending key (the top of a leaderboard first).
 
 **Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(1) per entity
 
-### `Range` [#range-2]
+### `Range` [#range]
 
 ```csharp
 extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered Range(TKey min, TKey max);
@@ -86,7 +44,7 @@ The entities whose key is between `min` and `max` (inclusive), by ascending key.
 
 **Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(log keys) to find `min` and O(1) per entity
 
-### `RangeDescending` [#rangedescending-2]
+### `RangeDescending` [#rangedescending]
 
 ```csharp
 extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered RangeDescending(TKey min, TKey max);

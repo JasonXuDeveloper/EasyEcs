@@ -41,6 +41,12 @@ icon: RotateCcwClock
 - `SaveEntities(output, a.Id, b.Id)` 和 `bag.AddRange(x, y)` 可以直接传值（`params` span，在栈上构造）。指南里收集好的列表改用
   `CollectionsMarshal.AsSpan(list)` 传入，不再 `ToArray()` 复制。见[迁移](/zh/docs/guide/migration-and-unload#save-entities)。
 
+- `ChildOf` 和 `Destroyed` 像你自己的组件一样有生成成员：`entity.ChildOf`、`HasChildOf`、`TryGetChildOf`、`SetChildOf(parent)`、
+  `SetChildOfIfChanged(parent)`、`RemoveChildOf()`、`world.ChildOfIndex`、预制体上的写入方法，以及 `entity.IsDestroyed`。
+  见[层级](/zh/docs/guide/hierarchy#reparent)。
+- 只把 `Entity` 当身份用（`Id`、`Version`、`IsAlive`、`==`、`EntityId`）的 `[ForEach]` 方法不再让系统单独运行：系统按其他参数调度。
+  见[系统](/zh/docs/guide/systems)。
+
 ### 性能 [#v4-7-0-performance]
 
 - 带组件刷出实体只拷贝一次行，不再是先 `Instantiate` 再 `Set`。见[决策 D41](/zh/docs/decisions#d41-instantiate-with-components)。
@@ -54,6 +60,12 @@ icon: RotateCcwClock
 - `EcsSystem` 新增公开的 `RunCount`：系统里同名的成员会隐藏它（警告 CS0108）。见[迁移指南](/zh/docs/migration#v4-7-run-count)。
 
 ### 修复 [#v4-7-0-fixes]
+
+- 嵌套的组件或缓冲元素和所在命名空间里另一个结构体同名时，仍会生成一部分成员（`DisableX`、`InX`、`world.XIndex`、缓冲的成员），
+  和另一个类型的成员同名，调用时编译不过（有歧义）。这样的类型现在不生成任何成员，用泛型 API 访问。
+- 关系的名字恰好是某个 `Entity` 成员的后缀（`Relation`，对应 `HasRelation`）时，会丢掉 `LinksX(target)`。
+- 只通过目标类型推断的创建（`Regen<Health> regen = new();`）或 `typeof` 闭合的泛型系统，代码要在运行时靠反射生成，
+  Native AOT 下会失败；这两种写法现在在编译期就注册。
 
 - 并行 pass（并行 `[ForEach]`、`ForEachParallel`，或者并行系统的一个阶段）可能卡死，调用方一直自旋，同时某一块（或某个系统）被执行两次：
   上一轮还没收尾的 helper 线程，会在下一轮任务更多时领走下一轮的任务。分片的并行 pass 每次运行的块数都不同，几秒内就会触发。

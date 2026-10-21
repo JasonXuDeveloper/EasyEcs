@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ChildOfEcsExtensions" source="fdb112b1498c">
+    <summary><see cref="T:EasyEcs.ChildOf" /> 的具名成员（生成）。</summary>
+  </member>
+  <member name="P:EasyEcs.ChildOfEcsExtensions.&lt;G&gt;$84DED1C6BBD34F1223F2730C06F98F0A.ChildOf" source="ff72a955ec3b">
+    <summary>实体的 <see cref="T:EasyEcs.ChildOf" />，只读（<c>Read</c>：从不算写入）；用 <c>Set</c> 写入，变更才会打 tick、进索引。没有时抛异常。</summary>
+  </member>
+  <member name="P:EasyEcs.ChildOfEcsExtensions.&lt;G&gt;$7193E572F30FD7E005904781AEF6260C.ChildOfIndex" source="dd00fc5b150f">
+    <summary>World 中 <see cref="T:EasyEcs.ChildOf" /> 的索引（<c>Index&lt;ChildOf, …&gt;()</c>）；循环里先存进局部变量或字段。</summary>
+  </member>
+  <member name="P:EasyEcs.ChildOfEcsExtensions.&lt;G&gt;$84DED1C6BBD34F1223F2730C06F98F0A.HasChildOf" source="0510ce9a23bf">
+    <summary>实体是否有 <see cref="T:EasyEcs.ChildOf" />。</summary>
+  </member>
+  <member name="M:EasyEcs.ChildOfEcsExtensions.&lt;G&gt;$84DED1C6BBD34F1223F2730C06F98F0A.RemoveChildOf" source="228e1ada8b75">
+    <summary>实体有 <see cref="T:EasyEcs.ChildOf" /> 时移除它；返回实体。</summary>
+  </member>
+  <member name="M:EasyEcs.ChildOfEcsExtensions.&lt;G&gt;$84DED1C6BBD34F1223F2730C06F98F0A.SetChildOf(EasyEcs.EntityId)" source="a63d6cd1cf89">
+    <summary>添加或覆盖实体的 <see cref="T:EasyEcs.ChildOf" />（<c>Set</c>）；返回实体。</summary>
+  </member>
+  <member name="M:EasyEcs.ChildOfEcsExtensions.&lt;G&gt;$84DED1C6BBD34F1223F2730C06F98F0A.SetChildOfIfChanged(EasyEcs.EntityId)" source="d0d6145f811f">
+    <summary>实体的 <see cref="T:EasyEcs.ChildOf" /> 不是这个值时才设置（<c>SetIfChanged</c>）：设置了返回 true；相等的值不写入、不打 tick、不更新索引。</summary>
+  </member>
+  <member name="M:EasyEcs.ChildOfEcsExtensions.&lt;G&gt;$84DED1C6BBD34F1223F2730C06F98F0A.TryGetChildOf(EasyEcs.ChildOf@)" source="a4ba36c3e072">
+    <summary>实体有 <see cref="T:EasyEcs.ChildOf" /> 时取它的一份副本（不算写入）。</summary>
+  </member>
+</doc>

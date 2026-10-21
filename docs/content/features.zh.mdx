@@ -365,7 +365,7 @@ var guard = world.Instantiate(goblin, new ChildOf(archer));          // 自带�
 
 内置的 `ChildOf(EntityId Parent)` 组件把子实体链接到父实体。`world.Children(parent)` 列出子实体，
 `world.Descendants(root)` 深度优先走完整棵子树（每个实体排在它的子实体之前，不含根），`.AddTo(ids, includeRoot: true)`
-把它收进列表，供迁移或存档使用，`Set(new ChildOf(other))` 换父实体，
+把它收进列表，供迁移或存档使用，`SetChildOf(other)` 换父实体，
 销毁父实体会连带销毁所有后代。
 
 - **适合：** 一艘船和它的炮塔、一个玩家和挂在身上的物品、一个小队和它的成员。

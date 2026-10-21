@@ -82,11 +82,15 @@ foreach (var part in world.Descendants(ship)) parts++;   // the turret, then its
 
 ### Re-parent and detach [#reparent]
 
-`ChildOf` is a value like any other: set a new one to re-parent, remove it to make the entity a root.
+`ChildOf` is a value like any other: set a new one to re-parent, remove it to make the entity a root. Like your own
+components it has [generated members](/en/docs/guide/entities-and-components): `entity.ChildOf` (read-only: it is
+indexed), `HasChildOf`, `TryGetChildOf(out link)`, `SetChildOf(parent)`, `SetChildOfIfChanged(parent)`,
+`RemoveChildOf()` and `world.ChildOfIndex`, with `SetChildOf` / `RemoveChildOf` on a prefab too. It has no
+`DisableChildOf`: `ChildOf` cannot be disabled.
 
 ```csharp
-gun.Set(new ChildOf(ship));                // the gun now hangs on the ship
-turret.Remove<ChildOf>();                  // the turret is a root
+gun.SetChildOf(ship);      // the gun now hangs on the ship
+turret.RemoveChildOf();    // the turret is a root
 ```
 
 </Step>
@@ -129,7 +133,7 @@ public static class Ancestors
         // A chain longer than the world's entities is a ChildOf cycle: stop instead of looping forever.
         for (int steps = world.EntityCount; steps > 0; steps--)
         {
-            if (!part.TryGet<ChildOf>(out var link)) return default;              // a root: no such ancestor
+            if (!part.TryGetChildOf(out var link)) return default;                // a root: no such ancestor
             if (!world.TryGetEntity(link.Parent, out var parent)) return default; // the parent is gone (Keep)
             if (parent.Has<T>()) return parent;
             part = parent;
@@ -144,7 +148,7 @@ public static class Ancestors
         var world = part.World;
         for (int steps = world.EntityCount; steps > 0; steps--)
         {
-            if (!part.TryGet<ChildOf>(out var link) || !world.TryGetEntity(link.Parent, out var parent)) return part;
+            if (!part.TryGetChildOf(out var link) || !world.TryGetEntity(link.Parent, out var parent)) return part;
             part = parent;
         }
 
@@ -178,7 +182,7 @@ it can be changed per world: `Remove` makes the children of a destroyed parent r
 pointing at the dead id.
 
 ```csharp
-world.Index<ChildOf, EntityId>().WhenTargetDestroyed(TargetPolicy.Remove);   // orphans become roots
+world.ChildOfIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // orphans become roots
 ```
 
 - A child that holds a [cleanup component](/en/docs/guide/cleanup-and-disable#cleanup-components) is retired, not freed:
@@ -342,11 +346,11 @@ foreach (var part in world.Descendants(ship))
 Console.WriteLine();
 
 // Re-parent: set a new ChildOf. Detach: remove it, and the entity is a root.
-gun.Set(new ChildOf(ship));
-turret.Remove<ChildOf>();
+gun.SetChildOf(ship);
+turret.RemoveChildOf();
 
 // ChildOf is an indexed component: its index counts the children of a parent.
-var children = world.Index<ChildOf, EntityId>();
+var children = world.ChildOfIndex;
 Console.WriteLine($"ship: {children.Count(ship)} child, turret: {children.Count(turret)} children");
 
 // Destroying a parent destroys its children: the gun goes with the ship.
@@ -381,7 +385,7 @@ ship, does not.
   (a ship and its turrets) walk fastest.
 - **`DestroyEntities<T>()`** destroys a whole table at once and still applies the cascade.
 - **Give a prefab's child its parent at once:** `Instantiate(prefab, new ChildOf(parent))` places it in its final
-  table; `Instantiate` then `Set(new ChildOf(...))` copies the row, then moves it.
+  table; `Instantiate` then `SetChildOf(...)` copies the row, then moves it.
 - **Store what a walk up finds** when many entities need it every tick: an [ancestor walk](#ancestors) is O(depth)
   per call.
 

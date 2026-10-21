@@ -240,6 +240,10 @@ bool changed = hero.SetArmorIfChanged(6);                  // false：Armor 已�
 - 写入是方法而不是属性 setter：句柄不是变量时（比如 `foreach` 变量），C# 不允许调用 setter。
 - 分析器认识这些成员：`SetX`、`GetOrAddX`、`RemoveX` 算结构变更，其余算对值的读写。
 - 泛型组件、嵌套在别处看不见的类型里的组件，以及和接收者已有成员重名的（`Entity.Id`、`World.Update`），不生成成员；泛型 API 照样能用。
+  嵌套的组件或缓冲元素和所在命名空间里另一个结构体同名时（`Npc.State` 和 `Player.State`），一个成员都不生成：两者都会生成
+  `entity.State`，导入这个命名空间的地方就会有歧义。
+- EasyEcs 自带的 `ChildOf` 也有生成成员（`entity.ChildOf`、`SetChildOf(parent)`、`world.ChildOfIndex` 等，没有 `DisableChildOf`），
+  `Destroyed` 标签有 `entity.IsDestroyed`。
 
 ### 标签 [#tags]
 
