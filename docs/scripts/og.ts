@@ -292,13 +292,20 @@ async function drawCard(card: Card, fonts: FontSet) {
     .toBuffer();
 }
 
-/** Write one card per page under `outDir`/og; pages that fail get `fallback`. */
+/**
+ * Write one card per page under `outDir`/og; pages that fail get `fallback`.
+ * The build draws them while it prerenders (scripts/after-build.ts): two cards
+ * at a time with two libvips threads each leave the prerender's thread a core
+ * (on 4 cores the server build took 25.6 s, against 31.8 s with four cards at
+ * a time on libvips' default of a thread per core).
+ */
 export async function writeCards(
   cards: Card[],
   outDir: string,
   fallback: string,
 ) {
   const fonts = await loadFonts(cards);
+  sharp.concurrency(2);
   let drawn = 0;
   let copied = 0;
   const queue = [...cards];
@@ -318,7 +325,7 @@ export async function writeCards(
       }
     }
   }
-  await Promise.all(Array.from({ length: 4 }, worker));
+  await Promise.all(Array.from({ length: 2 }, worker));
   console.log(
     `[og] ${drawn} social cards drawn${copied ? `, ${copied} use the default card` : ''}`,
   );
