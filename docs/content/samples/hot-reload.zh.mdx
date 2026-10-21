@@ -13,15 +13,6 @@ import { Boxes, Layers, Save, Workflow } from 'lucide-react';
 [`samples/HotReload`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload)，CI 会构建并运行它，
 并把输出和下面的结果比对。
 
-## 你会学到 [#what-you-learn]
-
-- **逻辑放进可回收插件**：插件的系统、组件和单例都在一个程序集里，宿主把它加载进可回收的 `AssemblyLoadContext`。
-- **干净地卸载**：`world.RemoveTypes(assembly)` 把插件的系统、组件和单例移出 World，World 里不再有东西引用插件，
-  它的上下文就能被回收（[卸载插件的类型](/zh/docs/guide/migration-and-unload#remove-types)）。
-- **保住数据**：卸载前存档、重载后读档，插件的组件值就带过来了。存档按类型全名的哈希记录类型，与加载它的程序集无关
-  （[热重载](/zh/docs/guide/migration-and-unload#hot-reload)、[存档](/zh/docs/guide/saves)）。
-- **批量变更**：`World.SetAll` 一次调用给整张表的单位加上组件（[批量操作](/zh/docs/guide/bulk)）。
-
 ## 运行 [#run-it]
 
 ```bash
@@ -45,7 +36,7 @@ dotnet run --project samples/HotReload/HotReload.Host
 
 <include lang="csharp" meta='title="HotReload.Plugin/Components.cs"'>../../../samples/HotReload/HotReload.Plugin/Components.cs</include>
 
-`JoinScoringSystem` 一次处理一整张表，给还没有分数的单位加上分数；`ScoringSystem` 给每个在动的单位加上奖励分。
+`JoinScoringSystem` 用 `World.SetAll` 一次处理一整张表，给还没有分数的单位加上分数（[批量操作](/zh/docs/guide/bulk)）；`ScoringSystem` 给每个在动的单位加上奖励分。
 
 <include lang="csharp" meta='title="HotReload.Plugin/Systems.cs"'>../../../samples/HotReload/HotReload.Plugin/Systems.cs</include>
 
@@ -59,7 +50,10 @@ dotnet run --project samples/HotReload/HotReload.Host
 
 <include lang="csharp" meta='title="HotReload.Host/Systems.cs"'>../../../samples/HotReload/HotReload.Host/Systems.cs</include>
 
-第 1 版：加载、更新 3 次、存档、移出插件类型、卸载。第 2 版：新的上下文、读档、再更新 2 次。`RunAndUnload` 禁止内联，
+第 1 版：加载、更新 3 次、存档、移出插件类型、卸载。第 2 版：新的上下文、读档、再更新 2 次。`world.RemoveTypes(assembly)`
+把插件的系统、组件和单例移出 World，World 里不再有东西引用插件，它的上下文就能被回收
+（[卸载插件的类型](/zh/docs/guide/migration-and-unload#remove-types)）。存档按类型全名的哈希记录类型，与加载它的程序集无关，
+所以插件的组件值能跨过重载带过来（[热重载](/zh/docs/guide/migration-and-unload#hot-reload)、[存档](/zh/docs/guide/saves)）。`RunAndUnload` 禁止内联，
 这样返回后 `Main` 的栈上不会留下插件的任何东西。可回收上下文、查找 `IGamePlugin`、等待回收都在
 [`Host/Plugins.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/HotReload/HotReload.Host/Host/Plugins.cs)，
 检查在

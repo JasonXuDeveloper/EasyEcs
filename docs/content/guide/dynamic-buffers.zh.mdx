@@ -102,7 +102,7 @@ world.Update();
 | 列表 | 存成 |
 | --- | --- |
 | 只有主人自己用、变了才同步或存盘的纯值：物品 id 或堆叠、路点、本 tick 受到的伤害 | **`DynamicBuffer<T>`** |
-| 元素自带状态（耐久度、带计时的 buff），系统要逐个查询或修改 | **每件一个实体**，用 [`EntityId` 链接](/zh/docs/guide/indexes-and-relations#entityid-keys)指向主人 |
+| 元素自带状态（耐久度、带计时的 buff），系统要逐个查询或修改 | **每件一个实体**，用 [`EntityId`](/zh/docs/guide/indexes-and-relations#entityid-keys) 链接指向主人 |
 | 数量少且有固定上限（4 个冷却槽、最近 8 次输入） | 非托管组件里的**固定长度 `[InlineArray]` 数组** |
 | 存盘时整体读写的数据（任务进度、设置） | **组件里的集合**，通过 `ref` 修改 |
 
@@ -144,7 +144,7 @@ ref var stash = ref hero.GetOrAddLoot();                       // 英雄没有�
 ```
 
 关系的缓冲没有 `WriteX()` 和 `GetOrAddX()`：链接带索引，只能通过
-[`Link` / `Unlink`](/zh/docs/guide/indexes-and-relations#relations) 修改。
+[`Link`](/zh/docs/guide/indexes-and-relations#relations) / [`Unlink`](/zh/docs/guide/indexes-and-relations#relations) 修改。
 
 ### 不要复制 [#copies]
 

@@ -7,7 +7,7 @@ icon: GitFork
 
 船上装着炮塔，炮塔上装着炮管，队长带着队员。`ChildOf(parent)` 把实体挂到父实体下：`world.Children(parent)` 列出子实体，
 销毁父实体时后代一并销毁。船沉了，炮塔跟着没了，一行清理代码都不用写。`ChildOf` 和其他
-[带索引的 `EntityId` 链接](/zh/docs/guide/indexes-and-relations#entityid-keys)没有区别，只是默认打开了级联销毁。
+按 `EntityId` [带索引的链接](/zh/docs/guide/indexes-and-relations#entityid-keys)没有区别，只是默认打开了级联销毁。
 
 ## 什么时候用 [#when-to-use-it]
 
@@ -60,7 +60,7 @@ foreach (var child in world.Children(ship)) { /* 炮塔 */ }
 
 `world.Descendants(root)` 遍历根下面的整棵子树：深度优先，每个实体都排在它自己的子实体前面，根本身不算在内。每个实体
 O(1)，热身后不分配内存。整棵树作为一个整体处理时（保存、迁移、计数）用它；需要先拿到父实体结果的传播，按
-[`Children` 一层层走](#transform-propagation)。
+[`Children`](#transform-propagation) 一层层走。
 
 ```csharp
 int parts = 0;

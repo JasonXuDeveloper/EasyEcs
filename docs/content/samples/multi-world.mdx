@@ -14,18 +14,6 @@ processor, all updated at once. Every code block on this page is included from
 [`samples/MultiWorld`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/MultiWorld), which CI builds
 and runs.
 
-## What you learn [#what-you-learn]
-
-- **A world belongs to one thread**: the thread that builds a world updates it and disposes it; nothing is locked
-  and nothing is shared ([one world per thread](/en/docs/guide/threading#recommended-one-world-per-thread)).
-- **Singletons are per world**: each zone's `Tally` counts the deaths of its own world only
-  ([singletons](/en/docs/guide/singletons)).
-- **Creating many entities at once**: `world.CreateEntities(units, …)` fills an array of handles in one call
-  ([structural changes](/en/docs/guide/structural-changes)).
-- **Systems with one job each**: move, hurt, respawn, as `[ForEach]` methods ([systems](/en/docs/guide/systems)).
-  The move is a [batch method](/en/docs/guide/systems#batch-methods): it takes whole runs of rows as spans and adds
-  them as `Vector<float>`.
-
 ## Run it [#run-it]
 
 ```bash
@@ -35,23 +23,26 @@ dotnet run -c Release --project samples/MultiWorld -- --updates 200
 
 ## The data [#data]
 
-Three components of a unit and the zone's `Tally` singleton.
+Three components of a unit and the zone's `Tally` [singleton](/en/docs/guide/singletons): singletons are per world,
+so each zone counts the deaths of its own world only.
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/MultiWorld/Components.cs</include>
 
 ## The systems [#systems]
 
 Units move by their velocity; those farther than the safe radius from the centre lose one health per tick, and the
-dead come back at the centre. Each system reads and writes components only, so the same three systems serve every
-zone. `MoveSystem` is the hot loop of every zone, so it is a batch method: one call per run of rows, the positions
-and velocities read as `Vector<float>` lanes.
+dead come back at the centre. Each [system](/en/docs/guide/systems) has one job and reads and writes components only,
+so the same three systems serve every zone. `MoveSystem` is the hot loop of every zone, so it is a
+[batch method](/en/docs/guide/systems#batch-methods): one call per run of rows, the positions and velocities read as
+`Vector<float>` lanes.
 
 <include lang="csharp" meta='title="Systems.cs"'>../../../samples/MultiWorld/Systems.cs</include>
 
 ## One zone [#zone]
 
-`Zone.Run` is everything one thread does: build a world, create the units, update it, report a `ZoneResult`, and
-dispose the world. No other thread ever sees it.
+`Zone.Run` is everything one thread does: build a world, create the units with one `world.CreateEntities` call,
+update it, report a `ZoneResult`, and dispose the world. No other thread ever sees it, so nothing is locked and
+nothing is shared ([one world per thread](/en/docs/guide/threading#recommended-one-world-per-thread)).
 
 <include lang="csharp" meta='title="Zone.cs"'>../../../samples/MultiWorld/Zone.cs</include>
 

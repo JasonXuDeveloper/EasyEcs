@@ -80,7 +80,7 @@ The rules are explicit and short ([D13](/en/docs/decisions#d13-one-owner-thread-
 - **Input from other threads** (network, IO) goes into a queue of yours that one system drains on the owner thread.
 
 Never keep a `ref` across an `await`: keep the `Entity` and get the component again. More in
-[Threading](/en/docs/guide/threading) and [`ref` and `await`](/en/docs/guide/refs-and-await).
+[Threading](/en/docs/guide/threading) and [ref and await](/en/docs/guide/refs-and-await).
 
 ## How do I run EasyEcs in ASP.NET Core or a Worker Service? [#hosting]
 
@@ -89,7 +89,7 @@ it when the host stops. Request handlers never touch the world: they write reque
 system drains each tick (with a `TaskCompletionSource` for the reply), and read an immutable status the world
 publishes. A request for one entity (an actor, a player) is handled on that entity, on the owner thread, with
 `entity.Run(ref job, filter)`: one lookup for all the components the job needs, and `false` when the entity is gone
-or does not match ([One entity: `entity.Run`](/en/docs/guide/queries#run-on-one-entity)). No hosting package is
+or does not match ([`entity.Run`](/en/docs/guide/queries#run-on-one-entity)). No hosting package is
 needed; [Hosting in a .NET server](/en/docs/guide/hosting) has the whole server.
 
 ## How do I test a system? [#testing]

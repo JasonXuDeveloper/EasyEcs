@@ -18,7 +18,7 @@ icon: Funnel
 </Callout>
 
 <Callout type="warn" title="不适合">
-  每个 tick 都要跑的逻辑：写成系统里的 [`[ForEach]` 方法](/zh/docs/guide/systems#foreach-methods)。它由生成器生成，和其他系统一起排序、
+  每个 tick 都要跑的逻辑：写成系统里的 [`[ForEach]`](/zh/docs/guide/systems#foreach-methods) 方法。它由生成器生成，和其他系统一起排序、
   按并行阶段调度，速度和最快的手写循环一样。按值查找实体、按指向的实体查找：用[索引](/zh/docs/guide/indexes-and-relations)，不要扫描。
 </Callout>
 
@@ -77,22 +77,22 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 
 | 需求 | 用法 |
 | --- | --- |
-| 系统里逐个实体的逻辑 | [`[ForEach]` 方法](/zh/docs/guide/systems#foreach-methods) |
-| 系统里对大量行做算术 | [批处理 `[ForEach]` 方法](/zh/docs/guide/systems#batch-methods)（span，SIMD） |
+| 系统里逐个实体的逻辑 | [`[ForEach]`](/zh/docs/guide/systems#foreach-methods) 方法 |
+| 系统里对大量行做算术 | 批处理 [`[ForEach]`](/zh/docs/guide/systems#batch-methods) 方法（span，SIMD） |
 | 系统里每个实体都很重的计算 | [`[ForEach(Parallel = true)]`](/zh/docs/guide/systems#parallel-methods) |
-| 实体可能有、也可能没有的组件 | [`Maybe<T>` 参数](/zh/docs/guide/systems#maybe)，或者用 `With` / `Without` 拆成两个方法 |
-| 系统之外的遍历，写成方法 | [`[ForEach]` runner](/zh/docs/guide/systems#foreach-outside-systems)：带生成入口的静态方法 |
+| 实体可能有、也可能没有的组件 | [`Maybe<T>`](/zh/docs/guide/systems#maybe) 参数，或者用 `With` / `Without` 拆成两个方法 |
+| 系统之外的遍历，写成方法 | [`[ForEach]`](/zh/docs/guide/systems#foreach-outside-systems) runner：带生成入口的静态方法 |
 | 最快的临时循环 | `world.ForEach<T1..Tn, TJob>(ref job, filter)` 加[结构体 job](#foreach-a-struct-job) |
 | 需要 `Entity` 的临时循环 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` |
 | 对成段的行做临时算术 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` |
 | 在单个实体上跑 job（一个请求、一条消息） | [`entity.Run<T1..Tn, TJob>(ref job, filter)`](#run-on-one-entity) |
-| 临时的重计算，多线程 | [`ForEachParallel` / `ForEachEntityParallel`](#on-several-threads-foreachparallel-and-foreachentityparallel) |
+| 临时的重计算，多线程 | [`ForEachParallel`](#on-several-threads-foreachparallel-and-foreachentityparallel) / [`ForEachEntityParallel`](#on-several-threads-foreachparallel-and-foreachentityparallel) |
 | 写起来方便的循环（工具、测试、请求处理） | `foreach (var item in world.Query<T1..Tn>(filter))` |
 | 只读的循环（存盘、发包、报表） | [`foreach (var item in world.Read<T1..Tn>(filter))`](#read)：不打 tick |
 | “有多少个……？” / “有没有……？” | `world.Count<T1..Tn>(filter)` / `world.Any<T1..Tn>(filter)` |
 | 销毁所有匹配的实体 | `world.DestroyAll<T1..Tn>(filter)` |
 | 只要某个 tick 之后写过或移除的行 | `Changed<T>(tick)` / `Removed<T>(tick)`；几个组件任意一个时用 `ChangedAny<T1..Tn>(tick)` / `RemovedAny<T1..Tn>(tick)`（[变更追踪](/zh/docs/guide/change-tracking)） |
-| 只写值真的变了的行 | `[ForEach]` 方法的 [`Mut<T>` 参数](/zh/docs/guide/change-tracking#set-if-changed) |
+| 只写值真的变了的行 | `[ForEach]` 方法的 [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 参数 |
 | 每次只处理一部分行，N 次遍历把每行各过一遍 | `ForEach` 系列调用配 `Slice(index, of)`，或 [`[ForEach(Slices = N)]`](/zh/docs/guide/systems#slices) |
 | 按值查找，或找指向某实体的实体 | `world.Index<T, TKey>().Find(key)`（[索引](/zh/docs/guide/indexes-and-relations)） |
 

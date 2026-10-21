@@ -245,7 +245,7 @@ public class DeathSystem : EcsSystem
 
 `Get<T>()` 或 `Query` 元素给出的 `ref`，在下一次结构变更（任何实体的）之前有效；`[ForEach]` 方法的 `ref` 参数在方法体自己做的变更之后
 依然有效。跨 `await` 的一律无效。保存 `Entity` 句柄（每次访问都会校验），需要时再重新读组件
-（[`ref` 与 `await`](/zh/docs/guide/refs-and-await)）。
+（[ref 与 await](/zh/docs/guide/refs-and-await)）。
 
 在数据里，存 `EntityId` 而不是句柄：`Entity` 字段会让组件变成托管类型（[EECS017](/zh/docs/guide/analyzer#eecs017)），
 而 `world.TryGetEntity(id, out var entity)` 能把 id 换回句柄，顺便告诉你这个实体是否还活着。

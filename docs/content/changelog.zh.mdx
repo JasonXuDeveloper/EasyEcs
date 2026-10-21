@@ -171,7 +171,7 @@ icon: RotateCcwClock
 - `entity.Run(ref job)` 在单个实体上运行结构体 job（`IForEachEntity<T1..T9>`）：实体已失效或缺少组件时返回 false；
   `entity.Run(ref job, filter)` 在 `QueryFilter`（`With`、`Without`、`WithAny`、`Changed`、`Removed`、分组）不通过时也返回 false。
   job 的 `Writes` 会像遍历时一样打上变更 tick；job 自己做结构变更后，`ref` 参数依然有效；job 抛异常时，写入也会带到搬走后的行。
-  见[单个实体：`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)。
+  见[`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)。
 - 系统分组可以通过接口加过滤条件：分组本身或它实现的接口上的 `IGroupWith<T>` / `IGroupWithout<T>`，作用等同于
   `[With<T>]` / `[Without<T>]`。泛型接口能给每种类型各配一个分组（`IActorGroup<TActor> : IGroupWith<Inbox<TActor>>`），这是特性做不到的。
   见[分组过滤](/zh/docs/guide/systems#group-filters)。

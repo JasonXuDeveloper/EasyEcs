@@ -13,17 +13,18 @@ its source: each page is `<page>.mdx` (English) and `<page>.zh.mdx` (Chinese), a
 | [Features](https://ecs.xgamedev.net/en/docs/features) | [features.mdx](features.mdx) | See every feature on one page. |
 | [Getting started](https://ecs.xgamedev.net/en/docs/getting-started) | [getting-started.mdx](getting-started.mdx) | Build a small simulation step by step. |
 | [ECS principles](https://ecs.xgamedev.net/en/docs/ecs-principles) | [ecs-principles.mdx](ecs-principles.mdx) | Design features as data plus one-job systems. |
-| [Example: a battle server](https://ecs.xgamedev.net/en/docs/example) | [example.mdx](example.mdx) | See every feature in one world (the code of `BattleServer.cs`). |
 | [Cheat sheet](https://ecs.xgamedev.net/en/docs/cheat-sheet) | [cheat-sheet.mdx](cheat-sheet.mdx) | Look up the common calls. |
 | [Glossary](https://ecs.xgamedev.net/en/docs/glossary) | [glossary.mdx](glossary.mdx) | Look up a term. |
 
 ## Samples
 
-One page per runnable project of [samples/](../../samples), its files included, under [samples/](samples):
+One page per runnable project of [samples/](../../samples), its files included, under [samples/](samples), and the
+battle server, whose sidebar entry is in the same section:
 
 | Page | Source | Read it to |
 |---|---|---|
 | [Samples](https://ecs.xgamedev.net/en/docs/samples) | [samples/index.mdx](samples/index.mdx) | Pick a runnable sample, in learning order. |
+| [Example: a battle server](https://ecs.xgamedev.net/en/docs/example) | [example.mdx](example.mdx) | See every feature in one world (the code of `BattleServer.cs`). |
 | [HelloWorld](https://ecs.xgamedev.net/en/docs/samples/hello-world) | [samples/hello-world.mdx](samples/hello-world.mdx) | The smallest program. |
 | [GameLoop](https://ecs.xgamedev.net/en/docs/samples/game-loop) | [samples/game-loop.mdx](samples/game-loop.mdx) | A fixed-tick server fed by a network thread. |
 | [SaveLoad](https://ecs.xgamedev.net/en/docs/samples/save-load) | [samples/save-load.mdx](samples/save-load.mdx) | Saves and migration between worlds. |
@@ -47,7 +48,7 @@ One page per concept, under [guide/](guide):
 | [Systems](https://ecs.xgamedev.net/en/docs/guide/systems) | [guide/systems.mdx](guide/systems.mdx) |
 | [Singletons](https://ecs.xgamedev.net/en/docs/guide/singletons) | [guide/singletons.mdx](guide/singletons.mdx) |
 | [Structural changes](https://ecs.xgamedev.net/en/docs/guide/structural-changes) | [guide/structural-changes.mdx](guide/structural-changes.mdx) |
-| [`ref` and `await`](https://ecs.xgamedev.net/en/docs/guide/refs-and-await) | [guide/refs-and-await.mdx](guide/refs-and-await.mdx) |
+| [ref and await](https://ecs.xgamedev.net/en/docs/guide/refs-and-await) | [guide/refs-and-await.mdx](guide/refs-and-await.mdx) |
 | [Change tracking](https://ecs.xgamedev.net/en/docs/guide/change-tracking) | [guide/change-tracking.mdx](guide/change-tracking.mdx) |
 | [Dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers) | [guide/dynamic-buffers.mdx](guide/dynamic-buffers.mdx) |
 | [Indexes and relations](https://ecs.xgamedev.net/en/docs/guide/indexes-and-relations) | [guide/indexes-and-relations.mdx](guide/indexes-and-relations.mdx) |

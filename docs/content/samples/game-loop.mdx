@@ -13,23 +13,6 @@ Sixteen fake clients join, move, fire and leave for three seconds of game time. 
 from [`samples/GameLoop`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop), which CI builds
 and runs. Read [HelloWorld](/en/docs/samples/hello-world) first.
 
-## What you learn [#what-you-learn]
-
-- **Input as data**: the network thread posts messages to a mailbox, and `ReceiveInputSystem` turns each one into a
-  request entity (`JoinRequest`, `MoveRequest`, ...). One system per kind of request handles it and destroys it in
-  the same tick ([input from other threads](/en/docs/guide/threading#input-from-other-threads)).
-- **[System groups](/en/docs/guide/systems#system-groups)** (`ISystemGroup`, `[UpdateInGroup<T>]`) give systems their
-  own cadence: input on every wake-up, the simulation on the fixed tick, replication every third tick.
-- **A [value index](/en/docs/guide/indexes-and-relations#value-indexes)** (`IIndexed<int>` on `Client`) finds a player
-  by client id: `world.ClientIndex.TryFind(...)`.
-- **[Prefabs](/en/docs/guide/prefabs)** in a singleton: systems instantiate `prefabs.Player` and `prefabs.Bullet` with
-  the values that differ per instance, one row copy each.
-- **[Change tracking](/en/docs/guide/change-tracking)** (`ITracked` on `Position`, `[Changed<Position>]`): replication
-  visits only the entities that moved since it last ran. `MovementSystem` writes through `Mut<Position>` and
-  `SetIfChanged`, so a player standing still is not stamped.
-- **Operations**: `--ticks N`, a status line per second, Ctrl+C stops cleanly, per-system run counts and times from
-  [`WorldOptions.MeasureSystems`](/en/docs/guide/diagnostics#timing).
-
 ## Run it [#run-it]
 
 ```bash
@@ -39,21 +22,28 @@ dotnet run --project samples/GameLoop -- --ticks 30     # 1 second
 
 ## The data [#data]
 
-Requests are the input, one component per kind; then the simulation state, the singletons and the two system groups.
+Requests are the input, one component per kind; then the simulation state, the singletons and the two
+[system groups](/en/docs/guide/systems#system-groups). `Client` is a
+[value index](/en/docs/guide/indexes-and-relations#value-indexes) (`IIndexed<int>`), so `world.ClientIndex` finds a
+player by client id; `Position` is `ITracked`, so replication can visit only what moved; the `Prefabs` singleton
+holds the [prefabs](/en/docs/guide/prefabs) of a player and a bullet.
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/GameLoop/Components.cs</include>
 
 ## Input [#input]
 
-`ReceiveInputSystem` is in `InputGroup`, so the host runs it on every wake-up, not only on ticks. The mailbox is a
-`readonly` field the host gives it: the system's connection to the network, not world state.
+Input is data: the network thread posts messages to a mailbox, and `ReceiveInputSystem` turns each one into a
+request entity ([input from other threads](/en/docs/guide/threading#input-from-other-threads)). The system is in
+`InputGroup`, so the host runs it on every wake-up, not only on ticks. The mailbox is a `readonly` field the host
+gives it: the system's connection to the network, not world state.
 
 <include lang="csharp" meta='title="Systems/Input.cs"'>../../../samples/GameLoop/Systems/Input.cs</include>
 
 ## Requests [#requests]
 
-One system per kind of request. Each finds the player by client id, acts, and destroys the request: a request lives
-for one tick.
+One system per kind of request. Each finds the player with `world.ClientIndex.TryFind`, acts, and destroys the
+request: a request lives for one tick. Joins and shots instantiate `prefabs.Player` and `prefabs.Bullet` with the
+values that differ per instance, one row copy each.
 
 <include lang="csharp" meta='title="Systems/Requests.cs"'>../../../samples/GameLoop/Systems/Requests.cs</include>
 
@@ -67,15 +57,17 @@ so a player standing still is not replicated.
 
 ## Replication [#replication]
 
-`[Changed<Position>]` skips the entities that did not move; each one that did writes 16 bytes into the outbox, which the
-host sends and clears.
+[Change tracking](/en/docs/guide/change-tracking): `[Changed<Position>]` skips the entities that did not move since
+the system last ran; each one that did writes 16 bytes into the outbox, which the host sends and clears.
 
 <include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/GameLoop/Systems/Replication.cs</include>
 
 ## The program [#program]
 
 The singletons first, then the systems by group, then the loop: input on every wake-up, a simulation tick when one is
-due, replication every third tick. The mailbox, the fake clients, the fixed-tick timer, the network and the report
+due, replication every third tick. `--ticks N` sets the length of the run, Ctrl+C stops it cleanly, and
+[`WorldOptions.MeasureSystems`](/en/docs/guide/diagnostics#timing) gives the per-system run counts and times of the
+report. The mailbox, the fake clients, the fixed-tick timer, the network and the report
 are in [`Host/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop/Host): plumbing, not the
 lesson.
 

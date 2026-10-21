@@ -102,7 +102,7 @@ creates garbage or the one whose population grew, not only the slow one:
 
 | Field | What it holds |
 | --- | --- |
-| `LastAllocated`, `TotalAllocated` | Bytes allocated on the managed heap by the latest run, and by all runs: on the thread that ran the system, plus on the helper threads that ran chunks of its [parallel `[ForEach]`](/en/docs/guide/systems#parallel-methods) methods. Another system of the same parallel stage never adds to it. |
+| `LastAllocated`, `TotalAllocated` | Bytes allocated on the managed heap by the latest run, and by all runs: on the thread that ran the system, plus on the helper threads that ran chunks of its parallel [`[ForEach]`](/en/docs/guide/systems#parallel-methods) methods. Another system of the same parallel stage never adds to it. |
 | `LastEntities`, `TotalEntities` | Entities the latest run's `[ForEach]` methods matched, and all runs: each method's query counted when its pass starts (with its filters, and for `[Changed<T>]` / `[Removed<T>]` only the rows written or removed since the system last ran), summed over the methods. |
 
 What the entity count means:

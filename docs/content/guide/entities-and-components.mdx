@@ -220,7 +220,7 @@ bool both = hero.Has<Position, Health>();
 ```
 
 Always change components through a `ref`: `var hp = hero.Get<Health>()` is a copy, and changing it changes nothing in
-the table ([`ref` and `await`](/en/docs/guide/refs-and-await)).
+the table ([ref and await](/en/docs/guide/refs-and-await)).
 
 ### Generated members [#generated-members]
 
@@ -236,7 +236,7 @@ the same.
 | a unique component (`Account : IUniqueIndexed<long>`) | as an indexed one; `world.AccountIndex.Get(key)`, `world.AccountIndex.TryGet(key, out e)` | the [one entity of a key](#unique-key) |
 | a grouped component (`Team : IGroup`) | `e.Team` is `ref readonly`, no `GetOrAddTeam` or `WriteTeam`; `e.SetTeamIfChanged(…)`; `filter.InTeam(group)` | `Read`; `SetIfChanged`; `filter.InGroup<Team>(group)` ([groups](/en/docs/guide/groups)) |
 | a tag (`struct Dead : IComponent`) | `e.IsDead`, `e.SetDead()`, `e.RemoveDead()` | `Has`, `Set(new Dead())`, `Remove` |
-| any component with fields, except a cleanup component | `e.DisableHealth()`, `e.EnableHealth()`, `e.IsHealthDisabled` | [`Disable` / `Enable`](/en/docs/guide/cleanup-and-disable) |
+| any component with fields, except a cleanup component | `e.DisableHealth()`, `e.EnableHealth()`, `e.IsHealthDisabled` | [`Disable`](/en/docs/guide/cleanup-and-disable) / [`Enable`](/en/docs/guide/cleanup-and-disable) |
 | a buffer element some code names as `DynamicBuffer<Loot>` | `e.Loot` (`ref readonly`), `e.HasLoot`, `e.WriteLoot()`, `e.GetOrAddLoot()`, `e.RemoveLoot()` | `Read`, `Has`, `Get`, `GetOrAdd`, `Remove` of `DynamicBuffer<Loot>` ([dynamic buffers](/en/docs/guide/dynamic-buffers)) |
 | a relation (`MemberOf : IRelation`), once code names `DynamicBuffer<MemberOf>` | `e.LinkMemberOf(target)`, `e.UnlinkMemberOf(target)`, `e.LinksMemberOf(target)`, `e.MemberOf` (`ref readonly`), `e.HasMemberOf`, `e.RemoveMemberOf()`, `world.MemberOfIndex` | `Link`, `Unlink`, `Links`, `Read`, `Has`, `Remove`, `world.Relations<MemberOf>()` ([relations](/en/docs/guide/indexes-and-relations#relations)) |
 | a singleton (`Clock : ISingletonComponent`) | `world.Clock` (`ref`), `world.HasClock`, `world.GetOrAddClock()`, `world.SetClock(…)`, `world.RemoveClock()` | [`GetSingleton`](/en/docs/guide/singletons), `HasSingleton`, `GetOrAddSingleton`, `GetOrAddSingleton() = …`, `RemoveSingleton` |

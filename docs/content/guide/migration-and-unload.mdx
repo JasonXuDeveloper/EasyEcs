@@ -23,7 +23,7 @@ unload and a new version can load the saved data.
 </Callout>
 
 <Callout type="warn" title="Skip it for">
-  Moving a whole world: [`Save` / `Load`](/en/docs/guide/saves) keeps every id. Entities that change "zone" inside one
+  Moving a whole world: [`Save`](/en/docs/guide/saves) / [`Load`](/en/docs/guide/saves) keeps every id. Entities that change "zone" inside one
   world: a [group](/en/docs/guide/groups) or a component value is enough. Reloading types that are not in a collectible
   context: the default context never unloads. A record of every component of an entity that does not exist yet:
   `SaveEntities` without a set and `LoadEntities` create it.

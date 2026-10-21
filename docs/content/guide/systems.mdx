@@ -21,7 +21,7 @@ writes, which the source generator compiles into a struct job as fast as a hand-
 </Callout>
 
 <Callout type="warn" title="Skip it for">
-  A one-off pass that a request or a tool runs between ticks: write a [`[ForEach]` runner](#foreach-outside-systems)
+  A one-off pass that a request or a tool runs between ticks: write a [`[ForEach]`](#foreach-outside-systems) runner
   or a [query](/en/docs/guide/queries). State that must survive between ticks: put it in a component or a
   [singleton](/en/docs/guide/singletons), never in a system field ([EECS007](/en/docs/guide/analyzer#eecs007)).
 </Callout>
@@ -352,7 +352,7 @@ Updating a group with no systems does nothing.
 whole group can leave frozen or inactive entities out without repeating the filter on each method. A group's
 `[WithAny<T>]` joins the method's own `[WithAny<T>]` set, so it widens the "at least one of" test: a group with
 `[WithAny<A>]` and a method with `[WithAny<B>]` select entities with `A` or `B`. Queries a system makes in `OnUpdate`
-are its own, and [`[ForEach]` runners](#foreach-outside-systems) belong to no group, so no group filter applies to
+are its own, and [`[ForEach]`](#foreach-outside-systems) runners belong to no group, so no group filter applies to
 them. A filter attribute on a struct that is not a group is a compile error
 ([EECS023](/en/docs/guide/analyzer#eecs023)).
 

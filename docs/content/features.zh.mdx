@@ -19,12 +19,12 @@ EasyEcs 的全部功能都在这一页，按它在服务器上承担的工作分
 
 | 用途 | 功能 |
 | --- | --- |
-| [模拟](#simulate) | [World 与实体](#worlds-and-entities)、[组件与标签](#components-and-tags)、[生成成员](#generated-members)、[系统与 `[ForEach]`](#systems-and-foreach)、[泛型系统](#generic-systems)、[过滤条件](#filters)、[可选组件](#optional-components)、[批量方法](#batch-methods)、[单例](#singletons)、[排序、分组与间隔](#system-groups-and-intervals)、[分片](#slices)、[立即生效的结构变更](#immediate-structural-changes)、[临时查询](#ad-hoc-queries) |
+| [模拟](#simulate) | [World 与实体](#worlds-and-entities)、[组件与标签](#components-and-tags)、[生成成员](#generated-members)、系统与 [`[ForEach]`](#systems-and-foreach)、[泛型系统](#generic-systems)、[过滤条件](#filters)、[可选组件](#optional-components)、[批量方法](#batch-methods)、[单例](#singletons)、[排序、分组与间隔](#system-groups-and-intervals)、[分片](#slices)、[立即生效的结构变更](#immediate-structural-changes)、[临时查询](#ad-hoc-queries) |
 | [响应变化](#react) | [变更追踪](#change-tracking)、[值变了才算写入](#write-only-when-changed)、[移除检测](#removal-detection)、[销毁日志](#destroy-log)、[清理组件](#cleanup-components)、[禁用与启用](#disable-and-enable) |
 | [查找](#find) | [值索引](#value-indexes)、[唯一键](#unique-keys)、[有序区间](#ordered-ranges)、[按值分表](#table-groups) |
 | [组织](#structure) | [关系](#relations)、[层级](#hierarchy)、[动态缓冲](#dynamic-buffers)、[预制体与克隆](#prefabs-and-cloning) |
 | [持久化](#persist) | [快照](#snapshots)、[存档](#saves)、[迁移](#migration)、[卸载插件类型](#unloading) |
-| [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、[并行 `[ForEach]`](#parallel-foreach)、[批量操作](#bulk-operations) |
+| [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、并行 [`[ForEach]`](#parallel-foreach)、[批量操作](#bulk-operations) |
 | [构建与运维](#operate) | [分析器与代码修复](#analyzer)、[系统耗时统计](#per-system-timing)、[调度](#schedule)、[异常处理](#errors)、[运行时自省](#introspection)、[归还内存](#trim-excess)、[Native AOT](#native-aot)、[托管与测试](#hosting-and-testing)、[模板与示例程序](#templates) |
 
 ## 模拟 [#simulate]
@@ -184,7 +184,7 @@ public class MovementSystem : EcsSystem
 - **别用于：** 每个 tick 都要跑的逻辑：系统有排序、有调度、有耗时统计。
 - **开销：** 零分配。`Count` 只是把表的行数加起来；`Any` 找到第一个就停；结构体 job 是最快的临时遍历。
   `entity.Run` 是 O(1)，过滤条件每多一个组件多 O(1)。
-- **指南：** [查询与过滤](/zh/docs/guide/queries)、[单个实体：`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)
+- **指南：** [查询与过滤](/zh/docs/guide/queries)、[`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)
 
 ## 响应变化 [#react]
 
@@ -576,11 +576,10 @@ World 跑在 ASP.NET Core 应用或 Worker Service 里，由一个托管服务�
 
 `dotnet new easyecs` 创建一个按固定 tick 运行的控制台服务器：`Components/`、每个系统一个文件的 `Systems/`（其中有一个
 用预制体刷怪的系统），`Program.cs` 只负责托管 World（加 `--tests` 多一个 NUnit 项目，每个系统一个测试文件）；
-`dotnet new easyecs-system` 添加一个系统。[`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples)
-按学习顺序收录完整程序（Hello World、游戏循环、存档与加载、每线程一个 World、热重载、actor、仿 Minecraft 的服务器、Godot 游戏）；指南里
+`dotnet new easyecs-system` 添加一个系统。[示例](/zh/docs/samples)按学习顺序收录完整程序；指南里
 [变更追踪](/zh/docs/guide/change-tracking#full-example)等功能页的“怎么用”部分最后都有一个完整例子。
 
-- **指南：** [快速开始](/zh/docs/getting-started)、[项目结构](/zh/docs/guide/project-structure)
+- **指南：** [快速开始](/zh/docs/getting-started)、[项目结构](/zh/docs/guide/project-structure)、[示例](/zh/docs/samples)
 
 ## 和其他库的对比 [#compared]
 
@@ -593,26 +592,10 @@ World 跑在 ASP.NET Core 应用或 Worker Service 里，由一个托管服务�
 
 <PeerChart />
 
-全部结果按领先幅度排序，其他库更快的项目和原因也在里面：[横向对比](/zh/docs/comparison#feature-by-feature)。
-
-| | EasyEcs | Friflo.Engine.ECS | Arch | DefaultEcs |
-| --- | --- | --- | --- | --- |
-| 存储 | 原型，带存在位 | 原型 | 分块的原型 | 每种组件一个池 |
-| 遍历中的结构变更 | 立即生效，每个实体只访问一次 | 抛异常；改用命令缓冲 | 不做保护；命令缓冲 | 不安全；命令记录器 |
-| 源生成的系统 | 有 | 无 | 核心库里没有 | 无 |
-| 编译期分析器 | 有 | 无 | 无 | 无 |
-| 按 tick 的变更追踪 | 有 | 无 | 无 | `WhenChanged<T>()` |
-| 移除检测 | `[Removed<T>]` | 事件 | 事件 | `WhenRemoved<T>()` |
-| 值索引 | 有 | 有 | 无 | `EntityMultiMap<TKey>` |
-| 关系与层级 | 有 | 有 | 无 | 无 |
-| 并行系统 | 读写集合自动生成 | 无 | 无 | `ParallelSystem<T>` |
-| 快照 / 存档 | 都有 | JSON | 无 | 文本、二进制 |
-| Godot 4（.NET） | 支持（项目面向 net10.0） | 支持 | 支持 | 支持 |
-| Unity | 不支持（net10.0） | 支持 | 支持 | 支持 |
+全部结果按领先幅度排序，其他库更快的项目和原因也在里面，见[横向对比](/zh/docs/comparison#feature-by-feature)；每个库内置了哪些功能，
+见它的[功能对照表](/zh/docs/comparison#features)。
 
 <BenchSource />
-
-完整的对比，包括每个库各自擅长的场景，见[横向对比](/zh/docs/comparison)。
 
 ## 相关页面 [#related]
 

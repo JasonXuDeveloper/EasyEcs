@@ -148,7 +148,7 @@ world.CreateEntities(garrison, new Position(0, 0), new Velocity(0, 0), new Healt
 
 | 需求 | 用 | 实测 |
 | --- | --- | --- |
-| 系统的逐实体逻辑 | [`[ForEach]` 方法](/zh/docs/guide/systems) | 每个实体 <BenchValue k="forEach.perEntity" />，两个普通数组是 <BenchValue k="rawArray.perEntity" /> |
+| 系统的逐实体逻辑 | [`[ForEach]`](/zh/docs/guide/systems) 方法 | 每个实体 <BenchValue k="forEach.perEntity" />，两个普通数组是 <BenchValue k="rawArray.perEntity" /> |
 | 多行上的算术 | 向量化的批量 `[ForEach]` 方法（span） | <BenchValue k="ops.iterate2Simd" />，逐实体是 <BenchValue k="ops.iterate2" />（100,000 个实体） |
 | 繁重的逐实体工作 | `[ForEach(Parallel = true)]` | <BenchValue k="parallel.forEach.on" />，单线程是 <BenchValue k="parallel.forEach.off" />（100,000 个实体，4 核） |
 | 系统之外、每个 tick 都跑的循环 | 通过入口运行的静态 `[ForEach]` 方法，或 struct job（`world.ForEach`） | <BenchValue k="runner.runner" />，`Query` 循环是 <BenchValue k="runner.query" /> |
@@ -477,22 +477,22 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 | 完整的服务器 tick | `BattleServerTests` | `WorldSimulationBenchmark`、`MultiWorldBenchmark`、`BattleServerBenchmark` | [`EcsComparisonBenchmark`](/zh/docs/comparison#the-same-server-tick) |
 | `[ForEach]`、struct job、`Query` | `ForEachSystemTests`、`QueryTests`、`RunnerTests` | `MicroBenchmarks`、`RunnerBenchmark`、`CallSiteBenchmark` | [`OperationBenchmark`](/zh/docs/comparison#operations) |
 | 结构变更、存在位 | `EntityTests`、`ComponentTests`、`PresenceTests` | `MicroBenchmarks`（`Churn`、`ToggleComponent`）、`SparseBenchmark`、`CountBenchmark` | [`StructuralChangeComparison`](/zh/docs/comparison#structural-changes) |
-| 批量变更和生成 | `BulkTests` | `BulkBenchmark`、`MicroBenchmarks.ChurnBatch` | [`BulkChangeComparison`、`BulkSpawnComparison`](/zh/docs/comparison#bulk) |
-| 预制体和克隆 | `InstantiateTests` | `PrefabBenchmark` | [`OperationBenchmark`（`Instantiate`）](/zh/docs/comparison#operations) |
+| 批量变更和生成 | `BulkTests` | `BulkBenchmark`、`MicroBenchmarks.ChurnBatch` | [`BulkChangeComparison`](/zh/docs/comparison#bulk)、[`BulkSpawnComparison`](/zh/docs/comparison#bulk) |
+| 预制体和克隆 | `InstantiateTests` | `PrefabBenchmark` | [`OperationBenchmark`](/zh/docs/comparison#operations)（`Instantiate`） |
 | 变更追踪、`Mut<T>` | `ChangedTests` | `ChangeTrackingBenchmark`、`ChangeTrackingWriteBenchmark`、`ChangeTrackingSomeRowsBenchmark` | [`ChangeTrackingComparison`](/zh/docs/comparison#change-tracking) |
 | 移除检测、销毁日志 | `RemovedTests` | `BattleServerBenchmark`、`DestroyLogBenchmark` | [`RemovalComparison`](/zh/docs/comparison#removal-detection) |
 | 禁用 | `DisableTests` | `BulkBenchmark`（`DisableAll`） | [`DisableComparison`](/zh/docs/comparison#disabling) |
-| 值索引、唯一键、有序索引 | `IndexTests`、`OrderedIndexTests` | `IndexBenchmark`、`OrderedIndexBenchmark` | [`IndexComparison`、`ValueQueryComparison`](/zh/docs/comparison#indexes-and-relations) |
+| 值索引、唯一键、有序索引 | `IndexTests`、`OrderedIndexTests` | `IndexBenchmark`、`OrderedIndexBenchmark` | [`IndexComparison`](/zh/docs/comparison#indexes-and-relations)、[`ValueQueryComparison`](/zh/docs/comparison#indexes-and-relations) |
 | 关系 | `RelationTests`、`TargetPolicyTests` | `RelationBenchmark` | [`RelationComparison`](/zh/docs/comparison#indexes-and-relations) |
 | 层级 | `HierarchyTests` | `HierarchyBenchmark` | [`HierarchyComparison`](/zh/docs/comparison#hierarchy) |
 | 分组 | `GroupTests` | `GroupBenchmark` | [`ValueQueryComparison`](/zh/docs/comparison#indexes-and-relations) |
-| 单例 | `SingletonTests` | `MicroBenchmarks.SingletonAccess` | [`OperationBenchmark`（`Singleton`）](/zh/docs/comparison#operations) |
+| 单例 | `SingletonTests` | `MicroBenchmarks.SingletonAccess` | [`OperationBenchmark`](/zh/docs/comparison#operations)（`Singleton`） |
 | 可选组件（`Maybe<T>`） | `ForEachSystemTests` | `MaybeBenchmark` | — |
 | 动态缓冲 | `DynamicBufferTests` | `DynamicBufferBenchmark` | — |
 | 清理组件 | `CleanupTests` | `CleanupBenchmark` | — |
 | 系统顺序和分组 | `SystemTests` | `OrderingBenchmark` | — |
 | 分片（`[ForEach(Slices = N)]`） | `ForEachSystemTests` | `SlicesBenchmark` | — |
-| 并行系统和 `[ForEach(Parallel = true)]` | `ParallelTests`、`ConcurrencyTests` | `ParallelSystemsBenchmark`、`ParallelForEachBenchmark` | [`ParallelSystemsComparison`、`ParallelQueryComparison`](/zh/docs/comparison#parallel) |
+| 并行系统和 `[ForEach(Parallel = true)]` | `ParallelTests`、`ConcurrencyTests` | `ParallelSystemsBenchmark`、`ParallelForEachBenchmark` | [`ParallelSystemsComparison`](/zh/docs/comparison#parallel)、[`ParallelQueryComparison`](/zh/docs/comparison#parallel) |
 | 快照 | `SnapshotTests` | `SnapshotBenchmark`（`Capture`、`Restore`） | — |
 | 存档 | `SerializationTests` | `SnapshotBenchmark`（`Save`、`Load`、`SaveWithout`、`LoadKeeping`） | [`SaveComparison`](/zh/docs/comparison#saves) |
 | 在 World 之间搬实体 | `MoveTests` | `MigrationBenchmark` | — |

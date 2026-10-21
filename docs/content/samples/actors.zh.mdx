@@ -2,7 +2,7 @@
 title: "Actors：响应消息的实体"
 navTitle: Actors
 seoTitle: "C# ECS 上的 Actor 模型：EasyEcs Actors 示例"
-description: "在 EasyEcs World 上实现 Actor：每类一个类型兼作键、索引和系统组，消息是 entity.Run 任务，激活时加载记录，只保存变过的数据。"
+description: "在 EasyEcs World 上实现 Actor：每类一个类型兼作键、索引和系统分组，消息是 entity.Run 任务，激活时加载记录，只保存变过的数据。"
 icon: Mailbox
 ---
 
@@ -13,19 +13,6 @@ import { Database, Layers, ListTree, Workflow } from 'lucide-react';
 [`samples/Actors`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)，CI 会构建并运行它，把输出和下面
 给出的对比。建议先读 [GameLoop](/zh/docs/samples/game-loop) 和 [SaveLoad](/zh/docs/samples/save-load) 两个示例。
 
-## 你会学到 [#what-you-learn]
-
-- **每类 Actor 一个类型**：`Shop` 和 `Bank` 实现同一个接口 `IActor<TSelf>`，于是一个类型同时是 Actor 的键组件
-  （[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)）、这一类的[系统组](/zh/docs/guide/systems#system-groups)，
-  以及这个组的[过滤条件](/zh/docs/guide/systems#group-filters)（`ISystemGroupWith<In<Shop>>`）。
-- **一条消息就是一个实体上的任务**：[`entity.Run(ref job, filter)`](/zh/docs/guide/queries#run-on-one-entity) 一次查找拿到任务要的
-  全部组件，用 `static readonly` 过滤条件拒绝已关门的商店；任务中途让商店关门，任务里的 ref 依然有效。
-- **激活与记录**：Actor 的实体在第一次用到时创建，它的[记录](/zh/docs/guide/migration-and-unload#records)用
-  `LoadEntitiesInto(..., markWritten: false)` 加载上去，加载不算变更。
-- **只保存变过的**：持久化组件是 `ITracked`（[变更追踪](/zh/docs/guide/change-tracking)）；保存组里的一个系统列出它上次运行后
-  被写过的 Actor，宿主在更新后保存它们，所以保存过的 Actor 在再次被写之前不会再存一遍。写入方只给改了的东西打 tick：
-  `InterestSystem` 通过 `Mut<Balance>` 写，`Mailman` 在执行 `Buy` 之前先读库存。
-
 ## 运行 [#run-it]
 
 ```bash
@@ -34,22 +21,27 @@ dotnet run --project samples/Actors
 
 ## 数据 [#data]
 
-一类 Actor 就是一个类型，靠一个接口同时承担三件事。键用显式接口实现（`Shop IIndexed<Shop>.Key => this;`）：record struct 上
-如果有公开的 `Key => this` 属性，`ToString()` 会无限打印 `Key`。`Stock` 和 `Balance` 要持久化；`Sales` 和 `Closed` 只在内存里。
+一类 Actor 就是一个类型，靠一个接口同时承担三件事：`Shop` 和 `Bank` 实现 `IActor<TSelf>`，于是同时是 Actor 的键组件
+（[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)）、这一类的[系统分组](/zh/docs/guide/systems#system-groups)，
+以及这个分组的[过滤条件](/zh/docs/guide/systems#group-filters)（`ISystemGroupWith<In<Shop>>`）：特性写不出类型参数，接口替每一类
+声明一次过滤条件。键用显式接口实现（`Shop IIndexed<Shop>.Key => this;`）：record struct 上
+如果有公开的 `Key => this` 属性，`ToString()` 会无限打印 `Key`。`Stock` 和 `Balance` 要持久化，都是 `ITracked`（[变更追踪](/zh/docs/guide/change-tracking)）；`Sales` 和 `Closed` 只在内存里。
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/Actors/Components.cs</include>
 
 ## 消息 [#messages]
 
-`Buy` 和 `Deposit` 是任务；`Mailman` 在索引里按键找到 Actor，在它身上跑任务。卖掉最后一件的 `Buy` 会在任务中途加上
-`Closed`：这是一次结构变更，任务里的 ref 仍然指向商店的值。`Mailman` 先读库存再跑 `Buy`：任务一运行，它的 `WriteMask`
+一条消息就是一个实体上的任务：`Buy` 和 `Deposit` 是任务，`Mailman` 在索引里按键找到 Actor，用
+[`entity.Run(ref job, filter)`](/zh/docs/guide/queries#run-on-one-entity) 在它身上跑任务：一次查找拿到任务要的全部组件，用
+`static readonly` 过滤条件拒绝已关门的商店。卖掉最后一件的 `Buy` 会在任务中途加上 `Closed`：这是一次结构变更，任务里的 ref
+仍然指向商店的值。`Mailman` 先读库存再跑 `Buy`：任务一运行，它的 `WriteMask`
 就会给 `Stock` 打 tick，被拒绝的订单如果也跑了任务，下一次保存就会把没变的商店再存一遍。
 
 <include lang="csharp" meta='title="Messages.cs"'>../../../samples/Actors/Messages.cs</include>
 
 ## 每类 Actor 的系统 [#systems]
 
-每个系统属于它那一类的组，所以 `world.Update<Shop>()` 只在商店上跑商店的系统。`InterestSystem` 通过
+每个系统属于它那一类的分组，所以 `world.Update<Shop>()` 只在商店上跑商店的系统。`InterestSystem` 通过
 [`Mut<Balance>`](/zh/docs/guide/change-tracking#set-if-changed) 写入：`SetIfChanged` 只给真正增长了的余额打 tick。
 
 <include lang="csharp" meta='tab="Systems/ShopSystems.cs"'>../../../samples/Actors/Systems/ShopSystems.cs</include>
@@ -58,7 +50,7 @@ dotnet run --project samples/Actors
 
 ## 保存变过的 [#saving]
 
-保存组只有一个系统，覆盖所有种类的 Actor。它的 `[Changed<T>]` 方法选出它上次运行后被写过的行，所以每次运行列出的是上次保存后
+保存分组只有一个系统，覆盖所有种类的 Actor。它的 `[Changed<T>]` 方法选出它上次运行后被写过的行，所以每次运行列出的是上次保存后
 被写过的 Actor，它自己的运行就是标记。保存记录会改写表，遍历期间不允许（[EECS041](/zh/docs/guide/analyzer#eecs041)），所以
 系统把 Actor 记进 `Unsaved` 单例，由宿主在 `world.Update<Saving>()` 之后保存。
 
@@ -66,14 +58,15 @@ dotnet run --project samples/Actors
 
 ## 激活 [#activation]
 
-`Activate` 返回已激活的 Actor；没有就用这一类的预制体创建一个，再加载它的记录。新 Actor 没有记录，默认值就是它的初始状态，
+`Activate` 返回已激活的 Actor；没有就用这一类的预制体创建一个，再用 `LoadEntitiesInto(..., markWritten: false)` 把它的
+[记录](/zh/docs/guide/migration-and-unload#records)（持久化组件的 `ComponentSet`）加载上去，加载不算变更。新 Actor 没有记录，默认值就是它的初始状态，
 下一次保存会写下它们。
 
 <include lang="csharp" meta='title="Activation.cs"'>../../../samples/Actors/Activation.cs</include>
 
 ## 程序 [#program]
 
-激活、发消息、更新各个组、保存，最后重启。存储是一个代替数据库的字典，宿主保存所列 Actor 的代码也放在
+激活、发消息、更新各个分组、保存，最后重启。存储是一个代替数据库的字典，宿主保存所列 Actor 的代码也放在
 [`Host/Storage.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Actors/Host/Storage.cs) 里：这是周边代码，
 不是本课重点。
 
@@ -104,7 +97,7 @@ restarted: shop 1 has 3 (sold 0), bank 7 has 1060
     按键找到 Actor 的索引。
   </Card>
   <Card icon={<Layers />} title="系统" href="/zh/docs/guide/systems#system-groups">
-    系统组和组的过滤条件，每类 Actor 一个。
+    系统分组和分组的过滤条件，每类 Actor 一个。
   </Card>
   <Card icon={<Workflow />} title="查询" href="/zh/docs/guide/queries#run-on-one-entity">
     entity.Run：一个实体上的任务，也就是消息的形状。

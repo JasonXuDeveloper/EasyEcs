@@ -100,7 +100,7 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 
 Every parameter must be a `ref` / `in` / `ref readonly` struct implementing `IComponent` or `ISingletonComponent`, a
 `Span<T>` / `ReadOnlySpan<T>` of an `IComponent` struct, a `Maybe<T>` of one (an optional component), an `Entity`, or
-the `World`. A [`[ForEach]` method outside a system](/en/docs/guide/systems#foreach-outside-systems) may also take
+the `World`. A `[ForEach]` method [outside a system](/en/docs/guide/systems#foreach-outside-systems) may also take
 values of any other type: its generated entry point takes them from the caller.
 
 ```csharp doccheck=expect-EECS002

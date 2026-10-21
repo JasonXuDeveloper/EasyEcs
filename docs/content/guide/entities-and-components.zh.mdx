@@ -204,7 +204,7 @@ hero.Remove<Armor, Name>();
 bool both = hero.Has<Position, Health>();
 ```
 
-改组件一定要通过 `ref`：`var hp = hero.Get<Health>()` 拿到的是副本，改它不会改到表里（见 [`ref` 与 `await`](/zh/docs/guide/refs-and-await)）。
+改组件一定要通过 `ref`：`var hp = hero.Get<Health>()` 拿到的是副本，改它不会改到表里（见 [ref 与 await](/zh/docs/guide/refs-and-await)）。
 
 ### 生成成员 [#generated-members]
 
@@ -219,7 +219,7 @@ bool both = hero.Has<Position, Health>();
 | 唯一组件（`Account : IUniqueIndexed<long>`） | 同索引组件；外加 `world.AccountIndex.Get(key)`、`world.AccountIndex.TryGet(key, out e)` | [一个键对应的那个实体](#unique-key) |
 | 分组组件（`Team : IGroup`） | `e.Team` 是 `ref readonly`，没有 `GetOrAddTeam` 和 `WriteTeam`；`e.SetTeamIfChanged(…)`；`filter.InTeam(group)` | `Read`；`SetIfChanged`；`filter.InGroup<Team>(group)`（[分组](/zh/docs/guide/groups)） |
 | 标签（`struct Dead : IComponent`） | `e.IsDead`、`e.SetDead()`、`e.RemoveDead()` | `Has`、`Set(new Dead())`、`Remove` |
-| 任何带字段的组件（清理组件除外） | `e.DisableHealth()`、`e.EnableHealth()`、`e.IsHealthDisabled` | [`Disable` / `Enable`](/zh/docs/guide/cleanup-and-disable) |
+| 任何带字段的组件（清理组件除外） | `e.DisableHealth()`、`e.EnableHealth()`、`e.IsHealthDisabled` | [`Disable`](/zh/docs/guide/cleanup-and-disable) / [`Enable`](/zh/docs/guide/cleanup-and-disable) |
 | 代码里写到 `DynamicBuffer<Loot>` 的缓冲元素 | `e.Loot`（`ref readonly`）、`e.HasLoot`、`e.WriteLoot()`、`e.GetOrAddLoot()`、`e.RemoveLoot()` | `DynamicBuffer<Loot>` 的 `Read`、`Has`、`Get`、`GetOrAdd`、`Remove`（[动态缓冲](/zh/docs/guide/dynamic-buffers)） |
 | 关系（`MemberOf : IRelation`），代码里写到 `DynamicBuffer<MemberOf>` 之后 | `e.LinkMemberOf(target)`、`e.UnlinkMemberOf(target)`、`e.LinksMemberOf(target)`、`e.MemberOf`（`ref readonly`）、`e.HasMemberOf`、`e.RemoveMemberOf()`、`world.MemberOfIndex` | `Link`、`Unlink`、`Links`、`Read`、`Has`、`Remove`、`world.Relations<MemberOf>()`（[关系](/zh/docs/guide/indexes-and-relations#relations)） |
 | 单例组件（`Clock : ISingletonComponent`） | `world.Clock`（`ref`）、`world.HasClock`、`world.GetOrAddClock()`、`world.SetClock(…)`、`world.RemoveClock()` | [`GetSingleton`](/zh/docs/guide/singletons)、`HasSingleton`、`GetOrAddSingleton`、`GetOrAddSingleton() = …`、`RemoveSingleton` |

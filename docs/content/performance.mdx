@@ -162,7 +162,7 @@ enumerator, a structural-change check. Pick the first row that fits:
 
 | Need | Use | Measured |
 | --- | --- | --- |
-| The per-entity logic of a system | a [`[ForEach]` method](/en/docs/guide/systems) | <BenchValue k="forEach.perEntity" /> per entity, against <BenchValue k="rawArray.perEntity" /> for two plain arrays |
+| The per-entity logic of a system | a [`[ForEach]`](/en/docs/guide/systems) method | <BenchValue k="forEach.perEntity" /> per entity, against <BenchValue k="rawArray.perEntity" /> for two plain arrays |
 | Arithmetic over many rows | a batch `[ForEach]` method (spans), vectorized | <BenchValue k="ops.iterate2Simd" /> instead of <BenchValue k="ops.iterate2" /> per-entity (100,000 entities) |
 | Heavy per-entity work | `[ForEach(Parallel = true)]` | <BenchValue k="parallel.forEach.on" /> instead of <BenchValue k="parallel.forEach.off" /> (100,000 entities, 4 cores) |
 | A loop outside systems, every tick | a static `[ForEach]` method run through its entry point, or a struct job (`world.ForEach`) | <BenchValue k="runner.runner" />, against <BenchValue k="runner.query" /> for a `Query` loop |
@@ -517,22 +517,22 @@ the feature, a head-to-head comparison that checks every library computes the sa
 | A whole server tick | `BattleServerTests` | `WorldSimulationBenchmark`, `MultiWorldBenchmark`, `BattleServerBenchmark` | [`EcsComparisonBenchmark`](/en/docs/comparison#the-same-server-tick) |
 | `[ForEach]`, struct jobs, `Query` | `ForEachSystemTests`, `QueryTests`, `RunnerTests` | `MicroBenchmarks`, `RunnerBenchmark`, `CallSiteBenchmark` | [`OperationBenchmark`](/en/docs/comparison#operations) |
 | Structural changes, presence bits | `EntityTests`, `ComponentTests`, `PresenceTests` | `MicroBenchmarks` (`Churn`, `ToggleComponent`), `SparseBenchmark`, `CountBenchmark` | [`StructuralChangeComparison`](/en/docs/comparison#structural-changes) |
-| Bulk changes and spawns | `BulkTests` | `BulkBenchmark`, `MicroBenchmarks.ChurnBatch` | [`BulkChangeComparison`, `BulkSpawnComparison`](/en/docs/comparison#bulk) |
-| Prefabs and clones | `InstantiateTests` | `PrefabBenchmark` | [`OperationBenchmark` (`Instantiate`)](/en/docs/comparison#operations) |
+| Bulk changes and spawns | `BulkTests` | `BulkBenchmark`, `MicroBenchmarks.ChurnBatch` | [`BulkChangeComparison`](/en/docs/comparison#bulk), [`BulkSpawnComparison`](/en/docs/comparison#bulk) |
+| Prefabs and clones | `InstantiateTests` | `PrefabBenchmark` | [`OperationBenchmark`](/en/docs/comparison#operations) (`Instantiate`) |
 | Change tracking, `Mut<T>` | `ChangedTests` | `ChangeTrackingBenchmark`, `ChangeTrackingWriteBenchmark`, `ChangeTrackingSomeRowsBenchmark` | [`ChangeTrackingComparison`](/en/docs/comparison#change-tracking) |
 | Removal detection, the destroy log | `RemovedTests` | `BattleServerBenchmark`, `DestroyLogBenchmark` | [`RemovalComparison`](/en/docs/comparison#removal-detection) |
 | Disabling | `DisableTests` | `BulkBenchmark` (`DisableAll`) | [`DisableComparison`](/en/docs/comparison#disabling) |
-| Value indexes, unique keys, ordered indexes | `IndexTests`, `OrderedIndexTests` | `IndexBenchmark`, `OrderedIndexBenchmark` | [`IndexComparison`, `ValueQueryComparison`](/en/docs/comparison#indexes-and-relations) |
+| Value indexes, unique keys, ordered indexes | `IndexTests`, `OrderedIndexTests` | `IndexBenchmark`, `OrderedIndexBenchmark` | [`IndexComparison`](/en/docs/comparison#indexes-and-relations), [`ValueQueryComparison`](/en/docs/comparison#indexes-and-relations) |
 | Relations | `RelationTests`, `TargetPolicyTests` | `RelationBenchmark` | [`RelationComparison`](/en/docs/comparison#indexes-and-relations) |
 | Hierarchy | `HierarchyTests` | `HierarchyBenchmark` | [`HierarchyComparison`](/en/docs/comparison#hierarchy) |
 | Groups | `GroupTests` | `GroupBenchmark` | [`ValueQueryComparison`](/en/docs/comparison#indexes-and-relations) |
-| Singletons | `SingletonTests` | `MicroBenchmarks.SingletonAccess` | [`OperationBenchmark` (`Singleton`)](/en/docs/comparison#operations) |
+| Singletons | `SingletonTests` | `MicroBenchmarks.SingletonAccess` | [`OperationBenchmark`](/en/docs/comparison#operations) (`Singleton`) |
 | Optional components (`Maybe<T>`) | `ForEachSystemTests` | `MaybeBenchmark` | — |
 | Dynamic buffers | `DynamicBufferTests` | `DynamicBufferBenchmark` | — |
 | Cleanup components | `CleanupTests` | `CleanupBenchmark` | — |
 | System ordering and groups | `SystemTests` | `OrderingBenchmark` | — |
 | Slices (`[ForEach(Slices = N)]`) | `ForEachSystemTests` | `SlicesBenchmark` | — |
-| Parallel systems and `[ForEach(Parallel = true)]` | `ParallelTests`, `ConcurrencyTests` | `ParallelSystemsBenchmark`, `ParallelForEachBenchmark` | [`ParallelSystemsComparison`, `ParallelQueryComparison`](/en/docs/comparison#parallel) |
+| Parallel systems and `[ForEach(Parallel = true)]` | `ParallelTests`, `ConcurrencyTests` | `ParallelSystemsBenchmark`, `ParallelForEachBenchmark` | [`ParallelSystemsComparison`](/en/docs/comparison#parallel), [`ParallelQueryComparison`](/en/docs/comparison#parallel) |
 | Snapshots | `SnapshotTests` | `SnapshotBenchmark` (`Capture`, `Restore`) | — |
 | Saves | `SerializationTests` | `SnapshotBenchmark` (`Save`, `Load`, `SaveWithout`, `LoadKeeping`) | [`SaveComparison`](/en/docs/comparison#saves) |
 | Moving entities between worlds | `MoveTests` | `MigrationBenchmark` | — |

@@ -14,19 +14,6 @@ running and the plugin's component values survive the reload. Every code block o
 [`samples/HotReload`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload), which CI builds
 and runs, comparing its output with the one shown below.
 
-## What you learn [#what-you-learn]
-
-- **Logic in a collectible plugin**: the plugin's systems, components and singletons live in an assembly the host
-  loads into a collectible `AssemblyLoadContext`.
-- **Unloading cleanly**: `world.RemoveTypes(assembly)` takes the plugin's systems, components and singletons out of
-  the world, so nothing roots the plugin and its context can be collected
-  ([unloading a plugin's types](/en/docs/guide/migration-and-unload#remove-types)).
-- **Keeping the data**: a save before the unload and a load after the reload carry the plugin's component values
-  over, because a save names types by a hash of their full name, not by the assembly that loaded them
-  ([hot reload](/en/docs/guide/migration-and-unload#hot-reload), [saves](/en/docs/guide/saves)).
-- **Bulk changes**: `World.SetAll` gives a whole table of units a component in one call
-  ([bulk changes](/en/docs/guide/bulk)).
-
 ## Run it [#run-it]
 
 ```bash
@@ -50,8 +37,8 @@ The plugin's data rides on the host's entities: a `Score` per unit and a `Bonus`
 
 <include lang="csharp" meta='title="HotReload.Plugin/Components.cs"'>../../../samples/HotReload/HotReload.Plugin/Components.cs</include>
 
-`JoinScoringSystem` gives the units without a score one, a whole table at a time; `ScoringSystem` adds the bonus to
-every moving unit.
+`JoinScoringSystem` gives the units without a score one, a whole table at a time with `World.SetAll`
+([bulk changes](/en/docs/guide/bulk)); `ScoringSystem` adds the bonus to every moving unit.
 
 <include lang="csharp" meta='title="HotReload.Plugin/Systems.cs"'>../../../samples/HotReload/HotReload.Plugin/Systems.cs</include>
 
@@ -67,7 +54,11 @@ The host's own system, which runs through every reload because it is not in the 
 <include lang="csharp" meta='title="HotReload.Host/Systems.cs"'>../../../samples/HotReload/HotReload.Host/Systems.cs</include>
 
 Version 1: load, three updates, save, remove the plugin's types, unload. Version 2: a new context, the save loaded,
-two more updates. `RunAndUnload` is not inlined so that nothing of the plugin is left on `Main`'s stack. The
+two more updates. `world.RemoveTypes(assembly)` takes the plugin's systems, components and singletons out of the
+world, so nothing roots the plugin and its context can be collected
+([unloading a plugin's types](/en/docs/guide/migration-and-unload#remove-types)). The save carries the plugin's
+component values over the reload because it names types by a hash of their full name, not by the assembly that
+loaded them ([hot reload](/en/docs/guide/migration-and-unload#hot-reload), [saves](/en/docs/guide/saves)). `RunAndUnload` is not inlined so that nothing of the plugin is left on `Main`'s stack. The
 collectible context, finding the `IGamePlugin` and waiting for collection are in
 [`Host/Plugins.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/HotReload/HotReload.Host/Host/Plugins.cs),
 and the checks in

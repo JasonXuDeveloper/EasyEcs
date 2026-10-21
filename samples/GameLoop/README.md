@@ -3,21 +3,8 @@
 A small game server: clients on another thread, a fixed 30 Hz simulation tick, and replication of only what
 changed. Read [HelloWorld](../HelloWorld) first.
 
-## What you learn
-
-- **Input as data.** The network thread posts messages to a mailbox, which `ReceiveInputSystem` keeps in a
-  `readonly` field (not in a singleton: the mailbox is not world state). It turns each message into a request entity (`JoinRequest`, `MoveRequest`, ...), and one system per kind of request handles it and destroys
-  it in the same tick. Systems never call each other; they share data.
-- **System groups** (`ISystemGroup`, `[UpdateInGroup<T>]`) give systems their own cadence: input on every
-  wake-up, the simulation on the fixed tick, replication every third tick.
-- **A value index** (`IIndexed<int>` on `Client`) finds a player by client id: `world.ClientIndex.TryFind(...)`.
-- **Prefabs** in a singleton: systems instantiate `prefabs.Player` and `prefabs.Bullet` with the values that differ
-  per instance (`world.Instantiate(prefab, new Client(id), new Position(x, 0))`), one row copy each.
-- **Change tracking** (`ITracked` on `Position`, `[Changed<Position>]`): replication visits only the
-  entities that moved since it last ran. `MovementSystem` writes through `Mut<Position>` and `SetIfChanged`, so a
-  player standing still is not stamped (a `ref Position` parameter would stamp every row it visits).
-- **Operations**: `--ticks N`, a status line per second, Ctrl+C stops cleanly, per-system run counts and times
-  from `WorldOptions.MeasureSystems`.
+What each file teaches, with its code, is on the docs site: [GameLoop](https://ecs.xgamedev.net/en/docs/samples/game-loop)
+([中文](https://ecs.xgamedev.net/zh/docs/samples/game-loop)).
 
 ## Files, in reading order
 

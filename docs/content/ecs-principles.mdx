@@ -261,7 +261,7 @@ The full rules are in [Structural changes](/en/docs/guide/structural-changes).
 A `ref` from `Get<T>()` or a `Query` item is valid until the next structural change (of any entity); the `ref`
 parameters of a `[ForEach]` method stay valid through their own body's changes. None is valid across `await`. Keep
 `Entity` handles, which are checked on every access, and read components again when you need them
-([`ref` and `await`](/en/docs/guide/refs-and-await)).
+([ref and await](/en/docs/guide/refs-and-await)).
 
 Inside data, keep the `EntityId` instead of the handle: an `Entity` field makes a component managed
 ([EECS017](/en/docs/guide/analyzer#eecs017)), and `world.TryGetEntity(id, out var entity)` turns the id back into

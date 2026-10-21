@@ -2,14 +2,8 @@
 
 The smallest complete EasyEcs program. Start here.
 
-## What you learn
-
-- **Components** are plain data on entities (`Position`, `Velocity`); a component with no fields is a **tag**
-  (`Player`) that systems filter on.
-- A **singleton** (`Clock`) holds one value per world.
-- **Systems** have one job each and no state of their own. A `[ForEach]` method runs once per entity that has its
-  component parameters: `ref` for what it writes, `in` for what it reads. `[With<Player>]` adds a filter.
-- `world.Update()` runs every system once, in the order they were added.
+What each file teaches, with its code, is on the docs site: [HelloWorld](https://ecs.xgamedev.net/en/docs/samples/hello-world)
+([中文](https://ecs.xgamedev.net/zh/docs/samples/hello-world)).
 
 ## Files, in reading order
 

@@ -94,7 +94,7 @@ dotnet new easyecs-system -n RegenSystem -o Systems
 
 系统自己不保存状态（[EECS007](/zh/docs/guide/analyzer#eecs007)），也从不调用别的系统
 （[EECS008](/zh/docs/guide/analyzer#eecs008)）：一个系统留给另一个系统的东西，就是一个组件或一个单例。
-见[系统与 `[ForEach]`](/zh/docs/guide/systems)。
+见[系统](/zh/docs/guide/systems)。
 
 </Step>
 <Step>
@@ -159,7 +159,7 @@ public class ExpireSystem : EcsSystem
 不是所有逻辑都每个 tick 跑。系统分组就是一种由宿主调用的节奏：标了 `[UpdateInGroup<G>]` 的系统在 `world.Update<G>()` 时执行，
 其余的在 `world.Update()` 时执行。输入一到就读，用一个分组；每隔几个 tick 同步一次状态，用一个分组；定时存盘，再用一个分组。
 分组内部，`UpdateInterval` 让慢系统每 N 次更新跑一次，`UpdatePhase` 把间隔相同的系统错开
-（[`UpdateInterval` 和 `UpdatePhase`](/zh/docs/guide/systems#update-interval)）：
+（[`UpdateInterval`](/zh/docs/guide/systems#update-interval) 和 [`UpdatePhase`](/zh/docs/guide/systems#update-interval)）：
 
 ```csharp
 public record struct Census(int Entities) : ISingletonComponent;

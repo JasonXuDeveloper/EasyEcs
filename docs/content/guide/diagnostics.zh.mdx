@@ -92,7 +92,7 @@ foreach (var system in measured.Systems)
 
 | 字段 | 内容 |
 | --- | --- |
-| `LastAllocated`、`TotalAllocated` | 最近一次运行和所有运行在托管堆上分配的字节数：运行这个系统的线程上的分配，加上替它的[并行 `[ForEach]`](/zh/docs/guide/systems#parallel-methods) 方法跑分块的辅助线程上的分配。同一个并行阶段里的其他系统不会算进来。 |
+| `LastAllocated`、`TotalAllocated` | 最近一次运行和所有运行在托管堆上分配的字节数：运行这个系统的线程上的分配，加上替它的并行 [`[ForEach]`](/zh/docs/guide/systems#parallel-methods) 方法跑分块的辅助线程上的分配。同一个并行阶段里的其他系统不会算进来。 |
 | `LastEntities`、`TotalEntities` | 最近一次运行和所有运行里，`[ForEach]` 方法匹配到的实体数：每个方法的查询在遍历开始时数一次（带上它的过滤条件；`[Changed<T>]` / `[Removed<T>]` 只算系统上次运行以来写过或移除过的行），各方法相加。 |
 
 实体数怎么理解：

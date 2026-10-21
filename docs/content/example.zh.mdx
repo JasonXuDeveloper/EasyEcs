@@ -50,10 +50,10 @@ flowchart LR
 | [组件、标签、单例](/zh/docs/guide/entities-and-components) | `Position`、`Health`、`Player`、`Dead`；单例 `Battle`、`Rules`、`Waypoints` |
 | 生成的成员 | `players[i].Position = …`、`SetZone`、`SetFrozen`、`RemoveBurning`、`SetDead`、`IsDead`、`HasAccount`、`TryGetMana`、`World.Battle`、`KillsIndex`、`AccountIndex`；缓冲 `player.Loot`、`WriteLoot()`；`DisableAttack` / `EnableAttack`；预制体上的 `SetHealth`、`SetNpc`、`SetLifetime` |
 | [系统](/zh/docs/guide/systems)与过滤（`With`、`Without`、`WithAny`） | 所有系统；`AfflictionSystem` 用 `World.Count` 统计着火**或**冻住的单位 |
-| [并行 `[ForEach]`](/zh/docs/guide/threading) | `SteeringSystem`；`NewRound` 里的 `Reports.HealFully` 和 `Reports.Scatter` |
+| 并行 [`[ForEach]`](/zh/docs/guide/threading) | `SteeringSystem`；`NewRound` 里的 `Reports.HealFully` 和 `Reports.Scatter` |
 | 并行系统（`WorldOptions.ParallelSystems`）、[`DescribeSchedule`](/zh/docs/guide/diagnostics#schedule) | `PlanningSystem` 和 `ManaSystem`：数据互不相交；`Schedule()` 能看到这一点 |
 | [分片](/zh/docs/guide/systems#slices)（`[ForEach(Slices = N)]`、`RunCount`） | `PlanningSystem` 每次只规划四分之一的 NPC |
-| [`Mut<T>` 与 `SetIfChanged`](/zh/docs/guide/change-tracking#set-if-changed) | `PlanningSystem.Plan` 只在目标变了时才写；`CombatSystem` 和 `RegenerationSystem` 只在命中或回血时给 `Health` 打 tick |
+| [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 与 [`SetIfChanged`](/zh/docs/guide/change-tracking#set-if-changed) | `PlanningSystem.Plan` 只在目标变了时才写；`CombatSystem` 和 `RegenerationSystem` 只在命中或回血时给 `Health` 打 tick |
 | 批处理方法（`Span<T>`）、SIMD | `MovementSystem`；`Reports.SumHealth` |
 | 系统之外的 `[ForEach]` runner | `Reports` |
 | `Maybe<T>` | `RegenerationSystem`：着火的玩家回血更少 |
@@ -312,9 +312,7 @@ for (int i = 0; i < threads.Length; i++)
 
 ## 更多程序 [#more-programs]
 
-- [`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples)：按学习顺序排列的完整程序：Hello
-  World、由网络线程投递输入的固定帧率游戏循环、存档与 World 之间的迁移、每线程一个 World、热重载游戏逻辑、带持久化的 actor、仿 Minecraft 的服务器、Godot 游戏。
-  每个都在[示例](/zh/docs/samples)下有讲解。
+- [示例](/zh/docs/samples)：按学习顺序排列的完整程序，从第一个 World 到仿 Minecraft 的服务器，每个都逐个文件讲解。
 - 指南：讲单个功能的页面都有一个只讲这个功能的完整例子，比如[变更追踪](/zh/docs/guide/change-tracking#full-example)。
 - [`templates/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/templates)：新建项目用的 `dotnet new` 模板。
 

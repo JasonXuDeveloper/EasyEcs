@@ -14,19 +14,6 @@ page is included from [`samples/Godot`](https://github.com/JasonXuDeveloper/Easy
 which CI builds and runs headless with Godot 4.7.2, comparing its output with the one shown below. Read the
 [HelloWorld](/en/docs/samples/hello-world) sample first.
 
-## What you learn [#what-you-learn]
-
-- **The project targets net10.0**: Godot loads a C# project's assembly into the .NET runtime the project targets.
-  A project made by an older editor says `net8.0`; change it to `net10.0` and install the .NET 10 SDK
-  ([getting started](/en/docs/getting-started#create-a-project), [Unity and Godot](/en/docs/faq#unity-godot)).
-- **The node is the host, the systems are the game**: `Main` creates the world in `_Ready`, calls
-  `world.Update()` in `_PhysicsProcess` (Godot's fixed tick) and disposes it in `_ExitTree`
-  ([hosting a world](/en/docs/guide/hosting#owner)).
-- **Godot types are component fields**: `Position` and `Velocity` hold a `Vector2`; the arena and the tick length
-  are [singletons](/en/docs/guide/singletons).
-- **Draw from the data in one call**: after the update the node copies every position into one float buffer and
-  hands it to `RenderingServer.MultimeshSetBuffer`: one draw for every entity, no node per entity.
-
 ## Run it [#run-it]
 
 Open the folder in the Godot 4 editor (the .NET build) and press Play, or run it without a window:
@@ -40,13 +27,17 @@ godot --headless --path samples/Godot -- --ticks 120
 
 A Godot 4 .NET project like any other: [`project.godot`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/project.godot)
 and the scene [`Main.tscn`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/Main.tscn), whose
-root node is `Main`. The one line that matters is the target framework.
+root node is `Main`. The one line that matters is the target framework: Godot loads a C# project's assembly into the
+.NET runtime the project targets. A project made by an older editor says `net8.0`; change it to `net10.0` and
+install the .NET 10 SDK ([Unity and Godot](/en/docs/faq#unity-godot)). Nothing else is needed: the package's
+generator and analyzer run in `dotnet build` and in the editor's build alike.
 
 <include lang="xml" meta='title="Godot.csproj"'>../../../samples/Godot/Godot.csproj</include>
 
 ## The data and the systems [#data]
 
-Components hold Godot's own `Vector2`; the systems move and bounce the entities, and know nothing of the scene.
+Components hold Godot's own `Vector2`, and the arena and the tick length are
+[singletons](/en/docs/guide/singletons). The systems move and bounce the entities, and know nothing of the scene.
 
 <include lang="csharp" meta='tab="Components.cs"'>../../../samples/Godot/Components.cs</include>
 
@@ -54,8 +45,11 @@ Components hold Godot's own `Vector2`; the systems move and bounce the entities,
 
 ## The node [#node]
 
-`Main` moves data between Godot and the world: it creates the entities, steps the world once per physics tick,
-writes the positions into the multimesh, and frees what it made when it leaves the tree. The `--ticks` option and
+The node is the host and the systems are the game. `Main` moves data between Godot and the world: it creates the
+world and the entities in `_Ready`, calls `world.Update()` in `_PhysicsProcess` (Godot's fixed tick), and disposes
+what it made in `_ExitTree` ([hosting a world](/en/docs/guide/hosting#owner)). After each update it copies every
+position into one float buffer and hands it to `RenderingServer.MultimeshSetBuffer`: one draw for every entity, no
+node per entity. The `--ticks` option and
 the report CI checks are in
 [`Support.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/Support.cs): plumbing, not the
 lesson.
