@@ -175,7 +175,8 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                (BattleServer.cs, every feature; docs/content/example.mdx includes its regions), one
                                benchmark per feature (Access: the analyzer's performance rules, Bulk, CallSite,
                                ChangeTracking (+ ChangeTrackingWrite: Mut<T>, ChangeTrackingRead: Read), Cleanup, Count, DestroyLog,
-                               DynamicBuffer, Group, Hierarchy, Index (+ unique keys), Introspection (+ Schedule),
+                               DynamicBuffer, Generator (the generators per keystroke and the analyzer per build, through
+                               Roslyn), Group, Hierarchy, Index (+ unique keys), Introspection (+ Schedule),
                                Maybe, Migration, OrderedIndex, Ordering, ParallelForEach, ParallelSystems (Measure),
                                Prefab, Relation, Runner, SingleEntity, Slices, Snapshot (+ SaveWithout / LoadKeeping),
                                Sparse, Trim, Unload) + MicroBenchmarks.

@@ -58,6 +58,8 @@ icon: RotateCcwClock
 - 每个 tick 重算被追踪值的系统，不再让每个 `[Changed<T>]` 读取方访问每一行：用 `Mut<T>` 时只有值真变了的行才打 tick。
   见[决策 D46](/zh/docs/decisions#d46-mut-stamps-per-write)。
 - `ChangedAny` 跳过它的组件都没写过的表、4,096 行的块和 64 行的位字。见[决策 D49](/zh/docs/decisions#d49-changedany-semantics)。
+- 源生成器在 IDE 里每次按键做的工作更少，分析器在构建时分配更少：方法体里的类型名不再连同方法体一起绑定，比较符号也不再拼字符串。
+  见[决策 D62](/zh/docs/decisions#d62-generators-bind-outside-bodies)。
 
 ### 需要修改代码的变更 [#v4-7-0-breaking]
 

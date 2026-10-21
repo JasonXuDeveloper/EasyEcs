@@ -79,6 +79,8 @@ after the change on the machine of the time; they are history, not the current r
 | [D59](#d59-analyzer-rules) | Rules for refs across changes, filters that cannot work and creations moved twice |
 | [D60](#d60-one-diagnostic-per-mistake) | One diagnostic per mistake |
 | [D61](#d61-one-pass-guard) | One guard for the calls that wait for a pass; a group prefab is not one |
+| [D62](#d62-generators-bind-outside-bodies) | Generators bind type names outside member bodies and compare symbols without strings |
+| [D63](#d63-roslyn-features) | Newer Roslyn features: interceptors not used, the rest in use or not needed |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1395,6 +1397,56 @@ names the refused call. Instantiating a prefab with members is not one of them: 
   copy per column, a group a copy per row. Kept apart.
 - **One target rule class for components and relations**: their `Apply` differ (remove a component, drop a link);
   the shared part is two one-line members. Kept.
+
+## D62. Generators bind type names outside member bodies and compare symbols without strings [#d62-generators-bind-outside-bodies]
+
+**Decision.** The generators' transforms bind a type name they found in a member body (`DynamicBuffer<T>`, a closed
+generic system, the components of `Query<…>` / `Read<…>`) alone, speculatively at the open brace of the enclosing type
+(`Symbols.TypeNamed`), not with `GetSymbolInfo` where it stands. Every symbol test in the generators and the analyzer
+is `Symbols.Named(symbol, "Ns.Type<T>")`, which walks the symbol's names, instead of `ToDisplayString() == …`. The C#
+version check reads the parse options and the module initializer's check the assembly name, not the compilation.
+
+**Why.**
+- **A keystroke re-runs every transform.** A new compilation re-runs the semantic transform of every candidate node,
+  in every file. Binding a node inside a body binds the whole body and runs its nullable analysis first; a speculative
+  binding at a position in the body does too. At the type's brace a name sees the same usings, namespaces and type
+  parameters (a method's type parameters excepted, which no generated code can name).
+- **Strings per candidate per edit.** `ToDisplayString` builds a string for every interface of every candidate, on
+  every edit; the generators and the analyzer both ask it thousands of times per run. `Named` builds nothing.
+- **Measured** (`GeneratorBenchmark`: the battle server and 40 modules of components, buffers, systems and query
+  loops; the branch against its base back to back): an edit in a method body 228 ms / 26.9 MB against 149 ms /
+  16.8 MB, an edit in another file 249 ms / 26.9 MB against 147 ms / 16.6 MB, a first run 271 ms / 67.8 MB against
+  232 ms / 58.5 MB. The analyzer's share of a build (`CompileAndAnalyze` minus `Compile`) allocates 35 MB against 42
+  MB, its time within the error.
+
+**Considered.**
+- **Fewer generated files** (one per namespace instead of one per type): the driver checks each new file against every
+  cached one, but its time there was mostly the collector's; fewer allocations removed it. Not done.
+- **Resolving a generated member's type from its class name in the analyzer** instead of walking the namespace: 523 ms /
+  34.6 MB against 569 ms / 33.3 MB, within the error. Not done.
+- **A shared receiver check for `Query` calls** in a body: needs the call bound. A `Query` or `Read` of several structs
+  that are all components is taken as a World's; a name-alike call adds an unused item file, nothing else.
+
+## D63. Newer Roslyn features: interceptors not used, the rest in use or not needed [#d63-roslyn-features]
+
+**Decision.** The generators use `ForAttributeWithMetadataName` (`[ForEach]`), implementation output for what user code
+never names (system code, `SavedTypes`), C# 14 extension members and generic attributes. They use no interceptors
+and no embedded attribute definitions.
+
+**Why.**
+- **Interceptors have nothing to remove.** `entity.Get<T>()`, `Has<T>()`, `Set<T>()`, `CreateEntity(new A(), new B())`
+  and `world.Index<T, TKey>()` read a static readonly field per type or signature (`ComponentType<T>.Bit`,
+  `ComponentSignature<…>`), a constant once the JIT tiers up: an intercepted body would be the same code. Systems
+  register through a module initializer, with no reflection to replace.
+- **Query calls**: an interceptor cannot skip the call's arguments
+  ([D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references)). Intercepting every call of a constant
+  filter chain, each returning the site's static filter, counts 16 entities in 25 ns against 76 ns for the filter built
+  at the call (`CallSiteBenchmark`, hand-written as the generator would emit it), which is what a `static readonly`
+  filter gives (24 ns) with no opt-in and nothing hidden.
+- **Embedded attributes**: the attributes ship in EasyEcs.Core, which every project using the generator references.
+
+**Considered.** Interceptors at each candidate above; `RegisterSourceOutput` for system code (an IDE would then build
+it on every keystroke); post-initialization attribute sources.
 
 ## Related [#related]
 

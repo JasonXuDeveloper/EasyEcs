@@ -76,6 +76,8 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D59](#d59-analyzer-rules) | 跨结构变更的 ref、行不通的过滤条件、搬两次的创建：对应的规则 |
 | [D60](#d60-one-diagnostic-per-mistake) | 一个错误一条诊断 |
 | [D61](#d61-one-pass-guard) | 要等遍历结束的调用共用一个检查；带成员的预制体不在其中 |
+| [D62](#d62-generators-bind-outside-bodies) | 生成器在成员体外绑定类型名，比较符号不拼字符串 |
+| [D63](#d63-roslyn-features) | 较新的 Roslyn 特性：不用拦截器，其余已在用或不需要 |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1134,6 +1136,41 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 - **把 `Capture()` 换成 `Capture(WorldSnapshot into = null)`**：少一个重载，但二进制不兼容，所有 cref 都要改，没有收益。保留。
 - **整列和实体组的行用同一个写入方法**（`WriteColumn` / `WriteRows`）：整张表每列一次块拷贝，实体组每行一次拷贝。分开保留。
 - **组件和关系用同一个目标规则类**：它们的 `Apply` 不同（移除组件、去掉链接），共同的只有两个一行的成员。保留。
+
+## D62. 生成器在成员体外绑定类型名，比较符号不拼字符串 [#d62-generators-bind-outside-bodies]
+
+**决定。** 生成器的转换在成员体里找到的类型名（`DynamicBuffer<T>`、封闭的泛型系统、`Query<…>` / `Read<…>` 的组件）单独绑定：
+在外层类型的左大括号处做推测绑定（`Symbols.TypeNamed`），不在原处调用 `GetSymbolInfo`。生成器和分析器里的符号判断都用
+`Symbols.Named(symbol, "Ns.Type<T>")` 逐级比较符号的名字，不再写 `ToDisplayString() == …`。C# 版本检查读解析选项，模块初始化器的检查读程序集名，都不读编译。
+
+**原因。**
+- **每次按键都会重跑所有转换。** 新的编译会让每个文件里每个候选节点的语义转换重跑。绑定成员体里的节点会先绑定整个成员体并做可空分析；
+  在成员体里某个位置做推测绑定也一样。在类型的大括号处，名字看到的 using、命名空间和类型参数都相同（方法的类型参数除外，生成的代码本来也引用不到）。
+- **每次编辑、每个候选都拼字符串。** `ToDisplayString` 每次编辑都为每个候选的每个接口拼一个字符串；生成器和分析器每次运行要问上千次。`Named` 什么都不分配。
+- **测量**（`GeneratorBenchmark`：对战服务器加 40 个模块的组件、缓冲、系统和查询循环；分支和它的基线背靠背运行）：改一个方法体
+  228 ms / 26.9 MB 对 149 ms / 16.8 MB，改另一个文件 249 ms / 26.9 MB 对 147 ms / 16.6 MB，首次运行 271 ms / 67.8 MB 对
+  232 ms / 58.5 MB。分析器在构建里的份额（`CompileAndAnalyze` 减 `Compile`）分配 35 MB 对 42 MB，时间在误差内。
+
+**比较过。**
+- **少生成文件**（每个命名空间一个而不是每个类型一个）：驱动会把每个新文件和所有缓存的文件比一遍，但那里的时间主要是垃圾回收的；减少分配后就没了。不做。
+- **分析器从生成类的类名直接找到生成成员的类型**，不遍历命名空间：523 ms / 34.6 MB 对 569 ms / 33.3 MB，在误差内。不做。
+- **成员体里的 `Query` 调用也检查接收者**：需要绑定整个调用。多个都是组件的结构体组成的 `Query` 或 `Read` 视为 World 的；同名的其他调用只多出一个用不到的项文件。
+
+## D63. 较新的 Roslyn 特性：不用拦截器，其余已在用或不需要 [#d63-roslyn-features]
+
+**决定。** 生成器使用 `ForAttributeWithMetadataName`（`[ForEach]`）、给用户代码从不引用的内容（系统代码、`SavedTypes`）用实现输出（implementation output）、
+C# 14 扩展成员和泛型特性。不用拦截器，也不用嵌入式特性定义。
+
+**原因。**
+- **拦截器没有可去掉的东西。** `entity.Get<T>()`、`Has<T>()`、`Set<T>()`、`CreateEntity(new A(), new B())` 和 `world.Index<T, TKey>()`
+  读的是按类型或签名的静态只读字段（`ComponentType<T>.Bit`、`ComponentSignature<…>`），JIT 分层编译后就是常量：拦截后的方法体是同样的代码。
+  系统通过模块初始化器注册，没有要替换的反射。
+- **查询调用**：拦截器跳不过调用的参数（[D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references)）。把常量过滤条件链上的每个调用都拦截、
+  各自返回该调用点的静态过滤条件，统计 16 个实体用 25 ns，在调用处构建过滤条件是 76 ns（`CallSiteBenchmark`，按生成器会生成的样子手写）；这正是
+  `static readonly` 过滤条件的结果（24 ns），而后者不需要开启任何选项，也没有隐藏的代码。
+- **嵌入式特性**：特性随 EasyEcs.Core 发布，使用生成器的项目都引用它。
+
+**比较过。** 在上面每个候选处使用拦截器；系统代码用 `RegisterSourceOutput`（IDE 会在每次按键时生成它）；在后初始化阶段输出特性源码。
 
 ## 相关页面 [#related]
 

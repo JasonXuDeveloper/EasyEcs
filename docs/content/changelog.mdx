@@ -78,6 +78,9 @@ major or minor version that needs code changes? The
   [decision D46](/en/docs/decisions#d46-mut-stamps-per-write).
 - `ChangedAny` skips the tables, 4,096-row blocks and 64-row words none of its components wrote. See
   [decision D49](/en/docs/decisions#d49-changedany-semantics).
+- The source generators do less work on every keystroke in the IDE, and the analyzer allocates less during a build:
+  type names in method bodies are bound without the body, and symbols are compared without strings. See
+  [decision D62](/en/docs/decisions#d62-generators-bind-outside-bodies).
 
 ### Changes that need code changes [#v4-7-0-breaking]
 
