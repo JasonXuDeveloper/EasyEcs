@@ -35,6 +35,7 @@ jobs:
           dotnet run --no-build -c Release --project samples/MultiWorld -- --updates 50
           .github/scripts/check-sample.sh samples/HotReload
           .github/scripts/check-sample.sh samples/Actors
+          .github/scripts/check-sample.sh samples/BlockWorld
       - name: Install the wasm-tools workload (the live demo is published with Mono AOT)
         run: dotnet workload install wasm-tools
       - name: Publish the docs site's live demo (demo/EasyEcs.Demo, WebAssembly, Mono AOT)
