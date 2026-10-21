@@ -31,11 +31,11 @@ public class GeneratorTests
         (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id))
             .Select(d => d.Id).Distinct().OrderBy(x => x).ToArray();
 
-    /// <summary>The diagnostics of the performance rules (EECS025-034, EECS039), with their properties for the code fixes.</summary>
+    /// <summary>The diagnostics of the performance rules (EECS025-034, EECS039, EECS046, EECS052, EECS053), with their properties for the code fixes.</summary>
     internal static async Task<Diagnostic[]> Costs(params string[] sources) =>
         (await Analyze(sources)).Where(d => IsPerformance(d.Id) || d.Id == "EECS034").OrderBy(d => d.Location.SourceSpan.Start).ToArray();
 
-    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id is "EECS039" or "EECS046" or "EECS052";
+    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id is "EECS039" or "EECS046" or "EECS052" or "EECS053";
 
     internal static async Task<Diagnostic[]> All(string source) => (await Analyze([Components, Extra, source])).Where(d => d.Id.StartsWith("EECS") || d.Severity == DiagnosticSeverity.Error).OrderBy(d => d.Location.SourceSpan.Start).ToArray();
 
@@ -1482,6 +1482,16 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(World w, System.Collections.Generic.List<Entity> all) { foreach (var item in w.Query<T>()) all.Add(item.Entity); } }", "EECS046")]
     [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<T>()) { ref readonly var t = ref item.Component1; n += t.V; } return n; } }", "EECS033", "EECS046")]
     [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (QueryItem<T> item in w.Query<T>()) n += item.T.V; return n; } }", "EECS046")] // typed by hand: no fix
+    // EECS053: a tracked component written by ref on some rows only (an early return, a branch, a loop that may not run).
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in P p) { if (p.V > 0) t.V = p.V; } }", "EECS053")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in P p) { if (p.V > 0) return; t.V = p.V; } }", "EECS053")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in P p) { if (p.V > 0) t.V = 1; else if (p.V < 0) t.V = 2; } }", "EECS053")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in P p) { switch (p.V) { case 1: t.V = 1; break; case 2: return; default: t.V = 3; break; } } }", "EECS053")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref DynamicBuffer<Loot> loot, in P p) { if (p.V > 0) loot.Add(new Loot { Item = p.V }); } }", "EECS053")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in DynamicBuffer<Loot> hits) { foreach (var hit in hits) t.V -= hit.Item; } }", "EECS053")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in P p) { if (p.V > t.V) Helpers.Inc(ref t.V); } }", "EECS053")]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref T t, in P p) { if (p.V == 0) return; t.V++; } }", "EECS053")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref T t, in P p) { if (p.V < 0) { e.Destroy(); return; } t.V = p.V; } }", "EECS053")]
     // EECS052: a component added right after the entity is created.
     [TestCase("public static class U { public static void F(World w) { var e = w.CreateEntity(new P()); e.Set(new Q { V = 1 }); } }", "EECS052")]
     [TestCase("public static class U { public static void F(World w) { var e = w.CreateEntity(); e.SetBoss(); } }", "EECS052")]
@@ -1519,6 +1529,17 @@ public class GeneratorTests
         Assert.That(all.Select(d => d.Id).OrderBy(x => x), Is.EqualTo(ids), string.Join("\n", all.Select(d => d.Id + " " + d.GetMessage())));
     }
 
+    // EECS053 is left out: every path writes, the stamp is wanted, the component is not tracked, a batch method, a throw.
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in P p) { if (p.V > 0) t.V = p.V; else t.V = 0; } }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in P p) { if (p.V > 0) { t.V = p.V; return; } t.V = 0; } }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in P p) { t.V = 0; if (p.V > 0) t.V = p.V; } }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in P p) => t.V = p.V; }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in P p) => t.V = p.V > 0 ? p.V : t.V; }")]       // written on every row
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in P p) { if (p.V < 0) throw new System.InvalidOperationException(); t.V = p.V; } }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in P p) { while (true) { t.V++; if (t.V > p.V) return; } } }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) { if (q.V > 0) p.V = q.V; } }")]                   // not tracked
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(System.Span<T> t, System.ReadOnlySpan<P> p) { for (int i = 0; i < t.Length; i++) if (p[i].V > 0) t[i].V = p[i].V; } }")] // batch
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, in P p) { try { if (p.V > 0) return; } finally { t.V = p.V; } } }")]  // a finally: left out
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<T> t, in P p) { if (p.V > 0) t.Write().V = p.V; } }")]       // written
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<T> t, in P p) => t.SetIfChanged(new T { V = p.V }); }")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<P> p, in Q q) => p.SetIfChanged(new P { V = q.V }); }")]       // a comparison: not a plain ref
@@ -1559,6 +1580,7 @@ public class GeneratorTests
     [TestCase("EECS050", DiagnosticSeverity.Error)]
     [TestCase("EECS051", DiagnosticSeverity.Error)]
     [TestCase("EECS052", DiagnosticSeverity.Warning)]
+    [TestCase("EECS053", DiagnosticSeverity.Warning)]
     public void UsageRulesHaveTheirSeverity(string id, DiagnosticSeverity severity) =>
         Assert.That(new EasyEcsAnalyzer().SupportedDiagnostics.Single(d => d.Id == id).DefaultSeverity, Is.EqualTo(severity));
 

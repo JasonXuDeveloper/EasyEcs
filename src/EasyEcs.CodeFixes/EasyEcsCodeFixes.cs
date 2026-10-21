@@ -25,7 +25,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS018", "EECS022", "EECS023", "EECS025", "EECS026", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
-            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052");
+            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -52,6 +52,12 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                                                  && FromMut(method, p, kind == "MutIn") is { } plain
                                                  && !await HasCallers(context.Document, p, context.CancellationToken).ConfigureAwait(false):
                     Register(context, diagnostic, kind == "MutIn" ? "Take it by 'in'" : "Take it by 'ref'", root, method, plain);
+                    break;
+                case "EECS053" when kind == "Mut" && node.FirstAncestorOrSelf<ParameterSyntax>() is { Parent.Parent: MethodDeclarationSyntax method } p
+                                    && diagnostic.Properties.TryGetValue("Writes", out var count) && int.TryParse(count, out int writes)
+                                    && ToMut(root, method, p, diagnostic.AdditionalLocations, writes) is { } mut
+                                    && !await HasCallers(context.Document, p, context.CancellationToken).ConfigureAwait(false):
+                    Register(context, diagnostic, $"Take it as a Mut<{p.Type!.WithoutTrivia()}>", root, method, mut);
                     break;
                 case "EECS025" or "EECS015" when kind is "In" or "ReadOnlySpan" && node.FirstAncestorOrSelf<ParameterSyntax>() is { } p
                                     && !await HasCallers(context.Document, p, context.CancellationToken).ConfigureAwait(false):
@@ -188,6 +194,43 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
         plain = Modify(plain.WithLeadingTrivia(parameter.GetLeadingTrivia()), read ? SyntaxKind.InKeyword : SyntaxKind.RefKeyword);
         return method.ReplaceNodes(uses.Append(parameter), (original, _) => original == parameter ? plain
             : SyntaxFactory.IdentifierName(name).WithTriviaFrom(original));
+    }
+
+    /// <summary>
+    /// EECS053: a <c>ref T</c> parameter becomes <c>Mut&lt;T&gt;</c>; the uses the analyzer found (<paramref name="uses"/>:
+    /// the first <paramref name="writes"/> write, the others read) become <c>p.Write()</c> and <c>p.Value</c>. Null when
+    /// the parameter has another modifier than 'ref' or a use is not the parameter's name.
+    /// </summary>
+    private static MethodDeclarationSyntax? ToMut(SyntaxNode root, MethodDeclarationSyntax method, ParameterSyntax parameter,
+        System.Collections.Generic.IReadOnlyList<Location> uses, int writes)
+    {
+        if (parameter.Type == null || parameter.Modifiers.Count != 1 || !parameter.Modifiers[0].IsKind(SyntaxKind.RefKeyword)) return null;
+        string name = parameter.Identifier.ValueText;
+        var write = new System.Collections.Generic.HashSet<SyntaxNode>();
+        var nodes = new System.Collections.Generic.List<SyntaxNode> { parameter };
+        for (int i = 0; i < uses.Count; i++)
+        {
+            if (root.FindNode(uses[i].SourceSpan, getInnermostNodeForTie: true) is not IdentifierNameSyntax use
+                || use.Identifier.ValueText != name || !method.Span.Contains(use.Span))
+                return null;
+            nodes.Add(use);
+            if (i < writes) write.Add(use);
+        }
+
+        var mut = SyntaxFactory.GenericName(SyntaxFactory.Identifier("Mut"),
+            SyntaxFactory.TypeArgumentList(SyntaxFactory.SingletonSeparatedList(parameter.Type.WithoutTrivia())));
+        var replaced = SyntaxFactory.Parameter(parameter.AttributeLists, SyntaxFactory.TokenList(), mut.WithTrailingTrivia(SyntaxFactory.Space),
+            parameter.Identifier, parameter.Default).WithLeadingTrivia(parameter.Modifiers[0].LeadingTrivia);
+        if (parameter.AttributeLists.Count > 0) replaced = replaced.WithLeadingTrivia(parameter.GetLeadingTrivia());
+        return method.ReplaceNodes(nodes, (original, _) =>
+        {
+            if (original == parameter) return replaced;
+            var target = SyntaxFactory.IdentifierName(name);
+            ExpressionSyntax access = write.Contains(original)
+                ? SyntaxFactory.InvocationExpression(SyntaxFactory.MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, target, SyntaxFactory.IdentifierName("Write")))
+                : SyntaxFactory.MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, target, SyntaxFactory.IdentifierName("Value"));
+            return access.WithTriviaFrom(original);
+        });
     }
 
     /// <summary>EECS037: the job's WriteMask declared as <paramref name="value"/>, replacing its declaration or as its first member.</summary>

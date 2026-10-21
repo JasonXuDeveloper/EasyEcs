@@ -16,14 +16,19 @@ public class DynamicBufferTests
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
-    /// <summary>Stunned entities drop their first item: a write through a <c>ref</c> parameter.</summary>
+    /// <summary>
+    /// Stunned entities drop their first item: a write through a <c>ref</c> parameter, which stamps every row it visits
+    /// (also an empty bag it leaves alone: the stamp this test checks; EECS053 points real code to a Mut&lt;T&gt;).
+    /// </summary>
     public class Drop : EcsSystem
     {
+#pragma warning disable EECS053
         [ForEach, With<Stun>]
         private static void Apply(ref DynamicBuffer<Loot> bag)
         {
             if (bag.Count > 0) bag.RemoveAt(0);
         }
+#pragma warning restore EECS053
     }
 
     /// <summary>Reads every bag: an <c>in</c> parameter is not a write.</summary>

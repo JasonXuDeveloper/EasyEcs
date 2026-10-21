@@ -5,12 +5,13 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// The rules for code that works but does more than it needs (EECS025-EECS033, EECS039, EECS046, EECS052) and EECS034:
+/// The rules for code that works but does more than it needs (EECS025-EECS033, EECS039, EECS046, EECS052, EECS053) and EECS034:
 /// what a [ForEach] method declares and does per row, allocations in code that runs every update, structural changes
 /// and queries one call could make, a component added right after its entity is created, and the generated members. A rule whose code costs is a warning (EECS025-EECS032), the generated member is a
 /// suggestion (the same call at the same cost, shorter) and an update inside a system an error. Each is reported only where the cheaper form does the
@@ -125,6 +126,16 @@ public sealed partial class EasyEcsAnalyzer
         "component on the next line moves it again: a second row copy, and a table on the way that nothing else may " +
         "use. Given to the creation, the component lands in the final table with the others.",
         helpLinkUri: Help("EECS052"));
+
+    public static readonly DiagnosticDescriptor SomeRowsWritten = new("EECS053", "A tracked component written by ref on only some rows",
+        "Parameter '{0}' of [ForEach] method '{1}' takes {2} by 'ref', but some rows pass through without a write, and every row it visits is stamped as changed; take it as a Mut<{2}> and write through Write() or SetIfChanged",
+        Category, DiagnosticSeverity.Warning, true,
+        "A 'ref' parameter of a tracked component (ITracked, DynamicBuffer<T>) stamps every row the method visits, whether " +
+        "the method writes it or returns first, so [Changed<T>] systems visit rows whose value never changed (and send, " +
+        "save or recompute them again). A Mut<T> stamps only the rows the method writes, through Write() or a " +
+        "SetIfChanged that changed the value; reading Value stamps nothing. Batch methods (spans) stamp whole runs and " +
+        "are left out.",
+        helpLinkUri: Help("EECS053"));
 
     /// <summary>Property keys of the diagnostics' code fixes: what the analyzer decided, the fix only applies it.</summary>
     public const string FixKind = "Fix", FixTitle = "Title", Replace = "Replace", Insert = "Insert", RemoveOthers = "Remove", WithType = "With";
@@ -303,7 +314,14 @@ public sealed partial class EasyEcsAnalyzer
             if (!span && !byRef) continue;
             var type = component ?? p.Type;
             if (Symbols.IsIndexed(type)) continue; // EECS015 says it
-            if (references.Any(Uses.MayWrite)) continue;
+            if (references.Any(Uses.MayWrite))
+            {
+                // EECS053: a tracked component a per-entity method writes on some rows only.
+                if (byRef && kind == Symbols.ParamKind.Component && spans == 0 && !entitySpan && type is not ITypeParameterSymbol
+                    && Symbols.Implements(type, Symbols.TrackChanges))
+                    WrittenOnSomeRows(context, method, body, p, type, references);
+                continue;
+            }
             // A 'ref' singleton of a parallel method is EECS010's ("it writes a singleton ... take it as 'in'").
             if (kind == Symbols.ParamKind.Singleton && Symbols.IsParallel(method)) continue;
             string cost = kind == Symbols.ParamKind.Singleton
@@ -316,6 +334,112 @@ public sealed partial class EasyEcsAnalyzer
                 $"Parameter '{p.Name}' of [ForEach] method '{method.Name}' ({(span ? "Span<" + type.Name + ">" : "ref")})", cost,
                 span ? "take it as a ReadOnlySpan<" + type.Name + ">" : "take it by 'in'"));
         }
+    }
+
+    /// <summary>
+    /// EECS053: a 'ref' parameter of a tracked component that some path through the method leaves unwritten (it reaches
+    /// the end or a return without a write; a path that throws does not count). Found on the method's control flow graph:
+    /// a walk from the entry that stops at every block holding a write of the parameter (a block runs whole, so a path
+    /// through it writes) and reaches the exit; a constant condition takes its one branch, a catch is reached only by a
+    /// throw (not followed). Conservative: a method that writes the parameter in a finally is left out (the walk does not
+    /// follow a finally on the way out), and anything <see cref="Uses.MayWrite"/> cannot prove a read counts as
+    /// a write, so a missed report is possible, a wrong one is not. The fix (to <c>Mut&lt;T&gt;</c>) is offered when every
+    /// use maps to <c>.Write()</c> or <c>.Value</c>: the writes come first in the additional locations, then the reads.
+    /// </summary>
+    private static void WrittenOnSomeRows(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body, IParameterSymbol p,
+        ITypeSymbol component, List<IOperation> references)
+    {
+        var writes = new HashSet<SyntaxNode>();
+        var reads = new List<IOperation>();
+        bool mechanical = !Symbols.SharesSignature(method) && method.PartialDefinitionPart == null && method.PartialImplementationPart == null;
+        foreach (var reference in references)
+        {
+            if (Uses.MayWrite(reference)) writes.Add(reference.Syntax);
+            else reads.Add(reference);
+            // 'p = ref other' rebinds the parameter, nameof(p) names it: no Mut<T> form of either.
+            if (reference.Parent is ISimpleAssignmentOperation { IsRef: true } rebind && rebind.Target == reference
+                || reference.Parent is INameOfOperation || reference.Syntax is not IdentifierNameSyntax)
+                mechanical = false;
+        }
+
+        var graph = context.GetControlFlowGraph(body); // body is one of the context's operation blocks
+        var blocks = graph.Blocks;
+        var written = new bool[blocks.Length];
+        for (int i = 0; i < blocks.Length; i++)
+        {
+            written[i] = Writes(blocks[i], writes);
+            // A finally runs on the way out of every path through its try, which the walk does not follow: a write there is left out.
+            if (written[i] && InFinally(blocks[i].EnclosingRegion)) return;
+        }
+
+        var seen = new bool[blocks.Length];
+        var pending = new Stack<BasicBlock>();
+        pending.Push(blocks[0]);
+        seen[0] = true;
+        bool unwritten = false;
+        while (pending.Count > 0)
+        {
+            var block = pending.Pop();
+            if (block.Kind == BasicBlockKind.Exit)
+            {
+                unwritten = true;
+                break;
+            }
+
+            if (written[block.Ordinal]) continue;
+            // A constant condition ('while (true)') takes one branch only.
+            bool conditional = true, fallThrough = true;
+            if (block.BranchValue?.ConstantValue is { HasValue: true, Value: bool constant } && block.ConditionKind != ControlFlowConditionKind.None)
+            {
+                conditional = constant == (block.ConditionKind == ControlFlowConditionKind.WhenTrue);
+                fallThrough = !conditional;
+            }
+
+            if (fallThrough) Follow(block.FallThroughSuccessor, seen, pending);
+            if (conditional) Follow(block.ConditionalSuccessor, seen, pending);
+        }
+
+        if (!unwritten) return;
+        var locations = references.Where(r => writes.Contains(r.Syntax)).Concat(reads).Select(r => r.Syntax.GetLocation());
+        var properties = mechanical
+            ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Mut").Add("Writes", writes.Count.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            : ImmutableDictionary<string, string?>.Empty;
+        context.ReportDiagnostic(Diagnostic.Create(SomeRowsWritten, p.Locations.FirstOrDefault(), locations, properties,
+            p.Name, method.Name, component.ToMinimalDisplayString(body.SemanticModel!, p.Locations.FirstOrDefault()?.SourceSpan.Start ?? 0)));
+    }
+
+    /// <summary>Whether <paramref name="region"/> is a finally or lies inside one.</summary>
+    private static bool InFinally(ControlFlowRegion? region)
+    {
+        for (; region != null; region = region.EnclosingRegion)
+            if (region.Kind == ControlFlowRegionKind.Finally) return true;
+        return false;
+    }
+
+    /// <summary>Queues the destination of <paramref name="branch"/> unless it throws or was queued before.</summary>
+    private static void Follow(ControlFlowBranch? branch, bool[] seen, Stack<BasicBlock> pending)
+    {
+        if (branch is not { Destination: { } next } || branch.Semantics is ControlFlowBranchSemantics.Throw or ControlFlowBranchSemantics.Rethrow
+            || seen[next.Ordinal])
+            return;
+        seen[next.Ordinal] = true;
+        pending.Push(next);
+    }
+
+    /// <summary>Whether a reference in <paramref name="block"/> (its operations or its branch value) is one of <paramref name="writes"/>.</summary>
+    private static bool Writes(BasicBlock block, HashSet<SyntaxNode> writes)
+    {
+        foreach (var operation in block.Operations)
+            if (Holds(operation, writes)) return true;
+        return block.BranchValue != null && Holds(block.BranchValue, writes);
+    }
+
+    private static bool Holds(IOperation root, HashSet<SyntaxNode> writes)
+    {
+        if (root is IParameterReferenceOperation self && writes.Contains(self.Syntax)) return true;
+        foreach (var operation in root.Descendants())
+            if (operation is IParameterReferenceOperation reference && writes.Contains(reference.Syntax)) return true;
+        return false;
     }
 
     /// <summary>

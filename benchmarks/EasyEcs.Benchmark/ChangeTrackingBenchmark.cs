@@ -188,6 +188,110 @@ public class ChangeTrackingWriteBenchmark
 }
 
 /// <summary>
+/// A tracked component a system writes on some rows only (EECS053): 100,000 players, of which 100 die per tick (input
+/// through handles) and respawn at the spawn point, then the <c>[Changed&lt;Position&gt;]</c> replication sends the
+/// positions that changed. <c>Mut = false</c> takes <c>ref Position</c> and returns early for the living, so every
+/// visited row is stamped and the replication visits every row; <c>Mut = true</c> takes <c>Mut&lt;Position&gt;</c>,
+/// which stamps the 100 rows it writes. <c>Write</c> is the respawn alone, <c>WriteAndRead</c> adds the replication.
+/// Steady state allocates 0 bytes either way.
+/// </summary>
+[MemoryDiagnoser]
+public class ChangeTrackingSomeRowsBenchmark
+{
+    [Params(100_000)] public int Entities;
+    [Params(false, true)] public bool Mut;
+
+    private const int Deaths = 100;
+    private World _world;
+    private Entity[] _entities;
+    private int _next;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _entities = new Entity[Entities];
+        _world.CreateEntities(_entities, new Health(100), new Position(0), new Sent(0));
+        if (Mut) _world.AddSystem<RespawnMut>();
+        else _world.AddSystem<RespawnRef>();
+        _world.AddSystem<SendChanged>();
+        for (int i = 0; i < 20; i++) WriteAndRead();
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _world.Dispose();
+
+    [Benchmark]
+    public void Write()
+    {
+        Kill();
+        _world.Update<Respawning>();
+    }
+
+    [Benchmark]
+    public void WriteAndRead()
+    {
+        Kill();
+        _world.Update<Respawning>();
+        _world.Update<Sending>();
+    }
+
+    /// <summary>Input: a different slice of players dies each tick (health is not tracked: no stamp).</summary>
+    private void Kill()
+    {
+        for (int i = 0; i < Deaths; i++)
+        {
+            _next = (_next + 97) % _entities.Length;
+            _entities[_next].Get<Health>().Value = 0;
+        }
+    }
+
+    public struct Respawning : ISystemGroup;
+
+    public struct Sending : ISystemGroup;
+
+    public record struct Health(int Value) : IComponent;
+
+    public record struct Position(int Value) : IComponent, ITracked;
+
+    /// <summary>The position last sent to clients.</summary>
+    public record struct Sent(int Value) : IComponent;
+
+    [UpdateInGroup<Respawning>]
+    public class RespawnRef : EcsSystem
+    {
+#pragma warning disable EECS053 // the reported side
+        [ForEach]
+        private static void Respawn(ref Health health, ref Position position)
+        {
+            if (health.Value > 0) return;
+            health.Value = 100;
+            position = new Position(position.Value + 1);
+        }
+#pragma warning restore EECS053
+    }
+
+    [UpdateInGroup<Respawning>]
+    public class RespawnMut : EcsSystem
+    {
+        [ForEach]
+        private static void Respawn(ref Health health, Mut<Position> position)
+        {
+            if (health.Value > 0) return;
+            health.Value = 100;
+            position.Write() = new Position(position.Value.Value + 1);
+        }
+    }
+
+    [UpdateInGroup<Sending>]
+    public class SendChanged : EcsSystem
+    {
+        [ForEach, Changed<Position>]
+        private static void Send(in Position position, ref Sent sent) => sent = new Sent(position.Value);
+    }
+}
+
+/// <summary>
 /// A loop that only reads a tracked component, next to the <c>[Changed&lt;Health&gt;]</c> replication of the same
 /// world: 100,000 entities, 10 written per tick, and a read of every health (a total for a status page) between the
 /// writes and the replication. <c>Read = false</c> walks <c>Query&lt;Health&gt;</c>, whose items stamp every row they
