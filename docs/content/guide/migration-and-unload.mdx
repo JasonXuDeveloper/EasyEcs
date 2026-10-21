@@ -160,9 +160,9 @@ world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
 - `LoadEntitiesInto` is a structural change: owner thread only ([EECS014](/en/docs/guide/analyzer#eecs014)), not while a pass iterates
   (`InvalidOperationException`), never in a parallel method ([EECS010](/en/docs/guide/analyzer#eecs010)), and in a
   `[ForEach]` method only when it takes `Entity` or `World` ([EECS013](/en/docs/guide/analyzer#eecs013)).
-- A set names components for a group save. It can also name singletons (`WithSingleton<T>()`, or `With(typeof(...))`,
+- A set names components for a save of entities. It can also name singletons (`WithSingleton<T>()`, or `With(typeof(...))`,
   which takes either kind) for a whole-world [restart](/en/docs/guide/saves#restart): `SaveWithout(output, in exclude)` leaves
-  its types out, `LoadKeeping(input, in keep)` keeps its singletons. A group save writes no singletons, so `SaveEntities`
+  its types out, `LoadKeeping(input, in keep)` keeps its singletons. A save of entities writes no singletons, so `SaveEntities`
   with a set that names one throws `ArgumentException`.
 - A framework that learns its types at run time builds the set by `Type`:
 
@@ -465,7 +465,7 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 | Restoring a snapshot taken before `RemoveTypes` | `InvalidOperationException` | At run time |
 | Migrating from another thread | Both worlds belong to their owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
 | Moving or loading a player whose unique key the target holds | `InvalidOperationException`; nothing arrives, the originals stay | Destroy the stale holder first ([unique keys](#unique-keys)) |
-| A singleton in the set of `SaveEntities` | `ArgumentException`: a group save writes no singletons | Singletons go in a whole-world [restart](/en/docs/guide/saves#restart) save |
+| A singleton in the set of `SaveEntities` | `ArgumentException`: a save of entities writes no singletons | Singletons go in a whole-world [restart](/en/docs/guide/saves#restart) save |
 | A component that persists left out of the record's set | Not saved: the loaded entity keeps its own value, or has none | Build the set from the persisting components, in one place |
 | A record loaded with `LoadEntities` | New entities beside the live ones | `LoadEntitiesInto` with the live entities |
 | `LoadEntitiesInto` with another number of entities than the save holds, or a stale one | `ArgumentException`; nothing changes | One live entity per saved entity, in save order |

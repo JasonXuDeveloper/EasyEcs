@@ -116,8 +116,8 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | `Slice(index, of)` | slice `index` of the `of` slices of every matching table's rows, cut at 64-row words; `ForEach`, `ForEachEntity`, `ForEachBatch` and their `Parallel` forms only | `[ForEach(Slices = N)]` ([slices](/en/docs/guide/systems#slices)) |
 | `Since(tick)` | the same filter, its `Changed`, `Removed`, `ChangedAny` and `RemovedAny` parts moved to another tick | |
 
-Every filter can be repeated and combined. The `ChangedAny` parts of a filter join one group that passes when any
-of its components passes (and the `RemovedAny` parts another); the groups combine with everything else with AND. A
+Every filter can be repeated and combined. The `ChangedAny` parts of a filter join one set that passes when any
+of its components passes (and the `RemovedAny` parts another); the sets combine with everything else with AND. A
 filter holds one tick: its `Changed`, `Removed`, `ChangedAny` and `RemovedAny` parts must name the same one (else
 `ArgumentException`), and `Since(tick)` moves them together, so a filter kept in a field is reused after every update,
 or [for each client](/en/docs/guide/change-tracking#per-client) with the tick it acknowledged:

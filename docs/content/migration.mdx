@@ -21,7 +21,7 @@ loses writes.
 ### `SaveEntities` refuses a set that names a singleton [#v4-7-save-entities]
 
 A `ComponentSet` holds singletons too (`WithSingleton<T>()`), and `With(Type)` now accepts a singleton type instead of
-throwing. A group save writes no singletons, so `SaveEntitiesWith(output, ids, set)` throws `ArgumentException` for a set
+throwing. A save of entities writes no singletons, so `SaveEntitiesWith(output, ids, set)` throws `ArgumentException` for a set
 that names one. A set built with `With(typeof(...))` from a list of types that mixes components and singletons now
 fails at the save, not at `With`. Keep the components of a record in a set of their own:
 

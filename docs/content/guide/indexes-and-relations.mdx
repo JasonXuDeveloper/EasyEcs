@@ -227,7 +227,7 @@ foreach (var member in parties.Find(red)) { /* each member of red */ }
 int links = parties.Find(red).Count;                          // O(1): the links the loop walks, to size a buffer
 int withMembers = parties.TargetCount;                        // O(1): how many parties have a member
 bool inBlue = knight.Links<MemberOf>(blue);
-knight.Unlink<MemberOf>(blue);                         // leaves blue
+knight.Unlink<MemberOf>(blue);                                // leaves blue
 ```
 
 `Link` adds the buffer if the entity has none, then appends the link and indexes it. Read the links with
@@ -327,7 +327,7 @@ Friendships.Befriend(ana, ben);
 int bensFriends = friends.Count(ben);                      // 1: ana links to ben
 
 ana.Destroy();                                             // ana's link goes with her, ben's link to her is dropped
-bool stillLinked = ben.Links<Friend>(ana);           // false
+bool stillLinked = ben.Links<Friend>(ana);                 // false
 ```
 
 Each side reads its own friends from its buffer, and since every link has its mirror, `friends.Count(player)` (the

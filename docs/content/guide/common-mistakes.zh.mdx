@@ -731,7 +731,7 @@ world.Descendants(hero).AddTo(group, includeRoot: true);   // 英雄，然后是
 ### 恢复的记录又被存了回去 [#record-written-back]
 
 ```csharp
-public record struct Bank(long Gold) : IComponent, ITracked;   // 需要持久化：变了就存
+public record struct Bank(long Gold) : IComponent, ITracked;        // 需要持久化：变了就存
 public record struct Connection(int Socket) : IComponent;           // 只在运行时存在
 ```
 

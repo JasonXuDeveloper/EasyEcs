@@ -32,7 +32,7 @@ major or minor version that needs code changes? The
   matches twice. `index.KeyCount` and `relations.TargetCount` count the distinct keys (or targets) in O(1). See
   [indexes and relations](/en/docs/guide/indexes-and-relations#value-indexes).
 - `world.Descendants(root).AddTo(ids, includeRoot)` appends a subtree to a `List<EntityId>`, each parent before its
-  children: the group `MoveEntities` and `SaveEntities` take, without a collecting loop. See
+  children: the ids `MoveEntities` and `SaveEntities` take, without a collecting loop. See
   [hierarchy](/en/docs/guide/hierarchy#moving).
 - `world.Instantiate(prefab, in c1 … in cn)` and `Instantiate(prefab, entities, in c1 … in cn)`: an instance with up
   to nine components of its own (a parent, a position, an owner) in one row copy. The keys of unique components, the
@@ -96,7 +96,7 @@ major or minor version that needs code changes? The
   is `TargetPolicyExtensions`, `entity.AddRelation` / `RemoveRelation` / `HasRelation` are `Link` / `Unlink` /
   `Links`, a relation's generated `AddX(target)` is `LinkX(target)`, a job's `static int Writes` is `WriteMask`, and
   `LoadEntitiesInto`'s parameter `into` is `targets`. See the [migration guide](/en/docs/migration#v4-7-renames).
-- `SaveEntitiesWith(output, ids, set)` throws `ArgumentException` when the set names a singleton (a group save writes
+- `SaveEntitiesWith(output, ids, set)` throws `ArgumentException` when the set names a singleton (a save of entities writes
   none). See the [migration guide](/en/docs/migration#v4-7-save-entities).
 - `EcsSystem` has a public `RunCount`: a member of that name in a system hides it (warning CS0108). See the
   [migration guide](/en/docs/migration#v4-7-run-count).

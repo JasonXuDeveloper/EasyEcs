@@ -142,8 +142,8 @@ world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
 - `LoadEntitiesInto` 是结构变更：只能在所有者线程调用（[EECS014](/zh/docs/guide/analyzer#eecs014)），遍历进行中不能调用
   （抛 `InvalidOperationException`），不能放进并行方法（[EECS010](/zh/docs/guide/analyzer#eecs010)），`[ForEach]` 方法要接收
   `Entity` 或 `World` 才能调用（[EECS013](/zh/docs/guide/analyzer#eecs013)）。
-- 集合在分组存档里列的是组件。它也能列单例（`WithSingleton<T>()`，或者两种类型都接受的 `With(typeof(...))`），用于整个 World 的
-  [重启](/zh/docs/guide/saves#restart)：`SaveWithout(output, in exclude)` 不写这些类型，`LoadKeeping(input, in keep)` 保留这些单例。分组存档不写单例，
+- 集合在实体存档里列的是组件。它也能列单例（`WithSingleton<T>()`，或者两种类型都接受的 `With(typeof(...))`），用于整个 World 的
+  [重启](/zh/docs/guide/saves#restart)：`SaveWithout(output, in exclude)` 不写这些类型，`LoadKeeping(input, in keep)` 保留这些单例。实体存档不写单例，
   所以集合里有单例时 `SaveEntities` 抛 `ArgumentException`。
 - 运行时才知道类型的框架按 `Type` 构建集合：
 
@@ -427,7 +427,7 @@ saving 0v1: 650 gold
 | 恢复 `RemoveTypes` 之前拍的快照 | 抛 `InvalidOperationException` | 运行时 |
 | 在其他线程迁移 | 两个 World 都只属于各自的所有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 迁移或加载的玩家，唯一键已被目标 World 持有 | 抛 `InvalidOperationException`；什么也不进来，原实体不动 | 先销毁过期的持有者（[唯一键](#unique-keys)） |
-| `SaveEntities` 的集合里有单例 | 抛 `ArgumentException`：分组存档不写单例 | 单例放进整个 World 的[重启](/zh/docs/guide/saves#restart)存档 |
+| `SaveEntities` 的集合里有单例 | 抛 `ArgumentException`：实体存档不写单例 | 单例放进整个 World 的[重启](/zh/docs/guide/saves#restart)存档 |
 | 需要持久化的组件没放进记录的集合 | 不会存档：读回后实体保留自己原来的值，或者根本没有这个组件 | 在一个地方、按需要持久化的组件建集合 |
 | 用 `LoadEntities` 读记录 | 在已有实体之外又建了新实体 | 对已有实体用 `LoadEntitiesInto` |
 | `LoadEntitiesInto` 传入的实体数和存档不一致，或者有失效的实体 | `ArgumentException`；什么都不改 | 按存档顺序，每个存档实体对应一个存活实体 |

@@ -37,7 +37,7 @@ A component is a struct that implements `IComponent`. A `record struct` gives yo
 ```csharp
 public record struct Position(float X, float Y) : IComponent;
 public record struct Health(int Value) : IComponent;
-public record struct Armor(int Value) : IComponent, ITracked;   // writes are tracked
+public record struct Armor(int Value) : IComponent, ITracked;        // writes are tracked
 public record struct Name(string Value) : IComponent;                // managed fields are allowed
 public struct Dead : IComponent;                                     // a tag: no fields
 ```
@@ -88,13 +88,15 @@ no behavior. Every member validates the version first:
 
 Two handles are equal when they name the same incarnation in the same world. Destroying an entity bumps its
 version, so every handle to it becomes stale at once, and it never reaches the entity that later reuses the index.
+An entity that holds [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) is retired by
+`Destroy` instead: it stays alive, tagged `Retired`, until a system removes them.
 
 Waves of spawns and clean-ups have bulk forms, each one pass through the structural gate:
 
 ```csharp
 var wave = new Entity[500];
 world.CreateEntities(wave, new Position(0, 0), new Health(100));   // the same values for each; handles written to wave
-int cleared = world.DestroyAll<Health, Dead>();                 // every dead entity with Health
+int cleared = world.DestroyAll<Health, Dead>();                    // every dead entity with Health
 ```
 
 Kinds of entities spawned again and again (an NPC type, a projectile) are best defined once as a

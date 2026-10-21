@@ -199,7 +199,7 @@ Replication has to tell clients when something goes away too: a fire went out, a
 `[Removed<T>]` visits the entities that lost a tracked component `T` since the system last ran:
 
 ```csharp title="ReplicateFire.cs"
-public record struct Burning(int Ticks) : IComponent, ITracked;   // tracked: removals are recorded too
+public record struct Burning(int Ticks) : IComponent, ITracked;           // tracked: removals are recorded too
 public record struct FireReplica(bool Burning) : IComponent;              // what the clients know of the fire
 
 public class ReplicateFire : EcsSystem
@@ -283,10 +283,10 @@ public class ReplicateUnitSystem : EcsSystem
 ```
 
 - **OR per row:** a row passes through a component it has, written (or removed) since the tick; it need not have the
-  others. A table passes only when it has a column of the group, and is skipped at once when none of those columns was
+  others. A table passes only when it has a column of the set, and is skipped at once when none of those columns was
   written since the tick.
-- **AND with the rest:** every `ChangedAny` attribute or call of a method or filter joins one group, every
-  `RemovedAny` another, and the groups combine with `With`, `Without`, `Changed`, `Removed` and the other filters with
+- **AND with the rest:** every `ChangedAny` attribute or call of a method or filter joins one set, every
+  `RemovedAny` another, and the sets combine with `With`, `Without`, `Changed`, `Removed` and the other filters with
   AND.
 - **One tick per filter:** the `Changed`, `Removed`, `ChangedAny` and `RemovedAny` parts of a filter look back from the
   same tick (else `ArgumentException`), and `Since(tick)` moves them all.
@@ -567,7 +567,7 @@ rows touch most 64-row words, and then the saving is mostly the method calls tha
 - **A `Mut<T>` write** stamps its row: directly in a method that changes no structure on one thread, after one
   record lookup in a method that changes structure or runs in parallel (the entity may have moved); `Value` and an
   unchanged `SetIfChanged` stamp nothing, and `SetIfChanged` compares the values, O(size of `T`).
-- **A `ChangedAny` / `RemovedAny` group** skips a table none of whose group columns was written since the tick, then
+- **A `ChangedAny` / `RemovedAny` set** skips a table none of whose columns was written since the tick, then
   words and blocks like a `Changed` filter.
 - **The destroy log** is allocated once at `new World`, 16 bytes per record; each destroy writes one record.
   `DestroyedSince` is O(entities reported) and allocates nothing. Off (the default), a destroy pays nothing.

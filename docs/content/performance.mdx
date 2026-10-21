@@ -424,7 +424,7 @@ private static readonly Prefab Goblin = new Prefab().SetPosition(0, 0).SetHealth
 var wave = new Entity[1_000];
 world.CreateEntities(wave, new Position(0, 0), new Velocity(1, 0));   // one pass through the structural gate
 world.Instantiate(Goblin, wave);                                      // a wave of a prefab, the same way
-int removed = world.DestroyAll<Dead>();                          // every dead entity, one pass
+int removed = world.DestroyAll<Dead>();                               // every dead entity, one pass
 int lifted = world.RemoveAll<Stunned>();                              // every stun lifted, whole words of rows
 ```
 

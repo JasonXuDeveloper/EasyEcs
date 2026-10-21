@@ -191,7 +191,7 @@ flowchart LR
     New["New table created"] -->|copy-on-write| Entry
 ```
 
-A query's key is its component sets: required, excluded, `WithAny`, `Changed`, `Removed` and the group. Its entry
+A query's key is its component sets: required, excluded, `WithAny`, `Changed`, `Removed` and the `InGroup` group. Its entry
 holds an immutable snapshot: the tables whose mask has every required component and the column of every `Removed`
 component (and, with `WithAny`, at least one of those), each with a row filter naming the columns whose presence bits
 and ticks the pass tests. An excluded component does not rule a table out, since its rows may lack it; the row filter

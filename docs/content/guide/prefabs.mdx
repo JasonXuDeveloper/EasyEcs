@@ -422,7 +422,7 @@ destroyed:
 | `Instantiate` on a thread that does not own the world | Races with the owner | [EECS014](/en/docs/guide/analyzer#eecs014) |
 | `Instantiate` in a `[ForEach]` method without `Entity` or `World` | The pass assumes no structural change | [EECS013](/en/docs/guide/analyzer#eecs013) |
 | Changing a prefab while other threads instantiate it | Torn copies | Build prefabs at startup, then only read them |
-| `Clone()` on a destroyed entity | `InvalidOperationException` | Check `IsAlive` |
+| `Clone()` on a destroyed or retired entity | `InvalidOperationException` | Check `IsAlive` and `IsRetired` |
 
 ## Related [#related]
 

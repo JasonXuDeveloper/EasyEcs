@@ -294,9 +294,9 @@ older than the log (`DestroyLogOldestTick`): that client needs the whole state a
 
 ### Cleanup components [#cleanup-components]
 
-A component implementing `ICleanupComponent` outlives the destruction of its entity: destroying it removes the other
-components and adds the `Retired` tag, and the entity stays until a system releases the resource and removes the
-last cleanup component.
+A component implementing `ICleanupComponent` keeps its entity alive past `Destroy`: `Destroy` retires the entity instead
+(the other components go, the `Retired` tag is added), and it stays until a system releases the resource and removes
+the last cleanup component.
 
 - **Use it for:** resources outside the world that must be released exactly once: a socket, a reserved seat, a
   slot in another service.

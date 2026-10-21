@@ -178,7 +178,7 @@ flowchart LR
 新增一个也不用改任何已有系统。
 
 实体留下的东西也一样。World 之外的资源（一个连接、一个预留的座位）用[清理组件](/zh/docs/guide/cleanup-and-disable)表示：
-销毁实体时它被保留下来，并打上 `Retired` 标签，直到某个系统释放资源。没有销毁事件需要订阅。
+`Destroy` 让实体退休：它带着 `Retired` 标签留下来，直到某个系统释放资源。没有销毁事件需要订阅。
 
 ### 5. 频繁的变化选最便宜的表示 [#5-choose-the-cheapest-representation-for-frequent-changes]
 
@@ -196,7 +196,7 @@ flowchart LR
 - 实体的种类用[预制体](/zh/docs/guide/prefabs)：不属于任何 World 的数据，用到时再实例化，不要放一批模板实体，让每个查询都去排除它们。
 
 ```csharp
-public record struct Facing(float Angle) : IComponent, ITracked;  // 被追踪：每行记录最后一次写入
+public record struct Facing(float Angle) : IComponent, ITracked;      // 被追踪：每行记录最后一次写入
 public record struct NetSync(Facing Sent) : IComponent;               // 客户端上次收到的值
 public record struct Outbox(int Updates) : ISingletonComponent;
 

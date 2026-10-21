@@ -352,7 +352,7 @@ Guide: [Change tracking](/en/docs/guide/change-tracking), with the
 | `world.Relations<T>()` then `Find(target)` / `Count(target)` | Who links to a target |
 | `world.Children(parent)` | Entities whose `ChildOf` names the parent; destroying the parent destroys them (`ChildOf` starts with `TargetPolicy.Destroy`) |
 | `world.Descendants(root)` | The whole subtree, depth first, each entity before its children, root excluded; a `ChildOf` cycle throws `InvalidOperationException` |
-| `world.Descendants(root).AddTo(ids, includeRoot: true)` | The root and its subtree appended to a `List<EntityId>`: the group for `MoveEntities` / `SaveEntities` |
+| `world.Descendants(root).AddTo(ids, includeRoot: true)` | The root and its subtree appended to a `List<EntityId>`: the entities for `MoveEntities` / `SaveEntities` |
 | `world.GroupBy<T>()` | Splits tables by an `IGroup` value |
 
 ```csharp

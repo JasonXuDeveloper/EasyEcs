@@ -157,7 +157,7 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 
 ## 销毁日志（Destroy log） [#destroy-log]
 
-设置了 `WorldOptions.DestroyLogCapacity` 时，World 保存的一个环形缓冲：最近销毁的实体，以及各自被销毁时的变更 tick。
+设置了 `WorldOptions.DestroyLogCapacity` 时，World 保存的一个环形缓冲：最近销毁的实体，以及各自被销毁时的变更 tick（[退休的实体](#retired-entity)在释放时才算）。
 `world.DestroyedSince(since, …)` 列出某个读取方的 tick 以来销毁的实体，所以每个客户端各自保存自己的 tick。见[变更追踪](/zh/docs/guide/change-tracking#destroy-log)。
 
 ## 结构变更（Structural change） [#structural-change]
@@ -242,6 +242,12 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 
 实现 `ICleanupComponent` 的组件。对它所在的实体调用 `Destroy` 不会释放实体，而是让它退休：其他组件被移除，加上 `Retired` 标签；实体会一直存活，
 直到某个系统释放了对应的资源（一个连接、一个座位）并移除这个组件。在那之前它不会被搬走、克隆，也不会被 `SetAll` 带回来。见[清理与禁用](/zh/docs/guide/cleanup-and-disable#cleanup-components)。
+
+## 退休的实体（Retired entity） [#retired-entity]
+
+`Destroy` 时还持有[清理组件](#cleanup-component)的实体：它仍然存活（`IsAlive` 为 true），只剩这些组件和 `Retired` 标签
+（`entity.IsRetired`），等某个系统移除最后一个清理组件时才被释放。“销毁”一律指释放：id 不再存活，[销毁日志](#destroy-log)也在这时记下它。
+见[清理与禁用](/zh/docs/guide/cleanup-and-disable#cleanup-components)。
 
 ## 禁用的组件（Disabled component） [#disabled-component]
 

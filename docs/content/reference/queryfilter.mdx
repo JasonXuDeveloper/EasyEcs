@@ -51,7 +51,7 @@ Only rows where at least one of `T1, T2` was written at or after change tick `si
 
 - `ArgumentException`: An earlier change filter named another tick.
 
-**Complexity** ([API table](/en/docs/api)): O(n) to build; a pass skips tables none of whose columns of the group was written since `since`, and blocks and words no column wrote
+**Complexity** ([API table](/en/docs/api)): O(n) to build; a pass skips tables none of whose columns of the set was written since `since`, and blocks and words no column wrote
 
 ### `Create` [#create]
 

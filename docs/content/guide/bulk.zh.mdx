@@ -77,7 +77,7 @@ public record struct Shot(int Damage) : IComponent;
 ```csharp
 var volley = new Entity[10_000];
 world.CreateEntities(volley, new Shot(5), new Position(0, 0));   // 一张表，所有行一次放好
-int cleared = world.DestroyAll<Shot>();                     // 所有子弹，一次遍历
+int cleared = world.DestroyAll<Shot>();                          // 所有子弹，一次遍历
 ```
 
 `world.Instantiate(prefab, span)` 用[预制体](/zh/docs/guide/prefabs)刷出一波实体。

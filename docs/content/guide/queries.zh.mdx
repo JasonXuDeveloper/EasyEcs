@@ -111,8 +111,8 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | `Slice(index, of)` | 每张匹配表的行切成 `of` 片，只取第 `index` 片，按 64 行的字切；只对 `ForEach`、`ForEachEntity`、`ForEachBatch` 及其 `Parallel` 版本有效 | `[ForEach(Slices = N)]`（[分片](/zh/docs/guide/systems#slices)） |
 | `Since(tick)` | 同一个过滤条件，把其中的 `Changed`、`Removed`、`ChangedAny`、`RemovedAny` 换到另一个 tick | |
 
-所有过滤都可以重复、可以组合。一个过滤条件里的 `ChangedAny` 并成一组，组里任意一个组件满足就算通过（`RemovedAny`
-另成一组）；这些组再和其他条件取“与”。一个过滤条件只有一个 tick：其中的 `Changed`、`Removed`、`ChangedAny` 和
+所有过滤都可以重复、可以组合。一个过滤条件里的 `ChangedAny` 并成一个集合，集合里任意一个组件满足就算通过（`RemovedAny`
+另成一个）；这些集合再和其他条件取“与”。一个过滤条件只有一个 tick：其中的 `Changed`、`Removed`、`ChangedAny` 和
 `RemovedAny` 必须用同一个（否则抛 `ArgumentException`），`Since(tick)` 会同时移动它们，所以放在字段里的过滤条件每次更新后
 都能接着用，也能[给每个客户端](/zh/docs/guide/change-tracking#per-client)各用一次它确认到的 tick：
 

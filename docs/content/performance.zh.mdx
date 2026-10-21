@@ -399,7 +399,7 @@ private static readonly Prefab Goblin = new Prefab().SetPosition(0, 0).SetHealth
 var wave = new Entity[1_000];
 world.CreateEntities(wave, new Position(0, 0), new Velocity(1, 0));   // 只过一次结构闸门
 world.Instantiate(Goblin, wave);                                      // 一波预制体，同样如此
-int removed = world.DestroyAll<Dead>();                          // 所有死亡实体，一遍搞定
+int removed = world.DestroyAll<Dead>();                               // 所有死亡实体，一遍搞定
 int lifted = world.RemoveAll<Stunned>();                              // 解除所有眩晕，按整字处理行
 ```
 

@@ -146,10 +146,10 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `foreach (var item in world.Read<T1..Tn>(filter))` | O(M + S) | 指向行内的 `ref readonly`：不打 tick；其余同 `Query` |
 | `world.Count<T1..Tn>(filter)` | O(M)，需要测位的表再加 S / 64 | 累加表计数，或数存在位（和 tick），AVX-512 下每步 8 个字 |
 | `world.Any<T1..Tn>(filter)` | 最坏 O(M + S / 64) | 找到第一个就停 |
-| `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | 只建一次，放在 `static readonly` 字段里；多个 `WithAny` 组成“至少有一个”的一组 |
+| `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | 只建一次，放在 `static readonly` 字段里；多个 `WithAny` 组成一个“至少有一个”的集合 |
 | `filter.Changed<T>(since)` / `[Changed<T>]` | O(1)；遍历跳过 `since` 之前写过的表、4,096 行的块和 64 行的字 | 被追踪的 `T` 在 `since` 及之后被写过的行（[变更追踪](/zh/docs/guide/change-tracking)）；一个过滤条件只有一个 tick |
 | `filter.Removed<T>(since)` / `[Removed<T>]` | 同 `Changed` | 在 `since` 及之后失去被追踪的 `T`、且现在仍没有它的实体；已销毁的实体不报告（由销毁日志报告） |
-| `filter.ChangedAny<T1..Tn>(since)` / `[ChangedAny<T1..Tn>]` | 构建 O(n)；遍历时跳过这一组列自 `since` 以来都没被写过的表，以及没有任何列写过的块和位字 | 2 到 9 个被追踪组件里至少有一个在 `since` 及之后被写过的行；一个过滤条件的所有 `ChangedAny` 调用合成一组，和其他条件按 AND 组合；每个过滤条件一个 tick |
+| `filter.ChangedAny<T1..Tn>(since)` / `[ChangedAny<T1..Tn>]` | 构建 O(n)；遍历时跳过集合里的列自 `since` 以来都没被写过的表，以及没有任何列写过的块和位字 | 2 到 9 个被追踪组件里至少有一个在 `since` 及之后被写过的行；一个过滤条件的所有 `ChangedAny` 调用合成一个集合，和其他条件按 AND 组合；每个过滤条件一个 tick |
 | `filter.RemovedAny<T1..Tn>(since)` / `[RemovedAny<T1..Tn>]` | 同 `ChangedAny` | 在 `since` 及之后至少失去其中一个、且现在仍没有它的实体 |
 | `filter.Slice(index, of)` / `[ForEach(Slices = N)]` | O(1)；一次遍历约访问 S / N 行，按 64 行位字切分 | 只用于 `ForEach` 系列调用（`Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run(ref job, filter)` 和批量调用会抛 `ArgumentException`）；分片方法访问第 `RunCount % N` 片；不能和 `[Changed<T>]` / `[Removed<T>]` 一起用（EECS035） |
 | `filter.InGroup<T>(group)` | O(1)；遍历只走这个分组的表 | [分组](/zh/docs/guide/groups) |

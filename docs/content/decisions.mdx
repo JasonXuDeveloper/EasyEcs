@@ -66,7 +66,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D46](#d46-mut-stamps-per-write) | `Mut<T>` stamps the row it writes, by row where rows cannot move |
 | [D47](#d47-setifchanged-equality) | `SetIfChanged` compares with `IEquatable<T>`, else the bytes |
 | [D48](#d48-parallel-tracked-chunks) | Parallel writers of tracked components cut chunks at 4,096 rows |
-| [D49](#d49-changedany-semantics) | `ChangedAny`: one OR group per kind, one tick per filter |
+| [D49](#d49-changedany-semantics) | `ChangedAny`: one OR set per kind, one tick per filter |
 | [D50](#d50-restart-saves) | A restart save leaves types out; a restart load keeps singletons |
 | [D51](#d51-not-added) | Not added: run conditions, time-based intervals, required components, an entity map, a meter, a checksum, partial snapshots |
 | [D52](#d52-identity-entity) | An `Entity` used only as an identity does not make a system run alone |
@@ -657,7 +657,7 @@ an id, with a message that names the fix. Format 1 saves (4.3 and earlier) are r
 ## D31. A record of what persists: a component set to save, loading onto existing entities [#d31-a-record-of-what-persists]
 
 **Decision.** `SaveEntitiesWith(output, ids, set)` writes only the components of a `ComponentSet`, and
-`LoadEntitiesInto(input, entities)` loads a group save onto entities that exist, the i-th saved entity onto the i-th
+`LoadEntitiesInto(input, entities)` loads a save of entities onto entities that exist, the i-th saved entity onto the i-th
 given, each moving table at most once. A `ComponentSet` is a bit mask built once (`With<T>()`, `With(Type)`); the save
 selects each table's rows in O(group).
 
@@ -1067,28 +1067,28 @@ which may start at any 64-row word); other parallel passes keep 64-row-aligned c
 - **Atomic updates of the summaries:** an interlocked operation on every write of every pass, parallel or not.
 - **Per-chunk summaries merged after the pass:** memory per chunk and a merge on every parallel pass.
 
-## D49. `ChangedAny`: one OR group per kind, one tick per filter [#d49-changedany-semantics]
+## D49. `ChangedAny`: one OR set per kind, one tick per filter [#d49-changedany-semantics]
 
 **Decision.** `QueryFilter.ChangedAny<T1..Tn>(since)` selects rows where at least one of its components was written
-at or after `since`; a row qualifies through a component it has. Every `ChangedAny` call of a filter joins one group,
-every `RemovedAny` call another, and the groups combine with each other and with the other filters by AND. A filter
-has one tick, which `Since` moves for all its change filters. A table none of whose group columns was stamped since
+at or after `since`; a row qualifies through a component it has. Every `ChangedAny` call of a filter joins one set,
+every `RemovedAny` call another, and the sets combine with each other and with the other filters by AND. A filter
+has one tick, which `Since` moves for all its change filters. A table none of whose columns was stamped since
 the tick is skipped whole, and words and blocks no column wrote.
 
 **Why.**
 - **Replication sends a unit when any of its parts changed.** Several `[Changed<T>]` filters mean all of them; a
   second query per component would visit a row twice and need a deduplication.
 - **One tick is enough.** The filter is kept once per purpose and run with each client's acknowledged tick.
-- **The groups live outside the filter.** A filter holds one interned id of its pair of groups (4 bytes, 0 without
-  groups), found once per new pair and allocation-free after: filters without groups, the common case, keep their
-  size, and table checks test one flag of the row plan before any group work.
-- **One group per kind is enough.** Several independent OR groups would need a list per filter for a case no request
+- **The sets live outside the filter.** A filter holds one interned id of its pair of sets (4 bytes, 0 without
+  sets), found once per new pair and allocation-free after: filters without sets, the common case, keep their
+  size, and table checks test one flag of the row plan before any set work.
+- **One set per kind is enough.** Several independent OR sets would need a list per filter for a case no request
   needed.
 - **Measured** (`ChangeTrackingBenchmark`, `CountBenchmark`, `SparseBenchmark`, against 4.6): filters without a
-  group cost what they did, every case within 7% either way, the run-to-run noise of these measurements.
+  set cost what they did, every case within 7% either way, the run-to-run noise of these measurements.
 
 **Considered.**
-- **Several independent OR groups:** more state per filter, no use found.
+- **Several independent OR sets:** more state per filter, no use found.
 - **A tick per component:** a filter per client per component, where the client has one acknowledgement.
 - **Running one query per component and merging:** rows visited twice.
 
@@ -1105,7 +1105,7 @@ a component.
   must not come back, and often have no formatter.
 - **The new process sets its configuration first.** Loading the old world over it would bring the old configuration
   back; keeping the singleton is one set, built once.
-- **Each set says what its call can do.** A group save writes no singletons and a load replaces every entity, so a set
+- **Each set says what its call can do.** A save of entities writes no singletons and a load replaces every entity, so a set
   naming what the call cannot honour is refused instead of ignored.
 - **Measured** (`SnapshotBenchmark`, `SaveWithout` against `Save`, `LoadKeeping` against `Load`, 100,000 entities over two
   runs): a save that leaves a component and the singleton out takes 225–250 µs against 232–235 µs for the whole

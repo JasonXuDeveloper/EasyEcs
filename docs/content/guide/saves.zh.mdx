@@ -104,7 +104,7 @@ long tick = restarted.Clock.Tick;                                      // 1234
 保留集合里的单例，维持新进程设好的样子，加载的行也不带变更 tick。
 
 ```csharp
-public record struct Balance(int Gold) : IComponent, ITracked;     // 要持久化；写过的余额要记下来
+public record struct Balance(int Gold) : IComponent, ITracked;            // 要持久化；写过的余额要记下来
 public record struct Connection(Stream Socket) : IComponent;              // 只在运行时有意义，没有 Nino 格式化器
 public record struct Rates(int Interest) : ISingletonComponent;           // 每个版本自己的配置
 public record struct Outbox(int Records) : ISingletonComponent;           // 等着写进数据库的记录
@@ -155,7 +155,7 @@ int interest = resumed.Rates.Interest;                                 // 7：�
 - **`markWritten: false` 只作用于加载进来的行：** 没有哪一行算作写入或移除，加载之后才加上的系统也一样；之后代码再写入的内容照常能看到。
 - **集合只建一次**，放在 `static readonly` 字段里：集合是值类型，每次 `With` 或 `WithSingleton` 都返回一个新集合。运行时才知道类型的框架用
   `With(typeof(...))` 添加，组件类型和单例类型都接受。
-- **分组存档不接受单例。** `SaveEntitiesWith(output, ids, set)` 的集合里有单例时抛 `ArgumentException`
+- **实体存档不接受单例。** `SaveEntitiesWith(output, ids, set)` 的集合里有单例时抛 `ArgumentException`
   （见[记录](/zh/docs/guide/migration-and-unload#records)）。
 
 之后才加到已经有状态的 World 上的系统（不管状态是谁写的），也可以从当前 tick 开始算：`world.AddSystem<T>(changesFromNow: true)`

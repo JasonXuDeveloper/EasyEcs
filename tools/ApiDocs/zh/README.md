@@ -49,7 +49,7 @@ The terms of the Chinese guide pages (`docs/content/glossary.zh.mdx`). Use these
 | run of rows | 一段连续的行 |
 | chunk (parallel) | 块 |
 | hole / tombstone | 空洞 / 墓碑 |
-| query, filter | 查询、过滤条件 |
+| query, filter; any-set (`ChangedAny` / `RemovedAny`) | 查询、过滤条件；集合 |
 | pass (an iteration in progress) | 遍历（遍历进行中） |
 | system, system group, default group | 系统、系统分组（分组）、默认分组 |
 | stage | 阶段 |
@@ -69,7 +69,7 @@ The terms of the Chinese guide pages (`docs/content/glossary.zh.mdx`). Use these
 | relation, link, target, source | 关系、链接、目标、来源实体 |
 | hierarchy, parent, child, root | 层级、父实体、子实体、根 |
 | group (`IGroup`) | 分组 |
-| cleanup component | 清理组件 |
+| cleanup component; retired (entity); destroyed (freed) | 清理组件；退休（的实体）；销毁 |
 | disable / enable | 禁用 / 启用 |
 | snapshot, capture, restore | 快照、拍快照、恢复 |
 | save, load | 存档、加载 |

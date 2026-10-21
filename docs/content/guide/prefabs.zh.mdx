@@ -391,7 +391,7 @@ boss 50 hp, twin 50 hp
 | 在不拥有 World 的线程上 `Instantiate` | 和所有者线程发生竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 在不带 `Entity` 或 `World` 参数的 `[ForEach]` 方法里 `Instantiate` | 遍历以为不会有结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
 | 其他线程正在实例化时修改预制体 | 复制出残缺的数据 | 启动时建好预制体，之后只读 |
-| 对已销毁的实体调用 `Clone()` | 抛 `InvalidOperationException` | 先查 `IsAlive` |
+| 对已销毁或已退休的实体调用 `Clone()` | 抛 `InvalidOperationException` | 先查 `IsAlive` 和 `IsRetired` |
 
 ## 相关页面 [#related]
 

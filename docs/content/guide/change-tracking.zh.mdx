@@ -185,7 +185,7 @@ bool moved = npcs[7].SetPositionIfChanged(1, 0);   // false：走了一步，已
 以来失去被追踪组件 `T` 的实体：
 
 ```csharp title="ReplicateFire.cs"
-public record struct Burning(int Ticks) : IComponent, ITracked;   // 被追踪：移除也会被记录
+public record struct Burning(int Ticks) : IComponent, ITracked;           // 被追踪：移除也会被记录
 public record struct FireReplica(bool Burning) : IComponent;              // 客户端知道的着火状态
 
 public class ReplicateFire : EcsSystem
@@ -262,12 +262,12 @@ public class ReplicateUnitSystem : EcsSystem
 ```
 
 - **每一行是“或”：** 一行只要有一个自己拥有的组件在这个 tick 之后被写过（或被移除），就通过；其他组件不必都有。
-  一张表至少要有这一组里的一列才会参与；这几列在这个 tick 之后都没人写过，整张表直接跳过。
-- **和其他条件是“与”：** 一个方法或过滤条件里所有的 `ChangedAny` 特性或调用并成一组，所有的 `RemovedAny` 并成另一组，
-  这些组再和 `With`、`Without`、`Changed`、`Removed` 等其他条件取“与”。
+  一张表至少要有集合里的一列才会参与；这几列在这个 tick 之后都没人写过，整张表直接跳过。
+- **和其他条件是“与”：** 一个方法或过滤条件里所有的 `ChangedAny` 特性或调用并成一个集合，所有的 `RemovedAny` 并成另一个，
+  这些集合再和 `With`、`Without`、`Changed`、`Removed` 等其他条件取“与”。
 - **一个过滤条件只有一个 tick：** 过滤条件里的 `Changed`、`Removed`、`ChangedAny` 和 `RemovedAny` 都从同一个 tick 往后看
   （否则抛 `ArgumentException`），`Since(tick)` 会一起移动它们。
-- 每组 2 到 9 个组件，每个都要实现 `ITracked`。和 `[Changed<T>]` 一样，方法会声明对每个组件的读取。
+- 2 到 9 个组件，每个都要实现 `ITracked`。和 `[Changed<T>]` 一样，方法会声明对每个组件的读取。
 
 ### 所有客户端共用一个过滤条件 [#per-client]
 
@@ -528,7 +528,7 @@ written since the mark: 2
 - **一次 `Mut<T>` 写入：** 给它的行打 tick：单线程且不做结构变更的方法直接打，会做结构变更或并行运行的方法先查一次实体记录
   （实体可能被搬走了）；`Value` 和值没变的 `SetIfChanged` 不打 tick，
   `SetIfChanged` 要比较两个值，O(`T` 的大小)。
-- **一组 `ChangedAny` / `RemovedAny`：** 组里的列在这个 tick 之后都没人写过的表直接跳过，之后和 `Changed` 一样按字和块跳过。
+- **`ChangedAny` / `RemovedAny` 的集合：** 集合里的列在这个 tick 之后都没人写过的表直接跳过，之后和 `Changed` 一样按字和块跳过。
 - **销毁日志：** `new World` 时一次分配，每条记录 16 字节；每次销毁写一条记录。`DestroyedSince` 是 O(报告的实体数)，
   不分配内存。关闭时（默认），销毁不为它付任何代价。
 - **没有 `ITracked` 的组件零开销：** 这些检查是 JIT 期常量。

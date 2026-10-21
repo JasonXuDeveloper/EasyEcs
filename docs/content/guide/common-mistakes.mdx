@@ -774,7 +774,7 @@ No rule catches it. More in [moving a hierarchy](/en/docs/guide/hierarchy#moving
 ### Restoring a record that is then saved again [#record-written-back]
 
 ```csharp
-public record struct Bank(long Gold) : IComponent, ITracked;   // persistent: saved when it changes
+public record struct Bank(long Gold) : IComponent, ITracked;        // persistent: saved when it changes
 public record struct Connection(int Socket) : IComponent;           // runtime only
 ```
 

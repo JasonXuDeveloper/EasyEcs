@@ -340,7 +340,7 @@ after the update: alive False, seats released 1
 | 对被禁用的组件 `Set`，以为它还是禁用状态 | `Set` 会用新值重新启用它；要拿回保留的值用 `Enable` | 设计如此 |
 | 系统忘了写 `Without<Inactive>` | 池里的实体还在动 | 代码审查 |
 | 指望 `[Changed<T>]` 区分新建和写入 | 两者都算写入 | 用 `Spawned` 标签 |
-| 只为了通知客户端实体没了而加清理组件 | 每个被销毁的实体都要等系统处理，而且只有一个读者看得到 | 用[销毁日志](/zh/docs/guide/change-tracking#destroy-log)：多个读者，只给 id |
+| 只为了通知客户端实体没了而加清理组件 | 每个调用了 `Destroy` 的实体都会退休、等系统处理，而且只有一个读者看得到 | 用[销毁日志](/zh/docs/guide/change-tracking#destroy-log)：多个读者，只给 id |
 | 指望销毁日志里有退休实体的值 | 日志只记 id，而且在实体释放时才记 | 先用清理组件读出这些值 |
 
 ## 相关页面 [#related]

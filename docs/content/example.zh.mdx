@@ -57,7 +57,7 @@ flowchart LR
 | 系统之外的 `[ForEach]` runner | `Reports` |
 | `Maybe<T>` | `RegenerationSystem`：着火的玩家回血更少 |
 | [禁用组件](/zh/docs/guide/cleanup-and-disable) | 被冻住单位的 `Attack` 和 `Velocity`；`NewRound` 批量重新启用 |
-| [清理组件](/zh/docs/guide/cleanup-and-disable)（`ICleanupComponent`、`Retired`） | `Spawn`：NPC 销毁后留下它，交给 `RespawnSystem.Revive` |
+| [清理组件](/zh/docs/guide/cleanup-and-disable)（`ICleanupComponent`、`Retired`） | `Spawn`：死去的 NPC 退休，留给 `RespawnSystem.Revive` |
 | [层级](/zh/docs/guide/hierarchy)（`ChildOf`、`Children`、`Descendants`） | 投射物是玩家的子实体；`Transfer` 收集整棵子树 |
 | [遍历中的结构变更](/zh/docs/guide/structural-changes) | 遍历途中增删状态、死亡、复活、生成和销毁投射物 |
 | [预制体](/zh/docs/guide/prefabs)（`Prefab`、`Instantiate`、`Reserve`）与克隆 | `Hero`、`Grunt`、`Brute`（`Grunt` 的变体）；`Mirror` 克隆一个活着的单位 |
@@ -121,7 +121,7 @@ flowchart LR
 
 `RespawnSystem` 响应 `Dead` 标签，`DeathSystem` 根本不知道它存在。玩家复活时召回自己的投射物（子实体）、清空背包、
 顺着 `Friend` 关系找到一个活着的好友并出现在他身边，再用一次 `Remove<Dead, Burning, Frozen>()` 去掉所有状态。
-NPC 死亡时，把下一个 NPC 的出生点写进 `Spawn` 清理组件，把掉落交给同区域的一名玩家（只需看一个分组的表），然后被销毁：
+NPC 死亡时，把下一个 NPC 的出生点写进 `Spawn` 清理组件，把掉落交给同区域的一名玩家（只需看一个分组的表），然后调用 `Destroy` 退休：
 `Spawn` 带着 `Retired` 标签留下来，等 `Revive` 生成下一个 NPC 并移除它，旧实体才真正释放。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#respawn</include>

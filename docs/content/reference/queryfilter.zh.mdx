@@ -51,7 +51,7 @@ public QueryFilter ChangedAny<T1, T2, T3, T4, T5, T6, T7, T8, T9>(ulong since) w
 
 - `ArgumentException`：前面的变更过滤条件用了另一个 tick。
 
-**复杂度**（[API 表](/zh/docs/api)）：构建 O(n)；遍历时跳过这一组列自 `since` 以来都没被写过的表，以及没有任何列写过的块和位字
+**复杂度**（[API 表](/zh/docs/api)）：构建 O(n)；遍历时跳过集合里的列自 `since` 以来都没被写过的表，以及没有任何列写过的块和位字
 
 ### `Create` [#create]
 

@@ -211,7 +211,7 @@ foreach (var member in parties.Find(red)) { /* red 的每个成员 */ }
 int links = parties.Find(red).Count;                          // O(1)：循环会走过的链接数，先按它确定缓冲区大小
 int withMembers = parties.TargetCount;                        // O(1)：有成员的队伍有几个
 bool inBlue = knight.Links<MemberOf>(blue);
-knight.Unlink<MemberOf>(blue);                         // 退出 blue
+knight.Unlink<MemberOf>(blue);                                // 退出 blue
 ```
 
 实体没有缓冲时，`Link` 会先加上缓冲，再追加链接并建立索引。读取链接用 `Read<DynamicBuffer<T>>()` 或 `in` 参数；
@@ -306,7 +306,7 @@ Friendships.Befriend(ana, ben);
 int bensFriends = friends.Count(ben);                      // 1：ana 链接到 ben
 
 ana.Destroy();                                             // ana 的链接随她消失，ben 指向她的那条也被删掉
-bool stillLinked = ben.Links<Friend>(ana);           // false
+bool stillLinked = ben.Links<Friend>(ana);                 // false
 ```
 
 每一方从自己的缓冲里读出自己的好友；而且每条链接都有对应的反向链接，所以 `friends.Count(player)`（指向这个玩家的链接数）也就是他的好友数。

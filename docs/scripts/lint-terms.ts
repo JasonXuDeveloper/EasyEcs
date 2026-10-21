@@ -25,6 +25,9 @@ const rules: Rule[] = [
   { wrong: /跟踪/g, right: '追踪 (tracking)' },
   { wrong: /世界更新/g, right: 'World 更新 (the World, not a 世界)' },
   { wrong: /记 tick/g, right: '打 tick (stamp)' },
+  // 分组 is a system group or an IGroup table group; neither names a set of entities or a ChangedAny set.
+  { wrong: /分组存档/g, right: '实体存档 (a save of entities)' },
+  { wrong: /OR 组/g, right: 'OR 集合 (the ChangedAny / RemovedAny set)' },
   // A link to a page is labelled with the page's title, as its sidebar entry is.
   {
     wrong: /\[(?:多线程|线程模型|线程)\]\(\/zh\/docs\/guide\/threading/g,

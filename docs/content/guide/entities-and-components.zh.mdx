@@ -33,7 +33,7 @@ icon: Box
 ```csharp
 public record struct Position(float X, float Y) : IComponent;
 public record struct Health(int Value) : IComponent;
-public record struct Armor(int Value) : IComponent, ITracked;   // 写入会被追踪
+public record struct Armor(int Value) : IComponent, ITracked;        // 写入会被追踪
 public record struct Name(string Value) : IComponent;                // 可以有托管字段
 public struct Dead : IComponent;                                     // 标签：没有字段
 ```
@@ -81,13 +81,14 @@ goblin.Destroy();
 | `Destroy()` | 忽略 |
 
 两个句柄指向同一个 World 里的同一代实体时才相等。销毁实体会让版本加一，指向它的所有句柄立刻失效，之后复用这个索引的新实体也不会被旧句柄碰到。
+持有[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)的实体则不同：`Destroy` 让它退休，它带着 `Retired` 标签继续存活，直到某个系统移除这些组件。
 
 批量生成和清理都有对应的批量接口，每次只过一次结构闸门：
 
 ```csharp
 var wave = new Entity[500];
 world.CreateEntities(wave, new Position(0, 0), new Health(100));   // 每个实体同样的值，句柄写进 wave
-int cleared = world.DestroyAll<Health, Dead>();                 // 所有带 Health 的死亡实体
+int cleared = world.DestroyAll<Health, Dead>();                    // 所有带 Health 的死亡实体
 ```
 
 反复生成的同类实体（某种 NPC、某种子弹）最好定义成[预制体](/zh/docs/guide/prefabs)：`world.Instantiate(prefab)` 生成一个，

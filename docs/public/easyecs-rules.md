@@ -27,8 +27,8 @@ available as Markdown: add `.md` to its URL.
   `EntityId` keys (EECS036). A component has one index key: never two `IIndexed<TKey>` (EECS036).
 - A list per entity is a `DynamicBuffer<T>` component; never copy it by value (EECS012). Call
   `EnsureCapacity(n)` on it (and `world.Reserve<T…>(n)` on the world) before a wave of known size.
-- An external resource (a socket, a seat) lives in an `ICleanupComponent`: destroying the entity keeps it with the
-  `Retired` tag until a system releases the resource and removes the component. Never set or remove `Retired` or
+- An external resource (a socket, a seat) lives in an `ICleanupComponent`: `Destroy` retires the entity (alive, with
+  the `Retired` tag) until a system releases the resource and removes the component, which frees it. Never set or remove `Retired` or
   `Disabled<T>` yourself (EECS045): `Destroy`, `Disable<T>()` and `Enable<T>()` do. A cleanup component and `ChildOf`
   are never disabled (EECS048). A retired entity (kept for its cleanup components) stays retired: `MoveEntities` skips it (and a moved entity leaves
   its cleanup components behind), `Clone()` throws, and `SetAll` reaches it only when the filter names `Retired`.
@@ -66,7 +66,8 @@ available as Markdown: add `.md` to its URL.
   it with each client's acknowledged tick, `filter.Since(client.Ack)`; never one filter per client per tick.
 - Despawns for replication: set `WorldOptions.DestroyLogCapacity` to at least the destroys of the longest gap between two
   reads of a client, and call `world.DestroyedSince(client.Ack, buffer, out count)`; on `false`, send that client the
-  whole state. `[Removed<T>]` does not see destroyed entities. A resource to release exactly once is a cleanup
+  whole state. `[Removed<T>]` does not see destroyed entities, and the log records a retired entity when it is freed.
+  A resource to release exactly once is a cleanup
   component, not the log.
 - Spread heavy per-row work that may lag over runs with `[ForEach(Slices = N)]`; never on `[Changed<T>]` /
   `[Removed<T>]` methods (EECS035). `system.RunCount % N` is the current slice; `Query`, `Read`, `Count`, `Any`,

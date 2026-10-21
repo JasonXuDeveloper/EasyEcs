@@ -134,7 +134,7 @@ using EasyEcs;
 
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
-public record struct Health(int Value) : IComponent, ITracked;   // tracked: rows record their last write
+public record struct Health(int Value) : IComponent, ITracked;         // tracked: rows record their last write
 public struct Dead : IComponent;                                       // a tag
 public record struct Clock(float Dt) : ISingletonComponent;           // one value per world
 
@@ -357,9 +357,9 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 - **Unique keys.** `IUniqueIndexed<TKey>` names one entity per key (`index.Get(key)`); a write that would duplicate a
   key throws before it changes anything
   ([indexes and relations](https://ecs.xgamedev.net/en/docs/guide/indexes-and-relations)).
-- **Counts without a walk, groups without a loop.** `index.Find(key).Count` sizes a buffer in O(1), `KeyCount` /
+- **Counts without a walk, subtrees without a loop.** `index.Find(key).Count` sizes a buffer in O(1), `KeyCount` /
   `TargetCount` count distinct keys and targets, and `world.Descendants(root).AddTo(ids, includeRoot: true)` collects
-  the group `MoveEntities` and `SaveEntities` take
+  the ids `MoveEntities` and `SaveEntities` take
   ([hierarchy](https://ecs.xgamedev.net/en/docs/guide/hierarchy#moving)).
 - **Spawns with their own components.** `world.Instantiate(prefab, new ChildOf(parent), …)` in one row copy, and a
   prefab with members can be instantiated by a system too, during its pass

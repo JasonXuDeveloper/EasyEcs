@@ -184,8 +184,8 @@ that state later in the update, in the order of the schedule: movement and comba
 adding one changes no existing system.
 
 The same holds for what an entity leaves behind. A resource outside the world (a socket, a reserved seat) is a
-[cleanup component](/en/docs/guide/cleanup-and-disable): destroying the entity keeps it, tagged `Retired`, until a
-system releases the resource. There is no destroy event to subscribe to.
+[cleanup component](/en/docs/guide/cleanup-and-disable): `Destroy` retires the entity, which stays, tagged `Retired`,
+until a system releases the resource. There is no destroy event to subscribe to.
 
 ### 5. Choose the cheapest representation for frequent changes [#5-choose-the-cheapest-representation-for-frequent-changes]
 
@@ -209,7 +209,7 @@ still cheaper than a structural change:
   instead of template entities that every query must exclude.
 
 ```csharp
-public record struct Facing(float Angle) : IComponent, ITracked;  // tracked: rows record their last write
+public record struct Facing(float Angle) : IComponent, ITracked;      // tracked: rows record their last write
 public record struct NetSync(Facing Sent) : IComponent;               // what clients last heard
 public record struct Outbox(int Updates) : ISingletonComponent;
 

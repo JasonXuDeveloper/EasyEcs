@@ -356,7 +356,7 @@ and enabled in bulk and one by one (`BulkBenchmark`):
 | `Set` on a disabled component expecting it to stay disabled | `Set` enables it with the new value; use `Enable` to get the kept value back | By design |
 | Forgetting `Without<Inactive>` on a system | Pooled entities keep moving | Code review |
 | Expecting `[Changed<T>]` to tell new from written | Both are writes | Use a `Spawned` tag |
-| A cleanup component only to tell clients an entity went | Every destroyed entity waits for a system, and only one reader sees it | The [destroy log](/en/docs/guide/change-tracking#destroy-log): many readers, ids only |
+| A cleanup component only to tell clients an entity went | Every entity `Destroy` reaches is retired and waits for a system, and only one reader sees it | The [destroy log](/en/docs/guide/change-tracking#destroy-log): many readers, ids only |
 | Expecting the destroy log to hold a retired entity's values | It holds ids only, and logs the entity when it is freed | A cleanup component reads the values first |
 
 ## Related [#related]

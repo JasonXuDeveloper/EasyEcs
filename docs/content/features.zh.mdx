@@ -248,8 +248,8 @@ public class ReplicationSystem : EcsSystem
 
 ### 清理组件 [#cleanup-components]
 
-实现 `ICleanupComponent` 的组件比它的实体活得久：销毁实体时，其他组件被移除，并加上 `Retired` 标签；实体一直保留，
-直到某个系统释放资源、移除最后一个清理组件。
+实现 `ICleanupComponent` 的组件让实体在 `Destroy` 之后继续存活：`Destroy` 改为让实体退休（其他组件被移除，加上 `Retired` 标签），
+实体一直保留，直到某个系统释放资源、移除最后一个清理组件。
 
 - **适合：** World 之外、必须恰好释放一次的资源：一个连接、一个预留的座位、另一个服务里的槽位。
 - **别用于：** 纯数据：已销毁实体的组件不需要释放。

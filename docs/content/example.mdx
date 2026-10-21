@@ -136,8 +136,8 @@ other systems filter on.
 `RespawnSystem` reacts to the `Dead` tag; `DeathSystem` does not know it exists. A player recalls its projectiles
 (its children), empties its bag, comes back next to a living friend found through its `Friend` links, and loses its
 statuses in one `Remove<Dead, Burning, Frozen>()`. An NPC writes where the next one should appear into its `Spawn`
-cleanup component, gives its loot to a player of its zone (one group's table to look at) and is destroyed: its
-`Spawn` stays behind with the `Retired` tag until `Revive` spawns the next NPC and removes it, which frees the old
+cleanup component, gives its loot to a player of its zone (one group's table to look at) and calls `Destroy`, which retires it:
+its `Spawn` stays behind with the `Retired` tag until `Revive` spawns the next NPC and removes it, which frees the old
 entity.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#respawn</include>

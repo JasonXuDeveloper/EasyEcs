@@ -118,7 +118,7 @@ of the set; `LoadKeeping(input, in keep, markWritten: false)` keeps the singleto
 and loads the rows without a change tick.
 
 ```csharp
-public record struct Balance(int Gold) : IComponent, ITracked;     // persists; written balances are recorded
+public record struct Balance(int Gold) : IComponent, ITracked;            // persists; written balances are recorded
 public record struct Connection(Stream Socket) : IComponent;              // runtime only, no Nino formatter
 public record struct Rates(int Interest) : ISingletonComponent;           // configuration of each version
 public record struct Outbox(int Records) : ISingletonComponent;           // records waiting for the database
@@ -177,7 +177,7 @@ records nothing; the next deposit is recorded as usual.
 - **Build the sets once,** in `static readonly` fields: a set is a value, each `With` or `WithSingleton` returns a new
   one. A framework that learns its types at run time adds them with `With(typeof(...))`, which takes a component or a
   singleton type.
-- **A group save takes no singletons.** `SaveEntitiesWith(output, ids, set)` with a set that names one throws
+- **A save of entities takes no singletons.** `SaveEntitiesWith(output, ids, set)` with a set that names one throws
   `ArgumentException` ([records](/en/docs/guide/migration-and-unload#records)).
 
 A system added later to a world that already holds its state, whatever wrote it, can start from the current tick
