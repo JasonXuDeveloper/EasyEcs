@@ -169,8 +169,8 @@ internal sealed class Reference
     {
         public string Slug => Name.Replace('.', '-').ToLowerInvariant();
         public INamedTypeSymbol First => Types[0];
-        /// <summary>A T1..T9 family: one type per arity from 1, generated from one template.</summary>
-        public bool Arities => Types.Count > 1 && Types.Select((t, i) => t.Arity == i + 1).All(x => x);
+        /// <summary>A consecutive T1..T9 (or T2..T9) family generated from one template; titled &lt;T1..Tn&gt;, as its types are declared.</summary>
+        public bool Arities => Types.Count > 1 && Types[0].Arity > 0 && Types.Select((t, i) => t.Arity == Types[0].Arity + i).All(x => x);
 
         public string Title => Types.Count == 1 ? First.ToDisplayString(TypeName)
             : Arities ? Name + "<T1..T" + Types[^1].Arity + ">" : string.Join(", ", Types.Select(t => t.ToDisplayString(TypeName)));
@@ -225,7 +225,7 @@ internal sealed class Reference
         };
         string word = _lang.KindWords[kind];
         text.Append("---\ntitle: ").Append(Yaml(family.Title))
-            .Append("\nseoTitle: ").Append(Yaml(_lang.SeoTitle(family.Title, word)))
+            .Append("\nseoTitle: ").Append(Yaml(_lang.SeoTitle(family.Types.Count > 1 ? family.Name : family.Title, word)))
             .Append("\ndescription: ").Append(Yaml(_lang.Description(Mdx.Sentence(summary), family.Title, word)))
             .Append("\n---\n\n").Append(Banner).Append("\n\n```csharp\n");
         foreach (var t in family.Types) text.Append(Declaration(t)).Append('\n');
@@ -235,7 +235,7 @@ internal sealed class Reference
         if (summary.Length != 0) text.Append(summary).Append("\n\n");
         Sections(text, type, "####");
         if (family.Arities)
-            text.Append(_lang.Arities(family.Types[^1].Arity, Mdx.Code(type.ToDisplayString(TypeName)))).Append("\n\n");
+            text.Append(_lang.Arities(family.Types[0].Arity, family.Types[^1].Arity, Mdx.Code(type.ToDisplayString(TypeName)))).Append("\n\n");
 
         foreach (var (title, groups) in Layout(family))
         {
