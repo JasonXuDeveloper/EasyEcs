@@ -1,6 +1,11 @@
 import type { FeedbackBlockProps } from 'fumadocs-core/mdx-plugins/remark-feedback-block';
 import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 import { Card, Cards } from 'fumadocs-ui/components/card';
+import {
+  CodeBlockTab,
+  CodeBlockTabs,
+  CodeBlockTabsTrigger,
+} from 'fumadocs-ui/components/codeblock';
 import { File, Files, Folder } from 'fumadocs-ui/components/files';
 import { ImageZoom } from 'fumadocs-ui/components/image-zoom';
 import { Step, Steps } from 'fumadocs-ui/components/steps';
@@ -23,6 +28,16 @@ import { FeedbackBlock } from '@/components/feedback/client';
 import { Mermaid } from '@/components/mermaid';
 import { Stat, Stats } from '@/components/stats';
 
+/**
+ * A fence's `tab="…"` label is also its tab's value, and Radix builds the
+ * trigger and panel ids from it: a label with spaces ("Per client") would
+ * give an `aria-controls` of two ids. The JSX `<Tabs>` escapes its values the
+ * same way.
+ */
+function tabValue(value: string | undefined) {
+  return value?.replace(/\s+/g, '-');
+}
+
 export function getMDXComponents(components?: MDXComponents): MDXComponents {
   return {
     ...defaultMdxComponents,
@@ -37,6 +52,24 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     BenchValue,
     Card,
     Cards,
+    CodeBlockTabs: ({
+      defaultValue,
+      ...props
+    }: ComponentProps<typeof CodeBlockTabs>) => (
+      <CodeBlockTabs {...props} defaultValue={tabValue(defaultValue)} />
+    ),
+    CodeBlockTabsTrigger: ({
+      value,
+      ...props
+    }: ComponentProps<typeof CodeBlockTabsTrigger>) => (
+      <CodeBlockTabsTrigger {...props} value={tabValue(value) ?? value} />
+    ),
+    CodeBlockTab: ({
+      value,
+      ...props
+    }: ComponentProps<typeof CodeBlockTab>) => (
+      <CodeBlockTab {...props} value={tabValue(value) ?? value} />
+    ),
     EcsDemo,
     FeatureComparison,
     FeatureCount,

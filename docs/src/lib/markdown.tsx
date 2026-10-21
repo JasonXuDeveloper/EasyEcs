@@ -108,6 +108,20 @@ function markdownComponents(lang: Locale, pageUrl: string) {
       asMarkdown();
       return md`\n**${title ?? value ?? ''}**\n\n${children}\n\n`;
     },
+    // Code fences with `tab="…"` meta (Fumadocs' remark-code-tab): the
+    // trigger list is dropped, each tab's fences follow its label.
+    CodeBlockTabs({ children }: Children) {
+      asMarkdown();
+      return children;
+    },
+    CodeBlockTabsList() {
+      asMarkdown();
+      return null;
+    },
+    CodeBlockTab({ value, children }: Children & { value?: string }) {
+      asMarkdown();
+      return md`\n**${value ?? ''}**\n\n${children}\n\n`;
+    },
     Cards({ children }: Children) {
       asMarkdown();
       return md`\n${children}\n\n`;
@@ -334,6 +348,7 @@ function withFallbacks(components: Record<string, unknown>) {
 /** Markdown inline syntax to plain text, for JSON-LD */
 function plainText(markdown: string) {
   return markdown
+    .replace(/^\*\*[^*\n]+\*\*\n+(?=```)/gm, '') // a tab's label above its code
     .replace(/```[\s\S]*?```/g, '')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
