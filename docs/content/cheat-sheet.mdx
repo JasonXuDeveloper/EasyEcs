@@ -368,7 +368,8 @@ Entity holder = world.AccountIndex.Get(42);        // the same entity; a second 
 ```
 
 Indexed and grouped components are written with `Set`, never through a `ref`
-([EECS015](/en/docs/guide/analyzer#eecs015)). Guides: [Indexes and relations](/en/docs/guide/indexes-and-relations),
+([EECS015](/en/docs/guide/analyzer#eecs015)), and not while a `foreach` walks their index
+([EECS042](/en/docs/guide/analyzer#eecs042)). Guides: [Indexes and relations](/en/docs/guide/indexes-and-relations),
 [Hierarchy](/en/docs/guide/hierarchy), [Groups](/en/docs/guide/groups).
 
 ## Prefabs and bulk operations [#prefabs-and-bulk]

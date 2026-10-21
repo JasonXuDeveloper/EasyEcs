@@ -37,7 +37,7 @@ public sealed partial class EasyEcsAnalyzer
         helpLinkUri: Help("EECS026"));
 
     public static readonly DiagnosticDescriptor RowLookup = new("EECS027", "A lookup per row that a parameter makes once",
-        "[ForEach] method '{0}' looks up '{1}' with '{2}' for every entity it visits; {3}",
+        "{0} looks up '{1}' with '{2}' for every entity it visits; {3}",
         Category, DiagnosticSeverity.Warning, true,
         "A [ForEach] method's parameters are resolved once per table or per pass: a component is a column the loop walks, " +
         "a singleton a ref taken before the loop. Looking the same data up through the visited Entity or the World " +
@@ -50,7 +50,8 @@ public sealed partial class EasyEcsAnalyzer
         Category, DiagnosticSeverity.Warning, true,
         "A [ForEach] method runs for every entity it visits and OnUpdate once per update, so garbage there is garbage " +
         "every tick, and the collections it causes pause the world. Objects, arrays, capturing lambdas, LINQ, strings " +
-        "built at run time, boxing and enumerators of interfaces allocate; code inside a throw, and calls the compiler " +
+        "built at run time, boxing, enumerators of interfaces and the cold calls of tools (TrimExcess, Capture(), " +
+        "Describe, DescribeSchedule, new Prefab) allocate; code inside a throw, and calls the compiler " +
         "removes ([Conditional]), are left out.",
         helpLinkUri: Help("EECS028"));
 
@@ -101,6 +102,13 @@ public sealed partial class EasyEcsAnalyzer
         "inside its own run (until the stack overflows), and a group's update runs other systems in the middle of a " +
         "stage, under its change tick. Run groups from the code that hosts the world, in the order they belong.",
         helpLinkUri: Help("EECS034"));
+
+    public static readonly DiagnosticDescriptor UntrackedMut = new("EECS039", "A Mut<T> of a component that is not tracked",
+        "Parameter '{0}' of [ForEach] method '{1}' is a Mut<{2}>, but {2} is not tracked (ITrackChanges): nothing is stamped either way; take it by 'ref'",
+        Category, DiagnosticSeverity.Info, true,
+        "Mut<T> stamps the rows a method writes, one by one, so [Changed<T>] systems visit only those. A component that " +
+        "is not tracked has no stamps: a Mut of it is a 'ref' parameter behind a wrapper, Value and Write() where the " +
+        "ref would do.", helpLinkUri: Help("EECS039"));
 
     /// <summary>Property keys of the diagnostics' code fixes: what the analyzer decided, the fix only applies it.</summary>
     public const string FixKind = "Fix", FixTitle = "Title", Replace = "Replace", Insert = "Insert", RemoveOthers = "Remove", WithType = "With";
@@ -190,6 +198,13 @@ public sealed partial class EasyEcsAnalyzer
                 && method.PartialDefinitionPart == null && method.PartialImplementationPart == null)
                 context.ReportDiagnostic(Diagnostic.Create(InstanceForEach, method.Locations.FirstOrDefault(), method.Name));
         }
+        else if (JobInterface(method) != null)
+        {
+            // A hand-written job: its signature is the interface's (EECS037 says what its Writes should be), what it
+            // looks up and allocates per row costs as in a [ForEach] method.
+            AnalyzeLookups(context, core, method, body);
+            AnalyzeAllocations(context, method, body, "for every entity its loop visits");
+        }
         else if (method is { Name: "OnUpdate", IsOverride: true, Parameters.Length: 0 } && core.IsSystem(method.ContainingType)
                  && !HasCadence(method.ContainingType, core))
             AnalyzeAllocations(context, method, body, "every update");
@@ -223,8 +238,18 @@ public sealed partial class EasyEcsAnalyzer
             if (kind is Symbols.ParamKind.Invalid or Symbols.ParamKind.Context) continue;
             var location = p.Locations.FirstOrDefault();
             var component = Symbols.QueriedComponent(p);
+            uses.TryGetValue(p, out var used);
+            bool span = kind == Symbols.ParamKind.ComponentSpan && p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>";
+            bool byRef = kind is Symbols.ParamKind.Component or Symbols.ParamKind.Singleton && p.RefKind == RefKind.Ref;
 
-            if (!uses.TryGetValue(p, out var references))
+            // EECS015 for a ref or Span parameter of an indexed component (AnalyzeMethod leaves it to the body): the fix
+            // is the read-only form when the method only reads it.
+            if ((span || byRef && kind == Symbols.ParamKind.Component) && component != null && Symbols.IsIndexed(component) && EasyEcsAnalyzer.HasBody(method))
+                context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, location,
+                    used == null || !used.Any(Uses.MayWrite) ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, span ? "ReadOnlySpan" : "In") : null,
+                    component.Name, $"parameter '{p.Name}' can write it (take it as 'in' or ReadOnlySpan)"));
+
+            if (used is not { } references)
             {
                 if (empty) continue; // a method being written: nothing to say yet
                 if (component != null)
@@ -265,8 +290,12 @@ public sealed partial class EasyEcsAnalyzer
                 continue;
             }
 
-            bool span = kind == Symbols.ParamKind.ComponentSpan && p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>";
-            bool byRef = kind is Symbols.ParamKind.Component or Symbols.ParamKind.Singleton && p.RefKind == RefKind.Ref;
+            if (kind == Symbols.ParamKind.Mutable)
+            {
+                MutParameter(context, method, p, component, references);
+                continue;
+            }
+
             if (!span && !byRef) continue;
             var type = component ?? p.Type;
             if (Symbols.IsIndexed(type)) continue; // EECS015 says it
@@ -281,6 +310,42 @@ public sealed partial class EasyEcsAnalyzer
                 $"Parameter '{p.Name}' of [ForEach] method '{method.Name}' ({(span ? "Span<" + type.Name + ">" : "ref")})", cost,
                 span ? "take it as a ReadOnlySpan<" + type.Name + ">" : "take it by 'in'"));
         }
+    }
+
+    /// <summary>
+    /// EECS025 for a <c>Mut&lt;T&gt;</c> parameter the method never writes (no Write, no SetIfChanged, not passed on: only
+    /// <c>.Value</c> read), EECS039 for one of a component that is not tracked, used through <c>.Value</c> and
+    /// <c>.Write()</c> only.
+    /// </summary>
+    private static void MutParameter(OperationBlockAnalysisContext context, IMethodSymbol method, IParameterSymbol p, ITypeSymbol? component,
+        List<IOperation> references)
+    {
+        if (component is null or ITypeParameterSymbol || Symbols.IsIndexed(component)) return; // EECS015 says it
+        bool reads = true, plain = true;
+        foreach (var reference in references)
+        {
+            switch (reference.Parent)
+            {
+                case IPropertyReferenceOperation { Property.Name: "Value" } value when value.Instance == reference:
+                    if (Uses.MayWrite(value)) reads = plain = false;  // a collection the value holds is changed
+                    break;
+                case IInvocationOperation { TargetMethod.Name: "Write", Arguments.Length: 0 } write when write.Instance == reference:
+                    reads = false;
+                    break;
+                default:
+                    reads = plain = false;
+                    break;
+            }
+        }
+
+        var location = p.Locations.FirstOrDefault();
+        if (reads)
+            context.ReportDiagnostic(Diagnostic.Create(ReadOnlyWriteAccess, location, ImmutableDictionary<string, string?>.Empty.Add(FixKind, "MutIn"),
+                $"Parameter '{p.Name}' of [ForEach] method '{method.Name}' (Mut<{component.Name}>)",
+                "the system is scheduled as the component's writer, so no parallel stage runs it beside a reader", "take it by 'in'"));
+        else if (plain && !Symbols.Implements(component, Symbols.TrackChanges))
+            context.ReportDiagnostic(Diagnostic.Create(UntrackedMut, location, ImmutableDictionary<string, string?>.Empty.Add(FixKind, "MutRef"),
+                p.Name, method.Name, component.Name));
     }
 
     /// <summary>The type arguments of a method's filter attributes of one kind (<c>EasyEcs.WithAttribute&lt;T&gt;</c>, ...).</summary>
@@ -336,10 +401,13 @@ public sealed partial class EasyEcsAnalyzer
             // looked up only on some rows: a branch, a loop, after an early return.
             if (changed.Contains(type) || Symbols.IsIndexed(type) || !EveryRow(operation, body)) continue;
             string name = type.ToMinimalDisplayString(operation.SemanticModel!, operation.Syntax.SpanStart);
-            string advice = singleton ? $"take it as a parameter ('in {name}' or 'ref {name}'), resolved once per pass"
+            bool job = !Symbols.IsForEach(method);
+            string advice = job ? (singleton ? $"keep it in a field of the job, set before the loop" : $"add {name} to the job's components")
+                : singleton ? $"take it as a parameter ('in {name}' or 'ref {name}'), resolved once per pass"
                 : presence ? $"take a Maybe<{name}> parameter, or split the method with [With<{name}>] / [Without<{name}>]"
                 : $"take it as a parameter ('in {name}' or 'ref {name}'), or a Maybe<{name}> when some entities lack it";
-            context.ReportDiagnostic(Diagnostic.Create(RowLookup, operation.Syntax.GetLocation(), method.Name, name,
+            context.ReportDiagnostic(Diagnostic.Create(RowLookup, operation.Syntax.GetLocation(),
+                job ? $"Job '{method.ContainingType.Name}'" : $"[ForEach] method '{method.Name}'", name,
                 Shorten(operation.Syntax), advice));
         }
     }
@@ -523,6 +591,9 @@ public sealed partial class EasyEcsAnalyzer
             case IBinaryOperation { OperatorKind: BinaryOperatorKind.Add, Type.SpecialType: SpecialType.System_String } concat
                 when concat.ConstantValue is not { HasValue: true }:
                 return "a string built at run time";
+            case IInvocationOperation { TargetMethod: { ContainingType: { } owner } method } when owner.ToDisplayString() is Symbols.World or Symbols.Entity
+                                                                                                && Cold(method) is { } cold:
+                return cold;
             case IInvocationOperation call when StringCall(call.TargetMethod):
                 return "a string built at run time";
             case IInvocationOperation call when call.TargetMethod.ContainingType?.ToDisplayString() is "System.Linq.Enumerable"
@@ -541,6 +612,18 @@ public sealed partial class EasyEcsAnalyzer
                 return null;
         }
     }
+
+    /// <summary>
+    /// The cold calls of World and Entity that allocate (they belong to tools and quiet moments): what each allocates, or null.
+    /// </summary>
+    private static string? Cold(IMethodSymbol method) => method.Name switch
+    {
+        "TrimExcess" => "the arrays of the tables it shrinks (and the next update grows them again)",
+        "Capture" when method.Parameters.Length == 0 => "a new WorldSnapshot (Capture(into) reuses one)",
+        "Describe" => "a description of every " + (method.ContainingType.Name == "Entity" ? "component" : "table") + " (objects and strings)",
+        "DescribeSchedule" => "a description of the schedule (objects and strings)",
+        _ => null,
+    };
 
     /// <summary>string.Format / Concat / Join, a string's methods that return a new string, and ToString().</summary>
     private static bool StringCall(IMethodSymbol method)

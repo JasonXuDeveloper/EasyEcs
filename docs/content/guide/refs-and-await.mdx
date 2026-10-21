@@ -27,10 +27,12 @@ re-acquire the data through the `Entity` handle, which tells you whether the ent
 
 ### Copies and refs [#copies-and-refs]
 
-```csharp
-var copy = entity.Health;              // a copy: the change below is lost
+```csharp doccheck=expect-EECS038
+var copy = entity.Health;              // a copy: the change below is lost (EECS038)
 copy.Value -= 10;
+```
 
+```csharp
 ref var hp = ref entity.Health;        // a ref into the table
 hp.Value -= 10;
 entity.Health.Value -= 10;             // the same, inline

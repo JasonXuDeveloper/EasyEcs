@@ -209,7 +209,9 @@ public class IntrospectionTests
         world.CreateEntity(new Health(1));
         Assert.Throws<InvalidOperationException>(() =>
         {
+#pragma warning disable EECS041 // the refusal is what this test covers
             foreach (var item in world.Query<Health>()) world.TrimExcess();
+#pragma warning restore EECS041
         });
         world.TrimExcess(); // the pass ended
         Assert.That(world.Count<Health>(), Is.EqualTo(1));

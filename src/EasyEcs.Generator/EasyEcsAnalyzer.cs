@@ -166,13 +166,14 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "that tick: the rows of the slices not visited would lose their changes. Drop Slices, or read the changes " +
         "every run and spread the work they cause.", helpLinkUri: Help("EECS035"));
 
-    public static readonly DiagnosticDescriptor BadUniqueKey = new("EECS036", "A unique component that cannot be indexed by its key",
-        "'{0}' is IUniqueIndexed<{1}>, {2}",
+    public static readonly DiagnosticDescriptor BadUniqueKey = new("EECS036", "A component that cannot be indexed by its key",
+        "'{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
-        "A world indexes a unique component by its unique key from its first table holding the component, and checks " +
-        "every write against that index. A second key (another IIndexed<TKey> or IUniqueIndexed<TKey>) can then never " +
-        "be indexed: World.Index throws for it. An EntityId key cannot be unique: loads and moves rewrite such keys after " +
-        "they copy the rows, too late to check them first; index the relation with IIndexed<EntityId>.", helpLinkUri: Help("EECS036"));
+        "A world indexes a component once, by one key: World.Index throws for a second key (another IIndexed<TKey> or " +
+        "IUniqueIndexed<TKey>), so that key can never be indexed. A unique component is indexed by its unique key from " +
+        "its first table, and every write is checked against that index. An EntityId key cannot be unique: loads and " +
+        "moves rewrite such keys after they copy the rows, too late to check them first; index the relation with " +
+        "IIndexed<EntityId>.", helpLinkUri: Help("EECS036"));
 
     // EECS002's property for its code fix (EasyEcs.CodeFixes): a component or singleton taken by value.
     public const string ByValue = "ByValue";
@@ -185,7 +186,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
         RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision, Unnameable, FilterOutsideGroup, LocalForEach,
         ReadOnlyWriteAccess, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
-        GeneratedMember, UpdateInSystem, BadSlices, BadUniqueKey);
+        GeneratedMember, UpdateInSystem, BadSlices, BadUniqueKey, JobWrites, DroppedCopy, UntrackedMut, NotComparable, RefusedInPass,
+        IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -196,6 +198,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterSymbolAction(AnalyzeMethod, SymbolKind.Method);
         context.RegisterSyntaxNodeAction(AnalyzeParallel, SyntaxKind.MethodDeclaration);
         context.RegisterSyntaxNodeAction(AnalyzeLocalFunction, SyntaxKind.LocalFunctionStatement);
+        context.RegisterSyntaxNodeAction(AnalyzeBufferOfEntities, SyntaxKind.GenericName);
         context.RegisterSymbolAction(AnalyzeBufferHolder, SymbolKind.Field, SymbolKind.Property, SymbolKind.Method);
         context.RegisterOperationAction(AnalyzeBufferCopy, OperationKind.VariableDeclarator, OperationKind.SimpleAssignment,
             OperationKind.Argument);
@@ -208,6 +211,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterOperationAction(AnalyzeSystemLookup, OperationKind.Invocation);
         context.RegisterCompilationStartAction(AnalyzeOrderings);
         InitializePerformance(context);
+        InitializeUsage(context);
     }
 
     /// <summary>
@@ -303,7 +307,12 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             ?? (getter?.Body?.Statements is { Count: 1 } statements && statements[0] is ReturnStatementSyntax { Expression: { } returned }
                 ? returned : null);
         if (body != null && context.SemanticModel.GetConstantValue(body, context.CancellationToken).HasValue) return;
+        // { get; } = 5: the constant is there, as an initializer; '=> 5' returns it.
+        bool initialized = declaration is { Initializer.Value: { } initial, AccessorList.Accessors: { Count: 1 } accessors }
+                           && accessors[0] is { Body: null, ExpressionBody: null } && accessors[0].IsKind(SyntaxKind.GetAccessorDeclaration)
+                           && context.SemanticModel.GetConstantValue(initial, context.CancellationToken).HasValue;
         context.ReportDiagnostic(Diagnostic.Create(ScheduleNotConstant, declaration.Identifier.GetLocation(),
+            initialized ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "ExpressionBody") : null,
             property.ContainingType.Name, property.Name, "it is read every update"));
     }
 
@@ -318,15 +327,32 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         {
             case IInvocationOperation { TargetMethod: { ReturnsByRef: true, TypeArguments.Length: 1 } method } call
                 when method.ContainingType?.ToDisplayString() == Symbols.Entity && Symbols.IsIndexed(method.TypeArguments[0]):
-                context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, call.Syntax.GetLocation(), method.TypeArguments[0].Name,
+                // Get<T>() that only reads (or binds a 'ref readonly' local): Read<T>() is the same read.
+                bool reads = method.Name == "Get" && (!Uses.MayWrite(call)
+                    || call.Parent is IVariableInitializerOperation { Parent: IVariableDeclaratorOperation { Symbol.RefKind: RefKind.RefReadOnly } });
+                var fix = reads && call.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name: GenericNameSyntax name } }
+                    ? Fix(call.Syntax.ReplaceToken(name.Identifier, SyntaxFactory.Identifier("Read")).ToString(), "Read it with Read<T>()") : null;
+                context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, call.Syntax.GetLocation(), fix, method.TypeArguments[0].Name,
                     $"Entity.{method.Name} hands out a ref (read it with Read)"));
                 break;
-            case IVariableDeclaratorOperation { Symbol.RefKind: RefKind.Ref, Initializer.Value: var value }
+            case IVariableDeclaratorOperation { Symbol: { RefKind: RefKind.Ref } local, Initializer.Value: var value } declarator
                 when Symbols.IndexedRoot(value) is { } root:
-                context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, context.Operation.Syntax.GetLocation(), root.Name,
+                context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, context.Operation.Syntax.GetLocation(),
+                    LocalOnlyRead(local, declarator) ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "RefReadOnly") : null, root.Name,
                     "a ref local can write it (use 'ref readonly')"));
                 break;
         }
+    }
+
+    /// <summary>Whether every use of ref local <paramref name="local"/> only reads it: 'ref readonly' then binds it the same way.</summary>
+    private static bool LocalOnlyRead(ILocalSymbol local, IOperation declaration)
+    {
+        IOperation root = declaration;
+        while (root.Parent != null) root = root.Parent;
+        foreach (var operation in root.Descendants())
+            if (operation is ILocalReferenceOperation reference && SymbolEqualityComparer.Default.Equals(reference.Local, local) && Uses.MayWrite(reference))
+                return false;
+        return true;
     }
 
     /// <summary>
@@ -341,17 +367,46 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (!Symbols.IsStructural(call.TargetMethod)) return;
         string name = call.TargetMethod.ContainingType.Name + "." + call.TargetMethod.Name;
 
+        bool inFunction = false;
         for (var node = call.Parent; node != null; node = node.Parent)
         {
+            if (node is ILocalFunctionOperation) inFunction = true;
             if (node is not IAnonymousFunctionOperation function) continue;
+            inFunction = true;
             var start = node.Parent is IDelegateCreationOperation creation ? creation.Parent : node.Parent;
-            if (start is not IArgumentOperation { Parent: { } handoff } || Starter(handoff) is not { } starter
-                || !Symbols.StartsThread(starter)) continue;
-            if (!Threads.Concurrent(call, function, handoff, starter, context.CancellationToken)) return;
-            context.ReportDiagnostic(Diagnostic.Create(OffThreadStructuralChange, call.Syntax.GetLocation(), name,
-                starter.ContainingType.Name + (starter.MethodKind == MethodKind.Constructor ? "" : "." + starter.Name)));
+            IOperation handoff;
+            IMethodSymbol starter;
+            string by;
+            if (start is IEventAssignmentOperation { Adds: true, EventReference: IEventReferenceOperation { Event: { Name: "Elapsed", AddMethod: { } add } timer } } subscription
+                && timer.ContainingType.ToDisplayString() == "System.Timers.Timer")
+                (handoff, starter, by) = (subscription, add, "Timer.Elapsed"); // raised on the thread pool
+            else if (start is IArgumentOperation { Parent: { } argumentOf } && Starter(argumentOf) is { } started && Symbols.StartsThread(started))
+                (handoff, starter, by) = (argumentOf, started, Started(started));
+            else continue;
+            if (!Threads.Concurrent(call, function.Syntax, handoff, starter, context.CancellationToken)) return;
+            context.ReportDiagnostic(Diagnostic.Create(OffThreadStructuralChange, call.Syntax.GetLocation(), name, by));
             return;
         }
+
+        // A method handed off as a method group (Task.Run(Work), ThreadPool.QueueUserWorkItem(Work)) in its own type, in
+        // this file: one level, the method's own calls.
+        if (!inFunction && context.ContainingSymbol is IMethodSymbol { MethodKind: MethodKind.Ordinary } worker
+            && worker.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is MethodDeclarationSyntax declaration
+            && declaration.SyntaxTree == call.Syntax.SyntaxTree && declaration.Parent is TypeDeclarationSyntax owner)
+            foreach (var group in owner.DescendantNodes().OfType<ArgumentSyntax>())
+            {
+                var expression = group.Expression;
+                if ((expression is IdentifierNameSyntax id ? id.Identifier : expression is MemberAccessExpressionSyntax access ? access.Name.Identifier : default).ValueText != worker.Name
+                    || call.SemanticModel!.GetOperation(group, context.CancellationToken) is not IArgumentOperation
+                    {
+                        Value: IDelegateCreationOperation { Target: IMethodReferenceOperation reference }, Parent: { } handoff,
+                    }
+                    || !SymbolEqualityComparer.Default.Equals(reference.Method.OriginalDefinition, worker.OriginalDefinition)
+                    || Starter(handoff) is not { } starter || !Symbols.StartsThread(starter)
+                    || !Threads.Concurrent(call, declaration, handoff, starter, context.CancellationToken)) continue;
+                context.ReportDiagnostic(Diagnostic.Create(OffThreadStructuralChange, call.Syntax.GetLocation(), name, Started(starter)));
+                return;
+            }
 
         if (context.ContainingSymbol is not IMethodSymbol method || !Symbols.IsForEach(method) || OwnWorld(call)) return;
         if (Symbols.IsBatch(method))
@@ -470,21 +525,32 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (Symbols.IsSystem(type)) AnalyzeSystemFields(context, type);
     }
 
-    /// <summary>EECS036: a unique component with an EntityId key, or with a second index key.</summary>
+    /// <summary>EECS036: a unique component with an EntityId key, or a component with a second index key.</summary>
     private static void AnalyzeUniqueKey(SymbolAnalysisContext context, INamedTypeSymbol type, Location? location)
     {
+        string Name(ITypeSymbol t) => t.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
         var unique = type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == Symbols.UniqueIndexed);
-        if (unique == null) return;
+        if (unique == null)
+        {
+            // A plain component with two keys: the first World.Index of it decides, the other throws.
+            var keys = type.AllInterfaces.Where(i => i.OriginalDefinition.ToDisplayString() == Symbols.Indexed)
+                .Select(i => i.TypeArguments[0]).Distinct<ITypeSymbol>(SymbolEqualityComparer.Default).ToArray();
+            if (keys.Length > 1)
+                context.ReportDiagnostic(Diagnostic.Create(BadUniqueKey, location, type.Name,
+                    $"is indexed by {string.Join(" and ", keys.Select(k => $"IIndexed<{Name(k)}>"))}, but a component has one index: World.Index throws for every key but the first it is asked for"));
+            return;
+        }
+
         var key = unique.TypeArguments[0];
-        string keyName = key.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+        string keyName = Name(key);
         if (key.ToDisplayString() == Symbols.EntityId)
-            context.ReportDiagnostic(Diagnostic.Create(BadUniqueKey, location, type.Name, keyName,
-                "but an EntityId key cannot be unique: index the relation with IIndexed<EntityId>"));
+            context.ReportDiagnostic(Diagnostic.Create(BadUniqueKey, location, type.Name,
+                $"is IUniqueIndexed<{keyName}>, but an EntityId key cannot be unique: index the relation with IIndexed<EntityId>"));
         foreach (var other in type.AllInterfaces)
             if (other.OriginalDefinition.ToDisplayString() is Symbols.Indexed or Symbols.UniqueIndexed
                 && !SymbolEqualityComparer.Default.Equals(other.TypeArguments[0], key))
-                context.ReportDiagnostic(Diagnostic.Create(BadUniqueKey, location, type.Name, keyName,
-                    $"so its key {other.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} can never be indexed: one index per component"));
+                context.ReportDiagnostic(Diagnostic.Create(BadUniqueKey, location, type.Name,
+                    $"is IUniqueIndexed<{keyName}>, so its key {Name(other.TypeArguments[0])} can never be indexed: one index per component"));
     }
 
     /// <summary>EECS017: an instance field (or a record's positional property) of a component or singleton holding an Entity.</summary>
@@ -495,8 +561,23 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             if (field.IsStatic || !HoldsEntity(field.Type, 0)) continue;
             var member = (ISymbol?)field.AssociatedSymbol ?? field;
             var location = member.Locations.FirstOrDefault(l => l.IsInSource) ?? data.Locations.FirstOrDefault();
-            context.ReportDiagnostic(Diagnostic.Create(EntityInData, location, data.Name, member.Name));
+            // A plain Entity field, declared alone: its code fix makes it an EntityId (when every use still compiles).
+            bool plain = field.AssociatedSymbol == null && field.Type.ToDisplayString() == Symbols.Entity
+                         && field.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Variables.Count: 1 } };
+            context.ReportDiagnostic(Diagnostic.Create(EntityInData, location,
+                plain ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "EntityId") : null, data.Name, member.Name));
         }
+    }
+
+    /// <summary>EECS017: a <c>DynamicBuffer&lt;T&gt;</c> named in source whose element holds an Entity (a buffer is a component).</summary>
+    private static void AnalyzeBufferOfEntities(SyntaxNodeAnalysisContext context)
+    {
+        var name = (GenericNameSyntax)context.Node;
+        if (name.Identifier.ValueText != "DynamicBuffer" || name.TypeArgumentList.Arguments.Count != 1
+            || context.SemanticModel.GetSymbolInfo(name, context.CancellationToken).Symbol is not INamedTypeSymbol type
+            || Symbols.BufferElement(type) is not { } element || !HoldsEntity(element, 0)) return;
+        context.ReportDiagnostic(Diagnostic.Create(EntityInData, name.GetLocation(),
+            type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), "its elements"));
     }
 
     /// <summary>Whether <paramref name="type"/> is an Entity or holds one (an array, a type argument, a struct's field).</summary>
@@ -508,7 +589,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (type is not INamedTypeSymbol named) return false;
         foreach (var argument in named.TypeArguments)
             if (HoldsEntity(argument, depth + 1)) return true;
-        if (named.TypeKind != TypeKind.Struct || named.SpecialType != SpecialType.None || named.Locations.All(l => !l.IsInSource)) return false;
+        // Structs of referenced assemblies too: their visible fields are what a row holds (private ones the compiler
+        // does not import are left out).
+        if (named.TypeKind != TypeKind.Struct || named.SpecialType != SpecialType.None) return false;
         foreach (var field in named.GetMembers().OfType<IFieldSymbol>())
             if (!field.IsStatic && HoldsEntity(field.Type, depth + 1)) return true;
         return false;
@@ -547,8 +630,61 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             if (SystemIn(type) is { } named)
                 context.ReportDiagnostic(Diagnostic.Create(SystemReference, location, system.Name, named.Name, member.Name));
             else if (mutable)
-                context.ReportDiagnostic(Diagnostic.Create(StatefulSystem, location, system.Name, member.Name));
+                context.ReportDiagnostic(Diagnostic.Create(StatefulSystem, location,
+                    member is IFieldSymbol plain && AssignedOnlyAtConstruction(plain, context.CancellationToken)
+                        ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Readonly") : null,
+                    system.Name, member.Name));
         }
+    }
+
+    /// <summary>
+    /// EECS007's fix: a private field, declared alone, of a type a readonly field keeps the same (a class, a readonly
+    /// struct, a number or enum: no mutating call on a copy), written only by its initializer and the constructors (the
+    /// static ones for a static field), not in a lambda there. Syntax only: any other write of its name blocks the fix.
+    /// </summary>
+    private static bool AssignedOnlyAtConstruction(IFieldSymbol field, System.Threading.CancellationToken token)
+    {
+        if (field.DeclaredAccessibility != Accessibility.Private || field.IsReadOnly || field.IsVolatile
+            || !(field.Type.IsReferenceType || field.Type.IsReadOnly || field.Type.SpecialType != SpecialType.None || field.Type.TypeKind == TypeKind.Enum)
+            || field.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(token) is not VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Variables.Count: 1 } })
+            return false;
+        foreach (var part in field.ContainingType.DeclaringSyntaxReferences)
+            foreach (var name in part.GetSyntax(token).DescendantNodes().OfType<IdentifierNameSyntax>())
+            {
+                if (name.Identifier.ValueText != field.Name) continue;
+                SyntaxNode use = name.Parent is MemberAccessExpressionSyntax access && access.Name == name ? access : name;
+                while (use.Parent is ParenthesizedExpressionSyntax) use = use.Parent;
+                bool written = use.Parent switch
+                {
+                    AssignmentExpressionSyntax assignment => assignment.Left == use,
+                    PrefixUnaryExpressionSyntax prefix => prefix.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PreIncrementExpression)
+                                                          || prefix.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.PreDecrementExpression)
+                                                          || prefix.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.AddressOfExpression),
+                    PostfixUnaryExpressionSyntax => true,
+                    ArgumentSyntax argument => argument.RefKindKeyword.ValueText is "ref" or "out",
+                    RefExpressionSyntax => true,
+                    TupleExpressionSyntax or ArgumentSyntax { Parent: TupleExpressionSyntax } => true, // a deconstruction: conservative
+                    _ => false,
+                };
+                if (!written) continue;
+                // A write in a constructor of the field's kind (static or instance), outside any lambda, is allowed.
+                bool construction = false;
+                for (var node = use.Parent; node != null; node = node.Parent)
+                {
+                    if (node is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax) break;
+                    if (node is ConstructorDeclarationSyntax ctor)
+                    {
+                        construction = ctor.Modifiers.Any(m => m.ValueText == "static") == field.IsStatic;
+                        break;
+                    }
+
+                    if (node is MemberDeclarationSyntax) break;
+                }
+
+                if (!construction) return false;
+            }
+
+        return true;
     }
 
     /// <summary>EECS007: a system's member writes a primary constructor parameter, a hidden mutable field.</summary>
@@ -652,7 +788,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                     Symbols.ParamKind.Mutable => true,
                     _ => p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>",
                 };
-                if (writable && component != null && Symbols.IsIndexed(component))
+                // A ref or Span parameter of a method with a body is reported with the body (AnalyzeParameters), which
+                // knows whether the method only reads it (then 'in' / ReadOnlySpan is the fix).
+                if (writable && component != null && Symbols.IsIndexed(component) && (kind == Symbols.ParamKind.Mutable || !HasBody(method)))
                     context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, p.Locations.FirstOrDefault(), component.Name,
                         $"parameter '{p.Name}' can write it (take it as 'in' or ReadOnlySpan)"));
                 if (component != null && removed.Any(r => SymbolEqualityComparer.Default.Equals(r, component)))
@@ -666,6 +804,12 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (valid && Symbols.MixesBatch(method))
             context.ReportDiagnostic(Diagnostic.Create(MixedBatch, location, method.Name));
     }
+
+    /// <summary>A method declared once, with its body: its operation block is analyzed (no partial parts).</summary>
+    internal static bool HasBody(IMethodSymbol method) =>
+        method.PartialDefinitionPart == null && method.PartialImplementationPart == null
+        && method.DeclaringSyntaxReferences.Length == 1
+        && method.DeclaringSyntaxReferences[0].GetSyntax() is MethodDeclarationSyntax { Body: not null } or MethodDeclarationSyntax { ExpressionBody: not null };
 
     /// <summary>A change of a world the method creates itself (<c>using var w = new World()</c>): not the visited one's.</summary>
     private static bool OwnWorld(IInvocationOperation call) =>
@@ -694,6 +838,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (Symbols.ParallelProblem(method, syntax, context.SemanticModel) is { } problem)
             context.ReportDiagnostic(Diagnostic.Create(NotParallel, method.Locations.FirstOrDefault(), method.Name, problem));
     }
+
+    private static string Started(IMethodSymbol starter) =>
+        starter.ContainingType.Name + (starter.MethodKind == MethodKind.Constructor ? "" : "." + starter.Name);
 
     private static IMethodSymbol? Starter(IOperation handoff) => handoff switch
     {

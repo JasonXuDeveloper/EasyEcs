@@ -173,6 +173,7 @@ public class ChangedTests
         }
     }
 
+#pragma warning disable EECS037 // the default Writes (every component) stamps the rows: what these jobs stand for
     /// <summary>A struct job that writes armor through a ref.</summary>
     private struct Polish : IForEach<Armor>
     {
@@ -184,6 +185,7 @@ public class ChangedTests
     {
         public void Execute(EntitySpan entities, System.Span<Armor> armor) { }
     }
+#pragma warning restore EECS037
 
     private static int SeenCount(Entity e) => e.Get<Seen>().Count;
 

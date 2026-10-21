@@ -12,7 +12,7 @@ EasyEcs 里出的问题，大多来自面向对象的写法习惯，或者其他
 
 ### 改的是组件的副本 [#copy]
 
-```csharp
+```csharp doccheck=expect-EECS038
 var hp = hero.Health;             // 行的一份副本
 hp.Value -= 10;                   // 表里还是旧值
 ```
@@ -25,7 +25,7 @@ health.Value -= 10;
 hero.Health.Value -= 10;          // 一样，写在一行里
 ```
 
-没有规则能发现。详见[副本与 ref](/zh/docs/guide/refs-and-await#copies-and-refs)。
+之后没有代码再读这个副本时，由 [EECS038](/zh/docs/guide/analyzer#eecs038) 发现（警告，带代码修复）。详见[副本与 ref](/zh/docs/guide/refs-and-await#copies-and-refs)。
 
 ### 组件里存 `Entity` [#entity-in-component]
 
@@ -119,7 +119,7 @@ caster.EnableCooldown();                // 眩晕结束：还是原来的值
 
 ### record struct 键上写了公开的 `Key => this` [#public-key]
 
-```csharp
+```csharp doccheck=expect-EECS043
 public readonly record struct Market(long Id) : IActor<Market>
 {
     public Market Key => this;          // 公开属性：会进 record 的 ToString()
@@ -136,7 +136,7 @@ public readonly record struct Market(long Id) : IActor<Market>
 }
 ```
 
-没有规则能发现。完整的写法见 [Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)。
+由 [EECS043](/zh/docs/guide/analyzer#eecs043) 发现（带代码修复）。完整的写法见 [Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)。
 
 ## 系统 [#systems]
 
@@ -368,7 +368,7 @@ else
 public struct Npc : IComponent;
 ```
 
-```csharp
+```csharp doccheck=expect-EECS044
 var quarter = QueryFilter.Create().With<Npc>().Slice(0, 4);
 int thinking = world.Count<Position>(quarter);   // ArgumentException：Count 需要所有匹配的行
 ```
@@ -381,7 +381,8 @@ int thinking = world.Count<Position>(quarter);   // ArgumentException：Count �
 int npcs = world.Count<Position>(QueryFilter.Create().With<Npc>());   // 全部；一个分片大约 npcs / 4 个
 ```
 
-打开 `MeasureSystems` 后，`[ForEach(Slices = N)]` 方法的 `system.Stats.LastEntities` 就是它那一份。运行时报错。详见
+打开 `MeasureSystems` 后，`[ForEach(Slices = N)]` 方法的 `system.Stats.LastEntities` 就是它那一份。过滤条件在同一个方法或类型里构造时由
+[EECS044](/zh/docs/guide/analyzer#eecs044) 发现，否则运行时报错。详见
 [分片](/zh/docs/guide/systems#slices)。
 
 ### 给 `[Changed<T>]` 方法分片 [#slice-changed]
@@ -692,7 +693,7 @@ if (world.UpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // 20 Hz �
     world.TrimExcess();
 ```
 
-没有规则能发现。详见[高峰过后还回内存](/zh/docs/guide/diagnostics#trim)。
+在 `OnUpdate` 或 `[ForEach]` 方法里由 [EECS028](/zh/docs/guide/analyzer#eecs028) 发现（警告）；宿主的循环里没有规则能发现。详见[高峰过后还回内存](/zh/docs/guide/diagnostics#trim)。
 
 ## 线程 [#threads]
 
@@ -776,7 +777,7 @@ public class HealAll : EcsSystem
 
 <Cards>
   <Card title="分析器规则" href="/zh/docs/guide/analyzer">
-    从 EECS002 到 EECS036 的每一条规则。
+    从 EECS002 到 EECS045 的每一条规则。
   </Card>
   <Card title="ECS 设计原则" href="/zh/docs/ecs-principles">
     这些错误违反的规则。

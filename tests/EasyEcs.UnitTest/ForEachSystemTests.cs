@@ -562,15 +562,18 @@ public class ForEachSystemTests
         using var world = new World();
         var entity = world.CreateEntity(new Health(1));
         var sliced = QueryFilter.Create().Slice(1, 2);
+#pragma warning disable EECS044 // the calls that throw for a slice are what this test covers
         var job = new DestroyDespitePromise();
         Assert.Throws<System.ArgumentException>(() => entity.Run<Health, DestroyDespitePromise>(ref job, sliced));
         Assert.Throws<System.ArgumentException>(() => world.Count<Health>(sliced));
         Assert.Throws<System.ArgumentException>(() => world.Any<Health>(sliced));
         Assert.Throws<System.ArgumentException>(() => world.Query<Health>(sliced));
+        Assert.Throws<System.ArgumentException>(() => world.Read<Health>(sliced));
         Assert.Throws<System.ArgumentException>(() => world.DestroyAll<Health>(sliced));
         Assert.Throws<System.ArgumentException>(() => world.SetAll(new Health(2), sliced));
         Assert.Throws<System.ArgumentOutOfRangeException>(() => QueryFilter.Create().Slice(2, 2));
         Assert.Throws<System.ArgumentOutOfRangeException>(() => QueryFilter.Create().Slice(0, 0));
+#pragma warning restore EECS044
         Assert.That(world.Count<Health>(QueryFilter.Create().Slice(0, 1)), Is.EqualTo(1)); // one slice: the whole tables
         Assert.That(entity.IsAlive, Is.True);                                                // no refused call ran
     }

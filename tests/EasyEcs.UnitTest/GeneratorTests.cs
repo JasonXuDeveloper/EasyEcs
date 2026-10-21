@@ -31,11 +31,11 @@ public class GeneratorTests
         (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id))
             .Select(d => d.Id).Distinct().OrderBy(x => x).ToArray();
 
-    /// <summary>The diagnostics of the performance rules (EECS025-034), with their properties for the code fixes.</summary>
+    /// <summary>The diagnostics of the performance rules (EECS025-034, EECS039), with their properties for the code fixes.</summary>
     internal static async Task<Diagnostic[]> Costs(params string[] sources) =>
         (await Analyze(sources)).Where(d => IsPerformance(d.Id) || d.Id == "EECS034").OrderBy(d => d.Location.SourceSpan.Start).ToArray();
 
-    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0;
+    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id == "EECS039";
 
     private static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
     {
@@ -216,7 +216,7 @@ public class GeneratorTests
         var user = Compile("""
             using Framework;
             public record struct Tiles(int Count) : IComponent;
-            public readonly partial record struct Map(long Id) : IActor<Map> { public Map Key => this; }
+            public readonly partial record struct Map(long Id) : IActor<Map> { Map IIndexed<Map>.Key => this; }
             [UpdateInGroup<Map>]
             public class Grow : EcsSystem { [ForEach] static void A(ref Tiles t) => t.Count++; }
             public static class Spawn
@@ -419,6 +419,142 @@ public class GeneratorTests
     {
         var errors = await Diagnose(Components, source);
         Assert.That(errors.Where(e => !e.StartsWith("CS")), Is.Empty);
+    }
+
+    // The rules of calls and declarations that compile but do not do what they say (EECS036 for plain components,
+    // EECS037, EECS038, EECS040-EECS045), and the false negatives of EECS014 and EECS017: each case reports exactly one.
+    // EECS037: a hand-written job's Writes.
+    [TestCase("public struct J : IForEach<T> { public void Execute(ref T t) => t.V++; public static int Writes => 0; }", "EECS037")]       // written, left out
+    [TestCase("public struct J : IForEach<T> { public int N; public void Execute(ref T t) => N += t.V; }", "EECS037")]                        // read, stamped by default
+    [TestCase("public struct J : IForEach<T, P> { public int N; public void Execute(ref T t, ref P p) => N += t.V + p.V; public static int Writes => 0b11; }", "EECS037")]
+    [TestCase("public struct J : IForEachEntity<P> { public void Execute(Entity e, ref P p) { p.V = 1; e.Set(new Q()); } public static int Writes => 0; }", "EECS037")] // not carried
+    [TestCase("public struct J : IForEachBatch<T> { public void Execute(EntitySpan e, System.Span<T> t) => t[0].V = 1; public static int Writes => 0; }", "EECS037")]
+    [TestCase("public struct J : IForEach<T> { public void Execute(ref T t) => Helpers.Inc(ref t.V); static int IForEach<T>.Writes => 0; }", "EECS037")]  // explicit
+    // EECS038: a changed copy that is dropped.
+    [TestCase("public static class U { public static void F(Entity e) { var p = e.Get<P>(); p.V = 1; } }", "EECS038")]
+    [TestCase("public static class U { public static void F(Entity e) { var p = e.P; p.V -= 1; } }", "EECS038")]                          // a generated property
+    [TestCase("public static class U { public static void F(Entity e) { var t = e.T; t.V++; } }", "EECS038")]                           // ref readonly (tracked)
+    [TestCase("public static class U { public static void F(World w) { var c = w.Clock; c.Ticks++; } }", "EECS038")]                    // a singleton
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) { var p = item.Component1; p.V++; } } }", "EECS038")]
+    [TestCase("public static class U { public static void F(Entity e) { if (e.TryGet<P>(out var p)) p.V = 1; } }", "EECS038")]          // TryGet's copy
+    [TestCase("public static class U { public static void F(Entity e) { var p = e.P; if (p.V > 0) p.V = 0; } }", "EECS038")]              // read before, not after
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, Maybe<Q> q) { if (!q.HasValue) return; var v = q.Value; v.V = p.V; } }", "EECS038")]
+    // EECS040: SetIfChanged on a type it cannot compare.
+    [TestCase("public struct Named : IComponent, ITrackChanges { public string Name; } public static class U { public static bool F(Entity e) => e.SetIfChanged(new Named()); }", "EECS040")]
+    [TestCase("public struct Named : IComponent, ITrackChanges { public string Name; } public class S : EcsSystem { [ForEach] static void A(Mut<Named> n, in P p) { if (p.V > 0) n.SetIfChanged(default); } }", "EECS040")]
+    // EECS041: a call a pass refuses, during one.
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) w.TrimExcess(); } }", "EECS041")]
+    [TestCase("public static class U { public static void F(World w, WorldSnapshot s) { foreach (var item in w.Query<P>()) if (item.Component1.V < 0) w.Restore(s); } }", "EECS041")]
+    [TestCase("public static class U { public static void F(World w, World other, EntityId[] ids) { foreach (var item in other.Query<P>()) w.MoveEntities(other, ids); } }", "EECS041")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { if (p.V < 0) e.World.Capture(); } }", "EECS041")]
+    [TestCase("public class S : EcsSystem { [ForEach] void A(ref P p) { if (p.V < 0) World.Save(new System.Buffers.ArrayBufferWriter<byte>()); } }", "EECS041")]
+    [TestCase("public static class R { [ForEach] static void A(World w, ref P p) { if (p.V < 0) w.TrimExcess(); } }", "EECS041")]
+    [TestCase("public struct J : IForEachEntity<P> { public void Execute(Entity e, ref P p) { if (p.V < 0) e.World.TrimExcess(); } }", "EECS041")]
+    // EECS042: an indexed component changed while its index is walked.
+    [TestCase("public static class U { public static void F(World w) { foreach (var e in w.Index<Owned, EntityId>().Find(default)) e.Set(new Owned()); } }", "EECS042")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var e in w.OwnedIndex.Find(default)) e.RemoveOwned(); } }", "EECS042")]  // generated
+    [TestCase("public static class U { public static void F(World w, EntityId id) { foreach (var c in w.Children(id)) c.Disable<ChildOf>(); } }", "EECS042")]
+    [TestCase("public struct Rank : IComponent, IIndexed<int> { public int V; public readonly int Key => V; } public static class U { public static void F(World w) { foreach (var e in w.RankIndex.Ascending()) e.Set(new Rank { V = 1 }); } }", "EECS042")]
+    // EECS043: a record struct key that prints itself.
+    [TestCase("public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; }", "EECS043")]
+    [TestCase("public interface IActor<TSelf> : IComponent, IIndexed<TSelf> where TSelf : struct, IActor<TSelf>, System.IEquatable<TSelf>; public readonly record struct Shop(long Id) : IActor<Shop> { public Shop Key => this; }", "EECS043")]
+    [TestCase("public readonly record struct Seat(long Id) : IComponent, IUniqueIndexed<Seat> { public Seat Key => this; }", "EECS043")]
+    // EECS044: a sliced filter where every row is needed, and a constant slice out of range.
+    [TestCase("public static class U { public static int F(World w) => w.Count<P>(QueryFilter.Create().Slice(0, 2)); }", "EECS044")]
+    [TestCase("public static class U { public static bool F(World w) { var f = QueryFilter.Create().Slice(1, 4).With<Q>(); return w.Any<P>(f); } }", "EECS044")]
+    [TestCase("public static class U { static readonly QueryFilter Half = QueryFilter.Create().Slice(0, 2); public static void F(World w) { w.DestroyEntities<P>(Half); } }", "EECS044")]
+    [TestCase("public static class U { public static int F(World w, int n) => w.SetAll(new Q(), QueryFilter.Create().Slice(0, n)); }", "EECS044")]
+    [TestCase("public static class U { public static QueryFilter F() => QueryFilter.Create().Slice(3, 2); }", "EECS044")]
+    [TestCase("public static class U { public static QueryFilter F() => QueryFilter.Create().Slice(0, 0); }", "EECS044")]
+    // EECS045: the world's own tags written by hand.
+    [TestCase("public static class U { public static void F(Entity e) => e.Remove<Destroyed>(); }", "EECS045")]
+    [TestCase("public static class U { public static void F(Entity e) => e.Set(new Disabled<P>()); }", "EECS045")]
+    [TestCase("public static class U { public static Entity F(World w) => w.CreateEntity(new P(), new Destroyed()); }", "EECS045")]
+    [TestCase("public static class U { public static int F(World w) => w.RemoveAll<Disabled<P>>(); }", "EECS045")]
+    [TestCase("public static class U { public static Prefab F() => new Prefab().Set(new Destroyed()); }", "EECS045")]
+    [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<Disabled<Q>>(); }", "EECS045")]
+    // EECS036: a plain component with two keys.
+    [TestCase("public struct Seat : IComponent, IIndexed<int>, IIndexed<string> { readonly int IIndexed<int>.Key => 0; readonly string IIndexed<string>.Key => \"\"; }", "EECS036")]
+    // EECS014: continuations, method groups, timers, and TrimExcess.
+    [TestCase("public static class U { public static void F(World w, System.Threading.Tasks.Task t) { t.ContinueWith(_ => w.CreateEntity()); w.CreateEntity(); } }", "EECS014")]
+    [TestCase("public class U { World _w = new(); void Work() => _w.CreateEntity(); public void F() { System.Threading.Tasks.Task.Run(Work); _w.CreateEntity(); } }", "EECS014")]
+    [TestCase("public class U { World _w = new(); void Work(object s) => _w.CreateEntity(); public void F() { System.Threading.ThreadPool.QueueUserWorkItem(Work); _w.Update(); } }", "EECS014")]
+    [TestCase("public class U { World _w = new(); public void F(System.Timers.Timer t) { t.Elapsed += (_, _) => _w.CreateEntity(); _w.Update(); } }", "EECS014")]
+    [TestCase("public static class U { public static void F(World w) { System.Threading.Tasks.Task.Run(() => w.TrimExcess()); w.TrimExcess(); } }", "EECS014")]
+    // EECS017: a buffer of handles.
+    [TestCase("public static class U { public static void F(Entity e) => e.Set(new DynamicBuffer<Entity>()); }", "EECS017")]
+    [TestCase("public struct Pair { public Entity A; } public static class U { public static void F(Entity e) => e.Get<DynamicBuffer<Pair>>().Add(default); }", "EECS017")]
+    public async Task UsageMisuseIsReported(string source, string id)
+    {
+        var errors = await Diagnose(Components, Extra, source);
+        Assert.That(errors, Does.Contain(id));
+        Assert.That(errors.Where(e => !e.StartsWith("CS")), Is.EqualTo(new[] { id }), "exactly one EasyEcs diagnostic");
+        Assert.That(errors.Where(e => e.StartsWith("CS")), Is.Empty, "the case compiles");
+    }
+
+    // The same rules leave alone: the code that does what it says.
+    [TestCase("public struct J : IForEach<T, P> { public void Execute(ref T t, ref P p) => p.V = t.V; public static int Writes => 0b10; }")]
+    [TestCase("public struct J : IForEach<P> { public int N; public void Execute(ref P p) => N += p.V; }")]                           // untracked: no stamp
+    [TestCase("public struct J : IForEach<T> { public void Execute(ref T t) => t.V++; }")]                                           // the default: all
+    [TestCase("public struct J : IForEach<P> { public void Execute(ref P p) => p.V++; public static int Writes => 0; }")]           // untracked, no move
+    [TestCase("public struct J : IForEach<T> { public void Execute(ref T t) { } public static int Writes => 1; public static int OwnStamps => 1; }")]
+    [TestCase("public struct J : IForEach<T> { public int N; public void Execute(ref T t) => N += Helpers.Look(new P { V = t.V }); public static int Writes => Bits(); static int Bits() => 1; }")] // computed
+    [TestCase("public static class U { public static void F(Entity e) { var p = e.Get<P>(); p.V = 1; e.Set(p); } }")]
+    [TestCase("public static class U { public static int F(Entity e) { var p = e.P; p.V++; return p.V; } }")]
+    [TestCase("public static class U { public static int F(Entity e, int n) { int s = 0; var p = e.P; for (int i = 0; i < n; i++) { s += p.V; p.V++; } return s; } }")]
+    [TestCase("public static class U { public static void F(Entity e) { ref var p = ref e.P; p.V = 1; } }")]
+    [TestCase("public static class U { public static System.Func<int> F(Entity e) { var p = e.P; p.V = 1; return () => p.V; } }")]
+    [TestCase("public static class U { public static int F(Entity e) { var p = e.P; return p.V; } }")]
+    [TestCase("public static class U { public static int F(Entity e) => e.TryGet<P>(out var p) ? p.V : 0; }")]
+    [TestCase("public record struct Named(string Name) : IComponent, ITrackChanges; public static class U { public static bool F(Entity e) => e.SetIfChanged(new Named(\"a\")); }")]
+    [TestCase("public static class U { public static bool F(Entity e) => e.SetIfChanged(new T { V = 1 }); }")]                      // unmanaged: its bytes
+    [TestCase("public static class U { public static void F(World w, World other) { foreach (var item in w.Query<P>()) other.TrimExcess(); } }")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) { } w.TrimExcess(); } }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) { using var w = new World(); w.TrimExcess(); } }")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var e in w.OwnedIndex.Find(default)) e.Destroy(); } }")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var e in w.OwnedIndex.Find(default)) e.Set(new P()); } }")]
+    [TestCase("public static class U { public static void F(World w, System.Collections.Generic.List<Entity> found) { foreach (var e in w.OwnedIndex.Find(default)) found.Add(e); foreach (var e in found) e.RemoveOwned(); } }")]
+    [TestCase("public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { Shop IIndexed<Shop>.Key => this; }")]
+    [TestCase("public readonly struct Shop : IComponent, IIndexed<Shop>, System.IEquatable<Shop> { public readonly long Id; public Shop Key => this; public bool Equals(Shop o) => Id == o.Id; }")] // no record: no printed properties
+    [TestCase("public static class U { public static int F(World w) => w.Count<P>(QueryFilter.Create().Slice(0, 1)); }")]           // one slice: the whole tables
+    [TestCase("public static class U { public static int F(World w) { var f = QueryFilter.Create().Slice(0, 2); f = QueryFilter.Create(); return w.Count<P>(f); } }")]
+    [TestCase("public struct J : IForEach<P> { public void Execute(ref P p) => p.V++; } public static class U { public static void F(World w) { var j = new J(); w.ForEach<P, J>(ref j, QueryFilter.Create().Slice(0, 2)); } }")]
+    [TestCase("public static class U { public static bool F(Entity e) => e.Has<Destroyed>() || e.IsDisabled<P>(); }")]
+    [TestCase("public static class U { public static int F(World w) => w.Count<P>(QueryFilter.Create().With<Destroyed>().Without<Disabled<Q>>()); }")]
+    [TestCase("public class S : EcsSystem { [ForEach, With<Disabled<P>>] static void A(ref Q q) => q.V++; }")]
+    [TestCase("public static class U { public static void F(Entity e) { e.Disable<P>(); e.Enable<P>(); } }")]
+    [TestCase("public class U { World _w = new(); void Work() => _w.CreateEntity(); public async System.Threading.Tasks.Task F() { await System.Threading.Tasks.Task.Run(Work); _w.CreateEntity(); } }")] // awaited
+    [TestCase("public class U { World _w = new(); void Work() => _w.CreateEntity(); public void F() { Work(); _w.CreateEntity(); } }")]         // no hand-off
+    [TestCase("public static class U { static void Work(object s) { using var w = new World(); w.CreateEntity(); } public static void F() => System.Threading.ThreadPool.QueueUserWorkItem(Work); }")] // a world of its own
+    [TestCase("public static class U { public static void F(Entity e) => e.Set(new DynamicBuffer<EntityId>()); }")]
+    public async Task UsageValidCodeIsNotReported(string source)
+    {
+        var errors = await Diagnose(Components, Extra, source);
+        Assert.That(errors, Is.Empty);
+    }
+
+    [Test]
+    public async Task AStructOfAnotherAssemblyHoldingAnEntityIsReported()
+    {
+        var library = CSharpCompilation.Create("Library",
+            [CSharpSyntaxTree.ParseText("namespace Library; public struct Pair { public EasyEcs.Entity A; public int B; } public struct Ids { public EasyEcs.EntityId A; }", Parse)],
+            Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        using var image = new System.IO.MemoryStream();
+        Assert.That(library.Emit(image).Success, Is.True);
+        var reference = MetadataReference.CreateFromImage(image.ToArray());
+        async Task<string[]> Ids(string source)
+        {
+            var user = CSharpCompilation.Create("User", [CSharpSyntaxTree.ParseText("using EasyEcs;\n" + source, Parse)],
+                Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)).Append(reference),
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            Driver().RunGeneratorsAndUpdateCompilation(user, out var output, out _);
+            return (await output.WithAnalyzers([new EasyEcsAnalyzer()]).GetAnalyzerDiagnosticsAsync()).Select(d => d.Id).Distinct().ToArray();
+        }
+
+        Assert.That(await Ids("public struct Holds : IComponent { public Library.Pair P; }"), Does.Contain("EECS017"));
+        Assert.That(await Ids("public static class U { public static void F(Entity e) => e.Set(new DynamicBuffer<Library.Pair>()); }"), Does.Contain("EECS017"));
+        Assert.That(await Ids("public struct Holds : IComponent { public Library.Ids P; }"), Does.Not.Contain("EECS017"));
     }
 
     [Test]
@@ -1135,6 +1271,52 @@ public class GeneratorTests
         var costs = await Costs(Components, Extra, source);
         Assert.That(costs.Select(d => d.Id), Is.Empty, string.Join("\n", costs.Select(d => d.GetMessage())));
     }
+
+    // Mut<T> parameters (EECS025 never written, EECS039 untracked), the cold calls of EECS028, and the lookups and
+    // allocations of a hand-written job's Execute (EECS027, EECS028).
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<T> t, ref P p) => p.V = t.Value.V; }", "EECS025")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<P> p, in Q q) { if (q.V > 0) p.Write().V = q.V; } }", "EECS039")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<P> p, in Q q) { if (q.V > p.Value.V) p.Write() = new P { V = q.V }; } }", "EECS039")]
+    [TestCase("public class S : EcsSystem { protected override void OnUpdate() => World.TrimExcess(); }", "EECS028")]
+    [TestCase("public class S : EcsSystem { protected override void OnUpdate() { if (World.Describe().Length > 9) World.Clock.Ticks++; } }", "EECS028")]
+    [TestCase("public class S : EcsSystem { protected override void OnUpdate() { if (World.DescribeSchedule().Groups.Length > 9) World.Clock.Ticks++; } }", "EECS028")]
+    [TestCase("public class S : EcsSystem { protected override void OnUpdate() { if (World.Capture() == null) World.Clock.Ticks++; } }", "EECS028")]
+    [TestCase("public class S : EcsSystem { protected override void OnUpdate() => World.Instantiate(new Prefab()); }", "EECS028")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V = e.Describe().Length; }", "EECS028")]
+    [TestCase("public struct J : IForEachEntity<P> { public void Execute(Entity e, ref P p) => p.V = e.Read<Q>().V; }", "EECS027", "EECS033")]
+    [TestCase("public struct J : IForEach<P> { public void Execute(ref P p) { var all = new System.Collections.Generic.List<int>(); p.V = all.Count; } }", "EECS028")]
+    public async Task UsageCostsAreReported(string source, params string[] ids)
+    {
+        var costs = await Costs(Components, Extra, source);
+        Assert.That(costs.Select(d => d.Id).Distinct().OrderBy(x => x), Is.EqualTo(ids),
+            string.Join("\n", costs.Select(d => d.GetMessage())));
+        Assert.That((await Diagnose(Components, Extra, source)).Where(e => e.StartsWith("CS")), Is.Empty, "the case compiles");
+    }
+
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<T> t, in P p) { if (p.V > 0) t.Write().V = p.V; } }")]       // written
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<T> t, in P p) => t.SetIfChanged(new T { V = p.V }); }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<P> p, in Q q) => p.SetIfChanged(new P { V = q.V }); }")]       // a comparison: not a plain ref
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<T> t, in P p) { if (p.V > 0) Helpers.Inc(ref t.Write().V); } }")]
+    [TestCase("public class S : EcsSystem { public override int UpdateInterval => 1200; protected override void OnUpdate() => World.TrimExcess(); }")] // its cadence
+    [TestCase("public struct J : IForEach<P> { public void Execute(ref P p) => p.V++; }")]
+    public async Task UsageCheapCodeIsNotReported(string source)
+    {
+        var costs = await Costs(Components, Extra, source);
+        Assert.That(costs.Select(d => d.Id), Is.Empty, string.Join("\n", costs.Select(d => d.GetMessage())));
+    }
+
+    [TestCase("EECS036", DiagnosticSeverity.Error)]
+    [TestCase("EECS037", DiagnosticSeverity.Warning)]
+    [TestCase("EECS038", DiagnosticSeverity.Warning)]
+    [TestCase("EECS039", DiagnosticSeverity.Info)]
+    [TestCase("EECS040", DiagnosticSeverity.Error)]
+    [TestCase("EECS041", DiagnosticSeverity.Error)]
+    [TestCase("EECS042", DiagnosticSeverity.Error)]
+    [TestCase("EECS043", DiagnosticSeverity.Error)]
+    [TestCase("EECS044", DiagnosticSeverity.Error)]
+    [TestCase("EECS045", DiagnosticSeverity.Error)]
+    public void UsageRulesHaveTheirSeverity(string id, DiagnosticSeverity severity) =>
+        Assert.That(new EasyEcsAnalyzer().SupportedDiagnostics.Single(d => d.Id == id).DefaultSeverity, Is.EqualTo(severity));
 
     /// <summary>Framework references of the running test host (enough for the generated code to compile).</summary>
     internal static class Basic

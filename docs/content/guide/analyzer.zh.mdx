@@ -1,15 +1,15 @@
 ---
 title: 分析器规则
-seoTitle: "EasyEcs 分析器规则 EECS002-EECS036：每条 C# 诊断的含义与修法"
-description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS036：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
+seoTitle: "EasyEcs 分析器规则 EECS002-EECS045：每条 C# 诊断的含义与修法"
+description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS045：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
 icon: ShieldCheck
 ---
 
 EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/docs/ecs-principles)的代码编译不过。正确性规则（EECS002 到 EECS024，以及
 EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑、但有代价的写法（EECS017、EECS018、EECS020）。生成器会跳过无效输入，由分析器报出来，
-所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034）找的是能跑、但做了多余工作的代码，级别说明是哪一种
+所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
-（EECS025 到 EECS032）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033）；错误表示代码根本不能这样写（EECS034，在系统里执行 World 更新）。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+（EECS025 到 EECS032）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失的报警告。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -20,7 +20,8 @@ EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑
 
 <Callout type="warn" title="不要">
   用 `#pragma` 压掉 `EECS` 错误：生成器已经跳过了规则所指的方法或类型，它需要的代码根本不存在。警告可以压掉，代价就是它们描述的那些；建议（信息级别）只在 IDE 里显示，
-  在 `.editorconfig` 里写 `dotnet_diagnostic.EECS033.severity = warning` 可以让整个项目把它当警告报出来。
+  在 `.editorconfig` 里写 `dotnet_diagnostic.EECS033.severity = warning` 可以让整个项目把它当警告报出来。用法错误（EECS040 到
+  EECS045）指出的是运行时会拒绝的调用：`#pragma` 只应该出现在测试这种拒绝的测试代码里。
 </Callout>
 
 ## 全部规则 [#rules]
@@ -32,7 +33,7 @@ EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑
 | [EECS004](#eecs004) | 错误 | 系统里的 `[ForEach]` 方法不能是泛型 | |
 | [EECS005](#eecs005) | 错误 | 实例 `[ForEach]` 方法只能放在系统里 | 改成 static |
 | [EECS006](#eecs006) | 错误 | 组件和单例必须是结构体 | 改成结构体 |
-| [EECS007](#eecs007) | 错误 | 系统无状态 | |
+| [EECS007](#eecs007) | 错误 | 系统无状态 | 只在构造时赋值的字段加 `readonly` |
 | [EECS008](#eecs008) | 错误 | 系统不引用其他系统 | |
 | [EECS009](#eecs009) | 错误 | 批量 `[ForEach]` 方法只接收 span、单例和 `EntitySpan` | |
 | [EECS010](#eecs010) | 错误 | `[ForEach(Parallel = true)]` 方法必须能在多个线程上跑 | 改为单线程运行 |
@@ -40,17 +41,17 @@ EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑
 | [EECS012](#eecs012) | 错误 | `DynamicBuffer<T>` 从不被复制 | `in`，或连同调用方一起改 `ref` |
 | [EECS013](#eecs013) | 错误 | 不接收 `Entity` 或 `World` 的 `[ForEach]` 方法不做结构变更 | |
 | [EECS014](#eecs014) | 错误 | 结构变更只在 World 的所有者线程上做 | |
-| [EECS015](#eecs015) | 错误 | 被索引的组件用 `Set` 写 | |
+| [EECS015](#eecs015) | 错误 | 被索引的组件用 `Set` 写 | `Read<T>()`、`ref readonly`、`in`、`ReadOnlySpan<T>` |
 | [EECS016](#eecs016) | 错误 | `[Removed<T>]` 方法不要求 `T` | |
-| [EECS017](#eecs017) | 警告 | 组件存 `EntityId`，不存 `Entity` | |
-| [EECS018](#eecs018) | 警告 | `UpdateInterval` 和 `UpdatePhase` 是常量 | |
+| [EECS017](#eecs017) | 警告 | 组件存 `EntityId`，不存 `Entity` | 字段改成 `EntityId` |
+| [EECS018](#eecs018) | 警告 | `UpdateInterval` 和 `UpdatePhase` 是常量 | `{ get; } = 常量` 改成 `=> 常量` |
 | [EECS019](#eecs019) | 错误 | 系统顺序不能成环 | |
 | [EECS020](#eecs020) | 警告 | 系统只在自己的分组内排序 | |
 | [EECS021](#eecs021) | 错误 | `[ForEach]` 入口不与已有方法冲突 | |
 | [EECS022](#eecs022) | 错误 | 生成的代码能访问 `[ForEach]` 方法用到的类型 | 改成 internal |
 | [EECS023](#eecs023) | 错误 | 过滤条件只放在 `[ForEach]` 方法和系统分组上 | 删掉过滤条件 |
 | [EECS024](#eecs024) | 错误 | `[ForEach]` 不能放在局部函数上 | |
-| [EECS025](#eecs025) | 警告 | 写访问没有只读 | `in`、`ReadOnlySpan<T>`、`Read<T>()` |
+| [EECS025](#eecs025) | 警告 | 写访问没有只读 | `in`、`ReadOnlySpan<T>`、`Read<T>()`，`Mut<T>` 改成 `in T` |
 | [EECS026](#eecs026) | 警告 | `[ForEach]` 方法用到自己的参数 | `[With<T>]`，或删掉参数 |
 | [EECS027](#eecs027) | 警告 | 每行都要查的数据，作为 `[ForEach]` 参数传入 | |
 | [EECS028](#eecs028) | 警告 | 每次更新都执行的代码不分配内存 | |
@@ -59,9 +60,18 @@ EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑
 | [EECS031](#eecs031) | 警告 | 计数循环里的实体一起创建，或先预留容量 | `CreateEntities`、`EnsureCapacity` |
 | [EECS032](#eecs032) | 警告 | 计数和过滤交给 World | `Any`、`Count` |
 | [EECS033](#eecs033) | 信息 | 生成的成员写起来更短 | 生成的成员 |
-| [EECS034](#eecs034) | 错误 | 系统里不执行 World 更新 | |
+| [EECS034](#eecs034) | 错误 | 系统里不执行World 更新 | |
 | [EECS035](#eecs035) | 错误 | `[ForEach(Slices = N)]` 至少为 1，且不能和变更过滤条件一起用 | |
-| [EECS036](#eecs036) | 错误 | 唯一组件按它唯一的键建索引 | |
+| [EECS036](#eecs036) | 错误 | 组件按它唯一的键建索引 | |
+| [EECS037](#eecs037) | 警告 | job 的 `Writes` 写明 `Execute` 写了什么 | `Execute` 需要的 `Writes` |
+| [EECS038](#eecs038) | 警告 | 改过的组件副本不被丢掉 | `ref var` |
+| [EECS039](#eecs039) | 信息 | `Mut<T>` 用于追踪变化的组件 | `ref T` |
+| [EECS040](#eecs040) | 错误 | `SetIfChanged` 能比较它的类型 | |
+| [EECS041](#eecs041) | 错误 | 遍历期间不调用它会拒绝的方法 | |
+| [EECS042](#eecs042) | 错误 | 遍历索引时不修改被索引的组件 | |
+| [EECS043](#eecs043) | 错误 | record struct 键不打印自身 | 显式实现 `Key` |
+| [EECS044](#eecs044) | 错误 | 切片过滤条件只交给遍历 | |
+| [EECS045](#eecs045) | 错误 | `Destroyed` 和 `Disabled<T>` 由 World 来写 | |
 
 ## EECS002 [#eecs002]
 
@@ -183,7 +193,7 @@ public record struct Wallet(int Gold) : IComponent;
 
 ## EECS007 [#eecs007]
 
-**系统必须无状态。** 错误。没有代码修复。
+**系统必须无状态。** 错误。代码修复：只由初始化器和构造函数写入的私有字段加上 `readonly`。
 
 系统有可变字段、可写的自动属性或类字段事件（静态的也算），或者某个成员写了主构造函数参数（一个隐藏字段）。系统里的状态，其他系统、
 查询和存档都看不到；系统被移除或重新添加时会丢失或重复；静态状态还会被所有 World 共享。`readonly` 字段（依赖、可复用的临时缓冲）、
@@ -425,8 +435,9 @@ public class MarkTargets : EcsSystem
 
 **在其他线程上做结构变更。** 错误。没有代码修复。
 
-World 的结构属于它的所有者线程。对于交给 `Task.Run`、`TaskFactory.StartNew`、`new Task`、`Parallel.*`、`ThreadPool.QueueUserWorkItem`
-（及其同类）、`new Thread` 或 `new Timer` 的 lambda 或匿名方法，如果其中的结构调用（EECS013 列出的那些成员）改的 World 或实体可能同时被
+World 的结构属于它的所有者线程。对于交给 `Task.Run`、`Task.ContinueWith`、`TaskFactory.StartNew`、`new Task`、`Parallel.*`、
+`ThreadPool.QueueUserWorkItem`（及其同类）、`new Thread` 或 `new Timer`，或者订阅到 `System.Timers.Timer.Elapsed` 的 lambda 或匿名方法，
+以及以方法组形式交给它们的同一类型里的方法（`Task.Run(Spawn)`），如果其中的结构调用（EECS013 列出的那些成员）改的 World 或实体可能同时被
 另一个线程修改，规则就会报出来：
 
 - `Parallel.*` 同时在多个线程上运行委托，所以从外面捕获的任何 World 或实体都会竞争（`worlds[i]` 这种每项一个 World 的不算）；
@@ -469,11 +480,12 @@ public static class WorldThreads
 }
 ```
 
-和 EECS013 一样，规则只看委托自身的代码，它追踪不到的接收者（某个方法的返回值）不会报。
+和 EECS013 一样，规则只看委托自身的代码（方法组则往下看一层，即那个方法本身），它追踪不到的接收者（某个方法的返回值）不会报。
 
 ## EECS015 [#eecs015]
 
-**通过 ref 写被索引的组件。** 错误。没有代码修复。
+**通过 ref 写被索引的组件。** 错误。代码修复（代码只读时）：`Get<T>()` 改成 `Read<T>()`，`ref` 局部变量改成 `ref readonly`，
+`[ForEach]` 参数改成 `in` / `ReadOnlySpan<T>`。
 
 [值索引](/zh/docs/guide/indexes-and-relations#value-indexes)追踪的是 `Set`、`CreateEntity` 和 `CreateEntities`；通过 `ref` 写入会
 背着它改掉键。对于实现了 `IIndexed<TKey>` 的组件（或者 `IGroup`，它的[分组](/zh/docs/guide/groups)也是一种键），规则会报出：
@@ -542,9 +554,10 @@ public class ReplicateFire : EcsSystem
 
 ## EECS017 [#eecs017]
 
-**组件里存了 `Entity` 句柄。** 警告。没有代码修复。
+**组件里存了 `Entity` 句柄。** 警告。代码修复：在所有用法改完仍能编译时（`.Id`、比较、赋值），把 `Entity` 字段改成 `EntityId`。
 
-`Entity` 持有对它所在 World 的引用，所以带 `Entity` 字段的组件或单例是托管类型：它的列要被垃圾回收器扫描，每次写入都要付写屏障，
+`Entity` 持有对它所在 World 的引用，所以带 `Entity` 字段（或者字段的结构体里含有 `Entity`，不论来自本程序集还是别的程序集）的组件或单例，
+以及元素含有 `Entity` 的 `DynamicBuffer<T>`，都是托管类型：它的列要被垃圾回收器扫描，每次写入都要付写屏障，
 行不能整块复制，[存档](/zh/docs/guide/saves)写不了它，[迁移](/zh/docs/guide/migration-and-unload#entityid-rewriting)也不会改写它。
 
 ```csharp doccheck=expect-EECS017
@@ -569,9 +582,10 @@ public class ChaseSystem : EcsSystem
 
 ## EECS018 [#eecs018]
 
-**系统的调度不是常量。** 警告。没有代码修复。
+**系统的调度不是常量。** 警告。代码修复：自动属性 `{ get; } = 5` 改成 `=> 5`。
 
-`UpdateInterval` 和 `UpdatePhase` 每次更新都会读，值一变，系统就会跳过或重复运行。
+`UpdateInterval` 和 `UpdatePhase` 每次更新都会读，值一变，系统就会跳过或重复运行。带常量初始化器的自动属性也会报：它读的是系统
+创建时赋值的字段，`=> 5` 才直接写明这是常量。
 
 ```csharp doccheck=expect-EECS018
 public class SaveSystem : EcsSystem
@@ -735,13 +749,13 @@ public static class Report
 ## EECS025 [#eecs025]
 
 **只读的写访问。** 警告。代码修复：组件或单例改成 `in`，span 改成 `ReadOnlySpan<T>`，`Get<T>()` 改成 `Read<T>()`，
-`WriteX()` 改成 `.X`。
+`WriteX()` 改成 `.X`，方法从不写入的 `Mut<T>` 改成 `in T`。
 
 `ref` 参数（批量方法里的 `Span<T>`）会把它的类型放进系统的写集合：任何[并行阶段](/zh/docs/guide/threading#parallel-systems)
 都不会让这个系统和读该类型的系统同时运行。如果是[追踪变化的组件](/zh/docs/guide/change-tracking)，方法访问的每一行还会
 被打 tick，`[Changed<T>]` 系统就会去处理没人改过的行。`entity.Get<T>()` 和生成的 `entity.WriteX()` 同样会给行打 tick。
 规则会逐个检查用法：赋值、`++`、`ref` 或 `out` 实参、非 `readonly` 方法、`ref` 局部变量、`this ref` 扩展方法
-（`DynamicBuffer<T>.Add`）都算写入，遇到这些就保留写访问。
+（`DynamicBuffer<T>.Add`）都算写入，遇到这些就保留写访问。只通过 `.Value` 使用的 `Mut<T>` 参数是在读，同样会报。
 
 ```csharp
 public record struct Armor(int Value) : IComponent, ITrackChanges;
@@ -801,6 +815,8 @@ public class CountSurvivors : EcsSystem
 
 **参数一次就能拿到的数据，却每行查一次。** 警告。无代码修复。
 
+规则覆盖 `[ForEach]` 方法和手写 job 的 `Execute`；job 把组件作为它接口的另一个类型实参传入。
+
 `[ForEach]` 方法的参数按表或按遍解析一次：组件是循环顺着走的一列，单例是循环开始前取好的 `ref`。通过被访问的 `Entity`
 （`entity.Velocity`、`entity.Has<T>()`、`entity.TryGet<T>(...)`）或 `World`（`World.Clock`）查同样的数据，每一行都要重新查一遍：
 实体记录、所在的表、对应的列。规则只报告每一行都会执行的查询（不在分支、循环里，也不在提前 `return` 之后），并且排除方法自己
@@ -835,7 +851,8 @@ public class Drift : EcsSystem
 由此触发的回收会让整个进程停顿。规则会指出每一个会分配的表达式：对象或数组、捕获变量的 lambda、实例方法组、LINQ、运行时拼出来的
 字符串（`$"..."`、`+`、`string.Format`、`ToString()`）、装箱，以及对接口做 `foreach`。不报告的情况：`throw` 里的代码、会被编译器
 去掉的调用（`[Conditional]`，例如 `Debug.Assert`）、控制台输出（写入本身比字符串更贵），以及重写了 `UpdateInterval` 的系统的
-`OnUpdate`（执行频率是作者选的）。
+`OnUpdate`（执行频率是作者选的）。规则同样覆盖手写 job 的 `Execute`，以及本来就要分配的冷调用：`TrimExcess`、`Capture()`、
+`Describe` 和 `DescribeSchedule` 属于定时器、命令或测试，不属于每次更新。
 
 ```csharp doccheck=expect-EECS028
 public class Steer : EcsSystem
@@ -1036,12 +1053,12 @@ public class SendFire : EcsSystem
 
 ## EECS036 [#eecs036]
 
-**无法按键建索引的唯一组件。** 错误。没有代码修复。
+**无法按键建索引的组件。** 错误。没有代码修复。
 
-World 从第一张装着 `IUniqueIndexed<TKey>` 组件的表开始，就按它的键建索引，并用这个索引检查每一次写入。规则报出两种行不通的声明：
+World 按键给 `IIndexed<TKey>` 或 `IUniqueIndexed<TKey>` 组件建索引，并用这个索引检查唯一组件的每一次写入。规则报出两种行不通的声明：
 
 - **`EntityId` 键。** 加载和迁移会在拷完行之后才改写 `EntityId` 的值，来不及先检查，所以关系键不能是唯一的。
-- **第二个键。** 一个组件只建一个索引：它身上的另一个 `IIndexed<TKey>` 或 `IUniqueIndexed<TKey>` 永远建不了索引，
+- **第二个键。** 一个组件只建一个索引：它身上的第二个 `IIndexed<TKey>` 或 `IUniqueIndexed<TKey>`，无论唯一与否，永远建不了索引，
   `world.Index` 会为它抛异常。
 
 ```csharp doccheck=expect-EECS036
@@ -1055,6 +1072,230 @@ public record struct Mount(EntityId Rider) : IComponent, IIndexed<EntityId> { pu
 ```
 
 唯一索引检查什么，见[唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)。
+
+## EECS037 [#eecs037]
+
+**job 的 `Writes` 与 `Execute` 实际写入的不一致。** 警告。代码修复：改成 `Execute` 需要的 `Writes`。
+
+手写的 job（`IForEach<...>`、`IForEachEntity<...>`、`IForEachBatch<...>`）用 `static int Writes` 声明它写哪些组件（第 `k` 个组件对应
+第 `k - 1` 位，`-1` 表示全部，也是默认值）。循环会给它列出的[追踪变化的组件](/zh/docs/guide/change-tracking)在访问的每一行上打 tick，
+并在 `Execute` 移动实体时把其余的组件带过去。`Execute` 写了、`Writes` 却漏掉的追踪组件永远不会被打 tick，`[Changed<T>]` 系统就看不到
+这次变化；`Execute` 只读的追踪组件仍会在每一行上被打 tick，`[Changed<T>]` 系统就会去处理没人改过的行。规则用与 EECS025 相同的判定，
+拿常量 `Writes`（或默认值）和它在 `Execute` 里看到的写入做比较；计算出来的 `Writes` 和 `OwnStamps` 里的位不在检查之列。
+
+```csharp
+public record struct Shield(int Value) : IComponent, ITrackChanges;
+```
+
+```csharp doccheck=expect-EECS037
+public struct Recharge : IForEach<Shield>
+{
+    public void Execute(ref Shield shield) => shield = new Shield(shield.Value + 1);
+    public static int Writes => 0;   // 写了 Shield，却从不打 tick
+}
+```
+
+写明 `Execute` 写了什么：
+
+```csharp
+public struct Recharge : IForEach<Shield>
+{
+    public void Execute(ref Shield shield) => shield = new Shield(shield.Value + 1);
+    public static int Writes => 0b1;
+}
+```
+
+`[ForEach]` 方法不需要这些：生成器根据参数写出它的 job。
+
+## EECS038 [#eecs038]
+
+**改过的组件副本被丢掉了。** 警告。代码修复：`ref var`（`Get<T>()`、生成的属性、单例）。
+
+`entity.Get<T>()`、生成的 `entity.X`、单例 `world.X` 和查询项的组件返回的都是 `ref`，`var` 会把它指向的值复制一份；`TryGet` 交出的也是副本。
+在副本上写了字段、之后再也不读，这次修改就到不了任何表：实体还是旧值。规则报出用这些来源初始化、随后被写入（赋值、`++`、复合赋值）的
+局部变量，前提是之后没有代码读取、返回、捕获或传递它。
+
+```csharp
+public struct Mana : IComponent { public int Value; }
+```
+
+```csharp doccheck=expect-EECS038
+var mana = hero.Get<Mana>();   // 行的一份副本
+mana.Value -= 10;              // 丢失
+```
+
+保留 `ref`：
+
+```csharp
+ref var mana = ref hero.Get<Mana>();
+mana.Value -= 10;
+```
+
+## EECS039 [#eecs039]
+
+**不追踪变化的组件用了 `Mut<T>`。** 建议（信息级别）。代码修复：`ref T`。
+
+[`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 只给 `[ForEach]` 方法写过的行打 tick，这只对带 `ITrackChanges` 的组件有意义。
+对其他组件，它和 `ref` 参数是同一种写入，只是写法更长（`.Value`、`.Write()`）。规则报出只通过 `.Value` 和 `.Write()` 使用的、
+未追踪的 `T` 的 `Mut<T>`；调用了 `SetIfChanged` 的保留它的比较。
+
+```csharp doccheck=expect-EECS039
+public class Clamp : EcsSystem
+{
+    [ForEach]
+    static void Apply(Mut<Health> health)
+    {
+        if (health.Value.Value > 100) health.Write() = new Health(100);
+    }
+}
+```
+
+改用 `ref`：
+
+```csharp
+public class Clamp : EcsSystem
+{
+    [ForEach]
+    static void Apply(ref Health health)
+    {
+        if (health.Value > 100) health = new Health(100);
+    }
+}
+```
+
+方法从不写入的 `Mut<T>` 由 [EECS025](#eecs025) 报告，修复是 `in T`。
+
+## EECS040 [#eecs040]
+
+**`SetIfChanged` 用在它无法比较的类型上。** 错误。没有代码修复。
+
+`entity.SetIfChanged(value)` 和 `Mut<T>.SetIfChanged(value)` 会在不装箱的前提下比较新值和已存的值：非托管类型按字节比较，其他类型通过
+`IEquatable<T>` 比较。两者都不是的托管结构体，第一次调用就抛 `NotSupportedException`；生成的 `SetXIfChanged` 只为能比较的类型生成。
+
+```csharp
+public struct Nickname : IComponent, ITrackChanges { public string Text; }
+```
+
+```csharp doccheck=expect-EECS040
+hero.SetIfChanged(new Nickname { Text = "Ada" });   // NotSupportedException：无法比较
+```
+
+改成 `record struct`（record 会实现 `IEquatable<T>`），或者自己实现 `IEquatable<T>`：
+
+```csharp
+public record struct Callsign(string Text) : IComponent, ITrackChanges;   // 通过 IEquatable<Callsign> 比较
+```
+
+```csharp
+hero.SetIfChanged(new Callsign("Ada"));
+```
+
+## EECS041 [#eecs041]
+
+**遍历期间调用了它会拒绝的方法。** 错误。没有代码修复。
+
+查询或 `[ForEach]` 遍历正在走一个 World 的表时，重建或替换这些表的调用会抛 `InvalidOperationException`：`TrimExcess`、`Capture`、
+`Restore`、`Save`、`Load`、`SaveEntities`、`LoadEntities`、`MoveEntities`（被遍历的 World 作为来源或目标）、`GroupBy` 和 `RemoveTypes`。
+规则报出在 `foreach` 遍历其 `Query` 的那个 World 上的这些调用，以及在 `[ForEach]` 方法或 job 的 `Execute` 所在 World 上的这些调用。
+
+```csharp doccheck=expect-EECS041
+foreach (var item in world.Query<Health>())
+{
+    if (item.Component1.Value <= 0) world.TrimExcess();   // 抛异常：有遍历正在走这些表
+}
+```
+
+在遍历里做决定，遍历结束后再执行：
+
+```csharp
+bool trim = false;
+foreach (var item in world.Query<Health>())
+    trim |= item.Component1.Value <= 0;
+if (trim) world.TrimExcess();
+```
+
+## EECS042 [#eecs042]
+
+**遍历索引时修改了被索引的组件。** 错误。没有代码修复。
+
+`index.Find(key)`、索引的有序遍历（`Ascending`、`Descending`、`Range` 等）和 `world.Children(parent)` 遍历的是索引自己的数组。
+在遍历中对某个实体设置、移除或禁用被索引的组件，或者销毁它，都会在遍历进行时改动这些数组：有的实体会被跳过，有的会被访问两次。
+规则报出在 `foreach` 遍历某个组件的索引时，对同一个组件做的这类修改。
+
+```csharp
+public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+```
+
+```csharp doccheck=expect-EECS042
+foreach (var member in world.TeamIndex.Find(1))
+    member.SetTeam(2);   // 把实体移出正在遍历的数组
+```
+
+先收集，再修改：
+
+```csharp
+var moving = new List<Entity>();
+foreach (var member in world.TeamIndex.Find(1)) moving.Add(member);
+foreach (var member in moving) member.SetTeam(2);
+```
+
+## EECS043 [#eecs043]
+
+**打印自身的 record struct 键。** 错误。代码修复：显式实现 `Key`。
+
+以自身为键的组件（`IIndexed<TSelf>` 或 `IUniqueIndexed<TSelf>`，`Key => this`）可以工作，但在 `record struct` 上，公开的 `Key` 是
+`ToString()` 会打印的属性之一。`Key` 返回这个 record，它又打印自己的 `Key`，`Key` 再打印 `Key`：第一行日志或调试器视图就会栈溢出。
+
+```csharp doccheck=expect-EECS043
+public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { public Market Key => this; }
+```
+
+显式实现 `Key`，让它只属于接口（修复也会改写读取 `.Key` 的地方）：
+
+```csharp
+public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { Market IIndexed<Market>.Key => this; }
+```
+
+## EECS044 [#eecs044]
+
+**需要全部行的地方用了切片过滤条件。** 错误。没有代码修复。
+
+[`QueryFilter.Slice(index, count)`](/zh/docs/guide/systems#slices) 把每张表切成 `count` 份，只有遍历（`ForEach`、`ForEachEntity`、
+`ForEachBatch` 及其并行形式）接受其中一份。`Query`、`Count`、`Any`、`DestroyEntities`、`entity.Run` 和批量调用需要每一个匹配的行，
+所以遇到切片过滤条件会抛 `ArgumentException`。规则会顺着局部变量和 `static readonly` 字段追踪过滤条件，还会报出会抛
+`ArgumentOutOfRangeException` 的常量 `Slice` 调用（`count` 小于 1，`index` 不在 `0..count - 1` 内）。`Slice(0, 1)` 就是整张表，不算切片。
+
+```csharp doccheck=expect-EECS044
+var half = QueryFilter.Create().Slice(0, 2);
+int count = world.Count<Health>(half);   // ArgumentException
+```
+
+不带切片地计数：
+
+```csharp
+int count = world.Count<Health>();
+```
+
+## EECS045 [#eecs045]
+
+**手动写入由 World 维护的标签。** 错误。没有代码修复。
+
+`Destroyed` 标记一个因[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)而被保留的实体，`Disabled<T>` 标记一个
+[对查询隐藏](/zh/docs/guide/cleanup-and-disable#disable-a-component)的组件。World 在 `Destroy`、`Disable<T>()` 和 `Enable<T>()` 里
+添加和移除它们，同时处理它们所代表的东西：`Destroyed` 连带销毁钩子和销毁日志，`Disabled<T>` 连带被隐藏的值。直接写入它们
+（对标签本身调用 `Set`、`GetOrAdd`、`Remove`、`SetIfChanged`、`Disable`、`Enable`，以及 `CreateEntity`、`CreateEntities`、`Instantiate`、
+`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`Prefab.Set`），标签说的就是 World 从没做过的事。读取它们（`Has`、`IsDisabled`、
+`With` / `Without` 过滤条件、`[With<Destroyed>]`）才是正确的用法。
+
+```csharp doccheck=expect-EECS045
+hero.Remove<Disabled<Health>>();   // 标签没了，值却仍然隐藏着
+```
+
+调用 World 自己的操作：
+
+```csharp
+hero.Enable<Health>();
+```
 
 ## 相关页面 [#related]
 

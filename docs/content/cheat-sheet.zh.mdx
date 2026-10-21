@@ -365,7 +365,7 @@ var account = world.CreateEntity(new Account(42));
 Entity holder = world.AccountIndex.Get(42);        // 就是它；再来一个 Account(42) 会抛异常
 ```
 
-被索引和分组的组件只能用 `Set` 写，不能经 `ref` 写（[EECS015](/zh/docs/guide/analyzer#eecs015)）。指南：
+被索引和分组的组件只能用 `Set` 写，不能经 `ref` 写（[EECS015](/zh/docs/guide/analyzer#eecs015)），也不能在 `foreach` 遍历它们的索引时写（[EECS042](/zh/docs/guide/analyzer#eecs042)）。指南：
 [索引与关系](/zh/docs/guide/indexes-and-relations)、[层级](/zh/docs/guide/hierarchy)、[分组](/zh/docs/guide/groups)。
 
 ## 预制体与批量操作 [#prefabs-and-bulk]
