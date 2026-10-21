@@ -138,6 +138,27 @@ public class MoveTests
     }
 
     [Test]
+    public void SaveEntitiesWithoutLeavesOutTheComponentsOfItsSet()
+    {
+        var output = new NinoArrayBufferWriter();
+        using (var from = new World())
+        {
+            var chunk = from.CreateEntity(new Health(9), new Armor(2), new Shield(4));
+            var gone = from.CreateEntity(new Shield(1));                            // every component left out
+            from.SaveEntitiesWithout(output, [chunk.Id, gone.Id], ComponentSet.Create().With<Shield>());
+            Assert.Throws<ArgumentException>(() =>
+                from.SaveEntitiesWithout(output, [chunk.Id], ComponentSet.Create().WithSingleton<Clock>()));
+        }
+
+        using var to = new World();
+        var loaded = new Entity[2];
+        Assert.That(to.LoadEntities(output.WrittenSpan, loaded), Is.EqualTo(2));
+        Assert.That((loaded[0].Read<Health>(), loaded[0].Read<Armor>(), loaded[0].Has<Shield>()),
+            Is.EqualTo((new Health(9), new Armor(2), false)));
+        Assert.That((loaded[1].IsAlive, loaded[1].Has<Shield>()), Is.EqualTo((true, false)));    // written without them
+    }
+
+    [Test]
     public void ALoadCanLeaveTheChangeTicksAlone()
     {
         var output = new NinoArrayBufferWriter();

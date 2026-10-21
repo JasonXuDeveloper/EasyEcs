@@ -36,7 +36,7 @@ public sealed partial class World
     public int LoadEntities(ReadOnlySpan<byte> input, Span<Entity> entities = default)
     {
         var source = LoadArrivals(input, nameof(LoadEntities));
-        int created = ArriveAll(source);
+        int created = ArriveAll(source, take: true);
         int order = Math.Min(entities.Length, source._loadOrderCount);
         for (int i = 0; i < order; i++) entities[i] = Arrived(source._loadOrder[i]);
         return created;
@@ -288,9 +288,10 @@ public sealed partial class World
     /// <summary>
     /// Copy every entity of <paramref name="source"/>, a world without tombstones, into this one; returns how many. The
     /// copies are new rows, as <c>CreateEntities</c> makes them: a pass may be iterating this world (a prefab with members
-    /// instantiated by a system).
+    /// instantiated by a system). With <paramref name="take"/> the buffer lists of <paramref name="source"/> move here
+    /// (a load's private world) instead of being copied (a prefab's, which stays as it is).
     /// </summary>
-    internal int ArriveAll(World source)
+    internal int ArriveAll(World source, bool take = false)
     {
         int created = 0;
         using (Structural())
@@ -300,7 +301,7 @@ public sealed partial class World
             foreach (var table in source._allArchetypes)
             {
                 if (table.Count == 0) continue;
-                ArriveRows(table, 0, table.Count);
+                ArriveRows(table, 0, table.Count, take: take);
                 created += table.Count;
             }
 
@@ -355,8 +356,8 @@ public sealed partial class World
     private void Stamp(EntityId id) => _arrivedStamp[id.Index] = _arrival;
 
     // Rows [first, +count) of a source table, as one run of new rows; moving ones (MoveEntities) leave their cleanup
-    // components behind.
-    private void ArriveRows(Archetype table, int first, int count, bool moving = false)
+    // components behind; taken ones (a load's private world) give up their buffer lists (Archetype.CopyRun).
+    private void ArriveRows(Archetype table, int first, int count, bool moving = false, bool take = false)
     {
         var target = TableFor(table);
         target.Reserve(target.Count + count);
@@ -372,7 +373,7 @@ public sealed partial class World
             _arrivedStamp[source] = _arrival;
         }
 
-        target.CopyRun(table, first, to, count, _changeTick);
+        target.CopyRun(table, first, to, count, _changeTick, take);
         if (moving && target.HasCleanup) target.DropCleanup(to, count);
         _arrivedRows.Add((target, to, count));
     }

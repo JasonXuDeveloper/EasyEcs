@@ -76,6 +76,21 @@ public sealed partial class World
         Save(output, entities, false, in components, SaveFilter.Include, nameof(SaveEntitiesWith));
     }
 
+    /// <summary>
+    /// <see cref="SaveEntities(IBufferWriter{byte}, ReadOnlySpan{EntityId})"/> without the components of
+    /// <paramref name="exclude"/>: their slices are not written and they need no Nino formatter (data derived from the
+    /// rest, rebuilt after a load; a runtime handle). A Disabled tag goes with its component; an entity whose components
+    /// are all left out is written without them. Allocates nothing once its buffers are large enough.
+    /// O(entities given × components). Not while a pass iterates.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="exclude"/> holds a singleton type: a save of entities writes no singletons.</exception>
+    public void SaveEntitiesWithout(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet exclude)
+    {
+        if (exclude.HasSingletons)
+            throw new ArgumentException("A save of entities writes no singletons: its set names components only", nameof(exclude));
+        Save(output, entities, false, in exclude, SaveFilter.Exclude, nameof(SaveEntitiesWithout));
+    }
+
     // How a save reads its ComponentSet: not at all, as the types it writes, or as the types it leaves out.
     private enum SaveFilter : byte { None, Include, Exclude }
 

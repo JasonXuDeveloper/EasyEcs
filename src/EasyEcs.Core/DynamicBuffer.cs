@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Runtime.InteropServices;
 using Nino.Core;
 
@@ -17,7 +18,8 @@ namespace EasyEcs;
 /// </summary>
 /// <remarks>
 /// A <c>new DynamicBuffer&lt;T&gt;()</c> holds no list: each entity's list is made by its first write (reserve room
-/// with <see cref="DynamicBufferExtensions.EnsureCapacity{T}"/>), so one value can create many entities. The list
+/// with <see cref="DynamicBufferExtensions.EnsureCapacity{T}"/>), so one value can create many entities; an instance of
+/// a prefab whose buffer is empty holds none either, so its first write takes a list from the pool. The list
 /// lives in an object the component refers to, and a copy of the component would refer to the same list: the analyzer
 /// rejects copies (EECS012), reach the list through the entity.
 /// </remarks>
@@ -27,8 +29,9 @@ public struct DynamicBuffer<T> : IComponent, ITracked, IBuffer
     internal BufferStore<T> Store;
 
     /// <summary>
-    /// The longest list, in elements, that a destroyed or removed buffer of <typeparamref name="T"/> gives back to its
-    /// thread's pool, for the next buffer's first write to reuse instead of allocating one (default: 4,096 bytes of
+    /// The longest list, in elements, that a destroyed or removed buffer of <typeparamref name="T"/> gives back to the
+    /// pool, for the next buffer's first write to reuse instead of allocating one, on any thread: the lists the owner
+    /// thread takes back serve the first writes of a parallel <c>[ForEach]</c> too (default: 4,096 bytes of
     /// elements, 4,096 for a <c>byte</c> or a byte-sized enum). A longer list is left to the GC. Raise it for buffers of
     /// one size that come and go in numbers, such as the blocks of chunks loaded and unloaded around players; 0 pools
     /// none. The pool holds at most as many lists as died while none were taken, so what it keeps is that peak times
@@ -110,6 +113,7 @@ public static class DynamicBufferExtensions
     /// <summary>Append <paramref name="items"/> (a list: <c>CollectionsMarshal.AsSpan(list)</c>, no copy). O(items).</summary>
     public static void AddRange<T>(this ref DynamicBuffer<T> buffer, params ReadOnlySpan<T> items)
     {
+        if (items.IsEmpty) return; // an empty buffer stays without a list: its first element takes one from the pool
         var store = buffer.Store ??= BufferStore<T>.Rent();
         if (store.Count + items.Length > store.Items.Length) store.Grow(store.Count + items.Length);
         items.CopyTo(store.Items.AsSpan(store.Count));
@@ -164,6 +168,26 @@ public static class DynamicBufferExtensions
         if (buffer.Store is { } store && store.Count < store.Items.Length) store.Resize(store.Count);
     }
 
+    /// <summary>
+    /// Set the number of elements to <paramref name="count"/>: elements past it are removed, elements added are
+    /// <c>default</c>, so a system can write a whole buffer in place through <see cref="AsSpan{T}"/> instead of filling a
+    /// span and copying it in (<c>CollectionsMarshal.SetCount</c> of a list, with the new elements cleared).
+    /// O(elements added or removed); allocates only when the list grows.
+    /// </summary>
+    public static void SetCount<T>(this ref DynamicBuffer<T> buffer, int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (buffer.Store is not { } store)
+        {
+            if (count == 0) return; // an empty buffer stays without a list
+            store = buffer.Store = BufferStore<T>.Rent();
+        }
+        if (count > store.Items.Length) store.Resize(count);
+        if (count > store.Count) Array.Clear(store.Items, store.Count, count - store.Count); // a pooled list holds old values
+        else if (RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(store.Items, count, store.Count - count);
+        store.Count = count;
+    }
+
     /// <summary>Make room for at least <paramref name="capacity"/> elements.</summary>
     public static void EnsureCapacity<T>(this ref DynamicBuffer<T> buffer, int capacity)
     {
@@ -200,10 +224,10 @@ internal interface IBuffer
 /// <summary>The list of a <see cref="DynamicBuffer{T}"/>, typed away so a column can be copied without its <c>T</c>.</summary>
 internal abstract class BufferStore
 {
-    /// <summary>A store with copies of the elements.</summary>
+    /// <summary>A store with copies of the elements, taken from the pool; null for an empty one (a buffer with no list).</summary>
     public abstract BufferStore Clone();
 
-    /// <summary>Empty the store and keep it for the next first write on this thread (its buffer died: nothing refers to it).</summary>
+    /// <summary>Empty the store and keep it for the next first write (its buffer died: nothing refers to it).</summary>
     public abstract void Recycle();
 }
 
@@ -212,33 +236,52 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     public T[] Items = capacity == 0 ? [] : new T[capacity];
     public int Count;
 
-    // The emptied stores of this thread, taken by first writes: a world's structural changes (where buffers die) run
-    // on its owner thread, so a world's lists come back to the buffers of that world, and an actor loaded after one
-    // unloaded reuses its list instead of allocating one. Bounded like a table's rows: the pool holds at most as many
-    // stores as died while none were taken (the peak a table's capacity keeps too), each with at most PoolCapacity
-    // elements (a list that grew larger is left to the GC; DynamicBuffer<T>.PoolCapacity sets it).
+    // The emptied stores, taken by first writes: a world's structural changes (where buffers die) run on its owner
+    // thread, so a world's lists come back to the buffers of that world, and an actor loaded after one unloaded reuses
+    // its list instead of allocating one. Each thread keeps up to 2 × Batch stores of its own (no lock); past that it
+    // hands Batch of them to a pool every thread shares, and a thread whose own run out takes Batch back from it, one
+    // lock per Batch stores: the lists the owner thread takes back serve the first writes of a parallel [ForEach] on
+    // the helper threads too. Bounded like a table's rows: the pools hold at most as many stores as died while none
+    // were taken (the peak a table's capacity keeps too), each with at most PoolCapacity elements (a list that grew
+    // larger is left to the GC; DynamicBuffer<T>.PoolCapacity sets it).
     internal static int PoolCapacity = 4096 / Unsafe.SizeOf<T>();
+
+    private const int Batch = 32;
 
     [ThreadStatic] private static BufferStore<T>[] t_free;
     [ThreadStatic] private static int t_freeCount;
 
-    /// <summary>An empty store: one this thread recycled, else a new one.</summary>
+    private static readonly Lock s_gate = new();
+    private static BufferStore<T>[] s_free = [];
+    private static int s_freeCount; // written under s_gate; read without it only to skip an empty pool
+
+    /// <summary>An empty store: a recycled one (this thread's, else the shared pool's), else a new one.</summary>
     public static BufferStore<T> Rent()
     {
+        if (t_freeCount == 0 && !Refill()) return new BufferStore<T>(0);
         var free = t_free;
-        if (free == null || t_freeCount == 0) return new BufferStore<T>(0);
         int last = --t_freeCount;
         var store = free[last];
         free[last] = null;
         return store;
     }
 
+    // This thread's stores ran out: take up to Batch from the shared pool.
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static BufferStore<T>[] Grown(BufferStore<T>[] free)
+    private static bool Refill()
     {
-        var grown = new BufferStore<T>[free == null ? 16 : free.Length * 2];
-        free?.CopyTo(grown, 0);
-        return grown;
+        if (Volatile.Read(ref s_freeCount) == 0) return false;
+        var free = t_free ??= new BufferStore<T>[2 * Batch];
+        lock (s_gate)
+        {
+            int taken = Math.Min(Batch, s_freeCount);
+            int from = s_freeCount - taken;
+            Array.Copy(s_free, from, free, 0, taken);
+            Array.Clear(s_free, from, taken);
+            s_freeCount = from;
+            t_freeCount = taken;
+            return taken != 0;
+        }
     }
 
     public override void Recycle()
@@ -246,9 +289,25 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         if (RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(Items, 0, Count);
         Count = 0;
         if (Items.Length > PoolCapacity) return;
-        var free = t_free;
-        if (free == null || t_freeCount == free.Length) t_free = free = Grown(free);
+        var free = t_free ??= new BufferStore<T>[2 * Batch];
+        if (t_freeCount == free.Length) Spill(free);
         free[t_freeCount++] = this;
+    }
+
+    // This thread holds 2 × Batch stores: hand the oldest Batch to the shared pool.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void Spill(BufferStore<T>[] free)
+    {
+        lock (s_gate)
+        {
+            if (s_freeCount + Batch > s_free.Length) Array.Resize(ref s_free, Math.Max(2 * Batch, s_free.Length * 2));
+            Array.Copy(free, 0, s_free, s_freeCount, Batch);
+            s_freeCount += Batch;
+        }
+
+        Array.Copy(free, Batch, free, 0, Batch);
+        Array.Clear(free, Batch, Batch);
+        t_freeCount = Batch;
     }
 
     /// <summary>Grow to hold at least <paramref name="needed"/> elements (doubling, at least 4).</summary>
@@ -263,7 +322,15 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         Items = grown;
     }
 
-    public override BufferStore Clone() => new BufferStore<T>(0) { Items = Items.AsSpan(0, Count).ToArray(), Count = Count };
+    public override BufferStore Clone()
+    {
+        if (Count == 0) return null;
+        var copy = Rent();
+        if (copy.Items.Length < Count) copy.Resize(Count);
+        Array.Copy(Items, copy.Items, Count);
+        copy.Count = Count;
+        return copy;
+    }
 
     /// <summary>Write the count, then the elements: raw rows when <typeparamref name="T"/> is unmanaged, else Nino values.</summary>
     public static void Write(ref Writer writer, BufferStore<T> store)

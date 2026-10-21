@@ -921,6 +921,20 @@ public void SaveEntitiesWith(IBufferWriter<byte> output, ReadOnlySpan<EntityId> 
 
 **复杂度**（[API 表](/zh/docs/api)）：O(给定实体数 × 组件数)
 
+### `SaveEntitiesWithout` [#saveentitieswithout]
+
+```csharp
+public void SaveEntitiesWithout(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet exclude);
+```
+
+不写 `exclude` 里的组件的 [`World.SaveEntities`](/zh/docs/reference/world#saveentities)：这些组件不写出，也不需要 Nino 格式化器（由其余数据推出、加载后重建的数据；运行时句柄）。Disabled 标签跟着它的组件；组件全被排除的实体也会写出，只是不带它们。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
+
+**异常**
+
+- `ArgumentException`：`exclude` 里有单例类型：实体存档不写单例。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(给定实体数 × 组件数)
+
 ### `SaveWithout` [#savewithout]
 
 ```csharp

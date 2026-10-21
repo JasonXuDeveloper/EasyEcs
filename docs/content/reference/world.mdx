@@ -921,6 +921,20 @@ public void SaveEntitiesWith(IBufferWriter<byte> output, ReadOnlySpan<EntityId> 
 
 **Complexity** ([API table](/en/docs/api)): O(entities given × components)
 
+### `SaveEntitiesWithout` [#saveentitieswithout]
+
+```csharp
+public void SaveEntitiesWithout(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet exclude);
+```
+
+[`World.SaveEntities`](/en/docs/reference/world#saveentities) without the components of `exclude`: their slices are not written and they need no Nino formatter (data derived from the rest, rebuilt after a load; a runtime handle). A Disabled tag goes with its component; an entity whose components are all left out is written without them. Allocates nothing once its buffers are large enough. O(entities given × components). Not while a pass iterates.
+
+**Exceptions**
+
+- `ArgumentException`: `exclude` holds a singleton type: a save of entities writes no singletons.
+
+**Complexity** ([API table](/en/docs/api)): O(entities given × components)
+
 ### `SaveWithout` [#savewithout]
 
 ```csharp

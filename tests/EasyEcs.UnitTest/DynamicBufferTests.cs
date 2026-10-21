@@ -8,6 +8,8 @@ public class DynamicBufferTests
     public record struct Loot(int Item, int Count);
     public enum Tile : byte { Air, Stone }
     public enum Voxel : byte { Air, Stone }   // PoolCapacity is process-wide: only this test sets it
+    public enum Ore : byte { Air, Iron }      // and only the reload test sets this one's
+    public record struct Mail(long Value);    // the pool of this element type serves only the tests below
 
     /// <summary>Counts, per entity, the runs in which its bag had changed since the system's previous run.</summary>
     public class BagWatch : EcsSystem
@@ -305,6 +307,109 @@ public class DynamicBufferTests
         {
             DynamicBuffer<Voxel>.PoolCapacity = 4096;
         }
+    }
+
+    [Test]
+    public void SetCountClearsTheElementsItAddsEvenInAListFromThePool()
+    {
+        using var world = new World();
+        var used = world.CreateEntity(new DynamicBuffer<Ore>());
+        ref var first = ref used.Get<DynamicBuffer<Ore>>();
+        first.AddRange(Ore.Iron, Ore.Iron, Ore.Iron);
+        used.Destroy();                                       // its list, holding Iron, goes back to the pool
+
+        var chunk = world.CreateEntity(new DynamicBuffer<Ore>());
+        ref var ores = ref chunk.Get<DynamicBuffer<Ore>>();
+        ores.SetCount(0);
+        Assert.That(ores.Count, Is.Zero);
+        ores.SetCount(4);                                     // the pooled list: its old values must not show
+        Assert.That(ores.AsReadOnlySpan().ToArray(), Is.EqualTo(new[] { Ore.Air, Ore.Air, Ore.Air, Ore.Air }));
+        ores.AsSpan()[3] = Ore.Iron;
+        ores.SetCount(2);
+        ores.SetCount(4);                                     // grown again: the element dropped comes back cleared
+        Assert.That(ores.AsReadOnlySpan().ToArray(), Is.EqualTo(new[] { Ore.Air, Ore.Air, Ore.Air, Ore.Air }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => chunk.Get<DynamicBuffer<Ore>>().SetCount(-1));
+    }
+
+    [Test]
+    public void AnEmptyBufferOfAPrefabTakesAListFromThePool()
+    {
+        using var world = new World();
+        var actor = new Prefab().Set(new Seen()).SetBuffer<Loot>();
+        for (int i = 0; i < 3; i++) Spawn(world, actor);                     // warm: the table, the pool
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        Spawn(world, actor);
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);  // no list of its own, then a pooled one
+
+        var stocked = world.Instantiate(new Prefab().SetBuffer(new Loot(1, 2)));
+        Assert.That(stocked.Loot[0], Is.EqualTo(new Loot(1, 2)));           // a prefab with elements still copies them
+    }
+
+    private static void Spawn(World world, Prefab actor)
+    {
+        var e = world.Instantiate(actor);
+        e.WriteLoot().Add(new Loot(1, 1));
+        e.Destroy();
+    }
+
+    [Test]
+    public void ListsGivenBackOnOneThreadServeTheFirstWritesOfAnother()
+    {
+        using var world = new World();
+        var mailboxes = new Entity[200];
+        world.CreateEntities(mailboxes, new DynamicBuffer<Mail>());
+        foreach (var mailbox in mailboxes) mailbox.Get<DynamicBuffer<Mail>>().Add(new Mail(1));
+        world.DestroyAll<DynamicBuffer<Mail>>();                              // 200 lists back, most to the shared pool
+
+        int reused = 0;
+        var helper = new System.Threading.Thread(() =>
+        {
+            for (int i = 0; i < 100; i++)
+                if (BufferStore<Mail>.Rent().Items.Length > 0) reused++;        // a list that held mail
+        });
+        helper.Start();
+        helper.Join();
+        Assert.That(reused, Is.EqualTo(100));
+    }
+
+    [Test]
+    public void LoadEntitiesTakesTheListsItReadsInsteadOfCopyingThem()
+    {
+        var blocks = new Ore[8192];
+        var bytes = new Nino.Core.NinoArrayBufferWriter();
+        var loaded = new Entity[4];
+        var ids = new EntityId[4];
+        try
+        {
+            DynamicBuffer<Ore>.PoolCapacity = blocks.Length;
+            using var world = new World();
+            world.CreateEntities(loaded, new DynamicBuffer<Ore>());
+            for (int i = 0; i < loaded.Length; i++)
+            {
+                loaded[i].Get<DynamicBuffer<Ore>>().AddRange(blocks);
+                ids[i] = loaded[i].Id;
+            }
+
+            for (int i = 0; i < 3; i++) Reload(world, bytes, ids, loaded);    // warm: the tables, the pool, the load world
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            Reload(world, bytes, ids, loaded);
+            Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.LessThan(blocks.Length));   // no list copied
+            Assert.That(loaded[0].Get<DynamicBuffer<Ore>>().Count, Is.EqualTo(blocks.Length));
+        }
+        finally
+        {
+            DynamicBuffer<Ore>.PoolCapacity = 4096;
+        }
+    }
+
+    // Chunks unloaded to bytes and loaded back.
+    private static void Reload(World world, Nino.Core.NinoArrayBufferWriter bytes, EntityId[] ids, Entity[] loaded)
+    {
+        bytes.ResetWrittenCount();
+        world.SaveEntities(bytes, ids);
+        world.DestroyEntities(ids);
+        world.LoadEntities(bytes.WrittenSpan, loaded);
+        for (int i = 0; i < loaded.Length; i++) ids[i] = loaded[i].Id;
     }
 
     // A chunk loaded and unloaded: a buffer filled to its size, then destroyed with its entity.

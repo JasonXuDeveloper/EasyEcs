@@ -14,7 +14,7 @@ A list of `T` per entity, held as a component: an inventory, a path, the hits of
 
 #### Remarks
 
-A `new DynamicBuffer<T>()` holds no list: each entity's list is made by its first write (reserve room with [`DynamicBufferExtensions.EnsureCapacity`](/en/docs/reference/dynamicbufferextensions#ensurecapacity)), so one value can create many entities. The list lives in an object the component refers to, and a copy of the component would refer to the same list: the analyzer rejects copies (EECS012), reach the list through the entity.
+A `new DynamicBuffer<T>()` holds no list: each entity's list is made by its first write (reserve room with [`DynamicBufferExtensions.EnsureCapacity`](/en/docs/reference/dynamicbufferextensions#ensurecapacity)), so one value can create many entities; an instance of a prefab whose buffer is empty holds none either, so its first write takes a list from the pool. The list lives in an object the component refers to, and a copy of the component would refer to the same list: the analyzer rejects copies (EECS012), reach the list through the entity.
 
 ## Properties
 
@@ -44,7 +44,7 @@ The number of elements.
 public static int PoolCapacity { get; set; }
 ```
 
-The longest list, in elements, that a destroyed or removed buffer of `T` gives back to its thread's pool, for the next buffer's first write to reuse instead of allocating one (default: 4,096 bytes of elements, 4,096 for a `byte` or a byte-sized enum). A longer list is left to the GC. Raise it for buffers of one size that come and go in numbers, such as the blocks of chunks loaded and unloaded around players; 0 pools none. The pool holds at most as many lists as died while none were taken, so what it keeps is that peak times this capacity. Process-wide, for every world and thread: set it at startup, before a world uses the type.
+The longest list, in elements, that a destroyed or removed buffer of `T` gives back to the pool, for the next buffer's first write to reuse instead of allocating one, on any thread: the lists the owner thread takes back serve the first writes of a parallel `[ForEach]` too (default: 4,096 bytes of elements, 4,096 for a `byte` or a byte-sized enum). A longer list is left to the GC. Raise it for buffers of one size that come and go in numbers, such as the blocks of chunks loaded and unloaded around players; 0 pools none. The pool holds at most as many lists as died while none were taken, so what it keeps is that peak times this capacity. Process-wide, for every world and thread: set it at startup, before a world uses the type.
 
 **Exceptions**
 

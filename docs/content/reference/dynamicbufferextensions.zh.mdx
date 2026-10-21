@@ -94,6 +94,16 @@ public static void RemoveAtSwapBack<T>(this ref DynamicBuffer<T> buffer, int ind
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 
+### `SetCount` [#setcount]
+
+```csharp
+public static void SetCount<T>(this ref DynamicBuffer<T> buffer, int count);
+```
+
+把元素个数设为 `count`：多出的元素去掉，新增的元素为 `default`，于是系统可以通过 [`DynamicBufferExtensions.AsSpan`](/zh/docs/reference/dynamicbufferextensions#asspan) 直接写整个缓冲，不用先填好一个 span 再复制进去（相当于列表的 `CollectionsMarshal.SetCount`，只是新增的元素会清零）。O(增加或去掉的元素数)；只有列表扩容时分配。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(增加或去掉的元素数)
+
 ### `TrimExcess` [#trimexcess]
 
 ```csharp

@@ -94,6 +94,16 @@ Remove the element at `index` by moving the last one into its place. O(1).
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 
+### `SetCount` [#setcount]
+
+```csharp
+public static void SetCount<T>(this ref DynamicBuffer<T> buffer, int count);
+```
+
+Set the number of elements to `count`: elements past it are removed, elements added are `default`, so a system can write a whole buffer in place through [`DynamicBufferExtensions.AsSpan`](/en/docs/reference/dynamicbufferextensions#asspan) instead of filling a span and copying it in (`CollectionsMarshal.SetCount` of a list, with the new elements cleared). O(elements added or removed); allocates only when the list grows.
+
+**Complexity** ([API table](/en/docs/api)): O(elements added or removed)
+
 ### `TrimExcess` [#trimexcess]
 
 ```csharp

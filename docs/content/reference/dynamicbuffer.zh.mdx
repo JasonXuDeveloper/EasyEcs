@@ -14,7 +14,7 @@ public struct DynamicBuffer<T> : IComponent, ITracked
 
 #### 备注 [#remarks]
 
-`new DynamicBuffer<T>()` 不持有列表：每个实体的列表在第一次写入时才创建（用 [`DynamicBufferExtensions.EnsureCapacity`](/zh/docs/reference/dynamicbufferextensions#ensurecapacity) 预留空间），所以同一个值可以用来创建很多实体。列表存放在组件引用的一个对象里，复制组件，副本也会引用同一个列表：分析器禁止复制（EECS012），要通过实体访问列表。
+`new DynamicBuffer<T>()` 不持有列表：每个实体的列表在第一次写入时才创建（用 [`DynamicBufferExtensions.EnsureCapacity`](/zh/docs/reference/dynamicbufferextensions#ensurecapacity) 预留空间），所以同一个值可以用来创建很多实体；预制体上的空缓冲给出的实例也不持有列表，第一次写入时从回收池取一个。列表存放在组件引用的一个对象里，复制组件，副本也会引用同一个列表：分析器禁止复制（EECS012），要通过实体访问列表。
 
 ## 属性 [#properties]
 
@@ -44,7 +44,7 @@ public readonly int Count { get; }
 public static int PoolCapacity { get; set; }
 ```
 
-`T` 的缓冲被销毁或移除时，最长多少个元素的列表会还给本线程的回收池，留给下一个缓冲第一次写入时重用，免得再分配（默认是 4,096 字节能放下的元素个数，`byte` 或单字节枚举就是 4,096）。更长的列表交给 GC。同样大小、大量反复出现又消失的缓冲可以调高它，比如玩家周围加载又卸载的区块里的方块；设为 0 则什么都不回收。池里最多保留“没人取用期间销毁的列表”那么多个，所以它占用的内存是这个峰值乘以这个容量。对整个进程、所有 World 和线程生效：在启动时、World 用到这个类型之前设置。
+`T` 的缓冲被销毁或移除时，最长多少个元素的列表会还给回收池，留给下一个缓冲第一次写入时重用，免得再分配，不论在哪个线程：拥有者线程收回的列表，也能给并行 `[ForEach]` 的第一次写入用（默认是 4,096 字节能放下的元素个数，`byte` 或单字节枚举就是 4,096）。更长的列表交给 GC。同样大小、大量反复出现又消失的缓冲可以调高它，比如玩家周围加载又卸载的区块里的方块；设为 0 则什么都不回收。池里最多保留“没人取用期间销毁的列表”那么多个，所以它占用的内存是这个峰值乘以这个容量。对整个进程、所有 World 和线程生效：在启动时、World 用到这个类型之前设置。
 
 **异常**
 

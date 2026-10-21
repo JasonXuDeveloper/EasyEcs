@@ -136,7 +136,7 @@ public sealed partial class EasyEcsAnalyzer
     private static readonly HashSet<string> PassRefused =
     [
         "TrimExcess", "Capture", "Restore", "RemoveTypes", "GroupBy", "Save", "SaveWithout", "Load", "LoadKeeping",
-        "SaveEntities", "SaveEntitiesWith", "LoadEntities", "LoadEntitiesInto", "MoveEntities",
+        "SaveEntities", "SaveEntitiesWith", "SaveEntitiesWithout", "LoadEntities", "LoadEntitiesInto", "MoveEntities",
     ];
 
     /// <summary>The calls that need every matching row (they throw for a sliced filter).</summary>
@@ -721,8 +721,8 @@ public sealed partial class EasyEcsAnalyzer
     /// <summary>The structural members that leave every row where it is: they copy, schedule or touch no table.</summary>
     private static readonly HashSet<string> RowsStay =
     [
-        "Capture", "Save", "SaveWithout", "SaveEntities", "SaveEntitiesWith", "AddSingleton", "RemoveSingleton", "AddSystem",
-        "RemoveSystem", "EnsureEntityCapacity", "Run",
+        "Capture", "Save", "SaveWithout", "SaveEntities", "SaveEntitiesWith", "SaveEntitiesWithout", "AddSingleton",
+        "RemoveSingleton", "AddSystem", "RemoveSystem", "EnsureEntityCapacity", "Run",
     ];
 
     /// <summary>

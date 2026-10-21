@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.DynamicBufferExtensions" source="40c4ebc04f15">
     <summary>
@@ -35,4 +35,12 @@
       把容量缩到和元素数一样，曾经涨得很大的列表就不会一直占着峰值时的内存（列表的数组会重新分配；空列表不占数组）。O(count)。
     </summary>
   </member>
+
+  <member name="M:EasyEcs.DynamicBufferExtensions.SetCount``1(EasyEcs.DynamicBuffer{``0}@,System.Int32)" source="7257c66ae3f8">
+    <summary>
+      把元素个数设为 <paramref name="count" />：多出的元素去掉，新增的元素为 <c>default</c>，于是系统可以通过
+      <see cref="M:EasyEcs.DynamicBufferExtensions.AsSpan``1(EasyEcs.DynamicBuffer{``0}@)" /> 直接写整个缓冲，不用先填好一个 span 再复制进去
+      （相当于列表的 <c>CollectionsMarshal.SetCount</c>，只是新增的元素会清零）。O(增加或去掉的元素数)；只有列表扩容时分配。
+    </summary>
+        </member>
 </doc>

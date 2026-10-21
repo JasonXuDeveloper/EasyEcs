@@ -752,9 +752,11 @@ internal sealed class Archetype
     /// <summary>
     /// Copy rows [<paramref name="from"/>, +<paramref name="count"/>) of <paramref name="source"/>, a table with the same
     /// components (of any world: columns line up, bits are global), into the new rows from <paramref name="to"/>: as
-    /// <see cref="CloneRows"/> does for one row, with one block copy per unmanaged column. Inside the structural gate.
+    /// <see cref="CloneRows"/> does for one row, with one block copy per unmanaged column. With <paramref name="take"/>
+    /// the source's buffer lists move instead of being copied, and its rows are left without them (a load's private
+    /// world, whose rows serve nothing else). Inside the structural gate.
     /// </summary>
-    public void CopyRun(Archetype source, int from, int to, int count, ulong tick)
+    public void CopyRun(Archetype source, int from, int to, int count, ulong tick, bool take = false)
     {
         for (int c = 0; c < Columns.Length; c++)
         {
@@ -774,8 +776,13 @@ internal sealed class Archetype
             if (info.Managed)
                 for (int r = 0; r < count; r++)
                 {
-                    if (all || source.Has(c, from + r) || (source.HasDisabled && source.Keeps(c, from + r)))
-                        info.CloneManaged(source.Columns[c], from + r, Columns[c], to + r);
+                    if (!all && !source.Has(c, from + r) && !(source.HasDisabled && source.Keeps(c, from + r))) continue;
+                    if (!take || !info.IsBuffer) info.CloneManaged(source.Columns[c], from + r, Columns[c], to + r);
+                    else
+                    {
+                        info.CopyManaged(source.Columns[c], from + r, Columns[c], to + r);
+                        info.Clear(source.Columns[c], from + r, 1); // the list moved: the next load takes another
+                    }
                 }
             else
                 Unsafe.CopyBlockUnaligned(ref Unsafe.Add(ref Aligned(Columns[c]), (nint)to * info.Size),
