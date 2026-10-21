@@ -165,7 +165,7 @@ and one cascade:
 ```csharp
 var ids = new List<EntityId>();
 foreach (var item in world.Read<Lifetime>()) if (item.Lifetime.Ticks == 0) ids.Add(item.Entity.Id);
-int gone = world.DestroyEntities(CollectionsMarshal.AsSpan(ids));
+int gone = world.DestroyEntities(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(ids));
 ```
 
 Entities created one at a time (a start-up that loads them, a loop that builds each from data) grow their table by
@@ -373,7 +373,7 @@ The comparison with 10 changes per pass: [Comparison](/en/docs/comparison).
 - **`Instantiate` with given components:** one row copy, the target table cached per prefab table and set of given
   components. **`SetIfChanged` with an equal value:** a comparison, no change at all.
 - **Destroying:** O(components); the hole is filled at once outside a pass, or closed when the last pass ends.
-- **Growing:** a full table doubles, copying its rows; a reservation (`EnsureCapacity`, `CreateEntities`) grows it
+- **Growing:** a full table doubles, copying its rows; a reservation (`Reserve`, `CreateEntities`) grows it
   once, to the rows it needs.
 - **No allocation** after warm-up: there is no buffer to grow.
 

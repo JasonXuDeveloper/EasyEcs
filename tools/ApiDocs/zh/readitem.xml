@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ReadItem`1" source="23394f532341">
+    <summary>
+      一条只读的查询结果：实体，以及指向它所在行的只读引用（不打 tick）。和所有指向 ECS 存储的引用一样，这些引用只在下一次结构变更之前有效；
+      变更之后通过 <see cref="P:EasyEcs.ReadItem`1.Entity" /> 重新读取。
+    </summary>
+  </member>
+</doc>

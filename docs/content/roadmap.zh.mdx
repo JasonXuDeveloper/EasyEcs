@@ -40,11 +40,11 @@ import { RotateCcwClock, Lightbulb } from 'lucide-react';
   （[D21](/zh/docs/decisions#d21-net-10-features-only-where-they-measure)）。
 - 多类型的 `Disable` / `Enable` 和批量调用
   （[D26](/zh/docs/decisions#d26-generated-members-and-a-suggestion-to-use-them)）。
-- 生成 `world.AddSystems()`：系统按注册顺序运行，这份列表就是 tick 的顺序，应当在构建 World 的地方读到。
+- 生成 `world.AddSystems()`：系统按注册顺序运行，这份列表就是 tick 的顺序，应当在构建 World 的地方读到（[D56](/zh/docs/decisions#d56-not-added)）。
 - 读单例时发现缺失就自动添加（`world.X`、`GetSingleton<T>()`、`[ForEach]` 参数）：缺单例说明忘了初始化，而默认值很少是对的
   （步长为零的时钟），所以所有读取都抛异常；确实要默认值的地方用 `GetOrAddX()`
   （[D27](/zh/docs/decisions#d27-reading-a-missing-singleton-throws-everywhere)）。
-- 由特性生成缓存过滤条件、按组件生成计数成员（`world.CountPlayer()`）、命名的 `TryGetXRef`：省不下代码，API 面却更大。
+- 由特性生成缓存过滤条件、按组件生成计数成员（`world.CountPlayer()`）、命名的 `TryGetXRef`：省不下代码，API 面却更大（[D56](/zh/docs/decisions#d56-not-added)）。
 - 并行批处理 job、`entity.LastWriteTick<T>()`、公开读写集、多个 World 共享并行预算
   （[D36](/zh/docs/decisions#d36-not-added)）。
 - 运行条件（`[RunIf]`）：什么时候跑哪个分组，系统分组和宿主已经能决定；每个系统一个谓词，是调度器看不见的代码

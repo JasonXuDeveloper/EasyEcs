@@ -311,18 +311,18 @@ World 怎样运行它的系统，用于诊断（启动日志、仪表盘、文�
 
 **复杂度**（[API 表](/zh/docs/api)）：O(分组数 × 系统数³)
 
-### `DestroyEntities` [#destroyentities]
+### `DestroyAll` [#destroyall]
 
 ```csharp
-public int DestroyEntities<T1>(in QueryFilter filter = default) where T1 : struct, IComponent;
-public int DestroyEntities<T1, T2>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3, T4>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3, T4, T5>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3, T4, T5, T6>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3, T4, T5, T6, T7>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3, T4, T5, T6, T7, T8>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
+public int DestroyAll<T1>(in QueryFilter filter = default) where T1 : struct, IComponent;
+public int DestroyAll<T1, T2>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent;
+public int DestroyAll<T1, T2, T3>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
+public int DestroyAll<T1, T2, T3, T4>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
+public int DestroyAll<T1, T2, T3, T4, T5>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
+public int DestroyAll<T1, T2, T3, T4, T5, T6>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
+public int DestroyAll<T1, T2, T3, T4, T5, T6, T7>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
+public int DestroyAll<T1, T2, T3, T4, T5, T6, T7, T8>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
+public int DestroyAll<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
 ```
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
@@ -330,6 +330,16 @@ public int DestroyEntities<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in QueryFilter fi
 销毁所有同时拥有 `T1, T2`（并匹配 `filter`）的存活实体，返回销毁的数量。只过一次结构闸门：O(匹配的原型数 + 行数)。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)
+
+### `DestroyEntities` [#destroyentities]
+
+```csharp
+public int DestroyEntities(params ReadOnlySpan<EntityId> entities);
+```
+
+销毁 `entities` 里的实体（失效的 id 和重复的 id 会跳过；带有清理组件的实体会像 [`Entity.Destroy`](/zh/docs/reference/entity#destroy) 那样被退役），返回销毁了多少个。整个列表只过一次结构闸门、只处理一次级联：id 列表用 `CollectionsMarshal.AsSpan(list)` 传入，不复制。按过滤条件销毁用 `DestroyAll`。O(实体数)。只能在所有者线程调用。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(ids × c)
 
 ### `DestroyedSince` [#destroyedsince]
 
@@ -339,7 +349,7 @@ public bool DestroyedSince(ulong since, Span<EntityId> into, out int count);
 
 变更 tick 为 `since` 或之后销毁的实体（规则和 `QueryFilter.Since` 一样：把 [`World.ChangeTick`](/zh/docs/reference/world#changetick) 记作标记，之后再传进来），来自 [`WorldOptions.DestroyLog`](/zh/docs/reference/worldoptions#destroylog) 的日志。每个读者保留自己的标记，所以确认到不同 tick 的读者共用一份日志。`count` 是一共有多少个；前 `min(count, into.Length)` 个写进 `into`，最旧的在前，每个带着它当时的版本号（下标被回收后，新实体用的是另一个版本号）。长度为 [`WorldOptions.DestroyLog`](/zh/docs/reference/worldoptions#destroylog) 的 span 总能放下全部。
 
-实体的 id 不再存活（[`World.IsAlive`](/zh/docs/reference/world#isalive) 变成 false）时就算销毁：`Destroy`、`DestroyEntities`、层级或关系的级联、用 `MoveEntities` 移出这个 World；带有 [`ICleanupComponent`](/zh/docs/reference/icleanupcomponent) 的实体在最后一个清理组件被移除时（在那之前它仍存活，带着 [`Destroyed`](/zh/docs/reference/destroyed) 标签）；[`World.Restore`](/zh/docs/reference/world#restore) 或 `Load` 时，之前存活、之后不再存活（版本号相同）的每个实体。[`World.Dispose`](/zh/docs/reference/world#dispose) 不记录。
+实体的 id 不再存活（[`World.IsAlive`](/zh/docs/reference/world#isalive) 变成 false）时就算销毁：`Destroy`、`DestroyEntities`、`DestroyAll`、层级或关系的级联、用 `MoveEntities` 移出这个 World；带有 [`ICleanupComponent`](/zh/docs/reference/icleanupcomponent) 的实体在最后一个清理组件被移除时（在那之前它仍存活，带着 [`Destroyed`](/zh/docs/reference/destroyed) 标签）；[`World.Restore`](/zh/docs/reference/world#restore) 或 `Load` 时，之前存活、之后不再存活（版本号相同）的每个实体。[`World.Dispose`](/zh/docs/reference/world#dispose) 不记录。
 
 `since` 比 [`World.DestroyLogOldestTick`](/zh/docs/reference/world#destroylogoldesttick) 更早时返回 false，什么都不写，`count` 为 0：读者需要的记录已被覆盖，它必须重新同步（重新发送全部状态）。O(count)。零分配。所有者线程，或者并行阶段的某个线程。
 
@@ -379,42 +389,6 @@ public int EnableAll<T>(in QueryFilter filter = default) where T : struct, IComp
 对每个禁用了 `T` 且匹配 `filter` 的存活实体执行 [`Entity.Enable`](/zh/docs/reference/entity#enable)：拿回保留的值（对被追踪组件算一次写入，索引跟着更新）。返回处理的数量。O(匹配的表数 + 行数)。只能在所有者线程调用。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)
-
-### `EnsureCapacity` [#ensurecapacity]
-
-```csharp
-public void EnsureCapacity(Prefab prefab, int count);
-```
-
-预先扩好 `prefab` 的实例要进的表和实体存储，接下来 `count` 次 [`World.Instantiate`](/zh/docs/reference/world#instantiate) 都不会再扩容：一波刷怪的扩容开销在 tick 之前就付掉了。分组（[`World.GroupBy`](/zh/docs/reference/world#groupby)）把实例放进别的表时，扩的是那张表；带成员的预制体，每个成员的表都扩。O(组件数) 加一次扩容。只能在所有者线程调用。
-
-**复杂度**（[API 表](/zh/docs/api)）：
-
-- `world.EnsureCapacity<T1..Tn>(count)`：O(n)，外加一次扩容
-- `world.EnsureCapacity(prefab, count)`：O(c)，外加一次扩容
-
-### `EnsureCapacity` [#ensurecapacity-2]
-
-```csharp
-public void EnsureCapacity<T1>(int count) where T1 : struct, IComponent;
-public void EnsureCapacity<T1, T2>(int count) where T1 : struct, IComponent where T2 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3, T4>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3, T4, T5>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3, T4, T5, T6>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3, T4, T5, T6, T7>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3, T4, T5, T6, T7, T8>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3, T4, T5, T6, T7, T8, T9>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
-```
-
-组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
-
-预先扩好正好有 `T1, T2` 的实体所在的表和实体存储，接下来 `count` 次带这些组件的 `CreateEntity` / `CreateEntities` 都不会再扩容：启动或一波刷怪的扩容开销在循环之前一次付掉。分组（[`World.GroupBy`](/zh/docs/reference/world#groupby)）把实体放进别的表时，扩的是那张表；之后再加组件会把实体搬到别的表，那些表照常自己扩容。O(2) 加一次扩容。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
-
-**复杂度**（[API 表](/zh/docs/api)）：
-
-- `world.EnsureCapacity<T1..Tn>(count)`：O(n)，外加一次扩容
-- `world.EnsureCapacity(prefab, count)`：O(c)，外加一次扩容
 
 ### `EnsureEntityCapacity` [#ensureentitycapacity]
 
@@ -708,30 +682,6 @@ public void Load(ReadOnlySpan<byte> input, bool markWritten = true);
 - `world.Load(input, markWritten)`：O(实体数 × 组件数)
 - `world.Load(input, in ComponentSet keep, markWritten)`：O(实体数 × 组件数)
 
-### `Load` [#load-2]
-
-```csharp
-public void Load(ReadOnlySpan<byte> input, in ComponentSet keep, bool markWritten = true);
-```
-
-保留 `keep` 里的单例、维持这个 World 现有状态的 [`World.Load`](/zh/docs/reference/world#load)：存档里这些单例的值被跳过（跳过它们那段数据，从不反序列化），保留的单例留着原来的盒子（[`World.SingletonRef`](/zh/docs/reference/world#singletonref) 仍然可用）和值；这个 World 没有的单例仍然没有，存档里没有的单例也不会被移除。用于重启：新版本先设置自己的配置，再加载上一个进程的 World（用 [`World.Save`](/zh/docs/reference/world#save-2) 存档，排除不能带回来的东西）。O(实体数 × 组件数)。遍历进行中不能调用。
-
-**参数**
-
-- `input`：存档的字节。
-- `keep`：要保留的单例。组件不保留：加载会替换所有实体。
-- `markWritten`：同 [`World.Load`](/zh/docs/reference/world#load)；只作用于加载的行。
-
-**异常**
-
-- `ArgumentException`：`keep` 里有组件类型（要把组件排除在存档之外，改用 [`World.Save`](/zh/docs/reference/world#save-2)）。
-- `InvalidDataException`：同 [`World.Load`](/zh/docs/reference/world#load)。
-
-**复杂度**（[API 表](/zh/docs/api)）：
-
-- `world.Load(input, markWritten)`：O(实体数 × 组件数)
-- `world.Load(input, in ComponentSet keep, markWritten)`：O(实体数 × 组件数)
-
 ### `LoadEntities` [#loadentities]
 
 ```csharp
@@ -753,7 +703,7 @@ public int LoadEntities(ReadOnlySpan<byte> input, Span<Entity> entities = defaul
 public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into, bool markWritten = true);
 ```
 
-把 [`World.SaveEntities`](/zh/docs/reference/world#saveentities-2) 写出的组件放到已经存在的实体上（Actor 的实体先建好、记录后到的情形）：存档里第 i 个实体的组件设到 `into`[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和变更 tick 的表现和 `Set` 一样（加载的每个组件都算写入）；被禁用的组件读进来仍是禁用的，值也保留。[`EntityId`](/zh/docs/reference/entityid) 字段原来指向组内实体的，改为指向它在 `into` 里对应的实体，其余的一律变成 [`EntityId.Null`](/zh/docs/reference/entityid#null)；父实体不在组内的 [`ChildOf`](/zh/docs/reference/childof) 不会被设置。返回加载的实体数。O(实体数 × 组件数)。遍历进行中不能调用。
+把 [`World.SaveEntities`](/zh/docs/reference/world#saveentities) 写出的组件放到已经存在的实体上（Actor 的实体先建好、记录后到的情形）：存档里第 i 个实体的组件设到 `into`[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和变更 tick 的表现和 `Set` 一样（加载的每个组件都算写入）；被禁用的组件读进来仍是禁用的，值也保留。[`EntityId`](/zh/docs/reference/entityid) 字段原来指向组内实体的，改为指向它在 `into` 里对应的实体，其余的一律变成 [`EntityId.Null`](/zh/docs/reference/entityid#null)；父实体不在组内的 [`ChildOf`](/zh/docs/reference/childof) 不会被设置。返回加载的实体数。O(实体数 × 组件数)。遍历进行中不能调用。
 
 `markWritten` 为 false 时，加载的组件不算写入：存档里的每个组件加载后都没有变更 tick，覆盖了之前写过的值（预制体的默认值）的也一样，所以 `[Changed<T>]` 系统和 `Since` 过滤条件不会因为这次加载访问该实体（从存储恢复的 Actor 内容和存储一致，“保存变化的部分”在代码写入之前不会保存它的任何东西）。存档里没有的组件保留各自的 tick。
 
@@ -764,6 +714,25 @@ public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into,
 - `InvalidOperationException`：加载的某个唯一键（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)）被另一个实体持有，而不是它要加载到的那个实体（加载前对照 World 检查）：什么都不写。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(实体数 × 组件数)
+
+### `LoadKeeping` [#loadkeeping]
+
+```csharp
+public void LoadKeeping(ReadOnlySpan<byte> input, in ComponentSet keep, bool markWritten = true);
+```
+
+保留 `keep` 里的单例、维持这个 World 现有状态的 [`World.Load`](/zh/docs/reference/world#load)：存档里这些单例的值被跳过（跳过它们那段数据，从不反序列化），保留的单例留着原来的盒子（[`World.SingletonRef`](/zh/docs/reference/world#singletonref) 仍然可用）和值；这个 World 没有的单例仍然没有，存档里没有的单例也不会被移除。用于重启：新版本先设置自己的配置，再加载上一个进程的 World（用 [`World.SaveWithout`](/zh/docs/reference/world#savewithout) 存档，排除不能带回来的东西）。O(实体数 × 组件数)。遍历进行中不能调用。
+
+**参数**
+
+- `input`：存档的字节。
+- `keep`：要保留的单例。组件不保留：加载会替换所有实体。
+- `markWritten`：同 [`World.Load`](/zh/docs/reference/world#load)；只作用于加载的行。
+
+**异常**
+
+- `ArgumentException`：`keep` 里有组件类型（要把组件排除在存档之外，改用 [`World.SaveWithout`](/zh/docs/reference/world#savewithout)）。
+- `InvalidDataException`：同 [`World.Load`](/zh/docs/reference/world#load)。
 
 ### `MoveEntities` [#moveentities]
 
@@ -792,6 +761,24 @@ public QueryEnumerator<T1, T2, T3, T4, T5, T6, T7, T8, T9> Query<T1, T2, T3, T4,
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
 枚举同时拥有 `T1, T2`（并匹配 `filter`）的实体。零分配。
+
+### `Read` [#read]
+
+```csharp
+public ReadEnumerator<T1> Read<T1>(in QueryFilter filter = default) where T1 : struct, IComponent;
+public ReadEnumerator<T1, T2> Read<T1, T2>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3> Read<T1, T2, T3>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3, T4> Read<T1, T2, T3, T4>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3, T4, T5> Read<T1, T2, T3, T4, T5>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3, T4, T5, T6> Read<T1, T2, T3, T4, T5, T6>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3, T4, T5, T6, T7> Read<T1, T2, T3, T4, T5, T6, T7>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3, T4, T5, T6, T7, T8> Read<T1, T2, T3, T4, T5, T6, T7, T8>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3, T4, T5, T6, T7, T8, T9> Read<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
+```
+
+组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
+
+遍历拥有全部 `T1, T2`（且匹配 `filter`）的实体来读取它们：条目交出 `ref readonly` 引用，不打 tick，所以读过的行不会被 `[Changed<T>]` 读取方当成写过（[`World.Query`](/zh/docs/reference/world#query) 会给它访问到的被追踪组件的行打 tick）。零分配。
 
 ### `Relations` [#relations]
 
@@ -861,6 +848,42 @@ public void RemoveTypes(AssemblyLoadContext context);
 - `world.RemoveTypes(assembly)`：O(拥有这些组件的实体数 + 表数 + 已缓存查询数)
 - `RemoveTypes(context)`：O(拥有这些组件的实体数 + 表数 + 已缓存查询数)
 
+### `Reserve` [#reserve]
+
+```csharp
+public void Reserve(Prefab prefab, int count);
+```
+
+预先扩好 `prefab` 的实例要进的表和实体存储，接下来 `count` 次 [`World.Instantiate`](/zh/docs/reference/world#instantiate) 都不会再扩容：一波刷怪的扩容开销在 tick 之前就付掉了。分组（[`World.GroupBy`](/zh/docs/reference/world#groupby)）把实例放进别的表时，扩的是那张表；带成员的预制体，每个成员的表都扩。O(组件数) 加一次扩容。只能在所有者线程调用。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.Reserve<T1..Tn>(count)`：O(n)，外加一次扩容
+- `world.Reserve(prefab, count)`：O(c)，外加一次扩容
+
+### `Reserve` [#reserve-2]
+
+```csharp
+public void Reserve<T1>(int count) where T1 : struct, IComponent;
+public void Reserve<T1, T2>(int count) where T1 : struct, IComponent where T2 : struct, IComponent;
+public void Reserve<T1, T2, T3>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
+public void Reserve<T1, T2, T3, T4>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
+public void Reserve<T1, T2, T3, T4, T5>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
+public void Reserve<T1, T2, T3, T4, T5, T6>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
+public void Reserve<T1, T2, T3, T4, T5, T6, T7>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
+public void Reserve<T1, T2, T3, T4, T5, T6, T7, T8>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
+public void Reserve<T1, T2, T3, T4, T5, T6, T7, T8, T9>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
+```
+
+组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
+
+预先扩好正好有 `T1, T2` 的实体所在的表和实体存储，接下来 `count` 次带这些组件的 `CreateEntity` / `CreateEntities` 都不会再扩容：启动或一波刷怪的扩容开销在循环之前一次付掉。分组（[`World.GroupBy`](/zh/docs/reference/world#groupby)）把实体放进别的表时，扩的是那张表；之后再加组件会把实体搬到别的表，那些表照常自己扩容。O(2) 加一次扩容。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.Reserve<T1..Tn>(count)`：O(n)，外加一次扩容
+- `world.Reserve(prefab, count)`：O(c)，外加一次扩容
+
 ### `Restore` [#restore]
 
 ```csharp
@@ -879,42 +902,9 @@ public void Save(IBufferWriter<byte> output);
 
 把实体（id 和版本号）、它们的组件和单例写进 `output`，供 [`World.Load`](/zh/docs/reference/world#load) 读取。非托管组件按原始行写出（布局一改，旧存档就加载不了），标了 `[NinoType]` 的除外：它们由格式化器写出，类型能怎么改由格式决定（`VersionTolerant` 可以追加字段，`Keyed` 可以任意增删调换成员）；托管组件和单例需要 Nino 格式化器。类型按 Nino 类型 id 记录：用 `[NinoFormerName]` 改了名的类型能读回旧的行。缓冲区够大之后不分配内存。O(实体数 × 组件数)。遍历进行中不能调用。
 
-**复杂度**（[API 表](/zh/docs/api)）：
-
-- `world.Save(output)`：O(实体数 × 组件数)
-- `world.Save(output, in ComponentSet exclude)`：O(实体数 × 组件数)
-
-### `Save` [#save-2]
-
-```csharp
-public void Save(IBufferWriter<byte> output, in ComponentSet exclude);
-```
-
-不含 `exclude` 里的组件和单例的 [`World.Save`](/zh/docs/reference/world#save)：它们那段数据不写，也不需要 Nino 格式化器（不能序列化的 World 本地缓存、下一个版本会重新带来的配置）。Disabled 标签跟着它的组件走；组件全被排除的实体照样写出，只是不带它们。用于重启，配合 [`World.Load`](/zh/docs/reference/world#load-2)。缓冲区够大之后不分配内存。O(实体数 × 组件数)。遍历进行中不能调用。
-
-**复杂度**（[API 表](/zh/docs/api)）：
-
-- `world.Save(output)`：O(实体数 × 组件数)
-- `world.Save(output, in ComponentSet exclude)`：O(实体数 × 组件数)
+**复杂度**（[API 表](/zh/docs/api)）：O(实体数 × 组件数)
 
 ### `SaveEntities` [#saveentities]
-
-```csharp
-public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet components);
-```
-
-只写 `components` 里的组件的 [`World.SaveEntities`](/zh/docs/reference/world#saveentities-2)（只记录需要持久化的组件，不带运行时组件）：其余组件不写，也不需要 Nino 格式化器；标签只记有没有，被禁用的组件连同保留的值一起写。一个这些组件都没有的实体也会写出，只是是空的。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
-
-**异常**
-
-- `ArgumentException`：`components` 里有单例类型：一组实体的存档不写单例。
-
-**复杂度**（[API 表](/zh/docs/api)）：
-
-- `world.SaveEntities(output, ids)`：O(给定实体数 × 组件数)
-- `world.SaveEntities(output, ids, set)`：O(给定实体数 × 组件数)
-
-### `SaveEntities` [#saveentities-2]
 
 ```csharp
 public void SaveEntities(IBufferWriter<byte> output, params ReadOnlySpan<EntityId> entities);
@@ -922,10 +912,31 @@ public void SaveEntities(IBufferWriter<byte> output, params ReadOnlySpan<EntityI
 
 把 `entities`（失效的 id 和重复的 id 跳过）和它们的组件写进 `output`，供 [`World.LoadEntities`](/zh/docs/reference/world#loadentities) 或 [`World.LoadEntitiesInto`](/zh/docs/reference/world#loadentitiesinto) 读取：一组要搬去另一个 World 的实体（一个玩家和他拥有的东西，搬到另一台服务器）。单例和组外的实体不写；整棵层级用 [`World.Descendants`](/zh/docs/reference/world#descendants) 收集（id 列表写成 `CollectionsMarshal.AsSpan(list)`，不复制）。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
 
-**复杂度**（[API 表](/zh/docs/api)）：
+**复杂度**（[API 表](/zh/docs/api)）：O(给定实体数 × 组件数)
 
-- `world.SaveEntities(output, ids)`：O(给定实体数 × 组件数)
-- `world.SaveEntities(output, ids, set)`：O(给定实体数 × 组件数)
+### `SaveEntitiesWith` [#saveentitieswith]
+
+```csharp
+public void SaveEntitiesWith(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet components);
+```
+
+只写 `components` 里的组件的 [`World.SaveEntities`](/zh/docs/reference/world#saveentities)（只记录需要持久化的组件，不带运行时组件）：其余组件不写，也不需要 Nino 格式化器；标签只记有没有，被禁用的组件连同保留的值一起写。一个这些组件都没有的实体也会写出，只是是空的。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
+
+**异常**
+
+- `ArgumentException`：`components` 里有单例类型：一组实体的存档不写单例。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(给定实体数 × 组件数)
+
+### `SaveWithout` [#savewithout]
+
+```csharp
+public void SaveWithout(IBufferWriter<byte> output, in ComponentSet exclude);
+```
+
+不含 `exclude` 里的组件和单例的 [`World.Save`](/zh/docs/reference/world#save)：它们那段数据不写，也不需要 Nino 格式化器（不能序列化的 World 本地缓存、下一个版本会重新带来的配置）。Disabled 标签跟着它的组件走；组件全被排除的实体照样写出，只是不带它们。用于重启，配合 [`World.LoadKeeping`](/zh/docs/reference/world#loadkeeping)。缓冲区够大之后不分配内存。O(实体数 × 组件数)。遍历进行中不能调用。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(实体数 × 组件数)
 
 ### `SetAll` [#setall]
 

@@ -49,7 +49,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 |---|---|
 | [`ChildOf`](/zh/docs/reference/childof) | 层级关系：实体是 ChildOf.Parent 的子实体。 |
 | [`ColumnInfo`](/zh/docs/reference/columninfo) | 表的一列（TableInfo）。 |
-| [`ComponentSet`](/zh/docs/reference/componentset) | 一组组件和单例类型，建一次就一直留着（放在 static readonly 字段里）：存档要写的组件（World.SaveEntities），也就是只记录需要持久化的数据、不带周围运行时状态的那份记录；或者在重启时，整个 World 的存档要排除的类型（World.Save）和加载时要保留的单例（World.Load）。 |
+| [`ComponentSet`](/zh/docs/reference/componentset) | 一组组件和单例类型，建一次就一直留着（放在 static readonly 字段里）：存档要写的组件（World.SaveEntitiesWith），也就是只记录需要持久化的数据、不带周围运行时状态的那份记录；或者在重启时，整个 World 的存档要排除的类型（World.SaveWithout）和加载时要保留的单例（World.LoadKeeping）。 |
 | [`ComponentValue`](/zh/docs/reference/componentvalue) | 实体的一个组件，即 Entity.Describe 读到的结果：它的值的装箱副本。 |
 | [`Destroyed`](/zh/docs/reference/destroyed) | 实体持有 ICleanupComponent 时销毁，就会带上这个标签：其他组件已经去掉，实体一直存活到最后一个清理组件移除为止。 |
 | [`Disabled<T>`](/zh/docs/reference/disabled) | T 处于禁用状态（Entity.Disable）的实体带的标签：实体保留 T 的值，但在 Entity.Enable 还回来之前，查询、Has 和 Get 都当它不存在。 |
@@ -62,6 +62,8 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`QueryEnumerator<T1..T9>`](/zh/docs/reference/queryenumerator) | 零分配的查询枚举器；遍历途中做结构变更也安全（访问规则和 ForEach 相同）。 |
 | [`QueryFilter`](/zh/docs/reference/queryfilter) | 查询的附加条件：必须存在但不读取的组件（QueryFilter.With），或者必须不存在的组件（QueryFilter.Without）。 |
 | [`QueryItem<T1..T9>`](/zh/docs/reference/queryitem) | 一条查询结果：实体，以及指向它所在行的 ref。 |
+| [`ReadEnumerator<T1..T9>`](/zh/docs/reference/readenumerator) | 零分配的只读查询枚举器；遍历途中做结构变更也安全（访问规则和 ForEach 相同）。 |
+| [`ReadItem<T1..T9>`](/zh/docs/reference/readitem) | 一条只读的查询结果：实体，以及指向它所在行的只读引用（不打 tick）。 |
 | [`RelationIndex<T>.Sources`](/zh/docs/reference/relationindex-sources) | 枚举链接到某个目标的实体（foreach），每条链接一次。 |
 | [`SingletonRef<T>`](/zh/docs/reference/singletonref) | 某个 World 的单例 T 的句柄。 |
 | [`SystemAccess`](/zh/docs/reference/systemaccess) | 系统读写的数据，添加系统时声明一次。 |

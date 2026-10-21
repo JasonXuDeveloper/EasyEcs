@@ -10,7 +10,7 @@ description: "A set of component and singleton types, built once and kept (a sta
 public readonly struct ComponentSet
 ```
 
-A set of component and singleton types, built once and kept (a `static readonly` field): the components a save writes ([`World.SaveEntities`](/en/docs/reference/world#saveentities)), the record of what persists without the runtime state around it; or, for a restart, the types a whole-world save leaves out ([`World.Save`](/en/docs/reference/world#save-2)) and the singletons a load keeps ([`World.Load`](/en/docs/reference/world#load-2)). `ComponentSet.Create().With<Bank>().WithSingleton<Rates>()`; a framework that learns its types at registration adds them by `Type`. Each call returns a new set.
+A set of component and singleton types, built once and kept (a `static readonly` field): the components a save writes ([`World.SaveEntitiesWith`](/en/docs/reference/world#saveentitieswith)), the record of what persists without the runtime state around it; or, for a restart, the types a whole-world save leaves out ([`World.SaveWithout`](/en/docs/reference/world#savewithout)) and the singletons a load keeps ([`World.LoadKeeping`](/en/docs/reference/world#loadkeeping)). `ComponentSet.Create().With<Bank>().WithSingleton<Rates>()`; a framework that learns its types at registration adds them by `Type`. Each call returns a new set.
 
 ## Methods
 

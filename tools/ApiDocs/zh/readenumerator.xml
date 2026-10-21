@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ReadEnumerator`1" source="5251085a8d1d">
+    <summary>
+      零分配的只读查询枚举器；遍历途中做结构变更也安全（访问规则和 ForEach 相同）。它是 ref struct，持有指向当前表的引用，
+      所以遍历它的循环里不能 <c>await</c>。
+    </summary>
+    <remarks>
+      循环调用的每个成员都会内联，冷路径是静态的（<see cref="T:EasyEcs.QueryWalk" />，按值传入传出）：枚举器从不按引用传递，
+      所以它的字段都能留在寄存器里。
+    </remarks>
+  </member>
+</doc>

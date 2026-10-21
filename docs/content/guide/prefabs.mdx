@@ -1,7 +1,7 @@
 ---
 title: Prefabs and cloning
 seoTitle: "Prefabs in C# ECS: spawn entity templates, waves and groups"
-description: "Define a kind of entity once as a Prefab and spawn it alone, in waves or as a linked group: derived prefabs, prefab buffers, EnsureCapacity and Entity.Clone."
+description: "Define a kind of entity once as a Prefab and spawn it alone, in waves or as a linked group: derived prefabs, prefab buffers, Reserve and Entity.Clone."
 icon: Copy
 ---
 
@@ -240,7 +240,7 @@ warlord.Destroy();                                   // ChildOf: destroying the 
 `ChildOf` is EasyEcs's hierarchy link: see [Hierarchy](/en/docs/guide/hierarchy). `Instantiate(group, span)`
 instantiates the group once per element.
 
-### Reserve before the wave: `EnsureCapacity` [#ensure-capacity]
+### Reserve before the wave [#reserve]
 
 `world.Reserve(prefab, count)` grows the table the prefab's instances go to, and the entity records, so the
 next `count` instances grow nothing. For a group, it reserves every member's table. Call it before the tick that

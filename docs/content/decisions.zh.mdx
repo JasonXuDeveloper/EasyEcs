@@ -68,6 +68,9 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D51](#d51-not-added) | 不加：运行条件、按时间的间隔、必需组件、实体映射表、Meter、校验和、部分快照 |
 | [D52](#d52-identity-entity) | 只当身份用的 `Entity` 不让系统单独运行 |
 | [D53](#d53-own-members) | EasyEcs 自带的组件在 EasyEcs 里生成成员；同名的嵌套类型不生成 |
+| [D54](#d54-names) | 调用的名字说明它做什么 |
+| [D55](#d55-read) | `Read` 遍历查询不打 tick；EECS046 指出应该这样写的循环 |
+| [D56](#d56-not-added) | 不加：生成的 `AddSystems()`、从特性生成的缓存过滤条件、按组件的计数成员、命名的 `TryGetXRef` |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -164,7 +167,7 @@ world.CreateEntity(new Health(100), new Spawned());                  // 创建�
 **决定。** 列是连续数组。
 
 **原因。** 分页的遍历速度一样，却给每次句柄访问多加一层间接；省下的只是表扩容时的那次复制，而 `InitialEntityCapacity` 和
-`EnsureCapacity` 本来就能消掉它。
+`Reserve` 本来就能消掉它。
 
 ## D8. 没有整实体禁用 [#d8-no-whole-entity-disable]
 
@@ -884,7 +887,7 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 
 **决定。** `world.SaveWithout(output, in exclude)` 写出整个 World，但不写 `ComponentSet` 里的组件和单例；`world.LoadKeeping(input, in keep, markWritten)`
 让 `keep` 里的单例保持 World 现在的样子（跳过存档里的值）。`ComponentSet` 用第二个掩码存单例（`WithSingleton<T>()`；`With(Type)` 两种都接受）。
-`SaveEntities` 拒绝含单例的集合；`Load` 拒绝含组件的 `keep`。
+`SaveEntitiesWith` 拒绝含单例的集合；`LoadKeeping` 拒绝含组件的 `keep`。
 
 **原因。**
 - **重启要带上的是状态，不是周围的运行时。** 连接、缓存和旧版本的配置不能带回来，而且常常没有格式化器。
@@ -895,7 +898,7 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 **比较过。**
 - **单独的 `SingletonSet` 类型：** 一次重启要建两个集合。
 - **“保留”组件表示不加载它：** 读档会替换实体，保留下来的组件不属于任何实体。
-- **`SaveEntities` 忽略集合里的单例：** 集合做的比它写的少，却不吭声。
+- **`SaveEntitiesWith` 忽略集合里的单例：** 集合做的比它写的少，却不吭声。
 
 ## D51. 不加：运行条件、按时间的间隔、必需组件、实体映射表、Meter、校验和、部分快照 [#d51-not-added]
 
@@ -942,6 +945,55 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 **比较过。**
 - **手写 `ChildOf` 的成员：** 第二份实现，迟早和生成的对不上。
 - **在每个引用方程序集里生成：** 每个程序集一个文件，互相可见的程序集之间还会重复。
+
+## D54. 调用的名字说明它做什么 [#d54-names]
+
+**决定。** 4.7 改了五个调用的名字：`EnsureCapacity<T1..Tn>(count)` / `EnsureCapacity(prefab, count)` 改为 `Reserve`，
+`DestroyEntities<T1..Tn>(filter)` 改为 `DestroyAll`，`SaveEntities(output, ids, set)` 改为 `SaveEntitiesWith`，
+`Save(output, exclude)` 改为 `SaveWithout`，`Load(input, keep, markWritten)` 改为 `LoadKeeping`，关系生成的 `RemoveX(target)`
+改为 `UnlinkX(target)`。`DestroyEntities(ids)` 销毁一组 id。旧名不保留别名。
+
+**原因。**
+- **改变含义的重载会把含义藏起来。** `Save(output, set)` 读起来像“存这些”，实际是不存它们；`Load(input, set)` 实际是保留单例。
+  换个名字，调用处自己就说清楚了。
+- **`count` 是再创建多少个，不是容量。** `EnsureCapacity` 读起来像 `List<T>.EnsureCapacity(total)`；`Reserve` 接收的是还要再创建多少个。
+- **`DestroyEntities` 曾是两个调用的名字。** 按 id 和按过滤条件现在各有名字，`DestroyAll` 和 `SetAll`、`RemoveAll`、`DisableAll` 一致。
+- **`RemoveX(target)` 和 `RemoveX()` 做的事不同。** 一个解除对某个目标的链接，另一个删掉整个缓冲区。
+- **1.0 之前的规则，用在一个小版本上：** 编译器会找出每一处调用，[迁移指南](/zh/docs/migration#v4-7-renames)列出了每个名字的对应。
+
+**考虑过的方案。**
+- **保留一个版本的 `[Obsolete]` 别名：** 补全列表和文档里同一个调用有两个名字，而编译器本来就会指出要改的地方。
+
+## D55. `Read` 遍历查询不打 tick；EECS046 指出应该这样写的循环 [#d55-read]
+
+**决定。** `world.Read<T1..Tn>(filter)` 遍历查询的行，组件是 `ref readonly`，不打 tick；`Query` 照旧给它交出的被追踪组件打 tick。
+分析器规则 EECS046（警告，有代码修复）报告只读取 item 的、带被追踪组件的 `Query` 循环。
+
+**原因。**
+- **`ref` 分不清读和写。** `Query` 的 item 交出 `ref T`，所以会给访问到的每一行被追踪组件打 tick；求和、状态页或发送同步数据，
+  都会让每个 `[Changed<T>]` 读取方访问每一行。
+- **第二种 item 类型，由生成器生成。** `ReadItem` / `ReadEnumerator` 和 `QueryItem` 来自同一个 `ArityGenerator` 模板，只是没有打 tick
+  的那几行；生成的成员（`item.Health`）在它们上面是 `ref readonly`。
+- **有了规则才会被用上。** 规则在这个仓库里找到的 17 个只读 `Query` 循环（测试、AOT 检查、一个示例）都改成了 `Read`。
+- **实测**（`ChangeTrackingReadBenchmark`，100,000 个实体，每 tick 写 10 个，读一遍全部生命值，再跑 `[Changed<Health>]` 同步）：
+  用 `Query` 每 tick 538 µs，用 `Read` 145 µs，两者都是 0 B。
+
+**考虑过的方案。**
+- **给 `Query` 加一个只读开关：** item 类型仍然交出 `ref T`，写入照样能编译，却不打 tick。
+- **第一次写入时才打 tick：** `ref` 没有写入的钩子；在 `[ForEach]` 方法里，`Mut<T>` 就是这个钩子。
+
+## D56. 不加：生成的 `AddSystems()`、从特性生成的缓存过滤条件、按组件的计数成员、命名的 `TryGetXRef` [#d56-not-added]
+
+**决定。** 权衡过四个生成器功能，都没有加。
+
+**原因。**
+- **生成的 `world.AddSystems()`。** 系统按注册顺序运行，所以这个列表就是 tick 的顺序；写在构建 World 的地方，它就是调度的文档。
+  生成的列表会按文件或名字固定一个顺序。
+- **从特性生成的缓存过滤条件**（由字段上的 `[With<T>]` 生成一个 `QueryFilter` 字段）。`static readonly QueryFilter` 本来就只有一行，
+  生成出来反而看不到它在哪里构建。
+- **按组件的计数成员**（`world.CountPlayer()`）。`world.Count<Player>()` 字数一样多，意思也一样；每个组件多一个成员只会让补全列表变长，
+  一行也没省。
+- **命名的 `TryGetXRef`。** `entity.TryGetRef<T>(out found)` 本来就少用；常用的调用已经有命名成员（`TryGetX`、`entity.X`）。
 
 ## 相关页面 [#related]
 

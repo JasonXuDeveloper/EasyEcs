@@ -37,7 +37,9 @@ icon: RotateCcwClock
   `ComponentSet.WithSingleton<T>()` / `With(Type)` 可以加入单例。见[重启](/zh/docs/guide/saves#restart)。
 - 分析器：[EECS035](/zh/docs/guide/analyzer#eecs035) 拒绝不合法的 `Slices`（小于 1，或者和 `Changed` / `Removed` 过滤一起用）；
   [EECS036](/zh/docs/guide/analyzer#eecs036) 拒绝无法按键建索引的唯一组件（`EntityId` 键，或者还有第二个索引键）；
-  [EECS031](/zh/docs/guide/analyzer#eecs031) 也覆盖用相同值循环调用 `Instantiate`；[EECS033](/zh/docs/guide/analyzer#eecs033) 建议改用生成的 `SetXIfChanged(…)`。
+  [EECS031](/zh/docs/guide/analyzer#eecs031) 也覆盖用相同值循环调用 `Instantiate`；[EECS033](/zh/docs/guide/analyzer#eecs033) 建议改用生成的 `SetXIfChanged(…)`；代码修复现在也覆盖 [EECS007](/zh/docs/guide/analyzer#eecs007)（`readonly`）、
+  [EECS015](/zh/docs/guide/analyzer#eecs015)、[EECS017](/zh/docs/guide/analyzer#eecs017)（`EntityId`）、[EECS018](/zh/docs/guide/analyzer#eecs018)
+  和 [EECS025](/zh/docs/guide/analyzer#eecs025)（`Mut<T>` 改为 `in T`）。
 - `SaveEntities(output, a.Id, b.Id)` 和 `bag.AddRange(x, y)` 可以直接传值（`params` span，在栈上构造）。
   见[迁移](/zh/docs/guide/migration-and-unload#save-entities)。
 - `world.Read<T1..Tn>(filter)` 遍历查询的行，只读不写：条目是 `ref readonly`，不打 tick，所以工具或请求处理函数读过的行，
@@ -64,6 +66,10 @@ icon: RotateCcwClock
   改为 `UnlinkX(target)`（`RemoveX()` 仍然删掉整个缓冲区）。见[迁移指南](/zh/docs/migration#v4-7-renames)。
 - 集合里有单例时，`SaveEntitiesWith(output, ids, set)` 抛 `ArgumentException`（实体组存档不写单例）。见[迁移指南](/zh/docs/migration#v4-7-save-entities)。
 - `EcsSystem` 新增公开的 `RunCount`：系统里同名的成员会隐藏它（警告 CS0108）。见[迁移指南](/zh/docs/migration#v4-7-run-count)。
+- 新的分析器错误（[EECS040](/zh/docs/guide/analyzer#eecs040) 到 [EECS045](/zh/docs/guide/analyzer#eecs045)，以及针对有两个索引键的组件的
+  [EECS036](/zh/docs/guide/analyzer#eecs036)）拒绝会抛异常或行不通的代码；新的警告（[EECS037](/zh/docs/guide/analyzer#eecs037)、
+  [EECS038](/zh/docs/guide/analyzer#eecs038)、[EECS046](/zh/docs/guide/analyzer#eecs046)）报告丢失的写入，以及只读循环打的 tick。
+  见[迁移指南](/zh/docs/migration#v4-7-analyzer)。
 
 ### 修复 [#v4-7-0-fixes]
 

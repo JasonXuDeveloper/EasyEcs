@@ -66,7 +66,7 @@ EasyEcs' features to their place in this file.
 | [Cleanup components](/en/docs/guide/cleanup-and-disable) (`ICleanupComponent`, `Destroyed`) | `Spawn`: a destroyed NPC leaves it behind for `RespawnSystem.Revive` |
 | [Hierarchy](/en/docs/guide/hierarchy) (`ChildOf`, `Children`, `Descendants`) | projectiles are children of their player; `Transfer` collects the subtree |
 | [Structural changes during passes](/en/docs/guide/structural-changes) | statuses, deaths, respawns, projectiles spawned and destroyed mid-pass |
-| [Prefabs](/en/docs/guide/prefabs) (`Prefab`, `Instantiate`, `EnsureCapacity`), cloning | `Hero`, `Grunt`, `Brute` (a variant of `Grunt`); `Mirror` clones a living unit |
+| [Prefabs](/en/docs/guide/prefabs) (`Prefab`, `Instantiate`, `Reserve`), cloning | `Hero`, `Grunt`, `Brute` (a variant of `Grunt`); `Mirror` clones a living unit |
 | [Instantiate with values](/en/docs/guide/prefabs#instantiate-with-values) | `Shot` with its position, velocity and `ChildOf`; `SpawnNpc`; `Join` |
 | [Change tracking](/en/docs/guide/change-tracking) and removal detection | `ReplicationSystem`; `WrittenSinceCheckpoint` |
 | [`ChangedAny`](/en/docs/guide/change-tracking#changed-any) per client, [destroy log](/en/docs/guide/change-tracking#destroy-log) | `CatchUp`: one kept filter, each client's tick; `DestroyedSince` |
@@ -205,7 +205,7 @@ three values changed, and `Shot` holds only what every shot shares: the rest is 
 
 The constructor configures the world (parallel systems, timings, a failing system switched off instead of thrown, a
 destroy log of one id per unit), groups tables by `Zone`, sets the friend links' target policy, registers the systems
-in tick order and spawns the units in bulk: one table growth per wave. `EnsureCapacity` sizes the NPC tables for
+in tick order and spawns the units in bulk: one table growth per wave. `Reserve` sizes the NPC tables for
 respawn waves, so they never grow during a tick. `SpawnNpc` instantiates a respawned NPC with its position given.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#setup</include>

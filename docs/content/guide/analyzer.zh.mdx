@@ -1,15 +1,15 @@
 ---
 title: 分析器规则
-seoTitle: "EasyEcs 分析器规则 EECS002-EECS045：每条 C# 诊断的含义与修法"
-description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS045：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
+seoTitle: "EasyEcs 分析器规则 EECS002-EECS046：每条 C# 诊断的含义与修法"
+description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS046：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
 icon: ShieldCheck
 ---
 
 EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/docs/ecs-principles)的代码编译不过。正确性规则（EECS002 到 EECS024，以及
 EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑、但有代价的写法（EECS017、EECS018、EECS020）。生成器会跳过无效输入，由分析器报出来，
-所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039）找的是能跑、但做了多余工作的代码，级别说明是哪一种
+所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
-（EECS025 到 EECS032）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失的报警告。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+（EECS025 到 EECS032，以及 EECS046）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失的报警告。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -57,7 +57,7 @@ EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑
 | [EECS028](#eecs028) | 警告 | 每次更新都执行的代码不分配内存 | |
 | [EECS029](#eecs029) | 警告 | 实例 `[ForEach]` 方法用到自己的系统 | 改成 static |
 | [EECS030](#eecs030) | 警告 | 对查询结果的结构变化用一次批量调用 | 批量调用 |
-| [EECS031](#eecs031) | 警告 | 计数循环里的实体一起创建，或先预留容量 | `CreateEntities`、`EnsureCapacity` |
+| [EECS031](#eecs031) | 警告 | 计数循环里的实体一起创建，或先预留容量 | `CreateEntities`、`Reserve` |
 | [EECS032](#eecs032) | 警告 | 计数和过滤交给 World | `Any`、`Count` |
 | [EECS033](#eecs033) | 信息 | 生成的成员写起来更短 | 生成的成员 |
 | [EECS034](#eecs034) | 错误 | 系统里不执行World 更新 | |
@@ -72,6 +72,7 @@ EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑
 | [EECS043](#eecs043) | 错误 | record struct 键不打印自身 | 显式实现 `Key` |
 | [EECS044](#eecs044) | 错误 | 切片过滤条件只交给遍历 | |
 | [EECS045](#eecs045) | 错误 | `Destroyed` 和 `Disabled<T>` 由 World 来写 | |
+| [EECS046](#eecs046) | 警告 | 只读追踪变化组件的循环用 `Read` | `Read<T1..Tn>` |
 
 ## EECS002 [#eecs002]
 
@@ -934,7 +935,7 @@ world.DestroyAll<Health>(QueryFilter.Create().With<Dead>());
 
 逐个创建时，表和实体存储按倍增扩容；如果 World 从没装过这么多实体，被丢弃的数组可能触发一次完整的垃圾回收
 （[D28](/zh/docs/decisions#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)）。`CreateEntities` 和
-`Instantiate(prefab, span)` 一遍就能创建完；每个实体的值各不相同时，先用 `EnsureCapacity` 预留空间。规则不报告这些循环：
+`Instantiate(prefab, span)` 一遍就能创建完；每个实体的值各不相同时，先用 `Reserve` 预留空间。规则不报告这些循环：
 次数是小于 4,096 的常量，或者遍历的是用这样的常量创建的数组（没有数组会进入大对象堆）；前面已经预留过容量；只在分支里或内层循环里创建；
 在系统里（运行中的 World会复用已有的行）。这样的循环里用相同的值调用 `Instantiate(prefab)` 或 `Instantiate(prefab, in c1..cn)`
 也会报告，修复是改成批量形式 `Instantiate(prefab, entities, in c1..cn)`。
@@ -1295,6 +1296,33 @@ hero.Remove<Disabled<Health>>();   // 标签没了，值却仍然隐藏着
 
 ```csharp
 hero.Enable<Health>();
+```
+
+## EECS046 [#eecs046]
+
+**只读取追踪变化组件的查询循环。** 警告。代码修复：`Read<T1..Tn>`。
+
+`Query` 的 item 以 `ref` 交出组件，分不清读和写，所以会给它访问到的每一行[追踪变化的组件](/zh/docs/guide/change-tracking)打 tick。
+一个只读的循环（求和、发送同步数据、查找）就会让每个 `[Changed<T>]` 系统去访问没人改过的行。`world.Read<T1..Tn>()` 遍历同样的行，
+组件是 `ref readonly`，不打 tick（[Read](/zh/docs/guide/queries#read)）。规则报告对 `world.Query<...>()` 的 `foreach`：其中至少有一个
+追踪变化的组件，而循环体只通过 `Entity` 和读取组件来使用 item；有写入、对组件取了 `ref`、或把 item 传给别处的，保留 `Query`。
+
+```csharp
+public record struct Rating(int Value) : IComponent, ITrackChanges;
+```
+
+```csharp doccheck=expect-EECS046
+int total = 0;
+foreach (var item in world.Query<Rating>())
+    total += item.Component1.Value;   // 每一行 Rating 都被打 tick，当作写过
+```
+
+改用 Read：
+
+```csharp
+int total = 0;
+foreach (var item in world.Read<Rating>())
+    total += item.Component1.Value;
 ```
 
 ## 相关页面 [#related]

@@ -61,8 +61,8 @@ available as Markdown: add `.md` to its URL.
   whole state. `[Removed<T>]` does not see destroyed entities. A resource to release exactly once is a cleanup
   component, not the log.
 - Spread heavy per-row work that may lag over runs with `[ForEach(Slices = N)]`; never on `[Changed<T>]` /
-  `[Removed<T>]` methods (EECS035). `system.RunCount % N` is the current slice; `Query`, `Count`, `Any`,
-  `DestroyEntities`, `entity.Run` and bulk calls refuse a sliced filter (EECS044).
+  `[Removed<T>]` methods (EECS035). `system.RunCount % N` is the current slice; `Query`, `Read`, `Count`, `Any`,
+  `DestroyAll`, `entity.Run` and bulk calls refuse a sliced filter (EECS044).
 - To change structure (add, remove, create, destroy) in a `[ForEach]` method, take `Entity` or `World`
   (EECS013). Changes apply at once; the pass stays safe.
 - Order systems with `[UpdateBefore<T>]` / `[UpdateAfter<T>]` inside the same group; no cycles (EECS019, EECS020).
@@ -86,20 +86,23 @@ available as Markdown: add `.md` to its URL.
   it (EECS014). Use one world per thread for more cores, or `ParallelSystems` / parallel `[ForEach]`.
 - Never keep a `ref` to a component across an `await` or a structural change of another entity; read it again.
 - `Query` results are ref structs: no `await` inside the loop, no storing items, no LINQ over them.
+- A loop that only reads tracked components walks `world.Read<T…>()`, not `Query`: a `Query` item stamps every row
+  it visits, so `[Changed<T>]` readers would see rows nobody changed (EECS046).
 - During a pass (a `foreach` over `Query`, a `[ForEach]` method, a job's `Execute`) never call `TrimExcess`,
-  `Capture`, `Restore`, `Save`, `Load`, `SaveEntities`, `LoadEntities`, `LoadEntitiesInto`, `MoveEntities`, `GroupBy`
+  `Capture`, `Restore`, `Save`, `SaveWithout`, `Load`, `LoadKeeping`, `SaveEntities`, `SaveEntitiesWith`, `LoadEntities`,
+  `LoadEntitiesInto`, `MoveEntities`, `GroupBy`
   or `RemoveTypes` on its world: they throw (EECS041). Record the request as data and call them after the pass.
 
 ## Performance
 
-- An `EECS` warning means the code costs (EECS025 to EECS032, and EECS017, EECS018, EECS020) or loses a write
-  (EECS037, EECS038): apply its fix. The suggestions, EECS033 and EECS039, are the same cost written shorter. An
-  `EECS` error means the code cannot work.
+- An `EECS` warning means the code costs (EECS025 to EECS032, and EECS017, EECS018, EECS020), loses a write
+  (EECS037, EECS038) or stamps rows it only reads (EECS046): apply its fix. The suggestions, EECS033 and EECS039, are
+  the same cost written shorter. An `EECS` error means the code cannot work.
 - Hot paths allocate nothing: no LINQ, closures, boxing, string formatting or `params object[]` in systems (EECS028).
 - Keep a `QueryFilter` in a `static readonly` field when a query runs every tick.
 - Prefer `[ForEach]` methods over hand-written `Query` loops; use bulk calls (`SetAll`, `RemoveAll`, `DisableAll`,
-  `EnableAll`, `CreateEntities`, `DestroyEntities`) for many entities at once, not a loop over a query (EECS030), and
-  `CreateEntities` or `EnsureCapacity` before creating many entities in a loop (EECS031). Ask `world.Any<T>()` and
+  `EnableAll`, `CreateEntities`, `DestroyAll`, `DestroyEntities(ids)`) for many entities at once, not a loop over a query (EECS030), and
+  `CreateEntities` or `Reserve` before creating many entities in a loop (EECS031). Ask `world.Any<T>()` and
   `world.Count<T>()`, and filter with `QueryFilter`, instead of counting or testing in a loop (EECS032).
 - Removing a component keeps the row (one bit flips), so status components that come and go are cheap; adding a new
   kind of component moves the row once.

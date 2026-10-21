@@ -52,7 +52,7 @@ public int MaxDegreeOfParallelism { get; init; }
 public bool MeasureSystems { get; init; }
 ```
 
-把每个系统每次运行的耗时记进 [`EcsSystem.Stats`](/zh/docs/reference/ecssystem#stats)（每次运行读两次时间戳）。默认 false。
+把每个系统每次运行的数据记进 [`EcsSystem.Stats`](/zh/docs/reference/ecssystem#stats)：耗时和分配的字节数（每次运行读两次时间戳、两次分配计数，并行 `[ForEach]` 的每个辅助块也一样），以及它的 `[ForEach]` 方法访问过的实体数（每次遍历开始时数一次）。默认 false。
 
 ### `ParallelSystems` [#parallelsystems]
 

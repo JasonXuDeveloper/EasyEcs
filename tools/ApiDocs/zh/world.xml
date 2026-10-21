@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-
 <doc>
   <member name="T:EasyEcs.World" source="0790ce1801e0">
     <summary>
@@ -441,7 +440,7 @@
       <see cref="M:EasyEcs.World.RemoveSystem``1" /> 发布的调度）。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.DestroyedSince(System.UInt64,System.Span{EasyEcs.EntityId},System.Int32@)" source="546ad0733cc1">
+  <member name="M:EasyEcs.World.DestroyedSince(System.UInt64,System.Span{EasyEcs.EntityId},System.Int32@)" source="21640a27ca34">
     <summary>
       变更 tick 为 <paramref name="since" /> 或之后销毁的实体（规则和 <c>QueryFilter.Since</c> 一样：把 <see cref="P:EasyEcs.World.ChangeTick" />
       记作标记，之后再传进来），来自 <see cref="P:EasyEcs.WorldOptions.DestroyLog" /> 的日志。每个读者保留自己的标记，所以确认到不同 tick 的读者
@@ -449,7 +448,7 @@
       每个带着它当时的版本号（下标被回收后，新实体用的是另一个版本号）。长度为 <see cref="P:EasyEcs.WorldOptions.DestroyLog" /> 的 span
       总能放下全部。
       <br />
-      实体的 id 不再存活（<see cref="M:EasyEcs.World.IsAlive(EasyEcs.EntityId)" /> 变成 false）时就算销毁：<c>Destroy</c>、<c>DestroyAll</c>、
+      实体的 id 不再存活（<see cref="M:EasyEcs.World.IsAlive(EasyEcs.EntityId)" /> 变成 false）时就算销毁：<c>Destroy</c>、<c>DestroyEntities</c>、<c>DestroyAll</c>、
       层级或关系的级联、用 <c>MoveEntities</c> 移出这个 World；带有 <see cref="T:EasyEcs.ICleanupComponent" /> 的实体在最后一个清理组件被移除时
       （在那之前它仍存活，带着 <see cref="T:EasyEcs.Destroyed" /> 标签）；<see cref="M:EasyEcs.World.Restore(EasyEcs.WorldSnapshot)" /> 或 <c>Load</c>
       时，之前存活、之后不再存活（版本号相同）的每个实体。<see cref="M:EasyEcs.World.Dispose" /> 不记录。
@@ -476,7 +475,7 @@
       O(数量 × 组件数)。只能在所有者线程调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.LoadKeeping(System.ReadOnlySpan{System.Byte},EasyEcs.ComponentSet@,System.Boolean)" source="5951e9483f90">
+  <member name="M:EasyEcs.World.LoadKeeping(System.ReadOnlySpan{System.Byte},EasyEcs.ComponentSet@,System.Boolean)" source="957209b3e896">
     <summary>
       保留 <paramref name="keep" /> 里的单例、维持这个 World 现有状态的 <see cref="M:EasyEcs.World.Load(System.ReadOnlySpan{System.Byte},System.Boolean)" />：
       存档里这些单例的值被跳过（跳过它们那段数据，从不反序列化），保留的单例留着原来的盒子（<see cref="M:EasyEcs.World.SingletonRef``1" />
@@ -493,7 +492,7 @@
     </exception>
     <exception cref="T:System.IO.InvalidDataException">同 <see cref="M:EasyEcs.World.Load(System.ReadOnlySpan{System.Byte},System.Boolean)" />。</exception>
   </member>
-  <member name="M:EasyEcs.World.SaveWithout(System.Buffers.IBufferWriter{System.Byte},EasyEcs.ComponentSet@)" source="01cbc51aed85">
+  <member name="M:EasyEcs.World.SaveWithout(System.Buffers.IBufferWriter{System.Byte},EasyEcs.ComponentSet@)" source="070a2bc572ce">
     <summary>
       不含 <paramref name="exclude" /> 里的组件和单例的 <see cref="M:EasyEcs.World.Save(System.Buffers.IBufferWriter{System.Byte})" />：它们那段数据不写，
       也不需要 Nino 格式化器（不能序列化的 World 本地缓存、下一个版本会重新带来的配置）。Disabled 标签跟着它的组件走；组件全被排除的实体
@@ -511,6 +510,20 @@
       只在需要时、在空闲的时候调用（一波怪物消失之后、两局之间、维护任务里）：它丢掉的东西，接下来的结构变更会重新分配（冷路径），所以每个
       tick 都调用，就是拿稳定状态的零分配去换反复分配。句柄、查询、系统、索引、分组和变更追踪都不受影响。只能在所有者线程调用，不能在遍历中，
       也不能在并行阶段里。O(表数 × (缓存的查询数 + 快照数) + 缩小的表的行数 × 列数)；会分配内存（冷路径）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.DestroyEntities(System.ReadOnlySpan{EasyEcs.EntityId})" source="2d48be690b74">
+    <summary>
+      销毁 <paramref name="entities" /> 里的实体（失效的 id 和重复的 id 会跳过；带有清理组件的实体会像 <see cref="M:EasyEcs.Entity.Destroy" /> 那样被
+      退役），返回销毁了多少个。整个列表只过一次结构闸门、只处理一次级联：id 列表用 <c>CollectionsMarshal.AsSpan(list)</c> 传入，不复制。
+      按过滤条件销毁用 <c>DestroyAll</c>。O(实体数)。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.Read``2(EasyEcs.QueryFilter@)" source="d137dcdccbd1">
+    <summary>
+      遍历拥有全部 <c>T1, T2</c>（且匹配 <paramref name="filter" />）的实体来读取它们：条目交出 <c>ref readonly</c> 引用，不打 tick，
+      所以读过的行不会被 <c>[Changed&lt;T&gt;]</c> 读取方当成写过（<see cref="M:EasyEcs.World.Query``2(EasyEcs.QueryFilter@)" /> 会给它访问到的
+      被追踪组件的行打 tick）。零分配。
     </summary>
   </member>
 </doc>

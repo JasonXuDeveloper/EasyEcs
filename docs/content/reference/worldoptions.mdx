@@ -52,7 +52,7 @@ Threads one parallel run uses at most (default: processor count): systems run by
 public bool MeasureSystems { get; init; }
 ```
 
-Time every system run into [`EcsSystem.Stats`](/en/docs/reference/ecssystem#stats) (two timestamp reads per run). Default false.
+Measure every system run into [`EcsSystem.Stats`](/en/docs/reference/ecssystem#stats): its time and allocated bytes (two timestamp and two allocation-counter reads per run, and per helper chunk of a parallel `[ForEach]`), and the entities its `[ForEach]` methods visited (one count per pass when it starts). Default false.
 
 ### `ParallelSystems` [#parallelsystems]
 

@@ -108,7 +108,7 @@ ulong mark = world.ChangeTick;
 unit.SetHealth(40);                                                 // a write after the mark
 var changed = QueryFilter.Create().Changed<Health>(mark);           // rows written at or after mark
 int count = world.Count<Health>(changed);
-foreach (var item in world.Query<Health>(changed))                  // items hand out refs: rows count as written
+foreach (var item in world.Read<Health>(changed))                   // Read stamps nothing: the rows stay as they were
     Console.WriteLine($"{item.Entity}: {item.Health.Value} hp");
 ```
 

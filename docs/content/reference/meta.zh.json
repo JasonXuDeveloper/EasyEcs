@@ -44,6 +44,8 @@
     "queryenumerator",
     "queryfilter",
     "queryitem",
+    "readenumerator",
+    "readitem",
     "relationindex",
     "relationindex-sources",
     "removedanyattribute",

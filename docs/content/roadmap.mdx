@@ -45,13 +45,14 @@ feature only where it measures ([D21](/en/docs/decisions#d21-net-10-features-onl
 - Multi-type `Disable` / `Enable` and bulk calls
   ([D26](/en/docs/decisions#d26-generated-members-and-a-suggestion-to-use-them)).
 - A generated `world.AddSystems()`: systems run in registration order, so the list is the tick's order and is read
-  where the world is built.
+  where the world is built
+  ([D56](/en/docs/decisions#d56-not-added)).
 - Singletons added when a read finds them missing (`world.X`, `GetSingleton<T>()`, a `[ForEach]` parameter): a
   missing singleton is a forgotten setup, and its default is rarely right (a clock with no step), so every read
   throws; `GetOrAddX()` adds the default where one is meant
   ([D27](/en/docs/decisions#d27-reading-a-missing-singleton-throws-everywhere)).
 - Cached filters from attributes, counting members per component (`world.CountPlayer()`) and a named `TryGetXRef`:
-  no line saved, more surface.
+  no line saved, more surface ([D56](/en/docs/decisions#d56-not-added)).
 - Parallel batch jobs, `entity.LastWriteTick<T>()`, public access sets and one parallelism budget for several worlds
   ([D36](/en/docs/decisions#d36-not-added)).
 - Run conditions (`[RunIf]`): system groups and the host already decide when a group runs, and a predicate per

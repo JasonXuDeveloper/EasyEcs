@@ -128,7 +128,7 @@ Visit only slice `index` of `count` of every matching table's rows: passes with 
 
 A table is cut at multiples of 64 rows (its presence words), from its row count when the pass starts, so a table of fewer than 64 rows is one piece; table i of the match starts its cut at slice (`index` + i) mod `count`, so many small tables spread over the slices too. Rows that move between passes (a swap-remove fills a hole with the table's last row, a structural change moves an entity to another table, the table grows or shrinks across a cut) may be skipped or visited twice in one cycle of `count` passes; the next cycle sees them again.
 
-Honoured by `ForEach`, `ForEachEntity`, `ForEachBatch` and their `Parallel` forms; the calls that need every matching row (`Query`, `Count`, `Any`, `DestroyEntities`, `entity.Run`, `SetAll` and the other bulk calls) throw `ArgumentException` for a sliced filter. A count of 1 is the whole tables.
+Honoured by `ForEach`, `ForEachEntity`, `ForEachBatch` and their `Parallel` forms; the calls that need every matching row (`Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run`, `SetAll` and the other bulk calls) throw `ArgumentException` for a sliced filter. A count of 1 is the whole tables.
 
 **Exceptions**
 

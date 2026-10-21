@@ -100,7 +100,7 @@ ulong mark = world.ChangeTick;
 unit.SetHealth(40);                                                 // 记下 tick 之后的一次写入
 var changed = QueryFilter.Create().Changed<Health>(mark);           // mark 及之后写入的行
 int count = world.Count<Health>(changed);
-foreach (var item in world.Query<Health>(changed))                  // 元素会交出 ref：这些行算作写入
+foreach (var item in world.Read<Health>(changed))                   // Read 不打 tick：这些行保持原样
     Console.WriteLine($"{item.Entity}: {item.Health.Value} hp");
 ```
 

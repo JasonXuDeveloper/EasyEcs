@@ -1,17 +1,17 @@
 ---
 title: Analyzer rules
-seoTitle: "EasyEcs analyzer rules EECS002-EECS045 for C# ECS code"
-description: Every EasyEcs analyzer rule, EECS002 to EECS045, with its severity, its code fix, the code it rejects and the code to write instead.
+seoTitle: "EasyEcs analyzer rules EECS002-EECS046 for C# ECS code"
+description: Every EasyEcs analyzer rule, EECS002 to EECS046, with its severity, its code fix, the code it rejects and the code to write instead.
 icon: ShieldCheck
 ---
 
 The EasyEcs analyzer ships in the package next to the source generator, so code that breaks the
 [ECS principles](/en/docs/ecs-principles) does not build. The correctness rules (EECS002 to EECS024, EECS035 and
 EECS036) are errors except three warnings for code that works but costs (EECS017, EECS018, EECS020). The generator skips invalid input and the
-analyzer reports it, so "not generated" always means "reported". The performance rules (EECS025 to EECS034, EECS039) find code
+analyzer reports it, so "not generated" always means "reported". The performance rules (EECS025 to EECS034, EECS039, EECS046) find code
 that works and does more than it needs, and the severity says what kind
 ([D29](/en/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)): a warning
-means the code costs (EECS025 to EECS032), a suggestion (Info) means the same cost written shorter (EECS033, EECS039), and an
+means the code costs (EECS025 to EECS032, EECS046), a suggestion (Info) means the same cost written shorter (EECS033, EECS039), and an
 error means code that cannot work (EECS034, a world update inside a system). The usage rules (EECS037, EECS038 and
 EECS040 to EECS045) find calls and declarations that compile but do not do what they say: an error where the runtime
 throws or the code cannot work, a warning where a write is lost. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
@@ -65,7 +65,7 @@ same package), and only when the result compiles.
 | [EECS028](#eecs028) | Warning | Code that runs every update does not allocate | |
 | [EECS029](#eecs029) | Warning | An instance `[ForEach]` method uses its system | Make it static |
 | [EECS030](#eecs030) | Warning | A structural change over a query is one bulk call | The bulk call |
-| [EECS031](#eecs031) | Warning | Entities created in a counted loop are created together, or reserved | `CreateEntities`, `EnsureCapacity` |
+| [EECS031](#eecs031) | Warning | Entities created in a counted loop are created together, or reserved | `CreateEntities`, `Reserve` |
 | [EECS032](#eecs032) | Warning | The world counts and filters | `Any`, `Count` |
 | [EECS033](#eecs033) | Info | A generated member says it shorter | The generated member |
 | [EECS034](#eecs034) | Error | A system does not run a world update | |
@@ -80,6 +80,7 @@ same package), and only when the result compiles.
 | [EECS043](#eecs043) | Error | A record struct key does not print itself | Implement `Key` explicitly |
 | [EECS044](#eecs044) | Error | A sliced filter goes to passes only | |
 | [EECS045](#eecs045) | Error | `Destroyed` and `Disabled<T>` are the world's to write | |
+| [EECS046](#eecs046) | Warning | A loop that only reads tracked components uses `Read` | `Read<T1..Tn>` |
 
 ## EECS002 [#eecs002]
 
@@ -1001,7 +1002,7 @@ world.DestroyAll<Health>(QueryFilter.Create().With<Dead>());
 
 Created one by one, a table and the entity storage grow by doubling, and in a world that has never held them the
 discarded arrays can set off a full garbage collection ([D28](/en/docs/decisions#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)).
-`CreateEntities` and `Instantiate(prefab, span)` create them in one pass; `EnsureCapacity` reserves room when each
+`CreateEntities` and `Instantiate(prefab, span)` create them in one pass; `Reserve` reserves room when each
 entity gets values of its own. The rule leaves out loops of a constant count under 4,096, or over an array created
 with one (no array reaches the large object heap), loops after a reservation, loops that create only under a branch or
 in an inner loop, and loops in a system (a running world reuses its rows). `Instantiate(prefab)` and
@@ -1384,6 +1385,36 @@ Call the world's own operation:
 
 ```csharp
 hero.Enable<Health>();
+```
+
+## EECS046 [#eecs046]
+
+**A query loop that only reads tracked components.** Warning. Code fix: `Read<T1..Tn>`.
+
+A `Query` item hands out its components by `ref` and stamps every row it visits of a
+[tracked component](/en/docs/guide/change-tracking), because it cannot tell a read from a write. A loop that only
+reads (a total, a replication send, a search) then makes every `[Changed<T>]` system visit rows nobody changed.
+`world.Read<T1..Tn>()` walks the same rows with `ref readonly` components and stamps nothing
+([Read](/en/docs/guide/queries#read)). The rule reports a `foreach` over `world.Query<...>()` of at least one tracked
+component whose body uses the item only through `Entity` and component reads; a write, a `ref` taken to a component
+or the item passed on keeps the `Query`.
+
+```csharp
+public record struct Rating(int Value) : IComponent, ITrackChanges;
+```
+
+```csharp doccheck=expect-EECS046
+int total = 0;
+foreach (var item in world.Query<Rating>())
+    total += item.Component1.Value;   // every Rating row is stamped as written
+```
+
+Read it:
+
+```csharp
+int total = 0;
+foreach (var item in world.Read<Rating>())
+    total += item.Component1.Value;
 ```
 
 ## Related [#related]

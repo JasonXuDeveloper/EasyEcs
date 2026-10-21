@@ -10,7 +10,7 @@ description: "一组组件和单例类型，建一次就一直留着（放在 st
 public readonly struct ComponentSet
 ```
 
-一组组件和单例类型，建一次就一直留着（放在 `static readonly` 字段里）：存档要写的组件（[`World.SaveEntities`](/zh/docs/reference/world#saveentities)），也就是只记录需要持久化的数据、不带周围运行时状态的那份记录；或者在重启时，整个 World 的存档要排除的类型（[`World.Save`](/zh/docs/reference/world#save-2)）和加载时要保留的单例（[`World.Load`](/zh/docs/reference/world#load-2)）。`ComponentSet.Create().With<Bank>().WithSingleton<Rates>()`；注册时才知道类型的框架按 `Type` 添加。每次调用都返回一个新集合。
+一组组件和单例类型，建一次就一直留着（放在 `static readonly` 字段里）：存档要写的组件（[`World.SaveEntitiesWith`](/zh/docs/reference/world#saveentitieswith)），也就是只记录需要持久化的数据、不带周围运行时状态的那份记录；或者在重启时，整个 World 的存档要排除的类型（[`World.SaveWithout`](/zh/docs/reference/world#savewithout)）和加载时要保留的单例（[`World.LoadKeeping`](/zh/docs/reference/world#loadkeeping)）。`ComponentSet.Create().With<Bank>().WithSingleton<Rates>()`；注册时才知道类型的框架按 `Type` 添加。每次调用都返回一个新集合。
 
 ## 方法 [#methods]
 

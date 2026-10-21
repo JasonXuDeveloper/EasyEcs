@@ -13,7 +13,7 @@ icon: CircleArrowUp
 
 四个调用和一个生成成员[改了名](#v4-7-renames)，编译器会找出每一处调用。除此之外，为 4.6 写的代码不用改就能编译，除非某个系统声明了名为
 `RunCount` 的成员，或者某个文件引入的其他命名空间里有和新类型同名的类型。
-有两个调用的行为变了；写被追踪组件的并行遍历切分行的方式也变了。
+有两个调用的行为变了；写被追踪组件的并行遍历切分行的方式也变了。[新的分析器规则](#v4-7-analyzer)会报告会抛异常或丢失写入的代码。
 
 ### `SaveEntities` 拒绝含单例的集合 [#v4-7-save-entities]
 
@@ -87,6 +87,17 @@ public class Spawner : EcsSystem
 
 4.7 新增的重启调用一开始就是新名字：`world.SaveWithout(output, in exclude)` 和
 `world.LoadKeeping(input, in keep, markWritten)`（见[重启](/zh/docs/guide/saves#restart)）。
+
+### 新的分析器规则：EECS037 到 EECS046 [#v4-7-analyzer]
+
+在 4.6 能编译的代码，到 4.7 可能编译失败。新的错误指出的是会抛异常或根本行不通的代码：
+[EECS040](/zh/docs/guide/analyzer#eecs040) 到 [EECS045](/zh/docs/guide/analyzer#eecs045)（对无法比较的类型调用 `SetIfChanged`、
+调用遍历期间会被拒绝的方法、遍历索引时修改被索引的组件、会打印自身的 record struct 键、把切片过滤条件交给需要整行的调用、
+手动写 `Destroyed` 或 `Disabled<T>` 标签）；[EECS036](/zh/docs/guide/analyzer#eecs036) 现在也报告有两个索引键的普通组件。
+新的警告指出丢失的写入或没人要的 tick：[EECS037](/zh/docs/guide/analyzer#eecs037)（job 的 `Writes`）、
+[EECS038](/zh/docs/guide/analyzer#eecs038)（改过的副本）和 [EECS046](/zh/docs/guide/analyzer#eecs046)（只读追踪变化组件的
+`Query` 循环：改用 `Read` 遍历）。[EECS039](/zh/docs/guide/analyzer#eecs039) 是建议。大多数规则有代码修复；把警告当错误的构建，
+在代码改好之前会因这些警告失败。
 
 ### `MeasureSystems` 统计得更多 [#v4-7-measure-systems]
 

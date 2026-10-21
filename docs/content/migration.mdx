@@ -15,7 +15,8 @@ current API.
 Four calls and one generated member are [renamed](#v4-7-renames): the compiler finds each call. Beyond that, code
 written for 4.6 compiles unchanged unless a system declares a member named `RunCount` or a file imports another
 namespace with a type of the same name as one of the new ones. Two calls behave differently, and parallel passes that
-write tracked components cut their rows differently.
+write tracked components cut their rows differently. The [new analyzer rules](#v4-7-analyzer) report code that throws or
+loses writes.
 
 ### `SaveEntities` refuses a set that names a singleton [#v4-7-save-entities]
 
@@ -95,6 +96,19 @@ to change:
 
 The restart calls new in 4.7 have their names from the start: `world.SaveWithout(output, in exclude)` and
 `world.LoadKeeping(input, in keep, markWritten)` ([restart](/en/docs/guide/saves#restart)).
+
+### New analyzer rules: EECS037 to EECS046 [#v4-7-analyzer]
+
+Code that compiled with 4.6 can fail the build with 4.7. The new errors name code that throws or cannot work:
+[EECS040](/en/docs/guide/analyzer#eecs040) to [EECS045](/en/docs/guide/analyzer#eecs045) (`SetIfChanged` of a type
+it cannot compare, a call a pass refuses, an indexed component changed while its index is walked, a record struct
+key that prints itself, a sliced filter given to a whole-row call, a `Destroyed` or `Disabled<T>` tag written by
+hand), and [EECS036](/en/docs/guide/analyzer#eecs036) now also reports a plain component with two index keys. The new
+warnings name a write that is lost or a stamp nobody asked for: [EECS037](/en/docs/guide/analyzer#eecs037) (a job's
+`Writes`), [EECS038](/en/docs/guide/analyzer#eecs038) (a changed copy) and
+[EECS046](/en/docs/guide/analyzer#eecs046) (a `Query` loop that only reads tracked components: loop over `Read`).
+[EECS039](/en/docs/guide/analyzer#eecs039) is a suggestion. Most have a code fix; a build that treats warnings as
+errors fails on the warnings until the code changes.
 
 ### `MeasureSystems` measures more [#v4-7-measure-systems]
 

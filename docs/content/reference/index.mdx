@@ -49,7 +49,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 |---|---|
 | [`ChildOf`](/en/docs/reference/childof) | The hierarchy relation: the entity is a child of ChildOf.Parent. |
 | [`ColumnInfo`](/en/docs/reference/columninfo) | A column of a table (TableInfo). |
-| [`ComponentSet`](/en/docs/reference/componentset) | A set of component and singleton types, built once and kept (a static readonly field): the components a save writes (World.SaveEntities), the record of what persists without the runtime state around it; or, for a restart, the types a whole-world save leaves out (World.Save) and the singletons a load keeps (World.Load). |
+| [`ComponentSet`](/en/docs/reference/componentset) | A set of component and singleton types, built once and kept (a static readonly field): the components a save writes (World.SaveEntitiesWith), the record of what persists without the runtime state around it; or, for a restart, the types a whole-world save leaves out (World.SaveWithout) and the singletons a load keeps (World.LoadKeeping). |
 | [`ComponentValue`](/en/docs/reference/componentvalue) | A component of an entity, as Entity.Describe reads it: a boxed copy of its value. |
 | [`Destroyed`](/en/docs/reference/destroyed) | Tag of an entity that was destroyed while holding ICleanupComponents: its other components are gone, it stays alive until its last cleanup component is removed. |
 | [`Disabled<T>`](/en/docs/reference/disabled) | The tag of an entity whose T is disabled (Entity.Disable): the entity keeps the value of T but lacks it for queries, Has and Get until Entity.Enable gives it back. |
@@ -62,6 +62,8 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`QueryEnumerator<T1..T9>`](/en/docs/reference/queryenumerator) | Allocation-free query enumerator; safe under structural changes during iteration (same visiting rules as ForEach). |
 | [`QueryFilter`](/en/docs/reference/queryfilter) | Extra query constraints: components that must be present without being read (QueryFilter.With) or must be absent (QueryFilter.Without). |
 | [`QueryItem<T1..T9>`](/en/docs/reference/queryitem) | One query result: the entity and refs into its row. |
+| [`ReadEnumerator<T1..T9>`](/en/docs/reference/readenumerator) | Allocation-free read-only query enumerator; safe under structural changes during iteration (same visiting rules as ForEach). |
+| [`ReadItem<T1..T9>`](/en/docs/reference/readitem) | One read-only query result: the entity and read-only refs into its row (nothing is stamped). |
 | [`RelationIndex<T>.Sources`](/en/docs/reference/relationindex-sources) | Enumerates the entities linking to one target (foreach), once per link. |
 | [`SingletonRef<T>`](/en/docs/reference/singletonref) | Handle to one world's singleton T. |
 | [`SystemAccess`](/en/docs/reference/systemaccess) | The data a system reads and writes, declared once when the system is added. |

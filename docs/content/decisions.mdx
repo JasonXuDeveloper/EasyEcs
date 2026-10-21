@@ -71,6 +71,9 @@ after the change on the machine of the time; they are history, not the current r
 | [D51](#d51-not-added) | Not added: run conditions, time-based intervals, required components, an entity map, a meter, a checksum, partial snapshots |
 | [D52](#d52-identity-entity) | An `Entity` used only as an identity does not make a system run alone |
 | [D53](#d53-own-members) | EasyEcs's own components get their members in EasyEcs; namesakes get none |
+| [D54](#d54-names) | A call's name says what it does |
+| [D55](#d55-read) | `Read` walks a query without stamping; EECS046 points at loops that should |
+| [D56](#d56-not-added) | Not added: a generated `AddSystems()`, cached filters from attributes, counting members, a named `TryGetXRef` |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -180,7 +183,7 @@ rows per word, and `[Removed<T>]` is a row like any other (its tick says when).
 **Decision.** Columns are contiguous arrays.
 
 **Why.** Paged columns iterate at the same speed but add an indirection to every handle access; all they save is the
-copy when a table grows, which `InitialEntityCapacity` and `EnsureCapacity` remove.
+copy when a table grows, which `InitialEntityCapacity` and `Reserve` remove.
 
 ## D8. No whole-entity disable [#d8-no-whole-entity-disable]
 
@@ -1084,7 +1087,7 @@ the tick is skipped whole, and words and blocks no column wrote.
 **Decision.** `world.SaveWithout(output, in exclude)` writes the whole world without the components and singletons of a
 `ComponentSet`; `world.LoadKeeping(input, in keep, markWritten)` keeps the singletons of `keep` exactly as the world has them
 (the save's values are skipped). A `ComponentSet` holds singletons as a second mask (`WithSingleton<T>()`;
-`With(Type)` takes either kind). `SaveEntities` refuses a set that names a singleton; `Load` refuses a `keep` that names
+`With(Type)` takes either kind). `SaveEntitiesWith` refuses a set that names a singleton; `LoadKeeping` refuses a `keep` that names
 a component.
 
 **Why.**
@@ -1102,7 +1105,7 @@ a component.
 **Considered.**
 - **A separate `SingletonSet` type:** two sets to build for one restart.
 - **Kept components meaning "not loaded":** the load replaces the entities, so a kept component would belong to none.
-- **Ignoring singletons in `SaveEntities`:** a set that silently does less than it says.
+- **Ignoring singletons in `SaveEntitiesWith`:** a set that silently does less than it says.
 
 ## D51. Not added: run conditions, time-based intervals, required components, an entity map, a meter, a checksum, partial snapshots [#d51-not-added]
 
@@ -1161,6 +1164,64 @@ named like another struct of its namespace gets no members at all.
 - **Hand-written members for `ChildOf`:** a second implementation that drifts from the generated ones.
 - **Generating them in each referencing assembly:** a file per assembly and duplicates between assemblies that see
   each other.
+
+## D54. A call's name says what it does [#d54-names]
+
+**Decision.** 4.7 renames five calls: `EnsureCapacity<T1..Tn>(count)` / `EnsureCapacity(prefab, count)` are
+`Reserve`, `DestroyEntities<T1..Tn>(filter)` is `DestroyAll`, `SaveEntities(output, ids, set)` is `SaveEntitiesWith`,
+`Save(output, exclude)` is `SaveWithout`, `Load(input, keep, markWritten)` is `LoadKeeping`, and a relation's generated
+`RemoveX(target)` is `UnlinkX(target)`. `DestroyEntities(ids)` destroys a list of ids. No alias is kept.
+
+**Why.**
+- **An overload that changes the meaning hides it.** `Save(output, set)` read like "save these", and it left them out;
+  `Load(input, set)` kept singletons. A different name makes the call site say it.
+- **`count` is more entities, not a capacity.** `EnsureCapacity` read like `List<T>.EnsureCapacity(total)`; `Reserve`
+  takes how many more will be created.
+- **`DestroyEntities` named two calls.** Ids and a filter now each have their name, and `DestroyAll` matches `SetAll`,
+  `RemoveAll`, `DisableAll`.
+- **`RemoveX(target)` and `RemoveX()` did different things.** One unlinks a target, the other drops the whole buffer.
+- **Pre-1.0 rule, applied to a minor version:** the compiler finds every call, and the
+  [migration guide](/en/docs/migration#v4-7-renames) maps each name.
+
+**Considered.**
+- **`[Obsolete]` aliases for a release:** two names for one call in completion lists and docs, for a change the
+  compiler already points at.
+
+## D55. `Read` walks a query without stamping; EECS046 points at loops that should [#d55-read]
+
+**Decision.** `world.Read<T1..Tn>(filter)` walks the rows of a query with `ref readonly` components and stamps
+nothing; `Query` keeps stamping the tracked components it hands out. The analyzer rule EECS046 (warning, code fix)
+reports a `Query` loop of a tracked component that uses its items only for reads.
+
+**Why.**
+- **A `ref` cannot tell a read from a write.** A `Query` item hands out `ref T`, so it stamps every visited row of a
+  tracked component; a total, a status page or a replication send then made every `[Changed<T>]` reader visit every
+  row.
+- **A second item type, generated.** `ReadItem` / `ReadEnumerator` come from the same `ArityGenerator` template as
+  `QueryItem`, without the stamping lines; generated members (`item.Health`) are `ref readonly` on them.
+- **The rule is what makes it used.** The 17 read-only `Query` loops it found in this repository (tests, the AOT
+  check, a sample) all became `Read`.
+- **Measured** (`ChangeTrackingReadBenchmark`, 100,000 entities, 10 written per tick, a read of every health and the
+  `[Changed<Health>]` replication): 538 µs per tick with `Query`, 145 µs with `Read`, 0 B both.
+
+**Considered.**
+- **A `readonly` flag on `Query`:** the item type would still hand out `ref T`, so a write would compile and not be
+  stamped.
+- **Stamping on first write only:** a `ref` gives no hook for a write; `Mut<T>` is that hook in `[ForEach]` methods.
+
+## D56. Not added: a generated `AddSystems()`, cached filters from attributes, counting members, a named `TryGetXRef` [#d56-not-added]
+
+**Decision.** Four generator features were weighed and left out.
+
+**Why.**
+- **A generated `world.AddSystems()`.** Systems run in registration order, so the list is the tick's order; read
+  where the world is built, it is the schedule's documentation. A generated list would fix an order by file or name.
+- **Cached filters from attributes** (a `QueryFilter` field generated from `[With<T>]` on a field). A
+  `static readonly QueryFilter` is one line already, and a generated one hides where it is built.
+- **Counting members per component** (`world.CountPlayer()`). `world.Count<Player>()` says the same in as many
+  characters; one more member per component grows completion lists without saving a line.
+- **A named `TryGetXRef`.** `entity.TryGetRef<T>(out found)` is the rare call; the named members cover the common
+  ones (`TryGetX`, `entity.X`).
 
 ## Related [#related]
 

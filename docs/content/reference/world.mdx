@@ -311,18 +311,18 @@ How the world runs its systems, for diagnostics (a startup log, a dashboard, a d
 
 **Complexity** ([API table](/en/docs/api)): O(groups × systems³)
 
-### `DestroyEntities` [#destroyentities]
+### `DestroyAll` [#destroyall]
 
 ```csharp
-public int DestroyEntities<T1>(in QueryFilter filter = default) where T1 : struct, IComponent;
-public int DestroyEntities<T1, T2>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3, T4>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3, T4, T5>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3, T4, T5, T6>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3, T4, T5, T6, T7>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3, T4, T5, T6, T7, T8>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
-public int DestroyEntities<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
+public int DestroyAll<T1>(in QueryFilter filter = default) where T1 : struct, IComponent;
+public int DestroyAll<T1, T2>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent;
+public int DestroyAll<T1, T2, T3>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
+public int DestroyAll<T1, T2, T3, T4>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
+public int DestroyAll<T1, T2, T3, T4, T5>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
+public int DestroyAll<T1, T2, T3, T4, T5, T6>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
+public int DestroyAll<T1, T2, T3, T4, T5, T6, T7>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
+public int DestroyAll<T1, T2, T3, T4, T5, T6, T7, T8>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
+public int DestroyAll<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
 ```
 
 One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
@@ -330,6 +330,16 @@ One overload per number of components, 1 to 9 (generated from one template); thi
 Destroy every alive entity having all of `T1, T2` (and matching `filter`) and return how many. One pass through the structural gate: O(matching archetypes + rows). Owner thread only (see docs/content/guide/threading.md).
 
 **Complexity** ([API table](/en/docs/api)): O(M + S)
+
+### `DestroyEntities` [#destroyentities]
+
+```csharp
+public int DestroyEntities(params ReadOnlySpan<EntityId> entities);
+```
+
+Destroy the entities of `entities` (stale ids and repeats are skipped; an entity holding cleanup components is retired, as [`Entity.Destroy`](/en/docs/reference/entity#destroy) does) and return how many. One pass through the structural gate and one cascade for the whole list: a list of ids goes as `CollectionsMarshal.AsSpan(list)`, no copy. Destroy by filter with `DestroyAll`. O(entities). Owner thread only.
+
+**Complexity** ([API table](/en/docs/api)): O(ids × c)
 
 ### `DestroyedSince` [#destroyedsince]
 
@@ -339,7 +349,7 @@ public bool DestroyedSince(ulong since, Span<EntityId> into, out int count);
 
 The entities destroyed at a change tick of `since` or later (the rule of `QueryFilter.Since`: take [`World.ChangeTick`](/en/docs/reference/world#changetick) as a mark, pass it later), from the log of [`WorldOptions.DestroyLog`](/en/docs/reference/worldoptions#destroylog). Each reader keeps its own mark, so readers that acknowledged different ticks share one log. `count` is how many there are; the first `min(count, into.Length)` are written to `into`, oldest first, each with the version it had (a recycled index names the new entity with another version). A span of [`WorldOptions.DestroyLog`](/en/docs/reference/worldoptions#destroylog) ids always holds them all.
 
-An entity counts as destroyed when its id stops being alive ([`World.IsAlive`](/en/docs/reference/world#isalive) turns false): at `Destroy`, `DestroyEntities`, a hierarchy or relation cascade, a `MoveEntities` out of this world; an entity holding [`ICleanupComponent`](/en/docs/reference/icleanupcomponent)s when its last one is removed (until then it is alive, tagged [`Destroyed`](/en/docs/reference/destroyed)); a [`World.Restore`](/en/docs/reference/world#restore) or `Load` for every entity alive before it and not after it (with the same version). [`World.Dispose`](/en/docs/reference/world#dispose) records nothing.
+An entity counts as destroyed when its id stops being alive ([`World.IsAlive`](/en/docs/reference/world#isalive) turns false): at `Destroy`, `DestroyEntities`, `DestroyAll`, a hierarchy or relation cascade, a `MoveEntities` out of this world; an entity holding [`ICleanupComponent`](/en/docs/reference/icleanupcomponent)s when its last one is removed (until then it is alive, tagged [`Destroyed`](/en/docs/reference/destroyed)); a [`World.Restore`](/en/docs/reference/world#restore) or `Load` for every entity alive before it and not after it (with the same version). [`World.Dispose`](/en/docs/reference/world#dispose) records nothing.
 
 Returns false, writing nothing and `count` 0, when `since` is older than [`World.DestroyLogOldestTick`](/en/docs/reference/world#destroylogoldesttick): records the reader needs were overwritten, and it must resynchronize (send the whole state again). O(count). Allocates nothing. Owner thread, or a thread of a parallel stage.
 
@@ -379,42 +389,6 @@ public int EnableAll<T>(in QueryFilter filter = default) where T : struct, IComp
 [`Entity.Enable`](/en/docs/reference/entity#enable) on every alive entity with `T` disabled and matching `filter`: each gets its kept value back (a write of a tracked component; indexes follow). Returns how many. O(matching tables + rows). Owner thread only.
 
 **Complexity** ([API table](/en/docs/api)): O(M + S)
-
-### `EnsureCapacity` [#ensurecapacity]
-
-```csharp
-public void EnsureCapacity(Prefab prefab, int count);
-```
-
-Pre-size the table `prefab`'s instances go to, and the entity storage, so the next `count` [`World.Instantiate`](/en/docs/reference/world#instantiate) calls never grow them: a wave of spawns pays its growth before the tick. Instances whose groups put them in another table ([`World.GroupBy`](/en/docs/reference/world#groupby)) grow that one. For a prefab with members, every member's table. O(components) plus one growth. Owner thread only.
-
-**Complexity** ([API table](/en/docs/api)):
-
-- `world.EnsureCapacity<T1..Tn>(count)`: O(n), plus one growth
-- `world.EnsureCapacity(prefab, count)`: O(c), plus one growth
-
-### `EnsureCapacity` [#ensurecapacity-2]
-
-```csharp
-public void EnsureCapacity<T1>(int count) where T1 : struct, IComponent;
-public void EnsureCapacity<T1, T2>(int count) where T1 : struct, IComponent where T2 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3, T4>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3, T4, T5>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3, T4, T5, T6>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3, T4, T5, T6, T7>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3, T4, T5, T6, T7, T8>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
-public void EnsureCapacity<T1, T2, T3, T4, T5, T6, T7, T8, T9>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
-```
-
-One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
-
-Pre-size the table of entities with exactly `T1, T2` and the entity storage, so the next `count` `CreateEntity` / `CreateEntities` calls with these components never grow them: a start-up or a wave of spawns pays its growth once, before the loop. Entities whose groups put them in another table ([`World.GroupBy`](/en/docs/reference/world#groupby)) grow that one; components added later move entities to other tables, which grow on their own. O(2) plus one growth. Owner thread only (see docs/content/guide/threading.md).
-
-**Complexity** ([API table](/en/docs/api)):
-
-- `world.EnsureCapacity<T1..Tn>(count)`: O(n), plus one growth
-- `world.EnsureCapacity(prefab, count)`: O(c), plus one growth
 
 ### `EnsureEntityCapacity` [#ensureentitycapacity]
 
@@ -708,30 +682,6 @@ Replace this world's entities, components and singletons with those [`World.Save
 - `world.Load(input, markWritten)`: O(entities × components)
 - `world.Load(input, in ComponentSet keep, markWritten)`: O(entities × components)
 
-### `Load` [#load-2]
-
-```csharp
-public void Load(ReadOnlySpan<byte> input, in ComponentSet keep, bool markWritten = true);
-```
-
-[`World.Load`](/en/docs/reference/world#load) that keeps the singletons of `keep` as this world has them: the save's values of them are skipped (their slices, never deserialized), a kept singleton keeps its box (a [`World.SingletonRef`](/en/docs/reference/world#singletonref) still works) and its value, and one this world lacks stays absent, one the save lacks is not removed. For a restart: the new version sets its configuration, then loads the previous process's world (saved with [`World.Save`](/en/docs/reference/world#save-2) without what it must not bring back). O(entities × components). Not while a pass iterates.
-
-**Parameters**
-
-- `input`: The bytes of the save.
-- `keep`: The singletons to keep. Components are not kept: the load replaces the entities.
-- `markWritten`: As [`World.Load`](/en/docs/reference/world#load); for the loaded rows only.
-
-**Exceptions**
-
-- `ArgumentException`: `keep` holds a component type (leave a component out of the save with [`World.Save`](/en/docs/reference/world#save-2) instead).
-- `InvalidDataException`: As [`World.Load`](/en/docs/reference/world#load).
-
-**Complexity** ([API table](/en/docs/api)):
-
-- `world.Load(input, markWritten)`: O(entities × components)
-- `world.Load(input, in ComponentSet keep, markWritten)`: O(entities × components)
-
 ### `LoadEntities` [#loadentities]
 
 ```csharp
@@ -753,7 +703,7 @@ Create the entities `SaveEntities` wrote (in this process or another), with new 
 public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into, bool markWritten = true);
 ```
 
-Put the components [`World.SaveEntities`](/en/docs/reference/world#saveentities-2) wrote onto entities that exist already (an actor whose entity was made before its record arrived): the components of the i-th saved entity are set on `into`[i], added or replacing the values it has, each entity moving table at most once; components the save does not hold stay as they are. Indexes, groups and change ticks follow as with `Set` (every loaded component counts as written); a disabled component arrives disabled with its value. [`EntityId`](/en/docs/reference/entityid) fields that named an entity of the group name the entity of `into` it became, every other one is [`EntityId.Null`](/en/docs/reference/entityid#null), and a [`ChildOf`](/en/docs/reference/childof) whose parent stayed behind is not set. Returns how many entities were loaded. O(entities × components). Not while a pass iterates.
+Put the components [`World.SaveEntities`](/en/docs/reference/world#saveentities) wrote onto entities that exist already (an actor whose entity was made before its record arrived): the components of the i-th saved entity are set on `into`[i], added or replacing the values it has, each entity moving table at most once; components the save does not hold stay as they are. Indexes, groups and change ticks follow as with `Set` (every loaded component counts as written); a disabled component arrives disabled with its value. [`EntityId`](/en/docs/reference/entityid) fields that named an entity of the group name the entity of `into` it became, every other one is [`EntityId.Null`](/en/docs/reference/entityid#null), and a [`ChildOf`](/en/docs/reference/childof) whose parent stayed behind is not set. Returns how many entities were loaded. O(entities × components). Not while a pass iterates.
 
 With `markWritten` false, the loaded components do not count as written: each one the save holds has no change tick afterwards, also when it replaces a value written before (a default from a prefab), so `[Changed<T>]` systems and `Since` filters do not visit the entity for the load (an actor restored from storage holds what storage has, and "save what changed" saves nothing of it until code writes it). Components the save does not hold keep their ticks.
 
@@ -764,6 +714,25 @@ With `markWritten` false, the loaded components do not count as written: each on
 - `InvalidOperationException`: A loaded unique key ([`IUniqueIndexed`](/en/docs/reference/iuniqueindexed)) is held by another entity than the one it is loaded onto (checked against the world before the load): nothing is written.
 
 **Complexity** ([API table](/en/docs/api)): O(entities × components)
+
+### `LoadKeeping` [#loadkeeping]
+
+```csharp
+public void LoadKeeping(ReadOnlySpan<byte> input, in ComponentSet keep, bool markWritten = true);
+```
+
+[`World.Load`](/en/docs/reference/world#load) that keeps the singletons of `keep` as this world has them: the save's values of them are skipped (their slices, never deserialized), a kept singleton keeps its box (a [`World.SingletonRef`](/en/docs/reference/world#singletonref) still works) and its value, and one this world lacks stays absent, one the save lacks is not removed. For a restart: the new version sets its configuration, then loads the previous process's world (saved with [`World.SaveWithout`](/en/docs/reference/world#savewithout) without what it must not bring back). O(entities × components). Not while a pass iterates.
+
+**Parameters**
+
+- `input`: The bytes of the save.
+- `keep`: The singletons to keep. Components are not kept: the load replaces the entities.
+- `markWritten`: As [`World.Load`](/en/docs/reference/world#load); for the loaded rows only.
+
+**Exceptions**
+
+- `ArgumentException`: `keep` holds a component type (leave a component out of the save with [`World.SaveWithout`](/en/docs/reference/world#savewithout) instead).
+- `InvalidDataException`: As [`World.Load`](/en/docs/reference/world#load).
 
 ### `MoveEntities` [#moveentities]
 
@@ -792,6 +761,24 @@ public QueryEnumerator<T1, T2, T3, T4, T5, T6, T7, T8, T9> Query<T1, T2, T3, T4,
 One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
 
 Enumerate entities having all of `T1, T2` (and matching `filter`). Allocation-free.
+
+### `Read` [#read]
+
+```csharp
+public ReadEnumerator<T1> Read<T1>(in QueryFilter filter = default) where T1 : struct, IComponent;
+public ReadEnumerator<T1, T2> Read<T1, T2>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3> Read<T1, T2, T3>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3, T4> Read<T1, T2, T3, T4>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3, T4, T5> Read<T1, T2, T3, T4, T5>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3, T4, T5, T6> Read<T1, T2, T3, T4, T5, T6>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3, T4, T5, T6, T7> Read<T1, T2, T3, T4, T5, T6, T7>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3, T4, T5, T6, T7, T8> Read<T1, T2, T3, T4, T5, T6, T7, T8>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
+public ReadEnumerator<T1, T2, T3, T4, T5, T6, T7, T8, T9> Read<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
+```
+
+One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
+
+Enumerate entities having all of `T1, T2` (and matching `filter`) to read them: the items hand out `ref readonly` refs and stamp nothing, so a `[Changed<T>]` reader does not see a row as written because it was read ([`World.Query`](/en/docs/reference/world#query) stamps the rows of tracked components it visits). Allocation-free.
 
 ### `Relations` [#relations]
 
@@ -861,6 +848,42 @@ public void RemoveTypes(AssemblyLoadContext context);
 - `world.RemoveTypes(assembly)`: O(entities with such components + tables + cached queries)
 - `RemoveTypes(context)`: O(entities with such components + tables + cached queries)
 
+### `Reserve` [#reserve]
+
+```csharp
+public void Reserve(Prefab prefab, int count);
+```
+
+Pre-size the table `prefab`'s instances go to, and the entity storage, so the next `count` [`World.Instantiate`](/en/docs/reference/world#instantiate) calls never grow them: a wave of spawns pays its growth before the tick. Instances whose groups put them in another table ([`World.GroupBy`](/en/docs/reference/world#groupby)) grow that one. For a prefab with members, every member's table. O(components) plus one growth. Owner thread only.
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.Reserve<T1..Tn>(count)`: O(n), plus one growth
+- `world.Reserve(prefab, count)`: O(c), plus one growth
+
+### `Reserve` [#reserve-2]
+
+```csharp
+public void Reserve<T1>(int count) where T1 : struct, IComponent;
+public void Reserve<T1, T2>(int count) where T1 : struct, IComponent where T2 : struct, IComponent;
+public void Reserve<T1, T2, T3>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
+public void Reserve<T1, T2, T3, T4>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
+public void Reserve<T1, T2, T3, T4, T5>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
+public void Reserve<T1, T2, T3, T4, T5, T6>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
+public void Reserve<T1, T2, T3, T4, T5, T6, T7>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
+public void Reserve<T1, T2, T3, T4, T5, T6, T7, T8>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
+public void Reserve<T1, T2, T3, T4, T5, T6, T7, T8, T9>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
+```
+
+One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
+
+Pre-size the table of entities with exactly `T1, T2` and the entity storage, so the next `count` `CreateEntity` / `CreateEntities` calls with these components never grow them: a start-up or a wave of spawns pays its growth once, before the loop. Entities whose groups put them in another table ([`World.GroupBy`](/en/docs/reference/world#groupby)) grow that one; components added later move entities to other tables, which grow on their own. O(2) plus one growth. Owner thread only (see docs/content/guide/threading.md).
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.Reserve<T1..Tn>(count)`: O(n), plus one growth
+- `world.Reserve(prefab, count)`: O(c), plus one growth
+
 ### `Restore` [#restore]
 
 ```csharp
@@ -879,42 +902,9 @@ public void Save(IBufferWriter<byte> output);
 
 Write the entities (ids and versions), their components and the singletons into `output`, for [`World.Load`](/en/docs/reference/world#load). Unmanaged components are their raw rows (a layout change makes old saves unloadable) unless they are `[NinoType]`s, whose formatter writes them (its format decides what a type may change: fields appended with `VersionTolerant`, any change of members with `Keyed`); managed components and singletons need a Nino formatter. Types are recorded by Nino type id: a type renamed with `[NinoFormerName]` loads its old rows. Allocates nothing once its buffers are large enough. O(entities × components). Not while a pass iterates.
 
-**Complexity** ([API table](/en/docs/api)):
-
-- `world.Save(output)`: O(entities × components)
-- `world.Save(output, in ComponentSet exclude)`: O(entities × components)
-
-### `Save` [#save-2]
-
-```csharp
-public void Save(IBufferWriter<byte> output, in ComponentSet exclude);
-```
-
-[`World.Save`](/en/docs/reference/world#save) without the components and singletons of `exclude`: their slices are not written and they need no Nino formatter (a world-local cache that cannot be serialized, configuration the next version brings anew). A Disabled tag goes with its component; an entity whose components are all left out is written without them. For a restart, with [`World.Load`](/en/docs/reference/world#load-2). Allocates nothing once its buffers are large enough. O(entities × components). Not while a pass iterates.
-
-**Complexity** ([API table](/en/docs/api)):
-
-- `world.Save(output)`: O(entities × components)
-- `world.Save(output, in ComponentSet exclude)`: O(entities × components)
+**Complexity** ([API table](/en/docs/api)): O(entities × components)
 
 ### `SaveEntities` [#saveentities]
-
-```csharp
-public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet components);
-```
-
-[`World.SaveEntities`](/en/docs/reference/world#saveentities-2) of the components in `components` only (a record of the components that persist, without the runtime ones): the others are not written and need no Nino formatter; a tag is written as present or not, a disabled component with its kept value. Entities without any of them are written too, empty. Allocates nothing once its buffers are large enough. O(entities given × components). Not while a pass iterates.
-
-**Exceptions**
-
-- `ArgumentException`: `components` holds a singleton type: a group save writes no singletons.
-
-**Complexity** ([API table](/en/docs/api)):
-
-- `world.SaveEntities(output, ids)`: O(entities given × components)
-- `world.SaveEntities(output, ids, set)`: O(entities given × components)
-
-### `SaveEntities` [#saveentities-2]
 
 ```csharp
 public void SaveEntities(IBufferWriter<byte> output, params ReadOnlySpan<EntityId> entities);
@@ -922,10 +912,31 @@ public void SaveEntities(IBufferWriter<byte> output, params ReadOnlySpan<EntityI
 
 Write `entities` (stale ids and repeats are skipped) and their components into `output`, for [`World.LoadEntities`](/en/docs/reference/world#loadentities) or [`World.LoadEntitiesInto`](/en/docs/reference/world#loadentitiesinto): a group of entities that moves to another world (a player and what it owns, to another server). Singletons and the other entities are not written; collect a hierarchy with [`World.Descendants`](/en/docs/reference/world#descendants) (a list of ids goes as `CollectionsMarshal.AsSpan(list)`, no copy). Allocates nothing once its buffers are large enough. O(entities given × components). Not while a pass iterates.
 
-**Complexity** ([API table](/en/docs/api)):
+**Complexity** ([API table](/en/docs/api)): O(entities given × components)
 
-- `world.SaveEntities(output, ids)`: O(entities given × components)
-- `world.SaveEntities(output, ids, set)`: O(entities given × components)
+### `SaveEntitiesWith` [#saveentitieswith]
+
+```csharp
+public void SaveEntitiesWith(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet components);
+```
+
+[`World.SaveEntities`](/en/docs/reference/world#saveentities) of the components in `components` only (a record of the components that persist, without the runtime ones): the others are not written and need no Nino formatter; a tag is written as present or not, a disabled component with its kept value. Entities without any of them are written too, empty. Allocates nothing once its buffers are large enough. O(entities given × components). Not while a pass iterates.
+
+**Exceptions**
+
+- `ArgumentException`: `components` holds a singleton type: a group save writes no singletons.
+
+**Complexity** ([API table](/en/docs/api)): O(entities given × components)
+
+### `SaveWithout` [#savewithout]
+
+```csharp
+public void SaveWithout(IBufferWriter<byte> output, in ComponentSet exclude);
+```
+
+[`World.Save`](/en/docs/reference/world#save) without the components and singletons of `exclude`: their slices are not written and they need no Nino formatter (a world-local cache that cannot be serialized, configuration the next version brings anew). A Disabled tag goes with its component; an entity whose components are all left out is written without them. For a restart, with [`World.LoadKeeping`](/en/docs/reference/world#loadkeeping). Allocates nothing once its buffers are large enough. O(entities × components). Not while a pass iterates.
+
+**Complexity** ([API table](/en/docs/api)): O(entities × components)
 
 ### `SetAll` [#setall]
 

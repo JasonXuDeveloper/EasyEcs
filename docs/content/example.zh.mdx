@@ -60,7 +60,7 @@ flowchart LR
 | [清理组件](/zh/docs/guide/cleanup-and-disable)（`ICleanupComponent`、`Destroyed`） | `Spawn`：NPC 销毁后留下它，交给 `RespawnSystem.Revive` |
 | [层级](/zh/docs/guide/hierarchy)（`ChildOf`、`Children`、`Descendants`） | 投射物是玩家的子实体；`Transfer` 收集整棵子树 |
 | [遍历中的结构变更](/zh/docs/guide/structural-changes) | 遍历途中增删状态、死亡、复活、生成和销毁投射物 |
-| [预制体](/zh/docs/guide/prefabs)（`Prefab`、`Instantiate`、`EnsureCapacity`）与克隆 | `Hero`、`Grunt`、`Brute`（`Grunt` 的变体）；`Mirror` 克隆一个活着的单位 |
+| [预制体](/zh/docs/guide/prefabs)（`Prefab`、`Instantiate`、`Reserve`）与克隆 | `Hero`、`Grunt`、`Brute`（`Grunt` 的变体）；`Mirror` 克隆一个活着的单位 |
 | [实例化时直接给值](/zh/docs/guide/prefabs#instantiate-with-values) | `Shot` 连同位置、速度和 `ChildOf` 一起生成；`SpawnNpc`；`Join` |
 | [变更追踪](/zh/docs/guide/change-tracking)与移除检测 | `ReplicationSystem`；`WrittenSinceCheckpoint` |
 | 每个客户端一份 tick 的 [`ChangedAny`](/zh/docs/guide/change-tracking#changed-any)、[销毁日志](/zh/docs/guide/change-tracking#destroy-log) | `CatchUp`：过滤条件只存一个，每个客户端用自己的 tick；`DestroyedSince` |
@@ -181,7 +181,7 @@ NPC），以及通过 `ref` 写过的背包（`[Changed<DynamicBuffer<Loot>>]`�
 ### 搭建 World [#setup]
 
 构造函数配置 World（并行系统、计时、出错的系统直接关掉而不是抛异常、每个单位一条的销毁日志），按 `Zone` 分组建表，
-设置好友关系的目标策略，按 tick 顺序注册系统，再批量生成单位：每一波只扩容一次表。`EnsureCapacity` 为 NPC 的重生波次预留空间，
+设置好友关系的目标策略，按 tick 顺序注册系统，再批量生成单位：每一波只扩容一次表。`Reserve` 为 NPC 的重生波次预留空间，
 tick 中表不会再扩容。`SpawnNpc` 实例化重生的 NPC 时直接给出位置。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#setup</include>
