@@ -12,7 +12,7 @@ icon: CircleArrowUp
 ## v4.6 → v4.7 [#v4-6-to-v4-7]
 
 四个调用和一个生成成员[改了名](#v4-7-renames)，编译器会找出每一处调用。除此之外，为 4.6 写的代码不用改就能编译，除非某个系统声明了名为
-`RunCount` 的成员，或者某个文件引入的其他命名空间里有和新类型同名的类型。
+`RunCount` 的成员，某个文件引入的其他命名空间里有和新类型同名的类型，或者代码直接写出了[生成的类](#v4-7-generated-classes)的名字。
 有两个调用的行为变了；写被追踪组件的并行遍历切分行的方式也变了。[新的分析器规则](#v4-7-analyzer)会报告会抛异常或丢失写入的代码。
 
 ### `SaveEntities` 拒绝含单例的集合 [#v4-7-save-entities]
@@ -87,6 +87,20 @@ public class Spawner : EcsSystem
 
 4.7 新增的重启调用一开始就是新名字：`world.SaveWithout(output, in exclude)` 和
 `world.LoadKeeping(input, in keep, markWritten)`（见[重启](/zh/docs/guide/saves#restart)）。
+
+### 生成的类 [#v4-7-generated-classes]
+
+存放生成成员的类，后缀现在都以 `Ecs` 开头，两个类型的类不会再同名（以前 `Loot` 和 `LootPrefab` 的会）：
+
+| 4.6 | 4.7 |
+|---|---|
+| `HealthEcsExtensions` | `HealthEcsExtensions`（不变） |
+| `HealthPrefabExtensions` | `HealthEcsPrefabExtensions` |
+| `LootBufferExtensions` | `LootEcsBufferExtensions` |
+| `LootPrefabBufferExtensions` | `LootEcsPrefabBufferExtensions` |
+
+通过成员的调用（`prefab.SetHealth(100)`、`e.WriteLoot()`）不用改。只有写出类名的代码要改：静态调用
+（`HealthPrefabExtensions.SetHealth(prefab, 100)`）、`using static` 指令或 `cref`。
 
 ### 新的分析器规则：EECS037 到 EECS046 [#v4-7-analyzer]
 

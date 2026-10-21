@@ -253,7 +253,8 @@ bool changed = hero.SetArmorIfChanged(6);                  // false: Armor is 6 
 - The property is `Get` (or `Read`), so it throws when the component is missing: check `HasX`, or use `TryGetX` /
   `TryGetRef<T>(out found)` when it is optional.
 - `SetX` has one overload per public constructor (a record struct's primary constructor), or one that takes every
-  field when the struct has no constructor and only public, writable fields. `SetXIfChanged` takes the same
+  field when the struct has no constructor and only public, writable fields and auto-properties with a public `set` or
+  `init` (`Hp { get; set; }` is the parameter `hp`). `SetXIfChanged` takes the same
   arguments; it exists for tracked, indexed and grouped components that are not tags and can be compared
   (`IEquatable<T>`, or unmanaged).
 - Writes are methods, not property setters: C# rejects a setter on a handle that is not a variable, such as a
@@ -261,9 +262,11 @@ bool changed = hero.SetArmorIfChanged(6);                  // false: Armor is 6 
 - The analyzer knows these members: `SetX`, `GetOrAddX` and `RemoveX` are structural changes, the rest are reads or
   writes of a value.
 - No members are generated for generic components, components nested in types other code cannot see, and names the
-  receiver already has (`Entity.Id`, `World.Update`); the generic API still works for them. A nested component or
-  buffer element named like another struct of its namespace (`Npc.State` and `Player.State`) gets none at all: both
-  would get `entity.State`, ambiguous wherever the namespace is imported.
+  receiver already has (`Entity.Id`, `World.Update`, `Prefab.SetBuffer`); the generic API still works for them. A
+  name two structs of one namespace would both get goes to neither, since every call of it would be ambiguous: the tag
+  `Dead` and the component `IsDead` both offer `entity.IsDead`, `Zone : IIndexed<int>` and the singleton `ZoneIndex`
+  both offer `world.ZoneIndex`, and each keeps its other members. A nested component or buffer element named like
+  another struct of its namespace (`Npc.State` and `Player.State`) gets none at all: both would get `entity.State`.
 - EasyEcs's own `ChildOf` has them too (`entity.ChildOf`, `SetChildOf(parent)`, `world.ChildOfIndex`, ...; no
   `DisableChildOf`), and the `Destroyed` tag has `entity.IsDestroyed`.
 

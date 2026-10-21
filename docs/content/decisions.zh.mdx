@@ -67,7 +67,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D50](#d50-restart-saves) | 重启存档可以不写某些类型，重启读档可以保留单例 |
 | [D51](#d51-not-added) | 不加：运行条件、按时间的间隔、必需组件、实体映射表、Meter、校验和、部分快照 |
 | [D52](#d52-identity-entity) | 只当身份用的 `Entity` 不让系统单独运行 |
-| [D53](#d53-own-members) | EasyEcs 自带的组件在 EasyEcs 里生成成员；同名的嵌套类型不生成 |
+| [D53](#d53-own-members) | EasyEcs 自带的组件在 EasyEcs 里生成成员；两个类型共有的名字谁都不生成 |
 | [D54](#d54-names) | 调用的名字说明它做什么 |
 | [D55](#d55-read) | `Read` 遍历查询不打 tick；EECS046 指出应该这样写的循环 |
 | [D56](#d56-not-added) | 不加：生成的 `AddSystems()`、从特性生成的缓存过滤条件、按组件的计数成员、命名的 `TryGetXRef` |
@@ -930,17 +930,26 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 **比较过。**
 - **把 `Has<T>` 当成读 `T`：** 存在位只在结构变更时改，但 `Get<T>` 是写，别的组件的泛型 `T` 也没法逐个调用确定；组件的读写还是只看参数这一条规则。
 
-## D53. EasyEcs 自带的组件在 EasyEcs 里生成成员；同名的嵌套类型不生成 [#d53-own-members]
+## D53. EasyEcs 自带的组件在 EasyEcs 里生成成员；两个类型共有的名字谁都不生成 [#d53-own-members]
 
 **决定。** `ComponentGenerator` 在 EasyEcs 自己的编译里也为公开组件生成成员：`ChildOf` 拿到被索引组件的那些成员，但没有
 `DisableChildOf` / `EnableChildOf`（它不能被禁用）；`Destroyed` 标签只有 `entity.IsDestroyed`（由 World 添加和移除）。
-嵌套的组件或缓冲元素和所在命名空间里另一个结构体同名时，一个成员都不生成。
+同一命名空间里两个结构体都会生成的成员名（标签 `Dead` 和组件 `IsDead` 的 `entity.IsDead`）两边都不生成；嵌套的组件或缓冲元素和所在命名空间里
+另一个结构体同名时，一个成员都不生成。生成的类名是 `{类型}` 加一个以 `Ecs` 开头的后缀（`HealthEcsExtensions`、`HealthEcsPrefabExtensions`、
+`LootEcsBufferExtensions`、`LootEcsPrefabBufferExtensions`），成员是 public 的，类和类型一样可见。
 
 **原因。**
 - **一个生成器，一种成员形状。** 用户读 `entity.ChildOf` 和读 `entity.Health` 一样；这些成员随包发布，引用方的程序集不用再为它们生成文件。
 - **World 拒绝的事就不提供：** 一个永远抛异常的 `DisableChildOf` 只是一个只会失败的 API。
 - **同名规则要覆盖每个名字。** 两个类型只要生成一个同名成员，每次调用都有歧义，所以嵌套的那个放弃全部成员：实体、World、过滤条件和预制体上的都不要。
   任何结构体都算，因为任何结构体都可以是缓冲的元素。
+- **共有的名字没有主人。** 两个不同名的类型之间（`Shield` 的 `IsShieldDisabled` 和标签 `ShieldDisabled` 的），没有哪个理应保留它，
+  读代码的人指的是哪个类型也猜不出来。每个类型只凭命名空间算出对方的名字，去掉共有的，所以两边不用看到对方的输出也会做出同样的决定，
+  其他成员照常保留。
+- **没有一个后缀是另一个的结尾。** 用 `PrefabExtensions` 和 `BufferExtensions` 时，`Loot` 的预制体缓冲类和 `LootPrefab` 的缓冲类都叫
+  `LootPrefabBufferExtensions`。每个后缀都以同一个 `Ecs` 标记开头，类型名就在标记开始的地方结束。
+- **成员 public，类按类型可见。** 看得到内部成员的程序集（`InternalsVisibleTo`）用不了 internal 的扩展属性，C# 会拒绝；internal 类里的
+  public 成员能被同样的代码用到。
 
 **比较过。**
 - **手写 `ChildOf` 的成员：** 第二份实现，迟早和生成的对不上。

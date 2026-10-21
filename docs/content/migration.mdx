@@ -13,8 +13,8 @@ current API.
 ## v4.6 → v4.7 [#v4-6-to-v4-7]
 
 Four calls and one generated member are [renamed](#v4-7-renames): the compiler finds each call. Beyond that, code
-written for 4.6 compiles unchanged unless a system declares a member named `RunCount` or a file imports another
-namespace with a type of the same name as one of the new ones. Two calls behave differently, and parallel passes that
+written for 4.6 compiles unchanged unless a system declares a member named `RunCount`, a file imports another
+namespace with a type of the same name as one of the new ones, or code names a [generated class](#v4-7-generated-classes). Two calls behave differently, and parallel passes that
 write tracked components cut their rows differently. The [new analyzer rules](#v4-7-analyzer) report code that throws or
 loses writes.
 
@@ -96,6 +96,21 @@ to change:
 
 The restart calls new in 4.7 have their names from the start: `world.SaveWithout(output, in exclude)` and
 `world.LoadKeeping(input, in keep, markWritten)` ([restart](/en/docs/guide/saves#restart)).
+
+### Generated classes [#v4-7-generated-classes]
+
+The classes that hold the generated members have a suffix that begins with `Ecs`, so two types' classes never share
+a name (`Loot`'s and `LootPrefab`'s did):
+
+| 4.6 | 4.7 |
+|---|---|
+| `HealthEcsExtensions` | `HealthEcsExtensions` (unchanged) |
+| `HealthPrefabExtensions` | `HealthEcsPrefabExtensions` |
+| `LootBufferExtensions` | `LootEcsBufferExtensions` |
+| `LootPrefabBufferExtensions` | `LootEcsPrefabBufferExtensions` |
+
+Calls through the members (`prefab.SetHealth(100)`, `e.WriteLoot()`) do not change. Only code that names a class
+does: a static call (`HealthPrefabExtensions.SetHealth(prefab, 100)`), a `using static` directive or a `cref`.
 
 ### New analyzer rules: EECS037 to EECS046 [#v4-7-analyzer]
 

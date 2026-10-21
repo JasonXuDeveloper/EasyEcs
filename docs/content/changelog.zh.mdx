@@ -66,6 +66,8 @@ icon: RotateCcwClock
   改为 `UnlinkX(target)`（`RemoveX()` 仍然删掉整个缓冲区）。见[迁移指南](/zh/docs/migration#v4-7-renames)。
 - 集合里有单例时，`SaveEntitiesWith(output, ids, set)` 抛 `ArgumentException`（实体组存档不写单例）。见[迁移指南](/zh/docs/migration#v4-7-save-entities)。
 - `EcsSystem` 新增公开的 `RunCount`：系统里同名的成员会隐藏它（警告 CS0108）。见[迁移指南](/zh/docs/migration#v4-7-run-count)。
+- 生成的类改了名（`HealthPrefabExtensions` 改为 `HealthEcsPrefabExtensions`，`LootBufferExtensions` 改为 `LootEcsBufferExtensions`）：
+  只有直接写出这些类名的代码要改。见[迁移指南](/zh/docs/migration#v4-7-generated-classes)。
 - 新的分析器错误（[EECS040](/zh/docs/guide/analyzer#eecs040) 到 [EECS045](/zh/docs/guide/analyzer#eecs045)，以及针对有两个索引键的组件的
   [EECS036](/zh/docs/guide/analyzer#eecs036)）拒绝会抛异常或行不通的代码；新的警告（[EECS037](/zh/docs/guide/analyzer#eecs037)、
   [EECS038](/zh/docs/guide/analyzer#eecs038)、[EECS046](/zh/docs/guide/analyzer#eecs046)）报告丢失的写入，以及只读循环打的 tick。
@@ -76,6 +78,16 @@ icon: RotateCcwClock
 - 嵌套的组件或缓冲元素和所在命名空间里另一个结构体同名时，仍会生成一部分成员（`DisableX`、`InX`、`world.XIndex`、缓冲的成员），
   和另一个类型的成员同名，调用时编译不过（有歧义）。这样的类型现在不生成任何成员，用泛型 API 访问。
 - 关系的名字恰好是某个 `Entity` 成员的后缀（`Relation`，对应 `HasRelation`）时，会丢掉 `LinksX(target)`。
+- 同一命名空间里两个结构体生成的成员同名时（标签 `Dead` 和组件 `IsDead`、`Target` 和 `HasTarget`、`Zone : IIndexed<int>` 和单例
+  `ZoneIndex`），每次调用这个成员都有歧义。现在两个类型都不生成它，其他成员照常保留。
+- internal 组件生成的属性（`entity.X`、`HasX`、`IsX`、`world.X`、`world.XIndex`）在看得到库内部成员的程序集（`InternalsVisibleTo`）里编译不过。
+  现在这些成员是 public 的，所在的类和类型一样可见。
+- 库和看得到它内部成员的程序集对同样的组件做 `Query` 或 `Read` 时，后者里查询项的命名成员有歧义。现在后者直接用库里的。
+- 同一命名空间里的缓冲元素 `Loot` 和 `LootPrefab` 会生成两个同名的类，编译不过。生成的类换了名字，见[迁移指南](/zh/docs/migration#v4-7-generated-classes)。
+- 组件名和 `Prefab` 的方法撞名时（`Buffer`，对应 `SetBuffer`），生成的预制体成员永远调不到：`prefab.SetBuffer(5)` 实际执行的是
+  `Prefab.SetBuffer<int>`。现在不再生成这样的成员。
+- 用自动属性写的组件或关系（`public int Hp { get; set; }`、`public EntityId Target { get; init; }`）没有 `SetX` 或 `AddX`。
+  现在带公开 `set` 或 `init` 的自动属性和字段一样算进去。
 - 只通过目标类型推断的创建（`Regen<Health> regen = new();`）或 `typeof` 闭合的泛型系统，代码要在运行时靠反射生成，
   Native AOT 下会失败；这两种写法现在在编译期就注册。
 - 并行 pass（并行 `[ForEach]`、`ForEachParallel`，或者并行系统的一个阶段）可能卡死，调用方一直自旋，同时某一块（或某个系统）被执行两次：

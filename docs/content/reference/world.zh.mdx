@@ -677,10 +677,7 @@ public void Load(ReadOnlySpan<byte> input, bool markWritten = true);
 
 - `InvalidDataException`：字节不是存档，或者已经损坏，或者某个组件的字段在存档之后改过（非托管组件的大小或布局，托管组件的 Nino 布局），或者存档把唯一组件（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)）的同一个键给了多个实体。这时 World 保持原样。
 
-**复杂度**（[API 表](/zh/docs/api)）：
-
-- `world.Load(input, markWritten)`：O(实体数 × 组件数)
-- `world.Load(input, in ComponentSet keep, markWritten)`：O(实体数 × 组件数)
+**复杂度**（[API 表](/zh/docs/api)）：O(实体数 × 组件数)
 
 ### `LoadEntities` [#loadentities]
 
@@ -733,6 +730,8 @@ public void LoadKeeping(ReadOnlySpan<byte> input, in ComponentSet keep, bool mar
 
 - `ArgumentException`：`keep` 里有组件类型（要把组件排除在存档之外，改用 [`World.SaveWithout`](/zh/docs/reference/world#savewithout)）。
 - `InvalidDataException`：同 [`World.Load`](/zh/docs/reference/world#load)。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(实体数 × 组件数)
 
 ### `MoveEntities` [#moveentities]
 

@@ -677,10 +677,7 @@ Replace this world's entities, components and singletons with those [`World.Save
 
 - `InvalidDataException`: The bytes are not a save or are damaged, or a component's fields changed since the save (an unmanaged one's size or layout, a managed one's Nino layout), or the save gives one key of a unique component ([`IUniqueIndexed`](/en/docs/reference/iuniqueindexed)) to several entities. The world is then left as it was.
 
-**Complexity** ([API table](/en/docs/api)):
-
-- `world.Load(input, markWritten)`: O(entities × components)
-- `world.Load(input, in ComponentSet keep, markWritten)`: O(entities × components)
+**Complexity** ([API table](/en/docs/api)): O(entities × components)
 
 ### `LoadEntities` [#loadentities]
 
@@ -733,6 +730,8 @@ public void LoadKeeping(ReadOnlySpan<byte> input, in ComponentSet keep, bool mar
 
 - `ArgumentException`: `keep` holds a component type (leave a component out of the save with [`World.SaveWithout`](/en/docs/reference/world#savewithout) instead).
 - `InvalidDataException`: As [`World.Load`](/en/docs/reference/world#load).
+
+**Complexity** ([API table](/en/docs/api)): O(entities × components)
 
 ### `MoveEntities` [#moveentities]
 

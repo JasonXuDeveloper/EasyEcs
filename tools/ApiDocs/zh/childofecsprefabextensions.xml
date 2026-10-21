@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.ChildOfPrefabExtensions" source="72ae61d0e30e">
+  <member name="T:EasyEcs.ChildOfEcsPrefabExtensions" source="72ae61d0e30e">
     <summary><see cref="T:EasyEcs.ChildOf" /> 在 <c>Prefab</c> 上的具名成员（生成）。</summary>
   </member>
-  <member name="P:EasyEcs.ChildOfPrefabExtensions.&lt;G&gt;$DBBEDA64A27E236727B1771218258F21.ChildOf" source="cdd12c083445">
+  <member name="P:EasyEcs.ChildOfEcsPrefabExtensions.&lt;G&gt;$DBBEDA64A27E236727B1771218258F21.ChildOf" source="cdd12c083445">
     <summary>预制体的 <see cref="T:EasyEcs.ChildOf" />，只读（<c>Read</c>）；用 <c>Set</c> 修改。没有时抛异常。</summary>
   </member>
-  <member name="P:EasyEcs.ChildOfPrefabExtensions.&lt;G&gt;$DBBEDA64A27E236727B1771218258F21.HasChildOf" source="366d3d3c1b7d">
+  <member name="P:EasyEcs.ChildOfEcsPrefabExtensions.&lt;G&gt;$DBBEDA64A27E236727B1771218258F21.HasChildOf" source="366d3d3c1b7d">
     <summary>预制体是否有 <see cref="T:EasyEcs.ChildOf" />。</summary>
   </member>
-  <member name="M:EasyEcs.ChildOfPrefabExtensions.&lt;G&gt;$DBBEDA64A27E236727B1771218258F21.RemoveChildOf" source="dfb034be7ba3">
+  <member name="M:EasyEcs.ChildOfEcsPrefabExtensions.&lt;G&gt;$DBBEDA64A27E236727B1771218258F21.RemoveChildOf" source="dfb034be7ba3">
     <summary>配方有 <see cref="T:EasyEcs.ChildOf" /> 时去掉它；返回预制体。</summary>
   </member>
-  <member name="M:EasyEcs.ChildOfPrefabExtensions.&lt;G&gt;$DBBEDA64A27E236727B1771218258F21.SetChildOf(EasyEcs.EntityId)" source="2cbcb59862a6">
+  <member name="M:EasyEcs.ChildOfEcsPrefabExtensions.&lt;G&gt;$DBBEDA64A27E236727B1771218258F21.SetChildOf(EasyEcs.EntityId)" source="2cbcb59862a6">
     <summary>把 <see cref="T:EasyEcs.ChildOf" /> 加进配方，已有时替换它的值；返回预制体。</summary>
   </member>
 </doc>

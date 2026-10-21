@@ -263,7 +263,10 @@ int linked = paladin.MemberOf.Count;                          // 1
 int inRed = world.MemberOfIndex.Count(red);                   // the knight and the paladin
 ```
 
-A relation gets no `WriteX()` or `GetOrAddX()`: its links are indexed, so they change only through the calls above.
+`AddX` takes what builds a link: one overload per public constructor, or, without one, every field and
+auto-property with a public `set` or `init` (`struct Ally : IRelation { public EntityId Target { get; init; } public
+int Weight; }` gets `e.AddAlly(target, weight)`). A relation gets no `WriteX()` or `GetOrAddX()`: its links are
+indexed, so they change only through the calls above.
 
 ### When the target is destroyed [#target-policies]
 

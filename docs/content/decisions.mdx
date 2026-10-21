@@ -70,7 +70,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D50](#d50-restart-saves) | A restart save leaves types out; a restart load keeps singletons |
 | [D51](#d51-not-added) | Not added: run conditions, time-based intervals, required components, an entity map, a meter, a checksum, partial snapshots |
 | [D52](#d52-identity-entity) | An `Entity` used only as an identity does not make a system run alone |
-| [D53](#d53-own-members) | EasyEcs's own components get their members in EasyEcs; namesakes get none |
+| [D53](#d53-own-members) | EasyEcs's own components get their members in EasyEcs; shared names go to neither type |
 | [D54](#d54-names) | A call's name says what it does |
 | [D55](#d55-read) | `Read` walks a query without stamping; EECS046 points at loops that should |
 | [D56](#d56-not-added) | Not added: a generated `AddSystems()`, cached filters from attributes, counting members, a named `TryGetXRef` |
@@ -1145,12 +1145,16 @@ the handle on) keeps the system running alone.
 - **Treating `Has<T>` as a read of `T`:** presence bits change only through structural changes, but `Get<T>` writes
   and a generic `T` of another component is not known per call; one rule for reads of components stays the parameters.
 
-## D53. EasyEcs's own components get their members in EasyEcs; namesakes get none [#d53-own-members]
+## D53. EasyEcs's own components get their members in EasyEcs; shared names go to neither type [#d53-own-members]
 
 **Decision.** `ComponentGenerator` also runs for EasyEcs's public components inside EasyEcs itself: `ChildOf` gets
 the members of an indexed component without `DisableChildOf` / `EnableChildOf` (it cannot be disabled), and the
-`Destroyed` tag gets `entity.IsDestroyed` only (the world adds and removes it). A nested component or buffer element
-named like another struct of its namespace gets no members at all.
+`Destroyed` tag gets `entity.IsDestroyed` only (the world adds and removes it). A member name two structs of one
+namespace would both get (the tag `Dead` and the component `IsDead`: `entity.IsDead`) is generated for neither; a
+nested component or buffer element named like another struct of its namespace gets no members at all. Generated
+classes are named `{Type}` + a suffix that begins with `Ecs` (`HealthEcsExtensions`, `HealthEcsPrefabExtensions`,
+`LootEcsBufferExtensions`, `LootEcsPrefabBufferExtensions`), and their members are public in a class as visible as
+the type.
 
 **Why.**
 - **One generator, one shape of members.** Users read `entity.ChildOf` as they read `entity.Health`; the members ship
@@ -1159,6 +1163,15 @@ named like another struct of its namespace gets no members at all.
 - **A namesake rule must cover every name.** Two types emitting any member of the same name make every call of it
   ambiguous, so the nested one gives up all of them, on the entity, the world, the filter and the prefab. Any struct
   counts, since any struct can be a buffer's element.
+- **A shared name has no owner.** Between two types with different names (`Shield`'s `IsShieldDisabled` and the tag
+  `ShieldDisabled`'s), neither is the obvious one to keep it, and which type a reader means cannot be guessed. Each
+  computes the other's names from the namespace alone and drops the shared ones, so both decide alike without
+  seeing each other's output, and keep their other members.
+- **No suffix ends another.** With `PrefabExtensions` and `BufferExtensions`, `Loot`'s prefab buffer class and
+  `LootPrefab`'s buffer class were both `LootPrefabBufferExtensions`. One `Ecs` marker at the start of every suffix
+  makes the type's name end where the marker begins.
+- **Public members, visible class.** C# rejects an internal extension property from an assembly that sees the
+  internals (`InternalsVisibleTo`); public members of an internal class reach exactly the same code.
 
 **Considered.**
 - **Hand-written members for `ChildOf`:** a second implementation that drifts from the generated ones.

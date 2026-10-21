@@ -235,13 +235,15 @@ bool changed = hero.SetArmorIfChanged(6);                  // false：Armor 已�
 ```
 
 - 属性就是 `Get`（或 `Read`），组件不存在时会抛异常：可选的组件先用 `HasX` 判断，或者用 `TryGetX` / `TryGetRef<T>(out found)`。
-- `SetX` 每个公开构造函数生成一个重载（record struct 就是主构造函数）；没有构造函数、且字段全是公开可写时，生成一个接收全部字段的重载。
+- `SetX` 每个公开构造函数生成一个重载（record struct 就是主构造函数）；没有构造函数、且字段全是公开可写的字段或带公开 `set` / `init`
+  的自动属性时，生成一个接收全部字段的重载（`Hp { get; set; }` 对应参数 `hp`）。
   `SetXIfChanged` 的参数和它一样，只为能比较（实现了 `IEquatable<T>`，或者是非托管类型）的被追踪、索引、分组组件生成，标签没有。
 - 写入是方法而不是属性 setter：句柄不是变量时（比如 `foreach` 变量），C# 不允许调用 setter。
 - 分析器认识这些成员：`SetX`、`GetOrAddX`、`RemoveX` 算结构变更，其余算对值的读写。
-- 泛型组件、嵌套在别处看不见的类型里的组件，以及和接收者已有成员重名的（`Entity.Id`、`World.Update`），不生成成员；泛型 API 照样能用。
-  嵌套的组件或缓冲元素和所在命名空间里另一个结构体同名时（`Npc.State` 和 `Player.State`），一个成员都不生成：两者都会生成
-  `entity.State`，导入这个命名空间的地方就会有歧义。
+- 泛型组件、嵌套在别处看不见的类型里的组件，以及和接收者已有成员重名的（`Entity.Id`、`World.Update`、`Prefab.SetBuffer`），不生成成员；
+  泛型 API 照样能用。同一命名空间里两个结构体都会生成的同名成员，两边都不生成，因为每次调用都会有歧义：标签 `Dead` 和组件 `IsDead`
+  都会生成 `entity.IsDead`，`Zone : IIndexed<int>` 和单例 `ZoneIndex` 都会生成 `world.ZoneIndex`，各自的其他成员照常生成。
+  嵌套的组件或缓冲元素和所在命名空间里另一个结构体同名时（`Npc.State` 和 `Player.State`），一个成员都不生成：两者都会生成 `entity.State`。
 - EasyEcs 自带的 `ChildOf` 也有生成成员（`entity.ChildOf`、`SetChildOf(parent)`、`world.ChildOfIndex` 等，没有 `DisableChildOf`），
   `Destroyed` 标签有 `entity.IsDestroyed`。
 

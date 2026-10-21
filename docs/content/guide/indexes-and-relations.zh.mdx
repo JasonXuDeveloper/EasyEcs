@@ -246,6 +246,8 @@ int linked = paladin.MemberOf.Count;                          // 1
 int inRed = world.MemberOfIndex.Count(red);                   // 骑士和圣骑士
 ```
 
+`AddX` 的参数就是构造一条链接要的东西：每个公开构造函数一个重载；没有构造函数时，接收全部字段和带公开 `set` / `init` 的自动属性
+（`struct Ally : IRelation { public EntityId Target { get; init; } public int Weight; }` 得到 `e.AddAlly(target, weight)`）。
 关系没有 `WriteX()` 和 `GetOrAddX()`：链接带索引，只能通过上面这些调用修改。
 
 ### 目标被销毁时 [#target-policies]

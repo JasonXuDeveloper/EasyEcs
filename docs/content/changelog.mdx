@@ -89,6 +89,9 @@ major or minor version that needs code changes? The
   none). See the [migration guide](/en/docs/migration#v4-7-save-entities).
 - `EcsSystem` has a public `RunCount`: a member of that name in a system hides it (warning CS0108). See the
   [migration guide](/en/docs/migration#v4-7-run-count).
+- Generated classes are renamed (`HealthPrefabExtensions` is `HealthEcsPrefabExtensions`, `LootBufferExtensions` is
+  `LootEcsBufferExtensions`): only code that names them changes. See the
+  [migration guide](/en/docs/migration#v4-7-generated-classes).
 - New analyzer errors ([EECS040](/en/docs/guide/analyzer#eecs040) to [EECS045](/en/docs/guide/analyzer#eecs045), and
   [EECS036](/en/docs/guide/analyzer#eecs036) for a component with two index keys) reject code that throws or cannot
   work, and new warnings ([EECS037](/en/docs/guide/analyzer#eecs037), [EECS038](/en/docs/guide/analyzer#eecs038),
@@ -101,6 +104,21 @@ major or minor version that needs code changes? The
   (`DisableX`, `InX`, `world.XIndex`, a buffer's members) under the same names as the other type's, so calls to
   them did not compile (ambiguous). Such a type now gets no generated members; the generic API names it.
 - A relation named like an `Entity` member's suffix (`Relation`, for `HasRelation`) lost its `LinksX(target)`.
+- Two structs of one namespace whose generated members shared a name (the tag `Dead` and the component `IsDead`,
+  `Target` and `HasTarget`, `Zone : IIndexed<int>` and the singleton `ZoneIndex`) made every call of that member
+  ambiguous. Neither type gets it now; both keep their other members.
+- An internal component's generated properties (`entity.X`, `HasX`, `IsX`, `world.X`, `world.XIndex`) did not compile in
+  an assembly that sees the library's internals (`InternalsVisibleTo`). The members are public now, in a class as
+  visible as the type.
+- A `Query` or `Read` of the same components in a library and in an assembly that sees its internals made the
+  named item members ambiguous there. The second assembly now uses the library's.
+- Buffer elements such as `Loot` and `LootPrefab` in one namespace gave two generated classes the same name, which
+  did not compile. Generated classes have new names; see the
+  [migration guide](/en/docs/migration#v4-7-generated-classes).
+- A component named like a `Prefab` method (`Buffer`, for `SetBuffer`) got a prefab member that calls never reached:
+  `prefab.SetBuffer(5)` ran `Prefab.SetBuffer<int>` instead. Such a member is no longer generated.
+- A component or relation built from auto-properties (`public int Hp { get; set; }`, `public EntityId Target { get;
+  init; }`) got no `SetX` or `AddX`. Auto-properties with a public `set` or `init` count as fields now.
 - A generic system closed only by a target-typed creation (`Regen<Health> regen = new();`) or by `typeof` had its
   code made by reflection at run time, which fails under Native AOT; those forms now register it at compile time.
 - A parallel pass (a parallel `[ForEach]` or `ForEachParallel`, or a stage of parallel systems) could hang, its
