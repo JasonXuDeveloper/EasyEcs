@@ -48,12 +48,12 @@ flowchart LR
 | 功能 | 位置 |
 | --- | --- |
 | [组件、标签、单例](/zh/docs/guide/entities-and-components) | `Position`、`Health`、`Player`、`Dead`；单例 `Battle`、`Rules`、`Waypoints` |
-| 生成的成员 | `players[i].Position = …`、`SetZone`、`SetFrozen`、`RemoveBurning`、`SetDead`、`IsDead`、`HasAccount`、`TryGetMana`、`WriteHealth()`、`World.Battle`、`KillsIndex`、`AccountIndex`；缓冲 `player.Loot`、`WriteLoot()`；`DisableAttack` / `EnableAttack`；预制体上的 `SetHealth`、`SetNpc`、`SetLifetime` |
+| 生成的成员 | `players[i].Position = …`、`SetZone`、`SetFrozen`、`RemoveBurning`、`SetDead`、`IsDead`、`HasAccount`、`TryGetMana`、`World.Battle`、`KillsIndex`、`AccountIndex`；缓冲 `player.Loot`、`WriteLoot()`；`DisableAttack` / `EnableAttack`；预制体上的 `SetHealth`、`SetNpc`、`SetLifetime` |
 | [系统](/zh/docs/guide/systems)与过滤（`With`、`Without`、`WithAny`） | 所有系统；`AfflictionSystem` 用 `World.Count` 统计着火**或**冻住的单位 |
 | [并行 `[ForEach]`](/zh/docs/guide/threading) | `SteeringSystem`；`NewRound` 里的 `Reports.HealFully` 和 `Reports.Scatter` |
 | 并行系统（`WorldOptions.ParallelSystems`）、[`DescribeSchedule`](/zh/docs/guide/diagnostics#schedule) | `PlanningSystem` 和 `ManaSystem`：数据互不相交；`Schedule()` 能看到这一点 |
 | [分片](/zh/docs/guide/systems#slices)（`[ForEach(Slices = N)]`、`RunCount`） | `PlanningSystem` 每次只规划四分之一的 NPC |
-| [`Mut<T>` 与 `SetIfChanged`](/zh/docs/guide/change-tracking#set-if-changed) | `PlanningSystem.Plan` 只在目标变了时才写 |
+| [`Mut<T>` 与 `SetIfChanged`](/zh/docs/guide/change-tracking#set-if-changed) | `PlanningSystem.Plan` 只在目标变了时才写；`CombatSystem` 和 `RegenerationSystem` 只在命中或回血时给 `Health` 打 tick |
 | 批处理方法（`Span<T>`）、SIMD | `MovementSystem`；`Reports.SumHealth` |
 | 系统之外的 `[ForEach]` runner | `Reports` |
 | `Maybe<T>` | `RegenerationSystem`：着火的玩家回血更少 |
@@ -114,7 +114,9 @@ flowchart LR
 战斗拆成两部分：`CombatSystem` 只管伤害，`StatusSystem` 只管状态。冻住一个单位就是禁用它的 `Attack` 和 `Velocity`：
 值还留着，但在 `Thaw` 重新启用之前没有查询能看到它们。于是被冻住的单位不攻击、不移动、不射击，却没有任何系统需要检查
 `Frozen`。`AfflictionSystem` 统计着火或冻住的单位时不写循环：`Count` 直接读存在位，一次 64 行。`DeathSystem`
-给死者打上标签，其他系统按这个标签过滤。
+给死者打上标签，其他系统按这个标签过滤。`CombatSystem` 以 `Mut<Health>` 接收 `Health`：大多数单位处在两次攻击之间，只有出手的
+单位的 `Health` 会被打 tick，而且每行不用再按实体查找一次；调度器看到的是系统读写了哪些组件，而不是一个经由 `Entity`
+访问组件的系统。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#combat</include>
 
@@ -132,7 +134,7 @@ NPC 死亡时，把下一个 NPC 的出生点写进 `Spawn` 清理组件，把�
 投射物是一个带 `ChildOf` 的实体，指向发射它的玩家，玩家被销毁时投射物随之销毁。
 `Instantiate(Shot, p, velocity, new ChildOf(player))` 复制 `Shot` 预制体，同时写入这三个值：投射物一次行拷贝就落进最终的表，
 生成时就已经挂在玩家下面。`RegenerationSystem` 用一个方法处理两种情况：
-`Maybe<Burning>` 告诉它这个实体有没有着火，着火的玩家回血更少。`ClockSystem` 最先注册，却因为
+`Maybe<Burning>` 告诉它这个实体有没有着火，着火的玩家回血更少；`Mut<Health>` 只给真正回了血的玩家打 tick，满血的不打。`ClockSystem` 最先注册，却因为
 `[UpdateAfter<RegenerationSystem>]` 排到了最后。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#projectiles</include>

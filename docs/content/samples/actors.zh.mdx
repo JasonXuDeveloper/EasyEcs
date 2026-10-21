@@ -22,7 +22,8 @@ import { Database, Layers, ListTree, Workflow } from 'lucide-react';
   全部组件，用 `static readonly` 过滤条件拒绝已关门的商店；任务中途让商店关门，任务里的 ref 依然有效。
 - **激活与记录**：Actor 的实体在第一次用到时创建，它的[记录](/zh/docs/guide/migration-and-unload#records)用
   `LoadEntitiesInto(..., markWritten: false)` 加载上去，加载不算变更。
-- **只保存变过的**：持久化组件是 `ITracked`（[变更追踪](/zh/docs/guide/change-tracking)），宿主只保存上次保存后被写过的 Actor。
+- **只保存变过的**：持久化组件是 `ITracked`（[变更追踪](/zh/docs/guide/change-tracking)）；保存组里的一个系统列出它上次运行后
+  被写过的 Actor，宿主在更新后保存它们，所以保存过的 Actor 在再次被写之前不会再存一遍。
 
 ## 运行 [#run-it]
 
@@ -40,17 +41,27 @@ dotnet run --project samples/Actors
 ## 消息 [#messages]
 
 `Buy` 和 `Deposit` 是任务；`Mailman` 在索引里按键找到 Actor，在它身上跑任务。卖掉最后一件的 `Buy` 会在任务中途加上
-`Closed`：这是一次结构变更，任务里的 ref 仍然指向商店的值。
+`Closed`：这是一次结构变更，任务里的 ref 仍然指向商店的值。`Mailman` 先读库存再跑 `Buy`：任务一运行，它的 `WriteMask`
+就会给 `Stock` 打 tick，被拒绝的订单如果也跑了任务，下一次保存就会把没变的商店再存一遍。
 
 <include lang="csharp" meta='title="Messages.cs"'>../../../samples/Actors/Messages.cs</include>
 
 ## 每类 Actor 的系统 [#systems]
 
-每个系统属于它那一类的组，所以 `world.Update<Shop>()` 只在商店上跑商店的系统。
+每个系统属于它那一类的组，所以 `world.Update<Shop>()` 只在商店上跑商店的系统。`InterestSystem` 通过
+[`Mut<Balance>`](/zh/docs/guide/change-tracking#set-if-changed) 写入：`SetIfChanged` 只给真正增长了的余额打 tick。
 
 <include lang="csharp" meta='title="Systems/ShopSystems.cs"'>../../../samples/Actors/Systems/ShopSystems.cs</include>
 
 <include lang="csharp" meta='title="Systems/BankSystems.cs"'>../../../samples/Actors/Systems/BankSystems.cs</include>
+
+## 保存变过的 [#saving]
+
+保存组只有一个系统，覆盖所有种类的 Actor。它的 `[Changed<T>]` 方法选出它上次运行后被写过的行，所以每次运行列出的是上次保存后
+被写过的 Actor，它自己的运行就是标记。保存记录会改写表，遍历期间不允许（[EECS041](/zh/docs/guide/analyzer#eecs041)），所以
+系统把 Actor 记进 `Unsaved` 单例，由宿主在 `world.Update<Saving>()` 之后保存。
+
+<include lang="csharp" meta='title="Systems/SaveSystems.cs"'>../../../samples/Actors/Systems/SaveSystems.cs</include>
 
 ## 激活 [#activation]
 
@@ -61,7 +72,7 @@ dotnet run --project samples/Actors
 
 ## 程序 [#program]
 
-激活、发消息、更新两个组、保存，最后重启。存储是一个代替数据库的字典，宿主的“只保存变过的”也放在
+激活、发消息、更新各个组、保存，最后重启。存储是一个代替数据库的字典，宿主保存所列 Actor 的代码也放在
 [`Host/Storage.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Actors/Host/Storage.cs) 里：这是周边代码，
 不是本课重点。
 
@@ -78,12 +89,12 @@ buy 1 at shop 1: refused, 0 left, closed: True
 deposit 50 at bank 7: True
 deposit 50 at bank 8: False
 after the updates: shop 1 has 3 (sold 2), bank 7 has 1060
-saved after the messages: 3
+saved after the messages: 2
 restarted: shop 1 has 3 (sold 0), bank 7 has 1060
 ```
 
-激活后只保存了新商店：用 `markWritten: false` 加载的两条记录不算变更。第三笔订单被过滤条件拒绝（商店在第二笔后关门了），
-银行 8 从未激活。重启后商店保留了存下的库存，但销量归零：`Sales` 只在内存里。
+激活后只保存了新商店：用 `markWritten: false` 加载的两条记录不算变更。第三笔订单在任务运行前就被拒绝（商店在第二笔后卖完并关门），
+银行 8 从未激活。发完消息后保存了商店 1 和银行 7；商店 2 激活后已经保存过，之后没人写它，所以不再保存。重启后商店保留了存下的库存，但销量归零：`Sales` 只在内存里。
 
 ## 相关页面 [#related]
 

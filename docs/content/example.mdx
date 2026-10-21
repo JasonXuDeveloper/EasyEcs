@@ -54,12 +54,12 @@ EasyEcs' features to their place in this file.
 | Feature | Where |
 | --- | --- |
 | [Components, tags, singletons](/en/docs/guide/entities-and-components) | `Position`, `Health`, `Player`, `Dead`; singletons `Battle`, `Rules`, `Waypoints` |
-| Generated members | `players[i].Position = …`, `SetZone`, `SetFrozen`, `RemoveBurning`, `SetDead`, `IsDead`, `HasAccount`, `TryGetMana`, `WriteHealth()`, `World.Battle`, `KillsIndex`, `AccountIndex`; buffers `player.Loot`, `WriteLoot()`; `DisableAttack` / `EnableAttack`; on prefabs `SetHealth`, `SetNpc`, `SetLifetime` |
+| Generated members | `players[i].Position = …`, `SetZone`, `SetFrozen`, `RemoveBurning`, `SetDead`, `IsDead`, `HasAccount`, `TryGetMana`, `World.Battle`, `KillsIndex`, `AccountIndex`; buffers `player.Loot`, `WriteLoot()`; `DisableAttack` / `EnableAttack`; on prefabs `SetHealth`, `SetNpc`, `SetLifetime` |
 | [Systems](/en/docs/guide/systems), filters (`With`, `Without`, `WithAny`) | every system; `AfflictionSystem` counts burning **or** frozen units with `World.Count` |
 | [Parallel `[ForEach]`](/en/docs/guide/threading) | `SteeringSystem`; `Reports.HealFully` and `Reports.Scatter` in `NewRound` |
 | Parallel systems (`WorldOptions.ParallelSystems`), [`DescribeSchedule`](/en/docs/guide/diagnostics#schedule) | `PlanningSystem` and `ManaSystem`: disjoint data; `Schedule()` shows it |
 | [Slices](/en/docs/guide/systems#slices) (`[ForEach(Slices = N)]`, `RunCount`) | `PlanningSystem` plans a quarter of the NPCs per run |
-| [`Mut<T>` and `SetIfChanged`](/en/docs/guide/change-tracking#set-if-changed) | `PlanningSystem.Plan` writes a goal only when it changes |
+| [`Mut<T>` and `SetIfChanged`](/en/docs/guide/change-tracking#set-if-changed) | `PlanningSystem.Plan` writes a goal only when it changes; `CombatSystem` and `RegenerationSystem` stamp `Health` only on a hit or a heal |
 | Batch methods (`Span<T>`), SIMD | `MovementSystem`; `Reports.SumHealth` |
 | `[ForEach]` runners outside systems | `Reports` |
 | `Maybe<T>` | `RegenerationSystem` heals burning players less |
@@ -128,7 +128,9 @@ Combat is split into damage (`CombatSystem`) and statuses (`StatusSystem`). Free
 `Velocity`: the values are kept, but no query sees them until `Thaw` enables them again, so a frozen unit neither
 attacks, moves nor shoots without any system checking for `Frozen`. `AfflictionSystem` counts burning or frozen
 units without a loop: `Count` reads presence bits 64 rows at a time. `DeathSystem` marks the dead with a tag that
-other systems filter on.
+other systems filter on. `CombatSystem` takes `Health` as a `Mut<Health>`: most units are between two attacks, and
+only the ones that hit get their `Health` stamped, with no lookup of the entity per row; the scheduler sees what the
+system reads and writes instead of a system that reaches components through `Entity`.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#combat</include>
 
@@ -149,7 +151,7 @@ A projectile is an entity with a `ChildOf` link to its player, so destroying the
 `Instantiate(Shot, p, velocity, new ChildOf(player))` copies the `Shot` prefab with the three values given: the shot
 lands in its final table in one row copy, already linked to its player.
 `RegenerationSystem` heals burning players less with one method: `Maybe<Burning>` tells whether this entity has the
-component. `ClockSystem` is registered first but runs last, because `[UpdateAfter<RegenerationSystem>]` moves it.
+component, and `Mut<Health>` stamps only the players it heals, not the ones at full health. `ClockSystem` is registered first but runs last, because `[UpdateAfter<RegenerationSystem>]` moves it.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#projectiles</include>
 

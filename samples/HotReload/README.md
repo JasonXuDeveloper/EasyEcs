@@ -18,7 +18,7 @@ Game logic in a plugin that is replaced while the world keeps running. Read [Mul
 |---|---|
 | [HotReload.Contracts/Components.cs](HotReload.Contracts/Components.cs) | what the host owns: `Position`, `Velocity` |
 | [HotReload.Contracts/IGamePlugin.cs](HotReload.Contracts/IGamePlugin.cs) | the only thing the host knows about a plugin |
-| [HotReload.Plugin/Components.cs](HotReload.Plugin/Components.cs) | the plugin's data: `Score` (change-tracked), the `Bonus` singleton |
+| [HotReload.Plugin/Components.cs](HotReload.Plugin/Components.cs) | the plugin's data: `Score`, the `Bonus` singleton |
 | [HotReload.Plugin/Systems.cs](HotReload.Plugin/Systems.cs) | `JoinScoringSystem` gives the units without a score one (`World.SetAll`), `ScoringSystem` adds the bonus |
 | [HotReload.Plugin/ScoringPlugin.cs](HotReload.Plugin/ScoringPlugin.cs) | the `IGamePlugin`: installs the systems and the bonus |
 | [HotReload.Host/Systems.cs](HotReload.Host/Systems.cs) | the host's `MoveSystem`, which runs through reloads |

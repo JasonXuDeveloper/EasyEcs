@@ -6,8 +6,9 @@ Using every core with one world per thread. Read [SaveLoad](../SaveLoad) first.
 
 - **A world belongs to one thread.** A server splits its game into zones (maps, rooms, matches) that share
   nothing, and gives each zone its own world on its own thread. Nothing is locked and nothing is shared.
-- Each zone here is the same small game: 20,000 units, a `MoveSystem`, a `DamageSystem` (units far from the
-  centre lose health) and a `RespawnSystem` (the dead come back at the centre). The `Tally` singleton counts the
+- Each zone here is the same small game: 20,000 units, a `MoveSystem` (a batch method: whole runs of rows as
+  spans, added as `Vector<float>`), a `DamageSystem` (units far from the centre lose health) and a `RespawnSystem`
+  (the dead come back at the centre). The `Tally` singleton counts the
   deaths of its own world.
 - One zone per processor, all updated at once.
 

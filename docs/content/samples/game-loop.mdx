@@ -58,7 +58,9 @@ for one tick.
 
 ## The simulation [#simulation]
 
-Movement over one fixed step, bullets that expire, and the clock.
+Movement over one fixed step, bullets that expire, and the clock. `MovementSystem` writes through
+[`Mut<Position>`](/en/docs/guide/change-tracking#set-if-changed): `SetIfChanged` stamps only a position that changed,
+so a player standing still is not replicated.
 
 <include lang="csharp" meta='title="Systems/Simulation.cs"'>../../../samples/GameLoop/Systems/Simulation.cs</include>
 
@@ -89,7 +91,7 @@ t=1s players=16 bullets=59 entities=75
   220 messages (0 refused)
   34 joins, 18 leaves
   59 bullets fired
-  455 position updates replicated (5.3 KB)
+  378 position updates replicated (4.4 KB)
   LeaveSystem             30 runs,      4.7 us last run
   JoinSystem              30 runs,      2.2 us last run
   MoveSystem              30 runs,      6.9 us last run

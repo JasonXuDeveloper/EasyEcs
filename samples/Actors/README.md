@@ -17,8 +17,11 @@ systems, loaded from storage when first needed and saved only when they change. 
   persistent components, is loaded onto it with `LoadEntitiesInto(..., markWritten: false)`: it replaces the
   prefab's defaults and loading is not a change. A new actor has no record, so its defaults are its first state and
   the next save writes them.
-- **Save what changed.** The persistent components are `ITracked`; the host saves the actors written since its
-  last save, and an actor nobody wrote costs nothing.
+- **Save what changed.** The persistent components are `ITracked`. A system in a group of its own
+  (`world.Update<Saving>()`) lists the actors written since it last ran (`[ForEach, Changed<Stock>]`), and the host
+  saves that list after the update: an actor nobody wrote costs nothing, and a saved actor is not saved again until
+  something writes it. Writers stamp only what they change: `InterestSystem` writes through `Mut<Balance>` and
+  `SetIfChanged`, and `Mailman` reads the stock before it runs a `Buy`, so a refused order writes nothing.
 
 The key is implemented explicitly (`Shop IIndexed<Shop>.Key => this;`): a public `Key => this` property on a record
 struct makes its `ToString()` print `Key` forever.
@@ -27,13 +30,14 @@ struct makes its `ToString()` print `Key` forever.
 
 | File | What it holds |
 |---|---|
-| [Components.cs](Components.cs) | the `In<TActor>` tag, the `IActor<TSelf>` interface, `Shop` and `Bank`, the persistent `Stock` and `Balance`, the in-memory `Sales` and `Closed` |
+| [Components.cs](Components.cs) | the `In<TActor>` tag, the `IActor<TSelf>` interface, `Shop` and `Bank`, the persistent `Stock` and `Balance`, the in-memory `Sales` and `Closed`, the `Saving` group and its `Unsaved` list |
 | [Messages.cs](Messages.cs) | the `Buy` and `Deposit` jobs, and `Mailman`, which runs each on its actor |
 | [Systems/ShopSystems.cs](Systems/ShopSystems.cs) | `RestockSystem`, in the shop group |
 | [Systems/BankSystems.cs](Systems/BankSystems.cs) | `InterestSystem`, in the bank group |
+| [Systems/SaveSystems.cs](Systems/SaveSystems.cs) | `ListUnsavedSystem`, in the save group: the actors written since the last save |
 | [Activation.cs](Activation.cs) | `Activate`: find the active actor, or make it and load its record |
-| [Program.cs](Program.cs) | activations, messages, the two group updates, saves, and a restart |
-| [Host/Storage.cs](Host/Storage.cs) | plumbing that is not the ECS lesson: a dictionary standing in for a database, and the host's "save what changed" |
+| [Program.cs](Program.cs) | activations, messages, the group updates, saves, and a restart |
+| [Host/Storage.cs](Host/Storage.cs) | plumbing that is not the ECS lesson: a dictionary standing in for a database, and the host's save of the listed actors |
 
 ## Run it
 
@@ -52,10 +56,11 @@ buy 1 at shop 1: refused, 0 left, closed: True
 deposit 50 at bank 7: True
 deposit 50 at bank 8: False
 after the updates: shop 1 has 3 (sold 2), bank 7 has 1060
-saved after the messages: 3
+saved after the messages: 2
 restarted: shop 1 has 3 (sold 0), bank 7 has 1060
 ```
 
 Only the new shop is saved after activation: the two records loaded with `markWritten: false` are not changes. The
-third order is refused by the filter (the shop closed on the second one), and bank 8 was never activated. After the
-restart the shop has its saved stock but no sales: `Sales` lives only in memory.
+third order is refused before its job runs (the shop sold out on the second one and closed), and bank 8 was never
+activated. After the messages shop 1 and bank 7 are saved; shop 2, saved after activation and not written since, is
+not. After the restart the shop has its saved stock but no sales: `Sales` lives only in memory.

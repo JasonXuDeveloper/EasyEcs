@@ -23,6 +23,8 @@ and runs.
 - **Creating many entities at once**: `world.CreateEntities(units, …)` fills an array of handles in one call
   ([structural changes](/en/docs/guide/structural-changes)).
 - **Systems with one job each**: move, hurt, respawn, as `[ForEach]` methods ([systems](/en/docs/guide/systems)).
+  The move is a [batch method](/en/docs/guide/systems#batch-methods): it takes whole runs of rows as spans and adds
+  them as `Vector<float>`.
 
 ## Run it [#run-it]
 
@@ -41,7 +43,8 @@ Three components of a unit and the zone's `Tally` singleton.
 
 Units move by their velocity; those farther than the safe radius from the centre lose one health per tick, and the
 dead come back at the centre. Each system reads and writes components only, so the same three systems serve every
-zone.
+zone. `MoveSystem` is the hot loop of every zone, so it is a batch method: one call per run of rows, the positions
+and velocities read as `Vector<float>` lanes.
 
 <include lang="csharp" meta='title="Systems.cs"'>../../../samples/MultiWorld/Systems.cs</include>
 

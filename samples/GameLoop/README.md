@@ -14,7 +14,8 @@ changed. Read [HelloWorld](../HelloWorld) first.
 - **Prefabs** in a singleton: systems instantiate `prefabs.Player` and `prefabs.Bullet` with the values that differ
   per instance (`world.Instantiate(prefab, new Client(id), new Position(x, 0))`), one row copy each.
 - **Change tracking** (`ITracked` on `Position`, `[Changed<Position>]`): replication visits only the
-  entities that moved since it last ran.
+  entities that moved since it last ran. `MovementSystem` writes through `Mut<Position>` and `SetIfChanged`, so a
+  player standing still is not stamped (a `ref Position` parameter would stamp every row it visits).
 - **Operations**: `--ticks N`, a status line per second, Ctrl+C stops cleanly, per-system run counts and times
   from `WorldOptions.MeasureSystems`.
 
@@ -48,7 +49,7 @@ t=1s players=16 bullets=59 entities=75
   220 messages (0 refused)
   34 joins, 18 leaves
   59 bullets fired
-  455 position updates replicated (5.3 KB)
+  378 position updates replicated (4.4 KB)
   LeaveSystem             30 runs,      4.7 us last run
   JoinSystem              30 runs,      2.2 us last run
   MoveSystem              30 runs,      6.9 us last run
