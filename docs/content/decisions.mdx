@@ -1290,7 +1290,7 @@ to an index.
 | EECS048 `Disable` of a cleanup component or `ChildOf` | Error | `Disable<T>()` and `DisableAll<T>()` throw `InvalidOperationException` for them |
 | EECS049 filters no entity passes | Error | A component required (a parameter, `[With<T>]`, `[Changed<T>]`, the group's `[With<T>]` or `IGroupWith<T>`) and excluded (`[Without<T>]`, `IGroupWithout<T>`): the method never runs |
 | EECS050 a second group in one filter | Error | `InGroup` throws `ArgumentException` for another group, of another component or another constant value |
-| EECS051 a world update during a pass | Error | The update closes the pass's holes, moving the rows it walks, and resets the pass count, which the end of the loop takes to -1: `TrimExcess` throws until the next update |
+| EECS051 a world update during a pass | Error | Every system runs while the loop walks the tables, and the update closes the pass's holes, moving rows the loop has not reached behind it, so it misses them |
 | EECS052 a `Set` right after a creation | Warning, code fix | `AccessBenchmark.CreateThenSet`: 1,000 creations of one component then a `Set` of another, and their destroy, 44.4 µs; the same creations with both components 25.8 µs (1.73x), 0 B both |
 
 `AccessBenchmark` ran on the machine of [D29](#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)

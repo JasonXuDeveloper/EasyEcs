@@ -438,7 +438,7 @@ call: shorter to write, and the same cost as one call per component, since the s
 The checklist for code that runs every tick. Find the system worth the effort first: `WorldOptions.MeasureSystems`
 times every system run.
 
-- **Mutate through refs**: `ref var hp = ref item.Component1;`, `ref var hp = ref entity.Get<Health>();`.
+- **Mutate through refs**: `ref var hp = ref item.Health;`, `ref var hp = ref entity.Health;`.
 - **Spawn with every component at once**: `world.CreateEntity(a, b, c)` places the entity in its final table;
   `world.Instantiate(prefab)` for a kind defined once. `entity.Set(a, b)` / `entity.Remove<A, B>()` change several
   components in one call: shorter, with the same cost as one call each.

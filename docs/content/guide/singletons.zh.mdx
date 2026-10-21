@@ -271,6 +271,7 @@ after tick 3: 3 dead
 | --- | --- | --- |
 | 把状态放在系统字段里 | 其他系统看不到，移除系统就丢了，静态字段还会被所有 World 共享 | [EECS007](/zh/docs/guide/analyzer#eecs007) |
 | 用 class 实现 `ISingletonComponent` | 编译不过 | [EECS006](/zh/docs/guide/analyzer#eecs006) |
+| 用 `AddSingleton<T>()` 重置 World 里已有的单例 | 抛 `InvalidOperationException`，值不变 | 用 `world.SetX(…)` 替换 |
 | 单例还没添加就读取（`world.X`、`GetSingleton<T>()`、`[ForEach]` 参数） | 抛 `InvalidOperationException`，信息里写明该用哪个调用添加 | 初始化时添加；默认值合适的地方用 `GetOrAddX()` |
 | 并行方法里用 `ref` 接收单例组件 | 块之间发生竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
 | 在批处理方法、并行方法或并行阶段里调用 `AddSingleton`、`RemoveSingleton` | 抛 `InvalidOperationException`：两者都要过结构闸门，而这些地方的结构是冻结的 | [EECS010](/zh/docs/guide/analyzer#eecs010)、[EECS013](/zh/docs/guide/analyzer#eecs013)，运行时也会抛 |

@@ -29,7 +29,7 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
 - CI 会构建、测试、运行所有 sample 和 example，编译本文档里的 C# 代码片段，并检查自动生成的 API 参考是否最新。
 - 分析器会拒绝 ECS 里常见的设计错误（EECS002 到 EECS052），并提供代码修复。
 
-需要权衡的地方：它只面向 `net10.0`；在走向成熟的过程中，小版本之间 API 会有变化（4.0 到 4.1 改名、删除了几个成员，4.2 起读取没添加过的单例会抛异常，
+需要权衡的地方：它只面向 `net10.0`；在走向成熟的过程中，小版本之间 API 会有变化（4.0 到 4.1 改名、删除了几个成员，4.2 起读取没添加过的单例会抛异常，4.7 改了几个调用的名字，让名字说明调用做什么，
 [迁移指南](/zh/docs/migration)逐条列出）；每个版本改了什么见[更新日志](/zh/docs/changelog)。
 
 ## EasyEcs 会分配内存吗？ [#allocations]
@@ -117,7 +117,7 @@ EasyEcs 在 <FeatureCount k="ahead" /> 项更快，<FeatureCount k="even" /> 项
 
 ## 怎么保存一个 World？ [#save-a-world]
 
-三种需求，三种工具：
+每种需求一种工具：
 
 | 需求 | 调用 | 页面 |
 | --- | --- | --- |
@@ -235,9 +235,10 @@ foreach (var item in world.Query<Position, Velocity>())
 
 - `var hp = entity.Health; hp.Value--;` 改的是副本。要用 `ref var`。
 - 只读时用 `in`，不要用 `ref`：对 `ITrackChanges` 组件的每次 `ref` 访问都算一次修改，同步时会把没人改过的行也发出去。
-  所以被追踪组件的生成属性是只读的，写入用 `entity.WriteX()`。只写访问到的部分行的方法用 `Mut<T>`，它只给写了的行打 tick；
+  所以被追踪组件的生成属性是只读的，写入用 `entity.WriteX()`；只读的循环走 `world.Read<…>()`，不要用 `Query`
+  （[EECS046](/zh/docs/guide/analyzer#eecs046)）。只写访问到的部分行的方法用 `Mut<T>`，它只给写了的行打 tick；
   `SetIfChanged`（以及生成的 `entity.SetXIfChanged(...)`）只在值不同时才写（[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)）。
-- 组件里的集合要通过组件的 `ref` 修改，不能通过 `in`：否则变更追踪和调度器都发现不了（[EECS011](/zh/docs/guide/analyzer)）。
+- 组件里的集合要通过组件的 `ref` 修改，不能通过 `in`：否则变更追踪和调度器都发现不了（[EECS011](/zh/docs/guide/analyzer#eecs011)）。
   每个实体需要一个列表时，用 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers)。
 
 ## 一个 World 最多能有多少种组件？ [#component-limit]

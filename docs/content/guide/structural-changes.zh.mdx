@@ -358,7 +358,7 @@ tick，`WearSystem` 给炮塔打上 `Dead`，紧接着运行的 `FireSystem` 就
 | 变更之后还在用 `Get<T>()` 拿到的 `ref` | 可能指向过期的副本或别的实体的行 | 同一个块里由 [EECS047](/zh/docs/guide/analyzer#eecs047)（警告）报出：重新获取 |
 | 指望创建实体的那次遍历访问到它 | 下一次遍历才会访问 | 设计如此 |
 | 在系统里调用 `World.Update()` | 系统在自己的运行里再跑一遍，直到栈溢出 | [EECS034](/zh/docs/guide/analyzer#eecs034) |
-| 同一个 World 的查询还在遍历时调用 `Update()` | 更新会移动查询正在走的行，遍历计数也会出错 | [EECS051](/zh/docs/guide/analyzer#eecs051) |
+| 同一个 World 的查询还在遍历时调用 `Update()` | 更新把查询还没走到的行挪到它身后，循环会漏掉这些行 | [EECS051](/zh/docs/guide/analyzer#eecs051) |
 
 ## 相关页面 [#related]
 

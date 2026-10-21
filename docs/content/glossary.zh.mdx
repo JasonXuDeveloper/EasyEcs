@@ -51,8 +51,8 @@ EasyEcs 文档里的术语，每个用几句话讲清，并链接到详细讲解
 
 ## 查询（Query） [#query]
 
-“哪些实体拥有这些组件、并且满足这个过滤条件？”这个问题本身。`[ForEach]` 方法就是一个查询；系统之外用 `world.Query<T…>()`、
-`Count`、`Any` 和结构体 job 提问。见[查询与过滤](/zh/docs/guide/queries)。
+“哪些实体拥有这些组件、并且满足这个过滤条件？”这个问题本身。`[ForEach]` 方法就是一个查询；系统之外用 `world.Query<T…>()`（只读的循环用
+`world.Read<T…>()`）、`Count`、`Any` 和结构体 job 提问。见[查询与过滤](/zh/docs/guide/queries)。
 
 ## 过滤条件（Filter） [#filter]
 
@@ -241,7 +241,7 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 ## 清理组件（Cleanup component） [#cleanup-component]
 
 实现 `ICleanupComponent` 的组件。销毁它所在的实体时，其他组件被移除，并加上 `Destroyed` 标签；实体会一直保留，
-直到某个系统释放了对应的资源（一个连接、一个座位）并移除这个组件。见[清理与禁用](/zh/docs/guide/cleanup-and-disable#cleanup-components)。
+直到某个系统释放了对应的资源（一个连接、一个座位）并移除这个组件。在那之前它不会被搬走、克隆，也不会被 `SetAll` 带回来。见[清理与禁用](/zh/docs/guide/cleanup-and-disable#cleanup-components)。
 
 ## 禁用的组件（Disabled component） [#disabled-component]
 

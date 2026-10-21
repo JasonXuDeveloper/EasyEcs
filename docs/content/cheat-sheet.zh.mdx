@@ -99,7 +99,7 @@ Entity unit = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Hea
 | `entity.TryGetRef<T>(out bool found)` | `ref T`，没有时是空引用 | 否 |
 | `entity.Has<T>()` / `Has<A, B>()` | 有没有这个，或这几个全有 | 否 |
 | `entity.Disable<T>()` / `Enable<T>()` / `IsDisabled<T>()` | 隐藏一个组件，保留它的值 | 是 |
-| `entity.Clone()` | 在同一个 World 里复制这个实体 | 是 |
+| `entity.Clone()` | 在同一个 World 里复制这个实体；已销毁、只为清理组件留着的实体会抛异常 | 是 |
 | `entity.Run<T1..T9, TJob>(ref job)` / `Run(ref job, filter)` | 在这个实体上跑一个 `IForEachEntity` job，拿到的 `ref` 和遍历时一样；实体已销毁、缺组件或不满足过滤条件时返回 `false` | job 做了结构变更时是 |
 | `entity.Destroy()` | 销毁；id 换一个版本号后回收复用 | 是 |
 | `entity.IsAlive` / `Id` / `World` | 句柄状态；每次访问都校验版本号 | 否 |
@@ -292,11 +292,11 @@ world.Clock.Tick++;
 
 | 算写入 | 不算写入 |
 | --- | --- |
-| `ref` 参数、`Span<T>`、`Query` 元素 | `in` 参数、`ReadOnlySpan<T>` |
+| `ref` 参数、`Span<T>`、`Query` 元素 | `in` 参数、`ReadOnlySpan<T>`、`world.Read<…>` 元素 |
 | `Mut<T>.Write()`、写入新值的 `SetIfChanged(value)` | `Mut<T>.Value`、值相同的 `SetIfChanged(value)` |
 | `Get<T>()`、找到时的 `TryGetRef<T>`、`GetOrAdd<T>()`、`Set(…)`、`WriteX()` | `Read<T>()`、`TryGet<T>(out copy)`、`Has<T>()`、被追踪组件的 `e.X` |
-| 创建、实例化、克隆、`Restore`、`Load`、`LoadEntitiesInto` | 移除（那是一次移除，供 `[Removed<T>]` 使用） |
-| `entity.Run`：job `Writes` 里的组件 | `LoadEntitiesInto(…, markWritten: false)` |
+| 创建、实例化、克隆、`Enable<T>()`、`Restore`、`Load`、`LoadEntitiesInto` | 移除或 `Disable<T>()`（那是一次移除，供 `[Removed<T>]` 使用） |
+| `entity.Run`：job `Writes` 里的组件 | `Load(…, markWritten: false)`、`LoadEntitiesInto(…, markWritten: false)` |
 
 ```csharp
 ulong mark = world.ChangeTick;
@@ -332,7 +332,7 @@ var gone = new EntityId[4096];
 if (!replicated.DestroyedSince(seen, gone, out int goneCount)) { /* 比日志还旧：全量下发 */ }
 ```
 
-指南：[变更追踪](/zh/docs/guide/change-tracking)。
+指南：[变更追踪](/zh/docs/guide/change-tracking)，完整的写入清单见[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)。
 
 ## 索引、关系、层级、分组 [#indexes]
 
@@ -380,7 +380,7 @@ Entity holder = world.AccountIndex.Get(42);        // 就是它；再来一个 A
 | `world.CreateEntities(span, a, b, …)` | 一波取值相同的实体 |
 | `world.DestroyAll<T…>(filter)` | 销毁所有匹配的实体，返回数量 |
 | `world.DestroyEntities(ids)` | 一次销毁一组 id，返回数量 |
-| `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | 给所有匹配的实体设置或移除一个组件 |
+| `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | 给所有匹配的实体设置或移除一个组件；过滤条件里没写 `Destroyed` 时，`SetAll` 跳过带 `Destroyed` 标签的实体 |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | 给所有匹配的实体禁用或启用一个组件 |
 
 ```csharp
@@ -429,7 +429,7 @@ loot.RemoveAtSwapBack(0);
 | `ComponentSet.Create().With<T>()….WithSingleton<S>()` | 组件（整个 World 的存档还可以有单例），在 `static readonly` 字段里构建一次 |
 | `world.SaveEntitiesWith(writer, ids, set)` | 一条记录：只写集合里的组件 |
 | `world.LoadEntitiesInto(bytes, entities, markWritten: false)` | 把记录放到已有的实体上；`markWritten: false` 让它不算变更 |
-| `world.MoveEntities(target, ids, moved)` | 在同一线程的两个 World 之间直接搬，不编码 |
+| `world.MoveEntities(target, ids, moved)` | 在同一线程的两个 World 之间直接搬，不编码；跳过已销毁、只为清理留着的实体，清理组件留在原处 |
 | `world.RemoveTypes(assembly or context)` | 插件的上下文卸载之前，先移除它的类型 |
 
 ```csharp

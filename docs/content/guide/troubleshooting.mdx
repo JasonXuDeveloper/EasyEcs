@@ -17,6 +17,8 @@ page for the first words of your message.
 | `Entity is not alive` | [A stale or default handle](#entity-not-alive) |
 | `Entity has no X component` | [A missing component](#no-component) |
 | `Singleton X was not added to this world` | [A missing singleton](#singleton-not-added) |
+| `Singleton X was added to this world already` | [`AddSingleton` on an existing singleton](#singleton-exists) |
+| `The entity was destroyed: it is only kept (tagged Destroyed)` | [Cloning a destroyed entity](#clone-destroyed) |
 | `The entity has no X (check HasValue)` | [An empty `Maybe<T>`](#maybe-empty) |
 | `X already belongs to a world` | [A system added twice](#system-in-a-world) |
 | `[UpdateBefore] / [UpdateAfter] form a cycle` | [An ordering cycle](#ordering-cycle) |
@@ -31,7 +33,8 @@ page for the first words of your message.
 The problems that throw nothing: [a system that never runs](#system-does-not-run),
 [systems that do not run in parallel](#not-parallel), [a missing generated member](#member-missing),
 [`entity.Run` returning `false`](#run-false), [a lost write through a `ref`](#ref-lost),
-[a component dropped by a load](#save-dropped-data), [an interface another generator adds](#other-generators) and
+[a component dropped by a load](#save-dropped-data), [an entity `MoveEntities` left behind](#move-skipped),
+[an interface another generator adds](#other-generators) and
 [a stack overflow in an actor key's `ToString`](#key-tostring-overflow).
 
 ## Why does a structural change throw "started while another one was running"? [#structural-change-running]
@@ -79,6 +82,20 @@ throwing: `IsAlive`, `Has<T>()` and `TryGet<T>()`; `Destroy` on such a handle do
 components, resolving them with `world.TryGetEntity(id, out var entity)`
 ([entities and components](/en/docs/guide/entities-and-components)).
 
+## Why does `Clone` say the entity "was destroyed"? [#clone-destroyed]
+
+```text
+InvalidOperationException: The entity was destroyed: it is only kept (tagged Destroyed) until its cleanup components
+are removed, and cannot be cloned
+```
+
+An entity with [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) stays alive after
+`Destroy`, tagged `Destroyed`, until a system releases what those components hold. It is still alive, so `IsAlive` is
+true, but it is not brought back: `Clone()` refuses it, `MoveEntities` skips it and `SetAll` leaves it out unless the
+filter names `Destroyed`.
+
+**Fix:** clone before destroying, or test `entity.IsDestroyed` where a handle may name a retired entity.
+
 ## Why does `Get<T>()` say the entity has no component? [#no-component]
 
 ```text
@@ -105,6 +122,19 @@ setup ([singletons](/en/docs/guide/singletons#in-systems)).
 
 **Fix:** add it where the world is built, before the first `Update()` (`world.SetClock(…)`,
 `world.AddSingleton<Clock>()`), or use `GetOrAddSingleton<T>()` / `GetOrAddClock()` where a default value is right.
+
+## Why does `AddSingleton` say the singleton "was added to this world already"? [#singleton-exists]
+
+```text
+InvalidOperationException: Singleton Clock was added to this world already: replace its value with
+world.SetClock(...) or world.Clock = ..., or use GetOrAddClock() to take it as it is
+```
+
+`AddSingleton<T>()` adds a singleton the world does not have yet. It refuses one it has, rather than resetting the
+value every system reads to `default` ([singletons](/en/docs/guide/singletons#api)).
+
+**Fix:** replace the value with `world.SetClock(…)` (or `world.Clock = …`), or take it as it is with
+`GetOrAddClock()` where the code only needs it to exist.
 
 ## Why does `Maybe<T>.Value` throw? [#maybe-empty]
 
@@ -157,7 +187,7 @@ InvalidOperationException: ChildOf cannot be disabled: remove it instead
 `ChildOf` cannot be hidden that way: the world must keep seeing them to finish a destroy and keep a hierarchy. **Fix:**
 remove the component, or disable another component that systems filter on.
 
-## Why must `Capture`, `Restore`, `RemoveTypes` or `TrimExcess` wait for a pass? [#during-a-pass]
+## Why must `Capture`, `Save`, `MoveEntities`, `RemoveTypes` or `TrimExcess` wait for a pass? [#during-a-pass]
 
 ```text
 InvalidOperationException: Snapshots cannot be captured or restored while a query iterates
@@ -165,7 +195,10 @@ InvalidOperationException: Types cannot be removed during a pass
 InvalidOperationException: A world cannot be trimmed during a pass
 ```
 
-They rewrite or drop whole tables, which a `foreach` over a query or a running system is walking. **Fix:** call them
+They read, rewrite or drop whole tables, which a `foreach` over a query or a running system is walking. The first
+message also comes from the saves, loads and moves (`Save`, `SaveWithout`, `SaveEntities`, `SaveEntitiesWith`,
+`Load`, `LoadKeeping`, `LoadEntities`, `LoadEntitiesInto`, `MoveEntities`) and from `GroupBy`; the analyzer reports
+all of them inside a pass it can see ([EECS041](/en/docs/guide/analyzer#eecs041)). **Fix:** call them
 between updates, outside any query loop ([snapshots](/en/docs/guide/snapshots),
 [unloading](/en/docs/guide/migration-and-unload#remove-types), [trimming](/en/docs/guide/diagnostics#trim)). `Restore` also refuses a snapshot of another world
 (`ArgumentException`) and one taken before `RemoveTypes` dropped some of its tables.
@@ -319,6 +352,18 @@ A save names each type by its Nino type id (a hash of its namespace-qualified na
 process does not have. A component renamed or moved to another namespace since the save loads as missing: its data is
 dropped without an error. Put `[NinoFormerName("Old.Namespace.Name")]` on the renamed type, and its old rows load
 ([when the code changed](/en/docs/guide/saves#versioning)).
+
+## Why did `MoveEntities` leave an entity behind? [#move-skipped]
+
+`MoveEntities` skips the ids it cannot move and counts only the others: a stale id, an id given twice, and an entity
+destroyed but kept for its [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) (tagged
+`Destroyed`). The `moved` span holds `default` at a skipped id's position. A child left out of the group is not
+skipped: it is destroyed with its moved parent. A moved entity also leaves its cleanup components behind, on the
+retired original, so this world's systems release the resource once; the new entity does not have them.
+
+**Fix:** compare the return value with the number of ids, collect a subtree with
+`world.Descendants(root).AddTo(ids, includeRoot: true)` ([moving a hierarchy](/en/docs/guide/hierarchy#moving)), and
+give the target world its own resource components after the move.
 
 ## Why does the generator not see an interface another generator adds? [#other-generators]
 

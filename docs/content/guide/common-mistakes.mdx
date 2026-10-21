@@ -1,7 +1,7 @@
 ---
 title: Common mistakes
 seoTitle: "Common EasyEcs mistakes in C# and how to fix them"
-description: "Thirty-two mistakes people make with EasyEcs in C#, each with the code you might write, why it is wrong and the fix, plus the analyzer rule behind it."
+description: "The mistakes people make with EasyEcs in C#, each with the code you might write, why it is wrong and the fix, plus the analyzer rule behind it."
 icon: TriangleAlert
 ---
 
@@ -147,6 +147,27 @@ public readonly record struct Market(long Id) : IActor<Market>
 
 Caught by [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix). The [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) shows
 the whole pattern.
+
+### Resetting a singleton with `AddSingleton` [#add-singleton-reset]
+
+```csharp
+public record struct Round(int Number, int Tick) : ISingletonComponent;
+```
+
+```csharp
+world.SetRound(1, 0);
+world.AddSingleton<Round>();       // throws: the world has Round already
+```
+
+`AddSingleton<T>()` adds a singleton the world lacks. On one it has, it throws `InvalidOperationException` instead of
+quietly putting back the default that every system then reads. Replace the value:
+
+```csharp
+world.SetRound(2, 0);              // the next round, from tick 0
+```
+
+No rule catches it; the exception names the call to write. More in
+[add, read and write](/en/docs/guide/singletons#add-read-write).
 
 ## Systems [#systems]
 
@@ -320,6 +341,31 @@ Outside systems, read through `in` parameters, `Read<T>()` or the generated prop
 `entity.SetIfChanged(...)` (or the generated `SetFacingIfChanged(...)`). No rule catches the `ref` writer that writes
 sometimes; [EECS025](/en/docs/guide/analyzer#eecs025) catches the one that never writes. More in
 [what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write).
+
+### A `Query` loop that only reads tracked components [#query-that-reads]
+
+```csharp
+public record struct Rating(int Value) : IComponent, ITrackChanges;   // replicated when it changes
+```
+
+```csharp doccheck=expect-EECS046
+int total = 0;
+foreach (var item in world.Query<Rating>())
+    total += item.Rating.Value;    // every Rating row is stamped as written
+```
+
+A `Query` item hands out `ref`s, and its enumerator stamps every row it visits: a total, a search or a send makes every
+`[Changed<Rating>]` reader visit rows nobody changed. `world.Read<…>()` walks the same rows read-only and stamps
+nothing:
+
+```csharp
+int total = 0;
+foreach (var item in world.Read<Rating>())
+    total += item.Rating.Value;
+```
+
+Caught by [EECS046](/en/docs/guide/analyzer#eecs046) (warning, with a code fix). More in
+[`Read`: a loop that only reads](/en/docs/guide/queries#read).
 
 ### `[Removed<T>]` that takes `T` [#removed-takes-t]
 
@@ -665,6 +711,48 @@ int frozen = world.SetAll(new Frozen(), QueryFilter.Create().With<Fighter>());
 
 Caught by [EECS030](/en/docs/guide/analyzer#eecs030) (warning, with a code fix). More in
 [bulk changes](/en/docs/guide/bulk).
+
+### A `Set` right after `CreateEntity` [#set-after-create]
+
+```csharp doccheck=expect-EECS052
+var bullet = world.CreateEntity(new Position(0, 0));
+bullet.Set(new Velocity(1, 0));    // moves the new entity a second time
+```
+
+`CreateEntity` places the entity in the table of the components it is given; the `Set` on the next line moves it to
+another table, and creates that table on the way if nothing else uses it. Give the creation every component:
+
+```csharp
+var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
+```
+
+The same holds for `Instantiate(prefab)` then `Set`: pass the instance's own components to `Instantiate`. Caught by
+[EECS052](/en/docs/guide/analyzer#eecs052) (warning, with a code fix). More in
+[create entities](/en/docs/guide/entities-and-components#create-entities).
+
+### Updating the world inside a query loop [#update-in-loop]
+
+```csharp doccheck=expect-EECS051
+foreach (var item in world.Query<Health>())
+{
+    item.Health.Value -= 1;
+    world.Update();                // every system runs while this loop walks the tables
+}
+```
+
+`world.Update()` assumes no loop is walking the world: it runs every system, and it closes the holes the loop's
+structural changes left, moving rows the loop has not reached into rows it has passed, so the loop misses them.
+Update after the loop:
+
+```csharp
+foreach (var item in world.Query<Health>())
+    item.Health.Value -= 1;
+world.Update();
+```
+
+Caught by [EECS051](/en/docs/guide/analyzer#eecs051); inside a system,
+[EECS034](/en/docs/guide/analyzer#eecs034). More in
+[adding and removing while iterating](/en/docs/guide/structural-changes#during-a-pass).
 
 ### Collecting a subtree with `Children` alone [#children-only]
 
