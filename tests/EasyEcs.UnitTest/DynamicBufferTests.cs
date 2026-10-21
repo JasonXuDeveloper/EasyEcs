@@ -6,6 +6,7 @@ namespace EasyEcs.UnitTest;
 public class DynamicBufferTests
 {
     public record struct Loot(int Item, int Count);
+    public enum Tile : byte { Air, Stone }
 
     /// <summary>Counts, per entity, the runs in which its bag had changed since the system's previous run.</summary>
     public class BagWatch : EcsSystem
@@ -249,5 +250,24 @@ public class DynamicBufferTests
 
         e.RemoveLoot();
         Assert.That(e.HasLoot, Is.False);
+    }
+
+    [Test]
+    public void AnEnumElementGetsTheNamedMembersToo()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new DynamicBuffer<Tile>());   // names the buffer: its element gets members
+        e.WriteTile().Add(Tile.Stone);
+        e.RemoveTile().GetOrAddTile().Add(Tile.Stone);
+        e.WriteTile().Add(Tile.Air);
+        Assert.That(e.HasTile, Is.True);
+        Assert.That((e.Tile[0], e.Tile[1]), Is.EqualTo((Tile.Stone, Tile.Air)));
+
+        e.WriteTile().AsSpan()[0] = Tile.Air;
+        Assert.That(e.Tile[0], Is.EqualTo(Tile.Air));
+        var column = new Prefab().SetTile(Tile.Stone, Tile.Stone);
+        Assert.That(world.Instantiate(column).Tile.Count, Is.EqualTo(2));
+        e.RemoveTile();
+        Assert.That(e.HasTile, Is.False);
     }
 }

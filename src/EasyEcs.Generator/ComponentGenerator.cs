@@ -433,12 +433,13 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         bool Writes, bool Comparable)
     {
         /// <summary>
-        /// The shape of a struct that gets named members (any struct some <c>DynamicBuffer</c> may hold counts), or
-        /// null. <paramref name="core"/>: EasyEcs's assembly, whose own components are never disabled.
+        /// The shape of a type that gets named members (a struct, or an enum some <c>DynamicBuffer</c> may hold: any
+        /// struct or enum counts), or null. <paramref name="core"/>: EasyEcs's assembly, whose own components are never
+        /// disabled.
         /// </summary>
         public static Shape? Of(INamedTypeSymbol type, IAssemblySymbol core)
         {
-            if (type.TypeKind != TypeKind.Struct || !Symbols.IsExtensible(type, out _)) return null;
+            if (type.TypeKind is not (TypeKind.Struct or TypeKind.Enum) || !Symbols.IsExtensible(type, out _)) return null;
             bool singleton = Symbols.Implements(type, Symbols.Singleton);
             if (!singleton && !Symbols.Implements(type, Symbols.Component))
                 return new Shape(Symbols.Implements(type, "EasyEcs.IRelation") ? Kind.Relation : Kind.Element,
@@ -547,7 +548,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
 
         /// <summary>
         /// The members a type of this shape gets: those <see cref="Names"/> offers, less the names its receivers already
-        /// have (<c>Entity.Id</c>, <c>Prefab.SetBuffer</c>) and those another struct of its namespace (at any depth) is
+        /// have (<c>Entity.Id</c>, <c>Prefab.SetBuffer</c>) and those another struct or enum of its namespace (at any depth) is
         /// offered too: both would emit them, ambiguous wherever the namespace is imported, so both give them up
         /// (<c>Shield</c>'s <c>IsShieldDisabled</c> and the tag <c>ShieldDisabled</c>'s). A nested type named like another
         /// struct of its namespace gets none at all; the namesake it yields to keeps its own.
@@ -562,7 +563,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             {
                 var other = pending.Pop();
                 foreach (var nested in other.GetTypeMembers()) pending.Push(nested);
-                if (other.TypeKind != TypeKind.Struct || SymbolEqualityComparer.Default.Equals(other, type)) continue;
+                if (other.TypeKind is not (TypeKind.Struct or TypeKind.Enum) || SymbolEqualityComparer.Default.Equals(other, type)) continue;
                 if (other.Name == type.Name)
                 {
                     if (type.ContainingType != null) return [];
@@ -599,8 +600,8 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// The element of a <c>DynamicBuffer&lt;T&gt;</c>: a non-generic struct declared in this compilation, visible to
-    /// it and not itself a component or singleton (those have members of their own). Symbol-free.
+    /// The element of a <c>DynamicBuffer&lt;T&gt;</c>: a non-generic struct or an enum declared in this compilation,
+    /// visible to it and not itself a component or singleton (those have members of their own). Symbol-free.
     /// <paramref name="Members"/>: the members it gets (<see cref="Shape.Members"/>).
     /// </summary>
     private sealed record BufferModel(string Namespace, string Element, string Name, string Path, string HintName, bool IsPublic,
@@ -608,7 +609,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     {
         public static BufferModel? Create(SemanticModel model, INamedTypeSymbol buffer)
         {
-            if (buffer.TypeArguments[0] is not INamedTypeSymbol { TypeKind: TypeKind.Struct } type
+            if (buffer.TypeArguments[0] is not INamedTypeSymbol { TypeKind: TypeKind.Struct or TypeKind.Enum } type
                 || !SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, model.Compilation.Assembly)
                 || !Symbols.IsExtensible(type, out bool isPublic)
                 || Shape.Of(type, buffer.ContainingAssembly) is not { Kind: Kind.Element or Kind.Relation } shape)

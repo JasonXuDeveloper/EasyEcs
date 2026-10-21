@@ -1215,9 +1215,18 @@ public class GeneratorTests
             public struct Q2 : IComponent, ITracked { public int V; }
             public record struct Loot(int Item);
             internal struct Note { public int V; }
+            public enum Block : byte { Air, Stone }                          // an enum element: the same members
             public record struct Friend(EntityId Target) : IRelation;
             public static class U
             {
+                public static Block Dig(Entity e)
+                {
+                    e.GetOrAddBlock().Add(Block.Stone);
+                    var was = e.Block[0];
+                    e.WriteBlock().AsSpan()[0] = Block.Air;
+                    return e.HasBlock && e.RemoveBlock().IsAlive ? was : Block.Air;
+                }
+                public static Prefab Column() => new Prefab().SetBlock(Block.Stone, Block.Air);
                 public static int Use(Entity e)
                 {
                     e.GetOrAddLoot().Add(new Game.Loot(1));
@@ -1233,7 +1242,7 @@ public class GeneratorTests
                 public static bool Friends(Entity e) => e.HasFriend && e.Friend.Count > 0 && e.RemoveFriend().IsAlive;
                 public static int Befriend(World w, Entity e, Entity f) =>
                     e.LinkFriend(f).LinksFriend(f) ? w.FriendIndex.Count(f) + e.UnlinkFriend(f) : 0;
-                static void Links(in DynamicBuffer<Friend> friends) { }
+                static void Links(in DynamicBuffer<Friend> friends, in DynamicBuffer<Block> blocks) { }
                 static void Notes(ref DynamicBuffer<Note> notes, in DynamicBuffer<int> ints, in DynamicBuffer<P> components) { }
             }
             """;
@@ -1242,11 +1251,12 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Buffer.g.cs")).Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("public ref readonly global::EasyEcs.DynamicBuffer<global::Game.Loot> Loot"));
+        Assert.That(generated, Does.Contain("public ref global::EasyEcs.DynamicBuffer<global::Game.Block> WriteBlock()"));
         Assert.That(generated, Does.Contain("internal static class NoteEcsBufferExtensions").And.Contain("public ref global::EasyEcs.DynamicBuffer<global::Game.Note> WriteNote()"));
         Assert.That(generated, Does.Contain("public global::EasyEcs.Entity LinkFriend(global::EasyEcs.EntityId Target) => @this.Link(new global::Game.Friend(Target));")
             .And.Contain("public int UnlinkFriend(global::EasyEcs.EntityId target)").And.Contain("public bool LinksFriend(global::EasyEcs.EntityId target)")
             .And.Contain("public global::EasyEcs.RelationIndex<global::Game.Friend> FriendIndex"));
-        Assert.That(output.SyntaxTrees.Count(t => t.FilePath.EndsWith(".Buffer.g.cs")), Is.EqualTo(3)); // not int, not a component
+        Assert.That(output.SyntaxTrees.Count(t => t.FilePath.EndsWith(".Buffer.g.cs")), Is.EqualTo(4)); // Loot, Note, Block, Friend: not int, not a component
         Assert.That(generated, Does.Not.Contain("WriteFriend").And.Not.Contain("int RemoveFriend(")); // links: LinkFriend / UnlinkFriend
         Assert.That(generated, Does.Contain("public global::EasyEcs.Prefab SetLoot(params global::System.ReadOnlySpan<global::Game.Loot> items)")
             .And.Not.Contain("Prefab SetFriend"));                                                     // a recipe holds no links
