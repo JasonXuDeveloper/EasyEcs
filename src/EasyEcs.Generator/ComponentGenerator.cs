@@ -50,8 +50,9 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             .Where(static m => m is not null)
             .WithTrackingName("Components");
 
-        var supported = context.CompilationProvider
-            .Select(static (c, _) => c is CSharpCompilation { LanguageVersion: var version } && (int)version >= 1400)
+        // From the parse options, not the compilation: a new compilation (every edit) does not re-run it.
+        var supported = context.ParseOptionsProvider
+            .Select(static (o, _) => o is CSharpParseOptions { LanguageVersion: var version } && (int)version >= 1400)
             .WithTrackingName("ExtensionMembers");
 
         context.RegisterSourceOutput(components.Combine(supported), static (spc, pair) =>
@@ -111,9 +112,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             .Where(static b => b.Saved is not null)
             .Select(static (b, _) => b.Saved!)
             .WithTrackingName("SavedBuffers");
+        // Every assembly but EasyEcs's own (which registers its types by hand): a component, a singleton and a buffer
+        // all name EasyEcs, whose SavedTypes ships with this generator. The assembly name, not a type lookup: this
+        // re-runs on every edit.
         var initializers = context.CompilationProvider
-            .Select(static (c, _) => c.GetTypeByMetadataName("EasyEcs.SavedTypes") is { } savedTypes
-                && !SymbolEqualityComparer.Default.Equals(savedTypes.ContainingAssembly, c.Assembly))
+            .Select(static (c, _) => c.AssemblyName != "EasyEcs.Core")
             .Combine(supported)
             .Select(static (pair, _) => pair.Left && pair.Right)
             .WithTrackingName("ModuleInitializers");
@@ -133,8 +136,8 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     {
         public static BufferUse? Create(SemanticModel model, GenericNameSyntax name, CancellationToken token)
         {
-            if (model.GetSymbolInfo(name, token).Symbol is not INamedTypeSymbol { IsGenericType: true } buffer
-                || buffer.OriginalDefinition.ToDisplayString() != Symbols.DynamicBuffer)
+            if (Symbols.TypeNamed(model, name) is not INamedTypeSymbol { IsGenericType: true } buffer
+                || !Symbols.Named(buffer.OriginalDefinition, Symbols.DynamicBuffer))
                 return null;
             var use = new BufferUse(BufferModel.Create(model, buffer), Registration(model, buffer));
             return use.Members is null && use.Saved is null ? null : use;
@@ -458,18 +461,18 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         /// </summary>
         public static ITypeSymbol? Key(INamedTypeSymbol type, out ITypeSymbol? unique)
         {
-            unique = type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == Symbols.UniqueIndexed)?.TypeArguments[0];
-            return unique ?? type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == Symbols.Indexed)?.TypeArguments[0];
+            unique = type.AllInterfaces.FirstOrDefault(i => Symbols.Named(i.OriginalDefinition, Symbols.UniqueIndexed))?.TypeArguments[0];
+            return unique ?? type.AllInterfaces.FirstOrDefault(i => Symbols.Named(i.OriginalDefinition, Symbols.Indexed))?.TypeArguments[0];
         }
 
         /// <summary>
-        /// Every member a type of this shape named <paramref name="n"/> is offered, as <c>Receiver.Name</c>
-        /// (<c>Entity.HasHealth</c>, <c>World.ZoneIndex</c>): what its file emits unless the name is taken.
+        /// Every member a type of this shape named <paramref name="n"/> is offered, as its receiver and name
+        /// (<c>(Entity, HasHealth)</c>, <c>(World, ZoneIndex)</c>): what its file emits unless the name is taken.
         /// </summary>
-        public List<string> Names(string n)
+        public List<(string Receiver, string Name)> Names(string n)
         {
-            var names = new List<string>();
-            void Add(string receiver, string name) => names.Add(receiver + "." + name);
+            var names = new List<(string, string)>(24);
+            void Add(string receiver, string name) => names.Add((receiver, name));
             switch (Kind)
             {
                 case Kind.Singleton:
@@ -551,9 +554,9 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         /// </summary>
         public string[] Members(INamedTypeSymbol type, INamespaceSymbol easyEcs, Compilation compilation)
         {
+            // Every component of a namespace walks it on every edit: no string is built until a name is kept.
             var names = Names(type.Name);
-            var bare = names.Select(q => q.Substring(q.IndexOf('.') + 1)).ToArray();
-            var shared = new HashSet<string>();
+            HashSet<(string, string)>? shared = null;
             var pending = new Stack<INamedTypeSymbol>(type.ContainingNamespace.GetTypeMembers());
             while (pending.Count > 0)
             {
@@ -567,19 +570,31 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 }
 
                 // Each of its names holds its own: one that holds none of ours shares none (the cheap test first).
-                if (!bare.Any(b => b.Contains(other.Name))
+                if (!Overlaps(names, other.Name)
                     || !compilation.IsSymbolAccessibleWithin(other, compilation.Assembly)
                     || Of(other, easyEcs.ContainingAssembly) is not { } shape)
                     continue;
-                foreach (var name in shape.Names(other.Name)) shared.Add(name);
+                foreach (var name in shape.Names(other.Name)) (shared ??= []).Add(name);
             }
 
-            return names.Where(qualified =>
+            var members = new List<string>(names.Count);
+            string? last = null;
+            INamedTypeSymbol? receiver = null;
+            foreach (var name in names)
             {
-                int dot = qualified.IndexOf('.');
-                var receiver = easyEcs.GetTypeMembers(qualified.Substring(0, dot)).FirstOrDefault();
-                return !shared.Contains(qualified) && receiver != null && receiver.GetMembers(qualified.Substring(dot + 1)).Length == 0;
-            }).ToArray();
+                if (shared != null && shared.Contains(name)) continue;
+                if (name.Receiver != last) receiver = easyEcs.GetTypeMembers(last = name.Receiver).FirstOrDefault();
+                if (receiver != null && receiver.GetMembers(name.Name).Length == 0) members.Add(name.Receiver + "." + name.Name);
+            }
+
+            return members.ToArray();
+        }
+
+        private static bool Overlaps(List<(string Receiver, string Name)> names, string other)
+        {
+            foreach (var name in names)
+                if (name.Name.IndexOf(other, System.StringComparison.Ordinal) >= 0) return true;
+            return false;
         }
     }
 
@@ -618,11 +633,8 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     {
         public static QueryShape? Create(SemanticModel model, GenericNameSyntax name, CancellationToken token)
         {
-            if (model.GetSymbolInfo(name, token).Symbol is not IMethodSymbol { ContainingType: { } world } query
-                || world.ToDisplayString() != "EasyEcs.World" || query.ReturnType is not INamedTypeSymbol enumerator)
-                return null;
-            bool read = query.Name == "Read";
-            var types = query.TypeArguments;
+            if (Arguments(model, name, token) is not { } types) return null;
+            bool read = name.Identifier.ValueText == "Read";
             var compilation = model.Compilation;
             foreach (var t in types)
                 if (t is not INamedTypeSymbol named || Symbols.ContainsTypeParameter(named) || !Symbols.IsNameable(named)
@@ -650,6 +662,34 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                     && compilation.IsSymbolAccessibleWithin(existing, compilation.Assembly))
                     return null;
             return new QueryShape(hash, item, read, new EquatableArray<QueryMember>(members.ToArray()));
+        }
+
+        /// <summary>
+        /// The components of <c>world.Query&lt;…&gt;()</c> / <c>world.Read&lt;…&gt;()</c>, or null for another call. In a
+        /// member body the type arguments are bound alone (<see cref="Symbols.TypeNamed"/>): binding the call would bind
+        /// the body around it and run its nullable analysis, on every edit. Unbound, the receiver is not known: a call
+        /// named so with struct components only is a World's (an item's members for a shape no loop uses are harmless),
+        /// except <c>entity.Read&lt;T&gt;()</c>, so a <c>Read</c> of one component takes the call's binding unless a
+        /// <c>foreach</c> walks it.
+        /// </summary>
+        private static ITypeSymbol[]? Arguments(SemanticModel model, GenericNameSyntax name, CancellationToken token)
+        {
+            var arguments = name.TypeArgumentList.Arguments;
+            if (name.Parent is MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax call } access && access.Name == name
+                && Symbols.Outside(name) >= 0
+                && (name.Identifier.ValueText == "Query" || arguments.Count > 1 || call.Parent is ForEachStatementSyntax walk && walk.Expression == call))
+            {
+                var types = new ITypeSymbol[arguments.Count];
+                for (int i = 0; i < types.Length; i++)
+                    // World.Query's constraints: a struct component each.
+                    if (Symbols.TypeNamed(model, arguments[i]) is not { IsValueType: true } type || !Symbols.Implements(type, Symbols.Component))
+                        return null;
+                    else types[i] = type;
+                return types;
+            }
+
+            return model.GetSymbolInfo(name, token).Symbol is IMethodSymbol { ContainingType: { } world } query && Symbols.Named(world, Symbols.World)
+                ? query.TypeArguments.ToArray() : null;
         }
 
         /// <summary>The name of the class holding a shape's members.</summary>
@@ -700,7 +740,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 return null;
 
             // EasyEcs, found next to the interface the type implements.
-            var easyEcs = type.AllInterfaces.FirstOrDefault(i => i.ToDisplayString() is Symbols.Component or Symbols.Singleton)?.ContainingNamespace;
+            var easyEcs = type.AllInterfaces.FirstOrDefault(i => Symbols.Named(i, Symbols.Component) || Symbols.Named(i, Symbols.Singleton))?.ContainingNamespace;
             if (easyEcs == null || easyEcs.GetTypeMembers(Entity).Length == 0 || easyEcs.GetTypeMembers(World).Length == 0) return null;
             // EasyEcs's own components: the public ones (ChildOf, Destroyed) get their members in EasyEcs itself, so every
             // assembly referencing it has them; the internal ones get nothing.
@@ -714,7 +754,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
             return new ComponentModel(ns, fqn, type.Name, Symbols.FlatName(type), Symbols.HintName(type), isPublic, shape,
                 key?.ToDisplayString(Symbols.Fqn) ?? "",
-                unique != null && unique.ToDisplayString() != Symbols.EntityId && unique is not ITypeParameterSymbol,
+                unique != null && !Symbols.Named(unique, Symbols.EntityId) && unique is not ITypeParameterSymbol,
                 new EquatableArray<Setter>(setters), new EquatableArray<string>(shape.Members(type, easyEcs, compilation)),
                 new EquatableArray<string>(shape.Kind == Kind.Singleton ? [] : Symbols.EntityIdPaths(type, compilation)),
                 Symbols.LayoutHash(type) ?? "");
@@ -734,7 +774,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             bool required = type.GetMembers().Any(m => m is IFieldSymbol { IsRequired: true } or IPropertySymbol { IsRequired: true });
             if (ctors.Length > 0)
                 return ctors.Where(c => c.Parameters.All(p => p.RefKind is RefKind.None or RefKind.In && !Unsafe(p.Type))
-                        && (!required || c.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == "System.Diagnostics.CodeAnalysis.SetsRequiredMembersAttribute")))
+                        && (!required || c.GetAttributes().Any(a => Symbols.Named(a.AttributeClass, "System.Diagnostics.CodeAnalysis.SetsRequiredMembersAttribute"))))
                     .Select(c => new Setter(
                         string.Join(", ", c.Parameters.Select(p => $"{(p.IsParams ? "params " : p.RefKind == RefKind.In ? "in " : "")}{p.Type.ToDisplayString(TypeName)} {ParameterName(p.Name)}{Default(p)}")),
                         $"new {fqn}({string.Join(", ", c.Parameters.Select(p => ParameterName(p.Name)))})"))

@@ -172,7 +172,7 @@ internal static class Uses
                 return true;
             case { IsReferenceType: true }:
                 return !Immutable(type);
-            case INamedTypeSymbol named when IsSpan(named) || named.OriginalDefinition.ToDisplayString() is "System.Memory<T>" or "System.ArraySegment<T>":
+            case INamedTypeSymbol named when IsSpan(named) || (Symbols.Named(named.OriginalDefinition, "System.Memory<T>") || Symbols.Named(named.OriginalDefinition, "System.ArraySegment<T>")):
                 return true;
             case INamedTypeSymbol named when IsReadOnlyView(named):
                 return false;
@@ -193,10 +193,10 @@ internal static class Uses
 
     private static bool Immutable(ITypeSymbol type) =>
         type.SpecialType == SpecialType.System_String
-        || type.ContainingNamespace?.ToDisplayString() is "System.Collections.Immutable" or "System.Collections.Frozen";
+        || (Symbols.Named(type.ContainingNamespace, "System.Collections.Immutable") || Symbols.Named(type.ContainingNamespace, "System.Collections.Frozen"));
 
-    private static bool IsSpan(ITypeSymbol? type) => type?.OriginalDefinition.ToDisplayString() == "System.Span<T>";
+    private static bool IsSpan(ITypeSymbol? type) => Symbols.Named(type?.OriginalDefinition, "System.Span<T>");
 
     private static bool IsReadOnlyView(ITypeSymbol? type) =>
-        type?.OriginalDefinition.ToDisplayString() is "System.ReadOnlySpan<T>" or "System.ReadOnlyMemory<T>";
+        (Symbols.Named(type?.OriginalDefinition, "System.ReadOnlySpan<T>") || Symbols.Named(type?.OriginalDefinition, "System.ReadOnlyMemory<T>"));
 }

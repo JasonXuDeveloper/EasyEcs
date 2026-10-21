@@ -25,7 +25,7 @@ internal static class Threads
         bool world = Symbols.OnWorld(call);
         if (world && throughElement) return false; // worlds[i]: a world per item, each with one owner
 
-        if (starter.ContainingType.ToDisplayString() == "System.Threading.Tasks.Parallel") return true; // runs at once
+        if (Symbols.Named(starter.ContainingType, "System.Threading.Tasks.Parallel")) return true; // runs at once
         if (Awaited(handoff.Syntax)) return false;                    // the caller waits for it: one change after the other
         if (InLoop(handoff.Syntax, root)) return true;                                                 // handed off again
         return ChangedOutside(root, function, handoff, token);

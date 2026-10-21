@@ -244,7 +244,7 @@ public sealed partial class EasyEcsAnalyzer
             // Excluded by the method's filters too: EECS016 or EECS049 says the method never runs, the cost is moot.
             if (component != null && excluded.Contains(component)) continue;
             uses.TryGetValue(p, out var used);
-            bool span = kind == Symbols.ParamKind.ComponentSpan && p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>";
+            bool span = kind == Symbols.ParamKind.ComponentSpan && Symbols.Named(p.Type.OriginalDefinition, "System.Span<T>");
             bool byRef = kind is Symbols.ParamKind.Component or Symbols.ParamKind.Singleton && p.RefKind == RefKind.Ref;
 
             // EECS015 for a ref or Span parameter of an indexed component (AnalyzeMethod leaves it to the body): the fix
@@ -265,7 +265,7 @@ public sealed partial class EasyEcsAnalyzer
                     // A write access of a tracked component stamps every row it visits: [With<T>] would not, so the
                     // fix is offered only where it changes nothing but the cost.
                     bool stamps = (p.RefKind == RefKind.Ref || kind == Symbols.ParamKind.ComponentSpan
-                                   && p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>")
+                                   && Symbols.Named(p.Type.OriginalDefinition, "System.Span<T>"))
                                   && Symbols.Implements(component, Symbols.TrackChanges);
                     if (!stamps && requirements.Any(r => r is { Has: true, Parameter: false } && SymbolEqualityComparer.Default.Equals(r.Type, component)))
                     {
@@ -543,7 +543,7 @@ public sealed partial class EasyEcsAnalyzer
             // A throw ends the tick; a [Conditional] call is not compiled in release; console output is the cost
             // itself (the program prints on purpose, and the write costs more than the string it formats).
             if (operation is IThrowOperation
-                || operation is IInvocationOperation call && (Conditional(call.TargetMethod) || call.TargetMethod.ContainingType?.ToDisplayString() == "System.Console"))
+                || operation is IInvocationOperation call && (Conditional(call.TargetMethod) || Symbols.Named(call.TargetMethod.ContainingType, "System.Console")))
                 continue;
             if (Allocates(operation, pass) is { } what)
             {
@@ -564,7 +564,7 @@ public sealed partial class EasyEcsAnalyzer
 
     /// <summary>A method the compiler drops outside the symbol it names (Debug.Assert, Debug.WriteLine, ...).</summary>
     private static bool Conditional(IMethodSymbol method) =>
-        method.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == "System.Diagnostics.ConditionalAttribute");
+        method.GetAttributes().Any(a => Symbols.Named(a.AttributeClass, "System.Diagnostics.ConditionalAttribute"));
 
     /// <summary>What <paramref name="operation"/> allocates, or null: the kinds EECS028 names.</summary>
     private static string? Allocates(IOperation operation, bool pass)
@@ -591,14 +591,14 @@ public sealed partial class EasyEcsAnalyzer
             case IBinaryOperation { OperatorKind: BinaryOperatorKind.Add, Type.SpecialType: SpecialType.System_String } concat
                 when concat.ConstantValue is not { HasValue: true }:
                 return "a string built at run time";
-            case IInvocationOperation { TargetMethod: { ContainingType: { } owner } method } when owner.ToDisplayString() is Symbols.World or Symbols.Entity
+            case IInvocationOperation { TargetMethod: { ContainingType: { } owner } method } when (Symbols.Named(owner, Symbols.World) || Symbols.Named(owner, Symbols.Entity))
                                                                                                 && !(pass && PassRefused.Contains(method.Name))
                                                                                                 && Cold(method) is { } cold:
                 return cold;
             case IInvocationOperation call when StringCall(call.TargetMethod):
                 return "a string built at run time";
-            case IInvocationOperation call when call.TargetMethod.ContainingType?.ToDisplayString() is "System.Linq.Enumerable"
-                                                     or "System.Linq.ParallelEnumerable" or "System.Linq.Queryable":
+            case IInvocationOperation { TargetMethod.ContainingType: { Name: "Enumerable" or "ParallelEnumerable" or "Queryable" } linq } call
+                when Symbols.Named(linq.ContainingNamespace, "System.Linq"):
                 return $"LINQ '{call.TargetMethod.Name}' (an enumerator and delegates)";
             case IConversionOperation conversion when conversion.Operand.Type is { IsValueType: true } from
                                                       && conversion.Type is { IsReferenceType: true }
@@ -749,7 +749,7 @@ public sealed partial class EasyEcsAnalyzer
         var method = call.TargetMethod;
         if (call.Syntax is not InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax access } syntax) return;
         if (method.TypeArguments.Any(t => t is not INamedTypeSymbol || t is INamedTypeSymbol { IsGenericType: true } g
-                && g.OriginalDefinition.ToDisplayString() != Symbols.DynamicBuffer)) return;
+                && !Symbols.Named(g.OriginalDefinition, Symbols.DynamicBuffer))) return;
         var model = call.SemanticModel!;
         string receiver = access.Expression.ToString();
         string args = syntax.ArgumentList.ToString();

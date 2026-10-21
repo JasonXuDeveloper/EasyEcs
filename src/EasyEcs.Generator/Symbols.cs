@@ -42,10 +42,95 @@ internal static class Symbols
 
     public static readonly SymbolDisplayFormat Fqn = SymbolDisplayFormat.FullyQualifiedFormat;
 
+    /// <summary>
+    /// Whether <paramref name="symbol"/> (a namespace or a named type) is displayed as <paramref name="display"/>
+    /// (<c>symbol.ToDisplayString() == display</c>: <c>EasyEcs.World</c>, a generic definition with its type parameters,
+    /// <c>EasyEcs.IIndexed&lt;TKey&gt;</c>), without building a string or an array: generators and the analyzer ask this
+    /// of every candidate on every edit. A nullable annotation does not count (<c>World?</c> is a <c>World</c>).
+    /// </summary>
+    public static bool Named(ISymbol? symbol, string display)
+    {
+        if (symbol is not (INamedTypeSymbol or INamespaceSymbol)) return false;
+        int end = display.Length;
+        if (display[end - 1] == '>')
+        {
+            // A generic definition of as many type parameters (their names are the definition's: no other type has them).
+            if (symbol is not INamedTypeSymbol { IsGenericType: true, IsDefinition: true } generic) return false;
+            int open = display.IndexOf('<'), arity = 1;
+            for (int i = open; i < end; i++)
+                if (display[i] == ',') arity++;
+            if (generic.Arity != arity) return false;
+            end = open;
+        }
+        else if (symbol is INamedTypeSymbol { IsGenericType: true } or INamedTypeSymbol { IsTupleType: true }) return false;
+
+        // The names, innermost first: the type, its containing types, its namespaces.
+        for (ISymbol? s = symbol; ;)
+        {
+            string name = s.Name;
+            int start = end - name.Length;
+            if (start < 0 || string.CompareOrdinal(display, start, name, 0, name.Length) != 0) return false;
+            s = (ISymbol?)s.ContainingType ?? s.ContainingNamespace;
+            if (s is null or INamespaceSymbol { IsGlobalNamespace: true }) return start == 0;
+            if (s is INamedTypeSymbol { IsGenericType: true } || start == 0 || display[start - 1] != '.') return false;
+            end = start - 1;
+        }
+    }
+
+    /// <summary>
+    /// The type a type name names (<paramref name="name"/>, or the qualified name it ends), or null when it names none
+    /// or one with an error in it. Generators ask this of every candidate of every file on every edit: in a member
+    /// body, <c>GetSymbolInfo</c> (and any speculation at a position there) binds the whole body and runs its nullable
+    /// analysis first, so a name in a body is bound alone at <see cref="Outside"/> its member. Names there see what they
+    /// see in the body (the usings, the namespaces, the types and their type parameters) but a method's type
+    /// parameters, which no generated code can name anyway.
+    /// </summary>
+    public static ITypeSymbol? TypeNamed(SemanticModel model, SyntaxNode name)
+    {
+        while (name.Parent is QualifiedNameSyntax qualified && qualified.Right == name || name.Parent is AliasQualifiedNameSyntax alias && alias.Name == name)
+            name = name.Parent;
+        if (name is not TypeSyntax type) return null;
+        int outside = Outside(type);
+        var bound = (outside < 0 ? model.GetSymbolInfo(type).Symbol
+            : model.GetSpeculativeSymbolInfo(outside, type, SpeculativeBindingOption.BindAsTypeOrNamespace).Symbol) as ITypeSymbol;
+        return bound == null || HasError(bound) ? null : bound;
+    }
+
+    /// <summary>
+    /// A position inside the braces of the type whose member body (or initializer) holds <paramref name="node"/>, where
+    /// a type name binds without the member; -1 outside a member body (a declaration's own types bind alone already)
+    /// or in top-level statements.
+    /// </summary>
+    public static int Outside(SyntaxNode node)
+    {
+        bool body = false;
+        for (var n = node.Parent; n != null; n = n.Parent)
+            switch (n)
+            {
+                case BlockSyntax or ArrowExpressionClauseSyntax or EqualsValueClauseSyntax:
+                    body = true;
+                    break;
+                case BaseTypeDeclarationSyntax type:
+                    return body && !type.OpenBraceToken.IsMissing ? type.OpenBraceToken.Span.End : -1;
+                case GlobalStatementSyntax:
+                    return -1;
+            }
+
+        return -1;
+    }
+
+    private static bool HasError(ITypeSymbol type) => type switch
+    {
+        { TypeKind: TypeKind.Error } => true,
+        INamedTypeSymbol named => named.TypeArguments.Any(HasError) || named.ContainingType is { } outer && HasError(outer),
+        IArrayTypeSymbol array => HasError(array.ElementType),
+        _ => false,
+    };
+
     /// <summary>The element type when <paramref name="type"/> is a <c>DynamicBuffer&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? BufferElement(ITypeSymbol type) =>
         type is INamedTypeSymbol { IsGenericType: true } named &&
-        named.OriginalDefinition.ToDisplayString() == DynamicBuffer
+        Named(named.OriginalDefinition, DynamicBuffer)
             ? named.TypeArguments[0]
             : null;
 
@@ -57,7 +142,7 @@ internal static class Symbols
     }
 
     /// <summary>Whether <paramref name="type"/> is a construction of generic type <paramref name="definition"/> (its display name).</summary>
-    public static bool Is(INamedTypeSymbol? type, string definition) => type?.OriginalDefinition.ToDisplayString() == definition;
+    public static bool Is(INamedTypeSymbol? type, string definition) => Named(type?.OriginalDefinition, definition);
 
     /// <summary>The group type of a system's (inherited) [UpdateInGroup&lt;T&gt;], or null for the default group.</summary>
     public static ITypeSymbol? GroupOf(INamedTypeSymbol system)
@@ -83,7 +168,7 @@ internal static class Symbols
     public static bool IsSystem(INamedTypeSymbol type)
     {
         for (var b = type.BaseType; b != null; b = b.BaseType)
-            if (b.ToDisplayString() == EcsSystem) return true;
+            if (Named(b, EcsSystem)) return true;
         return false;
     }
 
@@ -97,7 +182,7 @@ internal static class Symbols
 
     /// <summary>A hand-written job's interface: <c>IForEach</c>, <c>IForEachEntity</c> or <c>IForEachBatch</c> of EasyEcs.</summary>
     public static bool IsJob(INamedTypeSymbol face) =>
-        face.Name is "IForEach" or "IForEachEntity" or "IForEachBatch" && face.ContainingNamespace?.ToDisplayString() == "EasyEcs";
+        face.Name is "IForEach" or "IForEachEntity" or "IForEachBatch" && Named(face.ContainingNamespace, "EasyEcs");
 
     /// <summary>The one job interface (<see cref="IsJob"/>) whose Execute <paramref name="method"/> implements, or null.</summary>
     public static INamedTypeSymbol? JobInterface(IMethodSymbol method)
@@ -118,7 +203,7 @@ internal static class Symbols
 
     /// <summary>A query item: EasyEcs's <c>QueryItem&lt;…&gt;</c> (refs) or <c>ReadItem&lt;…&gt;</c> (ref readonly).</summary>
     public static bool IsItem(ITypeSymbol? type) =>
-        type is INamedTypeSymbol { Name: "QueryItem" or "ReadItem" } item && item.ContainingNamespace?.ToDisplayString() == "EasyEcs";
+        type is INamedTypeSymbol { Name: "QueryItem" or "ReadItem" } item && Named(item.ContainingNamespace, "EasyEcs");
 
     /// <summary>A query item's positional component, <c>item.Component1</c> … <c>item.Component9</c>.</summary>
     public static bool IsItemComponent(IPropertySymbol property) => property.Name.StartsWith("Component") && IsItem(property.ContainingType);
@@ -132,15 +217,15 @@ internal static class Symbols
     /// </summary>
     public static bool IsComparable(ITypeSymbol type) =>
         type is ITypeParameterSymbol or IErrorTypeSymbol || type.IsUnmanagedType
-        || type.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == "System.IEquatable<T>" && SymbolEqualityComparer.Default.Equals(i.TypeArguments[0], type));
+        || type.AllInterfaces.Any(i => Named(i.OriginalDefinition, "System.IEquatable<T>") && SymbolEqualityComparer.Default.Equals(i.TypeArguments[0], type));
 
     /// <summary>Whether Disable accepts <paramref name="component"/> (Entity.ThrowIfNotDisableable): not ChildOf, not a cleanup component.</summary>
     public static bool IsDisableable(ITypeSymbol component) =>
-        component is ITypeParameterSymbol || component.ToDisplayString() != "EasyEcs.ChildOf" && !Implements(component, Cleanup);
+        component is ITypeParameterSymbol || !Named(component, "EasyEcs.ChildOf") && !Implements(component, Cleanup);
 
     /// <summary><c>Destroyed</c> or a <c>Disabled&lt;T&gt;</c>: tags the world adds and removes itself.</summary>
     public static bool IsWorldTag(ITypeSymbol type) =>
-        type.ToDisplayString() == "EasyEcs.Destroyed" || type is INamedTypeSymbol { IsGenericType: true } named && named.OriginalDefinition.ToDisplayString() == "EasyEcs.Disabled<T>";
+        Named(type, "EasyEcs.Destroyed") || type is INamedTypeSymbol { IsGenericType: true } named && Named(named.OriginalDefinition, "EasyEcs.Disabled<T>");
 
     /// <summary><paramref name="operation"/> without the conversions around it.</summary>
     public static IOperation? Unwrap(IOperation? operation)
@@ -211,9 +296,9 @@ internal static class Symbols
             {
                 if (field.IsStatic || field.IsConst || field.IsFixedSizeBuffer) continue;
                 string step = prefix + owner + "\t" + field.Name + "\t" + field.Type.ToDisplayString(Fqn);
-                if (field.Type.ToDisplayString() == EntityId) paths.Add(step);
+                if (Named(field.Type, EntityId)) paths.Add(step);
                 else if (depth < 4 && field.Type is INamedTypeSymbol { TypeKind: TypeKind.Struct, IsGenericType: false, SpecialType: SpecialType.None } inner
-                         && inner.ToDisplayString() != Entity
+                         && !Named(inner, Entity)
                          && compilation.IsSymbolAccessibleWithin(inner, compilation.Assembly))
                     Collect(inner, step + "\n", depth + 1);
             }
@@ -251,24 +336,35 @@ internal static class Symbols
         }
     }
 
-    public static bool Implements(ITypeSymbol type, string interfaceName) =>
-        type.AllInterfaces.Any(i => i.ToDisplayString() == interfaceName);
+    public static bool Implements(ITypeSymbol type, string interfaceName)
+    {
+        foreach (var face in type.AllInterfaces)
+            if (Named(face, interfaceName)) return true;
+        return false;
+    }
 
     /// <summary>
     /// <see cref="Implements"/>, or a type parameter constrained to the interface (<c>where T : struct, IComponent</c>):
     /// what a [ForEach] parameter of a generic system or runner may be.
     /// </summary>
     private static bool IsA(ITypeSymbol type, string interfaceName) => type is ITypeParameterSymbol parameter
-        ? parameter.ConstraintTypes.Any(c => c.ToDisplayString() == interfaceName || IsA(c, interfaceName))
+        ? IsAny(parameter.ConstraintTypes, interfaceName)
         : Implements(type, interfaceName);
+
+    private static bool IsAny(System.Collections.Immutable.ImmutableArray<ITypeSymbol> constraints, string interfaceName)
+    {
+        foreach (var constraint in constraints)
+            if (Named(constraint, interfaceName) || IsA(constraint, interfaceName)) return true;
+        return false;
+    }
 
     /// <summary>
     /// A component the world indexes (<c>IIndexed&lt;TKey&gt;</c>, or a <c>DynamicBuffer</c> of <c>IRelation</c> links) or
     /// groups by (<c>IGroup</c>): written only with Set (and AddRelation / RemoveRelation), so its index or table follows.
     /// </summary>
     public static bool IsIndexed(ITypeSymbol type) =>
-        type.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() is Indexed or Group)
-        || type is INamedTypeSymbol { IsGenericType: true } buffer && buffer.OriginalDefinition.ToDisplayString() == "EasyEcs.DynamicBuffer<T>"
+        type.AllInterfaces.Any(i => Named(i.OriginalDefinition, Indexed) || Named(i.OriginalDefinition, Group))
+        || type is INamedTypeSymbol { IsGenericType: true } buffer && Named(buffer.OriginalDefinition, "EasyEcs.DynamicBuffer<T>")
         && Implements(buffer.TypeArguments[0], "EasyEcs.IRelation");
 
     /// <summary>
@@ -486,7 +582,7 @@ internal static class Symbols
         if (IsA(element, Component) || IsA(element, Singleton)) return ParamKind.Invalid; // a component by value
         // A span or other ref struct goes into the job by value: a job holds no ref field to a ref struct.
         if (p.Type.IsRefLikeType && p.RefKind != RefKind.None) return ParamKind.Invalid;
-        return p.Type.ToDisplayString() is Entity or EntitySpan or World ? ParamKind.Invalid : ParamKind.Context;
+        return Named(p.Type, Entity) || Named(p.Type, EntitySpan) || Named(p.Type, World) ? ParamKind.Invalid : ParamKind.Context;
     }
 
     /// <summary>
@@ -527,7 +623,7 @@ internal static class Symbols
 
     /// <summary>"ChangedAny" or "RemovedAny" for a <c>[ChangedAny&lt;T1..Tn&gt;]</c> / <c>[RemovedAny&lt;T1..Tn&gt;]</c> attribute class, else null.</summary>
     public static string? AnyFilter(INamedTypeSymbol attribute) =>
-        attribute is { Arity: >= 2, Name: "ChangedAnyAttribute" or "RemovedAnyAttribute" } && attribute.ContainingNamespace?.ToDisplayString() == "EasyEcs"
+        attribute is { Arity: >= 2, Name: "ChangedAnyAttribute" or "RemovedAnyAttribute" } && Named(attribute.ContainingNamespace, "EasyEcs")
             ? attribute.Name.Substring(0, attribute.Name.Length - "Attribute".Length)
             : null;
 
@@ -551,15 +647,13 @@ internal static class Symbols
                 continue;
             }
 
-            FilterKind? kind = cls.ConstructedFrom.ToDisplayString() switch
-            {
-                WithAttribute => FilterKind.With,
-                WithoutAttribute => FilterKind.Without,
-                WithAnyAttribute => FilterKind.WithAny,
-                ChangedAttribute => FilterKind.Changed,
-                RemovedAttribute => FilterKind.Removed,
-                _ => null,
-            };
+            var from = cls.ConstructedFrom;
+            FilterKind? kind = Named(from, WithAttribute) ? FilterKind.With
+                : Named(from, WithoutAttribute) ? FilterKind.Without
+                : Named(from, WithAnyAttribute) ? FilterKind.WithAny
+                : Named(from, ChangedAttribute) ? FilterKind.Changed
+                : Named(from, RemovedAttribute) ? FilterKind.Removed
+                : null;
             if (kind != null) yield return (kind.Value, cls.TypeArguments[0], attribute);
         }
     }
@@ -612,7 +706,7 @@ internal static class Symbols
     public static int Slices(IMethodSymbol method)
     {
         foreach (var attribute in method.GetAttributes())
-            if (attribute.AttributeClass?.ToDisplayString() == ForEachAttribute)
+            if (Named(attribute.AttributeClass, ForEachAttribute))
                 foreach (var named in attribute.NamedArguments)
                     if (named.Key == "Slices" && named.Value.Value is int slices) return slices;
         return 1;
@@ -645,13 +739,10 @@ internal static class Symbols
             return optional.IsValueType && IsA(optional, Component) ? ParamKind.Optional : ParamKind.Invalid;
         if (MutElement(p.Type) is { } mutable)
             return mutable.IsValueType && IsA(mutable, Component) ? ParamKind.Mutable : ParamKind.Invalid;
-        return p.Type.ToDisplayString() switch
-        {
-            Entity => ParamKind.Entity,
-            EntitySpan => ParamKind.Entities,
-            World => ParamKind.World,
-            _ => ParamKind.Invalid,
-        };
+        return Named(p.Type, Entity) ? ParamKind.Entity
+            : Named(p.Type, EntitySpan) ? ParamKind.Entities
+            : Named(p.Type, World) ? ParamKind.World
+            : ParamKind.Invalid;
     }
 
     /// <summary>A component or singleton struct taken by value: <c>in</c> (read) or <c>ref</c> (write) makes it a valid parameter.</summary>
@@ -661,19 +752,19 @@ internal static class Symbols
     /// <summary>Element type of a <c>Span&lt;T&gt;</c> / <c>ReadOnlySpan&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? SpanElement(ITypeSymbol type) =>
         type is INamedTypeSymbol { IsGenericType: true } named &&
-        named.ConstructedFrom.ToDisplayString() is "System.Span<T>" or "System.ReadOnlySpan<T>"
+        (Named(named.ConstructedFrom, "System.Span<T>") || Named(named.ConstructedFrom, "System.ReadOnlySpan<T>"))
             ? named.TypeArguments[0]
             : null;
 
     /// <summary>Component type of a <c>Maybe&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? MaybeElement(ITypeSymbol type) =>
-        type is INamedTypeSymbol { IsGenericType: true } named && named.ConstructedFrom.ToDisplayString() == "EasyEcs.Maybe<T>"
+        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Maybe<T>")
             ? named.TypeArguments[0]
             : null;
 
     /// <summary>Component type of a <c>Mut&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? MutElement(ITypeSymbol type) =>
-        type is INamedTypeSymbol { IsGenericType: true } named && named.ConstructedFrom.ToDisplayString() == "EasyEcs.Mut<T>"
+        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Mut<T>")
             ? named.TypeArguments[0]
             : null;
 
@@ -776,7 +867,7 @@ internal static class Symbols
 
     /// <summary>The <c>Parallel</c> named argument of the method's [ForEach] attribute.</summary>
     public static bool IsParallel(IMethodSymbol method) => method.GetAttributes()
-        .Where(a => a.AttributeClass?.ToDisplayString() == ForEachAttribute)
+        .Where(a => Named(a.AttributeClass, ForEachAttribute))
         .SelectMany(a => a.NamedArguments)
         .Any(n => n.Key == "Parallel" && n.Value.Value is true);
 
@@ -819,9 +910,9 @@ internal static class Symbols
     /// </summary>
     public static bool IsStructural(IMethodSymbol method)
     {
-        string? type = method.ContainingType?.ToDisplayString();
-        return type == Entity ? StructuralEntityMembers.Contains(method.Name)
-            : type == World ? StructuralWorldMembers.Contains(method.Name)
+        var type = method.ContainingType;
+        return Named(type, Entity) ? StructuralEntityMembers.Contains(method.Name)
+            : Named(type, World) ? StructuralWorldMembers.Contains(method.Name)
             : IsGenerated(method) && IsGeneratedWriter(method);
     }
 
@@ -831,7 +922,7 @@ internal static class Symbols
 
     /// <summary>Whether a call works on a World (its own member or a generated one), not on an entity.</summary>
     public static bool OnWorld(IInvocationOperation call) =>
-        (Receiver(call)?.Type ?? call.TargetMethod.ContainingType)?.ToDisplayString() == World;
+        Named(Receiver(call)?.Type ?? call.TargetMethod.ContainingType, World);
 
     /// <summary>The tool name ComponentGenerator writes on its classes (<c>[GeneratedCode]</c>).</summary>
     public const string GeneratorName = "EasyEcs.Generator";
@@ -848,7 +939,7 @@ internal static class Symbols
     }
 
     private static bool IsGeneratorMark(AttributeData a) =>
-        a.AttributeClass?.ToDisplayString() == "System.CodeDom.Compiler.GeneratedCodeAttribute"
+        Named(a.AttributeClass, "System.CodeDom.Compiler.GeneratedCodeAttribute")
         && a.ConstructorArguments.Length > 0 && a.ConstructorArguments[0].Value as string == GeneratorName;
 
     /// <summary>
@@ -895,19 +986,16 @@ internal static class Symbols
     /// </summary>
     public static bool StartsThread(IMethodSymbol method)
     {
-        string type = method.ContainingType?.ToDisplayString() ?? "";
-        return type switch
-        {
-            // ContinueWith runs its continuation on the thread pool when the task completes
-            "System.Threading.Tasks.Task" => method.Name is "Run" or "ContinueWith" || method.MethodKind == MethodKind.Constructor,
-            "System.Threading.Tasks.Task<TResult>" => method.Name == "ContinueWith" || method.MethodKind == MethodKind.Constructor,
-            "System.Threading.Tasks.TaskFactory" or "System.Threading.Tasks.TaskFactory<TResult>" => method.Name == "StartNew",
-            "System.Threading.Tasks.Parallel" => true,
-            "System.Threading.ThreadPool" => method.Name is "QueueUserWorkItem" or "UnsafeQueueUserWorkItem"
-                or "RegisterWaitForSingleObject" or "UnsafeRegisterWaitForSingleObject",
-            "System.Threading.Thread" or "System.Threading.Timer" => method.MethodKind == MethodKind.Constructor,
-            _ => false,
-        };
+        // By name first (most calls are of other types), then the full name.
+        if (method.ContainingType is not { Name: "Task" or "TaskFactory" or "Parallel" or "ThreadPool" or "Thread" or "Timer" } type) return false;
+        // ContinueWith runs its continuation on the thread pool when the task completes
+        if (Named(type, "System.Threading.Tasks.Task")) return method.Name is "Run" or "ContinueWith" || method.MethodKind == MethodKind.Constructor;
+        if (Named(type, "System.Threading.Tasks.Task<TResult>")) return method.Name == "ContinueWith" || method.MethodKind == MethodKind.Constructor;
+        if (Named(type, "System.Threading.Tasks.TaskFactory") || Named(type, "System.Threading.Tasks.TaskFactory<TResult>")) return method.Name == "StartNew";
+        if (Named(type, "System.Threading.Tasks.Parallel")) return true;
+        if (Named(type, "System.Threading.ThreadPool"))
+            return method.Name is "QueueUserWorkItem" or "UnsafeQueueUserWorkItem" or "RegisterWaitForSingleObject" or "UnsafeRegisterWaitForSingleObject";
+        return (Named(type, "System.Threading.Thread") || Named(type, "System.Threading.Timer")) && method.MethodKind == MethodKind.Constructor;
     }
 
     /// <summary>Entity members that cannot change the world (no structural change, no access to the World).</summary>
@@ -956,9 +1044,9 @@ internal static class Symbols
             return access.Name is IdentifierNameSyntax && IdentityEntityMembers.Contains(MemberName(access)); // properties: never called
         if (use.Parent is BinaryExpressionSyntax binary && binary.Kind() is SyntaxKind.EqualsExpression or SyntaxKind.NotEqualsExpression)
             return model.GetSymbolInfo(binary).Symbol is IMethodSymbol { MethodKind: MethodKind.UserDefinedOperator, ContainingType: { } op }
-                && op.ToDisplayString() is Entity or EntityId;
+                && (Named(op, Entity) || Named(op, EntityId));
         var type = model.GetTypeInfo(use);
-        return type.Type?.ToDisplayString() == Entity && type.ConvertedType?.ToDisplayString() == EntityId;
+        return Named(type.Type, Entity) && Named(type.ConvertedType, EntityId);
     }
 
     private static string MemberName(MemberAccessExpressionSyntax access) =>
@@ -1048,7 +1136,7 @@ internal static class Symbols
 
     /// <summary>A writable parameter (<c>ref</c> or <c>Span</c>) of a job's Execute (a type implementing EasyEcs.IForEach*).</summary>
     private static bool IsJobParameter(IParameterSymbol p) =>
-        (p.RefKind == RefKind.Ref || p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>")
+        (p.RefKind == RefKind.Ref || Named(p.Type.OriginalDefinition, "System.Span<T>"))
         && p.ContainingSymbol is IMethodSymbol { Name: "Execute", ContainingType: { } job }
         && job.AllInterfaces.Any(IsJob);
 
@@ -1090,9 +1178,9 @@ internal static class Symbols
     /// (its RemoveAll is a structural change, EECS013's business).
     /// </summary>
     private static bool Immutable(ITypeSymbol type) =>
-        type.SpecialType == SpecialType.System_String || type.ToDisplayString() == World
-        || type.ContainingNamespace?.ToDisplayString() is "System.Collections.Immutable" or "System.Collections.Frozen";
+        type.SpecialType == SpecialType.System_String || Named(type, World)
+        || Named(type.ContainingNamespace, "System.Collections.Immutable") || Named(type.ContainingNamespace, "System.Collections.Frozen");
 
     public static bool IsForEach(IMethodSymbol method) =>
-        method.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == ForEachAttribute);
+        method.GetAttributes().Any(a => Named(a.AttributeClass, ForEachAttribute));
 }

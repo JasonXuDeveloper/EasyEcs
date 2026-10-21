@@ -408,6 +408,9 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach(Slices = 1), Changed<T>] static void A(ref P p) { } [ForEach(Slices = 8, Parallel = true)] static void B(ref Q q) { } }")]
     [TestCase("public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; } public static class U { public static Entity F(World w) => w.AccountIndex.Get(1); }")]
     [TestCase("public static class U { public static bool F(ref DynamicBuffer<int> b) => System.Runtime.CompilerServices.Unsafe.IsNullRef(ref b); }")] // a 'ref readonly' argument is no copy
+    [TestCase("public static class U { public static bool F(in DynamicBuffer<int> b) => System.Runtime.CompilerServices.Unsafe.IsNullRef(in b); }")]
+    [TestCase("public static class U { public static bool F(Entity e) { ref var b = ref e.TryGetRef<DynamicBuffer<int>>(out _); return !System.Runtime.CompilerServices.Unsafe.IsNullRef(in b) && b.Count > 0; } }")]
+    [TestCase("public static class U { public static bool F(Entity e) { ref readonly var b = ref e.TryGetRef<DynamicBuffer<int>>(out _); return System.Runtime.CompilerServices.Unsafe.IsNullRef(in b); } }")]
     public async Task ValidCodeIsNotReported(string source)
     {
         var errors = await Diagnose(Components, source);
@@ -700,22 +703,38 @@ public class GeneratorTests
         Assert.That(managed.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs")).ToString(), Does.Not.Contain("Raw<"));
     }
 
-    [Test]
-    public void UnrelatedEditsHitTheCache()
+    // Every tracked stage of ComponentGenerator and SystemGenerator: a new stage is added here (the test fails until it is).
+    private static readonly string[] TrackedStages =
+    [
+        "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "ExtensionMembers", "BufferUses",
+        "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers",
+    ];
+
+    // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
+    // equal it), so no file is emitted again.
+    [TestCase("public class Unrelated { }", "public class Unrelated { int x; }")]                  // another file
+    [TestCase("i.P.V++;", "i.P.V += 2;")]                                                          // a body in the systems' file
+    [TestCase("{ [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { }", "{ [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { p.V++; }")] // a [ForEach] body
+    public void EditsThatChangeNoModelHitTheCache(string before, string after)
     {
-        var system = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components +
+        string code = "using EasyEcs;\n" + Components +
             "public struct L; public partial class S : EcsSystem { [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { } [ForEach(Slices = 4)] static void D(ref Q q) { } }" +
             "public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void B(ref T t) { } } public class H : G<P>;" +
-            "public static class U { static void C(World w) { foreach (var i in w.Query<P>()) i.P.V++; } }", Parse);
+            "public static class U { static void C(World w) { foreach (var i in w.Query<P>()) i.P.V++; } }";
+        var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
+        var edited = code.Contains(before) ? system : other;
         var compilation = Compile().AddSyntaxTrees(system, other);
 
         var driver = Driver().RunGenerators(compilation);
-        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(other,
-            CSharpSyntaxTree.ParseText("public class Unrelated { int x; }", Parse)));
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(edited,
+            CSharpSyntaxTree.ParseText(edited.ToString().Replace(before, after), Parse)));
 
-        var steps = driver.GetRunResult().Results.SelectMany(r => r.TrackedSteps).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.SelectMany(p => p.Value));
-        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "ExtensionMembers", "BufferUses", "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers" })
+        var steps = Steps(driver);
+        // Roslyn's own steps: its providers, FAWMN's internals (name_ForAttribute...) and the two outputs.
+        string[] roslyn = ["Compilation", "CompilationOptions", "ParseOptions", "SourceOutput", "ImplementationSourceOutput"];
+        Assert.That(steps.Keys.Where(k => !k.Contains('_') && !roslyn.Contains(k)), Is.EquivalentTo(TrackedStages), "every tracked stage is asserted");
+        foreach (var name in TrackedStages.Append("SourceOutput").Append("ImplementationSourceOutput")) // and nothing is emitted again
             Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                 Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
     }

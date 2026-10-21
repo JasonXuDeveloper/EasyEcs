@@ -394,7 +394,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             string definition = typeParameters.Count == 0 ? ""
                 : "global::" + (ns.Length > 0 ? ns + "." : "") + string.Join(".", levels.Select(t => t.Arity == 0 ? t.Name : $"{t.Name}<{new string(',', t.Arity - 1)}>"));
             bool overridesOnUpdate = false;
-            for (var t = type; t != null && t.ToDisplayString() != Symbols.EcsSystem; t = t.BaseType)
+            for (var t = type; t != null && !Symbols.Named(t, Symbols.EcsSystem); t = t.BaseType)
                 overridesOnUpdate |= t.GetMembers("OnUpdate").Any(m => m is IMethodSymbol { IsOverride: true, Parameters.Length: 0 });
             bool isPublic = true;
             for (var t = type; t != null; t = t.ContainingType) isPublic &= t.DeclaredAccessibility == Accessibility.Public;
@@ -476,7 +476,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 {
                     Symbols.ParamKind.ComponentSpan => new ParamModel(Symbols.ParamKind.ComponentSpan,
                         Symbols.SpanElement(p.Type)!.ToDisplayString(Symbols.Fqn),
-                        ((INamedTypeSymbol)p.Type).ConstructedFrom.ToDisplayString() == "System.Span<T>" ? "ref" : "in", p.Name, declared),
+                        Symbols.Named(((INamedTypeSymbol)p.Type).ConstructedFrom, "System.Span<T>") ? "ref" : "in", p.Name, declared),
                     Symbols.ParamKind.Optional => new ParamModel(Symbols.ParamKind.Optional, // a write unless it only reads Value
                         Symbols.MaybeElement(p.Type)!.ToDisplayString(Symbols.Fqn), Symbols.OnlyReadsValue(Symbols.WithBody(method, syntax, model).Item1, p.Name) ? "in" : "ref", p.Name, declared,
                         Symbols.Implements(Symbols.MaybeElement(p.Type)!, Symbols.TrackChanges)),
@@ -581,12 +581,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
         public static EquatableArray<ClosedUse> Create(GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
         {
-            if (ctx.SemanticModel.GetSymbolInfo(ctx.Node, ct).Symbol is not INamedTypeSymbol { IsGenericType: true } type
+            if (Symbols.TypeNamed(ctx.SemanticModel, ctx.Node) is not INamedTypeSymbol { IsGenericType: true } type
                 || type.TypeKind != TypeKind.Class || !Symbols.IsSystem(type))
                 return new([]);
             var uses = new List<ClosedUse>();
             var assembly = ctx.SemanticModel.Compilation.Assembly;
-            for (var t = type; t != null && t.ToDisplayString() != Symbols.EcsSystem; t = t.BaseType)
+            for (var t = type; t != null && !Symbols.Named(t, Symbols.EcsSystem); t = t.BaseType)
             {
                 var arguments = Symbols.ChainTypeArguments(t);
                 if (arguments.Count == 0 || !SymbolEqualityComparer.Default.Equals(t.ContainingAssembly, assembly)

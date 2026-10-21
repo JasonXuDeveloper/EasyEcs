@@ -290,12 +290,12 @@ public sealed partial class EasyEcsAnalyzer
         {
             case IInvocationOperation { TargetMethod: { } method } call when method.ReturnsByRef || method.ReturnsByRefReadonly:
             {
-                string? type = method.ContainingType?.ToDisplayString();
-                if (type is not (Symbols.Entity or Symbols.World) && !Symbols.IsGenerated(method)) return null;
+                bool entity = Symbols.Named(method.ContainingType, Symbols.Entity);
+                if (!entity && !Symbols.Named(method.ContainingType, Symbols.World) && !Symbols.IsGenerated(method)) return null;
                 string name = (method.ContainingType!.IsExtension ? "" : method.ContainingType.Name + ".") + method.Name;
                 if (method.ReturnsByRef) return (name, !Symbols.IsIndexed(method.ReturnType), null, set);
                 // Read<T>() of a component that is not indexed: Get<T>() is its writer.
-                string? writer = type == Symbols.Entity && method is { Name: "Read", TypeArguments.Length: 1 } && !Symbols.IsIndexed(method.TypeArguments[0])
+                string? writer = entity && method is { Name: "Read", TypeArguments.Length: 1 } && !Symbols.IsIndexed(method.TypeArguments[0])
                                  && call.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax access }
                     ? access.Expression + "." + access.Name.ToString().Replace("Read<", "Get<") + "()" : null;
                 return (name, false, writer, set);
@@ -303,7 +303,7 @@ public sealed partial class EasyEcsAnalyzer
             case IPropertyReferenceOperation { Property: { IsIndexer: false } property } reference when property.ReturnsByRef || property.ReturnsByRefReadonly:
             {
                 bool core = Symbols.IsItemComponent(property)
-                            || property.ContainingNamespace?.ToDisplayString() == "EasyEcs" && property.Name == "Value" && property.ContainingType.Name is "Maybe" or "Mut" or "SingletonRef";
+                            || Symbols.Named(property.ContainingNamespace, "EasyEcs") && property.Name == "Value" && property.ContainingType.Name is "Maybe" or "Mut" or "SingletonRef";
                 if (!core && !Symbols.IsGenerated(property)) return null;
                 string name = (core ? property.ContainingType.Name + "." : "") + property.Name;
                 if (property.ReturnsByRef) return (name, !Symbols.IsIndexed(property.Type), null, set);
@@ -391,18 +391,19 @@ public sealed partial class EasyEcsAnalyzer
     {
         var call = (IInvocationOperation)context.Operation;
         var method = call.TargetMethod;
-        string? owner = method.ContainingType?.ToDisplayString();
+        var type = method.ContainingType;
+        bool onEntity = Symbols.Named(type, Symbols.Entity), onWorld = Symbols.Named(type, Symbols.World);
 
         // EECS040: SetIfChanged of a value it cannot compare.
-        if (method.Name == "SetIfChanged" && (owner == Symbols.Entity && method.TypeArguments.Length == 1 ? method.TypeArguments[0]
-                : method.ContainingType is { Name: "Mut", TypeArguments.Length: 1 } mut && mut.ContainingNamespace?.ToDisplayString() == "EasyEcs" ? mut.TypeArguments[0]
+        if (method.Name == "SetIfChanged" && (onEntity && method.TypeArguments.Length == 1 ? method.TypeArguments[0]
+                : method.ContainingType is { Name: "Mut", TypeArguments.Length: 1 } mut && Symbols.Named(mut.ContainingNamespace, "EasyEcs") ? mut.TypeArguments[0]
                 : null) is { } compared && !Symbols.IsComparable(compared))
             context.ReportDiagnostic(Diagnostic.Create(NotComparable, call.Syntax.GetLocation(),
                 Shorten(call.Syntax), compared.Name));
 
         // EECS045: the world's own tags.
-        if ((owner == Symbols.Entity && EntityTagWriters.Contains(method.Name) || owner == Symbols.World && WorldTagWriters.Contains(method.Name)
-             || owner == "EasyEcs.Prefab" && method.Name is "Set" or "Remove")
+        if ((onEntity && EntityTagWriters.Contains(method.Name) || onWorld && WorldTagWriters.Contains(method.Name)
+             || Symbols.Named(type, "EasyEcs.Prefab") && method.Name is "Set" or "Remove")
             && method.TypeArguments.FirstOrDefault(Symbols.IsWorldTag) is { } tag)
             context.ReportDiagnostic(Diagnostic.Create(InternalTag, call.Syntax.GetLocation(),
                 method.ContainingType!.Name + "." + method.Name, tag.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
@@ -411,7 +412,7 @@ public sealed partial class EasyEcsAnalyzer
                     : $"Disable<{((INamedTypeSymbol)tag).TypeArguments[0].Name}>() adds it and hides the component, Enable<{((INamedTypeSymbol)tag).TypeArguments[0].Name}>() gives it back; call those"));
 
         // EECS048: a component Disable refuses.
-        var hidden = (owner == Symbols.Entity && method.Name == "Disable" || owner == Symbols.World && method.Name == "DisableAll") && method.TypeArguments.Length == 1
+        var hidden = (onEntity && method.Name == "Disable" || onWorld && method.Name == "DisableAll") && method.TypeArguments.Length == 1
             ? method.TypeArguments[0]
             : Symbols.IsGenerated(method) && Symbols.IsGeneratedWriter(method) && method.Name.StartsWith("Disable") ? Named(method, core) : null;
         if (hidden != null && !Symbols.IsDisableable(hidden))
@@ -425,7 +426,7 @@ public sealed partial class EasyEcsAnalyzer
         if (GroupOfCall(call, core) is { } second && Symbols.Receiver(call) is { } chain)
             for (var earlier = Symbols.Unwrap(chain); earlier is IInvocationOperation previous; earlier = Symbols.Unwrap(Symbols.Receiver(previous)))
             {
-                if (previous.Type?.ToDisplayString() != "EasyEcs.QueryFilter") break;
+                if (!Symbols.Named(previous.Type, "EasyEcs.QueryFilter")) break;
                 if (GroupOfCall(previous, core) is not { } first) continue;
                 bool differs = !SymbolEqualityComparer.Default.Equals(first.Type, second.Type)
                                || first.Value.ConstantValue is { HasValue: true } a && second.Value.ConstantValue is { HasValue: true } b && !Equals(a.Value, b.Value);
@@ -438,33 +439,33 @@ public sealed partial class EasyEcsAnalyzer
             }
 
         // EECS051: an update during a pass of the same world (from a system, EECS034 says it).
-        if (owner == Symbols.World && method.Name == "Update" && Symbols.SystemOf(context.ContainingSymbol) == null
+        if (onWorld && method.Name == "Update" && Symbols.SystemOf(context.ContainingSymbol) == null
             && DuringPass(call, context.ContainingSymbol, core) is { } running)
             context.ReportDiagnostic(Diagnostic.Create(UpdateInPass, call.Syntax.GetLocation(), Shorten(call.Syntax), running));
 
         // EECS038: TryGet's copy changed and dropped.
-        if (method.Name.StartsWith("TryGet") && method.Name != "TryGetRef" && (owner is Symbols.Entity or Symbols.World || Symbols.IsGenerated(method)))
+        if (method.Name.StartsWith("TryGet") && method.Name != "TryGetRef" && ((onEntity || onWorld) || Symbols.IsGenerated(method)))
             foreach (var argument in call.Arguments)
                 if (argument.Parameter?.RefKind == RefKind.Out && argument.Value is IDeclarationExpressionOperation { Expression: ILocalReferenceOperation { Local: var local } }
-                    && local.Type.IsValueType && local.Type.ToDisplayString() != Symbols.Entity && DeadAfterWrite(local, argument))
+                    && local.Type.IsValueType && !Symbols.Named(local.Type, Symbols.Entity) && DeadAfterWrite(local, argument))
                     context.ReportDiagnostic(Diagnostic.Create(DroppedCopy, argument.Syntax.GetLocation(), local.Name,
                         (method.ContainingType!.IsExtension ? "" : method.ContainingType.Name + ".") + method.Name,
                         "write through a ref instead (Get after Has, or TryGetRef), or write the copy back with Set"));
 
         // EECS044: a sliced filter where every row is needed, and a constant slice out of range.
-        if (owner == "EasyEcs.QueryFilter" && method.Name == "Slice" && call.Arguments.Length == 2
+        if (Symbols.Named(type, "EasyEcs.QueryFilter") && method.Name == "Slice" && call.Arguments.Length == 2
             && call.Arguments[0].Value.ConstantValue is { HasValue: true, Value: int index } && call.Arguments[1].Value.ConstantValue is { HasValue: true, Value: int count }
             && (count < 1 || index < 0 || index >= count))
             context.ReportDiagnostic(Diagnostic.Create(SlicedFilter, call.Syntax.GetLocation(),
                 $"Slice({index}, {count}) throws ArgumentOutOfRangeException: the count is 1 or more and the index in [0, count)"));
-        if (owner == Symbols.World && WholeRowCalls.Contains(method.Name) || owner == Symbols.Entity && method.Name == "Run")
+        if (onWorld && WholeRowCalls.Contains(method.Name) || onEntity && method.Name == "Run")
             foreach (var argument in call.Arguments)
-                if (argument.Parameter?.Type.ToDisplayString() == "EasyEcs.QueryFilter" && !argument.IsImplicit && Sliced(argument.Value, 0))
+                if (Symbols.Named(argument.Parameter?.Type, "EasyEcs.QueryFilter") && !argument.IsImplicit && Sliced(argument.Value, 0))
                     context.ReportDiagnostic(Diagnostic.Create(SlicedFilter, argument.Syntax.GetLocation(),
                         $"'{method.ContainingType!.Name}.{method.Name}' needs every matching row and throws ArgumentException for a sliced filter (QueryFilter.Slice); pass the filter without its slice"));
 
         // EECS041: a call a pass refuses, during one.
-        if (owner == Symbols.World && PassRefused.Contains(method.Name) && DuringPass(call, context.ContainingSymbol, core) is { } pass)
+        if (onWorld && PassRefused.Contains(method.Name) && DuringPass(call, context.ContainingSymbol, core) is { } pass)
             context.ReportDiagnostic(Diagnostic.Create(RefusedInPass, call.Syntax.GetLocation(), "World." + method.Name, pass,
                 "record what to do as data, and make the call after the pass"));
 
@@ -496,8 +497,8 @@ public sealed partial class EasyEcsAnalyzer
                 case IConversionOperation conversion:
                     value = conversion.Operand;
                     continue;
-                case IInvocationOperation call when call.TargetMethod.ContainingType?.ToDisplayString() == "EasyEcs.QueryFilter"
-                                                    || call.Type?.ToDisplayString() == "EasyEcs.QueryFilter" && Symbols.Receiver(call)?.Type?.ToDisplayString() == "EasyEcs.QueryFilter":
+                case IInvocationOperation call when Symbols.Named(call.TargetMethod.ContainingType, "EasyEcs.QueryFilter")
+                                                    || Symbols.Named(call.Type, "EasyEcs.QueryFilter") && Symbols.Named(Symbols.Receiver(call)?.Type, "EasyEcs.QueryFilter"):
                     if (call.TargetMethod.Name == "Slice" && call.Arguments.Length == 2
                         && call.Arguments[1].Value.ConstantValue is not { HasValue: true, Value: 1 }) return true;
                     value = Symbols.Receiver(call);
@@ -597,7 +598,7 @@ public sealed partial class EasyEcsAnalyzer
     /// element of a <c>DynamicBuffer</c> of relations; else null.
     /// </summary>
     private static ITypeSymbol? Indexing(ITypeSymbol type) =>
-        type.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == Symbols.Indexed) ? type
+        type.AllInterfaces.Any(i => Symbols.Named(i.OriginalDefinition, Symbols.Indexed)) ? type
         : Symbols.BufferElement(type) is { } element && Symbols.Implements(element, "EasyEcs.IRelation") ? element
         : null;
 
@@ -609,12 +610,12 @@ public sealed partial class EasyEcsAnalyzer
     private static ITypeSymbol? Walked(IOperation collection)
     {
         if (Symbols.Unwrap(collection) is not IInvocationOperation { Type: INamedTypeSymbol { ContainingType: { } owner } walk } call) return null;
-        string definition = owner.OriginalDefinition.ToDisplayString();
+        var definition = owner.OriginalDefinition;
         return walk.Name switch
         {
-            "Matches" or "Ordered" when definition == "EasyEcs.ValueIndex<T, TKey>" => owner.TypeArguments[0],
-            "Sources" when definition == "EasyEcs.RelationIndex<T>" => owner.TypeArguments[0],
-            "Subtree" when definition == Symbols.World => call.SemanticModel?.Compilation.GetTypeByMetadataName("EasyEcs.ChildOf"),
+            "Matches" or "Ordered" when Symbols.Named(definition, "EasyEcs.ValueIndex<T, TKey>") => owner.TypeArguments[0],
+            "Sources" when Symbols.Named(definition, "EasyEcs.RelationIndex<T>") => owner.TypeArguments[0],
+            "Subtree" when Symbols.Named(definition, Symbols.World) => call.SemanticModel?.Compilation.GetTypeByMetadataName("EasyEcs.ChildOf"),
             _ => null,
         };
     }
@@ -655,11 +656,11 @@ public sealed partial class EasyEcsAnalyzer
         // A ToString() or PrintMembers(StringBuilder) of its own decides what the record prints: Key is not printed then.
         if (type.GetMembers().Any(m => m is IMethodSymbol { IsImplicitlyDeclared: false, IsStatic: false } own
                 && (own.Name == "ToString" && own.Parameters.Length == 0
-                    || own.Name == "PrintMembers" && own.Parameters.Length == 1 && own.Parameters[0].Type.ToDisplayString() == "System.Text.StringBuilder")))
+                    || own.Name == "PrintMembers" && own.Parameters.Length == 1 && Symbols.Named(own.Parameters[0].Type, "System.Text.StringBuilder"))))
             return;
         foreach (var face in type.AllInterfaces)
         {
-            if (face.OriginalDefinition.ToDisplayString() != Symbols.Indexed || !SymbolEqualityComparer.Default.Equals(face.TypeArguments[0], type)
+            if (!Symbols.Named(face.OriginalDefinition, Symbols.Indexed) || !SymbolEqualityComparer.Default.Equals(face.TypeArguments[0], type)
                 || face.GetMembers("Key").FirstOrDefault() is not { } key
                 || type.FindImplementationForInterfaceMember(key) is not IPropertySymbol { ExplicitInterfaceImplementations.Length: 0, IsStatic: false } property
                 || property.DeclaredAccessibility != Accessibility.Public || !SymbolEqualityComparer.Default.Equals(property.ContainingType, type))
@@ -675,9 +676,9 @@ public sealed partial class EasyEcsAnalyzer
     private static (ITypeSymbol Type, IOperation Value)? GroupOfCall(IInvocationOperation call, Core core)
     {
         var method = call.TargetMethod;
-        if (method.ReturnType.ToDisplayString() != "EasyEcs.QueryFilter" || call.Arguments.Length == 0) return null;
+        if (!Symbols.Named(method.ReturnType, "EasyEcs.QueryFilter") || call.Arguments.Length == 0) return null;
         var value = call.Arguments[call.Arguments.Length - 1].Value;
-        if (method is { Name: "InGroup", TypeArguments.Length: 1 } && method.ContainingType?.ToDisplayString() == "EasyEcs.QueryFilter")
+        if (method is { Name: "InGroup", TypeArguments.Length: 1 } && Symbols.Named(method.ContainingType, "EasyEcs.QueryFilter"))
             return (method.TypeArguments[0], value);
         if (Symbols.IsGenerated(method) && method.Name.StartsWith("In") && method.Name.Length > 2 && Named(method, core) is { } named
             && Symbols.Implements(named, Symbols.Group))
