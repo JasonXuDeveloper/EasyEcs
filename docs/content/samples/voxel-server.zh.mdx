@@ -25,14 +25,13 @@ import { Boxes, FlaskConical, Network, Save } from 'lucide-react';
   `world.Update<TGroup>()` 运行（[一个 tick](#one-tick)）。
 - **区块是实体，方块和水是两个缓冲**：[唯一索引](/zh/docs/guide/indexes-and-relations#unique-keys)按位置找到区块，
   字节的[动态缓冲](/zh/docs/guide/dynamic-buffers)装它的 8,192 个方块和对应的水（[数据](#data)）。
-- **区块跟着玩家走，而且会保留**：用 [`UpdateInterval`](/zh/docs/guide/systems#update-interval) 和
-  [`Slices`](/zh/docs/guide/systems#slices) 控制频率，区块连同里面的实体用
-  [`SaveEntities` 和 `LoadEntities`](/zh/docs/guide/migration-and-unload) 存下、读回，放在遍历之后做（[区块](#chunks)）。
-- **一套视野**：每个[预制体](/zh/docs/guide/prefabs)一个 `Vision`，按区块索引实体的[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)
-  当网格，每个观察者一个 `Seen` 缓冲，只在变化时通过 [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 写入
-  （[视野](#aoi)）。
+- **区块跟着玩家走，而且会保留**：只有跨了区块的玩家才请求加载（[`[Changed<T>]`](/zh/docs/guide/change-tracking)），
+  区块连同里面的实体用 [`SaveEntities`](/zh/docs/guide/migration-and-unload) 和 `LoadEntities` 在遍历之后存下、读回（[区块](#chunks)）。
+- **不用轮询的视野**：客户端看见的是它那些区块里的实体，所以视野只在有东西跨区块、出现或消失时才变；
+  [清理组件](/zh/docs/guide/cleanup-and-disable)记住被销毁的实体最后在哪里被看见，直到它的消失包发出去（[视野](#aoi)）。
 - **水是 SIMD 模板运算**：每个方块同一条规则，用 `Vector128<byte>` 一条指令算 16 个方块，只算还可能流动的区块（[水](#water)）。
-- **SIMD 批量方法**：冷却、存在时间和着火在[批量方法](/zh/docs/guide/systems#batch-methods)里一条指令算 8 个（[SIMD](#simd)）。
+- **SIMD 批量方法**：冷却、存在时间、着火和火焰伤害在[批量方法](/zh/docs/guide/systems#batch-methods)里一条指令算 8 个，
+  伤害按自己的 [`UpdateInterval`](/zh/docs/guide/systems#update-interval) 运行（[SIMD](#simd)）。
 - **状态变化即数据**：挖掘、掉落物、着火和死亡都是组件和实体（[掉落物](#items)、[僵尸](#zombies)）。
 - **自动排好序的排行榜**：按挖掘数索引玩家的[有序索引](/zh/docs/guide/indexes-and-relations#ordered-index)（[排行榜](#leaderboard)）。
 - **只发变了的**：[`[Changed<T>]`、`[ChangedAny<..>]`](/zh/docs/guide/change-tracking#changed-any) 和
@@ -58,13 +57,13 @@ flowchart LR
   end
   subgraph Simulation
     clock[推进时钟] --> world[加载区块、水流动]
-    world --> sight[走、看、追、重生]
+    world --> sight[走、追、重生]
     sight --> move[浮起、物理、网格]
     move --> rules[挖、捡、刷怪、燃烧、僵尸死亡]
     rules --> unload[存盘并卸载区块]
   end
   subgraph Replication
-    send[视野内的区块、变化]
+    send[视野内的区块、出现、变化]
   end
   input --> world
   unload --> send
@@ -125,30 +124,39 @@ flowchart LR
 
 ## 视野（AOI） [#aoi]
 
-一个实体看得见什么，对所有能看的东西都是同一份数据：每个预制体设置的 `Vision`，玩家 32 格，僵尸 35 格（Minecraft 里它的追踪距离）。
-视野更远的 Boss 只是多一个预制体，不用写新代码。
+玩家看见的是它的 `Vision` 够得着的那一方块区块：周围加载并发给客户端的区块（上面的 `InView`），以及其中的实体。
+没有任何地方给每个玩家存一份实体列表。实体视野只有三种变化，而且每种本来就是数据：
 
-<include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#prefabs</include>
+| 发生了什么 | 客户端收到什么 | 在哪里计数 |
+| --- | --- | --- |
+| 一个区块进入或离开玩家的视野 | 其中实体的出现或消失包 | `ChunkViewSystem`（由网格计数） |
+| 一个实体跨进另一个区块，或刚被创建 | 看得见新区块、看不见旧区块的玩家收到出现包，反过来的收到消失包 | `SightSystem.Moved`，`[Changed<InChunk>]` |
+| 一个实体被销毁 | 看得见它所在区块的玩家收到消失包 | `SightSystem.Gone`，`[With<Retired>]` |
 
 网格是 `InChunk`，一个带索引的组件，挂在所有会动的东西上，所以 `world.InChunkIndex.Find(chunk)` 列出一个区块里的实体。
 `GridSystem` 让它保持最新：`[Changed<Position>]` 只访问这个 tick 移动过的实体，`SetInChunkIfChanged` 只在实体跨进另一个区块时才写，
-所以索引每秒只变几次，而不是每个 tick 都变。
+所以索引和所有响应 `[Changed<InChunk>]` 的系统每秒只看到几次跨区块，而不是每个 tick 都有。
 
 <include lang="csharp" meta='title="Systems/Movement.cs"'>../../../samples/VoxelServer/Systems/Movement.cs#grid</include>
 
-`SightSystem` 是唯一的视野系统。它遍历观察者 `Vision` 够得着的区块，把范围内的实体排好序存进 `Seen` 缓冲，再把新旧两个集合
-同时走一遍做比较：哪些进入了视野、哪些离开了、哪些在这期间被销毁了（`World.IsAlive` 返回 false）。玩家的客户端据此收到出现和消失的包；
-僵尸从同一个集合里挑目标。缓冲只在集合变化时通过 `Mut<T>` 写入，每个 tick 只有十分之一的观察者看一次（`Slices`），
-所以人再多，每个 tick 的开销也一样。
+跨区块时要知道客户端原先在哪个区块看见这个实体；被销毁的实体也要知道，而那时它的组件已经没了。`Visible` 记着这个区块，它是一个
+[清理组件](/zh/docs/guide/cleanup-and-disable)：销毁带清理组件的实体时，实体会退休而不是消失，只留下清理组件，直到某个系统去掉最后一个。
+`SightSystem` 据此发出消失包，再去掉它，实体才被释放。跨区块牵涉的玩家，是视野够得着其中一个区块、够不着另一个的那些，
+也就是两个方块之间的一条区块；创建或销毁牵涉的则是区块的 `Viewers`，一次查找。待在原区块的实体在这里没有任何开销，不管过多少个 tick。
 
 <include lang="csharp" meta='title="Systems/Sight.cs"'>../../../samples/VoxelServer/Systems/Sight.cs#sight</include>
 
-因为只在变化时才写，`ZombieTargetSystem` 用 `[Changed<DynamicBuffer<Seen>>]` 过滤：只有看见的东西变了，僵尸才重新挑最近的玩家。
+僵尸在自己的 `Vision` 范围内追人，35 格（Minecraft 里它的追踪距离）：每个预制体设置自己的，视野更远的 Boss 只是多一个预制体，不用写新代码。
+
+<include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#prefabs</include>
+
+`ZombieTargetSystem` 通过同一个网格找最近的玩家，只要玩家还在范围内就一直追它，就像原版的怪物保留目标一样。它每秒看两次，
+每个 tick 只看十分之一的僵尸（`Slices`），所以尸潮再大，每个 tick 的开销也一样。
 
 <include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#target</include>
 
 在 ECS 里，“谁在谁附近”的常规答案就是网格：一个从格子到其中实体的索引，由移动它们的系统维护，由需要邻居的系统读取。
-这里的格子是区块，因为区块本来就是加载的单位；人群密集的游戏可以用更小的格子，代码不变。
+这里的格子是区块，因为区块本来就是加载的单位，也是客户端拥有的单位。
 
 ## 水 [#water]
 
@@ -173,12 +181,13 @@ flowchart LR
 
 ## 移动 [#movement]
 
-行走把输入变成速度。每一行只依赖它自己，方法也不持有 `World`，所以是并行方法；注释说明了什么时候拆分才划算。
+行走把输入变成速度。每一行只依赖它自己，方法也不持有 `World`，所以是并行方法；运行器会给拆分计时，只在它让遍历更快时才保留。
 
 <include lang="csharp" meta='title="Systems/Movement.cs"'>../../../samples/VoxelServer/Systems/Movement.cs#walk</include>
 
 物理让每个物体在方块间移动，通过 `Mut<Position>` 写位置：`SetIfChanged` 只在位置变了时才给这一行打 tick，所以站着不动的物体不会被下发。
-它留在单线程，因为它通过 `World`（区块索引）读方块，而并行方法不能持有 World（EECS010）。水、浮起和视野也是同样的原因。
+静止的物体（站在地上、没有速度、脚下仍有地面）查一次方块就跳过。它留在单线程，因为它通过 `World`（区块索引）读方块，
+而并行方法不能持有 World（EECS010）。水和浮起也是同样的原因。
 
 <include lang="csharp" meta='title="Systems/Movement.cs"'>../../../samples/VoxelServer/Systems/Movement.cs#physics</include>
 
@@ -213,8 +222,9 @@ flowchart LR
 
 <include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#attack</include>
 
-着火也是数据：`SunlightSystem` 给白天露天的僵尸加上 `Burning`，在水里则去掉；`BurnSystem` 让火烧下去并扣血；
-`ExtinguishSystem` 去掉烧完的火。
+着火也是数据：`SunlightSystem` 给白天露天的僵尸加上 `Burning`，在水里则去掉；`BurnSystem` 让火烧下去，
+`FireDamageSystem` 每 `Rules.BurnEvery` 个 tick 扣一次血（它的 `UpdateInterval`），`ExtinguishSystem` 去掉烧完的火。
+扣血单独成一个系统，是因为 `Health` 被追踪，而批量方法会给它写的整段行打 tick：只在扣血的 tick 写，下面的死亡系统在其他 tick 就无事可做。
 
 <include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#sunlight</include>
 
@@ -230,10 +240,10 @@ flowchart LR
 这个服务器里有两种数据适合 SIMD：
 
 - **带模板运算的网格**：就是上面的水。每个方块的下一个水位是它邻居的同一个函数，网格又是字节缓冲，所以一条指令算 16 个方块。
-- **一列计数器**：冷却、掉落物存在时间和着火在每个实体上的变化都一样。批量方法把一段行当成 span 拿到，`Vector<int>` 在 AVX2 上一条指令改
+- **一列计数器**：冷却、掉落物存在时间、着火和火焰伤害在每个实体上的变化都一样。批量方法把一段行当成 span 拿到，`Vector<int>` 在 AVX2 上一条指令改
   8 个（Arm 上 4 个）。JIT 不会自己把这些循环向量化，所以方法里手写；整数通道在每台机器上结果都一样。
 
-其他系统对每个实体做的事都不一样：物理查每个物体周围的方块，视野遍历索引，追击读另一个实体的位置。查找加分支的循环用向量帮不上忙，
+其他系统对每个实体做的事都不一样：物理查每个物体周围的方块，找目标遍历索引，追击读另一个实体的位置。查找加分支的循环用向量帮不上忙，
 而位置是 `Vector3`，三个挨着的 float，不是三列。批量方法也只在一个线程上跑（EECS010），提速靠的是向量循环，不是多线程。
 
 ## 自动排好序的排行榜 [#leaderboard]
@@ -279,18 +289,18 @@ World 和它的选项：`MeasureSystems` 用来计时；缓冲池大到能放下
 ```text
 tick   200 (day  ): 50 players, 84 chunks, 3481 water, 0 zombies, 59 items
 tick   400 (night): 50 players, 118 chunks, 6481 water, 43 zombies, 103 items
-tick   600 (day  ): 50 players, 146 chunks, 11143 water, 125 zombies, 123 items
-tick   800 (day  ): 50 players, 143 chunks, 12506 water, 13 zombies, 116 items
-tick  1000 (night): 50 players, 129 chunks, 10822 water, 44 zombies, 82 items
-tick  1200 (day  ): 50 players, 141 chunks, 11914 water, 129 zombies, 84 items
-chunks: 166 generated, 61 unloaded, 36 loaded back
-blocks dug: 606; items: 424 picked up, 241 expired
-zombies: 250 spawned, 121 burned, 803 hits; player deaths: 101
-water: 15124 cells filled, 15647 ticks of bodies carried
-view: 4353 chunks sent, 3103 forgotten; 34187 entities came into view, 10968 left it, 17382 despawned
-sent: 35349 block updates, 3035871 entity updates (52851 KiB)
-top diggers: player 37 (26) player 8 (22) player 27 (21)
-restarted from the save: 50 players, 141 chunks, 11914 water, 129 zombies; 25 chunks in the region files
+tick   600 (day  ): 50 players, 146 chunks, 11142 water, 123 zombies, 103 items
+tick   800 (day  ): 50 players, 159 chunks, 12865 water, 13 zombies, 100 items
+tick  1000 (night): 50 players, 152 chunks, 12156 water, 50 zombies, 82 items
+tick  1200 (day  ): 50 players, 154 chunks, 12145 water, 131 zombies, 79 items
+chunks: 181 generated, 54 unloaded, 27 loaded back
+blocks dug: 585; items: 376 picked up, 230 expired
+zombies: 247 spawned, 116 burned, 411 hits; player deaths: 48
+water: 15813 cells filled, 17994 ticks of bodies carried
+view: 3928 chunks sent, 2678 forgotten; 43490 entities came into view, 11981 left it, 21249 despawned
+sent: 34218 block updates, 2790081 entity updates (48523 KiB)
+top diggers: player 8 (22) player 37 (21) player 35 (21)
+restarted from the save: 50 players, 154 chunks, 12145 water, 131 zombies; 27 chunks in the region files
 ```
 
 世界、泉眼、bot 和刷怪都来自整数哈希，所以每次运行输出都一样。bot 往外走，区块越来越多；留在身后的区块存进区域文件，
@@ -300,8 +310,7 @@ bot 回来时再读回。耗时打印到 stderr：平均 tick 与 50 ms 预算�
 
 - 一天 30 秒，掉落物存在 15 秒，着火扣血的频率是原版的四倍，这样一分钟的运行就能全看到。
 - 服务器根据玩家的输入移动玩家；原版服务器信任客户端的移动再做校验。
-- 同一个距离决定玩家看见什么、周围加载和模拟哪些区块。
-- 实体更新发给视野里有它所在区块的玩家，比 `Seen` 里有它的玩家范围更粗：一次查找，而不是遍历每个观察者。
+- 同一个距离决定玩家周围加载和模拟哪些区块，以及它看见哪些实体：它那些区块里的实体。原版服务器按实体种类的范围追踪每个实体，每个 tick 检查。
 - 没有刷怪上限、光照等级、远处怪物消失、心跳，也没有玩家加入或离开。
 
 ## 没用到的功能，以及原因 [#not-used]
@@ -309,15 +318,16 @@ bot 回来时再读回。耗时打印到 stderr：平均 tick 与 50 ms 预算�
 - **按区块 `GroupBy`**。按区块拆表能让“一个区块里的实体”在内存里连续，但实体每跨一次区块，它的行就要搬到另一张表，
   每个走动的实体每秒都要搬好几次。`InChunk` 索引在跨区块时只更新一次索引，别的什么都不花。
 - **用清理组件在卸载时保存区块**。退休的实体会失去其他组件，缓冲也在其中，到那时已经没东西可存了。区块在销毁之前保存。
-- **用销毁日志下发消失**。每个客户端的消失来自它自己的 `Seen` 集合，它知道这个客户端被展示过什么；记录所有销毁实体的日志
-  会给从没见过它的客户端也发一个消失。
-- **并行的物理、水和视野**。它们通过 World 的索引读数据，见[移动](#movement)。
+  （消失包倒是靠一个清理组件 `Visible` 发的：它要留住的只是一个区块位置。）
+- **用销毁日志下发消失**。日志里只有被销毁实体的 id 和时间，没有它在哪里，而消失包要发给看得见它所在区块的玩家。`Visible` 正好把区块留到需要的时候为止。
+- **给每个玩家存一份实体集合**。客户端看见的是它那些区块里的实体，每人一份集合只是重复网格，还要在附近每次跨区块时都改写：一千人的人群里，每次跨区块就要改一千份。
+- **并行的物理、水和找目标**。它们通过 World 的索引读数据，见[移动](#movement)。
 
 ## 客户端与服务器 [#client-and-server]
 
 联网游戏通常这样分工：服务器掌握世界、下发变化，客户端负责显示。两边都可以用这套 ECS：
 
-- **服务器上**，就像这个示例：系统每个 tick 计算世界，`Send` 系统把变化（`[Changed<T>]`、`Seen` 和 `InView` 的差异）编成包。
+- **服务器上**，就像这个示例：系统每个 tick 计算世界，`Send` 系统把变化（`[Changed<T>]`、`InView` 的差异、跨区块和退休的实体）编成包。
 - **客户端上**，收到的包写进一个组件相同的 World。同样的 `PhysicsSystem` 和 `FloatSystem` 在两个包之间预测本地玩家，
   渲染系统读 `Position` 和区块的方块来画：在 [Godot](/zh/docs/samples/godot) 里，节点在 `_PhysicsProcess` 中
   `World.Update()` 之后立刻绘制。
