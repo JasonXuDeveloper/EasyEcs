@@ -23,6 +23,8 @@ import { Boxes, FlaskConical, Network, Save } from 'lucide-react';
 - **世界跟着玩家走**：每秒创建两次区块（`UpdateInterval`），卸载时每 tick 只看二十分之一（`[ForEach(Slices = 20)]`），
   遍历途中直接做[结构变更](/zh/docs/guide/structural-changes)。
 - **水也是数据**：每格水一个实体，是所在区块的子实体（[层级](/zh/docs/guide/hierarchy)）；只有还要扩散的水才带 `Flowing` 组件。
+- **视野来自预制体**：每个预制体一个 `Vision`（[预制体](/zh/docs/guide/prefabs)），区块记下有几个玩家看得到它，
+  再用按区块分组的玩家[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)给僵尸当眼睛。
 - **用标签挑出会漂的**：让玩家和僵尸在水里浮起来的系统带 `[With<Humanoid>]`。
 - **只发变了的**：方块和位置用 [`[Changed<T>]` 和 `Mut<T>`](/zh/docs/guide/change-tracking)，消失的实体用
   [销毁日志](/zh/docs/guide/change-tracking#destroy-log)。
@@ -66,10 +68,25 @@ flowchart LR
 
 ## 玩家周围的区块 [#chunks]
 
-`ChunkLoadSystem` 补上缺的区块，其余的记为看到过；`ChunkUnloadSystem` 销毁五秒没人看到的区块。`Slices = 20` 让每个 tick
+`ChunkLoadSystem` 遍历每个玩家视野里的区块：缺的补上，并在每个区块上数清有几个玩家看得到它（`Viewers`）；`ChunkUnloadSystem` 销毁五秒没人看到的区块。`Slices = 20` 让每个 tick
 只检查二十分之一：1,300 个区块每 tick 查 65 个，而不是每秒一次查完 1,300 个。销毁区块会连带销毁它的水，因为每格水都是它的子实体。
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs</include>
+
+## 视野（AOI） [#aoi]
+
+和 Minecraft 服务器一样，玩家看得到什么，决定了服务器为它做什么：周围哪些区块保持加载、哪些变化要发给它。僵尸看得到什么，
+决定了它追谁。视野范围是数据：每个预制体设一个 `Vision`，玩家 32 格，僵尸 16 格。想要一个看得更远的 Boss，多一个预制体就行，
+不用写新代码。
+
+- **下发**：加载区块时在每个区块上留下“几个玩家看得到”。挖掉一块、走一步、水漫过来，都只发给这么多玩家，人群挤在一处，
+  远处的玩家不受影响。
+- **看见**：`GridSystem` 让每个玩家的 `InChunk`（一个带索引的组件）跟着它所在的区块走，只在跨区块时才写。
+  `ZombieSightSystem` 对视野覆盖的区块调用 `world.InChunkIndex.Find(chunk)`，留下范围内最近的玩家；每个 tick
+  只有十分之一的僵尸去看（`Slices`）。
+
+“谁在谁附近”在 ECS 里的常规做法就是这种网格：一张从格子到格子里实体的索引，由移动它们的系统维护，需要邻居的系统来读。
+代码在下面的移动和僵尸两节。
 
 ## 水 [#water]
 
@@ -113,16 +130,16 @@ World 和它的选项、单例和预制体、按 tick 顺序排好的系统、�
 ```text
 tick   200 (day  ): 50 players, 82 chunks, 1961 water, 0 zombies, 0 items
 tick   400 (night): 50 players, 119 chunks, 3070 water, 50 zombies, 0 items
-tick   600 (day  ): 50 players, 137 chunks, 4349 water, 150 zombies, 0 items
-tick   800 (day  ): 50 players, 156 chunks, 4561 water, 0 zombies, 0 items
-tick  1000 (night): 50 players, 172 chunks, 5329 water, 50 zombies, 0 items
-tick  1200 (day  ): 50 players, 177 chunks, 4905 water, 150 zombies, 0 items
-chunks: 232 loaded, 55 unloaded, 1463 sent
-blocks dug: 650; items: 650 picked up, 0 expired
-zombies: 300 spawned, 150 burned, 152 hits; player deaths: 8
-water: 7493 cells poured, 6248 ticks of humanoids carried
-sent: 89884 position updates, 3443 despawns
-restarted from the save: 50 players, 177 chunks, 4905 water, 150 zombies
+tick   600 (day  ): 50 players, 135 chunks, 4322 water, 150 zombies, 0 items
+tick   800 (day  ): 50 players, 142 chunks, 4054 water, 0 zombies, 0 items
+tick  1000 (night): 50 players, 171 chunks, 5311 water, 50 zombies, 0 items
+tick  1200 (day  ): 50 players, 170 chunks, 4774 water, 150 zombies, 0 items
+chunks: 232 loaded, 62 unloaded, 25227 sent
+blocks dug: 638; items: 638 picked up, 0 expired
+zombies: 300 spawned, 150 burned, 361 hits; player deaths: 39
+water: 7625 cells poured, 5005 ticks of humanoids carried
+sent: 2501294 position updates, 3701 despawns
+restarted from the save: 50 players, 170 chunks, 4774 water, 150 zombies
 ```
 
 世界、泉眼、bot 和刷怪都由整数哈希决定，所以单线程还是多线程，每次输出都一样。bot 往外走，区块就多起来，走过的区块又被释放，

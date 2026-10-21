@@ -28,6 +28,9 @@ after each tick. The server computes the world and sends what changed; the clien
   loop.
 - **Water as data**: one entity per block of water, a child of its chunk ([hierarchy](/en/docs/guide/hierarchy)), with
   a `Flowing` component only while it still has to spread.
+- **Areas of interest from the prefabs**: a `Vision` per prefab ([prefabs](/en/docs/guide/prefabs)), the chunks each
+  player sees counted on the chunk, and a [value index](/en/docs/guide/indexes-and-relations#value-indexes) of the
+  players by chunk for the zombies' eyes.
 - **A tag picks who floats**: `[With<Humanoid>]` on the system that lifts players and zombies in water.
 - **Send only what changed**: [`[Changed<T>]` and `Mut<T>`](/en/docs/guide/change-tracking) for blocks and positions,
   the [destroy log](/en/docs/guide/change-tracking#destroy-log) for despawns.
@@ -74,11 +77,28 @@ The rules are constants and two pure functions; the terrain is where a block liv
 
 ## Chunks around the players [#chunks]
 
-`ChunkLoadSystem` creates what is missing and stamps the rest as seen; `ChunkUnloadSystem` destroys the chunks nobody
-saw for five seconds. With `Slices = 20` each tick visits a twentieth of the chunks, so 1,300 chunks cost 65 checks a
-tick instead of 1,300 once a second. Destroying a chunk destroys its water: each cell is its child.
+`ChunkLoadSystem` walks the chunks in each player's view: it creates what is missing and counts, on each chunk, the
+players that see it (`Viewers`). `ChunkUnloadSystem` destroys the chunks nobody saw for five seconds. With
+`Slices = 20` each tick visits a twentieth of the chunks, so 1,300 chunks cost 65 checks a tick instead of 1,300 once
+a second. Destroying a chunk destroys its water: each cell is its child.
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs</include>
+
+## Areas of interest [#aoi]
+
+What a player sees decides what the server does for it, as on a Minecraft server: which chunks stay loaded around
+it and which changes it is sent. What a zombie sees decides whom it hunts. The range is data, a `Vision` that each
+prefab sets: 32 blocks for a player, 16 for a zombie. A boss with a longer view is one more prefab, not new code.
+
+- **Sending**: the load pass leaves on each chunk the number of players that see it. A dug block, a step, a flood is
+  sent to that many players, so a crowd in one place costs nothing to a player far away.
+- **Seeing**: `GridSystem` keeps each player's `InChunk`, an indexed component, on the chunk it stands in, written
+  only when it crosses into another chunk. `ZombieSightSystem` walks `world.InChunkIndex.Find(chunk)` for the
+  chunks its view reaches and keeps the nearest player in range; a tenth of the zombies look each tick (`Slices`).
+
+The grid is the usual answer to "who is near whom" in an ECS: an index from a cell to the entities in it, kept by
+the system that moves them, read by the systems that need neighbours. The code is in the movement and zombie files
+below.
 
 ## Water [#water]
 
@@ -128,16 +148,16 @@ lesson.
 ```text
 tick   200 (day  ): 50 players, 82 chunks, 1961 water, 0 zombies, 0 items
 tick   400 (night): 50 players, 119 chunks, 3070 water, 50 zombies, 0 items
-tick   600 (day  ): 50 players, 137 chunks, 4349 water, 150 zombies, 0 items
-tick   800 (day  ): 50 players, 156 chunks, 4561 water, 0 zombies, 0 items
-tick  1000 (night): 50 players, 172 chunks, 5329 water, 50 zombies, 0 items
-tick  1200 (day  ): 50 players, 177 chunks, 4905 water, 150 zombies, 0 items
-chunks: 232 loaded, 55 unloaded, 1463 sent
-blocks dug: 650; items: 650 picked up, 0 expired
-zombies: 300 spawned, 150 burned, 152 hits; player deaths: 8
-water: 7493 cells poured, 6248 ticks of humanoids carried
-sent: 89884 position updates, 3443 despawns
-restarted from the save: 50 players, 177 chunks, 4905 water, 150 zombies
+tick   600 (day  ): 50 players, 135 chunks, 4322 water, 150 zombies, 0 items
+tick   800 (day  ): 50 players, 142 chunks, 4054 water, 0 zombies, 0 items
+tick  1000 (night): 50 players, 171 chunks, 5311 water, 50 zombies, 0 items
+tick  1200 (day  ): 50 players, 170 chunks, 4774 water, 150 zombies, 0 items
+chunks: 232 loaded, 62 unloaded, 25227 sent
+blocks dug: 638; items: 638 picked up, 0 expired
+zombies: 300 spawned, 150 burned, 361 hits; player deaths: 39
+water: 7625 cells poured, 5005 ticks of humanoids carried
+sent: 2501294 position updates, 3701 despawns
+restarted from the save: 50 players, 170 chunks, 4774 water, 150 zombies
 ```
 
 The world, the springs, the bots and the spawns come from integer hashes, so every run prints the same, on one thread

@@ -1,14 +1,14 @@
 ---
-title: "HotReload: replace logic while the world runs"
+title: "HotReload: new logic in a running world"
 seoTitle: "Hot Reload C# ECS Systems: the HotReload Sample"
-description: "Game logic in a collectible plugin, unloaded and reloaded while the EasyEcs world runs: RemoveTypes, AssemblyLoadContext and a save that keeps the data."
+description: "Game logic in a collectible plugin that the host unloads and loads again, the world's data kept: RemoveTypes, AssemblyLoadContext and a save in between."
 icon: RefreshCw
 ---
 
 import { Boxes, Layers, Save, Workflow } from 'lucide-react';
 
 A server whose game logic lives in a plugin: the host loads it into a collectible `AssemblyLoadContext`, runs it,
-takes its types out of the world, unloads it and loads it again, while the host's own entities and systems keep
+takes its types out of the world, unloads it and loads it again; the host's own entities and systems keep
 running and the plugin's component values survive the reload. Every code block on this page is included from
 [`samples/HotReload`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload), which CI builds
 and runs, comparing its output with the one shown below.
@@ -90,7 +90,7 @@ all checks passed
 ```
 
 500 points after the reload is 100 units scoring for 3 updates and then 2 more: the scores came back from the save,
-and the first context was collected while the host's 100 units and its `MoveSystem` stayed in the world.
+and the first context was collected, and the host's 100 units and its `MoveSystem` stayed in the world.
 
 ## Related [#related]
 
