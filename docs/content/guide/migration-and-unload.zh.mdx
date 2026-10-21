@@ -422,7 +422,7 @@ saving 0v1: 650 gold
 | 组件里存了 `Entity` 句柄 | 不能存档，也不会改写 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
 | 先加载新插件，再卸载旧插件 | 类型 id 歧义：`InvalidDataException` | 按上面的重载顺序 |
 | 还留着旧插件系统的引用 | 上下文永远回收不了 | `RemoveTypes` 之后丢掉引用 |
-| 在更新或遍历期间调用 `RemoveTypes` | 抛 `InvalidOperationException` | 运行时 |
+| 在更新或遍历期间调用 `RemoveTypes` | 抛 `InvalidOperationException` | 遍历期间由 [EECS041](/zh/docs/guide/analyzer#eecs041) 报出；更新期间在运行时 |
 | 恢复 `RemoveTypes` 之前拍的快照 | 抛 `InvalidOperationException` | 运行时 |
 | 在其他线程迁移 | 两个 World 都只属于各自的所有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 迁移或加载的玩家，唯一键已被目标 World 持有 | 抛 `InvalidOperationException`；什么也不进来，原实体不动 | 先销毁过期的持有者（[唯一键](#unique-keys)） |

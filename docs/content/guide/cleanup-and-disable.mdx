@@ -157,6 +157,7 @@ public class MoveBullets : EcsSystem
 
 ```csharp
 var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Bullet());
+world.Update();                                              // it flies
 bullet.SetInactive();                                        // back to the pool: after the first time, a bit flip
 bullet.SetPosition(5, 5).RemoveInactive();                   // reused
 int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>());   // saves, cleanup and stats see everything
@@ -344,7 +345,7 @@ and enabled in bulk and one by one (`BulkBenchmark`):
 | --- | --- | --- |
 | A cleanup system without `With<Destroyed>` | It releases resources of live entities | Code review |
 | Never removing the last cleanup component | The retired entity stays forever | `world.Count<Destroyed>()` in your stats |
-| `Disable<T>()` on a cleanup component or `ChildOf` | `InvalidOperationException` | At run time |
+| `Disable<T>()` on a cleanup component or `ChildOf` | `InvalidOperationException` | [EECS048](/en/docs/guide/analyzer#eecs048) |
 | `Set` on a disabled component expecting it to stay disabled | `Set` enables it with the new value; use `Enable` to get the kept value back | By design |
 | Forgetting `Without<Inactive>` on a system | Pooled entities keep moving | Code review |
 | Expecting `[Changed<T>]` to tell new from written | Both are writes | Use a `Spawned` tag |

@@ -438,20 +438,20 @@ public readonly record struct Guild(long Id) : IActor<Guild> { Guild IIndexed<Gu
 
 ### 结构变更之后还拿着 `ref` [#ref-after-change]
 
-```csharp
+```csharp doccheck=expect-EECS047
 ref var life = ref hero.Health;
 hero.SetStunned();                 // 行搬到了另一张表
 life.Value -= 10;                  // 写的是旧位置
 ```
 
-添加或移除组件会搬动实体的行，之前拿到的 `ref` 还指着旧位置。变更之后重新取：
+添加组件、禁用组件或销毁实体会搬动行，之前拿到的 `ref` 还指着旧位置。变更之后重新取：
 
 ```csharp
 hero.SetStunned();
 hero.Health.Value -= 10;
 ```
 
-没有规则能发现。详见[变更前后的 ref](/zh/docs/guide/structural-changes#refs-across-a-change)。
+ref、变更和使用在同一个块里时，由 [EECS047](/zh/docs/guide/analyzer#eecs047)（警告）发现。详见[变更前后的 ref](/zh/docs/guide/structural-changes#refs-across-a-change)。
 
 ### 跨 `await` 拿着 `ref` [#ref-across-await]
 
@@ -777,7 +777,7 @@ public class HealAll : EcsSystem
 
 <Cards>
   <Card title="分析器规则" href="/zh/docs/guide/analyzer">
-    从 EECS002 到 EECS046 的每一条规则。
+    从 EECS002 到 EECS052 的每一条规则。
   </Card>
   <Card title="ECS 设计原则" href="/zh/docs/ecs-principles">
     这些错误违反的规则。

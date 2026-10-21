@@ -515,8 +515,8 @@ arrows left after the archer died: 0
 | --- | --- | --- |
 | 通过 `ref`、`Get<T>()` 或查询元素写入被索引的组件 | 索引还停在旧键上 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
 | 组件里存 `Entity` 句柄 | 变成托管列，有写屏障，存不了盘 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
-| 在 `Find` 循环里修改同一索引的组件 | 遍历可能读到别的键的实体（销毁实体没问题） | 代码审查：先收集，再修改 |
-| record struct 上写公开的 `Key => this` | `ToString()` 无限打印 `Key`，栈溢出 | 代码审查：`Shop IIndexed<Shop>.Key => this;` |
+| 在 `Find` 循环里给实体加上同一索引的组件或换新键 | 遍历可能读到别的键的实体（移除组件、销毁实体没问题） | [EECS042](/zh/docs/guide/analyzer#eecs042)：先收集，再修改 |
+| record struct 上写公开的 `Key => this` | `ToString()` 无限打印 `Key`，栈溢出 | [EECS043](/zh/docs/guide/analyzer#eecs043)（有代码修复）：`Shop IIndexed<Shop>.Key => this;` |
 | 在其他线程使用索引 | 索引属于所有者线程 | [多线程与并行](/zh/docs/guide/threading#what-the-world-synchronizes) |
 | 同一个组件用两种键类型建索引 | 抛 `InvalidOperationException`：每个组件一个索引 | 运行时 |
 | 键是 `null`（`string` 的默认值） | 实体不会出现在任何键下 | 设计如此 |

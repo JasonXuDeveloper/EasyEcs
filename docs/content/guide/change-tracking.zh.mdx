@@ -542,7 +542,7 @@ written since the mark: 2
 | 指望 `[Removed<T>]` 报告被销毁的实体 | 它们没有行，任何过滤条件都访问不到 | 从[销毁日志](#destroy-log)读（`WorldOptions.DestroyLog`、`DestroyedSince`） |
 | 销毁日志的容量小于客户端最长延迟内的销毁数 | 这个客户端每次读 `DestroyedSince` 都返回 false，一遍又一遍地全量重发 | 代码审查：容量按每秒销毁数乘以允许的延迟来定；关注 `DestroyLogOldestTick` |
 | 每个 tick 都重算、但很少变的值用 `ref` 参数写 | 访问到的每一行都算作已变化，下游每个 `[Changed<T>]` 读取方都要全部过一遍 | 代码审查：改用 [`Mut<T>`](#set-if-changed) 参数加 `SetIfChanged` |
-| 对带托管字段、又没实现 `IEquatable<T>` 的组件调 `SetIfChanged` | 抛 `NotSupportedException`；也不会生成 `SetXIfChanged` | 运行时：改成 record struct 或实现 `IEquatable<T>` |
+| 对带托管字段、又没实现 `IEquatable<T>` 的组件调 `SetIfChanged` | 抛 `NotSupportedException`；也不会生成 `SetXIfChanged` | [EECS040](/zh/docs/guide/analyzer#eecs040)：改成 record struct 或实现 `IEquatable<T>` |
 | 想要“任意一个变了就算”，却写了好几个 `[Changed<T>]` | 只有每个都变了的行才通过 | 代码审查：用 `[ChangedAny<T1, …, Tn>]` |
 | 一个过滤条件里的 `Changed`、`Removed`、`ChangedAny`、`RemovedAny` 用了不同的 tick | 抛 `ArgumentException`：一个过滤条件只有一个 tick | 运行时 |
 

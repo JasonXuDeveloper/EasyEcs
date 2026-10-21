@@ -66,9 +66,12 @@ icon: RotateCcwClock
   改为 `UnlinkX(target)`（`RemoveX()` 仍然删掉整个缓冲区）。见[迁移指南](/zh/docs/migration#v4-7-renames)。
 - 集合里有单例时，`SaveEntitiesWith(output, ids, set)` 抛 `ArgumentException`（实体组存档不写单例）。见[迁移指南](/zh/docs/migration#v4-7-save-entities)。
 - `EcsSystem` 新增公开的 `RunCount`：系统里同名的成员会隐藏它（警告 CS0108）。见[迁移指南](/zh/docs/migration#v4-7-run-count)。
-- 新的分析器错误（[EECS040](/zh/docs/guide/analyzer#eecs040) 到 [EECS045](/zh/docs/guide/analyzer#eecs045)，以及针对有两个索引键的组件的
-  [EECS036](/zh/docs/guide/analyzer#eecs036)）拒绝会抛异常或行不通的代码；新的警告（[EECS037](/zh/docs/guide/analyzer#eecs037)、
-  [EECS038](/zh/docs/guide/analyzer#eecs038)、[EECS046](/zh/docs/guide/analyzer#eecs046)）报告丢失的写入，以及只读循环打的 tick。
+- 新的分析器错误（[EECS040](/zh/docs/guide/analyzer#eecs040) 到 [EECS045](/zh/docs/guide/analyzer#eecs045)、
+  [EECS048](/zh/docs/guide/analyzer#eecs048) 到 [EECS051](/zh/docs/guide/analyzer#eecs051)，以及针对有两个索引键的组件的
+  [EECS036](/zh/docs/guide/analyzer#eecs036)）拒绝会抛异常或行不通的代码，其中包括禁用清理组件或 `ChildOf`、没有实体能通过的过滤条件、
+  一个过滤条件里的第二个 `InGroup`，以及在查询循环里调用 `world.Update()`；新的警告（[EECS037](/zh/docs/guide/analyzer#eecs037)、
+  [EECS038](/zh/docs/guide/analyzer#eecs038)、[EECS046](/zh/docs/guide/analyzer#eecs046)、[EECS047](/zh/docs/guide/analyzer#eecs047)、
+  [EECS052](/zh/docs/guide/analyzer#eecs052)）报告丢失的写入、只读循环打的 tick、结构变更之后还在用的 ref，以及创建之后紧跟的 `Set`。
   见[迁移指南](/zh/docs/migration#v4-7-analyzer)。
 
 ### 修复 [#v4-7-0-fixes]

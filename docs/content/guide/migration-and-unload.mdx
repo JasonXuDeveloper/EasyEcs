@@ -458,7 +458,7 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 | An `Entity` handle in a component | Not saved, not rewritten | [EECS017](/en/docs/guide/analyzer#eecs017) |
 | Loading the new plugin before unloading the old one | Ambiguous type ids: `InvalidDataException` | The reload order above |
 | Keeping references to the old plugin's systems | The context is never collected | Drop them after `RemoveTypes` |
-| `RemoveTypes` during an update or a pass | `InvalidOperationException` | At run time |
+| `RemoveTypes` during an update or a pass | `InvalidOperationException` | [EECS041](/en/docs/guide/analyzer#eecs041) for a pass; at run time during an update |
 | Restoring a snapshot taken before `RemoveTypes` | `InvalidOperationException` | At run time |
 | Migrating from another thread | Both worlds belong to their owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
 | Moving or loading a player whose unique key the target holds | `InvalidOperationException`; nothing arrives, the originals stay | Destroy the stale holder first ([unique keys](#unique-keys)) |

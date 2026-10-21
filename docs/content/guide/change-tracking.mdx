@@ -581,7 +581,7 @@ All of it on one page with the other features: [Performance guide](/en/docs/perf
 | Expecting destroyed entities in `[Removed<T>]` | They have no row: no filter visits them | Read them from the [destroy log](#destroy-log) (`WorldOptions.DestroyLog`, `DestroyedSince`) |
 | A destroy log smaller than the destroys of a client's longest lag | `DestroyedSince` returns false for that client on every read: it resyncs over and over | Code review: size it to destroys per second times the allowed lag; watch `DestroyLogOldestTick` |
 | A `ref` parameter on a value recomputed every tick that rarely changes | Every visited row counts as changed, so every `[Changed<T>]` reader visits them all | Code review: a [`Mut<T>`](#set-if-changed) parameter with `SetIfChanged` |
-| `SetIfChanged` on a component with managed fields and no `IEquatable<T>` | `NotSupportedException`; no `SetXIfChanged` is generated | At run time: make it a record struct or implement `IEquatable<T>` |
+| `SetIfChanged` on a component with managed fields and no `IEquatable<T>` | `NotSupportedException`; no `SetXIfChanged` is generated | [EECS040](/en/docs/guide/analyzer#eecs040): make it a record struct or implement `IEquatable<T>` |
 | Several `[Changed<T>]` attributes where any change should count | Only rows where every one changed pass | Code review: `[ChangedAny<T1, …, Tn>]` |
 | `Changed`, `Removed`, `ChangedAny` or `RemovedAny` parts of one filter with different ticks | `ArgumentException`: a filter has one tick | At run time |
 

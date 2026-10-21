@@ -311,7 +311,7 @@ The capture's allocation is the new snapshot itself; `Capture(into)` reuses one.
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
 | Expecting a `List<T>` in a component to roll back | It is shared: it comes back as it is now | Use `DynamicBuffer<T>` |
-| Capturing or restoring while a query iterates | `InvalidOperationException` | At run time |
+| Capturing or restoring while a query iterates | `InvalidOperationException` | [EECS041](/en/docs/guide/analyzer#eecs041) |
 | Restoring a snapshot into another world | `ArgumentException` | At run time |
 | Restoring a snapshot taken before [`RemoveTypes`](/en/docs/guide/migration-and-unload#remove-types) | `InvalidOperationException`: its tables are gone | At run time: capture into it again after `RemoveTypes` |
 | A snapshot every tick to rewind hit checks | A copy of every row each tick, and a restore rewinds everything | A [history ring](#lag-compensation) of the positions only |

@@ -151,6 +151,7 @@ public class MoveBullets : EcsSystem
 
 ```csharp
 var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Bullet());
+world.Update();                                              // 子弹飞行
 bullet.SetInactive();                                        // 回到对象池：第一次之后只翻转一个位
 bullet.SetPosition(5, 5).RemoveInactive();                   // 重新使用
 int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>());   // 存档、清理、统计都能看到所有实体
@@ -331,7 +332,7 @@ after the update: alive False, seats released 1
 | --- | --- | --- |
 | 清理系统没写 `With<Destroyed>` | 把存活实体的资源也释放了 | 代码审查 |
 | 从不移除最后一个清理组件 | 退休的实体永远留着 | 在统计里看 `world.Count<Destroyed>()` |
-| 对清理组件或 `ChildOf` 调用 `Disable<T>()` | 抛 `InvalidOperationException` | 运行时 |
+| 对清理组件或 `ChildOf` 调用 `Disable<T>()` | 抛 `InvalidOperationException` | [EECS048](/zh/docs/guide/analyzer#eecs048) |
 | 对被禁用的组件 `Set`，以为它还是禁用状态 | `Set` 会用新值重新启用它；要拿回保留的值用 `Enable` | 设计如此 |
 | 系统忘了写 `Without<Inactive>` | 池里的实体还在动 | 代码审查 |
 | 指望 `[Changed<T>]` 区分新建和写入 | 两者都算写入 | 用 `Spawned` 标签 |

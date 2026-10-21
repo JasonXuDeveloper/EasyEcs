@@ -231,7 +231,7 @@ shots cleared: 10000, entities left: 1000
 | --- | --- | --- |
 | 在不接收 `Entity` 或 `World` 的 `[ForEach]` 方法里调用批量操作 | 遍历没预料到的结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
 | 在其他线程调用批量操作 | 和所有者线程竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
-| 对清理组件或 `ChildOf` 调用 `DisableAll` | 抛 `InvalidOperationException` | 运行时 |
+| 对清理组件或 `ChildOf` 调用 `DisableAll` | 抛 `InvalidOperationException` | [EECS048](/zh/docs/guide/analyzer#eecs048) |
 | 值本该因实体而异却用了 `SetAll` | 所有实体拿到同一个值 | 改用 `[ForEach]` 系统 |
 | 遍历查询逐个实体 `Set` / `Remove` | 结果相同，但每个实体一次结构变更 | [EECS030](/zh/docs/guide/analyzer#eecs030) |
 | 在计数循环里 `CreateEntity` 或 `Instantiate(prefab)` | 每个实体创建一次，而不是一整波一次 | [EECS031](/zh/docs/guide/analyzer#eecs031)：`CreateEntities`、`Instantiate(prefab, span)` |

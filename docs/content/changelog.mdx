@@ -89,10 +89,14 @@ major or minor version that needs code changes? The
   none). See the [migration guide](/en/docs/migration#v4-7-save-entities).
 - `EcsSystem` has a public `RunCount`: a member of that name in a system hides it (warning CS0108). See the
   [migration guide](/en/docs/migration#v4-7-run-count).
-- New analyzer errors ([EECS040](/en/docs/guide/analyzer#eecs040) to [EECS045](/en/docs/guide/analyzer#eecs045), and
+- New analyzer errors ([EECS040](/en/docs/guide/analyzer#eecs040) to [EECS045](/en/docs/guide/analyzer#eecs045),
+  [EECS048](/en/docs/guide/analyzer#eecs048) to [EECS051](/en/docs/guide/analyzer#eecs051), and
   [EECS036](/en/docs/guide/analyzer#eecs036) for a component with two index keys) reject code that throws or cannot
-  work, and new warnings ([EECS037](/en/docs/guide/analyzer#eecs037), [EECS038](/en/docs/guide/analyzer#eecs038),
-  [EECS046](/en/docs/guide/analyzer#eecs046)) report lost writes and stamps of loops that only read. See the
+  work: among them `Disable` of a cleanup component or `ChildOf`, filters no entity passes, a second `InGroup` in one
+  filter and `world.Update()` inside a query loop. New warnings ([EECS037](/en/docs/guide/analyzer#eecs037),
+  [EECS038](/en/docs/guide/analyzer#eecs038), [EECS046](/en/docs/guide/analyzer#eecs046),
+  [EECS047](/en/docs/guide/analyzer#eecs047), [EECS052](/en/docs/guide/analyzer#eecs052)) report lost writes, stamps of
+  loops that only read, refs used after a structural change and a `Set` right after a creation. See the
   [migration guide](/en/docs/migration#v4-7-analyzer).
 
 ### Fixes [#v4-7-0-fixes]

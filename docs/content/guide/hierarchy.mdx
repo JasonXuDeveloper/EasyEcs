@@ -413,8 +413,8 @@ ship, does not.
 | Collecting a tree with `Children` alone | Grandchildren are left out | `Descendants` walks every level |
 | A `ChildOf` cycle walked with `Descendants` | `InvalidOperationException` when the walk reaches it | At run time |
 | Walking up `ChildOf` without a bound on the steps | A `ChildOf` cycle loops forever | Bound the walk by `world.EntityCount` ([ancestors](#ancestors)) |
-| Re-parenting or detaching inside a `Descendants` loop | The walk reads child lists that are being rewritten | Code review: collect first, then change |
-| `Disable<ChildOf>()` | `InvalidOperationException` | At run time |
+| Re-parenting inside a `Descendants` loop | A new link grows a child list the walk reads (a detached entity is stepped past) | [EECS042](/en/docs/guide/analyzer#eecs042): collect first, then change |
+| `Disable<ChildOf>()` | `InvalidOperationException` | [EECS048](/en/docs/guide/analyzer#eecs048): `Remove<ChildOf>()` |
 | Expecting world positions without a system | There is no built-in transform | Write the [propagation system](#transform-propagation) |
 
 ## Compared with other libraries [#compared]

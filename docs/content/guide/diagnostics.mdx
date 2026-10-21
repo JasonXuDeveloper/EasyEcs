@@ -531,7 +531,7 @@ Describing the battle server's world for a dashboard, one entity for a debugger 
 | Reading `Describe()` from another thread during an update | Counts of a table caught half-way through a change | Read between updates on the owner thread |
 | Expecting `Bytes` to drop when entities leave | Tables keep their capacity for the next wave | Call `TrimExcess()` after the peak |
 | `TrimExcess()` every tick | Tables dropped and rebuilt, growth paid again: allocations on the tick | Call it from a maintenance task ([common mistakes](/en/docs/guide/common-mistakes#trim-every-tick)) |
-| `TrimExcess()` inside a `Query` loop or a `[ForEach]` method | `InvalidOperationException` | Call it between updates |
+| `TrimExcess()` inside a `Query` loop or a `[ForEach]` method | `InvalidOperationException` | [EECS041](/en/docs/guide/analyzer#eecs041): call it between updates |
 | Reading `system.Stats` on the exporter's thread | A struct read while the tick writes it | Publish a copy from the owner thread |
 | Expecting `LastEntities` to count `OnUpdate` queries | Only `[ForEach]` passes are counted | Count in `OnUpdate` yourself if it matters |
 | Leaving a registration-only pair in the schedule | Reordering `AddSystem` calls changes what a system sees | Add `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |

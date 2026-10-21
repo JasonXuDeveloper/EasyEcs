@@ -1,15 +1,15 @@
 ---
 title: 分析器规则
-seoTitle: "EasyEcs 分析器规则 EECS002-EECS046：每条 C# 诊断的含义与修法"
-description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS046：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
+seoTitle: "EasyEcs 分析器规则 EECS002-EECS052：每条 C# 诊断的含义与修法"
+description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS052：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
 icon: ShieldCheck
 ---
 
 EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/docs/ecs-principles)的代码编译不过。正确性规则（EECS002 到 EECS024，以及
 EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑、但有代价的写法（EECS017、EECS018、EECS020）。生成器会跳过无效输入，由分析器报出来，
-所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046）找的是能跑、但做了多余工作的代码，级别说明是哪一种
+所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046、EECS052）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
-（EECS025 到 EECS032，以及 EECS046）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失的报警告。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+（EECS025 到 EECS032，以及 EECS046、EECS052）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -21,7 +21,7 @@ EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑
 <Callout type="warn" title="不要">
   用 `#pragma` 压掉 `EECS` 错误：生成器已经跳过了规则所指的方法或类型，它需要的代码根本不存在。警告可以压掉，代价就是它们描述的那些；建议（信息级别）只在 IDE 里显示，
   在 `.editorconfig` 里写 `dotnet_diagnostic.EECS033.severity = warning` 可以让整个项目把它当警告报出来。用法错误（EECS040 到
-  EECS045）指出的是运行时会拒绝的调用：`#pragma` 只应该出现在测试这种拒绝的测试代码里。
+  EECS045、EECS048 到 EECS051）指出的是运行时会拒绝的调用：`#pragma` 只应该出现在测试这种拒绝的测试代码里。
 </Callout>
 
 ## 全部规则 [#rules]
@@ -73,6 +73,12 @@ EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑
 | [EECS044](#eecs044) | 错误 | 切片过滤条件只交给遍历 | |
 | [EECS045](#eecs045) | 错误 | `Destroyed` 和 `Disabled<T>` 由 World 来写 | |
 | [EECS046](#eecs046) | 警告 | 只读追踪变化组件的循环用 `Read` | `Read<T1..Tn>` |
+| [EECS047](#eecs047) | 警告 | 结构变更之后不再使用之前取的 ref | |
+| [EECS048](#eecs048) | 错误 | 清理组件和 `ChildOf` 不能禁用 | |
+| [EECS049](#eecs049) | 错误 | `[ForEach]` 方法的过滤条件要能匹配 | |
+| [EECS050](#eecs050) | 错误 | 一个过滤条件只指定一个分组 | |
+| [EECS051](#eecs051) | 错误 | 遍历进行中不更新 World | |
+| [EECS052](#eecs052) | 警告 | 新实体的组件在创建时就给出 | 创建时带上组件 |
 
 ## EECS002 [#eecs002]
 
@@ -1114,7 +1120,8 @@ public struct Recharge : IForEach<Shield>
 
 `entity.Get<T>()`、生成的 `entity.X`、单例 `world.X` 和查询项的组件返回的都是 `ref`，`var` 会把它指向的值复制一份；`TryGet` 交出的也是副本。
 在副本上写了字段、之后再也不读，这次修改就到不了任何表：实体还是旧值。规则报出用这些来源初始化、随后被写入（赋值、`++`、复合赋值）的
-局部变量，前提是之后没有代码读取、返回、捕获或传递它。
+局部变量（写入也包括调用该结构体上非 `readonly` 的方法），前提是之后没有代码读取、返回、捕获或传递它；方法、lambda 和
+局部函数里都会检查。
 
 ```csharp
 public struct Mana : IComponent { public int Value; }
@@ -1219,9 +1226,11 @@ if (trim) world.TrimExcess();
 
 **遍历索引时修改了被索引的组件。** 错误。没有代码修复。
 
-`index.Find(key)`、索引的有序遍历（`Ascending`、`Descending`、`Range` 等）和 `world.Children(parent)` 遍历的是索引自己的数组。
-在遍历中对某个实体设置、移除或禁用被索引的组件，或者销毁它，都会在遍历进行时改动这些数组：有的实体会被跳过，有的会被访问两次。
-规则报出在 `foreach` 遍历某个组件的索引时，对同一个组件做的这类修改。
+`index.Find(key)`、索引的有序遍历（`Ascending`、`Descending`、`Range` 等）、`world.Children(parent)`、`world.Descendants(root)`
+和关系索引的 `Find(target)` 边走边读索引自己的列表。给实体加上被索引的组件或换一个新键（`Set`、`SetIfChanged`、`GetOrAdd`、`Enable`、
+`SetAll`、`EnableAll`、带着该组件创建实体、生成的 `SetX`；关系则是 `AddRelation`）会把它加进某个键，而一个变空的键会把它的列表交给接下来
+增长的键：遍历会跳过一些实体，或者走到别的实体。规则报出在 `foreach` 遍历某个组件的索引时，对同一个组件做的这类修改。移除组件、断开关系、
+销毁实体只会留下遍历会跳过的空洞；修改之后紧跟 `break`、`return` 或 `throw` 时，遍历在读下一个列表之前就结束了：这两种都不报。
 
 ```csharp
 public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
@@ -1323,6 +1332,143 @@ foreach (var item in world.Query<Rating>())
 int total = 0;
 foreach (var item in world.Read<Rating>())
     total += item.Component1.Value;
+```
+
+## EECS047 [#eecs047]
+
+**结构变更之后还在用之前取的 ref。** 警告。没有代码修复。
+
+`Get<T>()`、`Read<T>()`、生成的 `entity.X` 和查询项的组件都是指向表中某一行的 ref。结构变更会移动行：给实体 `Set` 一个它还没有的组件、
+`Disable`、`Destroy`、创建实体和 World 更新，都会把实体搬到别的表、把表的最后一行换进空洞、把列扩容到新数组。在这之前取的 ref 读写的仍是
+旧位置，那里可能已经是另一个实体的值。规则按顺序检查同一个块：先是绑定到实体（或查询项）组件的 `ref` 局部变量，然后是一定会执行的结构变更，
+再然后是对这个局部变量的使用；在遍历查询的 `foreach` 里，则是先修改 item 的实体，再读取 `item.Component1` 或生成的 `item.X`。
+`Remove<T>()` 和 `Enable<T>()` 只翻转行上的一个位，不移动任何东西；对 ref 指向的那个组件 `Set`，是原地写入。
+
+```csharp doccheck=expect-EECS047
+ref var health = ref hero.Get<Health>();
+hero.Set(new Burning(3));   // hero 搬到了带 Burning 的表
+health.Value -= 5;          // 写的是 hero 已经离开的那一行
+```
+
+先做结构变更，再取 ref：
+
+```csharp
+hero.Set(new Burning(3));
+ref var health = ref hero.Get<Health>();
+health.Value -= 5;
+```
+
+## EECS048 [#eecs048]
+
+**不能禁用的组件。** 错误。没有代码修复。
+
+[`Disable<T>()`](/zh/docs/guide/cleanup-and-disable#disable-a-component) 隐藏一个组件并保留它的值。
+[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)负责让已销毁的实体留到它的资源释放完，`ChildOf` 是父实体销毁时用来找到
+[子实体](/zh/docs/guide/hierarchy)的依据：一旦被隐藏，两者都会被遗忘。所以 `Disable<T>()` 和 `DisableAll<T>()` 对它们抛
+`InvalidOperationException`，生成器也不为它们生成 `DisableX`。规则报出这两种调用。
+
+```csharp doccheck=expect-EECS048
+unit.Disable<ChildOf>();   // InvalidOperationException
+```
+
+改为移除：实体离开它的父实体，父实体销毁时也不再波及它。
+
+```csharp
+unit.Remove<ChildOf>();
+```
+
+## EECS049 [#eecs049]
+
+**没有实体能通过的过滤条件。** 错误。没有代码修复。
+
+`[ForEach]` 方法访问的是通过它自己和它所在[分组](/zh/docs/guide/systems#system-groups)全部过滤条件的实体：组件参数、`[With<T>]`、
+`[Changed<T>]`、分组上的 `[With<T>]` 和 `IGroupWith<T>` 要求有某个组件；`[Without<T>]` 和 `IGroupWithout<T>` 要求没有。一个组件既被要求有、
+又被要求没有，就没有实体可访问，方法永远不会运行，也没有任何提示。规则报在排除它的那个过滤条件上。
+
+```csharp doccheck=expect-EECS049
+public struct Living : IGroupWithout<Dead>;
+
+[UpdateInGroup<Living>]
+public class ReviveSystem : EcsSystem
+{
+    [ForEach, With<Dead>] static void Revive(ref Health health) => health.Value = 1;   // Living 排除了 Dead
+}
+```
+
+把系统移出排除它所需组件的分组：
+
+```csharp
+public class ReviveSystem : EcsSystem
+{
+    [ForEach, With<Dead>] static void Revive(ref Health health) => health.Value = 1;
+}
+```
+
+## EECS050 [#eecs050]
+
+**一个过滤条件里的第二个分组。** 错误。没有代码修复。
+
+`QueryFilter.InGroup<T>(group)`（以及生成的 `InX(group)`）记录过滤条件要遍历哪一个[分组](/zh/docs/guide/groups)的表。再指定另一个分组，
+无论是另一个组件还是另一个常量值，构造过滤条件时都会抛 `ArgumentException`。规则报在链上的第二次调用。
+
+```csharp
+public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
+```
+
+```csharp doccheck=expect-EECS050
+var border = QueryFilter.Create().InGroup<Zone>(1).InGroup<Zone>(2);   // ArgumentException
+```
+
+每个分组用自己的过滤条件：
+
+```csharp
+int count = world.Count<Health>(QueryFilter.Create().InGroup<Zone>(1))
+          + world.Count<Health>(QueryFilter.Create().InGroup<Zone>(2));
+```
+
+## EECS051 [#eecs051]
+
+**遍历进行中更新 World。** 错误。没有代码修复。
+
+一次遍历（对 `Query` 或 `Read` 的 `foreach`、`[ForEach]` 方法、job 的 `Execute`）会在 World 上计数，遍历期间的结构变更留下的空洞由它在结束时
+填上。`world.Update()` 假定没有遍历在进行：它会填掉这些空洞，移动遍历正在走的行，并把计数清零，遍历结束时再减一就成了负数，于是在下一次更新之前
+World 会拒绝 `TrimExcess`。规则报出在 `foreach` 遍历某个 World 时对它的更新；在系统里由 [EECS034](#eecs034) 报出。
+
+```csharp doccheck=expect-EECS051
+foreach (var item in world.Query<Health>())
+{
+    item.Component1.Value -= 1;
+    world.Update();   // 在这个循环遍历表的同时运行所有系统
+}
+```
+
+循环结束后再更新：
+
+```csharp
+foreach (var item in world.Query<Health>())
+    item.Component1.Value -= 1;
+world.Update();
+```
+
+## EECS052 [#eecs052]
+
+**实体刚创建就添加组件。** 警告。代码修复：创建时带上组件。
+
+`CreateEntity` 和 `Instantiate` 会把实体放进它们收到的那组组件对应的表。紧接着的语句再 `Set` 另一个组件，又会把它搬一次：多一次行复制，
+途中还多出一张可能没有别的实体用的表。把组件交给创建调用，它就和其他组件一起落进最终的表
+（[D57](/zh/docs/decisions#d57-analyzer-rules)）。规则报出存进局部变量的创建调用，后面紧跟着对一个创建时没给的组件的 `local.Set(value)`
+或生成的 `local.SetX(...)`，且这个值不依赖该实体、也不来自方法调用；修复把值移进创建调用。分组组件、World 自己的标签，以及已经带了九个组件
+的创建不报。
+
+```csharp doccheck=expect-EECS052
+var bullet = world.CreateEntity(new Position(0, 0));
+bullet.Set(new Velocity(1, 0));   // 第二次搬动，搬到带 Velocity 的表
+```
+
+创建时带上组件：
+
+```csharp
+var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
 ```
 
 ## 相关页面 [#related]

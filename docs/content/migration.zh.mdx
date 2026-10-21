@@ -88,15 +88,18 @@ public class Spawner : EcsSystem
 4.7 新增的重启调用一开始就是新名字：`world.SaveWithout(output, in exclude)` 和
 `world.LoadKeeping(input, in keep, markWritten)`（见[重启](/zh/docs/guide/saves#restart)）。
 
-### 新的分析器规则：EECS037 到 EECS046 [#v4-7-analyzer]
+### 新的分析器规则：EECS037 到 EECS052 [#v4-7-analyzer]
 
 在 4.6 能编译的代码，到 4.7 可能编译失败。新的错误指出的是会抛异常或根本行不通的代码：
 [EECS040](/zh/docs/guide/analyzer#eecs040) 到 [EECS045](/zh/docs/guide/analyzer#eecs045)（对无法比较的类型调用 `SetIfChanged`、
-调用遍历期间会被拒绝的方法、遍历索引时修改被索引的组件、会打印自身的 record struct 键、把切片过滤条件交给需要整行的调用、
-手动写 `Destroyed` 或 `Disabled<T>` 标签）；[EECS036](/zh/docs/guide/analyzer#eecs036) 现在也报告有两个索引键的普通组件。
-新的警告指出丢失的写入或没人要的 tick：[EECS037](/zh/docs/guide/analyzer#eecs037)（job 的 `Writes`）、
-[EECS038](/zh/docs/guide/analyzer#eecs038)（改过的副本）和 [EECS046](/zh/docs/guide/analyzer#eecs046)（只读追踪变化组件的
-`Query` 循环：改用 `Read` 遍历）。[EECS039](/zh/docs/guide/analyzer#eecs039) 是建议。大多数规则有代码修复；把警告当错误的构建，
+调用遍历期间会被拒绝的方法、遍历索引时往索引里加实体、会打印自身的 record struct 键、把切片过滤条件交给需要整行的调用、
+手动写 `Destroyed` 或 `Disabled<T>` 标签），[EECS048](/zh/docs/guide/analyzer#eecs048) 到 [EECS051](/zh/docs/guide/analyzer#eecs051)（禁用清理组件或 `ChildOf`、
+过滤条件没有实体能通过的 `[ForEach]` 方法、一个过滤条件里的第二个 `InGroup`、在查询循环里调用 `world.Update()`）；
+[EECS036](/zh/docs/guide/analyzer#eecs036) 现在也报告有两个索引键的普通组件。
+新的警告指出丢失的写入、可能指向错误行的 ref 或做了两遍的工作：[EECS037](/zh/docs/guide/analyzer#eecs037)（job 的 `Writes`）、
+[EECS038](/zh/docs/guide/analyzer#eecs038)（改过的副本）、[EECS046](/zh/docs/guide/analyzer#eecs046)（只读追踪变化组件的
+`Query` 循环：改用 `Read` 遍历）、[EECS047](/zh/docs/guide/analyzer#eecs047)（结构变更之后还在用的 ref：重新获取）和
+[EECS052](/zh/docs/guide/analyzer#eecs052)（`CreateEntity` 或 `Instantiate` 之后紧跟 `Set`：把组件交给创建调用）。[EECS039](/zh/docs/guide/analyzer#eecs039) 是建议。大多数规则有代码修复；把警告当错误的构建，
 在代码改好之前会因这些警告失败。
 
 ### `MeasureSystems` 统计得更多 [#v4-7-measure-systems]

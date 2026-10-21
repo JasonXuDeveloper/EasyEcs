@@ -386,7 +386,7 @@ boss 50 hp, twin 50 hp
 | 先填好 `DynamicBuffer<T>` 值再 `Set` | 所有实例共用这个列表 | [EECS012](/zh/docs/guide/analyzer#eecs012)；改用 `SetLoot(...)` |
 | 在计数循环里 `Instantiate(prefab)` | 每次调用复制一个，而不是一次复制一整波 | [EECS031](/zh/docs/guide/analyzer#eecs031)：`Instantiate(prefab, span)` |
 | 在计数循环里用相同的值 `Instantiate(prefab, values)` | 每次调用复制一个 | [EECS031](/zh/docs/guide/analyzer#eecs031)：带值的批量形式 |
-| 先 `Instantiate`，再 `Set` 一个缺少的组件 | 一次行复制，再加一次行移动 | 代码审查：把值直接交给 `Instantiate` |
+| 先 `Instantiate`，再 `Set` 一个缺少的组件 | 一次行复制，再加一次行移动 | [EECS052](/zh/docs/guide/analyzer#eecs052)（警告，有代码修复）：把值直接交给 `Instantiate` |
 | 带唯一键的预制体实例化两次，或批量生成多于一个 | 抛 `InvalidOperationException`，什么也没创建 | 每个实例给自己的键 |
 | 在不拥有 World 的线程上 `Instantiate` | 和所有者线程发生竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 在不带 `Entity` 或 `World` 参数的 `[ForEach]` 方法里 `Instantiate` | 遍历以为不会有结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |

@@ -1,20 +1,20 @@
 ---
 title: Analyzer rules
-seoTitle: "EasyEcs analyzer rules EECS002-EECS046 for C# ECS code"
-description: Every EasyEcs analyzer rule, EECS002 to EECS046, with its severity, its code fix, the code it rejects and the code to write instead.
+seoTitle: "EasyEcs analyzer rules EECS002-EECS052 for C# ECS code"
+description: Every EasyEcs analyzer rule, EECS002 to EECS052, with its severity, its code fix, the code it rejects and the code to write instead.
 icon: ShieldCheck
 ---
 
 The EasyEcs analyzer ships in the package next to the source generator, so code that breaks the
 [ECS principles](/en/docs/ecs-principles) does not build. The correctness rules (EECS002 to EECS024, EECS035 and
 EECS036) are errors except three warnings for code that works but costs (EECS017, EECS018, EECS020). The generator skips invalid input and the
-analyzer reports it, so "not generated" always means "reported". The performance rules (EECS025 to EECS034, EECS039, EECS046) find code
+analyzer reports it, so "not generated" always means "reported". The performance rules (EECS025 to EECS034, EECS039, EECS046, EECS052) find code
 that works and does more than it needs, and the severity says what kind
 ([D29](/en/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)): a warning
-means the code costs (EECS025 to EECS032, EECS046), a suggestion (Info) means the same cost written shorter (EECS033, EECS039), and an
+means the code costs (EECS025 to EECS032, EECS046, EECS052), a suggestion (Info) means the same cost written shorter (EECS033, EECS039), and an
 error means code that cannot work (EECS034, a world update inside a system). The usage rules (EECS037, EECS038 and
-EECS040 to EECS045) find calls and declarations that compile but do not do what they say: an error where the runtime
-throws or the code cannot work, a warning where a write is lost. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
+EECS040 to EECS045, EECS047 to EECS051) find calls and declarations that compile but do not do what they say: an error where the runtime
+throws or the code cannot work, a warning where a write is lost or a ref can point at the wrong row. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
 same package), and only when the result compiles.
 
 ## When to read it [#when-to-use-it]
@@ -28,7 +28,7 @@ same package), and only when the result compiles.
   Suppress an `EECS` error with `#pragma`: the generator skipped the method or type the rule names, so the code it
   needs does not exist. The warnings can be suppressed, at the cost they describe; a suggestion (Info) shows in the
   IDE only, and `dotnet_diagnostic.EECS033.severity = warning` in `.editorconfig` raises one for a whole project. A
-  usage error (EECS040 to EECS045) names a call the runtime refuses: a `#pragma` only belongs around a test of that
+  usage error (EECS040 to EECS045, EECS048 to EECS051) names a call the runtime refuses: a `#pragma` only belongs around a test of that
   refusal.
 </Callout>
 
@@ -81,6 +81,12 @@ same package), and only when the result compiles.
 | [EECS044](#eecs044) | Error | A sliced filter goes to passes only | |
 | [EECS045](#eecs045) | Error | `Destroyed` and `Disabled<T>` are the world's to write | |
 | [EECS046](#eecs046) | Warning | A loop that only reads tracked components uses `Read` | `Read<T1..Tn>` |
+| [EECS047](#eecs047) | Warning | A ref is not used after a structural change | |
+| [EECS048](#eecs048) | Error | Cleanup components and `ChildOf` are not disabled | |
+| [EECS049](#eecs049) | Error | A `[ForEach]` method's filters can match | |
+| [EECS050](#eecs050) | Error | A filter names one group | |
+| [EECS051](#eecs051) | Error | A world does not update during a pass | |
+| [EECS052](#eecs052) | Warning | A component of a new entity is given to its creation | Create it with the component |
 
 ## EECS002 [#eecs002]
 
@@ -1194,8 +1200,8 @@ singleton).
 `entity.Get<T>()`, the generated `entity.X`, a singleton `world.X` and a query item's component return a `ref`, and
 `var` copies what it points at; `TryGet` hands out a copy too. A field written on that copy and never read again is
 a change that reaches no table: the entity keeps its old value. The rule reports a local initialized from one of
-these and written afterwards (an assignment, `++`, a compound assignment), when no later code reads, returns,
-captures or passes it.
+these and written afterwards (an assignment, `++`, a compound assignment, a call of a method of the struct that is
+not `readonly`), when no later code reads, returns, captures or passes it, in a method, a lambda or a local function.
 
 ```csharp
 public struct Mana : IComponent { public int Value; }
@@ -1303,10 +1309,14 @@ if (trim) world.TrimExcess();
 
 **An indexed component changed while its index is walked.** Error. No code fix.
 
-`index.Find(key)`, the ordered walks of an index (`Ascending`, `Descending`, `Range`, ...) and `world.Children(parent)`
-walk the index's own arrays. Setting, removing or disabling the indexed component of an entity in the walk, or
-destroying it, changes those arrays under the walk: entities are skipped or visited twice. The rule reports such a
-change inside a `foreach` over a walk of the same component's index.
+`index.Find(key)`, the ordered walks of an index (`Ascending`, `Descending`, `Range`, ...), `world.Children(parent)`,
+`world.Descendants(root)` and a relation index's `Find(target)` read the index's own lists as they go. Giving an
+entity the indexed component or a new key (`Set`, `SetIfChanged`, `GetOrAdd`, `Enable`, `SetAll`, `EnableAll`, a
+creation with the component, the generated `SetX`; `AddRelation` for a relation) adds it to a key, and a key that
+emptied hands its list to the keys that grow next: the walk skips entities or visits others. The rule reports such a
+change inside a `foreach` over a walk of the same component's index. Removing the component, dropping links and
+destroying entities leave holes the walk steps past, and a change followed by a `break`, `return` or `throw` ends the
+walk before it reads another list: neither is reported.
 
 ```csharp
 public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
@@ -1415,6 +1425,154 @@ Read it:
 int total = 0;
 foreach (var item in world.Read<Rating>())
     total += item.Component1.Value;
+```
+
+## EECS047 [#eecs047]
+
+**A ref used after a structural change.** Warning. No code fix.
+
+`Get<T>()`, `Read<T>()`, the generated `entity.X` and a query item's components are refs into a table's row. A
+structural change moves rows: a `Set` of a component the entity lacks, `Disable`, `Destroy`, a creation and an update
+move entities between tables, swap the last row of a table into a hole and grow columns into new arrays. A ref taken
+before it then reads or writes the old place, which may hold another entity's value. The rule follows one block in
+order: a `ref` local bound to an entity's component (or a query item's), then a change that always runs, then a use
+of the local; in a `foreach` over a query, a change of the item's entity followed by a read of `item.Component1` or
+a generated `item.X`. `Remove<T>()` and `Enable<T>()` flip a bit of the row and move nothing; a `Set` of the
+component the ref points at writes it in place.
+
+```csharp doccheck=expect-EECS047
+ref var health = ref hero.Get<Health>();
+hero.Set(new Burning(3));   // hero moves to the table with Burning
+health.Value -= 5;          // writes the row hero left
+```
+
+Change the structure first, then take the ref:
+
+```csharp
+hero.Set(new Burning(3));
+ref var health = ref hero.Get<Health>();
+health.Value -= 5;
+```
+
+## EECS048 [#eecs048]
+
+**A component that cannot be disabled.** Error. No code fix.
+
+[`Disable<T>()`](/en/docs/guide/cleanup-and-disable#disable-a-component) hides a component and keeps its value. A
+[cleanup component](/en/docs/guide/cleanup-and-disable#cleanup-components) is what keeps a destroyed entity until
+its resources are released, and `ChildOf` is what a parent's destruction follows to find its
+[children](/en/docs/guide/hierarchy): hidden, either would be forgotten. `Disable<T>()` and `DisableAll<T>()` throw
+`InvalidOperationException` for them, and the generator writes no `DisableX` for them. The rule reports both calls.
+
+```csharp doccheck=expect-EECS048
+unit.Disable<ChildOf>();   // InvalidOperationException
+```
+
+Remove it: the entity leaves its parent, and the parent's destruction no longer reaches it.
+
+```csharp
+unit.Remove<ChildOf>();
+```
+
+## EECS049 [#eecs049]
+
+**Filters no entity passes.** Error. No code fix.
+
+A `[ForEach]` method visits the entities that pass all of its filters and those of its
+[group](/en/docs/guide/systems#system-groups): its component parameters, `[With<T>]`, `[Changed<T>]`, the group's
+`[With<T>]` and `IGroupWith<T>` require a component; `[Without<T>]` and `IGroupWithout<T>` exclude it. A component
+both required and excluded leaves no entity to visit, so the method never runs and nothing says so. The rule
+reports the excluding filter.
+
+```csharp doccheck=expect-EECS049
+public struct Living : IGroupWithout<Dead>;
+
+[UpdateInGroup<Living>]
+public class ReviveSystem : EcsSystem
+{
+    [ForEach, With<Dead>] static void Revive(ref Health health) => health.Value = 1;   // Living excludes Dead
+}
+```
+
+Move the system out of the group that excludes what it needs:
+
+```csharp
+public class ReviveSystem : EcsSystem
+{
+    [ForEach, With<Dead>] static void Revive(ref Health health) => health.Value = 1;
+}
+```
+
+## EECS050 [#eecs050]
+
+**A second group in one filter.** Error. No code fix.
+
+`QueryFilter.InGroup<T>(group)` (and the generated `InX(group)`) keeps the one
+[group](/en/docs/guide/groups) a filter walks the tables of. Naming another one, of another component or another
+constant value, throws `ArgumentException` when the filter is built. The rule reports the second call of a chain.
+
+```csharp
+public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
+```
+
+```csharp doccheck=expect-EECS050
+var border = QueryFilter.Create().InGroup<Zone>(1).InGroup<Zone>(2);   // ArgumentException
+```
+
+Walk each group with its own filter:
+
+```csharp
+int count = world.Count<Health>(QueryFilter.Create().InGroup<Zone>(1))
+          + world.Count<Health>(QueryFilter.Create().InGroup<Zone>(2));
+```
+
+## EECS051 [#eecs051]
+
+**A world update during a pass.** Error. No code fix.
+
+A pass (a `foreach` over `Query` or `Read`, a `[ForEach]` method, a job's `Execute`) counts itself on the world, and
+the structural changes made during it leave holes it closes at its end. `world.Update()` assumes no pass is running:
+it closes the holes, moving the rows the pass is walking, and resets the count, which the end of the pass then takes
+below zero, so the world refuses the next `TrimExcess` until another update. The rule reports an update of the world
+a `foreach` walks; inside a system, [EECS034](#eecs034) reports it.
+
+```csharp doccheck=expect-EECS051
+foreach (var item in world.Query<Health>())
+{
+    item.Component1.Value -= 1;
+    world.Update();   // runs every system while this loop walks the tables
+}
+```
+
+Update after the loop:
+
+```csharp
+foreach (var item in world.Query<Health>())
+    item.Component1.Value -= 1;
+world.Update();
+```
+
+## EECS052 [#eecs052]
+
+**A component added right after the entity is created.** Warning. Code fix: create it with the component.
+
+`CreateEntity` and `Instantiate` place the entity in the table of the components they are given. A `Set` of another
+component on the next statement moves it again: a second row copy, and a table on the way that nothing else may
+use. Given to the creation, the component lands in the final table with the others
+([D57](/en/docs/decisions#d57-analyzer-rules)). The rule reports a creation stored in
+a local and followed directly by `local.Set(value)` or a generated `local.SetX(...)` of a component it was not given,
+when the value does not depend on the entity or on a call; the fix moves the value into the creation. A grouped
+component, the world's own tags and a creation that already has nine components are left alone.
+
+```csharp doccheck=expect-EECS052
+var bullet = world.CreateEntity(new Position(0, 0));
+bullet.Set(new Velocity(1, 0));   // a second move, to the table with Velocity
+```
+
+Create it with the component:
+
+```csharp
+var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
 ```
 
 ## Related [#related]

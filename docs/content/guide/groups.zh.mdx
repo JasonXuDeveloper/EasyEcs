@@ -303,8 +303,8 @@ zone 2: 0 units, 0 hp
 | 通过 `ref` 写分组组件 | 行还留在旧分组 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
 | 每个玩家、公会或主人一个分组 | 每个键一张表：浪费内存，World 碎片化 | 改用[值索引](/zh/docs/guide/indexes-and-relations#value-indexes) |
 | 值每个 tick 都变 | 每次变化一次行拷贝 | 保持普通组件 |
-| 一个过滤条件里调用两次 `InGroup` | 一个过滤条件只有一个分组，以最后一次为准，两个组件却都成了必需 | 代码审查 |
-| 遍历途中调用 `GroupBy` | 抛异常：它要挪行 | 初始化时调用 |
+| 一个过滤条件里用不同的分组调用两次 `InGroup` | 抛 `ArgumentException`：一个过滤条件只有一个分组 | [EECS050](/zh/docs/guide/analyzer#eecs050)：每个分组一个过滤条件 |
+| 遍历途中调用 `GroupBy` | 抛异常：它要挪行 | [EECS041](/zh/docs/guide/analyzer#eecs041)；初始化时调用 |
 
 ## 和其他库的对比 [#compared]
 
