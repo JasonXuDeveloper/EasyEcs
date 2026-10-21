@@ -201,7 +201,7 @@ docs/                          the docs site: React Router 7 + Fumadocs, prerend
                                (Cloudflare Pages Functions), WRITING.md (page anatomy, tone, numbers); public/
                                easyecs-rules.md (the rules file for AI assistants, docs/content/ai.mdx)
 samples/                       runnable projects in learning order (README.md): HelloWorld, GameLoop, SaveLoad,
-                               MultiWorld, HotReload (Contracts / Plugin / Host), Actors, BlockWorld (a Minecraft-style
+                               MultiWorld, HotReload (Contracts / Plugin / Host), Actors, VoxelServer (a Minecraft-style
                                server), Godot; built and run by CI
                                (.github/scripts/check-sample.sh compares the deterministic ones with their README's
                                expected output). Each reads top-down: Components.cs, Systems.cs (or Systems/ per
