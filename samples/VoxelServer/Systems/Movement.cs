@@ -61,3 +61,15 @@ public class PhysicsSystem : EcsSystem
         body = new Body(onGround, blocked);
     }
 }
+
+// Keeps each player's InChunk on the chunk its feet are in. SetInChunkIfChanged writes only when the player crossed
+// into another chunk, so the index is touched a few times a second, not every tick.
+public class GridSystem : EcsSystem
+{
+    [ForEach, With<Player>]
+    static void Track(Entity player, in Position position)
+    {
+        var p = position.Value;
+        player.SetInChunkIfChanged(Terrain.ChunkOf((int)MathF.Floor(p.X), (int)MathF.Floor(p.Z)));
+    }
+}

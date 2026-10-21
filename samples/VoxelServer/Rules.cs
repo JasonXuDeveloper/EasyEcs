@@ -7,7 +7,9 @@ public static class Rules
 {
     public const int TicksPerSecond = 20;
     public const int DayLength = 600;          // 30 seconds a day, so a short run sees a night
-    public const int ViewDistance = 2;         // chunks around a player in each direction: 5 x 5 loaded
+    public const float PlayerVision = 32;      // blocks a player sees: two chunks each way, 5 x 5 chunks loaded
+    public const float ZombieVision = 16;      // blocks a zombie sees a player from
+    public const int LoadEvery = TicksPerSecond / 2;   // ticks between two passes of ChunkLoadSystem
     public const int UnloadAfter = 100;        // ticks a chunk stays loaded after the last player saw it
     public const float Gravity = 0.08f;
     public const float WalkSpeed = 0.2f;
@@ -22,6 +24,13 @@ public static class Rules
     public const int FlowDelay = 5;            // ticks before water spreads one block further
     public const float FloatSpeed = 0.1f;      // the upward speed water gives a humanoid; gravity takes 0.08 back
     public const float Current = 0.15f;        // the push of the water next to a spring, in blocks per tick
+
+    // The chunks a view reaches in each direction.
+    public static int ChunksIn(float range) => (int)MathF.Ceiling(range / Terrain.Size);
+
+    // The players a chunk's changes go to: its viewers at the last load pass, none if nobody had it in view then.
+    public static int Watching(in Viewers viewers, in Clock clock) =>
+        clock.Tick - viewers.Tick < LoadEvery ? viewers.Count : 0;
 
     public static bool IsNight(in Clock clock) => clock.Tick % clock.DayLength >= clock.DayLength / 2;
 

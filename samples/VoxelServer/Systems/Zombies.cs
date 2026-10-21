@@ -2,21 +2,50 @@ using EasyEcs;
 
 namespace VoxelServer;
 
-// At night, every few seconds, a zombie rises 8 to 15 blocks from each player and hunts that player.
+// At night, every few seconds, a zombie rises 8 to 15 blocks from each player. What it hunts is up to its eyes
+// (ZombieSightSystem).
 public class NightSpawnSystem : EcsSystem
 {
     public override int UpdateInterval => Rules.SpawnEvery;
 
     [ForEach]
-    void Spawn(Entity player, in Player client, in Position position, in Clock clock, in Prefabs prefabs, ref Stats stats)
+    void Spawn(in Player client, in Position position, in Clock clock, in Prefabs prefabs, ref Stats stats)
     {
         if (!Rules.IsNight(clock)) return;
         int seed = (int)(clock.Tick / Rules.SpawnEvery);
         int dx = 8 + Rules.Hash(client.Client, seed) % 8, dz = 8 + Rules.Hash(seed, client.Client) % 8;
         int x = (int)MathF.Floor(position.Value.X) + dx, z = (int)MathF.Floor(position.Value.Z) - dz;
         var at = new System.Numerics.Vector3(x + 0.5f, Terrain.SurfaceHeight(x, z) + 1, z + 0.5f);
-        World.Instantiate(prefabs.Zombie, new Position(at), new Target(player));
+        World.Instantiate(prefabs.Zombie, new Position(at));
         stats.ZombiesSpawned++;
+    }
+}
+
+// Twice a second, a zombie looks for the nearest player within its Vision: it walks the players of the chunks its view
+// reaches through the InChunk index, not every player of the world. None in sight: it has no target and stands. A
+// tenth of the zombies look each tick (Slices), so a horde costs the same every tick instead of a spike twice a second.
+public class ZombieSightSystem : EcsSystem
+{
+    [ForEach(Slices = Rules.LoadEvery), With<Zombie>]
+    void Look(in Position position, in Vision vision, ref Target target)
+    {
+        var p = position.Value;
+        var center = Terrain.ChunkOf((int)MathF.Floor(p.X), (int)MathF.Floor(p.Z));
+        int reach = Rules.ChunksIn(vision.Range);
+        float nearest = vision.Range * vision.Range;
+        EntityId seen = default;
+        for (int dz = -reach; dz <= reach; dz++)
+        for (int dx = -reach; dx <= reach; dx++)
+        {
+            foreach (var player in World.InChunkIndex.Find(new ChunkPos(center.X + dx, center.Z + dz)))
+            {
+                float distance = (player.Position.Value - p).LengthSquared();
+                if (distance >= nearest) continue;
+                nearest = distance;
+                seen = player;
+            }
+        }
+        target = new Target(seen);
     }
 }
 
@@ -27,7 +56,11 @@ public class ZombieChaseSystem : EcsSystem
     void Chase(in Position position, in Target target, ref Velocity velocity, ref Cooldown cooldown,
         ref Stats stats)
     {
-        if (!World.TryGetEntity(target.Player, out var player)) return;   // the player left
+        if (!World.TryGetEntity(target.Player, out var player))           // none in sight, or the player left
+        {
+            velocity = new Velocity(velocity.Value with { X = 0, Z = 0 });
+            return;
+        }
         var to = player.Position.Value - position.Value;
         var flat = new System.Numerics.Vector2(to.X, to.Z);
         float distance = flat.Length();

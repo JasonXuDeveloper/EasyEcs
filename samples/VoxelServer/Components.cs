@@ -20,8 +20,9 @@ public record struct Chunk(ChunkPos Pos) : IComponent, IUniqueIndexed<ChunkPos>
     ChunkPos IIndexed<ChunkPos>.Key => Pos;
 }
 
-// The last tick a player had the chunk in view. ChunkUnloadSystem frees the chunks nobody has seen for a while.
-public record struct LastSeen(long Tick) : IComponent;
+// The players that had the chunk in view at the last load pass (Tick): who is sent what happens in it.
+// ChunkUnloadSystem frees the chunks nobody has seen for a while.
+public record struct Viewers(long Tick, int Count) : IComponent;
 
 // ---- Water ----
 
@@ -54,9 +55,20 @@ public record struct Health(int Value) : IComponent;
 // A tag: players and zombies. Humanoids float in water and drift with it; dropped items sink.
 public struct Humanoid : IComponent;
 
+// How far a player or a zombie sees, in blocks: each prefab sets its own. A player's view decides which chunks are
+// loaded around it and what it is sent (its area of interest); a zombie's, which player it hunts.
+public record struct Vision(float Range) : IComponent;
+
 // ---- Players ----
 
 public record struct Player(int Client) : IComponent;
+
+// The chunk a player is in: an index (world.InChunkIndex.Find(chunk)) of the players by chunk, the grid a zombie looks
+// through for the nearest player. GridSystem keeps it current.
+public record struct InChunk(ChunkPos Pos) : IComponent, IIndexed<ChunkPos>
+{
+    ChunkPos IIndexed<ChunkPos>.Key => Pos;
+}
 
 // What the client asked for this tick: a direction to walk in (x, z) and a dig of the block underfoot.
 public record struct Input(Vector2 Walk, bool Dig) : IComponent;
@@ -68,7 +80,8 @@ public record struct ItemStack(Block Kind, int Count);
 
 public struct Zombie : IComponent;
 
-// The player a zombie chases. An EntityId, so a player who left is noticed (TryGetEntity fails).
+// The player a zombie chases, the nearest it saw (none: default). An EntityId, so a player who left is noticed
+// (TryGetEntity fails).
 public record struct Target(EntityId Player) : IComponent;
 
 // Ticks until a zombie may hit again.

@@ -21,9 +21,11 @@ world.AddSystem<FakeClientsSystem>();
 world.AddSystem<ChunkLoadSystem>();
 world.AddSystem<WaterFlowSystem>();
 world.AddSystem<PlayerMoveSystem>();
+world.AddSystem<ZombieSightSystem>();
 world.AddSystem<ZombieChaseSystem>();
 world.AddSystem<FloatSystem>();
 world.AddSystem<PhysicsSystem>();
+world.AddSystem<GridSystem>();
 world.AddSystem<DigSystem>();
 world.AddSystem<PickupSystem>();
 world.AddSystem<ItemExpirySystem>();
@@ -45,7 +47,10 @@ if (args.Contains("--schedule"))
 
 var player = world.Prefabs.Player;
 for (int i = 0; i < players; i++)
-    world.Instantiate(player, new Player(i), new Position(Rules.SpawnPoint(i)));
+{
+    var at = Rules.SpawnPoint(i);
+    world.Instantiate(player, new Player(i), new Position(at), new InChunk(Terrain.ChunkOf((int)at.X, (int)at.Z)));
+}
 
 Server.Run(world, ticks, args.Contains("--realtime"));
 
@@ -62,15 +67,18 @@ Console.WriteLine($"restarted from the save: {restarted.Count<Player>()} players
                   $"{restarted.Count<Water>()} water, {restarted.Count<Zombie>()} zombies");
 Console.Error.WriteLine($"save: {save.WrittenCount / 1024} KiB");
 
-// The recipes players, zombies and items are created from: every start builds them.
+// The recipes players, zombies and items are created from: every start builds them. Players and zombies differ in
+// what they see: each prefab carries its own Vision.
 static void SetPrefabs(World world) =>
     world.SetPrefabs(
         Player: new Prefab()
-            .SetPlayer(0).Set(new Humanoid()).SetPosition(default).SetVelocity(default).SetBody(false, false)
+            .SetPlayer(0).Set(new Humanoid()).SetVision(Rules.PlayerVision).SetInChunk(default)
+            .SetPosition(default).SetVelocity(default).SetBody(false, false)
             .SetHealth(Rules.PlayerHealth).SetInput(default, false).SetBuffer<ItemStack>(),
         Zombie: new Prefab()
-            .Set(new Zombie()).Set(new Humanoid()).SetTarget(default).SetPosition(default).SetVelocity(default)
-            .SetBody(false, false).SetHealth(Rules.ZombieHealth).SetCooldown(0),
+            .Set(new Zombie()).Set(new Humanoid()).SetVision(Rules.ZombieVision).SetTarget(default)
+            .SetPosition(default).SetVelocity(default).SetBody(false, false)
+            .SetHealth(Rules.ZombieHealth).SetCooldown(0),
         Item: new Prefab()
             .SetItem(default, default).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
             .SetBody(false, false).SetLifetime(Rules.ItemLifetime));
