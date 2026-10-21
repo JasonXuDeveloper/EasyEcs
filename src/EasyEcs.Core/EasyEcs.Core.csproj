@@ -14,12 +14,12 @@
         <PackageId>EasyEcs</PackageId>
         <Title>EasyEcs</Title>
         <Authors>JasonXuDeveloper</Authors>
-        <Description>High-performance, allocation-free archetype Entity Component System (ECS) for C# and long-running .NET 10 servers: game servers, simulations, real-time backends. Faster than Friflo.Engine.ECS, Arch and DefaultEcs in most head-to-head benchmarks (saves, bulk changes, spawning, value queries, hierarchies, indexes, change tracking), with zero allocation per tick. Source-generated [ForEach] systems, immediate structural changes, safe parallel systems, change tracking, value indexes, relations, dynamic buffers, snapshots and saves; a Roslyn analyzer with code fixes. Native AOT ready.</Description>
+        <Description>High-performance, allocation-free archetype Entity Component System (ECS) for C# and long-running .NET 10 servers: game servers, simulations, real-time backends; also runs in Godot 4 .NET projects. Faster than Friflo.Engine.ECS, Arch and DefaultEcs in most head-to-head benchmarks (saves, bulk changes, spawning, value queries, hierarchies, indexes, change tracking), with zero allocation per tick. Source-generated [ForEach] systems, immediate structural changes, safe parallel systems, change tracking, value indexes, relations, dynamic buffers, snapshots and saves; a Roslyn analyzer with code fixes. Native AOT ready.</Description>
         <Copyright>JasonXuDeveloper</Copyright>
         <PackageProjectUrl>https://ecs.xgamedev.net</PackageProjectUrl>
         <RepositoryUrl>https://github.com/JasonXuDeveloper/EasyEcs</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
-        <PackageTags>ecs;entity-component-system;csharp;dotnet;archetype;data-oriented-design;game-server;gamedev;simulation;high-performance;zero-allocation;source-generator;roslyn-analyzer;aot</PackageTags>
+        <PackageTags>ecs;entity-component-system;csharp;dotnet;archetype;data-oriented-design;game-server;gamedev;godot;simulation;high-performance;zero-allocation;source-generator;roslyn-analyzer;aot</PackageTags>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <PublishRepositoryUrl>true</PublishRepositoryUrl>
