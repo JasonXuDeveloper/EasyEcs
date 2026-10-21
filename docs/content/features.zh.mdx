@@ -576,11 +576,10 @@ World 跑在 ASP.NET Core 应用或 Worker Service 里，由一个托管服务�
 
 `dotnet new easyecs` 创建一个按固定 tick 运行的控制台服务器：`Components/`、每个系统一个文件的 `Systems/`（其中有一个
 用预制体刷怪的系统），`Program.cs` 只负责托管 World（加 `--tests` 多一个 NUnit 项目，每个系统一个测试文件）；
-`dotnet new easyecs-system` 添加一个系统。[`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples)
-按学习顺序收录完整程序（Hello World、游戏循环、存档与加载、每线程一个 World、热重载、actor、仿 Minecraft 的服务器、Godot 游戏）；指南里
+`dotnet new easyecs-system` 添加一个系统。[示例](/zh/docs/samples)按学习顺序收录完整程序；指南里
 [变更追踪](/zh/docs/guide/change-tracking#full-example)等功能页的“怎么用”部分最后都有一个完整例子。
 
-- **指南：** [快速开始](/zh/docs/getting-started)、[项目结构](/zh/docs/guide/project-structure)
+- **指南：** [快速开始](/zh/docs/getting-started)、[项目结构](/zh/docs/guide/project-structure)、[示例](/zh/docs/samples)
 
 ## 和其他库的对比 [#compared]
 
@@ -593,26 +592,10 @@ World 跑在 ASP.NET Core 应用或 Worker Service 里，由一个托管服务�
 
 <PeerChart />
 
-全部结果按领先幅度排序，其他库更快的项目和原因也在里面：[横向对比](/zh/docs/comparison#feature-by-feature)。
-
-| | EasyEcs | Friflo.Engine.ECS | Arch | DefaultEcs |
-| --- | --- | --- | --- | --- |
-| 存储 | 原型，带存在位 | 原型 | 分块的原型 | 每种组件一个池 |
-| 遍历中的结构变更 | 立即生效，每个实体只访问一次 | 抛异常；改用命令缓冲 | 不做保护；命令缓冲 | 不安全；命令记录器 |
-| 源生成的系统 | 有 | 无 | 核心库里没有 | 无 |
-| 编译期分析器 | 有 | 无 | 无 | 无 |
-| 按 tick 的变更追踪 | 有 | 无 | 无 | `WhenChanged<T>()` |
-| 移除检测 | `[Removed<T>]` | 事件 | 事件 | `WhenRemoved<T>()` |
-| 值索引 | 有 | 有 | 无 | `EntityMultiMap<TKey>` |
-| 关系与层级 | 有 | 有 | 无 | 无 |
-| 并行系统 | 读写集合自动生成 | 无 | 无 | `ParallelSystem<T>` |
-| 快照 / 存档 | 都有 | JSON | 无 | 文本、二进制 |
-| Godot 4（.NET） | 支持（项目面向 net10.0） | 支持 | 支持 | 支持 |
-| Unity | 不支持（net10.0） | 支持 | 支持 | 支持 |
+全部结果按领先幅度排序，其他库更快的项目和原因也在里面，见[横向对比](/zh/docs/comparison#feature-by-feature)；每个库内置了哪些功能，
+见它的[功能对照表](/zh/docs/comparison#features)。
 
 <BenchSource />
-
-完整的对比，包括每个库各自擅长的场景，见[横向对比](/zh/docs/comparison)。
 
 ## 相关页面 [#related]
 

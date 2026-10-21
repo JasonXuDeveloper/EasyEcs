@@ -411,6 +411,7 @@ by `ref` from `e.WriteLoot()` (or `GetOrAddLoot()`), so each one counts for chan
 | `Clear()` | Empties it, keeping the capacity |
 | `EnsureCapacity(n)` / `TrimExcess()` | Grows once before a known count, gives memory back |
 | `AsSpan()` | A `Span<T>` over the elements, for writes in place |
+| `DynamicBuffer<T>.PoolCapacity = n` (static) | The longest list a dead buffer of `T` gives back to its pool, set once at startup |
 
 ```csharp
 unit.Set(new DynamicBuffer<Loot>());

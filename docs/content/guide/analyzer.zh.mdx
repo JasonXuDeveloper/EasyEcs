@@ -1209,7 +1209,8 @@ hero.SetIfChanged(new Callsign("Ada"));
 **遍历期间调用了它会拒绝的方法。** 错误。没有代码修复。
 
 查询或 `[ForEach]` 遍历正在走一个 World 的表时，重建或替换这些表的调用会抛 `InvalidOperationException`：`TrimExcess`、`Capture`、
-`Restore`、`Save`、`Load`、`SaveEntities`、`LoadEntities`、`MoveEntities`（被遍历的 World 作为来源或目标）、`GroupBy` 和 `RemoveTypes`。
+`Restore`、`Save`、`SaveWithout`、`Load`、`LoadKeeping`、`SaveEntities`、`SaveEntitiesWith`、`LoadEntities`、`LoadEntitiesInto`、
+`MoveEntities`（被遍历的 World 作为来源或目标）、`GroupBy` 和 `RemoveTypes`。
 规则报出在 `foreach` 遍历其 `Query` 的那个 World 上的这些调用，以及在 `[ForEach]` 方法或 job 的 `Execute` 所在 World 上的这些调用。
 
 ```csharp doccheck=expect-EECS041

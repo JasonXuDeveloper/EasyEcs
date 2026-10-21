@@ -406,6 +406,7 @@ world.DestroyAll<Dead>();
 | `Clear()` | 清空，保留容量 |
 | `EnsureCapacity(n)` / `TrimExcess()` | 已知数量时先扩容一次，或者把内存还回去 |
 | `AsSpan()` | 元素的 `Span<T>`，用来原地写 |
+| `DynamicBuffer<T>.PoolCapacity = n`（静态） | 死掉的 `T` 缓冲最多把多长的列表还给池，启动时设一次 |
 
 ```csharp
 unit.Set(new DynamicBuffer<Loot>());
