@@ -2,14 +2,13 @@ using EasyEcs;
 
 namespace HotReload.Plugin;
 
-// Every unit the host created takes part: a unit without a score gets one.
+// Every unit the host created takes part: the units without a score get one, all in one bulk call
+// (a whole table at a time) instead of a structural change per entity.
 public class JoinScoringSystem : EcsSystem
 {
-    [ForEach, With<Position>, Without<Score>]
-    static void Join(Entity unit)
-    {
-        unit.SetScore(0);
-    }
+    static readonly QueryFilter Unscored = QueryFilter.Create().With<Position>().Without<Score>();
+
+    protected override void OnUpdate() => World.SetAll(new Score(0), Unscored);
 }
 
 // Every moving unit scores the bonus once per update.
