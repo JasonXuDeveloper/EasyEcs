@@ -46,7 +46,7 @@ public static class Program
             status == "500 points");
 
         // And out again, for good.
-        world.RemoveTypes(context);
+        world.RemoveTypes(plugin);
         context.Unload();
 
         Console.WriteLine(checks.AllPassed ? "all checks passed" : "a check failed");

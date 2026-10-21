@@ -9,10 +9,11 @@ int players = Support.Option(args, "--players", 50);
 int ticks = Support.Option(args, "--ticks", 1200);
 
 // #region options
-// A chunk's blocks and its water are 8 KB each, more than a buffer's pool keeps by default: let each loaded chunk
+// A chunk's blocks, its water and the water's next step are 8 KB each, more than a buffer's pool keeps by default: let each loaded chunk
 // reuse the lists of one that was unloaded.
 DynamicBuffer<Block>.PoolCapacity = Terrain.BlocksPerChunk;
 DynamicBuffer<Fluid>.PoolCapacity = Terrain.BlocksPerChunk;
+DynamicBuffer<NextFluid>.PoolCapacity = Terrain.BlocksPerChunk;
 
 using var world = new World(new WorldOptions { MeasureSystems = true });
 // #endregion options
@@ -27,10 +28,12 @@ SetPrefabs(world);
 // One tick, in this order: what the clients asked for, the world around them, movement, the rules of the game, what
 // is sent back.
 world.AddSystem<FakeClientsSystem>();
+world.AddSystem<ClockSystem>();
 world.AddSystem<ChunkLoadSystem>();
 world.AddSystem<ChunkReadSystem>();
 world.AddSystem<BlockUpdateSystem>();
 world.AddSystem<WaterFlowSystem>();
+world.AddSystem<WaterCommitSystem>();
 world.AddSystem<PlayerMoveSystem>();
 world.AddSystem<SightSystem>();
 world.AddSystem<ZombieTargetSystem>();
@@ -55,7 +58,6 @@ world.AddSystem<ChunkSaveSystem>();
 world.AddSystem<ChunkViewSystem>();
 world.AddSystem<SendChunksSystem>();
 world.AddSystem<SendEntitiesSystem>();
-world.AddSystem<ClockSystem>();
 // #endregion systems
 
 if (args.Contains("--schedule"))

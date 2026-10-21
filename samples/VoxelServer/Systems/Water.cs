@@ -23,10 +23,15 @@ public class BlockUpdateSystem : EcsSystem
 // else empties. The same rule, applied again each step, makes water recede when its spring or the water above it is
 // gone, and fill a pit dug beside a lake.
 //
+// A simplified version of Minecraft's rule: no new sources between two springs, and water spreads every way rather
+// than toward the nearest drop.
+//
 // The rule is a stencil, the same arithmetic for every block from its six neighbours, so it runs as SIMD over the
 // grid: a row of the chunk is 16 blocks, one Vector128<byte>, and its neighbours are the rows next to it in the same
 // buffer. The neighbours across the chunk's edges are copied into a halo around a padded copy of the grid first, so
-// the vector loop has no edge cases. Byte lanes are integer arithmetic: the same water on every machine.
+// the vector loop has no edge cases. Byte lanes are integer arithmetic: the same water on every machine. The step
+// goes into NextFluid, not Fluid, so every chunk steps from the water before the step, whatever order the chunks are
+// visited in; WaterCommitSystem then makes it the water.
 [UpdateInGroup<Simulation>]
 public class WaterFlowSystem : EcsSystem
 {
@@ -36,16 +41,15 @@ public class WaterFlowSystem : EcsSystem
     const int Row = Size + 2, Layer = Row * Row;      // the padded grid: a halo of one block on each side
 
     [ForEach, With<Flowing>]
-    void Flow(Entity chunk, in Chunk key, in DynamicBuffer<Block> blocks, Mut<DynamicBuffer<Fluid>> fluid,
-        ref Stats stats)
+    void Flow(Entity chunk, in Chunk key, in DynamicBuffer<Block> blocks, in DynamicBuffer<Fluid> fluid,
+        Mut<DynamicBuffer<NextFluid>> step, ref Stats stats)
     {
-        var levels = MemoryMarshal.Cast<Fluid, byte>(fluid.Value.AsReadOnlySpan());
+        var levels = MemoryMarshal.Cast<Fluid, byte>(fluid.AsReadOnlySpan());
         var solid = MemoryMarshal.Cast<Block, byte>(blocks.AsReadOnlySpan());
 
         // What each block hands to its sides: one level less than its own, if it stands on something solid. Only the
         // layers holding water give anything, so only they are filled in, here and in the halo.
-        Span<byte> spread = stackalloc byte[Height * Layer];
-        spread.Clear();
+        Span<byte> spread = stackalloc byte[Height * Layer];             // zeroed: nothing given
         var (low, high) = Layers(levels);
         for (int y = Math.Max(low, 1); y <= high; y++)
         for (int z = 0; z < Size; z++)
@@ -82,9 +86,10 @@ public class WaterFlowSystem : EcsSystem
             chunk.Remove<Flowing>();                                    // settled: not visited again until woken
             return;
         }
-        next.CopyTo(MemoryMarshal.Cast<Fluid, byte>(fluid.Write().AsSpan()));
+        ref var buffer = ref step.Write();
+        buffer.Clear();
+        buffer.AddRange(MemoryMarshal.Cast<byte, NextFluid>(next));
         stats.WaterCells += filled;
-        Terrain.Wake(World, key.Pos);                                   // the water at an edge reaches the neighbours
     }
 
     // What the 16 blocks of a row starting at `at` hand to their sides.
@@ -148,6 +153,22 @@ public class WaterFlowSystem : EcsSystem
             if (solid[at - Size * Size] == 0) continue;                // not standing on anything: gives nothing
             spread[y * Layer + (z + 1) * Row + haloX] = (byte)Math.Max(Math.Min(levels[at], Fluid.Falling) - 1, 0);
         }
+    }
+}
+// Makes the step the water, once every chunk has stepped: [Changed<T>] visits the chunks whose NextFluid was written,
+// and the copy is a write of the Fluid buffer, which replication sends. The water of their neighbours may move now
+// (it reaches across the edges), so they are woken.
+[UpdateInGroup<Simulation>]
+public class WaterCommitSystem : EcsSystem
+{
+    [ForEach, Changed<DynamicBuffer<NextFluid>>]
+    void Commit(in Chunk key, Mut<DynamicBuffer<NextFluid>> step, Mut<DynamicBuffer<Fluid>> fluid)
+    {
+        var next = step.Value.AsReadOnlySpan();
+        if (next.Length == 0) return;                                   // emptied by the last commit
+        next.CopyTo(MemoryMarshal.Cast<Fluid, NextFluid>(fluid.Write().AsSpan()));
+        step.Write().Clear();
+        Terrain.Wake(World, key.Pos);
     }
 }
 // #endregion flow

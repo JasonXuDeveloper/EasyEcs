@@ -69,6 +69,13 @@ public static class Terrain
     // The chunk a point is in.
     public static ChunkPos ChunkOf(Vector3 p) => ChunkOf((int)MathF.Floor(p.X), (int)MathF.Floor(p.Z));
 
+    // Whether a view of `range` blocks from the chunk `center` reaches the chunk `chunk`: the square of ChunksAround.
+    public static bool InReach(ChunkPos center, ChunkPos chunk, float range)
+    {
+        int reach = Rules.ChunksIn(range);
+        return Math.Abs(chunk.X - center.X) <= reach && Math.Abs(chunk.Z - center.Z) <= reach;
+    }
+
     // The chunks a view of `range` blocks reaches around `center`: foreach (var chunk in Terrain.ChunksAround(...)).
     public static ChunkSquare ChunksAround(ChunkPos center, float range) => new(center, Rules.ChunksIn(range));
 

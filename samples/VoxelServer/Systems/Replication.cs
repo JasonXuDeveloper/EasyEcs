@@ -6,14 +6,19 @@ namespace VoxelServer;
 // What the server sends each tick, and to whom. A [Changed<T>] method visits only the rows written since its system
 // last ran, so a chunk nobody dug and a player standing still cost nothing. A chunk whose blocks or water changed
 // goes out as a block-change packet to the players that have it in view (the chunk's Viewers); [ChangedAny<..>]
-// takes either buffer. A chunk that comes into a view is sent whole by ChunkViewSystem. Here the packets are counted;
-// a real server would encode them.
+// takes either buffer. A chunk that comes into a view is sent whole by ChunkViewSystem, and so is a Fresh one, just
+// loaded or generated: its buffers count as written, but no client has it yet. Here the packets are counted; a real
+// server would encode them.
 [UpdateInGroup<Replication>]
 public class SendChunksSystem : EcsSystem
 {
-    [ForEach, With<Chunk>, ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]
+    [ForEach, With<Chunk>, Without<Fresh>, ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]
     static void Send(in Viewers viewers, in Clock clock, ref Stats stats) =>
         stats.BlockUpdates += Rules.Watching(viewers, clock);
+
+    // From the next tick on, its changes are block changes.
+    [ForEach, With<Fresh>]
+    static void Sent(Entity chunk) => chunk.Remove<Fresh>();
 }
 // #endregion chunks
 
@@ -37,8 +42,10 @@ public class SendEntitiesSystem : EcsSystem
 // #endregion entities
 
 // #region clock
-// Advances the clock after everything else ran this tick.
-[UpdateInGroup<Replication>]
+// Starts a tick of the simulation: the clock goes first, so every system of the tick, and the replication after it,
+// sees the same tick. In the Simulation group, not Replication, so a server that replicates less often than it
+// simulates keeps game time.
+[UpdateInGroup<Simulation>]
 public class ClockSystem : EcsSystem
 {
     protected override void OnUpdate() => World.Clock.Tick++;

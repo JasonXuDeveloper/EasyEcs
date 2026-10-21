@@ -30,8 +30,10 @@ public static class Rules
     public const float Current = 0.15f;        // the push of the water next to a spring, in blocks per tick
     public const int PositionBytes = 16;       // an entity update: the entity's id and its position
     public const int HealthBytes = 2;          // the health bar an update carries for a player or a zombie
-    public const int MaxRequests = 256;        // chunks read or unloaded in one tick at most; the others wait a tick
+    public const int MaxRequests = 256;        // chunks read or saved in one tick at most; the others wait a tick
     public const int MaxSeen = 256;            // entities a client shows at most; the others wait for room
+    public const int MaxSaved = 512;           // entities a chunk takes to the region files at most, itself included
+    public const int ViewChunks = 81;          // chunks a view holds at most: 9 x 9, a vision of up to 64 blocks
 
     // The chunks a view reaches in each direction.
     public static int ChunksIn(float range) => (int)MathF.Ceiling(range / Terrain.Size);

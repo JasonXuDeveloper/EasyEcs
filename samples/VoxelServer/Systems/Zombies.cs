@@ -99,7 +99,7 @@ public class ZombieAttackSystem : EcsSystem
     [ForEach, With<Zombie>]
     void Attack(in Position position, in Target target, ref Cooldown cooldown, ref Stats stats)
     {
-        if (cooldown.Ticks > 0 || !World.TryGetEntity(target.Player, out var player)) return;
+        if (cooldown.Ticks > 0 || !World.TryGetEntity(target.Player, out var player) || player.Health.Value <= 0) return;
         var to = player.Position.Value - position.Value;
         if (new Vector2(to.X, to.Z).LengthSquared() >= 1.2f * 1.2f || MathF.Abs(to.Y) >= 1.5f) return;
         player.Health = new Health(player.Health.Value - Rules.ZombieDamage);
@@ -108,7 +108,7 @@ public class ZombieAttackSystem : EcsSystem
     }
 }
 
-// Counts every cooldown down to zero: the same arithmetic over a column, 8 per instruction.
+// Counts every cooldown down to zero: the same arithmetic over a column, 8 per instruction (4 on Arm).
 [UpdateInGroup<Simulation>]
 public class CooldownSystem : EcsSystem
 {

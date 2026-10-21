@@ -12,5 +12,5 @@ public struct ClientInput : ISystemGroup;
 // The world itself: chunks, water, movement, the rules of the game.
 public struct Simulation : ISystemGroup;
 
-// What goes back to the clients, then the clock.
+// What goes back to the clients.
 public struct Replication : ISystemGroup;

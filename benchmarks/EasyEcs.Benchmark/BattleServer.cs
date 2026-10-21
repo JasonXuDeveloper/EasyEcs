@@ -135,8 +135,10 @@ public class CombatSystem : EcsSystem                                         //
     {
         if (--attack.Cooldown > 0) return;
         attack.Cooldown = attack.Interval;
-        hp.Write().Value -= attack.Damage;                                    // a hit is a change of Health: only the
-        battle.Hits++;                                                        // units hit this tick are stamped
+        // The fight is abstracted: a unit pays for the hits it trades from its own Health. A hit is a change of Health,
+        // so only the units hit this tick are stamped.
+        hp.Write().Value -= attack.Damage;
+        battle.Hits++;
     }
 }
 

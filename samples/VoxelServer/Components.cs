@@ -20,9 +20,17 @@ public record struct Chunk(ChunkPos Pos) : IComponent, IUniqueIndexed<ChunkPos>
     ChunkPos IIndexed<ChunkPos>.Key => Pos;
 }
 
-// A chunk a player needs that is not loaded: ChunkLoadSystem records it as an entity, ChunkReadSystem reads or
-// generates it after the pass (a pass may not load entities, EECS041).
-public record struct LoadRequest(ChunkPos Pos, long Tick) : IComponent;
+// A chunk players need that is not loaded, and how many of them asked at the load pass of Tick: ChunkLoadSystem
+// records it as an entity, one per chunk (the unique index), and ChunkReadSystem reads or generates it after the pass
+// (a pass may not load entities, EECS041).
+public record struct LoadRequest(ChunkPos Pos, long Tick, int Viewers) : IComponent, IUniqueIndexed<ChunkPos>
+{
+    ChunkPos IIndexed<ChunkPos>.Key => Pos;
+}
+
+// A tag on a chunk loaded this tick: its clients get it whole (ChunkViewSystem), so SendChunksSystem does not send its
+// blocks as changes. SendChunksSystem removes it.
+public struct Fresh : IComponent;
 
 // A tag on a chunk nobody saw for a while: ChunkSaveSystem writes it and what is in it to the region files and
 // destroys them, after the pass.
@@ -43,13 +51,18 @@ public record struct Fluid(byte Level)
     public const byte Spring = 9, Falling = 8;
 }
 
+// The water of a chunk after the next step, in the layout of Fluid: WaterFlowSystem writes it, WaterCommitSystem copies
+// it into the Fluid buffer once every chunk has stepped, so each chunk steps from its neighbours' water before the
+// step, as a GPU ping-pongs two buffers. Empty between two steps.
+public record struct NextFluid(byte Level);
+
 // A tag on a chunk whose water may still move: WaterFlowSystem visits only these. A chunk loses it when a step changed
 // nothing, and gets it back when a block is dug in it or the water of a neighbour changed.
 public struct Flowing : IComponent;
 
 // ---- Everything that moves: players, zombies, dropped items ----
 
-// The feet of a player or a zombie, the center of an item. ITracked: replication sends only what moved.
+// The feet of a player or a zombie, the bottom of an item. ITracked: replication sends only what moved.
 public record struct Position(Vector3 Value) : IComponent, ITracked;
 
 // Blocks per tick.
@@ -67,8 +80,9 @@ public record struct Vision(float Range) : IComponent;
 
 // The chunk an entity that moves is in: players, zombies and items. An index of them by chunk
 // (world.InChunkIndex.Find(chunk)), the grid through which players and zombies see who is near. GridSystem keeps it
-// current.
-public record struct InChunk(ChunkPos Pos) : IComponent, IIndexed<ChunkPos>
+// current and writes it only when the entity crosses into another chunk; ITracked, so ChunkViewSystem visits only the
+// players that crossed.
+public record struct InChunk(ChunkPos Pos) : IComponent, IIndexed<ChunkPos>, ITracked
 {
     ChunkPos IIndexed<ChunkPos>.Key => Pos;
 }
@@ -93,8 +107,8 @@ public record struct Seen(EntityId Entity) : IComparable<Seen>
         Entity.Index != other.Entity.Index ? Entity.Index.CompareTo(other.Entity.Index) : Entity.Version.CompareTo(other.Entity.Version);
 }
 
-// One chunk a player's client has: a DynamicBuffer<InView> on the player, the chunks of its view at the last load
-// pass. A chunk that comes into view is sent whole; one that leaves it is forgotten by the client.
+// One chunk a player's client has: a DynamicBuffer<InView> on the player, the loaded chunks of its view. A chunk that
+// comes into view is sent whole; one that leaves it is forgotten by the client.
 public record struct InView(ChunkPos Chunk);
 
 // What the client asked for this tick: a direction to walk in (x, z) and a dig of the block underfoot.
