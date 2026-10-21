@@ -33,8 +33,18 @@ Fifty bots play for a minute of game time, a day and a night twice. Read [GameLo
   chunks that were created, dug or flooded and the bodies that moved since the last tick. `PhysicsSystem` writes the
   position through a `Mut<Position>` with `SetIfChanged`, so a player standing still is not sent. What was destroyed
   comes from the destroy log (`WorldOptions.DestroyLogCapacity`, `world.DestroyedSince`).
-- **Threads where rows are independent.** The bots, the walk and the sunburn touch only their own row:
-  `[ForEach(Parallel = true)]` splits them across threads, with the same result on every run.
+- **A tick in three groups.** `ClientInput`, `Simulation` and `Replication` are system groups
+  (`[UpdateInGroup<T>]`); the host runs each with `world.Update<TGroup>()`, so each part could run at its own rate.
+- **Threads where rows are independent.** The bots and the walk touch only their own row and no `World`:
+  `[ForEach(Parallel = true)]` splits them across threads, with the same result on every run. Physics, water and
+  sight look blocks and players up through the world's indexes, so they stay on one thread.
+- **SIMD where the data is a column.** `SunburnSystem` is a batch method: it gets the health of a run of zombies as
+  one `Span<Health>` and takes a point from 8 of them per instruction with `Vector<int>`. The other systems look
+  something up per entity (a block, a cell of water, a player in a chunk), which no vector does.
+- **One method for several kinds.** `SendEntitiesSystem` reads the health bar through `Maybe<Health>`: players and
+  zombies have one, dropped items do not, and one method sends all three.
+- **A scoreboard that stays sorted.** `Score` is `IIndexed<int>`: `world.ScoreIndex.Descending()` walks the players
+  from the best digger down, kept in order as `DigSystem` writes the scores, never sorted.
 - **Save on stop.** The world is saved without its prefabs (`SaveWithout`), and a restarted world builds its prefabs
   and loads the save beside them (`LoadKeeping`).
 - **Measured.** `WorldOptions.MeasureSystems` times every system; the run prints the average tick against the 50 ms
@@ -44,7 +54,8 @@ Fifty bots play for a minute of game time, a day and a night twice. Read [GameLo
 
 | File | What it holds |
 |---|---|
-| [Components.cs](Components.cs) | blocks and chunks, water, bodies, players with their `Input` and inventory, zombies, items, the `Clock`, `Prefabs` and `Stats` singletons |
+| [Components.cs](Components.cs) | blocks and chunks, water, bodies, players with their `Input`, `Score` and inventory, zombies, items, the `Clock`, `Prefabs` and `Stats` singletons |
+| [Groups.cs](Groups.cs) | the three parts of a tick: `ClientInput`, `Simulation`, `Replication` |
 | [Rules.cs](Rules.cs) | the numbers of the game (ticks, speeds, damage, water) and the spawn points |
 | [Terrain.cs](Terrain.cs) | chunk coordinates, terrain generation, `BlockAt`, pouring water into a block |
 | [Systems/Chunks.cs](Systems/Chunks.cs) | `ChunkLoadSystem`, `ChunkUnloadSystem` |
@@ -53,8 +64,8 @@ Fifty bots play for a minute of game time, a day and a night twice. Read [GameLo
 | [Systems/Items.cs](Systems/Items.cs) | `DigSystem`, `PickupSystem`, `ItemExpirySystem` |
 | [Systems/Zombies.cs](Systems/Zombies.cs) | `NightSpawnSystem`, `ZombieSightSystem`, `ZombieChaseSystem`, `SunburnSystem` |
 | [Systems/Health.cs](Systems/Health.cs) | `ZombieDeathSystem`, `PlayerRespawnSystem` |
-| [Systems/Replication.cs](Systems/Replication.cs) | `SendChunksSystem`, `SendPositionsSystem`, `SendDespawnsSystem`, `ClockSystem` |
-| [Program.cs](Program.cs) | the world and its options, the prefabs, the systems in tick order, the players, the save on stop |
+| [Systems/Replication.cs](Systems/Replication.cs) | `SendChunksSystem`, `SendEntitiesSystem`, `SendDespawnsSystem`, `ClockSystem` |
+| [Program.cs](Program.cs) | the world and its options, the prefabs, the systems in tick order, the players, the top diggers, the save on stop |
 | [Host/](Host) | plumbing that is not the ECS lesson: the bots that stand in for clients, the tick loop and its report, options |
 
 ## Run it
@@ -79,7 +90,8 @@ chunks: 232 loaded, 62 unloaded, 25227 sent
 blocks dug: 638; items: 638 picked up, 0 expired
 zombies: 300 spawned, 150 burned, 361 hits; player deaths: 39
 water: 7625 cells poured, 5005 ticks of humanoids carried
-sent: 2501294 position updates, 3701 despawns
+sent: 2501294 entity updates (43967 KiB), 3701 despawns
+top diggers: player 6 (22) player 24 (21) player 22 (21)
 restarted from the save: 50 players, 170 chunks, 4774 water, 150 zombies
 ```
 
@@ -88,6 +100,6 @@ or many. The chunks grow as the bots walk out and shrink behind them, and the wa
 player rise each night and are gone a second after sunrise.
 
 stderr gets the timings, which depend on the machine: the average tick against the 50 ms budget, each system's
-average run and its allocations, and the size of the save. The allocations are the chunks' blocks (8 KB a chunk, more
-than the buffer pool keeps) and the tables and indexes growing to their peak. On a 4-core VM, 50 players take about
+average run and its allocations, and the size of the save. The allocations are the blocks of the chunks loaded while no
+unloaded chunk had a list to give back (8 KB a chunk) and the tables and indexes growing to their peak. On a 4-core VM, 50 players take about
 0.45 ms a tick, and 5,000 players with 15,000 zombies and 37,000 blocks of water about 4 ms.
