@@ -66,6 +66,14 @@ public sealed partial class EasyEcsAnalyzer
         "interface and its explicit Key, which no ToString() prints and no caller reaches by mistake. A computed key stays " +
         "hand-written.", helpLinkUri: Help("EECS067"));
 
+    public static readonly DiagnosticDescriptor BadSetup = new("EECS068", "A world setup attribute on a type it does not fit",
+        "[{0}] on '{1}': '{1}' {2}",
+        Category, DiagnosticSeverity.Error, true,
+        "[GroupBy] makes every world group its tables by a grouped component (IGroup, or a member declared with [Group]); " +
+        "[WhenTargetDestroyed] sets what destroying an entity does to the links to it, so it goes on a relation " +
+        "(IRelation) or a component indexed by an EntityId. On any other type no world would apply it.",
+        helpLinkUri: Help("EECS068"));
+
     // EECS065 / EECS066's properties for their code fixes: the attribute of each field (name=Op;...), and the Identity
     // that fits the Combine.
     public const string ReductionOps = "Ops", FixedIdentity = "Identity";
@@ -144,6 +152,19 @@ public sealed partial class EasyEcsAnalyzer
         context.ReportDiagnostic(Diagnostic.Create(AttributeKey, syntax.Identifier.GetLocation(),
             ImmutableDictionary<string, string?>.Empty.Add(KeyMember, member), type.Name,
             member == "this" ? "the value itself" : $"'{member}'", attribute, member == "this" ? "the type" : $"'{member}'"));
+    }
+
+    /// <summary>EECS068: [GroupBy] / [WhenTargetDestroyed] on a type that cannot take it (<see cref="Symbols.SetupProblem"/>).</summary>
+    private static void AnalyzeSetup(SymbolAnalysisContext context, INamedTypeSymbol type)
+    {
+        foreach (var attribute in type.GetAttributes())
+        {
+            if (!Symbols.Named(attribute.AttributeClass, Symbols.GroupByAttribute) && !Symbols.Named(attribute.AttributeClass, Symbols.WhenTargetDestroyedAttribute)
+                || Symbols.SetupProblem(type, attribute) is not { } problem)
+                continue;
+            var location = attribute.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken).GetLocation() ?? type.Locations.FirstOrDefault();
+            context.ReportDiagnostic(Diagnostic.Create(BadSetup, location, attribute.AttributeClass!.Name.Replace("Attribute", ""), type.Name, problem));
+        }
     }
 
     /// <summary>What the generator writes into the type, for EECS062's message.</summary>

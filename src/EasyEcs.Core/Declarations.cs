@@ -80,3 +80,25 @@ public sealed class UniqueKeyAttribute : Attribute;
 /// </summary>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
 public sealed class GroupAttribute : Attribute;
+
+/// <summary>
+/// What destroying an entity does to the links to it, in every world (<see cref="TargetPolicy"/>): on a relation
+/// (<see cref="IRelation"/>) or a component indexed by an <see cref="EntityId"/>. A world holds the rule from its first
+/// table holding the component (or the creation of its index), so the first destroy follows it; a world's own
+/// <c>WhenTargetDestroyed</c> call on the index replaces it.
+/// </summary>
+/// <param name="policy">The policy every world starts with.</param>
+[AttributeUsage(AttributeTargets.Struct)]
+public sealed class WhenTargetDestroyedAttribute(TargetPolicy policy) : Attribute
+{
+    /// <summary>The policy every world starts with.</summary>
+    public TargetPolicy Policy { get; } = policy;
+}
+
+/// <summary>
+/// Every world groups its tables by this <see cref="IGroup"/> component (<see cref="World.GroupBy{T}"/>), from its first
+/// table holding it: a group filter (<see cref="QueryFilter.InGroup{T}"/>) then visits that group's tables only, in
+/// every world, with no setup call to forget.
+/// </summary>
+[AttributeUsage(AttributeTargets.Struct)]
+public sealed class GroupByAttribute : Attribute;

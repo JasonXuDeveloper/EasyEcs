@@ -59,7 +59,9 @@ public sealed partial class World
         if (slot < _indexes.Length && _indexes[slot] is { } existing)
             return existing as ValueIndex<T, TKey> ?? throw OtherKey(typeof(T), existing);
         if (ComponentType<T>.Unique) Unique<T, TKey>();
-        return Register(slot, ComponentType<T>.Bit, new ValueIndex<T, TKey>(this));
+        var index = Register(slot, ComponentType<T>.Bit, new ValueIndex<T, TKey>(this));
+        if (TypeDefaults<T>.Value is { } defaults) DefaultRule(ComponentType<T>.Bit, defaults, defaults.Rule);
+        return index;
     }
 
     /// <summary>Checks the key of unique <typeparamref name="T"/> and tells every world how to index it (cold).</summary>
@@ -81,7 +83,9 @@ public sealed partial class World
     {
         int slot = TypeIndex<ValueIndexFamily, DynamicBuffer<T>>.Value;
         if (slot < _indexes.Length && _indexes[slot] is { } existing) return (RelationIndex<T>)existing;
-        return Register(slot, ComponentType<DynamicBuffer<T>>.Bit, new RelationIndex<T>(this));
+        var index = Register(slot, ComponentType<DynamicBuffer<T>>.Bit, new RelationIndex<T>(this));
+        if (TypeDefaults<DynamicBuffer<T>>.Value is { } defaults) DefaultRule(ComponentType<DynamicBuffer<T>>.Bit, defaults, defaults.Rule);
+        return index;
     }
 
     /// <summary>The relation index of <typeparamref name="T"/> if it is built (writes then update it), else null.</summary>

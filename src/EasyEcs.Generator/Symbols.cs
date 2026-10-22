@@ -34,6 +34,9 @@ internal static class Symbols
     public const string UniqueIndexed = "EasyEcs.IUniqueIndexed<TKey>";
     public const string DirectIndexed = "EasyEcs.IDirectIndexed<TKey>";
     public const string Group = "EasyEcs.IGroup";
+    public const string Relation = "EasyEcs.IRelation";
+    public const string GroupByAttribute = "EasyEcs.GroupByAttribute";
+    public const string WhenTargetDestroyedAttribute = "EasyEcs.WhenTargetDestroyedAttribute";
     public const string Cleanup = "EasyEcs.ICleanupComponent";
     public const string EntityId = "EasyEcs.EntityId";
     public const string UpdateBeforeAttribute = "EasyEcs.UpdateBeforeAttribute<TSystem>";
@@ -409,6 +412,21 @@ internal static class Symbols
     /// </summary>
     public static bool IsGrouped(ITypeSymbol type) =>
         Implements(type, Group) || type is INamedTypeSymbol named && Parts.Declares(named, Parts.Group) && Parts.Of(named) is { WritesGroup: true };
+
+    /// <summary>
+    /// Why <paramref name="type"/> cannot take the world setup <paramref name="attribute"/> declares, or null: [GroupBy]
+    /// on a grouped component (<see cref="IsGrouped"/>), [WhenTargetDestroyed] on a relation or a component indexed by
+    /// an <c>EntityId</c> (<see cref="IndexKey"/>). The generator registers only what this accepts; EECS068 reports the rest.
+    /// </summary>
+    public static string? SetupProblem(INamedTypeSymbol type, AttributeData attribute)
+    {
+        if (Named(attribute.AttributeClass, GroupByAttribute))
+            return Implements(type, Component) && IsGrouped(type) ? null
+                : "is not a grouped component: [GroupBy] splits tables by IGroup.Group (implement IGroup, or declare the member with [Group])";
+        if (Implements(type, Relation)) return null;
+        return Implements(type, Component) && IndexKey(type, out bool unique) is { } key && Named(key, EntityId) && !unique ? null
+            : "is neither a relation (IRelation) nor a component indexed by an EntityId: [WhenTargetDestroyed] decides what happens to links to a destroyed entity";
+    }
 
     /// <summary>Whether <paramref name="type"/> is <c>IEquatable</c> of itself: what an index key must be.</summary>
     public static bool IsEquatable(ITypeSymbol type)
