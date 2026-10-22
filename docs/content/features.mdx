@@ -27,7 +27,7 @@ after warm-up, and is covered by the unit tests and a BenchmarkDotNet benchmark.
 | [Find](#find) | [value indexes](#value-indexes), [unique keys](#unique-keys), [ordered ranges](#ordered-ranges), [table groups](#table-groups) |
 | [Structure](#structure) | [relations](#relations), [hierarchy](#hierarchy), [dynamic buffers](#dynamic-buffers), [prefabs and cloning](#prefabs-and-cloning) |
 | [Persist](#persist) | [snapshots](#snapshots), [saves](#saves), [migration](#migration), [unloading plugin types](#unloading) |
-| [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), parallel [`[ForEach]`](#parallel-foreach), [bulk operations](#bulk-operations) |
+| [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), parallel [`[ForEach]`](#parallel-foreach), [reductions](#reductions), [bulk operations](#bulk-operations) |
 | [Build and operate](#operate) | [analyzer and code fixes](#analyzer), [per-system timing](#per-system-timing), [the schedule](#schedule), [errors](#errors), [introspection](#introspection), [giving memory back](#trim-excess), [Native AOT](#native-aot), [hosting and testing](#hosting-and-testing), [templates and samples](#templates) |
 
 ## Simulate [#simulate]
@@ -130,23 +130,28 @@ then gives each actor type its own filtered group, where an attribute could not 
 ### Optional components [#optional-components]
 
 A `Maybe<T>` parameter visits every entity whether or not it has `T`: `HasValue` says which, `Value` is the `ref`.
-One method replaces a `[With<T>]` and a `[Without<T>]` variant when the optional part is small.
+One method replaces a `[With<T>]` and a `[Without<T>]` variant when the optional part is small. A
+`ReadOnlyMaybe<T>` is the read-only one: never stamped, scheduled as a read, and the only optional parameter an
+indexed component accepts.
 
 - **Use it for:** a bonus that only some entities have (armor on a damage roll, a buff on regeneration).
 - **Skip it for:** the hottest loops: two methods with `[With<T>]` / `[Without<T>]` test nothing per row.
 - **Cost:** one presence-bit test per row in a method that makes no structural change; a lookup per entity in one
   that does.
-- **Guide:** [Systems](/en/docs/guide/systems)
+- **Guide:** [Systems](/en/docs/guide/systems#maybe), [`ReadOnlyMaybe<T>`](/en/docs/guide/systems#read-only-maybe)
 
-### Vector loops [#vector-loops]
+### Vector loops the generator writes (SIMD) [#vector-loops]
 
-A per-row `[ForEach]` method whose components each hold one number of one type (`float`, `int`, ...) runs as a
-`Vector<T>` loop the generator writes from its body, the way Burst compiles a job: `if` and `?:` become masks,
-singletons and constants are copied to every lane, and the results are those of the per-row method bit for bit.
+A per-row `[ForEach]` method whose components hold 1 to 4 numbers of one type (`float`, `int`, ...;
+`Position { X, Y, Z }` too) runs as a `Vector<T>` loop the generator writes from its body, the way Burst compiles a
+job: `if` and `?:` become masks, singletons and constants are copied to every lane, several fields are split into
+one vector each, and the results are those of the per-row method bit for bit.
 
 - **Use it for:** arithmetic over many rows: decay, integration, clamps, counters.
-- **Skip it for:** nothing: it is automatic. A method that does not qualify (a `Vector3` component, a call, `Parallel`)
-  runs row by row as before.
+- **Skip it for:** nothing: it is automatic. A method that does not qualify (a `Vector3` field, two number types, a
+  call, `Parallel`) runs row by row as before, and [EECS055](/en/docs/guide/analyzer#eecs055) names why;
+  `Simd = SimdMode.Require` makes that a build error ([EECS056](/en/docs/guide/analyzer#eecs056)), `SimdMode.Off`
+  silences it.
 - **Cost:** none at run time; the loop is written at compile time.
 - **Guide:** [Systems](/en/docs/guide/systems#vector-loops)
 
@@ -174,7 +179,7 @@ takes it as a `ref` or `in` parameter; `SingletonRef<T>` is a stable handle for 
 
 Systems run in registration order, moved by `[UpdateBefore<T>]` / `[UpdateAfter<T>]`. `[UpdateInGroup<G>]` puts a
 system in a group that runs on `world.Update<G>()` only. `UpdateInterval` and `UpdatePhase` run a system every N-th
-update, spread over phases; `Enabled` switches it off. A group's filters (`[Without<Frozen>]`, or `ISystemGroupWith<T>` /
+update, spread over phases (`world.UpdateCount<G>()` is the count); `Enabled` switches it off. A group's filters (`[Without<Frozen>]`, or `ISystemGroupWith<T>` /
 `ISystemGroupWithout<T>` on the group or an interface it implements) apply to every `[ForEach]` method of its systems.
 
 - **Use it for:** different cadences: input on every wake-up, simulation on a fixed tick, saving every few seconds;
@@ -215,7 +220,7 @@ most once: entities that leave before their turn are skipped, entities that join
 ### Ad-hoc queries [#ad-hoc-queries]
 
 Iteration from any code: `foreach (var item in world.Query<T…>(filter))`, struct jobs (`world.ForEach`,
-`ForEachEntity`), `world.Count` and `world.Any`. A static `[ForEach]` method outside a system gets a generated entry
+`ForEachEntity`), `world.Count`, `world.Any`, and `world.CollectIds` for a bounded batch of matching ids. A static `[ForEach]` method outside a system gets a generated entry
 point (`Reports.CountAlive(world, ref alive)`) that runs it as a struct job with the caller's values.
 `entity.Run<Health, TakeHit>(ref job, filter)` runs a struct job on one entity, with the refs a pass would give it:
 `false` when the entity is not alive, lacks a component or fails the filter. A job's `static int WriteMask` names the
@@ -370,7 +375,10 @@ holds (`Set`, create, `Instantiate`, `Clone`, `SetAll`, `Enable`, loads and move
 - **Skip it for:** `EntityId` keys ([EECS036](/en/docs/guide/analyzer#eecs036)); keys several entities share (a plain
   `IIndexed<TKey>`).
 - **Cost:** the index exists from the first table holding the component, so every write is checked: one hash probe
-  per changed key, an extra pass over the rows for the bulk calls and loads. `Get` and `TryGet` are a hash probe.
+  per changed key, an extra pass over the rows for the bulk calls and loads. `Get` and `TryGet` are a hash probe
+  that reads the key's record alone: a unique key holds its entity inline, with no array per key. A key that maps
+  onto bounded slots (`IDirectIndexed<TKey>`: grid cells, small ids) is found by one array entry instead
+  ([direct-mapped keys](/en/docs/guide/indexes-and-relations#direct-index)).
 - **Guide:** [Indexes and relations](/en/docs/guide/indexes-and-relations)
 
 ### Ordered ranges [#ordered-ranges]
@@ -455,8 +463,10 @@ write through `in` does not compile. Snapshots copy the elements.
 - **Skip it for:** items with their own state (one entity per item with a relation) or a small fixed set (an
   `[InlineArray]` in an unmanaged component).
 - **Cost:** one object and one array per entity, made by the first write; writes within the capacity allocate
-  nothing.
-- **Guide:** [Dynamic buffers](/en/docs/guide/dynamic-buffers), [ECS principles, rule 8](/en/docs/ecs-principles#8-choose-how-to-hold-a-collection)
+  nothing. A dead buffer's list goes to a pool the next buffer of its type takes it from, on any thread:
+  `PoolCapacity` sets the longest list kept and `ReservePool(n)` fills the pool at start-up. `SetCount(n)` returns
+  the span to write a whole buffer in place.
+- **Guide:** [Dynamic buffers](/en/docs/guide/dynamic-buffers), [the buffer pool](/en/docs/guide/dynamic-buffers#pool), [ECS principles, rule 8](/en/docs/ecs-principles#8-choose-how-to-hold-a-collection)
 
 ### Prefabs and cloning [#prefabs-and-cloning]
 
@@ -523,7 +533,8 @@ bytes, with new ids and the links inside the group rewritten. `MoveEntities` doe
 thread without encoding. A record saves only what persists: `SaveEntitiesWith(writer, ids, set)` with a `ComponentSet`
 writes the components of the set, and `LoadEntitiesInto(bytes, entities)` puts them onto entities that exist already;
 with `markWritten: false` the restored values do not count as changed, so a saver of changed rows does not write them
-straight back.
+straight back. `SaveEntitiesWithout(writer, ids, set)` is the other way round: everything but the set, for the data a
+load computes again.
 
 - **Use it for:** a player changing zone or server, a match handing its survivors to a lobby (collect the group with
   `Descendants`); records for actors whose entity exists before its stored state arrives.
@@ -574,11 +585,31 @@ at once. The analyzer rejects methods that could race ([EECS010](/en/docs/guide/
 changes, batch methods, singletons taken by `ref`. `world.ForEachParallel` and `ForEachEntityParallel` do the same
 for struct jobs.
 
-- **Use it for:** heavy per-entity work over tens of thousands of entities: steering, path following, AI scoring.
-- **Cost:** chunks of 1,024 to 16,384 rows, about four per thread, allocation-free. A method that writes a tracked
-  component cuts at multiples of 4,096 rows (the blocks its change summaries cover), so a table needs more rows
-  before it is split.
-- **Guide:** [Threading](/en/docs/guide/threading)
+- **Use it for:** heavy per-entity work over tens of thousands of entities: steering, path following, AI scoring;
+  with `ChunkRows = n`, a few hundred rows that cost microseconds each (terrain chunks, path searches).
+- **Skip it for:** light rows over a few thousand entities: the hand-off costs more than the work.
+- **Cost:** the threads claim chunks one at a time as they finish, OpenMP's `schedule(dynamic, n)`. By default
+  chunks of 1,024 to 16,384 rows, about four per thread, allocation-free; a method that writes a tracked component
+  cuts at multiples of 4,096 rows (the blocks its change summaries cover), so a table needs more rows before it is
+  split. `ChunkRows = n` sets the chunk size (rounded up to 64; [EECS054](/en/docs/guide/analyzer#eecs054)).
+- **Guide:** [Threading](/en/docs/guide/threading), [chunk size](/en/docs/guide/threading#chunk-rows)
+
+### Totals over the rows (reductions) [#reductions]
+
+A `ref Reduce<T>` parameter turns a `[ForEach]` pass into a total: `T` is a singleton implementing `IReduction<T>`
+(`Identity`, `Combine`), each chunk of a parallel pass (or the pass on one thread) adds into its own partial result,
+and the partial results, combined in row order, replace `T` when the pass ends: OpenMP's `reduction`, MPI's
+`Allreduce`.
+
+- **Use it for:** the units alive, a resource's total, a crowd's extent: one result per pass over many rows.
+- **Skip it for:** results per entity (a component of the row), and totals a few rows change per tick (update them
+  where the rows change).
+- **Cost:** a write into the chunk's own struct per row, no lock or atomic; one job copy per chunk, combined once;
+  0 bytes after the first pass. Integers are exact; a float result is the same on any thread count for a fixed
+  `ChunkRows`. [EECS057](/en/docs/guide/analyzer#eecs057) rejects a second write of `T`;
+  [EECS060](/en/docs/guide/analyzer#eecs060) and [EECS061](/en/docs/guide/analyzer#eecs061) report the shared
+  counters and job fields it replaces.
+- **Guide:** [Threading](/en/docs/guide/threading#reductions)
 
 ### Bulk operations [#bulk-operations]
 
@@ -596,7 +627,7 @@ What keeps a code base correct as it grows, and a server observable while it run
 
 ### Analyzer and code fixes [#analyzer]
 
-The package bundles an analyzer (EECS002 to EECS056) and code fixes next to the generator. Invalid `[ForEach]`
+The package bundles an analyzer (EECS002 to EECS061) and code fixes next to the generator. Invalid `[ForEach]`
 methods, class components, stateful systems, systems that reference systems, writes through `in`, unsafe parallel
 methods, off-thread structural changes, indexed components written through a `ref` and ordering cycles fail the
 build; a few warnings flag code that works but costs.

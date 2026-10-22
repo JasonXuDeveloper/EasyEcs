@@ -70,7 +70,7 @@ From each package's public API and the comparison ports, which compile against t
 | Systems, ordering, groups | ✅ `EcsSystem`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`, `ISystemGroup`, `UpdateInterval` | ✅ `SystemRoot`, `SystemGroup`, `QuerySystem` | ❌ in core (Arch.Extended) | ✅ `ISystem<T>`, `SequentialSystem`, `AEntitySetSystem` |
 | Source-generated systems | ✅ `[ForEach]` → inlined struct jobs | ❌ | ❌ in core | ❌ |
 | Generated named API per component | ✅ `e.Position`, `HasX`, `SetX(...)`, `IsDead`, `world.Battle` | ❌ | ❌ | ❌ |
-| Compile-time analyzer | ✅ EECS002-EECS053, with code fixes | ❌ | ❌ | ❌ |
+| Compile-time analyzer | ✅ EECS002-EECS061, with code fixes | ❌ | ❌ | ❌ |
 | Chunk / span iteration | ✅ batch `[ForEach]` methods, `ForEachBatch` | ✅ `Chunks` | ✅ chunks | ✅ `ReadOnlySpan<Entity>` per system |
 | Struct query jobs | ✅ `IForEach`, `IForEachEntity`, `IForEachBatch` | ✅ | ✅ `IForEach`, `InlineQuery` | – |
 | Bulk changes | ✅ `SetAll`, `RemoveAll`, `DisableAll`, `EnableAll` | ✅ `EntityBatch`, `ApplyBatch` | ✅ add / remove by query | ❌ |
@@ -85,7 +85,7 @@ From each package's public API and the comparison ports, which compile against t
 | Hierarchy | ✅ `ChildOf`, `Children`, cascading destroy | ✅ `AddChild`, `ChildEntities` | ❌ | ❌ |
 | Disable a component, keep its value | ✅ `Disable<T>()` / `Enable<T>()` | ⚠️ whole entity (`Enabled`) | ❌ | ⚠️ whole entity, or a component (`Disable<T>()`) |
 | Parallel systems | ✅ conflict-free stages from generated access | ❌ | ❌ | ✅ `ParallelSystem<T>` (you keep them independent) |
-| Parallel query | ✅ `[ForEach(Parallel = true)]`, analyzer-checked | ✅ `QueryJob`, `ParallelJobRunner` | ✅ `InlineParallelQuery`, `JobScheduler` | ✅ `DefaultParallelRunner` |
+| Parallel query | ✅ `[ForEach(Parallel = true)]`, analyzer-checked, chunks claimed dynamically (`ChunkRows`) | ✅ `QueryJob`, `ParallelJobRunner` | ✅ `InlineParallelQuery`, `JobScheduler` | ✅ `DefaultParallelRunner` |
 | Snapshots in memory | ✅ `Capture` / `Restore` | ❌ | ❌ | ❌ |
 | Saves | ✅ binary `Save` / `Load` (Nino) | ✅ JSON | ❌ in core (Arch.Persistence) | ✅ text and binary |
 | Move entities to another world | ✅ `MoveEntities`, `SaveEntities` / `LoadEntities` | ✅ `CopyEntity` | ❌ | ✅ `CopyTo(world)` |

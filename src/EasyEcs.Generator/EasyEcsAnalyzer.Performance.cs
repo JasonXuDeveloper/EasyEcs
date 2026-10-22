@@ -520,7 +520,9 @@ public sealed partial class EasyEcsAnalyzer
     /// </summary>
     private static void AnalyzeLookups(OperationBlockAnalysisContext context, Core core, IMethodSymbol method, IOperation body)
     {
-        foreach (var (operation, type, singleton, presence) in RowLookups(core, method, body))
+        var all = new List<(IOperation Operation, ITypeSymbol Type, bool Singleton, bool Presence)>();
+        var fixedTypes = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
+        foreach (var (operation, type, singleton, presence) in RowLookups(core, method, body, all))
         {
             string name = type.ToMinimalDisplayString(operation.SemanticModel!, operation.Syntax.SpanStart);
             bool job = !Symbols.IsForEach(method);
@@ -529,10 +531,72 @@ public sealed partial class EasyEcsAnalyzer
                 : presence ? $"take a {(Symbols.IsIndexed(type) ? "ReadOnlyMaybe" : "Maybe")}<{name}> parameter, or split the method with [With<{name}>] / [Without<{name}>]"
                 : Symbols.IsIndexed(type) ? $"take it as an 'in {name}' parameter, or a ReadOnlyMaybe<{name}> when some entities lack it"
                 : $"take it as a parameter ('in {name}' or 'ref {name}'), or a Maybe<{name}> when some entities lack it";
-            context.ReportDiagnostic(Diagnostic.Create(RowLookup, operation.Syntax.GetLocation(),
+            // The fix goes on the first lookup of each type: it replaces every lookup of the type at once.
+            var fix = !job && !presence && fixedTypes.Add(type) ? ParameterFix(method, body, type, singleton, all, context.CancellationToken) : null;
+            context.ReportDiagnostic(Diagnostic.Create(RowLookup, operation.Syntax.GetLocation(), fix?.Uses ?? [], fix?.Properties,
                 job ? $"Job '{method.ContainingType.Name}'" : $"[ForEach] method '{method.Name}'", name,
                 Shorten(operation.Syntax), advice));
         }
+    }
+
+    /// <summary>
+    /// EECS027's code fix: the parameter that resolves <paramref name="type"/> once per pass (<c>in T t</c>, or
+    /// <c>ref T t</c> when a lookup may write it; an existing <c>ref</c> / <c>in</c> parameter of the type when the
+    /// method takes one), and the lookups it replaces (every one of the type: Get, Read, GetSingleton, WriteX and the
+    /// generated properties). None when a lookup of the type is a TryGet, a presence test or passes through a batch
+    /// method's entities, when the method takes the type otherwise (Maybe, Mut, a span) or excludes it, when a write
+    /// would need a 'ref' that cannot be (an indexed component, a singleton of a parallel method), when the method
+    /// already takes 9 components, or when the parameter's name is taken.
+    /// </summary>
+    private static (ImmutableDictionary<string, string?> Properties, Location[] Uses)? ParameterFix(IMethodSymbol method, IOperation body,
+        ITypeSymbol type, bool singleton, List<(IOperation Operation, ITypeSymbol Type, bool Singleton, bool Presence)> all,
+        System.Threading.CancellationToken token)
+    {
+        if (Symbols.IsBatch(method) || method.PartialDefinitionPart != null || method.PartialImplementationPart != null
+            || body.Syntax.FirstAncestorOrSelf<MethodDeclarationSyntax>() is not { } declaration || body.SemanticModel is not { } model
+            || Excluded(method, token).Contains(type)) return null;
+        var uses = new List<IOperation>();
+        bool writes = false;
+        foreach (var (operation, lookupType, _, presence) in all)
+        {
+            if (!SymbolEqualityComparer.Default.Equals(lookupType, type)) continue;
+            bool replaceable = !presence && operation switch
+            {
+                IInvocationOperation { TargetMethod: var called } => called.Name is "Get" or "Read" or "GetSingleton" || called.Name.StartsWith("Write"),
+                IPropertyReferenceOperation => true,
+                _ => false,
+            };
+            if (!replaceable || operation.Syntax is not ExpressionSyntax) return null;
+            uses.Add(operation);
+            writes |= Uses.MayWrite(operation);
+        }
+
+        if (uses.Count == 0 || writes && (Symbols.IsIndexed(type) || singleton && Symbols.IsParallel(method))) return null;
+        string? name = null, parameter = null;
+        foreach (var p in method.Parameters)
+        {
+            var kind = Symbols.Classify(p);
+            if (!SymbolEqualityComparer.Default.Equals(kind is Symbols.ParamKind.Singleton ? p.Type : Symbols.QueriedComponent(p) ?? Symbols.MaybeElement(p.Type), type)) continue;
+            if (kind is not (Symbols.ParamKind.Component or Symbols.ParamKind.Singleton) || writes && p.RefKind != RefKind.Ref) return null;
+            name = p.Name;
+        }
+
+        if (name == null)
+        {
+            int components = method.Parameters.Count(p => Symbols.Classify(p) is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan
+                or Symbols.ParamKind.Mutable or Symbols.ParamKind.Optional);
+            if (!singleton && components >= Symbols.MaxComponents) return null;
+            name = char.ToLowerInvariant(type.Name[0]) + type.Name.Substring(1);
+            // Taken anywhere in the method (a parameter, a local, a lambda's), or by a member or type it sees: no fix.
+            if (SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None || SyntaxFacts.GetContextualKeywordKind(name) != SyntaxKind.None
+                || declaration.DescendantTokens().Any(t => t.IsKind(SyntaxKind.IdentifierToken) && t.ValueText == name)
+                || !model.LookupSymbols(declaration.SpanStart, name: name).IsEmpty) return null;
+            parameter = (writes ? "ref " : "in ") + type.ToMinimalDisplayString(model, declaration.SpanStart) + " " + name;
+        }
+
+        var properties = ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Parameter").Add("Name", name);
+        if (parameter != null) properties = properties.Add("Parameter", parameter);
+        return (properties, uses.Select(u => u.Syntax.GetLocation()).ToArray());
     }
 
     /// <summary>
@@ -540,7 +604,9 @@ public sealed partial class EasyEcsAnalyzer
     /// components through its Entity, singletons through the World, on every row, of a type the method neither changes
     /// through the entity nor indexes.
     /// </summary>
-    private static List<(IOperation Operation, ITypeSymbol Type, bool Singleton, bool Presence)> RowLookups(Core core, IMethodSymbol method, IOperation body)
+    /// <param name="all">Receives every lookup of a type the method does not change through the entity, on every row or not.</param>
+    private static List<(IOperation Operation, ITypeSymbol Type, bool Singleton, bool Presence)> RowLookups(Core core, IMethodSymbol method, IOperation body,
+        List<(IOperation Operation, ITypeSymbol Type, bool Singleton, bool Presence)>? all = null)
     {
         var found = new List<(IOperation, ITypeSymbol, bool, bool)>();
         var entities = method.Parameters.Where(p => Symbols.Classify(p) is Symbols.ParamKind.Entity or Symbols.ParamKind.Entities).ToArray();
@@ -582,8 +648,12 @@ public sealed partial class EasyEcsAnalyzer
         // Changed through the entity in the same method, or looked up only on some rows: a branch, a loop, after an early
         // return. An indexed component is read through 'in' or a ReadOnlyMaybe (a Maybe of it would be a write: EECS015).
         foreach (var lookup in lookups)
-            if (!changed.Contains(lookup.Type) && EveryRow(lookup.Operation, body))
-                found.Add(lookup);
+        {
+            if (changed.Contains(lookup.Type)) continue;
+            all?.Add(lookup);
+            if (EveryRow(lookup.Operation, body)) found.Add(lookup);
+        }
+
         return found;
     }
 

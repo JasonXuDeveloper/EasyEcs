@@ -17,6 +17,19 @@ public sealed partial class World
     /// <summary>Number of completed <see cref="Update()"/> calls: updates of the default group only (<see cref="Update{TGroup}"/> runs are not counted).</summary>
     public long DefaultUpdateCount => _groups[0].Updates;
 
+    /// <summary>
+    /// Number of <see cref="Update{TGroup}"/> calls of group <typeparamref name="TGroup"/> so far, the one running
+    /// included (0 before the first, and for a group no system was ever added to): the count an <see cref="EcsSystem.UpdateInterval"/>
+    /// of the group's systems is taken from (a system runs when it modulo the interval is its
+    /// <see cref="EcsSystem.UpdatePhase"/>). O(1).
+    /// </summary>
+    public long UpdateCount<TGroup>() where TGroup : struct, ISystemGroup
+    {
+        var groups = _groups;
+        int index = SystemGroup<TGroup>.Index;
+        return index < groups.Length && groups[index] is { } group ? group.Updates : 0;
+    }
+
     /// <summary>Systems of every group, each group in execution order (default group first). Allocation-free.</summary>
     public SystemList Systems => new(_groups);
 

@@ -127,7 +127,8 @@ two systems.
 ## The data [#data]
 
 The components, one file per part of the world. Comments say what each value means and who writes it. A chunk is an
-entity: its `Chunk` key is a [unique index](/en/docs/guide/indexes-and-relations#unique-keys) (`world.ChunkIndex`),
+entity: its `Chunk` key is a [direct-indexed](/en/docs/guide/indexes-and-relations#direct-index) unique key
+(`world.ChunkIndex`, a chunk's slot its position modulo 64, so a lookup reads one array entry),
 its 8,192 blocks and their water two byte buffers, and the water passes keep their own data on it (`Border`,
 `Reach`, `NextFluid`, `FluidStep`).
 
@@ -169,9 +170,11 @@ stateDiagram-v2
 
 Each step is one system and each state is data. The chunks a player needs are asked for by
 [`AoiViewSystem`](#aoi) as `LoadRequest` entities, one per chunk: the request is `IUniqueIndexed`, so a second player
-asking finds it and asks nothing more. A pass may not load or create entities (EECS041), so `ChunkReadSystem` and
-`ChunkGenerateSystem` serve the requests in their `OnUpdate`, after the pass, up to `Rules.MaxRequests` a tick,
-destroying only those they served; the others wait a tick. A chunk that was unloaded comes back from the region files
+asking finds it and asks nothing more. A request is created with the `Saved` tag, which it loses when the region
+files lack its chunk: a presence bit, so all requests share one table and keep the order they came in. A pass may
+not load or create entities (EECS041), so `ChunkReadSystem` (`With<Saved>`) and `ChunkGenerateSystem`
+(`Without<Saved>`) serve the requests in their `OnUpdate`, after the pass: each takes up to `Rules.MaxRequests` a
+tick with [`CollectIds`](/en/docs/guide/queries#collect-ids) and destroys only those; the others wait a tick. A chunk that was unloaded comes back from the region files
 with `LoadEntities`, and with it the zombies and items that were in it. A chunk never seen is an instance of the chunk
 prefab, its blocks written in place through the span `SetCount` returns.
 
@@ -214,7 +217,7 @@ Who sees a chunk is counted, never searched: every player sees `Rules.PlayerVisi
 are the view centers in the square around it, and `ViewCenter` is indexed, so `world.ViewCenterIndex.Count(chunk)`
 counts the players centered on a chunk in O(1). An entity that stays in its chunk and a player who does cost nothing
 here, however many ticks go by. A player that just appeared has no `ViewCenter` yet:
-[`ReadOnlyMaybe<ViewCenter>`](/en/docs/guide/systems#maybe) reads it where it is, and, unlike `Maybe<T>`, can only read,
+[`ReadOnlyMaybe<ViewCenter>`](/en/docs/guide/systems#read-only-maybe) reads it where it is, and, unlike `Maybe<T>`, can only read,
 so the indexed component is never stamped.
 
 <include lang="csharp" meta='title="Systems/Aoi.cs"'>../../../samples/VoxelServer/Systems/Aoi.cs#aoi</include>
@@ -298,6 +301,11 @@ the chunks beside the edges that changed.
 <include lang="csharp" meta='tab="Water/Sleep.cs"'>../../../samples/VoxelServer/Systems/Water/Sleep.cs</include>
 
 <include lang="csharp" meta='tab="Water/Commit.cs"'>../../../samples/VoxelServer/Systems/Water/Commit.cs</include>
+
+{/* TODO(water overlap): the planned push-halo design (a chunk hands its edges to its neighbours when they change,
+instead of each flowing chunk gathering them every step) and the MPI-style interior/ring overlap go here, with the
+Border / Flow changes; then guide/high-performance#grid. Copying only the changed edges was measured and dropped
+(decisions#d73-survey-items-not-added). */}
 
 `FloatSystem` lifts whatever stands in water, players, zombies and items, and pushes it along the slope of the water
 toward the lower water around it, weaker the lower the water: full next to the spring or under falling water, an

@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Collections.Generic;
 using NUnit.Framework;
 
@@ -776,6 +777,182 @@ public class IndexTests
         int result = Churn();
         Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
         Assert.That(result, Is.EqualTo(players.Length));
+    }
+
+    [Test]
+    public void UniqueKeysHoldTheirEntityThroughEveryWritePath()
+    {
+        // A unique key's head holds its one entity inline: every write path must leave each key with the right entity
+        // and every freed key with none.
+        using var world = new World();
+        var players = new Entity[8];
+        for (int i = 0; i < players.Length; i++) players[i] = world.CreateEntity(new Login(i), new Health(i));
+        var accounts = world.LoginIndex;
+
+        void Expect(World w, params (int Key, Entity Holder)[] held)
+        {
+            var index = w.LoginIndex;
+            Assert.That(index.KeyCount, Is.EqualTo(held.Length));
+            var ascending = new System.Collections.Generic.List<int>();
+            foreach (var entity in index.Ascending()) ascending.Add(entity.Read<Login>().Id);
+            var keys = new int[held.Length];
+            for (int i = 0; i < held.Length; i++)
+            {
+                var (key, holder) = held[i];
+                keys[i] = key;
+                Assert.That(index.Get(key), Is.EqualTo(holder), $"key {key}");
+                Assert.That(index.TryGet(key, out var found) && found == holder, Is.True);
+                Assert.That(All(index.Find(key)), Is.EqualTo(new[] { holder }));
+                Assert.That(index.Count(key), Is.EqualTo(1));
+                Assert.That(holder.Read<Login>().Id, Is.EqualTo(key));
+            }
+
+            System.Array.Sort(keys);
+            Assert.That(ascending, Is.EqualTo(keys));
+            foreach (int gone in new[] { -1, 100, 101 })
+            {
+                Assert.That(index.TryGet(gone, out _), Is.False);
+                Assert.That((index.Count(gone), All(index.Find(gone)).Count), Is.EqualTo((0, 0)));
+            }
+        }
+
+        players[0].Set(new Login(100));                            // Set: the key moves, the old one is freed
+        players[0].Set(new Login(0));
+        players[1].Remove<Login>();                                // Remove
+        players[2].Destroy();                                      // Destroy
+        Assert.That(players[3].Disable<Login>(), Is.True);         // Disable / Enable
+        players[3].Enable<Login>();
+        world.CreateEntity(new Login(1)).Destroy();                // a freed key taken and freed again
+        var holders = new[] { (0, players[0]), (3, players[3]), (4, players[4]), (5, players[5]), (6, players[6]), (7, players[7]) };
+        Expect(world, holders);
+
+        var snapshot = world.Capture();                            // Snapshots
+        players[4].Set(new Login(101));
+        players[5].Destroy();
+        world.Restore(snapshot);
+        Expect(world, holders);
+
+        var save = Save(world);                                    // Save / Load
+        using var loaded = new World();
+        loaded.Load(save);
+        var reloaded = new (int, Entity)[holders.Length];
+        for (int i = 0; i < holders.Length; i++)
+        {
+            Assert.That(loaded.TryGetEntity(holders[i].Item2.Id, out var same), Is.True);
+            reloaded[i] = (holders[i].Item1, same);
+        }
+        Expect(loaded, reloaded);
+
+        using var moved = new World();                             // MoveEntities: the keys leave one world for the other
+        Assert.That(world.MoveEntities(moved, [players[6].Id, players[7].Id]), Is.EqualTo(2));
+        Expect(world, (0, players[0]), (3, players[3]), (4, players[4]), (5, players[5]));
+        Assert.That((moved.LoginIndex.Get(6).Read<Health>().Value, moved.LoginIndex.Get(7).Read<Health>().Value), Is.EqualTo((6, 7)));
+        world.CreateEntity(new Login(6));                          // free in the source again
+
+        foreach (var holder in accounts.Find(4)) holder.Destroy(); // destroyed during its own lookup
+        Assert.That((accounts.TryGet(4, out _), accounts.KeyCount), Is.EqualTo((false, 4)));
+    }
+
+    [Test]
+    public void ADirectIndexFindsEveryKeyThroughItsSlotOrTheHash()
+    {
+        Assert.That(KeySlotsOf<GridCell>.Map, Is.Not.Null);            // registered by the generator: the slots are used
+        using var world = new World();
+        var tiles = world.GridCellIndex;
+        var held = new System.Collections.Generic.Dictionary<(int, int), Entity>();
+        void Expect(World w, System.Collections.Generic.Dictionary<(int, int), Entity> expected)
+        {
+            var index = w.GridCellIndex;
+            Assert.That(index.KeyCount, Is.EqualTo(expected.Count));
+            for (int x = -2; x < 10; x++)
+            for (int y = 0; y < 10; y++)
+            {
+                long key = new GridCell(x, y).Key;
+                bool has = expected.TryGetValue((x, y), out var holder);
+                Assert.That(index.TryGet(key, out var found), Is.EqualTo(has), $"({x}, {y})");
+                if (!has) continue;
+                Assert.That(found, Is.EqualTo(holder));
+                Assert.That(index.Get(key), Is.EqualTo(holder));
+                Assert.That(All(index.Find(key)), Is.EqualTo(new[] { holder }));
+            }
+        }
+
+        // Keys in their own slots, keys sharing a slot (4 apart), keys out of range.
+        foreach (var (x, y) in new[] { (0, 0), (1, 2), (4, 0), (8, 0), (5, 6), (-1, 3), (-2, 3), (3, 3) })
+            held[(x, y)] = world.CreateEntity(new GridCell(x, y), new Health(x));
+        Expect(world, held);
+        Assert.That(() => world.CreateEntity(new GridCell(4, 0)), Throws.InvalidOperationException);  // a spilled key is taken
+        Assert.That(() => world.CreateEntity(new GridCell(0, 0)), Throws.InvalidOperationException);  // so is a slotted one
+        Assert.That(() => world.CreateEntity(new GridCell(-1, 3)), Throws.InvalidOperationException); // and one of the hash alone
+        held[(0, 0)].Set(new GridCell(0, 0));                                                          // its own key again
+
+        held[(0, 0)].Destroy();                                    // the slot's holder goes: (4, 0) and (8, 0) still found
+        held.Remove((0, 0));
+        Expect(world, held);
+        held[(9, 9)] = world.CreateEntity(new GridCell(9, 9));         // (1, 1)'s slot
+        held[(0, 0)] = world.CreateEntity(new GridCell(0, 0));         // back in the freed slot
+        var moving = held[(4, 0)];
+        moving.Set(new GridCell(2, 2));                                // Set: a key leaves its slot for another
+        held.Remove((4, 0));
+        held[(2, 2)] = moving;
+        held[(5, 6)].Remove<GridCell>();                               // Remove
+        held.Remove((5, 6));
+        Assert.That(held[(3, 3)].Disable<GridCell>(), Is.True);        // Disable / Enable
+        Expect(world, new(held.Where(p => p.Key != (3, 3)).ToDictionary(p => p.Key, p => p.Value)));
+        held[(3, 3)].Enable<GridCell>();
+        Expect(world, held);
+
+        var snapshot = world.Capture();                            // Snapshots
+        held[(8, 0)].Destroy();
+        world.CreateEntity(new GridCell(8, 4));
+        world.Restore(snapshot);
+        Expect(world, held);
+
+        world.GroupBy<Zone>();                                     // rows move between tables: the keys go along
+        held[(1, 2)].Set(new Zone(1));
+        world.TrimExcess();                                        // Trim
+        Expect(world, held);
+
+        using var loaded = new World();                            // Save / Load
+        loaded.Load(Save(world));
+        Expect(loaded, held.ToDictionary(p => p.Key, p => loaded.GetEntity(p.Value.Id)));
+
+        using var moved = new World();                             // MoveEntities
+        Assert.That(world.MoveEntities(moved, [held[(8, 0)].Id, held[(-1, 3)].Id]), Is.EqualTo(2));
+        var there = new System.Collections.Generic.Dictionary<(int, int), Entity>
+        {
+            [(8, 0)] = moved.GridCellIndex.Get(new GridCell(8, 0).Key), [(-1, 3)] = moved.GridCellIndex.Get(new GridCell(-1, 3).Key),
+        };
+        Expect(moved, there);
+        held.Remove((8, 0));
+        held.Remove((-1, 3));
+        Expect(world, held);
+        held[(8, 0)] = world.CreateEntity(new GridCell(8, 0));         // free in the source again
+        Expect(world, held);
+    }
+
+    [Test]
+    public void DirectLookupsAndWritesDoNotAllocate()
+    {
+        using var world = new World();
+        var tiles = world.GridCellIndex;
+        var all = new Entity[32];
+        for (int i = 0; i < all.Length; i++) all[i] = world.CreateEntity(new GridCell(i, i));
+        int Churn()
+        {
+            int found = 0;
+            for (int i = 0; i < all.Length; i++) all[i].Set(new GridCell(i, i + 100));
+            for (int i = 0; i < all.Length; i++) all[i].Set(new GridCell(i, i));
+            for (int i = 0; i < all.Length; i++)
+                if (tiles.TryGet(new GridCell(i, i).Key, out var e) && e == all[i] && !tiles.TryGet(new GridCell(i, i + 100).Key, out _)) found++;
+            return found;
+        }
+
+        Churn();
+        long before = System.GC.GetAllocatedBytesForCurrentThread();
+        int result = Churn();
+        Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(result, Is.EqualTo(all.Length));
     }
 
     private static byte[] Save(World world)

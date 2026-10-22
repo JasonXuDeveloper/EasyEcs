@@ -40,6 +40,25 @@ public record struct Sent(int Items) : IComponent;
 public struct Player : IComponent;
 ```
 
+An enum element gets the same generated members as a struct (`chunk.Block`, `WriteBlock()`, below), and a byte-sized
+enum keeps a list of one byte per element, such as the blocks of a voxel chunk:
+
+```csharp
+public enum Block : byte { Air, Stone, Water }
+public struct Chunk : IComponent;
+
+public static class Chunks
+{
+    public static int Water(Entity chunk)
+    {
+        int water = 0;
+        foreach (var block in chunk.Block)                     // a read: not stamped
+            if (block == Block.Water) water++;
+        return water;
+    }
+}
+```
+
 </Step>
 <Step>
 
@@ -125,8 +144,8 @@ owner. The full table, with read-mostly and immutable data, is in
 The writes are extension methods on `ref DynamicBuffer<T>`, so the compiler rejects them on an `in` parameter or on
 `Read<T>()`: a list cannot change without a tracked write.
 
-Outside systems, reach the buffer through its entity. For an element that some code names as `DynamicBuffer<Loot>`,
-the generator writes named members:
+Outside systems, reach the buffer through its entity. For an element (a struct or an enum) that some code names as
+`DynamicBuffer<Loot>`, the generator writes named members:
 
 | Generated | Same as |
 | --- | --- |
@@ -188,9 +207,7 @@ once through the span `SetCount` returns. The passes then run on memory that bel
 the cache. A computation that writes each element once still writes straight into the span.
 
 ```csharp
-public record struct Block(byte Id);
 public record struct Shade(byte Level);
-public struct Chunk : IComponent;
 
 public class ShadeSystem : EcsSystem
 {
@@ -206,7 +223,7 @@ public class ShadeSystem : EcsSystem
         var solid = blocks.AsReadOnlySpan();
         for (int layer = Layers - 1; layer >= 0; layer--)
             for (int i = 0; i < Cells; i++)
-                if (solid[layer * Cells + i].Id != 0 && light[i] > 0) light[i]--;
+                if (solid[layer * Cells + i] != Block.Air && light[i] > 0) light[i]--;
         var levels = shade.SetCount(Cells);
         for (int i = 0; i < Cells; i++) levels[i] = new Shade(light[i]);
     }
@@ -248,6 +265,66 @@ var opened = world.Instantiate(chest);                        // its own list: L
 ```
 
 - [`Save`](/en/docs/guide/saves) writes the elements: unmanaged ones as raw rows, managed ones through Nino.
+
+### Buffers that come and go: the buffer pool, `PoolCapacity` and `ReservePool` [#pool]
+
+A buffer that dies (its entity destroyed, the component removed, `TrimExcess` of an empty one) gives its list, emptied,
+to a pool of its element type, and the next buffer of that type to take its first element (`Add`, `SetCount`,
+`EnsureCapacity`) takes it instead of allocating one, on any thread. Actors loaded and unloaded, units spawned and
+killed, chunks loaded around players: once warm, their buffers allocate nothing. Two static settings per element type
+shape the pool:
+
+<TypeTable
+  type={{
+    'DynamicBuffer<T>.PoolCapacity': {
+      type: 'static int',
+      description: 'The longest list, in elements, a dead buffer gives back; a longer one is left to the GC. 0 pools none.',
+      default: '4 KB of elements (4,096 for a byte-sized enum)',
+    },
+    'DynamicBuffer<T>.ReservePool(lists)': {
+      type: 'static void',
+      description: 'Allocates empty lists of PoolCapacity elements now, until the pool holds that many (lists already pooled count).',
+      default: 'nothing reserved',
+    },
+  }}
+/>
+
+<Callout type="idea" title="Use it for">
+  `PoolCapacity`: buffers longer than 4 KB that come and go in numbers (the blocks of chunks, large mailboxes). With
+  the default each dead list goes to the GC and each new buffer allocates again. `ReservePool`: a server that knows its
+  peak and wants even the first climb to it allocation-free.
+</Callout>
+
+<Callout type="warn" title="Skip it when">
+  Buffers live as long as their entity (the bags of players who stay), or stay under 4 KB: the default pool already
+  recycles them. Do not reserve far above the peak: the lists are held for the process's life.
+</Callout>
+
+Both are process-wide, for every world and thread: set them once at start-up, before a world uses the type, and set
+the capacity first, because `ReservePool` makes its lists as long as the capacity is when it runs. A voxel server
+whose chunks hold 8,192 blocks, with at most 512 chunks loaded around its players:
+
+```csharp
+const int ChunkBlocks = 16 * 16 * 32;
+const int PeakChunks = 512;
+
+DynamicBuffer<Block>.PoolCapacity = ChunkBlocks;           // a whole chunk's list goes back to the pool
+DynamicBuffer<Block>.ReservePool(PeakChunks);              // the peak, allocated before the first tick
+
+using var server = new World();
+var loaded = new Entity[PeakChunks];
+server.CreateEntities(loaded, new DynamicBuffer<Block>(), new Chunk());
+foreach (var chunk in loaded) chunk.WriteBlock().SetCount(ChunkBlocks);   // each takes a reserved list
+```
+
+- **What the pool holds:** at most the lists of the buffers that died while none were taken, so its peak: that many
+  lists of `PoolCapacity` elements. 512 lists of 8,192 one-byte blocks are 4 MB, held for the process's life.
+- **Across threads:** each thread keeps a few lists of its own and trades the rest in batches with a pool all threads
+  share, one lock per batch, so the lists the owner thread gets back from destroyed buffers serve the first writes of a
+  [parallel `[ForEach]`](/en/docs/guide/threading#parallel-foreach-methods) on the helper threads too.
+
+What the pool saves, 1,000 actors with a mailbox each unloaded and loaded again, is the `BufferChurnBenchmark` table
+[below](#how-to-use-it-fast); why the limit is a setting of each element type: [D65](/en/docs/decisions#d65-buffer-pool-capacity).
 
 ## Full example [#full-example]
 
@@ -372,6 +449,9 @@ written, once in each of the five updates that follow.
 | `RemoveAt(i)` when the order does not matter | `RemoveAtSwapBack(i)` | O(1) instead of O(count) |
 | Reading through a `ref` parameter | An `in` parameter | A `ref` stamps the row, and every `[Changed<T>]` reader visits it ([EECS025](/en/docs/guide/analyzer#eecs025)) |
 | Keeping a span across `Add` | Take a new span after any call that may grow the list | `Add`, `AddRange`, `Insert`, `SetCount`, `EnsureCapacity` and `TrimExcess` may reallocate the array |
+| Buffers longer than 4 KB of elements that come and go (chunks, large mailboxes) | [`PoolCapacity`](#pool) raised to their length at start-up | A new buffer reuses a dead one's list instead of allocating |
+| Allocating lists while the world climbs to a peak it knows | [`ReservePool(peak)`](#pool) at start-up, after `PoolCapacity` | The lists are paid for before the first tick |
+| A `ref` buffer written on some rows only | A [`Mut<DynamicBuffer<T>>`](/en/docs/guide/change-tracking#set-if-changed) (`x.Write().Add(…)`) | Only the rows written are stamped ([EECS053](/en/docs/guide/analyzer#eecs053)) |
 
 Measured on 100,000 bags of 8 items, of which 1,000 trade an item per tick and one `[Changed]` system sends the
 changed bags (`DynamicBufferBenchmark`), against the same bag as a `List<T>` in a tracked component:
@@ -393,20 +473,11 @@ new buffers take the lists of the dead ones.
 - **A write** stamps the row once, like any [tracked component](/en/docs/guide/change-tracking#what-it-costs).
 - **Adding within the capacity** allocates nothing; growing doubles the array (at least 4 elements).
 - **A buffer that dies** (its entity destroyed, the component removed) hands its list, emptied, to the next buffer of
-  its element type that takes its first element, on any thread: entities that come and go with buffers (actors loaded
-  and unloaded, units spawned and killed) allocate nothing once warm, and the lists the owner thread gets back serve
-  the first writes of a parallel `[ForEach]` too. Each thread keeps a few lists of its own and trades the rest in
-  batches with a pool all threads share, one lock per batch. Only lists that died while none were taken wait there, and
-  a list longer than `DynamicBuffer<T>.PoolCapacity` elements (4 KB of them by default) is left to the GC.
+  its element type that takes its first element, on any thread; lists longer than `PoolCapacity` go to the GC, and the
+  pool holds at most the lists of its peak ([the buffer pool](#pool)).
 - **An empty buffer holds no list**, also one a prefab gives its instances (`SetBuffer<T>()` with no elements): its
   first element takes a list from the pool. `LoadEntities` and `Load` read each buffer into a list from the pool and
   hand that list to the entity, without copying it again.
-- **Large buffers that come and go**, such as the 8,192 blocks of a chunk loaded and unloaded around players: raise
-  the capacity once at startup, `DynamicBuffer<Block>.PoolCapacity = 8192;`, and each loaded chunk reuses the list of
-  one that was unloaded. The setting is per element type and process-wide; the pool keeps at most the lists of its
-  peak, so it holds that peak times the capacity. `DynamicBuffer<Block>.ReservePool(chunks)` fills the pool with that
-  many empty lists of the capacity at start-up, so even the first time the world reaches its peak takes lists instead of
-  allocating them.
 - **`TrimExcess`** gives back what a list that once grew large no longer needs. On an empty buffer it gives the list
   back to the pool: the buffer holds no list, and the next first write of any buffer of `T` reuses it. Scratch
   buffers used only while an entity is active (the step of a simulation that sleeps between bursts) then hold no memory
@@ -421,6 +492,10 @@ new buffers take the lists of the dead ones.
 | Calling `Add` on an `in` parameter or on `Read<T>()` | Does not compile: the writes need a `ref` | The compiler |
 | Keeping an `AsSpan()` (or the span of `SetCount`) across an `Add` | The span still points at the old array | Code review: take a new span |
 | Reading the buffer through a `ref` parameter | Every visited row counts as changed | [EECS025](/en/docs/guide/analyzer#eecs025) |
+| A `ref` buffer written on some rows only (an early `return`, an `Add` in an `if`) | Every visited row counts as changed, also the rows left alone | [EECS053](/en/docs/guide/analyzer#eecs053): a `Mut<DynamicBuffer<T>>` |
+| Buffers longer than `PoolCapacity` that come and go | Every dead list goes to the GC, every new buffer allocates | Raise [`PoolCapacity`](#pool) at start-up; the creating system's `TotalAllocated` ([diagnostics](/en/docs/guide/diagnostics)) shows it |
+| `ReservePool` before `PoolCapacity` is raised | The reserved lists are the old length and grow on their first fill | Code review: the capacity first |
+| `ReservePool` far above the peak | Memory held for the process's life: lists × capacity | Reserve the measured peak |
 | One entity per element of a plain list | An entity, a row and an index entry per item | Use a buffer for plain values |
 
 ## Related [#related]

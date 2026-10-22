@@ -536,6 +536,18 @@ internal sealed class QueryMatch(Archetype[] archetypes, RowPlan[] filters)
         return count;
     }
 
+    /// <summary>
+    /// The ids of the alive matching entities, in query order, into <paramref name="into"/> until it is full; how many.
+    /// Stops at the row that fills it.
+    /// </summary>
+    public int CollectAlive(ulong since, Span<EntityId> into)
+    {
+        int written = 0;
+        for (int i = 0; i < Archetypes.Length && written < into.Length; i++)
+            written += new RowFilter(Filters[i], since).Collect(Archetypes[i], into.Slice(written));
+        return written;
+    }
+
     /// <summary>Whether any alive matching entity exists: stops at the first one.</summary>
     public bool AnyAlive(ulong since)
     {
@@ -1073,6 +1085,41 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The ids of the alive rows of <paramref name="archetype"/> that pass, in row order, into <paramref name="into"/>
+    /// until it is full; how many. A table whose rows all pass and that has no tombstones is one copy of its slots.
+    /// </summary>
+    public int Collect(Archetype archetype, Span<EntityId> into)
+    {
+        int mode = Mode(archetype);
+        if (mode == None || into.IsEmpty) return 0;
+        int rows = archetype.Count;
+        var slots = archetype.Slots;
+        if (mode == All && rows == archetype.AliveCount)
+        {
+            int copied = Math.Min(rows, into.Length);
+            slots.AsSpan(0, copied).CopyTo(into);
+            return copied;
+        }
+
+        int written = 0, words = (rows + 63) >> 6;
+        for (int w = mode == All ? 0 : NextWord(archetype, 0, words); w < words;
+             w = mode == All ? w + 1 : NextWord(archetype, w + 1, words))
+        {
+            ulong bits = (mode == All ? ulong.MaxValue : Word(archetype, w)) & RowMask(w, rows);
+            if (bits == 0 && mode != All) w = NextPassing(archetype, w + 1, words) - 1; // words without a passing row
+            for (; bits != 0; bits &= bits - 1)
+            {
+                var id = slots[(w << 6) + BitOperations.TrailingZeroCount(bits)];
+                if (id.Index < 0) continue; // a tombstone
+                into[written] = id;
+                if (++written == into.Length) return written;
+            }
+        }
+
+        return written;
     }
 
     /// <summary>

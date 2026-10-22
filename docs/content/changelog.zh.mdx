@@ -16,7 +16,7 @@ icon: RotateCcwClock
 - 枚举元素的 `DynamicBuffer`（`DynamicBuffer<Block>`）现在和结构体元素一样有生成的具名成员：`chunk.Block`、`HasBlock`、
   `WriteBlock()`、`GetOrAddBlock()`、`RemoveBlock()`，以及预制体的 `SetBlock(…)`。见[动态缓冲](/zh/docs/guide/dynamic-buffers)。
 - `DynamicBuffer<T>.PoolCapacity` 按元素类型设置：缓冲被销毁或移除时，最长多少个元素的列表还给回收池（默认是 4 KB 能放下的个数）。
-  大缓冲反复出现又消失时调高它，比如玩家周围加载又卸载的区块，新缓冲就会重用旧列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)。
+  大缓冲反复出现又消失时调高它，比如玩家周围加载又卸载的区块，新缓冲就会重用旧列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#pool)。
 - 分析器规则 [EECS053](/zh/docs/guide/analyzer#eecs053)（警告，有代码修复）：`[ForEach]` 方法以 `ref` 传入追踪变化的组件（`ITracked`、
   `DynamicBuffer<T>`），却有路径不写它（提前 `return`、写在 `if` 里），访问到的每一行都会被打 tick，`[Changed<T>]` 系统就会看到它根本没改过的行。
   修复改成 `Mut<T>`（写入改成 `x.Write()`，读取改成 `x.Value`），只给写过的行打 tick。
@@ -25,22 +25,45 @@ icon: RotateCcwClock
 - `ReadOnlyMaybe<T>`：`[ForEach]` 方法的可选组件参数，方法只读它：`Value` 是 `ref readonly`，被追踪的组件永远不打 tick，带索引的组件也能用
   （EECS015 接受它，带索引组件的 `Maybe<T>` 仍然报错）。`Maybe<T>` 可以转换成它。见[系统](/zh/docs/guide/systems#read-only-maybe)。
 - `world.SaveEntitiesWithout(output, ids, set)` 保存一组实体，写 `ComponentSet` 以外的所有组件：加载后会重新算出的数据不进存档。见
-  [迁移与卸载](/zh/docs/guide/migration-and-unload#records)。
+  [迁移与卸载](/zh/docs/guide/migration-and-unload#save-entities-without)。
 - `DynamicBuffer<T>.ReservePool(lists)` 在启动时往 `T` 的回收池里放入这么多个容量为 `PoolCapacity` 的空列表，世界增长到的那些实体（玩家周围的区块）
-  的缓冲在服务器运行时从池里取列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)。
+  的缓冲在服务器运行时从池里取列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#pool)。
 
-- 按一行写的 `[ForEach]` 方法，只要它的每个组件都只有一个同类型数值（`float`、`double`、`int`、`uint`、`long`、`ulong`），就以 SIMD
-  循环运行：生成器根据方法体写出 `Vector<T>` 循环，和 Burst 编译 job 一样，`if`、`?:` 和 `return` 变成掩码。结果逐位相同；不符合条件的方法
+- 按一行写的 `[ForEach]` 方法，只要它的组件都只有 1 到 4 个同一类型的数值（`float`、`double`、`int`、`uint`、`long`、`ulong`），就以 SIMD
+  循环运行：生成器根据方法体写出 `Vector<T>` 循环，和 Burst 编译 job 一样，`if`、`?:` 和 `return` 变成掩码。多字段的组件（`Position { X, Y, Z }`）
+  由解交错加载和交错存储拆成每个字段一个向量（256 位用 AVX2，512 位用 permute；没有这些指令时逐行运行）。结果逐位相同；不符合条件的方法
   照旧逐行运行，代码不用改。见[向量循环](/zh/docs/guide/systems#vector-loops)和[决策](/zh/docs/decisions#d68-vector-loops-without-opting-in)。
+- 分析器规则 [EECS055](/zh/docs/guide/analyzer#eecs055)（建议）说明数值组件的 `[ForEach]` 方法为什么没有得到向量循环（“component Body has 5
+  fields”、“lane types float and int differ”），就像 Burst 的 Inspector。`[ForEach(Simd = SimdMode.Require)]` 让这种情况成为错误
+  （[EECS056](/zh/docs/guide/analyzer#eecs056)），热点循环不会悄悄失去向量；`SimdMode.Off` 让方法保持标量且不再提示。见
+  [向量循环](/zh/docs/guide/systems#vector-loops)。
+- `Reduce<T>`：对所有行求总数的 `[ForEach]` 参数，按 `ref` 传入（OpenMP 的 `reduction`），例如
+  `static void Count(in Health h, ref Reduce<Census> census) => census.Value.Alive++;`。`T` 是实现了 `IReduction<T>`（`Identity`、`Combine`）的单例。
+  并行遍历的每一块，或单线程时的整遍，累加进自己的部分结果，每行没有锁也没有原子操作；部分结果按块的顺序合并后替换 `T`。整数结果精确；
+  `ChunkRows` 固定时，浮点结果在任何线程数下都相同。分析器规则 [EECS057](/zh/docs/guide/analyzer#eecs057) 拒绝同一遍里对 `T` 的第二处写入。
+  见[归约](/zh/docs/guide/threading#reductions)和[决策](/zh/docs/decisions#d69-reductions)。
+- 分析器规则 [EECS060](/zh/docs/guide/analyzer#eecs060)（警告）：并行 `[ForEach]` 方法或 `ForEachParallel` 运行的 job 的 `Execute` 写了所有线程
+  共享的内存（静态字段、上下文参数或 job 字段引用的对象），这些写入会竞争。规则 [EECS061](/zh/docs/guide/analyzer#eecs061)（警告，有代码修复）：
+  `ForEachParallel` 之后读并行 job 的字段，而它给每块跑一个副本、什么都不合并回来；修复改为在一个线程上运行这个 job。
+- `IDirectIndexed<TKey>`：键能映射到一段有界槽位上的唯一组件（网格格子、玩家周围的区块、小 id）声明 `static int Slots` 和
+  `static int SlotOf(TKey key)`；它的索引在哈希旁边多存一个槽位数组，`Get`、`TryGet` 和写入的唯一性检查都只读一个数组元素。超出范围或
+  槽位被占的键通过哈希找到，`Find`、`Count` 和有序遍历仍由哈希负责。见[直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index)和
+  [决策](/zh/docs/decisions#d71-direct-index)。
+- `world.CollectIds<T1..Tn>(span, filter)` 按查询顺序把匹配实体的 id 写进 span，写满为止，返回写了多少个：给 `DestroyEntities`、
+  `SaveEntities` 或会改结构的循环用的一批有上限的 id（一个 tick 里的前几个请求）。零分配。见[查询](/zh/docs/guide/queries#collect-ids)。
+- `world.UpdateCount<TGroup>()`：到目前为止 `Update<TGroup>()` 的次数，分组里 `UpdateInterval` 就按它计数。见
+  [系统](/zh/docs/guide/systems#system-groups)。
+- [EECS027](/zh/docs/guide/analyzer#eecs027)（把查找的组件或单例改成参数）和 [EECS054](/zh/docs/guide/analyzer#eecs054)（去掉 `ChunkRows`）
+  有了代码修复。
 - `[ForEach(Parallel = true, ChunkRows = n)]` 指定并行方法的一个线程每次取多少行（向上取整到 64；`world.ForEachParallel` 等并行调用用
   `chunkRows:` 参数）。默认每块至少 1,024 行，方法写被追踪组件时至少 4,096 行，所以几百个重的行只落在一个线程上；现在它们会分到所有线程，
   写被追踪组件时也一样。分析器规则 [EECS054](/zh/docs/guide/analyzer#eecs054) 拒绝负数，以及没有 `Parallel` 的 `ChunkRows`。见
-  [多线程](/zh/docs/guide/threading#chunk-rows)和[决策](/zh/docs/decisions#d67-chunk-rows)。
+  [多线程与并行](/zh/docs/guide/threading#chunk-rows)和[决策](/zh/docs/decisions#d67-chunk-rows)。
 
 ### 性能 [#v4-8-0-performance]
 
 - 缓冲回收池在线程之间共享：每个线程自己留几个列表，其余的按批和所有线程都能取用的池交换，所以拥有者线程从销毁的缓冲收回的列表，也能给并行
-  `[ForEach]` 的第一次写入用，以前那里要分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)。
+  `[ForEach]` 的第一次写入用，以前那里要分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#pool)。
 - 预制体上的空缓冲（不带元素的 `SetBuffer<T>()`）不再给实例一个列表：实例写入第一个元素时从池里取，不再新建一个再扩容。
 - `LoadEntities` 把缓冲读进来的那个列表直接交给加载出的实体，不再复制到另一个列表。
 - 对空缓冲调用 `buffer.TrimExcess()` 会把列表还给回收池：缓冲不再持有列表，任何 `T` 缓冲的下一次首次写入会重用它，所以只在实体活跃时才用的临时缓冲，
@@ -49,6 +72,10 @@ icon: RotateCcwClock
 - `world.Reserve(prefab, n)` 和 `Reserve<T1..Tn>(n)` 也会预留实体在行之外要用的东西：带索引组件的键，以及带清理组件的实体被销毁后等待所在的表。
   空闲 id 列表和索引的逐实体记录跟着实体记录（包括 `EnsureEntityCapacity`）一起增长，不再随销毁或建索引的实体一个个增长，所以预留了峰值的世界增长到峰值时不再分配。
   见[预制体](/zh/docs/guide/prefabs#reserve)。
+- 唯一索引（[`IUniqueIndexed<TKey>`](/zh/docs/guide/indexes-and-relations)）把每个键对应的实体直接存在这个键自己的记录里，不再每个键一个数组：
+  每个键不再分配数组，`Get` / `TryGet` 只读一条记录（[决策](/zh/docs/decisions#d71-direct-index)）。
+- `SetAll` 对所有行都匹配的 64 行位字一次填好值，不再逐行写（不满的位字和带索引的组件仍逐行）。见
+  [批量操作](/zh/docs/guide/bulk#what-it-costs)和[决策](/zh/docs/decisions#d72-setall-whole-words)。
 
 ### 需要修改代码的变更 [#v4-8-0-breaking]
 
@@ -56,6 +83,8 @@ icon: RotateCcwClock
   `ReadOnlyMaybe<T>`。把警告当错误的构建会看到它：见[迁移指南](/zh/docs/migration#v4-8-analyzer)。
 - 分析器规则 [EECS030](/zh/docs/guide/analyzer#eecs030) 也会报告整个方法体只是对自己实体做一次结构变更、每行都一样的 `[ForEach]` 方法
   （`[ForEach, With<Dead>] static void Bury(Entity e) => e.Destroy();`）：在 `OnUpdate` 里一次批量调用（`World.DestroyAll<Dead>()`）就能一次改完整张表（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
+- 新的警告 [EECS060](/zh/docs/guide/analyzer#eecs060) 和 [EECS061](/zh/docs/guide/analyzer#eecs061) 报告在共享内存上竞争、或读了遍历从未写回的
+  job 字段的并行代码；总数改用 `Reduce<T>` 参数（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
 
 ### 修复 [#v4-8-0-fixes]
 

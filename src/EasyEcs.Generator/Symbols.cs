@@ -32,6 +32,7 @@ internal static class Symbols
     public const string TrackChanges = "EasyEcs.ITracked";
     public const string Indexed = "EasyEcs.IIndexed<TKey>";
     public const string UniqueIndexed = "EasyEcs.IUniqueIndexed<TKey>";
+    public const string DirectIndexed = "EasyEcs.IDirectIndexed<TKey>";
     public const string Group = "EasyEcs.IGroup";
     public const string Cleanup = "EasyEcs.ICleanupComponent";
     public const string EntityId = "EasyEcs.EntityId";
@@ -925,7 +926,7 @@ internal static class Symbols
         bool outside = IsRunner(method);
         if (outside && (!method.IsStatic || EntryPointCollides(method))) return false;
         if (method.IsGenericMethod && !outside || Unnameable(method) != null) return false; // a system's method gets no type arguments
-        if (SlicesProblem(method) != null) return false;
+        if (SlicesProblem(method) != null || ChunkRowsProblem(method) != null) return false;
         int components = 0;
         foreach (var p in method.Parameters)
         {

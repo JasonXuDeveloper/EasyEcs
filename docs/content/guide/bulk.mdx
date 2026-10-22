@@ -237,6 +237,8 @@ and entity by entity (`BulkBenchmark`):
 - **Time:** O(matching tables + rows). Rows that already have the column are a presence-bit flip; an entity that
   lacks the column moves once, to the table that has it.
 - **Allocation:** 0 B once the target tables exist.
+- **`SetAll` fills whole words:** a 64-row word whose rows all match gets the value in one fill; a partial word, and
+  an indexed component (the index sees each write), are written row by row.
 - **`SetAll` counts first:** a moved row can be visited again in its new table, so the count is taken before the
   change.
 

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using Microsoft.CodeAnalysis;
@@ -129,6 +130,126 @@ internal static class Threads
                 return true;
         }
 
+        return false;
+    }
+
+    /// <summary>
+    /// A write made by code that runs on several threads at once (a parallel [ForEach] method, the <c>Execute</c> of a
+    /// job run in parallel): what it writes (<see cref="Symbol"/>: the static field or property, the context parameter,
+    /// or the job's own field), whether every thread shares it (<see cref="Shared"/>; else the location is the job's
+    /// own field, a copy per chunk), and whether the value written is a constant (every thread writes the same).
+    /// </summary>
+    public sealed record Write(IOperation Operation, ISymbol Symbol, bool Shared, bool Constant, string What);
+
+    /// <summary>
+    /// The writes in <paramref name="body"/> that reach memory outside the row being visited: a static field or
+    /// auto-property (not <c>[ThreadStatic]</c>), an object a context parameter refers to (a [ForEach] method outside
+    /// a system), and with <paramref name="job"/> the job's own fields and the objects they refer to. Assignments,
+    /// <c>++</c> / <c>--</c>, <c>ref</c> / <c>out</c> arguments and the mutating calls of collections
+    /// (<see cref="Symbols.MutatedReceiver"/>) count. Left out: writes inside a <c>lock</c>, the calls of
+    /// <c>System.Threading</c> (<c>Interlocked</c>, <c>Volatile</c>), concurrent collections, and elements of arrays
+    /// and lists (rows may own different elements). Conservative: a location reached through a local or a call's
+    /// result is not followed.
+    /// </summary>
+    public static IEnumerable<Write> Writes(IOperation body, bool job)
+    {
+        foreach (var operation in body.Descendants())
+        {
+            IOperation? target;
+            bool contents = false, constant = false;
+            switch (operation)
+            {
+                case ISimpleAssignmentOperation { IsRef: false } assignment:
+                    target = assignment.Target;
+                    constant = assignment.Value.ConstantValue.HasValue;
+                    break;
+                case ICompoundAssignmentOperation or ICoalesceAssignmentOperation:
+                    target = ((IAssignmentOperation)operation).Target;
+                    break;
+                case IIncrementOrDecrementOperation step:
+                    target = step.Target;
+                    break;
+                case IInvocationOperation call when Symbols.MutatedReceiver(call) is { } receiver && !ThreadSafe(receiver.Type):
+                    target = receiver;
+                    contents = true;
+                    break;
+                case IArgumentOperation { Parameter.RefKind: RefKind.Ref or RefKind.Out, Parent: IInvocationOperation callee } argument
+                    when !Symbols.Named(callee.TargetMethod.ContainingNamespace, "System.Threading"):
+                    target = argument.Value;
+                    break;
+                default:
+                    continue;
+            }
+
+            if (Locked(operation, body) || Reached(target, contents, job) is not var (symbol, shared, what)) continue;
+            yield return new Write(operation, symbol, shared, constant, what);
+        }
+    }
+
+    /// <summary>
+    /// The location a write's target is in (see <see cref="Writes"/>), or null: walked from the written member to its
+    /// root, noting whether the way passes through an object (a reference held by a field, property or parameter).
+    /// </summary>
+    private static (ISymbol Symbol, bool Shared, string What)? Reached(IOperation? target, bool contents, bool job)
+    {
+        bool reference = contents, first = !contents; // the receiver of a call is read, not written
+        IFieldSymbol? own = null;
+        while (true)
+        {
+            switch (target)
+            {
+                case IFieldReferenceOperation { Field: var field } access:
+                    if (field.IsStatic)
+                        return field.IsConst || field.GetAttributes().Any(a => Symbols.Named(a.AttributeClass, "System.ThreadStaticAttribute"))
+                            ? null
+                            : (field, true, (reference ? "an object static field '" : "static field '") + field.ContainingType.Name + "." + field.Name + "'" + (reference ? " holds" : ""));
+                    own = field;
+                    target = access.Instance;
+                    break;
+                case IPropertyReferenceOperation { Property: { IsIndexer: false } property } access:
+                    // a property written is only known to be storage when it is an auto-property declared in source
+                    if (first && !IsAutoProperty(property)) return null;
+                    if (property.IsStatic)
+                        return reference || first
+                            ? (property, true, (reference ? "an object static property '" : "static property '") + property.ContainingType.Name + "." + property.Name + "'" + (reference ? " holds" : ""))
+                            : null;
+                    own = null;
+                    target = access.Instance;
+                    break;
+                case IConversionOperation conversion:
+                    target = conversion.Operand;
+                    continue;
+                case IInstanceReferenceOperation when job && own != null:
+                    return reference
+                        ? (own, true, $"the object field '{own.Name}' holds, which every chunk's copy of the job shares")
+                        : (own, false, $"its field '{own.Name}'");
+                case IParameterReferenceOperation { Parameter: var parameter }
+                    when reference && parameter.Type.IsReferenceType && parameter.ContainingSymbol is IMethodSymbol method
+                         && Symbols.IsForEach(method) && Symbols.Classify(parameter, Symbols.IsRunner(method)) == Symbols.ParamKind.Context:
+                    return (parameter, true, $"the object parameter '{parameter.Name}' refers to, which every chunk is given");
+                default:
+                    return null; // a local, a row's component, an element, a call's result
+            }
+
+            first = false;
+            if (target?.Type is { IsReferenceType: true }) reference = true; // the member written lives in that object
+        }
+    }
+
+    /// <summary>An auto-property declared in source: its backing field is the storage a write reaches.</summary>
+    private static bool IsAutoProperty(IPropertySymbol property) =>
+        property.SetMethod != null && property.ContainingType.GetMembers().OfType<IFieldSymbol>()
+            .Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, property));
+
+    /// <summary>A collection made for several threads (<c>System.Collections.Concurrent</c>, channels).</summary>
+    private static bool ThreadSafe(ITypeSymbol? type) =>
+        type?.ContainingNamespace is { } ns && (Symbols.Named(ns, "System.Collections.Concurrent") || Symbols.Named(ns, "System.Threading.Channels"));
+
+    /// <summary>Inside a <c>lock</c> statement of <paramref name="body"/>.</summary>
+    private static bool Locked(IOperation operation, IOperation body)
+    {
+        for (var node = operation.Parent; node != null && node != body; node = node.Parent)
+            if (node is ILockOperation) return true;
         return false;
     }
 }

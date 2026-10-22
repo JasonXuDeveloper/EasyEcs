@@ -62,7 +62,7 @@ dotnet add package EasyEcs        # net10.0 · source generator, analyzer and Ni
 - **Prefabs that stay out of your queries.** A `Prefab` is a recipe of component values that belongs to no world:
   `world.Instantiate(prefab)` spawns from it (a whole wave in one pass), and no system ever has to filter templates
   out. `entity.Clone()` copies a living entity.
-- **Mistakes fail the build.** The bundled analyzer (EECS002-EECS056, with code fixes) reports invalid `[ForEach]`
+- **Mistakes fail the build.** The bundled analyzer (EECS002-EECS061, with code fixes) reports invalid `[ForEach]`
   methods and systems, class components, stateful systems, systems that reference each other, batch methods mixing
   spans with per-entity parameters, parallel methods that would race, writes through read-only parameters, copied
   dynamic buffers, structural changes off the owner thread, indexed components written behind their index's back,
@@ -96,7 +96,7 @@ with what each costs and when to use it, and [API and complexity](https://ecs.xg
 - **[Threads](https://ecs.xgamedev.net/docs/guide/threading)**: one owner thread per world, parallel systems and parallel
   `[ForEach]` methods, Native AOT.
 - **Tools**: [per-system timing, schedule, introspection, trimming](https://ecs.xgamedev.net/docs/guide/diagnostics),
-  [the analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) (EECS002-EECS056, with code fixes).
+  [the analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) (EECS002-EECS061, with code fixes).
 
 ## Example
 
@@ -291,7 +291,7 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 
 - **Large buffers that come and go allocate nothing.** `DynamicBuffer<T>.PoolCapacity` sets, per element type, how long
   a list the buffer pool keeps, so the blocks of chunks loaded and unloaded around players reuse one another's lists
-  ([dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers#what-it-costs)). The pool is shared across
+  ([dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers#pool)). The pool is shared across
   threads, a prefab's empty buffer takes its list from it, and `LoadEntities` keeps the lists it reads.
 - **Reserve the peak, then allocate nothing.** `DynamicBuffer<T>.ReservePool(n)` fills the pool at start-up, and
   `Reserve(prefab, n)` also covers index keys, the retired table and the free ids. Restores and loads reuse their
@@ -305,13 +305,24 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   `[ForEach]` method that is one structural change
   ([systems](https://ecs.xgamedev.net/en/docs/guide/systems#read-only-maybe)).
 - **Enum elements get named members.** A `DynamicBuffer<Block>` of an enum gets `chunk.Block`, `WriteBlock()` and the
-  rest, like a buffer of a struct.
+  rest, like a buffer of a struct
+  ([dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers#declare-the-element)).
 - **A Minecraft-style sample and a Samples section.** [VoxelServer](https://ecs.xgamedev.net/en/docs/samples/voxel-server)
   runs chunks, flowing water, areas of interest, zombies, replication and saves at 20 ticks a second; the
   [Samples](https://ecs.xgamedev.net/en/docs/samples) section of the site walks through every sample.
-- **SIMD without writing it.** A `[ForEach]` method over one-number components runs as a `Vector<T>` loop the
-  generator writes from its body, the way Burst compiles a job, with the same results bit for bit
-  ([vector loops](https://ecs.xgamedev.net/en/docs/guide/systems#vector-loops)).
+- **SIMD without writing it.** A `[ForEach]` method over components of 1 to 4 numbers of one type (`Position { X, Y,
+  Z }` too) runs as a `Vector<T>` loop the generator writes from its body, the way Burst compiles a job, with the same
+  results bit for bit. EECS055 names why a method stayed scalar, and `Simd = SimdMode.Require` makes that a build
+  error ([vector loops](https://ecs.xgamedev.net/en/docs/guide/systems#vector-loops)).
+- **Totals on every core.** A `ref Reduce<T>` parameter gives each chunk of a parallel pass its own partial result (OpenMP's
+  `reduction`), combined in row order into a singleton: no lock or atomic per row, exact integers, reproducible floats
+  ([reductions](https://ecs.xgamedev.net/en/docs/guide/threading#reductions)). EECS060 reports parallel code that
+  writes shared memory, EECS061 a parallel job's field read after the pass.
+- **Grid lookups at array speed.** A unique key that maps onto bounded slots (`IDirectIndexed<TKey>`: grid cells,
+  chunks around the players) is found by one array entry instead of a hash probe, the hash behind it for the rest
+  ([direct-mapped keys](https://ecs.xgamedev.net/en/docs/guide/indexes-and-relations#direct-index)).
+  `world.CollectIds<T>(span, filter)` takes a bounded batch of matching ids (the first requests of a tick) without
+  allocating ([queries](https://ecs.xgamedev.net/en/docs/guide/queries#collect-ids)).
 - **Few heavy rows on every thread.** `[ForEach(Parallel = true, ChunkRows = 64)]` sets the rows a thread takes at a
   time (OpenMP's `schedule(dynamic, n)`), so a few hundred rows of microseconds each spread over the threads, also
   when they write tracked components ([threading](https://ecs.xgamedev.net/en/docs/guide/threading#chunk-rows), [decision](https://ecs.xgamedev.net/en/docs/decisions#d67-chunk-rows)).

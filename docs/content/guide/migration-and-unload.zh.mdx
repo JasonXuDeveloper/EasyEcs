@@ -137,14 +137,14 @@ world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
   系统，遇到还没见过这个实体的客户端，要自己发送完整状态。
 - 所以每类 actor 一个预制体就够了：新 actor 用预制体的默认值作为初始状态（算写入，下次保存会存下来），恢复的 actor 由记录覆盖
   默认值（不算写入）。[Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)就是这么做的。
-- 带集合的 `SaveEntities` 也会写出一个集合组件都没有的实体，作为空条目，这样存档里第 i 个实体仍对应传入的第 i 个实体。
+- `SaveEntitiesWith` 也会写出一个集合组件都没有的实体，作为空条目，这样存档里第 i 个实体仍对应传入的第 i 个实体。
 - `EntityId` 字段按下文的规则改写，指向传入的实体；父实体不在记录里的 `ChildOf` 不会被设置。
 - `LoadEntitiesInto` 是结构变更：只能在所有者线程调用（[EECS014](/zh/docs/guide/analyzer#eecs014)），遍历进行中不能调用
   （抛 `InvalidOperationException`），不能放进并行方法（[EECS010](/zh/docs/guide/analyzer#eecs010)），`[ForEach]` 方法要接收
   `Entity` 或 `World` 才能调用（[EECS013](/zh/docs/guide/analyzer#eecs013)）。
 - 集合在实体存档里列的是组件。它也能列单例（`WithSingleton<T>()`，或者两种类型都接受的 `With(typeof(...))`），用于整个 World 的
   [重启](/zh/docs/guide/saves#restart)：`SaveWithout(output, in exclude)` 不写这些类型，`LoadKeeping(input, in keep)` 保留这些单例。实体存档不写单例，
-  所以集合里有单例时 `SaveEntities` 抛 `ArgumentException`。
+  所以集合里有单例时 `SaveEntitiesWith` 和 `SaveEntitiesWithout` 都抛 `ArgumentException`。
 - 运行时才知道类型的框架按 `Type` 构建集合：
 
 ```csharp
@@ -153,6 +153,8 @@ public static class RuntimeRecords
     public static readonly ComponentSet Persistent = ComponentSet.Create().With(typeof(Bank));
 }
 ```
+
+#### 集合以外的一切：`SaveEntitiesWithout` [#save-entities-without]
 
 反过来，`SaveEntitiesWithout(output, ids, set)` 写集合以外的一切：实体加载后会重新算出来的数据（高度图、缓存、流场）不写进去，存档就小。
 不写的组件不需要 Nino 格式化器，`Disabled<T>` 标签跟着它的组件一起不写。
@@ -174,6 +176,14 @@ world.SaveEntitiesWithout(chunkSave, [chunk.Id], ChunkSaves.Derived);   // 只�
 ```
 
 `LoadEntities` 创建出来的区块只有 `Terrain`，没有 `HeightMap`；再由一个带 `[Without<HeightMap>]` 的系统把它算回来。
+
+| 实体 | 存档用 |
+| --- | --- |
+| 什么都要持久化 | `SaveEntities(output, ids)` |
+| 运行时状态里只有少数组件要持久化（连接、计时器、缓存旁边的银行余额） | `SaveEntitiesWith(output, ids, persistent)` |
+| 大多数组件要持久化，少数加载后会重新算（高度图、流场、路径） | `SaveEntitiesWithout(output, ids, derived)` |
+
+列出较小的那个集合：以后新加的组件默认落在对的一边，用 `Without` 时会被保存，用 `With` 时不写。
 
 ### id 怎么改写 [#entityid-rewriting]
 
@@ -416,6 +426,7 @@ saving 0v1: 650 gold
 | 一个实体一个实体地迁移 | 整组一次迁移 | 存档的固定开销（按 id 写类型）只付一次 |
 | 只有部分组件需要持久化，却用 `SaveEntities` 存整个实体 | 用 `ComponentSet` | 运行时组件不写入，也不需要格式化器 |
 | 每次存档都新建 `ComponentSet` | 一个 `static readonly` 集合 | 每次 `With` 都会复制集合 |
+| 把加载后会重新算的数据也存进去（高度图、缓存、流场） | `SaveEntitiesWithout`，集合里放这些派生组件 | 存档更小，也不需要它们的格式化器 |
 | 重载时重建整个 World | 先 `RemoveTypes`，再 `Load` | 宿主的实体和组件原地不动 |
 | 重载之后一直背着长大的缓冲 | 新版本跑起来后调一次 `TrimExcess()` | 释放存档、加载用的缓冲和空表 |
 
@@ -448,7 +459,8 @@ saving 0v1: 650 gold
 | 恢复 `RemoveTypes` 之前拍的快照 | 抛 `InvalidOperationException` | 运行时 |
 | 在其他线程迁移 | 两个 World 都只属于各自的所有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 迁移或加载的玩家，唯一键已被目标 World 持有 | 抛 `InvalidOperationException`；什么也不进来，原实体不动 | 先销毁过期的持有者（[唯一键](#unique-keys)） |
-| `SaveEntities` 的集合里有单例 | 抛 `ArgumentException`：实体存档不写单例 | 单例放进整个 World 的[重启](/zh/docs/guide/saves#restart)存档 |
+| `SaveEntitiesWith` 或 `SaveEntitiesWithout` 的集合里有单例 | 抛 `ArgumentException`：实体存档不写单例 | 单例放进整个 World 的[重启](/zh/docs/guide/saves#restart)存档 |
+| `SaveEntitiesWithout` 漏掉的组件没人重新算 | 加载出来的实体永远缺它 | 用带 `[Without<T>]` 的系统重建它，或者留在存档里 |
 | 需要持久化的组件没放进记录的集合 | 不会存档：读回后实体保留自己原来的值，或者根本没有这个组件 | 在一个地方、按需要持久化的组件建集合 |
 | 用 `LoadEntities` 读记录 | 在已有实体之外又建了新实体 | 对已有实体用 `LoadEntitiesInto` |
 | `LoadEntitiesInto` 传入的实体数和存档不一致，或者有失效的实体 | `ArgumentException`；什么都不改 | 按存档顺序，每个存档实体对应一个存活实体 |

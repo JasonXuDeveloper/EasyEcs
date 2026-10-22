@@ -96,6 +96,7 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | A loop that only reads (a save, a send, a report) | [`foreach (var item in world.Read<T1..Tn>(filter))`](#read): nothing stamped |
 | "How many …?" / "Is there any …?" | `world.Count<T1..Tn>(filter)` / `world.Any<T1..Tn>(filter)` |
 | Destroy every match | `world.DestroyAll<T1..Tn>(filter)` |
+| Up to N matches to serve, destroy or save this tick | [`world.CollectIds<T1..Tn>(span, filter)`](#collect-ids) |
 | Only rows written or removed since a tick | `Changed<T>(tick)` / `Removed<T>(tick)`, `ChangedAny<T1..Tn>(tick)` / `RemovedAny<T1..Tn>(tick)` for any of several ([change tracking](/en/docs/guide/change-tracking)) |
 | A pass that writes only the rows whose value changed | a [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) parameter of a `[ForEach]` method |
 | A share of the rows per pass, every row once per N passes | `Slice(index, of)` with a `ForEach` call, or [`[ForEach(Slices = N)]`](/en/docs/guide/systems#slices) |
@@ -334,12 +335,12 @@ and a structural change in the middle, against the same work written through the
 
 A job that implements `INoStructuralChanges` and writes only its own row can run on several threads.
 `ForEachParallel` (an `IForEach` job) and `ForEachEntityParallel` (an `IForEachEntity` job) cut the matching rows into
-chunks (about four per thread, a multiple of 64 rows, between 1,024 and `World.ParallelChunkRows` = 16,384; a multiple
-of 4,096 rows, at least 4,096, when the job's `WriteMask` include a tracked component, so that no two chunks share a
-block's change-tick summary). The
-calling thread and up to `WorldOptions.MaxDegreeOfParallelism - 1` thread-pool threads run them, each with its own
-copy of the job, so state accumulated in its fields is not merged back. Fewer than two chunks run on the calling
-thread.
+chunks (by default about four per thread, a multiple of 64 rows, between 1,024 and `World.ParallelChunkRows` = 16,384;
+a multiple of 4,096 rows, at least 4,096, when the job's `WriteMask` includes a tracked component, so that no two
+chunks share a block's change-tick summary). The calling thread and up to `WorldOptions.MaxDegreeOfParallelism - 1`
+thread-pool threads claim the chunks one at a time as they finish, like OpenMP's `schedule(dynamic, n)`. Each chunk
+runs on its own copy of the job, so state accumulated in its fields is not merged back. Fewer than two chunks run on
+the calling thread.
 
 ```csharp
 public struct Heal : IForEach<Health>, INoStructuralChanges
@@ -355,6 +356,32 @@ var heal = new Heal();
 world.ForEachParallel<Health, Heal>(ref heal, Filters.Active);   // each row runs once, on one of the threads
 ```
 
+The last argument, `chunkRows`, sets the rows a thread takes at a time (the `n` of `schedule(dynamic, n)`, rounded up
+to 64; 0, the default, chooses from the row count): for a few hundred rows that cost microseconds each, which the
+default would leave in one chunk. It is what `[ForEach(Parallel = true, ChunkRows = n)]` passes
+([chunk size](/en/docs/guide/threading#chunk-rows)).
+
+```csharp
+public record struct Plan(int Cost) : IComponent;
+
+public struct Replan : IForEach<Plan>, INoStructuralChanges
+{
+    public static int WriteMask => 1;
+
+    public void Execute(ref Plan plan)
+    {
+        int cost = plan.Cost;
+        for (int i = 0; i < 10_000; i++) cost = (cost * 31 + i) % 1_000_003;   // microseconds per row
+        plan = new Plan(cost);
+    }
+}
+```
+
+```csharp
+var replan = new Replan();
+world.ForEachParallel<Plan, Replan>(ref replan, chunkRows: 64);
+```
+
 The job must not read what another row's job writes (another entity, a singleton), and nothing else may change the
 world during the call. [`[ForEach(Parallel = true)]`](/en/docs/guide/systems#parallel-methods) compiles a system method
 to the same chunked run.
@@ -363,6 +390,36 @@ to the same chunked run.
 
 `Count` sums the row counts of the matching tables, and counts presence bits only in tables where some rows lack a
 queried component. `Any` stops at the first match. Neither touches a component value.
+
+
+### A bounded batch of ids: `CollectIds` [#collect-ids]
+
+`world.CollectIds<T1..Tn>(into, filter)` writes the ids of the matching entities into a span, in the order `Query`
+and `Read` visit them, until the span is full, and returns how many. It is the "take up to N this tick" of a system
+that serves requests: the ids then go to `DestroyEntities`, `SaveEntities` or a loop that changes structure, which a
+query loop may not do while it runs.
+
+```csharp
+public class BuryTheFallen : EcsSystem
+{
+    static readonly QueryFilter Fallen = QueryFilter.Create().With<Dead>();
+
+    protected override void OnUpdate()
+    {
+        Span<EntityId> batch = stackalloc EntityId[64];
+        int count = World.CollectIds<Health>(batch, Fallen);   // the first 64, in query order // [!code highlight]
+        World.DestroyEntities(batch[..count]);                 // the rest wait for the next tick
+    }
+}
+```
+
+- **Allocation-free.** O(matching tables), plus the rows read until the span is full; a table whose rows all match
+  is one copy of its ids.
+- **It does not remember where it stopped.** The next call starts from the first match again, so serve what it
+  returned (destroy it, tag it, save it) before the next call.
+- **Filter, do not branch.** Two systems that share a request type split it with a tag (`With<Saved>` /
+  `Without<Saved>`), not with a test that skips rows in the batch: `VoxelServer` serves its load requests this way
+  ([a chunk's life](/en/docs/samples/voxel-server#chunks)).
 
 ## Full example [#full-example]
 
@@ -499,6 +556,7 @@ not a mover, but the job over `Position` alone counts it.
 | `Count(...) > 0` | `Any(...)` | Stops at the first match ([EECS032](/en/docs/guide/analyzer#eecs032)) |
 | Several `Get` / `TryGetRef` and a `Has<Dead>()` per request | [`entity.Run`](#run-on-one-entity) with a `static readonly` filter | One lookup; the refs are carried across structural changes |
 | Scanning for a key | A [value index](/en/docs/guide/indexes-and-relations) | O(matches) instead of O(rows) |
+| A `Read` loop that copies ids into a span and breaks when it is full | [`CollectIds`](#collect-ids) | A table whose rows all match is one copy |
 
 The same write, `Position += Velocity` over 10,000 entities: two plain arrays (`RawArrayWrite`), a `[ForEach]`
 system (`ForEachSystemWrite`), a hand-written struct job (`ForEachWrite`) and a `Query` loop (`QueryWrite`):

@@ -22,7 +22,7 @@ extension<T, TKey>(ValueIndex<T, TKey> index) public Entity Get(TKey key);
 
 `T` 的键为 `key` 的实体；没有实体有这个键时抛 `InvalidOperationException`。O(1)：一次哈希探测。只能在所有者线程调用。
 
-**复杂度**（[API 表](/zh/docs/api)）：O(1)：一次哈希查找
+**复杂度**（[API 表](/zh/docs/api)）：O(1)：一次哈希查找；直接索引组件的键在自己的槽里时，读一次数组
 
 ### `TryGet` [#tryget]
 
@@ -32,4 +32,4 @@ extension<T, TKey>(ValueIndex<T, TKey> index) public bool TryGet(TKey key, out E
 
 `T` 的键为 `key` 的实体（如果有）。O(1)：一次哈希探测。只能在所有者线程调用。
 
-**复杂度**（[API 表](/zh/docs/api)）：O(1)：一次哈希查找
+**复杂度**（[API 表](/zh/docs/api)）：O(1)：一次哈希查找；直接索引组件的键在自己的槽里时，读一次数组

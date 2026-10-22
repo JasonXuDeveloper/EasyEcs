@@ -740,6 +740,21 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         return DestroyMatching(Match<{{tps}}>(in filter, {{List(n, i => "out _")}}), filter.Tick);
                     }
 
+                    /// <summary>
+                    /// Write the ids of the alive entities having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>)
+                    /// into <paramref name="into"/>, in the order <c>Query</c> and <c>Read</c> visit them, until it is full, and
+                    /// return how many: a bounded batch of work (the first requests of a tick, the next chunks to unload) to hand
+                    /// to <c>DestroyEntities</c>, <c>SaveEntities</c> or a loop that changes structure, which a query loop may
+                    /// not. O(matching archetypes), plus the rows read until <paramref name="into"/> is full (a table whose rows
+                    /// all match is one copy). Allocation-free.
+                    /// </summary>
+                    public int CollectIds<{{tps}}>(Span<EntityId> into, in QueryFilter filter = default)
+                {{cons}}
+                    {
+                        filter.Whole();
+                        return Match<{{tps}}>(in filter, {{List(n, i => "out _")}}).CollectAlive(filter.Tick, into);
+                    }
+
 
                 """);
         }

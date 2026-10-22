@@ -24,6 +24,14 @@ public interface IForEachEntity<T1, T2, T3, T4, T5, T6, T7, T8, T9> where T1 : s
 
 ## 属性 [#properties]
 
+### `Merges` [#merges]
+
+```csharp
+static virtual bool Merges { get; }
+```
+
+job 在字段里保存部分结果（[`Reduce`](/zh/docs/reference/reduce)；默认 false）：并行遍历保留每个块的 job 副本，按块的顺序把它们合并进调用方的 job（[`IForEachEntity.Merge`](/zh/docs/reference/iforeachentity#merge)）。
+
 ### `SelfStamped` [#selfstamped]
 
 ```csharp
@@ -49,3 +57,11 @@ void Execute(Entity entity, ref T1 c1);
 ```
 
 一个匹配的实体：它的句柄和组件，组件按引用传入。
+
+### `Merge` [#merge]
+
+```csharp
+static virtual void Merge<TSelf>(ref TSelf job, in TSelf chunk) where TSelf : struct;
+```
+
+把 `chunk` 里的部分结果合并进 `job`（两者都是这个 job 自己的类型；[`IForEachEntity.Merges`](/zh/docs/reference/iforeachentity#merges)）。带 [`Reduce`](/zh/docs/reference/reduce) 参数的生成 job 实现它。

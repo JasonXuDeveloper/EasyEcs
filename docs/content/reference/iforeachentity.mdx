@@ -24,6 +24,14 @@ One type per number of components, 1 to 9 (generated from one template); the mem
 
 ## Properties
 
+### `Merges` [#merges]
+
+```csharp
+static virtual bool Merges { get; }
+```
+
+The job keeps partial results in its fields ([`Reduce`](/en/docs/reference/reduce); default false): a parallel pass keeps each chunk's copy of the job and combines them into the caller's job in chunk order ([`IForEachEntity.Merge`](/en/docs/reference/iforeachentity#merge)).
+
 ### `SelfStamped` [#selfstamped]
 
 ```csharp
@@ -49,3 +57,11 @@ void Execute(Entity entity, ref T1 c1);
 ```
 
 One matching entity: its handle and its components, by reference.
+
+### `Merge` [#merge]
+
+```csharp
+static virtual void Merge<TSelf>(ref TSelf job, in TSelf chunk) where TSelf : struct;
+```
+
+Combine the partial results `chunk` holds into `job` (both of the job's own type; [`IForEachEntity.Merges`](/en/docs/reference/iforeachentity#merges)). Generated jobs with [`Reduce`](/en/docs/reference/reduce) parameters implement it.

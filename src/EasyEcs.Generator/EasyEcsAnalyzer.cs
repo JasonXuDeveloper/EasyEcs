@@ -174,6 +174,13 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "more sets it (rounded up to 64). A method without Parallel = true runs on one thread and has no chunks: set " +
         "Parallel = true or drop ChunkRows.", helpLinkUri: Help("EECS054"));
 
+    public static readonly DiagnosticDescriptor BadReduction = new("EECS057", "A reduction whose result another write replaces",
+        "Parameter '{0}' of [ForEach] method '{1}' reduces into {2}, but {3}",
+        Category, DiagnosticSeverity.Error, true,
+        "A Reduce<T> parameter gives each chunk of rows a partial result of singleton T and replaces T with the combined " +
+        "result when the pass ends. A second Reduce<T> of the same method or system, or a 'ref T' parameter of the same " +
+        "method, writes T in the same pass: one result would silently replace the other. Reduce each result into a " +
+        "singleton of its own, and read the last result with 'in T'.", helpLinkUri: Help("EECS057"));
     public static readonly DiagnosticDescriptor NoVectorLoop = new("EECS056", "A required vector loop that the method does not qualify for",
         "[ForEach(Simd = SimdMode.Require)] method '{0}' gets no vector loop: {1}",
         Category, DiagnosticSeverity.Error, true,
@@ -182,14 +189,6 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "long or ulong), singletons and values, and computes with arithmetic, comparisons, branches and Math functions " +
         "that have an exact vector counterpart. Change what the message names, or set SimdMode.Auto to accept the loop " +
         "of one row at a time.", helpLinkUri: Help("EECS056"));
-
-    public static readonly DiagnosticDescriptor BadReduction = new("EECS057", "A reduction whose result another write replaces",
-        "Parameter '{0}' of [ForEach] method '{1}' reduces into {2}, but {3}",
-        Category, DiagnosticSeverity.Error, true,
-        "A Reduce<T> parameter gives each chunk of rows a partial result of singleton T and replaces T with the combined " +
-        "result when the pass ends. A second Reduce<T> of the same method or system, or a 'ref T' parameter of the same " +
-        "method, writes T in the same pass: one result would silently replace the other. Reduce each result into a " +
-        "singleton of its own, and read the last result with 'in T'.", helpLinkUri: Help("EECS057"));
 
     public static readonly DiagnosticDescriptor ScratchEscape = new("EECS058", "Scratch memory stored into the world",
         "[ForEach] method '{0}' stores '{1}', which its Scratch<{2}> '{3}' holds, into '{4}'",
@@ -230,7 +229,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
-        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, ScalarLoop, NoVectorLoop, BadReduction, ScratchEscape, LookupOfWritten);
+        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScalarLoop, NoVectorLoop,
+        SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -256,6 +256,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterCompilationStartAction(AnalyzeOrderings);
         InitializePerformance(context);
         InitializeUsage(context);
+        InitializeParallel(context);
     }
 
     /// <summary>
@@ -794,7 +795,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (Symbols.SlicesProblem(method) is { } slices)
             context.ReportDiagnostic(Diagnostic.Create(BadSlices, location, method.Name, slices));
         if (Symbols.ChunkRowsProblem(method) is { } chunks)
-            context.ReportDiagnostic(Diagnostic.Create(BadChunkRows, location, method.Name, chunks));
+            context.ReportDiagnostic(Diagnostic.Create(BadChunkRows, location, // dropped, the method runs as without it
+                ImmutableDictionary<string, string?>.Empty.Add(FixKind, "ChunkRows"), method.Name, chunks));
         if (Symbols.Unnameable(method) is { } unnameable)
             context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, // the type its code fix makes internal, with its containers
                 Symbols.Hidden(unnameable)?.Locations.Where(l => l.IsInSource) ?? [],

@@ -1,7 +1,7 @@
 ---
 title: 分析器规则
-seoTitle: "EasyEcs 分析器规则 EECS002-EECS056：每条 C# 诊断的含义与修法"
-description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS056：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
+seoTitle: "EasyEcs 分析器规则 EECS002-EECS061：每条 C# 诊断的含义与修法"
+description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS061：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
 icon: ShieldCheck
 ---
 
@@ -9,7 +9,7 @@ EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/doc
 EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑、但有代价的写法（EECS017、EECS018、EECS020）。生成器会跳过无效输入，由分析器报出来，
 所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046、EECS052、EECS053）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
-（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -57,7 +57,7 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS024](#eecs024) | 错误 | `[ForEach]` 不能放在局部函数上 | |
 | [EECS025](#eecs025) | 警告 | 写访问没有只读 | `in`、`ReadOnlySpan<T>`、`Read<T>()`，`Mut<T>` 改成 `in T` |
 | [EECS026](#eecs026) | 警告 | `[ForEach]` 方法用到自己的参数 | `[With<T>]`，或删掉参数 |
-| [EECS027](#eecs027) | 警告 | 每行都要查的数据，作为 `[ForEach]` 参数传入 | |
+| [EECS027](#eecs027) | 警告 | 每行都要查的数据，作为 `[ForEach]` 参数传入 | 把查找改成参数 |
 | [EECS028](#eecs028) | 警告 | 每次更新都执行的代码不分配内存 | |
 | [EECS029](#eecs029) | 警告 | 实例 `[ForEach]` 方法用到自己的系统 | 改成 static |
 | [EECS030](#eecs030) | 警告 | 对查询结果的结构变化用一次批量调用 | 批量调用 |
@@ -84,14 +84,21 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS051](#eecs051) | 错误 | 遍历进行中不更新 World | |
 | [EECS052](#eecs052) | 警告 | 新实体的组件在创建时就给出 | 创建时带上组件 |
 | [EECS053](#eecs053) | 警告 | 只在部分行上写入的追踪变化组件用 `Mut<T>` | `Mut<T>` |
-| [EECS054](#eecs054) | 错误 | `ChunkRows` 不小于 0，且只用于并行方法 | |
+| [EECS054](#eecs054) | 错误 | `ChunkRows` 不小于 0，且只用于并行方法 | 去掉 `ChunkRows` |
+| [EECS055](#eecs055) | 信息 | 数值组件的 `[ForEach]` 方法得到向量循环 | |
+| [EECS056](#eecs056) | 错误 | `Simd = SimdMode.Require` 只用于符合条件的方法 | |
+| [EECS057](#eecs057) | 错误 | 归约的单例每遍只写一次 | |
+| [EECS060](#eecs060) | 警告 | 多线程上运行的代码不写共享内存 | |
+| [EECS061](#eecs061) | 警告 | 遍历之后不读并行 job 的字段 | `ForEach` / `ForEachEntity` |
 
 ## EECS002 [#eecs002]
 
 **`[ForEach]` 参数无效。** 错误。代码修复：给按值传入的组件或单例加上 `in` 或 `ref`。
 
 每个参数都必须是以下之一：实现 `IComponent` 或 `ISingletonComponent` 的 `ref` / `in` / `ref readonly` 结构体，`IComponent`
-结构体的 `Span<T>` / `ReadOnlySpan<T>`，它的 `Maybe<T>` 或 `ReadOnlyMaybe<T>`（可选组件），`Entity`，或者 `World`。
+结构体的 `Span<T>` / `ReadOnlySpan<T>`，它的 `Maybe<T>` 或 `ReadOnlyMaybe<T>`（可选组件），`Mut<T>`，`ref Reduce<T>`
+（[归约](/zh/docs/guide/threading#reductions)；不带 `ref` 时部分结果只是一份副本），`Entity`，或者 `World`。
+{/* TODO(parallel ForEach): Scratch<T> 和 Lookup<T> 合并后加进这个列表。 */}
 [系统之外](/zh/docs/guide/systems#foreach-outside-systems)的 `[ForEach]` 方法还可以接收任意其他类型的值，由生成的入口从调用方传进来。
 
 ```csharp doccheck=expect-EECS002
@@ -833,7 +840,8 @@ public class CountSurvivors : EcsSystem
 
 ## EECS027 [#eecs027]
 
-**参数一次就能拿到的数据，却每行查一次。** 警告。无代码修复。
+**参数一次就能拿到的数据，却每行查一次。** 警告。代码修复：把查找的组件或单例改成参数（`in T`，查找里有写入时用 `ref T`），
+并把这个类型的每次查找都换成这个参数。
 
 规则覆盖 `[ForEach]` 方法和手写 job 的 `Execute`；job 把组件作为它接口的另一个类型实参传入。
 
@@ -851,6 +859,9 @@ public class Drift : EcsSystem
         position = new Position(position.X + entity.Velocity.X, position.Y + entity.Velocity.Y);
 }
 ```
+
+代码修复在每个类型的第一次查找上提供，前提是这个类型的每次查找都是 `Get`、`Read` 或生成的属性（实体没有该组件时它们会抛异常，
+所以改成必须有这个组件，不会改变方法会处理的任何一行）；`TryGet` 或存在性判断、有调用方的方法、批处理方法，以及已经有 9 个组件的方法不提供。
 
 把组件作为参数（`in`、`ref`，部分实体没有它时用 `Maybe<T>`；判断有没有某个组件，用 `Maybe<T>` 或者拆成 `[With<T>]` /
 `[Without<T>]` 两个方法；带索引的组件用 `in` 或 `ReadOnlyMaybe<T>`），单例也作为参数：
@@ -1525,7 +1536,7 @@ var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
 public record struct Location(int X, int Y) : IComponent, ITracked;
 ```
 
-```csharp doccheck=expect-EECS053
+```csharp tab="报告" doccheck=expect-EECS053
 public class RespawnSystem : EcsSystem
 {
     [ForEach]
@@ -1538,9 +1549,7 @@ public class RespawnSystem : EcsSystem
 }
 ```
 
-改成 `Mut<T>`：
-
-```csharp
+```csharp tab="修正"
 public class RespawnSystem : EcsSystem
 {
     [ForEach]
@@ -1559,28 +1568,260 @@ public class RespawnSystem : EcsSystem
 
 ## EECS054 [#eecs054]
 
-**不合法的 `[ForEach(ChunkRows = N)]`。** 错误。没有代码修复。
+**不合法的 `[ForEach(ChunkRows = N)]`。** 错误。代码修复：去掉 `ChunkRows`；之前跳过这个方法的生成器会重新生成它。
 
 `ChunkRows` 是[并行方法](/zh/docs/guide/threading#chunk-rows)的一个线程每次取的行数：0 表示由运行时按行数决定，大于 0 则指定
 （向上取整到 64）。没有 `Parallel = true` 的方法只在一个线程上跑，没有块可言；负数没有意义。
 
-```csharp doccheck=expect-EECS054
-public class PlanCells : EcsSystem
+```csharp tab="报告" doccheck=expect-EECS054
+public class PlanRoutes : EcsSystem
 {
+    const int Steps = 4_096;
+
     [ForEach(ChunkRows = 64)]   // 单线程：没有块可设大小
-    static void Plan(in Position position, ref Velocity velocity) => velocity = new Velocity(position.X, position.Y);
+    static void Plan(in Position from, ref Velocity heading)
+    {
+        float x = from.X;
+        for (int i = 0; i < Steps; i++) x = MathF.Sqrt(x * x + 1);   // 重活：每行几微秒
+        heading = new Velocity(x, from.Y);
+    }
 }
 ```
 
-改成并行，或者去掉 `ChunkRows`：
-
-```csharp
-public class PlanCells : EcsSystem
+```csharp tab="修正"
+public class PlanRoutes : EcsSystem
 {
+    const int Steps = 4_096;
+
     [ForEach(Parallel = true, ChunkRows = 64)]
-    static void Plan(in Position position, ref Velocity velocity) => velocity = new Velocity(position.X, position.Y);
+    static void Plan(in Position from, ref Velocity heading)
+    {
+        float x = from.X;
+        for (int i = 0; i < Steps; i++) x = MathF.Sqrt(x * x + 1);   // 重活：每行几微秒
+        heading = new Velocity(x, from.Y);
+    }
 }
 ```
+
+改成并行（像这里，几百行重活），或者去掉 `ChunkRows`。轻量的行两者都不需要：保持默认的块（[什么时候设](/zh/docs/guide/threading#chunk-rows)）。
+
+## EECS055 [#eecs055]
+
+**一行一行执行的 `[ForEach]` 方法。** 建议（信息级别）。没有代码修复。
+
+符合条件的 `[ForEach]` 方法会被生成器写成[向量循环](/zh/docs/guide/systems#vector-loops)。一个看起来就是为向量循环写的方法（静态、
+单线程、只接收数值字段的组件、单例和值），只要缺了一个条件，就会收到这条消息，消息里写出第一个原因：组件有 5 个字段、两种 lane
+类型、循环没有向量版本的调用、写入的目标不是 lane。它相当于 Burst 的 Inspector：构建时就知道哪个方法保持标量、为什么。方法照样正确运行，
+只是一行一行地跑。
+
+```csharp tab="报告" doccheck=expect-EECS055
+public struct Body : IComponent { public float X, Y, Z, Mass; public int Squad; }   // 5 个字段，float 和 int
+
+public class Sink : EcsSystem
+{
+    [ForEach]   // “component Body has 5 fields (a vector loop splits up to 4)”
+    static void Fall(ref Body body) => body.Y -= body.Mass * 0.01f;
+}
+```
+
+```csharp tab="修正"
+public struct Body : IComponent { public float X, Y, Z, Mass; }   // 4 个 float：每个字段一个向量
+public struct Squad : IComponent { public int Value; }             // int 放进它自己的组件
+
+public class Sink : EcsSystem
+{
+    [ForEach]
+    static void Fall(ref Body body) => body.Y -= body.Mass * 0.01f;
+}
+```
+
+按消息改，或者给本来就该保持标量的方法（行很少，或者方法体循环接不了）加 `[ForEach(Simd = SimdMode.Off)]` 让它不再提示。
+它是建议级别，只在 IDE 里显示；`.editorconfig` 里写 `dotnet_diagnostic.EECS055.severity = warning`，构建时就会列出所有保持标量的方法。
+
+## EECS056 [#eecs056]
+
+**要求向量循环，方法却不符合条件。** 错误。没有代码修复。
+
+`[ForEach(Simd = SimdMode.Require)]` 表示这个方法必须有向量循环：它是速度取决于向量循环的热路径。方法不符合条件时构建失败，原因和
+EECS055 给出的一样，所以之后的改动（循环没有向量版本的调用、换了类型的字段）不会悄悄把它变慢。
+
+```csharp tab="报告" doccheck=expect-EECS056
+public struct Charge : IComponent { public float Value; }
+
+public class Recharge : EcsSystem
+{
+    [ForEach(Simd = SimdMode.Require)]   // “Math.Clamp is not supported”
+    static void Fill(ref Charge charge) => charge.Value = Math.Clamp(charge.Value + 0.1f, 0f, 1f);
+}
+```
+
+```csharp tab="修正"
+public struct Charge : IComponent { public float Value; }
+
+public class Recharge : EcsSystem
+{
+    [ForEach(Simd = SimdMode.Require)]
+    static void Fill(ref Charge charge) => charge.Value = MathF.Min(MathF.Max(charge.Value + 0.1f, 0f), 1f);
+}
+```
+
+按消息改，或者设成 `SimdMode.Auto`（默认值），接受一行一行的循环。
+
+{/* TODO(vector loops): Math.Clamp、MathF.* 和 lerp 有了向量版本后，把这个例子的原因换成仍然成立的一个。 */}
+
+## EECS057 [#eecs057]
+
+**归约的结果会被另一处写入覆盖。** 错误。没有代码修复。
+
+[`Reduce<T>` 参数](/zh/docs/guide/threading#reductions)给每一块行一个部分结果，这一遍结束时用合并后的结果替换单例 `T`。同一个方法或系统里
+第二个 `Reduce<T>`，或者同一个方法的 `ref T` 参数，在同一遍里也写 `T`：一个结果会悄悄覆盖另一个。
+
+```csharp tab="报告" doccheck=expect-EECS057
+public struct Census : ISingletonComponent, IReduction<Census>
+{
+    public long Health;
+    public static Census Identity => default;
+    public static Census Combine(Census left, Census right) => new() { Health = left.Health + right.Health };
+}
+
+public class CountUnits : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Alive(in Health health, ref Reduce<Census> census) => census.Value.Health += health.Value;
+
+    [ForEach, With<Dead>]   // 第二个 Reduce<Census>：阵亡者的总和会覆盖存活者的
+    static void Fallen(in Health health, ref Reduce<Census> census) => census.Value.Health += health.Value;
+}
+```
+
+```csharp tab="修正"
+public struct Census : ISingletonComponent, IReduction<Census>
+{
+    public long Health;
+    public static Census Identity => default;
+    public static Census Combine(Census left, Census right) => new() { Health = left.Health + right.Health };
+}
+
+public struct Casualties : ISingletonComponent, IReduction<Casualties>
+{
+    public long Health;
+    public static Casualties Identity => default;
+    public static Casualties Combine(Casualties left, Casualties right) => new() { Health = left.Health + right.Health };
+}
+
+public class CountUnits : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Alive(in Health health, ref Reduce<Census> census) => census.Value.Health += health.Value;
+
+    [ForEach, With<Dead>]
+    static void Fallen(in Health health, ref Reduce<Casualties> fallen) => fallen.Value.Health += health.Value;
+}
+```
+
+每个结果归约进它自己的单例，在之后的系统里用 `in T` 读最近一次的结果。
+
+## EECS060 [#eecs060]
+
+**在多个线程上运行的代码写共享内存。** 警告。没有代码修复。
+
+`[ForEach(Parallel = true)]` 方法，以及由 `ForEachParallel` 或 `ForEachEntityParallel` 运行的 job 的 `Execute`，会同时在多个线程上跑，
+每个线程一块行。静态字段或自动属性、上下文参数引用的对象、job 字段持有的对象（每一块的 job 副本共享它），对所有线程都是同一块内存：
+自增会丢更新，列表的 `Add` 会把列表写坏，普通写入最后留下哪个取决于时机。规则不报：每个线程都写同一个常量、`[ThreadStatic]` 字段、
+并发集合、`Interlocked` 和 `Volatile` 调用、`lock` 里的写入、数组和列表的元素（不同的行可以各占不同的元素）以及局部变量。
+
+```csharp tab="报告" doccheck=expect-EECS060
+public static class HitStats
+{
+    public static int Hits;
+}
+
+public class TakeHits : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(ref Health health)
+    {
+        health = new Health(health.Value - 1);
+        HitStats.Hits++;   // 每个线程都对同一个 int 自增：更新会丢
+    }
+}
+```
+
+```csharp tab="修正"
+public struct Hits : ISingletonComponent, IReduction<Hits>
+{
+    public int Count;
+    public static Hits Identity => default;
+    public static Hits Combine(Hits left, Hits right) => new() { Count = left.Count + right.Count };
+}
+
+public class TakeHits : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(ref Health health, ref Reduce<Hits> hits)
+    {
+        health = new Health(health.Value - 1);
+        hits.Value.Count++;   // 这一块的部分计数，这一遍结束时合并
+    }
+}
+```
+
+总数放进 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 单例；每个实体的结果放进它这一行的组件，由这一遍之后的系统读取。
+每行一次 `Interlocked` 调用也能消掉这条警告，代价是每行都争抢同一条缓存行。
+
+## EECS061 [#eecs061]
+
+**并行 job 的字段在遍历之后被读取。** 警告。代码修复：在调用没有传 `chunkRows` 时，改成在一个线程上运行这个 job（`ForEach` /
+`ForEachEntity`）。
+
+`ForEachParallel` 和 `ForEachEntityParallel` 给每一块运行一个 job 副本，什么都不合并回来：按 `ref` 传入的 job 保持调用之前的值。
+`Execute` 写的字段（总和、计数、标记），调用方之后再读，读到的还是旧值。调用之后对这个 job 的第一次使用是读这样的字段时，规则报告这次调用。
+会把各块副本合并回来的 job（带 `Reduce<T>` 参数的方法生成的 job）不报。
+
+```csharp tab="报告" doccheck=expect-EECS061
+public struct TotalHealth : IForEach<Health>, INoStructuralChanges
+{
+    public long Sum;
+
+    public static int WriteMask => 0;
+
+    public void Execute(ref Health health) => Sum += health.Value;
+}
+
+public static class Reports
+{
+    public static long Total(World world)
+    {
+        var total = new TotalHealth();
+        world.ForEachParallel<Health, TotalHealth>(ref total);
+        return total.Sum;   // 仍然是 0：每一块都加进了自己的副本
+    }
+}
+```
+
+```csharp tab="修正"
+public struct TotalHealth : IForEach<Health>, INoStructuralChanges
+{
+    public long Sum;
+
+    public static int WriteMask => 0;
+
+    public void Execute(ref Health health) => Sum += health.Value;
+}
+
+public static class Reports
+{
+    public static long Total(World world)
+    {
+        var total = new TotalHealth();
+        world.ForEach<Health, TotalHealth>(ref total);   // 一个线程：job 会写回来
+        return total.Sum;
+    }
+}
+```
+
+要在所有核上对大量行求总数，改写成带 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 参数的 `[ForEach(Parallel = true)]` 方法：
+每一块保留一个部分结果，这一遍把它们合并起来。
 
 ## 相关页面 [#related]
 

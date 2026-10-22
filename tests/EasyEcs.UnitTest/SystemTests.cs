@@ -200,6 +200,7 @@ public class SystemTests
 
         Assert.That(Log.FindAll(l => l.EndsWith(".update")), Is.EqualTo(new[] { "input.update", "input.update", "tick.update" }));
         Assert.That(world.DefaultUpdateCount, Is.EqualTo(1), "DefaultUpdateCount counts the default group");
+        Assert.That((world.UpdateCount<InputGroup>(), world.UpdateCount<EmptyGroup>()), Is.EqualTo((2L, 0L)));
         Assert.That(world.TryGetSystem(out InInputGroup input) && input.World == world, Is.True);
         Assert.That(world.RemoveSystem<InInputGroup>(), Is.True);
         world.Update<InputGroup>();

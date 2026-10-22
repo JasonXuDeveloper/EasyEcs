@@ -126,9 +126,24 @@ faster; a busy runner leaves the items to the calling thread. See
 ## Chunk [#chunk]
 
 A slice of the matching rows of a parallel method (`[ForEach(Parallel = true)]`, `ForEachParallel`): a multiple of 64
-rows, about four per thread, between 1,024 and 16,384 rows (a multiple of 4,096 when the method writes a tracked
-component). The [runner](#runner) hands the chunks to its threads; fewer than two chunks run on the calling thread
-alone. See [Systems](/en/docs/guide/systems#parallel-methods).
+rows, by default about four per thread, between 1,024 and 16,384 rows (a multiple of 4,096 when the method writes a
+tracked component), or `ChunkRows` rounded up to 64. The [runner](#runner)'s threads claim the chunks one at a time
+as they finish (OpenMP's `schedule(dynamic, n)`); fewer than two chunks run on the calling thread alone. See
+[chunk size](/en/docs/guide/threading#chunk-rows).
+
+## Reduction [#reduction]
+
+A total over the rows of a pass, computed in parts and combined: a `Reduce<T>` parameter of a `[ForEach]` method
+gives each [chunk](#chunk) (or the pass on one thread) its own partial result starting at `T.Identity`, and when the
+pass ends the partial results are combined with `T.Combine`, in row order, into singleton `T`. OpenMP's `reduction`,
+MPI's `Allreduce`. See [reductions](/en/docs/guide/threading#reductions).
+
+## Vector loop [#vector-loop]
+
+The `Vector<T>` loop the generator writes for a per-row `[ForEach]` method over components of 1 to 4 numbers of one
+type: the method's body computed for as many rows per instruction as a vector holds, with masks for its branches and
+the method itself for the rows left over. EECS055 names why a method got none. See
+[vector loops](/en/docs/guide/systems#vector-loops).
 
 ## Slice [#slice]
 
@@ -259,6 +274,13 @@ A recipe of component values that belongs to no world (`new Prefab().SetHealth(3
 A `DynamicBuffer<T>` component: a list that belongs to one entity, such as a bag of loot or a path. Its writes need
 a `ref`, so every change is tracked, and snapshots copy its elements. See
 [Dynamic buffers](/en/docs/guide/dynamic-buffers).
+
+## Buffer pool [#buffer-pool]
+
+Where the lists of dead [dynamic buffers](#dynamic-buffer) wait, per element type, for the next buffer's first write:
+entities with buffers that come and go allocate nothing once warm. `DynamicBuffer<T>.PoolCapacity` caps the length a
+list may have to go back, and `DynamicBuffer<T>.ReservePool(n)` fills it at start-up. See
+[the buffer pool](/en/docs/guide/dynamic-buffers#pool).
 
 ## Value index [#value-index]
 

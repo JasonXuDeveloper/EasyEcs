@@ -24,7 +24,7 @@ EasyEcs 的全部功能都在这一页，按它在服务器上承担的工作分
 | [查找](#find) | [值索引](#value-indexes)、[唯一键](#unique-keys)、[有序区间](#ordered-ranges)、[按值分表](#table-groups) |
 | [组织](#structure) | [关系](#relations)、[层级](#hierarchy)、[动态缓冲](#dynamic-buffers)、[预制体与克隆](#prefabs-and-cloning) |
 | [持久化](#persist) | [快照](#snapshots)、[存档](#saves)、[迁移](#migration)、[卸载插件类型](#unloading) |
-| [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、并行 [`[ForEach]`](#parallel-foreach)、[批量操作](#bulk-operations) |
+| [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、并行 [`[ForEach]`](#parallel-foreach)、[归约](#reductions)、[批量操作](#bulk-operations) |
 | [构建与运维](#operate) | [分析器与代码修复](#analyzer)、[系统耗时统计](#per-system-timing)、[调度](#schedule)、[异常处理](#errors)、[运行时自省](#introspection)、[归还内存](#trim-excess)、[Native AOT](#native-aot)、[托管与测试](#hosting-and-testing)、[模板与示例程序](#templates) |
 
 ## 模拟 [#simulate]
@@ -111,20 +111,23 @@ public class MovementSystem : EcsSystem
 ### 可选组件 [#optional-components]
 
 `Maybe<T>` 参数不管实体有没有 `T` 都会访问：`HasValue` 说明有没有，`Value` 是 `ref`。可选部分不大时，一个方法就能代替
-`[With<T>]` 和 `[Without<T>]` 两个版本。
+`[With<T>]` 和 `[Without<T>]` 两个版本。`ReadOnlyMaybe<T>` 是只读版本：从不打 tick，调度时算读，也是带索引的组件唯一能用的可选参数。
 
 - **适合：** 只有部分实体才有的加成（伤害计算时的护甲、回血时的增益）。
 - **别用于：** 最热的循环：用 `[With<T>]` / `[Without<T>]` 拆成两个方法，每行都不用检测。
 - **开销：** 不做结构变更的方法每行检测一个存在位；做结构变更的方法每个实体查找一次。
-- **指南：** [系统](/zh/docs/guide/systems)
+- **指南：** [系统](/zh/docs/guide/systems#maybe)、[`ReadOnlyMaybe<T>`](/zh/docs/guide/systems#read-only-maybe)
 
-### 向量循环 [#vector-loops]
+### 生成器写出的向量循环（SIMD） [#vector-loops]
 
-组件都只有一个同类型数值（`float`、`int` 等）的逐行 `[ForEach]` 方法，会以生成器根据方法体写出的 `Vector<T>` 循环运行，和 Burst 编译
-job 的做法一样：`if` 和 `?:` 变成掩码，单例和常量复制到每条通道，结果和逐行方法逐位相同。
+组件有 1 到 4 个同类型数值（`float`、`int` 等；`Position { X, Y, Z }` 也行）的逐行 `[ForEach]` 方法，会以生成器根据方法体写出的
+`Vector<T>` 循环运行，和 Burst 编译 job 的做法一样：`if` 和 `?:` 变成掩码，单例和常量复制到每条通道，多个字段拆成每个字段一个向量，
+结果和逐行方法逐位相同。
 
 - **适合：** 对大量行做算术：衰减、积分、截断、计数。
-- **别用于：** 不用管：它是自动的。不符合条件的方法（`Vector3` 组件、函数调用、`Parallel`）照旧逐行运行。
+- **别用于：** 不用管：它是自动的。不符合条件的方法（`Vector3` 字段、两种数值类型、函数调用、`Parallel`）照旧逐行运行，
+  [EECS055](/zh/docs/guide/analyzer#eecs055) 会说明原因；`Simd = SimdMode.Require` 让它成为构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)），
+  `SimdMode.Off` 不再提示。
 - **开销：** 运行时没有；循环在编译时写好。
 - **指南：** [系统](/zh/docs/guide/systems#vector-loops)
 
@@ -151,7 +154,7 @@ job 的做法一样：`if` 和 `?:` 变成掩码，单例和常量复制到每�
 ### 排序、分组与间隔 [#system-groups-and-intervals]
 
 系统按注册顺序执行，可以用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 调整。`[UpdateInGroup<G>]` 把系统放进一个分组，只在
-`world.Update<G>()` 时执行。`UpdateInterval` 和 `UpdatePhase` 让系统每 N 次更新执行一次，并分散到不同相位；`Enabled` 关掉它。
+`world.Update<G>()` 时执行。`UpdateInterval` 和 `UpdatePhase` 让系统每 N 次更新执行一次，并分散到不同相位（次数是 `world.UpdateCount<G>()`）；`Enabled` 关掉它。
 分组的过滤条件（`[Without<Frozen>]`，或分组自己、它实现的接口上的 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`）作用于分组里所有系统的 `[ForEach]` 方法。
 
 - **适合：** 不同的节奏：输入每次唤醒都处理，模拟按固定 tick 跑，存盘每隔几秒一次；每种 actor 一个分组，用一个泛型接口统一声明。
@@ -315,7 +318,8 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 - **适合：** 账号 id、玩家名、会话令牌、格子的占用者：绝不能对应两个实体的键。
 - **别用于：** `EntityId` 键（[EECS036](/zh/docs/guide/analyzer#eecs036)）；几个实体共用的键（用普通的 `IIndexed<TKey>`）。
 - **开销：** 第一张含该组件的表出现时索引就建好了，所以每次写入都会检查：每个变了的键一次哈希查找，批量调用和读档多遍历一遍行。
-  `Get` 和 `TryGet` 是一次哈希查找。
+  `Get` 和 `TryGet` 是一次哈希查找，只读这个键自己的记录：唯一键直接存它的实体，每个键没有数组。能映射到有界槽位的键
+  （`IDirectIndexed<TKey>`：网格格子、小 id）改为读一个数组元素（[直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index)）。
 - **指南：** [索引与关系](/zh/docs/guide/indexes-and-relations)
 
 ### 有序区间 [#ordered-ranges]
@@ -391,8 +395,9 @@ var guard = world.Instantiate(goblin, new ChildOf(archer));          // 自带�
 
 - **适合：** 属于某个实体、变了就要发送或保存的列表：背包、路径、最近的命中记录。
 - **别用于：** 有自己状态的元素（每个元素一个实体，加一条关系），或者数量固定的一小组值（非托管组件里的 `[InlineArray]`）。
-- **开销：** 每个实体一个对象加一个数组，第一次写入时创建；容量之内的写入不分配内存。
-- **指南：** [动态缓冲](/zh/docs/guide/dynamic-buffers)、[ECS 设计原则第 8 条](/zh/docs/ecs-principles#8-choose-how-to-hold-a-collection)
+- **开销：** 每个实体一个对象加一个数组，第一次写入时创建；容量之内的写入不分配内存。销毁的缓冲把列表交给池，同类型的下一个缓冲
+  从池里取，不论在哪个线程：`PoolCapacity` 决定最长保留多长的列表，`ReservePool(n)` 在启动时把池填满。`SetCount(n)` 返回 span，原地写整个缓冲。
+- **指南：** [动态缓冲](/zh/docs/guide/dynamic-buffers)、[缓冲池](/zh/docs/guide/dynamic-buffers#pool)、[ECS 设计原则第 8 条](/zh/docs/ecs-principles#8-choose-how-to-hold-a-collection)
 
 ### 预制体与克隆 [#prefabs-and-cloning]
 
@@ -449,7 +454,8 @@ restarted.Load(bytes.WrittenSpan);
 `SaveEntities` 和 `LoadEntities` 经由字节把相关的实体（一个玩家和他拥有的东西）搬到另一个 World，换上新 id，组内的链接随之改写。
 `MoveEntities` 在同一线程的两个 World 之间直接搬，不经过编码。记录只保存需要持久化的部分：`SaveEntitiesWith(writer, ids, set)`
 配一个 `ComponentSet`，只写出集合里的组件；`LoadEntitiesInto(bytes, entities)` 把它们放到已经存在的实体上。
-加上 `markWritten: false`，恢复的值不算变更，按变更存盘的系统就不会立刻把它写回去。
+加上 `markWritten: false`，恢复的值不算变更，按变更存盘的系统就不会立刻把它写回去。`SaveEntitiesWithout(writer, ids, set)` 反过来：
+除了集合都写，留给加载后会重新算的数据。
 
 - **适合：** 玩家换场景或换服，对局结束把幸存者交给大厅（用 `Descendants` 收集整组）；实体先于存储数据出现的 actor 用记录。
 - **开销：** O(给出的实体数 × 组件数)；`MoveEntities` 直接拷贝行。
@@ -494,10 +500,24 @@ restarted.Load(bytes.WrittenSpan);
 （[EECS010](/zh/docs/guide/analyzer#eecs010)）：结构变更、批量方法、以 `ref` 接收单例。`world.ForEachParallel` 和
 `ForEachEntityParallel` 对结构体 job 做同样的事。
 
-- **适合：** 几万个实体以上、每个实体计算量大的工作：转向、寻路跟随、AI 打分。
-- **开销：** 每块 1,024 到 16,384 行，大约每个线程四块，零分配。写被追踪组件的方法按 4,096 行的整数倍切块（变更摘要覆盖的块大小），
-  所以表要更大才会被拆开。
-- **指南：** [多线程与并行](/zh/docs/guide/threading)
+- **适合：** 几万个实体以上、每个实体计算量大的工作：转向、寻路跟随、AI 打分；配上 `ChunkRows = n`，也适合只有几百行、每行几微秒的活（地形区块、寻路）。
+- **别用于：** 几千个实体的轻量行：交接的开销比活本身还大。
+- **开销：** 线程做完一块就领下一块，也就是 OpenMP 的 `schedule(dynamic, n)`。默认每块 1,024 到 16,384 行，大约每个线程四块，零分配；
+  写被追踪组件的方法按 4,096 行的整数倍切块（变更摘要一段的行数），所以表要更大才会被拆开。`ChunkRows = n` 指定每块的行数
+  （向上取整到 64；[EECS054](/zh/docs/guide/analyzer#eecs054)）。
+- **指南：** [多线程与并行](/zh/docs/guide/threading)、[`ChunkRows`](/zh/docs/guide/threading#chunk-rows)
+
+### 对所有行求总数（归约） [#reductions]
+
+`ref Reduce<T>` 参数把一遍 `[ForEach]` 变成求一个总数：`T` 是实现了 `IReduction<T>`（`Identity`、`Combine`）的单例，并行遍历的每一块
+（单线程时是整遍）累加进自己的部分结果，这一遍结束时按行的顺序合并部分结果并替换 `T`：就是 OpenMP 的 `reduction`、MPI 的 `Allreduce`。
+
+- **适合：** 存活的单位数、一种资源的总量、人群的范围：每遍对大量行求一个结果。
+- **别用于：** 每个实体各自的结果（写进这一行的组件），以及每个 tick 只有几行会改变的总数（在改这些行的地方更新）。
+- **开销：** 每行一次对本块自己的结构体的写入，没有锁也没有原子操作；每块一个 job 副本，合并一次；第一遍之后零分配。整数精确；
+  `ChunkRows` 固定时，浮点结果在任何线程数下都相同。[EECS057](/zh/docs/guide/analyzer#eecs057) 拒绝对 `T` 的第二处写入；
+  [EECS060](/zh/docs/guide/analyzer#eecs060) 和 [EECS061](/zh/docs/guide/analyzer#eecs061) 报告它所替代的共享计数器和 job 字段。
+- **指南：** [多线程与并行](/zh/docs/guide/threading#reductions)
 
 ### 批量操作 [#bulk-operations]
 
@@ -514,7 +534,7 @@ restarted.Load(bytes.WrittenSpan);
 
 ### 分析器与代码修复 [#analyzer]
 
-包里在生成器旁边附带了分析器（EECS002 到 EECS056）和代码修复。不合法的 `[ForEach]` 方法、类组件、有状态的系统、引用系统的系统、
+包里在生成器旁边附带了分析器（EECS002 到 EECS061）和代码修复。不合法的 `[ForEach]` 方法、类组件、有状态的系统、引用系统的系统、
 经 `in` 的写入、可能竞争的并行方法、跨线程的结构变更、经 `ref` 写入的被索引组件、成环的排序，都会编译失败；还有几条警告标出能跑但有代价的写法。
 
 - **适合：** 一直开着；默认就是开的，它让系统保持解耦。

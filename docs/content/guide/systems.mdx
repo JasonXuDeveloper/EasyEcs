@@ -206,11 +206,12 @@ an instance method. Its parameters say what it runs over:
 | `World` | the world (for creating entities, other singletons) |
 | [`Maybe<T>`](#maybe) | a component the entity may lack |
 | [`ReadOnlyMaybe<T>`](#read-only-maybe) | a component the entity may lack, read only (indexed components too) |
+| [`ref Reduce<T>`](/en/docs/guide/threading#reductions), `T : ISingletonComponent, IReduction<T>` | a total over the rows: each chunk (or the pass on one thread) adds into its own partial result, and the combined result replaces singleton `T` |
 | `Span<T>` / `ReadOnlySpan<T>`, `EntitySpan` | a [batch method](#batch-methods): runs of rows at once |
 
 | Attribute | Meaning |
 | --- | --- |
-| `[ForEach]` | run the method for every matching entity; `Parallel = true` for [several threads](#parallel-methods), `Slices = N` for [part of the rows per run](#slices) |
+| `[ForEach]` | run the method for every matching entity; `Parallel = true` for [several threads](#parallel-methods) (with `ChunkRows = n`, [the rows a thread takes at a time](/en/docs/guide/threading#chunk-rows)), `Slices = N` for [part of the rows per run](#slices) |
 | `[With<T>]` | the entity must have `T`, not passed in; repeatable |
 | `[Without<T>]` | the entity must not have `T`; repeatable |
 | `[WithAny<T>]` | the entity must have at least one of the method's `[WithAny<T>]` components |
@@ -218,6 +219,33 @@ an instance method. Its parameters say what it runs over:
 | `[Removed<T>]` | the entity lost `T` (`ITracked`) since the system last ran ([removal detection](/en/docs/guide/change-tracking#removal-detection)) |
 | `[ChangedAny<T1, …, Tn>]` | at least one of the components (2 to 9, `ITracked`) was written since the system last ran ([any of several](/en/docs/guide/change-tracking#changed-any)) |
 | `[RemovedAny<T1, …, Tn>]` | the entity lost at least one of the components since the system last ran |
+
+The properties of `[ForEach]`:
+
+<TypeTable
+  type={{
+    Parallel: {
+      type: 'bool',
+      description: 'Cut the rows into chunks that several threads claim at once (parallel methods, below).',
+      default: 'false',
+    },
+    ChunkRows: {
+      type: 'int',
+      description: 'With Parallel: the rows a thread claims at a time, rounded up to 64 (OpenMP schedule(dynamic, n)); 0 chooses from the row count. EECS054.',
+      default: '0',
+    },
+    Slices: {
+      type: 'int',
+      description: 'Visit about 1 / N of the rows on each run, every row once per N runs (slices, above). Not with change filters: EECS035.',
+      default: '1',
+    },
+    Simd: {
+      type: 'SimdMode',
+      description: 'Auto: a vector loop when the method qualifies (EECS055 names why not). Require: an error when it does not (EECS056). Off: one row at a time, no message.',
+      default: 'SimdMode.Auto',
+    },
+  }}
+/>
 
 With no component parameter, the first `[With<T>]` (else the first `[Changed<T>]`) names the queried component:
 
@@ -283,10 +311,28 @@ holds it to that, so a tracked `T` is never stamped. It is the one optional para
 the key behind the index's back ([EECS015](/en/docs/guide/analyzer#eecs015)), and reading it through the `Entity`
 instead is a lookup per row ([EECS027](/en/docs/guide/analyzer#eecs027)).
 
+| The method, for a component some entities lack | Take |
+| --- | --- |
+| writes it on the entities that have it | `Maybe<T>` |
+| only reads it | `ReadOnlyMaybe<T>` |
+| only reads it, and it is indexed (`IIndexed<TKey>`, `IGroup`) | `ReadOnlyMaybe<T>` (a `Maybe<T>` is EECS015) |
+| runs in the hottest loop, over many rows | two methods, `[With<T>]` and `[Without<T>]`: no test per row |
+
 ```csharp
 public record struct Guild(int Id, int Level) : IComponent, IIndexed<int> { public int Key => Id; }
 public record struct Morale(int Value) : IComponent;
+```
 
+```csharp tab="Lookup per row" doccheck=expect-EECS027
+public class Rally : EcsSystem
+{
+    [ForEach]
+    static void Raise(Entity member, ref Morale morale) =>
+        morale.Value += member.HasGuild ? 1 + member.Guild.Level : 1;   // the entity searched on every row
+}
+```
+
+```csharp tab="ReadOnlyMaybe<T>"
 public class Rally : EcsSystem
 {
     [ForEach]
@@ -295,7 +341,7 @@ public class Rally : EcsSystem
 }
 ```
 
-The lookups are those of `Maybe<T>`. A `Maybe<T>` converts to a `ReadOnlyMaybe<T>`, so a helper that only reads can
+The lookups are those of `Maybe<T>`, and so is the cost: the `MaybeBenchmark` table [below](#how-to-use-it-fast). A `Maybe<T>` converts to a `ReadOnlyMaybe<T>`, so a helper that only reads can
 take the read-only one from either.
 
 ### Batch methods [#batch-methods]
@@ -330,10 +376,12 @@ A scalar loop over spans gains little over a per-entity method; write a batch me
 
 ### Parallel methods [#parallel-methods]
 
-`[ForEach(Parallel = true)]` cuts the matching rows into chunks (about four per thread, a multiple of 64 rows,
-between 1,024 and `World.ParallelChunkRows` = 16,384) and runs them on the calling thread plus up to
-`WorldOptions.MaxDegreeOfParallelism - 1` thread-pool threads. It is for heavy per-entity work (path finding,
-steering, AI scoring) over tens of thousands of entities; for light work the hand-off costs more than it saves.
+`[ForEach(Parallel = true)]` cuts the matching rows into chunks (by default about four per thread, a multiple of 64
+rows, between 1,024 and `World.ParallelChunkRows` = 16,384) that the calling thread plus up to
+`WorldOptions.MaxDegreeOfParallelism - 1` thread-pool threads claim one at a time as they finish, like OpenMP's
+`schedule(dynamic, n)`. It is for heavy per-entity work (path finding, steering, AI scoring) over tens of thousands
+of entities, or over a few hundred rows that cost microseconds each with `ChunkRows`; for light work the hand-off
+costs more than it saves.
 
 ```csharp
 public record struct Clock(float Time) : ISingletonComponent;
@@ -352,19 +400,61 @@ row's run reads, such as another entity through `Get`. Fewer than two chunks run
 nothing after its first update.
 
 A method that writes a tracked component (a `ref` or a [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed)
-parameter) is cut at multiples of 4,096 rows, so a table of 4,096 rows or fewer runs on one thread
-([why](/en/docs/guide/threading#parallel-foreach-methods)). For a few hundred heavy rows, `ChunkRows = 64` sets the
-rows a thread takes at a time ([chunk size](/en/docs/guide/threading#chunk-rows)).
+parameter) is cut by default at multiples of 4,096 rows, so a table of 4,096 rows or fewer runs on one thread
+([why](/en/docs/guide/threading#parallel-foreach-methods)). `ChunkRows = n` sets the rows a thread takes at a time,
+the `n` of `schedule(dynamic, n)`, rounded up to 64, for a few hundred heavy rows:
+
+```csharp
+public record struct Route(int Length) : IComponent;
+public record struct Goal(int X, int Y) : IComponent;
+
+public class RouteSystem : EcsSystem
+{
+    const int Steps = 4_096;   // a path search per agent: microseconds each
+
+    [ForEach(Parallel = true, ChunkRows = 64)]
+    static void Search(in Position from, in Goal goal, ref Route route)
+    {
+        int length = 0;
+        float x = from.X, y = from.Y;
+        for (int i = 0; i < Steps && (MathF.Abs(goal.X - x) > 1 || MathF.Abs(goal.Y - y) > 1); i++)
+        {
+            x += MathF.Sign(goal.X - x);
+            y += MathF.Sign(goal.Y - y);
+            length++;
+        }
+        route = new Route(length);
+    }
+}
+```
+
+How the chunks are claimed, how to choose `n` and what it costs: [chunk size](/en/docs/guide/threading#chunk-rows).
 
 ### Vector loops: SIMD the generator writes [#vector-loops]
 
 You write a `[ForEach]` method for one row; when its components are plain numbers, the generator also writes its
 SIMD loop: the method's body becomes a `System.Numerics.Vector<T>` loop over each run of matching rows, as many rows
-per instruction as `Vector<T>` holds (8 floats on x64 with AVX2, 4 on Arm). Unity's Burst and ISPC work this way: the method is the kernel of
-one lane. The .NET JIT does not vectorize loops on its own, so without this a per-row method runs one row at a time.
-There is nothing to opt into and nothing to write by hand:
+per instruction as `Vector<T>` holds (8 floats on x64 with AVX2, 4 on Arm). Unity's Burst and ISPC work this way: the
+method is the kernel of one lane. The .NET JIT does not vectorize loops on its own, so without this a per-row method
+runs one row at a time ([D68](/en/docs/decisions#d68-vector-loops-without-opting-in)). There is nothing to opt into:
+`[ForEach(Simd = SimdMode.Require)]` makes a method that loses its loop a build error, `SimdMode.Off` keeps one
+scalar.
 
-```csharp
+<Callout type="idea" title="Use it for">
+  Hot per-row arithmetic over many rows: movement, heat, decay, timers, clamps, counters. Write the method for one row
+  in the shape below and the loop comes with it.
+</Callout>
+
+<Callout type="warn" title="Skip it when">
+  The work is not arithmetic on numbers: lookups, calls, buffers, structural changes. Those methods stay row by row,
+  which is right for them. For lanes the rule does not cover (bytes, mixed types) write a
+  [batch method](#batch-methods) with `Vector128<T>` or `Vector<T>` by hand.
+</Callout>
+
+The method below qualifies. The second tab is the job the generator wrote for it (from the system's
+`CoolingSystem.….ForEach.g.cs`, trimmed to the loop and with the `global::` prefixes dropped):
+
+```csharp tab="You write"
 public struct Heat : IComponent { public float Value; }
 public struct Speed : IComponent { public float Value; }
 public record struct Pull(float Value) : ISingletonComponent;
@@ -381,31 +471,177 @@ public class CoolingSystem : EcsSystem
 }
 ```
 
+```csharp tab="The generator writes" doccheck=skip
+// Generated: an IForEachBatch job over each run of matching rows. Do not copy it: it calls your private
+// method through an [UnsafeAccessor] (Cool_0) and reinterprets the columns with Unsafe.As.
+public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2)
+{
+    ref Heat r1 = ref MemoryMarshal.GetReference(c1);
+    ref Speed r2 = ref MemoryMarshal.GetReference(c2);
+    nint rows = c1.Length;
+    ref float e1 = ref Unsafe.As<Heat, float>(ref r1);            // the columns as floats
+    ref float e2 = ref Unsafe.As<Speed, float>(ref r2);
+    nint i = 0;
+    if (Vector.IsHardwareAccelerated && rows >= Vector<float>.Count)
+    {
+        // 1. Uniform values, broadcast once per run: the singleton and the constants
+        var __u0 = new Vector<float>(s2.Value);                   // pull.Value
+        var __u1 = new Vector<float>(10f);
+        var __u2 = new Vector<float>(-10f);
+        var __u4 = new Vector<float>(100f);
+        var __u5 = new Vector<float>(0.125f);
+        for (nint last = rows - Vector<float>.Count; i <= last; i += Vector<float>.Count)
+        {
+            // 2. Loads: one vector of rows from each column
+            var __c1 = Vector.LoadUnsafe(ref e1, (nuint)i);           // heat
+            var __c2 = Vector.LoadUnsafe(ref e2, (nuint)i);           // speed
+            // 3. The body, lane by lane, in the order you wrote it
+            __c2 = Vector.Max(Vector.Min((__c2 - (__c1 * __u0)), __u1), __u2);
+            // 4. if / else: a mask, and a select for each branch
+            var __m3 = Vector.GreaterThan<float>(__c1, __u4);
+            __c1 = Vector.ConditionalSelect<float>(__m3, __u4, __c1);
+            __c1 = Vector.ConditionalSelect<float>(~__m3, (__c1 + (__c2 * __u5)), __c1);
+            // 5. Stores: back into the columns
+            Vector.StoreUnsafe(__c1, ref e1, (nuint)i);
+            Vector.StoreUnsafe(__c2, ref e2, (nuint)i);
+        }
+    }
+    // 6. The tail: the rows after the last whole vector run your method itself
+    for (; i < rows; i++)
+        __ForEach.Cool_0(null, ref Unsafe.Add(ref r1, i), ref Unsafe.Add(ref r2, i), in s2);
+}
+```
+
+- **Uniform values** (singletons, constants, `static readonly` fields) are read once per run of rows and copied to
+  every lane.
+- **Loads and stores** move one `Vector<float>` of rows at a time between the column and a register.
+- **`if` / `else` and `?:`** become a comparison mask and a `ConditionalSelect` per branch: every lane computes both
+  sides, and the mask keeps the one its condition picked. A `return` under a condition turns its lanes off for the rest
+  of the method.
+- **The tail** runs the method itself on the rows after the last whole vector, and on every row when the hardware has
+  no vector unit, so the results never depend on the lane count.
+
+**Components of several fields.** A component of 2 to 4 fields of one lane type (`Position { X, Y, Z }`) is split into
+one vector per field: a deinterleaving load reads `Vector<float>.Count` rows of the column and gives the X lanes, the Y
+lanes and the Z lanes, and an interleaving store puts them back. The generator calls `EasyEcs.Interleaved` for both:
+AVX2 shuffles and blends at 256 bits, two-source permutes at 512, for lanes of 4 and 8 bytes. Where the CPU has
+neither (Arm, older x64), `Interleaved.IsAccelerated` is false and every row runs the method one at a time, with the
+same results.
+
+```csharp tab="You write"
+public struct Position3 : IComponent { public float X, Y, Z; }
+public struct Velocity3 : IComponent { public float X, Y, Z; }
+public record struct Gravity(float Pull) : ISingletonComponent;
+
+public class FallSystem : EcsSystem
+{
+    [ForEach]
+    static void Fall(ref Position3 position, ref Velocity3 velocity, in Gravity gravity)
+    {
+        velocity.Y -= gravity.Pull;
+        if (position.Y < 0f) velocity.Y = 0f;   // on the ground: a mask over the Y lanes
+        position.X += velocity.X;
+        position.Y += velocity.Y;
+        position.Z += velocity.Z;
+    }
+}
+```
+
+```csharp tab="The generator writes" doccheck=skip
+// Generated (FallSystem.….ForEach.g.cs, trimmed, global:: dropped). Do not copy it: Interleaved is the generator's
+// helper, and Fall_0 is an [UnsafeAccessor] to your private method.
+ref float e1 = ref Unsafe.As<Position3, float>(ref r1);   // the columns as runs of floats: X, Y, Z, X, Y, Z, ...
+ref float e2 = ref Unsafe.As<Velocity3, float>(ref r2);
+nint i = 0;
+if (Vector.IsHardwareAccelerated && Interleaved.IsAccelerated && rows >= Vector<float>.Count)
+{
+    var __u0 = new Vector<float>(s2.Pull);   // the singleton, broadcast once per run
+    var __u2 = new Vector<float>(0f);
+    for (nint last = rows - Vector<float>.Count; i <= last; i += Vector<float>.Count)
+    {
+        // 1. Deinterleaving loads: Count rows of X, Y, Z become three vectors per component
+        Interleaved.Load3(ref e1, (nuint)i, out Vector<float> __c1_0, out Vector<float> __c1_1, out Vector<float> __c1_2);
+        Interleaved.Load3(ref e2, (nuint)i, out Vector<float> __c2_0, out Vector<float> __c2_1, out Vector<float> __c2_2);
+        // 2. The body, one vector per field
+        __c2_1 = (__c2_1 - __u0);
+        var __m1 = Vector.LessThan<float>(__c1_1, __u2);
+        __c2_1 = Vector.ConditionalSelect<float>(__m1, __u2, __c2_1);
+        __c1_0 = (__c1_0 + __c2_0);
+        __c1_1 = (__c1_1 + __c2_1);
+        __c1_2 = (__c1_2 + __c2_2);
+        // 3. Interleaving stores: the fields back into rows
+        Interleaved.Store3(__c1_0, __c1_1, __c1_2, ref e1, (nuint)i);
+        Interleaved.Store3(__c2_0, __c2_1, __c2_2, ref e2, (nuint)i);
+    }
+}
+for (; i < rows; i++)   // 4. the tail, and every row without the shuffles: the method itself
+    __ForEach.Fall_0(null, ref Unsafe.Add(ref r1, i), ref Unsafe.Add(ref r2, i), in s2);
+```
+
 A method gets a vector loop when all of this holds; otherwise it runs row by row, exactly as before:
 
 - **The method:** `static`, per entity, not `Parallel` (a parallel method stays scalar), no `Entity`, `World`,
   `Mut<T>` or `Maybe<T>` parameter.
-- **The components:** each holds one field (or one auto-property) of `float`, `double`, `int`, `uint`, `long` or
-  `ulong`, and all of the method's components the same type: one lane count. `ref` and `in` both work.
-- **Uniform values:** singletons, constants and `static readonly` fields are read once per run and copied to every
-  lane.
+- **The components:** each holds 1 to 4 fields (or auto-properties) of `float`, `double`, `int`, `uint`, `long` or
+  `ulong`, declared in one part, and all of the method's fields the same type: one lane count. `ref` and `in` both
+  work; write the fields (`p.X += v.X`), not a new value of the whole component.
+- **Uniform values:** singletons, constants and `static readonly` fields.
 - **The body:** locals, `=`, compound assignments, `++` / `--`, `+ - *`, `/` on floats, `& | ^ ~`, shifts by a uniform
   count, comparisons, `&& || !`, `?:`, `if` / `else`, `return`, and `Math` / `MathF` `Min`, `Max`, `Abs` (floats),
-  `Sqrt`, `Floor`, `Ceiling` and `FusedMultiplyAdd`. A condition becomes a mask, and a `return` under a condition
-  turns its lanes off for the rest of the method.
+  `Sqrt`, `Floor`, `Ceiling` and `FusedMultiplyAdd`.
 
 **The same results, bit for bit.** Each lane runs the same IEEE operation as the scalar code, in the same order: no
 reassociation, and no fused multiply-add the method did not write (`Vector.Min` / `Max` treat NaN and −0 as
-`Math.Min` / `Max` do). The rows after the last whole vector, and every row when the hardware has no vector unit, run
-the method itself. Change ticks and the system's read and write sets are those of the per-row method.
+`Math.Min` / `Max` do). Change ticks and the system's read and write sets are those of the per-row method.
 
-**Make a method qualify** the way Burst code is written: split a component of several fields into components of one
-field each (`PositionX`, `PositionY` instead of a `Vector2` component), keep one number type per method, and move a
-call or an integer division to a method of its own. The generated file of the system (`<System>.ForEach.g.cs`, under
-the project's generated sources) holds `Vector<` when the method got a loop. For lanes the rule does not cover (bytes,
-mixed types), write a [batch method](#batch-methods) with `Vector128<T>` or `Vector<T>` by hand.
+**A method that does not qualify** stays a scalar loop: it is correct, only slower, and
+[EECS055](/en/docs/guide/analyzer#eecs055) (a suggestion in the IDE) names the first reason, as Burst's inspector
+would. The common causes are a component of more than 4 fields, two number types in one method, a whole component
+assigned (`p = new Position(...)`) instead of its fields, and a call the rule does not cover. Rewrite it the way
+Burst code is written: one number type per method, at most 4 fields per component, the call moved out. A method
+whose speed depends on its loop says so with `Simd = SimdMode.Require`, and the build fails
+([EECS056](/en/docs/guide/analyzer#eecs056)) when an edit takes the loop away.
+
+```csharp tab="Stays scalar" doccheck=expect-EECS055
+public struct Fuel : IComponent { public float Value; }
+public struct Engines : IComponent { public int Value; }   // EECS055: lane types float and int differ
+
+public class BurnFuel : EcsSystem
+{
+    [ForEach]
+    static void Burn(ref Fuel fuel, in Engines engines) =>
+        fuel.Value = MathF.Max(fuel.Value - engines.Value * 0.5f, 0f);
+}
+```
+
+```csharp tab="Qualifies"
+public struct Fuel : IComponent { public float Value; }
+public struct BurnRate : IComponent { public float Value; }   // the engines' rate, kept as a float
+
+public class BurnFuel : EcsSystem
+{
+    [ForEach]
+    static void Burn(ref Fuel fuel, in BurnRate rate) =>
+        fuel.Value = MathF.Max(fuel.Value - rate.Value, 0f);
+}
+```
+
+The system's generated file (`<System>.….ForEach.g.cs`, under the project's generated sources, or with
+`<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>` under `obj/`) holds `Vector<` when the method got a
+loop; EECS055 names the methods that did not, without opening the file.
+
+{/* TODO(vector loops): Math.Clamp, MathF.* beyond Min/Max/Abs/Sqrt/Floor/Ceiling, lerp and conversions; vector
+reductions (Reduce<T> in a vector loop); FloatMode.Fast; presence-bit lane masks (Maybe<T> as a mask);
+Vector512; bounds-check-free scalar loops. Add each to the qualification list above, with its generated code
+where it changes the loop's shape. */}
+
+`KernelBenchmark` runs the per-row job against the generated loop over 100,000 and 1,000 rows (a clamp with a branch,
+`h += v * dt`, an int increment, and positions of 2 to 4 fields moved, sought and travelled); its numbers are in [D68](/en/docs/decisions#d68-vector-loops-without-opting-in):
 
 <BenchTable bench="KernelBenchmark" />
+
+Vector loops, parallel chunks, batch methods and grid kernels side by side, with what each borrows from Burst,
+OpenMP and the GPU: [high-performance patterns](/en/docs/guide/high-performance).
 
 ### System groups [#system-groups]
 
@@ -428,10 +664,14 @@ public class ApplyInputSystem : EcsSystem
 world.AddSystem<ApplyInputSystem>();
 world.Update<InputGroup>();   // whenever input arrives
 world.Update();               // fixed tick: the default group
+long inputs = world.UpdateCount<InputGroup>();   // Update<InputGroup>() calls so far
 ```
 
 Ordering, `UpdateInterval`, `UpdatePhase` and `Enabled` apply within each group, and the attribute is inherited.
-Updating a group with no systems does nothing.
+Updating a group with no systems does nothing. `world.UpdateCount<TGroup>()` counts a group's updates, the running
+one included, as `DefaultUpdateCount` does for the default group: it is the count the group's `UpdateInterval`s are
+taken from, so a tool or a test can tell which systems run on the next update. O(1); 0 for a group no system was
+added to.
 
 #### Group filters [#group-filters]
 
@@ -719,10 +959,12 @@ move although it was added second, so the grounded unit loses half its speed bef
 | `ref` on a component the method only reads | `in` ([EECS025](/en/docs/guide/analyzer#eecs025)) | The system can share a stage; a tracked component is not stamped |
 | An `Entity` or `World` parameter the method does not need | Drop it ([EECS026](/en/docs/guide/analyzer#eecs026)) | The job skips structural bookkeeping and may run in parallel |
 | An instance `[ForEach]` method | A static one ([EECS029](/en/docs/guide/analyzer#eecs029)) | Proven not to change structure: may share a stage, no per-row checks |
-| A component of several numbers in a hot method | One-field components of one number type | The method gets a [vector loop](#vector-loops) |
+| A component of more than 4 numbers, or of two number types, in a hot method | Components of 1 to 4 fields of one number type | The method gets a [vector loop](#vector-loops) |
 | Lanes a vector loop does not cover (bytes, mixed types) | A batch method with `Vector<T>` | SIMD over whole runs of rows |
 | `Maybe<T>` in the hottest loop | Two methods with `[With<T>]` / `[Without<T>]` | No presence test per row |
 | `Parallel = true` on light work | A plain `[ForEach]` | The hand-off costs more than it saves |
+| `Parallel = true` over a few hundred heavy rows, one chunk by default | [`ChunkRows = 64`](/en/docs/guide/threading#chunk-rows) | Every thread claims chunks instead of one doing them all |
+| `Maybe<T>` (or a lookup through the `Entity`) that only reads | [`ReadOnlyMaybe<T>`](#read-only-maybe) | A read for the scheduler, never stamped, no lookup per row ([EECS027](/en/docs/guide/analyzer#eecs027)) |
 | A filter repeated on every method of a cadence | A [group filter](#group-filters) | Written once |
 | Work every tick that could wait | `UpdateInterval` and `UpdatePhase` | Spread over ticks |
 | Upkeep over every entity on every N-th tick | [`Slices = N`](#slices) | A flat cost per update instead of a spike |
@@ -781,6 +1023,9 @@ needed, and a method that writes a singleton:
 | A generic `[ForEach]` method in a system | No type arguments | [EECS004](/en/docs/guide/analyzer#eecs004); make the system generic |
 | Spans mixed with per-entity parameters | No single value per run | [EECS009](/en/docs/guide/analyzer#eecs009) |
 | A parallel method that changes structure or writes a singleton | Races between chunks | [EECS010](/en/docs/guide/analyzer#eecs010) |
+| `ChunkRows` without `Parallel = true`, or below 0 | A method on one thread has no chunks | [EECS054](/en/docs/guide/analyzer#eecs054) |
+| A `Maybe<T>` of an indexed component | Its `ref` could change the key behind the index's back | [EECS015](/en/docs/guide/analyzer#eecs015): a `ReadOnlyMaybe<T>` |
+| `ReadOnlyMaybe<T>.Value` read when the entity lacks `T` | `InvalidOperationException` | Test `HasValue` first |
 | Writing a collection through an `in` parameter | Scheduled as a read, never stamped | [EECS011](/en/docs/guide/analyzer#eecs011) |
 | A structural change through a component's link in a method without `Entity` / `World` | The pass keeps refs into moved rows | [EECS013](/en/docs/guide/analyzer#eecs013) |
 | `UpdateInterval` that changes | Skipped or repeated runs | [EECS018](/en/docs/guide/analyzer#eecs018) |
