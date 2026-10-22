@@ -1,7 +1,7 @@
 ---
 title: Analyzer rules
-seoTitle: "EasyEcs analyzer rules EECS002-EECS085 for C# ECS code"
-description: Every EasyEcs analyzer rule, EECS002 to EECS085, with its severity, its code fix, the code it rejects and the code to write instead.
+seoTitle: "EasyEcs analyzer rules EECS002-EECS089 for C# ECS code"
+description: Every EasyEcs analyzer rule, EECS002 to EECS089, with its severity, its code fix, the code it rejects and the code to write instead.
 icon: ShieldCheck
 ---
 
@@ -17,9 +17,14 @@ EECS040 to EECS045, EECS047 to EECS051) find calls and declarations that compile
 throws or the code cannot work, a warning where a write is lost or a ref can point at the wrong row. The vector-loop
 rules say why a method runs one row at a time (EECS055, a suggestion) and fail the build when a method that must
 vectorize does not (EECS056); EECS057 keeps a [reduction](/en/docs/guide/threading#reductions) the only write of its
-singleton; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses; EECS070 keeps the records of an `Emit<T>` in row order, and EECS071 finds random numbers a run cannot repeat; the tile rules (EECS072, EECS073) reject a grid tile whose halo does not fit and two tiles that would share a texture. The declaration rules (EECS080 to EECS085) suggest the attribute
+singleton; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses; the part
+rules (EECS062 to EECS069) check the types whose members the generator writes from attributes (`[Sum]`, `[Key]`,
+`[Group]`) and the setup attributes, and suggest the attributes for a reduction or a key written by hand; EECS070 keeps the records of an `Emit<T>` in row order, and EECS071 finds random numbers a run cannot repeat; the tile rules (EECS072, EECS073) reject a grid tile whose halo does not fit and two tiles that would share a texture. The declaration rules (EECS080 to EECS085) suggest the attribute
 that writes what code does by hand (a one-entity job, a pass that destroys what it visits) and reject one that cannot
-apply. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
+apply. The parameter rules (EECS086 to EECS089) point code that keeps a method on one thread to the parameter that does
+the same work per chunk: a singleton accumulated row by row to `Reduce<T>`, other entities read through the `World` to
+`Lookup<T>`, records appended to a singleton's list to `Emit<T>`, and a random stream drawn twice to a stream of its
+own. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
 same package), and only when the result compiles.
 
 ## When to read it [#when-to-use-it]
@@ -64,12 +69,12 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS017](#eecs017) | Warning | Components store an `EntityId`, not an `Entity` | `EntityId` for a field |
 | [EECS019](#eecs019) | Error | Systems are not ordered in a cycle | |
 | [EECS020](#eecs020) | Warning | Systems are ordered within their group | |
-| [EECS021](#eecs021) | Error | A `[ForEach]` entry point does not collide with a method | |
+| [EECS021](#eecs021) | Error | A generated entry point does not collide with a method | |
 | [EECS022](#eecs022) | Error | The generated code can name a `[ForEach]` method's types | Make it internal |
 | [EECS023](#eecs023) | Error | Filters go on `[ForEach]` methods and system groups | Remove the filter |
 | [EECS024](#eecs024) | Error | `[ForEach]` is not on a local function | |
 | [EECS025](#eecs025) | Warning | A write access only reads | `in`, `ReadOnlySpan<T>`, `Read<T>()`, `in T` for a `Mut<T>` |
-| [EECS026](#eecs026) | Warning | A `[ForEach]` method uses its parameters | `[With<T>]`, or remove the parameter |
+| [EECS026](#eecs026) | Warning | A `[ForEach]` or `[ForEntity]` method uses its parameters | `[With<T>]`, or remove the parameter |
 | [EECS027](#eecs027) | Warning | A `[ForEach]` method takes what it looks up on every row | Take the lookup as a parameter |
 | [EECS028](#eecs028) | Warning | Code that runs every update does not allocate | |
 | [EECS029](#eecs029) | Warning | An instance `[ForEach]` method uses its system | Make it static |
@@ -105,8 +110,16 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS059](#eecs059) | Error | A `Lookup<T>` reads a component the pass does not write | |
 | [EECS060](#eecs060) | Warning | Code on several threads writes no shared memory | |
 | [EECS061](#eecs061) | Warning | A parallel job's fields are not read after the pass | `ForEach` / `ForEachEntity` |
+| [EECS062](#eecs062) | Error | A type with generated members is partial | Make it partial |
+| [EECS063](#eecs063) | Error | A reduction declared by attributes writes no `Identity` or `Combine` | |
+| [EECS064](#eecs064) | Error | The reduction attributes combine every field | |
+| [EECS065](#eecs065) | Info | A field-wise reduction is declared by attributes | Declare it with attributes |
+| [EECS066](#eecs066) | Warning | A reduction's `Identity` is the identity of its `Combine` | The right `Identity`, or the attributes |
+| [EECS067](#eecs067) | Info | A key that returns a member is declared by `[Key]` | `[Key]` / `[UniqueKey]` |
+| [EECS068](#eecs068) | Error | A setup attribute goes on a type it fits | |
+| [EECS069](#eecs069) | Warning / Info | A saved managed type has a Nino formatter | `[NinoType]` / `[NotSaved]` |
 | [EECS070](#eecs070) | Error | A pass neither reads its own records nor emits one kind twice | |
-| [EECS071](#eecs071) | Warning | `[ForEach]` methods draw repeatable random numbers | `EntityRandom` |
+| [EECS071](#eecs071) | Warning | `[ForEach]` methods draw repeatable random numbers, from no `System.Random` | `EntityRandom` |
 | [EECS072](#eecs072) | Error | A tile's shape fits its halo | |
 | [EECS073](#eecs073) | Error | A method takes one tile per cell type and grid | |
 | [EECS080](#eecs080) | Info | A one-entity job is a `[ForEntity]` method | Write it as a `[ForEntity]` method |
@@ -115,6 +128,10 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS083](#eecs083) | Error | `[UpdateInterval]`: an interval of 1 or more, a phase 0 to n - 1, on a system | |
 | [EECS084](#eecs084) | Info | A `[ForEach]` method that destroys every entity it visits is `[Consume]` | `[Consume]` |
 | [EECS085](#eecs085) | Error | `[Consume]` goes with `[ForEach]`, without `Slices` | |
+| [EECS086](#eecs086) | Info | A singleton reset each update and accumulated row by row is a `Reduce<T>` | |
+| [EECS087](#eecs087) | Warning | Other entities' components are read through a `Lookup<T>`, not the `World` | |
+| [EECS088](#eecs088) | Warning | Each `EntityRandom` draw of a row has a stream of its own | The next free stream |
+| [EECS089](#eecs089) | Info | Records appended row by row go through an `Emit<T>` | |
 
 ## EECS002 [#eecs002]
 
@@ -955,8 +972,9 @@ public class Steer : EcsSystem
 }
 ```
 
-Keep values in structs, spans and `stackalloc`; keep a reusable collection in a component or a singleton taken by
-`ref`; pass numbers, not strings:
+Keep values in structs, spans and `stackalloc`; a list that a row fills is a
+[`Scratch<T>`](/en/docs/guide/threading#scratch) parameter, one per thread and cleared before use, which the message
+of a `[ForEach]` method names; pass numbers, not strings:
 
 ```csharp
 public class Steer : EcsSystem
@@ -2038,6 +2056,208 @@ For a total over many rows on all cores, write a `[ForEach(Parallel = true)]` me
 [`Reduce<T>`](/en/docs/guide/threading#reductions) parameter instead: each chunk keeps a partial result and the pass
 combines them.
 
+## EECS062 [#eecs062]
+
+**A type with generated members that is not partial.** Error. Code fix: makes it partial, with every type that
+contains it.
+
+`[Sum]`, `[Key]` and `[Group]` declare members that the generator writes into the type itself: the members of
+`IReduction<T>`, `IIndexed<TKey>` or `IGroup`, in a second part of the type. A part can only be added to a partial type
+nested in partial types. A `file` type cannot get one, because its part would live in another file.
+
+```csharp tab="Reported" doccheck=alone,expect-EECS062
+public struct Headcount : ISingletonComponent
+{
+    [Sum] public int Alive;
+}
+```
+
+```csharp tab="Fixed"
+public partial struct Headcount : ISingletonComponent
+{
+    [Sum] public int Alive;
+}
+```
+
+## EECS063 [#eecs063]
+
+**A reduction declared by attributes that writes its own members.** Error. No code fix.
+
+The reduction attributes (`[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]`, `[Any]`) declare `IReduction<T>` field by
+field, and the generator writes `Identity` and `Combine` from them. A hand-written member of the same name collides with
+the generated one. A reduction that combines some other way (a first and a last value, a concatenation) implements
+`IReduction<T>` by hand, without the attributes.
+
+```csharp tab="Reported" doccheck=alone,expect-EECS063
+public partial struct Wealth : ISingletonComponent
+{
+    [Sum] public long Gold;
+
+    public static Wealth Identity => default;   // [Sum] already gives the identity
+}
+```
+
+```csharp tab="Fixed"
+public partial struct Wealth : ISingletonComponent
+{
+    [Sum] public long Gold;
+}
+```
+
+## EECS064 [#eecs064]
+
+**A field that the reduction attributes cannot combine.** Error. No code fix.
+
+A reduction declared by attributes combines every instance field. `[Sum]`, `[Product]`, `[Min]` and `[Max]` combine
+numbers (integers, `float`, `double`, `decimal`), and `[All]` and `[Any]` combine bools. `Combine` sets each field of a
+new value, so each one is a field or an auto-property with a setter. A field with no attribute would be dropped by every
+`Combine`, and so would one with two attributes, a `readonly` field or a computed property. The message names the
+field and what it lacks.
+
+```csharp tab="Reported" doccheck=alone,expect-EECS064
+public partial struct Spread : ISingletonComponent
+{
+    [Min] public float Lowest;
+    [Max] public float Highest;
+    public int Rows;               // no attribute: every Combine would drop it
+}
+```
+
+```csharp tab="Fixed"
+public partial struct Spread : ISingletonComponent
+{
+    [Min] public float Lowest;
+    [Max] public float Highest;
+    [Sum] public int Rows;
+}
+```
+
+## EECS065 [#eecs065]
+
+**A hand-written reduction that the attributes can declare.** Suggestion (Info). Code fix: declares it with the
+attributes, partial along its chain, and removes `Identity` and `Combine`.
+
+When a hand-written `IReduction<T>` applies a sum, a product, a minimum, a maximum, an and or an or to each field, the
+attributes can declare it. The generator then writes both members, with the right identity for each field, so no
+`Identity` can be left at 0 for a minimum ([EECS066](#eecs066)).
+
+```csharp tab="Reported" doccheck=alone,expect-EECS065
+public struct Extent : ISingletonComponent, IReduction<Extent>
+{
+    public float Left, Right;
+
+    public static Extent Identity => new() { Left = float.PositiveInfinity, Right = float.NegativeInfinity };
+    public static Extent Combine(Extent a, Extent b) => new() { Left = MathF.Min(a.Left, b.Left), Right = MathF.Max(a.Right, b.Right) };
+}
+```
+
+```csharp tab="Fixed"
+public partial struct Extent : ISingletonComponent
+{
+    [Min] public float Left;
+    [Max] public float Right;
+}
+```
+
+## EECS066 [#eecs066]
+
+**A reduction whose `Identity` is not the identity of its `Combine`.** Warning. Code fix: writes the `Identity` that
+fits `Combine`, or, when `Combine` works field by field, declares the reduction with attributes.
+
+Each chunk of a pass starts its partial result at `Identity`, and the chunks are combined when the pass ends. Suppose
+the `Identity` changes the value it is combined with: 0 for a minimum, or a field left at 0 for a product or for a
+maximum of negative values. Then it adds itself once per chunk, and the result depends on how many chunks the pass
+had, which means on the thread count and the table sizes.
+
+```csharp tab="Reported" doccheck=alone,expect-EECS066
+public struct Weakest : ISingletonComponent, IReduction<Weakest>
+{
+    public float Health;
+
+    public static Weakest Identity => default;   // 0: no chunk's minimum is above it
+    public static Weakest Combine(Weakest a, Weakest b) => new() { Health = MathF.Min(a.Health, b.Health) };
+}
+```
+
+```csharp tab="Fixed"
+public partial struct Weakest : ISingletonComponent
+{
+    [Min] public float Health;    // the generator starts it at float.PositiveInfinity
+}
+```
+
+## EECS067 [#eecs067]
+
+**An index key that an attribute can declare.** Suggestion (Info). Code fix: declares it with `[Key]` (or
+`[UniqueKey]` for a unique index) on the member, partial along its chain.
+
+A `Key` that returns a field, a property or the value itself is what `[Key]` declares on that member (or on the type,
+for the value itself). The generator writes the interface and an explicit `Key`, which no `ToString()` prints and no
+caller reaches by mistake. A key computed from several members stays hand-written.
+
+```csharp tab="Reported" doccheck=alone,expect-EECS067
+public struct Owner : IComponent, IIndexed<EntityId>
+{
+    public EntityId Id;
+
+    public EntityId Key => Id;
+}
+```
+
+```csharp tab="Fixed"
+public partial struct Owner : IComponent
+{
+    [Key] public EntityId Id;
+}
+```
+
+## EECS068 [#eecs068]
+
+**A world setup attribute on a type it does not fit.** Error. No code fix.
+
+Each setup attribute fits certain types, and on any other type no world would apply it:
+
+- `[GroupBy]` makes every world group its tables by a grouped component (`IGroup`, or a member declared with `[Group]`).
+- `[WhenTargetDestroyed]` sets what destroying an entity does to the links to it, so it goes on a relation
+  (`IRelation`) or on a component indexed by an `EntityId`.
+- `[NotSaved]` leaves a component or a singleton out of saves.
+
+```csharp tab="Reported" doccheck=alone,expect-EECS068
+[GroupBy]
+public struct Squad : IComponent
+{
+    public int Id;              // nothing says it is the group
+}
+```
+
+```csharp tab="Fixed"
+[GroupBy]
+public partial struct Squad : IComponent
+{
+    [Group] public int Id;
+}
+```
+
+## EECS069 [#eecs069]
+
+**A managed component or singleton without a Nino formatter.** Warning when the code saves what holds the type,
+suggestion (Info) otherwise. Code fix: marks it `[NinoType]` and partial, or marks it `[NotSaved]`.
+
+A [save](/en/docs/guide/saves) writes unmanaged components as raw rows. It writes every other component and singleton
+with Nino, which needs the formatter that `[NinoType]` generates, so a save that holds the type throws. The rule is a
+warning for a component when the code calls `Save`, `SaveWithout` or `SaveEntities`. For a singleton it is a warning
+only for `Save` or `SaveWithout`, since entity saves write no singletons. Runtime state that a restart rebuilds (a
+connection, a cache) is `[NotSaved]` instead.
+
+```csharp tab="Reported" doccheck=alone,expect-EECS069
+public record struct Title(string Value) : IComponent;   // a string: Nino writes it
+```
+
+```csharp tab="Fixed"
+[Nino.Core.NinoType]
+public partial record struct Title(string Value) : IComponent;
+```
+
 ## EECS070 [#eecs070]
 
 **Records read or reordered by the pass that emits them.** Error. No code fix.
@@ -2095,7 +2315,8 @@ lacks them), for `NextSingle`, `NextDouble` and `Next` in a per-row method.
 
 `Random.Shared` is seeded differently on every run, and in a parallel pass its numbers go to rows in the order the
 threads happen to ask, so a replay, a test or another machine sees other results. A `new Random()` per row
-allocates, is seeded from the clock unless given a seed, and a seed given gives every row the same numbers.
+allocates, is seeded from the clock unless given a seed, and a seed given gives every row the same numbers. A
+`Random` held in a static field is reported the same way: its draws depend on the order the rows run in.
 `EntityRandom` is a pure function of a seed, the entity, the tick and a stream: the same numbers on every run, on any
 number of threads. The fix gives each draw of the method its own stream.
 
@@ -2118,7 +2339,8 @@ public class Wander : EcsSystem
 ```
 
 The world needs the singleton (`world.SetEntityRandom(seed, 0)`), and the system that advances the simulation's clock
-advances its `Tick`, so each step draws new numbers.
+advances its `Tick`, so each step draws new numbers. Two draws for the same entity need two streams
+([EECS088](#eecs088)).
 
 ## EECS072 [#eecs072]
 
@@ -2395,6 +2617,187 @@ public class CountDamage : EcsSystem
     static void Count(in Damage damage, ref DamageDealt dealt) => dealt.Total += damage.Amount;
 }
 ```
+
+## EECS086 [#eecs086]
+
+**A singleton that is reset each update and then accumulated row by row.** Suggestion (Info). No code fix.
+
+Every row of the pass writes a `ref` singleton parameter. Two things follow. The method cannot run in parallel, since
+each chunk would race on the singleton ([EECS010](#eecs010)). And its vector loop has no lane to keep the singleton in.
+A [`ref Reduce<T>`](/en/docs/guide/threading#reductions) parameter gives each chunk a partial result of its own,
+starting at `T`'s identity, and combines the partial results into `T` when the pass ends. The sums, minimums and
+maximums are the same, but `Parallel = true` and the vector loop are open to the method.
+
+The pass's result replaces `T`. So the rule reports only a singleton that system code resets outside `OnCreate`: a whole
+assignment, a constant given to a field, `AddSingleton`, `RemoveSingleton`, or the generated `SetX` and `RemoveX`. Such
+a singleton holds one pass's result, and the reduction makes its reset redundant. A total that grows across updates
+(a score, deaths so far) is never reset, and the rule leaves it alone.
+
+The rule reports when every use of the parameter accumulates into a field: `+=`, `-=`, `++`, `--`, `*=`, `|=` and `&=`
+of a bool, `Math.Max` or `Math.Min` of the field, or `if (x > s.F) s.F = x;`. Each field must be accumulated one way,
+and the message names the attributes that declare them.
+
+```csharp tab="Reported" doccheck=alone,expect-EECS086
+public struct Crowd : ISingletonComponent
+{
+    public int Alive;
+    public int Strongest;
+}
+
+public class CountCrowd : EcsSystem
+{
+    protected override void OnUpdate() => World.Crowd = default;   // every update counts again
+
+    [ForEach]
+    static void Count(in Health health, ref Crowd crowd)
+    {
+        crowd.Alive++;
+        crowd.Strongest = Math.Max(crowd.Strongest, health.Value);
+    }
+}
+```
+
+```csharp tab="Fixed"
+public partial struct Crowd : ISingletonComponent
+{
+    [Sum] public int Alive;
+    [Max] public int Strongest;
+}
+
+public class CountCrowd : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Count(in Health health, ref Reduce<Crowd> crowd)
+    {
+        crowd.Value.Alive++;
+        crowd.Value.Strongest = Math.Max(crowd.Value.Strongest, health.Value);
+    }
+}
+```
+
+There is no code fix, because the reset in the other method has to go too. It is a suggestion, so it shows in the IDE
+only, at the end of a full analysis, since the reset can be in any file.
+
+## EECS087 [#eecs087]
+
+**Other entities' components read through the `World`.** Warning. No code fix.
+
+A `[ForEach]` method that takes the `World` could change structure. So its system runs alone in its stage, and its
+rows are walked with the checks that a structural change needs. Suppose the method uses the `World` only to find other
+entities (`TryGetEntity`, `GetEntity`) and reads components from them that it does not write. Then a
+[`Lookup<T>`](/en/docs/guide/threading#lookups) parameter per component does the same without the `World`:
+`lookup[id]` is a `ReadOnlyMaybe<T>`, `Read(id)` a `ref readonly` and `Has(id)` a presence test. The system is
+scheduled as a reader of those components, it shares a stage with systems that do not write them, and the method may
+run in parallel.
+
+```csharp tab="Reported" doccheck=alone,expect-EECS087
+public record struct Quarry(EntityId Id) : IComponent;
+public record struct Heading(float X, float Y) : IComponent;
+
+public class Pursuit : EcsSystem
+{
+    [ForEach]
+    static void Steer(in Position position, in Quarry quarry, ref Heading heading, World world)
+    {
+        heading = default;
+        if (world.TryGetEntity(quarry.Id, out var target))
+        {
+            var at = target.Read<Position>();
+            heading = new Heading(at.X - position.X, at.Y - position.Y);
+        }
+    }
+}
+```
+
+```csharp tab="Fixed"
+public record struct Quarry(EntityId Id) : IComponent;
+public record struct Heading(float X, float Y) : IComponent;
+
+public class Pursuit : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Steer(in Position position, in Quarry quarry, ref Heading heading, Lookup<Position> positions)
+    {
+        var at = positions[quarry.Id];
+        heading = at.HasValue ? new Heading(at.Value.X - position.X, at.Value.Y - position.Y) : default;
+    }
+}
+```
+
+A method that also writes the other entity, changes structure, or reads a component it writes itself
+([EECS059](#eecs059)) keeps the `World`.
+
+## EECS088 [#eecs088]
+
+**Two `EntityRandom` draws of one stream.** Warning. Code fix: gives the later draw a stream that no draw of the method
+uses.
+
+An [`EntityRandom`](/en/docs/reference/entityrandom) number is a pure function of the seed, the entity, the tick and
+the stream. Two draws for the same entity with the same stream in one pass come from the same bits: a direction whose X
+always equals its Y, a hit roll that always matches the damage roll. The same holds for a draw inside a loop whose
+stream and entity the loop does not change, where every iteration gets the same number. Add the iteration to the
+stream (`stream + (uint)i`), which has no single mechanical fix. The rule checks `[ForEach]` and `[ForEntity]` methods
+and the `Execute` of jobs, where each row draws once per update. A test that compares two draws on purpose is left
+alone.
+
+```csharp tab="Reported" doccheck=alone,expect-EECS088
+public record struct Sway(float X, float Y) : IComponent;
+
+public class Flutter : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Sway sway, Entity entity, in EntityRandom random) =>
+        sway = new Sway(random.Range(entity.Id, 0, -1f, 1f), random.Range(entity.Id, 0, -1f, 1f));   // X == Y
+}
+```
+
+```csharp tab="Fixed"
+public record struct Sway(float X, float Y) : IComponent;
+
+public class Flutter : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Sway sway, Entity entity, in EntityRandom random) =>
+        sway = new Sway(random.Range(entity.Id, 0, -1f, 1f), random.Range(entity.Id, 1, -1f, 1f));
+}
+```
+
+Draws in the two branches of an `if` or in different `switch` arms never run together, so they may share a stream.
+
+## EECS089 [#eecs089]
+
+**Records appended to a singleton's list row by row.** Suggestion (Info). No code fix.
+
+A list that a singleton holds, filled through a `ref` parameter, is one list that every row writes. The method cannot
+run in parallel, and the list grows by doubling as the records come. An [`Emit<T>`](/en/docs/reference/emit)
+parameter gives each chunk of rows a pooled list and appends the lists to `Emitted<T>` in chunk order when the pass
+ends. That keeps the same records in the same row order, on one thread or on several. Systems after the pass read
+`Emitted<T>` and clear it ([EECS070](#eecs070)).
+
+```csharp tab="Reported" doccheck=alone,expect-EECS089
+public record struct Shot(EntityId From, float Power);
+public record struct Gun(float Power) : IComponent;
+public struct Volley : ISingletonComponent { public List<Shot> Shots; }
+
+public class Fire : EcsSystem
+{
+    [ForEach]
+    static void Pull(Entity entity, in Gun gun, ref Volley volley) => volley.Shots.Add(new Shot(entity.Id, gun.Power));
+}
+```
+
+```csharp tab="Fixed"
+public record struct Shot(EntityId From, float Power);
+public record struct Gun(float Power) : IComponent;
+
+public class Fire : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Pull(Entity entity, in Gun gun, Emit<Shot> shots) => shots.Add(new Shot(entity.Id, gun.Power));
+}
+```
+
+There is no code fix, because the readers of the list have to read `Emitted<T>` instead.
 
 ## Related [#related]
 

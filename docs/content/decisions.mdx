@@ -102,6 +102,9 @@ after the change on the machine of the time; they are history, not the current r
 | [D82](#d82-for-entity) | One entity is a `[ForEntity]` method |
 | [D83](#d83-update-interval-attribute) | A system's cadence is an attribute |
 | [D84](#d84-consume) | `[Consume]` destroys the visited rows in bulk when it can |
+| [D97](#d97-hand-written-parameters) | Rules for code that does by hand what a parameter does per chunk |
+| [D98](#d98-random-streams) | EECS088: one stream per draw, checked in pass code only |
+| [D99](#d99-singleton-saves) | EECS069 warns for a singleton only when the code saves whole worlds |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -2273,6 +2276,82 @@ write, and each method's loop is listed:
 - **Left for later:** masked words of parallel methods (a chunk passes whole runs), `Maybe<T>` in parallel methods
   and of narrow lanes, masked words of narrow lanes and of wide rows (they run the method), `Atan2`, `Asin`, `Pow`
   and kin (no vector form in .NET 10), `Vector2.Clamp` (the sample clamps each field with `Math.Clamp`).
+
+## D97. Rules for code that does by hand what a parameter does per chunk [#d97-hand-written-parameters]
+
+**Decision.** Three rules point a `[ForEach]` method to the parameter that does its work per chunk of rows. None of
+them has a code fix.
+- **EECS086** (a suggestion) reports a `ref` singleton accumulated row by row, when system code also resets it each
+  update. The parameter is `ref Reduce<T>`.
+- **EECS087** (a warning) reports a `World` parameter used only to find other entities and read components the method
+  does not write. The parameter is `Lookup<T>`.
+- **EECS089** (a suggestion) reports records added one by one to a list that a `ref` singleton holds. The parameter
+  is `Emit<T>`.
+
+**Why.**
+- **The hand-written forms keep a method on one thread.** A `ref` singleton races in a parallel pass
+  ([EECS010](/en/docs/guide/analyzer#eecs010)). A `World` parameter makes the system run alone in its stage. And
+  [D69](#d69-reductions), [D75](#d75-lookup) and [D78](#d78-emit) measured the parameters against those forms. The
+  rules make the faster form the one users meet.
+- **EECS086 waits for a reset.** A first version reported every accumulation. In the docs it fired on 16 examples, and
+  each was a running total: a score, deaths so far, rows sent. A reduction replaces its singleton with one pass's
+  result, so for a running total it is not the same code. A singleton that a system resets each update (a whole
+  assignment, a constant given to a field, `AddSingleton`, `RemoveSingleton`, `SetX`, `RemoveX`, outside `OnCreate`
+  and `OnDestroy`) does hold one pass's result. The reset can be in any file, so the rule reports at the end of the
+  compilation, and the message names the reset that the reduction makes redundant.
+- **EECS087 is a warning.** The cost is the whole system's, a stage of its own, and the fix is one parameter per
+  component. EECS086 and EECS089 change two places (the reset, the readers of the list), so they stay suggestions.
+- **No code fix.** For EECS086 the reset has to go too. For EECS087 the reads (`Read<T>()`, `entity.X`, `Has<T>()`)
+  do not map one for one onto `lookup[id]`, `Read(id)` and `Has(id)`. For EECS089 the readers of the list read
+  `Emitted<T>` instead.
+- **One mistake, one diagnostic** ([D60](#d60-one-diagnostic-per-mistake)). EECS055 leaves a method that accumulates
+  into a singleton to EECS086, and EECS033 leaves a read that EECS087 reports.
+
+**Considered.**
+- **Reporting running totals too, with the advice to reduce into a second singleton.** That gives two singletons and
+  a system that adds one to the other for every counter, against one `ref` that a sequential method writes in a
+  register. It was dropped.
+- **A rule for a hand-written `Scratch<T>`** (a `new List<T>` per row). EECS028 already reports the allocation, and
+  its message now names the `Scratch<T>` parameter, so no separate rule was added.
+
+## D98. EECS088: one stream per draw, checked in pass code only [#d98-random-streams]
+
+**Decision.** EECS088 reports two `EntityRandom` draws of the same stream for the same entity in one method, and a
+draw in a loop that changes neither its stream nor its entity. It checks the code of passes only: `[ForEach]` and
+`[ForEntity]` methods and the `Execute` of jobs. Its code fix gives the later draw the next stream that no draw of the
+method uses.
+
+**Why.**
+- **Two draws of one stream are one number.** `EntityRandom` is a pure function of seed, entity, tick and stream
+  ([D79](#d79-entity-random)), so a direction whose two parts share a stream lies on the diagonal. Nothing fails, and
+  nothing shows it in a test that checks ranges.
+- **Pass code only.** Tests and tools compare two draws of the same stream on purpose, to check that the function is
+  pure. In a pass, each row draws once per update, and there a repeated stream is a mistake.
+- **Draws that never run together may share a stream.** The two branches of an `if` and the arms of a `switch` are
+  left alone.
+- **The fix is the next free stream, not `stream + 1`.** `stream + 1` could collide with a third draw.
+
+**Considered.**
+- **A fix for a draw in a loop.** Adding the iteration (`stream + (uint)i`) needs a loop variable that the analyzer
+  would have to choose. It also changes the numbers of every iteration but the first, so it is left to the author.
+
+## D99. EECS069 warns for a singleton only when the code saves whole worlds [#d99-singleton-saves]
+
+**Decision.** EECS069 (a managed component or singleton without a Nino formatter) is a warning for a component when
+the code calls `Save`, `SaveWithout` or `SaveEntities`. It is a warning for a singleton only for `Save` or
+`SaveWithout`, and a suggestion otherwise.
+
+**Why.**
+- **Entity saves write no singletons.** `SaveEntities` writes the components of the entities it is given. A project
+  that saves only player records got a warning for each managed singleton it holds, and none of those warnings could
+  throw.
+- **Warnings were left in the build.** The benchmarks and the tests built with EECS069 warnings: two benchmark
+  components that hold lists, and test fixtures that hold references on purpose. The benchmark components are now
+  `[NotSaved]`, and the test project silences the rule.
+
+**Considered.**
+- **Following which types each save can reach.** That would need the `ComponentSet` of every call and the data flow
+  into it. The rule already leaves a type that a `ComponentSet` names to the code that chose it.
 
 ## Related [#related]
 
