@@ -105,9 +105,29 @@ public class TakeHits : EcsSystem
 [EECS061](/zh/docs/guide/analyzer#eecs061) 是新规则：`ForEachParallel` 之后读并行 job 的字段（每一块跑的是副本）。代码修复改用 `ForEach`；
 要用满所有核，像上面那样用 `Reduce<T>` 参数。
 
+[EECS071](/zh/docs/guide/analyzer#eecs071) 是新规则：`[ForEach]` 方法里的 `Random.Shared` 或 `new Random(...)`，它们的数没有一次运行能重现。
+代码修复改为从单例 [`EntityRandom`](/zh/docs/reference/entityrandom) 抽取，World 需要这个单例（`world.SetEntityRandom(seed, 0)`，每一步推进它的 `Tick`）：
+
+```csharp tab="4.7" doccheck=expect-EECS071
+public class Wander : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Velocity velocity) => velocity = new Velocity(Random.Shared.NextSingle() * 2 - 1, velocity.Y);
+}
+```
+
+```csharp tab="4.8"
+public class Wander : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Velocity velocity, Entity entity, in EntityRandom random) =>
+        velocity = new Velocity(random.Range(entity.Id, 0, -1f, 1f), velocity.Y);
+}
+```
+
 ### 新的公开类型 [#v4-8-new-types]
 
-`namespace EasyEcs` 里新增了 `ReadOnlyMaybe<T>`、`Reduce<T>`、`IReduction<T>`、`Scratch<T>`、`Lookup<T>`、`LookupExtensions`、`IDirectIndexed<TKey>`、`SimdMode` 和 `Interleaved`。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
+`namespace EasyEcs` 里新增了 `ReadOnlyMaybe<T>`、`Reduce<T>`、`IReduction<T>`、`Scratch<T>`、`Lookup<T>`、`LookupExtensions`、`IDirectIndexed<TKey>`、`SimdMode`、`Interleaved`、`Emit<T>`、`Emitted<T>`、`EntityRandom`、`IForRange` 和 `IForSpan<T>`。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
 或者用 `using` 起个别名。
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.Emitted`1" source="a3fb533884a9">
+    <summary>
+      带 <see cref="T:EasyEcs.Emit`1" /> 参数的遍历追加的记录，每次遍历内按行的顺序，遍历之间按运行的顺序：一个单例，由第一次产出记录的遍历添加。
+      应用这些记录的系统读 <see cref="F:EasyEcs.Emitted`1.Items" />（<c>foreach</c>、<c>AsReadOnlySpan</c>、
+      <see cref="M:EasyEcs.World.ForParallel``2(EasyEcs.DynamicBuffer{``0}@,``1@,System.Int32)" />），然后清空它。
+      快照和存档像复制缓冲区组件一样复制这些记录。
+    </summary>
+    <typeparam name="T">记录。</typeparam>
+  </member>
+  <member name="F:EasyEcs.Emitted`1.Items" source="cf54d0cdc832">
+    <summary>这些记录：先读，再 <c>Clear()</c>（<see cref="T:EasyEcs.DynamicBuffer`1" /> 的成员）。</summary>
+  </member>
+</doc>

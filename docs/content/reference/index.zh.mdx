@@ -19,6 +19,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`ChildOfEcsPrefabExtensions`](/zh/docs/reference/childofecsprefabextensions) | ChildOf 在 Prefab 上的具名成员（生成）。 |
 | [`DynamicBufferExtensions`](/zh/docs/reference/dynamicbufferextensions) | DynamicBuffer 的写入方法。 |
 | [`EcsSystem`](/zh/docs/reference/ecssystem) | 在 World 上运行的逻辑。 |
+| [`EntityRandomEcsExtensions`](/zh/docs/reference/entityrandomecsextensions) | EntityRandom 的具名成员（生成）。 |
 | [`ForEachAttribute`](/zh/docs/reference/foreachattribute) | 对每个匹配组件参数（以及 WithAttribute / WithoutAttribute / WithAnyAttribute 过滤条件）的实体，执行 EcsSystem 的一个方法（或者通过生成的入口点，执行任何其他类型的静态方法）。 |
 | [`GroupAttribute`](/zh/docs/reference/groupattribute) | World 按哪个成员把组件的表分组（IGroup）：int，或底层类型为 int 的枚举。 |
 | [`GroupByAttribute`](/zh/docs/reference/groupbyattribute) | 每个 World 都按这个 IGroup 组件给表分组（World.GroupBy），从它第一张含这个组件的表开始：分组过滤条件（QueryFilter.InGroup）在每个 World 里都只访问这一组的表，不用记着调用设置方法。 |
@@ -67,8 +68,11 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`ComponentValue`](/zh/docs/reference/componentvalue) | 实体的一个组件，即 Entity.Describe 读到的结果：它的值的装箱副本。 |
 | [`Disabled<T>`](/zh/docs/reference/disabled) | T 处于禁用状态（Entity.Disable）的实体带的标签：实体保留 T 的值，但在 Entity.Enable 还回来之前，查询、Has 和 Get 都当它不存在。 |
 | [`DynamicBuffer<T>`](/zh/docs/reference/dynamicbuffer) | 每个实体一个 T 列表，作为组件存放：背包、路径、这个 tick 的命中记录。 |
+| [`Emit<T>`](/zh/docs/reference/emit) | 一次 [ForEach] 遍历追加记录的目标（Unity 的 NativeStream，GPU 的流压缩），按值传入：static void Strike(in Attack attack, in Target target, Emit&lt;Hit&gt; hits) =&gt; hits.Add(new Hit(target.Id, attack.Power));。 |
+| [`Emitted<T>`](/zh/docs/reference/emitted) | 带 Emit 参数的遍历追加的记录，每次遍历内按行的顺序，遍历之间按运行的顺序：一个单例，由第一次产出记录的遍历添加。 |
 | [`Entity`](/zh/docs/reference/entity) | 实体的句柄：id + 版本号 + World（16 字节）。 |
 | [`EntityId`](/zh/docs/reference/entityid) | 实体的身份：下标，加上这个下标的版本号（8 字节，非托管）。 |
+| [`EntityRandom`](/zh/docs/reference/entityrandom) | [ForEach] 方法（包括并行方法）用的确定性随机数（cuRAND 的 Philox，一种基于计数器的生成器）：每个数都是种子、实体、tick 和流的纯函数，没有要推进的状态，所以每次运行、任何线程数、行以任何顺序运行，结果都一样。 |
 | [`EntitySpan`](/zh/docs/reference/entityspan) | 批处理 job 里一段行对应的实体：第 i 个元素，就是这段行各个 span 第 i 个元素所属的实体。 |
 | [`Lookup<T>`](/zh/docs/reference/lookup) | 从 [ForEach] 方法只读访问任意实体的组件 T（MPI 的单边 Get，Unity 的 ComponentLookup）：static void Chase(ref Velocity v, in Target target, Lookup&lt;Position&gt; positions) 用 positions[target.Id] 读目标的位置。 |
 | [`Maybe<T>`](/zh/docs/reference/maybe) | [ForEach] 方法所访问实体的一个可选组件：static void Regen(ref Health h, Maybe&lt;Buff&gt; buff) 访问所有带 Health 的实体，Maybe.HasValue 告诉你当前这个实体有没有 Buff。 |
@@ -105,6 +109,9 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`IForEach<T1..T9>`](/zh/docs/reference/iforeach) | World.ForEach 的结构体回调。 |
 | [`IForEachBatch<T1..T9>`](/zh/docs/reference/iforeachbatch) | World.ForEachBatch 的结构体回调：一次接收一整段行，每个组件一个 span，job 可以用 SIMD 处理（System.Numerics.Vector、MemoryMarshal.Cast），还能拿到这些行的实体（按下标访问时才构造）。 |
 | [`IForEachEntity<T1..T9>`](/zh/docs/reference/iforeachentity) | 和 IForEach 一样，但还接收 Entity 句柄。 |
+| [`IForEachMasked<T1..T9>`](/zh/docs/reference/iforeachmasked) | 还接收"只有部分行通过"的 64 行一字的批量 job（过滤条件要检查存在位或变更 tick）：World.ForEachMasked 把整个字交给它，通过的行以位的形式给出；IForEachBatch 则会把每段连续通过的行分开交给它。 |
+| [`IForRange`](/zh/docs/reference/iforrange) | 一段下标上的 job，由 World.ForParallel 分块运行（Kokkos 的 RangePolicy，Unity 的 IJobParallelForBatch）：每次调用拿到一个块。 |
+| [`IForSpan<T>`](/zh/docs/reference/iforspan) | 一个列表的元素上的 job，由 World.ForParallel 分块运行：每次调用拿到一个块的元素，可写。 |
 | [`IGroup`](/zh/docs/reference/igroup) | 标记一个按值拆分表的组件：在调用过 World.GroupBy 的 World 里，IGroup.Group 不同的实体放在不同的表，所以只查询一组（QueryFilter.InGroup）时只遍历这一组的行，这些行在内存里是连续的（一个区域、一张地图、一场对局、一支队伍）。 |
 | [`IIndexed, IIndexed<TKey>`](/zh/docs/reference/iindexed) | 所有 IIndexed 共同实现的接口：不用反射，就能知道一个组件类型建了索引（JIT 会把这个类型检测折叠掉）。 |
 | [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) | 标记一个不做结构变更的 ForEach job：不在它遍历的 World 里创建或销毁实体，也不增删、设置任何组件。 |
@@ -121,6 +128,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 
 | 类型 | 说明 |
 |---|---|
+| [`FloatMode`](/zh/docs/reference/floatmode) | ForEachAttribute 方法的向量循环可以改变哪些浮点结果。 |
 | [`SimdMode`](/zh/docs/reference/simdmode) | ForEachAttribute 方法是否以向量循环运行（ForEachAttribute.Simd）。 |
 | [`SystemErrorPolicy`](/zh/docs/reference/systemerrorpolicy) | 系统抛出异常时怎么处理（WorldOptions.SystemErrors）。 |
 | [`TargetPolicy`](/zh/docs/reference/targetpolicy) | 实体销毁时，指向它的链接怎么处理（TargetPolicyExtensions.WhenTargetDestroyed、RelationIndex.WhenTargetDestroyed）。 |
