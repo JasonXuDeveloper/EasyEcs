@@ -37,6 +37,26 @@ public class AllocationTests
     }
 
     [Test]
+    public void CompactionAndFilteredCollectIdsDoNotAllocate()
+    {
+        using var world = new World();
+        var all = new Entity[1000];
+        world.CreateEntities(all, new Health(1));
+        for (int i = 0; i < all.Length; i += 3) all[i].Set(new Frozen());
+        var awake = QueryFilter.Create().Without<Frozen>();
+        var ids = new EntityId[all.Length];
+        var values = new long[64];
+        var picked = new long[64];
+        world.CollectIds<Health>(ids, awake);
+        Lanes.Compact<long>(values, 0xF0F0_F0F0_F0F0_F0F0UL, picked);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        int collected = world.CollectIds<Health>(ids, awake);
+        int compacted = Lanes.Compact<long>(values, 0xF0F0_F0F0_F0F0_F0F0UL, picked);
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That((collected, compacted), Is.EqualTo((666, 32)));
+    }
+
+    [Test]
     public void UpdatesQueriesAndStructuralChangesDoNotAllocate()
     {
         using var world = new World();
