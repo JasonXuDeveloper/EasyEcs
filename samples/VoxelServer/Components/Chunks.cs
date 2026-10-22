@@ -15,12 +15,25 @@ public record struct BlockPos(int X, int Y, int Z);
 // a body, the chunk an entity is in, the edges of the water). It is direct-indexed: a chunk's slot is its position
 // modulo 64, so the chunks loaded around the players, never 64 apart, each have their own slot, and a lookup reads one
 // array entry (the hash finds the others). Every chunk is an instance of one prefab (Program.cs), with every component
-// and tag below and in Water.cs, so all chunks share one table whatever happens to them.
-public record struct Chunk(ChunkPos Pos) : IComponent, IDirectIndexed<ChunkPos>
+// and tag below and in Water.cs, so all chunks share one table whatever happens to them. It is also a tile of the
+// world's grid (ITile): 16 x 16 x 32 cells in its buffers, with a neighbour on each side, so the water shader takes a
+// Tile<Fluid, Chunk> and gets its water with the halo of its neighbours' (WaterFlowSystem).
+public record struct Chunk(ChunkPos Pos) : IComponent, IDirectIndexed<ChunkPos>, ITile<ChunkPos>
 {
     ChunkPos IIndexed<ChunkPos>.Key => Pos;
     static int IDirectIndexed<ChunkPos>.Slots => 64 * 64;
     static int IDirectIndexed<ChunkPos>.SlotOf(ChunkPos pos) => (pos.Z & 63) * 64 + (pos.X & 63);
+    static int ITileShape.Width => Terrain.Size;
+    static int ITileShape.Depth => Terrain.Size;
+    static int ITileShape.Height => Terrain.Height;
+
+    static ChunkPos ITile<ChunkPos>.Beside(ChunkPos pos, TileFaces face) => face switch
+    {
+        TileFaces.North => new(pos.X, pos.Z - 1),
+        TileFaces.South => new(pos.X, pos.Z + 1),
+        TileFaces.West => new(pos.X - 1, pos.Z),
+        _ => new(pos.X + 1, pos.Z),
+    };
 }
 
 // A chunk a player needs that is not loaded: AoiViewSystem records it as an entity, one per chunk (the unique index), and
