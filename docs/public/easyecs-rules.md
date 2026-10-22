@@ -84,7 +84,8 @@ available as Markdown: add `.md` to its URL.
   and `UpdatePhase`, constants (EECS018).
 - A system never calls `World.Update()` (EECS034): the host runs the world.
 - `[ForEach(Parallel = true)]` methods write data only and make no structural changes (EECS010); a later system on the
-  owner thread acts on that data.
+  owner thread acts on that data. A few hundred heavy rows (microseconds each) set `ChunkRows = 64` so threads take 64
+  rows at a time (EECS054: only with `Parallel = true`); light rows keep the default.
 - A request or message for one entity runs as a struct job on it: `entity.Run<T…, TJob>(ref job, Filter)` with an
   `IForEachEntity` job and a `static readonly` `QueryFilter`; it returns `false` when the entity is gone, lacks a
   component or fails the filter. It is structural: never inside a parallel `[ForEach]` (EECS010), never in a

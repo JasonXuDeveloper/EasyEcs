@@ -353,7 +353,8 @@ nothing after its first update.
 
 A method that writes a tracked component (a `ref` or a [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed)
 parameter) is cut at multiples of 4,096 rows, so a table of 4,096 rows or fewer runs on one thread
-([why](/en/docs/guide/threading#parallel-foreach-methods)).
+([why](/en/docs/guide/threading#parallel-foreach-methods)). For a few hundred heavy rows, `ChunkRows = 64` sets the
+rows a thread takes at a time ([chunk size](/en/docs/guide/threading#chunk-rows)).
 
 ### System groups [#system-groups]
 

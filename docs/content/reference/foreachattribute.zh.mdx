@@ -34,6 +34,14 @@ public ForEachAttribute();
 
 ## 属性 [#properties]
 
+### `ChunkRows` [#chunkrows]
+
+```csharp
+public int ChunkRows { get; init; }
+```
+
+与 [`ForEachAttribute.Parallel`](/zh/docs/reference/foreachattribute#parallel) 一起用：一个线程每次取的行数，向上取整到 64 的倍数（相当于 OpenMP 的 `schedule(dynamic, n)`）。默认每块约为每个线程份额的四分之一，且至少 1,024 行（方法写被追踪组件时至少 4,096 行），所以只有几百个重的行（每行一块地形、每行一次寻路）的遍历只在一个线程上跑；每行要花几微秒时，指定一个线程每次取多少行。块越小，领块的次数越多；共用一个 4,096 行变更 tick 区块的块会（以原子操作）共用它的摘要。默认 0：按行数决定。不能脱离 [`ForEachAttribute.Parallel`](/zh/docs/reference/foreachattribute#parallel) 单独使用，也不能小于 0（EECS054）。
+
 ### `Parallel` [#parallel]
 
 ```csharp

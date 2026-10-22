@@ -29,6 +29,11 @@ icon: RotateCcwClock
 - `DynamicBuffer<T>.ReservePool(lists)` 在启动时往 `T` 的回收池里放入这么多个容量为 `PoolCapacity` 的空列表，世界增长到的那些实体（玩家周围的区块）
   的缓冲在服务器运行时从池里取列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)。
 
+- `[ForEach(Parallel = true, ChunkRows = n)]` 指定并行方法的一个线程每次取多少行（向上取整到 64；`world.ForEachParallel` 等并行调用用
+  `chunkRows:` 参数）。默认每块至少 1,024 行，方法写被追踪组件时至少 4,096 行，所以几百个重的行只落在一个线程上；现在它们会分到所有线程，
+  写被追踪组件时也一样。分析器规则 [EECS054](/zh/docs/guide/analyzer#eecs054) 拒绝负数，以及没有 `Parallel` 的 `ChunkRows`。见
+  [多线程](/zh/docs/guide/threading#chunk-rows)。
+
 ### 性能 [#v4-8-0-performance]
 
 - 缓冲回收池在线程之间共享：每个线程自己留几个列表，其余的按批和所有线程都能取用的池交换，所以拥有者线程从销毁的缓冲收回的列表，也能给并行

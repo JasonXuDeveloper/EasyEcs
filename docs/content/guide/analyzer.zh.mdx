@@ -1,7 +1,7 @@
 ---
 title: 分析器规则
-seoTitle: "EasyEcs 分析器规则 EECS002-EECS053：每条 C# 诊断的含义与修法"
-description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS053：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
+seoTitle: "EasyEcs 分析器规则 EECS002-EECS054：每条 C# 诊断的含义与修法"
+description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS054：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
 icon: ShieldCheck
 ---
 
@@ -84,6 +84,7 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS051](#eecs051) | 错误 | 遍历进行中不更新 World | |
 | [EECS052](#eecs052) | 警告 | 新实体的组件在创建时就给出 | 创建时带上组件 |
 | [EECS053](#eecs053) | 警告 | 只在部分行上写入的追踪变化组件用 `Mut<T>` | `Mut<T>` |
+| [EECS054](#eecs054) | 错误 | `ChunkRows` 不小于 0，且只用于并行方法 | |
 
 ## EECS002 [#eecs002]
 
@@ -1555,6 +1556,31 @@ public class RespawnSystem : EcsSystem
 修复把参数改成 `Mut<T>`，对它的每次写入改成 `x.Write()`，每次读取改成 `x.Value`，方法做的事不变。参数除了 `ref` 还有别的修饰符
 （`scoped ref`）、有代码调用这个方法、方法体在 `nameof` 里用到参数或重新绑定它（`x = ref other`）时，不提供修复。如果几乎每一行都走写入的
 路径，又没有系统读这个组件的 `[Changed<T>]`，`ref` 每段行打一次 tick 反而更便宜：在那里压掉这条警告。
+
+## EECS054 [#eecs054]
+
+**不合法的 `[ForEach(ChunkRows = N)]`。** 错误。没有代码修复。
+
+`ChunkRows` 是[并行方法](/zh/docs/guide/threading#chunk-rows)的一个线程每次取的行数：0 表示由运行时按行数决定，大于 0 则指定
+（向上取整到 64）。没有 `Parallel = true` 的方法只在一个线程上跑，没有块可言；负数没有意义。
+
+```csharp doccheck=expect-EECS054
+public class PlanCells : EcsSystem
+{
+    [ForEach(ChunkRows = 64)]   // 单线程：没有块可设大小
+    static void Plan(in Position position, ref Velocity velocity) => velocity = new Velocity(position.X, position.Y);
+}
+```
+
+改成并行，或者去掉 `ChunkRows`：
+
+```csharp
+public class PlanCells : EcsSystem
+{
+    [ForEach(Parallel = true, ChunkRows = 64)]
+    static void Plan(in Position position, ref Velocity velocity) => velocity = new Velocity(position.X, position.Y);
+}
+```
 
 ## 相关页面 [#related]
 

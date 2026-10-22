@@ -1,7 +1,7 @@
 ---
 title: Analyzer rules
-seoTitle: "EasyEcs analyzer rules EECS002-EECS053 for C# ECS code"
-description: Every EasyEcs analyzer rule, EECS002 to EECS053, with its severity, its code fix, the code it rejects and the code to write instead.
+seoTitle: "EasyEcs analyzer rules EECS002-EECS054 for C# ECS code"
+description: Every EasyEcs analyzer rule, EECS002 to EECS054, with its severity, its code fix, the code it rejects and the code to write instead.
 icon: ShieldCheck
 ---
 
@@ -93,6 +93,7 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS051](#eecs051) | Error | A world does not update during a pass | |
 | [EECS052](#eecs052) | Warning | A component of a new entity is given to its creation | Create it with the component |
 | [EECS053](#eecs053) | Warning | A tracked component written on some rows only is a `Mut<T>` | `Mut<T>` |
+| [EECS054](#eecs054) | Error | `ChunkRows` is 0 or more, on a parallel method | |
 
 ## EECS002 [#eecs002]
 
@@ -1665,6 +1666,32 @@ what it does. It is not offered when the parameter has another modifier than `re
 the method, or when the body names the parameter in `nameof` or rebinds it (`x = ref other`). Where nearly every
 row takes the writing path and nothing reads `[Changed<T>]` of the component, the `ref`'s one stamp per run is the
 cheaper write: suppress the warning there.
+
+## EECS054 [#eecs054]
+
+**Invalid `[ForEach(ChunkRows = N)]`.** Error. No code fix.
+
+`ChunkRows` is the rows a thread of a [parallel method](/en/docs/guide/threading#chunk-rows) takes at a time: 0 lets
+the runtime choose from the row count, more sets it (rounded up to 64). A method without `Parallel = true` runs on one
+thread and has no chunks, and a negative count means nothing.
+
+```csharp doccheck=expect-EECS054
+public class PlanCells : EcsSystem
+{
+    [ForEach(ChunkRows = 64)]   // one thread: no chunks to size
+    static void Plan(in Position position, ref Velocity velocity) => velocity = new Velocity(position.X, position.Y);
+}
+```
+
+Run it in parallel, or drop `ChunkRows`:
+
+```csharp
+public class PlanCells : EcsSystem
+{
+    [ForEach(Parallel = true, ChunkRows = 64)]
+    static void Plan(in Position position, ref Velocity velocity) => velocity = new Velocity(position.X, position.Y);
+}
+```
 
 ## Related [#related]
 

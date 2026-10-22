@@ -163,8 +163,30 @@ public class RegenerateAll : EcsSystem
 并行系统和并行方法可以叠加：在并行阶段里，如果调度器正忙着跑另一个系统的方法，这个并行方法就在自己的线程上运行，不会干等。
 
 并行方法可以通过 `ref` 或 [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 参数写被追踪组件：每块只给自己的行
-打 tick，而且这类方法按 4,096 行的倍数切块（每块至少 4,096 行），正好对齐共用一份变更 tick 摘要的区块，不会有两个线程
-更新同一份摘要。在块里调 `Mut<T>.Write()` 和 `SetIfChanged`，和用 `ref` 一样安全。这样一来，不超过 4,096 行的表只有一块。
+打 tick，而且默认情况下这类方法按 4,096 行的倍数切块（每块至少 4,096 行），正好对齐共用一份变更 tick 摘要的区块，不会有
+两个线程更新同一份摘要。在块里调 `Mut<T>.Write()` 和 `SetIfChanged`，和用 `ref` 一样安全。这样一来，不超过 4,096 行的表只有一块。
+
+#### 块大小：行少而重 [#chunk-rows]
+
+默认的块大小适合大量轻量的行：约为每个线程份额的四分之一，至少 1,024 行（方法写被追踪组件时至少 4,096 行）。如果只有几百行、
+每行要花几微秒（一块地形、一次寻路、一个人群格子），它们就只成一块，落在一个线程上。`ChunkRows` 指定一个线程每次取多少行，
+和 OpenMP 的 `schedule(dynamic, n)`、Unity job 的 batch count 是一回事：
+
+```csharp
+public record struct Cell(int Agents) : IComponent;
+public record struct Plan(int Steps) : IComponent;
+
+public class PlanCells : EcsSystem
+{
+    [ForEach(Parallel = true, ChunkRows = 64)]   // 线程做完一块就再领 64 行
+    static void Plan(in Cell cell, ref Plan plan) => plan.Steps = cell.Agents * 4;
+}
+```
+
+它会向上取整到 64 的倍数（一个存在位字和变更 tick 字只归一个线程）。写被追踪组件的方法，块现在可以切开一个 4,096 行的区块：
+遍历开始前，它覆盖的区块先按这次遍历的 tick 打开，共用一个区块的线程以原子操作在摘要里置自己的位，每 64 行一次。每块要领一次：
+只有每行的工作远大于领一次的开销时才设 `ChunkRows`，轻量的行别设。它要求 `Parallel = true`，且不小于 0
+（[EECS054](/zh/docs/guide/analyzer#eecs054)）。临时调用时，`world.ForEachParallel(ref job, filter, chunkRows: 64)` 效果相同。
 
 开启 `WorldOptions.MeasureSystems` 后，`system.Stats` 会把帮忙的线程也算进去：`LastAllocated` 和 `TotalAllocated` 是
 运行这个系统的线程，加上跑过它并行方法分块的每个线程上分配的字节数之和；时间是整次运行的耗时。开启 `ParallelSystems`

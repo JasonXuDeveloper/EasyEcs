@@ -40,6 +40,13 @@ major or minor version that needs code changes? The
   list instead of allocating one while the server runs. See
   [dynamic buffers](/en/docs/guide/dynamic-buffers#what-it-costs).
 
+- `[ForEach(Parallel = true, ChunkRows = n)]` sets the rows a thread of a parallel method takes at a time (rounded up
+  to 64; `chunkRows:` on `world.ForEachParallel` and the other parallel calls). By default a chunk holds at least
+  1,024 rows, 4,096 when the method writes a tracked component, so a few hundred heavy rows ran on one thread; now they
+  spread over all of them, also when they write tracked components. Analyzer rule
+  [EECS054](/en/docs/guide/analyzer#eecs054) rejects a negative count and `ChunkRows` without `Parallel`. See
+  [threading](/en/docs/guide/threading#chunk-rows).
+
 ### Performance [#v4-8-0-performance]
 
 - The buffer pool is shared across threads: each thread keeps a few lists and trades the rest in batches with a pool

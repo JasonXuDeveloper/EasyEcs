@@ -177,10 +177,35 @@ Parallel systems and parallel methods compose: inside a parallel stage, a parall
 another system's method runs on its own thread instead of waiting.
 
 A parallel method may write a tracked component, through a `ref` or a
-[`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) parameter: each chunk stamps only its own rows, and the
-chunks of such a method are cut at multiples of 4,096 rows (at least 4,096), the blocks whose change-tick summary
-their rows share, so no two threads update one summary. `Mut<T>.Write()` and `SetIfChanged` are as safe in a chunk as
-a `ref`. A table of 4,096 rows or fewer is then a single chunk.
+[`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) parameter: each chunk stamps only its own rows, and by
+default the chunks of such a method are cut at multiples of 4,096 rows (at least 4,096), the blocks whose change-tick
+summary their rows share, so no two threads update one summary. `Mut<T>.Write()` and `SetIfChanged` are as safe in a
+chunk as a `ref`. A table of 4,096 rows or fewer is then a single chunk.
+
+#### Chunk size: few heavy rows [#chunk-rows]
+
+The default chunk suits many light rows: about a quarter of each thread's share, and at least 1,024 rows (4,096 when
+the method writes a tracked component). A few hundred rows that cost microseconds each (a chunk of terrain, a path
+search, a crowd cell) are then one chunk on one thread. `ChunkRows` sets the rows a thread takes at a time, as
+OpenMP's `schedule(dynamic, n)` and the batch count of a Unity job do:
+
+```csharp
+public record struct Cell(int Agents) : IComponent;
+public record struct Plan(int Steps) : IComponent;
+
+public class PlanCells : EcsSystem
+{
+    [ForEach(Parallel = true, ChunkRows = 64)]   // threads claim 64 rows at a time, as they finish
+    static void Plan(in Cell cell, ref Plan plan) => plan.Steps = cell.Agents * 4;
+}
+```
+
+It is rounded up to a multiple of 64 (a word of presence bits and change ticks stays with one thread). Chunks of a
+method that writes a tracked component may now split a 4,096-row block: before the pass, the blocks it covers are
+opened at the pass's tick, and the threads that share one set their words in its summary atomically, once per 64
+rows. Each chunk is one claim: keep `ChunkRows` for rows whose work dwarfs a claim, and leave it out for light rows.
+It needs `Parallel = true` and is 0 or more ([EECS054](/en/docs/guide/analyzer#eecs054)). Ad hoc,
+`world.ForEachParallel(ref job, filter, chunkRows: 64)` does the same.
 
 With `WorldOptions.MeasureSystems`, `system.Stats` covers the threads that helped: `LastAllocated` and
 `TotalAllocated` sum the bytes allocated on the thread that ran the system and on every thread that ran a chunk of its

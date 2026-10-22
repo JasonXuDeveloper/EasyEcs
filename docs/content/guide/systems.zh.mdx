@@ -321,7 +321,8 @@ public class SteeringSystem : EcsSystem
 单例组件只能用 `in`。它也不能写别的行会读的东西，比如通过 `Get` 写另一个实体。不足两块时在调用线程上执行。第一次更新之后不再分配内存。
 
 写被追踪组件的方法（`ref` 或 [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 参数）按 4,096 行的倍数切块，
-所以不超过 4,096 行的表只在一个线程上跑（[原因](/zh/docs/guide/threading#parallel-foreach-methods)）。
+所以不超过 4,096 行的表只在一个线程上跑（[原因](/zh/docs/guide/threading#parallel-foreach-methods)）。只有几百行、每行很重时，
+`ChunkRows = 64` 指定一个线程每次取多少行（[块大小](/zh/docs/guide/threading#chunk-rows)）。
 
 ### 系统分组 [#system-groups]
 

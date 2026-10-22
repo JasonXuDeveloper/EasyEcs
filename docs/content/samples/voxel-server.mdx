@@ -246,7 +246,9 @@ water that stands on something solid fills one level below it; everything else e
 spring goes.
 
 It runs in passes, as a GPU draws ([where the ideas come from](#ideas)), and only on the chunks tagged `Flowing`, the
-ones whose water may still move: a settled lake is not visited again until something wakes it.
+ones whose water may still move: a settled lake is not visited again until something wakes it. Each pass is its own
+system in its own file (`Systems/Water/`), with one job: they hand each other data (`Border`, `NextFluid`, `FluidStep`,
+the `Flowing` tag) and never call one another.
 
 ```mermaid
 flowchart LR
@@ -263,15 +265,19 @@ flowchart LR
 the lanes whose block is solid with its height, so after the 32 layers each lane holds the top of its column with no
 branch; `WaterWakeSystem` tags the chunk and its four neighbours `Flowing`.
 
-<include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#wake</include>
+<include lang="csharp" meta='tab="Water/HeightMap.cs"'>../../../samples/VoxelServer/Systems/Water/HeightMap.cs</include>
+
+<include lang="csharp" meta='tab="Water/Wake.cs"'>../../../samples/VoxelServer/Systems/Water/Wake.cs</include>
 
 **The passes.** `WaterBorderSystem` gathers what the step needs from the chunks around: the facing edge of each
 neighbour into the chunk's `Border` buffer, and the layers to shade (`Reach`, from the chunks' `FluidCount`, no
 search). Then `WaterFlowSystem` is the shader: it copies the chunk's layers and its border into a padded texture on
 the stack, a ring of one block around each layer, so the loop samples neighbours with no edge case, and computes each
 row of 16 blocks in one `Vector128<byte>`. It reads nothing but its own row's components and holds no `World`, so it
-is a [parallel method](/en/docs/guide/systems#parallel-methods). Byte lanes are integer arithmetic: the same water on
-every machine.
+is a [parallel method](/en/docs/guide/systems#parallel-methods). A few hundred chunks flow at a time, each one costing
+microseconds, far under the 4,096 rows of a default chunk of a pass that writes a tracked component, so it sets
+`ChunkRows = 64` and the threads take 64 chunks at a time ([chunk size](/en/docs/guide/threading#chunk-rows)). Byte
+lanes are integer arithmetic: the same water on every machine.
 
 Nothing is cleared that does not have to be. The stencil skips a row with no water in it, above it or beside it, and
 writes zeros. The texture is a `stackalloc` under `[SkipLocalsInit]`: the pad writes every texel the loop samples.
@@ -285,14 +291,20 @@ it in the same step. `WaterCommitSystem` copies the step into the water once eve
 from its neighbours' water before the step, whatever order the chunks are visited in), updates `FluidCount` and wakes
 the chunks beside the edges that changed.
 
-<include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#flow</include>
+<include lang="csharp" meta='tab="Water/Border.cs"'>../../../samples/VoxelServer/Systems/Water/Border.cs</include>
+
+<include lang="csharp" meta='tab="Water/Flow.cs"'>../../../samples/VoxelServer/Systems/Water/Flow.cs</include>
+
+<include lang="csharp" meta='tab="Water/Sleep.cs"'>../../../samples/VoxelServer/Systems/Water/Sleep.cs</include>
+
+<include lang="csharp" meta='tab="Water/Commit.cs"'>../../../samples/VoxelServer/Systems/Water/Commit.cs</include>
 
 `FloatSystem` lifts whatever stands in water, players, zombies and items, and pushes it along the slope of the water
 toward the lower water around it, weaker the lower the water: full next to the spring or under falling water, an
 eighth at the edge of a run. It visits the chunks, skips the dry ones by their `FluidCount`, and finds the bodies of
 the others through the index of entities by chunk, so the water of a body's block is the loop's own row.
 
-<include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#float</include>
+<include lang="csharp" meta='title="Systems/Water/Float.cs"'>../../../samples/VoxelServer/Systems/Water/Float.cs</include>
 
 ## Movement [#movement]
 

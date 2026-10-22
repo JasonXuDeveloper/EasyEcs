@@ -62,7 +62,7 @@ dotnet add package EasyEcs        # net10.0 · source generator, analyzer and Ni
 - **Prefabs that stay out of your queries.** A `Prefab` is a recipe of component values that belongs to no world:
   `world.Instantiate(prefab)` spawns from it (a whole wave in one pass), and no system ever has to filter templates
   out. `entity.Clone()` copies a living entity.
-- **Mistakes fail the build.** The bundled analyzer (EECS002-EECS053, with code fixes) reports invalid `[ForEach]`
+- **Mistakes fail the build.** The bundled analyzer (EECS002-EECS054, with code fixes) reports invalid `[ForEach]`
   methods and systems, class components, stateful systems, systems that reference each other, batch methods mixing
   spans with per-entity parameters, parallel methods that would race, writes through read-only parameters, copied
   dynamic buffers, structural changes off the owner thread, indexed components written behind their index's back,
@@ -96,7 +96,7 @@ with what each costs and when to use it, and [API and complexity](https://ecs.xg
 - **[Threads](https://ecs.xgamedev.net/docs/guide/threading)**: one owner thread per world, parallel systems and parallel
   `[ForEach]` methods, Native AOT.
 - **Tools**: [per-system timing, schedule, introspection, trimming](https://ecs.xgamedev.net/docs/guide/diagnostics),
-  [the analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) (EECS002-EECS053, with code fixes).
+  [the analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) (EECS002-EECS054, with code fixes).
 
 ## Example
 
@@ -309,6 +309,9 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 - **A Minecraft-style sample and a Samples section.** [VoxelServer](https://ecs.xgamedev.net/en/docs/samples/voxel-server)
   runs chunks, flowing water, areas of interest, zombies, replication and saves at 20 ticks a second; the
   [Samples](https://ecs.xgamedev.net/en/docs/samples) section of the site walks through every sample.
+- **Few heavy rows on every thread.** `[ForEach(Parallel = true, ChunkRows = 64)]` sets the rows a thread takes at a
+  time (OpenMP's `schedule(dynamic, n)`), so a few hundred rows of microseconds each spread over the threads, also
+  when they write tracked components ([threading](https://ecs.xgamedev.net/en/docs/guide/threading#chunk-rows)).
 - **Change stamps only where a method writes.** EECS053 reports a tracked component taken by `ref` that some path
   leaves unwritten (an early `return`, a write in an `if`), which stamps every visited row; its fix takes it as a
   `Mut<T>` ([analyzer](https://ecs.xgamedev.net/en/docs/guide/analyzer#eecs053)).

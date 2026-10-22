@@ -209,6 +209,8 @@ stateDiagram-v2
 水位比它低一级；其余的都变空，所以泉眼没了水就会退。
 
 它像 GPU 画图一样分趟运行（见[思路来自哪里](#ideas)），而且只在打了 `Flowing` 标签、水还可能动的区块上跑：静止的湖在被唤醒之前不会再被访问。
+每一趟是一个单独的系统、一个单独的文件（`Systems/Water/`），只做一件事：它们靠数据交接（`Border`、`NextFluid`、`FluidStep` 和
+`Flowing` 标签），从不互相调用。
 
 ```mermaid
 flowchart LR
@@ -223,12 +225,16 @@ flowchart LR
 有两个系统响应它：`HeightMapSystem` 算出区块的高度图，16 个向量，每个 16 列：从下往上，每一层把方块实心的通道改写成这一层的高度，
 32 层走完，每个通道就是它那一列的顶，没有分支；`WaterWakeSystem` 给这个区块和四个邻居打上 `Flowing`。
 
-<include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#wake</include>
+<include lang="csharp" meta='tab="Water/HeightMap.cs"'>../../../samples/VoxelServer/Systems/Water/HeightMap.cs</include>
+
+<include lang="csharp" meta='tab="Water/Wake.cs"'>../../../samples/VoxelServer/Systems/Water/Wake.cs</include>
 
 **各趟。** `WaterBorderSystem` 从四周的区块收集这一步需要的东西：每个邻居朝向这边的那条边写进区块的 `Border` 缓冲，以及要算的层
 （`Reach`，由各区块的 `FluidCount` 得出，不用搜索）。然后 `WaterFlowSystem` 就是着色器：它把区块的各层和边复制进栈上一张带填充的纹理，
 每层外面多一圈一格宽的方块，所以循环采样邻居没有边界情况；每行 16 个方块用一个 `Vector128<byte>` 算。它只读自己这一行的组件，
-不持有 `World`，所以是[并行方法](/zh/docs/guide/systems#parallel-methods)。字节通道是整数运算：每台机器上的水都一样。
+不持有 `World`，所以是[并行方法](/zh/docs/guide/systems#parallel-methods)。同时流动的区块只有几百个，每个要花几微秒，远少于写被追踪组件
+的遍历默认每块的 4,096 行，所以它设了 `ChunkRows = 64`，线程每次领 64 个区块（[块大小](/zh/docs/guide/threading#chunk-rows)）。
+字节通道是整数运算：每台机器上的水都一样。
 
 不必清零的都不清零。模板跳过自己、上面和旁边都没有水的行，直接写零。纹理是 `[SkipLocalsInit]` 下的 `stackalloc`：填充会写满循环要采样的每个纹素。
 `NextFluid` 在两步之间保留它的长度，所以 `SetCount` 既不分配也不清零；这一步不算的层本来就是零：之前的各步只在这一步的范围覆盖的层上写过水。
@@ -238,13 +244,19 @@ flowchart LR
 `WaterCommitSystem` 等所有区块都走完这一步，再把结果拷成水（每个区块都用邻居这一步之前的水来算，与区块的访问顺序无关），
 更新 `FluidCount`，并唤醒变化的边旁边的区块。
 
-<include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#flow</include>
+<include lang="csharp" meta='tab="Water/Border.cs"'>../../../samples/VoxelServer/Systems/Water/Border.cs</include>
+
+<include lang="csharp" meta='tab="Water/Flow.cs"'>../../../samples/VoxelServer/Systems/Water/Flow.cs</include>
+
+<include lang="csharp" meta='tab="Water/Sleep.cs"'>../../../samples/VoxelServer/Systems/Water/Sleep.cs</include>
+
+<include lang="csharp" meta='tab="Water/Commit.cs"'>../../../samples/VoxelServer/Systems/Water/Commit.cs</include>
 
 `FloatSystem` 把站在水里的东西（玩家、僵尸和掉落物）托起来，顺着水面的坡度推向周围更低的水，水位越低推得越弱：泉眼旁边或下落的水里是全力，
 水流末端只有八分之一。它遍历区块，按 `FluidCount` 跳过干的区块，其余的通过按区块索引的实体找到其中的物体，所以物体所在方块的水
 就是循环自己这一行。
 
-<include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#float</include>
+<include lang="csharp" meta='title="Systems/Water/Float.cs"'>../../../samples/VoxelServer/Systems/Water/Float.cs</include>
 
 ## 移动 [#movement]
 

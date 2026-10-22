@@ -144,7 +144,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` | O(M + S) | job 还会拿到 `Entity` |
 | `entity.Run<T1..Tn, TJob>(ref job)` / `Run(ref job, filter)` | O(n)，过滤条件每个组件再加 O(1) | 单个实体；实体失效、缺组件或被过滤掉时返回 false；job 做结构变更后 ref 仍然有效 |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数) | 连续行的 span；不能做结构变更 |
-| `world.ForEachParallel<T1..Tn, TJob>(ref job, filter)` / `ForEachEntityParallel` | O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | `INoStructuralChanges` job；每块 1,024 到 `World.ParallelChunkRows` 行（job 写被追踪组件时为 4,096 的整数倍），每块一个 job 副本；只在划算时唤醒助手线程 |
+| `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)` / `ForEachEntityParallel` | O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | `INoStructuralChanges` job；每块 1,024 到 `World.ParallelChunkRows` 行（job 写被追踪组件时为 4,096 的整数倍），或 `chunkRows` 向上取整到 64（`[ForEach(ChunkRows = n)]`；这时遍历前打开 O(B) 个区块，B 为 4,096 行的区块数，每写 64 行一次原子 OR），每块一个 job 副本；只在划算时唤醒助手线程 |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | 指向行内的 ref：被追踪组件的每个被访问行都算写入；循环里不能 `await` |
 | `foreach (var item in world.Read<T1..Tn>(filter))` | O(M + S) | 指向行内的 `ref readonly`：不打 tick；其余同 `Query` |
 | `world.Count<T1..Tn>(filter)` | O(M)，需要测位的表再加 S / 64 | 累加表计数，或数存在位（和 tick），AVX-512 下每步 8 个字 |
