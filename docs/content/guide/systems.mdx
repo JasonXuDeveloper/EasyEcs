@@ -206,6 +206,7 @@ an instance method. Its parameters say what it runs over:
 | `World` | the world (for creating entities, other singletons) |
 | [`Maybe<T>`](#maybe) | a component the entity may lack |
 | [`ReadOnlyMaybe<T>`](#read-only-maybe) | a component the entity may lack, read only (indexed components too) |
+| [`ref Reduce<T>`](/en/docs/guide/threading#reductions), `T : ISingletonComponent, IReduction<T>` | a total over the rows: each chunk (or the pass on one thread) adds into its own partial result, and the combined result replaces singleton `T` |
 | `Span<T>` / `ReadOnlySpan<T>`, `EntitySpan` | a [batch method](#batch-methods): runs of rows at once |
 
 | Attribute | Meaning |
@@ -237,6 +238,11 @@ The properties of `[ForEach]`:
       type: 'int',
       description: 'Visit about 1 / N of the rows on each run, every row once per N runs (slices, above). Not with change filters: EECS035.',
       default: '1',
+    },
+    Simd: {
+      type: 'SimdMode',
+      description: 'Auto: a vector loop when the method qualifies (EECS055 names why not). Require: an error when it does not (EECS056). Off: one row at a time, no message.',
+      default: 'SimdMode.Auto',
     },
   }}
 />
@@ -430,7 +436,9 @@ You write a `[ForEach]` method for one row; when its components are plain number
 SIMD loop: the method's body becomes a `System.Numerics.Vector<T>` loop over each run of matching rows, as many rows
 per instruction as `Vector<T>` holds (8 floats on x64 with AVX2, 4 on Arm). Unity's Burst and ISPC work this way: the
 method is the kernel of one lane. The .NET JIT does not vectorize loops on its own, so without this a per-row method
-runs one row at a time ([D68](/en/docs/decisions#d68-vector-loops-without-opting-in)). There is nothing to opt into.
+runs one row at a time ([D68](/en/docs/decisions#d68-vector-loops-without-opting-in)). There is nothing to opt into:
+`[ForEach(Simd = SimdMode.Require)]` makes a method that loses its loop a build error, `SimdMode.Off` keeps one
+scalar.
 
 <Callout type="idea" title="Use it for">
   Hot per-row arithmetic over many rows: movement, heat, decay, timers, clamps, counters. Write the method for one row
@@ -513,12 +521,70 @@ public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2)
 - **The tail** runs the method itself on the rows after the last whole vector, and on every row when the hardware has
   no vector unit, so the results never depend on the lane count.
 
+**Components of several fields.** A component of 2 to 4 fields of one lane type (`Position { X, Y, Z }`) is split into
+one vector per field: a deinterleaving load reads `Vector<float>.Count` rows of the column and gives the X lanes, the Y
+lanes and the Z lanes, and an interleaving store puts them back. The generator calls `EasyEcs.Interleaved` for both:
+AVX2 shuffles and blends at 256 bits, two-source permutes at 512, for lanes of 4 and 8 bytes. Where the CPU has
+neither (Arm, older x64), `Interleaved.IsAccelerated` is false and every row runs the method one at a time, with the
+same results.
+
+```csharp tab="You write"
+public struct Position3 : IComponent { public float X, Y, Z; }
+public struct Velocity3 : IComponent { public float X, Y, Z; }
+public record struct Gravity(float Pull) : ISingletonComponent;
+
+public class FallSystem : EcsSystem
+{
+    [ForEach]
+    static void Fall(ref Position3 position, ref Velocity3 velocity, in Gravity gravity)
+    {
+        velocity.Y -= gravity.Pull;
+        if (position.Y < 0f) velocity.Y = 0f;   // on the ground: a mask over the Y lanes
+        position.X += velocity.X;
+        position.Y += velocity.Y;
+        position.Z += velocity.Z;
+    }
+}
+```
+
+```csharp tab="The generator writes" doccheck=skip
+// Generated (FallSystem.….ForEach.g.cs, trimmed, global:: dropped). Do not copy it: Interleaved is the generator's
+// helper, and Fall_0 is an [UnsafeAccessor] to your private method.
+ref float e1 = ref Unsafe.As<Position3, float>(ref r1);   // the columns as runs of floats: X, Y, Z, X, Y, Z, ...
+ref float e2 = ref Unsafe.As<Velocity3, float>(ref r2);
+nint i = 0;
+if (Vector.IsHardwareAccelerated && Interleaved.IsAccelerated && rows >= Vector<float>.Count)
+{
+    var __u0 = new Vector<float>(s2.Pull);   // the singleton, broadcast once per run
+    var __u2 = new Vector<float>(0f);
+    for (nint last = rows - Vector<float>.Count; i <= last; i += Vector<float>.Count)
+    {
+        // 1. Deinterleaving loads: Count rows of X, Y, Z become three vectors per component
+        Interleaved.Load3(ref e1, (nuint)i, out Vector<float> __c1_0, out Vector<float> __c1_1, out Vector<float> __c1_2);
+        Interleaved.Load3(ref e2, (nuint)i, out Vector<float> __c2_0, out Vector<float> __c2_1, out Vector<float> __c2_2);
+        // 2. The body, one vector per field
+        __c2_1 = (__c2_1 - __u0);
+        var __m1 = Vector.LessThan<float>(__c1_1, __u2);
+        __c2_1 = Vector.ConditionalSelect<float>(__m1, __u2, __c2_1);
+        __c1_0 = (__c1_0 + __c2_0);
+        __c1_1 = (__c1_1 + __c2_1);
+        __c1_2 = (__c1_2 + __c2_2);
+        // 3. Interleaving stores: the fields back into rows
+        Interleaved.Store3(__c1_0, __c1_1, __c1_2, ref e1, (nuint)i);
+        Interleaved.Store3(__c2_0, __c2_1, __c2_2, ref e2, (nuint)i);
+    }
+}
+for (; i < rows; i++)   // 4. the tail, and every row without the shuffles: the method itself
+    __ForEach.Fall_0(null, ref Unsafe.Add(ref r1, i), ref Unsafe.Add(ref r2, i), in s2);
+```
+
 A method gets a vector loop when all of this holds; otherwise it runs row by row, exactly as before:
 
 - **The method:** `static`, per entity, not `Parallel` (a parallel method stays scalar), no `Entity`, `World`,
   `Mut<T>` or `Maybe<T>` parameter.
-- **The components:** each holds one field (or one auto-property) of `float`, `double`, `int`, `uint`, `long` or
-  `ulong`, and all of the method's components the same type: one lane count. `ref` and `in` both work.
+- **The components:** each holds 1 to 4 fields (or auto-properties) of `float`, `double`, `int`, `uint`, `long` or
+  `ulong`, declared in one part, and all of the method's fields the same type: one lane count. `ref` and `in` both
+  work; write the fields (`p.X += v.X`), not a new value of the whole component.
 - **Uniform values:** singletons, constants and `static readonly` fields.
 - **The body:** locals, `=`, compound assignments, `++` / `--`, `+ - *`, `/` on floats, `& | ^ ~`, shifts by a uniform
   count, comparisons, `&& || !`, `?:`, `if` / `else`, `return`, and `Math` / `MathF` `Min`, `Max`, `Abs` (floats),
@@ -528,13 +594,17 @@ A method gets a vector loop when all of this holds; otherwise it runs row by row
 reassociation, and no fused multiply-add the method did not write (`Vector.Min` / `Max` treat NaN and −0 as
 `Math.Min` / `Max` do). Change ticks and the system's read and write sets are those of the per-row method.
 
-**A method that does not qualify** stays a scalar loop, with no warning: it is correct, only slower. The common
-causes are a component of several fields, two number types in one method, and a call the rule does not cover. Rewrite
-it the way Burst code is written: one field per component, one number type per method, the call moved out.
+**A method that does not qualify** stays a scalar loop: it is correct, only slower, and
+[EECS055](/en/docs/guide/analyzer#eecs055) (a suggestion in the IDE) names the first reason, as Burst's inspector
+would. The common causes are a component of more than 4 fields, two number types in one method, a whole component
+assigned (`p = new Position(...)`) instead of its fields, and a call the rule does not cover. Rewrite it the way
+Burst code is written: one number type per method, at most 4 fields per component, the call moved out. A method
+whose speed depends on its loop says so with `Simd = SimdMode.Require`, and the build fails
+([EECS056](/en/docs/guide/analyzer#eecs056)) when an edit takes the loop away.
 
-```csharp tab="Stays scalar"
+```csharp tab="Stays scalar" doccheck=expect-EECS055
 public struct Fuel : IComponent { public float Value; }
-public struct Engines : IComponent { public int Value; }   // an int beside a float: two lane counts
+public struct Engines : IComponent { public int Value; }   // EECS055: lane types float and int differ
 
 public class BurnFuel : EcsSystem
 {
@@ -558,10 +628,15 @@ public class BurnFuel : EcsSystem
 
 The system's generated file (`<System>.….ForEach.g.cs`, under the project's generated sources, or with
 `<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>` under `obj/`) holds `Vector<` when the method got a
-loop.
+loop; EECS055 names the methods that did not, without opening the file.
+
+{/* TODO(vector loops): Math.Clamp, MathF.* beyond Min/Max/Abs/Sqrt/Floor/Ceiling, lerp and conversions; vector
+reductions (Reduce<T> in a vector loop); FloatMode.Fast; presence-bit lane masks (Maybe<T> as a mask);
+Vector512; bounds-check-free scalar loops. Add each to the qualification list above, with its generated code
+where it changes the loop's shape. */}
 
 `KernelBenchmark` runs the per-row job against the generated loop over 100,000 and 1,000 rows (a clamp with a branch,
-`h += v * dt`, an int increment); its numbers are in [D68](/en/docs/decisions#d68-vector-loops-without-opting-in):
+`h += v * dt`, an int increment, and positions of 2 to 4 fields moved, sought and travelled); its numbers are in [D68](/en/docs/decisions#d68-vector-loops-without-opting-in):
 
 <BenchTable bench="KernelBenchmark" />
 
@@ -880,7 +955,7 @@ move although it was added second, so the grounded unit loses half its speed bef
 | `ref` on a component the method only reads | `in` ([EECS025](/en/docs/guide/analyzer#eecs025)) | The system can share a stage; a tracked component is not stamped |
 | An `Entity` or `World` parameter the method does not need | Drop it ([EECS026](/en/docs/guide/analyzer#eecs026)) | The job skips structural bookkeeping and may run in parallel |
 | An instance `[ForEach]` method | A static one ([EECS029](/en/docs/guide/analyzer#eecs029)) | Proven not to change structure: may share a stage, no per-row checks |
-| A component of several numbers in a hot method | One-field components of one number type | The method gets a [vector loop](#vector-loops) |
+| A component of more than 4 numbers, or of two number types, in a hot method | Components of 1 to 4 fields of one number type | The method gets a [vector loop](#vector-loops) |
 | Lanes a vector loop does not cover (bytes, mixed types) | A batch method with `Vector<T>` | SIMD over whole runs of rows |
 | `Maybe<T>` in the hottest loop | Two methods with `[With<T>]` / `[Without<T>]` | No presence test per row |
 | `Parallel = true` on light work | A plain `[ForEach]` | The hand-off costs more than it saves |
