@@ -359,16 +359,16 @@ public static class Interleaved
             ref float s = ref Unsafe.As<T, float>(ref column);
             var a = Vector512.LoadUnsafe(ref s, row * 2);
             var b = Vector512.LoadUnsafe(ref s, row * 2 + 16);
-            f0 = Avx512F.PermuteVar16x32x2(a, Tables32.Load2[0], b).As<float, T>();
-            f1 = Avx512F.PermuteVar16x32x2(a, Tables32.Load2[1], b).As<float, T>();
+            f0 = Avx512F.PermuteVar16x32x2(a, Tables32.Load2A, b).As<float, T>();
+            f1 = Avx512F.PermuteVar16x32x2(a, Tables32.Load2B, b).As<float, T>();
         }
         else
         {
             ref double s = ref Unsafe.As<T, double>(ref column);
             var a = Vector512.LoadUnsafe(ref s, row * 2);
             var b = Vector512.LoadUnsafe(ref s, row * 2 + 8);
-            f0 = Avx512F.PermuteVar8x64x2(a, Tables64.Load2[0], b).As<double, T>();
-            f1 = Avx512F.PermuteVar8x64x2(a, Tables64.Load2[1], b).As<double, T>();
+            f0 = Avx512F.PermuteVar8x64x2(a, Tables64.Load2A, b).As<double, T>();
+            f1 = Avx512F.PermuteVar8x64x2(a, Tables64.Load2B, b).As<double, T>();
         }
     }
 
@@ -379,14 +379,14 @@ public static class Interleaved
         if (Unsafe.SizeOf<T>() == 4)
         {
             ref float d = ref Unsafe.As<T, float>(ref column);
-            Avx512F.PermuteVar16x32x2(f0.AsSingle(), Tables32.Store2[0], f1.AsSingle()).StoreUnsafe(ref d, row * 2);
-            Avx512F.PermuteVar16x32x2(f0.AsSingle(), Tables32.Store2[1], f1.AsSingle()).StoreUnsafe(ref d, row * 2 + 16);
+            Avx512F.PermuteVar16x32x2(f0.AsSingle(), Tables32.Store2A, f1.AsSingle()).StoreUnsafe(ref d, row * 2);
+            Avx512F.PermuteVar16x32x2(f0.AsSingle(), Tables32.Store2B, f1.AsSingle()).StoreUnsafe(ref d, row * 2 + 16);
         }
         else
         {
             ref double d = ref Unsafe.As<T, double>(ref column);
-            Avx512F.PermuteVar8x64x2(f0.AsDouble(), Tables64.Store2[0], f1.AsDouble()).StoreUnsafe(ref d, row * 2);
-            Avx512F.PermuteVar8x64x2(f0.AsDouble(), Tables64.Store2[1], f1.AsDouble()).StoreUnsafe(ref d, row * 2 + 8);
+            Avx512F.PermuteVar8x64x2(f0.AsDouble(), Tables64.Store2A, f1.AsDouble()).StoreUnsafe(ref d, row * 2);
+            Avx512F.PermuteVar8x64x2(f0.AsDouble(), Tables64.Store2B, f1.AsDouble()).StoreUnsafe(ref d, row * 2 + 8);
         }
     }
 
@@ -401,10 +401,9 @@ public static class Interleaved
             var a = Vector512.LoadUnsafe(ref s, row * 3);
             var b = Vector512.LoadUnsafe(ref s, row * 3 + 16);
             var c = Vector512.LoadUnsafe(ref s, row * 3 + 32);
-            var t = Tables32.Load3;
-            f0 = Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(a, t[0], b), t[1], c).As<float, T>();
-            f1 = Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(a, t[2], b), t[3], c).As<float, T>();
-            f2 = Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(a, t[4], b), t[5], c).As<float, T>();
+            f0 = Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(a, Tables32.Load3A, b), Tables32.Load3B, c).As<float, T>();
+            f1 = Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(a, Tables32.Load3C, b), Tables32.Load3D, c).As<float, T>();
+            f2 = Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(a, Tables32.Load3E, b), Tables32.Load3F, c).As<float, T>();
         }
         else
         {
@@ -412,10 +411,9 @@ public static class Interleaved
             var a = Vector512.LoadUnsafe(ref s, row * 3);
             var b = Vector512.LoadUnsafe(ref s, row * 3 + 8);
             var c = Vector512.LoadUnsafe(ref s, row * 3 + 16);
-            var t = Tables64.Load3;
-            f0 = Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(a, t[0], b), t[1], c).As<double, T>();
-            f1 = Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(a, t[2], b), t[3], c).As<double, T>();
-            f2 = Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(a, t[4], b), t[5], c).As<double, T>();
+            f0 = Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(a, Tables64.Load3A, b), Tables64.Load3B, c).As<double, T>();
+            f1 = Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(a, Tables64.Load3C, b), Tables64.Load3D, c).As<double, T>();
+            f2 = Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(a, Tables64.Load3E, b), Tables64.Load3F, c).As<double, T>();
         }
     }
 
@@ -427,19 +425,17 @@ public static class Interleaved
         {
             ref float d = ref Unsafe.As<T, float>(ref column);
             Vector512<float> x = f0.AsSingle(), y = f1.AsSingle(), z = f2.AsSingle();
-            var t = Tables32.Store3;
-            Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(x, t[0], y), t[1], z).StoreUnsafe(ref d, row * 3);
-            Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(x, t[2], y), t[3], z).StoreUnsafe(ref d, row * 3 + 16);
-            Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(x, t[4], y), t[5], z).StoreUnsafe(ref d, row * 3 + 32);
+            Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(x, Tables32.Store3A, y), Tables32.Store3B, z).StoreUnsafe(ref d, row * 3);
+            Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(x, Tables32.Store3C, y), Tables32.Store3D, z).StoreUnsafe(ref d, row * 3 + 16);
+            Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(x, Tables32.Store3E, y), Tables32.Store3F, z).StoreUnsafe(ref d, row * 3 + 32);
         }
         else
         {
             ref double d = ref Unsafe.As<T, double>(ref column);
             Vector512<double> x = f0.AsDouble(), y = f1.AsDouble(), z = f2.AsDouble();
-            var t = Tables64.Store3;
-            Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(x, t[0], y), t[1], z).StoreUnsafe(ref d, row * 3);
-            Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(x, t[2], y), t[3], z).StoreUnsafe(ref d, row * 3 + 8);
-            Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(x, t[4], y), t[5], z).StoreUnsafe(ref d, row * 3 + 16);
+            Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(x, Tables64.Store3A, y), Tables64.Store3B, z).StoreUnsafe(ref d, row * 3);
+            Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(x, Tables64.Store3C, y), Tables64.Store3D, z).StoreUnsafe(ref d, row * 3 + 8);
+            Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(x, Tables64.Store3E, y), Tables64.Store3F, z).StoreUnsafe(ref d, row * 3 + 16);
         }
     }
 
@@ -456,15 +452,14 @@ public static class Interleaved
             var b = Vector512.LoadUnsafe(ref s, row * 4 + 16);
             var c = Vector512.LoadUnsafe(ref s, row * 4 + 32);
             var d = Vector512.LoadUnsafe(ref s, row * 4 + 48);
-            var t = Tables32.Load4;
-            var xy0 = Avx512F.PermuteVar16x32x2(a, t[0], b);
-            var zw0 = Avx512F.PermuteVar16x32x2(a, t[1], b);
-            var xy1 = Avx512F.PermuteVar16x32x2(c, t[0], d);
-            var zw1 = Avx512F.PermuteVar16x32x2(c, t[1], d);
-            f0 = Avx512F.PermuteVar16x32x2(xy0, t[2], xy1).As<float, T>();
-            f1 = Avx512F.PermuteVar16x32x2(xy0, t[3], xy1).As<float, T>();
-            f2 = Avx512F.PermuteVar16x32x2(zw0, t[2], zw1).As<float, T>();
-            f3 = Avx512F.PermuteVar16x32x2(zw0, t[3], zw1).As<float, T>();
+            var xy0 = Avx512F.PermuteVar16x32x2(a, Tables32.Load4A, b);
+            var zw0 = Avx512F.PermuteVar16x32x2(a, Tables32.Load4B, b);
+            var xy1 = Avx512F.PermuteVar16x32x2(c, Tables32.Load4A, d);
+            var zw1 = Avx512F.PermuteVar16x32x2(c, Tables32.Load4B, d);
+            f0 = Avx512F.PermuteVar16x32x2(xy0, Tables32.Load4C, xy1).As<float, T>();
+            f1 = Avx512F.PermuteVar16x32x2(xy0, Tables32.Load4D, xy1).As<float, T>();
+            f2 = Avx512F.PermuteVar16x32x2(zw0, Tables32.Load4C, zw1).As<float, T>();
+            f3 = Avx512F.PermuteVar16x32x2(zw0, Tables32.Load4D, zw1).As<float, T>();
         }
         else
         {
@@ -473,15 +468,14 @@ public static class Interleaved
             var b = Vector512.LoadUnsafe(ref s, row * 4 + 8);
             var c = Vector512.LoadUnsafe(ref s, row * 4 + 16);
             var d = Vector512.LoadUnsafe(ref s, row * 4 + 24);
-            var t = Tables64.Load4;
-            var xy0 = Avx512F.PermuteVar8x64x2(a, t[0], b);
-            var zw0 = Avx512F.PermuteVar8x64x2(a, t[1], b);
-            var xy1 = Avx512F.PermuteVar8x64x2(c, t[0], d);
-            var zw1 = Avx512F.PermuteVar8x64x2(c, t[1], d);
-            f0 = Avx512F.PermuteVar8x64x2(xy0, t[2], xy1).As<double, T>();
-            f1 = Avx512F.PermuteVar8x64x2(xy0, t[3], xy1).As<double, T>();
-            f2 = Avx512F.PermuteVar8x64x2(zw0, t[2], zw1).As<double, T>();
-            f3 = Avx512F.PermuteVar8x64x2(zw0, t[3], zw1).As<double, T>();
+            var xy0 = Avx512F.PermuteVar8x64x2(a, Tables64.Load4A, b);
+            var zw0 = Avx512F.PermuteVar8x64x2(a, Tables64.Load4B, b);
+            var xy1 = Avx512F.PermuteVar8x64x2(c, Tables64.Load4A, d);
+            var zw1 = Avx512F.PermuteVar8x64x2(c, Tables64.Load4B, d);
+            f0 = Avx512F.PermuteVar8x64x2(xy0, Tables64.Load4C, xy1).As<double, T>();
+            f1 = Avx512F.PermuteVar8x64x2(xy0, Tables64.Load4D, xy1).As<double, T>();
+            f2 = Avx512F.PermuteVar8x64x2(zw0, Tables64.Load4C, zw1).As<double, T>();
+            f3 = Avx512F.PermuteVar8x64x2(zw0, Tables64.Load4D, zw1).As<double, T>();
         }
     }
 
@@ -493,29 +487,27 @@ public static class Interleaved
         {
             ref float d = ref Unsafe.As<T, float>(ref column);
             Vector512<float> x = f0.AsSingle(), y = f1.AsSingle(), z = f2.AsSingle(), w = f3.AsSingle();
-            var t = Tables32.Store4;
-            var xy0 = Avx512F.PermuteVar16x32x2(x, t[0], y);
-            var xy1 = Avx512F.PermuteVar16x32x2(x, t[1], y);
-            var zw0 = Avx512F.PermuteVar16x32x2(z, t[0], w);
-            var zw1 = Avx512F.PermuteVar16x32x2(z, t[1], w);
-            Avx512F.PermuteVar16x32x2(xy0, t[2], zw0).StoreUnsafe(ref d, row * 4);
-            Avx512F.PermuteVar16x32x2(xy0, t[3], zw0).StoreUnsafe(ref d, row * 4 + 16);
-            Avx512F.PermuteVar16x32x2(xy1, t[2], zw1).StoreUnsafe(ref d, row * 4 + 32);
-            Avx512F.PermuteVar16x32x2(xy1, t[3], zw1).StoreUnsafe(ref d, row * 4 + 48);
+            var xy0 = Avx512F.PermuteVar16x32x2(x, Tables32.Store4A, y);
+            var xy1 = Avx512F.PermuteVar16x32x2(x, Tables32.Store4B, y);
+            var zw0 = Avx512F.PermuteVar16x32x2(z, Tables32.Store4A, w);
+            var zw1 = Avx512F.PermuteVar16x32x2(z, Tables32.Store4B, w);
+            Avx512F.PermuteVar16x32x2(xy0, Tables32.Store4C, zw0).StoreUnsafe(ref d, row * 4);
+            Avx512F.PermuteVar16x32x2(xy0, Tables32.Store4D, zw0).StoreUnsafe(ref d, row * 4 + 16);
+            Avx512F.PermuteVar16x32x2(xy1, Tables32.Store4C, zw1).StoreUnsafe(ref d, row * 4 + 32);
+            Avx512F.PermuteVar16x32x2(xy1, Tables32.Store4D, zw1).StoreUnsafe(ref d, row * 4 + 48);
         }
         else
         {
             ref double d = ref Unsafe.As<T, double>(ref column);
             Vector512<double> x = f0.AsDouble(), y = f1.AsDouble(), z = f2.AsDouble(), w = f3.AsDouble();
-            var t = Tables64.Store4;
-            var xy0 = Avx512F.PermuteVar8x64x2(x, t[0], y);
-            var xy1 = Avx512F.PermuteVar8x64x2(x, t[1], y);
-            var zw0 = Avx512F.PermuteVar8x64x2(z, t[0], w);
-            var zw1 = Avx512F.PermuteVar8x64x2(z, t[1], w);
-            Avx512F.PermuteVar8x64x2(xy0, t[2], zw0).StoreUnsafe(ref d, row * 4);
-            Avx512F.PermuteVar8x64x2(xy0, t[3], zw0).StoreUnsafe(ref d, row * 4 + 8);
-            Avx512F.PermuteVar8x64x2(xy1, t[2], zw1).StoreUnsafe(ref d, row * 4 + 16);
-            Avx512F.PermuteVar8x64x2(xy1, t[3], zw1).StoreUnsafe(ref d, row * 4 + 24);
+            var xy0 = Avx512F.PermuteVar8x64x2(x, Tables64.Store4A, y);
+            var xy1 = Avx512F.PermuteVar8x64x2(x, Tables64.Store4B, y);
+            var zw0 = Avx512F.PermuteVar8x64x2(z, Tables64.Store4A, w);
+            var zw1 = Avx512F.PermuteVar8x64x2(z, Tables64.Store4B, w);
+            Avx512F.PermuteVar8x64x2(xy0, Tables64.Store4C, zw0).StoreUnsafe(ref d, row * 4);
+            Avx512F.PermuteVar8x64x2(xy0, Tables64.Store4D, zw0).StoreUnsafe(ref d, row * 4 + 8);
+            Avx512F.PermuteVar8x64x2(xy1, Tables64.Store4C, zw1).StoreUnsafe(ref d, row * 4 + 16);
+            Avx512F.PermuteVar8x64x2(xy1, Tables64.Store4D, zw1).StoreUnsafe(ref d, row * 4 + 24);
         }
     }
 
@@ -589,34 +581,67 @@ public static class Interleaved
         }
     }
 
+    // One static readonly vector per permute: constants once the JIT optimizes the loop (no array, no bounds check).
     private static class Tables32
     {
-        public static readonly Vector512<int>[] Load2 = Of(Tables.Load2(16)), Store2 = Of(Tables.Store2(16)), Load3 = Of(Tables.Load3(16)),
-            Store3 = Of(Tables.Store3(16)), Load4 = Of(Tables.Load4(16)), Store4 = Of(Tables.Store4(16));
-
-        private static Vector512<int>[] Of(int[][] tables)
-        {
-            var vectors = new Vector512<int>[tables.Length];
-            for (int i = 0; i < tables.Length; i++) vectors[i] = Vector512.Create(tables[i]);
-            return vectors;
-        }
+        public static readonly Vector512<int> Load2A = Vector512.Create(Tables.Load2(16)[0]),
+            Load2B = Vector512.Create(Tables.Load2(16)[1]);
+        public static readonly Vector512<int> Store2A = Vector512.Create(Tables.Store2(16)[0]),
+            Store2B = Vector512.Create(Tables.Store2(16)[1]);
+        public static readonly Vector512<int> Load3A = Vector512.Create(Tables.Load3(16)[0]),
+            Load3B = Vector512.Create(Tables.Load3(16)[1]),
+            Load3C = Vector512.Create(Tables.Load3(16)[2]),
+            Load3D = Vector512.Create(Tables.Load3(16)[3]),
+            Load3E = Vector512.Create(Tables.Load3(16)[4]),
+            Load3F = Vector512.Create(Tables.Load3(16)[5]);
+        public static readonly Vector512<int> Store3A = Vector512.Create(Tables.Store3(16)[0]),
+            Store3B = Vector512.Create(Tables.Store3(16)[1]),
+            Store3C = Vector512.Create(Tables.Store3(16)[2]),
+            Store3D = Vector512.Create(Tables.Store3(16)[3]),
+            Store3E = Vector512.Create(Tables.Store3(16)[4]),
+            Store3F = Vector512.Create(Tables.Store3(16)[5]);
+        public static readonly Vector512<int> Load4A = Vector512.Create(Tables.Load4(16)[0]),
+            Load4B = Vector512.Create(Tables.Load4(16)[1]),
+            Load4C = Vector512.Create(Tables.Load4(16)[2]),
+            Load4D = Vector512.Create(Tables.Load4(16)[3]);
+        public static readonly Vector512<int> Store4A = Vector512.Create(Tables.Store4(16)[0]),
+            Store4B = Vector512.Create(Tables.Store4(16)[1]),
+            Store4C = Vector512.Create(Tables.Store4(16)[2]),
+            Store4D = Vector512.Create(Tables.Store4(16)[3]);
     }
 
     private static class Tables64
     {
-        public static readonly Vector512<long>[] Load2 = Of(Tables.Load2(8)), Store2 = Of(Tables.Store2(8)), Load3 = Of(Tables.Load3(8)),
-            Store3 = Of(Tables.Store3(8)), Load4 = Of(Tables.Load4(8)), Store4 = Of(Tables.Store4(8));
+        public static readonly Vector512<long> Load2A = Wide(Tables.Load2(8)[0]),
+            Load2B = Wide(Tables.Load2(8)[1]);
+        public static readonly Vector512<long> Store2A = Wide(Tables.Store2(8)[0]),
+            Store2B = Wide(Tables.Store2(8)[1]);
+        public static readonly Vector512<long> Load3A = Wide(Tables.Load3(8)[0]),
+            Load3B = Wide(Tables.Load3(8)[1]),
+            Load3C = Wide(Tables.Load3(8)[2]),
+            Load3D = Wide(Tables.Load3(8)[3]),
+            Load3E = Wide(Tables.Load3(8)[4]),
+            Load3F = Wide(Tables.Load3(8)[5]);
+        public static readonly Vector512<long> Store3A = Wide(Tables.Store3(8)[0]),
+            Store3B = Wide(Tables.Store3(8)[1]),
+            Store3C = Wide(Tables.Store3(8)[2]),
+            Store3D = Wide(Tables.Store3(8)[3]),
+            Store3E = Wide(Tables.Store3(8)[4]),
+            Store3F = Wide(Tables.Store3(8)[5]);
+        public static readonly Vector512<long> Load4A = Wide(Tables.Load4(8)[0]),
+            Load4B = Wide(Tables.Load4(8)[1]),
+            Load4C = Wide(Tables.Load4(8)[2]),
+            Load4D = Wide(Tables.Load4(8)[3]);
+        public static readonly Vector512<long> Store4A = Wide(Tables.Store4(8)[0]),
+            Store4B = Wide(Tables.Store4(8)[1]),
+            Store4C = Wide(Tables.Store4(8)[2]),
+            Store4D = Wide(Tables.Store4(8)[3]);
 
-        private static Vector512<long>[] Of(int[][] tables)
+        private static Vector512<long> Wide(int[] table)
         {
-            var vectors = new Vector512<long>[tables.Length];
-            for (int i = 0; i < tables.Length; i++)
-            {
-                var wide = new long[tables[i].Length];
-                for (int j = 0; j < wide.Length; j++) wide[j] = tables[i][j];
-                vectors[i] = Vector512.Create(wide);
-            }
-            return vectors;
+            var wide = new long[table.Length];
+            for (int j = 0; j < wide.Length; j++) wide[j] = table[j];
+            return Vector512.Create(wide);
         }
     }
 }

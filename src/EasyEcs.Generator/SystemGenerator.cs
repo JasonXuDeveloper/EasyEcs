@@ -262,7 +262,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
         {
             Symbols.ParamKind.Component when runs => $"{p.RefKind} global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i)",
-            Symbols.ParamKind.Entity when runs => "entities[(int)i]",
+            Symbols.ParamKind.Entity when runs => "entities.At(i)", // i < rows, the run's length: no bounds check
             Symbols.ParamKind.Optional when runs => $"m{i}[(int)i]",
             Symbols.ParamKind.Mutable when runs => $"new global::EasyEcs.Mut<{p.Type}>(ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i), in entities, (int)i)",
             Symbols.ParamKind.Component => $"{p.RefKind} c{++index}",
