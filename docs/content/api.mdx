@@ -37,6 +37,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `ITracked` | marker interface | Rows record the change tick of their last write or removal ([change tracking](/en/docs/guide/change-tracking)). |
 | `IIndexed<TKey>` | interface | A component the world indexes by its `Key`; written with `Set` (EECS015). An `EntityId` key makes it a link to an entity. |
 | `IUniqueIndexed<TKey>`, `UniqueIndexExtensions` | interface, extensions | An indexed component whose key names one entity: a write giving a second entity a taken key throws; `index.Get(key)`, `TryGet` ([indexes and relations](/en/docs/guide/indexes-and-relations)). |
+| `IDirectIndexed<TKey>` | interface | A unique component whose keys map to a bounded range of slots (`static Slots`, `static SlotOf(key)`): its index keeps a slot array beside the hash, so `Get` / `TryGet` and the uniqueness check of a write read one entry ([indexes and relations](/en/docs/guide/indexes-and-relations)). |
 | `IRelation` | interface | An element of a `DynamicBuffer<T>` that links its entity to `Target` ([indexes and relations](/en/docs/guide/indexes-and-relations)). |
 | `ChildOf` | record struct | `ChildOf(EntityId Parent)`: the hierarchy; destroying a parent destroys its children ([hierarchy](/en/docs/guide/hierarchy)). |
 | `IGroup` | interface | A component whose `Group` value splits tables (`world.GroupBy<T>()`, [groups](/en/docs/guide/groups)). |
@@ -75,6 +76,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `world.CreateEntities(Span<Entity> entities, in T1 … in Tn)` | O(count × n) amortized | one gate pass and at most one table growth for the wave; writes the handles |
 | `entity.Destroy()` | O(c) | the table's last row fills the hole (a tombstone during a pass); recycles the id; a stale handle is ignored; unlinks indexed components; cascades to `ChildOf` children and applies target policies; with `WorldOptions.DestroyLogCapacity`, one 16-byte record |
 | `world.DestroyAll<T1..Tn>(filter)` | O(M + S) | destroys every match in one gate pass and returns how many; safe during a pass |
+| `world.CollectIds<T1..Tn>(into, filter)` | O(M), + the rows read until `into` is full | writes the ids of the matches into a span in query order until it is full and returns how many: a bounded batch for `DestroyEntities`, `SaveEntities` or structural changes; a table whose rows all match is one copy; allocation-free |
 | `world.DestroyEntities(ids)` | O(ids × c) | destroys a list of ids in one gate pass and one cascade and returns how many; stale ids and repeats are skipped; safe during a pass |
 | `entity.IsAlive` / `world.IsAlive(id)` | O(1) | |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` | O(1) | false (or a throw) when that incarnation is not alive |
@@ -198,7 +200,7 @@ Details: [bulk changes](/en/docs/guide/bulk), [cleanup and disable](/en/docs/gui
 | `index.Ascending()` / `Descending()` | O(keys log keys) for the first walk, then O(1) per entity | ordered walks for a comparable key (leaderboards, timers); after the first walk the index keeps its keys sorted: O(log keys) plus a block move per key that appears or disappears |
 | `index.Range(min, max)` / `RangeDescending(min, max)` | O(keys log keys) for the first walk, then O(log keys) to find `min` and O(1) per entity | inclusive bounds |
 | `index.WhenTargetDestroyed(policy)` | O(1); then O(1) per destroyed entity | an `EntityId` key: `Keep` (default), `Remove` or `Destroy` the components pointing at a destroyed entity |
-| `index.Get(key)` / `TryGet(key, out Entity)` | O(1): a hash probe | a unique component (`IUniqueIndexed<TKey>`): the one entity of the key; `Get` throws `InvalidOperationException` when none has it |
+| `index.Get(key)` / `TryGet(key, out Entity)` | O(1): a hash probe; one array read for a direct-indexed component's key in its own slot | a unique component (`IUniqueIndexed<TKey>`): the one entity of the key; `Get` throws `InvalidOperationException` when none has it |
 
 A unique component's index exists from the first table holding it, so every write is checked before it changes
 anything: `Set` and `CreateEntity` add one hash probe per changed key; `SetAll` and `EnableAll` an extra pass over the
@@ -265,6 +267,7 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 | generated: `world.X`, `HasX`, `GetOrAddX()`, `SetX(…)`, `RemoveX()` for a singleton `X` | as the generic call | |
 | `world.Systems` | O(systems) to walk, `Count` O(groups) | every group's systems in execution order, allocation-free |
 | `world.DefaultUpdateCount` | O(1) | default-group updates so far |
+| `world.UpdateCount<TGroup>()` | O(1) | `Update<TGroup>()` calls so far, the running one included (0 before the first): what `UpdateInterval` counts |
 | `world.RemoveTypes(assembly)` / `RemoveTypes(context)` | O(entities with such components + tables + cached queries) | takes a plugin's systems, singletons, indexes and components out of the world so its `AssemblyLoadContext` can unload; allocates (cold) |
 | `world.DescribeTables()` | O(tables + columns) | every table with its columns, rows, capacity and bytes; allocates (cold) |
 | `world.DescribeSchedule()` | O(groups × systems³) | every group's stages, each system's reads and writes, its waits and the registration-only pairs; allocates (cold); any thread |
