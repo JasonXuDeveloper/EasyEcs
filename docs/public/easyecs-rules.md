@@ -90,9 +90,18 @@ available as Markdown: add `.md` to its URL.
   owner thread acts on that data. A few hundred heavy rows (microseconds each) set `ChunkRows = 64` so threads take 64
   rows at a time (EECS054: only with `Parallel = true`); light rows keep the default. Threads claim chunks from one
   shared counter, like OpenMP's `schedule(dynamic, n)`: never assume an order between chunks.
-- Hot per-row arithmetic over numbers: a static, non-parallel `[ForEach]` method over one-field components of one
-  primitive type (no `Entity`, `World`, `Mut<T>` or `Maybe<T>` parameter) gets a generated `Vector<T>` loop; mixing
-  `float` and `int` fields keeps it scalar.
+- Code that runs on several threads (a parallel `[ForEach]` method, the `Execute` of a job run by `ForEachParallel`)
+  never writes shared state: no static field, no object a context parameter or a job field refers to (EECS060). A
+  parallel job's fields are not merged back: each chunk runs a copy, so never read a field after `ForEachParallel`
+  (EECS061). A total over the rows (a count, a sum, a min / max, a bounding box) is a `ref Reduce<T>` parameter (always `ref`:
+  without it, EECS002), with `T` a singleton implementing `IReduction<T>` (`Identity`, an associative `Combine`); read the result as `world.T` or `in T`
+  after the pass, never `Reduce<T>.Value` as the total (it is the chunk's part). One `Reduce<T>` per `T` per pass
+  (EECS057). Set `ChunkRows` when a float total must be the same on every machine.
+- Hot per-row arithmetic over numbers: a static, non-parallel `[ForEach]` method over components of 1 to 4 fields of
+  one primitive type (no `Entity`, `World`, `Mut<T>` or `Maybe<T>` parameter) gets a generated `Vector<T>` loop; write
+  the fields (`p.X += v.X`), not a new whole component, and do not mix `float` and `int`. EECS055 (a suggestion) names
+  why a method stayed scalar; put `[ForEach(Simd = SimdMode.Require)]` on a hot method so losing the loop fails the
+  build (EECS056), `SimdMode.Off` on one that should stay scalar.
 - A request or message for one entity runs as a struct job on it: `entity.Run<T…, TJob>(ref job, Filter)` with an
   `IForEachEntity` job and a `static readonly` `QueryFilter`; it returns `false` when the entity is gone, lacks a
   component or fails the filter. It is structural: never inside a parallel `[ForEach]` (EECS010), never in a
