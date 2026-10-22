@@ -420,7 +420,7 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 - **不做结构变更的 `[ForEach]` 方法保持 `static`**，不拿 `World` 参数，`Entity` 只读：生成器会给它的 job 标上
   `INoStructuralChanges`，省掉每行的簿记。手写的 job 也照此标记。
 - **单例作为 `[ForEach]` 参数**（每一遍只解析一次），系统之外则持有一个 `SingletonRef<T>`（每次访问不用查找）。
-- **给系统定节奏**：用 `UpdateInterval`，或在需要时更新某个系统分组（`Update<TGroup>()`），不要在方法里数计数器。
+- **给系统定节奏**：用 `[UpdateInterval(N)]`，或在需要时更新某个系统分组（`Update<TGroup>()`），不要在方法里数计数器。
 - **组件保持小**（几个字段，远小于 64 字节），很少用的数据拆成单独的组件：遍历只加载它读的列。
 - **在批量方法里向量化算术**，成批生成用批量调用，状态用标签，变了什么用 `[Changed<T>]`，没了什么用 `[Removed<T>]`
   （[见上](#regular-code-and-the-fastest-code)）。
@@ -458,7 +458,6 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 | 并行方法写单例或做结构变更 | 线程之间数据竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
 | 组件里存 `Entity` | 列里有了引用：不再固定，GC 要扫描 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告） |
 | 通过 `ref` 写被索引的组件 | 索引看不到新键 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
-| 计算出来的 `UpdateInterval` | 每次更新都要读 | [EECS018](/zh/docs/guide/analyzer#eecs018)（警告） |
 | 只读被追踪组件的 `ref` 参数 | 访问过的每一行都算变了 | [EECS025](/zh/docs/guide/analyzer#eecs025)（警告，代码修复：`in`） |
 | 每次更新都跑的代码里有闭包或 LINQ | 每个 tick 都产生垃圾 | [EECS028](/zh/docs/guide/analyzer#eecs028)（警告），再加上自己测试里 `AllocationTests` 式的检查 |
 | `[ForEach]` 方法里通过被访问的 `Entity` 查组件 | 每行查一次 | [EECS027](/zh/docs/guide/analyzer#eecs027)（警告） |

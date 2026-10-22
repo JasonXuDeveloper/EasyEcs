@@ -85,7 +85,7 @@ public void APoisonedUnitDiesAndScores()
 读 `DateTime.Now`、随机数生成器或 socket 的系统没法精确测试。改给它一个单例（带 tick 和步长的时钟、种子、配置），在测试里设置这个
 单例。输入也是数据：测试直接创建网络系统本来会创建的请求实体，或者往输入系统消费的队列里写（[托管](/zh/docs/guide/hosting#requests)）。
 
-- **间隔：**`UpdateInterval => 4` 的系统每四次 `Update()` 跑一次；测试里就调用这么多次 `Update()`。
+- **间隔：**`[UpdateInterval(4)]` 的系统每四次 `Update()` 跑一次；测试里就调用这么多次 `Update()`。
 - **分组：**`[UpdateInGroup<G>]` 里的系统只在 `world.Update<G>()` 时运行；测试像主机那样调用它。
 - **变更追踪：**`[Changed<T>]` 方法只看到它的系统上次运行以来的写入；在两次更新之间写组件，对第二次更新做断言
   （[变更追踪](/zh/docs/guide/change-tracking)）。

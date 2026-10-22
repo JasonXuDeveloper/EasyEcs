@@ -23,6 +23,24 @@ namespace EasyEcs;
 public abstract class SystemCode
 {
     private static readonly ConditionalWeakTable<Type, SystemCode> Registered = new();
+
+    /// <summary>The code of a type without <see cref="UpdateIntervalAttribute">[UpdateInterval]</see>.</summary>
+    protected SystemCode()
+    {
+    }
+
+    /// <summary>
+    /// The code of a type with <c>[UpdateInterval(<paramref name="interval"/>, Phase = <paramref name="phase"/>)]</c>,
+    /// as the generator writes it (interval 1 or more, phase 0 to interval - 1).
+    /// </summary>
+    protected SystemCode(int interval, int phase)
+    {
+        Interval = interval;
+        Phase = phase;
+    }
+
+    // The type's [UpdateInterval] (0: it has none, its base's or every update applies).
+    internal readonly int Interval, Phase;
     private static readonly ConditionalWeakTable<Type, Type> Generic = new(); // system definition -> open code type
 
     /// <summary>Runs the type's [ForEach] methods in declaration order (after OnUpdate).</summary>

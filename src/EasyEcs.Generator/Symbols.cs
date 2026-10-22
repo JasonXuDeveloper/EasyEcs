@@ -15,6 +15,9 @@ namespace EasyEcs.Generator;
 internal static class Symbols
 {
     public const string ForEachAttribute = "EasyEcs.ForEachAttribute";
+    public const string ForEntityAttribute = "EasyEcs.ForEntityAttribute";
+    public const string ConsumeAttribute = "EasyEcs.ConsumeAttribute";
+    public const string UpdateIntervalAttribute = "EasyEcs.UpdateIntervalAttribute";
     public const string WithAttribute = "EasyEcs.WithAttribute<T>";
     public const string WithoutAttribute = "EasyEcs.WithoutAttribute<T>";
     public const string GroupWith = "EasyEcs.ISystemGroupWith<T>";
@@ -684,7 +687,87 @@ internal static class Symbols
     /// A [ForEach] method outside a system: static, in a type that is no system. The generator writes its job and an
     /// entry point taking the world (and the caller's context parameters), a static extension member of the type.
     /// </summary>
-    public static bool IsRunner(IMethodSymbol method) => !IsSystem(method.ContainingType);
+    public static bool IsRunner(IMethodSymbol method) => !IsSystem(method.ContainingType) || IsForEntity(method);
+
+    /// <summary>
+    /// A [ForEntity] method: static, it runs on one entity through its entry point, a static extension member of its
+    /// type (in a system too) that takes the entity, then the tick with [Changed&lt;T&gt;] / [Removed&lt;T&gt;], then
+    /// the caller's context parameters, and runs the method's job with <c>entity.Run</c>.
+    /// </summary>
+    public static bool IsForEntity(IMethodSymbol method) =>
+        method.GetAttributes().Any(a => Named(a.AttributeClass, ForEntityAttribute));
+
+    /// <summary>
+    /// Why a [ForEntity] method cannot be generated (EECS081), or null: it is an instance method, also has [ForEach],
+    /// or takes a parameter that has no meaning for one entity (a component span, an EntitySpan, a Reduce, a Scratch).
+    /// Its other problems are those of a [ForEach] method outside a system (EECS002, EECS003, EECS021, EECS022).
+    /// </summary>
+    public static string? ForEntityProblem(IMethodSymbol method)
+    {
+        if (method.GetAttributes().Any(a => Named(a.AttributeClass, ForEachAttribute)))
+            return "also has [ForEach]: a method is either a pass over the world or a run on one entity";
+        if (!method.IsStatic) return "is an instance method: make it static (its entry point takes the entity)";
+        foreach (var p in method.Parameters)
+        {
+            string? what = Classify(p) switch
+            {
+                ParamKind.ComponentSpan => "a component span, which belongs to a batch method",
+                ParamKind.Entities => "an EntitySpan, which belongs to a batch method",
+                ParamKind.Reduction => "a Reduce, the partial result of a pass",
+                ParamKind.Scratch => "a Scratch, the working memory of a pass's thread",
+                _ => null,
+            };
+            if (what != null) return $"takes '{p.Name}', {what}: one entity has none (take the singleton by 'ref', or a value the caller passes)";
+        }
+
+        return null;
+    }
+
+    /// <summary>The method has [Consume]: its entities are destroyed when the pass that visited them ends.</summary>
+    public static bool IsConsume(IMethodSymbol method) =>
+        method.GetAttributes().Any(a => Named(a.AttributeClass, ConsumeAttribute));
+
+    /// <summary>Why a method's [Consume] cannot apply (EECS085), or null: it has no [ForEach], or it visits a slice of its rows.</summary>
+    public static string? ConsumeProblem(IMethodSymbol method)
+    {
+        if (!IsConsume(method)) return null;
+        if (!method.GetAttributes().Any(a => Named(a.AttributeClass, ForEachAttribute)))
+            return "it has no [ForEach]: only a pass has rows to consume";
+        if (Slices(method) > 1)
+            return "it visits a slice of its rows per run, and destroying them moves the rows of the other slices (events would wait for many runs)";
+        return null;
+    }
+
+    /// <summary>
+    /// The [UpdateInterval(n, Phase = p)] of a system type (its own, not a base's), or null without one. Invalid values
+    /// are <see cref="ScheduleProblem"/>'s.
+    /// </summary>
+    public static (int Interval, int Phase, AttributeData Attribute)? Schedule(INamedTypeSymbol type)
+    {
+        foreach (var attribute in type.GetAttributes())
+        {
+            if (!Named(attribute.AttributeClass, UpdateIntervalAttribute)) continue;
+            int interval = attribute.ConstructorArguments.Length == 1 && attribute.ConstructorArguments[0].Value is int value ? value : 0, phase = 0;
+            foreach (var named in attribute.NamedArguments)
+                if (named.Key == "Phase" && named.Value.Value is int p) phase = p;
+            return (interval, phase, attribute);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Why a type's [UpdateInterval] cannot apply (EECS083), or null: the type is no system, the interval is below 1,
+    /// or the phase is outside 0 to interval - 1.
+    /// </summary>
+    public static string? ScheduleProblem(INamedTypeSymbol type)
+    {
+        if (Schedule(type) is not var (interval, phase, _)) return null;
+        if (!IsSystem(type)) return "it is no EcsSystem, so nothing runs it on a schedule";
+        if (interval < 1) return $"its interval {interval} must be 1 or more";
+        if (phase < 0 || phase >= interval) return $"its phase {phase} must be 0 to {interval - 1} (the interval - 1)";
+        return null;
+    }
 
     /// <summary>
     /// The entry point of a [ForEach] method outside a system would have the signature of a method of its type with
@@ -699,12 +782,12 @@ internal static class Symbols
         return members.Any(m =>
             !m.GetAttributes().Any(IsGeneratorMark) // not the entry point itself
             && (m.Parameters.Select(p => (p.Type.ToDisplayString(), p.RefKind)).SequenceEqual(expected)
-                || !SymbolEqualityComparer.Default.Equals(m, method) && IsForEach(m) && EntryPoint(m).SequenceEqual(expected)));
+                || !SymbolEqualityComparer.Default.Equals(m, method) && IsGeneratedJob(m) && EntryPoint(m).SequenceEqual(expected)));
     }
 
     private static List<(string, RefKind)> EntryPoint(IMethodSymbol method)
     {
-        var parameters = new List<(string, RefKind)> { (World, RefKind.None) };
+        var parameters = new List<(string, RefKind)> { (IsForEntity(method) ? Entity : World, RefKind.None) };
         if (TracksSince(method)) parameters.Add(("ulong", RefKind.None));
         if (Slices(method) > 1) parameters.Add(("int", RefKind.None));
         foreach (var p in method.Parameters)
@@ -1039,6 +1122,7 @@ internal static class Symbols
     {
         var type = method.ContainingType;
         bool outside = IsRunner(method);
+        if (IsForEntity(method) ? ForEntityProblem(method) != null : ConsumeProblem(method) != null) return false;
         if (outside && (!method.IsStatic || EntryPointCollides(method))) return false;
         if (method.IsGenericMethod && !outside || Unnameable(method) != null) return false; // a system's method gets no type arguments
         if (SlicesProblem(method) != null || ChunkRowsProblem(method) != null) return false;
@@ -1415,7 +1499,7 @@ internal static class Symbols
                 case IArrayElementReferenceOperation a: target = a.ArrayReference; break;
                 case IConversionOperation c: target = c.Operand; break;
                 case IParameterReferenceOperation { Parameter: var p }:
-                    return p.ContainingSymbol is IMethodSymbol m && IsForEach(m)
+                    return p.ContainingSymbol is IMethodSymbol m && IsGeneratedJob(m)
                         && (p.RefKind is RefKind.In or RefKind.RefReadOnlyParameter
                             && Classify(p) is ParamKind.Component or ParamKind.Singleton
                             || p.RefKind == RefKind.None && Classify(p) == ParamKind.ComponentSpan
@@ -1438,6 +1522,14 @@ internal static class Symbols
         type.SpecialType == SpecialType.System_String || Named(type, World)
         || Named(type.ContainingNamespace, "System.Collections.Immutable") || Named(type.ContainingNamespace, "System.Collections.Frozen");
 
+    /// <summary>A [ForEach] method: a pass over the world's matching entities (a system's, or a runner's).</summary>
     public static bool IsForEach(IMethodSymbol method) =>
         method.GetAttributes().Any(a => Named(a.AttributeClass, ForEachAttribute));
+
+    /// <summary>
+    /// A [ForEach] or a [ForEntity] method: the generator compiles its body into a job, so the rules about its
+    /// parameters, filters and what its body costs or changes apply to both.
+    /// </summary>
+    public static bool IsGeneratedJob(IMethodSymbol method) =>
+        method.GetAttributes().Any(a => Named(a.AttributeClass, ForEachAttribute) || Named(a.AttributeClass, ForEntityAttribute));
 }

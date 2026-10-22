@@ -98,6 +98,9 @@ after the change on the machine of the time; they are history, not the current r
 | [D79](#d79-entity-random) | Deterministic random numbers are a pure function, `EntityRandom` |
 | [D80](#d80-for-parallel) | A parallel loop over a range or a list is `world.ForParallel` |
 | [D81](#d81-keyed-reductions) | Keyed reductions not added |
+| [D82](#d82-for-entity) | One entity is a `[ForEntity]` method |
+| [D83](#d83-update-interval-attribute) | A system's cadence is an attribute |
+| [D84](#d84-consume) | `[Consume]` destroys the visited rows in bulk when it can |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -2000,6 +2003,104 @@ per-chunk copies in an array, and the runtime creates no array of a value type t
 **Considered.**
 - **Per-thread bins** (above) and **a sparse list per chunk** (pairs sorted and merged): the second adds a sort per
   chunk to the same merge, so it was not built.
+
+## D82. One entity is a `[ForEntity]` method [#d82-for-entity]
+
+**Decision.** A static method marked `[ForEntity]` runs on one entity. The generator writes the `IForEachEntity` job
+that `entity.Run` takes (its `ref` parameters are the `WriteMask`, its filter attributes are a `static readonly`
+filter, and it implements `INoStructuralChanges` when the method makes no structural change). It also writes an entry
+point next to the method, with the method's name: `Owner.Method(entity, [since,] values…)`. The entry point returns
+whether the method ran.
+
+**Why.**
+- **A request handler written as a job is four declarations for one line of work.** You write a struct, its fields,
+  a `WriteMask` that must match the `ref` parameters (EECS037 checks it), and a filter field. Then each call site
+  creates the job and calls `Run` with the type arguments spelled out. A `[ForEach]` method outside a system already
+  gets a generated job and entry point
+  ([D26](#d26-generated-members-and-a-suggestion-to-use-them)). One entity is the same pattern with
+  `entity.Run` in place of `world.ForEach`.
+- **The name pairs with `[ForEach]`.** `[ForEach]` runs the method for each matching row; `[ForEntity]` runs it for
+  the one entity the caller gives. Both attributes declare what the method is, not when it runs.
+  - The working name, `[RunOn]`, reads as a schedule (run on a thread, on an update) and suggests a target type
+    argument.
+  - `[OneEntity]` names the cardinality, but no verb or preposition says the method runs.
+- **The entry point keeps the shape of the other generated runners.** It is a static member of the method's type,
+  named like the method, with the entity first. A method with `[Changed<T>]` / `[Removed<T>]` takes the tick to look
+  back from second, the way `Since` does. As with runners, the method stays private so that its name is free for the
+  entry point.
+- **It costs what the hand-written job costs.** The generated code is the same `entity.Run` call: `ForEntityBenchmark` (1,000 hits on 10,000 units, a tenth dead): 9.80 and 9.96 µs in two rounds against 10.04 and 9.97 µs for the hand-written job and filter field, inside the error, 0 B both.
+
+**Considered.**
+- **An extension member on `Entity` (`unit.TakeHit(30)`).** Every request of every module would land in `Entity`'s
+  member list, and two owners with one method name would collide. The owner's name says whose request it is.
+- **Returning the method's result.** `ref` values already carry results, as they do for runners; a `bool` keeps one
+  meaning, whether the method ran.
+- **Converting jobs whose fields are read after the call.** EECS080 converts a job only when every use of it is a
+  creation followed by one `Run`. A job that returns a result in a field becomes a method with a `ref` parameter, and
+  that rewrite of the call site is left to its author.
+
+## D83. A system's cadence is an attribute [#d83-update-interval-attribute]
+
+**Decision.** `[UpdateInterval(n, Phase = p)]` on a system class sets how often the system runs, and the `UpdateInterval`
+and `UpdatePhase` properties are removed. The generator passes the two values to the system's generated code, which
+`AddSystem` reads once. A derived system inherits its base's attribute unless it declares its own. EECS082 reports an
+override of the old properties, and its fix writes the attribute; EECS083 reports an interval below 1 or a phase
+outside 0 to n - 1.
+
+**Why.**
+- **The cadence was meant to be a constant, and a property could not say so.** EECS018 warned on a computed override
+  after the fact. An attribute argument is a compile-time constant, so that warning and its code fix go away.
+- **One virtual call less per update, below what measures.** `RunSystem` used to make one virtual call per system per update to read the interval;
+  it now reads a field set when the system is added. In `OrderingBenchmark` (four systems over 10,000 entities per
+  update): before and after, 6.96 and 7.21 µs in one round, 7.55 and 7.16 µs in a second (registered order; ordered: 6.99 and 7.09, then 7.96 and 7.02 µs), each inside its error (±0.22 to 0.69 µs): one virtual call per system is below what the benchmark can see, so the reason for the change is the constant, not the speed. 0 B either way.
+- **The schedule is visible without running code.** Tools, the analyzer (EECS028 exempts the `OnUpdate` of a system
+  with a cadence) and readers all see it on the declaration.
+
+**Considered.**
+- **Keeping the properties next to the attribute.** That gives two ways to say one thing, with an order between them to
+  learn. The breaking change is one line per system, the code fix makes it, and the migration guide shows it.
+- **Run-time cadence.** A server that changes how often a system runs puts the system in a group and updates the group
+  when it is due ([system groups](/en/docs/guide/systems#system-groups)), as
+  [D51](#d51-not-added) already recommends over a time-based interval.
+
+## D84. `[Consume]` destroys the visited rows in bulk when it can [#d84-consume]
+
+**Decision.** `[ForEach, Consume]` destroys exactly the rows its pass visited, when the pass ends.
+- **A method that makes no structural change** (or a batch method) is followed by one `DestroyAll` with the method's
+  own filter. Whole tables that match and hold no cleanup component are freed in one step.
+- **A method that may change structure** destroys each entity right after the method ran on it.
+- **If the pass throws,** nothing it has not finished is destroyed.
+- A method that consumes makes its system run alone in a parallel update. `[Consume]` with `Slices` is EECS085.
+
+**Why.**
+- **Bulk is exact only when the pass cannot change what matches.** After a method without structural changes, the
+  rows that match the filter are exactly the rows the pass visited: no entity was created, moved or tagged in between.
+  A method that creates entities matching its own query (a `Spawn` that spawns) would see them destroyed by a
+  `DestroyAll`, so such a method destroys row by row.
+- **Measured** (`ConsumeBenchmark`: each operation creates N event entities and runs one pass that applies and destroys
+  them; `HandWritten` calls `entity.Destroy()` in the body, `EachRow` is `[Consume]` on a method that may change
+  structure, and `Bulk` is `[Consume]` on one that does not):
+
+| Events | `HandWritten` | `EachRow` | `Bulk` | Allocated |
+| --- | --- | --- | --- | --- |
+| 1,000 | 37.85 / 36.65 µs | 38.39 / 38.61 µs | 14.84 / 14.84 µs (0.39× / 0.41×) | 0 B |
+| 100,000 | 3,923.61 / 3,946.63 µs | 3,878.94 / 3,908.39 µs | 1,499.03 / 1,392.84 µs (0.38× / 0.36×) | 0 B |
+
+  (two rounds, first / second)
+
+  Bulk takes about 0.4 of the time of a destroy per row. Per row, `[Consume]` costs what the hand-written destroy
+  costs, so the methods that cannot use bulk lose nothing.
+
+- **What a throw leaves.** The bulk destroy runs after the pass, so an exception skips it and every event stays for the
+  next run, which visits them again. The per-row path has already destroyed the rows it finished, as hand-written code
+  would have.
+
+**Considered.**
+- **Always row by row.** It is simple, but it pays the per-row cost where a table could be freed at once.
+- **Recording the visited ids and destroying those.** That is exact for every method, but it costs a buffer that grows
+  with the pass (unbounded memory per pass) and a lookup per id. Per-row destroy is already exact for the methods
+  where bulk is not.
+- **Consuming with `Slices`.** Each destroy moves rows of the other slices, so events could wait many runs.
 
 ## D90. Vector loops for parallel methods, optional and narrow lanes, struct values and wide rows [#d90-vector-loops-reach]
 

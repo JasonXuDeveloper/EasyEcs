@@ -133,21 +133,21 @@ a system is added: a cycle throws there and the system stays out. The analyzer r
 ([EECS019](/en/docs/guide/analyzer#eecs019)) and cross-group orderings ([EECS020](/en/docs/guide/analyzer#eecs020))
 it can see.
 
-### `UpdateInterval` and `UpdatePhase` [#update-interval]
+### `[UpdateInterval(N, Phase = P)]` [#update-interval]
 
-A system that overrides `UpdateInterval` runs every N-th update of its group: on the updates whose count is a
-multiple of N, so first on the N-th. `UpdatePhase` (0 to N - 1) shifts which of the N updates it takes, so systems
-with the same interval spread their work instead of all running on the same tick. Both must be constants
-([EECS018](/en/docs/guide/analyzer#eecs018)); to pause a system, set `Enabled`.
+A system marked `[UpdateInterval(N)]` runs every N-th update of its group: on the updates whose count is a
+multiple of N, so first on the N-th. `Phase` (0 to N - 1) shifts which of the N updates it takes, so systems
+with the same interval spread their work instead of all running on the same tick. The attribute takes constants, so
+the cadence is fixed when the system is compiled; the generator writes it into the system's registration, and a
+derived system inherits it unless it declares its own ([EECS083](/en/docs/guide/analyzer#eecs083) reports an interval
+below 1 or a phase outside 0 to N - 1). To pause a system, set `Enabled`.
 
 ```csharp
 public record struct Autosave(long Count) : ISingletonComponent;
 
+[UpdateInterval(60, Phase = 30)]                   // every 60th update, half a cycle after the others
 public class SaveSystem : EcsSystem
 {
-    public override int UpdateInterval => 60;      // every 60th update
-    public override int UpdatePhase => 30;         // half a cycle after the others with the same interval
-
     protected override void OnUpdate() => World.GetOrAddAutosave().Count++;
 }
 ```
@@ -182,7 +182,7 @@ public class HungerSystem : EcsSystem
   structural change moves the entity to another table, a table grows or shrinks across a cut) may be skipped or
   visited twice in one cycle of N runs; the next cycle sees it again. Slice work that tolerates this, not work that
   must happen exactly once per cycle.
-- **With an interval:** `UpdateInterval => M` and `Slices = N` visit each row once per N × M updates.
+- **With an interval:** `[UpdateInterval(M)]` and `Slices = N` visit each row once per N × M updates.
 - **Every form:** per-entity methods, [batch methods](#batch-methods) (runs of rows inside the slice) and
   [parallel methods](#parallel-methods) (the slice is cut into chunks).
 - **Not with change filters:** `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<…>]` and `[RemovedAny<…>]` cannot be
@@ -345,6 +345,30 @@ public class Rally : EcsSystem
 
 The lookups are those of `Maybe<T>`, and so is the cost: the `MaybeBenchmark` table [below](#how-to-use-it-fast). A `Maybe<T>` converts to a `ReadOnlyMaybe<T>`, so a helper that only reads can
 take the read-only one from either.
+
+### `[Consume]`: events destroyed after the pass [#consume]
+
+`[ForEach, Consume]` destroys exactly the rows the pass visited, when it ends: a method over event or command
+entities (a hit, a request) does its work and leaves the destroying to the pass. A method without structural changes
+has them destroyed at once, a `DestroyAll` of its filter that frees whole tables; one that may change structure (it
+takes the `World`, or uses its `Entity` to change something) destroys each row after the method ran on it. An entity
+that starts to match during the pass is not destroyed: the next run visits it. Cleanup components retire a consumed
+entity as they do any destroyed one, and the [destroy log](/en/docs/guide/change-tracking#destroy-log) records it. A
+pass that throws destroys nothing, so its rows are visited again. `[Consume]` cannot be combined with `Slices`
+([EECS085](/en/docs/guide/analyzer#eecs085)).
+
+```csharp
+public record struct Heal(int Amount, EntityId Target) : IComponent;   // an event entity
+
+public class ApplyHeals : EcsSystem
+{
+    [ForEach, Consume]
+    static void Apply(in Heal heal, World world)
+    {
+        if (world.TryGetEntity(heal.Target, out var target)) target.Get<Health>().Value += heal.Amount;
+    }
+}
+```
 
 ### Batch methods [#batch-methods]
 
@@ -682,7 +706,7 @@ world.Update();               // fixed tick: the default group
 long inputs = world.UpdateCount<InputGroup>();   // Update<InputGroup>() calls so far
 ```
 
-Ordering, `UpdateInterval`, `UpdatePhase` and `Enabled` apply within each group, and the attribute is inherited.
+Ordering, `[UpdateInterval]` and `Enabled` apply within each group, and the attribute is inherited.
 Updating a group with no systems does nothing. `world.UpdateCount<TGroup>()` counts a group's updates, the running
 one included, as `DefaultUpdateCount` does for the default group: it is the count the group's `UpdateInterval`s are
 taken from, so a tool or a test can tell which systems run on the next update. O(1); 0 for a group no system was
@@ -981,7 +1005,7 @@ move although it was added second, so the grounded unit loses half its speed bef
 | `Parallel = true` over a few hundred heavy rows, one chunk by default | [`ChunkRows = 64`](/en/docs/guide/threading#chunk-rows) | Every thread claims chunks instead of one doing them all |
 | `Maybe<T>` (or a lookup through the `Entity`) that only reads | [`ReadOnlyMaybe<T>`](#read-only-maybe) | A read for the scheduler, never stamped, no lookup per row ([EECS027](/en/docs/guide/analyzer#eecs027)) |
 | A filter repeated on every method of a cadence | A [group filter](#group-filters) | Written once |
-| Work every tick that could wait | `UpdateInterval` and `UpdatePhase` | Spread over ticks |
+| Work every tick that could wait | `[UpdateInterval(N, Phase = P)]` | Spread over ticks |
 | Upkeep over every entity on every N-th tick | [`Slices = N`](#slices) | A flat cost per update instead of a spike |
 | A `ref` on a tracked value recomputed every tick that rarely changes | [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) with `SetIfChanged` | Only real changes are stamped: `[Changed<T>]` readers visit fewer rows |
 
@@ -1043,7 +1067,7 @@ needed, and a method that writes a singleton:
 | `ReadOnlyMaybe<T>.Value` read when the entity lacks `T` | `InvalidOperationException` | Test `HasValue` first |
 | Writing a collection through an `in` parameter | Scheduled as a read, never stamped | [EECS011](/en/docs/guide/analyzer#eecs011) |
 | A structural change through a component's link in a method without `Entity` / `World` | The pass keeps refs into moved rows | [EECS013](/en/docs/guide/analyzer#eecs013) |
-| `UpdateInterval` that changes | Skipped or repeated runs | [EECS018](/en/docs/guide/analyzer#eecs018) |
+| An interval below 1, a phase outside 0 to N - 1 | No valid cadence | [EECS083](/en/docs/guide/analyzer#eecs083) |
 | `Slices` below 1, or with `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<…>]`, `[RemovedAny<…>]` | The changes in the other slices' rows are lost | [EECS035](/en/docs/guide/analyzer#eecs035) |
 | A sliced method relied on to visit each row exactly once per cycle | Rows that move between runs can be skipped or visited twice | Code review: slice only work that tolerates it |
 | A `Mut<T>` parameter in a batch method | Batch methods take spans | [EECS009](/en/docs/guide/analyzer#eecs009) |

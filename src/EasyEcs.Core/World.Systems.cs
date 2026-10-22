@@ -19,9 +19,9 @@ public sealed partial class World
 
     /// <summary>
     /// Number of <see cref="Update{TGroup}"/> calls of group <typeparamref name="TGroup"/> so far, the one running
-    /// included (0 before the first, and for a group no system was ever added to): the count an <see cref="EcsSystem.UpdateInterval"/>
-    /// of the group's systems is taken from (a system runs when it modulo the interval is its
-    /// <see cref="EcsSystem.UpdatePhase"/>). O(1).
+    /// included (0 before the first, and for a group no system was ever added to): the count an
+    /// <see cref="UpdateIntervalAttribute">[UpdateInterval]</see> of the group's systems is taken from (a system runs
+    /// when it modulo the interval is its phase). O(1).
     /// </summary>
     public long UpdateCount<TGroup>() where TGroup : struct, ISystemGroup
     {
@@ -154,8 +154,8 @@ public sealed partial class World
     private void RunSystem(EcsSystem system, long update)
     {
         if (!system.Enabled) return;
-        int interval = system.UpdateInterval;
-        if (interval > 1 && update % interval != system.UpdatePhase % interval) return;
+        int interval = system.Interval;
+        if (interval > 1 && update % interval != system.Phase) return;
 
         try
         {

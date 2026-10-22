@@ -302,7 +302,7 @@ flowchart LR
 
 <include lang="csharp" meta='tab="攻击"'>../../../samples/VoxelServer/Systems/Zombies.cs#attack</include>
 
-着火是三个系统，各做一件事，都按火的节奏运行（`UpdateInterval = Rules.BurnEvery`）：`SunlightSystem` 白天给露天的僵尸加上 `Burning`
+着火是三个系统，各做一件事，都按火的节奏运行（`[UpdateInterval(Rules.BurnEvery)]`）：`SunlightSystem` 白天给露天的僵尸加上 `Burning`
 （头上是不是天空由高度图回答），`FireDamageSystem` 给着火的扣血，`ExtinguishSystem` 熄灭烧完的或走进水里的火。`Burning` 在僵尸预制体里，
 所以着火只是翻一个存在位。扣血单独成一个系统，是因为 `Health` 被追踪，而批量方法会给它写的整段行打 tick：只在扣血的 tick 写，
 下面的死亡系统在其他 tick 就无事可做。

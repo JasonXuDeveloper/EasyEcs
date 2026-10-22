@@ -48,8 +48,8 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `ValueIndex<T, TKey>` | sealed class | `world.Index<T, TKey>()`: `Find`, `TryFind`, `Count`; ordered walks for a comparable key (`OrderedIndexExtensions`). |
 | `RelationIndex<T>` | sealed class | `world.Relations<T>()`: the entities linking to a target. |
 | `TargetPolicy`, `TargetPolicyExtensions` | enum, extensions | What destroying a target does to the links to it: `Keep`, `Remove`, `Destroy`. |
-| `EcsSystem` | abstract class | `World`, `UpdateInterval`, `UpdatePhase`, `Enabled`, `Error`, `Stats`, `LastRunTick`, `RunCount`; `OnCreate` / `OnUpdate` / `OnDestroy` ([systems](/en/docs/guide/systems)). |
-| `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`, `ChunkRows = n`, `Slices = N`, `Simd = SimdMode.Auto` / `Require` / `Off`), `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<T1..Tn>]`, `[RemovedAny<T1..Tn>]`. |
+| `EcsSystem` | abstract class | `World`, `Enabled`, `Error`, `Stats`, `LastRunTick`, `RunCount`; `OnCreate` / `OnUpdate` / `OnDestroy` ([systems](/en/docs/guide/systems)). |
+| `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`, `ChunkRows = n`, `Slices = N`, `Simd = SimdMode.Auto` / `Require` / `Off`), `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<T1..Tn>]`, `[RemovedAny<T1..Tn>]`; `[Consume]` (the visited rows destroyed after the pass); `[ForEntity]` (a static method run on one entity through its generated entry point). |
 | `Maybe<T>` | ref struct | An optional component parameter of a `[ForEach]` method: `HasValue`, `Value`. |
 | `ReadOnlyMaybe<T>` | ref struct | The same, read-only: `Value` is `ref readonly`, never stamped, allowed for indexed components; a `Maybe<T>` converts to it. |
 | `Mut<T>` | ref struct | A component parameter of a `[ForEach]` method that counts as written only on the rows the method writes: `Value`, `Write()`, `SetIfChanged(value)` ([change tracking](/en/docs/guide/change-tracking)). |
@@ -63,7 +63,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `IForRange`, `IForSpan<T>` | interfaces | Jobs of `world.ForParallel`: `Execute(start, end)` over a range of indexes, `Execute(start, span)` over the elements of a list. |
 | `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out id)`, `Find(key)`, `Count(key)`. |
 | `Lanes` | static class | Stream compaction for batch methods: `Compact(source, mask, destination)` writes the elements a lane mask selects side by side. |
-| `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interfaces, attributes | System groups (with filters through interfaces) and ordering. |
+| `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]`, `[UpdateInterval(n, Phase = p)]` | interfaces, attributes | System groups (with filters through interfaces), ordering and cadence. |
 | `SystemErrorPolicy` | enum | `Throw` (default) or `Disable`: what an exception in a system does. |
 | `SystemStats`, `SystemList` | readonly structs | A system's run count, times, allocated bytes and visited entities; `world.Systems`, allocation-free. |
 | `ScheduleInfo`, `GroupInfo`, `StageInfo`, `SystemInfo`, `StageWait`, `SystemPair` | sealed records | What `world.DescribeSchedule()` returns: stages, reads and writes, waits, registration-only pairs; `ToString()`, `ToMermaid()`. |
@@ -163,6 +163,8 @@ A snapshot, a save or a clone of a buffer column copies the elements: O(elements
 | `[ForEach]` method / `world.ForEach<T1..Tn, TJob>(ref job, filter)` | O(M + S) | fastest: a struct job, no delegate |
 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` | O(M + S) | the job also receives the `Entity` |
 | `entity.Run<T1..Tn, TJob>(ref job)` / `Run(ref job, filter)` | O(n), plus O(1) per filter component | one entity; false when stale, missing a component or rejected by the filter; refs survive the job's structural changes |
+| `[ForEntity]` method: generated `Owner.Method(entity, values…)` | as `entity.Run` | `entity.Run` of the generated job (its `ref` parameters the `WriteMask`, its filter attributes a `static readonly` filter); false as `Run`; a method with `[Changed<T>]` takes `since` second; one that takes singletons or the `World` is false for an entity of no world |
+| `[ForEach, Consume]` | the pass, then O(M + S): a `DestroyAll` (whole tables freed at once) or one destroy per row | destroys the rows the pass visited when it ends: a `DestroyAll` of the method's filter after a method without structural changes, one destroy per row after the method otherwise; rows that start to match during the pass stay; a pass that throws destroys nothing; not with `Slices` (EECS085) |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + runs) | spans of consecutive rows; no structural changes |
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)` / `ForEachEntityParallel` / `ForEachBatchParallel` (spans of a chunk's runs of rows) | O(M + S), divided over up to `MaxDegreeOfParallelism` threads | `INoStructuralChanges` jobs; chunks of 1,024 to `World.ParallelChunkRows` rows (multiples of 4,096 when the job writes a tracked component), or `chunkRows` rounded up to 64 (`[ForEach(ChunkRows = n)]`; then O(B) block openings before the pass, B = 4,096-row blocks, and one atomic OR per 64 written rows), one job copy per chunk (kept, and combined in chunk order in O(chunks), when the job reduces: `Reduce<T>`); helpers are woken only when they pay |
 | `world.ForParallel<TJob>(count, ref job, chunkRows)` / `ForParallel<T, TJob>(ref buffer, ref job, chunkRows)` | O(count), divided over up to `MaxDegreeOfParallelism` threads | the same runner and chunks as `ForEachParallel` (no tables: no change ticks, chunks of 1,024 to `World.ParallelChunkRows`, or `chunkRows` rounded up to 64); one job copy per chunk, nothing merged back; the structure is frozen (a structural change throws); 0 B after the first call per job type |
@@ -318,7 +320,7 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 | generated: `world.X`, `HasX`, `GetOrAddX()`, `SetX(…)`, `RemoveX()` for a singleton `X` | as the generic call | |
 | `world.Systems` | O(systems) to walk, `Count` O(groups) | every group's systems in execution order, allocation-free |
 | `world.DefaultUpdateCount` | O(1) | default-group updates so far |
-| `world.UpdateCount<TGroup>()` | O(1) | `Update<TGroup>()` calls so far, the running one included (0 before the first): what `UpdateInterval` counts |
+| `world.UpdateCount<TGroup>()` | O(1) | `Update<TGroup>()` calls so far, the running one included (0 before the first): what `[UpdateInterval]` counts |
 | `world.RemoveTypes(assembly)` / `RemoveTypes(context)` | O(entities with such components + tables + cached queries) | takes a plugin's systems, singletons, indexes and components out of the world so its `AssemblyLoadContext` can unload; allocates (cold) |
 | `world.DescribeTables()` | O(tables + columns) | every table with its columns, rows, capacity and bytes; allocates (cold) |
 | `world.DescribeSchedule()` | O(groups × systems³) | every group's stages, each system's reads and writes, its waits and the registration-only pairs; allocates (cold); any thread |
@@ -338,7 +340,7 @@ chunk of a parallel `[ForEach]`), plus one count of each `[ForEach]` pass's matc
 0, off) preallocates that many 16-byte records for `DestroyedSince`: O(capacity) once, at `new World`.
 
 Values and handles, all O(1): `entity.Id` / `World`, `id.Index` / `Version`, `==` / `Equals` / `GetHashCode` (id and
-version) / `ToString`; `snapshot.EntityCount`; `system.LastRunTick`, `RunCount`, `UpdateInterval`, `UpdatePhase`,
+version) / `ToString`; `snapshot.EntityCount`; `system.LastRunTick`, `RunCount`,
 `Enabled`, `Error`, `Stats`, `World`.
 
 ## Related [#related]

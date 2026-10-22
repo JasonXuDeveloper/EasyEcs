@@ -361,7 +361,7 @@ comparison.
 
 <include lang="csharp" meta='tab="Attack"'>../../../samples/VoxelServer/Systems/Zombies.cs#attack</include>
 
-Fire is three systems, one job each, all at the fire's cadence (`UpdateInterval = Rules.BurnEvery`):
+Fire is three systems, one job each, all at the fire's cadence (`[UpdateInterval(Rules.BurnEvery)]`):
 `SunlightSystem` sets `Burning` on a zombie under the open sky by day (the height map says whether the sky is above
 it), `FireDamageSystem` hurts the burning, and `ExtinguishSystem` puts out the fires that burned down or walked into
 water. `Burning` is in the zombie prefab, so catching fire flips a presence bit. The hurt is its own system because

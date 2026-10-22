@@ -225,7 +225,7 @@ public sealed partial class EasyEcsAnalyzer
         if (context.OwningSymbol is not IMethodSymbol method) return;
         var body = context.OperationBlocks.FirstOrDefault(b => b is IMethodBodyOperation or IBlockOperation);
         if (body == null) return;
-        bool forEach = Symbols.IsForEach(method);
+        bool forEach = Symbols.IsGeneratedJob(method);
         if (forEach)
         {
             if (ForEachBulk(context, method, body, core)) return; // the method goes: what it costs per row is moot
@@ -263,13 +263,13 @@ public sealed partial class EasyEcsAnalyzer
     }
 
     /// <summary>
-    /// Whether the system (or a base below EcsSystem) overrides UpdateInterval: its OnUpdate runs on the cadence its
+    /// Whether the system (or a base below EcsSystem) has [UpdateInterval(n)] with n above 1: its OnUpdate runs on the cadence its
     /// author chose, so what it allocates there is a choice, not garbage of every update.
     /// </summary>
     private static bool HasCadence(INamedTypeSymbol? type, Core core)
     {
         for (; type != null && !core.Is(type, core.EcsSystem); type = type.BaseType)
-            if (type.GetMembers("UpdateInterval").Any(m => m.IsOverride)) return true;
+            if (Symbols.Schedule(type) is { Interval: > 1 }) return true;
         return false;
     }
 
@@ -531,7 +531,7 @@ public sealed partial class EasyEcsAnalyzer
         foreach (var (operation, type, singleton, presence) in RowLookups(core, method, body, all))
         {
             string name = type.ToMinimalDisplayString(operation.SemanticModel!, operation.Syntax.SpanStart);
-            bool job = !Symbols.IsForEach(method);
+            bool job = !Symbols.IsGeneratedJob(method);
             string advice = job ? (singleton ? $"keep it in a field of the job, set before the loop" : $"add {name} to the job's components")
                 : singleton ? $"take it as a parameter ('in {name}' or 'ref {name}'), resolved once per pass"
                 : presence ? $"take a {(Symbols.IsIndexed(type) ? "ReadOnlyMaybe" : "Maybe")}<{name}> parameter, or split the method with [With<{name}>] / [Without<{name}>]"
@@ -950,7 +950,7 @@ public sealed partial class EasyEcsAnalyzer
 
         // In a stable [ForEach] method EECS013 already reports it (Update is a structural call).
         if (core.Is(owner, core.World) && method.Name == "Update" && Symbols.SystemOf(context.ContainingSymbol) is { } system
-            && !(context.ContainingSymbol is IMethodSymbol caller && Symbols.IsForEach(caller) && Symbols.IsStable(caller, call.SemanticModel!)))
+            && !(context.ContainingSymbol is IMethodSymbol caller && Symbols.IsGeneratedJob(caller) && Symbols.IsStable(caller, call.SemanticModel!)))
         {
             context.ReportDiagnostic(Diagnostic.Create(UpdateInSystem, call.Syntax.GetLocation(), system.Name,
                 "World.Update" + (method.TypeArguments.Length == 1 ? "<" + method.TypeArguments[0].Name + ">" : "")));
@@ -991,7 +991,7 @@ public sealed partial class EasyEcsAnalyzer
     /// lookup away, so EECS033's shorter spelling of it would only be undone.
     /// </summary>
     private static bool RowLookupOf(IInvocationOperation call, ISymbol containing, Core core) =>
-        containing is IMethodSymbol method && (Symbols.IsForEach(method) || Symbols.JobInterface(method) != null)
+        containing is IMethodSymbol method && (Symbols.IsGeneratedJob(method) || Symbols.JobInterface(method) != null)
         && RowLookups(core, method, Symbols.Root(call)).Any(l => l.Operation == call);
 
     /// <summary>Whether <paramref name="call"/> is the Set EECS052 folds into the creation before it (and so removes).</summary>

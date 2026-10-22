@@ -52,7 +52,7 @@ public ulong LastRunTick { get; }
 public long RunCount { get; }
 ```
 
-当前这次运行之前，系统已经运行过多少次（第一次运行时为 0；被 [`EcsSystem.UpdateInterval`](/zh/docs/reference/ecssystem#updateinterval) 跳过的、禁用期间的运行不算，抛出异常的运行算）。`[ForEach(Slices = N)]` 方法访问它的第 `RunCount % N` 片行，所以 [`EcsSystem.OnUpdate`](/zh/docs/reference/ecssystem#onupdate) 能知道这次运行访问哪一片。
+当前这次运行之前，系统已经运行过多少次（第一次运行时为 0；被 [[UpdateInterval]](/zh/docs/reference/updateintervalattribute) 跳过的、禁用期间的运行不算，抛出异常的运行算）。`[ForEach(Slices = N)]` 方法访问它的第 `RunCount % N` 片行，所以 [`EcsSystem.OnUpdate`](/zh/docs/reference/ecssystem#onupdate) 能知道这次运行访问哪一片。
 
 ### `Stats` [#stats]
 
@@ -61,22 +61,6 @@ public SystemStats Stats { get; }
 ```
 
 这个系统的运行次数、耗时、分配的字节数和访问的实体数；只有打开 [`WorldOptions.MeasureSystems`](/zh/docs/reference/worldoptions#measuresystems) 才记录。
-
-### `UpdateInterval` [#updateinterval]
-
-```csharp
-public virtual int UpdateInterval { get; }
-```
-
-每 N 次 World 更新运行一次（1 表示每次都运行）；另见 [`EcsSystem.UpdatePhase`](/zh/docs/reference/ecssystem#updatephase)。
-
-### `UpdatePhase` [#updatephase]
-
-```csharp
-public virtual int UpdatePhase { get; }
-```
-
-系统在每 [`EcsSystem.UpdateInterval`](/zh/docs/reference/ecssystem#updateinterval) 次更新里的第几次运行（0 到 interval - 1）：间隔相同、相位不同的系统，把工作分散到不同的更新里，不会全挤在同一次。
 
 ### `World` [#world]
 

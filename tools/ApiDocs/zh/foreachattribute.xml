@@ -27,11 +27,11 @@
       每行工作量大、行数上万时才划算。默认 false。
     </summary>
   </member>
-  <member name="P:EasyEcs.ForEachAttribute.Slices" source="4879cae4241b">
+  <member name="P:EasyEcs.ForEachAttribute.Slices" source="078dc360c110">
     <summary>
       把方法的行分摊到系统的 N 次运行上：每次运行访问一片，约为每个匹配表行数的 1 / N（第 <see cref="P:EasyEcs.EcsSystem.RunCount" /> mod N 片，
       见 <see cref="M:EasyEcs.QueryFilter.Slice(System.Int32,System.Int32)" />），所以每 N 次运行每行访问一次，处理大量实体的系统每次更新只花约 1 / N，
-      而不是集中在某一次更新上出现尖峰。配合 <see cref="P:EasyEcs.EcsSystem.UpdateInterval" /> M，每行每 N * M 次更新访问一次。
+      而不是集中在某一次更新上出现尖峰。配合 <see cref="T:EasyEcs.UpdateIntervalAttribute">[UpdateInterval(M)]</see>，每行每 N * M 次更新访问一次。
       两次运行之间移动了的行（交换删除、结构变更、表扩容或缩小）在一轮里可能被跳过，也可能被访问两次。
       逐实体、批处理和 <see cref="P:EasyEcs.ForEachAttribute.Parallel" /> 都能用（这一片再切成块）。不能和
       <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c> 一起用（EECS035）：其他片的行会丢掉系统上次运行之后的变更。

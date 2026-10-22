@@ -125,6 +125,21 @@ major or minor version that needs code changes? The
   [EECS054](/en/docs/guide/analyzer#eecs054) rejects a negative count and `ChunkRows` without `Parallel`. See
   [threading](/en/docs/guide/threading#chunk-rows) and the [decision](/en/docs/decisions#d67-chunk-rows).
 
+- `[ForEntity]` on a static method runs it on one entity: the generator writes the job `entity.Run` runs (its `ref`
+  parameters the `WriteMask`, its filter attributes the filter) and an entry point named like the method that takes
+  the entity and the method's other values and returns whether it ran (`Requests.TakeHit(unit, damage)`). Analyzer rule
+  [EECS080](/en/docs/guide/analyzer#eecs080) (suggestion, with a code fix) finds a hand-written one-entity job and
+  converts it with its calls; [EECS081](/en/docs/guide/analyzer#eecs081) rejects a method that cannot run on one
+  entity. See [queries](/en/docs/guide/queries#run-on-one-entity).
+- `[ForEach, Consume]` destroys exactly the rows a pass visited when it ends, for event and command entities handled
+  once: in bulk (a `DestroyAll` of the method's filter) after a method without structural changes, row by row after
+  one that may make them. Analyzer rule [EECS084](/en/docs/guide/analyzer#eecs084) (suggestion, with a code fix)
+  finds a method that ends with `entity.Destroy()`; [EECS085](/en/docs/guide/analyzer#eecs085) rejects `[Consume]`
+  without `[ForEach]` or with `Slices`. See [systems](/en/docs/guide/systems#consume).
+- `[UpdateInterval(n, Phase = p)]` declares a system's cadence on its class; the generator writes it into the
+  registration ([EECS083](/en/docs/guide/analyzer#eecs083) rejects an interval below 1 or a phase outside 0 to n - 1).
+  See [systems](/en/docs/guide/systems#update-interval).
+
 ### Performance [#v4-8-0-performance]
 
 - The buffer pool is shared across threads: each thread keeps a few lists and trades the rest in batches with a pool
@@ -163,6 +178,10 @@ major or minor version that needs code changes? The
   `Reduce<T>` parameter ([migration guide](/en/docs/migration#v4-8-analyzer)).
 - The new warning [EECS071](/en/docs/guide/analyzer#eecs071) reports `Random.Shared` and `new Random()` in `[ForEach]`
   methods; its fix draws from an `EntityRandom` singleton ([migration guide](/en/docs/migration#v4-8-analyzer)).
+
+- `EcsSystem.UpdateInterval` and `UpdatePhase` are removed: declare `[UpdateInterval(n, Phase = p)]` on the class.
+  An override is [EECS082](/en/docs/guide/analyzer#eecs082), with a code fix; EECS018 is gone
+  ([migration guide](/en/docs/migration#v4-8-update-interval)).
 
 ### Fixes [#v4-8-0-fixes]
 
@@ -220,7 +239,7 @@ major or minor version that needs code changes? The
   `Instantiate` calls with the same values; [EECS033](/en/docs/guide/analyzer#eecs033) suggests the generated
   `SetXIfChanged(…)`; code fixes now also cover [EECS007](/en/docs/guide/analyzer#eecs007) (`readonly`),
   [EECS015](/en/docs/guide/analyzer#eecs015), [EECS017](/en/docs/guide/analyzer#eecs017) (`EntityId`),
-  [EECS018](/en/docs/guide/analyzer#eecs018) and [EECS025](/en/docs/guide/analyzer#eecs025) (`in T` for a `Mut<T>`).
+  EECS018 and [EECS025](/en/docs/guide/analyzer#eecs025) (`in T` for a `Mut<T>`).
 - `SaveEntities(output, a.Id, b.Id)` and `bag.AddRange(x, y)` take the values directly (`params` spans, built on the
   stack). See [migration](/en/docs/guide/migration-and-unload#save-entities).
 - `world.Read<T1..Tn>(filter)` walks the rows of a query to read them: its items are `ref readonly` and stamp nothing,

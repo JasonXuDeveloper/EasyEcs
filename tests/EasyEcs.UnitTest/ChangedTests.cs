@@ -87,10 +87,9 @@ public class ChangedTests
     }
 
     /// <summary>A watch that runs every other update.</summary>
+    [UpdateInterval(2)]
     public class SlowArmorWatch : EcsSystem
     {
-        public override int UpdateInterval => 2;
-
         [ForEach, Changed<Armor>]
         private static void Count(ref Seen seen) => seen.Count++;
     }

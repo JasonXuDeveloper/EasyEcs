@@ -1143,6 +1143,6 @@ Run one update of every enabled system in group `TGroup` (synchronous, allocatio
 public long UpdateCount<TGroup>() where TGroup : struct, ISystemGroup;
 ```
 
-Number of [`World.Update`](/en/docs/reference/world#update-2) calls of group `TGroup` so far, the one running included (0 before the first, and for a group no system was ever added to): the count an [`EcsSystem.UpdateInterval`](/en/docs/reference/ecssystem#updateinterval) of the group's systems is taken from (a system runs when it modulo the interval is its [`EcsSystem.UpdatePhase`](/en/docs/reference/ecssystem#updatephase)). O(1).
+Number of [`World.Update`](/en/docs/reference/world#update-2) calls of group `TGroup` so far, the one running included (0 before the first, and for a group no system was ever added to): the count an [[UpdateInterval]](/en/docs/reference/updateintervalattribute) of the group's systems is taken from (a system runs when it modulo the interval is its phase). O(1).
 
 **Complexity** ([API table](/en/docs/api)): O(1)

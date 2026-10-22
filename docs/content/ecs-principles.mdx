@@ -96,7 +96,7 @@ public class DeathSystem : EcsSystem
 ```
 
 Splitting costs nothing at run time. Every `[ForEach]` method is its own inlined struct job either way, and the
-per-system cost of an update is three virtual calls (`UpdateInterval`, `OnUpdate` and the generated code) plus one
+per-system cost of an update is two virtual calls (`OnUpdate` and the generated code) plus one
 query-cache lookup per `[ForEach]` method and one lookup per singleton parameter. When in doubt, split.
 
 ### 2. Systems are stateless [#2-systems-are-stateless]

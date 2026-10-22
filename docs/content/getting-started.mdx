@@ -244,7 +244,7 @@ Console.WriteLine($"the scout is at {scout.Position.X}, the others at {units[2].
 ```
 
 `Update()` runs every enabled system once, in registration order adjusted by `[UpdateBefore<T>]` /
-`[UpdateAfter<T>]`, and allocates nothing. A system can run less often by overriding `UpdateInterval`, or be
+`[UpdateAfter<T>]`, and allocates nothing. A system can run less often with `[UpdateInterval(N)]`, or be
 switched off with `Enabled = false`.
 
 </Step>
