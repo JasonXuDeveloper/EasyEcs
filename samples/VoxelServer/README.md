@@ -20,7 +20,7 @@ What each file teaches, with its code, is on the docs site:
 | [Rules.cs](Rules.cs) | the numbers of the game (ticks, speeds, damage, ranges) and the spawn points |
 | [Terrain.cs](Terrain.cs) | chunk coordinates, terrain generation, `Nearby` (the blocks, water and height map around a body, one chunk lookup), the square of chunks around a point and the strip a view gains |
 | [Systems/Chunks.cs](Systems/Chunks.cs) | `ChunkReadSystem`, `ChunkGenerateSystem`, `ChunkUnloadSystem`, `ChunkSaveSystem`: a chunk's life |
-| [Systems/Water.cs](Systems/Water.cs) | `HeightMapSystem`, `WaterWakeSystem`, then the passes: `WaterBorderSystem` (gather), `WaterFlowSystem` (the shader), `WaterSleepSystem`, `WaterCommitSystem`; `FloatSystem` |
+| [Systems/Water/](Systems/Water) | one system per file: [HeightMap.cs](Systems/Water/HeightMap.cs) and [Wake.cs](Systems/Water/Wake.cs) (a block update), then the passes: [Border.cs](Systems/Water/Border.cs) (the halo exchange), [Flow.cs](Systems/Water/Flow.cs) (the shader), [Sleep.cs](Systems/Water/Sleep.cs), [Commit.cs](Systems/Water/Commit.cs); [Float.cs](Systems/Water/Float.cs) |
 | [Systems/Movement.cs](Systems/Movement.cs) | `PlayerMoveSystem`, `PhysicsSystem` (steps, walls, gravity), `GridSystem` (the entities by chunk) |
 | [Systems/Aoi.cs](Systems/Aoi.cs) | the areas of interest: `AoiViewSystem` (a player's view), `AoiChunkSystem` (a chunk loaded), `AoiSpawnSystem` (an entity crossing), `AoiDespawnSystem` (an entity gone) |
 | [Systems/Zombies.cs](Systems/Zombies.cs) | `NightSpawnSystem`, `ZombieTargetSystem`, `ZombieChaseSystem`, `ZombieAttackSystem`, `SunlightSystem`, `FireDamageSystem`, `ExtinguishSystem` |
