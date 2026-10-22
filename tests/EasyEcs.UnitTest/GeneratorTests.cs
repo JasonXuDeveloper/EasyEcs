@@ -271,6 +271,8 @@ public class GeneratorTests
     [TestCase("[ForEach(Simd = SimdMode.Require)] void A(ref F f) => f.V++;", "it is not static")]
     [TestCase("[ForEach(Simd = SimdMode.Require, Parallel = true)] static void A(ref F f) => f.V++;", "it runs in parallel (Parallel = true), and parallel jobs have no vector loop")]
     [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4)")]
+    [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref F f, Scratch<int> s) => f.V += s.Value;", "it takes a Scratch<Int32>: working memory a row at a time, not one per lane")]
+    [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref F f, Lookup<H> h) => f.V++;", "it takes a Lookup<H>: a lookup of another entity per row has no vector form")]
     public void ARequiredVectorLoopThatDoesNotQualifyIsAnError(string members, string reason)
     {
         var diagnostics = Analyze([Components, Lanes, $"public partial class S : EcsSystem {{ {members} }}"]).Result.Where(d => d.Id.StartsWith("EECS05")).ToArray();
@@ -290,6 +292,21 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("internal ref struct AJob0 : global::EasyEcs.IForEach<"), generated);  // per row
         Assert.That(generated, Does.Contain("internal ref struct BJob1 : global::EasyEcs.IForEachMasked<"), generated);
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "Vector.LoadUnsafe").Count, Is.EqualTo(2), generated); // B only: its batch and masked forms (and their Vector512.LoadUnsafe)
+    }
+
+    // The Vector512 loop is the Vector<T> loop's text with the vector type's token replaced: user types named
+    // Vector-something in the setup (a context value, a singleton's field) stay as written.
+    [TestCase("public static partial class R { [ForEach(Simd = SimdMode.Require)] public static void A(ref F f, in System.Numerics.Vector3 wind) => f.V += wind.X * wind.Y; }")]
+    [TestCase("public static partial class R { [ForEach(Simd = SimdMode.Require)] public static void A(ref F f, in System.Numerics.Vector<float> bias, float gain) => f.V *= gain; }")]
+    [TestCase("public struct Wind : ISingletonComponent { public System.Numerics.Vector3 V; } public class S : EcsSystem { [ForEach(Simd = SimdMode.Require)] static void A(ref F f, in Wind w) => f.V += w.V.X; }")]
+    public void UserTypesNamedVectorStayAsWritten(string source)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, source), out var output, out _);
+        string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("for (nint last = rows - global::System.Runtime.Intrinsics.Vector512<float>.Count;"), generated);
+        Assert.That(generated, Does.Not.Contain("Vector5123").And.Not.Contain("Intrinsics.Vector512<float> __p").And.Not.Contain("Intrinsics.Vector512<float> x"), generated);
+        Assert.That(generated.IndexOf('\u0001'), Is.EqualTo(-1), "a token left in the loop"); // ordinal: culture comparison ignores U+0001
     }
 
     // A reduction: one accumulator per lane and field from T.Identity, folded into the run's partial result in lane order.

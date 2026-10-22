@@ -50,7 +50,16 @@ internal sealed class Kernel
     internal sealed record Code(EquatableArray<string> Columns, string Setup, string Body, string Stores, string MaskedBody,
         string MaskedStores, string Restore, string Fold, int Size, string Mask, bool Interleaves, bool Bails);
 
-    private const string V = "global::System.Numerics.Vector";
+    /// <summary>
+    /// The vector type the loop names, as a token: <c>SystemGenerator.EmitVectorLoop</c> writes the Vector512 loop and the
+    /// Vector&lt;T&gt; loop from one text by replacing this token alone (and <see cref="SquareRoot"/>), never text that
+    /// names user types (a setup line holds <c>ref readonly global::System.Numerics.Vector3 __p1</c> as written). The
+    /// prefix U+0001 occurs in no C# token outside a literal, and the loop's literals are formatted here.
+    /// </summary>
+    internal const string V = "\u0001Vector";
+
+    /// <summary>The token of the square root: Vector.SquareRoot, Vector512.Sqrt.</summary>
+    internal const string SquareRoot = V + ".SquareRoot(";
     private const string Interleaved = "global::EasyEcs.Interleaved";
 
     /// <summary>The most fields a component of a vector loop has: the forms of <c>EasyEcs.Interleaved</c>.</summary>
@@ -143,6 +152,9 @@ internal sealed class Kernel
         return any;
     }
 
+    /// <summary>The type argument of a Scratch&lt;T&gt; / Lookup&lt;T&gt; parameter, for a reason.</summary>
+    private static string? Element(ITypeSymbol type) => type is INamedTypeSymbol { TypeArguments.Length: 1 } named ? named.TypeArguments[0].Name : null;
+
     private static bool IsLaneType(ITypeSymbol? type) => type?.SpecialType is SpecialType.System_Single or SpecialType.System_Double
         or SpecialType.System_Int32 or SpecialType.System_UInt32 or SpecialType.System_Int64 or SpecialType.System_UInt64;
 
@@ -189,7 +201,9 @@ internal sealed class Kernel
                         Symbols.ParamKind.ComponentSpan => "it takes spans: a batch method writes its own loop",
                         Symbols.ParamKind.Optional => $"it takes a Maybe<{Symbols.MaybeElement(p.Type)?.Name}>",
                         Symbols.ParamKind.Mutable => $"it takes a Mut<{Symbols.MutElement(p.Type)?.Name}>",
-                        _ => $"parameter '{p.Name}' is not a component, a singleton or a value",
+                        Symbols.ParamKind.Scratch => $"it takes a Scratch<{Element(p.Type)}>: working memory a row at a time, not one per lane",
+                        Symbols.ParamKind.Lookup => $"it takes a Lookup<{Element(p.Type)}>: a lookup of another entity per row has no vector form",
+                        _ => $"parameter '{p.Name}' is not a component, a singleton, a Reduce<T> or a value",
                     });
             }
         }
@@ -807,7 +821,7 @@ internal sealed class Kernel
             case "Abs" when single && isFloat:                     // Math.Abs of int.MinValue throws: no integers
                 return $"{V}.Abs({Arg(0)})";
             case "Sqrt" when single && isFloat:
-                return $"{V}.SquareRoot({Arg(0)})";
+                return $"{SquareRoot}{Arg(0)})";
             case "Floor" or "Ceiling" or "Truncate" when single && isFloat:
                 return $"{V}.{m.Name}({Arg(0)})";
             case "Round" when single && isFloat:                   // to even, like Math.Round(x)
