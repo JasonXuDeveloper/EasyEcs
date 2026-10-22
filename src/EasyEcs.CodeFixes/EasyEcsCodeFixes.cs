@@ -713,7 +713,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
         var byName = new System.Collections.Generic.Dictionary<string, string>();
         if (member != "this") byName[member] = attribute;
         var rewritten = Declare(model, root, type, byName, member == "this" ? attribute : null,
-            m => m is PropertyDeclarationSyntax p && p.Identifier.ValueText == "Key" && p.Span == key.Span,
+            static m => m is PropertyDeclarationSyntax { Identifier.ValueText: "Key" } p && !p.Modifiers.Any(SyntaxKind.StaticKeyword), // the analyzer saw one Key
             static b => Generic(b.Type) is { Identifier.ValueText: "IIndexed" or "IUniqueIndexed" });
         return rewritten == null ? null : (rewritten, attribute);
     }

@@ -295,8 +295,8 @@ public class CodeFixTests
         "public record struct A(int Id) : IComponent, IUniqueIndexed<int> { readonly int IIndexed<int>.Key => Id; }",
         "public partial record struct A([UniqueKey] int Id) : IComponent { }")]
     [TestCase("EECS067", "Declare it with [Key]",
-        "namespace N\n{\n    public readonly struct T : IComponent, IIndexed<T>, System.IEquatable<T>\n    {\n        public readonly int X;\n        T IIndexed<T>.Key => this;\n        public bool Equals(T o) => X == o.X;\n    }\n}",
-        "namespace N\n{\n    [Key]\n    public readonly partial struct T : IComponent, System.IEquatable<T>\n    {\n        public readonly int X;\n        public bool Equals(T o) => X == o.X;\n    }\n}")]
+        "namespace N\n{\n    public readonly struct Tile : IComponent, IIndexed<Tile>, System.IEquatable<Tile>\n    {\n        public readonly int X;\n        Tile IIndexed<Tile>.Key => this;\n        public bool Equals(Tile o) => X == o.X;\n    }\n}",
+        "namespace N\n{\n    [Key]\n    public readonly partial struct Tile : IComponent, System.IEquatable<Tile>\n    {\n        public readonly int X;\n        public bool Equals(Tile o) => X == o.X;\n    }\n}")]
     [TestCase("EECS067", "Declare it with [UniqueKey]",
         "public struct D : IComponent, IDirectIndexed<int> { public int Cell; public int Key { get => Cell; } public static int Slots => 8; public static int SlotOf(int key) => key; }",
         "public partial struct D : IComponent, IDirectIndexed<int> { [UniqueKey] public int Cell; public static int Slots")]  // IDirectIndexed stays

@@ -193,7 +193,7 @@ public class PartTests
     [TestCase("public readonly record struct T(int X) : IComponent, IIndexed<T> { public T Key => this; }", "EECS043")]                 // EECS043's
     [TestCase("public struct M : IComponent, IIndexed<int> { public int N; public int Key => N * 2; }")]                                // computed
     [TestCase("public struct M : IComponent, IIndexed<long> { public int N; public long Key => N; }")]                                  // converted
-    [TestCase("public struct M : IComponent, IIndexed<int>, IIndexed<string> { public int N; public string S; int IIndexed<int>.Key => N; string IIndexed<string>.Key => S; }")]
+    [TestCase("public struct M : IComponent, IIndexed<int>, IIndexed<string> { public int N; public string S; int IIndexed<int>.Key => N; string IIndexed<string>.Key => S; }", "EECS036")]  // two keys: EECS036's
     [TestCase("public struct M : IComponent, IIndexed<int> { public static int Shared; public int Key => Shared; }")]                    // not the value's
     [TestCase("file struct M : IComponent, IIndexed<int> { public int N; public int Key => N; }")]                                     // no part for a file type
     public async Task AKeyTheAttributesCanDeclareIsReported(string source, string id = null) =>
