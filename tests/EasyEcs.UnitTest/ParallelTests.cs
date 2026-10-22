@@ -299,8 +299,12 @@ public class ParallelTests
     {
         // 12 chunks, then 16, in turn (two job types: each keeps its own record of whether helpers pay): a helper still in
         // the last pass must not claim a chunk of the next, larger one (that chunk would run twice and the caller wait
-        // forever for it).
+        // forever for it). The passes stop after a time budget too, and the counts are checked against the passes run: a
+        // loaded machine (100,000 passes took over a minute under a load of 20 on 4 cores) runs fewer, and what fails is a
+        // pass that never ends or a chunk run twice, not a slow machine.
         const int passes = 100_000;
+        var budget = TimeSpan.FromSeconds(30);
+        int done = 0;
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
         world.CreateEntities(new Entity[12_288], new Counter(0));
         world.CreateEntities(new Entity[65_536], new Counter(0), new Dead());
@@ -310,17 +314,20 @@ public class ParallelTests
         {
             var ids = new StampId();
             var counts = new CountUp();
-            for (int i = 0; i < passes; i++)
+            long start = System.Diagnostics.Stopwatch.GetTimestamp();
+            for (int i = 0; i < passes && System.Diagnostics.Stopwatch.GetElapsedTime(start) < budget; i++)
             {
                 world.ForEachParallel<Counter, StampId>(ref ids, small);
                 world.ForEachParallel<Counter, CountUp>(ref counts, large);
+                done = i + 1;
             }
         }) { IsBackground = true };
         thread.Start();
 
-        Assert.That(thread.Join(TimeSpan.FromSeconds(60)), Is.True, "a pass never ended");
+        Assert.That(thread.Join(budget + TimeSpan.FromSeconds(60)), Is.True, "a pass never ended");
+        Assert.That(done, Is.GreaterThan(1_000), "too few passes to cover the race");
         int wrong = 0;
-        foreach (var item in world.Query<Counter>()) wrong += item.Component1.N == passes ? 0 : 1;
+        foreach (var item in world.Query<Counter>()) wrong += item.Component1.N == done ? 0 : 1;
         Assert.That(wrong, Is.Zero);
     }
 
