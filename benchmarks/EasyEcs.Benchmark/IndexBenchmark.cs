@@ -114,6 +114,18 @@ public class IndexBenchmark
         return found;
     }
 
+    /// <summary>
+    /// What unique keys cost in memory: a world of 10,000 players, each created with its own unique token, then
+    /// disposed. The allocated bytes are the world's, its table's and the index's.
+    /// </summary>
+    [Benchmark]
+    public int CreateUnique()
+    {
+        using var world = new World(new WorldOptions { InitialEntityCapacity = 10_000 });
+        for (int i = 0; i < 10_000; i++) world.CreateEntity(new UniqueSession(i + 1));
+        return world.EntityCount;
+    }
+
     public record struct Session(long Token) : IComponent, IIndexed<long>
     {
         public long Key => Token;
