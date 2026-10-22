@@ -447,12 +447,17 @@ public sealed class SystemGenerator : IIncrementalGenerator
         {
             // A lane would throw (Math.Clamp with min above max): nothing is stored yet, so the method itself runs the
             // rows of this vector (that pass), and throws as written. i walks them, and is set back for the loop's own step.
+            // The reductions' lanes go back to before this vector: the method adds those rows itself.
             string row = masked ? $"if (((pass >> (int)i) & 1) != 0) {call}" : call;
-            loop.Append($"{body}if (__bail)\n{body}{{\n{body}    for (nint end = i + {vector}.Count; i < end; i++)\n{body}        {row}\n");
+            loop.Append($"{body}if (__bail)\n{body}{{\n");
+            foreach (var line in simd.Restore.Split('\n')) if (line.Length > 0) loop.Append(body).Append("    ").Append(line).Append('\n');
+            loop.Append($"{body}    for (nint end = i + {vector}.Count; i < end; i++)\n{body}        {row}\n");
             loop.Append($"{body}    i -= {vector}.Count;\n{body}    continue;\n{body}}}\n");
         }
         foreach (var line in (masked ? simd.MaskedStores : simd.Stores).Split('\n')) if (line.Length > 0) loop.Append(body).Append(line).Append('\n');
-        loop.Append($"{inner}}}\n{indent}}}\n");
+        loop.Append($"{inner}}}\n");
+        foreach (var line in simd.Fold.Split('\n')) if (line.Length > 0) loop.Append(inner).Append(line).Append('\n');
+        loop.Append($"{indent}}}\n");
         string text = loop.ToString();
         // Vector512 names the same operations alike, except the square root (Vector.SquareRoot, Vector512.Sqrt).
         sb.Append(text.Replace(Vector, Vector512).Replace(Vector512 + ".SquareRoot(", Vector512 + ".Sqrt(")
@@ -677,7 +682,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
                     Slices = Symbols.Slices(method), ChunkRows = Symbols.ChunkRows(method), Identifies = Symbols.OnlyIdentifies(method, syntax, model),
                     // Kernel.Vectorize decides alone (static, one thread, stable, its body): the analyzer reports its reasons.
-                    Simd = Kernel.Vectorize(method, syntax, model, static (i, kind) => kind == Symbols.ParamKind.Singleton ? $"s{i}" : $"x{i}", ct, out _),
+                    Simd = Kernel.Vectorize(method, syntax, model, static (i, kind) => kind switch
+                    {
+                        Symbols.ParamKind.Singleton => $"s{i}",
+                        Symbols.ParamKind.Reduction => $"l{i}", // the run's partial result, a local of the batch job
+                        _ => $"x{i}",
+                    }, ct, out _),
                 };
         }
     }

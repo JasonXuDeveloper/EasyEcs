@@ -43,7 +43,7 @@ public static class Kernels
     [ForEach]
     internal static void Guard(ref Heat heat, in Mass mass, float scale)
     {
-        if (mass.Value <= 0 || mass.Value != mass.Value) return; // NaN: a return clears its lanes
+        if (mass.Value <= 0 || float.IsNaN(mass.Value)) return; // NaN: a return clears its lanes
         heat.Value = mass.Value > 1 ? MathF.Sqrt(mass.Value) * scale : heat.Value / mass.Value;
         heat.Value -= 1;
     }
@@ -131,6 +131,91 @@ public static class MoreKernels
         if (float.IsNaN(level.Value)) level.Value = 0;
         bool both = hot && !cold;
         level.Value = both != (tally.Value >= 100) ? level.Value + 1 : level.Value;
+    }
+}
+
+/// <summary>A count, a sum, a minimum and a maximum of ints: exact in any order.</summary>
+public record struct Headcount : ISingletonComponent, IReduction<Headcount>
+{
+    public int Count, Sum, Low, High;
+
+    public static Headcount Identity => new() { Low = int.MaxValue, High = int.MinValue };
+    public static Headcount Combine(Headcount left, Headcount right) => new()
+    {
+        Count = left.Count + right.Count, Sum = left.Sum + right.Sum, Low = Math.Min(left.Low, right.Low), High = Math.Max(left.High, right.High),
+    };
+}
+
+/// <summary>The extent of floats: Min / Max, exact in any order (NaN and -0 included).</summary>
+public struct Extent : ISingletonComponent, IReduction<Extent>
+{
+    public float Low, High;
+
+    public static Extent Identity => new() { Low = float.PositiveInfinity, High = float.NegativeInfinity };
+    public static Extent Combine(Extent left, Extent right) => new() { Low = MathF.Min(left.Low, right.Low), High = MathF.Max(right.High, left.High) };
+}
+
+/// <summary>A float sum: its rounding depends on the order of the rows.</summary>
+public struct Energy : ISingletonComponent, IReduction<Energy>
+{
+    public float Total;
+
+    public static Energy Identity => default;
+    public static Energy Combine(Energy left, Energy right) => new() { Total = left.Total + right.Total };
+}
+
+/// <summary>A sum and a maximum of 8-byte integers.</summary>
+public record struct Ledger : ISingletonComponent, IReduction<Ledger>
+{
+    public long Sum, Max;
+
+    public static Ledger Identity => new() { Max = long.MinValue };
+    public static Ledger Combine(Ledger left, Ledger right) => new() { Sum = left.Sum + right.Sum, Max = Math.Max(left.Max, right.Max) };
+}
+
+/// <summary>Kernels that reduce into a singleton: one accumulator per lane, folded in lane order.</summary>
+public static class ReduceKernels
+{
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Count(in Rank rank, ref Reduce<Headcount> headcount)
+    {
+        headcount.Value.Count++;
+        if (rank.Value > 0) headcount.Value.Sum += rank.Value; // under a mask: only the lanes that pass
+        headcount.Value.Low = Math.Min(headcount.Value.Low, rank.Value);
+        headcount.Value.High = Math.Max(rank.Value, headcount.Value.High);
+    }
+
+    // The same through Combine, and a write to the component in the same pass.
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Tally(ref Rank rank, ref Reduce<Headcount> headcount)
+    {
+        rank.Value = rank.Value * 3 - 1;
+        headcount.Combine(new Headcount { Count = 1, Sum = rank.Value, Low = rank.Value, High = rank.Value });
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Span(in Level level, ref Reduce<Extent> extent)
+    {
+        extent.Value.Low = MathF.Min(extent.Value.Low, level.Value);
+        extent.Value.High = float.Max(extent.Value.High, level.Value);
+    }
+
+    [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+    internal static void Sum(in Level level, ref Reduce<Energy> energy) => energy.Value.Total += level.Value * 0.5f;
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Book(in Stamp stamp, ref Reduce<Ledger> ledger)
+    {
+        ledger.Value.Sum += stamp.Value;
+        ledger.Value.Max = Math.Max(ledger.Value.Max, stamp.Value);
+    }
+
+    // Clamp bounds out of order send a vector's rows to the method, which throws as written.
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Bounded(ref Spot2 spot, ref Reduce<Headcount> headcount)
+    {
+        spot.X = Math.Clamp(spot.X, 0, spot.Y);
+        headcount.Value.Count++;
     }
 }
 
@@ -461,6 +546,105 @@ public class KernelTests
         }
     }
 
+    /// <summary>
+    /// A Reduce&lt;T&gt; carried in lanes (one accumulator per lane, from T.Identity) and folded with T.Combine in lane
+    /// order: integer sums, counts, Min and Max match the method row by row bit for bit, so do float Min and Max, in
+    /// tables with and without rows to test.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void ReductionsMatchTheMethodBitForBit(int count)
+    {
+        foreach (var hole in new Func<int, bool>[] { _ => false, i => i % 3 == 0, i => (uint)(i * 2654435761u) >> 31 == 1 })
+        {
+            using var world = new World();
+            var random = new Random(count);
+            var ranks = new Rank[count];
+            var levels = new Level[count];
+            var stamps = new Stamp[count];
+            var spots = new Spot2[count];
+            var entities = new Entity[count];
+            world.Reserve<Rank, Level, Stamp, Spot2>(count);
+            for (int i = 0; i < count; i++)
+            {
+                (ranks[i], levels[i]) = (NextTally(random, i), NextLevel(random, i));
+                stamps[i] = new Stamp { Value = i % 3 == 0 ? long.MaxValue - i : random.NextInt64(long.MinValue, long.MaxValue) };
+                spots[i] = new Spot2 { X = NextFloat(random, i), Y = 1000 };
+                entities[i] = world.CreateEntity(ranks[i], levels[i], stamps[i], spots[i]);
+            }
+            for (int i = 0; i < count; i++)
+            {
+                if (i % 7 == 0) entities[i].Set(new Frozen()); // a second table: a second run
+                if (hole(i)) entities[i].Remove<Rank>();
+            }
+
+            // The method, row by row in the order the pass visits them (table by table).
+            var order = Enumerable.Range(0, count).OrderBy(i => i % 7 == 0 ? 1 : 0).ToArray();
+            var headcount = new Reduce<Headcount> { Value = Headcount.Identity };
+            foreach (int i in order) if (!hole(i)) ReduceKernels.Count(in ranks[i], ref headcount);
+            ReduceKernels.Count(world);
+            Assert.That(world.GetSingleton<Headcount>(), Is.EqualTo(headcount.Value), "Count");
+
+            headcount = new Reduce<Headcount> { Value = Headcount.Identity };
+            foreach (int i in order) if (!hole(i)) ReduceKernels.Tally(ref ranks[i], ref headcount);
+            ReduceKernels.Tally(world);
+            Assert.That(world.GetSingleton<Headcount>(), Is.EqualTo(headcount.Value), "Tally");
+            for (int i = 0; i < count; i++) if (!hole(i)) Assert.That(entities[i].Get<Rank>(), Is.EqualTo(ranks[i]), $"Rank of row {i}");
+
+            var extent = new Reduce<Extent> { Value = Extent.Identity };
+            foreach (int i in order) ReduceKernels.Span(in levels[i], ref extent);
+            ReduceKernels.Span(world);
+            Assert.That(Same(world.GetSingleton<Extent>(), extent.Value), $"Span: {Bits(world.GetSingleton<Extent>())} instead of {Bits(extent.Value)}");
+
+            var ledger = new Reduce<Ledger> { Value = Ledger.Identity };
+            foreach (int i in order) ReduceKernels.Book(in stamps[i], ref ledger);
+            ReduceKernels.Book(world);
+            Assert.That(world.GetSingleton<Ledger>(), Is.EqualTo(ledger.Value), "Book");
+
+            headcount = new Reduce<Headcount> { Value = Headcount.Identity };
+            foreach (int i in order) ReduceKernels.Bounded(ref spots[i], ref headcount);
+            ReduceKernels.Bounded(world);
+            Assert.That(world.GetSingleton<Headcount>(), Is.EqualTo(headcount.Value), "Bounded");
+        }
+    }
+
+    /// <summary>
+    /// A float sum under FloatMode.Fast: the same rows, one sum per lane, so it rounds differently from the method's
+    /// row by row sum, within the error bound of a sum of that many terms (n * u * the sum of the magnitudes).
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void AFastFloatSumIsTheSumOfTheRows(int count)
+    {
+        using var world = new World();
+        world.Reserve<Level>(count);
+        var random = new Random(count);
+        double exact = 0, magnitude = 0;
+        float scalar = 0;
+        for (int i = 0; i < count; i++)
+        {
+            float value = (float)(random.NextDouble() * 200 - 100);
+            world.CreateEntity(new Level { Value = value });
+            exact += value * 0.5f;
+            magnitude += Math.Abs(value * 0.5f);
+            scalar += value * 0.5f;
+        }
+
+        ReduceKernels.Sum(world);
+        float total = world.GetSingleton<Energy>().Total;
+        double bound = count * 6e-8 * magnitude;
+        Assert.That(Math.Abs(total - exact), Is.LessThanOrEqualTo(bound), $"{total} against {exact} (row by row {scalar})");
+    }
+
+    /// <summary>A Clamp that throws inside a reducing vector loop throws for its row; the pass replaces no result.</summary>
+    [Test]
+    public void AReductionThatThrowsReplacesNoResult()
+    {
+        using var world = new World();
+        world.Reserve<Spot2>(100);
+        for (int i = 0; i < 100; i++) world.CreateEntity(new Spot2 { X = i, Y = i == 37 ? -1 : 1000 });
+        Assert.Throws<ArgumentException>(() => ReduceKernels.Bounded(world));
+        Assert.That(world.HasSingleton<Headcount>(), Is.False);
+    }
+
     private delegate void ScalarRow3<T1, T2, T3>(ref T1 a, ref T2 b, ref T3 c);
 
     private static void Check3<T1, T2, T3>(int count, Func<Random, int, T1> make1, Func<Random, int, T2> make2, Func<Random, int, T3> make3,
@@ -611,9 +795,12 @@ public class KernelTests
             MoreKernels.Blend(world);
             MoreKernels.Convert(world);
             MoreKernels.Masks(world);
+            ReduceKernels.Count(world);
+            ReduceKernels.Span(world);
+            ReduceKernels.Sum(world);
         }
 
-        Frame(); // warm-up: the query cache, the static index tables of Interleaved
+        for (int i = 0; i < 50; i++) Frame(); // warm-up: the query cache, the static index tables of Interleaved, JIT tiers
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 10; i++) Frame();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
@@ -637,6 +824,7 @@ public class KernelTests
         var bits = new Bits[count];
         var masks = new Mask[count];
         var entities = new Entity[count];
+        world.Reserve<Heat, Speed, Mass, Bits, Mask>(count);
         for (int i = 0; i < count; i++)
         {
             heat[i].Value = Next(i);

@@ -178,6 +178,10 @@ public class GeneratorTests
         public partial struct Split : IComponent { public float A; }
         public partial struct Split { public float B; }
         public record struct G(float Pull) : ISingletonComponent;
+        public struct Count : ISingletonComponent, IReduction<Count> { public int N, Low; public static Count Identity => new() { Low = int.MaxValue }; public static Count Combine(Count a, Count b) => new() { N = a.N + b.N, Low = System.Math.Min(a.Low, b.Low) }; }
+        public struct Total : ISingletonComponent, IReduction<Total> { public float V; public static Total Identity => default; public static Total Combine(Total a, Total b) => new() { V = a.V + b.V }; }
+        public struct Ends : ISingletonComponent, IReduction<Ends> { public int First, Last; public static Ends Identity => default; public static Ends Combine(Ends a, Ends b) => new() { First = a.First, Last = b.Last }; }
+        public struct Wide : ISingletonComponent, IReduction<Wide> { public int N; public long L; public static Wide Identity => default; public static Wide Combine(Wide a, Wide b) => new() { N = a.N + b.N, L = a.L + b.L }; }
         """;
 
     // Kernel.cs: a method on one lane type with vector counterparts for its operations gets a Vector<T> loop.
@@ -199,6 +203,11 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Mixed m) => m.A += m.B;", true)]                             // float and int fields
     [TestCase("[ForEach(Parallel = true)] static void A(ref F f) => f.V++;", false)]                   // no parallel batch loop yet
     [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V++;", false)]
+    [TestCase("[ForEach] static void A(in P p, ref Reduce<Count> c) { c.Value.N++; c.Value.Low = System.Math.Min(c.Value.Low, p.V); }", true)] // reductions
+    [TestCase("[ForEach] static void A(in P p, ref Reduce<Count> c) => c.Combine(new Count { N = p.V, Low = p.V });", true)]
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;", true)]
+    [TestCase("[ForEach] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;", false)]  // a float sum: Exact
+    [TestCase("[ForEach] static void A(in P p, ref Reduce<Ends> e) => e.Value.Last = p.V;", false)]  // not field by field
     public void QualifyingMethodsGetAVectorLoop(string members, bool vectorized)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"public partial class S : EcsSystem {{ {members} }}"),
@@ -232,7 +241,11 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f) { for (int i = 0; i < 2; i++) f.V++; }", "'for (int i = 0; i < 2; i++) f.V++;' is not supported")]
     [TestCase("[ForEach] static void A(ref F f, in H h) => h.V.ToString();", "it calls Single.ToString")]
     [TestCase("[ForEach] static void A(in F f, ref H h) { double d = f.V; h.V = (float)d; }", "local 'd' is a double, not a lane type of 4 bytes")]
-    [TestCase("[ForEach] static void A(ref F f, ref int n) => n++;", "it takes 'n' by ref, and a vector loop has no reductions")]
+    [TestCase("[ForEach] static void A(ref F f, ref int n) => n++;", "it takes 'n' by ref: a vector loop reduces only into a Reduce<T>")]
+    [TestCase("[ForEach] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;", "the float sum Total.V would add its rows in another order (one sum per lane): set FloatMode = FloatMode.Fast to accept a sum that is not bit for bit the method's")]
+    [TestCase("[ForEach] static void A(in P p, ref Reduce<Ends> e) => e.Value.Last = p.V;", "Ends.Combine sets First to 'a.First', not the sum, Min or Max of both sides' First")]
+    [TestCase("[ForEach] static void A(in P p, ref Reduce<Wide> w) => w.Value.N += p.V;", "field Wide.L of the reduction is a long, not a lane type of 4 bytes")]
+    [TestCase("[ForEach] static void A(ref P p, ref Reduce<Count> c) { c.Value.N += p.V; p.V = c.Value.N; }", "it reads 'c.Value.N', a partial result the lanes of a vector loop hold in parts")]
     public void ScalarLoopsNameTheirReason(string members, string reason)
     {
         var diagnostics = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Where(d => d.Id == "EECS055").ToArray();
@@ -247,6 +260,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(Entity e, ref Five t) => t.A = t.B;")]
     [TestCase("[ForEach] static void A(ref Holder h) { }")]                                             // not numeric fields
     [TestCase("[ForEach] static void A(System.Span<F> f) { }")]                                          // a batch method
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;")] // vectorized
     public void MethodsNotMeantForAVectorLoopGetNoMessage(string members)
     {
         var ids = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Select(d => d.Id);
@@ -276,6 +290,44 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("internal ref struct AJob0 : global::EasyEcs.IForEach<"), generated);  // per row
         Assert.That(generated, Does.Contain("internal ref struct BJob1 : global::EasyEcs.IForEachMasked<"), generated);
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "Vector.LoadUnsafe").Count, Is.EqualTo(2), generated); // B only: its batch and masked forms (and their Vector512.LoadUnsafe)
+    }
+
+    // A reduction: one accumulator per lane and field from T.Identity, folded into the run's partial result in lane order.
+    [Test]
+    public void AReductionFoldsItsLanesInLaneOrder()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { [ForEach] static void A(in P p, ref Reduce<Count> c) { if (p.V > 0) c.Value.N += p.V; c.Value.Low = System.Math.Min(c.Value.Low, p.V); } }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("var __id1 = global::Count.Identity;")
+            .And.Contain("var __a1_0 = global::System.Numerics.Vector.Create<int>(__id1.N);")
+            .And.Contain("var __a1_1 = global::System.Numerics.Vector.Create<int>(__id1.Low);")
+            .And.Contain("__a1_0 = global::System.Numerics.Vector.ConditionalSelect(__m0, (__a1_0 + __c1_0), __a1_0);")
+            .And.Contain("__a1_1 = global::System.Numerics.Vector.Min(__a1_1, __c1_0);")
+            .And.Contain("for (int __j = 0; __j < global::System.Numerics.Vector<int>.Count; __j++)")
+            .And.Contain("__v.N = __a1_0[__j];")
+            .And.Contain("l1.Combine(__v);"), generated);
+        // In a masked word the lanes that do not pass keep what they held.
+        Assert.That(generated, Does.Contain("var __h1_0 = __a1_0;").And.Contain("__a1_0 = global::System.Numerics.Vector.ConditionalSelect(__pass, __a1_0, __h1_0);"), generated);
+    }
+
+    // T.Combine is part of the loop: an edit of it in another file re-emits the method (here: no longer field by field).
+    [Test]
+    public void AnEditOfCombineReemitsTheLoopsThatFoldWithIt()
+    {
+        var reduction = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic struct P : IComponent { public int V; } " +
+            "public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; }", Parse);
+        var systems = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic class S : EcsSystem { [ForEach] static void A(in P p, ref Reduce<Sum> s) => s.Value.N += p.V; }", Parse);
+        var compilation = Compile().AddSyntaxTrees(reduction, systems);
+        var driver = Driver().RunGenerators(compilation);
+        string Generated() => driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
+        Assert.That(Generated(), Does.Contain("l1.Combine(__v);"));
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(reduction, CSharpSyntaxTree.ParseText(
+            reduction.ToString().Replace("N = a.N + b.N", "N = a.N"), Parse)));
+        Assert.That(Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason), Has.Some.EqualTo(IncrementalStepRunReason.Modified));
+        Assert.That(Generated(), Does.Not.Contain("l1.Combine(__v);").And.Not.Contain("Vector.IsHardwareAccelerated"));
     }
 
     [Test]

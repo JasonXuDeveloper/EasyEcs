@@ -18,7 +18,8 @@ namespace EasyEcs.Benchmark;
 /// division) and <c>Travel</c> (3 doubles) take components of several fields, which the vector loop splits into one
 /// vector per field (Interleaved), in a world of their own. <c>Clamp</c> (Math.Clamp by a singleton's bounds, checked
 /// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
-/// pattern) are the calls, conversions and masks a vector loop takes. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
+/// pattern) are the calls, conversions and masks a vector loop takes. <c>Tally</c> (an int count, sum, Min and Max) and
+/// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
 /// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
 /// leaves out (a lane mask per word of 64 rows). 0 bytes either way.
 /// </summary>
@@ -219,7 +220,79 @@ public class KernelBenchmark
     [Benchmark]
     public void GateGenerated() => Kernels.Gate(_world);
 
+    [Benchmark]
+    public void TallyScalar()
+    {
+        var job = new TallyRows { Tally = new Reduce<Tally> { Value = Tally.Identity } };
+        _world.ForEachBatch<Ticks, TallyRows>(ref job);
+        _world.GetOrAddSingleton<Tally>() = job.Tally.Value;
+    }
+
+    [Benchmark]
+    public void TallyGenerated() => Kernels.Tally(_world);
+
+    [Benchmark]
+    public void EnergyScalar()
+    {
+        var job = new EnergyRows { Energy = new Reduce<Energy> { Value = Energy.Identity } };
+        _world.ForEachBatch<Heat, Speed, EnergyRows>(ref job);
+        _world.GetOrAddSingleton<Energy>() = job.Energy.Value;
+    }
+
+    [Benchmark]
+    public void EnergyGenerated() => Kernels.Energy(_world);
+
     public record struct Window(float Min, float Max) : ISingletonComponent;
+
+    /// <summary>A count, a sum, a minimum and a maximum of ints: exact in any order of the rows.</summary>
+    public struct Tally : ISingletonComponent, IReduction<Tally>
+    {
+        public int Count, Sum, Low, High;
+
+        public static Tally Identity => new() { Low = int.MaxValue, High = int.MinValue };
+        public static Tally Combine(Tally left, Tally right) => new()
+        {
+            Count = left.Count + right.Count, Sum = left.Sum + right.Sum, Low = Math.Min(left.Low, right.Low), High = Math.Max(left.High, right.High),
+        };
+    }
+
+    /// <summary>A float sum: vectorized only under FloatMode.Fast, since one sum per lane rounds in another order.</summary>
+    public struct Energy : ISingletonComponent, IReduction<Energy>
+    {
+        public float Total;
+
+        public static Energy Identity => default;
+        public static Energy Combine(Energy left, Energy right) => new() { Total = left.Total + right.Total };
+    }
+
+    /// <summary>The batch job [ForEach] compiled a reduction to before: the partial result in a local, the method per row.</summary>
+    private struct TallyRows : IForEachBatch<Ticks>
+    {
+        public Reduce<Tally> Tally;
+
+        public void Execute(EntitySpan entities, Span<Ticks> ticks)
+        {
+            var tally = Tally;
+            for (int i = 0; i < ticks.Length; i++) Kernels.Tally(in ticks[i], ref tally);
+            Tally = tally;
+        }
+
+        static int IForEachBatch<Ticks>.WriteMask => 0;
+    }
+
+    private struct EnergyRows : IForEachBatch<Heat, Speed>
+    {
+        public Reduce<Energy> Energy;
+
+        public void Execute(EntitySpan entities, Span<Heat> heat, Span<Speed> speed)
+        {
+            var energy = Energy;
+            for (int i = 0; i < heat.Length; i++) Kernels.Energy(in heat[i], in speed[i], ref energy);
+            Energy = energy;
+        }
+
+        static int IForEachBatch<Heat, Speed>.WriteMask => 0;
+    }
 
     private struct ClampRows : IForEach<Heat, Speed>, INoStructuralChanges
     {
@@ -320,6 +393,19 @@ public class KernelBenchmark
 
         [ForEach]
         internal static void Integrate(ref Heat heat, in Speed speed) => heat.Value += speed.Value * Dt;
+
+        // Reductions into a singleton: integers exact, so vectorized as written; a float sum only under FloatMode.Fast.
+        [ForEach(Simd = SimdMode.Require)]
+        internal static void Tally(in Ticks ticks, ref Reduce<Tally> tally)
+        {
+            tally.Value.Count++;
+            if ((ticks.Value & 1) == 0) tally.Value.Sum += ticks.Value;
+            tally.Value.Low = Math.Min(tally.Value.Low, ticks.Value);
+            tally.Value.High = Math.Max(tally.Value.High, ticks.Value);
+        }
+
+        [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+        internal static void Energy(in Heat heat, in Speed speed, ref Reduce<Energy> energy) => energy.Value.Total += heat.Value * speed.Value * speed.Value;
 
         [ForEach]
         internal static void Count(ref Ticks ticks) => ticks.Value++;
