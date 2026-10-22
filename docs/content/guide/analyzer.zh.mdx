@@ -1525,7 +1525,7 @@ var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
 public record struct Location(int X, int Y) : IComponent, ITracked;
 ```
 
-```csharp doccheck=expect-EECS053
+```csharp tab="报告" doccheck=expect-EECS053
 public class RespawnSystem : EcsSystem
 {
     [ForEach]
@@ -1538,9 +1538,7 @@ public class RespawnSystem : EcsSystem
 }
 ```
 
-改成 `Mut<T>`：
-
-```csharp
+```csharp tab="修正"
 public class RespawnSystem : EcsSystem
 {
     [ForEach]
@@ -1564,23 +1562,37 @@ public class RespawnSystem : EcsSystem
 `ChunkRows` 是[并行方法](/zh/docs/guide/threading#chunk-rows)的一个线程每次取的行数：0 表示由运行时按行数决定，大于 0 则指定
 （向上取整到 64）。没有 `Parallel = true` 的方法只在一个线程上跑，没有块可言；负数没有意义。
 
-```csharp doccheck=expect-EECS054
-public class PlanCells : EcsSystem
+```csharp tab="报告" doccheck=expect-EECS054
+public class PlanRoutes : EcsSystem
 {
+    const int Steps = 4_096;
+
     [ForEach(ChunkRows = 64)]   // 单线程：没有块可设大小
-    static void Plan(in Position position, ref Velocity velocity) => velocity = new Velocity(position.X, position.Y);
+    static void Plan(in Position from, ref Velocity heading)
+    {
+        float x = from.X;
+        for (int i = 0; i < Steps; i++) x = MathF.Sqrt(x * x + 1);   // 重活：每行几微秒
+        heading = new Velocity(x, from.Y);
+    }
 }
 ```
 
-改成并行，或者去掉 `ChunkRows`：
-
-```csharp
-public class PlanCells : EcsSystem
+```csharp tab="修正"
+public class PlanRoutes : EcsSystem
 {
+    const int Steps = 4_096;
+
     [ForEach(Parallel = true, ChunkRows = 64)]
-    static void Plan(in Position position, ref Velocity velocity) => velocity = new Velocity(position.X, position.Y);
+    static void Plan(in Position from, ref Velocity heading)
+    {
+        float x = from.X;
+        for (int i = 0; i < Steps; i++) x = MathF.Sqrt(x * x + 1);   // 重活：每行几微秒
+        heading = new Velocity(x, from.Y);
+    }
 }
 ```
+
+改成并行（像这里，几百行重活），或者去掉 `ChunkRows`。轻量的行两者都不需要：保持默认的块（[什么时候设](/zh/docs/guide/threading#chunk-rows)）。
 
 ## 相关页面 [#related]
 

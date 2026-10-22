@@ -39,6 +39,7 @@ Unity 的跑分，因为没有这样的测试。
 | `SystemAPI.Query<RefRW<A>, RefRO<B>>()` | 参数为 `ref A`、`in B` 的 `[ForEach]` 方法 | job 由生成器写；`ref` 是写，`in` 是读。 |
 | `IJobEntity` | `[ForEach]` 方法（生成的 struct job） | |
 | `ScheduleParallel` | `[ForEach(Parallel = true)]` | 按行分块交给线程池；会产生竞争的方法由分析器拦下（[EECS010](/zh/docs/guide/analyzer#eecs010)）。 |
+| `IJobParallelFor` 的 batch count | `[ForEach(Parallel = true, ChunkRows = n)]` | 一个线程每次领多少行，适合行少而重（[块大小](/zh/docs/guide/threading#chunk-rows)）。 |
 | `EntityQuery` 的 `WithAll` / `WithNone` / `WithAny` | `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`；临时调用用 `QueryFilter` | |
 | 变更过滤（`WithChangeFilter<T>`） | `ITracked` + `[Changed<T>]` | 按行而不是按 chunk，按组件类型自愿开启。 |
 | 结构变更事件 | `[Removed<T>]` | 系统上次运行以来失去了某个被追踪组件的实体。 |
@@ -49,7 +50,7 @@ Unity 的跑分，因为没有这样的测试。
 | 预制体实体、`EntityManager.Instantiate(prefab, array)` | `Prefab`、`world.Instantiate(prefab, span)` | `Prefab` 不属于任何 World，也不需要烘焙。 |
 | 烘焙、authoring 组件 | 没有 | 用代码、预制体或存档来建实体。 |
 | `LinkedEntityGroup`（一起销毁） | `ChildOf(parent)`，级联销毁 | `world.Children(parent)` 列出子实体。 |
-| Burst | .NET JIT、Native AOT | struct job 按类型特化并内联。 |
+| Burst | .NET JIT、Native AOT，以及生成器的[向量循环](/zh/docs/guide/systems#vector-loops) | struct job 按类型特化并内联；普通数值的逐行方法还会得到一个 `Vector<T>` 循环，结果和标量逐位相同。 |
 
 ## 同一个系统 [#same-system]
 

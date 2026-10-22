@@ -20,8 +20,8 @@ discipline, decides what may run together, and the analyzer rejects what could r
 
 <Callout type="warn" title="Skip it for">
   Several threads of your own changing one world: structural changes belong to its owner thread (EECS014 reports the
-  ones it sees). Parallel systems or methods over a few hundred rows: the hand-off to the thread pool costs more than
-  the work.
+  ones it sees). Parallel systems or methods over a few hundred light rows: the hand-off to the thread pool costs more
+  than the work. A few hundred heavy rows (microseconds each) are the exception: see [chunk size](#chunk-rows).
 </Callout>
 
 ## How to use it [#how-to-use-it]
@@ -182,35 +182,100 @@ default the chunks of such a method are cut at multiples of 4,096 rows (at least
 summary their rows share, so no two threads update one summary. `Mut<T>.Write()` and `SetIfChanged` are as safe in a
 chunk as a `ref`. A table of 4,096 rows or fewer is then a single chunk.
 
-#### Chunk size: few heavy rows [#chunk-rows]
+#### Chunk size: few heavy rows, `ChunkRows` [#chunk-rows]
 
-The default chunk suits many light rows: about a quarter of each thread's share, and at least 1,024 rows (4,096 when
-the method writes a tracked component). A few hundred rows that cost microseconds each (a chunk of terrain, a path
-search, a crowd cell) are then one chunk on one thread. `ChunkRows` sets the rows a thread takes at a time, as
-OpenMP's `schedule(dynamic, n)` and the batch count of a Unity job do:
+A parallel pass cuts its rows into chunks, and the threads claim them one at a time through a shared counter as they
+finish their last one, like OpenMP's `schedule(dynamic, n)`: a thread that drew cheap rows takes the next chunk while
+another is still busy, so uneven rows even out. By default a chunk is about a quarter of each thread's share of the
+matching rows, at least 1,024 (4,096 when the method writes a tracked component) and at most
+`World.ParallelChunkRows` (16,384). That suits many light rows. A few hundred rows that cost microseconds each (a
+chunk of terrain, a path search, a crowd cell) are then one chunk, run by one thread while the others wait.
+
+`ChunkRows = n` is the `n` of `schedule(dynamic, n)`: the rows a thread takes at a time.
+
+<Callout type="idea" title="Use it for">
+  A parallel method over a few hundred to a few thousand rows that cost microseconds each: terrain chunks, path
+  searches, crowd cells, simulation islands.
+</Callout>
+
+<Callout type="warn" title="Skip it when">
+  The rows are light (a few arithmetic operations each), however many there are: the default chunks already fill
+  every thread, and smaller ones only add claims. Also when the method is not parallel: `ChunkRows` needs
+  `Parallel = true`.
+</Callout>
 
 ```csharp
 public record struct Cell(int Agents) : IComponent;
-public record struct Plan(int Steps) : IComponent;
+public record struct Crowd(float Pressure) : IComponent;
+```
 
-public class PlanCells : EcsSystem
+```csharp tab="Default chunks"
+public class CrowdPressure : EcsSystem
 {
-    [ForEach(Parallel = true, ChunkRows = 64)]   // threads claim 64 rows at a time, as they finish
-    static void Plan(in Cell cell, ref Plan plan) => plan.Steps = cell.Agents * 4;
+    const int Iterations = 2_000;   // a few microseconds of work per cell
+
+    // 500 cells: one chunk of at least 1,024 rows, so one thread runs them all
+    [ForEach(Parallel = true)]
+    static void Relax(in Cell cell, ref Crowd crowd)
+    {
+        float pressure = crowd.Pressure;
+        for (int i = 0; i < Iterations; i++)
+            pressure += (cell.Agents - pressure) * 0.001f;
+        crowd = new Crowd(pressure);
+    }
 }
 ```
 
-It is rounded up to a multiple of 64 (a word of presence bits and change ticks stays with one thread). Chunks of a
-method that writes a tracked component may now split a 4,096-row block: before the pass, the blocks it covers are
-opened at the pass's tick, and the threads that share one set their words in its summary atomically, once per 64
-rows. Each chunk is one claim: keep `ChunkRows` for rows whose work dwarfs a claim, and leave it out for light rows.
-It needs `Parallel = true` and is 0 or more ([EECS054](/en/docs/guide/analyzer#eecs054)). Ad hoc,
-`world.ForEachParallel(ref job, filter, chunkRows: 64)` does the same.
+```csharp tab="ChunkRows = 64"
+public class CrowdPressure : EcsSystem
+{
+    const int Iterations = 2_000;   // a few microseconds of work per cell
+
+    // 500 cells: eight chunks of up to 64 rows, claimed by the threads as they finish
+    [ForEach(Parallel = true, ChunkRows = 64)]
+    static void Relax(in Cell cell, ref Crowd crowd)
+    {
+        float pressure = crowd.Pressure;
+        for (int i = 0; i < Iterations; i++)
+            pressure += (cell.Agents - pressure) * 0.001f;
+        crowd = new Crowd(pressure);
+    }
+}
+```
+
+- **Rounded up to 64.** A word of presence bits and change ticks stays with one thread, so `ChunkRows = 10` takes 64.
+- **Per table.** Each matching table is cut on its own, at multiples of `n` from its first row; a chunk never spans two
+  tables, and a table's last chunk holds what is left. A sliced method ([`Slices`](/en/docs/guide/systems#slices)) cuts
+  the slice it visits.
+- **Tracked writes.** Chunks of a method that writes a tracked component may split a 4,096-row block of change ticks:
+  before the pass, the blocks it covers are opened at the pass's tick, and the threads that share one set their words
+  of its summary with an atomic OR, once per 64 written rows (the same OR every pass pays). Without `ChunkRows` such a
+  method keeps whole blocks per chunk, so no two threads share one
+  ([D67](/en/docs/decisions#d67-chunk-rows)).
+- **Choosing `n`.** Each chunk is one claim, a compare-and-swap on the counter. Aim for several chunks per thread
+  (rows ÷ threads ÷ 4 is a good start, never below 64), and keep `ChunkRows` for rows whose work dwarfs a claim:
+  light rows keep the default. Fewer than two chunks run on the calling thread, and a pass whose helpers do not make
+  it faster runs there too ([what it costs](#what-it-costs)).
+- **Where it goes.** `ChunkRows` needs `Parallel = true` and is 0 (the default: chosen from the row count) or more
+  ([EECS054](/en/docs/guide/analyzer#eecs054)). Ad hoc, the parallel calls take it as their last argument:
+  `world.ForEachParallel(ref job, filter, chunkRows: 64)` and `ForEachEntityParallel`
+  ([queries](/en/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel)).
+
+Why the default stays chosen from the row count, how a split block keeps its change ticks exact and what else was
+weighed (guided scheduling, per-thread summaries): [D67](/en/docs/decisions#d67-chunk-rows). The
+[VoxelServer](/en/docs/samples/voxel-server) water flow runs its few hundred flowing chunks with `ChunkRows = 64`.
 
 With `WorldOptions.MeasureSystems`, `system.Stats` covers the threads that helped: `LastAllocated` and
 `TotalAllocated` sum the bytes allocated on the thread that ran the system and on every thread that ran a chunk of its
 parallel methods, and the time is that of the whole run. With `ParallelSystems`, each system of a stage records its
 own runs.
+
+How chunk size fits with vector loops, batch methods and grid kernels, and the OpenMP / MPI terms for each:
+[high-performance patterns](/en/docs/guide/high-performance).
+
+{/* TODO(parallel ForEach): reductions (OpenMP reduction(+: x)), thread-private scratch (private / threadprivate)
+and read-only lookups of other entities from a parallel method go here, each as a #### section with when, cost, a
+compiled example and its pitfall; then the mapping table of guide/high-performance. */}
 
 ### Input from other threads [#input-from-other-threads]
 
@@ -378,6 +443,8 @@ changes what an update computes, only how many threads compute it.
   everything runs alone.
 - **Read with `in`.** A `ref` that only reads declares a write, and a write conflicts
   ([EECS025](/en/docs/guide/analyzer#eecs025) reports it).
+- **Size the chunks of few heavy rows.** A parallel method over a few hundred rows of microseconds each sets
+  [`ChunkRows`](#chunk-rows), so every thread gets some; one over many light rows keeps the default.
 
 One world of 100,000 entities, and the same entities in four worlds on four threads (`WorldSimulationBenchmark`,
 `MultiWorldBenchmark`): <BenchValue k="tick.oneWorld" /> per tick in one world, <BenchValue k="tick.fourWorlds" /> for
@@ -397,7 +464,11 @@ over 100,000 rows, sequential and parallel (`ParallelForEachBenchmark`):
 - **One world, one thread:** no locks, no atomics on hot paths; a structural change checks and sets a plain flag.
 - **A parallel stage:** a hand-off to reusable thread-pool work items, nothing allocated; the
   `ParallelSystemsBenchmark` table above shows what it saves on heavy systems.
-- **A parallel method:** the same runner, over chunks of rows; the calling thread always takes part.
+- **A parallel method:** the same runner, over chunks of rows; the calling thread always takes part, and helpers
+  are woken only while measured runs show they make the pass at least a fifth faster than its work alone (so a small
+  pass between ticks runs on the caller). Each chunk costs one claim and a copy of the job; with
+  [`ChunkRows`](#chunk-rows) on a method that writes a tracked component, also one block opening per 4,096 rows before
+  the pass and one atomic OR per 64 written rows.
 - **Off:** `ParallelSystems` is off by default, and a world that never uses it pays nothing for it.
 
 ## Pitfalls [#pitfalls]
@@ -410,6 +481,10 @@ over 100,000 rows, sequential and parallel (`ParallelForEachBenchmark`):
 | A structural change through a held handle in a method that takes no `Entity` | The system shares a stage it should not | [EECS013](/en/docs/guide/analyzer#eecs013) |
 | `Task.Run(() => world.CreateEntity(...))` beside the owner | Two threads change one world | [EECS014](/en/docs/guide/analyzer#eecs014) |
 | A `ref` parameter that only reads | Declares a write: fewer systems run together | [EECS025](/en/docs/guide/analyzer#eecs025) |
+| A few hundred heavy rows in a parallel method without `ChunkRows` | One chunk: one thread works, the others wait | Code review: [`ChunkRows`](#chunk-rows) |
+| `ChunkRows` on many light rows | A claim per small chunk: more overhead, no gain | Code review: keep the default |
+| `ChunkRows` without `Parallel = true`, or below 0 | Compile error: a method on one thread has no chunks | [EECS054](/en/docs/guide/analyzer#eecs054) |
+| Code that expects chunks in row order, or one per thread | Chunks are claimed as threads finish, in any order and on any thread | Code review: write each row's result to its own row |
 
 ## Compared with other ECS libraries [#compared-with-other-ecs-libraries]
 

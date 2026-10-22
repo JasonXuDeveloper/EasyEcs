@@ -76,7 +76,9 @@ The rules are explicit and short ([D13](/en/docs/decisions#d13-one-owner-thread-
   ([EECS013, EECS014](/en/docs/guide/analyzer)).
 - **The parallelism EasyEcs adds is checked.** `WorldOptions.ParallelSystems` runs systems together only when their
   generated access does not conflict, with the same result as running them one by one; a
-  `[ForEach(Parallel = true)]` method must change no structure and write no singleton (EECS010).
+  `[ForEach(Parallel = true)]` method must change no structure and write no singleton (EECS010); its threads claim
+  chunks of rows as they finish (OpenMP's `schedule(dynamic, n)`), and `ChunkRows = n` sizes them for a few hundred heavy
+  rows ([chunk size](/en/docs/guide/threading#chunk-rows)).
 - **Input from other threads** (network, IO) goes into a queue of yours that one system drains on the owner thread.
 
 Never keep a `ref` across an `await`: keep the `Entity` and get the component again. More in
