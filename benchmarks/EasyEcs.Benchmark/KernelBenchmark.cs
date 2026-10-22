@@ -13,14 +13,17 @@ namespace EasyEcs.Benchmark;
 /// written by hand with <c>Vector&lt;float&gt;</c> (<c>HandWritten</c>) and with <c>Vector512&lt;float&gt;</c>
 /// (<c>HandWritten512</c>, the widest the hardware may have), and as the generator's vector loop of the same per-row
 /// method (<c>Generated</c>, Kernel.cs). <c>Step</c> computes (a clamp, a branch on random data); <c>Integrate</c> and
-/// <c>Count</c> stream memory (one float multiply-add, one int increment per row). 0 bytes either way.
+/// <c>Count</c> stream memory (one float multiply-add, one int increment per row). <c>Move2</c> / <c>Move3</c> /
+/// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity), <c>Seek</c> (3 floats: a direction, its length, a
+/// division) and <c>Travel</c> (3 doubles) take components of several fields, which the vector loop splits into one
+/// vector per field (Interleaved), in a world of their own. 0 bytes either way.
 /// </summary>
 [MemoryDiagnoser]
 public class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world;
+    private World _world, _fields;
 
     [GlobalSetup]
     public void Setup()
@@ -33,10 +36,21 @@ public class KernelBenchmark
             _world.CreateEntity(new Heat { Value = (float)random.NextDouble() * 200 - 50 },
                 new Speed { Value = (float)random.NextDouble() * 20 - 10 }, new Mass { Value = (float)random.NextDouble() * 5 },
                 new Ticks { Value = i });
+
+        _fields = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        float F() => (float)random.NextDouble() * 10 - 5;
+        for (int i = 0; i < Entities; i++)
+            _fields.CreateEntity(new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() }, new P3 { X = F(), Y = F(), Z = F() },
+                new V3 { X = F(), Y = F(), Z = F() }, new P4 { X = F(), Y = F(), Z = F(), W = F() }, new V4 { X = F(), Y = F(), Z = F(), W = F() },
+                new D3 { X = F(), Y = F(), Z = F() });
     }
 
     [GlobalCleanup]
-    public void Cleanup() => _world.Dispose();
+    public void Cleanup()
+    {
+        _world.Dispose();
+        _fields.Dispose();
+    }
 
     [Benchmark(Baseline = true)]
     public void StepScalar()
@@ -76,6 +90,94 @@ public class KernelBenchmark
 
     [Benchmark]
     public void CountGenerated() => Kernels.Count(_world);
+
+    [Benchmark]
+    public void Move2Scalar()
+    {
+        var job = new Move2Rows();
+        _fields.ForEach<P2, V2, Move2Rows>(ref job);
+    }
+
+    [Benchmark]
+    public void Move2Generated() => Kernels.Move2(_fields);
+
+    [Benchmark]
+    public void Move3Scalar()
+    {
+        var job = new Move3Rows();
+        _fields.ForEach<P3, V3, Move3Rows>(ref job);
+    }
+
+    [Benchmark]
+    public void Move3Generated() => Kernels.Move3(_fields);
+
+    [Benchmark]
+    public void Move4Scalar()
+    {
+        var job = new Move4Rows();
+        _fields.ForEach<P4, V4, Move4Rows>(ref job);
+    }
+
+    [Benchmark]
+    public void Move4Generated() => Kernels.Move4(_fields);
+
+    [Benchmark]
+    public void SeekScalar()
+    {
+        var job = new SeekRows();
+        _fields.ForEach<P3, V3, SeekRows>(ref job);
+    }
+
+    [Benchmark]
+    public void SeekGenerated() => Kernels.Seek(_fields);
+
+    [Benchmark]
+    public void TravelScalar()
+    {
+        var job = new TravelRows();
+        _fields.ForEach<D3, TravelRows>(ref job);
+    }
+
+    [Benchmark]
+    public void TravelGenerated() => Kernels.Travel(_fields);
+
+    public struct P2 : IComponent { public float X, Y; }
+    public struct V2 : IComponent { public float X, Y; }
+    public struct P3 : IComponent { public float X, Y, Z; }
+    public struct V3 : IComponent { public float X, Y, Z; }
+    public struct P4 : IComponent { public float X, Y, Z, W; }
+    public struct V4 : IComponent { public float X, Y, Z, W; }
+    public struct D3 : IComponent { public double X, Y, Z; }
+
+    private struct Move2Rows : IForEach<P2, V2>, INoStructuralChanges
+    {
+        public void Execute(ref P2 p, ref V2 v) => Kernels.Move2(ref p, in v);
+        static int IForEach<P2, V2>.WriteMask => 1;
+    }
+
+    private struct Move3Rows : IForEach<P3, V3>, INoStructuralChanges
+    {
+        public void Execute(ref P3 p, ref V3 v) => Kernels.Move3(ref p, in v);
+        static int IForEach<P3, V3>.WriteMask => 1;
+    }
+
+    private struct Move4Rows : IForEach<P4, V4>, INoStructuralChanges
+    {
+        public void Execute(ref P4 p, ref V4 v) => Kernels.Move4(ref p, in v);
+        static int IForEach<P4, V4>.WriteMask => 1;
+    }
+
+    private struct SeekRows : IForEach<P3, V3>, INoStructuralChanges
+    {
+        public void Execute(ref P3 p, ref V3 v) => Kernels.Seek(ref p, ref v);
+        static int IForEach<P3, V3>.WriteMask => 3;
+    }
+
+    private struct TravelRows : IForEach<D3>, INoStructuralChanges
+    {
+        public void Execute(ref D3 d) => Kernels.Travel(ref d);
+        static int IForEach<D3>.WriteMask => 1;
+    }
 
     public struct Heat : IComponent { public float Value; }
     public struct Ticks : IComponent { public int Value; }
@@ -122,6 +224,52 @@ public class KernelBenchmark
 
         [ForEach]
         internal static void Count(ref Ticks ticks) => ticks.Value++;
+
+        [ForEach]
+        internal static void Move2(ref P2 p, in V2 v)
+        {
+            p.X += v.X * Dt;
+            p.Y += v.Y * Dt;
+        }
+
+        [ForEach]
+        internal static void Move3(ref P3 p, in V3 v)
+        {
+            p.X += v.X * Dt;
+            p.Y += v.Y * Dt;
+            p.Z += v.Z * Dt;
+        }
+
+        [ForEach]
+        internal static void Move4(ref P4 p, in V4 v)
+        {
+            p.X += v.X * Dt;
+            p.Y += v.Y * Dt;
+            p.Z += v.Z * Dt;
+            p.W += v.W * Dt;
+        }
+
+        // Steers toward a point at a fixed speed: a length, a division, writes to both components.
+        [ForEach]
+        internal static void Seek(ref P3 p, ref V3 v)
+        {
+            float dx = 1 - p.X, dy = 2 - p.Y, dz = 3 - p.Z;
+            float scale = 4 / MathF.Max(MathF.Sqrt(dx * dx + dy * dy + dz * dz), 1e-6f);
+            v.X = dx * scale;
+            v.Y = dy * scale;
+            v.Z = dz * scale;
+            p.X += v.X * Dt;
+            p.Y += v.Y * Dt;
+            p.Z += v.Z * Dt;
+        }
+
+        [ForEach]
+        internal static void Travel(ref D3 d)
+        {
+            d.X = Math.FusedMultiplyAdd(d.Y, 0.5, d.X);
+            d.Y = Math.Max(d.Y - d.Z * 0.25, -100);
+            d.Z = d.Z > 10 ? -d.Z : d.Z + 1;
+        }
 
         // What a person writes by hand for the same work: a batch method over the runs of rows.
         [ForEach]

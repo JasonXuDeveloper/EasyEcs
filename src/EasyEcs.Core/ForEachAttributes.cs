@@ -51,6 +51,32 @@ public sealed class ForEachAttribute : Attribute
     /// and not below 0 (EECS054).
     /// </summary>
     public int ChunkRows { get; init; }
+
+    /// <summary>
+    /// Whether the generator turns the method into a <c>System.Numerics.Vector&lt;T&gt;</c> loop over its runs of rows
+    /// (several rows per instruction, the results of the method bit for bit). <see cref="SimdMode.Auto"/> vectorizes a
+    /// method that qualifies and reports why one that looks eligible does not (EECS055, a message);
+    /// <see cref="SimdMode.Require"/> makes a method that does not qualify an error (EECS056);
+    /// <see cref="SimdMode.Off"/> keeps the method one row at a time. Default <see cref="SimdMode.Auto"/>.
+    /// </summary>
+    public SimdMode Simd { get; init; }
+}
+
+/// <summary>
+/// Whether a <see cref="ForEachAttribute"/> method runs as a vector loop (<see cref="ForEachAttribute.Simd"/>). A method
+/// qualifies when it is static, runs on one thread, makes no structural change, takes components (by <c>ref</c> or
+/// <c>in</c>), singletons and values, and computes with operations that have an exact vector counterpart.
+/// </summary>
+public enum SimdMode
+{
+    /// <summary>A vector loop when the method qualifies; EECS055 names the reason when one that looks eligible does not.</summary>
+    Auto,
+
+    /// <summary>A vector loop, or the build fails with the reason (EECS056).</summary>
+    Require,
+
+    /// <summary>One row at a time, as written.</summary>
+    Off,
 }
 
 /// <summary>

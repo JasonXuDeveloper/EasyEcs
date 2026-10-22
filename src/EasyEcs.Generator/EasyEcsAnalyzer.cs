@@ -181,6 +181,14 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "result when the pass ends. A second Reduce<T> of the same method or system, or a 'ref T' parameter of the same " +
         "method, writes T in the same pass: one result would silently replace the other. Reduce each result into a " +
         "singleton of its own, and read the last result with 'in T'.", helpLinkUri: Help("EECS057"));
+    public static readonly DiagnosticDescriptor NoVectorLoop = new("EECS056", "A required vector loop that the method does not qualify for",
+        "[ForEach(Simd = SimdMode.Require)] method '{0}' gets no vector loop: {1}",
+        Category, DiagnosticSeverity.Error, true,
+        "SimdMode.Require asks for the method's Vector<T> loop. A method qualifies when it is static, runs on one thread, " +
+        "makes no structural change, takes components of one lane field each (all of one type: float, double, int, uint, " +
+        "long or ulong), singletons and values, and computes with arithmetic, comparisons, branches and Math functions " +
+        "that have an exact vector counterpart. Change what the message names, or set SimdMode.Auto to accept the loop " +
+        "of one row at a time.", helpLinkUri: Help("EECS056"));
 
     public static readonly DiagnosticDescriptor BadIndexKey = new("EECS036", "A component that cannot be indexed by its key",
         "'{0}' {1}",
@@ -204,7 +212,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
-        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction,
+        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScalarLoop, NoVectorLoop,
         SharedWrite, LostJobWrite);
 
     public override void Initialize(AnalysisContext context)
@@ -215,6 +223,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterSyntaxNodeAction(AnalyzeSchedule, SyntaxKind.PropertyDeclaration);
         context.RegisterSymbolAction(AnalyzeMethod, SymbolKind.Method);
         context.RegisterSyntaxNodeAction(AnalyzeParallel, SyntaxKind.MethodDeclaration);
+        context.RegisterSyntaxNodeAction(AnalyzeVectorLoop, SyntaxKind.MethodDeclaration);
         context.RegisterSyntaxNodeAction(AnalyzeLocalFunction, SyntaxKind.LocalFunctionStatement);
         context.RegisterSyntaxNodeAction(AnalyzeBufferOfEntities, SyntaxKind.GenericName);
         context.RegisterSymbolAction(AnalyzeBufferHolder, SymbolKind.Field, SymbolKind.Property, SymbolKind.Method);

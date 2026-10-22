@@ -47,4 +47,13 @@
       不能脱离 <see cref="P:EasyEcs.ForEachAttribute.Parallel" /> 单独使用，也不能小于 0（EECS054）。
     </summary>
   </member>
+
+  <member name="P:EasyEcs.ForEachAttribute.Simd" source="d29c8cd91883">
+    <summary>
+      生成器是否把方法写成按一段连续的行跑的 <c>System.Numerics.Vector&lt;T&gt;</c> 循环（一条指令算几行，结果与方法本身逐位相同）。
+      <see cref="F:EasyEcs.SimdMode.Auto" /> 给符合条件的方法生成向量循环，看起来适合却不符合的方法报告原因（EECS055，一条消息）；
+      <see cref="F:EasyEcs.SimdMode.Require" /> 让不符合条件的方法编译失败（EECS056）；
+      <see cref="F:EasyEcs.SimdMode.Off" /> 让方法保持一次一行。默认 <see cref="F:EasyEcs.SimdMode.Auto" />。
+    </summary>
+  </member>
 </doc>

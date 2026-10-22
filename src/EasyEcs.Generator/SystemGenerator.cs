@@ -400,7 +400,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string vector = $"global::System.Numerics.Vector<{simd.Element}>";
         for (int k = 1; k <= components.Length; k++)
             sb.Append($"{indent}ref {simd.Element} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Element}>(ref r{k});\n");
-        sb.Append($"{indent}nint i = 0;\n{indent}if (global::System.Numerics.Vector.IsHardwareAccelerated && rows >= {vector}.Count)\n{indent}{{\n");
+        // Components of several fields need the shuffles of Interleaved; without them, every row runs the method.
+        string interleaved = simd.Interleaves ? " && global::EasyEcs.Interleaved.IsAccelerated" : "";
+        sb.Append($"{indent}nint i = 0;\n{indent}if (global::System.Numerics.Vector.IsHardwareAccelerated{interleaved} && rows >= {vector}.Count)\n{indent}{{\n");
         string inner = indent + "    ";
         foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) sb.Append(inner).Append(line).Append('\n');
         sb.Append($"{inner}for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{inner}{{\n");
@@ -611,8 +613,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
                     && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
                     Slices = Symbols.Slices(method), ChunkRows = Symbols.ChunkRows(method), Identifies = Symbols.OnlyIdentifies(method, syntax, model),
-                    // A stable method on one thread: a batch job holds no structural path (a parallel batch loop does not exist yet).
-                    Simd = stable && !parallel ? Kernel.Translate(method, syntax, model, static (i, kind) => kind == Symbols.ParamKind.Singleton ? $"s{i}" : $"x{i}", ct) : null,
+                    // Kernel.Vectorize decides alone (static, one thread, stable, its body): the analyzer reports its reasons.
+                    Simd = Kernel.Vectorize(method, syntax, model, static (i, kind) => kind == Symbols.ParamKind.Singleton ? $"s{i}" : $"x{i}", ct, out _),
                 };
         }
     }
