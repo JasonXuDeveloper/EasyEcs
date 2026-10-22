@@ -182,6 +182,14 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "method, writes T in the same pass: one result would silently replace the other. Reduce each result into a " +
         "singleton of its own, and read the last result with 'in T'.", helpLinkUri: Help("EECS057"));
 
+    public static readonly DiagnosticDescriptor ScratchEscape = new("EECS058", "Scratch memory stored into the world",
+        "[ForEach] method '{0}' stores '{1}', which its Scratch<{2}> '{3}' holds, into '{4}'",
+        Category, DiagnosticSeverity.Error, true,
+        "A Scratch<T> value belongs to the thread running the method and is reused by the next row that thread runs, " +
+        "of any pass. A reference into it (a list, an array, a span) stored in a component or a singleton is changed " +
+        "under the entity by later rows, on another thread in a parallel pass. Copy what the row produced into the " +
+        "component's own storage (a DynamicBuffer, a value), or keep the data in a component.", helpLinkUri: Help("EECS058"));
+
     public static readonly DiagnosticDescriptor BadIndexKey = new("EECS036", "A component that cannot be indexed by its key",
         "'{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
@@ -204,7 +212,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
-        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction);
+        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScratchEscape);
 
     public override void Initialize(AnalysisContext context)
     {

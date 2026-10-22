@@ -250,7 +250,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             return;
         }
 
-        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind != Symbols.ParamKind.Entity)
+        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch))
                      .Select(p => (p.Kind, p.Type, p.RefKind)).Distinct())
         {
             string kind = p.Kind is Symbols.ParamKind.Singleton or Symbols.ParamKind.Reduction ? "Singleton" : "";
@@ -290,6 +290,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Entities => "entities",
             Symbols.ParamKind.Optional => $"global::EasyEcs.Maybe<{p.Type}>.{(p.RefKind == "ref" ? "ForWrite" : "ForRead")}(entity)",
             Symbols.ParamKind.Reduction => $"new global::EasyEcs.Reduce<{p.Type}>(ref {(local[i] ? "l" : "a")}{i})",
+            // This thread's box, resolved once per chunk (per pass on one thread): the job's copy keeps it.
+            Symbols.ParamKind.Scratch => $"new global::EasyEcs.Scratch<{p.Type}>(ref (t{i} ??= global::EasyEcs.Scratch<{p.Type}>.Of<{job}>()).Value)",
             Symbols.ParamKind.Context when local[i] => $"ref l{i}",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
             _ => "World",
@@ -320,6 +322,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     : $"        public ref {(p.RefKind == "in" ? "readonly " : "")}{p.Type} x{i};\n");
             else if (p.Kind == Symbols.ParamKind.Reduction) // the partial result: of the pass, or of a chunk's copy
                 sb.Append($"        public {p.Type} a{i};\n");
+            else if (p.Kind == Symbols.ParamKind.Scratch) // this thread's box (null until the first row of a chunk)
+                sb.Append($"        public global::System.Runtime.CompilerServices.StrongBox<{p.Type}> t{i};\n");
         }
         if (sb[sb.Length - 2] != '{') sb.Append('\n'); // a blank line after the fields, if any
         sb.Append("        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
@@ -552,6 +556,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                         Symbols.Implements(Symbols.MutElement(p.Type)!, Symbols.TrackChanges)),
                     Symbols.ParamKind.Reduction => new ParamModel(Symbols.ParamKind.Reduction, // a write of the singleton, once per pass
                         Symbols.ReduceElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared),
+                    Symbols.ParamKind.Scratch => new ParamModel(Symbols.ParamKind.Scratch, Symbols.ScratchElement(p.Type)!.ToDisplayString(Symbols.Fqn), "", p.Name, declared),
                     Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn),
                         p.RefKind switch { RefKind.Ref => "ref", RefKind.In => "in", _ => "" }, p.Name, declared),
                     var kind => new ParamModel(kind, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.Ref ? "ref" : "in", p.Name, declared),

@@ -571,6 +571,8 @@ internal static class Symbols
         /// into the singleton when the pass ends: a write of the singleton, once per pass.
         /// </summary>
         Reduction,
+        /// <summary><c>Scratch&lt;T&gt;</c>: the method's working memory on the thread running it, kept between rows and passes.</summary>
+        Scratch,
         /// <summary>
         /// A value the caller passes to the entry point of a [ForEach] method outside a system (<c>ref int dead</c>, a
         /// configuration): any type but a component, a singleton or the framework's own, by value, <c>ref</c> or <c>in</c>.
@@ -793,6 +795,7 @@ internal static class Symbols
             return mutable.IsValueType && IsA(mutable, Component) ? ParamKind.Mutable : ParamKind.Invalid;
         if (ReduceElement(p.Type) is { } reduced)
             return reduced.IsValueType && IsA(reduced, Singleton) ? ParamKind.Reduction : ParamKind.Invalid;
+        if (ScratchElement(p.Type) != null) return ParamKind.Scratch;
         return Named(p.Type, Entity) ? ParamKind.Entity
             : Named(p.Type, EntitySpan) ? ParamKind.Entities
             : Named(p.Type, World) ? ParamKind.World
@@ -830,6 +833,12 @@ internal static class Symbols
     /// <summary>Singleton type of a <c>Reduce&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? ReduceElement(ITypeSymbol type) =>
         type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Reduce<T>")
+            ? named.TypeArguments[0]
+            : null;
+
+    /// <summary>Value type of a <c>Scratch&lt;T&gt;</c>, else null.</summary>
+    public static ITypeSymbol? ScratchElement(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Scratch<T>")
             ? named.TypeArguments[0]
             : null;
 

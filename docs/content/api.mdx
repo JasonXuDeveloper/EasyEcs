@@ -53,6 +53,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `ReadOnlyMaybe<T>` | ref struct | The same, read-only: `Value` is `ref readonly`, never stamped, allowed for indexed components; a `Maybe<T>` converts to it. |
 | `Mut<T>` | ref struct | A component parameter of a `[ForEach]` method that counts as written only on the rows the method writes: `Value`, `Write()`, `SetIfChanged(value)` ([change tracking](/en/docs/guide/change-tracking)). |
 | `Reduce<T>`, `IReduction<T>` | ref struct, interface | A `[ForEach]` parameter reducing a pass into singleton `T`, which implements `IReduction<T>` (`Identity`, `Combine`): `Value`, `Combine(value)`. |
+| `Scratch<T>` | ref struct | A `[ForEach]` parameter: working memory of the method on the running thread, kept between rows, passes and worlds: `Value`. |
 | `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interfaces, attributes | System groups (with filters through interfaces) and ordering. |
 | `SystemErrorPolicy` | enum | `Throw` (default) or `Disable`: what an exception in a system does. |
 | `SystemStats`, `SystemList` | readonly structs | A system's run count, times, allocated bytes and visited entities; `world.Systems`, allocation-free. |
@@ -183,6 +184,12 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | `reduce.Value` | O(1) | `ref T`: the partial result of this chunk (of the pass, on one thread), which starts at `T.Identity` |
 | `reduce.Combine(T value)` | O(1) plus `T.Combine` | `Value = T.Combine(Value, value)` |
 | end of the pass | O(chunks) `T.Combine` calls | the partial results in chunk order (row order), then one write of the singleton (added when missing) |
+
+`Scratch<T>`, a `[ForEach]` parameter for parallel passes:
+
+| API | Complexity | Notes |
+| --- | --- | --- |
+| `scratch.Value` | O(1): one thread-static read per chunk | `ref T`, this method's value on this thread: `default` on the thread's first row, never reset |
 
 ## Disable and bulk changes [#bulk]
 

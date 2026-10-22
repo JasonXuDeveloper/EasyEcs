@@ -429,6 +429,8 @@ public class GeneratorTests
     [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, Reduce<Sum> a, Reduce<Sum> b) { a.Value.N += p.V; b.Value.N++; } }", "EECS057")]
     [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public class S : EcsSystem { [ForEach] static void A(in P p, Reduce<Sum> a, ref Sum s) { a.Value.N += p.V; s.N++; } }", "EECS057")]
     [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public class S : EcsSystem { [ForEach] static void A(in P p, Reduce<Sum> a) => a.Value.N += p.V; [ForEach] static void B(in Q q, Reduce<Sum> b) => b.Value.N += q.V; }", "EECS057")]
+    [TestCase("public struct Bag : IComponent { public System.Collections.Generic.List<int> Items; } public struct Work { public System.Collections.Generic.List<int> Items; } public class S : EcsSystem { [ForEach] static void A(ref Bag bag, Scratch<Work> work) { work.Value.Items ??= new(); bag.Items = work.Value.Items; } }", "EECS058")]
+    [TestCase("public struct Bag : IComponent { public int[] Items; } public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref Bag bag, Scratch<int[]> work) { work.Value ??= new int[8]; bag.Items = work.Value; } }", "EECS058")]
     public async Task MisuseIsReported(string source, string id)
     {
         var errors = await Diagnose(Components, source);
@@ -436,6 +438,9 @@ public class GeneratorTests
         Assert.That(errors.Where(e => !e.StartsWith("CS")), Is.EqualTo(new[] { id }), "exactly one EasyEcs diagnostic");
     }
 
+    [TestCase("public static class Cache { [System.ThreadStatic] public static System.Collections.Generic.List<int> List; } public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p) { var l = Cache.List ??= new(); l.Clear(); l.Add(p.V); p.V = l.Count; } }")]
+    [TestCase("public struct Work { public System.Collections.Generic.List<int> Items; } public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, Scratch<Work> work) { ref var w = ref work.Value; var items = w.Items ??= new(); items.Clear(); items.Add(p.V); p.V = items.Count; } }")]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, Scratch<int[]> work) { if (work.Value == null) work.Value = new int[8]; work.Value[0] = p.V; p.V = work.Value[0]; } }")]
     [TestCase("public struct Named : IComponent { public string Name; } public class S : EcsSystem { [ForEach] static void A(in Named n, ref P p) => p.V = n.Name.Remove(0, 1).Length; }")]
     [TestCase("public static class U { public static async System.Threading.Tasks.Task F(World world) { await System.Threading.Tasks.Task.Run(() => world.CreateEntity(new P())); world.CreateEntity(new P()); } }")]
     [TestCase("public static class U { public static void F(World world) { System.Threading.Tasks.Task.Run(() => world.CreateEntity(new P())).Wait(); world.CreateEntity(new P()); } }")]

@@ -8,6 +8,29 @@ namespace EasyEcs.UnitTest;
 public class AllocationTests
 {
     [Test]
+    public void ParallelReductionsAndScratchDoNotAllocate()
+    {
+        // Several tables of chunks, several threads: the job copies kept per chunk, the thread's scratch. Warm-up lets every helper thread meet every method once.
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4, ParallelSystems = true });
+        world.CreateEntities(new Entity[World.ParallelChunkRows * 3], new ReduceTests.Points(3));
+        world.CreateEntities(new Entity[World.ParallelChunkRows], new ReduceTests.Points(1), new ReduceTests.Spot(1, 2));
+        world.CreateEntities(new Entity[World.ParallelChunkRows * 2], new ScratchTests.Number(12345), new ScratchTests.DigitSum());
+        world.AddSystem<ReduceTests.ParallelScores>();
+        world.AddSystem<ReduceTests.ParallelBounds>();
+        world.AddSystem<ScratchTests.SumDigits>();
+        for (int i = 0; i < 30; i++) world.Update();
+        long least = long.MaxValue;
+        for (int window = 0; window < 3 && least != 0; window++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 100; i++) world.Update();
+            least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+
+        Assert.That(least, Is.Zero);
+    }
+
+    [Test]
     public void UpdatesQueriesAndStructuralChangesDoNotAllocate()
     {
         using var world = new World();

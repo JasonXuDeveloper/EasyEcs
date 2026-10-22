@@ -50,6 +50,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `ReadOnlyMaybe<T>` | ref struct | 只读版本：`Value` 是 `ref readonly`，从不打 tick，带索引的组件也能用；`Maybe<T>` 可以转换成它。 |
 | `Mut<T>` | ref struct | `[ForEach]` 方法的组件参数，只有方法真正写了的行才算写入：`Value`、`Write()`、`SetIfChanged(value)`（[变更追踪](/zh/docs/guide/change-tracking)）。 |
 | `Reduce<T>`、`IReduction<T>` | ref struct、接口 | `[ForEach]` 参数，把一次遍历归约到单例 `T`，`T` 实现 `IReduction<T>`（`Identity`、`Combine`）：`Value`、`Combine(value)`。 |
+| `Scratch<T>` | ref struct | `[ForEach]` 参数：方法在当前线程上的工作内存，在行、遍历和 World 之间保留：`Value`。 |
 | `ISystemGroup`、`ISystemGroupWith<T>`、`ISystemGroupWithout<T>`、`[UpdateInGroup<T>]`、`[UpdateBefore<T>]`、`[UpdateAfter<T>]` | 接口、特性 | 系统分组（可通过接口加过滤条件）与排序。 |
 | `SystemErrorPolicy` | 枚举 | `Throw`（默认）或 `Disable`：系统抛异常时怎么办。 |
 | `SystemStats`、`SystemList` | readonly struct | 系统的运行次数、耗时、分配字节数和访问的实体数；`world.Systems`，零分配。 |
@@ -177,6 +178,12 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `reduce.Value` | O(1) | `ref T`：这个块（单线程时是整次遍历）的部分结果，从 `T.Identity` 开始 |
 | `reduce.Combine(T value)` | O(1)，加上 `T.Combine` | `Value = T.Combine(Value, value)` |
 | 遍历结束 | O(块数) 次 `T.Combine` | 按块的顺序（行的顺序）合并部分结果，再写一次单例（没有就先添加） |
+
+`Scratch<T>`，用于并行遍历的 `[ForEach]` 参数：
+
+| API | 复杂度 | 说明 |
+| --- | --- | --- |
+| `scratch.Value` | O(1)：每块读一次线程静态字段 | `ref T`，这个方法在这个线程上的值：线程的第一行为 `default`，从不重置 |
 
 ## 禁用与批量修改 [#bulk]
 
