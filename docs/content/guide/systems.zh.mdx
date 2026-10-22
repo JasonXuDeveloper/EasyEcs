@@ -189,6 +189,7 @@ public class HungerSystem : EcsSystem
 | `World` | World 本身（创建实体、访问其他单例） |
 | [`Maybe<T>`](#maybe) | 实体可能没有的组件 |
 | [`ReadOnlyMaybe<T>`](#read-only-maybe) | 实体可能没有、只读的组件（带索引的组件也行） |
+| [`ref Reduce<T>`](/zh/docs/guide/threading#reductions)，`T : ISingletonComponent, IReduction<T>` | 对所有行求的一个总结果：每一块（单线程时是整遍）累加进自己的部分结果，合并后的结果替换单例 `T` |
 | `Span<T>` / `ReadOnlySpan<T>`、`EntitySpan` | [批处理方法](#batch-methods)：一次处理成段的行 |
 
 | 特性 | 含义 |
@@ -220,6 +221,11 @@ public class HungerSystem : EcsSystem
       type: 'int',
       description: '每次运行访问约 1 / N 的行，每行每 N 次运行访问一次（见上文的分片）。不能和变更过滤一起用：EECS035。',
       default: '1',
+    },
+    Simd: {
+      type: 'SimdMode',
+      description: 'Auto：方法符合条件时生成向量循环（不符合时 EECS055 说明原因）。Require：不符合条件就报错（EECS056）。Off：一行一行地跑，不提示。',
+      default: 'SimdMode.Auto',
     },
   }}
 />
@@ -396,7 +402,8 @@ public class RouteSystem : EcsSystem
 `[ForEach]` 方法照常按一行来写；组件都是普通数值时，生成器还会顺手写出它的 SIMD 循环：方法体变成在每段匹配行上跑的
 `System.Numerics.Vector<T>` 循环，一条指令处理 `Vector<T>` 装得下的行数（x64 上用 AVX2 是 8 个 float，Arm 上 4 个）。Unity 的
 Burst 和 ISPC 也是这样做的：方法就是一条通道（lane）的内核。.NET 的 JIT 自己不会把循环向量化，没有这一步的话，逐行方法就一次只算一行
-（[D68](/zh/docs/decisions#d68-vector-loops-without-opting-in)）。不用开启什么。
+（[D68](/zh/docs/decisions#d68-vector-loops-without-opting-in)）。不用开启什么：`[ForEach(Simd = SimdMode.Require)]`
+让失去向量循环的方法构建失败，`SimdMode.Off` 让方法保持标量。
 
 <Callout type="idea" title="适合">
   大量行上的热点逐行算术：移动、热量、衰减、计时器、钳制、计数器。按下面的形状写好一行的方法，循环自然就有了。
@@ -473,11 +480,66 @@ public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2)
   `return` 让对应的通道在方法剩下的部分不再生效。
 - **尾部** 对最后一个完整向量之后的行、以及硬件没有向量单元时的所有行，直接调用方法本身，所以结果从不取决于通道数。
 
+**多字段的组件。** 有 2 到 4 个同一种 lane 类型字段的组件（`Position { X, Y, Z }`）会被拆成每个字段一个向量：解交错加载一次读出这一列的
+`Vector<float>.Count` 行，得到 X 的各条通道、Y 的各条通道和 Z 的各条通道，交错存储再把它们放回去。两者都由生成器调用 `EasyEcs.Interleaved`
+完成：256 位用 AVX2 的 shuffle 和 blend，512 位用双源 permute，适用于 4 字节和 8 字节的通道。CPU 两者都没有时（Arm、较老的 x64），
+`Interleaved.IsAccelerated` 为 false，每一行都直接调用方法本身，结果相同。
+
+```csharp tab="你写的"
+public struct Position3 : IComponent { public float X, Y, Z; }
+public struct Velocity3 : IComponent { public float X, Y, Z; }
+public record struct Gravity(float Pull) : ISingletonComponent;
+
+public class FallSystem : EcsSystem
+{
+    [ForEach]
+    static void Fall(ref Position3 position, ref Velocity3 velocity, in Gravity gravity)
+    {
+        velocity.Y -= gravity.Pull;
+        if (position.Y < 0f) velocity.Y = 0f;   // 落地：作用在 Y 各条通道上的掩码
+        position.X += velocity.X;
+        position.Y += velocity.Y;
+        position.Z += velocity.Z;
+    }
+}
+```
+
+```csharp tab="生成器写的" doccheck=skip
+// 生成的代码（FallSystem.….ForEach.g.cs，有删减，去掉了 global::）。不要照抄：Interleaved 是生成器的辅助类，
+// Fall_0 是指向你的私有方法的 [UnsafeAccessor]。
+ref float e1 = ref Unsafe.As<Position3, float>(ref r1);   // 把列看成一串 float：X, Y, Z, X, Y, Z, ...
+ref float e2 = ref Unsafe.As<Velocity3, float>(ref r2);
+nint i = 0;
+if (Vector.IsHardwareAccelerated && Interleaved.IsAccelerated && rows >= Vector<float>.Count)
+{
+    var __u0 = new Vector<float>(s2.Pull);   // 单例，每段行广播一次
+    var __u2 = new Vector<float>(0f);
+    for (nint last = rows - Vector<float>.Count; i <= last; i += Vector<float>.Count)
+    {
+        // 1. 解交错加载：Count 行的 X、Y、Z 变成每个组件三个向量
+        Interleaved.Load3(ref e1, (nuint)i, out Vector<float> __c1_0, out Vector<float> __c1_1, out Vector<float> __c1_2);
+        Interleaved.Load3(ref e2, (nuint)i, out Vector<float> __c2_0, out Vector<float> __c2_1, out Vector<float> __c2_2);
+        // 2. 方法体，每个字段一个向量
+        __c2_1 = (__c2_1 - __u0);
+        var __m1 = Vector.LessThan<float>(__c1_1, __u2);
+        __c2_1 = Vector.ConditionalSelect<float>(__m1, __u2, __c2_1);
+        __c1_0 = (__c1_0 + __c2_0);
+        __c1_1 = (__c1_1 + __c2_1);
+        __c1_2 = (__c1_2 + __c2_2);
+        // 3. 交错存储：各字段放回到行里
+        Interleaved.Store3(__c1_0, __c1_1, __c1_2, ref e1, (nuint)i);
+        Interleaved.Store3(__c2_0, __c2_1, __c2_2, ref e2, (nuint)i);
+    }
+}
+for (; i < rows; i++)   // 4. 尾部，以及没有 shuffle 指令时的每一行：方法本身
+    __ForEach.Fall_0(null, ref Unsafe.Add(ref r1, i), ref Unsafe.Add(ref r2, i), in s2);
+```
+
 下面这些条件都满足时，方法才会得到向量循环；否则它照旧逐行运行，和以前完全一样：
 
 - **方法：** `static`、逐实体、不是 `Parallel`（并行方法保持标量），没有 `Entity`、`World`、`Mut<T>` 或 `Maybe<T>` 参数。
-- **组件：** 每个组件只有一个字段（或一个自动属性），类型是 `float`、`double`、`int`、`uint`、`long` 或 `ulong`，而且方法的所有组件
-  是同一种类型，也就是同一个通道数。`ref` 和 `in` 都可以。
+- **组件：** 每个组件有 1 到 4 个字段（或自动属性），类型是 `float`、`double`、`int`、`uint`、`long` 或 `ulong`，只在一处声明，
+  而且方法的所有字段是同一种类型，也就是同一个通道数。`ref` 和 `in` 都可以；写字段（`p.X += v.X`），不要给整个组件赋新值。
 - **统一值：** 单例、常量和 `static readonly` 字段。
 - **方法体：** 局部变量、`=`、复合赋值、`++` / `--`、`+ - *`、浮点的 `/`、`& | ^ ~`、按统一位数移位、比较、`&& || !`、`?:`、
   `if` / `else`、`return`，以及 `Math` / `MathF` 的 `Min`、`Max`、`Abs`（浮点）、`Sqrt`、`Floor`、`Ceiling` 和 `FusedMultiplyAdd`。
@@ -485,12 +547,14 @@ public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2)
 **结果逐位相同。** 每条通道按同样的顺序执行和标量代码相同的 IEEE 运算：不重排结合顺序，方法没写的融合乘加也不会加（`Vector.Min` /
 `Max` 对 NaN 和 −0 的处理与 `Math.Min` / `Max` 一致）。变更 tick 和系统的读写集合都和逐行方法相同。
 
-**不符合条件的方法** 保持标量循环，也没有警告：结果是对的，只是慢。常见原因是组件有多个字段、一个方法里有两种数值类型、用了规则覆盖不到的
-函数调用。照 Burst 代码的写法改：一个组件一个字段，一个方法一种数值类型，把调用挪出去。
+**不符合条件的方法** 保持标量循环：结果是对的，只是慢，[EECS055](/zh/docs/guide/analyzer#eecs055)（IDE 里的建议）会像 Burst 的
+Inspector 一样说出第一个原因。常见原因是组件超过 4 个字段、一个方法里有两种数值类型、给整个组件赋值（`p = new Position(...)`）而不是写字段、
+用了规则覆盖不到的函数调用。照 Burst 代码的写法改：一个方法一种数值类型，每个组件最多 4 个字段，把调用挪出去。速度取决于向量循环的方法用
+`Simd = SimdMode.Require` 写明，之后哪次改动让它失去循环，构建就会失败（[EECS056](/zh/docs/guide/analyzer#eecs056)）。
 
-```csharp tab="保持标量"
+```csharp tab="保持标量" doccheck=expect-EECS055
 public struct Fuel : IComponent { public float Value; }
-public struct Engines : IComponent { public int Value; }   // float 旁边一个 int：两种通道数
+public struct Engines : IComponent { public int Value; }   // EECS055：lane types float and int differ
 
 public class BurnFuel : EcsSystem
 {
@@ -513,9 +577,13 @@ public class BurnFuel : EcsSystem
 ```
 
 系统的生成文件（`<System>.….ForEach.g.cs`，在项目的生成源码下；开启 `<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>`
-后在 `obj/` 下）里出现 `Vector<`，就说明方法得到了向量循环。
+后在 `obj/` 下）里出现 `Vector<`，就说明方法得到了向量循环；没得到的方法不用打开文件，EECS055 会列出来。
 
-`KernelBenchmark` 在 10 万行和 1,000 行上对比逐行 job 和生成的循环（带分支的钳制、`h += v * dt`、整数自增）；数字见
+{/* TODO(vector loops): Math.Clamp、Min/Max/Abs/Sqrt/Floor/Ceiling 之外的 MathF.*、lerp 和类型转换；向量归约（向量循环里的
+Reduce<T>）；FloatMode.Fast；存在位的 lane 掩码（Maybe<T> 作为掩码）；Vector512；无边界检查的标量循环。每项加进上面的条件列表，
+改变循环形状的附上生成的代码。 */}
+
+`KernelBenchmark` 在 10 万行和 1,000 行上对比逐行 job 和生成的循环（带分支的钳制、`h += v * dt`、整数自增，以及 2 到 4 个字段的位置的移动、寻向和行进）；数字见
 [D68](/zh/docs/decisions#d68-vector-loops-without-opting-in)：
 
 <BenchTable bench="KernelBenchmark" />
@@ -543,9 +611,12 @@ public class ApplyInputSystem : EcsSystem
 world.AddSystem<ApplyInputSystem>();
 world.Update<InputGroup>();   // 输入到达时
 world.Update();               // 固定 tick：默认分组
+long inputs = world.UpdateCount<InputGroup>();   // 到目前为止 Update<InputGroup>() 的次数
 ```
 
 顺序、`UpdateInterval`、`UpdatePhase` 和 `Enabled` 都在各自分组内生效，分组特性会被继承。更新一个没有系统的分组什么也不做。
+`world.UpdateCount<TGroup>()` 统计一个分组的更新次数（包括正在进行的这一次），就像 `DefaultUpdateCount` 统计默认分组：分组里各系统的
+`UpdateInterval` 就按这个次数算，所以工具或测试能知道下一次更新哪些系统会跑。O(1)；从没加过系统的分组是 0。
 
 #### 分组过滤 [#group-filters]
 
@@ -819,7 +890,7 @@ run order: MoveSystem
 | 只读的组件写成 `ref` | 改成 `in`（[EECS025](/zh/docs/guide/analyzer#eecs025)） | 系统能共享并行阶段；被追踪的组件不会被打 tick |
 | 方法用不到却带了 `Entity` 或 `World` 参数 | 去掉（[EECS026](/zh/docs/guide/analyzer#eecs026)） | job 跳过结构变更簿记，还能并行 |
 | 实例 `[ForEach]` 方法 | 改成静态方法（[EECS029](/zh/docs/guide/analyzer#eecs029)） | 能证明不改结构：可以共享阶段，每行不用检查 |
-| 热点方法里一个组件装了好几个数 | 拆成同一种数值类型的单字段组件 | 方法得到[向量循环](#vector-loops) |
+| 热点方法里一个组件装了 4 个以上的数，或两种数值类型 | 拆成每个 1 到 4 个同类型字段的组件 | 方法得到[向量循环](#vector-loops) |
 | 向量循环覆盖不到的通道（字节、混合类型） | 用 `Vector<T>` 的批处理方法 | 对整段行做 SIMD |
 | 最热的循环里用 `Maybe<T>` | 用 `[With<T>]` / `[Without<T>]` 拆成两个方法 | 每行不用判断存在位 |
 | 很轻的计算也 `Parallel = true` | 普通 `[ForEach]` | 分发的开销比省下的多 |

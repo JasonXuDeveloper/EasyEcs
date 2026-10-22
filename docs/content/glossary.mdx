@@ -131,6 +131,20 @@ tracked component), or `ChunkRows` rounded up to 64. The [runner](#runner)'s thr
 as they finish (OpenMP's `schedule(dynamic, n)`); fewer than two chunks run on the calling thread alone. See
 [chunk size](/en/docs/guide/threading#chunk-rows).
 
+## Reduction [#reduction]
+
+A total over the rows of a pass, computed in parts and combined: a `Reduce<T>` parameter of a `[ForEach]` method
+gives each [chunk](#chunk) (or the pass on one thread) its own partial result starting at `T.Identity`, and when the
+pass ends the partial results are combined with `T.Combine`, in row order, into singleton `T`. OpenMP's `reduction`,
+MPI's `Allreduce`. See [reductions](/en/docs/guide/threading#reductions).
+
+## Vector loop [#vector-loop]
+
+The `Vector<T>` loop the generator writes for a per-row `[ForEach]` method over components of 1 to 4 numbers of one
+type: the method's body computed for as many rows per instruction as a vector holds, with masks for its branches and
+the method itself for the rows left over. EECS055 names why a method got none. See
+[vector loops](/en/docs/guide/systems#vector-loops).
+
 ## Slice [#slice]
 
 The part of each matching table one run of a `[ForEach(Slices = N)]` method visits: about 1 / N of its rows, cut at

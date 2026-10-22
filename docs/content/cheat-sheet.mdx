@@ -38,6 +38,7 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 | `: ITracked` | Rows record the tick of their last write and removal | [Change tracking](/en/docs/guide/change-tracking) |
 | `: IIndexed<TKey>` with `Key` | Found by value through `world.Index<T, TKey>()` | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `: IUniqueIndexed<TKey>` with `Key` | A key that names one entity: `index.Get(key)`; a write that would give a second entity the key throws | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
+| `: IDirectIndexed<TKey>` with `Key`, `static Slots`, `static SlotOf(key)` | A unique key that maps onto bounded slots (grid cells): `Get` / `TryGet` read one array entry | [Direct-mapped keys](/en/docs/guide/indexes-and-relations#direct-index) |
 | `: IIndexed<EntityId>` | A link to one entity, found from the target | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `: IRelation` with `Target` | Many links per entity, kept in a buffer | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `: IGroup` with `Group` | Splits tables by value after `world.GroupBy<T>()` | [Groups](/en/docs/guide/groups) |
@@ -64,6 +65,7 @@ Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an ent
 | `world.EntityCount` / `Entities` | Live entities and an allocation-free walk over them |
 | `world.ChangeTick` | The current change tick |
 | `world.DefaultUpdateCount` | Completed `Update()` calls of the default group |
+| `world.UpdateCount<TGroup>()` | `Update<TGroup>()` calls so far, the running one included: what the group's `UpdateInterval`s count |
 | `world.Reserve<T1, …, Tn>(n)` / `Reserve(prefab, n)` / `EnsureEntityCapacity(n)` | Pre-size before a known peak or a wave |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | From an `EntityId` back to a checked handle |
 | `world.DescribeTables()` | Tables, columns, rows and bytes, for tools |
@@ -171,9 +173,10 @@ public class MovementSystem : EcsSystem
 }
 ```
 
-A static per-entity method whose components each hold one number of one type (`float`, `int`, …) also gets a
+A static per-entity method whose components hold 1 to 4 numbers of one type (`float`, `int`, …) also gets a
 `Vector<T>` loop written by the generator, with the same results bit for bit
-([vector loops](/en/docs/guide/systems#vector-loops)); `Position` here has two fields, so this one runs row by row.
+([vector loops](/en/docs/guide/systems#vector-loops)). This one assigns a whole new `Position`, so it runs row by
+row; `p.X += v.X; p.Y += v.Y;` would get the loop, and [EECS055](/en/docs/guide/analyzer#eecs055) says which.
 
 ### [ForEach] parameters [#foreach-parameters]
 
@@ -188,6 +191,7 @@ A static per-entity method whose components each hold one number of one type (`f
 | `EntitySpan` | The entities of a batch method's run | Batch methods only |
 | `Maybe<T>` | A component the entity may lack | `HasValue`, `Value` |
 | `ReadOnlyMaybe<T>` | The same, read only (indexed components too) | `HasValue`, `Value` (`ref readonly`) |
+| `ref Reduce<T>` | A total over the rows into singleton `T : IReduction<T>` | Always by `ref` (else EECS002); the `Value` field is this chunk's partial result; the combined result replaces `T` ([reductions](/en/docs/guide/threading#reductions), [EECS057](/en/docs/guide/analyzer#eecs057)) |
 | `Mut<T>` | A component the method writes on some rows | `Value` reads; `Write()` and a `SetIfChanged(value)` that changed it stamp the row; a write for the scheduler |
 | Any other type (outside a system) | A value the caller passes to the entry point | `ref int count`, `in Settings s` |
 
@@ -197,6 +201,7 @@ A static per-entity method whose components each hold one number of one type (`f
 | --- | --- | --- |
 | `[ForEach]` / `[ForEach(Parallel = true)]` | Method | The method is the loop; `Parallel` splits rows across threads ([EECS010](/en/docs/guide/analyzer#eecs010)) |
 | `[ForEach(Parallel = true, ChunkRows = n)]` | Method | Threads claim `n` rows at a time (OpenMP's `schedule(dynamic, n)`): for a few hundred heavy rows ([chunk size](/en/docs/guide/threading#chunk-rows), [EECS054](/en/docs/guide/analyzer#eecs054)) |
+| `[ForEach(Simd = SimdMode.Require)]` | Method | The method must get its vector loop, else a build error ([EECS056](/en/docs/guide/analyzer#eecs056)); `SimdMode.Off` keeps it scalar without [EECS055](/en/docs/guide/analyzer#eecs055) |
 | `[ForEach(Slices = N)]` | Method | Each run visits one slice, about 1 / N of the rows: every row once per N runs (not with `Changed` / `Removed`: [EECS035](/en/docs/guide/analyzer#eecs035)) |
 | `[With<T>]` | Method, system group | Requires `T` without passing it |
 | `[Without<T>]` | Method, system group | Excludes entities with `T` |
@@ -390,6 +395,7 @@ Indexed and grouped components are written with `Set`, never through a `ref`
 | `world.Instantiate(prefab, a, b, …)` / `Instantiate(prefab, span, a, b, …)` | The same with up to 9 components of its own, replacing or adding to the prefab's: one row copy |
 | `world.CreateEntities(span, a, b, …)` | A wave with the same values |
 | `world.DestroyAll<T…>(filter)` | Destroys every match; returns how many |
+| `world.CollectIds<T1..Tn>(span, filter)` | Writes the ids of the first matches into `span`, in query order, until it is full; returns how many ([bounded batch](/en/docs/guide/queries#collect-ids)) |
 | `world.DestroyEntities(ids)` | Destroys a list of ids in one pass; returns how many |
 | `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | One component set or removed on every match; `SetAll` skips entities tagged `Retired` unless the filter names it |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | One component disabled or enabled on every match |

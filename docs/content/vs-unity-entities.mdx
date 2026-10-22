@@ -41,6 +41,7 @@ apply immediately. This page maps the concepts; it has no benchmarks against Uni
 | `IJobEntity` | a `[ForEach]` method (a generated struct job) | |
 | `ScheduleParallel` | `[ForEach(Parallel = true)]` | Chunks of rows on the thread pool; the analyzer rejects methods that would race ([EECS010](/en/docs/guide/analyzer#eecs010)). |
 | `IJobParallelFor`'s batch count | `[ForEach(Parallel = true, ChunkRows = n)]` | The rows a thread takes at a time, for few heavy rows ([chunk size](/en/docs/guide/threading#chunk-rows)). |
+| `IJobParallelFor` summing into a `NativeReference` (with `[NativeDisableParallelForRestriction]` and `Interlocked`, or a `NativeArray` per thread) | a `Reduce<T>` parameter of a parallel `[ForEach]` method | A partial result per chunk, no atomic per row, combined in row order into a singleton ([reductions](/en/docs/guide/threading#reductions)); EECS060 reports the shared-counter version. |
 | `EntityQuery` with `WithAll` / `WithNone` / `WithAny` | `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`; `QueryFilter` for ad-hoc calls | |
 | Change filter (`WithChangeFilter<T>`) | `ITracked` + `[Changed<T>]` | Per row, not per chunk, and opt-in per component type. |
 | Structural change events | `[Removed<T>]` | The entities that lost a tracked component since the system last ran. |
@@ -51,7 +52,8 @@ apply immediately. This page maps the concepts; it has no benchmarks against Uni
 | Prefab entity, `EntityManager.Instantiate(prefab, array)` | `Prefab`, `world.Instantiate(prefab, span)` | A `Prefab` lives outside every world; no baking step builds it. |
 | Baking, authoring components | none | Build entities in code, from a prefab or from a save. |
 | `LinkedEntityGroup` (destroyed together) | `ChildOf(parent)`, cascading destroy | `world.Children(parent)` lists the children. |
-| Burst | the .NET JIT, Native AOT, and the generator's [vector loops](/en/docs/guide/systems#vector-loops) | Struct jobs are specialized and inlined per job type; a per-row method of plain numbers also gets a `Vector<T>` loop, with the scalar results bit for bit. |
+| Burst | the .NET JIT, Native AOT, and the generator's [vector loops](/en/docs/guide/systems#vector-loops) | Struct jobs are specialized and inlined per job type; a per-row method over components of 1 to 4 numbers of one type also gets a `Vector<T>` loop, with the scalar results bit for bit. |
+| Burst Inspector (does this job vectorize?) | [EECS055](/en/docs/guide/analyzer#eecs055), and `[ForEach(Simd = SimdMode.Require)]` ([EECS056](/en/docs/guide/analyzer#eecs056)) | The build names why a method stayed scalar; `Require` turns that into an error, so no inspector is needed. |
 
 ## The same system [#same-system]
 

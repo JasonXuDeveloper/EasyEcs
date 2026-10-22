@@ -82,6 +82,15 @@ after the change on the machine of the time; they are history, not the current r
 | [D62](#d62-generators-bind-outside-bodies) | Generators bind type names outside member bodies and compare symbols without strings |
 | [D63](#d63-roslyn-features) | Newer Roslyn features: interceptors not used, the rest in use or not needed |
 | [D64](#d64-names-of-4-7) | The names of 4.7: a name says what the thing is |
+| [D65](#d65-buffer-pool-capacity) | The buffer pool's limit is a setting of each element type |
+| [D66](#d66-a-ref-written-on-some-rows) | A tracked component written by `ref` on some rows is a warning |
+| [D67](#d67-chunk-rows) | Chunk size for few heavy rows |
+| [D68](#d68-vector-loops-without-opting-in) | Vector loops without opting in |
+| [D69](#d69-reductions) | Reductions are a parameter, combined in chunk order |
+| [D70](#d70-analyzer-candidates-not-added) | Analyzer candidates not added |
+| [D71](#d71-direct-index) | Unique keys inline, and direct-mapped keys |
+| [D72](#d72-setall-whole-words) | `SetAll` fills whole words |
+| [D73](#d73-survey-items-not-added) | Survey items not added |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1586,9 +1595,12 @@ block of change ticks: before the pass, the blocks it covers are opened at its t
 
 **Decision.** The generator writes a `Vector<T>` loop for every `[ForEach]` method that qualifies
 ([vector loops](/en/docs/guide/systems#vector-loops)): static, per entity, not parallel, no `Entity` / `World` /
-`Mut<T>` / `Maybe<T>`, components of one field of one primitive type, a body of arithmetic, comparisons, branches and
-the `Math` functions with an exact vector counterpart. There is no attribute to turn it on or off. The rows after the
-last whole vector, and all rows without a vector unit, run the method itself.
+`Mut<T>` / `Maybe<T>`, components of 1 to 4 fields of one primitive type (several fields split into one vector each
+by deinterleaving loads and interleaving stores, `EasyEcs.Interleaved`), a body of arithmetic, comparisons, branches
+and the `Math` functions with an exact vector counterpart. It is on by default (`SimdMode.Auto`): EECS055 names why a
+method that looks meant for a loop stays scalar, `Simd = SimdMode.Require` makes that an error (EECS056) and
+`SimdMode.Off` opts a method out. The rows after the last whole vector, and all rows without a vector unit (or,
+for several fields, without the shuffles: AVX2 at 256 bits, permutes at 512), run the method itself.
 
 **Why.**
 - **The JIT does not do it.** In .NET 10 the Tier-1 code of `a[i] += b[i]`, `a[i] += b[i] * 0.5f`, a clamp, an int
@@ -1608,16 +1620,158 @@ last whole vector, and all rows without a vector unit, run the method itself.
 - **Columns already are what Burst needs.** Burst learns from `NativeArray` that arrays do not alias and walks
   contiguous per-component arrays; EasyEcs columns are contiguous, 64-byte aligned and never alias, which the
   generator knows statically. Translating a small source subset is enough; a compiler from IL is not needed.
+- **Say why, as Burst's inspector does.** A method left scalar is correct, so silence would hide the cost. One test
+  (`Kernel.Vectorize`) gives the loop or the reason: the generator emits what it returns and the analyzer reports
+  the reason, so "no loop" and "reported" are the same set. A suggestion, not a warning: scalar code is not a
+  mistake. `Require` is for the hot path whose speed a later edit must not lose without failing the build.
+- **Several fields, because real components have them.** `Position { X, Y, Z }` is the common shape; asking for
+  one component per axis would make every other system worse. A 256-bit deinterleave costs a few shuffles per
+  vector, far less than running the rows one at a time. Past 4 fields, mixed types and partial structs stay scalar
+  (EECS055 says so).
 
 **Considered.**
 - **Opt-in, as Burst's `[BurstCompile]`:** Burst needs it because it changes the compiler and allows `FloatMode.Fast`.
-  Here nothing changes but speed, so an opt-in would leave most code slow for no safety.
+  Here nothing changes but speed, so an opt-in would leave most code slow for no safety. `SimdMode` keeps `Auto` as
+  the default and adds only the assertion (`Require`) and the way out (`Off`).
+
+{/* TODO(vector loops): the KernelBenchmark numbers of Move2 / Move3 / Move4 / Seek / Travel (several fields), and
+the items still coming (Math.Clamp and MathF.*, presence-bit lane masks, Vector512, bounds-check-free scalar loops,
+vector reductions), each as a bullet here when it lands. */}
 - **Leaving it to batch methods with `Vector<T>`:** still there for lanes the rule does not cover, but it asks every
   user to write SIMD by hand; a per-row method says the same thing.
 - **`Vector512` where the hardware has it:** a hand-written `Vector512` loop is about 1.4 times the generated
   `Vector<T>` one on AVX-512; a later step of the same generator.
 - **Reductions inside the loop** (sums into a singleton): exact for integers, not for floats without reassociation;
-  left for a later design, with parallel reductions.
+  parallel reductions are a `Reduce<T>` parameter ([D69](#d69-reductions)), which a vector loop does not take yet.
+
+## D69. Reductions are a parameter, combined in chunk order [#d69-reductions]
+
+**Decision.** A total over a pass is a `ref Reduce<T>` parameter of a `[ForEach]` method, where `T` is a singleton that
+implements `IReduction<T>` for itself (a static `Identity` and an associative `Combine`)
+([reductions](/en/docs/guide/threading#reductions)). Each chunk of a parallel pass, or the whole pass on one thread,
+accumulates into its own copy starting at `Identity`; when the pass ends the world's runner combines the copies in chunk
+order, which is row order, and the result replaces `T`. The system is scheduled as a writer of `T`. EECS057 rejects a
+second write of `T` in the same pass.
+
+**Why.**
+- **A parallel method had no way to produce a total.** It may not write a singleton (EECS010), and the ways around
+  it race (a static counter, EECS060) or lose the result (a job field after `ForEachParallel`, EECS061). Every server
+  computes totals each tick: the units alive, a resource, a crowd's extent.
+- **No lock and no atomic per row.** The partial result lives in the chunk's own copy of the job; nothing is shared
+  until the end, when each copy is combined once. An `Interlocked` add per row makes every core write one cache line.
+- **Deterministic.** Combining in chunk order (not in the order chunks finish) makes integer results exact and a float
+  result the same on every run and any thread count for a fixed `ChunkRows`; `Combine` need not be commutative (a
+  first and last value, a concatenation of bits).
+- **One shape for both runners.** The same parameter works with `Parallel = false` (a local per run of rows) and in a
+  `[ForEach]` method outside a system, so making a pass parallel changes one attribute, not the code.
+- **0 bytes.** The runner keeps an array of job copies per job type, grown once; steady passes allocate nothing.
+- **A plain struct taken by `ref`, so the partial result stays in a register.** A reducing method runs over each
+  chunk's runs of rows (`World.ForEachBatchParallel` in parallel; the batch loop on one thread), with the run's
+  partial result in a local. Passed by `ref` to the inlined method, the JIT keeps that local in a register (the
+  chunk loop of a float sum is one `vaddss` per row). A `ref struct` holding a `ref` field to the local, the first
+  shape, pinned it in memory: a load and a store per row, a float sum chained through store forwarding and several
+  times slower than the serial pass. A `Reduce<T>` not taken by `ref` would reduce into a copy, so it is EECS002.
+
+**Considered.**
+- **`Parallel.For<TLocal>` with `localInit` / `localFinally`** (pending numbers): .NET's thread-local reduction, and
+  the closest existing tool. It is not the runner: it has no overload that passes state, so a `static` lambda needs
+  static state (the column, the result), which is not reentrant (two worlds cannot reduce at once); it allocates per
+  call (delegates, partition state); and its partitions follow work stealing, so a float result changes from run to
+  run. `ReduceBenchmark` measures it next to `Reduce<T>`.
+- **An `Interlocked` add or a lock per row:** correct for integers, but every row contends for one line; measured in
+  `ReduceBenchmark` (pending numbers).
+- **Slots per thread, indexed by thread id:** padded against false sharing, but the combination order would follow
+  the threads, not the rows, and a thread count change would resize them.
+- **Combining in the order chunks finish:** one fewer array, but float results and non-commutative combines would
+  depend on timing.
+- **A `ref struct` wrapping a `ref` to the partial result** (`Reduce<T>` by value): reads like `Maybe<T>`, but keeps
+  the partial result in memory (above), so the reduction runs per row through a load and a store.
+- **Reductions inside a vector loop:** a later step ([D68](#d68-vector-loops-without-opting-in)); exact for integers,
+  and for floats only with reassociation.
+
+{/* TODO(reductions): the ReduceBenchmark numbers (integer sum, float sum, bounding box; Reduce<T> on several threads
+and one, ref context value, Interlocked, lock, Parallel.For localInit/localFinally) once measured; then drop
+"pending numbers" here and on guide/threading#reductions. */}
+
+## D70. Analyzer candidates not added [#d70-analyzer-candidates-not-added]
+
+**Decision.** The audit that added EECS060 and EECS061 and the code fixes of EECS027 and EECS054 weighed these rules
+and fixes too, and left them out.
+
+**Considered and dropped.**
+- **`Parallel = true` on a method over few or light rows:** whether the hand-off pays depends on the row count and the
+  work per row at run time, which the analyzer cannot see; the runner already runs a small pass on the caller
+  (adaptive helper waking). The cost rule of [D29](#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)
+  (only a measured cost) excludes it.
+- **`ChunkRows` that is not a multiple of 64:** the runtime rounds it up to 64 for free
+  ([D67](#d67-chunk-rows)), so the code works as written; a rule would only ask for the rounding by hand.
+- **`Math` to `MathF` on floats:** for `Sqrt`, `Abs`, `Min` and `Max` both are exact, so nothing is gained; for the
+  transcendental functions (`Sin`, `Exp`, `Pow`) `MathF` returns different, less precise results, so the fix would
+  change behavior, which D29 forbids.
+- **`Parallel.For` or `Task.Run` inside a system:** legitimate uses (a computation that touches no world state, I/O
+  handed off and read back through a thread-safe queue) are common, so the rule would mostly report correct code; what
+  is wrong in such code (a structural change from another thread) is EECS014's.
+- **A code fix for EECS016 (drop `[With<T>]` or the parameter from a `[Removed<T>]` method):** the method left would
+  take no component, which EECS003 rejects, so no single edit makes it compile; the right change (which component the
+  method runs over) is the author's.
+
+## D71. Unique keys inline, and direct-mapped keys [#d71-direct-index]
+
+**Decision.** A unique index keeps each key's one entity inline in the key's head, with no id array per key. A unique
+component whose keys map onto a bounded range of slots may declare `IDirectIndexed<TKey>` (`static Slots`,
+`static SlotOf(key)`): its index keeps an array of `Slots` entries beside the hash, each holding a key and its
+entity, so `Get`, `TryGet` and the uniqueness check of a write read one entry. A key whose slot is out of range or
+held by another key is found through the hash, which stays the index for `Find`, `Count` and the ordered walks. The
+generator registers the slot map with the unique index (`SavedTypes.DirectIndex`), with no reflection.
+
+**Why.**
+- **A unique key has one entity.** An array per key held one id and cost an allocation per new key; inline,
+  `CreateUnique` (10,000 keys) went from 2,044 µs and 3.15 MB to about 1,120 µs and 2.33 MB, and
+  `RekeyAndLookupUnique` from 34.4 µs to 14 to 21 µs (`IndexBenchmark`).
+- **Grid lookups are the hot path of grid worlds.** The voxel server looks a chunk up by position for the blocks
+  around every body, the chunk every entity is in and the edges of the water, thousands of times a tick. A slot read
+  is about 2.1 times faster than the hash probe of a unique index and as fast as the hand-written grid it replaces
+  (`LookupUnique`, `LookupDirect`, `LookupGrid` in `IndexBenchmark`); the voxel server's physics ran 5 to 11 %
+  faster with it.
+- **Kept by every write.** The slot array is updated where the hash is (link, unlink, clear), so creation, loads,
+  moves, `SetAll` and destruction keep it right; a grid kept by hand has to be updated on each of those paths.
+- **Correct for any slot function.** A collision or an out-of-range key costs a hash probe, never a wrong answer: a
+  slot counts the keys of it that only the hash holds, so a lookup that finds another key there knows whether the
+  hash must be asked.
+
+**Considered.**
+- **The hand-written grid beside the unique index** (what the voxel server had): the same lookup speed, but code
+  every grid world repeats, and a grid that a missed write path leaves stale.
+- **A slot array instead of the hash:** out-of-range keys would have nowhere to go, and `Find`, `Count` and the
+  ordered walks are built on the hash.
+- **Registration by reflection:** not trimmable and not Native AOT safe; the generator already registers every
+  unique component.
+
+## D72. `SetAll` fills whole words [#d72-setall-whole-words]
+
+**Decision.** `SetAll` writes a 64-row word whose rows all match with one `Span.Fill` of the value. A partial word,
+and a component an index watches (the index must see each row's write), keep the row-by-row loop.
+
+**Why.** The other bulk calls already worked a word at a time; the value write was the one per-row loop left.
+`BulkBenchmark` `StunAndLift` (100,000 entities) went from 92 and 100 µs to 30 and 30 µs over two runs, 0 B both.
+
+**Considered.** Filling indexed components too: the index links each row to its key, so a fill would skip the
+updates it needs.
+
+## D73. Survey items not added [#d73-survey-items-not-added]
+
+**Decision.** The survey that added `IDirectIndexed<TKey>`, `CollectIds` and the whole-word `SetAll` measured these
+changes to the voxel server and the core too, and left them out.
+
+**Considered and dropped.**
+- **A chunk grid beside the unique index:** superseded by `IDirectIndexed<TKey>` ([D71](#d71-direct-index)), which
+  reads as fast and is kept by every write.
+- **Writing the voxel server's `InChunk` only when an entity's chunk changed:** the difference stayed within noise.
+- **Copying presence bits a word at a time** instead of bit by bit: contradictory A/B runs (faster in one, slower in
+  the next), so no net win was shown.
+- **A water halo that copies only the edges that changed:** half the copies, but the step's time stayed within noise,
+  and it cost 4 KB more per sleeping chunk to remember the edges. Superseded by the planned push-halo design, where a
+  chunk hands its edges to its neighbours when they change ([roadmap](/en/docs/roadmap#push-halo)).
 
 ## Related [#related]
 

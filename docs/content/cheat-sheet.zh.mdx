@@ -38,6 +38,7 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 | `: ITracked` | 每行记录最后一次写入和移除的 tick | [变更追踪](/zh/docs/guide/change-tracking) |
 | `: IIndexed<TKey>` 加 `Key` | 通过 `world.Index<T, TKey>()` 按值查找 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | `: IUniqueIndexed<TKey>` 加 `Key` | 一个键只对应一个实体：`index.Get(key)`；会让第二个实体拿到这个键的写入直接抛异常 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
+| `: IDirectIndexed<TKey>` 加 `Key`、`static Slots`、`static SlotOf(key)` | 能映射到有界槽位（网格格子）的唯一键：`Get` / `TryGet` 读一个数组元素 | [直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index) |
 | `: IIndexed<EntityId>` | 指向一个实体的链接，可以从目标反查 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | `: IRelation` 加 `Target` | 每个实体多条链接，存放在缓冲里 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | `: IGroup` 加 `Group` | 调用 `world.GroupBy<T>()` 后按值拆表 | [分组](/zh/docs/guide/groups) |
@@ -64,6 +65,7 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 | `world.EntityCount` / `Entities` | 存活实体数，以及零分配的遍历 |
 | `world.ChangeTick` | 当前的变更 tick |
 | `world.DefaultUpdateCount` | 默认分组已完成的 `Update()` 次数 |
+| `world.UpdateCount<TGroup>()` | 到目前为止 `Update<TGroup>()` 的次数，包括正在进行的这一次：分组里 `UpdateInterval` 按它计数 |
 | `world.Reserve<T1, …, Tn>(n)` / `Reserve(prefab, n)` / `EnsureEntityCapacity(n)` | 在已知峰值或一波刷怪之前预分配 |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | 从 `EntityId` 换回经过校验的句柄 |
 | `world.DescribeTables()` | 表、列、行数和字节数，供工具使用 |
@@ -169,8 +171,9 @@ public class MovementSystem : EcsSystem
 }
 ```
 
-静态、逐实体、每个组件只有一个同类型数值（`float`、`int`……）的方法，生成器还会给它写一个 `Vector<T>` 循环，结果逐位相同
-（[向量循环](/zh/docs/guide/systems#vector-loops)）；这里的 `Position` 有两个字段，所以这个方法逐行运行。
+静态、逐实体、组件有 1 到 4 个同类型数值（`float`、`int`……）的方法，生成器还会给它写一个 `Vector<T>` 循环，结果逐位相同
+（[向量循环](/zh/docs/guide/systems#vector-loops)）。这个方法给 `Position` 整个赋新值，所以逐行运行；写成 `p.X += v.X; p.Y += v.Y;`
+就会得到循环，[EECS055](/zh/docs/guide/analyzer#eecs055) 会说明是哪一种。
 
 ### [ForEach] 参数 [#foreach-parameters]
 
@@ -185,6 +188,7 @@ public class MovementSystem : EcsSystem
 | `EntitySpan` | 批量方法这一段行对应的实体 | 仅批量方法 |
 | `Maybe<T>` | 实体可能没有的组件 | `HasValue`、`Value` |
 | `ReadOnlyMaybe<T>` | 同上，只读（带索引的组件也行） | `HasValue`、`Value`（`ref readonly`） |
+| `ref Reduce<T>` | 对所有行求总数，结果放进单例 `T : IReduction<T>` | 必须按 `ref` 传入（否则 EECS002）；`Value` 字段是这一块的部分结果；合并后的结果替换 `T`（[归约](/zh/docs/guide/threading#reductions)、[EECS057](/zh/docs/guide/analyzer#eecs057)） |
 | `Mut<T>` | 方法只在部分行上写的组件 | `Value` 只读；`Write()` 和改了值的 `SetIfChanged(value)` 才给这一行打 tick；对调度器来说算写入 |
 | 其他任意类型（系统之外） | 调用方传给入口方法的值 | `ref int count`、`in Settings s` |
 
@@ -194,6 +198,7 @@ public class MovementSystem : EcsSystem
 | --- | --- | --- |
 | `[ForEach]` / `[ForEach(Parallel = true)]` | 方法 | 方法就是循环；`Parallel` 把行分给多个线程（[EECS010](/zh/docs/guide/analyzer#eecs010)） |
 | `[ForEach(Parallel = true, ChunkRows = n)]` | 方法 | 线程每次领 `n` 行（OpenMP 的 `schedule(dynamic, n)`）：适合几百行重活（[块大小](/zh/docs/guide/threading#chunk-rows)、[EECS054](/zh/docs/guide/analyzer#eecs054)） |
+| `[ForEach(Simd = SimdMode.Require)]` | 方法 | 方法必须得到向量循环，否则构建报错（[EECS056](/zh/docs/guide/analyzer#eecs056)）；`SimdMode.Off` 保持标量，不再有 [EECS055](/zh/docs/guide/analyzer#eecs055) |
 | `[ForEach(Slices = N)]` | 方法 | 每次运行只访问一片，约 1/N 的行：每 N 次运行每行一次（不能和 `Changed` / `Removed` 一起用：[EECS035](/zh/docs/guide/analyzer#eecs035)） |
 | `[With<T>]` | 方法、系统分组 | 要求有 `T`，但不作为参数传入 |
 | `[Without<T>]` | 方法、系统分组 | 排除有 `T` 的实体 |
@@ -384,6 +389,7 @@ Entity holder = world.AccountIndex.Get(42);        // 就是它；再来一个 A
 | `world.Instantiate(prefab, a, b, …)` / `Instantiate(prefab, span, a, b, …)` | 同上，外加最多 9 个自己的组件，覆盖或补充预制体里的值：只拷贝一次行 |
 | `world.CreateEntities(span, a, b, …)` | 一波取值相同的实体 |
 | `world.DestroyAll<T…>(filter)` | 销毁所有匹配的实体，返回数量 |
+| `world.CollectIds<T1..Tn>(span, filter)` | 按查询顺序把前几个匹配实体的 id 写进 `span`，写满为止；返回数量（[有上限的一批](/zh/docs/guide/queries#collect-ids)） |
 | `world.DestroyEntities(ids)` | 一次销毁一组 id，返回数量 |
 | `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | 给所有匹配的实体设置或移除一个组件；过滤条件里没写 `Retired` 时，`SetAll` 跳过带 `Retired` 标签的实体 |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | 给所有匹配的实体禁用或启用一个组件 |

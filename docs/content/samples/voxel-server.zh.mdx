@@ -106,7 +106,7 @@ flowchart LR
 ## 数据 [#data]
 
 组件按世界的各个部分分文件。注释说明每个值的含义和谁来写。区块是实体：它的键 `Chunk` 是
-[唯一索引](/zh/docs/guide/indexes-and-relations#unique-keys)（`world.ChunkIndex`），8,192 个方块和对应的水是两个字节缓冲，
+[直接映射](/zh/docs/guide/indexes-and-relations#direct-index)的唯一键（`world.ChunkIndex`，区块的槽位是它的坐标对 64 取模，查找只读一个数组元素），8,192 个方块和对应的水是两个字节缓冲，
 水的各趟把自己的数据也放在它上面（`Border`、`Reach`、`NextFluid`、`FluidStep`）。
 
 <include lang="csharp" meta='tab="区块"'>../../../samples/VoxelServer/Components/Chunks.cs</include>
@@ -144,9 +144,10 @@ stateDiagram-v2
 ```
 
 每一步是一个系统，每个状态是数据。玩家需要的区块由 [`AoiViewSystem`](#aoi) 请求，记成 `LoadRequest` 实体，每个区块一个：
-请求是 `IUniqueIndexed`，第二个要它的玩家能找到它，就不再重复请求。遍历期间不能加载或创建实体（EECS041），所以
-`ChunkReadSystem` 和 `ChunkGenerateSystem` 在遍历之后的 `OnUpdate` 里处理这些请求，每个 tick 最多 `Rules.MaxRequests` 个，
-只销毁处理过的，其余的等下一个 tick。卸载过的区块用 `LoadEntities` 从区域文件读回，里面的僵尸和掉落物也一起回来；
+请求是 `IUniqueIndexed`，第二个要它的玩家能找到它，就不再重复请求。请求创建时带着 `Saved` 标签，区域文件里没有这个区块时去掉它：
+这是存在位，所以所有请求都在同一张表里，保持到来的顺序。遍历期间不能加载或创建实体（EECS041），所以 `ChunkReadSystem`（`With<Saved>`）
+和 `ChunkGenerateSystem`（`Without<Saved>`）在遍历之后的 `OnUpdate` 里处理这些请求：每个 tick 各用
+[`CollectIds`](/zh/docs/guide/queries#collect-ids) 最多取 `Rules.MaxRequests` 个，只销毁这些，其余的等下一个 tick。卸载过的区块用 `LoadEntities` 从区域文件读回，里面的僵尸和掉落物也一起回来；
 从没见过的区块是区块预制体的一个实例，方块通过 `SetCount` 返回的 span 原地写入。
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs#load</include>
@@ -252,8 +253,8 @@ flowchart LR
 
 <include lang="csharp" meta='tab="Water/Commit.cs"'>../../../samples/VoxelServer/Systems/Water/Commit.cs</include>
 
-{/* TODO(water overlap): MPI 式的内部/外圈重叠（外圈等光环时先给区块内部着色）和只交换变化过的边的光环交换写在这里，
-连同 Border / Flow 的改动；再更新 guide/high-performance#grid。 */}
+{/* TODO(water overlap): 计划中的推送光环（区块的边变了时推给邻居，而不是每个流动的区块每一步都去收集）和 MPI 式的内部/外圈重叠写在这里，
+连同 Border / Flow 的改动；再更新 guide/high-performance#grid。只拷贝变化过的边测过、已放弃（decisions#d73-survey-items-not-added）。 */}
 
 `FloatSystem` 把站在水里的东西（玩家、僵尸和掉落物）托起来，顺着水面的坡度推向周围更低的水，水位越低推得越弱：泉眼旁边或下落的水里是全力，
 水流末端只有八分之一。它遍历区块，按 `FluidCount` 跳过干的区块，其余的通过按区块索引的实体找到其中的物体，所以物体所在方块的水

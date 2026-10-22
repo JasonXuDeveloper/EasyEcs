@@ -30,12 +30,16 @@ icon: Gauge
 
 ### 让生成器向量化：向量循环 [#vector-loops]
 
-非并行的静态 `[ForEach]` 方法，参数都是同一种数值类型的单字段组件时，生成器会为它写一个 `Vector<T>` 循环，把其中的 `if`
+非并行的静态 `[ForEach]` 方法，组件都有 1 到 4 个同一种数值类型的字段时，生成器会为它写一个 `Vector<T>` 循环，把其中的 `if`
 变成掩码，再加一段标量收尾：这就是 Burst 为 Unity job 做的事，只是在编译期完成。你写的代码仍是标量的。哪些方法符合条件、
 生成的代码对照、怎样改写一个保持标量的方法：[向量循环](/zh/docs/guide/systems#vector-loops)。
 
-{/* TODO(vector loops): EECS055、[ForEach(Simd = Require/Off)] 和 EECS056；多字段结构体、Math.Clamp、MathF.*、lerp 和类型转换；
-归约、FloatMode.Fast、存在位的 lane 掩码、Vector512 和无边界检查的标量循环。每项在这里加一行，链接 guide/systems 里的小节。 */}
+- **多个字段：** `Position { X, Y, Z }` 由解交错加载和交错存储拆成每个字段一个向量（AVX2、AVX-512）；没有这些指令时逐行运行。
+- **为什么没有：** [EECS055](/zh/docs/guide/analyzer#eecs055) 像 Burst 的 Inspector 一样说出方法保持标量的第一个原因；热路径上的
+  `[ForEach(Simd = SimdMode.Require)]` 把它变成构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)），`SimdMode.Off` 不再提示。
+
+{/* TODO(vector loops): Math.Clamp、MathF.* 和 lerp、类型转换；向量归约、FloatMode.Fast、存在位的 lane 掩码、Vector512 和无边界检查的
+标量循环。每项在这里加一行，链接 guide/systems 里的小节。 */}
 
 </Step>
 
@@ -48,8 +52,13 @@ icon: Gauge
 适合大量轻量行。几百行重活（每行几微秒）设 `ChunkRows = 64`，每个线程才都有活干：[块大小](/zh/docs/guide/threading#chunk-rows)。
 读写互不冲突的系统本来就会同时运行，不需要这些：[并行系统](/zh/docs/guide/threading#parallel-systems)。
 
-{/* TODO(parallel ForEach): 归约（OpenMP reduction(+: x)）、线程私有的临时空间（private / threadprivate），以及并行方法里对其他实体的
-只读查找。每项在这里加一行，并在下面的对照表里加一行，链接 guide/threading 里的小节。 */}
+对所有行求总数（计数、总和、包围盒）用 `Reduce<T>` 参数：每块累加进自己的部分结果，每行没有锁也没有原子操作，部分结果按行的顺序合并进
+单例，整数精确，`ChunkRows` 固定时浮点可复现：[归约](/zh/docs/guide/threading#reductions)。并行方法写静态计数器报
+[EECS060](/zh/docs/guide/analyzer#eecs060)，`ForEachParallel` 之后读 job 字段报 [EECS061](/zh/docs/guide/analyzer#eecs061)。
+
+{/* TODO(parallel ForEach): hpc-parallel 分支上的 Scratch<T>（线程私有的临时空间：OpenMP 的 private / threadprivate）和
+Lookup<T>（并行方法里对其他实体的只读查找）。每项在这里加一行，
+并在下面的对照表里加一行，链接 guide/threading 里的小节。 */}
 
 </Step>
 
@@ -129,6 +138,7 @@ public static class Stencil
 | --- | --- | --- |
 | OpenMP `parallel for` | `[ForEach(Parallel = true)]` | [并行方法](/zh/docs/guide/systems#parallel-methods) |
 | OpenMP `schedule(dynamic, n)` | `ChunkRows = n`（不设时用默认大小） | [`ChunkRows`](/zh/docs/guide/threading#chunk-rows) |
+| OpenMP `reduction(+: x)`、MPI `Allreduce` | 归约进单例 `T : IReduction<T>` 的 `Reduce<T>` 参数 | [归约](/zh/docs/guide/threading#reductions) |
 | OpenMP `sections` / task | 同一阶段的系统，读写互不冲突时同时运行 | [并行系统](/zh/docs/guide/threading#parallel-systems) |
 | 拥有一块子区域的 MPI rank | 每线程一个 World（每个区域或地图一个 World） | [每线程一个 World](/zh/docs/guide/threading#recommended-one-world-per-thread) |
 | MPI 把实体发给另一个 rank | `SaveEntities` / `MoveEntities` | [迁移](/zh/docs/guide/migration-and-unload#save-entities) |
@@ -136,18 +146,18 @@ public static class Stencil
 | Burst 自动向量化 | `[ForEach]` 方法的向量循环 | [向量循环](/zh/docs/guide/systems#vector-loops) |
 | Burst 里手写 `float4` / Unity.Mathematics | 用 `Vector<T>` / `Vector128<T>` 的批处理方法 | [批处理方法](/zh/docs/guide/systems#batch-methods) |
 | Burst `IJobParallelFor` 的 batch count | `ChunkRows` | [`ChunkRows`](/zh/docs/guide/threading#chunk-rows) |
+| Burst Inspector | EECS055，以及 `Simd = SimdMode.Require`（EECS056） | [分析器](/zh/docs/guide/analyzer#eecs055) |
 | GPU 片元着色器 | 在区块网格上每个格子一个函数 | [思路来自哪里](/zh/docs/samples/voxel-server#ideas) |
 | GPU 模板缓冲 | 每行一位，用 `TrailingZeroCount` 访问 | [给网格着色](#grid) |
 | GPU 乒乓渲染目标 | 两个缓冲，读一个写一个，再提交 | [VoxelServer 的水](/zh/docs/samples/voxel-server#water) |
 
-{/* TODO(mapping): 落地后补上 OpenMP reduction、private / threadprivate 临时空间、并行方法里的只读查找、[ForEach(Simd = ...)]
-选项和 MPI 内部/外圈重叠这几行。 */}
+{/* TODO(mapping): 落地后补上 private / threadprivate 临时空间（Scratch<T>）、并行方法里的只读查找（Lookup<T>，Unity 带 [ReadOnly] 的 ComponentLookup）、Burst 的 FloatMode.Fast 和 MPI 内部/外圈重叠这几行。 */}
 
 ## 怎么用得快 [#how-to-use-it-fast]
 
 - 先测：[`MeasureSystems`](/zh/docs/guide/systems#measuring-systems) 指出占了 tick 的系统，BenchmarkDotNet 用例证明改动有效；
   每种写法的小节都链接了它自己的基准表。
-- 先让数据合适，再写代码：向量循环要每个组件一个数，网格要每个格子一个字节或 `int`（每条指令 16 或 8 个 lane），
+- 先让数据合适，再写代码：向量循环要每个组件一种数值类型、最多 4 个字段，网格要每个格子一个字节或 `int`（每条指令 16 或 8 个 lane），
   这样活就是一列上的同一种形状。
 - 每个格子的中间结果放在寄存器或栈上（`[SkipLocalsInit]` 下的 `stackalloc`），最后拷进缓冲一次：一遍里反复读写一个缓冲，
   比栈上的 span 慢得多。
@@ -157,7 +167,8 @@ public static class Stencil
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
 | 优化没人测过的系统 | 代码更难读，什么也没省下 | [`MeasureSystems`](/zh/docs/guide/systems#measuring-systems) |
-| 想向量化的方法里混用 `float` 和 `int` 字段 | 保持标量 | 生成的文件（[向量循环](/zh/docs/guide/systems#vector-loops)） |
+| 想向量化的方法里混用 `float` 和 `int` 字段 | 保持标量 | [EECS055](/zh/docs/guide/analyzer#eecs055)；`Simd = SimdMode.Require` 让它报错 |
+| 并行方法写共享计数器 | 更新丢失 | [EECS060](/zh/docs/guide/analyzer#eecs060)：改用 [`Reduce<T>`](/zh/docs/guide/threading#reductions) |
 | 大量轻量行也设 `ChunkRows` | 同样的活要领更多次块 | 基准（[`ChunkRows`](/zh/docs/guide/threading#chunk-rows)） |
 | 网格的一遍读到了同一遍里已更新的格子 | 结果取决于访问顺序（并行时还取决于线程数） | 测试：写进第二个缓冲 |
 | 每一遍都清空输出缓冲 | 把这一遍本来就要重写的内存整个写一遍 | 代码审查：改为写跳过的行 |

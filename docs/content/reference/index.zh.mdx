@@ -64,6 +64,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`ReadEnumerator<T1..T9>`](/zh/docs/reference/readenumerator) | 零分配的只读查询枚举器；遍历途中做结构变更也安全（访问规则和 ForEach 相同）。 |
 | [`ReadItem<T1..T9>`](/zh/docs/reference/readitem) | 一条只读的查询结果：实体，以及指向它所在行的只读引用（不打 tick）。 |
 | [`ReadOnlyMaybe<T>`](/zh/docs/reference/readonlymaybe) | [ForEach] 方法访问的实体上一个可选、只读的组件：ReadOnlyMaybe.Value 是 ref readonly，所以方法按 T 的读者调度，被追踪的组件永远不打 tick；带索引的组件（IIndexed）也能这样接收，Maybe 不行（EECS015：它的 ref 可能背着索引改掉键）。 |
+| [`Reduce<T>`](/zh/docs/reference/reduce) | 把一次 [ForEach] 遍历归约到单例 T（OpenMP 的 reduction，MPI 的 Allreduce）：static void Count(in Health h, Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;。 |
 | [`RelationIndex<T>.Sources`](/zh/docs/reference/relationindex-sources) | 枚举链接到某个目标的实体（foreach），每条链接一次。 |
 | [`Retired`](/zh/docs/reference/retired) | 退休实体的标签：Destroy 发现实体上有 ICleanupComponent，于是去掉其他组件，让实体继续存活，直到最后一个清理组件被移除（那时实体被释放，才算销毁）。 |
 | [`SingletonRef<T>`](/zh/docs/reference/singletonref) | 某个 World 的单例 T 的句柄。 |
@@ -91,6 +92,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`IGroup`](/zh/docs/reference/igroup) | 标记一个按值拆分表的组件：在调用过 World.GroupBy 的 World 里，IGroup.Group 不同的实体放在不同的表，所以只查询一组（QueryFilter.InGroup）时只遍历这一组的行，这些行在内存里是连续的（一个区域、一张地图、一场对局、一支队伍）。 |
 | [`IIndexed, IIndexed<TKey>`](/zh/docs/reference/iindexed) | 所有 IIndexed 共同实现的接口：不用反射，就能知道一个组件类型建了索引（JIT 会把这个类型检测折叠掉）。 |
 | [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) | 标记一个不做结构变更的 ForEach job：不在它遍历的 World 里创建或销毁实体，也不增删、设置任何组件。 |
+| [`IReduction<T>`](/zh/docs/reference/ireduction) | T 的值怎样合并：满足结合律的 IReduction.Combine，以及它的 IReduction.Identity，和任何值合并都不改变那个值（求和是 0，求最小值是 float.MaxValue）。 |
 | [`IRelation`](/zh/docs/reference/irelation) | DynamicBuffer 的元素，把所在实体链接到 IRelation.Target：一个实体可以有任意多条同一种链接（队伍的成员、商人卖的物品、一个 buff 作用的单位），World.Relations 能找出链接到某个目标的实体。 |
 | [`ISingletonComponent`](/zh/docs/reference/isingletoncomponent) | 把结构体标记为 World 单例：每个 World 恰好有一个值（时钟、配置、共享状态）。 |
 | [`ISystemGroup`](/zh/docs/reference/isystemgroup) | 系统分组的标记：标了 UpdateInGroupAttribute 的系统在调用 World.Update 时一起运行，和 World.Update 运行的默认分组互不相干。 |

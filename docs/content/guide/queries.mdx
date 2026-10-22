@@ -96,6 +96,7 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | A loop that only reads (a save, a send, a report) | [`foreach (var item in world.Read<T1..Tn>(filter))`](#read): nothing stamped |
 | "How many …?" / "Is there any …?" | `world.Count<T1..Tn>(filter)` / `world.Any<T1..Tn>(filter)` |
 | Destroy every match | `world.DestroyAll<T1..Tn>(filter)` |
+| Up to N matches to serve, destroy or save this tick | [`world.CollectIds<T1..Tn>(span, filter)`](#collect-ids) |
 | Only rows written or removed since a tick | `Changed<T>(tick)` / `Removed<T>(tick)`, `ChangedAny<T1..Tn>(tick)` / `RemovedAny<T1..Tn>(tick)` for any of several ([change tracking](/en/docs/guide/change-tracking)) |
 | A pass that writes only the rows whose value changed | a [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) parameter of a `[ForEach]` method |
 | A share of the rows per pass, every row once per N passes | `Slice(index, of)` with a `ForEach` call, or [`[ForEach(Slices = N)]`](/en/docs/guide/systems#slices) |
@@ -390,6 +391,36 @@ to the same chunked run.
 `Count` sums the row counts of the matching tables, and counts presence bits only in tables where some rows lack a
 queried component. `Any` stops at the first match. Neither touches a component value.
 
+
+### A bounded batch of ids: `CollectIds` [#collect-ids]
+
+`world.CollectIds<T1..Tn>(into, filter)` writes the ids of the matching entities into a span, in the order `Query`
+and `Read` visit them, until the span is full, and returns how many. It is the "take up to N this tick" of a system
+that serves requests: the ids then go to `DestroyEntities`, `SaveEntities` or a loop that changes structure, which a
+query loop may not do while it runs.
+
+```csharp
+public class BuryTheFallen : EcsSystem
+{
+    static readonly QueryFilter Fallen = QueryFilter.Create().With<Dead>();
+
+    protected override void OnUpdate()
+    {
+        Span<EntityId> batch = stackalloc EntityId[64];
+        int count = World.CollectIds<Health>(batch, Fallen);   // the first 64, in query order // [!code highlight]
+        World.DestroyEntities(batch[..count]);                 // the rest wait for the next tick
+    }
+}
+```
+
+- **Allocation-free.** O(matching tables), plus the rows read until the span is full; a table whose rows all match
+  is one copy of its ids.
+- **It does not remember where it stopped.** The next call starts from the first match again, so serve what it
+  returned (destroy it, tag it, save it) before the next call.
+- **Filter, do not branch.** Two systems that share a request type split it with a tag (`With<Saved>` /
+  `Without<Saved>`), not with a test that skips rows in the batch: `VoxelServer` serves its load requests this way
+  ([a chunk's life](/en/docs/samples/voxel-server#chunks)).
+
 ## Full example [#full-example]
 
 Filters in a system, then a query, a count and a struct job outside it. Three units move, one of them frozen, and
@@ -525,6 +556,7 @@ not a mover, but the job over `Position` alone counts it.
 | `Count(...) > 0` | `Any(...)` | Stops at the first match ([EECS032](/en/docs/guide/analyzer#eecs032)) |
 | Several `Get` / `TryGetRef` and a `Has<Dead>()` per request | [`entity.Run`](#run-on-one-entity) with a `static readonly` filter | One lookup; the refs are carried across structural changes |
 | Scanning for a key | A [value index](/en/docs/guide/indexes-and-relations) | O(matches) instead of O(rows) |
+| A `Read` loop that copies ids into a span and breaks when it is full | [`CollectIds`](#collect-ids) | A table whose rows all match is one copy |
 
 The same write, `Position += Velocity` over 10,000 entities: two plain arrays (`RawArrayWrite`), a `[ForEach]`
 system (`ForEachSystemWrite`), a hand-written struct job (`ForEachWrite`) and a `Query` loop (`QueryWrite`):

@@ -24,7 +24,7 @@ EasyEcs 的全部功能都在这一页，按它在服务器上承担的工作分
 | [查找](#find) | [值索引](#value-indexes)、[唯一键](#unique-keys)、[有序区间](#ordered-ranges)、[按值分表](#table-groups) |
 | [组织](#structure) | [关系](#relations)、[层级](#hierarchy)、[动态缓冲](#dynamic-buffers)、[预制体与克隆](#prefabs-and-cloning) |
 | [持久化](#persist) | [快照](#snapshots)、[存档](#saves)、[迁移](#migration)、[卸载插件类型](#unloading) |
-| [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、并行 [`[ForEach]`](#parallel-foreach)、[批量操作](#bulk-operations) |
+| [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、并行 [`[ForEach]`](#parallel-foreach)、[归约](#reductions)、[批量操作](#bulk-operations) |
 | [构建与运维](#operate) | [分析器与代码修复](#analyzer)、[系统耗时统计](#per-system-timing)、[调度](#schedule)、[异常处理](#errors)、[运行时自省](#introspection)、[归还内存](#trim-excess)、[Native AOT](#native-aot)、[托管与测试](#hosting-and-testing)、[模板与示例程序](#templates) |
 
 ## 模拟 [#simulate]
@@ -118,13 +118,16 @@ public class MovementSystem : EcsSystem
 - **开销：** 不做结构变更的方法每行检测一个存在位；做结构变更的方法每个实体查找一次。
 - **指南：** [系统](/zh/docs/guide/systems#maybe)、[`ReadOnlyMaybe<T>`](/zh/docs/guide/systems#read-only-maybe)
 
-### 向量循环 [#vector-loops]
+### 生成器写出的向量循环（SIMD） [#vector-loops]
 
-组件都只有一个同类型数值（`float`、`int` 等）的逐行 `[ForEach]` 方法，会以生成器根据方法体写出的 `Vector<T>` 循环运行，和 Burst 编译
-job 的做法一样：`if` 和 `?:` 变成掩码，单例和常量复制到每条通道，结果和逐行方法逐位相同。
+组件有 1 到 4 个同类型数值（`float`、`int` 等；`Position { X, Y, Z }` 也行）的逐行 `[ForEach]` 方法，会以生成器根据方法体写出的
+`Vector<T>` 循环运行，和 Burst 编译 job 的做法一样：`if` 和 `?:` 变成掩码，单例和常量复制到每条通道，多个字段拆成每个字段一个向量，
+结果和逐行方法逐位相同。
 
 - **适合：** 对大量行做算术：衰减、积分、截断、计数。
-- **别用于：** 不用管：它是自动的。不符合条件的方法（`Vector3` 组件、函数调用、`Parallel`）照旧逐行运行。
+- **别用于：** 不用管：它是自动的。不符合条件的方法（`Vector3` 字段、两种数值类型、函数调用、`Parallel`）照旧逐行运行，
+  [EECS055](/zh/docs/guide/analyzer#eecs055) 会说明原因；`Simd = SimdMode.Require` 让它成为构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)），
+  `SimdMode.Off` 不再提示。
 - **开销：** 运行时没有；循环在编译时写好。
 - **指南：** [系统](/zh/docs/guide/systems#vector-loops)
 
@@ -151,7 +154,7 @@ job 的做法一样：`if` 和 `?:` 变成掩码，单例和常量复制到每�
 ### 排序、分组与间隔 [#system-groups-and-intervals]
 
 系统按注册顺序执行，可以用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 调整。`[UpdateInGroup<G>]` 把系统放进一个分组，只在
-`world.Update<G>()` 时执行。`UpdateInterval` 和 `UpdatePhase` 让系统每 N 次更新执行一次，并分散到不同相位；`Enabled` 关掉它。
+`world.Update<G>()` 时执行。`UpdateInterval` 和 `UpdatePhase` 让系统每 N 次更新执行一次，并分散到不同相位（次数是 `world.UpdateCount<G>()`）；`Enabled` 关掉它。
 分组的过滤条件（`[Without<Frozen>]`，或分组自己、它实现的接口上的 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`）作用于分组里所有系统的 `[ForEach]` 方法。
 
 - **适合：** 不同的节奏：输入每次唤醒都处理，模拟按固定 tick 跑，存盘每隔几秒一次；每种 actor 一个分组，用一个泛型接口统一声明。
@@ -315,7 +318,8 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 - **适合：** 账号 id、玩家名、会话令牌、格子的占用者：绝不能对应两个实体的键。
 - **别用于：** `EntityId` 键（[EECS036](/zh/docs/guide/analyzer#eecs036)）；几个实体共用的键（用普通的 `IIndexed<TKey>`）。
 - **开销：** 第一张含该组件的表出现时索引就建好了，所以每次写入都会检查：每个变了的键一次哈希查找，批量调用和读档多遍历一遍行。
-  `Get` 和 `TryGet` 是一次哈希查找。
+  `Get` 和 `TryGet` 是一次哈希查找，只读这个键自己的记录：唯一键直接存它的实体，每个键没有数组。能映射到有界槽位的键
+  （`IDirectIndexed<TKey>`：网格格子、小 id）改为读一个数组元素（[直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index)）。
 - **指南：** [索引与关系](/zh/docs/guide/indexes-and-relations)
 
 ### 有序区间 [#ordered-ranges]
@@ -503,6 +507,18 @@ restarted.Load(bytes.WrittenSpan);
   （向上取整到 64；[EECS054](/zh/docs/guide/analyzer#eecs054)）。
 - **指南：** [多线程与并行](/zh/docs/guide/threading)、[`ChunkRows`](/zh/docs/guide/threading#chunk-rows)
 
+### 对所有行求总数（归约） [#reductions]
+
+`ref Reduce<T>` 参数把一遍 `[ForEach]` 变成求一个总数：`T` 是实现了 `IReduction<T>`（`Identity`、`Combine`）的单例，并行遍历的每一块
+（单线程时是整遍）累加进自己的部分结果，这一遍结束时按行的顺序合并部分结果并替换 `T`：就是 OpenMP 的 `reduction`、MPI 的 `Allreduce`。
+
+- **适合：** 存活的单位数、一种资源的总量、人群的范围：每遍对大量行求一个结果。
+- **别用于：** 每个实体各自的结果（写进这一行的组件），以及每个 tick 只有几行会改变的总数（在改这些行的地方更新）。
+- **开销：** 每行一次对本块自己的结构体的写入，没有锁也没有原子操作；每块一个 job 副本，合并一次；第一遍之后零分配。整数精确；
+  `ChunkRows` 固定时，浮点结果在任何线程数下都相同。[EECS057](/zh/docs/guide/analyzer#eecs057) 拒绝对 `T` 的第二处写入；
+  [EECS060](/zh/docs/guide/analyzer#eecs060) 和 [EECS061](/zh/docs/guide/analyzer#eecs061) 报告它所替代的共享计数器和 job 字段。
+- **指南：** [多线程与并行](/zh/docs/guide/threading#reductions)
+
 ### 批量操作 [#bulk-operations]
 
 `world.CreateEntities(span, a, b)` 刷出一波取值相同的实体，`Instantiate(prefab, span)` 按预制体刷一波，`DestroyAll<T>(filter)`
@@ -518,7 +534,7 @@ restarted.Load(bytes.WrittenSpan);
 
 ### 分析器与代码修复 [#analyzer]
 
-包里在生成器旁边附带了分析器（EECS002 到 EECS056）和代码修复。不合法的 `[ForEach]` 方法、类组件、有状态的系统、引用系统的系统、
+包里在生成器旁边附带了分析器（EECS002 到 EECS061）和代码修复。不合法的 `[ForEach]` 方法、类组件、有状态的系统、引用系统的系统、
 经 `in` 的写入、可能竞争的并行方法、跨线程的结构变更、经 `ref` 写入的被索引组件、成环的排序，都会编译失败；还有几条警告标出能跑但有代价的写法。
 
 - **适合：** 一直开着；默认就是开的，它让系统保持解耦。

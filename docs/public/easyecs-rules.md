@@ -24,7 +24,10 @@ available as Markdown: add `.md` to its URL.
 - A key that must name one entity (an account id, a session token, a cell's occupant) is `IUniqueIndexed<TKey>`: look
   it up with `world.XIndex.Get(key)` / `TryGet(key, out e)`, never with a hand-kept dictionary. A write that would give
   a second entity a taken key throws `InvalidOperationException`; to move a key, change the old holder first. Not for
-  `EntityId` keys (EECS036). A component has one index key: never two `IIndexed<TKey>` (EECS036).
+  `EntityId` keys (EECS036). A component has one index key: never two `IIndexed<TKey>` (EECS036). When the keys a
+  world holds at once map onto bounded slots (grid cells modulo the loaded area, small ids), make it
+  `IDirectIndexed<TKey>` (`static Slots`, `static SlotOf(key)`, pure arithmetic) instead of keeping a grid of ids by
+  hand; never for sparse keys or huge ranges.
 - A list per entity is a `DynamicBuffer<T>` component; never copy it by value (EECS012). Call
   `EnsureCapacity(n)` on it (and `world.Reserve<T…>(n)` on the world) before a wave of known size. Write a whole
   buffer through the span `SetCount(n)` returns; compute many passes over the same elements in a `stackalloc`'d span
@@ -90,9 +93,18 @@ available as Markdown: add `.md` to its URL.
   owner thread acts on that data. A few hundred heavy rows (microseconds each) set `ChunkRows = 64` so threads take 64
   rows at a time (EECS054: only with `Parallel = true`); light rows keep the default. Threads claim chunks from one
   shared counter, like OpenMP's `schedule(dynamic, n)`: never assume an order between chunks.
-- Hot per-row arithmetic over numbers: a static, non-parallel `[ForEach]` method over one-field components of one
-  primitive type (no `Entity`, `World`, `Mut<T>` or `Maybe<T>` parameter) gets a generated `Vector<T>` loop; mixing
-  `float` and `int` fields keeps it scalar.
+- Code that runs on several threads (a parallel `[ForEach]` method, the `Execute` of a job run by `ForEachParallel`)
+  never writes shared state: no static field, no object a context parameter or a job field refers to (EECS060). A
+  parallel job's fields are not merged back: each chunk runs a copy, so never read a field after `ForEachParallel`
+  (EECS061). A total over the rows (a count, a sum, a min / max, a bounding box) is a `ref Reduce<T>` parameter (always `ref`:
+  without it, EECS002), with `T` a singleton implementing `IReduction<T>` (`Identity`, an associative `Combine`); read the result as `world.T` or `in T`
+  after the pass, never `Reduce<T>.Value` as the total (it is the chunk's part). One `Reduce<T>` per `T` per pass
+  (EECS057). Set `ChunkRows` when a float total must be the same on every machine.
+- Hot per-row arithmetic over numbers: a static, non-parallel `[ForEach]` method over components of 1 to 4 fields of
+  one primitive type (no `Entity`, `World`, `Mut<T>` or `Maybe<T>` parameter) gets a generated `Vector<T>` loop; write
+  the fields (`p.X += v.X`), not a new whole component, and do not mix `float` and `int`. EECS055 (a suggestion) names
+  why a method stayed scalar; put `[ForEach(Simd = SimdMode.Require)]` on a hot method so losing the loop fails the
+  build (EECS056), `SimdMode.Off` on one that should stay scalar.
 - A request or message for one entity runs as a struct job on it: `entity.Run<T…, TJob>(ref job, Filter)` with an
   `IForEachEntity` job and a `static readonly` `QueryFilter`; it returns `false` when the entity is gone, lacks a
   component or fails the filter. It is structural: never inside a parallel `[ForEach]` (EECS010), never in a
@@ -127,7 +139,8 @@ available as Markdown: add `.md` to its URL.
 - Give a new entity its components in `CreateEntity(a, b, c)` / `Instantiate(prefab, a, b)`, not a `Set` right
   after (EECS052).
 - Prefer `[ForEach]` methods over hand-written `Query` loops; use bulk calls (`SetAll`, `RemoveAll`, `DisableAll`,
-  `EnableAll`, `CreateEntities`, `DestroyAll`, `DestroyEntities(ids)`) for many entities at once, not a loop over a query or a `[ForEach]` method whose whole body is that one change
+  `EnableAll`, `CreateEntities`, `DestroyAll`, `DestroyEntities(ids)`; `CollectIds<T>(span, filter)` for a bounded
+  batch of ids, the first N requests of a tick) for many entities at once, not a loop over a query or a `[ForEach]` method whose whole body is that one change
   (EECS030), and
   `CreateEntities` or `Reserve` before creating many entities in a loop (EECS031); `world.Reserve(prefab, n)` also
   reserves the prefab's index keys, its retired table (cleanup components) and free ids, so a wave of a kind spawns at 0 B. Ask `world.Any<T>()` and

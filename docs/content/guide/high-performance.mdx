@@ -33,14 +33,20 @@ Take the steps in order and measure after each; stop at the first one that is en
 
 ### Let the generator vectorize: vector loops [#vector-loops]
 
-A static, non-parallel `[ForEach]` method over one-field components of one number type gets a generated `Vector<T>`
-loop, with its `if`s turned into masks and a scalar tail: what Burst does for a Unity job, done at compile time. The
-code you write stays scalar. Which methods qualify, the generated code side by side and how to rewrite a method that
-stays scalar: [vector loops](/en/docs/guide/systems#vector-loops).
+A static, non-parallel `[ForEach]` method over components of 1 to 4 fields of one number type gets a generated
+`Vector<T>` loop, with its `if`s turned into masks and a scalar tail: what Burst does for a Unity job, done at compile
+time. The code you write stays scalar. Which methods qualify, the generated code side by side and how to rewrite a
+method that stays scalar: [vector loops](/en/docs/guide/systems#vector-loops).
 
-{/* TODO(vector loops): EECS055, [ForEach(Simd = Require/Off)] and EECS056; multi-field structs, Math.Clamp, MathF.*,
-lerp and conversions; reductions, FloatMode.Fast, presence-bit lane masks, Vector512 and bounds-check-free scalar
-loops. Add one line each here, linking their sections on guide/systems. */}
+- **Several fields:** `Position { X, Y, Z }` is split into one vector per field by deinterleaving loads and
+  interleaving stores (AVX2, AVX-512); without those instructions the rows run one at a time.
+- **Why not:** [EECS055](/en/docs/guide/analyzer#eecs055) names the first reason a method stayed scalar, as Burst's
+  inspector would; `[ForEach(Simd = SimdMode.Require)]` turns it into a build error
+  ([EECS056](/en/docs/guide/analyzer#eecs056)) on the hot path, and `SimdMode.Off` silences it.
+
+{/* TODO(vector loops): Math.Clamp, MathF.* and lerp, conversions; vector reductions, FloatMode.Fast, presence-bit
+lane masks, Vector512 and bounds-check-free scalar loops. Add one line each here, linking their sections on
+guide/systems. */}
 
 </Step>
 
@@ -55,9 +61,16 @@ microseconds) set `ChunkRows = 64`, so every thread gets work: [chunk size](/en/
 Systems whose access does not conflict already run at once without any of this:
 [parallel systems](/en/docs/guide/threading#parallel-systems).
 
-{/* TODO(parallel ForEach): reductions (OpenMP reduction(+: x)), thread-private scratch (private / threadprivate) and
-read-only lookups of other entities from a parallel method. Add one line each here and a row each in the mapping
-table below, linking their sections on guide/threading. */}
+A total over the rows (a count, a sum, a bounding box) is a `Reduce<T>` parameter: each chunk adds into its own
+partial result, with no lock or atomic per row, and the partial results are combined in row order into a singleton,
+exact for integers and reproducible for floats with a fixed `ChunkRows`:
+[reductions](/en/docs/guide/threading#reductions). A static counter written by a parallel method is
+[EECS060](/en/docs/guide/analyzer#eecs060), a job field read after `ForEachParallel`
+[EECS061](/en/docs/guide/analyzer#eecs061).
+
+{/* TODO(parallel ForEach): Scratch<T> (thread-private scratch: OpenMP private / threadprivate) and Lookup<T>
+(read-only lookups of other entities from a parallel method), on branch hpc-parallel. Add one line each here and a row each in the mapping table below, linking their sections on
+guide/threading. */}
 
 </Step>
 
@@ -142,6 +155,7 @@ samples/voxel-server sections. */}
 | --- | --- | --- |
 | OpenMP `parallel for` | `[ForEach(Parallel = true)]` | [Parallel methods](/en/docs/guide/systems#parallel-methods) |
 | OpenMP `schedule(dynamic, n)` | `ChunkRows = n` (the default size when unset) | [Chunk size](/en/docs/guide/threading#chunk-rows) |
+| OpenMP `reduction(+: x)`, MPI `Allreduce` | a `Reduce<T>` parameter into a singleton `T : IReduction<T>` | [Reductions](/en/docs/guide/threading#reductions) |
 | OpenMP `sections` / tasks | systems of one stage, run at once when their access does not conflict | [Parallel systems](/en/docs/guide/threading#parallel-systems) |
 | MPI rank owning a subdomain | one world per thread (a world per zone or map) | [One world per thread](/en/docs/guide/threading#recommended-one-world-per-thread) |
 | MPI send of entities to another rank | `SaveEntities` / `MoveEntities` | [Migration](/en/docs/guide/migration-and-unload#save-entities) |
@@ -149,18 +163,20 @@ samples/voxel-server sections. */}
 | Burst auto-vectorization | vector loops of `[ForEach]` methods | [Vector loops](/en/docs/guide/systems#vector-loops) |
 | Burst `float4` / Unity.Mathematics by hand | a batch method with `Vector<T>` / `Vector128<T>` | [Batch methods](/en/docs/guide/systems#batch-methods) |
 | Burst `IJobParallelFor` batch count | `ChunkRows` | [Chunk size](/en/docs/guide/threading#chunk-rows) |
+| Burst Inspector | EECS055, and `Simd = SimdMode.Require` (EECS056) | [Analyzer](/en/docs/guide/analyzer#eecs055) |
 | GPU fragment shader | a function per cell over a chunk's grid | [Where the ideas come from](/en/docs/samples/voxel-server#ideas) |
 | GPU stencil | a bit per row, visited with `TrailingZeroCount` | [Shade a grid](#grid) |
 | GPU ping-pong targets | two buffers, read one, write the other, commit | [VoxelServer water](/en/docs/samples/voxel-server#water) |
 
-{/* TODO(mapping): rows for OpenMP reduction, private / threadprivate scratch, read-only lookups from a parallel
-method, the [ForEach(Simd = ...)] option and the MPI interior/ring overlap, once they land. */}
+{/* TODO(mapping): rows for private / threadprivate scratch (Scratch<T>), read-only lookups from a parallel method
+(Lookup<T>, Unity's ComponentLookup with [ReadOnly]), Burst's
+FloatMode.Fast and the MPI interior/ring overlap, once they land. */}
 
 ## How to use it fast [#how-to-use-it-fast]
 
 - Measure first: [`MeasureSystems`](/en/docs/guide/systems#measuring-systems) names the system that costs the tick,
   and a BenchmarkDotNet case proves the change; each pattern's section links its own benchmark table.
-- Make the data fit before the code: one number per component for vector loops, a byte or `int` per cell for a grid
+- Make the data fit before the code: one number type and at most 4 fields per component for vector loops, a byte or `int` per cell for a grid
   (16 or 8 lanes per instruction), so the work is one shape over a column.
 - Keep per-cell work in registers or on the stack (`stackalloc` under `[SkipLocalsInit]`) and copy into a buffer
   once: a buffer read and written many times per pass is far slower than a stack span.
@@ -170,7 +186,8 @@ method, the [ForEach(Simd = ...)] option and the MPI interior/ring overlap, once
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
 | Optimizing a system nobody measured | Code that is harder to read and saves nothing | [`MeasureSystems`](/en/docs/guide/systems#measuring-systems) |
-| Mixing `float` and `int` fields in a method meant to vectorize | It stays scalar | The generated file ([vector loops](/en/docs/guide/systems#vector-loops)) |
+| Mixing `float` and `int` fields in a method meant to vectorize | It stays scalar | [EECS055](/en/docs/guide/analyzer#eecs055); `Simd = SimdMode.Require` makes it an error |
+| A shared counter written by a parallel method | Lost updates | [EECS060](/en/docs/guide/analyzer#eecs060): a [`Reduce<T>`](/en/docs/guide/threading#reductions) instead |
 | `ChunkRows` on many light rows | Many more claims for the same work | Benchmark ([chunk size](/en/docs/guide/threading#chunk-rows)) |
 | A grid pass that reads cells it updated in the same pass | Results depend on the visit order (and on the thread count in parallel) | Tests: write into a second buffer |
 | Clearing the output buffer every pass | A full write of memory the pass rewrites anyway | Review: write the skipped rows instead |

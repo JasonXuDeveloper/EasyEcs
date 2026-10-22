@@ -148,7 +148,7 @@ using var zone = new World(new WorldOptions { ParallelSystems = true, MaxDegreeO
 ### 并行 `[ForEach]` 方法 [#parallel-foreach-methods]
 
 `[ForEach(Parallel = true)]` 把一个方法的行切成块分给多个线程。它不能做结构变更，必须逐实体运行，也不能写单例
-（[EECS010](/zh/docs/guide/analyzer#eecs010)）：
+（[EECS010](/zh/docs/guide/analyzer#eecs010)）；对所有行求总数用 [`Reduce<T>`](#reductions)：
 
 ```csharp
 public record struct Regen(int PerTick) : ISingletonComponent;
@@ -246,8 +246,102 @@ public class CrowdPressure : EcsSystem
 块大小与向量循环、批处理方法和网格内核如何配合，以及各自对应的 OpenMP / MPI 术语：
 [高性能写法](/zh/docs/guide/high-performance)。
 
-{/* TODO(parallel ForEach): 归约（OpenMP reduction(+: x)）、线程私有的临时空间（private / threadprivate）和并行方法里对其他实体的
-只读查找放在这里，各写一个 #### 小节：什么时候用、开销、能编译的例子和常见陷阱；再更新 guide/high-performance 的对照表。 */}
+#### 归约：`Reduce<T>` [#reductions]
+
+并行方法只写它自己的行：不能写单例（[EECS010](/zh/docs/guide/analyzer#eecs010)），共享的计数器会竞争
+（[EECS060](/zh/docs/guide/analyzer#eecs060)）。对所有行求一个结果（计数、总和、最小值、包围盒），用 `ref Reduce<T>` 参数：就是 OpenMP 的
+`reduction(+: x)`、MPI 的 `Allreduce`。每一块累加进自己的部分结果，每行没有锁也没有原子操作；这一遍结束时，部分结果合并起来替换单例 `T`。
+
+<Callout type="idea" title="适合">
+  每遍对大量行求一个结果：存活的单位数、世界里的金币总数、人群的总质量和范围、最拥挤的格子。多线程或单线程都行：同一个方法加不加
+  `Parallel = true` 都能用。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  每个实体各自的结果：写进这一行的组件。每个 tick 只有几行会改变的总数：在改这些行的系统里随手更新（或者读一遍
+  [`[Changed<T>]`](/zh/docs/guide/change-tracking)），不必遍历所有行。方法运行中就要用的值：`Value` 是这一块的部分结果，不是总数。
+</Callout>
+
+<Steps>
+<Step>
+
+**声明结果**：一个为自己实现 `IReduction<T>` 的单例。`Identity` 是和谁合并都不改变对方的值（求和是 0，求最小值是 `float.MaxValue`），
+`Combine` 必须满足结合律。不要求交换律：部分结果按行的顺序合并。
+
+</Step>
+<Step>
+
+**接收一个 `ref Reduce<T>` 参数**，写 `Value` 的字段（一个字段：这一块的部分结果），或者用一行的贡献调用 `Combine(value)`。
+按 `ref` 传入，部分结果才能留在寄存器里；不带 `ref` 的 `Reduce<T>` 报 [EECS002](/zh/docs/guide/analyzer#eecs002)。
+
+</Step>
+<Step>
+
+**读取结果**：这一遍之后读 `world.T`，或者在之后的系统里用 `in T`。每一遍都会替换 `T`（没有就添加；一行都没有的遍写入 `Identity`），
+系统按 `T` 的写者调度，所以读 `T` 的系统会等它。
+
+</Step>
+</Steps>
+
+```csharp
+public struct Extent : ISingletonComponent, IReduction<Extent>
+{
+    public int Count;
+    public float MinX, MaxX;
+
+    public static Extent Identity => new() { MinX = float.MaxValue, MaxX = float.MinValue };
+
+    public static Extent Combine(Extent left, Extent right) => new()
+    {
+        Count = left.Count + right.Count,
+        MinX = MathF.Min(left.MinX, right.MinX),
+        MaxX = MathF.Max(left.MaxX, right.MaxX),
+    };
+}
+
+public class MeasureCrowd : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Measure(in Position position, ref Reduce<Extent> extent)
+    {
+        ref var e = ref extent.Value;   // 这一块的部分结果
+        e.Count++;
+        e.MinX = MathF.Min(e.MinX, position.X);
+        e.MaxX = MathF.Max(e.MaxX, position.X);
+    }
+}
+```
+
+```csharp
+world.AddSystem<MeasureCrowd>();
+world.Update();
+var crowd = world.Extent;   // 所有块合并后的结果
+Console.WriteLine($"{crowd.Count} 个单位，x 从 {crowd.MinX} 到 {crowd.MaxX}");
+```
+
+- **精确，或可复现。** 整数结果在每次运行、任何线程数下都精确。浮点求和按块舍入，所以取决于块从哪里开始：[`ChunkRows`](#chunk-rows)
+  固定时，每次运行、任何线程数下结果都相同（测试检查了 1、2、3、4 和 8 个线程），但和同一个方法 `Parallel = false` 的结果不逐位相同。
+  默认块大小随线程数变化：浮点总数要在不同机器上复现时，设定 `ChunkRows`。最小值、最大值和包围盒不涉及舍入，怎样都精确。
+- **单线程时**，部分结果是 job 的局部变量，每段连续的行一个；方法、结果和调度都一样。系统之外的 `[ForEach]` 方法归约进调用它时传入的 World。
+- **开销：** 每行一次累加到局部变量：归约方法按每块里连续的行运行，这段行的部分结果按 `ref` 传给内联的方法，JIT 把它留在寄存器里。
+  每块一个 job 副本，留到这一遍结束再按块的顺序合并；第一遍之后零分配。没有锁、没有 `Interlocked`、没有伪共享：每块的部分结果只存一次。
+- **分析器检查什么：** 方法或系统里同一个 `T` 的第二个 `Reduce<T>`，或旁边的 `ref T`，会让一个结果覆盖另一个
+  （[EECS057](/zh/docs/guide/analyzer#eecs057)）。归约方法生成的 job 会合并各块的副本，所以 [EECS061](/zh/docs/guide/analyzer#eecs061)
+  （并行遍历之后读 job 的字段）不报它。
+
+`ReduceBenchmark` 测量整数求和、浮点求和和包围盒，`Reduce<T>` 多线程和单线程两种，对比单线程的 `ref` 上下文值、每行一次 `Interlocked`
+加法、每行一把锁，以及 `Parallel.For<TLocal>(from, to, localInit, body, localFinally)`。
+
+{/* TODO(reductions): bench.json 有了 ReduceBenchmark 之后放上它的表（<BenchTable bench="ReduceBenchmark" />），并链接归约决策记录里的数字。 */}
+
+**为什么不用带 `localInit` / `localFinally` 的 `Parallel.For`**（数字待测）：它是 .NET 的线程局部模式，也是和 `Reduce<T>` 最接近的写法，
+但它不是运行器。它没有传状态的重载，所以 `static` lambda 只能用静态状态（这一列、结果），而静态状态不可重入：两个 World 不能同时归约。
+它每次调用都分配（委托、分区状态）。它的分区跟着线程池的工作窃取走，所以浮点结果每次运行都会变。World 的运行器按 `ref` 传 job，
+不分配，并按块的顺序合并部分结果（[归约](/zh/docs/decisions#d69-reductions)）。
+
+{/* TODO(parallel ForEach): Scratch<T>（方法在当前线程上的工作内存，在行、遍历和 World 之间保留：OpenMP 的 private / threadprivate）、
+Lookup<T>（读取任意实体的组件，调度为对 T 的读；带索引的 T 可按键 TryFind / Find / Count，还没建好的索引在并行区域里抛异常、在单线程遍历里
+照常延迟建立）和 World.ForEachBatchParallel。各写一个 #### 小节：什么时候用、开销、能编译的例子和常见陷阱；再更新 guide/high-performance 的对照表。 */}
 
 ### 来自其他线程的输入 [#input-from-other-threads]
 
@@ -407,6 +501,7 @@ unit 0 at (7.06, 7.06) with 60 hp
 - **按数据拆，不按方法拆。** 写不同组件的两个系统能一起跑；什么都写的系统只能单独跑。
 - **只读就用 `in`。** 只读的 `ref` 也算写，而写会冲突（[EECS025](/zh/docs/guide/analyzer#eecs025) 会报出来）。
 - **行少而重时设块大小。** 只有几百行、每行几微秒的并行方法设 [`ChunkRows`](#chunk-rows)，每个线程都能分到活；大量轻量行保持默认。
+- **归约，不要共享。** 并行遍历上的计数或求和用 [`Reduce<T>`](#reductions) 参数：每块一个部分结果，每行没有原子操作。
 
 一个 World 里 10 万个实体，以及同样的实体分到四个线程上的四个 World（`WorldSimulationBenchmark`、`MultiWorldBenchmark`）：一个 World
 每 tick <BenchValue k="tick.oneWorld" />，四个 World 合计 <BenchValue k="tick.fourWorlds" />。
@@ -425,7 +520,7 @@ unit 0 at (7.06, 7.06) with 60 hp
 - **一个并行阶段：** 交给可复用的线程池工作项，不分配；它在重的系统上省下多少，见上面 `ParallelSystemsBenchmark` 的表。
 - **一个并行方法：** 同一个调度器，按块分配；调用线程总是参与。只有实测表明辅助线程能让这次遍历比单线程快至少五分之一时才唤醒它们，
   所以 tick 之间的小遍历就在调用线程上跑。每块要领一次、复制一份 job；写被追踪组件的方法设了 [`ChunkRows`](#chunk-rows) 时，
-  遍历前每 4,096 行还要打开一次 tick 块，每写 64 行做一次原子 OR。
+  遍历前每 4,096 行还要打开一次 tick 块，每写 64 行做一次原子 OR。[`Reduce<T>`](#reductions) 每块多一个 job 副本，这一遍结束时合并一次。
 - **不用时：** `ParallelSystems` 默认关闭，从不使用它的 World 不为它付出任何开销。
 
 ## 常见陷阱 [#pitfalls]
@@ -442,6 +537,13 @@ unit 0 at (7.06, 7.06) with 60 hp
 | 大量轻量行也设 `ChunkRows` | 每个小块都要领一次：开销变大，没有收益 | 代码审查：保持默认 |
 | 没有 `Parallel = true` 却设 `ChunkRows`，或小于 0 | 编译错误：单线程的方法没有块 | [EECS054](/zh/docs/guide/analyzer#eecs054) |
 | 代码假定块按行的顺序执行，或每个线程一块 | 块是线程做完一块后再领的，顺序不定，线程也不定 | 代码审查：每行的结果写回它自己那一行 |
+| 并行方法写静态计数器或共享列表 | 更新丢失，列表被写坏 | [EECS060](/zh/docs/guide/analyzer#eecs060)；改用 [`Reduce<T>`](#reductions) |
+| 总和放在 job 字段里，`ForEachParallel` 之后再读 | 还是旧值：每一块跑的是副本 | [EECS061](/zh/docs/guide/analyzer#eecs061) |
+| `Reduce<T>` 参数没写 `ref` | 编译错误：副本会丢掉结果 | [EECS002](/zh/docs/guide/analyzer#eecs002) |
+| 在方法里把 `Reduce<T>.Value` 当总数读 | 它是这一块的部分结果 | 代码审查：这一遍之后再读 `T` |
+| 同一个 `T` 两个 `Reduce<T>`，或旁边有 `ref T` | 一个结果覆盖另一个 | [EECS057](/zh/docs/guide/analyzer#eecs057) |
+| `Combine` 不满足结合律（平均值的平均值） | 结果取决于块从哪里开始 | 代码审查：归约总和与计数，最后再除 |
+| 用默认块大小在不同机器间比较浮点总数 | 末几位不同 | 设定 [`ChunkRows`](#chunk-rows) |
 
 ## 和其他 ECS 库的对比 [#compared-with-other-ecs-libraries]
 

@@ -32,6 +32,11 @@ Unity 正在迁移到 CoreCLR；等 Unity 有版本能运行 .NET 10 代码，�
 player 构建（IL2CPP 及其预先编译的限制），编辑器的域重载与 EasyEcs 启动时注册的类型如何相处，以及在 player 里测一遍主基准。
 Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运行 EasyEcs（[常见问题](/zh/docs/faq#unity-godot)）。
 
+### 给网格邻居推送光环 [#push-halo]
+
+按区块划分的网格模拟（[体素服务器](/zh/docs/samples/voxel-server#water)里的水）每一步都要为每个流动的区块收集邻居的边。计划中的设计反过来：
+区块的边变了时推进邻居的光环，这样一步只读自己的组件，邻居都静止的区块也没有东西要拷（[D73](/zh/docs/decisions#d73-survey-items-not-added)）。
+
 ## 已放弃 [#dropped]
 
 - `Added<T>`：`[Changed<T>]` 也会选出新添加的行；要区分新出现和被写过，用一个由响应系统移除的标签
@@ -63,6 +68,8 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
 - 内置 `Meter`：数据都在 `SystemStats` 里，发布出去是文档里给出的宿主写法，EasyEcs 不必依赖指标库
   （[D51](/zh/docs/decisions#d51-not-added)）。
 - World 校验和：对 `world.Save` 的输出做哈希，用户代码里就能做，不必给所有人定死一种算法（[D51](/zh/docs/decisions#d51-not-added)）。
+- 唯一索引旁边的区块网格、只在变化时才写 `InChunk`、按位字拷贝存在位、只拷贝变化过的边的光环：测过，没有净收益，或者被 `IDirectIndexed<TKey>`
+  和推送光环的设计取代（[D73](/zh/docs/decisions#d73-survey-items-not-added)）。
 - 部分快照 API：用一个系统把需要的值拷进单例里的环形缓冲（延迟补偿的写法），只拷需要的东西
   （[D51](/zh/docs/decisions#d51-not-added)）。
 

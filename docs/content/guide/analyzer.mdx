@@ -1,7 +1,7 @@
 ---
 title: Analyzer rules
-seoTitle: "EasyEcs analyzer rules EECS002-EECS056 for C# ECS code"
-description: Every EasyEcs analyzer rule, EECS002 to EECS056, with its severity, its code fix, the code it rejects and the code to write instead.
+seoTitle: "EasyEcs analyzer rules EECS002-EECS061 for C# ECS code"
+description: Every EasyEcs analyzer rule, EECS002 to EECS061, with its severity, its code fix, the code it rejects and the code to write instead.
 icon: ShieldCheck
 ---
 
@@ -14,7 +14,10 @@ that works and does more than it needs, and the severity says what kind
 means the code costs (EECS025 to EECS032, EECS046, EECS052, EECS053), a suggestion (Info) means the same cost written shorter (EECS033, EECS039), and an
 error means code that cannot work (EECS034, a world update inside a system). The usage rules (EECS037, EECS038 and
 EECS040 to EECS045, EECS047 to EECS051) find calls and declarations that compile but do not do what they say: an error where the runtime
-throws or the code cannot work, a warning where a write is lost or a ref can point at the wrong row. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
+throws or the code cannot work, a warning where a write is lost or a ref can point at the wrong row. The vector-loop
+rules say why a method runs one row at a time (EECS055, a suggestion) and fail the build when a method that must
+vectorize does not (EECS056); EECS057 keeps a [reduction](/en/docs/guide/threading#reductions) the only write of its
+singleton; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
 same package), and only when the result compiles.
 
 ## When to read it [#when-to-use-it]
@@ -66,7 +69,7 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS024](#eecs024) | Error | `[ForEach]` is not on a local function | |
 | [EECS025](#eecs025) | Warning | A write access only reads | `in`, `ReadOnlySpan<T>`, `Read<T>()`, `in T` for a `Mut<T>` |
 | [EECS026](#eecs026) | Warning | A `[ForEach]` method uses its parameters | `[With<T>]`, or remove the parameter |
-| [EECS027](#eecs027) | Warning | A `[ForEach]` method takes what it looks up on every row | |
+| [EECS027](#eecs027) | Warning | A `[ForEach]` method takes what it looks up on every row | Take the lookup as a parameter |
 | [EECS028](#eecs028) | Warning | Code that runs every update does not allocate | |
 | [EECS029](#eecs029) | Warning | An instance `[ForEach]` method uses its system | Make it static |
 | [EECS030](#eecs030) | Warning | A structural change over a query is one bulk call | The bulk call |
@@ -93,7 +96,12 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS051](#eecs051) | Error | A world does not update during a pass | |
 | [EECS052](#eecs052) | Warning | A component of a new entity is given to its creation | Create it with the component |
 | [EECS053](#eecs053) | Warning | A tracked component written on some rows only is a `Mut<T>` | `Mut<T>` |
-| [EECS054](#eecs054) | Error | `ChunkRows` is 0 or more, on a parallel method | |
+| [EECS054](#eecs054) | Error | `ChunkRows` is 0 or more, on a parallel method | Remove `ChunkRows` |
+| [EECS055](#eecs055) | Info | A `[ForEach]` method over numbers gets a vector loop | |
+| [EECS056](#eecs056) | Error | `Simd = SimdMode.Require` on a method that qualifies | |
+| [EECS057](#eecs057) | Error | One write of a reduced singleton per pass | |
+| [EECS060](#eecs060) | Warning | Code on several threads writes no shared memory | |
+| [EECS061](#eecs061) | Warning | A parallel job's fields are not read after the pass | `ForEach` / `ForEachEntity` |
 
 ## EECS002 [#eecs002]
 
@@ -101,7 +109,9 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 
 Every parameter must be a `ref` / `in` / `ref readonly` struct implementing `IComponent` or `ISingletonComponent`, a
 `Span<T>` / `ReadOnlySpan<T>` of an `IComponent` struct, a `Maybe<T>` or `ReadOnlyMaybe<T>` of one (an optional
-component), an `Entity`, or the `World`. A `[ForEach]` method [outside a system](/en/docs/guide/systems#foreach-outside-systems) may also take
+component), a `Mut<T>`, a `ref Reduce<T>` ([reductions](/en/docs/guide/threading#reductions); without `ref` its
+partial result would be a copy), an `Entity`, or the `World`.
+{/* TODO(parallel ForEach): add Scratch<T> and Lookup<T> to this list once they are merged. */} A `[ForEach]` method [outside a system](/en/docs/guide/systems#foreach-outside-systems) may also take
 values of any other type: its generated entry point takes them from the caller.
 
 ```csharp doccheck=expect-EECS002
@@ -891,7 +901,8 @@ public class CountSurvivors : EcsSystem
 
 ## EECS027 [#eecs027]
 
-**A lookup per row that a parameter makes once.** Warning. No code fix.
+**A lookup per row that a parameter makes once.** Warning. Code fix: takes the looked-up component or singleton as
+a parameter (`in T`, or `ref T` when a lookup writes it) and turns every lookup of the type into that parameter.
 
 The rule covers `[ForEach]` methods and the `Execute` of a hand-written job; a job takes the component as another
 type argument of its interface.
@@ -912,6 +923,10 @@ public class Drift : EcsSystem
         position = new Position(position.X + entity.Velocity.X, position.Y + entity.Velocity.Y);
 }
 ```
+
+The fix is offered on the first lookup of each type, when every lookup of the type is a `Get`, a `Read` or a generated
+property (which throw for an entity without it, so requiring the component changes no row the method runs on); not
+for a `TryGet` or a presence test, a method with callers, a batch method or a method with 9 components already.
 
 Take the component as a parameter (`in`, `ref`, or `Maybe<T>` when some entities lack it; a presence test is a
 `Maybe<T>` or a `[With<T>]` / `[Without<T>]` split; for an indexed component `in` or `ReadOnlyMaybe<T>`), and a
@@ -1667,7 +1682,8 @@ cheaper write: suppress the warning there.
 
 ## EECS054 [#eecs054]
 
-**Invalid `[ForEach(ChunkRows = N)]`.** Error. No code fix.
+**Invalid `[ForEach(ChunkRows = N)]`.** Error. Code fix: removes `ChunkRows`; the generator, which skipped the method,
+writes it again.
 
 `ChunkRows` is the rows a thread of a [parallel method](/en/docs/guide/threading#chunk-rows) takes at a time: 0 lets
 the runtime choose from the row count, more sets it (rounded up to 64). A method without `Parallel = true` runs on one
@@ -1705,6 +1721,234 @@ public class PlanRoutes : EcsSystem
 
 Run it in parallel (as here, for a few hundred heavy rows), or drop `ChunkRows`. Light rows need neither: keep the
 default chunks ([when to set it](/en/docs/guide/threading#chunk-rows)).
+
+## EECS055 [#eecs055]
+
+**A `[ForEach]` method that runs one row at a time.** Suggestion (Info). No code fix.
+
+The generator turns a [`[ForEach]` method into a vector loop](/en/docs/guide/systems#vector-loops) when it qualifies.
+A method that looks meant for one (static, on one thread, taking only components of number fields, singletons and
+values) but misses a condition gets this message, which names the first reason: a component of 5 fields, two lane
+types, a call the loop has no vector form of, a write to something that is not a lane. It is the counterpart of
+Burst's inspector: the build says which method stayed scalar and why. The method still runs correctly, row by row.
+
+```csharp tab="Reported" doccheck=expect-EECS055
+public struct Body : IComponent { public float X, Y, Z, Mass; public int Squad; }   // 5 fields, float and int
+
+public class Sink : EcsSystem
+{
+    [ForEach]   // "component Body has 5 fields (a vector loop splits up to 4)"
+    static void Fall(ref Body body) => body.Y -= body.Mass * 0.01f;
+}
+```
+
+```csharp tab="Fixed"
+public struct Body : IComponent { public float X, Y, Z, Mass; }   // 4 floats: one vector per field
+public struct Squad : IComponent { public int Value; }             // the int in a component of its own
+
+public class Sink : EcsSystem
+{
+    [ForEach]
+    static void Fall(ref Body body) => body.Y -= body.Mass * 0.01f;
+}
+```
+
+Change what the message names, or set `[ForEach(Simd = SimdMode.Off)]` on a method that should stay scalar (a few
+rows, or a body the loop cannot take) to silence it. As a suggestion it shows in the IDE only;
+`dotnet_diagnostic.EECS055.severity = warning` in `.editorconfig` lists every scalar method in the build.
+
+## EECS056 [#eecs056]
+
+**A required vector loop that the method does not qualify for.** Error. No code fix.
+
+`[ForEach(Simd = SimdMode.Require)]` says the method must get its vector loop: a hot path whose speed depends on it.
+When the method does not qualify, the build fails with the reason EECS055 would give, so a later edit (a call the
+loop has no vector form of, a field of another type) cannot slow it down without anyone noticing.
+
+```csharp tab="Reported" doccheck=expect-EECS056
+public struct Charge : IComponent { public float Value; }
+
+public class Recharge : EcsSystem
+{
+    [ForEach(Simd = SimdMode.Require)]   // "Math.Clamp is not supported"
+    static void Fill(ref Charge charge) => charge.Value = Math.Clamp(charge.Value + 0.1f, 0f, 1f);
+}
+```
+
+```csharp tab="Fixed"
+public struct Charge : IComponent { public float Value; }
+
+public class Recharge : EcsSystem
+{
+    [ForEach(Simd = SimdMode.Require)]
+    static void Fill(ref Charge charge) => charge.Value = MathF.Min(MathF.Max(charge.Value + 0.1f, 0f), 1f);
+}
+```
+
+Change what the message names, or set `SimdMode.Auto` (the default) to accept the loop of one row at a time.
+
+{/* TODO(vector loops): when Math.Clamp, MathF.* and lerp get vector forms, replace this example's reason with one
+that still holds. */}
+
+## EECS057 [#eecs057]
+
+**A reduction whose result another write replaces.** Error. No code fix.
+
+A [`Reduce<T>` parameter](/en/docs/guide/threading#reductions) gives each chunk of rows a partial result and replaces
+singleton `T` with the combined result when the pass ends. A second `Reduce<T>` of the same method or system, or a
+`ref T` parameter of the same method, writes `T` in the same pass: one result would silently replace the other.
+
+```csharp tab="Reported" doccheck=expect-EECS057
+public struct Census : ISingletonComponent, IReduction<Census>
+{
+    public long Health;
+    public static Census Identity => default;
+    public static Census Combine(Census left, Census right) => new() { Health = left.Health + right.Health };
+}
+
+public class CountUnits : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Alive(in Health health, ref Reduce<Census> census) => census.Value.Health += health.Value;
+
+    [ForEach, With<Dead>]   // a second Reduce<Census>: the dead's total would replace the living's
+    static void Fallen(in Health health, ref Reduce<Census> census) => census.Value.Health += health.Value;
+}
+```
+
+```csharp tab="Fixed"
+public struct Census : ISingletonComponent, IReduction<Census>
+{
+    public long Health;
+    public static Census Identity => default;
+    public static Census Combine(Census left, Census right) => new() { Health = left.Health + right.Health };
+}
+
+public struct Casualties : ISingletonComponent, IReduction<Casualties>
+{
+    public long Health;
+    public static Casualties Identity => default;
+    public static Casualties Combine(Casualties left, Casualties right) => new() { Health = left.Health + right.Health };
+}
+
+public class CountUnits : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Alive(in Health health, ref Reduce<Census> census) => census.Value.Health += health.Value;
+
+    [ForEach, With<Dead>]
+    static void Fallen(in Health health, ref Reduce<Casualties> fallen) => fallen.Value.Health += health.Value;
+}
+```
+
+Reduce each result into a singleton of its own, and read the last result with `in T` in a later system.
+
+## EECS060 [#eecs060]
+
+**Code running on several threads writes shared memory.** Warning. No code fix.
+
+A `[ForEach(Parallel = true)]` method, and the `Execute` of a job run by `ForEachParallel` or `ForEachEntityParallel`,
+run on several threads at once, one chunk of rows each. A static field or auto-property, an object a context parameter
+refers to, or the object a job's field holds (every chunk's copy of the job shares it) is the same memory for all of
+them: an increment loses updates, a list's `Add` corrupts the list, and which plain write is kept depends on timing.
+The rule leaves out a constant every thread writes, `[ThreadStatic]` fields, concurrent collections, `Interlocked` and
+`Volatile` calls, writes inside a `lock`, elements of arrays and lists (rows may own different elements) and locals.
+
+```csharp tab="Reported" doccheck=expect-EECS060
+public static class HitStats
+{
+    public static int Hits;
+}
+
+public class TakeHits : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(ref Health health)
+    {
+        health = new Health(health.Value - 1);
+        HitStats.Hits++;   // every thread increments the same int: updates are lost
+    }
+}
+```
+
+```csharp tab="Fixed"
+public struct Hits : ISingletonComponent, IReduction<Hits>
+{
+    public int Count;
+    public static Hits Identity => default;
+    public static Hits Combine(Hits left, Hits right) => new() { Count = left.Count + right.Count };
+}
+
+public class TakeHits : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(ref Health health, ref Reduce<Hits> hits)
+    {
+        health = new Health(health.Value - 1);
+        hits.Value.Count++;   // this chunk's partial count, combined when the pass ends
+    }
+}
+```
+
+A total goes into a [`Reduce<T>`](/en/docs/guide/threading#reductions) singleton; a result per entity goes into a
+component of its row, which a system after the pass reads. An `Interlocked` call per row also silences the rule,
+at the cost of a contended cache line on every row.
+
+## EECS061 [#eecs061]
+
+**A parallel job's field read after the pass.** Warning. Code fix: runs the job on one thread (`ForEach` /
+`ForEachEntity`), when the call passes no `chunkRows`.
+
+`ForEachParallel` and `ForEachEntityParallel` run a copy of the job per chunk and merge nothing back: the job passed by
+`ref` keeps the values it had before the call. A field `Execute` writes (a sum, a count, a flag) and the caller reads
+afterwards holds its old value. The rule reports the call when the first use of the job after it reads such a field.
+Jobs that merge their chunks' copies back (the generated jobs of methods with a `Reduce<T>` parameter) are left out.
+
+```csharp tab="Reported" doccheck=expect-EECS061
+public struct TotalHealth : IForEach<Health>, INoStructuralChanges
+{
+    public long Sum;
+
+    public static int WriteMask => 0;
+
+    public void Execute(ref Health health) => Sum += health.Value;
+}
+
+public static class Reports
+{
+    public static long Total(World world)
+    {
+        var total = new TotalHealth();
+        world.ForEachParallel<Health, TotalHealth>(ref total);
+        return total.Sum;   // still 0: each chunk summed into its own copy
+    }
+}
+```
+
+```csharp tab="Fixed"
+public struct TotalHealth : IForEach<Health>, INoStructuralChanges
+{
+    public long Sum;
+
+    public static int WriteMask => 0;
+
+    public void Execute(ref Health health) => Sum += health.Value;
+}
+
+public static class Reports
+{
+    public static long Total(World world)
+    {
+        var total = new TotalHealth();
+        world.ForEach<Health, TotalHealth>(ref total);   // one thread: the job is written back
+        return total.Sum;
+    }
+}
+```
+
+For a total over many rows on all cores, write a `[ForEach(Parallel = true)]` method with a
+[`Reduce<T>`](/en/docs/guide/threading#reductions) parameter instead: each chunk keeps a partial result and the pass
+combines them.
 
 ## Related [#related]
 
