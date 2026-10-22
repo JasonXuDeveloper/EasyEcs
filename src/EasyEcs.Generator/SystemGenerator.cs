@@ -103,9 +103,14 @@ public sealed class SystemGenerator : IIncrementalGenerator
         // the root's size) on the method's loop, its samples and the helpers they call: inlined into this small
         // accessor (or the job), a method of that size uses up the budget and calls its samples. The accessor runs
         // unoptimized (NoOptimization: no inlining in it, one call per entity), and is never inlined itself.
-        if (method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Tile))
-            sb.Append("    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining | global::System.Runtime.CompilerServices.MethodImplOptions.NoOptimization)]\n");
-        sb.Append($"    [global::System.Runtime.CompilerServices.UnsafeAccessor(global::System.Runtime.CompilerServices.UnsafeAccessorKind.{kind}, Name = \"{method.Name}\")]\n");
+        // Otherwise a Scratch method that loops or calls runs in its own frame (ForEachModel.OutOfLine); the method
+        // still inlines into the accessor, so the call per row is the only cost.
+        string impl = method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Tile)
+            ? ", global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining | global::System.Runtime.CompilerServices.MethodImplOptions.NoOptimization)"
+            : method.OutOfLine
+                ? ", global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)"
+                : "";
+        sb.Append($"    [global::System.Runtime.CompilerServices.UnsafeAccessor(global::System.Runtime.CompilerServices.UnsafeAccessorKind.{kind}, Name = \"{method.Name}\"){impl}]\n");
         sb.Append($"    internal static extern {method.Returns} {method.Name}_{index}{method.TypeParameters}([global::System.Runtime.CompilerServices.UnsafeAccessorType(\"{owner.AccessorType}\")] object {self}{parameters}){method.Constraints};\n\n");
     }
 
@@ -330,7 +335,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
             _ => "World",
         }).Prepend(method.IsStatic ? "null" : "System"));
 
-        // The JIT specializes World.ForEach on this struct and inlines Execute and the user's method into the loop.
+        // The JIT specializes World.ForEach on this struct and inlines Execute and the user's method into the loop (only
+        // Execute for a method that runs out of line: ForEachModel.OutOfLine).
         string iface = "I" + method.Loop;
         // A batch job has no structural path at all; ForEachBatchParallel asks for the marker all the same, as every parallel loop.
         bool stable = method.Stable && (!method.IsBatch || method.Parallel);
@@ -661,6 +667,15 @@ public sealed class SystemGenerator : IIncrementalGenerator
         public Kernel.Code? Simd { get; init; }
 
         /// <summary>
+        /// Takes a Scratch and its body loops or calls: the row loop calls it instead of inlining it. Profile-guided
+        /// inlining takes such a method into the row loop (a Scratch argument makes it look cheap to inline), where its
+        /// own loop shares the callee-saved registers with the row loop's refs and the scratch box, runs out of them and
+        /// keeps its counters on the stack: 30-40% slower than the same method behind a call. A method without a loop or
+        /// a call is too small to spill and pays more for a call than it saves (a counter: 10-50%), so it stays inlined.
+        /// </summary>
+        public bool OutOfLine { get; init; }
+
+        /// <summary>
         /// Changes no structure (on one thread) and takes a Maybe, a Mut, a Reduce or a caller's value by ref: its job walks
         /// runs of rows, finding each optional column once per run (a presence bit per row), stamping a Mut's writes by row
         /// (no entity lookup) and keeping partial results and the caller's values in locals for the run. In parallel, a
@@ -778,8 +793,15 @@ public sealed class SystemGenerator : IIncrementalGenerator
                         Symbols.ParamKind.Reduction => $"l{i}", // the run's partial result, a local of the batch job
                         _ => $"x{i}",
                     }, ct, out _),
+                    OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LoopsOrCalls(syntax),
                 };
         }
+
+        /// <summary>The body has a loop or a call (syntax only: a call's target is not resolved).</summary>
+        private static bool LoopsOrCalls(MethodDeclarationSyntax syntax) =>
+            ((SyntaxNode?)syntax.Body ?? syntax.ExpressionBody)?.DescendantNodes().Any(static n => n is ForStatementSyntax
+                or ForEachStatementSyntax or ForEachVariableStatementSyntax or WhileStatementSyntax or DoStatementSyntax
+                or InvocationExpressionSyntax) == true;
     }
 
 

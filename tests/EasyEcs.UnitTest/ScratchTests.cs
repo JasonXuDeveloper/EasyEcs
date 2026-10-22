@@ -39,6 +39,26 @@ public class ScratchTests
         }
     }
 
+    public record struct Bonus(int Value) : IComponent;
+
+    /// <summary>
+    /// A Scratch method that loops, beside a Maybe: its job walks runs of rows (ForEachBatch) and calls the method out of
+    /// line, once per row.
+    /// </summary>
+    public class SumDigitsWithBonus : EcsSystem
+    {
+        [ForEach]
+        static void Sum(in Number number, ref DigitSum sum, ReadOnlyMaybe<Bonus> bonus, Scratch<List<int>> digits)
+        {
+            var list = digits.Value ??= new List<int>(16);
+            list.Clear();
+            for (int n = number.Value; n > 0; n /= 10) list.Add(n % 10);
+            int total = bonus.HasValue ? bonus.Value.Value : 0;
+            for (int i = 0; i < list.Count; i++) total += list[i];
+            sum.Value = total;
+        }
+    }
+
     /// <summary>Counts the rows its thread ran: what the last row left is what the next one finds.</summary>
     public class CountRows : EcsSystem
     {
@@ -151,6 +171,27 @@ public class ScratchTests
         }
 
         Assert.That(least, Is.Zero);
+    }
+
+    [Test]
+    public void AScratchMethodThatLoopsRunsInRunsOfRowsWithoutAllocating()
+    {
+        using var world = Numbered(1_000);
+        var bonused = new Entity[1_000];
+        world.CreateEntities(bonused, new Number(0), new DigitSum(0), new Bonus(100));
+        for (int i = 0; i < bonused.Length; i++) bonused[i].Number = new Number(i * 31);
+        world.AddSystem<SumDigitsWithBonus>();
+        world.Update();
+        foreach (var item in world.Read<Number, DigitSum>())
+        {
+            int bonus = item.Entity.TryGetBonus(out var b) ? b.Value : 0;
+            Assert.That(item.DigitSum.Value, Is.EqualTo(SumOfDigits(item.Number.Value) + bonus));
+        }
+
+        for (int i = 0; i < 10; i++) world.Update();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++) world.Update();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
 
     [Test]
