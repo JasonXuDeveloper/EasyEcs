@@ -161,6 +161,12 @@ public class CodeFixTests
     [TestCase("EECS033", "Use .WriteT",
         "public static class U { public static void F(Entity e) => e.Get<T>().V = 1; }",
         "=> e.WriteT().V = 1;")]
+    [TestCase("EECS033", "Use .SetTIfChanged",
+        "public static class U { public static void F(Entity e, int v) { if (e.T.V != v) e.SetT(v); } }",
+        "{ e.SetTIfChanged(v); }")]
+    [TestCase("EECS033", "Use .GetOrAddHp",
+        "public record struct Hp(int V) : IComponent; public static class U { public static int F(Entity e) => e.GetOrAdd(new Hp(3)).V; }",
+        "=> e.GetOrAddHp(3).V;")]
     [TestCase("EECS033", "Use .T",
         "public static class U { public static int F(Entity e) => e.Read<T>().V; }",
         "=> e.T.V;")]

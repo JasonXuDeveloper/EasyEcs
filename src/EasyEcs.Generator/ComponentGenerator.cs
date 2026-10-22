@@ -14,7 +14,7 @@ namespace EasyEcs.Generator;
 /// so the common calls read like fields and methods of the entity or the world:
 /// <list type="bullet">
 /// <item>component <c>Position</c>: <c>entity.Position</c> (<c>ref</c>, <c>Get</c>), <c>HasPosition</c>,
-/// <c>TryGetPosition(out p)</c>, <c>GetOrAddPosition()</c> (not for indexed components), <c>SetPosition(x, y)</c> (one overload per public constructor, or the public fields),
+/// <c>TryGetPosition(out p)</c>, <c>GetOrAddPosition()</c> and <c>GetOrAddPosition(x, y)</c> (added with that value if missing; not for indexed components), <c>SetPosition(x, y)</c> (one overload per public constructor, or the public fields),
 /// <c>RemovePosition()</c>. A component the world watches (<c>ITracked</c>, <c>IIndexed&lt;TKey&gt;</c>) gets a
 /// <c>ref readonly</c> property (<c>Read</c>): reading it never counts as a write, and writes are <c>Set…</c> calls; a
 /// tracked one that is neither indexed nor grouped also gets <c>WriteHealth()</c> (<c>ref</c>, <c>Get</c>: stamped as
@@ -297,6 +297,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             if (Free(World, "GetOrAdd" + n))
                 Member(sb, $"The world's <see cref=\"{t}\"/> by <c>ref</c>, added (default) first if missing (<c>GetOrAddSingleton</c>).",
                     $"ref {t} GetOrAdd{n}() => ref @this.GetOrAddSingleton<{t}>();");
+            if (Free(World, "GetOrAdd" + n))
+                foreach (var setter in m.Setters)
+                    if (setter.Parameters.Length > 0)
+                        Member(sb, $"The world's <see cref=\"{t}\"/> by <c>ref</c>, added with this value first if missing (<c>GetOrAddSingleton</c>); a world that has it keeps its own.",
+                            $"ref {t} GetOrAdd{n}({setter.Parameters}) => ref @this.GetOrAddSingleton({setter.Value});");
             if (Free(World, "Set" + n))
                 foreach (var setter in m.Setters)
                     Member(sb, $"Sets the world's <see cref=\"{t}\"/>, adding it if missing.",
@@ -324,6 +329,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         if (Free(Entity, "GetOrAdd" + n))
             Member(sb, $"The entity's <see cref=\"{t}\"/> by <c>ref</c>, added (default) first if missing (<c>GetOrAdd</c>).",
                 $"ref {t} GetOrAdd{n}() => ref @this.GetOrAdd<{t}>();");
+        if (Free(Entity, "GetOrAdd" + n))
+            foreach (var setter in m.Setters)
+                if (setter.Parameters.Length > 0)
+                    Member(sb, $"The entity's <see cref=\"{t}\"/> by <c>ref</c>, added with this value first if missing (<c>GetOrAdd</c>); an entity that has it keeps its own.",
+                        $"ref {t} GetOrAdd{n}({setter.Parameters}) => ref @this.GetOrAdd({setter.Value});");
         if (Free(Entity, "Disable" + n))
             Member(sb, $"Switches the entity's <see cref=\"{t}\"/> off, keeping its value (<c>Disable</c>); false if it has none enabled.",
                 $"bool Disable{n}() => @this.Disable<{t}>();");

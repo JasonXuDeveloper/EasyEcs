@@ -1663,6 +1663,10 @@ public class GeneratorTests
     [TestCase("public static class U { public static int F(World w, Entity e) => w.Index<Owned, EntityId>().Count(e); }", "EECS033")]
     [TestCase("public static class U { public static EntityId F(Entity e) => e.Read<ChildOf>().Parent; }", "EECS033")]          // EasyEcs's ChildOf has its members
     [TestCase("public static class U { public static bool F(Entity e) => e.Has<Retired>(); }", "EECS033")]
+    [TestCase("public static class U { public static void F(Entity e, int v) { if (e.T.V != v) e.SetT(v); } }", "EECS033")]           // a guarded write: SetTIfChanged
+    [TestCase("public static class U { public static void F(Entity e, int v) { if (v != e.Read<T>().V) { e.SetT(v); } } }", "EECS033")]
+    [TestCase("public record struct Hp(int V) : IComponent, ITracked; public static class U { public static void F(Entity e, int v) { if (e.Hp.V != v) e.Set(new Hp(v)); } }", "EECS033")]
+    [TestCase("public record struct Hp(int V) : IComponent; public static class U { public static int F(Entity e) => e.GetOrAdd(new Hp(3)).V; }", "EECS033")] // GetOrAddHp(3)
     [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) n += item.Component1.V; return n; } }", "EECS033")]
     [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<DynamicBuffer<Loot>>().Add(new Loot()); static DynamicBuffer<Loot> named; }", "EECS033")]
     // EECS034: a world update from a system.
@@ -1737,6 +1741,10 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<DynamicBuffer<Loot>>().Add(new Loot()); }")]          // the only name of the buffer
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p) { } }")]
     [TestCase("public static class U { public static EntityId F(World w, Entity e) { foreach (var item in w.Query<P, ChildOf>()) _ = item.ChildOf; return e.ChildOf.Parent; } }")]   // EasyEcs's own component, by its members
+    [TestCase("public static class U { public static void F(Entity e, int v) { if (e.T.V != v) e.SetT(v); else e.SetT(0); } }")]     // an else
+    [TestCase("public static class U { public static void F(Entity e, Entity o, int v) { if (o.T.V != v) e.SetT(v); } }")]             // another entity
+    [TestCase("public static class U { public static void F(Entity e, int v) { if (e.T.V != v) e.SetT(v + 1); } }")]                // another value
+    [TestCase("public record struct Two(int A, int B) : IComponent, ITracked; public static class U { public static void F(Entity e, int v) { if (e.Two.A != v) e.SetTwo(v, 0); } }")] // two fields
     public async Task CheapCodeIsNotReported(string source)
     {
         var costs = await Costs(Components, Extra, source);
