@@ -657,7 +657,7 @@ public class GeneratorTests
         public class Tally { public int N; }
         """;
 
-    // EECS060: code on several threads writes memory they share.
+    // EECS060: code on several threads writes memory they share; EECS061: a parallel job's field read after the call.
     [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) => Counters.Hits += p.V; }", "EECS060")]
     [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) { if (p.V > 0) Counters.Hits++; } }", "EECS060")]
     [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) => Counters.Max = p.V; }", "EECS060")]          // last writer wins
@@ -667,6 +667,8 @@ public class GeneratorTests
     [TestCase("public static class R { [ForEach(Parallel = true)] public static void A(in P p, Tally t) => t.N += p.V; }", "EECS060")]   // a context object
     [TestCase("public struct J : IForEach<P>, INoStructuralChanges { public void Execute(ref P p) => Counters.Hits += p.V; } public static class U { public static void F(World w) { var j = new J(); w.ForEachParallel<P, J>(ref j); } }", "EECS060")]
     [TestCase("public struct J : IForEachEntity<P>, INoStructuralChanges { public System.Collections.Generic.List<EntityId> Hits; public void Execute(Entity e, ref P p) { if (p.V > 0) Hits.Add(e.Id); } } public static class U { public static void F(World w) { var j = new J { Hits = new() }; w.ForEachEntityParallel<P, J>(ref j); } }", "EECS060")] // copies share the list
+    [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s); return s.Total; } }", "EECS061")]
+    [TestCase("public struct Seen : IForEach<P>, INoStructuralChanges { public bool Any; public void Execute(ref P p) { if (p.V > 0) Any = true; } } public static class U { public static bool F(World w) { var s = new Seen(); w.ForEachParallel<P, Seen>(ref s, default, 64); return s.Any; } }", "EECS061")]
     public async Task ParallelWritesAreReported(string source, string id)
     {
         var errors = await Diagnose(Components, Extra, Shared, source);
@@ -685,6 +687,10 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, in Q q) { var l = new System.Collections.Generic.List<int>(); l.Add(q.V); p.V = l.Count; } }")] // its own list
     [TestCase("public static class R { [ForEach(Parallel = true)] public static void A(ref P p, int n) { n++; p.V += n; } }")]           // a copy
     [TestCase("public struct J : IForEach<P>, INoStructuralChanges { public void Execute(ref P p) => Counters.Hits += p.V; } public static class U { public static void F(World w) { var j = new J(); w.ForEach<P, J>(ref j); } }")]
+    [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum(); w.ForEach<P, Sum>(ref s); return s.Total; } }")]
+    [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) { Total = p.V; p.V = Total * 2; } } public static class U { public static void F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s); } }")] // scratch per chunk
+    [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total, Limit; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum { Limit = 3 }; w.ForEachParallel<P, Sum>(ref s); return s.Limit; } }")] // not written
+    [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s); s.Total = 0; return s.Total; } }")] // set first
     public async Task ParallelWritesThatDoNotRaceAreNotReported(string source)
     {
         var errors = await Diagnose(Components, Extra, Shared, source);

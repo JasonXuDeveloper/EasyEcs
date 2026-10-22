@@ -197,7 +197,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
         UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows,
-        SharedWrite);
+        SharedWrite, LostJobWrite);
 
     public override void Initialize(AnalysisContext context)
     {

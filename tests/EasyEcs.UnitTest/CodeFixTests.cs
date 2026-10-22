@@ -245,6 +245,10 @@ public class CodeFixTests
     [TestCase("EECS054", "Remove ChunkRows",
         "public class S : EcsSystem { [ForEach(Parallel = true, ChunkRows = -1)] static void A(ref P p) => p.V++; }",
         "[ForEach(Parallel = true)] static void A(ref P p)")]
+    [TestCase("EECS061", "Run it on one thread",
+        "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
+        + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, QueryFilter.Create().Without<Q>()); return s.Total; } }",
+        "w.ForEach<P, Sum>(ref s, QueryFilter.Create().Without<Q>());")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
@@ -293,6 +297,8 @@ public class CodeFixTests
     [TestCase("EECS039", "public static class R { [ForEach] public static void B(Mut<P> p, in Q q) { if (q.V > 0) p.Write().V = q.V; }\n"
                          + "  public static void Call() { P p = default; B(new Mut<P>(ref p, default), default); } }")]                 // a caller passes a Mut
     [TestCase("EECS046", "public static class U { public static int F(World w) { int n = 0; foreach (QueryItem<T> item in w.Query<T>()) n += item.Component1.V; return n; } }")] // typed by hand
+    [TestCase("EECS061", "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
+                         + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, default, 64); return s.Total; } }")] // its chunk size: chosen for threads
     public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)
     {
         var document = Document(Data + source);

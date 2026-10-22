@@ -10,9 +10,10 @@ using Microsoft.CodeAnalysis.Operations;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// The rules for code that runs on several threads at once (EECS060): a parallel [ForEach] method, or the
+/// The rules for code that runs on several threads at once (EECS060, EECS061): a parallel [ForEach] method, or the
 /// <c>Execute</c> of a job run by <c>ForEachParallel</c> / <c>ForEachEntityParallel</c>, that writes memory every
-/// thread shares. The writes are found by <see cref="Threads.Writes"/>.
+/// thread shares, and a parallel job whose fields the caller reads after the call (each chunk ran a copy). Both find
+/// the writes with <see cref="Threads.Writes"/>.
 /// </summary>
 public sealed partial class EasyEcsAnalyzer
 {
@@ -27,6 +28,15 @@ public sealed partial class EasyEcsAnalyzer
         "(Interlocked, a lock). A constant written by every thread, [ThreadStatic] fields, concurrent collections, writes " +
         "inside a lock and elements of arrays and lists (rows may own different ones) are not reported.",
         helpLinkUri: Help("EECS060"));
+
+    public static readonly DiagnosticDescriptor LostJobWrite = new("EECS061", "A parallel job's field read after the pass",
+        "'{0}' is run by {1}, which gives each chunk its own copy of the job, so what Execute writes to its field '{2}' never reaches '{3}', read after the call",
+        Category, DiagnosticSeverity.Warning, true,
+        "ForEachParallel and ForEachEntityParallel run a copy of the job per chunk, on several threads, and merge nothing " +
+        "back: the job passed by ref keeps the values it had before the call. A field Execute writes (a sum, a count, a " +
+        "flag) and the caller reads afterwards holds its old value. Run the job on one thread (ForEach, ForEachEntity), " +
+        "which writes the job back, or write the results into the rows.",
+        helpLinkUri: Help("EECS061"));
 
     private static void InitializeParallel(AnalysisContext context)
     {
@@ -57,7 +67,8 @@ public sealed partial class EasyEcsAnalyzer
              && Symbols.IsSystem(write.Symbol.ContainingType));
 
     /// <summary>
-    /// EECS060 at a <c>ForEachParallel</c> / <c>ForEachEntityParallel</c> call: the job's Execute writes shared memory.
+    /// EECS060 and EECS061 at a <c>ForEachParallel</c> / <c>ForEachEntityParallel</c> call: the job's Execute writes
+    /// shared memory, or a field of the job the caller reads after the call.
     /// </summary>
     private static void AnalyzeParallelJob(OperationAnalysisContext context)
     {
@@ -70,9 +81,32 @@ public sealed partial class EasyEcsAnalyzer
             || call.SemanticModel is not { } model) return;
         var bodyModel = declaration.SyntaxTree == model.SyntaxTree ? model : model.Compilation.GetSemanticModel(declaration.SyntaxTree);
         if (bodyModel.GetOperation(declaration, context.CancellationToken) is not { } body) return;
-        if (Threads.Writes(body, job: true).FirstOrDefault(Races) is { } shared)
+        var writes = Threads.Writes(body, job: true).ToList();
+
+        if (writes.FirstOrDefault(Races) is { } shared)
             context.ReportDiagnostic(Diagnostic.Create(SharedWrite, call.Syntax.GetLocation(),
                 $"Job '{job.Name}', run by {method.Name},", shared.What, $" (Execute: '{Shorten(shared.Operation.Syntax)}')"));
+
+        // EECS061: the first use of the job local after the call reads a field Execute writes.
+        var own = new HashSet<ISymbol>(writes.Where(w => !w.Shared).Select(w => w.Symbol), SymbolEqualityComparer.Default);
+        if (own.Count == 0 || call.Arguments.FirstOrDefault(a => a.Parameter?.Name == "job")?.Value is not ILocalReferenceOperation { Local: var local }) return;
+        int after = call.Syntax.Span.End;
+        foreach (var use in Symbols.Root(call).Descendants().OfType<ILocalReferenceOperation>()
+                     .Where(r => SymbolEqualityComparer.Default.Equals(r.Local, local) && r.Syntax.SpanStart >= after)
+                     .OrderBy(r => r.Syntax.SpanStart))
+        {
+            if (use.Parent is not IFieldReferenceOperation { Field: var field } read || read.Parent is ISimpleAssignmentOperation { Target: var t } && t == read)
+                break; // the job itself used again, or the field set: what follows may see that, not the call's state
+            if (!own.Contains(field)) continue;
+            var fix = call.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name: var name } }
+                      && call.Arguments.All(a => a.Parameter?.Name != "chunkRows" || a.IsImplicit)
+                ? Fix(call.Syntax.ReplaceToken(name.Identifier, SyntaxFactory.Identifier(method.Name.Substring(0, method.Name.Length - "Parallel".Length))).ToString(),
+                    "Run it on one thread")
+                : null;
+            context.ReportDiagnostic(Diagnostic.Create(LostJobWrite, call.Syntax.GetLocation(), [read.Syntax.GetLocation()], fix,
+                job.Name, method.Name, field.Name, Shorten(read.Syntax)));
+            return;
+        }
     }
 
     /// <summary>The job's Execute for the components of a parallel call (its interface: IForEach&lt;…&gt; or IForEachEntity&lt;…&gt;).</summary>
