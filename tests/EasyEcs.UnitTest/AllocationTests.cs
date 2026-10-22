@@ -21,6 +21,7 @@ public class AllocationTests
         world.CreateEntities(new Entity[World.ParallelChunkRows], new Follows(leader.Id), new LookupTests.Place(1, 0));
         world.AddSystem<ReduceTests.ParallelScores>();
         world.AddSystem<ReduceTests.ParallelBounds>();
+        world.AddSystem<ReduceTests.ParallelCensus>();
         world.AddSystem<ScratchTests.SumDigits>();
         world.AddSystem<LookupTests.SumFollowers>();
         for (int i = 0; i < 30; i++) world.Update();

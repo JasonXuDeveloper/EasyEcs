@@ -1,0 +1,8 @@
+<doc>
+  <member name="T:EasyEcs.ProductAttribute" source="b3fb1c1f5e8c">
+    <summary>
+      归约中按乘法合并的字段：<c>Identity</c> 是 1，<c>Combine</c> 是 <c>left * right</c>。用在数值字段上（见
+      <see cref="T:EasyEcs.SumAttribute" />）。
+    </summary>
+  </member>
+</doc>

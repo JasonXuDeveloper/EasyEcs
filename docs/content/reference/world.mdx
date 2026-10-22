@@ -562,7 +562,23 @@ public ref T GetOrAddSingleton<T>() where T : struct, ISingletonComponent;
 
 Ref to singleton `T`, adding it (default) first if missing. O(1).
 
-**Complexity** ([API table](/en/docs/api)): O(1)
+**Complexity** ([API table](/en/docs/api)):
+
+- `GetOrAddSingleton<T>()`: O(1)
+- `world.GetOrAddSingleton<T>(in T value)`: O(1)
+
+### `GetOrAddSingleton` [#getoraddsingleton-2]
+
+```csharp
+public ref T GetOrAddSingleton<T>(scoped in T value) where T : struct, ISingletonComponent;
+```
+
+Ref to singleton `T`, adding it with `value` first if missing; a world that has it keeps its own value. The generated `GetOrAddClock(…)` calls it. O(1).
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `GetOrAddSingleton<T>()`: O(1)
+- `world.GetOrAddSingleton<T>(in T value)`: O(1)
 
 ### `GetSingleton` [#getsingleton]
 

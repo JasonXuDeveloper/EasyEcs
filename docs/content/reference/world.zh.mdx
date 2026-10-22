@@ -562,7 +562,23 @@ public ref T GetOrAddSingleton<T>() where T : struct, ISingletonComponent;
 
 单例 `T` 的 ref；不存在时先添加（默认值）。O(1)。
 
-**复杂度**（[API 表](/zh/docs/api)）：O(1)
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `GetOrAddSingleton<T>()`：O(1)
+- `world.GetOrAddSingleton<T>(in T value)`：O(1)
+
+### `GetOrAddSingleton` [#getoraddsingleton-2]
+
+```csharp
+public ref T GetOrAddSingleton<T>(scoped in T value) where T : struct, ISingletonComponent;
+```
+
+单例 `T` 的 ref，缺少时先以 `value` 添加；已有它的 World 保留自己的值。生成的 `GetOrAddClock(…)` 调用它。O(1)。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `GetOrAddSingleton<T>()`：O(1)
+- `world.GetOrAddSingleton<T>(in T value)`：O(1)
 
 ### `GetSingleton` [#getsingleton]
 

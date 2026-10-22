@@ -27,13 +27,15 @@ public sealed partial class World
     }
 
     /// <summary>Publish a fresh box for <typeparamref name="T"/>. Inside the structural gate.</summary>
-    private SingletonBox<T> Publish<T>() where T : struct, ISingletonComponent
+    private SingletonBox<T> Publish<T>() where T : struct, ISingletonComponent => Publish<T>(default);
+
+    private SingletonBox<T> Publish<T>(in T value) where T : struct, ISingletonComponent
     {
         int index = SingletonType<T>.Index;
         if (index >= _singletons.Length)
             Array.Resize(ref _singletons, Math.Max(index + 1, _singletons.Length * 2));
 
-        var box = new SingletonBox<T>();
+        var box = new SingletonBox<T> { Value = value };
         // Volatile publish so lock-free readers on other threads observe a fully constructed box.
         Volatile.Write(ref _singletons[index], box);
         return box;
@@ -47,6 +49,16 @@ public sealed partial class World
     public ref T GetOrAddSingleton<T>() where T : struct, ISingletonComponent
     {
         var box = Box<T>() ?? AddMissingSingleton<T>();
+        return ref box.Value;
+    }
+
+    /// <summary>
+    /// Ref to singleton <typeparamref name="T"/>, adding it with <paramref name="value"/> first if missing; a world that
+    /// has it keeps its own value. The generated <c>GetOrAddClock(…)</c> calls it. O(1).
+    /// </summary>
+    public ref T GetOrAddSingleton<T>(scoped in T value) where T : struct, ISingletonComponent
+    {
+        var box = Box<T>() ?? AddMissingSingleton(in value);
         return ref box.Value;
     }
 
@@ -69,6 +81,17 @@ public sealed partial class World
         using (Shared())
         {
             return Box<T>() ?? Publish<T>();
+        }
+    }
+
+    /// <summary><see cref="AddMissingSingleton{T}()"/> with a first value: set before the box is published, so no thread sees it default. Cold path.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SingletonBox<T> AddMissingSingleton<T>(in T value) where T : struct, ISingletonComponent
+    {
+        if (_disposed) throw new ObjectDisposedException(nameof(World));
+        using (Shared())
+        {
+            return Box<T>() ?? Publish(in value);
         }
     }
 

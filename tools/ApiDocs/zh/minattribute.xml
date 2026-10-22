@@ -1,0 +1,8 @@
+<doc>
+  <member name="T:EasyEcs.MinAttribute" source="87e18b2a6670">
+    <summary>
+      归约中保留较小值的字段：<c>Identity</c> 是类型的 <c>MaxValue</c>（<c>float</c> 和 <c>double</c> 是 +∞），
+      <c>Combine</c> 是 <c>Math.Min(left, right)</c>。用在数值字段上（见 <see cref="T:EasyEcs.SumAttribute" />）。
+    </summary>
+  </member>
+</doc>

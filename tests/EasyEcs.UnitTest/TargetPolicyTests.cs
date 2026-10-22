@@ -2,8 +2,61 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
+/// <summary>A summon dies with its summoner in every world: the policy is declared on the type.</summary>
+[WhenTargetDestroyed(TargetPolicy.Destroy)]
+public partial record struct SummonedBy([Key] EntityId Summoner) : IComponent;
+
+/// <summary>A pact's links go when its target is destroyed, in every world.</summary>
+[WhenTargetDestroyed(TargetPolicy.Remove)]
+public record struct PactWith(EntityId Target) : IRelation;
+
 public class TargetPolicyTests
 {
+    [Test]
+    public void ADeclaredPolicyHoldsFromAWorldsFirstTable()
+    {
+        using var world = new World();
+        var summoner = world.CreateEntity(new Health(1));
+        var summon = world.CreateEntity(new SummonedBy(summoner), new Health(2));
+        var other = world.CreateEntity(new SummonedBy(summon));
+        var ally = world.CreateEntity().Link(new PactWith(summoner)).Link(new PactWith(other));
+        summoner.Destroy();                                                   // no setup call in this world
+        Assert.That((summon.IsAlive, other.IsAlive, ally.IsAlive), Is.EqualTo((false, false, true)));
+        Assert.That(ally.Read<DynamicBuffer<PactWith>>().Count, Is.Zero);    // both targets went: their links went
+    }
+
+    [Test]
+    public void AWorldsOwnPolicyReplacesTheDeclaredOne()
+    {
+        using var world = new World();
+        world.Index<SummonedBy, EntityId>().WhenTargetDestroyed(TargetPolicy.Keep); // before the first table
+        world.Relations<PactWith>().WhenTargetDestroyed(TargetPolicy.Keep);
+        var summoner = world.CreateEntity(new Health(1));
+        var summon = world.CreateEntity(new SummonedBy(summoner));
+        var ally = world.CreateEntity().Link(new PactWith(summoner));
+        summoner.Destroy();
+        Assert.That((summon.IsAlive, ally.Read<DynamicBuffer<PactWith>>().Count), Is.EqualTo((true, 1)));
+
+        using var later = new World();
+        var first = later.CreateEntity(new Health(1));
+        var bound = later.CreateEntity(new SummonedBy(first));
+        later.Index<SummonedBy, EntityId>().WhenTargetDestroyed(TargetPolicy.Remove); // after the first table, before a destroy
+        first.Destroy();
+        Assert.That((bound.IsAlive, bound.Has<SummonedBy>()), Is.EqualTo((true, false)));
+    }
+
+    [Test]
+    public void ADeclaredPolicyAppliesToAnIndexCreatedFirst()
+    {
+        using var world = new World();
+        var index = world.Index<SummonedBy, EntityId>();                      // no table yet: the index brings the rule
+        var summoner = world.CreateEntity(new Health(1));
+        var summon = world.CreateEntity(new SummonedBy(summoner));
+        Assert.That(index.Count(summoner), Is.EqualTo(1));
+        summoner.Destroy();
+        Assert.That(summon.IsAlive, Is.False);
+    }
+
     [Test]
     public void ARemovedPolicyTakesTheComponentFromEveryFollower()
     {

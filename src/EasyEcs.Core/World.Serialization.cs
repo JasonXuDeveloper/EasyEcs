@@ -214,15 +214,19 @@ public sealed partial class World
         }
     }
 
-    /// <summary>Whether a save writes column <paramref name="bit"/> (<paramref name="info"/>): data, and kept by the set when there is one.</summary>
+    /// <summary>
+    /// Whether a save writes column <paramref name="bit"/> (<paramref name="info"/>): data, not [NotSaved], and kept by
+    /// the set when there is one. Cold: once per column per save.
+    /// </summary>
     private static bool Saves(ComponentInfo info, int bit, in ComponentSet components, SaveFilter filter) =>
         info.Owner < 0 // a change-tick column is not data
+        && !(info.DisabledOf >= 0 ? ComponentInfo.Of(info.DisabledOf) : info).NotSaved // a Disabled<T> tag goes with T
         && (filter == SaveFilter.None
             || components.Contains(info.DisabledOf >= 0 ? info.DisabledOf : bit) == (filter == SaveFilter.Include)); // a Disabled<T> tag goes with T
 
-    /// <summary>Whether a whole-world save writes the singleton in <paramref name="slot"/>: unless the set excludes it.</summary>
-    private static bool SavesSingleton(int slot, in ComponentSet components, SaveFilter filter) =>
-        filter != SaveFilter.Exclude || !components.ContainsSingleton(slot);
+    /// <summary>Whether a whole-world save writes singleton <paramref name="box"/> (in <paramref name="slot"/>): unless it is [NotSaved] or the set excludes it.</summary>
+    private static bool SavesSingleton(SingletonBox box, int slot, in ComponentSet components, SaveFilter filter) =>
+        !box.NotSaved && (filter != SaveFilter.Exclude || !components.ContainsSingleton(slot));
 
     private void WriteSave(ref Writer writer, bool all, in ComponentSet components, SaveFilter filter)
     {
@@ -299,11 +303,11 @@ public sealed partial class World
         // The singletons, by type id, each a slice (a group has none; an excluded one is left out).
         int singletons = 0;
         for (int slot = 0; all && slot < _singletons.Length; slot++)
-            if (_singletons[slot] != null && SavesSingleton(slot, in components, filter)) singletons++;
+            if (_singletons[slot] is SingletonBox counted && SavesSingleton(counted, slot, in components, filter)) singletons++;
         writer.Write(singletons);
         for (int slot = 0; all && slot < _singletons.Length; slot++)
         {
-            if (_singletons[slot] is not SingletonBox box || !SavesSingleton(slot, in components, filter)) continue;
+            if (_singletons[slot] is not SingletonBox box || !SavesSingleton(box, slot, in components, filter)) continue;
             writer.Write(box.TypeId);
             int slice = writer.ReserveInt32();
             box.Write(ref writer);
@@ -484,7 +488,7 @@ public sealed partial class World
                 var box = Find(loaded, id) ?? SavedTypes.NewSingleton(id);
                 if (box == null) continue;
                 box.Clear();
-                if (!keep.ContainsSingleton(box.Slot)) // a kept one's box stays in the snapshot, empty: Restore skips it
+                if (!keep.ContainsSingleton(box.Slot) && !box.NotSaved) // a kept one's box stays in the snapshot, empty: Restore skips it
                 {
                     box.Read(ref slice);
                     Ends(ref slice, box.Name);

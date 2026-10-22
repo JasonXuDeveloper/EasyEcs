@@ -582,4 +582,11 @@
       在需要逐行检查的表里，行全部通过的字并入前面几个字的那一段，部分行通过的字整个交给 job，通过的行以位的形式给出。零分配。
     </summary>
   </member>
+
+  <member name="M:EasyEcs.World.GetOrAddSingleton``1(``0@)" source="8767f4018347">
+    <summary>
+      单例 <typeparamref name="T" /> 的 ref，缺少时先以 <paramref name="value" /> 添加；已有它的 World 保留自己的值。
+      生成的 <c>GetOrAddClock(…)</c> 调用它。O(1)。
+    </summary>
+  </member>
 </doc>

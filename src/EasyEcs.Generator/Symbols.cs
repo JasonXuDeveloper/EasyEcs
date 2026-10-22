@@ -28,12 +28,17 @@ internal static class Symbols
     public const string Entity = "EasyEcs.Entity";
     public const string EntitySpan = "EasyEcs.EntitySpan";
     public const string World = "EasyEcs.World";
+    public const string ComponentSet = "EasyEcs.ComponentSet";
     public const string DynamicBuffer = "EasyEcs.DynamicBuffer<T>";
     public const string TrackChanges = "EasyEcs.ITracked";
     public const string Indexed = "EasyEcs.IIndexed<TKey>";
     public const string UniqueIndexed = "EasyEcs.IUniqueIndexed<TKey>";
     public const string DirectIndexed = "EasyEcs.IDirectIndexed<TKey>";
     public const string Group = "EasyEcs.IGroup";
+    public const string Relation = "EasyEcs.IRelation";
+    public const string GroupByAttribute = "EasyEcs.GroupByAttribute";
+    public const string WhenTargetDestroyedAttribute = "EasyEcs.WhenTargetDestroyedAttribute";
+    public const string NotSavedAttribute = "EasyEcs.NotSavedAttribute";
     public const string Cleanup = "EasyEcs.ICleanupComponent";
     public const string EntityId = "EasyEcs.EntityId";
     public const string UpdateBeforeAttribute = "EasyEcs.UpdateBeforeAttribute<TSystem>";
@@ -364,9 +369,81 @@ internal static class Symbols
     /// groups by (<c>IGroup</c>): written only with Set (and Link / Unlink), so its index or table follows.
     /// </summary>
     public static bool IsIndexed(ITypeSymbol type) =>
-        type.AllInterfaces.Any(i => Named(i.OriginalDefinition, Indexed) || Named(i.OriginalDefinition, Group))
+        IndexKey(type, out _) != null || IsGrouped(type)
         || type is INamedTypeSymbol { IsGenericType: true } buffer && Named(buffer.OriginalDefinition, "EasyEcs.DynamicBuffer<T>")
         && Implements(buffer.TypeArguments[0], "EasyEcs.IRelation");
+
+    /// <summary>
+    /// The key type of indexed component <paramref name="type"/>, or null: by the interfaces it implements
+    /// (<c>IUniqueIndexed&lt;TKey&gt;</c> first, then <c>IIndexed&lt;TKey&gt;</c>), else by its <c>[Key]</c> /
+    /// <c>[UniqueKey]</c> when the generator writes that key (<see cref="Parts"/>). Every generator asks this, never the
+    /// interfaces alone: the interface a generated part adds is not in another generator's compilation.
+    /// <paramref name="unique"/>: the key is unique.
+    /// </summary>
+    public static ITypeSymbol? IndexKey(ITypeSymbol type, out bool unique)
+    {
+        if (InterfaceKey(type, out unique) is { } declared) return declared;
+        if (type is not INamedTypeSymbol named || !Parts.Declares(named, Parts.Key) && !Parts.Declares(named, Parts.UniqueKey)) return null;
+        if (Parts.Of(named) is not { WritesKey: true } parts) return null;
+        unique = parts.KeyOf!.Unique;
+        return parts.KeyType;
+    }
+
+    /// <summary>The key of the index interfaces <paramref name="type"/> implements (<c>IUniqueIndexed&lt;TKey&gt;</c> first), or null.</summary>
+    public static ITypeSymbol? InterfaceKey(ITypeSymbol type, out bool unique)
+    {
+        ITypeSymbol? key = null;
+        unique = false;
+        foreach (var face in type.AllInterfaces)
+        {
+            if (Named(face.OriginalDefinition, UniqueIndexed))
+            {
+                unique = true;
+                return face.TypeArguments[0];
+            }
+
+            if (key == null && Named(face.OriginalDefinition, Indexed)) key = face.TypeArguments[0];
+        }
+
+        return key;
+    }
+
+    /// <summary>
+    /// Whether the world groups tables by component <paramref name="type"/>: it implements <c>IGroup</c>, or the
+    /// generator writes its <c>[Group]</c> (see <see cref="IndexKey"/>).
+    /// </summary>
+    public static bool IsGrouped(ITypeSymbol type) =>
+        Implements(type, Group) || type is INamedTypeSymbol named && Parts.Declares(named, Parts.Group) && Parts.Of(named) is { WritesGroup: true };
+
+    /// <summary>
+    /// Why <paramref name="type"/> cannot take the world setup <paramref name="attribute"/> declares, or null: [GroupBy]
+    /// on a grouped component (<see cref="IsGrouped"/>), [WhenTargetDestroyed] on a relation or a component indexed by
+    /// an <c>EntityId</c> (<see cref="IndexKey"/>), [NotSaved] on a component or a singleton. The generator registers only what this accepts; EECS068 reports the rest.
+    /// </summary>
+    public static string? SetupProblem(INamedTypeSymbol type, AttributeData attribute)
+    {
+        if (Named(attribute.AttributeClass, NotSavedAttribute))
+            return Implements(type, Component) || Implements(type, Singleton) ? null
+                : "is neither a component nor a singleton: [NotSaved] leaves a component or a singleton out of saves";
+        if (Named(attribute.AttributeClass, GroupByAttribute))
+            return Implements(type, Component) && IsGrouped(type) ? null
+                : "is not a grouped component: [GroupBy] splits tables by IGroup.Group (implement IGroup, or declare the member with [Group])";
+        if (Implements(type, Relation)) return null;
+        return Implements(type, Component) && IndexKey(type, out bool unique) is { } key && Named(key, EntityId) && !unique ? null
+            : "is neither a relation (IRelation) nor a component indexed by an EntityId: [WhenTargetDestroyed] decides what happens to links to a destroyed entity";
+    }
+
+    /// <summary>Whether <paramref name="type"/> is <c>IEquatable</c> of itself: what an index key must be.</summary>
+    public static bool IsEquatable(ITypeSymbol type)
+    {
+        if (type is ITypeParameterSymbol parameter)
+            return parameter.ConstraintTypes.Any(c => c is INamedTypeSymbol { IsGenericType: true } e && Named(e.OriginalDefinition, "System.IEquatable<T>")
+                                                      && SymbolEqualityComparer.Default.Equals(e.TypeArguments[0], type));
+        foreach (var face in type.AllInterfaces)
+            if (Named(face.OriginalDefinition, "System.IEquatable<T>") && SymbolEqualityComparer.Default.Equals(face.TypeArguments[0].WithNullableAnnotation(NullableAnnotation.None), type.WithNullableAnnotation(NullableAnnotation.None)))
+                return true;
+        return false;
+    }
 
     /// <summary>
     /// Code outside the type's declaration, anywhere in its assembly, can name <paramref name="type"/>: it and every
@@ -899,15 +976,13 @@ internal static class Symbols
     /// </summary>
     public static ITypeSymbol? LookupKey(IParameterSymbol lookup, IMethodSymbol method, MethodDeclarationSyntax? syntax)
     {
-        if (LookupElement(lookup.Type) is not INamedTypeSymbol component) return null;
-        var indexed = component.AllInterfaces.FirstOrDefault(i => Named(i.OriginalDefinition, Indexed));
-        if (indexed == null) return null;
-        if (component.AllInterfaces.Any(i => Named(i.OriginalDefinition, UniqueIndexed))) return indexed.TypeArguments[0];
+        if (LookupElement(lookup.Type) is not INamedTypeSymbol component || IndexKey(component, out bool unique) is not { } key) return null;
+        if (unique) return key;
         var body = (SyntaxNode?)syntax?.Body ?? syntax?.ExpressionBody;
         bool byKey = body != null && body.DescendantNodes().OfType<InvocationExpressionSyntax>().Any(call =>
             call.Expression is MemberAccessExpressionSyntax { Name.Identifier.ValueText: "TryFind" or "Count" or "Find", Expression: IdentifierNameSyntax target }
             && target.Identifier.ValueText == lookup.Name);
-        return byKey ? indexed.TypeArguments[0] : null;
+        return byKey ? key : null;
     }
 
     /// <summary>The queried component of a parameter: a <c>ref</c> / <c>in</c> component, a span's element or a <c>Mut</c>'s; else null.</summary>
