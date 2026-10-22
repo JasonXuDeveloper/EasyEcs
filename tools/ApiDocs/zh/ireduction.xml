@@ -1,0 +1,17 @@
+<doc>
+  <member name="T:EasyEcs.IReduction`1" source="7c14351ff1e3">
+    <summary>
+      <typeparamref name="T" /> 的值怎样合并：满足结合律的 <see cref="M:EasyEcs.IReduction`1.Combine(`0,`0)" />，以及它的
+      <see cref="P:EasyEcs.IReduction`1.Identity" />，和任何值合并都不改变那个值（求和是 0，求最小值是 <c>float.MaxValue</c>）。
+      为自身实现它的单例，就是 <see cref="T:EasyEcs.Reduce`1" /> 参数的结果。Combine 不必满足交换律：部分结果按行的顺序合并。
+      逐字段写（结果的每个字段只取两边的同一个字段）时，它也是向量循环可以逐 lane 套用的逐元素形式。
+    </summary>
+    <typeparam name="T">被合并的值。</typeparam>
+  </member>
+  <member name="P:EasyEcs.IReduction`1.Identity" source="e2a13432c8f8">
+    <summary>和任何值合并都不改变那个值的值：每个部分结果的起点。</summary>
+  </member>
+  <member name="M:EasyEcs.IReduction`1.Combine(`0,`0)" source="930c1150bd94">
+    <summary><paramref name="left" /> 和 <paramref name="right" /> 合并的结果，<paramref name="left" /> 的行在前。</summary>
+  </member>
+</doc>

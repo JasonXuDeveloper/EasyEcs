@@ -174,6 +174,14 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "more sets it (rounded up to 64). A method without Parallel = true runs on one thread and has no chunks: set " +
         "Parallel = true or drop ChunkRows.", helpLinkUri: Help("EECS054"));
 
+    public static readonly DiagnosticDescriptor BadReduction = new("EECS057", "A reduction whose result another write replaces",
+        "Parameter '{0}' of [ForEach] method '{1}' reduces into {2}, but {3}",
+        Category, DiagnosticSeverity.Error, true,
+        "A Reduce<T> parameter gives each chunk of rows a partial result of singleton T and replaces T with the combined " +
+        "result when the pass ends. A second Reduce<T> of the same method or system, or a 'ref T' parameter of the same " +
+        "method, writes T in the same pass: one result would silently replace the other. Reduce each result into a " +
+        "singleton of its own, and read the last result with 'in T'.", helpLinkUri: Help("EECS057"));
+
     public static readonly DiagnosticDescriptor BadIndexKey = new("EECS036", "A component that cannot be indexed by its key",
         "'{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
@@ -196,7 +204,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
-        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows);
+        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -777,6 +785,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                 context.ReportDiagnostic(Diagnostic.Create(BadParameter, p.Locations.FirstOrDefault(),
                     Symbols.ByValueData(p) ? ImmutableDictionary<string, string?>.Empty.Add(ByValue, "") : null, p.Name, method.Name));
             }
+            else if (kind == Symbols.ParamKind.Reduction && Symbols.ReductionProblem(method, p) is { } reduction)
+                context.ReportDiagnostic(Diagnostic.Create(BadReduction, p.Locations.FirstOrDefault(), p.Name, method.Name,
+                    Symbols.ReduceElement(p.Type)!.Name, reduction));
             else if (kind == Symbols.ParamKind.Optional && !Symbols.IsReadOnlyMaybe(p.Type)
                      && Symbols.MaybeElement(p.Type) is { } optional && Symbols.IsIndexed(optional))
                 context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, p.Locations.FirstOrDefault(), optional.Name,
