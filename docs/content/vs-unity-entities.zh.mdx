@@ -41,6 +41,8 @@ Unity 的跑分，因为没有这样的测试。
 | `ScheduleParallel` | `[ForEach(Parallel = true)]` | 按行分块交给线程池；会产生竞争的方法由分析器拦下（[EECS010](/zh/docs/guide/analyzer#eecs010)）。 |
 | `IJobParallelFor` 的 batch count | `[ForEach(Parallel = true, ChunkRows = n)]` | 一个线程每次领多少行，适合行少而重（[块大小](/zh/docs/guide/threading#chunk-rows)）。 |
 | `IJobParallelFor` 累加进 `NativeReference`（配 `[NativeDisableParallelForRestriction]` 和 `Interlocked`，或每线程一个 `NativeArray`） | 并行 `[ForEach]` 方法的 `Reduce<T>` 参数 | 每块一个部分结果，每行没有原子操作，按行的顺序合并进单例（[归约](/zh/docs/guide/threading#reductions)）；共享计数器的写法由 EECS060 报告。 |
+| job 里带 `[ReadOnly]` 的 `ComponentLookup<T>` | `Lookup<T>` 参数 | 任意实体在这一遍之前的 `T`，按 id 或按键；系统算作读 `T`，所以可以并行，方法自己也写 `T` 时报 EECS059（[查找](/zh/docs/guide/threading#lookups)）。 |
+| 每个 job 分配一个 `NativeList`，或用 `[NativeSetThreadIndex]` 每线程一个列表 | `Scratch<T>` 参数 | 每个方法、每个线程一个 `T`，只分配一次，由行自己清空（[临时空间](/zh/docs/guide/threading#scratch)）。 |
 | `EntityQuery` 的 `WithAll` / `WithNone` / `WithAny` | `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`；临时调用用 `QueryFilter` | |
 | 变更过滤（`WithChangeFilter<T>`） | `ITracked` + `[Changed<T>]` | 按行而不是按 chunk，按组件类型自愿开启。 |
 | 结构变更事件 | `[Removed<T>]` | 系统上次运行以来失去了某个被追踪组件的实体。 |

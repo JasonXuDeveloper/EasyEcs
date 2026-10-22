@@ -188,6 +188,8 @@ public class MovementSystem : EcsSystem
 | `EntitySpan` | 批量方法这一段行对应的实体 | 仅批量方法 |
 | `Maybe<T>` | 实体可能没有的组件 | `HasValue`、`Value` |
 | `ReadOnlyMaybe<T>` | 同上，只读（带索引的组件也行） | `HasValue`、`Value`（`ref readonly`） |
+| `Scratch<T>` | 方法在当前线程上的工作内存，在行之间保留 | `Value`（`ref T`，起初是 `default`：`scratch.Value ??= new()`）；每行清空；不要把它持有的东西存起来（[临时空间](/zh/docs/guide/threading#scratch)、[EECS058](/zh/docs/guide/analyzer#eecs058)） |
+| `Lookup<T>` | 只读地读取任意实体在这一遍之前的 `T`；并行也能用 | `lookup[id]`（`ReadOnlyMaybe<T>`）、`Read(id)`、`Has(id)`；按键 `TryFind`、`Find`、`Count`（[查找](/zh/docs/guide/threading#lookups)、[EECS059](/zh/docs/guide/analyzer#eecs059)） |
 | `ref Reduce<T>` | 对所有行求总数，结果放进单例 `T : IReduction<T>` | 必须按 `ref` 传入（否则 EECS002）；`Value` 字段是这一块的部分结果；合并后的结果替换 `T`（[归约](/zh/docs/guide/threading#reductions)、[EECS057](/zh/docs/guide/analyzer#eecs057)） |
 | `Mut<T>` | 方法只在部分行上写的组件 | `Value` 只读；`Write()` 和改了值的 `SetIfChanged(value)` 才给这一行打 tick；对调度器来说算写入 |
 | 其他任意类型（系统之外） | 调用方传给入口方法的值 | `ref int count`、`in Settings s` |

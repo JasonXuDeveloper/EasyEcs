@@ -24,7 +24,7 @@ EasyEcs 的全部功能都在这一页，按它在服务器上承担的工作分
 | [查找](#find) | [值索引](#value-indexes)、[唯一键](#unique-keys)、[有序区间](#ordered-ranges)、[按值分表](#table-groups) |
 | [组织](#structure) | [关系](#relations)、[层级](#hierarchy)、[动态缓冲](#dynamic-buffers)、[预制体与克隆](#prefabs-and-cloning) |
 | [持久化](#persist) | [快照](#snapshots)、[存档](#saves)、[迁移](#migration)、[卸载插件类型](#unloading) |
-| [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、并行 [`[ForEach]`](#parallel-foreach)、[归约](#reductions)、[批量操作](#bulk-operations) |
+| [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、并行 [`[ForEach]`](#parallel-foreach)、[归约](#reductions)、[临时空间和查找](#scratch-and-lookups)、[批量操作](#bulk-operations) |
 | [构建与运维](#operate) | [分析器与代码修复](#analyzer)、[系统耗时统计](#per-system-timing)、[调度](#schedule)、[异常处理](#errors)、[运行时自省](#introspection)、[归还内存](#trim-excess)、[Native AOT](#native-aot)、[托管与测试](#hosting-and-testing)、[模板与示例程序](#templates) |
 
 ## 模拟 [#simulate]
@@ -518,6 +518,19 @@ restarted.Load(bytes.WrittenSpan);
   `ChunkRows` 固定时，浮点结果在任何线程数下都相同。[EECS057](/zh/docs/guide/analyzer#eecs057) 拒绝对 `T` 的第二处写入；
   [EECS060](/zh/docs/guide/analyzer#eecs060) 和 [EECS061](/zh/docs/guide/analyzer#eecs061) 报告它所替代的共享计数器和 job 字段。
 - **指南：** [多线程与并行](/zh/docs/guide/threading#reductions)
+
+### 并行方法里的临时空间和查找 [#scratch-and-lookups]
+
+另外两个参数让并行 `[ForEach]` 方法保持并行。`Scratch<T>` 是方法在当前线程上的工作内存（OpenMP 的 `threadprivate`）：每个线程只分配一次的
+列表或缓冲，这个线程跑的每一行都复用它。`Lookup<T>` 读取任意实体在这一遍之前的组件 `T`（MPI 的单边 `Get`、Unity 的 `ComponentLookup`），
+按 id，带索引的 `T` 还能按键。
+
+- **适合：** 一行的候选、边界或缓冲（`Scratch<T>`）；目标的位置、首领、某个键的持有者（`Lookup<T>`）。
+- **别用于：** 上限固定的小缓冲（`stackalloc`）；当前行自己的组件（直接作为参数）。
+- **开销：** `Scratch<T>` 每块查一次这个线程的值，每个线程第一行之后零分配；`Lookup<T>` 每次读取一次实体查找，单线程时也比 `World` 参数快。
+  系统算作读 `T`；[EECS058](/zh/docs/guide/analyzer#eecs058) 不让临时内存进入 World，[EECS059](/zh/docs/guide/analyzer#eecs059)
+  不让方法查找自己会写的组件。
+- **指南：** [临时空间](/zh/docs/guide/threading#scratch)、[查找](/zh/docs/guide/threading#lookups)
 
 ### 批量操作 [#bulk-operations]
 

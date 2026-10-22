@@ -27,7 +27,7 @@ after warm-up, and is covered by the unit tests and a BenchmarkDotNet benchmark.
 | [Find](#find) | [value indexes](#value-indexes), [unique keys](#unique-keys), [ordered ranges](#ordered-ranges), [table groups](#table-groups) |
 | [Structure](#structure) | [relations](#relations), [hierarchy](#hierarchy), [dynamic buffers](#dynamic-buffers), [prefabs and cloning](#prefabs-and-cloning) |
 | [Persist](#persist) | [snapshots](#snapshots), [saves](#saves), [migration](#migration), [unloading plugin types](#unloading) |
-| [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), parallel [`[ForEach]`](#parallel-foreach), [reductions](#reductions), [bulk operations](#bulk-operations) |
+| [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), parallel [`[ForEach]`](#parallel-foreach), [reductions](#reductions), [scratch and lookups](#scratch-and-lookups), [bulk operations](#bulk-operations) |
 | [Build and operate](#operate) | [analyzer and code fixes](#analyzer), [per-system timing](#per-system-timing), [the schedule](#schedule), [errors](#errors), [introspection](#introspection), [giving memory back](#trim-excess), [Native AOT](#native-aot), [hosting and testing](#hosting-and-testing), [templates and samples](#templates) |
 
 ## Simulate [#simulate]
@@ -610,6 +610,22 @@ and the partial results, combined in row order, replace `T` when the pass ends: 
   [EECS060](/en/docs/guide/analyzer#eecs060) and [EECS061](/en/docs/guide/analyzer#eecs061) report the shared
   counters and job fields it replaces.
 - **Guide:** [Threading](/en/docs/guide/threading#reductions)
+
+### Scratch and lookups in parallel methods [#scratch-and-lookups]
+
+Two more parameters keep a parallel `[ForEach]` method parallel. `Scratch<T>` is the method's working memory on
+the running thread (OpenMP's `threadprivate`): a list or a buffer allocated once per thread and reused by every row
+it runs. `Lookup<T>` reads component `T` of any entity as it was before the pass (MPI's one-sided `Get`, Unity's
+`ComponentLookup`), by id or, for an indexed `T`, by key.
+
+- **Use it for:** a row's candidates, frontier or buffer (`Scratch<T>`); a target's position, a leader, the holder
+  of a key (`Lookup<T>`).
+- **Skip it for:** a small buffer with a fixed bound (`stackalloc`); the row's own components (parameters).
+- **Cost:** `Scratch<T>`, one lookup of the thread's value per chunk and 0 bytes after each thread's first row;
+  `Lookup<T>`, one entity lookup per read, faster than the `World` parameter on one thread too. The system reads
+  `T`; [EECS058](/en/docs/guide/analyzer#eecs058) keeps scratch memory out of the world,
+  [EECS059](/en/docs/guide/analyzer#eecs059) a lookup away from a component the method writes.
+- **Guide:** [Scratch](/en/docs/guide/threading#scratch), [lookups](/en/docs/guide/threading#lookups)
 
 ### Bulk operations [#bulk-operations]
 
