@@ -239,6 +239,12 @@ public class CodeFixTests
     [TestCase("EECS052", "Create it with the component",
         "public static class U { public static Entity F(World w, Prefab p) { Entity e = w.Instantiate(p); e.Set(new Q()); return e; } }",
         "{ Entity e = w.Instantiate(p, new Q()); return e; }")]
+    [TestCase("EECS054", "Remove ChunkRows",
+        "public class S : EcsSystem { [ForEach(ChunkRows = 64)] static void A(ref P p) => p.V++; }",
+        "[ForEach] static void A(ref P p)")]
+    [TestCase("EECS054", "Remove ChunkRows",
+        "public class S : EcsSystem { [ForEach(Parallel = true, ChunkRows = -1)] static void A(ref P p) => p.V++; }",
+        "[ForEach(Parallel = true)] static void A(ref P p)")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);

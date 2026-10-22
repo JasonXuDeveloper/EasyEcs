@@ -25,7 +25,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS018", "EECS022", "EECS023", "EECS025", "EECS026", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
-            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053");
+            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -130,7 +130,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                     if (kind == "Static" && !await UsesInstance(context.Document, method, context.CancellationToken).ConfigureAwait(false)
                         && !await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false))
                         MakeStatic(context, diagnostic, generator, root, method);
-                    if (Parallel(method) is { Parent: AttributeArgumentListSyntax arguments } argument)
+                    if (Named(method, "Parallel") is { Parent: AttributeArgumentListSyntax arguments } argument)
                         Register(context, diagnostic, "Run it on one thread", root, arguments,
                             arguments.Arguments.Count == 1 ? null : arguments.RemoveNode(argument, SyntaxRemoveOptions.KeepNoTrivia));
                     break;
@@ -141,6 +141,11 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                 case "EECS022" when diagnostic.AdditionalLocations.FirstOrDefault() is { } where:
                     context.RegisterCodeFix(CodeAction.Create("Make it internal",
                         token => Internal(context.Document, where, token), diagnostic.Id), diagnostic);
+                    break;
+                case "EECS054" when kind == "ChunkRows" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
+                                    && Named(method, "ChunkRows") is { Parent: AttributeArgumentListSyntax list } chunks:
+                    Register(context, diagnostic, "Remove ChunkRows", root, list,
+                        list.Arguments.Count == 1 ? null : list.RemoveNode(chunks, SyntaxRemoveOptions.KeepNoTrivia));
                     break;
                 case "EECS023" when node.FirstAncestorOrSelf<AttributeSyntax>() is { Parent: AttributeListSyntax list } attribute:
                     Register(context, diagnostic, "Remove the filter", root, list.Attributes.Count == 1 ? list : attribute, null);
@@ -587,11 +592,11 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
         }
     }
 
-    /// <summary>EECS010: the <c>Parallel = true</c> argument of the method's [ForEach].</summary>
-    private static AttributeArgumentSyntax? Parallel(MethodDeclarationSyntax method) =>
+    /// <summary>The named argument <paramref name="name"/> of the method's [ForEach] attribute (EECS010: <c>Parallel = true</c>, EECS054: <c>ChunkRows = 64</c>).</summary>
+    private static AttributeArgumentSyntax? Named(MethodDeclarationSyntax method, string name) =>
         method.AttributeLists.SelectMany(l => l.Attributes).Where(IsForEach)
             .SelectMany(a => a.ArgumentList?.Arguments ?? default)
-            .FirstOrDefault(a => a.NameEquals?.Name.Identifier.Text == "Parallel");
+            .FirstOrDefault(a => a.NameEquals?.Name.Identifier.Text == name);
 
     /// <summary>Whether <paramref name="attribute"/> is spelled as [ForEach] (the fixes edit its syntax, not its symbol).</summary>
     private static bool IsForEach(AttributeSyntax attribute) =>
