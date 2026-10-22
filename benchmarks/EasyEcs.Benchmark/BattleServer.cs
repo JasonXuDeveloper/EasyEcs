@@ -25,9 +25,9 @@ public record struct Frozen(int Ticks) : IComponent;                          //
 public record struct Goal(int Waypoint) : IComponent, ITracked;              // where an NPC heads: replicated,
                                                                               // re-planned often, rarely different
 public record struct Lifetime(int Ticks) : IComponent;
-public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }  // a table per zone
-public record struct Kills(int Count) : IComponent, IIndexed<int> { public int Key => Count; } // ordered: a leaderboard
-public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; } // one hero per account
+public partial record struct Zone([Group] int Id) : IComponent;              // a table per zone
+public partial record struct Kills([Key] int Count) : IComponent;            // indexed, ordered: a leaderboard
+public partial record struct Account([UniqueKey] int Id) : IComponent;       // one hero per account
 public record struct Spawn(Position At, int Seed) : ICleanupComponent;        // outlives its NPC: where the next appears
 public record struct Loot(int Item);                                          // players carry a DynamicBuffer<Loot>
 public record struct Friend(EntityId Target) : IRelation;                     // and a DynamicBuffer<Friend> of links

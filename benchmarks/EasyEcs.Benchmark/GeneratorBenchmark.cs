@@ -145,9 +145,9 @@ public class GeneratorBenchmark
                     }
 
                     [ForEach]
-                    static void Pick(ref DynamicBuffer<Item{{m}}> items, in {{b}} q)
+                    static void Pick(Mut<DynamicBuffer<Item{{m}}>> items, in {{b}} q)
                     {
-                        if (q.V > 100 && items.Count < 8) items.Add(new Item{{m}}(q.V));
+                        if (q.V > 100 && items.Value.Count < 8) items.Write().Add(new Item{{m}}(q.V));
                     }
                 }
 
