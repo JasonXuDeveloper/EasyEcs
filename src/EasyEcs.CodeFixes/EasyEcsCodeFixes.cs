@@ -24,7 +24,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
 {
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
-            "EECS018", "EECS022", "EECS023", "EECS025", "EECS026", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
+            "EECS018", "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
             "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
@@ -141,6 +141,13 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                 case "EECS022" when diagnostic.AdditionalLocations.FirstOrDefault() is { } where:
                     context.RegisterCodeFix(CodeAction.Create("Make it internal",
                         token => Internal(context.Document, where, token), diagnostic.Id), diagnostic);
+                    break;
+                case "EECS027" when kind == "Parameter" && diagnostic.Properties.TryGetValue("Name", out var name) && name != null
+                                    && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
+                                    && !await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false):
+                    diagnostic.Properties.TryGetValue("Parameter", out var taken);
+                    Register(context, diagnostic, taken == null ? $"Use parameter '{name}'" : $"Take it as a parameter ('{taken}')", root, method,
+                        Lookups(root, method, diagnostic.AdditionalLocations, name, taken));
                     break;
                 case "EECS054" when kind == "ChunkRows" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
                                     && Named(method, "ChunkRows") is { Parent: AttributeArgumentListSyntax list } chunks:
@@ -590,6 +597,24 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// EECS027: the lookups the analyzer found (<paramref name="uses"/>) become <paramref name="name"/>, and
+    /// <paramref name="parameter"/> (when the method does not take the type yet) is added after the others.
+    /// </summary>
+    private static MethodDeclarationSyntax Lookups(SyntaxNode root, MethodDeclarationSyntax method, System.Collections.Generic.IEnumerable<Location> uses,
+        string name, string? parameter)
+    {
+        var nodes = uses.Select(l => root.FindNode(l.SourceSpan, getInnermostNodeForTie: true)).Where(n => method.Span.Contains(n.Span)).ToList();
+        var replaced = method.ReplaceNodes(nodes, (original, _) => SyntaxFactory.IdentifierName(name).WithTriviaFrom(original));
+        if (parameter == null) return replaced;
+        var added = SyntaxFactory.ParseParameterList("(" + parameter + ")").Parameters[0];
+        var list = replaced.ParameterList.Parameters;
+        return replaced.WithParameterList(replaced.ParameterList.WithParameters(list.Count == 0
+            ? SyntaxFactory.SingletonSeparatedList(added)
+            : SyntaxFactory.SeparatedList<ParameterSyntax>(list.GetWithSeparators()
+                .Add(SyntaxFactory.Token(SyntaxKind.CommaToken).WithTrailingTrivia(SyntaxFactory.Space)).Add(added))));
     }
 
     /// <summary>The named argument <paramref name="name"/> of the method's [ForEach] attribute (EECS010: <c>Parallel = true</c>, EECS054: <c>ChunkRows = 64</c>).</summary>

@@ -239,6 +239,24 @@ public class CodeFixTests
     [TestCase("EECS052", "Create it with the component",
         "public static class U { public static Entity F(World w, Prefab p) { Entity e = w.Instantiate(p); e.Set(new Q()); return e; } }",
         "{ Entity e = w.Instantiate(p, new Q()); return e; }")]
+    [TestCase("EECS027", "Take it as a parameter ('in Q q')",
+        "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V = e.Get<Q>().V; }",
+        "static void A(Entity e, ref P p, in Q q) => p.V = q.V; }")]
+    [TestCase("EECS027", "Take it as a parameter ('in Q q')",
+        "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { p.V = e.Q.V; if (p.V > 0) p.V += e.Read<Q>().V; } }",
+        "static void A(Entity e, ref P p, in Q q) { p.V = q.V; if (p.V > 0) p.V += q.V; } }")]                 // every lookup of the type
+    [TestCase("EECS027", "Take it as a parameter ('ref Q q')",
+        "public class S : EcsSystem { [ForEach] static void A(Entity e, in P p) => e.Get<Q>().V = p.V; }",
+        "static void A(Entity e, in P p, ref Q q) => q.V = p.V; }")]
+    [TestCase("EECS027", "Take it as a parameter ('in Clock clock')",
+        "public class S : EcsSystem { [ForEach] static void A(ref P p, World w) => p.V = w.Clock.Ticks; }",
+        "static void A(ref P p, World w, in Clock clock) => p.V = clock.Ticks; }")]
+    [TestCase("EECS027", "Take it as a parameter ('in Clock clock')",
+        "public class S : EcsSystem { [ForEach] void A(ref P p) => p.V = World.GetSingleton<Clock>().Ticks; }",
+        "void A(ref P p, in Clock clock) => p.V = clock.Ticks; }")]
+    [TestCase("EECS027", "Use parameter 'q'",
+        "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p, in Q q) => p.V = e.Read<Q>().V + q.V; }",
+        "static void A(Entity e, ref P p, in Q q) => p.V = q.V + q.V; }")]
     [TestCase("EECS054", "Remove ChunkRows",
         "public class S : EcsSystem { [ForEach(ChunkRows = 64)] static void A(ref P p) => p.V++; }",
         "[ForEach] static void A(ref P p)")]
@@ -297,6 +315,11 @@ public class CodeFixTests
     [TestCase("EECS039", "public static class R { [ForEach] public static void B(Mut<P> p, in Q q) { if (q.V > 0) p.Write().V = q.V; }\n"
                          + "  public static void Call() { P p = default; B(new Mut<P>(ref p, default), default); } }")]                 // a caller passes a Mut
     [TestCase("EECS046", "public static class U { public static int F(World w) { int n = 0; foreach (QueryItem<T> item in w.Query<T>()) n += item.Component1.V; return n; } }")] // typed by hand
+    [TestCase("EECS027", "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { int q = 1; p.V = e.Get<Q>().V + q; } }")]   // the name is taken
+    [TestCase("EECS027", "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { p.V = e.Get<Q>().V; if (e.TryGet<Q>(out var x)) p.V += x.V; } }")] // a TryGet stays
+    [TestCase("EECS027", "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p, Maybe<Q> m) { p.V = e.Get<Q>().V; if (m.HasValue) p.V++; } }")]   // taken as a Maybe
+    [TestCase("EECS027", "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p, in Q q) => e.Get<Q>().V = p.V + q.V; }")]                     // 'in' cannot write
+    [TestCase("EECS027", "public static class R { [ForEach] public static void A(Entity e, ref P p) => p.V = e.Get<Q>().V; public static void Call(Entity e) { P p = default; A(e, ref p); } }")] // a caller
     [TestCase("EECS061", "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
                          + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, default, 64); return s.Total; } }")] // its chunk size: chosen for threads
     public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)
