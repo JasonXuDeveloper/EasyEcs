@@ -34,27 +34,4 @@
       或来自按相同层加载的另一个分块）第一个格子处的位置：它的样本。行在范围外时抛出异常。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.PaddedTile`2.CopyTo(System.Span{`0})" source="0b46bd26c062">
-    <summary>
-      把加载的各层格子（From 到 To，不含 halo）按分块缓冲的布局写进 <paramref name="cells" />：
-      把 <see cref="M:EasyEcs.PaddedTile`2.Steps``2" /> 的结果写进这一步的缓冲。O(层数 × Width × Depth)。
-    </summary>
-  </member>
-  <member name="M:EasyEcs.PaddedTile`2.Steps``2" source="2d9fd8556273">
-    <summary>
-      一次遍历内运行模板 <see cref="P:EasyEcs.ITileShape.Halo" /> / <c>TStep.Reach</c> 步（时间分块）：每一步用
-      <typeparamref name="TStep" /> 把纹理算进这个线程的第二个纹理，下一步再读它，来回交替（ping-pong）；每一步 halo 缩小一个 Reach
-      （更外面的格子已经没有它要读的数据），所以最后一步之后，分块自己的格子就是模板应用这么多次的结果，只加载一次。
-      一步跳过的行（<see cref="P:EasyEcs.ITileStep`3.Reads" />）每一步重新计算；没有邻居的地方，halo 继续按边界
-      （<see cref="P:EasyEcs.ITileShape.Boundary" />）处理。用 <see cref="M:EasyEcs.PaddedTile`2.CopyTo(System.Span{`0})" /> 写出结果。
-      需要分块的 mask；不止一步时邻域要是 <see cref="F:EasyEcs.TileNeighbourhood.All" />（几步之后读到的格子在角上）；
-      还要求 Depth + 2r ≤ 64，每行至少 16 字节。
-      <para>
-      最多 O(步数 × 层数 × (Width + 2r) × (Depth + 2r))；线程有了第二个纹理之后零分配。
-      结果在线程再次加载或步进这个分块类型之前有效。
-      </para>
-    </summary>
-    <typeparam name="TStep">这一步：一个 struct，它的 <c>Step</c> 编译进循环。</typeparam>
-    <typeparam name="TLane">这一步计算用的道。</typeparam>
-  </member>
 </doc>

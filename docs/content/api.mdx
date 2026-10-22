@@ -64,7 +64,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out id)`, `Find(key)`, `Count(key)`. |
 | `Lanes` | static class | Stream compaction for batch methods: `Compact(source, mask, destination)` writes the elements a lane mask selects side by side. |
 | `Tile<TCell, TTile>`, `ITile<TKey>`, `ITileShape`, `TileFaces`, `TileNeighbourhood`, `TileBoundary`, `TileIds` | ref structs, interfaces, enums | A `[ForEach]` parameter: the entity's `DynamicBuffer<TCell>` with its neighbours' in the grid of `TTile` (an indexed component with a static shape, halo, neighbourhood and boundary, and the key of each neighbour), scheduled as a read of both: `Load(from, to, fill, mask)`, `Beside(face)`, `Beside(dx, dy, dz)`, `Cells`, `Changes(next, out changed)`, `Facing(edges)`. |
-| `PaddedTile<TCell, TTile>`, `TileRows<TTile>`, `TileRow<TTile>`, `TileCursor<TCell, TTile>`, `TileReads`, `ITileStep<TCell, TTile, TLane>` | ref structs, struct, enum, interface | The layers a stencil samples, padded with a halo of `Halo` cells: `Rows(reads)` walks the active rows, `At(row)` samples around one (`Load128`, `Load256`, `LoadVector`, `this[dx, dy, dz]`), `this[x, y, z]`, `Steps<TStep, TLane>()` runs several steps of a stencil in one pass, `CopyTo(cells)`. |
+| `PaddedTile<TCell, TTile>`, `TileRows<TTile>`, `TileRow<TTile>`, `TileCursor<TCell, TTile>`, `TileReads` | ref structs, struct, enum | The layers a stencil samples, padded with a halo of `Halo` cells: `Rows(reads)` walks the active rows, `At(row)` samples around one (`Load128`, `Load256`, `LoadVector`, `this[dx, dy, dz]`), `this[x, y, z]`. |
 | `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interfaces, attributes | System groups (with filters through interfaces) and ordering. |
 | `SystemErrorPolicy` | enum | `Throw` (default) or `Disable`: what an exception in a system does. |
 | `SystemStats`, `SystemList` | readonly structs | A system's run count, times, allocated bytes and visited entities; `world.Systems`, allocation-free. |
@@ -243,8 +243,6 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | `padded.At(row)` | O(1) | the row's first cell; checks the row is inside |
 | `cursor.Load128<TLane>(dx, dy, dz)` / `Load256` / `LoadVector` / `cursor[dx, dy, dz]` | O(1): one unaligned load | offsets within r cells, rows and layers of the row; one unsigned compare per axis, folded away when constant |
 | `padded[x, y, z]` | O(1) | any texel of the texture, checked |
-| `padded.Steps<TStep, TLane>()` | O(steps × layers × (Width + 2r) × (Depth + 2r)) at most; steps = `Halo / TStep.Reach` | the stencil applied that many times from one load, on two textures of the thread (ping-pong), the region shrinking by the reach each step; needs the mask, `All` for more than one step, Depth + 2r ≤ 64 and rows of 16 bytes or more; allocation-free once the thread has its second texture |
-| `padded.CopyTo(cells)` | O(layers × Width × Depth) | the loaded layers' cells, without the halo, in the buffer's layout |
 
 ## Disable and bulk changes [#bulk]
 

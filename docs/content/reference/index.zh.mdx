@@ -129,7 +129,6 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`ISystemGroupWithout<T>`](/zh/docs/reference/isystemgroupwithout) | 系统分组：其中的 [ForEach] 方法跳过有 T 的实体，效果和在分组上写 WithoutAttribute 一样（见 ISystemGroupWith）。 |
 | [`ITile<TKey>`](/zh/docs/reference/itile) | 让实体成为网格中一个分块的组件，按键查找（带索引的组件，IIndexed）：record struct Chunk(ChunkPos Pos) : IComponent, ITile&lt;ChunkPos&gt;，带着形状（ITileShape）和每个邻居的键（ITile.Beside）。 |
 | [`ITileShape`](/zh/docs/reference/itileshape) | 分块的形状，写在让实体成为网格分块的组件上（ITile）：实体的格子共 ITileShape.Width × ITileShape.Depth × ITileShape.Height 个，存在它的 DynamicBuffer&lt;TCell&gt; 里：每行 ITileShape.Width 个（x），每层 ITileShape.Depth 行（z），共 ITileShape.Height 层（y）：格子 (x, y, z) 在 (y \* Depth + z) \* Width + x。 |
-| [`ITileStep<TCell, TTile, TLane>`](/zh/docs/reference/itilestep) | 模板的一步，供 PaddedTile.Steps 使用（时间分块）：一个 struct，它的静态 ITileStep.Step 根据周围的格子算出 16 字节格子的下一个值。 |
 | [`ITracked`](/zh/docs/reference/itracked) | 标记一个追踪变更的组件：每一行都记下最后一次写入时 World 的 World.ChangeTick，[Changed&lt;T&gt;] / QueryFilter.Changed&lt;T&gt;(since) 选出系统上次运行以来写过的行。 |
 | [`IUniqueIndexed, IUniqueIndexed<TKey>`](/zh/docs/reference/iuniqueindexed) | 所有 IUniqueIndexed 共同的标记，不用反射就能知道一个组件类型是唯一的（JIT 会折叠掉的类型测试）。 |
 

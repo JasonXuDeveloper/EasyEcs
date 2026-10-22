@@ -112,8 +112,8 @@ available as Markdown: add `.md` to its URL.
   p.Rows(TileReads.Layer)) { var c = p.At(row); ... c.Load128<T>(dx, dy, dz) ... }`, writing a second buffer that a
   later system commits (never the tile's own buffer, EECS059); never fetch neighbour buffers by hand. A stencil
   reaching r cells needs `Halo => r` (at most the tile, EECS072); a 9- or 27-point one needs
-  `Neighbourhood => TileNeighbourhood.All`; several steps per load are `Steps<TStep, TLane>()` with an `ITileStep`
-  struct; quiet tiles sleep through `tile.Changes` / `tile.Facing` and an awake tag. One cell type per field, one
+  `Neighbourhood => TileNeighbourhood.All`; one step per pass (several steps per load lose on a cached grid);
+  quiet tiles sleep through `tile.Changes` / `tile.Facing` and an awake tag. One cell type per field, one
   `Tile` per field (two of the same cell type is EECS073).
 - Hot per-row arithmetic over numbers: a static, non-parallel `[ForEach]` method over components of 1 to 4 fields of
   one primitive type (no `Entity`, `World`, `Mut<T>` or `Maybe<T>` parameter) gets a generated `Vector<T>` loop; write

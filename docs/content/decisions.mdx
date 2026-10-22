@@ -1902,18 +1902,33 @@ a value index; `Beside(key, face)`, the key of a neighbour) and a `DynamicBuffer
 method takes a `Tile<TCell, TTile>` parameter, and the generator writes the plumbing: it finds the tile's neighbours in
 the index once per entity, declares the reads (the index, `DynamicBuffer<TCell>`), adds the shape and the buffer to the
 method's filter, and keeps the method parallel. `Load(from, to)` pads the layers into a texture of the thread with a
-ring of one cell from the facing edges of the neighbours (and a layer under and over), records a bit per row that
+ring of `Halo` cells from the facing edges of the neighbours (and layers under and over), records a bit per row that
 holds a cell that is not zero, and returns a `PaddedTile`: `Rows(reads)` walks the rows a stencil can change with
 `TrailingZeroCount`, `At(row)` is a cursor whose `Load128` / `Load256` / `LoadVector` read a vector one cell, row or
 layer away. A tile parameter beside a write of its cell buffer is EECS059, the rule of `Lookup<T>`.
+
+The shape also says how far and how wide a stencil reads: `Halo` (cells of halo, up to the tile's extent),
+`Neighbourhood` (the faces, the faces and edges, or all 26 neighbours) and `Boundary` (fill, clamp or mirror where a
+tile has no neighbour; a periodic grid is a `Beside` that wraps). `Tile.Changes` / `Tile.Facing` let a grid put its
+quiet tiles to sleep and wake only the tiles facing an edge that changed. A tile takes one step per pass. EECS072
+reports a shape a tile cannot hold, EECS073 two tiles of one cell type in one method.
 
 **Why.**
 - **Every grid wrote the same 80 lines.** The VoxelServer water found its four neighbours, read their counts and
   buffers through four `Lookup`s, padded a `stackalloc` texture with an edge case per face and kept its own row mask.
   With a tile, `Flow.cs` keeps the rule and its row loop; the shape is four members of `Chunk`.
 - **As fast as the hand-written loop.** `WaterTileBenchmark` (400 chunks, one step, the hand-written system against
-  the tile one, outputs compared chunk by chunk): within noise at 1 and 4 threads, 0 B both, on a machine under load
-  from other benchmarks (StdDev 15 to 25 %).
+  the tile one, outputs compared chunk by chunk, two rounds): the tile 482–513 µs, by hand 516–524 µs at 1 thread
+  (263 µs against 263–269 µs at 4), 0 B both.
+- **The load of the common shape is its own loop.** With halos, neighbourhoods and boundaries added, the general load
+  (every neighbour slot, a fill or a clamp per cell) made the water up to 40 % slower than its first version. Three
+  changes brought it back: a missing neighbour reads a blank array of the fill (no branch per cell), the rows are
+  copied through refs computed once per row, and a halo of 1 with faces only and a fill boundary (the water, the
+  Laplacian) takes a loop of its own, chosen by a condition of constants; the neighbour search is unrolled per face
+  for the faces neighbourhood. That loop is compiled twice, with and without the row masks (`Masked` / `Unmasked`, a
+  `typeof` constant), so a tile only sampled (the water's blocks) tests no cell, and a halo cell is tested in the
+  register it was moved through. The water's tile went from 566–585 µs to 482–513 µs at 1 thread; the first version
+  took 528–547 µs. The row loop of the general load keeps its vectors in registers (no spill).
 - **The constants fold.** The shape is static abstract members of a struct type argument, so the JIT compiles every
   stride, every `Offset` check and every copy size as a constant: a sample is one `vmovdqu` from a fixed displacement.
 - **The method is its own compilation root.** The generated accessor that calls a method with a tile is
@@ -1921,11 +1936,41 @@ layer away. A tile parameter beside a write of its cell buffer is EECS059, the r
   (about ten times the root's size) and its eleven `Load128` calls stayed calls. As its own root it inlines all of
   them (192 inlinees, no call in the row loop). The hand-written version had the same effect by accident: a method
   with `stackalloc` is never inlined.
+- **A throw helper that never returns, and one x check per column.** The cursor's throw helpers are
+  `[DoesNotReturn]`, not `NoInlining`: the JIT compiles a call to a method that may return as one that clobbers every
+  vector register, so each check spilled the stencil's vectors (the 9-point blur's Tier1 body: 1,399 bytes before,
+  884 after). The x check stands on its own: dy and dz are constants and fold, and the loads of one column (x − 1 in
+  three rows) repeat one compare, which the JIT then removes, so a 9-point blur checks three times per vector, not nine.
+  The 9-point blur at 1 thread went from 969 µs to 756–765 µs, the Laplacian from 966 µs to 661–678 µs.
+- **Tiles against hand-written stencils.** `TileStencilBenchmark` (1,024 plates of 16 × 16 floats on a torus, outputs
+  compared, two rounds): the 9-point blur 756–765 µs with a tile, 679–690 µs with a direct-mapped key, 389–432 µs by
+  hand at 1 thread (406–428, 389–403 and 253–269 µs at 4); the Laplacian 661–678 µs against 385–397 µs (381–393 against
+  249–273 µs at 4); 0 B all. The gap is the general load (about 200 ns per plate: every neighbour slot through one copy
+  loop with its row mask) and the index search (about 150 ns): a stencil this cheap per cell is dominated by them, and
+  one that does real work per cell (the water) is not.
+- **Quiet tiles cost nothing.** `TileActiveBenchmark` (1,024 Life plates, 16 blinkers, two rounds): always on 369–378 µs,
+  with sleep and wake 10.7–11.6 µs at 1 thread (222–226 µs and 12.7–13.1 µs at 4), 0 B both.
 - **A texture per thread, not on the stack.** A `stackalloc` sized by a type argument is not a constant; the texture
   is a `[ThreadStatic]` array per cell type and shape, allocated on the thread's first load for every layer, then
   reused (the same rule as `Scratch<T>`, D74).
 
 **Considered.**
+- **Several steps per load (temporal blocking, a deep halo):** built and dropped. With a halo of k, one load holds what
+  k steps of a stencil reaching one cell need; the prototype ran them on two textures of the thread, the region
+  shrinking each step. `TileStepsBenchmark` (four blur steps on 1,024 plates; ratios against four plain passes, two
+  rounds): two passes of two steps 1.55–1.58 at 16 × 16 cells and 1.70–1.86 at 32 × 32 at 1 thread (1.14–1.22 and
+  1.55–1.57 at 4), one pass of four steps 1.55–1.70 and 1.75–1.80 (1.08–1.10 and 1.60–1.61 at 4). Each step also
+  computes the halo cells the next one reads, and on a grid whose cells fit the cache the passes it saves cost less
+  than that. Steps could pay on a grid far larger than the cache; nothing measured here is.
+- **A sliding window along y (2.5D streaming):** a prototype kept three padded layers and padded layer y + 1 just before
+  stepping layer y. A 7-point stencil over 8 × 8 chunks of 16 × 16 × Height floats, two rounds: Height 32, 416–443 µs
+  whole against 434–454 µs sliding (1.03–1.04); Height 256, 3,821–4,091 µs against 3,847–3,894 µs (0.95–1.01, within the
+  error). Not built: a texture of the whole tile fits the cache at these sizes.
+- **A cache of the neighbours' ids:** `TileNeighbourBenchmark` (1,024 plates, 8 neighbours, a pass that only finds
+  them, two rounds): searching the index 147–159 µs, a direct-mapped key 107 µs, ids read from a component 1.4–1.5 µs
+  at 1 thread (60–66, 46–48 and 2.8–2.9 µs at 4). Not built: in a stencil pass the search is about a fifth of the
+  cost, and a cache needs per-entity state outside the tables and an invalidation on every create, destroy and key
+  change; a key that implements `IDirectIndexed<TKey>` makes each search an array read without one.
 - **A generated per-cell kernel (the user writes `Next(center, north, south, ...)`, the generator the loop):** not
   built. C# arithmetic on `byte` promotes to `int`, so a scalar body does not map onto byte lanes; the vector loops
   of the generator target `Vector<T>` (32 bytes on AVX2), not a 16-cell row; and the water reduces per row (wet
@@ -1933,8 +1978,10 @@ layer away. A tile parameter beside a write of its cell buffer is EECS059, the r
   left in the user's method is the rule itself.
 - **A new analyzer id for a tile that writes its own cells:** it is the misuse EECS059 already reports for
   `Lookup<T>` (a read of what the pass writes), so EECS059 covers both.
-- **A wider halo and tiles over several components:** no user yet; one cell of halo is what a five- or seven-point
-  stencil reads.
+- **Several fields in one tile, deinterleaved:** not built. One struct per field, each its own buffer and tile type, is
+  what the texture and the masks already handle; EECS073 rejects two tiles of one cell type in one method, since they
+  would share the thread's texture.
+- **A periodic boundary mode:** a `Beside` that wraps is the periodic grid, with no mode to add.
 
 ## D78. Records out of a pass are an `Emit<T>` parameter, appended in row order [#d78-emit]
 

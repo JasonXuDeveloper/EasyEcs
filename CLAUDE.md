@@ -54,8 +54,7 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighbourhood, boundary and a key),
                                Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbours found by generated code,
                                TileNeighbours), Load into a [ThreadStatic] texture padded with the halo and a row mask,
-                               PaddedTile.Rows (TZCNT walk), TileCursor.Load128, Steps (ITileStep: several steps per load
-                               on two textures), Changes / Facing (sleeping tiles)
+                               PaddedTile.Rows (TZCNT walk), TileCursor.Load128, Changes / Facing (sleeping tiles)
   Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), joined in
                                chunk order into singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear)
   EntityRandom.cs              EntityRandom: deterministic random numbers, a pure function of (seed, entity, tick, stream)

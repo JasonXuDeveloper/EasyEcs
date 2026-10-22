@@ -217,62 +217,10 @@ public class LifeSystem : EcsSystem
 | `TileNeighbourhood.Faces` / `All` | von Neumann / Moore 模板 | 只交换面 / 交换面、棱和角 |
 | `TileBoundary.Fill` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / 钳制 / Neumann 边界 |
 | 回绕的 `Beside` | `cudaAddressModeWrap` | 带周期维度的 `MPI_Cart_create` |
-| `padded.Steps<TStep, TLane>()` | 时间分块（temporal blocking） | 深光环（减少通信的多步） |
 | 步进之后的提交系统 | 乒乓缓冲 | Jacobi 迭代的新旧两个数组 |
 
-#### 一遍走多步：`Steps` [#grid-steps]
-
-光环宽 k、每步只读一个格子远时，一次加载就装下了 k 步需要的数据：`padded.Steps<TStep, TLane>()` 在这个线程的两张纹理上来回运行这些步
-（乒乓），每一步的区域小一圈，每一步重新计算行掩码、重写边界，最后 `CopyTo` 写出瓦片的格子。你只把一步写成一个 struct；
-循环、收缩的区域和边缘都由框架处理。第一步之后的每一步都会读到角上的格子，所以多于一步时需要
-`Neighbourhood => TileNeighbourhood.All`。
-
-```csharp
-// 每遍四代生命游戏：光环宽 4，只加载一次。
-public record struct Life4Plate(PlatePos Pos) : IComponent, ITile<PlatePos>
-{
-    readonly PlatePos IIndexed<PlatePos>.Key => Pos;
-    static int ITileShape.Width => 16;
-    static int ITileShape.Depth => 16;
-    static int ITileShape.Halo => 4;
-    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
-
-    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
-    {
-        TileFaces.North => p with { Z = p.Z - 1 },
-        TileFaces.South => p with { Z = p.Z + 1 },
-        TileFaces.West => p with { X = p.X - 1 },
-        _ => p with { X = p.X + 1 },
-    };
-}
-
-public struct LifeStep : ITileStep<Alive, Life4Plate, byte>
-{
-    public static int Reach => 1;
-    public static TileReads Reads => TileReads.Layer;
-
-    // 这一行从第 x 个格子起的下 16 个格子。
-    public static Vector128<byte> Step(TileCursor<Alive, Life4Plate> c, int x)
-    {
-        var count = c.Load128<byte>(x - 1, 0, -1) + c.Load128<byte>(x, 0, -1) + c.Load128<byte>(x + 1, 0, -1)
-            + c.Load128<byte>(x - 1) + c.Load128<byte>(x + 1)
-            + c.Load128<byte>(x - 1, 0, 1) + c.Load128<byte>(x, 0, 1) + c.Load128<byte>(x + 1, 0, 1);
-        var born = Vector128.Equals(count, Vector128.Create((byte)3));
-        var stays = Vector128.Equals(count, Vector128.Create((byte)2)) & c.Load128<byte>(x);
-        return (born | stays) & Vector128<byte>.One;
-    }
-}
-
-public class Life4System : EcsSystem
-{
-    [ForEach(Parallel = true, ChunkRows = 64)]
-    static void Step(Tile<Alive, Life4Plate> life, Mut<DynamicBuffer<NextAlive>> next) =>
-        life.Load().Steps<LifeStep, byte>().CopyTo(MemoryMarshal.Cast<NextAlive, Alive>(next.Write().AsSpan()));
-}
-```
-
-多步用计算换内存访问：每一步还要算下一步读的光环格子，所以 k 步比 k 倍内部格子的计算多，只有加载、查找和提交的开销更大时才划算。
-`TileStepsBenchmark` 对比了 k = 2 和 4 与 k 遍。
+瓦片每遍走一步。一次加载走多步的深光环（时间分块）测量过后放弃了：每一步还要算下一步读的光环格子，格子装得进缓存的网格上，
+k 遍普通的遍历更快（[D77](/zh/docs/decisions#d77-tiles)）。
 
 #### 让安静的瓦片休眠 [#grid-active]
 

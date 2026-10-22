@@ -57,16 +57,6 @@ public TileCursor<TCell, TTile> At(TileRow<TTile> row);
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 
-### `CopyTo` [#copyto]
-
-```csharp
-public void CopyTo(Span<TCell> cells);
-```
-
-把加载的各层格子（From 到 To，不含 halo）按分块缓冲的布局写进 `cells`：把 [`PaddedTile.Steps`](/zh/docs/reference/paddedtile#steps) 的结果写进这一步的缓冲。O(层数 × Width × Depth)。
-
-**复杂度**（[API 表](/zh/docs/api)）：O(层数 × Width × Depth)
-
 ### `Rows` [#rows]
 
 ```csharp
@@ -76,20 +66,3 @@ public TileRows<TTile> Rows(TileReads reads = All);
 读 `reads` 的模板在 From 到 To 层中必须计算的行，逐层、按顺序（`foreach (var row in padded.Rows(TileReads.Layer))`）：它读的行里（最远到 halo 宽度）有不为零格子的那些。每访问一行、每层 O(1)。加载时没有记录 mask 则抛出异常。
 
 **复杂度**（[API 表](/zh/docs/api)）：每层、每访问一行 O(1)：一次尾零计数
-
-### `Steps` [#steps]
-
-```csharp
-public PaddedTile<TCell, TTile> Steps<TStep, TLane>() where TStep : struct, ITileStep<TCell, TTile, TLane>;
-```
-
-一次遍历内运行模板 [`ITileShape.Halo`](/zh/docs/reference/itileshape#halo) / `TStep.Reach` 步（时间分块）：每一步用 `TStep` 把纹理算进这个线程的第二个纹理，下一步再读它，来回交替（ping-pong）；每一步 halo 缩小一个 Reach（更外面的格子已经没有它要读的数据），所以最后一步之后，分块自己的格子就是模板应用这么多次的结果，只加载一次。一步跳过的行（[`ITileStep.Reads`](/zh/docs/reference/itilestep#reads)）每一步重新计算；没有邻居的地方，halo 继续按边界（[`ITileShape.Boundary`](/zh/docs/reference/itileshape#boundary)）处理。用 [`PaddedTile.CopyTo`](/zh/docs/reference/paddedtile#copyto) 写出结果。需要分块的 mask；不止一步时邻域要是 [`TileNeighbourhood.All`](/zh/docs/reference/tileneighbourhood#all)（几步之后读到的格子在角上）；还要求 Depth + 2r ≤ 64，每行至少 16 字节。
-
-最多 O(步数 × 层数 × (Width + 2r) × (Depth + 2r))；线程有了第二个纹理之后零分配。结果在线程再次加载或步进这个分块类型之前有效。
-
-**类型参数**
-
-- `TStep`：这一步：一个 struct，它的 `Step` 编译进循环。
-- `TLane`：这一步计算用的道。
-
-**复杂度**（[API 表](/zh/docs/api)）：最多 O(步数 × 层数 × (Width + 2r) × (Depth + 2r))；步数 = `Halo / TStep.Reach`

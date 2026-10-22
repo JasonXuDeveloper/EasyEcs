@@ -244,64 +244,11 @@ The names come from CUDA and MPI, which solve the same problem on a GPU and acro
 | `TileNeighbourhood.Faces` / `All` | a von Neumann / Moore stencil | the face / face, edge and corner exchanges |
 | `TileBoundary.Fill` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / clamped / Neumann boundary |
 | a `Beside` that wraps | `cudaAddressModeWrap` | `MPI_Cart_create` with periodic dimensions |
-| `padded.Steps<TStep, TLane>()` | temporal blocking | a deep halo (communication-avoiding steps) |
 | a commit system after the step | ping-pong buffers | the old and new arrays of a Jacobi sweep |
 
-#### Several steps per pass: `Steps` [#grid-steps]
-
-With a halo of k and a step that reads one cell away, one load holds what k steps need: `padded.Steps<TStep, TLane>()`
-runs them on two textures of the thread (ping-pong), each step on a region one cell smaller, the row mask recomputed
-each step and the boundary rewritten, then `CopyTo` writes the tile's cells. You write the step once, as a struct; the
-loop, the shrinking region and the edges are the framework's. Every step after the first reads cells across corners,
-so more than one step needs `Neighbourhood => TileNeighbourhood.All`.
-
-```csharp
-// Four generations of the Game of Life per pass: a halo of 4, one load.
-public record struct Life4Plate(PlatePos Pos) : IComponent, ITile<PlatePos>
-{
-    readonly PlatePos IIndexed<PlatePos>.Key => Pos;
-    static int ITileShape.Width => 16;
-    static int ITileShape.Depth => 16;
-    static int ITileShape.Halo => 4;
-    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
-
-    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
-    {
-        TileFaces.North => p with { Z = p.Z - 1 },
-        TileFaces.South => p with { Z = p.Z + 1 },
-        TileFaces.West => p with { X = p.X - 1 },
-        _ => p with { X = p.X + 1 },
-    };
-}
-
-public struct LifeStep : ITileStep<Alive, Life4Plate, byte>
-{
-    public static int Reach => 1;
-    public static TileReads Reads => TileReads.Layer;
-
-    // The next 16 cells from cell x of the row.
-    public static Vector128<byte> Step(TileCursor<Alive, Life4Plate> c, int x)
-    {
-        var count = c.Load128<byte>(x - 1, 0, -1) + c.Load128<byte>(x, 0, -1) + c.Load128<byte>(x + 1, 0, -1)
-            + c.Load128<byte>(x - 1) + c.Load128<byte>(x + 1)
-            + c.Load128<byte>(x - 1, 0, 1) + c.Load128<byte>(x, 0, 1) + c.Load128<byte>(x + 1, 0, 1);
-        var born = Vector128.Equals(count, Vector128.Create((byte)3));
-        var stays = Vector128.Equals(count, Vector128.Create((byte)2)) & c.Load128<byte>(x);
-        return (born | stays) & Vector128<byte>.One;
-    }
-}
-
-public class Life4System : EcsSystem
-{
-    [ForEach(Parallel = true, ChunkRows = 64)]
-    static void Step(Tile<Alive, Life4Plate> life, Mut<DynamicBuffer<NextAlive>> next) =>
-        life.Load().Steps<LifeStep, byte>().CopyTo(MemoryMarshal.Cast<NextAlive, Alive>(next.Write().AsSpan()));
-}
-```
-
-The steps trade memory traffic for arithmetic: each step also computes the halo cells the next one reads, so k steps
-cost more than k times the interior, and win when the load, the searches and the commit outweigh that.
-`TileStepsBenchmark` measures k = 2 and 4 against k passes.
+A tile takes one step per pass. A deeper halo that runs several steps per load (temporal blocking) was measured and
+dropped: each step also computes the halo cells the next one reads, and on grids whose cells fit the cache k plain
+passes were faster ([D77](/en/docs/decisions#d77-tiles)).
 
 #### Sleep the quiet tiles [#grid-active]
 
