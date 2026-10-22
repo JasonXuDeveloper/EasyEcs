@@ -8,6 +8,9 @@ public sealed partial class World
     // Indexed by TypeIndex<ValueIndexFamily, T>.Value; each slot is a ValueIndex<T, TKey>.
     private IValueIndex[] _indexes = [];
 
+    // By component bit: the keys Reserve made room for, for an index created after the reservation (cold).
+    private int[] _reservedKeys = [];
+
     // Indexed by component bit: the index of that component, told when an entity loses it. Null until the first index.
     private IValueIndex[] _indexByBit;
 
@@ -20,6 +23,19 @@ public sealed partial class World
 
         /// <summary>Entity <paramref name="id"/> is destroyed or loses the indexed component. Inside the structural gate.</summary>
         void Removed(int id);
+
+        /// <summary>
+        /// The world's entity storage holds <paramref name="ids"/> ids: size what the index keeps per id to match, so an
+        /// id the storage already has never grows it (<see cref="World.Reserve"/> and <see cref="World.EnsureEntityCapacity"/>
+        /// pay for the indexes too). Inside the structural gate.
+        /// </summary>
+        void Reserve(int ids);
+
+        /// <summary>
+        /// Room for <paramref name="more"/> new keys (each entity a reservation makes room for may bring its own), so
+        /// they are indexed without growing anything. Inside the structural gate.
+        /// </summary>
+        void ReserveKeys(int more);
 
         /// <summary>
         /// New entities hold the component in rows <paramref name="first"/> .. <paramref name="first"/> +
@@ -82,10 +98,37 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private IValueIndex IndexOf(int bit) => _indexByBit is { } byBit && (uint)bit < (uint)byBit.Length ? byBit[bit] : null;
 
+    /// <summary>
+    /// What <c>Reserve</c> sizes beside the rows of <paramref name="table"/> for <paramref name="count"/> more entities:
+    /// the table they retire into when they hold cleanup components, and room in the indexes of its components for a
+    /// key each. Inside the structural gate.
+    /// </summary>
+    private void ReserveBeside(Archetype table, int count)
+    {
+        // Entities with cleanup components are retired before they go: their table with the Retired tag takes them.
+        if (table.HasCleanup && table.ColumnIndex(RetiredBit) < 0)
+        {
+            var retired = (table.GetAddEdge(RetiredBit) ?? CreateEdge(table, RetiredBit)).Target;
+            retired.Reserve(retired.Count + count);
+        }
+
+        var components = table.Components;
+        for (int i = 0; i < components.Length; i++)
+        {
+            int bit = components[i];
+            if (!ComponentInfo.Of(bit).Indexed) continue;
+            if (bit >= _reservedKeys.Length) Array.Resize(ref _reservedKeys, bit + 1);
+            _reservedKeys[bit] += count;
+            IndexOf(bit)?.ReserveKeys(count);
+        }
+    }
+
     private TIndex Register<TIndex>(int slot, int bit, TIndex index) where TIndex : IValueIndex
     {
         if (slot >= _indexes.Length) Array.Resize(ref _indexes, Math.Max(slot + 1, _indexes.Length * 2));
         _indexes[slot] = index;
+        index.Reserve(Meta.Length);
+        if (bit < _reservedKeys.Length && _reservedKeys[bit] > 0) index.ReserveKeys(_reservedKeys[bit]);
         _indexByBit ??= [];
         if (bit >= _indexByBit.Length) Array.Resize(ref _indexByBit, bit + 1);
         _indexByBit[bit] = index;

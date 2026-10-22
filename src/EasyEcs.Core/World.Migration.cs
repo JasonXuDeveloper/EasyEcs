@@ -134,7 +134,9 @@ public sealed partial class World
     private World LoadArrivals(ReadOnlySpan<byte> input, string call)
     {
         ThrowIfIterating(call);
-        var source = _arrivals ??= new World(new WorldOptions { InitialEntityCapacity = 16 });
+        // Sized like this world: a group saved here names ids below its capacity, so loads never grow the staging world
+        // past the first (a group of another world's ids grows it by doubling, to the largest id seen).
+        var source = _arrivals ??= new World(new WorldOptions { InitialEntityCapacity = Meta.Length });
         source.Load(input);
         return source;
     }
@@ -346,7 +348,8 @@ public sealed partial class World
 
         if (_arrived.Length < source._nextId)
         {
-            int length = Math.Max(source._nextId, _arrived.Length * 2);
+            // As long as the source's storage: a staging world sized like this one is reached once, not step by step.
+            int length = Math.Max(Math.Max(source._nextId, _arrived.Length * 2), source.Meta.Length);
             Array.Resize(ref _arrived, length);
             Array.Resize(ref _arrivedStamp, length);
         }

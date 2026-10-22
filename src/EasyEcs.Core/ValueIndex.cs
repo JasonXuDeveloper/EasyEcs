@@ -115,6 +115,22 @@ internal sealed class SpareIds
     }
 
     public void Return(EntityId[] ids) => (_byLength[BitOperations.Log2((uint)ids.Length)] ??= []).Add(ids);
+
+    /// <summary>Forget every list of <paramref name="heads"/>, keeping their arrays for the lists that grow next.</summary>
+    public void Clear<TKey>(Dictionary<TKey, IndexHead> heads) where TKey : notnull
+    {
+        foreach (var head in heads.Values)
+            if (head.Ids != null) Return(head.Ids);
+        heads.Clear();
+    }
+
+    /// <summary>Keep at least <paramref name="count"/> arrays of the shortest length, for as many new keys (cold).</summary>
+    public void Reserve(int count)
+    {
+        var shortest = _byLength[2] ??= new List<EntityId[]>(count);
+        shortest.EnsureCapacity(count);
+        while (shortest.Count < count) shortest.Add(new EntityId[4]);
+    }
 }
 
 /// <summary>
@@ -186,9 +202,13 @@ internal struct TargetSlots
         return ref head;
     }
 
-    public readonly void Clear()
+    /// <summary>Forget every list, giving their arrays to <paramref name="spares"/> for the lists that grow next.</summary>
+    public readonly void Clear(SpareIds spares)
     {
-        if (_slots != null) Array.Clear(_slots);
+        if (_slots == null) return;
+        for (int i = 0; i < _slots.Length; i++)
+            if (_slots[i].Ids is { } ids) spares.Return(ids);
+        Array.Clear(_slots);
     }
 }
 
@@ -318,8 +338,8 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     /// <summary>Forget everything; after <see cref="World.Restore(WorldSnapshot)"/> the next lookup re-indexes every row, after <see cref="World.Dispose"/> it finds nothing.</summary>
     void World.IValueIndex.Reset(bool rebuild)
     {
-        _heads.Clear();
-        _byTarget.Clear();
+        _spares.Clear(_heads); // a restore indexes as many keys again: their arrays wait for them
+        _byTarget.Clear(_spares);
         _keyCount = 0;
         Array.Clear(_nodes);
         _sorted = null; // sorted again by the next ordered walk (one sort instead of one insertion per key)
@@ -466,6 +486,18 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     }
 
     /// <summary>Entity <paramref name="id"/> is destroyed or loses <typeparamref name="T"/>. Inside the structural gate.</summary>
+    void World.IValueIndex.Reserve(int ids)
+    {
+        if (ids > _nodes.Length) Array.Resize(ref _nodes, ids);
+    }
+
+    void World.IValueIndex.ReserveKeys(int more)
+    {
+        _heads.EnsureCapacity(_heads.Count + more);
+        _spares.Reserve(more);
+        if (_sorted != null && _sortedCount + more > _sorted.Length) Array.Resize(ref _sorted, _sortedCount + more);
+    }
+
     void World.IValueIndex.Removed(int id)
     {
         if (id < _nodes.Length && _nodes[id].Linked) Unlink(id);

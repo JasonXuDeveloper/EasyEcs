@@ -48,6 +48,20 @@ public struct DynamicBuffer<T> : IComponent, ITracked, IBuffer
         }
     }
 
+    /// <summary>
+    /// Fill the pool with lists until it holds <paramref name="lists"/>, each of <see cref="PoolCapacity"/> elements, so
+    /// the first writes of that many buffers take a list instead of allocating one: a server that knows how many
+    /// buffers of <typeparamref name="T"/> it keeps at its peak (the chunks around its players) pays for them at
+    /// startup, and its ticks allocate nothing even while the world grows to that peak. Process-wide, like the pool;
+    /// lists already in the pool count. O(<paramref name="lists"/>) allocations once; nothing when the pool holds enough.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="lists"/> is negative.</exception>
+    public static void ReservePool(int lists)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(lists);
+        BufferStore<T>.Reserve(lists);
+    }
+
     readonly bool IBuffer.Relational => default(T) is IRelation;
 
     readonly int IBuffer.RowSize => SavedTypes.RowSize<T>();
@@ -239,6 +253,25 @@ internal abstract class BufferStore
 
     /// <summary>Empty the store and keep it for the next first write (its buffer died: nothing refers to it).</summary>
     public abstract void Recycle();
+
+    /// <summary>
+    /// <paramref name="target"/> (a store its owner replaces, or null) made a copy of <paramref name="source"/>: the
+    /// elements are copied into it when both have some, a new store is taken from the pool when only the source has
+    /// some, and the target goes back to the pool when the source is empty. A restore or a capture into a reused copy
+    /// then keeps each row's list instead of leaving it to the GC.
+    /// </summary>
+    public static void Assign(ref BufferStore target, BufferStore source)
+    {
+        if (target == null) target = source?.Clone();
+        else if (!target.CopyFrom(source))
+        {
+            target.Recycle();
+            target = null;
+        }
+    }
+
+    /// <summary>Hold copies of the elements of <paramref name="source"/> (of the same element type); false when it has none.</summary>
+    protected abstract bool CopyFrom(BufferStore source);
 }
 
 internal sealed class BufferStore<T>(int capacity) : BufferStore
@@ -274,6 +307,20 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         var store = free[last];
         free[last] = null;
         return store;
+    }
+
+    /// <summary>Add stores of PoolCapacity elements to the shared pool until the pools hold <paramref name="count"/> (cold).</summary>
+    public static void Reserve(int count)
+    {
+        if (PoolCapacity == 0) return;
+        t_free ??= new BufferStore<T>[2 * Batch]; // the calling thread's own stores: its first refill allocates nothing
+        lock (s_gate)
+        {
+            int missing = count - s_freeCount - t_freeCount;
+            if (missing <= 0) return;
+            if (s_freeCount + missing > s_free.Length) Array.Resize(ref s_free, Math.Max(s_freeCount + missing, s_free.Length * 2));
+            for (int i = 0; i < missing; i++) s_free[s_freeCount++] = new BufferStore<T>(PoolCapacity);
+        }
     }
 
     // This thread's stores ran out: take up to Batch from the shared pool.
@@ -330,6 +377,17 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         var grown = capacity == 0 ? [] : new T[capacity];
         Array.Copy(Items, grown, Count);
         Items = grown;
+    }
+
+    protected override bool CopyFrom(BufferStore source)
+    {
+        var from = Unsafe.As<BufferStore<T>>(source);
+        if (from == null || from.Count == 0) return false;
+        if (Items.Length < from.Count) Resize(from.Count);
+        if (RuntimeHelpers.IsReferenceOrContainsReferences<T>() && Count > from.Count) Array.Clear(Items, from.Count, Count - from.Count);
+        Array.Copy(from.Items, Items, from.Count);
+        Count = from.Count;
+        return true;
     }
 
     public override BufferStore Clone()

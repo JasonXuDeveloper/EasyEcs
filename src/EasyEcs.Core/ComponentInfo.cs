@@ -90,16 +90,20 @@ internal abstract class ComponentInfo
     /// <summary>Whether the type is an <see cref="IUniqueIndexed{TKey}"/> (each world indexes it from its first table).</summary>
     public readonly bool Unique;
 
+    /// <summary>Whether the type is an <see cref="IIndexed{TKey}"/>, unique or not (a world may keep a value index of it).</summary>
+    public readonly bool Indexed;
+
     /// <summary>Whether any unique component type was registered (new tables then look for their unique columns).</summary>
     public static bool AnyUnique => _anyUnique;
 
     private static volatile bool _anyUnique;
 
-    protected ComponentInfo(int size, bool cleanup, bool grouped, bool unique = false) : this(size)
+    protected ComponentInfo(int size, bool cleanup, bool grouped, bool unique = false, bool indexed = false) : this(size)
     {
         Cleanup = cleanup;
         Grouped = grouped;
         Unique = unique;
+        Indexed = indexed;
         if (unique) _anyUnique = true;
     }
 
@@ -288,7 +292,7 @@ internal abstract class ComponentInfo
 /// (<see cref="ComponentInfo.Release"/>). Else null.
 /// </param>
 internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? -1 : Unsafe.SizeOf<T>(),
-    default(T) is ICleanupComponent, default(T) is IGroup, default(T) is IUniqueIndexed)
+    default(T) is ICleanupComponent, default(T) is IGroup, default(T) is IUniqueIndexed, default(T) is IIndexed)
     where T : struct, IComponent
 {
     public override World.IValueIndex CreateUniqueIndex(World world) =>
@@ -427,7 +431,7 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
             ref var store = ref Unsafe.As<T, BufferStore>(ref rows[i]);
             ref var saved = ref Unsafe.As<T, BufferStore>(ref from[i]);
             if (swap) (store, saved) = (saved, store);
-            else store = saved?.Clone();
+            else BufferStore.Assign(ref store, saved);
         }
     }
 }

@@ -93,7 +93,7 @@ public sealed partial class World
             // then (its old handles work again), else it moves past every version it ever had, so no handle made after
             // the capture can match a later incarnation.
             var saved = snapshot.Meta.AsSpan(0, snapshot.NextId);
-            if (Meta.Length < saved.Length) Grow(saved.Length, true);
+            if (Meta.Length < saved.Length) Grow(swap ? Math.Max(saved.Length, Meta.Length * 2) : saved.Length, true);
             int used = Math.Max(_nextId, snapshot.NextId);
             var log = _destroyLog;
             for (int id = 0; id < used; id++)
@@ -109,7 +109,7 @@ public sealed partial class World
             _nextId = used;
             // Ids recorded free, then ids first used after the capture; LIFO takes the recorded ones first.
             int free = snapshot.FreeCount + (used - snapshot.NextId);
-            if (_freeIds.Length < free) _freeIds = new int[free];
+            if (_freeIds.Length < free) _freeIds = new int[swap ? Math.Max(free, _freeIds.Length * 2) : free];
             for (int id = used - 1, i = 0; id >= snapshot.NextId; id--, i++) _freeIds[i] = id;
             snapshot.FreeIds.AsSpan(0, snapshot.FreeCount).CopyTo(_freeIds.AsSpan(used - snapshot.NextId));
             _freeIdCount = free;

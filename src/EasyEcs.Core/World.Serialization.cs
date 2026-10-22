@@ -449,12 +449,12 @@ public sealed partial class World
 
         var snapshot = _loadSnapshot ??= new WorldSnapshot(this);
         int nextId = Count(ref reader, sizeof(int));
-        if (snapshot.Meta.Length < nextId) snapshot.Meta = new EntityMeta[nextId];
+        if (snapshot.Meta.Length < nextId) snapshot.Meta = new EntityMeta[Grown(snapshot.Meta.Length, nextId)]; // loads of a growing world: a few times
         else Array.Clear(snapshot.Meta, 0, nextId); // an id the bytes give no row is dead
         snapshot.NextId = nextId;
         for (int id = 0; id < nextId; id++) snapshot.Meta[id].Version = reader.Read<int>();
         snapshot.FreeCount = Count(ref reader, sizeof(int));
-        if (snapshot.FreeIds.Length < snapshot.FreeCount) snapshot.FreeIds = new int[snapshot.FreeCount];
+        if (snapshot.FreeIds.Length < snapshot.FreeCount) snapshot.FreeIds = new int[Grown(snapshot.FreeIds.Length, snapshot.FreeCount)];
         reader.ReadUnmanagedRaw(snapshot.FreeIds.AsSpan(0, snapshot.FreeCount));
         foreach (int id in snapshot.FreeIds.AsSpan(0, snapshot.FreeCount))
             if ((uint)id >= (uint)nextId) throw Damaged();
@@ -501,9 +501,12 @@ public sealed partial class World
         }
 
         _loadOrderCount = Count(ref reader, Unsafe.SizeOf<EntityId>());
-        if (_loadOrder.Length < _loadOrderCount) _loadOrder = new EntityId[_loadOrderCount];
+        if (_loadOrder.Length < _loadOrderCount) _loadOrder = new EntityId[Grown(_loadOrder.Length, _loadOrderCount)];
         reader.ReadUnmanagedRaw(_loadOrder.AsSpan(0, _loadOrderCount));
     }
+
+    /// <summary>The length a reused array of <paramref name="length"/> grows to for <paramref name="count"/> items: doubled at least.</summary>
+    private static int Grown(int length, int count) => Math.Max(count, length * 2);
 
     /// <summary>A count the rest of the bytes can hold (<paramref name="size"/> bytes per item at least), else the save is damaged.</summary>
     private static int Count(ref Reader reader, int size)
@@ -608,7 +611,7 @@ public sealed partial class World
             ref var present = ref rows.Present[column];
             if (present == null) // every earlier row present
             {
-                present = new ulong[(rows.Slots.Length + 63) >> 6];
+                present = rows.TakeBits(column, (rows.Slots.Length + 63) >> 6);
                 for (int r = 0; r < start; r++) present[r >> 6] |= 1UL << r;
             }
 
@@ -626,7 +629,8 @@ public sealed partial class World
     /// <summary>Make the entity records of <paramref name="snapshot"/> cover ids below <paramref name="count"/> (dead ones).</summary>
     private static void Extend(WorldSnapshot snapshot, int count)
     {
-        if (snapshot.Meta.Length < count) Array.Resize(ref snapshot.Meta, Math.Max(count, snapshot.Meta.Length * 2));
+        if (snapshot.Meta.Length < count)
+            Array.Resize(ref snapshot.Meta, Math.Max(Math.Max(count, snapshot.Meta.Length * 2), snapshot.World.Meta.Length));
         Array.Clear(snapshot.Meta, snapshot.NextId, count - snapshot.NextId);
         snapshot.NextId = count;
     }
@@ -641,7 +645,7 @@ public sealed partial class World
 
     /// <summary>
     /// Empty rows an earlier load filled (null: none), keeping their arrays: managed values are cleared (no
-    /// references kept alive), presence bits dropped (a load sets them again where rows are absent).
+    /// references kept alive), presence bits dropped and kept for the next load that needs them.
     /// </summary>
     private static void Empty(Archetype.TableCopy rows, Archetype table)
     {
@@ -651,7 +655,7 @@ public sealed partial class World
             var info = table.Info(c);
             // Buffer columns keep their lists: the next read refills them (ComponentInfo.Read).
             if (info.Managed && !info.IsBuffer && rows.Columns[c] != null) info.Clear(rows.Columns[c], 0, rows.Count);
-            rows.Present[c] = null;
+            rows.DropBits(c);
             rows.Absent[c] = 0;
         }
 
@@ -662,6 +666,7 @@ public sealed partial class World
     private static void GrowRows(Archetype.TableCopy rows, Archetype table, int count)
     {
         if (rows.Slots.Length >= count) return;
+        count = Grown(rows.Slots.Length, count); // reused load after load: grown a few times, not once per larger group
         Array.Resize(ref rows.Slots, count);
         for (int c = 0; c < table.Columns.Length; c++)
         {

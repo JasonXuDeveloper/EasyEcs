@@ -186,6 +186,13 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
             if (archetype.Has(column, r)) Put(archetype.Slots[r].Index, archetype.Slots[r].Version, in Unsafe.Add(ref buffers, r));
     }
 
+    void World.IValueIndex.Reserve(int ids)
+    {
+        if (ids > _bySource.Length) Array.Resize(ref _bySource, ids);
+    }
+
+    void World.IValueIndex.ReserveKeys(int more) { } // links come from buffer writes, not from the entities reserved
+
     void World.IValueIndex.Removed(int id) => Remove(id, default, all: true);
 
     void World.IValueIndex.Reset(bool rebuild)
@@ -194,8 +201,8 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
         _linkCount = 0;
         _free = -1;
         Array.Clear(_bySource);
-        _byTarget.Clear();
-        _older.Clear();
+        _byTarget.Clear(_spares);
+        _spares.Clear(_older);
         _targetCount = 0;
         _built = !rebuild;
     }

@@ -229,6 +229,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             if (count <= 0) return;
                             ReserveIds(count);
                             target.Reserve(target.Count + count);
+                            ReserveBeside(target, count);
                             StorageVersion++; // its columns may have moved: a pass in progress refreshes its refs
                         }
                     }

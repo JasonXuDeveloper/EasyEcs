@@ -995,6 +995,24 @@ internal sealed class Archetype
         public readonly Array[] Columns = new Array[table.Columns.Length];
         public readonly ulong[][] Present = new ulong[table.Columns.Length][];
         public readonly int[] Absent = new int[table.Columns.Length];
+        private readonly ulong[][] _spare = new ulong[table.Columns.Length][]; // presence bits dropped, kept for reuse
+
+        /// <summary>Column <paramref name="c"/> has every row present again; its bits are kept for <see cref="TakeBits"/>.</summary>
+        public void DropBits(int c)
+        {
+            if (Present[c] is { } bits) _spare[c] = bits;
+            Present[c] = null;
+        }
+
+        /// <summary>Zeroed presence bits for column <paramref name="c"/>, at least <paramref name="words"/> long: the dropped ones when they fit.</summary>
+        public ulong[] TakeBits(int c, int words)
+        {
+            var bits = _spare[c];
+            _spare[c] = null;
+            if (bits == null || bits.Length < words) return new ulong[words];
+            bits.AsSpan().Clear();
+            return bits;
+        }
     }
 
     /// <summary>
@@ -1030,10 +1048,10 @@ internal sealed class Archetype
             if (Present[c] is { } bits)
             {
                 ref var saved = ref rows.Present[c];
-                if (saved == null || saved.Length < words) saved = new ulong[words];
+                if (saved == null || saved.Length < words) saved = rows.TakeBits(c, words);
                 bits.AsSpan(0, words).CopyTo(saved);
             }
-            else rows.Present[c] = null;
+            else rows.DropBits(c);
         }
 
         Absent.CopyTo(rows.Absent, 0);

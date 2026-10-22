@@ -1,4 +1,5 @@
 using System;
+using Nino.Core;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -246,6 +247,182 @@ public class AllocationTests
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 300; i++) Frame();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+
+    /// <summary>A region of a map, one per key, with a list of cells: what a server unloads and loads back.</summary>
+    public record struct Region(int Key) : IComponent, IUniqueIndexed<int>
+    {
+        readonly int IIndexed<int>.Key => Key;
+    }
+
+    public record struct Cell(byte Value); // the pool of this element type serves only the test below
+
+    [Test]
+    public void UnloadingAndLoadingBackEntitiesDoesNotAllocateOnceWarm()
+    {
+        DynamicBuffer<Cell>.PoolCapacity = 1024;
+        using var world = new World();
+        var others = new Entity[3000];
+        for (int i = 0; i < others.Length; i++) others[i] = world.CreateEntity(new Health(i));
+        var output = new NinoArrayBufferWriter(64 * 1024);
+        var loaded = new Entity[1];
+        var ids = new EntityId[1];
+
+        // A region is saved and destroyed (every other one without its Position), another entity of the world goes and comes back (so the next region takes
+        // another id, as in a world where other entities come and go), and the region is loaded back.
+        void Cycle(int round)
+        {
+            var region = world.CreateEntity(new Region(round % 16), new Position(round, 0));
+            region.GetOrAdd<DynamicBuffer<Cell>>().SetCount(1024).Fill(new Cell((byte)round));
+            if (round % 2 == 0) region.Remove<Position>(); // a row without a component of its table: presence bits saved
+            ids[0] = region.Id;
+            world.SaveEntities(output, ids);
+            region.Destroy();
+            int other = round * 37 % others.Length;
+            others[other].Destroy();
+            others[other] = world.CreateEntity(new Health(other));
+            world.LoadEntities(output.WrittenSpan, loaded);
+            loaded[0].Destroy();
+            output.ResetWrittenCount();
+        }
+
+        for (int round = 0; round < 2000; round++) Cycle(round);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int round = 2000; round < 2500; round++) Cycle(round);
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+
+    [Test]
+    public void LoadingAGrowingWorldGrowsItsArraysAFewTimes()
+    {
+        // Each round the source world gains an entity (and frees another id) and is loaded into the target: the load's
+        // records of the ids grow with the world by doubling, not by one id per load.
+        using var source = new World();
+        using var target = new World();
+        var output = new NinoArrayBufferWriter(256 * 1024);
+        for (int i = 0; i < 4000; i++) source.CreateEntity(new Health(i));
+
+        void Cycle(int round)
+        {
+            source.CreateEntity(new Health(round));
+            source.CreateEntity(new Health(-round)).Destroy();
+            source.Save(output);
+            target.Load(output.WrittenSpan);
+            output.ResetWrittenCount();
+        }
+
+        for (int round = 0; round < 100; round++) Cycle(round);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int round = 100; round < 2100; round++) Cycle(round);
+        // 4,000 more ids: a growth or two of a few arrays of 8,000-16,000 ids (the worlds' own and the load's), where
+        // growing by one id per load would copy them 2,000 times (hundreds of MB).
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.LessThan(2 << 20));
+    }
+
+    [Test]
+    public void DestroyingAReservedWorldDoesNotAllocate()
+    {
+        // The ids of a reservation's entities, all destroyed one by one, go to the free list without growing it.
+        using var world = new World();
+        world.EnsureEntityCapacity(20_000);
+        var entities = new Entity[20_000];
+        for (int i = 0; i < entities.Length; i++) entities[i] = world.CreateEntity(new Health(i));
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        foreach (var entity in entities) entity.Destroy();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+
+    public record struct Grain(byte Value); // the pool of this element type serves only the test below
+
+    [Test]
+    public void ReservedPoolListsServeTheFirstBuffers()
+    {
+        // ReservePool pays at startup for the lists the world's buffers take when it first grows to its peak.
+        DynamicBuffer<Grain>.PoolCapacity = 256;
+        DynamicBuffer<Grain>.ReservePool(500);
+        using var world = new World();
+        world.Reserve<Position, DynamicBuffer<Grain>>(500);
+        var entities = new Entity[500];
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < entities.Length; i++)
+        {
+            entities[i] = world.CreateEntity(new Position(i, 0), new DynamicBuffer<Grain>());
+            entities[i].Get<DynamicBuffer<Grain>>().SetCount(256).Fill(new Grain((byte)i));
+        }
+
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.Throws<ArgumentOutOfRangeException>(() => DynamicBuffer<Grain>.ReservePool(-1));
+    }
+
+    [Test]
+    public void ReservingAPrefabCoversItsIndexKeysAndItsRetiredTable()
+    {
+        // Each instance takes a key of its own in a value index and a unique index, and holds a cleanup component, so
+        // its destruction moves it to the retired table: the reservation covers all of it, and the free ids.
+        using var world = new World();
+        world.Index<Rating, int>();
+        var prefab = new Prefab().Set(new Rating(0)).Set(new Region(-1)).Set(new Lease(0));
+        const int count = 2000;
+        var spawned = new Entity[count];
+        // One instance lives its whole life first: the tables and the caches of the calls exist from then on.
+        var first = world.Instantiate(prefab, new Rating(-1), new Region(-2));
+        first.Destroy();
+        first.Remove<Lease>();
+        world.Reserve(prefab, count);
+        long start = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < count; i++) spawned[i] = world.Instantiate(prefab, new Rating(i), new Region(i));
+        long created = GC.GetAllocatedBytesForCurrentThread();
+        foreach (var entity in spawned) entity.Destroy();
+        long retired = GC.GetAllocatedBytesForCurrentThread();
+        foreach (var entity in spawned) entity.Remove<Lease>(); // released: freed
+        long freed = GC.GetAllocatedBytesForCurrentThread();
+        Assert.That((created - start, retired - created, freed - retired), Is.EqualTo((0L, 0L, 0L)));
+        Assert.That(world.EntityCount, Is.Zero);
+    }
+
+    [TestCase(true, false, false, false)]
+    [TestCase(false, true, false, false)]
+    [TestCase(true, false, true, false)]
+    [TestCase(true, false, false, true)]
+    [TestCase(false, true, false, true)]
+    [TestCase(true, true, true, true)]
+    public void RestoringAndLoadingAWorldWithIndexesDoesNotAllocateOnceWarm(bool restore, bool load, bool unique, bool links)
+    {
+        // Value, unique and relation indexes are emptied by each restore and load and filled again from the copy: their
+        // lists come back from the arrays of the last one. Links are buffers: a restore copies them into the lists the
+        // rows hold, a capture into the snapshot's.
+        using var world = new World();
+        var ratings = world.Index<Rating, int>();
+        var parties = world.Relations<MemberOf>();
+        var party = world.CreateEntity(new Position(0, 0));
+        for (int i = 0; i < 300; i++)
+        {
+            var e = world.CreateEntity(new Rating(i % 7));
+            if (unique) e.Set(new Region(i));
+            if (links) e.Link(new MemberOf(party.Id));
+        }
+        var snapshot = world.Capture();
+        var output = new NinoArrayBufferWriter(64 * 1024);
+        world.Save(output);
+        var bytes = output.WrittenSpan.ToArray();
+
+        void Cycle()
+        {
+            if (restore)
+            {
+                world.Restore(snapshot);
+                world.Capture(snapshot);
+            }
+
+            if (load) world.Load(bytes);
+        }
+
+        for (int round = 0; round < 50; round++) Cycle();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int round = 0; round < 200; round++) Cycle();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(ratings.Find(3).Count, Is.EqualTo(43));
+        if (links) Assert.That(parties.Find(party.Id).Count, Is.EqualTo(300));
     }
 
     // The fewest bytes one of three windows of `updates` updates allocated on this thread. Waking helpers queues thread

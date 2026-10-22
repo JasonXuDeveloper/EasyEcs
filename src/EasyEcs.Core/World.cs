@@ -55,7 +55,7 @@ public sealed partial class World : IDisposable
     /// <summary>All alive entities in id order (diagnostics: O(capacity)).</summary>
     public EntityEnumerator Entities => new(this);
 
-    /// <summary>Pre-size entity storage so creating up to <paramref name="capacity"/> entities never grows it.</summary>
+    /// <summary>Pre-size entity storage so creating up to <paramref name="capacity"/> entities, and destroying them, never grows it.</summary>
     public void EnsureEntityCapacity(int capacity)
     {
         using (Structural())
@@ -81,6 +81,7 @@ public sealed partial class World : IDisposable
                 if (tables[i].Count == 0) continue;
                 var target = TableFor(tables[i]);
                 target.Reserve(target.Count + tables[i].Count * count);
+                ReserveBeside(target, tables[i].Count * count);
             }
 
             ReserveIds(prefab.Store.EntityCount * count);
@@ -569,6 +570,11 @@ public sealed partial class World : IDisposable
         var grown = AllocateMeta(capacity, sized);
         Meta.AsSpan().CopyTo(grown);
         Meta = grown;
+        // As many ids as the records may be free at once (all destroyed): the free list grows with the records, so
+        // destroying what a reservation made room for grows nothing. 4 bytes per id beside the record's 16.
+        if (_freeIds.Length < capacity) Array.Resize(ref _freeIds, capacity);
+        var indexes = _indexes;
+        for (int i = 0; i < indexes.Length; i++) indexes[i]?.Reserve(capacity);
         StorageVersion++;
     }
 
