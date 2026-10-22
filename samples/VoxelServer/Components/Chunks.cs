@@ -11,11 +11,16 @@ public record struct BlockPos(int X, int Y, int Z);
 
 // A 16 x 16 column of the world. Its blocks are a DynamicBuffer<Block> on the same entity, tracked like any
 // component, so SendChunksSystem sees the chunks that were created or dug. The unique index finds the chunk at a
-// position: world.ChunkIndex.TryGet(pos, out chunk). Every chunk is an instance of one prefab (Program.cs), with every
-// component and tag below and in Water.cs, so all chunks share one table whatever happens to them.
-public record struct Chunk(ChunkPos Pos) : IComponent, IUniqueIndexed<ChunkPos>
+// position: world.ChunkIndex.TryGet(pos, out chunk), the lookup every tick makes thousands of times (the blocks around
+// a body, the chunk an entity is in, the edges of the water). It is direct-indexed: a chunk's slot is its position
+// modulo 64, so the chunks loaded around the players, never 64 apart, each have their own slot, and a lookup reads one
+// array entry (the hash finds the others). Every chunk is an instance of one prefab (Program.cs), with every component
+// and tag below and in Water.cs, so all chunks share one table whatever happens to them.
+public record struct Chunk(ChunkPos Pos) : IComponent, IDirectIndexed<ChunkPos>
 {
     ChunkPos IIndexed<ChunkPos>.Key => Pos;
+    static int IDirectIndexed<ChunkPos>.Slots => 64 * 64;
+    static int IDirectIndexed<ChunkPos>.SlotOf(ChunkPos pos) => (pos.Z & 63) * 64 + (pos.X & 63);
 }
 
 // A chunk a player needs that is not loaded: AoiViewSystem records it as an entity, one per chunk (the unique index), and

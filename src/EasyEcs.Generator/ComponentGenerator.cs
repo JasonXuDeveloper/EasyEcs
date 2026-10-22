@@ -104,7 +104,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 ? new[]
                 {
                     new SavedType("Component<" + m.Type + ">", m.Type, m.EntityIds, m.Layout),
-                    new SavedType("UniqueIndex<" + m.Type + ", " + m.IndexKey + ">", m.Type, new EquatableArray<string>([]), ""),
+                    new SavedType((m.Direct ? "DirectIndex<" : "UniqueIndex<") + m.Type + ", " + m.IndexKey + ">", m.Type, new EquatableArray<string>([]), ""),
                 }
                 : [new SavedType((m.Singleton ? "Singleton" : "Component") + "<" + m.Type + ">", m.Type, m.EntityIds, m.Singleton ? "" : m.Layout)])
             .WithTrackingName("SavedComponents");
@@ -723,7 +723,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     /// </summary>
     private sealed record ComponentModel(
         string Namespace, string Type, string Name, string Path, string HintName, bool IsPublic, Shape Shape, string IndexKey,
-        bool Unique, EquatableArray<Setter> Setters, EquatableArray<string> Members, EquatableArray<string> EntityIds, string Layout)
+        bool Unique, bool Direct, EquatableArray<Setter> Setters, EquatableArray<string> Members, EquatableArray<string> EntityIds, string Layout)
     {
         private static readonly SymbolDisplayFormat TypeName = Symbols.Fqn
             .AddMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
@@ -756,6 +756,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             return new ComponentModel(ns, fqn, type.Name, Symbols.FlatName(type), Symbols.HintName(type), isPublic, shape,
                 key?.ToDisplayString(Symbols.Fqn) ?? "",
                 unique != null && !Symbols.Named(unique, Symbols.EntityId) && unique is not ITypeParameterSymbol,
+                type.AllInterfaces.Any(i => Symbols.Named(i.OriginalDefinition, Symbols.DirectIndexed)),
                 new EquatableArray<Setter>(setters), new EquatableArray<string>(shape.Members(type, easyEcs, compilation)),
                 new EquatableArray<string>(shape.Kind == Kind.Singleton ? [] : Symbols.EntityIdPaths(type, compilation)),
                 Symbols.LayoutHash(type) ?? "");
