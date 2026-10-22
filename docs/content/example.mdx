@@ -72,9 +72,9 @@ EasyEcs' features to their place in this file.
 | [Change tracking](/en/docs/guide/change-tracking) and removal detection | `ReplicationSystem`; `WrittenSinceCheckpoint` |
 | [`ChangedAny`](/en/docs/guide/change-tracking#changed-any) per client, [destroy log](/en/docs/guide/change-tracking#destroy-log) | `CatchUp`: one kept filter, each client's tick; `DestroyedSince` |
 | [Dynamic buffers](/en/docs/guide/dynamic-buffers) | every player's bag of `Loot` |
-| [Groups](/en/docs/guide/groups) (`IGroup`, `GroupBy`, `InGroup`) | `Zone`: a table per zone |
+| [Groups](/en/docs/guide/groups) (`[Group]`, `GroupBy`, `InGroup`) | `Zone`: a table per zone |
 | [Ordered index, relations, target policies](/en/docs/guide/indexes-and-relations) | `Kills` leaderboard; `Friend` links, dropped when a player leaves |
-| [Unique keys](/en/docs/guide/indexes-and-relations#unique-keys) (`IUniqueIndexed`, `Get` / `TryGet`) | `Account`: `Join` and `Kick` find a hero by account |
+| [Unique keys](/en/docs/guide/indexes-and-relations#unique-keys) (`[UniqueKey]`, `Get` / `TryGet`) | `Account`: `Join` and `Kick` find a hero by account |
 | System groups, `[UpdateInterval(n, Phase = p)]`, ordering, lifecycle | `Replication`; `ManaSystem`, `RegenerationSystem`; `ClockSystem`; `PlanningSystem.OnCreate` |
 | [Queries](/en/docs/guide/queries), handles and [one-entity methods](/en/docs/guide/queries#run-on-one-entity) | `NearestPlayer`, `Census`, `ShotsLeft`; `Hit` calls the `[ForEntity]` method `Requests.TakeHit` |
 | [Bulk operations](/en/docs/guide/bulk) | `Instantiate(prefab, span)`, `DestroyAll`, `RemoveAll`, `EnableAll` |
@@ -85,11 +85,12 @@ EasyEcs' features to their place in this file.
 
 ### Components [#components]
 
-Every component is a plain `record struct`. Four markers change how the world stores one: `ITracked` gives it
-a hidden column of change ticks (`Health`, `Burning` and `Goal` are replicated), `IGroup` splits tables by its value
-(one table set per `Zone`), `IIndexed<TKey>` keeps a value index of it (`Kills`, the leaderboard), and
-`IUniqueIndexed<TKey>` makes its key name one entity (`Account`: one hero per account). `Spawn` is a cleanup
-component, `Loot` and `Friend` are the elements of dynamic buffers, and the empty structs are tags.
+Every component is a plain `record struct`. Four declarations change how the world stores one: `ITracked` gives it
+a hidden column of change ticks (`Health`, `Burning` and `Goal` are replicated), `[Group]` splits tables by a field's
+value (one table set per `Zone`), `[Key]` keeps a value index of it (`Kills`, the leaderboard), and `[UniqueKey]` makes
+its key name one entity (`Account`: one hero per account). The generator writes the `IGroup` / `IIndexed<TKey>` /
+`IUniqueIndexed<TKey>` part of these `partial` structs. `Spawn` is a cleanup component, `Loot` and `Friend` are the
+elements of dynamic buffers, and the empty structs are tags.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#components</include>
 
@@ -223,7 +224,7 @@ that threw: under `SystemErrorPolicy.Disable` the exception is data in `system.E
 
 ### Joining with an account [#accounts]
 
-A client logs in with its account. `Account` is `IUniqueIndexed<int>`: its key names one entity, so `TryGet` finds the
+A client logs in with its account. `Account` has a `[UniqueKey]` (it is `IUniqueIndexed<int>`): its key names one entity, so `TryGet` finds the
 hero of an account with one hash probe, and a write that would give a second hero an account already taken throws
 before it changes anything. `Join` gives a new account a hero with `Instantiate(Hero, at, new Account(account))`, the
 position and the account written in the same row copy as the prefab's components; an account that already has a hero
