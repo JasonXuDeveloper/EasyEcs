@@ -598,7 +598,7 @@ public sealed partial class EasyEcsAnalyzer
     /// element of a <c>DynamicBuffer</c> of relations; else null.
     /// </summary>
     private static ITypeSymbol? Indexing(ITypeSymbol type) =>
-        type.AllInterfaces.Any(i => Symbols.Named(i.OriginalDefinition, Symbols.Indexed)) ? type
+        Symbols.IndexKey(type, out _) != null ? type
         : Symbols.BufferElement(type) is { } element && Symbols.Implements(element, "EasyEcs.IRelation") ? element
         : null;
 
@@ -652,12 +652,23 @@ public sealed partial class EasyEcsAnalyzer
     private static void AnalyzeRecordKey(SymbolAnalysisContext context)
     {
         var type = (INamedTypeSymbol)context.Symbol;
-        if (type is not { TypeKind: TypeKind.Struct, IsRecord: true }) return;
+        if (SelfPrintingKey(type) is not { } property) return;
+        string self = type.Name;
+        context.ReportDiagnostic(Diagnostic.Create(KeyPrintsItself, property.Locations.FirstOrDefault(), self, $"{self} IIndexed<{self}>.Key => this;"));
+    }
+
+    /// <summary>
+    /// EECS043's key: the public, implicit Key of a record struct indexed by itself (<c>IIndexed&lt;TSelf&gt;</c>), which its
+    /// ToString() prints; null when the record prints its own way (a ToString() or PrintMembers of its own).
+    /// </summary>
+    private static IPropertySymbol? SelfPrintingKey(INamedTypeSymbol type)
+    {
+        if (type is not { TypeKind: TypeKind.Struct, IsRecord: true }) return null;
         // A ToString() or PrintMembers(StringBuilder) of its own decides what the record prints: Key is not printed then.
         if (type.GetMembers().Any(m => m is IMethodSymbol { IsImplicitlyDeclared: false, IsStatic: false } own
                 && (own.Name == "ToString" && own.Parameters.Length == 0
                     || own.Name == "PrintMembers" && own.Parameters.Length == 1 && Symbols.Named(own.Parameters[0].Type, "System.Text.StringBuilder"))))
-            return;
+            return null;
         foreach (var face in type.AllInterfaces)
         {
             if (!Symbols.Named(face.OriginalDefinition, Symbols.Indexed) || !SymbolEqualityComparer.Default.Equals(face.TypeArguments[0], type)
@@ -665,9 +676,10 @@ public sealed partial class EasyEcsAnalyzer
                 || type.FindImplementationForInterfaceMember(key) is not IPropertySymbol { ExplicitInterfaceImplementations.Length: 0, IsStatic: false } property
                 || property.DeclaredAccessibility != Accessibility.Public || !SymbolEqualityComparer.Default.Equals(property.ContainingType, type))
                 continue;
-            string self = type.Name;
-            context.ReportDiagnostic(Diagnostic.Create(KeyPrintsItself, property.Locations.FirstOrDefault(), self, $"{self} IIndexed<{self}>.Key => this;"));
+            return property;
         }
+
+        return null;
     }
 
     // ---------------- EECS050: helpers ----------------
@@ -681,7 +693,7 @@ public sealed partial class EasyEcsAnalyzer
         if (method is { Name: "InGroup", TypeArguments.Length: 1 } && Symbols.Named(method.ContainingType, "EasyEcs.QueryFilter"))
             return (method.TypeArguments[0], value);
         if (Symbols.IsGenerated(method) && method.Name.StartsWith("In") && method.Name.Length > 2 && Named(method, core) is { } named
-            && Symbols.Implements(named, Symbols.Group))
+            && Symbols.IsGrouped(named))
             return (named, value);
         return null;
     }

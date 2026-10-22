@@ -55,3 +55,28 @@ public sealed class AllAttribute : Attribute;
 /// </summary>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
 public sealed class AnyAttribute : Attribute;
+
+/// <summary>
+/// The key a world indexes the component by (<see cref="IIndexed{TKey}"/>): on a field, a property or a record's
+/// positional parameter, the key is that member (<c>public partial struct Owner : IComponent { [Key] public EntityId Of; }</c>);
+/// on the struct itself, the key is the whole value. The generator adds <c>IIndexed&lt;TKey&gt;</c> to the partial
+/// struct (unless an interface the struct declares brings it) with an explicit <c>Key</c> returning the member. One key
+/// per component; a key computed from several members is written by hand (<c>public (int, int) Key => (X, Y);</c>).
+/// </summary>
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter | AttributeTargets.Struct)]
+public sealed class KeyAttribute : Attribute;
+
+/// <summary>
+/// <see cref="KeyAttribute"/> for a key that names one entity (<see cref="IUniqueIndexed{TKey}"/>): the generator adds
+/// <c>IUniqueIndexed&lt;TKey&gt;</c> with the explicit <c>Key</c>. A struct that declares
+/// <see cref="IDirectIndexed{TKey}"/> keeps its own <c>Slots</c> and <c>SlotOf</c>; only <c>Key</c> is generated.
+/// </summary>
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter | AttributeTargets.Struct)]
+public sealed class UniqueKeyAttribute : Attribute;
+
+/// <summary>
+/// The member a world groups the component's tables by (<see cref="IGroup"/>): an <c>int</c> or an enum of
+/// <c>int</c>. The generator adds <c>IGroup</c> to the partial struct with an explicit <c>Group</c> returning it.
+/// </summary>
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
+public sealed class GroupAttribute : Attribute;

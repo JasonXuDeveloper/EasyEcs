@@ -6,6 +6,24 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
+/// <summary>A miner indexed by the blocks it dug ([Key] on a field).</summary>
+public partial struct Miner : IComponent
+{
+    [Key] public int BlocksDug;
+}
+
+/// <summary>A subscriber, one entity per id ([UniqueKey] on a record parameter).</summary>
+public partial record struct Subscriber([UniqueKey] int Id) : IComponent;
+
+/// <summary>A plot indexed by its whole value ([Key] on the type).</summary>
+[Key]
+public readonly partial record struct Plot(int X, int Y) : IComponent;
+
+public enum Biome { Plains, Desert, Snow }
+
+/// <summary>The biome an entity's rows are grouped by ([Group] on an enum).</summary>
+public partial record struct Terrain([Group] Biome Biome) : IComponent;
+
 /// <summary>
 /// PartGenerator and the rules of the declarations it writes parts for: the part's place (nested, generic, every kind
 /// of containing type), EECS062-EECS066, and the caching of its stage.
@@ -119,6 +137,116 @@ public class PartTests
     [TestCase("public struct C : ISingletonComponent, IReduction<C> { public float L; public static C Identity => new C { L = float.MaxValue }; public static C Combine(C a, C b) => new C { L = System.Math.Min(a.L, b.L) }; }", "EECS065")] // MaxValue is an identity of a float minimum
     public async Task OtherReductionsAreLeftAlone(string source, string only = null) =>
         Assert.That(await Ids(source), only == null ? Is.Empty : Is.EqualTo(new[] { only }));
+
+    [TestCase("public partial struct M : IComponent { [Key] public int N; }",
+        "public partial struct M : global::EasyEcs.IIndexed<int>", "readonly int global::EasyEcs.IIndexed<int>.Key => N;")]
+    [TestCase("public partial record struct A([UniqueKey] string Name) : IComponent;",
+        "public partial record struct A : global::EasyEcs.IUniqueIndexed<string>", "string global::EasyEcs.IIndexed<string>.Key => Name;")]
+    [TestCase("[Key] public readonly partial record struct T(int X, int Y) : IComponent;",
+        "public readonly partial record struct T : global::EasyEcs.IIndexed<T>", "T global::EasyEcs.IIndexed<T>.Key => this;")]
+    [TestCase("public partial struct M : IComponent { [Key] public int N { get; set; } public int Computed => N * 2; }",
+        "public partial struct M : global::EasyEcs.IIndexed<int>", "int global::EasyEcs.IIndexed<int>.Key => N;")]
+    [TestCase("public partial struct M : IComponent { int n; [Key] public int Doubled => n * 2; }",
+        "public partial struct M : global::EasyEcs.IIndexed<int>", "int global::EasyEcs.IIndexed<int>.Key => Doubled;")]  // a computed member, named
+    [TestCase("public partial struct R : IComponent, IIndexed<EntityId> { [Key] public EntityId Target; }",
+        "public partial struct R\n", "EntityId global::EasyEcs.IIndexed<global::EasyEcs.EntityId>.Key")]                        // the user's interface brings it
+    [TestCase("public partial struct U : IComponent, IIndexed<int> { [UniqueKey] public int N; }",
+        "public partial struct U : global::EasyEcs.IUniqueIndexed<int>", "IIndexed<int>.Key => N;")]                              // the part makes it unique
+    [TestCase("public partial struct D : IComponent, IDirectIndexed<int> { [Key] public int Cell; public static int Slots => 8; public static int SlotOf(int key) => key; }",
+        "public partial struct D\n", "IIndexed<int>.Key => Cell;")]                                                               // IDirectIndexed keeps Slots and SlotOf
+    [TestCase("public partial record struct Z([Group] int Zone) : IComponent;",
+        "public partial record struct Z : global::EasyEcs.IGroup", "int global::EasyEcs.IGroup.Group => Zone;")]
+    [TestCase("public enum B { P, D } public partial struct Z : IComponent { [Group] public B Biome; }",
+        "public partial struct Z : global::EasyEcs.IGroup", "int global::EasyEcs.IGroup.Group => (int)Biome;")]
+    [TestCase("public partial struct Z : IComponent, IGroup { [Group] public int Zone; }",
+        "public partial struct Z\n", "int global::EasyEcs.IGroup.Group => Zone;")]
+    [TestCase("public partial struct Z : IComponent { [Key] public int Player; [Group] public int Zone; }",
+        "public partial struct Z : global::EasyEcs.IIndexed<int>, global::EasyEcs.IGroup", "IGroup.Group => Zone;")]             // both
+    public void KeysAndGroupsAreExplicitImplementations(string source, string head, string member)
+    {
+        var (parts, output) = Generate(source);
+        Assert.That(parts.Replace("\r", ""), Does.Contain(head).And.Contain(member));
+        Assert.That(Errors(output), Is.Empty, parts);
+    }
+
+    [TestCase("public partial struct M : IComponent { [Key] public int A; [Key] public int B; }")]                         // two keys
+    [TestCase("[Key] public partial struct M : IComponent { [UniqueKey] public int A; }")]                                 // the type and a member
+    [TestCase("public partial struct M : IComponent { [Key] public object A; }")]                                         // not IEquatable
+    [TestCase("public partial struct M : IComponent { [UniqueKey] public EntityId Target; }")]                            // a unique relation
+    [TestCase("public partial struct M : IComponent, IIndexed<long> { [Key] public int A; long IIndexed<long>.Key => A; }")] // disagrees with the interface
+    [TestCase("public partial struct M : IComponent, IIndexed<int> { [Key] public int A; public int Key => A; }")]        // Key written by hand
+    [TestCase("public partial struct Z : IComponent { [Group] public int A; [Group] public int B; }")]                     // two groups
+    [TestCase("public partial struct Z : IComponent { [Group] public long A; }")]                                         // not an int
+    [TestCase("public enum E : byte { A } public partial struct Z : IComponent { [Group] public E A; }")]                 // an enum of byte
+    [TestCase("public partial struct Z : IComponent, IGroup { [Group] public int A; public int Group => A; }")]           // Group written by hand
+    public async Task KeysAndGroupsThePartCannotHoldAreReported(string source)
+    {
+        Assert.That(await Ids(source), Is.EqualTo(new[] { "EECS036" }), "one diagnostic, and no error of the generated code");
+        Assert.That(Generate(source).Parts, Is.Empty, "the generator skips what the analyzer reports");
+    }
+
+    [TestCase("public struct M : IComponent, IIndexed<int> { public int N; public int Key => N; }", "EECS067")]
+    [TestCase("public struct M : IComponent, IIndexed<int> { public int N; readonly int IIndexed<int>.Key => this.N; }", "EECS067")]
+    [TestCase("public struct M : IComponent, IIndexed<int> { int n; public int N => n; public int Key { get => N; } }", "EECS067")]   // a computed member, named
+    [TestCase("public record struct A(string Name) : IComponent, IUniqueIndexed<string> { readonly string IIndexed<string>.Key => Name; }", "EECS067")]
+    [TestCase("public readonly record struct T(int X) : IComponent, IIndexed<T> { T IIndexed<T>.Key => this; }", "EECS067")]
+    [TestCase("public readonly record struct T(int X) : IComponent, IIndexed<T> { public T Key => this; }", "EECS043")]                 // EECS043's
+    [TestCase("public struct M : IComponent, IIndexed<int> { public int N; public int Key => N * 2; }")]                                // computed
+    [TestCase("public struct M : IComponent, IIndexed<long> { public int N; public long Key => N; }")]                                  // converted
+    [TestCase("public struct M : IComponent, IIndexed<int>, IIndexed<string> { public int N; public string S; int IIndexed<int>.Key => N; string IIndexed<string>.Key => S; }")]
+    [TestCase("public struct M : IComponent, IIndexed<int> { public static int Shared; public int Key => Shared; }")]                    // not the value's
+    [TestCase("file struct M : IComponent, IIndexed<int> { public int N; public int Key => N; }")]                                     // no part for a file type
+    public async Task AKeyTheAttributesCanDeclareIsReported(string source, string id = null) =>
+        Assert.That(await Ids(source), id == null ? Is.Empty : Is.EqualTo(new[] { id }));
+
+    [Test]
+    public void KeysDeclaredByAttributesIndexTheirEntities()
+    {
+        using var world = new World();
+        var a = world.CreateEntity(new Miner { BlocksDug = 3 }, new Subscriber(1), new Plot(1, 2));
+        var b = world.CreateEntity(new Miner { BlocksDug = 3 }, new Subscriber(2), new Plot(2, 1));
+        Assert.That(world.Index<Miner, int>().Count(3), Is.EqualTo(2));
+        Assert.That((world.SubscriberIndex.Get(1), world.SubscriberIndex.Get(2)), Is.EqualTo((a, b)));
+        Assert.That(world.PlotIndex.TryFind(new Plot(2, 1), out var found) && found == b, Is.True);
+
+        b.Set(new Miner { BlocksDug = 4 });                                          // a write moves the entity to its new key
+        Assert.That((world.Index<Miner, int>().Count(3), world.Index<Miner, int>().Count(4)), Is.EqualTo((1, 1)));
+        Assert.That(() => world.CreateEntity(new Subscriber(1)), Throws.InvalidOperationException);  // unique
+    }
+
+    [Test]
+    public void AGroupDeclaredByAttributesSplitsTables()
+    {
+        using var world = new World();
+        world.GroupBy<Terrain>();
+        world.CreateEntity(new Terrain(Biome.Desert), new Health(1));
+        world.CreateEntity(new Terrain(Biome.Snow), new Health(10));
+        world.CreateEntity(new Terrain(Biome.Desert), new Health(100));
+        Assert.That(world.Count<Health>(QueryFilter.Create().InGroup<Terrain>((int)Biome.Desert)), Is.EqualTo(2));
+        Assert.That(world.Count<Health>(QueryFilter.Create().InGroup<Terrain>((int)Biome.Snow)), Is.EqualTo(1));
+    }
+
+    /// <summary>A unique index declared by [UniqueKey], found by key from a parallel pass (the system's access and lookup see the key).</summary>
+    public class FindSubscriber : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 64)]
+        static void Find(in LookupTests.Wants wants, ref LookupTests.Found found, Lookup<Subscriber> accounts) =>
+            found.Id = accounts.TryFind(wants.Login, out var id) ? id : default;
+    }
+
+    [Test]
+    public void ALookupFindsAnAttributeKey()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        var accounts = new Entity[300];
+        for (int i = 0; i < accounts.Length; i++) accounts[i] = world.CreateEntity(new Subscriber(i));
+        var seekers = new Entity[2000];
+        for (int i = 0; i < seekers.Length; i++) seekers[i] = world.CreateEntity(new LookupTests.Wants(i % 400), new LookupTests.Found());
+        world.AddSystem<FindSubscriber>();
+        world.Update();
+        for (int i = 0; i < seekers.Length; i++)
+            Assert.That(seekers[i].Read<LookupTests.Found>().Id, Is.EqualTo(i % 400 < 300 ? accounts[i % 400].Id : default(EntityId)));
+    }
 
     [Test]
     public void AChangedDeclarationWritesItsPartAlone()

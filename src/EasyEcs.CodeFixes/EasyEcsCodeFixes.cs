@@ -25,7 +25,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS018", "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
-            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061", "EECS062", "EECS065", "EECS066");
+            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -85,9 +85,13 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                         context.RegisterCodeFix(CodeAction.Create($"Declare WriteMask => {writes}", _ => Task.FromResult(context.Document.WithSyntaxRoot(withWrites)),
                             diagnostic.Id), diagnostic);
                     break;
-                case "EECS043" when node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { } key
-                                    && await ExplicitKey(context.Document, key, context.CancellationToken).ConfigureAwait(false) is { } explicitKey:
-                    Register(context, diagnostic, "Implement it explicitly", root, key, explicitKey);
+                case "EECS043" or "EECS067" when node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { } key:
+                    if (diagnostic.Id == "EECS043" && await ExplicitKey(context.Document, key, context.CancellationToken).ConfigureAwait(false) is { } explicitKey)
+                        Register(context, diagnostic, "Implement it explicitly", root, key, explicitKey);
+                    if (await KeyAttribute(context.Document, root, key, diagnostic.Properties.TryGetValue("Member", out var member) ? member : "this",
+                            context.CancellationToken).ConfigureAwait(false) is { } keyed)
+                        context.RegisterCodeFix(CodeAction.Create($"Declare it with [{keyed.Attribute}]", _ => Task.FromResult(context.Document.WithSyntaxRoot(keyed.Root)),
+                            diagnostic.Id + "attribute"), diagnostic);
                     break;
                 case "EECS017" when kind == "EntityId" && node.FirstAncestorOrSelf<FieldDeclarationSyntax>() is { } field:
                     if (await ToEntityId(context.Document, field, context.CancellationToken).ConfigureAwait(false) is { } ids)
@@ -287,8 +291,21 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
         if (model?.GetDeclaredSymbol(key, token) is not IPropertySymbol property || key.ExplicitInterfaceSpecifier != null) return null;
         var face = property.ContainingType.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == "EasyEcs.IIndexed<TKey>"
                                                                             && SymbolEqualityComparer.Default.Equals(i.TypeArguments[0], property.ContainingType));
-        if (face == null) return null;
-        // A read of .Key through the type (not the interface) would no longer compile.
+        if (face == null || await ReadThroughType(document, property, token).ConfigureAwait(false)) return null;
+
+        var modifiers = SyntaxFactory.TokenList(key.Modifiers.Where(m => !SyntaxFacts.IsAccessibilityModifier(m.Kind())));
+        return key.WithModifiers(modifiers)
+            .WithExplicitInterfaceSpecifier(SyntaxFactory.ExplicitInterfaceSpecifier(SyntaxFactory.ParseName(face.ToMinimalDisplayString(model, key.SpanStart))))
+            .WithLeadingTrivia(key.GetLeadingTrivia());
+    }
+
+    /// <summary>
+    /// Whether code of the project reads <paramref name="key"/> (an implicit Key) through its type, not the interface:
+    /// such a read stops compiling once the key is an explicit implementation or the generator's.
+    /// </summary>
+    private static async Task<bool> ReadThroughType(Document document, IPropertySymbol key, CancellationToken token)
+    {
+        if (key.ExplicitInterfaceImplementations.Length > 0) return false;
         foreach (var other in document.Project.Documents)
         {
             var otherRoot = await other.GetSyntaxRootAsync(token).ConfigureAwait(false);
@@ -296,16 +313,13 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
             SemanticModel? otherModel = null;
             foreach (var name in otherRoot.DescendantNodes().OfType<IdentifierNameSyntax>())
             {
-                if (name.Identifier.ValueText != "Key" || name.Parent == key) continue;
+                if (name.Identifier.ValueText != "Key" || name.Parent is PropertyDeclarationSyntax) continue;
                 otherModel ??= await other.GetSemanticModelAsync(token).ConfigureAwait(false);
-                if (SymbolEqualityComparer.Default.Equals(otherModel?.GetSymbolInfo(name, token).Symbol, property)) return null;
+                if (SymbolEqualityComparer.Default.Equals(otherModel?.GetSymbolInfo(name, token).Symbol, key)) return true;
             }
         }
 
-        var modifiers = SyntaxFactory.TokenList(key.Modifiers.Where(m => !SyntaxFacts.IsAccessibilityModifier(m.Kind())));
-        return key.WithModifiers(modifiers)
-            .WithExplicitInterfaceSpecifier(SyntaxFactory.ExplicitInterfaceSpecifier(SyntaxFactory.ParseName(face.ToMinimalDisplayString(model, key.SpanStart))))
-            .WithLeadingTrivia(key.GetLeadingTrivia());
+        return false;
     }
 
     /// <summary>
@@ -674,8 +688,50 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
     {
         var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
         if (model == null) return null;
-        bool imported = model.LookupNamespacesAndTypes(type.SpanStart, name: "SumAttribute").Any(s => s.ToDisplayString() == "EasyEcs.SumAttribute");
         var byName = ops.Split(';').Select(p => p.Split('=')).Where(p => p.Length == 2).ToDictionary(p => p[0], p => p[1]);
+        return Declare(model, root, type, byName, null,
+            static m => m is MethodDeclarationSyntax { Identifier.ValueText: "Combine" } or PropertyDeclarationSyntax { Identifier.ValueText: "Identity" }
+                        && m.Modifiers.Any(SyntaxKind.StaticKeyword),
+            static b => Generic(b.Type) is { Identifier.ValueText: "IReduction" });
+    }
+
+    /// <summary>
+    /// EECS067 (and EECS043's second fix): a hand-written Key returning <paramref name="member"/> (<c>this</c>: the value)
+    /// declared with <c>[Key]</c> (<c>[UniqueKey]</c> for a unique index) on that member or the type; the Key and the
+    /// IIndexed / IUniqueIndexed of the base list go (an IDirectIndexed stays: its Slots and SlotOf are the user's), the
+    /// type becomes partial along its chain. Null when code reads the Key through the type.
+    /// </summary>
+    private static async Task<(SyntaxNode Root, string Attribute)?> KeyAttribute(Document document, SyntaxNode root, PropertyDeclarationSyntax key,
+        string? member, CancellationToken token)
+    {
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        if (member == null || model?.GetDeclaredSymbol(key, token) is not IPropertySymbol property || key.Parent is not TypeDeclarationSyntax type
+            || await ReadThroughType(document, property, token).ConfigureAwait(false))
+            return null;
+        bool unique = property.ContainingType.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == "EasyEcs.IUniqueIndexed<TKey>");
+        string attribute = unique ? "UniqueKey" : "Key";
+        var byName = new System.Collections.Generic.Dictionary<string, string>();
+        if (member != "this") byName[member] = attribute;
+        var rewritten = Declare(model, root, type, byName, member == "this" ? attribute : null,
+            m => m is PropertyDeclarationSyntax p && p.Identifier.ValueText == "Key" && p.Span == key.Span,
+            static b => Generic(b.Type) is { Identifier.ValueText: "IIndexed" or "IUniqueIndexed" });
+        return rewritten == null ? null : (rewritten, attribute);
+    }
+
+    /// <summary>
+    /// The declarations of a part written into <paramref name="type"/>: <paramref name="byName"/>'s attribute on each
+    /// member it names (a field, an auto-property, a record's parameter), <paramref name="onType"/> on the type itself,
+    /// the members <paramref name="remove"/> picks gone, the bases <paramref name="removeBase"/> picks gone when another
+    /// base stays (alone, one stays: declared twice is fine), and partial along the chain. Null when one field
+    /// declaration holds members of different attributes.
+    /// </summary>
+    private static SyntaxNode? Declare(SemanticModel model, SyntaxNode root, TypeDeclarationSyntax type, System.Collections.Generic.Dictionary<string, string> byName,
+        string? onType, System.Func<MemberDeclarationSyntax, bool> remove, System.Func<BaseTypeSyntax, bool> removeBase)
+    {
+        bool imported = model.LookupNamespacesAndTypes(type.SpanStart, name: "SumAttribute").Any(s => s.ToDisplayString() == "EasyEcs.SumAttribute");
+        AttributeListSyntax List(string attribute, SyntaxTriviaList leading, SyntaxTriviaList trailing) =>
+            SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Attribute(SyntaxFactory.ParseName(imported ? attribute : "EasyEcs." + attribute))))
+                .WithLeadingTrivia(leading).WithTrailingTrivia(trailing);
         var annotate = new System.Collections.Generic.Dictionary<SyntaxNode, string>();
         foreach (var member in type.Members)
             switch (member)
@@ -697,9 +753,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
 
         var rewritten = type.ReplaceNodes(annotate.Keys, (original, current) =>
         {
-            string name = imported ? annotate[original] : "EasyEcs." + annotate[original];
-            var list = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Attribute(SyntaxFactory.ParseName(name))))
-                .WithLeadingTrivia(current.GetLeadingTrivia()).WithTrailingTrivia(SyntaxFactory.Space);
+            var list = List(annotate[original], current.GetLeadingTrivia(), SyntaxFactory.TriviaList(SyntaxFactory.Space));
             return current switch
             {
                 FieldDeclarationSyntax f => f.WithoutLeadingTrivia().WithAttributeLists(f.WithoutLeadingTrivia().AttributeLists.Insert(0, list)),
@@ -708,15 +762,31 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                 _ => current,
             };
         });
-        // The members and the interface go: found again by name, as the rewrite made new nodes.
-        rewritten = rewritten.RemoveNodes(rewritten.Members.Where(m => m is MethodDeclarationSyntax { Identifier.ValueText: "Combine" } or PropertyDeclarationSyntax { Identifier.ValueText: "Identity" }
-            && m.Modifiers.Any(SyntaxKind.StaticKeyword)), SyntaxRemoveOptions.KeepNoTrivia)!;
-        // The interface goes when the type has other bases (the part declares it); alone, it stays (declared twice is fine).
-        if (rewritten.BaseList is { Types.Count: > 1 } bases && bases.Types.FirstOrDefault(b => Generic(b.Type) is { Identifier.ValueText: "IReduction" }) is { } listed)
+        // The members and the bases go: found again, as the rewrite made new nodes.
+        rewritten = rewritten.RemoveNodes(rewritten.Members.Where(remove), SyntaxRemoveOptions.KeepNoTrivia)!;
+        if (rewritten.BaseList is { } bases)
         {
-            var types = bases.Types.Remove(listed);
-            if (bases.Types.Last() == listed) types = types.Replace(types.Last(), types.Last().WithTrailingTrivia(listed.GetTrailingTrivia()));
+            var types = bases.Types;
+            foreach (var listed in bases.Types.Where(removeBase))
+            {
+                if (types.Count == 1) break;
+                var current = types.First(t => t.IsEquivalentTo(listed));
+                bool last = types.Last() == current;
+                types = types.Remove(current);
+                if (last) types = types.Replace(types.Last(), types.Last().WithTrailingTrivia(current.GetTrailingTrivia()));
+            }
+
             rewritten = rewritten.WithBaseList(bases.WithTypes(types));
+        }
+
+        if (onType != null)
+        {
+            // The attribute takes the type's line: its indentation, then the type on the next line, indented the same.
+            var leading = rewritten.GetLeadingTrivia();
+            var indent = leading.Count > 0 && leading.Last().IsKind(SyntaxKind.WhitespaceTrivia) ? leading.Last() : default;
+            var next = indent == default ? SyntaxFactory.TriviaList(EndOfLine(root)) : SyntaxFactory.TriviaList(EndOfLine(root), indent);
+            var withoutLeading = rewritten.WithoutLeadingTrivia();
+            rewritten = withoutLeading.WithAttributeLists(withoutLeading.AttributeLists.Insert(0, List(onType, leading, next)));
         }
 
         var marked = root.ReplaceNode(type, rewritten.WithAdditionalAnnotations(Marker));

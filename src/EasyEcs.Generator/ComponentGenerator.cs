@@ -445,7 +445,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 return new Shape(Symbols.Implements(type, "EasyEcs.IRelation") ? Kind.Relation : Kind.Element,
                     false, false, false, false, false, false, true, false);
             bool tag = Symbols.IsTag(type);
-            bool indexed = Key(type, out _) != null, grouped = Symbols.Implements(type, Symbols.Group);
+            bool indexed = Symbols.IndexKey(type, out _) != null, grouped = Symbols.IsGrouped(type);
             bool tracked = Symbols.Implements(type, Symbols.TrackChanges);
             bool own = SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, core);
             return new Shape(singleton ? Kind.Singleton : Kind.Component, tag, tracked || indexed || grouped,
@@ -454,16 +454,6 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 // components; EasyEcs's own tag (Retired) is the world's to add and remove: it is only read.
                 Symbols.IsDisableable(type) && !own, !(own && tag),
                 Symbols.IsComparable(type)); // what SetIfChanged compares (EECS040's rule)
-        }
-
-        /// <summary>
-        /// The key of an indexed component (a unique component's is its unique key, another IIndexed key is EECS036),
-        /// or null; <paramref name="unique"/>: the unique key.
-        /// </summary>
-        public static ITypeSymbol? Key(INamedTypeSymbol type, out ITypeSymbol? unique)
-        {
-            unique = type.AllInterfaces.FirstOrDefault(i => Symbols.Named(i.OriginalDefinition, Symbols.UniqueIndexed))?.TypeArguments[0];
-            return unique ?? type.AllInterfaces.FirstOrDefault(i => Symbols.Named(i.OriginalDefinition, Symbols.Indexed))?.TypeArguments[0];
         }
 
         /// <summary>
@@ -751,11 +741,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
 
             string fqn = type.ToDisplayString(Symbols.Fqn);
             var setters = SettersOf(type, fqn, type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray());
-            var key = Shape.Key(type, out var unique);
+            var key = Symbols.IndexKey(type, out bool unique);
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
             return new ComponentModel(ns, fqn, type.Name, Symbols.FlatName(type), Symbols.HintName(type), isPublic, shape,
                 key?.ToDisplayString(Symbols.Fqn) ?? "",
-                unique != null && !Symbols.Named(unique, Symbols.EntityId) && unique is not ITypeParameterSymbol,
+                unique && key != null && !Symbols.Named(key, Symbols.EntityId) && key is not ITypeParameterSymbol,
                 type.AllInterfaces.Any(i => Symbols.Named(i.OriginalDefinition, Symbols.DirectIndexed)),
                 new EquatableArray<Setter>(setters), new EquatableArray<string>(shape.Members(type, easyEcs, compilation)),
                 new EquatableArray<string>(shape.Kind == Kind.Singleton ? [] : Symbols.EntityIdPaths(type, compilation)),

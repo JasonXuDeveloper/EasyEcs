@@ -10,8 +10,9 @@ using Microsoft.CodeAnalysis.Operations;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// The rules of declarations the generator writes parts for (EECS062-EECS066): a type that is not partial along its
-/// chain, a reduction declared by attributes that also writes its members or has a field the attributes cannot combine,
+/// The rules of declarations the generator writes parts for (EECS062-EECS067, and EECS036 for keys and groups): a type
+/// that is not partial along its chain, a reduction declared by attributes that also writes its members or has a field
+/// the attributes cannot combine, a key or group the attributes cannot declare,
 /// and the hand-written reductions the attributes could declare (EECS065) or whose Identity is not the identity of
 /// their Combine (EECS066). <see cref="Parts"/> decides what the generator writes; these rules report what keeps it.
 /// </summary>
@@ -57,6 +58,14 @@ public sealed partial class EasyEcsAnalyzer
         "of negative values) adds itself once per chunk, so the result depends on how many chunks the pass had: on the " +
         "thread count and the table sizes.", helpLinkUri: Help("EECS066"));
 
+    public static readonly DiagnosticDescriptor AttributeKey = new("EECS067", "An index key an attribute can declare",
+        "'{0}.Key' returns {1}: declare it with [{2}] on {3}, and the generator writes the key",
+        Category, DiagnosticSeverity.Info, true,
+        "A Key that returns a field, a property or the value itself is what [Key] (and [UniqueKey] for a unique index) " +
+        "declares on that member, or on the type for the value itself, of a partial struct: the generator writes the " +
+        "interface and its explicit Key, which no ToString() prints and no caller reaches by mistake. A computed key stays " +
+        "hand-written.", helpLinkUri: Help("EECS067"));
+
     // EECS065 / EECS066's properties for their code fixes: the attribute of each field (name=Op;...), and the Identity
     // that fits the Combine.
     public const string ReductionOps = "Ops", FixedIdentity = "Identity";
@@ -84,12 +93,66 @@ public sealed partial class EasyEcsAnalyzer
                 case Parts.Rule.BadField:
                     context.ReportDiagnostic(Diagnostic.Create(BadReductionField, where, problem.Where.Name, type.Name, problem.Text));
                     break;
+                case Parts.Rule.BadKey or Parts.Rule.BadGroup:
+                    context.ReportDiagnostic(Diagnostic.Create(BadIndexKey, where, type.Name, problem.Text));
+                    break;
             }
         }
     }
 
+    // EECS067's property for its code fix: the member [Key] goes on ("this" for the type).
+    public const string KeyMember = "Member";
+
+    /// <summary>
+    /// EECS067: a struct indexed by one key whose hand-written Key returns one of its own members or <c>this</c> (an
+    /// expression body or a <c>get =&gt;</c>), of exactly the key's type. Not for a file type (no part can be added),
+    /// nor the public self key of a record EECS043 reports.
+    /// </summary>
+    private static void AnalyzeAttributeKey(SymbolAnalysisContext context, INamedTypeSymbol type)
+    {
+        if (Parts.Declares(type, Parts.Key) || Parts.Declares(type, Parts.UniqueKey)
+            || Symbols.InterfaceKey(type, out bool unique) is not { } key
+            || type.AllInterfaces.Count(i => Symbols.Named(i.OriginalDefinition, Symbols.Indexed)) != 1
+            || SelfPrintingKey(type) != null)
+            return;
+        for (var level = type; level != null; level = level.ContainingType)
+            if (level.IsFileLocal) return;
+        var face = type.AllInterfaces.First(i => Symbols.Named(i.OriginalDefinition, Symbols.Indexed));
+        if (type.FindImplementationForInterfaceMember(face.GetMembers("Key").First()) is not IPropertySymbol { IsStatic: false } property
+            || !SymbolEqualityComparer.Default.Equals(property.ContainingType, type) || Parts.IsGeneratedPart(property)
+            || property.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is not PropertyDeclarationSyntax syntax)
+            return;
+        var returned = syntax.ExpressionBody?.Expression
+                       ?? (syntax.AccessorList?.Accessors is { Count: 1 } accessors && accessors[0] is { Keyword.ValueText: "get", ExpressionBody.Expression: { } body } ? body : null);
+        string? member = returned switch
+        {
+            ThisExpressionSyntax => "this",
+            IdentifierNameSyntax name => name.Identifier.ValueText,
+            MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax, Name: IdentifierNameSyntax name } => name.Identifier.ValueText,
+            _ => null,
+        };
+        if (member == null) return;
+        if (member == "this")
+        {
+            if (!SymbolEqualityComparer.Default.Equals(key, type)) return;
+        }
+        else if (Parts.Members(type).FirstOrDefault(m => m.Name == member) is not { } target
+                 || !SymbolEqualityComparer.Default.Equals(target.Type, key) || SymbolEqualityComparer.Default.Equals(target.Where, property))
+            return;
+
+        string attribute = unique ? "UniqueKey" : "Key";
+        context.ReportDiagnostic(Diagnostic.Create(AttributeKey, syntax.Identifier.GetLocation(),
+            ImmutableDictionary<string, string?>.Empty.Add(KeyMember, member), type.Name,
+            member == "this" ? "the value itself" : $"'{member}'", attribute, member == "this" ? "the type" : $"'{member}'"));
+    }
+
     /// <summary>What the generator writes into the type, for EECS062's message.</summary>
-    private static string What(Parts parts) => "IReduction<T>, from its field attributes";
+    private static string What(Parts parts) => string.Join(", ", new[]
+    {
+        parts.Fields.Count > 0 || parts.Reduces ? "IReduction<T> from its field attributes" : null,
+        parts.KeyOf != null ? $"the Key of [{(parts.KeyOf.Unique ? "UniqueKey" : "Key")}]" : null,
+        parts.GroupOf != null ? "the Group of [Group]" : null,
+    }.Where(w => w != null));
 
     // ---------------- EECS065, EECS066: hand-written reductions ----------------
 

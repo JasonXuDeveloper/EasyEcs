@@ -1319,7 +1319,7 @@ public sealed partial class EasyEcsAnalyzer
             // A Set of a component the query requires overwrites a value: no row moves, nothing for SetAll to batch.
             // A grouped component's new value moves each row to its group's table, one by one under SetAll too.
             case "Set" when component != null && !types.Contains(component, SymbolEqualityComparer.Default)
-                            && !Symbols.Implements(component, Symbols.Group)
+                            && !Symbols.IsGrouped(component)
                             && SetValue(call, component, generated, model, at) is { } value:
                 return ("SetAll", $"SetAll({value}, {with})", "adds a component to");
             case "Remove" when component != null && call.Arguments.All(a => a.IsImplicit):
@@ -1627,7 +1627,7 @@ public sealed partial class EasyEcsAnalyzer
         var component = generated ? Named(method, core) : method.TypeArguments[0];
         var given = create.TargetMethod.TypeArguments;
         if (component is not INamedTypeSymbol || given.Length >= Symbols.MaxComponents || given.Contains(component, SymbolEqualityComparer.Default)
-            || Symbols.Implements(component, Symbols.Group) || Symbols.IsWorldTag(component)
+            || Symbols.IsGrouped(component) || Symbols.IsWorldTag(component)
             || !Invariant(set.Arguments.Where(a => !a.IsImplicit).Select(a => a.Value), next, declarator.Symbol)) return null;
 
         var model = create.SemanticModel!;

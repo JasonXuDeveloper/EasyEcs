@@ -288,6 +288,21 @@ public class CodeFixTests
     [TestCase("EECS066", "Declare it with attributes",
         "public struct C : ISingletonComponent, IReduction<C> { public int Lo; public static C Identity => default; public static C Combine(C a, C b) => new C { Lo = System.Math.Min(a.Lo, b.Lo) }; }",
         "public partial struct C : ISingletonComponent { [Min] public int Lo; }")]
+    [TestCase("EECS067", "Declare it with [Key]",
+        "public struct M : IComponent, IIndexed<int> { public int BlocksDug; public int Key => BlocksDug; }",
+        "public partial struct M : IComponent { [Key] public int BlocksDug; }")]
+    [TestCase("EECS067", "Declare it with [UniqueKey]",
+        "public record struct A(int Id) : IComponent, IUniqueIndexed<int> { readonly int IIndexed<int>.Key => Id; }",
+        "public partial record struct A([UniqueKey] int Id) : IComponent { }")]
+    [TestCase("EECS067", "Declare it with [Key]",
+        "namespace N\n{\n    public readonly struct T : IComponent, IIndexed<T>, System.IEquatable<T>\n    {\n        public readonly int X;\n        T IIndexed<T>.Key => this;\n        public bool Equals(T o) => X == o.X;\n    }\n}",
+        "namespace N\n{\n    [Key]\n    public readonly partial struct T : IComponent, System.IEquatable<T>\n    {\n        public readonly int X;\n        public bool Equals(T o) => X == o.X;\n    }\n}")]
+    [TestCase("EECS067", "Declare it with [UniqueKey]",
+        "public struct D : IComponent, IDirectIndexed<int> { public int Cell; public int Key { get => Cell; } public static int Slots => 8; public static int SlotOf(int key) => key; }",
+        "public partial struct D : IComponent, IDirectIndexed<int> { [UniqueKey] public int Cell; public static int Slots")]  // IDirectIndexed stays
+    [TestCase("EECS043", "Declare it with [Key]",
+        "public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; }",
+        "[Key]\npublic readonly partial record struct Shop(long Id) : IComponent { }")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
