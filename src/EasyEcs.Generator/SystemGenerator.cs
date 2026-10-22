@@ -90,8 +90,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         var owner = model.Owner;
         var sb = new StringBuilder(Header).Append('\n');
         if (owner.Namespace.Length > 0) sb.Append("namespace ").Append(owner.Namespace).Append(";\n\n");
-        if (model.One) EmitEntityEntryPoints(sb, model);
-        else if (!owner.IsSystem) EmitEntryPoints(sb, model);
+        if (model.One || !owner.IsSystem) EmitEntryPoints(sb, model, model.One);
 
         // Generic over the owner's type parameters (a generic system or runner type): one instantiation per closed type.
         sb.Append($"file static class __ForEach{owner.TypeParameters}{owner.Constraints}\n{{\n");
@@ -136,61 +135,16 @@ public sealed class SystemGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// [ForEach] methods outside a system: each gets an entry point, a static extension member of the type taking the
-    /// world (the change tick for [Changed&lt;T&gt;] / [Removed&lt;T&gt;]) and the method's context parameters, which
-    /// runs the job once.
+    /// The entry points of a type that is not a system, static extension members of the type. [ForEach] methods run
+    /// the job over the world (taking the world, the change tick for [Changed&lt;T&gt;] / [Removed&lt;T&gt;], the slice of
+    /// a sliced method); [ForEntity] methods (<paramref name="perEntity"/>) run it on the entity they take with
+    /// <c>entity.Run</c> and return whether it ran. Both take the method's context parameters.
     /// </summary>
-    private static void EmitEntryPoints(StringBuilder sb, UpdateModel model)
+    private static void EmitEntryPoints(StringBuilder sb, UpdateModel model, bool perEntity)
     {
         var owner = model.Owner;
         sb.Append("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
-        sb.Append($"{(owner.IsPublic ? "public" : "internal")} static class {owner.FlatName}ForEach\n{{\n");
-        sb.Append($"    extension{owner.TypeParameters}({owner.FullName}){owner.Constraints}\n    {{\n");
-        for (int m = 0; m < model.Methods.Length; m++)
-        {
-            var method = model.Methods[m];
-            var contexts = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Context).ToArray();
-            var names = new HashSet<string>(contexts.Select(p => p.Name).Concat(method.TypeParameterNames));
-            string world = Free("world"), since = Free("since"), slice = Free("slice"), local = Free("job");
-            var signature = new List<string> { $"global::EasyEcs.World {world}" };
-            if (method.Since) signature.Add($"ulong {since}");
-            if (method.Slices > 1) signature.Add($"int {slice}");
-            signature.AddRange(contexts.Select(p => $"{p.Declared} {Escape(p.Name)}"));
-
-            string forEach = "__ForEach" + owner.TypeParameters, job = $"{forEach}.{method.Name}Job{m}{method.TypeParameters}";
-            string filter = method.Since ? $", {forEach}.{method.Name}Filter{m}.Since({since})" : method.HasFilter ? $", in {forEach}.{method.Name}Filter{m}" : "";
-            if (method.Slices > 1) filter = method.Sliced($"{forEach}.{method.Name}Filter{m}", slice);
-            string which = method.Since ? $" whose filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>"
-                : method.Slices > 1 ? $" in slice <paramref name=\"{slice}\"/> (0 to {method.Slices - 1}) of each matching table's rows" : "";
-            sb.Append($"        /// <summary>Runs <c>{method.Name}</c> for every matching entity of <paramref name=\"{world}\"/>{which}. Owner thread only.</summary>\n");
-            sb.Append($"        {Code.GeneratedCode(Symbols.GeneratorName)}\n");
-            sb.Append($"        {(method.PublicEntry ? "public" : "internal")} static void {Escape(method.Name)}{method.TypeParameters}({string.Join(", ", signature)}){method.Constraints}\n        {{\n");
-            sb.Append($"            var {local} = new {job}{Fields(method, world, null)};\n");
-            sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref {local}{filter}{method.Chunks});\n");
-            EmitReductions(sb, method, world, local, "            ");
-            EmitConsume(sb, method, world, filter, "            ");
-            sb.Append("        }\n\n");
-
-            string Free(string name)
-            {
-                while (names.Contains(name)) name = "_" + name;
-                return name;
-            }
-        }
-
-        sb.Append("    }\n}\n\n");
-    }
-
-    /// <summary>
-    /// [ForEntity] methods: each gets an entry point, a static extension member of the type taking the entity (the
-    /// change tick for [Changed&lt;T&gt;] / [Removed&lt;T&gt;]) and the method's context parameters, which runs the job
-    /// on the entity with <c>entity.Run</c> and returns whether it ran.
-    /// </summary>
-    private static void EmitEntityEntryPoints(StringBuilder sb, UpdateModel model)
-    {
-        var owner = model.Owner;
-        sb.Append("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
-        sb.Append($"{(owner.IsPublic ? "public" : "internal")} static class {owner.FlatName}ForEntity\n{{\n");
+        sb.Append($"{(owner.IsPublic ? "public" : "internal")} static class {owner.FlatName}{(perEntity ? "ForEntity" : "ForEach")}\n{{\n");
         sb.Append($"    extension{owner.TypeParameters}({owner.FullName}){owner.Constraints}\n    {{\n");
         for (int m = 0; m < model.Methods.Length; m++)
         {
@@ -198,25 +152,45 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var contexts = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Context).ToArray();
             var names = new HashSet<string>(contexts.Select(p => p.Name).Concat(method.TypeParameterNames));
             // The entity keeps the name the method gives it (Buy(Entity shop, ...) -> Buy(shop, ...)).
-            string entity = Free(method.Parameters.FirstOrDefault(p => p.Kind == Symbols.ParamKind.Entity)?.Name ?? "entity");
-            names.Add(entity);
-            string world = Free("world"), since = Free("since"), local = Free("job");
-            var signature = new List<string> { $"global::EasyEcs.Entity {Escape(entity)}" };
+            string entity = perEntity ? Free(method.Parameters.FirstOrDefault(p => p.Kind == Symbols.ParamKind.Entity)?.Name ?? "entity") : "";
+            if (perEntity) names.Add(entity);
+            string world = Free("world"), since = Free("since"), slice = Free("slice"), local = Free("job");
+            bool sliced = !perEntity && method.Slices > 1;
+            var signature = new List<string> { perEntity ? $"global::EasyEcs.Entity {Escape(entity)}" : $"global::EasyEcs.World {world}" };
             if (method.Since) signature.Add($"ulong {since}");
+            if (sliced) signature.Add($"int {slice}");
             signature.AddRange(contexts.Select(p => $"{p.Declared} {Escape(p.Name)}"));
 
             string forEach = "__ForEach" + owner.TypeParameters, job = $"{forEach}.{method.Name}Job{m}{method.TypeParameters}";
             string filter = method.Since ? $", {forEach}.{method.Name}Filter{m}.Since({since})" : method.HasFilter ? $", in {forEach}.{method.Name}Filter{m}" : "";
-            string which = method.Since ? $" and its filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>"
-                : method.HasFilter ? " and passes its filters" : "";
-            sb.Append($"        /// <summary>Runs <c>{method.Name}</c> on <paramref name=\"{entity}\"/> when it is alive, has the method's components{which}: true when it ran. Owner thread only.</summary>\n");
+            if (sliced) filter = method.Sliced($"{forEach}.{method.Name}Filter{m}", slice);
+            if (perEntity)
+            {
+                string which = method.Since ? $" and its filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>"
+                    : method.HasFilter ? " and passes its filters" : "";
+                sb.Append($"        /// <summary>Runs <c>{method.Name}</c> on <paramref name=\"{entity}\"/> when it is alive, has the method's components{which}: true when it ran. Owner thread only.</summary>\n");
+            }
+            else
+            {
+                string which = method.Since ? $" whose filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>"
+                    : sliced ? $" in slice <paramref name=\"{slice}\"/> (0 to {method.Slices - 1}) of each matching table's rows" : "";
+                sb.Append($"        /// <summary>Runs <c>{method.Name}</c> for every matching entity of <paramref name=\"{world}\"/>{which}. Owner thread only.</summary>\n");
+            }
+
             sb.Append($"        {Code.GeneratedCode(Symbols.GeneratorName)}\n");
-            sb.Append($"        {(method.PublicEntry ? "public" : "internal")} static bool {Escape(method.Name)}{method.TypeParameters}({string.Join(", ", signature)}){method.Constraints}\n        {{\n");
+            sb.Append($"        {(method.PublicEntry ? "public" : "internal")} static {(perEntity ? "bool" : "void")} {Escape(method.Name)}{method.TypeParameters}({string.Join(", ", signature)}){method.Constraints}\n        {{\n");
             // The world, for singletons, lookups and a World parameter: a default handle has none (Run returns false for it).
-            if (method.NeedsWorld || method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Singleton))
+            if (perEntity && (method.NeedsWorld || method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Singleton)))
                 sb.Append($"            if ({Escape(entity)}.World is not {{ }} {world}) return false;\n");
             sb.Append($"            var {local} = new {job}{Fields(method, world, null)};\n");
-            sb.Append($"            return {Escape(entity)}.Run<{method.ComponentTypes}, {job}>(ref {local}{filter});\n");
+            if (perEntity) sb.Append($"            return {Escape(entity)}.Run<{method.ComponentTypes}, {job}>(ref {local}{filter});\n");
+            else
+            {
+                sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref {local}{filter}{method.Chunks});\n");
+                EmitReductions(sb, method, world, local, "            ");
+                EmitConsume(sb, method, world, filter, "            ");
+            }
+
             sb.Append("        }\n\n");
 
             string Free(string name)
