@@ -368,39 +368,51 @@ public sealed class SystemGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// The vector loop of a method <see cref="Kernel"/> translated: each component's lane field as a ref of the lane
-    /// type, the uniform values broadcast once per run, then one Vector&lt;T&gt; of rows per iteration; the rows left
-    /// run the method. Without hardware acceleration (the JIT would emulate Vector&lt;T&gt;), every row runs the method.
+    /// The vector loops of a method <see cref="Kernel"/> translated: each component's lane field as a ref of the lane
+    /// type, the uniform values broadcast once per run, then one vector of rows per iteration: Vector512 where the
+    /// hardware runs it (AVX-512), then Vector&lt;T&gt; for the rows left (or all of them); the rows left after that
+    /// run the method. Without hardware acceleration (the JIT would emulate the vectors), every row runs the method.
+    /// The two loops are one text: the Vector512 one names Vector512 where the other names Vector.
     /// </summary>
     private static void EmitVectorLoop(StringBuilder sb, Kernel.Code simd, string[] components, string indent, string call, bool masked)
     {
-        string vector = $"global::System.Numerics.Vector<{simd.Columns[0]}>"; // every column has lanes of one size: one count
         for (int k = 1; k <= components.Length; k++)
             sb.Append($"{indent}ref {simd.Columns[k - 1]} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref r{k});\n");
+        sb.Append($"{indent}nint i = 0;\n");
+        var loop = new StringBuilder();
+        string vector = $"{Vector}<{simd.Columns[0]}>"; // every column has lanes of one size: one count
         // Components of several fields need the shuffles of Interleaved; without them, every row runs the method.
         string interleaved = simd.Interleaves ? " && global::EasyEcs.Interleaved.IsAccelerated" : "";
-        sb.Append($"{indent}nint i = 0;\n{indent}if (global::System.Numerics.Vector.IsHardwareAccelerated{interleaved} && rows >= {vector}.Count)\n{indent}{{\n");
+        loop.Append($"{indent}if ({Vector}.IsHardwareAccelerated{interleaved} && rows - i >= {vector}.Count)\n{indent}{{\n");
         string inner = indent + "    ", body = inner + "    ";
-        foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) sb.Append(inner).Append(line).Append('\n');
-        sb.Append($"{inner}for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{inner}{{\n");
+        foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) loop.Append(inner).Append(line).Append('\n');
+        loop.Append($"{inner}for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{inner}{{\n");
         if (masked)
         {
             // The rows of this vector that pass, one lane each: a vector with none is skipped.
-            sb.Append($"{body}var __pass = global::EasyEcs.Interleaved.Lanes{simd.Size * 8}(pass, (int)i);\n");
-            sb.Append($"{body}if (__pass == global::System.Numerics.Vector<{simd.Mask}>.Zero) continue;\n");
+            loop.Append($"{body}var __pass = global::EasyEcs.Interleaved.Lanes{simd.Size * 8}(pass, (int)i);\n");
+            loop.Append($"{body}if (__pass == {Vector}<{simd.Mask}>.Zero) continue;\n");
         }
-        foreach (var line in (masked ? simd.MaskedBody : simd.Body).Split('\n')) if (line.Length > 0) sb.Append(body).Append(line).Append('\n');
+        foreach (var line in (masked ? simd.MaskedBody : simd.Body).Split('\n')) if (line.Length > 0) loop.Append(body).Append(line).Append('\n');
         if (simd.Bails)
         {
             // A lane would throw (Math.Clamp with min above max): nothing is stored yet, so the method itself runs the
             // rows of this vector (that pass), and throws as written. i walks them, and is set back for the loop's own step.
             string row = masked ? $"if (((pass >> (int)i) & 1) != 0) {call}" : call;
-            sb.Append($"{body}if (__bail)\n{body}{{\n{body}    for (nint end = i + {vector}.Count; i < end; i++)\n{body}        {row}\n");
-            sb.Append($"{body}    i -= {vector}.Count;\n{body}    continue;\n{body}}}\n");
+            loop.Append($"{body}if (__bail)\n{body}{{\n{body}    for (nint end = i + {vector}.Count; i < end; i++)\n{body}        {row}\n");
+            loop.Append($"{body}    i -= {vector}.Count;\n{body}    continue;\n{body}}}\n");
         }
-        foreach (var line in (masked ? simd.MaskedStores : simd.Stores).Split('\n')) if (line.Length > 0) sb.Append(body).Append(line).Append('\n');
-        sb.Append($"{inner}}}\n{indent}}}\n");
+        foreach (var line in (masked ? simd.MaskedStores : simd.Stores).Split('\n')) if (line.Length > 0) loop.Append(body).Append(line).Append('\n');
+        loop.Append($"{inner}}}\n{indent}}}\n");
+        string text = loop.ToString();
+        // Vector512 names the same operations alike, except the square root (Vector.SquareRoot, Vector512.Sqrt).
+        sb.Append(text.Replace(Vector, Vector512).Replace(Vector512 + ".SquareRoot(", Vector512 + ".Sqrt(")
+            .Replace("Interleaved.IsAccelerated", "Interleaved.IsAccelerated512")
+            .Replace($"Interleaved.Lanes{simd.Size * 8}(", $"Interleaved.Lanes{simd.Size * 8}In512("));
+        sb.Append(text);
     }
+
+    private const string Vector = "global::System.Numerics.Vector", Vector512 = "global::System.Runtime.Intrinsics.Vector512";
 
     /// <summary>
     /// A ChangedAny / RemovedAny set as calls of at most 9 components each (calls join one set): a set of one

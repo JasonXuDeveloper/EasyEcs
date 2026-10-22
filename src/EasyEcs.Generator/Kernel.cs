@@ -459,7 +459,7 @@ internal sealed class Kernel
         {
             name = Temp("u");
             _broadcasts[key] = name;
-            _setup.Append($"var {name} = new {Vec(Elem(type))}({scalar});\n"); // once per run, not per vector
+            _setup.Append($"var {name} = {V}.Create<{Elem(type)}>({scalar});\n"); // once per run, not per vector
         }
         return name;
     }

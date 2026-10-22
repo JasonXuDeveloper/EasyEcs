@@ -206,6 +206,10 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("S.ForEach.g.cs") || t.FilePath.Contains("/S.") && t.FilePath.EndsWith(".ForEach.g.cs")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated.Contains("for (nint last = rows - global::System.Numerics.Vector<"), Is.EqualTo(vectorized), generated);
+        // Vector512 first where the hardware runs it, then Vector<T> for the rows left.
+        Assert.That(generated.Contains("for (nint last = rows - global::System.Runtime.Intrinsics.Vector512<"), Is.EqualTo(vectorized), generated);
+        Assert.That(generated.IndexOf("Vector512.IsHardwareAccelerated", System.StringComparison.Ordinal)
+            < generated.IndexOf("global::System.Numerics.Vector.IsHardwareAccelerated", System.StringComparison.Ordinal), Is.EqualTo(vectorized), generated);
         // A vector loop also takes words of rows of which some pass, as a lane mask (IForEachMasked).
         Assert.That(generated.Contains("global::EasyEcs.IForEachMasked<") && generated.Contains("ulong pass, "), Is.EqualTo(vectorized), generated);
 
@@ -271,7 +275,7 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated, Does.Contain("internal ref struct AJob0 : global::EasyEcs.IForEach<"), generated);  // per row
         Assert.That(generated, Does.Contain("internal ref struct BJob1 : global::EasyEcs.IForEachMasked<"), generated);
-        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "Vector.LoadUnsafe").Count, Is.EqualTo(2), generated); // B only: its batch and masked forms
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "Vector.LoadUnsafe").Count, Is.EqualTo(2), generated); // B only: its batch and masked forms (and their Vector512.LoadUnsafe)
     }
 
     [Test]

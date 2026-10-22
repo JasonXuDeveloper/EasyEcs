@@ -59,11 +59,29 @@ public static class Interleaved
         return Vector.Equals(new Vector<long>((long)(rows >> first)) & bits, bits);
     }
 
+    /// <summary><see cref="Lanes32"/> for <c>Vector512&lt;int&gt;</c>: 16 rows.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector512<int> Lanes32In512(ulong rows, int first)
+    {
+        var bits = Masks.Bits32x16;
+        return Vector512.Equals(Vector512.Create((int)(rows >> first)) & bits, bits);
+    }
+
+    /// <summary><see cref="Lanes64"/> for <c>Vector512&lt;long&gt;</c>: 8 rows.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector512<long> Lanes64In512(ulong rows, int first)
+    {
+        var bits = Masks.Bits64x8;
+        return Vector512.Equals(Vector512.Create((long)(rows >> first)) & bits, bits);
+    }
+
     /// <summary>Lane j holds bit j: the row of each lane in a word's bits.</summary>
     private static class Masks
     {
         public static readonly Vector<int> Bits32 = Make32();
         public static readonly Vector<long> Bits64 = Make64();
+        public static readonly Vector512<int> Bits32x16 = Vector512.Create(1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768);
+        public static readonly Vector512<long> Bits64x8 = Vector512.Create(1L, 2, 4, 8, 16, 32, 64, 128);
 
         private static Vector<int> Make32()
         {
