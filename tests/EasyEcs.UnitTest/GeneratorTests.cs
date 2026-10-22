@@ -179,6 +179,9 @@ public class GeneratorTests
         public struct C8 : IComponent { public byte V; }
         public struct S8 : IComponent { public sbyte V; }
         public struct Px : IComponent { public byte R, G; }
+        public record struct Pos(System.Numerics.Vector2 Value) : IComponent;
+        public record struct Vel(System.Numerics.Vector2 Value) : IComponent;
+        public struct Odd : IComponent { public float X, Y; public Odd(float x, float y) { X = x; Y = x + y; } }
         public partial struct Split : IComponent { public float A; }
         public partial struct Split { public float B; }
         public record struct G(float Pull) : ISingletonComponent;
@@ -269,7 +272,6 @@ public class GeneratorTests
     [TestCase("[ForEach(Parallel = true)] static void A(ref Five t) => t.A = t.B;", "component Five has 5 fields (a vector loop splits up to 4)")] // parallel too
     [TestCase("[ForEach] static void A(ref F f, Maybe<D> d) { if (d.HasValue) f.V++; }", "lane types float and double differ in size")]
     [TestCase("[ForEach(Parallel = true)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V++; }", "it takes a Maybe<H> and runs in parallel: an optional column has a vector loop on one thread")]
-    [TestCase("[ForEach] static void A(ref F f, Maybe<H> h) { var x = h.Value; f.V = x.V; }", "local 'x' is a H, not a lane type of 4 bytes")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Sin(f.V);", "MathF.Sin is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
     [TestCase("[ForEach] static void A(ref D d) => d.V = double.Hypot(d.V, 1);", "Double.Hypot is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Atan2(f.V, 1);", "MathF.Atan2 has no vector form in .NET 10")]
@@ -282,6 +284,9 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) { if (b.V + c.V > 255) b.V = 0; }", "'b.V + c.V > 255' compares ints that 8-bit lanes do not hold")]
     [TestCase("[ForEach] static void A(ref B8 b, Maybe<C8> c) { if (c.HasValue) b.V++; }", "it takes a Maybe<C8> of byte lanes: optional columns have vector loops of 4- and 8-byte lanes")]
     [TestCase("[ForEach] static void A(ref Px p) => p.R = (byte)(p.R + p.G);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field")]
+    [TestCase("[ForEach] static void A(ref F f, in Pos p) => f.V = System.Numerics.Vector2.Dot(p.Value, p.Value);", "Vector2.Dot adds the fields of a vector together, in an order not proven to be the scalar code's")]
+    [TestCase("[ForEach] static void A(ref F f, in Pos p) => f.V = p.Value.Length();", "Vector2.Length adds the fields of a vector together, in an order not proven to be the scalar code's")]
+    [TestCase("[ForEach] static void A(ref Odd o) => o = new Odd(o.Y, o.X);", "Odd's constructor does more than set fields from its parameters ('Y = x + y;')")]
     public void ScalarLoopsNameTheirReason(string members, string reason)
     {
         var diagnostics = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Where(d => d.Id == "EECS055").ToArray();
@@ -404,6 +409,19 @@ public class GeneratorTests
         // One check, for the read outside the branch; none for the one under h.HasValue.
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__live & ~__has1\) != global::System.Numerics.Vector<int>.Zero;").Count, Is.EqualTo(2), generated); // unmasked + masked
         Assert.That(generated, Does.Not.Contain("__bail |= (__live & __m"), generated);
+    }
+
+    // A component of a Vector2 assigned whole: one statement per lane, and as each lane is computed alike, the flat loop.
+    [Test]
+    public void AWholeComponentOfAVector2IsOneStatementPerLane()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { [ForEach(Simd = SimdMode.Require)] static void A(ref Pos p, in Vel v, in G g) => p = new Pos(p.Value + v.Value * g.Pull); }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("lanes = rows * 2;").And.Contain("var __t1 = (__c1_0 + (__c2_0 * __u0));")
+            .And.Contain("var __t2 = (__c1_1 + (__c2_1 * __u0));"), generated); // the flat loop, then the masked one per lane
     }
 
     // Narrow lanes: a byte sum brought back into range by Math.Min is AddSaturate, a difference raised to 0 by Math.Max is

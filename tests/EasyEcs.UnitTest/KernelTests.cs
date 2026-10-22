@@ -431,6 +431,56 @@ public static class OptionalKernels
     internal static void Careless(ref Level level, Maybe<Boost> boost) => level.Value = boost.Value.Value + 1;
 }
 
+// Struct fields as lanes: Vector2 / Vector3 inside components, whole components assigned, component-wise operators.
+public record struct Place2(Vector2 Value) : IComponent;
+public record struct Pace2(Vector2 Value) : IComponent;
+public record struct Place3(Vector3 Value) : IComponent;
+public record struct Pace3(Vector3 Value) : IComponent;
+public struct Body3 : IComponent { public Vector3 P; public float M; }
+public struct Plain2 : IComponent
+{
+    public float X, Y;
+    public Plain2(float x, float y) { X = x; Y = y; }
+}
+public record struct Dt2(float Seconds) : ISingletonComponent;
+public record struct Gust3(Vector3 Value) : ISingletonComponent;
+
+/// <summary>Kernels over struct values: each lane the IEEE operation the scalar code performs on it.</summary>
+public static class StructKernels
+{
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Move(ref Place2 position, in Pace2 velocity, in Dt2 step) =>
+        position = new Place2(position.Value + velocity.Value * step.Seconds);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Drift(ref Place3 position, in Pace3 velocity, in Dt2 step) => position.Value += velocity.Value * step.Seconds;
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Blow(ref Place3 position, in Pace3 velocity, in Gust3 gust) =>
+        position = position with { Value = position.Value * 0.5f - velocity.Value / 3f + gust.Value };
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Bounce(ref Place2 position, ref Pace2 velocity)
+    {
+        Vector2 p = position.Value, v = velocity.Value;
+        if (p.X < 0 || p.X > 10) v.X = -v.X;
+        if (p.Y < 0 || p.Y > 10) v.Y = -v.Y;
+        position = new Place2(Vector2.Min(Vector2.Max(p, Vector2.Zero), new Vector2(10)));
+        velocity = new Pace2(v);
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Swap(ref Plain2 a) => a = new Plain2(a.Y, a.X);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Weigh(ref Body3 body, in Pace3 velocity)
+    {
+        body = body with { M = body.M * 0.99f };
+        body.P += velocity.Value / body.M;
+        body.P.Y = -body.P.Y;
+    }
+}
+
 // Narrow lanes: C# computes on bytes and shorts in int; the vector loop follows the int's low bits and its range.
 public record struct Shade : IComponent { public byte V; }
 public record struct Tone : IComponent { public byte V; }
@@ -611,6 +661,34 @@ public class KernelTests
     }
 
     private delegate void ScalarRow<T1, T2>(ref T1 a, ref T2 b);
+
+    private static Vector2 NextVector2(Random r, int i) => new(NextFloat(r, i), NextFloat(r, i + 1));
+    private static Vector3 NextVector3(Random r, int i) => new(NextFloat(r, i), NextFloat(r, i + 1), NextFloat(r, i + 2));
+
+    /// <summary>
+    /// Components holding Vector2 / Vector3, assigned whole (<c>new T(...)</c>, <c>with</c>), through compound operators,
+    /// struct locals and constructors that set fields: lane by lane the method's results, bit for bit.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void StructValuesMatchTheMethodBitForBit(int count)
+    {
+        foreach (float dt in new[] { 1f / 60, float.NaN, -3e7f })
+        {
+            Check(count, (r, i) => new Place2(NextVector2(r, i)), (r, i) => new Pace2(NextVector2(r, i + 2)), w => { w.SetDt2(dt); StructKernels.Move(w); },
+                (ref Place2 p, ref Pace2 v) => StructKernels.Move(ref p, in v, new Dt2(dt)));
+            Check(count, (r, i) => new Place3(NextVector3(r, i)), (r, i) => new Pace3(NextVector3(r, i + 3)), w => { w.SetDt2(dt); StructKernels.Drift(w); },
+                (ref Place3 p, ref Pace3 v) => StructKernels.Drift(ref p, in v, new Dt2(dt)));
+            var gust = new Gust3(new Vector3(dt, 1, -2));
+            Check(count, (r, i) => new Place3(NextVector3(r, i)), (r, i) => new Pace3(NextVector3(r, i + 3)), w => { w.SetGust3(gust.Value); StructKernels.Blow(w); },
+                (ref Place3 p, ref Pace3 v) => StructKernels.Blow(ref p, in v, in gust));
+        }
+        Check(count, (r, i) => new Place2(NextVector2(r, i) * 2), (r, i) => new Pace2(NextVector2(r, i + 2)), StructKernels.Bounce,
+            (ref Place2 p, ref Pace2 v) => StructKernels.Bounce(ref p, ref v));
+        Check(count, (r, i) => new Plain2(NextFloat(r, i), NextFloat(r, i + 1)), (r, i) => new Heat(), StructKernels.Swap,
+            (ref Plain2 a, ref Heat _) => StructKernels.Swap(ref a));
+        Check(count, (r, i) => new Body3 { P = NextVector3(r, i), M = NextFloat(r, i + 3) }, (r, i) => new Pace3(NextVector3(r, i + 4)), StructKernels.Weigh,
+            (ref Body3 b, ref Pace3 v) => StructKernels.Weigh(ref b, in v));
+    }
 
     private delegate void NarrowRow<TO, TA, TB>(ref TO o, in TA a, in TB b);
 
@@ -1434,8 +1512,10 @@ public class KernelTests
             if (i % 3 == 0) e.Remove<Rank>(); // rows to test: masked words
             var n = world.CreateEntity(new Ink(), new Shade { V = (byte)i }, new Tone { V = (byte)(i * 7) }, new Rgba(), new Tint4());
             if (i % 4 == 0) n.Remove<Tone>(); // narrow masked words: the method on their passing rows
+            world.CreateEntity(new Place2(new Vector2(i, 1)), new Pace2(Vector2.One), new Body3 { M = 2 }, new Pace3(Vector3.One));
         }
         world.SetBounds(-10, 10);
+        world.SetDt2(0.5f);
 
         void Frame()
         {
@@ -1463,6 +1543,9 @@ public class KernelTests
             NarrowKernels.Band(world);
             NarrowKernels.Pick(world);
             NarrowKernels.Blend(world);
+            StructKernels.Move(world);
+            StructKernels.Bounce(world);
+            StructKernels.Weigh(world);
         }
 
         for (int i = 0; i < 50; i++) Frame(); // warm-up: the query cache, the static index tables of Interleaved, JIT tiers

@@ -22,7 +22,8 @@ namespace EasyEcs.Benchmark;
 /// pattern) are the calls, conversions and masks a vector loop takes. <c>Tally</c> (an int count, sum, Min and Max) and
 /// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order.
 /// <c>Optional</c> takes a <c>Maybe&lt;Mass&gt;</c> over <c>_holes</c> (a lane mask of the rows that have it).
-/// <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
+/// <c>MoveVector</c> is the Godot sample's move (a
+/// component of one Vector2 assigned whole: a flat loop). <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
 /// <c>Wave</c> calls Sin and Exp per row (FloatMode.Fast: .NET's vector forms). <c>StepParallel</c> / <c>SeekParallel</c> run
 /// <c>Step</c> / <c>Seek</c> on several threads, the per-row parallel job against the vector loop in each chunk. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
 /// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
@@ -33,7 +34,7 @@ public class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _fields, _holes, _halves, _pixels;
+    private World _world, _fields, _holes, _halves, _pixels, _vectors;
 
     [GlobalSetup]
     public void Setup()
@@ -55,6 +56,13 @@ public class KernelBenchmark
         _pixels.Reserve<Lum, Glow>(Entities);
         for (int i = 0; i < Entities; i++)
             _pixels.CreateEntity(new Lum { V = (byte)random.Next(256) }, new Glow { V = (byte)random.Next(256) });
+
+        _vectors = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _vectors.SetPull(1f / 60);
+        _vectors.Reserve<Pos2D, Vel2D>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _vectors.CreateEntity(new Pos2D(new Vector2((float)random.NextDouble(), (float)random.NextDouble())),
+                new Vel2D(new Vector2((float)random.NextDouble() - 0.5f, (float)random.NextDouble() - 0.5f)));
 
         _fields = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _fields.Reserve<P2, V2, P3, V3, P4, V4, D3>(Entities);
@@ -90,6 +98,7 @@ public class KernelBenchmark
         _holes.Dispose();
         _halves.Dispose();
         _pixels.Dispose();
+        _vectors.Dispose();
     }
 
     [Benchmark(Baseline = true)]
@@ -277,6 +286,16 @@ public class KernelBenchmark
     public void WaveGenerated() => Kernels.Wave(_world);
 
     [Benchmark]
+    public void MoveVectorScalar()
+    {
+        var job = new MoveVectorRows { Pull = _vectors.Pull };
+        _vectors.ForEach<Pos2D, Vel2D, MoveVectorRows>(ref job);
+    }
+
+    [Benchmark]
+    public void MoveVectorGenerated() => Kernels.MoveVector(_vectors);
+
+    [Benchmark]
     public void BrightenScalar()
     {
         var job = new BrightenRows();
@@ -431,6 +450,16 @@ public class KernelBenchmark
         }
     }
 
+    public record struct Pos2D(Vector2 Value) : IComponent;
+    public record struct Vel2D(Vector2 Value) : IComponent;
+
+    private struct MoveVectorRows : IForEach<Pos2D, Vel2D>, INoStructuralChanges
+    {
+        public Pull Pull;
+        public void Execute(ref Pos2D place, ref Vel2D motion) => Kernels.MoveVector(ref place, in motion, in Pull);
+        static int IForEach<Pos2D, Vel2D>.WriteMask => 1;
+    }
+
     public struct Lum : IComponent { public byte V; }
     public struct Glow : IComponent { public byte V; }
 
@@ -543,6 +572,11 @@ public class KernelBenchmark
             if (mass.HasValue) heat.Value += speed.Value * Dt / MathF.Max(mass.Value.Value, 0.5f);
             else heat.Value += speed.Value * Dt;
         }
+
+        // The Godot sample's move: a component of a Vector2 assigned whole, Vector2's operators lane by lane (a flat loop).
+        [ForEach(Simd = SimdMode.Require)]
+        internal static void MoveVector(ref Pos2D place, in Vel2D motion, in Pull pull) =>
+            place = new Pos2D(place.Value + motion.Value * pull.Value);
 
         // Narrow lanes: a saturating byte sum (AddSaturate), then a wrapping one past a threshold: 64 rows per Vector512.
         [ForEach(Simd = SimdMode.Require)]
