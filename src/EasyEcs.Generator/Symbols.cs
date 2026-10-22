@@ -28,6 +28,7 @@ internal static class Symbols
     public const string Entity = "EasyEcs.Entity";
     public const string EntitySpan = "EasyEcs.EntitySpan";
     public const string World = "EasyEcs.World";
+    public const string ComponentSet = "EasyEcs.ComponentSet";
     public const string DynamicBuffer = "EasyEcs.DynamicBuffer<T>";
     public const string TrackChanges = "EasyEcs.ITracked";
     public const string Indexed = "EasyEcs.IIndexed<TKey>";

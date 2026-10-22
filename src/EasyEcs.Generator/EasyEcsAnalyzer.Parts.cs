@@ -167,12 +167,15 @@ public sealed partial class EasyEcsAnalyzer
     /// <summary>
     /// EECS069: the managed components and singletons of the compilation with neither [NinoType] nor [NotSaved], reported
     /// when it ends: a warning if some code saves a world (a call of World.Save, SaveWithout or SaveEntities), else a
-    /// suggestion.
+    /// suggestion. A type the code names in a ComponentSet (With&lt;T&gt; / WithSingleton&lt;T&gt;) is left alone: the
+    /// code already chooses which saves hold it (SaveWithout, SaveEntitiesWith / Without).
     /// </summary>
     private static void AnalyzeFormatters(CompilationStartAnalysisContext start)
     {
         if (start.Compilation.GetTypeByMetadataName(Symbols.World) is not { } world) return;
         var unwritten = new System.Collections.Concurrent.ConcurrentQueue<INamedTypeSymbol>();
+        var chosen = new System.Collections.Concurrent.ConcurrentDictionary<ITypeSymbol, byte>(SymbolEqualityComparer.Default);
+        var set = start.Compilation.GetTypeByMetadataName(Symbols.ComponentSet);
         int saves = 0;
         start.RegisterSymbolAction(context =>
         {
@@ -185,7 +188,10 @@ public sealed partial class EasyEcsAnalyzer
         }, SymbolKind.NamedType);
         start.RegisterOperationAction(context =>
         {
-            if (Volatile.Read(ref saves) == 0 && ((IInvocationOperation)context.Operation).TargetMethod is { Name: "Save" or "SaveWithout" or "SaveEntities" or "SaveEntitiesWith" or "SaveEntitiesWithout" } method
+            var method = ((IInvocationOperation)context.Operation).TargetMethod;
+            if (method is { Name: "With" or "WithSingleton", TypeArguments.Length: 1 } && SymbolEqualityComparer.Default.Equals(method.ContainingType, set))
+                chosen.TryAdd(method.TypeArguments[0].OriginalDefinition, 0);
+            else if (Volatile.Read(ref saves) == 0 && method is { Name: "Save" or "SaveWithout" or "SaveEntities" or "SaveEntitiesWith" or "SaveEntitiesWithout" }
                 && SymbolEqualityComparer.Default.Equals(method.ContainingType, world))
                 Interlocked.Exchange(ref saves, 1);
         }, OperationKind.Invocation);
@@ -193,7 +199,8 @@ public sealed partial class EasyEcsAnalyzer
         {
             var severity = saves != 0 ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info;
             foreach (var type in unwritten)
-                context.ReportDiagnostic(Diagnostic.Create(NoFormatter, type.Locations.First(l => l.IsInSource), severity, null, null, type.Name));
+                if (!chosen.ContainsKey(type.OriginalDefinition))
+                    context.ReportDiagnostic(Diagnostic.Create(NoFormatter, type.Locations.First(l => l.IsInSource), severity, null, null, type.Name));
         });
     }
 
