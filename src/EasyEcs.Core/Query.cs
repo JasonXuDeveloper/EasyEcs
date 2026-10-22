@@ -1003,21 +1003,99 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     {
         int rows = archetype.Count;
         if (rows == archetype.AliveCount && !_plan.Ticked && _plan.AnyOf.Length == 0) return CountDense(archetype, rows);
-        int count = 0;
+        var counter = new Counter();
+        Visit(archetype, false, ref counter);
+        return counter.Count;
+    }
+
+    /// <summary>
+    /// What a walk of the passing rows (<see cref="Visit"/>) does with each word of them: the rows of word
+    /// <paramref name="word"/> of <paramref name="slots"/> that pass, one bit each (tombstones may pass: check ids). False
+    /// stops the walk. A struct, so the walk is compiled for it.
+    /// </summary>
+    private interface IWordSink
+    {
+        bool Word(EntityId[] slots, int word, ulong bits);
+    }
+
+    /// <summary>
+    /// Hand <paramref name="sink"/> the words of rows of <paramref name="archetype"/> that pass, in row order: every word
+    /// when <paramref name="all"/> (a table whose rows all pass), else the words <see cref="NextWord"/> and
+    /// <see cref="NextPassing"/> do not skip, words without a passing row left out.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void Visit<TSink>(Archetype archetype, bool all, ref TSink sink) where TSink : struct, IWordSink, allows ref struct
+    {
+        int rows = archetype.Count;
         var slots = archetype.Slots;
         int words = (rows + 63) >> 6;
-        for (int w = NextWord(archetype, 0, words); w < words; w = NextWord(archetype, w + 1, words))
+        for (int w = all ? 0 : NextWord(archetype, 0, words); w < words; w = all ? w + 1 : NextWord(archetype, w + 1, words))
         {
-            ulong bits = Word(archetype, w) & RowMask(w, rows);
-            if (bits == 0) w = NextPassing(archetype, w + 1, words) - 1; // words without a passing row
-            while (bits != 0)
+            ulong bits = (all ? ulong.MaxValue : Word(archetype, w)) & RowMask(w, rows);
+            if (bits == 0)
             {
-                if (slots[(w << 6) + BitOperations.TrailingZeroCount(bits)].Index >= 0) count++;
-                bits &= bits - 1;
+                if (!all) w = NextPassing(archetype, w + 1, words) - 1; // words without a passing row
+                continue;
             }
-        }
 
-        return count;
+            if (!sink.Word(slots, w, bits)) return;
+        }
+    }
+
+    private struct Counter : IWordSink
+    {
+        public int Count;
+
+        public bool Word(EntityId[] slots, int word, ulong bits)
+        {
+            for (; bits != 0; bits &= bits - 1)
+                if (slots[(word << 6) + BitOperations.TrailingZeroCount(bits)].Index >= 0) Count++;
+            return true;
+        }
+    }
+
+    private struct Finder : IWordSink
+    {
+        public bool Found;
+
+        public bool Word(EntityId[] slots, int word, ulong bits)
+        {
+            for (; bits != 0; bits &= bits - 1)
+                if (slots[(word << 6) + BitOperations.TrailingZeroCount(bits)].Index >= 0)
+                {
+                    Found = true;
+                    return false; // the first one is enough
+                }
+
+            return true;
+        }
+    }
+
+    private ref struct Collector(Span<EntityId> into, int rows, bool tombstones) : IWordSink
+    {
+        private readonly Span<EntityId> _into = into;
+        public int Written;
+
+        public bool Word(EntityId[] slots, int word, ulong bits)
+        {
+            int first = word << 6;
+            if (!tombstones && _into.Length - Written >= 64)
+            {
+                // Room for the whole word and no tombstone to skip: the passing rows' ids side by side, 8 per store.
+                Written += Lanes.Compact<EntityId>(slots.AsSpan(first, Math.Min(64, rows - first)), bits, _into.Slice(Written));
+                return true;
+            }
+
+            for (; bits != 0; bits &= bits - 1)
+            {
+                var id = slots[first + BitOperations.TrailingZeroCount(bits)];
+                if (id.Index < 0) continue; // a tombstone
+                _into[Written] = id;
+                if (++Written == _into.Length) return false;
+            }
+
+            return true;
+        }
     }
 
     /// <summary>
@@ -1073,18 +1151,9 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     /// <summary>Whether any alive row passes: <see cref="Count"/> stopping at the first.</summary>
     public bool Any(Archetype archetype)
     {
-        int rows = archetype.Count;
-        var slots = archetype.Slots;
-        int words = (rows + 63) >> 6;
-        for (int w = NextWord(archetype, 0, words); w < words; w = NextWord(archetype, w + 1, words))
-        {
-            ulong bits = Word(archetype, w) & RowMask(w, rows);
-            if (bits == 0) w = NextPassing(archetype, w + 1, words) - 1; // words without a passing row
-            for (; bits != 0; bits &= bits - 1)
-                if (slots[(w << 6) + BitOperations.TrailingZeroCount(bits)].Index >= 0) return true;
-        }
-
-        return false;
+        var finder = new Finder();
+        Visit(archetype, false, ref finder);
+        return finder.Found;
     }
 
     /// <summary>
@@ -1104,31 +1173,9 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
             return copied;
         }
 
-        int written = 0, words = (rows + 63) >> 6;
-        bool tombstones = rows != archetype.AliveCount;
-        for (int w = mode == All ? 0 : NextWord(archetype, 0, words); w < words;
-             w = mode == All ? w + 1 : NextWord(archetype, w + 1, words))
-        {
-            ulong bits = (mode == All ? ulong.MaxValue : Word(archetype, w)) & RowMask(w, rows);
-            if (bits == 0 && mode != All) w = NextPassing(archetype, w + 1, words) - 1; // words without a passing row
-            if (bits != 0 && !tombstones && into.Length - written >= 64)
-            {
-                // Room for the whole word and no tombstone to skip: the passing rows' ids side by side, 8 per store.
-                int first = w << 6;
-                written += Lanes.Compact<EntityId>(slots.AsSpan(first, Math.Min(64, rows - first)), bits, into.Slice(written));
-                continue;
-            }
-
-            for (; bits != 0; bits &= bits - 1)
-            {
-                var id = slots[(w << 6) + BitOperations.TrailingZeroCount(bits)];
-                if (id.Index < 0) continue; // a tombstone
-                into[written] = id;
-                if (++written == into.Length) return written;
-            }
-        }
-
-        return written;
+        var collector = new Collector(into, rows, rows != archetype.AliveCount);
+        Visit(archetype, mode == All, ref collector);
+        return collector.Written;
     }
 
     /// <summary>
