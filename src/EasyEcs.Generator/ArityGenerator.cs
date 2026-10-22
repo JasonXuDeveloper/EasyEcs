@@ -371,6 +371,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
             static virtual int SelfStamped => 0;
 
             /// <summary>
+            /// Tracked components the job writes besides its own (through a <see cref="Maybe{T}"/>; default none): a
+            /// parallel pass opens their change-tick blocks with those of <see cref="WriteMask"/>, so chunks splitting a
+            /// block share it. Generated parallel jobs set their <see cref="Maybe{T}"/> writes.
+            /// </summary>
+            static virtual ComponentSet OptionalWrites => default;
+
+            /// <summary>
             /// The job keeps partial results in its fields (<see cref="Reduce{T}"/>; default false): a parallel pass keeps
             /// each chunk's copy of the job and combines them into the caller's job in chunk order (<see cref="Merge{TSelf}"/>).
             /// </summary>
@@ -1349,7 +1356,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         int chunks = 0;
                         var archetypes = match.Archetypes;
                         // A job writing a tracked component stamps change-tick summaries shared by 4,096 rows (a JIT-time constant).
-                        bool stamps = {{List(n, i => $"(TJob.WriteMask & {1 << (i - 1)}) != 0 && default(T{i}) is ITracked", " || ")}};
+                        bool stamps = {{List(n, i => $"(TJob.WriteMask & {1 << (i - 1)}) != 0 && default(T{i}) is ITracked", " || ")}} || TJob.OptionalWrites.HasComponents;
                         int size = world.ChunkRows(archetypes, stamps, filter.SliceCount, chunkRows);
                         bool open = stamps && (size & 4095) != 0; // chunks split blocks: open them first (Archetype.OpenBlocks)
                         for (int a = 0; a < archetypes.Length; a++)
@@ -1362,6 +1369,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             {
                                 ulong tick = world.ChangeTick;
             {{Lines(n, i => $"                    if ((TJob.WriteMask & {1 << (i - 1)}) != 0) archetype.OpenBlocks<T{i}>(first, end, tick);")}}
+                                if (TJob.OptionalWrites.HasComponents) archetype.OpenBlocks(TJob.OptionalWrites, first, end, tick);
                             }
                             // Chunks end on multiples of size, not size rows after a slice's start: a slice starts at any
                             // word, and two chunks of one unopened 4,096-row block would race on its change-tick summary.

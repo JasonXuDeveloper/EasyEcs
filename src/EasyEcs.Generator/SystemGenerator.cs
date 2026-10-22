@@ -530,6 +530,15 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string declaring = method.Simd != null ? "IForEachBatch" : iface; // IForEachMasked declares no masks of its own
         sb.Append($"\n        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.WriteMask => {writes};\n");
         if (own != 0) sb.Append($"        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.SelfStamped => {own};\n");
+        // Tracked components written through a Maybe: the parallel pass opens their blocks as it opens its own columns'.
+        var optional = method.Parallel
+            ? method.Parameters.Where(p => p is { Kind: Symbols.ParamKind.Optional, RefKind: "ref", Tracked: true }).Select(p => p.Type).Distinct().ToArray()
+            : [];
+        if (optional.Length > 0)
+        {
+            sb.Append($"        private static readonly global::EasyEcs.ComponentSet __optionalWrites = global::EasyEcs.ComponentSet.Create(){string.Concat(optional.Select(t => $".With<{t}>()"))};\n");
+            sb.Append($"        static global::EasyEcs.ComponentSet global::EasyEcs.{declaring}<{method.ComponentTypes}>.OptionalWrites => __optionalWrites;\n");
+        }
         var reductions = Enumerable.Range(0, method.Parameters.Length).Where(i => method.Parameters[i].Kind == Symbols.ParamKind.Reduction).ToArray();
         var emits = Enumerable.Range(0, method.Parameters.Length).Where(i => method.Parameters[i].Kind == Symbols.ParamKind.Emit).ToArray();
         if (method.Parallel && reductions.Length + emits.Length > 0)
