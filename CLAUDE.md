@@ -38,11 +38,18 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy, RunCount (completed runs: the slice of a sliced method);
                                SystemCode.cs: the generated jobs and access of a system type, registered by a module
                                initializer (systems need no partial)
-  ForEachAttributes.cs         [ForEach] (Parallel, Slices), [With<T>], [Without<T>], [WithAny<T>], [Changed<T>],
+  ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkRows, Simd), [With<T>], [Without<T>], [WithAny<T>], [Changed<T>],
                                [Removed<T>] ([ChangedAny<..>] / [RemovedAny<..>] are generated: Filters.g.cs)
   Maybe.cs                     Maybe<T>: an optional component parameter of a [ForEach] method
   Mut.cs                       Mut<T>: a [ForEach] parameter stamped only on the rows it writes (Write, SetIfChanged);
                                Values.Same, the boxing-free equality of SetIfChanged
+  Reduce.cs                    IReduction<T> + Reduce<T> (taken by ref): a [ForEach] method's partial result per chunk,
+                               combined in chunk order into a singleton when the pass ends (OpenMP reduction)
+  Scratch.cs                   Scratch<T>: per-thread working memory of a [ForEach] method, never shared, never reset
+  Lookup.cs                    Lookup<T> + LookupExtensions: read-only lookups of any entity (and index keys) from a
+                               [ForEach] method, parallel ones included; the system reads T, so no writer shares its stage
+  Interleaved.cs               the deinterleaving loads / interleaving stores of generated vector loops over components
+                               of 2 to 4 fields of one lane type
   SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
   SystemOrder.cs               [UpdateBefore<T>] / [UpdateAfter<T>]
   SystemAccess.cs              a system's read/write sets (generated from [ForEach] parameters) and the conflict rule
