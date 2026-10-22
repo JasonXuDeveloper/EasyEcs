@@ -111,12 +111,12 @@ public class MovementSystem : EcsSystem
 ### 可选组件 [#optional-components]
 
 `Maybe<T>` 参数不管实体有没有 `T` 都会访问：`HasValue` 说明有没有，`Value` 是 `ref`。可选部分不大时，一个方法就能代替
-`[With<T>]` 和 `[Without<T>]` 两个版本。
+`[With<T>]` 和 `[Without<T>]` 两个版本。`ReadOnlyMaybe<T>` 是只读版本：从不打 tick，调度时算读，也是带索引的组件唯一能用的可选参数。
 
 - **适合：** 只有部分实体才有的加成（伤害计算时的护甲、回血时的增益）。
 - **别用于：** 最热的循环：用 `[With<T>]` / `[Without<T>]` 拆成两个方法，每行都不用检测。
 - **开销：** 不做结构变更的方法每行检测一个存在位；做结构变更的方法每个实体查找一次。
-- **指南：** [系统](/zh/docs/guide/systems)
+- **指南：** [系统](/zh/docs/guide/systems#maybe)、[`ReadOnlyMaybe<T>`](/zh/docs/guide/systems#read-only-maybe)
 
 ### 向量循环 [#vector-loops]
 
@@ -391,8 +391,9 @@ var guard = world.Instantiate(goblin, new ChildOf(archer));          // 自带�
 
 - **适合：** 属于某个实体、变了就要发送或保存的列表：背包、路径、最近的命中记录。
 - **别用于：** 有自己状态的元素（每个元素一个实体，加一条关系），或者数量固定的一小组值（非托管组件里的 `[InlineArray]`）。
-- **开销：** 每个实体一个对象加一个数组，第一次写入时创建；容量之内的写入不分配内存。
-- **指南：** [动态缓冲](/zh/docs/guide/dynamic-buffers)、[ECS 设计原则第 8 条](/zh/docs/ecs-principles#8-choose-how-to-hold-a-collection)
+- **开销：** 每个实体一个对象加一个数组，第一次写入时创建；容量之内的写入不分配内存。销毁的缓冲把列表交给池，同类型的下一个缓冲
+  从池里取，不论在哪个线程：`PoolCapacity` 决定最长保留多长的列表，`ReservePool(n)` 在启动时把池填满。`SetCount(n)` 返回 span，原地写整个缓冲。
+- **指南：** [动态缓冲](/zh/docs/guide/dynamic-buffers)、[缓冲池](/zh/docs/guide/dynamic-buffers#pool)、[ECS 设计原则第 8 条](/zh/docs/ecs-principles#8-choose-how-to-hold-a-collection)
 
 ### 预制体与克隆 [#prefabs-and-cloning]
 
@@ -449,7 +450,8 @@ restarted.Load(bytes.WrittenSpan);
 `SaveEntities` 和 `LoadEntities` 经由字节把相关的实体（一个玩家和他拥有的东西）搬到另一个 World，换上新 id，组内的链接随之改写。
 `MoveEntities` 在同一线程的两个 World 之间直接搬，不经过编码。记录只保存需要持久化的部分：`SaveEntitiesWith(writer, ids, set)`
 配一个 `ComponentSet`，只写出集合里的组件；`LoadEntitiesInto(bytes, entities)` 把它们放到已经存在的实体上。
-加上 `markWritten: false`，恢复的值不算变更，按变更存盘的系统就不会立刻把它写回去。
+加上 `markWritten: false`，恢复的值不算变更，按变更存盘的系统就不会立刻把它写回去。`SaveEntitiesWithout(writer, ids, set)` 反过来：
+除了集合都写，留给加载后会重新算的数据。
 
 - **适合：** 玩家换场景或换服，对局结束把幸存者交给大厅（用 `Descendants` 收集整组）；实体先于存储数据出现的 actor 用记录。
 - **开销：** O(给出的实体数 × 组件数)；`MoveEntities` 直接拷贝行。
@@ -494,10 +496,12 @@ restarted.Load(bytes.WrittenSpan);
 （[EECS010](/zh/docs/guide/analyzer#eecs010)）：结构变更、批量方法、以 `ref` 接收单例。`world.ForEachParallel` 和
 `ForEachEntityParallel` 对结构体 job 做同样的事。
 
-- **适合：** 几万个实体以上、每个实体计算量大的工作：转向、寻路跟随、AI 打分。
-- **开销：** 每块 1,024 到 16,384 行，大约每个线程四块，零分配。写被追踪组件的方法按 4,096 行的整数倍切块（变更摘要覆盖的块大小），
-  所以表要更大才会被拆开。
-- **指南：** [多线程与并行](/zh/docs/guide/threading)
+- **适合：** 几万个实体以上、每个实体计算量大的工作：转向、寻路跟随、AI 打分；配上 `ChunkRows = n`，也适合只有几百行、每行几微秒的活（地形区块、寻路）。
+- **别用于：** 几千个实体的轻量行：交接的开销比活本身还大。
+- **开销：** 线程做完一块就领下一块，也就是 OpenMP 的 `schedule(dynamic, n)`。默认每块 1,024 到 16,384 行，大约每个线程四块，零分配；
+  写被追踪组件的方法按 4,096 行的整数倍切块（变更摘要一段的行数），所以表要更大才会被拆开。`ChunkRows = n` 指定每块的行数
+  （向上取整到 64；[EECS054](/zh/docs/guide/analyzer#eecs054)）。
+- **指南：** [多线程与并行](/zh/docs/guide/threading)、[`ChunkRows`](/zh/docs/guide/threading#chunk-rows)
 
 ### 批量操作 [#bulk-operations]
 

@@ -171,6 +171,10 @@ public class MovementSystem : EcsSystem
 }
 ```
 
+A static per-entity method whose components each hold one number of one type (`float`, `int`, …) also gets a
+`Vector<T>` loop written by the generator, with the same results bit for bit
+([vector loops](/en/docs/guide/systems#vector-loops)); `Position` here has two fields, so this one runs row by row.
+
 ### [ForEach] parameters [#foreach-parameters]
 
 | Parameter | Is | Notes |
@@ -192,6 +196,7 @@ public class MovementSystem : EcsSystem
 | Attribute | On | Does |
 | --- | --- | --- |
 | `[ForEach]` / `[ForEach(Parallel = true)]` | Method | The method is the loop; `Parallel` splits rows across threads ([EECS010](/en/docs/guide/analyzer#eecs010)) |
+| `[ForEach(Parallel = true, ChunkRows = n)]` | Method | Threads claim `n` rows at a time (OpenMP's `schedule(dynamic, n)`): for a few hundred heavy rows ([chunk size](/en/docs/guide/threading#chunk-rows), [EECS054](/en/docs/guide/analyzer#eecs054)) |
 | `[ForEach(Slices = N)]` | Method | Each run visits one slice, about 1 / N of the rows: every row once per N runs (not with `Changed` / `Removed`: [EECS035](/en/docs/guide/analyzer#eecs035)) |
 | `[With<T>]` | Method, system group | Requires `T` without passing it |
 | `[Without<T>]` | Method, system group | Excludes entities with `T` |
@@ -259,7 +264,7 @@ bool anyDead = world.Any<Dead>();
 | `world.ForEach<T1..T9, TJob>(ref job, filter)` | A struct job `IForEach<T…>`: `Execute(ref T1 …)` |
 | `world.ForEachEntity<…>(ref job, filter)` | `IForEachEntity<T…>`: `Execute(Entity e, ref T1 …)` |
 | `world.ForEachBatch<…>(ref job, filter)` | `IForEachBatch<T…>`: runs of rows as spans |
-| `world.ForEachParallel` / `ForEachEntityParallel` | A struct job in chunks on several threads |
+| `world.ForEachParallel` / `ForEachEntityParallel` | A struct job in chunks on several threads (`chunkRows:` sets the chunk size) |
 | `Runner.Method(world, …)` | The entry point of a static `[ForEach]` method outside a system |
 | `static int WriteMask => mask` on a job | Components the job writes (bit k - 1 for component k), stamped for change tracking; default `-1`, all |
 | `: INoStructuralChanges` on a job | The job promises no structural change: no per-entity bookkeeping, structure frozen while it runs |
@@ -412,7 +417,9 @@ by `ref` from `e.WriteLoot()` (or `GetOrAddLoot()`), so each one counts for chan
 | `Clear()` | Empties it, keeping the capacity |
 | `EnsureCapacity(n)` / `TrimExcess()` | Grows once before a known count, gives memory back |
 | `AsSpan()` | A `Span<T>` over the elements, for writes in place |
-| `DynamicBuffer<T>.PoolCapacity = n` (static) | The longest list a dead buffer of `T` gives back to its pool, set once at startup |
+| `SetCount(n)` | Sets the count (added elements `default`) and returns the span to write the whole buffer in place |
+| `DynamicBuffer<T>.PoolCapacity = n` (static) | The longest list a dead buffer of `T` gives back to its pool, set once at startup ([pool](/en/docs/guide/dynamic-buffers#pool)) |
+| `DynamicBuffer<T>.ReservePool(n)` (static) | Fills the pool with `n` empty lists at startup, after `PoolCapacity` |
 
 ```csharp
 unit.Set(new DynamicBuffer<Loot>());
@@ -435,6 +442,7 @@ Guide: [Dynamic buffers](/en/docs/guide/dynamic-buffers).
 | `world.SaveEntities(writer, ids)` / `LoadEntities(bytes, handles)` | Related entities to another world or process |
 | `ComponentSet.Create().With<T>()….WithSingleton<S>()` | Components (and, for whole-world saves, singletons), built once in a `static readonly` field |
 | `world.SaveEntitiesWith(writer, ids, set)` | A record: only the components of the set |
+| `world.SaveEntitiesWithout(writer, ids, set)` | Everything but the set: the data a load computes again stays out |
 | `world.LoadEntitiesInto(bytes, entities, markWritten: false)` | A record onto entities that exist; `markWritten: false` keeps it from counting as changed |
 | `world.MoveEntities(target, ids, moved)` | A group to another world of the thread, no encoding; skips retired entities (kept for cleanup), and leaves cleanup components behind |
 | `world.RemoveTypes(assembly or context)` | Drops a plugin's types before its context unloads |

@@ -28,7 +28,10 @@ available as Markdown: add `.md` to its URL.
 - A list per entity is a `DynamicBuffer<T>` component; never copy it by value (EECS012). Call
   `EnsureCapacity(n)` on it (and `world.Reserve<T…>(n)` on the world) before a wave of known size. Write a whole
   buffer through the span `SetCount(n)` returns; compute many passes over the same elements in a `stackalloc`'d span
-  and copy it in once. `TrimExcess()` on an empty scratch buffer gives its list back to the pool.
+  and copy it in once. `TrimExcess()` on an empty scratch buffer gives its list back to the pool. Buffers longer than
+  4 KB that come and go (a chunk's blocks, a path) set `DynamicBuffer<T>.PoolCapacity` to their length and call
+  `DynamicBuffer<T>.ReservePool(peak)` once at startup, after `PoolCapacity` (both process-wide); `world.Reserve` does not
+  reserve buffer lists.
 - An external resource (a socket, a seat) lives in an `ICleanupComponent`: `Destroy` retires the entity (alive, with
   the `Retired` tag) until a system releases the resource and removes the component, which frees it. Never set or remove `Retired` or
   `Disabled<T>` yourself (EECS045): `Destroy`, `Disable<T>()` and `Enable<T>()` do. A cleanup component and `ChildOf`
@@ -85,7 +88,11 @@ available as Markdown: add `.md` to its URL.
 - A system never calls `World.Update()` (EECS034): the host runs the world.
 - `[ForEach(Parallel = true)]` methods write data only and make no structural changes (EECS010); a later system on the
   owner thread acts on that data. A few hundred heavy rows (microseconds each) set `ChunkRows = 64` so threads take 64
-  rows at a time (EECS054: only with `Parallel = true`); light rows keep the default.
+  rows at a time (EECS054: only with `Parallel = true`); light rows keep the default. Threads claim chunks from one
+  shared counter, like OpenMP's `schedule(dynamic, n)`: never assume an order between chunks.
+- Hot per-row arithmetic over numbers: a static, non-parallel `[ForEach]` method over one-field components of one
+  primitive type (no `Entity`, `World`, `Mut<T>` or `Maybe<T>` parameter) gets a generated `Vector<T>` loop; mixing
+  `float` and `int` fields keeps it scalar.
 - A request or message for one entity runs as a struct job on it: `entity.Run<T…, TJob>(ref job, Filter)` with an
   `IForEachEntity` job and a `static readonly` `QueryFilter`; it returns `false` when the entity is gone, lacks a
   component or fails the filter. It is structural: never inside a parallel `[ForEach]` (EECS010), never in a
@@ -105,7 +112,7 @@ available as Markdown: add `.md` to its URL.
 - A loop that only reads tracked components walks `world.Read<T…>()`, not `Query`: a `Query` item stamps every row
   it visits, so `[Changed<T>]` readers would see rows nobody changed (EECS046).
 - During a pass (a `foreach` over `Query`, a `[ForEach]` method, a job's `Execute`) never call `TrimExcess`,
-  `Capture`, `Restore`, `Save`, `SaveWithout`, `Load`, `LoadKeeping`, `SaveEntities`, `SaveEntitiesWith`, `LoadEntities`,
+  `Capture`, `Restore`, `Save`, `SaveWithout`, `Load`, `LoadKeeping`, `SaveEntities`, `SaveEntitiesWith`, `SaveEntitiesWithout`, `LoadEntities`,
   `LoadEntitiesInto`, `MoveEntities`, `GroupBy`
   or `RemoveTypes` on its world: they throw (EECS041). Record the request as data and call them after the pass.
 
@@ -122,7 +129,8 @@ available as Markdown: add `.md` to its URL.
 - Prefer `[ForEach]` methods over hand-written `Query` loops; use bulk calls (`SetAll`, `RemoveAll`, `DisableAll`,
   `EnableAll`, `CreateEntities`, `DestroyAll`, `DestroyEntities(ids)`) for many entities at once, not a loop over a query or a `[ForEach]` method whose whole body is that one change
   (EECS030), and
-  `CreateEntities` or `Reserve` before creating many entities in a loop (EECS031). Ask `world.Any<T>()` and
+  `CreateEntities` or `Reserve` before creating many entities in a loop (EECS031); `world.Reserve(prefab, n)` also
+  reserves the prefab's index keys, its retired table (cleanup components) and free ids, so a wave of a kind spawns at 0 B. Ask `world.Any<T>()` and
   `world.Count<T>()`, and filter with `QueryFilter`, instead of counting or testing in a loop (EECS032).
 - Removing a component keeps the row (one bit flips), so status components that come and go are cheap; adding a new
   kind of component moves the row once.
@@ -154,7 +162,8 @@ available as Markdown: add `.md` to its URL.
 - Size a buffer from `index.Find(key).Count` (O(1)), never by walking the matches twice; `index.KeyCount` /
   `relations.TargetCount` count distinct keys / targets in O(1).
 - Durable state is a record: `SaveEntitiesWith(writer, ids, Persistent)` with a `static readonly ComponentSet` of the
-  durable components only, never the runtime ones (connections, timers, caches).
+  durable components only, never the runtime ones (connections, timers, caches); when the runtime set is the smaller
+  one, `SaveEntitiesWithout(writer, ids, Runtime)` writes everything else. Neither set may name a singleton (it throws).
 - Restore a record with `LoadEntitiesInto(bytes, entities, markWritten: false)`, so a system that saves or
   replicates changed components does not send it straight back; the values it replaces (a prefab's defaults) count as
   never written too, so one prefab per kind serves new and restored entities. `LoadEntitiesInto` is structural (EECS010, EECS013, EECS014).

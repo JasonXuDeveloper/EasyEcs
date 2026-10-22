@@ -48,7 +48,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `RelationIndex<T>` | sealed class | `world.Relations<T>()`: the entities linking to a target. |
 | `TargetPolicy`, `TargetPolicyExtensions` | enum, extensions | What destroying a target does to the links to it: `Keep`, `Remove`, `Destroy`. |
 | `EcsSystem` | abstract class | `World`, `UpdateInterval`, `UpdatePhase`, `Enabled`, `Error`, `Stats`, `LastRunTick`, `RunCount`; `OnCreate` / `OnUpdate` / `OnDestroy` ([systems](/en/docs/guide/systems)). |
-| `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`, `Slices = N`), `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<T1..Tn>]`, `[RemovedAny<T1..Tn>]`. |
+| `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`, `ChunkRows = n`, `Slices = N`), `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<T1..Tn>]`, `[RemovedAny<T1..Tn>]`. |
 | `Maybe<T>` | ref struct | An optional component parameter of a `[ForEach]` method: `HasValue`, `Value`. |
 | `ReadOnlyMaybe<T>` | ref struct | The same, read-only: `Value` is `ref readonly`, never stamped, allowed for indexed components; a `Maybe<T>` converts to it. |
 | `Mut<T>` | ref struct | A component parameter of a `[ForEach]` method that counts as written only on the rows the method writes: `Value`, `Write()`, `SetIfChanged(value)` ([change tracking](/en/docs/guide/change-tracking)). |
@@ -81,7 +81,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `world.EntityCount` | O(1) | |
 | `world.Entities` | O(capacity) | living entities in id order, for diagnostics |
 | `world.EnsureEntityCapacity(capacity)` | O(capacity) | pre-size the entity array; a no-op when large enough |
-| `world.Reserve<T1..Tn>(count)` | O(n), plus one growth | pre-sizes the table of exactly `T1..Tn` and the entity array, so the next `count` creations with those components never grow them |
+| `world.Reserve<T1..Tn>(count)` | O(n), plus one growth | pre-sizes the table of exactly `T1..Tn` and the entity array, so the next `count` creations with those components never grow them; also the keys of their indexed components, the table they retire into when they hold cleanup components, and the free-id list ([reserve](/en/docs/guide/prefabs#reserve)) |
 
 ## Components [#components]
 
@@ -119,7 +119,7 @@ component it has; components the source lacks stay absent and are not removals.
 | `world.Instantiate(prefab, Span<Entity> entities)` | O(count × c) | one gate pass and at most one table growth for the wave |
 | `world.Instantiate(prefab, in T1 … in Tn)` | O(c + n) amortized | the prefab's values plus the given ones (replacing the prefab's, or added; a disabled one given is enabled), in one row copy into the final table, no intermediate table; a given `ChildOf` links the hierarchy, a unique key is checked first; O(members × c) plus one move for a group, whose entity of the prefab passed gets the components |
 | `world.Instantiate(prefab, Span<Entity> entities, in T1 … in Tn)` | O(count × (c + n)) | the same values for every instance; one gate pass, at most one table growth, each given column filled at once |
-| `world.Reserve(prefab, count)` | O(c), plus one growth | pre-sizes the tables the next `count` instances go to, so a spawn wave never grows them during a tick |
+| `world.Reserve(prefab, count)` | O(c), plus one growth | pre-sizes the tables the next `count` instances go to, so a spawn wave never grows them during a tick; also the instances' index keys, retired table and free ids (not their buffer lists: `ReservePool`) |
 | `entity.Clone()` | O(c) | a new entity of the same world and table with a copy of every component; throws if not alive or retired (kept for its cleanup components) |
 
 ## Dynamic buffers [#dynamic-buffers]
@@ -137,7 +137,8 @@ need a `ref` and are tracked writes.
 | `bag.EnsureCapacity(n)` / `AsSpan()` | O(count) when it grows / O(1) | `AsSpan()` is writable |
 | `bag.SetCount(n)` | O(elements added or removed) | returns the span to write (`AsSpan()`); added elements are `default`; allocates only when the buffer grows |
 | `bag.TrimExcess()` | O(count) | reallocates to the count; an empty buffer gives its list back to the pool and holds none |
-| `DynamicBuffer<T>.PoolCapacity` | O(1) | the longest list a dead buffer of `T` gives back to its thread's pool (default 4 KB of elements); per element type, process-wide, set at startup |
+| `DynamicBuffer<T>.PoolCapacity` | O(1) | the longest list a dead buffer of `T` gives back to the [buffer pool](/en/docs/guide/dynamic-buffers#pool) (default 4 KB of elements); per element type, process-wide, set at startup |
+| `DynamicBuffer<T>.ReservePool(lists)` | O(lists) allocations once; O(1) when the pool holds enough | fills the pool with empty lists of `PoolCapacity` elements until it holds `lists`; per element type, process-wide, after `PoolCapacity` |
 
 A snapshot, a save or a clone of a buffer column copies the elements: O(elements), a new list per entity.
 
