@@ -91,9 +91,16 @@ public class DynamicBufferTests
         bag.Add(new Loot(4, 4));
         bag.TrimExcess();                         // the peak capacity is released
         Assert.That((bag.Count, bag.Capacity, bag[0]), Is.EqualTo((1, 1, new Loot(4, 4))));
+        bag.Add(new Loot(5, 5));
+        bag.Add(new Loot(6, 6));
+        int grown = bag.Capacity;
         bag.Clear();
-        bag.TrimExcess();
+        bag.TrimExcess();                         // empty: the list goes back to the pool
         Assert.That(bag.Capacity, Is.Zero);
+        var other = world.CreateEntity(new DynamicBuffer<Loot>());
+        ref var reused = ref other.Get<DynamicBuffer<Loot>>();
+        reused.Add(new Loot(7, 7));               // the first write takes it back, with the capacity it grew to
+        Assert.That((reused.Count, reused.Capacity, reused[0]), Is.EqualTo((1, grown, new Loot(7, 7))));
 
         var empty = world.CreateEntity(new DynamicBuffer<Loot>());
         Assert.That(empty.Read<DynamicBuffer<Loot>>().Count, Is.Zero);

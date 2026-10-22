@@ -161,11 +161,19 @@ public static class DynamicBufferExtensions
 
     /// <summary>
     /// Shrink the capacity to the count, so a list that once grew large stops holding its peak (the list's array is
-    /// reallocated; an empty list holds none). O(count).
+    /// reallocated). An empty buffer gives its list back to the pool its first writes take lists from, so a buffer
+    /// used only now and then (scratch space while an entity is active) holds no memory in between and the next
+    /// first write of any buffer of <typeparamref name="T"/> reuses it. O(count).
     /// </summary>
     public static void TrimExcess<T>(this ref DynamicBuffer<T> buffer)
     {
-        if (buffer.Store is { } store && store.Count < store.Items.Length) store.Resize(store.Count);
+        if (buffer.Store is not { } store) return;
+        if (store.Count == 0)
+        {
+            buffer.Store = null;
+            store.Recycle();
+        }
+        else if (store.Count < store.Items.Length) store.Resize(store.Count);
     }
 
     /// <summary>
