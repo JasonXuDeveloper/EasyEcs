@@ -72,6 +72,8 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
   和推送光环的设计取代（[D73](/zh/docs/decisions#d73-survey-items-not-added)）。
 - 部分快照 API：用一个系统把需要的值拷进单例里的环形缓冲（延迟补偿的写法），只拷需要的东西
   （[D51](/zh/docs/decisions#d51-not-added)）。
+- 按依赖驱动的系统调度（系统在与它冲突的系统结束后就开始，而不是等阶段屏障）：测过的世界的依赖图路径与阶段路径相同
+  （[D76](/zh/docs/decisions#d76-stages-not-a-dependency-graph)）。
 
 ## 相关页面 [#related]
 

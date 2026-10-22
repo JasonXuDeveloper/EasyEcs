@@ -93,6 +93,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D73](#d73-survey-items-not-added) | Survey items not added |
 | [D74](#d74-scratch) | Per-thread scratch is a parameter |
 | [D75](#d75-lookup) | Lookups of other entities are a read-only parameter |
+| [D76](#d76-stages-not-a-dependency-graph) | Systems run in stages, not as a dependency graph |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1848,6 +1849,45 @@ yet throws inside a parallel region, and still builds lazily in a serial pass.
   from two threads; writes to other entities stay data (a component of the row, read by a later system).
 - **Building indexes lazily under a lock:** a lock on the first lookup of every pass, for an index that can be built
   before it.
+
+## D76. Systems run in stages, not as a dependency graph [#d76-stages-not-a-dependency-graph]
+
+**Decision.** A parallel update keeps its stages: a system starts when the whole stage before its own has finished,
+not as soon as the systems it conflicts with have (TBB's flow graph, Unity's `JobHandle`, OpenMP's `depend`).
+
+**Why.**
+- **The barriers cost the measured worlds nothing.** With `MeasureSystems`, each system's time per tick (600 ticks,
+  100,000 units or entities, 4 cores) gave the critical path of the stages (the slowest system of each stage, summed)
+  and the critical path of the dependency graph built from the same orderings and read/write sets (every system
+  starting once the earlier systems it conflicts with or follows finish, on unbounded threads and on 4).
+  The idle time is real (the threads beside `PlanningSystem`, beside `MoveBodies`), but no later system could use it:
+  in BattleServer `SteeringSystem` waits for `PlanningSystem`, and every later system waits for `ZoneSystem`, which
+  runs alone; in ParallelSystems the stage is the whole update; in WorldSimulation every stage holds one system.
+
+| World | Stages (multi-system) | Stage path | Graph path | Idle beside the slowest of a stage |
+| --- | --- | --- | --- | --- |
+| BattleServer | 12 (1) | 4,181 µs | 4,181 µs | 507 µs |
+| ParallelSystems | 1 (1) | 126 µs | 126 µs | 227 µs |
+| WorldSimulation, `ParallelSystems` on, 10,000 / 100,000 | 9 (0) | 1,261 / 2,395 µs | same | 0 |
+
+- **Systems that run alone are barriers in any schedule.** An `Entity` or `World` parameter, an `OnUpdate` override
+  or a structural change makes a system run alone: 7 of BattleServer's 13 default systems, 7 of WorldSimulation's 9.
+  A graph waits for them exactly as stages do, and real servers are written this way.
+- **The best case is small.** `BarrierBenchmark` (outside the repository; 100,000 rows): a heavy system beside a
+  chain of three light ones staged {heavy, first}, {second}, {third}, against the same three passes in one system
+  beside the heavy one (the schedule a graph would run, on today's runner): 6.36 against 6.08 ms in one run, 6.73
+  against 7.13 ms in a second, each inside its error (±0.3 to 0.9 ms).
+- **A graph would cost on every update.** One change tick per stage is what keeps `[Changed<T>]` exact (a stage's
+  systems never write what another one reads); a graph needs a tick per system computed from its level, per-system
+  dependency counters reset and decremented atomically, a ready queue helpers poll instead of one cursor, and the
+  freeze of structural changes held across overlapping levels; the adaptive waking of D22 decides per piece of work,
+  which a graph no longer has.
+
+**Considered.** A dependency graph from the same read/write sets and orderings, deterministic for every conflict
+pair (the design evaluated here); dropped on the numbers above. Where a stage's slowest system does leave a chain of light
+conflicting systems waiting, putting the chain's passes into one system (several `[ForEach]` methods run in order)
+gives it the graph's schedule today; `DescribeSchedule` and `SystemStats` show such a stage. Measured again if a world
+shows a graph path well below its stage path.
 
 ## Related [#related]
 
