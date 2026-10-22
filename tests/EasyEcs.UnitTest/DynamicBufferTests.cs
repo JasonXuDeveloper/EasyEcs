@@ -322,9 +322,10 @@ public class DynamicBufferTests
         ref var ores = ref chunk.Get<DynamicBuffer<Ore>>();
         ores.SetCount(0);
         Assert.That(ores.Count, Is.Zero);
-        ores.SetCount(4);                                     // the pooled list: its old values must not show
+        var written = ores.SetCount(4);                       // the pooled list: its old values must not show
         Assert.That(ores.AsReadOnlySpan().ToArray(), Is.EqualTo(new[] { Ore.Air, Ore.Air, Ore.Air, Ore.Air }));
-        ores.AsSpan()[3] = Ore.Iron;
+        written[3] = Ore.Iron;                                // the span returned is the buffer's
+        Assert.That(ores[3], Is.EqualTo(Ore.Iron));
         ores.SetCount(2);
         ores.SetCount(4);                                     // grown again: the element dropped comes back cleared
         Assert.That(ores.AsReadOnlySpan().ToArray(), Is.EqualTo(new[] { Ore.Air, Ore.Air, Ore.Air, Ore.Air }));
@@ -394,7 +395,7 @@ public class DynamicBufferTests
             long before = GC.GetAllocatedBytesForCurrentThread();
             Reload(world, bytes, ids, loaded);
             Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.LessThan(blocks.Length));   // no list copied
-            Assert.That(loaded[0].Get<DynamicBuffer<Ore>>().Count, Is.EqualTo(blocks.Length));
+            Assert.That(loaded[0].Read<DynamicBuffer<Ore>>().Count, Is.EqualTo(blocks.Length));
         }
         finally
         {

@@ -170,22 +170,24 @@ public static class DynamicBufferExtensions
 
     /// <summary>
     /// Set the number of elements to <paramref name="count"/>: elements past it are removed, elements added are
-    /// <c>default</c>, so a system can write a whole buffer in place through <see cref="AsSpan{T}"/> instead of filling a
-    /// span and copying it in (<c>CollectionsMarshal.SetCount</c> of a list, with the new elements cleared).
+    /// <c>default</c>, so a system writes a whole buffer in place through the span returned instead of filling a span
+    /// and copying it in (<c>CollectionsMarshal.SetCount</c> of a list, with the new elements cleared). The span is
+    /// <see cref="AsSpan{T}"/>: valid until the buffer's next change of count or capacity.
     /// O(elements added or removed); allocates only when the list grows.
     /// </summary>
-    public static void SetCount<T>(this ref DynamicBuffer<T> buffer, int count)
+    public static Span<T> SetCount<T>(this ref DynamicBuffer<T> buffer, int count)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         if (buffer.Store is not { } store)
         {
-            if (count == 0) return; // an empty buffer stays without a list
+            if (count == 0) return default; // an empty buffer stays without a list
             store = buffer.Store = BufferStore<T>.Rent();
         }
         if (count > store.Items.Length) store.Resize(count);
         if (count > store.Count) Array.Clear(store.Items, store.Count, count - store.Count); // a pooled list holds old values
         else if (RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(store.Items, count, store.Count - count);
         store.Count = count;
+        return store.Items.AsSpan(0, count);
     }
 
     /// <summary>Make room for at least <paramref name="capacity"/> elements.</summary>
