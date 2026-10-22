@@ -344,7 +344,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
         // The common shape (a five- or seven-point stencil: one cell of halo, the faces, a fill boundary) has its own
         // loop, which the JIT keeps for that shape alone (the condition is a constant): no corner, no remapping.
         if (TTile.Halo == 1 && TTile.Neighbourhood == TileNeighbourhood.Faces && TTile.Boundary == TileBoundary.Fill)
-            return LoadFaces(from, to, fill, mask);
+            return mask ? LoadFaces<Masked>(from, to, fill) : LoadFaces<Unmasked>(from, to, fill);
         int width = TTile.Width, depth = TTile.Depth, height = TTile.Height, r = TTile.Halo, hy = height > 1 ? r : 0;
         int row = width + 2 * r, layer = row * (depth + 2 * r), cells = width * depth * height;
         int layers = to - from + 1 + 2 * hy;
@@ -415,9 +415,12 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     /// <summary>
     /// <see cref="Load(int, int, TCell, bool)"/> of a shape with a halo of one cell, the faces and a fill boundary: per row
     /// one copy of Width cells and the two cells beside it, the corners the fill. The same texture and masks.
+    /// <typeparamref name="TMask"/> is <see cref="Masked"/> or <see cref="Unmasked"/>: the JIT compiles a loop for each,
+    /// and the unmasked one (the blocks a stencil only samples) tests no cell.
     /// </summary>
-    private PaddedTile<TCell, TTile> LoadFaces(int from, int to, TCell fill, bool mask)
+    private PaddedTile<TCell, TTile> LoadFaces<TMask>(int from, int to, TCell fill) where TMask : struct
     {
+        bool mask = typeof(TMask) == typeof(Masked);
         int width = TTile.Width, depth = TTile.Depth, height = TTile.Height, hy = height > 1 ? 1 : 0;
         int row = width + 2, layer = row * (depth + 2), cells = width * depth * height;
         int layers = to - from + 1 + 2 * hy;
@@ -461,7 +464,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
                 bool any = Cell.Copy(ref into, ref Unsafe.Add(ref s, at0), width);
                 any |= Cell.Copy(ref Unsafe.Add(ref into, -1), ref Unsafe.Add(ref w, at0 + width - 1), 1);
                 any |= Cell.Copy(ref Unsafe.Add(ref into, width), ref Unsafe.Add(ref e, at0), 1);
-                if (any) rows |= 1UL << z;
+                if (mask && any) rows |= 1UL << z;
             }
 
             // The north neighbour's last row and the south neighbour's first, and the four corners (the fill).
@@ -949,6 +952,12 @@ public readonly ref struct TileCursor<TCell, TTile> where TCell : unmanaged wher
     }
 }
 
+/// <summary>A load that records the row masks: the typeof test on it is a JIT-time constant.</summary>
+internal struct Masked;
+
+/// <summary>...and one that does not (a tile only sampled).</summary>
+internal struct Unmasked;
+
 /// <summary>A thread's texture and masks for a tile type: allocated on its first load for all the layers, then reused.</summary>
 internal static class TileMemory<TCell, TTile> where TCell : unmanaged where TTile : struct, IComponent, ITileShape
 {
@@ -1076,10 +1085,11 @@ internal static class Cell
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool Copy<TCell>(ref TCell target, ref TCell source, int count) where TCell : unmanaged
     {
-        if (count == 1) // a halo of one cell: one move
+        if (count == 1) // a halo of one cell: one move, tested in its register (not read again after the store)
         {
-            target = source;
-            return !IsZero(source);
+            TCell cell = source;
+            target = cell;
+            return !IsZero(cell);
         }
         ref byte to = ref Unsafe.As<TCell, byte>(ref target);
         ref byte from = ref Unsafe.As<TCell, byte>(ref source);

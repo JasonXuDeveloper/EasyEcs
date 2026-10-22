@@ -276,16 +276,19 @@ public class TileTests
         {
             var at = tile.Read<TTile>().Key;
             if (empty.Contains(at)) continue;
-            var padded = TileOf<Cell, TTile>(tile, out var around).Load(from, to, new Cell(fill));
-            Assert.That((padded.From, padded.To), Is.EqualTo((from, to)));
-            for (int y = from - hy; y <= to + hy; y++)
-            for (int z = -r; z < d + r; z++)
-            for (int x = -r; x < w + r; x++)
+            foreach (bool mask in new[] { true, false }) // the texture is the same with or without the row masks
             {
-                int expected = Expected<TTile>(full, at, x, y, z, fill);
-                if (padded[x, y, z].V != expected)
-                    Assert.Fail($"{typeof(TTile).Name} {at} layers {from}-{to}, texel ({x}, {y}, {z}): {padded[x, y, z].V}, expected {expected}");
-                texels++;
+                var padded = TileOf<Cell, TTile>(tile, out var around).Load(from, to, new Cell(fill), mask);
+                Assert.That((padded.From, padded.To), Is.EqualTo((from, to)));
+                for (int y = from - hy; y <= to + hy; y++)
+                for (int z = -r; z < d + r; z++)
+                for (int x = -r; x < w + r; x++)
+                {
+                    int expected = Expected<TTile>(full, at, x, y, z, fill);
+                    if (padded[x, y, z].V != expected)
+                        Assert.Fail($"{typeof(TTile).Name} {at} layers {from}-{to} (mask {mask}), texel ({x}, {y}, {z}): {padded[x, y, z].V}, expected {expected}");
+                    if (mask) texels++;
+                }
             }
         }
 
