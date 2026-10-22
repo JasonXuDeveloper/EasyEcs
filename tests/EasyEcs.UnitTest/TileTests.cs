@@ -708,7 +708,7 @@ public class TileTests
     {
         switch (boundary)
         {
-            case TileBoundary.Fill: BlurGrid<BlurFill, BlurFillSystem>(threads, p => new BlurFill(p), boundary); break;
+            case TileBoundary.Fill: BlurGrid<BlurFill, BlurFillSystem>(threads, p => new BlurFill(p), boundary, new TilePos(1, 0, 2), new TilePos(3, 0, 0)); break;
             case TileBoundary.Clamp: BlurGrid<BlurClamp, BlurClampSystem>(threads, p => new BlurClamp(p), boundary); break;
             case TileBoundary.Mirror: BlurGrid<BlurMirror, BlurMirrorSystem>(threads, p => new BlurMirror(p), boundary); break;
             default: BlurGrid<BlurTorus, BlurTorusSystem>(threads, p => new BlurTorus(p), null); break;
@@ -716,10 +716,10 @@ public class TileTests
     }
 
     /// <summary>
-    /// Blurs a grid of 4 x 4 plates (holes missing from it: the fill), <paramref name="steps"/> blurs per update, and checks
-    /// every update against the whole grid blurred as often with the boundary.
+    /// Blurs a grid of 4 x 4 plates (holes missing from it: the fill) and checks every update against the whole grid
+    /// blurred with the boundary.
     /// </summary>
-    private static void BlurGrid<TTile, TSystem>(int threads, Func<TilePos, TTile> make, TileBoundary? boundary, int steps = 1, params TilePos[] holes)
+    private static void BlurGrid<TTile, TSystem>(int threads, Func<TilePos, TTile> make, TileBoundary? boundary, params TilePos[] holes)
         where TTile : struct, IComponent, ITile<TilePos> where TSystem : EcsSystem, new()
     {
         const int size = Torus, cells = size * 16;
@@ -744,21 +744,18 @@ public class TileTests
         for (int step = 0; step < 25; step++)
         {
             world.Update();
-            for (int k = 0; k < steps; k++)
+            var next = new float[cells, cells];
+            for (int z = 0; z < cells; z++)
+            for (int x = 0; x < cells; x++)
             {
-                var next = new float[cells, cells];
-                for (int z = 0; z < cells; z++)
-                for (int x = 0; x < cells; x++)
-                {
-                    if (!plates.ContainsKey(new TilePos(x / 16, 0, z / 16))) continue;
-                    float sum = At(x - 1, z - 1) + At(x, z - 1) + At(x + 1, z - 1)
-                        + At(x - 1, z) + At(x, z) + At(x + 1, z)
-                        + At(x - 1, z + 1) + At(x, z + 1) + At(x + 1, z + 1);
-                    next[x, z] = sum * (1f / 9);
-                }
-
-                grid = next;
+                if (!plates.ContainsKey(new TilePos(x / 16, 0, z / 16))) continue;
+                float sum = At(x - 1, z - 1) + At(x, z - 1) + At(x + 1, z - 1)
+                    + At(x - 1, z) + At(x, z) + At(x + 1, z)
+                    + At(x - 1, z + 1) + At(x, z + 1) + At(x + 1, z + 1);
+                next[x, z] = sum * (1f / 9);
             }
+
+            grid = next;
             Same(plates, 16, 16, grid, (Entity e, int i) => e.Read<DynamicBuffer<Heat>>()[i].T, $"{boundary?.ToString() ?? "torus"} step {step}");
         }
 
@@ -771,100 +768,6 @@ public class TileTests
         };
 
         static int Mirror(int c) => c < 0 ? -1 - c : c >= cells ? 2 * cells - 1 - c : c;
-    }
-
-    // Temporal blocking: the blur two or four times per pass, on plates with a halo of two or four.
-
-    /// <summary>The blur as one step: what a pass that steps several times runs over its texture.</summary>
-    public struct BlurStep<TTile> : ITileStep<Heat, TTile, float> where TTile : struct, IComponent, ITileShape
-    {
-        public static int Reach => 1;
-        public static TileReads Reads => TileReads.Layer;
-
-        public static Vector128<float> Step(TileCursor<Heat, TTile> c, int x) =>
-            (c.Load128<float>(x - 1, 0, -1) + c.Load128<float>(x, 0, -1) + c.Load128<float>(x + 1, 0, -1)
-             + c.Load128<float>(x - 1) + c.Load128<float>(x) + c.Load128<float>(x + 1)
-             + c.Load128<float>(x - 1, 0, 1) + c.Load128<float>(x, 0, 1) + c.Load128<float>(x + 1, 0, 1)) * (1f / 9);
-    }
-
-    public record struct StepFill4(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 16;
-        static int ITileShape.Depth => 16;
-        static int ITileShape.Halo => 4;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
-
-    public record struct StepClamp2(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 16;
-        static int ITileShape.Depth => 16;
-        static int ITileShape.Halo => 2;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
-        static TileBoundary ITileShape.Boundary => TileBoundary.Clamp;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
-
-    public record struct StepMirror4(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 16;
-        static int ITileShape.Depth => 16;
-        static int ITileShape.Halo => 4;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
-        static TileBoundary ITileShape.Boundary => TileBoundary.Mirror;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
-
-    public record struct StepTorus2(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 16;
-        static int ITileShape.Depth => 16;
-        static int ITileShape.Halo => 2;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Wrap(p, face);
-    }
-
-    /// <summary>Halo / Reach blurs from one load: the result into the step's buffer.</summary>
-    private static void Blurs<TTile>(Tile<Heat, TTile> heat, Mut<DynamicBuffer<NextHeat>> next) where TTile : struct, IComponent, ITileShape =>
-        heat.Load().Steps<BlurStep<TTile>, float>().CopyTo(MemoryMarshal.Cast<NextHeat, Heat>(next.Write().AsSpan()));
-
-    public class StepFill4System : EcsSystem
-    {
-        [ForEach(Parallel = true, ChunkRows = 4)]
-        static void Step(Tile<Heat, StepFill4> heat, Mut<DynamicBuffer<NextHeat>> next) => Blurs(heat, next);
-    }
-
-    public class StepClamp2System : EcsSystem
-    {
-        [ForEach(Parallel = true, ChunkRows = 4)]
-        static void Step(Tile<Heat, StepClamp2> heat, Mut<DynamicBuffer<NextHeat>> next) => Blurs(heat, next);
-    }
-
-    public class StepMirror4System : EcsSystem
-    {
-        [ForEach(Parallel = true, ChunkRows = 4)]
-        static void Step(Tile<Heat, StepMirror4> heat, Mut<DynamicBuffer<NextHeat>> next) => Blurs(heat, next);
-    }
-
-    public class StepTorus2System : EcsSystem
-    {
-        [ForEach(Parallel = true, ChunkRows = 4)]
-        static void Step(Tile<Heat, StepTorus2> heat, Mut<DynamicBuffer<NextHeat>> next) => Blurs(heat, next);
-    }
-
-    [TestCase(1)]
-    [TestCase(4)]
-    public void StepsBlurSeveralTimesInOnePass(int threads)
-    {
-        BlurGrid<StepFill4, StepFill4System>(threads, p => new StepFill4(p), TileBoundary.Fill, 4, new TilePos(1, 0, 2), new TilePos(3, 0, 0));
-        BlurGrid<StepClamp2, StepClamp2System>(threads, p => new StepClamp2(p), TileBoundary.Clamp, 2);
-        BlurGrid<StepMirror4, StepMirror4System>(threads, p => new StepMirror4(p), TileBoundary.Mirror, 4);
-        BlurGrid<StepTorus2, StepTorus2System>(threads, p => new StepTorus2(p), null, 2);
     }
 
     // The Game of Life on a torus of 4 x 4 plates of 16 x 16 cells: nine points, every lane a byte.
@@ -955,118 +858,6 @@ public class TileTests
             grid = next;
             Same(plates, 16, 16, grid, (Entity e, int i) => e.Read<DynamicBuffer<Life>>()[i].Alive, $"generation {step}");
         }
-    }
-
-    // Four generations per pass on plates with a halo of 4 (temporal blocking of the Game of Life).
-
-    public record struct Life4Plate(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 16;
-        static int ITileShape.Depth => 16;
-        static int ITileShape.Halo => 4;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Wrap(p, face);
-    }
-
-    public struct LifeStep : ITileStep<Life, Life4Plate, byte>
-    {
-        public static int Reach => 1;
-        public static TileReads Reads => TileReads.Layer;
-
-        public static Vector128<byte> Step(TileCursor<Life, Life4Plate> c, int x)
-        {
-            var count = c.Load128<byte>(x - 1, 0, -1) + c.Load128<byte>(x, 0, -1) + c.Load128<byte>(x + 1, 0, -1)
-                + c.Load128<byte>(x - 1) + c.Load128<byte>(x + 1)
-                + c.Load128<byte>(x - 1, 0, 1) + c.Load128<byte>(x, 0, 1) + c.Load128<byte>(x + 1, 0, 1);
-            var born = Vector128.Equals(count, Vector128.Create((byte)3));
-            var stays = Vector128.Equals(count, Vector128.Create((byte)2)) & c.Load128<byte>(x);
-            return (born | stays) & Vector128<byte>.One;
-        }
-    }
-
-    public class Life4System : EcsSystem
-    {
-        [ForEach(Parallel = true, ChunkRows = 2)]
-        static void Step(Tile<Life, Life4Plate> life, Mut<DynamicBuffer<NextLife>> next) =>
-            life.Load().Steps<LifeStep, byte>().CopyTo(MemoryMarshal.Cast<NextLife, Life>(next.Write().AsSpan()));
-    }
-
-    [TestCase(1)]
-    [TestCase(4)]
-    public void FourGenerationsOfLifeInOnePassAreFourGenerationsOfTheWholeTorus(int threads)
-    {
-        const int cells = Torus * 16;
-        var (world, plates) = Life4World(threads);
-        using var _ = world;
-        var grid = Whole(plates, 16, 16, (Entity e, int i) => e.Read<DynamicBuffer<Life>>()[i].Alive, Torus);
-        for (int pass = 0; pass < 12; pass++)
-        {
-            world.Update();
-            for (int generation = 0; generation < 4; generation++)
-            {
-                var next = new byte[cells, cells];
-                for (int z = 0; z < cells; z++)
-                for (int x = 0; x < cells; x++)
-                {
-                    int count = 0;
-                    for (int dz = -1; dz <= 1; dz++)
-                    for (int dx = -1; dx <= 1; dx++)
-                        if ((dx | dz) != 0) count += grid[(x + dx + cells) % cells, (z + dz + cells) % cells];
-                    next[x, z] = (byte)(count == 3 || count == 2 && grid[x, z] == 1 ? 1 : 0);
-                }
-                grid = next;
-            }
-
-            Same(plates, 16, 16, grid, (Entity e, int i) => e.Read<DynamicBuffer<Life>>()[i].Alive, $"pass {pass}");
-        }
-    }
-
-    private static (World World, Dictionary<TilePos, Entity> Plates) Life4World(int threads)
-    {
-        var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
-        var random = new Random(11);
-        var plates = new Dictionary<TilePos, Entity>();
-        foreach (var place in Box(Torus, 1, Torus))
-        {
-            var plate = world.CreateEntity(new Life4Plate(place));
-            var alive = plate.GetOrAdd<DynamicBuffer<Life>>().SetCount(256);
-            plate.GetOrAdd<DynamicBuffer<NextLife>>().SetCount(256);
-            if (place.X != 2)
-                for (int i = 0; i < 256; i++) alive[i] = new Life((byte)(random.Next(3) == 0 ? 1 : 0));
-            plates.Add(place, plate);
-        }
-        world.AddSystem<Life4System>();
-        world.AddSystem<CommitLifeSystem>();
-        return (world, plates);
-    }
-
-    [Test]
-    public void StepsRejectWhatTheyCannotStep()
-    {
-        using var world = new World();
-        var plates = Grid(world, Box(1, 1, 1), s => new WidePlate(s));
-        var cubes = Grid(world, Box(1, 1, 1), s => new EdgeCube(s));
-        Assert.DoesNotThrow(() => TileOf<Cell, WidePlate>(plates[0], out _).Load().Steps<CellStep<WidePlate>, int>());
-        var corners = Assert.Throws<InvalidOperationException>(() => TileOf<Cell, EdgeCube>(cubes[0], out _).Load().Steps<CellStep<EdgeCube>, int>());
-        Assert.That(corners.Message, Does.Contain("TileNeighbourhood.All"));                               // two steps, no corners
-        Assert.Throws<InvalidOperationException>(() => TileOf<Cell, WidePlate>(plates[0], out _).Load(0, 0, mask: false).Steps<CellStep<WidePlate>, int>());
-        var voxels = world.CreateEntity(new Plate(new TilePos(5, 0, 5)));
-        voxels.GetOrAdd<DynamicBuffer<Voxel>>().SetCount(35);
-        var narrow = Assert.Throws<InvalidOperationException>(() => TileOf<Voxel, Plate>(voxels, out _).Load().Steps<VoxelStep, byte>());
-        Assert.That(narrow.Message, Does.Contain("16 bytes"));                                             // rows of 5 bytes
-    }
-
-    public struct VoxelStep : ITileStep<Voxel, Plate, byte>
-    {
-        public static int Reach => 1;
-        public static Vector128<byte> Step(TileCursor<Voxel, Plate> c, int x) => c.Load128<byte>(x);
-    }
-
-    public struct CellStep<TTile> : ITileStep<Cell, TTile, int> where TTile : struct, IComponent, ITileShape
-    {
-        public static int Reach => 1;
-        public static Vector128<int> Step(TileCursor<Cell, TTile> c, int x) => c.Load128<int>(x);
     }
 
     // Active tiles: a step that changed nothing lets its tile sleep, and the edges that changed wake the tiles beside.
@@ -1459,11 +1250,9 @@ public class TileTests
     {
         var (heat, _) = HeatWorld(4, 8);
         var (life, _) = LifeWorld(4);
-        var (steps, _) = Life4World(4);
         using var a = heat;
         using var b = life;
-        using var c = steps;
-        foreach (var world in new[] { heat, life, steps })
+        foreach (var world in new[] { heat, life })
         {
             for (int i = 0; i < 30; i++) world.Update(); // every thread gets its texture
             long least = long.MaxValue;

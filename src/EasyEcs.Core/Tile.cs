@@ -396,7 +396,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
                     rows |= 1UL << z;
 
             // The halo rows north and south, with their corners.
-            // Bands: bit z + r of each halo row that is not zero, where the texture's rows fit a word (Steps reads them).
+            // Bands: bit z + r of each halo row that is not zero, where the texture's rows fit a word (TileMask.Of).
             ulong bands = 0;
             for (int k = 1; k <= r; k++)
             {
@@ -409,7 +409,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
             if (mask) Unsafe.Add(ref masks, t) = TileMask.Of<TTile>(rows, bands);
         }
 
-        return new PaddedTile<TCell, TTile>(ref texels, ref (mask ? ref masks : ref Unsafe.NullRef<TileMask>()), from, to, present, fill);
+        return new PaddedTile<TCell, TTile>(ref texels, ref (mask ? ref masks : ref Unsafe.NullRef<TileMask>()), from, to);
     }
 
     /// <summary>
@@ -427,9 +427,8 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
         TCell[] blank = TileMemory<TCell, TTile>.Blank(fill, zero);
 
         // A missing neighbour reads the blank (cells of the fill), so the row loop copies without a branch on it.
-        uint present = 1u << 13;
-        TCell[] north = Beside(10, cells, blank, ref present), south = Beside(16, cells, blank, ref present);
-        TCell[] west = Beside(12, cells, blank, ref present), east = Beside(14, cells, blank, ref present);
+        TCell[] north = Beside(10, cells, blank), south = Beside(16, cells, blank);
+        TCell[] west = Beside(12, cells, blank), east = Beside(14, cells, blank);
         ref TCell s = ref MemoryMarshal.GetArrayDataReference(Own(cells));
         ref TCell n = ref MemoryMarshal.GetArrayDataReference(north), so = ref MemoryMarshal.GetArrayDataReference(south);
         ref TCell w = ref MemoryMarshal.GetArrayDataReference(west), e = ref MemoryMarshal.GetArrayDataReference(east);
@@ -447,7 +446,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
             {
                 // Under layer 0 or over the last: the facing layer of the tile below or above (the blank when there is
                 // none), its ring the fill.
-                var across = Beside(y < 0 ? 4 : 22, cells, blank, ref present);
+                var across = Beside(y < 0 ? 4 : 22, cells, blank);
                 var edge = Edge(ref at, ref MemoryMarshal.GetArrayDataReference(across), y < 0 ? height - 1 : 0, fill, zero);
                 if (mask) Unsafe.Add(ref masks, t) = edge;
                 continue;
@@ -477,17 +476,13 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
             if (mask) Unsafe.Add(ref masks, t) = TileMask.Of<TTile>(rows, (northWet ? 1UL : 0) | (southWet ? southBand : 0));
         }
 
-        return new PaddedTile<TCell, TTile>(ref texels, ref (mask ? ref masks : ref Unsafe.NullRef<TileMask>()), from, to, present, fill);
+        return new PaddedTile<TCell, TTile>(ref texels, ref (mask ? ref masks : ref Unsafe.NullRef<TileMask>()), from, to);
     }
 
-    /// <summary>The cells of the neighbour in <paramref name="slot"/> (marked in <paramref name="present"/>), or the blank.</summary>
+    /// <summary>The cells of the neighbour in <paramref name="slot"/>, or the blank.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private TCell[] Beside(int slot, int cells, TCell[] blank, ref uint present)
-    {
-        if ((TileOffsets<TTile>.Slots >> slot & 1) == 0 || Of(_around[slot], cells) is not { } there) return blank;
-        present |= 1u << slot;
-        return there;
-    }
+    private TCell[] Beside(int slot, int cells, TCell[] blank) =>
+        (TileOffsets<TTile>.Slots >> slot & 1) != 0 && Of(_around[slot], cells) is { } there ? there : blank;
 
     /// <summary>
     /// A layer under or over the tile for <see cref="LoadFaces"/>: <paramref name="source"/>'s layer <paramref name="y"/>
@@ -693,7 +688,7 @@ public ref struct TileIds
 /// A layer's active rows: bit z for row z (with its halo cells), and the rows a halo row north or south that is not
 /// zero reaches (<see cref="Ends"/>: rows 0 to r − 1, rows Depth − r to Depth − 1).
 /// </summary>
-internal readonly record struct TileMask(ulong Rows, ulong Ends, ulong Bands)
+internal readonly record struct TileMask(ulong Rows, ulong Ends)
 {
     /// <summary>
     /// The mask of a layer whose rows <paramref name="rows"/> (bit z) and halo rows <paramref name="bands"/> (bit z + r
@@ -715,11 +710,8 @@ internal readonly record struct TileMask(ulong Rows, ulong Ends, ulong Bands)
             wetNorth = (bands & 1) != 0;
             wetSouth = (bands & 2) != 0;
         }
-        return new TileMask(rows, (wetNorth ? north : 0) | (wetSouth ? south : 0), bands);
+        return new TileMask(rows, (wetNorth ? north : 0) | (wetSouth ? south : 0));
     }
-
-    /// <summary>The rows of the texture (bit z + r, halo rows too) that hold a cell that is not zero: Depth + 2r ≤ 64 only.</summary>
-    public ulong Texture<TTile>() where TTile : ITileShape => Rows << TTile.Halo | Bands;
 }
 
 /// <summary>
@@ -736,17 +728,13 @@ public readonly ref struct PaddedTile<TCell, TTile> where TCell : unmanaged wher
     private readonly ref TCell _texels;
     private readonly ref TileMask _masks;
     private readonly int _from, _to;
-    private readonly uint _present; // the slots whose cells the halo holds (TileOffsets), the tile's own (13) too
-    private readonly TCell _fill;
 
-    internal PaddedTile(ref TCell texels, ref TileMask masks, int from, int to, uint present, TCell fill)
+    internal PaddedTile(ref TCell texels, ref TileMask masks, int from, int to)
     {
         _texels = ref texels;
         _masks = ref masks;
         _from = from;
         _to = to;
-        _present = present;
-        _fill = fill;
     }
 
     /// <summary>The first layer loaded (the halo adds r under it).</summary>
@@ -794,193 +782,6 @@ public readonly ref struct PaddedTile<TCell, TTile> where TCell : unmanaged wher
         int r = TTile.Halo, hy = TTile.Height > 1 ? r : 0;
         return new TileCursor<TCell, TTile>(ref Unsafe.Add(ref _texels,
             (row.Y - _from + hy) * Cell.Layer<TTile>() + (row.Z + r) * Cell.Row<TTile>() + r));
-    }
-
-    /// <summary>
-    /// The loaded layers' cells (From to To, no halo) into <paramref name="cells"/>, in the layout of the tile's buffer:
-    /// the result of <see cref="Steps{TStep, TLane}"/> into the step's buffer. O(layers × Width × Depth).
-    /// </summary>
-    public void CopyTo(Span<TCell> cells)
-    {
-        int width = TTile.Width, depth = TTile.Depth, r = TTile.Halo, hy = TTile.Height > 1 ? r : 0;
-        if (cells.Length < width * depth * TTile.Height) Cell.ThrowOffset();
-        for (int y = _from; y <= _to; y++)
-        for (int z = 0; z < depth; z++)
-            MemoryMarshal.CreateReadOnlySpan(ref Unsafe.Add(ref _texels, (y - _from + hy) * Cell.Layer<TTile>() + (z + r) * Cell.Row<TTile>() + r), width)
-                .CopyTo(cells.Slice((y * depth + z) * width, width));
-    }
-
-    /// <summary>
-    /// <see cref="ITileShape.Halo"/> / <c>TStep.Reach</c> steps of a stencil in one pass (temporal blocking): each
-    /// step computes the texture with <typeparamref name="TStep"/> into this thread's second texture and the next step
-    /// reads it, ping-pong, the halo shrinking by the reach each step (the cells further out no longer have what they
-    /// read), so after the last the tile's own cells hold the stencil applied that many times, from one load. The rows
-    /// a step skips (<see cref="ITileStep{TCell, TTile, TLane}.Reads"/>) are recomputed every step, and where there is
-    /// no neighbour the halo keeps following the boundary (<see cref="ITileShape.Boundary"/>). Write the result with
-    /// <see cref="CopyTo"/>. Needs the tile's mask, a neighbourhood of <see cref="TileNeighbourhood.All"/> for more than
-    /// one step (the cells a few steps reach lie across corners), Depth + 2r ≤ 64 and rows of at least 16 bytes.
-    /// <para>
-    /// O(steps × layers × (Width + 2r) × (Depth + 2r)) at most, no allocation once the thread has its second texture.
-    /// The result is valid until the thread loads or steps this tile type again.
-    /// </para>
-    /// </summary>
-    /// <typeparam name="TStep">The step: a struct, its <c>Step</c> compiled into the loop.</typeparam>
-    /// <typeparam name="TLane">The lanes the step computes in.</typeparam>
-    public PaddedTile<TCell, TTile> Steps<TStep, TLane>() where TStep : struct, ITileStep<TCell, TTile, TLane>
-    {
-        if (Unsafe.IsNullRef(ref _masks)) Cell.ThrowNoMask();
-        TileSteps<TCell, TTile, TStep, TLane>.Check();
-        int width = TTile.Width, depth = TTile.Depth, r = TTile.Halo, hy = TTile.Height > 1 ? r : 0;
-        int reach = TStep.Reach, steps = r / reach, row = Cell.Row<TTile>(), layer = Cell.Layer<TTile>();
-        int layers = _to - _from + 1 + 2 * hy, lanes = Vector128<byte>.Count / Unsafe.SizeOf<TCell>();
-        ulong interior = (depth == 64 ? ulong.MaxValue : (1UL << depth) - 1) << r;
-        ref TCell from = ref _texels;
-        ref TileMask fromMasks = ref _masks;
-        ref TCell back = ref TileMemory<TCell, TTile>.Back();
-        bool onBack = Unsafe.AreSame(ref from, ref back); // stepping a result again: ping-pong with the first texture
-        ref TCell into = ref onBack ? ref TileMemory<TCell, TTile>.Texels() : ref back;
-        ref TileMask intoMasks = ref onBack ? ref TileMemory<TCell, TTile>.Masks() : ref TileMemory<TCell, TTile>.BackMasks();
-
-        // The bounds: at step s the texels computed are those up to m = (steps - s) * reach from the tile (layers
-        // too, for a tall tile), and each reads its own up to reach away, so inside m + reach <= r: the texture. A Step
-        // that samples further (up to r, which TileCursor checks) stays inside the guard around it (TileMemory.Guard).
-        for (int s = 1; s <= steps; s++)
-        {
-            int m = (steps - s) * reach, my = hy > 0 ? m : 0;
-            for (int t = hy - my; t <= layers - 1 - hy + my; t++)
-            {
-                ulong need = Need<TStep, TLane>(ref fromMasks, t, reach), active = 0;
-                ref TCell source = ref Unsafe.Add(ref from, t * layer + r * row + r);
-                ref TCell target = ref Unsafe.Add(ref into, t * layer + r * row + r);
-                for (int z = -m; z < depth + m; z++)
-                {
-                    ref TCell at = ref Unsafe.Add(ref target, z * row);
-                    if ((need >> (z + r) & 1) == 0)
-                    {
-                        // Nothing it reads is set: zero, as the step of zeros is; the next step reads this row.
-                        Unsafe.InitBlockUnaligned(ref Unsafe.As<TCell, byte>(ref Unsafe.Add(ref at, -m)), 0, (uint)((width + 2 * m) * Unsafe.SizeOf<TCell>()));
-                        continue;
-                    }
-
-                    var cursor = new TileCursor<TCell, TTile>(ref Unsafe.Add(ref source, z * row));
-                    var any = Vector128<byte>.Zero;
-                    for (int x = -m, last = width + m - lanes; ; x = Math.Min(x + lanes, last))
-                    {
-                        var next = TStep.Step(cursor, x).AsByte();
-                        next.StoreUnsafe(ref Unsafe.As<TCell, byte>(ref Unsafe.Add(ref at, x)));
-                        any |= next;
-                        if (x == last) break;
-                    }
-                    if (any != Vector128<byte>.Zero) active |= 1UL << (z + r);
-                }
-
-                Unsafe.Add(ref intoMasks, t) = TileMask.Of<TTile>((active & interior) >> r, active & ~interior);
-            }
-
-            Boundary(ref into, ref intoMasks, m, layers);
-            ref TCell texels = ref from;
-            from = ref into;
-            into = ref texels;
-            ref TileMask masks = ref fromMasks;
-            fromMasks = ref intoMasks;
-            intoMasks = ref masks;
-        }
-
-        return new PaddedTile<TCell, TTile>(ref from, ref fromMasks, _from, _to, _present, _fill);
-    }
-
-    /// <summary>
-    /// The halo texels up to <paramref name="m"/> from the tile that no neighbour holds, after a step computed them:
-    /// the fill again, or the tile's own clamped or mirrored (along the axes with no neighbour, as Load put them), so a
-    /// boundary stays a boundary from step to step. The rows written are marked active (their cells may not be zero).
-    /// O(the boundary's texels); nothing where every tile around is there.
-    /// </summary>
-    private void Boundary(ref TCell texels, ref TileMask masks, int m, int layers)
-    {
-        int width = TTile.Width, depth = TTile.Depth, height = TTile.Height, r = TTile.Halo, hy = height > 1 ? r : 0;
-        int row = Cell.Row<TTile>(), layer = Cell.Layer<TTile>(), my = hy > 0 ? m : 0;
-        int bottom = _from - hy; // the tile layer of texture layer 0
-        for (int oy = -1; oy <= 1; oy++)
-        for (int oz = -1; oz <= 1; oz++)
-        for (int ox = -1; ox <= 1; ox++)
-        {
-            if ((ox | oy | oz) == 0 || oy != 0 && hy == 0 || m == 0 && (ox | oz) != 0) continue;
-            // The region's tile: present and read as it is (a real region, computed by the step), or remapped.
-            int fx = Axis(_present, ox, TileOffsets<TTile>.Slot(-1, 0, 0), TileOffsets<TTile>.Slot(1, 0, 0));
-            int fz = Axis(_present, oz, TileOffsets<TTile>.Slot(0, 0, -1), TileOffsets<TTile>.Slot(0, 0, 1));
-            int fy = Axis(_present, oy, TileOffsets<TTile>.Slot(0, -1, 0), TileOffsets<TTile>.Slot(0, 1, 0));
-            bool remapped = fx != ox || fy != oy || fz != oz;
-            int final = TileOffsets<TTile>.Slot(fx, fy, fz);
-            bool real = !remapped && (_present >> final & 1) != 0;
-            if (real) continue;
-            bool fill = TTile.Boundary == TileBoundary.Fill || (_present >> final & 1) == 0;
-
-            // The region's texels this step computed: up to m past the tile along the axes it is outside.
-            int x0 = ox < 0 ? -m : ox == 0 ? 0 : width, x1 = ox < 0 ? 0 : ox == 0 ? width : width + m;
-            int z0 = oz < 0 ? -m : oz == 0 ? 0 : depth, z1 = oz < 0 ? 0 : oz == 0 ? depth : depth + m;
-            int t0 = hy - my, t1 = layers - 1 - hy + my;
-            for (int t = t0; t <= t1; t++)
-            {
-                int y = bottom + t;
-                if ((y < 0 ? -1 : y >= height ? 1 : 0) != oy) continue;
-                ulong active = 0;
-                for (int z = z0; z < z1; z++)
-                {
-                    bool any = false;
-                    for (int x = x0; x < x1; x++)
-                    {
-                        TCell cell = fill ? _fill : Unsafe.Add(ref texels,
-                            (Map(y, height, fy != oy) - bottom) * layer + (Map(z, depth, fz != oz) + r) * row + Map(x, width, fx != ox) + r);
-                        Unsafe.Add(ref texels, t * layer + (z + r) * row + x + r) = cell;
-                        any |= !Cell.IsZero(cell);
-                    }
-                    if (any) active |= 1UL << (z + r);
-                }
-
-                if (active == 0) continue;
-                ref var mask = ref Unsafe.Add(ref masks, t);
-                ulong all = mask.Texture<TTile>() | active, interior = (depth == 64 ? ulong.MaxValue : (1UL << depth) - 1) << r;
-                mask = TileMask.Of<TTile>((all & interior) >> r, all & ~interior);
-            }
-        }
-
-        // An axis's offset as the halo reads it: the tile across, or 0 (the tile's own) where none is and the boundary remaps.
-        static int Axis(uint present, int o, int before, int after)
-        {
-            if (o == 0 || TTile.Boundary == TileBoundary.Fill) return o;
-            return (present >> (o < 0 ? before : after) & 1) != 0 ? o : 0;
-        }
-
-        // A coordinate, clamped or mirrored into the tile when its axis is remapped.
-        static int Map(int c, int n, bool remap) =>
-            !remap || (uint)c < (uint)n ? c
-            : TTile.Boundary == TileBoundary.Clamp ? (c < 0 ? 0 : n - 1)
-            : c < 0 ? -1 - c : 2 * n - 1 - c;
-    }
-
-    /// <summary>The texture rows (bit z + r) of layer <paramref name="t"/> a step must compute: those whose reads hold a cell that is not zero.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static ulong Need<TStep, TLane>(ref TileMask masks, int t, int reach) where TStep : struct, ITileStep<TCell, TTile, TLane>
-    {
-        var reads = TStep.Reads;
-        ulong here = Unsafe.Add(ref masks, t).Texture<TTile>(), need = (reads & TileReads.Self) != 0 ? here : 0;
-        if ((reads & TileReads.Sides) != 0) need |= Spread(here, reach);
-        if (TTile.Height > 1)
-            for (int k = 1; k <= reach; k++)
-            {
-                ulong up = Unsafe.Add(ref masks, t + k).Texture<TTile>(), down = Unsafe.Add(ref masks, t - k).Texture<TTile>();
-                if ((reads & TileReads.Above) != 0) need |= up;
-                if ((reads & TileReads.Below) != 0) need |= down;
-                if ((reads & TileReads.Diagonals) != 0) need |= Spread(up, reach) | Spread(down, reach);
-            }
-        return need;
-
-        static ulong Spread(ulong rows, int reach)
-        {
-            ulong spread = 0;
-            for (int j = 1; j <= reach; j++) spread |= rows << j | rows >> j;
-            return spread;
-        }
     }
 }
 
@@ -1151,29 +952,16 @@ public readonly ref struct TileCursor<TCell, TTile> where TCell : unmanaged wher
 /// <summary>A thread's texture and masks for a tile type: allocated on its first load for all the layers, then reused.</summary>
 internal static class TileMemory<TCell, TTile> where TCell : unmanaged where TTile : struct, IComponent, ITileShape
 {
-    [ThreadStatic] private static TCell[] t_texels, t_back;
-    [ThreadStatic] private static TileMask[] t_masks, t_backMasks;
-
-    /// <summary>
-    /// The cells before a texture and after it in its array: r layers and r rows, so a sample up to r away from any
-    /// texel of the texture (a halo texel too, as <see cref="PaddedTile{TCell, TTile}.Steps{TStep, TLane}"/> computes
-    /// them) stays inside the array.
-    /// </summary>
-    public static int Guard => TTile.Halo * (Cell.Layer<TTile>() + Cell.Row<TTile>());
+    [ThreadStatic] private static TCell[] t_texels;
+    [ThreadStatic] private static TileMask[] t_masks;
 
     /// <summary>This thread's texture (created on its first load).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static ref TCell Texels() => ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(t_texels ?? Create(ref t_texels, ref t_masks)), Guard);
+    public static ref TCell Texels() => ref MemoryMarshal.GetArrayDataReference(t_texels ?? Create(ref t_texels, ref t_masks));
 
     /// <summary>This thread's masks, a layer each: after <see cref="Texels"/>, which creates them.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ref TileMask Masks() => ref MemoryMarshal.GetArrayDataReference(t_masks);
-
-    /// <summary>This thread's second texture, which steps ping-pong with (created on its first use).</summary>
-    public static ref TCell Back() => ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(t_back ?? Create(ref t_back, ref t_backMasks)), Guard);
-
-    /// <summary>The masks of the second texture: after <see cref="Back"/>.</summary>
-    public static ref TileMask BackMasks() => ref MemoryMarshal.GetArrayDataReference(t_backMasks);
 
     [ThreadStatic] private static TCell[] t_blank;
     private static readonly TCell[] Zeros = new TCell[Cell.Cells<TTile>()];
@@ -1205,61 +993,8 @@ internal static class TileMemory<TCell, TTile> where TCell : unmanaged where TTi
     {
         int layers = Cell.Layers<TTile>();
         masks = new TileMask[layers];
-        return texels = GC.AllocateUninitializedArray<TCell>(layers * Cell.Layer<TTile>() + 2 * Guard);
+        return texels = GC.AllocateUninitializedArray<TCell>(layers * Cell.Layer<TTile>());
     }
-}
-
-/// <summary>
-/// One step of a stencil, for <see cref="PaddedTile{TCell, TTile}.Steps{TStep, TLane}"/> (temporal blocking): a struct
-/// whose static <see cref="Step"/> computes the next value of 16 bytes of cells from the cells around them. Steps runs
-/// it over every texel the step can still compute, so the body is the one a single step would have.
-/// </summary>
-/// <typeparam name="TCell">The cell.</typeparam>
-/// <typeparam name="TTile">The tile's component and shape.</typeparam>
-/// <typeparam name="TLane">The lanes the step computes in: <c>float</c> for float cells, <c>byte</c> for byte ones.</typeparam>
-public interface ITileStep<TCell, TTile, TLane> where TCell : unmanaged where TTile : struct, IComponent, ITileShape
-{
-    /// <summary>
-    /// How far the step reads, in cells, rows and layers (1 for a five-, nine-, seven- or 27-point stencil): Steps runs
-    /// <see cref="ITileShape.Halo"/> / Reach steps, the halo a whole number of reaches.
-    /// </summary>
-    static abstract int Reach { get; }
-
-    /// <summary>What the step reads around a cell, for the rows it skips (default <see cref="TileReads.All"/>).</summary>
-    static virtual TileReads Reads => TileReads.All;
-
-    /// <summary>
-    /// The next value of the 16 bytes of cells from cell <paramref name="x"/> of the cursor's row: read them and their
-    /// neighbours with <c>cells.Load128&lt;TLane&gt;(x + dx, dy, dz)</c>, |dx|, |dy|, |dz| ≤ Reach.
-    /// </summary>
-    static abstract Vector128<TLane> Step(TileCursor<TCell, TTile> cells, int x);
-}
-
-/// <summary>The checks of a stepped stencil, once per step type.</summary>
-internal static class TileSteps<TCell, TTile, TStep, TLane> where TCell : unmanaged where TTile : struct, IComponent, ITileShape
-    where TStep : struct, ITileStep<TCell, TTile, TLane>
-{
-    private static readonly string Problem = Validate();
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Check()
-    {
-        if (Problem != null) Throw();
-    }
-
-    private static string Validate()
-    {
-        int r = TTile.Halo, reach = TStep.Reach, size = Unsafe.SizeOf<TCell>();
-        if (reach < 1 || r % reach != 0) return $"the halo of {r} is not a whole number of reaches of {reach}";
-        if (r / reach > 1 && TTile.Neighbourhood != TileNeighbourhood.All) return "more than one step reads the tiles across corners: TileNeighbourhood.All";
-        if (TTile.Depth + 2 * r > 64) return $"{TTile.Depth} rows and a halo of {r} are more than 64 rows";
-        if (Vector128<byte>.Count % size != 0 || TTile.Width * size < Vector128<byte>.Count) return "a row of cells is less than 16 bytes, or a cell does not divide them";
-        if (Unsafe.SizeOf<TLane>() > Vector128<byte>.Count) return "the lanes are wider than 16 bytes";
-        return null;
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void Throw() => throw new InvalidOperationException($"{typeof(TStep).Name} on a {typeof(TTile).Name} tile: {Problem}");
 }
 
 /// <summary>The checks of a tile shape, once per shape (EECS072 reports them at build time where it can read the shape).</summary>
