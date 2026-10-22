@@ -310,9 +310,11 @@ flowchart TB
   (EECS014).
 - Parallel runs use the calling thread plus reusable `IThreadPoolWorkItem` helpers that claim items through one
   `Interlocked` cursor (the run's epoch in the high 32 bits, so a helper that starts late never touches the next
-  run). The chunks of a parallel `[ForEach]` are multiples of 64 rows, so no two threads share a presence-bit word;
-  a job that writes a tracked component cuts at multiples of 4,096 rows, so no two threads share a block's
-  change-tick summary, which its writes update without an atomic instruction. Each job and stage measures its runs and wakes helpers only while they make a run at least a fifth faster
+  run): dynamic scheduling, OpenMP's `schedule(dynamic, n)`. The chunks of a parallel `[ForEach]` are multiples of
+  64 rows, so no two threads share a presence-bit word; by default a job that writes a tracked component cuts at
+  multiples of 4,096 rows, so no two threads share a block's change-tick summary. With `ChunkRows` its chunks may split
+  a block: the pass opens the blocks it covers at its tick first, and their summaries take an atomic OR per 64 written
+  rows ([D67](/en/docs/decisions#d67-chunk-rows)). Each job and stage measures its runs and wakes helpers only while they make a run at least a fifth faster
   ([D22](/en/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)). Nothing is
   allocated per update.
 

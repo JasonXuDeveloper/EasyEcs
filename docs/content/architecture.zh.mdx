@@ -262,8 +262,9 @@ flowchart TB
   （[D13](/zh/docs/decisions#d13-one-owner-thread-per-world)）。分析器会报告声称不做结构变更的 `[ForEach]` 方法里的结构变更（EECS013），
   以及交给其他线程的委托里的结构变更（EECS014）。
 - 并行运行使用调用线程，加上可复用的 `IThreadPoolWorkItem` 助手；助手通过一个 `Interlocked` 游标领取任务（高 32 位是本次运行的纪元，
-  启动太晚的助手不会碰到下一次运行）。并行 `[ForEach]` 的分块是 64 行的倍数，两个线程不会共用一个存在位字；写追踪组件的 job 按
-  4,096 行的倍数切块，两个线程不会共用一个块的变更 tick 摘要，因为写入更新这份摘要时不用原子指令。每个 job 和阶段都会测量自己的运行，只有当助手能让一次运行快至少五分之一时才唤醒它们
+  启动太晚的助手不会碰到下一次运行），也就是动态调度，OpenMP 的 `schedule(dynamic, n)`。并行 `[ForEach]` 的块是 64 行的倍数，两个线程
+  不会共用一个存在位字；写追踪组件的 job 默认按 4,096 行的倍数切块，两个线程不会共用一个块的变更 tick 摘要。设了 `ChunkRows` 时块可以切开
+  一个 4,096 行块：遍历先按自己的 tick 打开它覆盖的块，摘要每写 64 行做一次原子 OR（[D67](/zh/docs/decisions#d67-chunk-rows)）。每个 job 和阶段都会测量自己的运行，只有当助手能让一次运行快至少五分之一时才唤醒它们
   （[D22](/zh/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)）。每次更新零分配。
 
 使用者视角的规则见[多线程与并行](/zh/docs/guide/threading)。

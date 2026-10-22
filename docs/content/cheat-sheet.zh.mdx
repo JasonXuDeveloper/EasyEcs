@@ -169,6 +169,9 @@ public class MovementSystem : EcsSystem
 }
 ```
 
+静态、逐实体、每个组件只有一个同类型数值（`float`、`int`……）的方法，生成器还会给它写一个 `Vector<T>` 循环，结果逐位相同
+（[向量循环](/zh/docs/guide/systems#vector-loops)）；这里的 `Position` 有两个字段，所以这个方法逐行运行。
+
 ### [ForEach] 参数 [#foreach-parameters]
 
 | 参数 | 含义 | 说明 |
@@ -190,6 +193,7 @@ public class MovementSystem : EcsSystem
 | 特性 | 用在 | 作用 |
 | --- | --- | --- |
 | `[ForEach]` / `[ForEach(Parallel = true)]` | 方法 | 方法就是循环；`Parallel` 把行分给多个线程（[EECS010](/zh/docs/guide/analyzer#eecs010)） |
+| `[ForEach(Parallel = true, ChunkRows = n)]` | 方法 | 线程每次领 `n` 行（OpenMP 的 `schedule(dynamic, n)`）：适合几百行重活（[块大小](/zh/docs/guide/threading#chunk-rows)、[EECS054](/zh/docs/guide/analyzer#eecs054)） |
 | `[ForEach(Slices = N)]` | 方法 | 每次运行只访问一片，约 1/N 的行：每 N 次运行每行一次（不能和 `Changed` / `Removed` 一起用：[EECS035](/zh/docs/guide/analyzer#eecs035)） |
 | `[With<T>]` | 方法、系统分组 | 要求有 `T`，但不作为参数传入 |
 | `[Without<T>]` | 方法、系统分组 | 排除有 `T` 的实体 |
@@ -257,7 +261,7 @@ bool anyDead = world.Any<Dead>();
 | `world.ForEach<T1..T9, TJob>(ref job, filter)` | 结构体 job `IForEach<T…>`：`Execute(ref T1 …)` |
 | `world.ForEachEntity<…>(ref job, filter)` | `IForEachEntity<T…>`：`Execute(Entity e, ref T1 …)` |
 | `world.ForEachBatch<…>(ref job, filter)` | `IForEachBatch<T…>`：以 span 接收一段段行 |
-| `world.ForEachParallel` / `ForEachEntityParallel` | 结构体 job 分块在多个线程上执行 |
+| `world.ForEachParallel` / `ForEachEntityParallel` | 结构体 job 分块在多个线程上执行（`chunkRows:` 指定块大小） |
 | `Runner.Method(world, …)` | 系统之外的静态 `[ForEach]` 方法生成的入口 |
 | job 上的 `static int WriteMask => mask` | job 写哪些组件（第 k 个组件对应第 k - 1 位），这些组件打上变更 tick；默认 `-1`，全部 |
 | job 上的 `: INoStructuralChanges` | job 保证不做结构变更：省掉逐实体的簿记，执行期间结构冻结 |
@@ -407,7 +411,9 @@ world.DestroyAll<Dead>();
 | `Clear()` | 清空，保留容量 |
 | `EnsureCapacity(n)` / `TrimExcess()` | 已知数量时先扩容一次，或者把内存还回去 |
 | `AsSpan()` | 元素的 `Span<T>`，用来原地写 |
-| `DynamicBuffer<T>.PoolCapacity = n`（静态） | 死掉的 `T` 缓冲最多把多长的列表还给池，启动时设一次 |
+| `SetCount(n)` | 设置元素个数（新增的是 `default`），返回 span，原地写整个缓冲 |
+| `DynamicBuffer<T>.PoolCapacity = n`（静态） | 死掉的 `T` 缓冲最多把多长的列表还给池，启动时设一次（[缓冲池](/zh/docs/guide/dynamic-buffers#pool)） |
+| `DynamicBuffer<T>.ReservePool(n)`（静态） | 启动时、设好 `PoolCapacity` 之后，往池里放 `n` 个空列表 |
 
 ```csharp
 unit.Set(new DynamicBuffer<Loot>());
@@ -430,6 +436,7 @@ loot.RemoveAtSwapBack(0);
 | `world.SaveEntities(writer, ids)` / `LoadEntities(bytes, handles)` | 把一组实体搬到另一个 World 或进程 |
 | `ComponentSet.Create().With<T>()….WithSingleton<S>()` | 组件（整个 World 的存档还可以有单例），在 `static readonly` 字段里构建一次 |
 | `world.SaveEntitiesWith(writer, ids, set)` | 一条记录：只写集合里的组件 |
+| `world.SaveEntitiesWithout(writer, ids, set)` | 除了集合都写：加载后会重新算的数据不进存档 |
 | `world.LoadEntitiesInto(bytes, entities, markWritten: false)` | 把记录放到已有的实体上；`markWritten: false` 让它不算变更 |
 | `world.MoveEntities(target, ids, moved)` | 在同一线程的两个 World 之间直接搬，不编码；跳过已退休、只为清理留着的实体，清理组件留在原处 |
 | `world.RemoveTypes(assembly or context)` | 插件的上下文卸载之前，先移除它的类型 |

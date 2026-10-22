@@ -130,13 +130,15 @@ then gives each actor type its own filtered group, where an attribute could not 
 ### Optional components [#optional-components]
 
 A `Maybe<T>` parameter visits every entity whether or not it has `T`: `HasValue` says which, `Value` is the `ref`.
-One method replaces a `[With<T>]` and a `[Without<T>]` variant when the optional part is small.
+One method replaces a `[With<T>]` and a `[Without<T>]` variant when the optional part is small. A
+`ReadOnlyMaybe<T>` is the read-only one: never stamped, scheduled as a read, and the only optional parameter an
+indexed component accepts.
 
 - **Use it for:** a bonus that only some entities have (armor on a damage roll, a buff on regeneration).
 - **Skip it for:** the hottest loops: two methods with `[With<T>]` / `[Without<T>]` test nothing per row.
 - **Cost:** one presence-bit test per row in a method that makes no structural change; a lookup per entity in one
   that does.
-- **Guide:** [Systems](/en/docs/guide/systems)
+- **Guide:** [Systems](/en/docs/guide/systems#maybe), [`ReadOnlyMaybe<T>`](/en/docs/guide/systems#read-only-maybe)
 
 ### Vector loops [#vector-loops]
 
@@ -455,8 +457,10 @@ write through `in` does not compile. Snapshots copy the elements.
 - **Skip it for:** items with their own state (one entity per item with a relation) or a small fixed set (an
   `[InlineArray]` in an unmanaged component).
 - **Cost:** one object and one array per entity, made by the first write; writes within the capacity allocate
-  nothing.
-- **Guide:** [Dynamic buffers](/en/docs/guide/dynamic-buffers), [ECS principles, rule 8](/en/docs/ecs-principles#8-choose-how-to-hold-a-collection)
+  nothing. A dead buffer's list goes to a pool the next buffer of its type takes it from, on any thread:
+  `PoolCapacity` sets the longest list kept and `ReservePool(n)` fills the pool at start-up. `SetCount(n)` returns
+  the span to write a whole buffer in place.
+- **Guide:** [Dynamic buffers](/en/docs/guide/dynamic-buffers), [the buffer pool](/en/docs/guide/dynamic-buffers#pool), [ECS principles, rule 8](/en/docs/ecs-principles#8-choose-how-to-hold-a-collection)
 
 ### Prefabs and cloning [#prefabs-and-cloning]
 
@@ -523,7 +527,8 @@ bytes, with new ids and the links inside the group rewritten. `MoveEntities` doe
 thread without encoding. A record saves only what persists: `SaveEntitiesWith(writer, ids, set)` with a `ComponentSet`
 writes the components of the set, and `LoadEntitiesInto(bytes, entities)` puts them onto entities that exist already;
 with `markWritten: false` the restored values do not count as changed, so a saver of changed rows does not write them
-straight back.
+straight back. `SaveEntitiesWithout(writer, ids, set)` is the other way round: everything but the set, for the data a
+load computes again.
 
 - **Use it for:** a player changing zone or server, a match handing its survivors to a lobby (collect the group with
   `Descendants`); records for actors whose entity exists before its stored state arrives.
@@ -574,11 +579,14 @@ at once. The analyzer rejects methods that could race ([EECS010](/en/docs/guide/
 changes, batch methods, singletons taken by `ref`. `world.ForEachParallel` and `ForEachEntityParallel` do the same
 for struct jobs.
 
-- **Use it for:** heavy per-entity work over tens of thousands of entities: steering, path following, AI scoring.
-- **Cost:** chunks of 1,024 to 16,384 rows, about four per thread, allocation-free. A method that writes a tracked
-  component cuts at multiples of 4,096 rows (the blocks its change summaries cover), so a table needs more rows
-  before it is split.
-- **Guide:** [Threading](/en/docs/guide/threading)
+- **Use it for:** heavy per-entity work over tens of thousands of entities: steering, path following, AI scoring;
+  with `ChunkRows = n`, a few hundred rows that cost microseconds each (terrain chunks, path searches).
+- **Skip it for:** light rows over a few thousand entities: the hand-off costs more than the work.
+- **Cost:** the threads claim chunks one at a time as they finish, OpenMP's `schedule(dynamic, n)`. By default
+  chunks of 1,024 to 16,384 rows, about four per thread, allocation-free; a method that writes a tracked component
+  cuts at multiples of 4,096 rows (the blocks its change summaries cover), so a table needs more rows before it is
+  split. `ChunkRows = n` sets the chunk size (rounded up to 64; [EECS054](/en/docs/guide/analyzer#eecs054)).
+- **Guide:** [Threading](/en/docs/guide/threading), [chunk size](/en/docs/guide/threading#chunk-rows)
 
 ### Bulk operations [#bulk-operations]
 

@@ -240,20 +240,75 @@ warlord.Destroy();                                   // ChildOf: destroying the 
 `ChildOf` is EasyEcs's hierarchy link: see [Hierarchy](/en/docs/guide/hierarchy). `Instantiate(group, span)`
 instantiates the group once per element.
 
-### Reserve before the wave [#reserve]
+### Reserve before the wave: `Reserve` [#reserve]
 
-`world.Reserve(prefab, count)` grows the table the prefab's instances go to, and the entity records, so the
-next `count` instances grow nothing. For a group, it reserves every member's table. It also reserves what the
-instances bring beside their rows: the keys of their [indexed](/en/docs/guide/indexes-and-relations) components, the
-table they wait in once destroyed when they hold [cleanup components](/en/docs/guide/cleanup-and-disable), and the list of free
-ids their destruction fills. Call it before the tick that spawns, so the wave pays no growth inside it; a server that
-reserves its peak at start-up (players, mobs, items) allocates nothing to reach it.
+`world.Reserve(prefab, count)` grows the table the prefab's instances go to, and the entity records, so the next
+`count` instances grow nothing. For a group, it reserves every member's table. Call it before the tick that spawns,
+so the wave pays no growth inside it; a server that reserves its peak at start-up (players, mobs, items) allocates
+nothing to reach it.
 
 ```csharp
 world.Reserve(Kinds.Troll, 5_000);
 var army = new Entity[5_000];
 world.Instantiate(Kinds.Troll, army);                // no growth, no allocation
 ```
+
+<Callout type="idea" title="Use it for">
+  A known peak (the players a shard admits, the mobs a zone holds) reserved at start-up, and a wave whose size is
+  known a tick ahead (a raid, a dungeon spawn).
+</Callout>
+
+<Callout type="warn" title="Skip it when">
+  The entities arrive a few at a time with no known peak: tables already grow by doubling, and a reservation far above
+  what arrives holds memory for nothing. `CreateEntities` and `Instantiate(prefab, span)` size their wave on their own.
+</Callout>
+
+What a reservation covers, beside the rows:
+
+| Reserved by `Reserve(prefab, n)` and `Reserve<T1..Tn>(n)` | Not reserved: do it yourself |
+| --- | --- |
+| The rows of the target table (every member's table for a group) | The lists of `DynamicBuffer<T>` elements: [`ReservePool`](/en/docs/guide/dynamic-buffers#pool) |
+| The entity records, and the list of free ids their destruction fills | A [group](/en/docs/guide/groups)'s other tables (`GroupBy` puts instances by value) |
+| The keys of their [indexed](/en/docs/guide/indexes-and-relations) components, also for an index created later | Relation links (they come from buffer writes) |
+| The table they wait in once destroyed, when they hold [cleanup components](/en/docs/guide/cleanup-and-disable) | Entities with other components: `EnsureEntityCapacity(n)` for the records alone |
+
+Reserving a whole server's peak at start-up, in order:
+
+<Steps>
+<Step>
+
+#### Buffer lists [#reserve-buffers]
+
+Raise `DynamicBuffer<T>.PoolCapacity` for long buffers, then `ReservePool(peak)`: process-wide, before any world
+uses the type ([the buffer pool](/en/docs/guide/dynamic-buffers#pool)).
+
+</Step>
+<Step>
+
+#### One reservation per kind [#reserve-kinds]
+
+`world.Reserve(prefab, peak)` for each prefab, `Reserve<T1..Tn>(peak)` for entities created with exactly those
+components.
+
+```csharp
+world.Reserve(Kinds.Troll, 2_000);                   // mobs
+world.Reserve<Position, Health>(10_000);             // projectiles created with exactly these two
+```
+
+</Step>
+<Step>
+
+#### The rest of the records [#reserve-records]
+
+`world.EnsureEntityCapacity(total)` (or `WorldOptions.InitialEntityCapacity`) for entities spread over many tables.
+
+</Step>
+</Steps>
+
+What it saves is proven by an allocation test, not a benchmark
+([`ReservingAPrefabCoversItsIndexKeysAndItsRetiredTable`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/tests/EasyEcs.UnitTest/AllocationTests.cs)):
+2,000 reserved instances of a prefab with a value index, a unique key and a cleanup component are spawned, retired and
+freed with 0 bytes allocated in each step.
 
 ### What a copy gets [#what-a-copy-gets]
 
@@ -383,6 +438,7 @@ are not among the 103 entities.
 | `Instantiate`, then `Set` of a component the prefab lacks | `Instantiate(prefab, in c1, …, in cn)` | One row copy into the final table, no move |
 | A loop of `Instantiate(prefab, sameValues)` | `Instantiate(prefab, span, in c1, …, in cn)` | One gate pass, each given column filled at once |
 | Growing tables during the spawning tick | `Reserve(prefab, count)` before it | The wave allocates nothing |
+| Index keys, free ids and the retired table growing while the world climbs to its peak | One [`Reserve`](#reserve) of the peak per kind at start-up | All of them are sized with the rows |
 | `CreateEntity` then `Set` per component of a kind | A prefab | One row copy, the target table cached per prefab |
 | A new `Prefab` per spawn | One prefab per kind, kept in a field | Its table lookup is cached after the first instance |
 | Templates as hidden entities | A `Prefab` | No query pays to skip them |
@@ -426,6 +482,8 @@ destroyed:
 | `Instantiate` in a `[ForEach]` method without `Entity` or `World` | The pass assumes no structural change | [EECS013](/en/docs/guide/analyzer#eecs013) |
 | Changing a prefab while other threads instantiate it | Torn copies | Build prefabs at startup, then only read them |
 | `Clone()` on a destroyed or retired entity | `InvalidOperationException` | Check `IsAlive` and `IsRetired` |
+| Counting on `Reserve` for the instances' buffer lists | The first write of each buffer still allocates | [`ReservePool`](/en/docs/guide/dynamic-buffers#pool) for the element type |
+| `Reserve` inside the spawning tick | The growth happens in the tick anyway | Reserve at start-up or a tick ahead |
 
 ## Related [#related]
 

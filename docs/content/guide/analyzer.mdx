@@ -1633,7 +1633,7 @@ per-entity parameter.
 public record struct Location(int X, int Y) : IComponent, ITracked;
 ```
 
-```csharp doccheck=expect-EECS053
+```csharp tab="Reported" doccheck=expect-EECS053
 public class RespawnSystem : EcsSystem
 {
     [ForEach]
@@ -1646,9 +1646,7 @@ public class RespawnSystem : EcsSystem
 }
 ```
 
-Take it as a `Mut<T>`:
-
-```csharp
+```csharp tab="Fixed"
 public class RespawnSystem : EcsSystem
 {
     [ForEach]
@@ -1675,23 +1673,38 @@ cheaper write: suppress the warning there.
 the runtime choose from the row count, more sets it (rounded up to 64). A method without `Parallel = true` runs on one
 thread and has no chunks, and a negative count means nothing.
 
-```csharp doccheck=expect-EECS054
-public class PlanCells : EcsSystem
+```csharp tab="Reported" doccheck=expect-EECS054
+public class PlanRoutes : EcsSystem
 {
+    const int Steps = 4_096;
+
     [ForEach(ChunkRows = 64)]   // one thread: no chunks to size
-    static void Plan(in Position position, ref Velocity velocity) => velocity = new Velocity(position.X, position.Y);
+    static void Plan(in Position from, ref Velocity heading)
+    {
+        float x = from.X;
+        for (int i = 0; i < Steps; i++) x = MathF.Sqrt(x * x + 1);   // heavy: microseconds per row
+        heading = new Velocity(x, from.Y);
+    }
 }
 ```
 
-Run it in parallel, or drop `ChunkRows`:
-
-```csharp
-public class PlanCells : EcsSystem
+```csharp tab="Fixed"
+public class PlanRoutes : EcsSystem
 {
+    const int Steps = 4_096;
+
     [ForEach(Parallel = true, ChunkRows = 64)]
-    static void Plan(in Position position, ref Velocity velocity) => velocity = new Velocity(position.X, position.Y);
+    static void Plan(in Position from, ref Velocity heading)
+    {
+        float x = from.X;
+        for (int i = 0; i < Steps; i++) x = MathF.Sqrt(x * x + 1);   // heavy: microseconds per row
+        heading = new Velocity(x, from.Y);
+    }
 }
 ```
+
+Run it in parallel (as here, for a few hundred heavy rows), or drop `ChunkRows`. Light rows need neither: keep the
+default chunks ([when to set it](/en/docs/guide/threading#chunk-rows)).
 
 ## Related [#related]
 

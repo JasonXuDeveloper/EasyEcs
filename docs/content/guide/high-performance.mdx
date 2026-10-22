@@ -1,0 +1,194 @@
+---
+title: High-performance patterns
+seoTitle: "High-performance C# ECS: SIMD, chunks and stencils"
+description: "The patterns that make a hot EasyEcs system fast: vector loops, parallel chunks, SIMD by hand, grid shaders with stencils, ping-pong buffers and halos."
+icon: Gauge
+---
+
+Most systems are fast enough as plain `[ForEach]` methods. This page is for the few that are not: the ones that run
+over every row each tick, do real arithmetic per row, or update a grid. It collects the patterns, says which tool of
+high-performance computing each one borrows (OpenMP, MPI, Burst, the GPU), and links the section that explains it in
+full, so each pattern is described once.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+A system that shows up in [`MeasureSystems`](/en/docs/guide/systems#measuring-systems) as most of the tick: arithmetic
+over every row, a few hundred heavy rows, a grid of cells (water, light, heat, a nav field) updated from its
+neighbours.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+Systems nobody measured as hot, and work per row that is lookups and branches (an index walk, another entity's
+position): vectors and finer chunks do not help those. A plain `[ForEach]` method is the readable default.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+Take the steps in order and measure after each; stop at the first one that is enough.
+
+<Steps>
+
+<Step>
+
+### Let the generator vectorize: vector loops [#vector-loops]
+
+A static, non-parallel `[ForEach]` method over one-field components of one number type gets a generated `Vector<T>`
+loop, with its `if`s turned into masks and a scalar tail: what Burst does for a Unity job, done at compile time. The
+code you write stays scalar. Which methods qualify, the generated code side by side and how to rewrite a method that
+stays scalar: [vector loops](/en/docs/guide/systems#vector-loops).
+
+{/* TODO(vector loops): EECS055, [ForEach(Simd = Require/Off)] and EECS056; multi-field structs, Math.Clamp, MathF.*,
+lerp and conversions; reductions, FloatMode.Fast, presence-bit lane masks, Vector512 and bounds-check-free scalar
+loops. Add one line each here, linking their sections on guide/systems. */}
+
+</Step>
+
+<Step>
+
+### Spread rows over threads: parallel methods [#parallel]
+
+`[ForEach(Parallel = true)]` cuts the rows into chunks that the thread pool takes, like OpenMP's
+`#pragma omp parallel for`: [parallel methods](/en/docs/guide/systems#parallel-methods). Threads claim the chunks from
+one shared counter, like `schedule(dynamic, n)`; the default `n` suits many light rows. A few hundred heavy rows (each
+microseconds) set `ChunkRows = 64`, so every thread gets work: [chunk size](/en/docs/guide/threading#chunk-rows).
+Systems whose access does not conflict already run at once without any of this:
+[parallel systems](/en/docs/guide/threading#parallel-systems).
+
+{/* TODO(parallel ForEach): reductions (OpenMP reduction(+: x)), thread-private scratch (private / threadprivate) and
+read-only lookups of other entities from a parallel method. Add one line each here and a row each in the mapping
+table below, linking their sections on guide/threading. */}
+
+</Step>
+
+<Step>
+
+### Write the vector yourself: batch methods [#batch]
+
+When the generator keeps a method scalar (several fields, a lookup table, integer tricks), a
+[batch method](/en/docs/guide/systems#batch-methods) gets a run of rows as spans, and the method loops over them with
+`Vector<T>` or `Vector128<T>` by hand: the Unity.Mathematics `float4` of a Burst job. Fire damage in the VoxelServer
+sample is that loop: [SIMD where the data is a column](/en/docs/samples/voxel-server#simd).
+
+</Step>
+
+<Step>
+
+### Shade a grid: shader, stencil, ping-pong, halo [#grid]
+
+A grid whose next value is a function of its neighbours (water, light, heat) runs like a GPU draws. The VoxelServer
+water is the worked example, explained in [where the ideas come from](/en/docs/samples/voxel-server#ideas) and
+[water](/en/docs/samples/voxel-server#water):
+
+- **A shader per chunk.** One function per cell, reading the cell and its neighbours and writing only the cell, so
+  16 byte cells go through one `Vector128<byte>` and chunks run in parallel.
+- **A stencil.** A bit per row of cells says whether the row can change; the loop visits the set bits only, each
+  found with one `TrailingZeroCount` (TZCNT), so a dry row costs nothing.
+- **Ping-pong without clearing.** The pass reads one buffer and writes another, then a commit copies it back once
+  every chunk has stepped, so no cell reads a neighbour already updated. Neither buffer is cleared: the pass writes
+  every cell it later reads, the skipped rows included.
+- **A halo.** Before the pass, each chunk copies the facing edges of its neighbours into a border buffer (the ghost
+  cells of an MPI halo exchange), so the shader reads its own row's components only and can run in parallel.
+
+The stencil and the write of every row, on one layer of 16 x 16 cells:
+
+```csharp
+using System.Numerics;
+using System.Runtime.Intrinsics;
+
+public static class Stencil
+{
+    public const int Size = 16;
+
+    // One layer of 16 x 16 cells; bit z of wet is set when row z holds water.
+    public static void Spread(ReadOnlySpan<byte> water, Span<byte> next, uint wet)
+    {
+        // A row can change when it or a row beside it is wet: the stencil.
+        uint shaded = (wet | wet << 1 | wet >> 1) & 0xFFFF;
+        for (uint rows = shaded; rows != 0; rows &= rows - 1)
+        {
+            int z = BitOperations.TrailingZeroCount(rows);
+            var beside = Vector128.Max(Row(water, z - 1), Row(water, z + 1));
+            // Water flows in one level lower; a dry lane stays 0 instead of wrapping to 255.
+            var dry = Vector128.Equals(beside, Vector128<byte>.Zero);
+            var flowed = Vector128.ConditionalSelect(dry, beside, beside - Vector128<byte>.One);
+            Vector128.Max(Row(water, z), flowed).CopyTo(next.Slice(z * Size, Size));
+        }
+        // The rows the stencil skips are written too, so next is never cleared first.
+        for (uint rows = ~shaded & 0xFFFF; rows != 0; rows &= rows - 1)
+            next.Slice(BitOperations.TrailingZeroCount(rows) * Size, Size).Clear();
+    }
+
+    // A row outside the layer reads as dry: the halo of a real chunk holds its neighbour's edge instead.
+    private static Vector128<byte> Row(ReadOnlySpan<byte> water, int z) =>
+        (uint)z < Size ? Vector128.Create(water.Slice(z * Size, Size)) : Vector128<byte>.Zero;
+}
+```
+
+The sample's `Systems/Water/Flow.cs` is the same loop over a padded texture on the stack, six neighbours per cell, in
+a parallel method with `ChunkRows = 64`.
+
+{/* TODO(water overlap): the MPI-style interior/ring overlap (the interior of a chunk shaded while its ring waits for
+the halo) and a halo exchange of the changed edges only. Describe them here in one bullet each, linking the
+samples/voxel-server sections. */}
+
+</Step>
+
+</Steps>
+
+## The mapping: OpenMP, MPI, Burst, the GPU [#mapping]
+
+| You know | In EasyEcs | Where |
+| --- | --- | --- |
+| OpenMP `parallel for` | `[ForEach(Parallel = true)]` | [Parallel methods](/en/docs/guide/systems#parallel-methods) |
+| OpenMP `schedule(dynamic, n)` | `ChunkRows = n` (the default size when unset) | [Chunk size](/en/docs/guide/threading#chunk-rows) |
+| OpenMP `sections` / tasks | systems of one stage, run at once when their access does not conflict | [Parallel systems](/en/docs/guide/threading#parallel-systems) |
+| MPI rank owning a subdomain | one world per thread (a world per zone or map) | [One world per thread](/en/docs/guide/threading#recommended-one-world-per-thread) |
+| MPI send of entities to another rank | `SaveEntities` / `MoveEntities` | [Migration](/en/docs/guide/migration-and-unload#save-entities) |
+| MPI halo exchange (ghost cells) | a border buffer filled from the neighbours before the pass | [VoxelServer water](/en/docs/samples/voxel-server#water) |
+| Burst auto-vectorization | vector loops of `[ForEach]` methods | [Vector loops](/en/docs/guide/systems#vector-loops) |
+| Burst `float4` / Unity.Mathematics by hand | a batch method with `Vector<T>` / `Vector128<T>` | [Batch methods](/en/docs/guide/systems#batch-methods) |
+| Burst `IJobParallelFor` batch count | `ChunkRows` | [Chunk size](/en/docs/guide/threading#chunk-rows) |
+| GPU fragment shader | a function per cell over a chunk's grid | [Where the ideas come from](/en/docs/samples/voxel-server#ideas) |
+| GPU stencil | a bit per row, visited with `TrailingZeroCount` | [Shade a grid](#grid) |
+| GPU ping-pong targets | two buffers, read one, write the other, commit | [VoxelServer water](/en/docs/samples/voxel-server#water) |
+
+{/* TODO(mapping): rows for OpenMP reduction, private / threadprivate scratch, read-only lookups from a parallel
+method, the [ForEach(Simd = ...)] option and the MPI interior/ring overlap, once they land. */}
+
+## How to use it fast [#how-to-use-it-fast]
+
+- Measure first: [`MeasureSystems`](/en/docs/guide/systems#measuring-systems) names the system that costs the tick,
+  and a BenchmarkDotNet case proves the change; each pattern's section links its own benchmark table.
+- Make the data fit before the code: one number per component for vector loops, a byte or `int` per cell for a grid
+  (16 or 8 lanes per instruction), so the work is one shape over a column.
+- Keep per-cell work in registers or on the stack (`stackalloc` under `[SkipLocalsInit]`) and copy into a buffer
+  once: a buffer read and written many times per pass is far slower than a stack span.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| Optimizing a system nobody measured | Code that is harder to read and saves nothing | [`MeasureSystems`](/en/docs/guide/systems#measuring-systems) |
+| Mixing `float` and `int` fields in a method meant to vectorize | It stays scalar | The generated file ([vector loops](/en/docs/guide/systems#vector-loops)) |
+| `ChunkRows` on many light rows | Many more claims for the same work | Benchmark ([chunk size](/en/docs/guide/threading#chunk-rows)) |
+| A grid pass that reads cells it updated in the same pass | Results depend on the visit order (and on the thread count in parallel) | Tests: write into a second buffer |
+| Clearing the output buffer every pass | A full write of memory the pass rewrites anyway | Review: write the skipped rows instead |
+| Reading another chunk's grid from a parallel method | A race, or a lookup per row | EECS010 for structure; copy the edges into a halo first |
+
+## Related [#related]
+
+<Cards>
+  <Card title="Systems" href="/en/docs/guide/systems">
+    `[ForEach]`, batch, parallel methods and vector loops in full.
+  </Card>
+  <Card title="Threading and parallel systems" href="/en/docs/guide/threading">
+    Owner threads, parallel stages and chunk size.
+  </Card>
+  <Card title="VoxelServer" href="/en/docs/samples/voxel-server">
+    The water: a shader, a stencil, ping-pong buffers and a halo in a real server.
+  </Card>
+  <Card title="Performance" href="/en/docs/performance">
+    The measured cost of every feature.
+  </Card>
+</Cards>

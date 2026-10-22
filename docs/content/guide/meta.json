@@ -21,6 +21,7 @@
     "saves",
     "migration-and-unload",
     "threading",
+    "high-performance",
     "hosting",
     "testing",
     "diagnostics",

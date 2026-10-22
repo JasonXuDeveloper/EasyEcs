@@ -221,18 +221,69 @@ warlord.Destroy();                                   // ChildOf：销毁父实�
 
 `ChildOf` 是 EasyEcs 的层级链接，见[层级](/zh/docs/guide/hierarchy)。`Instantiate(group, span)` 会为每个元素实例化一整组。
 
-### 生成前先预留 [#reserve]
+### 生成前先预留：`Reserve` [#reserve]
 
 `world.Reserve(prefab, count)` 先扩好预制体实例要进的表和实体记录，接下来 `count` 个实例都不再扩容。编组会预留每个成员的表。
-它也会预留实例在行之外要用的东西：[带索引](/zh/docs/guide/indexes-and-relations)组件的键、带[清理组件](/zh/docs/guide/cleanup-and-disable)的实例销毁后等待所在的表，
-以及销毁它们时会填进去的空闲 id 列表。在生成的那个 tick 之前调用，这波生成就不用在 tick 里付扩容的代价；服务器启动时预留好峰值（玩家、怪物、物品），
-增长到峰值时就不再分配。
+在生成的那个 tick 之前调用，这波生成就不用在 tick 里付扩容的代价；服务器启动时预留好峰值（玩家、怪物、物品），增长到峰值时就不再分配。
 
 ```csharp
 world.Reserve(Kinds.Troll, 5_000);
 var army = new Entity[5_000];
 world.Instantiate(Kinds.Troll, army);                // 不扩容，不分配
 ```
+
+<Callout type="idea" title="适合">
+  启动时预留已知的峰值（一个分片接纳的玩家数、一个区域容纳的怪物数），以及提前一个 tick 就知道大小的一波生成（突袭、副本刷怪）。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  实体零零散散地来，也没有已知峰值：表本来就按倍数增长，预留得远超实际到来的数量只会白占内存。`CreateEntities` 和
+  `Instantiate(prefab, span)` 会自己为这一波预留。
+</Callout>
+
+预留在行之外还覆盖了什么：
+
+| `Reserve(prefab, n)` 和 `Reserve<T1..Tn>(n)` 会预留 | 不会预留：自己来 |
+| --- | --- |
+| 目标表的行（编组是每个成员的表） | `DynamicBuffer<T>` 元素的列表：[`ReservePool`](/zh/docs/guide/dynamic-buffers#pool) |
+| 实体记录，以及销毁它们时要填进去的空闲 id 列表 | [分组](/zh/docs/guide/groups)的其他表（`GroupBy` 按值放实例） |
+| [带索引](/zh/docs/guide/indexes-and-relations)组件的键，之后才创建的索引也算 | 关系链接（来自缓冲写入） |
+| 带[清理组件](/zh/docs/guide/cleanup-and-disable)的实例销毁后等待所在的表 | 其他组件组合的实体：只预留记录用 `EnsureEntityCapacity(n)` |
+
+服务器启动时预留整体峰值，按这个顺序：
+
+<Steps>
+<Step>
+
+#### 缓冲列表 [#reserve-buffers]
+
+长缓冲先调高 `DynamicBuffer<T>.PoolCapacity`，再 `ReservePool(peak)`：对整个进程生效，要在任何 World 用到这个类型之前（[缓冲池](/zh/docs/guide/dynamic-buffers#pool)）。
+
+</Step>
+<Step>
+
+#### 每种实体预留一次 [#reserve-kinds]
+
+每个预制体 `world.Reserve(prefab, peak)`，正好用这几个组件创建的实体用 `Reserve<T1..Tn>(peak)`。
+
+```csharp
+world.Reserve(Kinds.Troll, 2_000);                   // 怪物
+world.Reserve<Position, Health>(10_000);             // 正好用这两个组件创建的投射物
+```
+
+</Step>
+<Step>
+
+#### 其余的记录 [#reserve-records]
+
+分散在很多张表里的实体，用 `world.EnsureEntityCapacity(total)`（或 `WorldOptions.InitialEntityCapacity`）。
+
+</Step>
+</Steps>
+
+省下了什么由一个分配测试证明，不是基准测试
+（[`ReservingAPrefabCoversItsIndexKeysAndItsRetiredTable`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/tests/EasyEcs.UnitTest/AllocationTests.cs)）：
+一个带值索引、唯一键和清理组件的预制体，预留后的 2,000 个实例生成、退休、销毁，每一步都是 0 字节分配。
 
 ### 副本里有什么 [#what-a-copy-gets]
 
@@ -355,6 +406,7 @@ boss 50 hp, twin 50 hp
 | 先 `Instantiate`，再 `Set` 预制体没有的组件 | `Instantiate(prefab, in c1, …, in cn)` | 一次行复制直接进最终的表，不移动 |
 | 循环调用 `Instantiate(prefab, 相同的值)` | `Instantiate(prefab, span, in c1, …, in cn)` | 只过一次闸门，每个给定的列一次填满 |
 | 在生成的那个 tick 里扩容 | 提前 `Reserve(prefab, count)` | 这波生成不分配内存 |
+| World 涨到峰值的途中，索引键、空闲 id 和退休表不断扩容 | 启动时每种实体按峰值 [`Reserve`](#reserve) 一次 | 它们都和行一起预留好 |
 | 先 `CreateEntity`，再逐个 `Set` 同一类实体的组件 | 用预制体 | 一次行复制，目标表按预制体缓存 |
 | 每次生成都 new 一个 `Prefab` | 每类一个预制体，放在字段里 | 第一次实例化后，表查找就缓存了 |
 | 把模板做成隐藏实体 | 用 `Prefab` | 查询不用付跳过它们的代价 |
@@ -394,6 +446,8 @@ boss 50 hp, twin 50 hp
 | 在不带 `Entity` 或 `World` 参数的 `[ForEach]` 方法里 `Instantiate` | 遍历以为不会有结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
 | 其他线程正在实例化时修改预制体 | 复制出残缺的数据 | 启动时建好预制体，之后只读 |
 | 对已销毁或已退休的实体调用 `Clone()` | 抛 `InvalidOperationException` | 先查 `IsAlive` 和 `IsRetired` |
+| 指望 `Reserve` 也预留实例缓冲的列表 | 每个缓冲第一次写入仍要分配 | 给元素类型调用 [`ReservePool`](/zh/docs/guide/dynamic-buffers#pool) |
+| 在生成的那个 tick 里才 `Reserve` | 扩容照样发生在 tick 里 | 启动时或提前一个 tick 预留 |
 
 ## 相关页面 [#related]
 

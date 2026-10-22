@@ -295,9 +295,12 @@ helpers ([D22](/en/docs/decisions)). Two kinds of work use it:
 - **Parallel stages**: with `WorldOptions.ParallelSystems`, consecutive systems with no order between them and no
   conflicting access (from the generated access sets) form one stage and run at once.
 - **`[ForEach(Parallel = true)]`**: a method's rows run in chunks, a multiple of 64 rows (so presence-bit words never
-  straddle chunks), about four per thread, between 1,024 and 16,384 rows. A method that writes a tracked component
-  gets chunks of a multiple of 4,096 rows, 4,096 at least: each block of 4,096 rows shares one change-tick summary per
-  column, updated without atomics, so two threads never write into one block.
+  straddle chunks), that the threads claim one at a time through a shared cursor as they finish, OpenMP's
+  `schedule(dynamic, n)`. By default a chunk is about a quarter of each thread's share, between 1,024 and 16,384 rows,
+  and a method that writes a tracked component gets a multiple of 4,096 rows, 4,096 at least, so two threads never
+  share the change-tick summary of a 4,096-row block. `ChunkRows = n` sets `n` for a few hundred heavy rows; chunks
+  that then share a block set its summary with an atomic OR, once per 64 written rows
+  ([D67](/en/docs/decisions#d67-chunk-rows)).
 
 ```mermaid
 flowchart LR

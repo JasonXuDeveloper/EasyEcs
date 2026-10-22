@@ -45,7 +45,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `RelationIndex<T>` | sealed class | `world.Relations<T>()`：链接到某个目标的实体。 |
 | `TargetPolicy`、`TargetPolicyExtensions` | 枚举、扩展方法 | 目标被销毁时链接怎么处理：`Keep`、`Remove`、`Destroy`。 |
 | `EcsSystem` | abstract class | `World`、`UpdateInterval`、`UpdatePhase`、`Enabled`、`Error`、`Stats`、`LastRunTick`、`RunCount`；`OnCreate` / `OnUpdate` / `OnDestroy`（[系统](/zh/docs/guide/systems)）。 |
-| `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`Slices = N`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`。 |
+| `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`ChunkRows = n`、`Slices = N`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`。 |
 | `Maybe<T>` | ref struct | `[ForEach]` 方法的可选组件参数：`HasValue`、`Value`。 |
 | `ReadOnlyMaybe<T>` | ref struct | 只读版本：`Value` 是 `ref readonly`，从不打 tick，带索引的组件也能用；`Maybe<T>` 可以转换成它。 |
 | `Mut<T>` | ref struct | `[ForEach]` 方法的组件参数，只有方法真正写了的行才算写入：`Value`、`Write()`、`SetIfChanged(value)`（[变更追踪](/zh/docs/guide/change-tracking)）。 |
@@ -78,7 +78,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.EntityCount` | O(1) | |
 | `world.Entities` | O(容量) | 按 id 顺序列出存活实体，用于诊断 |
 | `world.EnsureEntityCapacity(capacity)` | O(容量) | 预先分配实体数组；已经够大时什么都不做 |
-| `world.Reserve<T1..Tn>(count)` | O(n)，外加一次扩容 | 为正好有 `T1..Tn` 的表和实体数组预留空间，接下来 `count` 次带这些组件的创建都不再扩容 |
+| `world.Reserve<T1..Tn>(count)` | O(n)，外加一次扩容 | 为正好有 `T1..Tn` 的表和实体数组预留空间，接下来 `count` 次带这些组件的创建都不再扩容；也预留它们带索引组件的键、带清理组件时退休所进的表，以及空闲 id 列表（[预留](/zh/docs/guide/prefabs#reserve)） |
 
 ## 组件 [#components]
 
@@ -115,7 +115,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.Instantiate(prefab, Span<Entity> entities)` | O(count × c) | 整波只过一次闸门，表最多扩容一次 |
 | `world.Instantiate(prefab, in T1 … in Tn)` | 均摊 O(c + n) | 预制体的值加上给定的值（覆盖预制体里的，或者新加；给定的组件若在预制体里被禁用则启用），一次行复制直接进最终的表，不经过中间表；给定的 `ChildOf` 会挂上层级，唯一键先检查；预制体组为 O(成员数 × c) 再加一次搬行，组件给传入的那个预制体对应的实体 |
 | `world.Instantiate(prefab, Span<Entity> entities, in T1 … in Tn)` | O(count × (c + n)) | 每个实例都是同样的值；只过一次闸门，表最多扩容一次，每个给定的列一次填满 |
-| `world.Reserve(prefab, count)` | O(c)，外加一次扩容 | 为接下来 `count` 个实例要进的表预留空间，生成波次在 tick 中不再扩容 |
+| `world.Reserve(prefab, count)` | O(c)，外加一次扩容 | 为接下来 `count` 个实例要进的表预留空间，生成波次在 tick 中不再扩容；也预留实例的索引键、退休表和空闲 id（不含缓冲列表：用 `ReservePool`） |
 | `entity.Clone()` | O(c) | 同一 World、同一张表里的新实体，复制全部组件；实体不存活或已退休（因清理组件而保留）时抛异常 |
 
 ## 动态缓冲 [#dynamic-buffers]
@@ -132,7 +132,8 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `bag.EnsureCapacity(n)` / `AsSpan()` | 扩容时 O(count) / O(1) | `AsSpan()` 可写 |
 | `bag.SetCount(n)` | O(增加或去掉的元素数) | 返回要写的 span（`AsSpan()`）；增加的元素为 `default`；只有缓冲扩容时分配 |
 | `bag.TrimExcess()` | O(count) | 重新分配到 count 大小；空缓冲把列表还给池，不再持有列表 |
-| `DynamicBuffer<T>.PoolCapacity` | O(1) | 销毁的 `T` 缓冲还给本线程回收池的列表最长多少个元素（默认 4 KB 能放下的个数）；按元素类型、整个进程生效，启动时设置 |
+| `DynamicBuffer<T>.PoolCapacity` | O(1) | 销毁的 `T` 缓冲还给[缓冲池](/zh/docs/guide/dynamic-buffers#pool)的列表最长多少个元素（默认 4 KB 能放下的个数）；按元素类型、整个进程生效，启动时设置 |
+| `DynamicBuffer<T>.ReservePool(lists)` | 一次性 O(lists) 次分配；池里够了就是 O(1) | 往池里放 `PoolCapacity` 个元素的空列表，直到有 `lists` 个；按元素类型、整个进程生效，在设好 `PoolCapacity` 之后调用 |
 
 快照、存档或克隆一列缓冲时会复制元素：O(元素数)，每个实体一个新列表。
 

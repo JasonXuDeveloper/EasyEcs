@@ -182,7 +182,7 @@ stateDiagram-v2
 
 谁看得见一个区块是数出来的，从不搜索：每个玩家的视野都是 `Rules.PlayerVision`，所以看得见一个区块的玩家，就是以它为中心的正方形里的
 视野中心；`ViewCenter` 带索引，`world.ViewCenterIndex.Count(chunk)` 以 O(1) 数出中心落在某个区块的玩家。待在原区块的实体和玩家
-在这里没有任何开销，不管过多少个 tick。刚出现的玩家还没有 `ViewCenter`：[`ReadOnlyMaybe<ViewCenter>`](/zh/docs/guide/systems#maybe)
+在这里没有任何开销，不管过多少个 tick。刚出现的玩家还没有 `ViewCenter`：[`ReadOnlyMaybe<ViewCenter>`](/zh/docs/guide/systems#read-only-maybe)
 在有的时候读它，而且和 `Maybe<T>` 不同，它只能读，所以这个带索引的组件从不被打 tick。
 
 <include lang="csharp" meta='title="Systems/Aoi.cs"'>../../../samples/VoxelServer/Systems/Aoi.cs#aoi</include>
@@ -251,6 +251,9 @@ flowchart LR
 <include lang="csharp" meta='tab="Water/Sleep.cs"'>../../../samples/VoxelServer/Systems/Water/Sleep.cs</include>
 
 <include lang="csharp" meta='tab="Water/Commit.cs"'>../../../samples/VoxelServer/Systems/Water/Commit.cs</include>
+
+{/* TODO(water overlap): MPI 式的内部/外圈重叠（外圈等光环时先给区块内部着色）和只交换变化过的边的光环交换写在这里，
+连同 Border / Flow 的改动；再更新 guide/high-performance#grid。 */}
 
 `FloatSystem` 把站在水里的东西（玩家、僵尸和掉落物）托起来，顺着水面的坡度推向周围更低的水，水位越低推得越弱：泉眼旁边或下落的水里是全力，
 水流末端只有八分之一。它遍历区块，按 `FluidCount` 跳过干的区块，其余的通过按区块索引的实体找到其中的物体，所以物体所在方块的水
