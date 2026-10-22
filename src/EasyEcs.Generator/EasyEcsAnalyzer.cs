@@ -167,6 +167,13 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "that tick: the rows of the slices not visited would lose their changes. Drop Slices, or read the changes " +
         "every run and spread the work they cause.", helpLinkUri: Help("EECS035"));
 
+    public static readonly DiagnosticDescriptor BadChunkRows = new("EECS054", "Invalid [ForEach(ChunkRows = N)]",
+        "[ForEach] method '{0}' cannot set ChunkRows: {1}",
+        Category, DiagnosticSeverity.Error, true,
+        "ChunkRows is the rows a thread of a parallel pass takes at a time: 0 lets the runtime choose from the row count, " +
+        "more sets it (rounded up to 64). A method without Parallel = true runs on one thread and has no chunks: set " +
+        "Parallel = true or drop ChunkRows.", helpLinkUri: Help("EECS054"));
+
     public static readonly DiagnosticDescriptor BadIndexKey = new("EECS036", "A component that cannot be indexed by its key",
         "'{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
@@ -189,7 +196,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
-        UpdateInPass, CreateThenSet, SomeRowsWritten);
+        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -751,6 +758,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));
         if (Symbols.SlicesProblem(method) is { } slices)
             context.ReportDiagnostic(Diagnostic.Create(BadSlices, location, method.Name, slices));
+        if (Symbols.ChunkRowsProblem(method) is { } chunks)
+            context.ReportDiagnostic(Diagnostic.Create(BadChunkRows, location, method.Name, chunks));
         if (Symbols.Unnameable(method) is { } unnameable)
             context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, // the type its code fix makes internal, with its containers
                 Symbols.Hidden(unnameable)?.Locations.Where(l => l.IsInSource) ?? [],

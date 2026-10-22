@@ -17,6 +17,29 @@ public class ParallelTests
         static void Add(ref Counter counter, in Seen step, Entity entity) => counter.N += step.N + (entity.Id.Index & 0);
     }
 
+    /// <summary>Few heavy rows: chunks of 64 rows, so a few hundred rows reach every thread.</summary>
+    public class HeavyRows : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 64)]
+        static void Work(ref Counter counter)
+        {
+            counter.N = Environment.CurrentManagedThreadId;
+            Thread.SpinWait(20_000); // microseconds per row
+        }
+    }
+
+    /// <summary>Writes Armor on the rows whose Seen matches the world's step, in chunks that split blocks of change ticks.</summary>
+    public class SomeArmor : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 64)]
+        static void Write(in Seen seen, Mut<Armor> armor, in Step step)
+        {
+            if (seen.N % step.Every == step.Phase) armor.Write().Value++;
+        }
+    }
+
+    public record struct Step(int Every, int Phase) : ISingletonComponent;
+
     // Each system waits at the rendezvous: it reports Met only if another system arrived while it was running.
     public record struct Rendezvous(Barrier Barrier, int TimeoutMs) : ISingletonComponent;
     public record struct Left(bool Met) : IComponent;
@@ -299,6 +322,68 @@ public class ParallelTests
         int wrong = 0;
         foreach (var item in world.Query<Counter>()) wrong += item.Component1.N == passes ? 0 : 1;
         Assert.That(wrong, Is.Zero);
+    }
+
+    [Test]
+    public void ChunkRowsSpreadAFewHeavyRowsOverThreads()
+    {
+        if (Environment.ProcessorCount < 2) Assert.Ignore("one processor: nothing to spread over");
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        world.CreateEntities(new Entity[300], new Counter(0)); // under the 1,024 rows of a default chunk
+        world.AddSystem<HeavyRows>();
+        var threads = new System.Collections.Generic.HashSet<int>();
+        for (int i = 0; i < 5 && threads.Count < 2; i++) // helpers start on the thread pool: give them a few passes
+        {
+            world.Update();
+            foreach (var item in world.Query<Counter>()) threads.Add(item.Component1.N);
+        }
+
+        Assert.That(threads, Has.Count.GreaterThan(1));
+    }
+
+    [Test]
+    public void ChunksSplittingBlocksKeepChangeTicksExact()
+    {
+        // 10,000 rows in chunks of 64: about 64 chunks share each 4,096-row block of change ticks. Each step writes
+        // another seventh of the rows; a Changed query since the step finds exactly those, one since two steps both.
+        const int rows = 10_000, every = 7;
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        var entities = new Entity[rows];
+        world.CreateEntities(entities, new Seen(0), new Armor(0));
+        for (int i = 0; i < rows; i++) entities[i].Get<Seen>().N = i;
+        world.AddSystem<SomeArmor>();
+        world.AddSingleton<Step>() = new Step(every, -1);
+        world.Update(); // past the creation's tick: no row written yet
+        var marks = new ulong[every + 1];
+        for (int phase = 0; phase < every; phase++)
+        {
+            world.GetSingleton<Step>() = new Step(every, phase);
+            marks[phase] = world.ChangeTick;
+            world.Update();
+            marks[phase + 1] = world.ChangeTick;
+            Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(marks[phase])), Is.EqualTo(Phases(phase, phase)),
+                $"step {phase}");
+            if (phase > 0)
+                Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(marks[phase - 1])), Is.EqualTo(Phases(phase - 1, phase)),
+                    $"steps {phase - 1} and {phase}");
+        }
+
+        // Every row each step: the chunks start together, so threads stamp the first words of a shared block at once.
+        world.GetSingleton<Step>() = new Step(1, 0);
+        for (int i = 0; i < 1_000; i++)
+        {
+            ulong mark = world.ChangeTick;
+            world.Update();
+            Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(mark)), Is.EqualTo(rows), $"pass {i}");
+        }
+
+        static int Phases(int from, int to)
+        {
+            int count = 0;
+            for (int i = 0; i < rows; i++)
+                if (i % every >= from && i % every <= to) count++;
+            return count;
+        }
     }
 
     [Test]

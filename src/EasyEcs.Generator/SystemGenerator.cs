@@ -134,7 +134,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append($"        {Code.GeneratedCode(Symbols.GeneratorName)}\n");
             sb.Append($"        {(method.PublicEntry ? "public" : "internal")} static void {Escape(method.Name)}{method.TypeParameters}({string.Join(", ", signature)}){method.Constraints}\n        {{\n");
             sb.Append($"            var {local} = new {job}{Fields(method, world, null)};\n");
-            sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref {local}{filter});\n        }}\n\n");
+            sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref {local}{filter}{method.Chunks});\n        }}\n\n");
 
             string Free(string name)
             {
@@ -189,7 +189,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             string count = $"world.Count<{method.ComponentTypes}>({(whole.Length == 0 ? "" : whole.Substring(2))})";
             if (method.Slices > 1) count = $"{count} / {method.Slices}";
             sb.Append($"            if (Measuring(world)) Visit(system, {count});\n");
-            sb.Append($"            world.{method.ForEach}<{method.ComponentTypes}, {method.Name}Job{i}>(ref job{i}{filter});\n");
+            sb.Append($"            world.{method.ForEach}<{method.ComponentTypes}, {method.Name}Job{i}>(ref job{i}{filter}{method.Chunks});\n");
         }
 
         sb.Append("        }\n\n");
@@ -432,6 +432,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
         /// <summary>[ForEach(Slices = N)]: visits one of N slices of its rows per run (1: all of them).</summary>
         public int Slices { get; init; } = 1;
 
+        /// <summary>[ForEach(Parallel = true, ChunkRows = N)]: the rows a thread takes at a time (0: chosen by the runtime).</summary>
+        public int ChunkRows { get; init; }
+
+        /// <summary>The chunkRows argument of a parallel call that sets it, else nothing.</summary>
+        public string Chunks => Parallel && ChunkRows > 0 ? $", chunkRows: {ChunkRows}" : "";
+
         /// <summary>Uses its Entity parameters (if any) only as identities (<see cref="Symbols.OnlyIdentifies"/>).</summary>
         public bool Identifies { get; init; }
 
@@ -544,7 +550,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 new EquatableArray<string>(method.TypeParameters.Select(t => t.Name).ToArray()),
                 // A public entry point names only public types: its context parameters' and its constraints'.
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
-                    && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) { Slices = Symbols.Slices(method), Identifies = Symbols.OnlyIdentifies(method, syntax, model) };
+                    && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) { Slices = Symbols.Slices(method), ChunkRows = Symbols.ChunkRows(method), Identifies = Symbols.OnlyIdentifies(method, syntax, model) };
         }
     }
 

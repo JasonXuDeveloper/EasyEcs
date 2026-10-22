@@ -692,6 +692,19 @@ internal sealed class Archetype
             }
     }
 
+    /// <summary>
+    /// Open the change-tick blocks of <typeparamref name="T"/> holding rows [<paramref name="start"/>,
+    /// <paramref name="end"/>) at <paramref name="tick"/> (<see cref="BlockTicks.Open"/>), before a parallel pass whose
+    /// chunks split blocks stamps them. Nothing for an untracked component (a JIT-time constant).
+    /// </summary>
+    public void OpenBlocks<T>(int start, int end, ulong tick) where T : struct, IComponent
+    {
+        int column;
+        if (default(T) is not ITracked || start >= end || (column = TicksColumn<T>()) < 0) return; // a Maybe<T> the table lacks
+        var blocks = Blocks[column];
+        for (int b = start >> 12; b <= (end - 1) >> 12; b++) blocks[b].Open(tick);
+    }
+
     /// <summary><see cref="Stamp{T}"/> for the rows of word <paramref name="word"/> whose bit is set in <paramref name="rows"/>.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void StampWord<T>(int word, ulong rows, ulong tick) where T : struct, IComponent
@@ -1279,7 +1292,9 @@ internal struct BlockTicks
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Raise(ulong words, ulong tick)
     {
-        if (tick == Latest) Words |= words;
+        // Atomic: chunks of a parallel pass smaller than a block share it, opened at the pass's tick (Open), so they
+        // only ever take this branch. Once per word and tick (the word's first stamp), so the lock costs little.
+        if (tick == Latest) Interlocked.Or(ref Words, words);
         else if (tick > Latest)
         {
             Rest = Latest; // every word of the block held at most the previous latest
@@ -1288,6 +1303,19 @@ internal struct BlockTicks
         }
         // Older than the latest (a copied row): the words were older still, so none is in Words.
         else Rest = Math.Max(Rest, tick);
+    }
+
+    /// <summary>
+    /// Raise the block to <paramref name="tick"/> with no word at it yet, so that the threads of a pass at that tick
+    /// share it through the atomic branch of <see cref="Raise"/>. The words at the previous latest join the rest: a
+    /// reader since then visits all the block's words instead of those (the price of a block the pass leaves alone).
+    /// </summary>
+    public void Open(ulong tick)
+    {
+        if (tick <= Latest) return;
+        Rest = Latest;
+        Latest = tick;
+        Words = 0;
     }
 }
 

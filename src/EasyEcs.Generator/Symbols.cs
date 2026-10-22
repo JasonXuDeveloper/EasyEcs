@@ -706,13 +706,27 @@ internal static class Symbols
     }
 
     /// <summary>The N of [ForEach(Slices = N)] (1 without it).</summary>
-    public static int Slices(IMethodSymbol method)
+    public static int Slices(IMethodSymbol method) => ForEachArgument(method, "Slices", 1);
+
+    /// <summary>[ForEach(ChunkRows = N)]: the rows a thread of a parallel pass takes at a time (0: chosen by the runtime).</summary>
+    public static int ChunkRows(IMethodSymbol method) => ForEachArgument(method, "ChunkRows", 0);
+
+    private static int ForEachArgument(IMethodSymbol method, string name, int otherwise)
     {
         foreach (var attribute in method.GetAttributes())
             if (Named(attribute.AttributeClass, ForEachAttribute))
                 foreach (var named in attribute.NamedArguments)
-                    if (named.Key == "Slices" && named.Value.Value is int slices) return slices;
-        return 1;
+                    if (named.Key == name && named.Value.Value is int value) return value;
+        return otherwise;
+    }
+
+    /// <summary>Why a method's [ForEach(ChunkRows = N)] is invalid (EECS054), or null: N below 0, or set on a method that does not run in parallel.</summary>
+    public static string? ChunkRowsProblem(IMethodSymbol method)
+    {
+        int rows = ChunkRows(method);
+        if (rows < 0) return $"ChunkRows = {rows} must be 0 (chosen by the runtime) or more";
+        if (rows > 0 && !IsParallel(method)) return "the method does not run in parallel (Parallel = true), so it has no chunks";
+        return null;
     }
 
     /// <summary>

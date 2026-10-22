@@ -25,22 +25,25 @@ public sealed partial class World
     private readonly Lock _parallelWorkLock = new();
 
     /// <summary>
-    /// The most rows per chunk of a parallel [ForEach]. Chunks hold about a quarter of each thread's share of the
-    /// matching rows (at least 1,024): equal chunks finish together, and four per thread even out uneven rows.
+    /// The most rows per chunk of a parallel [ForEach] that does not set its own (<c>chunkRows</c>). Chunks hold about
+    /// a quarter of each thread's share of the matching rows (at least 1,024): equal chunks finish together, and four
+    /// per thread even out uneven rows.
     /// </summary>
     public const int ParallelChunkRows = 16384;
 
     /// <summary>
     /// Rows per chunk for a pass over <paramref name="tables"/> (over one of <paramref name="slices"/> slices of each,
-    /// <see cref="QueryFilter.Slice"/>): a multiple of 64 (presence-bit words never straddle
-    /// chunks), about four chunks per thread, between 1,024 and <see cref="ParallelChunkRows"/>. With fixed 16,384-row
-    /// chunks, 100,000 rows made 7 chunks for 4 threads: the second round ran 3 of them and left a thread idle. A pass
-    /// that <paramref name="stamps"/> a tracked component gets a multiple of 4,096 rows: each block of 4,096 rows shares
-    /// one change-tick summary per column (<see cref="Archetype.Blocks"/>), whose plain read-modify-write two chunks of
-    /// one block would race on.
+    /// <see cref="QueryFilter.Slice"/>): <paramref name="chunkRows"/> rounded up to 64 when given (the caller knows its
+    /// rows are heavy, OpenMP's <c>schedule(dynamic, n)</c>); else about four chunks per thread, between 1,024 and
+    /// <see cref="ParallelChunkRows"/>. Always a multiple of 64: presence-bit words and change-tick words never straddle
+    /// chunks. With fixed 16,384-row chunks, 100,000 rows made 7 chunks for 4 threads: the second round ran 3 of them
+    /// and left a thread idle. A pass that <paramref name="stamps"/> a tracked component gets a multiple of 4,096 rows
+    /// unless it sets its own: each block of 4,096 rows shares one change-tick summary per column
+    /// (<see cref="Archetype.Blocks"/>), which chunks splitting a block share through <see cref="Archetype.OpenBlocks{T}"/>.
     /// </summary>
-    internal int ChunkRows(Archetype[] tables, bool stamps, int slices = 0)
+    internal int ChunkRows(Archetype[] tables, bool stamps, int slices = 0, int chunkRows = 0)
     {
+        if (chunkRows > 0) return (int)Math.Min((chunkRows + 63L) & ~63L, int.MaxValue & ~63);
         long rows = 0;
         for (int i = 0; i < tables.Length; i++) rows += tables[i].Count;
         if (slices > 1) rows /= slices; // a sliced pass visits about 1 / slices of them

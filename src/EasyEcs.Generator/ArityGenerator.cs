@@ -1090,20 +1090,21 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                 /// <summary>
                 /// <see cref="{{name}}{{{tps}}, TJob}"/> on several threads: the matching rows are cut into chunks (about four per
-                /// thread, a multiple of 64 rows, at most <see cref="ParallelChunkRows"/>) that the calling thread and up to
+                /// thread, a multiple of 64 rows, at most <see cref="ParallelChunkRows"/>; or <paramref name="chunkRows"/> rounded
+                /// up to 64, for few heavy rows: <c>[ForEach(Parallel = true, ChunkRows = n)]</c>) that the calling thread and up to
                 /// <see cref="WorldOptions.MaxDegreeOfParallelism"/> - 1 thread-pool threads run at the same time, each with its own copy of <paramref name="job"/> (state
                 /// a job keeps in its fields is not merged back). The job must not change structure or write anything
                 /// that another row's run reads (a singleton, another entity); nothing else may change the world
                 /// during the call. Fewer than two chunks of rows, or a runner already busy, run on the calling thread.
                 /// Allocation-free after the first call per job type.
                 /// </summary>
-                public void {{name}}Parallel<{{tps}}, TJob>(ref TJob job, in QueryFilter filter = default)
+                public void {{name}}Parallel<{{tps}}, TJob>(ref TJob job, in QueryFilter filter = default, int chunkRows = 0)
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, INoStructuralChanges
                 {
                     var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
                     var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
-                    int chunks = work.Cut(this, match, in filter, ref job, {{bits}});
+                    int chunks = work.Cut(this, match, in filter, chunkRows, ref job, {{bits}});
                     Gate.Freeze(); // the chunks may run on several threads: a structural change throws
                     try
                     {
@@ -1142,7 +1143,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{Lines(n, i => $"            private ushort _b{i};")}}
 
                     /// <summary>Cut the matching rows into chunks; returns how many.</summary>
-                    public int Cut(World world, QueryMatch match, in QueryFilter filter, ref TJob job, {{ushorts}})
+                    public int Cut(World world, QueryMatch match, in QueryFilter filter, int chunkRows, ref TJob job, {{ushorts}})
                     {
                         _world = world;
                         Job = job;
@@ -1150,15 +1151,22 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         int chunks = 0;
                         var archetypes = match.Archetypes;
                         // A job writing a tracked component stamps change-tick summaries shared by 4,096 rows (a JIT-time constant).
-                        int size = world.ChunkRows(archetypes, {{List(n, i => $"(TJob.WriteMask & {1 << (i - 1)}) != 0 && default(T{i}) is ITracked", " || ")}}, filter.SliceCount);
+                        bool stamps = {{List(n, i => $"(TJob.WriteMask & {1 << (i - 1)}) != 0 && default(T{i}) is ITracked", " || ")}};
+                        int size = world.ChunkRows(archetypes, stamps, filter.SliceCount, chunkRows);
+                        bool open = stamps && (size & 4095) != 0; // chunks split blocks: open them first (Archetype.OpenBlocks)
                         for (int a = 0; a < archetypes.Length; a++)
                         {
                             var archetype = archetypes[a];
                             var rows = new RowFilter(match.Filters[a], filter.Tick);
                             if (archetype.AliveCount == 0 || rows.Mode(archetype) == RowFilter.None) continue;
                             var (first, end) = filter.Rows(a, archetype.Count); // all rows, or a slice's (from a word's first row)
+                            if (open)
+                            {
+                                ulong tick = world.ChangeTick;
+            {{Lines(n, i => $"                    if ((TJob.WriteMask & {1 << (i - 1)}) != 0) archetype.OpenBlocks<T{i}>(first, end, tick);")}}
+                            }
                             // Chunks end on multiples of size, not size rows after a slice's start: a slice starts at any
-                            // word, and two chunks of one 4,096-row block would race on its change-tick summary.
+                            // word, and two chunks of one unopened 4,096-row block would race on its change-tick summary.
                             for (int start = first, stop; start < end; start = stop)
                             {
                                 stop = Math.Min(start - start % size + size, end);

@@ -156,6 +156,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(in P p) { } protected override void OnUpdate() { }", "access.RunAlone();")]
     [TestCase("[ForEach(Slices = 3)] static void A(ref P p) { }", "access.Write<global::P>();", "global::EasyEcs.QueryFilter.Create().Slice((int)(system.RunCount % 3), 3)")]
     [TestCase("[ForEach(Slices = 2, Parallel = true), Without<Q>] static void A(ref P p) { }", "ForEachParallel<", "AFilter0.Slice((int)(system.RunCount % 2), 2)")]
+    [TestCase("[ForEach(Parallel = true, ChunkRows = 100)] static void A(ref P p) { }", "ForEachParallel<", "(ref job0, chunkRows: 100);")]
     [TestCase("[ForEach(Slices = 4)] static void A(System.Span<P> p) { }", "ForEachBatch<", "Slice((int)(system.RunCount % 4), 4)")]
     public void AccessIsDeclaredFromParameters(string members, params string[] expected)
     {
@@ -392,6 +393,8 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach(Slices = 0)] static void A(ref P p) { } }", "EECS035")]
     [TestCase("public class S : EcsSystem { [ForEach(Slices = 2), ChangedAny<T, T>] static void A(ref P p) { } }", "EECS035")]
     [TestCase("public static class R { [ForEach(Slices = -1)] static void A(ref P p) { } }", "EECS035")]
+    [TestCase("public class S : EcsSystem { [ForEach(ChunkRows = 64)] static void A(ref P p) { } }", "EECS054")]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true, ChunkRows = -1)] static void A(ref P p) { } }", "EECS054")]
     [TestCase("public static class R { [ForEach(Slices = 2)] static void A(ref P p) { } static void A(World w, int slice) { } }", "EECS021")]
     [TestCase("public struct Mount : IComponent, IUniqueIndexed<EntityId> { public EntityId Rider; public EntityId Key => Rider; }", "EECS036")]
     [TestCase("public struct Seat : IComponent, IUniqueIndexed<int>, IIndexed<string> { public int Id; readonly int IIndexed<int>.Key => Id; readonly string IIndexed<string>.Key => \"\"; }", "EECS036")]
@@ -408,6 +411,7 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach] static void C(in P p) { using var w = new World(); w.CreateEntity(new Q()); } }")]
     [TestCase("public class S(int n) : EcsSystem { public int N => n; }")]
     [TestCase("public class S : EcsSystem { [ForEach(Slices = 1), Changed<T>] static void A(ref P p) { } [ForEach(Slices = 8, Parallel = true)] static void B(ref Q q) { } }")]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true, ChunkRows = 64)] static void A(ref P p) { } [ForEach(Parallel = true, ChunkRows = 0)] static void B(ref Q q) { } }")]
     [TestCase("public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; } public static class U { public static Entity F(World w) => w.AccountIndex.Get(1); }")]
     [TestCase("public static class U { public static bool F(ref DynamicBuffer<int> b) => System.Runtime.CompilerServices.Unsafe.IsNullRef(ref b); }")] // a 'ref readonly' argument is no copy
     [TestCase("public static class U { public static bool F(in DynamicBuffer<int> b) => System.Runtime.CompilerServices.Unsafe.IsNullRef(in b); }")]

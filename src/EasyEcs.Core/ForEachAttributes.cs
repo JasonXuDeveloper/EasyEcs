@@ -40,6 +40,17 @@ public sealed class ForEachAttribute : Attribute
     /// changes made since the system last ran. Default 1: every row on every run.
     /// </summary>
     public int Slices { get; init; } = 1;
+
+    /// <summary>
+    /// With <see cref="Parallel"/>: the rows a thread takes at a time, rounded up to a multiple of 64 (OpenMP's
+    /// <c>schedule(dynamic, n)</c>). By default a chunk holds about a quarter of each thread's share of the rows, and at
+    /// least 1,024 (4,096 when the method writes a tracked component), so a pass over a few hundred heavy rows (a chunk
+    /// of terrain each, a path search each) runs on one thread; set the rows one thread should take at a time when one
+    /// row costs microseconds. Smaller chunks cost a claim each, and chunks that share a 4,096-row block of change
+    /// ticks share its summary (atomically). Default 0: chosen from the row count. Not without <see cref="Parallel"/>
+    /// and not below 0 (EECS054).
+    /// </summary>
+    public int ChunkRows { get; init; }
 }
 
 /// <summary>
