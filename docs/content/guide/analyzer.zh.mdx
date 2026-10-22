@@ -90,7 +90,7 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 **`[ForEach]` 参数无效。** 错误。代码修复：给按值传入的组件或单例加上 `in` 或 `ref`。
 
 每个参数都必须是以下之一：实现 `IComponent` 或 `ISingletonComponent` 的 `ref` / `in` / `ref readonly` 结构体，`IComponent`
-结构体的 `Span<T>` / `ReadOnlySpan<T>`，它的 `Maybe<T>`（可选组件），`Entity`，或者 `World`。
+结构体的 `Span<T>` / `ReadOnlySpan<T>`，它的 `Maybe<T>` 或 `ReadOnlyMaybe<T>`（可选组件），`Entity`，或者 `World`。
 [系统之外](/zh/docs/guide/systems#foreach-outside-systems)的 `[ForEach]` 方法还可以接收任意其他类型的值，由生成的入口从调用方传进来。
 
 ```csharp doccheck=expect-EECS002
@@ -120,7 +120,7 @@ public class MoveSystem : EcsSystem
 
 **组件数量无效。** 错误。没有代码修复。
 
-`[ForEach]` 方法接收 1 到 9 个组件（单例、`Entity`、`World` 和 runner 的其他值不算，`Maybe<T>` 算），或者在 `[With<T>]`（其次是
+`[ForEach]` 方法接收 1 到 9 个组件（单例、`Entity`、`World` 和 runner 的其他值不算，`Maybe<T>` 和 `ReadOnlyMaybe<T>` 算），或者在 `[With<T>]`（其次是
 `[Changed<T>]`）指明要查询哪个组件时一个都不接收。`[Removed<T>]` 不算指明：它选出的实体已经没有 `T` 了，所以方法还需要一个组件参数
 或者 `[With<U>]`。
 
@@ -508,7 +508,8 @@ public static class WorldThreads
 
 - 在实体上调用 `Get<T>()`、`GetOrAdd<T>()` 或 `TryGetRef<T>()`；
 - 绑定到它的 `ref` 局部变量，或者通过查询项给它（或它的字段）赋值；
-- `[ForEach]` 方法或 `IForEach*` job 里它的 `ref`、`Span<T>`、`Mut<T>` 或 `Maybe<T>` 参数。
+- `[ForEach]` 方法或 `IForEach*` job 里它的 `ref`、`Span<T>`、`Mut<T>` 或 `Maybe<T>` 参数（`Maybe<T>` 给出的是 `ref`；只读就用
+  `ReadOnlyMaybe<T>`）。
 
 ```csharp
 public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
@@ -522,7 +523,8 @@ public class TakePortals : EcsSystem
 }
 ```
 
-用 `in`、`ReadOnlySpan<T>`、`Read<T>()` 或生成的属性读，用 `Set`（或生成的 `SetX`）写：
+用 `in`、`ReadOnlySpan<T>`、[`ReadOnlyMaybe<T>`](/zh/docs/guide/systems#read-only-maybe)（部分实体没有它时）、`Read<T>()` 或生成的属性读，
+用 `Set`（或生成的 `SetX`）写：
 
 ```csharp
 public class TakePortals : EcsSystem
@@ -798,7 +800,8 @@ public class ArmorBonus : EcsSystem
 ## EECS026 [#eecs026]
 
 **方法没有用到的 `[ForEach]` 参数。** 警告。代码修复：组件改成 `[With<T>]` 过滤条件（已有 `[With<T>]` 或 `[Changed<T>]`
-要求它时直接删掉）；`Entity`、`World`、`EntitySpan`、单例或 `Maybe<T>` 直接删掉。
+要求它时直接删掉）；`Entity`、`World`、`EntitySpan`、单例、`Maybe<T>` 或
+`ReadOnlyMaybe<T>` 直接删掉。
 
 每个参数在每一行或每一遍上都有开销：组件的列要加载、要前进，单例要解析、要作为一次访问参与调度，`Entity` 每行都要构造句柄，
 而且和 `World` 一样会让系统[单独运行](/zh/docs/guide/threading#parallel-systems)。方法只要求实体有某个组件时，用过滤条件表达。
@@ -836,7 +839,8 @@ public class CountSurvivors : EcsSystem
 `[ForEach]` 方法的参数按表或按遍解析一次：组件是循环顺着走的一列，单例是循环开始前取好的 `ref`。通过被访问的 `Entity`
 （`entity.Velocity`、`entity.Has<T>()`、`entity.TryGet<T>(...)`）或 `World`（`World.Clock`）查同样的数据，每一行都要重新查一遍：
 实体记录、所在的表、对应的列。规则只报告每一行都会执行的查询（不在分支、循环里，也不在提前 `return` 之后），并且排除方法自己
-添加或移除的组件和带索引的组件。
+添加或移除的组件。带索引的组件也算在内：`in` 参数或 [`ReadOnlyMaybe<T>`](/zh/docs/guide/systems#read-only-maybe) 读它们，
+既不用逐行查找，也不会产生 EECS015 禁止的写入。
 
 ```csharp doccheck=expect-EECS027
 public class Drift : EcsSystem
@@ -848,7 +852,7 @@ public class Drift : EcsSystem
 ```
 
 把组件作为参数（`in`、`ref`，部分实体没有它时用 `Maybe<T>`；判断有没有某个组件，用 `Maybe<T>` 或者拆成 `[With<T>]` /
-`[Without<T>]` 两个方法），单例也作为参数：
+`[Without<T>]` 两个方法；带索引的组件用 `in` 或 `ReadOnlyMaybe<T>`），单例也作为参数：
 
 ```csharp
 public class Drift : EcsSystem

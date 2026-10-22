@@ -57,8 +57,8 @@ public partial record struct PlayerName(string Value) : IComponent;    // manage
 
 ### Save [#save]
 
-`Save` writes into any `IBufferWriter<byte>`. A `NinoArrayBufferWriter` is written directly; another writer gets a
-copy from the world's own buffer.
+`Save` writes into any `IBufferWriter<byte>`. A `Nino.Core.NinoArrayBufferWriter` is written in place, with no copy
+inside the world; another writer gets the bytes through the world's own buffer and one copy.
 
 ```csharp
 world.CreateEntity(new PlayerName("alice"), new Stock(10, 3));
@@ -67,6 +67,15 @@ world.SetClock(1234);
 var output = new NinoArrayBufferWriter();
 world.Save(output);                                                    // entities, components, singletons // [!code highlight]
 File.WriteAllBytes("world.sav", output.WrittenSpan.ToArray());
+```
+
+A save appends to what the writer holds, so a writer reused for every save is reset first. `WrittenSpan` is the save,
+read in place:
+
+```csharp
+output.ResetWrittenCount();                                            // the next save starts at byte 0
+world.Save(output);
+ReadOnlySpan<byte> saved = output.WrittenSpan;                         // no copy: hand it to a file or a socket
 ```
 
 </Step>
@@ -365,6 +374,7 @@ loaded keeping a singleton (`SnapshotBenchmark`):
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
 | A managed component without `[NinoType]` | `Save` throws `InvalidOperationException` (no formatter) | At run time; leave runtime-only types out with `SaveWithout(output, in exclude)` |
+| Reusing a `NinoArrayBufferWriter` without `ResetWrittenCount()` | The new save is appended after the old one | Code review: reset before each save |
 | A plain `Load` after setting the new configuration | The save's singletons replace it, and one the save lacks is removed | `LoadKeeping(input, in keep)` with the configuration's singletons |
 | A component in the keep set of `Load` | `ArgumentException` | Leave it out of the save instead |
 | A singleton a system needs, left out of the save and never set again | The system throws on its first run | Set it before the load and keep it, or set it after |

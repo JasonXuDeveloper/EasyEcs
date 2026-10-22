@@ -2,7 +2,7 @@
 title: "VoxelServer：仿 Minecraft 的服务器"
 navTitle: VoxelServer
 seoTitle: "C# 仿 Minecraft 体素服务器：EasyEcs 示例"
-description: "用 EasyEcs 写的仿 Minecraft 体素服务器：区块随玩家加载，水流是 SIMD 着色器，一个系统统一管视野，僵尸夜袭，20 TPS。"
+description: "用 EasyEcs 写的仿 Minecraft 体素服务器：区块随玩家加载，水流按 GPU 着色器分趟用 SIMD 计算，视野管理，僵尸夜袭，20 TPS。"
 icon: Box
 ---
 
@@ -16,6 +16,49 @@ import { Boxes, FlaskConical, Network, Save } from 'lucide-react';
 
 它写的是服务器，但里面没有一处只属于服务器：同一个 World 也能放在客户端。客户端跑同样的区块、水和刚体，在服务器的包到达之前先预测；
 每个 tick 之后，渲染层读位置和方块画出来。见[客户端与服务器](#client-and-server)。
+
+## 你会学到 [#what-you-learn]
+
+下面每一项都有单独的一节，附上用到它的代码。
+
+- **一个 tick 分三个组**：输入、模拟、同步各是一个[系统组](/zh/docs/guide/systems#system-groups)，各由自己的
+  `world.Update<TGroup>()` 运行（[一个 tick](#one-tick)）。
+- **一个系统只做一件事**：35 个小系统，每个只响应一份数据（一个标签、一个变了的组件、一个请求实体），再把数据交给下一个；没有系统调用别的系统。
+- **区块是实体，它的状态是存在位**：[唯一索引](/zh/docs/guide/indexes-and-relations#unique-keys)找到某个位置的区块，
+  [动态缓冲](/zh/docs/guide/dynamic-buffers)装它的方块和水，所有区块都来自同一个带全部标签的[预制体](/zh/docs/guide/prefabs)，
+  所以状态变化从不把它搬到另一张表（[区块的一生](#chunks)）。
+- **区块跟着玩家走，并且会存下来**：用 [`SaveEntities` 和 `LoadEntities`](/zh/docs/guide/migration-and-unload)
+  在遍历之后存下一组实体再读回（[区块的一生](#chunks)）。
+- **不轮询的视野管理**：四个系统响应四种变化；谁看得见一个区块通过索引数出来，被销毁的实体在哪里被看见，由一个
+  [清理组件](/zh/docs/guide/cleanup-and-disable)留到它的消失包发出为止（[视野](#aoi)）。
+- **水按 GPU 的方式分趟算**：收集、一个只读自己这一行的并行 SIMD 着色器、提交；模板跳过干的行，缓冲不清零（[水](#water)）。
+- **数据是网格或一列时用 SIMD**：水、高度图，以及[批量方法](/zh/docs/guide/systems#batch-methods)里的火焰伤害（[SIMD](#simd)）。
+- **时间和状态都是数据**：冷却、着火、掉落物的存在时间都是它们结束的 tick；挖掘、死亡、重生都是组件和实体（[掉落物](#items)、[僵尸](#zombies)）。
+- **自动排好序的排行榜**：按挖掘数索引玩家的[有序索引](/zh/docs/guide/indexes-and-relations#ordered-index)（[排行榜](#leaderboard)）。
+- **只下发变了的东西**：[`[Changed<T>]`、`[ChangedAny<..>]`](/zh/docs/guide/change-tracking#changed-any)、
+  [`Maybe<T>` 和 `ReadOnlyMaybe<T>`](/zh/docs/guide/systems#maybe)，以及一次[批量移除](/zh/docs/guide/bulk)（[下发](#replication)）。
+- **停机存档、不分配的缓冲**：[`SaveWithout` 和 `LoadKeeping`](/zh/docs/guide/saves#restart) 写进一个复用的 writer，
+  缓冲池按区块的大小设置（[程序](#program)）。
+- **可测量**：[`MeasureSystems` 和 `DescribeSchedule`](/zh/docs/guide/diagnostics)。
+
+## 思路来自哪里 [#ideas]
+
+这个示例借鉴了三个地方。不了解它们也能读懂代码；下面说明每个在这里指什么。
+
+**原版 Minecraft 服务器。** 游戏逻辑照它来：每秒 20 tick（一个 tick 50 ms）；世界切成 16 x 16 列的区块，玩家周围加载，
+没人在附近时写进*区域文件*；每个区块一张*高度图*（每一列最高的实心方块，所以“这个方块上面是不是天空”只读一次）；
+水位从泉眼往外递减到水流末端的 1；僵尸夜里在 24 格外出现，白天着火。不同之处见[下面](#vanilla)。
+
+**GPU。** 水借用了显卡画图的三个做法：
+
+- *片元着色器*是 GPU 对每个像素运行一次的小函数，所有像素同时算：它从纹理里读像素的邻居，只写自己这个像素。水的一步就是这样一个
+  按方块的函数：一个方块的下一个水位，只由它自己和六个邻居的水位决定，别的都不看，所以 16 个方块走一个 `Vector128<byte>`，
+  各个区块也能在多个线程上跑。
+- *模板（stencil）*是一张遮罩，决定着色器到底在哪些像素上运行。这里一行 16 个方块如果自己、上面和旁边都没有水，就直接跳过：水不可能流进来。
+- *乒乓缓冲*：一趟读一个缓冲、写另一个，然后两者交换，所以没有像素会读到同一趟里已经更新过的邻居。这一步读 `Fluid`、写 `NextFluid`，
+  等所有区块都走完，提交再把它拷回去。和 GPU 的渲染目标一样，两趟之间都不清零：着色器会写满它之后要读的每个纹素。
+
+**面向数据的 ECS。** “谁在谁附近”是一个从格子到其中实体的索引，由移动它们的系统维护；每次状态变化都是另一个系统响应的数据，而不是一次调用。
 
 ## 运行 [#run-it]
 
@@ -34,14 +77,14 @@ flowchart LR
     input[Bot 填 Input]
   end
   subgraph Simulation
-    clock[推进时钟] --> world[加载区块、水流动]
+    clock[推进时钟] --> world[读取和生成区块、水的各趟]
     world --> sight[走、追、重生]
     sight --> move[浮起、物理、网格]
     move --> rules[挖、捡、刷怪、燃烧、僵尸死亡]
-    rules --> unload[存盘并卸载区块]
+    rules --> unload[标记并保存区块]
   end
   subgraph Replication
-    send[视野内的区块、出现、变化]
+    send[视野、区块、出现、变化]
   end
   input --> world
   unload --> send
@@ -56,75 +99,97 @@ flowchart LR
 
 <include lang="csharp" meta='title="Host/Server.cs"'>../../../samples/VoxelServer/Host/Server.cs#tick</include>
 
-组内的系统按添加顺序运行。系统之间不互相调用：每个系统读写组件，下一个系统看到上一个写下的结果。
+组内的系统按添加顺序运行。系统之间不互相调用：每个系统读写组件，下一个系统看到上一个写下的结果。大多数系统只有几行：做两件事的系统就拆成两个。
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#systems</include>
 
 ## 数据 [#data]
 
-先是方块、区块和它的水，然后是会动的东西、玩家、僵尸和掉落物，最后是单例。注释说明每个值的含义和谁来写。区块是实体：它的键 `Chunk` 是
+组件按世界的各个部分分文件。注释说明每个值的含义和谁来写。区块是实体：它的键 `Chunk` 是
 [唯一索引](/zh/docs/guide/indexes-and-relations#unique-keys)（`world.ChunkIndex`），8,192 个方块和对应的水是两个字节缓冲，
-高度图和水的流向是另外两个，由区块从前两个算出来。
+水的各趟把自己的数据也放在它上面（`Border`、`Reach`、`NextFluid`、`FluidStep`）。
 
-<include lang="csharp" meta='title="Components.cs"'>../../../samples/VoxelServer/Components.cs</include>
+<include lang="csharp" meta='tab="区块"'>../../../samples/VoxelServer/Components/Chunks.cs</include>
+
+<include lang="csharp" meta='tab="水"'>../../../samples/VoxelServer/Components/Water.cs</include>
+
+<include lang="csharp" meta='tab="物体"'>../../../samples/VoxelServer/Components/Bodies.cs</include>
+
+<include lang="csharp" meta='tab="玩家"'>../../../samples/VoxelServer/Components/Players.cs</include>
+
+<include lang="csharp" meta='tab="怪物"'>../../../samples/VoxelServer/Components/Mobs.cs</include>
+
+<include lang="csharp" meta='tab="单例"'>../../../samples/VoxelServer/Components/Singletons.cs</include>
 
 时间也是数据：僵尸的 `Cooldown` 和 `Burning` 记着它们结束的 tick，掉落物的 `Dropped` 记着它掉下的 tick，所以没有什么要每个 tick 倒数。
 每个 tick 给每个实体加一减一的值，是系统在白干活；结束的 tick 写一次，到用的时候比较一下就够了。
 
 规则是常量和几个纯函数；地形负责方块的位置、区块的生成，以及所有系统共用的读取。`Nearby` 读取一个物体周围的方块、水和高度图：
-它在唯一索引里查一次物体所在的区块，之后同一区块的方块直接从缓冲读，所以物理每个物体只查一次，而不是每个方块查一次；
-“这个方块上面是不是天空”也只是读高度图的一个字节，不用扫一整列。未加载的区块读出来是石头，所以什么都不会掉出世界。
+它在唯一索引里查一次物体所在的区块，之后同一区块的方块直接从缓冲读，所以物理每个物体只查一次，而不是每个方块查一次。
+未加载的区块读出来是石头，所以什么都不会掉出世界。
 
 <include lang="csharp" meta='tab="Rules.cs"'>../../../samples/VoxelServer/Rules.cs</include>
 
 <include lang="csharp" meta='tab="Terrain.cs"'>../../../samples/VoxelServer/Terrain.cs</include>
 
-## 玩家周围的区块 [#chunks]
+## 区块的一生 [#chunks]
 
-玩家需要的区块由下面的 [`InterestSystem`](#interest) 请求，记成 `LoadRequest` 实体，每个区块一个：请求是 `IUniqueIndexed`，
-第二个要它的玩家能找到它，就不再重复请求。遍历期间不能加载或保存实体（EECS041），所以由 `ChunkReadSystem` 在遍历之后的
-`OnUpdate` 里处理这些请求，每个 tick 最多 `Rules.MaxRequests` 个，只销毁处理过的，其余的等下一个 tick。卸载过的区块用
-`LoadEntities` 从区域文件读回，里面的僵尸和掉落物也一起回来；从没见过的区块就生成，方块和水各用一次 `AddRange` 写进缓冲。
-不管哪种，它都一次拿到以后每个区块都有的东西：`Viewers`；这个 tick 的 `Fresh` 标签（客户端整块收到它，而不是收到方块变化）；
-`Flowing`（它的水走一步）；以及存档里没存的高度图和流向。
+```mermaid
+stateDiagram-v2
+  [*] --> Requested: 视野需要它（LoadRequest）
+  Requested --> Fresh: ChunkReadSystem / ChunkGenerateSystem
+  Fresh --> Loaded: ChunkSentSystem（已整块发送）
+  Loaded --> Unloading: ChunkUnloadSystem（5 秒没人看）
+  Unloading --> [*]: ChunkSaveSystem（区域文件）
+```
+
+每一步是一个系统，每个状态是数据。玩家需要的区块由 [`AoiViewSystem`](#aoi) 请求，记成 `LoadRequest` 实体，每个区块一个：
+请求是 `IUniqueIndexed`，第二个要它的玩家能找到它，就不再重复请求。遍历期间不能加载或创建实体（EECS041），所以
+`ChunkReadSystem` 和 `ChunkGenerateSystem` 在遍历之后的 `OnUpdate` 里处理这些请求，每个 tick 最多 `Rules.MaxRequests` 个，
+只销毁处理过的，其余的等下一个 tick。卸载过的区块用 `LoadEntities` 从区域文件读回，里面的僵尸和掉落物也一起回来；
+从没见过的区块是区块预制体的一个实例，方块通过 `SetCount` 返回的 span 原地写入。
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs#load</include>
 
-区块创建时就带上它以后会有的所有组件和标签，`Flowing` 也在内，这是有原因的：表里已经有列的组件，来去只是翻一个
-[存在位](/zh/docs/guide/structural-changes#during-a-pass)，区块留在原来的表里。第一次加上的标签会把实体搬到另一张表，
-而遍历不会访问开始之后才加入匹配表的实体：一个系统要是唤醒正在访问的区块旁边的区块，遍历就会漏掉其中一些。
+每个区块都是同一个预制体的实例，这个预制体带着区块以后会有的所有组件和标签，标签处于不存在状态。所以所有区块共用一张表，
+读回的区块也一样（它的存档保留了这些列），`Fresh`、`Flowing`、`Unloading` 的来去只是翻[存在位](/zh/docs/guide/structural-changes#during-a-pass)：
+区块从不搬到另一张表。这不只是省一次搬动的开销：遍历不会访问开始之后才加入匹配表的实体，一个系统要是唤醒正在访问的区块旁边的区块，
+遍历就会漏掉其中一些。
 
-卸载是反过来的同一套做法。区块的 `Viewers` 记着视野里有它的玩家数，由 `InterestSystem` 随视野变化增减，并记下它最近一次归零的 tick。
+<include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#prefabs</include>
+
+卸载是反过来的同一套做法。区块的 `Viewers` 记着视野里有它的玩家数，由视野系统维护，并记下它最近一次归零的 tick。
 `Slices = 20` 让每个 tick 检查二十分之一的区块，五秒都没人看着的打上 `Unloading` 标签；`ChunkSaveSystem` 再把每个区块连同其中的实体
-写成一条记录并销毁，所以没有玩家的地方什么都不跑。`SaveEntitiesWithout` 不存高度图和流向，加载后的区块会重新算。
-有玩家站着的区块（比如刚在那里重生的玩家）不会卸载。区域文件是一个装着类的单例；
+写成一条记录并销毁，所以没有玩家的地方什么都不跑。有玩家站着的区块（比如刚在那里重生的玩家）不会卸载。区域文件是一个装着类的单例；
 [`Host/RegionFiles.cs`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/VoxelServer/Host/RegionFiles.cs)
 代替磁盘，用的是从共享 `ArrayPool` 租来的数组。
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs#unload</include>
 
-## 每个客户端拥有什么 [#interest]
+## 视野 [#aoi]
 
-客户端拥有它的玩家周围那个正方形里已加载的区块，以及其中的实体。两者是同一件事：兴趣（interest），由一个系统 `InterestSystem` 维护。
-视野是以玩家的 `ViewCenter` 为中心的一个正方形区块范围，所以它是一个值，不是一串区块；不管发生什么，客户端多出和少掉的
-都是两个正方形的差：走进下一个区块是一行宽的一条区块，重生则是整个正方形。
+*视野*（area of interest，AOI）是告诉客户端的范围：这里是它的玩家周围那个正方形里已加载的区块，以及其中的实体。视野是以玩家的
+`ViewCenter` 为中心的一个正方形区块范围，所以它是一个值，不是一串区块；不管发生什么，客户端多出和少掉的都是两个正方形的差：
+走进下一个区块是一行宽的一条区块，重生则是整个正方形。四个系统响应四种变化：
 
-| 发生了什么 | 客户端收到什么 | 方法 |
+| 发生了什么 | 客户端收到什么 | 系统 |
 | --- | --- | --- |
-| 玩家跨进另一个区块，或出现 | 多出的那条区块整块发送，带着其中的实体（没加载的记成 `LoadRequest`）；少掉的那条让客户端忘掉 | `Look`，`[With<Player>, Changed<InChunk>]` |
-| 实体跨进另一个区块，或刚被创建 | 看得见新区块、看不见旧区块的玩家收到出现包，反过来的收到消失包 | `Moved`，`[Changed<InChunk>]` |
-| 一个区块加载完 | 区块和其中的实体，发给周围的玩家 | `Loaded`，`[With<Fresh>]` |
-| 实体被销毁，玩家离开 | 看得见它所在区块的玩家收到消失包；离开的玩家的视野被释放 | `Gone` 和 `Left`，`[With<Retired>]` |
+| 玩家跨进另一个区块，或出现 | 多出的那条区块整块发送，带着其中的实体（没加载的记成 `LoadRequest`）；少掉的那条让客户端忘掉 | `AoiViewSystem`，`[With<Player>, Changed<InChunk>]` |
+| 玩家离开 | 它的视野被释放 | `AoiViewSystem`，`[With<Retired>]` |
+| 一个区块加载完 | 区块和其中的实体，发给周围的玩家 | `AoiChunkSystem`，`[With<Fresh>]` |
+| 实体跨进另一个区块，或刚被创建 | 看得见新区块、看不见旧区块的玩家收到出现包，反过来的收到消失包 | `AoiSpawnSystem`，`[Changed<InChunk>]` |
+| 实体被销毁 | 看得见它所在区块的玩家收到消失包 | `AoiDespawnSystem`，`[With<Retired>]` |
 
 谁看得见一个区块是数出来的，从不搜索：每个玩家的视野都是 `Rules.PlayerVision`，所以看得见一个区块的玩家，就是以它为中心的正方形里的
-视野中心；`ViewCenter` 带索引，`world.ViewCenterIndex.Count(chunk)` 以 O(1) 数出中心落在某个区块的玩家。一次跨区块只访问两个正方形之间
-的那一条，五个区块，每个区块的 `Viewers` 跟着增减，每个 tick 都准确。待在原区块的实体和玩家在这里没有任何开销，不管过多少个 tick。
+视野中心；`ViewCenter` 带索引，`world.ViewCenterIndex.Count(chunk)` 以 O(1) 数出中心落在某个区块的玩家。待在原区块的实体和玩家
+在这里没有任何开销，不管过多少个 tick。刚出现的玩家还没有 `ViewCenter`：[`ReadOnlyMaybe<ViewCenter>`](/zh/docs/guide/systems#maybe)
+在有的时候读它，而且和 `Maybe<T>` 不同，它只能读，所以这个带索引的组件从不被打 tick。
 
-<include lang="csharp" meta='title="Systems/Interest.cs"'>../../../samples/VoxelServer/Systems/Interest.cs#interest</include>
+<include lang="csharp" meta='title="Systems/Aoi.cs"'>../../../samples/VoxelServer/Systems/Aoi.cs#aoi</include>
 
 每种变化本来就是数据。`InChunk` 是一个带索引的组件，挂在所有会动的东西上，所以 `world.InChunkIndex.Find(chunk)` 列出一个区块里的实体，
 `Count(chunk)` 数出它们。`GridSystem` 让它保持最新：`[Changed<Position>]` 只访问这个 tick 移动过的实体，`SetInChunkIfChanged`
-只在实体跨进另一个区块时才写，所以 `InterestSystem` 和所有响应 `[Changed<InChunk>]` 的系统每秒只看到几次跨区块，而不是每个 tick 都有。
+只在实体跨进另一个区块时才写，所以响应 `[Changed<InChunk>]` 的系统每秒只看到几次跨区块。
 
 <include lang="csharp" meta='title="Systems/Movement.cs"'>../../../samples/VoxelServer/Systems/Movement.cs#grid</include>
 
@@ -132,44 +197,52 @@ flowchart LR
 [清理组件](/zh/docs/guide/cleanup-and-disable)：销毁带清理组件的实体时，实体会退休而不是消失，只留下清理组件，直到某个系统去掉最后一个。
 `ViewCenter` 也是清理组件，所以离开的玩家会一直处于退休状态，直到它的视野被释放。
 
-僵尸在自己的 `Vision` 范围内追人，35 格（Minecraft 里它的追踪距离）：每个预制体设置自己的，视野更远的 Boss 只是多一个预制体，不用写新代码。
-
-<include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#prefabs</include>
-
-`ZombieTargetSystem` 通过视野中心的索引找最近的玩家（这个索引里只有玩家），只要玩家还在范围内就一直追它，就像原版的怪物保留目标一样。它每秒看两次，
-每个 tick 只看十分之一的僵尸（`Slices`），所以尸潮再大，每个 tick 的开销也一样。
+`ZombieTargetSystem` 用同一个索引找目标：僵尸 `Vision` 范围内最近的玩家（每个预制体设置自己的范围），从它自己的区块一圈一圈往外走，
+走到不可能有更近玩家的那一圈就停。它每秒看两次，每个 tick 只看十分之一的僵尸（`Slices`），所以尸潮再大，每个 tick 的开销也一样。
 
 <include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#target</include>
 
-在 ECS 里，“谁在谁附近”的常规答案是一个从格子到其中实体的索引，由移动它们的系统维护，由需要邻居的系统读取。
-这里的格子是区块，因为区块本来就是加载的单位，也是客户端拥有的单位。
-
 ## 水 [#water]
 
-水不是一种方块，而是方块旁边的第二个网格：每个方块一个字节的 `DynamicBuffer<Fluid>`。方块一变，不管是谁改的，`BlockUpdateSystem`
-都会从方块缓冲的变化看到，所以挖掘本身不用知道水，也不用知道天空。它先算区块的高度图，16 个向量，每个 16 列：从下往上，
-每一层把方块实心的通道改写成这一层的高度，32 层走完，每个通道就是它那一列的顶，没有分支。然后唤醒这个区块和四个邻居的水（`Flowing`）。
+水不是一种方块，而是方块旁边的第二个网格：每个方块一个字节的 `DynamicBuffer<Fluid>`，布局与方块相同。规则是 Minecraft 的简化版
+（两个泉眼之间不会生出新水源，水向四面扩散而不是流向最近的落差）：水下面的空格变成下落的水；水旁边、脚下踩着实心方块的空格，
+水位比它低一级；其余的都变空，所以泉眼没了水就会退。
+
+它像 GPU 画图一样分趟运行（见[思路来自哪里](#ideas)），而且只在打了 `Flowing` 标签、水还可能动的区块上跑：静止的湖在被唤醒之前不会再被访问。
+
+```mermaid
+flowchart LR
+  wake[WaterWakeSystem：方块变了，Flowing] --> border[WaterBorderSystem：收集四周的边，Reach]
+  border --> flow[WaterFlowSystem：着色器，并行，写入 NextFluid]
+  flow --> sleep[WaterSleepSystem：什么都没动，休眠]
+  flow --> commit[WaterCommitSystem：NextFluid 写回 Fluid，唤醒边上的区块]
+  commit -.-> border
+```
+
+**唤醒。** 方块一变，不管是谁改的，都会从方块缓冲的变化看到（`[Changed<DynamicBuffer<Block>>]`），所以挖掘本身不用知道水，也不用知道天空。
+有两个系统响应它：`HeightMapSystem` 算出区块的高度图，16 个向量，每个 16 列：从下往上，每一层把方块实心的通道改写成这一层的高度，
+32 层走完，每个通道就是它那一列的顶，没有分支；`WaterWakeSystem` 给这个区块和四个邻居打上 `Flowing`。
 
 <include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#wake</include>
 
-规则是 Minecraft 的简化版（两个泉眼之间不会生出新水源，水向四面扩散而不是流向最近的落差）：水下面的空格变成下落的水；水旁边、脚下踩着实心方块的空格，水位比它低一级；其余的都变空，所以泉眼没了水就会退。
-它照片元着色器的写法写：`Shade` 只从一个方块自己和六个邻居的水位算出它的下一个水位，别的都不看；一次算 16 个方块，即区块的一行，
-一个 `Vector128<byte>`。
+**各趟。** `WaterBorderSystem` 从四周的区块收集这一步需要的东西：每个邻居朝向这边的那条边写进区块的 `Border` 缓冲，以及要算的层
+（`Reach`，由各区块的 `FluidCount` 得出，不用搜索）。然后 `WaterFlowSystem` 就是着色器：它把区块的各层和边复制进栈上一张带填充的纹理，
+每层外面多一圈一格宽的方块，所以循环采样邻居没有边界情况；每行 16 个方块用一个 `Vector128<byte>` 算。它只读自己这一行的组件，
+不持有 `World`，所以是[并行方法](/zh/docs/guide/systems#parallel-methods)。字节通道是整数运算：每台机器上的水都一样。
 
-为什么按区块算，而不是整个世界一个网格？水随区块加载、存档和下发，而且只有还可能变的区块才走一步：静止的湖不会再被访问。
-所以着色器运行之前，先把区块复制进一张带填充的纹理：它的水和方块，外加四周区块一格宽的一圈，着色器采样这张纹理就没有边界情况。
-只复制和计算水够得着的那几层（两次向量化搜索 `IndexOfAnyExcept` 找出它们）。字节通道是整数运算：每台机器上的水都一样。
+不必清零的都不清零。模板跳过自己、上面和旁边都没有水的行，直接写零。纹理是 `[SkipLocalsInit]` 下的 `stackalloc`：填充会写满循环要采样的每个纹素。
+`NextFluid` 在两步之间保留它的长度，所以 `SetCount` 既不分配也不清零；这一步不算的层本来就是零：之前的各步只在这一步的范围覆盖的层上写过水。
 
-这一步写进第二个缓冲 `NextFluid`，就像 GPU 交替使用两个缓冲；等所有区块都走完，`WaterCommitSystem` 再把它拷成水：
-每个区块都用邻居这一步之前的水来算，与区块的访问顺序无关。同一次遍历还写下每个方块的 `Current`，即水朝周围更低的水倾斜的方向，
-存成两层字节；并数出区块里的水（`FluidCount`，一次向量化的 `Count`）。两个缓冲都原地写：`SetCount` 定好大小，着色器直接写
-`AsSpan()`，不用从栈上拷贝。一步下来什么都没变，就去掉 `Flowing`。
+这一步的结果是数据 `FluidStep`：`WaterSleepSystem` 把水什么都没动的区块移出各趟，用 `TrimExcess` 把它们的临时缓冲（`NextFluid`、`Border`）
+还给缓冲池，所以只有还在流动的区块持有它们；它在提交之前运行，所以同一步里刚静下来的区块，仍会被水流到它这里的邻居唤醒。
+`WaterCommitSystem` 等所有区块都走完这一步，再把结果拷成水（每个区块都用邻居这一步之前的水来算，与区块的访问顺序无关），
+更新 `FluidCount`，并唤醒变化的边旁边的区块。
 
 <include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#flow</include>
 
-`FloatSystem` 把站在水里的东西（玩家、僵尸和掉落物）托起来，顺着所在方块的流向推走，水位越低推得越弱：泉眼旁边或下落的水里是全力，
-水流末端只有八分之一。它遍历区块，按 `FluidCount` 跳过干的区块，其余的通过按区块索引的实体找到其中的物体，所以物体所在区块的水
-就是循环自己这一行：读一次水位、一次流向，不用查找。
+`FloatSystem` 把站在水里的东西（玩家、僵尸和掉落物）托起来，顺着水面的坡度推向周围更低的水，水位越低推得越弱：泉眼旁边或下落的水里是全力，
+水流末端只有八分之一。它遍历区块，按 `FluidCount` 跳过干的区块，其余的通过按区块索引的实体找到其中的物体，所以物体所在方块的水
+就是循环自己这一行。
 
 <include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#float</include>
 
@@ -181,18 +254,18 @@ flowchart LR
 
 物理让每个物体在方块间移动，通过 `Mut<Position>` 写位置：`SetIfChanged` 只在位置变了时才给这一行打 tick，所以站着不动的物体不会被下发。
 静止的物体（站在地上、没有速度、脚下仍有地面）查一次方块就跳过。它留在单线程，因为它通过 `World`（区块索引）读方块，
-而并行方法不能持有 World（EECS010）。水和浮起也一样，它们读周围的区块。
+而并行方法不能持有 World（EECS010）。
 
 <include lang="csharp" meta='title="Systems/Movement.cs"'>../../../samples/VoxelServer/Systems/Movement.cs#physics</include>
 
 ## 挖掘与掉落物 [#items]
 
 挖一下，方块变成空气和一个掉落物（像 Minecraft 一样，草变成泥土），挖的人 `Score` 加一（见[排行榜](#leaderboard)）。
-缓冲通过 `chunk.Block[slot]` 读、`chunk.WriteBlock()` 写，所以只有挖掘会给区块打 tick，周围的水也是通过这次打 tick 被唤醒的。
+缓冲通过 `chunk.Block[slot]` 读、`chunk.WriteBlock()` 写，所以只有挖掘会给区块打 tick，周围的水和高度图都随这次打 tick 更新。
 
 <include lang="csharp" meta='title="Systems/Items.cs"'>../../../samples/VoxelServer/Systems/Items.cs#dig</include>
 
-过了拾取延迟，掉落物归站在它上面的任何玩家，通过视野中心的索引找到。同类的堆先长满，空格子装剩下的，装不下的留在地上。
+过了拾取延迟，掉落物归站在它上面的任何玩家，通过它的拾取范围碰到的区块的视野中心索引找到。同类的堆先长满，空格子装剩下的，装不下的留在地上。
 先读背包再写，所以背包满了不会被打 tick。掉落物记着它掉下的 tick（`Dropped`），这个组件带有序索引，所以 `ItemExpirySystem`
 用 `DroppedIndex.Range(...)` 从最早的掉落物开始走，遇到第一个还没到期的就停：一个 tick 只访问到期的掉落物，而不是所有掉落物。
 
@@ -213,16 +286,17 @@ flowchart LR
 
 <include lang="csharp" meta='tab="攻击"'>../../../samples/VoxelServer/Systems/Zombies.cs#attack</include>
 
-着火也是数据：`SunlightSystem` 给白天露天的僵尸加上 `Burning`，烧到稍晚的某个 tick 为止（头上是不是天空由高度图回答），
-在水里则去掉；`FireDamageSystem` 每 `Rules.BurnEvery` 个 tick 扣一次血（它的 `UpdateInterval`），`ExtinguishSystem` 去掉到了结束 tick 的火。
-扣血单独成一个系统，是因为 `Health` 被追踪，而批量方法会给它写的整段行打 tick：只在扣血的 tick 写，下面的死亡系统在其他 tick 就无事可做。
+着火是三个系统，各做一件事，都按火的节奏运行（`UpdateInterval = Rules.BurnEvery`）：`SunlightSystem` 白天给露天的僵尸加上 `Burning`
+（头上是不是天空由高度图回答），`FireDamageSystem` 给着火的扣血，`ExtinguishSystem` 熄灭烧完的或走进水里的火。`Burning` 在僵尸预制体里，
+所以着火只是翻一个存在位。扣血单独成一个系统，是因为 `Health` 被追踪，而批量方法会给它写的整段行打 tick：只在扣血的 tick 写，
+下面的死亡系统在其他 tick 就无事可做。
 
 <include lang="csharp" meta='tab="日照"'>../../../samples/VoxelServer/Systems/Zombies.cs#sunlight</include>
 
 <include lang="csharp" meta='tab="燃烧"'>../../../samples/VoxelServer/Systems/Zombies.cs#burn</include>
 
 死亡就是 `Health` 归零，每种实体一个系统处理：僵尸消失，玩家把背包掉在原地然后重生。`Health` 是 `ITracked`，所以两个系统都用
-`[Changed<Health>]`，只访问上次运行以来被写过的血量，也就是刚被打或被烧的实体，而不是每个 tick 遍历所有实体。`Mut<T>` 只为重生的玩家写血量、位置和背包。
+`[Changed<Health>]`，只访问上次运行以来被写过的血量。`Mut<T>` 只为重生的玩家写血量、位置和背包。
 
 <include lang="csharp" meta='title="Systems/Health.cs"'>../../../samples/VoxelServer/Systems/Health.cs</include>
 
@@ -230,21 +304,18 @@ flowchart LR
 
 这个服务器里有三种数据适合 SIMD：
 
-- **带着色器的网格**：就是上面的水。每个方块的下一个水位和流向都是它邻居的同一个函数，网格又是字节缓冲，所以一条指令算 16 个方块。
-- **沿一个轴归约的网格**：高度图，256 列各自的顶，一条指令算 16 列，每层一次 `ConditionalSelect`，没有分支。
-- **一列相同的变化**：火焰伤害（按它自己的 [`UpdateInterval`](/zh/docs/guide/systems#update-interval)）给每只着火的僵尸扣一点血。
-  [批量方法](/zh/docs/guide/systems#batch-methods)把一段连续的行当成 span 拿到，`Vector<int>` 在 AVX2 上一条指令改
-  8 个（Arm 上 4 个）。JIT 不会自己把这些循环向量化，所以方法里手写；整数通道在每台机器上结果都一样。
-
-搜索和计数字节由 .NET 自己向量化：`IndexOfAnyExcept` 找出有水的层，`Count` 数出一个区块里的水。计时器不在其中：冷却、
-掉落物的存在时间和着火都是它们结束的 tick，所以根本没有要倒数的列，向量化与否都谈不上。
+- **带着色器的网格**：就是上面的水。每个方块的下一个水位都是它邻居的同一个函数，网格又是字节缓冲，所以一条指令算 16 个方块。
+- **沿一个轴归约的网格**：高度图，256 列各自的顶，一条指令算 16 列，每层一次 `ConditionalSelect`，没有分支。它的 256 个字节要改写 32 次，
+  所以放在栈上，最后一次拷进缓冲：直接在缓冲的数组上读写 32 次要慢一个数量级。
+- **一列相同的变化**：火焰伤害给每只着火的僵尸扣一点血。[批量方法](/zh/docs/guide/systems#batch-methods)把一段连续的行当成 span 拿到，
+  `Vector<int>` 在 AVX2 上一条指令改 8 个（Arm 上 4 个）。JIT 不会自己把这些循环向量化，所以方法里手写；整数通道在每台机器上结果都一样。
 
 其他系统对每个实体做的事都不一样：物理查每个物体周围的方块，找目标遍历索引，追击读另一个实体的位置。查找加分支的循环用向量帮不上忙，
-而位置是 `Vector3`，三个挨着的 float，不是三列。批量方法也只在一个线程上跑（EECS010），提速靠的是向量循环，不是多线程。
+而位置是 `Vector3`，三个挨着的 float，不是三列。
 
 ## 自动排好序的排行榜 [#leaderboard]
 
-`Score` 是玩家挖的方块数，一个 `IIndexed<int>`（见[数据](#data)），所以 `world.ScoreIndex` 是按分数索引玩家的[有序索引](/zh/docs/guide/indexes-and-relations#ordered-index)。键可比较，
+`Score` 是玩家挖的方块数，一个 `IIndexed<int>`，所以 `world.ScoreIndex` 是按分数索引玩家的[有序索引](/zh/docs/guide/indexes-and-relations#ordered-index)。键可比较，
 所以索引能按顺序遍历：`Descending()` 从挖得最多的人开始。`DigSystem` 写分数时索引就保持有序，所以榜首只是走三项，从不对所有玩家排序。
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#leaderboard</include>
@@ -255,7 +326,8 @@ flowchart LR
 
 变了的区块来自
 [`[ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]`](/zh/docs/guide/change-tracking#changed-any)：只有自系统上次运行以来方块或水变了的区块，
-才会发给视野里有它的玩家（它的 `Viewers`）。
+才会发给视野里有它的玩家（它的 `Viewers`）。`Fresh` 区块已经整块发过；之后 `ChunkSentSystem` 用一次[批量调用](/zh/docs/guide/bulk)
+`World.RemoveAll<Fresh>()` 清掉所有区块的这个标签，一次处理一整个字的存在位。
 
 <include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/VoxelServer/Systems/Replication.cs#chunks</include>
 
@@ -268,7 +340,8 @@ flowchart LR
 
 ## 程序 [#program]
 
-World 和它的选项：[`MeasureSystems`](/zh/docs/guide/diagnostics) 用来计时（`--schedule` 打印 `DescribeSchedule`）；缓冲池大到能放下一个区块的方块、水、高度图和流向，所以新加载的区块能复用卸载区块的列表。
+World 和它的选项：[`MeasureSystems`](/zh/docs/guide/diagnostics) 用来计时（`--schedule` 打印 `DescribeSchedule`）；
+[缓冲池](/zh/docs/guide/dynamic-buffers#what-it-costs)大到能放下一个区块的缓冲，所以新加载的区块复用卸载区块的列表，刚唤醒的区块复用刚静下来的区块的列表。
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#options</include>
 
@@ -277,27 +350,28 @@ World 和它的选项：[`MeasureSystems`](/zh/docs/guide/diagnostics) 用来计
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#players</include>
 
-停机时存档，但不存预制体和区域文件，它们每次启动都会重新设置（[`SaveWithout`](/zh/docs/guide/saves#restart)）；重启的 World 先设置好它们，再把存档读进来（`LoadKeeping`）。
+停机时存档，但不存预制体和区域文件，它们每次启动都会重新设置（[`SaveWithout`](/zh/docs/guide/saves#restart)）；重启的 World 先设置好它们，
+再把存档读进来（`LoadKeeping`）。存档写进一个 `NinoArrayBufferWriter`，`Save` 直接在里面写，不再拷贝；经常存档的服务器留一个反复用。
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#save</include>
 
 ## 输出 [#output]
 
 ```text
-tick   200 (day  ): 50 players, 84 chunks, 3482 water, 0 zombies, 68 items
-tick   400 (night): 50 players, 109 chunks, 4679 water, 45 zombies, 120 items
-tick   600 (day  ): 50 players, 138 chunks, 9356 water, 131 zombies, 141 items
-tick   800 (day  ): 50 players, 123 chunks, 8975 water, 9 zombies, 114 items
-tick  1000 (night): 50 players, 138 chunks, 10207 water, 45 zombies, 102 items
-tick  1200 (day  ): 50 players, 135 chunks, 10088 water, 124 zombies, 92 items
-chunks: 166 generated, 67 unloaded, 36 loaded back
-blocks dug: 646; items: 374 picked up, 251 expired
-zombies: 252 spawned, 126 burned, 422 hits; player deaths: 46
-water: 13925 cells filled, 15974 ticks of bodies carried
-view: 4250 chunks sent, 3000 forgotten; 44386 entities came into view, 13223 left it, 23077 despawned
-sent: 36135 block updates, 2953644 entity updates (51340 KiB)
-top diggers: player 37 (24) player 34 (20) player 26 (20)
-restarted from the save: 50 players, 135 chunks, 10088 water, 124 zombies; 31 chunks in the region files
+tick   200 (day  ): 50 players, 84 chunks, 3483 water, 0 zombies, 69 items
+tick   400 (night): 50 players, 107 chunks, 4688 water, 45 zombies, 110 items
+tick   600 (day  ): 50 players, 131 chunks, 8914 water, 129 zombies, 131 items
+tick   800 (day  ): 50 players, 124 chunks, 9586 water, 4 zombies, 117 items
+tick  1000 (night): 50 players, 137 chunks, 9500 water, 40 zombies, 114 items
+tick  1200 (day  ): 50 players, 134 chunks, 10154 water, 126 zombies, 98 items
+chunks: 163 generated, 64 unloaded, 35 loaded back
+blocks dug: 664; items: 405 picked up, 251 expired
+zombies: 255 spawned, 129 burned, 456 hits; player deaths: 55
+water: 13221 cells filled, 16079 ticks of bodies carried
+view: 4351 chunks sent, 3101 forgotten; 45566 entities came into view, 13391 left it, 24094 despawned
+sent: 37090 block updates, 2954333 entity updates (51310 KiB)
+top diggers: player 37 (24) player 8 (24) player 35 (22)
+restarted from the save: 50 players, 134 chunks, 10154 water, 126 zombies; 29 chunks in the region files
 ```
 
 世界、泉眼、bot 和刷怪都来自整数哈希，所以每次运行输出都一样。bot 往外走，区块越来越多；留在身后的区块存进区域文件，
@@ -321,7 +395,9 @@ bot 回来时再读回。耗时打印到 stderr：平均 tick 与 50 ms 预算�
   还要在附近每次跨区块时都改写：一千人的人群里，每次跨区块就要改一千份。视野中心和索引以 O(1) 数出同样的东西。
 - **每个计时器一个计数器**。冷却、着火或掉落物的存在时间每个 tick 倒数一次，就是每个实体每个 tick 写一次；结束的 tick 只写一次，
   有序索引还能找出到期的掉落物，不用访问其他的。
-- **并行的物理、水和找目标**。它们通过 World 的索引读数据，见[移动](#movement)。
+- **并行的物理和找目标**。它们通过 World 的索引读数据，而并行方法不能持有 World（EECS010）。物理试过带着自己的区块查找放到多个线程上，
+  测下来并不更快：它的时间花在查找和分支上，多几个核也缩短不了。水能并行，是因为它的着色器只读自己这一行。
+- **给碰撞用的实心方块模板**。每个方块一位能让物理几次读取就测完一个包围盒，但每个 tick 维护这张遮罩的开销比它省下的方块读取还多：一个物体只读几个方块。
 
 ## 客户端与服务器 [#client-and-server]
 

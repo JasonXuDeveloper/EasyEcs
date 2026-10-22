@@ -25,9 +25,13 @@ major or minor version that needs code changes? The
   a tracked component (`ITracked`, `DynamicBuffer<T>`) by `ref` and leaves it unwritten on some path (an early
   `return`, a write inside an `if`) stamps every row it visits, so `[Changed<T>]` systems see rows it never changed.
   The fix takes it as a `Mut<T>` (writes `x.Write()`, reads `x.Value`), which stamps only the rows written.
-- `buffer.SetCount(n)` sets the number of elements of a `DynamicBuffer<T>`, the added ones `default`, so a whole buffer
-  is written in place through `AsSpan()` instead of filled on the stack and copied in with `AddRange`. See
-  [dynamic buffers](/en/docs/guide/dynamic-buffers).
+- `buffer.SetCount(n)` sets the number of elements of a `DynamicBuffer<T>`, the added ones `default`, and returns the
+  span to write, so a whole buffer is written in place instead of filled on the stack and copied in with `AddRange`.
+  See [dynamic buffers](/en/docs/guide/dynamic-buffers#set-count).
+- `ReadOnlyMaybe<T>`, a `[ForEach]` parameter of a component the entity may lack that the method only reads: `Value` is
+  `ref readonly`, a tracked component is never stamped, and an indexed component may be taken (EECS015 accepts it, a
+  `Maybe<T>` of one is still an error). A `Maybe<T>` converts to it. See
+  [systems](/en/docs/guide/systems#read-only-maybe).
 - `world.SaveEntitiesWithout(output, ids, set)` saves a group of entities with every component but those of a
   `ComponentSet`: the data they compute again after a load stays out of the save. See
   [migration and unloading](/en/docs/guide/migration-and-unload#records).
@@ -40,6 +44,19 @@ major or minor version that needs code changes? The
 - An empty buffer of a prefab (`SetBuffer<T>()` with no elements) gives its instances no list: their first element
   takes one from the pool instead of growing a new one.
 - `LoadEntities` hands each loaded entity the list its buffer was read into, instead of copying it into another.
+- `buffer.TrimExcess()` on an empty buffer gives its list back to the pool: the buffer holds no list, and the next first
+  write of any buffer of `T` reuses it, so scratch buffers used only while an entity is active hold no memory in
+  between. See [dynamic buffers](/en/docs/guide/dynamic-buffers#what-it-costs).
+
+### Changes that need code changes [#v4-8-0-breaking]
+
+- Analyzer rule [EECS027](/en/docs/guide/analyzer#eecs027) also reports per-row lookups of indexed components
+  through the visited `Entity`; take an `in` parameter, or a `ReadOnlyMaybe<T>` when some entities lack it. A build
+  that treats warnings as errors sees it: see the [migration guide](/en/docs/migration#v4-8-analyzer).
+- Analyzer rule [EECS030](/en/docs/guide/analyzer#eecs030) also reports a `[ForEach]` method whose whole body is one
+  structural change of its entity, the same for every row (`[ForEach, With<Dead>] static void Bury(Entity e) =>
+  e.Destroy();`): one bulk call in `OnUpdate` (`World.DestroyAll<Dead>()`) changes each table at once
+  ([migration guide](/en/docs/migration#v4-8-analyzer)).
 
 ## 4.7.0 [#v4-7-0]
 

@@ -97,10 +97,10 @@ Remove the element at `index` by moving the last one into its place. O(1).
 ### `SetCount` [#setcount]
 
 ```csharp
-public static void SetCount<T>(this ref DynamicBuffer<T> buffer, int count);
+public static Span<T> SetCount<T>(this ref DynamicBuffer<T> buffer, int count);
 ```
 
-Set the number of elements to `count`: elements past it are removed, elements added are `default`, so a system can write a whole buffer in place through [`DynamicBufferExtensions.AsSpan`](/en/docs/reference/dynamicbufferextensions#asspan) instead of filling a span and copying it in (`CollectionsMarshal.SetCount` of a list, with the new elements cleared). O(elements added or removed); allocates only when the list grows.
+Set the number of elements to `count`: elements past it are removed, elements added are `default`, so a system writes a whole buffer in place through the span returned instead of filling a span and copying it in (`CollectionsMarshal.SetCount` of a list, with the new elements cleared). The span is [`DynamicBufferExtensions.AsSpan`](/en/docs/reference/dynamicbufferextensions#asspan): valid until the buffer's next change of count or capacity. O(elements added or removed); allocates only when the list grows.
 
 **Complexity** ([API table](/en/docs/api)): O(elements added or removed)
 
@@ -110,6 +110,6 @@ Set the number of elements to `count`: elements past it are removed, elements ad
 public static void TrimExcess<T>(this ref DynamicBuffer<T> buffer);
 ```
 
-Shrink the capacity to the count, so a list that once grew large stops holding its peak (the list's array is reallocated; an empty list holds none). O(count).
+Shrink the capacity to the count, so a list that once grew large stops holding its peak (the list's array is reallocated). An empty buffer gives its list back to the pool its first writes take lists from, so a buffer used only now and then (scratch space while an entity is active) holds no memory in between and the next first write of any buffer of `T` reuses it. O(count).
 
 **Complexity** ([API table](/en/docs/api)): O(count)

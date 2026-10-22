@@ -97,10 +97,10 @@ public static void RemoveAtSwapBack<T>(this ref DynamicBuffer<T> buffer, int ind
 ### `SetCount` [#setcount]
 
 ```csharp
-public static void SetCount<T>(this ref DynamicBuffer<T> buffer, int count);
+public static Span<T> SetCount<T>(this ref DynamicBuffer<T> buffer, int count);
 ```
 
-把元素个数设为 `count`：多出的元素去掉，新增的元素为 `default`，于是系统可以通过 [`DynamicBufferExtensions.AsSpan`](/zh/docs/reference/dynamicbufferextensions#asspan) 直接写整个缓冲，不用先填好一个 span 再复制进去（相当于列表的 `CollectionsMarshal.SetCount`，只是新增的元素会清零）。O(增加或去掉的元素数)；只有列表扩容时分配。
+把元素个数设为 `count`：多出的元素去掉，新增的元素为 `default`，于是系统通过返回的 span 原地写整个缓冲，不用先填好一个 span 再复制进去（相当于列表的 `CollectionsMarshal.SetCount`，只是新增的元素会清零）。返回的 span 就是 [`DynamicBufferExtensions.AsSpan`](/zh/docs/reference/dynamicbufferextensions#asspan)：在缓冲下一次改变元素个数或容量之前有效。O(增加或去掉的元素数)；只有列表扩容时分配。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(增加或去掉的元素数)
 
@@ -110,6 +110,6 @@ public static void SetCount<T>(this ref DynamicBuffer<T> buffer, int count);
 public static void TrimExcess<T>(this ref DynamicBuffer<T> buffer);
 ```
 
-把容量缩到和元素数一样，曾经涨得很大的列表就不会一直占着峰值时的内存（列表的数组会重新分配；空列表不占数组）。O(count)。
+把容量缩到和元素数一样，曾经涨得很大的列表就不会一直占着峰值时的内存（列表的数组会重新分配）。空缓冲会把列表还给首次写入取列表的那个池：偶尔才用的缓冲（实体活跃时的临时空间）空闲期间不占内存，任何 `T` 缓冲的下一次首次写入会重用这个列表。O(count)。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(count)

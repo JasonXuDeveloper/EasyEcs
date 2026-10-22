@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.Maybe`1" source="f5dd430b2497">
     <summary>
@@ -19,5 +19,9 @@
   </member>
   <member name="P:EasyEcs.Maybe`1.Value" source="98d323ab6d42">
     <summary>按 <c>ref</c> 返回组件；实体没有它时抛异常（先检查 <see cref="P:EasyEcs.Maybe`1.HasValue" />）。</summary>
+  </member>
+
+  <member name="M:EasyEcs.Maybe`1.op_Implicit(EasyEcs.Maybe{`0})~EasyEcs.ReadOnlyMaybe{`0}" source="2f2c7766b709">
+    <summary>同一个组件的只读版本：传给 <see cref="T:EasyEcs.ReadOnlyMaybe`1" /> 参数的就是它。</summary>
   </member>
 </doc>

@@ -188,6 +188,7 @@ public class HungerSystem : EcsSystem
 | `Entity` | 当前实体，用来做结构变更和查找 |
 | `World` | World 本身（创建实体、访问其他单例） |
 | [`Maybe<T>`](#maybe) | 实体可能没有的组件 |
+| [`ReadOnlyMaybe<T>`](#read-only-maybe) | 实体可能没有、只读的组件（带索引的组件也行） |
 | `Span<T>` / `ReadOnlySpan<T>`、`EntitySpan` | [批处理方法](#batch-methods)：一次处理成段的行 |
 
 | 特性 | 含义 |
@@ -250,6 +251,26 @@ public class Regeneration : EcsSystem
 
 可选部分很小时，它能省掉一个方法。最热的循环里，用 `[With<Shield>]` 和 `[Without<Shield>]` 拆成两个方法更快：每行不用再判断
 （数字见下文）。不改变结构的方法每段行只找一次可选列；可能改变结构的方法则按实体逐个查找。
+
+#### 只读：`ReadOnlyMaybe<T>` [#read-only-maybe]
+
+`ReadOnlyMaybe<T>` 也是可选参数，只是 `Value` 返回 `ref readonly`：方法只读 `T`，编译器会把住这一点，被追踪的 `T` 永远不会被打 tick。
+[带索引的组件](/zh/docs/guide/indexes-and-relations#value-indexes)只能用它当可选参数：`Maybe<T>` 给出的 `ref` 可能背着索引改掉键
+（[EECS015](/zh/docs/guide/analyzer#eecs015)），改从 `Entity` 上读又是每行查一次（[EECS027](/zh/docs/guide/analyzer#eecs027)）。
+
+```csharp
+public record struct Guild(int Id, int Level) : IComponent, IIndexed<int> { public int Key => Id; }
+public record struct Morale(int Value) : IComponent;
+
+public class Rally : EcsSystem
+{
+    [ForEach]
+    static void Raise(ref Morale morale, ReadOnlyMaybe<Guild> guild) =>
+        morale.Value += guild.HasValue ? 1 + guild.Value.Level : 1;
+}
+```
+
+查找方式和 `Maybe<T>` 一样。`Maybe<T>` 可以隐式转换成 `ReadOnlyMaybe<T>`，所以只读的辅助方法接收只读版本，两种参数都能传进去。
 
 ### 批处理方法 [#batch-methods]
 

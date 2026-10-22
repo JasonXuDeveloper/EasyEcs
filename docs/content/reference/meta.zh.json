@@ -45,6 +45,7 @@
     "queryitem",
     "readenumerator",
     "readitem",
+    "readonlymaybe",
     "relationindex",
     "relationindex-sources",
     "removedanyattribute",

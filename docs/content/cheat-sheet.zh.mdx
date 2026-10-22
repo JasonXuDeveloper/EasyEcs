@@ -181,6 +181,7 @@ public class MovementSystem : EcsSystem
 | `World` | 当前 World | 在静态方法里创建实体时用 |
 | `EntitySpan` | 批量方法这一段行对应的实体 | 仅批量方法 |
 | `Maybe<T>` | 实体可能没有的组件 | `HasValue`、`Value` |
+| `ReadOnlyMaybe<T>` | 同上，只读（带索引的组件也行） | `HasValue`、`Value`（`ref readonly`） |
 | `Mut<T>` | 方法只在部分行上写的组件 | `Value` 只读；`Write()` 和改了值的 `SetIfChanged(value)` 才给这一行打 tick；对调度器来说算写入 |
 | 其他任意类型（系统之外） | 调用方传给入口方法的值 | `ref int count`、`in Settings s` |
 

@@ -40,3 +40,13 @@ public ref T Value { get; }
 ```
 
 The component by `ref`; throws when the entity lacks it (check [`Maybe.HasValue`](/en/docs/reference/maybe#hasvalue)).
+
+## Operators
+
+### `operator implicit` [#op-implicit]
+
+```csharp
+public static implicit operator ReadOnlyMaybe<T>(Maybe<T> maybe);
+```
+
+The same component, read-only: what a [`ReadOnlyMaybe`](/en/docs/reference/readonlymaybe) parameter is given.

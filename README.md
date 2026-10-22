@@ -293,8 +293,13 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   a list the buffer pool keeps, so the blocks of chunks loaded and unloaded around players reuse one another's lists
   ([dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers#what-it-costs)). The pool is shared across
   threads, a prefab's empty buffer takes its list from it, and `LoadEntities` keeps the lists it reads.
-- **Write a buffer in place, save without derived data.** `buffer.SetCount(n)` sizes a `DynamicBuffer<T>` for writing
-  through `AsSpan()`; `SaveEntitiesWithout(output, ids, set)` leaves out what entities compute again after a load.
+- **Write a buffer in place, save without derived data.** `buffer.SetCount(n)` sizes a `DynamicBuffer<T>` and returns
+  the span to write; `TrimExcess()` on an empty buffer gives its list back to the pool;
+  `SaveEntitiesWithout(output, ids, set)` leaves out what entities compute again after a load.
+- **Optional reads of indexed components.** A `ReadOnlyMaybe<T>` parameter reads a component the entity may lack, never
+  stamps it, and accepts indexed components; EECS027 now reports per-row lookups of those too, and EECS030 a
+  `[ForEach]` method that is one structural change
+  ([systems](https://ecs.xgamedev.net/en/docs/guide/systems#read-only-maybe)).
 - **Enum elements get named members.** A `DynamicBuffer<Block>` of an enum gets `chunk.Block`, `WriteBlock()` and the
   rest, like a buffer of a struct.
 - **A Minecraft-style sample and a Samples section.** [VoxelServer](https://ecs.xgamedev.net/en/docs/samples/voxel-server)

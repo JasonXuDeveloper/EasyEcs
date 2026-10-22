@@ -183,6 +183,7 @@ public class MovementSystem : EcsSystem
 | `World` | The world | For creating entities from a static method |
 | `EntitySpan` | The entities of a batch method's run | Batch methods only |
 | `Maybe<T>` | A component the entity may lack | `HasValue`, `Value` |
+| `ReadOnlyMaybe<T>` | The same, read only (indexed components too) | `HasValue`, `Value` (`ref readonly`) |
 | `Mut<T>` | A component the method writes on some rows | `Value` reads; `Write()` and a `SetIfChanged(value)` that changed it stamp the row; a write for the scheduler |
 | Any other type (outside a system) | A value the caller passes to the entry point | `ref int count`, `in Settings s` |
 

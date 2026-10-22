@@ -163,7 +163,8 @@ the structure is [frozen](#frozen-structure) while it runs. Write one to vectori
 ## Optional component (`Maybe<T>`) [#maybe]
 
 A `[ForEach]` parameter for a component the entity may lack: the method visits every entity with its other
-components, and `HasValue` says whether this one also has `T`. See [Systems](/en/docs/guide/systems#maybe).
+components, and `HasValue` says whether this one also has `T`. `ReadOnlyMaybe<T>` is the read-only one, which an
+indexed component accepts too. See [Systems](/en/docs/guide/systems#maybe).
 
 ## `Mut<T>` [#mut]
 

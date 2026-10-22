@@ -205,6 +205,7 @@ an instance method. Its parameters say what it runs over:
 | `Entity` | the current entity, for structural changes and lookups |
 | `World` | the world (for creating entities, other singletons) |
 | [`Maybe<T>`](#maybe) | a component the entity may lack |
+| [`ReadOnlyMaybe<T>`](#read-only-maybe) | a component the entity may lack, read only (indexed components too) |
 | `Span<T>` / `ReadOnlySpan<T>`, `EntitySpan` | a [batch method](#batch-methods): runs of rows at once |
 
 | Attribute | Meaning |
@@ -273,6 +274,29 @@ public class Regeneration : EcsSystem
 It saves writing two methods when the optional part is small. In the hottest loops, two methods split by
 `[With<Shield>]` and `[Without<Shield>]` are faster: no test per row (see the numbers below). A method that changes
 no structure finds the optional column once per run of rows; one that changes structure looks it up per entity.
+
+#### Read only: `ReadOnlyMaybe<T>` [#read-only-maybe]
+
+`ReadOnlyMaybe<T>` is the same optional parameter with a `ref readonly` `Value`: the method reads `T` and the compiler
+holds it to that, so a tracked `T` is never stamped. It is the one optional parameter an
+[indexed component](/en/docs/guide/indexes-and-relations#value-indexes) accepts: the `ref` of a `Maybe<T>` could change
+the key behind the index's back ([EECS015](/en/docs/guide/analyzer#eecs015)), and reading it through the `Entity`
+instead is a lookup per row ([EECS027](/en/docs/guide/analyzer#eecs027)).
+
+```csharp
+public record struct Guild(int Id, int Level) : IComponent, IIndexed<int> { public int Key => Id; }
+public record struct Morale(int Value) : IComponent;
+
+public class Rally : EcsSystem
+{
+    [ForEach]
+    static void Raise(ref Morale morale, ReadOnlyMaybe<Guild> guild) =>
+        morale.Value += guild.HasValue ? 1 + guild.Value.Level : 1;
+}
+```
+
+The lookups are those of `Maybe<T>`. A `Maybe<T>` converts to a `ReadOnlyMaybe<T>`, so a helper that only reads can
+take the read-only one from either.
 
 ### Batch methods [#batch-methods]
 

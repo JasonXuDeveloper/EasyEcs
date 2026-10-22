@@ -112,9 +112,6 @@ when the entity is created before its data arrives. Build the set once, in a `st
 components that persist; save into a reused `NinoArrayBufferWriter` and store the written bytes wherever the data
 lives (a database row, a file, a message to another server).
 
-The other way round, `SaveEntitiesWithout(output, ids, set)` writes everything but the set: the data an entity computes
-again after a load (a height map, a cache, a flow field), left out so the save stays small.
-
 ```csharp
 public record struct Bank(long Gold) : IComponent;
 public record struct Connection(int Socket) : IComponent;              // runtime only: never saved
@@ -175,6 +172,29 @@ public static class RuntimeRecords
     public static readonly ComponentSet Persistent = ComponentSet.Create().With(typeof(Bank));
 }
 ```
+
+The other way round, `SaveEntitiesWithout(output, ids, set)` writes everything but the set: the data an entity computes
+again after a load (a height map, a cache, a flow field), left out so the save stays small. The components left out need
+no Nino formatter, and a `Disabled<T>` tag goes with its component.
+
+```csharp
+public record struct Terrain(int Seed) : IComponent;
+public record struct HeightMap(int[] Heights) : IComponent;            // computed from Terrain after a load
+
+public static class ChunkSaves
+{
+    public static readonly ComponentSet Derived = ComponentSet.Create().With<HeightMap>();   // built once
+}
+```
+
+```csharp
+var chunk = world.CreateEntity(new Terrain(42), new HeightMap(new int[256]));
+var chunkSave = new NinoArrayBufferWriter();
+world.SaveEntitiesWithout(chunkSave, [chunk.Id], ChunkSaves.Derived);   // Terrain only // [!code highlight]
+```
+
+`LoadEntities` then creates the chunk with its `Terrain` and no `HeightMap`; a system with `[Without<HeightMap>]`
+computes it again.
 
 ### How ids are rewritten [#entityid-rewriting]
 

@@ -146,6 +146,63 @@ ref var stash = ref hero.GetOrAddLoot();                       // 英雄没有�
 关系的缓冲没有 `WriteX()` 和 `GetOrAddX()`：链接带索引，只能通过
 [`Link`](/zh/docs/guide/indexes-and-relations#relations) / [`Unlink`](/zh/docs/guide/indexes-and-relations#relations) 修改。
 
+### 原地写整个缓冲：`SetCount` [#set-count]
+
+`SetCount(n)` 设置元素个数，并返回要写的 span：超过 `n` 的元素去掉，新增的元素是 `default`。一次算出整个列表的代码（一条路径、
+一个生成的区块）直接写进缓冲，不用先填一个 span，也不用复制：
+
+```csharp
+public record struct Waypoint(float X, float Y);
+public record struct Destination(float X, float Y) : IComponent, ITracked;
+
+public class PathSystem : EcsSystem
+{
+    const int Steps = 8;
+
+    [ForEach, Changed<Destination>]
+    static void Plan(in Position from, in Destination to, ref DynamicBuffer<Waypoint> path)
+    {
+        var points = path.SetCount(Steps);                     // 整条路径原地写好
+        for (int i = 0; i < points.Length; i++)
+        {
+            float t = (i + 1) / (float)Steps;
+            points[i] = new Waypoint(from.X + (to.X - from.X) * t, from.Y + (to.Y - from.Y) * t);
+        }
+    }
+}
+```
+
+这个 span 就是缓冲的 `AsSpan()`：下一次改变元素个数或容量的调用之前有效。
+
+一次计算里要反复改写的缓冲是例外。同一批格子要读写很多遍时，比如 32 层、每层都更新同样的 256 字节，先在 `stackalloc` 出来的 span
+里算，最后通过 `SetCount` 返回的 span 复制一次进去。这样每一遍都在方法独占、留在缓存里的内存上跑。每个元素只写一次的计算，还是直接写进 span。
+
+```csharp
+public record struct Block(byte Id);
+public record struct Shade(byte Level);
+public struct Chunk : IComponent;
+
+public class ShadeSystem : EcsSystem
+{
+    const int Cells = 256;                                     // 16 × 16 的一根柱子
+    const int Layers = 32;
+
+    [ForEach, With<Chunk>]
+    static void Darken(in DynamicBuffer<Block> blocks, ref DynamicBuffer<Shade> shade)
+    {
+        // 同样 256 格算 32 遍：在栈上算，最后复制一次进缓冲
+        Span<byte> light = stackalloc byte[Cells];
+        light.Fill(15);
+        var solid = blocks.AsReadOnlySpan();
+        for (int layer = Layers - 1; layer >= 0; layer--)
+            for (int i = 0; i < Cells; i++)
+                if (solid[layer * Cells + i].Id != 0 && light[i] > 0) light[i]--;
+        var levels = shade.SetCount(Cells);
+        for (int i = 0; i < Cells; i++) levels[i] = new Shade(light[i]);
+    }
+}
+```
+
 ### 不要复制 [#copies]
 
 列表放在组件引用的一个对象里。复制一个 `DynamicBuffer<T>` 值，副本指向的还是同一个列表：通过副本写入不会打 tick，
@@ -297,7 +354,8 @@ bags synced: 7
 | 每个 tick 新建列表 | `Clear()` 后重新填充 | `Clear` 保留容量：每 tick 重填的列表长到稳定大小后不再分配 |
 | 不在乎顺序还用 `RemoveAt(i)` | `RemoveAtSwapBack(i)` | O(1)，而不是 O(count) |
 | 用 `ref` 参数只读 | 改成 `in` 参数 | `ref` 会给行打 tick，下游每个 `[Changed<T>]` 读取方都要访问它（[EECS025](/zh/docs/guide/analyzer#eecs025)） |
-| 为了写整个缓冲，先在栈上填好一个 span 再 `AddRange` | `SetCount(n)`，然后直接写 `AsSpan()` | 元素只过一遍，也不用在栈上开一个缓冲那么大的空间 |
+| 只写一遍的整个缓冲，先在栈上填好一个 span 再 `AddRange` | 直接写 `SetCount(n)` 返回的 span | 元素只过一遍，也不用在栈上开一个缓冲那么大的空间 |
+| 在缓冲的 span 上反复读改写很多遍 | 在 `stackalloc` 的 span 上算完，再复制一次进 `SetCount(n)` 返回的 span | 每一遍都在方法自己的内存上跑，缓冲只写一次 |
 | `Add` 之后还用之前的 span | 可能扩容的调用之后重新取 span | `Add`、`AddRange`、`Insert`、`SetCount`、`EnsureCapacity`、`TrimExcess` 都可能换数组 |
 
 10 万个装 8 件物品的背包，每 tick 有 1,000 个交易一件物品，再由一个 `[Changed]` 系统发送变化的背包
@@ -325,7 +383,8 @@ bags synced: 7
 - **大缓冲反复出现又消失**，比如玩家周围加载又卸载的区块，每个 8,192 个方块：启动时调高一次上限，
   `DynamicBuffer<Block>.PoolCapacity = 8192;`，新加载的区块就会重用已卸载区块的列表。这个设置按元素类型区分、对整个进程生效；
   池里最多保留峰值数量的列表，所以占用的内存是峰值乘以这个容量。
-- **`TrimExcess`** 把曾经变大的列表多余的空间还回去；空列表随后不再持有数组。
+- **`TrimExcess`** 把曾经变大的列表多余的空间还回去。缓冲为空时，它把列表还给池：缓冲不再持有列表，任何 `T` 缓冲的下一次
+  首次写入会重用它。只在实体活跃时才用的临时缓冲（模拟一阵一阵跑、中间会休眠的那一步），空闲期间就不占内存。
 - **并行方法** 可以接收 `ref DynamicBuffer<T>`：每个分块只写自己那些实体的列表。
 
 ## 常见陷阱 [#pitfalls]
@@ -334,7 +393,7 @@ bags synced: 7
 | --- | --- | --- |
 | 把缓冲复制到局部变量、字段或另一个实体 | 一个列表两个主人；通过副本的写入不被追踪 | [EECS012](/zh/docs/guide/analyzer#eecs012) |
 | 在 `in` 参数或 `Read<T>()` 上调用 `Add` | 编译不过：写入需要 `ref` | 编译器 |
-| `Add` 之后继续用之前的 `AsSpan()` | span 还指着旧数组 | 代码审查：重新取 span |
+| `Add` 之后继续用之前的 `AsSpan()`（或 `SetCount` 返回的 span） | span 还指着旧数组 | 代码审查：重新取 span |
 | 用 `ref` 参数读取缓冲 | 访问到的每一行都算作已变化 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
 | 纯值列表的每个元素都建一个实体 | 每件物品一个实体、一行、一条索引 | 纯值用缓冲 |
 

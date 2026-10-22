@@ -63,6 +63,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`QueryItem<T1..T9>`](/zh/docs/reference/queryitem) | 一条查询结果：实体，以及指向它所在行的 ref。 |
 | [`ReadEnumerator<T1..T9>`](/zh/docs/reference/readenumerator) | 零分配的只读查询枚举器；遍历途中做结构变更也安全（访问规则和 ForEach 相同）。 |
 | [`ReadItem<T1..T9>`](/zh/docs/reference/readitem) | 一条只读的查询结果：实体，以及指向它所在行的只读引用（不打 tick）。 |
+| [`ReadOnlyMaybe<T>`](/zh/docs/reference/readonlymaybe) | [ForEach] 方法访问的实体上一个可选、只读的组件：ReadOnlyMaybe.Value 是 ref readonly，所以方法按 T 的读者调度，被追踪的组件永远不打 tick；带索引的组件（IIndexed）也能这样接收，Maybe 不行（EECS015：它的 ref 可能背着索引改掉键）。 |
 | [`RelationIndex<T>.Sources`](/zh/docs/reference/relationindex-sources) | 枚举链接到某个目标的实体（foreach），每条链接一次。 |
 | [`Retired`](/zh/docs/reference/retired) | 退休实体的标签：Destroy 发现实体上有 ICleanupComponent，于是去掉其他组件，让实体继续存活，直到最后一个清理组件被移除（那时实体被释放，才算销毁）。 |
 | [`SingletonRef<T>`](/zh/docs/reference/singletonref) | 某个 World 的单例 T 的句柄。 |

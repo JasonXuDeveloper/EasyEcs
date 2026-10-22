@@ -51,7 +51,8 @@ public partial record struct PlayerName(string Value) : IComponent;    // 托管
 
 ### 存档 [#save]
 
-`Save` 可以写进任何 `IBufferWriter<byte>`。写进 `NinoArrayBufferWriter` 时直接写入，其他 writer 要从 World 自己的缓冲区拷一份。
+`Save` 可以写进任何 `IBufferWriter<byte>`。写进 `Nino.Core.NinoArrayBufferWriter` 时原地写入，World 内部不复制；其他 writer
+要先写进 World 自己的缓冲区，再复制一次。
 
 ```csharp
 world.CreateEntity(new PlayerName("alice"), new Stock(10, 3));
@@ -60,6 +61,14 @@ world.SetClock(1234);
 var output = new NinoArrayBufferWriter();
 world.Save(output);                                                    // 实体、组件、单例 // [!code highlight]
 File.WriteAllBytes("world.sav", output.WrittenSpan.ToArray());
+```
+
+存档是追加到 writer 已有内容后面的，所以每次存档复用同一个 writer 时，先重置它。`WrittenSpan` 就是这份存档，原地读取：
+
+```csharp
+output.ResetWrittenCount();                                            // 下一份存档从第 0 个字节开始
+world.Save(output);
+ReadOnlySpan<byte> saved = output.WrittenSpan;                         // 不复制：直接交给文件或 socket
 ```
 
 </Step>
@@ -331,6 +340,7 @@ bob follows alice
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
 | 托管组件没有 `[NinoType]` | `Save` 抛 `InvalidOperationException`（没有格式化器） | 运行时；只在运行时有意义的类型用 `SaveWithout(output, in exclude)` 排除 |
+| 复用 `NinoArrayBufferWriter` 却没调 `ResetWrittenCount()` | 新存档接在旧存档后面 | 代码审查：每次存档前先重置 |
 | 设好新配置之后用普通的 `Load` | 存档里的单例把它替换掉，存档里没有的单例被删掉 | 用 `LoadKeeping(input, in keep)` 保留配置单例 |
 | `Load` 的保留集合里放了组件 | 抛 `ArgumentException` | 改为存档时排除它 |
 | 系统要用的单例被排除出存档，之后又没人再设 | 系统第一次运行就抛异常 | 加载前设好并保留，或者加载后再设 |

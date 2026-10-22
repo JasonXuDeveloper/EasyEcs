@@ -9,6 +9,63 @@ icon: CircleArrowUp
 要跨好几个版本升级，就从最旧的一节开始，按顺序往下改。每个版本新增了什么见[更新日志](/zh/docs/changelog)；当前的 API
 见 [API 参考](/zh/docs/api)。
 
+## v4.7 → v4.8 [#v4-7-to-v4-8]
+
+为 4.7 写的代码不用改就能编译，4.7 的存档照样能读。有两条分析器规则报告的范围变大了，还有一条新规则：把警告当错误的构建会在这些地方失败，
+改完代码才能通过。
+
+### 报告范围变大的分析器规则：EECS027、EECS030 和 EECS053 [#v4-8-analyzer]
+
+[EECS027](/zh/docs/guide/analyzer#eecs027) 现在也报告通过被访问的 `Entity` 逐行查带索引的组件。以前它放过这种写法，因为带索引组件的
+`Maybe<T>` 是错误（[EECS015](/zh/docs/guide/analyzer#eecs015)）。改成 `in` 参数，部分实体没有它时用
+[`ReadOnlyMaybe<T>`](/zh/docs/guide/systems#read-only-maybe)：
+
+```csharp
+public record struct Guild(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public record struct Morale(int Value) : IComponent;
+```
+
+```csharp tab="4.7" doccheck=expect-EECS027
+public class Rally : EcsSystem
+{
+    [ForEach, With<Guild>]
+    static void Raise(Entity member, ref Morale morale) => morale.Value += member.Guild.Id;   // 每行查一次
+}
+```
+
+```csharp tab="4.8"
+public class Rally : EcsSystem
+{
+    [ForEach]
+    static void Raise(ref Morale morale, in Guild guild) => morale.Value += guild.Id;
+}
+```
+
+[EECS030](/zh/docs/guide/analyzer#eecs030) 现在也报告整个方法体只是对自己实体做一次结构变更、每行都一样的 `[ForEach]` 方法。把这次变更
+挪到 `OnUpdate` 里，写成一次批量调用：
+
+```csharp tab="4.7" doccheck=expect-EECS030
+public class CorpseSystem : EcsSystem
+{
+    [ForEach, With<Dead>]
+    static void Bury(Entity entity) => entity.Destroy();                // 同一个变更，一个实体一个实体地做
+}
+```
+
+```csharp tab="4.8"
+public class CorpseSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.DestroyAll<Dead>();
+}
+```
+
+[EECS053](/zh/docs/guide/analyzer#eecs053) 是新规则：以 `ref` 接收被追踪的组件，却有路径不写它。代码修复会改成 `Mut<T>`。
+
+### 新的公开类型 [#v4-8-new-types]
+
+`namespace EasyEcs` 里新增了 `ReadOnlyMaybe<T>`。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
+或者用 `using` 起个别名。
+
 ## v4.6 → v4.7 [#v4-6-to-v4-7]
 
 一些调用、类型和生成成员[改了名](#v4-7-renames)，编译器会找出每一处用法，4.6 的存档照样能读。除此之外，为 4.6 写的代码不用改就能编译，除非某个系统声明了名为

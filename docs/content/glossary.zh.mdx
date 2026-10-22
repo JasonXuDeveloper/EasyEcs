@@ -138,7 +138,7 @@ World 执行系统的顺序：每个[分组](#system-group)的[阶段](#stage)�
 ## 可选组件（`Maybe<T>`） [#maybe]
 
 `[ForEach]` 方法里表示“实体可能没有”的组件参数：方法访问所有具备其他组件的实体，`HasValue` 说明这个实体是否也有 `T`。
-见[系统](/zh/docs/guide/systems#maybe)。
+`ReadOnlyMaybe<T>` 是它的只读版本，带索引的组件也能用。见[系统](/zh/docs/guide/systems#maybe)。
 
 ## `Mut<T>` [#mut]
 

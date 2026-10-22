@@ -19,21 +19,24 @@ available as Markdown: add `.md` to its URL.
   `IsDead` / `SetDead()` / `RemoveDead()` for tags, `world.Arena` for singletons, `item.Position` on query items.
   `entity.Read<T>()` reads without counting as a write. Prefer them to the generic calls (EECS033).
 - Components marked `ITracked` record writes; indexed components (`IIndexed<TKey>`) are written with `Set` or
-  `SetX(…)`, never through a `ref` (EECS015), and never while a `foreach` walks their index (`Find`, `Children`,
+  `SetX(…)`, never through a `ref` or a `Maybe<T>` (EECS015: read one with `in` or `ReadOnlyMaybe<T>`), and never while a `foreach` walks their index (`Find`, `Children`,
   `Range`): collect the entities first (EECS042).
 - A key that must name one entity (an account id, a session token, a cell's occupant) is `IUniqueIndexed<TKey>`: look
   it up with `world.XIndex.Get(key)` / `TryGet(key, out e)`, never with a hand-kept dictionary. A write that would give
   a second entity a taken key throws `InvalidOperationException`; to move a key, change the old holder first. Not for
   `EntityId` keys (EECS036). A component has one index key: never two `IIndexed<TKey>` (EECS036).
 - A list per entity is a `DynamicBuffer<T>` component; never copy it by value (EECS012). Call
-  `EnsureCapacity(n)` on it (and `world.Reserve<T…>(n)` on the world) before a wave of known size.
+  `EnsureCapacity(n)` on it (and `world.Reserve<T…>(n)` on the world) before a wave of known size. Write a whole
+  buffer through the span `SetCount(n)` returns; compute many passes over the same elements in a `stackalloc`'d span
+  and copy it in once. `TrimExcess()` on an empty scratch buffer gives its list back to the pool.
 - An external resource (a socket, a seat) lives in an `ICleanupComponent`: `Destroy` retires the entity (alive, with
   the `Retired` tag) until a system releases the resource and removes the component, which frees it. Never set or remove `Retired` or
   `Disabled<T>` yourself (EECS045): `Destroy`, `Disable<T>()` and `Enable<T>()` do. A cleanup component and `ChildOf`
   are never disabled (EECS048). A retired entity (kept for its cleanup components) stays retired: `MoveEntities` skips it (and a moved entity leaves
   its cleanup components behind), `Clone()` throws, and `SetAll` reaches it only when the filter names `Retired`.
-- An optional component is a `Maybe<T>` parameter, but not in the hottest loops: there, write two methods with
-  `[With<T>]` and `[Without<T>]`.
+- An optional component is a `Maybe<T>` parameter (`ReadOnlyMaybe<T>` when the method only reads it, the one an
+  indexed component accepts), but not in the hottest loops: there, write two methods with `[With<T>]` and
+  `[Without<T>]`.
 
 ## Systems
 
@@ -44,7 +47,8 @@ available as Markdown: add `.md` to its URL.
   Take components by `ref` to write and `in` to read (EECS002); a `ref` that only reads is EECS025. Do not change
   what an `in` parameter holds (EECS011). Take only what the method uses: a component it only requires is a
   `[With<T>]` filter (EECS026), and a component or singleton it reads is a parameter, not a lookup through the
-  `Entity` or `World` on every row (EECS027). A method that uses nothing of its system is `static` (EECS029).
+  `Entity` or `World` on every row (EECS027; an indexed component too: `in` or
+  `ReadOnlyMaybe<T>`). A method that uses nothing of its system is `static` (EECS029).
   A `[ForEach]` method takes 1 to 9 components (or none with a `[With<T>]` / `[Changed<T>]`, EECS003), is not generic
   (EECS004) nor a local function (EECS024), and its types are visible to the generated code (EECS022); a batch method
   takes spans, singletons and an `EntitySpan` only (EECS009).
@@ -115,7 +119,8 @@ available as Markdown: add `.md` to its URL.
 - Give a new entity its components in `CreateEntity(a, b, c)` / `Instantiate(prefab, a, b)`, not a `Set` right
   after (EECS052).
 - Prefer `[ForEach]` methods over hand-written `Query` loops; use bulk calls (`SetAll`, `RemoveAll`, `DisableAll`,
-  `EnableAll`, `CreateEntities`, `DestroyAll`, `DestroyEntities(ids)`) for many entities at once, not a loop over a query (EECS030), and
+  `EnableAll`, `CreateEntities`, `DestroyAll`, `DestroyEntities(ids)`) for many entities at once, not a loop over a query or a `[ForEach]` method whose whole body is that one change
+  (EECS030), and
   `CreateEntities` or `Reserve` before creating many entities in a loop (EECS031). Ask `world.Any<T>()` and
   `world.Count<T>()`, and filter with `QueryFilter`, instead of counting or testing in a loop (EECS032).
 - Removing a component keeps the row (one bit flips), so status components that come and go are cheap; adding a new

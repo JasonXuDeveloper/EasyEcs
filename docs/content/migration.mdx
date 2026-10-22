@@ -10,6 +10,65 @@ lists every rename, removal and behavior change of its step, with the code to wr
 [changelog](/en/docs/changelog) lists everything each release added; the [API reference](/en/docs/api) is the
 current API.
 
+## v4.7 → v4.8 [#v4-7-to-v4-8]
+
+Code written for 4.7 compiles unchanged, and saves of 4.7 load. Two analyzer rules report more code, and one rule is
+new: a build that treats warnings as errors fails on them until the code changes.
+
+### Analyzer rules that report more: EECS027, EECS030 and EECS053 [#v4-8-analyzer]
+
+[EECS027](/en/docs/guide/analyzer#eecs027) now also reports a per-row lookup of an indexed component through the visited
+`Entity`, which it used to leave alone because a `Maybe<T>` of one is an error
+([EECS015](/en/docs/guide/analyzer#eecs015)). Take it as an `in` parameter, or a
+[`ReadOnlyMaybe<T>`](/en/docs/guide/systems#read-only-maybe) when some entities lack it:
+
+```csharp
+public record struct Guild(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public record struct Morale(int Value) : IComponent;
+```
+
+```csharp tab="4.7" doccheck=expect-EECS027
+public class Rally : EcsSystem
+{
+    [ForEach, With<Guild>]
+    static void Raise(Entity member, ref Morale morale) => morale.Value += member.Guild.Id;   // a lookup per row
+}
+```
+
+```csharp tab="4.8"
+public class Rally : EcsSystem
+{
+    [ForEach]
+    static void Raise(ref Morale morale, in Guild guild) => morale.Value += guild.Id;
+}
+```
+
+[EECS030](/en/docs/guide/analyzer#eecs030) now also reports a `[ForEach]` method whose whole body is one structural
+change of its entity, the same for every row. Move the change into one bulk call in `OnUpdate`:
+
+```csharp tab="4.7" doccheck=expect-EECS030
+public class CorpseSystem : EcsSystem
+{
+    [ForEach, With<Dead>]
+    static void Bury(Entity entity) => entity.Destroy();                // one change, entity by entity
+}
+```
+
+```csharp tab="4.8"
+public class CorpseSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.DestroyAll<Dead>();
+}
+```
+
+[EECS053](/en/docs/guide/analyzer#eecs053) is new: a tracked component taken by `ref` that some path leaves unwritten.
+Its code fix takes it as a `Mut<T>`.
+
+### New public type [#v4-8-new-types]
+
+`ReadOnlyMaybe<T>` is new in `namespace EasyEcs`. A file that imports another namespace with a type of that name gets
+CS0104 (ambiguous reference): qualify the name, or alias it with a `using` directive.
+
 ## v4.6 → v4.7 [#v4-6-to-v4-7]
 
 Calls, types and generated members are [renamed](#v4-7-renames): the compiler finds each use, and saves of 4.6 still

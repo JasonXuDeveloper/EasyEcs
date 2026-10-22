@@ -99,8 +99,8 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 **Invalid `[ForEach]` parameter.** Error. Code fix: adds `in` or `ref` to a component or singleton taken by value.
 
 Every parameter must be a `ref` / `in` / `ref readonly` struct implementing `IComponent` or `ISingletonComponent`, a
-`Span<T>` / `ReadOnlySpan<T>` of an `IComponent` struct, a `Maybe<T>` of one (an optional component), an `Entity`, or
-the `World`. A `[ForEach]` method [outside a system](/en/docs/guide/systems#foreach-outside-systems) may also take
+`Span<T>` / `ReadOnlySpan<T>` of an `IComponent` struct, a `Maybe<T>` or `ReadOnlyMaybe<T>` of one (an optional
+component), an `Entity`, or the `World`. A `[ForEach]` method [outside a system](/en/docs/guide/systems#foreach-outside-systems) may also take
 values of any other type: its generated entry point takes them from the caller.
 
 ```csharp doccheck=expect-EECS002
@@ -131,7 +131,7 @@ public class MoveSystem : EcsSystem
 **Invalid component count.** Error. No code fix.
 
 A `[ForEach]` method takes between 1 and 9 components (singletons, `Entity`, `World` and a runner's other values do
-not count; a `Maybe<T>` does), or none when a `[With<T>]` (else a `[Changed<T>]`) names the component to query.
+not count; a `Maybe<T>` or `ReadOnlyMaybe<T>` does), or none when a `[With<T>]` (else a `[Changed<T>]`) names the component to query.
 `[Removed<T>]` names none: the entities it selects no longer have `T`, so the method also needs a component parameter
 or a `[With<U>]`.
 
@@ -551,7 +551,8 @@ A [value index](/en/docs/guide/indexes-and-relations#value-indexes) follows `Set
 
 - `Get<T>()`, `GetOrAdd<T>()` or `TryGetRef<T>()` on an entity;
 - a `ref` local bound to it, or an assignment to it (or a field of it) through a query item;
-- a `ref`, `Span<T>`, `Mut<T>` or `Maybe<T>` parameter of it in a `[ForEach]` method or an `IForEach*` job.
+- a `ref`, `Span<T>`, `Mut<T>` or `Maybe<T>` parameter of it in a `[ForEach]` method or an `IForEach*` job (a
+  `Maybe<T>` hands out a `ref`; take a `ReadOnlyMaybe<T>` to read it).
 
 ```csharp
 public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
@@ -565,8 +566,8 @@ public class TakePortals : EcsSystem
 }
 ```
 
-Read it with `in`, `ReadOnlySpan<T>`, `Read<T>()` or the generated property, and write it with `Set` (or the
-generated `SetX`):
+Read it with `in`, `ReadOnlySpan<T>`, [`ReadOnlyMaybe<T>`](/en/docs/guide/systems#read-only-maybe) (when some entities
+lack it), `Read<T>()` or the generated property, and write it with `Set` (or the generated `SetX`):
 
 ```csharp
 public class TakePortals : EcsSystem
@@ -855,8 +856,8 @@ public class ArmorBonus : EcsSystem
 ## EECS026 [#eecs026]
 
 **A `[ForEach]` parameter the method does not use.** Warning. Code fix: a component becomes a `[With<T>]` filter (or
-goes, when a `[With<T>]` or `[Changed<T>]` already requires it); an `Entity`, `World`, `EntitySpan`, singleton or
-`Maybe<T>` goes.
+goes, when a `[With<T>]` or `[Changed<T>]` already requires it); an `Entity`, `World`, `EntitySpan`, singleton,
+`Maybe<T>` or `ReadOnlyMaybe<T>` goes.
 
 Each parameter costs something on every row or every pass: a component's column is loaded and advanced, a singleton is
 resolved and scheduled as an access, an `Entity` builds a handle for every row and, like the `World`, makes the system
@@ -898,8 +899,9 @@ A `[ForEach]` method's parameters are resolved once per table or per pass: a com
 singleton a `ref` taken before the loop. The same data looked up through the visited `Entity` (`entity.Velocity`,
 `entity.Has<T>()`, `entity.TryGet<T>(...)`) or through the `World` (`World.Clock`) repeats the search on every row:
 the entity's record, its table, the column. The rule reports only lookups that run on every row (not in a branch,
-a loop or after an early `return`), of components the method does not add or remove itself, and not of indexed
-components.
+a loop or after an early `return`), of components the method does not add or remove itself. Indexed components count
+too: an `in` parameter or a [`ReadOnlyMaybe<T>`](/en/docs/guide/systems#read-only-maybe) reads them without the
+lookup and without the write EECS015 forbids.
 
 ```csharp doccheck=expect-EECS027
 public class Drift : EcsSystem
@@ -911,7 +913,8 @@ public class Drift : EcsSystem
 ```
 
 Take the component as a parameter (`in`, `ref`, or `Maybe<T>` when some entities lack it; a presence test is a
-`Maybe<T>` or a `[With<T>]` / `[Without<T>]` split), and a singleton as a parameter too:
+`Maybe<T>` or a `[With<T>]` / `[Without<T>]` split; for an indexed component `in` or `ReadOnlyMaybe<T>`), and a
+singleton as a parameter too:
 
 ```csharp
 public class Drift : EcsSystem

@@ -153,6 +153,66 @@ ref var stash = ref hero.GetOrAddLoot();                       // an empty buffe
 A relation's buffer gets no `WriteX()` or `GetOrAddX()`: its links are indexed and change only through
 [`Link`](/en/docs/guide/indexes-and-relations#relations) / [`Unlink`](/en/docs/guide/indexes-and-relations#relations).
 
+### Write a whole buffer in place: `SetCount` [#set-count]
+
+`SetCount(n)` sets the number of elements and returns the span to write: elements past `n` are removed, elements
+added are `default`. Code that computes a whole list (a path, a generated chunk) writes it straight into the buffer,
+with no span to fill first and no copy:
+
+```csharp
+public record struct Waypoint(float X, float Y);
+public record struct Destination(float X, float Y) : IComponent, ITracked;
+
+public class PathSystem : EcsSystem
+{
+    const int Steps = 8;
+
+    [ForEach, Changed<Destination>]
+    static void Plan(in Position from, in Destination to, ref DynamicBuffer<Waypoint> path)
+    {
+        var points = path.SetCount(Steps);                     // the whole path, written in place
+        for (int i = 0; i < points.Length; i++)
+        {
+            float t = (i + 1) / (float)Steps;
+            points[i] = new Waypoint(from.X + (to.X - from.X) * t, from.Y + (to.Y - from.Y) * t);
+        }
+    }
+}
+```
+
+The span is the buffer's `AsSpan()`: valid until the next call that changes its count or capacity.
+
+A buffer rewritten many times in one computation is the exception. When the same cells are read and written over many
+passes, say 32 layers that each update the same 256 bytes, compute them in a `stackalloc`'d span and copy the result in
+once through the span `SetCount` returns. The passes then run on memory that belongs to the method alone and stays in
+the cache. A computation that writes each element once still writes straight into the span.
+
+```csharp
+public record struct Block(byte Id);
+public record struct Shade(byte Level);
+public struct Chunk : IComponent;
+
+public class ShadeSystem : EcsSystem
+{
+    const int Cells = 256;                                     // a 16 × 16 column
+    const int Layers = 32;
+
+    [ForEach, With<Chunk>]
+    static void Darken(in DynamicBuffer<Block> blocks, ref DynamicBuffer<Shade> shade)
+    {
+        // 32 passes over the same 256 cells: on the stack, then one copy into the buffer
+        Span<byte> light = stackalloc byte[Cells];
+        light.Fill(15);
+        var solid = blocks.AsReadOnlySpan();
+        for (int layer = Layers - 1; layer >= 0; layer--)
+            for (int i = 0; i < Cells; i++)
+                if (solid[layer * Cells + i].Id != 0 && light[i] > 0) light[i]--;
+        var levels = shade.SetCount(Cells);
+        for (int i = 0; i < Cells; i++) levels[i] = new Shade(light[i]);
+    }
+}
+```
+
 ### Copies [#copies]
 
 The list lives in an object the component refers to. A copy of a `DynamicBuffer<T>` value would refer to the same
@@ -306,7 +366,8 @@ written, once in each of the five updates that follow.
 | Instead of | Do | Why |
 | --- | --- | --- |
 | Letting a list grow from empty | `EnsureCapacity(n)` once where the size is known | Adding within the capacity allocates nothing |
-| Filling a span on the stack, then `AddRange` of it, to write a whole buffer | `SetCount(n)`, then write `AsSpan()` in place | One pass over the elements instead of two, and no stack the size of the buffer |
+| Filling a span on the stack, then `AddRange` of it, to write a whole buffer in one pass | Write the span `SetCount(n)` returns | One pass over the elements instead of two, and no stack the size of the buffer |
+| Many passes of read-modify-write over the buffer's span | The passes on a `stackalloc`'d span, then one copy into the span `SetCount(n)` returns | The passes run on the method's own memory; the buffer is written once |
 | A new list per tick | `Clear()` and refill | `Clear` keeps the capacity: a list refilled every tick allocates nothing once it reached its size |
 | `RemoveAt(i)` when the order does not matter | `RemoveAtSwapBack(i)` | O(1) instead of O(count) |
 | Reading through a `ref` parameter | An `in` parameter | A `ref` stamps the row, and every `[Changed<T>]` reader visits it ([EECS025](/en/docs/guide/analyzer#eecs025)) |
@@ -344,7 +405,10 @@ new buffers take the lists of the dead ones.
   the capacity once at startup, `DynamicBuffer<Block>.PoolCapacity = 8192;`, and each loaded chunk reuses the list of
   one that was unloaded. The setting is per element type and process-wide; the pool keeps at most the lists of its
   peak, so it holds that peak times the capacity.
-- **`TrimExcess`** gives back what a list that once grew large no longer needs; an empty list then holds no array.
+- **`TrimExcess`** gives back what a list that once grew large no longer needs. On an empty buffer it gives the list
+  back to the pool: the buffer holds no list, and the next first write of any buffer of `T` reuses it. Scratch
+  buffers used only while an entity is active (the step of a simulation that sleeps between bursts) then hold no memory
+  in between.
 - **Parallel methods** may take a `ref DynamicBuffer<T>`: each chunk writes only its own entities' lists.
 
 ## Pitfalls [#pitfalls]
@@ -353,7 +417,7 @@ new buffers take the lists of the dead ones.
 | --- | --- | --- |
 | Copying the buffer into a local, a field or another entity | Two owners of one list; writes through the copy are not tracked | [EECS012](/en/docs/guide/analyzer#eecs012) |
 | Calling `Add` on an `in` parameter or on `Read<T>()` | Does not compile: the writes need a `ref` | The compiler |
-| Keeping an `AsSpan()` across an `Add` | The span still points at the old array | Code review: take a new span |
+| Keeping an `AsSpan()` (or the span of `SetCount`) across an `Add` | The span still points at the old array | Code review: take a new span |
 | Reading the buffer through a `ref` parameter | Every visited row counts as changed | [EECS025](/en/docs/guide/analyzer#eecs025) |
 | One entity per element of a plain list | An entity, a row and an index entry per item | Use a buffer for plain values |
 

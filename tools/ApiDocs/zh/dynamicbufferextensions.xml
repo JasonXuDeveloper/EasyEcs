@@ -30,17 +30,19 @@
   <member name="M:EasyEcs.DynamicBufferExtensions.RemoveAtSwapBack``1(EasyEcs.DynamicBuffer{``0}@,System.Int32)" source="8f59d6964dbe">
     <summary>移除 <paramref name="index" /> 处的元素，把最后一个元素挪到这个位置。O(1)。</summary>
   </member>
-  <member name="M:EasyEcs.DynamicBufferExtensions.TrimExcess``1(EasyEcs.DynamicBuffer{``0}@)" source="52746fc46e33">
+  <member name="M:EasyEcs.DynamicBufferExtensions.TrimExcess``1(EasyEcs.DynamicBuffer{``0}@)" source="2f8068fa2244">
     <summary>
-      把容量缩到和元素数一样，曾经涨得很大的列表就不会一直占着峰值时的内存（列表的数组会重新分配；空列表不占数组）。O(count)。
+      把容量缩到和元素数一样，曾经涨得很大的列表就不会一直占着峰值时的内存（列表的数组会重新分配）。空缓冲会把列表还给首次写入取列表的那个池：
+      偶尔才用的缓冲（实体活跃时的临时空间）空闲期间不占内存，任何 <typeparamref name="T" /> 缓冲的下一次首次写入会重用这个列表。O(count)。
     </summary>
   </member>
 
-  <member name="M:EasyEcs.DynamicBufferExtensions.SetCount``1(EasyEcs.DynamicBuffer{``0}@,System.Int32)" source="7257c66ae3f8">
+  <member name="M:EasyEcs.DynamicBufferExtensions.SetCount``1(EasyEcs.DynamicBuffer{``0}@,System.Int32)" source="4d45dab4f7bf">
     <summary>
-      把元素个数设为 <paramref name="count" />：多出的元素去掉，新增的元素为 <c>default</c>，于是系统可以通过
-      <see cref="M:EasyEcs.DynamicBufferExtensions.AsSpan``1(EasyEcs.DynamicBuffer{``0}@)" /> 直接写整个缓冲，不用先填好一个 span 再复制进去
-      （相当于列表的 <c>CollectionsMarshal.SetCount</c>，只是新增的元素会清零）。O(增加或去掉的元素数)；只有列表扩容时分配。
+      把元素个数设为 <paramref name="count" />：多出的元素去掉，新增的元素为 <c>default</c>，于是系统通过返回的 span 原地写整个缓冲，
+      不用先填好一个 span 再复制进去（相当于列表的 <c>CollectionsMarshal.SetCount</c>，只是新增的元素会清零）。返回的 span 就是
+      <see cref="M:EasyEcs.DynamicBufferExtensions.AsSpan``1(EasyEcs.DynamicBuffer{``0}@)" />：在缓冲下一次改变元素个数或容量之前有效。
+      O(增加或去掉的元素数)；只有列表扩容时分配。
     </summary>
-        </member>
+  </member>
 </doc>

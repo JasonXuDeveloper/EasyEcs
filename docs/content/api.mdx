@@ -50,6 +50,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `EcsSystem` | abstract class | `World`, `UpdateInterval`, `UpdatePhase`, `Enabled`, `Error`, `Stats`, `LastRunTick`, `RunCount`; `OnCreate` / `OnUpdate` / `OnDestroy` ([systems](/en/docs/guide/systems)). |
 | `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`, `Slices = N`), `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<T1..Tn>]`, `[RemovedAny<T1..Tn>]`. |
 | `Maybe<T>` | ref struct | An optional component parameter of a `[ForEach]` method: `HasValue`, `Value`. |
+| `ReadOnlyMaybe<T>` | ref struct | The same, read-only: `Value` is `ref readonly`, never stamped, allowed for indexed components; a `Maybe<T>` converts to it. |
 | `Mut<T>` | ref struct | A component parameter of a `[ForEach]` method that counts as written only on the rows the method writes: `Value`, `Write()`, `SetIfChanged(value)` ([change tracking](/en/docs/guide/change-tracking)). |
 | `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interfaces, attributes | System groups (with filters through interfaces) and ordering. |
 | `SystemErrorPolicy` | enum | `Throw` (default) or `Disable`: what an exception in a system does. |
@@ -134,8 +135,8 @@ need a `ref` and are tracked writes.
 | `bag.RemoveAtSwapBack(i)` | O(1) | the last element moves into `i` |
 | `bag.Clear()` | O(1), O(count) for elements with references | keeps the capacity |
 | `bag.EnsureCapacity(n)` / `AsSpan()` | O(count) when it grows / O(1) | `AsSpan()` is writable |
-| `bag.SetCount(n)` | O(elements added or removed) | added elements are `default`; allocates only when the buffer grows |
-| `bag.TrimExcess()` | O(count) | reallocates to the count; an empty list holds no array |
+| `bag.SetCount(n)` | O(elements added or removed) | returns the span to write (`AsSpan()`); added elements are `default`; allocates only when the buffer grows |
+| `bag.TrimExcess()` | O(count) | reallocates to the count; an empty buffer gives its list back to the pool and holds none |
 | `DynamicBuffer<T>.PoolCapacity` | O(1) | the longest list a dead buffer of `T` gives back to its thread's pool (default 4 KB of elements); per element type, process-wide, set at startup |
 
 A snapshot, a save or a clone of a buffer column copies the elements: O(elements), a new list per entity.
@@ -232,7 +233,7 @@ columns); `Load` O(rows). A taken key throws `InvalidOperationException` (a save
 | --- | --- | --- |
 | `world.Capture()` / `Capture(into)` | O(entities × components + tables + singletons) | copies by value; `Capture(into)` reuses an earlier snapshot's arrays and allocates nothing once they are large enough; not while a pass iterates |
 | `world.Restore(snapshot)` | O(entities × components + tables + singletons) | snapshot handles are valid again, later ones stale; every restored row counts as written (or removed) |
-| `world.Save(output)` | O(entities × components) | the world as bytes: unmanaged rows raw, managed values through Nino; allocates nothing once its buffers are large enough |
+| `world.Save(output)` | O(entities × components) | the world as bytes: unmanaged rows raw, managed values through Nino; allocates nothing once its buffers are large enough; a `NinoArrayBufferWriter` output is written in place, another writer gets one copy |
 | `world.SaveWithout(output, in ComponentSet exclude)` | O(entities × components) | without the components and singletons of `exclude` (a `Disabled<T>` goes with its `T`), which need no formatter; allocates nothing once its buffers are large enough |
 | `world.Load(input, markWritten)` | O(entities × components) | entities keep their ids; a changed component layout throws `InvalidDataException` and leaves the world as it was; `markWritten: false`: the loaded rows count as never written |
 | `world.LoadKeeping(input, in ComponentSet keep, markWritten)` | O(entities × components) | the singletons of `keep` stay exactly as the world has them (the save's values are skipped); a component in `keep` throws `ArgumentException`; `markWritten` applies to the loaded rows |

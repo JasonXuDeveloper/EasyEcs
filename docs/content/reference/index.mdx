@@ -63,6 +63,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`QueryItem<T1..T9>`](/en/docs/reference/queryitem) | One query result: the entity and refs into its row. |
 | [`ReadEnumerator<T1..T9>`](/en/docs/reference/readenumerator) | Allocation-free read-only query enumerator; safe under structural changes during iteration (same visiting rules as ForEach). |
 | [`ReadItem<T1..T9>`](/en/docs/reference/readitem) | One read-only query result: the entity and read-only refs into its row (nothing is stamped). |
+| [`ReadOnlyMaybe<T>`](/en/docs/reference/readonlymaybe) | An optional component of the entity a [ForEach] method visits, read-only: ReadOnlyMaybe.Value is a ref readonly, so the method is scheduled as a reader of T, a tracked component is never stamped, and an indexed one (IIndexed) may be taken, which a Maybe may not (EECS015: its ref could change the key behind the index's back). |
 | [`RelationIndex<T>.Sources`](/en/docs/reference/relationindex-sources) | Enumerates the entities linking to one target (foreach), once per link. |
 | [`Retired`](/en/docs/reference/retired) | Tag of a retired entity: Destroy found ICleanupComponents on it, so it took the other components away and kept the entity alive until its last cleanup component is removed (then the entity is freed: destroyed). |
 | [`SingletonRef<T>`](/en/docs/reference/singletonref) | Handle to one world's singleton T. |

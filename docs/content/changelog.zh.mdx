@@ -20,8 +20,10 @@ icon: RotateCcwClock
 - 分析器规则 [EECS053](/zh/docs/guide/analyzer#eecs053)（警告，有代码修复）：`[ForEach]` 方法以 `ref` 传入追踪变化的组件（`ITracked`、
   `DynamicBuffer<T>`），却有路径不写它（提前 `return`、写在 `if` 里），访问到的每一行都会被打 tick，`[Changed<T>]` 系统就会看到它根本没改过的行。
   修复改成 `Mut<T>`（写入改成 `x.Write()`，读取改成 `x.Value`），只给写过的行打 tick。
-- `buffer.SetCount(n)` 设置 `DynamicBuffer<T>` 的元素个数，新增的元素为 `default`，于是整个缓冲可以通过 `AsSpan()` 直接写，不用先在栈上填好再用
-  `AddRange` 复制进去。见[动态缓冲](/zh/docs/guide/dynamic-buffers)。
+- `buffer.SetCount(n)` 设置 `DynamicBuffer<T>` 的元素个数，新增的元素为 `default`，并返回要写的 span，于是整个缓冲可以原地写好，不用先在栈上填好再用
+  `AddRange` 复制进去。见[动态缓冲](/zh/docs/guide/dynamic-buffers#set-count)。
+- `ReadOnlyMaybe<T>`：`[ForEach]` 方法的可选组件参数，方法只读它：`Value` 是 `ref readonly`，被追踪的组件永远不打 tick，带索引的组件也能用
+  （EECS015 接受它，带索引组件的 `Maybe<T>` 仍然报错）。`Maybe<T>` 可以转换成它。见[系统](/zh/docs/guide/systems#read-only-maybe)。
 - `world.SaveEntitiesWithout(output, ids, set)` 保存一组实体，写 `ComponentSet` 以外的所有组件：加载后会重新算出的数据不进存档。见
   [迁移与卸载](/zh/docs/guide/migration-and-unload#records)。
 
@@ -31,6 +33,15 @@ icon: RotateCcwClock
   `[ForEach]` 的第一次写入用，以前那里要分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)。
 - 预制体上的空缓冲（不带元素的 `SetBuffer<T>()`）不再给实例一个列表：实例写入第一个元素时从池里取，不再新建一个再扩容。
 - `LoadEntities` 把缓冲读进来的那个列表直接交给加载出的实体，不再复制到另一个列表。
+- 对空缓冲调用 `buffer.TrimExcess()` 会把列表还给回收池：缓冲不再持有列表，任何 `T` 缓冲的下一次首次写入会重用它，所以只在实体活跃时才用的临时缓冲，
+  空闲期间不占内存。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)。
+
+### 需要修改代码的变更 [#v4-8-0-breaking]
+
+- 分析器规则 [EECS027](/zh/docs/guide/analyzer#eecs027) 也会报告通过被访问的 `Entity` 逐行查带索引的组件；改成 `in` 参数，部分实体没有它时用
+  `ReadOnlyMaybe<T>`。把警告当错误的构建会看到它：见[迁移指南](/zh/docs/migration#v4-8-analyzer)。
+- 分析器规则 [EECS030](/zh/docs/guide/analyzer#eecs030) 也会报告整个方法体只是对自己实体做一次结构变更、每行都一样的 `[ForEach]` 方法
+  （`[ForEach, With<Dead>] static void Bury(Entity e) => e.Destroy();`）：在 `OnUpdate` 里一次批量调用（`World.DestroyAll<Dead>()`）就能一次改完整张表（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
 
 ## 4.7.0 [#v4-7-0]
 

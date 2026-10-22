@@ -39,3 +39,13 @@ public ref T Value { get; }
 ```
 
 按 `ref` 返回组件；实体没有它时抛异常（先检查 [`Maybe.HasValue`](/zh/docs/reference/maybe#hasvalue)）。
+
+## 运算符 [#operators]
+
+### `operator implicit` [#op-implicit]
+
+```csharp
+public static implicit operator ReadOnlyMaybe<T>(Maybe<T> maybe);
+```
+
+同一个组件的只读版本：传给 [`ReadOnlyMaybe`](/zh/docs/reference/readonlymaybe) 参数的就是它。

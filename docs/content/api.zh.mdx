@@ -47,6 +47,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `EcsSystem` | abstract class | `World`、`UpdateInterval`、`UpdatePhase`、`Enabled`、`Error`、`Stats`、`LastRunTick`、`RunCount`；`OnCreate` / `OnUpdate` / `OnDestroy`（[系统](/zh/docs/guide/systems)）。 |
 | `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`Slices = N`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`。 |
 | `Maybe<T>` | ref struct | `[ForEach]` 方法的可选组件参数：`HasValue`、`Value`。 |
+| `ReadOnlyMaybe<T>` | ref struct | 只读版本：`Value` 是 `ref readonly`，从不打 tick，带索引的组件也能用；`Maybe<T>` 可以转换成它。 |
 | `Mut<T>` | ref struct | `[ForEach]` 方法的组件参数，只有方法真正写了的行才算写入：`Value`、`Write()`、`SetIfChanged(value)`（[变更追踪](/zh/docs/guide/change-tracking)）。 |
 | `ISystemGroup`、`ISystemGroupWith<T>`、`ISystemGroupWithout<T>`、`[UpdateInGroup<T>]`、`[UpdateBefore<T>]`、`[UpdateAfter<T>]` | 接口、特性 | 系统分组（可通过接口加过滤条件）与排序。 |
 | `SystemErrorPolicy` | 枚举 | `Throw`（默认）或 `Disable`：系统抛异常时怎么办。 |
@@ -129,8 +130,8 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `bag.RemoveAtSwapBack(i)` | O(1) | 最后一个元素移到 `i` |
 | `bag.Clear()` | O(1)，元素含引用时 O(count) | 保留容量 |
 | `bag.EnsureCapacity(n)` / `AsSpan()` | 扩容时 O(count) / O(1) | `AsSpan()` 可写 |
-| `bag.SetCount(n)` | O(增加或去掉的元素数) | 增加的元素为 `default`；只有缓冲扩容时分配 |
-| `bag.TrimExcess()` | O(count) | 重新分配到 count 大小；空列表不持有数组 |
+| `bag.SetCount(n)` | O(增加或去掉的元素数) | 返回要写的 span（`AsSpan()`）；增加的元素为 `default`；只有缓冲扩容时分配 |
+| `bag.TrimExcess()` | O(count) | 重新分配到 count 大小；空缓冲把列表还给池，不再持有列表 |
 | `DynamicBuffer<T>.PoolCapacity` | O(1) | 销毁的 `T` 缓冲还给本线程回收池的列表最长多少个元素（默认 4 KB 能放下的个数）；按元素类型、整个进程生效，启动时设置 |
 
 快照、存档或克隆一列缓冲时会复制元素：O(元素数)，每个实体一个新列表。
@@ -225,7 +226,7 @@ World 保持原样。
 | --- | --- | --- |
 | `world.Capture()` / `Capture(into)` | O(实体数 × 组件数 + 表数 + 单例数) | 按值复制；`Capture(into)` 复用之前快照的数组，够大之后不再分配；遍历进行时不可用 |
 | `world.Restore(snapshot)` | O(实体数 × 组件数 + 表数 + 单例数) | 快照里的句柄重新有效，之后创建的句柄失效；每个恢复的行都算写入（或移除） |
-| `world.Save(output)` | O(实体数 × 组件数) | 把 World 写成字节：非托管行原样写出，托管值走 Nino；缓冲够大之后不再分配 |
+| `world.Save(output)` | O(实体数 × 组件数) | 把 World 写成字节：非托管行原样写出，托管值走 Nino；缓冲够大之后不再分配；输出是 `NinoArrayBufferWriter` 时原地写入，其他 writer 多复制一次 |
 | `world.SaveWithout(output, in ComponentSet exclude)` | O(实体数 × 组件数) | 不写 `exclude` 里的组件和单例（`Disabled<T>` 跟着 `T` 一起不写），这些类型不需要格式化器；缓冲够大之后不再分配 |
 | `world.Load(input, markWritten)` | O(实体数 × 组件数) | 实体保留原 id；组件布局变了会抛 `InvalidDataException`，World 保持原样；`markWritten: false`：加载的行算作从未写过 |
 | `world.LoadKeeping(input, in ComponentSet keep, markWritten)` | O(实体数 × 组件数) | `keep` 里的单例保持 World 现在的样子（跳过存档里的值）；`keep` 里有组件时抛 `ArgumentException`；`markWritten` 只作用于加载的行 |
