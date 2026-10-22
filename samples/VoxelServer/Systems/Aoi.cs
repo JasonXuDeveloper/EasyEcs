@@ -28,7 +28,7 @@ namespace VoxelServer;
 public class AoiViewSystem : EcsSystem
 {
     [ForEach, With<Player>, Changed<InChunk>]
-    void Look(Entity player, in InChunk at, ReadOnlyMaybe<ViewCenter> view, in Clock clock, ref Stats stats)
+    void Look(Entity player, in InChunk at, ReadOnlyMaybe<ViewCenter> view, in Clock clock, in Regions regions, ref Stats stats)
     {
         bool placed = view.HasValue;                                      // none yet: the player just appeared
         var from = placed ? view.Value.Chunk : default;
@@ -42,7 +42,10 @@ public class AoiViewSystem : EcsSystem
                 stats.CameIntoView += World.InChunkIndex.Count(chunk);
             }
             else if (loaded == default && !World.LoadRequestIndex.TryGet(chunk, out _))
-                World.CreateEntity(new LoadRequest(chunk));
+            {
+                var request = World.CreateEntity(new LoadRequest(chunk), new Saved());
+                if (!regions.Files.Has(chunk)) request.RemoveSaved();     // never saved: generated
+            }
         }
         if (placed) Release(from, at.Pos, true, clock.Tick, ref stats);
         player.SetViewCenter(at.Pos);                                     // last: the view is not read after it

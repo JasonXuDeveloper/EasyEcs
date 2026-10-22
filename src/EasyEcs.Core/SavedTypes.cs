@@ -62,6 +62,17 @@ public static class SavedTypes
     }
 
     /// <summary>
+    /// <see cref="UniqueIndex{T,TKey}"/> for a direct-indexed component (<see cref="IDirectIndexed{TKey}"/>): its worlds'
+    /// indexes also keep the slot array.
+    /// </summary>
+    public static void DirectIndex<T, TKey>() where T : struct, IComponent, IDirectIndexed<TKey> where TKey : IEquatable<TKey>
+    {
+        if (typeof(TKey) == typeof(EntityId)) return;
+        KeySlotsOf<T>.Map ??= new KeySlots<T, TKey>();
+        UniqueIndex<T, TKey>();
+    }
+
+    /// <summary>
     /// Tell <see cref="World.LoadEntities"/> where the <see cref="EntityId"/> fields of <typeparamref name="T"/> (a
     /// component or a buffer's element) are, so a migration points them at the moved entities. Each accessor returns
     /// one field of the value it is given (generated with <c>UnsafeAccessor</c>, private fields too).

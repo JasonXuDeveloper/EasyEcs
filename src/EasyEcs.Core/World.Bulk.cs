@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace EasyEcs;
@@ -188,12 +189,15 @@ public sealed partial class World
         {
             table.MarkPresentWord(table.ColumnIndex(Bit), word, rows);
             ref T row0 = ref table.Ref<T>(Bit, 0);
-            for (ulong r = rows; r != 0; r &= r - 1)
-            {
-                int slot = (word << 6) + BitOperations.TrailingZeroCount(r);
-                Unsafe.Add(ref row0, slot) = Value;
-                if (ComponentType<T>.Watched) world.Written(table.Slots[slot].Index, table.Slots[slot].Version, in Value);
-            }
+            if (rows == ulong.MaxValue && !ComponentType<T>.Watched)
+                MemoryMarshal.CreateSpan(ref Unsafe.Add(ref row0, word << 6), 64).Fill(Value); // a whole word: one fill
+            else
+                for (ulong r = rows; r != 0; r &= r - 1)
+                {
+                    int slot = (word << 6) + BitOperations.TrailingZeroCount(r);
+                    Unsafe.Add(ref row0, slot) = Value;
+                    if (ComponentType<T>.Watched) world.Written(table.Slots[slot].Index, table.Slots[slot].Version, in Value);
+                }
 
             table.StampWord<T>(word, rows, world.ChangeTick); // the word's summary once, not per row
         }

@@ -63,6 +63,57 @@ public class QueryTests
     }
 
     [Test]
+    public void CollectIdsTakesABoundedBatchInQueryOrder()
+    {
+        using var world = new World();
+        var all = new Entity[200];
+        world.CreateEntities(all, new Health(1));
+        for (int i = 0; i < all.Length; i++)
+        {
+            if (i % 3 == 0) all[i].Set(new Stun(i));               // a second table
+            if (i % 5 == 0) all[i].Set(new Frozen());              // a third
+            if (i % 7 == 0) all[i].Remove<Health>();               // a presence bit: rows to test
+        }
+
+        all[11].Destroy();
+        var awake = QueryFilter.Create().Without<Frozen>();
+        var expected = new List<EntityId>();
+        foreach (var item in world.Read<Health>(awake)) expected.Add(item.Entity);
+
+        Span<EntityId> batch = stackalloc EntityId[expected.Count + 10];
+        int count = world.CollectIds<Health>(batch, awake);      // room for every one: all of them, in query order
+        Assert.That(batch[..count].ToArray(), Is.EqualTo(expected.ToArray()));
+
+        for (int size = 0; size < 70; size += 13)                   // a bounded batch: the first ones
+        {
+            var some = new EntityId[size];
+            Assert.That(world.CollectIds<Health>(some, awake), Is.EqualTo(size));
+            Assert.That(some, Is.EqualTo(expected.GetRange(0, size).ToArray()));
+        }
+
+        Span<EntityId> two = stackalloc EntityId[2];                // two components, and a table every row of which passes
+        Assert.That(world.CollectIds<Health, Stun>(two), Is.EqualTo(2));
+        Assert.That(world.CollectIds<Marked>(two), Is.Zero);        // no entity
+        Assert.That(world.DestroyEntities(batch[..count]), Is.EqualTo(count)); // the use it is for: a batch of work
+        Assert.That(world.Count<Health>(awake), Is.Zero);
+    }
+
+    [Test]
+    public void CollectIdsDoesNotAllocate()
+    {
+        using var world = new World();
+        world.CreateEntities(new Entity[300], new Health(1));
+        var filter = QueryFilter.Create().With<Health>();
+        var into = new EntityId[100];
+        world.CollectIds<Health>(into, filter);
+        world.CollectIds<Health>(into);                                       // each query's match is cached by its first call
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        int count = world.CollectIds<Health>(into, filter) + world.CollectIds<Health>(into);
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(count, Is.EqualTo(200));
+    }
+
+    [Test]
     public void WithAnyNeedsOneOfTheComponents()
     {
         var halted = QueryFilter.Create().WithAny<Frozen>().WithAny<Dead>();

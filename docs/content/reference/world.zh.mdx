@@ -206,6 +206,26 @@ public ValueIndex<ChildOf, EntityId>.Matches Children(EntityId parent);
 - `world.Children(parent).Count`：O(1)
 - `world.Children(parent)`：O(1)，然后每个子实体 O(1)
 
+### `CollectIds` [#collectids]
+
+```csharp
+public int CollectIds<T1>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent;
+public int CollectIds<T1, T2>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent;
+public int CollectIds<T1, T2, T3>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
+public int CollectIds<T1, T2, T3, T4>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
+public int CollectIds<T1, T2, T3, T4, T5>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
+public int CollectIds<T1, T2, T3, T4, T5, T6>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
+public int CollectIds<T1, T2, T3, T4, T5, T6, T7>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
+public int CollectIds<T1, T2, T3, T4, T5, T6, T7, T8>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
+public int CollectIds<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
+```
+
+组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
+
+把拥有 `T1, T2` 全部组件（并且满足 `filter`）的存活实体的 id 写进 `into`，顺序和 `Query`、`Read` 访问它们的顺序一样，写满为止，返回写了几个：一批有界的工作（一个 tick 的前几个请求、接下来要卸载的区块），交给 `DestroyEntities`、`SaveEntities` 或者会做结构变更的循环，查询循环里不能做这些。O(匹配的原型数)，加上写满 `into` 之前读过的行（所有行都匹配的表是一次复制）。零分配。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(M)，再加 `into` 写满前读过的行
+
 ### `Count` [#count]
 
 ```csharp
@@ -1032,3 +1052,13 @@ public void Update<TGroup>() where TGroup : struct, ISystemGroup;
 
 - `world.Update()`：分组内所有系统之和
 - `world.Update<TGroup>()`：分组内所有系统之和
+
+### `UpdateCount` [#updatecount]
+
+```csharp
+public long UpdateCount<TGroup>() where TGroup : struct, ISystemGroup;
+```
+
+到目前为止分组 `TGroup` 的 [`World.Update`](/zh/docs/reference/world#update-2) 调用次数，包括正在执行的这一次（第一次之前是 0；从没加过系统的分组也是 0）：分组里系统的 [`EcsSystem.UpdateInterval`](/zh/docs/reference/ecssystem#updateinterval) 就按这个计数算（计数对间隔取模等于系统的 [`EcsSystem.UpdatePhase`](/zh/docs/reference/ecssystem#updatephase) 时，系统执行）。O(1)。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(1)

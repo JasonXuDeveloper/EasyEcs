@@ -85,6 +85,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 |---|---|
 | [`ICleanupComponent`](/en/docs/reference/icleanupcomponent) | Marks a component that outlives the destruction of its entity: destroying an entity holding one removes its other components and adds the Retired tag instead of freeing it, so a system can release what the component stands for (a socket, a reservation, a slot in another service) and then remove it. |
 | [`IComponent`](/en/docs/reference/icomponent) | Marks a struct as component data. |
+| [`IDirectIndexed<TKey>`](/en/docs/reference/idirectindexed) | A unique component whose keys map to a bounded range of slots (grid cells, tiles, rooms, player slots): its index keeps an array of IDirectIndexed.Slots entries beside the hash, the entry IDirectIndexed.SlotOf of a key holding the key's entity, so Get / TryGet and the uniqueness check of a write read one array entry instead of probing the hash. |
 | [`IForEach<T1..T9>`](/en/docs/reference/iforeach) | Struct callback for World.ForEach. |
 | [`IForEachBatch<T1..T9>`](/en/docs/reference/iforeachbatch) | Struct callback for World.ForEachBatch: receives whole runs of rows as spans, one per component, so the job can process them with SIMD (System.Numerics.Vector, MemoryMarshal.Cast), and their entities (built only when indexed). |
 | [`IForEachEntity<T1..T9>`](/en/docs/reference/iforeachentity) | Like IForEach but also receives the Entity handle, built from the archetype's entity rows (id and version side by side) without a per-entity lookup. |
