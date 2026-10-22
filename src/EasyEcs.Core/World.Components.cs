@@ -163,10 +163,6 @@ public sealed partial class World
         _dirty[_dirtyCount++] = archetype;
     }
 
-    /// <summary>Ref to <typeparamref name="T"/> of entity <paramref name="id"/>, whose archetype must have it.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal ref T ColumnRef<T>(ushort bit, int id) where T : struct, IComponent => ref Row<T>(ref MetaRef(id), bit);
-
     /// <summary>Ref to <typeparamref name="T"/> in the row of <paramref name="meta"/>, whose archetype must have it.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static ref T Row<T>(scoped ref EntityMeta meta, ushort bit) where T : struct, IComponent =>
