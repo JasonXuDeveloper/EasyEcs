@@ -294,6 +294,26 @@ public class GeneratorTests
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "Vector.LoadUnsafe").Count, Is.EqualTo(2), generated); // B only: its batch and masked forms (and their Vector512.LoadUnsafe)
     }
 
+    // Each field alike (field i of every component to field i, the same operations): the columns as flat lanes.
+    [TestCase("[ForEach] static void A(ref Two t, in Two u) { t.A += u.A * 2; t.B += u.B * 2; }", true)]
+    [TestCase("[ForEach] static void A(ref Two t, in G g) { if (t.A > 1) t.A = 0; if (t.B > 1) t.B = 0; t.A -= g.Pull; t.B -= g.Pull; }", true)]
+    [TestCase("[ForEach] static void A(ref Two t, in Two u) { t.A += u.A * 2; t.B += u.B * 3; }", false)]   // other operations
+    [TestCase("[ForEach] static void A(ref Two t, in Two u) { t.A += u.B; t.B += u.A; }", false)]          // field A from B
+    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t.A += u.A;", false)]                      // B left alone
+    [TestCase("[ForEach] static void A(ref Two t, in Two u) { float d = u.A; t.A += d; t.B += u.B; }", false)] // a local
+    [TestCase("[ForEach] static void A(ref Two t, in F f) { t.A += f.V; t.B += f.V; }", false)]            // one field and two
+    [TestCase("[ForEach] static void A(ref Mixed m) { m.A += 1; m.B += 1; }", false)]                       // float and int
+    public void ComponentsWhoseFieldsMatchAreFlatLanes(string members, bool flat)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"public partial class S : EcsSystem {{ {members} }}"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated.Contains("lanes = rows * 2;"), Is.EqualTo(flat), generated);
+        Assert.That(generated.Contains("for (nint last = rows - global::System.Numerics.Vector<"), Is.True, generated); // masked words, or the loop
+        if (flat) Assert.That(generated, Does.Contain("i /= 2;").And.Contain("Interleaved.Load2("), generated);   // the masked Execute deinterleaves
+    }
+
     // The Vector512 loop is the Vector<T> loop's text with the vector type's token replaced: user types named
     // Vector-something in the setup (a context value, a singleton's field) stay as written.
     [TestCase("public static partial class R { [ForEach(Simd = SimdMode.Require)] public static void A(ref F f, in System.Numerics.Vector3 wind) => f.V += wind.X * wind.Y; }")]

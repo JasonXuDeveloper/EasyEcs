@@ -366,7 +366,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 for (int k = 1; k <= components.Length; k++)
                     sb.Append($"{indent}ref {components[k - 1]} r{k} = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{k});\n");
                 sb.Append($"{indent}nint rows = {(components.Length > 0 ? "c1.Length" : "entities.Length")};\n");
-                if (method.Simd is { } simd) EmitVectorLoop(sb, simd, components, indent, call, masked);
+                if (method.Simd is { Flat: { } flat } && !masked) EmitFlatLoop(sb, flat, method.Simd, components, indent);
+                else if (method.Simd is { } simd) EmitVectorLoop(sb, simd, components, indent, call, masked);
                 sb.Append(method.Simd == null
                     ? $"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n"
                     : masked
@@ -465,6 +466,31 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append(text.ToString().Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512)
             .Replace(Accelerated, "IsAccelerated512").Replace(LanesForm, "In512"));
         sb.Append(text.Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(LanesForm, ""));
+    }
+
+    /// <summary>
+    /// The loop of a method that treats each field alike (<see cref="Kernel.FlatCode"/>): the columns as flat arrays of
+    /// <c>rows * fields</c> lanes, no shuffles. The vector loops end at a multiple of <c>Count * fields</c> lanes, whole
+    /// rows, so <c>i</c> becomes a row again for the rows left, which run the method.
+    /// </summary>
+    private static void EmitFlatLoop(StringBuilder sb, Kernel.FlatCode flat, Kernel.Code simd, string[] components, string indent)
+    {
+        for (int k = 1; k <= components.Length; k++)
+            sb.Append($"{indent}ref {simd.Columns[k - 1]} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref r{k});\n");
+        sb.Append($"{indent}nint i = 0, lanes = rows * {flat.Fields}; // i counts lanes: {flat.Fields} per row\n");
+        var loop = new StringBuilder();
+        string count = $"{Kernel.V}<{simd.Columns[0]}>.Count";
+        string chunk = $"{count} * {flat.Fields}"; // whole vectors of whole rows
+        loop.Append($"{indent}if ({Kernel.V}.IsHardwareAccelerated && lanes - i >= {chunk})\n{indent}{{\n");
+        string inner = indent + "    ", body = inner + "    ";
+        foreach (var line in flat.Setup.Split('\n')) if (line.Length > 0) loop.Append(inner).Append(line).Append('\n');
+        loop.Append($"{inner}for (nint end = lanes - (lanes - i) % ({chunk}); i < end; i += {count})\n{inner}{{\n");
+        foreach (var line in (flat.Body + flat.Stores).Split('\n')) if (line.Length > 0) loop.Append(body).Append(line).Append('\n');
+        loop.Append($"{inner}}}\n{indent}}}\n");
+        var text = new StringBuilder(loop.ToString());
+        sb.Append(text.ToString().Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512));
+        sb.Append(text.Replace(Kernel.V, Vector));
+        sb.Append($"{indent}i /= {flat.Fields}; // whole rows: the row the rows left start at\n");
     }
 
     // Tokens of EmitVectorLoop's text (U+0001 occurs in no C# token outside a literal): Interleaved.IsAccelerated /

@@ -14,7 +14,8 @@ namespace EasyEcs.Benchmark;
 /// (<c>HandWritten512</c>, the widest the hardware may have), and as the generator's vector loop of the same per-row
 /// method (<c>Generated</c>, Kernel.cs). <c>Step</c> computes (a clamp, a branch on random data); <c>Integrate</c> and
 /// <c>Count</c> stream memory (one float multiply-add, one int increment per row). <c>Move2</c> / <c>Move3</c> /
-/// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity), <c>Seek</c> (3 floats: a direction, its length, a
+/// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity: each field alike, a flat loop over the columns' lanes;
+/// <c>Move2HandCast</c> is the same by hand, the columns cast to floats), <c>Seek</c> (3 floats: a direction, its length, a
 /// division) and <c>Travel</c> (3 doubles) take components of several fields, which the vector loop splits into one
 /// vector per field (Interleaved), in a world of their own. <c>Clamp</c> (Math.Clamp by a singleton's bounds, checked
 /// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
@@ -149,6 +150,9 @@ public class KernelBenchmark
 
     [Benchmark]
     public void Move2Generated() => Kernels.Move2(_fields);
+
+    [Benchmark]
+    public void Move2HandCast() => Kernels.Move2Cast(_fields);
 
     [Benchmark]
     public void Move3Scalar()
@@ -476,6 +480,19 @@ public class KernelBenchmark
             bool heavy = mass.Value > 2.5f;
             if (fast && !heavy) heat.Value = Math.Clamp(heat.Value, -5f, 5f);
             else if (!fast || heat.Value is > 50 and < 100) heat.Value = MathF.Max(heat.Value - 1, -50);
+        }
+
+        // Move2 by hand: both columns cast to flat float lanes (a row's X and Y are consecutive), one vector per step.
+        [ForEach]
+        internal static void Move2Cast(Span<P2> p, ReadOnlySpan<V2> v)
+        {
+            var pf = MemoryMarshal.Cast<P2, float>(p);
+            var vf = MemoryMarshal.Cast<V2, float>(v);
+            var dt = new Vector<float>(Dt);
+            int i = 0;
+            for (; i <= pf.Length - Vector<float>.Count; i += Vector<float>.Count)
+                (new Vector<float>(pf.Slice(i)) + new Vector<float>(vf.Slice(i)) * dt).CopyTo(pf.Slice(i));
+            for (; i < pf.Length; i++) pf[i] += vf[i] * Dt;
         }
 
         // What a person writes by hand for the same work: a batch method over the runs of rows.

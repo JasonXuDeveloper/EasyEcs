@@ -268,6 +268,41 @@ public static class FieldKernels
         c.Y ^= c.X >> 7;
     }
 
+    // Each field alike: a flat loop over the columns' lanes (no shuffles).
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Glide(ref Spot2 p, in Drift2 v)
+    {
+        p.X += v.X * Dt;
+        p.Y += v.Y * Dt;
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Bounce(ref Spot3 p, ref Drift3 v, float speed)
+    {
+        if (p.X > 5 || p.X < -5) v.X = -v.X; // a branch per field
+        if (p.Y > 5 || p.Y < -5) v.Y = -v.Y;
+        if (p.Z > 5 || p.Z < -5) v.Z = -v.Z;
+        p.X = MathF.FusedMultiplyAdd(v.X, speed, p.X);
+        p.Y = MathF.FusedMultiplyAdd(v.Y, speed, p.Y);
+        p.Z = MathF.FusedMultiplyAdd(v.Z, speed, p.Z);
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Shade(ref Color4 c)
+    {
+        c.R = MathF.Min(c.R * 0.5f, 1);
+        c.G = MathF.Min(c.G * 0.5f, 1);
+        c.B = MathF.Min(c.B * 0.5f, 1);
+        c.A = MathF.Min(c.A * 0.5f, 1);
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Scramble(ref Cell2 c)
+    {
+        c.X = c.X * 6364136223846793005L + 1442695040888963407L; // wraps
+        c.Y = c.Y * 6364136223846793005L + 1442695040888963407L;
+    }
+
     [ForEach]
     internal static void Mix(ref Hash4 h)
     {
@@ -371,6 +406,15 @@ public class KernelTests
             FieldKernels.Step, (ref Cell2 c, ref Heat _) => FieldKernels.Step(ref c));
         Check(count, (r, i) => new Hash4 { A = (uint)r.Next(), B = uint.MaxValue - (uint)i, C = (uint)r.Next(), D = (uint)i }, (r, i) => new Heat(),
             FieldKernels.Mix, (ref Hash4 h, ref Heat _) => FieldKernels.Mix(ref h));
+        Check(count, (r, i) => new Spot2 { X = NextFloat(r, i), Y = NextFloat(r, i + 1) }, (r, i) => new Drift2 { X = NextFloat(r, i + 2), Y = NextFloat(r, i + 3) },
+            FieldKernels.Glide, (ref Spot2 p, ref Drift2 v) => FieldKernels.Glide(ref p, in v));
+        Check(count, (r, i) => new Spot3 { X = NextFloat(r, i), Y = NextFloat(r, i + 1), Z = NextFloat(r, i + 2) },
+            (r, i) => new Drift3 { X = NextFloat(r, i + 3), Y = NextFloat(r, i + 4), Z = NextFloat(r, i + 5) },
+            w => FieldKernels.Bounce(w, 0.25f), (ref Spot3 p, ref Drift3 v) => FieldKernels.Bounce(ref p, ref v, 0.25f));
+        Check(count, (r, i) => new Color4(NextFloat(r, i), NextFloat(r, i + 1), NextFloat(r, i + 2), NextFloat(r, i + 3)),
+            (r, i) => new Heat(), FieldKernels.Shade, (ref Color4 c, ref Heat _) => FieldKernels.Shade(ref c));
+        Check(count, (r, i) => new Cell2 { X = r.NextInt64(long.MinValue, long.MaxValue), Y = r.NextInt64() }, (r, i) => new Heat(),
+            FieldKernels.Scramble, (ref Cell2 c, ref Heat _) => FieldKernels.Scramble(ref c));
     }
 
     [TestCaseSource(nameof(Lengths))]
@@ -447,6 +491,10 @@ public class KernelTests
             (ref Level l, ref Rank t) => MoreKernels.Clamp(ref l, in t, in bounds));
         CheckHoles(count, hole, (r, i) => new Far3 { X = NextDouble(r, i), Y = NextDouble(r, i + 1), Z = NextDouble(r, i + 2) },
             (r, i) => new Pace { Value = NextDouble(r, i + 3) }, FieldKernels.Travel, (ref Far3 p, ref Pace v) => FieldKernels.Travel(ref p, in v));
+        // A flat loop's job: its masked words take the deinterleaving loop.
+        CheckHoles(count, hole, (r, i) => new Spot3 { X = NextFloat(r, i), Y = NextFloat(r, i + 1), Z = NextFloat(r, i + 2) },
+            (r, i) => new Drift3 { X = NextFloat(r, i + 3), Y = NextFloat(r, i + 4), Z = NextFloat(r, i + 5) },
+            w => FieldKernels.Bounce(w, 0.25f), (ref Spot3 p, ref Drift3 v) => FieldKernels.Bounce(ref p, ref v, 0.25f));
     }
 
     /// <summary>A Math.Clamp that throws in a masked word throws for the row that has it, after the passing rows before it.</summary>
@@ -790,6 +838,8 @@ public class KernelTests
             FieldKernels.Drift(world);
             FieldKernels.Seek(world, 4f);
             FieldKernels.Travel(world);
+            FieldKernels.Glide(world);
+            FieldKernels.Bounce(world, 0.25f);
             MoreKernels.Clamp(world);
             MoreKernels.ClampLanes(world);
             MoreKernels.Blend(world);

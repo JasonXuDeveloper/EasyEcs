@@ -47,8 +47,23 @@ internal sealed class Kernel
     /// The body sets <c>__bail</c> when a lane would throw: the rows of that vector then run the method itself, before any
     /// store.
     /// </param>
+    /// <param name="Flat">
+    /// The loop over flat lanes when the method treats each field alike (<see cref="FlatCode"/>), else null: words of rows
+    /// of which only some pass still take the loop above.
+    /// </param>
     internal sealed record Code(EquatableArray<string> Columns, string Setup, string Body, string Stores, string MaskedBody,
-        string MaskedStores, string Restore, string Fold, int Size, string Mask, bool Interleaves, bool Bails);
+        string MaskedStores, string Restore, string Fold, int Size, string Mask, bool Interleaves, bool Bails, FlatCode? Flat);
+
+    /// <summary>
+    /// A loop that reads the columns as flat arrays of lanes, <paramref name="Fields"/> lanes per row (a row's fields are
+    /// consecutive): what the method does to field i of each component it does to every field i alike, so every lane
+    /// runs the same operations and no deinterleaving is needed. The loop variable <c>i</c> counts lanes.
+    /// </summary>
+    /// <param name="Setup">The uniform values and broadcasts.</param>
+    /// <param name="Body">Loads (one vector per component) and the method's statements for one field.</param>
+    /// <param name="Stores">The stores of the components the method writes.</param>
+    /// <param name="Fields">The fields of every component: lanes per row.</param>
+    internal sealed record FlatCode(string Setup, string Body, string Stores, int Fields);
 
     /// <summary>
     /// The vector type the loop names, as a token: <c>SystemGenerator.EmitVectorLoop</c> writes the Vector512 loop and the
@@ -79,6 +94,7 @@ internal sealed class Kernel
     private string? _alive; // lanes that have not returned yet, once a return under a condition cleared some
     private bool _bails;
     private int _temps;
+    private int _flat = -1; // translating the statements of field _flat of a flat loop: that field is lane 0, others refused
 
     private Kernel(int size)
     {
@@ -210,30 +226,36 @@ internal sealed class Kernel
         if (first == null) throw new Unsupported("it takes no component");
         if (model.GetOperation(syntax, ct) is not IMethodBodyOperation body) throw new Unsupported("it has no body");
 
-        var kernel = new Kernel(SizeOf(first));
-        for (int i = 0, k = 0; i < method.Parameters.Length; i++)
+        // The parameters of a kernel: the main one, and one per field of a flat loop (Flat) with the same setup.
+        Kernel Make(bool reductions)
         {
-            var p = method.Parameters[i];
-            var kind = Symbols.Classify(p, outside);
-            if (kind == Symbols.ParamKind.Component)
+            var made = new Kernel(SizeOf(first));
+            for (int i = 0, k = 0; i < method.Parameters.Length; i++)
             {
-                kernel._components[p] = (k + 1, components[k], p.RefKind == RefKind.Ref);
-                k++;
-                continue;
+                var p = method.Parameters[i];
+                var kind = Symbols.Classify(p, outside);
+                if (kind == Symbols.ParamKind.Component)
+                {
+                    made._components[p] = (k + 1, components[k], p.RefKind == RefKind.Ref);
+                    k++;
+                    continue;
+                }
+                if (kind == Symbols.ParamKind.Reduction)
+                {
+                    if (reductions) made._reductions[p] = made.Reduced(p, i, fieldOf(i, kind), Symbols.FastFloats(method), model.Compilation, ct);
+                    continue;
+                }
+                string name = $"__p{i}";
+                made._uniformParams[p] = name;
+                string source = fieldOf(i, kind);
+                made._setup.Append(p.RefKind == RefKind.None
+                    ? $"var {name} = {source};\n"
+                    : $"ref readonly {p.Type.ToDisplayString(Symbols.Fqn)} {name} = ref {source};\n");
             }
-            if (kind == Symbols.ParamKind.Reduction)
-            {
-                kernel._reductions[p] = kernel.Reduced(p, i, fieldOf(i, kind), Symbols.FastFloats(method), model.Compilation, ct);
-                continue;
-            }
-            string name = $"__p{i}";
-            kernel._uniformParams[p] = name;
-            string source = fieldOf(i, kind);
-            kernel._setup.Append(p.RefKind == RefKind.None
-                ? $"var {name} = {source};\n"
-                : $"ref readonly {p.Type.ToDisplayString(Symbols.Fqn)} {name} = ref {source};\n");
+            return made;
         }
 
+        var kernel = Make(true);
         // A component of several fields is deinterleaved into one vector per field (Interleaved: shuffles, which move
         // bits, so fields of another type of the same size are reinterpreted after the load), and written back whole:
         // the fields the method does not write keep the values loaded.
@@ -250,7 +272,8 @@ internal sealed class Kernel
                     loads.Append($"var __c{index}_{f} = {As(column, Elem(fields[f].Type), $"__s{index}_{f}")};\n");
             }
         }
-        kernel.Statement((IOperation?)body.BlockBody ?? body.ExpressionBody!, null);
+        var root = (IOperation?)body.BlockBody ?? body.ExpressionBody!;
+        kernel.Statement(root, null);
         // A masked word keeps the values loaded of what the method writes, and stores them back in the lanes that do not
         // pass: the rows are left as they were (their memory is the table's, whether a component is absent or not).
         var kept = new StringBuilder();
@@ -291,7 +314,80 @@ internal sealed class Kernel
         string hold = kernel._bails ? held.ToString() : "";
         return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
             kernel._setup.ToString(), prologue + loads + hold + kernel._body, stores.ToString(), prologue + loads + kept + held + kernel._body, masked.ToString(),
-            restore.ToString(), fold.ToString(), kernel._size, kernel._mask, kernel._components.Values.Any(c => c.Fields.Length > 1), kernel._bails);
+            restore.ToString(), fold.ToString(), kernel._size, kernel._mask, kernel._components.Values.Any(c => c.Fields.Length > 1), kernel._bails,
+            Flat(kernel, root, () => Make(false)));
+    }
+
+    /// <summary>
+    /// The flat loop of a method that treats each field alike, or null. Every component has the same 2 to
+    /// <see cref="MaxFields"/> fields of one type; the method declares no local, returns nowhere, reduces into nothing
+    /// and has no call that bails; each of its statements reads and writes field i of the components for one i; and
+    /// the statements of each field, translated with that field as the only lane, are one text (the same operations
+    /// on the same uniform values, in the same order). Then field i of every row runs those operations, as in the
+    /// method: lane by lane, the results are the method's bit for bit.
+    /// </summary>
+    private static FlatCode? Flat(Kernel main, IOperation root, System.Func<Kernel> make)
+    {
+        if (main._bails || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0) return null;
+        var components = main._components.Values.ToArray();
+        var type = components[0].Fields[0].Type;
+        int fields = components[0].Fields.Length;
+        if (fields < 2 || components.Any(c => c.Fields.Length != fields || c.Fields.Any(f => !SymbolEqualityComparer.Default.Equals(f.Type, type))))
+            return null;
+
+        var statements = new List<IOperation>();
+        void Flatten(IOperation op)
+        {
+            if (op is IBlockOperation block) foreach (var inner in block.Operations) Flatten(inner);
+            else if (op is not IEmptyOperation) statements.Add(op);
+        }
+        Flatten(root);
+        var groups = new List<IOperation>[fields];
+        for (int f = 0; f < fields; f++) groups[f] = new List<IOperation>();
+        foreach (var statement in statements)
+        {
+            int field = -1;
+            foreach (var op in statement.DescendantsAndSelf())
+            {
+                if (main.LaneOf(op) is not { } lane) continue;
+                if (field >= 0 && lane.Field != field) return null; // a statement that mixes fields
+                field = lane.Field;
+            }
+            if (field < 0) return null;
+            groups[field].Add(statement);
+        }
+
+        string? setup = null, body = null;
+        Kernel? first = null;
+        for (int f = 0; f < fields; f++)
+        {
+            if (groups[f].Count == 0) return null; // a field the method leaves alone: a flat loop would not
+            var kernel = make();
+            kernel._flat = f;
+            try
+            {
+                foreach (var statement in groups[f]) kernel.Statement(statement, null);
+            }
+            catch (Unsupported)
+            {
+                return null;
+            }
+            if (f == 0)
+            {
+                (setup, body, first) = (kernel._setup.ToString(), kernel._body.ToString(), kernel);
+                continue;
+            }
+            if (kernel._setup.ToString() != setup || kernel._body.ToString() != body) return null;
+        }
+
+        var loads = new StringBuilder();
+        var stores = new StringBuilder();
+        foreach (var (index, _, _) in first!._components.Values.OrderBy(c => c.Index))
+        {
+            loads.Append($"var __c{index}_0 = {V}.LoadUnsafe(ref e{index}, (nuint)i);\n");
+            if (first._written.Contains(index)) stores.Append($"{V}.StoreUnsafe(__c{index}_0, ref e{index}, (nuint)i);\n");
+        }
+        return new FlatCode(setup!, loads + body, stores.ToString(), fields);
     }
 
     /// <summary>
@@ -621,7 +717,11 @@ internal sealed class Kernel
             return null;
         for (int f = 0; f < c.Fields.Length; f++)
             if (SymbolEqualityComparer.Default.Equals(member, c.Fields[f]) || SymbolEqualityComparer.Default.Equals(member, c.Fields[f].AssociatedSymbol))
-                return (c.Index, f, c.Ref);
+            {
+                if (_flat < 0) return (c.Index, f, c.Ref);
+                if (f != _flat) throw new Unsupported("a statement mixes fields"); // Flat checked this; never reported
+                return (c.Index, 0, c.Ref);
+            }
         return null;
     }
 
