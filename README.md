@@ -62,7 +62,7 @@ dotnet add package EasyEcs        # net10.0 · source generator, analyzer and Ni
 - **Prefabs that stay out of your queries.** A `Prefab` is a recipe of component values that belongs to no world:
   `world.Instantiate(prefab)` spawns from it (a whole wave in one pass), and no system ever has to filter templates
   out. `entity.Clone()` copies a living entity.
-- **Mistakes fail the build.** The bundled analyzer (EECS002-EECS054, with code fixes) reports invalid `[ForEach]`
+- **Mistakes fail the build.** The bundled analyzer (EECS002-EECS061, with code fixes) reports invalid `[ForEach]`
   methods and systems, class components, stateful systems, systems that reference each other, batch methods mixing
   spans with per-entity parameters, parallel methods that would race, writes through read-only parameters, copied
   dynamic buffers, structural changes off the owner thread, indexed components written behind their index's back,
@@ -96,7 +96,7 @@ with what each costs and when to use it, and [API and complexity](https://ecs.xg
 - **[Threads](https://ecs.xgamedev.net/docs/guide/threading)**: one owner thread per world, parallel systems and parallel
   `[ForEach]` methods, Native AOT.
 - **Tools**: [per-system timing, schedule, introspection, trimming](https://ecs.xgamedev.net/docs/guide/diagnostics),
-  [the analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) (EECS002-EECS054, with code fixes).
+  [the analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) (EECS002-EECS061, with code fixes).
 
 ## Example
 

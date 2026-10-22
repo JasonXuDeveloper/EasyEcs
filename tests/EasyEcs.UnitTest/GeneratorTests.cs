@@ -304,6 +304,16 @@ public class GeneratorTests
         Assert.That(generated, Does.Not.Contain("GeneratedUpdate").And.Not.Contain("GeneratedAccess"));
     }
 
+    // Skipped by the generator == reported: a method the analyzer rejects gets no job.
+    [TestCase("[ForEach(Slices = 0)] static void A(ref P p) { }")]                                    // EECS035
+    [TestCase("[ForEach(ChunkRows = 64)] static void A(ref P p) { }")]                                // EECS054: not parallel
+    [TestCase("[ForEach(Parallel = true, ChunkRows = -1)] static void A(ref P p) { }")]               // EECS054: below 0
+    public void RejectedMethodsGetNoJob(string members)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"public class S : EcsSystem {{ {members} }}"), out var output, out _);
+        Assert.That(output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")), Is.Empty);
+    }
+
     [TestCase("[ForEach] static void A(Entity e, in P p) { if (e.Has<Q>()) _ = e.Id; }", true, "")]
     [TestCase("[ForEach] static void A(Entity e, ref P p, in Q q) => e.Remove<Q>();", false, "WriteMask => 1;")]
     [TestCase("[ForEach] static void A(Entity e, in P p) => Use(e); static void Use(Entity e) { }", false, "WriteMask => 0;")]
@@ -631,6 +641,59 @@ public class GeneratorTests
     public async Task UsageValidCodeIsNotReported(string source)
     {
         var errors = await Diagnose(Components, Extra, source);
+        Assert.That(errors, Is.Empty);
+    }
+
+    private const string Shared = """
+        public static class Counters
+        {
+            public static int Hits; public static bool Any; public static int Max { get; set; }
+            public static readonly object Gate = new();
+            public static readonly int[] Counts = new int[8];
+            public static readonly System.Collections.Generic.List<int> Seen = new();
+            public static readonly System.Collections.Concurrent.ConcurrentBag<int> Bag = new();
+            [System.ThreadStatic] public static int Mine;
+        }
+        public class Tally { public int N; }
+        """;
+
+    // EECS060: code on several threads writes memory they share; EECS061: a parallel job's field read after the call.
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) => Counters.Hits += p.V; }", "EECS060")]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) { if (p.V > 0) Counters.Hits++; } }", "EECS060")]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) => Counters.Max = p.V; }", "EECS060")]          // last writer wins
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) => Counters.Seen.Add(p.V); }", "EECS060")]      // a list's Add
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) => Helpers.Inc(ref Counters.Hits); }", "EECS060")]
+    [TestCase("public class S : EcsSystem { static readonly System.Collections.Generic.List<int> Scratch = new(); [ForEach(Parallel = true)] static void A(in P p) => Scratch.Add(p.V); }", "EECS060")] // readonly scratch: shared
+    [TestCase("public static class R { [ForEach(Parallel = true)] public static void A(in P p, Tally t) => t.N += p.V; }", "EECS060")]   // a context object
+    [TestCase("public struct J : IForEach<P>, INoStructuralChanges { public void Execute(ref P p) => Counters.Hits += p.V; } public static class U { public static void F(World w) { var j = new J(); w.ForEachParallel<P, J>(ref j); } }", "EECS060")]
+    [TestCase("public struct J : IForEachEntity<P>, INoStructuralChanges { public System.Collections.Generic.List<EntityId> Hits; public void Execute(Entity e, ref P p) { if (p.V > 0) Hits.Add(e.Id); } } public static class U { public static void F(World w) { var j = new J { Hits = new() }; w.ForEachEntityParallel<P, J>(ref j); } }", "EECS060")] // copies share the list
+    [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s); return s.Total; } }", "EECS061")]
+    [TestCase("public struct Seen : IForEach<P>, INoStructuralChanges { public bool Any; public void Execute(ref P p) { if (p.V > 0) Any = true; } } public static class U { public static bool F(World w) { var s = new Seen(); w.ForEachParallel<P, Seen>(ref s, default, 64); return s.Any; } }", "EECS061")]
+    public async Task ParallelWritesAreReported(string source, string id)
+    {
+        var errors = await Diagnose(Components, Extra, Shared, source);
+        Assert.That(errors, Does.Contain(id));
+        Assert.That(errors.Where(e => !e.StartsWith("CS")), Is.EqualTo(new[] { id }), "exactly one EasyEcs diagnostic");
+        Assert.That(errors.Where(e => e.StartsWith("CS")), Is.Empty, "the case compiles");
+    }
+
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(in P p) => Counters.Hits += p.V; }")]                                   // one thread
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) => System.Threading.Interlocked.Add(ref Counters.Hits, p.V); }")]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) { lock (Counters.Gate) Counters.Hits += p.V; } }")]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) { if (p.V > 0) Counters.Any = true; } }")]      // the same constant
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) => Counters.Bag.Add(p.V); }")]                  // concurrent
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) => Counters.Mine += p.V; }")]                   // [ThreadStatic]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p) => Counters.Counts[p.V & 7]++; }")]             // an element: rows may own it
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, in Q q) { var l = new System.Collections.Generic.List<int>(); l.Add(q.V); p.V = l.Count; } }")] // its own list
+    [TestCase("public static class R { [ForEach(Parallel = true)] public static void A(ref P p, int n) { n++; p.V += n; } }")]           // a copy
+    [TestCase("public struct J : IForEach<P>, INoStructuralChanges { public void Execute(ref P p) => Counters.Hits += p.V; } public static class U { public static void F(World w) { var j = new J(); w.ForEach<P, J>(ref j); } }")]
+    [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum(); w.ForEach<P, Sum>(ref s); return s.Total; } }")]
+    [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) { Total = p.V; p.V = Total * 2; } } public static class U { public static void F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s); } }")] // scratch per chunk
+    [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total, Limit; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum { Limit = 3 }; w.ForEachParallel<P, Sum>(ref s); return s.Limit; } }")] // not written
+    [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s); s.Total = 0; return s.Total; } }")] // set first
+    public async Task ParallelWritesThatDoNotRaceAreNotReported(string source)
+    {
+        var errors = await Diagnose(Components, Extra, Shared, source);
         Assert.That(errors, Is.Empty);
     }
 
@@ -1565,6 +1628,8 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V = e.Get<Q>().V; }", "EECS027")]               // not EECS033
     [TestCase("public static class U { public static void F(World w) { var e = w.CreateEntity(new P()); e.Set(new Boss()); } }", "EECS052")] // not EECS033
     [TestCase("public struct Pair { public Entity A; } public struct Pairs : IComponent { public int N; public DynamicBuffer<Pair> All; }", "EECS012", "EECS017")] // two mistakes, once each
+    [TestCase("public class S : EcsSystem { static int _hits; [ForEach(Parallel = true)] static void A(in P p) => _hits += p.V; }", "EECS007")] // not EECS060
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, ref Clock c) { c.Ticks += p.V; G.N++; } } public static class G { public static int N; }", "EECS010")] // not EECS060
     public async Task OneMistakeIsReportedOnce(string source, params string[] ids)
     {
         var all = await All(source);

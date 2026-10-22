@@ -196,7 +196,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
-        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows);
+        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows,
+        SharedWrite, LostJobWrite);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -221,6 +222,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterCompilationStartAction(AnalyzeOrderings);
         InitializePerformance(context);
         InitializeUsage(context);
+        InitializeParallel(context);
     }
 
     /// <summary>
@@ -759,7 +761,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (Symbols.SlicesProblem(method) is { } slices)
             context.ReportDiagnostic(Diagnostic.Create(BadSlices, location, method.Name, slices));
         if (Symbols.ChunkRowsProblem(method) is { } chunks)
-            context.ReportDiagnostic(Diagnostic.Create(BadChunkRows, location, method.Name, chunks));
+            context.ReportDiagnostic(Diagnostic.Create(BadChunkRows, location, // dropped, the method runs as without it
+                ImmutableDictionary<string, string?>.Empty.Add(FixKind, "ChunkRows"), method.Name, chunks));
         if (Symbols.Unnameable(method) is { } unnameable)
             context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, // the type its code fix makes internal, with its containers
                 Symbols.Hidden(unnameable)?.Locations.Where(l => l.IsInSource) ?? [],
