@@ -33,6 +33,12 @@ public static class Rules
     public const int MaxRequests = 256;        // chunks read or saved in one tick at most; the others wait a tick
     public const int MaxSaved = 512;           // entities a chunk takes to the region files at most, itself included
 
+    // What a server for `players` holds at its peak, reserved before the first tick (Program.cs) so that no tick grows a
+    // table, an index or a buffer pool: the peaks of this sample's runs with headroom. Loaded chunks grow with how far
+    // the players spread, not with how many they are (a crowd shares its chunks); zombies with the nights.
+    public static Capacity CapacityFor(int players) =>
+        new(Players: players, Chunks: 192 + players / 3, Zombies: 32 + 3 * players, Items: 128 + players);
+
     // The chunks a view reaches in each direction.
     public static int ChunksIn(float range) => (int)MathF.Ceiling(range / Terrain.Size);
 
@@ -60,4 +66,11 @@ public static class Rules
             return (int)(h & 255);
         }
     }
+}
+
+// The peak a server is sized for: see Rules.CapacityFor. Only some chunks flow at once, half of them at most.
+public readonly record struct Capacity(int Players, int Chunks, int Zombies, int Items)
+{
+    public int Flowing => Chunks / 2;
+    public int Requests => Chunks / 2;
 }

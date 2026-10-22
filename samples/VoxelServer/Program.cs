@@ -16,15 +16,18 @@ DynamicBuffer<Fluid>.PoolCapacity = Terrain.BlocksPerChunk;
 DynamicBuffer<NextFluid>.PoolCapacity = Terrain.BlocksPerChunk;
 DynamicBuffer<Surface>.PoolCapacity = Terrain.Size * Terrain.Size;
 DynamicBuffer<Border>.PoolCapacity = Terrain.BorderSize;
+DynamicBuffer<ItemStack>.PoolCapacity = Rules.InventorySlots;
 
 using var world = new World(new WorldOptions { MeasureSystems = true });
 // #endregion options
 
 world.SetClock(Tick: 0, DayLength: Rules.DayLength);
 world.AddSingleton<Stats>();
-var regions = new RegionFiles();
+var capacity = Rules.CapacityFor(players);
+using var regions = new RegionFiles(capacity.Chunks * 4);
 world.SetRegions(regions);
 SetPrefabs(world);
+Reserve(world, capacity);
 
 // #region systems
 // One tick, in this order: what the clients asked for, the world around them, movement, the rules of the game, what
@@ -111,6 +114,30 @@ Console.WriteLine($"restarted from the save: {restarted.Count<Player>()} players
                   $"{Terrain.WaterIn(restarted)} water, {restarted.Count<Zombie>()} zombies; {regions.Count} chunks in the region files");
 Console.Error.WriteLine($"save: {save.WrittenCount / 1024} KiB");
 // #endregion save
+
+// #region capacity
+// Pooling reuses what the world gave back; the first time the world reaches a size still allocates it. A server sized
+// for its players reserves that peak before the first tick instead: the tables and the entity storage of every kind
+// (and the indexes, which follow the storage), and the buffer lists of the chunks. Then no tick allocates, even while
+// the world grows to its peak; beyond it, the world grows as it would have.
+static void Reserve(World world, in Capacity capacity)
+{
+    // Each Reserve sizes the entity storage for its own count; the world holds them all at once.
+    world.EnsureEntityCapacity(capacity.Chunks + capacity.Players + capacity.Zombies + capacity.Items + capacity.Requests);
+    ref readonly var prefabs = ref world.Prefabs;
+    world.Reserve(prefabs.Chunk, capacity.Chunks);
+    world.Reserve(prefabs.Player, capacity.Players);
+    world.Reserve(prefabs.Zombie, capacity.Zombies);
+    world.Reserve(prefabs.Item, capacity.Items);
+    world.Reserve<LoadRequest>(capacity.Requests);
+    DynamicBuffer<Block>.ReservePool(capacity.Chunks);
+    DynamicBuffer<Fluid>.ReservePool(capacity.Chunks);
+    DynamicBuffer<Surface>.ReservePool(capacity.Chunks);
+    DynamicBuffer<NextFluid>.ReservePool(capacity.Flowing);
+    DynamicBuffer<Border>.ReservePool(capacity.Flowing);
+    DynamicBuffer<ItemStack>.ReservePool(capacity.Players);
+}
+// #endregion capacity
 
 // #region prefabs
 // The recipes chunks, players, zombies and items are created from: every start builds them. A chunk has every
