@@ -1256,7 +1256,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         }
 
                         if (tombstones) bits &= AliveRows(ref ids, left); // rare: the run loops then test nothing
-            {{Lines(n, i => $"                if ((TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0) archetype.StampWord<T{i}>(w, bits, _changeTick);")}}
+            {{StampWord(n, "            ", "w", "bits")}}
                         while (bits != 0)
                         {
                             int k = BitOperations.TrailingZeroCount(bits);

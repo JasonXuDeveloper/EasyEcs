@@ -223,24 +223,44 @@ public sealed class SystemGenerator : IIncrementalGenerator
         if (system != null && !method.IsStatic) fields.Add($"System = {system}");
         if (method.NeedsWorld) fields.Add($"World = {world}");
         for (int i = 0; i < method.Parameters.Length; i++)
-        {
-            var p = method.Parameters[i];
-            if (p.Kind == Symbols.ParamKind.Singleton)
-                fields.Add(method.Parallel ? $"s{i} = {world}.SingletonRef<{p.Type}>()" : $"s{i} = ref {world}.SingletonRef<{p.Type}>().Value");
-            else if (p.Kind == Symbols.ParamKind.Context)
-                fields.Add(p.RefKind.Length == 0 || method.Parallel ? $"x{i} = {Escape(p.Name)}" : $"x{i} = ref {Escape(p.Name)}");
-            else if (p.Kind == Symbols.ParamKind.Reduction)
-                fields.Add($"a{i} = new global::EasyEcs.Reduce<{p.Type}> {{ Value = {p.Type}.Identity }}"); // every partial result starts there
-            else if (p.Kind == Symbols.ParamKind.Emit) // on one thread the singleton's list itself; in parallel the target of the chunks' lists
-                fields.Add(method.Parallel ? $"o{i} = global::EasyEcs.Emitted<{p.Type}>.Target({world})"
-                    : $"e{i} = ref global::EasyEcs.Emitted<{p.Type}>.Target({world}).Value.Items");
-            else if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // its index, built before the pass
-                fields.Add($"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Type}, {p.Key}>({world})");
-            else if (p.Kind == Symbols.ParamKind.Tile && method.FirstOfGrid(i)) // the grid's index, built before the pass
-                fields.Add($"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Grid}, {p.Key}>({world})");
-        }
-
+            if (JobField(method, i, world) is { Initializer: { } initializer }) fields.Add(initializer);
         return fields.Count == 0 ? "()" : $" {{ {string.Join(", ", fields)} }}";
+    }
+
+    /// <summary>
+    /// The job's field for parameter <paramref name="i"/>, if it has one: its declaration (lines) and what the job's
+    /// initializer sets it to (null when the job fills it itself). Singletons are resolved once per pass, not per
+    /// entity; the caller's values are held by reference unless a parallel job copies them for its threads.
+    /// </summary>
+    private static (string Declaration, string? Initializer)? JobField(ForEachModel method, int i, string world)
+    {
+        var p = method.Parameters[i];
+        switch (p.Kind)
+        {
+            case Symbols.ParamKind.Singleton:
+                return method.Parallel
+                    ? ($"public global::EasyEcs.SingletonRef<{p.Type}> s{i};", $"s{i} = {world}.SingletonRef<{p.Type}>()")
+                    : ($"public ref {p.Type} s{i};", $"s{i} = ref {world}.SingletonRef<{p.Type}>().Value");
+            case Symbols.ParamKind.Context:
+                return p.RefKind.Length == 0 || method.Parallel
+                    ? ($"public {p.Type} x{i};", $"x{i} = {Escape(p.Name)}")
+                    : ($"public ref {(p.RefKind == "in" ? "readonly " : "")}{p.Type} x{i};", $"x{i} = ref {Escape(p.Name)}");
+            case Symbols.ParamKind.Reduction: // the partial result, of the pass or of a chunk's copy; every one starts at Identity
+                return ($"public global::EasyEcs.Reduce<{p.Type}> a{i};", $"a{i} = new global::EasyEcs.Reduce<{p.Type}> {{ Value = {p.Type}.Identity }}");
+            case Symbols.ParamKind.Scratch: // this thread's box (null until the first row of a chunk)
+                return ($"public global::System.Runtime.CompilerServices.StrongBox<{p.Type}> t{i};", null);
+            case Symbols.ParamKind.Lookup when p.Key.Length > 0: // its index, built before the pass
+                return ($"public object k{i};", $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Type}, {p.Key}>({world})");
+            case Symbols.ParamKind.Tile when method.FirstOfGrid(i): // the grid's index, built before the pass
+                return ($"public object k{i};", $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Grid}, {p.Key}>({world})");
+            case Symbols.ParamKind.Emit: // on one thread the singleton's list itself; in parallel the target of the chunks' lists (from the pool)
+                return method.Parallel
+                    ? ($"public global::EasyEcs.SingletonRef<global::EasyEcs.Emitted<{p.Type}>> o{i};\npublic global::EasyEcs.DynamicBuffer<{p.Type}> e{i};",
+                        $"o{i} = global::EasyEcs.Emitted<{p.Type}>.Target({world})")
+                    : ($"public ref global::EasyEcs.DynamicBuffer<{p.Type}> e{i};", $"e{i} = ref global::EasyEcs.Emitted<{p.Type}>.Target({world}).Value.Items");
+            default:
+                return null;
+        }
     }
 
     /// <summary>
@@ -411,26 +431,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
         // holds a callee-saved register a job that calls out (a structural change) needs for its loop state.
         if (method.NeedsWorld) sb.Append("        public global::EasyEcs.World World;\n");
         for (int i = 0; i < method.Parameters.Length; i++)
-        {
-            var p = method.Parameters[i];
-            if (p.Kind == Symbols.ParamKind.Singleton) // resolved once per pass, not per entity
-                sb.Append(method.Parallel
-                    ? $"        public global::EasyEcs.SingletonRef<{p.Type}> s{i};\n"
-                    : $"        public ref {p.Type} s{i};\n");
-            else if (p.Kind == Symbols.ParamKind.Context) // the caller's value: by reference unless copied for threads
-                sb.Append(p.RefKind.Length == 0 || method.Parallel ? $"        public {p.Type} x{i};\n"
-                    : $"        public ref {(p.RefKind == "in" ? "readonly " : "")}{p.Type} x{i};\n");
-            else if (p.Kind == Symbols.ParamKind.Reduction) // the partial result: of the pass, or of a chunk's copy
-                sb.Append($"        public global::EasyEcs.Reduce<{p.Type}> a{i};\n");
-            else if (p.Kind == Symbols.ParamKind.Scratch) // this thread's box (null until the first row of a chunk)
-                sb.Append($"        public global::System.Runtime.CompilerServices.StrongBox<{p.Type}> t{i};\n");
-            else if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 } || p.Kind == Symbols.ParamKind.Tile && method.FirstOfGrid(i)) // an index, built
-                sb.Append($"        public object k{i};\n");
-            else if (p.Kind == Symbols.ParamKind.Emit) // the singleton's list, or a chunk's (from the pool) and where it goes
-                sb.Append(method.Parallel
-                    ? $"        public global::EasyEcs.SingletonRef<global::EasyEcs.Emitted<{p.Type}>> o{i};\n        public global::EasyEcs.DynamicBuffer<{p.Type}> e{i};\n"
-                    : $"        public ref global::EasyEcs.DynamicBuffer<{p.Type}> e{i};\n");
-        }
+            if (JobField(method, i, "") is { } field)
+                foreach (var line in field.Declaration.Split('\n')) sb.Append("        ").Append(line).Append('\n');
         if (sb[sb.Length - 2] != '{') sb.Append('\n'); // a blank line after the fields, if any
         // A wide component's permute tables and layout check (Kernel.Wide.cs): statics, built once per job type.
         if (method.Simd is { Statics.Length: > 0 } statics)
