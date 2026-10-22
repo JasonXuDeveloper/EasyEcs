@@ -11,12 +11,13 @@ namespace EasyEcs.Benchmark;
 /// dedicated API would serve: <see cref="Reduce{T}"/> over a singleton of <c>[InlineArray]</c> bins (combined per
 /// chunk: bins × chunks), against what it would be built on: bins per thread merged once per thread when the pass
 /// ends (threads × bins, the candidate API), a shared array with an <see cref="Interlocked"/> increment per row, and
-/// one thread's plain loop. 65,536 bins (256 KB) are past what a Reduce&lt;T&gt; struct holds: its copies pass by value.
+/// one thread's plain loop. From 16,384 bins (64 KB) on, a Reduce&lt;T&gt; cannot hold them: the generated job keeps a copy
+/// per chunk in an array, and the runtime refuses arrays of value types of 64 KB or more (TypeLoadException).
 /// </summary>
 [MemoryDiagnoser]
 public class HistogramBenchmark
 {
-    [Params(1_024, 16_384, 65_536)] public int Bins;
+    [Params(1_024, 4_096, 16_384, 65_536)] public int Bins;
 
     private const int Rows = 100_000;
     private World _world;
@@ -54,11 +55,11 @@ public class HistogramBenchmark
             case 1_024:
                 Histograms.Reduce1K(_world);
                 return _world.GetSingleton<Bins1K>().Counts[0];
-            case 16_384:
-                Histograms.Reduce16K(_world);
-                return _world.GetSingleton<Bins16K>().Counts[0];
+            case 4_096:
+                Histograms.Reduce4K(_world);
+                return _world.GetSingleton<Bins4K>().Counts[0];
             default:
-                return -1; // too large for a struct passed by value
+                return -1; // 64 KB or more: no array of the job's per-chunk copies can be created
         }
     }
 
@@ -89,8 +90,8 @@ public class HistogramBenchmark
         private int _first;
     }
 
-    [InlineArray(16_384)]
-    public struct Counts16K
+    [InlineArray(4_096)]
+    public struct Counts4K
     {
         private int _first;
     }
@@ -110,13 +111,13 @@ public class HistogramBenchmark
         }
     }
 
-    public struct Bins16K : ISingletonComponent, IReduction<Bins16K>
+    public struct Bins4K : ISingletonComponent, IReduction<Bins4K>
     {
-        public Counts16K Counts;
+        public Counts4K Counts;
 
-        public static Bins16K Identity => default;
+        public static Bins4K Identity => default;
 
-        public static Bins16K Combine(Bins16K left, Bins16K right)
+        public static Bins4K Combine(Bins4K left, Bins4K right)
         {
             Span<int> into = left.Counts;
             ReadOnlySpan<int> from = right.Counts;
@@ -134,7 +135,7 @@ public class HistogramBenchmark
         public static void Reduce1K(in Cell cell, ref Reduce<Bins1K> bins) => bins.Value.Counts[cell.Bin]++;
 
         [ForEach(Parallel = true)]
-        public static void Reduce16K(in Cell cell, ref Reduce<Bins16K> bins) => bins.Value.Counts[cell.Bin]++;
+        public static void Reduce4K(in Cell cell, ref Reduce<Bins4K> bins) => bins.Value.Counts[cell.Bin]++;
     }
 
     private struct Shared : IForEach<Cell>, INoStructuralChanges
