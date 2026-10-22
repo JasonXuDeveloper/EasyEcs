@@ -80,12 +80,6 @@ public static class Terrain
     public static ChunkStrip Gained(ChunkPos center, ChunkPos other, float range) => new(center, other, true, range);
 
 
-    // A chunk's Border: for each side (north, south, west, east) and layer, the 16 water levels of the neighbour's
-    // facing edge, then (blocks) its 16 blocks.
-    public const int BorderSize = 2 * 4 * Height * Size;
-
-    public static int BorderOf(int side, int y, bool blocks) => ((blocks ? 4 : 0) + side) * Height * Size + y * Size;
-
     // The four sides of a chunk, one bit each, and the chunk beside it on each side.
     public const byte North = 1, South = 2, West = 4, East = 8, AllSides = North | South | West | East;
 
