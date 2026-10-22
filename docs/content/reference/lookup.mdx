@@ -17,7 +17,7 @@ The contract: no one writes `T` while the pass runs, so every read sees the valu
 
 An indexed `T` ([`IIndexed`](/en/docs/reference/iindexed)) is also found by key ([`LookupExtensions`](/en/docs/reference/lookupextensions): `TryFind`, `Find`, `Count`, called on the parameter itself): its index is created and built before the pass, and before the parallel stage of its system, so a lookup during a pass never changes it. (A value index otherwise builds on its first lookup; reached any other way during a parallel stage or pass, an index not built yet throws instead of building.)
 
-Each lookup is one entity lookup ([`World.TryGetEntity`](/en/docs/reference/world#trygetentity), then the row's column). Valid for the call it is passed to (a ref struct).
+Each lookup is one entity lookup (bounds and version checked like [`World.TryGetEntity`](/en/docs/reference/world#trygetentity), then the row's column). Valid for the call it is passed to (a ref struct).
 
 #### Type parameters
 
