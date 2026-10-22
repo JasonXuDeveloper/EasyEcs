@@ -27,7 +27,7 @@ public record struct LoadRequest(ChunkPos Pos) : IComponent, IUniqueIndexed<Chun
 }
 
 // A tag on a chunk loaded this tick: its clients get it whole, with what is in it (AoiChunkSystem), so neither its blocks
-// (SendChunksSystem) nor its entities (a spawn per entity) are sent as changes. SendChunksSystem removes it.
+// (SendChunksSystem) nor its entities (a spawn per entity) are sent as changes. ChunkSentSystem removes it.
 public struct Fresh : IComponent;
 
 // A tag on a chunk nobody saw for a while: ChunkSaveSystem writes it and what is in it to the region files and
@@ -35,6 +35,6 @@ public struct Fresh : IComponent;
 public struct Unloading : IComponent;
 
 // The players that have the chunk in view, and since when none has: who is sent what happens in it, and whether it can
-// be unloaded. the AOI systems keep it as the players' views move; ChunkUnloadSystem frees the chunks nobody has seen for a
+// be unloaded. The AOI systems keep it as the players' views move; ChunkUnloadSystem frees the chunks nobody has seen for a
 // while.
 public record struct Viewers(int Count, long EmptySince) : IComponent;

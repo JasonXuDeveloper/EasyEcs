@@ -13,7 +13,8 @@ public record struct Fluid(byte Level)
 
 // The water of a chunk after the next step, in the layout of Fluid: WaterFlowSystem writes it, WaterCommitSystem copies
 // it into the Fluid buffer once every chunk has stepped, so each chunk steps from its neighbours' water before the
-// step, as a GPU ping-pongs two buffers. Empty between two steps.
+// step, as a GPU ping-pongs two buffers. A flowing chunk keeps it from one step to the next, never cleared (each step
+// writes every layer the last one wrote water on); a chunk that settles gives it back to the pool (WaterSleepSystem).
 public record struct NextFluid(byte Level);
 
 // The height map of a chunk, as Minecraft keeps one: a DynamicBuffer<Surface> of 256, the highest solid block of each
@@ -46,7 +47,8 @@ public record struct Reach(int From, int To) : IComponent
 
 // What the step in NextFluid did: nothing yet (a chunk just created), settled (no water moved), or moved; then its water
 // (as FluidCount counts it), the blocks it filled, and the edges whose water changed (one bit per side, Terrain.North
-// ...). ITracked: WaterFlowSystem writes it with every step, and WaterCommitSystem visits the chunks that stepped.
+// ...). ITracked: WaterFlowSystem writes it with every step, and WaterSleepSystem and WaterCommitSystem visit the
+// chunks that stepped.
 public record struct FluidStep(StepResult Result, FluidCount Water, int Filled, byte Edges) : IComponent, ITracked;
 
 public enum StepResult : byte { None, Settled, Moved }

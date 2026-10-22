@@ -61,9 +61,9 @@ public class WaterWakeSystem : EcsSystem
 // It runs as a GPU runs a shader, in passes that hand data to each other, on the chunks that may still move (Flowing):
 // WaterBorderSystem gathers what the step needs from the chunks around (their edges, into the Border buffer, and the
 // layers to shade, Reach); WaterFlowSystem shades every block from its own components only, into NextFluid, so it runs
-// in parallel; WaterCommitSystem makes the step the water once every chunk has stepped (each chunk steps from its
-// neighbours' water before the step, as a GPU ping-pongs two buffers), wakes the chunks beside the edges that changed
-// and lets the settled chunks sleep.
+// in parallel; WaterSleepSystem lets the chunks whose step moved nothing sleep; WaterCommitSystem makes the step the
+// water once every chunk has stepped (each chunk steps from its neighbours' water before the step, as a GPU ping-pongs
+// two buffers) and wakes the chunks beside the edges that changed.
 [UpdateInGroup<Simulation>]
 public class WaterBorderSystem : EcsSystem
 {
