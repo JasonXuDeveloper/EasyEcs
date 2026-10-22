@@ -10,19 +10,21 @@ namespace EasyEcs.Benchmark;
 /// search's shape), keeps those its rule accepts, and stores how many and their spread. Where the list lives:
 /// <see cref="Scratch{T}"/> (one list per method and thread), a new list per row (the obvious code), a rented array per
 /// row (<c>ArrayPool&lt;int&gt;.Shared</c>), a user's own <c>[ThreadStatic]</c> list, and <c>stackalloc</c> (only for a
-/// small bound known up front: the baseline a list cannot beat).
+/// small bound known up front: the baseline a list cannot beat). On one thread (the chunks run one after another on
+/// the calling thread: the per-row cost alone, steady on a busy machine) and on four.
 /// </summary>
 [MemoryDiagnoser]
 public class ScratchBenchmark
 {
     [Params(10_000, 100_000)] public int Entities;
+    [Params(1, 4)] public int Threads;
 
     private World _world;
 
     [GlobalSetup]
     public void Setup()
     {
-        _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _world = new World(new WorldOptions { InitialEntityCapacity = Entities, MaxDegreeOfParallelism = Threads });
         _world.CreateEntities(new Entity[Entities], new Cell(0), new Spread());
         int row = 0;
         foreach (var item in _world.Query<Cell>()) item.Component1 = new Cell(row++ * 7919);
