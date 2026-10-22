@@ -342,7 +342,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         // A vector loop also takes the words of 64 rows of which some pass (IForEachMasked): their passing rows as a
         // lane mask, the other lanes stored back as loaded.
-        for (int pass = 0; pass < (method.Simd != null ? 2 : 1); pass++)
+        // A parallel one runs as a batch job over each chunk's runs of rows (ForEachBatchParallel): no masked form.
+        for (int pass = 0; pass < (method.Simd != null && !method.Parallel ? 2 : 1); pass++)
         {
         bool masked = pass == 1;
         if (masked) sb.Append('\n');
@@ -603,7 +604,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         public bool NeedsWorld => Parameters.Any(p => p.Kind is Symbols.ParamKind.World or Symbols.ParamKind.Lookup);
 
         /// <summary>The World loop (and, with an I, the job interface) the method runs as.</summary>
-        public string Loop => Simd != null ? "ForEachMasked" : IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
+        public string Loop => Simd != null && !Parallel ? "ForEachMasked" : IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
 
         /// <summary>Takes component spans, or runs per row inside runs of rows: World.ForEachBatch.</summary>
         public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) || Runs || Simd != null;
@@ -712,8 +713,13 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
                     && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
                     Slices = Symbols.Slices(method), ChunkRows = Symbols.ChunkRows(method), Identifies = Symbols.OnlyIdentifies(method, syntax, model),
-                    // Kernel.Vectorize decides alone (static, one thread, stable, its body): the analyzer reports its reasons.
-                    Simd = Kernel.Vectorize(method, syntax, model, static (i, kind) => kind switch
+                    // Kernel.Vectorize decides alone (static, stable, its body; in parallel too): the analyzer reports its reasons.
+                    Simd = Kernel.Vectorize(method, syntax, model, parallel ? static (i, kind) => kind switch
+                    {
+                        Symbols.ParamKind.Singleton => $"s{i}.Value", // a parallel job's SingletonRef
+                        Symbols.ParamKind.Reduction => $"l{i}",
+                        _ => $"x{i}",
+                    } : static (i, kind) => kind switch
                     {
                         Symbols.ParamKind.Singleton => $"s{i}",
                         Symbols.ParamKind.Reduction => $"l{i}", // the run's partial result, a local of the batch job

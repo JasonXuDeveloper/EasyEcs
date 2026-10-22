@@ -246,6 +246,26 @@ public class KernelBenchmark
     [Benchmark]
     public void EnergyGenerated() => Kernels.Energy(_world);
 
+    [Benchmark]
+    public void StepParallelScalar()
+    {
+        var job = new StepRows { Pull = _world.Pull };
+        _world.ForEachParallel<Heat, Speed, Mass, StepRows>(ref job);
+    }
+
+    [Benchmark]
+    public void StepParallelGenerated() => Kernels.StepParallel(_world);
+
+    [Benchmark]
+    public void SeekParallelScalar()
+    {
+        var job = new SeekRows();
+        _fields.ForEachParallel<P3, V3, SeekRows>(ref job);
+    }
+
+    [Benchmark]
+    public void SeekParallelGenerated() => Kernels.SeekParallel(_fields);
+
     public record struct Window(float Min, float Max) : ISingletonComponent;
 
     /// <summary>A count, a sum, a minimum and a maximum of ints: exact in any order of the rows.</summary>
@@ -441,6 +461,29 @@ public class KernelBenchmark
         // Steers toward a point at a fixed speed: a length, a division, writes to both components.
         [ForEach]
         internal static void Seek(ref P3 p, ref V3 v)
+        {
+            float dx = 1 - p.X, dy = 2 - p.Y, dz = 3 - p.Z;
+            float scale = 4 / MathF.Max(MathF.Sqrt(dx * dx + dy * dy + dz * dz), 1e-6f);
+            v.X = dx * scale;
+            v.Y = dy * scale;
+            v.Z = dz * scale;
+            p.X += v.X * Dt;
+            p.Y += v.Y * Dt;
+            p.Z += v.Z * Dt;
+        }
+
+        // Step and Seek on several threads: each chunk's runs of rows through the vector loop (parallel for simd).
+        [ForEach(Parallel = true, Simd = SimdMode.Require)]
+        internal static void StepParallel(ref Heat heat, ref Speed speed, in Mass mass, in Pull pull)
+        {
+            float force = heat.Value * 0.5f - mass.Value * pull.Value;
+            speed.Value = MathF.Max(MathF.Min(speed.Value + force - Drag, Limit), -Limit);
+            if (heat.Value > 100f) heat.Value = 100f;
+            else heat.Value += speed.Value * 0.125f;
+        }
+
+        [ForEach(Parallel = true, Simd = SimdMode.Require)]
+        internal static void SeekParallel(ref P3 p, ref V3 v)
         {
             float dx = 1 - p.X, dy = 2 - p.Y, dz = 3 - p.Z;
             float scale = 4 / MathF.Max(MathF.Sqrt(dx * dx + dy * dy + dz * dz), 1e-6f);

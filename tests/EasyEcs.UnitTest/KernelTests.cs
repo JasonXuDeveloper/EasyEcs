@@ -314,6 +314,56 @@ public static class FieldKernels
     }
 }
 
+// A tracked component a parallel vector loop writes: every chunk stamps its rows, and chunks share blocks of ticks.
+public record struct Warmth : IComponent, ITracked { public float Value; }
+
+/// <summary>
+/// Parallel [ForEach] methods with a vector loop (OpenMP's parallel for simd): each chunk's runs of rows go through the
+/// loop, the change ticks are stamped by the parallel batch pass, and the chunks' partial results combine in chunk order.
+/// </summary>
+public static class ParallelKernels
+{
+    [ForEach(Parallel = true, Simd = SimdMode.Require)]
+    internal static void Seek(ref Spot3 p, ref Drift3 v, in Gravity gravity, float speed)
+    {
+        float dx = 1 - p.X, dy = gravity.Pull - p.Y, dz = 3 - p.Z;
+        float length = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+        if (length <= 0) return;
+        float scale = speed / MathF.Max(length, 1e-6f);
+        v.X = dx * scale;
+        v.Y = dy * scale;
+        v.Z = dz * scale;
+        p.X += v.X * FieldKernels.Dt;
+        p.Y += v.Y * FieldKernels.Dt;
+        p.Z += v.Z * FieldKernels.Dt;
+    }
+
+    [ForEach(Parallel = true, Simd = SimdMode.Require, ChunkRows = 64)] // chunks split the blocks of 4,096 rows: opened, shared
+    internal static void Glide(ref Spot2 p, in Drift2 v)
+    {
+        p.X += v.X * FieldKernels.Dt;
+        p.Y += v.Y * FieldKernels.Dt;
+    }
+
+    [ForEach(Parallel = true, Simd = SimdMode.Require)]
+    internal static void Warm(ref Warmth warmth, in Mass mass) => warmth.Value = MathF.Min(warmth.Value + mass.Value * 0.5f, 100f);
+
+    [ForEach(Parallel = true, Simd = SimdMode.Require, ChunkRows = 64)]
+    internal static void WarmFine(ref Warmth warmth, in Mass mass) => warmth.Value = MathF.Max(warmth.Value - mass.Value, -100f);
+
+    [ForEach(Parallel = true, Simd = SimdMode.Require, ChunkRows = 128)]
+    internal static void Count(in Rank rank, ref Reduce<Headcount> headcount)
+    {
+        headcount.Value.Count++;
+        if (rank.Value > 0) headcount.Value.Sum += rank.Value;
+        headcount.Value.Low = Math.Min(headcount.Value.Low, rank.Value);
+        headcount.Value.High = Math.Max(rank.Value, headcount.Value.High);
+    }
+
+    [ForEach(Parallel = true, Simd = SimdMode.Require, FloatMode = FloatMode.Fast, ChunkRows = 256)]
+    internal static void Sum(in Level level, ref Reduce<Energy> energy) => energy.Value.Total += level.Value * 0.5f;
+}
+
 public class KernelTests
 {
     /// <summary>The lengths that cut a vector short or leave a tail, at both vector widths, and a long run.</summary>
@@ -814,6 +864,121 @@ public class KernelTests
         var lanes = new T[Vector512<T>.Count];
         v.CopyTo(lanes);
         return lanes;
+    }
+
+    /// <summary>
+    /// A parallel vector loop at 1 and 4 threads: the same bits as the method row by row (each row's lanes run the
+    /// method's operations, wherever its chunk begins), in tables with rows to test (presence holes) and several runs.
+    /// </summary>
+    [TestCase(1)]
+    [TestCase(4)]
+    public void ParallelVectorLoopsMatchTheMethodBitForBit(int threads)
+    {
+        const int count = 20_011;
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        world.SetGravity(2f);
+        var random = new Random(7);
+        var spots = new Spot3[count];
+        var drifts = new Drift3[count];
+        var flats = new Spot2[count];
+        var flows = new Drift2[count];
+        var entities = new Entity[count];
+        world.Reserve<Spot3, Drift3, Spot2, Drift2>(count);
+        for (int i = 0; i < count; i++)
+        {
+            spots[i] = new Spot3 { X = NextFloat(random, i), Y = NextFloat(random, i + 1), Z = NextFloat(random, i + 2) };
+            drifts[i] = new Drift3 { X = NextFloat(random, i + 3) };
+            flats[i] = new Spot2 { X = NextFloat(random, i), Y = NextFloat(random, i + 4) };
+            flows[i] = new Drift2 { X = NextFloat(random, i + 1), Y = NextFloat(random, i + 2) };
+            entities[i] = world.CreateEntity(spots[i], drifts[i], flats[i], flows[i]);
+            if (i % 11 == 0) entities[i].Set(new Frozen()); // a second table
+        }
+        for (int i = 0; i < count; i += 5) entities[i].Remove<Drift2>(); // rows the flat loop's pass tests
+
+        var gravity = world.Gravity;
+        for (int round = 0; round < 3; round++)
+        {
+            ParallelKernels.Seek(world, 3f);
+            ParallelKernels.Glide(world);
+            for (int i = 0; i < count; i++)
+            {
+                ParallelKernels.Seek(ref spots[i], ref drifts[i], in gravity, 3f);
+                if (i % 5 != 0) ParallelKernels.Glide(ref flats[i], in flows[i]);
+            }
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            Assert.That(Same(entities[i].Get<Spot3>(), spots[i]), $"Spot3 of row {i}: {Bits(entities[i].Get<Spot3>())} instead of {Bits(spots[i])}");
+            Assert.That(Same(entities[i].Get<Drift3>(), drifts[i]), $"Drift3 of row {i}");
+            Assert.That(Same(entities[i].Get<Spot2>(), flats[i]), $"Spot2 of row {i}: {Bits(entities[i].Get<Spot2>())} instead of {Bits(flats[i])}");
+        }
+    }
+
+    /// <summary>
+    /// The rows a parallel vector loop writes are stamped, those it does not visit are not, so a [Changed&lt;T&gt;]
+    /// filter (which skips words and blocks by their summaries) finds exactly them: chunks of whole blocks and chunks
+    /// that split blocks (opened before the pass, raised atomically).
+    /// </summary>
+    [TestCase(1)]
+    [TestCase(4)]
+    public void ParallelVectorLoopsStampTheRowsTheyWrite(int threads)
+    {
+        const int count = 30_000;
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var entities = new Entity[count];
+        world.Reserve<Warmth, Mass>(count);
+        for (int i = 0; i < count; i++) entities[i] = world.CreateEntity(new Warmth { Value = i % 50 }, new Mass { Value = i % 7 });
+        for (int i = 0; i < count; i += 3) entities[i].Remove<Mass>(); // not visited: not stamped
+        for (int i = 1; i < count; i += 1000) entities[i].Set(new Frozen());
+
+        foreach (Action<World> pass in new Action<World>[] { ParallelKernels.Warm, ParallelKernels.WarmFine })
+        {
+            world.Update(); // a new tick: the rows created before it are older
+            ulong mark = world.ChangeTick;
+            pass(world);
+            int visited = 0;
+            for (int i = 0; i < count; i++) if (entities[i].Has<Mass>()) visited++;
+            Assert.That(world.Count<Warmth>(QueryFilter.Create().Changed<Warmth>(mark)), Is.EqualTo(visited));
+            foreach (var item in world.Read<Warmth>(QueryFilter.Create().Changed<Warmth>(mark)))
+                Assert.That(item.Entity.Has<Mass>(), $"{item.Entity} has no Mass but was stamped");
+        }
+    }
+
+    /// <summary>
+    /// A parallel vector reduction: the chunks' lanes fold into each chunk's partial result, the chunks combine in chunk
+    /// order. Integer sums, counts, Min and Max are exact at any thread count; a Fast float sum with fixed chunks is the
+    /// same at 1 and 4 threads.
+    /// </summary>
+    [Test]
+    public void ParallelVectorReductionsAreExactAndDoNotDependOnTheThreads()
+    {
+        (Headcount, float) Run(int threads)
+        {
+            const int count = 50_003;
+            using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+            var random = new Random(3);
+            var expected = new Reduce<Headcount> { Value = Headcount.Identity };
+            world.Reserve<Rank, Level>(count);
+            for (int i = 0; i < count; i++)
+            {
+                var rank = NextTally(random, i);
+                var e = world.CreateEntity(rank, new Level { Value = (float)(random.NextDouble() * 200 - 100) });
+                if (i % 13 == 0) e.Set(new Frozen());
+                if (i % 4 == 1) e.Remove<Rank>();
+                else ParallelKernels.Count(in rank, ref expected);
+            }
+
+            ParallelKernels.Count(world);
+            Assert.That(world.GetSingleton<Headcount>(), Is.EqualTo(expected.Value), $"Count at {threads} threads");
+            ParallelKernels.Sum(world);
+            return (world.GetSingleton<Headcount>(), world.GetSingleton<Energy>().Total);
+        }
+
+        var (one, sum1) = Run(1);
+        var (four, sum4) = Run(4);
+        Assert.That(four, Is.EqualTo(one));
+        Assert.That(BitConverter.SingleToInt32Bits(sum4), Is.EqualTo(BitConverter.SingleToInt32Bits(sum1)), $"{sum4} against {sum1}");
     }
 
     [Test]

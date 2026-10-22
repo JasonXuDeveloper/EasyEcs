@@ -156,8 +156,8 @@ public class GeneratorTests
     [TestCase("[ForEach] void A(in P p) { }", "access.RunAlone();")]
     [TestCase("[ForEach] static void A(in P p) { } protected override void OnUpdate() { }", "access.RunAlone();")]
     [TestCase("[ForEach(Slices = 3)] static void A(ref P p) { }", "access.Write<global::P>();", "global::EasyEcs.QueryFilter.Create().Slice((int)(system.RunCount % 3), 3)")]
-    [TestCase("[ForEach(Slices = 2, Parallel = true), Without<Q>] static void A(ref P p) { }", "ForEachParallel<", "AFilter0.Slice((int)(system.RunCount % 2), 2)")]
-    [TestCase("[ForEach(Parallel = true, ChunkRows = 100)] static void A(ref P p) { }", "ForEachParallel<", "(ref job0, chunkRows: 100);")]
+    [TestCase("[ForEach(Slices = 2, Parallel = true), Without<Q>] static void A(ref P p) { }", "ForEachBatchParallel<", "AFilter0.Slice((int)(system.RunCount % 2), 2)")]
+    [TestCase("[ForEach(Parallel = true, ChunkRows = 100)] static void A(ref P p) { }", "ForEachBatchParallel<", "(ref job0, chunkRows: 100);")]
     [TestCase("[ForEach(Slices = 4)] static void A(System.Span<P> p) { }", "ForEachBatch<", "Slice((int)(system.RunCount % 4), 4)")]
     public void AccessIsDeclaredFromParameters(string members, params string[] expected)
     {
@@ -201,7 +201,9 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Two t) => t.A = t.B;", true)]                               // two fields: Interleaved
     [TestCase("[ForEach] static void A(ref Five t) => t.A = t.B;", false)]                             // five fields
     [TestCase("[ForEach] static void A(ref Mixed m) => m.A += m.B;", true)]                             // float and int fields
-    [TestCase("[ForEach(Parallel = true)] static void A(ref F f) => f.V++;", false)]                   // no parallel batch loop yet
+    [TestCase("[ForEach(Parallel = true)] static void A(ref F f) => f.V++;", true)]                    // parallel: in each chunk
+    [TestCase("[ForEach(Parallel = true)] static void A(ref Two t, in G g) => t.A -= t.B * g.Pull;", true)]
+    [TestCase("[ForEach(Parallel = true)] static void A(in P p, ref Reduce<Count> c) => c.Value.N += p.V;", true)]
     [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V++;", false)]
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Count> c) { c.Value.N++; c.Value.Low = System.Math.Min(c.Value.Low, p.V); }", true)] // reductions
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Count> c) => c.Combine(new Count { N = p.V, Low = p.V });", true)]
@@ -219,8 +221,11 @@ public class GeneratorTests
         Assert.That(generated.Contains("for (nint last = rows - global::System.Runtime.Intrinsics.Vector512<"), Is.EqualTo(vectorized), generated);
         Assert.That(generated.IndexOf("Vector512.IsHardwareAccelerated", System.StringComparison.Ordinal)
             < generated.IndexOf("global::System.Numerics.Vector.IsHardwareAccelerated", System.StringComparison.Ordinal), Is.EqualTo(vectorized), generated);
-        // A vector loop also takes words of rows of which some pass, as a lane mask (IForEachMasked).
-        Assert.That(generated.Contains("global::EasyEcs.IForEachMasked<") && generated.Contains("ulong pass, "), Is.EqualTo(vectorized), generated);
+        // A vector loop also takes words of rows of which some pass, as a lane mask (IForEachMasked); a parallel one
+        // runs each chunk's runs of rows (ForEachBatchParallel).
+        bool parallel = members.Contains("Parallel = true");
+        Assert.That(generated.Contains("global::EasyEcs.IForEachMasked<") && generated.Contains("ulong pass, "), Is.EqualTo(vectorized && !parallel), generated);
+        if (parallel) Assert.That(generated, Does.Contain("world.ForEachBatchParallel<"), generated);
 
         // Skipped means reported: the same method with SimdMode.Require is an error exactly when it got no loop.
         string required = members.Replace("[ForEach]", "[ForEach(Simd = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(Simd = SimdMode.Require, Parallel");
@@ -246,6 +251,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Ends> e) => e.Value.Last = p.V;", "Ends.Combine sets First to 'a.First', not the sum, Min or Max of both sides' First")]
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Wide> w) => w.Value.N += p.V;", "field Wide.L of the reduction is a long, not a lane type of 4 bytes")]
     [TestCase("[ForEach] static void A(ref P p, ref Reduce<Count> c) { c.Value.N += p.V; p.V = c.Value.N; }", "it reads 'c.Value.N', a partial result the lanes of a vector loop hold in parts")]
+    [TestCase("[ForEach(Parallel = true)] static void A(ref Five t) => t.A = t.B;", "component Five has 5 fields (a vector loop splits up to 4)")] // parallel too
     public void ScalarLoopsNameTheirReason(string members, string reason)
     {
         var diagnostics = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Where(d => d.Id == "EECS055").ToArray();
@@ -256,7 +262,6 @@ public class GeneratorTests
     // Not meant for a vector loop (or vectorized, or opted out): no EECS055.
     [TestCase("[ForEach] static void A(ref F f, in H h) => f.V += h.V;")]                              // vectorized
     [TestCase("[ForEach(Simd = SimdMode.Off)] static void A(ref Five t) => t.A = t.B;")]              // opted out
-    [TestCase("[ForEach(Parallel = true)] static void A(ref Five t) => t.A = t.B;")]
     [TestCase("[ForEach] static void A(Entity e, ref Five t) => t.A = t.B;")]
     [TestCase("[ForEach] static void A(ref Holder h) { }")]                                             // not numeric fields
     [TestCase("[ForEach] static void A(System.Span<F> f) { }")]                                          // a batch method
@@ -269,7 +274,7 @@ public class GeneratorTests
 
     [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(Entity e, ref F f) => f.V++;", "it takes the Entity")]
     [TestCase("[ForEach(Simd = SimdMode.Require)] void A(ref F f) => f.V++;", "it is not static")]
-    [TestCase("[ForEach(Simd = SimdMode.Require, Parallel = true)] static void A(ref F f) => f.V++;", "it runs in parallel (Parallel = true), and parallel jobs have no vector loop")]
+    [TestCase("[ForEach(Simd = SimdMode.Require, Parallel = true)] static void A(ref F f, in D d) => f.V++;", "lane types float and double differ in size")]
     [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4)")]
     [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref F f, Scratch<int> s) => f.V += s.Value;", "it takes a Scratch<Int32>: working memory a row at a time, not one per lane")]
     [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref F f, Lookup<H> h) => f.V++;", "it takes a Lookup<H>: a lookup of another entity per row has no vector form")]
@@ -312,6 +317,42 @@ public class GeneratorTests
         Assert.That(generated.Contains("lanes = rows * 2;"), Is.EqualTo(flat), generated);
         Assert.That(generated.Contains("for (nint last = rows - global::System.Numerics.Vector<"), Is.True, generated); // masked words, or the loop
         if (flat) Assert.That(generated, Does.Contain("i /= 2;").And.Contain("Interleaved.Load2("), generated);   // the masked Execute deinterleaves
+    }
+
+    // A parallel method's vector loop runs in each chunk's batch job: its singletons are the job's SingletonRefs, its
+    // reductions the run's locals, combined per chunk.
+    [Test]
+    public void AParallelVectorLoopRunsInEachChunk()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { [ForEach(Parallel = true, Simd = SimdMode.Require)] static void A(ref F f, in G g, ref Reduce<Count> c) { f.V -= g.Pull; c.Value.N++; } }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("internal struct AJob0 : global::EasyEcs.IForEachBatch<global::F>, global::EasyEcs.INoStructuralChanges")
+            .And.Contain("ref readonly global::G __p1 = ref s1.Value;")
+            .And.Contain("var l2 = a2;")
+            .And.Contain("l2.Combine(__v);")
+            .And.Contain("static bool global::EasyEcs.IForEachBatch<global::F>.Merges => true;")
+            .And.Contain("world.ForEachBatchParallel<global::F, AJob0>(ref job0);")
+            .And.Not.Contain("ulong pass"), generated);
+    }
+
+    [Test]
+    public void MakingAVectorLoopParallelReemitsOnlyItsSystem()
+    {
+        const string other = "public class O : EcsSystem { [ForEach] static void B(ref F f) => f.V++; }";
+        var tree = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components + Lanes + "public class S : EcsSystem { [ForEach] static void A(ref F f) => f.V++; }", Parse);
+        var compilation = Compile().AddSyntaxTrees(tree, CSharpSyntaxTree.ParseText("using EasyEcs;\n" + other, Parse));
+        var driver = Driver().RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(tree, CSharpSyntaxTree.ParseText(
+            tree.ToString().Replace("[ForEach] static void A", "[ForEach(Parallel = true)] static void A"), Parse)));
+
+        var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
+        Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
+        string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
+        Assert.That(generated, Does.Contain("ForEachBatchParallel<").And.Contain("Vector.LoadUnsafe"));
     }
 
     // The Vector512 loop is the Vector<T> loop's text with the vector type's token replaced: user types named
@@ -499,7 +540,7 @@ public class GeneratorTests
         "public static void A(global::EasyEcs.World world, ref int n, in int floor, int add)", "x1 = ref n, x2 = ref floor, x3 = add")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p, ref Clock c, int world) { }",
         "public static void A(global::EasyEcs.World _world, ulong since, int world)", "__ForEach.AFilter0.Since(since)", "s1 = ref _world.SingletonRef")]
-    [TestCase("[ForEach(Parallel = true)] static void A(ref P p, in int k) { }", "public int x1;", "x1 = k }", "ForEachParallel<")]
+    [TestCase("[ForEach(Parallel = true)] static void A(ref P p, in int k) { }", "public int x1;", "x1 = k }", "ForEachBatchParallel<")]
     [TestCase("[ForEach(Slices = 3), Without<Q>] static void A(ref P p, int slice) { }",
         "public static void A(global::EasyEcs.World world, int _slice, int slice)", "__ForEach.AFilter0.Slice(_slice, 3)")]
     public void RunnersGetAnEntryPoint(string members, params string[] expected)

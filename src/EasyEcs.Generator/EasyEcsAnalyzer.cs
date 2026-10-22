@@ -184,7 +184,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     public static readonly DiagnosticDescriptor NoVectorLoop = new("EECS056", "A required vector loop that the method does not qualify for",
         "[ForEach(Simd = SimdMode.Require)] method '{0}' gets no vector loop: {1}",
         Category, DiagnosticSeverity.Error, true,
-        "SimdMode.Require asks for the method's vector loop. A method qualifies when it is static, runs on one thread, " +
+        "SimdMode.Require asks for the method's vector loop. A method qualifies when it is static, " +
         "takes no Entity and makes no structural change, takes components of up to 4 fields whose lane types all have " +
         "one size (float, int and uint, or double, long and ulong), singletons, values and Reduce<T> results (sums, Min " +
         "and Max that T.Combine takes field by field; a float sum only with FloatMode.Fast), and computes with " +

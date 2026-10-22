@@ -127,7 +127,6 @@ internal sealed class Kernel
     {
         reason = Symbols.Simd(method) == Symbols.SimdOff ? "Simd = SimdMode.Off"
             : !method.IsStatic ? "it is not static"
-            : Symbols.IsParallel(method) ? "it runs in parallel (Parallel = true), and parallel jobs have no vector loop"
             : !Symbols.IsStable(method, syntax, model) ? "it can make structural changes"
             : null;
         if (reason != null) return null;
@@ -144,13 +143,13 @@ internal sealed class Kernel
 
     /// <summary>
     /// Whether a method <see cref="Vectorize"/> leaves scalar looks meant for a vector loop, so EECS055 names the reason:
-    /// it is static, runs on one thread, takes only components (by <c>ref</c> or <c>in</c>), singletons and values (no
-    /// Entity, World, span, Maybe or Mut), and each component is a struct of lane-type fields only (float, double,
-    /// int, uint, long, ulong). The reason is then about its components or its body.
+    /// it is static, takes only components (by <c>ref</c> or <c>in</c>), singletons and values (no Entity, World, span,
+    /// Maybe or Mut), and each component is a struct of lane-type fields only (float, double, int, uint, long, ulong).
+    /// The reason is then about its components or its body.
     /// </summary>
     public static bool LooksEligible(IMethodSymbol method)
     {
-        if (!method.IsStatic || Symbols.IsParallel(method)) return false;
+        if (!method.IsStatic) return false;
         bool outside = Symbols.IsRunner(method), any = false;
         foreach (var p in method.Parameters)
             switch (Symbols.Classify(p, outside))

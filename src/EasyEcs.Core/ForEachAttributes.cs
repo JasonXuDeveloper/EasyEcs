@@ -74,7 +74,7 @@ public sealed class ForEachAttribute : Attribute
 
 /// <summary>
 /// Whether a <see cref="ForEachAttribute"/> method runs as a vector loop (<see cref="ForEachAttribute.Simd"/>). A method
-/// qualifies when it is static, runs on one thread, makes no structural change, takes components (by <c>ref</c> or
+/// qualifies when it is static, makes no structural change (on one thread or in parallel), takes components (by <c>ref</c> or
 /// <c>in</c>), singletons and values, and computes with operations that have an exact vector counterpart.
 /// </summary>
 public enum SimdMode
