@@ -73,6 +73,15 @@ internal sealed class Kernel
     /// </summary>
     internal const string V = "\u0001Vector";
 
+    /// <summary>The token of the lane masks' form: <c>Interleaved.Lanes32</c>, <c>Interleaved.Lanes32In512</c>.</summary>
+    internal const string LanesForm = "\u0001In512";
+
+    /// <summary>
+    /// The token of the rows a loop visits, as bits (<c>MaybeColumn.StampPresent</c>): every row of a run
+    /// (<c>ulong.MaxValue</c>), or a masked word's <c>pass</c>.
+    /// </summary>
+    internal const string Visited = "\u0001Visited";
+
     /// <summary>The token of the square root: Vector.SquareRoot, Vector512.Sqrt.</summary>
     internal const string SquareRoot = V + ".SquareRoot(";
     private const string Interleaved = "global::EasyEcs.Interleaved";
@@ -91,6 +100,20 @@ internal sealed class Kernel
     private readonly Dictionary<string, string> _broadcasts = new();
     private readonly StringBuilder _setup = new(), _body = new();
     private readonly HashSet<int> _written = new();
+    /// <summary>
+    /// The Maybe&lt;T&gt; / ReadOnlyMaybe&lt;T&gt; parameters: their position i (the job's column <c>m{i}</c>) and T's lane
+    /// fields. Each is a lane mask <c>__has{i}</c> (the rows that have T) and one vector per field <c>__q{i}_{f}</c>.
+    /// </summary>
+    private readonly Dictionary<IParameterSymbol, (int Index, IFieldSymbol[] Fields)> _optionals = new(SymbolEqualityComparer.Default);
+    private readonly HashSet<int> _writtenOptionals = new();
+    /// <summary>
+    /// What each mask atom (a mask temp, or one negated: <c>~__m3</c>) proves: the optionals whose component every lane
+    /// it holds has. A read of <c>m.Value</c> under a mask that proves m needs no check.
+    /// </summary>
+    private readonly Dictionary<string, HashSet<int>> _implied = new();
+    private readonly HashSet<string> _guarded = new();
+    private string? _active;  // the lanes the expression being translated is evaluated for (null: every lane)
+    private bool _live;       // a guard reads __live: the lanes of the vector the loop computes for
     private string? _alive; // lanes that have not returned yet, once a return under a condition cleared some
     private bool _bails;
     private bool _fast; // FloatMode.Fast: float sums reordered and the vector approximations of Sin, Exp, Log and kin
@@ -144,8 +167,9 @@ internal sealed class Kernel
 
     /// <summary>
     /// Whether a method <see cref="Vectorize"/> leaves scalar looks meant for a vector loop, so EECS055 names the reason:
-    /// it is static, takes only components (by <c>ref</c> or <c>in</c>), singletons and values (no Entity, World, span,
-    /// Maybe or Mut), and each component is a struct of lane-type fields only (float, double, int, uint, long, ulong).
+    /// it is static, takes only components (by <c>ref</c> or <c>in</c>), Maybe&lt;T&gt; of them, singletons and values (no
+    /// Entity, World, span or Mut), and each component is a struct of lane-type fields only (float, double, int, uint,
+    /// long, ulong).
     /// The reason is then about its components or its body.
     /// </summary>
     public static bool LooksEligible(IMethodSymbol method)
@@ -156,9 +180,10 @@ internal sealed class Kernel
             switch (Symbols.Classify(p, outside))
             {
                 case Symbols.ParamKind.Component:
-                    var fields = p.Type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray();
-                    if (fields.Length == 0 || fields.Any(f => !IsLaneType(f.Type))) return false;
+                    if (!LaneFields(p.Type)) return false;
                     any = true;
+                    break;
+                case Symbols.ParamKind.Optional when Symbols.MaybeElement(p.Type) is { } element && LaneFields(element):
                     break;
                 case Symbols.ParamKind.Singleton or Symbols.ParamKind.Context or Symbols.ParamKind.Reduction:
                     break;
@@ -167,6 +192,9 @@ internal sealed class Kernel
             }
         return any;
     }
+
+    private static bool LaneFields(ITypeSymbol type) =>
+        type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray() is { Length: > 0 } fields && fields.All(f => IsLaneType(f.Type));
 
     /// <summary>The type argument of a Scratch&lt;T&gt; / Lookup&lt;T&gt; parameter, for a reason.</summary>
     private static string? Element(ITypeSymbol type) => type is INamedTypeSymbol { TypeArguments.Length: 1 } named ? named.TypeArguments[0].Name : null;
@@ -184,6 +212,7 @@ internal sealed class Kernel
         (syntax, model) = Symbols.WithBody(method, syntax, model);
         ITypeSymbol? first = null;
         var components = new List<IFieldSymbol[]>();
+        var optionals = new List<IFieldSymbol[]>();
         bool outside = Symbols.IsRunner(method);
         foreach (var p in method.Parameters)
         {
@@ -208,6 +237,11 @@ internal sealed class Kernel
                     break;
                 case Symbols.ParamKind.Context:
                     break;
+                case Symbols.ParamKind.Optional when Symbols.IsParallel(method):
+                    throw new Unsupported($"it takes a Maybe<{Symbols.MaybeElement(p.Type)?.Name}> and runs in parallel: an optional column has a vector loop on one thread");
+                case Symbols.ParamKind.Optional:
+                    optionals.Add(Lanes(Symbols.MaybeElement(p.Type)!));
+                    break;
                 default:
                     throw new Unsupported(kind switch
                     {
@@ -215,7 +249,6 @@ internal sealed class Kernel
                         Symbols.ParamKind.Entities => "it takes the EntitySpan",
                         Symbols.ParamKind.World => "it takes the World",
                         Symbols.ParamKind.ComponentSpan => "it takes spans: a batch method writes its own loop",
-                        Symbols.ParamKind.Optional => $"it takes a Maybe<{Symbols.MaybeElement(p.Type)?.Name}>",
                         Symbols.ParamKind.Mutable => $"it takes a Mut<{Symbols.MutElement(p.Type)?.Name}>",
                         Symbols.ParamKind.Scratch => $"it takes a Scratch<{Element(p.Type)}>: working memory a row at a time, not one per lane",
                         Symbols.ParamKind.Lookup => $"it takes a Lookup<{Element(p.Type)}>: a lookup of another entity per row has no vector form",
@@ -224,13 +257,16 @@ internal sealed class Kernel
             }
         }
         if (first == null) throw new Unsupported("it takes no component");
+        foreach (var field in optionals.SelectMany(f => f))
+            if (SizeOf(first) != SizeOf(field.Type))
+                throw new Unsupported($"lane types {first.ToDisplayString()} and {field.Type.ToDisplayString()} differ in size");
         if (model.GetOperation(syntax, ct) is not IMethodBodyOperation body) throw new Unsupported("it has no body");
 
         // The parameters of a kernel: the main one, and one per field of a flat loop (Flat) with the same setup.
         Kernel Make(bool reductions)
         {
             var made = new Kernel(SizeOf(first)) { _fast = Symbols.FastFloats(method) };
-            for (int i = 0, k = 0; i < method.Parameters.Length; i++)
+            for (int i = 0, k = 0, o = 0; i < method.Parameters.Length; i++)
             {
                 var p = method.Parameters[i];
                 var kind = Symbols.Classify(p, outside);
@@ -238,6 +274,17 @@ internal sealed class Kernel
                 {
                     made._components[p] = (k + 1, components[k], p.RefKind == RefKind.Ref);
                     k++;
+                    continue;
+                }
+                if (kind == Symbols.ParamKind.Optional)
+                {
+                    // The column of the run (or 64 rows of zeros the row mask keeps at row 0, for a table without it).
+                    var fields = optionals[o++];
+                    made._optionals[p] = (i, fields);
+                    made._implied[$"__has{i}"] = [i];
+                    string t = Symbols.MaybeElement(p.Type)!.ToDisplayString(Symbols.Fqn);
+                    made._setup.Append($"ref {Elem(fields[0].Type)} __r{i} = ref global::System.Runtime.CompilerServices.Unsafe.As<{t}, {Elem(fields[0].Type)}>(ref m{i}.Lanes);\n");
+                    made._setup.Append($"var __z{i} = m{i}.RowMask;\n");
                     continue;
                 }
                 if (kind == Symbols.ParamKind.Reduction)
@@ -272,6 +319,18 @@ internal sealed class Kernel
                     loads.Append($"var __c{index}_{f} = {As(column, Elem(fields[f].Type), $"__s{index}_{f}")};\n");
             }
         }
+        foreach (var (index, fields) in kernel._optionals.Values.OrderBy(o => o.Index))
+        {
+            string column = Elem(fields[0].Type), row = $"(nuint)i & __z{index}";
+            loads.Append($"var __has{index} = {Interleaved}.Lanes{kernel._size * 8}{LanesForm}(m{index}.Present(i), 0);\n");
+            if (fields.Length == 1) loads.Append($"var __q{index}_0 = {V}.LoadUnsafe(ref __r{index}, {row});\n");
+            else
+            {
+                loads.Append($"{Interleaved}.Load{fields.Length}(ref __r{index}, {row}, {string.Join(", ", fields.Select((_, f) => $"out {Vec(column)} __t{index}_{f}"))});\n");
+                for (int f = 0; f < fields.Length; f++)
+                    loads.Append($"var __q{index}_{f} = {As(column, Elem(fields[f].Type), $"__t{index}_{f}")};\n");
+            }
+        }
         var root = (IOperation?)body.BlockBody ?? body.ExpressionBody!;
         kernel.Statement(root, null);
         // A masked word keeps the values loaded of what the method writes, and stores them back in the lanes that do not
@@ -289,6 +348,21 @@ internal sealed class Kernel
             masked.Append(fields.Length == 1
                 ? $"{V}.StoreUnsafe({Blend(0)}, ref e{index}, (nuint)i);\n"
                 : $"{Interleaved}.Store{fields.Length}({string.Join(", ", fields.Select((field, f) => As(Elem(field.Type), column, Blend(f))))}, ref e{index}, (nuint)i);\n");
+        }
+        // A written optional column is stored whole, the lanes of rows without the component as loaded (a read or a
+        // write of m.Value runs only where the row has it, else the vector's rows go to the method); nothing for a table
+        // without the column. Its stamps: the rows that have it, as the method stamps them.
+        foreach (var (index, fields) in kernel._optionals.Values.Where(o => kernel._writtenOptionals.Contains(o.Index)).OrderBy(o => o.Index))
+        {
+            string column = Elem(fields[0].Type);
+            string Blend(int f) => $"{V}.ConditionalSelect({As(kernel._mask, Elem(fields[f].Type), "__pass")}, __q{index}_{f}, __k{index}_{f})";
+            for (int f = 0; f < fields.Length; f++) kept.Append($"var __k{index}_{f} = __q{index}_{f};\n");
+            string Store(System.Func<int, string> value) => fields.Length == 1
+                ? $"if (__z{index} != 0) {V}.StoreUnsafe({value(0)}, ref __r{index}, (nuint)i);\n"
+                : $"if (__z{index} != 0) {Interleaved}.Store{fields.Length}({string.Join(", ", fields.Select((field, f) => As(Elem(field.Type), column, value(f))))}, ref __r{index}, (nuint)i);\n";
+            stores.Append(Store(f => $"__q{index}_{f}"));
+            masked.Append(Store(Blend));
+            kernel._setup.Append($"m{index}.StampPresent((int)rows, {Visited});\n");
         }
         // The reductions' lane accumulators: kept before the body (a bail sets them back, a masked word keeps the lanes
         // that do not pass), folded after the loop, lane by lane, into the run's partial result.
@@ -311,9 +385,10 @@ internal sealed class Kernel
             fold.Append($"    {r.Partial}.Combine(__v);\n}}\n");
         }
         string prologue = kernel._bails ? "bool __bail = false;\n" : "";
+        string live = kernel._live ? $"var __live = {Vec(kernel._mask)}.AllBitsSet;\n" : "", maskedLive = kernel._live ? "var __live = __pass;\n" : "";
         string hold = kernel._bails ? held.ToString() : "";
         return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
-            kernel._setup.ToString(), prologue + loads + hold + kernel._body, stores.ToString(), prologue + loads + kept + held + kernel._body, masked.ToString(),
+            kernel._setup.ToString(), prologue + live + loads + hold + kernel._body, stores.ToString(), prologue + maskedLive + loads + kept + held + kernel._body, masked.ToString(),
             restore.ToString(), fold.ToString(), kernel._size, kernel._mask, kernel._components.Values.Any(c => c.Fields.Length > 1), kernel._bails,
             Flat(kernel, root, () => Make(false)));
     }
@@ -328,7 +403,7 @@ internal sealed class Kernel
     /// </summary>
     private static FlatCode? Flat(Kernel main, IOperation root, System.Func<Kernel> make)
     {
-        if (main._bails || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0) return null;
+        if (main._bails || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0 || main._optionals.Count > 0) return null;
         var components = main._components.Values.ToArray();
         var type = components[0].Fields[0].Type;
         int fields = components[0].Fields.Length;
@@ -460,17 +535,22 @@ internal sealed class Kernel
                     if (!IsLane(local.Type) && !IsBool(local.Type))
                         throw new Unsupported($"local '{local.Name}' is a {local.Type.ToDisplayString()}, not a lane type of {_size} bytes");
                     string name = Temp("l");
+                    _active = And(mask, _alive);
+                    string value = Expr(init);
                     _locals[local] = name;
-                    _body.Append($"var {name} = {Expr(init)};\n"); // a fresh local: its value in other lanes is never read
+                    _body.Append($"var {name} = {value};\n"); // a fresh local: its value in other lanes is never read
                 }
                 return true;
             case IExpressionStatementOperation { Operation: var e }:
+                _active = And(mask, _alive);
                 Assignment(e, mask);
                 return true;
             case IConditionalOperation { WhenTrue: var whenTrue, WhenFalse: var whenFalse } branch when branch.Type == null:
             {
                 string condition = Temp("m");
+                _active = And(mask, _alive);
                 _body.Append($"var {condition} = {Expr(branch.Condition)};\n"); // before either branch writes what it reads
+                Prove(condition, branch.Condition);
                 Statement(whenTrue, And(mask, condition));
                 if (whenFalse != null) Statement(whenFalse, And(mask, $"~{condition}"));
                 return true;
@@ -481,8 +561,13 @@ internal sealed class Kernel
                 {
                     _alive = Temp("alive");
                     _body.Append($"var {_alive} = ~{mask};\n");
+                    _implied[_alive] = ImpliedNot(mask);
                 }
-                else _body.Append($"{_alive} &= ~{mask};\n");
+                else
+                {
+                    _body.Append($"{_alive} &= ~{mask};\n");
+                    _implied[_alive].UnionWith(ImpliedNot(mask)); // the lanes left are fewer: what they have, they keep
+                }
                 return true;
             default:
                 throw Not(op);
@@ -537,6 +622,12 @@ internal sealed class Kernel
         {
             _written.Add(c.Index);
             return $"__c{c.Index}_{c.Field}";
+        }
+        if (OptionalLane(target) is { } q)
+        {
+            Guard(q.Index);
+            _writtenOptionals.Add(q.Index);
+            return $"__q{q.Index}_{q.Field}";
         }
         throw new Unsupported($"it writes '{Text(target)}', which is neither a local nor the lane of a component taken by ref");
     }
@@ -725,6 +816,94 @@ internal sealed class Kernel
         return null;
     }
 
+    // ---------------- optional components ----------------
+
+    /// <summary>The optional and field whose lane <paramref name="op"/> is: <c>m.Value.X</c> of a Maybe&lt;T&gt; m.</summary>
+    private (int Index, int Field)? OptionalLane(IOperation op)
+    {
+        var (instance, member) = op switch
+        {
+            IFieldReferenceOperation f => (f.Instance, (ISymbol)f.Field),
+            IPropertyReferenceOperation { Arguments.Length: 0 } p => (p.Instance, p.Property),
+            _ => (null, null),
+        };
+        if (instance is not IPropertyReferenceOperation { Property.Name: "Value", Instance: IParameterReferenceOperation { Parameter: var parameter } }
+            || !_optionals.TryGetValue(parameter, out var o))
+            return null;
+        for (int f = 0; f < o.Fields.Length; f++)
+            if (SymbolEqualityComparer.Default.Equals(member, o.Fields[f]) || SymbolEqualityComparer.Default.Equals(member, o.Fields[f].AssociatedSymbol))
+                return (o.Index, f);
+        return null;
+    }
+
+    /// <summary>
+    /// A read or write of optional <paramref name="index"/>'s Value for the lanes of <see cref="_active"/>: Value throws
+    /// for a row without the component, so where the lanes are not proven to have it, a lane without it sends the
+    /// vector's rows to the method itself (which throws as written).
+    /// </summary>
+    private void Guard(int index)
+    {
+        if (Implied(_active).Contains(index) || !_guarded.Add($"{index} {_active}")) return;
+        _bails = _live = true;
+        string lanes = _active == null ? "__live" : $"(__live & {_active})";
+        _body.Append($"__bail |= ({lanes} & ~__has{index}) != {Vec(_mask)}.Zero;\n");
+    }
+
+    /// <summary>Record what mask <paramref name="name"/>, the value of <paramref name="condition"/>, and its negation prove.</summary>
+    private void Prove(string name, IOperation condition)
+    {
+        if (_optionals.Count == 0 || !name.StartsWith("__", System.StringComparison.Ordinal) || _implied.ContainsKey(name)) return;
+        _implied[name] = Has(condition, true);
+        _implied["~" + name] = Has(condition, false);
+    }
+
+    /// <summary>The optionals whose component every lane has where <paramref name="condition"/> is <paramref name="holds"/>.</summary>
+    private HashSet<int> Has(IOperation condition, bool holds)
+    {
+        while (condition is IConversionOperation { Conversion.IsIdentity: true } c) condition = c.Operand;
+        switch (condition)
+        {
+            case IPropertyReferenceOperation { Property.Name: "HasValue", Instance: IParameterReferenceOperation { Parameter: var p } } when holds && _optionals.TryGetValue(p, out var o):
+                return [o.Index];
+            case IUnaryOperation { OperatorKind: UnaryOperatorKind.Not, Operand: var operand }:
+                return Has(operand, !holds);
+            case IBinaryOperation { OperatorKind: BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.And or BinaryOperatorKind.ConditionalOr or BinaryOperatorKind.Or } b
+                when IsBool(b.Type):
+                var (left, right) = (Has(b.LeftOperand, holds), Has(b.RightOperand, holds));
+                // a && b holds: both do; a || b fails: both do. Otherwise either may: what both prove.
+                if ((b.OperatorKind is BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.And) == holds) left.UnionWith(right);
+                else left.IntersectWith(right);
+                return left;
+            default:
+                return [];
+        }
+    }
+
+    /// <summary>What a mask (atoms joined by <c>&amp;</c>, as <see cref="And"/> joins them) proves: what any of its atoms does.</summary>
+    private HashSet<int> Implied(string? mask)
+    {
+        var set = new HashSet<int>();
+        if (mask == null) return set;
+        foreach (var atom in Atoms(mask))
+            if (_implied.TryGetValue(atom, out var proven)) set.UnionWith(proven);
+        return set;
+    }
+
+    /// <summary>What the lanes outside a mask prove: what the negation of every one of its atoms does.</summary>
+    private HashSet<int> ImpliedNot(string mask)
+    {
+        HashSet<int>? set = null;
+        foreach (var atom in Atoms(mask))
+        {
+            var proven = _implied.TryGetValue(atom.StartsWith("~", System.StringComparison.Ordinal) ? atom.Substring(1) : "~" + atom, out var p) ? p : [];
+            if (set == null) set = new HashSet<int>(proven);
+            else set.IntersectWith(proven);
+        }
+        return set ?? [];
+    }
+
+    private static string[] Atoms(string mask) => mask.Replace("(", "").Replace(")", "").Split([" & "], System.StringSplitOptions.RemoveEmptyEntries);
+
     // ---------------- expressions ----------------
 
     /// <summary>
@@ -749,6 +928,11 @@ internal sealed class Kernel
                 return Convert(Expr(c.Operand), c.Operand.Type!, c.Type!) ?? throw Not(c);
             case IFieldReferenceOperation or IPropertyReferenceOperation when LaneOf(op) is { } c:
                 return $"__c{c.Index}_{c.Field}";
+            case IPropertyReferenceOperation { Property.Name: "HasValue", Instance: IParameterReferenceOperation { Parameter: var p } } when _optionals.TryGetValue(p, out var o):
+                return $"__has{o.Index}";
+            case IFieldReferenceOperation or IPropertyReferenceOperation when OptionalLane(op) is { } q:
+                Guard(q.Index);
+                return $"__q{q.Index}_{q.Field}";
             case IFieldReferenceOperation when Accumulator(op) != null:
                 throw new Unsupported($"it reads '{Text(op)}', a partial result the lanes of a vector loop hold in parts");
             case ILocalReferenceOperation { Local: var local } when _locals.TryGetValue(local, out var name):
@@ -766,7 +950,21 @@ internal sealed class Kernel
                     _ => throw Not(u),
                 };
             case IConditionalOperation { IsRef: false, WhenFalse: { } whenFalse } t when IsLane(t.Type) || IsBool(t.Type):
-                return $"{V}.ConditionalSelect({MaskAs(Expr(t.Condition), t.Type!)}, {Expr(t.WhenTrue)}, {Expr(whenFalse)})";
+            {
+                string condition = Expr(t.Condition);
+                if (_optionals.Count == 0)
+                    return $"{V}.ConditionalSelect({MaskAs(condition, t.Type!)}, {Expr(t.WhenTrue)}, {Expr(whenFalse)})";
+                // Each arm reads under its lanes (m.HasValue ? m.Value.X : 0 reads only rows that have it).
+                condition = Hold(condition, t.Condition.Type!);
+                Prove(condition, t.Condition);
+                string? active = _active;
+                _active = And(active, condition);
+                string whenTrue = Expr(t.WhenTrue);
+                _active = And(active, $"~{condition}");
+                string otherwise = Expr(whenFalse);
+                _active = active;
+                return $"{V}.ConditionalSelect({MaskAs(condition, t.Type!)}, {whenTrue}, {otherwise})";
+            }
             case IIsPatternOperation { Value: var value } pattern when IsLane(value.Type):
                 return Pattern(Expr(value), value.Type!, pattern.Pattern);
             case IInvocationOperation { Instance: null } call when IsMath(call.TargetMethod):
@@ -831,6 +1029,17 @@ internal sealed class Kernel
 
         bool lanes = IsLane(leftType) && IsLane(right.Type) && SymbolEqualityComparer.Default.Equals(leftType, right.Type);
         bool masks = IsBool(leftType) && IsBool(right.Type);
+        if (masks && _optionals.Count > 0 && kind is BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.ConditionalOr)
+        {
+            // The right side reads under the lanes the left lets through (m.HasValue && m.Value.X > 0).
+            string left = Hold(Expr(leftOp), leftType!);
+            Prove(left, leftOp);
+            string? active = _active;
+            _active = And(active, kind == BinaryOperatorKind.ConditionalAnd ? left : $"~{left}");
+            string other = Expr(right);
+            _active = active;
+            return $"({left} {(kind == BinaryOperatorKind.ConditionalAnd ? "&" : "|")} {other})";
+        }
         if (kind is BinaryOperatorKind.Divide or BinaryOperatorKind.Remainder && lanes && !IsFloat(type))
             throw new Unsupported("integer division is not supported (it throws on 0)");
         if (kind == BinaryOperatorKind.Remainder) throw new Unsupported("'%' is not supported (no vector remainder)");

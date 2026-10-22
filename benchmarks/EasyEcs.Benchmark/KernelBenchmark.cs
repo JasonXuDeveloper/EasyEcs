@@ -21,6 +21,7 @@ namespace EasyEcs.Benchmark;
 /// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
 /// pattern) are the calls, conversions and masks a vector loop takes. <c>Tally</c> (an int count, sum, Min and Max) and
 /// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order.
+/// <c>Optional</c> takes a <c>Maybe&lt;Mass&gt;</c> over <c>_holes</c> (a lane mask of the rows that have it).
 /// <c>Wave</c> calls Sin and Exp per row (FloatMode.Fast: .NET's vector forms). <c>StepParallel</c> / <c>SeekParallel</c> run
 /// <c>Step</c> / <c>Seek</c> on several threads, the per-row parallel job against the vector loop in each chunk. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
 /// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
@@ -249,6 +250,16 @@ public class KernelBenchmark
     public void EnergyGenerated() => Kernels.Energy(_world);
 
     [Benchmark]
+    public void OptionalScalar()
+    {
+        var job = new OptionalRows();
+        _holes.ForEachBatch<Heat, Speed, OptionalRows>(ref job);
+    }
+
+    [Benchmark]
+    public void OptionalGenerated() => Kernels.Optional(_holes);
+
+    [Benchmark]
     public void WaveScalar()
     {
         var job = new WaveRows();
@@ -393,6 +404,16 @@ public class KernelBenchmark
     public struct Mass : IComponent { public float Value; }
     public record struct Pull(float Value) : ISingletonComponent;
 
+    /// <summary>The batch job a method taking a Maybe compiled to before: the optional column once per run, a presence bit per row.</summary>
+    private struct OptionalRows : IForEachBatch<Heat, Speed>
+    {
+        public void Execute(EntitySpan entities, Span<Heat> heat, Span<Speed> speed)
+        {
+            var mass = new MaybeColumn<Mass>(in entities, false);
+            for (int i = 0; i < heat.Length; i++) Kernels.Optional(ref heat[i], in speed[i], mass[i]);
+        }
+    }
+
     private struct WaveRows : IForEach<Heat, Speed, Mass>
     {
         public void Execute(ref Heat heat, ref Speed speed, ref Mass mass) => Kernels.Wave(ref heat, in speed, in mass);
@@ -487,6 +508,14 @@ public class KernelBenchmark
             p.X += v.X * Dt;
             p.Y += v.Y * Dt;
             p.Z += v.Z * Dt;
+        }
+
+        // An optional component: Maybe<Mass> as a lane mask of the rows that have it (every third row of _holes lacks it).
+        [ForEach(Simd = SimdMode.Require)]
+        internal static void Optional(ref Heat heat, in Speed speed, Maybe<Mass> mass)
+        {
+            if (mass.HasValue) heat.Value += speed.Value * Dt / MathF.Max(mass.Value.Value, 0.5f);
+            else heat.Value += speed.Value * Dt;
         }
 
         // Sin and Exp per row: .NET's vector approximations under FloatMode.Fast, the CRT's sinf / expf per row otherwise.

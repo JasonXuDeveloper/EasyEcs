@@ -399,6 +399,38 @@ public static class MathKernels
     }
 }
 
+// Optional components of vector loops: Maybe<T> is a lane mask of the rows that have T, and T's fields are lanes.
+public record struct Boost : IComponent { public float Value; }
+public record struct Wind2 : IComponent, ITracked { public float X, Y; }
+
+/// <summary>Kernels taking a Maybe&lt;T&gt;: HasValue is a lane mask, Value's fields are lanes read (and written) where rows have T.</summary>
+public static class OptionalKernels
+{
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Push(ref Heat heat, Maybe<Boost> boost)
+    {
+        if (boost.HasValue) heat.Value += boost.Value.Value * 2;
+        else heat.Value -= 1;
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Blow(ref Spot2 p, Maybe<Wind2> wind)
+    {
+        if (!wind.HasValue) return;      // the lanes left have Wind2: no check per read
+        wind.Value.X *= 0.5f;
+        p.X += wind.Value.X;
+        p.Y += wind.Value.Y;
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Peek(ref Level level, in Heat heat, ReadOnlyMaybe<Boost> boost) =>
+        level.Value = boost.HasValue && boost.Value.Value > 0 ? boost.Value.Value : heat.Value;
+
+    // Reads Value without HasValue: a row without Boost throws, as the method does.
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Careless(ref Level level, Maybe<Boost> boost) => level.Value = boost.Value.Value + 1;
+}
+
 public class KernelTests
 {
     /// <summary>The lengths that cut a vector short or leave a tail, at both vector widths, and a long run.</summary>
@@ -1084,6 +1116,103 @@ public class KernelTests
         }
     }
 
+    /// <summary>
+    /// Maybe&lt;T&gt; as a lane mask, bit for bit the method's: tables with the optional column (some rows without it),
+    /// without it, and rows that lack a queried component (masked words); written through, stored only where rows have
+    /// it, and stamped where they have it.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void OptionalComponentsAreLaneMasks(int count)
+    {
+        using var world = new World();
+        var random = new Random(count);
+        var heats = new Heat[count];
+        var levels = new Level[count];
+        var spots = new Spot2[count];
+        var boosts = new Boost[count];
+        var winds = new Wind2[count];
+        bool[] hasBoost = new bool[count], hasWind = new bool[count], hasHeat = new bool[count], hasSpot = new bool[count];
+        var entities = new Entity[count];
+        world.Reserve<Heat, Level, Spot2, Boost, Wind2>(count);
+        for (int i = 0; i < count; i++)
+        {
+            heats[i] = new Heat { Value = NextFloat(random, i) };
+            levels[i] = NextLevel(random, i + 1);
+            spots[i] = new Spot2 { X = NextFloat(random, i), Y = NextFloat(random, i + 2) };
+            boosts[i] = new Boost { Value = NextFloat(random, i + 3) };
+            winds[i] = new Wind2 { X = NextFloat(random, i + 1), Y = NextFloat(random, i + 4) };
+            var e = entities[i] = world.CreateEntity(heats[i], levels[i], spots[i]);
+            hasHeat[i] = hasSpot[i] = true;
+            int table = i % 5;
+            if (table != 4) // the fifth table has neither optional column
+            {
+                e.Set(boosts[i]);
+                e.Set(winds[i]);
+                hasBoost[i] = hasWind[i] = true;
+                if (table == 3) e.Set(new Frozen());
+            }
+        }
+        for (int i = 0; i < count; i++)
+        {
+            int table = i % 5;
+            if (table == 1 && i % 3 == 0) { entities[i].Remove<Boost>(); hasBoost[i] = false; }  // presence holes
+            if (table == 1 && i % 7 == 0) { entities[i].Remove<Wind2>(); hasWind[i] = false; }
+            if (table == 2 && i % 4 == 0) { entities[i].Remove<Heat>(); hasHeat[i] = false; }    // masked words
+            if (table == 2 && i % 6 == 0) { entities[i].Remove<Spot2>(); hasSpot[i] = false; }
+        }
+
+        world.Update();
+        ulong mark = world.ChangeTick;
+        for (int round = 0; round < 2; round++)
+        {
+            OptionalKernels.Push(world);
+            OptionalKernels.Blow(world);
+            OptionalKernels.Peek(world);
+            for (int i = 0; i < count; i++)
+            {
+                var boost = hasBoost[i] ? new Maybe<Boost>(ref boosts[i]) : default;
+                var wind = hasWind[i] ? new Maybe<Wind2>(ref winds[i]) : default;
+                if (hasHeat[i]) OptionalKernels.Push(ref heats[i], boost);
+                if (hasSpot[i]) OptionalKernels.Blow(ref spots[i], wind);
+                if (hasHeat[i]) OptionalKernels.Peek(ref levels[i], in heats[i], boost);
+            }
+        }
+
+        // Rows Blow reached with a Wind2 are stamped (the indexer's stamps), the others are not (checked before Get,
+        // which writes).
+        int stamped = 0;
+        for (int i = 0; i < count; i++) if (hasWind[i] && hasSpot[i]) stamped++;
+        Assert.That(world.Count<Wind2>(QueryFilter.Create().Changed<Wind2>(mark)), Is.EqualTo(stamped));
+        foreach (var item in world.Read<Wind2>(QueryFilter.Create().Changed<Wind2>(mark)))
+            Assert.That(item.Entity.Has<Spot2>(), $"{item.Entity} was stamped without being visited");
+        for (int i = 0; i < count; i++)
+        {
+            if (hasHeat[i]) Assert.That(Same(entities[i].Get<Heat>(), heats[i]), $"Heat of row {i}: {Bits(entities[i].Get<Heat>())} instead of {Bits(heats[i])}");
+            Assert.That(Same(entities[i].Get<Level>(), levels[i]), $"Level of row {i}: {Bits(entities[i].Get<Level>())} instead of {Bits(levels[i])}");
+            if (hasSpot[i]) Assert.That(Same(entities[i].Get<Spot2>(), spots[i]), $"Spot2 of row {i}");
+            if (hasBoost[i]) Assert.That(Same(entities[i].Get<Boost>(), boosts[i]), $"Boost of row {i}");
+            if (hasWind[i]) Assert.That(Same(entities[i].Get<Wind2>(), winds[i]), $"Wind2 of row {i}: {Bits(entities[i].Get<Wind2>())} instead of {Bits(winds[i])}");
+        }
+    }
+
+    /// <summary>A read of Value for a row without the component throws for that row, after the rows before it, as the method does.</summary>
+    [Test]
+    public void AnOptionalReadWithoutHasValueThrowsForItsRow()
+    {
+        const int count = 100;
+        using var world = new World();
+        var entities = new Entity[count];
+        for (int i = 0; i < count; i++) entities[i] = world.CreateEntity(new Level { Value = i }, new Boost { Value = i * 10 });
+        OptionalKernels.Careless(world); // every row has Boost
+        for (int i = 0; i < count; i++) Assert.That(entities[i].Get<Level>().Value, Is.EqualTo(i * 10 + 1));
+
+        for (int i = 0; i < count; i++) entities[i].SetBoost(i * 100);
+        entities[37].Remove<Boost>();
+        Assert.Throws<InvalidOperationException>(() => OptionalKernels.Careless(world));
+        for (int i = 0; i < count; i++)
+            Assert.That(entities[i].Get<Level>().Value, Is.EqualTo(i < 37 ? i * 100 + 1 : i * 10 + 1), $"row {i}");
+    }
+
     [Test]
     public void VectorLoopsDoNotAllocate()
     {
@@ -1120,6 +1249,7 @@ public class KernelTests
             MathKernels.Lengths(world);
             ParallelKernels.Glide(world);
             ParallelKernels.Count(world);
+            OptionalKernels.Push(world); // tables without the optional column
         }
 
         for (int i = 0; i < 50; i++) Frame(); // warm-up: the query cache, the static index tables of Interleaved, JIT tiers

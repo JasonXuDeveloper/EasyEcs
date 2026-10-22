@@ -442,7 +442,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         if (masked)
         {
             // The rows of this vector that pass, one lane each: a vector with none is skipped.
-            loop.Append($"{body}var __pass = global::EasyEcs.Interleaved.Lanes{simd.Size * 8}{LanesForm}(pass, (int)i);\n");
+            loop.Append($"{body}var __pass = global::EasyEcs.Interleaved.Lanes{simd.Size * 8}{Kernel.LanesForm}(pass, (int)i);\n");
             loop.Append($"{body}if (__pass == {Kernel.V}<{simd.Mask}>.Zero) continue;\n");
         }
         foreach (var line in (masked ? simd.MaskedBody : simd.Body).Split('\n')) if (line.Length > 0) loop.Append(body).Append(line).Append('\n');
@@ -464,9 +464,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
         // Only the tokens are replaced: setup lines name user types (in Vector3 wind, in Vector<float> bias) as written.
         // Vector512 names the same operations alike, except the square root (Vector.SquareRoot, Vector512.Sqrt).
         var text = new StringBuilder(loop.ToString());
+        text.Replace(Kernel.Visited, masked ? "pass" : "ulong.MaxValue");
         sb.Append(text.ToString().Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512)
-            .Replace(Accelerated, "IsAccelerated512").Replace(LanesForm, "In512"));
-        sb.Append(text.Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(LanesForm, ""));
+            .Replace(Accelerated, "IsAccelerated512").Replace(Kernel.LanesForm, "In512"));
+        sb.Append(text.Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(Kernel.LanesForm, ""));
     }
 
     /// <summary>
@@ -494,9 +495,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append($"{indent}i /= {flat.Fields}; // whole rows: the row the rows left start at\n");
     }
 
-    // Tokens of EmitVectorLoop's text (U+0001 occurs in no C# token outside a literal): Interleaved.IsAccelerated /
-    // IsAccelerated512, Interleaved.Lanes32 / Lanes32In512.
-    private const string Accelerated = "\u0001Accelerated", LanesForm = "\u0001In512";
+    // A token of EmitVectorLoop's text (U+0001 occurs in no C# token outside a literal): Interleaved.IsAccelerated /
+    // IsAccelerated512.
+    private const string Accelerated = "\u0001Accelerated";
 
     private const string Vector = "global::System.Numerics.Vector", Vector512 = "global::System.Runtime.Intrinsics.Vector512";
 

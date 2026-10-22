@@ -657,7 +657,7 @@ internal sealed class Archetype
 
     /// <summary>The rows of [<paramref name="start"/>, <paramref name="end"/>) in word <paramref name="word"/>.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static ulong RunMask(int start, int end, int word)
+    internal static ulong RunMask(int start, int end, int word)
     {
         int first = Math.Max(start - (word << 6), 0), last = Math.Min(end - (word << 6), 64); // rows [first, last)
         ulong upTo = last == 64 ? ulong.MaxValue : (1UL << last) - 1;

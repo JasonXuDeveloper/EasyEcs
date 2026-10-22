@@ -107,6 +107,13 @@ public readonly ref struct MaybeColumn<T> where T : struct, IComponent
     private readonly Archetype _table;    // for stamps: set only for a write of a tracked component
     private readonly ulong _tick;
     private readonly int _start;
+    private readonly int _words;          // the presence bits' length
+
+    /// <summary>
+    /// 64 rows of zeros: the lanes a vector loop loads where the table has no such column (<see cref="RowMask"/> keeps
+    /// it at row 0). Never written: the loop stores nothing for such a column.
+    /// </summary>
+    private static readonly T[] Zeros = new T[64];
 
     /// <summary>The column of <paramref name="entities"/>' table (found through the run's first entity, one lookup per run); <paramref name="write"/> stamps a tracked component per row reached.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -122,7 +129,11 @@ public readonly ref struct MaybeColumn<T> where T : struct, IComponent
         _start = meta.Slot;
         if (column < 0) return;
         _first = ref Unsafe.Add(ref table.Data<T>(column), _start);
-        if (table.Bits(column) is { } bits) _present = ref MemoryMarshal.GetArrayDataReference(bits);
+        if (table.Bits(column) is { } bits)
+        {
+            _present = ref MemoryMarshal.GetArrayDataReference(bits);
+            _words = bits.Length;
+        }
         if (write && default(T) is ITracked) (_table, _tick) = (table, world.ChangeTick);
     }
 
@@ -138,6 +149,71 @@ public readonly ref struct MaybeColumn<T> where T : struct, IComponent
             if (!Unsafe.IsNullRef(ref _present) && (Unsafe.Add(ref _present, row >> 6) & (1UL << row)) == 0) return default; // shift is mod 64
             if (default(T) is ITracked && _table != null) _table.Stamp<T>(row, _tick);
             return new Maybe<T>(ref Unsafe.Add(ref _first, index));
+        }
+    }
+
+    // A vector loop's view of the column (Kernel.cs): the run's rows as lanes, a lane mask of the rows that have the
+    // component, and the stamps of a write. Each lane computes what the method computes for its row; the lanes of rows
+    // without the component are stored back as loaded.
+
+    /// <summary>
+    /// The run's first row of the column, or row 0 of 64 rows of zeros when the table has no such column (a loop
+    /// indexes it through <see cref="RowMask"/>, so it stays at row 0).
+    /// </summary>
+    public ref T Lanes
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => ref Unsafe.IsNullRef(ref _first) ? ref MemoryMarshal.GetArrayDataReference(Zeros) : ref _first;
+    }
+
+    /// <summary>
+    /// The mask a vector loop applies to its row index before it reads <see cref="Lanes"/>: all bits set when the table
+    /// has the column, 0 when it reads the zeros (and stores nothing).
+    /// </summary>
+    public nuint RowMask
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Unsafe.IsNullRef(ref _first) ? 0 : nuint.MaxValue;
+    }
+
+    /// <summary>
+    /// Which of the 64 rows from row <paramref name="index"/> of the run have the component: bit j for row
+    /// <c>index + j</c> (0 for a table without the column, every bit for a column every row has). Bits past the table's
+    /// capacity are 0 or not, as the column's last presence word holds them: a loop reads only the rows of its vector.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ulong Present(nint index)
+    {
+        if (Unsafe.IsNullRef(ref _first)) return 0;
+        if (Unsafe.IsNullRef(ref _present)) return ulong.MaxValue;
+        int row = _start + (int)index, word = row >> 6, shift = row & 63;
+        // No bounds check: the row is one of the table's, its presence bits cover every row of its capacity; the next
+        // word is read only when the array holds it.
+        ulong bits = Unsafe.Add(ref _present, word) >> shift;
+        if (shift != 0 && word + 1 < _words) bits |= Unsafe.Add(ref _present, word + 1) << (64 - shift);
+        return bits;
+    }
+
+    /// <summary>
+    /// Stamp, for a write of a tracked component, the rows of the first <paramref name="count"/> rows of the run that
+    /// have it and whose bit is set in <paramref name="rows"/> (bit j for row j; every row for
+    /// <see cref="ulong.MaxValue"/>, else at most 64 rows): what the indexer stamps for each row it reaches. Nothing
+    /// for a read, or for a component that does not track changes.
+    /// </summary>
+    public void StampPresent(int count, ulong rows)
+    {
+        if (_table == null || count <= 0) return;
+        int first = _start, end = _start + count;
+        for (int w = first >> 6; w <= (end - 1) >> 6; w++)
+        {
+            ulong bits = Archetype.RunMask(first, end, w);
+            if (!Unsafe.IsNullRef(ref _present)) bits &= Unsafe.Add(ref _present, w);
+            if (rows != ulong.MaxValue)
+            {
+                int offset = (w << 6) - first; // in (-64, 64): the run holds at most 64 rows
+                bits &= offset >= 0 ? rows >> offset : rows << -offset;
+            }
+            _table.StampWord<T>(w, bits, _tick);
         }
     }
 }

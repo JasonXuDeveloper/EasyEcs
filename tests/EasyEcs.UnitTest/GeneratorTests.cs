@@ -216,6 +216,11 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f, in G g) => f.V *= System.MathF.Sin(g.Pull);", true)]      // uniform: the scalar call
     [TestCase("[ForEach] static void A(ref F f) => f.V = float.DegreesToRadians(f.V);", true)]            // (x * Pi) / 180: exact
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Atan2(f.V, 1);", false)]            // no vector form
+    [TestCase("[ForEach] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V += h.Value.V; else f.V = 0; }", true)] // a lane mask
+    [TestCase("[ForEach] static void A(ref F f, ReadOnlyMaybe<Two> t) => f.V = t.HasValue && t.Value.A > 0 ? t.Value.B : f.V;", true)]
+    [TestCase("[ForEach] static void A(ref F f, Maybe<H> h) { if (!h.HasValue) return; h.Value.V = f.V; }", true)]   // written through
+    [TestCase("[ForEach] static void A(ref F f, Maybe<D> d) { if (d.HasValue) f.V++; }", false)]                    // another lane size
+    [TestCase("[ForEach(Parallel = true)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V++; }", false)]   // in parallel
     public void QualifyingMethodsGetAVectorLoop(string members, bool vectorized)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"public partial class S : EcsSystem {{ {members} }}"),
@@ -231,7 +236,7 @@ public class GeneratorTests
         // runs each chunk's runs of rows (ForEachBatchParallel).
         bool parallel = members.Contains("Parallel = true");
         Assert.That(generated.Contains("global::EasyEcs.IForEachMasked<") && generated.Contains("ulong pass, "), Is.EqualTo(vectorized && !parallel), generated);
-        if (parallel) Assert.That(generated, Does.Contain("world.ForEachBatchParallel<"), generated);
+        if (parallel && vectorized) Assert.That(generated, Does.Contain("world.ForEachBatchParallel<"), generated);
 
         // Skipped means reported: the same method with SimdMode.Require is an error exactly when it got no loop.
         string required = members.Replace("[ForEach]", "[ForEach(Simd = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(Simd = SimdMode.Require, Parallel").Replace("[ForEach(FloatMode", "[ForEach(Simd = SimdMode.Require, FloatMode");
@@ -258,6 +263,9 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Wide> w) => w.Value.N += p.V;", "field Wide.L of the reduction is a long, not a lane type of 4 bytes")]
     [TestCase("[ForEach] static void A(ref P p, ref Reduce<Count> c) { c.Value.N += p.V; p.V = c.Value.N; }", "it reads 'c.Value.N', a partial result the lanes of a vector loop hold in parts")]
     [TestCase("[ForEach(Parallel = true)] static void A(ref Five t) => t.A = t.B;", "component Five has 5 fields (a vector loop splits up to 4)")] // parallel too
+    [TestCase("[ForEach] static void A(ref F f, Maybe<D> d) { if (d.HasValue) f.V++; }", "lane types float and double differ in size")]
+    [TestCase("[ForEach(Parallel = true)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V++; }", "it takes a Maybe<H> and runs in parallel: an optional column has a vector loop on one thread")]
+    [TestCase("[ForEach] static void A(ref F f, Maybe<H> h) { var x = h.Value; f.V = x.V; }", "local 'x' is a H, not a lane type of 4 bytes")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Sin(f.V);", "MathF.Sin is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
     [TestCase("[ForEach] static void A(ref D d) => d.V = double.Hypot(d.V, 1);", "Double.Hypot is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Atan2(f.V, 1);", "MathF.Atan2 has no vector form in .NET 10")]
@@ -363,6 +371,27 @@ public class GeneratorTests
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
         string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
         Assert.That(generated, Does.Contain("ForEachBatchParallel<").And.Contain("Vector.LoadUnsafe"));
+    }
+
+    // Maybe<T>: HasValue is a lane mask of the presence bits, Value's fields are lanes of the run's optional column; a
+    // read of Value where lanes are not proven to have it checks them (a lane without it sends the vector's rows to the
+    // method, which throws), one proven by HasValue does not.
+    [Test]
+    public void AMaybeIsALaneMask()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { [ForEach(Simd = SimdMode.Require)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V += h.Value.V; f.V -= h.Value.V; } }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("ref float __r1 = ref global::System.Runtime.CompilerServices.Unsafe.As<global::H, float>(ref m1.Lanes);")
+            .And.Contain("var __has1 = global::EasyEcs.Interleaved.Lanes32(m1.Present(i), 0);")
+            .And.Contain("var __has1 = global::EasyEcs.Interleaved.Lanes32In512(m1.Present(i), 0);")
+            .And.Contain("var __q1_0 = global::System.Numerics.Vector.LoadUnsafe(ref __r1, (nuint)i & __z1);")
+            .And.Contain("var __live = global::System.Numerics.Vector<int>.AllBitsSet;").And.Contain("var __live = __pass;"), generated);
+        // One check, for the read outside the branch; none for the one under h.HasValue.
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__live & ~__has1\) != global::System.Numerics.Vector<int>.Zero;").Count, Is.EqualTo(2), generated); // unmasked + masked
+        Assert.That(generated, Does.Not.Contain("__bail |= (__live & __m"), generated);
     }
 
     // FloatMode.Fast: the vector approximations of .NET (Vector.Sin, Vector512.Sin) in both loops; degrees to radians as
