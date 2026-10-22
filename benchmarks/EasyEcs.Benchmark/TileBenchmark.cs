@@ -1,0 +1,693 @@
+using System;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using BenchmarkDotNet.Attributes;
+
+namespace EasyEcs.Benchmark;
+
+// Stencils over a torus of 32 x 32 plates of 16 x 16 cells (262,144 cells): what Tile<TCell, TTile> costs against the
+// same stencil written by hand (a Lookup per neighbour, a padded texture on the stack), what a wider halo buys
+// (several steps in one pass), what sleeping tiles save, and what finding the neighbours costs in a pass.
+
+public record struct Plot(int X, int Z)
+{
+    public const int Side = 32;
+
+    /// <summary>The plot beside this one across a face, around the torus.</summary>
+    public Plot Wrap(TileFaces face) => face switch
+    {
+        TileFaces.North => new Plot(X, (Z + Side - 1) % Side),
+        TileFaces.South => new Plot(X, (Z + 1) % Side),
+        TileFaces.West => new Plot((X + Side - 1) % Side, Z),
+        TileFaces.East => new Plot((X + 1) % Side, Z),
+        _ => this,
+    };
+
+    /// <summary>The plot <paramref name="dx"/>, <paramref name="dz"/> away, around the torus.</summary>
+    public Plot Offset(int dx, int dz) => new((X + dx + Side) % Side, (Z + dz + Side) % Side);
+}
+
+public record struct Warmth(float T);
+public record struct NextWarmth(float T);
+public record struct Seed(byte Alive);
+public record struct NextSeed(byte Alive);
+
+/// <summary>A plate of the 9-point blur: every neighbour, edges and corners.</summary>
+public record struct BlurPlot(Plot Pos) : IComponent, ITile<Plot>
+{
+    readonly Plot IIndexed<Plot>.Key => Pos;
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
+    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+    static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
+}
+
+/// <summary>A plate of the blur whose key maps onto a slot of an array (IDirectIndexed): a neighbour is one array read.</summary>
+public record struct DirectPlot(Plot Pos) : IComponent, ITile<Plot>, IDirectIndexed<Plot>
+{
+    readonly Plot IIndexed<Plot>.Key => Pos;
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
+    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+    static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
+    static int IDirectIndexed<Plot>.Slots => Plot.Side * Plot.Side;
+    static int IDirectIndexed<Plot>.SlotOf(Plot p) => p.Z * Plot.Side + p.X;
+}
+
+/// <summary>A plate of the blur with a halo of 2: two blur steps per pass.</summary>
+public record struct Blur2Plot(Plot Pos) : IComponent, ITile<Plot>
+{
+    readonly Plot IIndexed<Plot>.Key => Pos;
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
+    static int ITileShape.Halo => 2;
+    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+    static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
+}
+
+/// <summary>A plate of the blur with a halo of 4: four blur steps per pass.</summary>
+public record struct Blur4Plot(Plot Pos) : IComponent, ITile<Plot>
+{
+    readonly Plot IIndexed<Plot>.Key => Pos;
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
+    static int ITileShape.Halo => 4;
+    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+    static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
+}
+
+/// <summary>A plate of the fourth-order Laplacian: five points along each axis, a halo of 2, faces only.</summary>
+public record struct WavePlot(Plot Pos) : IComponent, ITile<Plot>
+{
+    readonly Plot IIndexed<Plot>.Key => Pos;
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
+    static int ITileShape.Halo => 2;
+    static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
+}
+
+/// <summary>A plate of the Game of Life.</summary>
+public record struct LifePlot(Plot Pos) : IComponent, ITile<Plot>
+{
+    readonly Plot IIndexed<Plot>.Key => Pos;
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
+    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+    static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
+}
+
+/// <summary>A plate of the hand-written stencils: only its key, the neighbours found by hand.</summary>
+public record struct HandPlot(Plot Pos) : IComponent, IIndexed<Plot>
+{
+    readonly Plot IIndexed<Plot>.Key => Pos;
+}
+
+/// <summary>Tags a plate whose step may change it.</summary>
+public struct Awake : IComponent;
+
+/// <summary>What a plate's last step changed: whether anything, and the faces whose edge.</summary>
+public record struct SeedChange(TileFaces Edges, bool Changed) : IComponent;
+
+/// <summary>Where the neighbours were found: an id that keeps the search from being dropped.</summary>
+public record struct Probe(EntityId North, EntityId SouthEast) : IComponent;
+
+/// <summary>The eight neighbours of a plate, found once and kept (the alternative to a search per pass).</summary>
+public record struct Around(Around.Ids Of) : IComponent
+{
+    [InlineArray(8)]
+    public struct Ids
+    {
+        private EntityId _first;
+    }
+}
+
+[MemoryDiagnoser]
+public class TileStencilBenchmark
+{
+    [Params(1, 4)] public int Threads;
+
+    private World _blurTile, _blurDirect, _blurHand, _waveTile, _waveHand;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _blurTile = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p));
+        _blurTile.AddSystem<TileSystems.BlurSystem>();
+        _blurTile.AddSystem<TileSystems.CommitWarmthSystem>();
+        _blurDirect = TileWorlds.Warm<DirectPlot>(Threads, p => new DirectPlot(p));
+        _blurDirect.AddSystem<TileSystems.BlurDirectSystem>();
+        _blurDirect.AddSystem<TileSystems.CommitWarmthSystem>();
+        _blurHand = TileWorlds.Warm<HandPlot>(Threads, p => new HandPlot(p));
+        _blurHand.AddSystem<TileSystems.HandBlurSystem>();
+        _blurHand.AddSystem<TileSystems.CommitWarmthSystem>();
+        _waveTile = TileWorlds.Warm<WavePlot>(Threads, p => new WavePlot(p));
+        _waveTile.AddSystem<TileSystems.WaveSystem>();
+        _waveTile.AddSystem<TileSystems.CommitWarmthSystem>();
+        _waveHand = TileWorlds.Warm<HandPlot>(Threads, p => new HandPlot(p));
+        _waveHand.AddSystem<TileSystems.HandWaveSystem>();
+        _waveHand.AddSystem<TileSystems.CommitWarmthSystem>();
+        for (int i = 0; i < 3; i++)
+        {
+            Blur9_Tile();
+            Blur9_TileDirect();
+            Blur9_Hand();
+            Laplacian_Tile();
+            Laplacian_Hand();
+        }
+        TileWorlds.Same(_blurTile, _blurHand);
+        TileWorlds.Same(_blurDirect, _blurHand);
+        TileWorlds.Same(_waveTile, _waveHand);
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _blurTile.Dispose();
+        _blurDirect.Dispose();
+        _blurHand.Dispose();
+        _waveTile.Dispose();
+        _waveHand.Dispose();
+    }
+
+    [Benchmark] public void Blur9_Tile() => _blurTile.Update();
+    [Benchmark] public void Blur9_TileDirect() => _blurDirect.Update();
+    [Benchmark] public void Blur9_Hand() => _blurHand.Update();
+    [Benchmark] public void Laplacian_Tile() => _waveTile.Update();
+    [Benchmark] public void Laplacian_Hand() => _waveHand.Update();
+}
+
+/// <summary>Four blur steps: four passes of a halo of 1, two of a halo of 2 (two steps each), one of a halo of 4.</summary>
+[MemoryDiagnoser]
+public class TileStepsBenchmark
+{
+    [Params(1, 4)] public int Threads;
+
+    private World _passes, _two, _four;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _passes = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p));
+        _passes.AddSystem<TileSystems.BlurSystem>();
+        _passes.AddSystem<TileSystems.CommitWarmthSystem>();
+        _two = TileWorlds.Warm<Blur2Plot>(Threads, p => new Blur2Plot(p));
+        _two.AddSystem<TileSystems.Blur2System>();
+        _two.AddSystem<TileSystems.CommitWarmthSystem>();
+        _four = TileWorlds.Warm<Blur4Plot>(Threads, p => new Blur4Plot(p));
+        _four.AddSystem<TileSystems.Blur4System>();
+        _four.AddSystem<TileSystems.CommitWarmthSystem>();
+        for (int i = 0; i < 2; i++)
+        {
+            FourPasses();
+            TwoPassesOfTwoSteps();
+            OnePassOfFourSteps();
+        }
+        TileWorlds.Close(_passes, _two);
+        TileWorlds.Close(_passes, _four);
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _passes.Dispose();
+        _two.Dispose();
+        _four.Dispose();
+    }
+
+    [Benchmark(Baseline = true)]
+    public void FourPasses()
+    {
+        for (int i = 0; i < 4; i++) _passes.Update();
+    }
+
+    [Benchmark]
+    public void TwoPassesOfTwoSteps()
+    {
+        _two.Update();
+        _two.Update();
+    }
+
+    [Benchmark] public void OnePassOfFourSteps() => _four.Update();
+}
+
+/// <summary>
+/// A quiet Game of Life: 16 blinkers on 1,024 plates. Always on steps every plate (each skipping its empty rows);
+/// Sparse steps the plates that are awake (the 16, which never change their edges) and lets the others sleep.
+/// </summary>
+[MemoryDiagnoser]
+public class TileActiveBenchmark
+{
+    [Params(1, 4)] public int Threads;
+
+    private World _always, _sparse;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _always = TileWorlds.Blinkers(Threads, awake: false);
+        _always.AddSystem<TileSystems.LifeSystem>();
+        _always.AddSystem<TileSystems.CommitSeedSystem>();
+        _sparse = TileWorlds.Blinkers(Threads, awake: true);
+        _sparse.AddSystem<TileSystems.SparseLifeSystem>();
+        _sparse.AddSystem<TileSystems.CommitAwakeSystem>();
+        _sparse.AddSystem<TileSystems.SleepSystem>();
+        _sparse.AddSystem<TileSystems.WakeSystem>();
+        for (int i = 0; i < 4; i++)
+        {
+            AlwaysOn();
+            Sparse();
+        }
+        if (_sparse.Count<Awake>(QueryFilter.Create()) != 16) throw new InvalidOperationException("16 plates stay awake");
+        TileWorlds.SameSeeds(_always, _sparse);
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _always.Dispose();
+        _sparse.Dispose();
+    }
+
+    [Benchmark(Baseline = true)] public void AlwaysOn() => _always.Update();
+    [Benchmark] public void Sparse() => _sparse.Update();
+}
+
+/// <summary>
+/// What finding a plate's eight neighbours costs in a pass: Search is a pass whose method takes the tile (the
+/// generated code searches the key index for the eight keys) and does nothing else; SearchDirect the same with a
+/// direct-mapped key (an array read per neighbour); Cached reads the eight ids from a component kept beside the plate
+/// instead.
+/// </summary>
+[MemoryDiagnoser]
+public class TileNeighbourBenchmark
+{
+    [Params(1, 4)] public int Threads;
+
+    private World _search, _direct, _cached;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _search = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p), probe: true);
+        _search.AddSystem<TileSystems.SearchSystem>();
+        _direct = TileWorlds.Warm<DirectPlot>(Threads, p => new DirectPlot(p), probe: true);
+        _direct.AddSystem<TileSystems.SearchDirectSystem>();
+        _cached = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p), probe: true);
+        _cached.AddSystem<TileSystems.CacheSystem>();
+        _cached.Update();
+        _cached.RemoveSystem<TileSystems.CacheSystem>();
+        _cached.AddSystem<TileSystems.CachedSystem>();
+        Search();
+        SearchDirect();
+        Cached();
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _search.Dispose();
+        _direct.Dispose();
+        _cached.Dispose();
+    }
+
+    [Benchmark(Baseline = true)] public void Search() => _search.Update();
+    [Benchmark] public void SearchDirect() => _direct.Update();
+    [Benchmark] public void Cached() => _cached.Update();
+}
+
+internal static class TileWorlds
+{
+    /// <summary>A torus of plates of random warmth (a fixed seed), the step buffer sized.</summary>
+    public static World Warm<TPlot>(int threads, Func<Plot, TPlot> make, bool probe = false) where TPlot : struct, IComponent
+    {
+        var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var random = new Random(7);
+        for (int z = 0; z < Plot.Side; z++)
+        for (int x = 0; x < Plot.Side; x++)
+        {
+            var plate = world.CreateEntity(make(new Plot(x, z)));
+            var warmth = plate.GetOrAdd<DynamicBuffer<Warmth>>().SetCount(256);
+            for (int i = 0; i < 256; i++) warmth[i] = new Warmth(random.Next(1000));
+            plate.GetOrAdd<DynamicBuffer<NextWarmth>>().SetCount(256);
+            if (probe) plate.Set(new Probe());
+        }
+        return world;
+    }
+
+    /// <summary>A torus of empty Life plates with a blinker in the middle of every 64th.</summary>
+    public static World Blinkers(int threads, bool awake)
+    {
+        var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        for (int z = 0; z < Plot.Side; z++)
+        for (int x = 0; x < Plot.Side; x++)
+        {
+            var plate = world.CreateEntity(new LifePlot(new Plot(x, z)));
+            var seeds = plate.GetOrAdd<DynamicBuffer<Seed>>().SetCount(256);
+            plate.GetOrAdd<DynamicBuffer<NextSeed>>().SetCount(256);
+            if (x % 8 == 3 && z % 8 == 5)
+                for (int i = 7; i <= 9; i++) seeds[8 * 16 + i] = new Seed(1);
+            if (awake)
+            {
+                plate.Set(new SeedChange());
+                plate.SetAwake();
+            }
+        }
+        return world;
+    }
+
+    /// <summary>Throws unless both worlds hold the same warmth, cell for cell, in creation order.</summary>
+    public static void Same(World a, World b) => Compare(a, b, 0f);
+
+    /// <summary>Throws unless both worlds hold nearly the same warmth (sums in another order round differently).</summary>
+    public static void Close(World a, World b) => Compare(a, b, 1e-3f);
+
+    private static void Compare(World a, World b, float tolerance)
+    {
+        var left = a.Query<DynamicBuffer<Warmth>>().GetEnumerator();
+        var right = b.Query<DynamicBuffer<Warmth>>().GetEnumerator();
+        while (left.MoveNext())
+        {
+            right.MoveNext();
+            var l = left.Current.Component1.AsReadOnlySpan();
+            var r = right.Current.Component1.AsReadOnlySpan();
+            for (int i = 0; i < l.Length; i++)
+                if (MathF.Abs(l[i].T - r[i].T) > tolerance * MathF.Max(1f, MathF.Abs(l[i].T)))
+                    throw new InvalidOperationException($"warmth differs at {i}: {l[i].T} and {r[i].T}");
+        }
+    }
+
+    /// <summary>Throws unless both worlds hold the same cells.</summary>
+    public static void SameSeeds(World a, World b)
+    {
+        var left = a.Query<DynamicBuffer<Seed>>().GetEnumerator();
+        var right = b.Query<DynamicBuffer<Seed>>().GetEnumerator();
+        while (left.MoveNext())
+        {
+            right.MoveNext();
+            if (!left.Current.Component1.AsReadOnlySpan().SequenceEqual(right.Current.Component1.AsReadOnlySpan()))
+                throw new InvalidOperationException("the cells differ");
+        }
+    }
+}
+
+internal static class TileSystems
+{
+    /// <summary>The 9-point blur of one plate, a row of 16 in four vectors.</summary>
+    private static void Blur<TTile>(Tile<Warmth, TTile> warmth, Mut<DynamicBuffer<NextWarmth>> next)
+        where TTile : struct, IComponent, ITileShape
+    {
+        var plate = warmth.Load();
+        var into = MemoryMarshal.Cast<NextWarmth, float>(next.Write().AsSpan());
+        foreach (var row in plate.Rows(TileReads.Layer))
+        {
+            var c = plate.At(row);
+            for (int x = 0; x < 16; x += 4)
+                (BlurStep<TTile>.Step(c, x)).CopyTo(into.Slice(row.Index + x));
+        }
+    }
+
+    public struct BlurStep<TTile> : ITileStep<Warmth, TTile, float> where TTile : struct, IComponent, ITileShape
+    {
+        public static int Reach => 1;
+        public static TileReads Reads => TileReads.Layer;
+
+        public static Vector128<float> Step(TileCursor<Warmth, TTile> c, int x) =>
+            (c.Load128<float>(x - 1, 0, -1) + c.Load128<float>(x, 0, -1) + c.Load128<float>(x + 1, 0, -1)
+             + c.Load128<float>(x - 1) + c.Load128<float>(x) + c.Load128<float>(x + 1)
+             + c.Load128<float>(x - 1, 0, 1) + c.Load128<float>(x, 0, 1) + c.Load128<float>(x + 1, 0, 1)) * (1f / 9);
+    }
+
+    public class BlurSystem : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Step(Tile<Warmth, BlurPlot> warmth, Mut<DynamicBuffer<NextWarmth>> next) => Blur(warmth, next);
+    }
+
+    public class BlurDirectSystem : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Step(Tile<Warmth, DirectPlot> warmth, Mut<DynamicBuffer<NextWarmth>> next) => Blur(warmth, next);
+    }
+
+    public class Blur2System : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Step(Tile<Warmth, Blur2Plot> warmth, Mut<DynamicBuffer<NextWarmth>> next) =>
+            warmth.Load().Steps<BlurStep<Blur2Plot>, float>().CopyTo(MemoryMarshal.Cast<NextWarmth, Warmth>(next.Write().AsSpan()));
+    }
+
+    public class Blur4System : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Step(Tile<Warmth, Blur4Plot> warmth, Mut<DynamicBuffer<NextWarmth>> next) =>
+            warmth.Load().Steps<BlurStep<Blur4Plot>, float>().CopyTo(MemoryMarshal.Cast<NextWarmth, Warmth>(next.Write().AsSpan()));
+    }
+
+    public const float Rate = 0.05f;
+
+    public class WaveSystem : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Step(Tile<Warmth, WavePlot> warmth, Mut<DynamicBuffer<NextWarmth>> next)
+        {
+            var plate = warmth.Load();
+            var into = MemoryMarshal.Cast<NextWarmth, float>(next.Write().AsSpan());
+            foreach (var row in plate.Rows(TileReads.Layer))
+            {
+                var c = plate.At(row);
+                for (int x = 0; x < 16; x += 4)
+                {
+                    var here = c.Load128<float>(x);
+                    var alongX = -c.Load128<float>(x - 2) + 16f * c.Load128<float>(x - 1) - 30f * here + 16f * c.Load128<float>(x + 1) - c.Load128<float>(x + 2);
+                    var alongZ = -c.Load128<float>(x, 0, -2) + 16f * c.Load128<float>(x, 0, -1) - 30f * here + 16f * c.Load128<float>(x, 0, 1) - c.Load128<float>(x, 0, 2);
+                    (here + (alongX + alongZ) * (1f / 12) * Rate).CopyTo(into.Slice(row.Index + x));
+                }
+            }
+        }
+    }
+
+    public class CommitWarmthSystem : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 64)]
+        static void Commit(in DynamicBuffer<NextWarmth> next, Mut<DynamicBuffer<Warmth>> warmth) =>
+            next.AsReadOnlySpan().CopyTo(MemoryMarshal.Cast<Warmth, NextWarmth>(warmth.Write().AsSpan()));
+    }
+
+    // The hand-written blur: the eight neighbours found through the key index, their cells read through a lookup, the
+    // plate and its ring of one cell copied into an 18 x 18 texture on the stack, then the same row loop.
+    [SkipLocalsInit]
+    public class HandBlurSystem : EcsSystem
+    {
+        const int Row = 18;
+
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Step(in HandPlot plot, in DynamicBuffer<Warmth> warmth, Lookup<HandPlot> plots,
+            Lookup<DynamicBuffer<Warmth>> warmths, Mut<DynamicBuffer<NextWarmth>> next)
+        {
+            Span<float> pad = stackalloc float[Row * Row];
+            var self = MemoryMarshal.Cast<Warmth, float>(warmth.AsReadOnlySpan());
+            var north = Cells(plots.TryFind(plot.Pos.Offset(0, -1), out EntityId northId), northId, warmths);
+            var south = Cells(plots.TryFind(plot.Pos.Offset(0, 1), out EntityId southId), southId, warmths);
+            var west = Cells(plots.TryFind(plot.Pos.Offset(-1, 0), out EntityId westId), westId, warmths);
+            var east = Cells(plots.TryFind(plot.Pos.Offset(1, 0), out EntityId eastId), eastId, warmths);
+            // The corners: the cell of each diagonal neighbour nearest this plate.
+            pad[0] = Corner(plots.TryFind(plot.Pos.Offset(-1, -1), out EntityId nw), nw, 255, warmths);
+            pad[Row - 1] = Corner(plots.TryFind(plot.Pos.Offset(1, -1), out EntityId ne), ne, 240, warmths);
+            pad[(Row - 1) * Row] = Corner(plots.TryFind(plot.Pos.Offset(-1, 1), out EntityId sw), sw, 15, warmths);
+            pad[Row * Row - 1] = Corner(plots.TryFind(plot.Pos.Offset(1, 1), out EntityId se), se, 0, warmths);
+            Band(north, 15 * 16, pad.Slice(1, 16));
+            Band(south, 0, pad.Slice((Row - 1) * Row + 1, 16));
+            for (int z = 0; z < 16; z++)
+            {
+                int p = (z + 1) * Row;
+                pad[p] = west.IsEmpty ? 0 : west[z * 16 + 15];
+                self.Slice(z * 16, 16).CopyTo(pad.Slice(p + 1, 16));
+                pad[p + 17] = east.IsEmpty ? 0 : east[z * 16];
+            }
+
+            var into = MemoryMarshal.Cast<NextWarmth, float>(next.Write().AsSpan());
+            ref float t = ref MemoryMarshal.GetReference(pad);
+            for (int z = 0; z < 16; z++)
+            for (int x = 0; x < 16; x += 4)
+            {
+                // The invariant: the texel (x + 1, z + 1) and its ring lie inside the 18 x 18 texture.
+                nuint p = (nuint)((z + 1) * Row + x + 1);
+                var sum = Vector128.LoadUnsafe(ref t, p - Row - 1) + Vector128.LoadUnsafe(ref t, p - Row) + Vector128.LoadUnsafe(ref t, p - Row + 1)
+                    + Vector128.LoadUnsafe(ref t, p - 1) + Vector128.LoadUnsafe(ref t, p) + Vector128.LoadUnsafe(ref t, p + 1)
+                    + Vector128.LoadUnsafe(ref t, p + Row - 1) + Vector128.LoadUnsafe(ref t, p + Row) + Vector128.LoadUnsafe(ref t, p + Row + 1);
+                (sum * (1f / 9)).CopyTo(into.Slice(z * 16 + x));
+            }
+        }
+
+        static float Corner(bool found, EntityId id, int cell, Lookup<DynamicBuffer<Warmth>> warmths) =>
+            found ? warmths.Read(id)[cell].T : 0;
+    }
+
+    // The hand-written fourth-order Laplacian: the four face neighbours, a 20 x 20 texture (a ring of two cells).
+    [SkipLocalsInit]
+    public class HandWaveSystem : EcsSystem
+    {
+        const int Row = 20;
+
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Step(in HandPlot plot, in DynamicBuffer<Warmth> warmth, Lookup<HandPlot> plots,
+            Lookup<DynamicBuffer<Warmth>> warmths, Mut<DynamicBuffer<NextWarmth>> next)
+        {
+            Span<float> pad = stackalloc float[Row * Row];
+            var self = MemoryMarshal.Cast<Warmth, float>(warmth.AsReadOnlySpan());
+            var north = Cells(plots.TryFind(plot.Pos.Offset(0, -1), out EntityId northId), northId, warmths);
+            var south = Cells(plots.TryFind(plot.Pos.Offset(0, 1), out EntityId southId), southId, warmths);
+            var west = Cells(plots.TryFind(plot.Pos.Offset(-1, 0), out EntityId westId), westId, warmths);
+            var east = Cells(plots.TryFind(plot.Pos.Offset(1, 0), out EntityId eastId), eastId, warmths);
+            for (int k = 0; k < 2; k++)
+            {
+                Band(north, (14 + k) * 16, pad.Slice(k * Row + 2, 16));
+                Band(south, k * 16, pad.Slice((18 + k) * Row + 2, 16));
+            }
+            for (int z = 0; z < 16; z++)
+            {
+                int p = (z + 2) * Row, at = z * 16;
+                pad[p] = west.IsEmpty ? 0 : west[at + 14];
+                pad[p + 1] = west.IsEmpty ? 0 : west[at + 15];
+                self.Slice(at, 16).CopyTo(pad.Slice(p + 2, 16));
+                pad[p + 18] = east.IsEmpty ? 0 : east[at];
+                pad[p + 19] = east.IsEmpty ? 0 : east[at + 1];
+            }
+
+            var into = MemoryMarshal.Cast<NextWarmth, float>(next.Write().AsSpan());
+            ref float t = ref MemoryMarshal.GetReference(pad);
+            for (int z = 0; z < 16; z++)
+            for (int x = 0; x < 16; x += 4)
+            {
+                // The invariant: the texel (x + 2, z + 2) and two cells each way along both axes lie inside the texture.
+                nuint p = (nuint)((z + 2) * Row + x + 2);
+                var here = Vector128.LoadUnsafe(ref t, p);
+                var alongX = -Vector128.LoadUnsafe(ref t, p - 2) + 16f * Vector128.LoadUnsafe(ref t, p - 1) - 30f * here
+                    + 16f * Vector128.LoadUnsafe(ref t, p + 1) - Vector128.LoadUnsafe(ref t, p + 2);
+                var alongZ = -Vector128.LoadUnsafe(ref t, p - 2 * Row) + 16f * Vector128.LoadUnsafe(ref t, p - Row) - 30f * here
+                    + 16f * Vector128.LoadUnsafe(ref t, p + Row) - Vector128.LoadUnsafe(ref t, p + 2 * Row);
+                (here + (alongX + alongZ) * (1f / 12) * Rate).CopyTo(into.Slice(z * 16 + x));
+            }
+        }
+    }
+
+    /// <summary>A neighbour's cells, empty when no plate was found (the search stays in the method: a Lookup gets its
+    /// index when the method calls TryFind on the parameter itself).</summary>
+    private static ReadOnlySpan<float> Cells(bool found, EntityId id, Lookup<DynamicBuffer<Warmth>> warmths) =>
+        found ? MemoryMarshal.Cast<Warmth, float>(warmths.Read(id).AsReadOnlySpan()) : default;
+
+    /// <summary>A neighbour's facing row of 16 into the ring, or zeros.</summary>
+    private static void Band(ReadOnlySpan<float> cells, int at, Span<float> into)
+    {
+        if (cells.IsEmpty) into.Clear();
+        else cells.Slice(at, 16).CopyTo(into);
+    }
+
+    /// <summary>Life on bytes: born with three live neighbours, lives on with two or three; a row of 16 in one vector.</summary>
+    private static void Life(Tile<Seed, LifePlot> life, Span<byte> into)
+    {
+        var plate = life.Load();
+        foreach (var row in plate.Rows(TileReads.Layer))
+        {
+            var c = plate.At(row);
+            var count = c.Load128<byte>(-1, 0, -1) + c.Load128<byte>(0, 0, -1) + c.Load128<byte>(1, 0, -1)
+                + c.Load128<byte>(-1) + c.Load128<byte>(1)
+                + c.Load128<byte>(-1, 0, 1) + c.Load128<byte>(0, 0, 1) + c.Load128<byte>(1, 0, 1);
+            var born = Vector128.Equals(count, Vector128.Create((byte)3));
+            var stays = Vector128.Equals(count, Vector128.Create((byte)2)) & c.Load128<byte>();
+            ((born | stays) & Vector128<byte>.One).CopyTo(into.Slice(row.Index));
+        }
+    }
+
+    public class LifeSystem : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Step(Tile<Seed, LifePlot> life, Mut<DynamicBuffer<NextSeed>> next)
+        {
+            var into = MemoryMarshal.Cast<NextSeed, byte>(next.Write().AsSpan());
+            into.Clear(); // the rows the mask skips are empty
+            Life(life, into);
+        }
+    }
+
+    public class CommitSeedSystem : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 64)]
+        static void Commit(in DynamicBuffer<NextSeed> next, Mut<DynamicBuffer<Seed>> seeds) =>
+            next.AsReadOnlySpan().CopyTo(MemoryMarshal.Cast<Seed, NextSeed>(seeds.Write().AsSpan()));
+    }
+
+    public class SparseLifeSystem : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 16), With<Awake>]
+        static void Step(Tile<Seed, LifePlot> life, Mut<DynamicBuffer<NextSeed>> next, ref SeedChange change)
+        {
+            var step = next.Write().AsSpan();
+            var into = MemoryMarshal.Cast<NextSeed, byte>(step);
+            into.Clear();
+            Life(life, into);
+            var edges = life.Changes(MemoryMarshal.Cast<NextSeed, Seed>(step), out bool changed);
+            change = new SeedChange(edges, changed);
+        }
+    }
+
+    public class CommitAwakeSystem : EcsSystem
+    {
+        [ForEach, With<Awake>]
+        static void Commit(in DynamicBuffer<NextSeed> next, Mut<DynamicBuffer<Seed>> seeds) =>
+            next.AsReadOnlySpan().CopyTo(MemoryMarshal.Cast<Seed, NextSeed>(seeds.Write().AsSpan()));
+    }
+
+    public class SleepSystem : EcsSystem
+    {
+        [ForEach, With<Awake>]
+        static void Sleep(Entity plate, in SeedChange change)
+        {
+            if (!change.Changed) plate.RemoveAwake();
+        }
+    }
+
+    public class WakeSystem : EcsSystem
+    {
+        [ForEach, With<Awake>]
+        void Wake(in SeedChange change, Tile<Seed, LifePlot> life)
+        {
+            foreach (var id in life.Facing(change.Edges)) World.GetEntity(id).SetAwake();
+        }
+    }
+
+    public class SearchSystem : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Find(Tile<Warmth, BlurPlot> warmth, ref Probe probe) =>
+            probe = new Probe(warmth.Beside(TileFaces.North), warmth.Beside(1, 0, 1));
+    }
+
+    public class SearchDirectSystem : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Find(Tile<Warmth, DirectPlot> warmth, ref Probe probe) =>
+            probe = new Probe(warmth.Beside(TileFaces.North), warmth.Beside(1, 0, 1));
+    }
+
+    public class CacheSystem : EcsSystem
+    {
+        [ForEach, With<Probe>]
+        static void Keep(Entity plate, Tile<Warmth, BlurPlot> warmth)
+        {
+            var around = new Around.Ids();
+            int i = 0;
+            for (int dz = -1; dz <= 1; dz++)
+            for (int dx = -1; dx <= 1; dx++)
+                if ((dx | dz) != 0) around[i++] = warmth.Beside(dx, 0, dz);
+            plate.Set(new Around(around));
+        }
+    }
+
+    public class CachedSystem : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Find(in Around around, ref Probe probe) => probe = new Probe(around.Of[1], around.Of[7]);
+    }
+}

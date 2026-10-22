@@ -7,6 +7,8 @@
         <Nullable>disable</Nullable>
         <IsPackable>false</IsPackable>
         <Optimize>true</Optimize>
+        <!-- [SkipLocalsInit] on the hand-written stencils of TileBenchmark: their stack textures are not cleared -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
     <ItemGroup>

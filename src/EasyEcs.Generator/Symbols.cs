@@ -36,6 +36,7 @@ internal static class Symbols
     public const string Group = "EasyEcs.IGroup";
     public const string Cleanup = "EasyEcs.ICleanupComponent";
     public const string EntityId = "EasyEcs.EntityId";
+    public const string TileShape = "EasyEcs.ITileShape";
     public const string UpdateBeforeAttribute = "EasyEcs.UpdateBeforeAttribute<TSystem>";
     public const string UpdateAfterAttribute = "EasyEcs.UpdateAfterAttribute<TSystem>";
     public const string UpdateInGroupAttribute = "EasyEcs.UpdateInGroupAttribute<TGroup>";

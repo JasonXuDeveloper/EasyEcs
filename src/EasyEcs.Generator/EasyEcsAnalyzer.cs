@@ -208,6 +208,23 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "the result into another component (double buffering: read Position, write NextPosition), or split the work " +
         "into two systems.", helpLinkUri: Help("EECS059"));
 
+    public static readonly DiagnosticDescriptor BadTileShape = new("EECS072", "An invalid tile shape",
+        "Tile shape '{0}' {1}",
+        Category, DiagnosticSeverity.Error, true,
+        "A tile (ITileShape) is Width x Depth x Height cells, Depth 1 to 64 (a layer's active rows are one 64-bit " +
+        "word), with a halo of 1 or more cells. A halo reads the cells of the tile beside, so it is at most the tile's " +
+        "extent along every axis with neighbours (its Faces), and along every axis when the boundary mirrors: like an " +
+        "MPI ghost width, never wider than the subdomain. Tile.Load throws for such a shape; widen the tile or narrow " +
+        "the halo.", helpLinkUri: Help("EECS072"));
+
+    public static readonly DiagnosticDescriptor SharedTile = new("EECS073", "Two tiles of the same cells and grid",
+        "[ForEach] method '{0}' takes '{1}' and '{2}', both Tile<{3}>: they load into one texture and read one buffer",
+        Category, DiagnosticSeverity.Error, true,
+        "A Tile<TCell, TTile> loads into the running thread's texture for TCell and TTile, and both parameters read the " +
+        "same DynamicBuffer<TCell> of the same entity: the second load replaces the first while it is still sampled. " +
+        "Take one tile per field: one cell type (one struct, one buffer) per field the stencil reads, each its own " +
+        "Tile<TCell, TTile>.", helpLinkUri: Help("EECS073"));
+
     public static readonly DiagnosticDescriptor BadIndexKey = new("EECS036", "A component that cannot be indexed by its key",
         "'{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
@@ -231,7 +248,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
         UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScalarLoop, NoVectorLoop,
-        SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten);
+        SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, BadTileShape, SharedTile);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -239,6 +256,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.EnableConcurrentExecution();
         context.RegisterSymbolAction(AnalyzeType, SymbolKind.NamedType);
         context.RegisterSyntaxNodeAction(AnalyzeSchedule, SyntaxKind.PropertyDeclaration);
+        context.RegisterSyntaxNodeAction(AnalyzeTileShape, SyntaxKind.StructDeclaration, SyntaxKind.RecordStructDeclaration);
         context.RegisterSymbolAction(AnalyzeMethod, SymbolKind.Method);
         context.RegisterSyntaxNodeAction(AnalyzeParallel, SyntaxKind.MethodDeclaration);
         context.RegisterSyntaxNodeAction(AnalyzeVectorLoop, SyntaxKind.MethodDeclaration);
@@ -353,6 +371,39 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.ReportDiagnostic(Diagnostic.Create(ScheduleNotConstant, declaration.Identifier.GetLocation(),
             initialized ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "ExpressionBody") : null,
             property.ContainingType.Name, property.Name, "it is read every update"));
+    }
+
+    /// <summary>
+    /// EECS072: a tile shape whose static members are constants (expression-bodied, or left to their defaults) and
+    /// that Tile.Load would reject: the checks of Shape&lt;TTile&gt;.Validate, read at build time.
+    /// </summary>
+    private static void AnalyzeTileShape(SyntaxNodeAnalysisContext context)
+    {
+        if (context.SemanticModel.GetDeclaredSymbol((TypeDeclarationSyntax)context.Node, context.CancellationToken) is not { } type) return;
+        var shape = type.AllInterfaces.FirstOrDefault(i => Symbols.Named(i, Symbols.TileShape));
+        if (shape == null) return;
+        int? Read(string name, int fallback)
+        {
+            if (shape.GetMembers(name).FirstOrDefault() is not IPropertySymbol member) return null;
+            if (type.FindImplementationForInterfaceMember(member) is not IPropertySymbol property
+                || SymbolEqualityComparer.Default.Equals(property.ContainingType, shape)) return fallback;
+            if (property.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is not PropertyDeclarationSyntax declaration
+                || declaration.SyntaxTree != context.Node.SyntaxTree || Symbols.Returned(declaration) is not { } body) return null;
+            return context.SemanticModel.GetConstantValue(body, context.CancellationToken) is { HasValue: true, Value: { } value }
+                ? System.Convert.ToInt32(value) : null;
+        }
+        // The defaults of ITileShape: Height 1, Halo 1, Faces Sides (15), Boundary Fill (0); Mirror is 2.
+        if (Read("Width", 0) is not { } w || Read("Depth", 0) is not { } d || Read("Height", 1) is not { } h || Read("Halo", 1) is not { } r
+            || Read("Faces", 15) is not { } faces || Read("Boundary", 0) is not { } boundary) return;
+        bool mirror = boundary == 2;
+        string? problem = w < 1 || d is < 1 or > 64 || h < 1 ? $"is {w} x {d} x {h} cells: Width and Height must be 1 or more, Depth 1 to 64"
+            : r < 1 ? $"has a halo of {r}: 1 or more"
+            : r > w && (mirror || (faces & 12) != 0) ? $"has a halo of {r}, wider than its rows of {w} cells"
+            : r > d && (mirror || (faces & 3) != 0) ? $"has a halo of {r}, deeper than its {d} rows"
+            : h > 1 && r > h && (mirror || (faces & 48) != 0) ? $"has a halo of {r}, taller than its {h} layers"
+            : null;
+        if (problem != null)
+            context.ReportDiagnostic(Diagnostic.Create(BadTileShape, ((TypeDeclarationSyntax)context.Node).Identifier.GetLocation(), type.Name, problem));
     }
 
     /// <summary>
@@ -815,6 +866,10 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                 context.ReportDiagnostic(Diagnostic.Create(BadParameter, p.Locations.FirstOrDefault(),
                     Symbols.ByValueData(p) ? ImmutableDictionary<string, string?>.Empty.Add(ByValue, "") : null, p.Name, method.Name));
             }
+            else if (kind == Symbols.ParamKind.Tile && method.Parameters.FirstOrDefault(other => other.Ordinal < p.Ordinal
+                         && SymbolEqualityComparer.Default.Equals(other.Type, p.Type)) is { } first)
+                context.ReportDiagnostic(Diagnostic.Create(SharedTile, p.Locations.FirstOrDefault(), method.Name, first.Name, p.Name,
+                    string.Join(", ", ((INamedTypeSymbol)p.Type).TypeArguments.Select(t => t.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)))));
             else if (kind is Symbols.ParamKind.Lookup or Symbols.ParamKind.Tile
                      && Symbols.LookedUp(p, context.Compilation).Select(t => (t, Symbols.LookupProblem(method, p, t))).FirstOrDefault(c => c.Item2 != null) is ({ } read, { } written))
                 context.ReportDiagnostic(Diagnostic.Create(LookupOfWritten, p.Locations.FirstOrDefault(), p.Name, method.Name,

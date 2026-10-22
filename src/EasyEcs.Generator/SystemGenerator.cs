@@ -356,7 +356,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         // A grid's neighbours, found once per entity for every Tile of the grid the method takes.
         string grids = string.Concat(Enumerable.Range(0, method.Parameters.Length).Where(method.FirstOfGrid).Select(i =>
-            $"var n{i} = global::EasyEcs.TileNeighbours.Of<{method.Parameters[i].Grid}, {method.Parameters[i].Key}>(k{i}, {(runs ? "entities[(int)i]" : "entity")}); "));
+            $"global::EasyEcs.TileNeighbours.Of<{method.Parameters[i].Grid}, {method.Parameters[i].Key}>(k{i}, {(runs ? "entities[(int)i]" : "entity")}, out var n{i}); "));
         if (grids.Length > 0) call = runs ? $"{{ {grids}{call} }}" : grids + call;
         // A vector loop also takes the words of 64 rows of which some pass (IForEachMasked): their passing rows as a
         // lane mask, the other lanes stored back as loaded.
