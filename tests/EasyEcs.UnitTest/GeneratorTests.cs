@@ -164,6 +164,34 @@ public class GeneratorTests
         if (!expected.Contains("access.RunAlone();")) Assert.That(generated, Does.Not.Contain("RunAlone"));
     }
 
+    private const string Lanes = """
+        public struct F : IComponent { public float V; }
+        public struct H : IComponent { public float V; }
+        public struct Two : IComponent { public float A, B; }
+        public record struct G(float Pull) : ISingletonComponent;
+        """;
+
+    // Kernel.cs: a method on one lane type with vector counterparts for its operations gets a Vector<T> loop.
+    [TestCase("[ForEach] static void A(ref F f, in H h) => f.V += h.V * 2;", true)]
+    [TestCase("[ForEach] static void A(ref F f, in H h) { if (h.V > 0) return; f.V = h.V > 1 ? 1 : System.MathF.Sqrt(h.V); }", true)]
+    [TestCase("[ForEach] static void A(ref F f, in G g) => f.V -= g.Pull;", true)]                     // a singleton: uniform
+    [TestCase("[ForEach] static void A(ref P p) => p.V = (p.V << 2) | 1;", true)]
+    [TestCase("[ForEach] static void A(ref F f, in P p) => f.V = p.V;", false)]                        // two lane types
+    [TestCase("[ForEach] static void A(ref P p) => p.V = System.Math.Abs(p.V);", false)]               // Math.Abs(int.MinValue) throws
+    [TestCase("[ForEach] static void A(ref P p) => p.V /= 3;", false)]                                 // integer division
+    [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x;", false)] // a call
+    [TestCase("[ForEach] static void A(ref Two t) => t.A = t.B;", false)]                              // two fields
+    [TestCase("[ForEach(Parallel = true)] static void A(ref F f) => f.V++;", false)]                   // no parallel batch loop yet
+    [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V++;", false)]
+    public void QualifyingMethodsGetAVectorLoop(string members, bool vectorized)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"public partial class S : EcsSystem {{ {members} }}"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("S.ForEach.g.cs") || t.FilePath.Contains("/S.") && t.FilePath.EndsWith(".ForEach.g.cs")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated.Contains("global::System.Numerics.Vector.LoadUnsafe"), Is.EqualTo(vectorized), generated);
+    }
+
     [TestCase("public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void A(ref T t, in P p) { } } public class H : G<Q>; "
               + "public static class U { public static void F(World w) { w.AddSystem<G<P>>(); w.AddSystem(new G<Q>()); } }",
         "file static class __ForEach<T> where T : struct, global::EasyEcs.IComponent", "UnsafeAccessorType(\"G`1[[!0]]\")",

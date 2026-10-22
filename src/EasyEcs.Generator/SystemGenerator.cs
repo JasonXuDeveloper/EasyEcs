@@ -254,7 +254,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string job = $"{method.Name}Job{number}{method.TypeParameters}";
         var components = method.Query.ToArray();
         int index = 0;
-        bool runs = method.Runs; // per row of a run: components and handles at the row's offset
+        bool runs = method.Runs || method.Simd != null; // per row of a run: components and handles at the row's offset
         // A batch job copies the caller's ref values into locals for its run (written back after it): through the
         // ref field, every row would load and store memory, a dependency chain of ~2.5 ns per row. No finally: Execute
         // would no longer inline, so a method that throws loses its changes of the run in progress.
@@ -324,7 +324,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 for (int k = 1; k <= components.Length; k++)
                     sb.Append($"{indent}ref {components[k - 1]} r{k} = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{k});\n");
                 sb.Append($"{indent}nint rows = {(components.Length > 0 ? "c1.Length" : "entities.Length")};\n");
-                sb.Append($"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n");
+                if (method.Simd is { } simd) EmitVectorLoop(sb, simd, components, indent);
+                sb.Append(method.Simd != null
+                    ? $"{indent}for (; i < rows; i++) // the rows after the last whole vector: the method itself\n{indent}    {call}\n"
+                    : $"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n");
             }
             else sb.Append($"{indent}{call}\n");
             for (int i = 0; i < method.Parameters.Length; i++)
@@ -352,6 +355,24 @@ public sealed class SystemGenerator : IIncrementalGenerator
             .Concat(AnyCalls("ChangedAny", method.ChangedAny)).Concat(AnyCalls("RemovedAny", method.RemovedAny));
         // Attribute type arguments cannot name type parameters (CS8968): the filter is one field, even for a generic method.
         sb.Append($"    internal static readonly global::EasyEcs.QueryFilter {method.Name}Filter{number} = global::EasyEcs.QueryFilter.Create(){string.Concat(chain)};\n\n");
+    }
+
+    /// <summary>
+    /// The vector loop of a method <see cref="Kernel"/> translated: each component's lane field as a ref of the lane
+    /// type, the uniform values broadcast once per run, then one Vector&lt;T&gt; of rows per iteration; the rows left
+    /// run the method. Without hardware acceleration (the JIT would emulate Vector&lt;T&gt;), every row runs the method.
+    /// </summary>
+    private static void EmitVectorLoop(StringBuilder sb, Kernel.Code simd, string[] components, string indent)
+    {
+        string vector = $"global::System.Numerics.Vector<{simd.Element}>";
+        for (int k = 1; k <= components.Length; k++)
+            sb.Append($"{indent}ref {simd.Element} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Element}>(ref r{k});\n");
+        sb.Append($"{indent}nint i = 0;\n{indent}if (global::System.Numerics.Vector.IsHardwareAccelerated && rows >= {vector}.Count)\n{indent}{{\n");
+        string inner = indent + "    ";
+        foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) sb.Append(inner).Append(line).Append('\n');
+        sb.Append($"{inner}for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{inner}{{\n");
+        foreach (var line in simd.Body.Split('\n')) if (line.Length > 0) sb.Append(inner).Append("    ").Append(line).Append('\n');
+        sb.Append($"{inner}}}\n{indent}}}\n");
     }
 
     /// <summary>
@@ -451,7 +472,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
         public string Loop => IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
 
         /// <summary>Takes component spans, or runs per row inside runs of rows: World.ForEachBatch.</summary>
-        public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) || Runs;
+        public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) || Runs || Simd != null;
+
+        /// <summary>The method's vector loop (<see cref="Kernel"/>), or null: it runs one row at a time.</summary>
+        public Kernel.Code? Simd { get; init; }
 
         /// <summary>
         /// Changes no structure (on one thread) and takes a Maybe, a Mut or a caller's value by ref: its job walks runs of
@@ -544,7 +568,11 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 new EquatableArray<string>(method.TypeParameters.Select(t => t.Name).ToArray()),
                 // A public entry point names only public types: its context parameters' and its constraints'.
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
-                    && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) { Slices = Symbols.Slices(method), Identifies = Symbols.OnlyIdentifies(method, syntax, model) };
+                    && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
+                    Slices = Symbols.Slices(method), Identifies = Symbols.OnlyIdentifies(method, syntax, model),
+                    // A stable method on one thread: a batch job holds no structural path (a parallel batch loop does not exist yet).
+                    Simd = stable && !parallel ? Kernel.Translate(method, syntax, model, static (i, kind) => kind == Symbols.ParamKind.Singleton ? $"s{i}" : $"x{i}", ct) : null,
+                };
         }
     }
 
