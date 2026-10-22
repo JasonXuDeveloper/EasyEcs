@@ -1,5 +1,5 @@
-using System.Buffers;
 using EasyEcs;
+using Nino.Core;
 using VoxelServer;
 
 // A Minecraft-style server: 20 ticks a second, chunks loaded around the players, blocks dug into items, springs whose
@@ -9,13 +9,13 @@ int players = Support.Option(args, "--players", 50);
 int ticks = Support.Option(args, "--ticks", 1200);
 
 // #region options
-// A chunk's blocks, its water and the water's next step are 8 KB each (its current 16 KB), more than a buffer's pool keeps by default: let each loaded chunk
-// reuse the lists of one that was unloaded.
+// A chunk's blocks, its water and the water's next step are 8 KB each (its border 4 KB), more than a buffer's pool keeps by default: let
+// each chunk loaded reuse the lists of one that was unloaded.
 DynamicBuffer<Block>.PoolCapacity = Terrain.BlocksPerChunk;
 DynamicBuffer<Fluid>.PoolCapacity = Terrain.BlocksPerChunk;
 DynamicBuffer<NextFluid>.PoolCapacity = Terrain.BlocksPerChunk;
-DynamicBuffer<Current>.PoolCapacity = 2 * Terrain.BlocksPerChunk;
 DynamicBuffer<Surface>.PoolCapacity = Terrain.Size * Terrain.Size;
+DynamicBuffer<Border>.PoolCapacity = Terrain.BorderSize;
 
 using var world = new World(new WorldOptions { MeasureSystems = true });
 // #endregion options
@@ -32,7 +32,10 @@ SetPrefabs(world);
 world.AddSystem<FakeClientsSystem>();
 world.AddSystem<ClockSystem>();
 world.AddSystem<ChunkReadSystem>();
-world.AddSystem<BlockUpdateSystem>();
+world.AddSystem<ChunkGenerateSystem>();
+world.AddSystem<HeightMapSystem>();
+world.AddSystem<WaterWakeSystem>();
+world.AddSystem<WaterBorderSystem>();
 world.AddSystem<WaterFlowSystem>();
 world.AddSystem<WaterCommitSystem>();
 world.AddSystem<PlayerMoveSystem>();
@@ -53,8 +56,12 @@ world.AddSystem<ExtinguishSystem>();
 world.AddSystem<ZombieDeathSystem>();
 world.AddSystem<ChunkUnloadSystem>();
 world.AddSystem<ChunkSaveSystem>();
-world.AddSystem<InterestSystem>();
+world.AddSystem<AoiViewSystem>();
+world.AddSystem<AoiChunkSystem>();
+world.AddSystem<AoiSpawnSystem>();
+world.AddSystem<AoiDespawnSystem>();
 world.AddSystem<SendChunksSystem>();
+world.AddSystem<ChunkSentSystem>();
 world.AddSystem<SendEntitiesSystem>();
 // #endregion systems
 
@@ -92,7 +99,7 @@ Console.WriteLine();
 // and the region files are not in the save: every start builds the prefabs (a Prefab has no serialized form) and
 // opens the files. A restart does both, then loads the save beside them.
 var startup = ComponentSet.Create().WithSingleton<Prefabs>().WithSingleton<Regions>();
-var save = new ArrayBufferWriter<byte>();
+var save = new NinoArrayBufferWriter();                                    // Save writes into it in place, no copy
 world.SaveWithout(save, in startup);
 
 using var restarted = new World();
@@ -105,10 +112,16 @@ Console.Error.WriteLine($"save: {save.WrittenCount / 1024} KiB");
 // #endregion save
 
 // #region prefabs
-// The recipes players, zombies and items are created from: every start builds them. A zombie carries the Vision it
-// hunts within; a player's view is Rules.PlayerVision, the same for every player (InterestSystem).
+// The recipes chunks, players, zombies and items are created from: every start builds them. A chunk has every
+// component and tag it will ever have, the tags absent, so all chunks share one table (Systems/Chunks.cs); a zombie
+// has Burning, absent, for the same reason. A zombie carries the Vision it hunts within; a player's view is
+// Rules.PlayerVision, the same for every player (Aoi.Range).
 static void SetPrefabs(World world) =>
     world.SetPrefabs(
+        Chunk: new Prefab()
+            .SetChunk(default).SetBuffer<Block>().SetBuffer<Fluid>().SetBuffer<NextFluid>().SetBuffer<Surface>().SetBuffer<Border>()
+            .SetViewers(0, 0).Set(FluidCount.Dry).SetReach(0, -1).SetFluidStep(StepResult.None, FluidCount.Dry, 0, 0)
+            .Set(new Fresh(), new Flowing(), new Unloading()).RemoveUnloading(),
         Player: new Prefab()
             .SetPlayer(0).SetInChunk(default).SetVisible(default, false).SetScore(0)
             .SetPosition(default).SetVelocity(default).SetBody(false, false)
@@ -116,7 +129,7 @@ static void SetPrefabs(World world) =>
         Zombie: new Prefab()
             .Set(new Zombie()).SetVision(Rules.ZombieVision).SetInChunk(default).SetVisible(default, false).SetTarget(default)
             .SetPosition(default).SetVelocity(default).SetBody(false, false)
-            .SetHealth(Rules.ZombieHealth).SetCooldown(0),
+            .SetHealth(Rules.ZombieHealth).SetCooldown(0).SetBurning(0).RemoveBurning(),
         Item: new Prefab()
             .SetItem(default, 1).SetInChunk(default).SetVisible(default, false).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
             .SetBody(false, false).SetDropped(0));

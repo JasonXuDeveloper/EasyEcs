@@ -15,6 +15,9 @@ public sealed class RegionFiles
 
     public int Count => _chunks.Count;
 
+    // Whether the chunk at `pos` was saved: read back, not generated.
+    public bool Has(ChunkPos pos) => _chunks.ContainsKey(pos);
+
     // Keeps what Buffer holds as the chunk at `pos`, and empties Buffer for the next one.
     public void Write(ChunkPos pos)
     {

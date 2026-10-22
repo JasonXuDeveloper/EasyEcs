@@ -1,4 +1,6 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using EasyEcs;
 
 namespace VoxelServer;
@@ -26,20 +28,28 @@ public static class Terrain
         return 10 + noise * 8 / 256;
     }
 
-    // Bedrock at the bottom, stone, three blocks of dirt and grass on top.
+    // Bedrock at the bottom, stone, three blocks of dirt and grass on top: the tops of the 256 columns first, then
+    // each layer 16 columns at a time, the block of each lane chosen by comparing the layer with its column's top.
     public static void Generate(ChunkPos chunk, Span<Block> blocks)
     {
+        Span<byte> top = stackalloc byte[Size * Size];
         for (int z = 0; z < Size; z++)
         for (int x = 0; x < Size; x++)
+            top[z * Size + x] = (byte)SurfaceHeight(chunk.X * Size + x, chunk.Z * Size + z);
+
+        var cells = MemoryMarshal.Cast<Block, byte>(blocks);
+        cells[..(Size * Size)].Fill((byte)VoxelServer.Block.Bedrock);
+        for (int y = 1; y < Height; y++)
         {
-            int top = SurfaceHeight(chunk.X * Size + x, chunk.Z * Size + z);
-            for (int y = 0; y < Height; y++)
+            var layer = Vector128.Create((byte)y);
+            var below = Vector128.Create((byte)(y + 3));                        // y < top - 3: stone
+            for (int i = 0; i < Size * Size; i += Size)
             {
-                blocks[IndexOf(x, y, z)] =
-                    y == 0 ? Block.Bedrock :
-                    y < top - 3 ? Block.Stone :
-                    y < top ? Block.Dirt :
-                    y == top ? Block.Grass : Block.Air;
+                var tops = Vector128.Create((ReadOnlySpan<byte>)top.Slice(i, Size));
+                var block = Vector128.ConditionalSelect(Vector128.LessThan(below, tops), Vector128.Create((byte)VoxelServer.Block.Stone),
+                    Vector128.ConditionalSelect(Vector128.LessThan(layer, tops), Vector128.Create((byte)VoxelServer.Block.Dirt),
+                        Vector128.Equals(layer, tops) & Vector128.Create((byte)VoxelServer.Block.Grass)));   // above: air (0)
+                block.CopyTo(cells.Slice(y * Size * Size + i, Size));
             }
         }
     }
@@ -70,12 +80,22 @@ public static class Terrain
     public static ChunkStrip Gained(ChunkPos center, ChunkPos other, float range) => new(center, other, true, range);
 
 
-    // The water of a chunk and of its four neighbours may move again: a block changed at `pos`, or water beside it.
-    public static void Wake(World world, ChunkPos pos)
+    // A chunk's Border: for each side (north, south, west, east) and layer, the 16 water levels of the neighbour's
+    // facing edge, then (blocks) its 16 blocks.
+    public const int BorderSize = 2 * 4 * Height * Size;
+
+    public static int BorderOf(int side, int y, bool blocks) => ((blocks ? 4 : 0) + side) * Height * Size + y * Size;
+
+    // The four sides of a chunk, one bit each, and the chunk beside it on each side.
+    public const byte North = 1, South = 2, West = 4, East = 8, AllSides = North | South | West | East;
+
+    // The water of the chunks beside `pos` on `sides` may move again: the water or a block at that edge changed.
+    public static void Wake(World world, ChunkPos pos, byte sides)
     {
-        ReadOnlySpan<(int Dx, int Dz)> sides = [(0, 0), (0, -1), (0, 1), (-1, 0), (1, 0)];
-        foreach (var (dx, dz) in sides)
-            if (world.ChunkIndex.TryGet(new ChunkPos(pos.X + dx, pos.Z + dz), out var chunk)) chunk.Set(new Flowing());
+        ReadOnlySpan<(byte Side, int Dx, int Dz)> around = [(North, 0, -1), (South, 0, 1), (West, -1, 0), (East, 1, 0)];
+        foreach (var (side, dx, dz) in around)
+            if ((sides & side) != 0 && world.ChunkIndex.TryGet(new ChunkPos(pos.X + dx, pos.Z + dz), out var chunk))
+                chunk.SetFlowing();
     }
 
     // The blocks of water in the world, for the report.
@@ -168,6 +188,24 @@ public ref struct ChunkStrip(ChunkPos center, ChunkPos other, bool hasOther, flo
     {
         while (_square.MoveNext())
             if (!hasOther || !Terrain.InReach(other, _square.Current, range)) return true;
+        return false;
+    }
+}
+
+// The chunks at a ring distance of `ring` from `center` (its own chunk alone for ring 0): the square of side
+// 2 ring + 1 without the square inside it. A walk ring by ring goes from near to far.
+public ref struct ChunkRing(ChunkPos center, int ring)
+{
+    ChunkSquare _square = new(center, ring);
+
+    public readonly ChunkRing GetEnumerator() => this;
+
+    public readonly ChunkPos Current => _square.Current;
+
+    public bool MoveNext()
+    {
+        while (_square.MoveNext())
+            if (Math.Max(Math.Abs(_square.Current.X - center.X), Math.Abs(_square.Current.Z - center.Z)) == ring) return true;
         return false;
     }
 }

@@ -1,70 +1,83 @@
-using System.Runtime.CompilerServices;
 using EasyEcs;
 
 namespace VoxelServer;
 
 // #region load
-// Brings in the chunks asked for: read back from the region files if one was unloaded before, or else generated: an
-// entity with its Chunk key and two buffers of 8,192 bytes, its blocks and its water (a spring in one chunk in four).
-// An OnUpdate, not a [ForEach]: LoadEntities may not run while a pass walks the world, so the requests are collected
-// first, then served, Rules.MaxRequests a tick at most; the others stay and are served the next tick. A new chunk is
-// Fresh: InterestSystem sends it whole to the players near it, who become its viewers.
+// A chunk's life, each step one system and each state data: a player's view asks for it (a LoadRequest, AoiViewSystem),
+// ChunkReadSystem reads it back from the region files or ChunkGenerateSystem generates it, it is Fresh for a tick
+// (AoiChunkSystem sends it whole), its water steps while it is Flowing, it is marked Unloading once nobody has seen it for a
+// while, and ChunkSaveSystem writes it to the region files with what is in it.
+//
+// Every chunk is an instance of the chunk prefab (Program.cs), which has every component and tag a chunk ever has,
+// the tags absent. So all chunks share one table, a read chunk included (its save keeps the columns), and each change
+// of state is a presence bit: no chunk moves to another table, and a pass that wakes the chunks beside the one it
+// visits still visits them (a pass skips an entity that joined a matching table after it started).
+//
+// Reads and generation are OnUpdates, not [ForEach] methods: LoadEntities and Instantiate may not run while a pass
+// walks the world. Each serves Rules.MaxRequests a tick at most; the others wait a tick.
 [UpdateInGroup<Simulation>]
 public class ChunkReadSystem : EcsSystem
 {
     protected override void OnUpdate()
     {
         if (!World.Any<LoadRequest>()) return;
-        Span<LoadRequest> asked = stackalloc LoadRequest[Rules.MaxRequests];
+        var files = World.Regions.Files;
         Span<EntityId> served = stackalloc EntityId[Rules.MaxRequests];
+        Span<ChunkPos> saved = stackalloc ChunkPos[Rules.MaxRequests];
         int count = 0;
         foreach (var request in World.Read<LoadRequest>())
         {
-            if (count == asked.Length) break;                                    // the rest waits a tick
-            asked[count] = request.LoadRequest;
+            if (count == served.Length) break;                                   // the rest waits a tick
+            if (!files.Has(request.LoadRequest.Pos)) continue;                   // never saved: generated
+            saved[count] = request.LoadRequest.Pos;
             served[count++] = request.Entity;
         }
         World.DestroyEntities(served[..count]);
 
-        var files = World.Regions.Files;
-        ref var stats = ref World.Stats;
         long tick = World.Clock.Tick;
-        foreach (var request in asked[..count])
+        foreach (var pos in saved[..count])
         {
-            Entity chunk;
-            if (files.TryRead(request.Pos, out var saved))
-            {
-                World.LoadEntities(saved);                                        // the chunk and what was in it
-                chunk = World.ChunkIndex.Get(request.Pos);
-                stats.ChunksLoaded++;
-            }
-            else
-            {
-                chunk = Generate(World, request.Pos);
-                stats.ChunksGenerated++;
-            }
-            // What a chunk has from now on, read or generated, in one move: the save leaves out what it computes again.
-            chunk.Set(new Viewers(0, tick), new Fresh(), new Flowing(), new DynamicBuffer<Surface>(), new DynamicBuffer<Current>());
+            files.TryRead(pos, out var bytes);
+            World.LoadEntities(bytes);                                           // the chunk and what was in it
+            World.ChunkIndex.Get(pos).Set(new Fresh(), new Flowing());           // two presence bits
+            World.Stats.ChunksLoaded++;
         }
     }
+}
 
-    // A new chunk: its blocks and its water grid, empty but for a spring in one chunk in four.
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    static Entity Generate(World world, ChunkPos pos)
+// Generates the chunks asked for that were never saved: an instance of the chunk prefab, its blocks written in place
+// (SetCount gives the span to write), its water empty but for a spring in one chunk in four.
+[UpdateInGroup<Simulation>]
+public class ChunkGenerateSystem : EcsSystem
+{
+    protected override void OnUpdate()
     {
-        Span<Block> blocks = stackalloc Block[Terrain.BlocksPerChunk];
-        Terrain.Generate(pos, blocks);
-        Span<Fluid> water = stackalloc Fluid[Terrain.BlocksPerChunk];   // zeroed: no water
-        if (Rules.HasSpring(pos))
+        if (!World.Any<LoadRequest>()) return;
+        Span<EntityId> served = stackalloc EntityId[Rules.MaxRequests];
+        Span<ChunkPos> asked = stackalloc ChunkPos[Rules.MaxRequests];
+        int count = 0;
+        var files = World.Regions.Files;
+        foreach (var request in World.Read<LoadRequest>())
+        {
+            if (count == served.Length) break;
+            if (files.Has(request.LoadRequest.Pos)) continue;                    // saved: ChunkReadSystem's, next tick
+            asked[count] = request.LoadRequest.Pos;
+            served[count++] = request.Entity;
+        }
+        World.DestroyEntities(served[..count]);
+
+        var prefab = World.Prefabs.Chunk;
+        foreach (var pos in asked[..count])
         {
             int x = pos.X * Terrain.Size + Terrain.Size / 2, z = pos.Z * Terrain.Size + Terrain.Size / 2;
-            water[Terrain.IndexOf(x, Terrain.SurfaceHeight(x, z) + 1, z)] = new Fluid(Fluid.Spring);
+            int y = Terrain.SurfaceHeight(x, z) + 1;                             // a spring's block, on the ground
+            bool spring = Rules.HasSpring(pos);
+            var chunk = World.Instantiate(prefab, new Chunk(pos), spring ? new FluidCount(1, (byte)y, (byte)y) : FluidCount.Dry);
+            Terrain.Generate(pos, chunk.WriteBlock().SetCount(Terrain.BlocksPerChunk));
+            var water = chunk.WriteFluid().SetCount(Terrain.BlocksPerChunk);    // zeroed: no water
+            if (spring) water[Terrain.IndexOf(x, y, z)] = new Fluid(Fluid.Spring);
+            World.Stats.ChunksGenerated++;
         }
-        var chunk = world.CreateEntity(new Chunk(pos), new DynamicBuffer<Block>(), new DynamicBuffer<Fluid>(),
-            new DynamicBuffer<NextFluid>(), new FluidCount(Rules.HasSpring(pos) ? 1 : 0));
-        chunk.WriteBlock().AddRange(blocks);
-        chunk.WriteFluid().AddRange(water);
-        return chunk;
     }
 }
 // #endregion load
@@ -75,7 +88,7 @@ public class ChunkReadSystem : EcsSystem
 [UpdateInGroup<Simulation>]
 public class ChunkUnloadSystem : EcsSystem
 {
-    [ForEach(Slices = Rules.TicksPerSecond), Without<Unloading>]
+    [ForEach(Slices = Rules.TicksPerSecond), With<Chunk>, Without<Unloading>]
     static void Unload(Entity chunk, in Viewers viewers, in Clock clock)
     {
         if (viewers.Count == 0 && clock.Tick - viewers.EmptySince > Rules.UnloadAfter) chunk.Set(new Unloading());
@@ -103,7 +116,7 @@ public class ChunkSaveSystem : EcsSystem
         foreach (var id in marked[..count])
         {
             var chunk = World.GetEntity(id);
-            chunk.Remove<Unloading>();                                       // not in the region file
+            chunk.RemoveUnloading();                                         // not in the region file
             var pos = chunk.Chunk.Pos;
             int size = 0;
             group[size++] = id;
@@ -118,7 +131,7 @@ public class ChunkSaveSystem : EcsSystem
                 group[size++] = entity;
             }
             if (keep) continue;
-            World.SaveEntitiesWithout(files.Buffer, group[..size], Derived);
+            World.SaveEntities(files.Buffer, group[..size]);
             files.Write(pos);
             World.DestroyEntities(group[..size]);
             World.Stats.ChunksUnloaded++;
@@ -126,9 +139,5 @@ public class ChunkSaveSystem : EcsSystem
     }
 
     static readonly QueryFilter Unload = QueryFilter.Create().With<Unloading>();
-
-    // What a chunk computes again after a load, left out of its save: its height map and its current.
-    static readonly ComponentSet Derived = ComponentSet.Create().With<DynamicBuffer<Surface>>().With<DynamicBuffer<Current>>();
 }
 // #endregion unload
-

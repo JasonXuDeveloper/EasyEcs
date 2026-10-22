@@ -6,8 +6,8 @@ namespace VoxelServer;
 // What the server sends each tick, and to whom. A [Changed<T>] method visits only the rows written since its system
 // last ran, so a chunk nobody dug and a player standing still cost nothing. A chunk whose blocks or water changed
 // goes out as a block-change packet to the players that have it in view (the chunk's Viewers); [ChangedAny<..>]
-// takes either buffer. A chunk that comes into a view is sent whole by InterestSystem, and so is a Fresh one, just
-// loaded or generated: its buffers count as written, but no client has it yet. Here the packets are counted; a real
+// takes either buffer. A chunk that comes into a view is sent whole by AoiViewSystem, and so is a Fresh one, just
+// loaded or generated: its buffers count as written, but no client has it yet; ChunkSentSystem clears the tag. Here the packets are counted; a real
 // server would encode them.
 [UpdateInGroup<Replication>]
 public class SendChunksSystem : EcsSystem
@@ -15,9 +15,14 @@ public class SendChunksSystem : EcsSystem
     [ForEach, With<Chunk>, Without<Fresh>, ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]
     static void Send(in Viewers viewers, ref Stats stats) => stats.BlockUpdates += viewers.Count;
 
-    // From the next tick on, its changes are block changes.
-    [ForEach, With<Fresh>]
-    static void Sent(Entity chunk) => chunk.Remove<Fresh>();
+}
+
+// From the next tick on, a chunk loaded this tick is like any other: its changes are block changes. One bulk removal
+// clears the tag of every chunk at once, whole words of presence bits, after the systems that read it.
+[UpdateInGroup<Replication>]
+public class ChunkSentSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.RemoveAll<Fresh>();
 }
 // #endregion chunks
 
@@ -25,7 +30,7 @@ public class SendChunksSystem : EcsSystem
 // An entity that moved goes out as an update of its position, with its health bar when it has one: players and
 // zombies do, a dropped item does not. Maybe<Health> reads the health where the entity has it, so one method serves
 // all three kinds instead of one per kind. It goes to the players that have the entity's chunk in view, as the
-// entity's spawn did (InterestSystem): the chunk's Viewers, one lookup instead of a walk of every viewer.
+// entity's spawn did (AoiSpawnSystem): the chunk's Viewers, one lookup instead of a walk of every viewer.
 [UpdateInGroup<Replication>]
 public class SendEntitiesSystem : EcsSystem
 {
