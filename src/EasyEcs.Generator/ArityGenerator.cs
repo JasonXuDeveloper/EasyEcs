@@ -1180,7 +1180,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
                     var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
                     int chunks = work.Cut(this, match, in filter, chunkRows, ref job, {{bits}});
-                    Gate.Freeze(); // the chunks may run on several threads: a structural change throws
+                    Gate.FreezeParallel(); // the chunks may run on several threads: a structural change throws
                     try
                     {
                         if (chunks < 2 || !TryRunChunks(work, chunks))
@@ -1188,7 +1188,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
                     finally
                     {
-                        Gate.Thaw();
+                        Gate.ThawParallel();
                     }
 
                     if (TJob.Merges) work.MergeInto(ref job, chunks); // after the gate: the helpers are done with the copies

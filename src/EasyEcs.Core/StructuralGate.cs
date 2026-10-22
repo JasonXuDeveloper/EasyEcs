@@ -29,6 +29,7 @@ internal struct StructuralGate
 
     [FieldOffset(Archetype.CacheLine)] private int _held;
     [FieldOffset(Archetype.CacheLine + sizeof(int))] private int _shared;
+    [FieldOffset(Archetype.CacheLine + 2 * sizeof(int))] private int _parallel; // parallel regions running (stages, parallel passes)
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Enter()
@@ -59,6 +60,32 @@ internal struct StructuralGate
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _held == 0;
+    }
+
+    /// <summary>
+    /// A frozen region whose code may run on several threads at once starts (a parallel stage of systems, the chunks of
+    /// a parallel pass): <see cref="Parallel"/> holds until it ends. Two atomic adds per region.
+    /// </summary>
+    public void FreezeParallel()
+    {
+        Freeze();
+        Interlocked.Increment(ref _parallel);
+    }
+
+    public void ThawParallel()
+    {
+        Interlocked.Decrement(ref _parallel);
+        Thaw();
+    }
+
+    /// <summary>
+    /// A parallel region runs: other threads may be reading the world, so lazily built state (a value index) must not be
+    /// built now. A serial pass, frozen too, may still build it on the owner thread.
+    /// </summary>
+    public bool Parallel
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Volatile.Read(ref _parallel) != 0;
     }
 
     /// <summary>

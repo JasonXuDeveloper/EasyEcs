@@ -156,7 +156,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
     {
         var fields = new List<string>();
         if (system != null && !method.IsStatic) fields.Add($"System = {system}");
-        if (method.TakesWorld) fields.Add($"World = {world}");
+        if (method.NeedsWorld) fields.Add($"World = {world}");
         for (int i = 0; i < method.Parameters.Length; i++)
         {
             var p = method.Parameters[i];
@@ -166,6 +166,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 fields.Add(p.RefKind.Length == 0 || method.Parallel ? $"x{i} = {Escape(p.Name)}" : $"x{i} = ref {Escape(p.Name)}");
             else if (p.Kind == Symbols.ParamKind.Reduction)
                 fields.Add($"a{i} = {p.Type}.Identity"); // every partial result starts there
+            else if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // its index, built before the pass
+                fields.Add($"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Type}, {p.Key}>({world})");
         }
 
         return fields.Count == 0 ? "()" : $" {{ {string.Join(", ", fields)} }}";
@@ -251,8 +253,14 @@ public sealed class SystemGenerator : IIncrementalGenerator
         }
 
         foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch))
-                     .Select(p => (p.Kind, p.Type, p.RefKind)).Distinct())
+                     .Select(p => (p.Kind, p.Type, p.RefKind, p.Key)).Distinct())
         {
+            if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // a read, and its index built before a parallel stage
+            {
+                sb.Append($"            access.Index<{p.Type}, {p.Key}>();\n");
+                continue;
+            }
+
             string kind = p.Kind is Symbols.ParamKind.Singleton or Symbols.ParamKind.Reduction ? "Singleton" : "";
             sb.Append($"            access.{(p.RefKind == "ref" ? "Write" : "Read")}{kind}<{p.Type}>();\n");
         }
@@ -292,6 +300,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Reduction => $"new global::EasyEcs.Reduce<{p.Type}>(ref {(local[i] ? "l" : "a")}{i})",
             // This thread's box, resolved once per chunk (per pass on one thread): the job's copy keeps it.
             Symbols.ParamKind.Scratch => $"new global::EasyEcs.Scratch<{p.Type}>(ref (t{i} ??= global::EasyEcs.Scratch<{p.Type}>.Of<{job}>()).Value)",
+            Symbols.ParamKind.Lookup => $"new global::EasyEcs.Lookup<{p.Type}>(World, {(p.Key.Length > 0 ? $"k{i}" : "null")})",
             Symbols.ParamKind.Context when local[i] => $"ref l{i}",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
             _ => "World",
@@ -309,7 +318,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         if (!method.IsStatic) sb.Append("        public object System;\n");
         // Only when the method takes the World: an unused field would still be copied into the row loop, where it
         // holds a callee-saved register a job that calls out (a structural change) needs for its loop state.
-        if (method.TakesWorld) sb.Append("        public global::EasyEcs.World World;\n");
+        if (method.NeedsWorld) sb.Append("        public global::EasyEcs.World World;\n");
         for (int i = 0; i < method.Parameters.Length; i++)
         {
             var p = method.Parameters[i];
@@ -324,6 +333,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 sb.Append($"        public {p.Type} a{i};\n");
             else if (p.Kind == Symbols.ParamKind.Scratch) // this thread's box (null until the first row of a chunk)
                 sb.Append($"        public global::System.Runtime.CompilerServices.StrongBox<{p.Type}> t{i};\n");
+            else if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // the component's index, built
+                sb.Append($"        public object k{i};\n");
         }
         if (sb[sb.Length - 2] != '{') sb.Append('\n'); // a blank line after the fields, if any
         sb.Append("        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
@@ -467,7 +478,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// <param name="RefKind">"ref" or "in" ("" for a context parameter passed by value).</param>
     /// <param name="Declared">The parameter as declared, with its modifier (<c>in global::Health</c>), for the accessor.</param>
     /// <param name="Tracked">A Maybe's or Mut's element tracks changes (a write through it is stamped).</param>
-    private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name, string Declared, bool Tracked = false);
+    /// <param name="Key">A Lookup's index key type when its index is built before the pass (<see cref="Symbols.LookupKey"/>), else "".</param>
+    private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name, string Declared, bool Tracked = false, string Key = "");
 
     /// <param name="Stable">
     /// The method cannot make structural changes: it is static, takes no <c>World</c>, and uses its <c>Entity</c>
@@ -511,6 +523,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
         public bool TakesEntity => Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable);
 
         public bool TakesWorld => Parameters.Any(p => p.Kind == Symbols.ParamKind.World);
+
+        /// <summary>The job holds the World: the method takes it, or a Lookup reads through it.</summary>
+        public bool NeedsWorld => Parameters.Any(p => p.Kind is Symbols.ParamKind.World or Symbols.ParamKind.Lookup);
 
         /// <summary>The World loop (and, with an I, the job interface) the method runs as.</summary>
         public string Loop => IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
@@ -557,6 +572,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     Symbols.ParamKind.Reduction => new ParamModel(Symbols.ParamKind.Reduction, // a write of the singleton, once per pass
                         Symbols.ReduceElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared),
                     Symbols.ParamKind.Scratch => new ParamModel(Symbols.ParamKind.Scratch, Symbols.ScratchElement(p.Type)!.ToDisplayString(Symbols.Fqn), "", p.Name, declared),
+                    Symbols.ParamKind.Lookup => new ParamModel(Symbols.ParamKind.Lookup, Symbols.LookupElement(p.Type)!.ToDisplayString(Symbols.Fqn), "in", p.Name, declared,
+                        Key: Symbols.LookupKey(p, method, Symbols.WithBody(method, syntax, model).Item1)?.ToDisplayString(Symbols.Fqn) ?? ""),
                     Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn),
                         p.RefKind switch { RefKind.Ref => "ref", RefKind.In => "in", _ => "" }, p.Name, declared),
                     var kind => new ParamModel(kind, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.Ref ? "ref" : "in", p.Name, declared),

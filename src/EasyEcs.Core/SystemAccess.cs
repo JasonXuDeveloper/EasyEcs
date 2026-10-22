@@ -1,3 +1,5 @@
+using System;
+
 namespace EasyEcs;
 
 /// <summary>
@@ -19,6 +21,7 @@ public struct SystemAccess
     internal BitMask ReadSingletons;
     internal BitMask WriteSingletons;
     internal bool Alone;
+    internal Action<World>[] Indexes; // the indexes its key lookups use, built before its parallel stage runs
 
     /// <summary>The system reads component <typeparamref name="T"/>.</summary>
     public void Read<T>() where T : struct, IComponent => ReadComponents.SetBit(ComponentType<T>.Bit);
@@ -31,6 +34,24 @@ public struct SystemAccess
 
     /// <summary>The system writes singleton <typeparamref name="T"/>.</summary>
     public void WriteSingleton<T>() where T : struct, ISingletonComponent => WriteSingletons.SetBit(SingletonType<T>.Index);
+
+    /// <summary>
+    /// The system reads component <typeparamref name="T"/> and finds it by key (<see cref="Lookup{T}"/>,
+    /// <see cref="LookupExtensions"/>): before a parallel stage holding the system runs, <typeparamref name="T"/>'s index
+    /// is created and built on the updating thread, so no lookup of the stage changes it.
+    /// </summary>
+    public void Index<T, TKey>() where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
+    {
+        Read<T>();
+        var prepare = PrepareIndex<T, TKey>.Run;
+        if (Indexes == null) Indexes = [prepare];
+        else if (Array.IndexOf(Indexes, prepare) < 0) Indexes = [.. Indexes, prepare]; // cold: once per AddSystem
+    }
+
+    private static class PrepareIndex<T, TKey> where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
+    {
+        public static readonly Action<World> Run = static world => LookupExtensions.Prepared<T, TKey>(world);
+    }
 
     /// <summary>The system may touch anything (structural changes, any component): it never shares a stage.</summary>
     public void RunAlone() => Alone = true;

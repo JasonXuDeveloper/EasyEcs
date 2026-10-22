@@ -305,6 +305,7 @@ public sealed partial class EasyEcsAnalyzer
                             Symbols.ParamKind.Singleton => "it is resolved every pass and scheduled as an access; remove it",
                             Symbols.ParamKind.Reduction => "it replaces its singleton every pass and is scheduled as its writer; remove it",
                             Symbols.ParamKind.Scratch => "remove it",
+                            Symbols.ParamKind.Lookup => "it is scheduled as a reader of the component; remove it",
                             _ => "it is looked up for every row; remove it",
                         }));
                 continue;

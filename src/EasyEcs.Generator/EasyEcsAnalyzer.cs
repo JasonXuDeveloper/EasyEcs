@@ -190,6 +190,15 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "under the entity by later rows, on another thread in a parallel pass. Copy what the row produced into the " +
         "component's own storage (a DynamicBuffer, a value), or keep the data in a component.", helpLinkUri: Help("EECS058"));
 
+    public static readonly DiagnosticDescriptor LookupOfWritten = new("EECS059", "A lookup of a component the pass writes",
+        "Parameter '{0}' of [ForEach] method '{1}' looks up {2}, which {3}",
+        Category, DiagnosticSeverity.Error, true,
+        "A Lookup<T> reads T of any entity, as it was before the pass: nothing may write T while the pass runs. The " +
+        "method writes T itself, so a lookup would read rows before or after their write in this pass, and a parallel " +
+        "pass would read them while another thread writes them. Read the entity's own T through its parameter, write " +
+        "the result into another component (double buffering: read Position, write NextPosition), or split the work " +
+        "into two systems.", helpLinkUri: Help("EECS059"));
+
     public static readonly DiagnosticDescriptor BadIndexKey = new("EECS036", "A component that cannot be indexed by its key",
         "'{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
@@ -212,7 +221,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
-        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScratchEscape);
+        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScratchEscape, LookupOfWritten);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -793,6 +802,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                 context.ReportDiagnostic(Diagnostic.Create(BadParameter, p.Locations.FirstOrDefault(),
                     Symbols.ByValueData(p) ? ImmutableDictionary<string, string?>.Empty.Add(ByValue, "") : null, p.Name, method.Name));
             }
+            else if (kind == Symbols.ParamKind.Lookup && Symbols.LookupProblem(method, p) is { } written)
+                context.ReportDiagnostic(Diagnostic.Create(LookupOfWritten, p.Locations.FirstOrDefault(), p.Name, method.Name,
+                    Symbols.LookupElement(p.Type)!.Name, written));
             else if (kind == Symbols.ParamKind.Reduction && Symbols.ReductionProblem(method, p) is { } reduction)
                 context.ReportDiagnostic(Diagnostic.Create(BadReduction, p.Locations.FirstOrDefault(), p.Name, method.Name,
                     Symbols.ReduceElement(p.Type)!.Name, reduction));
