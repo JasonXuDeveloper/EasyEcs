@@ -22,9 +22,10 @@ namespace EasyEcs.Generator;
 /// lane (no reassociation, no fused multiply-add the method did not write), integer arithmetic wraps both ways, and
 /// conversions saturate like C#'s. A call that would throw for some lane (<c>Math.Clamp</c> with its min above its max)
 /// sends the rows of its vector to the method itself. Anything else (other calls, integer division, checked arithmetic,
-/// <c>Math.Abs</c> of an integer) leaves the method scalar, as written.
+/// <c>Math.Abs</c> of an integer) leaves the method scalar, as written. Lanes of 1 and 2 bytes (byte, sbyte, short,
+/// ushort), whose arithmetic C# computes in int, are Kernel.Narrow.cs.
 /// </summary>
-internal sealed class Kernel
+internal sealed partial class Kernel
 {
     /// <param name="Columns">The lane type of each component's column (its first field), in job order (<c>float</c>).</param>
     /// <param name="Setup">Statements before the vector loop: the uniform values and their broadcasts.</param>
@@ -40,8 +41,8 @@ internal sealed class Kernel
     /// Statements after the loop: each reduction's lanes combined into its partial result in lane order
     /// (<c>Reduce&lt;T&gt;.Combine</c>).
     /// </param>
-    /// <param name="Size">The lanes' size in bytes: 4 or 8.</param>
-    /// <param name="Mask">The element type of a lane mask: <c>int</c> or <c>long</c>.</param>
+    /// <param name="Size">The lanes' size in bytes: 1, 2, 4 or 8.</param>
+    /// <param name="Mask">The element type of a lane mask: <c>sbyte</c>, <c>short</c>, <c>int</c> or <c>long</c>.</param>
     /// <param name="Interleaves">A component has several fields: the loop needs <c>EasyEcs.Interleaved.IsAccelerated</c>.</param>
     /// <param name="Bails">
     /// The body sets <c>__bail</c> when a lane would throw: the rows of that vector then run the method itself, before any
@@ -89,8 +90,8 @@ internal sealed class Kernel
     /// <summary>The most fields a component of a vector loop has: the forms of <c>EasyEcs.Interleaved</c>.</summary>
     private const int MaxFields = 4;
 
-    private readonly int _size;      // bytes per lane: 4 or 8
-    private readonly string _mask;   // the lane type of masks: int or long (all bits set where true)
+    private readonly int _size;      // bytes per lane: 1, 2, 4 or 8
+    private readonly string _mask;   // the lane type of masks: sbyte, short, int or long (all bits set where true)
     /// <summary>The components: their index (job column k), their lane fields in memory order, and whether they are written.</summary>
     private readonly Dictionary<IParameterSymbol, (int Index, IFieldSymbol[] Fields, bool Ref)> _components = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<IParameterSymbol, string> _uniformParams = new(SymbolEqualityComparer.Default);
@@ -123,7 +124,7 @@ internal sealed class Kernel
     private Kernel(int size)
     {
         _size = size;
-        _mask = size == 4 ? "int" : "long";
+        _mask = size switch { 1 => "sbyte", 2 => "short", 4 => "int", _ => "long" };
     }
 
     /// <param name="Index">The parameter's position: its accumulators are <c>__a{Index}_{field}</c>.</param>
@@ -169,7 +170,7 @@ internal sealed class Kernel
     /// Whether a method <see cref="Vectorize"/> leaves scalar looks meant for a vector loop, so EECS055 names the reason:
     /// it is static, takes only components (by <c>ref</c> or <c>in</c>), Maybe&lt;T&gt; of them, singletons and values (no
     /// Entity, World, span or Mut), and each component is a struct of lane-type fields only (float, double, int, uint,
-    /// long, ulong).
+    /// long, ulong, byte, sbyte, short, ushort).
     /// The reason is then about its components or its body.
     /// </summary>
     public static bool LooksEligible(IMethodSymbol method)
@@ -200,9 +201,16 @@ internal sealed class Kernel
     private static string? Element(ITypeSymbol type) => type is INamedTypeSymbol { TypeArguments.Length: 1 } named ? named.TypeArguments[0].Name : null;
 
     private static bool IsLaneType(ITypeSymbol? type) => type?.SpecialType is SpecialType.System_Single or SpecialType.System_Double
+        or SpecialType.System_Byte or SpecialType.System_SByte or SpecialType.System_Int16 or SpecialType.System_UInt16
         or SpecialType.System_Int32 or SpecialType.System_UInt32 or SpecialType.System_Int64 or SpecialType.System_UInt64;
 
-    private static int SizeOf(ITypeSymbol type) => type.SpecialType is SpecialType.System_Single or SpecialType.System_Int32 or SpecialType.System_UInt32 ? 4 : 8;
+    private static int SizeOf(ITypeSymbol type) => type.SpecialType switch
+    {
+        SpecialType.System_Byte or SpecialType.System_SByte => 1,
+        SpecialType.System_Int16 or SpecialType.System_UInt16 => 2,
+        SpecialType.System_Single or SpecialType.System_Int32 or SpecialType.System_UInt32 => 4,
+        _ => 8,
+    };
 
     private static Code Translate(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
         System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct)
@@ -260,6 +268,8 @@ internal sealed class Kernel
         foreach (var field in optionals.SelectMany(f => f))
             if (SizeOf(first) != SizeOf(field.Type))
                 throw new Unsupported($"lane types {first.ToDisplayString()} and {field.Type.ToDisplayString()} differ in size");
+        if (SizeOf(first) < 4 && optionals.Count > 0)
+            throw new Unsupported($"it takes a Maybe<{Symbols.MaybeElement(method.Parameters.First(q => Symbols.Classify(q, outside) == Symbols.ParamKind.Optional).Type)?.Name}> of {first.ToDisplayString()} lanes: optional columns have vector loops of 4- and 8-byte lanes");
         if (model.GetOperation(syntax, ct) is not IMethodBodyOperation body) throw new Unsupported("it has no body");
 
         // The parameters of a kernel: the main one, and one per field of a flat loop (Flat) with the same setup.
@@ -387,10 +397,13 @@ internal sealed class Kernel
         string prologue = kernel._bails ? "bool __bail = false;\n" : "";
         string live = kernel._live ? $"var __live = {Vec(kernel._mask)}.AllBitsSet;\n" : "", maskedLive = kernel._live ? "var __live = __pass;\n" : "";
         string hold = kernel._bails ? held.ToString() : "";
+        var flat = Flat(kernel, root, () => Make(false));
+        // Narrow lanes have no shuffles: a component of several fields takes the flat loop or none.
+        if (kernel._narrow && flat == null && kernel._components.Values.FirstOrDefault(c => c.Fields.Length > 1) is { Fields: { } several })
+            throw new Unsupported($"component {several[0].ContainingType.Name} has {several.Length} fields of {several[0].Type.ToDisplayString()}: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field");
         return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
             kernel._setup.ToString(), prologue + live + loads + hold + kernel._body, stores.ToString(), prologue + maskedLive + loads + kept + held + kernel._body, masked.ToString(),
-            restore.ToString(), fold.ToString(), kernel._size, kernel._mask, kernel._components.Values.Any(c => c.Fields.Length > 1), kernel._bails,
-            Flat(kernel, root, () => Make(false)));
+            restore.ToString(), fold.ToString(), kernel._size, kernel._mask, kernel._components.Values.Any(c => c.Fields.Length > 1), kernel._bails, flat);
     }
 
     /// <summary>
@@ -403,7 +416,7 @@ internal sealed class Kernel
     /// </summary>
     private static FlatCode? Flat(Kernel main, IOperation root, System.Func<Kernel> make)
     {
-        if (main._bails || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0 || main._optionals.Count > 0) return null;
+        if (main._bails || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0 || main._wides.Count > 0 || main._optionals.Count > 0) return null;
         var components = main._components.Values.ToArray();
         var type = components[0].Fields[0].Type;
         int fields = components[0].Fields.Length;
@@ -483,18 +496,19 @@ internal sealed class Kernel
         if (fields.Length > MaxFields) throw new Unsupported($"component {type.Name} has {fields.Length} fields (a vector loop splits up to {MaxFields})");
         foreach (var field in fields)
             if (field.IsFixedSizeBuffer || !IsLaneType(field.Type))
-                throw new Unsupported($"field {type.Name}.{field.AssociatedSymbol?.Name ?? field.Name} is a {field.Type.ToDisplayString()}, not a lane type (float, double, int, uint, long or ulong)");
+                throw new Unsupported($"field {type.Name}.{field.AssociatedSymbol?.Name ?? field.Name} is a {field.Type.ToDisplayString()}, not a lane type (float, double, int, uint, long, ulong, byte, sbyte, short or ushort)");
         return fields;
     }
 
     // ---------------- types ----------------
 
-    /// <summary>A lane type of this kernel: float, int, uint (4 bytes) or double, long, ulong (8), its size.</summary>
+    /// <summary>A lane type of this kernel: byte, sbyte (1 byte), short, ushort (2), float, int, uint (4) or double, long, ulong (8), its size.</summary>
     private bool IsLane(ITypeSymbol? type) => IsLaneType(type) && SizeOf(type!) == _size;
 
     private static bool IsBool(ITypeSymbol? type) => type?.SpecialType == SpecialType.System_Boolean;
     private static bool IsFloat(ITypeSymbol? t) => t?.SpecialType is SpecialType.System_Single or SpecialType.System_Double;
-    private static bool IsSigned(ITypeSymbol? t) => t?.SpecialType is SpecialType.System_Int32 or SpecialType.System_Int64 || IsFloat(t);
+    private static bool IsSigned(ITypeSymbol? t) => t?.SpecialType is SpecialType.System_Int32 or SpecialType.System_Int64
+        or SpecialType.System_SByte or SpecialType.System_Int16 || IsFloat(t);
     private static string Elem(ITypeSymbol type) => type.ToDisplayString(Symbols.Fqn);
     private static string Vec(string element) => $"{V}<{element}>";
 
@@ -532,6 +546,12 @@ internal sealed class Kernel
                     var init = declarator.GetVariableInitializer()?.Value ?? declaration.Initializer?.Value;
                     if (local.IsRef) throw new Unsupported($"ref local '{local.Name}' is not supported");
                     if (init == null) throw new Unsupported($"local '{local.Name}' has no initializer");
+                    if (_narrow && IsInt(local.Type))
+                    {
+                        _active = And(mask, _alive);
+                        DeclareWide(local, WideOf(init));
+                        continue;
+                    }
                     if (!IsLane(local.Type) && !IsBool(local.Type))
                         throw new Unsupported($"local '{local.Name}' is a {local.Type.ToDisplayString()}, not a lane type of {_size} bytes");
                     string name = Temp("l");
@@ -581,6 +601,9 @@ internal sealed class Kernel
         string value;
         switch (op)
         {
+            case ISimpleAssignmentOperation { IsRef: false } a when _narrow && IsInt(a.Target.Type):
+                WriteWide(a.Target, WideOf(a.Value), mask);
+                return;
             case ISimpleAssignmentOperation { IsRef: false } a:
                 if (a.Value is ISimpleAssignmentOperation inner) // a = b = value: b first, then a from it
                 {
@@ -590,10 +613,27 @@ internal sealed class Kernel
                 else value = Expr(a.Value);
                 target = a.Target;
                 break;
+            case ICompoundAssignmentOperation a when _narrow && !a.IsChecked && a.OperatorMethod == null && (IsLane(a.Target.Type) || IsInt(a.Target.Type)):
+            {
+                // b += x is b = (byte)(b + x): the operation on ints, truncated back to the field's type
+                var computed = WideBinary(a.OperatorKind, WideOf(a.Target), WideOf(a.Value), a);
+                if (IsInt(a.Target.Type))
+                {
+                    WriteWide(a.Target, computed, mask);
+                    return;
+                }
+                target = a.Target;
+                value = Truncate(computed, a.Target.Type!, a);
+                break;
+            }
             case ICompoundAssignmentOperation a when !a.IsChecked && a.OperatorMethod == null && a.InConversion.IsIdentity && a.OutConversion.IsIdentity:
                 target = a.Target;
                 value = Binary(a.OperatorKind, a.Target, a.Value, a.Target.Type);
                 break;
+            case IIncrementOrDecrementOperation { IsChecked: false, OperatorMethod: null } a when _narrow && IsInt(a.Type):
+                WriteWide(a.Target, WideBinary(a.Kind == OperationKind.Increment ? BinaryOperatorKind.Add : BinaryOperatorKind.Subtract,
+                    WideOf(a.Target), Constant(1), a), mask);
+                return;
             case IIncrementOrDecrementOperation { IsChecked: false, OperatorMethod: null } a when IsLane(a.Type):
                 target = a.Target;
                 value = $"({Expr(a.Target)} {(a.Kind == OperationKind.Increment ? "+" : "-")} {VecOf(a.Type)}.One)";
@@ -922,6 +962,8 @@ internal sealed class Kernel
 
         switch (op)
         {
+            case IConversionOperation { Conversion.IsNumeric: true, IsChecked: false, OperatorMethod: null } c when _narrow && IsLane(c.Type) && IsInt(c.Operand.Type):
+                return Truncate(WideOf(c.Operand), c.Type!, c); // (byte)(a + b): the low bits, as C# truncates
             case IConversionOperation { Conversion.IsIdentity: true } c when IsLane(c.Type) || IsBool(c.Type):
                 return Expr(c.Operand);
             case IConversionOperation { Conversion.IsNumeric: true, IsChecked: false, OperatorMethod: null } c when IsLane(c.Type) && IsLane(c.Operand.Type):
@@ -967,6 +1009,8 @@ internal sealed class Kernel
             }
             case IIsPatternOperation { Value: var value } pattern when IsLane(value.Type):
                 return Pattern(Expr(value), value.Type!, pattern.Pattern);
+            case IIsPatternOperation { Value: var value } pattern when _narrow && IsInt(value.Type):
+                return WidePattern(WideOf(value), pattern.Pattern, pattern);
             case IInvocationOperation { Instance: null } call when IsMath(call.TargetMethod):
                 return Call(call);
             default:
@@ -975,14 +1019,17 @@ internal sealed class Kernel
     }
 
     /// <summary>A uniform scalar of <paramref name="type"/>, broadcast once per run (before the loop).</summary>
-    private string Broadcast(string scalar, ITypeSymbol type)
+    private string Broadcast(string scalar, ITypeSymbol type) => Broadcast(scalar, Elem(type));
+
+    /// <summary>A uniform scalar broadcast to lanes of <paramref name="element"/> (a fully qualified C# type).</summary>
+    private string Broadcast(string scalar, string element)
     {
-        string key = Elem(type) + " " + scalar;
+        string key = element + " " + scalar;
         if (!_broadcasts.TryGetValue(key, out var name))
         {
             name = Temp("u");
             _broadcasts[key] = name;
-            _setup.Append($"var {name} = {V}.Create<{Elem(type)}>({scalar});\n"); // once per run, not per vector
+            _setup.Append($"var {name} = {V}.Create<{element}>({scalar});\n"); // once per run, not per vector
         }
         return name;
     }
@@ -1027,6 +1074,8 @@ internal sealed class Kernel
                 : $"{V}.{(kind == BinaryOperatorKind.RightShift && IsSigned(type) ? "ShiftRightArithmetic" : "ShiftRightLogical")}({shifted}, {count})";
         }
 
+        if (_narrow && (IsInt(leftType) || IsInt(right.Type)))
+            return WideCompare(kind, WideOf(leftOp), WideOf(right), leftOp, right);
         bool lanes = IsLane(leftType) && IsLane(right.Type) && SymbolEqualityComparer.Default.Equals(leftType, right.Type);
         bool masks = IsBool(leftType) && IsBool(right.Type);
         if (masks && _optionals.Count > 0 && kind is BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.ConditionalOr)
@@ -1104,7 +1153,9 @@ internal sealed class Kernel
     private static System.Type ClrType(ITypeSymbol type) => type.SpecialType switch
     {
         SpecialType.System_Single => typeof(float), SpecialType.System_Double => typeof(double), SpecialType.System_Int32 => typeof(int),
-        SpecialType.System_UInt32 => typeof(uint), SpecialType.System_Int64 => typeof(long), _ => typeof(ulong),
+        SpecialType.System_UInt32 => typeof(uint), SpecialType.System_Int64 => typeof(long),
+        SpecialType.System_Byte => typeof(byte), SpecialType.System_SByte => typeof(sbyte), SpecialType.System_Int16 => typeof(short),
+        SpecialType.System_UInt16 => typeof(ushort), _ => typeof(ulong),
     };
 
     /// <summary>

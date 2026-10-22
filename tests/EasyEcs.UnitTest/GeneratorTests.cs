@@ -175,6 +175,10 @@ public class GeneratorTests
         public struct Five : IComponent { public float A, B, C, D, E; }
         public struct Mixed : IComponent { public float A; public int B; }
         public struct D : IComponent { public double V; }
+        public struct B8 : IComponent { public byte V; }
+        public struct C8 : IComponent { public byte V; }
+        public struct S8 : IComponent { public sbyte V; }
+        public struct Px : IComponent { public byte R, G; }
         public partial struct Split : IComponent { public float A; }
         public partial struct Split { public float B; }
         public record struct G(float Pull) : ISingletonComponent;
@@ -270,6 +274,14 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref D d) => d.V = double.Hypot(d.V, 1);", "Double.Hypot is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Atan2(f.V, 1);", "MathF.Atan2 has no vector form in .NET 10")]
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Pow(f.V, 2);", "MathF.Pow has no vector form in .NET 10")]
+    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)System.Math.Min(b.V - c.V, 10);", "'(byte)System.Math.Min(b.V - c.V, 10)' keeps the low bits of an int the vector loop cannot compute in 8-bit lanes (it may leave [0, 255] and [-128, 127])")]
+    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)((b.V * c.V) >> 8);", "the shift '(b.V * c.V) >> 8' needs bits of an int that 8-bit lanes do not hold")]
+    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)(b.V << c.V);", "the shift 'b.V << c.V' is by a count that is not a constant")]
+    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)(b.V / (c.V + 1));", "integer division is not supported (it throws on 0)")]
+    [TestCase("[ForEach] static void A(ref B8 b, in S8 s) { if (b.V > s.V) b.V = 0; }", "'b.V > s.V' compares ints that 8-bit lanes do not hold")]
+    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) { if (b.V + c.V > 255) b.V = 0; }", "'b.V + c.V > 255' compares ints that 8-bit lanes do not hold")]
+    [TestCase("[ForEach] static void A(ref B8 b, Maybe<C8> c) { if (c.HasValue) b.V++; }", "it takes a Maybe<C8> of byte lanes: optional columns have vector loops of 4- and 8-byte lanes")]
+    [TestCase("[ForEach] static void A(ref Px p) => p.R = (byte)(p.R + p.G);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field")]
     public void ScalarLoopsNameTheirReason(string members, string reason)
     {
         var diagnostics = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Where(d => d.Id == "EECS055").ToArray();
@@ -392,6 +404,25 @@ public class GeneratorTests
         // One check, for the read outside the branch; none for the one under h.HasValue.
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__live & ~__has1\) != global::System.Numerics.Vector<int>.Zero;").Count, Is.EqualTo(2), generated); // unmasked + masked
         Assert.That(generated, Does.Not.Contain("__bail |= (__live & __m"), generated);
+    }
+
+    // Narrow lanes: a byte sum brought back into range by Math.Min is AddSaturate, a difference raised to 0 by Math.Max is
+    // SubtractSaturate, a wrapping sum stays the lanes' own +, and the masked words run the method on their passing rows.
+    [Test]
+    public void ByteSaturationIdiomsAreTheSaturatingForms()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { [ForEach(Simd = SimdMode.Require)] static void A(ref B8 b, in C8 c) { b.V = (byte)System.Math.Max(b.V - c.V, 0); b.V = (byte)System.Math.Min(b.V + c.V, 255); b.V += c.V; } }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("global::System.Numerics.Vector.SubtractSaturate(__c1_0, __c2_0)")
+            .And.Contain("global::System.Runtime.Intrinsics.Vector512.AddSaturate(")
+            .And.Contain("(__c1_0 + __c2_0)")
+            .And.Not.Contain("Interleaved.Lanes8"), generated);
+        // the masked Execute: no vector loop, the passing rows run the method
+        string masked = generated.Substring(generated.IndexOf("ulong pass,", System.StringComparison.Ordinal));
+        Assert.That(masked.Substring(0, masked.IndexOf("WriteMask", System.StringComparison.Ordinal)), Does.Not.Contain("Vector"), generated);
     }
 
     // FloatMode.Fast: the vector approximations of .NET (Vector.Sin, Vector512.Sin) in both loops; degrees to radians as

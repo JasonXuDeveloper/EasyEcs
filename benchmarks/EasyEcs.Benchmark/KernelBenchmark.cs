@@ -22,6 +22,7 @@ namespace EasyEcs.Benchmark;
 /// pattern) are the calls, conversions and masks a vector loop takes. <c>Tally</c> (an int count, sum, Min and Max) and
 /// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order.
 /// <c>Optional</c> takes a <c>Maybe&lt;Mass&gt;</c> over <c>_holes</c> (a lane mask of the rows that have it).
+/// <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
 /// <c>Wave</c> calls Sin and Exp per row (FloatMode.Fast: .NET's vector forms). <c>StepParallel</c> / <c>SeekParallel</c> run
 /// <c>Step</c> / <c>Seek</c> on several threads, the per-row parallel job against the vector loop in each chunk. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
 /// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
@@ -32,7 +33,7 @@ public class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _fields, _holes, _halves;
+    private World _world, _fields, _holes, _halves, _pixels;
 
     [GlobalSetup]
     public void Setup()
@@ -49,6 +50,11 @@ public class KernelBenchmark
 
         _holes = Holes(Entities, i => i % 3 == 0);
         _halves = Holes(Entities, i => random.Next(2) == 0);
+
+        _pixels = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _pixels.Reserve<Lum, Glow>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _pixels.CreateEntity(new Lum { V = (byte)random.Next(256) }, new Glow { V = (byte)random.Next(256) });
 
         _fields = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _fields.Reserve<P2, V2, P3, V3, P4, V4, D3>(Entities);
@@ -83,6 +89,7 @@ public class KernelBenchmark
         _fields.Dispose();
         _holes.Dispose();
         _halves.Dispose();
+        _pixels.Dispose();
     }
 
     [Benchmark(Baseline = true)]
@@ -270,6 +277,16 @@ public class KernelBenchmark
     public void WaveGenerated() => Kernels.Wave(_world);
 
     [Benchmark]
+    public void BrightenScalar()
+    {
+        var job = new BrightenRows();
+        _pixels.ForEach<Lum, Glow, BrightenRows>(ref job);
+    }
+
+    [Benchmark]
+    public void BrightenGenerated() => Kernels.Brighten(_pixels);
+
+    [Benchmark]
     public void StepParallelScalar()
     {
         var job = new StepRows { Pull = _world.Pull };
@@ -414,6 +431,15 @@ public class KernelBenchmark
         }
     }
 
+    public struct Lum : IComponent { public byte V; }
+    public struct Glow : IComponent { public byte V; }
+
+    private struct BrightenRows : IForEach<Lum, Glow>, INoStructuralChanges
+    {
+        public void Execute(ref Lum lum, ref Glow glow) => Kernels.Brighten(ref lum, in glow);
+        static int IForEach<Lum, Glow>.WriteMask => 1;
+    }
+
     private struct WaveRows : IForEach<Heat, Speed, Mass>
     {
         public void Execute(ref Heat heat, ref Speed speed, ref Mass mass) => Kernels.Wave(ref heat, in speed, in mass);
@@ -516,6 +542,14 @@ public class KernelBenchmark
         {
             if (mass.HasValue) heat.Value += speed.Value * Dt / MathF.Max(mass.Value.Value, 0.5f);
             else heat.Value += speed.Value * Dt;
+        }
+
+        // Narrow lanes: a saturating byte sum (AddSaturate), then a wrapping one past a threshold: 64 rows per Vector512.
+        [ForEach(Simd = SimdMode.Require)]
+        internal static void Brighten(ref Lum lum, in Glow glow)
+        {
+            lum.V = (byte)Math.Min(lum.V + (glow.V >> 2), 255);
+            if (lum.V > 250) lum.V = (byte)(lum.V - glow.V);
         }
 
         // Sin and Exp per row: .NET's vector approximations under FloatMode.Fast, the CRT's sinf / expf per row otherwise.

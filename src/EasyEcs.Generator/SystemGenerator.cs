@@ -368,6 +368,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     sb.Append($"{indent}ref {components[k - 1]} r{k} = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{k});\n");
                 sb.Append($"{indent}nint rows = {(components.Length > 0 ? "c1.Length" : "entities.Length")};\n");
                 if (method.Simd is { Flat: { } flat } && !masked) EmitFlatLoop(sb, flat, method.Simd, components, indent);
+                // Narrow lanes have no lane masks of their own (a Vector512<byte> is a whole word): the passing rows of a
+                // masked word run the method.
+                else if (method.Simd is { Size: < 4 } && masked) sb.Append($"{indent}nint i = 0;\n");
                 else if (method.Simd is { } simd) EmitVectorLoop(sb, simd, components, indent, call, masked);
                 sb.Append(method.Simd == null
                     ? $"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n"

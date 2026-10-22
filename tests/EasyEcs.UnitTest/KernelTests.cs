@@ -431,6 +431,111 @@ public static class OptionalKernels
     internal static void Careless(ref Level level, Maybe<Boost> boost) => level.Value = boost.Value.Value + 1;
 }
 
+// Narrow lanes: C# computes on bytes and shorts in int; the vector loop follows the int's low bits and its range.
+public record struct Shade : IComponent { public byte V; }
+public record struct Tone : IComponent { public byte V; }
+public record struct Ink : IComponent { public byte V; }
+public record struct Volume : IComponent { public sbyte V; }
+public record struct Pitch : IComponent { public sbyte V; }
+public record struct Echo : IComponent { public sbyte V; }
+public record struct Wave16 : IComponent { public short V; }
+public record struct Gain16 : IComponent { public short V; }
+public record struct Mix16 : IComponent { public short V; }
+public record struct Word16 : IComponent { public ushort V; }
+public record struct Bias16 : IComponent { public ushort V; }
+public record struct Sum16 : IComponent { public ushort V; }
+public record struct Rgba : IComponent { public byte R, G, B, A; }
+public record struct Tint4 : IComponent { public byte R, G, B, A; }
+
+/// <summary>Kernels of narrow lanes: wrap-around arithmetic, saturating Min / Max idioms, comparisons, shifts, locals.</summary>
+public static class NarrowKernels
+{
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Wrap(ref Ink o, in Shade a, in Tone b) => o.V = (byte)(a.V + b.V * 3 - 7);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Times(ref Ink o, in Shade a, in Tone b) => o.V = (byte)(a.V * b.V ^ ~a.V);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void AddSat(ref Ink o, in Shade a, in Tone b) => o.V = (byte)Math.Min(a.V + b.V, 255);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void SubSat(ref Ink o, in Shade a, in Tone b) => o.V = (byte)Math.Max(a.V - b.V, 0);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Band(ref Ink o, in Shade a, in Tone b) => o.V = (byte)Math.Clamp(a.V + b.V, 16, 235);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Pick(ref Ink o, in Shade a, in Tone b)
+    {
+        if (a.V + b.V > 200) o.V = 1;           // the saturated sum compares alike against 200
+        else if (a.V == 7 || b.V is > 250 or < 3) o.V = 2;
+        else o.V = a.V > b.V ? a.V : (byte)(b.V >> 1);
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Bits(ref Ink o, in Shade a, in Tone b) => o.V = (byte)((a.V << 3) | (b.V >> 5) ^ (a.V & 0x0F) << 9);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Least(ref Ink o, in Shade a, in Tone b) => o.V = Math.Max(Math.Min(a.V, b.V), (byte)10);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Compound(ref Ink o, in Shade a, in Tone b)
+    {
+        o.V += a.V;
+        o.V -= b.V;
+        o.V ^= 0x5A;
+        o.V >>= 1;
+        o.V++;
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Distance(ref Ink o, in Shade a, in Tone b)
+    {
+        int d = a.V - b.V;
+        if (d < 0) d = -d;
+        o.V = (byte)d;
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void SignedSat(ref Echo o, in Volume a, in Pitch b) => o.V = (sbyte)Math.Clamp(a.V + b.V, -128, 127);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void SignedSubSat(ref Echo o, in Volume a, in Pitch b) => o.V = (sbyte)Math.Max(Math.Min(a.V - b.V, 127), -128);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void SignedShift(ref Echo o, in Volume a, in Pitch b) => o.V = (sbyte)((a.V >> 2) + (b.V >> 9) + (b.V << 1));
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void SignedAbs(ref Echo o, in Volume a, in Pitch b)
+    {
+        int x = Math.Abs((int)a.V);
+        o.V = a.V - b.V > 50 ? (sbyte)x : a.V < b.V ? a.V : b.V;
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Mix(ref Mix16 o, in Wave16 a, in Gain16 b) => o.V = (short)Math.Clamp(a.V + b.V, short.MinValue, short.MaxValue);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Scale(ref Mix16 o, in Wave16 a, in Gain16 b) => o.V = (short)(a.V * b.V + (a.V >> 3));
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Drain(ref Sum16 o, in Word16 a, in Bias16 b) => o.V = (ushort)Math.Max(a.V - b.V, 0);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Fill(ref Sum16 o, in Word16 a, in Bias16 b) => o.V = a.V > b.V ? (ushort)Math.Min(a.V + b.V, ushort.MaxValue) : (ushort)(b.V >>> 4);
+
+    // Each field alike: the flat loop of narrow lanes.
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Blend(ref Rgba c, in Tint4 t)
+    {
+        c.R = (byte)Math.Min(c.R + t.R, 255);
+        c.G = (byte)Math.Min(c.G + t.G, 255);
+        c.B = (byte)Math.Min(c.B + t.B, 255);
+        c.A = (byte)Math.Min(c.A + t.A, 255);
+    }
+}
+
 public class KernelTests
 {
     /// <summary>The lengths that cut a vector short or leave a tail, at both vector widths, and a long run.</summary>
@@ -506,6 +611,109 @@ public class KernelTests
     }
 
     private delegate void ScalarRow<T1, T2>(ref T1 a, ref T2 b);
+
+    private delegate void NarrowRow<TO, TA, TB>(ref TO o, in TA a, in TB b);
+
+    /// <summary>
+    /// A kernel of three components run over <paramref name="count"/> rows in two tables, then by the method row by row:
+    /// every row ends bit for bit as the method leaves it. With <paramref name="holes"/>, every fifth row lacks
+    /// <typeparamref name="TB"/> (masked words: their passing rows run the method).
+    /// </summary>
+    private static void CheckNarrow<TO, TA, TB>(int count, bool holes, Func<int, TO> o, Func<int, TA> a, Func<int, TB> b,
+        Action<World> generated, NarrowRow<TO, TA, TB> scalar, string name)
+        where TO : struct, IComponent where TA : struct, IComponent where TB : struct, IComponent
+    {
+        using var world = new World();
+        world.Reserve<TO, TA, TB>(count);
+        var os = new TO[count];
+        var @as = new TA[count];
+        var bs = new TB[count];
+        var entities = new Entity[count];
+        for (int i = 0; i < count; i++)
+        {
+            (os[i], @as[i], bs[i]) = (o(i), a(i), b(i));
+            entities[i] = world.CreateEntity(os[i], @as[i], bs[i]);
+            if (i % 3 == 0) entities[i].Set(new Frozen());
+            if (holes && i % 5 == 0) entities[i].Remove<TB>();
+        }
+        for (int round = 0; round < 2; round++)
+        {
+            generated(world);
+            for (int i = 0; i < count; i++)
+                if (!(holes && i % 5 == 0)) scalar(ref os[i], in @as[i], in bs[i]);
+        }
+        int wrong = 0, first = -1;
+        for (int i = 0; i < count; i++)
+            if (!Same(entities[i].Read<TO>(), os[i]) && wrong++ == 0) first = i;
+        Assert.That(wrong, Is.Zero, () => $"{name}: {wrong} of {count} rows differ, first row {first}: {entities[first].Read<TO>()} instead of {os[first]} ({@as[first]}, {bs[first]})");
+    }
+
+    private static readonly int Pairs = 65536 + 13; // every pair of bytes, and a tail
+
+    /// <summary>
+    /// Byte kernels over every pair of operands (and holes for the masked words): wrap-around arithmetic, the saturating
+    /// Min / Max / Clamp idioms, comparisons (a saturated sum compared with a value inside the range), shifts, bitwise
+    /// operators, Min / Max of bytes, compound assignments and an int local: the method's result, lane by lane.
+    /// </summary>
+    [TestCase(false), TestCase(true)]
+    public void ByteLanesMatchTheMethodForEveryPairOfOperands(bool holes)
+    {
+        static Ink O(int i) => new() { V = (byte)(i * 37) };
+        static Shade A(int i) => new() { V = (byte)i };
+        static Tone B(int i) => new() { V = (byte)(i >> 8) };
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Wrap, NarrowKernels.Wrap, "Wrap");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Times, NarrowKernels.Times, "Times");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.AddSat, NarrowKernels.AddSat, "AddSat");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.SubSat, NarrowKernels.SubSat, "SubSat");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Band, NarrowKernels.Band, "Band");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Pick, NarrowKernels.Pick, "Pick");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Bits, NarrowKernels.Bits, "Bits");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Least, NarrowKernels.Least, "Least");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Compound, NarrowKernels.Compound, "Compound");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Distance, NarrowKernels.Distance, "Distance");
+    }
+
+    /// <summary>Signed bytes over every pair: signed saturation, arithmetic shifts (counts past the lane), Abs of an int, compares.</summary>
+    [TestCase(false), TestCase(true)]
+    public void SignedByteLanesMatchTheMethodForEveryPairOfOperands(bool holes)
+    {
+        static Echo O(int i) => new() { V = (sbyte)(i * 37) };
+        static Volume A(int i) => new() { V = (sbyte)i };
+        static Pitch B(int i) => new() { V = (sbyte)(i >> 8) };
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.SignedSat, NarrowKernels.SignedSat, "SignedSat");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.SignedSubSat, NarrowKernels.SignedSubSat, "SignedSubSat");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.SignedShift, NarrowKernels.SignedShift, "SignedShift");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.SignedAbs, NarrowKernels.SignedAbs, "SignedAbs");
+    }
+
+    /// <summary>Lanes of 2 bytes over random operands and the edges of both ranges.</summary>
+    [TestCase(false), TestCase(true)]
+    public void ShortLanesMatchTheMethodOnRandomAndEdgeValues(bool holes)
+    {
+        int[] edges = [short.MinValue, short.MinValue + 1, -32767, -256, -129, -128, -1, 0, 1, 127, 128, 255, 256, 32766, short.MaxValue, 32768, 65534, 65535];
+        var random = new Random(16);
+        var values = new int[40000];
+        for (int i = 0; i < values.Length; i++) values[i] = i % 4 == 0 ? edges[random.Next(edges.Length)] : random.Next(0, 65536);
+        int V(int i) => values[i % values.Length];
+        CheckNarrow(30000, holes, i => new Mix16 { V = (short)V(i * 3) }, i => new Wave16 { V = (short)V(i * 3 + 1) }, i => new Gain16 { V = (short)V(i * 3 + 2) },
+            NarrowKernels.Mix, NarrowKernels.Mix, "Mix");
+        CheckNarrow(30000, holes, i => new Mix16 { V = (short)V(i * 3) }, i => new Wave16 { V = (short)V(i * 3 + 1) }, i => new Gain16 { V = (short)V(i * 3 + 2) },
+            NarrowKernels.Scale, NarrowKernels.Scale, "Scale");
+        CheckNarrow(30000, holes, i => new Sum16 { V = (ushort)V(i * 3) }, i => new Word16 { V = (ushort)V(i * 3 + 1) }, i => new Bias16 { V = (ushort)V(i * 3 + 2) },
+            NarrowKernels.Drain, NarrowKernels.Drain, "Drain");
+        CheckNarrow(30000, holes, i => new Sum16 { V = (ushort)V(i * 3) }, i => new Word16 { V = (ushort)V(i * 3 + 1) }, i => new Bias16 { V = (ushort)V(i * 3 + 2) },
+            NarrowKernels.Fill, NarrowKernels.Fill, "Fill");
+    }
+
+    /// <summary>A component of four byte fields treated alike: the flat loop, every field saturating as the method does.</summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void ByteFieldsTreatedAlikeTakeTheFlatLoop(int count)
+    {
+        var random = new Random(count);
+        Rgba Next() => new() { R = (byte)random.Next(256), G = (byte)random.Next(256), B = (byte)random.Next(256), A = (byte)random.Next(256) };
+        Check(count, (_, _) => Next(), (_, _) => { var c = Next(); return new Tint4 { R = c.R, G = c.G, B = c.B, A = c.A }; },
+            NarrowKernels.Blend, (ref Rgba c, ref Tint4 t) => NarrowKernels.Blend(ref c, in t));
+    }
 
     [TestCaseSource(nameof(Lengths))]
     public void ComponentsOfSeveralFieldsMatchTheMethodBitForBit(int count)
@@ -1191,7 +1399,7 @@ public class KernelTests
             Assert.That(Same(entities[i].Get<Level>(), levels[i]), $"Level of row {i}: {Bits(entities[i].Get<Level>())} instead of {Bits(levels[i])}");
             if (hasSpot[i]) Assert.That(Same(entities[i].Get<Spot2>(), spots[i]), $"Spot2 of row {i}");
             if (hasBoost[i]) Assert.That(Same(entities[i].Get<Boost>(), boosts[i]), $"Boost of row {i}");
-            if (hasWind[i]) Assert.That(Same(entities[i].Get<Wind2>(), winds[i]), $"Wind2 of row {i}: {Bits(entities[i].Get<Wind2>())} instead of {Bits(winds[i])}");
+            if (hasWind[i]) Assert.That(Same(entities[i].Read<Wind2>(), winds[i]), $"Wind2 of row {i}: {Bits(entities[i].Read<Wind2>())} instead of {Bits(winds[i])}");
         }
     }
 
@@ -1224,6 +1432,8 @@ public class KernelTests
             world.CreateEntity(new Spot3 { X = i }, new Drift3(), new Spot2(), new Drift2(), new Far3(), new Pace { Value = 2 });
             var e = world.CreateEntity(new Level { Value = i }, new Rank { Value = i - 500 }, new Code32 { Value = (uint)i }, new Spot2 { Y = float.PositiveInfinity }); // no Clamp throws
             if (i % 3 == 0) e.Remove<Rank>(); // rows to test: masked words
+            var n = world.CreateEntity(new Ink(), new Shade { V = (byte)i }, new Tone { V = (byte)(i * 7) }, new Rgba(), new Tint4());
+            if (i % 4 == 0) n.Remove<Tone>(); // narrow masked words: the method on their passing rows
         }
         world.SetBounds(-10, 10);
 
@@ -1250,6 +1460,9 @@ public class KernelTests
             ParallelKernels.Glide(world);
             ParallelKernels.Count(world);
             OptionalKernels.Push(world); // tables without the optional column
+            NarrowKernels.Band(world);
+            NarrowKernels.Pick(world);
+            NarrowKernels.Blend(world);
         }
 
         for (int i = 0; i < 50; i++) Frame(); // warm-up: the query cache, the static index tables of Interleaved, JIT tiers
