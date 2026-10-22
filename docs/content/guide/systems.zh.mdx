@@ -190,6 +190,8 @@ public class HungerSystem : EcsSystem
 | [`Maybe<T>`](#maybe) | 实体可能没有的组件 |
 | [`ReadOnlyMaybe<T>`](#read-only-maybe) | 实体可能没有、只读的组件（带索引的组件也行） |
 | [`ref Reduce<T>`](/zh/docs/guide/threading#reductions)，`T : ISingletonComponent, IReduction<T>` | 对所有行求的一个总结果：每一块（单线程时是整遍）累加进自己的部分结果，合并后的结果替换单例 `T` |
+| [`Scratch<T>`](/zh/docs/guide/threading#scratch) | 方法在当前线程上的工作内存（列表、缓冲），在行之间保留；不增加读写 |
+| [`Lookup<T>`](/zh/docs/guide/threading#lookups)，`T : IComponent` | 只读地读取任意实体在这一遍之前的 `T`（`lookup[id]`、`Read`、`Has`；按键 `TryFind`、`Find`、`Count`）；系统算作读 `T`，并行也能用 |
 | `Span<T>` / `ReadOnlySpan<T>`、`EntitySpan` | [批处理方法](#batch-methods)：一次处理成段的行 |
 
 | 特性 | 含义 |

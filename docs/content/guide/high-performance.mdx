@@ -68,9 +68,12 @@ exact for integers and reproducible for floats with a fixed `ChunkRows`:
 [EECS060](/en/docs/guide/analyzer#eecs060), a job field read after `ForEachParallel`
 [EECS061](/en/docs/guide/analyzer#eecs061).
 
-{/* TODO(parallel ForEach): Scratch<T> (thread-private scratch: OpenMP private / threadprivate) and Lookup<T>
-(read-only lookups of other entities from a parallel method), on branch hpc-parallel. Add one line each here and a row each in the mapping table below, linking their sections on
-guide/threading. */}
+A row's working list (the candidates of a search, a frontier) is a `Scratch<T>`: one per method and thread, like
+OpenMP's `threadprivate`, allocated once per thread and cleared by the row; a small buffer with a fixed bound is a
+`stackalloc` span: [scratch](/en/docs/guide/threading#scratch). Another entity's component is read through a
+`Lookup<T>`, MPI's one-sided `Get`: every read sees the value from before the pass, so the method stays parallel:
+[lookups](/en/docs/guide/threading#lookups). Neither adds an atomic per row: [how the runner
+synchronizes](/en/docs/guide/threading#runner-contract).
 
 </Step>
 
@@ -156,9 +159,11 @@ samples/voxel-server sections. */}
 | OpenMP `parallel for` | `[ForEach(Parallel = true)]` | [Parallel methods](/en/docs/guide/systems#parallel-methods) |
 | OpenMP `schedule(dynamic, n)` | `ChunkRows = n` (the default size when unset) | [Chunk size](/en/docs/guide/threading#chunk-rows) |
 | OpenMP `reduction(+: x)`, MPI `Allreduce` | a `Reduce<T>` parameter into a singleton `T : IReduction<T>` | [Reductions](/en/docs/guide/threading#reductions) |
+| OpenMP `private` / `threadprivate` scratch | a `Scratch<T>` parameter (it starts at `default`, not as a copy: no `firstprivate`) | [Scratch](/en/docs/guide/threading#scratch) |
 | OpenMP `sections` / tasks | systems of one stage, run at once when their access does not conflict | [Parallel systems](/en/docs/guide/threading#parallel-systems) |
 | MPI rank owning a subdomain | one world per thread (a world per zone or map) | [One world per thread](/en/docs/guide/threading#recommended-one-world-per-thread) |
 | MPI send of entities to another rank | `SaveEntities` / `MoveEntities` | [Migration](/en/docs/guide/migration-and-unload#save-entities) |
+| MPI one-sided `MPI_Get`, Unity `ComponentLookup` (`[ReadOnly]`) | a `Lookup<T>` parameter: `T` of any entity, as it was before the pass | [Lookups](/en/docs/guide/threading#lookups) |
 | MPI halo exchange (ghost cells) | a border buffer filled from the neighbours before the pass | [VoxelServer water](/en/docs/samples/voxel-server#water) |
 | Burst auto-vectorization | vector loops of `[ForEach]` methods | [Vector loops](/en/docs/guide/systems#vector-loops) |
 | Burst `float4` / Unity.Mathematics by hand | a batch method with `Vector<T>` / `Vector128<T>` | [Batch methods](/en/docs/guide/systems#batch-methods) |
@@ -168,9 +173,7 @@ samples/voxel-server sections. */}
 | GPU stencil | a bit per row, visited with `TrailingZeroCount` | [Shade a grid](#grid) |
 | GPU ping-pong targets | two buffers, read one, write the other, commit | [VoxelServer water](/en/docs/samples/voxel-server#water) |
 
-{/* TODO(mapping): rows for private / threadprivate scratch (Scratch<T>), read-only lookups from a parallel method
-(Lookup<T>, Unity's ComponentLookup with [ReadOnly]), Burst's
-FloatMode.Fast and the MPI interior/ring overlap, once they land. */}
+{/* TODO(mapping): rows for Burst's FloatMode.Fast and the MPI interior/ring overlap, once they land. */}
 
 ## How to use it fast [#how-to-use-it-fast]
 

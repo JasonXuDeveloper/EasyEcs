@@ -191,6 +191,8 @@ row; `p.X += v.X; p.Y += v.Y;` would get the loop, and [EECS055](/en/docs/guide/
 | `EntitySpan` | The entities of a batch method's run | Batch methods only |
 | `Maybe<T>` | A component the entity may lack | `HasValue`, `Value` |
 | `ReadOnlyMaybe<T>` | The same, read only (indexed components too) | `HasValue`, `Value` (`ref readonly`) |
+| `Scratch<T>` | The method's working memory on the running thread, kept between rows | `Value` (`ref T`, `default` at first: `scratch.Value ??= new()`); clear it per row; never store what it holds ([scratch](/en/docs/guide/threading#scratch), [EECS058](/en/docs/guide/analyzer#eecs058)) |
+| `Lookup<T>` | Read-only `T` of any entity, as it was before the pass; parallel too | `lookup[id]` (`ReadOnlyMaybe<T>`), `Read(id)`, `Has(id)`; `TryFind`, `Find`, `Count` by key ([lookups](/en/docs/guide/threading#lookups), [EECS059](/en/docs/guide/analyzer#eecs059)) |
 | `ref Reduce<T>` | A total over the rows into singleton `T : IReduction<T>` | Always by `ref` (else EECS002); the `Value` field is this chunk's partial result; the combined result replaces `T` ([reductions](/en/docs/guide/threading#reductions), [EECS057](/en/docs/guide/analyzer#eecs057)) |
 | `Mut<T>` | A component the method writes on some rows | `Value` reads; `Write()` and a `SetIfChanged(value)` that changed it stamp the row; a write for the scheduler |
 | Any other type (outside a system) | A value the caller passes to the entry point | `ref int count`, `in Settings s` |

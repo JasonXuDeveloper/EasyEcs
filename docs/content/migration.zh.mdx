@@ -107,7 +107,7 @@ public class TakeHits : EcsSystem
 
 ### 新的公开类型 [#v4-8-new-types]
 
-`namespace EasyEcs` 里新增了 `ReadOnlyMaybe<T>`、`Reduce<T>`、`IReduction<T>`、`SimdMode` 和 `Interleaved`。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
+`namespace EasyEcs` 里新增了 `ReadOnlyMaybe<T>`、`Reduce<T>`、`IReduction<T>`、`Scratch<T>`、`Lookup<T>`、`LookupExtensions`、`IDirectIndexed<TKey>`、`SimdMode` 和 `Interleaved`。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
 或者用 `using` 起个别名。
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]

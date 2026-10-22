@@ -50,7 +50,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D33](#d33-one-entity-runs-a-passs-job) | 单个实体运行遍历的 job：`entity.Run` |
 | [D34](#d34-group-filters-through-interfaces) | 通过接口给分组加过滤条件 |
 | [D35](#d35-a-record-can-load-without-counting-as-a-change) | 读记录时可以不算变更 |
-| [D36](#d36-not-added) | 不加：并行批处理 job、行的最后写入 tick、公开读写集、多个 World 共享并行预算 |
+| [D36](#d36-not-added) | 不加：并行的 span 方法、行的最后写入 tick、公开读写集、多个 World 共享并行预算 |
 | [D37](#d37-the-easyecs-package-brings-ninos-generator) | EasyEcs 包自带 Nino 的生成器 |
 | [D38](#d38-the-hidden-columns-are-not-generic-over-their-component) | 隐藏列不再按组件泛型 |
 | [D39](#d39-a-whole-load-can-leave-the-change-ticks-alone) | 整个读档可以不打变更 tick，系统可以从现在开始算 |
@@ -88,6 +88,8 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D71](#d71-direct-index) | 唯一键内联，以及直接映射的键 |
 | [D72](#d72-setall-whole-words) | `SetAll` 按整个位字填充 |
 | [D73](#d73-survey-items-not-added) | 调研中没有加入的改动 |
+| [D74](#d74-scratch) | 每个线程的临时空间是一个参数 |
+| [D75](#d75-lookup) | 对其他实体的查找是一个只读参数 |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -382,6 +384,9 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
   中位数 130 对 135 μs，但 p90 170 对 190 μs，每 tick CPU 990 对 760 μs。
 - `ThreadPool.UnfairSemaphoreSpinLimit`：能消除首尾相接的差距，但它是进程级的，会让线程池线程在 tick 之间一直自旋（每 16 ms tick 49 ms CPU），
   所以留给应用自己决定。
+- 用带静态委托的 `Parallel.For` 当运行器（`ParallelRunnerBenchmark`，`ParallelForEachBenchmark` 的转向遍历，4 核、机器负载 10 到 30）：
+  1,000 行时运行器 18 µs、0 B，`Parallel.For` 24 到 42 µs、1.5 到 1.9 KB；10,000 行时两者在噪声范围内持平；100,000 行时 `Parallel.For`
+  快 15% 到 40%，但在这种负载的噪声范围内（运行之间相差 2 倍）。在空闲机器上重跑还没做。它每次调用还会分配，也不能传状态（[D69](#d69-reductions)）。
 
 ## D23. 按块维护变更摘要；移除单独汇总 [#d23-change-summaries-per-block-removals-summarized-apart]
 
@@ -654,14 +659,14 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **读完再清掉整行的 tick**：记录里没有的组件，之前的写入也会一起丢掉。
 - **单独的 `RestoreEntitiesInto`：** 和原调用只差一点；用参数在调用处写明更清楚。
 
-## D36. 不加：并行批处理 job、行的最后写入 tick、公开读写集、多个 World 共享并行预算 [#d36-not-added]
+## D36. 不加：并行的 span 方法、行的最后写入 tick、公开读写集、多个 World 共享并行预算 [#d36-not-added]
 
 **决定。** 权衡了四个需求，都没有加。
 
 **原因。**
-- **并行批处理 job**（`ForEachBatchParallel`，以及 span 方法上的 `[ForEach(Parallel = true)]`）。10 万个实体，`ParallelForEachBenchmark`：
-  重的转向计算，并行批处理 766 µs，逐实体并行 727 µs；轻的漂移计算分别是 54.5 µs 和 55.6 µs（单线程 107 µs）。多线程时逐实体遍历已经
-  跑满内存带宽，批处理形式多出一个 API、一种 job 类型和几条生成器路径，却没有收益。
+- **span 方法上的 `[ForEach(Parallel = true)]`。** 10 万个实体，`ParallelForEachBenchmark`：重的转向计算，并行批处理 766 µs，逐实体并行
+  727 µs；轻的漂移计算分别是 54.5 µs 和 55.6 µs（单线程 107 µs）。多线程时逐实体遍历已经跑满内存带宽，所以 span 方法仍然只在一个线程上跑
+  （EECS010）。`World.ForEachBatchParallel` 是因为另一个原因才有的：并行归约把部分结果放在每段行的局部变量里（[D69](#d69-reductions)）。
 - **`entity.LastWriteTick<T>()`。** `entity.Run(ref job, QueryFilter.Create().Changed<T>(tick))` 就能回答单个实体“之后有没有写过”，
   不用公开 tick 列。
 - **公开 `SystemAccess`。** 读写集是调度器做决定的依据；公开就把它的形状冻结进了 API，而调度器之外已经没有用处。
@@ -1347,18 +1352,32 @@ MathF.*、存在位的 lane 掩码、Vector512、无边界检查的标量循环�
   最初的写法是持有指向这个局部变量的 `ref` 字段的 `ref struct`，它把局部变量钉在内存里：每行一次加载和一次存储，浮点求和串在存储转发上，
   比单线程遍历慢好几倍。不按 `ref` 传入的 `Reduce<T>` 会归约进一份副本，所以报 EECS002。
 
-**考虑过的方案。**
-- **带 `localInit` / `localFinally` 的 `Parallel.For<TLocal>`**（数字待测）：.NET 的线程局部归约，也是现有工具里最接近的。它不是运行器：
-  没有传状态的重载，所以 `static` lambda 只能用静态状态（这一列、结果），静态状态不可重入（两个 World 不能同时归约）；每次调用都分配
-  （委托、分区状态）；分区跟着工作窃取走，浮点结果每次运行都会变。`ReduceBenchmark` 把它和 `Reduce<T>` 放在一起测。
-- **每行一次 `Interlocked` 加法或一把锁：** 对整数是对的，但每一行都在争抢同一条缓存行；`ReduceBenchmark` 里有测（数字待测）。
+**考虑过的方案。** 用 `ReduceBenchmark` 测量（BenchmarkDotNet，1,000,000 行，每种两次运行，4 核，机器负载 10 到 30）：
+
+| 写法 | 整数求和 | 浮点求和 | 每次调用分配 |
+| --- | --- | --- | --- |
+| 单线程 `ref` 上下文值 | 0.41 / 0.47 ms | 0.74 / 0.76 ms | 0 B |
+| `ref Reduce<T>`，并行 | 0.37 / 0.46 ms | 0.74 / 0.77 ms | 0 B |
+| 带 `ref` 字段的 `ref struct` 形式的 `Reduce<T>`（最初的写法） | | 3.3 到 4.6 ms | 0 B |
+| 按遍历自己的块运行的 `Parallel.For`，部分结果按顺序累加 | 差不多 | 差不多 | 1.7 到 1.9 KB |
+| 逐行的 `Parallel.For<TLocal>`，静态委托 | 2.4 到 3.5 ms | 3.3 到 6.8 ms | 1.7 到 2.1 KB |
+| 每行一次 `Interlocked`（浮点用 CAS 循环） | 8 到 13 ms | 15 到 24 ms | 0 B |
+| 每行一把锁 | 25 到 33 ms | | 0 B |
+
+1,000 行时 `Reduce<T>` 约 0.45 µs，每种 `Parallel.For` 写法 3.5 到 13 µs。浮点求和跑 200 次，`Reduce<T>` 和按块的 `Parallel.For` 都只得到
+1 种结果；逐行的 `Parallel.For<TLocal>` 最多得到 129 种，CAS 循环最多 137 种。
+
+- **带 `localInit` / `localFinally` 的 `Parallel.For<TLocal>`：** .NET 的线程局部归约，也是现有工具里最接近的；不采用。它从不能做到 0 B，
+  逐行的写法慢 5 到 9 倍，浮点结果不确定，而且没有传状态的重载，所以 `static` lambda 只能用静态状态（这一列、结果），静态状态不可重入：
+  两个 World 不能同时归约。按遍历自己的块运行时时间跟得上、结果也确定，但照样每次调用都分配，照样需要静态状态。
+- **每行一次 `Interlocked` 加法或一把锁：** 对整数是对的，但每一行都在争抢同一条缓存行：比上面的 `Reduce<T>` 慢 20 到 70 倍，浮点的 CAS 循环
+  结果也不确定。
+- **逐行把部分结果放在 job 字段里：** 逐行的并行 job 就会这样做；块的 job 副本里的字段每行都要加载、存储一次。并行归约以批处理 job 运行
+  （`World.ForEachBatchParallel`），一段行的部分结果放在局部变量里。
 - **按线程 id 索引的每线程槽位：** 加了填充防伪共享，但合并顺序会跟着线程而不是行，线程数变了还要调整大小。
 - **按块完成的顺序合并：** 少一个数组，但浮点结果和不满足交换律的合并会取决于时机。
-- **包装部分结果 `ref` 的 `ref struct`**（按值传入的 `Reduce<T>`）：读起来像 `Maybe<T>`，但部分结果留在内存里（见上），归约每行都要加载、存储一次。
+- **包装部分结果 `ref` 的 `ref struct`**（按值传入的 `Reduce<T>`）：读起来像 `Maybe<T>`，但部分结果留在内存里（见上）：浮点求和 3.3 到 4.6 ms。
 - **向量循环里的归约：** 以后的一步（[D68](#d68-vector-loops-without-opting-in)）；整数精确，浮点只有重排结合顺序才行。
-
-{/* TODO(reductions): ReduceBenchmark 测完后补上数字（整数求和、浮点求和、包围盒；多线程和单线程的 Reduce<T>、ref 上下文值、Interlocked、
-锁、Parallel.For localInit/localFinally），并去掉这里和 guide/threading#reductions 的“数字待测”。 */}
 
 ## D70. 没有加入的分析器候选规则 [#d70-analyzer-candidates-not-added]
 
@@ -1419,6 +1438,44 @@ MathF.*、存在位的 lane 掩码、Vector512、无边界检查的标量循环�
 - **按位字而不是逐位拷贝存在位：** A/B 测试结果互相矛盾（这次快、下次慢），没有证明有净收益。
 - **只拷贝变化过的边的水光环：** 拷贝少了一半，但一步的时间仍在噪声范围内，而且每个休眠的区块要多花 4 KB 记住这些边。被计划中的推送光环设计取代：
   区块的边变了时推给邻居（[路线图](/zh/docs/roadmap#push-halo)）。
+
+## D74. 每个线程的临时空间是一个参数 [#d74-scratch]
+
+**决定。** `[ForEach]` 方法的 `Scratch<T>` 参数是方法在当前线程上的工作内存：每个方法、每个线程一个 `T`（每种生成的 job 类型一个
+`[ThreadStatic]` 盒子），方法填充之前是 `default`，从不重置，线程结束时释放。它不给系统增加任何读写。EECS058 拒绝把它持有的引用存进组件、单例、
+`Maybe`、`Mut` 或 `Reduce`；EECS028 不报它一次性的 `??= new()`。
+
+**原因。**
+- **并行方法原来没有地方放列表。** 每行 `new` 一个会分配（EECS028），共享一个会竞争（EECS060），手写 `[ThreadStatic]` 字段又是每个这样的方法都要重复的代码。
+  OpenMP 的 `threadprivate` 就是同一个思路。
+- **0 B，而且比分配快。** `ScratchBenchmark`（每行 24 个候选，10,000 和 100,000 行，并行）：比每行新建一个列表快约 1.8 倍，每个线程第一行之后 0 B。
+- **重置交给用户。** 清空列表是行在需要时调用一次；由运行器重置的话，每个临时空间每行都要调一次，不管需不需要。
+
+**考虑过的方案。**
+- **手写的 `[ThreadStatic]` 列表：** 目前在 `ScratchBenchmark` 里比 `Scratch<T>` 快 17% 到 26%；正在尝试修复。
+- **每行用 `ArrayPool<T>.Shared`：** 每行租一次、还一次，而且只能是数组。
+- **`stackalloc`：** 上限事先知道的小缓冲最快，也推荐用它；大小会变、或者大到放不进栈的缓冲不行。
+- **每个 World 一份临时空间：** World 的并行遍历跑在不属于任何 World 的线程上，所以 World 里还是得每个线程一份。
+
+{/* TODO(scratch): 修复落地后更新和 [ThreadStatic] 的对比。 */}
+
+## D75. 对其他实体的查找是一个只读参数 [#d75-lookup]
+
+**决定。** `[ForEach]` 方法的 `Lookup<T>` 参数读取任意实体在这一遍之前的组件 `T`（`this[id]`、`Read(id)`、`Has(id)`；带索引的 `T` 还能通过
+`LookupExtensions` 按键 `TryFind`、`Find`、`Count`）。系统按 `T` 的读者调度，所以写 `T` 的系统落到别的阶段；EECS059 拒绝自己也写 `T` 的方法；
+EECS010 接受它出现在并行方法里。方法通过参数查询的值索引在这一遍之前创建并建好（在所有者线程上、阶段之前）；其他还没建好的索引在并行区域里抛异常，
+在单线程遍历里仍然延迟建立。
+
+**原因。**
+- **读另一个实体原来会把方法逼到一个线程上。** `World` 参数在并行时被拒绝（EECS010）。一个由调度器保证契约的只读视图（同一阶段没有 `T` 的写者，
+  方法里也没有）不加锁就能让读取不发生竞争：就是 Unity 带 `[ReadOnly]` 的 `ComponentLookup`、MPI 的单边 `Get`。
+- **单线程时也更快。** `LookupBenchmark`：单线程的 `Lookup<T>` 比 `World` 参数加 `TryGetEntity` 和 `TryGet` 快 10% 到 28%（10,000 和
+  100,000 行的追击，以及唯一键查找）。在那台机器的负载下，并行没有测出额外收益。
+- **索引不能在多个线程上自己建。** 在遍历之前建好，遍历期间的每次查找就都是读；通过别的方式碰到的索引抛异常，而不是去竞争。
+
+**考虑过的方案。**
+- **也能写的查找（不带 `[ReadOnly]` 的 Unity `ComponentLookup`）：** 两行可能从两个线程写同一个实体；对其他实体的写入仍然是数据（这一行的组件，由之后的系统读取）。
+- **加锁延迟建立索引：** 每一遍第一次查找都要加锁，而这个索引本可以在遍历之前建好。
 
 ## 相关页面 [#related]
 

@@ -317,6 +317,10 @@ flowchart TB
   rows ([D67](/en/docs/decisions#d67-chunk-rows)). Each job and stage measures its runs and wakes helpers only while they make a run at least a fifth faster
   ([D22](/en/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)). Nothing is
   allocated per update.
+- A run's synchronization is per chunk and per run, never per row: a chunk is claimed by one compare-and-swap on the
+  cursor and finished by one `Interlocked.Decrement` of the chunks remaining (and an `Interlocked.Add` of its time);
+  the caller spins on `Volatile.Read` of that count, and each `Decrement`'s full fence orders the chunk's writes, its
+  partial result included, before the merge ([how the runner synchronizes](/en/docs/guide/threading#runner-contract)).
 
 The rules from the user's side: [Threading](/en/docs/guide/threading).
 

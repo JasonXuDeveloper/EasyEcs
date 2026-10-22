@@ -42,6 +42,14 @@ icon: RotateCcwClock
   并行遍历的每一块，或单线程时的整遍，累加进自己的部分结果，每行没有锁也没有原子操作；部分结果按块的顺序合并后替换 `T`。整数结果精确；
   `ChunkRows` 固定时，浮点结果在任何线程数下都相同。分析器规则 [EECS057](/zh/docs/guide/analyzer#eecs057) 拒绝同一遍里对 `T` 的第二处写入。
   见[归约](/zh/docs/guide/threading#reductions)和[决策](/zh/docs/decisions#d69-reductions)。
+- `Scratch<T>`：`[ForEach]` 参数，方法在当前线程上的工作内存（OpenMP 的 `threadprivate`），每个方法、每个线程一个 `T`，从不重置，所以每行要填的
+  列表每个线程只分配一次（`scratch.Value ??= new()`）。分析器规则 [EECS058](/zh/docs/guide/analyzer#eecs058) 拒绝把它持有的东西存进组件或单例。
+  见[临时空间](/zh/docs/guide/threading#scratch)和[决策](/zh/docs/decisions#d74-scratch)。
+- `Lookup<T>`：`[ForEach]` 参数，读取任意实体在这一遍之前的组件 `T`（`lookup[id]`、`Read`、`Has`；带索引的 `T` 按键 `TryFind`、`Find`、`Count`），
+  并行方法也能用。系统算作读 `T`；规则 [EECS059](/zh/docs/guide/analyzer#eecs059) 拒绝自己也写 `T` 的方法。见[查找](/zh/docs/guide/threading#lookups)
+  和[决策](/zh/docs/decisions#d75-lookup)。
+- `world.ForEachBatchParallel<T1..Tn, TJob>(ref job, filter, chunkRows)`：在多个线程上按每块里连续的行段运行 `IForEachBatch` job。见
+  [查询](/zh/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel)。
 - 分析器规则 [EECS060](/zh/docs/guide/analyzer#eecs060)（警告）：并行 `[ForEach]` 方法或 `ForEachParallel` 运行的 job 的 `Execute` 写了所有线程
   共享的内存（静态字段、上下文参数或 job 字段引用的对象），这些写入会竞争。规则 [EECS061](/zh/docs/guide/analyzer#eecs061)（警告，有代码修复）：
   `ForEachParallel` 之后读并行 job 的字段，而它给每块跑一个副本、什么都不合并回来；修复改为在一个线程上运行这个 job。

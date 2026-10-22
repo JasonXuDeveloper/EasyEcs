@@ -116,6 +116,16 @@ World 用来跑并行工作的部件：一个阶段里的系统，或者一个�
 开始的部分结果，这一遍结束时用 `T.Combine` 按行的顺序把部分结果合并进单例 `T`。就是 OpenMP 的 `reduction`、MPI 的 `Allreduce`。
 见[归约](/zh/docs/guide/threading#reductions)。
 
+## 临时空间（Scratch） [#scratch]
+
+`[ForEach]` 方法在运行它的线程上的工作内存：`Scratch<T>` 参数每个方法、每个线程持有一个 `T`，在行、遍历和 World 之间保留，从不重置，
+所以列表每个线程只分配一次。就是 OpenMP 的 `threadprivate`。见[临时空间](/zh/docs/guide/threading#scratch)。
+
+## 查找（Lookup） [#lookup]
+
+在 `[ForEach]` 方法里读另一个实体的组件：`Lookup<T>` 参数读取任意实体在这一遍之前的 `T`（按 id，带索引的 `T` 还能按键），系统按 `T` 的读者调度，
+所以方法可以并行。就是 MPI 的单边 `Get`、Unity 的 `ComponentLookup`。见[查找](/zh/docs/guide/threading#lookups)。
+
 ## 向量循环（Vector loop） [#vector-loop]
 
 生成器为组件有 1 到 4 个同类型数值的逐行 `[ForEach]` 方法写出的 `Vector<T>` 循环：一条指令按向量能装下的行数计算方法体，分支变成掩码，

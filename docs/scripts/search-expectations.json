@@ -20,6 +20,12 @@
     { "query": "SimdMode", "page": "reference/simdmode" },
     { "query": "EECS060", "page": "guide/analyzer", "top": 3 },
     {
+      "query": "working memory per thread",
+      "page": "guide/threading",
+      "top": 3
+    },
+    { "query": "reading other entities", "page": "guide/threading", "top": 3 },
+    {
       "query": "direct-mapped keys",
       "page": "guide/indexes-and-relations",
       "top": 3
@@ -54,6 +60,7 @@
     },
     { "query": "高性能写法", "page": "guide/high-performance" },
     { "query": "归约", "page": "guide/threading", "top": 3 },
+    { "query": "每个线程的工作内存", "page": "guide/threading", "top": 3 },
     {
       "query": "直接映射的键",
       "page": "guide/indexes-and-relations",

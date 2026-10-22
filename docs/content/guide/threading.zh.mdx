@@ -148,7 +148,7 @@ using var zone = new World(new WorldOptions { ParallelSystems = true, MaxDegreeO
 ### 并行 `[ForEach]` 方法 [#parallel-foreach-methods]
 
 `[ForEach(Parallel = true)]` 把一个方法的行切成块分给多个线程。它不能做结构变更，必须逐实体运行，也不能写单例
-（[EECS010](/zh/docs/guide/analyzer#eecs010)）；对所有行求总数用 [`Reduce<T>`](#reductions)：
+（[EECS010](/zh/docs/guide/analyzer#eecs010)）；对所有行求总数用 [`Reduce<T>`](#reductions)，每行的工作列表用 [`Scratch<T>`](#scratch)，读其他实体用 [`Lookup<T>`](#lookups)：
 
 ```csharp
 public record struct Regen(int PerTick) : ISingletonComponent;
@@ -329,19 +329,149 @@ Console.WriteLine($"{crowd.Count} 个单位，x 从 {crowd.MinX} 到 {crowd.MaxX
   （[EECS057](/zh/docs/guide/analyzer#eecs057)）。归约方法生成的 job 会合并各块的副本，所以 [EECS061](/zh/docs/guide/analyzer#eecs061)
   （并行遍历之后读 job 的字段）不报它。
 
-`ReduceBenchmark` 测量整数求和、浮点求和和包围盒，`Reduce<T>` 多线程和单线程两种，对比单线程的 `ref` 上下文值、每行一次 `Interlocked`
-加法、每行一把锁，以及 `Parallel.For<TLocal>(from, to, localInit, body, localFinally)`。
+`ReduceBenchmark` 在 1,000 行和 1,000,000 行上测量整数求和、浮点求和和包围盒：`Reduce<T>` 多线程和单线程两种，对比单线程的 `ref`
+上下文值、每行一次 `Interlocked` 加法、每行一把锁、按遍历自己的块运行的 `Parallel.For`，以及逐行的
+`Parallel.For<TLocal>(from, to, localInit, body, localFinally)`。数字，以及每种写法 200 次运行得到的不同浮点结果个数，见
+[决策记录](/zh/docs/decisions#d69-reductions)。
 
-{/* TODO(reductions): bench.json 有了 ReduceBenchmark 之后放上它的表（<BenchTable bench="ReduceBenchmark" />），并链接归约决策记录里的数字。 */}
+{/* TODO(bench): bench.json 有了 ReduceBenchmark 之后在这里放 <BenchTable bench="ReduceBenchmark" />。 */}
 
-**为什么不用带 `localInit` / `localFinally` 的 `Parallel.For`**（数字待测）：它是 .NET 的线程局部模式，也是和 `Reduce<T>` 最接近的写法，
-但它不是运行器。它没有传状态的重载，所以 `static` lambda 只能用静态状态（这一列、结果），而静态状态不可重入：两个 World 不能同时归约。
-它每次调用都分配（委托、分区状态）。它的分区跟着线程池的工作窃取走，所以浮点结果每次运行都会变。World 的运行器按 `ref` 传 job，
-不分配，并按块的顺序合并部分结果（[归约](/zh/docs/decisions#d69-reductions)）。
+**为什么不用带 `localInit` / `localFinally` 的 `Parallel.For`：** 它是 .NET 的线程局部模式，也是和 `Reduce<T>` 最接近的写法，但每一项都输了。
+它没有传状态的重载，所以 `static` lambda 只能用静态状态（这一列、结果），而静态状态不可重入：两个 World 不能同时归约。它每次调用都分配
+（委托、分区状态），所以从不能做到 0 B。逐行的写法每行调用一次委托，比 `Reduce<T>` 慢好几倍；遍历很小时，光是交给线程池的开销就比遍历本身还大。
+它的分区跟着线程池的工作窃取走，所以浮点总数每次运行都会变。按遍历自己的块运行、按顺序累加部分结果的 `Parallel.For` 在时间上跟得上，结果也确定，
+但它照样每次调用都分配，照样需要静态状态。World 的运行器按 `ref` 传 job，不分配，并按块的顺序合并部分结果（[D69](/zh/docs/decisions#d69-reductions)）。
 
-{/* TODO(parallel ForEach): Scratch<T>（方法在当前线程上的工作内存，在行、遍历和 World 之间保留：OpenMP 的 private / threadprivate）、
-Lookup<T>（读取任意实体的组件，调度为对 T 的读；带索引的 T 可按键 TryFind / Find / Count，还没建好的索引在并行区域里抛异常、在单线程遍历里
-照常延迟建立）和 World.ForEachBatchParallel。各写一个 #### 小节：什么时候用、开销、能编译的例子和常见陷阱；再更新 guide/high-performance 的对照表。 */}
+归约方法以批处理 job 运行：每块把它持有的连续行段交给方法（[`ForEachBatchParallel`](/zh/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel)），
+这段行的部分结果是一个局部变量，JIT 把它留在寄存器里。如果逐行运行，部分结果就在这块的 job 副本里，每行都要加载、存储一次。
+
+#### 每个线程的工作内存：`Scratch<T>` [#scratch]
+
+一行为自己的计算需要一个列表（邻居搜索的候选、寻路的开放集、要填的缓冲），不应该每行分配一个，也不能在线程之间共用一个。`Scratch<T>`
+参数就是方法在当前线程上的工作内存：每个方法、每个线程一个 `T`，就是 OpenMP 的 `threadprivate`。它从 `default` 开始，第一次分配
+（`scratch.Value ??= new()`）每个线程只发生一次，之后这个线程上的每一行都会看到上一行留下的东西。
+
+<Callout type="idea" title="适合">
+  每行在调用里填充、读取的列表、集合或缓冲，大小会变或者大到放不进栈：候选、边界、排好序的窗口。并行和单线程的方法都能用。
+</Callout>
+
+<Callout type="warn" title="别用于">
+  上限事先就知道的小缓冲：`stackalloc`（`Span<int> kept = stackalloc int[24];`）最快，也不需要别的东西。必须活过这一行的东西：它属于组件、
+  [动态缓冲](/zh/docs/guide/dynamic-buffers)或单例。
+</Callout>
+
+```csharp
+public record struct Neighbours(int Count, int Spread) : IComponent;
+
+public class CountNeighbours : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Count(in Position position, ref Neighbours neighbours, Scratch<List<int>> scratch)
+    {
+        var near = scratch.Value ??= new List<int>(32);   // 每个线程一次 // [!code highlight]
+        near.Clear();                                      // 这个线程上一行留下的东西
+        int cell = (int)position.X * 64 + (int)position.Y;
+        for (int i = 0; i < 24; i++)
+            if (((cell ^ (i * 40_503)) & 3) != 0) near.Add(i);
+        int spread = near.Count == 0 ? 0 : near[^1] - near[0];
+        neighbours = new Neighbours(near.Count, spread);
+    }
+}
+```
+
+- **从不重置。** 一行看到的是这个线程上一行留下的东西，可能来自这一遍或更早的一遍、这个 World 或别的 World：在行开始时清掉要用的东西。
+- **不是 World 的数据。** 它不给系统增加任何读写，所以不改变调度；把它持有的引用存进组件、单例、`Maybe`、`Mut` 或 `Reduce`，就把一个线程的内存
+  交给了下一个复用它的行（[EECS058](/zh/docs/guide/analyzer#eecs058)）。
+- **它的内存属于线程**，线程结束时才释放，不随 World 释放；线程池的线程活得很久，所以长大的缓冲会一直那么大。
+- **开销：** 每块查一次这个线程的值（单线程时每遍一次），之后每行读一个字段；每个线程第一次用过之后零分配。
+  [EECS028](/zh/docs/guide/analyzer#eecs028) 不报一次性的 `??= new()`。
+
+`ScratchBenchmark` 在 10,000 和 100,000 行上并行地每行收集 24 个候选，列表分别放在 `Scratch<T>` 里、每行新建、每行从 `ArrayPool<int>.Shared`
+租用、放在手写的 `[ThreadStatic]` 字段里，或者用 `stackalloc` 的 span（[D74](/zh/docs/decisions#d74-scratch)）。
+
+{/* TODO(scratch): ScratchBenchmark 里 Scratch<T> 还落后于手写的 [ThreadStatic] 列表，正在尝试修复。落地后更新这一段和 D74，
+bench.json 有了 ScratchBenchmark 之后加上 <BenchTable bench="ScratchBenchmark" />。 */}
+
+#### 读取其他实体：`Lookup<T>` [#lookups]
+
+需要另一个实体的组件的方法（追击者的目标、单位的首领、请求里指明的账号），原本要接收 `World` 再调用 `TryGetEntity`，这让它只能在一个线程上跑。`Lookup<T>` 参数改为读取任意实体的组件 `T`：就是 Unity 带 `[ReadOnly]` 的 `ComponentLookup`、MPI 的单边 `Get`。
+方法不接触 World，所以可以并行。
+
+<Callout type="idea" title="适合">
+  读取当前行以外的实体：目标、首领、父实体、某个键的持有者。单线程的方法也适合：查找比 `World` 参数加 `TryGetEntity` 和 `TryGet` 更快。
+</Callout>
+
+<Callout type="warn" title="别用于">
+  当前行自己的组件：直接作为参数接收。同一个方法会写的组件：查找会读到写入之前或之后的行（[EECS059](/zh/docs/guide/analyzer#eecs059)）。
+</Callout>
+
+| 成员 | 返回 |
+| --- | --- |
+| `lookup[id]` | `ReadOnlyMaybe<T>`：实体的 `T`；实体没有它或已不存活时没有值 |
+| `lookup.Read(id)` | `ref readonly T`；实体没有它或已不存活时抛异常 |
+| `lookup.Has(id)` | 实体是否存活且有 `T` |
+| `lookup.TryFind(key, out id)`、`Find(key)`、`Count(key)` | 带索引的 `T`（`IIndexed<TKey>`、`IUniqueIndexed<TKey>`）：某个键的一个实体、全部实体、数量 |
+
+```csharp
+public record struct Quarry(EntityId Id) : IComponent;
+public record struct Heading(float X, float Y) : IComponent;
+
+public class ChaseSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Chase(in Position position, in Quarry quarry, ref Heading heading, Lookup<Position> positions)
+    {
+        var at = positions[quarry.Id];                 // 目标在这一遍之前的位置 // [!code highlight]
+        heading = at.HasValue ? new Heading(at.Value.X - position.X, at.Value.Y - position.Y) : default;
+    }
+}
+```
+
+```csharp
+public record struct Login(int Number) : IComponent, IUniqueIndexed<int>
+{
+    public int Key => Number;
+}
+
+public record struct Asks(int Number) : IComponent;
+public record struct Answer(EntityId Login) : IComponent;
+
+public class MatchLogins : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Match(in Asks asks, ref Answer answer, Lookup<Login> logins) =>
+        answer = new Answer(logins.TryFind(asks.Number, out var id) ? id : default);   // 索引在这一遍之前建好
+}
+```
+
+- **每次读取看到的都是这一遍之前的值。** 系统按 `T` 的读者调度，所以写 `T` 的系统不会和它同一个阶段，方法自己也不能写 `T`（EECS059）。
+  这一遍不做结构变更，所以 id 一直对应原来的行。
+- **在参数上按键查找会先建好索引。** 在自己的 `Lookup<T>` 上调用 `TryFind`、`Find` 或 `Count` 的方法，`T` 的值索引会在这一遍之前（在所有者线程上、
+  它的系统所在的并行阶段之前）创建并建好。通过别的方式在并行区域里碰到还没建好的索引，会抛异常而不是去建；单线程的遍历仍在第一次查找时建立。
+- **[EECS010](/zh/docs/guide/analyzer#eecs010) 接受它**出现在并行方法里，而 `World` 参数会被拒绝。
+- **开销：** 每次读取一次实体查找（`TryGetEntity`，再读这一行的列），按键查找一次哈希探测。单线程时它比 `World` 参数加 `TryGetEntity` 和 `TryGet`
+  更快（[D75](/zh/docs/decisions#d75-lookup)）；并行时，查找和普通的行一样分摊到各个线程。
+
+`LookupBenchmark` 从 10,000 和 100,000 行追击 1,000 个目标，并按唯一键查找账号，分别用并行和单线程的 `Lookup<T>`，以及 `World` 参数。
+
+{/* TODO(bench): bench.json 有了 LookupBenchmark 之后放上 <BenchTable bench="LookupBenchmark" />。 */}
+
+#### 运行器怎样同步 [#runner-contract]
+
+一次并行遍历在同步上要付出什么，以及是什么让一块的写入排在遍历之后的代码之前：
+
+| 什么时候 | 同步 |
+| --- | --- |
+| 每行 | 没有。唯一的例外是设了 [`ChunkRows`](#chunk-rows)、又写被追踪组件的方法：把一个 4,096 行区块拆开的几块用原子 OR 置它的变更 tick 摘要，每写 64 行一次（[D67](/zh/docs/decisions#d67-chunk-rows)）。 |
+| 每块 | 在这次运行的游标上做一次比较并交换来领取它（游标带着这次运行的纪元，所以晚启动的助手线程永远领不到下一次运行的块）；做完时，对剩余块数做一次 `Interlocked.Decrement`，对用时做一次 `Interlocked.Add`。 |
+| 每次运行 | 游标上两次 `Interlocked.Exchange`（打开和关闭），每唤醒一个助手线程再加一次比较并交换和一个排队的线程池工作项。 |
+| 运行结束 | 调用线程自旋，用 `Volatile.Read` 读剩余块数，直到读到 0。每块 `Decrement` 的完整内存屏障让它的写入（它的行、它的 job 副本和部分结果）排在调用线程的合并和遍历之后的代码之前。 |
+
+`ParallelRunnerBenchmark` 把 `ParallelForEachBenchmark` 的转向遍历分别交给运行器和带静态委托的 `Parallel.For`：遍历很小时运行器更快，而且不分配；
+10,000 行时两者持平；100,000 行时 `Parallel.For` 在一台负载很高的机器上测得更快，但在这台机器的噪声范围内
+（[D22](/zh/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)）。
+
+{/* TODO(bench): 在空闲的机器上重跑 ParallelRunnerBenchmark；更新这一段和 D22，bench.json 有了它之后加上 <BenchTable bench="ParallelRunnerBenchmark" />。 */}
 
 ### 来自其他线程的输入 [#input-from-other-threads]
 
@@ -502,6 +632,8 @@ unit 0 at (7.06, 7.06) with 60 hp
 - **只读就用 `in`。** 只读的 `ref` 也算写，而写会冲突（[EECS025](/zh/docs/guide/analyzer#eecs025) 会报出来）。
 - **行少而重时设块大小。** 只有几百行、每行几微秒的并行方法设 [`ChunkRows`](#chunk-rows)，每个线程都能分到活；大量轻量行保持默认。
 - **归约，不要共享。** 并行遍历上的计数或求和用 [`Reduce<T>`](#reductions) 参数：每块一个部分结果，每行没有原子操作。
+- **每个线程一份临时空间，不是每行一份。** 每行要填的列表用 [`Scratch<T>`](#scratch)（上限固定的小缓冲用 `stackalloc`），不要每行 `new`。
+- **查找，不要拿 World。** 读其他实体走 [`Lookup<T>`](#lookups)，方法能保持并行，单线程时也更快。
 
 一个 World 里 10 万个实体，以及同样的实体分到四个线程上的四个 World（`WorldSimulationBenchmark`、`MultiWorldBenchmark`）：一个 World
 每 tick <BenchValue k="tick.oneWorld" />，四个 World 合计 <BenchValue k="tick.fourWorlds" />。
@@ -520,7 +652,8 @@ unit 0 at (7.06, 7.06) with 60 hp
 - **一个并行阶段：** 交给可复用的线程池工作项，不分配；它在重的系统上省下多少，见上面 `ParallelSystemsBenchmark` 的表。
 - **一个并行方法：** 同一个调度器，按块分配；调用线程总是参与。只有实测表明辅助线程能让这次遍历比单线程快至少五分之一时才唤醒它们，
   所以 tick 之间的小遍历就在调用线程上跑。每块要领一次、复制一份 job；写被追踪组件的方法设了 [`ChunkRows`](#chunk-rows) 时，
-  遍历前每 4,096 行还要打开一次 tick 块，每写 64 行做一次原子 OR。[`Reduce<T>`](#reductions) 每块多一个 job 副本，这一遍结束时合并一次。
+  遍历前每 4,096 行还要打开一次 tick 块，每写 64 行做一次原子 OR。[`Reduce<T>`](#reductions) 每块多一个 job 副本，这一遍结束时合并一次；
+  [`Scratch<T>`](#scratch) 每块查一次这个线程的值；[`Lookup<T>`](#lookups) 每次读取一次实体查找。一次遍历的原子操作：[运行器怎样同步](#runner-contract)。
 - **不用时：** `ParallelSystems` 默认关闭，从不使用它的 World 不为它付出任何开销。
 
 ## 常见陷阱 [#pitfalls]
@@ -544,6 +677,11 @@ unit 0 at (7.06, 7.06) with 60 hp
 | 同一个 `T` 两个 `Reduce<T>`，或旁边有 `ref T` | 一个结果覆盖另一个 | [EECS057](/zh/docs/guide/analyzer#eecs057) |
 | `Combine` 不满足结合律（平均值的平均值） | 结果取决于块从哪里开始 | 代码审查：归约总和与计数，最后再除 |
 | 用默认块大小在不同机器间比较浮点总数 | 末几位不同 | 设定 [`ChunkRows`](#chunk-rows) |
+| `Scratch<T>` 里的列表用之前没清空 | 这一行看到上一行的元素 | 代码审查：行开始时 `Clear()` |
+| 把 `Scratch<T>` 持有的引用存进组件 | 这个线程的下一行会改掉这个实体的数据 | [EECS058](/zh/docs/guide/analyzer#eecs058) |
+| 用 `Lookup<T>` 查同一个方法会写的组件 | 读到写入之前或之后的行，在别的线程上还会读到写了一半的值 | [EECS059](/zh/docs/guide/analyzer#eecs059)：写到另一个组件（双缓冲） |
+| 并行方法里用 `World` 参数读其他实体 | 编译错误 | [EECS010](/zh/docs/guide/analyzer#eecs010)：改用 `Lookup<T>` |
+| 并行遍历里通过辅助方法碰到还没人建好的值索引 | `InvalidOperationException` | 在 `Lookup<T>` 参数本身上调用 `TryFind` / `Find` / `Count` |
 
 ## 和其他 ECS 库的对比 [#compared-with-other-ecs-libraries]
 

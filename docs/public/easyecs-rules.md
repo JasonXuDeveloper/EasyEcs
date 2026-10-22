@@ -99,7 +99,12 @@ available as Markdown: add `.md` to its URL.
   (EECS061). A total over the rows (a count, a sum, a min / max, a bounding box) is a `ref Reduce<T>` parameter (always `ref`:
   without it, EECS002), with `T` a singleton implementing `IReduction<T>` (`Identity`, an associative `Combine`); read the result as `world.T` or `in T`
   after the pass, never `Reduce<T>.Value` as the total (it is the chunk's part). One `Reduce<T>` per `T` per pass
-  (EECS057). Set `ChunkRows` when a float total must be the same on every machine.
+  (EECS057). Set `ChunkRows` when a float total must be the same on every machine. A list or buffer a row fills
+  is a `Scratch<T>` parameter (`var list = scratch.Value ??= new(); list.Clear();`), or `stackalloc` for a small
+  fixed bound, never a `new` per row; never store what a scratch holds into a component or singleton (EECS058).
+  Read other entities through a `Lookup<T>` parameter (`lookup[id]`, `Read`, `Has`, `TryFind` by key), never a
+  `World` parameter in parallel code (EECS010); it sees the values from before the pass, and the same method may not
+  write `T` (EECS059): write another component and copy it back later.
 - Hot per-row arithmetic over numbers: a static, non-parallel `[ForEach]` method over components of 1 to 4 fields of
   one primitive type (no `Entity`, `World`, `Mut<T>` or `Maybe<T>` parameter) gets a generated `Vector<T>` loop; write
   the fields (`p.X += v.X`), not a new whole component, and do not mix `float` and `int`. EECS055 (a suggestion) names
