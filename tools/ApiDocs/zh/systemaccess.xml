@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.SystemAccess" source="ba0d9aac7f64">
     <summary>
@@ -26,5 +26,12 @@
   </member>
   <member name="M:EasyEcs.SystemAccess.WriteSingleton``1" source="d4a76fc7c619">
     <summary>系统写单例 <typeparamref name="T" />。</summary>
+  </member>
+
+  <member name="M:EasyEcs.SystemAccess.Index``2" source="19315ffc0793">
+    <summary>
+      系统读组件 <typeparamref name="T" /> 并按键查找它（<see cref="T:EasyEcs.Lookup`1" />，<see cref="T:EasyEcs.LookupExtensions" />）：
+      在包含该系统的并行阶段运行之前，<typeparamref name="T" /> 的索引在执行更新的线程上创建并建好，所以该阶段的查找不会修改它。
+    </summary>
   </member>
 </doc>

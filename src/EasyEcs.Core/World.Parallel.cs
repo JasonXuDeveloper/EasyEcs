@@ -62,7 +62,12 @@ public sealed partial class World
         stage.Update = update;
         // Each system of the stage measures its own allocations (RunMeasured, on the thread that runs it).
         var runner = _systemRunner ??= new Runner(Helpers, false);
-        Gate.Freeze(); // the stage's systems never change structure (they do not run alone): a change throws
+        // The indexes the stage's key lookups read, built here: an index builds (or is created) on first use, and the
+        // stage's threads may only read it.
+        for (int i = 0; i < systems.Length; i++)
+            if (systems[i].Access.Indexes is { } indexes)
+                foreach (var prepare in indexes) prepare(this);
+        Gate.FreezeParallel(); // the stage's systems never change structure (they do not run alone): a change throws
         try
         {
             if (runner.TryRun(stage, systems.Length, out _)) return;
@@ -70,7 +75,7 @@ public sealed partial class World
         }
         finally
         {
-            Gate.Thaw();
+            Gate.ThawParallel();
         }
     }
 

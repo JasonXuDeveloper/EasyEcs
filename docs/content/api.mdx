@@ -53,7 +53,9 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `Maybe<T>` | ref struct | An optional component parameter of a `[ForEach]` method: `HasValue`, `Value`. |
 | `ReadOnlyMaybe<T>` | ref struct | The same, read-only: `Value` is `ref readonly`, never stamped, allowed for indexed components; a `Maybe<T>` converts to it. |
 | `Mut<T>` | ref struct | A component parameter of a `[ForEach]` method that counts as written only on the rows the method writes: `Value`, `Write()`, `SetIfChanged(value)` ([change tracking](/en/docs/guide/change-tracking)). |
-| `Reduce<T>`, `IReduction<T>` | ref struct, interface | A `[ForEach]` parameter reducing a pass into singleton `T`, which implements `IReduction<T>` (`Identity`, `Combine`): `Value`, `Combine(value)`. |
+| `Reduce<T>`, `IReduction<T>` | struct, interface | A `[ForEach]` parameter, taken by `ref`, reducing a pass into singleton `T`, which implements `IReduction<T>` (`Identity`, `Combine`): `Value`, `Combine(value)`. |
+| `Scratch<T>` | ref struct | A `[ForEach]` parameter: working memory of the method on the running thread, kept between rows, passes and worlds: `Value`. |
+| `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out id)`, `Find(key)`, `Count(key)`. |
 | `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interfaces, attributes | System groups (with filters through interfaces) and ordering. |
 | `SystemErrorPolicy` | enum | `Throw` (default) or `Disable`: what an exception in a system does. |
 | `SystemStats`, `SystemList` | readonly structs | A system's run count, times, allocated bytes and visited entities; `world.Systems`, allocation-free. |
@@ -153,7 +155,7 @@ A snapshot, a save or a clone of a buffer column copies the elements: O(elements
 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` | O(M + S) | the job also receives the `Entity` |
 | `entity.Run<T1..Tn, TJob>(ref job)` / `Run(ref job, filter)` | O(n), plus O(1) per filter component | one entity; false when stale, missing a component or rejected by the filter; refs survive the job's structural changes |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + runs) | spans of consecutive rows; no structural changes |
-| `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)` / `ForEachEntityParallel` | O(M + S), divided over up to `MaxDegreeOfParallelism` threads | `INoStructuralChanges` jobs; chunks of 1,024 to `World.ParallelChunkRows` rows (multiples of 4,096 when the job writes a tracked component), or `chunkRows` rounded up to 64 (`[ForEach(ChunkRows = n)]`; then O(B) block openings before the pass, B = 4,096-row blocks, and one atomic OR per 64 written rows), one job copy per chunk (kept, and combined in chunk order in O(chunks), when the job reduces: `Reduce<T>`); helpers are woken only when they pay |
+| `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)` / `ForEachEntityParallel` / `ForEachBatchParallel` (spans of a chunk's runs of rows) | O(M + S), divided over up to `MaxDegreeOfParallelism` threads | `INoStructuralChanges` jobs; chunks of 1,024 to `World.ParallelChunkRows` rows (multiples of 4,096 when the job writes a tracked component), or `chunkRows` rounded up to 64 (`[ForEach(ChunkRows = n)]`; then O(B) block openings before the pass, B = 4,096-row blocks, and one atomic OR per 64 written rows), one job copy per chunk (kept, and combined in chunk order in O(chunks), when the job reduces: `Reduce<T>`); helpers are woken only when they pay |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | refs into the row: every visited row of a tracked component counts as written; no `await` in the loop |
 | `foreach (var item in world.Read<T1..Tn>(filter))` | O(M + S) | `ref readonly` into the row: nothing is stamped; otherwise as `Query` |
 | `world.Count<T1..Tn>(filter)` | O(M), + S / 64 for tables whose rows must be tested | sums table counts, or counts presence bits (and ticks), 8 words per step with AVX-512 |
@@ -179,13 +181,22 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | `mut.Write()` | O(1): one stamp (plus one entity lookup in a method that changes structure or runs in parallel) | `ref T`, the row stamped as written (a tracked `T`); call it once per write |
 | `mut.SetIfChanged(in T value)` | O(size of `T`), plus a `Write()` when it differs | true when it stored the value; equality is `IEquatable<T>`, else the bytes of an unmanaged `T`; a managed `T` without `IEquatable<T>` throws `NotSupportedException` |
 
-`Reduce<T>`, the `[ForEach]` parameter of a reduction into singleton `T`:
+`ref Reduce<T>`, the `[ForEach]` parameter of a reduction into singleton `T`:
 
 | API | Complexity | Notes |
 | --- | --- | --- |
-| `reduce.Value` | O(1) | `ref T`: the partial result of this chunk (of the pass, on one thread), which starts at `T.Identity` |
+| `reduce.Value` | O(1) | a field: the partial result of this chunk (of the pass, on one thread), which starts at `T.Identity` |
 | `reduce.Combine(T value)` | O(1) plus `T.Combine` | `Value = T.Combine(Value, value)` |
 | end of the pass | O(chunks) `T.Combine` calls | the partial results in chunk order (row order), then one write of the singleton (added when missing) |
+
+`Scratch<T>` and `Lookup<T>`, `[ForEach]` parameters for parallel passes:
+
+| API | Complexity | Notes |
+| --- | --- | --- |
+| `scratch.Value` | O(1): one thread-static read per chunk | `ref T`, this method's value on this thread: `default` on the thread's first row, never reset |
+| `lookup[id]` / `lookup.Read(id)` / `lookup.Has(id)` | O(1): one entity lookup | a `ReadOnlyMaybe<T>` (no value when stale or missing) / `ref readonly T` (throws) / `bool` |
+| `lookup.TryFind(key, out id)` / `Find(key)` / `Count(key)` | O(1) hash probe, then O(1) per entity of `Find` | indexed `T` only, called on the parameter: the index is created and built before the pass and before the parallel stage of its system (O(N) the first time) |
+| a value index reached otherwise during a parallel stage or pass | throws `InvalidOperationException` when not built yet | building it would change it under the threads reading it |
 
 ## Disable and bulk changes [#bulk]
 

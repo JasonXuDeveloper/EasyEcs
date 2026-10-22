@@ -1,8 +1,8 @@
 <doc>
-  <member name="T:EasyEcs.Reduce`1" source="cff252091dcc">
+  <member name="T:EasyEcs.Reduce`1" source="c5ffd09b164d">
     <summary>
-      把一次 <c>[ForEach]</c> 遍历归约到单例 <typeparamref name="T" />（OpenMP 的 <c>reduction</c>，MPI 的 <c>Allreduce</c>）：
-      <c>static void Count(in Health h, Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;</c>。并行遍历的每个块（单线程时是整次遍历）
+      把一次 <c>[ForEach]</c> 遍历归约到单例 <typeparamref name="T" />（OpenMP 的 <c>reduction</c>，MPI 的 <c>Allreduce</c>），按 <c>ref</c> 传入：
+      <c>static void Count(in Health h, ref Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;</c>。并行遍历的每个块（单线程时是整次遍历）
       累加到自己的副本里，副本从 <see cref="P:EasyEcs.IReduction`1.Identity" /> 开始：每行不加锁，也没有原子操作。遍历结束时，
       副本按块的顺序（也就是行的顺序）合并，结果替换 World 里的 <typeparamref name="T" />（没有就先添加）。
       <para>
@@ -10,13 +10,16 @@
       固定时，每次运行、任何线程数下结果都一样，但和同一个方法 <c>Parallel = false</c> 的结果（只有一个部分结果）不一定逐位相同。
       默认的块大小随线程数变化。
       </para>
-      系统写 <typeparamref name="T" />（每次遍历一次）；<see cref="P:EasyEcs.Reduce`1.Value" /> 是这个块的部分结果，不是总数。
-      只在传入它的那次调用内有效（ref struct）。
+      <para>
+      它是按 <c>ref</c> 传入的普通结构体，而不是持有引用的包装：遍历把每段连续行的部分结果放在局部变量里，JIT 会把按 <c>ref</c>
+      传给内联方法的局部变量留在寄存器里，而地址被 ref 字段持有的局部变量只能留在内存里，每行一次读一次写（浮点求和因此慢好几倍）。
+      </para>
+      系统写 <typeparamref name="T" />（每次遍历一次）；<see cref="F:EasyEcs.Reduce`1.Value" /> 是这个块的部分结果，不是总数。
     </summary>
     <typeparam name="T">存放结果的单例，它和自身合并。</typeparam>
   </member>
-  <member name="P:EasyEcs.Reduce`1.Value" source="b0cf44aa5ff2">
-    <summary>这一块行（单线程时是整次遍历）的部分结果，按 <c>ref</c> 返回：直接写它的字段。</summary>
+  <member name="F:EasyEcs.Reduce`1.Value" source="8ec3f39ac7a9">
+    <summary>这一块行（单线程时是整次遍历）的部分结果：直接写它的字段。</summary>
   </member>
   <member name="M:EasyEcs.Reduce`1.Combine(`0)" source="0307a002c18d">
     <summary>把 <paramref name="value" /> 合并进部分结果（<see cref="M:EasyEcs.IReduction`1.Combine(`0,`0)" />）。</summary>

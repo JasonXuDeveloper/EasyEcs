@@ -687,10 +687,18 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Build()
     {
+        // Building writes the index: in a parallel region other threads may be looking it up, or building it too.
+        if (_world.Gate.Parallel) ThrowBuildInRegion();
         _built = true;
         var job = new BuildJob { Index = this };
         _world.ForEachEntity<T, BuildJob>(ref job);
     }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowBuildInRegion() => throw new InvalidOperationException(
+        $"The index of {typeof(T).Name} by {typeof(TKey).Name} is not built yet, and building it now, while a parallel stage " +
+        "or pass runs, would change it under the threads reading it. Find it through a Lookup<" + typeof(T).Name + "> " +
+        "parameter (its index is built before the pass), or look it up once on the owner thread before the update.");
 
     // Reads every row without stamping it (WriteMask = 0): building the index is not a change of a tracked T.
     private struct BuildJob : IForEachEntity<T>, INoStructuralChanges

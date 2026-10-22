@@ -18,7 +18,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     private const string Category = "EasyEcs";
 
     public static readonly DiagnosticDescriptor BadParameter = new("EECS002", "Invalid [ForEach] parameter",
-        "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe of one, an Entity or the World (outside a system, also a value the caller passes, of any other type)",
+        "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe, Mut or Lookup of one, a 'ref Reduce' of a singleton, a Scratch, an Entity or the World (outside a system, also a value the caller passes, of any other type)",
         Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS002"));
 
     public static readonly DiagnosticDescriptor ComponentCount = new("EECS003", "Invalid component count",
@@ -190,6 +190,23 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "that have an exact vector counterpart. Change what the message names, or set SimdMode.Auto to accept the loop " +
         "of one row at a time.", helpLinkUri: Help("EECS056"));
 
+    public static readonly DiagnosticDescriptor ScratchEscape = new("EECS058", "Scratch memory stored into the world",
+        "[ForEach] method '{0}' stores '{1}', which its Scratch<{2}> '{3}' holds, into '{4}'",
+        Category, DiagnosticSeverity.Error, true,
+        "A Scratch<T> value belongs to the thread running the method and is reused by the next row that thread runs, " +
+        "of any pass. A reference into it (a list, an array, a span) stored in a component or a singleton is changed " +
+        "under the entity by later rows, on another thread in a parallel pass. Copy what the row produced into the " +
+        "component's own storage (a DynamicBuffer, a value), or keep the data in a component.", helpLinkUri: Help("EECS058"));
+
+    public static readonly DiagnosticDescriptor LookupOfWritten = new("EECS059", "A lookup of a component the pass writes",
+        "Parameter '{0}' of [ForEach] method '{1}' looks up {2}, which {3}",
+        Category, DiagnosticSeverity.Error, true,
+        "A Lookup<T> reads T of any entity, as it was before the pass: nothing may write T while the pass runs. The " +
+        "method writes T itself, so a lookup would read rows before or after their write in this pass, and a parallel " +
+        "pass would read them while another thread writes them. Read the entity's own T through its parameter, write " +
+        "the result into another component (double buffering: read Position, write NextPosition), or split the work " +
+        "into two systems.", helpLinkUri: Help("EECS059"));
+
     public static readonly DiagnosticDescriptor BadIndexKey = new("EECS036", "A component that cannot be indexed by its key",
         "'{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
@@ -213,7 +230,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
         UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScalarLoop, NoVectorLoop,
-        SharedWrite, LostJobWrite);
+        SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -797,6 +814,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                 context.ReportDiagnostic(Diagnostic.Create(BadParameter, p.Locations.FirstOrDefault(),
                     Symbols.ByValueData(p) ? ImmutableDictionary<string, string?>.Empty.Add(ByValue, "") : null, p.Name, method.Name));
             }
+            else if (kind == Symbols.ParamKind.Lookup && Symbols.LookupProblem(method, p) is { } written)
+                context.ReportDiagnostic(Diagnostic.Create(LookupOfWritten, p.Locations.FirstOrDefault(), p.Name, method.Name,
+                    Symbols.LookupElement(p.Type)!.Name, written));
             else if (kind == Symbols.ParamKind.Reduction && Symbols.ReductionProblem(method, p) is { } reduction)
                 context.ReportDiagnostic(Diagnostic.Create(BadReduction, p.Locations.FirstOrDefault(), p.Name, method.Name,
                     Symbols.ReduceElement(p.Type)!.Name, reduction));

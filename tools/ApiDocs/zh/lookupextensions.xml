@@ -1,0 +1,20 @@
+<doc>
+  <member name="T:EasyEcs.LookupExtensions" source="9d58e883a102">
+    <summary>通过 <see cref="T:EasyEcs.Lookup`1" /> 按键查找带索引的组件（<see cref="T:EasyEcs.IIndexed`1" />）。</summary>
+  </member>
+  <member name="M:EasyEcs.LookupExtensions.&lt;G&gt;$F4407922E4D47C2CF72BA2E9B00869E2`2.Count(`1)" source="7ad07fcbec71">
+    <summary><typeparamref name="T" /> 的键为 <paramref name="key" /> 的实体数量。O(1)：一次哈希探测。</summary>
+  </member>
+  <member name="M:EasyEcs.LookupExtensions.&lt;G&gt;$F4407922E4D47C2CF72BA2E9B00869E2`2.Find(`1)" source="23b48a8d03fc">
+    <summary>
+      <typeparamref name="T" /> 的键为 <paramref name="key" /> 的实体（<c>foreach</c>）。O(1)，然后每个实体 O(1)。
+      遍历期间没有人写 <typeparamref name="T" />，所以遍历这个列表时它保持不变。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.LookupExtensions.&lt;G&gt;$F4407922E4D47C2CF72BA2E9B00869E2`2.TryFind(`1,EasyEcs.EntityId@)" source="d6ff7ecb15b9">
+    <summary>
+      一个 <typeparamref name="T" /> 的键为 <paramref name="key" /> 的实体：唯一索引（<see cref="T:EasyEcs.IUniqueIndexed`1" />）时就是那一个，
+      否则是其中任意一个。O(1)：一次哈希探测。
+    </summary>
+  </member>
+</doc>

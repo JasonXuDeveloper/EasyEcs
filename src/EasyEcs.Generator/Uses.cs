@@ -1,5 +1,6 @@
 using System.Linq;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace EasyEcs.Generator;
@@ -188,6 +189,32 @@ internal static class Uses
                 return false;
             default:
                 return true;
+        }
+    }
+
+    /// <summary>
+    /// The parameter <paramref name="operation"/> reaches through members, elements, conversions and calls on it
+    /// (<c>p.Value.List</c>, <c>mut.Write().Field</c>), or null when it starts elsewhere.
+    /// </summary>
+    public static IParameterSymbol? Root(IOperation? operation)
+    {
+        while (true)
+        {
+            switch (operation)
+            {
+                case IParameterReferenceOperation parameter: return parameter.Parameter;
+                case IFieldReferenceOperation field: operation = field.Instance; continue;
+                case IPropertyReferenceOperation property: operation = property.Instance; continue;
+                case IArrayElementReferenceOperation element: operation = element.ArrayReference; continue;
+                case IInvocationOperation call: operation = call.Instance; continue;
+                case IConversionOperation conversion: operation = conversion.Operand; continue;
+                case ILocalReferenceOperation { Local.RefKind: not RefKind.None } local
+                    when local.Local.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is VariableDeclaratorSyntax { Initializer.Value: var value }:
+                    // A ref local (ref var digits = ref scratch.Value): what it refers to.
+                    operation = local.SemanticModel?.GetOperation(value is RefExpressionSyntax r ? r.Expression : value);
+                    continue;
+                default: return null;
+            }
         }
     }
 

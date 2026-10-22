@@ -60,7 +60,7 @@ public class ReduceTests
     public class SerialScores : EcsSystem
     {
         [ForEach]
-        static void Add(in Points points, Reduce<Scores> tally)
+        static void Add(in Points points, ref Reduce<Scores> tally)
         {
             ref var t = ref tally.Value;
             t.Count++;
@@ -71,13 +71,13 @@ public class ReduceTests
     public class ParallelScores : EcsSystem
     {
         [ForEach(Parallel = true)]
-        static void Add(in Points points, Reduce<Scores> tally) => tally.Combine(new Scores { Count = 1, Sum = points.Value });
+        static void Add(in Points points, ref Reduce<Scores> tally) => tally.Combine(new Scores { Count = 1, Sum = points.Value });
     }
 
     public class ParallelBounds : EcsSystem
     {
         [ForEach(Parallel = true, ChunkRows = 1024)]
-        static void Grow(in Spot spot, Reduce<Bounds2> box)
+        static void Grow(in Spot spot, ref Reduce<Bounds2> box)
         {
             ref var b = ref box.Value;
             b.MinX = MathF.Min(b.MinX, spot.X);
@@ -90,20 +90,20 @@ public class ReduceTests
     public class FixedChunkMass : EcsSystem
     {
         [ForEach(Parallel = true, ChunkRows = 4096)]
-        static void Add(in Weight weight, Reduce<WeightSum> mass) => mass.Value.Total += weight.Value;
+        static void Add(in Weight weight, ref Reduce<WeightSum> mass) => mass.Value.Total += weight.Value;
     }
 
     public class ParallelEnds : EcsSystem
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
-        static void Visit(in Points points, Reduce<Ends2> ends) =>
+        static void Visit(in Points points, ref Reduce<Ends2> ends) =>
             ends.Combine(new Ends2 { First = points.Value, Last = points.Value, Any = true });
     }
 
     public class SerialEnds : EcsSystem
     {
         [ForEach]
-        static void Visit(in Points points, Reduce<Ends2> ends) =>
+        static void Visit(in Points points, ref Reduce<Ends2> ends) =>
             ends.Combine(new Ends2 { First = points.Value, Last = points.Value, Any = true });
     }
 
@@ -111,7 +111,7 @@ public class ReduceTests
     public class ScoresWithBonus : EcsSystem
     {
         [ForEach]
-        static void Add(in Points points, ReadOnlyMaybe<Weight> bonus, Reduce<Scores> tally)
+        static void Add(in Points points, ReadOnlyMaybe<Weight> bonus, ref Reduce<Scores> tally)
         {
             ref var t = ref tally.Value;
             t.Count++;
@@ -128,7 +128,7 @@ public class ReduceTests
     public static class Runners
     {
         [ForEach(Parallel = true)]
-        public static void Score(in Points points, Reduce<Scores> tally)
+        public static void Score(in Points points, ref Reduce<Scores> tally)
         {
             ref var t = ref tally.Value;
             t.Count++;
@@ -143,6 +143,40 @@ public class ReduceTests
         world.CreateEntities(entities, new Points(0));
         for (int i = 0; i < count; i++) entities[i].Points = new Points(i);
         return world;
+    }
+
+    /// <summary>The armor of the rows written since the last run: rows picked by change ticks, a chunk's runs at a time.</summary>
+    public class ChangedArmor : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 64), Changed<Armor>]
+        static void Add(in Armor armor, ref Reduce<Scores> tally) => tally.Combine(new Scores { Count = 1, Sum = armor.Value });
+    }
+
+    [Test]
+    public void AParallelReductionVisitsOnlyTheRowsItsFilterPasses()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        var entities = new Entity[20_000];
+        world.CreateEntities(entities, new Armor(0), new Points(0));
+        world.AddSystem<ChangedArmor>();
+        world.Update(); // every row is new
+        Assert.That(world.Scores.Count, Is.EqualTo(entities.Length));
+        for (int run = 1; run <= 50; run++)
+        {
+            long sum = 0;
+            int count = 0;
+            for (int i = run % 7; i < entities.Length; i += 7 + run % 5) // scattered rows, runs of one row
+            {
+                entities[i].Set(new Armor(i));
+                sum += i;
+                count++;
+            }
+
+            for (int i = 0; i < entities.Length; i += 997) entities[i].Disable<Points>(); // presence bits: rows tested
+            world.Update();
+            Assert.That((world.Scores.Count, world.Scores.Sum), Is.EqualTo((count, sum)), $"run {run}");
+            for (int i = 0; i < entities.Length; i += 997) entities[i].Enable<Points>();
+        }
     }
 
     [Test]

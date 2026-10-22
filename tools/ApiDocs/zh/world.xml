@@ -525,24 +525,36 @@
     </summary>
     <exception cref="T:System.ArgumentException"><paramref name="exclude" /> 里有单例类型：实体存档不写单例。</exception>
         </member>
-  <member name="M:EasyEcs.World.ForEachEntityParallel``3(``2@,EasyEcs.QueryFilter@,System.Int32)" source="2f1d10ed7649">
+  <member name="M:EasyEcs.World.ForEachEntityParallel``3(``2@,EasyEcs.QueryFilter@,System.Int32)" source="b2451a2f042e">
     <summary>
       多线程版的 <see cref="M:EasyEcs.World.ForEachEntity``3(``2@,EasyEcs.QueryFilter@)" />：匹配的行切成块（每个线程大约四块，行数是 64 的倍数，最多
       <see cref="F:EasyEcs.World.ParallelChunkRows" /> 行；或者把 <paramref name="chunkRows" /> 向上取整到 64，用于行少而重的情况：
       <c>[ForEach(Parallel = true, ChunkRows = n)]</c>），由调用线程和最多
       <see cref="P:EasyEcs.WorldOptions.MaxDegreeOfParallelism" /> - 1 个线程池线程同时执行，每个线程用自己的一份
-      <paramref name="job" /> 副本（job 存在字段里的状态不会合并回来）。job 不能做结构变更，也不能写别的行会读的数据
+      <paramref name="job" /> 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：<c>Merges</c>，即 <c>Reduce&lt;T&gt;</c>；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据
       （单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。
       每种 job 类型第一次调用之后零分配。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.ForEachParallel``3(``2@,EasyEcs.QueryFilter@,System.Int32)" source="c23feb7d40c8">
+  <member name="M:EasyEcs.World.ForEachParallel``3(``2@,EasyEcs.QueryFilter@,System.Int32)" source="cb9c87468d76">
     <summary>
       多线程版的 <see cref="M:EasyEcs.World.ForEach``3(``2@,EasyEcs.QueryFilter@)" />：匹配的行切成块（每个线程大约四块，行数是 64 的倍数，最多
       <see cref="F:EasyEcs.World.ParallelChunkRows" /> 行；或者把 <paramref name="chunkRows" /> 向上取整到 64，用于行少而重的情况：
       <c>[ForEach(Parallel = true, ChunkRows = n)]</c>），由调用线程和最多
       <see cref="P:EasyEcs.WorldOptions.MaxDegreeOfParallelism" /> - 1 个线程池线程同时执行，每个线程用自己的一份
-      <paramref name="job" /> 副本（job 存在字段里的状态不会合并回来）。job 不能做结构变更，也不能写别的行会读的数据
+      <paramref name="job" /> 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：<c>Merges</c>，即 <c>Reduce&lt;T&gt;</c>；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据
+      （单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。
+      每种 job 类型第一次调用之后零分配。
+    </summary>
+  </member>
+
+  <member name="M:EasyEcs.World.ForEachBatchParallel``3(``2@,EasyEcs.QueryFilter@,System.Int32)" source="e090b2815c24">
+    <summary>
+      多线程版的 <see cref="M:EasyEcs.World.ForEachBatch``3(``2@,EasyEcs.QueryFilter@)" />：匹配的行切成块（每个线程大约四块，行数是 64 的倍数，最多
+      <see cref="F:EasyEcs.World.ParallelChunkRows" /> 行；或者把 <paramref name="chunkRows" /> 向上取整到 64，用于行少而重的情况：
+      <c>[ForEach(Parallel = true, ChunkRows = n)]</c>），由调用线程和最多
+      <see cref="P:EasyEcs.WorldOptions.MaxDegreeOfParallelism" /> - 1 个线程池线程同时执行，每个线程用自己的一份
+      <paramref name="job" /> 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：<c>Merges</c>，即 <c>Reduce&lt;T&gt;</c>；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据
       （单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。
       每种 job 类型第一次调用之后零分配。
     </summary>

@@ -1,0 +1,21 @@
+<doc>
+  <member name="T:EasyEcs.Scratch`1" source="90c9f4ba6ecf">
+    <summary>
+      <c>[ForEach]</c> 方法在运行它的线程上的工作内存（OpenMP 的 <c>threadprivate</c>）：邻居列表、寻路的开放集、要填充的缓冲区。
+      <c>static void Plan(ref Path path, in Goal goal, Scratch&lt;Frontier&gt; frontier)</c>：<see cref="P:EasyEcs.Scratch`1.Value" /> 是每个方法、每个线程一个的
+      <typeparamref name="T" />，线程第一次运行该方法时创建（<c>default</c>），在线程的整个生命周期内保留，所以它分配的东西
+      （<c>value.Ids ??= new int[256]</c>）每个线程只分配一次，稳定状态不分配。两个线程从不共享同一个；并行遍历中在同一线程上运行的块一个接一个地运行，
+      所以一行在它的调用期间独占它。
+      <para>
+      它从不重置：一行看到的是同一线程上一行留下的内容，可能来自本次遍历或更早的遍历，来自这个 World 或另一个 World。在行的开头清空你要用的东西
+      （<c>list.Clear()</c>）；属于 World 的数据不能在行与行之间留在这里。把它按引用持有的东西存进组件或单例（EECS058），等于把一个线程的内存
+      交给下一个复用它的行。它的内存属于线程：线程结束时释放，而不是 World 释放时。
+      </para>
+      只在传入它的那次调用内有效（ref struct）。
+    </summary>
+    <typeparam name="T">工作值：持有缓冲区的结构体，或 <c>List&lt;int&gt;</c> 这样的类（首次使用时创建：<c>scratch.Value ??= new()</c>）。</typeparam>
+  </member>
+  <member name="P:EasyEcs.Scratch`1.Value" source="c5c22703cd7f">
+    <summary>这个线程的值，按 <c>ref</c> 返回，是同一线程上一行留下的样子（第一次是 <c>default</c>）。</summary>
+  </member>
+</doc>

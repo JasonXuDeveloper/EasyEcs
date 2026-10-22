@@ -572,6 +572,10 @@ internal static class Symbols
         /// into the singleton when the pass ends: a write of the singleton, once per pass.
         /// </summary>
         Reduction,
+        /// <summary><c>Scratch&lt;T&gt;</c>: the method's working memory on the thread running it, kept between rows and passes.</summary>
+        Scratch,
+        /// <summary><c>Lookup&lt;T&gt;</c>: read-only access to component <c>T</c> of any entity (a read of <c>T</c>).</summary>
+        Lookup,
         /// <summary>
         /// A value the caller passes to the entry point of a [ForEach] method outside a system (<c>ref int dead</c>, a
         /// configuration): any type but a component, a singleton or the framework's own, by value, <c>ref</c> or <c>in</c>.
@@ -588,7 +592,7 @@ internal static class Symbols
         var kind = Classify(p);
         if (kind != ParamKind.Invalid || !outside || p.RefKind is not (RefKind.None or RefKind.Ref or RefKind.In)) return kind;
         var element = SpanElement(p.Type) ?? MaybeElement(p.Type) ?? MutElement(p.Type) ?? p.Type;
-        if (IsA(element, Component) || IsA(element, Singleton)) return ParamKind.Invalid; // a component by value
+        if (IsA(element, Component) || IsA(element, Singleton) || ReduceElement(p.Type) != null) return ParamKind.Invalid; // a component by value
         // A span or other ref struct goes into the job by value: a job holds no ref field to a ref struct.
         if (p.Type.IsRefLikeType && p.RefKind != RefKind.None) return ParamKind.Invalid;
         return Named(p.Type, Entity) || Named(p.Type, EntitySpan) || Named(p.Type, World) ? ParamKind.Invalid : ParamKind.Context;
@@ -762,6 +766,34 @@ internal static class Symbols
         return null;
     }
 
+    /// <summary>
+    /// Why <paramref name="lookup"/>, a <c>Lookup&lt;T&gt;</c> parameter of <paramref name="method"/>, would read rows the
+    /// pass writes (EECS059), or null: another parameter writes T (<c>ref T</c>, <c>Mut&lt;T&gt;</c>, <c>Span&lt;T&gt;</c>,
+    /// or a <c>Maybe&lt;T&gt;</c> the method writes through).
+    /// </summary>
+    public static string? LookupProblem(IMethodSymbol method, IParameterSymbol lookup)
+    {
+        var target = LookupElement(lookup.Type);
+        var body = (method.PartialImplementationPart ?? method).DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() as MethodDeclarationSyntax;
+        foreach (var p in method.Parameters)
+        {
+            var kind = Classify(p, IsRunner(method));
+            bool writes = kind switch
+            {
+                ParamKind.Component => p.RefKind == RefKind.Ref,
+                ParamKind.Mutable => true,
+                ParamKind.ComponentSpan => Named(p.Type.OriginalDefinition, "System.Span<T>"),
+                ParamKind.Optional => !IsReadOnlyMaybe(p.Type) && (body == null || !OnlyReadsValue(body, p.Name)),
+                _ => false,
+            };
+            var written = kind == ParamKind.Optional ? MaybeElement(p.Type) : QueriedComponent(p);
+            if (writes && SymbolEqualityComparer.Default.Equals(written, target))
+                return $"the method writes through parameter '{p.Name}'";
+        }
+
+        return null;
+    }
+
     /// <summary>Why a method's [ForEach(ChunkRows = N)] is invalid (EECS054), or null: N below 0, or set on a method that does not run in parallel.</summary>
     public static string? ChunkRowsProblem(IMethodSymbol method)
     {
@@ -786,6 +818,8 @@ internal static class Symbols
 
     public static ParamKind Classify(IParameterSymbol p)
     {
+        if (ReduceElement(p.Type) is { } reduced) // by ref only: the pass's partial result, which the method writes
+            return p.RefKind == RefKind.Ref && reduced.IsValueType && IsA(reduced, Singleton) ? ParamKind.Reduction : ParamKind.Invalid;
         if (p.RefKind is RefKind.Ref or RefKind.In or RefKind.RefReadOnlyParameter)
             return !p.Type.IsValueType ? ParamKind.Invalid
                 : IsA(p.Type, Component) ? ParamKind.Component
@@ -798,8 +832,9 @@ internal static class Symbols
             return optional.IsValueType && IsA(optional, Component) ? ParamKind.Optional : ParamKind.Invalid;
         if (MutElement(p.Type) is { } mutable)
             return mutable.IsValueType && IsA(mutable, Component) ? ParamKind.Mutable : ParamKind.Invalid;
-        if (ReduceElement(p.Type) is { } reduced)
-            return reduced.IsValueType && IsA(reduced, Singleton) ? ParamKind.Reduction : ParamKind.Invalid;
+        if (ScratchElement(p.Type) != null) return ParamKind.Scratch;
+        if (LookupElement(p.Type) is { } looked)
+            return looked.IsValueType && IsA(looked, Component) ? ParamKind.Lookup : ParamKind.Invalid;
         return Named(p.Type, Entity) ? ParamKind.Entity
             : Named(p.Type, EntitySpan) ? ParamKind.Entities
             : Named(p.Type, World) ? ParamKind.World
@@ -839,6 +874,38 @@ internal static class Symbols
         type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Reduce<T>")
             ? named.TypeArguments[0]
             : null;
+
+    /// <summary>Value type of a <c>Scratch&lt;T&gt;</c>, else null.</summary>
+    public static ITypeSymbol? ScratchElement(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Scratch<T>")
+            ? named.TypeArguments[0]
+            : null;
+
+    /// <summary>Component type of a <c>Lookup&lt;T&gt;</c>, else null.</summary>
+    public static ITypeSymbol? LookupElement(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Lookup<T>")
+            ? named.TypeArguments[0]
+            : null;
+
+    /// <summary>
+    /// The key type of indexed component <paramref name="type"/> (<c>IIndexed&lt;TKey&gt;</c>) when a
+    /// <c>Lookup&lt;T&gt;</c> parameter of it must have its index built before the pass, else null: always for a unique
+    /// index (it exists already: free), and for another when <paramref name="method"/> finds it by key itself
+    /// (<c>lookup.TryFind</c> / <c>Find</c> / <c>Count</c> on the parameter), since building it costs memory and upkeep on every
+    /// write from then on.
+    /// </summary>
+    public static ITypeSymbol? LookupKey(IParameterSymbol lookup, IMethodSymbol method, MethodDeclarationSyntax? syntax)
+    {
+        if (LookupElement(lookup.Type) is not INamedTypeSymbol component) return null;
+        var indexed = component.AllInterfaces.FirstOrDefault(i => Named(i.OriginalDefinition, Indexed));
+        if (indexed == null) return null;
+        if (component.AllInterfaces.Any(i => Named(i.OriginalDefinition, UniqueIndexed))) return indexed.TypeArguments[0];
+        var body = (SyntaxNode?)syntax?.Body ?? syntax?.ExpressionBody;
+        bool byKey = body != null && body.DescendantNodes().OfType<InvocationExpressionSyntax>().Any(call =>
+            call.Expression is MemberAccessExpressionSyntax { Name.Identifier.ValueText: "TryFind" or "Count" or "Find", Expression: IdentifierNameSyntax target }
+            && target.Identifier.ValueText == lookup.Name);
+        return byKey ? indexed.TypeArguments[0] : null;
+    }
 
     /// <summary>The queried component of a parameter: a <c>ref</c> / <c>in</c> component, a span's element or a <c>Mut</c>'s; else null.</summary>
     public static ITypeSymbol? QueriedComponent(IParameterSymbol p) => Classify(p) switch
