@@ -41,8 +41,16 @@ public abstract class SystemCode
     /// <summary>Count <paramref name="entities"/> visited by a [ForEach] pass of <paramref name="system"/> (<see cref="SystemStats.LastEntities"/>).</summary>
     protected static void Visit(EcsSystem system, int entities) => system.Visited += entities;
 
+    /// <summary>
+    /// How each [ForEach] method of the type runs, one line per method in declaration order: "Move: vector (Vector512 or
+    /// Vector&lt;float&gt;), flat", "Spawn: scalar (it takes the Entity)" (<see cref="SystemInfo.Loops"/>).
+    /// </summary>
+    protected virtual string[] Loops => [];
+
     // Protected, not protected internal: generated overrides are then the same in every assembly, friends included.
     internal void Run(EcsSystem system) => Update(system);
+
+    internal string[] Describe() => Loops;
 
     internal void Declare(ref SystemAccess access) => Access(ref access);
 

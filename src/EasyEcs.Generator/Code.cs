@@ -14,6 +14,9 @@ internal static class Code
 
     public static string TypeParams(int n) => List(n, i => $"T{i}");
 
+    /// <summary>A C# string literal of <paramref name="text"/>, quoted and escaped.</summary>
+    public static string Literal(string text) => SymbolDisplay.FormatLiteral(text, true);
+
     public static string Constraints(int n, string indent) =>
         Lines(n, i => $"{indent}where T{i} : struct, IComponent");
 

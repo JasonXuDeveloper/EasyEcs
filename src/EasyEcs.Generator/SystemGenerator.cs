@@ -211,6 +211,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
         }
 
         sb.Append("        }\n\n");
+        // How each method runs (SystemInfo.Loops): one array for the type, made once.
+        sb.Append($"        private static readonly string[] __loops = [{string.Join(", ", model.Methods.Select(m => Code.Literal(m.Describe())))}];\n\n");
+        sb.Append("        protected override string[] Loops => __loops;\n\n");
         EmitAccess(sb, model);
         sb.Append("    }\n");
         if (owner.TypeParameters.Length > 0) return; // registered by EmitGenericRegistration: a module initializer is never generic
@@ -616,6 +619,25 @@ public sealed class SystemGenerator : IIncrementalGenerator
         /// <summary>The method's vector loop (<see cref="Kernel"/>), or null: it runs one row at a time.</summary>
         public Kernel.Code? Simd { get; init; }
 
+        /// <summary>Why it runs one row at a time (Kernel.Vectorize's reason, EECS055's), when it does.</summary>
+        public string Scalar { get; init; } = "";
+
+        /// <summary>
+        /// One line on the loop the method got (SystemInfo.Loops): "vector" with its forms (flat, interleaved fields,
+        /// masked words, parallel chunks, a cold branch), or "scalar" and why.
+        /// </summary>
+        public string Describe()
+        {
+            if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")})";
+            var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Columns[0]}>)" };
+            if (simd.Flat != null) parts.Add("flat");
+            else if (simd.Interleaves) parts.Add("interleaved fields");
+            if (Parallel) parts.Add("in parallel chunks");
+            else parts.Add(simd.Size < 4 ? "masked words scalar" : "masked words vector");
+            if (simd.Cold != null) parts.Add($"cold branch ({simd.Cold})");
+            return $"{Name}: {string.Join(", ", parts)}";
+        }
+
         /// <summary>
         /// Changes no structure (on one thread) and takes a Maybe, a Mut, a Reduce or a caller's value by ref: its job walks
         /// runs of rows, finding each optional column once per run (a presence bit per row), stamping a Mut's writes by row
@@ -728,7 +750,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                         Symbols.ParamKind.Singleton => $"s{i}",
                         Symbols.ParamKind.Reduction => $"l{i}", // the run's partial result, a local of the batch job
                         _ => $"x{i}",
-                    }, ct, out _),
+                    }, ct, out var scalar),
+                    Scalar = scalar ?? "",
                 };
         }
     }

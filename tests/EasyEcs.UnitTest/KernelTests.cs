@@ -515,6 +515,23 @@ public static class ColdKernels
     }
 }
 
+/// <summary>A system of three methods for the schedule's loop lines: a flat vector loop, a cold branch, one scalar.</summary>
+public class LoopsSystem : EcsSystem
+{
+    [ForEach]
+    static void Move(ref Place2 position, in Pace2 velocity) => position = new Place2(position.Value + velocity.Value);
+
+    [ForEach]
+    static void Hurt(ref Heat health, in Level damage)
+    {
+        if (health.Value < damage.Value) Console.WriteLine(health.Value);
+        health.Value -= damage.Value;
+    }
+
+    [ForEach]
+    static void Mark(Entity entity, ref Heat health) => health.Value = entity.Id.Index;
+}
+
 // Narrow lanes: C# computes on bytes and shorts in int; the vector loop follows the int's low bits and its range.
 public record struct Shade : IComponent { public byte V; }
 public record struct Tone : IComponent { public byte V; }
@@ -770,6 +787,22 @@ public class KernelTests
         for (int i = 0; i < count; i++) ColdKernels.Census(in ranks[i], ref headcount);
         Assert.That(census.GetSingleton<Headcount>(), Is.EqualTo(headcount.Value));
         Assert.That(calls, Is.EqualTo(ColdKernels.Calls.ToArray()));
+    }
+
+    /// <summary>DescribeSchedule names the loop each [ForEach] method got, and why a scalar one is scalar (EECS055's reason).</summary>
+    [Test]
+    public void TheScheduleNamesEachMethodsLoop()
+    {
+        using var world = new World();
+        world.AddSystem<LoopsSystem>();
+        var system = world.DescribeSchedule().Groups[0].Stages[0].Systems[0];
+        Assert.That(system.Loops, Is.EqualTo(new[]
+        {
+            "Move: vector (Vector512 or Vector<float>), flat, masked words vector",
+            "Hurt: vector (Vector512 or Vector<float>), masked words vector, cold branch (it calls Console.WriteLine)",
+            "Mark: scalar (it takes the Entity)",
+        }));
+        Assert.That(world.DescribeSchedule().ToString(), Does.Contain("      loop Mark: scalar (it takes the Entity)\n"));
     }
 
     private delegate void NarrowRow<TO, TA, TB>(ref TO o, in TA a, in TB b);

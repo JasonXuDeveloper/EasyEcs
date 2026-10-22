@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace EasyEcs;
 
@@ -103,6 +104,14 @@ public abstract class EcsSystem
 
     // The generated code of the system's type and its base types, base first (SystemCode.For).
     private SystemCode[] _code = [];
+
+    /// <summary>How each [ForEach] method of the system's type (and its base types, base first) runs (<see cref="SystemInfo.Loops"/>).</summary>
+    internal string[] Loops()
+    {
+        var loops = new List<string>();
+        foreach (var code in _code) loops.AddRange(code.Describe());
+        return loops.ToArray();
+    }
 
     // Entry points used by World (hooks stay protected so user overrides are plain `protected override`).
     internal void Create() => OnCreate();

@@ -52,8 +52,10 @@ internal sealed partial class Kernel
     /// The loop over flat lanes when the method treats each field alike (<see cref="FlatCode"/>), else null: words of rows
     /// of which only some pass still take the loop above.
     /// </param>
+    /// <param name="Cold">The reason of the first cold branch (what the loop cannot express under a condition it computes:
+    /// a vector with a lane that takes it runs the method), or null.</param>
     internal sealed record Code(EquatableArray<string> Columns, string Setup, string Body, string Stores, string MaskedBody,
-        string MaskedStores, string Restore, string Fold, int Size, string Mask, bool Interleaves, bool Bails, FlatCode? Flat);
+        string MaskedStores, string Restore, string Fold, int Size, string Mask, bool Interleaves, bool Bails, FlatCode? Flat, string? Cold = null);
 
     /// <summary>
     /// A loop that reads the columns as flat arrays of lanes, <paramref name="Fields"/> lanes per row (a row's fields are
@@ -415,7 +417,7 @@ internal sealed partial class Kernel
             throw new Unsupported($"component {several[0].ContainingType.Name} has {several.Length} fields of {several[0].Type.ToDisplayString()}: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field");
         return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
             kernel._setup.ToString(), prologue + live + loads + hold + kernel._body, stores.ToString(), prologue + maskedLive + loads + kept + held + kernel._body, masked.ToString(),
-            restore.ToString(), fold.ToString(), kernel._size, kernel._mask, kernel._components.Values.Any(c => c.Fields.Length > 1), kernel._bails, flat);
+            restore.ToString(), fold.ToString(), kernel._size, kernel._mask, kernel._components.Values.Any(c => c.Fields.Length > 1), kernel._bails, flat, kernel._cold);
     }
 
     /// <summary>
