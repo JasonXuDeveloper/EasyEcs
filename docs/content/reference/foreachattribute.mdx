@@ -42,6 +42,14 @@ public int ChunkRows { get; init; }
 
 With [`ForEachAttribute.Parallel`](/en/docs/reference/foreachattribute#parallel): the rows a thread takes at a time, rounded up to a multiple of 64 (OpenMP's `schedule(dynamic, n)`). By default a chunk holds about a quarter of each thread's share of the rows, and at least 1,024 (4,096 when the method writes a tracked component), so a pass over a few hundred heavy rows (a chunk of terrain each, a path search each) runs on one thread; set the rows one thread should take at a time when one row costs microseconds. Smaller chunks cost a claim each, and chunks that share a 4,096-row block of change ticks share its summary (atomically). Default 0: chosen from the row count. Not without [`ForEachAttribute.Parallel`](/en/docs/reference/foreachattribute#parallel) and not below 0 (EECS054).
 
+### `FloatMode` [#floatmode]
+
+```csharp
+public FloatMode FloatMode { get; init; }
+```
+
+What a vector loop may change in floating-point results. [`FloatMode.Exact`](/en/docs/reference/floatmode#exact) keeps every result the method's bit for bit, so a float sum into a [`Reduce`](/en/docs/reference/reduce) stays one row at a time (EECS055 says so): the lanes of a vector loop each add their own rows, in another order. [`FloatMode.Fast`](/en/docs/reference/floatmode#fast) accepts that order: the sum of the same rows, rounded differently (not bit for bit the method's, and not the same across vector widths). Integer sums and the Min / Max of any lane type are exact either way. Default [`FloatMode.Exact`](/en/docs/reference/floatmode#exact).
+
 ### `Parallel` [#parallel]
 
 ```csharp

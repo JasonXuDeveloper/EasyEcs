@@ -273,6 +273,12 @@ public class CodeFixTests
         "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
         + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, QueryFilter.Create().Without<Q>()); return s.Total; } }",
         "w.ForEach<P, Sum>(ref s, QueryFilter.Create().Without<Q>());")]
+    [TestCase("EECS071", "Draw from EntityRandom",
+        "public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p) => p.V = System.Random.Shared.Next(1, 7); }",
+        "static void A(ref P p, Entity entity, in EntityRandom random) => p.V = random.Range(entity.Id, 0, 1, 7); }")]
+    [TestCase("EECS071", "Draw from EntityRandom",
+        "public class S : EcsSystem { [ForEach] static void A(ref Q q, Entity e, in EntityRandom r) => q.V = r.Range(e.Id, 0, 0, 9) + (System.Random.Shared.NextSingle() < 0.5f ? 1 : 0); }",
+        "q.V = r.Range(e.Id, 0, 0, 9) + (r.Float(e.Id, 1) < 0.5f ? 1 : 0); }")]
     [TestCase("EECS062", "Make it partial",
         "public static class Outer { internal class Mid { public struct Census : ISingletonComponent { [Sum] public int Alive; } } }",
         "public static partial class Outer { internal partial class Mid { public partial struct Census")]
@@ -370,6 +376,8 @@ public class CodeFixTests
     [TestCase("EECS027", "public static class R { [ForEach] public static void A(Entity e, ref P p) => p.V = e.Get<Q>().V; public static void Call(Entity e) { P p = default; A(e, ref p); } }")] // a caller
     [TestCase("EECS061", "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
                          + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, default, 64); return s.Total; } }")] // its chunk size: chosen for threads
+    [TestCase("EECS071", "public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V = (int)System.Random.Shared.NextInt64(9); }")] // no EntityRandom twin
+    [TestCase("EECS071", "public class S : EcsSystem { [ForEach] static void A(System.Span<P> p) => p[0].V = System.Random.Shared.Next(); }")] // a batch method: no Entity
     public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)
     {
         var document = Document(Data + source);

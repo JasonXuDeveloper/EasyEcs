@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.Emit`1" source="991795f936cc">
+    <summary>
+      一次 <c>[ForEach]</c> 遍历追加记录的目标（Unity 的 <c>NativeStream</c>，GPU 的流压缩），按值传入：
+      <c>static void Strike(in Attack attack, in Target target, Emit&lt;Hit&gt; hits) =&gt; hits.Add(new Hit(target.Id,
+      attack.Power));</c>。并行遍历的每个块（单线程时是整次遍历）追加到自己的列表，每条记录不加锁，也没有原子操作；遍历结束时，
+      这些列表按块的顺序（也就是行的顺序）追加到 World 的 <see cref="T:EasyEcs.Emitted`1" /> 单例（没有就先添加）：
+      每次运行、任何线程数下记录的顺序都一样，就是同一个方法 <c>Parallel = false</c> 时的顺序。
+      <para>
+      遍历是追加，不是替换：一次更新里可以有几个系统依次产出 <typeparamref name="T" />（近战和法术都产出伤害），
+      由应用这些记录的系统清空它们（<c>world.GetSingleton&lt;Emitted&lt;Hit&gt;&gt;().Items.Clear()</c>），所以没有记录会被应用两次。
+      产出记录的方法不能同时接收 <see cref="T:EasyEcs.Emitted`1" />（EECS070）：并行遍历的记录要到遍历结束才进入它。
+      </para>
+      系统写 <see cref="T:EasyEcs.Emitted`1" />（每次遍历一次，和 <see cref="T:EasyEcs.Reduce`1" /> 写它的单例一样）。
+      各块的列表来自它们自己的池，保持在一个块用过的最大长度，所以稳定的遍历零分配。只在传入它的这次调用里有效（ref struct）。
+    </summary>
+    <typeparam name="T">记录：普通数据，比如一次命中的目标和伤害。</typeparam>
+  </member>
+  <member name="M:EasyEcs.Emit`1.Add(`0@)" source="d73663532f7c">
+    <summary>追加 <paramref name="record" />。均摊 O(1)；只有这个块的列表超过它用过的最大长度时才分配。</summary>
+  </member>
+  <member name="M:EasyEcs.Emit`1.AddRange(System.ReadOnlySpan{`0})" source="b511038b5a29">
+    <summary>追加 <paramref name="records" />。O(records)。</summary>
+  </member>
+</doc>

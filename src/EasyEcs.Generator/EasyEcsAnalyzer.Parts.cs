@@ -182,6 +182,7 @@ public sealed partial class EasyEcsAnalyzer
             var type = (INamedTypeSymbol)context.Symbol;
             if (type is { TypeKind: TypeKind.Struct, IsUnmanagedType: false } && type.Locations.Any(l => l.IsInSource)
                 && !Symbols.Named(type.OriginalDefinition, Symbols.DynamicBuffer) // its elements are written one by one
+                && !Symbols.Implements(type, "EasyEcs.IBuffer") // a singleton holding a list (Emitted<T>): written as one too
                 && (Symbols.Implements(type, Symbols.Component) || Symbols.Implements(type, Symbols.Singleton))
                 && !type.GetAttributes().Any(a => a.AttributeClass is { Name: "NinoTypeAttribute" } || Symbols.Named(a.AttributeClass, Symbols.NotSavedAttribute)))
                 unwritten.Enqueue(type);

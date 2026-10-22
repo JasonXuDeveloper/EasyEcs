@@ -654,6 +654,11 @@ internal static class Symbols
         /// <summary><c>Lookup&lt;T&gt;</c>: read-only access to component <c>T</c> of any entity (a read of <c>T</c>).</summary>
         Lookup,
         /// <summary>
+        /// <c>Emit&lt;T&gt;</c>: records appended to a list per chunk of rows (per pass on one thread), joined in chunk order
+        /// into singleton <c>Emitted&lt;T&gt;</c> when the pass ends: a write of the singleton, once per pass.
+        /// </summary>
+        Emit,
+        /// <summary>
         /// A value the caller passes to the entry point of a [ForEach] method outside a system (<c>ref int dead</c>, a
         /// configuration): any type but a component, a singleton or the framework's own, by value, <c>ref</c> or <c>in</c>.
         /// </summary>
@@ -913,6 +918,7 @@ internal static class Symbols
         if (MutElement(p.Type) is { } mutable)
             return mutable.IsValueType && IsA(mutable, Component) ? ParamKind.Mutable : ParamKind.Invalid;
         if (ScratchElement(p.Type) != null) return ParamKind.Scratch;
+        if (EmitElement(p.Type) is { } emitted) return emitted.IsValueType ? ParamKind.Emit : ParamKind.Invalid;
         if (LookupElement(p.Type) is { } looked)
             return looked.IsValueType && IsA(looked, Component) ? ParamKind.Lookup : ParamKind.Invalid;
         return Named(p.Type, Entity) ? ParamKind.Entity
@@ -960,6 +966,40 @@ internal static class Symbols
         type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Scratch<T>")
             ? named.TypeArguments[0]
             : null;
+
+    /// <summary>Record type of an <c>Emit&lt;T&gt;</c>, else null.</summary>
+    public static ITypeSymbol? EmitElement(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Emit<T>")
+            ? named.TypeArguments[0]
+            : null;
+
+    /// <summary>Record type of an <c>Emitted&lt;T&gt;</c> singleton, else null.</summary>
+    public static ITypeSymbol? EmittedElement(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Emitted<T>")
+            ? named.TypeArguments[0]
+            : null;
+
+    /// <summary>
+    /// Why <paramref name="emit"/>, an <c>Emit&lt;T&gt;</c> parameter of <paramref name="method"/>, would read or reorder
+    /// its records (EECS070), or null: the method takes <c>Emitted&lt;T&gt;</c> (a parallel pass's records reach it only
+    /// when the pass ends, a pass on one thread's as they are added), or emits <c>T</c> in an earlier parameter too (on one
+    /// thread both append to one list, row by row; in parallel each chunk's lists are joined one after the other).
+    /// </summary>
+    public static string? EmitProblem(IMethodSymbol method, IParameterSymbol emit)
+    {
+        var record = EmitElement(emit.Type);
+        foreach (var p in method.Parameters)
+        {
+            if (SymbolEqualityComparer.Default.Equals(p, emit)) break;
+            if (EmitElement(p.Type) is { } other && SymbolEqualityComparer.Default.Equals(other, record))
+                return $"parameter '{p.Name}' emits it too, and the order of their records would depend on whether the pass runs in parallel";
+        }
+
+        foreach (var p in method.Parameters)
+            if (EmittedElement(p.Type) is { } read && SymbolEqualityComparer.Default.Equals(read, record))
+                return $"parameter '{p.Name}' reads the records, which the pass is still appending to";
+        return null;
+    }
 
     /// <summary>Component type of a <c>Lookup&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? LookupElement(ITypeSymbol type) =>

@@ -524,6 +524,24 @@ public void ForEachEntityParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref 
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
 
+### `ForEachMasked` [#foreachmasked]
+
+```csharp
+public void ForEachMasked<T1, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where TJob : struct, IForEachMasked<T1>, allows ref struct;
+public void ForEachMasked<T1, T2, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, T9>, allows ref struct;
+```
+
+组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
+
+用于还接收"只有部分行通过"的字的 job 的 [`World.ForEachBatch`](/zh/docs/reference/world#foreachbatch)：在需要逐行检查的表里，行全部通过的字并入前面几个字的那一段，部分行通过的字整个交给 job，通过的行以位的形式给出。零分配。
+
 ### `ForEachParallel` [#foreachparallel]
 
 ```csharp
@@ -543,6 +561,36 @@ public void ForEachParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob j
 多线程版的 [`World.ForEach`](/zh/docs/reference/world#foreach)：匹配的行切成块（每个线程大约四块，行数是 64 的倍数，最多 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 行；或者把 `chunkRows` 向上取整到 64，用于行少而重的情况：`[ForEach(Parallel = true, ChunkRows = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个线程池线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+
+### `ForParallel` [#forparallel]
+
+```csharp
+public void ForParallel<TJob>(int count, ref TJob job, int chunkRows = 0) where TJob : struct, IForRange;
+```
+
+在多个线程上对下标 0 到 `count` - 1 运行 `job`：区间切成块（每个线程约四块，64 个下标的整数倍，介于 1,024 和 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 之间；少量重的元素时用 `chunkRows` 向上取整到 64），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个线程池线程一次认领一块，每块运行 job 的一份副本（Execute 写进它字段的内容不会合并回来）。和并行 `[ForEach]` 遍历是同一个运行器：只有帮手线程划算时才唤醒它们，少于两块或运行器已经在忙时在调用线程上运行。job 不能改变 World 的结构（结构变更会抛异常），也不能写另一个块读的数据。所有者线程。每种 job 类型第一次调用之后零分配。
+
+**异常**
+
+- `ArgumentOutOfRangeException`：`count` 为负数。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.ForParallel<TJob>(count, ref job, chunkRows)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+- `ForParallel<T, TJob>(ref buffer, ref job, chunkRows)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+
+### `ForParallel` [#forparallel-2]
+
+```csharp
+public void ForParallel<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkRows = 0) where TJob : struct, IForSpan<T>;
+```
+
+对 `items`（一个 [`Emitted`](/zh/docs/reference/emitted) 单例的记录、某个单例的缓冲区）的元素运行 [`World.ForParallel`](/zh/docs/reference/world#forparallel)：每个块以 span 拿到自己的元素，可以写。调用运行期间列表不能改变。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.ForParallel<TJob>(count, ref job, chunkRows)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+- `ForParallel<T, TJob>(ref buffer, ref job, chunkRows)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
 
 ### `GetEntity` [#getentity]
 
