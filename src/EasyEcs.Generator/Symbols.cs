@@ -806,7 +806,7 @@ internal static class Symbols
         bool outside = IsRunner(method);
         if (outside && (!method.IsStatic || EntryPointCollides(method))) return false;
         if (method.IsGenericMethod && !outside || Unnameable(method) != null) return false; // a system's method gets no type arguments
-        if (SlicesProblem(method) != null) return false;
+        if (SlicesProblem(method) != null || ChunkRowsProblem(method) != null) return false;
         int components = 0;
         foreach (var p in method.Parameters)
         {

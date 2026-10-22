@@ -304,6 +304,16 @@ public class GeneratorTests
         Assert.That(generated, Does.Not.Contain("GeneratedUpdate").And.Not.Contain("GeneratedAccess"));
     }
 
+    // Skipped by the generator == reported: a method the analyzer rejects gets no job.
+    [TestCase("[ForEach(Slices = 0)] static void A(ref P p) { }")]                                    // EECS035
+    [TestCase("[ForEach(ChunkRows = 64)] static void A(ref P p) { }")]                                // EECS054: not parallel
+    [TestCase("[ForEach(Parallel = true, ChunkRows = -1)] static void A(ref P p) { }")]               // EECS054: below 0
+    public void RejectedMethodsGetNoJob(string members)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"public class S : EcsSystem {{ {members} }}"), out var output, out _);
+        Assert.That(output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")), Is.Empty);
+    }
+
     [TestCase("[ForEach] static void A(Entity e, in P p) { if (e.Has<Q>()) _ = e.Id; }", true, "")]
     [TestCase("[ForEach] static void A(Entity e, ref P p, in Q q) => e.Remove<Q>();", false, "WriteMask => 1;")]
     [TestCase("[ForEach] static void A(Entity e, in P p) => Use(e); static void Use(Entity e) { }", false, "WriteMask => 0;")]
