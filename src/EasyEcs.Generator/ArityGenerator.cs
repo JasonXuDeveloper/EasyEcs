@@ -518,31 +518,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             var archetype = archetypes[ai];
                             var rows = new RowFilter(match.Filters[ai], filter.Tick);
                             var (first, count) = filter.Rows(ai, archetype.Count); // all rows, or a slice's
-                            int mode = rows.Mode(archetype);
-                            if (archetype.AliveCount == 0 || mode == RowFilter.None || first >= count) continue;
-                            ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
-                {{Lines(n, i => $"            ref T{i} r{i} = ref archetype.Base<T{i}>(b{i});")}}
-                            if (mode == RowFilter.Test)
-                            {
-                                // Rows without some component: runs of rows whose presence bits pass.
-                                for (int start = first; rows.NextRun(archetype, ref start, count, out int length); start += length)
-                                {
-                {{BatchRun(n, "                    ", "start", "length")}}
-                                }
-
-                                continue;
-                            }
-
-                            if (archetype.Count == archetype.AliveCount)
-                            {
-                {{BatchRun(n, "                ", "first", "count - first")}}
-                                continue;
-                            }
-
-                            for (int start = first; archetype.NextRun(ref start, count, out int length); start += length)
-                            {
-                {{BatchRun(n, "                ", "start", "length")}}
-                            }
+                            if (archetype.AliveCount == 0 || rows.Mode(archetype) == RowFilter.None || first >= count) continue;
+                            ForEachBatchChunk<{{tps}}, TJob>(ref job, archetype, rows, first, count, {{bits}});
                         }
                     }
 
@@ -632,27 +609,19 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 continue;
                             }
 
-                            if (archetype.Count == archetype.AliveCount)
-                            {
-                {{BatchRun(n, "                ", "first", "count - first")}}
-                                continue;
-                            }
-
-                            for (int start = first; archetype.NextRun(ref start, count, out int length); start += length)
-                            {
-                {{BatchRun(n, "                ", "start", "length")}}
-                            }
+                            ForEachBatchChunk<{{tps}}, TJob>(ref job, archetype, rows, first, count, {{bits}}); // every row passes: runs
                         }
                     }
 
                 {{ParallelLoop(n, "ForEachBatch", "IForEachBatch")}}
                     /// <summary>
-                    /// One chunk of a parallel batch pass: the runs of rows [<paramref name="start"/>, <paramref name="end"/>)
-                    /// of a table, as <c>Batches</c> walks a whole table (a dense chunk is a single call).
+                    /// The runs of rows [<paramref name="start"/>, <paramref name="end"/>) of a table, a nonempty range of a table
+                    /// some row of which may pass: a table of <c>Batches</c>, a table of <c>Masked</c> whose rows all pass, a chunk
+                    /// of a parallel batch pass. A dense range is a single call.
                     /// </summary>
                     private void ForEachBatchChunk<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int start, int end, {{List(n, i => $"ushort b{i}")}})
                 {{cons}}
-                        where TJob : struct, IForEachBatch<{{tps}}>
+                        where TJob : struct, IForEachBatch<{{tps}}>, allows ref struct
                     {
                         ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
                 {{Lines(n, i => $"        ref T{i} r{i} = ref archetype.Base<T{i}>(b{i});")}}
@@ -1312,19 +1281,15 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
                     var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
                     int chunks = work.Cut(this, match, in filter, chunkRows, ref job, {{bits}});
-                    Gate.FreezeParallel(); // the chunks may run on several threads: a structural change throws
                     try
                     {
-                        if (chunks < 2 || !TryRunChunks(work, chunks))
-                            for (int i = 0; i < chunks; i++) work.Run(i);
+                        RunChunks(work, chunks);
+                        if (TJob.Merges) work.MergeInto(ref job, chunks); // after the run: the helpers are done with the copies
                     }
                     finally
                     {
-                        Gate.ThawParallel();
+                        work.Release();
                     }
-
-                    if (TJob.Merges) work.MergeInto(ref job, chunks); // after the gate: the helpers are done with the copies
-                    work.Release();
                 }
 
                 /// <summary>The chunks of one <see cref="{{name}}Parallel{{{tps}}, TJob}"/> call: (table, first row) pairs.</summary>

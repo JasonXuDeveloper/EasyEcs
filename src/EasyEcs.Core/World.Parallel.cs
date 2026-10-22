@@ -92,11 +92,30 @@ public sealed partial class World
     }
 
     /// <summary>
+    /// Run the chunks 0 .. <paramref name="chunks"/> - 1 of <paramref name="work"/> (a parallel pass, a
+    /// <see cref="ForParallel{TJob}"/>), structural changes refused meanwhile: on the chunk runner, or on this thread
+    /// when there are fewer than two or the runner cannot take them (<see cref="TryRunChunks"/>).
+    /// </summary>
+    internal void RunChunks(ParallelWork work, int chunks)
+    {
+        Gate.FreezeParallel(); // the chunks may run on several threads: a structural change throws
+        try
+        {
+            if (chunks < 2 || !TryRunChunks(work, chunks))
+                for (int i = 0; i < chunks; i++) work.Run(i);
+        }
+        finally
+        {
+            Gate.ThawParallel();
+        }
+    }
+
+    /// <summary>
     /// Run <paramref name="work"/> items 0 .. <paramref name="count"/> - 1 on the chunk runner. False when it is busy (a
     /// parallel pass inside another one's item, or two systems of a stage at once) or the world allows one thread
     /// only: the caller then runs the items itself.
     /// </summary>
-    internal bool TryRunChunks(ParallelWork work, int count)
+    private bool TryRunChunks(ParallelWork work, int count)
     {
         int helpers = Helpers;
         if (helpers == 0) return false;

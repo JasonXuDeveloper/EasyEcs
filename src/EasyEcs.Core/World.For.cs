@@ -67,15 +67,12 @@ public sealed partial class World
         work.Count = count;
         work.Size = size;
         int chunks = (int)((count + (long)size - 1) / size);
-        Gate.FreezeParallel(); // the chunks may run on several threads: a structural change throws
         try
         {
-            if (chunks < 2 || !TryRunChunks(work, chunks))
-                for (int i = 0; i < chunks; i++) work.Run(i);
+            RunChunks(work, chunks);
         }
         finally
         {
-            Gate.ThawParallel();
             work.Release();
         }
     }
