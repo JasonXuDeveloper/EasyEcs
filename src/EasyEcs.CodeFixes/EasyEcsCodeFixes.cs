@@ -25,7 +25,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
-            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069",
+            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071",
             "EECS080", "EECS081", "EECS082", "EECS084");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
@@ -85,9 +85,9 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                         root, type, Scheduled(type, property, diagnostic.AdditionalLocations, schedule));
                     break;
                 case "EECS084" when kind == "Consume" && node.FirstAncestorOrSelf<ExpressionStatementSyntax>() is { Parent: BlockSyntax { Parent: MethodDeclarationSyntax method } } destroy:
-                    diagnostic.Properties.TryGetValue("DropEntity", out var entity);
-                    if (entity != null && await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false)) entity = null;
-                    Register(context, diagnostic, "Consume its rows with [Consume]", root, method, Consumed(method, destroy, entity));
+                    diagnostic.Properties.TryGetValue("DropEntity", out var dropEntity);
+                    if (dropEntity != null && await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false)) dropEntity = null;
+                    Register(context, diagnostic, "Consume its rows with [Consume]", root, method, Consumed(method, destroy, dropEntity));
                     break;
                 case "EECS080" when kind == "ForEntity":
                     context.RegisterCodeFix(CodeAction.Create("Write it as a [ForEntity] method",
@@ -171,6 +171,14 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     Register(context, diagnostic, "Remove ChunkRows", root, list,
                         list.Arguments.Count == 1 ? null : list.RemoveNode(chunks, SyntaxRemoveOptions.KeepNoTrivia));
                     break;
+                case "EECS071" when kind == "Random" && diagnostic.Properties.TryGetValue("Text", out var draw) && draw != null
+                                    && node.FirstAncestorOrSelf<InvocationExpressionSyntax>() is { } call
+                                    && call.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
+                                    && !await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false):
+                    diagnostic.Properties.TryGetValue("Random", out var rng);
+                    diagnostic.Properties.TryGetValue("Entity", out var entity);
+                    Register(context, diagnostic, "Draw from EntityRandom", root, method, FromRandom(method, call, draw, rng, entity));
+                    break;
                 case "EECS062" when node.FirstAncestorOrSelf<TypeDeclarationSyntax>() is { } type
                                     && !type.AncestorsAndSelf().OfType<TypeDeclarationSyntax>().Any(t => t.Modifiers.Any(SyntaxKind.FileKeyword)):
                     context.RegisterCodeFix(CodeAction.Create("Make it partial", _ => Task.FromResult(context.Document.WithSyntaxRoot(Partial(root, type))),
@@ -197,6 +205,28 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// EECS071: the draw from System.Random becomes the analyzer's EntityRandom draw (<paramref name="draw"/>), and the method
+    /// gets the parameters it names: <c>in EntityRandom</c> <paramref name="rng"/> and <c>Entity</c> <paramref name="entity"/>
+    /// (null: the method has it).
+    /// </summary>
+    private static MethodDeclarationSyntax FromRandom(MethodDeclarationSyntax method, InvocationExpressionSyntax call, string draw, string? rng, string? entity)
+    {
+        var updated = method.ReplaceNode(call, SyntaxFactory.ParseExpression(draw).WithTriviaFrom(call));
+        var added = new System.Collections.Generic.List<ParameterSyntax>();
+        if (entity != null) added.Add(SyntaxFactory.Parameter(SyntaxFactory.Identifier(entity)).WithType(SyntaxFactory.ParseTypeName("Entity ")));
+        if (rng != null)
+            added.Add(SyntaxFactory.Parameter(SyntaxFactory.Identifier(rng)).WithType(SyntaxFactory.ParseTypeName("EntityRandom "))
+                .WithModifiers(SyntaxFactory.TokenList(SyntaxFactory.Token(SyntaxKind.InKeyword).WithTrailingTrivia(SyntaxFactory.Space))));
+        if (added.Count == 0) return updated;
+        var list = updated.ParameterList;
+        var parameters = list.Parameters;
+        foreach (var parameter in added)
+            parameters = parameters.Count == 0 ? parameters.Add(parameter)
+                : parameters.Add(parameter.WithLeadingTrivia(SyntaxFactory.Space));
+        return updated.WithParameterList(list.WithParameters(parameters));
     }
 
     /// <summary>

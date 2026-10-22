@@ -43,12 +43,24 @@ public sealed partial class World
     /// </summary>
     internal int ChunkRows(Archetype[] tables, bool stamps, int slices = 0, int chunkRows = 0)
     {
-        if (chunkRows > 0) return (int)Math.Min((chunkRows + 63L) & ~63L, int.MaxValue & ~63);
+        if (chunkRows > 0) return ChunkRows(0, chunkRows);
         long rows = 0;
         for (int i = 0; i < tables.Length; i++) rows += tables[i].Count;
         if (slices > 1) rows /= slices; // a sliced pass visits about 1 / slices of them
+        if (!stamps) return ChunkRows(rows, 0);
         long share = rows / ((Helpers + 1) * 4L);
-        if (stamps) return (int)Math.Clamp((share + 4095) & ~4095L, 4096, ParallelChunkRows);
+        return (int)Math.Clamp((share + 4095) & ~4095L, 4096, ParallelChunkRows);
+    }
+
+    /// <summary>
+    /// Items per chunk for <paramref name="items"/> items (rows of a pass, elements of <see cref="ForParallel{TJob}"/>):
+    /// <paramref name="chunkRows"/> rounded up to 64 when given, else about four chunks per thread, a multiple of 64
+    /// between 1,024 and <see cref="ParallelChunkRows"/>.
+    /// </summary>
+    private int ChunkRows(long items, int chunkRows)
+    {
+        if (chunkRows > 0) return (int)Math.Min((chunkRows + 63L) & ~63L, int.MaxValue & ~63);
+        long share = items / ((Helpers + 1) * 4L);
         return (int)Math.Clamp((share + 63) & ~63L, 1024, ParallelChunkRows);
     }
 

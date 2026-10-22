@@ -562,6 +562,36 @@ One overload per number of components, 1 to 9 (generated from one template); thi
 
 **Complexity** ([API table](/en/docs/api)): O(M + S), divided over up to `MaxDegreeOfParallelism` threads
 
+### `ForParallel` [#forparallel]
+
+```csharp
+public void ForParallel<TJob>(int count, ref TJob job, int chunkRows = 0) where TJob : struct, IForRange;
+```
+
+Run `job` over indexes 0 to `count` - 1 on several threads: the range is cut into chunks (about four per thread, a multiple of 64 indexes between 1,024 and [`World.ParallelChunkRows`](/en/docs/reference/world#parallelchunkrows); or `chunkRows` rounded up to 64, for few heavy items) that the calling thread and up to [`WorldOptions.MaxDegreeOfParallelism`](/en/docs/reference/worldoptions#maxdegreeofparallelism) - 1 thread-pool threads claim one at a time, each running a copy of the job (what Execute writes into its fields is not merged back). The same runner as the parallel `[ForEach]` passes: helpers are woken only while they pay, and fewer than two chunks, or a runner already busy, run on the calling thread. The job must not change the world's structure (a structural change throws) nor write what another chunk reads. Owner thread. Allocation-free after the first call per job type.
+
+**Exceptions**
+
+- `ArgumentOutOfRangeException`: `count` is negative.
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.ForParallel<TJob>(count, ref job, chunkRows)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
+- `ForParallel<T, TJob>(ref buffer, ref job, chunkRows)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
+
+### `ForParallel` [#forparallel-2]
+
+```csharp
+public void ForParallel<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkRows = 0) where TJob : struct, IForSpan<T>;
+```
+
+[`World.ForParallel`](/en/docs/reference/world#forparallel) over the elements of `items` (an [`Emitted`](/en/docs/reference/emitted) singleton's records, a buffer of a singleton): each chunk gets its elements as a span, which it may write. The list must not change while the call runs.
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.ForParallel<TJob>(count, ref job, chunkRows)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
+- `ForParallel<T, TJob>(ref buffer, ref job, chunkRows)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
+
 ### `GetEntity` [#getentity]
 
 ```csharp

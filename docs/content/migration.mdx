@@ -140,9 +140,30 @@ public class TakeHits : EcsSystem
 [EECS061](/en/docs/guide/analyzer#eecs061) is new: a parallel job's field read after `ForEachParallel` (each chunk
 ran a copy). Its code fix runs the job with `ForEach`; for all cores, use a `Reduce<T>` parameter as above.
 
+[EECS071](/en/docs/guide/analyzer#eecs071) is new: `Random.Shared` or `new Random(...)` in a `[ForEach]` method,
+whose numbers no run repeats. Its code fix draws from an [`EntityRandom`](/en/docs/reference/entityrandom)
+singleton, which the world needs (`world.SetEntityRandom(seed, 0)`, its `Tick` advanced each step):
+
+```csharp tab="4.7" doccheck=expect-EECS071
+public class Wander : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Velocity velocity) => velocity = new Velocity(Random.Shared.NextSingle() * 2 - 1, velocity.Y);
+}
+```
+
+```csharp tab="4.8"
+public class Wander : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Velocity velocity, Entity entity, in EntityRandom random) =>
+        velocity = new Velocity(random.Range(entity.Id, 0, -1f, 1f), velocity.Y);
+}
+```
+
 ### New public type [#v4-8-new-types]
 
-`ReadOnlyMaybe<T>`, `Reduce<T>`, `IReduction<T>`, `Scratch<T>`, `Lookup<T>`, `LookupExtensions`, `IDirectIndexed<TKey>`, `SimdMode`, `Interleaved`, `ForEntityAttribute`, `ConsumeAttribute` and `UpdateIntervalAttribute` are new in `namespace EasyEcs`. A file that imports another namespace with a type of that name gets
+`ReadOnlyMaybe<T>`, `Reduce<T>`, `IReduction<T>`, `Scratch<T>`, `Lookup<T>`, `LookupExtensions`, `IDirectIndexed<TKey>`, `SimdMode`, `Interleaved`, `Emit<T>`, `Emitted<T>`, `EntityRandom`, `IForRange`, `IForSpan<T>`, `ForEntityAttribute`, `ConsumeAttribute` and `UpdateIntervalAttribute` are new in `namespace EasyEcs`. A file that imports another namespace with a type of that name gets
 CS0104 (ambiguous reference): qualify the name, or alias it with a `using` directive.
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]

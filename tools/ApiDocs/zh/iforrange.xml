@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.IForRange" source="cbe90ecd4ea6">
+    <summary>
+      一段下标上的 job，由 <see cref="M:EasyEcs.World.ForParallel``1(System.Int32,``0@,System.Int32)" /> 分块运行（Kokkos 的 <c>RangePolicy</c>，
+      Unity 的 <c>IJobParallelForBatch</c>）：每次调用拿到一个块。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.IForRange.Execute(System.Int32,System.Int32)" source="9a885b62a9a0">
+    <summary>运行下标 <paramref name="start" /> 到 <paramref name="end" /> - 1，一个块。</summary>
+  </member>
+</doc>

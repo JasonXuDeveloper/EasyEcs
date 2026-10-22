@@ -9,7 +9,7 @@ EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/doc
 EECS035、EECS036）除了两条警告都是错误；这两条针对的是能跑、但有代价的写法（EECS017、EECS020）。生成器会跳过无效输入，由分析器报出来，
 所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046、EECS052、EECS053）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
-（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入。声明规则（EECS080 到 EECS085）为手写的代码（单实体 job、销毁所访问实体的遍历）建议能生成它的特性，并拒绝无法生效的特性。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入；EECS070 让 `Emit<T>` 的记录保持行的顺序，EECS071 找出一次运行无法重现的随机数。声明规则（EECS080 到 EECS085）为手写的代码（单实体 job、销毁所访问实体的遍历）建议能生成它的特性，并拒绝无法生效的特性。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -91,6 +91,8 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS059](#eecs059) | 错误 | `Lookup<T>` 读的组件这一遍不写 | |
 | [EECS060](#eecs060) | 警告 | 多线程上运行的代码不写共享内存 | |
 | [EECS061](#eecs061) | 警告 | 遍历之后不读并行 job 的字段 | `ForEach` / `ForEachEntity` |
+| [EECS070](#eecs070) | 错误 | 遍历不读自己产出的记录，同一种记录不产出两次 | |
+| [EECS071](#eecs071) | 警告 | `[ForEach]` 方法抽取可重现的随机数 | `EntityRandom` |
 | [EECS080](#eecs080) | 信息 | 单实体 job 写成 `[ForEntity]` 方法 | 改写成 `[ForEntity]` 方法 |
 | [EECS081](#eecs081) | 错误 | `[ForEntity]` 方法是静态的，只接收单个实体有的东西 | 改成静态方法 |
 | [EECS082](#eecs082) | 错误 | 系统的调度是 `[UpdateInterval(n, Phase = p)]`，不是重写属性 | 改用特性声明 |
@@ -1894,6 +1896,82 @@ public static class Reports
 要在所有核上对大量行求总数，改写成带 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 参数的 `[ForEach(Parallel = true)]` 方法：
 每一块保留一个部分结果，这一遍把它们合并起来。
 
+## EECS070 [#eecs070]
+
+**产出记录的遍历读取或打乱了这些记录。** 错误。没有代码修复。
+
+[`Emit<T>`](/zh/docs/reference/emit) 参数给每一块行一个自己的列表，遍历结束时按块的顺序把这些列表追加到单例 `Emitted<T>`，所以不管多少线程，
+记录都按行的顺序出来。同一个方法再接收 `Emitted<T>`，就是在记录还在追加时读它们：并行时读不到这次遍历的任何记录，单线程时读到一部分。
+同一个 `T` 的第二个 `Emit<T>`，在单线程上和在并行时记录的顺序不同（单线程逐行交错，并行时每块的列表一个接一个）。
+
+```csharp tab="报告" doccheck=expect-EECS070
+public record struct Hit(EntityId Target, int Amount);
+public record struct Aim(EntityId Target) : IComponent;
+
+public class Strike : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(in Aim aim, Emit<Hit> hits, in Emitted<Hit> sent)
+    {
+        if (sent.Items.Count < 100) hits.Add(new Hit(aim.Target, 1));   // 看不到这次遍历的命中
+    }
+}
+```
+
+```csharp tab="修复后"
+public record struct Hit(EntityId Target, int Amount);
+public record struct Aim(EntityId Target) : IComponent;
+
+public class Strike : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(in Aim aim, Emit<Hit> hits) => hits.Add(new Hit(aim.Target, 1));
+}
+
+[UpdateAfter<Strike>]
+public class ApplyHits : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+        foreach (ref readonly var hit in hits.AsReadOnlySpan())
+            if (World.TryGetEntity(hit.Target, out var target)) target.Get<Health>().Value -= hit.Amount;
+        hits.Clear();   // 遍历是追加：由读的一方清空
+    }
+}
+```
+
+在遍历之后的系统里读这些记录，每种记录只通过一个参数产出。
+
+## EECS071 [#eecs071]
+
+**`[ForEach]` 方法无法重现的随机数。** 警告。代码修复：在逐行方法里，把 `NextSingle`、`NextDouble` 和 `Next` 改为从
+[`EntityRandom`](/zh/docs/reference/entityrandom) 抽取（方法没有时加上 `Entity entity` 和 `in EntityRandom random`）。
+
+`Random.Shared` 每次运行的种子都不同，并行遍历中它的数按线程恰好请求的顺序分给各行，所以回放、测试或另一台机器看到的结果不同。
+每行 `new Random()` 会分配，不给种子时用时钟做种子，给了种子又让每一行得到同样的数。`EntityRandom` 是种子、实体、tick 和流的纯函数：
+每次运行、任何线程数下都是同样的数。修复给方法里的每次抽取一个自己的流。
+
+```csharp tab="报告" doccheck=expect-EECS071
+public class Wander : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Velocity velocity) =>
+        velocity = new Velocity(Random.Shared.NextSingle() * 2 - 1, velocity.Y);   // 换一次运行，换一组数
+}
+```
+
+```csharp tab="修复后"
+public class Wander : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Velocity velocity, Entity entity, in EntityRandom random) =>
+        velocity = new Velocity(random.Range(entity.Id, 0, -1f, 1f), velocity.Y);
+}
+```
+
+World 里需要这个单例（`world.SetEntityRandom(seed, 0)`），推进模拟时钟的系统同时推进它的 `Tick`，每一步才会抽到新的数。
+
 ## EECS080 [#eecs080]
 
 **手写的单实体 job。** 建议（信息级别）。代码修复：改写成 `[ForEntity]` 方法，并改掉每一处调用。
@@ -2021,28 +2099,28 @@ public class Regeneration : EcsSystem
 （按它的过滤条件做一次 `DestroyAll`，整张表一起释放），而不是每行一次销毁、留一个空洞。放在条件里或 `return` 之后的销毁不报告。
 
 ```csharp tab="报告" doccheck=expect-EECS084
-public record struct Strike(int Amount, EntityId Target) : IComponent;
+public record struct Impact(int Amount, EntityId Target) : IComponent;
 
-public class ApplyStrikes : EcsSystem
+public class ApplyImpacts : EcsSystem
 {
     [ForEach]
-    static void Apply(Entity hit, in Strike strike, World world)
+    static void Apply(Entity hit, in Impact impact, World world)
     {
-        if (world.TryGetEntity(strike.Target, out var target)) target.Get<Health>().Value -= strike.Amount;
+        if (world.TryGetEntity(impact.Target, out var target)) target.Get<Health>().Value -= impact.Amount;
         hit.Destroy();
     }
 }
 ```
 
 ```csharp tab="修正"
-public record struct Strike(int Amount, EntityId Target) : IComponent;
+public record struct Impact(int Amount, EntityId Target) : IComponent;
 
-public class ApplyStrikes : EcsSystem
+public class ApplyImpacts : EcsSystem
 {
     [ForEach, Consume]
-    static void Apply(in Strike strike, World world)
+    static void Apply(in Impact impact, World world)
     {
-        if (world.TryGetEntity(strike.Target, out var target)) target.Get<Health>().Value -= strike.Amount;
+        if (world.TryGetEntity(impact.Target, out var target)) target.Get<Health>().Value -= impact.Amount;
     }
 }
 ```

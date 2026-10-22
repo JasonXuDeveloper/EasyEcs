@@ -50,6 +50,16 @@ icon: RotateCcwClock
   和[决策](/zh/docs/decisions#d75-lookup)。
 - `world.ForEachBatchParallel<T1..Tn, TJob>(ref job, filter, chunkRows)`：在多个线程上按每块里连续的行段运行 `IForEachBatch` job。见
   [查询](/zh/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel)。
+- `Emit<T>`：按值传入的 `[ForEach]` 参数，用于一次遍历产出的记录（交给后面的系统应用的命中、视野范围内的数据包）：
+  `hits.Add(new Hit(target, power))` 追加到这个块自己的列表，不加锁、无原子操作，遍历结束时这些列表按块的顺序追加到单例 `Emitted<T>`，
+  所以不管多少线程，记录都按行的顺序出来。遍历是追加；应用记录的系统清空它们。规则 [EECS070](/zh/docs/guide/analyzer#eecs070)
+  拒绝同时读 `Emitted<T>` 或把同一种记录产出两次的方法。见[决策](/zh/docs/decisions#d78-emit)。
+- `EntityRandom`：`[ForEach]` 方法（包括并行方法）用的确定性随机数：一个存放种子和 tick 的单例，加上（种子、实体、tick、流）的纯函数：
+  `Bits`、`Float`、`Range`（整数和浮点）和 `Chance`。规则 [EECS071](/zh/docs/guide/analyzer#eecs071)（警告，有改为 `EntityRandom` 的代码修复）
+  报告 `[ForEach]` 方法里的 `Random.Shared` 和 `new Random()`。见[决策](/zh/docs/decisions#d79-entity-random)。
+- `world.ForParallel(count, ref job)` 对一段下标运行 `IForRange` job，`world.ForParallel(ref buffer, ref job)` 对一个列表的元素
+  （`Emitted<T>` 的记录）运行 `IForSpan<T>` job，都在 World 的运行器上、用它的块；EECS060 和 EECS061 也检查这些 job。
+  见[决策](/zh/docs/decisions#d80-for-parallel)。
 - 分析器规则 [EECS060](/zh/docs/guide/analyzer#eecs060)（警告）：并行 `[ForEach]` 方法或 `ForEachParallel` 运行的 job 的 `Execute` 写了所有线程
   共享的内存（静态字段、上下文参数或 job 字段引用的对象），这些写入会竞争。规则 [EECS061](/zh/docs/guide/analyzer#eecs061)（警告，有代码修复）：
   `ForEachParallel` 之后读并行 job 的字段，而它给每块跑一个副本、什么都不合并回来；修复改为在一个线程上运行这个 job。
@@ -104,6 +114,8 @@ icon: RotateCcwClock
   （`[ForEach, With<Dead>] static void Bury(Entity e) => e.Destroy();`）：在 `OnUpdate` 里一次批量调用（`World.DestroyAll<Dead>()`）就能一次改完整张表（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
 - 新的警告 [EECS060](/zh/docs/guide/analyzer#eecs060) 和 [EECS061](/zh/docs/guide/analyzer#eecs061) 报告在共享内存上竞争、或读了遍历从未写回的
   job 字段的并行代码；总数改用 `Reduce<T>` 参数（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
+- 新的警告 [EECS071](/zh/docs/guide/analyzer#eecs071) 报告 `[ForEach]` 方法里的 `Random.Shared` 和 `new Random()`；修复改为从单例
+  `EntityRandom` 抽取（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
 
 - 删掉了 `EcsSystem.UpdateInterval` 和 `UpdatePhase`：在类上声明 `[UpdateInterval(n, Phase = p)]`。重写它们会报
   [EECS082](/zh/docs/guide/analyzer#eecs082)，带代码修复；EECS018 删掉了（[迁移指南](/zh/docs/migration#v4-8-update-interval)）。
