@@ -309,9 +309,12 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 - **A Minecraft-style sample and a Samples section.** [VoxelServer](https://ecs.xgamedev.net/en/docs/samples/voxel-server)
   runs chunks, flowing water, areas of interest, zombies, replication and saves at 20 ticks a second; the
   [Samples](https://ecs.xgamedev.net/en/docs/samples) section of the site walks through every sample.
+- **SIMD without writing it.** A `[ForEach]` method over one-number components runs as a `Vector<T>` loop the
+  generator writes from its body, the way Burst compiles a job, with the same results bit for bit
+  ([vector loops](https://ecs.xgamedev.net/en/docs/guide/systems#vector-loops)).
 - **Few heavy rows on every thread.** `[ForEach(Parallel = true, ChunkRows = 64)]` sets the rows a thread takes at a
   time (OpenMP's `schedule(dynamic, n)`), so a few hundred rows of microseconds each spread over the threads, also
-  when they write tracked components ([threading](https://ecs.xgamedev.net/en/docs/guide/threading#chunk-rows)).
+  when they write tracked components ([threading](https://ecs.xgamedev.net/en/docs/guide/threading#chunk-rows), [decision](https://ecs.xgamedev.net/en/docs/decisions#d67-chunk-rows)).
 - **Change stamps only where a method writes.** EECS053 reports a tracked component taken by `ref` that some path
   leaves unwritten (an early `return`, a write in an `if`), which stamps every visited row; its fix takes it as a
   `Mut<T>` ([analyzer](https://ecs.xgamedev.net/en/docs/guide/analyzer#eecs053)).

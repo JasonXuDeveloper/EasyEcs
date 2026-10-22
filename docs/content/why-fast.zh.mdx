@@ -251,7 +251,7 @@ flowchart TB
 | 变更过滤 | 字摘要一次比 4 个；混合字的行 tick 一条指令比 4 个 |
 | 一段连续行的写入 | 一次向量化填充它们的 tick |
 | 关闭墓碑 | 把行当作 `long` 读，搜索负的 id |
-| 你的系统 | 批量 `[ForEach]` 方法拿到对齐列的 span，可以直接用 `Vector<T>` |
+| 你的系统 | 组件都是单个数值的逐行 `[ForEach]` 方法，会以[生成器写出的 `Vector<T>` 循环](/zh/docs/guide/systems#vector-loops)运行，结果逐位相同；其余情况由批量方法拿到对齐列的 span |
 
 <BenchTable bench="CountBenchmark" />
 
@@ -260,6 +260,8 @@ flowchart TB
   methods="EasyEcs_Iterate2,EasyEcs_Iterate2Simd,Friflo_Iterate2,Friflo_Iterate2Simd"
   title="100,000 个实体的移动：逐实体和向量化的批量方法"
 />
+
+<BenchTable bench="KernelBenchmark" />
 
 ## 并行调度器 [#parallel-runner]
 

@@ -1549,6 +1549,76 @@ unreported ([D46](#d46-mut-stamps-per-write)); batch methods are left out.
 - **`SetIfChanged` in the fix:** it compares, which a write that already knows it changes does not need, and it throws
   for a managed component without `IEquatable<T>`. The fix keeps the method's writes as writes.
 
+## D67. Chunk size for few heavy rows [#d67-chunk-rows]
+
+**Decision.** `[ForEach(Parallel = true, ChunkRows = n)]` (and `chunkRows:` on the parallel calls) sets the rows a
+thread claims at a time, rounded up to 64; without it the runtime keeps choosing (about four chunks per thread, at
+least 1,024 rows, 4,096 when the method writes a tracked component). Chunks of a stamping pass may split a 4,096-row
+block of change ticks: before the pass, the blocks it covers are opened at its tick (`Rest` takes the previous latest,
+`Latest` the pass's tick, `Words` none), and `BlockTicks.Raise` ORs a word into an open block atomically.
+
+**Why.**
+- **Few heavy rows ran on one thread.** The minimum chunk suits many light rows, where a claim costs more than a row.
+  A few hundred rows of microseconds each (VoxelServer's flowing chunks) made one chunk: the other threads idled.
+  The runner already claims chunks through a shared cursor, OpenMP's `schedule(dynamic, n)`; only `n` was fixed.
+- **The 4,096 rows protected one read-modify-write.** Word summaries cover 64 rows, so chunks of multiples of 64 own
+  their words; only the block summary (64 words) was shared, through a plain `Words |= words`. Opening the block
+  first leaves every thread of the pass on the same-tick branch, where the OR can be atomic; readers keep their
+  meaning (the words in `Words` are at `Latest`, the others at most `Rest`). An opened block the pass leaves alone
+  only loses the precision of its previous `Words`: a reader since then visits all its words.
+- **Atomic once per 64 rows.** `Raise` runs on a word's first stamp at a tick, not per row, so the lock prefix is
+  paid once per 64 written rows, by every pass (one code path for the shared and the private case).
+- **A test that catches the race.** `ChunksSplittingBlocksKeepChangeTicksExact` writes every row of 10,000 in chunks
+  of 64, 1,000 times, and counts the `[Changed<T>]` rows after each pass: without opening the blocks it lost a word's
+  rows (9,936 of 10,000) in some runs.
+
+**Considered.**
+- **A smaller default minimum:** light rows (the common case) would pay a claim per few rows; the default stays
+  chosen from the row count, and heavy rows say so.
+- **A lock-free transition inside `Raise`** (compare-and-swap of `Latest`, then the words): three fields cannot move
+  together without a loop or a sentinel; opening the blocks before the pass needs neither.
+- **Per-thread block summaries merged after the pass:** an array per thread and a merge per pass, for what one
+  atomic OR per 64 rows already gives.
+- **Guided scheduling** (chunks that shrink as the pass ends): the adaptive runner and `ChunkRows` cover the cases
+  measured so far.
+
+## D68. Vector loops without opting in [#d68-vector-loops-without-opting-in]
+
+**Decision.** The generator writes a `Vector<T>` loop for every `[ForEach]` method that qualifies
+([vector loops](/en/docs/guide/systems#vector-loops)): static, per entity, not parallel, no `Entity` / `World` /
+`Mut<T>` / `Maybe<T>`, components of one field of one primitive type, a body of arithmetic, comparisons, branches and
+the `Math` functions with an exact vector counterpart. There is no attribute to turn it on or off. The rows after the
+last whole vector, and all rows without a vector unit, run the method itself.
+
+**Why.**
+- **The JIT does not do it.** In .NET 10 the Tier-1 code of `a[i] += b[i]`, `a[i] += b[i] * 0.5f`, a clamp, an int
+  sum and `a[i]++` is scalar (`vaddss`, `vmulss`, compare and branch, `add`, `inc`): bounds checks go, loops are never
+  vectorized. A per-row method stays one row per instruction unless something writes the vector loop.
+- **The same results, so nothing to opt into.** Each lane runs the scalar code's IEEE operations in its order: no
+  reassociation, no fused multiply-add the code did not write, `Vector.Min` / `Max` / `SquareRoot` / `Abs` equal to
+  `Math`'s on NaN, ±0 and infinities, shifts masked as C# masks them. A unit test runs three kernels at 1, 7 and 1,003
+  rows over two tables, with NaN, ±0, infinities and random ints, and compares the bits with the method called row by
+  row. Change ticks and access sets are those of the per-row method. A switch would only let code be slower.
+- **Measured** (`KernelBenchmark`, 100,000 rows, the per-row job against the generated loop): a clamp with a branch on
+  random data 472 µs → 29.4 µs, `h += v * dt` 62.9 µs → 9.9 µs, an int increment 33.2 µs → 8.2 µs; 1,000 rows: 1,372 ns
+  → 309 ns, 485 → 83 ns, 399 → 62 ns. Existing benchmarks whose methods qualify, unchanged: `AccessBenchmark`'s
+  static method 38.7 → 8.0 µs, `SparseBenchmark.PassOverTheRest` 50.2 → 9.3 µs, `MaybeBenchmark.TwoMethods` 35.9 →
+  9.6 µs; `SparseBenchmark.PassOverTheFew` (10 scattered rows) 334 → 330 ns, so short runs pay nothing. 0 B
+  everywhere. Same machine as [D29](#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same).
+- **Columns already are what Burst needs.** Burst learns from `NativeArray` that arrays do not alias and walks
+  contiguous per-component arrays; EasyEcs columns are contiguous, 64-byte aligned and never alias, which the
+  generator knows statically. Translating a small source subset is enough; a compiler from IL is not needed.
+
+**Considered.**
+- **Opt-in, as Burst's `[BurstCompile]`:** Burst needs it because it changes the compiler and allows `FloatMode.Fast`.
+  Here nothing changes but speed, so an opt-in would leave most code slow for no safety.
+- **Leaving it to batch methods with `Vector<T>`:** still there for lanes the rule does not cover, but it asks every
+  user to write SIMD by hand; a per-row method says the same thing.
+- **`Vector512` where the hardware has it:** a hand-written `Vector512` loop is about 1.4 times the generated
+  `Vector<T>` one on AVX-512; a later step of the same generator.
+- **Reductions inside the loop** (sums into a singleton): exact for integers, not for floats without reassociation;
+  left for a later design, with parallel reductions.
+
 ## Related [#related]
 
 <Cards>

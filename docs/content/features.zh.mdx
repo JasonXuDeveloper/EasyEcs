@@ -118,6 +118,16 @@ public class MovementSystem : EcsSystem
 - **开销：** 不做结构变更的方法每行检测一个存在位；做结构变更的方法每个实体查找一次。
 - **指南：** [系统](/zh/docs/guide/systems)
 
+### 向量循环 [#vector-loops]
+
+组件都只有一个同类型数值（`float`、`int` 等）的逐行 `[ForEach]` 方法，会以生成器根据方法体写出的 `Vector<T>` 循环运行，和 Burst 编译
+job 的做法一样：`if` 和 `?:` 变成掩码，单例和常量复制到每条通道，结果和逐行方法逐位相同。
+
+- **适合：** 对大量行做算术：衰减、积分、截断、计数。
+- **别用于：** 不用管：它是自动的。不符合条件的方法（`Vector3` 组件、函数调用、`Parallel`）照旧逐行运行。
+- **开销：** 运行时没有；循环在编译时写好。
+- **指南：** [系统](/zh/docs/guide/systems#vector-loops)
+
 ### 批量方法 [#batch-methods]
 
 参数是 `Span<T>` / `ReadOnlySpan<T>` 的 `[ForEach]` 方法，一次接收一整段连续的匹配行，每段调用一次，方便用 `Vector<T>` 做向量化。

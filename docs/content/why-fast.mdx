@@ -275,7 +275,7 @@ Vector instructions appear where they measure ([D21](/en/docs/decisions)):
 | Change filters | Word summaries 4 per compare; row ticks of mixed words 4 per instruction |
 | Writes of a run of rows | One vectorized fill of their ticks |
 | Closing tombstones | Rows read as `long`s and searched for negative ids |
-| Your systems | Batch `[ForEach]` methods take spans of aligned columns, ready for `Vector<T>` |
+| Your systems | A per-row `[ForEach]` method over one-number components runs as a [`Vector<T>` loop the generator writes](/en/docs/guide/systems#vector-loops), bit for bit the same; batch methods take spans of aligned columns for the rest |
 
 <BenchTable bench="CountBenchmark" />
 
@@ -284,6 +284,8 @@ Vector instructions appear where they measure ([D21](/en/docs/decisions)):
   methods="EasyEcs_Iterate2,EasyEcs_Iterate2Simd,Friflo_Iterate2,Friflo_Iterate2Simd"
   title="Movement over 100,000 entities: per entity and as a vectorized batch method"
 />
+
+<BenchTable bench="KernelBenchmark" />
 
 ## The parallel runner [#parallel-runner]
 

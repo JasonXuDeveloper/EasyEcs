@@ -29,10 +29,13 @@ icon: RotateCcwClock
 - `DynamicBuffer<T>.ReservePool(lists)` 在启动时往 `T` 的回收池里放入这么多个容量为 `PoolCapacity` 的空列表，世界增长到的那些实体（玩家周围的区块）
   的缓冲在服务器运行时从池里取列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)。
 
+- 按一行写的 `[ForEach]` 方法，只要它的每个组件都只有一个同类型数值（`float`、`double`、`int`、`uint`、`long`、`ulong`），就以 SIMD
+  循环运行：生成器根据方法体写出 `Vector<T>` 循环，和 Burst 编译 job 一样，`if`、`?:` 和 `return` 变成掩码。结果逐位相同；不符合条件的方法
+  照旧逐行运行，代码不用改。见[向量循环](/zh/docs/guide/systems#vector-loops)和[决策](/zh/docs/decisions#d68-vector-loops-without-opting-in)。
 - `[ForEach(Parallel = true, ChunkRows = n)]` 指定并行方法的一个线程每次取多少行（向上取整到 64；`world.ForEachParallel` 等并行调用用
   `chunkRows:` 参数）。默认每块至少 1,024 行，方法写被追踪组件时至少 4,096 行，所以几百个重的行只落在一个线程上；现在它们会分到所有线程，
   写被追踪组件时也一样。分析器规则 [EECS054](/zh/docs/guide/analyzer#eecs054) 拒绝负数，以及没有 `Parallel` 的 `ChunkRows`。见
-  [多线程](/zh/docs/guide/threading#chunk-rows)。
+  [多线程](/zh/docs/guide/threading#chunk-rows)和[决策](/zh/docs/decisions#d67-chunk-rows)。
 
 ### 性能 [#v4-8-0-performance]
 

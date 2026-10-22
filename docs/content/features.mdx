@@ -138,6 +138,18 @@ One method replaces a `[With<T>]` and a `[Without<T>]` variant when the optional
   that does.
 - **Guide:** [Systems](/en/docs/guide/systems)
 
+### Vector loops [#vector-loops]
+
+A per-row `[ForEach]` method whose components each hold one number of one type (`float`, `int`, ...) runs as a
+`Vector<T>` loop the generator writes from its body, the way Burst compiles a job: `if` and `?:` become masks,
+singletons and constants are copied to every lane, and the results are those of the per-row method bit for bit.
+
+- **Use it for:** arithmetic over many rows: decay, integration, clamps, counters.
+- **Skip it for:** nothing: it is automatic. A method that does not qualify (a `Vector3` component, a call, `Parallel`)
+  runs row by row as before.
+- **Cost:** none at run time; the loop is written at compile time.
+- **Guide:** [Systems](/en/docs/guide/systems#vector-loops)
+
 ### Batch methods [#batch-methods]
 
 A `[ForEach]` method that takes `Span<T>` / `ReadOnlySpan<T>` receives whole runs of matching rows, one call per run,

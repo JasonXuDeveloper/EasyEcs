@@ -356,6 +356,57 @@ parameter) is cut at multiples of 4,096 rows, so a table of 4,096 rows or fewer 
 ([why](/en/docs/guide/threading#parallel-foreach-methods)). For a few hundred heavy rows, `ChunkRows = 64` sets the
 rows a thread takes at a time ([chunk size](/en/docs/guide/threading#chunk-rows)).
 
+### Vector loops: SIMD the generator writes [#vector-loops]
+
+You write a `[ForEach]` method for one row; when its components are plain numbers, the generator also writes its
+SIMD loop: the method's body becomes a `System.Numerics.Vector<T>` loop over each run of matching rows, as many rows
+per instruction as `Vector<T>` holds (8 floats on x64 with AVX2, 4 on Arm). Unity's Burst and ISPC work this way: the method is the kernel of
+one lane. The .NET JIT does not vectorize loops on its own, so without this a per-row method runs one row at a time.
+There is nothing to opt into and nothing to write by hand:
+
+```csharp
+public struct Heat : IComponent { public float Value; }
+public struct Speed : IComponent { public float Value; }
+public record struct Pull(float Value) : ISingletonComponent;
+
+public class CoolingSystem : EcsSystem
+{
+    [ForEach]
+    static void Cool(ref Heat heat, ref Speed speed, in Pull pull)
+    {
+        speed.Value = MathF.Max(MathF.Min(speed.Value - heat.Value * pull.Value, 10f), -10f);
+        if (heat.Value > 100f) heat.Value = 100f;   // a mask over the lanes, not a branch
+        else heat.Value += speed.Value * 0.125f;
+    }
+}
+```
+
+A method gets a vector loop when all of this holds; otherwise it runs row by row, exactly as before:
+
+- **The method:** `static`, per entity, not `Parallel` (a parallel method stays scalar), no `Entity`, `World`,
+  `Mut<T>` or `Maybe<T>` parameter.
+- **The components:** each holds one field (or one auto-property) of `float`, `double`, `int`, `uint`, `long` or
+  `ulong`, and all of the method's components the same type: one lane count. `ref` and `in` both work.
+- **Uniform values:** singletons, constants and `static readonly` fields are read once per run and copied to every
+  lane.
+- **The body:** locals, `=`, compound assignments, `++` / `--`, `+ - *`, `/` on floats, `& | ^ ~`, shifts by a uniform
+  count, comparisons, `&& || !`, `?:`, `if` / `else`, `return`, and `Math` / `MathF` `Min`, `Max`, `Abs` (floats),
+  `Sqrt`, `Floor`, `Ceiling` and `FusedMultiplyAdd`. A condition becomes a mask, and a `return` under a condition
+  turns its lanes off for the rest of the method.
+
+**The same results, bit for bit.** Each lane runs the same IEEE operation as the scalar code, in the same order: no
+reassociation, and no fused multiply-add the method did not write (`Vector.Min` / `Max` treat NaN and −0 as
+`Math.Min` / `Max` do). The rows after the last whole vector, and every row when the hardware has no vector unit, run
+the method itself. Change ticks and the system's read and write sets are those of the per-row method.
+
+**Make a method qualify** the way Burst code is written: split a component of several fields into components of one
+field each (`PositionX`, `PositionY` instead of a `Vector2` component), keep one number type per method, and move a
+call or an integer division to a method of its own. The generated file of the system (`<System>.ForEach.g.cs`, under
+the project's generated sources) holds `Vector<` when the method got a loop. For lanes the rule does not cover (bytes,
+mixed types), write a [batch method](#batch-methods) with `Vector128<T>` or `Vector<T>` by hand.
+
+<BenchTable bench="KernelBenchmark" />
+
 ### System groups [#system-groups]
 
 `world.Update()` runs the default group. A system marked `[UpdateInGroup<TGroup>]` (`TGroup` a
@@ -668,7 +719,8 @@ move although it was added second, so the grounded unit loses half its speed bef
 | `ref` on a component the method only reads | `in` ([EECS025](/en/docs/guide/analyzer#eecs025)) | The system can share a stage; a tracked component is not stamped |
 | An `Entity` or `World` parameter the method does not need | Drop it ([EECS026](/en/docs/guide/analyzer#eecs026)) | The job skips structural bookkeeping and may run in parallel |
 | An instance `[ForEach]` method | A static one ([EECS029](/en/docs/guide/analyzer#eecs029)) | Proven not to change structure: may share a stage, no per-row checks |
-| A scalar loop over many rows | A batch method with `Vector<T>` | SIMD over whole runs of rows |
+| A component of several numbers in a hot method | One-field components of one number type | The method gets a [vector loop](#vector-loops) |
+| Lanes a vector loop does not cover (bytes, mixed types) | A batch method with `Vector<T>` | SIMD over whole runs of rows |
 | `Maybe<T>` in the hottest loop | Two methods with `[With<T>]` / `[Without<T>]` | No presence test per row |
 | `Parallel = true` on light work | A plain `[ForEach]` | The hand-off costs more than it saves |
 | A filter repeated on every method of a cadence | A [group filter](#group-filters) | Written once |
@@ -713,6 +765,8 @@ needed, and a method that writes a singleton:
 - **`MeasureSystems`** costs, per system run, two clock reads, two allocation counter reads and one `Count` per
   `[ForEach]` pass ([diagnostics](/en/docs/guide/diagnostics#what-it-costs)); one field test per run when off.
 - **Parallel methods** allocate nothing after their first update; the runner's work items are reused.
+- **Vector loops** cost nothing to qualify for: they are written at compile time, run per run of rows, and allocate
+  nothing.
 - **Generated code** is registered by a module initializer: systems need no `partial`, no registration call and no
   reflection at update time.
 
@@ -745,6 +799,7 @@ needed, and a method that writes a singleton:
 | An allocation in `OnUpdate` or a `[ForEach]` method | Garbage every update | [EECS028](/en/docs/guide/analyzer#eecs028) |
 | An instance `[ForEach]` method that uses nothing of its system | Treated as one that may change structure: runs alone, with per-row checks | [EECS029](/en/docs/guide/analyzer#eecs029) |
 | `World.Update()` called from a system | The system runs again inside its own run | [EECS034](/en/docs/guide/analyzer#eecs034) |
+| A hot method over a `Vector2` / `Vector3` component, or one call in its body | No [vector loop](#vector-loops): one row at a time | The generated file has no `Vector<`; split the component, move the call out |
 
 ## Related [#related]
 

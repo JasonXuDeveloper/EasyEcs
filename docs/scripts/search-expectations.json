@@ -5,6 +5,8 @@
     { "query": "parallel", "page": "guide/threading" },
     { "query": "Reserve", "page": "guide/prefabs", "top": 3 },
     { "query": "ForEach", "page": "guide/systems" },
+    { "query": "vector loop", "page": "guide/systems", "top": 3 },
+    { "query": "chunk size", "page": "guide/threading", "top": 3 },
     { "query": "change tracking", "page": "guide/change-tracking" },
     { "query": "hot reload", "page": "guide/migration-and-unload" },
     { "query": "save load", "page": "guide/saves" },
@@ -23,6 +25,8 @@
     { "query": "migrate from Arch", "page": "migrate-from-arch" }
   ],
   "zh": [
+    { "query": "向量循环", "page": "guide/systems", "top": 3 },
+    { "query": "块大小", "page": "guide/threading", "top": 3 },
     { "query": "单例", "page": "guide/singletons" },
     { "query": "遍历时删除", "page": "guide/structural-changes" },
     { "query": "并行", "page": "guide/threading" },

@@ -324,6 +324,51 @@ public class SteeringSystem : EcsSystem
 所以不超过 4,096 行的表只在一个线程上跑（[原因](/zh/docs/guide/threading#parallel-foreach-methods)）。只有几百行、每行很重时，
 `ChunkRows = 64` 指定一个线程每次取多少行（[块大小](/zh/docs/guide/threading#chunk-rows)）。
 
+### 向量循环：生成器写的 SIMD [#vector-loops]
+
+`[ForEach]` 方法照常按一行来写；组件都是普通数值时，生成器还会顺手写出它的 SIMD 循环：方法体变成在每段匹配行上跑的
+`System.Numerics.Vector<T>` 循环，一条指令处理 `Vector<T>` 装得下的行数（x64 上用 AVX2 是 8 个 float，Arm 上 4 个）。Unity 的
+Burst 和 ISPC 也是这样做的：方法就是一条通道（lane）的内核。.NET 的 JIT 自己不会把循环向量化，没有这一步的话，逐行方法就一次只算一行。
+不用开启什么，也不用手写：
+
+```csharp
+public struct Heat : IComponent { public float Value; }
+public struct Speed : IComponent { public float Value; }
+public record struct Pull(float Value) : ISingletonComponent;
+
+public class CoolingSystem : EcsSystem
+{
+    [ForEach]
+    static void Cool(ref Heat heat, ref Speed speed, in Pull pull)
+    {
+        speed.Value = MathF.Max(MathF.Min(speed.Value - heat.Value * pull.Value, 10f), -10f);
+        if (heat.Value > 100f) heat.Value = 100f;   // 变成各通道上的掩码，不是分支
+        else heat.Value += speed.Value * 0.125f;
+    }
+}
+```
+
+下面这些条件都满足时，方法才会得到向量循环；否则它照旧逐行运行，和以前完全一样：
+
+- **方法：** `static`、逐实体、不是 `Parallel`（并行方法保持标量），没有 `Entity`、`World`、`Mut<T>` 或 `Maybe<T>` 参数。
+- **组件：** 每个组件只有一个字段（或一个自动属性），类型是 `float`、`double`、`int`、`uint`、`long` 或 `ulong`，而且方法的所有组件
+  是同一种类型，也就是同一个通道数。`ref` 和 `in` 都可以。
+- **统一值：** 单例、常量和 `static readonly` 字段每段行只读一次，复制到每条通道。
+- **方法体：** 局部变量、`=`、复合赋值、`++` / `--`、`+ - *`、浮点的 `/`、`& | ^ ~`、按统一位数移位、比较、`&& || !`、`?:`、
+  `if` / `else`、`return`，以及 `Math` / `MathF` 的 `Min`、`Max`、`Abs`（浮点）、`Sqrt`、`Floor`、`Ceiling` 和 `FusedMultiplyAdd`。
+  条件变成掩码；条件下的 `return` 让对应的通道在方法剩下的部分不再生效。
+
+**结果逐位相同。** 每条通道按同样的顺序执行和标量代码相同的 IEEE 运算：不重排结合顺序，方法没写的融合乘加也不会加（`Vector.Min` /
+`Max` 对 NaN 和 −0 的处理与 `Math.Min` / `Max` 一致）。最后一个完整向量之后剩下的行，以及硬件没有向量单元时的所有行，都调用方法本身。
+变更 tick 和系统的读写集合都和逐行方法相同。
+
+**让方法符合条件**，就照 Burst 代码的写法：把多个字段的组件拆成每个只有一个字段的组件（用 `PositionX`、`PositionY` 代替一个
+`Vector2` 组件），一个方法只用一种数值类型，把函数调用或整数除法挪到单独的方法里。系统的生成文件（`<System>.ForEach.g.cs`，在项目的
+生成源码下）里出现 `Vector<`，就说明方法得到了向量循环。规则覆盖不到的通道（字节、混合类型），手写一个用 `Vector128<T>` 或
+`Vector<T>` 的[批处理方法](#batch-methods)。
+
+<BenchTable bench="KernelBenchmark" />
+
 ### 系统分组 [#system-groups]
 
 `world.Update()` 运行默认分组。标了 `[UpdateInGroup<TGroup>]`（`TGroup` 是 `struct : ISystemGroup`）的系统，只有调用
@@ -620,7 +665,8 @@ run order: MoveSystem
 | 只读的组件写成 `ref` | 改成 `in`（[EECS025](/zh/docs/guide/analyzer#eecs025)） | 系统能共享并行阶段；被追踪的组件不会被打 tick |
 | 方法用不到却带了 `Entity` 或 `World` 参数 | 去掉（[EECS026](/zh/docs/guide/analyzer#eecs026)） | job 跳过结构变更簿记，还能并行 |
 | 实例 `[ForEach]` 方法 | 改成静态方法（[EECS029](/zh/docs/guide/analyzer#eecs029)） | 能证明不改结构：可以共享阶段，每行不用检查 |
-| 对大量行写标量循环 | 用 `Vector<T>` 的批处理方法 | 对整段行做 SIMD |
+| 热点方法里一个组件装了好几个数 | 拆成同一种数值类型的单字段组件 | 方法得到[向量循环](#vector-loops) |
+| 向量循环覆盖不到的通道（字节、混合类型） | 用 `Vector<T>` 的批处理方法 | 对整段行做 SIMD |
 | 最热的循环里用 `Maybe<T>` | 用 `[With<T>]` / `[Without<T>]` 拆成两个方法 | 每行不用判断存在位 |
 | 很轻的计算也 `Parallel = true` | 普通 `[ForEach]` | 分发的开销比省下的多 |
 | 同一个节奏的每个方法都重复写一个过滤 | [分组过滤](#group-filters) | 只写一次 |
@@ -660,6 +706,7 @@ run order: MoveSystem
 - **`MeasureSystems`** 每次系统运行读两次时钟、两次分配计数器，每次 `[ForEach]` 遍历一次 `Count`
   （[调试与诊断](/zh/docs/guide/diagnostics#what-it-costs)）；关闭时每次运行一次字段判断。
 - **并行方法**第一次更新之后不再分配内存，执行器的工作项会复用。
+- **向量循环**本身没有额外开销：它在编译时写好，按段运行，不分配内存。
 - **生成的代码**由模块初始化器注册：系统不需要 `partial`、不需要注册调用，更新时也不用反射。
 
 ## 常见陷阱 [#pitfalls]
@@ -691,6 +738,7 @@ run order: MoveSystem
 | `OnUpdate` 或 `[ForEach]` 方法里分配内存 | 每次更新都产生垃圾 | [EECS028](/zh/docs/guide/analyzer#eecs028) |
 | 实例 `[ForEach]` 方法没用到系统的任何成员 | 被当作可能改结构：单独运行，每行都要检查 | [EECS029](/zh/docs/guide/analyzer#eecs029) |
 | 在系统里调用 `World.Update()` | 系统在自己的运行里再次运行 | [EECS034](/zh/docs/guide/analyzer#eecs034) |
+| 热点方法用了 `Vector2` / `Vector3` 组件，或方法体里有一次调用 | 没有[向量循环](#vector-loops)：一次一行 | 生成文件里没有 `Vector<`；拆开组件，把调用挪出去 |
 
 ## 相关页面 [#related]
 

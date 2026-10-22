@@ -40,12 +40,18 @@ major or minor version that needs code changes? The
   list instead of allocating one while the server runs. See
   [dynamic buffers](/en/docs/guide/dynamic-buffers#what-it-costs).
 
+- A `[ForEach]` method written for one row runs as a SIMD loop when its components each hold one number of one type
+  (`float`, `double`, `int`, `uint`, `long`, `ulong`): the generator writes a `Vector<T>` loop from the method's body,
+  as Burst does for a job, with masks for `if`, `?:` and `return`. The results are the same bit for bit, and a method
+  that does not qualify runs row by row as before; nothing to change in code. See
+  [vector loops](/en/docs/guide/systems#vector-loops) and the
+  [decision](/en/docs/decisions#d68-vector-loops-without-opting-in).
 - `[ForEach(Parallel = true, ChunkRows = n)]` sets the rows a thread of a parallel method takes at a time (rounded up
   to 64; `chunkRows:` on `world.ForEachParallel` and the other parallel calls). By default a chunk holds at least
   1,024 rows, 4,096 when the method writes a tracked component, so a few hundred heavy rows ran on one thread; now they
   spread over all of them, also when they write tracked components. Analyzer rule
   [EECS054](/en/docs/guide/analyzer#eecs054) rejects a negative count and `ChunkRows` without `Parallel`. See
-  [threading](/en/docs/guide/threading#chunk-rows).
+  [threading](/en/docs/guide/threading#chunk-rows) and the [decision](/en/docs/decisions#d67-chunk-rows).
 
 ### Performance [#v4-8-0-performance]
 
