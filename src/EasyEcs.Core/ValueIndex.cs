@@ -31,6 +31,11 @@ public interface IIndexed<TKey> : IIndexed where TKey : IEquatable<TKey>
 /// incarnation it belongs to. A leaving entity leaves a hole (a negative index: the next hole of <see cref="Free"/>'s
 /// chain, + 1) that the next entity fills. Entities never move, so a loop reads them in order and finds each once,
 /// whatever is destroyed during it.
+/// <br/>
+/// The key of a unique index has one entity, held inline (<see cref="AddSingle"/>): no array (<see cref="Ids"/> null,
+/// <see cref="Count"/> 1), the entity's index in <see cref="Used"/> and its incarnation in <see cref="Version"/> (a
+/// unique key is never an <see cref="EntityId"/>, so the head is in no <see cref="TargetSlots"/>). A lookup reads the
+/// head alone, and a key allocates nothing.
 /// </summary>
 internal struct IndexHead
 {
@@ -57,6 +62,18 @@ internal struct IndexHead
         return place;
     }
 
+    /// <summary>Hold <paramref name="id"/> inline, the one entity of a unique key (an empty head).</summary>
+    public void AddSingle(EntityId id)
+    {
+        System.Diagnostics.Debug.Assert(Count == 0, "a unique key's head holds one entity: its claim lets no second in");
+        Used = id.Index;
+        Version = id.Version;
+        Count = 1;
+    }
+
+    /// <summary>The entity of a unique key's head (<see cref="AddSingle"/>).</summary>
+    public readonly EntityId Single => new(Used, Version);
+
     /// <summary>Make room for <paramref name="more"/> entities at once (a run of rows with this key), instead of growing step by step.</summary>
     public void Reserve(int more, SpareIds spares)
     {
@@ -69,6 +86,12 @@ internal struct IndexHead
     /// </summary>
     public bool Remove(int place, SpareIds spares)
     {
+        if (Ids == null) // a unique key's entity, inline (an array list never empties into a null array before this)
+        {
+            this = default;
+            return true;
+        }
+
         // A hole even in an emptied list: a loop over it may still be walking the array.
         Ids[place] = new EntityId(-1 - Free, 0);
         Free = place + 1;
@@ -80,7 +103,7 @@ internal struct IndexHead
     }
 
     /// <summary>A walk over the entities the list holds now.</summary>
-    public readonly ListWalk Walk() => new(Ids, Used);
+    public readonly ListWalk Walk() => Ids == null ? new(Single, Count) : new(Ids, Used);
 }
 
 /// <summary>The arrays of emptied lists of an index, by length, for the next lists that grow: keys that come and go allocate nothing.</summary>
@@ -140,17 +163,33 @@ internal sealed class SpareIds
 internal struct ListWalk
 {
     private readonly EntityId[] _ids;
+    private readonly EntityId _single;
     private int _place;
 
     public ListWalk(EntityId[] ids, int used)
     {
         _ids = ids;
         _place = used;
+        _single = default;
+    }
+
+    /// <summary>The walk of a head without an array: its inline entity when <paramref name="count"/> is 1, else none.</summary>
+    public ListWalk(EntityId single, int count)
+    {
+        _ids = null;
+        _place = count;
+        _single = single;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Next(out EntityId id)
     {
+        if (_ids == null) // a unique key's entity (or an empty list: _place 0)
+        {
+            id = _single;
+            return _place-- > 0;
+        }
+
         // _place starts at the length the list had when the walk began, within the array the walk holds: no bounds
         // check.
         while (--_place >= 0)
@@ -298,6 +337,13 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     /// <summary>The first entity found with key <paramref name="key"/> (any, when several have it).</summary>
     public bool TryFind(TKey key, out Entity entity)
     {
+        if (Unique) // built from the start; a key's head holds its entity inline
+        {
+            ref var head = ref HeadOf(key);
+            entity = Unsafe.IsNullRef(ref head) ? default : new Entity(_world, head.Single);
+            return !Unsafe.IsNullRef(ref head);
+        }
+
         foreach (var found in Find(key))
         {
             entity = found;
@@ -438,7 +484,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
         var key = value.Key;
         if (IsNull(key)) return;
         ref var head = ref AddHead(key);
-        head.Reserve(entities.Length, _spares);
+        if (!Unique) head.Reserve(entities.Length, _spares); // a unique key holds its one entity inline
         foreach (var entity in entities)
         {
             int id = entity.Index;
@@ -478,7 +524,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
                 previous = key;
                 int run = 1; // the rows of this key in a row (the children of one parent) get their room at once
                 while (r + run < first + count && Unsafe.Add(ref values, r + run).Key.Equals(key)) run++;
-                head.Reserve(run, _spares);
+                if (!Unique) head.Reserve(run, _spares); // a unique key holds its one entity inline
             }
 
             Link(id, slots[r].Version, key, ref head);
@@ -588,7 +634,8 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     {
         ref var node = ref _nodes[id];
         if (head.Count == 0) _keyCount++; // the key's first entity
-        node.Place = head.Add(new EntityId(id, version), _spares);
+        if (Unique) head.AddSingle(new EntityId(id, version)); // claimed: the key had none
+        else node.Place = head.Add(new EntityId(id, version), _spares);
         node.Key = key;
         node.Linked = true;
     }

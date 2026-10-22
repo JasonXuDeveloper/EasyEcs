@@ -778,6 +778,80 @@ public class IndexTests
         Assert.That(result, Is.EqualTo(players.Length));
     }
 
+    [Test]
+    public void UniqueKeysHoldTheirEntityThroughEveryWritePath()
+    {
+        // A unique key's head holds its one entity inline: every write path must leave each key with the right entity
+        // and every freed key with none.
+        using var world = new World();
+        var players = new Entity[8];
+        for (int i = 0; i < players.Length; i++) players[i] = world.CreateEntity(new Login(i), new Health(i));
+        var accounts = world.LoginIndex;
+
+        void Expect(World w, params (int Key, Entity Holder)[] held)
+        {
+            var index = w.LoginIndex;
+            Assert.That(index.KeyCount, Is.EqualTo(held.Length));
+            var ascending = new System.Collections.Generic.List<int>();
+            foreach (var entity in index.Ascending()) ascending.Add(entity.Read<Login>().Id);
+            var keys = new int[held.Length];
+            for (int i = 0; i < held.Length; i++)
+            {
+                var (key, holder) = held[i];
+                keys[i] = key;
+                Assert.That(index.Get(key), Is.EqualTo(holder), $"key {key}");
+                Assert.That(index.TryGet(key, out var found) && found == holder, Is.True);
+                Assert.That(All(index.Find(key)), Is.EqualTo(new[] { holder }));
+                Assert.That(index.Count(key), Is.EqualTo(1));
+                Assert.That(holder.Read<Login>().Id, Is.EqualTo(key));
+            }
+
+            System.Array.Sort(keys);
+            Assert.That(ascending, Is.EqualTo(keys));
+            foreach (int gone in new[] { -1, 100, 101 })
+            {
+                Assert.That(index.TryGet(gone, out _), Is.False);
+                Assert.That((index.Count(gone), All(index.Find(gone)).Count), Is.EqualTo((0, 0)));
+            }
+        }
+
+        players[0].Set(new Login(100));                            // Set: the key moves, the old one is freed
+        players[0].Set(new Login(0));
+        players[1].Remove<Login>();                                // Remove
+        players[2].Destroy();                                      // Destroy
+        Assert.That(players[3].Disable<Login>(), Is.True);         // Disable / Enable
+        players[3].Enable<Login>();
+        world.CreateEntity(new Login(1)).Destroy();                // a freed key taken and freed again
+        var holders = new[] { (0, players[0]), (3, players[3]), (4, players[4]), (5, players[5]), (6, players[6]), (7, players[7]) };
+        Expect(world, holders);
+
+        var snapshot = world.Capture();                            // Snapshots
+        players[4].Set(new Login(101));
+        players[5].Destroy();
+        world.Restore(snapshot);
+        Expect(world, holders);
+
+        var save = Save(world);                                    // Save / Load
+        using var loaded = new World();
+        loaded.Load(save);
+        var reloaded = new (int, Entity)[holders.Length];
+        for (int i = 0; i < holders.Length; i++)
+        {
+            Assert.That(loaded.TryGetEntity(holders[i].Item2.Id, out var same), Is.True);
+            reloaded[i] = (holders[i].Item1, same);
+        }
+        Expect(loaded, reloaded);
+
+        using var moved = new World();                             // MoveEntities: the keys leave one world for the other
+        Assert.That(world.MoveEntities(moved, [players[6].Id, players[7].Id]), Is.EqualTo(2));
+        Expect(world, (0, players[0]), (3, players[3]), (4, players[4]), (5, players[5]));
+        Assert.That((moved.LoginIndex.Get(6).Read<Health>().Value, moved.LoginIndex.Get(7).Read<Health>().Value), Is.EqualTo((6, 7)));
+        world.CreateEntity(new Login(6));                          // free in the source again
+
+        foreach (var holder in accounts.Find(4)) holder.Destroy(); // destroyed during its own lookup
+        Assert.That((accounts.TryGet(4, out _), accounts.KeyCount), Is.EqualTo((false, 4)));
+    }
+
     private static byte[] Save(World world)
     {
         var buffer = new System.Buffers.ArrayBufferWriter<byte>();
