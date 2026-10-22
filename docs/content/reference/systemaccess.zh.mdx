@@ -16,6 +16,14 @@ public struct SystemAccess
 
 ## 方法 [#methods]
 
+### `Index` [#index]
+
+```csharp
+public void Index<T, TKey>() where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>;
+```
+
+系统读组件 `T` 并按键查找它（[`Lookup`](/zh/docs/reference/lookup)，[`LookupExtensions`](/zh/docs/reference/lookupextensions)）：在包含该系统的并行阶段运行之前，`T` 的索引在执行更新的线程上创建并建好，所以该阶段的查找不会修改它。
+
 ### `Read` [#read]
 
 ```csharp

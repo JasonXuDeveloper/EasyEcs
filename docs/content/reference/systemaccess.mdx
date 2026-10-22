@@ -16,6 +16,14 @@ The generator declares it for every system with [[ForEach]](/en/docs/reference/f
 
 ## Methods
 
+### `Index` [#index]
+
+```csharp
+public void Index<T, TKey>() where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>;
+```
+
+The system reads component `T` and finds it by key ([`Lookup`](/en/docs/reference/lookup), [`LookupExtensions`](/en/docs/reference/lookupextensions)): before a parallel stage holding the system runs, `T`'s index is created and built on the updating thread, so no lookup of the stage changes it.
+
 ### `Read` [#read]
 
 ```csharp

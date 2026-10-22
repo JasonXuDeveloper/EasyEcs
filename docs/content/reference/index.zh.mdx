@@ -19,6 +19,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`EcsSystem`](/zh/docs/reference/ecssystem) | 在 World 上运行的逻辑。 |
 | [`ForEachAttribute`](/zh/docs/reference/foreachattribute) | 对每个匹配组件参数（以及 WithAttribute / WithoutAttribute / WithAnyAttribute 过滤条件）的实体，执行 EcsSystem 的一个方法（或者通过生成的入口点，执行任何其他类型的静态方法）。 |
 | [`GroupInfo`](/zh/docs/reference/groupinfo) | 一个分组的系统，按阶段排列（ScheduleInfo）。 |
+| [`LookupExtensions`](/zh/docs/reference/lookupextensions) | 通过 Lookup 按键查找带索引的组件（IIndexed）。 |
 | [`OrderedIndexExtensions`](/zh/docs/reference/orderedindexextensions) | 键可比较（分数、截止时间、等级）的值索引的有序遍历：按区间或按顺序遍历，用于排行榜、计时器和匹配分段。 |
 | [`Prefab`](/zh/docs/reference/prefab) | 实体的配方：一组不属于任何 World 的组件值，所以任何查询都看不到它。 |
 | [`RelationIndex<T>`](/zh/docs/reference/relationindex) | 一个 World 里关系 T 的链接，按目标组织（World.Relations）：哪些实体链接到某个实体，开始 O(1)，之后每条链接 O(1)。 |
@@ -56,6 +57,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`Entity`](/zh/docs/reference/entity) | 实体的句柄：id + 版本号 + World（16 字节）。 |
 | [`EntityId`](/zh/docs/reference/entityid) | 实体的身份：下标，加上这个下标的版本号（8 字节，非托管）。 |
 | [`EntitySpan`](/zh/docs/reference/entityspan) | 批处理 job 里一段行对应的实体：第 i 个元素，就是这段行各个 span 第 i 个元素所属的实体。 |
+| [`Lookup<T>`](/zh/docs/reference/lookup) | 从 [ForEach] 方法只读访问任意实体的组件 T（MPI 的单边 Get，Unity 的 ComponentLookup）：static void Chase(ref Velocity v, in Target target, Lookup&lt;Position&gt; positions) 用 positions[target.Id] 读目标的位置。 |
 | [`Maybe<T>`](/zh/docs/reference/maybe) | [ForEach] 方法所访问实体的一个可选组件：static void Regen(ref Health h, Maybe&lt;Buff&gt; buff) 访问所有带 Health 的实体，Maybe.HasValue 告诉你当前这个实体有没有 Buff。 |
 | [`Mut<T>`](/zh/docs/reference/mut) | [ForEach] 方法所访问实体的一个组件，只有方法真的写了它才算写入：static void Aim(Mut&lt;Target&gt; target, in Position p) =&gt; target.SetIfChanged(new Target(Nearest(p)))。 |
 | [`QueryEnumerator<T1..T9>`](/zh/docs/reference/queryenumerator) | 零分配的查询枚举器；遍历途中做结构变更也安全（访问规则和 ForEach 相同）。 |
@@ -64,9 +66,10 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`ReadEnumerator<T1..T9>`](/zh/docs/reference/readenumerator) | 零分配的只读查询枚举器；遍历途中做结构变更也安全（访问规则和 ForEach 相同）。 |
 | [`ReadItem<T1..T9>`](/zh/docs/reference/readitem) | 一条只读的查询结果：实体，以及指向它所在行的只读引用（不打 tick）。 |
 | [`ReadOnlyMaybe<T>`](/zh/docs/reference/readonlymaybe) | [ForEach] 方法访问的实体上一个可选、只读的组件：ReadOnlyMaybe.Value 是 ref readonly，所以方法按 T 的读者调度，被追踪的组件永远不打 tick；带索引的组件（IIndexed）也能这样接收，Maybe 不行（EECS015：它的 ref 可能背着索引改掉键）。 |
-| [`Reduce<T>`](/zh/docs/reference/reduce) | 把一次 [ForEach] 遍历归约到单例 T（OpenMP 的 reduction，MPI 的 Allreduce）：static void Count(in Health h, Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;。 |
+| [`Reduce<T>`](/zh/docs/reference/reduce) | 把一次 [ForEach] 遍历归约到单例 T（OpenMP 的 reduction，MPI 的 Allreduce），按 ref 传入：static void Count(in Health h, ref Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;。 |
 | [`RelationIndex<T>.Sources`](/zh/docs/reference/relationindex-sources) | 枚举链接到某个目标的实体（foreach），每条链接一次。 |
 | [`Retired`](/zh/docs/reference/retired) | 退休实体的标签：Destroy 发现实体上有 ICleanupComponent，于是去掉其他组件，让实体继续存活，直到最后一个清理组件被移除（那时实体被释放，才算销毁）。 |
+| [`Scratch<T>`](/zh/docs/reference/scratch) | [ForEach] 方法在运行它的线程上的工作内存（OpenMP 的 threadprivate）：邻居列表、寻路的开放集、要填充的缓冲区。 |
 | [`SingletonRef<T>`](/zh/docs/reference/singletonref) | 某个 World 的单例 T 的句柄。 |
 | [`SystemAccess`](/zh/docs/reference/systemaccess) | 系统读写的数据，添加系统时声明一次。 |
 | [`SystemList`](/zh/docs/reference/systemlist) | World 的系统，所有分组按执行顺序排列（默认分组在前）：用 foreach 遍历，或者读 SystemList.Count。 |
