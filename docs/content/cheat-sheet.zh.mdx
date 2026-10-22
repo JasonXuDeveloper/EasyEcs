@@ -169,8 +169,9 @@ public class MovementSystem : EcsSystem
 }
 ```
 
-静态、逐实体、每个组件只有一个同类型数值（`float`、`int`……）的方法，生成器还会给它写一个 `Vector<T>` 循环，结果逐位相同
-（[向量循环](/zh/docs/guide/systems#vector-loops)）；这里的 `Position` 有两个字段，所以这个方法逐行运行。
+静态、逐实体、组件有 1 到 4 个同类型数值（`float`、`int`……）的方法，生成器还会给它写一个 `Vector<T>` 循环，结果逐位相同
+（[向量循环](/zh/docs/guide/systems#vector-loops)）。这个方法给 `Position` 整个赋新值，所以逐行运行；写成 `p.X += v.X; p.Y += v.Y;`
+就会得到循环，[EECS055](/zh/docs/guide/analyzer#eecs055) 会说明是哪一种。
 
 ### [ForEach] 参数 [#foreach-parameters]
 
@@ -185,6 +186,7 @@ public class MovementSystem : EcsSystem
 | `EntitySpan` | 批量方法这一段行对应的实体 | 仅批量方法 |
 | `Maybe<T>` | 实体可能没有的组件 | `HasValue`、`Value` |
 | `ReadOnlyMaybe<T>` | 同上，只读（带索引的组件也行） | `HasValue`、`Value`（`ref readonly`） |
+| `ref Reduce<T>` | 对所有行求总数，结果放进单例 `T : IReduction<T>` | 必须按 `ref` 传入（否则 EECS002）；`Value` 字段是这一块的部分结果；合并后的结果替换 `T`（[归约](/zh/docs/guide/threading#reductions)、[EECS057](/zh/docs/guide/analyzer#eecs057)） |
 | `Mut<T>` | 方法只在部分行上写的组件 | `Value` 只读；`Write()` 和改了值的 `SetIfChanged(value)` 才给这一行打 tick；对调度器来说算写入 |
 | 其他任意类型（系统之外） | 调用方传给入口方法的值 | `ref int count`、`in Settings s` |
 
@@ -194,6 +196,7 @@ public class MovementSystem : EcsSystem
 | --- | --- | --- |
 | `[ForEach]` / `[ForEach(Parallel = true)]` | 方法 | 方法就是循环；`Parallel` 把行分给多个线程（[EECS010](/zh/docs/guide/analyzer#eecs010)） |
 | `[ForEach(Parallel = true, ChunkRows = n)]` | 方法 | 线程每次领 `n` 行（OpenMP 的 `schedule(dynamic, n)`）：适合几百行重活（[块大小](/zh/docs/guide/threading#chunk-rows)、[EECS054](/zh/docs/guide/analyzer#eecs054)） |
+| `[ForEach(Simd = SimdMode.Require)]` | 方法 | 方法必须得到向量循环，否则构建报错（[EECS056](/zh/docs/guide/analyzer#eecs056)）；`SimdMode.Off` 保持标量，不再有 [EECS055](/zh/docs/guide/analyzer#eecs055) |
 | `[ForEach(Slices = N)]` | 方法 | 每次运行只访问一片，约 1/N 的行：每 N 次运行每行一次（不能和 `Changed` / `Removed` 一起用：[EECS035](/zh/docs/guide/analyzer#eecs035)） |
 | `[With<T>]` | 方法、系统分组 | 要求有 `T`，但不作为参数传入 |
 | `[Without<T>]` | 方法、系统分组 | 排除有 `T` 的实体 |

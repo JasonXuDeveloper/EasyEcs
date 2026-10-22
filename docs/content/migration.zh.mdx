@@ -11,7 +11,7 @@ icon: CircleArrowUp
 
 ## v4.7 → v4.8 [#v4-7-to-v4-8]
 
-为 4.7 写的代码不用改就能编译，4.7 的存档照样能读。有两条分析器规则报告的范围变大了，还有一条新规则：把警告当错误的构建会在这些地方失败，
+为 4.7 写的代码不用改就能编译，4.7 的存档照样能读。有两条分析器规则报告的范围变大了，还有三条新的警告：把警告当错误的构建会在这些地方失败，
 改完代码才能通过。
 
 ### 报告范围变大的分析器规则：EECS027、EECS030 和 EECS053 [#v4-8-analyzer]
@@ -61,9 +61,53 @@ public class CorpseSystem : EcsSystem
 
 [EECS053](/zh/docs/guide/analyzer#eecs053) 是新规则：以 `ref` 接收被追踪的组件，却有路径不写它。代码修复会改成 `Mut<T>`。
 
+[EECS060](/zh/docs/guide/analyzer#eecs060) 是新规则：并行 `[ForEach]` 方法，或 `ForEachParallel` 运行的 job 的 `Execute`，写了静态字段或共享对象。
+总数改用 [`ref Reduce<T>`](/zh/docs/guide/threading#reductions) 参数：
+
+```csharp
+public struct Hits : ISingletonComponent, IReduction<Hits>
+{
+    public int Count;
+    public static Hits Identity => default;
+    public static Hits Combine(Hits left, Hits right) => new() { Count = left.Count + right.Count };
+}
+```
+
+```csharp tab="4.7" doccheck=expect-EECS060
+public static class HitStats
+{
+    public static int Hits;
+}
+
+public class TakeHits : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(ref Health health)
+    {
+        health = new Health(health.Value - 1);
+        HitStats.Hits++;   // 更新会丢
+    }
+}
+```
+
+```csharp tab="4.8"
+public class TakeHits : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(ref Health health, ref Reduce<Hits> hits)
+    {
+        health = new Health(health.Value - 1);
+        hits.Value.Count++;
+    }
+}
+```
+
+[EECS061](/zh/docs/guide/analyzer#eecs061) 是新规则：`ForEachParallel` 之后读并行 job 的字段（每一块跑的是副本）。代码修复改用 `ForEach`；
+要用满所有核，像上面那样用 `Reduce<T>` 参数。
+
 ### 新的公开类型 [#v4-8-new-types]
 
-`namespace EasyEcs` 里新增了 `ReadOnlyMaybe<T>`。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
+`namespace EasyEcs` 里新增了 `ReadOnlyMaybe<T>`、`Reduce<T>`、`IReduction<T>`、`SimdMode` 和 `Interleaved`。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
 或者用 `using` 起个别名。
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]

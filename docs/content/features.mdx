@@ -27,7 +27,7 @@ after warm-up, and is covered by the unit tests and a BenchmarkDotNet benchmark.
 | [Find](#find) | [value indexes](#value-indexes), [unique keys](#unique-keys), [ordered ranges](#ordered-ranges), [table groups](#table-groups) |
 | [Structure](#structure) | [relations](#relations), [hierarchy](#hierarchy), [dynamic buffers](#dynamic-buffers), [prefabs and cloning](#prefabs-and-cloning) |
 | [Persist](#persist) | [snapshots](#snapshots), [saves](#saves), [migration](#migration), [unloading plugin types](#unloading) |
-| [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), parallel [`[ForEach]`](#parallel-foreach), [bulk operations](#bulk-operations) |
+| [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), parallel [`[ForEach]`](#parallel-foreach), [reductions](#reductions), [bulk operations](#bulk-operations) |
 | [Build and operate](#operate) | [analyzer and code fixes](#analyzer), [per-system timing](#per-system-timing), [the schedule](#schedule), [errors](#errors), [introspection](#introspection), [giving memory back](#trim-excess), [Native AOT](#native-aot), [hosting and testing](#hosting-and-testing), [templates and samples](#templates) |
 
 ## Simulate [#simulate]
@@ -140,15 +140,18 @@ indexed component accepts.
   that does.
 - **Guide:** [Systems](/en/docs/guide/systems#maybe), [`ReadOnlyMaybe<T>`](/en/docs/guide/systems#read-only-maybe)
 
-### Vector loops [#vector-loops]
+### Vector loops the generator writes (SIMD) [#vector-loops]
 
-A per-row `[ForEach]` method whose components each hold one number of one type (`float`, `int`, ...) runs as a
-`Vector<T>` loop the generator writes from its body, the way Burst compiles a job: `if` and `?:` become masks,
-singletons and constants are copied to every lane, and the results are those of the per-row method bit for bit.
+A per-row `[ForEach]` method whose components hold 1 to 4 numbers of one type (`float`, `int`, ...;
+`Position { X, Y, Z }` too) runs as a `Vector<T>` loop the generator writes from its body, the way Burst compiles a
+job: `if` and `?:` become masks, singletons and constants are copied to every lane, several fields are split into
+one vector each, and the results are those of the per-row method bit for bit.
 
 - **Use it for:** arithmetic over many rows: decay, integration, clamps, counters.
-- **Skip it for:** nothing: it is automatic. A method that does not qualify (a `Vector3` component, a call, `Parallel`)
-  runs row by row as before.
+- **Skip it for:** nothing: it is automatic. A method that does not qualify (a `Vector3` field, two number types, a
+  call, `Parallel`) runs row by row as before, and [EECS055](/en/docs/guide/analyzer#eecs055) names why;
+  `Simd = SimdMode.Require` makes that a build error ([EECS056](/en/docs/guide/analyzer#eecs056)), `SimdMode.Off`
+  silences it.
 - **Cost:** none at run time; the loop is written at compile time.
 - **Guide:** [Systems](/en/docs/guide/systems#vector-loops)
 
@@ -372,7 +375,8 @@ holds (`Set`, create, `Instantiate`, `Clone`, `SetAll`, `Enable`, loads and move
 - **Skip it for:** `EntityId` keys ([EECS036](/en/docs/guide/analyzer#eecs036)); keys several entities share (a plain
   `IIndexed<TKey>`).
 - **Cost:** the index exists from the first table holding the component, so every write is checked: one hash probe
-  per changed key, an extra pass over the rows for the bulk calls and loads. `Get` and `TryGet` are a hash probe.
+  per changed key, an extra pass over the rows for the bulk calls and loads. `Get` and `TryGet` are a hash probe
+  that reads the key's record alone: a unique key holds its entity inline, with no array per key.
 - **Guide:** [Indexes and relations](/en/docs/guide/indexes-and-relations)
 
 ### Ordered ranges [#ordered-ranges]
@@ -588,6 +592,23 @@ for struct jobs.
   split. `ChunkRows = n` sets the chunk size (rounded up to 64; [EECS054](/en/docs/guide/analyzer#eecs054)).
 - **Guide:** [Threading](/en/docs/guide/threading), [chunk size](/en/docs/guide/threading#chunk-rows)
 
+### Totals over the rows (reductions) [#reductions]
+
+A `ref Reduce<T>` parameter turns a `[ForEach]` pass into a total: `T` is a singleton implementing `IReduction<T>`
+(`Identity`, `Combine`), each chunk of a parallel pass (or the pass on one thread) adds into its own partial result,
+and the partial results, combined in row order, replace `T` when the pass ends: OpenMP's `reduction`, MPI's
+`Allreduce`.
+
+- **Use it for:** the units alive, a resource's total, a crowd's extent: one result per pass over many rows.
+- **Skip it for:** results per entity (a component of the row), and totals a few rows change per tick (update them
+  where the rows change).
+- **Cost:** a write into the chunk's own struct per row, no lock or atomic; one job copy per chunk, combined once;
+  0 bytes after the first pass. Integers are exact; a float result is the same on any thread count for a fixed
+  `ChunkRows`. [EECS057](/en/docs/guide/analyzer#eecs057) rejects a second write of `T`;
+  [EECS060](/en/docs/guide/analyzer#eecs060) and [EECS061](/en/docs/guide/analyzer#eecs061) report the shared
+  counters and job fields it replaces.
+- **Guide:** [Threading](/en/docs/guide/threading#reductions)
+
 ### Bulk operations [#bulk-operations]
 
 `world.CreateEntities(span, a, b)` spawns a wave with the same values, `Instantiate(prefab, span)` a wave of a
@@ -604,7 +625,7 @@ What keeps a code base correct as it grows, and a server observable while it run
 
 ### Analyzer and code fixes [#analyzer]
 
-The package bundles an analyzer (EECS002 to EECS056) and code fixes next to the generator. Invalid `[ForEach]`
+The package bundles an analyzer (EECS002 to EECS061) and code fixes next to the generator. Invalid `[ForEach]`
 methods, class components, stateful systems, systems that reference systems, writes through `in`, unsafe parallel
 methods, off-thread structural changes, indexed components written through a `ref` and ordering cycles fail the
 build; a few warnings flag code that works but costs.

@@ -310,9 +310,14 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 - **A Minecraft-style sample and a Samples section.** [VoxelServer](https://ecs.xgamedev.net/en/docs/samples/voxel-server)
   runs chunks, flowing water, areas of interest, zombies, replication and saves at 20 ticks a second; the
   [Samples](https://ecs.xgamedev.net/en/docs/samples) section of the site walks through every sample.
-- **SIMD without writing it.** A `[ForEach]` method over one-number components runs as a `Vector<T>` loop the
-  generator writes from its body, the way Burst compiles a job, with the same results bit for bit
-  ([vector loops](https://ecs.xgamedev.net/en/docs/guide/systems#vector-loops)).
+- **SIMD without writing it.** A `[ForEach]` method over components of 1 to 4 numbers of one type (`Position { X, Y,
+  Z }` too) runs as a `Vector<T>` loop the generator writes from its body, the way Burst compiles a job, with the same
+  results bit for bit. EECS055 names why a method stayed scalar, and `Simd = SimdMode.Require` makes that a build
+  error ([vector loops](https://ecs.xgamedev.net/en/docs/guide/systems#vector-loops)).
+- **Totals on every core.** A `ref Reduce<T>` parameter gives each chunk of a parallel pass its own partial result (OpenMP's
+  `reduction`), combined in row order into a singleton: no lock or atomic per row, exact integers, reproducible floats
+  ([reductions](https://ecs.xgamedev.net/en/docs/guide/threading#reductions)). EECS060 reports parallel code that
+  writes shared memory, EECS061 a parallel job's field read after the pass.
 - **Few heavy rows on every thread.** `[ForEach(Parallel = true, ChunkRows = 64)]` sets the rows a thread takes at a
   time (OpenMP's `schedule(dynamic, n)`), so a few hundred rows of microseconds each spread over the threads, also
   when they write tracked components ([threading](https://ecs.xgamedev.net/en/docs/guide/threading#chunk-rows), [decision](https://ecs.xgamedev.net/en/docs/decisions#d67-chunk-rows)).

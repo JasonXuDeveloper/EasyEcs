@@ -34,18 +34,39 @@ major or minor version that needs code changes? The
   [systems](/en/docs/guide/systems#read-only-maybe).
 - `world.SaveEntitiesWithout(output, ids, set)` saves a group of entities with every component but those of a
   `ComponentSet`: the data they compute again after a load stays out of the save. See
-  [migration and unloading](/en/docs/guide/migration-and-unload#records).
+  [migration and unloading](/en/docs/guide/migration-and-unload#save-entities-without).
 - `DynamicBuffer<T>.ReservePool(lists)` fills the buffer pool of `T` with that many empty lists of
   `PoolCapacity` elements at start-up, so the buffers of the entities a world grows to (chunks around players) take a
   list instead of allocating one while the server runs. See
   [dynamic buffers](/en/docs/guide/dynamic-buffers#pool).
 
-- A `[ForEach]` method written for one row runs as a SIMD loop when its components each hold one number of one type
+- A `[ForEach]` method written for one row runs as a SIMD loop when its components hold 1 to 4 numbers of one type
   (`float`, `double`, `int`, `uint`, `long`, `ulong`): the generator writes a `Vector<T>` loop from the method's body,
-  as Burst does for a job, with masks for `if`, `?:` and `return`. The results are the same bit for bit, and a method
-  that does not qualify runs row by row as before; nothing to change in code. See
+  as Burst does for a job, with masks for `if`, `?:` and `return`. A component of several fields (`Position { X, Y, Z
+  }`) is split into one vector per field by deinterleaving loads and interleaving stores (AVX2 at 256 bits, permutes
+  at 512; without them the rows run one at a time). The results are the same bit for bit, and a method that does not
+  qualify runs row by row as before; nothing to change in code. See
   [vector loops](/en/docs/guide/systems#vector-loops) and the
   [decision](/en/docs/decisions#d68-vector-loops-without-opting-in).
+- Analyzer rule [EECS055](/en/docs/guide/analyzer#eecs055) (suggestion) names why a `[ForEach]` method over numbers
+  got no vector loop ("component Body has 5 fields", "lane types float and int differ"), as Burst's inspector does.
+  `[ForEach(Simd = SimdMode.Require)]` makes that an error ([EECS056](/en/docs/guide/analyzer#eecs056)), so a hot
+  loop cannot lose its vectors unnoticed; `SimdMode.Off` keeps a method scalar without the message. See
+  [vector loops](/en/docs/guide/systems#vector-loops).
+- `Reduce<T>`, a `[ForEach]` parameter taken by `ref` for a total over the rows (OpenMP's `reduction`), as in
+  `static void Count(in Health h, ref Reduce<Census> census) => census.Value.Alive++;`: `T` is a singleton that
+  implements `IReduction<T>` (`Identity`, `Combine`). Each chunk of a parallel pass, or the pass on one thread, adds
+  into its own partial result, with no lock or atomic per row; the partial results are combined in chunk order and
+  replace `T`. Integer results are exact; a float result is the same on any thread count for a fixed `ChunkRows`.
+  Analyzer rule [EECS057](/en/docs/guide/analyzer#eecs057) rejects a second write of `T` in the same pass. See
+  [reductions](/en/docs/guide/threading#reductions) and the [decision](/en/docs/decisions#d69-reductions).
+- Analyzer rule [EECS060](/en/docs/guide/analyzer#eecs060) (warning): a parallel `[ForEach]` method or the `Execute`
+  of a job run by `ForEachParallel` writes memory every thread shares (a static field, an object a context parameter
+  or a job's field refers to): the writes race. Rule [EECS061](/en/docs/guide/analyzer#eecs061) (warning, with a code
+  fix): a parallel job's field read after `ForEachParallel`, which ran a copy per chunk and merged nothing back; the
+  fix runs the job on one thread.
+- Code fixes for [EECS027](/en/docs/guide/analyzer#eecs027) (takes the looked-up component or singleton as a
+  parameter) and [EECS054](/en/docs/guide/analyzer#eecs054) (removes `ChunkRows`).
 - `[ForEach(Parallel = true, ChunkRows = n)]` sets the rows a thread of a parallel method takes at a time (rounded up
   to 64; `chunkRows:` on `world.ForEachParallel` and the other parallel calls). By default a chunk holds at least
   1,024 rows, 4,096 when the method writes a tracked component, so a few hundred heavy rows ran on one thread; now they
@@ -70,6 +91,8 @@ major or minor version that needs code changes? The
   The list of free ids and an index's per-entity records grow with the entity records (`EnsureEntityCapacity`
   included) instead of one destroyed or indexed entity at a time, so a world that reserved its peak allocates nothing to
   reach it. See [prefabs](/en/docs/guide/prefabs#reserve).
+- A unique index ([`IUniqueIndexed<TKey>`](/en/docs/guide/indexes-and-relations)) keeps each key's entity in the
+  key's own record instead of an array per key: no array allocated per key, and `Get` / `TryGet` read one record.
 
 ### Changes that need code changes [#v4-8-0-breaking]
 
@@ -80,6 +103,9 @@ major or minor version that needs code changes? The
   structural change of its entity, the same for every row (`[ForEach, With<Dead>] static void Bury(Entity e) =>
   e.Destroy();`): one bulk call in `OnUpdate` (`World.DestroyAll<Dead>()`) changes each table at once
   ([migration guide](/en/docs/migration#v4-8-analyzer)).
+- The new warnings [EECS060](/en/docs/guide/analyzer#eecs060) and [EECS061](/en/docs/guide/analyzer#eecs061) report
+  parallel code that races on shared memory or reads a job field the pass never wrote back; a total becomes a
+  `Reduce<T>` parameter ([migration guide](/en/docs/migration#v4-8-analyzer)).
 
 ### Fixes [#v4-8-0-fixes]
 

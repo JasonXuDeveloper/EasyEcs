@@ -255,7 +255,11 @@ What makes it hold:
   first needed, never on the steady path.
 - **Bounded growth**: tables double when full and shrink only when you call `TrimExcess`, ids are recycled, buffers
   are reused.
-- **The parallel runner** uses reusable thread-pool work items, not `Parallel.For` (a closure and state per call).
+- **The parallel runner** uses reusable thread-pool work items, not `Parallel.For` (a closure and state per call);
+  a [`Reduce<T>`](/en/docs/guide/threading#reductions) keeps each chunk's partial result in a job copy the runner
+  reuses, so a parallel total allocates nothing after its first pass.
+- **Unique keys hold their entity inline**: a unique index keeps each key's one entity in the key's own record, so
+  it allocates no array per key and a lookup reads one record.
 
 The same tick in other libraries, with what each allocates per tick:
 
@@ -275,7 +279,7 @@ Vector instructions appear where they measure ([D21](/en/docs/decisions)):
 | Change filters | Word summaries 4 per compare; row ticks of mixed words 4 per instruction |
 | Writes of a run of rows | One vectorized fill of their ticks |
 | Closing tombstones | Rows read as `long`s and searched for negative ids |
-| Your systems | A per-row `[ForEach]` method over one-number components runs as a [`Vector<T>` loop the generator writes](/en/docs/guide/systems#vector-loops), bit for bit the same; batch methods take spans of aligned columns for the rest |
+| Your systems | A per-row `[ForEach]` method over components of 1 to 4 numbers of one type runs as a [`Vector<T>` loop the generator writes](/en/docs/guide/systems#vector-loops) (several fields through deinterleaving loads and interleaving stores), bit for bit the same, and EECS055 names why a method did not; batch methods take spans of aligned columns for the rest |
 
 <BenchTable bench="CountBenchmark" />
 
@@ -300,7 +304,9 @@ helpers ([D22](/en/docs/decisions)). Two kinds of work use it:
   and a method that writes a tracked component gets a multiple of 4,096 rows, 4,096 at least, so two threads never
   share the change-tick summary of a 4,096-row block. `ChunkRows = n` sets `n` for a few hundred heavy rows; chunks
   that then share a block set its summary with an atomic OR, once per 64 written rows
-  ([D67](/en/docs/decisions#d67-chunk-rows)).
+  ([D67](/en/docs/decisions#d67-chunk-rows)). A [`Reduce<T>`](/en/docs/guide/threading#reductions) parameter gives
+  each chunk its own partial result, a local per run of rows that the JIT keeps in a register (the parameter is a
+  plain struct taken by `ref`), with no lock or atomic per row; the runner combines the chunks' copies in chunk order when the pass ends ([D69](/en/docs/decisions#d69-reductions)).
 
 ```mermaid
 flowchart LR

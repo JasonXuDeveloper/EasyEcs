@@ -171,9 +171,10 @@ public class MovementSystem : EcsSystem
 }
 ```
 
-A static per-entity method whose components each hold one number of one type (`float`, `int`, …) also gets a
+A static per-entity method whose components hold 1 to 4 numbers of one type (`float`, `int`, …) also gets a
 `Vector<T>` loop written by the generator, with the same results bit for bit
-([vector loops](/en/docs/guide/systems#vector-loops)); `Position` here has two fields, so this one runs row by row.
+([vector loops](/en/docs/guide/systems#vector-loops)). This one assigns a whole new `Position`, so it runs row by
+row; `p.X += v.X; p.Y += v.Y;` would get the loop, and [EECS055](/en/docs/guide/analyzer#eecs055) says which.
 
 ### [ForEach] parameters [#foreach-parameters]
 
@@ -188,6 +189,7 @@ A static per-entity method whose components each hold one number of one type (`f
 | `EntitySpan` | The entities of a batch method's run | Batch methods only |
 | `Maybe<T>` | A component the entity may lack | `HasValue`, `Value` |
 | `ReadOnlyMaybe<T>` | The same, read only (indexed components too) | `HasValue`, `Value` (`ref readonly`) |
+| `ref Reduce<T>` | A total over the rows into singleton `T : IReduction<T>` | Always by `ref` (else EECS002); the `Value` field is this chunk's partial result; the combined result replaces `T` ([reductions](/en/docs/guide/threading#reductions), [EECS057](/en/docs/guide/analyzer#eecs057)) |
 | `Mut<T>` | A component the method writes on some rows | `Value` reads; `Write()` and a `SetIfChanged(value)` that changed it stamp the row; a write for the scheduler |
 | Any other type (outside a system) | A value the caller passes to the entry point | `ref int count`, `in Settings s` |
 
@@ -197,6 +199,7 @@ A static per-entity method whose components each hold one number of one type (`f
 | --- | --- | --- |
 | `[ForEach]` / `[ForEach(Parallel = true)]` | Method | The method is the loop; `Parallel` splits rows across threads ([EECS010](/en/docs/guide/analyzer#eecs010)) |
 | `[ForEach(Parallel = true, ChunkRows = n)]` | Method | Threads claim `n` rows at a time (OpenMP's `schedule(dynamic, n)`): for a few hundred heavy rows ([chunk size](/en/docs/guide/threading#chunk-rows), [EECS054](/en/docs/guide/analyzer#eecs054)) |
+| `[ForEach(Simd = SimdMode.Require)]` | Method | The method must get its vector loop, else a build error ([EECS056](/en/docs/guide/analyzer#eecs056)); `SimdMode.Off` keeps it scalar without [EECS055](/en/docs/guide/analyzer#eecs055) |
 | `[ForEach(Slices = N)]` | Method | Each run visits one slice, about 1 / N of the rows: every row once per N runs (not with `Changed` / `Removed`: [EECS035](/en/docs/guide/analyzer#eecs035)) |
 | `[With<T>]` | Method, system group | Requires `T` without passing it |
 | `[Without<T>]` | Method, system group | Excludes entities with `T` |

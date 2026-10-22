@@ -533,7 +533,8 @@ follow, then the followers of 100 players counted and walked (`RelationBenchmark
   changes anything. `SetAll`, `EnableAll` and `Load` add one claiming pass over their rows; `Clone`, `Instantiate`,
   `LoadEntities`, `LoadEntitiesInto` and `MoveEntities` one probe per row and unique component. None of it allocates
   once warm.
-- **Memory:** one node per indexed entity, and one array of ids per key. A relation keeps one 20-byte link per element,
+- **Memory:** one node per indexed entity, and one array of ids per key; a unique key keeps its one entity in the
+  key's own record, with no array, so `Get` reads that record alone. A relation keeps one 20-byte link per element,
   recycled, and 8 bytes in its target's list.
 - **`Count`** is a hash probe, or an array access for an `EntityId` key; **`Find`** adds one step per entity, and its
   `.Count` none.

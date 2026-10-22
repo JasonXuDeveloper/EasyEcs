@@ -12,8 +12,8 @@ current API.
 
 ## v4.7 → v4.8 [#v4-7-to-v4-8]
 
-Code written for 4.7 compiles unchanged, and saves of 4.7 load. Two analyzer rules report more code, and one rule is
-new: a build that treats warnings as errors fails on them until the code changes.
+Code written for 4.7 compiles unchanged, and saves of 4.7 load. Two analyzer rules report more code, and three
+warnings are new: a build that treats warnings as errors fails on them until the code changes.
 
 ### Analyzer rules that report more: EECS027, EECS030 and EECS053 [#v4-8-analyzer]
 
@@ -64,9 +64,54 @@ public class CorpseSystem : EcsSystem
 [EECS053](/en/docs/guide/analyzer#eecs053) is new: a tracked component taken by `ref` that some path leaves unwritten.
 Its code fix takes it as a `Mut<T>`.
 
+[EECS060](/en/docs/guide/analyzer#eecs060) is new: a parallel `[ForEach]` method, or the `Execute` of a job run by
+`ForEachParallel`, that writes a static field or a shared object. A total becomes a
+[`ref Reduce<T>`](/en/docs/guide/threading#reductions) parameter:
+
+```csharp
+public struct Hits : ISingletonComponent, IReduction<Hits>
+{
+    public int Count;
+    public static Hits Identity => default;
+    public static Hits Combine(Hits left, Hits right) => new() { Count = left.Count + right.Count };
+}
+```
+
+```csharp tab="4.7" doccheck=expect-EECS060
+public static class HitStats
+{
+    public static int Hits;
+}
+
+public class TakeHits : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(ref Health health)
+    {
+        health = new Health(health.Value - 1);
+        HitStats.Hits++;   // lost updates
+    }
+}
+```
+
+```csharp tab="4.8"
+public class TakeHits : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(ref Health health, ref Reduce<Hits> hits)
+    {
+        health = new Health(health.Value - 1);
+        hits.Value.Count++;
+    }
+}
+```
+
+[EECS061](/en/docs/guide/analyzer#eecs061) is new: a parallel job's field read after `ForEachParallel` (each chunk
+ran a copy). Its code fix runs the job with `ForEach`; for all cores, use a `Reduce<T>` parameter as above.
+
 ### New public type [#v4-8-new-types]
 
-`ReadOnlyMaybe<T>` is new in `namespace EasyEcs`. A file that imports another namespace with a type of that name gets
+`ReadOnlyMaybe<T>`, `Reduce<T>`, `IReduction<T>`, `SimdMode` and `Interleaved` are new in `namespace EasyEcs`. A file that imports another namespace with a type of that name gets
 CS0104 (ambiguous reference): qualify the name, or alias it with a `using` directive.
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]
