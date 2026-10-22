@@ -63,6 +63,39 @@ public class QueryTests
     }
 
     [Test]
+    public void CollectIdsOfWholeWordsMatchesTheQuery()
+    {
+        // Tables of many 64-row words whose rows pass or not by presence bits and change ticks: a word with room for
+        // all of its rows is compacted at once, the last words of a bounded batch one row at a time.
+        using var world = new World();
+        var all = new Entity[3000];
+        world.CreateEntities(all, new Health(1), new Armor(1));
+        var random = new Random(11);
+        for (int i = 0; i < all.Length; i++)
+        {
+            if (random.Next(2) == 0) all[i].Remove<Health>();
+            if (i % 9 == 0) all[i].Set(new Stun(i));
+        }
+
+        ulong since = world.ChangeTick + 1;
+        world.Update();
+        for (int i = 0; i < all.Length; i += 1 + random.Next(4)) all[i].WriteArmor() = new Armor(2);
+        var filters = new[] { default, QueryFilter.Create().Changed<Armor>(since), QueryFilter.Create().Without<Stun>() };
+        foreach (var filter in filters)
+        {
+            var expected = new List<EntityId>();
+            foreach (var item in world.Read<Health, Armor>(filter)) expected.Add(item.Entity);
+            foreach (int size in new[] { expected.Count + 64, expected.Count, 64, 65, 127, 1 })
+            {
+                var batch = new EntityId[size];
+                int count = world.CollectIds<Health, Armor>(batch, filter);
+                Assert.That(count, Is.EqualTo(Math.Min(size, expected.Count)));
+                Assert.That(batch[..count], Is.EqualTo(expected.GetRange(0, count).ToArray()));
+            }
+        }
+    }
+
+    [Test]
     public void CollectIdsTakesABoundedBatchInQueryOrder()
     {
         using var world = new World();

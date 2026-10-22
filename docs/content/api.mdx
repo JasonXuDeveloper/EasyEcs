@@ -56,6 +56,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `Reduce<T>`, `IReduction<T>` | struct, interface | A `[ForEach]` parameter, taken by `ref`, reducing a pass into singleton `T`, which implements `IReduction<T>` (`Identity`, `Combine`): `Value`, `Combine(value)`. |
 | `Scratch<T>` | ref struct | A `[ForEach]` parameter: working memory of the method on the running thread, kept between rows, passes and worlds: `Value`. |
 | `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out id)`, `Find(key)`, `Count(key)`. |
+| `Lanes` | static class | Stream compaction for batch methods: `Compact(source, mask, destination)` writes the elements a lane mask selects side by side. |
 | `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interfaces, attributes | System groups (with filters through interfaces) and ordering. |
 | `SystemErrorPolicy` | enum | `Throw` (default) or `Disable`: what an exception in a system does. |
 | `SystemStats`, `SystemList` | readonly structs | A system's run count, times, allocated bytes and visited entities; `world.Systems`, allocation-free. |
@@ -79,7 +80,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `world.CreateEntities(Span<Entity> entities, in T1 … in Tn)` | O(count × n) amortized | one gate pass and at most one table growth for the wave; writes the handles |
 | `entity.Destroy()` | O(c) | the table's last row fills the hole (a tombstone during a pass); recycles the id; a stale handle is ignored; unlinks indexed components; cascades to `ChildOf` children and applies target policies; with `WorldOptions.DestroyLogCapacity`, one 16-byte record |
 | `world.DestroyAll<T1..Tn>(filter)` | O(M + S) | destroys every match in one gate pass and returns how many; safe during a pass |
-| `world.CollectIds<T1..Tn>(into, filter)` | O(M), + the rows read until `into` is full | writes the ids of the matches into a span in query order until it is full and returns how many: a bounded batch for `DestroyEntities`, `SaveEntities` or structural changes; a table whose rows all match is one copy; allocation-free |
+| `world.CollectIds<T1..Tn>(into, filter)` | O(M), + the rows read until `into` is full | writes the ids of the matches into a span in query order until it is full and returns how many: a bounded batch for `DestroyEntities`, `SaveEntities` or structural changes; a table whose rows all match is one copy, a 64-row word with room for its rows one `Lanes.Compact`; allocation-free |
 | `world.DestroyEntities(ids)` | O(ids × c) | destroys a list of ids in one gate pass and one cascade and returns how many; stale ids and repeats are skipped; safe during a pass |
 | `entity.IsAlive` / `world.IsAlive(id)` | O(1) | |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` | O(1) | false (or a throw) when that incarnation is not alive |
@@ -197,6 +198,12 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | `lookup[id]` / `lookup.Read(id)` / `lookup.Has(id)` | O(1): one entity lookup | a `ReadOnlyMaybe<T>` (no value when stale or missing) / `ref readonly T` (throws) / `bool` |
 | `lookup.TryFind(key, out id)` / `Find(key)` / `Count(key)` | O(1) hash probe, then O(1) per entity of `Find` | indexed `T` only, called on the parameter: the index is created and built before the pass and before the parallel stage of its system (O(N) the first time) |
 | a value index reached otherwise during a parallel stage or pass | throws `InvalidOperationException` when not built yet | building it would change it under the threads reading it |
+
+`Lanes`, for batch methods that pick rows with a vector compare:
+
+| API | Complexity | Notes |
+| --- | --- | --- |
+| `Lanes.Compact<T>(source, mask, destination)` | O(1): at most 64 elements; with AVX-512, 8 or 4 vector steps for elements of 8 or 4 bytes; otherwise one step per selected element, or per element up to the last selected one when more than 12 are | writes `source[i]` for each set bit `i` of `mask`, in order, to the start of `destination` and returns `PopCount(mask)`; reads only the selected elements and writes only that many; throws `ArgumentException` when a bit lies at or past `source.Length` or `destination` is shorter than `PopCount(mask)`; allocation-free |
 
 ## Disable and bulk changes [#bulk]
 

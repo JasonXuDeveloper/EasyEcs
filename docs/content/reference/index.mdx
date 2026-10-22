@@ -19,6 +19,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`EcsSystem`](/en/docs/reference/ecssystem) | Logic that runs on a world. |
 | [`ForEachAttribute`](/en/docs/reference/foreachattribute) | Runs a method of an EcsSystem (or a static method of any other type, through a generated entry point) for every entity matching its component parameters (and the WithAttribute / WithoutAttribute / WithAnyAttribute filters), each update, after EcsSystem.OnUpdate, in declaration order. |
 | [`GroupInfo`](/en/docs/reference/groupinfo) | The systems of one group in stages (ScheduleInfo). |
+| [`Lanes`](/en/docs/reference/lanes) | Stream compaction for batch methods, a GPU's ballot and compaction on a CPU: a vector compare decides a lane mask (Vector256.LessThan(hp, limit).ExtractMostSignificantBits(): CUDA's __ballot_sync; its __popc is PopCount), and Lanes.Compact writes the selected elements side by side: the ids of the rows a batch method picked (entities.Ids), their values, their indexes. |
 | [`LookupExtensions`](/en/docs/reference/lookupextensions) | Key lookups of an indexed component (IIndexed) through a Lookup. |
 | [`OrderedIndexExtensions`](/en/docs/reference/orderedindexextensions) | Ordered walks of a value index whose key is comparable (a score, a deadline, a level): ranges and sorted iteration for leaderboards, timers and matchmaking brackets. |
 | [`Prefab`](/en/docs/reference/prefab) | A recipe for entities: a set of component values that belongs to no world, so no query ever sees it. |

@@ -1105,11 +1105,20 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         }
 
         int written = 0, words = (rows + 63) >> 6;
+        bool tombstones = rows != archetype.AliveCount;
         for (int w = mode == All ? 0 : NextWord(archetype, 0, words); w < words;
              w = mode == All ? w + 1 : NextWord(archetype, w + 1, words))
         {
             ulong bits = (mode == All ? ulong.MaxValue : Word(archetype, w)) & RowMask(w, rows);
             if (bits == 0 && mode != All) w = NextPassing(archetype, w + 1, words) - 1; // words without a passing row
+            if (bits != 0 && !tombstones && into.Length - written >= 64)
+            {
+                // Room for the whole word and no tombstone to skip: the passing rows' ids side by side, 8 per store.
+                int first = w << 6;
+                written += Lanes.Compact<EntityId>(slots.AsSpan(first, Math.Min(64, rows - first)), bits, into.Slice(written));
+                continue;
+            }
+
             for (; bits != 0; bits &= bits - 1)
             {
                 var id = slots[(w << 6) + BitOperations.TrailingZeroCount(bits)];

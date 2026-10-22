@@ -16,6 +16,7 @@ public static partial class Complexity
         ["filter"] = ["QueryFilter"], ["QueryFilter"] = ["QueryFilter"], ["system"] = ["EcsSystem"],
         ["snapshot"] = ["WorldSnapshot"], ["singletonRef"] = ["SingletonRef"], ["relations"] = ["RelationIndex"],
         ["id"] = ["EntityId"], ["mut"] = ["Mut"], ["schedule"] = ["ScheduleInfo"], ["ComponentSet"] = ["ComponentSet"],
+        ["Lanes"] = ["Lanes"],
     };
 
     /// <summary>(type name, member name) to the table's rows for it: (the call as the table writes it, complexity).</summary>
