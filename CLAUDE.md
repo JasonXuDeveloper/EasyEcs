@@ -241,6 +241,70 @@ tools/ApiDocs/                 writes docs/content/reference/ from the XML docs 
                                workflow and glossary); missing, stale or orphaned entries fail the tool
 ```
 
+## Definition of done for a feature
+
+A feature, rule or change ships only with every part below that applies to it. Check them off before merging; a
+fresh session working on a new request follows this list.
+
+1. **Core**: one shared non-generic core with thin typed wrappers. T1..T9 variants come from `ArityGenerator`
+   templates. Hot paths allocate nothing and run no LINQ, closures or boxing. Each invariant that skips a bounds
+   check is documented next to the code. Structural changes go through the gate, and `StorageVersion` is bumped
+   where a pass must notice.
+2. **Generator**: whatever users would otherwise write twice is generated.
+   - Declarations users write once, such as an attribute on a field or type, are read through one `Symbols` helper.
+     Both the generator and the analyzer use it, so "skipped by the generator" is exactly "reported by the analyzer".
+   - Models are equatable and symbol-free, with a tracking name per stage and a caching assertion in
+     `GeneratorTests`, plus a generated-output test.
+   - Generators report no diagnostics.
+   - Partial types and nested types are handled; the declaring chain is partial or reported.
+3. **Analyzer**: every misuse that compiles and every pattern that works but costs gets an EECS rule.
+   - Severity: Error when the code is wrong, Warning when it is likely wrong, Info for performance hints.
+   - The descriptor message names the type or member and the fix.
+   - For a fallback to scalar, the reason comes from the same function the generator uses (`Kernel.Vectorize`), so
+     EECS055 or EECS056 names exactly why.
+   - Tests cover the positive cases, the negative cases and false-positive guards.
+   - Update the rule list and range in this file, in `docs/content/guide/analyzer.mdx` and `.zh.mdx`, and in
+     `docs/public/easyecs-rules.md`.
+4. **Code fix** (`EasyEcs.CodeFixes`) for every rule whose fix is mechanical, including converting hand-written
+   patterns to the generated or attribute form. The analyzer computes the fix as diagnostic properties, and a
+   `CodeFixTests` case covers it.
+5. **Tests** in `tests/EasyEcs.UnitTest`, one file per feature:
+   - behaviour;
+   - edge cases (stale ids, empty tables, structural changes mid-pass);
+   - the allocation test (0 B in steady state);
+   - for parallel code, bit-identical results at 1 and 4 threads;
+   - for vector loops, equivalence with the scalar method.
+6. **Benchmarks** with BenchmarkDotNet only.
+   - Measure before and after, two rounds each, with the A/B copy outside the repo tree (duplicate project names
+     break BDN).
+   - When several agents share a machine, run one benchmark at a time behind a shared lock file (`flock`).
+   - Check the Tier1 asm of new hot loops (JitDisasm): no calls in the loop body, no unexpected range checks.
+   - A change ships only if it is a net win at 0 B with no regression in WorldSimulation, BattleServer and the
+     feature's neighbours.
+   - Add a benchmark for anything not covered yet.
+7. **Docs**, written per `docs/WRITING.md`, en and zh structurally identical:
+   - the feature's guide page follows the page anatomy (what it is, when to use it as idea/warn Callouts, how to use
+     it with compiling examples, a full example, how to use it fast, what it costs, pitfalls with their EECS rule,
+     related Cards);
+   - components fit their content: Tabs for alternatives (`You write` / `The generator writes`, `Reported` /
+     `Fixed`), Steps for sequences, TypeTable for options, Accordions for multi-file examples, Files for trees;
+   - numbers appear only through `docs/src/data/bench.json` (BenchTable and the related components), never typed on
+     a page (decision records may quote numbers);
+   - complexity rows go in `docs/content/api.mdx` and `.zh.mdx`;
+   - XML docs need Chinese entries in `tools/ApiDocs/zh` (`dotnet run --project tools/ApiDocs`);
+   - add a decision record (`decisions.mdx` + `.zh.mdx`) for every non-obvious choice and every dropped idea, and
+     update the roadmap;
+   - add a changelog entry and a README "What's new" entry;
+   - a breaking change also needs a migration entry;
+   - update the rules file for AI assistants (`docs/public/easyecs-rules.md`) and this file's layout;
+   - the battle server (`BattleServer.cs` regions and `example.mdx`) and the samples use the feature where it
+     belongs, as exemplary code.
+8. **Commits and merge**:
+   - logic, docs and CI go in separate commits;
+   - parallel work happens in worktrees on branches off the work branch;
+   - `verify` runs before anything reaches master;
+   - renames of released public API are reported first and applied after the owner's approval (`audit-naming`).
+
 ## Workflows
 
 Repeatable procedures live in `.claude/skills/<name>/SKILL.md` (Claude Code loads them as skills; any agent or
