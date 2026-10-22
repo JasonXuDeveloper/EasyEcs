@@ -31,6 +31,11 @@ public record struct LoadRequest(ChunkPos Pos) : IComponent, IUniqueIndexed<Chun
     ChunkPos IIndexed<ChunkPos>.Key => Pos;
 }
 
+// A tag on a LoadRequest whose chunk the region files have: ChunkReadSystem reads those, ChunkGenerateSystem generates
+// the others. A request is created with it and loses it when the files lack the chunk (a presence bit), so all requests
+// share one table and both systems take theirs in the order they came.
+public struct Saved : IComponent;
+
 // A tag on a chunk loaded this tick: its clients get it whole, with what is in it (AoiChunkSystem), so neither its blocks
 // (SendChunksSystem) nor its entities (a spawn per entity) are sent as changes. ChunkSentSystem removes it.
 public struct Fresh : IComponent;
