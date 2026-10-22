@@ -88,6 +88,9 @@ after the change on the machine of the time; they are history, not the current r
 | [D68](#d68-vector-loops-without-opting-in) | Vector loops without opting in |
 | [D69](#d69-reductions) | Reductions are a parameter, combined in chunk order |
 | [D70](#d70-analyzer-candidates-not-added) | Analyzer candidates not added |
+| [D71](#d71-direct-index) | Unique keys inline, and direct-mapped keys |
+| [D72](#d72-setall-whole-words) | `SetAll` fills whole words |
+| [D73](#d73-survey-items-not-added) | Survey items not added |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1711,6 +1714,64 @@ and fixes too, and left them out.
 - **A code fix for EECS016 (drop `[With<T>]` or the parameter from a `[Removed<T>]` method):** the method left would
   take no component, which EECS003 rejects, so no single edit makes it compile; the right change (which component the
   method runs over) is the author's.
+
+## D71. Unique keys inline, and direct-mapped keys [#d71-direct-index]
+
+**Decision.** A unique index keeps each key's one entity inline in the key's head, with no id array per key. A unique
+component whose keys map onto a bounded range of slots may declare `IDirectIndexed<TKey>` (`static Slots`,
+`static SlotOf(key)`): its index keeps an array of `Slots` entries beside the hash, each holding a key and its
+entity, so `Get`, `TryGet` and the uniqueness check of a write read one entry. A key whose slot is out of range or
+held by another key is found through the hash, which stays the index for `Find`, `Count` and the ordered walks. The
+generator registers the slot map with the unique index (`SavedTypes.DirectIndex`), with no reflection.
+
+**Why.**
+- **A unique key has one entity.** An array per key held one id and cost an allocation per new key; inline,
+  `CreateUnique` (10,000 keys) went from 2,044 µs and 3.15 MB to about 1,120 µs and 2.33 MB, and
+  `RekeyAndLookupUnique` from 34.4 µs to 14 to 21 µs (`IndexBenchmark`).
+- **Grid lookups are the hot path of grid worlds.** The voxel server looks a chunk up by position for the blocks
+  around every body, the chunk every entity is in and the edges of the water, thousands of times a tick. A slot read
+  is about 2.1 times faster than the hash probe of a unique index and as fast as the hand-written grid it replaces
+  (`LookupUnique`, `LookupDirect`, `LookupGrid` in `IndexBenchmark`); the voxel server's physics ran 5 to 11 %
+  faster with it.
+- **Kept by every write.** The slot array is updated where the hash is (link, unlink, clear), so creation, loads,
+  moves, `SetAll` and destruction keep it right; a grid kept by hand has to be updated on each of those paths.
+- **Correct for any slot function.** A collision or an out-of-range key costs a hash probe, never a wrong answer: a
+  slot counts the keys of it that only the hash holds, so a lookup that finds another key there knows whether the
+  hash must be asked.
+
+**Considered.**
+- **The hand-written grid beside the unique index** (what the voxel server had): the same lookup speed, but code
+  every grid world repeats, and a grid that a missed write path leaves stale.
+- **A slot array instead of the hash:** out-of-range keys would have nowhere to go, and `Find`, `Count` and the
+  ordered walks are built on the hash.
+- **Registration by reflection:** not trimmable and not Native AOT safe; the generator already registers every
+  unique component.
+
+## D72. `SetAll` fills whole words [#d72-setall-whole-words]
+
+**Decision.** `SetAll` writes a 64-row word whose rows all match with one `Span.Fill` of the value. A partial word,
+and a component an index watches (the index must see each row's write), keep the row-by-row loop.
+
+**Why.** The other bulk calls already worked a word at a time; the value write was the one per-row loop left.
+`BulkBenchmark` `StunAndLift` (100,000 entities) went from 92 and 100 µs to 30 and 30 µs over two runs, 0 B both.
+
+**Considered.** Filling indexed components too: the index links each row to its key, so a fill would skip the
+updates it needs.
+
+## D73. Survey items not added [#d73-survey-items-not-added]
+
+**Decision.** The survey that added `IDirectIndexed<TKey>`, `CollectIds` and the whole-word `SetAll` measured these
+changes to the voxel server and the core too, and left them out.
+
+**Considered and dropped.**
+- **A chunk grid beside the unique index:** superseded by `IDirectIndexed<TKey>` ([D71](#d71-direct-index)), which
+  reads as fast and is kept by every write.
+- **Writing the voxel server's `InChunk` only when an entity's chunk changed:** the difference stayed within noise.
+- **Copying presence bits a word at a time** instead of bit by bit: contradictory A/B runs (faster in one, slower in
+  the next), so no net win was shown.
+- **A water halo that copies only the edges that changed:** half the copies, but the step's time stayed within noise,
+  and it cost 4 KB more per sleeping chunk to remember the edges. Superseded by the planned push-halo design, where a
+  chunk hands its edges to its neighbours when they change ([roadmap](/en/docs/roadmap#push-halo)).
 
 ## Related [#related]
 
