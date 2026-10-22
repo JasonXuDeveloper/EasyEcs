@@ -1105,10 +1105,12 @@ public class GeneratorTests
     [TestCase("public class Unrelated { }", "public class Unrelated { int x; }")]                  // another file
     [TestCase("i.P.V++;", "i.P.V += 2;")]                                                          // a body in the systems' file
     [TestCase("{ [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { }", "{ [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { p.V++; }")] // a [ForEach] body
+    [TestCase("for (int i = 0; i < 2; i++) q.V += ++s.Value;", "for (int i = 0; i < 3; i++) q.V += ++s.Value;")] // a looping Scratch method's body
     public void EditsThatChangeNoModelHitTheCache(string before, string after)
     {
         string code = "using EasyEcs;\n" + Components +
-            "public struct L; public partial class S : EcsSystem { [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { } [ForEach(Slices = 4)] static void D(ref Q q) { } }" +
+            "public struct L; public partial class S : EcsSystem { [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { } [ForEach(Slices = 4)] static void D(ref Q q) { } " +
+            "[ForEach] static void E(ref Q q, Scratch<int> s) { for (int i = 0; i < 2; i++) q.V += ++s.Value; } }" +
             "public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void B(ref T t) { } } public class H : G<P>;" +
             "public static class U { static void C(World w) { foreach (var i in w.Query<P>()) i.P.V++; } }" +
             "public partial struct Census : ISingletonComponent { [Sum] public int N; [Min] public float L; }" +
@@ -1352,6 +1354,43 @@ public class GeneratorTests
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
         string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
         Assert.That(generated, Does.Contain("Slice((int)(system.RunCount % 3), 3)"));
+    }
+
+    [Test]
+    public void AScratchMethodThatLoopsOrCallsRunsOutOfLine()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components,
+            "public class S : EcsSystem { " +
+            "[ForEach(Parallel = true)] static void Loops(ref P p, Scratch<int[]> s) { s.Value ??= new int[4]; for (int i = 0; i < 4; i++) p.V += s.Value[i]; } " +
+            "[ForEach] static void Calls(ref Q q, ReadOnlyMaybe<T> t, Scratch<System.Collections.Generic.List<int>> s) { (s.Value ??= new()).Clear(); q.V = s.Value.Count; } " +
+            "[ForEach] static void Counts(ref P p, Scratch<int> s) => p.V = ++s.Value; " +                    // small: inlined
+            "[ForEach] static void Plain(ref Q q) { for (int i = 0; i < 4; i++) q.V++; } }"),                // no Scratch: inlined
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        const string noInlining = "global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]";
+        Assert.That(generated, Does.Contain($"Name = \"Loops\"), {noInlining}"), generated);
+        Assert.That(generated, Does.Contain($"Name = \"Calls\"), {noInlining}"), generated);   // a run of rows calls it too
+        Assert.That(generated, Does.Contain("internal ref struct CallsJob1 : global::EasyEcs.IForEachBatch<"), generated);
+        Assert.That(generated, Does.Contain("Name = \"Counts\")]"), generated);
+        Assert.That(generated, Does.Contain("Name = \"Plain\")]"), generated);
+    }
+
+    [Test]
+    public void ALoopAddedToAScratchMethodReemitsOnlyItsSystem()
+    {
+        var tree = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components + "public class S : EcsSystem { [ForEach] static void A(ref P p, Scratch<int> s) => p.V = ++s.Value; }", Parse);
+        var other = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic class O : EcsSystem { [ForEach] static void B(ref Q q, Scratch<int> s) { for (int i = 0; i < 2; i++) q.V += ++s.Value; } }", Parse);
+        var compilation = Compile().AddSyntaxTrees(tree, other);
+        var driver = Driver().RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(tree, CSharpSyntaxTree.ParseText(
+            tree.ToString().Replace("=> p.V = ++s.Value;", "{ for (int i = 0; i < 2; i++) p.V += ++s.Value; }"), Parse)));
+
+        var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
+        Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
+        string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
+        Assert.That(generated, Does.Contain("MethodImplOptions.NoInlining"), generated);
     }
 
     [Test]
