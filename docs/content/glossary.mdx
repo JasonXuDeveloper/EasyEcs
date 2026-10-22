@@ -126,9 +126,10 @@ faster; a busy runner leaves the items to the calling thread. See
 ## Chunk [#chunk]
 
 A slice of the matching rows of a parallel method (`[ForEach(Parallel = true)]`, `ForEachParallel`): a multiple of 64
-rows, about four per thread, between 1,024 and 16,384 rows (a multiple of 4,096 when the method writes a tracked
-component). The [runner](#runner) hands the chunks to its threads; fewer than two chunks run on the calling thread
-alone. See [Systems](/en/docs/guide/systems#parallel-methods).
+rows, by default about four per thread, between 1,024 and 16,384 rows (a multiple of 4,096 when the method writes a
+tracked component), or `ChunkRows` rounded up to 64. The [runner](#runner)'s threads claim the chunks one at a time
+as they finish (OpenMP's `schedule(dynamic, n)`); fewer than two chunks run on the calling thread alone. See
+[chunk size](/en/docs/guide/threading#chunk-rows).
 
 ## Slice [#slice]
 
@@ -259,6 +260,13 @@ A recipe of component values that belongs to no world (`new Prefab().SetHealth(3
 A `DynamicBuffer<T>` component: a list that belongs to one entity, such as a bag of loot or a path. Its writes need
 a `ref`, so every change is tracked, and snapshots copy its elements. See
 [Dynamic buffers](/en/docs/guide/dynamic-buffers).
+
+## Buffer pool [#buffer-pool]
+
+Where the lists of dead [dynamic buffers](#dynamic-buffer) wait, per element type, for the next buffer's first write:
+entities with buffers that come and go allocate nothing once warm. `DynamicBuffer<T>.PoolCapacity` caps the length a
+list may have to go back, and `DynamicBuffer<T>.ReservePool(n)` fills it at start-up. See
+[the buffer pool](/en/docs/guide/dynamic-buffers#pool).
 
 ## Value index [#value-index]
 

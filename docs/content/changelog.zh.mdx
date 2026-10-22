@@ -16,7 +16,7 @@ icon: RotateCcwClock
 - 枚举元素的 `DynamicBuffer`（`DynamicBuffer<Block>`）现在和结构体元素一样有生成的具名成员：`chunk.Block`、`HasBlock`、
   `WriteBlock()`、`GetOrAddBlock()`、`RemoveBlock()`，以及预制体的 `SetBlock(…)`。见[动态缓冲](/zh/docs/guide/dynamic-buffers)。
 - `DynamicBuffer<T>.PoolCapacity` 按元素类型设置：缓冲被销毁或移除时，最长多少个元素的列表还给回收池（默认是 4 KB 能放下的个数）。
-  大缓冲反复出现又消失时调高它，比如玩家周围加载又卸载的区块，新缓冲就会重用旧列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)。
+  大缓冲反复出现又消失时调高它，比如玩家周围加载又卸载的区块，新缓冲就会重用旧列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#pool)。
 - 分析器规则 [EECS053](/zh/docs/guide/analyzer#eecs053)（警告，有代码修复）：`[ForEach]` 方法以 `ref` 传入追踪变化的组件（`ITracked`、
   `DynamicBuffer<T>`），却有路径不写它（提前 `return`、写在 `if` 里），访问到的每一行都会被打 tick，`[Changed<T>]` 系统就会看到它根本没改过的行。
   修复改成 `Mut<T>`（写入改成 `x.Write()`，读取改成 `x.Value`），只给写过的行打 tick。
@@ -27,7 +27,7 @@ icon: RotateCcwClock
 - `world.SaveEntitiesWithout(output, ids, set)` 保存一组实体，写 `ComponentSet` 以外的所有组件：加载后会重新算出的数据不进存档。见
   [迁移与卸载](/zh/docs/guide/migration-and-unload#records)。
 - `DynamicBuffer<T>.ReservePool(lists)` 在启动时往 `T` 的回收池里放入这么多个容量为 `PoolCapacity` 的空列表，世界增长到的那些实体（玩家周围的区块）
-  的缓冲在服务器运行时从池里取列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)。
+  的缓冲在服务器运行时从池里取列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#pool)。
 
 - 按一行写的 `[ForEach]` 方法，只要它的每个组件都只有一个同类型数值（`float`、`double`、`int`、`uint`、`long`、`ulong`），就以 SIMD
   循环运行：生成器根据方法体写出 `Vector<T>` 循环，和 Burst 编译 job 一样，`if`、`?:` 和 `return` 变成掩码。结果逐位相同；不符合条件的方法
@@ -35,12 +35,12 @@ icon: RotateCcwClock
 - `[ForEach(Parallel = true, ChunkRows = n)]` 指定并行方法的一个线程每次取多少行（向上取整到 64；`world.ForEachParallel` 等并行调用用
   `chunkRows:` 参数）。默认每块至少 1,024 行，方法写被追踪组件时至少 4,096 行，所以几百个重的行只落在一个线程上；现在它们会分到所有线程，
   写被追踪组件时也一样。分析器规则 [EECS054](/zh/docs/guide/analyzer#eecs054) 拒绝负数，以及没有 `Parallel` 的 `ChunkRows`。见
-  [多线程](/zh/docs/guide/threading#chunk-rows)和[决策](/zh/docs/decisions#d67-chunk-rows)。
+  [多线程与并行](/zh/docs/guide/threading#chunk-rows)和[决策](/zh/docs/decisions#d67-chunk-rows)。
 
 ### 性能 [#v4-8-0-performance]
 
 - 缓冲回收池在线程之间共享：每个线程自己留几个列表，其余的按批和所有线程都能取用的池交换，所以拥有者线程从销毁的缓冲收回的列表，也能给并行
-  `[ForEach]` 的第一次写入用，以前那里要分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)。
+  `[ForEach]` 的第一次写入用，以前那里要分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#pool)。
 - 预制体上的空缓冲（不带元素的 `SetBuffer<T>()`）不再给实例一个列表：实例写入第一个元素时从池里取，不再新建一个再扩容。
 - `LoadEntities` 把缓冲读进来的那个列表直接交给加载出的实体，不再复制到另一个列表。
 - 对空缓冲调用 `buffer.TrimExcess()` 会把列表还给回收池：缓冲不再持有列表，任何 `T` 缓冲的下一次首次写入会重用它，所以只在实体活跃时才用的临时缓冲，

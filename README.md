@@ -291,7 +291,7 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 
 - **Large buffers that come and go allocate nothing.** `DynamicBuffer<T>.PoolCapacity` sets, per element type, how long
   a list the buffer pool keeps, so the blocks of chunks loaded and unloaded around players reuse one another's lists
-  ([dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers#what-it-costs)). The pool is shared across
+  ([dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers#pool)). The pool is shared across
   threads, a prefab's empty buffer takes its list from it, and `LoadEntities` keeps the lists it reads.
 - **Reserve the peak, then allocate nothing.** `DynamicBuffer<T>.ReservePool(n)` fills the pool at start-up, and
   `Reserve(prefab, n)` also covers index keys, the retired table and the free ids. Restores and loads reuse their
@@ -305,7 +305,8 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   `[ForEach]` method that is one structural change
   ([systems](https://ecs.xgamedev.net/en/docs/guide/systems#read-only-maybe)).
 - **Enum elements get named members.** A `DynamicBuffer<Block>` of an enum gets `chunk.Block`, `WriteBlock()` and the
-  rest, like a buffer of a struct.
+  rest, like a buffer of a struct
+  ([dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers#declare-the-element)).
 - **A Minecraft-style sample and a Samples section.** [VoxelServer](https://ecs.xgamedev.net/en/docs/samples/voxel-server)
   runs chunks, flowing water, areas of interest, zombies, replication and saves at 20 ticks a second; the
   [Samples](https://ecs.xgamedev.net/en/docs/samples) section of the site walks through every sample.
