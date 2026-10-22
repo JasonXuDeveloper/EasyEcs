@@ -1,0 +1,16 @@
+<doc>
+  <member name="T:EasyEcs.IForEachMasked`1" source="c9733e9f8e70">
+    <summary>
+      还接收"只有部分行通过"的 64 行一字的批量 job（过滤条件要检查存在位或变更 tick）：<c>World.ForEachMasked</c>
+      把整个字交给它，通过的行以位的形式给出；<see cref="T:EasyEcs.IForEachBatch`1" /> 则会把每段连续通过的行分开交给它。
+      向量循环算出每个通道，只保留通过的那些。带向量循环的 <c>[ForEach]</c> 方法编译成这个接口。
+    </summary>
+  </member>
+
+  <member name="M:EasyEcs.IForEachMasked`1.Execute(EasyEcs.EntitySpan,System.UInt64,System.Span{`0})" source="db1616c853b6">
+    <summary>
+      一个字里的行：<paramref name="rows" /> 的第 i 位为 1 时，第 i 行（<paramref name="entities" /> 和每个 span 的第 i 个元素）通过；
+      job 保持其余各行不变（可以把它们的值原样写回）。第 0 位一定为 1，span 长度及之后的位一定为 0。
+    </summary>
+  </member>
+</doc>
