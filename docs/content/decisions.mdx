@@ -99,6 +99,9 @@ after the change on the machine of the time; they are history, not the current r
 | [D79](#d79-entity-random) | Deterministic random numbers are a pure function, `EntityRandom` |
 | [D80](#d80-for-parallel) | A parallel loop over a range or a list is `world.ForParallel` |
 | [D81](#d81-keyed-reductions) | Keyed reductions not added |
+| [D82](#d82-for-entity) | One entity is a `[ForEntity]` method |
+| [D83](#d83-update-interval-attribute) | A system's cadence is an attribute |
+| [D84](#d84-consume) | `[Consume]` destroys the visited rows in bulk when it can |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1615,6 +1618,8 @@ and the `Math` functions with an exact vector counterpart. It is on by default (
 method that looks meant for a loop stays scalar, `Simd = SimdMode.Require` makes that an error (EECS056) and
 `SimdMode.Off` opts a method out. The rows after the last whole vector, and all rows without a vector unit (or,
 for several fields, without the shuffles: AVX2 at 256 bits, permutes at 512), run the method itself.
+Later steps took `Vector512` (where the hardware runs it, then `Vector<T>`),
+`Reduce<T>` results (lane accumulators), masked words and the methods of [D90](#d90-vector-loops-reach).
 
 **Why.**
 - **The JIT does not do it.** In .NET 10 the Tier-1 code of `a[i] += b[i]`, `a[i] += b[i] * 0.5f`, a clamp, an int
@@ -1647,16 +1652,8 @@ for several fields, without the shuffles: AVX2 at 256 bits, permutes at 512), ru
 - **Opt-in, as Burst's `[BurstCompile]`:** Burst needs it because it changes the compiler and allows `FloatMode.Fast`.
   Here nothing changes but speed, so an opt-in would leave most code slow for no safety. `SimdMode` keeps `Auto` as
   the default and adds only the assertion (`Require`) and the way out (`Off`).
-
-{/* TODO(vector loops): the KernelBenchmark numbers of Move2 / Move3 / Move4 / Seek / Travel (several fields), and
-the items still coming (Math.Clamp and MathF.*, presence-bit lane masks, Vector512, bounds-check-free scalar loops,
-vector reductions), each as a bullet here when it lands. */}
 - **Leaving it to batch methods with `Vector<T>`:** still there for lanes the rule does not cover, but it asks every
   user to write SIMD by hand; a per-row method says the same thing.
-- **`Vector512` where the hardware has it:** a hand-written `Vector512` loop is about 1.4 times the generated
-  `Vector<T>` one on AVX-512; a later step of the same generator.
-- **Reductions inside the loop** (sums into a singleton): exact for integers, not for floats without reassociation;
-  parallel reductions are a `Reduce<T>` parameter ([D69](#d69-reductions)), which a vector loop does not take yet.
 
 ## D69. Reductions are a parameter, combined in chunk order [#d69-reductions]
 
@@ -2096,6 +2093,186 @@ per-chunk copies in an array, and the runtime creates no array of a value type t
 **Considered.**
 - **Per-thread bins** (above) and **a sparse list per chunk** (pairs sorted and merged): the second adds a sort per
   chunk to the same merge, so it was not built.
+
+## D82. One entity is a `[ForEntity]` method [#d82-for-entity]
+
+**Decision.** A static method marked `[ForEntity]` runs on one entity. The generator writes the `IForEachEntity` job
+that `entity.Run` takes (its `ref` parameters are the `WriteMask`, its filter attributes are a `static readonly`
+filter, and it implements `INoStructuralChanges` when the method makes no structural change). It also writes an entry
+point next to the method, with the method's name: `Owner.Method(entity, [since,] values…)`. The entry point returns
+whether the method ran.
+
+**Why.**
+- **A request handler written as a job is four declarations for one line of work.** You write a struct, its fields,
+  a `WriteMask` that must match the `ref` parameters (EECS037 checks it), and a filter field. Then each call site
+  creates the job and calls `Run` with the type arguments spelled out. A `[ForEach]` method outside a system already
+  gets a generated job and entry point
+  ([D26](#d26-generated-members-and-a-suggestion-to-use-them)). One entity is the same pattern with
+  `entity.Run` in place of `world.ForEach`.
+- **The name pairs with `[ForEach]`.** `[ForEach]` runs the method for each matching row; `[ForEntity]` runs it for
+  the one entity the caller gives. Both attributes declare what the method is, not when it runs.
+  - The working name, `[RunOn]`, reads as a schedule (run on a thread, on an update) and suggests a target type
+    argument.
+  - `[OneEntity]` names the cardinality, but no verb or preposition says the method runs.
+- **The entry point keeps the shape of the other generated runners.** It is a static member of the method's type,
+  named like the method, with the entity first. A method with `[Changed<T>]` / `[Removed<T>]` takes the tick to look
+  back from second, the way `Since` does. As with runners, the method stays private so that its name is free for the
+  entry point.
+- **It costs what the hand-written job costs.** The generated code is the same `entity.Run` call: `ForEntityBenchmark` (1,000 hits on 10,000 units, a tenth dead): 9.80 and 9.96 µs in two rounds against 10.04 and 9.97 µs for the hand-written job and filter field, inside the error, 0 B both.
+
+**Considered.**
+- **An extension member on `Entity` (`unit.TakeHit(30)`).** Every request of every module would land in `Entity`'s
+  member list, and two owners with one method name would collide. The owner's name says whose request it is.
+- **Returning the method's result.** `ref` values already carry results, as they do for runners; a `bool` keeps one
+  meaning, whether the method ran.
+- **Converting jobs whose fields are read after the call.** EECS080 converts a job only when every use of it is a
+  creation followed by one `Run`. A job that returns a result in a field becomes a method with a `ref` parameter, and
+  that rewrite of the call site is left to its author.
+
+## D83. A system's cadence is an attribute [#d83-update-interval-attribute]
+
+**Decision.** `[UpdateInterval(n, Phase = p)]` on a system class sets how often the system runs, and the `UpdateInterval`
+and `UpdatePhase` properties are removed. The generator passes the two values to the system's generated code, which
+`AddSystem` reads once. A derived system inherits its base's attribute unless it declares its own. EECS082 reports an
+override of the old properties, and its fix writes the attribute; EECS083 reports an interval below 1 or a phase
+outside 0 to n - 1.
+
+**Why.**
+- **The cadence was meant to be a constant, and a property could not say so.** EECS018 warned on a computed override
+  after the fact. An attribute argument is a compile-time constant, so that warning and its code fix go away.
+- **One virtual call less per update, below what measures.** `RunSystem` used to make one virtual call per system per update to read the interval;
+  it now reads a field set when the system is added. In `OrderingBenchmark` (four systems over 10,000 entities per
+  update): before and after, 6.96 and 7.21 µs in one round, 7.55 and 7.16 µs in a second (registered order; ordered: 6.99 and 7.09, then 7.96 and 7.02 µs), each inside its error (±0.22 to 0.69 µs): one virtual call per system is below what the benchmark can see, so the reason for the change is the constant, not the speed. 0 B either way.
+- **The schedule is visible without running code.** Tools, the analyzer (EECS028 exempts the `OnUpdate` of a system
+  with a cadence) and readers all see it on the declaration.
+
+**Considered.**
+- **Keeping the properties next to the attribute.** That gives two ways to say one thing, with an order between them to
+  learn. The breaking change is one line per system, the code fix makes it, and the migration guide shows it.
+- **Run-time cadence.** A server that changes how often a system runs puts the system in a group and updates the group
+  when it is due ([system groups](/en/docs/guide/systems#system-groups)), as
+  [D51](#d51-not-added) already recommends over a time-based interval.
+
+## D84. `[Consume]` destroys the visited rows in bulk when it can [#d84-consume]
+
+**Decision.** `[ForEach, Consume]` destroys exactly the rows its pass visited, when the pass ends.
+- **A method that makes no structural change** (or a batch method) is followed by one `DestroyAll` with the method's
+  own filter. Whole tables that match and hold no cleanup component are freed in one step.
+- **A method that may change structure** destroys each entity right after the method ran on it.
+- **If the pass throws,** nothing it has not finished is destroyed.
+- A method that consumes makes its system run alone in a parallel update. `[Consume]` with `Slices` is EECS085.
+
+**Why.**
+- **Bulk is exact only when the pass cannot change what matches.** After a method without structural changes, the
+  rows that match the filter are exactly the rows the pass visited: no entity was created, moved or tagged in between.
+  A method that creates entities matching its own query (a `Spawn` that spawns) would see them destroyed by a
+  `DestroyAll`, so such a method destroys row by row.
+- **Measured** (`ConsumeBenchmark`: each operation creates N event entities and runs one pass that applies and destroys
+  them; `HandWritten` calls `entity.Destroy()` in the body, `EachRow` is `[Consume]` on a method that may change
+  structure, and `Bulk` is `[Consume]` on one that does not):
+
+| Events | `HandWritten` | `EachRow` | `Bulk` | Allocated |
+| --- | --- | --- | --- | --- |
+| 1,000 | 37.85 / 36.65 µs | 38.39 / 38.61 µs | 14.84 / 14.84 µs (0.39× / 0.41×) | 0 B |
+| 100,000 | 3,923.61 / 3,946.63 µs | 3,878.94 / 3,908.39 µs | 1,499.03 / 1,392.84 µs (0.38× / 0.36×) | 0 B |
+
+  (two rounds, first / second)
+
+  Bulk takes about 0.4 of the time of a destroy per row. Per row, `[Consume]` costs what the hand-written destroy
+  costs, so the methods that cannot use bulk lose nothing.
+
+- **What a throw leaves.** The bulk destroy runs after the pass, so an exception skips it and every event stays for the
+  next run, which visits them again. The per-row path has already destroyed the rows it finished, as hand-written code
+  would have.
+
+**Considered.**
+- **Always row by row.** It is simple, but it pays the per-row cost where a table could be freed at once.
+- **Recording the visited ids and destroying those.** That is exact for every method, but it costs a buffer that grows
+  with the pass (unbounded memory per pass) and a lookup per id. Per-row destroy is already exact for the methods
+  where bulk is not.
+- **Consuming with `Slices`.** Each destroy moves rows of the other slices, so events could wait many runs.
+
+## D90. Vector loops for parallel methods, optional and narrow lanes, struct values and wide rows [#d90-vector-loops-reach]
+
+**Decision.** The vector loop of [D68](#d68-vector-loops-without-opting-in) takes more of the methods real systems
+write, and each method's loop is listed:
+- **Parallel methods.** A `[ForEach(Parallel = true)]` method's chunks run their runs of rows through the same loop.
+- **`FloatMode.Fast` math.** `MathF.Sin`, `Cos`, `Exp`, `Log`, `Log2` and `Hypot` (and their `double` forms) take
+  .NET's vector approximations (`Vector512.Sin`...); under `FloatMode.Exact`, EECS055 names the call.
+- **`Maybe<T>` as a lane mask.** The presence bits of the run's optional column are a lane mask per vector, `HasValue`
+  is that mask and `Value`'s fields are lanes read (and written) where rows have `T`; a read of `Value` for a row
+  without it sends the vector's rows to the method, which throws as written.
+- **Narrow lanes.** `byte`, `sbyte`, `short` and `ushort` components get 64 or 32 rows per `Vector512`. C# computes
+  them as `int`, so the generator follows each value as low bits plus the interval it lies in, and takes an operation
+  only where that proves the narrow lane is the `int` result's: wrapping `+ - * & | ^ ~ <<` (the low bits of the `int`
+  result), `Math.Min` / `Max` chains around a sum or difference as `AddSaturate` / `SubtractSaturate`, compares against
+  a constant inside the range (a saturated sum against 255 is not), right shifts and `Abs` of exact values. Masked words
+  of narrow lanes run the method.
+- **Struct values.** A field of `System.Numerics` or Godot `Vector2` / `Vector3` / `Vector4` (or another struct of
+  lanes) gives its lanes; `new T(...)` (a record's positional constructor, or one that only sets fields), `with`, the
+  vector types' component-wise operators, `Min` / `Max` / `Abs` / `SquareRoot` and struct locals become one statement
+  per lane, so the Godot sample's `position = new Position(position.Value + velocity.Value * dt)` is a flat loop.
+- **Cold branches.** A call (or anything else the loop cannot express) under a condition the loop computes sends the
+  rows of a vector whose lanes take it to the method, in row order, before any store; the other vectors stay vectors.
+- **Wide components.** On AVX-512, a component the loop does not split (more than 4 lanes, fields of other types) gets
+  a `Vector512` loop when the method uses only 4-byte lanes of it on word boundaries, the row is at most 16 words, and
+  the permutes pay: the 16 rows of a vector are loaded as K whole vectors, a pruned tree of two-source permutes
+  (`vpermt2ps`) gathers each used field, and only the vectors holding written words are permuted and stored back.
+  The job's tables are `static readonly` fields, and a `static readonly bool` checks the runtime layout (the size, and
+  each used lane set through `with` and found in its word), so a layout the generator did not predict runs the method.
+- **An inspector.** `DescribeSchedule()` lists each method's loop (`SystemInfo.Loops`: "Move: vector (Vector512 or
+  Vector&lt;float&gt;), flat", "Steer: vector (Vector512 only), wide component (permutes), masked words scalar",
+  "Spawn: scalar (it takes the Entity)"); `tools/jitdisasm.sh` prints the Tier-1 code of a loop
+  (`DOTNET_JitDisasm`, `DOTNET_TC_CallCountingDelayMs=0`).
+- **The advice to split.** When a component is too wide or too mixed for the loop and the method uses at most half its
+  fields (at most 4, of one size), EECS055 ends with them: "it uses 3 of Body's 12 fields (X, VX, Y): split them into a
+  component of their own".
+
+**Why.**
+- **`FloatMode.Exact` is deterministic, and stays so.** Each lane is one IEEE operation of the scalar code, in its
+  order: `+ - * /`, `Sqrt`, `Min` / `Max` and the conversions are correctly rounded on x64 and on ARM64 (AdvSimd)
+  alike, so a vector loop gives every machine the scalar code's bits. `FloatMode.Fast` is the mode that may differ:
+  reordered float sums, and approximations, measured against `MathF` on 1.6 million random inputs each (`Sin` and
+  `Cos` in ±100, `Exp` in ±80, `Log` in 10^-30 to 10^30): `Sin`, `Cos`, `Log` and `Log2` within 1 ulp, `Exp` within 2
+  (`Exp(0)` is `1 + 1 ulp`), `Hypot` equal on every pair tried; for `double`, `Sin` within 1 ulp, `Exp` and `Log`
+  within 2.
+- **Narrow lanes are proven, lane by lane.** A unit test runs every pair of `byte` (and `sbyte`) values, 65,536 rows,
+  through each narrow kernel, with and without rows that lack a component, and compares the bits with the method;
+  swapping `AddSaturate` for `SubtractSaturate` fails it. Anything the interval does not prove stays scalar, with the
+  reason.
+- **Wide rows: where the permutes pay.** Prototype (BenchmarkDotNet, this machine, AVX-512), the permute tree against
+  the per-row loop at 1,000 / 10,000 / 100,000 rows: 3 of 12 fields under 11 vector operations 0.48 / 0.60 / 0.85 of
+  the scalar time; 4 of 8 fields under 4 operations 0.69 / 0.67 / 0.97; 3 of 12 under 3 operations 0.89 / 1.03 /
+  1.10; 4 of 16 under 4 operations 1.07 / 0.96 / 0.94; 2 of 8 under 2 operations 0.66 / 0.97 / 1.06. The gate is the
+  line between them: fewer permutes per 16 rows than 8 per vector operation of the body (31 permutes against 11
+  operations vectorizes, 42 against 4 stays scalar, and says so). The same rows split into a component of the 3 used
+  fields ran in 0.16 to 0.34 of the scalar time: the advice is worth more than the permutes.
+- **Cold branches cost only where taken.** Prototype at 10,000 rows, a call under a condition: 7.75 µs →
+  1.06 µs when no row takes it, 1.09 at 0.1 %, 1.94 at 1 %, 9.30 (against 12.74) at 10 %.
+- **The generated loops, against the same method per row** (`KernelBenchmark`, 1,000 / 100,000 rows, two runs): a
+  byte brightness with saturation 48 ns / 2.6 µs against 3.1 µs / 311 µs; `Vector3` movement 96 to 108 ns / 23 µs
+  against 488 to 565 ns / 53 to 58 µs; a `Maybe<T>` mask 261 to 298 ns / 24 µs against 1.5 µs / 148 to 156 µs
+  (`MaybeBenchmark.OneMethod` 109 → 10 µs, as fast as two methods); a parallel step 274 to 294 ns / 23 to 25 µs against
+  1.4 µs / 207 to 215 µs; a cold branch 87 ns / 10 µs when no row takes it and 281 to 287 ns / 27 µs when one row in
+  100 does, against 752 ns / 64 to 68 µs and 773 to 811 ns / 83 to 85 µs; `Sin` and `Exp` under `FloatMode.Fast`
+  1.8 µs / 178 µs against 7.2 µs / 1.43 ms; the wide component of 12 floats 898 to 916 ns / 186 to 196 µs against
+  1.6 to 1.8 µs / 209 to 217 µs. Every one allocates 0 B, and the loops the branch had before kept their times.
+
+**Considered.**
+- **A full transpose of 8 or 16 words a row** (butterflies, every word moved): 1.07 to 2.05 times the scalar time (8
+  words at 1,000 rows 983 against 531 ns, 16 words 2,666 against 1,301 ns). The pruned tree moves only the used words.
+- **Gathers.** .NET 10 has no AVX-512 gather API; AVX2 gathers of 8 rows ran in 0.8 to 1.18 of the scalar time, below
+  the tree wherever the tree paid.
+- **Strided loads** (one insert per lane): 1.0 to 2.9 times the scalar time.
+- **`[Lane]` / `[Hot]` field markings, `[Layout(Soa)]` storage.** The method already says which fields it uses, so
+  marking them adds nothing the generator lacks. A struct-of-arrays table was the fastest form (3 of 12 fields: 97 ns
+  against 765 at 1,000 rows, 19.9 against 185 µs at 100,000) but changes every API that hands out a `ref` to a row;
+  splitting the component gets most of it (263 ns, 30.7 µs) with storage unchanged, so EECS055 says that instead.
+- **Unrolling the loop** by 2 or 4: 37.4 → 33.1 / 34.1 ns at 1,000 rows, 1,018 → 1,037 / 1,076 ns at 10,000, within
+  noise at 100,000: no consistent gain, and twice the code.
+- **Left for later:** masked words of parallel methods (a chunk passes whole runs), `Maybe<T>` in parallel methods
+  and of narrow lanes, masked words of narrow lanes and of wide rows (they run the method), `Atan2`, `Asin`, `Pow`
+  and kin (no vector form in .NET 10), `Vector2.Clamp` (the sample clamps each field with `Math.Clamp`).
 
 ## Related [#related]
 

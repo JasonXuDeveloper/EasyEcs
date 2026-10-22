@@ -49,7 +49,7 @@ Unity 的跑分，因为没有这样的测试。
 | `EntityCommandBuffer` | 不需要 | `entity.Set`、`Remove`、`Destroy` 当场生效，遍历途中也一样。 |
 | `ComponentSystemGroup`、`[UpdateInGroup]` | `ISystemGroup`、`[UpdateInGroup<T>]`、`world.Update<TGroup>()` | |
 | `[UpdateBefore]` / `[UpdateAfter]` | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` | 出现环会编译报错（[EECS019](/zh/docs/guide/analyzer#eecs019)）。 |
-| `RateManager`、固定步长分组 | `UpdateInterval`，或者自己决定何时更新某个分组 | |
+| `RateManager`、固定步长分组 | `[UpdateInterval(N)]`，或者自己决定何时更新某个分组 | |
 | 预制体实体、`EntityManager.Instantiate(prefab, array)` | `Prefab`、`world.Instantiate(prefab, span)` | `Prefab` 不属于任何 World，也不需要烘焙。 |
 | 烘焙、authoring 组件 | 没有 | 用代码、预制体或存档来建实体。 |
 | `LinkedEntityGroup`（一起销毁） | `ChildOf(parent)`，级联销毁 | `world.Children(parent)` 列出子实体。 |

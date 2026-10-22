@@ -9,20 +9,30 @@ public class SystemTests
 {
     private static readonly List<string> Log = [];
 
-#pragma warning disable EECS018, EECS028 // one test system, many schedules: each instance's values never change; its log is the test's record
-    private class Logged(string name, int interval = 1, int phase = 0) : EcsSystem
+#pragma warning disable EECS028 // one test system, many names: its log is the test's record
+    private class Logged(string name) : EcsSystem
     {
-        public override int UpdateInterval => interval;
-        public override int UpdatePhase => phase;
         protected string Name => name;
         protected override void OnCreate() => Log.Add($"{name}.create");
         protected override void OnUpdate() => Log.Add($"{name}.update");
         protected override void OnDestroy() => Log.Add($"{name}.destroy");
     }
 
+    [UpdateInterval(3)]
+    private class Every3(string name) : Logged(name);
+
+    [UpdateInterval(3, Phase = 1)]
+    private sealed class Every3Phase1(string name) : Every3(name);   // its own schedule replaces its base's
+
+    [UpdateInterval(3, Phase = 2)]
+    private sealed class Every3Phase2(string name) : Logged(name);
+
+    private sealed class Inherits(string name) : Every3(name);      // no attribute of its own: its base's
+
     // A run as short as Logged's can take less than a TimeSpan tick (100 ns), so its measured time may round to zero:
     // this one lasts at least a microsecond.
-    private sealed class Slow(int interval) : Logged("slow", interval)
+    [UpdateInterval(2)]
+    private sealed class Slow() : Logged("slow")
     {
         protected override void OnUpdate()
         {
@@ -31,15 +41,15 @@ public class SystemTests
             while (Stopwatch.GetElapsedTime(start) < TimeSpan.FromMicroseconds(1)) { }
         }
     }
-#pragma warning restore EECS018, EECS028
+#pragma warning restore EECS028
 
     [Test]
     public void PhasesSpreadSystemsOfOneInterval()
     {
         using var world = new World();
-        world.AddSystem(new Logged("a", interval: 3));
-        world.AddSystem(new Logged("b", interval: 3, phase: 1));
-        world.AddSystem(new Logged("c", interval: 3, phase: 2));
+        world.AddSystem(new Every3("a"));
+        world.AddSystem(new Every3Phase1("b"));
+        world.AddSystem(new Every3Phase2("c"));
         Log.Clear();
         for (int i = 0; i < 6; i++) world.Update();                           // updates 1..6
         Assert.That(Log, Is.EqualTo(new[] { "b.update", "c.update", "a.update", "b.update", "c.update", "a.update" }));
@@ -71,7 +81,7 @@ public class SystemTests
     public void MeasureSystemsRecordsRunsOnlyWhenEnabled()
     {
         using var measured = new World(new WorldOptions { MeasureSystems = true });
-        var a = new Slow(interval: 2);
+        var a = new Slow();
         measured.AddSystem(a);
         for (int i = 0; i < 4; i++) measured.Update();
         Assert.That(a.Stats.Runs, Is.EqualTo(2));
@@ -141,10 +151,19 @@ public class SystemTests
     }
 
     [Test]
+    public void ADerivedSystemRunsOnItsBasesSchedule()
+    {
+        using var world = new World();
+        world.AddSystem(new Inherits("i"));
+        for (int i = 0; i < 6; i++) world.Update();
+        Assert.That(Log.FindAll(l => l == "i.update"), Has.Count.EqualTo(2)); // updates 3 and 6
+    }
+
+    [Test]
     public void IntervalEnabledAndRemoval()
     {
         using var world = new World();
-        var every3 = new Logged("every3", interval: 3);
+        var every3 = new Every3("every3");
         world.AddSystem(every3);
         for (int i = 0; i < 6; i++) world.Update();
         every3.Enabled = false;

@@ -12,7 +12,7 @@ What each file teaches, with its code, is on the docs site: [Actors](https://ecs
 | File | What it holds |
 |---|---|
 | [Components.cs](Components.cs) | the `In<TActor>` tag, the `IActor<TSelf>` interface, `Shop` and `Bank`, the persistent `Stock` and `Balance`, the in-memory `Sales` and `Closed`, the `Saving` group and its `Unsaved` list |
-| [Messages.cs](Messages.cs) | the `Buy` and `Deposit` jobs, and `Mailman`, which runs each on its actor |
+| [Messages.cs](Messages.cs) | the `Buy` and `Deposit` messages (`[ForEntity]` methods), and `Mailman`, which runs each on its actor |
 | [Systems/ShopSystems.cs](Systems/ShopSystems.cs) | `RestockSystem`, in the shop group |
 | [Systems/BankSystems.cs](Systems/BankSystems.cs) | `InterestSystem`, in the bank group |
 | [Systems/SaveSystems.cs](Systems/SaveSystems.cs) | `ListUnsavedSystem`, in the save group: the actors written since the last save |

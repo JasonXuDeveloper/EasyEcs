@@ -554,7 +554,7 @@ public sealed partial class EasyEcsAnalyzer
         }
 
         if (containing is not IMethodSymbol method) return null;
-        bool forEach = Symbols.IsForEach(method), job = !forEach && Symbols.JobInterface(method) != null;
+        bool forEach = Symbols.IsGeneratedJob(method), job = !forEach && Symbols.JobInterface(method) != null;
         if (!forEach && !job) return null;
         foreach (var world in worlds)
         {
@@ -712,7 +712,7 @@ public sealed partial class EasyEcsAnalyzer
     private static void AnalyzeFilters(SymbolAnalysisContext context)
     {
         var method = (IMethodSymbol)context.Symbol;
-        if (!Symbols.IsForEach(method)) return;
+        if (!Symbols.IsGeneratedJob(method)) return;
         var all = Symbols.Requirements(method, context.CancellationToken);
         var location = method.Locations.FirstOrDefault();
         foreach (var with in all)

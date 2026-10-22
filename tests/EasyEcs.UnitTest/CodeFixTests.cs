@@ -227,9 +227,32 @@ public class CodeFixTests
     [TestCase("EECS007", "Make it readonly",
         "public class S : EcsSystem { private int _limit; public S(int limit) { _limit = limit; } public int Limit => _limit; }",
         "private readonly int _limit;")]
-    [TestCase("EECS018", "Return the constant",
+    [TestCase("EECS082", "Declare it with [UpdateInterval(5)]",
         "public class S : EcsSystem { public override int UpdateInterval { get; } = 5; }",
-        "public override int UpdateInterval => 5;")]
+        "[UpdateInterval(5)]\npublic class S : EcsSystem { }")]
+    [TestCase("EECS082", "Declare it with [UpdateInterval(10, Phase = 5)]",
+        "namespace N\n{\n    public class S : EcsSystem\n    {\n        public override int UpdateInterval => 10;\n        public override int UpdatePhase => 5;\n        protected override void OnUpdate() { }\n    }\n}",
+        "namespace N\n{\n    [UpdateInterval(10, Phase = 5)]\n    public class S : EcsSystem\n    {\n        protected override void OnUpdate() { }\n    }\n}")]
+    [TestCase("EECS082", "Remove it: the system runs every update",
+        "public class S : EcsSystem { public override int UpdatePhase => 3; }",
+        "public class S : EcsSystem { }")]
+    [TestCase("EECS080", "Write it as a [ForEntity] method",
+        "public struct Closed : IComponent;\npublic struct Buy : IForEachEntity<P, Q>\n{\n    public int Quantity;\n    public static int WriteMask => 0b01;\n\n    // Sells and closes the shop when it runs out.\n    public void Execute(Entity shop, ref P p, ref Q q)\n    {\n        p.V -= Quantity;\n        if (p.V == 0) shop.Set(new Closed());\n    }\n}\n"
+        + "public static class Mailman\n{\n    private static readonly QueryFilter Open = QueryFilter.Create().Without<Closed>();\n\n    public static bool Send(Entity shop, int quantity)\n    {\n        var buy = new Buy { Quantity = quantity };\n        return shop.Run<P, Q, Buy>(ref buy, Open);\n    }\n}",
+        "public static class Buy\n{\n    // Sells and closes the shop when it runs out.\n    [ForEntity, Without<Closed>]\n    static void Run(Entity shop, ref P p, in Q q, int quantity)\n    {\n        p.V -= quantity;\n        if (p.V == 0) shop.Set(new Closed());\n    }\n}\npublic static class Mailman\n{\n    public static bool Send(Entity shop, int quantity)\n    {\n        return Buy.Run(shop, quantity);\n    }\n}")]
+    [TestCase("EECS080", "Write it as a [ForEntity] method",
+        "public struct Read : IForEachEntity<P> { public int Scale; public static int WriteMask => 0; public void Execute(Entity e, ref P p) => System.Console.WriteLine(p.V * Scale); }\n"
+        + "public static class U { public static void F(Entity a, Entity b) { var r = new Read { Scale = 2 }; a.Run<P, Read>(ref r); var s = new Read(); b.Run<P, Read>(ref s); } }",
+        "static void Run(in P p, int scale) => System.Console.WriteLine(p.V * scale);")]
+    [TestCase("EECS081", "Make it static",
+        "public static class R { [ForEntity] void A(ref P p) => p.V++; }",
+        "[ForEntity] static void A(ref P p)")]
+    [TestCase("EECS084", "Consume its rows with [Consume]",
+        "public struct Hit : IComponent { public int Amount; }\npublic class S : EcsSystem\n{\n    [ForEach]\n    static void A(Entity e, in Hit hit, ref P p)\n    {\n        p.V -= hit.Amount;\n        e.Destroy();\n    }\n}",
+        "    [ForEach, Consume]\n    static void A(in Hit hit, ref P p)\n    {\n        p.V -= hit.Amount;\n    }")]
+    [TestCase("EECS084", "Consume its rows with [Consume]",
+        "public struct Hit : IComponent { public int Amount; }\npublic class S : EcsSystem\n{\n    [ForEach]\n    static void A(Entity e, in Hit hit, ref P p)\n    {\n        if (e.Has<Q>()) p.V = 0;\n        e.Destroy();\n    }\n}",
+        "    [ForEach, Consume]\n    static void A(Entity e, in Hit hit, ref P p)\n    {\n        if (e.Has<Q>()) p.V = 0;\n    }")]
     [TestCase("EECS017", "Store its EntityId",
         "public struct Target : IComponent { public Entity Of; }\npublic static class U { public static bool F(Entity e, Entity other) { e.Set(new Target { Of = other }); return e.Read<Target>().Of.Id == other.Id; } }",
         "public struct Target : IComponent { public EntityId Of; }")]
@@ -376,6 +399,9 @@ public class CodeFixTests
     [TestCase("EECS027", "public static class R { [ForEach] public static void A(Entity e, ref P p) => p.V = e.Get<Q>().V; public static void Call(Entity e) { P p = default; A(e, ref p); } }")] // a caller
     [TestCase("EECS061", "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
                          + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, default, 64); return s.Total; } }")] // its chunk size: chosen for threads
+    [TestCase("EECS082", "public class S : EcsSystem { public override int UpdateInterval => World.EntityCount; }")]            // not a constant
+    [TestCase("EECS082", "[UpdateInterval(2)] public class S : EcsSystem { public override int UpdateInterval => 4; }")]          // declared already
+    [TestCase("EECS081", "public class R { int x = 1; [ForEntity] void A(ref P p) => p.V += x; }")]                              // uses its instance
     [TestCase("EECS071", "public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V = (int)System.Random.Shared.NextInt64(9); }")] // no EntityRandom twin
     [TestCase("EECS071", "public class S : EcsSystem { [ForEach] static void A(System.Span<P> p) => p[0].V = System.Random.Shared.Next(); }")] // a batch method: no Entity
     public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)

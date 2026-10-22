@@ -451,7 +451,7 @@ times every system run.
   bookkeeping. Mark hand-written jobs the same way.
 - **Take singletons as `[ForEach]` parameters** (resolved once per pass), or keep a `SingletonRef<T>` outside
   systems (no lookup per access).
-- **Give systems a cadence**: `UpdateInterval`, or a system group updated when needed (`Update<TGroup>()`), instead
+- **Give systems a cadence**: `[UpdateInterval(N)]`, or a system group updated when needed (`Update<TGroup>()`), instead
   of a counter checked in the method.
 - **Keep components small** (a few fields, well under 64 bytes) and split rarely used data into its own component:
   iteration loads only the columns it reads.
@@ -498,7 +498,6 @@ times every system run.
 | A parallel method that writes a singleton or changes structure | Data races between the threads | [EECS010](/en/docs/guide/analyzer#eecs010) |
 | An `Entity` stored in a component | The column holds references: no longer pinned, scanned by the GC | [EECS017](/en/docs/guide/analyzer#eecs017) (warning) |
 | Writing an indexed component through a `ref` | The index cannot see the new key | [EECS015](/en/docs/guide/analyzer#eecs015) |
-| A computed `UpdateInterval` | Read every update | [EECS018](/en/docs/guide/analyzer#eecs018) (warning) |
 | A `ref` parameter that only reads a tracked component | Every visited row counts as changed | [EECS025](/en/docs/guide/analyzer#eecs025) (warning, code fix: `in`) |
 | A closure or LINQ in per-update code | Garbage every tick | [EECS028](/en/docs/guide/analyzer#eecs028) (warning), and `AllocationTests`-style checks in your own tests |
 | A lookup through the visited `Entity` in a `[ForEach]` method | A search per row | [EECS027](/en/docs/guide/analyzer#eecs027) (warning) |

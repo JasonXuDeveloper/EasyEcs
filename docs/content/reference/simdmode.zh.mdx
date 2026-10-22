@@ -10,7 +10,7 @@ description: "ForEachAttribute 方法是否以向量循环运行（ForEachAttrib
 public enum SimdMode
 ```
 
-[`ForEachAttribute`](/zh/docs/reference/foreachattribute) 方法是否以向量循环运行（[`ForEachAttribute.Simd`](/zh/docs/reference/foreachattribute#simd)）。符合条件的方法：是静态方法，在一个线程上跑，不做结构变更，只接收组件（`ref` 或 `in`）、单例和值，并且只用有精确向量对应的运算。
+[`ForEachAttribute`](/zh/docs/reference/foreachattribute) 方法是否以向量循环运行（[`ForEachAttribute.Simd`](/zh/docs/reference/foreachattribute#simd)）。符合条件的方法：是静态方法，不做结构变更（在一个线程上或并行都一样），只接收组件（`ref` 或 `in`）及其 [`Maybe`](/zh/docs/reference/maybe)、单例和值，并且只用有精确向量对应的运算。[`World.DescribeSchedule`](/zh/docs/reference/world#describeschedule) 列出系统每个方法得到的循环（[`SystemInfo.Loops`](/zh/docs/reference/systeminfo#loops)）。
 
 ## 字段 [#fields]
 

@@ -73,7 +73,7 @@ neighbours are still holds nothing to copy ([D73](/en/docs/decisions#d73-survey-
   ([D36](/en/docs/decisions#d36-not-added)).
 - Run conditions (`[RunIf]`): system groups and the host already decide when a group runs, and a predicate per
   system is code the scheduler cannot see ([D51](/en/docs/decisions#d51-not-added)).
-- `UpdatePeriod` and a system time: the host's fixed-step loop owns time, `UpdateInterval` counts updates and stays
+- `UpdatePeriod` and a system time: the host's fixed-step loop owns time, `[UpdateInterval]` counts updates and stays
   deterministic ([D51](/en/docs/decisions#d51-not-added)).
 - `[Requires<B>]`: a prefab per kind of entity brings the full set in one copy, without hidden structural changes
   ([D51](/en/docs/decisions#d51-not-added)).

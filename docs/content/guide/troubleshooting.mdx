@@ -284,8 +284,8 @@ Check, in this order:
    it off; setting `Enabled = true` clears the error and retries.
 3. **Its group is updated:** a system with `[UpdateInGroup<G>]` runs only on `world.Update<G>()`, never on
    `world.Update()`.
-4. **Its interval is due:** with `UpdateInterval => N`, it runs on every N-th update of its group, first on the N-th,
-   shifted by `UpdatePhase`.
+4. **Its interval is due:** with `[UpdateInterval(N)]`, it runs on every N-th update of its group, first on the N-th,
+   shifted by its `Phase`.
 5. **Its filters match:** count what the method needs with `world.Count<T…>(filter)`. The group's filters apply to
    every method of the group: `[With<T>]`, `[Without<T>]` and `[WithAny<T>]` on the group struct, and `ISystemGroupWith<T>`
    / `ISystemGroupWithout<T>` from the group or any interface it implements (a generic actor interface carries them). A
@@ -392,7 +392,7 @@ no longer sees it ([common mistakes](/en/docs/guide/common-mistakes#public-key))
     The mistakes, the code that makes them and the fix.
   </Card>
   <Card title="Analyzer rules" href="/en/docs/guide/analyzer">
-    EECS002 to EECS073, what triggers each and how to fix it.
+    EECS002 to EECS085, what triggers each and how to fix it.
   </Card>
   <Card title="Threading" href="/en/docs/guide/threading">
     The owner thread and what the world synchronizes.

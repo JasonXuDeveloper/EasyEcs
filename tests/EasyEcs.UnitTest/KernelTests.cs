@@ -314,6 +314,366 @@ public static class FieldKernels
     }
 }
 
+// A tracked component a parallel vector loop writes: every chunk stamps its rows, and chunks share blocks of ticks.
+public record struct Warmth : IComponent, ITracked { public float Value; }
+
+/// <summary>
+/// Parallel [ForEach] methods with a vector loop (OpenMP's parallel for simd): each chunk's runs of rows go through the
+/// loop, the change ticks are stamped by the parallel batch pass, and the chunks' partial results combine in chunk order.
+/// </summary>
+public static class ParallelKernels
+{
+    [ForEach(Parallel = true, Simd = SimdMode.Require)]
+    internal static void Seek(ref Spot3 p, ref Drift3 v, in Gravity gravity, float speed)
+    {
+        float dx = 1 - p.X, dy = gravity.Pull - p.Y, dz = 3 - p.Z;
+        float length = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+        if (length <= 0) return;
+        float scale = speed / MathF.Max(length, 1e-6f);
+        v.X = dx * scale;
+        v.Y = dy * scale;
+        v.Z = dz * scale;
+        p.X += v.X * FieldKernels.Dt;
+        p.Y += v.Y * FieldKernels.Dt;
+        p.Z += v.Z * FieldKernels.Dt;
+    }
+
+    [ForEach(Parallel = true, Simd = SimdMode.Require, ChunkRows = 64)] // chunks split the blocks of 4,096 rows: opened, shared
+    internal static void Glide(ref Spot2 p, in Drift2 v)
+    {
+        p.X += v.X * FieldKernels.Dt;
+        p.Y += v.Y * FieldKernels.Dt;
+    }
+
+    [ForEach(Parallel = true, Simd = SimdMode.Require)]
+    internal static void Warm(ref Warmth warmth, in Mass mass) => warmth.Value = MathF.Min(warmth.Value + mass.Value * 0.5f, 100f);
+
+    [ForEach(Parallel = true, Simd = SimdMode.Require, ChunkRows = 64)]
+    internal static void WarmFine(ref Warmth warmth, in Mass mass) => warmth.Value = MathF.Max(warmth.Value - mass.Value, -100f);
+
+    [ForEach(Parallel = true, Simd = SimdMode.Require, ChunkRows = 128)]
+    internal static void Count(in Rank rank, ref Reduce<Headcount> headcount)
+    {
+        headcount.Value.Count++;
+        if (rank.Value > 0) headcount.Value.Sum += rank.Value;
+        headcount.Value.Low = Math.Min(headcount.Value.Low, rank.Value);
+        headcount.Value.High = Math.Max(rank.Value, headcount.Value.High);
+    }
+
+    [ForEach(Parallel = true, Simd = SimdMode.Require, FloatMode = FloatMode.Fast, ChunkRows = 256)]
+    internal static void Sum(in Level level, ref Reduce<Energy> energy) => energy.Value.Total += level.Value * 0.5f;
+}
+
+/// <summary>
+/// Math functions in vector loops: degrees to radians and a uniform Sin exactly; Sin, Cos, Exp, Log, Log2 and Hypot per
+/// lane only under FloatMode.Fast, as .NET's vector approximations.
+/// </summary>
+public static class MathKernels
+{
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Turn(ref Level level, in Heat heat, in Gravity gravity) =>
+        level.Value = float.DegreesToRadians(level.Value) * MathF.Sin(gravity.Pull) + float.RadiansToDegrees(heat.Value);
+
+    [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+    internal static void Waves(ref Color4 c, in Level level)
+    {
+        c.R = MathF.Sin(level.Value);
+        c.G = MathF.Cos(level.Value);
+        c.B = MathF.Exp(level.Value);
+        c.A = MathF.Log(MathF.Abs(level.Value));
+    }
+
+    [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+    internal static void Lengths(ref Spot2 spot, in Level level)
+    {
+        spot.X = MathF.Log2(MathF.Abs(level.Value));
+        spot.Y = float.Hypot(level.Value, spot.Y);
+    }
+
+    [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+    internal static void Far(ref Far3 p, in Pace pace)
+    {
+        p.X = Math.Sin(pace.Value);
+        p.Y = Math.Exp(pace.Value * 0.01);
+        p.Z = Math.Log(Math.Abs(pace.Value));
+    }
+}
+
+// Optional components of vector loops: Maybe<T> is a lane mask of the rows that have T, and T's fields are lanes.
+public record struct Boost : IComponent { public float Value; }
+public record struct Wind2 : IComponent, ITracked { public float X, Y; }
+
+/// <summary>Kernels taking a Maybe&lt;T&gt;: HasValue is a lane mask, Value's fields are lanes read (and written) where rows have T.</summary>
+public static class OptionalKernels
+{
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Push(ref Heat heat, Maybe<Boost> boost)
+    {
+        if (boost.HasValue) heat.Value += boost.Value.Value * 2;
+        else heat.Value -= 1;
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Blow(ref Spot2 p, Maybe<Wind2> wind)
+    {
+        if (!wind.HasValue) return;      // the lanes left have Wind2: no check per read
+        wind.Value.X *= 0.5f;
+        p.X += wind.Value.X;
+        p.Y += wind.Value.Y;
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Peek(ref Level level, in Heat heat, ReadOnlyMaybe<Boost> boost) =>
+        level.Value = boost.HasValue && boost.Value.Value > 0 ? boost.Value.Value : heat.Value;
+
+    // Reads Value without HasValue: a row without Boost throws, as the method does.
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Careless(ref Level level, Maybe<Boost> boost) => level.Value = boost.Value.Value + 1;
+}
+
+// Struct fields as lanes: Vector2 / Vector3 inside components, whole components assigned, component-wise operators.
+public record struct Place2(Vector2 Value) : IComponent;
+public record struct Pace2(Vector2 Value) : IComponent;
+public record struct Place3(Vector3 Value) : IComponent;
+public record struct Pace3(Vector3 Value) : IComponent;
+public struct Body3 : IComponent { public Vector3 P; public float M; }
+public struct Plain2 : IComponent
+{
+    public float X, Y;
+    public Plain2(float x, float y) { X = x; Y = y; }
+}
+public record struct Dt2(float Seconds) : ISingletonComponent;
+public record struct Gust3(Vector3 Value) : ISingletonComponent;
+
+/// <summary>Kernels over struct values: each lane the IEEE operation the scalar code performs on it.</summary>
+public static class StructKernels
+{
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Move(ref Place2 position, in Pace2 velocity, in Dt2 step) =>
+        position = new Place2(position.Value + velocity.Value * step.Seconds);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Drift(ref Place3 position, in Pace3 velocity, in Dt2 step) => position.Value += velocity.Value * step.Seconds;
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Blow(ref Place3 position, in Pace3 velocity, in Gust3 gust) =>
+        position = position with { Value = position.Value * 0.5f - velocity.Value / 3f + gust.Value };
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Bounce(ref Place2 position, ref Pace2 velocity)
+    {
+        Vector2 p = position.Value, v = velocity.Value;
+        if (p.X < 0 || p.X > 10) v.X = -v.X;
+        if (p.Y < 0 || p.Y > 10) v.Y = -v.Y;
+        position = new Place2(Vector2.Min(Vector2.Max(p, Vector2.Zero), new Vector2(10)));
+        velocity = new Pace2(v);
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Swap(ref Plain2 a) => a = new Plain2(a.Y, a.X);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Weigh(ref Body3 body, in Pace3 velocity)
+    {
+        body = body with { M = body.M * 0.99f };
+        body.P += velocity.Value / body.M;
+        body.P.Y = -body.P.Y;
+    }
+}
+
+/// <summary>
+/// Kernels with a cold branch: a call the vector loop cannot express under a condition it can. A vector with a lane
+/// that takes it runs its rows through the method, so the calls happen as in the method, in row order.
+/// </summary>
+public static class ColdKernels
+{
+    /// <summary>What the calls saw, in order (a test's record: not a pattern for systems, which keep state in data).</summary>
+    internal static readonly System.Collections.Generic.List<float> Calls = new();
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    internal static void Died(float value) => Calls.Add(value);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Hurt(ref Heat health, in Level damage)
+    {
+        health.Value -= damage.Value;
+        if (health.Value <= 0)
+        {
+            Died(health.Value);
+            health.Value = 0;
+        }
+    }
+
+    // A cold else, a reduction and a return: the reduction's lanes go back to before the vector when it bails.
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Census(in Rank rank, ref Reduce<Headcount> count)
+    {
+        if (rank.Value < -150) return;
+        if (rank.Value < 100) count.Value.Count++;
+        else for (int i = 0; i < 2; i++) Died(rank.Value + i);
+        count.Value.Sum += rank.Value;
+    }
+}
+
+// Wide components: more fields than a vector loop splits, or fields of other types beside the 4-byte lanes a method uses.
+public record struct Craft12(float X, float Y, float VX, float VY, float Fuel, float Mass, float Drag, float Heat, float Spin, float Tilt, float Yaw, float Roll) : IComponent;
+public struct Mixed : IComponent
+{
+    public float Speed;
+    public bool Alive;
+    public byte Team;
+    public short Rank;
+    public int Hp;
+    public double Score;
+    public float Armor;
+}
+
+/// <summary>
+/// Kernels over wide components: the lanes they use gathered by permutes (AVX-512), the rest of each row stored as
+/// loaded, so results are the method's bit for bit.
+/// </summary>
+public static class WideKernels
+{
+    [ForEach]
+    internal static void Steer(ref Craft12 c, in Dt2 step)
+    {
+        float d = c.VX * step.Seconds;
+        float s = MathF.Sqrt(c.VY * c.VY + d * d);
+        c.X = MathF.Max(c.X + s * step.Seconds, 0f);
+        c.VX = c.VX * c.VY - s;
+    }
+
+    [ForEach]
+    internal static void Wear(ref Mixed m, in Level damage)
+    {
+        if (m.Speed > 1) m.Hp -= 1;
+        m.Armor = MathF.Max(m.Armor - m.Speed * damage.Value, 0) * 0.5f + damage.Value * damage.Value;
+        m.Speed = m.Speed * 0.75f - m.Armor / 8;
+    }
+}
+
+/// <summary>A system of three methods for the schedule's loop lines: a flat vector loop, a cold branch, one scalar.</summary>
+public class LoopsSystem : EcsSystem
+{
+    [ForEach]
+    static void Move(ref Place2 position, in Pace2 velocity) => position = new Place2(position.Value + velocity.Value);
+
+    [ForEach]
+    static void Hurt(ref Heat health, in Level damage)
+    {
+        if (health.Value < damage.Value) Console.WriteLine(health.Value);
+        health.Value -= damage.Value;
+    }
+
+    [ForEach]
+    static void Mark(Entity entity, ref Heat health) => health.Value = entity.Id.Index;
+}
+
+// Narrow lanes: C# computes on bytes and shorts in int; the vector loop follows the int's low bits and its range.
+public record struct Shade : IComponent { public byte V; }
+public record struct Tone : IComponent { public byte V; }
+public record struct Ink : IComponent { public byte V; }
+public record struct Volume : IComponent { public sbyte V; }
+public record struct Pitch : IComponent { public sbyte V; }
+public record struct Echo : IComponent { public sbyte V; }
+public record struct Wave16 : IComponent { public short V; }
+public record struct Gain16 : IComponent { public short V; }
+public record struct Mix16 : IComponent { public short V; }
+public record struct Word16 : IComponent { public ushort V; }
+public record struct Bias16 : IComponent { public ushort V; }
+public record struct Sum16 : IComponent { public ushort V; }
+public record struct Rgba : IComponent { public byte R, G, B, A; }
+public record struct Tint4 : IComponent { public byte R, G, B, A; }
+
+/// <summary>Kernels of narrow lanes: wrap-around arithmetic, saturating Min / Max idioms, comparisons, shifts, locals.</summary>
+public static class NarrowKernels
+{
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Wrap(ref Ink o, in Shade a, in Tone b) => o.V = (byte)(a.V + b.V * 3 - 7);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Times(ref Ink o, in Shade a, in Tone b) => o.V = (byte)(a.V * b.V ^ ~a.V);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void AddSat(ref Ink o, in Shade a, in Tone b) => o.V = (byte)Math.Min(a.V + b.V, 255);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void SubSat(ref Ink o, in Shade a, in Tone b) => o.V = (byte)Math.Max(a.V - b.V, 0);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Band(ref Ink o, in Shade a, in Tone b) => o.V = (byte)Math.Clamp(a.V + b.V, 16, 235);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Pick(ref Ink o, in Shade a, in Tone b)
+    {
+        if (a.V + b.V > 200) o.V = 1;           // the saturated sum compares alike against 200
+        else if (a.V == 7 || b.V is > 250 or < 3) o.V = 2;
+        else o.V = a.V > b.V ? a.V : (byte)(b.V >> 1);
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Bits(ref Ink o, in Shade a, in Tone b) => o.V = (byte)((a.V << 3) | (b.V >> 5) ^ (a.V & 0x0F) << 9);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Least(ref Ink o, in Shade a, in Tone b) => o.V = Math.Max(Math.Min(a.V, b.V), (byte)10);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Compound(ref Ink o, in Shade a, in Tone b)
+    {
+        o.V += a.V;
+        o.V -= b.V;
+        o.V ^= 0x5A;
+        o.V >>= 1;
+        o.V++;
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Distance(ref Ink o, in Shade a, in Tone b)
+    {
+        int d = a.V - b.V;
+        if (d < 0) d = -d;
+        o.V = (byte)d;
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void SignedSat(ref Echo o, in Volume a, in Pitch b) => o.V = (sbyte)Math.Clamp(a.V + b.V, -128, 127);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void SignedSubSat(ref Echo o, in Volume a, in Pitch b) => o.V = (sbyte)Math.Max(Math.Min(a.V - b.V, 127), -128);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void SignedShift(ref Echo o, in Volume a, in Pitch b) => o.V = (sbyte)((a.V >> 2) + (b.V >> 9) + (b.V << 1));
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void SignedAbs(ref Echo o, in Volume a, in Pitch b)
+    {
+        int x = Math.Abs((int)a.V);
+        o.V = a.V - b.V > 50 ? (sbyte)x : a.V < b.V ? a.V : b.V;
+    }
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Mix(ref Mix16 o, in Wave16 a, in Gain16 b) => o.V = (short)Math.Clamp(a.V + b.V, short.MinValue, short.MaxValue);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Scale(ref Mix16 o, in Wave16 a, in Gain16 b) => o.V = (short)(a.V * b.V + (a.V >> 3));
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Drain(ref Sum16 o, in Word16 a, in Bias16 b) => o.V = (ushort)Math.Max(a.V - b.V, 0);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Fill(ref Sum16 o, in Word16 a, in Bias16 b) => o.V = a.V > b.V ? (ushort)Math.Min(a.V + b.V, ushort.MaxValue) : (ushort)(b.V >>> 4);
+
+    // Each field alike: the flat loop of narrow lanes.
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Blend(ref Rgba c, in Tint4 t)
+    {
+        c.R = (byte)Math.Min(c.R + t.R, 255);
+        c.G = (byte)Math.Min(c.G + t.G, 255);
+        c.B = (byte)Math.Min(c.B + t.B, 255);
+        c.A = (byte)Math.Min(c.A + t.A, 255);
+    }
+}
+
 public class KernelTests
 {
     /// <summary>The lengths that cut a vector short or leave a tail, at both vector widths, and a long run.</summary>
@@ -389,6 +749,222 @@ public class KernelTests
     }
 
     private delegate void ScalarRow<T1, T2>(ref T1 a, ref T2 b);
+
+    private static Vector2 NextVector2(Random r, int i) => new(NextFloat(r, i), NextFloat(r, i + 1));
+    private static Vector3 NextVector3(Random r, int i) => new(NextFloat(r, i), NextFloat(r, i + 1), NextFloat(r, i + 2));
+
+    /// <summary>
+    /// Components holding Vector2 / Vector3, assigned whole (<c>new T(...)</c>, <c>with</c>), through compound operators,
+    /// struct locals and constructors that set fields: lane by lane the method's results, bit for bit.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void StructValuesMatchTheMethodBitForBit(int count)
+    {
+        foreach (float dt in new[] { 1f / 60, float.NaN, -3e7f })
+        {
+            Check(count, (r, i) => new Place2(NextVector2(r, i)), (r, i) => new Pace2(NextVector2(r, i + 2)), w => { w.SetDt2(dt); StructKernels.Move(w); },
+                (ref Place2 p, ref Pace2 v) => StructKernels.Move(ref p, in v, new Dt2(dt)));
+            Check(count, (r, i) => new Place3(NextVector3(r, i)), (r, i) => new Pace3(NextVector3(r, i + 3)), w => { w.SetDt2(dt); StructKernels.Drift(w); },
+                (ref Place3 p, ref Pace3 v) => StructKernels.Drift(ref p, in v, new Dt2(dt)));
+            var gust = new Gust3(new Vector3(dt, 1, -2));
+            Check(count, (r, i) => new Place3(NextVector3(r, i)), (r, i) => new Pace3(NextVector3(r, i + 3)), w => { w.SetGust3(gust.Value); StructKernels.Blow(w); },
+                (ref Place3 p, ref Pace3 v) => StructKernels.Blow(ref p, in v, in gust));
+        }
+        Check(count, (r, i) => new Place2(NextVector2(r, i) * 2), (r, i) => new Pace2(NextVector2(r, i + 2)), StructKernels.Bounce,
+            (ref Place2 p, ref Pace2 v) => StructKernels.Bounce(ref p, ref v));
+        Check(count, (r, i) => new Plain2(NextFloat(r, i), NextFloat(r, i + 1)), (r, i) => new Heat(), StructKernels.Swap,
+            (ref Plain2 a, ref Heat _) => StructKernels.Swap(ref a));
+        Check(count, (r, i) => new Body3 { P = NextVector3(r, i), M = NextFloat(r, i + 3) }, (r, i) => new Pace3(NextVector3(r, i + 4)), StructKernels.Weigh,
+            (ref Body3 b, ref Pace3 v) => StructKernels.Weigh(ref b, in v));
+    }
+
+    private static Craft12 NextCraft(Random r, int i) => new(NextFloat(r, i), NextFloat(r, i + 1), NextFloat(r, i + 2), NextFloat(r, i + 3), i, -i, 2, 3, 4, 5, 6, 7);
+
+    private static Mixed NextMixed(Random r, int i) => new()
+    {
+        Speed = NextFloat(r, i), Alive = i % 2 == 0, Team = (byte)i, Rank = (short)-i, Hp = r.Next(-5, 5), Score = i * 0.5, Armor = NextFloat(r, i + 1),
+    };
+
+    /// <summary>
+    /// Wide components (12 fields of a record struct, fields of five types): the lanes a method uses are gathered and
+    /// written back by permutes, every other field kept as loaded, in tables of any length and with rows that lack the
+    /// component (their masked words run the method).
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void WideComponentsMatchTheMethodBitForBit(int count)
+    {
+        foreach (float dt in new[] { 1f / 60, float.NaN, -3e7f })
+            Check(count, NextCraft, (r, i) => new Heat(), w => { w.SetDt2(dt); WideKernels.Steer(w); }, (ref Craft12 c, ref Heat _) => WideKernels.Steer(ref c, new Dt2(dt)));
+        Check(count, NextMixed, NextLevel, WideKernels.Wear, (ref Mixed m, ref Level l) => WideKernels.Wear(ref m, in l));
+        CheckHoles(count, i => i % 3 == 1, NextMixed, NextLevel, WideKernels.Wear, (ref Mixed m, ref Level l) => WideKernels.Wear(ref m, in l));
+    }
+
+    /// <summary>
+    /// A cold branch: the rows of a vector where some lane takes it run the method, so the results and the calls (their
+    /// order included) are the method's, whether no row, a few or all take it.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void ColdBranchesRunTheirVectorsThroughTheMethod(int count)
+    {
+        foreach (int every in new[] { 0, 97, 7, 1 })
+        {
+            using var world = new World();
+            var random = new Random(count + every);
+            var healths = new Heat[count];
+            var damages = new Level[count];
+            var entities = new Entity[count];
+            for (int i = 0; i < count; i++)
+            {
+                healths[i] = new Heat { Value = every > 0 && i % every == 0 ? 1 : 100 + i };
+                damages[i] = new Level { Value = i % 3 == 0 ? NextFloat(random, i) : 2 };
+                entities[i] = world.CreateEntity(healths[i], damages[i]);
+            }
+            ColdKernels.Calls.Clear();
+            ColdKernels.Hurt(world);
+            var vector = ColdKernels.Calls.ToArray();
+            ColdKernels.Calls.Clear();
+            for (int i = 0; i < count; i++) ColdKernels.Hurt(ref healths[i], in damages[i]);
+            Assert.That(vector, Is.EqualTo(ColdKernels.Calls.ToArray()), $"the calls, one row in {every}");
+            for (int i = 0; i < count; i++)
+                Assert.That(Same(entities[i].Read<Heat>(), healths[i]), $"Heat of row {i}: {entities[i].Read<Heat>()} instead of {healths[i]}");
+        }
+
+        using var census = new World();
+        var r = new Random(count);
+        var ranks = new Rank[count];
+        for (int i = 0; i < count; i++)
+        {
+            ranks[i] = NextTally(r, i);
+            census.CreateEntity(ranks[i]);
+        }
+        ColdKernels.Calls.Clear();
+        ColdKernels.Census(census);
+        var calls = ColdKernels.Calls.ToArray();
+        ColdKernels.Calls.Clear();
+        var headcount = new Reduce<Headcount> { Value = Headcount.Identity };
+        for (int i = 0; i < count; i++) ColdKernels.Census(in ranks[i], ref headcount);
+        Assert.That(census.GetSingleton<Headcount>(), Is.EqualTo(headcount.Value));
+        Assert.That(calls, Is.EqualTo(ColdKernels.Calls.ToArray()));
+    }
+
+    /// <summary>DescribeSchedule names the loop each [ForEach] method got, and why a scalar one is scalar (EECS055's reason).</summary>
+    [Test]
+    public void TheScheduleNamesEachMethodsLoop()
+    {
+        using var world = new World();
+        world.AddSystem<LoopsSystem>();
+        var system = world.DescribeSchedule().Groups[0].Stages[0].Systems[0];
+        Assert.That(system.Loops, Is.EqualTo(new[]
+        {
+            "Move: vector (Vector512 or Vector<float>), flat, masked words vector",
+            "Hurt: vector (Vector512 or Vector<float>), masked words vector, cold branch (it calls Console.WriteLine)",
+            "Mark: scalar (it takes the Entity)",
+        }));
+        Assert.That(world.DescribeSchedule().ToString(), Does.Contain("      loop Mark: scalar (it takes the Entity)\n"));
+    }
+
+    private delegate void NarrowRow<TO, TA, TB>(ref TO o, in TA a, in TB b);
+
+    /// <summary>
+    /// A kernel of three components run over <paramref name="count"/> rows in two tables, then by the method row by row:
+    /// every row ends bit for bit as the method leaves it. With <paramref name="holes"/>, every fifth row lacks
+    /// <typeparamref name="TB"/> (masked words: their passing rows run the method).
+    /// </summary>
+    private static void CheckNarrow<TO, TA, TB>(int count, bool holes, Func<int, TO> o, Func<int, TA> a, Func<int, TB> b,
+        Action<World> generated, NarrowRow<TO, TA, TB> scalar, string name)
+        where TO : struct, IComponent where TA : struct, IComponent where TB : struct, IComponent
+    {
+        using var world = new World();
+        world.Reserve<TO, TA, TB>(count);
+        var os = new TO[count];
+        var @as = new TA[count];
+        var bs = new TB[count];
+        var entities = new Entity[count];
+        for (int i = 0; i < count; i++)
+        {
+            (os[i], @as[i], bs[i]) = (o(i), a(i), b(i));
+            entities[i] = world.CreateEntity(os[i], @as[i], bs[i]);
+            if (i % 3 == 0) entities[i].Set(new Frozen());
+            if (holes && i % 5 == 0) entities[i].Remove<TB>();
+        }
+        for (int round = 0; round < 2; round++)
+        {
+            generated(world);
+            for (int i = 0; i < count; i++)
+                if (!(holes && i % 5 == 0)) scalar(ref os[i], in @as[i], in bs[i]);
+        }
+        int wrong = 0, first = -1;
+        for (int i = 0; i < count; i++)
+            if (!Same(entities[i].Read<TO>(), os[i]) && wrong++ == 0) first = i;
+        Assert.That(wrong, Is.Zero, () => $"{name}: {wrong} of {count} rows differ, first row {first}: {entities[first].Read<TO>()} instead of {os[first]} ({@as[first]}, {bs[first]})");
+    }
+
+    private static readonly int Pairs = 65536 + 13; // every pair of bytes, and a tail
+
+    /// <summary>
+    /// Byte kernels over every pair of operands (and holes for the masked words): wrap-around arithmetic, the saturating
+    /// Min / Max / Clamp idioms, comparisons (a saturated sum compared with a value inside the range), shifts, bitwise
+    /// operators, Min / Max of bytes, compound assignments and an int local: the method's result, lane by lane.
+    /// </summary>
+    [TestCase(false), TestCase(true)]
+    public void ByteLanesMatchTheMethodForEveryPairOfOperands(bool holes)
+    {
+        static Ink O(int i) => new() { V = (byte)(i * 37) };
+        static Shade A(int i) => new() { V = (byte)i };
+        static Tone B(int i) => new() { V = (byte)(i >> 8) };
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Wrap, NarrowKernels.Wrap, "Wrap");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Times, NarrowKernels.Times, "Times");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.AddSat, NarrowKernels.AddSat, "AddSat");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.SubSat, NarrowKernels.SubSat, "SubSat");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Band, NarrowKernels.Band, "Band");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Pick, NarrowKernels.Pick, "Pick");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Bits, NarrowKernels.Bits, "Bits");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Least, NarrowKernels.Least, "Least");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Compound, NarrowKernels.Compound, "Compound");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Distance, NarrowKernels.Distance, "Distance");
+    }
+
+    /// <summary>Signed bytes over every pair: signed saturation, arithmetic shifts (counts past the lane), Abs of an int, compares.</summary>
+    [TestCase(false), TestCase(true)]
+    public void SignedByteLanesMatchTheMethodForEveryPairOfOperands(bool holes)
+    {
+        static Echo O(int i) => new() { V = (sbyte)(i * 37) };
+        static Volume A(int i) => new() { V = (sbyte)i };
+        static Pitch B(int i) => new() { V = (sbyte)(i >> 8) };
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.SignedSat, NarrowKernels.SignedSat, "SignedSat");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.SignedSubSat, NarrowKernels.SignedSubSat, "SignedSubSat");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.SignedShift, NarrowKernels.SignedShift, "SignedShift");
+        CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.SignedAbs, NarrowKernels.SignedAbs, "SignedAbs");
+    }
+
+    /// <summary>Lanes of 2 bytes over random operands and the edges of both ranges.</summary>
+    [TestCase(false), TestCase(true)]
+    public void ShortLanesMatchTheMethodOnRandomAndEdgeValues(bool holes)
+    {
+        int[] edges = [short.MinValue, short.MinValue + 1, -32767, -256, -129, -128, -1, 0, 1, 127, 128, 255, 256, 32766, short.MaxValue, 32768, 65534, 65535];
+        var random = new Random(16);
+        var values = new int[40000];
+        for (int i = 0; i < values.Length; i++) values[i] = i % 4 == 0 ? edges[random.Next(edges.Length)] : random.Next(0, 65536);
+        int V(int i) => values[i % values.Length];
+        CheckNarrow(30000, holes, i => new Mix16 { V = (short)V(i * 3) }, i => new Wave16 { V = (short)V(i * 3 + 1) }, i => new Gain16 { V = (short)V(i * 3 + 2) },
+            NarrowKernels.Mix, NarrowKernels.Mix, "Mix");
+        CheckNarrow(30000, holes, i => new Mix16 { V = (short)V(i * 3) }, i => new Wave16 { V = (short)V(i * 3 + 1) }, i => new Gain16 { V = (short)V(i * 3 + 2) },
+            NarrowKernels.Scale, NarrowKernels.Scale, "Scale");
+        CheckNarrow(30000, holes, i => new Sum16 { V = (ushort)V(i * 3) }, i => new Word16 { V = (ushort)V(i * 3 + 1) }, i => new Bias16 { V = (ushort)V(i * 3 + 2) },
+            NarrowKernels.Drain, NarrowKernels.Drain, "Drain");
+        CheckNarrow(30000, holes, i => new Sum16 { V = (ushort)V(i * 3) }, i => new Word16 { V = (ushort)V(i * 3 + 1) }, i => new Bias16 { V = (ushort)V(i * 3 + 2) },
+            NarrowKernels.Fill, NarrowKernels.Fill, "Fill");
+    }
+
+    /// <summary>A component of four byte fields treated alike: the flat loop, every field saturating as the method does.</summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void ByteFieldsTreatedAlikeTakeTheFlatLoop(int count)
+    {
+        var random = new Random(count);
+        Rgba Next() => new() { R = (byte)random.Next(256), G = (byte)random.Next(256), B = (byte)random.Next(256), A = (byte)random.Next(256) };
+        Check(count, (_, _) => Next(), (_, _) => { var c = Next(); return new Tint4 { R = c.R, G = c.G, B = c.B, A = c.A }; },
+            NarrowKernels.Blend, (ref Rgba c, ref Tint4 t) => NarrowKernels.Blend(ref c, in t));
+    }
 
     [TestCaseSource(nameof(Lengths))]
     public void ComponentsOfSeveralFieldsMatchTheMethodBitForBit(int count)
@@ -816,6 +1392,286 @@ public class KernelTests
         return lanes;
     }
 
+    /// <summary>
+    /// A parallel vector loop at 1 and 4 threads: the same bits as the method row by row (each row's lanes run the
+    /// method's operations, wherever its chunk begins), in tables with rows to test (presence holes) and several runs.
+    /// </summary>
+    [TestCase(1)]
+    [TestCase(4)]
+    public void ParallelVectorLoopsMatchTheMethodBitForBit(int threads)
+    {
+        const int count = 20_011;
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        world.SetGravity(2f);
+        var random = new Random(7);
+        var spots = new Spot3[count];
+        var drifts = new Drift3[count];
+        var flats = new Spot2[count];
+        var flows = new Drift2[count];
+        var entities = new Entity[count];
+        world.Reserve<Spot3, Drift3, Spot2, Drift2>(count);
+        for (int i = 0; i < count; i++)
+        {
+            spots[i] = new Spot3 { X = NextFloat(random, i), Y = NextFloat(random, i + 1), Z = NextFloat(random, i + 2) };
+            drifts[i] = new Drift3 { X = NextFloat(random, i + 3) };
+            flats[i] = new Spot2 { X = NextFloat(random, i), Y = NextFloat(random, i + 4) };
+            flows[i] = new Drift2 { X = NextFloat(random, i + 1), Y = NextFloat(random, i + 2) };
+            entities[i] = world.CreateEntity(spots[i], drifts[i], flats[i], flows[i]);
+            if (i % 11 == 0) entities[i].Set(new Frozen()); // a second table
+        }
+        for (int i = 0; i < count; i += 5) entities[i].Remove<Drift2>(); // rows the flat loop's pass tests
+
+        var gravity = world.Gravity;
+        for (int round = 0; round < 3; round++)
+        {
+            ParallelKernels.Seek(world, 3f);
+            ParallelKernels.Glide(world);
+            for (int i = 0; i < count; i++)
+            {
+                ParallelKernels.Seek(ref spots[i], ref drifts[i], in gravity, 3f);
+                if (i % 5 != 0) ParallelKernels.Glide(ref flats[i], in flows[i]);
+            }
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            Assert.That(Same(entities[i].Get<Spot3>(), spots[i]), $"Spot3 of row {i}: {Bits(entities[i].Get<Spot3>())} instead of {Bits(spots[i])}");
+            Assert.That(Same(entities[i].Get<Drift3>(), drifts[i]), $"Drift3 of row {i}");
+            Assert.That(Same(entities[i].Get<Spot2>(), flats[i]), $"Spot2 of row {i}: {Bits(entities[i].Get<Spot2>())} instead of {Bits(flats[i])}");
+        }
+    }
+
+    /// <summary>
+    /// The rows a parallel vector loop writes are stamped, those it does not visit are not, so a [Changed&lt;T&gt;]
+    /// filter (which skips words and blocks by their summaries) finds exactly them: chunks of whole blocks and chunks
+    /// that split blocks (opened before the pass, raised atomically).
+    /// </summary>
+    [TestCase(1)]
+    [TestCase(4)]
+    public void ParallelVectorLoopsStampTheRowsTheyWrite(int threads)
+    {
+        const int count = 30_000;
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var entities = new Entity[count];
+        world.Reserve<Warmth, Mass>(count);
+        for (int i = 0; i < count; i++) entities[i] = world.CreateEntity(new Warmth { Value = i % 50 }, new Mass { Value = i % 7 });
+        for (int i = 0; i < count; i += 3) entities[i].Remove<Mass>(); // not visited: not stamped
+        for (int i = 1; i < count; i += 1000) entities[i].Set(new Frozen());
+
+        foreach (Action<World> pass in new Action<World>[] { ParallelKernels.Warm, ParallelKernels.WarmFine })
+        {
+            world.Update(); // a new tick: the rows created before it are older
+            ulong mark = world.ChangeTick;
+            pass(world);
+            int visited = 0;
+            for (int i = 0; i < count; i++) if (entities[i].Has<Mass>()) visited++;
+            Assert.That(world.Count<Warmth>(QueryFilter.Create().Changed<Warmth>(mark)), Is.EqualTo(visited));
+            foreach (var item in world.Read<Warmth>(QueryFilter.Create().Changed<Warmth>(mark)))
+                Assert.That(item.Entity.Has<Mass>(), $"{item.Entity} has no Mass but was stamped");
+        }
+    }
+
+    /// <summary>
+    /// A parallel vector reduction: the chunks' lanes fold into each chunk's partial result, the chunks combine in chunk
+    /// order. Integer sums, counts, Min and Max are exact at any thread count; a Fast float sum with fixed chunks is the
+    /// same at 1 and 4 threads.
+    /// </summary>
+    [Test]
+    public void ParallelVectorReductionsAreExactAndDoNotDependOnTheThreads()
+    {
+        (Headcount, float) Run(int threads)
+        {
+            const int count = 50_003;
+            using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+            var random = new Random(3);
+            var expected = new Reduce<Headcount> { Value = Headcount.Identity };
+            world.Reserve<Rank, Level>(count);
+            for (int i = 0; i < count; i++)
+            {
+                var rank = NextTally(random, i);
+                var e = world.CreateEntity(rank, new Level { Value = (float)(random.NextDouble() * 200 - 100) });
+                if (i % 13 == 0) e.Set(new Frozen());
+                if (i % 4 == 1) e.Remove<Rank>();
+                else ParallelKernels.Count(in rank, ref expected);
+            }
+
+            ParallelKernels.Count(world);
+            Assert.That(world.GetSingleton<Headcount>(), Is.EqualTo(expected.Value), $"Count at {threads} threads");
+            ParallelKernels.Sum(world);
+            return (world.GetSingleton<Headcount>(), world.GetSingleton<Energy>().Total);
+        }
+
+        var (one, sum1) = Run(1);
+        var (four, sum4) = Run(4);
+        Assert.That(four, Is.EqualTo(one));
+        Assert.That(BitConverter.SingleToInt32Bits(sum4), Is.EqualTo(BitConverter.SingleToInt32Bits(sum1)), $"{sum4} against {sum1}");
+    }
+
+    /// <summary>
+    /// Degrees to radians (and back) are the scalar's two IEEE operations, and a uniform Sin is the scalar call once per
+    /// run: bit for bit the method's, under FloatMode.Exact.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void DegreesAndUniformCallsMatchTheMethodBitForBit(int count)
+    {
+        foreach (float pull in new[] { 0.3f, float.NaN, -1e7f })
+            Check(count, NextLevel, (r, i) => new Heat { Value = NextFloat(r, i + 1) }, w => { w.SetGravity(pull); MathKernels.Turn(w); },
+                (ref Level l, ref Heat h) => MathKernels.Turn(ref l, in h, new Gravity(pull)));
+    }
+
+    /// <summary>
+    /// Sin, Cos, Exp, Log, Log2 and Hypot under FloatMode.Fast: .NET's vector forms, within 2 ulps of the scalar
+    /// function (NaN where it is NaN, infinities and zeros where it has them), lane by lane; the rows after the last
+    /// vector are the scalar function's.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void FastMathIsWithinTwoUlpsOfTheScalarFunctions(int count)
+    {
+        static long Ulps(double a, double b, bool single)
+        {
+            if (double.IsNaN(a) || double.IsNaN(b)) return double.IsNaN(a) && double.IsNaN(b) ? 0 : long.MaxValue;
+            if (a == b) return 0;
+            if (double.IsInfinity(a) || double.IsInfinity(b) || Math.Sign(a) != Math.Sign(b)) return long.MaxValue;
+            return single ? Math.Abs(BitConverter.SingleToInt32Bits((float)a) - (long)BitConverter.SingleToInt32Bits((float)b))
+                : Math.Abs(BitConverter.DoubleToInt64Bits(a) - BitConverter.DoubleToInt64Bits(b));
+        }
+
+        using var world = new World();
+        var random = new Random(count);
+        var levels = new Level[count];
+        var paces = new Pace[count];
+        var spots = new Spot2[count];
+        var entities = new Entity[count];
+        world.Reserve<Color4, Level, Spot2, Far3, Pace>(count);
+        for (int i = 0; i < count; i++)
+        {
+            float x = i % 3 == 0 ? NextFloat(random, i) : (float)(random.NextDouble() * 200 - 100);
+            levels[i] = new Level { Value = x };
+            paces[i] = new Pace { Value = NextDouble(random, i) };
+            spots[i] = new Spot2 { Y = NextFloat(random, i + 1) };
+            entities[i] = world.CreateEntity(new Color4(), levels[i], spots[i], new Far3(), paces[i]);
+            if (i % 7 == 0) entities[i].Set(new Frozen());
+        }
+
+        MathKernels.Waves(world);
+        MathKernels.Lengths(world);
+        MathKernels.Far(world);
+        for (int i = 0; i < count; i++)
+        {
+            float x = levels[i].Value;
+            double d = paces[i].Value;
+            var c = entities[i].Get<Color4>();
+            var s = entities[i].Get<Spot2>();
+            var f = entities[i].Get<Far3>();
+            (string Name, double Got, double Want, bool Single)[] lanes =
+            [
+                ("Sin", c.R, MathF.Sin(x), true), ("Cos", c.G, MathF.Cos(x), true), ("Exp", c.B, MathF.Exp(x), true),
+                ("Log", c.A, MathF.Log(MathF.Abs(x)), true), ("Log2", s.X, MathF.Log2(MathF.Abs(x)), true),
+                ("Hypot", s.Y, float.Hypot(x, spots[i].Y), true), ("Math.Sin", f.X, Math.Sin(d), false),
+                ("Math.Exp", f.Y, Math.Exp(d * 0.01), false), ("Math.Log", f.Z, Math.Log(Math.Abs(d)), false),
+            ];
+            foreach (var (name, got, want, single) in lanes)
+                Assert.That(Ulps(got, want, single), Is.LessThanOrEqualTo(2), $"{name} of row {i} ({x}, {d}): {got} instead of {want}");
+        }
+    }
+
+    /// <summary>
+    /// Maybe&lt;T&gt; as a lane mask, bit for bit the method's: tables with the optional column (some rows without it),
+    /// without it, and rows that lack a queried component (masked words); written through, stored only where rows have
+    /// it, and stamped where they have it.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void OptionalComponentsAreLaneMasks(int count)
+    {
+        using var world = new World();
+        var random = new Random(count);
+        var heats = new Heat[count];
+        var levels = new Level[count];
+        var spots = new Spot2[count];
+        var boosts = new Boost[count];
+        var winds = new Wind2[count];
+        bool[] hasBoost = new bool[count], hasWind = new bool[count], hasHeat = new bool[count], hasSpot = new bool[count];
+        var entities = new Entity[count];
+        world.Reserve<Heat, Level, Spot2, Boost, Wind2>(count);
+        for (int i = 0; i < count; i++)
+        {
+            heats[i] = new Heat { Value = NextFloat(random, i) };
+            levels[i] = NextLevel(random, i + 1);
+            spots[i] = new Spot2 { X = NextFloat(random, i), Y = NextFloat(random, i + 2) };
+            boosts[i] = new Boost { Value = NextFloat(random, i + 3) };
+            winds[i] = new Wind2 { X = NextFloat(random, i + 1), Y = NextFloat(random, i + 4) };
+            var e = entities[i] = world.CreateEntity(heats[i], levels[i], spots[i]);
+            hasHeat[i] = hasSpot[i] = true;
+            int table = i % 5;
+            if (table != 4) // the fifth table has neither optional column
+            {
+                e.Set(boosts[i]);
+                e.Set(winds[i]);
+                hasBoost[i] = hasWind[i] = true;
+                if (table == 3) e.Set(new Frozen());
+            }
+        }
+        for (int i = 0; i < count; i++)
+        {
+            int table = i % 5;
+            if (table == 1 && i % 3 == 0) { entities[i].Remove<Boost>(); hasBoost[i] = false; }  // presence holes
+            if (table == 1 && i % 7 == 0) { entities[i].Remove<Wind2>(); hasWind[i] = false; }
+            if (table == 2 && i % 4 == 0) { entities[i].Remove<Heat>(); hasHeat[i] = false; }    // masked words
+            if (table == 2 && i % 6 == 0) { entities[i].Remove<Spot2>(); hasSpot[i] = false; }
+        }
+
+        world.Update();
+        ulong mark = world.ChangeTick;
+        for (int round = 0; round < 2; round++)
+        {
+            OptionalKernels.Push(world);
+            OptionalKernels.Blow(world);
+            OptionalKernels.Peek(world);
+            for (int i = 0; i < count; i++)
+            {
+                var boost = hasBoost[i] ? new Maybe<Boost>(ref boosts[i]) : default;
+                var wind = hasWind[i] ? new Maybe<Wind2>(ref winds[i]) : default;
+                if (hasHeat[i]) OptionalKernels.Push(ref heats[i], boost);
+                if (hasSpot[i]) OptionalKernels.Blow(ref spots[i], wind);
+                if (hasHeat[i]) OptionalKernels.Peek(ref levels[i], in heats[i], boost);
+            }
+        }
+
+        // Rows Blow reached with a Wind2 are stamped (the indexer's stamps), the others are not (checked before Get,
+        // which writes).
+        int stamped = 0;
+        for (int i = 0; i < count; i++) if (hasWind[i] && hasSpot[i]) stamped++;
+        Assert.That(world.Count<Wind2>(QueryFilter.Create().Changed<Wind2>(mark)), Is.EqualTo(stamped));
+        foreach (var item in world.Read<Wind2>(QueryFilter.Create().Changed<Wind2>(mark)))
+            Assert.That(item.Entity.Has<Spot2>(), $"{item.Entity} was stamped without being visited");
+        for (int i = 0; i < count; i++)
+        {
+            if (hasHeat[i]) Assert.That(Same(entities[i].Get<Heat>(), heats[i]), $"Heat of row {i}: {Bits(entities[i].Get<Heat>())} instead of {Bits(heats[i])}");
+            Assert.That(Same(entities[i].Get<Level>(), levels[i]), $"Level of row {i}: {Bits(entities[i].Get<Level>())} instead of {Bits(levels[i])}");
+            if (hasSpot[i]) Assert.That(Same(entities[i].Get<Spot2>(), spots[i]), $"Spot2 of row {i}");
+            if (hasBoost[i]) Assert.That(Same(entities[i].Get<Boost>(), boosts[i]), $"Boost of row {i}");
+            if (hasWind[i]) Assert.That(Same(entities[i].Read<Wind2>(), winds[i]), $"Wind2 of row {i}: {Bits(entities[i].Read<Wind2>())} instead of {Bits(winds[i])}");
+        }
+    }
+
+    /// <summary>A read of Value for a row without the component throws for that row, after the rows before it, as the method does.</summary>
+    [Test]
+    public void AnOptionalReadWithoutHasValueThrowsForItsRow()
+    {
+        const int count = 100;
+        using var world = new World();
+        var entities = new Entity[count];
+        for (int i = 0; i < count; i++) entities[i] = world.CreateEntity(new Level { Value = i }, new Boost { Value = i * 10 });
+        OptionalKernels.Careless(world); // every row has Boost
+        for (int i = 0; i < count; i++) Assert.That(entities[i].Get<Level>().Value, Is.EqualTo(i * 10 + 1));
+
+        for (int i = 0; i < count; i++) entities[i].SetBoost(i * 100);
+        entities[37].Remove<Boost>();
+        Assert.Throws<InvalidOperationException>(() => OptionalKernels.Careless(world));
+        for (int i = 0; i < count; i++)
+            Assert.That(entities[i].Get<Level>().Value, Is.EqualTo(i < 37 ? i * 100 + 1 : i * 10 + 1), $"row {i}");
+    }
+
     [Test]
     public void VectorLoopsDoNotAllocate()
     {
@@ -827,8 +1683,14 @@ public class KernelTests
             world.CreateEntity(new Spot3 { X = i }, new Drift3(), new Spot2(), new Drift2(), new Far3(), new Pace { Value = 2 });
             var e = world.CreateEntity(new Level { Value = i }, new Rank { Value = i - 500 }, new Code32 { Value = (uint)i }, new Spot2 { Y = float.PositiveInfinity }); // no Clamp throws
             if (i % 3 == 0) e.Remove<Rank>(); // rows to test: masked words
+            var n = world.CreateEntity(new Ink(), new Shade { V = (byte)i }, new Tone { V = (byte)(i * 7) }, new Rgba(), new Tint4());
+            if (i % 4 == 0) n.Remove<Tone>(); // narrow masked words: the method on their passing rows
+            world.CreateEntity(new Place2(new Vector2(i, 1)), new Pace2(Vector2.One), new Body3 { M = 2 }, new Pace3(Vector3.One));
+            var w = world.CreateEntity(new Craft12 { VX = i }, new Mixed { Speed = i }, new Level());
+            if (i % 5 == 0) w.Remove<Craft12>(); // wide masked words: the method on their passing rows
         }
         world.SetBounds(-10, 10);
+        world.SetDt2(0.5f);
 
         void Frame()
         {
@@ -848,6 +1710,19 @@ public class KernelTests
             ReduceKernels.Count(world);
             ReduceKernels.Span(world);
             ReduceKernels.Sum(world);
+            MathKernels.Turn(world);
+            MathKernels.Lengths(world);
+            ParallelKernels.Glide(world);
+            ParallelKernels.Count(world);
+            OptionalKernels.Push(world); // tables without the optional column
+            NarrowKernels.Band(world);
+            NarrowKernels.Pick(world);
+            NarrowKernels.Blend(world);
+            StructKernels.Move(world);
+            StructKernels.Bounce(world);
+            WideKernels.Steer(world);
+            WideKernels.Wear(world);
+            StructKernels.Weigh(world);
         }
 
         for (int i = 0; i < 50; i++) Frame(); // warm-up: the query cache, the static index tables of Interleaved, JIT tiers

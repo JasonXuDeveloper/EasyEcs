@@ -30,16 +30,22 @@ icon: Gauge
 
 ### 让生成器向量化：向量循环 [#vector-loops]
 
-非并行的静态 `[ForEach]` 方法，组件都有 1 到 4 个同一种数值类型的字段时，生成器会为它写一个 `Vector<T>` 循环，把其中的 `if`
-变成掩码，再加一段标量收尾：这就是 Burst 为 Unity job 做的事，只是在编译期完成。你写的代码仍是标量的。哪些方法符合条件、
-生成的代码对照、怎样改写一个保持标量的方法：[向量循环](/zh/docs/guide/systems#vector-loops)。
+静态的逐实体 `[ForEach]` 方法（单线程或 `Parallel`），组件都是 1 到 4 个同一宽度的 lane 时，生成器会为它写一个向量循环（CPU 支持时用
+`Vector512`，否则用 `Vector<T>`），把其中的 `if` 变成掩码，再加一段标量收尾：这就是 Burst 为 Unity job 做的事，只是在编译期完成。
+你写的代码仍是标量的，除 `FloatMode.Fast` 外结果与标量代码逐位相同。哪些方法符合条件、生成的代码对照、怎样改写一个保持标量的方法：
+[向量循环](/zh/docs/guide/systems#vector-loops)。
 
 - **多个字段：** `Position { X, Y, Z }` 由解交错加载和交错存储拆成每个字段一个向量（AVX2、AVX-512）；没有这些指令时逐行运行。
+- **方法体：** lane 类型之间的转换、`Math.Clamp`、`Round`、`CopySign`、`Lerp` 以及其他有精确向量形式的 `Math` / `MathF`
+  函数；`Sin`、`Cos`、`Exp`、`Log`、`Log2` 和 `Hypot` 只在 `FloatMode.Fast` 下，它的近似会改变结果。循环表达不了、位于条件之下的
+  调用是冷分支：只有某个 lane 走进它的向量才运行原方法。
+- **数据：** `byte` 和 `short` lane（每个 `Vector512` 64 行和 32 行）、`Vector2` / `Vector3` / `Vector4` 字段、作为拥有 `T` 的行的
+  lane 掩码的 `Maybe<T>`，以及在 AVX-512 上最多 16 个字、方法只用其中若干 4 字节字段的组件（置换代价超过运算时，EECS055 会说出该拆出
+  哪些字段）。
+- **合计：** [`Reduce<T>`](/zh/docs/guide/threading#reductions) 每个 lane 一个累加器，按 lane 顺序合并。
+- **系统得到了什么：** `world.DescribeSchedule()` 每个方法打印一行（`SystemInfo.Loops`）：循环、它的形状，或者保持标量的原因。
 - **为什么没有：** [EECS055](/zh/docs/guide/analyzer#eecs055) 像 Burst 的 Inspector 一样说出方法保持标量的第一个原因；热路径上的
   `[ForEach(Simd = SimdMode.Require)]` 把它变成构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)），`SimdMode.Off` 不再提示。
-
-{/* TODO(vector loops): Math.Clamp、MathF.* 和 lerp、类型转换；向量归约、FloatMode.Fast、存在位的 lane 掩码、Vector512 和无边界检查的
-标量循环。每项在这里加一行，链接 guide/systems 里的小节。 */}
 
 </Step>
 

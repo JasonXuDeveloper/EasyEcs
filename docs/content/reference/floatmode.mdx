@@ -28,4 +28,4 @@ Every result bit for bit the method's: float sums of a reduction stay one row at
 Fast = 1;
 ```
 
-Float sums of a reduction may add their rows in another order (per vector lane), so they round differently.
+Float sums of a reduction may add their rows in another order (per vector lane), so they round differently, and Sin, Cos, Exp, Log, Log2 and Hypot take .NET's vector approximations: results may differ from the method's and between machines.

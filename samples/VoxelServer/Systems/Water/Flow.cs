@@ -30,11 +30,9 @@ namespace VoxelServer;
 // found by counting trailing zeros. The others are not written at all: the step's buffer equals the water after every
 // commit (a moved step is copied into it, a settled one wrote back what was there), so a row whose stencil is dry is
 // already zero in it.
-[UpdateInGroup<Simulation>]
+[UpdateInGroup<Simulation>, UpdateInterval(Rules.FlowDelay)]
 public class WaterFlowSystem : EcsSystem
 {
-    public override int UpdateInterval => Rules.FlowDelay;
-
     const int Size = Terrain.Size, Blocks = Terrain.BlocksPerChunk;
 
     // A few hundred chunks of 16 x 16 x 32 blocks: far under the 4,096 rows of a default chunk of a pass that writes a

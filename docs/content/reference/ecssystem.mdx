@@ -52,7 +52,7 @@ The world's [`World.ChangeTick`](/en/docs/reference/world#changetick) when this 
 public long RunCount { get; }
 ```
 
-How many times the system has run before the current run (0 during its first run; runs skipped by [`EcsSystem.UpdateInterval`](/en/docs/reference/ecssystem#updateinterval) or while disabled do not count, a run that throws does). A `[ForEach(Slices = N)]` method visits slice `RunCount % N` of its rows, so [`EcsSystem.OnUpdate`](/en/docs/reference/ecssystem#onupdate) can tell which slice this run visits.
+How many times the system has run before the current run (0 during its first run; runs skipped by [[UpdateInterval]](/en/docs/reference/updateintervalattribute) or while disabled do not count, a run that throws does). A `[ForEach(Slices = N)]` method visits slice `RunCount % N` of its rows, so [`EcsSystem.OnUpdate`](/en/docs/reference/ecssystem#onupdate) can tell which slice this run visits.
 
 ### `Stats` [#stats]
 
@@ -61,22 +61,6 @@ public SystemStats Stats { get; }
 ```
 
 Run count, time, allocated bytes and visited entities of this system; recorded only with [`WorldOptions.MeasureSystems`](/en/docs/reference/worldoptions#measuresystems).
-
-### `UpdateInterval` [#updateinterval]
-
-```csharp
-public virtual int UpdateInterval { get; }
-```
-
-Run every N-th world update (1 = every update); see [`EcsSystem.UpdatePhase`](/en/docs/reference/ecssystem#updatephase).
-
-### `UpdatePhase` [#updatephase]
-
-```csharp
-public virtual int UpdatePhase { get; }
-```
-
-Which of the [`EcsSystem.UpdateInterval`](/en/docs/reference/ecssystem#updateinterval) updates the system runs on (0 to interval - 1): systems with the same interval and different phases spread their work over the updates instead of all running on the same one.
 
 ### `World` [#world]
 

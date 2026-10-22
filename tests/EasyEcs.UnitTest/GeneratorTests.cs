@@ -27,10 +27,11 @@ public class GeneratorTests
     /// Errors and the diagnostics of the correctness rules (EECS002-024). The performance rules (EECS025-033) are left
     /// out: the cases here write the shortest code that shows a rule, which often also costs; <see cref="Costs"/> checks them.
     /// So are the suggestion to declare a hand-written key with [Key] (EECS067, PartTests) and the formatter a managed type
-    /// lacks (EECS069): the shared components write keys by hand and hold references.
+    /// lacks (EECS069): the shared components write keys by hand and hold references. So are the suggestions to write
+    /// a hand-written one-entity job or consuming pass with attributes (EECS080, EECS084; FormTests).
     /// </summary>
     private static async Task<string[]> Diagnose(params string[] sources) =>
-        (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id) && d.Id != "EECS055" && d.Id is not ("EECS067" or "EECS069"))
+        (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id) && d.Id != "EECS055" && d.Id is not ("EECS067" or "EECS069" or "EECS080" or "EECS084"))
             .Select(d => d.Id).Distinct().OrderBy(x => x).ToArray();
 
     /// <summary>The diagnostics of the performance rules (EECS025-034, EECS039, EECS046, EECS052, EECS053), with their properties for the code fixes.</summary>
@@ -79,6 +80,7 @@ public class GeneratorTests
             }
             public partial class Outer
             {
+                [UpdateInterval(4, Phase = 1)]
                 public partial class S : EcsSystem
                 {
                     [ForEach, With<Q>] static void A(ref P p) => p.V++;
@@ -94,8 +96,6 @@ public class GeneratorTests
                     [ForEach] static void I(Entity e, in DynamicBuffer<long> read) { ref var items = ref e.Get<DynamicBuffer<int>>(); items.Clear(); foreach (var x in read) items.Add((int)x); }
                     [ForEach, With<Q>] static void J(Entity e, World w) { e.Get<DynamicBuffer<int>>() = default; w.CreateEntity(new P(), new DynamicBuffer<int>()); }
                     [ForEach] static void K(Entity e, in Handle link) { e.Remove<Q>(); link.Target.Destroy(); } // changes structure: runs alone
-                    public override int UpdateInterval { get { return 4; } }
-                    public override int UpdatePhase => 1;
                 }
             }
             public static class Indexed
@@ -160,8 +160,8 @@ public class GeneratorTests
     [TestCase("[ForEach] void A(in P p) { }", "access.RunAlone();")]
     [TestCase("[ForEach] static void A(in P p) { } protected override void OnUpdate() { }", "access.RunAlone();")]
     [TestCase("[ForEach(Slices = 3)] static void A(ref P p) { }", "access.Write<global::P>();", "global::EasyEcs.QueryFilter.Create().Slice((int)(system.RunCount % 3), 3)")]
-    [TestCase("[ForEach(Slices = 2, Parallel = true), Without<Q>] static void A(ref P p) { }", "ForEachParallel<", "AFilter0.Slice((int)(system.RunCount % 2), 2)")]
-    [TestCase("[ForEach(Parallel = true, ChunkRows = 100)] static void A(ref P p) { }", "ForEachParallel<", "(ref job0, chunkRows: 100);")]
+    [TestCase("[ForEach(Slices = 2, Parallel = true), Without<Q>] static void A(ref P p) { }", "ForEachBatchParallel<", "AFilter0.Slice((int)(system.RunCount % 2), 2)")]
+    [TestCase("[ForEach(Parallel = true, ChunkRows = 100)] static void A(ref P p) { }", "ForEachBatchParallel<", "(ref job0, chunkRows: 100);")]
     [TestCase("[ForEach(Slices = 4)] static void A(System.Span<P> p) { }", "ForEachBatch<", "Slice((int)(system.RunCount % 4), 4)")]
     public void AccessIsDeclaredFromParameters(string members, params string[] expected)
     {
@@ -179,8 +179,17 @@ public class GeneratorTests
         public struct Five : IComponent { public float A, B, C, D, E; }
         public struct Mixed : IComponent { public float A; public int B; }
         public struct D : IComponent { public double V; }
+        public struct B8 : IComponent { public byte V; }
+        public struct C8 : IComponent { public byte V; }
+        public struct S8 : IComponent { public sbyte V; }
+        public struct Px : IComponent { public byte R, G; }
+        public record struct Pos(System.Numerics.Vector2 Value) : IComponent;
+        public record struct Vel(System.Numerics.Vector2 Value) : IComponent;
+        public struct Odd : IComponent { public float X, Y; public Odd(float x, float y) { X = x; Y = x + y; } }
         public partial struct Split : IComponent { public float A; }
         public partial struct Split { public float B; }
+        public struct Unit : IComponent { public float Speed; public bool Alive; public byte Team; public int Hp; }
+        public struct Sixteen : IComponent { public float F0, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F14, F15; }
         public record struct G(float Pull) : ISingletonComponent;
         public struct Count : ISingletonComponent, IReduction<Count> { public int N, Low; public static Count Identity => new() { Low = int.MaxValue }; public static Count Combine(Count a, Count b) => new() { N = a.N + b.N, Low = System.Math.Min(a.Low, b.Low) }; }
         public struct Total : ISingletonComponent, IReduction<Total> { public float V; public static Total Identity => default; public static Total Combine(Total a, Total b) => new() { V = a.V + b.V }; }
@@ -205,13 +214,26 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Two t) => t.A = t.B;", true)]                               // two fields: Interleaved
     [TestCase("[ForEach] static void A(ref Five t) => t.A = t.B;", false)]                             // five fields
     [TestCase("[ForEach] static void A(ref Mixed m) => m.A += m.B;", true)]                             // float and int fields
-    [TestCase("[ForEach(Parallel = true)] static void A(ref F f) => f.V++;", false)]                   // no parallel batch loop yet
+    [TestCase("[ForEach(Parallel = true)] static void A(ref F f) => f.V++;", true)]                    // parallel: in each chunk
+    [TestCase("[ForEach(Parallel = true)] static void A(ref Two t, in G g) => t.A -= t.B * g.Pull;", true)]
+    [TestCase("[ForEach(Parallel = true)] static void A(in P p, ref Reduce<Count> c) => c.Value.N += p.V;", true)]
     [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V++;", false)]
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Count> c) { c.Value.N++; c.Value.Low = System.Math.Min(c.Value.Low, p.V); }", true)] // reductions
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Count> c) => c.Combine(new Count { N = p.V, Low = p.V });", true)]
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;", true)]
     [TestCase("[ForEach] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;", false)]  // a float sum: Exact
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Ends> e) => e.Value.Last = p.V;", false)]  // not field by field
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f, in H h) => f.V = System.MathF.Sin(f.V) * System.MathF.Exp(h.V);", true)]
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref D d) => d.V = System.Math.Log2(d.V) + double.Hypot(d.V, 2);", true)]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Cos(f.V);", false)]                 // approximate: Exact
+    [TestCase("[ForEach] static void A(ref F f, in G g) => f.V *= System.MathF.Sin(g.Pull);", true)]      // uniform: the scalar call
+    [TestCase("[ForEach] static void A(ref F f) => f.V = float.DegreesToRadians(f.V);", true)]            // (x * Pi) / 180: exact
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Atan2(f.V, 1);", false)]            // no vector form
+    [TestCase("[ForEach] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V += h.Value.V; else f.V = 0; }", true)] // a lane mask
+    [TestCase("[ForEach] static void A(ref F f, ReadOnlyMaybe<Two> t) => f.V = t.HasValue && t.Value.A > 0 ? t.Value.B : f.V;", true)]
+    [TestCase("[ForEach] static void A(ref F f, Maybe<H> h) { if (!h.HasValue) return; h.Value.V = f.V; }", true)]   // written through
+    [TestCase("[ForEach] static void A(ref F f, Maybe<D> d) { if (d.HasValue) f.V++; }", false)]                    // another lane size
+    [TestCase("[ForEach(Parallel = true)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V++; }", false)]   // in parallel
     public void QualifyingMethodsGetAVectorLoop(string members, bool vectorized)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"public partial class S : EcsSystem {{ {members} }}"),
@@ -223,17 +245,20 @@ public class GeneratorTests
         Assert.That(generated.Contains("for (nint last = rows - global::System.Runtime.Intrinsics.Vector512<"), Is.EqualTo(vectorized), generated);
         Assert.That(generated.IndexOf("Vector512.IsHardwareAccelerated", System.StringComparison.Ordinal)
             < generated.IndexOf("global::System.Numerics.Vector.IsHardwareAccelerated", System.StringComparison.Ordinal), Is.EqualTo(vectorized), generated);
-        // A vector loop also takes words of rows of which some pass, as a lane mask (IForEachMasked).
-        Assert.That(generated.Contains("global::EasyEcs.IForEachMasked<") && generated.Contains("ulong pass, "), Is.EqualTo(vectorized), generated);
+        // A vector loop also takes words of rows of which some pass, as a lane mask (IForEachMasked); a parallel one
+        // runs each chunk's runs of rows (ForEachBatchParallel).
+        bool parallel = members.Contains("Parallel = true");
+        Assert.That(generated.Contains("global::EasyEcs.IForEachMasked<") && generated.Contains("ulong pass, "), Is.EqualTo(vectorized && !parallel), generated);
+        if (parallel && vectorized) Assert.That(generated, Does.Contain("world.ForEachBatchParallel<"), generated);
 
         // Skipped means reported: the same method with SimdMode.Require is an error exactly when it got no loop.
-        string required = members.Replace("[ForEach]", "[ForEach(Simd = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(Simd = SimdMode.Require, Parallel");
+        string required = members.Replace("[ForEach]", "[ForEach(Simd = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(Simd = SimdMode.Require, Parallel").Replace("[ForEach(FloatMode", "[ForEach(Simd = SimdMode.Require, FloatMode");
         var errors = Diagnose(Components, Lanes, $"public partial class S : EcsSystem {{ {required} }}").Result;
         Assert.That(errors.Contains("EECS056"), Is.EqualTo(!vectorized), string.Join(", ", errors));
     }
 
     // EECS055: the first reason a method that looks meant for a vector loop stays scalar, from Kernel.Vectorize.
-    [TestCase("[ForEach] static void A(ref Five t) => t.A = t.B;", "component Five has 5 fields (a vector loop splits up to 4)")]
+    [TestCase("[ForEach] static void A(ref Five t) => t.A = t.B;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 2 fields it uses takes 11 permutes per 16 rows, for no vector operation; it uses 2 of Five's 5 fields (A, B): split them into a component of their own (a component of 2 fields gets a vector loop)")]
     [TestCase("[ForEach] static void A(ref F f, in D d) => f.V = (float)d.V;", "lane types float and double differ in size")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.Math.Clamp(f.V, 2, 1);", "Math.Clamp's min is above its max, so the call throws")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Round(f.V, 2);", "MathF.Round is not supported")]
@@ -250,6 +275,27 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Ends> e) => e.Value.Last = p.V;", "Ends.Combine sets First to 'a.First', not the sum, Min or Max of both sides' First")]
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Wide> w) => w.Value.N += p.V;", "field Wide.L of the reduction is a long, not a lane type of 4 bytes")]
     [TestCase("[ForEach] static void A(ref P p, ref Reduce<Count> c) { c.Value.N += p.V; p.V = c.Value.N; }", "it reads 'c.Value.N', a partial result the lanes of a vector loop hold in parts")]
+    [TestCase("[ForEach(Parallel = true)] static void A(ref Five t) => t.A = t.B;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 2 fields it uses takes 11 permutes per 16 rows, for no vector operation; it uses 2 of Five's 5 fields (A, B): split them into a component of their own (a component of 2 fields gets a vector loop)")] // parallel too
+    [TestCase("[ForEach] static void A(ref F f, Maybe<D> d) { if (d.HasValue) f.V++; }", "lane types float and double differ in size")]
+    [TestCase("[ForEach(Parallel = true)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V++; }", "it takes a Maybe<H> and runs in parallel: an optional column has a vector loop on one thread")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Sin(f.V);", "MathF.Sin is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
+    [TestCase("[ForEach] static void A(ref D d) => d.V = double.Hypot(d.V, 1);", "Double.Hypot is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Atan2(f.V, 1);", "MathF.Atan2 has no vector form in .NET 10")]
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Pow(f.V, 2);", "MathF.Pow has no vector form in .NET 10")]
+    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)System.Math.Min(b.V - c.V, 10);", "'(byte)System.Math.Min(b.V - c.V, 10)' keeps the low bits of an int the vector loop cannot compute in 8-bit lanes (it may leave [0, 255] and [-128, 127])")]
+    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)((b.V * c.V) >> 8);", "the shift '(b.V * c.V) >> 8' needs bits of an int that 8-bit lanes do not hold")]
+    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)(b.V << c.V);", "the shift 'b.V << c.V' is by a count that is not a constant")]
+    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)(b.V / (c.V + 1));", "integer division is not supported (it throws on 0)")]
+    [TestCase("[ForEach] static void A(ref B8 b, in S8 s) { if (b.V > s.V) b.V = 0; }", "'b.V > s.V' compares ints that 8-bit lanes do not hold")]
+    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) { if (b.V + c.V > 255) b.V = 0; }", "'b.V + c.V > 255' compares ints that 8-bit lanes do not hold")]
+    [TestCase("[ForEach] static void A(ref B8 b, Maybe<C8> c) { if (c.HasValue) b.V++; }", "it takes a Maybe<C8> of byte lanes: optional columns have vector loops of 4- and 8-byte lanes")]
+    [TestCase("[ForEach] static void A(ref Sixteen r, in G g) { r.F0 += r.F2 * g.Pull; r.F1 += r.F3 * g.Pull; }", "component Sixteen has 16 fields (a vector loop splits up to 4), and gathering the 4 fields it uses takes 42 permutes per 16 rows, more than its 4 vector operations gain; it uses 4 of Sixteen's 16 fields (F0, F1, F2, F3): split them into a component of their own (a component of 4 fields gets a vector loop)")]
+    [TestCase("[ForEach] static void A(ref Unit u) { if (u.Alive) u.Hp--; }", "field Unit.Alive is a bool, not a lane type (float, double, int, uint, long, ulong, byte, sbyte, short or ushort)")]
+    [TestCase("[ForEach] static void A(ref Px p, in B8 b) => p.R = (byte)(p.R + b.V);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field; it uses 1 of Px's 2 fields (R): move it into a component of its own (a component of one field gets a vector loop)")]
+    [TestCase("[ForEach] static void A(ref Px p) => p.R = (byte)(p.R + p.G);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field")]
+    [TestCase("[ForEach] static void A(ref F f, in Pos p) => f.V = System.Numerics.Vector2.Dot(p.Value, p.Value);", "Vector2.Dot adds the fields of a vector together, in an order not proven to be the scalar code's")]
+    [TestCase("[ForEach] static void A(ref F f, in Pos p) => f.V = p.Value.Length();", "Vector2.Length adds the fields of a vector together, in an order not proven to be the scalar code's")]
+    [TestCase("[ForEach] static void A(ref Odd o) => o = new Odd(o.Y, o.X);", "Odd's constructor does more than set fields from its parameters ('Y = x + y;')")]
     public void ScalarLoopsNameTheirReason(string members, string reason)
     {
         var diagnostics = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Where(d => d.Id == "EECS055").ToArray();
@@ -260,7 +306,6 @@ public class GeneratorTests
     // Not meant for a vector loop (or vectorized, or opted out): no EECS055.
     [TestCase("[ForEach] static void A(ref F f, in H h) => f.V += h.V;")]                              // vectorized
     [TestCase("[ForEach(Simd = SimdMode.Off)] static void A(ref Five t) => t.A = t.B;")]              // opted out
-    [TestCase("[ForEach(Parallel = true)] static void A(ref Five t) => t.A = t.B;")]
     [TestCase("[ForEach] static void A(Entity e, ref Five t) => t.A = t.B;")]
     [TestCase("[ForEach] static void A(ref Holder h) { }")]                                             // not numeric fields
     [TestCase("[ForEach] static void A(System.Span<F> f) { }")]                                          // a batch method
@@ -273,8 +318,8 @@ public class GeneratorTests
 
     [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(Entity e, ref F f) => f.V++;", "it takes the Entity")]
     [TestCase("[ForEach(Simd = SimdMode.Require)] void A(ref F f) => f.V++;", "it is not static")]
-    [TestCase("[ForEach(Simd = SimdMode.Require, Parallel = true)] static void A(ref F f) => f.V++;", "it runs in parallel (Parallel = true), and parallel jobs have no vector loop")]
-    [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4)")]
+    [TestCase("[ForEach(Simd = SimdMode.Require, Parallel = true)] static void A(ref F f, in D d) => f.V++;", "lane types float and double differ in size")]
+    [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 1 field it uses takes 9 permutes per 16 rows, more than its 1 vector operation gains; it uses 1 of Five's 5 fields (A): move it into a component of its own (a component of one field gets a vector loop)")]
     [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref F f, Scratch<int> s) => f.V += s.Value;", "it takes a Scratch<Int32>: working memory a row at a time, not one per lane")]
     [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref F f, Lookup<H> h) => f.V++;", "it takes a Lookup<H>: a lookup of another entity per row has no vector form")]
     public void ARequiredVectorLoopThatDoesNotQualifyIsAnError(string members, string reason)
@@ -316,6 +361,142 @@ public class GeneratorTests
         Assert.That(generated.Contains("lanes = rows * 2;"), Is.EqualTo(flat), generated);
         Assert.That(generated.Contains("for (nint last = rows - global::System.Numerics.Vector<"), Is.True, generated); // masked words, or the loop
         if (flat) Assert.That(generated, Does.Contain("i /= 2;").And.Contain("Interleaved.Load2("), generated);   // the masked Execute deinterleaves
+    }
+
+    // A parallel method's vector loop runs in each chunk's batch job: its singletons are the job's SingletonRefs, its
+    // reductions the run's locals, combined per chunk.
+    [Test]
+    public void AParallelVectorLoopRunsInEachChunk()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { [ForEach(Parallel = true, Simd = SimdMode.Require)] static void A(ref F f, in G g, ref Reduce<Count> c) { f.V -= g.Pull; c.Value.N++; } }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("internal struct AJob0 : global::EasyEcs.IForEachBatch<global::F>, global::EasyEcs.INoStructuralChanges")
+            .And.Contain("ref readonly global::G __p1 = ref s1.Value;")
+            .And.Contain("var l2 = a2;")
+            .And.Contain("l2.Combine(__v);")
+            .And.Contain("static bool global::EasyEcs.IForEachBatch<global::F>.Merges => true;")
+            .And.Contain("world.ForEachBatchParallel<global::F, AJob0>(ref job0);")
+            .And.Not.Contain("ulong pass"), generated);
+    }
+
+    [Test]
+    public void MakingAVectorLoopParallelReemitsOnlyItsSystem()
+    {
+        const string other = "public class O : EcsSystem { [ForEach] static void B(ref F f) => f.V++; }";
+        var tree = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components + Lanes + "public class S : EcsSystem { [ForEach] static void A(ref F f) => f.V++; }", Parse);
+        var compilation = Compile().AddSyntaxTrees(tree, CSharpSyntaxTree.ParseText("using EasyEcs;\n" + other, Parse));
+        var driver = Driver().RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(tree, CSharpSyntaxTree.ParseText(
+            tree.ToString().Replace("[ForEach] static void A", "[ForEach(Parallel = true)] static void A"), Parse)));
+
+        var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
+        Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
+        string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
+        Assert.That(generated, Does.Contain("ForEachBatchParallel<").And.Contain("Vector.LoadUnsafe"));
+    }
+
+    // Maybe<T>: HasValue is a lane mask of the presence bits, Value's fields are lanes of the run's optional column; a
+    // read of Value where lanes are not proven to have it checks them (a lane without it sends the vector's rows to the
+    // method, which throws), one proven by HasValue does not.
+    [Test]
+    public void AMaybeIsALaneMask()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { [ForEach(Simd = SimdMode.Require)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V += h.Value.V; f.V -= h.Value.V; } }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("ref float __r1 = ref global::System.Runtime.CompilerServices.Unsafe.As<global::H, float>(ref m1.Lanes);")
+            .And.Contain("var __has1 = global::EasyEcs.Interleaved.Lanes32(m1.Present(i), 0);")
+            .And.Contain("var __has1 = global::EasyEcs.Interleaved.Lanes32In512(m1.Present(i), 0);")
+            .And.Contain("var __q1_0 = global::System.Numerics.Vector.LoadUnsafe(ref __r1, (nuint)i & __z1);")
+            .And.Contain("var __live = global::System.Numerics.Vector<int>.AllBitsSet;").And.Contain("var __live = __pass;"), generated);
+        // One check, for the read outside the branch; none for the one under h.HasValue.
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__live & ~__has1\) != global::System.Numerics.Vector<int>.Zero;").Count, Is.EqualTo(2), generated); // unmasked + masked
+        Assert.That(generated, Does.Not.Contain("__bail |= (__live & __m"), generated);
+    }
+
+    // A call under an if the loop computes: a cold branch, whose lanes send the vector's rows to the method.
+    [Test]
+    public void ACallUnderAConditionIsAColdBranch()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { static void Log(float v) { } [ForEach(Simd = SimdMode.Require)] static void A(ref F f) { f.V -= 1; if (f.V < 0) { Log(f.V); f.V = 0; } } }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("__bail |= (__live & __m1) != global::System.Numerics.Vector<int>.Zero; // a cold branch: the method runs these rows")
+            .And.Contain("var __live = __pass;").And.Not.Contain("Log("), generated);
+    }
+
+    // A component of a Vector2 assigned whole: one statement per lane, and as each lane is computed alike, the flat loop.
+    [Test]
+    public void AWholeComponentOfAVector2IsOneStatementPerLane()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { [ForEach(Simd = SimdMode.Require)] static void A(ref Pos p, in Vel v, in G g) => p = new Pos(p.Value + v.Value * g.Pull); }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("lanes = rows * 2;").And.Contain("var __t1 = (__c1_0 + (__c2_0 * __u0));")
+            .And.Contain("var __t2 = (__c1_1 + (__c2_1 * __u0));"), generated); // the flat loop, then the masked one per lane
+    }
+
+    // A wide component (a float, a bool, a byte and an int a row): the float lane gathered from 3 words per row by
+    // permutes, on AVX-512 alone, behind the job's check of the layout; the masked words run the method.
+    [Test]
+    public void AWideComponentsLanesAreGatheredByPermutes()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { [ForEach(Simd = SimdMode.Require)] static void A(ref Unit u) => u.Speed = System.MathF.Max(u.Speed * 0.5f - 1, 0); }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("private static readonly bool __layout1 = __Layout1();")
+            .And.Contain("t = t with { Speed = global::System.BitConverter.Int32BitsToSingle(1) };")
+            .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.IsSupported && __layout1 && rows - i >=")
+            .And.Contain("global::System.Runtime.Intrinsics.Vector512.LoadUnsafe(ref e1, (nuint)i * 3 + 32);")
+            .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar16x32x2(")
+            .And.Contain("A: vector (Vector512 only), wide component (permutes), masked words scalar")
+            .And.Not.Contain("global::System.Numerics.Vector<float>"), generated);
+    }
+
+    // Narrow lanes: a byte sum brought back into range by Math.Min is AddSaturate, a difference raised to 0 by Math.Max is
+    // SubtractSaturate, a wrapping sum stays the lanes' own +, and the masked words run the method on their passing rows.
+    [Test]
+    public void ByteSaturationIdiomsAreTheSaturatingForms()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { [ForEach(Simd = SimdMode.Require)] static void A(ref B8 b, in C8 c) { b.V = (byte)System.Math.Max(b.V - c.V, 0); b.V = (byte)System.Math.Min(b.V + c.V, 255); b.V += c.V; } }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("global::System.Numerics.Vector.SubtractSaturate(__c1_0, __c2_0)")
+            .And.Contain("global::System.Runtime.Intrinsics.Vector512.AddSaturate(")
+            .And.Contain("(__c1_0 + __c2_0)")
+            .And.Not.Contain("Interleaved.Lanes8"), generated);
+        // the masked Execute: no vector loop, the passing rows run the method
+        string masked = generated.Substring(generated.IndexOf("ulong pass,", System.StringComparison.Ordinal));
+        Assert.That(masked.Substring(0, masked.IndexOf("WriteMask", System.StringComparison.Ordinal)), Does.Not.Contain("Vector"), generated);
+    }
+
+    // FloatMode.Fast: the vector approximations of .NET (Vector.Sin, Vector512.Sin) in both loops; degrees to radians as
+    // the scalar's two operations; a uniform call computed once by the scalar function.
+    [Test]
+    public void FastMathCallsTheVectorForms()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { [ForEach(FloatMode = FloatMode.Fast, Simd = SimdMode.Require)] static void A(ref F f, in G g) => f.V = System.MathF.Sin(f.V) + System.MathF.Cos(g.Pull) * float.DegreesToRadians(f.V); }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("global::System.Numerics.Vector.Sin(__c1_0)").And.Contain("global::System.Runtime.Intrinsics.Vector512.Sin(__c1_0)")
+            .And.Contain("global::System.Numerics.Vector.Create<float>(global::System.MathF.Cos(__p1.Pull))")
+            .And.Contain("Vector.Create<float>(float.Pi)").And.Contain("Vector.Create<float>(180f)"), generated);
     }
 
     // The Vector512 loop is the Vector<T> loop's text with the vector type's token replaced: user types named
@@ -503,7 +684,7 @@ public class GeneratorTests
         "public static void A(global::EasyEcs.World world, ref int n, in int floor, int add)", "x1 = ref n, x2 = ref floor, x3 = add")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p, ref Clock c, int world) { }",
         "public static void A(global::EasyEcs.World _world, ulong since, int world)", "__ForEach.AFilter0.Since(since)", "s1 = ref _world.SingletonRef")]
-    [TestCase("[ForEach(Parallel = true)] static void A(ref P p, in int k) { }", "public int x1;", "x1 = k }", "ForEachParallel<")]
+    [TestCase("[ForEach(Parallel = true)] static void A(ref P p, in int k) { }", "public int x1;", "x1 = k }", "ForEachBatchParallel<")]
     [TestCase("[ForEach(Slices = 3), Without<Q>] static void A(ref P p, int slice) { }",
         "public static void A(global::EasyEcs.World world, int _slice, int slice)", "__ForEach.AFilter0.Slice(_slice, 3)")]
     public void RunnersGetAnEntryPoint(string members, params string[] expected)
@@ -601,10 +782,24 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<Owned>()) item.Component1.Owner = default; } }", "EECS015")]
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<Owned>()) { ref var o = ref item.Component1; } } }", "EECS015")]
     [TestCase("public struct J : IForEach<Owned> { public void Execute(ref Owned o) => o = default; }", "EECS015")]
-    [TestCase("public class S : EcsSystem { public override int UpdatePhase => (int)World.DefaultUpdateCount; }", "EECS018")]
+    [TestCase("public class S : EcsSystem { public override int UpdatePhase => (int)World.DefaultUpdateCount; }", "EECS082")]
+    [TestCase("public class S : EcsSystem { public override int UpdateInterval => 4; public override int UpdatePhase => 1; }", "EECS082")]  // once per class
+    [TestCase("[UpdateInterval(0)] public class S : EcsSystem { }", "EECS083")]
+    [TestCase("[UpdateInterval(4, Phase = 4)] public class S : EcsSystem { }", "EECS083")]
+    [TestCase("[UpdateInterval(4, Phase = -1)] public class S : EcsSystem { }", "EECS083")]
+    [TestCase("[UpdateInterval(4)] public class NotASystem { }", "EECS083")]
+    [TestCase("public static class R { [Consume] static void A(ref P p) { } }", "EECS085")]
+    [TestCase("public class S : EcsSystem { [ForEach(Slices = 2), Consume] static void A(ref P p) { } }", "EECS085")]
+    [TestCase("public static class R { [ForEntity] void A(ref P p) { } }", "EECS081")]
+    [TestCase("public class S : EcsSystem { [ForEntity] void A(ref P p) { } }", "EECS081")]
+    [TestCase("public static class R { [ForEntity] static void A(System.Span<P> p) { } }", "EECS081")]
+    [TestCase("public static class R { [ForEntity, ForEach] static void A(ref P p) { } }", "EECS081")]
+    [TestCase("public static class R { [ForEntity] static void A(ref P p, Scratch<int> s) { } }", "EECS081")]
+    [TestCase("public static class R { [ForEntity] static void A(ref P p, int n) { } static void A(Entity e, int n) { } }", "EECS021")]
+    [TestCase("public static class R { [ForEntity] static void A(P p) { } }", "EECS002")]
+    [TestCase("public static class R { [ForEntity] static void A(int n) { } }", "EECS003")]
     [TestCase("[UpdateBefore<B>, UpdateAfter<C>] public class A : EcsSystem { } public class B : EcsSystem { } [UpdateAfter<B>] public class C : EcsSystem { }", "EECS019")]
     [TestCase("public struct G : ISystemGroup; [UpdateInGroup<G>] public class A : EcsSystem { } [UpdateAfter<A>] public class B : EcsSystem { }", "EECS020")]
-    [TestCase("public class S : EcsSystem { public override int UpdateInterval { get { return World.EntityCount; } } }", "EECS018")]
     [TestCase("public struct Zone : IComponent, IGroup { public int Id; public int Group => Id; } public partial class S : EcsSystem { [ForEach] static void A(ref Zone z) { } }", "EECS015")]
     [TestCase("public struct Link : IRelation { public EntityId Target { get; set; } } public static class U { public static void F(Entity e, Link l) => e.Get<DynamicBuffer<Link>>().Add(l); }", "EECS015")]
     [TestCase("public struct Link : IRelation { public EntityId Target { get; set; } } public partial class S : EcsSystem { [ForEach] static void A(ref DynamicBuffer<Link> links) { } }", "EECS015")]
@@ -632,7 +827,6 @@ public class GeneratorTests
     [TestCase("public class Base { public static string A(World w) => \"\"; } public class R4 : Base { [ForEach] public static void A(ref P p) { } }", "EECS021")]
     [TestCase("public static class U { public static void M() { [ForEach] static void Local(ref P p) => p.V++; } }", "EECS024")]
     [TestCase("[UpdateBefore<G2<int>>] public class G1 : EcsSystem { [ForEach] static void A(ref P p) { } } [UpdateBefore<G1>] public class G2<X> : EcsSystem { [ForEach] static void B(ref Q q) { } }", "EECS019")]
-    [TestCase("public class B1 : EcsSystem { public override int UpdateInterval => 4; } public class B2 : B1 { public override int UpdateInterval => System.Environment.TickCount; }", "EECS018")]
     [TestCase("public class S : EcsSystem { public event System.Action Fired; }", "EECS007")]
     [TestCase("public class S(int n) : EcsSystem { public void Tick() => n++; }", "EECS007")]
     [TestCase("public class K : EcsSystem; public class S : EcsSystem { private readonly K[] _all = []; }", "EECS008")]
@@ -1109,7 +1303,7 @@ public class GeneratorTests
     [
         "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "ExtensionMembers", "BufferUses",
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
-        "GroupBy", "TargetPolicies", "NotSaved",
+        "GroupBy", "TargetPolicies", "NotSaved", "Schedules", "ForEntityMethods", "ForEntityTypes",
     ];
 
     // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
@@ -1127,7 +1321,8 @@ public class GeneratorTests
             "public static class U { static void C(World w) { foreach (var i in w.Query<P>()) i.P.V++; } }" +
             "public partial struct Census : ISingletonComponent { [Sum] public int N; [Min] public float L; }" +
             "[GroupBy] public partial record struct Zn([Group] int Id) : IComponent; [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Tether(EntityId Target) : IRelation;" +
-            "[NotSaved] public record struct Wire(object O) : IComponent;";
+            "[NotSaved] public record struct Wire(object O) : IComponent;" +
+            "[UpdateInterval(3, Phase = 1)] public class Sch : EcsSystem { } public static class FE { [ForEntity, Without<Q>] static void E(ref P p, int n) { } }";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         var edited = code.Contains(before) ? system : other;
@@ -1144,6 +1339,50 @@ public class GeneratorTests
         foreach (var name in TrackedStages.Append("SourceOutput").Append("ImplementationSourceOutput")) // and nothing is emitted again
             Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                 Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
+    }
+
+    [Test]
+    public void AnEditedScheduleReemitsOnlyItsSystem()
+    {
+        var tree = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components + "[UpdateInterval(3)] public class S : EcsSystem { }", Parse);
+        var other = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic class O : EcsSystem { [ForEach] static void B(ref Q q) => q.V++; } public static class E { [ForEntity] static void C(ref P p) { } }", Parse);
+        var compilation = Compile().AddSyntaxTrees(tree, other);
+        var driver = Driver().RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(tree, CSharpSyntaxTree.ParseText(tree.ToString().Replace("UpdateInterval(3)", "UpdateInterval(5, Phase = 2)"), Parse)));
+
+        var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
+        Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
+        Assert.That(Steps(driver)["ForEntityTypes"].SelectMany(s => s.Outputs).Select(o => o.Reason),
+            Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged));
+        Assert.That(driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("typeof(global::S)")), Does.Contain("public Code() : base(5, 2) { }"));
+    }
+
+    [Test]
+    public void ConsumeForEntityAndSchedulesAreGenerated()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
+            public class S : EcsSystem
+            {
+                [ForEach, Consume, Without<Q>] static void A(in P p) { }               // stable: in bulk after the pass
+                [ForEach, Consume] static void B(Entity e, ref P p) => e.Set(new Q()); // may change structure: per row
+            }
+            [UpdateInterval(4, Phase = 3)] public class Slow : EcsSystem { protected override void OnUpdate() { } }
+            [UpdateInterval(2)] public class G<X> : EcsSystem where X : struct, IComponent { }
+            public class H : G<P>;
+            public static class O { [ForEntity, Changed<T>] static void C(Entity e, ref P p, in Clock c, int n) { } }
+            public static class R { [ForEach, Consume] static void D(in Q q, ref int n) => n++; }
+            """), out var output, out _);
+        string all = string.Join("\n", output.SyntaxTrees.Skip(2).Select(t => t.ToString()));
+        Assert.That(all, Does.Contain("world.DestroyAll<global::P>(in AFilter0); // [Consume]"));
+        Assert.That(all, Does.Contain("__ForEach.B_1(null, entity, ref c1);\n            entity.Destroy();"));
+        Assert.That(all, Does.Contain("world.DestroyAll<global::Q>(); // [Consume]"));                         // a runner's
+        Assert.That(all, Does.Contain("public Code() : base(4, 3) { }").And.Contain("public Code() : base(2, 0) { }"));
+        Assert.That(all, Does.Contain("global::EasyEcs.SystemCode.Register(typeof(global::G<global::P>), new __ForEach<global::P>.Code());"));
+        Assert.That(all, Does.Contain("public static bool C(global::EasyEcs.Entity e, ulong since, int n)"));
+        Assert.That(all, Does.Contain("if (e.World is not { } world) return false;"));
+        Assert.That(all, Does.Contain("return e.Run<global::P, __ForEach.CJob0>(ref job, __ForEach.CFilter0.Since(since));"));
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, all);
     }
 
     [Test]
@@ -1899,7 +2138,7 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) { System.Diagnostics.Debug.Assert(q.V >= 0, $\"{q.V}\"); p.V = q.V; } }")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(in P p, in Q q) => System.Console.WriteLine($\"{p.V} {q.V}\"); }")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) { System.Func<int, int> f = static x => x + 1; p.V = f(q.V); } }")]
-    [TestCase("public class S : EcsSystem { public override int UpdateInterval => 20; protected override void OnUpdate() => World.Clock.Ticks += new int[4].Length; }")]
+    [TestCase("[UpdateInterval(20)] public class S : EcsSystem { protected override void OnUpdate() => World.Clock.Ticks += new int[4].Length; }")]
     [TestCase("public class S : EcsSystem { [ForEach] void A(ref P p) => p.V = World.DefaultUpdateCount > 0 ? 1 : 0; }")]               // uses its system
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Set(new P { V = 1 }); } }")]   // overwrites
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Set(new Q { V = item.Entity.Id.Index }); } }")]
@@ -2006,7 +2245,7 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<T> t, in P p) => t.SetIfChanged(new T { V = p.V }); }")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<P> p, in Q q) => p.SetIfChanged(new P { V = q.V }); }")]       // a comparison: not a plain ref
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<T> t, in P p) { if (p.V > 0) Helpers.Inc(ref t.Write().V); } }")]
-    [TestCase("public class S : EcsSystem { public override int UpdateInterval => 1200; protected override void OnUpdate() => World.TrimExcess(); }")] // its cadence
+    [TestCase("[UpdateInterval(1200)] public class S : EcsSystem { protected override void OnUpdate() => World.TrimExcess(); }")] // its cadence
     [TestCase("public struct J : IForEach<P> { public void Execute(ref P p) => p.V++; }")]
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<T>()) item.T.V++; } }")]                      // a write
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<T, P>()) { ref var t = ref item.T; t.V = item.P.V; } } }")]

@@ -32,6 +32,7 @@ public sealed record ScheduleInfo(GroupInfo[] Groups)
                     Names(text, "reads singletons", system.ReadsSingletons);
                     Names(text, "writes singletons", system.WritesSingletons);
                     text.Append('\n');
+                    foreach (var loop in system.Loops) text.Append("      loop ").Append(loop).Append('\n');
                     foreach (var wait in system.After)
                     {
                         text.Append("      after ").Append(wait.System).Append(": ");
@@ -149,7 +150,15 @@ public sealed record StageInfo(SystemInfo[] Systems);
 /// <param name="After">Why it is not in an earlier stage: the systems of the stage just before its own that it must
 /// follow (empty in the first stage).</param>
 public sealed record SystemInfo(string Name, string[] Reads, string[] Writes, string[] ReadsSingletons, string[] WritesSingletons,
-    bool RunsAlone, StageWait[] After);
+    bool RunsAlone, StageWait[] After)
+{
+    /// <summary>
+    /// How each of its [ForEach] methods runs, one line per method: a vector loop and its forms ("Move: vector (Vector512
+    /// or Vector&lt;float&gt;), flat"), or one row at a time and why ("Spawn: scalar (it takes the Entity)"), as the
+    /// generator decided (the reasons of EECS055).
+    /// </summary>
+    public string[] Loops { get; init; } = [];
+}
 
 /// <summary>A system a later one waits for (<see cref="SystemInfo.After"/>).</summary>
 /// <param name="System">The earlier system's name.</param>

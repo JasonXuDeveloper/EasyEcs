@@ -17,10 +17,12 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`ChangedAttribute<T>`](/zh/docs/reference/changedattribute) | ForEachAttribute 方法只访问 T 在系统上次运行之后写过的实体（EcsSystem.LastRunTick；第一次运行时是所有拥有它的实体）。 |
 | [`ChildOfEcsExtensions`](/zh/docs/reference/childofecsextensions) | ChildOf 的具名成员（生成）。 |
 | [`ChildOfEcsPrefabExtensions`](/zh/docs/reference/childofecsprefabextensions) | ChildOf 在 Prefab 上的具名成员（生成）。 |
+| [`ConsumeAttribute`](/zh/docs/reference/consumeattribute) | ForEachAttribute 方法消费它访问的行：遍历结束时，销毁访问过的实体，用于只处理一次的事件和命令实体。 |
 | [`DynamicBufferExtensions`](/zh/docs/reference/dynamicbufferextensions) | DynamicBuffer 的写入方法。 |
 | [`EcsSystem`](/zh/docs/reference/ecssystem) | 在 World 上运行的逻辑。 |
 | [`EntityRandomEcsExtensions`](/zh/docs/reference/entityrandomecsextensions) | EntityRandom 的具名成员（生成）。 |
 | [`ForEachAttribute`](/zh/docs/reference/foreachattribute) | 对每个匹配组件参数（以及 WithAttribute / WithoutAttribute / WithAnyAttribute 过滤条件）的实体，执行 EcsSystem 的一个方法（或者通过生成的入口点，执行任何其他类型的静态方法）。 |
+| [`ForEntityAttribute`](/zh/docs/reference/forentityattribute) | 在单个实体上运行的静态方法：生成器写一个入口，它是方法所在类型的静态成员，和方法同名，接收实体（带 [Changed&lt;T&gt;] / [Removed&lt;T&gt;] 时接着是 tick，然后是方法的其他值），返回方法有没有运行。 |
 | [`GroupAttribute`](/zh/docs/reference/groupattribute) | World 按哪个成员把组件的表分组（IGroup）：int，或底层类型为 int 的枚举。 |
 | [`GroupByAttribute`](/zh/docs/reference/groupbyattribute) | 每个 World 都按这个 IGroup 组件给表分组（World.GroupBy），从它第一张含这个组件的表开始：分组过滤条件（QueryFilter.InGroup）在每个 World 里都只访问这一组的表，不用记着调用设置方法。 |
 | [`GroupInfo`](/zh/docs/reference/groupinfo) | 一个分组的系统，按阶段排列（ScheduleInfo）。 |
@@ -49,6 +51,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`UpdateAfterAttribute<TSystem>`](/zh/docs/reference/updateafterattribute) | 让这个系统排在同一分组里的 TSystem（和它的派生系统）之后运行：见 UpdateBeforeAttribute。 |
 | [`UpdateBeforeAttribute<TSystem>`](/zh/docs/reference/updatebeforeattribute) | 让这个系统排在同一分组里的 TSystem（和它的派生系统）之前运行，不管它们的注册顺序。 |
 | [`UpdateInGroupAttribute<TGroup>`](/zh/docs/reference/updateingroupattribute) | 把系统（和它的派生系统）放进分组 TGroup。 |
+| [`UpdateIntervalAttribute`](/zh/docs/reference/updateintervalattribute) | 系统（以及没有自己声明的派生系统）只在所属分组每第 interval 次更新时运行：更新计数（World.DefaultUpdateCount、World.UpdateCount）对间隔取模等于 UpdateIntervalAttribute.Phase 的那几次。 |
 | [`ValueIndex<T, TKey>`](/zh/docs/reference/valueindex) | 一个 World 里组件 T 的值索引（World.Index）。 |
 | [`WhenTargetDestroyedAttribute`](/zh/docs/reference/whentargetdestroyedattribute) | 在每个 World 里，销毁一个实体时指向它的链接怎么处理（TargetPolicy）：用在关系（IRelation）或以 EntityId 为键建索引的组件上。 |
 | [`WithAnyAttribute<T>`](/zh/docs/reference/withanyattribute) | ForEachAttribute 方法要求实体至少拥有它的 [WithAny&lt;T&gt;] 特性列出的组件之一（不传入方法）：[ForEach, WithAny&lt;Burning&gt;, WithAny&lt;Poisoned&gt;]。 |

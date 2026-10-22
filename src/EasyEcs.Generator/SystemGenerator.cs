@@ -30,11 +30,18 @@ public sealed class SystemGenerator : IIncrementalGenerator
             .Where(static m => m is not null)
             .WithTrackingName("ForEachMethods");
 
+        // [UpdateInterval(n, Phase = p)] of system types: written into their code's registration.
+        var schedules = context.SyntaxProvider
+            .ForAttributeWithMetadataName(Symbols.UpdateIntervalAttribute,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => ScheduleModel.Create((INamedTypeSymbol)ctx.TargetSymbol))
+            .Where(static m => m is not null)
+            .WithTrackingName("Schedules");
+
         // Group per system: Collect re-runs this cheap step on any change, but each grouped model is equatable, so
-        // RegisterSourceOutput only re-emits systems whose methods actually changed.
-        var updates = methods.Collect()
-            .SelectMany(static (all, _) => all.GroupBy(m => m!.Owner)
-                .Select(g => new UpdateModel(g.Key, new EquatableArray<ForEachModel>(g.OrderBy(m => m!.Order).ToArray()!))))
+        // RegisterSourceOutput only re-emits systems whose methods or schedule actually changed.
+        var updates = methods.Collect().Combine(schedules.Collect())
+            .SelectMany(static (pair, _) => UpdateModel.Group(pair.Left!, pair.Right!))
             .WithTrackingName("SystemUpdates");
         // Closed types of generic systems this assembly names: their code is registered without runtime code generation.
         var closed = context.SyntaxProvider
@@ -53,10 +60,22 @@ public sealed class SystemGenerator : IIncrementalGenerator
         // typing. Entry points of other types are API the user's code calls.
         context.RegisterImplementationSourceOutput(updates.Where(static m => m.Owner.IsSystem), static (spc, model) => Add(spc, model));
         context.RegisterSourceOutput(updates.Where(static m => !m.Owner.IsSystem), static (spc, model) => Add(spc, model));
+
+        // [ForEntity] methods: entry points that run the method's job on one entity (entity.Run), in a system too.
+        var ones = context.SyntaxProvider
+            .ForAttributeWithMetadataName(Symbols.ForEntityAttribute,
+                static (node, _) => node is MethodDeclarationSyntax,
+                static (ctx, ct) => ForEachModel.Create((IMethodSymbol)ctx.TargetSymbol, (MethodDeclarationSyntax)ctx.TargetNode, ctx.SemanticModel, ct))
+            .Where(static m => m is not null)
+            .WithTrackingName("ForEntityMethods");
+        var entityTypes = ones.Collect()
+            .SelectMany(static (all, _) => UpdateModel.Group(all!, []).Select(m => m with { One = true }))
+            .WithTrackingName("ForEntityTypes");
+        context.RegisterSourceOutput(entityTypes, static (spc, model) => Add(spc, model));
     }
 
     private static void Add(SourceProductionContext context, UpdateModel model) =>
-        context.AddSource($"{model.Owner.HintName}.ForEach.g.cs", SourceText.From(Emit(model), Encoding.UTF8));
+        context.AddSource($"{model.Owner.HintName}.{(model.One ? "ForEntity" : "ForEach")}.g.cs", SourceText.From(Emit(model), Encoding.UTF8));
 
     // ---------------- emit ----------------
 
@@ -71,7 +90,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
         var owner = model.Owner;
         var sb = new StringBuilder(Header).Append('\n');
         if (owner.Namespace.Length > 0) sb.Append("namespace ").Append(owner.Namespace).Append(";\n\n");
-        if (!owner.IsSystem) EmitEntryPoints(sb, model);
+        if (model.One) EmitEntityEntryPoints(sb, model);
+        else if (!owner.IsSystem) EmitEntryPoints(sb, model);
 
         // Generic over the owner's type parameters (a generic system or runner type): one instantiation per closed type.
         sb.Append($"file static class __ForEach{owner.TypeParameters}{owner.Constraints}\n{{\n");
@@ -81,9 +101,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
             EmitJob(sb, owner, model.Methods[i], i);
         }
 
-        if (owner.IsSystem) EmitSystemCode(sb, model);
+        bool system = owner.IsSystem && !model.One;
+        if (system) EmitSystemCode(sb, model);
         sb.Append("}\n");
-        if (owner.IsSystem && owner.TypeParameters.Length > 0) EmitGenericRegistration(sb, model);
+        if (system && owner.TypeParameters.Length > 0) EmitGenericRegistration(sb, model);
         return sb.ToString();
     }
 
@@ -147,6 +168,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append($"            var {local} = new {job}{Fields(method, world, null)};\n");
             sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref {local}{filter}{method.Chunks});\n");
             EmitReductions(sb, method, world, local, "            ");
+            EmitConsume(sb, method, world, filter, "            ");
             sb.Append("        }\n\n");
 
             string Free(string name)
@@ -157,6 +179,64 @@ public sealed class SystemGenerator : IIncrementalGenerator
         }
 
         sb.Append("    }\n}\n\n");
+    }
+
+    /// <summary>
+    /// [ForEntity] methods: each gets an entry point, a static extension member of the type taking the entity (the
+    /// change tick for [Changed&lt;T&gt;] / [Removed&lt;T&gt;]) and the method's context parameters, which runs the job
+    /// on the entity with <c>entity.Run</c> and returns whether it ran.
+    /// </summary>
+    private static void EmitEntityEntryPoints(StringBuilder sb, UpdateModel model)
+    {
+        var owner = model.Owner;
+        sb.Append("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
+        sb.Append($"{(owner.IsPublic ? "public" : "internal")} static class {owner.FlatName}ForEntity\n{{\n");
+        sb.Append($"    extension{owner.TypeParameters}({owner.FullName}){owner.Constraints}\n    {{\n");
+        for (int m = 0; m < model.Methods.Length; m++)
+        {
+            var method = model.Methods[m];
+            var contexts = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Context).ToArray();
+            var names = new HashSet<string>(contexts.Select(p => p.Name).Concat(method.TypeParameterNames));
+            // The entity keeps the name the method gives it (Buy(Entity shop, ...) -> Buy(shop, ...)).
+            string entity = Free(method.Parameters.FirstOrDefault(p => p.Kind == Symbols.ParamKind.Entity)?.Name ?? "entity");
+            names.Add(entity);
+            string world = Free("world"), since = Free("since"), local = Free("job");
+            var signature = new List<string> { $"global::EasyEcs.Entity {Escape(entity)}" };
+            if (method.Since) signature.Add($"ulong {since}");
+            signature.AddRange(contexts.Select(p => $"{p.Declared} {Escape(p.Name)}"));
+
+            string forEach = "__ForEach" + owner.TypeParameters, job = $"{forEach}.{method.Name}Job{m}{method.TypeParameters}";
+            string filter = method.Since ? $", {forEach}.{method.Name}Filter{m}.Since({since})" : method.HasFilter ? $", in {forEach}.{method.Name}Filter{m}" : "";
+            string which = method.Since ? $" and its filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>"
+                : method.HasFilter ? " and passes its filters" : "";
+            sb.Append($"        /// <summary>Runs <c>{method.Name}</c> on <paramref name=\"{entity}\"/> when it is alive, has the method's components{which}: true when it ran. Owner thread only.</summary>\n");
+            sb.Append($"        {Code.GeneratedCode(Symbols.GeneratorName)}\n");
+            sb.Append($"        {(method.PublicEntry ? "public" : "internal")} static bool {Escape(method.Name)}{method.TypeParameters}({string.Join(", ", signature)}){method.Constraints}\n        {{\n");
+            // The world, for singletons, lookups and a World parameter: a default handle has none (Run returns false for it).
+            if (method.NeedsWorld || method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Singleton))
+                sb.Append($"            if ({Escape(entity)}.World is not {{ }} {world}) return false;\n");
+            sb.Append($"            var {local} = new {job}{Fields(method, world, null)};\n");
+            sb.Append($"            return {Escape(entity)}.Run<{method.ComponentTypes}, {job}>(ref {local}{filter});\n");
+            sb.Append("        }\n\n");
+
+            string Free(string name)
+            {
+                while (names.Contains(name)) name = "_" + name;
+                return name;
+            }
+        }
+
+        sb.Append("    }\n}\n\n");
+    }
+
+    /// <summary>
+    /// [Consume] in bulk: the pass made no structural change, so the rows that pass its filter (<paramref name="filter"/>,
+    /// as the pass's call takes it) when it ends are exactly the rows it visited. One DestroyAll destroys them.
+    /// </summary>
+    private static void EmitConsume(StringBuilder sb, ForEachModel method, string world, string filter, string indent)
+    {
+        if (!method.ConsumesInBulk) return;
+        sb.Append($"{indent}{world}.DestroyAll<{method.ComponentTypes}>({(filter.Length == 0 ? "" : filter.Substring(2))}); // [Consume]: the rows the pass visited\n");
     }
 
     /// <summary>
@@ -208,7 +288,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
     {
         var owner = model.Owner;
         sb.Append("    internal sealed class Code : global::EasyEcs.SystemCode\n    {\n");
-        sb.Append("        protected override void Update(global::EasyEcs.EcsSystem system)\n        {\n            var world = system.World;\n");
+        // [UpdateInterval(n, Phase = p)]: the runtime reads the values from the registered code.
+        if (model.Interval > 0) sb.Append($"        public Code() : base({model.Interval}, {model.Phase}) {{ }}\n\n");
+        sb.Append("        protected override void Update(global::EasyEcs.EcsSystem system)\n        {\n");
+        if (model.Methods.Length > 0) sb.Append("            var world = system.World;\n");
         for (int i = 0; i < model.Methods.Length; i++)
         {
             var method = model.Methods[i];
@@ -224,9 +307,13 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append($"            if (Measuring(world)) Visit(system, {count});\n");
             sb.Append($"            world.{method.ForEach}<{method.ComponentTypes}, {method.Name}Job{i}>(ref job{i}{filter}{method.Chunks});\n");
             EmitReductions(sb, method, "world", $"job{i}", "            ");
+            EmitConsume(sb, method, "world", whole, "            ");
         }
 
         sb.Append("        }\n\n");
+        // How each method runs (SystemInfo.Loops): one array for the type, made once.
+        sb.Append($"        private static readonly string[] __loops = [{string.Join(", ", model.Methods.Select(m => Code.Literal(m.Describe())))}];\n\n");
+        sb.Append("        protected override string[] Loops => __loops;\n\n");
         EmitAccess(sb, model);
         sb.Append("    }\n");
         if (owner.TypeParameters.Length > 0) return; // registered by EmitGenericRegistration: a module initializer is never generic
@@ -259,7 +346,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
     private static void EmitAccess(StringBuilder sb, UpdateModel model)
     {
         sb.Append("        protected override void Access(ref global::EasyEcs.SystemAccess access)\n        {\n");
-        bool alone = model.Owner.OverridesOnUpdate || model.Methods.Any(m => !m.IsStatic
+        bool alone = model.Owner.OverridesOnUpdate || model.Methods.Any(m => !m.IsStatic || m.Consume // [Consume] destroys
             || m.Parameters.Any(p => p.Kind is Symbols.ParamKind.Entities or Symbols.ParamKind.World
                 || p.Kind == Symbols.ParamKind.Entity && !m.Identifies));
         if (alone)
@@ -371,6 +458,11 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     : $"        public ref global::EasyEcs.DynamicBuffer<{p.Type}> e{i};\n");
         }
         if (sb[sb.Length - 2] != '{') sb.Append('\n'); // a blank line after the fields, if any
+        // A wide component's permute tables and layout check (Kernel.Wide.cs): statics, built once per job type.
+        if (method.Simd is { Statics.Length: > 0 } statics)
+        {
+            foreach (var line in statics.Statics.Split('\n')) sb.Append(line.Length > 0 ? "        " + line : "").Append('\n');
+        }
         string call = $"__ForEach{owner.TypeParameters}.{method.Name}_{number}{method.TypeParameters}({args});";
         string first = method.IsBatch ? "global::EasyEcs.EntitySpan entities, " : method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
@@ -380,13 +472,14 @@ public sealed class SystemGenerator : IIncrementalGenerator
         if (grids.Length > 0) call = runs ? $"{{ {grids}{call} }}" : grids + call;
         // A vector loop also takes the words of 64 rows of which some pass (IForEachMasked): their passing rows as a
         // lane mask, the other lanes stored back as loaded.
-        for (int pass = 0; pass < (method.Simd != null ? 2 : 1); pass++)
+        // A parallel one runs as a batch job over each chunk's runs of rows (ForEachBatchParallel): no masked form.
+        for (int pass = 0; pass < (method.Simd != null && !method.Parallel ? 2 : 1); pass++)
         {
         bool masked = pass == 1;
         if (masked) sb.Append('\n');
         sb.Append("        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
         sb.Append($"        public void Execute({first}{(masked ? "ulong pass, " : "")}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
-        if (!runs && !local.Contains(true) && grids.Length == 0)
+        if (!runs && !local.Contains(true) && grids.Length == 0 && !method.ConsumesEach)
             sb.Append($"            => {call}\n");
         else
         {
@@ -405,6 +498,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     sb.Append($"{indent}ref {components[k - 1]} r{k} = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{k});\n");
                 sb.Append($"{indent}nint rows = {(components.Length > 0 ? "c1.Length" : "entities.Length")};\n");
                 if (method.Simd is { Flat: { } flat } && !masked) EmitFlatLoop(sb, flat, method.Simd, components, indent);
+                // Narrow lanes have no lane masks of their own (a Vector512<byte> is a whole word): the passing rows of a
+                // masked word run the method.
+                // So do a wide component's (its write-back stores whole vectors of rows).
+                else if (method.Simd is { Size: < 4 } or { Wide: not null } && masked) sb.Append($"{indent}nint i = 0;\n");
                 else if (method.Simd is { } simd) EmitVectorLoop(sb, simd, components, indent, call, masked);
                 sb.Append(method.Simd == null
                     ? $"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n"
@@ -413,6 +510,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                         : $"{indent}for (; i < rows; i++) // the rows after the last whole vector: the method itself\n{indent}    {call}\n");
             }
             else sb.Append($"{indent}{call}\n");
+            // [Consume] of a method that may change structure: the entity goes after its row, a hole the pass closes.
+            if (method.ConsumesEach) sb.Append($"{indent}entity.Destroy();\n");
             for (int i = 0; i < method.Parameters.Length; i++)
                 if (local[i]) sb.Append($"            {Field(i)} = l{i};\n");
             sb.Append("        }\n");
@@ -475,6 +574,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string vector = $"{Kernel.V}<{simd.Columns[0]}>"; // every column has lanes of one size: one count
         // Components of several fields need the shuffles of Interleaved; without them, every row runs the method.
         string interleaved = simd.Interleaves ? $" && global::EasyEcs.Interleaved.{Accelerated}" : "";
+        // A wide component's permutes are AVX-512's, and its layout the generator's (checked once per job type).
+        if (simd.Wide != null) interleaved += $" && global::System.Runtime.Intrinsics.X86.Avx512F.IsSupported && {simd.Wide}";
         loop.Append($"{indent}if ({Kernel.V}.IsHardwareAccelerated{interleaved} && rows - i >= {vector}.Count)\n{indent}{{\n");
         string inner = indent + "    ", body = inner + "    ";
         foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) loop.Append(inner).Append(line).Append('\n');
@@ -482,7 +583,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         if (masked)
         {
             // The rows of this vector that pass, one lane each: a vector with none is skipped.
-            loop.Append($"{body}var __pass = global::EasyEcs.Interleaved.Lanes{simd.Size * 8}{LanesForm}(pass, (int)i);\n");
+            loop.Append($"{body}var __pass = global::EasyEcs.Interleaved.Lanes{simd.Size * 8}{Kernel.LanesForm}(pass, (int)i);\n");
             loop.Append($"{body}if (__pass == {Kernel.V}<{simd.Mask}>.Zero) continue;\n");
         }
         foreach (var line in (masked ? simd.MaskedBody : simd.Body).Split('\n')) if (line.Length > 0) loop.Append(body).Append(line).Append('\n');
@@ -504,9 +605,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
         // Only the tokens are replaced: setup lines name user types (in Vector3 wind, in Vector<float> bias) as written.
         // Vector512 names the same operations alike, except the square root (Vector.SquareRoot, Vector512.Sqrt).
         var text = new StringBuilder(loop.ToString());
+        text.Replace(Kernel.Visited, masked ? "pass" : "ulong.MaxValue");
         sb.Append(text.ToString().Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512)
-            .Replace(Accelerated, "IsAccelerated512").Replace(LanesForm, "In512"));
-        sb.Append(text.Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(LanesForm, ""));
+            .Replace(Accelerated, "IsAccelerated512").Replace(Kernel.LanesForm, "In512"));
+        if (simd.Wide == null) sb.Append(text.Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(Kernel.LanesForm, ""));
     }
 
     /// <summary>
@@ -534,9 +636,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append($"{indent}i /= {flat.Fields}; // whole rows: the row the rows left start at\n");
     }
 
-    // Tokens of EmitVectorLoop's text (U+0001 occurs in no C# token outside a literal): Interleaved.IsAccelerated /
-    // IsAccelerated512, Interleaved.Lanes32 / Lanes32In512.
-    private const string Accelerated = "\u0001Accelerated", LanesForm = "\u0001In512";
+    // A token of EmitVectorLoop's text (U+0001 occurs in no C# token outside a literal): Interleaved.IsAccelerated /
+    // IsAccelerated512.
+    private const string Accelerated = "\u0001Accelerated";
 
     private const string Vector = "global::System.Numerics.Vector", Vector512 = "global::System.Runtime.Intrinsics.Vector512";
 
@@ -631,6 +733,21 @@ public sealed class SystemGenerator : IIncrementalGenerator
         /// <summary>Uses its Entity parameters (if any) only as identities (<see cref="Symbols.OnlyIdentifies"/>).</summary>
         public bool Identifies { get; init; }
 
+        /// <summary>[ForEntity]: the job runs on one entity (entity.Run), from an entry point that takes it.</summary>
+        public bool One { get; init; }
+
+        /// <summary>[Consume]: the entities the pass visits are destroyed.</summary>
+        public bool Consume { get; init; }
+
+        /// <summary>
+        /// [Consume] after the pass, with one DestroyAll of its filter: a method that makes no structural change (or a
+        /// batch method, which cannot) leaves the set of matching rows as it found it, so those rows are the ones it visited.
+        /// </summary>
+        public bool ConsumesInBulk => Consume && (Stable || IsBatch);
+
+        /// <summary>[Consume] of a method that may change structure: each entity is destroyed after its row.</summary>
+        public bool ConsumesEach => Consume && !ConsumesInBulk;
+
         /// <summary>The filter argument of a sliced method: its filter (or none) cut to slice <paramref name="slice"/>.</summary>
         public string Sliced(string filter, string slice) =>
             $", {(HasFilter ? filter : "global::EasyEcs.QueryFilter.Create()")}.Slice({slice}, {Slices})";
@@ -639,7 +756,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         public string ComponentTypes => string.Join(", ", Query);
 
         /// <summary>Runs per entity with its handle: it takes the Entity, a Maybe looked up through it, a Mut that stamps through it, or a Tile of it.</summary>
-        public bool TakesEntity => Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Tile);
+        public bool TakesEntity => One || ConsumesEach || Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Tile);
 
         public bool TakesWorld => Parameters.Any(p => p.Kind == Symbols.ParamKind.World);
 
@@ -658,13 +775,34 @@ public sealed class SystemGenerator : IIncrementalGenerator
         public bool NeedsWorld => Parameters.Any(p => p.Kind is Symbols.ParamKind.World or Symbols.ParamKind.Lookup);
 
         /// <summary>The World loop (and, with an I, the job interface) the method runs as.</summary>
-        public string Loop => Simd != null ? "ForEachMasked" : IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
+        public string Loop => Simd != null && !Parallel ? "ForEachMasked" : IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
 
         /// <summary>Takes component spans, or runs per row inside runs of rows: World.ForEachBatch.</summary>
         public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) || Runs || Simd != null;
 
         /// <summary>The method's vector loop (<see cref="Kernel"/>), or null: it runs one row at a time.</summary>
         public Kernel.Code? Simd { get; init; }
+
+        /// <summary>Why it runs one row at a time (Kernel.Vectorize's reason, EECS055's), when it does.</summary>
+        public string Scalar { get; init; } = "";
+
+        /// <summary>
+        /// One line on the loop the method got (SystemInfo.Loops): "vector" with its forms (flat, interleaved fields,
+        /// masked words, parallel chunks, a cold branch), or "scalar" and why.
+        /// </summary>
+        public string Describe()
+        {
+            if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")})";
+            var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Columns[0]}>)" };
+            if (simd.Flat != null) parts.Add("flat");
+            else if (simd.Interleaves) parts.Add("interleaved fields");
+            if (simd.Wide != null) parts[0] = "vector (Vector512 only)";
+            if (simd.Wide != null) parts.Add("wide component (permutes)");
+            if (Parallel) parts.Add("in parallel chunks");
+            else parts.Add(simd.Size < 4 || simd.Wide != null ? "masked words scalar" : "masked words vector");
+            if (simd.Cold != null) parts.Add($"cold branch ({simd.Cold})");
+            return $"{Name}: {string.Join(", ", parts)}";
+        }
 
         /// <summary>
         /// Takes a Scratch and its body loops or calls: the row loop calls it instead of inlining it. Profile-guided
@@ -682,7 +820,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         /// method that reduces (and takes no Maybe or Mut) runs the same way, a chunk's runs at a time
         /// (ForEachBatchParallel): its partial results stay in registers instead of a load and a store per row.
         /// </summary>
-        public bool Runs => Stable && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) && (Parallel
+        public bool Runs => !One && Stable && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) && (Parallel
             ? Parameters.Any(p => p.Kind == Symbols.ParamKind.Reduction) && !Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable)
             : Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Reduction || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" }));
 
@@ -772,6 +910,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model) == null;
                         // Declaration order by member index: a text position would change (and re-emit the file) on any edit above it.
             int order = method.ContainingType.GetMembers().IndexOf(method);
+            string? scalar = null; // why the method runs scalar; a [ForEntity] method has no loop to explain
             return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, stable, parallel, order,
                 new EquatableArray<string>(query.ToArray()),
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),
@@ -786,13 +925,21 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
                     && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
                     Slices = Symbols.Slices(method), ChunkRows = Symbols.ChunkRows(method), Identifies = Symbols.OnlyIdentifies(method, syntax, model),
-                    // Kernel.Vectorize decides alone (static, one thread, stable, its body): the analyzer reports its reasons.
-                    Simd = Kernel.Vectorize(method, syntax, model, static (i, kind) => kind switch
+                    One = Symbols.IsForEntity(method), Consume = Symbols.IsConsume(method),
+                    // Kernel.Vectorize decides alone (static, stable, its body; in parallel too): the analyzer reports its reasons.
+                    // One entity has no run of rows to vectorize.
+                    Simd = Symbols.IsForEntity(method) ? null : Kernel.Vectorize(method, syntax, model, parallel ? static (i, kind) => kind switch
+                    {
+                        Symbols.ParamKind.Singleton => $"s{i}.Value", // a parallel job's SingletonRef
+                        Symbols.ParamKind.Reduction => $"l{i}",
+                        _ => $"x{i}",
+                    } : static (i, kind) => kind switch
                     {
                         Symbols.ParamKind.Singleton => $"s{i}",
                         Symbols.ParamKind.Reduction => $"l{i}", // the run's partial result, a local of the batch job
                         _ => $"x{i}",
-                    }, ct, out _),
+                    }, ct, out scalar),
+                    Scalar = scalar ?? "",
                     OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LoopsOrCalls(syntax),
                 };
         }
@@ -817,6 +964,61 @@ public sealed class SystemGenerator : IIncrementalGenerator
     {
         /// <summary>The closed types of a generic system that this assembly names.</summary>
         public EquatableArray<ClosedUse> Closed { get; init; } = new([]);
+
+        /// <summary>The type's [ForEntity] methods: entry points only (in a file of their own).</summary>
+        public bool One { get; init; }
+
+        /// <summary>The system's [UpdateInterval(n, Phase = p)]: n (0 without one) and p.</summary>
+        public int Interval { get; init; }
+
+        public int Phase { get; init; }
+
+        /// <summary>
+        /// One model per type with [ForEach] methods or an [UpdateInterval], its methods in declaration order: a system
+        /// with a schedule and no method still registers code that carries it.
+        /// </summary>
+        public static IEnumerable<UpdateModel> Group(ImmutableArray<ForEachModel> methods, ImmutableArray<ScheduleModel> schedules)
+        {
+            var owners = new List<OwnerModel>();
+            var byOwner = new Dictionary<OwnerModel, List<ForEachModel>>();
+            foreach (var method in methods)
+            {
+                if (!byOwner.TryGetValue(method.Owner, out var list))
+                {
+                    byOwner[method.Owner] = list = [];
+                    owners.Add(method.Owner);
+                }
+
+                list.Add(method);
+            }
+
+            var bySchedule = new Dictionary<OwnerModel, ScheduleModel>();
+            foreach (var schedule in schedules)
+            {
+                if (bySchedule.ContainsKey(schedule.Owner)) continue; // a partial type: one attribute (AllowMultiple = false)
+                bySchedule[schedule.Owner] = schedule;
+                if (!byOwner.ContainsKey(schedule.Owner))
+                {
+                    byOwner[schedule.Owner] = [];
+                    owners.Add(schedule.Owner);
+                }
+            }
+
+            foreach (var owner in owners)
+            {
+                var model = new UpdateModel(owner, new EquatableArray<ForEachModel>(byOwner[owner].OrderBy(m => m.Order).ToArray()));
+                yield return bySchedule.TryGetValue(owner, out var s) ? model with { Interval = s.Interval, Phase = s.Phase } : model;
+            }
+        }
+    }
+
+    /// <summary>A system type's valid [UpdateInterval(n, Phase = p)] (an invalid one is EECS083's, and runs every update).</summary>
+    private sealed record ScheduleModel(OwnerModel Owner, int Interval, int Phase)
+    {
+        public static ScheduleModel? Create(INamedTypeSymbol type) =>
+            Symbols.IsSystem(type) && Symbols.ScheduleProblem(type) == null && Symbols.Schedule(type) is var (interval, phase, _)
+                ? new ScheduleModel(OwnerModel.From(type), interval, phase)
+                : null;
     }
 
     /// <summary>
@@ -855,7 +1057,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 var arguments = Symbols.ChainTypeArguments(t);
                 if (arguments.Count == 0 || !SymbolEqualityComparer.Default.Equals(t.ContainingAssembly, assembly)
                     || !Symbols.IsVisible(t) || arguments.Any(a => !Symbols.IsNameable(a) || Symbols.ContainsTypeParameter(a))
-                    || !t.OriginalDefinition.GetMembers().OfType<IMethodSymbol>().Any(Symbols.IsForEach))
+                    || !t.OriginalDefinition.GetMembers().OfType<IMethodSymbol>().Any(Symbols.IsForEach) && Symbols.Schedule(t.OriginalDefinition) == null)
                     continue;
                 uses.Add(new ClosedUse(t.OriginalDefinition.ToDisplayString(Symbols.Fqn), t.ToDisplayString(Symbols.Fqn),
                     string.Join(", ", arguments.Select(a => a.ToDisplayString(Symbols.Fqn)))));

@@ -133,21 +133,21 @@ a system is added: a cycle throws there and the system stays out. The analyzer r
 ([EECS019](/en/docs/guide/analyzer#eecs019)) and cross-group orderings ([EECS020](/en/docs/guide/analyzer#eecs020))
 it can see.
 
-### `UpdateInterval` and `UpdatePhase` [#update-interval]
+### `[UpdateInterval(N, Phase = P)]` [#update-interval]
 
-A system that overrides `UpdateInterval` runs every N-th update of its group: on the updates whose count is a
-multiple of N, so first on the N-th. `UpdatePhase` (0 to N - 1) shifts which of the N updates it takes, so systems
-with the same interval spread their work instead of all running on the same tick. Both must be constants
-([EECS018](/en/docs/guide/analyzer#eecs018)); to pause a system, set `Enabled`.
+A system marked `[UpdateInterval(N)]` runs every N-th update of its group: on the updates whose count is a
+multiple of N, so first on the N-th. `Phase` (0 to N - 1) shifts which of the N updates it takes, so systems
+with the same interval spread their work instead of all running on the same tick. The attribute takes constants, so
+the cadence is fixed when the system is compiled; the generator writes it into the system's registration, and a
+derived system inherits it unless it declares its own ([EECS083](/en/docs/guide/analyzer#eecs083) reports an interval
+below 1 or a phase outside 0 to N - 1). To pause a system, set `Enabled`.
 
 ```csharp
 public record struct Autosave(long Count) : ISingletonComponent;
 
+[UpdateInterval(60, Phase = 30)]                   // every 60th update, half a cycle after the others
 public class SaveSystem : EcsSystem
 {
-    public override int UpdateInterval => 60;      // every 60th update
-    public override int UpdatePhase => 30;         // half a cycle after the others with the same interval
-
     protected override void OnUpdate() => World.GetOrAddAutosave().Count++;
 }
 ```
@@ -182,7 +182,7 @@ public class HungerSystem : EcsSystem
   structural change moves the entity to another table, a table grows or shrinks across a cut) may be skipped or
   visited twice in one cycle of N runs; the next cycle sees it again. Slice work that tolerates this, not work that
   must happen exactly once per cycle.
-- **With an interval:** `UpdateInterval => M` and `Slices = N` visit each row once per N × M updates.
+- **With an interval:** `[UpdateInterval(M)]` and `Slices = N` visit each row once per N × M updates.
 - **Every form:** per-entity methods, [batch methods](#batch-methods) (runs of rows inside the slice) and
   [parallel methods](#parallel-methods) (the slice is cut into chunks).
 - **Not with change filters:** `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<…>]` and `[RemovedAny<…>]` cannot be
@@ -345,6 +345,30 @@ public class Rally : EcsSystem
 
 The lookups are those of `Maybe<T>`, and so is the cost: the `MaybeBenchmark` table [below](#how-to-use-it-fast). A `Maybe<T>` converts to a `ReadOnlyMaybe<T>`, so a helper that only reads can
 take the read-only one from either.
+
+### `[Consume]`: events destroyed after the pass [#consume]
+
+`[ForEach, Consume]` destroys exactly the rows the pass visited, when it ends: a method over event or command
+entities (a hit, a request) does its work and leaves the destroying to the pass. A method without structural changes
+has them destroyed at once, a `DestroyAll` of its filter that frees whole tables; one that may change structure (it
+takes the `World`, or uses its `Entity` to change something) destroys each row after the method ran on it. An entity
+that starts to match during the pass is not destroyed: the next run visits it. Cleanup components retire a consumed
+entity as they do any destroyed one, and the [destroy log](/en/docs/guide/change-tracking#destroy-log) records it. A
+pass that throws destroys nothing, so its rows are visited again. `[Consume]` cannot be combined with `Slices`
+([EECS085](/en/docs/guide/analyzer#eecs085)).
+
+```csharp
+public record struct Heal(int Amount, EntityId Target) : IComponent;   // an event entity
+
+public class ApplyHeals : EcsSystem
+{
+    [ForEach, Consume]
+    static void Apply(in Heal heal, World world)
+    {
+        if (world.TryGetEntity(heal.Target, out var target)) target.Get<Health>().Value += heal.Amount;
+    }
+}
+```
 
 ### Batch methods [#batch-methods]
 
@@ -582,60 +606,73 @@ for (; i < rows; i++)   // 4. the tail, and every row without the shuffles: the 
 
 A method gets a vector loop when all of this holds; otherwise it runs row by row, exactly as before:
 
-- **The method:** `static`, per entity, not `Parallel` (a parallel method stays scalar), no `Entity`, `World`,
-  `Mut<T>` or `Maybe<T>` parameter.
-- **The components:** each holds 1 to 4 fields (or auto-properties) of `float`, `double`, `int`, `uint`, `long` or
-  `ulong`, declared in one part, and all of the method's fields the same type: one lane count. `ref` and `in` both
-  work; write the fields (`p.X += v.X`), not a new value of the whole component.
+- **The method:** `static`, per entity (on one thread or `Parallel`), no `Entity`, `World` or `Mut<T>` parameter. A
+  `Maybe<T>` / `ReadOnlyMaybe<T>` of a component is a lane mask of the rows that have it (on one thread).
+- **The components:** 1 to 4 lanes of one size: fields (or auto-properties) of `float`, `double`, `int`, `uint`,
+  `long`, `ulong`, `byte`, `sbyte`, `short` or `ushort`, or of structs of them (`Vector2`, `Vector3`, `Vector4`,
+  System.Numerics and Godot), declared in one part. `ref` and `in` both work; a whole component may be assigned
+  (`p = new Position(p.Value + v.Value * dt)`, `p = p with { ... }`). On AVX-512 a wider component (up to 16 words,
+  other fields of any plain type) also qualifies when the method uses only its 4-byte fields and the permutes that
+  gather them cost less than the work.
 - **Uniform values:** singletons, constants and `static readonly` fields.
-- **The body:** locals, `=`, compound assignments, `++` / `--`, `+ - *`, `/` on floats, `& | ^ ~`, shifts by a uniform
-  count, comparisons, `&& || !`, `?:`, `if` / `else`, `return`, and `Math` / `MathF` `Min`, `Max`, `Abs` (floats),
-  `Sqrt`, `Floor`, `Ceiling` and `FusedMultiplyAdd`.
+- **The body:** locals, `=`, compound assignments, `++` / `--`, `+ - *`, `/` on floats, `& | ^ ~`, shifts,
+  comparisons, `&& || !`, `?:`, `if` / `else`, `return`, conversions between lane types, the operators of the vector
+  types, and the `Math` / `MathF` functions with an exact vector counterpart (`Min`, `Max`, `Abs`, `Clamp`, `Sqrt`,
+  `Floor`, `Ceiling`, `Round`, `Truncate`, `CopySign`, `FusedMultiplyAdd`, `Lerp`); `Sin`, `Cos`, `Exp`, `Log`,
+  `Log2` and `Hypot` under `FloatMode.Fast`. A call the loop cannot express under a condition the loop computes is a
+  cold branch: the vectors where a lane takes it run the method.
 
 **The same results, bit for bit.** Each lane runs the same IEEE operation as the scalar code, in the same order: no
 reassociation, and no fused multiply-add the method did not write (`Vector.Min` / `Max` treat NaN and −0 as
-`Math.Min` / `Max` do). Change ticks and the system's read and write sets are those of the per-row method.
+`Math.Min` / `Max` do). Narrow lanes take an operation only where the result is proven to be the `int` result C#
+computes. Change ticks and the system's read and write sets are those of the per-row method. Only `FloatMode.Fast`
+changes results ([D90](/en/docs/decisions#d90-vector-loops-reach)).
 
 **A method that does not qualify** stays a scalar loop: it is correct, only slower, and
 [EECS055](/en/docs/guide/analyzer#eecs055) (a suggestion in the IDE) names the first reason, as Burst's inspector
-would. The common causes are a component of more than 4 fields, two number types in one method, a whole component
-assigned (`p = new Position(...)`) instead of its fields, and a call the rule does not cover. Rewrite it the way
-Burst code is written: one number type per method, at most 4 fields per component, the call moved out. A method
-whose speed depends on its loop says so with `Simd = SimdMode.Require`, and the build fails
+would: a `bool` field, a component too wide for the work done on it (with the fields to split out), a vector sum such
+as `Vector3.Dot` whose order the scalar code does not fix, a call outside a condition. A method whose speed depends
+on its loop says so with `Simd = SimdMode.Require`, and the build fails
 ([EECS056](/en/docs/guide/analyzer#eecs056)) when an edit takes the loop away.
 
 ```csharp tab="Stays scalar" doccheck=expect-EECS055
-public struct Fuel : IComponent { public float Value; }
-public struct Engines : IComponent { public int Value; }   // EECS055: lane types float and int differ
+public record struct Motion(System.Numerics.Vector3 Value) : IComponent;
+public struct Speed : IComponent { public float Value; }
 
-public class BurnFuel : EcsSystem
+public class MeasureSpeed : EcsSystem
 {
-    [ForEach]
-    static void Burn(ref Fuel fuel, in Engines engines) =>
-        fuel.Value = MathF.Max(fuel.Value - engines.Value * 0.5f, 0f);
+    [ForEach]   // EECS055: Vector3.Dot adds the fields of a vector together, in an order not proven to be the scalar code's
+    static void Measure(ref Speed speed, in Motion motion) =>
+        speed.Value = MathF.Sqrt(System.Numerics.Vector3.Dot(motion.Value, motion.Value));
 }
 ```
 
 ```csharp tab="Qualifies"
-public struct Fuel : IComponent { public float Value; }
-public struct BurnRate : IComponent { public float Value; }   // the engines' rate, kept as a float
+public record struct Motion(System.Numerics.Vector3 Value) : IComponent;
+public struct Speed : IComponent { public float Value; }
 
-public class BurnFuel : EcsSystem
+public class MeasureSpeed : EcsSystem
 {
-    [ForEach]
-    static void Burn(ref Fuel fuel, in BurnRate rate) =>
-        fuel.Value = MathF.Max(fuel.Value - rate.Value, 0f);
+    [ForEach]   // the sum written out: its order is the method's, so each lane computes it the same way
+    static void Measure(ref Speed speed, in Motion motion)
+    {
+        var v = motion.Value;
+        speed.Value = MathF.Sqrt(v.X * v.X + v.Y * v.Y + v.Z * v.Z);
+    }
 }
 ```
 
-The system's generated file (`<System>.….ForEach.g.cs`, under the project's generated sources, or with
-`<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>` under `obj/`) holds `Vector<` when the method got a
-loop; EECS055 names the methods that did not, without opening the file.
+`world.DescribeSchedule()` names the loop each method of a system got, one line per method (`SystemInfo.Loops`):
 
-{/* TODO(vector loops): Math.Clamp, MathF.* beyond Min/Max/Abs/Sqrt/Floor/Ceiling, lerp and conversions; vector
-reductions (Reduce<T> in a vector loop); FloatMode.Fast; presence-bit lane masks (Maybe<T> as a mask);
-Vector512; bounds-check-free scalar loops. Add each to the qualification list above, with its generated code
-where it changes the loop's shape. */}
+```text
+      loop Move: vector (Vector512 or Vector<float>), flat, masked words vector
+      loop Steer: vector (Vector512 only), wide component (permutes), masked words scalar
+      loop Spawn: scalar (it takes the Entity)
+```
+
+The system's generated file (`<System>.….ForEach.g.cs`, under the project's generated sources, or with
+`<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>` under `obj/`) holds the loop itself, and
+`tools/jitdisasm.sh <project> 'EasyEcs.World:Masked'` prints the machine code the JIT makes of it.
 
 `KernelBenchmark` runs the per-row job against the generated loop over 100,000 and 1,000 rows (a clamp with a branch,
 `h += v * dt`, an int increment, and positions of 2 to 4 fields moved, sought and travelled); its numbers are in [D68](/en/docs/decisions#d68-vector-loops-without-opting-in):
@@ -669,7 +706,7 @@ world.Update();               // fixed tick: the default group
 long inputs = world.UpdateCount<InputGroup>();   // Update<InputGroup>() calls so far
 ```
 
-Ordering, `UpdateInterval`, `UpdatePhase` and `Enabled` apply within each group, and the attribute is inherited.
+Ordering, `[UpdateInterval]` and `Enabled` apply within each group, and the attribute is inherited.
 Updating a group with no systems does nothing. `world.UpdateCount<TGroup>()` counts a group's updates, the running
 one included, as `DefaultUpdateCount` does for the default group: it is the count the group's `UpdateInterval`s are
 taken from, so a tool or a test can tell which systems run on the next update. O(1); 0 for a group no system was
@@ -968,7 +1005,7 @@ move although it was added second, so the grounded unit loses half its speed bef
 | `Parallel = true` over a few hundred heavy rows, one chunk by default | [`ChunkRows = 64`](/en/docs/guide/threading#chunk-rows) | Every thread claims chunks instead of one doing them all |
 | `Maybe<T>` (or a lookup through the `Entity`) that only reads | [`ReadOnlyMaybe<T>`](#read-only-maybe) | A read for the scheduler, never stamped, no lookup per row ([EECS027](/en/docs/guide/analyzer#eecs027)) |
 | A filter repeated on every method of a cadence | A [group filter](#group-filters) | Written once |
-| Work every tick that could wait | `UpdateInterval` and `UpdatePhase` | Spread over ticks |
+| Work every tick that could wait | `[UpdateInterval(N, Phase = P)]` | Spread over ticks |
 | Upkeep over every entity on every N-th tick | [`Slices = N`](#slices) | A flat cost per update instead of a spike |
 | A `ref` on a tracked value recomputed every tick that rarely changes | [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) with `SetIfChanged` | Only real changes are stamped: `[Changed<T>]` readers visit fewer rows |
 
@@ -1030,7 +1067,7 @@ needed, and a method that writes a singleton:
 | `ReadOnlyMaybe<T>.Value` read when the entity lacks `T` | `InvalidOperationException` | Test `HasValue` first |
 | Writing a collection through an `in` parameter | Scheduled as a read, never stamped | [EECS011](/en/docs/guide/analyzer#eecs011) |
 | A structural change through a component's link in a method without `Entity` / `World` | The pass keeps refs into moved rows | [EECS013](/en/docs/guide/analyzer#eecs013) |
-| `UpdateInterval` that changes | Skipped or repeated runs | [EECS018](/en/docs/guide/analyzer#eecs018) |
+| An interval below 1, a phase outside 0 to N - 1 | No valid cadence | [EECS083](/en/docs/guide/analyzer#eecs083) |
 | `Slices` below 1, or with `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<…>]`, `[RemovedAny<…>]` | The changes in the other slices' rows are lost | [EECS035](/en/docs/guide/analyzer#eecs035) |
 | A sliced method relied on to visit each row exactly once per cycle | Rows that move between runs can be skipped or visited twice | Code review: slice only work that tolerates it |
 | A `Mut<T>` parameter in a batch method | Batch methods take spans | [EECS009](/en/docs/guide/analyzer#eecs009) |

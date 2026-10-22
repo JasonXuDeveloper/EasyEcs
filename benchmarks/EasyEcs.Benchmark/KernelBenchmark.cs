@@ -20,7 +20,14 @@ namespace EasyEcs.Benchmark;
 /// vector per field (Interleaved), in a world of their own. <c>Clamp</c> (Math.Clamp by a singleton's bounds, checked
 /// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
 /// pattern) are the calls, conversions and masks a vector loop takes. <c>Tally</c> (an int count, sum, Min and Max) and
-/// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
+/// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order.
+/// <c>Optional</c> takes a <c>Maybe&lt;Mass&gt;</c> over <c>_holes</c> (a lane mask of the rows that have it).
+/// <c>Hurt</c> / <c>HurtHot</c> have a
+/// cold branch (a call when a health reaches 0) that no row / one row in a hundred takes. <c>MoveVector</c> is the Godot sample's move (a
+/// component of one Vector2 assigned whole: a flat loop). <c>Steer</c> uses 3 of the 12 fields of a wide component (permutes
+/// gather them into lanes and back on AVX-512, the other 9 kept as loaded). <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
+/// <c>Wave</c> calls Sin and Exp per row (FloatMode.Fast: .NET's vector forms). <c>StepParallel</c> / <c>SeekParallel</c> run
+/// <c>Step</c> / <c>Seek</c> on several threads, the per-row parallel job against the vector loop in each chunk. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
 /// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
 /// leaves out (a lane mask per word of 64 rows). 0 bytes either way.
 /// </summary>
@@ -29,7 +36,7 @@ public class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _fields, _holes, _halves;
+    private World _world, _fields, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft;
 
     [GlobalSetup]
     public void Setup()
@@ -47,6 +54,27 @@ public class KernelBenchmark
         _holes = Holes(Entities, i => i % 3 == 0);
         _halves = Holes(Entities, i => random.Next(2) == 0);
 
+        _pixels = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _pixels.Reserve<Lum, Glow>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _pixels.CreateEntity(new Lum { V = (byte)random.Next(256) }, new Glow { V = (byte)random.Next(256) });
+
+        _calm = Wounded(Entities, 0);
+        _hot = Wounded(Entities, 0.01);
+
+        _vectors = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _vectors.SetPull(1f / 60);
+        _vectors.Reserve<Pos2D, Vel2D>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _vectors.CreateEntity(new Pos2D(new Vector2((float)random.NextDouble(), (float)random.NextDouble())),
+                new Vel2D(new Vector2((float)random.NextDouble() - 0.5f, (float)random.NextDouble() - 0.5f)));
+
+        _craft = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _craft.SetPull(1f / 60);
+        _craft.Reserve<Craft>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _craft.CreateEntity(new Craft { X = (float)random.NextDouble(), VX = (float)random.NextDouble() - 0.5f, VY = (float)random.NextDouble() - 0.5f, Fuel = i });
+
         _fields = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _fields.Reserve<P2, V2, P3, V3, P4, V4, D3>(Entities);
         float F() => (float)random.NextDouble() * 10 - 5;
@@ -54,6 +82,17 @@ public class KernelBenchmark
             _fields.CreateEntity(new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() }, new P3 { X = F(), Y = F(), Z = F() },
                 new V3 { X = F(), Y = F(), Z = F() }, new P4 { X = F(), Y = F(), Z = F(), W = F() }, new V4 { X = F(), Y = F(), Z = F(), W = F() },
                 new D3 { X = F(), Y = F(), Z = F() });
+    }
+
+    /// <summary>Healths that take no damage, a share <paramref name="rate"/> of them at 0: those take the cold branch every pass.</summary>
+    private static World Wounded(int entities, double rate)
+    {
+        var world = new World(new WorldOptions { InitialEntityCapacity = entities });
+        world.Reserve<Heat, Speed>(entities);
+        var random = new Random(3);
+        for (int i = 0; i < entities; i++)
+            world.CreateEntity(new Heat { Value = random.NextDouble() < rate ? 0 : 100 }, new Speed());
+        return world;
     }
 
     /// <summary>A world of Heat, Speed and Mass whose rows in <paramref name="hole"/> lose Mass (in place: a presence bit).</summary>
@@ -80,6 +119,11 @@ public class KernelBenchmark
         _fields.Dispose();
         _holes.Dispose();
         _halves.Dispose();
+        _pixels.Dispose();
+        _vectors.Dispose();
+        _craft.Dispose();
+        _calm.Dispose();
+        _hot.Dispose();
     }
 
     [Benchmark(Baseline = true)]
@@ -246,6 +290,96 @@ public class KernelBenchmark
     [Benchmark]
     public void EnergyGenerated() => Kernels.Energy(_world);
 
+    [Benchmark]
+    public void OptionalScalar()
+    {
+        var job = new OptionalRows();
+        _holes.ForEachBatch<Heat, Speed, OptionalRows>(ref job);
+    }
+
+    [Benchmark]
+    public void OptionalGenerated() => Kernels.Optional(_holes);
+
+    [Benchmark]
+    public void WaveScalar()
+    {
+        var job = new WaveRows();
+        _world.ForEach<Heat, Speed, Mass, WaveRows>(ref job);
+    }
+
+    [Benchmark]
+    public void WaveGenerated() => Kernels.Wave(_world);
+
+    [Benchmark]
+    public void HurtScalar()
+    {
+        var job = new HurtRows();
+        _calm.ForEach<Heat, Speed, HurtRows>(ref job);
+    }
+
+    [Benchmark]
+    public void HurtGenerated() => Kernels.Hurt(_calm);
+
+    [Benchmark]
+    public void HurtHotScalar()
+    {
+        var job = new HurtRows();
+        _hot.ForEach<Heat, Speed, HurtRows>(ref job);
+    }
+
+    [Benchmark]
+    public void HurtHotGenerated() => Kernels.Hurt(_hot);
+
+    [Benchmark]
+    public void MoveVectorScalar()
+    {
+        var job = new MoveVectorRows { Pull = _vectors.Pull };
+        _vectors.ForEach<Pos2D, Vel2D, MoveVectorRows>(ref job);
+    }
+
+    [Benchmark]
+    public void MoveVectorGenerated() => Kernels.MoveVector(_vectors);
+
+    [Benchmark]
+    public void SteerScalar()
+    {
+        var job = new SteerRows { Pull = _craft.Pull };
+        _craft.ForEach<Craft, SteerRows>(ref job);
+    }
+
+    [Benchmark]
+    public void SteerGenerated() => Kernels.Steer(_craft);
+
+    [Benchmark]
+    public void BrightenScalar()
+    {
+        var job = new BrightenRows();
+        _pixels.ForEach<Lum, Glow, BrightenRows>(ref job);
+    }
+
+    [Benchmark]
+    public void BrightenGenerated() => Kernels.Brighten(_pixels);
+
+    [Benchmark]
+    public void StepParallelScalar()
+    {
+        var job = new StepRows { Pull = _world.Pull };
+        _world.ForEachParallel<Heat, Speed, Mass, StepRows>(ref job);
+    }
+
+    [Benchmark]
+    public void StepParallelGenerated() => Kernels.StepParallel(_world);
+
+    [Benchmark]
+    public void SeekParallelScalar()
+    {
+        var job = new SeekRows();
+        _fields.ForEachParallel<P3, V3, SeekRows>(ref job);
+    }
+
+    [Benchmark]
+    public void SeekParallelGenerated() => Kernels.SeekParallel(_fields);
+
     public record struct Window(float Min, float Max) : ISingletonComponent;
 
     /// <summary>A count, a sum, a minimum and a maximum of ints: exact in any order of the rows.</summary>
@@ -361,6 +495,59 @@ public class KernelBenchmark
     public struct Mass : IComponent { public float Value; }
     public record struct Pull(float Value) : ISingletonComponent;
 
+    /// <summary>The batch job a method taking a Maybe compiled to before: the optional column once per run, a presence bit per row.</summary>
+    private struct OptionalRows : IForEachBatch<Heat, Speed>
+    {
+        public void Execute(EntitySpan entities, Span<Heat> heat, Span<Speed> speed)
+        {
+            var mass = new MaybeColumn<Mass>(in entities, false);
+            for (int i = 0; i < heat.Length; i++) Kernels.Optional(ref heat[i], in speed[i], mass[i]);
+        }
+    }
+
+    private struct HurtRows : IForEach<Heat, Speed>, INoStructuralChanges
+    {
+        public void Execute(ref Heat heat, ref Speed speed) => Kernels.Hurt(ref heat, in speed);
+        static int IForEach<Heat, Speed>.WriteMask => 1;
+    }
+
+    public record struct Pos2D(Vector2 Value) : IComponent;
+    public record struct Vel2D(Vector2 Value) : IComponent;
+
+    private struct MoveVectorRows : IForEach<Pos2D, Vel2D>, INoStructuralChanges
+    {
+        public Pull Pull;
+        public void Execute(ref Pos2D place, ref Vel2D motion) => Kernels.MoveVector(ref place, in motion, in Pull);
+        static int IForEach<Pos2D, Vel2D>.WriteMask => 1;
+    }
+
+    /// <summary>A wide component: 12 floats a row, of which Steer uses 3.</summary>
+    public struct Craft : IComponent
+    {
+        public float X, Y, VX, VY, Fuel, Mass, Drag, Heat, Spin, Tilt, Yaw, Roll;
+    }
+
+    private struct SteerRows : IForEach<Craft>, INoStructuralChanges
+    {
+        public Pull Pull;
+        public void Execute(ref Craft craft) => Kernels.Steer(ref craft, in Pull);
+        static int IForEach<Craft>.WriteMask => 1;
+    }
+
+    public struct Lum : IComponent { public byte V; }
+    public struct Glow : IComponent { public byte V; }
+
+    private struct BrightenRows : IForEach<Lum, Glow>, INoStructuralChanges
+    {
+        public void Execute(ref Lum lum, ref Glow glow) => Kernels.Brighten(ref lum, in glow);
+        static int IForEach<Lum, Glow>.WriteMask => 1;
+    }
+
+    private struct WaveRows : IForEach<Heat, Speed, Mass>
+    {
+        public void Execute(ref Heat heat, ref Speed speed, ref Mass mass) => Kernels.Wave(ref heat, in speed, in mass);
+    }
+
     /// <summary>The per-row job [ForEach] compiled to before: one call of the method per row, inlined.</summary>
     private struct StepRows : IForEach<Heat, Speed, Mass>, INoStructuralChanges
     {
@@ -441,6 +628,82 @@ public class KernelBenchmark
         // Steers toward a point at a fixed speed: a length, a division, writes to both components.
         [ForEach]
         internal static void Seek(ref P3 p, ref V3 v)
+        {
+            float dx = 1 - p.X, dy = 2 - p.Y, dz = 3 - p.Z;
+            float scale = 4 / MathF.Max(MathF.Sqrt(dx * dx + dy * dy + dz * dz), 1e-6f);
+            v.X = dx * scale;
+            v.Y = dy * scale;
+            v.Z = dz * scale;
+            p.X += v.X * Dt;
+            p.Y += v.Y * Dt;
+            p.Z += v.Z * Dt;
+        }
+
+        // An optional component: Maybe<Mass> as a lane mask of the rows that have it (every third row of _holes lacks it).
+        [ForEach(Simd = SimdMode.Require)]
+        internal static void Optional(ref Heat heat, in Speed speed, Maybe<Mass> mass)
+        {
+            if (mass.HasValue) heat.Value += speed.Value * Dt / MathF.Max(mass.Value.Value, 0.5f);
+            else heat.Value += speed.Value * Dt;
+        }
+
+        // A cold branch: a call under a condition few rows meet. A vector with such a row runs its rows through the method.
+        [ForEach(Simd = SimdMode.Require)]
+        internal static void Hurt(ref Heat health, in Speed damage)
+        {
+            health.Value -= damage.Value;
+            if (health.Value <= 0)
+            {
+                health.Value = 0;
+                Died();
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void Died() => Deaths++;
+
+        internal static int Deaths;
+
+        // The Godot sample's move: a component of a Vector2 assigned whole, Vector2's operators lane by lane (a flat loop).
+        [ForEach(Simd = SimdMode.Require)]
+        internal static void MoveVector(ref Pos2D place, in Vel2D motion, in Pull pull) =>
+            place = new Pos2D(place.Value + motion.Value * pull.Value);
+
+        // 3 of a wide component's 12 fields: gathered by permutes into lanes (AVX-512), a few dependent operations each.
+        [ForEach(Simd = SimdMode.Require)]
+        internal static void Steer(ref Craft craft, in Pull pull)
+        {
+            float d = craft.VX * pull.Value;
+            float s = MathF.Sqrt(craft.VY * craft.VY + d * d);
+            craft.X = MathF.Max(craft.X + s * pull.Value, 0f);
+            craft.VX = craft.VX * craft.VY - s;
+        }
+
+        // Narrow lanes: a saturating byte sum (AddSaturate), then a wrapping one past a threshold: 64 rows per Vector512.
+        [ForEach(Simd = SimdMode.Require)]
+        internal static void Brighten(ref Lum lum, in Glow glow)
+        {
+            lum.V = (byte)Math.Min(lum.V + (glow.V >> 2), 255);
+            if (lum.V > 250) lum.V = (byte)(lum.V - glow.V);
+        }
+
+        // Sin and Exp per row: .NET's vector approximations under FloatMode.Fast, the CRT's sinf / expf per row otherwise.
+        [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+        internal static void Wave(ref Heat heat, in Speed speed, in Mass mass) =>
+            heat.Value = MathF.Sin(speed.Value) * 0.5f + MathF.Exp(-mass.Value);
+
+        // Step and Seek on several threads: each chunk's runs of rows through the vector loop (parallel for simd).
+        [ForEach(Parallel = true, Simd = SimdMode.Require)]
+        internal static void StepParallel(ref Heat heat, ref Speed speed, in Mass mass, in Pull pull)
+        {
+            float force = heat.Value * 0.5f - mass.Value * pull.Value;
+            speed.Value = MathF.Max(MathF.Min(speed.Value + force - Drag, Limit), -Limit);
+            if (heat.Value > 100f) heat.Value = 100f;
+            else heat.Value += speed.Value * 0.125f;
+        }
+
+        [ForEach(Parallel = true, Simd = SimdMode.Require)]
+        internal static void SeekParallel(ref P3 p, ref V3 v)
         {
             float dx = 1 - p.X, dy = 2 - p.Y, dz = 3 - p.Z;
             float scale = 4 / MathF.Max(MathF.Sqrt(dx * dx + dy * dy + dz * dz), 1e-6f);

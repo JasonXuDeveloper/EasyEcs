@@ -33,7 +33,7 @@ long-running .NET processes, servers above all. What backs it up, in the reposit
   in setup ([Performance](/en/docs/performance)).
 - CI that builds, tests, runs every sample and example, compiles the C# snippets of these docs and checks the
   generated API reference.
-- An analyzer that rejects the design mistakes an ECS makes easy (EECS002 to EECS073), with code fixes.
+- An analyzer that rejects the design mistakes an ECS makes easy (EECS002 to EECS085), with code fixes.
 
 What to weigh: it targets `net10.0` only, the API changes between minor versions while it matures (4.0 to 4.1 renamed
 and removed a few members, in 4.2 reading a singleton that was never added throws, and 4.7 renamed a few calls so each name says what it
@@ -253,7 +253,7 @@ Systems run in the order you register them. To make one depend on another, name 
 ordering never reshuffles the others ([D5](/en/docs/decisions#d5-order-systems-by-dependencies-not-priorities)).
 A cycle throws in `AddSystem` and is reported by EECS019 when the analyzer can see it. There are no integer
 priorities: `Priority` was removed in 4.1. Systems that run on a different cadence go into a
-[system group](/en/docs/guide/systems) updated by its own call, or set `UpdateInterval` and `UpdatePhase`.
+[system group](/en/docs/guide/systems) updated by its own call, or mark it `[UpdateInterval(N, Phase = P)]`.
 
 ## How do I change a component? [#how-do-i-change-a-component]
 

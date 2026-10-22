@@ -255,7 +255,7 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 2. **它是启用的：**`Enabled` 为 true，且 `Error` 为 null。`SystemErrorPolicy.Disable` 下，异常会把它关掉；设
    `Enabled = true` 会清掉错误并重试。
 3. **它的分组被更新了：**带 `[UpdateInGroup<G>]` 的系统只在 `world.Update<G>()` 时运行，`world.Update()` 永远不会跑它。
-4. **它的间隔到了：**`UpdateInterval => N` 时，它在所属分组每第 N 次更新时运行，第一次是第 N 次，再按 `UpdatePhase` 偏移。
+4. **它的间隔到了：**`[UpdateInterval(N)]` 时，它在所属分组每第 N 次更新时运行，第一次是第 N 次，再按它的 `Phase` 偏移。
 5. **它的过滤条件能匹配：**用 `world.Count<T…>(filter)` 数一数方法需要的实体。分组的过滤条件对分组里所有方法都生效：分组结构体上的
    `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`，以及分组自己或它实现的任何接口带来的 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`
    （泛型 actor 接口就带着它们）。被禁用的组件算不存在。
@@ -340,7 +340,7 @@ record struct 自己就是自己的键（`IIndexed<TSelf>`，actor 写法），�
     常见的错误、会犯错的代码，以及修法。
   </Card>
   <Card title="分析器规则" href="/zh/docs/guide/analyzer">
-    EECS002 到 EECS073，各自由什么触发、怎么修。
+    EECS002 到 EECS085，各自由什么触发、怎么修。
   </Card>
   <Card title="多线程与并行" href="/zh/docs/guide/threading">
     所有者线程，以及 World 同步了什么。

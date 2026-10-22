@@ -120,7 +120,8 @@ public partial class World
 
                 ref readonly var access = ref order[at].Access;
                 systems[i] = new SystemInfo(names[at], ComponentNames(access.ReadComponents), ComponentNames(access.WriteComponents),
-                    SingletonNamesOf(access.ReadSingletons), SingletonNamesOf(access.WriteSingletons), access.Alone, waits.ToArray());
+                    SingletonNamesOf(access.ReadSingletons), SingletonNamesOf(access.WriteSingletons), access.Alone, waits.ToArray())
+                    { Loops = order[at].Loops() };
             }
 
             infos[s] = new StageInfo(systems);

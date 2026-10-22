@@ -50,7 +50,7 @@ apply immediately. This page maps the concepts; it has no benchmarks against Uni
 | `EntityCommandBuffer` | none | `entity.Set`, `Remove`, `Destroy` apply at once, also mid-pass. |
 | `ComponentSystemGroup`, `[UpdateInGroup]` | `ISystemGroup`, `[UpdateInGroup<T>]`, `world.Update<TGroup>()` | |
 | `[UpdateBefore]` / `[UpdateAfter]` | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` | A cycle is a build error ([EECS019](/en/docs/guide/analyzer#eecs019)). |
-| `RateManager`, fixed-step groups | `UpdateInterval`, a group updated when you choose | |
+| `RateManager`, fixed-step groups | `[UpdateInterval(N)]`, a group updated when you choose | |
 | Prefab entity, `EntityManager.Instantiate(prefab, array)` | `Prefab`, `world.Instantiate(prefab, span)` | A `Prefab` lives outside every world; no baking step builds it. |
 | Baking, authoring components | none | Build entities in code, from a prefab or from a save. |
 | `LinkedEntityGroup` (destroyed together) | `ChildOf(parent)`, cascading destroy | `world.Children(parent)` lists the children. |

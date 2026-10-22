@@ -37,6 +37,14 @@ icon: RotateCcwClock
   fields”、“lane types float and int differ”），就像 Burst 的 Inspector。`[ForEach(Simd = SimdMode.Require)]` 让这种情况成为错误
   （[EECS056](/zh/docs/guide/analyzer#eecs056)），热点循环不会悄悄失去向量；`SimdMode.Off` 让方法保持标量且不再提示。见
   [向量循环](/zh/docs/guide/systems#vector-loops)。
+- 向量循环能接下更多方法（[决策](/zh/docs/decisions#d90-vector-loops-reach)）：并行 `[ForEach]` 方法（每个块的行段）；`Maybe<T>` 参数（有 `T` 的行组成的通道掩码）；
+  `byte`、`sbyte`、`short` 和 `ushort` 组件（每个向量 64 或 32 行，每个运算都证明给出方法本身的位，饱和写法 `(byte)Math.Min(a + b, 255)` 和
+  `(byte)Math.Max(a - b, 0)` 是一条指令）；`Vector2` / `Vector3` / `Vector4` 字段（System.Numerics 和 Godot）、用 `new T(...)` 或 `with` 整体赋值的组件，
+  以及这些向量的运算符；条件下的调用（有通道走进它的向量由方法本身运行）；在 AVX-512 上，最多 16 个字的组件里的 4 字节字段，只要收集它们的置换划算。
+  在 `FloatMode.Fast` 下，`Sin`、`Cos`、`Exp`、`Log`、`Log2` 和 `Hypot` 采用 .NET 的向量近似；`FloatMode.Exact`（默认）让每个结果都与方法本身相同，
+  每台机器上都一样。
+- `SystemInfo.Loops`（在 `world.DescribeSchedule()` 里）列出系统每个 `[ForEach]` 方法得到的循环，或者它为什么一次一行；`tools/jitdisasm.sh` 打印循环的机器码。
+  关于组件太宽或太杂的 EECS055 原因，会在末尾列出方法用到的字段，建议拆成自己的组件。
 - `Reduce<T>`：对所有行求总数的 `[ForEach]` 参数，按 `ref` 传入（OpenMP 的 `reduction`），例如
   `static void Count(in Health h, ref Reduce<Census> census) => census.Value.Alive++;`。`T` 是实现了 `IReduction<T>`（`Identity`、`Combine`）的单例。
   并行遍历的每一块，或单线程时的整遍，累加进自己的部分结果，每行没有锁也没有原子操作；部分结果按块的顺序合并后替换 `T`。整数结果精确；
@@ -86,6 +94,17 @@ icon: RotateCcwClock
   写被追踪组件时也一样。分析器规则 [EECS054](/zh/docs/guide/analyzer#eecs054) 拒绝负数，以及没有 `Parallel` 的 `ChunkRows`。见
   [多线程与并行](/zh/docs/guide/threading#chunk-rows)和[决策](/zh/docs/decisions#d67-chunk-rows)。
 
+- 静态方法标上 `[ForEntity]` 就在单个实体上运行：生成器写出 `entity.Run` 运行的 job（`ref` 参数构成 `WriteMask`，过滤特性构成过滤条件），
+  再写一个和方法同名的入口，接收实体和方法的其他值，返回方法有没有运行（`Requests.TakeHit(unit, damage)`）。分析器规则
+  [EECS080](/zh/docs/guide/analyzer#eecs080)（建议，带代码修复）找出手写的单实体 job，连同调用一起改写；
+  [EECS081](/zh/docs/guide/analyzer#eecs081) 拒绝无法在单个实体上运行的方法。见[查询](/zh/docs/guide/queries#run-on-one-entity)。
+- `[ForEach, Consume]` 在遍历结束时恰好销毁这次访问过的行，用于只处理一次的事件和命令实体：方法不做结构变更时整批销毁（按方法的过滤条件做一次
+  `DestroyAll`），可能做结构变更时逐行销毁。分析器规则 [EECS084](/zh/docs/guide/analyzer#eecs084)（建议，带代码修复）找出以
+  `entity.Destroy()` 结尾的方法；[EECS085](/zh/docs/guide/analyzer#eecs085) 拒绝没有 `[ForEach]` 或带 `Slices` 的 `[Consume]`。
+  见[系统](/zh/docs/guide/systems#consume)。
+- `[UpdateInterval(n, Phase = p)]` 在类上声明系统的节奏；生成器把它写进注册代码（[EECS083](/zh/docs/guide/analyzer#eecs083)
+  拒绝小于 1 的间隔和不在 0 到 n - 1 之间的相位）。见[系统](/zh/docs/guide/systems#update-interval)。
+
 ### 性能 [#v4-8-0-performance]
 
 - 缓冲回收池在线程之间共享：每个线程自己留几个列表，其余的按批和所有线程都能取用的池交换，所以拥有者线程从销毁的缓冲收回的列表，也能给并行
@@ -113,6 +132,9 @@ icon: RotateCcwClock
   job 字段的并行代码；总数改用 `Reduce<T>` 参数（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
 - 新的警告 [EECS071](/zh/docs/guide/analyzer#eecs071) 报告 `[ForEach]` 方法里的 `Random.Shared` 和 `new Random()`；修复改为从单例
   `EntityRandom` 抽取（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
+
+- 删掉了 `EcsSystem.UpdateInterval` 和 `UpdatePhase`：在类上声明 `[UpdateInterval(n, Phase = p)]`。重写它们会报
+  [EECS082](/zh/docs/guide/analyzer#eecs082)，带代码修复；EECS018 删掉了（[迁移指南](/zh/docs/migration#v4-8-update-interval)）。
 
 ### 修复 [#v4-8-0-fixes]
 
@@ -151,7 +173,7 @@ icon: RotateCcwClock
 - 分析器：[EECS035](/zh/docs/guide/analyzer#eecs035) 拒绝不合法的 `Slices`（小于 1，或者和 `Changed` / `Removed` 过滤一起用）；
   [EECS036](/zh/docs/guide/analyzer#eecs036) 拒绝无法按键建索引的唯一组件（`EntityId` 键，或者还有第二个索引键）；
   [EECS031](/zh/docs/guide/analyzer#eecs031) 也覆盖用相同值循环调用 `Instantiate`；[EECS033](/zh/docs/guide/analyzer#eecs033) 建议改用生成的 `SetXIfChanged(…)`；代码修复现在也覆盖 [EECS007](/zh/docs/guide/analyzer#eecs007)（`readonly`）、
-  [EECS015](/zh/docs/guide/analyzer#eecs015)、[EECS017](/zh/docs/guide/analyzer#eecs017)（`EntityId`）、[EECS018](/zh/docs/guide/analyzer#eecs018)
+  [EECS015](/zh/docs/guide/analyzer#eecs015)、[EECS017](/zh/docs/guide/analyzer#eecs017)（`EntityId`）、EECS018
   和 [EECS025](/zh/docs/guide/analyzer#eecs025)（`Mut<T>` 改为 `in T`）。
 - `SaveEntities(output, a.Id, b.Id)` 和 `bag.AddRange(x, y)` 可以直接传值（`params` span，在栈上构造）。
   见[迁移](/zh/docs/guide/migration-and-unload#save-entities)。

@@ -85,9 +85,12 @@ available as Markdown: add `.md` to its URL.
   `DestroyAll`, `entity.Run` and bulk calls refuse a sliced filter (EECS044).
 - To change structure (add, remove, create, destroy) in a `[ForEach]` method, take `Entity` or `World`
   (EECS013). Changes apply at once; the pass stays safe.
+- Event and command entities handled once: `[ForEach, Consume]` destroys exactly the rows the pass visited when it
+  ends (in bulk when the method changes no structure), not `entity.Destroy()` at the end of the body (EECS084); not
+  with `Slices` (EECS085).
 - Order systems with `[UpdateBefore<T>]` / `[UpdateAfter<T>]` inside the same group; no cycles (EECS019, EECS020).
-  There is no `Priority`. Groups are `ISystemGroup` structs with `[UpdateInGroup<T>]`; cadence is `UpdateInterval`
-  and `UpdatePhase`, constants (EECS018).
+  There is no `Priority`. Groups are `ISystemGroup` structs with `[UpdateInGroup<T>]`; cadence is
+  `[UpdateInterval(n, Phase = p)]` on the class (EECS082: no overrides; EECS083: n >= 1, 0 <= p < n).
 - A system never calls `World.Update()` (EECS034): the host runs the world.
 - `[ForEach(Parallel = true)]` methods write data only and make no structural changes (EECS010); a later system on the
   owner thread acts on that data. A few hundred heavy rows (microseconds each) set `ChunkRows = 64` so threads take 64
@@ -120,9 +123,12 @@ available as Markdown: add `.md` to its URL.
   the fields (`p.X += v.X`), not a new whole component, and do not mix `float` and `int`. EECS055 (a suggestion) names
   why a method stayed scalar; put `[ForEach(Simd = SimdMode.Require)]` on a hot method so losing the loop fails the
   build (EECS056), `SimdMode.Off` on one that should stay scalar.
-- A request or message for one entity runs as a struct job on it: `entity.Run<T…, TJob>(ref job, Filter)` with an
-  `IForEachEntity` job and a `static readonly` `QueryFilter`; it returns `false` when the entity is gone, lacks a
-  component or fails the filter. It is structural: never inside a parallel `[ForEach]` (EECS010), never in a
+- A request or message for one entity is a private static `[ForEntity]` method (`ref` for what it writes, filter
+  attributes such as `[Without<Dead>]`, the caller's values after the components), called through its generated entry
+  point `Owner.Method(entity, values…)`; a job written by hand and run with `entity.Run` is EECS080, an instance
+  method or one taking spans EECS081. The entry point returns `false` when the entity is gone, lacks a component or
+  fails the filter. A hand-written `entity.Run<T…, TJob>(ref job, Filter)` takes an `IForEachEntity` job and a
+  `static readonly` `QueryFilter`. Both are structural: never inside a parallel `[ForEach]` (EECS010), never in a
   `[ForEach]` method without `Entity` or `World` (EECS013), never off the owner thread (EECS014). A job that makes no
   structural change implements `INoStructuralChanges`; `static int WriteMask` names the components it writes, no more
   and no fewer (EECS037).
@@ -145,7 +151,7 @@ available as Markdown: add `.md` to its URL.
 
 ## Performance
 
-- An `EECS` warning means the code costs (EECS025 to EECS032, EECS052, and EECS017, EECS018, EECS020), loses a write
+- An `EECS` warning means the code costs (EECS025 to EECS032, EECS052, and EECS017, EECS020), loses a write
   (EECS037, EECS038), stamps rows it only reads or leaves alone (EECS046, EECS053) or uses a ref after a structural change (EECS047): apply
   its fix (one mistake gets one diagnostic: where two rules see the same code, one defers). The suggestions, EECS033 and EECS039, are
   the same cost written shorter. An `EECS` error means the code cannot work.

@@ -157,7 +157,7 @@ public class ThinkSystem : EcsSystem
 ```
 
 Tables are cut at 64-row words and many small tables spread over the slices, so the work per tick stays even
-without a round-robin of your own. With `UpdateInterval = M` as well, each entity is visited once every N × M updates.
+without a round-robin of your own. With `[UpdateInterval(M)]` as well, each entity is visited once every N × M updates.
 A slice is not exact under churn (an entity that moves between tables may be skipped or visited twice in one cycle),
 and `[Changed<T>]` / `[Removed<T>]` methods cannot be sliced ([EECS035](/en/docs/guide/analyzer#eecs035)); the
 rules are in [systems](/en/docs/guide/systems#update-interval).
@@ -289,11 +289,10 @@ public sealed class StatusBoard
     public void Publish(ArenaStatus status) => Volatile.Write(ref _current, status);
 }
 
+[UpdateInterval(20)]                                                   // once a second at 20 Hz
 public sealed class PublishStatus(StatusBoard board) : EcsSystem
 {
     private readonly StatusBoard _board = board;
-
-    public override int UpdateInterval => 20;                          // once a second at 20 Hz
 
     protected override void OnUpdate() =>
         _board.Publish(new ArenaStatus(World.DefaultUpdateCount, World.Count<Position>()));
@@ -484,11 +483,10 @@ public class ClockSystem : EcsSystem
 }
 
 // Copies what request handlers may read, once a second at 20 ticks per second.
+[UpdateInterval(20)]
 public sealed class PublishStatus(StatusBoard board) : EcsSystem
 {
     private readonly StatusBoard _board = board;
-
-    public override int UpdateInterval => 20;
 
     protected override void OnUpdate()
     {

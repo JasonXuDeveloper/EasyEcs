@@ -27,11 +27,11 @@
       每行工作量大、行数上万时才划算。默认 false。
     </summary>
   </member>
-  <member name="P:EasyEcs.ForEachAttribute.Slices" source="4879cae4241b">
+  <member name="P:EasyEcs.ForEachAttribute.Slices" source="078dc360c110">
     <summary>
       把方法的行分摊到系统的 N 次运行上：每次运行访问一片，约为每个匹配表行数的 1 / N（第 <see cref="P:EasyEcs.EcsSystem.RunCount" /> mod N 片，
       见 <see cref="M:EasyEcs.QueryFilter.Slice(System.Int32,System.Int32)" />），所以每 N 次运行每行访问一次，处理大量实体的系统每次更新只花约 1 / N，
-      而不是集中在某一次更新上出现尖峰。配合 <see cref="P:EasyEcs.EcsSystem.UpdateInterval" /> M，每行每 N * M 次更新访问一次。
+      而不是集中在某一次更新上出现尖峰。配合 <see cref="T:EasyEcs.UpdateIntervalAttribute">[UpdateInterval(M)]</see>，每行每 N * M 次更新访问一次。
       两次运行之间移动了的行（交换删除、结构变更、表扩容或缩小）在一轮里可能被跳过，也可能被访问两次。
       逐实体、批处理和 <see cref="P:EasyEcs.ForEachAttribute.Parallel" /> 都能用（这一片再切成块）。不能和
       <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c> 一起用（EECS035）：其他片的行会丢掉系统上次运行之后的变更。
@@ -57,12 +57,13 @@
     </summary>
   </member>
 
-  <member name="P:EasyEcs.ForEachAttribute.FloatMode" source="af9b5bf47bab">
+  <member name="P:EasyEcs.ForEachAttribute.FloatMode" source="fbc888efdd85">
     <summary>
       向量循环可以改变哪些浮点结果。<see cref="F:EasyEcs.FloatMode.Exact" /> 让每个结果都与方法本身逐位相同，所以写进
       <see cref="T:EasyEcs.Reduce`1" /> 的浮点求和保持一次一行（EECS055 会说明）：向量循环的每个通道各加各的行，相加顺序不同。
-      <see cref="F:EasyEcs.FloatMode.Fast" /> 接受这种顺序：同样那些行的和，只是舍入不同（与方法本身不逐位相同，不同向量宽度之间也不相同）。
-      整数求和以及任何通道类型的 Min / Max 两种模式下都精确。默认 <see cref="F:EasyEcs.FloatMode.Exact" />。
+      <see cref="F:EasyEcs.FloatMode.Fast" /> 接受这种顺序：同样那些行的和，只是舍入不同（与方法本身不逐位相同，不同向量宽度之间也不相同），
+      并接受 <c>Sin</c>、<c>Cos</c>、<c>Exp</c>、<c>Log</c>、<c>Log2</c> 和 <c>Hypot</c> 的向量近似（与标量函数相差 1 到 2 ulp 以内）。
+      整数求和以及任何通道类型的 Min / Max 两种模式下都精确。默认 <see cref="F:EasyEcs.FloatMode.Exact" />：每台机器上结果都相同（每个通道都是一次 IEEE 运算）。
     </summary>
   </member>
 </doc>

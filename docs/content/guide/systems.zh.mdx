@@ -123,20 +123,19 @@ flowchart TB
 其他系统的相对顺序不变。顺序在添加系统时就确定了：出现环会当场抛异常，这个系统不会被加进去。分析器能发现它看得到的环
 （[EECS019](/zh/docs/guide/analyzer#eecs019)）和跨分组的排序（[EECS020](/zh/docs/guide/analyzer#eecs020)）。
 
-### `UpdateInterval` 和 `UpdatePhase` [#update-interval]
+### `[UpdateInterval(N, Phase = P)]` [#update-interval]
 
-重写了 `UpdateInterval` 的系统，每 N 次分组更新才跑一次：更新计数是 N 的倍数时运行，所以第一次是第 N 次更新。`UpdatePhase`
-（0 到 N - 1）决定它占 N 次里的哪一次，同样间隔的系统可以错开，不必挤在同一个 tick。两者都必须是常量
-（[EECS018](/zh/docs/guide/analyzer#eecs018)）；要暂停系统，设置 `Enabled`。
+标了 `[UpdateInterval(N)]` 的系统，每 N 次分组更新才跑一次：更新计数是 N 的倍数时运行，所以第一次是第 N 次更新。`Phase`
+（0 到 N - 1）决定它占 N 次里的哪一次，同样间隔的系统可以错开，不必挤在同一个 tick。特性只接受常量，节奏在编译时就定了；
+生成器把它写进系统的注册代码，派生系统没有自己声明时沿用基类的（间隔小于 1 或相位不在 0 到 N - 1 之间时报
+[EECS083](/zh/docs/guide/analyzer#eecs083)）。要暂停系统，设置 `Enabled`。
 
 ```csharp
 public record struct Autosave(long Count) : ISingletonComponent;
 
+[UpdateInterval(60, Phase = 30)]                   // 每 60 次更新一次，和同间隔的其他系统错开半个周期
 public class SaveSystem : EcsSystem
 {
-    public override int UpdateInterval => 60;      // 每 60 次更新一次
-    public override int UpdatePhase => 30;         // 和同间隔的其他系统错开半个周期
-
     protected override void OnUpdate() => World.GetOrAddAutosave().Count++;
 }
 ```
@@ -166,7 +165,7 @@ public class HungerSystem : EcsSystem
 - **会移动的行：** 两次运行之间移动过的行（交换删除时用表的最后一行填洞、结构变更把实体搬到另一张表、表的行数跨过切点
   增减）在一轮 N 次运行里可能被跳过，也可能被访问两次；下一轮还会看到它。只对容忍这一点的工作分片，每轮必须恰好处理一次
   的工作不要分片。
-- **和间隔一起用：** `UpdateInterval => M` 加上 `Slices = N`，每一行每 N × M 次更新访问一次。
+- **和间隔一起用：** `[UpdateInterval(M)]` 加上 `Slices = N`，每一行每 N × M 次更新访问一次。
 - **各种写法都支持：** 逐实体方法、[批处理方法](#batch-methods)（片内成段的行）和[并行方法](#parallel-methods)（把这一片
   再切成块）。
 - **不能和变化过滤一起用：** `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]`、`[RemovedAny<…>]` 都不能分片，`Slices`
@@ -319,6 +318,27 @@ public class Rally : EcsSystem
 ```
 
 查找方式和 `Maybe<T>` 一样，开销也一样：见[下文](#how-to-use-it-fast)的 `MaybeBenchmark` 表。`Maybe<T>` 可以隐式转换成 `ReadOnlyMaybe<T>`，所以只读的辅助方法接收只读版本，两种参数都能传进去。
+
+### `[Consume]`：遍历之后销毁事件 [#consume]
+
+`[ForEach, Consume]` 在遍历结束时销毁这次遍历访问过的行，不多也不少：处理事件或命令实体（一次命中、一个请求）的方法只管处理，
+销毁交给遍历。不做结构变更的方法，它的行在遍历结束时一次销毁，按它的过滤条件做一次 `DestroyAll`，整张表一起释放；可能做结构变更的方法
+（接收 `World`，或用 `Entity` 改了什么）在方法处理完每一行后销毁那一行。遍历期间才开始匹配的实体不会被销毁：下一次运行会访问它。
+清理组件让被消费的实体退休，和其他被销毁的实体一样，[销毁日志](/zh/docs/guide/change-tracking#destroy-log)也会记下它。遍历抛异常时
+什么也不销毁，这些行下次还会被访问。`[Consume]` 不能和 `Slices` 一起用（[EECS085](/zh/docs/guide/analyzer#eecs085)）。
+
+```csharp
+public record struct Heal(int Amount, EntityId Target) : IComponent;   // 一个事件实体
+
+public class ApplyHeals : EcsSystem
+{
+    [ForEach, Consume]
+    static void Apply(in Heal heal, World world)
+    {
+        if (world.TryGetEntity(heal.Target, out var target)) target.Get<Health>().Value += heal.Amount;
+    }
+}
+```
 
 ### 批处理方法 [#batch-methods]
 
@@ -539,51 +559,63 @@ for (; i < rows; i++)   // 4. 尾部，以及没有 shuffle 指令时的每一�
 
 下面这些条件都满足时，方法才会得到向量循环；否则它照旧逐行运行，和以前完全一样：
 
-- **方法：** `static`、逐实体、不是 `Parallel`（并行方法保持标量），没有 `Entity`、`World`、`Mut<T>` 或 `Maybe<T>` 参数。
-- **组件：** 每个组件有 1 到 4 个字段（或自动属性），类型是 `float`、`double`、`int`、`uint`、`long` 或 `ulong`，只在一处声明，
-  而且方法的所有字段是同一种类型，也就是同一个通道数。`ref` 和 `in` 都可以；写字段（`p.X += v.X`），不要给整个组件赋新值。
+- **方法：** `static`、逐实体（单线程或 `Parallel` 都行），没有 `Entity`、`World` 或 `Mut<T>` 参数。组件的 `Maybe<T>` / `ReadOnlyMaybe<T>`
+  是有这个组件的行组成的通道掩码（单线程时）。
+- **组件：** 1 到 4 个同样大小的通道：`float`、`double`、`int`、`uint`、`long`、`ulong`、`byte`、`sbyte`、`short` 或 `ushort` 的字段
+  （或自动属性），或由它们组成的结构体（`Vector2`、`Vector3`、`Vector4`，System.Numerics 和 Godot 的都行），只在一处声明。`ref` 和 `in`
+  都可以；可以给整个组件赋值（`p = new Position(p.Value + v.Value * dt)`、`p = p with { ... }`）。在 AVX-512 上，更宽的组件（最多 16 个字，
+  其他字段可以是任何普通类型）在方法只用它的 4 字节字段、并且收集这些字段的置换比工作量便宜时，也符合条件。
 - **统一值：** 单例、常量和 `static readonly` 字段。
-- **方法体：** 局部变量、`=`、复合赋值、`++` / `--`、`+ - *`、浮点的 `/`、`& | ^ ~`、按统一位数移位、比较、`&& || !`、`?:`、
-  `if` / `else`、`return`，以及 `Math` / `MathF` 的 `Min`、`Max`、`Abs`（浮点）、`Sqrt`、`Floor`、`Ceiling` 和 `FusedMultiplyAdd`。
+- **方法体：** 局部变量、`=`、复合赋值、`++` / `--`、`+ - *`、浮点的 `/`、`& | ^ ~`、移位、比较、`&& || !`、`?:`、`if` / `else`、`return`、
+  通道类型之间的转换、向量类型的运算符，以及有精确向量对应的 `Math` / `MathF` 函数（`Min`、`Max`、`Abs`、`Clamp`、`Sqrt`、`Floor`、`Ceiling`、
+  `Round`、`Truncate`、`CopySign`、`FusedMultiplyAdd`、`Lerp`）；`FloatMode.Fast` 下还有 `Sin`、`Cos`、`Exp`、`Log`、`Log2` 和 `Hypot`。
+  在循环能计算的条件下、循环表达不了的调用是冷分支：有通道走进它的向量由方法本身运行。
 
 **结果逐位相同。** 每条通道按同样的顺序执行和标量代码相同的 IEEE 运算：不重排结合顺序，方法没写的融合乘加也不会加（`Vector.Min` /
-`Max` 对 NaN 和 −0 的处理与 `Math.Min` / `Max` 一致）。变更 tick 和系统的读写集合都和逐行方法相同。
+`Max` 对 NaN 和 −0 的处理与 `Math.Min` / `Max` 一致）。窄通道只在证明结果就是 C# 算出的 `int` 结果时才接受一个运算。变更 tick 和系统的读写集合都和逐行方法相同。
+只有 `FloatMode.Fast` 会改变结果（[D90](/zh/docs/decisions#d90-vector-loops-reach)）。
 
 **不符合条件的方法** 保持标量循环：结果是对的，只是慢，[EECS055](/zh/docs/guide/analyzer#eecs055)（IDE 里的建议）会像 Burst 的
-Inspector 一样说出第一个原因。常见原因是组件超过 4 个字段、一个方法里有两种数值类型、给整个组件赋值（`p = new Position(...)`）而不是写字段、
-用了规则覆盖不到的函数调用。照 Burst 代码的写法改：一个方法一种数值类型，每个组件最多 4 个字段，把调用挪出去。速度取决于向量循环的方法用
-`Simd = SimdMode.Require` 写明，之后哪次改动让它失去循环，构建就会失败（[EECS056](/zh/docs/guide/analyzer#eecs056)）。
+Inspector 一样说出第一个原因：`bool` 字段、组件对它上面的工作来说太宽（并列出该拆出的字段）、`Vector3.Dot` 这种标量代码没有固定顺序的向量求和、
+条件之外的调用。速度取决于向量循环的方法用 `Simd = SimdMode.Require` 写明，之后哪次改动让它失去循环，构建就会失败（[EECS056](/zh/docs/guide/analyzer#eecs056)）。
 
 ```csharp tab="保持标量" doccheck=expect-EECS055
-public struct Fuel : IComponent { public float Value; }
-public struct Engines : IComponent { public int Value; }   // EECS055：lane types float and int differ
+public record struct Motion(System.Numerics.Vector3 Value) : IComponent;
+public struct Speed : IComponent { public float Value; }
 
-public class BurnFuel : EcsSystem
+public class MeasureSpeed : EcsSystem
 {
-    [ForEach]
-    static void Burn(ref Fuel fuel, in Engines engines) =>
-        fuel.Value = MathF.Max(fuel.Value - engines.Value * 0.5f, 0f);
+    [ForEach]   // EECS055：Vector3.Dot adds the fields of a vector together, in an order not proven to be the scalar code's
+    static void Measure(ref Speed speed, in Motion motion) =>
+        speed.Value = MathF.Sqrt(System.Numerics.Vector3.Dot(motion.Value, motion.Value));
 }
 ```
 
 ```csharp tab="符合条件"
-public struct Fuel : IComponent { public float Value; }
-public struct BurnRate : IComponent { public float Value; }   // 发动机的消耗率，存成 float
+public record struct Motion(System.Numerics.Vector3 Value) : IComponent;
+public struct Speed : IComponent { public float Value; }
 
-public class BurnFuel : EcsSystem
+public class MeasureSpeed : EcsSystem
 {
-    [ForEach]
-    static void Burn(ref Fuel fuel, in BurnRate rate) =>
-        fuel.Value = MathF.Max(fuel.Value - rate.Value, 0f);
+    [ForEach]   // 把求和写出来：顺序就是方法的顺序，每条通道都按它计算
+    static void Measure(ref Speed speed, in Motion motion)
+    {
+        var v = motion.Value;
+        speed.Value = MathF.Sqrt(v.X * v.X + v.Y * v.Y + v.Z * v.Z);
+    }
 }
 ```
 
-系统的生成文件（`<System>.….ForEach.g.cs`，在项目的生成源码下；开启 `<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>`
-后在 `obj/` 下）里出现 `Vector<`，就说明方法得到了向量循环；没得到的方法不用打开文件，EECS055 会列出来。
+`world.DescribeSchedule()` 列出系统每个方法得到的循环，每个方法一行（`SystemInfo.Loops`）：
 
-{/* TODO(vector loops): Math.Clamp、Min/Max/Abs/Sqrt/Floor/Ceiling 之外的 MathF.*、lerp 和类型转换；向量归约（向量循环里的
-Reduce<T>）；FloatMode.Fast；存在位的 lane 掩码（Maybe<T> 作为掩码）；Vector512；无边界检查的标量循环。每项加进上面的条件列表，
-改变循环形状的附上生成的代码。 */}
+```text
+      loop Move: vector (Vector512 or Vector<float>), flat, masked words vector
+      loop Steer: vector (Vector512 only), wide component (permutes), masked words scalar
+      loop Spawn: scalar (it takes the Entity)
+```
+
+系统的生成文件（`<System>.….ForEach.g.cs`，在项目的生成源码下；开启 `<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>`
+后在 `obj/` 下）里就是循环本身，`tools/jitdisasm.sh <project> 'EasyEcs.World:Masked'` 打印 JIT 为它生成的机器码。
 
 `KernelBenchmark` 在 10 万行和 1,000 行上对比逐行 job 和生成的循环（带分支的钳制、`h += v * dt`、整数自增，以及 2 到 4 个字段的位置的移动、寻向和行进）；数字见
 [D68](/zh/docs/decisions#d68-vector-loops-without-opting-in)：
@@ -616,7 +648,7 @@ world.Update();               // 固定 tick：默认分组
 long inputs = world.UpdateCount<InputGroup>();   // 到目前为止 Update<InputGroup>() 的次数
 ```
 
-顺序、`UpdateInterval`、`UpdatePhase` 和 `Enabled` 都在各自分组内生效，分组特性会被继承。更新一个没有系统的分组什么也不做。
+顺序、`[UpdateInterval]` 和 `Enabled` 都在各自分组内生效，分组特性会被继承。更新一个没有系统的分组什么也不做。
 `world.UpdateCount<TGroup>()` 统计一个分组的更新次数（包括正在进行的这一次），就像 `DefaultUpdateCount` 统计默认分组：分组里各系统的
 `UpdateInterval` 就按这个次数算，所以工具或测试能知道下一次更新哪些系统会跑。O(1)；从没加过系统的分组是 0。
 
@@ -899,7 +931,7 @@ run order: MoveSystem
 | 只有几百行重活的 `Parallel = true`，默认只成一块 | [`ChunkRows = 64`](/zh/docs/guide/threading#chunk-rows) | 每个线程都领块，而不是一个线程包圆 |
 | 只读的 `Maybe<T>`（或通过 `Entity` 逐行查找） | [`ReadOnlyMaybe<T>`](#read-only-maybe) | 调度时算读，从不打 tick，也不用每行查找（[EECS027](/zh/docs/guide/analyzer#eecs027)） |
 | 同一个节奏的每个方法都重复写一个过滤 | [分组过滤](#group-filters) | 只写一次 |
-| 可以等的工作每个 tick 都做 | `UpdateInterval` 加 `UpdatePhase` | 分摊到多个 tick |
+| 可以等的工作每个 tick 都做 | `[UpdateInterval(N, Phase = P)]` | 分摊到多个 tick |
 | 每 N 个 tick 把所有实体维护一遍 | [`Slices = N`](#slices) | 每次更新开销平稳，没有尖峰 |
 | 每个 tick 都重算、但很少变的被追踪值用 `ref` 写 | [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 加 `SetIfChanged` | 只有真正的变化打 tick：`[Changed<T>]` 读取方访问的行更少 |
 
@@ -954,7 +986,7 @@ run order: MoveSystem
 | 实体没有 `T` 时读 `ReadOnlyMaybe<T>.Value` | 抛 `InvalidOperationException` | 先判断 `HasValue` |
 | 通过 `in` 参数修改集合 | 被当成读来调度，也不会打 tick | [EECS011](/zh/docs/guide/analyzer#eecs011) |
 | 不带 `Entity` / `World` 的方法通过组件里的链接做结构变更 | 遍历拿着指向已搬走行的 ref | [EECS013](/zh/docs/guide/analyzer#eecs013) |
-| `UpdateInterval` 的值会变 | 跳过或重复运行 | [EECS018](/zh/docs/guide/analyzer#eecs018) |
+| 间隔小于 1、相位不在 0 到 N - 1 之间 | 节奏无效 | [EECS083](/zh/docs/guide/analyzer#eecs083) |
 | `Slices` 小于 1，或和 `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]`、`[RemovedAny<…>]` 一起用 | 其他分片里的行发生的变化会丢失 | [EECS035](/zh/docs/guide/analyzer#eecs035) |
 | 指望分片方法每轮恰好访问每行一次 | 两次运行之间移动过的行可能被跳过或访问两次 | 代码审查：只对容忍这一点的工作分片 |
 | 批处理方法里用 `Mut<T>` 参数 | 批处理方法拿的是 span | [EECS009](/zh/docs/guide/analyzer#eecs009) |

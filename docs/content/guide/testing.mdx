@@ -93,7 +93,7 @@ instead (a clock with a tick and a step, a seed, a config) and set that singleto
 test creates the request entities a network system would have created, or writes into the queue the input system
 drains ([hosting](/en/docs/guide/hosting#requests)).
 
-- **Intervals:** a system with `UpdateInterval => 4` runs on every fourth `Update()`; call `Update()` that many times.
+- **Intervals:** a system with `[UpdateInterval(4)]` runs on every fourth `Update()`; call `Update()` that many times.
 - **Groups:** systems in `[UpdateInGroup<G>]` run only on `world.Update<G>()`; call it in the test as the host
   would.
 - **Change tracking:** a `[Changed<T>]` method sees the writes made since its system last ran; write the component

@@ -167,18 +167,16 @@ public class ExpireSystem : EcsSystem
 
 Not everything runs every tick. A system group is a cadence the host calls: systems marked `[UpdateInGroup<G>]` run
 on `world.Update<G>()`, the others on `world.Update()`. Use one group for input read whenever it arrives, one for
-replication every few ticks, one for autosaves. Inside a group, `UpdateInterval` runs a slow system every N-th
-update and `UpdatePhase` spreads systems with the same interval
-([`UpdateInterval`](/en/docs/guide/systems#update-interval) and [`UpdatePhase`](/en/docs/guide/systems#update-interval)):
+replication every few ticks, one for autosaves. Inside a group, [`[UpdateInterval(N, Phase = P)]`](/en/docs/guide/systems#update-interval)
+runs a slow system every N-th update, and its phase spreads systems with the same interval:
 
 ```csharp
 public record struct Census(int Entities) : ISingletonComponent;
 
 // Every 20th update of its group: once a second at 20 ticks a second.
+[UpdateInterval(20)]
 public class CensusSystem : EcsSystem
 {
-    public override int UpdateInterval => 20;
-
     protected override void OnUpdate() => World.GetOrAddCensus().Entities = World.EntityCount;
 }
 ```

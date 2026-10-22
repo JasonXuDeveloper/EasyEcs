@@ -61,7 +61,7 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
   （[D36](/zh/docs/decisions#d36-not-added)）。
 - 运行条件（`[RunIf]`）：什么时候跑哪个分组，系统分组和宿主已经能决定；每个系统一个谓词，是调度器看不见的代码
   （[D51](/zh/docs/decisions#d51-not-added)）。
-- `UpdatePeriod` 和系统时间：时间归宿主的固定步长循环管，`UpdateInterval` 数的是更新次数，结果可复现
+- `UpdatePeriod` 和系统时间：时间归宿主的固定步长循环管，`[UpdateInterval]` 数的是更新次数，结果可复现
   （[D51](/zh/docs/decisions#d51-not-added)）。
 - `[Requires<B>]`：每种实体一个预制体，一次拷贝就带齐整套组件，没有隐式的结构变更（[D51](/zh/docs/decisions#d51-not-added)）。
 - 外部键到实体的映射表：`IUniqueIndexed<TKey>` 就是这张表，每次写入都会维护（[D51](/zh/docs/decisions#d51-not-added)）。

@@ -2,32 +2,29 @@ using EasyEcs;
 
 namespace GameLoop;
 
-// One system per kind of request. Each finds the player by client id, acts,
-// and destroys the request entity: a request lives for one tick.
+// One system per kind of request. Each finds the player by client id and acts;
+// [Consume] destroys the requests it visited when its pass ends: a request lives for one tick.
 
 // Removes a player that left. It runs before JoinSystem, so a client that
 // leaves and joins again in the same tick ends up joined.
 public sealed class LeaveSystem : EcsSystem
 {
-    [ForEach]
-    static void Leave(Entity request, in LeaveRequest leave, ref Stats stats, World world)
+    [ForEach, Consume]
+    static void Leave(in LeaveRequest leave, ref Stats stats, World world)
     {
         if (world.ClientIndex.TryFind(leave.Client, out var player))
         {
             player.Destroy();
             stats.Left++;
         }
-
-        request.Destroy();
     }
 }
 
 // Creates a player from the prefab. A second join of the same client is ignored.
 public sealed class JoinSystem : EcsSystem
 {
-    [ForEach]
+    [ForEach, Consume]
     static void Join(
-        Entity request,
         in JoinRequest join,
         in Prefabs prefabs,
         ref Stats stats,
@@ -44,23 +41,19 @@ public sealed class JoinSystem : EcsSystem
                 new Position(join.Client * 10, 0));
             stats.Joined++;
         }
-
-        request.Destroy();
     }
 }
 
 // Sets the velocity a client asked for.
 public sealed class MoveSystem : EcsSystem
 {
-    [ForEach]
-    static void Steer(Entity request, in MoveRequest move, World world)
+    [ForEach, Consume]
+    static void Steer(in MoveRequest move, World world)
     {
         if (world.ClientIndex.TryFind(move.Client, out var player))
         {
             player.Velocity = new Velocity(move.X, move.Y);
         }
-
-        request.Destroy();
     }
 }
 
@@ -69,9 +62,8 @@ public sealed class FireSystem : EcsSystem
 {
     const float BulletSpeed = 4;
 
-    [ForEach]
+    [ForEach, Consume]
     static void Fire(
-        Entity request,
         in FireRequest fire,
         in Prefabs prefabs,
         ref Stats stats,
@@ -87,7 +79,5 @@ public sealed class FireSystem : EcsSystem
                 new Velocity(aim.X * BulletSpeed, aim.Y * BulletSpeed));
             stats.Fired++;
         }
-
-        request.Destroy();
     }
 }

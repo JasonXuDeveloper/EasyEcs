@@ -150,7 +150,7 @@ public class ThinkSystem : EcsSystem
 }
 ```
 
-表按 64 行的字切开，很多小表也会分散到各片里，不用自己写轮转，每个 tick 的工作量就是均匀的。再加上 `UpdateInterval = M`，每个
+表按 64 行的字切开，很多小表也会分散到各片里，不用自己写轮转，每个 tick 的工作量就是均匀的。再加上 `[UpdateInterval(M)]`，每个
 实体每 N × M 次更新被访问一次。实体频繁变动时分片不是精确的（在表之间移动的实体，一轮里可能被跳过或访问两次）；
 `[Changed<T>]` / `[Removed<T>]` 方法不能分片（[EECS035](/zh/docs/guide/analyzer#eecs035)）。规则见[系统](/zh/docs/guide/systems#update-interval)。
 
@@ -272,11 +272,10 @@ public sealed class StatusBoard
     public void Publish(ArenaStatus status) => Volatile.Write(ref _current, status);
 }
 
+[UpdateInterval(20)]                                                   // 20 Hz 下每秒一次
 public sealed class PublishStatus(StatusBoard board) : EcsSystem
 {
     private readonly StatusBoard _board = board;
-
-    public override int UpdateInterval => 20;                          // 20 Hz 下每秒一次
 
     protected override void OnUpdate() =>
         _board.Publish(new ArenaStatus(World.DefaultUpdateCount, World.Count<Position>()));
@@ -454,11 +453,10 @@ public class ClockSystem : EcsSystem
 }
 
 // 拷贝请求处理代码可以读的内容，每秒 20 个 tick 时每秒一次。
+[UpdateInterval(20)]
 public sealed class PublishStatus(StatusBoard board) : EcsSystem
 {
     private readonly StatusBoard _board = board;
-
-    public override int UpdateInterval => 20;
 
     protected override void OnUpdate()
     {

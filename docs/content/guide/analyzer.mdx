@@ -1,13 +1,13 @@
 ---
 title: Analyzer rules
-seoTitle: "EasyEcs analyzer rules EECS002-EECS073 for C# ECS code"
-description: Every EasyEcs analyzer rule, EECS002 to EECS073, with its severity, its code fix, the code it rejects and the code to write instead.
+seoTitle: "EasyEcs analyzer rules EECS002-EECS085 for C# ECS code"
+description: Every EasyEcs analyzer rule, EECS002 to EECS085, with its severity, its code fix, the code it rejects and the code to write instead.
 icon: ShieldCheck
 ---
 
 The EasyEcs analyzer ships in the package next to the source generator, so code that breaks the
 [ECS principles](/en/docs/ecs-principles) does not build. The correctness rules (EECS002 to EECS024, EECS035 and
-EECS036) are errors except three warnings for code that works but costs (EECS017, EECS018, EECS020). The generator skips invalid input and the
+EECS036) are errors except two warnings for code that works but costs (EECS017, EECS020). The generator skips invalid input and the
 analyzer reports it, so "not generated" always means "reported". The performance rules (EECS025 to EECS034, EECS039, EECS046, EECS052, EECS053) find code
 that works and does more than it needs, and the severity says what kind
 ([D29](/en/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)): a warning
@@ -17,7 +17,9 @@ EECS040 to EECS045, EECS047 to EECS051) find calls and declarations that compile
 throws or the code cannot work, a warning where a write is lost or a ref can point at the wrong row. The vector-loop
 rules say why a method runs one row at a time (EECS055, a suggestion) and fail the build when a method that must
 vectorize does not (EECS056); EECS057 keeps a [reduction](/en/docs/guide/threading#reductions) the only write of its
-singleton; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses; EECS070 keeps the records of an `Emit<T>` in row order, and EECS071 finds random numbers a run cannot repeat; the tile rules (EECS072, EECS073) reject a grid tile whose halo does not fit and two tiles that would share a texture. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
+singleton; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses; EECS070 keeps the records of an `Emit<T>` in row order, and EECS071 finds random numbers a run cannot repeat; the tile rules (EECS072, EECS073) reject a grid tile whose halo does not fit and two tiles that would share a texture. The declaration rules (EECS080 to EECS085) suggest the attribute
+that writes what code does by hand (a one-entity job, a pass that destroys what it visits) and reject one that cannot
+apply. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
 same package), and only when the result compiles.
 
 ## When to read it [#when-to-use-it]
@@ -60,7 +62,6 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS015](#eecs015) | Error | An indexed component is written with `Set` | `Read<T>()`, `ref readonly`, `in`, `ReadOnlySpan<T>` |
 | [EECS016](#eecs016) | Error | A `[Removed<T>]` method does not require `T` | |
 | [EECS017](#eecs017) | Warning | Components store an `EntityId`, not an `Entity` | `EntityId` for a field |
-| [EECS018](#eecs018) | Warning | `UpdateInterval` and `UpdatePhase` are constants | `=> constant` for `{ get; } = constant` |
 | [EECS019](#eecs019) | Error | Systems are not ordered in a cycle | |
 | [EECS020](#eecs020) | Warning | Systems are ordered within their group | |
 | [EECS021](#eecs021) | Error | A `[ForEach]` entry point does not collide with a method | |
@@ -108,6 +109,12 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS071](#eecs071) | Warning | `[ForEach]` methods draw repeatable random numbers | `EntityRandom` |
 | [EECS072](#eecs072) | Error | A tile's shape fits its halo | |
 | [EECS073](#eecs073) | Error | A method takes one tile per cell type and grid | |
+| [EECS080](#eecs080) | Info | A one-entity job is a `[ForEntity]` method | Write it as a `[ForEntity]` method |
+| [EECS081](#eecs081) | Error | A `[ForEntity]` method is static and takes what one entity has | Make it static |
+| [EECS082](#eecs082) | Error | A system's schedule is `[UpdateInterval(n, Phase = p)]`, not an override | Declare it with the attribute |
+| [EECS083](#eecs083) | Error | `[UpdateInterval]`: an interval of 1 or more, a phase 0 to n - 1, on a system | |
+| [EECS084](#eecs084) | Info | A `[ForEach]` method that destroys every entity it visits is `[Consume]` | `[Consume]` |
+| [EECS085](#eecs085) | Error | `[Consume]` goes with `[ForEach]`, without `Slices` | |
 
 ## EECS002 [#eecs002]
 
@@ -664,31 +671,6 @@ public class ChaseSystem : EcsSystem
 }
 ```
 
-## EECS018 [#eecs018]
-
-**A system's schedule is not a constant.** Warning. Code fix: `=> 5` for an auto-property `{ get; } = 5`.
-
-`UpdateInterval` and `UpdatePhase` are read every update, so a value that changes makes the system skip or repeat
-runs. An auto-property with a constant initializer is reported too: it reads a field set when the system is built,
-and `=> 5` says the constant.
-
-```csharp doccheck=expect-EECS018
-public class SaveSystem : EcsSystem
-{
-    public override int UpdateInterval => World.EntityCount > 1000 ? 4 : 1;
-}
-```
-
-Return a constant. To stop and resume a system, set `Enabled`:
-
-```csharp
-public class SaveSystem : EcsSystem
-{
-    public override int UpdateInterval => 60;    // every 60th update
-    public override int UpdatePhase => 30;       // half a cycle after the others with the same interval
-}
-```
-
 ## EECS019 [#eecs019]
 
 **Systems ordered in a cycle.** Error. No code fix.
@@ -957,7 +939,7 @@ of every tick, and the collections it causes pause the world. The rule names eac
 array, a lambda that captures, a method group of an instance, LINQ, a string built at run time (`$"..."`, `+`,
 `string.Format`, `ToString()`), boxing, and `foreach` over an interface. Left out: code inside a `throw`, calls the
 compiler removes (`[Conditional]`, such as `Debug.Assert`), console output (the write costs more than its string),
-and the `OnUpdate` of a system that overrides `UpdateInterval` (its author chose that cadence). The rule also covers
+and the `OnUpdate` of a system with its own `[UpdateInterval]` (its author chose that cadence). The rule also covers
 the `Execute` of a hand-written job, and the cold calls that allocate by design: `TrimExcess`, `Capture()`,
 `Describe`, `DescribeTables` and `DescribeSchedule` belong to a timer, a command or a test, not to every update.
 
@@ -1734,29 +1716,35 @@ default chunks ([when to set it](/en/docs/guide/threading#chunk-rows)).
 **A `[ForEach]` method that runs one row at a time.** Suggestion (Info). No code fix.
 
 The generator turns a [`[ForEach]` method into a vector loop](/en/docs/guide/systems#vector-loops) when it qualifies.
-A method that looks meant for one (static, on one thread, taking only components of number fields, singletons and
-values) but misses a condition gets this message, which names the first reason: a component of 5 fields, two lane
-types, a call the loop has no vector form of, a write to something that is not a lane. It is the counterpart of
-Burst's inspector: the build says which method stayed scalar and why. The method still runs correctly, row by row.
+A method that looks meant for one (static, taking only components of plain values, singletons and values) but misses
+a condition gets this message, which names the first reason: a component too wide for the work the method does on
+it, a `bool` field, a call the loop has no vector form of, a write to something that is not a lane. When the method
+uses few fields of a wide component, the message ends with them: split them into a component of their own. It is the
+counterpart of Burst's inspector: the build says which method stayed scalar and why, and
+[`DescribeSchedule()`](/en/docs/guide/systems#vector-loops) lists the loop of every method. The method still runs
+correctly, row by row.
 
 ```csharp tab="Reported" doccheck=expect-EECS055
-public struct Body : IComponent { public float X, Y, Z, Mass; public int Squad; }   // 5 fields, float and int
+public struct Ship : IComponent { public float X, Y, Z, VX, VY, VZ, Fuel, Heat; }   // 8 fields
 
-public class Sink : EcsSystem
+public class Burn : EcsSystem
 {
-    [ForEach]   // "component Body has 5 fields (a vector loop splits up to 4)"
-    static void Fall(ref Body body) => body.Y -= body.Mass * 0.01f;
+    // "component Ship has 8 fields (a vector loop splits up to 4), and gathering the 1 field it uses takes ... permutes
+    // per 16 rows, more than its 1 vector operation gains; it uses 1 of Ship's 8 fields (Fuel): move it into a
+    // component of its own (a component of one field gets a vector loop)"
+    [ForEach]
+    static void Spend(ref Ship ship) => ship.Fuel -= 0.01f;
 }
 ```
 
 ```csharp tab="Fixed"
-public struct Body : IComponent { public float X, Y, Z, Mass; }   // 4 floats: one vector per field
-public struct Squad : IComponent { public int Value; }             // the int in a component of its own
+public struct Ship : IComponent { public float X, Y, Z, VX, VY, VZ, Heat; }
+public struct Fuel : IComponent { public float Value; }   // what Spend changes, in a component of its own
 
-public class Sink : EcsSystem
+public class Burn : EcsSystem
 {
     [ForEach]
-    static void Fall(ref Body body) => body.Y -= body.Mass * 0.01f;
+    static void Spend(ref Fuel fuel) => fuel.Value -= 0.01f;
 }
 ```
 
@@ -1773,29 +1761,31 @@ When the method does not qualify, the build fails with the reason EECS055 would 
 loop has no vector form of, a field of another type) cannot slow it down without anyone noticing.
 
 ```csharp tab="Reported" doccheck=expect-EECS056
-public struct Charge : IComponent { public float Value; }
+public struct Charge : IComponent { public float Value; public bool Full; }
 
 public class Recharge : EcsSystem
 {
-    [ForEach(Simd = SimdMode.Require)]   // "Math.Clamp is not supported"
-    static void Fill(ref Charge charge) => charge.Value = Math.Clamp(charge.Value + 0.1f, 0f, 1f);
+    [ForEach(Simd = SimdMode.Require)]   // "field Charge.Full is a bool, not a lane type (...)"
+    static void Fill(ref Charge charge)
+    {
+        if (charge.Full) return;
+        charge.Value = Math.Clamp(charge.Value + 0.1f, 0f, 1f);
+    }
 }
 ```
 
 ```csharp tab="Fixed"
 public struct Charge : IComponent { public float Value; }
+public struct Full : IComponent;   // a tag: the full batteries are a set of entities, not a flag
 
 public class Recharge : EcsSystem
 {
-    [ForEach(Simd = SimdMode.Require)]
-    static void Fill(ref Charge charge) => charge.Value = MathF.Min(MathF.Max(charge.Value + 0.1f, 0f), 1f);
+    [ForEach(Simd = SimdMode.Require), Without<Full>]
+    static void Fill(ref Charge charge) => charge.Value = Math.Clamp(charge.Value + 0.1f, 0f, 1f);
 }
 ```
 
 Change what the message names, or set `SimdMode.Auto` (the default) to accept the loop of one row at a time.
-
-{/* TODO(vector loops): when Math.Clamp, MathF.* and lerp get vector forms, replace this example's reason with one
-that still holds. */}
 
 ## EECS057 [#eecs057]
 
@@ -2211,6 +2201,198 @@ public class PressureSystem : EcsSystem
         for (int x = 0; x < 16; x++)
             into[x] = new NextPressure(p[x, 0, 0].Value - (v[x + 1, 0, 0].Value - v[x - 1, 0, 0].Value) * 0.5f);
     }
+}
+```
+
+## EECS080 [#eecs080]
+
+**A one-entity job written by hand.** Suggestion (Info). Code fix: writes it as a `[ForEntity]` method and changes
+each call.
+
+A struct implementing `IForEachEntity<T1..Tn>`, created and handed to `entity.Run` right away, is what
+[`[ForEntity]`](/en/docs/guide/queries#run-on-one-entity) generates from a static method: its `ref` parameters make the
+`WriteMask`, its filter attributes the `QueryFilter`, its other parameters the values the entry point takes, and
+`INoStructuralChanges` follows from what the method calls. The rule reports the struct when every use of it is such a
+call: `var job = new J { ... };` followed by `entity.Run<.., J>(ref job)`, with no filter or with one held in a
+`static readonly` field. A job whose fields are read after the call (a result), that other code creates, or whose
+`WriteMask` is not what its parameters say is left alone.
+
+```csharp tab="Reported" doccheck=expect-EECS080
+public struct TakeHit : IForEachEntity<Health>, INoStructuralChanges
+{
+    public int Damage;
+
+    public static int WriteMask => 1;
+
+    public void Execute(Entity unit, ref Health hp) => hp.Value -= Damage;
+}
+
+public static class Combat
+{
+    static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>();
+
+    public static bool Hit(Entity unit, int damage)
+    {
+        var hit = new TakeHit { Damage = damage };
+        return unit.Run<Health, TakeHit>(ref hit, Alive);
+    }
+}
+```
+
+```csharp tab="Fixed"
+public static class TakeHit
+{
+    [ForEntity, Without<Dead>]
+    static void Run(ref Health hp, int damage) => hp.Value -= damage;
+}
+
+public static class Combat
+{
+    public static bool Hit(Entity unit, int damage) => TakeHit.Run(unit, damage);
+}
+```
+
+The fix changes every call in the solution and removes the filter field when nothing else reads it. As a suggestion
+it shows in the IDE only.
+
+## EECS081 [#eecs081]
+
+**A `[ForEntity]` method that cannot run on one entity.** Error. Code fix: makes an instance method static.
+
+A `[ForEntity]` method is static: the generator writes an entry point next to it that takes the entity, and no
+instance is there to call it on. It takes components (`in`, `ref`, `Maybe<T>`), singletons, the `Entity`, the `World`
+and the caller's values; what belongs to a pass over many rows (component spans, an `EntitySpan`, a `Reduce<T>`, a
+`Scratch<T>`) has no meaning for one entity, and a method is either a pass (`[ForEach]`) or a run on one entity.
+
+```csharp tab="Reported" doccheck=expect-EECS081
+public static class Healing
+{
+    [ForEntity]
+    static void Heal(Span<Health> health, int amount) { }   // a span: one entity has one Health
+}
+```
+
+```csharp tab="Fixed"
+public static class Healing
+{
+    [ForEntity]
+    static void Heal(ref Health hp, int amount) => hp.Value += amount;   // Healing.Heal(unit, 5)
+}
+```
+
+## EECS082 [#eecs082]
+
+**A system's schedule written as an override.** Error. Code fix: declares it with `[UpdateInterval(n, Phase = p)]`.
+
+A system's cadence is the [`[UpdateInterval(n, Phase = p)]`](/en/docs/guide/systems#update-interval) attribute on its
+class, which the generator writes into its registration; the `UpdateInterval` and `UpdatePhase` properties are gone.
+The fix moves constant overrides onto the attribute, and removes them when they said "every update" (an interval of
+1, phase 0).
+
+```csharp tab="Reported" doccheck=expect-EECS082,expect-CS0115
+public class SaveSystem : EcsSystem
+{
+    public override int UpdateInterval => 60;
+    public override int UpdatePhase => 30;
+}
+```
+
+```csharp tab="Fixed"
+[UpdateInterval(60, Phase = 30)]
+public class SaveSystem : EcsSystem
+{
+}
+```
+
+An override that computes its value has no attribute form: decide the cadence, or update a
+[system group](/en/docs/guide/systems#system-groups) when it is due.
+
+## EECS083 [#eecs083]
+
+**An `[UpdateInterval]` that cannot apply.** Error. No code fix.
+
+`[UpdateInterval(n, Phase = p)]` runs a system on the updates of its group whose count modulo n is p: n is 1 or more,
+p is 0 to n - 1, and the type is an `EcsSystem`. The generator leaves an invalid one out, so the system would run on
+every update.
+
+```csharp tab="Reported" doccheck=expect-EECS083
+[UpdateInterval(10, Phase = 10)]   // phase 0 to 9
+public class Regeneration : EcsSystem
+{
+}
+```
+
+```csharp tab="Fixed"
+[UpdateInterval(10, Phase = 9)]
+public class Regeneration : EcsSystem
+{
+}
+```
+
+## EECS084 [#eecs084]
+
+**A `[ForEach]` method that destroys every entity it visits.** Suggestion (Info). Code fix: `[Consume]`, the final
+`Destroy()` removed (and the `Entity` parameter, when nothing else used it).
+
+A method that handles event or command entities and ends with `entity.Destroy()` on every path is a consuming pass.
+[`[Consume]`](/en/docs/guide/systems#consume) destroys exactly the rows the pass visited when it ends; a method that
+makes no structural change has them destroyed at once (a `DestroyAll` of its filter, whole tables freed at a time)
+instead of one destroy and one hole per row. A destroy behind a condition or after a `return` is left alone.
+
+```csharp tab="Reported" doccheck=expect-EECS084
+public record struct Impact(int Amount, EntityId Target) : IComponent;
+
+public class ApplyImpacts : EcsSystem
+{
+    [ForEach]
+    static void Apply(Entity hit, in Impact impact, World world)
+    {
+        if (world.TryGetEntity(impact.Target, out var target)) target.Get<Health>().Value -= impact.Amount;
+        hit.Destroy();
+    }
+}
+```
+
+```csharp tab="Fixed"
+public record struct Impact(int Amount, EntityId Target) : IComponent;
+
+public class ApplyImpacts : EcsSystem
+{
+    [ForEach, Consume]
+    static void Apply(in Impact impact, World world)
+    {
+        if (world.TryGetEntity(impact.Target, out var target)) target.Get<Health>().Value -= impact.Amount;
+    }
+}
+```
+
+## EECS085 [#eecs085]
+
+**A `[Consume]` that cannot apply.** Error. No code fix.
+
+`[Consume]` destroys the rows a `[ForEach]` pass visited, when the pass ends. A method without `[ForEach]` has no pass,
+and a sliced one (`Slices > 1`) visits part of its rows per run: destroying them moves the rows of the other slices,
+so an event could wait many runs.
+
+```csharp tab="Reported" doccheck=expect-EECS085
+public record struct Damage(int Amount) : IComponent;              // an event entity
+public record struct DamageDealt(long Total) : ISingletonComponent;
+
+public class CountDamage : EcsSystem
+{
+    [ForEach(Slices = 4), Consume]
+    static void Count(in Damage damage, ref DamageDealt dealt) => dealt.Total += damage.Amount;
+}
+```
+
+```csharp tab="Fixed"
+public record struct Damage(int Amount) : IComponent;
+public record struct DamageDealt(long Total) : ISingletonComponent;
+
+public class CountDamage : EcsSystem
+{
+    [ForEach, Consume]
+    static void Count(in Damage damage, ref DamageDealt dealt) => dealt.Total += damage.Amount;
 }
 ```
 

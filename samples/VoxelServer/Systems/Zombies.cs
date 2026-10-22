@@ -8,13 +8,11 @@ namespace VoxelServer;
 // At night, every five seconds, a zombie rises near each player: 24 to 32 blocks away on the larger axis, in a
 // direction the hash picks, on top of the highest block of that column (a dug pit included) and out of the water, as
 // in Minecraft, which spawns no hostile mob closer than 24 blocks. A column whose chunk is not loaded gets none. What
-// a zombie hunts is up to its eyes (ZombieTargetSystem). UpdatePhase = 1: the first spawn of a night is
-// at its first tick.
-[UpdateInGroup<Simulation>]
+// a zombie hunts is up to its eyes (ZombieTargetSystem). Phase = 1: the first spawn of a night is at its first
+// tick.
+[UpdateInGroup<Simulation>, UpdateInterval(Rules.SpawnEvery, Phase = 1)]
 public class NightSpawnSystem : EcsSystem
 {
-    public override int UpdateInterval => Rules.SpawnEvery;
-    public override int UpdatePhase => 1;
 
     [ForEach]
     void Spawn(in Player client, in Position position, in Clock clock, in Prefabs prefabs, ref Stats stats)
@@ -132,11 +130,9 @@ public class ZombieAttackSystem : EcsSystem
 // A zombie under the open sky by day catches fire, as in Minecraft: no block above it and no water at its feet. It
 // looks every Rules.BurnEvery ticks, the cadence of the fire's damage, so a zombie catches fire before it is first
 // hurt, and not at all at night. Burning is in the zombie prefab, so catching fire flips a presence bit.
-[UpdateInGroup<Simulation>]
+[UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
 public class SunlightSystem : EcsSystem
 {
-    public override int UpdateInterval => Rules.BurnEvery;
-
     [ForEach, With<Zombie>]
     void Expose(Entity zombie, in Position position, in Clock clock)
     {
@@ -151,15 +147,13 @@ public class SunlightSystem : EcsSystem
 // #region burn
 // Every Rules.BurnEvery ticks the fire hurts: a batch method over the Health column of the burning zombies, 8 rows per
 // instruction with Vector<int> (4 on Arm; the JIT does not vectorize the loop by itself, and integer lanes give the
-// same result on every machine). The cadence is the system's (UpdateInterval), not a branch per tick: Health is
+// same result on every machine). The cadence is the system's ([UpdateInterval]), not a branch per tick: Health is
 // tracked, and a batch method writing it stamps its whole run, so it is written only on the ticks that hurt and the
 // death systems ([Changed<Health>]) find nothing to do on the others. Putting the fire out is a structural change,
 // which a batch method may not make (its spans point into the table), so it is the next system's job.
-[UpdateInGroup<Simulation>]
+[UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
 public class FireDamageSystem : EcsSystem
 {
-    public override int UpdateInterval => Rules.BurnEvery;
-
     [ForEach, With<Burning>]
     static void Hurt(Span<Health> health)
     {
@@ -172,11 +166,9 @@ public class FireDamageSystem : EcsSystem
 
 // Puts out the fires that burned down, and those of the zombies that walked into water: it visits only the burning,
 // at the fire's own cadence.
-[UpdateInGroup<Simulation>]
+[UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
 public class ExtinguishSystem : EcsSystem
 {
-    public override int UpdateInterval => Rules.BurnEvery;
-
     [ForEach]
     void Out(Entity zombie, in Burning fire, in Position position, in Clock clock)
     {

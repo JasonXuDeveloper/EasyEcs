@@ -158,17 +158,16 @@ public class ExpireSystem : EcsSystem
 
 不是所有逻辑都每个 tick 跑。系统分组就是一种由宿主调用的节奏：标了 `[UpdateInGroup<G>]` 的系统在 `world.Update<G>()` 时执行，
 其余的在 `world.Update()` 时执行。输入一到就读，用一个分组；每隔几个 tick 同步一次状态，用一个分组；定时存盘，再用一个分组。
-分组内部，`UpdateInterval` 让慢系统每 N 次更新跑一次，`UpdatePhase` 把间隔相同的系统错开
-（[`UpdateInterval`](/zh/docs/guide/systems#update-interval) 和 [`UpdatePhase`](/zh/docs/guide/systems#update-interval)）：
+分组内部，[`[UpdateInterval(N, Phase = P)]`](/zh/docs/guide/systems#update-interval) 让慢系统每 N 次更新跑一次，
+相位把间隔相同的系统错开：
 
 ```csharp
 public record struct Census(int Entities) : ISingletonComponent;
 
 // 所在分组每更新 20 次跑一次：每秒 20 个 tick 时就是每秒一次。
+[UpdateInterval(20)]
 public class CensusSystem : EcsSystem
 {
-    public override int UpdateInterval => 20;
-
     protected override void OnUpdate() => World.GetOrAddCensus().Entities = World.EntityCount;
 }
 ```
