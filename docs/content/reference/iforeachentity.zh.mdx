@@ -32,6 +32,14 @@ static virtual bool Merges { get; }
 
 job 在字段里保存部分结果（[`Reduce`](/zh/docs/reference/reduce)；默认 false）：并行遍历保留每个块的 job 副本，按块的顺序把它们合并进调用方的 job（[`IForEachEntity.Merge`](/zh/docs/reference/iforeachentity#merge)）。
 
+### `OptionalWrites` [#optionalwrites]
+
+```csharp
+static virtual ComponentSet OptionalWrites { get; }
+```
+
+job 在自身组件之外写入的被追踪的组件（通过 [`Maybe`](/zh/docs/reference/maybe)；默认没有）：并行遍历打开它们的变更 tick 区块时，与 [`IForEachEntity.WriteMask`](/zh/docs/reference/iforeachentity#writemask) 的组件一起打开，让切开同一区块的块共用它。生成的并行 job 标出它们通过 [`Maybe`](/zh/docs/reference/maybe) 的写入。
+
 ### `SelfStamped` [#selfstamped]
 
 ```csharp
