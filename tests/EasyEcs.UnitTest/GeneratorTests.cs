@@ -26,10 +26,11 @@ public class GeneratorTests
     /// <summary>
     /// Errors and the diagnostics of the correctness rules (EECS002-024). The performance rules (EECS025-033) are left
     /// out: the cases here write the shortest code that shows a rule, which often also costs; <see cref="Costs"/> checks them.
-    /// So is the suggestion to declare a hand-written key with [Key] (EECS067, PartTests): the shared components write keys by hand.
+    /// So are the suggestion to declare a hand-written key with [Key] (EECS067, PartTests) and the formatter a managed type
+    /// lacks (EECS069): the shared components write keys by hand and hold references.
     /// </summary>
     private static async Task<string[]> Diagnose(params string[] sources) =>
-        (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id) && d.Id != "EECS055" && d.Id != "EECS067")
+        (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id) && d.Id != "EECS055" && d.Id is not ("EECS067" or "EECS069"))
             .Select(d => d.Id).Distinct().OrderBy(x => x).ToArray();
 
     /// <summary>The diagnostics of the performance rules (EECS025-034, EECS039, EECS046, EECS052, EECS053), with their properties for the code fixes.</summary>
@@ -41,7 +42,7 @@ public class GeneratorTests
     private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id is "EECS039" or "EECS046" or "EECS052" or "EECS053" or "EECS065";
 
     /// <summary>Every EasyEcs diagnostic but EECS055 (the vector loop's message, asserted by <see cref="ScalarLoopsNameTheirReason"/>).</summary>
-    internal static async Task<Diagnostic[]> All(string source) => (await Analyze([Components, Extra, source])).Where(d => d.Id.StartsWith("EECS") && d.Id != "EECS055" && d.Id != "EECS067" || d.Severity == DiagnosticSeverity.Error).OrderBy(d => d.Location.SourceSpan.Start).ToArray();
+    internal static async Task<Diagnostic[]> All(string source) => (await Analyze([Components, Extra, source])).Where(d => d.Id.StartsWith("EECS") && d.Id != "EECS055" && d.Id is not ("EECS067" or "EECS069") || d.Severity == DiagnosticSeverity.Error).OrderBy(d => d.Location.SourceSpan.Start).ToArray();
 
     internal static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
     {
@@ -897,10 +898,12 @@ public class GeneratorTests
             [GroupBy] public record struct Room(int Id) : IComponent, IGroup { public int Group => Id; }
             [WhenTargetDestroyed(TargetPolicy.Destroy)] public partial record struct Summon([Key] EntityId Owner) : IComponent;
             [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Ally(EntityId Target) : IRelation;
+            [NotSaved] public record struct Link2(object Socket) : IComponent;
+            [NotSaved] public record struct Pool(object Handle) : ISingletonComponent;
             """), out var output, out _);
         var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs")).ToString();
         foreach (var call in new[] { "GroupBy<global::Zone>()", "GroupBy<global::Room>()", "WhenTargetDestroyed<global::Summon>((global::EasyEcs.TargetPolicy)2)",
-                     "RelationWhenTargetDestroyed<global::Ally>((global::EasyEcs.TargetPolicy)1)" })
+                     "RelationWhenTargetDestroyed<global::Ally>((global::EasyEcs.TargetPolicy)1)", "NotSaved<global::Link2>()", "NotSaved<global::Pool>()" })
             Assert.That(source, Does.Contain("global::EasyEcs.SavedTypes." + call + ";"), call);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
     }
@@ -909,13 +912,27 @@ public class GeneratorTests
     [TestCase("[GroupBy] public partial record struct Z([Group] int Id) : ISingletonComponent;")]                             // not a component
     [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public record struct W(int Id) : IComponent;")]                   // no link
     [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public partial record struct W([Key] int Id) : IComponent;")]     // not an EntityId key
+    [TestCase("[NotSaved] public record struct N(object O);")]                                                              // no component
     public async Task AWorldSetupOnATypeItDoesNotFitIsReported(string source)
     {
         Assert.That((await Analyze([source])).Where(d => d.Id.StartsWith("EECS") || d.Severity == DiagnosticSeverity.Error).Select(d => d.Id).Distinct(),
             Is.EqualTo(new[] { "EECS068" }));
         Driver().RunGeneratorsAndUpdateCompilation(Compile(source), out var output, out _);
         var saved = output.SyntaxTrees.SingleOrDefault(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs"))?.ToString() ?? "";
-        Assert.That(saved, Does.Not.Contain("GroupBy<").And.Not.Contain("WhenTargetDestroyed<"));
+        Assert.That(saved, Does.Not.Contain("GroupBy<").And.Not.Contain("WhenTargetDestroyed<").And.Not.Contain("NotSaved<"));
+    }
+
+    [TestCase("public record struct S(object O) : IComponent;", DiagnosticSeverity.Info)]
+    [TestCase("public record struct S(string Name) : ISingletonComponent; public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.Save(o); }", DiagnosticSeverity.Warning)]
+    [TestCase("public record struct S(object O) : IComponent; public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.SaveEntities(o); }", DiagnosticSeverity.Warning)]
+    [TestCase("[NotSaved] public record struct S(object O) : IComponent; public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.Save(o); }", null)]
+    [TestCase("namespace Nino.Core { public sealed class NinoTypeAttribute : System.Attribute; } [Nino.Core.NinoType] public partial record struct S(string Name) : IComponent; public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.Save(o); }", null)]
+    [TestCase("public record struct S(int N) : IComponent; public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.Save(o); }", null)] // unmanaged: raw rows
+    [TestCase("public record struct S(object O); public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.Save(o); }", null)]           // not a component
+    public async Task AManagedTypeASaveCannotWriteIsReported(string source, DiagnosticSeverity? severity)
+    {
+        var found = (await Analyze([source])).Where(d => d.Id == "EECS069").ToArray();
+        Assert.That(found.Select(d => (DiagnosticSeverity?)d.Severity), Is.EqualTo(severity == null ? [] : new[] { severity }));
     }
 
     [Test]
@@ -959,7 +976,7 @@ public class GeneratorTests
     [
         "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "ExtensionMembers", "BufferUses",
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
-        "GroupBy", "TargetPolicies",
+        "GroupBy", "TargetPolicies", "NotSaved",
     ];
 
     // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
@@ -974,7 +991,8 @@ public class GeneratorTests
             "public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void B(ref T t) { } } public class H : G<P>;" +
             "public static class U { static void C(World w) { foreach (var i in w.Query<P>()) i.P.V++; } }" +
             "public partial struct Census : ISingletonComponent { [Sum] public int N; [Min] public float L; }" +
-            "[GroupBy] public partial record struct Zn([Group] int Id) : IComponent; [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Tether(EntityId Target) : IRelation;";
+            "[GroupBy] public partial record struct Zn([Group] int Id) : IComponent; [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Tether(EntityId Target) : IRelation;" +
+            "[NotSaved] public record struct Wire(object O) : IComponent;";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         var edited = code.Contains(before) ? system : other;

@@ -37,6 +37,7 @@ internal static class Symbols
     public const string Relation = "EasyEcs.IRelation";
     public const string GroupByAttribute = "EasyEcs.GroupByAttribute";
     public const string WhenTargetDestroyedAttribute = "EasyEcs.WhenTargetDestroyedAttribute";
+    public const string NotSavedAttribute = "EasyEcs.NotSavedAttribute";
     public const string Cleanup = "EasyEcs.ICleanupComponent";
     public const string EntityId = "EasyEcs.EntityId";
     public const string UpdateBeforeAttribute = "EasyEcs.UpdateBeforeAttribute<TSystem>";
@@ -416,10 +417,13 @@ internal static class Symbols
     /// <summary>
     /// Why <paramref name="type"/> cannot take the world setup <paramref name="attribute"/> declares, or null: [GroupBy]
     /// on a grouped component (<see cref="IsGrouped"/>), [WhenTargetDestroyed] on a relation or a component indexed by
-    /// an <c>EntityId</c> (<see cref="IndexKey"/>). The generator registers only what this accepts; EECS068 reports the rest.
+    /// an <c>EntityId</c> (<see cref="IndexKey"/>), [NotSaved] on a component or a singleton. The generator registers only what this accepts; EECS068 reports the rest.
     /// </summary>
     public static string? SetupProblem(INamedTypeSymbol type, AttributeData attribute)
     {
+        if (Named(attribute.AttributeClass, NotSavedAttribute))
+            return Implements(type, Component) || Implements(type, Singleton) ? null
+                : "is neither a component nor a singleton: [NotSaved] leaves a component or a singleton out of saves";
         if (Named(attribute.AttributeClass, GroupByAttribute))
             return Implements(type, Component) && IsGrouped(type) ? null
                 : "is not a grouped component: [GroupBy] splits tables by IGroup.Group (implement IGroup, or declare the member with [Group])";

@@ -25,7 +25,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS018", "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
-            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067");
+            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -171,6 +171,13 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                         && await Attributed(context.Document, root, type, ops, context.CancellationToken).ConfigureAwait(false) is { } attributed)
                         context.RegisterCodeFix(CodeAction.Create("Declare it with attributes", _ => Task.FromResult(context.Document.WithSyntaxRoot(attributed)),
                             diagnostic.Id + "attributes"), diagnostic);
+                    break;
+                case "EECS069" when node.FirstAncestorOrSelf<TypeDeclarationSyntax>() is { } type:
+                    if (!type.AncestorsAndSelf().OfType<TypeDeclarationSyntax>().Any(t => t.Modifiers.Any(SyntaxKind.FileKeyword))
+                        && await Marked(context.Document, root, type, true, context.CancellationToken).ConfigureAwait(false) is { } nino)
+                        context.RegisterCodeFix(CodeAction.Create("Mark it [NinoType]", _ => Task.FromResult(context.Document.WithSyntaxRoot(nino)), diagnostic.Id + "nino"), diagnostic);
+                    if (await Marked(context.Document, root, type, false, context.CancellationToken).ConfigureAwait(false) is { } notSaved)
+                        context.RegisterCodeFix(CodeAction.Create("Mark it [NotSaved]", _ => Task.FromResult(context.Document.WithSyntaxRoot(notSaved)), diagnostic.Id + "notsaved"), diagnostic);
                     break;
                 case "EECS023" when node.FirstAncestorOrSelf<AttributeSyntax>() is { Parent: AttributeListSyntax list } attribute:
                     Register(context, diagnostic, "Remove the filter", root, list.Attributes.Count == 1 ? list : attribute, null);
@@ -779,18 +786,41 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
             rewritten = rewritten.WithBaseList(bases.WithTypes(types));
         }
 
-        if (onType != null)
-        {
-            // The attribute takes the type's line: its indentation, then the type on the next line, indented the same.
-            var leading = rewritten.GetLeadingTrivia();
-            var indent = leading.Count > 0 && leading.Last().IsKind(SyntaxKind.WhitespaceTrivia) ? leading.Last() : default;
-            var next = indent == default ? SyntaxFactory.TriviaList(EndOfLine(root)) : SyntaxFactory.TriviaList(EndOfLine(root), indent);
-            var withoutLeading = rewritten.WithoutLeadingTrivia();
-            rewritten = withoutLeading.WithAttributeLists(withoutLeading.AttributeLists.Insert(0, List(onType, leading, next)));
-        }
+        if (onType != null) rewritten = WithAttribute(rewritten, imported ? onType : "EasyEcs." + onType, root);
 
         var marked = root.ReplaceNode(type, rewritten.WithAdditionalAnnotations(Marker));
         return Partial(marked, marked.GetAnnotatedNodes(Marker).OfType<TypeDeclarationSyntax>().Single());
+    }
+
+    /// <summary>
+    /// <paramref name="type"/> with attribute <paramref name="attribute"/> (as written) first: on the type's line, its
+    /// indentation kept, the type on the next line indented the same.
+    /// </summary>
+    private static TypeDeclarationSyntax WithAttribute(TypeDeclarationSyntax type, string attribute, SyntaxNode root)
+    {
+        var leading = type.GetLeadingTrivia();
+        var indent = leading.Count > 0 && leading.Last().IsKind(SyntaxKind.WhitespaceTrivia) ? leading.Last() : default;
+        var next = indent == default ? SyntaxFactory.TriviaList(EndOfLine(root)) : SyntaxFactory.TriviaList(EndOfLine(root), indent);
+        var list = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Attribute(SyntaxFactory.ParseName(attribute))))
+            .WithLeadingTrivia(leading).WithTrailingTrivia(next);
+        var withoutLeading = type.WithoutLeadingTrivia();
+        return withoutLeading.WithAttributeLists(withoutLeading.AttributeLists.Insert(0, list));
+    }
+
+    /// <summary>
+    /// EECS069: <paramref name="type"/> marked <c>[NinoType]</c> and partial along its chain (the Nino generator writes
+    /// its formatter into a part), or <c>[NotSaved]</c>; each named as the file's usings allow.
+    /// </summary>
+    private static async Task<SyntaxNode?> Marked(Document document, SyntaxNode root, TypeDeclarationSyntax type, bool nino, CancellationToken token)
+    {
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        if (model == null) return null;
+        string name = nino ? "NinoType" : "NotSaved", ns = nino ? "Nino.Core" : "EasyEcs";
+        bool imported = model.LookupNamespacesAndTypes(type.SpanStart, name: name + "Attribute").Any(s => s.ToDisplayString() == ns + "." + name + "Attribute");
+        var marked = WithAttribute(type, imported ? name : ns + "." + name, root);
+        if (!nino) return root.ReplaceNode(type, marked);
+        var withMark = root.ReplaceNode(type, marked.WithAdditionalAnnotations(Marker));
+        return Partial(withMark, withMark.GetAnnotatedNodes(Marker).OfType<TypeDeclarationSyntax>().Single());
     }
 
     private static readonly SyntaxAnnotation Marker = new("EasyEcs.Part");

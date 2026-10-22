@@ -117,6 +117,10 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 static (node, _) => node is TypeDeclarationSyntax,
                 static (ctx, _) => Setup(ctx.TargetSymbol, ctx.SemanticModel.Compilation, ctx.Attributes[0]))
             .Where(static t => t is not null).Select(static (t, _) => t!).WithTrackingName("TargetPolicies");
+        var notSaved = context.SyntaxProvider.ForAttributeWithMetadataName(Symbols.NotSavedAttribute,
+                static (node, _) => node is TypeDeclarationSyntax,
+                static (ctx, _) => Setup(ctx.TargetSymbol, ctx.SemanticModel.Compilation, ctx.Attributes[0]))
+            .Where(static t => t is not null).Select(static (t, _) => t!).WithTrackingName("NotSaved");
         var buffers = bufferUses
             .Where(static b => b.Saved is not null)
             .Select(static (b, _) => b.Saved!)
@@ -130,7 +134,8 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             .Select(static (pair, _) => pair.Left && pair.Right)
             .WithTrackingName("ModuleInitializers");
         // Only the module initializer reaches it: implementation output.
-        var setups = groupBy.Collect().Combine(targetPolicies.Collect()).Select(static (pair, _) => pair.Left.AddRange(pair.Right));
+        var setups = groupBy.Collect().Combine(targetPolicies.Collect()).Select(static (pair, _) => pair.Left.AddRange(pair.Right))
+            .Combine(notSaved.Collect()).Select(static (pair, _) => pair.Left.AddRange(pair.Right));
         context.RegisterImplementationSourceOutput(saved.Collect().Combine(buffers.Collect()).Combine(setups).Combine(initializers), static (spc, pair) =>
         {
             var types = pair.Left.Left.Left.Concat(pair.Left.Left.Right).Concat(pair.Left.Right).Distinct().OrderBy(static t => t.Call, System.StringComparer.Ordinal).ToArray();
@@ -168,7 +173,8 @@ public sealed class ComponentGenerator : IIncrementalGenerator
 
     /// <summary>
     /// The registration of the world setup <paramref name="attribute"/> declares on <paramref name="symbol"/>
-    /// (<c>GroupBy&lt;T&gt;()</c>, <c>WhenTargetDestroyed&lt;T&gt;(policy)</c>, <c>RelationWhenTargetDestroyed&lt;T&gt;(policy)</c>),
+    /// (<c>GroupBy&lt;T&gt;()</c>, <c>WhenTargetDestroyed&lt;T&gt;(policy)</c>, <c>RelationWhenTargetDestroyed&lt;T&gt;(policy)</c>,
+    /// <c>NotSaved&lt;T&gt;()</c>),
     /// or null when the type cannot take it (EECS068 reports it) or the module initializer cannot name it.
     /// </summary>
     private static SavedType? Setup(ISymbol symbol, Compilation compilation, AttributeData attribute)
@@ -180,6 +186,8 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         string name = type.ToDisplayString(Symbols.Fqn);
         if (Symbols.Named(attribute.AttributeClass, Symbols.GroupByAttribute))
             return new SavedType($"GroupBy<{name}>()", name, new EquatableArray<string>([]), "");
+        if (Symbols.Named(attribute.AttributeClass, Symbols.NotSavedAttribute))
+            return new SavedType($"NotSaved<{name}>()", name, new EquatableArray<string>([]), "");
         string policy = $"(global::EasyEcs.TargetPolicy){attribute.ConstructorArguments[0].Value}";
         return new SavedType($"{(Symbols.Implements(type, Symbols.Relation) ? "RelationWhenTargetDestroyed" : "WhenTargetDestroyed")}<{name}>({policy})",
             name, new EquatableArray<string>([]), "");

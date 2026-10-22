@@ -116,6 +116,9 @@ internal abstract class ComponentInfo
     /// <summary>The setup every world gives the type (<see cref="TypeDefaults"/>), or null. Cold: read once per new table.</summary>
     public virtual TypeDefaults Defaults => null;
 
+    /// <summary>Whether the type is [NotSaved]: saves leave its column out (<see cref="SavedTypes.NotSaved{T}"/>). Cold: once per column per save.</summary>
+    public virtual bool NotSaved => false;
+
     /// <summary>Whether the type holds managed references (cleared when its row dies, copied by type).</summary>
     public bool Managed => Size < 0;
 
@@ -299,6 +302,8 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
     where T : struct, IComponent
 {
     public override TypeDefaults Defaults => TypeDefaults<T>.Value;
+
+    public override bool NotSaved => NotSavedOf<T>.Value;
 
     public override World.IValueIndex CreateUniqueIndex(World world) =>
         UniqueIndexOf<T>.Create is { } create ? create(world) : throw new InvalidOperationException(

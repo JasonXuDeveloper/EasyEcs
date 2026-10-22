@@ -35,8 +35,63 @@ public record struct Cache(object Handle) : ISingletonComponent;     // no forma
 public record struct Balance(int Gold) : IComponent, ITracked;
 public record struct Session(object Socket) : IComponent;             // runtime only, no formatter
 
+// Runtime state declared once on the type: no save writes it, so neither needs a formatter.
+[NotSaved]
+public record struct Socket(object Handle) : IComponent;
+[NotSaved]
+public record struct Connections(object Pool) : ISingletonComponent;
+
 public class SerializationTests
 {
+    [Test]
+    public void NotSavedTypesAreLeftOutOfEverySaveAndALoadKeepsTheWorldsOwn()
+    {
+        byte[] bytes, some;
+        var pool = new object();
+        using (var world = new World())
+        {
+            world.AddSingleton<Connections>() = new Connections(new object());
+            world.AddSingleton<Config>() = new Config { Rate = 4 };
+            var a = world.CreateEntity(new Balance(3), new Socket(new object()));
+            world.CreateEntity(new Socket(new object()));
+            a.Disable<Socket>();                                                // a Disabled<Socket> goes with Socket
+            bytes = Save(world);                                                // no formatter needed: never written
+            var output = new NinoArrayBufferWriter();
+            world.SaveEntitiesWith(output, [a.Id], ComponentSet.Create().With<Balance>().With<Socket>()); // named, still left out
+            some = output.WrittenSpan.ToArray();
+            var without = new NinoArrayBufferWriter();
+            world.SaveWithout(without, ComponentSet.Create().WithSingleton<Config>());
+            Assert.That(without.WrittenCount, Is.GreaterThan(0));
+        }
+
+        using var loaded = new World();
+        loaded.AddSingleton<Connections>() = new Connections(pool);
+        loaded.Load(bytes);
+        Assert.That((loaded.EntityCount, loaded.Count<Balance>(), loaded.Count<Socket>(), loaded.GetSingleton<Config>().Rate), Is.EqualTo((2, 1, 0, 4)));
+        Assert.That(loaded.GetSingleton<Connections>().Pool, Is.SameAs(pool));    // the world's own, kept
+        using var bare = new World();
+        bare.Load(bytes);
+        Assert.That(bare.HasSingleton<Connections>(), Is.False);
+
+        using var moved = new World();
+        Assert.That(moved.LoadEntities(some), Is.EqualTo(1));
+        Assert.That((moved.Count<Balance>(), moved.Count<Socket>()), Is.EqualTo((1, 0)));
+    }
+
+    [Test]
+    public void SnapshotsCopyNotSavedTypesAsAnyOther()
+    {
+        using var world = new World();
+        var handle = new object();
+        world.AddSingleton<Connections>() = new Connections(handle);
+        var e = world.CreateEntity(new Socket(handle));
+        var snapshot = world.Capture();
+        e.Destroy();
+        world.SetConnections(null);
+        world.Restore(snapshot);
+        Assert.That((world.Count<Socket>(), world.GetSingleton<Connections>().Pool), Is.EqualTo((1, handle)));
+    }
+
     private static byte[] Save(World world)
     {
         var output = new NinoArrayBufferWriter();

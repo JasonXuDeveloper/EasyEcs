@@ -233,7 +233,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
         UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScalarLoop, NoVectorLoop,
         SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, NotPartial, HandWrittenReduction, BadReductionField, FieldWiseReduction,
-        WrongIdentity, AttributeKey, BadSetup);
+        WrongIdentity, AttributeKey, BadSetup, NoFormatter);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -258,6 +258,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterOperationAction(AnalyzeIndexedRef, OperationKind.Invocation, OperationKind.VariableDeclarator);
         context.RegisterOperationAction(AnalyzeSystemLookup, OperationKind.Invocation);
         context.RegisterCompilationStartAction(AnalyzeOrderings);
+        context.RegisterCompilationStartAction(AnalyzeFormatters);
         InitializePerformance(context);
         InitializeUsage(context);
         InitializeParallel(context);

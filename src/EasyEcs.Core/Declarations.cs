@@ -102,3 +102,13 @@ public sealed class WhenTargetDestroyedAttribute(TargetPolicy policy) : Attribut
 /// </summary>
 [AttributeUsage(AttributeTargets.Struct)]
 public sealed class GroupByAttribute : Attribute;
+
+/// <summary>
+/// A component or singleton no save holds: runtime state (a connection, a cache, a handle to a service) that a
+/// restart rebuilds. Every save leaves it out (<see cref="World.Save(System.Buffers.IBufferWriter{byte})"/>,
+/// <see cref="World.SaveWithout"/>, the saves of entities, even a set that names it), so it needs no Nino formatter,
+/// and a load keeps the world's own value of a singleton (as <see cref="World.LoadKeeping"/> does). Snapshots
+/// (<see cref="World.Capture()"/>) and moves between worlds (<see cref="World.MoveEntities"/>) copy it as any other.
+/// </summary>
+[AttributeUsage(AttributeTargets.Struct)]
+public sealed class NotSavedAttribute : Attribute;

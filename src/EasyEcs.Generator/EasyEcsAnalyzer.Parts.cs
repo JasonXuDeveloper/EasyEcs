@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -71,8 +72,17 @@ public sealed partial class EasyEcsAnalyzer
         Category, DiagnosticSeverity.Error, true,
         "[GroupBy] makes every world group its tables by a grouped component (IGroup, or a member declared with [Group]); " +
         "[WhenTargetDestroyed] sets what destroying an entity does to the links to it, so it goes on a relation " +
-        "(IRelation) or a component indexed by an EntityId. On any other type no world would apply it.",
+        "(IRelation) or a component indexed by an EntityId; [NotSaved] leaves a component or a singleton out of saves. " +
+        "On any other type no world would apply it.",
         helpLinkUri: Help("EECS068"));
+
+    public static readonly DiagnosticDescriptor NoFormatter = new("EECS069", "A managed component or singleton without a Nino formatter",
+        "'{0}' holds references and has no Nino formatter, so a save that holds it throws: mark it [NinoType] (and partial) for Nino to write it, or [NotSaved] for saves to leave it out",
+        Category, DiagnosticSeverity.Info, true,
+        "A save writes unmanaged components as raw rows and every other component and singleton with Nino, which needs " +
+        "the formatter [NinoType] generates. Runtime state that a restart rebuilds (a connection, a cache) is [NotSaved] " +
+        "instead. A warning when the compilation saves (Save, SaveWithout, SaveEntities), a suggestion otherwise.",
+        helpLinkUri: Help("EECS069"), customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     // EECS065 / EECS066's properties for their code fixes: the attribute of each field (name=Op;...), and the Identity
     // that fits the Combine.
@@ -154,12 +164,46 @@ public sealed partial class EasyEcsAnalyzer
             member == "this" ? "the value itself" : $"'{member}'", attribute, member == "this" ? "the type" : $"'{member}'"));
     }
 
+    /// <summary>
+    /// EECS069: the managed components and singletons of the compilation with neither [NinoType] nor [NotSaved], reported
+    /// when it ends: a warning if some code saves a world (a call of World.Save, SaveWithout or SaveEntities), else a
+    /// suggestion.
+    /// </summary>
+    private static void AnalyzeFormatters(CompilationStartAnalysisContext start)
+    {
+        if (start.Compilation.GetTypeByMetadataName(Symbols.World) is not { } world) return;
+        var unwritten = new System.Collections.Concurrent.ConcurrentQueue<INamedTypeSymbol>();
+        int saves = 0;
+        start.RegisterSymbolAction(context =>
+        {
+            var type = (INamedTypeSymbol)context.Symbol;
+            if (type is { TypeKind: TypeKind.Struct, IsUnmanagedType: false } && type.Locations.Any(l => l.IsInSource)
+                && !Symbols.Named(type.OriginalDefinition, Symbols.DynamicBuffer) // its elements are written one by one
+                && (Symbols.Implements(type, Symbols.Component) || Symbols.Implements(type, Symbols.Singleton))
+                && !type.GetAttributes().Any(a => a.AttributeClass is { Name: "NinoTypeAttribute" } || Symbols.Named(a.AttributeClass, Symbols.NotSavedAttribute)))
+                unwritten.Enqueue(type);
+        }, SymbolKind.NamedType);
+        start.RegisterOperationAction(context =>
+        {
+            if (Volatile.Read(ref saves) == 0 && ((IInvocationOperation)context.Operation).TargetMethod is { Name: "Save" or "SaveWithout" or "SaveEntities" or "SaveEntitiesWith" or "SaveEntitiesWithout" } method
+                && SymbolEqualityComparer.Default.Equals(method.ContainingType, world))
+                Interlocked.Exchange(ref saves, 1);
+        }, OperationKind.Invocation);
+        start.RegisterCompilationEndAction(context =>
+        {
+            var severity = saves != 0 ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info;
+            foreach (var type in unwritten)
+                context.ReportDiagnostic(Diagnostic.Create(NoFormatter, type.Locations.First(l => l.IsInSource), severity, null, null, type.Name));
+        });
+    }
+
     /// <summary>EECS068: [GroupBy] / [WhenTargetDestroyed] on a type that cannot take it (<see cref="Symbols.SetupProblem"/>).</summary>
     private static void AnalyzeSetup(SymbolAnalysisContext context, INamedTypeSymbol type)
     {
         foreach (var attribute in type.GetAttributes())
         {
             if (!Symbols.Named(attribute.AttributeClass, Symbols.GroupByAttribute) && !Symbols.Named(attribute.AttributeClass, Symbols.WhenTargetDestroyedAttribute)
+                && !Symbols.Named(attribute.AttributeClass, Symbols.NotSavedAttribute)
                 || Symbols.SetupProblem(type, attribute) is not { } problem)
                 continue;
             var location = attribute.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken).GetLocation() ?? type.Locations.FirstOrDefault();

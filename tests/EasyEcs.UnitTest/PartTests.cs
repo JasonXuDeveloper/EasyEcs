@@ -41,7 +41,7 @@ public class PartTests
         output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()).ToArray();
 
     private static async Task<string[]> Ids(string source) =>
-        (await GeneratorTests.Analyze([source])).Where(d => d.Id.StartsWith("EECS") || d.Severity == DiagnosticSeverity.Error)
+        (await GeneratorTests.Analyze([source])).Where(d => d.Id.StartsWith("EECS") && d.Id != "EECS069" || d.Severity == DiagnosticSeverity.Error)
         .Select(d => d.Id).Distinct().OrderBy(x => x).ToArray();
 
     [TestCase("public partial struct Census : ISingletonComponent { [Sum] public int Alive; }",

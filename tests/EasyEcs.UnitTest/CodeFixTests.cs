@@ -303,10 +303,16 @@ public class CodeFixTests
     [TestCase("EECS043", "Declare it with [Key]",
         "public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; }",
         "[Key]\npublic readonly partial record struct Shop(long Id) : IComponent { }")]
+    [TestCase("EECS069", "Mark it [NinoType]",
+        "namespace Nino.Core { public sealed class NinoTypeAttribute : System.Attribute; }\npublic struct Name : IComponent { public string Text; }", // Nino's attribute, as its package declares it
+        "[Nino.Core.NinoType]\npublic partial struct Name : IComponent { public string Text; }")]
+    [TestCase("EECS069", "Mark it [NotSaved]",
+        "namespace N\n{\n    public record struct Wire(object Socket) : IComponent;\n}",
+        "namespace N\n{\n    [NotSaved]\n    public record struct Wire(object Socket) : IComponent;\n}")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
-        var diagnostic = (await Analyze(document)).First(d => d.Id == id);
+        var diagnostic = (await Analyze(document)).First(d => d.Id == id && d.Location.SourceSpan.Start >= Data.Length); // not one of Data's
 
         var actions = new List<CodeAction>();
         var context = new CodeFixContext(document, diagnostic, (action, _) => actions.Add(action), CancellationToken.None);
@@ -318,7 +324,7 @@ public class CodeFixTests
         var fixedDocument = operation.ChangedSolution.GetDocument(document.Id)!;
         var text = (await fixedDocument.GetTextAsync()).ToString();
         Assert.That(text, Does.Contain(expected));
-        Assert.That((await Analyze(fixedDocument)).Where(d => d.Id == id), Is.Empty, text);
+        Assert.That((await Analyze(fixedDocument)).Where(d => d.Id == id && d.Location.SourceSpan.Start >= Data.Length), Is.Empty, text);
         var errors = (await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error);
         Assert.That(errors, Is.Empty, text);
     }

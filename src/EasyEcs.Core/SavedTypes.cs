@@ -62,6 +62,13 @@ public static class SavedTypes
     }
 
     /// <summary>
+    /// [NotSaved] on component or singleton <typeparamref name="T"/>: no save writes it (<see cref="World.Save(System.Buffers.IBufferWriter{byte})"/>,
+    /// <see cref="World.SaveWithout"/>, <see cref="World.SaveEntities"/>, even with a set that names it), and a load
+    /// keeps the world's own singleton of it.
+    /// </summary>
+    public static void NotSaved<T>() where T : struct => NotSavedOf<T>.Value = true;
+
+    /// <summary>
     /// [GroupBy] on <typeparamref name="T"/>: every world groups its tables by it (<see cref="World.GroupBy{T}"/>) from
     /// its first table holding it, unless the world called GroupBy first.
     /// </summary>
