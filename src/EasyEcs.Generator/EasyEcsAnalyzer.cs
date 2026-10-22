@@ -174,6 +174,15 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "more sets it (rounded up to 64). A method without Parallel = true runs on one thread and has no chunks: set " +
         "Parallel = true or drop ChunkRows.", helpLinkUri: Help("EECS054"));
 
+    public static readonly DiagnosticDescriptor NoVectorLoop = new("EECS056", "A required vector loop that the method does not qualify for",
+        "[ForEach(Simd = SimdMode.Require)] method '{0}' gets no vector loop: {1}",
+        Category, DiagnosticSeverity.Error, true,
+        "SimdMode.Require asks for the method's Vector<T> loop. A method qualifies when it is static, runs on one thread, " +
+        "makes no structural change, takes components of one lane field each (all of one type: float, double, int, uint, " +
+        "long or ulong), singletons and values, and computes with arithmetic, comparisons, branches and Math functions " +
+        "that have an exact vector counterpart. Change what the message names, or set SimdMode.Auto to accept the loop " +
+        "of one row at a time.", helpLinkUri: Help("EECS056"));
+
     public static readonly DiagnosticDescriptor BadIndexKey = new("EECS036", "A component that cannot be indexed by its key",
         "'{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
@@ -196,7 +205,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
-        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows);
+        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, ScalarLoop, NoVectorLoop);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -206,6 +215,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterSyntaxNodeAction(AnalyzeSchedule, SyntaxKind.PropertyDeclaration);
         context.RegisterSymbolAction(AnalyzeMethod, SymbolKind.Method);
         context.RegisterSyntaxNodeAction(AnalyzeParallel, SyntaxKind.MethodDeclaration);
+        context.RegisterSyntaxNodeAction(AnalyzeVectorLoop, SyntaxKind.MethodDeclaration);
         context.RegisterSyntaxNodeAction(AnalyzeLocalFunction, SyntaxKind.LocalFunctionStatement);
         context.RegisterSyntaxNodeAction(AnalyzeBufferOfEntities, SyntaxKind.GenericName);
         context.RegisterSymbolAction(AnalyzeBufferHolder, SymbolKind.Field, SymbolKind.Property, SymbolKind.Method);

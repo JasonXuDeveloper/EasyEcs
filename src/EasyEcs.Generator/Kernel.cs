@@ -47,40 +47,116 @@ internal sealed class Kernel
         _vec = $"{V}<{_e}>";
     }
 
-    private sealed class Unsupported : System.Exception;
+    /// <summary>Why the method runs one row at a time: the first construct the vector loop cannot express.</summary>
+    private sealed class Unsupported(string reason) : System.Exception(reason)
+    {
+        public string Reason { get; } = reason;
+    }
 
     /// <summary>
-    /// The vector loop of <paramref name="method"/>, or null when it does not qualify (it then runs as written).
-    /// <paramref name="fieldOf"/> names the job field holding parameter i (a singleton's <c>s{i}</c>, a context
-    /// value's <c>x{i}</c>).
+    /// The vector loop of a [ForEach] method, or null with the reason it runs one row at a time
+    /// (<paramref name="reason"/>: "component Position has 3 fields"). The one test of what qualifies: the generator
+    /// emits the loop it returns, and the analyzer reports the reason (EECS055, EECS056), so a method the generator
+    /// leaves scalar is exactly a method reported. <paramref name="fieldOf"/> names the job field holding parameter i
+    /// (a singleton's <c>s{i}</c>, a context value's <c>x{i}</c>).
     /// </summary>
-    public static Code? Translate(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
+    public static Code? Vectorize(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
+        System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct, out string? reason)
+    {
+        reason = Symbols.Simd(method) == Symbols.SimdOff ? "Simd = SimdMode.Off"
+            : !method.IsStatic ? "it is not static"
+            : Symbols.IsParallel(method) ? "it runs in parallel (Parallel = true), and parallel jobs have no vector loop"
+            : !Symbols.IsStable(method, syntax, model) ? "it can make structural changes"
+            : null;
+        if (reason != null) return null;
+        try
+        {
+            return Translate(method, syntax, model, fieldOf, ct);
+        }
+        catch (Unsupported unsupported)
+        {
+            reason = unsupported.Reason;
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether a method <see cref="Vectorize"/> leaves scalar looks meant for a vector loop, so EECS055 names the reason:
+    /// it is static, runs on one thread, takes only components (by <c>ref</c> or <c>in</c>), singletons and values (no
+    /// Entity, World, span, Maybe or Mut), and each component is a struct of lane-type fields only (float, double,
+    /// int, uint, long, ulong). The reason is then about its components or its body.
+    /// </summary>
+    public static bool LooksEligible(IMethodSymbol method)
+    {
+        if (!method.IsStatic || Symbols.IsParallel(method)) return false;
+        bool outside = Symbols.IsRunner(method), any = false;
+        foreach (var p in method.Parameters)
+            switch (Symbols.Classify(p, outside))
+            {
+                case Symbols.ParamKind.Component:
+                    var fields = p.Type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray();
+                    if (fields.Length == 0 || fields.Any(f => !IsLaneType(f.Type))) return false;
+                    any = true;
+                    break;
+                case Symbols.ParamKind.Singleton or Symbols.ParamKind.Context:
+                    break;
+                default:
+                    return false;
+            }
+        return any;
+    }
+
+    private static bool IsLaneType(ITypeSymbol type) => type.SpecialType is SpecialType.System_Single or SpecialType.System_Double
+        or SpecialType.System_Int32 or SpecialType.System_UInt32 or SpecialType.System_Int64 or SpecialType.System_UInt64;
+
+    private static Code Translate(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
         System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct)
     {
-        if (!method.ReturnsVoid || method.IsGenericMethod || !method.IsStatic) return null;
+        if (!method.ReturnsVoid) throw new Unsupported("it returns a value");
+        if (method.IsGenericMethod) throw new Unsupported("it is generic");
         (syntax, model) = Symbols.WithBody(method, syntax, model);
         ITypeSymbol? element = null;
         var components = new List<(IParameterSymbol, IFieldSymbol)>();
+        bool outside = Symbols.IsRunner(method);
         foreach (var p in method.Parameters)
         {
-            var kind = Symbols.Classify(p, Symbols.IsRunner(method));
-            if (kind == Symbols.ParamKind.Component)
+            var kind = Symbols.Classify(p, outside);
+            switch (kind)
             {
-                if (Lane(p.Type) is not { } field) return null;
-                if (element != null && !SymbolEqualityComparer.Default.Equals(element, field.Type)) return null;
-                element = field.Type;
-                components.Add((p, field));
+                case Symbols.ParamKind.Component:
+                    var field = Lane(p.Type);
+                    if (element != null && !SymbolEqualityComparer.Default.Equals(element, field.Type))
+                        throw new Unsupported($"lane types {element.ToDisplayString()} and {field.Type.ToDisplayString()} differ");
+                    element = field.Type;
+                    components.Add((p, field));
+                    break;
+                case Symbols.ParamKind.Singleton:
+                    break;
+                case Symbols.ParamKind.Context when p.RefKind == RefKind.Ref:
+                    throw new Unsupported($"it takes '{p.Name}' by ref, and a vector loop has no reductions");
+                case Symbols.ParamKind.Context:
+                    break;
+                default:
+                    throw new Unsupported(kind switch
+                    {
+                        Symbols.ParamKind.Entity => "it takes the Entity",
+                        Symbols.ParamKind.Entities => "it takes the EntitySpan",
+                        Symbols.ParamKind.World => "it takes the World",
+                        Symbols.ParamKind.ComponentSpan => "it takes spans: a batch method writes its own loop",
+                        Symbols.ParamKind.Optional => $"it takes a Maybe<{Symbols.MaybeElement(p.Type)?.Name}>",
+                        Symbols.ParamKind.Mutable => $"it takes a Mut<{Symbols.MutElement(p.Type)?.Name}>",
+                        _ => $"parameter '{p.Name}' is not a component, a singleton or a value",
+                    });
             }
-            else if (kind is not (Symbols.ParamKind.Singleton or Symbols.ParamKind.Context) || p.RefKind == RefKind.Ref && kind == Symbols.ParamKind.Context)
-                return null; // a ref context value is a reduction: not yet
         }
-        if (element == null || model.GetOperation(syntax, ct) is not IMethodBodyOperation body) return null;
+        if (element == null) throw new Unsupported("it takes no component");
+        if (model.GetOperation(syntax, ct) is not IMethodBodyOperation body) throw new Unsupported("it has no body");
 
         var kernel = new Kernel(element);
         for (int i = 0, k = 0; i < method.Parameters.Length; i++)
         {
             var p = method.Parameters[i];
-            var kind = Symbols.Classify(p, Symbols.IsRunner(method));
+            var kind = Symbols.Classify(p, outside);
             if (kind == Symbols.ParamKind.Component)
             {
                 var (_, field) = components[k];
@@ -95,35 +171,30 @@ internal sealed class Kernel
                 : $"ref readonly {p.Type.ToDisplayString(Symbols.Fqn)} {name} = ref {source};\n");
         }
 
-        try
-        {
-            foreach (var c in kernel._components.Values.OrderBy(c => c.Index))
-                kernel._body.Append($"var __c{c.Index} = {V}.LoadUnsafe(ref e{c.Index}, (nuint)i);\n");
-            kernel.Statement((IOperation?)body.BlockBody ?? body.ExpressionBody!, null);
-            foreach (int c in kernel._written.OrderBy(c => c))
-                kernel._body.Append($"{V}.StoreUnsafe(__c{c}, ref e{c}, (nuint)i);\n");
-        }
-        catch (Unsupported)
-        {
-            return null;
-        }
-
+        foreach (var c in kernel._components.Values.OrderBy(c => c.Index))
+            kernel._body.Append($"var __c{c.Index} = {V}.LoadUnsafe(ref e{c.Index}, (nuint)i);\n");
+        kernel.Statement((IOperation?)body.BlockBody ?? body.ExpressionBody!, null);
+        foreach (int c in kernel._written.OrderBy(c => c))
+            kernel._body.Append($"{V}.StoreUnsafe(__c{c}, ref e{c}, (nuint)i);\n");
         return new Code(kernel._e, kernel._setup.ToString(), kernel._body.ToString());
     }
 
     /// <summary>
     /// The one field of a component holding one primitive lane value with C# arithmetic of its own type (no promotion
-    /// to int), laid out without padding; null otherwise.
+    /// to int), laid out without padding; otherwise the reason it is no lane.
     /// </summary>
-    private static IFieldSymbol? Lane(ITypeSymbol type)
+    private static IFieldSymbol Lane(ITypeSymbol type)
     {
-        if (type is not INamedTypeSymbol { TypeKind: TypeKind.Struct, IsGenericType: false } named
-            || named.GetAttributes().Any(a => a.AttributeClass?.Name == "StructLayoutAttribute"))
-            return null;
+        if (type is not INamedTypeSymbol { TypeKind: TypeKind.Struct } named) throw new Unsupported($"component {type.Name} is not a struct");
+        if (named.IsGenericType) throw new Unsupported($"component {type.Name} is generic");
+        if (named.GetAttributes().Any(a => a.AttributeClass?.Name == "StructLayoutAttribute"))
+            throw new Unsupported($"component {type.Name} sets its layout ([StructLayout])");
         var fields = named.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray();
-        return fields.Length == 1 && fields[0] is { IsFixedSizeBuffer: false, Type.SpecialType: SpecialType.System_Single or SpecialType.System_Double
-            or SpecialType.System_Int32 or SpecialType.System_UInt32 or SpecialType.System_Int64 or SpecialType.System_UInt64 } field
-            ? field : null;
+        if (fields.Length != 1) throw new Unsupported($"component {type.Name} has {fields.Length} fields");
+        var field = fields[0];
+        if (field.IsFixedSizeBuffer || !IsLaneType(field.Type))
+            throw new Unsupported($"field {type.Name}.{field.AssociatedSymbol?.Name ?? field.Name} is a {field.Type.ToDisplayString()}, not a lane type (float, double, int, uint, long or ulong)");
+        return field;
     }
 
     private bool IsFloat => _element.SpecialType is SpecialType.System_Single or SpecialType.System_Double;
@@ -153,7 +224,9 @@ internal sealed class Kernel
                 {
                     var local = declarator.Symbol;
                     var init = declarator.GetVariableInitializer()?.Value ?? declaration.Initializer?.Value;
-                    if (local.IsRef || init == null || !IsLane(local.Type) && !IsBool(local.Type)) throw new Unsupported();
+                    if (local.IsRef) throw new Unsupported($"ref local '{local.Name}' is not supported");
+                    if (init == null) throw new Unsupported($"local '{local.Name}' has no initializer");
+                    if (!IsLane(local.Type) && !IsBool(local.Type)) throw new Unsupported($"local '{local.Name}' is a {local.Type.ToDisplayString()}, not the lane type {_element.ToDisplayString()}");
                     string name = Temp("l");
                     _locals[local] = name;
                     _body.Append($"var {name} = {Expr(init)};\n"); // a fresh local: its value in other lanes is never read
@@ -180,7 +253,7 @@ internal sealed class Kernel
                 else _body.Append($"{_alive} &= ~{mask};\n");
                 return true;
             default:
-                throw new Unsupported();
+                throw Not(op);
         }
     }
 
@@ -203,7 +276,7 @@ internal sealed class Kernel
                 value = $"({Expr(a.Target)} {(a.Kind == OperationKind.Increment ? "+" : "-")} {_vec}.One)";
                 break;
             default:
-                throw new Unsupported();
+                throw Not(op);
         }
 
         string name = Target(target);
@@ -220,7 +293,7 @@ internal sealed class Kernel
             _written.Add(c.Index);
             return $"__c{c.Index}";
         }
-        throw new Unsupported();
+        throw new Unsupported($"it writes '{Text(target)}', which is neither a local nor the lane of a component taken by ref");
     }
 
     /// <summary>
@@ -252,7 +325,7 @@ internal sealed class Kernel
         if (IsUniform(op))
         {
             if (IsBool(op.Type)) return $"({Scalar(op)} ? {_vec}.AllBitsSet : {_vec}.Zero)";
-            if (!IsLane(op.Type)) throw new Unsupported();
+            if (!IsLane(op.Type)) throw new Unsupported($"'{Text(op)}' is a {op.Type?.ToDisplayString()}, not the lane type {_element.ToDisplayString()}");
             string scalar = Scalar(op);
             if (!_broadcasts.TryGetValue(scalar, out var name))
             {
@@ -281,7 +354,7 @@ internal sealed class Kernel
                     UnaryOperatorKind.Minus when IsLane(u.Type) && IsSigned => $"(-{operand})",
                     UnaryOperatorKind.BitwiseNegation when IsLane(u.Type) && !IsFloat => $"(~{operand})",
                     UnaryOperatorKind.Not when IsBool(u.Type) => $"(~{operand})",
-                    _ => throw new Unsupported(),
+                    _ => throw Not(u),
                 };
             case IConditionalOperation { IsRef: false, WhenFalse: { } whenFalse } t when IsLane(t.Type) || IsBool(t.Type):
                 return $"{V}.ConditionalSelect<{_e}>({Expr(t.Condition)}, {Expr(t.WhenTrue)}, {Expr(whenFalse)})";
@@ -297,9 +370,9 @@ internal sealed class Kernel
                     "FusedMultiplyAdd" when IsFloat => "FusedMultiplyAdd",
                     _ => null,
                 };
-                return vector == null ? throw new Unsupported() : $"{V}.{vector}({args})";
+                return vector == null ? throw Not(call) : $"{V}.{vector}({args})";
             default:
-                throw new Unsupported();
+                throw Not(op);
         }
     }
 
@@ -308,7 +381,8 @@ internal sealed class Kernel
         type ??= leftType;
         if (kind is BinaryOperatorKind.LeftShift or BinaryOperatorKind.RightShift)
         {
-            if (!IsLane(type) || IsFloat || !IsUniform(right)) throw new Unsupported();
+            if (!IsLane(type) || IsFloat) throw new Unsupported($"shifts of a {type?.ToDisplayString()} are not supported");
+            if (!IsUniform(right)) throw new Unsupported("a shift by a count that differs per row is not supported");
             string count = $"(int)({Scalar(right)})";
             return kind == BinaryOperatorKind.LeftShift ? $"{V}.ShiftLeft({left}, {count})"
                 : $"{V}.{(IsSigned ? "ShiftRightArithmetic" : "ShiftRightLogical")}({left}, {count})";
@@ -331,7 +405,8 @@ internal sealed class Kernel
             BinaryOperatorKind.LessThanOrEqual when lanes => $"{V}.LessThanOrEqual<{_e}>({left}, {r})",
             BinaryOperatorKind.GreaterThan when lanes => $"{V}.GreaterThan<{_e}>({left}, {r})",
             BinaryOperatorKind.GreaterThanOrEqual when lanes => $"{V}.GreaterThanOrEqual<{_e}>({left}, {r})",
-            _ => throw new Unsupported(),
+            BinaryOperatorKind.Divide or BinaryOperatorKind.Remainder when !IsFloat => throw new Unsupported("integer division is not supported (it throws on 0)"),
+            _ => throw new Unsupported($"operator {Operator(kind)} on {leftType?.ToDisplayString()} and {right.Type?.ToDisplayString()} is not supported"),
         };
     }
 
@@ -378,27 +453,21 @@ internal sealed class Kernel
             case IInvocationOperation { Instance: null, TargetMethod: var m } call when IsMath(m) && m.Name is "Min" or "Max" or "Sqrt" or "Floor" or "Ceiling":
                 return $"{m.ContainingType.ToDisplayString(Symbols.Fqn)}.{m.Name}({string.Join(", ", call.Arguments.Select(a => Scalar(a.Value)))})";
             default:
-                throw new Unsupported(); // a call or a property could do anything: not hoisted out of the rows
+                // a call or a property could do anything: not hoisted out of the rows
+                throw new Unsupported($"'{Text(op)}' is not a value the loop can compute once per run (a call or a property could do anything)");
         }
     }
 
     private static bool IsFloatType(ITypeSymbol? t) => t?.SpecialType is SpecialType.System_Single or SpecialType.System_Double;
 
-    private static string BinaryText(BinaryOperatorKind kind) => kind switch
-    {
-        BinaryOperatorKind.Add => "+", BinaryOperatorKind.Subtract => "-", BinaryOperatorKind.Multiply => "*", BinaryOperatorKind.Divide => "/",
-        BinaryOperatorKind.And => "&", BinaryOperatorKind.Or => "|", BinaryOperatorKind.ExclusiveOr => "^",
-        BinaryOperatorKind.ConditionalAnd => "&&", BinaryOperatorKind.ConditionalOr => "||",
-        BinaryOperatorKind.LeftShift => "<<", BinaryOperatorKind.RightShift => ">>",
-        BinaryOperatorKind.Equals => "==", BinaryOperatorKind.NotEquals => "!=", BinaryOperatorKind.LessThan => "<",
-        BinaryOperatorKind.LessThanOrEqual => "<=", BinaryOperatorKind.GreaterThan => ">", BinaryOperatorKind.GreaterThanOrEqual => ">=",
-        _ => throw new Unsupported(),
-    };
+    /// <summary>The C# operator of <paramref name="kind"/> in a uniform value (string concatenation and the like are not).</summary>
+    private static string BinaryText(BinaryOperatorKind kind) =>
+        Operator(kind) is var text && !char.IsLetter(text[0]) ? text : throw new Unsupported($"operator {text} is not supported");
 
     private static string UnaryText(UnaryOperatorKind kind) => kind switch
     {
         UnaryOperatorKind.Plus => "+", UnaryOperatorKind.Minus => "-", UnaryOperatorKind.BitwiseNegation => "~", UnaryOperatorKind.Not => "!",
-        _ => throw new Unsupported(),
+        _ => throw new Unsupported($"operator {kind} is not supported"),
     };
 
     private static string Literal(object? value, ITypeSymbol? type) => value switch
@@ -417,6 +486,41 @@ internal sealed class Kernel
         long l => l == long.MinValue ? "long.MinValue" : $"({l.ToString(CultureInfo.InvariantCulture)}L)",
         ulong u => u.ToString(CultureInfo.InvariantCulture) + "UL",
         _ when type is { SpecialType: not SpecialType.None } => $"(({type.ToDisplayString(Symbols.Fqn)})({System.Convert.ToString(value, CultureInfo.InvariantCulture)}))",
-        _ => throw new Unsupported(),
+        _ => throw new Unsupported($"the constant {value} is not supported"),
+    };
+
+    // ---------------- reasons ----------------
+
+    /// <summary>The reason <paramref name="op"/> keeps the method scalar, named the way the method writes it.</summary>
+    private Unsupported Not(IOperation op) => new(op switch
+    {
+        IInvocationOperation { TargetMethod: var m } when IsMath(m) => m.Name == "Abs" && !IsFloatType(m.ReturnType)
+            ? $"{m.ContainingType.Name}.Abs of an integer is not supported (it throws on MinValue)"
+            : $"{m.ContainingType.Name}.{m.Name} is not supported",
+        IInvocationOperation { TargetMethod: var m } => $"it calls {m.ContainingType.Name}.{m.Name}",
+        IConversionOperation c => $"the conversion of '{Text(c.Operand)}' from {c.Operand.Type?.ToDisplayString()} to {c.Type?.ToDisplayString()} is not supported",
+        IBinaryOperation { IsChecked: true } or IUnaryOperation { IsChecked: true } or ICompoundAssignmentOperation { IsChecked: true }
+            => $"checked arithmetic ('{Text(op)}') is not supported",
+        IBinaryOperation { OperatorMethod: not null } or IUnaryOperation { OperatorMethod: not null } or ICompoundAssignmentOperation { OperatorMethod: not null }
+            => $"it calls a user-defined operator ('{Text(op)}')",
+        _ => $"'{Text(op)}' is not supported",
+    });
+
+    /// <summary>The source of <paramref name="op"/> on one line, cut short.</summary>
+    private static string Text(IOperation op)
+    {
+        string text = string.Join(" ", op.Syntax.ToString().Split(['\r', '\n', '\t', ' '], System.StringSplitOptions.RemoveEmptyEntries));
+        return text.Length <= 60 ? text : text.Substring(0, 57) + "...";
+    }
+
+    private static string Operator(BinaryOperatorKind kind) => kind switch
+    {
+        BinaryOperatorKind.Add => "+", BinaryOperatorKind.Subtract => "-", BinaryOperatorKind.Multiply => "*", BinaryOperatorKind.Divide => "/",
+        BinaryOperatorKind.Remainder => "%", BinaryOperatorKind.And => "&", BinaryOperatorKind.Or => "|", BinaryOperatorKind.ExclusiveOr => "^",
+        BinaryOperatorKind.ConditionalAnd => "&&", BinaryOperatorKind.ConditionalOr => "||",
+        BinaryOperatorKind.LeftShift => "<<", BinaryOperatorKind.RightShift => ">>", BinaryOperatorKind.UnsignedRightShift => ">>>",
+        BinaryOperatorKind.Equals => "==", BinaryOperatorKind.NotEquals => "!=", BinaryOperatorKind.LessThan => "<",
+        BinaryOperatorKind.LessThanOrEqual => "<=", BinaryOperatorKind.GreaterThan => ">", BinaryOperatorKind.GreaterThanOrEqual => ">=",
+        _ => kind.ToString(),
     };
 }

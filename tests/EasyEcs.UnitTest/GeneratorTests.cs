@@ -28,7 +28,7 @@ public class GeneratorTests
     /// out: the cases here write the shortest code that shows a rule, which often also costs; <see cref="Costs"/> checks them.
     /// </summary>
     private static async Task<string[]> Diagnose(params string[] sources) =>
-        (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id))
+        (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id) && d.Id != "EECS055")
             .Select(d => d.Id).Distinct().OrderBy(x => x).ToArray();
 
     /// <summary>The diagnostics of the performance rules (EECS025-034, EECS039, EECS046, EECS052, EECS053), with their properties for the code fixes.</summary>
@@ -37,7 +37,8 @@ public class GeneratorTests
 
     private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id is "EECS039" or "EECS046" or "EECS052" or "EECS053";
 
-    internal static async Task<Diagnostic[]> All(string source) => (await Analyze([Components, Extra, source])).Where(d => d.Id.StartsWith("EECS") || d.Severity == DiagnosticSeverity.Error).OrderBy(d => d.Location.SourceSpan.Start).ToArray();
+    /// <summary>Every EasyEcs diagnostic but EECS055 (the vector loop's message, asserted by <see cref="ScalarLoopsNameTheirReason"/>).</summary>
+    internal static async Task<Diagnostic[]> All(string source) => (await Analyze([Components, Extra, source])).Where(d => d.Id.StartsWith("EECS") && d.Id != "EECS055" || d.Severity == DiagnosticSeverity.Error).OrderBy(d => d.Location.SourceSpan.Start).ToArray();
 
     private static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
     {
@@ -193,6 +194,83 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("S.ForEach.g.cs") || t.FilePath.Contains("/S.") && t.FilePath.EndsWith(".ForEach.g.cs")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated.Contains("global::System.Numerics.Vector.LoadUnsafe"), Is.EqualTo(vectorized), generated);
+
+        // Skipped means reported: the same method with SimdMode.Require is an error exactly when it got no loop.
+        string required = members.Replace("[ForEach]", "[ForEach(Simd = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(Simd = SimdMode.Require, Parallel");
+        var errors = Diagnose(Components, Lanes, $"public partial class S : EcsSystem {{ {required} }}").Result;
+        Assert.That(errors.Contains("EECS056"), Is.EqualTo(!vectorized), string.Join(", ", errors));
+    }
+
+    // EECS055: the first reason a method that looks meant for a vector loop stays scalar, from Kernel.Vectorize.
+    [TestCase("[ForEach] static void A(ref Two t) => t.A = t.B;", "component Two has 2 fields")]
+    [TestCase("[ForEach] static void A(ref F f, in P p) => f.V = p.V;", "lane types float and int differ")]
+    [TestCase("[ForEach] static void A(ref P p) => p.V = System.Math.Abs(p.V);", "Math.Abs of an integer is not supported (it throws on MinValue)")]
+    [TestCase("[ForEach] static void A(ref P p) => p.V /= 3;", "integer division is not supported (it throws on 0)")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x;", "it calls S.M")]
+    [TestCase("[ForEach] static void A(ref F f) { for (int i = 0; i < 2; i++) f.V++; }", "'for (int i = 0; i < 2; i++) f.V++;' is not supported")]
+    [TestCase("[ForEach] static void A(ref F f, in H h) => h.V.ToString();", "it calls Single.ToString")]
+    [TestCase("[ForEach] static void A(in F f, ref H h) { double d = f.V; h.V = (float)d; }", "local 'd' is a double, not the lane type float")]
+    [TestCase("[ForEach] static void A(ref F f, ref int n) => n++;", "it takes 'n' by ref, and a vector loop has no reductions")]
+    public void ScalarLoopsNameTheirReason(string members, string reason)
+    {
+        var diagnostics = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Where(d => d.Id == "EECS055").ToArray();
+        Assert.That(diagnostics.Select(d => d.GetMessage()), Is.EqualTo(new[] { $"[ForEach] method 'A' runs one row at a time, without a vector loop: {reason}" }));
+        Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Info));
+    }
+
+    // Not meant for a vector loop (or vectorized, or opted out): no EECS055.
+    [TestCase("[ForEach] static void A(ref F f, in H h) => f.V += h.V;")]                              // vectorized
+    [TestCase("[ForEach(Simd = SimdMode.Off)] static void A(ref Two t) => t.A = t.B;")]               // opted out
+    [TestCase("[ForEach(Parallel = true)] static void A(ref Two t) => t.A = t.B;")]
+    [TestCase("[ForEach] static void A(Entity e, ref Two t) => t.A = t.B;")]
+    [TestCase("[ForEach] static void A(ref Holder h) { }")]                                             // not numeric fields
+    [TestCase("[ForEach] static void A(System.Span<F> f) { }")]                                          // a batch method
+    public void MethodsNotMeantForAVectorLoopGetNoMessage(string members)
+    {
+        var ids = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Select(d => d.Id);
+        Assert.That(ids, Has.None.EqualTo("EECS055"));
+    }
+
+    [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(Entity e, ref F f) => f.V++;", "it takes the Entity")]
+    [TestCase("[ForEach(Simd = SimdMode.Require)] void A(ref F f) => f.V++;", "it is not static")]
+    [TestCase("[ForEach(Simd = SimdMode.Require, Parallel = true)] static void A(ref F f) => f.V++;", "it runs in parallel (Parallel = true), and parallel jobs have no vector loop")]
+    [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref Two t) => t.A++;", "component Two has 2 fields")]
+    public void ARequiredVectorLoopThatDoesNotQualifyIsAnError(string members, string reason)
+    {
+        var diagnostics = Analyze([Components, Lanes, $"public partial class S : EcsSystem {{ {members} }}"]).Result.Where(d => d.Id.StartsWith("EECS05")).ToArray();
+        Assert.That(diagnostics.Select(d => d.Id + " " + d.GetMessage()),
+            Is.EqualTo(new[] { $"EECS056 [ForEach(Simd = SimdMode.Require)] method 'A' gets no vector loop: {reason}" }));
+        Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Error));
+    }
+
+    [Test]
+    public void SimdOffKeepsAQualifyingMethodScalar()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { [ForEach(Simd = SimdMode.Off)] static void A(ref F f, in H h) => f.V += h.V; [ForEach(Simd = SimdMode.Require)] static void B(ref F f) => f.V++; }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("internal ref struct AJob0 : global::EasyEcs.IForEach<"), generated);  // per row
+        Assert.That(generated, Does.Contain("internal ref struct BJob1 : global::EasyEcs.IForEachBatch<"), generated);
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "Vector.LoadUnsafe").Count, Is.EqualTo(1), generated);
+    }
+
+    [Test]
+    public void TurningSimdOffReemitsOnlyItsSystem()
+    {
+        const string other = "public class O : EcsSystem { [ForEach] static void B(ref F f) => f.V++; }";
+        var tree = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components + Lanes + "public class S : EcsSystem { [ForEach] static void A(ref F f) => f.V++; }", Parse);
+        var compilation = Compile().AddSyntaxTrees(tree, CSharpSyntaxTree.ParseText("using EasyEcs;\n" + other, Parse));
+        var driver = Driver().RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(tree, CSharpSyntaxTree.ParseText(
+            tree.ToString().Replace("[ForEach] static void A", "[ForEach(Simd = SimdMode.Off)] static void A"), Parse)));
+
+        var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
+        Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
+        string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
+        Assert.That(generated, Does.Not.Contain("Vector.LoadUnsafe"));
     }
 
     [TestCase("public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void A(ref T t, in P p) { } } public class H : G<Q>; "

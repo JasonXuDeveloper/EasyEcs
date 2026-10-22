@@ -11,10 +11,12 @@ using Microsoft.CodeAnalysis.Operations;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// The rules for code that works but does more than it needs (EECS025-EECS033, EECS039, EECS046, EECS052, EECS053) and EECS034:
-/// what a [ForEach] method declares and does per row, allocations in code that runs every update, structural changes
-/// and queries one call could make, a component added right after its entity is created, and the generated members. A rule whose code costs is a warning (EECS025-EECS032), the generated member is a
-/// suggestion (the same call at the same cost, shorter) and an update inside a system an error. Each is reported only where the cheaper form does the
+/// The rules for code that works but does more than it needs (EECS025-EECS033, EECS039, EECS046, EECS052, EECS053), EECS034
+/// and EECS055-EECS056: what a [ForEach] method declares and does per row, allocations in code that runs every update, structural changes
+/// and queries one call could make, a component added right after its entity is created, the generated members, and
+/// the methods left without a vector loop. A rule whose code costs is a warning (EECS025-EECS032), the generated member is a
+/// suggestion (the same call at the same cost, shorter), a scalar loop a message (EECS055; an error when the method
+/// requires a vector loop, EECS056) and an update inside a system an error. Each is reported only where the cheaper form does the
 /// same thing; the code fixes (EasyEcs.CodeFixes) apply the replacement the analyzer computed, so the analyzer stays
 /// the only place that decides.
 /// </summary>
@@ -137,6 +139,34 @@ public sealed partial class EasyEcsAnalyzer
         "SetIfChanged that changed the value; reading Value stamps nothing. Batch methods (spans) stamp whole runs and " +
         "are left out.",
         helpLinkUri: Help("EECS053"));
+
+    public static readonly DiagnosticDescriptor ScalarLoop = new("EECS055", "A [ForEach] method that runs one row at a time",
+        "[ForEach] method '{0}' runs one row at a time, without a vector loop: {1}",
+        Category, DiagnosticSeverity.Info, true,
+        "The generator turns a [ForEach] method into a Vector<T> loop (several rows per instruction, the same results bit " +
+        "for bit) when it is static, runs on one thread, makes no structural change, takes components of one lane field " +
+        "each (all of one type), singletons and values, and computes with operations that have an exact vector " +
+        "counterpart. This method takes components of numeric fields but misses one of those: the message names the " +
+        "first. Change it to get the vector loop, set Simd = SimdMode.Off to keep the method scalar without this " +
+        "message, or SimdMode.Require to make it an error.", helpLinkUri: Help("EECS055"));
+
+    /// <summary>
+    /// EECS055 and EECS056: a [ForEach] method the generator leaves without a vector loop, with the reason
+    /// <see cref="Kernel.Vectorize"/> gives, the same call the generator makes, so a method reported is exactly a
+    /// method left scalar. EECS055 only for a method that looks meant for one (<see cref="Kernel.LooksEligible"/>),
+    /// EECS056 for any method that requires one.
+    /// </summary>
+    private static void AnalyzeVectorLoop(SyntaxNodeAnalysisContext context)
+    {
+        var syntax = (MethodDeclarationSyntax)context.Node;
+        if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
+            || !Symbols.IsValidForEach(method) || method.PartialDefinitionPart != null) return; // a partial method: once, on its definition
+        int mode = Symbols.Simd(method);
+        if (mode == Symbols.SimdOff || mode == Symbols.SimdAuto && !Kernel.LooksEligible(method)) return;
+        if (Kernel.Vectorize(method, syntax, context.SemanticModel, static (i, _) => "", context.CancellationToken, out var reason) != null) return;
+        context.ReportDiagnostic(Diagnostic.Create(mode == Symbols.SimdRequire ? NoVectorLoop : ScalarLoop,
+            method.Locations.FirstOrDefault(), method.Name, reason));
+    }
 
     /// <summary>Property keys of the diagnostics' code fixes: what the analyzer decided, the fix only applies it.</summary>
     public const string FixKind = "Fix", FixTitle = "Title", Replace = "Replace", Insert = "Insert", RemoveOthers = "Remove", WithType = "With";

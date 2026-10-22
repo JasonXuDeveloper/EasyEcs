@@ -711,6 +711,12 @@ internal static class Symbols
     /// <summary>[ForEach(ChunkRows = N)]: the rows a thread of a parallel pass takes at a time (0: chosen by the runtime).</summary>
     public static int ChunkRows(IMethodSymbol method) => ForEachArgument(method, "ChunkRows", 0);
 
+    /// <summary>[ForEach(Simd = SimdMode.X)]: <see cref="SimdAuto"/>, <see cref="SimdRequire"/> or <see cref="SimdOff"/>.</summary>
+    public static int Simd(IMethodSymbol method) => ForEachArgument(method, "Simd", SimdAuto);
+
+    /// <summary>The values of EasyEcs.SimdMode.</summary>
+    public const int SimdAuto = 0, SimdRequire = 1, SimdOff = 2;
+
     private static int ForEachArgument(IMethodSymbol method, string name, int otherwise)
     {
         foreach (var attribute in method.GetAttributes())

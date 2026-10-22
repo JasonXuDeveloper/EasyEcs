@@ -576,8 +576,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
                     && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
                     Slices = Symbols.Slices(method), ChunkRows = Symbols.ChunkRows(method), Identifies = Symbols.OnlyIdentifies(method, syntax, model),
-                    // A stable method on one thread: a batch job holds no structural path (a parallel batch loop does not exist yet).
-                    Simd = stable && !parallel ? Kernel.Translate(method, syntax, model, static (i, kind) => kind == Symbols.ParamKind.Singleton ? $"s{i}" : $"x{i}", ct) : null,
+                    // Kernel.Vectorize decides alone (static, one thread, stable, its body): the analyzer reports its reasons.
+                    Simd = Kernel.Vectorize(method, syntax, model, static (i, kind) => kind == Symbols.ParamKind.Singleton ? $"s{i}" : $"x{i}", ct, out _),
                 };
         }
     }

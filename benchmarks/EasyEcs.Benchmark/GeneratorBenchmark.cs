@@ -100,9 +100,12 @@ public class GeneratorBenchmark
 
     private Compilation Fresh() => _generated.RemoveAllSyntaxTrees().AddSyntaxTrees(_generated.SyntaxTrees);
 
-    /// <summary>The analyzer's diagnostics of the benchmark's code (none: it is written as users should write it).</summary>
+    /// <summary>
+    /// The analyzer's diagnostics of the benchmark's code (none: it is written as users should write it), but EECS055:
+    /// the methods over components of several fields stay scalar, and the message says so.
+    /// </summary>
     private Diagnostic[] Analyzed() => Fresh().WithAnalyzers([new EasyEcsAnalyzer()]).GetAnalyzerDiagnosticsAsync().Result
-        .Where(d => d.Severity >= DiagnosticSeverity.Info).ToArray();
+        .Where(d => d.Severity >= DiagnosticSeverity.Info && d.Id != "EECS055").ToArray();
 
     /// <summary>One module of a game: components, a buffer element, systems with [ForEach] methods and a query loop.</summary>
     private static string Module(int m)
