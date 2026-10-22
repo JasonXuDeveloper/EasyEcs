@@ -203,11 +203,21 @@ public class HungerSystem : EcsSystem
 
 没有组件参数时，由第一个 `[With<T>]`（没有的话就是第一个 `[Changed<T>]`）指定要查询的组件：
 
-```csharp
+```csharp doccheck=expect-EECS030
 public class CorpseCleanup : EcsSystem
 {
     [ForEach, With<Dead>]
     static void Remove(Entity corpse) => corpse.Destroy();
+}
+```
+
+整个方法体只是一次结构变化、每一行都一样的方法，是一个 world 自己能跑得更快的循环：在 `OnUpdate` 里一次
+[批量调用](/zh/docs/guide/bulk)，一次改完整张表（[EECS030](/zh/docs/guide/analyzer#eecs030) 会指出这一点）：
+
+```csharp
+public class CorpseCleanup : EcsSystem
+{
+    protected override void OnUpdate() => World.DestroyAll<Dead>();
 }
 ```
 

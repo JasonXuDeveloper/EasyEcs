@@ -145,13 +145,16 @@ public class CorpseCleanupSystem : EcsSystem
 Name the component with a filter. With no component at all, use `OnUpdate`; with more than 9, move the extra
 requirements to `[With<T>]` or split the method:
 
-```csharp
+```csharp doccheck=expect-EECS030
 public class CorpseCleanupSystem : EcsSystem
 {
     [ForEach, With<Dead>]                          // the filter names what to query
     static void Remove(Entity e) => e.Destroy();
 }
 ```
+
+This method's whole body is one structural change, so [EECS030](#eecs030) then asks for the bulk call
+`World.DestroyAll<Dead>()` in `OnUpdate`.
 
 ## EECS004 [#eecs004]
 
@@ -1008,6 +1011,28 @@ One call:
 
 ```csharp
 world.DestroyAll<Health>(QueryFilter.Create().With<Dead>());
+```
+
+A `[ForEach]` method whose whole body is such a call on its entity is the same loop, written by the generator. The rule
+reports it when the call's arguments use no parameter and the method's filters are ones a `QueryFilter` holds (no
+`[Changed<T>]` or `[Removed<T>]`, no slices). There is no code fix: the call moves into the system's `OnUpdate` and
+the method goes.
+
+```csharp doccheck=expect-EECS030
+public class CorpseSystem : EcsSystem
+{
+    [ForEach, With<Dead>]
+    static void Bury(Entity entity) => entity.Destroy();
+}
+```
+
+One call per update:
+
+```csharp
+public class CorpseSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.DestroyAll<Dead>();
+}
 ```
 
 ## EECS031 [#eecs031]

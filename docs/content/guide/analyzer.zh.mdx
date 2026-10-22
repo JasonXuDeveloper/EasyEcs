@@ -133,13 +133,16 @@ public class CorpseCleanupSystem : EcsSystem
 
 用过滤条件指明组件。完全没有组件就用 `OnUpdate`；超过 9 个，就把多出来的条件挪到 `[With<T>]`，或者拆开方法：
 
-```csharp
+```csharp doccheck=expect-EECS030
 public class CorpseCleanupSystem : EcsSystem
 {
     [ForEach, With<Dead>]                          // 过滤条件指明查询什么
     static void Remove(Entity e) => e.Destroy();
 }
 ```
+
+这个方法的整个方法体只是一次结构变化，所以接着 [EECS030](#eecs030) 会要求改成在 `OnUpdate` 里批量调用
+`World.DestroyAll<Dead>()`。
 
 ## EECS004 [#eecs004]
 
@@ -939,6 +942,27 @@ foreach (var item in world.Query<Health>(QueryFilter.Create().With<Dead>()))
 
 ```csharp
 world.DestroyAll<Health>(QueryFilter.Create().With<Dead>());
+```
+
+`[ForEach]` 方法的整个方法体只是对自己实体的这样一个调用时，它就是同一个循环，只是由生成器写出来。调用参数不用任何参数、
+方法的过滤条件都能放进 `QueryFilter`（没有 `[Changed<T>]` 或 `[Removed<T>]`，没有分片）时，规则会报告它。没有代码修复：
+调用要挪进系统的 `OnUpdate`，方法本身删掉。
+
+```csharp doccheck=expect-EECS030
+public class CorpseSystem : EcsSystem
+{
+    [ForEach, With<Dead>]
+    static void Bury(Entity entity) => entity.Destroy();
+}
+```
+
+每次更新一次调用：
+
+```csharp
+public class CorpseSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.DestroyAll<Dead>();
+}
 ```
 
 ## EECS031 [#eecs031]

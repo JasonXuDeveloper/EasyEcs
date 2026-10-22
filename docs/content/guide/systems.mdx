@@ -220,11 +220,22 @@ an instance method. Its parameters say what it runs over:
 
 With no component parameter, the first `[With<T>]` (else the first `[Changed<T>]`) names the queried component:
 
-```csharp
+```csharp doccheck=expect-EECS030
 public class CorpseCleanup : EcsSystem
 {
     [ForEach, With<Dead>]
     static void Remove(Entity corpse) => corpse.Destroy();
+}
+```
+
+A method whose whole body is one structural change, the same for every row, is a loop the world runs faster itself: one
+[bulk call](/en/docs/guide/bulk) in `OnUpdate` changes each table at once
+([EECS030](/en/docs/guide/analyzer#eecs030) says so):
+
+```csharp
+public class CorpseCleanup : EcsSystem
+{
+    protected override void OnUpdate() => World.DestroyAll<Dead>();
 }
 ```
 

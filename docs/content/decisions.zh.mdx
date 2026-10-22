@@ -136,8 +136,12 @@ public struct Spawned : IComponent;                                  // 标签�
 
 public class GreetSystem : EcsSystem
 {
-    [ForEach, With<Spawned>, With<Health>]
-    static void Greet(Entity entity) => entity.RemoveSpawned();   // 首次处理，然后翻一个位
+    [ForEach, With<Spawned>]
+    static void Greet(Entity entity, ref Health health)
+    {
+        health = new Health(health.Value + 10);                      // 首次处理：新手奖励
+        entity.RemoveSpawned();                                       // 然后翻一个位
+    }
 }
 ```
 

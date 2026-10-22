@@ -145,8 +145,12 @@ public struct Spawned : IComponent;                                  // a tag: "
 
 public class GreetSystem : EcsSystem
 {
-    [ForEach, With<Spawned>, With<Health>]
-    static void Greet(Entity entity) => entity.RemoveSpawned();   // first-time work, then a bit flip
+    [ForEach, With<Spawned>]
+    static void Greet(Entity entity, ref Health health)
+    {
+        health = new Health(health.Value + 10);                      // first-time work: a welcome bonus
+        entity.RemoveSpawned();                                       // then a bit flip
+    }
 }
 ```
 

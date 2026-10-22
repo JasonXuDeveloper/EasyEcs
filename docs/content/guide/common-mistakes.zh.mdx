@@ -201,8 +201,7 @@ public struct Looted : IComponent;
 
 public class LootSystem : EcsSystem
 {
-    [ForEach, With<Dead>, Without<Looted>]
-    static void Drop(Entity corpse) => corpse.SetLooted();
+    protected override void OnUpdate() => World.SetAll(new Looted(), QueryFilter.Create().With<Dead>().Without<Looted>());
 }
 
 [UpdateAfter<LootSystem>]
