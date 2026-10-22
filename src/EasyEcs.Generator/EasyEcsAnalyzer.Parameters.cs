@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
@@ -14,22 +15,23 @@ namespace EasyEcs.Generator;
 /// components of other entities read through the World (a <c>Lookup&lt;T&gt;</c> reads them without it), and records
 /// appended to a singleton's list (an <c>Emit&lt;T&gt;</c> appends them per chunk). The hand-written forms keep the
 /// method on one thread, out of a vector loop or alone in its stage; the parameter does the same work without those
-/// costs. None has a code fix: a reduction replaces its singleton with the pass's result where the hand-written sum
-/// adds to what it held, a lookup's reads are not the World's calls one for one, and emitted records land in another
-/// singleton, which their readers must read.
+/// costs. None has a code fix: a reduction makes the reset of its singleton in another system redundant, a lookup's
+/// reads are not the World's calls one for one, and emitted records land in another singleton, which their readers
+/// must read.
 /// </summary>
 public sealed partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor HandWrittenReduce = new("EECS086", "A singleton accumulated row by row",
-        "Parameter '{0}' of {1} accumulates into singleton {2} row by row ({3}), so the method runs on one thread and without a vector loop; {4}: each chunk keeps a partial result, and the pass's result replaces {2} (a total across updates reduces into a singleton of its own, which a later system adds to {2})",
+        "Parameter '{0}' of {1} accumulates into singleton {2} row by row ({3}), so the method runs on one thread and without a vector loop; {4}: each chunk keeps a partial result, and the pass's result replaces {2}, so its reset in '{5}' goes",
         Category, DiagnosticSeverity.Info, true,
         "A 'ref' singleton parameter is one value every row writes: the method cannot run in parallel (each chunk would " +
         "race on it), and its vector loop has no lane to keep it in. A Reduce<T> parameter gives each chunk of rows its own " +
         "partial result, starting at T's Identity, and combines them in row order into T when the pass ends: the same " +
         "sums, minimums and maximums, with Parallel = true and the vector loop open to the method. The pass's result " +
-        "replaces T, so a total meant to grow across updates reduces into a singleton of its own, which a later system " +
-        "adds to the total.",
-        helpLinkUri: Help("EECS086"));
+        "replaces T, so the rule reports a singleton that system code resets (assigns whole, sets, removes, or gives a " +
+        "field a constant) outside OnCreate: one that holds a pass's result. A total that grows across updates is left " +
+        "alone; it would reduce into a singleton of its own, which a later system adds to the total.",
+        helpLinkUri: Help("EECS086"), customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     public static readonly DiagnosticDescriptor HandWrittenLookup = new("EECS087", "Other entities' components read through the World",
         "{0} takes the World only to read {1} of other entities ('{2}'), so its system runs alone; {3}",
@@ -49,8 +51,12 @@ public sealed partial class EasyEcsAnalyzer
         "row order, on one thread or several. Systems after the pass read world.Emitted<T>().Items and clear it.",
         helpLinkUri: Help("EECS089"));
 
-    /// <summary>EECS086 and EECS087 in a [ForEach] method's body (from AnalyzeBody, with the rules of its parameters).</summary>
-    private static void AnalyzeHandWritten(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body, Core core)
+    /// <summary>
+    /// EECS086, EECS087 and EECS089 in a [ForEach] method's body (from AnalyzeBody, with the rules of its parameters).
+    /// EECS086 waits for the end of the compilation in <paramref name="resets"/>: only a singleton that system code
+    /// resets holds one pass's result, which is what a reduction writes.
+    /// </summary>
+    private static void AnalyzeHandWritten(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body, Core core, Resets resets)
     {
         if (!Symbols.IsForEach(method) || Symbols.IsForEntity(method)) return; // one entity per call: nothing to split into chunks
         foreach (var (p, fields) in Accumulations(method, body))
@@ -60,8 +66,7 @@ public sealed partial class EasyEcsAnalyzer
             string advice = Reduces(singleton)
                 ? $"take it as 'ref Reduce<{singleton.Name}>' and accumulate into '{p.Name}.Value'"
                 : $"declare {singleton.Name} partial with {string.Join(", ", fields.Select(f => $"[{f.Op}] on {f.Field.Name}"))} and take it as 'ref Reduce<{singleton.Name}>'";
-            context.ReportDiagnostic(Diagnostic.Create(HandWrittenReduce, p.Locations.FirstOrDefault(), p.Name, Symbols.Describe(method),
-                singleton.Name, ops, advice));
+            resets.Pending.Enqueue((p, singleton, method, [p.Name, Symbols.Describe(method), singleton.Name, ops, advice]));
         }
 
         foreach (var (p, list, element) in Appends(method, body))
@@ -80,6 +85,68 @@ public sealed partial class EasyEcsAnalyzer
                 reads.Select(r => r.Operation.Syntax.GetLocation()), Symbols.Describe(method), names, Shorten(reads[0].Operation.Syntax),
                 $"take {parameters} instead of '{world.Name}' and read them by id (lookup[id], Read(id), Has(id))"));
         }
+    }
+
+    /// <summary>
+    /// EECS086's evidence, gathered over the compilation: the singletons system code resets, by the methods that reset
+    /// them. A reset is a whole assignment (<c>World.Score = default</c>, <c>s = new(..)</c>), a constant given to a field
+    /// (<c>World.Score.Kills = 0</c>), or a call that sets or removes it (<c>AddSingleton</c>, <c>RemoveSingleton</c>,
+    /// the generated <c>SetX</c> / <c>RemoveX</c>), in a method of a system other than OnCreate and OnDestroy (which set
+    /// it up once). A singleton nothing resets keeps a total across updates: a reduction would replace it per pass.
+    /// </summary>
+    private sealed class Resets
+    {
+        private readonly ConcurrentDictionary<ITypeSymbol, ConcurrentQueue<IMethodSymbol>> _types = new(SymbolEqualityComparer.Default);
+        private readonly ConcurrentDictionary<string, ConcurrentQueue<IMethodSymbol>> _names = new(); // the generated SetX / RemoveX: X
+
+        /// <summary>
+        /// The EECS086 reports waiting for the end of the compilation: the parameter, its singleton, the method and the
+        /// message's arguments but the last (the reset).
+        /// </summary>
+        public readonly ConcurrentQueue<(IParameterSymbol Parameter, INamedTypeSymbol Singleton, IMethodSymbol Method, object[] Arguments)> Pending = new();
+
+        public void Register(CompilationStartAnalysisContext start)
+        {
+            start.RegisterOperationAction(Collect, OperationKind.SimpleAssignment, OperationKind.Invocation);
+            start.RegisterCompilationEndAction(context =>
+            {
+                foreach (var (p, singleton, method, arguments) in Pending)
+                    if ((By(_types, singleton.OriginalDefinition, method) ?? By(_names, singleton.Name, method)) is { } reset)
+                        context.ReportDiagnostic(Diagnostic.Create(HandWrittenReduce, p.Locations.FirstOrDefault(),
+                            [.. arguments, reset.ContainingType.Name + "." + reset.Name]));
+            });
+        }
+
+        /// <summary>A method other than <paramref name="except"/> that resets <paramref name="key"/>, or null.</summary>
+        private static IMethodSymbol? By<TKey>(ConcurrentDictionary<TKey, ConcurrentQueue<IMethodSymbol>> resets, TKey key, IMethodSymbol except) =>
+            resets.TryGetValue(key, out var methods) ? methods.FirstOrDefault(m => !SymbolEqualityComparer.Default.Equals(m, except)) : null;
+
+        private void Collect(OperationAnalysisContext context)
+        {
+            if (context.ContainingSymbol is not IMethodSymbol { Name: not ("OnCreate" or "OnDestroy") } method
+                || method.ContainingType is not { } system || !Symbols.IsSystem(system)) return;
+            switch (context.Operation)
+            {
+                case ISimpleAssignmentOperation { Target: var target } assignment:
+                    if (IsSingleton(target.Type)) Add(_types, target.Type!.OriginalDefinition, method);
+                    else if (target is IMemberReferenceOperation { Instance: { } instance } && IsSingleton(instance.Type)
+                             && assignment.Value.ConstantValue.HasValue)
+                        Add(_types, instance.Type!.OriginalDefinition, method);
+                    break;
+                case IInvocationOperation { TargetMethod: var called }:
+                    if (called is { Name: "AddSingleton" or "RemoveSingleton", TypeArguments.Length: 1 } && Symbols.Named(called.ContainingType, Symbols.World))
+                        Add(_types, called.TypeArguments[0].OriginalDefinition, method);
+                    else if (called.Name.Length > 6 && (called.Name.StartsWith("Set") || called.Name.StartsWith("Remove")) && Symbols.IsGenerated(called)
+                             && Symbols.OnWorld((IInvocationOperation)context.Operation))
+                        Add(_names, called.Name.Substring(called.Name[0] == 'S' ? 3 : 6), method);
+                    break;
+            }
+        }
+
+        private static bool IsSingleton(ITypeSymbol? type) => type is INamedTypeSymbol named && Symbols.Implements(named, Symbols.Singleton);
+
+        private static void Add<TKey>(ConcurrentDictionary<TKey, ConcurrentQueue<IMethodSymbol>> resets, TKey key, IMethodSymbol method) =>
+            resets.GetOrAdd(key, _ => new ConcurrentQueue<IMethodSymbol>()).Enqueue(method);
     }
 
     /// <summary>Whether <paramref name="type"/> combines with itself: a Reduce&lt;T&gt; of it compiles.</summary>

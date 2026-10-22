@@ -313,7 +313,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(System.Span<F> f) { }")]                                          // a batch method
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;")] // vectorized
     [TestCase("[ForEntity] static void A(ref F f, in H h) => f.V = h.V.GetHashCode();")]                // one entity: no loop
-    [TestCase("public struct Acc : ISingletonComponent { public float Sum; } [ForEach] static void A(in F f, ref Acc a) => a.Sum += f.V;")] // EECS086's
+    [TestCase("public struct Acc : ISingletonComponent { public float Sum; } [ForEach] static void A(in F f, ref Acc a) => a.Sum += f.V;")] // accumulated by hand: EECS086 when a system resets it, a running total otherwise
     public void MethodsNotMeantForAVectorLoopGetNoMessage(string members)
     {
         var ids = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Select(d => d.Id);
@@ -2058,9 +2058,9 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, ref Q q) => p.V = Helpers.Look(q.V == 0 ? p : default); }", "EECS025")]
     [TestCase("public static class U { public static int F(Entity e) => e.Get<T>().V; }", "EECS025")]
     [TestCase("public static class U { public static int F(Entity e) => e.WriteT().V; }", "EECS025")]
-    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, ref Clock c) { ref readonly var x = ref t; c.Ticks += x.V; } }", "EECS025", "EECS086")] // a 'ref readonly' local reads
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, ref Clock c) { ref readonly var x = ref t; c.Ticks += x.V; } }", "EECS025")] // a 'ref readonly' local reads
     // EECS026: a parameter the method does not use.
-    [TestCase("public class S : EcsSystem { [ForEach] static void A(in P p, ref Clock c) => c.Ticks++; }", "EECS026", "EECS086")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(in P p, ref Clock c) => c.Ticks++; }", "EECS026")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V++; }", "EECS026")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, World w) => p.V++; }", "EECS026")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, ref Clock c) => p.V++; }", "EECS026")]
@@ -2176,7 +2176,7 @@ public class GeneratorTests
 
     // Not reported: used, filters, branches, small or reserved creation, and the code each rule leaves alone.
     [TestCase("public class S : EcsSystem { [ForEach] static void A(in P p, ref Clock c) { } }")]                                           // being written
-    [TestCase("public class S : EcsSystem { [ForEach, With<P>] static void A(ref Clock c) => c.Ticks = c.Ticks * 2 + 1; }")]
+    [TestCase("public class S : EcsSystem { [ForEach, With<P>] static void A(ref Clock c) => c.Ticks++; }")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { if (p.V > 0) p.V = e.Q.V; } }")]       // some rows only
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { if (p.V > 0) return; p.V = e.Q.V; } }")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { if (e.HasQ) e.RemoveQ(); p.V++; } }")]    // changed here

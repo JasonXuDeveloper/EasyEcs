@@ -213,7 +213,9 @@ public sealed partial class EasyEcsAnalyzer
         context.RegisterCompilationStartAction(start =>
         {
             if (Core.Create(start.Compilation) is not { } core) return;
-            start.RegisterOperationBlockAction(c => AnalyzeBody(c, core));
+            var resets = new Resets();
+            resets.Register(start);
+            start.RegisterOperationBlockAction(c => AnalyzeBody(c, core, resets));
             start.RegisterOperationAction(c => AnalyzeCall(c, core), OperationKind.Invocation);
             start.RegisterOperationAction(c => AnalyzeItem(c), OperationKind.PropertyReference);
             start.RegisterOperationAction(c => AnalyzeComparison(c, core), OperationKind.Binary);
@@ -224,7 +226,7 @@ public sealed partial class EasyEcsAnalyzer
 
     // ---------------- [ForEach] methods and OnUpdate: parameters, lookups, allocations ----------------
 
-    private static void AnalyzeBody(OperationBlockAnalysisContext context, Core core)
+    private static void AnalyzeBody(OperationBlockAnalysisContext context, Core core, Resets resets)
     {
         if (context.OwningSymbol is not IMethodSymbol method) return;
         var body = context.OperationBlocks.FirstOrDefault(b => b is IMethodBodyOperation or IBlockOperation);
@@ -246,7 +248,7 @@ public sealed partial class EasyEcsAnalyzer
             }
 
             AnalyzeParameters(context, method, body, uses);
-            AnalyzeHandWritten(context, method, body, core);
+            AnalyzeHandWritten(context, method, body, core, resets);
             AnalyzeScratch(context, method, body);
             AnalyzeLookups(context, core, method, body);
             AnalyzeAllocations(context, method, body, Symbols.IsForEntity(method) ? "on every call" : "for every entity it visits, each update", true);
