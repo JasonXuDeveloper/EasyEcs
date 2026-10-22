@@ -1733,7 +1733,7 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
   （`Vector512.Sin`……）；在 `FloatMode.Exact` 下，EECS055 指出这个调用。
 - **`Maybe<T>` 作为通道掩码。** 本行段可选列的存在位就是每个向量的通道掩码，`HasValue` 就是这个掩码，`Value` 的字段是只在有 `T` 的行上读（和写）的通道；
   对没有 `T` 的行读 `Value`，会把这个向量的行交给方法本身，按写法抛出异常。
-- **窄通道。** `byte`、`sbyte`、`short` 和 `ushort` 组件每个 `Vector512` 处理 64 或 32 行。C# 按 `int` 计算它们，所以生成器把每个值跟踪为低位加上它所在的区间，
+- **窄通道。** `byte`、`sbyte`、`short` 和 `ushort` 组件每个 `Vector512` 处理 64 或 32 行。C# 按 `int` 计算它们，所以生成器把每个值追踪为低位加上它所在的区间，
   只在区间证明窄通道就是 `int` 结果时才接受一个运算：回绕的 `+ - * & | ^ ~ <<`（`int` 结果的低位）、包住和或差的 `Math.Min` / `Max` 链对应
   `AddSaturate` / `SubtractSaturate`、与范围内常量的比较（饱和和与 255 比较不行）、精确值的右移和 `Abs`。窄通道的掩码字由方法本身运行。
 - **结构体值。** `System.Numerics` 或 Godot 的 `Vector2` / `Vector3` / `Vector4` 字段（或其他由通道组成的结构体）给出自己的通道；`new T(...)`
