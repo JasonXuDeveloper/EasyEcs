@@ -57,12 +57,13 @@
     </summary>
   </member>
 
-  <member name="P:EasyEcs.ForEachAttribute.FloatMode" source="af9b5bf47bab">
+  <member name="P:EasyEcs.ForEachAttribute.FloatMode" source="fbc888efdd85">
     <summary>
       向量循环可以改变哪些浮点结果。<see cref="F:EasyEcs.FloatMode.Exact" /> 让每个结果都与方法本身逐位相同，所以写进
       <see cref="T:EasyEcs.Reduce`1" /> 的浮点求和保持一次一行（EECS055 会说明）：向量循环的每个通道各加各的行，相加顺序不同。
-      <see cref="F:EasyEcs.FloatMode.Fast" /> 接受这种顺序：同样那些行的和，只是舍入不同（与方法本身不逐位相同，不同向量宽度之间也不相同）。
-      整数求和以及任何通道类型的 Min / Max 两种模式下都精确。默认 <see cref="F:EasyEcs.FloatMode.Exact" />。
+      <see cref="F:EasyEcs.FloatMode.Fast" /> 接受这种顺序：同样那些行的和，只是舍入不同（与方法本身不逐位相同，不同向量宽度之间也不相同），
+      并接受 <c>Sin</c>、<c>Cos</c>、<c>Exp</c>、<c>Log</c>、<c>Log2</c> 和 <c>Hypot</c> 的向量近似（与标量函数相差 1 到 2 ulp 以内）。
+      整数求和以及任何通道类型的 Min / Max 两种模式下都精确。默认 <see cref="F:EasyEcs.FloatMode.Exact" />：每台机器上结果都相同（每个通道都是一次 IEEE 运算）。
     </summary>
   </member>
 </doc>

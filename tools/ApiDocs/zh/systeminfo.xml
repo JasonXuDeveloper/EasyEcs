@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.SystemInfo" source="45daed00eff9">
     <summary>调度里的一个系统，以及它声明的数据（<see cref="T:EasyEcs.SystemAccess" />）。</summary>
@@ -30,5 +30,12 @@
   </member>
   <member name="P:EasyEcs.SystemInfo.WritesSingletons" source="f39a9cfdebe7">
     <summary>它写的单例。</summary>
+  </member>
+
+  <member name="P:EasyEcs.SystemInfo.Loops" source="17e91eaa224a">
+    <summary>
+      它的每个 [ForEach] 方法怎样运行，每个方法一行：向量循环及其形式（"Move: vector (Vector512 or Vector&lt;float&gt;), flat"），
+      或一次一行及其原因（"Spawn: scalar (it takes the Entity)"），即生成器的决定（EECS055 的原因）。
+    </summary>
   </member>
 </doc>

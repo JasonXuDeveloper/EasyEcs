@@ -10,7 +10,7 @@ description: "Whether a ForEachAttribute method runs as a vector loop (ForEachAt
 public enum SimdMode
 ```
 
-Whether a [`ForEachAttribute`](/en/docs/reference/foreachattribute) method runs as a vector loop ([`ForEachAttribute.Simd`](/en/docs/reference/foreachattribute#simd)). A method qualifies when it is static, runs on one thread, makes no structural change, takes components (by `ref` or `in`), singletons and values, and computes with operations that have an exact vector counterpart.
+Whether a [`ForEachAttribute`](/en/docs/reference/foreachattribute) method runs as a vector loop ([`ForEachAttribute.Simd`](/en/docs/reference/foreachattribute#simd)). A method qualifies when it is static, makes no structural change (on one thread or in parallel), takes components (by `ref` or `in`) and [`Maybe`](/en/docs/reference/maybe) of them, singletons and values, and computes with operations that have an exact vector counterpart. [`World.DescribeSchedule`](/en/docs/reference/world#describeschedule) names the loop each method of a system got ([`SystemInfo.Loops`](/en/docs/reference/systeminfo#loops)).
 
 ## Fields
 

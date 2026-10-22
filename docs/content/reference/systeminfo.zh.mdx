@@ -52,6 +52,14 @@ public StageWait[] After { get; init; }
 
 它为什么不在更早的阶段：紧挨在它前面的那个阶段里它必须排在后面的系统（第一个阶段为空）。
 
+### `Loops` [#loops]
+
+```csharp
+public string[] Loops { get; init; }
+```
+
+它的每个 [ForEach] 方法怎样运行，每个方法一行：向量循环及其形式（"Move: vector (Vector512 or Vector&lt;float&gt;), flat"），或一次一行及其原因（"Spawn: scalar (it takes the Entity)"），即生成器的决定（EECS055 的原因）。
+
 ### `Name` [#name]
 
 ```csharp

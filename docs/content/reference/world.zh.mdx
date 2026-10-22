@@ -524,6 +524,24 @@ public void ForEachEntityParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref 
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
 
+### `ForEachMasked` [#foreachmasked]
+
+```csharp
+public void ForEachMasked<T1, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where TJob : struct, IForEachMasked<T1>, allows ref struct;
+public void ForEachMasked<T1, T2, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, T9>, allows ref struct;
+```
+
+组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
+
+用于还接收"只有部分行通过"的字的 job 的 [`World.ForEachBatch`](/zh/docs/reference/world#foreachbatch)：在需要逐行检查的表里，行全部通过的字并入前面几个字的那一段，部分行通过的字整个交给 job，通过的行以位的形式给出。零分配。
+
 ### `ForEachParallel` [#foreachparallel]
 
 ```csharp

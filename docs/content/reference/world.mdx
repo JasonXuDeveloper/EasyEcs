@@ -524,6 +524,24 @@ One overload per number of components, 1 to 9 (generated from one template); thi
 
 **Complexity** ([API table](/en/docs/api)): O(M + S), divided over up to `MaxDegreeOfParallelism` threads
 
+### `ForEachMasked` [#foreachmasked]
+
+```csharp
+public void ForEachMasked<T1, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where TJob : struct, IForEachMasked<T1>, allows ref struct;
+public void ForEachMasked<T1, T2, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, T9>, allows ref struct;
+```
+
+One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
+
+[`World.ForEachBatch`](/en/docs/reference/world#foreachbatch) for a job that also takes a word of rows of which only some pass: in a table whose rows must be tested, each word whose rows all pass joins the run of the words before it, and each word with some passing rows goes to the job whole with those rows as bits. Allocation-free.
+
 ### `ForEachParallel` [#foreachparallel]
 
 ```csharp

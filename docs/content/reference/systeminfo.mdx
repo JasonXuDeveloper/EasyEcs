@@ -52,6 +52,14 @@ public StageWait[] After { get; init; }
 
 Why it is not in an earlier stage: the systems of the stage just before its own that it must follow (empty in the first stage).
 
+### `Loops` [#loops]
+
+```csharp
+public string[] Loops { get; init; }
+```
+
+How each of its [ForEach] methods runs, one line per method: a vector loop and its forms ("Move: vector (Vector512 or Vector&lt;float&gt;), flat"), or one row at a time and why ("Spawn: scalar (it takes the Entity)"), as the generator decided (the reasons of EECS055).
+
 ### `Name` [#name]
 
 ```csharp

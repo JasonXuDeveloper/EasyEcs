@@ -105,6 +105,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`IForEach<T1..T9>`](/en/docs/reference/iforeach) | Struct callback for World.ForEach. |
 | [`IForEachBatch<T1..T9>`](/en/docs/reference/iforeachbatch) | Struct callback for World.ForEachBatch: receives whole runs of rows as spans, one per component, so the job can process them with SIMD (System.Numerics.Vector, MemoryMarshal.Cast), and their entities (built only when indexed). |
 | [`IForEachEntity<T1..T9>`](/en/docs/reference/iforeachentity) | Like IForEach but also receives the Entity handle, built from the archetype's entity rows (id and version side by side) without a per-entity lookup. |
+| [`IForEachMasked<T1..T9>`](/en/docs/reference/iforeachmasked) | A batch job that also takes a word of 64 rows of which only some pass (a filter that tests presence bits or change ticks): World.ForEachMasked hands it the whole word with the passing rows as bits, where IForEachBatch would get each run of passing rows apart. |
 | [`IGroup`](/en/docs/reference/igroup) | Marks a component whose value splits tables: in a world that called World.GroupBy, entities with different IGroup.Groups live in different tables, so a query of one group (QueryFilter.InGroup) walks only its own rows, contiguous in memory (a zone, a map, a match, a team). |
 | [`IIndexed, IIndexed<TKey>`](/en/docs/reference/iindexed) | What every IIndexed is, so a component type is known to be indexed without reflection (a type test the JIT folds). |
 | [`INoStructuralChanges`](/en/docs/reference/inostructuralchanges) | Marks a ForEach job that makes no structural change (no create/destroy/add/remove/set on any entity of the world it iterates). |
@@ -121,6 +122,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 
 | Type | Summary |
 |---|---|
+| [`FloatMode`](/en/docs/reference/floatmode) | What a vector loop of a ForEachAttribute method may change in floating-point results. |
 | [`SimdMode`](/en/docs/reference/simdmode) | Whether a ForEachAttribute method runs as a vector loop (ForEachAttribute.Simd). |
 | [`SystemErrorPolicy`](/en/docs/reference/systemerrorpolicy) | What an exception thrown by a system does (WorldOptions.SystemErrors). |
 | [`TargetPolicy`](/en/docs/reference/targetpolicy) | What happens to the links to an entity when it is destroyed (TargetPolicyExtensions.WhenTargetDestroyed, RelationIndex.WhenTargetDestroyed). |
