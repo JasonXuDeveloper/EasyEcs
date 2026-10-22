@@ -198,13 +198,14 @@ public class DeathSystem : EcsSystem
 public class RespawnSystem : EcsSystem                                        // DeathSystem does not know it exists
 {
     [ForEach, With<Player>, With<Dead>]
-    static void Respawn(Entity player, ref Health hp, ref DynamicBuffer<Loot> bag, World world)
+    static void Respawn(Entity player, ref Health hp, ref DynamicBuffer<Loot> bag, in DynamicBuffer<Friend> friends,
+        World world)
     {
         foreach (var shot in world.Children(player)) shot.Destroy();          // recall its projectiles
         hp.Value = hp.Max;
         bag.Clear();                                                          // a death empties the bag
         var at = new Position(2048, 2048);
-        foreach (var link in player.Friend)                                   // next to a living friend, if any
+        foreach (var link in friends)                                         // next to a living friend, if any
             if (world.TryGetEntity(link.Target, out var friend) && !friend.IsDead)
             {
                 at = friend.Position;

@@ -303,7 +303,7 @@ public sealed partial class EasyEcsAnalyzer
             case IPropertyReferenceOperation { Property: { IsIndexer: false } property } reference when property.ReturnsByRef || property.ReturnsByRefReadonly:
             {
                 bool core = Symbols.IsItemComponent(property)
-                            || Symbols.Named(property.ContainingNamespace, "EasyEcs") && property.Name == "Value" && property.ContainingType.Name is "Maybe" or "Mut" or "SingletonRef";
+                            || Symbols.Named(property.ContainingNamespace, "EasyEcs") && property.Name == "Value" && property.ContainingType.Name is "Maybe" or "ReadOnlyMaybe" or "Mut" or "SingletonRef";
                 if (!core && !Symbols.IsGenerated(property)) return null;
                 string name = (core ? property.ContainingType.Name + "." : "") + property.Name;
                 if (property.ReturnsByRef) return (name, !Symbols.IsIndexed(property.Type), null, set);

@@ -559,7 +559,10 @@ internal static class Symbols
         ComponentSpan,
         /// <summary><c>EntitySpan</c>: the entities of a batch method's run of rows.</summary>
         Entities,
-        /// <summary><c>Maybe&lt;T&gt;</c>: a component the entity may lack (looked up per entity, a write when present).</summary>
+        /// <summary>
+        /// <c>Maybe&lt;T&gt;</c>: a component the entity may lack (looked up per entity, a write when present unless the
+        /// method only reads it); <c>ReadOnlyMaybe&lt;T&gt;</c>: the same, always a read.
+        /// </summary>
         Optional,
         /// <summary><c>Mut&lt;T&gt;</c>: a queried component written only where the method writes it (stamped per write).</summary>
         Mutable,
@@ -756,11 +759,16 @@ internal static class Symbols
             ? named.TypeArguments[0]
             : null;
 
-    /// <summary>Component type of a <c>Maybe&lt;T&gt;</c>, else null.</summary>
+    /// <summary>Component type of a <c>Maybe&lt;T&gt;</c> or a <c>ReadOnlyMaybe&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? MaybeElement(ITypeSymbol type) =>
-        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Maybe<T>")
+        type is INamedTypeSymbol { IsGenericType: true } named
+        && (Named(named.ConstructedFrom, "EasyEcs.Maybe<T>") || Named(named.ConstructedFrom, "EasyEcs.ReadOnlyMaybe<T>"))
             ? named.TypeArguments[0]
             : null;
+
+    /// <summary>A <c>ReadOnlyMaybe&lt;T&gt;</c>: an optional component the method can only read.</summary>
+    public static bool IsReadOnlyMaybe(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.ReadOnlyMaybe<T>");
 
     /// <summary>Component type of a <c>Mut&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? MutElement(ITypeSymbol type) =>

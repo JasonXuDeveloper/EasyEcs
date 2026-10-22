@@ -102,7 +102,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         Category, DiagnosticSeverity.Error, true,
         "The index of an IIndexed<TKey> component follows the values written with Set and CreateEntity as they are " +
         "written; a write through a ref (Get, GetOrAdd, TryGetRef, a 'ref' or Span [ForEach] parameter, a " +
-        "query item, a job's 'ref' parameter) would leave it stale. Read it with Read, 'in' or ReadOnlySpan; write it " +
+        "query item, a job's 'ref' parameter, a Maybe) would leave it stale. Read it with Read, 'in', ReadOnlySpan or " +
+        "ReadOnlyMaybe; write it " +
         "with Set or the generated SetX.", helpLinkUri: Help("EECS015"));
 
     public static readonly DiagnosticDescriptor RemovedRequired = new("EECS016", "A [Removed<T>] method requires T",
@@ -767,9 +768,10 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                 context.ReportDiagnostic(Diagnostic.Create(BadParameter, p.Locations.FirstOrDefault(),
                     Symbols.ByValueData(p) ? ImmutableDictionary<string, string?>.Empty.Add(ByValue, "") : null, p.Name, method.Name));
             }
-            else if (kind == Symbols.ParamKind.Optional && Symbols.MaybeElement(p.Type) is { } optional && Symbols.IsIndexed(optional))
+            else if (kind == Symbols.ParamKind.Optional && !Symbols.IsReadOnlyMaybe(p.Type)
+                     && Symbols.MaybeElement(p.Type) is { } optional && Symbols.IsIndexed(optional))
                 context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, p.Locations.FirstOrDefault(), optional.Name,
-                    $"parameter '{p.Name}' hands out a ref to it (read it from the Entity instead)"));
+                    $"parameter '{p.Name}' hands out a ref to it (take a ReadOnlyMaybe<{optional.Name}> to read it)"));
             else if (kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan or Symbols.ParamKind.Mutable)
             {
                 components++;

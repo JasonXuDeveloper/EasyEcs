@@ -478,7 +478,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                         Symbols.SpanElement(p.Type)!.ToDisplayString(Symbols.Fqn),
                         Symbols.Named(((INamedTypeSymbol)p.Type).ConstructedFrom, "System.Span<T>") ? "ref" : "in", p.Name, declared),
                     Symbols.ParamKind.Optional => new ParamModel(Symbols.ParamKind.Optional, // a write unless it only reads Value
-                        Symbols.MaybeElement(p.Type)!.ToDisplayString(Symbols.Fqn), Symbols.OnlyReadsValue(Symbols.WithBody(method, syntax, model).Item1, p.Name) ? "in" : "ref", p.Name, declared,
+                        Symbols.MaybeElement(p.Type)!.ToDisplayString(Symbols.Fqn), Symbols.IsReadOnlyMaybe(p.Type) || Symbols.OnlyReadsValue(Symbols.WithBody(method, syntax, model).Item1, p.Name) ? "in" : "ref", p.Name, declared,
                         Symbols.Implements(Symbols.MaybeElement(p.Type)!, Symbols.TrackChanges)),
                     Symbols.ParamKind.Mutable => new ParamModel(Symbols.ParamKind.Mutable, // a write: the scheduler sees its writer
                         Symbols.MutElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared,

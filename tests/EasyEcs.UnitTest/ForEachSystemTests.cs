@@ -53,6 +53,22 @@ public class ArmorBonus : EcsSystem
     }
 }
 
+/// <summary>Reads an optional indexed component: a ReadOnlyMaybe, which a Maybe of it cannot be (EECS015).</summary>
+public class LoginBonus : EcsSystem
+{
+    [ForEach]
+    private static void Add(ref Health health, ReadOnlyMaybe<Login> login)
+    {
+        if (login.HasValue) health = health with { Value = health.Value + login.Value.Id };
+    }
+
+    [ForEach]
+    private static void Mark(Entity entity, ref Health health, ReadOnlyMaybe<Login> login) // per entity: a lookup
+    {
+        if (login.HasValue && entity.Id.Index >= 0) health = health with { Value = health.Value + 100 };
+    }
+}
+
 /// <summary>Derived partial systems compose: base [ForEach] methods run first.</summary>
 public class MovementWithGravity : Movement
 {
@@ -241,6 +257,22 @@ public class ForEachSystemTests
 
         Assert.That(armored.Read<Health>().Value, Is.EqualTo(15));
         Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(mark + 1)), Is.Zero);
+    }
+
+    [Test]
+    public void ReadOnlyMaybeParametersReadIndexedComponents()
+    {
+        using var world = new World();
+        var bare = world.CreateEntity(new Health(10));
+        var player = world.CreateEntity(new Health(10), new Login(7));
+        var index = world.LoginIndex;
+        world.AddSystem<LoginBonus>();
+        world.Update();
+
+        Assert.That(bare.Read<Health>().Value, Is.EqualTo(10));
+        Assert.That(player.Read<Health>().Value, Is.EqualTo(117));
+        Assert.That(index.Get(7), Is.EqualTo(player));                            // the index never saw a write
+        Assert.Throws<System.InvalidOperationException>(static () => new ReadOnlyMaybe<Login>(in System.Runtime.CompilerServices.Unsafe.NullRef<Login>()).Value.ToString());
     }
 
     [Test]

@@ -50,8 +50,47 @@ public readonly ref struct Maybe<T> where T : struct, IComponent
         }
     }
 
+    /// <summary>The same component, read-only: what a <see cref="ReadOnlyMaybe{T}"/> parameter is given.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static implicit operator ReadOnlyMaybe<T>(Maybe<T> maybe) => new(in maybe._value);
+
     [DoesNotReturn]
-    private static void ThrowMissing() => throw new InvalidOperationException($"The entity has no {typeof(T).Name} (check HasValue)");
+    internal static void ThrowMissing() => throw new InvalidOperationException($"The entity has no {typeof(T).Name} (check HasValue)");
+}
+
+/// <summary>
+/// An optional component of the entity a <c>[ForEach]</c> method visits, read-only: <see cref="Value"/> is a
+/// <c>ref readonly</c>, so the method is scheduled as a reader of <typeparamref name="T"/>, a tracked component is never
+/// stamped, and an indexed one (<see cref="IIndexed{TKey}"/>) may be taken, which a <see cref="Maybe{T}"/> may not
+/// (EECS015: its ref could change the key behind the index's back). The same lookups as a <see cref="Maybe{T}"/>: the
+/// column once per run of rows in a method that changes no structure, the entity otherwise. Valid for the call it is
+/// passed to (a ref struct).
+/// </summary>
+public readonly ref struct ReadOnlyMaybe<T> where T : struct, IComponent
+{
+    private readonly ref readonly T _value;
+
+    /// <summary>Wraps <paramref name="value"/>, a null ref when the entity lacks the component.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ReadOnlyMaybe(ref readonly T value) => _value = ref value;
+
+    /// <summary>Whether the entity has the component.</summary>
+    public bool HasValue
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => !Unsafe.IsNullRef(in _value);
+    }
+
+    /// <summary>The component, read-only; throws when the entity lacks it (check <see cref="HasValue"/>).</summary>
+    public ref readonly T Value
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            if (Unsafe.IsNullRef(in _value)) Maybe<T>.ThrowMissing();
+            return ref _value;
+        }
+    }
 }
 
 /// <summary>

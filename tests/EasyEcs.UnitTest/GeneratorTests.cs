@@ -107,6 +107,7 @@ public class GeneratorTests
             public partial class Reparent : EcsSystem
             {
                 [ForEach] static void B(Entity e, in Owned o) => e.Set(new Owned { Owner = o.Owner });
+                [ForEach] static void C(ref P p, ReadOnlyMaybe<Owned> o) { if (o.HasValue) p.V = o.Value.Owner.Index; } // reads an optional indexed component
             }
             public static class Threads
             {
@@ -137,6 +138,7 @@ public class GeneratorTests
     [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>(0)", "Since(system.LastRunTick + 1)", "WriteMask => 1;")]
     [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Read<global::Q>();", "IForEachBatch<global::P>", "new global::EasyEcs.MaybeColumn<global::Q>(in entities, false)", "ref global::System.Runtime.CompilerServices.Unsafe.Add(")]
     [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) q.Value.V++; }", "access.Write<global::Q>();", "MaybeColumn<global::Q>(in entities, false)")]  // untracked: no stamp
+    [TestCase("[ForEach] static void A(ref P p, ReadOnlyMaybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Read<global::Q>();", "MaybeColumn<global::Q>(in entities, false)")]
     [TestCase("[ForEach] static void A(ref P p, Maybe<T> t) { if (t.HasValue) t.Value = default; }", "access.Write<global::T>();", "MaybeColumn<global::T>(in entities, true)")]  // tracked: stamped
     [TestCase("[ForEach] static void A(Mut<T> t, in P p) => t.SetIfChanged(new T { V = p.V });", "access.Write<global::T>();", "access.Read<global::P>();",
         "IForEachBatch<global::T, global::P>", "new global::EasyEcs.Mut<global::T>(ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r1, i), in entities, (int)i)",
@@ -1339,6 +1341,7 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach, Changed<T>] static void A(in T t, ref P p) => p.V++; }", "EECS026")]
     // EECS027: a lookup per row.
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V = e.Q.V; }", "EECS027")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V = e.Owned.Owner.Index; }", "EECS027")] // indexed: an 'in' parameter
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { if (e.HasQ) p.V++; } }", "EECS027")]
     [TestCase("public class S : EcsSystem { [ForEach] void A(ref P p) => p.V = World.Clock.Ticks; }", "EECS027")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, World w) => p.V = w.HasClock ? 1 : 0; }", "EECS027")]
@@ -1438,7 +1441,6 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { if (p.V > 0) p.V = e.Q.V; } }")]       // some rows only
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { if (p.V > 0) return; p.V = e.Q.V; } }")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { if (e.HasQ) e.RemoveQ(); p.V++; } }")]    // changed here
-    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V = e.Owned.Owner.Index; }")]               // indexed
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) { if (q.V < 0) throw new System.InvalidOperationException($\"{q.V}\"); p.V = q.V; } }")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) { System.Diagnostics.Debug.Assert(q.V >= 0, $\"{q.V}\"); p.V = q.V; } }")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(in P p, in Q q) => System.Console.WriteLine($\"{p.V} {q.V}\"); }")]

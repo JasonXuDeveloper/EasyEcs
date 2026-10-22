@@ -490,7 +490,8 @@ public sealed partial class EasyEcsAnalyzer
             bool job = !Symbols.IsForEach(method);
             string advice = job ? (singleton ? $"keep it in a field of the job, set before the loop" : $"add {name} to the job's components")
                 : singleton ? $"take it as a parameter ('in {name}' or 'ref {name}'), resolved once per pass"
-                : presence ? $"take a Maybe<{name}> parameter, or split the method with [With<{name}>] / [Without<{name}>]"
+                : presence ? $"take a {(Symbols.IsIndexed(type) ? "ReadOnlyMaybe" : "Maybe")}<{name}> parameter, or split the method with [With<{name}>] / [Without<{name}>]"
+                : Symbols.IsIndexed(type) ? $"take it as an 'in {name}' parameter, or a ReadOnlyMaybe<{name}> when some entities lack it"
                 : $"take it as a parameter ('in {name}' or 'ref {name}'), or a Maybe<{name}> when some entities lack it";
             context.ReportDiagnostic(Diagnostic.Create(RowLookup, operation.Syntax.GetLocation(),
                 job ? $"Job '{method.ContainingType.Name}'" : $"[ForEach] method '{method.Name}'", name,
@@ -542,10 +543,10 @@ public sealed partial class EasyEcsAnalyzer
             lookups.Add((operation, lookup.Type, !onEntity, lookup.Presence));
         }
 
-        // Changed through the entity in the same method, indexed (a Maybe of it would be a write: EECS015), or looked up
-        // only on some rows: a branch, a loop, after an early return.
+        // Changed through the entity in the same method, or looked up only on some rows: a branch, a loop, after an early
+        // return. An indexed component is read through 'in' or a ReadOnlyMaybe (a Maybe of it would be a write: EECS015).
         foreach (var lookup in lookups)
-            if (!changed.Contains(lookup.Type) && !Symbols.IsIndexed(lookup.Type) && EveryRow(lookup.Operation, body))
+            if (!changed.Contains(lookup.Type) && EveryRow(lookup.Operation, body))
                 found.Add(lookup);
         return found;
     }
