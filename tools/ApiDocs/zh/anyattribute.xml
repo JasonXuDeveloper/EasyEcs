@@ -1,0 +1,8 @@
+<doc>
+  <member name="T:EasyEcs.AnyAttribute" source="90f92296ff21">
+    <summary>
+      归约中的 <c>bool</c> 字段，有一行成立就成立：<c>Identity</c> 是 <c>false</c>，<c>Combine</c> 是
+      <c>left | right</c>（见 <see cref="T:EasyEcs.SumAttribute" />）。
+    </summary>
+  </member>
+</doc>

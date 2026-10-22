@@ -54,8 +54,12 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `ReadOnlyMaybe<T>` | ref struct | The same, read-only: `Value` is `ref readonly`, never stamped, allowed for indexed components; a `Maybe<T>` converts to it. |
 | `Mut<T>` | ref struct | A component parameter of a `[ForEach]` method that counts as written only on the rows the method writes: `Value`, `Write()`, `SetIfChanged(value)` ([change tracking](/en/docs/guide/change-tracking)). |
 | `Reduce<T>`, `IReduction<T>` | struct, interface | A `[ForEach]` parameter, taken by `ref`, reducing a pass into singleton `T`, which implements `IReduction<T>` (`Identity`, `Combine`): `Value`, `Combine(value)`. |
+| `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]`, `[Any]` | attributes | On every instance field of a partial struct: the generator writes its `IReduction<T>` (`Identity` and a field-wise `Combine`). |
+| `[Key]`, `[UniqueKey]`, `[Group]` | attributes | On a member of a partial component (`[Key]` on the type: the value itself): the generator writes the explicit `IIndexed<TKey>.Key` (`IUniqueIndexed<TKey>`) or `IGroup.Group`. |
+| `[GroupBy]`, `[WhenTargetDestroyed(policy)]`, `[NotSaved]` | attributes | Setup every world applies from its first table holding the type: its grouping, the policy of links to a destroyed target; `[NotSaved]`: no save writes the type, a load keeps the world's own singleton. |
 | `Scratch<T>` | ref struct | A `[ForEach]` parameter: working memory of the method on the running thread, kept between rows, passes and worlds: `Value`. |
 | `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out id)`, `Find(key)`, `Count(key)`. |
+| `Lanes` | static class | Stream compaction for batch methods: `Compact(source, mask, destination)` writes the elements a lane mask selects side by side. |
 | `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interfaces, attributes | System groups (with filters through interfaces) and ordering. |
 | `SystemErrorPolicy` | enum | `Throw` (default) or `Disable`: what an exception in a system does. |
 | `SystemStats`, `SystemList` | readonly structs | A system's run count, times, allocated bytes and visited entities; `world.Systems`, allocation-free. |
@@ -79,7 +83,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `world.CreateEntities(Span<Entity> entities, in T1 … in Tn)` | O(count × n) amortized | one gate pass and at most one table growth for the wave; writes the handles |
 | `entity.Destroy()` | O(c) | the table's last row fills the hole (a tombstone during a pass); recycles the id; a stale handle is ignored; unlinks indexed components; cascades to `ChildOf` children and applies target policies; with `WorldOptions.DestroyLogCapacity`, one 16-byte record |
 | `world.DestroyAll<T1..Tn>(filter)` | O(M + S) | destroys every match in one gate pass and returns how many; safe during a pass |
-| `world.CollectIds<T1..Tn>(into, filter)` | O(M), + the rows read until `into` is full | writes the ids of the matches into a span in query order until it is full and returns how many: a bounded batch for `DestroyEntities`, `SaveEntities` or structural changes; a table whose rows all match is one copy; allocation-free |
+| `world.CollectIds<T1..Tn>(into, filter)` | O(M), + the rows read until `into` is full | writes the ids of the matches into a span in query order until it is full and returns how many: a bounded batch for `DestroyEntities`, `SaveEntities` or structural changes; a table whose rows all match is one copy, a 64-row word with room for its rows one `Lanes.Compact`; allocation-free |
 | `world.DestroyEntities(ids)` | O(ids × c) | destroys a list of ids in one gate pass and one cascade and returns how many; stale ids and repeats are skipped; safe during a pass |
 | `entity.IsAlive` / `world.IsAlive(id)` | O(1) | |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` | O(1) | false (or a throw) when that incarnation is not alive |
@@ -100,6 +104,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `entity.Set(in T1 … in Tn)` | O(n), or O(c) amortized when it moves | adds or overwrites, at most one row copy, returns the entity; a component the table has a column for only sets its bit; re-indexes a changed key (O(1)); a unique key another entity holds throws before anything changes |
 | `entity.SetIfChanged(in T value)` | O(1) plus a comparison (O(size of `T`)); as `Set` when the value differs | false, and nothing written, stamped or re-indexed, when the entity already has this value; adds `T` when missing; equality is `IEquatable<T>`, else the bytes of an unmanaged `T` |
 | `entity.GetOrAdd<T>()` | O(1); when missing, O(1) if the table has a column for `T`, else O(c) amortized | `ref T`; adds a default value only when missing; a write of a tracked component; an indexed `T` it adds is indexed by its default key (a unique one claims it) |
+| `entity.GetOrAdd<T>(in T value)` / generated `GetOrAddX(…)` | as `GetOrAdd<T>()` | `ref T`; adds `value` only when missing (indexed, grouped, a unique key claimed, as `Set`); an entity that has `T` keeps its own value |
 | `entity.Remove<T1..Tn>()` | O(n) | clears presence bits, the row stays; missing components are ignored; a tracked component's removal is stamped (`[Removed<T>]`); returns the entity |
 | `entity.Disable<T>()` / `Enable<T>()` | O(1); the first disable in a table moves the row once | keeps the value while queries, `Has` and `Get` see it as gone; a disable counts as a removal, an enable as a write; returns false when there was nothing to do |
 | `entity.IsDisabled<T>()` | O(1) | |
@@ -118,6 +123,7 @@ component it has; components the source lacks stay absent and are not removals.
 | `prefab.Remove<T1..Tn>()` | O(n) | missing ones are ignored; returns the prefab |
 | `prefab.Has<T>()` / `Read<T>()` | O(1) | `Read` throws if the prefab has no `T` |
 | `prefab.SetBuffer<T>(params ReadOnlySpan<T>)` | O(n) | a `DynamicBuffer<T>` of these elements; every instance gets a list of its own |
+| `prefab.Absent<T>()` | O(1) | a column for `T` without the component: instances lack it, and adding it later flips a presence bit in their table instead of moving the row |
 | `prefab.AddMember()` | O(1) | a member of the prefab's group: instantiating one creates all; `EntityId` fields naming members are rewritten per instance |
 | generated: `prefab.X`, `HasX`, `SetX(…)`, `RemoveX()`; tags `IsX`, `SetX()`; buffers `SetLoot(items…)` | as the generic call | writers return the prefab; the property is read-only; not structural changes of any world |
 | `world.Instantiate(prefab)` | O(c) | one row copy; the target table is found once per prefab table and cached; safe during a pass (which does not visit the new entity); O(members × c) for a group |
@@ -197,6 +203,12 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | `lookup[id]` / `lookup.Read(id)` / `lookup.Has(id)` | O(1): one entity lookup | a `ReadOnlyMaybe<T>` (no value when stale or missing) / `ref readonly T` (throws) / `bool` |
 | `lookup.TryFind(key, out id)` / `Find(key)` / `Count(key)` | O(1) hash probe, then O(1) per entity of `Find` | indexed `T` only, called on the parameter: the index is created and built before the pass and before the parallel stage of its system (O(N) the first time) |
 | a value index reached otherwise during a parallel stage or pass | throws `InvalidOperationException` when not built yet | building it would change it under the threads reading it |
+
+`Lanes`, for batch methods that pick rows with a vector compare:
+
+| API | Complexity | Notes |
+| --- | --- | --- |
+| `Lanes.Compact<T>(source, mask, destination)` | O(1): at most 64 elements; with AVX-512, 8 or 4 vector steps for elements of 8 or 4 bytes; otherwise one step per selected element, or per element up to the last selected one when more than 12 are | writes `source[i]` for each set bit `i` of `mask`, in order, to the start of `destination` and returns `PopCount(mask)`; reads only the selected elements and writes only that many; throws `ArgumentException` when a bit lies at or past `source.Length` or `destination` is shorter than `PopCount(mask)`; allocation-free |
 
 ## Disable and bulk changes [#bulk]
 
@@ -282,6 +294,7 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 | `world.Update()` / `world.Update<TGroup>()` | Σ systems of the group | synchronous, allocation-free; throws `ObjectDisposedException` after `Dispose` |
 | `world.ChangeTick` | O(1) | grows by one per stage of systems and once after each update |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` | O(1) | `ref T`; `AddSingleton` throws when the singleton exists; `GetSingleton` throws when missing |
+| `world.GetOrAddSingleton<T>(in T value)` / generated `GetOrAddX(…)` | O(1) | `ref T`; adds `value` only when missing; a world that has `T` keeps its own value |
 | `world.SingletonRef<T>()` | O(1) | a stable handle; throws when the singleton was not added; `.Value` is one load |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) | `RemoveSingleton` returns false when it was not added |
 | generated: `world.X`, `HasX`, `GetOrAddX()`, `SetX(…)`, `RemoveX()` for a singleton `X` | as the generic call | |

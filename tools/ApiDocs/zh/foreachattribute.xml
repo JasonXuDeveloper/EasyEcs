@@ -56,4 +56,13 @@
       <see cref="F:EasyEcs.SimdMode.Off" /> 让方法保持一次一行。默认 <see cref="F:EasyEcs.SimdMode.Auto" />。
     </summary>
   </member>
+
+  <member name="P:EasyEcs.ForEachAttribute.FloatMode" source="af9b5bf47bab">
+    <summary>
+      向量循环可以改变哪些浮点结果。<see cref="F:EasyEcs.FloatMode.Exact" /> 让每个结果都与方法本身逐位相同，所以写进
+      <see cref="T:EasyEcs.Reduce`1" /> 的浮点求和保持一次一行（EECS055 会说明）：向量循环的每个通道各加各的行，相加顺序不同。
+      <see cref="F:EasyEcs.FloatMode.Fast" /> 接受这种顺序：同样那些行的和，只是舍入不同（与方法本身不逐位相同，不同向量宽度之间也不相同）。
+      整数求和以及任何通道类型的 Min / Max 两种模式下都精确。默认 <see cref="F:EasyEcs.FloatMode.Exact" />。
+    </summary>
+  </member>
 </doc>

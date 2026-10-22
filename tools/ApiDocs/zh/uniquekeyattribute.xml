@@ -1,0 +1,9 @@
+<doc>
+  <member name="T:EasyEcs.UniqueKeyAttribute" source="aa505dca917e">
+    <summary>
+      一个键只对应一个实体时用的 <see cref="T:EasyEcs.KeyAttribute" />（<see cref="T:EasyEcs.IUniqueIndexed`1" />）：生成器加上
+      <c>IUniqueIndexed&lt;TKey&gt;</c> 和显式的 <c>Key</c>。声明了 <see cref="T:EasyEcs.IDirectIndexed`1" /> 的 struct
+      保留自己写的 <c>Slots</c> 和 <c>SlotOf</c>，只生成 <c>Key</c>。
+    </summary>
+  </member>
+</doc>

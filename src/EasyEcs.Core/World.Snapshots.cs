@@ -130,14 +130,14 @@ public sealed partial class World
             for (int i = 0; i < _singletons.Length; i++)
             {
                 var recorded = i < snapshot.Singletons.Length ? snapshot.Singletons[i] : null;
-                if (keep.ContainsSingleton(i)) continue;
+                if (keep.ContainsSingleton(i) || swap && (recorded ?? _singletons[i] as SingletonBox) is { NotSaved: true }) continue; // a load keeps [NotSaved] ones
                 if (recorded == null) Volatile.Write(ref _singletons[i], null);
                 else if (_singletons[i] is SingletonBox box) box.CopyFrom(recorded);
                 else Volatile.Write(ref _singletons[i], recorded.Clone());
             }
 
             for (int i = _singletons.Length; i < snapshot.Singletons.Length; i++)
-                if (snapshot.Singletons[i] is { } recorded && !keep.ContainsSingleton(i))
+                if (snapshot.Singletons[i] is { } recorded && !keep.ContainsSingleton(i) && !(swap && recorded.NotSaved))
                 {
                     Array.Resize(ref _singletons, snapshot.Singletons.Length);
                     Volatile.Write(ref _singletons[i], recorded.Clone());

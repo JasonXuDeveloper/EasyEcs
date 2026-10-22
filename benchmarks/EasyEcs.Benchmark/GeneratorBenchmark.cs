@@ -34,7 +34,7 @@ public class GeneratorBenchmark
     private GeneratorDriver _driver;
 
     private GeneratorDriver NewDriver() => CSharpGeneratorDriver.Create(
-        [new ArityGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new SystemGenerator().AsSourceGenerator()], parseOptions: Parse,
+        [new ArityGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new SystemGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()], parseOptions: Parse,
         driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None));
 
     [GlobalSetup]

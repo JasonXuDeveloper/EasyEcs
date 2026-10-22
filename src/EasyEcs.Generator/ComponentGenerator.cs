@@ -14,7 +14,7 @@ namespace EasyEcs.Generator;
 /// so the common calls read like fields and methods of the entity or the world:
 /// <list type="bullet">
 /// <item>component <c>Position</c>: <c>entity.Position</c> (<c>ref</c>, <c>Get</c>), <c>HasPosition</c>,
-/// <c>TryGetPosition(out p)</c>, <c>GetOrAddPosition()</c> (not for indexed components), <c>SetPosition(x, y)</c> (one overload per public constructor, or the public fields),
+/// <c>TryGetPosition(out p)</c>, <c>GetOrAddPosition()</c> and <c>GetOrAddPosition(x, y)</c> (added with that value if missing; not for indexed components), <c>SetPosition(x, y)</c> (one overload per public constructor, or the public fields),
 /// <c>RemovePosition()</c>. A component the world watches (<c>ITracked</c>, <c>IIndexed&lt;TKey&gt;</c>) gets a
 /// <c>ref readonly</c> property (<c>Read</c>): reading it never counts as a write, and writes are <c>Set…</c> calls; a
 /// tracked one that is neither indexed nor grouped also gets <c>WriteHealth()</c> (<c>ref</c>, <c>Get</c>: stamped as
@@ -103,11 +103,24 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             .SelectMany(static (m, _) => m!.Unique
                 ? new[]
                 {
-                    new SavedType("Component<" + m.Type + ">", m.Type, m.EntityIds, m.Layout),
-                    new SavedType((m.Direct ? "DirectIndex<" : "UniqueIndex<") + m.Type + ", " + m.IndexKey + ">", m.Type, new EquatableArray<string>([]), ""),
+                    new SavedType("Component<" + m.Type + ">()", m.Type, m.EntityIds, m.Layout),
+                    new SavedType((m.Direct ? "DirectIndex<" : "UniqueIndex<") + m.Type + ", " + m.IndexKey + ">()", m.Type, new EquatableArray<string>([]), ""),
                 }
-                : [new SavedType((m.Singleton ? "Singleton" : "Component") + "<" + m.Type + ">", m.Type, m.EntityIds, m.Singleton ? "" : m.Layout)])
+                : [new SavedType((m.Singleton ? "Singleton" : "Component") + "<" + m.Type + ">()", m.Type, m.EntityIds, m.Singleton ? "" : m.Layout)])
             .WithTrackingName("SavedComponents");
+        // The setup a type declares for every world ([GroupBy], [WhenTargetDestroyed]): registered with it.
+        var groupBy = context.SyntaxProvider.ForAttributeWithMetadataName(Symbols.GroupByAttribute,
+                static (node, _) => node is TypeDeclarationSyntax,
+                static (ctx, _) => Setup(ctx.TargetSymbol, ctx.SemanticModel.Compilation, ctx.Attributes[0]))
+            .Where(static t => t is not null).Select(static (t, _) => t!).WithTrackingName("GroupBy");
+        var targetPolicies = context.SyntaxProvider.ForAttributeWithMetadataName(Symbols.WhenTargetDestroyedAttribute,
+                static (node, _) => node is TypeDeclarationSyntax,
+                static (ctx, _) => Setup(ctx.TargetSymbol, ctx.SemanticModel.Compilation, ctx.Attributes[0]))
+            .Where(static t => t is not null).Select(static (t, _) => t!).WithTrackingName("TargetPolicies");
+        var notSaved = context.SyntaxProvider.ForAttributeWithMetadataName(Symbols.NotSavedAttribute,
+                static (node, _) => node is TypeDeclarationSyntax,
+                static (ctx, _) => Setup(ctx.TargetSymbol, ctx.SemanticModel.Compilation, ctx.Attributes[0]))
+            .Where(static t => t is not null).Select(static (t, _) => t!).WithTrackingName("NotSaved");
         var buffers = bufferUses
             .Where(static b => b.Saved is not null)
             .Select(static (b, _) => b.Saved!)
@@ -121,9 +134,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             .Select(static (pair, _) => pair.Left && pair.Right)
             .WithTrackingName("ModuleInitializers");
         // Only the module initializer reaches it: implementation output.
-        context.RegisterImplementationSourceOutput(saved.Collect().Combine(buffers.Collect()).Combine(initializers), static (spc, pair) =>
+        var setups = groupBy.Collect().Combine(targetPolicies.Collect()).Select(static (pair, _) => pair.Left.AddRange(pair.Right))
+            .Combine(notSaved.Collect()).Select(static (pair, _) => pair.Left.AddRange(pair.Right));
+        context.RegisterImplementationSourceOutput(saved.Collect().Combine(buffers.Collect()).Combine(setups).Combine(initializers), static (spc, pair) =>
         {
-            var types = pair.Left.Left.Concat(pair.Left.Right).Distinct().OrderBy(static t => t.Call, System.StringComparer.Ordinal).ToArray();
+            var types = pair.Left.Left.Left.Concat(pair.Left.Left.Right).Concat(pair.Left.Right).Distinct().OrderBy(static t => t.Call, System.StringComparer.Ordinal).ToArray();
             if (pair.Right && types.Length > 0) spc.AddSource("EasyEcs.SavedTypes.g.cs", SourceText.From(EmitSavedTypes(types), Encoding.UTF8));
         });
     }
@@ -148,12 +163,34 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             if (buffer.TypeArguments[0] is not INamedTypeSymbol element || Symbols.ContainsTypeParameter(element)
                 || !model.Compilation.IsSymbolAccessibleWithin(element, model.Compilation.Assembly) || !Symbols.IsNameable(element))
                 return null;
-            return new SavedType("Component<" + buffer.ToDisplayString(Symbols.Fqn) + ">", element.ToDisplayString(Symbols.Fqn),
+            return new SavedType("Component<" + buffer.ToDisplayString(Symbols.Fqn) + ">()", element.ToDisplayString(Symbols.Fqn),
                 new EquatableArray<string>(Symbols.EntityIdPaths(element, model.Compilation)),
                 // An element of another assembly: its private fields are invisible here, its own module records the hash.
                 Symbols.LayoutHash(element) is not { } layout ? ""
                 : SymbolEqualityComparer.Default.Equals(element.ContainingAssembly, model.Compilation.Assembly) ? layout : "0");
         }
+    }
+
+    /// <summary>
+    /// The registration of the world setup <paramref name="attribute"/> declares on <paramref name="symbol"/>
+    /// (<c>GroupBy&lt;T&gt;()</c>, <c>WhenTargetDestroyed&lt;T&gt;(policy)</c>, <c>RelationWhenTargetDestroyed&lt;T&gt;(policy)</c>,
+    /// <c>NotSaved&lt;T&gt;()</c>),
+    /// or null when the type cannot take it (EECS068 reports it) or the module initializer cannot name it.
+    /// </summary>
+    private static SavedType? Setup(ISymbol symbol, Compilation compilation, AttributeData attribute)
+    {
+        if (symbol is not INamedTypeSymbol { TypeKind: TypeKind.Struct } type || Symbols.ContainsTypeParameter(type)
+            || !compilation.IsSymbolAccessibleWithin(type, compilation.Assembly) || !Symbols.IsNameable(type)
+            || Symbols.SetupProblem(type, attribute) != null)
+            return null;
+        string name = type.ToDisplayString(Symbols.Fqn);
+        if (Symbols.Named(attribute.AttributeClass, Symbols.GroupByAttribute))
+            return new SavedType($"GroupBy<{name}>()", name, new EquatableArray<string>([]), "");
+        if (Symbols.Named(attribute.AttributeClass, Symbols.NotSavedAttribute))
+            return new SavedType($"NotSaved<{name}>()", name, new EquatableArray<string>([]), "");
+        string policy = $"(global::EasyEcs.TargetPolicy){attribute.ConstructorArguments[0].Value}";
+        return new SavedType($"{(Symbols.Implements(type, Symbols.Relation) ? "RelationWhenTargetDestroyed" : "WhenTargetDestroyed")}<{name}>({policy})",
+            name, new EquatableArray<string>([]), "");
     }
 
     /// <summary>
@@ -172,7 +209,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         sb.Append("    /// <summary>Makes this module's components and singletons loadable by type id (World.Load), and tells\n");
         sb.Append("    /// World.LoadEntities where their EntityId fields are.</summary>\n");
         sb.Append($"    {Code.ModuleInitializer}\n    internal static void Register()\n    {{\n");
-        foreach (var type in types) sb.Append($"        global::EasyEcs.SavedTypes.{type.Call}();\n");
+        foreach (var type in types) sb.Append($"        global::EasyEcs.SavedTypes.{type.Call};\n");
         foreach (var type in types.Where(static t => t.Layout.Length > 0).Select(static t => (t.Type, t.Layout)).Distinct())
             sb.Append($"        global::EasyEcs.SavedTypes.Raw<{type.Type}>({type.Layout});\n");
 
@@ -260,6 +297,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             if (Free(World, "GetOrAdd" + n))
                 Member(sb, $"The world's <see cref=\"{t}\"/> by <c>ref</c>, added (default) first if missing (<c>GetOrAddSingleton</c>).",
                     $"ref {t} GetOrAdd{n}() => ref @this.GetOrAddSingleton<{t}>();");
+            if (Free(World, "GetOrAdd" + n))
+                foreach (var setter in m.Setters)
+                    if (setter.Parameters.Length > 0)
+                        Member(sb, $"The world's <see cref=\"{t}\"/> by <c>ref</c>, added with this value first if missing (<c>GetOrAddSingleton</c>); a world that has it keeps its own.",
+                            $"ref {t} GetOrAdd{n}({setter.Parameters}) => ref @this.GetOrAddSingleton({setter.Value});");
             if (Free(World, "Set" + n))
                 foreach (var setter in m.Setters)
                     Member(sb, $"Sets the world's <see cref=\"{t}\"/>, adding it if missing.",
@@ -287,6 +329,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         if (Free(Entity, "GetOrAdd" + n))
             Member(sb, $"The entity's <see cref=\"{t}\"/> by <c>ref</c>, added (default) first if missing (<c>GetOrAdd</c>).",
                 $"ref {t} GetOrAdd{n}() => ref @this.GetOrAdd<{t}>();");
+        if (Free(Entity, "GetOrAdd" + n))
+            foreach (var setter in m.Setters)
+                if (setter.Parameters.Length > 0)
+                    Member(sb, $"The entity's <see cref=\"{t}\"/> by <c>ref</c>, added with this value first if missing (<c>GetOrAdd</c>); an entity that has it keeps its own.",
+                        $"ref {t} GetOrAdd{n}({setter.Parameters}) => ref @this.GetOrAdd({setter.Value});");
         if (Free(Entity, "Disable" + n))
             Member(sb, $"Switches the entity's <see cref=\"{t}\"/> off, keeping its value (<c>Disable</c>); false if it has none enabled.",
                 $"bool Disable{n}() => @this.Disable<{t}>();");
@@ -445,7 +492,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 return new Shape(Symbols.Implements(type, "EasyEcs.IRelation") ? Kind.Relation : Kind.Element,
                     false, false, false, false, false, false, true, false);
             bool tag = Symbols.IsTag(type);
-            bool indexed = Key(type, out _) != null, grouped = Symbols.Implements(type, Symbols.Group);
+            bool indexed = Symbols.IndexKey(type, out _) != null, grouped = Symbols.IsGrouped(type);
             bool tracked = Symbols.Implements(type, Symbols.TrackChanges);
             bool own = SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, core);
             return new Shape(singleton ? Kind.Singleton : Kind.Component, tag, tracked || indexed || grouped,
@@ -454,16 +501,6 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 // components; EasyEcs's own tag (Retired) is the world's to add and remove: it is only read.
                 Symbols.IsDisableable(type) && !own, !(own && tag),
                 Symbols.IsComparable(type)); // what SetIfChanged compares (EECS040's rule)
-        }
-
-        /// <summary>
-        /// The key of an indexed component (a unique component's is its unique key, another IIndexed key is EECS036),
-        /// or null; <paramref name="unique"/>: the unique key.
-        /// </summary>
-        public static ITypeSymbol? Key(INamedTypeSymbol type, out ITypeSymbol? unique)
-        {
-            unique = type.AllInterfaces.FirstOrDefault(i => Symbols.Named(i.OriginalDefinition, Symbols.UniqueIndexed))?.TypeArguments[0];
-            return unique ?? type.AllInterfaces.FirstOrDefault(i => Symbols.Named(i.OriginalDefinition, Symbols.Indexed))?.TypeArguments[0];
         }
 
         /// <summary>
@@ -751,11 +788,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
 
             string fqn = type.ToDisplayString(Symbols.Fqn);
             var setters = SettersOf(type, fqn, type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray());
-            var key = Shape.Key(type, out var unique);
+            var key = Symbols.IndexKey(type, out bool unique);
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
             return new ComponentModel(ns, fqn, type.Name, Symbols.FlatName(type), Symbols.HintName(type), isPublic, shape,
                 key?.ToDisplayString(Symbols.Fqn) ?? "",
-                unique != null && !Symbols.Named(unique, Symbols.EntityId) && unique is not ITypeParameterSymbol,
+                unique && key != null && !Symbols.Named(key, Symbols.EntityId) && key is not ITypeParameterSymbol,
                 type.AllInterfaces.Any(i => Symbols.Named(i.OriginalDefinition, Symbols.DirectIndexed)),
                 new EquatableArray<Setter>(setters), new EquatableArray<string>(shape.Members(type, easyEcs, compilation)),
                 new EquatableArray<string>(shape.Kind == Kind.Singleton ? [] : Symbols.EntityIdPaths(type, compilation)),

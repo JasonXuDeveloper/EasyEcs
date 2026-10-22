@@ -7,7 +7,7 @@ namespace EasyEcs.UnitTest;
 /// <see cref="Reduce{T}"/>: a [ForEach] pass accumulates into a partial result per chunk (per pass on one thread),
 /// combined in chunk order into its singleton when the pass ends.
 /// </summary>
-public class ReduceTests
+public partial class ReduceTests
 {
     public record struct Points(int Value) : IComponent;
     public record struct Spot(float X, float Y) : IComponent;
@@ -55,6 +55,34 @@ public class ReduceTests
         public static Ends2 Identity => default;
         public static Ends2 Combine(Ends2 left, Ends2 right) =>
             !left.Any ? right : !right.Any ? left : new Ends2 { First = left.First, Last = right.Last, Any = true };
+    }
+
+    /// <summary>A reduction declared by its fields' attributes: the generator writes Identity and Combine.</summary>
+    public partial struct Census : ISingletonComponent
+    {
+        [Sum] public int Count;
+        [Sum] public long Total;
+        [Min] public int Lowest;
+        [Max] public float Highest;
+        [Product] public double Odds;
+        [All] public bool AllEven;
+        [Any] public bool AnyTen;
+    }
+
+    public class ParallelCensus : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 256)]
+        static void Count(in Points points, ref Reduce<Census> census)
+        {
+            ref var c = ref census.Value;
+            c.Count++;
+            c.Total += points.Value;
+            c.Lowest = Math.Min(c.Lowest, points.Value);
+            c.Highest = MathF.Max(c.Highest, points.Value);
+            c.Odds *= points.Value % 100 == 0 ? 0.5 : 1;
+            c.AllEven &= points.Value % 2 == 0;
+            c.AnyTen |= points.Value == 10;
+        }
     }
 
     public class SerialScores : EcsSystem
@@ -177,6 +205,23 @@ public class ReduceTests
             Assert.That((world.Scores.Count, world.Scores.Sum), Is.EqualTo((count, sum)), $"run {run}");
             for (int i = 0; i < entities.Length; i += 997) entities[i].Enable<Points>();
         }
+    }
+
+    [Test]
+    public void AReductionDeclaredByAttributesCombinesEachFieldItsWay()
+    {
+        Assert.That(Census.Identity, Is.EqualTo(new Census { Lowest = int.MaxValue, Highest = float.NegativeInfinity, Odds = 1, AllEven = true }));
+        using var world = Pointed(10_000);
+        world.AddSystem<ParallelCensus>();
+        world.Update();
+        var census = world.Census;
+        Assert.That((census.Count, census.Total, census.Lowest, census.Highest), Is.EqualTo((10_000, 9_999L * 10_000 / 2, 0, 9_999f)));
+        Assert.That((census.Odds, census.AllEven, census.AnyTen), Is.EqualTo((Math.Pow(0.5, 100), false, true)));
+
+        using var empty = new World(); // no rows: the identity
+        empty.AddSystem<ParallelCensus>();
+        empty.Update();
+        Assert.That(empty.Census, Is.EqualTo(Census.Identity));
     }
 
     [Test]

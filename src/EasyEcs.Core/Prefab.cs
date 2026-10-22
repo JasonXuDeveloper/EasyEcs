@@ -76,4 +76,17 @@ public sealed partial class Prefab
         Row.Get<DynamicBuffer<T>>().AddRange(elements);
         return this;
     }
+
+    /// <summary>
+    /// Give the recipe a column for <typeparamref name="T"/> without the component: instances lack it, but their table
+    /// has room for it, so adding it later (a tag set and cleared per tick, a state some instances enter) flips a
+    /// presence bit instead of moving the row to another table, and every instance stays in one table. A value the
+    /// recipe had is dropped. Returns this prefab. O(1).
+    /// </summary>
+    public Prefab Absent<T>() where T : struct, IComponent
+    {
+        Row.Set(default(T)); // the column...
+        Row.Remove<T>();     // ...its row absent: the table keeps the column
+        return this;
+    }
 }

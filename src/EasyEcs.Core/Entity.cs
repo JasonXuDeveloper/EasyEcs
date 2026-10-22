@@ -9,11 +9,11 @@ namespace EasyEcs;
 /// Handle to an entity: id + version + world (16 bytes). Every access validates the version, so a handle to a
 /// destroyed entity never touches the entity that reused its id: questions (<see cref="IsAlive"/>,
 /// <see cref="Has{T}"/>, <see cref="TryGet{T}"/>, <see cref="TryGetRef{T}"/>) answer false, accesses and changes
-/// (<see cref="Get{T}"/>, <see cref="Read{T}"/>, <see cref="GetOrAdd{T}"/>, <c>Set</c>, <c>Remove</c>) throw, and
+/// (<see cref="Get{T}"/>, <see cref="Read{T}"/>, <see cref="GetOrAdd{T}()"/>, <c>Set</c>, <c>Remove</c>) throw, and
 /// <see cref="Destroy"/> does nothing. Safe to store and to compare.
 /// </summary>
 /// <remarks>
-/// Refs returned by <see cref="Get{T}"/>/<see cref="GetOrAdd{T}"/> point into the row of the entity's archetype table: use
+/// Refs returned by <see cref="Get{T}"/>/<see cref="GetOrAdd{T}()"/> point into the row of the entity's archetype table: use
 /// them immediately and never keep them across a structural change of that entity (it moves the row) or an
 /// <c>await</c>.
 /// </remarks>
@@ -240,7 +240,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     // Structural changes and cold paths take the handle by value: a loop calling them keeps its handle in registers
     // (a call through `this` would take its address and store it to memory on every row, even when the call is rare).
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
-    private static ref T AddCore<T>(World world, int id, int version) where T : struct, IComponent
+    private static ref T AddCore<T>(World world, int id, int version, scoped in T initial) where T : struct, IComponent
     {
         if (world == null) ThrowStale(); // a default handle
         using (world.Structural())
@@ -249,12 +249,12 @@ public readonly partial struct Entity : IEquatable<Entity>
             ushort bit = ComponentType<T>.Bit;
             // A disabled T is there, paused: it comes back with the value it kept (as Enable), not reset to default.
             if (meta.Archetype.HasDisabled && world.EnableRow<T>(ref meta, id, version)) return ref World.Row<T>(ref meta, bit);
-            if (ComponentType<T>.Unique) world.Claim(id, default(T)); // the default's key, before the row moves
+            if (ComponentType<T>.Unique) world.Claim(id, initial); // the initial value's key, before the row moves
             world.AddBit(ref meta, id, bit);
             ref T value = ref World.Row<T>(ref meta, bit);
-            value = default;
+            value = initial;
             meta.Archetype.Stamp<T>(meta.Slot, world.ChangeTick);
-            if (ComponentType<T>.Indexed) world.IndexAdded(id, version, in value); // the default's key
+            if (ComponentType<T>.Indexed) world.IndexAdded(id, version, in value); // the initial value's key
             return ref value;
         }
     }
@@ -269,9 +269,24 @@ public readonly partial struct Entity : IEquatable<Entity>
     public ref T GetOrAdd<T>() where T : struct, IComponent
     {
         ref T value = ref Find<T>(false);
-        if (Unsafe.IsNullRef(ref value)) return ref AddCore<T>(_world, Index, Version); // throws for a handle that is not alive
+        if (Unsafe.IsNullRef(ref value)) return ref AddCore<T>(_world, Index, Version, default); // throws for a handle that is not alive
         if (default(T) is ITracked) Stamp<T>(_world, Index);
         return ref value;
+    }
+
+    /// <summary>
+    /// Ref to component <typeparamref name="T"/>, adding it with <paramref name="value"/> first if missing (its key
+    /// indexed, its group joined, as <c>Set</c> would); an entity that has it keeps its own value, and a disabled
+    /// <typeparamref name="T"/> is enabled with the value it kept (<see cref="Enable{T}"/>). Counts as a write of a
+    /// tracked component. The generated <c>GetOrAddHealth(100)</c> calls it. Same cost as <see cref="GetOrAdd{T}()"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ref T GetOrAdd<T>(scoped in T value) where T : struct, IComponent
+    {
+        ref T current = ref Find<T>(false);
+        if (Unsafe.IsNullRef(ref current)) return ref AddCore(_world, Index, Version, in value); // throws for a handle that is not alive
+        if (default(T) is ITracked) Stamp<T>(_world, Index);
+        return ref current;
     }
 
     /// <summary>Stamp entity <paramref name="id"/>'s row of tracked component <typeparamref name="T"/>, which it has (cold path).</summary>

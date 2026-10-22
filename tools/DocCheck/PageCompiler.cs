@@ -116,7 +116,7 @@ public sealed class PageCompiler
         foreach (var snippet in snippets) trees.AddRange(snippet.Emit(page, name => last[name] == snippet));
 
         var compilation = CSharpCompilation.Create("DocCheck." + Path.GetFileNameWithoutExtension(page), trees, References, Options);
-        CSharpGeneratorDriver.Create([new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator()],
+        CSharpGeneratorDriver.Create([new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()],
                 parseOptions: Regular)
             .RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
         var diagnostics = await output.WithAnalyzers([new EasyEcsAnalyzer()]).GetAllDiagnosticsAsync();

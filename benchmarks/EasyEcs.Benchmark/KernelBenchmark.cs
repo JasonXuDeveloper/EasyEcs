@@ -14,22 +14,29 @@ namespace EasyEcs.Benchmark;
 /// (<c>HandWritten512</c>, the widest the hardware may have), and as the generator's vector loop of the same per-row
 /// method (<c>Generated</c>, Kernel.cs). <c>Step</c> computes (a clamp, a branch on random data); <c>Integrate</c> and
 /// <c>Count</c> stream memory (one float multiply-add, one int increment per row). <c>Move2</c> / <c>Move3</c> /
-/// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity), <c>Seek</c> (3 floats: a direction, its length, a
+/// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity: each field alike, a flat loop over the columns' lanes;
+/// <c>Move2HandCast</c> is the same by hand, the columns cast to floats), <c>Seek</c> (3 floats: a direction, its length, a
 /// division) and <c>Travel</c> (3 doubles) take components of several fields, which the vector loop splits into one
-/// vector per field (Interleaved), in a world of their own. 0 bytes either way.
+/// vector per field (Interleaved), in a world of their own. <c>Clamp</c> (Math.Clamp by a singleton's bounds, checked
+/// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
+/// pattern) are the calls, conversions and masks a vector loop takes. <c>Tally</c> (an int count, sum, Min and Max) and
+/// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
+/// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
+/// leaves out (a lane mask per word of 64 rows). 0 bytes either way.
 /// </summary>
 [MemoryDiagnoser]
 public class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _fields;
+    private World _world, _fields, _holes, _halves;
 
     [GlobalSetup]
     public void Setup()
     {
         _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _world.SetPull(0.75f);
+        _world.SetWindow(-40f, 120f);
         _world.Reserve<Heat, Speed, Mass, Ticks>(Entities);
         var random = new Random(1);
         for (int i = 0; i < Entities; i++)
@@ -37,7 +44,11 @@ public class KernelBenchmark
                 new Speed { Value = (float)random.NextDouble() * 20 - 10 }, new Mass { Value = (float)random.NextDouble() * 5 },
                 new Ticks { Value = i });
 
+        _holes = Holes(Entities, i => i % 3 == 0);
+        _halves = Holes(Entities, i => random.Next(2) == 0);
+
         _fields = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _fields.Reserve<P2, V2, P3, V3, P4, V4, D3>(Entities);
         float F() => (float)random.NextDouble() * 10 - 5;
         for (int i = 0; i < Entities; i++)
             _fields.CreateEntity(new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() }, new P3 { X = F(), Y = F(), Z = F() },
@@ -45,11 +56,30 @@ public class KernelBenchmark
                 new D3 { X = F(), Y = F(), Z = F() });
     }
 
+    /// <summary>A world of Heat, Speed and Mass whose rows in <paramref name="hole"/> lose Mass (in place: a presence bit).</summary>
+    private static World Holes(int entities, Func<int, bool> hole)
+    {
+        var world = new World(new WorldOptions { InitialEntityCapacity = entities });
+        world.SetPull(0.75f);
+        world.Reserve<Heat, Speed, Mass>(entities);
+        var random = new Random(2);
+        for (int i = 0; i < entities; i++)
+        {
+            var entity = world.CreateEntity(new Heat { Value = (float)random.NextDouble() * 200 - 50 },
+                new Speed { Value = (float)random.NextDouble() * 20 - 10 }, new Mass { Value = (float)random.NextDouble() * 5 });
+            if (hole(i)) entity.Remove<Mass>();
+        }
+
+        return world;
+    }
+
     [GlobalCleanup]
     public void Cleanup()
     {
         _world.Dispose();
         _fields.Dispose();
+        _holes.Dispose();
+        _halves.Dispose();
     }
 
     [Benchmark(Baseline = true)]
@@ -67,6 +97,26 @@ public class KernelBenchmark
 
     [Benchmark]
     public void StepGenerated() => Kernels.Step(_world);
+
+    [Benchmark]
+    public void HolesScalar()
+    {
+        var job = new StepRows { Pull = _holes.Pull };
+        _holes.ForEach<Heat, Speed, Mass, StepRows>(ref job);
+    }
+
+    [Benchmark]
+    public void HolesGenerated() => Kernels.Step(_holes);
+
+    [Benchmark]
+    public void HalvesScalar()
+    {
+        var job = new StepRows { Pull = _halves.Pull };
+        _halves.ForEach<Heat, Speed, Mass, StepRows>(ref job);
+    }
+
+    [Benchmark]
+    public void HalvesGenerated() => Kernels.Step(_halves);
 
     [Benchmark]
     public void IntegrateScalar()
@@ -100,6 +150,9 @@ public class KernelBenchmark
 
     [Benchmark]
     public void Move2Generated() => Kernels.Move2(_fields);
+
+    [Benchmark]
+    public void Move2HandCast() => Kernels.Move2Cast(_fields);
 
     [Benchmark]
     public void Move3Scalar()
@@ -140,6 +193,129 @@ public class KernelBenchmark
 
     [Benchmark]
     public void TravelGenerated() => Kernels.Travel(_fields);
+
+    [Benchmark]
+    public void ClampScalar()
+    {
+        var job = new ClampRows { Window = _world.Window };
+        _world.ForEach<Heat, Speed, ClampRows>(ref job);
+    }
+
+    [Benchmark]
+    public void ClampGenerated() => Kernels.Clamp(_world);
+
+    [Benchmark]
+    public void QuantizeScalar()
+    {
+        var job = new QuantizeRows();
+        _world.ForEach<Heat, Ticks, QuantizeRows>(ref job);
+    }
+
+    [Benchmark]
+    public void QuantizeGenerated() => Kernels.Quantize(_world);
+
+    [Benchmark]
+    public void GateScalar()
+    {
+        var job = new GateRows();
+        _world.ForEach<Heat, Speed, Mass, GateRows>(ref job);
+    }
+
+    [Benchmark]
+    public void GateGenerated() => Kernels.Gate(_world);
+
+    [Benchmark]
+    public void TallyScalar()
+    {
+        var job = new TallyRows { Tally = new Reduce<Tally> { Value = Tally.Identity } };
+        _world.ForEachBatch<Ticks, TallyRows>(ref job);
+        _world.GetOrAddSingleton<Tally>() = job.Tally.Value;
+    }
+
+    [Benchmark]
+    public void TallyGenerated() => Kernels.Tally(_world);
+
+    [Benchmark]
+    public void EnergyScalar()
+    {
+        var job = new EnergyRows { Energy = new Reduce<Energy> { Value = Energy.Identity } };
+        _world.ForEachBatch<Heat, Speed, EnergyRows>(ref job);
+        _world.GetOrAddSingleton<Energy>() = job.Energy.Value;
+    }
+
+    [Benchmark]
+    public void EnergyGenerated() => Kernels.Energy(_world);
+
+    public record struct Window(float Min, float Max) : ISingletonComponent;
+
+    /// <summary>A count, a sum, a minimum and a maximum of ints: exact in any order of the rows.</summary>
+    public struct Tally : ISingletonComponent, IReduction<Tally>
+    {
+        public int Count, Sum, Low, High;
+
+        public static Tally Identity => new() { Low = int.MaxValue, High = int.MinValue };
+        public static Tally Combine(Tally left, Tally right) => new()
+        {
+            Count = left.Count + right.Count, Sum = left.Sum + right.Sum, Low = Math.Min(left.Low, right.Low), High = Math.Max(left.High, right.High),
+        };
+    }
+
+    /// <summary>A float sum: vectorized only under FloatMode.Fast, since one sum per lane rounds in another order.</summary>
+    public struct Energy : ISingletonComponent, IReduction<Energy>
+    {
+        public float Total;
+
+        public static Energy Identity => default;
+        public static Energy Combine(Energy left, Energy right) => new() { Total = left.Total + right.Total };
+    }
+
+    /// <summary>The batch job [ForEach] compiled a reduction to before: the partial result in a local, the method per row.</summary>
+    private struct TallyRows : IForEachBatch<Ticks>
+    {
+        public Reduce<Tally> Tally;
+
+        public void Execute(EntitySpan entities, Span<Ticks> ticks)
+        {
+            var tally = Tally;
+            for (int i = 0; i < ticks.Length; i++) Kernels.Tally(in ticks[i], ref tally);
+            Tally = tally;
+        }
+
+        static int IForEachBatch<Ticks>.WriteMask => 0;
+    }
+
+    private struct EnergyRows : IForEachBatch<Heat, Speed>
+    {
+        public Reduce<Energy> Energy;
+
+        public void Execute(EntitySpan entities, Span<Heat> heat, Span<Speed> speed)
+        {
+            var energy = Energy;
+            for (int i = 0; i < heat.Length; i++) Kernels.Energy(in heat[i], in speed[i], ref energy);
+            Energy = energy;
+        }
+
+        static int IForEachBatch<Heat, Speed>.WriteMask => 0;
+    }
+
+    private struct ClampRows : IForEach<Heat, Speed>, INoStructuralChanges
+    {
+        public Window Window;
+        public void Execute(ref Heat heat, ref Speed speed) => Kernels.Clamp(ref heat, in speed, in Window);
+        static int IForEach<Heat, Speed>.WriteMask => 1;
+    }
+
+    private struct QuantizeRows : IForEach<Heat, Ticks>, INoStructuralChanges
+    {
+        public void Execute(ref Heat heat, ref Ticks ticks) => Kernels.Quantize(ref heat, ref ticks);
+        static int IForEach<Heat, Ticks>.WriteMask => 3;
+    }
+
+    private struct GateRows : IForEach<Heat, Speed, Mass>, INoStructuralChanges
+    {
+        public void Execute(ref Heat heat, ref Speed speed, ref Mass mass) => Kernels.Gate(ref heat, in speed, in mass);
+        static int IForEach<Heat, Speed, Mass>.WriteMask => 1;
+    }
 
     public struct P2 : IComponent { public float X, Y; }
     public struct V2 : IComponent { public float X, Y; }
@@ -222,6 +398,19 @@ public class KernelBenchmark
         [ForEach]
         internal static void Integrate(ref Heat heat, in Speed speed) => heat.Value += speed.Value * Dt;
 
+        // Reductions into a singleton: integers exact, so vectorized as written; a float sum only under FloatMode.Fast.
+        [ForEach(Simd = SimdMode.Require)]
+        internal static void Tally(in Ticks ticks, ref Reduce<Tally> tally)
+        {
+            tally.Value.Count++;
+            if ((ticks.Value & 1) == 0) tally.Value.Sum += ticks.Value;
+            tally.Value.Low = Math.Min(tally.Value.Low, ticks.Value);
+            tally.Value.High = Math.Max(tally.Value.High, ticks.Value);
+        }
+
+        [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+        internal static void Energy(in Heat heat, in Speed speed, ref Reduce<Energy> energy) => energy.Value.Total += heat.Value * speed.Value * speed.Value;
+
         [ForEach]
         internal static void Count(ref Ticks ticks) => ticks.Value++;
 
@@ -269,6 +458,41 @@ public class KernelBenchmark
             d.X = Math.FusedMultiplyAdd(d.Y, 0.5, d.X);
             d.Y = Math.Max(d.Y - d.Z * 0.25, -100);
             d.Z = d.Z > 10 ? -d.Z : d.Z + 1;
+        }
+
+        [ForEach]
+        internal static void Clamp(ref Heat heat, in Speed speed, in Window window) =>
+            heat.Value = Math.Clamp(heat.Value + speed.Value * Dt, window.Min, window.Max);
+
+        // A float truncated to an int, the int back to a float: a fixed-point step.
+        [ForEach]
+        internal static void Quantize(ref Heat heat, ref Ticks ticks)
+        {
+            int whole = (int)heat.Value;
+            ticks.Value = (ticks.Value & 1023) + whole;
+            heat.Value = whole + (heat.Value - whole) * 0.5f + ticks.Value * 1e-4f;
+        }
+
+        [ForEach]
+        internal static void Gate(ref Heat heat, in Speed speed, in Mass mass)
+        {
+            bool fast = speed.Value > 2 || speed.Value < -2;
+            bool heavy = mass.Value > 2.5f;
+            if (fast && !heavy) heat.Value = Math.Clamp(heat.Value, -5f, 5f);
+            else if (!fast || heat.Value is > 50 and < 100) heat.Value = MathF.Max(heat.Value - 1, -50);
+        }
+
+        // Move2 by hand: both columns cast to flat float lanes (a row's X and Y are consecutive), one vector per step.
+        [ForEach]
+        internal static void Move2Cast(Span<P2> p, ReadOnlySpan<V2> v)
+        {
+            var pf = MemoryMarshal.Cast<P2, float>(p);
+            var vf = MemoryMarshal.Cast<V2, float>(v);
+            var dt = new Vector<float>(Dt);
+            int i = 0;
+            for (; i <= pf.Length - Vector<float>.Count; i += Vector<float>.Count)
+                (new Vector<float>(pf.Slice(i)) + new Vector<float>(vf.Slice(i)) * dt).CopyTo(pf.Slice(i));
+            for (; i < pf.Length; i++) pf[i] += vf[i] * Dt;
         }
 
         // What a person writes by hand for the same work: a batch method over the runs of rows.

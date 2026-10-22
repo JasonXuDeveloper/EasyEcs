@@ -92,7 +92,7 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
     /// </summary>
     public RelationIndex<T> WhenTargetDestroyed(TargetPolicy policy)
     {
-        _world.SetRule(this, policy, static index => new World.RelationRule<T>(index));
+        _world.SetRule(this, ComponentType<DynamicBuffer<T>>.Bit, policy, static index => new World.RelationRule<T>(index));
         return this;
     }
 

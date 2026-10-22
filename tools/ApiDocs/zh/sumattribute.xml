@@ -1,0 +1,14 @@
+<doc>
+  <member name="T:EasyEcs.SumAttribute" source="8d76278a3658">
+    <summary>
+      归约（<see cref="T:EasyEcs.IReduction`1" />）中按加法合并的字段：<c>Identity</c> 是 0，<c>Combine</c> 是
+      <c>left + right</c>。用在 partial struct 的数值类型（整数、<c>float</c>、<c>double</c>、<c>decimal</c>）字段、带 setter
+      的自动属性或 record 的位置参数上：
+      <c>public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Max] public float Oldest; }</c>。
+      生成器为这个 struct 写出 <c>IReduction&lt;T&gt;</c>（public static 的 <c>Identity</c> 和逐字段的 <c>Combine</c>），
+      所以每个实例字段都要标 <see cref="T:EasyEcs.SumAttribute" />、<see cref="T:EasyEcs.ProductAttribute" />、
+      <see cref="T:EasyEcs.MinAttribute" />、<see cref="T:EasyEcs.MaxAttribute" />、<see cref="T:EasyEcs.AllAttribute" /> 或
+      <see cref="T:EasyEcs.AnyAttribute" /> 之一。
+    </summary>
+  </member>
+</doc>

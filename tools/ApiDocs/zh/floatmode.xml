@@ -1,0 +1,13 @@
+<doc>
+  <member name="T:EasyEcs.FloatMode" source="49d587393f2d">
+    <summary><see cref="T:EasyEcs.ForEachAttribute" /> 方法的向量循环可以改变哪些浮点结果。</summary>
+  </member>
+
+  <member name="F:EasyEcs.FloatMode.Exact" source="e83fb52199a7">
+    <summary>每个结果都与方法本身逐位相同：归约里的浮点求和保持一次一行。</summary>
+  </member>
+
+  <member name="F:EasyEcs.FloatMode.Fast" source="b985256ee07b">
+    <summary>归约里的浮点求和可以按另一种顺序（每个向量通道各加各的行）相加，所以舍入结果不同。</summary>
+  </member>
+</doc>

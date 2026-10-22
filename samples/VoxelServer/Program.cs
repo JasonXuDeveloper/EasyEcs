@@ -9,13 +9,12 @@ int players = Support.Option(args, "--players", 50);
 int ticks = Support.Option(args, "--ticks", 1200);
 
 // #region options
-// A chunk's blocks, its water and the water's next step are 8 KB each (its border 4 KB), more than a buffer's pool keeps by default: let
+// A chunk's blocks, its water and the water's next step are 8 KB each, more than a buffer's pool keeps by default: let
 // each chunk loaded reuse the lists of one that was unloaded.
 DynamicBuffer<Block>.PoolCapacity = Terrain.BlocksPerChunk;
 DynamicBuffer<Fluid>.PoolCapacity = Terrain.BlocksPerChunk;
 DynamicBuffer<NextFluid>.PoolCapacity = Terrain.BlocksPerChunk;
 DynamicBuffer<Surface>.PoolCapacity = Terrain.Size * Terrain.Size;
-DynamicBuffer<Border>.PoolCapacity = Terrain.BorderSize;
 DynamicBuffer<ItemStack>.PoolCapacity = Rules.InventorySlots;
 
 using var world = new World(new WorldOptions { MeasureSystems = true });
@@ -38,7 +37,6 @@ world.AddSystem<ChunkReadSystem>();
 world.AddSystem<ChunkGenerateSystem>();
 world.AddSystem<HeightMapSystem>();
 world.AddSystem<WaterWakeSystem>();
-world.AddSystem<WaterBorderSystem>();
 world.AddSystem<WaterFlowSystem>();
 world.AddSystem<WaterSleepSystem>();
 world.AddSystem<WaterCommitSystem>();
@@ -134,7 +132,6 @@ static void Reserve(World world, in Capacity capacity)
     DynamicBuffer<Fluid>.ReservePool(capacity.Chunks);
     DynamicBuffer<Surface>.ReservePool(capacity.Chunks);
     DynamicBuffer<NextFluid>.ReservePool(capacity.Flowing);
-    DynamicBuffer<Border>.ReservePool(capacity.Flowing);
     DynamicBuffer<ItemStack>.ReservePool(capacity.Players);
 }
 // #endregion capacity
@@ -147,8 +144,8 @@ static void Reserve(World world, in Capacity capacity)
 static void SetPrefabs(World world) =>
     world.SetPrefabs(
         Chunk: new Prefab()
-            .SetChunk(default).SetBuffer<Block>().SetBuffer<Fluid>().SetBuffer<NextFluid>().SetBuffer<Surface>().SetBuffer<Border>()
-            .SetViewers(0, 0).Set(FluidCount.Dry).SetReach(0, -1).SetFluidStep(StepResult.None, FluidCount.Dry, 0, 0)
+            .SetChunk(default).SetBuffer<Block>().SetBuffer<Fluid>().SetBuffer<NextFluid>().SetBuffer<Surface>()
+            .SetViewers(0, 0).Set(FluidCount.Dry).SetFluidStep(StepResult.None, FluidCount.Dry, 0, 0)
             .Set(new Fresh(), new Flowing(), new Unloading()).RemoveUnloading(),
         Player: new Prefab()
             .SetPlayer(0).SetInChunk(default).SetVisible(default, false).SetScore(0)

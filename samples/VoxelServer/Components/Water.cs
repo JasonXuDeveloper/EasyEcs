@@ -23,26 +23,11 @@ public record struct NextFluid(byte Level);
 public record struct Surface(byte Top);
 
 // Where a chunk's water is: how many blocks hold some, and the lowest and highest layer holding any (Low > High when
-// none). WaterCommitSystem writes it with each step; WaterBorderSystem reads it for the chunk and its neighbours instead
+// none). WaterCommitSystem writes it with each step; WaterFlowSystem reads it for the chunk and its neighbours instead
 // of searching 8 KB, FloatSystem skips the dry chunks, and the report sums the column.
 public record struct FluidCount(int Blocks, byte Low, byte High) : IComponent
 {
     public static readonly FluidCount Dry = new(0, Terrain.Height, 0);
-}
-
-// The edges of the four chunks around, as the water step sees them: a DynamicBuffer<Border> of the water, then the
-// blocks, of the row (north, south) or column (west, east) of each neighbour that touches this chunk, layer by layer
-// (Terrain.BorderOf). Zero where a neighbour is not loaded: no water, no block. WaterBorderSystem gathers it before each
-// step, so the step reads nothing but its own chunk's components.
-public record struct Border(byte Value);
-
-// The layers the next step shades, From to To: those holding water here or in the chunks around, and one below
-// (From > To when there is none). It samples one more layer each way, Bottom to Top. WaterBorderSystem writes it with
-// the border.
-public record struct Reach(int From, int To) : IComponent
-{
-    public readonly int Bottom => From - 1;
-    public readonly int Top => Math.Min(To + 1, Terrain.Height - 1);
 }
 
 // What the step in NextFluid did: nothing yet (a chunk just created), settled (no water moved), or moved; then its water

@@ -63,7 +63,7 @@ public class UnloadTests
         var compilation = CSharpCompilation.Create("Plugin",
             [CSharpSyntaxTree.ParseText(Plugin.Replace("VERSION", version.ToString()), parse)], references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
-        CSharpGeneratorDriver.Create([new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator()],
+        CSharpGeneratorDriver.Create([new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()],
             parseOptions: parse).RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
         using var stream = new MemoryStream();
         var result = output.Emit(stream);

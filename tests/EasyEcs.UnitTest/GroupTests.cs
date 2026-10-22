@@ -8,8 +8,36 @@ public record struct Zone(int Id) : IComponent, IGroup   // entities of one zone
     public int Group => Id;
 }
 
+/// <summary>Every world groups its tables by the shard ([GroupBy] with [Group]): no GroupBy call to forget.</summary>
+[GroupBy]
+public partial record struct Shard([Group] int Id) : IComponent;
+
 public class GroupTests
 {
+    [Test]
+    public void ADeclaredGroupingSplitsEveryWorldsTables()
+    {
+        using var world = new World();                                       // never calls GroupBy
+        world.CreateEntity(new Shard(0), new Health(1));
+        world.CreateEntity(new Shard(1), new Health(10));
+        var moved = world.CreateEntity(new Shard(2), new Health(100));
+        var batch = new Entity[3];
+        world.CreateEntities(batch, new Shard(1), new Health(1000));
+        static int Sum(World w, int shard)
+        {
+            int sum = 0;
+            foreach (var item in w.Query<Health>(QueryFilter.Create().InGroup<Shard>(shard))) sum += item.Component1.Value;
+            return sum;
+        }
+
+        // Without the grouping every table is group 0, and InGroup(0) would match all of them: 4111.
+        Assert.That((Sum(world, 0), Sum(world, 1), Sum(world, 2)), Is.EqualTo((1, 3010, 100)));
+        moved.Set(new Shard(0));
+        Assert.That((Sum(world, 0), Sum(world, 2)), Is.EqualTo((101, 0)));
+        world.GroupBy<Shard>();                                              // idempotent
+        Assert.That(Sum(world, 1), Is.EqualTo(3010));
+    }
+
     private static int Sum(World world, int zone)
     {
         int sum = 0;

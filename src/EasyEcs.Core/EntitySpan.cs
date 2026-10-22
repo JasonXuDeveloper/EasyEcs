@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -43,6 +44,13 @@ public readonly ref struct EntitySpan
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => new Entity(_world, _slots[index]);
     }
+
+    /// <summary>
+    /// The entity of row <paramref name="index"/> of the run, without a bounds check: generated per-row loops call it,
+    /// whose index stays below the spans' length, which is the run's (every span of a run has its rows). O(1).
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Entity At(nint index) => new Entity(_world, Unsafe.Add(ref MemoryMarshal.GetReference(_slots), index));
 
     /// <summary>The ids of the run's entities, read straight from the table (no copy): to store or send them.</summary>
     public ReadOnlySpan<EntityId> Ids
