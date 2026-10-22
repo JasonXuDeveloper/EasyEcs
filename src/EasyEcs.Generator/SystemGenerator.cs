@@ -301,11 +301,17 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     : $"        public ref {(p.RefKind == "in" ? "readonly " : "")}{p.Type} x{i};\n");
         }
         if (sb[sb.Length - 2] != '{') sb.Append('\n'); // a blank line after the fields, if any
-        sb.Append("        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
+        string call = $"__ForEach{owner.TypeParameters}.{method.Name}_{number}{method.TypeParameters}({args});";
         string first = method.IsBatch ? "global::EasyEcs.EntitySpan entities, " : method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
-        sb.Append($"        public void Execute({first}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
-        string call = $"__ForEach{owner.TypeParameters}.{method.Name}_{number}{method.TypeParameters}({args});";
+        // A vector loop also takes the words of 64 rows of which some pass (IForEachMasked): their passing rows as a
+        // lane mask, the other lanes stored back as loaded.
+        for (int pass = 0; pass < (method.Simd != null ? 2 : 1); pass++)
+        {
+        bool masked = pass == 1;
+        if (masked) sb.Append('\n');
+        sb.Append("        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
+        sb.Append($"        public void Execute({first}{(masked ? "ulong pass, " : "")}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
         if (!runs && !local.Contains(true))
             sb.Append($"            => {call}\n");
         else
@@ -324,15 +330,18 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 for (int k = 1; k <= components.Length; k++)
                     sb.Append($"{indent}ref {components[k - 1]} r{k} = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{k});\n");
                 sb.Append($"{indent}nint rows = {(components.Length > 0 ? "c1.Length" : "entities.Length")};\n");
-                if (method.Simd is { } simd) EmitVectorLoop(sb, simd, components, indent, call);
-                sb.Append(method.Simd != null
-                    ? $"{indent}for (; i < rows; i++) // the rows after the last whole vector: the method itself\n{indent}    {call}\n"
-                    : $"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n");
+                if (method.Simd is { } simd) EmitVectorLoop(sb, simd, components, indent, call, masked);
+                sb.Append(method.Simd == null
+                    ? $"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n"
+                    : masked
+                        ? $"{indent}for (; i < rows; i++) // the rows after the last whole vector that pass: the method itself\n{indent}    if (((pass >> (int)i) & 1) != 0) {call}\n"
+                        : $"{indent}for (; i < rows; i++) // the rows after the last whole vector: the method itself\n{indent}    {call}\n");
             }
             else sb.Append($"{indent}{call}\n");
             for (int i = 0; i < method.Parameters.Length; i++)
                 if (local[i]) sb.Append($"            x{i} = l{i};\n");
             sb.Append("        }\n");
+        }
         }
         // Its ref parameters (Span<T> for a batch, Mut<T>): carried over when the method moves the entity it visits,
         // and stamped when the component tracks changes: by the loop, every row it visits, except a Mut's, which
@@ -344,8 +353,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
             if (queried.Any(p => p.Type == components[k] && p.RefKind == "ref")) writes |= 1 << k;
             if (queried.Any(p => p.Type == components[k] && p.Kind == Symbols.ParamKind.Mutable)) own |= 1 << k;
         }
-        sb.Append($"\n        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.WriteMask => {writes};\n");
-        if (own != 0) sb.Append($"        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.SelfStamped => {own};\n");
+        string declaring = method.Simd != null ? "IForEachBatch" : iface; // IForEachMasked declares no masks of its own
+        sb.Append($"\n        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.WriteMask => {writes};\n");
+        if (own != 0) sb.Append($"        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.SelfStamped => {own};\n");
 
         sb.Append("    }\n\n");
 
@@ -362,7 +372,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// type, the uniform values broadcast once per run, then one Vector&lt;T&gt; of rows per iteration; the rows left
     /// run the method. Without hardware acceleration (the JIT would emulate Vector&lt;T&gt;), every row runs the method.
     /// </summary>
-    private static void EmitVectorLoop(StringBuilder sb, Kernel.Code simd, string[] components, string indent, string call)
+    private static void EmitVectorLoop(StringBuilder sb, Kernel.Code simd, string[] components, string indent, string call, bool masked)
     {
         string vector = $"global::System.Numerics.Vector<{simd.Columns[0]}>"; // every column has lanes of one size: one count
         for (int k = 1; k <= components.Length; k++)
@@ -373,15 +383,22 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string inner = indent + "    ", body = inner + "    ";
         foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) sb.Append(inner).Append(line).Append('\n');
         sb.Append($"{inner}for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{inner}{{\n");
-        foreach (var line in simd.Body.Split('\n')) if (line.Length > 0) sb.Append(body).Append(line).Append('\n');
+        if (masked)
+        {
+            // The rows of this vector that pass, one lane each: a vector with none is skipped.
+            sb.Append($"{body}var __pass = global::EasyEcs.Interleaved.Lanes{simd.Size * 8}(pass, (int)i);\n");
+            sb.Append($"{body}if (__pass == global::System.Numerics.Vector<{simd.Mask}>.Zero) continue;\n");
+        }
+        foreach (var line in (masked ? simd.MaskedBody : simd.Body).Split('\n')) if (line.Length > 0) sb.Append(body).Append(line).Append('\n');
         if (simd.Bails)
         {
             // A lane would throw (Math.Clamp with min above max): nothing is stored yet, so the method itself runs the
-            // rows of this vector, and throws as written. i walks them, and is set back for the loop's own step.
-            sb.Append($"{body}if (__bail)\n{body}{{\n{body}    for (nint end = i + {vector}.Count; i < end; i++)\n{body}        {call}\n");
+            // rows of this vector (that pass), and throws as written. i walks them, and is set back for the loop's own step.
+            string row = masked ? $"if (((pass >> (int)i) & 1) != 0) {call}" : call;
+            sb.Append($"{body}if (__bail)\n{body}{{\n{body}    for (nint end = i + {vector}.Count; i < end; i++)\n{body}        {row}\n");
             sb.Append($"{body}    i -= {vector}.Count;\n{body}    continue;\n{body}}}\n");
         }
-        foreach (var line in simd.Stores.Split('\n')) if (line.Length > 0) sb.Append(body).Append(line).Append('\n');
+        foreach (var line in (masked ? simd.MaskedStores : simd.Stores).Split('\n')) if (line.Length > 0) sb.Append(body).Append(line).Append('\n');
         sb.Append($"{inner}}}\n{indent}}}\n");
     }
 
@@ -485,7 +502,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         public bool TakesWorld => Parameters.Any(p => p.Kind == Symbols.ParamKind.World);
 
         /// <summary>The World loop (and, with an I, the job interface) the method runs as.</summary>
-        public string Loop => IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
+        public string Loop => Simd != null ? "ForEachMasked" : IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
 
         /// <summary>Takes component spans, or runs per row inside runs of rows: World.ForEachBatch.</summary>
         public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) || Runs || Simd != null;

@@ -30,12 +30,20 @@ internal sealed class Kernel
     /// <param name="Setup">Statements before the vector loop: the uniform values and their broadcasts.</param>
     /// <param name="Body">The vector loop's body up to the stores: loads, the translated method.</param>
     /// <param name="Stores">The stores of the components the method writes.</param>
+    /// <param name="MaskedBody">
+    /// <paramref name="Body"/> for a word of rows of which some pass (<c>__pass</c>, a lane mask): the loaded values of
+    /// the components the method writes are kept too.
+    /// </param>
+    /// <param name="MaskedStores">The stores of a masked body: the lanes <c>__pass</c> leaves out get the values loaded.</param>
+    /// <param name="Size">The lanes' size in bytes: 4 or 8.</param>
+    /// <param name="Mask">The element type of a lane mask: <c>int</c> or <c>long</c>.</param>
     /// <param name="Interleaves">A component has several fields: the loop needs <c>EasyEcs.Interleaved.IsAccelerated</c>.</param>
     /// <param name="Bails">
     /// The body sets <c>__bail</c> when a lane would throw: the rows of that vector then run the method itself, before any
     /// store.
     /// </param>
-    internal sealed record Code(EquatableArray<string> Columns, string Setup, string Body, string Stores, bool Interleaves, bool Bails);
+    internal sealed record Code(EquatableArray<string> Columns, string Setup, string Body, string Stores, string MaskedBody,
+        string MaskedStores, int Size, string Mask, bool Interleaves, bool Bails);
 
     private const string V = "global::System.Numerics.Vector";
     private const string Interleaved = "global::EasyEcs.Interleaved";
@@ -208,17 +216,26 @@ internal sealed class Kernel
             }
         }
         kernel.Statement((IOperation?)body.BlockBody ?? body.ExpressionBody!, null);
+        // A masked word keeps the values loaded of what the method writes, and stores them back in the lanes that do not
+        // pass: the rows are left as they were (their memory is the table's, whether a component is absent or not).
+        var kept = new StringBuilder();
+        var masked = new StringBuilder();
         foreach (var (index, fields, _) in kernel._components.Values.Where(c => kernel._written.Contains(c.Index)).OrderBy(c => c.Index))
         {
             string column = Elem(fields[0].Type);
+            string Blend(int f) => $"{V}.ConditionalSelect({As(kernel._mask, Elem(fields[f].Type), "__pass")}, __c{index}_{f}, __o{index}_{f})";
+            for (int f = 0; f < fields.Length; f++) kept.Append($"var __o{index}_{f} = __c{index}_{f};\n");
             stores.Append(fields.Length == 1
                 ? $"{V}.StoreUnsafe(__c{index}_0, ref e{index}, (nuint)i);\n"
                 : $"{Interleaved}.Store{fields.Length}({string.Join(", ", fields.Select((field, f) => As(Elem(field.Type), column, $"__c{index}_{f}")))}, ref e{index}, (nuint)i);\n");
+            masked.Append(fields.Length == 1
+                ? $"{V}.StoreUnsafe({Blend(0)}, ref e{index}, (nuint)i);\n"
+                : $"{Interleaved}.Store{fields.Length}({string.Join(", ", fields.Select((field, f) => As(Elem(field.Type), column, Blend(f))))}, ref e{index}, (nuint)i);\n");
         }
         string prologue = kernel._bails ? "bool __bail = false;\n" : "";
         return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
-            kernel._setup.ToString(), prologue + loads + kernel._body, stores.ToString(),
-            kernel._components.Values.Any(c => c.Fields.Length > 1), kernel._bails);
+            kernel._setup.ToString(), prologue + loads + kernel._body, stores.ToString(), prologue + loads + kept + kernel._body, masked.ToString(),
+            kernel._size, kernel._mask, kernel._components.Values.Any(c => c.Fields.Length > 1), kernel._bails);
     }
 
     /// <summary>

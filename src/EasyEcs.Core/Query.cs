@@ -1138,6 +1138,21 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         return true;
     }
 
+    /// <summary>
+    /// The rows of word <paramref name="word"/> that are not tombstones (a row freed during a pass keeps its place with a
+    /// negative index until the last pass ends). Out of line: only tables with tombstones pay it.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static ulong AliveRows(Archetype archetype, int word)
+    {
+        var slots = archetype.Slots;
+        int from = word << 6, to = Math.Min(from + 64, archetype.Count);
+        ulong alive = 0;
+        for (int row = from; row < to; row++)
+            if (slots[row].Index >= 0) alive |= 1UL << row;
+        return alive;
+    }
+
     /// <summary>The bits of word <paramref name="word"/> that are below <paramref name="rows"/>.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ulong RowMask(int word, int rows)

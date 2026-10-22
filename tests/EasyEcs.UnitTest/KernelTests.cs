@@ -328,6 +328,139 @@ public class KernelTests
         foreach (var item in vector.Query<Spot2>()) Assert.That(Same(item.Spot2, spots[row++]), $"row {row - 1}");
     }
 
+    /// <summary>Which rows lose a component (removed in place: the row keeps its place, its presence bit clears).</summary>
+    public static readonly (string Name, Func<int, bool> Hole)[] Holes =
+    [
+        ("every third", i => i % 3 == 0),
+        ("random half", i => (uint)(i * 2654435761u) >> 31 == 1),
+        ("every other word", i => (i >> 6) % 2 == 1),
+        ("one per word", i => (i & 63) == 5),
+        ("all but one per word", i => (i & 63) != 40),
+        ("after row 70", i => i >= 70),
+    ];
+
+    private static readonly int[] HoleCounts = [1, 8, 17, 64, 65, 130, 1000];
+
+    private static System.Collections.Generic.IEnumerable<TestCaseData> HoleCases() =>
+        from hole in Holes from count in HoleCounts select new TestCaseData(hole.Name, count);
+
+    /// <summary>
+    /// Rows lacking a component (removed in place) are lanes the vector loop leaves out: a word of 64 rows with some
+    /// passing runs as a masked vector loop, and every row ends as the method leaves it (the rows it does not visit as
+    /// they were).
+    /// </summary>
+    [TestCaseSource(nameof(HoleCases))]
+    public void RowsWithoutAComponentAreLanesTheLoopLeavesOut(string pattern, int count)
+    {
+        var hole = Holes.First(h => h.Name == pattern).Hole;
+        CheckHoles(count, hole, (r, i) => new Spot3 { X = NextFloat(r, i), Y = NextFloat(r, i + 1), Z = NextFloat(r, i + 2) },
+            (r, i) => new Drift3 { X = NextFloat(r, i + 3), Y = NextFloat(r, i + 4), Z = NextFloat(r, i + 5) },
+            w => FieldKernels.Seek(w, 4f), (ref Spot3 p, ref Drift3 v) => FieldKernels.Seek(ref p, ref v, 4f));
+        CheckHoles(count, hole, NextLevel, NextTally, MoreKernels.Masks, (ref Level l, ref Rank t) => MoreKernels.Masks(ref l, ref t));
+        var bounds = new Bounds(-5, 5);
+        CheckHoles(count, hole, NextLevel, NextTally, w => { w.SetBounds(bounds.Min, bounds.Max); MoreKernels.Clamp(w); },
+            (ref Level l, ref Rank t) => MoreKernels.Clamp(ref l, in t, in bounds));
+        CheckHoles(count, hole, (r, i) => new Far3 { X = NextDouble(r, i), Y = NextDouble(r, i + 1), Z = NextDouble(r, i + 2) },
+            (r, i) => new Pace { Value = NextDouble(r, i + 3) }, FieldKernels.Travel, (ref Far3 p, ref Pace v) => FieldKernels.Travel(ref p, in v));
+    }
+
+    /// <summary>A Math.Clamp that throws in a masked word throws for the row that has it, after the passing rows before it.</summary>
+    [Test]
+    public void AClampThatThrowsInAMaskedWordLeavesTheRowsTheMethodLeaves()
+    {
+        const int count = 100;
+        using var vector = new World();
+        var spots = new Spot2[count];
+        var levels = new Level[count];
+        var entities = new Entity[count];
+        for (int i = 0; i < count; i++)
+        {
+            // Rows 36 and 38 lack Level but hold bounds that would throw: only row 37 throws.
+            spots[i] = new Spot2 { X = i, Y = i is >= 36 and <= 38 ? -1000 : 1000 };
+            levels[i] = new Level { Value = 10 };
+            entities[i] = vector.CreateEntity(spots[i], levels[i]);
+        }
+
+        bool Hole(int i) => i % 2 == 0;
+        for (int i = 0; i < count; i++) if (Hole(i)) entities[i].Remove<Level>();
+        Assert.Throws<ArgumentException>(() => MoreKernels.ClampLanes(vector));
+        Assert.Throws<ArgumentException>(() => { for (int i = 0; i < count; i++) if (!Hole(i)) MoreKernels.ClampLanes(ref spots[i], in levels[i]); });
+        for (int i = 0; i < count; i++) Assert.That(Same(entities[i].Get<Spot2>(), spots[i]), $"row {i}");
+    }
+
+    /// <summary>Rows destroyed during an outer pass (tombstones until it ends) are lanes the vector loop leaves out.</summary>
+    [Test]
+    public void RowsDestroyedDuringAPassAreLanesTheLoopLeavesOut()
+    {
+        const int count = 200;
+        using var world = new World();
+        var random = new Random(3);
+        var levels = new Level[count];
+        var ranks = new Rank[count];
+        var entities = new Entity[count];
+        for (int i = 0; i < count; i++)
+        {
+            (levels[i], ranks[i]) = (NextLevel(random, i), NextTally(random, i));
+            entities[i] = world.CreateEntity(levels[i], ranks[i]);
+            if (i % 5 == 0) entities[i].Remove<Rank>(); // a test of presence bits: the masked path
+        }
+
+        world.CreateEntity(new Heat());
+        foreach (var _ in world.Query<Heat>())
+        {
+            for (int i = 0; i < count; i += 7) entities[i].Destroy();
+            MoreKernels.Masks(world);
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            if (i % 7 == 0) continue;
+            if (i % 5 != 0) MoreKernels.Masks(ref levels[i], ref ranks[i]);
+            Assert.That(Same(entities[i].Get<Level>(), levels[i]), $"Level of row {i}: {Bits(entities[i].Get<Level>())} instead of {Bits(levels[i])}");
+        }
+    }
+
+    /// <summary>
+    /// <see cref="Check{T1, T2}"/> over one table whose rows in <paramref name="hole"/> lack one of the two components
+    /// (the first for odd rows, the second for even ones): the method runs on the rows that have both.
+    /// </summary>
+    private static void CheckHoles<T1, T2>(int count, Func<int, bool> hole, Func<Random, int, T1> make1, Func<Random, int, T2> make2,
+        Action<World> generated, ScalarRow<T1, T2> scalar)
+        where T1 : struct, IComponent where T2 : struct, IComponent
+    {
+        using var world = new World();
+        world.Reserve<T1, T2>(count);
+        var random = new Random(count);
+        var a = new T1[count];
+        var b = new T2[count];
+        var entities = new Entity[count];
+        for (int i = 0; i < count; i++)
+        {
+            a[i] = make1(random, i);
+            b[i] = make2(random, i);
+            entities[i] = world.CreateEntity(a[i], b[i]);
+        }
+
+        for (int i = 0; i < count; i++)
+            if (hole(i))
+            {
+                if (i % 2 == 1) entities[i].Remove<T1>();
+                else entities[i].Remove<T2>();
+            }
+
+        for (int round = 0; round < 3; round++)
+        {
+            generated(world);
+            for (int i = 0; i < count; i++) if (!hole(i)) scalar(ref a[i], ref b[i]);
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            if (entities[i].Has<T1>()) Assert.That(Same(entities[i].Get<T1>(), a[i]), $"{typeof(T1).Name} of row {i} of {count}: {Bits(entities[i].Get<T1>())} instead of {Bits(a[i])}");
+            if (entities[i].Has<T2>()) Assert.That(Same(entities[i].Get<T2>(), b[i]), $"{typeof(T2).Name} of row {i} of {count}: {Bits(entities[i].Get<T2>())} instead of {Bits(b[i])}");
+        }
+    }
+
     private delegate void ScalarRow3<T1, T2, T3>(ref T1 a, ref T2 b, ref T3 c);
 
     private static void Check3<T1, T2, T3>(int count, Func<Random, int, T1> make1, Func<Random, int, T2> make2, Func<Random, int, T3> make3,
@@ -460,7 +593,8 @@ public class KernelTests
         {
             world.CreateEntity(new Heat { Value = i }, new Speed(), new Mass { Value = 1 }, new Bits(i), new Mask(i));
             world.CreateEntity(new Spot3 { X = i }, new Drift3(), new Spot2(), new Drift2(), new Far3(), new Pace { Value = 2 });
-            world.CreateEntity(new Level { Value = i }, new Rank { Value = i - 500 }, new Code32 { Value = (uint)i }, new Spot2 { Y = float.PositiveInfinity }); // no Clamp throws
+            var e = world.CreateEntity(new Level { Value = i }, new Rank { Value = i - 500 }, new Code32 { Value = (uint)i }, new Spot2 { Y = float.PositiveInfinity }); // no Clamp throws
+            if (i % 3 == 0) e.Remove<Rank>(); // rows to test: masked words
         }
         world.SetBounds(-10, 10);
 

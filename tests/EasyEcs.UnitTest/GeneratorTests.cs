@@ -206,6 +206,8 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("S.ForEach.g.cs") || t.FilePath.Contains("/S.") && t.FilePath.EndsWith(".ForEach.g.cs")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated.Contains("for (nint last = rows - global::System.Numerics.Vector<"), Is.EqualTo(vectorized), generated);
+        // A vector loop also takes words of rows of which some pass, as a lane mask (IForEachMasked).
+        Assert.That(generated.Contains("global::EasyEcs.IForEachMasked<") && generated.Contains("ulong pass, "), Is.EqualTo(vectorized), generated);
 
         // Skipped means reported: the same method with SimdMode.Require is an error exactly when it got no loop.
         string required = members.Replace("[ForEach]", "[ForEach(Simd = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(Simd = SimdMode.Require, Parallel");
@@ -268,8 +270,8 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated, Does.Contain("internal ref struct AJob0 : global::EasyEcs.IForEach<"), generated);  // per row
-        Assert.That(generated, Does.Contain("internal ref struct BJob1 : global::EasyEcs.IForEachBatch<"), generated);
-        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "Vector.LoadUnsafe").Count, Is.EqualTo(1), generated);
+        Assert.That(generated, Does.Contain("internal ref struct BJob1 : global::EasyEcs.IForEachMasked<"), generated);
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "Vector.LoadUnsafe").Count, Is.EqualTo(2), generated); // B only: its batch and masked forms
     }
 
     [Test]

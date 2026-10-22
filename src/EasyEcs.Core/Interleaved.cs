@@ -1,3 +1,4 @@
+using System;
 using System.ComponentModel;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -11,7 +12,8 @@ namespace EasyEcs;
 /// a column holds rows as <c>x0 y0 z0 x1 y1 z1 ...</c>, and the loop computes on one vector per field
 /// (<c>x0 x1 x2 ...</c>). <c>Load2</c> / <c>Load3</c> / <c>Load4</c> split the rows of one vector into one vector per
 /// field with shuffles, <c>Store2</c> / <c>Store3</c> / <c>Store4</c> put them back. The generator calls them; a
-/// [ForEach] method never does. Lanes of 4 bytes (float, int, uint) or 8 bytes (double, long, ulong).
+/// [ForEach] method never does. Lanes of 4 bytes (float, int, uint) or 8 bytes (double, long, ulong). <c>Lanes32</c> /
+/// <c>Lanes64</c> turn the passing rows of a word (IForEachMasked) into the lane mask of one vector.
 /// </summary>
 /// <remarks>
 /// Each call reads or writes exactly the rows of one vector (<c>Vector&lt;T&gt;.Count</c> or
@@ -36,6 +38,46 @@ public static class Interleaved
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Avx512F.IsSupported;
+    }
+
+    /// <summary>
+    /// The lane mask of the <c>Vector&lt;int&gt;.Count</c> rows from <paramref name="first"/> of a word whose passing
+    /// rows are the bits of <paramref name="rows"/>: all bits set in lane j when row <c>first + j</c> passes.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<int> Lanes32(ulong rows, int first)
+    {
+        var bits = Masks.Bits32;
+        return Vector.Equals(new Vector<int>((int)(rows >> first)) & bits, bits);
+    }
+
+    /// <summary><see cref="Lanes32"/> for lanes of 8 bytes: <c>Vector&lt;long&gt;.Count</c> rows.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<long> Lanes64(ulong rows, int first)
+    {
+        var bits = Masks.Bits64;
+        return Vector.Equals(new Vector<long>((long)(rows >> first)) & bits, bits);
+    }
+
+    /// <summary>Lane j holds bit j: the row of each lane in a word's bits.</summary>
+    private static class Masks
+    {
+        public static readonly Vector<int> Bits32 = Make32();
+        public static readonly Vector<long> Bits64 = Make64();
+
+        private static Vector<int> Make32()
+        {
+            Span<int> bits = stackalloc int[Vector<int>.Count];
+            for (int j = 0; j < bits.Length; j++) bits[j] = 1 << j;
+            return new Vector<int>(bits);
+        }
+
+        private static Vector<long> Make64()
+        {
+            Span<long> bits = stackalloc long[Vector<long>.Count];
+            for (int j = 0; j < bits.Length; j++) bits[j] = 1L << j;
+            return new Vector<long>(bits);
+        }
     }
 
     // ---------------- Vector<T>: the 256-bit form, or the 512-bit one when Vector<T> is that wide ----------------

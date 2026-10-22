@@ -18,14 +18,16 @@ namespace EasyEcs.Benchmark;
 /// division) and <c>Travel</c> (3 doubles) take components of several fields, which the vector loop splits into one
 /// vector per field (Interleaved), in a world of their own. <c>Clamp</c> (Math.Clamp by a singleton's bounds, checked
 /// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
-/// pattern) are the calls, conversions and masks a vector loop takes. 0 bytes either way.
+/// pattern) are the calls, conversions and masks a vector loop takes. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
+/// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
+/// leaves out (a lane mask per word of 64 rows). 0 bytes either way.
 /// </summary>
 [MemoryDiagnoser]
 public class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _fields;
+    private World _world, _fields, _holes, _halves;
 
     [GlobalSetup]
     public void Setup()
@@ -40,6 +42,9 @@ public class KernelBenchmark
                 new Speed { Value = (float)random.NextDouble() * 20 - 10 }, new Mass { Value = (float)random.NextDouble() * 5 },
                 new Ticks { Value = i });
 
+        _holes = Holes(Entities, i => i % 3 == 0);
+        _halves = Holes(Entities, i => random.Next(2) == 0);
+
         _fields = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _fields.Reserve<P2, V2, P3, V3, P4, V4, D3>(Entities);
         float F() => (float)random.NextDouble() * 10 - 5;
@@ -49,11 +54,30 @@ public class KernelBenchmark
                 new D3 { X = F(), Y = F(), Z = F() });
     }
 
+    /// <summary>A world of Heat, Speed and Mass whose rows in <paramref name="hole"/> lose Mass (in place: a presence bit).</summary>
+    private static World Holes(int entities, Func<int, bool> hole)
+    {
+        var world = new World(new WorldOptions { InitialEntityCapacity = entities });
+        world.SetPull(0.75f);
+        world.Reserve<Heat, Speed, Mass>(entities);
+        var random = new Random(2);
+        for (int i = 0; i < entities; i++)
+        {
+            var entity = world.CreateEntity(new Heat { Value = (float)random.NextDouble() * 200 - 50 },
+                new Speed { Value = (float)random.NextDouble() * 20 - 10 }, new Mass { Value = (float)random.NextDouble() * 5 });
+            if (hole(i)) entity.Remove<Mass>();
+        }
+
+        return world;
+    }
+
     [GlobalCleanup]
     public void Cleanup()
     {
         _world.Dispose();
         _fields.Dispose();
+        _holes.Dispose();
+        _halves.Dispose();
     }
 
     [Benchmark(Baseline = true)]
@@ -71,6 +95,26 @@ public class KernelBenchmark
 
     [Benchmark]
     public void StepGenerated() => Kernels.Step(_world);
+
+    [Benchmark]
+    public void HolesScalar()
+    {
+        var job = new StepRows { Pull = _holes.Pull };
+        _holes.ForEach<Heat, Speed, Mass, StepRows>(ref job);
+    }
+
+    [Benchmark]
+    public void HolesGenerated() => Kernels.Step(_holes);
+
+    [Benchmark]
+    public void HalvesScalar()
+    {
+        var job = new StepRows { Pull = _halves.Pull };
+        _halves.ForEach<Heat, Speed, Mass, StepRows>(ref job);
+    }
+
+    [Benchmark]
+    public void HalvesGenerated() => Kernels.Step(_halves);
 
     [Benchmark]
     public void IntegrateScalar()

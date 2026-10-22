@@ -421,6 +421,23 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 }
 
                 /// <summary>
+                /// A batch job that also takes a word of 64 rows of which only some pass (a filter that tests presence bits
+                /// or change ticks): <c>World.ForEachMasked</c> hands it the whole word with the passing rows as bits, where
+                /// <see cref="IForEachBatch{{{TypeParams(n)}}}"/> would get each run of passing rows apart. A vector loop
+                /// computes every lane and keeps the passing ones. <c>[ForEach]</c> methods with a vector loop compile to this.
+                /// </summary>
+                public interface IForEachMasked<{{TypeParams(n)}}> : IForEachBatch<{{TypeParams(n)}}>
+                {{Constraints(n, "    ")}}
+                {
+                    /// <summary>
+                    /// Rows of one word: row i (of <paramref name="entities"/> and of every span) passes when bit i of
+                    /// <paramref name="rows"/> is set; the job leaves the other rows as they are (it may store their values
+                    /// back unchanged). Bit 0 is set, and no bit at or past the spans' length.
+                    /// </summary>
+                    void Execute(EntitySpan entities, ulong rows, {{List(n, i => $"Span<T{i}> c{i}")}});
+                }
+
+                /// <summary>
                 /// Like <see cref="IForEach{{{TypeParams(n)}}}"/> but also receives the <see cref="Entity"/> handle, built from the
                 /// archetype's entity rows (id and version side by side) without a per-entity lookup. <c>[ForEach]</c> methods taking an
                 /// <see cref="Entity"/> compile to this.
@@ -517,6 +534,105 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             {
                 {{StampRows(n, "                ", "start", "length")}}
                                 job.Execute(new EntitySpan(this, archetype, start, ref Unsafe.Add(ref slots, start), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
+                            }
+                        }
+                    }
+
+                    /// <summary>
+                    /// <see cref="ForEachBatch{{"{"}}{{tps}}, TJob{{"}"}}"/> for a job that also takes a word of rows of
+                    /// which only some pass: in a table whose rows must be tested, each word whose rows all pass joins
+                    /// the run of the words before it, and each word with some passing rows goes to the job whole with
+                    /// those rows as bits. Allocation-free.
+                    /// </summary>
+                    public void ForEachMasked<{{tps}}, TJob>(ref TJob job, in QueryFilter filter = default)
+                {{cons}}
+                        where TJob : struct, IForEachMasked<{{tps}}>, allows ref struct
+                    {
+                        Gate.Freeze();
+                        try
+                        {
+                            Masked<{{tps}}, TJob>(ref job, in filter);
+                        }
+                        finally
+                        {
+                            Gate.Thaw();
+                        }
+                    }
+
+                    [MethodImpl(MethodImplOptions.NoInlining)]
+                    private void Masked<{{tps}}, TJob>(ref TJob job, in QueryFilter filter)
+                {{cons}}
+                        where TJob : struct, IForEachMasked<{{tps}}>, allows ref struct
+                    {
+                        var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
+                        var archetypes = match.Archetypes;
+                        for (int ai = 0; ai < archetypes.Length; ai++)
+                        {
+                            var archetype = archetypes[ai];
+                            var rows = new RowFilter(match.Filters[ai], filter.Tick);
+                            var (first, count) = filter.Rows(ai, archetype.Count);
+                            int mode = rows.Mode(archetype);
+                            if (archetype.AliveCount == 0 || mode == RowFilter.None || first >= count) continue;
+                            ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
+                {{Lines(n, i => $"            ref T{i} r{i} = ref archetype.Base<T{i}>(b{i});")}}
+                            if (mode == RowFilter.Test)
+                            {
+                                // Word by word: whole words make runs, the others go to the job with their passing rows.
+                                bool tombstones = archetype.Count != archetype.AliveCount;
+                                int words = (count + 63) >> 6, start = first, end = first; // the pending run: start .. end
+                                for (int w = first >> 6; w < words; w++)
+                                {
+                                    int next = rows.NextWord(archetype, w, words); // words no Changed column reaches
+                                    if (next != w)
+                                    {
+                                        w = next - 1;
+                                        continue;
+                                    }
+
+                                    int at = Math.Max(w << 6, first);
+                                    ulong range = RowFilter.RowMask(w, count) & (ulong.MaxValue << at); // shift is mod 64
+                                    ulong bits = rows.Word(archetype, w) & range;
+                                    if (tombstones && bits != 0) bits &= RowFilter.AliveRows(archetype, w);
+                                    if (bits == range)
+                                    {
+                                        if (end != at)
+                                        {
+                                            if (end > start)
+                                            {
+                {{BatchRun(n, "                            ", "start", "end - start")}}
+                                            }
+
+                                            start = at;
+                                        }
+
+                                        end = Math.Min((w + 1) << 6, count);
+                                        continue;
+                                    }
+
+                                    if (bits == 0) continue;
+                                    int low = (w << 6) + BitOperations.TrailingZeroCount(bits), high = (w << 6) + 64 - BitOperations.LeadingZeroCount(bits);
+                                    ulong passing = bits >> (low & 63);
+                {{StampWord(n, "                    ", "w", "bits")}}
+                                    job.Execute(new EntitySpan(this, archetype, low, ref Unsafe.Add(ref slots, low), high - low), passing, {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, low), high - low)")}});
+                                }
+
+                                if (end > start)
+                                {
+                {{BatchRun(n, "                    ", "start", "end - start")}}
+                                }
+
+                                continue;
+                            }
+
+                            if (archetype.Count == archetype.AliveCount)
+                            {
+                {{BatchRun(n, "                ", "first", "count - first")}}
+                                continue;
+                            }
+
+                            for (int start = first; archetype.NextRun(ref start, count, out int length); start += length)
+                            {
+                {{BatchRun(n, "                ", "start", "length")}}
                             }
                         }
                     }
@@ -702,6 +818,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
         Lines(n, i => $"{indent}    if ((TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0) archetype.StampVisited<T{i}>({row}, _changeTick);");
 
     /// <summary>Stamp a run of rows of every component the job writes.</summary>
+    /// <summary>A run of <paramref name="length"/> rows from <paramref name="start"/>: stamped, then the job's batch Execute.</summary>
+    private static string BatchRun(int n, string indent, string start, string length) =>
+        StampRows(n, indent, start, $"({length})") + "\n" + indent
+        + $"    job.Execute(new EntitySpan(this, archetype, {start}, ref Unsafe.Add(ref slots, {start}), {length}), {List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, {start}), {length})")});";
+
+    private static string StampWord(int n, string indent, string word, string rows) =>
+        Lines(n, i => $"{indent}    if ((TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0) archetype.StampWord<T{i}>({word}, {rows}, _changeTick);");
+
     private static string StampRows(int n, string indent, string start, string count) =>
         Lines(n, i => $"{indent}    if ((TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0) archetype.StampRows<T{i}>({start}, {count}, _changeTick);");
 
