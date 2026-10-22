@@ -1,0 +1,8 @@
+<doc>
+  <member name="T:EasyEcs.GroupAttribute" source="abee7c537174">
+    <summary>
+      World 按哪个成员把组件的表分组（<see cref="T:EasyEcs.IGroup" />）：<c>int</c>，或底层类型为 <c>int</c> 的枚举。
+      生成器给这个 partial struct 加上 <c>IGroup</c>，并显式实现返回它的 <c>Group</c>。
+    </summary>
+  </member>
+</doc>

@@ -575,4 +575,11 @@
       （计数对间隔取模等于系统的 <see cref="P:EasyEcs.EcsSystem.UpdatePhase" /> 时，系统执行）。O(1)。
     </summary>
   </member>
+
+  <member name="M:EasyEcs.World.GetOrAddSingleton``1(``0@)" source="8767f4018347">
+    <summary>
+      单例 <typeparamref name="T" /> 的 ref，缺少时先以 <paramref name="value" /> 添加；已有它的 World 保留自己的值。
+      生成的 <c>GetOrAddClock(…)</c> 调用它。O(1)。
+    </summary>
+  </member>
 </doc>
