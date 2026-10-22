@@ -110,6 +110,17 @@ World 用来跑并行工作的部件：一个阶段里的系统，或者一个�
 在 1,024 到 16,384 行之间（方法写被追踪组件时是 4,096 的倍数），或者是 `ChunkRows` 向上取整到 64。[执行器](#runner)的线程做完一块
 就领下一块（OpenMP 的 `schedule(dynamic, n)`）；不足两块时只在调用线程上跑。见[块大小](/zh/docs/guide/threading#chunk-rows)。
 
+## 归约（Reduction） [#reduction]
+
+对一遍里所有行求的总数，分段计算再合并：`[ForEach]` 方法的 `Reduce<T>` 参数给每个[块](#chunk)（单线程时是整遍）一个从 `T.Identity`
+开始的部分结果，这一遍结束时用 `T.Combine` 按行的顺序把部分结果合并进单例 `T`。就是 OpenMP 的 `reduction`、MPI 的 `Allreduce`。
+见[归约](/zh/docs/guide/threading#reductions)。
+
+## 向量循环（Vector loop） [#vector-loop]
+
+生成器为组件有 1 到 4 个同类型数值的逐行 `[ForEach]` 方法写出的 `Vector<T>` 循环：一条指令按向量能装下的行数计算方法体，分支变成掩码，
+剩下的行调用方法本身。方法没有得到向量循环时，EECS055 说明原因。见[向量循环](/zh/docs/guide/systems#vector-loops)。
+
 ## 分片（Slice） [#slice]
 
 `[ForEach(Slices = N)]` 方法一次运行访问的那部分行：每张匹配表约 1/N 的行，按 64 行的位字切分，取系统运行次数的第 `RunCount % N` 片。
