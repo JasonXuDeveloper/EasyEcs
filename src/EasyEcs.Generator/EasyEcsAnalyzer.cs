@@ -120,12 +120,6 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "cannot be serialized. Store the EntityId (8 bytes, unmanaged; a handle converts to it implicitly) and turn it " +
         "back into a handle with world.TryGetEntity(id, out var entity).", helpLinkUri: Help("EECS017"));
 
-    public static readonly DiagnosticDescriptor ScheduleNotConstant = new("EECS018", "A system's schedule is not a constant",
-        "'{0}.{1}' is not a constant: {2}",
-        Category, DiagnosticSeverity.Warning, true,
-        "UpdateInterval and UpdatePhase are read every update, so a changing value makes the system skip or repeat " +
-        "runs. Return a constant; to stop and resume a system, set Enabled.", helpLinkUri: Help("EECS018"));
-
     public static readonly DiagnosticDescriptor OrderCycle = new("EECS019", "Systems are ordered in a cycle",
         "[UpdateBefore] / [UpdateAfter] order '{0}' in a cycle: {1}",
         Category, DiagnosticSeverity.Error, true,
@@ -139,9 +133,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "order the caller calls them. Order the systems of one group, or move the system into the other's group.", helpLinkUri: Help("EECS020"));
 
     public static readonly DiagnosticDescriptor EntryPointCollision = new("EECS021", "[ForEach] entry point has the method's signature",
-        "The entry point of [ForEach] method '{0}' (the World, {1}the caller's values) would have the signature of a method '{0}' of its type, or of another [ForEach] overload's entry point: rename one of them",
+        "The entry point of [ForEach] method '{0}' (the {1}the caller's values) would have the signature of a method '{0}' of its type, or of another [ForEach] overload's entry point: rename one of them",
         Category, DiagnosticSeverity.Error, true,
-        "Outside a system, the generator writes an overload of a [ForEach] method that takes the World (and the change tick, for [Changed<T>] / [Removed<T>]) followed by the method's context parameters, and runs the method over every matching entity.", helpLinkUri: Help("EECS021"));
+        "Outside a system, the generator writes an overload of a [ForEach] method that takes the World (and the change tick, for [Changed<T>] / [Removed<T>]) followed by the method's context parameters, and runs the method over every matching entity; for a [ForEntity] method, one that takes the entity and runs the method on it.", helpLinkUri: Help("EECS021"));
 
     public static readonly DiagnosticDescriptor Unnameable = new("EECS022", "Type out of reach of the generated code",
         "[ForEach] method '{0}' uses '{1}', which code outside its declaring type cannot name: make it internal or public",
@@ -228,20 +222,20 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
         MixedBatch, NotParallel, WriteThroughReadOnly, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
-        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, EntryPointCollision, Unnameable, FilterOutsideGroup, LocalForEach,
+        RemovedRequired, EntityInData, OrderCycle, OrderAcrossGroups, EntryPointCollision, Unnameable, FilterOutsideGroup, LocalForEach,
         WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
         UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScalarLoop, NoVectorLoop,
         SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, NotPartial, HandWrittenReduction, BadReductionField, FieldWiseReduction,
-        WrongIdentity, AttributeKey, BadSetup, NoFormatter);
+        WrongIdentity, AttributeKey, BadSetup, NoFormatter,
+        HandWrittenEntityJob, BadForEntity, ScheduleOverride, BadSchedule, HandWrittenConsume, BadConsume);
 
     public override void Initialize(AnalysisContext context)
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
         context.RegisterSymbolAction(AnalyzeType, SymbolKind.NamedType);
-        context.RegisterSyntaxNodeAction(AnalyzeSchedule, SyntaxKind.PropertyDeclaration);
         context.RegisterSymbolAction(AnalyzeMethod, SymbolKind.Method);
         context.RegisterSyntaxNodeAction(AnalyzeParallel, SyntaxKind.MethodDeclaration);
         context.RegisterSyntaxNodeAction(AnalyzeVectorLoop, SyntaxKind.MethodDeclaration);
@@ -263,6 +257,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         InitializePerformance(context);
         InitializeUsage(context);
         InitializeParallel(context);
+        InitializeForms(context);
     }
 
     /// <summary>
@@ -336,28 +331,6 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (Symbols.SystemOf(context.ContainingSymbol.ContainingType) is { } system)
             context.ReportDiagnostic(Diagnostic.Create(SystemReference, call.Syntax.GetLocation(), system.Name,
                 method.TypeArguments[0].Name, "World.TryGetSystem"));
-    }
-
-    /// <summary>
-    /// EECS018: an override of EcsSystem.UpdateInterval or UpdatePhase that is not a constant expression.
-    /// </summary>
-    private static void AnalyzeSchedule(SyntaxNodeAnalysisContext context)
-    {
-        var declaration = (PropertyDeclarationSyntax)context.Node;
-        if (declaration.Identifier.ValueText is not ("UpdateInterval" or "UpdatePhase")) return;
-        if (context.SemanticModel.GetDeclaredSymbol(declaration, context.CancellationToken) is not { IsOverride: true } property) return;
-        var root = property.OverriddenProperty; // up the chain: an override of an override of EcsSystem's
-        while (root?.OverriddenProperty != null) root = root.OverriddenProperty;
-        if (!Symbols.Named(root?.ContainingType, Symbols.EcsSystem)) return;
-        var body = Symbols.Returned(declaration);
-        if (body != null && context.SemanticModel.GetConstantValue(body, context.CancellationToken).HasValue) return;
-        // { get; } = 5: the constant is there, as an initializer; '=> 5' returns it.
-        bool initialized = declaration is { Initializer.Value: { } initial, AccessorList.Accessors: { Count: 1 } accessors }
-                           && accessors[0] is { Body: null, ExpressionBody: null } && accessors[0].IsKind(SyntaxKind.GetAccessorDeclaration)
-                           && context.SemanticModel.GetConstantValue(initial, context.CancellationToken).HasValue;
-        context.ReportDiagnostic(Diagnostic.Create(ScheduleNotConstant, declaration.Identifier.GetLocation(),
-            initialized ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "ExpressionBody") : null,
-            property.ContainingType.Name, property.Name, "it is read every update"));
     }
 
     /// <summary>
@@ -453,7 +426,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                 return;
             }
 
-        if (context.ContainingSymbol is not IMethodSymbol method || !Symbols.IsForEach(method) || OwnWorld(call)) return;
+        if (context.ContainingSymbol is not IMethodSymbol method || !Symbols.IsGeneratedJob(method) || OwnWorld(call)) return;
         if (Symbols.IsBatch(method))
             context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), method.Name, name,
                 "it is a batch method, whose spans point into the tables; record the change as data for a method that runs per entity"));
@@ -499,7 +472,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             case IMethodSymbol method when method.AssociatedSymbol == null:
                 if (method.RefKind == RefKind.None) Report(method.ReturnType, method, method.Locations.FirstOrDefault());
                 // A [ForEach] method's buffer by value is an invalid parameter: EECS002 says it, with the same fixes.
-                if (Symbols.IsForEach(method)) break;
+                if (Symbols.IsGeneratedJob(method)) break;
                 // an override or an interface's method shares its signature: changing one parameter breaks the others
                 var properties = Symbols.SharesSignature(method) ? ImmutableDictionary<string, string?>.Empty.Add(SharedSignature, "") : null;
                 foreach (var p in method.Parameters)
@@ -789,16 +762,21 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     private static void AnalyzeMethod(SymbolAnalysisContext context)
     {
         var method = (IMethodSymbol)context.Symbol;
-        if (!Symbols.IsForEach(method)) return;
+        if (!Symbols.IsGeneratedJob(method)) return;
         var location = method.Locations.FirstOrDefault();
 
-        bool outside = Symbols.IsRunner(method);
+        bool outside = Symbols.IsRunner(method), one = Symbols.IsForEntity(method);
         var excluded = Excluded(method, context.CancellationToken);
-        if (outside && !method.IsStatic)
+        string? problem = one ? Symbols.ForEntityProblem(method) : null;
+        if (problem != null)
+            context.ReportDiagnostic(Diagnostic.Create(BadForEntity, location,
+                !method.IsStatic && problem.StartsWith("is an instance") ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Static") : null,
+                method.Name, problem));
+        else if (outside && !method.IsStatic)
             context.ReportDiagnostic(Diagnostic.Create(NotASystem, location, method.Name, method.ContainingType.Name));
         else if (outside && Symbols.EntryPointCollides(method))
             context.ReportDiagnostic(Diagnostic.Create(EntryPointCollision, location, method.Name,
-                Symbols.TracksSince(method) ? "the tick, " : Symbols.Slices(method) > 1 ? "the slice, " : ""));
+                (one ? "entity, " : "World, ") + (Symbols.TracksSince(method) ? "the tick, " : Symbols.Slices(method) > 1 ? "the slice, " : "")));
         if (method.IsGenericMethod && !outside)
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));
         if (Symbols.SlicesProblem(method) is { } slices)
@@ -855,7 +833,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
 
         if (valid && !Symbols.ComponentCountValid(method, components))
             context.ReportDiagnostic(Diagnostic.Create(ComponentCount, location, method.Name));
-        if (valid && Symbols.MixesBatch(method))
+        if (valid && problem == null && Symbols.MixesBatch(method))
             context.ReportDiagnostic(Diagnostic.Create(MixedBatch, location, method.Name));
     }
 
@@ -886,7 +864,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         var function = (LocalFunctionStatementSyntax)context.Node;
         if (function.AttributeLists.Count == 0
             || context.SemanticModel.GetDeclaredSymbol(function, context.CancellationToken) is not IMethodSymbol method
-            || !Symbols.IsForEach(method)) return;
+            || !Symbols.IsGeneratedJob(method)) return;
         context.ReportDiagnostic(Diagnostic.Create(LocalForEach, function.Identifier.GetLocation(), method.Name));
     }
 

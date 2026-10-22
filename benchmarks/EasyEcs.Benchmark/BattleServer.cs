@@ -107,10 +107,10 @@ public class MovementSystem : EcsSystem
     }
 }
 
-public class ManaSystem : EcsSystem                                           // data no earlier system touches: it
-{                                                                             // runs beside PlanningSystem
-    public override int UpdateInterval => 10;                                 // every 10th update, five updates after
-    public override int UpdatePhase => 5;                                     // RegenerationSystem: their work spreads
+[UpdateInterval(10, Phase = 5)]                                               // every 10th update, five updates after
+public class ManaSystem : EcsSystem                                           // RegenerationSystem: their work spreads;
+{                                                                             // data no earlier system touches: it runs
+                                                                              // beside PlanningSystem
 
     [ForEach]
     static void Regenerate(ref Mana mana) => mana.Value = Math.Min(mana.Max, mana.Value + 10);
@@ -270,10 +270,9 @@ public class ProjectileSystem : EcsSystem
     }
 }
 
+[UpdateInterval(10)]                                                          // every 10th update
 public class RegenerationSystem : EcsSystem
 {
-    public override int UpdateInterval => 10;                                 // every 10th update
-
     [ForEach, With<Player>, Without<Dead>]
     static void Regenerate(Mut<Health> hp, Maybe<Burning> burning)            // burning or not: one method
     {

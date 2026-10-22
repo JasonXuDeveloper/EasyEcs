@@ -194,11 +194,10 @@ public class SlicedArmor : EcsSystem
     private static void Visit(ref Armor armor) => armor.Value++;
 }
 
-/// <summary>Slices and UpdateInterval: a slice per run, a run every other update.</summary>
+/// <summary>Slices and [UpdateInterval]: a slice per run, a run every other update.</summary>
+[UpdateInterval(2)]
 public class SlicedEveryOther : EcsSystem
 {
-    public override int UpdateInterval => 2;
-
     [ForEach(Slices = 2)]
     private static void Visit(ref Health health) => health.Value++;
 }

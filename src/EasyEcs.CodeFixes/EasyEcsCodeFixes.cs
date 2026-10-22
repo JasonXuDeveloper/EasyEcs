@@ -20,12 +20,13 @@ namespace EasyEcs.CodeFixes;
 /// location, its additional locations and its properties, so the analyzer stays the only place that decides.
 /// </summary>
 [ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(EasyEcsCodeFixes)), Shared]
-public sealed class EasyEcsCodeFixes : CodeFixProvider
+public sealed partial class EasyEcsCodeFixes : CodeFixProvider
 {
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
-            "EECS018", "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
-            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069");
+            "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
+            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069",
+            "EECS080", "EECS081", "EECS082", "EECS084");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -74,11 +75,23 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                     Register(context, diagnostic, "Make it readonly", root, field,
                         generator.WithModifiers(field, generator.GetModifiers(field).WithIsReadOnly(true)));
                     break;
-                case "EECS018" when kind == "ExpressionBody" && node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { Initializer.Value: { } value } property:
-                    Register(context, diagnostic, "Return the constant", root, property, property.WithAccessorList(null).WithInitializer(null)
-                        .WithIdentifier(property.Identifier.WithTrailingTrivia(SyntaxFactory.Space))
-                        .WithExpressionBody(SyntaxFactory.ArrowExpressionClause(value.WithoutTrivia()).WithArrowToken(
-                            SyntaxFactory.Token(SyntaxKind.EqualsGreaterThanToken).WithTrailingTrivia(SyntaxFactory.Space))));
+                case "EECS081" when kind == "Static" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
+                                    && !await UsesInstance(context.Document, method, context.CancellationToken).ConfigureAwait(false):
+                    MakeStatic(context, diagnostic, generator, root, method);
+                    break;
+                case "EECS082" when kind == "Schedule" && node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { Parent: ClassDeclarationSyntax type } property:
+                    diagnostic.Properties.TryGetValue("Schedule", out var schedule);
+                    Register(context, diagnostic, string.IsNullOrEmpty(schedule) ? "Remove it: the system runs every update" : $"Declare it with {schedule}",
+                        root, type, Scheduled(type, property, diagnostic.AdditionalLocations, schedule));
+                    break;
+                case "EECS084" when kind == "Consume" && node.FirstAncestorOrSelf<ExpressionStatementSyntax>() is { Parent: BlockSyntax { Parent: MethodDeclarationSyntax method } } destroy:
+                    diagnostic.Properties.TryGetValue("DropEntity", out var entity);
+                    if (entity != null && await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false)) entity = null;
+                    Register(context, diagnostic, "Consume its rows with [Consume]", root, method, Consumed(method, destroy, entity));
+                    break;
+                case "EECS080" when kind == "ForEntity":
+                    context.RegisterCodeFix(CodeAction.Create("Write it as a [ForEntity] method",
+                        token => ToForEntity(context.Document, diagnostic, token), diagnostic.Id), diagnostic);
                     break;
                 case "EECS037" when kind == "WriteMask" && diagnostic.Properties.TryGetValue("WriteMask", out var writes) && writes != null:
                     if (DeclareWriteMask(root, node, writes) is { } withWrites)

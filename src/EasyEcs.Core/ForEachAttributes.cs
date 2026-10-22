@@ -33,7 +33,7 @@ public sealed class ForEachAttribute : Attribute
     /// Spread the method's rows over N runs of its system: each run visits one slice, about 1 / N of the rows of every
     /// matching table (slice <see cref="EcsSystem.RunCount"/> mod N, <see cref="QueryFilter.Slice"/>), so every row is
     /// visited once per N runs and a system over many entities costs about 1 / N per update instead of a spike on one.
-    /// With <see cref="EcsSystem.UpdateInterval"/> M, a row is visited once per N * M updates. Rows that move between
+    /// With <see cref="UpdateIntervalAttribute">[UpdateInterval(M)]</see>, a row is visited once per N * M updates. Rows that move between
     /// runs (swap-removes, structural changes, tables that grow or shrink) may be skipped or visited twice in one cycle.
     /// Works per entity, in batches and with <see cref="Parallel"/> (the slice is cut into chunks). Not with
     /// <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c> (EECS035): the rows of the other slices would lose the
@@ -71,6 +71,47 @@ public sealed class ForEachAttribute : Attribute
     /// </summary>
     public FloatMode FloatMode { get; init; }
 }
+
+/// <summary>
+/// The <see cref="ForEachAttribute"/> method consumes the rows it visits: when its pass ends, the entities it visited
+/// are destroyed, for event and command entities that are handled once. Exactly the pass's rows go, never an entity
+/// that matches later: a method that makes no structural change has every row it visited destroyed at once after the
+/// pass (one <c>DestroyAll</c> with the method's filter, a table whose rows all go emptied in one step); a method that may
+/// change structure has each entity destroyed right after its row. Destroying follows the rules of
+/// <see cref="Entity.Destroy"/>: an entity holding cleanup components is retired, the destroy log records each id.
+/// A pass that throws destroys nothing it has not finished: a method without structural changes destroys none of its
+/// rows, which it visits again on the next run. Not with <see cref="ForEachAttribute.Slices"/> (EECS085).
+/// <code>
+/// [ForEach, Consume]
+/// static void Count(in Damage hit, ref DamageDealt dealt) => dealt.Total += hit.Amount;   // each Damage event, once
+/// </code>
+/// </summary>
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class ConsumeAttribute : Attribute;
+
+/// <summary>
+/// A static method that runs on one entity: the generator writes an entry point, a static member of the method's type
+/// named like the method, which takes the entity (then the tick with <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c>,
+/// then the method's other values) and returns whether the method ran. The method takes what a
+/// <see cref="ForEachAttribute"/> method outside a system takes for one entity: components (<c>ref</c> / <c>in</c>,
+/// <see cref="Mut{T}"/>, <see cref="Maybe{T}"/>), singletons, <see cref="Lookup{T}"/>, the <see cref="Entity"/>, the
+/// <see cref="World"/> and values of any other type, and filters (<see cref="WithAttribute{T}"/>,
+/// <see cref="WithoutAttribute{T}"/>, <see cref="WithAnyAttribute{T}"/>, <c>[Changed&lt;T&gt;]</c>, <c>[Removed&lt;T&gt;]</c>).
+/// It compiles to the job <c>entity.Run</c> runs (an <see cref="IForEachEntity{T1}"/> struct with its <c>WriteMask</c>,
+/// <see cref="INoStructuralChanges"/> when the method makes no structural change): one table lookup for all its
+/// components, no allocation.
+/// <code>
+/// public static class Orders
+/// {
+///     [ForEntity, Without&lt;Closed&gt;]
+///     static void Buy(ref Stock stock, ref Sales sales, int quantity) { stock.Items -= quantity; sales.Count += quantity; }
+/// }
+///
+/// bool sold = Orders.Buy(shop, 3);   // false: closed, no Stock or Sales, or not alive
+/// </code>
+/// </summary>
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class ForEntityAttribute : Attribute;
 
 /// <summary>
 /// Whether a <see cref="ForEachAttribute"/> method runs as a vector loop (<see cref="ForEachAttribute.Simd"/>). A method
