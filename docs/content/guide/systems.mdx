@@ -664,10 +664,14 @@ public class ApplyInputSystem : EcsSystem
 world.AddSystem<ApplyInputSystem>();
 world.Update<InputGroup>();   // whenever input arrives
 world.Update();               // fixed tick: the default group
+long inputs = world.UpdateCount<InputGroup>();   // Update<InputGroup>() calls so far
 ```
 
 Ordering, `UpdateInterval`, `UpdatePhase` and `Enabled` apply within each group, and the attribute is inherited.
-Updating a group with no systems does nothing.
+Updating a group with no systems does nothing. `world.UpdateCount<TGroup>()` counts a group's updates, the running
+one included, as `DefaultUpdateCount` does for the default group: it is the count the group's `UpdateInterval`s are
+taken from, so a tool or a test can tell which systems run on the next update. O(1); 0 for a group no system was
+added to.
 
 #### Group filters [#group-filters]
 

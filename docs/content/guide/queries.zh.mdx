@@ -91,6 +91,7 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | 只读的循环（存盘、发包、报表） | [`foreach (var item in world.Read<T1..Tn>(filter))`](#read)：不打 tick |
 | “有多少个……？” / “有没有……？” | `world.Count<T1..Tn>(filter)` / `world.Any<T1..Tn>(filter)` |
 | 销毁所有匹配的实体 | `world.DestroyAll<T1..Tn>(filter)` |
+| 这个 tick 最多处理、销毁或存盘 N 个匹配的实体 | [`world.CollectIds<T1..Tn>(span, filter)`](#collect-ids) |
 | 只要某个 tick 之后写过或移除的行 | `Changed<T>(tick)` / `Removed<T>(tick)`；几个组件任意一个时用 `ChangedAny<T1..Tn>(tick)` / `RemovedAny<T1..Tn>(tick)`（[变更追踪](/zh/docs/guide/change-tracking)） |
 | 只写值真的变了的行 | `[ForEach]` 方法的 [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 参数 |
 | 每次只处理一部分行，N 次遍历把每行各过一遍 | `ForEach` 系列调用配 `Slice(index, of)`，或 [`[ForEach(Slices = N)]`](/zh/docs/guide/systems#slices) |
@@ -358,6 +359,32 @@ job 不能读别的行的 job 会写的东西（别的实体、单例组件）�
 ### `Count` 和 `Any` [#count]
 
 `Count` 把匹配表的行数加起来，只有在某些行缺少被查询组件的表里才去数存在位。`Any` 找到第一个匹配就停。两者都不碰组件的值。
+
+
+### 有上限的一批 id：`CollectIds` [#collect-ids]
+
+`world.CollectIds<T1..Tn>(into, filter)` 按 `Query` 和 `Read` 的遍历顺序，把匹配实体的 id 写进一个 span，写满为止，返回写了多少个。
+它就是处理请求的系统里“这个 tick 最多取 N 个”：之后把这些 id 交给 `DestroyEntities`、`SaveEntities`，或者交给一个会改结构的循环，
+这些都不能在查询循环进行中做。
+
+```csharp
+public class BuryTheFallen : EcsSystem
+{
+    static readonly QueryFilter Fallen = QueryFilter.Create().With<Dead>();
+
+    protected override void OnUpdate()
+    {
+        Span<EntityId> batch = stackalloc EntityId[64];
+        int count = World.CollectIds<Health>(batch, Fallen);   // 按查询顺序取前 64 个 // [!code highlight]
+        World.DestroyEntities(batch[..count]);                 // 其余的等下一个 tick
+    }
+}
+```
+
+- **零分配。** O(匹配的表)，加上写满之前读过的行；所有行都匹配的表是一次 id 拷贝。
+- **它不记得停在哪里。** 下一次调用又从第一个匹配开始，所以在下一次调用之前先处理掉它返回的（销毁、打标签、存盘）。
+- **用过滤条件，不用分支。** 两个系统共用一种请求时，用标签拆开（`With<Saved>` / `Without<Saved>`），而不是在批里用判断跳过某些行：
+  `VoxelServer` 就是这样处理加载请求的（[区块的一生](/zh/docs/samples/voxel-server#chunks)）。
 
 ## 完整例子 [#full-example]
 
