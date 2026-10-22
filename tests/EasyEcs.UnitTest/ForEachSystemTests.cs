@@ -28,8 +28,10 @@ public class Damage : EcsSystem
     }
 #pragma warning restore EECS029
 
+#pragma warning disable EECS030 // a method with no component parameter is what this system covers (RemoveAll would do it)
     [ForEach, With<Dead>]   // no component parameter: Dead is queried through the filter
     private static void Corpses(Entity entity) => entity.Remove<Velocity>();
+#pragma warning restore EECS030
 }
 
 /// <summary>Optional component: one method for entities with and without Armor.</summary>

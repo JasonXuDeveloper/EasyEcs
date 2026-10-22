@@ -1361,6 +1361,14 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Set(new Q { V = 1 }); } }", "EECS030")]
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P, Q>()) item.Entity.RemoveQ(); } }", "EECS030")]
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) { item.Entity.DisableP(); } } }", "EECS030")]
+    [TestCase("public class S : EcsSystem { [ForEach, With<Boss>] static void A(Entity e) => e.Destroy(); }", "EECS030")]
+    [TestCase("public class S : EcsSystem { [ForEach, With<P>, Without<Boss>] static void A(Entity e) => e.RemoveP(); }", "EECS030")]
+    [TestCase("public class S : EcsSystem { [ForEach, With<P>] static void A(Entity e) { e.Set(new Q { V = 1 }); } }", "EECS030")]
+    [TestCase("public class S : EcsSystem { [ForEach, With<P>] static void A(Entity e, in Clock c) => e.SetBoss(); }", "EECS030")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, in P p) { if (p.V == 0) e.Destroy(); } }")]          // some rows only
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, in P p) => e.Set(new Q { V = p.V }); }")]             // a value per row
+    [TestCase("public class S : EcsSystem { [ForEach, Changed<T>] static void A(Entity e) => e.SetBoss(); }")]                       // rows since the last run
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, Maybe<P> p) => e.SetBoss(); }", "EECS026")]           // no filter, only an unused parameter
     // EECS031: entities created one by one in a counted loop.
     [TestCase("public static class U { public static void F(World w, int n) { for (int i = 0; i < n; i++) w.CreateEntity(new P { V = i }); } }", "EECS031")]
     [TestCase("public static class U { public static void F(World w, Entity[] all) { for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P()); } }", "EECS031")]

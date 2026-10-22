@@ -65,11 +65,12 @@ public sealed partial class EasyEcsAnalyzer
         helpLinkUri: Help("EECS029"));
 
     public static readonly DiagnosticDescriptor PerEntityChange = new("EECS030", "A structural change entity by entity over a query",
-        "This loop {0} each entity of the query one by one; '{1}' does it for all of them in one call",
+        "This {0} {1} each entity {2} one by one; {3} does it for all of them in one call",
         Category, DiagnosticSeverity.Warning, true,
         "A structural change through each entity moves (or flips) one row per call, through the structural gate each " +
         "time. SetAll, RemoveAll, DisableAll, EnableAll and DestroyAll change every matching row of a table " +
-        "together, whole words of rows at once.",
+        "together, whole words of rows at once. A [ForEach] method whose whole body is such a change is the same loop, " +
+        "written by the generator: make the bulk call in the system's OnUpdate instead.",
         helpLinkUri: Help("EECS030"));
 
     public static readonly DiagnosticDescriptor CreateInLoop = new("EECS031", "Entities created one by one in a counted loop",
@@ -192,6 +193,7 @@ public sealed partial class EasyEcsAnalyzer
         bool forEach = Symbols.IsForEach(method);
         if (forEach)
         {
+            if (ForEachBulk(context, method, body, core)) return; // the method goes: what it costs per row is moot
             var uses = new Dictionary<IParameterSymbol, List<IOperation>>(SymbolEqualityComparer.Default);
             bool usesInstance = false;
             foreach (var operation in body.Descendants())
@@ -1098,43 +1100,95 @@ public sealed partial class EasyEcsAnalyzer
         {
             if (statement is not IExpressionStatementOperation { Operation: IInvocationOperation call } || item == null
                 || !IsItemEntity(Symbols.Receiver(call), item) || !Invariant(call.Arguments.Select(a => a.Value), loop.Body, item)) return false;
-            var method = call.TargetMethod;
-            bool generated = Symbols.IsGenerated(method);
-            var component = ComponentOf(method, core);
-            if (component != null && Symbols.IsWorldTag(component)) return false; // the world's own tags are EECS045's, by one call or by all
             string with = (filter != null ? "(" + filter + ")" : "QueryFilter.Create()") + string.Concat(types.Select(t => $".With<{t.ToMinimalDisplayString(model, at)}>()"));
-            string? bulk = null, call2 = null, verb = null;
-            string? name = generated ? Generated(method.Name) : method.Name;
-            string T() => component!.ToMinimalDisplayString(model, at);
-            switch (name)
+            if (BulkCall(call, typeList, filter, with, types, model, at, core) is not { } bulk) return false;
+            string text = world + "." + bulk.Call;
+            context.ReportDiagnostic(Diagnostic.Create(PerEntityChange, loop.Syntax.GetLocation(),
+                Binds(model, loop.Syntax, text, out _) ? Fix(text + ";", "Make it one bulk call") : null, "loop", bulk.Verb, "of the query", $"'{bulk.Bulk}'"));
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// EECS030 for a [ForEach] method whose whole body is one structural change of its entity, the same for every row
+    /// (no parameter in its arguments), over filters a QueryFilter holds (no Changed / Removed, no slices): the bulk
+    /// call in OnUpdate does what the generated loop does, a table at a time.
+    /// </summary>
+    private static bool ForEachBulk(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body, Core core)
+    {
+        var block = body is IMethodBodyOperation { BlockBody: var b, ExpressionBody: var e } ? b ?? e : body;
+        if (block == null || Single(block) is not IExpressionStatementOperation { Operation: IInvocationOperation call }
+            || Symbols.Unwrap(Symbols.Receiver(call)) is not IParameterReferenceOperation { Parameter: var entity }
+            || Symbols.Classify(entity) != Symbols.ParamKind.Entity || Symbols.IsRunner(method) || Symbols.IsParallel(method)
+            || Symbols.Slices(method) != 1 || !Symbols.IsSystem(method.ContainingType)
+            || call.Arguments.Any(a => a.Value.DescendantsAndSelf().Any(o => o is IParameterReferenceOperation))
+            || !Invariant(call.Arguments.Select(a => a.Value), block, null)) return false;
+
+        var queried = new List<ITypeSymbol>();
+        string rest = "";
+        var model = body.SemanticModel!;
+        int at = body.Syntax.SpanStart;
+        foreach (var p in method.Parameters)
+            if (Symbols.Classify(p) is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan or Symbols.ParamKind.Mutable or Symbols.ParamKind.Optional)
             {
-                case "Destroy" when !generated:
-                    (bulk, call2, verb) = ("DestroyAll", $"DestroyAll<{typeList}>({filter})", "destroys");
-                    break;
-                // A Set of a component the query requires overwrites a value: no row moves, nothing for SetAll to batch.
-                // A grouped component's new value moves each row to its group's table, one by one under SetAll too.
-                case "Set" when component != null && !types.Contains(component, SymbolEqualityComparer.Default)
-                                && !Symbols.Implements(component, Symbols.Group)
-                                && SetValue(call, component, generated, model, at) is { } value:
-                    (bulk, call2, verb) = ("SetAll", $"SetAll({value}, {with})", "adds a component to");
-                    break;
-                case "Remove" when component != null && call.Arguments.All(a => a.IsImplicit):
-                    (bulk, call2, verb) = ("RemoveAll", $"RemoveAll<{T()}>({with})", "removes a component from");
-                    break;
-                // ChildOf and cleanup components cannot be disabled, by one call or by all (EECS048).
-                case "Disable" when component != null && Symbols.IsDisableable(component):
-                    (bulk, call2, verb) = ("DisableAll", $"DisableAll<{T()}>({with})", "disables a component of");
-                    break;
-                case "Enable" when component != null:
-                    (bulk, call2, verb) = ("EnableAll", $"EnableAll<{T()}>({with})", "enables a component of");
-                    break;
+                // An optional component is no filter: its rows with and without it would both need the call.
+                if (Symbols.Classify(p) == Symbols.ParamKind.Optional || Symbols.QueriedComponent(p) is not { } c) return false;
+                queried.Add(c);
+            }
+            else if (Symbols.Classify(p) is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Singleton)) return false;
+
+        foreach (var (kind, type) in Symbols.AttributeFilters(method).Select(f => (f.Kind, f.Type))
+                     .Concat(Symbols.GroupFilters(method).Select(f => (f.Kind, f.Type))))
+            switch (kind)
+            {
+                case Symbols.FilterKind.With: queried.Add(type); break;
+                case Symbols.FilterKind.Without or Symbols.FilterKind.WithAny: rest += $".{kind}<{type.ToMinimalDisplayString(model, at)}>()"; break;
+                default: return false; // Changed / Removed: the rows since the last run, which no bulk call selects
             }
 
-            if (bulk == null) return false;
-            string text = world + "." + call2;
-            context.ReportDiagnostic(Diagnostic.Create(PerEntityChange, loop.Syntax.GetLocation(),
-                Binds(model, loop.Syntax, text, out _) ? Fix(text + ";", "Make it one bulk call") : null, verb, bulk));
-            return true;
+        if (queried.Count == 0 || queried.Any(t => t is ITypeParameterSymbol or { TypeKind: TypeKind.Error })) return false;
+        string typeList = string.Join(", ", queried.Select(t => t.ToMinimalDisplayString(model, at)));
+        string? filter = rest.Length > 0 ? "QueryFilter.Create()" + rest : null;
+        string with = "QueryFilter.Create()" + string.Concat(queried.Select(t => $".With<{t.ToMinimalDisplayString(model, at)}>()")) + rest;
+        if (BulkCall(call, typeList, filter, with, queried, model, at, core) is not { } bulk) return false;
+        context.ReportDiagnostic(Diagnostic.Create(PerEntityChange, method.Locations.FirstOrDefault(),
+            "[ForEach] method", bulk.Verb, "it visits", $"'World.{bulk.Call}' in OnUpdate"));
+        return true;
+    }
+
+    /// <summary>
+    /// The bulk call that makes a structural change of one entity for every entity a filter matches: (its name, the call
+    /// after the world, what it does), or null when none does. <paramref name="types"/> are the queried components
+    /// (<paramref name="typeList"/> as text), <paramref name="filter"/> the filter argument's text (null for none) and
+    /// <paramref name="with"/> the same filter with the queried components required.
+    /// </summary>
+    private static (string Bulk, string Call, string Verb)? BulkCall(IInvocationOperation call, string typeList, string? filter, string with,
+        IReadOnlyList<ITypeSymbol> types, SemanticModel model, int at, Core core)
+    {
+        var method = call.TargetMethod;
+        bool generated = Symbols.IsGenerated(method);
+        var component = ComponentOf(method, core);
+        if (component != null && Symbols.IsWorldTag(component)) return null; // the world's own tags are EECS045's, by one call or by all
+        string T() => component!.ToMinimalDisplayString(model, at);
+        switch (generated ? Generated(method.Name) : method.Name)
+        {
+            case "Destroy" when !generated && types.Count > 0:
+                return ("DestroyAll", $"DestroyAll<{typeList}>({filter})", "destroys");
+            // A Set of a component the query requires overwrites a value: no row moves, nothing for SetAll to batch.
+            // A grouped component's new value moves each row to its group's table, one by one under SetAll too.
+            case "Set" when component != null && !types.Contains(component, SymbolEqualityComparer.Default)
+                            && !Symbols.Implements(component, Symbols.Group)
+                            && SetValue(call, component, generated, model, at) is { } value:
+                return ("SetAll", $"SetAll({value}, {with})", "adds a component to");
+            case "Remove" when component != null && call.Arguments.All(a => a.IsImplicit):
+                return ("RemoveAll", $"RemoveAll<{T()}>({with})", "removes a component from");
+            // ChildOf and cleanup components cannot be disabled, by one call or by all (EECS048).
+            case "Disable" when component != null && Symbols.IsDisableable(component):
+                return ("DisableAll", $"DisableAll<{T()}>({with})", "disables a component of");
+            case "Enable" when component != null:
+                return ("EnableAll", $"EnableAll<{T()}>({with})", "enables a component of");
+            default:
+                return null;
         }
 
         static string Generated(string member) =>
