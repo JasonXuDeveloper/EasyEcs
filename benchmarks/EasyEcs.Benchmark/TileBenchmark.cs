@@ -77,6 +77,36 @@ public record struct Blur4Plot(Plot Pos) : IComponent, ITile<Plot>
     static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
 }
 
+/// <summary>A wide plate of the blur, 32 x 32 cells, with a halo of 1, 2 or 4 (<see cref="TileStepsBenchmark"/>).</summary>
+public record struct Wide1Plot(Plot Pos) : IComponent, ITile<Plot>
+{
+    readonly Plot IIndexed<Plot>.Key => Pos;
+    static int ITileShape.Width => 32;
+    static int ITileShape.Depth => 32;
+    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+    static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
+}
+
+public record struct Wide2Plot(Plot Pos) : IComponent, ITile<Plot>
+{
+    readonly Plot IIndexed<Plot>.Key => Pos;
+    static int ITileShape.Width => 32;
+    static int ITileShape.Depth => 32;
+    static int ITileShape.Halo => 2;
+    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+    static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
+}
+
+public record struct Wide4Plot(Plot Pos) : IComponent, ITile<Plot>
+{
+    readonly Plot IIndexed<Plot>.Key => Pos;
+    static int ITileShape.Width => 32;
+    static int ITileShape.Depth => 32;
+    static int ITileShape.Halo => 4;
+    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+    static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
+}
+
 /// <summary>A plate of the fourth-order Laplacian: five points along each axis, a halo of 2, faces only.</summary>
 public record struct WavePlot(Plot Pos) : IComponent, ITile<Plot>
 {
@@ -177,25 +207,40 @@ public class TileStencilBenchmark
     [Benchmark] public void Laplacian_Hand() => _waveHand.Update();
 }
 
-/// <summary>Four blur steps: four passes of a halo of 1, two of a halo of 2 (two steps each), one of a halo of 4.</summary>
+/// <summary>Four blur steps on 1,024 plates: four passes of a halo of 1, two of a halo of 2 (two steps each), one of a halo of 4.</summary>
 [MemoryDiagnoser]
 public class TileStepsBenchmark
 {
     [Params(1, 4)] public int Threads;
+
+    /// <summary>The plate's side: 16 (1 MB of cells, in cache) or 32 (4 MB).</summary>
+    [Params(16, 32)] public int Plate;
 
     private World _passes, _two, _four;
 
     [GlobalSetup]
     public void Setup()
     {
-        _passes = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p));
-        _passes.AddSystem<TileSystems.BlurSystem>();
+        if (Plate == 16)
+        {
+            _passes = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p));
+            _passes.AddSystem<TileSystems.BlurSystem>();
+            _two = TileWorlds.Warm<Blur2Plot>(Threads, p => new Blur2Plot(p));
+            _two.AddSystem<TileSystems.Blur2System>();
+            _four = TileWorlds.Warm<Blur4Plot>(Threads, p => new Blur4Plot(p));
+            _four.AddSystem<TileSystems.Blur4System>();
+        }
+        else
+        {
+            _passes = TileWorlds.Warm<Wide1Plot>(Threads, p => new Wide1Plot(p), cells: 1024);
+            _passes.AddSystem<TileSystems.Wide1System>();
+            _two = TileWorlds.Warm<Wide2Plot>(Threads, p => new Wide2Plot(p), cells: 1024);
+            _two.AddSystem<TileSystems.Wide2System>();
+            _four = TileWorlds.Warm<Wide4Plot>(Threads, p => new Wide4Plot(p), cells: 1024);
+            _four.AddSystem<TileSystems.Wide4System>();
+        }
         _passes.AddSystem<TileSystems.CommitWarmthSystem>();
-        _two = TileWorlds.Warm<Blur2Plot>(Threads, p => new Blur2Plot(p));
-        _two.AddSystem<TileSystems.Blur2System>();
         _two.AddSystem<TileSystems.CommitWarmthSystem>();
-        _four = TileWorlds.Warm<Blur4Plot>(Threads, p => new Blur4Plot(p));
-        _four.AddSystem<TileSystems.Blur4System>();
         _four.AddSystem<TileSystems.CommitWarmthSystem>();
         for (int i = 0; i < 2; i++)
         {
@@ -319,7 +364,7 @@ public class TileNeighbourBenchmark
 internal static class TileWorlds
 {
     /// <summary>A torus of plates of random warmth (a fixed seed), the step buffer sized.</summary>
-    public static World Warm<TPlot>(int threads, Func<Plot, TPlot> make, bool probe = false) where TPlot : struct, IComponent
+    public static World Warm<TPlot>(int threads, Func<Plot, TPlot> make, bool probe = false, int cells = 256) where TPlot : struct, IComponent
     {
         var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
         var random = new Random(7);
@@ -327,9 +372,9 @@ internal static class TileWorlds
         for (int x = 0; x < Plot.Side; x++)
         {
             var plate = world.CreateEntity(make(new Plot(x, z)));
-            var warmth = plate.GetOrAdd<DynamicBuffer<Warmth>>().SetCount(256);
-            for (int i = 0; i < 256; i++) warmth[i] = new Warmth(random.Next(1000));
-            plate.GetOrAdd<DynamicBuffer<NextWarmth>>().SetCount(256);
+            var warmth = plate.GetOrAdd<DynamicBuffer<Warmth>>().SetCount(cells);
+            for (int i = 0; i < cells; i++) warmth[i] = new Warmth(random.Next(1000));
+            plate.GetOrAdd<DynamicBuffer<NextWarmth>>().SetCount(cells);
             if (probe) plate.Set(new Probe());
         }
         return world;
@@ -402,7 +447,7 @@ internal static class TileSystems
         foreach (var row in plate.Rows(TileReads.Layer))
         {
             var c = plate.At(row);
-            for (int x = 0; x < 16; x += 4)
+            for (int x = 0; x < TTile.Width; x += 4)
                 (BlurStep<TTile>.Step(c, x)).CopyTo(into.Slice(row.Index + x));
         }
     }
@@ -442,6 +487,26 @@ internal static class TileSystems
         [ForEach(Parallel = true, ChunkRows = 16)]
         static void Step(Tile<Warmth, Blur4Plot> warmth, Mut<DynamicBuffer<NextWarmth>> next) =>
             warmth.Load().Steps<BlurStep<Blur4Plot>, float>().CopyTo(MemoryMarshal.Cast<NextWarmth, Warmth>(next.Write().AsSpan()));
+    }
+
+    public class Wide1System : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Step(Tile<Warmth, Wide1Plot> warmth, Mut<DynamicBuffer<NextWarmth>> next) => Blur(warmth, next);
+    }
+
+    public class Wide2System : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Step(Tile<Warmth, Wide2Plot> warmth, Mut<DynamicBuffer<NextWarmth>> next) =>
+            warmth.Load().Steps<BlurStep<Wide2Plot>, float>().CopyTo(MemoryMarshal.Cast<NextWarmth, Warmth>(next.Write().AsSpan()));
+    }
+
+    public class Wide4System : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 16)]
+        static void Step(Tile<Warmth, Wide4Plot> warmth, Mut<DynamicBuffer<NextWarmth>> next) =>
+            warmth.Load().Steps<BlurStep<Wide4Plot>, float>().CopyTo(MemoryMarshal.Cast<NextWarmth, Warmth>(next.Write().AsSpan()));
     }
 
     public const float Rate = 0.05f;
