@@ -174,6 +174,7 @@ public class GeneratorTests
         public struct Two : IComponent { public float A, B; }
         public struct Five : IComponent { public float A, B, C, D, E; }
         public struct Mixed : IComponent { public float A; public int B; }
+        public struct D : IComponent { public double V; }
         public partial struct Split : IComponent { public float A; }
         public partial struct Split { public float B; }
         public record struct G(float Pull) : ISingletonComponent;
@@ -184,13 +185,18 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f, in H h) { if (h.V > 0) return; f.V = h.V > 1 ? 1 : System.MathF.Sqrt(h.V); }", true)]
     [TestCase("[ForEach] static void A(ref F f, in G g) => f.V -= g.Pull;", true)]                     // a singleton: uniform
     [TestCase("[ForEach] static void A(ref P p) => p.V = (p.V << 2) | 1;", true)]
-    [TestCase("[ForEach] static void A(ref F f, in P p) => f.V = p.V;", false)]                        // two lane types
+    [TestCase("[ForEach] static void A(ref F f, in P p) => f.V = p.V;", true)]                         // int to float: one size
+    [TestCase("[ForEach] static void A(ref F f, in D d) => f.V = (float)d.V;", false)]                 // float and double
+    [TestCase("[ForEach] static void A(ref F f, in G g) => f.V = System.Math.Clamp(f.V, -g.Pull, g.Pull);", true)]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.Math.Clamp(f.V, 2, 1);", false)]       // throws
+    [TestCase("[ForEach] static void A(ref F f, in H h) => f.V = float.Lerp(f.V, h.V, 0.5f);", true)]
+    [TestCase("[ForEach] static void A(ref F f, ref P p) { if (f.V is > 0 and < 1 || !(p.V == 3)) p.V = (int)f.V; }", true)]
     [TestCase("[ForEach] static void A(ref P p) => p.V = System.Math.Abs(p.V);", false)]               // Math.Abs(int.MinValue) throws
     [TestCase("[ForEach] static void A(ref P p) => p.V /= 3;", false)]                                 // integer division
     [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x;", false)] // a call
     [TestCase("[ForEach] static void A(ref Two t) => t.A = t.B;", true)]                               // two fields: Interleaved
     [TestCase("[ForEach] static void A(ref Five t) => t.A = t.B;", false)]                             // five fields
-    [TestCase("[ForEach] static void A(ref Mixed m) => m.A++;", false)]                                // float and int fields
+    [TestCase("[ForEach] static void A(ref Mixed m) => m.A += m.B;", true)]                             // float and int fields
     [TestCase("[ForEach(Parallel = true)] static void A(ref F f) => f.V++;", false)]                   // no parallel batch loop yet
     [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V++;", false)]
     public void QualifyingMethodsGetAVectorLoop(string members, bool vectorized)
@@ -209,15 +215,17 @@ public class GeneratorTests
 
     // EECS055: the first reason a method that looks meant for a vector loop stays scalar, from Kernel.Vectorize.
     [TestCase("[ForEach] static void A(ref Five t) => t.A = t.B;", "component Five has 5 fields (a vector loop splits up to 4)")]
-    [TestCase("[ForEach] static void A(ref Mixed m) => m.A++;", "lane types float and int differ")]
+    [TestCase("[ForEach] static void A(ref F f, in D d) => f.V = (float)d.V;", "lane types float and double differ in size")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.Math.Clamp(f.V, 2, 1);", "Math.Clamp's min is above its max, so the call throws")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Round(f.V, 2);", "MathF.Round is not supported")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V %= 2;", "'%' is not supported (no vector remainder)")]
     [TestCase("[ForEach] static void A(ref Split s) => s.A++;", "component Split is declared in several parts, so the order of its fields is not defined")]
-    [TestCase("[ForEach] static void A(ref F f, in P p) => f.V = p.V;", "lane types float and int differ")]
     [TestCase("[ForEach] static void A(ref P p) => p.V = System.Math.Abs(p.V);", "Math.Abs of an integer is not supported (it throws on MinValue)")]
     [TestCase("[ForEach] static void A(ref P p) => p.V /= 3;", "integer division is not supported (it throws on 0)")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x;", "it calls S.M")]
     [TestCase("[ForEach] static void A(ref F f) { for (int i = 0; i < 2; i++) f.V++; }", "'for (int i = 0; i < 2; i++) f.V++;' is not supported")]
     [TestCase("[ForEach] static void A(ref F f, in H h) => h.V.ToString();", "it calls Single.ToString")]
-    [TestCase("[ForEach] static void A(in F f, ref H h) { double d = f.V; h.V = (float)d; }", "local 'd' is a double, not the lane type float")]
+    [TestCase("[ForEach] static void A(in F f, ref H h) { double d = f.V; h.V = (float)d; }", "local 'd' is a double, not a lane type of 4 bytes")]
     [TestCase("[ForEach] static void A(ref F f, ref int n) => n++;", "it takes 'n' by ref, and a vector loop has no reductions")]
     public void ScalarLoopsNameTheirReason(string members, string reason)
     {

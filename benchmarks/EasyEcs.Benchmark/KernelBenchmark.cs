@@ -16,7 +16,9 @@ namespace EasyEcs.Benchmark;
 /// <c>Count</c> stream memory (one float multiply-add, one int increment per row). <c>Move2</c> / <c>Move3</c> /
 /// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity), <c>Seek</c> (3 floats: a direction, its length, a
 /// division) and <c>Travel</c> (3 doubles) take components of several fields, which the vector loop splits into one
-/// vector per field (Interleaved), in a world of their own. 0 bytes either way.
+/// vector per field (Interleaved), in a world of their own. <c>Clamp</c> (Math.Clamp by a singleton's bounds, checked
+/// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
+/// pattern) are the calls, conversions and masks a vector loop takes. 0 bytes either way.
 /// </summary>
 [MemoryDiagnoser]
 public class KernelBenchmark
@@ -30,6 +32,7 @@ public class KernelBenchmark
     {
         _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _world.SetPull(0.75f);
+        _world.SetWindow(-40f, 120f);
         _world.Reserve<Heat, Speed, Mass, Ticks>(Entities);
         var random = new Random(1);
         for (int i = 0; i < Entities; i++)
@@ -38,6 +41,7 @@ public class KernelBenchmark
                 new Ticks { Value = i });
 
         _fields = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _fields.Reserve<P2, V2, P3, V3, P4, V4, D3>(Entities);
         float F() => (float)random.NextDouble() * 10 - 5;
         for (int i = 0; i < Entities; i++)
             _fields.CreateEntity(new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() }, new P3 { X = F(), Y = F(), Z = F() },
@@ -140,6 +144,57 @@ public class KernelBenchmark
 
     [Benchmark]
     public void TravelGenerated() => Kernels.Travel(_fields);
+
+    [Benchmark]
+    public void ClampScalar()
+    {
+        var job = new ClampRows { Window = _world.Window };
+        _world.ForEach<Heat, Speed, ClampRows>(ref job);
+    }
+
+    [Benchmark]
+    public void ClampGenerated() => Kernels.Clamp(_world);
+
+    [Benchmark]
+    public void QuantizeScalar()
+    {
+        var job = new QuantizeRows();
+        _world.ForEach<Heat, Ticks, QuantizeRows>(ref job);
+    }
+
+    [Benchmark]
+    public void QuantizeGenerated() => Kernels.Quantize(_world);
+
+    [Benchmark]
+    public void GateScalar()
+    {
+        var job = new GateRows();
+        _world.ForEach<Heat, Speed, Mass, GateRows>(ref job);
+    }
+
+    [Benchmark]
+    public void GateGenerated() => Kernels.Gate(_world);
+
+    public record struct Window(float Min, float Max) : ISingletonComponent;
+
+    private struct ClampRows : IForEach<Heat, Speed>, INoStructuralChanges
+    {
+        public Window Window;
+        public void Execute(ref Heat heat, ref Speed speed) => Kernels.Clamp(ref heat, in speed, in Window);
+        static int IForEach<Heat, Speed>.WriteMask => 1;
+    }
+
+    private struct QuantizeRows : IForEach<Heat, Ticks>, INoStructuralChanges
+    {
+        public void Execute(ref Heat heat, ref Ticks ticks) => Kernels.Quantize(ref heat, ref ticks);
+        static int IForEach<Heat, Ticks>.WriteMask => 3;
+    }
+
+    private struct GateRows : IForEach<Heat, Speed, Mass>, INoStructuralChanges
+    {
+        public void Execute(ref Heat heat, ref Speed speed, ref Mass mass) => Kernels.Gate(ref heat, in speed, in mass);
+        static int IForEach<Heat, Speed, Mass>.WriteMask => 1;
+    }
 
     public struct P2 : IComponent { public float X, Y; }
     public struct V2 : IComponent { public float X, Y; }
@@ -269,6 +324,28 @@ public class KernelBenchmark
             d.X = Math.FusedMultiplyAdd(d.Y, 0.5, d.X);
             d.Y = Math.Max(d.Y - d.Z * 0.25, -100);
             d.Z = d.Z > 10 ? -d.Z : d.Z + 1;
+        }
+
+        [ForEach]
+        internal static void Clamp(ref Heat heat, in Speed speed, in Window window) =>
+            heat.Value = Math.Clamp(heat.Value + speed.Value * Dt, window.Min, window.Max);
+
+        // A float truncated to an int, the int back to a float: a fixed-point step.
+        [ForEach]
+        internal static void Quantize(ref Heat heat, ref Ticks ticks)
+        {
+            int whole = (int)heat.Value;
+            ticks.Value = (ticks.Value & 1023) + whole;
+            heat.Value = whole + (heat.Value - whole) * 0.5f + ticks.Value * 1e-4f;
+        }
+
+        [ForEach]
+        internal static void Gate(ref Heat heat, in Speed speed, in Mass mass)
+        {
+            bool fast = speed.Value > 2 || speed.Value < -2;
+            bool heavy = mass.Value > 2.5f;
+            if (fast && !heavy) heat.Value = Math.Clamp(heat.Value, -5f, 5f);
+            else if (!fast || heat.Value is > 50 and < 100) heat.Value = MathF.Max(heat.Value - 1, -50);
         }
 
         // What a person writes by hand for the same work: a batch method over the runs of rows.

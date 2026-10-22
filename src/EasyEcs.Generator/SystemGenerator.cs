@@ -324,7 +324,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 for (int k = 1; k <= components.Length; k++)
                     sb.Append($"{indent}ref {components[k - 1]} r{k} = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{k});\n");
                 sb.Append($"{indent}nint rows = {(components.Length > 0 ? "c1.Length" : "entities.Length")};\n");
-                if (method.Simd is { } simd) EmitVectorLoop(sb, simd, components, indent);
+                if (method.Simd is { } simd) EmitVectorLoop(sb, simd, components, indent, call);
                 sb.Append(method.Simd != null
                     ? $"{indent}for (; i < rows; i++) // the rows after the last whole vector: the method itself\n{indent}    {call}\n"
                     : $"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n");
@@ -362,18 +362,26 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// type, the uniform values broadcast once per run, then one Vector&lt;T&gt; of rows per iteration; the rows left
     /// run the method. Without hardware acceleration (the JIT would emulate Vector&lt;T&gt;), every row runs the method.
     /// </summary>
-    private static void EmitVectorLoop(StringBuilder sb, Kernel.Code simd, string[] components, string indent)
+    private static void EmitVectorLoop(StringBuilder sb, Kernel.Code simd, string[] components, string indent, string call)
     {
-        string vector = $"global::System.Numerics.Vector<{simd.Element}>";
+        string vector = $"global::System.Numerics.Vector<{simd.Columns[0]}>"; // every column has lanes of one size: one count
         for (int k = 1; k <= components.Length; k++)
-            sb.Append($"{indent}ref {simd.Element} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Element}>(ref r{k});\n");
+            sb.Append($"{indent}ref {simd.Columns[k - 1]} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref r{k});\n");
         // Components of several fields need the shuffles of Interleaved; without them, every row runs the method.
         string interleaved = simd.Interleaves ? " && global::EasyEcs.Interleaved.IsAccelerated" : "";
         sb.Append($"{indent}nint i = 0;\n{indent}if (global::System.Numerics.Vector.IsHardwareAccelerated{interleaved} && rows >= {vector}.Count)\n{indent}{{\n");
-        string inner = indent + "    ";
+        string inner = indent + "    ", body = inner + "    ";
         foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) sb.Append(inner).Append(line).Append('\n');
         sb.Append($"{inner}for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{inner}{{\n");
-        foreach (var line in simd.Body.Split('\n')) if (line.Length > 0) sb.Append(inner).Append("    ").Append(line).Append('\n');
+        foreach (var line in simd.Body.Split('\n')) if (line.Length > 0) sb.Append(body).Append(line).Append('\n');
+        if (simd.Bails)
+        {
+            // A lane would throw (Math.Clamp with min above max): nothing is stored yet, so the method itself runs the
+            // rows of this vector, and throws as written. i walks them, and is set back for the loop's own step.
+            sb.Append($"{body}if (__bail)\n{body}{{\n{body}    for (nint end = i + {vector}.Count; i < end; i++)\n{body}        {call}\n");
+            sb.Append($"{body}    i -= {vector}.Count;\n{body}    continue;\n{body}}}\n");
+        }
+        foreach (var line in simd.Stores.Split('\n')) if (line.Length > 0) sb.Append(body).Append(line).Append('\n');
         sb.Append($"{inner}}}\n{indent}}}\n");
     }
 
