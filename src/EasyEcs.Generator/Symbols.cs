@@ -567,6 +567,11 @@ internal static class Symbols
         /// <summary><c>Mut&lt;T&gt;</c>: a queried component written only where the method writes it (stamped per write).</summary>
         Mutable,
         /// <summary>
+        /// <c>Reduce&lt;T&gt;</c>: a partial result of singleton <c>T</c> per chunk of rows (per pass on one thread), combined
+        /// into the singleton when the pass ends: a write of the singleton, once per pass.
+        /// </summary>
+        Reduction,
+        /// <summary>
         /// A value the caller passes to the entry point of a [ForEach] method outside a system (<c>ref int dead</c>, a
         /// configuration): any type but a component, a singleton or the framework's own, by value, <c>ref</c> or <c>in</c>.
         /// </summary>
@@ -720,6 +725,36 @@ internal static class Symbols
         return otherwise;
     }
 
+    /// <summary>
+    /// Why <paramref name="reduction"/>, a <c>Reduce&lt;T&gt;</c> parameter of <paramref name="method"/>, would lose its
+    /// result (EECS057), or null: the method takes T by <c>ref</c>, or reduces into T in an earlier parameter, or an
+    /// earlier [ForEach] method of its system does (the later pass replaces the earlier one's result).
+    /// </summary>
+    public static string? ReductionProblem(IMethodSymbol method, IParameterSymbol reduction)
+    {
+        var target = ReduceElement(reduction.Type);
+        foreach (var p in method.Parameters)
+        {
+            if (SymbolEqualityComparer.Default.Equals(p, reduction)) break;
+            if (ReduceElement(p.Type) is { } other && SymbolEqualityComparer.Default.Equals(other, target))
+                return $"parameter '{p.Name}' reduces into it too";
+        }
+
+        foreach (var p in method.Parameters)
+            if (p.RefKind == RefKind.Ref && SymbolEqualityComparer.Default.Equals(p.Type, target))
+                return $"parameter '{p.Name}' writes it, and the pass's result replaces what it wrote";
+        if (IsRunner(method)) return null; // its methods are separate entry points: the caller runs each on its own
+        foreach (var member in method.ContainingType.GetMembers())
+        {
+            if (SymbolEqualityComparer.Default.Equals(member, method)) break;
+            if (member is IMethodSymbol other && IsForEach(other)
+                && other.Parameters.Any(p => ReduceElement(p.Type) is { } t && SymbolEqualityComparer.Default.Equals(t, target)))
+                return $"[ForEach] method '{other.Name}' of its type reduces into it too, and the later pass replaces its result";
+        }
+
+        return null;
+    }
+
     /// <summary>Why a method's [ForEach(ChunkRows = N)] is invalid (EECS054), or null: N below 0, or set on a method that does not run in parallel.</summary>
     public static string? ChunkRowsProblem(IMethodSymbol method)
     {
@@ -756,6 +791,8 @@ internal static class Symbols
             return optional.IsValueType && IsA(optional, Component) ? ParamKind.Optional : ParamKind.Invalid;
         if (MutElement(p.Type) is { } mutable)
             return mutable.IsValueType && IsA(mutable, Component) ? ParamKind.Mutable : ParamKind.Invalid;
+        if (ReduceElement(p.Type) is { } reduced)
+            return reduced.IsValueType && IsA(reduced, Singleton) ? ParamKind.Reduction : ParamKind.Invalid;
         return Named(p.Type, Entity) ? ParamKind.Entity
             : Named(p.Type, EntitySpan) ? ParamKind.Entities
             : Named(p.Type, World) ? ParamKind.World
@@ -787,6 +824,12 @@ internal static class Symbols
     /// <summary>Component type of a <c>Mut&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? MutElement(ITypeSymbol type) =>
         type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Mut<T>")
+            ? named.TypeArguments[0]
+            : null;
+
+    /// <summary>Singleton type of a <c>Reduce&lt;T&gt;</c>, else null.</summary>
+    public static ITypeSymbol? ReduceElement(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Reduce<T>")
             ? named.TypeArguments[0]
             : null;
 

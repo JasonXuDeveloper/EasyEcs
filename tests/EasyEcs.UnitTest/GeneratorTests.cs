@@ -436,6 +436,9 @@ public class GeneratorTests
     [TestCase("public static class R { [ForEach(Slices = 2)] static void A(ref P p) { } static void A(World w, int slice) { } }", "EECS021")]
     [TestCase("public struct Mount : IComponent, IUniqueIndexed<EntityId> { public EntityId Rider; public EntityId Key => Rider; }", "EECS036")]
     [TestCase("public struct Seat : IComponent, IUniqueIndexed<int>, IIndexed<string> { public int Id; readonly int IIndexed<int>.Key => Id; readonly string IIndexed<string>.Key => \"\"; }", "EECS036")]
+    [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, Reduce<Sum> a, Reduce<Sum> b) { a.Value.N += p.V; b.Value.N++; } }", "EECS057")]
+    [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public class S : EcsSystem { [ForEach] static void A(in P p, Reduce<Sum> a, ref Sum s) { a.Value.N += p.V; s.N++; } }", "EECS057")]
+    [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public class S : EcsSystem { [ForEach] static void A(in P p, Reduce<Sum> a) => a.Value.N += p.V; [ForEach] static void B(in Q q, Reduce<Sum> b) => b.Value.N += q.V; }", "EECS057")]
     public async Task MisuseIsReported(string source, string id)
     {
         var errors = await Diagnose(Components, source);
@@ -455,6 +458,9 @@ public class GeneratorTests
     [TestCase("public static class U { public static bool F(in DynamicBuffer<int> b) => System.Runtime.CompilerServices.Unsafe.IsNullRef(in b); }")]
     [TestCase("public static class U { public static bool F(Entity e) { ref var b = ref e.TryGetRef<DynamicBuffer<int>>(out _); return !System.Runtime.CompilerServices.Unsafe.IsNullRef(in b) && b.Count > 0; } }")]
     [TestCase("public static class U { public static bool F(Entity e) { ref readonly var b = ref e.TryGetRef<DynamicBuffer<int>>(out _); return System.Runtime.CompilerServices.Unsafe.IsNullRef(in b); } }")]
+    [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, Reduce<Sum> sum, in Sum last) => sum.Value.N += p.V + last.N; }")]
+    [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public class S : EcsSystem { [ForEach] static void A(in P p, Maybe<Q> q, Reduce<Sum> sum) => sum.Combine(new Sum { N = p.V + (q.HasValue ? q.Value.V : 0) }); }")]
+    [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public static class R { [ForEach(Parallel = true, ChunkRows = 1024)] public static void A(in P p, Reduce<Sum> sum) => sum.Value.N += p.V; }")]
     public async Task ValidCodeIsNotReported(string source)
     {
         var errors = await Diagnose(Components, source);

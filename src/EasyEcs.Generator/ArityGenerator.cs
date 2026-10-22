@@ -369,6 +369,18 @@ public sealed class ArityGenerator : IIncrementalGenerator
             /// <see cref="Mut{T}"/> parameters.
             /// </summary>
             static virtual int SelfStamped => 0;
+
+            /// <summary>
+            /// The job keeps partial results in its fields (<see cref="Reduce{T}"/>; default false): a parallel pass keeps
+            /// each chunk's copy of the job and combines them into the caller's job in chunk order (<see cref="Merge{TSelf}"/>).
+            /// </summary>
+            static virtual bool Merges => false;
+
+            /// <summary>
+            /// Combine the partial results <paramref name="chunk"/> holds into <paramref name="job"/> (both of the job's
+            /// own type; <see cref="Merges"/>). Generated jobs with <see cref="Reduce{T}"/> parameters implement it.
+            /// </summary>
+            static virtual void Merge<TSelf>(ref TSelf job, in TSelf chunk) where TSelf : struct { }
         """;
 
     private static string Queries()
@@ -1116,6 +1128,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         Gate.Thaw();
                     }
 
+                    if (TJob.Merges) work.MergeInto(ref job, chunks); // after the gate: the helpers are done with the copies
                     work.Release();
                 }
 
@@ -1136,6 +1149,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     where TJob : struct, {{job}}<{{tps}}>
                 {
                     public TJob Job;
+                    private TJob[] _parts = []; // each chunk's copy of the job, when it keeps partial results (TJob.Merges)
                     private World _world;
                     private Archetype[] _tables = [];
                     private RowFilter[] _filters = [];
@@ -1177,6 +1191,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                     Array.Resize(ref _filters, grown);
                                     Array.Resize(ref _starts, grown);
                                     Array.Resize(ref _ends, grown);
+                                    if (TJob.Merges) Array.Resize(ref _parts, grown);
                                 }
 
                                 _tables[chunks] = archetype;
@@ -1194,6 +1209,17 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         var archetype = _tables[index];
                         var job = Job;
                         _world.{{name}}Chunk<{{tps}}, TJob>(ref job, archetype, _filters[index], _starts[index], _ends[index], {{List(n, i => $"_b{i}")}});
+                        // One write per chunk: neighbouring slots written by other threads share a line only for this store.
+                        if (TJob.Merges) _parts[index] = job;
+                    }
+
+                    /// <summary>
+                    /// Combine the chunks' partial results into <paramref name="job"/> in chunk order (tables in match order,
+                    /// rows in table order): the result depends on where chunks begin, never on which thread ran which.
+                    /// </summary>
+                    public void MergeInto(ref TJob job, int chunks)
+                    {
+                        for (int i = 0; i < chunks; i++) TJob.Merge(ref job, in _parts[i]);
                     }
 
                     /// <summary>Drop the references of the last call (tables, filters, the job's own) until the next one.</summary>
@@ -1201,6 +1227,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     {
                         Array.Clear(_tables);
                         Array.Clear(_filters);
+                        if (TJob.Merges) Array.Clear(_parts); // the copies hold the job's references
                         Job = default;
                         _world = null;
                     }

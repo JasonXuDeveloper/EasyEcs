@@ -134,7 +134,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append($"        {Code.GeneratedCode(Symbols.GeneratorName)}\n");
             sb.Append($"        {(method.PublicEntry ? "public" : "internal")} static void {Escape(method.Name)}{method.TypeParameters}({string.Join(", ", signature)}){method.Constraints}\n        {{\n");
             sb.Append($"            var {local} = new {job}{Fields(method, world, null)};\n");
-            sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref {local}{filter}{method.Chunks});\n        }}\n\n");
+            sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref {local}{filter}{method.Chunks});\n");
+            EmitReductions(sb, method, world, local, "            ");
+            sb.Append("        }\n\n");
 
             string Free(string name)
             {
@@ -162,9 +164,22 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 fields.Add(method.Parallel ? $"s{i} = {world}.SingletonRef<{p.Type}>()" : $"s{i} = ref {world}.SingletonRef<{p.Type}>().Value");
             else if (p.Kind == Symbols.ParamKind.Context)
                 fields.Add(p.RefKind.Length == 0 || method.Parallel ? $"x{i} = {Escape(p.Name)}" : $"x{i} = ref {Escape(p.Name)}");
+            else if (p.Kind == Symbols.ParamKind.Reduction)
+                fields.Add($"a{i} = {p.Type}.Identity"); // every partial result starts there
         }
 
         return fields.Count == 0 ? "()" : $" {{ {string.Join(", ", fields)} }}";
+    }
+
+    /// <summary>
+    /// A pass's reductions (<c>Reduce&lt;T&gt;</c>), combined into the job by the pass: each replaces its singleton
+    /// (added when missing), once per pass.
+    /// </summary>
+    private static void EmitReductions(StringBuilder sb, ForEachModel method, string world, string job, string indent)
+    {
+        for (int i = 0; i < method.Parameters.Length; i++)
+            if (method.Parameters[i] is { Kind: Symbols.ParamKind.Reduction } p)
+                sb.Append($"{indent}{world}.GetOrAddSingleton<{p.Type}>() = {job}.a{i};\n");
     }
 
     /// <summary>
@@ -190,6 +205,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             if (method.Slices > 1) count = $"{count} / {method.Slices}";
             sb.Append($"            if (Measuring(world)) Visit(system, {count});\n");
             sb.Append($"            world.{method.ForEach}<{method.ComponentTypes}, {method.Name}Job{i}>(ref job{i}{filter}{method.Chunks});\n");
+            EmitReductions(sb, method, "world", $"job{i}", "            ");
         }
 
         sb.Append("        }\n\n");
@@ -237,7 +253,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind != Symbols.ParamKind.Entity)
                      .Select(p => (p.Kind, p.Type, p.RefKind)).Distinct())
         {
-            string kind = p.Kind == Symbols.ParamKind.Singleton ? "Singleton" : "";
+            string kind = p.Kind is Symbols.ParamKind.Singleton or Symbols.ParamKind.Reduction ? "Singleton" : "";
             sb.Append($"            access.{(p.RefKind == "ref" ? "Write" : "Read")}{kind}<{p.Type}>();\n");
         }
 
@@ -258,7 +274,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
         // A batch job copies the caller's ref values into locals for its run (written back after it): through the
         // ref field, every row would load and store memory, a dependency chain of ~2.5 ns per row. No finally: Execute
         // would no longer inline, so a method that throws loses its changes of the run in progress.
-        bool[] local = method.Parameters.Select(p => method.IsBatch && p.Kind == Symbols.ParamKind.Context && p.RefKind == "ref").ToArray();
+        bool[] local = method.Parameters.Select(p => method.IsBatch && (p.Kind == Symbols.ParamKind.Context && p.RefKind == "ref" || p.Kind == Symbols.ParamKind.Reduction)).ToArray();
+        string Field(int i) => method.Parameters[i].Kind == Symbols.ParamKind.Reduction ? $"a{i}" : $"x{i}";
         var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
         {
             Symbols.ParamKind.Component when runs => $"{p.RefKind} global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i)",
@@ -272,6 +289,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Entity => "entity",
             Symbols.ParamKind.Entities => "entities",
             Symbols.ParamKind.Optional => $"global::EasyEcs.Maybe<{p.Type}>.{(p.RefKind == "ref" ? "ForWrite" : "ForRead")}(entity)",
+            Symbols.ParamKind.Reduction => $"new global::EasyEcs.Reduce<{p.Type}>(ref {(local[i] ? "l" : "a")}{i})",
             Symbols.ParamKind.Context when local[i] => $"ref l{i}",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
             _ => "World",
@@ -299,6 +317,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
             else if (p.Kind == Symbols.ParamKind.Context) // the caller's value: by reference unless copied for threads
                 sb.Append(p.RefKind.Length == 0 || method.Parallel ? $"        public {p.Type} x{i};\n"
                     : $"        public ref {(p.RefKind == "in" ? "readonly " : "")}{p.Type} x{i};\n");
+            else if (p.Kind == Symbols.ParamKind.Reduction) // the partial result: of the pass, or of a chunk's copy
+                sb.Append($"        public {p.Type} a{i};\n");
         }
         if (sb[sb.Length - 2] != '{') sb.Append('\n'); // a blank line after the fields, if any
         sb.Append("        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
@@ -313,7 +333,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append("        {\n");
             const string indent = "            ";
             for (int i = 0; i < method.Parameters.Length; i++)
-                if (local[i]) sb.Append($"            var l{i} = x{i};\n");
+                if (local[i]) sb.Append($"            var l{i} = {Field(i)};\n");
             for (int i = 0; i < method.Parameters.Length; i++)
                 if (runs && method.Parameters[i] is { Kind: Symbols.ParamKind.Optional } p)
                     sb.Append($"{indent}var m{i} = new global::EasyEcs.MaybeColumn<{p.Type}>(in entities, {(p.RefKind == "ref" && p.Tracked ? "true" : "false")});\n");
@@ -331,7 +351,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             }
             else sb.Append($"{indent}{call}\n");
             for (int i = 0; i < method.Parameters.Length; i++)
-                if (local[i]) sb.Append($"            x{i} = l{i};\n");
+                if (local[i]) sb.Append($"            {Field(i)} = l{i};\n");
             sb.Append("        }\n");
         }
         // Its ref parameters (Span<T> for a batch, Mut<T>): carried over when the method moves the entity it visits,
@@ -346,6 +366,19 @@ public sealed class SystemGenerator : IIncrementalGenerator
         }
         sb.Append($"\n        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.WriteMask => {writes};\n");
         if (own != 0) sb.Append($"        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.SelfStamped => {own};\n");
+        var reductions = Enumerable.Range(0, method.Parameters.Length).Where(i => method.Parameters[i].Kind == Symbols.ParamKind.Reduction).ToArray();
+        if (method.Parallel && reductions.Length > 0)
+        {
+            // The chunks' partial results, combined in chunk order (TSelf is this job: the runtime passes its own TJob).
+            const string unsafeType = "global::System.Runtime.CompilerServices.Unsafe";
+            sb.Append($"        static bool global::EasyEcs.{iface}<{method.ComponentTypes}>.Merges => true;\n\n");
+            sb.Append($"        static void global::EasyEcs.{iface}<{method.ComponentTypes}>.Merge<TSelf>(ref TSelf job, in TSelf chunk)\n        {{\n");
+            sb.Append($"            ref var into = ref {unsafeType}.As<TSelf, {job}>(ref job);\n");
+            sb.Append($"            ref var part = ref {unsafeType}.As<TSelf, {job}>(ref {unsafeType}.AsRef(in chunk));\n");
+            foreach (int i in reductions)
+                sb.Append($"            into.a{i} = {method.Parameters[i].Type}.Combine(into.a{i}, part.a{i});\n");
+            sb.Append("        }\n");
+        }
 
         sb.Append("    }\n\n");
 
@@ -484,12 +517,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
         public Kernel.Code? Simd { get; init; }
 
         /// <summary>
-        /// Changes no structure (on one thread) and takes a Maybe, a Mut or a caller's value by ref: its job walks runs of
-        /// rows, finding each optional column once per run (a presence bit per row), stamping a Mut's writes by row (no
-        /// entity lookup) and keeping the caller's values in locals for the run.
+        /// Changes no structure (on one thread) and takes a Maybe, a Mut, a Reduce or a caller's value by ref: its job walks
+        /// runs of rows, finding each optional column once per run (a presence bit per row), stamping a Mut's writes by row
+        /// (no entity lookup) and keeping partial results and the caller's values in locals for the run.
         /// </summary>
         public bool Runs => Stable && !Parallel && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan)
-            && Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" });
+            && Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Reduction || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" });
 
         public static ForEachModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
         {
@@ -513,6 +546,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     Symbols.ParamKind.Mutable => new ParamModel(Symbols.ParamKind.Mutable, // a write: the scheduler sees its writer
                         Symbols.MutElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared,
                         Symbols.Implements(Symbols.MutElement(p.Type)!, Symbols.TrackChanges)),
+                    Symbols.ParamKind.Reduction => new ParamModel(Symbols.ParamKind.Reduction, // a write of the singleton, once per pass
+                        Symbols.ReduceElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared),
                     Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn),
                         p.RefKind switch { RefKind.Ref => "ref", RefKind.In => "in", _ => "" }, p.Name, declared),
                     var kind => new ParamModel(kind, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.Ref ? "ref" : "in", p.Name, declared),
