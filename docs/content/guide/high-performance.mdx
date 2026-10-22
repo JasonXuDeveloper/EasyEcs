@@ -33,20 +33,28 @@ Take the steps in order and measure after each; stop at the first one that is en
 
 ### Let the generator vectorize: vector loops [#vector-loops]
 
-A static, non-parallel `[ForEach]` method over components of 1 to 4 fields of one number type gets a generated
-`Vector<T>` loop, with its `if`s turned into masks and a scalar tail: what Burst does for a Unity job, done at compile
-time. The code you write stays scalar. Which methods qualify, the generated code side by side and how to rewrite a
-method that stays scalar: [vector loops](/en/docs/guide/systems#vector-loops).
+A static per-entity `[ForEach]` method, on one thread or `Parallel`, over components of 1 to 4 lanes of one size gets
+a generated vector loop (`Vector512` where the CPU has it, `Vector<T>` otherwise), with its `if`s turned into masks
+and a scalar tail: what Burst does for a Unity job, done at compile time. The code you write stays scalar, and outside
+`FloatMode.Fast` the results are the scalar code's, bit for bit. Which methods qualify, the generated code side by
+side and how to rewrite a method that stays scalar: [vector loops](/en/docs/guide/systems#vector-loops).
 
 - **Several fields:** `Position { X, Y, Z }` is split into one vector per field by deinterleaving loads and
   interleaving stores (AVX2, AVX-512); without those instructions the rows run one at a time.
+- **The body:** conversions between lane types, `Math.Clamp`, `Round`, `CopySign`, `Lerp` and the other `Math` /
+  `MathF` functions with an exact vector form; `Sin`, `Cos`, `Exp`, `Log`, `Log2` and `Hypot` only under
+  `FloatMode.Fast`, whose approximations change results. A call the loop cannot express under a condition is a cold
+  branch: only the vectors where a lane takes it run the method.
+- **The data:** `byte` and `short` lanes (64 and 32 rows per `Vector512`), fields of `Vector2` / `Vector3` / `Vector4`,
+  a `Maybe<T>` as the lane mask of the rows that have `T`, and on AVX-512 a component of up to 16 words of which the
+  method uses some 4-byte fields (EECS055 names the fields to split out when the permutes cost more than the work).
+- **Totals:** a [`Reduce<T>`](/en/docs/guide/threading#reductions) keeps one accumulator per lane, folded in lane
+  order.
+- **What a system got:** `world.DescribeSchedule()` prints one line per method (`SystemInfo.Loops`): the loop, its
+  shape, or the reason it stayed scalar.
 - **Why not:** [EECS055](/en/docs/guide/analyzer#eecs055) names the first reason a method stayed scalar, as Burst's
   inspector would; `[ForEach(Simd = SimdMode.Require)]` turns it into a build error
   ([EECS056](/en/docs/guide/analyzer#eecs056)) on the hot path, and `SimdMode.Off` silences it.
-
-{/* TODO(vector loops): Math.Clamp, MathF.* and lerp, conversions; vector reductions, FloatMode.Fast, presence-bit
-lane masks, Vector512 and bounds-check-free scalar loops. Add one line each here, linking their sections on
-guide/systems. */}
 
 </Step>
 
