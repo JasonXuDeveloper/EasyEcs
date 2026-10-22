@@ -12,15 +12,15 @@ namespace EasyEcs.UnitTest;
 /// <summary>Drives SystemGenerator and EasyEcsAnalyzer through Roslyn: output, diagnostics and incremental caching.</summary>
 public class GeneratorTests
 {
-    private static readonly CSharpParseOptions Parse = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+    internal static readonly CSharpParseOptions Parse = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
 
-    private static CSharpCompilation Compile(params string[] sources) => CSharpCompilation.Create("Test",
+    internal static CSharpCompilation Compile(params string[] sources) => CSharpCompilation.Create("Test",
         sources.Select(s => CSharpSyntaxTree.ParseText("using EasyEcs;\n" + s, Parse)),
         Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
         new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
 
-    private static GeneratorDriver Driver() => CSharpGeneratorDriver.Create(
-        [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator()], parseOptions: Parse,
+    internal static GeneratorDriver Driver() => CSharpGeneratorDriver.Create(
+        [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()], parseOptions: Parse,
         driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
 
     /// <summary>
@@ -35,12 +35,14 @@ public class GeneratorTests
     internal static async Task<Diagnostic[]> Costs(params string[] sources) =>
         (await Analyze(sources)).Where(d => IsPerformance(d.Id) || d.Id == "EECS034").OrderBy(d => d.Location.SourceSpan.Start).ToArray();
 
-    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id is "EECS039" or "EECS046" or "EECS052" or "EECS053";
+    // The performance rules, and the suggestions to declare with attributes what a hand-written reduction does (EECS065):
+    // the shortest code that shows a rule often writes one by hand.
+    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id is "EECS039" or "EECS046" or "EECS052" or "EECS053" or "EECS065";
 
     /// <summary>Every EasyEcs diagnostic but EECS055 (the vector loop's message, asserted by <see cref="ScalarLoopsNameTheirReason"/>).</summary>
     internal static async Task<Diagnostic[]> All(string source) => (await Analyze([Components, Extra, source])).Where(d => d.Id.StartsWith("EECS") && d.Id != "EECS055" || d.Severity == DiagnosticSeverity.Error).OrderBy(d => d.Location.SourceSpan.Start).ToArray();
 
-    private static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
+    internal static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(sources), out var output, out _);
         return await output.WithAnalyzers([new EasyEcsAnalyzer()]).GetAllDiagnosticsAsync();
@@ -926,7 +928,7 @@ public class GeneratorTests
     private static readonly string[] TrackedStages =
     [
         "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "ExtensionMembers", "BufferUses",
-        "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers",
+        "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
     ];
 
     // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
@@ -939,7 +941,8 @@ public class GeneratorTests
         string code = "using EasyEcs;\n" + Components +
             "public struct L; public partial class S : EcsSystem { [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { } [ForEach(Slices = 4)] static void D(ref Q q) { } }" +
             "public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void B(ref T t) { } } public class H : G<P>;" +
-            "public static class U { static void C(World w) { foreach (var i in w.Query<P>()) i.P.V++; } }";
+            "public static class U { static void C(World w) { foreach (var i in w.Query<P>()) i.P.V++; } }" +
+            "public partial struct Census : ISingletonComponent { [Sum] public int N; [Min] public float L; }";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         var edited = code.Contains(before) ? system : other;
@@ -1224,7 +1227,7 @@ public class GeneratorTests
             Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged));
     }
 
-    private static System.Collections.Generic.Dictionary<string, System.Collections.Generic.IEnumerable<IncrementalGeneratorRunStep>> Steps(GeneratorDriver driver) =>
+    internal static System.Collections.Generic.Dictionary<string, System.Collections.Generic.IEnumerable<IncrementalGeneratorRunStep>> Steps(GeneratorDriver driver) =>
         driver.GetRunResult().Results.SelectMany(r => r.TrackedSteps).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.SelectMany(p => p.Value));
 
     [Test]

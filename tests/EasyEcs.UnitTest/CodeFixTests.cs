@@ -267,6 +267,27 @@ public class CodeFixTests
         "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
         + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, QueryFilter.Create().Without<Q>()); return s.Total; } }",
         "w.ForEach<P, Sum>(ref s, QueryFilter.Create().Without<Q>());")]
+    [TestCase("EECS062", "Make it partial",
+        "public static class Outer { internal class Mid { public struct Census : ISingletonComponent { [Sum] public int Alive; } } }",
+        "public static partial class Outer { internal partial class Mid { public partial struct Census")]
+    [TestCase("EECS062", "Make it partial",
+        "class Outer\n{\n    [System.Serializable]\n    struct Census : ISingletonComponent { [Sum] public int Alive; }\n}",
+        "partial class Outer\n{\n    [System.Serializable]\n    partial struct Census")]
+    [TestCase("EECS065", "Declare it with attributes",
+        "public struct C : ISingletonComponent, IReduction<C> { public int N; public float L; public static C Identity => new C { L = float.MaxValue }; public static C Combine(C a, C b) => new C { N = a.N + b.N, L = System.Math.Min(a.L, b.L) }; }",
+        "public partial struct C : ISingletonComponent { [Sum] public int N; [Min] public float L; }")]
+    [TestCase("EECS065", "Declare it with attributes",
+        "public record struct C(int N, long M) : ISingletonComponent, IReduction<C>\n{\n    public static C Identity => new C { M = long.MinValue };\n\n    public static C Combine(C a, C b) => new C { N = a.N + b.N, M = System.Math.Max(a.M, b.M) };\n}",
+        "public partial record struct C([Sum] int N, [Max] long M) : ISingletonComponent\n{\n}")]
+    [TestCase("EECS066", "Fix the Identity",
+        "public struct C : ISingletonComponent, IReduction<C> { public float L; public int First; public static C Identity => default; public static C Combine(C a, C b) => new C { L = System.MathF.Min(a.L, b.L), First = a.First < 0 ? b.First : a.First }; }",
+        "public static C Identity => new C { L = float.PositiveInfinity };")]
+    [TestCase("EECS066", "Fix the Identity",
+        "public struct C : ISingletonComponent, IReduction<C> { public int Lo, Hi, First; public static C Identity => new C { Lo = int.MaxValue, First = -1 }; public static C Combine(C a, C b) => new C { Lo = System.Math.Min(a.Lo, b.Lo), Hi = System.Math.Max(a.Hi, b.Hi), First = a.First < 0 ? b.First : a.First }; }",
+        "public static C Identity => new C { Lo = int.MaxValue, Hi = int.MinValue, First = -1 };")]
+    [TestCase("EECS066", "Declare it with attributes",
+        "public struct C : ISingletonComponent, IReduction<C> { public int Lo; public static C Identity => default; public static C Combine(C a, C b) => new C { Lo = System.Math.Min(a.Lo, b.Lo) }; }",
+        "public partial struct C : ISingletonComponent { [Min] public int Lo; }")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
@@ -363,7 +384,7 @@ public class CodeFixTests
         public override ImmutableArray<DiagnosticAnalyzer> GetAnalyzersForAllLanguages() => [];
         // The same instances every call: the workspace maps each generator back to its reference.
         private readonly ImmutableArray<ISourceGenerator> _generators =
-            [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator()];
+            [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()];
 
         public override ImmutableArray<ISourceGenerator> GetGenerators(string language) => _generators;
     }
