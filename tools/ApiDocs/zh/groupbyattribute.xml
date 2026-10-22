@@ -1,0 +1,8 @@
+<doc>
+  <member name="T:EasyEcs.GroupByAttribute" source="8e666d01abef">
+    <summary>
+      每个 World 都按这个 <see cref="T:EasyEcs.IGroup" /> 组件给表分组（<see cref="M:EasyEcs.World.GroupBy``1" />），从它第一张含这个组件的表开始：
+      分组过滤条件（<see cref="M:EasyEcs.QueryFilter.InGroup``1(System.Int32)" />）在每个 World 里都只访问这一组的表，不用记着调用设置方法。
+    </summary>
+  </member>
+</doc>

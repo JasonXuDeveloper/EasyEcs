@@ -44,6 +44,16 @@ The id that names this member in the components of the prefab's entities (rewrit
 
 ## Methods
 
+### `Absent` [#absent]
+
+```csharp
+public Prefab Absent<T>() where T : struct, IComponent;
+```
+
+Give the recipe a column for `T` without the component: instances lack it, but their table has room for it, so adding it later (a tag set and cleared per tick, a state some instances enter) flips a presence bit instead of moving the row to another table, and every instance stays in one table. A value the recipe had is dropped. Returns this prefab. O(1).
+
+**Complexity** ([API table](/en/docs/api)): O(1)
+
 ### `AddMember` [#addmember]
 
 ```csharp

@@ -215,7 +215,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "IUniqueIndexed<TKey>), so that key can never be indexed. A unique component is indexed by its unique key from " +
         "its first table, and every write is checked against that index. An EntityId key cannot be unique: loads and " +
         "moves rewrite such keys after they copy the rows, too late to check them first; index the relation with " +
-        "IIndexed<EntityId>.", helpLinkUri: Help("EECS036"));
+        "IIndexed<EntityId> (or [Key]). A key declared with [Key] / [UniqueKey] is IEquatable of itself, the only key of " +
+        "its component, of the type of any index interface the struct declares, and not written by hand as well; a " +
+        "[Group] member is an int or an enum of int, the only one.", helpLinkUri: Help("EECS036"));
 
     // EECS002's property for its code fix (EasyEcs.CodeFixes): a component or singleton taken by value.
     public const string ByValue = "ByValue";
@@ -231,7 +233,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
         UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScalarLoop, NoVectorLoop,
-        SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten);
+        SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, NotPartial, HandWrittenReduction, BadReductionField, FieldWiseReduction,
+        WrongIdentity, AttributeKey, BadSetup, NoFormatter);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -244,6 +247,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterSyntaxNodeAction(AnalyzeVectorLoop, SyntaxKind.MethodDeclaration);
         context.RegisterSyntaxNodeAction(AnalyzeLocalFunction, SyntaxKind.LocalFunctionStatement);
         context.RegisterSyntaxNodeAction(AnalyzeBufferOfEntities, SyntaxKind.GenericName);
+        context.RegisterSyntaxNodeAction(AnalyzeReduction, SyntaxKind.StructDeclaration, SyntaxKind.RecordStructDeclaration);
         context.RegisterSymbolAction(AnalyzeBufferHolder, SymbolKind.Field, SymbolKind.Property, SymbolKind.Method);
         context.RegisterOperationAction(AnalyzeBufferCopy, OperationKind.VariableDeclarator, OperationKind.SimpleAssignment,
             OperationKind.Argument);
@@ -255,6 +259,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterOperationAction(AnalyzeIndexedRef, OperationKind.Invocation, OperationKind.VariableDeclarator);
         context.RegisterOperationAction(AnalyzeSystemLookup, OperationKind.Invocation);
         context.RegisterCompilationStartAction(AnalyzeOrderings);
+        context.RegisterCompilationStartAction(AnalyzeFormatters);
         InitializePerformance(context);
         InitializeUsage(context);
         InitializeParallel(context);
@@ -553,6 +558,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (type.TypeKind == TypeKind.Struct && (Symbols.Implements(type, Symbols.Component) || Symbols.Implements(type, Symbols.Singleton)))
             AnalyzeDataFields(context, type);
         if (type.TypeKind == TypeKind.Struct) AnalyzeUniqueKey(context, type, location);
+        if (type.TypeKind == TypeKind.Struct) AnalyzeParts(context, type);
+        if (type.TypeKind == TypeKind.Struct) AnalyzeAttributeKey(context, type);
+        if (type.TypeKind == TypeKind.Struct) AnalyzeSetup(context, type);
 
         if (type.TypeKind == TypeKind.Struct && !Symbols.Implements(type, "EasyEcs.ISystemGroup"))
             foreach (var attribute in type.GetAttributes())

@@ -167,4 +167,13 @@
       只能在所有者线程调用。
     </summary>
   </member>
+
+  <member name="M:EasyEcs.Entity.GetOrAdd``1(``0@)" source="32b6fbd1b286">
+    <summary>
+      组件 <typeparamref name="T" /> 的 ref，缺少时先以 <paramref name="value" /> 添加（和 <c>Set</c> 一样登记键、
+      进入分组）；已有这个组件的实体保留自己的值，被禁用的 <typeparamref name="T" /> 以保留的值重新启用
+      （<see cref="M:EasyEcs.Entity.Enable``1" />）。对追踪组件算一次写入。生成的 <c>GetOrAddHealth(100)</c> 调用它。
+      开销和 <see cref="M:EasyEcs.Entity.GetOrAdd``1" /> 相同。
+    </summary>
+  </member>
 </doc>
