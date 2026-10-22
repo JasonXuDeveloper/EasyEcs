@@ -211,6 +211,7 @@ public sealed partial class EasyEcsAnalyzer
             start.RegisterOperationAction(c => AnalyzeComparison(c, core), OperationKind.Binary);
             start.RegisterOperationAction(c => AnalyzeLoop(c, core), OperationKind.Loop);
             start.RegisterOperationAction(c => AnalyzeCreation(c, core), OperationKind.VariableDeclarator);
+            start.RegisterOperationAction(c => AnalyzeGuardedSet(c, core), OperationKind.Conditional);
         });
 
     // ---------------- [ForEach] methods and OnUpdate: parameters, lookups, allocations ----------------
@@ -1038,7 +1039,8 @@ public sealed partial class EasyEcsAnalyzer
                 (true, "Read") => (name, true),
                 (true, "Has") => (tag ? "Is" + name : "Has" + name, true),
                 (true, "TryGet") => ("TryGet" + name, false),
-                (true, "GetOrAdd") => ("GetOrAdd" + name, false),
+                (true, "GetOrAdd") when call.Arguments.Length == 0 => ("GetOrAdd" + name, false),
+                (true, "GetOrAdd") when !tag && SetCandidate(call, name, tag, out args) is ({ }, _) => ("GetOrAdd" + name, false), // GetOrAdd(new T(a)) as GetOrAddT(a)
                 (true, "Remove") => ("Remove" + name, false),
                 (true, "Disable") => ("Disable" + name, false),
                 (true, "Enable") => ("Enable" + name, false),
@@ -1047,7 +1049,8 @@ public sealed partial class EasyEcsAnalyzer
                 (true, "SetIfChanged") when !tag && SetCandidate(call, name, tag, out args) is ({ } set, _) => (set + "IfChanged", false),
                 (false, "GetSingleton") => (name, true),
                 (false, "HasSingleton") => ("Has" + name, true),
-                (false, "GetOrAddSingleton") => ("GetOrAdd" + name, false),
+                (false, "GetOrAddSingleton") when call.Arguments.Length == 0 => ("GetOrAdd" + name, false),
+                (false, "GetOrAddSingleton") when !tag && SetCandidate(call, name, tag, out args) is ({ }, _) => ("GetOrAdd" + name, false),
                 (false, "RemoveSingleton") => ("Remove" + name, false),
                 (false, "Relations") => (name + "Index", true),
                 _ => (null, false),
@@ -1073,6 +1076,75 @@ public sealed partial class EasyEcsAnalyzer
 
         context.ReportDiagnostic(Diagnostic.Create(GeneratedMember, syntax.GetLocation(), Fix(replacement, "Use ." + candidate.Split('(')[0]),
             Shorten(syntax), replacement));
+    }
+
+    /// <summary>
+    /// EECS033 for a guarded write: <c>if (e.Score.Points != v) e.SetScore(v);</c> (or <c>e.Set(new Score(v))</c>) on a
+    /// component of one field is <c>e.SetScoreIfChanged(v);</c>, the generated writer that compares the value itself
+    /// (<c>SetIfChanged</c>). The field is read through the generated property, <c>Read&lt;T&gt;()</c> or <c>Get&lt;T&gt;()</c> of
+    /// the same receiver; the if has no else and does nothing else.
+    /// </summary>
+    private static void AnalyzeGuardedSet(OperationAnalysisContext context, Core core)
+    {
+        var conditional = (IConditionalOperation)context.Operation;
+        if (conditional is not { WhenFalse: null, Syntax: IfStatementSyntax syntax, Condition: IBinaryOperation { OperatorKind: BinaryOperatorKind.NotEquals } test }) return;
+        var write = conditional.WhenTrue is IBlockOperation { Operations.Length: 1 } block ? block.Operations[0] : conditional.WhenTrue;
+        if (write is not IExpressionStatementOperation { Operation: IInvocationOperation set }
+            || set.Syntax is not InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax setAccess }
+            || set.Arguments.Length != 1)
+            return;
+
+        // The written value: the generated SetX(v), or Set(new X(v)) with one argument.
+        var method = set.TargetMethod;
+        INamedTypeSymbol? component = null;
+        IOperation? value = null;
+        if (Symbols.IsGenerated(method) && method.Name.StartsWith("Set") && method.Parameters.Length == 1)
+        {
+            // The generated writer names its component: the struct of that name in scope where the if is.
+            component = conditional.SemanticModel!.LookupNamespacesAndTypes(syntax.SpanStart, name: method.Name.Substring("Set".Length))
+                .OfType<INamedTypeSymbol>().FirstOrDefault(t => t.TypeKind == TypeKind.Struct && Symbols.Implements(t, Symbols.Component));
+            value = set.Arguments[0].Value;
+        }
+        else if (core.Is(method.ContainingType, core.Entity) && method is { Name: "Set", TypeArguments.Length: 1 }
+                 && Unwrap(set.Arguments[0].Value) is IObjectCreationOperation { Initializer: null, Arguments.Length: 1 } creation)
+        {
+            component = method.TypeArguments[0] as INamedTypeSymbol;
+            value = creation.Arguments[0].Value;
+        }
+
+        if (component == null || value == null) return;
+        var fields = component.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToList();
+        if (fields.Count != 1) return;
+        // The compared field and value, either way round.
+        var (read, compared) = Field(Unwrap(test.LeftOperand), fields[0]) is { } left ? (left, test.RightOperand)
+            : Field(Unwrap(test.RightOperand), fields[0]) is { } right ? (right, test.LeftOperand) : (null, null);
+        if (read == null || !SyntaxFactory.AreEquivalent(Unwrap(compared!).Syntax, Unwrap(value).Syntax)) return;
+        string receiver = setAccess.Expression.ToString();
+        if (Receiver(read, component) is not { } readFrom || readFrom != receiver) return;
+
+        string replacement = receiver + ".Set" + component.Name + "IfChanged(" + Unwrap(value).Syntax + ")";
+        if (!Binds(conditional.SemanticModel!, syntax, replacement, out var bound) || !Symbols.IsGenerated(bound!)) return;
+        context.ReportDiagnostic(Diagnostic.Create(GeneratedMember, syntax.GetLocation(), Fix(replacement + ";", "Use .Set" + component.Name + "IfChanged"),
+            Shorten(syntax), replacement));
+
+        static IOperation Unwrap(IOperation operation)
+        {
+            while (operation is IConversionOperation { IsImplicit: true } conversion) operation = conversion.Operand;
+            return operation;
+        }
+
+        static IOperation? Field(IOperation operation, IFieldSymbol field) =>
+            operation is IFieldReferenceOperation reference && SymbolEqualityComparer.Default.Equals(reference.Field, field) ? reference.Instance : null;
+
+        // The receiver whose component the comparison reads: e.X (generated), e.Read<X>(), e.Get<X>().
+        static string? Receiver(IOperation instance, INamedTypeSymbol component) => instance switch
+        {
+            IPropertyReferenceOperation { Syntax: MemberAccessExpressionSyntax access } property when Symbols.IsGenerated(property.Property)
+                && SymbolEqualityComparer.Default.Equals(property.Type, component) => access.Expression.ToString(),
+            IInvocationOperation { TargetMethod: { Name: "Read" or "Get", TypeArguments.Length: 1 } read, Syntax: InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax access } }
+                when SymbolEqualityComparer.Default.Equals(read.TypeArguments[0], component) => access.Expression.ToString(),
+            _ => null,
+        };
     }
 
     /// <summary>
@@ -1320,7 +1392,7 @@ public sealed partial class EasyEcsAnalyzer
             // A Set of a component the query requires overwrites a value: no row moves, nothing for SetAll to batch.
             // A grouped component's new value moves each row to its group's table, one by one under SetAll too.
             case "Set" when component != null && !types.Contains(component, SymbolEqualityComparer.Default)
-                            && !Symbols.Implements(component, Symbols.Group)
+                            && !Symbols.IsGrouped(component)
                             && SetValue(call, component, generated, model, at) is { } value:
                 return ("SetAll", $"SetAll({value}, {with})", "adds a component to");
             case "Remove" when component != null && call.Arguments.All(a => a.IsImplicit):
@@ -1628,7 +1700,7 @@ public sealed partial class EasyEcsAnalyzer
         var component = generated ? Named(method, core) : method.TypeArguments[0];
         var given = create.TargetMethod.TypeArguments;
         if (component is not INamedTypeSymbol || given.Length >= Symbols.MaxComponents || given.Contains(component, SymbolEqualityComparer.Default)
-            || Symbols.Implements(component, Symbols.Group) || Symbols.IsWorldTag(component)
+            || Symbols.IsGrouped(component) || Symbols.IsWorldTag(component)
             || !Invariant(set.Arguments.Where(a => !a.IsImplicit).Select(a => a.Value), next, declarator.Symbol)) return null;
 
         var model = create.SemanticModel!;

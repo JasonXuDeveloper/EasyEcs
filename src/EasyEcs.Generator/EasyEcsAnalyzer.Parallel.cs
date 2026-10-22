@@ -38,7 +38,7 @@ public sealed partial class EasyEcsAnalyzer
         "which writes the job back, or write the results into the rows.",
         helpLinkUri: Help("EECS061"));
 
-    public static readonly DiagnosticDescriptor SharedRandom = new("EECS063", "Random numbers a [ForEach] method cannot repeat",
+    public static readonly DiagnosticDescriptor SharedRandom = new("EECS071", "Random numbers a [ForEach] method cannot repeat",
         "[ForEach] method '{0}' draws from '{1}', {2}: draw from EntityRandom (a pure function of a seed, the entity, the tick and a stream)",
         Category, DiagnosticSeverity.Warning, true,
         "System.Random gives numbers that depend on things outside the world. Random.Shared is seeded differently on every " +
@@ -47,9 +47,9 @@ public sealed partial class EasyEcsAnalyzer
         "given a seed, and a seed given gives every row the same numbers. EntityRandom (a singleton holding a seed and a tick, " +
         "or its static members) is a pure function of the seed, the entity, the tick and a stream: the same numbers on " +
         "every run, whatever the threads. The fix takes the world's EntityRandom and the entity, and gives each draw of the " +
-        "method its own stream.", helpLinkUri: Help("EECS063"));
+        "method its own stream.", helpLinkUri: Help("EECS071"));
 
-    /// <summary>EECS063's properties for its code fix: the draw, and the parameters to add (null: the method has them).</summary>
+    /// <summary>EECS071's properties for its code fix: the draw, and the parameters to add (null: the method has them).</summary>
     public const string RandomText = "Text", RandomSingleton = "Random", RandomEntity = "Entity";
 
     private static void InitializeParallel(AnalysisContext context)
@@ -73,7 +73,7 @@ public sealed partial class EasyEcsAnalyzer
     }
 
     /// <summary>
-    /// EECS063: <c>Random.Shared</c> or <c>new Random()</c> in a [ForEach] method. A draw the fix can translate
+    /// EECS071: <c>Random.Shared</c> or <c>new Random()</c> in a [ForEach] method. A draw the fix can translate
     /// (<c>NextSingle</c>, <c>NextDouble</c>, <c>Next</c> with 0 to 2 arguments, on either receiver) is reported on the
     /// call, with its replacement: the method's <c>in EntityRandom</c> and <c>Entity</c> parameters (added when missing), and the
     /// next stream no draw of the method uses yet, so draws fixed one at a time still get one stream each.

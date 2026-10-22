@@ -19,7 +19,7 @@ public class ForParallelTests
     }
 
     /// <summary>Counts the chunks and the threads that ran them (Interlocked: shared on purpose).</summary>
-    private struct Census : IForRange
+    private struct Visits : IForRange
     {
         public int[] Chunks;
         public int[] Smallest;
@@ -75,11 +75,11 @@ public class ForParallelTests
     public void ChunksFollowChunkRows()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
-        var census = new Census { Chunks = new int[1], Smallest = [int.MaxValue] };
+        var census = new Visits { Chunks = new int[1], Smallest = [int.MaxValue] };
         world.ForParallel(10_000, ref census, chunkRows: 100); // rounded up to 128
         Assert.That(census.Chunks[0], Is.EqualTo((10_000 + 127) / 128));
         Assert.That(census.Smallest[0], Is.EqualTo(10_000 % 128));
-        census = new Census { Chunks = new int[1], Smallest = [int.MaxValue] };
+        census = new Visits { Chunks = new int[1], Smallest = [int.MaxValue] };
         world.ForParallel(500, ref census); // below the smallest default chunk: one chunk, on the caller
         Assert.That(census.Chunks[0], Is.EqualTo(1));
     }

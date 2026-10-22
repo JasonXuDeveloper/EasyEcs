@@ -276,6 +276,20 @@ public class InstantiateTests
     }
 
     [Test]
+    public void AnAbsentComponentKeepsInstancesInOneTable()
+    {
+        using var world = new World();
+        var orc = new Prefab().Set(new Health(30)).Set(new Armor(5)).Absent<Shield>().Absent<Armor>();
+        var a = world.Instantiate(orc);
+        var b = world.Instantiate(orc);
+        Assert.That((orc.Has<Armor>(), orc.Has<Shield>(), a.Has<Shield>(), a.Has<Armor>(), a.Read<Health>()), Is.EqualTo((false, false, false, false, new Health(30))));
+        int tables = world.DescribeTables().Length;
+        a.Set(new Shield(2));                                             // a presence bit, no move
+        b.Set(new Armor(1));
+        Assert.That((world.DescribeTables().Length, a.Read<Shield>(), b.Read<Armor>()), Is.EqualTo((tables, new Shield(2), new Armor(1))));
+    }
+
+    [Test]
     public void GivenComponentsJoinTheCopyInItsFinalTable()
     {
         using var world = new World();

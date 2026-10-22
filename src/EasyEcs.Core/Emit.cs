@@ -17,7 +17,7 @@ namespace EasyEcs;
 /// A pass appends, it does not replace: several systems may emit <typeparamref name="T"/> in one update (melee and
 /// spells both emit damage), each in its turn, and the system that applies the records clears them
 /// (<c>world.GetSingleton&lt;Emitted&lt;Hit&gt;&gt;().Items.Clear()</c>), so nothing is applied twice. A method that
-/// emits must not also take <see cref="Emitted{T}"/> (EECS062): a parallel pass's records reach it only when the pass
+/// emits must not also take <see cref="Emitted{T}"/> (EECS070): a parallel pass's records reach it only when the pass
 /// ends.
 /// </para>
 /// The system writes <see cref="Emitted{T}"/> (once per pass, as a <see cref="Reduce{T}"/> writes its singleton). The

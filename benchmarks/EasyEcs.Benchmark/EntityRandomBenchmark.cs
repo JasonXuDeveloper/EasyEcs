@@ -92,9 +92,9 @@ public class EntityRandomBenchmark
         public static void Deterministic(ref Roll roll, Entity entity, in EntityRandom random) => roll.Value = random.Range(entity.Id, 0, 1, 7);
 
         [ForEach(Parallel = true)]
-#pragma warning disable EECS063 // the comparison: not repeatable
+#pragma warning disable EECS071 // the comparison: not repeatable
         public static void Shared(ref Roll roll) => roll.Value = Random.Shared.Next(1, 7);
-#pragma warning restore EECS063
+#pragma warning restore EECS071
     }
 
     /// <summary>Philox-4x32 (Salmon et al., 2011): the counter is the entity and the tick (its high half xor the stream), the key the seed.</summary>

@@ -143,6 +143,7 @@ public sealed partial class World
         {
             if (_indexByBit != null && bit < _indexByBit.Length) _indexByBit[bit] = null;
             if (_groupByBit != null && bit < _groupByBit.Length) _groupByBit[bit] = null;
+            if (bit < _setUp.Length) _setUp[bit] = false;
         }
 
         for (int i = _ruleCount - 1; i >= 0; i--)

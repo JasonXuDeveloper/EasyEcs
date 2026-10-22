@@ -27,6 +27,9 @@ BenchmarkDotNet reports); pages never type a number.
 ```
 src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written shared core only)
   Contracts.cs                 IComponent, ITracked, ISingletonComponent, INoStructuralChanges and the other markers
+  Declarations.cs              attributes whose code the generators write: [Sum]/[Product]/[Min]/[Max]/[All]/[Any]
+                               (a reduction), [Key]/[UniqueKey]/[Group] (an index key, a group), and world setup:
+                               [GroupBy], [WhenTargetDestroyed], [NotSaved]
   Entity.cs                    the entity handle (id, version, world): Has/Get/Read/TryGet/GetOrAdd/SetIfChanged/
                                Disable/Enable/Clone/Destroy
   Entity.Relations.cs          entity.Link / Unlink / Links (IRelation buffers + their index)
@@ -59,6 +62,9 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
                                pairs) and its ToString / ToMermaid
   World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration, Instantiate of a
                                Prefab, with given components too, and Entity.Clone: one row copy, CloneRow)
+  World.Defaults.cs            TypeDefaults: the setup a type declares ([GroupBy], [WhenTargetDestroyed]), applied by
+                               every world from its first table holding the type (rules pending until a destroy or
+                               the index needs them); what a world set up itself is never overridden
   World.DestroyLog.cs          WorldOptions.DestroyLogCapacity: the ring of (EntityId, tick) records of freed ids,
                                DestroyedSince / DestroyLogOldestTick
   World.Components.cs          AddBit/AddBits/RemoveBit/RemoveBits (shared core of every Set/GetOrAdd/Remove/Disable;
@@ -146,7 +152,7 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                item.X per Query<T1..Tn> shape the code calls, SavedTypes registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                                lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
   EasyEcsAnalyzer.cs           EECS002-024, EECS035-036, EECS054 and EECS056 (the declaration and [ForEach] rules of the
-                               range EECS002-061 that are not performance rules; generators never report diagnostics)
+                               range EECS002-069 that are not performance rules; generators never report diagnostics)
   EasyEcsAnalyzer.Performance.cs  EECS025-034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the check of EECS056):
                                code that works but costs (write access that
                                only reads, unused or per-row lookups in [ForEach] methods and jobs, allocations per
@@ -155,6 +161,9 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                that only reads, a Set right after a creation, a tracked ref written on some rows only, a
                                method left without a vector loop); each computes its fix as
                                diagnostic properties for EasyEcs.CodeFixes
+  PartGenerator.cs             [Sum]..[Any], [Key]/[UniqueKey], [Group] -> a part of the partial struct (IReduction<T>,
+                               IIndexed<K>.Key, IGroup.Group); Parts.cs: the models and Problems read once for the
+                               generator and the analyzer (other generators read keys and groups through Symbols)
   Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (Kernel.Vectorize: the loop, or the
                                reason EECS055 / EECS056 report)
   EasyEcsAnalyzer.Usage.cs     EECS037-038, EECS040-045 and EECS047-051: calls and declarations that compile but do not
@@ -166,6 +175,10 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
   EasyEcsAnalyzer.Parallel.cs  EECS060-061: code on several threads (a parallel [ForEach] method, the Execute of a job
                                run by ForEachParallel) that writes memory every thread shares, a parallel job's field
                                read after the call
+  EasyEcsAnalyzer.Parts.cs     EECS062-069: generated parts (not partial, hand-written members, fields no attribute
+                               combines), hand-written reductions and keys the attributes could declare, a wrong
+                               Identity, a setup attribute on a type it does not fit, a managed type without a Nino
+                               formatter (Warning when the code saves worlds)
   Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)
   Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race;
                                the writes of code on several threads that reach shared memory (EECS060, EECS061)
@@ -178,7 +191,7 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                ForEachSystem (and Slices), Singleton, Concurrency, Parallel, Runner, Run (entity.Run),
                                Changed (and Mut, ChangedAny), Removed (and the destroy log), Instantiate, DynamicBuffer,
                                Index (and unique keys), OrderedIndex, Relation, Hierarchy, TargetPolicy, Group, Cleanup,
-                               Disable, Bulk, Move, Snapshot, Serialization (and restart saves), Unload, Introspection
+                               Disable, Bulk, Move, Part (generated parts, EECS062-069), Snapshot, Serialization (and restart saves), Unload, Introspection
                                (and Trim, DescribeSchedule), Generic, Allocation (0 B budget),
                                Generator (diagnostics + caching), CodeFix, BattleServer (the world of
                                docs/content/example.mdx as a whole, linked from EasyEcs.Benchmark); Fixtures.cs holds
@@ -240,6 +253,70 @@ tools/ApiDocs/                 writes docs/content/reference/ from the XML docs 
                                text per doc id with a hash of the English it translates (Translations.cs; zh/README.md:
                                workflow and glossary); missing, stale or orphaned entries fail the tool
 ```
+
+## Definition of done for a feature
+
+A feature, rule or change ships only with every part below that applies to it. Check them off before merging; a
+fresh session working on a new request follows this list.
+
+1. **Core**: one shared non-generic core with thin typed wrappers. T1..T9 variants come from `ArityGenerator`
+   templates. Hot paths allocate nothing and run no LINQ, closures or boxing. Each invariant that skips a bounds
+   check is documented next to the code. Structural changes go through the gate, and `StorageVersion` is bumped
+   where a pass must notice.
+2. **Generator**: whatever users would otherwise write twice is generated.
+   - Declarations users write once, such as an attribute on a field or type, are read through one `Symbols` helper.
+     Both the generator and the analyzer use it, so "skipped by the generator" is exactly "reported by the analyzer".
+   - Models are equatable and symbol-free, with a tracking name per stage and a caching assertion in
+     `GeneratorTests`, plus a generated-output test.
+   - Generators report no diagnostics.
+   - Partial types and nested types are handled; the declaring chain is partial or reported.
+3. **Analyzer**: every misuse that compiles and every pattern that works but costs gets an EECS rule.
+   - Severity: Error when the code is wrong, Warning when it is likely wrong, Info for performance hints.
+   - The descriptor message names the type or member and the fix.
+   - For a fallback to scalar, the reason comes from the same function the generator uses (`Kernel.Vectorize`), so
+     EECS055 or EECS056 names exactly why.
+   - Tests cover the positive cases, the negative cases and false-positive guards.
+   - Update the rule list and range in this file, in `docs/content/guide/analyzer.mdx` and `.zh.mdx`, and in
+     `docs/public/easyecs-rules.md`.
+4. **Code fix** (`EasyEcs.CodeFixes`) for every rule whose fix is mechanical, including converting hand-written
+   patterns to the generated or attribute form. The analyzer computes the fix as diagnostic properties, and a
+   `CodeFixTests` case covers it.
+5. **Tests** in `tests/EasyEcs.UnitTest`, one file per feature:
+   - behaviour;
+   - edge cases (stale ids, empty tables, structural changes mid-pass);
+   - the allocation test (0 B in steady state);
+   - for parallel code, bit-identical results at 1 and 4 threads;
+   - for vector loops, equivalence with the scalar method.
+6. **Benchmarks** with BenchmarkDotNet only.
+   - Measure before and after, two rounds each, with the A/B copy outside the repo tree (duplicate project names
+     break BDN).
+   - When several agents share a machine, run one benchmark at a time behind a shared lock file (`flock`).
+   - Check the Tier1 asm of new hot loops (JitDisasm): no calls in the loop body, no unexpected range checks.
+   - A change ships only if it is a net win at 0 B with no regression in WorldSimulation, BattleServer and the
+     feature's neighbours.
+   - Add a benchmark for anything not covered yet.
+7. **Docs**, written per `docs/WRITING.md`, en and zh structurally identical:
+   - the feature's guide page follows the page anatomy (what it is, when to use it as idea/warn Callouts, how to use
+     it with compiling examples, a full example, how to use it fast, what it costs, pitfalls with their EECS rule,
+     related Cards);
+   - components fit their content: Tabs for alternatives (`You write` / `The generator writes`, `Reported` /
+     `Fixed`), Steps for sequences, TypeTable for options, Accordions for multi-file examples, Files for trees;
+   - numbers appear only through `docs/src/data/bench.json` (BenchTable and the related components), never typed on
+     a page (decision records may quote numbers);
+   - complexity rows go in `docs/content/api.mdx` and `.zh.mdx`;
+   - XML docs need Chinese entries in `tools/ApiDocs/zh` (`dotnet run --project tools/ApiDocs`);
+   - add a decision record (`decisions.mdx` + `.zh.mdx`) for every non-obvious choice and every dropped idea, and
+     update the roadmap;
+   - add a changelog entry and a README "What's new" entry;
+   - a breaking change also needs a migration entry;
+   - update the rules file for AI assistants (`docs/public/easyecs-rules.md`) and this file's layout;
+   - the battle server (`BattleServer.cs` regions and `example.mdx`) and the samples use the feature where it
+     belongs, as exemplary code.
+8. **Commits and merge**:
+   - logic, docs and CI go in separate commits;
+   - parallel work happens in worktrees on branches off the work branch;
+   - `verify` runs before anything reaches master;
+   - renames of released public API are reported first and applied after the owner's approval (`audit-naming`).
 
 ## Workflows
 

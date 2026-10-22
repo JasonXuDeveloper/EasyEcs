@@ -11,6 +11,8 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 
 | 类型 | 说明 |
 |---|---|
+| [`AllAttribute`](/zh/docs/reference/allattribute) | 归约中的 bool 字段，每一行都成立时才成立：Identity 是 true，Combine 是 left & right（见 SumAttribute）。 |
+| [`AnyAttribute`](/zh/docs/reference/anyattribute) | 归约中的 bool 字段，有一行成立就成立：Identity 是 false，Combine 是 left \| right（见 SumAttribute）。 |
 | [`ChangedAnyAttribute<T1..T9>`](/zh/docs/reference/changedanyattribute) | ForEachAttribute 方法只访问 T1, T2 中至少一个在系统上次运行之后写过的实体（EcsSystem.LastRunTick；第一次运行时是所有拥有其中一个的实体）：即 QueryFilter.ChangedAny。 |
 | [`ChangedAttribute<T>`](/zh/docs/reference/changedattribute) | ForEachAttribute 方法只访问 T 在系统上次运行之后写过的实体（EcsSystem.LastRunTick；第一次运行时是所有拥有它的实体）。 |
 | [`ChildOfEcsExtensions`](/zh/docs/reference/childofecsextensions) | ChildOf 的具名成员（生成）。 |
@@ -18,11 +20,18 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`DynamicBufferExtensions`](/zh/docs/reference/dynamicbufferextensions) | DynamicBuffer 的写入方法。 |
 | [`EcsSystem`](/zh/docs/reference/ecssystem) | 在 World 上运行的逻辑。 |
 | [`ForEachAttribute`](/zh/docs/reference/foreachattribute) | 对每个匹配组件参数（以及 WithAttribute / WithoutAttribute / WithAnyAttribute 过滤条件）的实体，执行 EcsSystem 的一个方法（或者通过生成的入口点，执行任何其他类型的静态方法）。 |
+| [`GroupAttribute`](/zh/docs/reference/groupattribute) | World 按哪个成员把组件的表分组（IGroup）：int，或底层类型为 int 的枚举。 |
+| [`GroupByAttribute`](/zh/docs/reference/groupbyattribute) | 每个 World 都按这个 IGroup 组件给表分组（World.GroupBy），从它第一张含这个组件的表开始：分组过滤条件（QueryFilter.InGroup）在每个 World 里都只访问这一组的表，不用记着调用设置方法。 |
 | [`GroupInfo`](/zh/docs/reference/groupinfo) | 一个分组的系统，按阶段排列（ScheduleInfo）。 |
+| [`KeyAttribute`](/zh/docs/reference/keyattribute) | World 为组件建索引用的键（IIndexed）：标在字段、属性或 record 的位置参数上，键就是这个成员（public partial struct Owner : IComponent \{ [Key] public EntityId Of; \}）；标在 struct 本身上，键是整个值。 |
 | [`Lanes`](/zh/docs/reference/lanes) | 批处理方法的流压缩，在 CPU 上做 GPU 的 ballot 和压缩：一次向量比较得出通道掩码（Vector256.LessThan(hp, limit).ExtractMostSignificantBits()：CUDA 的 __ballot_sync；它的 __popc 是 PopCount），Lanes.Compact 把选中的元素紧挨着写出：批处理方法选中的行的 id（entities.Ids）、它们的值、它们的下标。 |
 | [`LookupExtensions`](/zh/docs/reference/lookupextensions) | 通过 Lookup 按键查找带索引的组件（IIndexed）。 |
+| [`MaxAttribute`](/zh/docs/reference/maxattribute) | 归约中保留较大值的字段：Identity 是类型的 MinValue（float 和 double 是 -∞），Combine 是 Math.Max(left, right)。 |
+| [`MinAttribute`](/zh/docs/reference/minattribute) | 归约中保留较小值的字段：Identity 是类型的 MaxValue（float 和 double 是 +∞），Combine 是 Math.Min(left, right)。 |
+| [`NotSavedAttribute`](/zh/docs/reference/notsavedattribute) | 不进任何存档的组件或单例：重启时会重建的运行时状态（连接、缓存、服务句柄）。 |
 | [`OrderedIndexExtensions`](/zh/docs/reference/orderedindexextensions) | 键可比较（分数、截止时间、等级）的值索引的有序遍历：按区间或按顺序遍历，用于排行榜、计时器和匹配分段。 |
 | [`Prefab`](/zh/docs/reference/prefab) | 实体的配方：一组不属于任何 World 的组件值，所以任何查询都看不到它。 |
+| [`ProductAttribute`](/zh/docs/reference/productattribute) | 归约中按乘法合并的字段：Identity 是 1，Combine 是 left \* right。 |
 | [`RelationIndex<T>`](/zh/docs/reference/relationindex) | 一个 World 里关系 T 的链接，按目标组织（World.Relations）：哪些实体链接到某个实体，开始 O(1)，之后每条链接 O(1)。 |
 | [`RemovedAnyAttribute<T1..T9>`](/zh/docs/reference/removedanyattribute) | ForEachAttribute 方法只访问在系统上次运行之后失去 T1, T2 中至少一个、而且没有再拿回来的实体：即 QueryFilter.RemovedAny。 |
 | [`RemovedAttribute<T>`](/zh/docs/reference/removedattribute) | ForEachAttribute 方法只访问在系统上次运行之后（EcsSystem.LastRunTick）失去 T、而且没有再拿回来的实体：同步时把移除发出去，清理时释放组件代表的资源。 |
@@ -30,14 +39,17 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`ScheduleInfo`](/zh/docs/reference/scheduleinfo) | World 怎样运行它的系统（World.DescribeSchedule）：每个分组的阶段、每个系统读写什么、一个系统为什么要等前面的阶段，以及哪些冲突的系统只靠注册顺序排先后。 |
 | [`StageInfo`](/zh/docs/reference/stageinfo) | 分组里的一个阶段：彼此之间没有先后约束、也没有冲突的系统。 |
 | [`StageWait`](/zh/docs/reference/stagewait) | 后面的系统要等待的一个系统（SystemInfo.After）。 |
+| [`SumAttribute`](/zh/docs/reference/sumattribute) | 归约（IReduction）中按加法合并的字段：Identity 是 0，Combine 是 left + right。 |
 | [`SystemInfo`](/zh/docs/reference/systeminfo) | 调度里的一个系统，以及它声明的数据（SystemAccess）。 |
 | [`SystemPair`](/zh/docs/reference/systempair) | 两个冲突的系统，按执行顺序排列，只靠注册顺序排先后（GroupInfo.RegistrationOrdered）。 |
 | [`TargetPolicyExtensions`](/zh/docs/reference/targetpolicyextensions) | 指向实体的组件（键是 EntityId 的 IIndexed）的目标策略。 |
 | [`UniqueIndexExtensions`](/zh/docs/reference/uniqueindexextensions) | 唯一索引（IUniqueIndexed）的查找：一个键对应的那一个实体。 |
+| [`UniqueKeyAttribute`](/zh/docs/reference/uniquekeyattribute) | 一个键只对应一个实体时用的 KeyAttribute（IUniqueIndexed）：生成器加上 IUniqueIndexed&lt;TKey&gt; 和显式的 Key。 |
 | [`UpdateAfterAttribute<TSystem>`](/zh/docs/reference/updateafterattribute) | 让这个系统排在同一分组里的 TSystem（和它的派生系统）之后运行：见 UpdateBeforeAttribute。 |
 | [`UpdateBeforeAttribute<TSystem>`](/zh/docs/reference/updatebeforeattribute) | 让这个系统排在同一分组里的 TSystem（和它的派生系统）之前运行，不管它们的注册顺序。 |
 | [`UpdateInGroupAttribute<TGroup>`](/zh/docs/reference/updateingroupattribute) | 把系统（和它的派生系统）放进分组 TGroup。 |
 | [`ValueIndex<T, TKey>`](/zh/docs/reference/valueindex) | 一个 World 里组件 T 的值索引（World.Index）。 |
+| [`WhenTargetDestroyedAttribute`](/zh/docs/reference/whentargetdestroyedattribute) | 在每个 World 里，销毁一个实体时指向它的链接怎么处理（TargetPolicy）：用在关系（IRelation）或以 EntityId 为键建索引的组件上。 |
 | [`WithAnyAttribute<T>`](/zh/docs/reference/withanyattribute) | ForEachAttribute 方法要求实体至少拥有它的 [WithAny&lt;T&gt;] 特性列出的组件之一（不传入方法）：[ForEach, WithAny&lt;Burning&gt;, WithAny&lt;Poisoned&gt;]。 |
 | [`WithAttribute<T>`](/zh/docs/reference/withattribute) | ForEachAttribute 方法还要求实体有组件 T（不传入方法）。 |
 | [`WithoutAttribute<T>`](/zh/docs/reference/withoutattribute) | ForEachAttribute 方法跳过拥有组件 T 的实体。 |

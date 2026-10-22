@@ -138,6 +138,9 @@ internal abstract class SingletonBox
 
     /// <summary>Reset the value to default (a load then reads into an empty value).</summary>
     public abstract void Clear();
+
+    /// <summary>Whether the type is [NotSaved]: no save writes it, a load keeps the world's own (<see cref="SavedTypes.NotSaved{T}"/>).</summary>
+    public abstract bool NotSaved { get; }
 }
 
 /// <summary>Heap box holding one world's singleton value; refs into it stay valid for the box lifetime.</summary>
@@ -193,4 +196,12 @@ internal sealed class SingletonBox<T> : SingletonBox where T : struct, ISingleto
 
         Value = default;
     }
+
+    public override bool NotSaved => NotSavedOf<T>.Value;
+}
+
+/// <summary>Whether <typeparamref name="T"/> (a component or a singleton) is [NotSaved]: set when its module loads (<see cref="SavedTypes.NotSaved{T}"/>).</summary>
+internal static class NotSavedOf<T> where T : struct
+{
+    public static bool Value;
 }
