@@ -266,6 +266,9 @@ flowchart TB
   不会共用一个存在位字；写追踪组件的 job 默认按 4,096 行的倍数切块，两个线程不会共用一个块的变更 tick 摘要。设了 `ChunkRows` 时块可以切开
   一个 4,096 行块：遍历先按自己的 tick 打开它覆盖的块，摘要每写 64 行做一次原子 OR（[D67](/zh/docs/decisions#d67-chunk-rows)）。每个 job 和阶段都会测量自己的运行，只有当助手能让一次运行快至少五分之一时才唤醒它们
   （[D22](/zh/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)）。每次更新零分配。
+- 一次运行的同步只按块、按次，从不按行：领一块是在游标上做一次比较并交换，做完一块是对剩余块数做一次 `Interlocked.Decrement`（再对用时做一次
+  `Interlocked.Add`）；调用线程用 `Volatile.Read` 自旋等这个计数，每次 `Decrement` 的完整内存屏障让这一块的写入（包括它的部分结果）排在合并之前
+  （[运行器怎样同步](/zh/docs/guide/threading#runner-contract)）。
 
 使用者视角的规则见[多线程与并行](/zh/docs/guide/threading)。
 

@@ -207,6 +207,8 @@ an instance method. Its parameters say what it runs over:
 | [`Maybe<T>`](#maybe) | a component the entity may lack |
 | [`ReadOnlyMaybe<T>`](#read-only-maybe) | a component the entity may lack, read only (indexed components too) |
 | [`ref Reduce<T>`](/en/docs/guide/threading#reductions), `T : ISingletonComponent, IReduction<T>` | a total over the rows: each chunk (or the pass on one thread) adds into its own partial result, and the combined result replaces singleton `T` |
+| [`Scratch<T>`](/en/docs/guide/threading#scratch) | the method's working memory on the running thread (a list, a buffer), kept between rows; adds no access |
+| [`Lookup<T>`](/en/docs/guide/threading#lookups), `T : IComponent` | read-only `T` of any entity (`lookup[id]`, `Read`, `Has`; `TryFind`, `Find`, `Count` by key), as it was before the pass; the system reads `T`, in parallel too |
 | `Span<T>` / `ReadOnlySpan<T>`, `EntitySpan` | a [batch method](#batch-methods): runs of rows at once |
 
 | Attribute | Meaning |
