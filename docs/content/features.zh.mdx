@@ -154,7 +154,7 @@ public class MovementSystem : EcsSystem
 ### 排序、分组与间隔 [#system-groups-and-intervals]
 
 系统按注册顺序执行，可以用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 调整。`[UpdateInGroup<G>]` 把系统放进一个分组，只在
-`world.Update<G>()` 时执行。`UpdateInterval` 和 `UpdatePhase` 让系统每 N 次更新执行一次，并分散到不同相位；`Enabled` 关掉它。
+`world.Update<G>()` 时执行。`UpdateInterval` 和 `UpdatePhase` 让系统每 N 次更新执行一次，并分散到不同相位（次数是 `world.UpdateCount<G>()`）；`Enabled` 关掉它。
 分组的过滤条件（`[Without<Frozen>]`，或分组自己、它实现的接口上的 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`）作用于分组里所有系统的 `[ForEach]` 方法。
 
 - **适合：** 不同的节奏：输入每次唤醒都处理，模拟按固定 tick 跑，存盘每隔几秒一次；每种 actor 一个分组，用一个泛型接口统一声明。
@@ -318,7 +318,8 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 - **适合：** 账号 id、玩家名、会话令牌、格子的占用者：绝不能对应两个实体的键。
 - **别用于：** `EntityId` 键（[EECS036](/zh/docs/guide/analyzer#eecs036)）；几个实体共用的键（用普通的 `IIndexed<TKey>`）。
 - **开销：** 第一张含该组件的表出现时索引就建好了，所以每次写入都会检查：每个变了的键一次哈希查找，批量调用和读档多遍历一遍行。
-  `Get` 和 `TryGet` 是一次哈希查找，只读这个键自己的记录：唯一键直接存它的实体，每个键没有数组。
+  `Get` 和 `TryGet` 是一次哈希查找，只读这个键自己的记录：唯一键直接存它的实体，每个键没有数组。能映射到有界槽位的键
+  （`IDirectIndexed<TKey>`：网格格子、小 id）改为读一个数组元素（[直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index)）。
 - **指南：** [索引与关系](/zh/docs/guide/indexes-and-relations)
 
 ### 有序区间 [#ordered-ranges]

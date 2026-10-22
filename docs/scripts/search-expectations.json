@@ -19,6 +19,12 @@
     { "query": "parallel reduction", "page": "guide/threading", "top": 3 },
     { "query": "SimdMode", "page": "reference/simdmode" },
     { "query": "EECS060", "page": "guide/analyzer", "top": 3 },
+    {
+      "query": "direct-mapped keys",
+      "page": "guide/indexes-and-relations",
+      "top": 3
+    },
+    { "query": "bounded batch of ids", "page": "guide/queries", "top": 3 },
     { "query": "change tracking", "page": "guide/change-tracking" },
     { "query": "hot reload", "page": "guide/migration-and-unload" },
     { "query": "save load", "page": "guide/saves" },
@@ -48,6 +54,11 @@
     },
     { "query": "高性能写法", "page": "guide/high-performance" },
     { "query": "归约", "page": "guide/threading", "top": 3 },
+    {
+      "query": "直接映射的键",
+      "page": "guide/indexes-and-relations",
+      "top": 3
+    },
     { "query": "SimdMode", "page": "reference/simdmode" },
     { "query": "单例", "page": "guide/singletons" },
     { "query": "遍历时删除", "page": "guide/structural-changes" },

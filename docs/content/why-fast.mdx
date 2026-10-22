@@ -259,7 +259,9 @@ What makes it hold:
   a [`Reduce<T>`](/en/docs/guide/threading#reductions) keeps each chunk's partial result in a job copy the runner
   reuses, so a parallel total allocates nothing after its first pass.
 - **Unique keys hold their entity inline**: a unique index keeps each key's one entity in the key's own record, so
-  it allocates no array per key and a lookup reads one record.
+  it allocates no array per key and a lookup reads one record. A direct-indexed key (`IDirectIndexed<TKey>`) is
+  found by one entry of a slot array, as fast as a hand-written grid, with the hash behind it for the keys the slots
+  miss ([D71](/en/docs/decisions#d71-direct-index)).
 
 The same tick in other libraries, with what each allocates per tick:
 

@@ -318,6 +318,11 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   `reduction`), combined in row order into a singleton: no lock or atomic per row, exact integers, reproducible floats
   ([reductions](https://ecs.xgamedev.net/en/docs/guide/threading#reductions)). EECS060 reports parallel code that
   writes shared memory, EECS061 a parallel job's field read after the pass.
+- **Grid lookups at array speed.** A unique key that maps onto bounded slots (`IDirectIndexed<TKey>`: grid cells,
+  chunks around the players) is found by one array entry instead of a hash probe, the hash behind it for the rest
+  ([direct-mapped keys](https://ecs.xgamedev.net/en/docs/guide/indexes-and-relations#direct-index)).
+  `world.CollectIds<T>(span, filter)` takes a bounded batch of matching ids (the first requests of a tick) without
+  allocating ([queries](https://ecs.xgamedev.net/en/docs/guide/queries#collect-ids)).
 - **Few heavy rows on every thread.** `[ForEach(Parallel = true, ChunkRows = 64)]` sets the rows a thread takes at a
   time (OpenMP's `schedule(dynamic, n)`), so a few hundred rows of microseconds each spread over the threads, also
   when they write tracked components ([threading](https://ecs.xgamedev.net/en/docs/guide/threading#chunk-rows), [decision](https://ecs.xgamedev.net/en/docs/decisions#d67-chunk-rows)).

@@ -65,6 +65,18 @@ major or minor version that needs code changes? The
   or a job's field refers to): the writes race. Rule [EECS061](/en/docs/guide/analyzer#eecs061) (warning, with a code
   fix): a parallel job's field read after `ForEachParallel`, which ran a copy per chunk and merged nothing back; the
   fix runs the job on one thread.
+- `IDirectIndexed<TKey>`: a unique component whose keys map onto a bounded range of slots (grid cells, chunks around
+  the players, small ids) declares `static int Slots` and `static int SlotOf(TKey key)`; its index keeps a slot array
+  beside the hash, so `Get`, `TryGet` and the uniqueness check of a write read one array entry. Keys out of range or
+  in a taken slot are found through the hash, which still serves `Find`, `Count` and the ordered walks. See
+  [direct-mapped keys](/en/docs/guide/indexes-and-relations#direct-index) and the
+  [decision](/en/docs/decisions#d71-direct-index).
+- `world.CollectIds<T1..Tn>(span, filter)` writes the ids of the matching entities into a span, in query order, until
+  it is full, and returns how many: a bounded batch (the first requests of a tick) for `DestroyEntities`,
+  `SaveEntities` or a loop that changes structure. Allocation-free. See
+  [queries](/en/docs/guide/queries#collect-ids).
+- `world.UpdateCount<TGroup>()`: the number of `Update<TGroup>()` calls so far, the count the group's
+  `UpdateInterval`s are taken from. See [systems](/en/docs/guide/systems#system-groups).
 - Code fixes for [EECS027](/en/docs/guide/analyzer#eecs027) (takes the looked-up component or singleton as a
   parameter) and [EECS054](/en/docs/guide/analyzer#eecs054) (removes `ChunkRows`).
 - `[ForEach(Parallel = true, ChunkRows = n)]` sets the rows a thread of a parallel method takes at a time (rounded up
@@ -92,7 +104,11 @@ major or minor version that needs code changes? The
   included) instead of one destroyed or indexed entity at a time, so a world that reserved its peak allocates nothing to
   reach it. See [prefabs](/en/docs/guide/prefabs#reserve).
 - A unique index ([`IUniqueIndexed<TKey>`](/en/docs/guide/indexes-and-relations)) keeps each key's entity in the
-  key's own record instead of an array per key: no array allocated per key, and `Get` / `TryGet` read one record.
+  key's own record instead of an array per key: no array allocated per key, and `Get` / `TryGet` read one record
+  ([decision](/en/docs/decisions#d71-direct-index)).
+- `SetAll` writes a 64-row word whose rows all match with one fill instead of row by row (partial words and indexed
+  components keep the loop). See [bulk operations](/en/docs/guide/bulk#what-it-costs) and the
+  [decision](/en/docs/decisions#d72-setall-whole-words).
 
 ### Changes that need code changes [#v4-8-0-breaking]
 

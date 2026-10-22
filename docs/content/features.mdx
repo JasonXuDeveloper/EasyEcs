@@ -179,7 +179,7 @@ takes it as a `ref` or `in` parameter; `SingletonRef<T>` is a stable handle for 
 
 Systems run in registration order, moved by `[UpdateBefore<T>]` / `[UpdateAfter<T>]`. `[UpdateInGroup<G>]` puts a
 system in a group that runs on `world.Update<G>()` only. `UpdateInterval` and `UpdatePhase` run a system every N-th
-update, spread over phases; `Enabled` switches it off. A group's filters (`[Without<Frozen>]`, or `ISystemGroupWith<T>` /
+update, spread over phases (`world.UpdateCount<G>()` is the count); `Enabled` switches it off. A group's filters (`[Without<Frozen>]`, or `ISystemGroupWith<T>` /
 `ISystemGroupWithout<T>` on the group or an interface it implements) apply to every `[ForEach]` method of its systems.
 
 - **Use it for:** different cadences: input on every wake-up, simulation on a fixed tick, saving every few seconds;
@@ -220,7 +220,7 @@ most once: entities that leave before their turn are skipped, entities that join
 ### Ad-hoc queries [#ad-hoc-queries]
 
 Iteration from any code: `foreach (var item in world.Query<T…>(filter))`, struct jobs (`world.ForEach`,
-`ForEachEntity`), `world.Count` and `world.Any`. A static `[ForEach]` method outside a system gets a generated entry
+`ForEachEntity`), `world.Count`, `world.Any`, and `world.CollectIds` for a bounded batch of matching ids. A static `[ForEach]` method outside a system gets a generated entry
 point (`Reports.CountAlive(world, ref alive)`) that runs it as a struct job with the caller's values.
 `entity.Run<Health, TakeHit>(ref job, filter)` runs a struct job on one entity, with the refs a pass would give it:
 `false` when the entity is not alive, lacks a component or fails the filter. A job's `static int WriteMask` names the
@@ -376,7 +376,9 @@ holds (`Set`, create, `Instantiate`, `Clone`, `SetAll`, `Enable`, loads and move
   `IIndexed<TKey>`).
 - **Cost:** the index exists from the first table holding the component, so every write is checked: one hash probe
   per changed key, an extra pass over the rows for the bulk calls and loads. `Get` and `TryGet` are a hash probe
-  that reads the key's record alone: a unique key holds its entity inline, with no array per key.
+  that reads the key's record alone: a unique key holds its entity inline, with no array per key. A key that maps
+  onto bounded slots (`IDirectIndexed<TKey>`: grid cells, small ids) is found by one array entry instead
+  ([direct-mapped keys](/en/docs/guide/indexes-and-relations#direct-index)).
 - **Guide:** [Indexes and relations](/en/docs/guide/indexes-and-relations)
 
 ### Ordered ranges [#ordered-ranges]

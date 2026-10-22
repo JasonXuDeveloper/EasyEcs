@@ -45,6 +45,14 @@ icon: RotateCcwClock
 - 分析器规则 [EECS060](/zh/docs/guide/analyzer#eecs060)（警告）：并行 `[ForEach]` 方法或 `ForEachParallel` 运行的 job 的 `Execute` 写了所有线程
   共享的内存（静态字段、上下文参数或 job 字段引用的对象），这些写入会竞争。规则 [EECS061](/zh/docs/guide/analyzer#eecs061)（警告，有代码修复）：
   `ForEachParallel` 之后读并行 job 的字段，而它给每块跑一个副本、什么都不合并回来；修复改为在一个线程上运行这个 job。
+- `IDirectIndexed<TKey>`：键能映射到一段有界槽位上的唯一组件（网格格子、玩家周围的区块、小 id）声明 `static int Slots` 和
+  `static int SlotOf(TKey key)`；它的索引在哈希旁边多存一个槽位数组，`Get`、`TryGet` 和写入的唯一性检查都只读一个数组元素。超出范围或
+  槽位被占的键通过哈希找到，`Find`、`Count` 和有序遍历仍由哈希负责。见[直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index)和
+  [决策](/zh/docs/decisions#d71-direct-index)。
+- `world.CollectIds<T1..Tn>(span, filter)` 按查询顺序把匹配实体的 id 写进 span，写满为止，返回写了多少个：给 `DestroyEntities`、
+  `SaveEntities` 或会改结构的循环用的一批有上限的 id（一个 tick 里的前几个请求）。零分配。见[查询](/zh/docs/guide/queries#collect-ids)。
+- `world.UpdateCount<TGroup>()`：到目前为止 `Update<TGroup>()` 的次数，分组里 `UpdateInterval` 就按它计数。见
+  [系统](/zh/docs/guide/systems#system-groups)。
 - [EECS027](/zh/docs/guide/analyzer#eecs027)（把查找的组件或单例改成参数）和 [EECS054](/zh/docs/guide/analyzer#eecs054)（去掉 `ChunkRows`）
   有了代码修复。
 - `[ForEach(Parallel = true, ChunkRows = n)]` 指定并行方法的一个线程每次取多少行（向上取整到 64；`world.ForEachParallel` 等并行调用用
@@ -65,7 +73,9 @@ icon: RotateCcwClock
   空闲 id 列表和索引的逐实体记录跟着实体记录（包括 `EnsureEntityCapacity`）一起增长，不再随销毁或建索引的实体一个个增长，所以预留了峰值的世界增长到峰值时不再分配。
   见[预制体](/zh/docs/guide/prefabs#reserve)。
 - 唯一索引（[`IUniqueIndexed<TKey>`](/zh/docs/guide/indexes-and-relations)）把每个键对应的实体直接存在这个键自己的记录里，不再每个键一个数组：
-  每个键不再分配数组，`Get` / `TryGet` 只读一条记录。
+  每个键不再分配数组，`Get` / `TryGet` 只读一条记录（[决策](/zh/docs/decisions#d71-direct-index)）。
+- `SetAll` 对所有行都匹配的 64 行位字一次填好值，不再逐行写（不满的位字和带索引的组件仍逐行）。见
+  [批量操作](/zh/docs/guide/bulk#what-it-costs)和[决策](/zh/docs/decisions#d72-setall-whole-words)。
 
 ### 需要修改代码的变更 [#v4-8-0-breaking]
 

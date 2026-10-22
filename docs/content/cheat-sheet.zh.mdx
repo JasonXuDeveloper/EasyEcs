@@ -38,6 +38,7 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 | `: ITracked` | 每行记录最后一次写入和移除的 tick | [变更追踪](/zh/docs/guide/change-tracking) |
 | `: IIndexed<TKey>` 加 `Key` | 通过 `world.Index<T, TKey>()` 按值查找 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | `: IUniqueIndexed<TKey>` 加 `Key` | 一个键只对应一个实体：`index.Get(key)`；会让第二个实体拿到这个键的写入直接抛异常 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
+| `: IDirectIndexed<TKey>` 加 `Key`、`static Slots`、`static SlotOf(key)` | 能映射到有界槽位（网格格子）的唯一键：`Get` / `TryGet` 读一个数组元素 | [直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index) |
 | `: IIndexed<EntityId>` | 指向一个实体的链接，可以从目标反查 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | `: IRelation` 加 `Target` | 每个实体多条链接，存放在缓冲里 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | `: IGroup` 加 `Group` | 调用 `world.GroupBy<T>()` 后按值拆表 | [分组](/zh/docs/guide/groups) |
@@ -64,6 +65,7 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 | `world.EntityCount` / `Entities` | 存活实体数，以及零分配的遍历 |
 | `world.ChangeTick` | 当前的变更 tick |
 | `world.DefaultUpdateCount` | 默认分组已完成的 `Update()` 次数 |
+| `world.UpdateCount<TGroup>()` | 到目前为止 `Update<TGroup>()` 的次数，包括正在进行的这一次：分组里 `UpdateInterval` 按它计数 |
 | `world.Reserve<T1, …, Tn>(n)` / `Reserve(prefab, n)` / `EnsureEntityCapacity(n)` | 在已知峰值或一波刷怪之前预分配 |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | 从 `EntityId` 换回经过校验的句柄 |
 | `world.DescribeTables()` | 表、列、行数和字节数，供工具使用 |
@@ -387,6 +389,7 @@ Entity holder = world.AccountIndex.Get(42);        // 就是它；再来一个 A
 | `world.Instantiate(prefab, a, b, …)` / `Instantiate(prefab, span, a, b, …)` | 同上，外加最多 9 个自己的组件，覆盖或补充预制体里的值：只拷贝一次行 |
 | `world.CreateEntities(span, a, b, …)` | 一波取值相同的实体 |
 | `world.DestroyAll<T…>(filter)` | 销毁所有匹配的实体，返回数量 |
+| `world.CollectIds<T1..Tn>(span, filter)` | 按查询顺序把前几个匹配实体的 id 写进 `span`，写满为止；返回数量（[有上限的一批](/zh/docs/guide/queries#collect-ids)） |
 | `world.DestroyEntities(ids)` | 一次销毁一组 id，返回数量 |
 | `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | 给所有匹配的实体设置或移除一个组件；过滤条件里没写 `Retired` 时，`SetAll` 跳过带 `Retired` 标签的实体 |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | 给所有匹配的实体禁用或启用一个组件 |

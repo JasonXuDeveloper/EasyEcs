@@ -24,7 +24,10 @@ available as Markdown: add `.md` to its URL.
 - A key that must name one entity (an account id, a session token, a cell's occupant) is `IUniqueIndexed<TKey>`: look
   it up with `world.XIndex.Get(key)` / `TryGet(key, out e)`, never with a hand-kept dictionary. A write that would give
   a second entity a taken key throws `InvalidOperationException`; to move a key, change the old holder first. Not for
-  `EntityId` keys (EECS036). A component has one index key: never two `IIndexed<TKey>` (EECS036).
+  `EntityId` keys (EECS036). A component has one index key: never two `IIndexed<TKey>` (EECS036). When the keys a
+  world holds at once map onto bounded slots (grid cells modulo the loaded area, small ids), make it
+  `IDirectIndexed<TKey>` (`static Slots`, `static SlotOf(key)`, pure arithmetic) instead of keeping a grid of ids by
+  hand; never for sparse keys or huge ranges.
 - A list per entity is a `DynamicBuffer<T>` component; never copy it by value (EECS012). Call
   `EnsureCapacity(n)` on it (and `world.Reserve<T…>(n)` on the world) before a wave of known size. Write a whole
   buffer through the span `SetCount(n)` returns; compute many passes over the same elements in a `stackalloc`'d span
@@ -136,7 +139,8 @@ available as Markdown: add `.md` to its URL.
 - Give a new entity its components in `CreateEntity(a, b, c)` / `Instantiate(prefab, a, b)`, not a `Set` right
   after (EECS052).
 - Prefer `[ForEach]` methods over hand-written `Query` loops; use bulk calls (`SetAll`, `RemoveAll`, `DisableAll`,
-  `EnableAll`, `CreateEntities`, `DestroyAll`, `DestroyEntities(ids)`) for many entities at once, not a loop over a query or a `[ForEach]` method whose whole body is that one change
+  `EnableAll`, `CreateEntities`, `DestroyAll`, `DestroyEntities(ids)`; `CollectIds<T>(span, filter)` for a bounded
+  batch of ids, the first N requests of a tick) for many entities at once, not a loop over a query or a `[ForEach]` method whose whole body is that one change
   (EECS030), and
   `CreateEntities` or `Reserve` before creating many entities in a loop (EECS031); `world.Reserve(prefab, n)` also
   reserves the prefab's index keys, its retired table (cleanup components) and free ids, so a wave of a kind spawns at 0 B. Ask `world.Any<T>()` and
