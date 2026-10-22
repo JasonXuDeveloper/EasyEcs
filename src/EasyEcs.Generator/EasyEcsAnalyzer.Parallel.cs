@@ -87,7 +87,9 @@ public sealed partial class EasyEcsAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(SharedWrite, call.Syntax.GetLocation(),
                 $"Job '{job.Name}', run by {method.Name},", shared.What, $" (Execute: '{Shorten(shared.Operation.Syntax)}')"));
 
-        // EECS061: the first use of the job local after the call reads a field Execute writes.
+        // EECS061: the first use of the job local after the call reads a field Execute writes; a job that merges
+        // its chunks' copies back (Merges, as generated jobs with Reduce<T> do) keeps them.
+        if (job.GetMembers("Merges").Length > 0) return;
         var own = new HashSet<ISymbol>(writes.Where(w => !w.Shared).Select(w => w.Symbol), SymbolEqualityComparer.Default);
         if (own.Count == 0 || call.Arguments.FirstOrDefault(a => a.Parameter?.Name == "job")?.Value is not ILocalReferenceOperation { Local: var local }) return;
         int after = call.Syntax.Span.End;
