@@ -622,7 +622,6 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
         }
     }
 
-    /// <summary>Entity <paramref name="id"/> is destroyed or loses <typeparamref name="T"/>. Inside the structural gate.</summary>
     void World.IValueIndex.Reserve(int ids)
     {
         if (ids > _nodes.Length) Array.Resize(ref _nodes, ids);
@@ -635,6 +634,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
         if (_sorted != null && _sortedCount + more > _sorted.Length) Array.Resize(ref _sorted, _sortedCount + more);
     }
 
+    /// <summary>Entity <paramref name="id"/> is destroyed or loses <typeparamref name="T"/>. Inside the structural gate.</summary>
     void World.IValueIndex.Removed(int id)
     {
         if (id < _nodes.Length && _nodes[id].Linked) Unlink(id);
