@@ -11,8 +11,36 @@ icon: CircleArrowUp
 
 ## v4.7 → v4.8 [#v4-7-to-v4-8]
 
-为 4.7 写的代码不用改就能编译，4.7 的存档照样能读。有两条分析器规则报告的范围变大了，还有三条新的警告：把警告当错误的构建会在这些地方失败，
+4.7 的存档照样能读。为 4.7 写的代码除了系统的调度都不用改就能编译：`UpdateInterval` 和 `UpdatePhase` 属性变成了
+`[UpdateInterval(n, Phase = p)]` 特性。有两条分析器规则报告的范围变大了，还有三条新的警告：把警告当错误的构建会在这些地方失败，
 改完代码才能通过。
+
+### 系统的调度是特性：`[UpdateInterval(n, Phase = p)]` [#v4-8-update-interval]
+
+`EcsSystem.UpdateInterval` 和 `EcsSystem.UpdatePhase` 删掉了。在类上声明节奏：生成器把它写进系统的注册代码，所以它天然是常量；
+派生系统没有自己声明时沿用基类的。重写这两个属性之一会报 [EECS082](/zh/docs/guide/analyzer#eecs082)，它的代码修复会写出特性
+（表示“每次更新都跑”的重写直接删掉）。针对调度不是常量的警告 EECS018 随这两个属性一起删掉了。
+
+```csharp tab="4.7" doccheck=skip
+public class SaveSystem : EcsSystem
+{
+    public override int UpdateInterval => 60;
+    public override int UpdatePhase => 30;
+
+    protected override void OnUpdate() { }
+}
+```
+
+```csharp tab="4.8"
+[UpdateInterval(60, Phase = 30)]
+public class SaveSystem : EcsSystem
+{
+    protected override void OnUpdate() { }
+}
+```
+
+运行时算出来的间隔没有对应的特性写法：要么定下节奏，要么把系统放进一个[系统分组](/zh/docs/guide/systems#system-groups)，到期时更新这个分组。
+读 `system.UpdateInterval` 的代码改成读特性（`typeof(T).GetCustomAttribute<UpdateIntervalAttribute>()`）。
 
 ### 报告范围变大的分析器规则：EECS027、EECS030 和 EECS053 [#v4-8-analyzer]
 
@@ -107,7 +135,7 @@ public class TakeHits : EcsSystem
 
 ### 新的公开类型 [#v4-8-new-types]
 
-`namespace EasyEcs` 里新增了 `ReadOnlyMaybe<T>`、`Reduce<T>`、`IReduction<T>`、`Scratch<T>`、`Lookup<T>`、`LookupExtensions`、`IDirectIndexed<TKey>`、`SimdMode` 和 `Interleaved`。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
+`namespace EasyEcs` 里新增了 `ReadOnlyMaybe<T>`、`Reduce<T>`、`IReduction<T>`、`Scratch<T>`、`Lookup<T>`、`LookupExtensions`、`IDirectIndexed<TKey>`、`SimdMode`、`Interleaved`、`ForEntityAttribute`、`ConsumeAttribute` 和 `UpdateIntervalAttribute`。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
 或者用 `using` 起个别名。
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]
@@ -408,7 +436,7 @@ world.Update();
 - **`World.SystemError` 事件删掉了。** 系统抛的异常默认传出 `Update`；设了 `new WorldOptions { SystemErrors = SystemErrorPolicy.Disable }`
   时，系统被关掉，异常留在 `system.Error` 里，应用从 `world.Systems` 读取。重新启用系统就会重试。
 - **系统不再需要 `partial`。** 生成的代码放在系统类型之外，所以 EECS001 删掉了；写着 `partial` 也照样能编译。
-- **`UpdateInterval` 和新增的 `UpdatePhase` 应该是常量**：每次更新都会读它们，警告 [EECS018](/zh/docs/guide/analyzer#eecs018)
+- **`UpdateInterval` 和新增的 `UpdatePhase` 应该是常量**：每次更新都会读它们，警告 EECS018
   会指出计算出值的重写。要停下和恢复一个系统，设置 `Enabled`。
 - **`world.DestroyEntity(entity)` 删掉了**：它做的就是 `entity.Destroy()` 做的事。调用 `entity.Destroy()`，或者用
   `world.DestroyAll<T…>(filter)` 一次销毁所有匹配的实体。

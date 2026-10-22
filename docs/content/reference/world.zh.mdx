@@ -524,6 +524,24 @@ public void ForEachEntityParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref 
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
 
+### `ForEachMasked` [#foreachmasked]
+
+```csharp
+public void ForEachMasked<T1, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where TJob : struct, IForEachMasked<T1>, allows ref struct;
+public void ForEachMasked<T1, T2, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8>, allows ref struct;
+public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, T9>, allows ref struct;
+```
+
+组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
+
+用于还接收"只有部分行通过"的字的 job 的 [`World.ForEachBatch`](/zh/docs/reference/world#foreachbatch)：在需要逐行检查的表里，行全部通过的字并入前面几个字的那一段，部分行通过的字整个交给 job，通过的行以位的形式给出。零分配。
+
 ### `ForEachParallel` [#foreachparallel]
 
 ```csharp
@@ -1095,6 +1113,6 @@ public void Update<TGroup>() where TGroup : struct, ISystemGroup;
 public long UpdateCount<TGroup>() where TGroup : struct, ISystemGroup;
 ```
 
-到目前为止分组 `TGroup` 的 [`World.Update`](/zh/docs/reference/world#update-2) 调用次数，包括正在执行的这一次（第一次之前是 0；从没加过系统的分组也是 0）：分组里系统的 [`EcsSystem.UpdateInterval`](/zh/docs/reference/ecssystem#updateinterval) 就按这个计数算（计数对间隔取模等于系统的 [`EcsSystem.UpdatePhase`](/zh/docs/reference/ecssystem#updatephase) 时，系统执行）。O(1)。
+到目前为止分组 `TGroup` 的 [`World.Update`](/zh/docs/reference/world#update-2) 调用次数，包括正在执行的这一次（第一次之前是 0；从没加过系统的分组也是 0）：分组里系统的 [[UpdateInterval]](/zh/docs/reference/updateintervalattribute) 就按这个计数算（计数对间隔取模等于它的相位时，系统执行）。O(1)。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)

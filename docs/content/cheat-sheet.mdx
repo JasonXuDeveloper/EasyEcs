@@ -238,7 +238,7 @@ public struct Shop : IActorGroup<Shop>;             // the systems of [UpdateInG
 | --- | --- |
 | `OnCreate()` / `OnUpdate()` / `OnDestroy()` | Lifecycle; `OnUpdate` runs before the `[ForEach]` methods |
 | `World` | The system's world |
-| `UpdateInterval` / `UpdatePhase` | Run every N-th update, on phase 0 to N-1 |
+| `[UpdateInterval(N, Phase = P)]` | Run every N-th update, on phase 0 to N-1 |
 | `Enabled` | Skip the system; setting `true` clears `Error` |
 | `Error` | The exception that disabled it under `SystemErrorPolicy.Disable` |
 | `LastRunTick` | The change tick of its last run |

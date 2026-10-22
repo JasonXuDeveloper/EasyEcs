@@ -254,7 +254,31 @@ var drift = new Drift();
 world.ForEachBatch<Position, Velocity, Drift>(ref drift, Filters.Active);
 ```
 
-### One entity: `entity.Run` [#run-on-one-entity]
+### One entity: `[ForEntity]` and `entity.Run` [#run-on-one-entity]
+
+A static method marked `[ForEntity]` runs on one entity: the generator writes the job and an entry point next to the
+method that takes the entity and the method's other values, and returns whether it ran. Its `ref` components are the
+ones stamped as written, `in` ones are read, and filter attributes (`[Without<Dead>]`) refuse an entity the way a
+pass's filter skips a row; a method with `[Changed<T>]` takes the tick to look back from as its second argument. Keep
+the method private: the entry point has its name.
+
+```csharp
+public static class Requests
+{
+    [ForEntity, Without<Dead>]
+    static void TakeHit(Entity unit, ref Health hp, int damage)
+    {
+        if (hp.Value <= damage) unit.SetDead();   // a structural change: hp still points at the entity's value
+        hp.Value -= damage;                       // carried over to its new row when the method returns
+    }
+}
+```
+
+```csharp
+bool applied = Requests.TakeHit(unit, 30);   // false: dead, no Health, or not alive
+```
+
+The entry point is `entity.Run` with the generated job: what follows holds for both.
 
 Code that handles one entity at a time runs a job on it with `entity.Run<T1..Tn, TJob>(ref job, filter)`: a request
 or a message to an actor, a command from a client. The job is an `IForEachEntity` job, the same type a pass over the

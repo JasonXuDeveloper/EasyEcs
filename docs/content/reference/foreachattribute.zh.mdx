@@ -42,6 +42,14 @@ public int ChunkRows { get; init; }
 
 与 [`ForEachAttribute.Parallel`](/zh/docs/reference/foreachattribute#parallel) 一起用：一个线程每次取的行数，向上取整到 64 的倍数（相当于 OpenMP 的 `schedule(dynamic, n)`）。默认每块约为每个线程份额的四分之一，且至少 1,024 行（方法写被追踪组件时至少 4,096 行），所以只有几百个重的行（每行一块地形、每行一次寻路）的遍历只在一个线程上跑；每行要花几微秒时，指定一个线程每次取多少行。块越小，领块的次数越多；共用一个 4,096 行变更 tick 区块的块会（以原子操作）共用它的摘要。默认 0：按行数决定。不能脱离 [`ForEachAttribute.Parallel`](/zh/docs/reference/foreachattribute#parallel) 单独使用，也不能小于 0（EECS054）。
 
+### `FloatMode` [#floatmode]
+
+```csharp
+public FloatMode FloatMode { get; init; }
+```
+
+向量循环可以改变哪些浮点结果。[`FloatMode.Exact`](/zh/docs/reference/floatmode#exact) 让每个结果都与方法本身逐位相同，所以写进 [`Reduce`](/zh/docs/reference/reduce) 的浮点求和保持一次一行（EECS055 会说明）：向量循环的每个通道各加各的行，相加顺序不同。[`FloatMode.Fast`](/zh/docs/reference/floatmode#fast) 接受这种顺序：同样那些行的和，只是舍入不同（与方法本身不逐位相同，不同向量宽度之间也不相同）。整数求和以及任何通道类型的 Min / Max 两种模式下都精确。默认 [`FloatMode.Exact`](/zh/docs/reference/floatmode#exact)。
+
 ### `Parallel` [#parallel]
 
 ```csharp
@@ -64,4 +72,4 @@ public SimdMode Simd { get; init; }
 public int Slices { get; init; }
 ```
 
-把方法的行分摊到系统的 N 次运行上：每次运行访问一片，约为每个匹配表行数的 1 / N（第 [`EcsSystem.RunCount`](/zh/docs/reference/ecssystem#runcount) mod N 片，见 [`QueryFilter.Slice`](/zh/docs/reference/queryfilter#slice)），所以每 N 次运行每行访问一次，处理大量实体的系统每次更新只花约 1 / N，而不是集中在某一次更新上出现尖峰。配合 [`EcsSystem.UpdateInterval`](/zh/docs/reference/ecssystem#updateinterval) M，每行每 N \* M 次更新访问一次。两次运行之间移动了的行（交换删除、结构变更、表扩容或缩小）在一轮里可能被跳过，也可能被访问两次。逐实体、批处理和 [`ForEachAttribute.Parallel`](/zh/docs/reference/foreachattribute#parallel) 都能用（这一片再切成块）。不能和 `[Changed<T>]` / `[Removed<T>]` 一起用（EECS035）：其他片的行会丢掉系统上次运行之后的变更。默认 1：每次运行访问每一行。
+把方法的行分摊到系统的 N 次运行上：每次运行访问一片，约为每个匹配表行数的 1 / N（第 [`EcsSystem.RunCount`](/zh/docs/reference/ecssystem#runcount) mod N 片，见 [`QueryFilter.Slice`](/zh/docs/reference/queryfilter#slice)），所以每 N 次运行每行访问一次，处理大量实体的系统每次更新只花约 1 / N，而不是集中在某一次更新上出现尖峰。配合 [[UpdateInterval(M)]](/zh/docs/reference/updateintervalattribute)，每行每 N \* M 次更新访问一次。两次运行之间移动了的行（交换删除、结构变更、表扩容或缩小）在一轮里可能被跳过，也可能被访问两次。逐实体、批处理和 [`ForEachAttribute.Parallel`](/zh/docs/reference/foreachattribute#parallel) 都能用（这一片再切成块）。不能和 `[Changed<T>]` / `[Removed<T>]` 一起用（EECS035）：其他片的行会丢掉系统上次运行之后的变更。默认 1：每次运行访问每一行。

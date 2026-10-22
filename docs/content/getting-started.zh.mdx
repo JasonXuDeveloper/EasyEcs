@@ -232,7 +232,7 @@ Console.WriteLine($"the scout is at {scout.Position.X}, the others at {units[2].
 ```
 
 `Update()` 把每个启用的系统执行一次，顺序是注册顺序再按 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 调整，整个过程不分配内存。
-想让系统跑得少一些，重写 `UpdateInterval`；想关掉它，设 `Enabled = false`。
+想让系统跑得少一些，标上 `[UpdateInterval(N)]`；想关掉它，设 `Enabled = false`。
 
 </Step>
 <Step>

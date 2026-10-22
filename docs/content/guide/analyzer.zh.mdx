@@ -1,15 +1,15 @@
 ---
 title: 分析器规则
-seoTitle: "EasyEcs 分析器规则 EECS002-EECS061：每条 C# 诊断的含义与修法"
-description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS061：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
+seoTitle: "EasyEcs 分析器规则 EECS002-EECS085：每条 C# 诊断的含义与修法"
+description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS085：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
 icon: ShieldCheck
 ---
 
 EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/docs/ecs-principles)的代码编译不过。正确性规则（EECS002 到 EECS024，以及
-EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑、但有代价的写法（EECS017、EECS018、EECS020）。生成器会跳过无效输入，由分析器报出来，
+EECS035、EECS036）除了两条警告都是错误；这两条针对的是能跑、但有代价的写法（EECS017、EECS020）。生成器会跳过无效输入，由分析器报出来，
 所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046、EECS052、EECS053）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
-（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入。声明规则（EECS080 到 EECS085）为手写的代码（单实体 job、销毁所访问实体的遍历）建议能生成它的特性，并拒绝无法生效的特性。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -48,7 +48,6 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS015](#eecs015) | 错误 | 被索引的组件用 `Set` 写 | `Read<T>()`、`ref readonly`、`in`、`ReadOnlySpan<T>` |
 | [EECS016](#eecs016) | 错误 | `[Removed<T>]` 方法不要求 `T` | |
 | [EECS017](#eecs017) | 警告 | 组件存 `EntityId`，不存 `Entity` | 字段改成 `EntityId` |
-| [EECS018](#eecs018) | 警告 | `UpdateInterval` 和 `UpdatePhase` 是常量 | `{ get; } = 常量` 改成 `=> 常量` |
 | [EECS019](#eecs019) | 错误 | 系统顺序不能成环 | |
 | [EECS020](#eecs020) | 警告 | 系统只在自己的分组内排序 | |
 | [EECS021](#eecs021) | 错误 | `[ForEach]` 入口不与已有方法冲突 | |
@@ -92,6 +91,12 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS059](#eecs059) | 错误 | `Lookup<T>` 读的组件这一遍不写 | |
 | [EECS060](#eecs060) | 警告 | 多线程上运行的代码不写共享内存 | |
 | [EECS061](#eecs061) | 警告 | 遍历之后不读并行 job 的字段 | `ForEach` / `ForEachEntity` |
+| [EECS080](#eecs080) | 信息 | 单实体 job 写成 `[ForEntity]` 方法 | 改写成 `[ForEntity]` 方法 |
+| [EECS081](#eecs081) | 错误 | `[ForEntity]` 方法是静态的，只接收单个实体有的东西 | 改成静态方法 |
+| [EECS082](#eecs082) | 错误 | 系统的调度是 `[UpdateInterval(n, Phase = p)]`，不是重写属性 | 改用特性声明 |
+| [EECS083](#eecs083) | 错误 | `[UpdateInterval]`：间隔至少为 1，相位在 0 到 n - 1 之间，用在系统上 | |
+| [EECS084](#eecs084) | 信息 | 销毁每个访问到的实体的 `[ForEach]` 方法用 `[Consume]` | `[Consume]` |
+| [EECS085](#eecs085) | 错误 | `[Consume]` 和 `[ForEach]` 一起用，不带 `Slices` | |
 
 ## EECS002 [#eecs002]
 
@@ -609,30 +614,6 @@ public class ChaseSystem : EcsSystem
 }
 ```
 
-## EECS018 [#eecs018]
-
-**系统的调度不是常量。** 警告。代码修复：自动属性 `{ get; } = 5` 改成 `=> 5`。
-
-`UpdateInterval` 和 `UpdatePhase` 每次更新都会读，值一变，系统就会跳过或重复运行。带常量初始化器的自动属性也会报：它读的是系统
-创建时赋值的字段，`=> 5` 才直接写明这是常量。
-
-```csharp doccheck=expect-EECS018
-public class SaveSystem : EcsSystem
-{
-    public override int UpdateInterval => World.EntityCount > 1000 ? 4 : 1;
-}
-```
-
-返回常量。要暂停和恢复系统，设置 `Enabled`：
-
-```csharp
-public class SaveSystem : EcsSystem
-{
-    public override int UpdateInterval => 60;    // 每 60 次更新一次
-    public override int UpdatePhase => 30;       // 比同间隔的其他系统晚半个周期
-}
-```
-
 ## EECS019 [#eecs019]
 
 **系统顺序成环。** 错误。没有代码修复。
@@ -885,7 +866,7 @@ public class Drift : EcsSystem
 `[ForEach]` 方法对访问到的每个实体都执行一次，`OnUpdate` 每次更新执行一次，所以它们分配的内存每个 tick 都会变成垃圾，
 由此触发的回收会让整个进程停顿。规则会指出每一个会分配的表达式：对象或数组、捕获变量的 lambda、实例方法组、LINQ、运行时拼出来的
 字符串（`$"..."`、`+`、`string.Format`、`ToString()`）、装箱，以及对接口做 `foreach`。不报告的情况：`throw` 里的代码、会被编译器
-去掉的调用（`[Conditional]`，例如 `Debug.Assert`）、控制台输出（写入本身比字符串更贵），以及重写了 `UpdateInterval` 的系统的
+去掉的调用（`[Conditional]`，例如 `Debug.Assert`）、控制台输出（写入本身比字符串更贵），以及自己标了 `[UpdateInterval]` 的系统的
 `OnUpdate`（执行频率是作者选的）。规则同样覆盖手写 job 的 `Execute`，以及本来就要分配的冷调用：`TrimExcess`、`Capture()`、
 `Describe`、`DescribeTables` 和 `DescribeSchedule` 属于定时器、命令或测试，不属于每次更新。
 
@@ -1912,6 +1893,188 @@ public static class Reports
 
 要在所有核上对大量行求总数，改写成带 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 参数的 `[ForEach(Parallel = true)]` 方法：
 每一块保留一个部分结果，这一遍把它们合并起来。
+
+## EECS080 [#eecs080]
+
+**手写的单实体 job。** 建议（信息级别）。代码修复：改写成 `[ForEntity]` 方法，并改掉每一处调用。
+
+实现 `IForEachEntity<T1..Tn>`、创建后马上交给 `entity.Run` 的结构体，正是 [`[ForEntity]`](/zh/docs/guide/queries#run-on-one-entity)
+从静态方法生成的东西：方法的 `ref` 参数构成 `WriteMask`，过滤特性构成 `QueryFilter`，其余参数就是入口接收的值，
+`INoStructuralChanges` 由方法调用了什么推出来。只有当这个结构体的每一处使用都是这样的调用时，规则才报告它：
+`var job = new J { ... };` 紧跟着 `entity.Run<.., J>(ref job)`，不带过滤条件，或者过滤条件放在 `static readonly` 字段里。
+调用之后还读字段（拿结果）的 job、别处也会创建的 job、`WriteMask` 和参数对不上的 job，都不报告。
+
+```csharp tab="报告" doccheck=expect-EECS080
+public struct TakeHit : IForEachEntity<Health>, INoStructuralChanges
+{
+    public int Damage;
+
+    public static int WriteMask => 1;
+
+    public void Execute(Entity unit, ref Health hp) => hp.Value -= Damage;
+}
+
+public static class Combat
+{
+    static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>();
+
+    public static bool Hit(Entity unit, int damage)
+    {
+        var hit = new TakeHit { Damage = damage };
+        return unit.Run<Health, TakeHit>(ref hit, Alive);
+    }
+}
+```
+
+```csharp tab="修正"
+public static class TakeHit
+{
+    [ForEntity, Without<Dead>]
+    static void Run(ref Health hp, int damage) => hp.Value -= damage;
+}
+
+public static class Combat
+{
+    public static bool Hit(Entity unit, int damage) => TakeHit.Run(unit, damage);
+}
+```
+
+修复会改掉整个解决方案里的每一处调用；过滤条件字段没有别的地方读时，也一并删掉。它是建议，只在 IDE 里显示。
+
+## EECS081 [#eecs081]
+
+**无法在单个实体上运行的 `[ForEntity]` 方法。** 错误。代码修复：把实例方法改成静态方法。
+
+`[ForEntity]` 方法是静态的：生成器在它旁边写一个接收实体的入口，没有实例可以调用它。它接收组件（`in`、`ref`、`Maybe<T>`）、
+单例、`Entity`、`World` 和调用方传入的值；属于多行遍历的东西（组件 span、`EntitySpan`、`Reduce<T>`、`Scratch<T>`）对单个实体
+没有意义；一个方法要么是遍历（`[ForEach]`），要么在单个实体上运行。
+
+```csharp tab="报告" doccheck=expect-EECS081
+public static class Healing
+{
+    [ForEntity]
+    static void Heal(Span<Health> health, int amount) { }   // span：一个实体只有一个 Health
+}
+```
+
+```csharp tab="修正"
+public static class Healing
+{
+    [ForEntity]
+    static void Heal(ref Health hp, int amount) => hp.Value += amount;   // Healing.Heal(unit, 5)
+}
+```
+
+## EECS082 [#eecs082]
+
+**用重写属性写系统的调度。** 错误。代码修复：改用 `[UpdateInterval(n, Phase = p)]` 声明。
+
+系统的节奏是类上的 [`[UpdateInterval(n, Phase = p)]`](/zh/docs/guide/systems#update-interval) 特性，生成器把它写进系统的注册代码；
+`UpdateInterval` 和 `UpdatePhase` 属性已经没有了。修复把返回常量的重写移到特性上；如果它们表示的是“每次更新都跑”（间隔 1、相位 0），
+就直接删掉。
+
+```csharp tab="报告" doccheck=expect-EECS082,expect-CS0115
+public class SaveSystem : EcsSystem
+{
+    public override int UpdateInterval => 60;
+    public override int UpdatePhase => 30;
+}
+```
+
+```csharp tab="修正"
+[UpdateInterval(60, Phase = 30)]
+public class SaveSystem : EcsSystem
+{
+}
+```
+
+计算出值的重写没有对应的特性写法：要么定下节奏，要么在到期时更新一个[系统分组](/zh/docs/guide/systems#system-groups)。
+
+## EECS083 [#eecs083]
+
+**无法生效的 `[UpdateInterval]`。** 错误。没有代码修复。
+
+`[UpdateInterval(n, Phase = p)]` 让系统在所属分组的更新计数对 n 取模等于 p 时运行：n 至少为 1，p 在 0 到 n - 1 之间，类型是
+`EcsSystem`。生成器会忽略无效的特性，系统于是每次更新都跑。
+
+```csharp tab="报告" doccheck=expect-EECS083
+[UpdateInterval(10, Phase = 10)]   // 相位是 0 到 9
+public class Regeneration : EcsSystem
+{
+}
+```
+
+```csharp tab="修正"
+[UpdateInterval(10, Phase = 9)]
+public class Regeneration : EcsSystem
+{
+}
+```
+
+## EECS084 [#eecs084]
+
+**销毁每个访问到的实体的 `[ForEach]` 方法。** 建议（信息级别）。代码修复：加上 `[Consume]`，删掉最后的 `Destroy()`
+（`Entity` 参数没有别的用处时也一并删掉）。
+
+处理事件或命令实体、每条路径都以 `entity.Destroy()` 结尾的方法，就是一次消费式遍历。
+[`[Consume]`](/zh/docs/guide/systems#consume) 在遍历结束时恰好销毁这次访问过的行；不做结构变更的方法，这些行一次销毁
+（按它的过滤条件做一次 `DestroyAll`，整张表一起释放），而不是每行一次销毁、留一个空洞。放在条件里或 `return` 之后的销毁不报告。
+
+```csharp tab="报告" doccheck=expect-EECS084
+public record struct Strike(int Amount, EntityId Target) : IComponent;
+
+public class ApplyStrikes : EcsSystem
+{
+    [ForEach]
+    static void Apply(Entity hit, in Strike strike, World world)
+    {
+        if (world.TryGetEntity(strike.Target, out var target)) target.Get<Health>().Value -= strike.Amount;
+        hit.Destroy();
+    }
+}
+```
+
+```csharp tab="修正"
+public record struct Strike(int Amount, EntityId Target) : IComponent;
+
+public class ApplyStrikes : EcsSystem
+{
+    [ForEach, Consume]
+    static void Apply(in Strike strike, World world)
+    {
+        if (world.TryGetEntity(strike.Target, out var target)) target.Get<Health>().Value -= strike.Amount;
+    }
+}
+```
+
+## EECS085 [#eecs085]
+
+**无法生效的 `[Consume]`。** 错误。没有代码修复。
+
+`[Consume]` 在 `[ForEach]` 遍历结束时销毁它访问过的行。没有 `[ForEach]` 的方法没有遍历；分片的方法（`Slices > 1`）每次运行只访问
+一部分行，销毁它们会挪动其他分片的行，事件可能要等很多次运行。
+
+```csharp tab="报告" doccheck=expect-EECS085
+public record struct Damage(int Amount) : IComponent;              // 一个事件实体
+public record struct DamageDealt(long Total) : ISingletonComponent;
+
+public class CountDamage : EcsSystem
+{
+    [ForEach(Slices = 4), Consume]
+    static void Count(in Damage damage, ref DamageDealt dealt) => dealt.Total += damage.Amount;
+}
+```
+
+```csharp tab="修正"
+public record struct Damage(int Amount) : IComponent;
+public record struct DamageDealt(long Total) : ISingletonComponent;
+
+public class CountDamage : EcsSystem
+{
+    [ForEach, Consume]
+    static void Count(in Damage damage, ref DamageDealt dealt) => dealt.Total += damage.Amount;
+}
+```
 
 ## 相关页面 [#related]
 

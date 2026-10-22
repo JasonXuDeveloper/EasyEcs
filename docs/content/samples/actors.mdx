@@ -36,12 +36,13 @@ parameter, so the interface declares the filter once for every kind. The key is 
 
 ## Messages [#messages]
 
-A message is a job on one entity: `Buy` and `Deposit` are jobs, and `Mailman` finds the actor by key in its index and
-runs the job on it with [`entity.Run(ref job, filter)`](/en/docs/guide/queries#run-on-one-entity), which gives the job
-its components in one lookup and refuses a closed shop through a `static readonly` filter. A `Buy` that sells the
-last item adds `Closed` in the middle of the job: a structural change, and the job's refs still point at the shop's
-values. `Mailman` reads the stock before it runs a `Buy`: the job's `WriteMask` stamps `Stock` whenever
-the job runs, so a refused order that ran it would make the next save store an unchanged shop.
+A message is a method run on one entity: `Buy` and `Deposit` are
+[`[ForEntity]` methods](/en/docs/guide/queries#run-on-one-entity), and `Mailman` finds the actor by key in its index
+and calls the generated entry point, `Messages.Buy(shop, quantity)`. It runs the method through `entity.Run`, which
+gives it its components in one lookup, and `[Without<Closed>]` refuses a closed shop. A `Buy` that sells the last
+item adds `Closed` in the middle of the method: a structural change, and its refs still point at the shop's values.
+`Mailman` reads the stock before it runs a `Buy`: its `ref` components are stamped whenever it runs, so a refused
+order that ran it would make the next save store an unchanged shop.
 
 <include lang="csharp" meta='title="Messages.cs"'>../../../samples/Actors/Messages.cs</include>
 

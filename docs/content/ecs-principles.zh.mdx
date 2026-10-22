@@ -94,8 +94,8 @@ public class DeathSystem : EcsSystem
 }
 ```
 
-拆分在运行时没有代价。每个 `[ForEach]` 方法本来就是各自内联的结构体 job；每个系统每次更新的开销是三次虚调用
-（`UpdateInterval`、`OnUpdate` 和生成的代码），再加每个 `[ForEach]` 方法一次查询缓存查找、每个单例参数一次查找。拿不准就拆。
+拆分在运行时没有代价。每个 `[ForEach]` 方法本来就是各自内联的结构体 job；每个系统每次更新的开销是两次虚调用
+（`OnUpdate` 和生成的代码），再加每个 `[ForEach]` 方法一次查询缓存查找、每个单例参数一次查找。拿不准就拆。
 
 ### 2. 系统不保存状态 [#2-systems-are-stateless]
 

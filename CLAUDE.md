@@ -38,11 +38,14 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   EntitySpan.cs                the entities of a batch job's run of rows (lazy handles over the run's EntitySlots; its
                                table and first row, through which a Mut<T> of the run stamps its row)
   EntityDebugView.cs           what a debugger shows for an entity (Entity.Describe)
-  EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy, RunCount (completed runs: the slice of a sliced method);
-                               SystemCode.cs: the generated jobs and access of a system type, registered by a module
-                               initializer (systems need no partial)
+  EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy, RunCount (completed runs: the slice of a sliced method),
+                               [UpdateInterval(n, Phase = p)] (the cadence, read from the generated code);
+                               SystemCode.cs: the generated jobs, access and cadence of a system type, registered by a
+                               module initializer (systems need no partial)
   ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkRows, Simd), [With<T>], [Without<T>], [WithAny<T>], [Changed<T>],
-                               [Removed<T>] ([ChangedAny<..>] / [RemovedAny<..>] are generated: Filters.g.cs)
+                               [Removed<T>] ([ChangedAny<..>] / [RemovedAny<..>] are generated: Filters.g.cs),
+                               [Consume] (the visited rows destroyed after the pass), [ForEntity] (a static method run
+                               on one entity through a generated entry point)
   Maybe.cs                     Maybe<T>: an optional component parameter of a [ForEach] method
   Mut.cs                       Mut<T>: a [ForEach] parameter stamped only on the rows it writes (Write, SetIfChanged);
                                Values.Same, the boxing-free equality of SetIfChanged
@@ -144,7 +147,10 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
   SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                                the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] /
                                [Removed<T>] -> Since(LastRunTick + 1) and a read of T; Mut<T> -> a write stamped per
-                               write; Slices -> the slice of the run; ChunkRows -> the chunkRows argument), registered as SystemCode
+                               write; Slices -> the slice of the run; ChunkRows -> the chunkRows argument; [Consume] -> DestroyAll of
+                               the filter after a pass without structural changes, a destroy per row otherwise;
+                               [ForEntity] -> the IForEachEntity job and an entry point Owner.Method(entity, values)
+                               over entity.Run; [UpdateInterval] -> the Code's constructor), registered as SystemCode
   ComponentGenerator.cs        C# 14 extension members per component / singleton: entity.X (ref T; ref readonly for
                                tracked or indexed), HasX, TryGetX, GetOrAddX, SetX(ctor args), SetXIfChanged, RemoveX,
                                tags IsX,
@@ -152,7 +158,7 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                item.X per Query<T1..Tn> shape the code calls, SavedTypes registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                                lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
   EasyEcsAnalyzer.cs           EECS002-024, EECS035-036, EECS054 and EECS056 (the declaration and [ForEach] rules of the
-                               range EECS002-069 that are not performance rules; generators never report diagnostics)
+                               range EECS002-085 that are not performance rules; generators never report diagnostics)
   EasyEcsAnalyzer.Performance.cs  EECS025-034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the check of EECS056):
                                code that works but costs (write access that
                                only reads, unused or per-row lookups in [ForEach] methods and jobs, allocations per
@@ -179,6 +185,10 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                combines), hand-written reductions and keys the attributes could declare, a wrong
                                Identity, a setup attribute on a type it does not fit, a managed type without a Nino
                                formatter (Warning when the code saves worlds)
+  EasyEcsAnalyzer.Forms.cs     EECS080-085: what the generator declares for code written by hand (a one-entity job
+                               [ForEntity] writes, a [ForEach] method that destroys every entity it visits: [Consume])
+                               and those attributes (and [UpdateInterval], an override of the removed schedule
+                               properties) where they cannot apply
   Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)
   Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race;
                                the writes of code on several threads that reach shared memory (EECS060, EECS061)
@@ -186,9 +196,12 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
   Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
   EquatableArray.cs            array with value equality (generator models cache between edits)
   Polyfills.cs                 IsExternalInit for netstandard2.0 (records); do not delete
-src/EasyEcs.CodeFixes/         EasyEcsCodeFixes.cs: fixes for the analyzer's diagnostics (bundled in the package)
+src/EasyEcs.CodeFixes/         EasyEcsCodeFixes.cs: fixes for the analyzer's diagnostics (bundled in the package);
+                               EasyEcsCodeFixes.Forms.cs: EECS080 (a job and its calls to [ForEntity], solution-wide),
+                               EECS082 ([UpdateInterval]), EECS084 ([Consume])
 tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, Presence, Query, System (and stats),
                                ForEachSystem (and Slices), Singleton, Concurrency, Parallel, Runner, Run (entity.Run),
+                               ForEntity, Consume, Form (EECS080 / EECS084),
                                Changed (and Mut, ChangedAny), Removed (and the destroy log), Instantiate, DynamicBuffer,
                                Index (and unique keys), OrderedIndex, Relation, Hierarchy, TargetPolicy, Group, Cleanup,
                                Disable, Bulk, Move, Part (generated parts, EECS062-069), Snapshot, Serialization (and restart saves), Unload, Introspection
@@ -202,7 +215,7 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                server tick; the world itself is WorldSimulation.cs), BattleServerBenchmark
                                (BattleServer.cs, every feature; docs/content/example.mdx includes its regions), one
                                benchmark per feature (Access: the analyzer's performance rules, Bulk, CallSite,
-                               ChangeTracking (+ ChangeTrackingWrite: Mut<T>, ChangeTrackingRead: Read, ChangeTrackingSomeRows: EECS053), Cleanup, Count, DestroyLog,
+                               ChangeTracking (+ ChangeTrackingWrite: Mut<T>, ChangeTrackingRead: Read, ChangeTrackingSomeRows: EECS053), Cleanup, Consume ([Consume] in bulk and per row against a hand-written Destroy), Count, DestroyLog,
                                DynamicBuffer (+ ChunkChurn: PoolCapacity), Generator (the generators per keystroke and the analyzer per
                                build, through
                                Roslyn), Group, Hierarchy, Index (+ unique keys), Introspection (+ Schedule),
@@ -222,7 +235,7 @@ docs/content/                  the docs (source of https://ecs.xgamedev.net), ea
                                battle server through regions of BattleServer.cs, cheat-sheet, glossary), samples/ (one
                                page per sample of samples/, its files included, its output checked by
                                check-sample.sh), guide/ (one
-                               page per concept, analyzer lists EECS002-061), compare pages (performance, why-fast,
+                               page per concept, analyzer lists EECS002-085), compare pages (performance, why-fast,
                                comparison, vs-*, migrate-from-*), reference pages (api: API + complexity, read by
                                tools/ApiDocs; architecture, faq, ai, decisions, roadmap, changelog); reference/ (API
                                reference generated by tools/ApiDocs, <page>.mdx + <page>.zh.mdx); README.md (GitHub index);

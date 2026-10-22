@@ -178,7 +178,7 @@ takes it as a `ref` or `in` parameter; `SingletonRef<T>` is a stable handle for 
 ### Ordering, groups and intervals [#system-groups-and-intervals]
 
 Systems run in registration order, moved by `[UpdateBefore<T>]` / `[UpdateAfter<T>]`. `[UpdateInGroup<G>]` puts a
-system in a group that runs on `world.Update<G>()` only. `UpdateInterval` and `UpdatePhase` run a system every N-th
+system in a group that runs on `world.Update<G>()` only. `[UpdateInterval(N, Phase = P)]` runs a system every N-th
 update, spread over phases (`world.UpdateCount<G>()` is the count); `Enabled` switches it off. A group's filters (`[Without<Frozen>]`, or `ISystemGroupWith<T>` /
 `ISystemGroupWithout<T>` on the group or an interface it implements) apply to every `[ForEach]` method of its systems.
 
@@ -199,7 +199,7 @@ this is (the slice is `RunCount % N`); `QueryFilter.Slice(index, of)` does the s
 - **Skip it for:** `[Changed<T>]` / `[Removed<T>]` methods, which must see every change
   ([EECS035](/en/docs/guide/analyzer#eecs035)), and logic that must touch every row every tick. Rows that move
   between runs may be skipped or visited twice in one cycle.
-- **Cost:** about 1 / N of the rows per run, plus the table walk; with `UpdateInterval` M, a row is visited once per
+- **Cost:** about 1 / N of the rows per run, plus the table walk; with `[UpdateInterval(M)]`, a row is visited once per
   N × M updates. `Query`, `Count` and the bulk calls refuse a sliced filter.
 - **Guide:** [Systems](/en/docs/guide/systems)
 
@@ -222,8 +222,9 @@ most once: entities that leave before their turn are skipped, entities that join
 Iteration from any code: `foreach (var item in world.Query<T…>(filter))`, struct jobs (`world.ForEach`,
 `ForEachEntity`), `world.Count`, `world.Any`, and `world.CollectIds` for a bounded batch of matching ids. A static `[ForEach]` method outside a system gets a generated entry
 point (`Reports.CountAlive(world, ref alive)`) that runs it as a struct job with the caller's values.
-`entity.Run<Health, TakeHit>(ref job, filter)` runs a struct job on one entity, with the refs a pass would give it:
-`false` when the entity is not alive, lacks a component or fails the filter. A job's `static int WriteMask` names the
+A static `[ForEntity]` method runs on one entity, with the refs a pass would give it: its entry point
+(`Requests.TakeHit(unit, damage)`) returns `false` when the entity is not alive, lacks a component or fails the filter;
+`entity.Run<Health, TJob>(ref job, filter)` runs a hand-written job the same way. A job's `static int WriteMask` names the
 components that count as written (default: all); a job implementing `INoStructuralChanges` skips the structural
 bookkeeping.
 
@@ -643,7 +644,7 @@ What keeps a code base correct as it grows, and a server observable while it run
 
 ### Analyzer and code fixes [#analyzer]
 
-The package bundles an analyzer (EECS002 to EECS061) and code fixes next to the generator. Invalid `[ForEach]`
+The package bundles an analyzer (EECS002 to EECS085) and code fixes next to the generator. Invalid `[ForEach]`
 methods, class components, stateful systems, systems that reference systems, writes through `in`, unsafe parallel
 methods, off-thread structural changes, indexed components written through a `ref` and ordering cycles fail the
 build; a few warnings flag code that works but costs.

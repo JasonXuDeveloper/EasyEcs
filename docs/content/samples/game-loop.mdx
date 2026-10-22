@@ -41,8 +41,8 @@ gives it: the system's connection to the network, not world state.
 
 ## Requests [#requests]
 
-One system per kind of request. Each finds the player with `world.ClientIndex.TryFind`, acts, and destroys the
-request: a request lives for one tick. Joins and shots instantiate `prefabs.Player` and `prefabs.Bullet` with the
+One system per kind of request. Each finds the player with `world.ClientIndex.TryFind` and acts; `[Consume]` destroys
+the requests the pass visited when it ends, so a request lives for one tick. Joins and shots instantiate `prefabs.Player` and `prefabs.Bullet` with the
 values that differ per instance, one row copy each.
 
 <include lang="csharp" meta='title="Systems/Requests.cs"'>../../../samples/GameLoop/Systems/Requests.cs</include>

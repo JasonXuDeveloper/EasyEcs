@@ -123,20 +123,19 @@ flowchart TB
 其他系统的相对顺序不变。顺序在添加系统时就确定了：出现环会当场抛异常，这个系统不会被加进去。分析器能发现它看得到的环
 （[EECS019](/zh/docs/guide/analyzer#eecs019)）和跨分组的排序（[EECS020](/zh/docs/guide/analyzer#eecs020)）。
 
-### `UpdateInterval` 和 `UpdatePhase` [#update-interval]
+### `[UpdateInterval(N, Phase = P)]` [#update-interval]
 
-重写了 `UpdateInterval` 的系统，每 N 次分组更新才跑一次：更新计数是 N 的倍数时运行，所以第一次是第 N 次更新。`UpdatePhase`
-（0 到 N - 1）决定它占 N 次里的哪一次，同样间隔的系统可以错开，不必挤在同一个 tick。两者都必须是常量
-（[EECS018](/zh/docs/guide/analyzer#eecs018)）；要暂停系统，设置 `Enabled`。
+标了 `[UpdateInterval(N)]` 的系统，每 N 次分组更新才跑一次：更新计数是 N 的倍数时运行，所以第一次是第 N 次更新。`Phase`
+（0 到 N - 1）决定它占 N 次里的哪一次，同样间隔的系统可以错开，不必挤在同一个 tick。特性只接受常量，节奏在编译时就定了；
+生成器把它写进系统的注册代码，派生系统没有自己声明时沿用基类的（间隔小于 1 或相位不在 0 到 N - 1 之间时报
+[EECS083](/zh/docs/guide/analyzer#eecs083)）。要暂停系统，设置 `Enabled`。
 
 ```csharp
 public record struct Autosave(long Count) : ISingletonComponent;
 
+[UpdateInterval(60, Phase = 30)]                   // 每 60 次更新一次，和同间隔的其他系统错开半个周期
 public class SaveSystem : EcsSystem
 {
-    public override int UpdateInterval => 60;      // 每 60 次更新一次
-    public override int UpdatePhase => 30;         // 和同间隔的其他系统错开半个周期
-
     protected override void OnUpdate() => World.GetOrAddAutosave().Count++;
 }
 ```
@@ -166,7 +165,7 @@ public class HungerSystem : EcsSystem
 - **会移动的行：** 两次运行之间移动过的行（交换删除时用表的最后一行填洞、结构变更把实体搬到另一张表、表的行数跨过切点
   增减）在一轮 N 次运行里可能被跳过，也可能被访问两次；下一轮还会看到它。只对容忍这一点的工作分片，每轮必须恰好处理一次
   的工作不要分片。
-- **和间隔一起用：** `UpdateInterval => M` 加上 `Slices = N`，每一行每 N × M 次更新访问一次。
+- **和间隔一起用：** `[UpdateInterval(M)]` 加上 `Slices = N`，每一行每 N × M 次更新访问一次。
 - **各种写法都支持：** 逐实体方法、[批处理方法](#batch-methods)（片内成段的行）和[并行方法](#parallel-methods)（把这一片
   再切成块）。
 - **不能和变化过滤一起用：** `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]`、`[RemovedAny<…>]` 都不能分片，`Slices`
@@ -319,6 +318,27 @@ public class Rally : EcsSystem
 ```
 
 查找方式和 `Maybe<T>` 一样，开销也一样：见[下文](#how-to-use-it-fast)的 `MaybeBenchmark` 表。`Maybe<T>` 可以隐式转换成 `ReadOnlyMaybe<T>`，所以只读的辅助方法接收只读版本，两种参数都能传进去。
+
+### `[Consume]`：遍历之后销毁事件 [#consume]
+
+`[ForEach, Consume]` 在遍历结束时销毁这次遍历访问过的行，不多也不少：处理事件或命令实体（一次命中、一个请求）的方法只管处理，
+销毁交给遍历。不做结构变更的方法，它的行在遍历结束时一次销毁，按它的过滤条件做一次 `DestroyAll`，整张表一起释放；可能做结构变更的方法
+（接收 `World`，或用 `Entity` 改了什么）在方法处理完每一行后销毁那一行。遍历期间才开始匹配的实体不会被销毁：下一次运行会访问它。
+清理组件让被消费的实体退休，和其他被销毁的实体一样，[销毁日志](/zh/docs/guide/change-tracking#destroy-log)也会记下它。遍历抛异常时
+什么也不销毁，这些行下次还会被访问。`[Consume]` 不能和 `Slices` 一起用（[EECS085](/zh/docs/guide/analyzer#eecs085)）。
+
+```csharp
+public record struct Heal(int Amount, EntityId Target) : IComponent;   // 一个事件实体
+
+public class ApplyHeals : EcsSystem
+{
+    [ForEach, Consume]
+    static void Apply(in Heal heal, World world)
+    {
+        if (world.TryGetEntity(heal.Target, out var target)) target.Get<Health>().Value += heal.Amount;
+    }
+}
+```
 
 ### 批处理方法 [#batch-methods]
 
@@ -616,7 +636,7 @@ world.Update();               // 固定 tick：默认分组
 long inputs = world.UpdateCount<InputGroup>();   // 到目前为止 Update<InputGroup>() 的次数
 ```
 
-顺序、`UpdateInterval`、`UpdatePhase` 和 `Enabled` 都在各自分组内生效，分组特性会被继承。更新一个没有系统的分组什么也不做。
+顺序、`[UpdateInterval]` 和 `Enabled` 都在各自分组内生效，分组特性会被继承。更新一个没有系统的分组什么也不做。
 `world.UpdateCount<TGroup>()` 统计一个分组的更新次数（包括正在进行的这一次），就像 `DefaultUpdateCount` 统计默认分组：分组里各系统的
 `UpdateInterval` 就按这个次数算，所以工具或测试能知道下一次更新哪些系统会跑。O(1)；从没加过系统的分组是 0。
 
@@ -899,7 +919,7 @@ run order: MoveSystem
 | 只有几百行重活的 `Parallel = true`，默认只成一块 | [`ChunkRows = 64`](/zh/docs/guide/threading#chunk-rows) | 每个线程都领块，而不是一个线程包圆 |
 | 只读的 `Maybe<T>`（或通过 `Entity` 逐行查找） | [`ReadOnlyMaybe<T>`](#read-only-maybe) | 调度时算读，从不打 tick，也不用每行查找（[EECS027](/zh/docs/guide/analyzer#eecs027)） |
 | 同一个节奏的每个方法都重复写一个过滤 | [分组过滤](#group-filters) | 只写一次 |
-| 可以等的工作每个 tick 都做 | `UpdateInterval` 加 `UpdatePhase` | 分摊到多个 tick |
+| 可以等的工作每个 tick 都做 | `[UpdateInterval(N, Phase = P)]` | 分摊到多个 tick |
 | 每 N 个 tick 把所有实体维护一遍 | [`Slices = N`](#slices) | 每次更新开销平稳，没有尖峰 |
 | 每个 tick 都重算、但很少变的被追踪值用 `ref` 写 | [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 加 `SetIfChanged` | 只有真正的变化打 tick：`[Changed<T>]` 读取方访问的行更少 |
 
@@ -954,7 +974,7 @@ run order: MoveSystem
 | 实体没有 `T` 时读 `ReadOnlyMaybe<T>.Value` | 抛 `InvalidOperationException` | 先判断 `HasValue` |
 | 通过 `in` 参数修改集合 | 被当成读来调度，也不会打 tick | [EECS011](/zh/docs/guide/analyzer#eecs011) |
 | 不带 `Entity` / `World` 的方法通过组件里的链接做结构变更 | 遍历拿着指向已搬走行的 ref | [EECS013](/zh/docs/guide/analyzer#eecs013) |
-| `UpdateInterval` 的值会变 | 跳过或重复运行 | [EECS018](/zh/docs/guide/analyzer#eecs018) |
+| 间隔小于 1、相位不在 0 到 N - 1 之间 | 节奏无效 | [EECS083](/zh/docs/guide/analyzer#eecs083) |
 | `Slices` 小于 1，或和 `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]`、`[RemovedAny<…>]` 一起用 | 其他分片里的行发生的变化会丢失 | [EECS035](/zh/docs/guide/analyzer#eecs035) |
 | 指望分片方法每轮恰好访问每行一次 | 两次运行之间移动过的行可能被跳过或访问两次 | 代码审查：只对容忍这一点的工作分片 |
 | 批处理方法里用 `Mut<T>` 参数 | 批处理方法拿的是 span | [EECS009](/zh/docs/guide/analyzer#eecs009) |

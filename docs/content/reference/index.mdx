@@ -17,9 +17,11 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`ChangedAttribute<T>`](/en/docs/reference/changedattribute) | The ForEachAttribute method visits only entities whose T was written since its system last ran (EcsSystem.LastRunTick; on the first run, every entity having it). |
 | [`ChildOfEcsExtensions`](/en/docs/reference/childofecsextensions) | The named members of ChildOf (generated). |
 | [`ChildOfEcsPrefabExtensions`](/en/docs/reference/childofecsprefabextensions) | The named members of ChildOf on a Prefab (generated). |
+| [`ConsumeAttribute`](/en/docs/reference/consumeattribute) | The ForEachAttribute method consumes the rows it visits: when its pass ends, the entities it visited are destroyed, for event and command entities that are handled once. |
 | [`DynamicBufferExtensions`](/en/docs/reference/dynamicbufferextensions) | The writes of a DynamicBuffer. |
 | [`EcsSystem`](/en/docs/reference/ecssystem) | Logic that runs on a world. |
 | [`ForEachAttribute`](/en/docs/reference/foreachattribute) | Runs a method of an EcsSystem (or a static method of any other type, through a generated entry point) for every entity matching its component parameters (and the WithAttribute / WithoutAttribute / WithAnyAttribute filters), each update, after EcsSystem.OnUpdate, in declaration order. |
+| [`ForEntityAttribute`](/en/docs/reference/forentityattribute) | A static method that runs on one entity: the generator writes an entry point, a static member of the method's type named like the method, which takes the entity (then the tick with [Changed&lt;T&gt;] / [Removed&lt;T&gt;], then the method's other values) and returns whether the method ran. |
 | [`GroupAttribute`](/en/docs/reference/groupattribute) | The member a world groups the component's tables by (IGroup): an int or an enum of int. |
 | [`GroupByAttribute`](/en/docs/reference/groupbyattribute) | Every world groups its tables by this IGroup component (World.GroupBy), from its first table holding it: a group filter (QueryFilter.InGroup) then visits that group's tables only, in every world, with no setup call to forget. |
 | [`GroupInfo`](/en/docs/reference/groupinfo) | The systems of one group in stages (ScheduleInfo). |
@@ -48,6 +50,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`UpdateAfterAttribute<TSystem>`](/en/docs/reference/updateafterattribute) | Run this system after TSystem (and systems derived from it) of the same group: see UpdateBeforeAttribute. |
 | [`UpdateBeforeAttribute<TSystem>`](/en/docs/reference/updatebeforeattribute) | Run this system before TSystem (and systems derived from it) of the same group, whatever their registration order. |
 | [`UpdateInGroupAttribute<TGroup>`](/en/docs/reference/updateingroupattribute) | Puts the system (and derived systems) into group TGroup. |
+| [`UpdateIntervalAttribute`](/en/docs/reference/updateintervalattribute) | Run the system (and derived systems without their own) on every interval-th update of its group only: the updates whose count (World.DefaultUpdateCount, World.UpdateCount) modulo the interval is UpdateIntervalAttribute.Phase. |
 | [`ValueIndex<T, TKey>`](/en/docs/reference/valueindex) | The value index of component T in one world (World.Index). |
 | [`WhenTargetDestroyedAttribute`](/en/docs/reference/whentargetdestroyedattribute) | What destroying an entity does to the links to it, in every world (TargetPolicy): on a relation (IRelation) or a component indexed by an EntityId. |
 | [`WithAnyAttribute<T>`](/en/docs/reference/withanyattribute) | The ForEachAttribute method requires at least one of the components named by its [WithAny&lt;T&gt;] attributes (not passed in): [ForEach, WithAny&lt;Burning&gt;, WithAny&lt;Poisoned&gt;]. |
@@ -105,6 +108,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`IForEach<T1..T9>`](/en/docs/reference/iforeach) | Struct callback for World.ForEach. |
 | [`IForEachBatch<T1..T9>`](/en/docs/reference/iforeachbatch) | Struct callback for World.ForEachBatch: receives whole runs of rows as spans, one per component, so the job can process them with SIMD (System.Numerics.Vector, MemoryMarshal.Cast), and their entities (built only when indexed). |
 | [`IForEachEntity<T1..T9>`](/en/docs/reference/iforeachentity) | Like IForEach but also receives the Entity handle, built from the archetype's entity rows (id and version side by side) without a per-entity lookup. |
+| [`IForEachMasked<T1..T9>`](/en/docs/reference/iforeachmasked) | A batch job that also takes a word of 64 rows of which only some pass (a filter that tests presence bits or change ticks): World.ForEachMasked hands it the whole word with the passing rows as bits, where IForEachBatch would get each run of passing rows apart. |
 | [`IGroup`](/en/docs/reference/igroup) | Marks a component whose value splits tables: in a world that called World.GroupBy, entities with different IGroup.Groups live in different tables, so a query of one group (QueryFilter.InGroup) walks only its own rows, contiguous in memory (a zone, a map, a match, a team). |
 | [`IIndexed, IIndexed<TKey>`](/en/docs/reference/iindexed) | What every IIndexed is, so a component type is known to be indexed without reflection (a type test the JIT folds). |
 | [`INoStructuralChanges`](/en/docs/reference/inostructuralchanges) | Marks a ForEach job that makes no structural change (no create/destroy/add/remove/set on any entity of the world it iterates). |
@@ -121,6 +125,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 
 | Type | Summary |
 |---|---|
+| [`FloatMode`](/en/docs/reference/floatmode) | What a vector loop of a ForEachAttribute method may change in floating-point results. |
 | [`SimdMode`](/en/docs/reference/simdmode) | Whether a ForEachAttribute method runs as a vector loop (ForEachAttribute.Simd). |
 | [`SystemErrorPolicy`](/en/docs/reference/systemerrorpolicy) | What an exception thrown by a system does (WorldOptions.SystemErrors). |
 | [`TargetPolicy`](/en/docs/reference/targetpolicy) | What happens to the links to an entity when it is destroyed (TargetPolicyExtensions.WhenTargetDestroyed, RelationIndex.WhenTargetDestroyed). |

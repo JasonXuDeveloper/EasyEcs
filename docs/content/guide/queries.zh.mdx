@@ -238,7 +238,29 @@ var drift = new Drift();
 world.ForEachBatch<Position, Velocity, Drift>(ref drift, Filters.Active);
 ```
 
-### 单个实体：`entity.Run` [#run-on-one-entity]
+### 单个实体：`[ForEntity]` 和 `entity.Run` [#run-on-one-entity]
+
+标了 `[ForEntity]` 的静态方法在单个实体上运行：生成器写出 job，并在方法旁边写一个入口，接收实体和方法的其他值，返回方法有没有运行。
+`ref` 组件算作写入并打 tick，`in` 组件只读，过滤特性（`[Without<Dead>]`）像遍历的过滤条件跳过行那样拒绝实体；带 `[Changed<T>]`
+的方法，入口的第二个参数是往回看的起始 tick。方法保持 private：入口用的是它的名字。
+
+```csharp
+public static class Requests
+{
+    [ForEntity, Without<Dead>]
+    static void TakeHit(Entity unit, ref Health hp, int damage)
+    {
+        if (hp.Value <= damage) unit.SetDead();   // 结构变更：hp 仍然指向这个实体的值
+        hp.Value -= damage;                       // 方法返回时带到它的新行
+    }
+}
+```
+
+```csharp
+bool applied = Requests.TakeHit(unit, 30);   // false：已死亡、没有 Health，或不存活
+```
+
+入口就是用生成的 job 调 `entity.Run`：下面说的对两者都成立。
 
 一次只处理一个实体的代码，用 `entity.Run<T1..Tn, TJob>(ref job, filter)` 在这个实体上跑 job：一个请求、发给 actor 的一条消息、
 客户端的一个命令。这个 job 是 `IForEachEntity` job，和遍历整个 World 用的是同一种类型，拿到的 ref 也和遍历时一样：所有组件只查一次表，

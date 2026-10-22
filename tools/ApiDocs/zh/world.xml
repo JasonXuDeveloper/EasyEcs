@@ -568,11 +568,11 @@
       O(匹配的原型数)，加上写满 <paramref name="into" /> 之前读过的行（所有行都匹配的表是一次复制）。零分配。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.UpdateCount``1" source="e49c6802c43b">
+  <member name="M:EasyEcs.World.UpdateCount``1" source="479246b16c15">
     <summary>
       到目前为止分组 <typeparamref name="TGroup" /> 的 <see cref="M:EasyEcs.World.Update``1" /> 调用次数，包括正在执行的这一次
-      （第一次之前是 0；从没加过系统的分组也是 0）：分组里系统的 <see cref="P:EasyEcs.EcsSystem.UpdateInterval" /> 就按这个计数算
-      （计数对间隔取模等于系统的 <see cref="P:EasyEcs.EcsSystem.UpdatePhase" /> 时，系统执行）。O(1)。
+      （第一次之前是 0；从没加过系统的分组也是 0）：分组里系统的 <see cref="T:EasyEcs.UpdateIntervalAttribute">[UpdateInterval]</see> 就按这个计数算
+      （计数对间隔取模等于它的相位时，系统执行）。O(1)。
     </summary>
   </member>
 

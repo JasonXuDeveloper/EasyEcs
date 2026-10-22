@@ -17,9 +17,11 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`ChangedAttribute<T>`](/zh/docs/reference/changedattribute) | ForEachAttribute 方法只访问 T 在系统上次运行之后写过的实体（EcsSystem.LastRunTick；第一次运行时是所有拥有它的实体）。 |
 | [`ChildOfEcsExtensions`](/zh/docs/reference/childofecsextensions) | ChildOf 的具名成员（生成）。 |
 | [`ChildOfEcsPrefabExtensions`](/zh/docs/reference/childofecsprefabextensions) | ChildOf 在 Prefab 上的具名成员（生成）。 |
+| [`ConsumeAttribute`](/zh/docs/reference/consumeattribute) | ForEachAttribute 方法消费它访问的行：遍历结束时，销毁访问过的实体，用于只处理一次的事件和命令实体。 |
 | [`DynamicBufferExtensions`](/zh/docs/reference/dynamicbufferextensions) | DynamicBuffer 的写入方法。 |
 | [`EcsSystem`](/zh/docs/reference/ecssystem) | 在 World 上运行的逻辑。 |
 | [`ForEachAttribute`](/zh/docs/reference/foreachattribute) | 对每个匹配组件参数（以及 WithAttribute / WithoutAttribute / WithAnyAttribute 过滤条件）的实体，执行 EcsSystem 的一个方法（或者通过生成的入口点，执行任何其他类型的静态方法）。 |
+| [`ForEntityAttribute`](/zh/docs/reference/forentityattribute) | 在单个实体上运行的静态方法：生成器写一个入口，它是方法所在类型的静态成员，和方法同名，接收实体（带 [Changed&lt;T&gt;] / [Removed&lt;T&gt;] 时接着是 tick，然后是方法的其他值），返回方法有没有运行。 |
 | [`GroupAttribute`](/zh/docs/reference/groupattribute) | World 按哪个成员把组件的表分组（IGroup）：int，或底层类型为 int 的枚举。 |
 | [`GroupByAttribute`](/zh/docs/reference/groupbyattribute) | 每个 World 都按这个 IGroup 组件给表分组（World.GroupBy），从它第一张含这个组件的表开始：分组过滤条件（QueryFilter.InGroup）在每个 World 里都只访问这一组的表，不用记着调用设置方法。 |
 | [`GroupInfo`](/zh/docs/reference/groupinfo) | 一个分组的系统，按阶段排列（ScheduleInfo）。 |
@@ -48,6 +50,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`UpdateAfterAttribute<TSystem>`](/zh/docs/reference/updateafterattribute) | 让这个系统排在同一分组里的 TSystem（和它的派生系统）之后运行：见 UpdateBeforeAttribute。 |
 | [`UpdateBeforeAttribute<TSystem>`](/zh/docs/reference/updatebeforeattribute) | 让这个系统排在同一分组里的 TSystem（和它的派生系统）之前运行，不管它们的注册顺序。 |
 | [`UpdateInGroupAttribute<TGroup>`](/zh/docs/reference/updateingroupattribute) | 把系统（和它的派生系统）放进分组 TGroup。 |
+| [`UpdateIntervalAttribute`](/zh/docs/reference/updateintervalattribute) | 系统（以及没有自己声明的派生系统）只在所属分组每第 interval 次更新时运行：更新计数（World.DefaultUpdateCount、World.UpdateCount）对间隔取模等于 UpdateIntervalAttribute.Phase 的那几次。 |
 | [`ValueIndex<T, TKey>`](/zh/docs/reference/valueindex) | 一个 World 里组件 T 的值索引（World.Index）。 |
 | [`WhenTargetDestroyedAttribute`](/zh/docs/reference/whentargetdestroyedattribute) | 在每个 World 里，销毁一个实体时指向它的链接怎么处理（TargetPolicy）：用在关系（IRelation）或以 EntityId 为键建索引的组件上。 |
 | [`WithAnyAttribute<T>`](/zh/docs/reference/withanyattribute) | ForEachAttribute 方法要求实体至少拥有它的 [WithAny&lt;T&gt;] 特性列出的组件之一（不传入方法）：[ForEach, WithAny&lt;Burning&gt;, WithAny&lt;Poisoned&gt;]。 |
@@ -105,6 +108,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`IForEach<T1..T9>`](/zh/docs/reference/iforeach) | World.ForEach 的结构体回调。 |
 | [`IForEachBatch<T1..T9>`](/zh/docs/reference/iforeachbatch) | World.ForEachBatch 的结构体回调：一次接收一整段行，每个组件一个 span，job 可以用 SIMD 处理（System.Numerics.Vector、MemoryMarshal.Cast），还能拿到这些行的实体（按下标访问时才构造）。 |
 | [`IForEachEntity<T1..T9>`](/zh/docs/reference/iforeachentity) | 和 IForEach 一样，但还接收 Entity 句柄。 |
+| [`IForEachMasked<T1..T9>`](/zh/docs/reference/iforeachmasked) | 还接收"只有部分行通过"的 64 行一字的批量 job（过滤条件要检查存在位或变更 tick）：World.ForEachMasked 把整个字交给它，通过的行以位的形式给出；IForEachBatch 则会把每段连续通过的行分开交给它。 |
 | [`IGroup`](/zh/docs/reference/igroup) | 标记一个按值拆分表的组件：在调用过 World.GroupBy 的 World 里，IGroup.Group 不同的实体放在不同的表，所以只查询一组（QueryFilter.InGroup）时只遍历这一组的行，这些行在内存里是连续的（一个区域、一张地图、一场对局、一支队伍）。 |
 | [`IIndexed, IIndexed<TKey>`](/zh/docs/reference/iindexed) | 所有 IIndexed 共同实现的接口：不用反射，就能知道一个组件类型建了索引（JIT 会把这个类型检测折叠掉）。 |
 | [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) | 标记一个不做结构变更的 ForEach job：不在它遍历的 World 里创建或销毁实体，也不增删、设置任何组件。 |
@@ -121,6 +125,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 
 | 类型 | 说明 |
 |---|---|
+| [`FloatMode`](/zh/docs/reference/floatmode) | ForEachAttribute 方法的向量循环可以改变哪些浮点结果。 |
 | [`SimdMode`](/zh/docs/reference/simdmode) | ForEachAttribute 方法是否以向量循环运行（ForEachAttribute.Simd）。 |
 | [`SystemErrorPolicy`](/zh/docs/reference/systemerrorpolicy) | 系统抛出异常时怎么处理（WorldOptions.SystemErrors）。 |
 | [`TargetPolicy`](/zh/docs/reference/targetpolicy) | 实体销毁时，指向它的链接怎么处理（TargetPolicyExtensions.WhenTargetDestroyed、RelationIndex.WhenTargetDestroyed）。 |
