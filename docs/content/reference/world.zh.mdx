@@ -52,7 +52,7 @@ public ulong ChangeTick { get; }
 public long DefaultUpdateCount { get; }
 ```
 
-已经完成的 [`World.Update`](/zh/docs/reference/world#update) 调用次数：只数默认分组的更新（[`World.Update`](/zh/docs/reference/world#update-2) 的运行不计入）。
+到目前为止 [`World.Update`](/zh/docs/reference/world#update) 的调用次数，包括正在执行的这一次（第一次之前是 0）：只数默认分组的更新（[`World.Update`](/zh/docs/reference/world#update-2) 的运行由 [`World.UpdateCount`](/zh/docs/reference/world#updatecount) 计数）。默认分组里系统的 [[UpdateInterval]](/zh/docs/reference/updateintervalattribute) 就按这个计数算。O(1)。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 

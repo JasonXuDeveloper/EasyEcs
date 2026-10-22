@@ -52,7 +52,7 @@ The current change tick, stamped into tracked components' rows on every write ([
 public long DefaultUpdateCount { get; }
 ```
 
-Number of completed [`World.Update`](/en/docs/reference/world#update) calls: updates of the default group only ([`World.Update`](/en/docs/reference/world#update-2) runs are not counted).
+Number of [`World.Update`](/en/docs/reference/world#update) calls so far, the one running included (0 before the first): updates of the default group only ([`World.Update`](/en/docs/reference/world#update-2) runs are counted by [`World.UpdateCount`](/en/docs/reference/world#updatecount)). The count an [[UpdateInterval]](/en/docs/reference/updateintervalattribute) of the default group's systems is taken from. O(1).
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 

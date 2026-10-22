@@ -32,8 +32,12 @@
   <member name="P:EasyEcs.World.Systems" source="8ea3f54eaf95">
     <summary>所有分组的系统，每个分组内按执行顺序排列（默认分组在前）。零分配。</summary>
   </member>
-  <member name="P:EasyEcs.World.DefaultUpdateCount" source="adb32d5e83a5">
-    <summary>已经完成的 <see cref="M:EasyEcs.World.Update" /> 调用次数：只数默认分组的更新（<see cref="M:EasyEcs.World.Update``1" /> 的运行不计入）。</summary>
+  <member name="P:EasyEcs.World.DefaultUpdateCount" source="12cf30e45a28">
+    <summary>
+      到目前为止 <see cref="M:EasyEcs.World.Update" /> 的调用次数，包括正在执行的这一次（第一次之前是 0）：只数默认分组的更新
+      （<see cref="M:EasyEcs.World.Update``1" /> 的运行由 <see cref="M:EasyEcs.World.UpdateCount``1" /> 计数）。默认分组里系统的
+      <see cref="T:EasyEcs.UpdateIntervalAttribute">[UpdateInterval]</see> 就按这个计数算。O(1)。
+    </summary>
   </member>
   <member name="M:EasyEcs.World.AddSingleton``1" source="2795a958722a">
     <summary>

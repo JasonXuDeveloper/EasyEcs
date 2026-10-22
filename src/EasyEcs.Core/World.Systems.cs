@@ -14,7 +14,11 @@ public sealed partial class World
     // Group 0 is the default group (World.Update()); others are [UpdateInGroup<T>] groups (World.Update<T>()).
     private SystemSchedule[] _groups = [new()];
 
-    /// <summary>Number of completed <see cref="Update()"/> calls: updates of the default group only (<see cref="Update{TGroup}"/> runs are not counted).</summary>
+    /// <summary>
+    /// Number of <see cref="Update()"/> calls so far, the one running included (0 before the first): updates of the default
+    /// group only (<see cref="Update{TGroup}"/> runs are counted by <see cref="UpdateCount{TGroup}"/>). The count an
+    /// <see cref="UpdateIntervalAttribute">[UpdateInterval]</see> of the default group's systems is taken from. O(1).
+    /// </summary>
     public long DefaultUpdateCount => _groups[0].Updates;
 
     /// <summary>
