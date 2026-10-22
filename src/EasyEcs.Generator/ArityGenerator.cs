@@ -527,8 +527,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 // Rows without some component: runs of rows whose presence bits pass.
                                 for (int start = first; rows.NextRun(archetype, ref start, count, out int length); start += length)
                                 {
-                {{StampRows(n, "                    ", "start", "length")}}
-                                    job.Execute(new EntitySpan(this, archetype, start, ref Unsafe.Add(ref slots, start), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
+                {{BatchRun(n, "                    ", "start", "length")}}
                                 }
 
                                 continue;
@@ -536,16 +535,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                             if (archetype.Count == archetype.AliveCount)
                             {
-                                int rowCount = count - first;
-                {{StampRows(n, "                ", "first", "rowCount")}}
-                                job.Execute(new EntitySpan(this, archetype, first, ref Unsafe.Add(ref slots, first), rowCount), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, first), rowCount)")}});
+                {{BatchRun(n, "                ", "first", "count - first")}}
                                 continue;
                             }
 
                             for (int start = first; archetype.NextRun(ref start, count, out int length); start += length)
                             {
-                {{StampRows(n, "                ", "start", "length")}}
-                                job.Execute(new EntitySpan(this, archetype, start, ref Unsafe.Add(ref slots, start), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
+                {{BatchRun(n, "                ", "start", "length")}}
                             }
                         }
                     }
@@ -604,7 +600,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                     int at = Math.Max(w << 6, first);
                                     ulong range = RowFilter.RowMask(w, count) & (ulong.MaxValue << at); // shift is mod 64
                                     ulong bits = rows.Word(archetype, w) & range;
-                                    if (tombstones && bits != 0) bits &= RowFilter.AliveRows(archetype, w);
+                                    if (tombstones && bits != 0) bits &= AliveRows(ref Unsafe.Add(ref slots, w << 6), Math.Min(64, count - (w << 6)));
                                     if (bits == range)
                                     {
                                         if (end != at)
@@ -664,8 +660,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         {
                             for (int at = start; rows.NextRun(archetype, ref at, end, out int length); at += length)
                             {
-                {{StampRows(n, "                ", "at", "length")}}
-                                job.Execute(new EntitySpan(this, archetype, at, ref Unsafe.Add(ref slots, at), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, at), length)")}});
+                {{BatchRun(n, "                ", "at", "length")}}
                             }
 
                             return;
@@ -673,16 +668,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                         if (archetype.Count == archetype.AliveCount)
                         {
-                            int rowCount = end - start;
-                {{StampRows(n, "            ", "start", "rowCount")}}
-                            job.Execute(new EntitySpan(this, archetype, start, ref Unsafe.Add(ref slots, start), rowCount), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), rowCount)")}});
+                {{BatchRun(n, "            ", "start", "end - start")}}
                             return;
                         }
 
                         for (int at = start; archetype.NextRun(ref at, end, out int length); at += length)
                         {
-                {{StampRows(n, "            ", "at", "length")}}
-                            job.Execute(new EntitySpan(this, archetype, at, ref Unsafe.Add(ref slots, at), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, at), length)")}});
+                {{BatchRun(n, "            ", "at", "length")}}
                         }
                     }
 
@@ -881,15 +873,16 @@ public sealed class ArityGenerator : IIncrementalGenerator
     private static string StampRow(int n, string indent, string row) =>
         Lines(n, i => $"{indent}    if ((TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0) archetype.StampVisited<T{i}>({row}, _changeTick);");
 
-    /// <summary>Stamp a run of rows of every component the job writes.</summary>
     /// <summary>A run of <paramref name="length"/> rows from <paramref name="start"/>: stamped, then the job's batch Execute.</summary>
     private static string BatchRun(int n, string indent, string start, string length) =>
         StampRows(n, indent, start, $"({length})") + "\n" + indent
         + $"    job.Execute(new EntitySpan(this, archetype, {start}, ref Unsafe.Add(ref slots, {start}), {length}), {List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, {start}), {length})")});";
 
+    /// <summary>Stamp the rows <paramref name="rows"/> (bits) of word <paramref name="word"/> of every component the job writes.</summary>
     private static string StampWord(int n, string indent, string word, string rows) =>
         Lines(n, i => $"{indent}    if ((TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0) archetype.StampWord<T{i}>({word}, {rows}, _changeTick);");
 
+    /// <summary>Stamp a run of rows of every component the job writes.</summary>
     private static string StampRows(int n, string indent, string start, string count) =>
         Lines(n, i => $"{indent}    if ((TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0) archetype.StampRows<T{i}>({start}, {count}, _changeTick);");
 
