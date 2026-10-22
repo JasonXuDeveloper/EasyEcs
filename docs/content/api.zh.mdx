@@ -53,6 +53,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `Reduce<T>`、`IReduction<T>` | 结构体、接口 | `[ForEach]` 参数（按 `ref` 传入），把一次遍历归约到单例 `T`，`T` 实现 `IReduction<T>`（`Identity`、`Combine`）：`Value`、`Combine(value)`。 |
 | `Scratch<T>` | ref struct | `[ForEach]` 参数：方法在当前线程上的工作内存，在行、遍历和 World 之间保留：`Value`。 |
 | `Lookup<T>`、`LookupExtensions` | ref struct、静态类 | `[ForEach]` 参数，读取任意实体的组件 `T`，调度为对 `T` 的读：`this[id]`、`Read(id)`、`Has(id)`；带索引的 `T` 还可按键查找：`TryFind(key, out id)`、`Find(key)`、`Count(key)`。 |
+| `Lanes` | 静态类 | 批处理方法的流压缩：`Compact(source, mask, destination)` 把掩码选中的元素紧挨着写出。 |
 | `ISystemGroup`、`ISystemGroupWith<T>`、`ISystemGroupWithout<T>`、`[UpdateInGroup<T>]`、`[UpdateBefore<T>]`、`[UpdateAfter<T>]` | 接口、特性 | 系统分组（可通过接口加过滤条件）与排序。 |
 | `SystemErrorPolicy` | 枚举 | `Throw`（默认）或 `Disable`：系统抛异常时怎么办。 |
 | `SystemStats`、`SystemList` | readonly struct | 系统的运行次数、耗时、分配字节数和访问的实体数；`world.Systems`，零分配。 |
@@ -76,7 +77,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.CreateEntities(Span<Entity> entities, in T1 … in Tn)` | 均摊 O(count × n) | 整波只过一次闸门，表最多扩容一次；写回句柄 |
 | `entity.Destroy()` | O(c) | 表的最后一行补上空位（遍历期间变成墓碑）；回收 id；失效句柄直接忽略；从索引里摘掉；级联销毁 `ChildOf` 子实体并执行目标策略；开了 `WorldOptions.DestroyLogCapacity` 时多写一条 16 字节的记录 |
 | `world.DestroyAll<T1..Tn>(filter)` | O(M + S) | 一次过闸门销毁所有匹配并返回数量；遍历期间也安全 |
-| `world.CollectIds<T1..Tn>(into, filter)` | O(M)，再加 `into` 写满前读过的行 | 按查询顺序把匹配实体的 id 写进 span，写满为止，返回写了几个：一批有上限的工作，交给 `DestroyEntities`、`SaveEntities` 或结构变更；所有行都匹配的表一次拷贝；不分配 |
+| `world.CollectIds<T1..Tn>(into, filter)` | O(M)，再加 `into` 写满前读过的行 | 按查询顺序把匹配实体的 id 写进 span，写满为止，返回写了几个：一批有上限的工作，交给 `DestroyEntities`、`SaveEntities` 或结构变更；所有行都匹配的表一次拷贝，`into` 放得下一整个 64 行的字时一次 `Lanes.Compact`；不分配 |
 | `world.DestroyEntities(ids)` | O(ids × c) | 一次过闸门、一次级联销毁一组 id 并返回数量；失效的和重复的 id 会跳过；遍历期间也安全 |
 | `entity.IsAlive` / `world.IsAlive(id)` | O(1) | |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` | O(1) | 这个版本的实体不存活时返回 false（或抛异常） |
@@ -191,6 +192,12 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `lookup[id]` / `lookup.Read(id)` / `lookup.Has(id)` | O(1)：一次实体查找 | `ReadOnlyMaybe<T>`（失效或缺少时没有值）/ `ref readonly T`（抛出异常）/ `bool` |
 | `lookup.TryFind(key, out id)` / `Find(key)` / `Count(key)` | O(1) 哈希探测，`Find` 再加每个实体 O(1) | 仅带索引的 `T`，在参数上调用：索引在遍历之前、在系统所在的并行阶段之前创建并建好（第一次 O(N)） |
 | 并行阶段或并行遍历中以其他方式访问值索引 | 尚未构建时抛出 `InvalidOperationException` | 构建会在其他线程读取时修改它 |
+
+`Lanes`，用于以向量比较选行的批处理方法：
+
+| API | 复杂度 | 说明 |
+| --- | --- | --- |
+| `Lanes.Compact<T>(source, mask, destination)` | O(1)：最多 64 个元素；有 AVX-512 时，8 字节或 4 字节的元素为 8 步或 4 步向量操作；否则每个选中元素一步，选中超过 12 个时每个元素一步，直到最后一个选中的元素 | 对 `mask` 的每个置位 `i`，按顺序把 `source[i]` 写到 `destination` 开头，返回 `PopCount(mask)`；只读选中的元素，只写这么多个；某一位落在 `source.Length` 或之后、或 `destination` 短于 `PopCount(mask)` 时抛出 `ArgumentException`；不分配 |
 
 ## 禁用与批量修改 [#bulk]
 

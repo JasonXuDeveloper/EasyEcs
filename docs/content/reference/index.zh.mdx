@@ -19,6 +19,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`EcsSystem`](/zh/docs/reference/ecssystem) | 在 World 上运行的逻辑。 |
 | [`ForEachAttribute`](/zh/docs/reference/foreachattribute) | 对每个匹配组件参数（以及 WithAttribute / WithoutAttribute / WithAnyAttribute 过滤条件）的实体，执行 EcsSystem 的一个方法（或者通过生成的入口点，执行任何其他类型的静态方法）。 |
 | [`GroupInfo`](/zh/docs/reference/groupinfo) | 一个分组的系统，按阶段排列（ScheduleInfo）。 |
+| [`Lanes`](/zh/docs/reference/lanes) | 批处理方法的流压缩，在 CPU 上做 GPU 的 ballot 和压缩：一次向量比较得出通道掩码（Vector256.LessThan(hp, limit).ExtractMostSignificantBits()：CUDA 的 __ballot_sync；它的 __popc 是 PopCount），Lanes.Compact 把选中的元素紧挨着写出：批处理方法选中的行的 id（entities.Ids）、它们的值、它们的下标。 |
 | [`LookupExtensions`](/zh/docs/reference/lookupextensions) | 通过 Lookup 按键查找带索引的组件（IIndexed）。 |
 | [`OrderedIndexExtensions`](/zh/docs/reference/orderedindexextensions) | 键可比较（分数、截止时间、等级）的值索引的有序遍历：按区间或按顺序遍历，用于排行榜、计时器和匹配分段。 |
 | [`Prefab`](/zh/docs/reference/prefab) | 实体的配方：一组不属于任何 World 的组件值，所以任何查询都看不到它。 |

@@ -38,6 +38,7 @@
     "isystemgroupwithout",
     "itracked",
     "iuniqueindexed",
+    "lanes",
     "lookup",
     "lookupextensions",
     "maybe",

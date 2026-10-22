@@ -1,0 +1,23 @@
+<doc>
+  <member name="T:EasyEcs.Lanes" source="94a24f3a96a8">
+    <summary>
+      批处理方法的流压缩，在 CPU 上做 GPU 的 ballot 和压缩：一次向量比较得出通道掩码
+      （<c>Vector256.LessThan(hp, limit).ExtractMostSignificantBits()</c>：CUDA 的 <c>__ballot_sync</c>；它的
+      <c>__popc</c> 是 <see cref="M:System.Numerics.BitOperations.PopCount(System.UInt64)" />），<see cref="M:EasyEcs.Lanes.Compact``1(System.ReadOnlySpan{``0},System.UInt64,System.Span{``0})" />
+      把选中的元素紧挨着写出：批处理方法选中的行的 id（<c>entities.Ids</c>）、它们的值、它们的下标。有 AVX-512 时，4 字节或 8 字节的通道一次移动
+      16 个或 8 个（<c>VPCOMPRESSD</c> / <c>VPCOMPRESSQ</c>）；否则，以及其他大小的元素，一次一个，每个元素没有分支。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Lanes.Compact``1(System.ReadOnlySpan{``0},System.UInt64,System.Span{``0})" source="29595bf34163">
+    <summary>
+      把 <paramref name="source" /> 中在 <paramref name="mask" /> 里置位的元素（第 <c>i</c> 位选中 <c>source[i]</c>，所以最多 64 个）
+      按顺序写到 <paramref name="destination" /> 开头，返回写了几个：<c>PopCount(mask)</c>。只读选中的元素，只写这么多个。有 AVX-512 时
+      4 字节或 8 字节的元素为 O(64 / 每个向量的通道数)，否则 O(选中数)；不分配。
+    </summary>
+    <param name="source">从中挑选的元素：批处理方法某个 span 或它的 <c>EntitySpan.Ids</c> 的一段。</param>
+    <param name="mask">选中的元素；<c>source.Length</c> 及之后的位不能置位。</param>
+    <param name="destination">选中元素写入的位置；长度至少 <c>PopCount(mask)</c>。</param>
+    <returns>写入的元素个数。</returns>
+    <exception cref="T:System.ArgumentException"><paramref name="mask" /> 的某一位没有对应 <paramref name="source" /> 的元素，或 <paramref name="destination" /> 太短。</exception>
+  </member>
+</doc>
