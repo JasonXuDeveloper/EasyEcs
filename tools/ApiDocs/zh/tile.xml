@@ -1,0 +1,46 @@
+<doc>
+  <member name="T:EasyEcs.Tile`2" source="94ccd3c0e525">
+    <summary>
+      一个分块（由 <typeparamref name="TTile" /> 变成分块的实体，<see cref="T:EasyEcs.ITile`1" />）的格子，连同邻居的格子：
+      一个 <c>[ForEach]</c> 参数，就像 CUDA 线程块的分块和 halo。<c>static void Diffuse(Tile&lt;Heat,
+      Plate&gt; heat, Mut&lt;DynamicBuffer&lt;NextHeat&gt;&gt; next)</c>：生成的 job 按键找到邻居（每个实体找一次，同一网格的所有分块共用），
+      <see cref="M:EasyEcs.Tile`2.Load(System.Int32,System.Int32,`0,System.Boolean)" /> 把模板要计算的层拷进一个带边的分块
+      （<see cref="T:EasyEcs.PaddedTile`2" />）：中间是实体自己的格子，外面一圈来自邻居朝向这边的行、列或层，没有邻居的地方是填充值，
+      所以模板代码没有边界情况。
+      <para>
+      约定：系统被调度为 <c>DynamicBuffer&lt;TCell&gt;</c> 和 <typeparamref name="TTile" /> 的读者（并在遍历之前建好它的索引），
+      所以每个邻居读到的都是遍历之前的值，方法可以并行运行；写其中任何一个的方法不能接收这个分块（EECS059）。
+      把这一步的结果写进另一个组件，再由另一个系统提交（双缓冲）。
+      </para>
+      只在传入它的那次调用内有效（ref struct）。
+    </summary>
+    <typeparam name="TCell">格子：实体的 <c>DynamicBuffer&lt;TCell&gt;</c> 的元素。</typeparam>
+    <typeparam name="TTile">把实体放进网格的组件，带着分块的形状。</typeparam>
+  </member>
+  <member name="P:EasyEcs.Tile`2.Cells" source="1e148366e590">
+    <summary>分块自己的格子，布局见 <see cref="T:EasyEcs.ITileShape" />。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.Tile`2.Beside(EasyEcs.TileFaces)" source="adb250563a46">
+    <summary>
+      <paramref name="face" />（一个面）对面的邻居；网格在那里没有分块，或 <typeparamref name="TTile" /> 在这个面上没有声明邻居时为默认值：
+      它的其他组件通过 <see cref="T:EasyEcs.Lookup`1" /> 读。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Tile`2.Load" source="bbd224585ada">
+    <summary>带边拷入所有层，缺失邻居的那一圈为零：见 <see cref="M:EasyEcs.Tile`2.Load(System.Int32,System.Int32,`0,System.Boolean)" />。</summary>
+  </member>
+  <member name="M:EasyEcs.Tile`2.Load(System.Int32,System.Int32,`0,System.Boolean)" source="c39b11df3009">
+    <summary>
+      把第 <paramref name="from" /> 到第 <paramref name="to" /> 层带边拷进这个线程的纹理：每层的格子在中间，每层外面一圈一个格子
+      （西、东邻居朝向这边的那一列，北、南邻居朝向这边的那一行，四个角是 <paramref name="fill" />）；分块不止一层时，
+      <paramref name="from" /> 下面和 <paramref name="to" /> 上面各多一层（分块自己的，或下方、上方邻居朝向这边的那一层，它的外圈是
+      <paramref name="fill" />）。没有邻居、或邻居的缓冲为空的面是 <paramref name="fill" />。传入 <paramref name="mask" /> 时，
+      记录哪些行有不为零的格子（按位），供 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileReads)" /> 使用。
+      <para>
+      O(层数 × (Width + 2) × (Depth + 2))；线程有了纹理之后零分配（纹理在线程第一次加载时按全部层分配）。纹理属于线程和这个分块类型：
+      线程下一次加载 <typeparamref name="TCell" /> 和 <typeparamref name="TTile" /> 时会覆盖它，所以一个方法对每种格子和网格只接收一个分块。
+      实体的缓冲、或某个非空邻居的缓冲比形状的格子少，或层不满足 0 ≤ from ≤ to &lt; Height 时抛出异常。
+      </para>
+    </summary>
+  </member>
+</doc>

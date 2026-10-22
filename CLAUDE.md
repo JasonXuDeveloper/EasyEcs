@@ -48,6 +48,9 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   Scratch.cs                   Scratch<T>: per-thread working memory of a [ForEach] method, never shared, never reset
   Lookup.cs                    Lookup<T> + LookupExtensions: read-only lookups of any entity (and index keys) from a
                                [ForEach] method, parallel ones included; the system reads T, so no writer shares its stage
+  Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape and a key), Tile<TCell, TTile> (a [ForEach]
+                               parameter: the neighbours found by generated code), Load into a [ThreadStatic] texture
+                               padded with the halo and a row mask, PaddedTile.Rows (TZCNT walk), TileCursor.Load128
   Interleaved.cs               the deinterleaving loads / interleaving stores of generated vector loops over components
                                of 2 to 4 fields of one lane type
   SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
@@ -177,7 +180,7 @@ src/EasyEcs.CodeFixes/         EasyEcsCodeFixes.cs: fixes for the analyzer's dia
 tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, Presence, Query, System (and stats),
                                ForEachSystem (and Slices), Singleton, Concurrency, Parallel, Runner, Run (entity.Run),
                                Changed (and Mut, ChangedAny), Removed (and the destroy log), Instantiate, DynamicBuffer,
-                               Index (and unique keys), OrderedIndex, Relation, Hierarchy, TargetPolicy, Group, Cleanup,
+                               Index (and unique keys), Tile, OrderedIndex, Relation, Hierarchy, TargetPolicy, Group, Cleanup,
                                Disable, Bulk, Move, Snapshot, Serialization (and restart saves), Unload, Introspection
                                (and Trim, DescribeSchedule), Generic, Allocation (0 B budget),
                                Generator (diagnostics + caching), CodeFix, BattleServer (the world of

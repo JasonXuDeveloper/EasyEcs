@@ -34,7 +34,7 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
 
 ### 给网格邻居推送光环 [#push-halo]
 
-按区块划分的网格模拟（[体素服务器](/zh/docs/samples/voxel-server#water)里的水）每一步都要为每个流动的区块收集邻居的边。计划中的设计反过来：
+按区块划分的网格模拟（[体素服务器](/zh/docs/samples/voxel-server#water)里的水）每一步都要把每个流动区块的邻居的边载入它的瓦片（`Tile<TCell, TTile>.Load`）。计划中的设计反过来：
 区块的边变了时推进邻居的光环，这样一步只读自己的组件，邻居都静止的区块也没有东西要拷（[D73](/zh/docs/decisions#d73-survey-items-not-added)）。
 
 ## 已放弃 [#dropped]
@@ -70,6 +70,7 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
 - World 校验和：对 `world.Save` 的输出做哈希，用户代码里就能做，不必给所有人定死一种算法（[D51](/zh/docs/decisions#d51-not-added)）。
 - 唯一索引旁边的区块网格、只在变化时才写 `InChunk`、按位字拷贝存在位、只拷贝变化过的边的光环：测过，没有净收益，或者被 `IDirectIndexed<TKey>`
   和推送光环的设计取代（[D73](/zh/docs/decisions#d73-survey-items-not-added)）。
+- 网格瓦片的生成式逐格内核：字节运算会提升成 `int`，模板又按行归约；瓦片负责加载光环，规则留在方法里（[D76](/zh/docs/decisions#d76-tiles)）。
 - 部分快照 API：用一个系统把需要的值拷进单例里的环形缓冲（延迟补偿的写法），只拷需要的东西
   （[D51](/zh/docs/decisions#d51-not-added)）。
 

@@ -69,6 +69,12 @@ major or minor version that needs code changes? The
   (`lookup[id]`, `Read`, `Has`; `TryFind`, `Find`, `Count` by key for an indexed `T`), in parallel methods too. The
   system is a reader of `T`; rule [EECS059](/en/docs/guide/analyzer#eecs059) rejects a method that also writes `T`.
   See [lookups](/en/docs/guide/threading#lookups) and the [decision](/en/docs/decisions#d75-lookup).
+- `Tile<TCell, TTile>`, a `[ForEach]` parameter over a grid cut into tiles: `TTile` implements `ITile<TKey>` (its
+  shape, its key, the key beside it across a face) and the entity holds a `DynamicBuffer<TCell>`. The generator finds
+  the neighbours, declares the reads and keeps the method parallel; `Load` pads the tile with its neighbours' edges
+  into a texture of the thread, `Rows` walks the rows a stencil can change and `At(row).Load128` samples the cells
+  around. Rule [EECS059](/en/docs/guide/analyzer#eecs059) also rejects a tile beside a write of its cell buffer. See
+  [shade a grid](/en/docs/guide/high-performance#grid) and the [decision](/en/docs/decisions#d76-tiles).
 - `world.ForEachBatchParallel<T1..Tn, TJob>(ref job, filter, chunkRows)`: an `IForEachBatch` job over the runs of
   rows of each chunk, on several threads. See
   [queries](/en/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel).

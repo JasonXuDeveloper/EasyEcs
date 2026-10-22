@@ -31,7 +31,7 @@ import { Boxes, FlaskConical, Network, Save } from 'lucide-react';
   在遍历之后存下一组实体再读回（[区块的一生](#chunks)）。
 - **不轮询的视野管理**：四个系统响应四种变化；谁看得见一个区块通过索引数出来，被销毁的实体在哪里被看见，由一个
   [清理组件](/zh/docs/guide/cleanup-and-disable)留到它的消失包发出为止（[视野](#aoi)）。
-- **水按 GPU 的方式分趟算**：收集、一个只读自己这一行的并行 SIMD 着色器、提交；模板跳过干的行，缓冲不清零（[水](#water)）。
+- **水按 GPU 的方式分趟算**：一个在网格瓦片上自己加载光环的并行 SIMD 着色器，然后提交；模板跳过干的行，缓冲不清零（[水](#water)）。
 - **数据是网格或一列时用 SIMD**：水、高度图，以及[批量方法](/zh/docs/guide/systems#batch-methods)里的火焰伤害（[SIMD](#simd)）。
 - **时间和状态都是数据**：冷却、着火、掉落物的存在时间都是它们结束的 tick；挖掘、死亡、重生都是组件和实体（[掉落物](#items)、[僵尸](#zombies)）。
 - **自动排好序的排行榜**：按挖掘数索引玩家的[有序索引](/zh/docs/guide/indexes-and-relations#ordered-index)（[排行榜](#leaderboard)）。
@@ -107,7 +107,7 @@ flowchart LR
 
 组件按世界的各个部分分文件。注释说明每个值的含义和谁来写。区块是实体：它的键 `Chunk` 是
 [直接映射](/zh/docs/guide/indexes-and-relations#direct-index)的唯一键（`world.ChunkIndex`，区块的槽位是它的坐标对 64 取模，查找只读一个数组元素），8,192 个方块和对应的水是两个字节缓冲，
-水的各趟把自己的数据也放在它上面（`Border`、`Reach`、`NextFluid`、`FluidStep`）。
+水的各趟把自己的数据也放在它上面（`NextFluid`、`FluidStep`）；`Chunk` 也是网格的瓦片形状（`ITile<ChunkPos>`）。
 
 <include lang="csharp" meta='tab="区块"'>../../../samples/VoxelServer/Components/Chunks.cs</include>
 
@@ -210,16 +210,15 @@ stateDiagram-v2
 水位比它低一级；其余的都变空，所以泉眼没了水就会退。
 
 它像 GPU 画图一样分趟运行（见[思路来自哪里](#ideas)），而且只在打了 `Flowing` 标签、水还可能动的区块上跑：静止的湖在被唤醒之前不会再被访问。
-每一趟是一个单独的系统、一个单独的文件（`Systems/Water/`），只做一件事：它们靠数据交接（`Border`、`NextFluid`、`FluidStep` 和
+每一趟是一个单独的系统、一个单独的文件（`Systems/Water/`），只做一件事：它们靠数据交接（`NextFluid`、`FluidStep` 和
 `Flowing` 标签），从不互相调用。
 
 ```mermaid
 flowchart LR
-  wake[WaterWakeSystem：方块变了，Flowing] --> border[WaterBorderSystem：收集四周的边，Reach]
-  border --> flow[WaterFlowSystem：着色器，并行，写入 NextFluid]
+  wake[WaterWakeSystem：方块变了，Flowing] --> flow[WaterFlowSystem：瓦片和光环，着色器，并行，写入 NextFluid]
   flow --> sleep[WaterSleepSystem：什么都没动，休眠]
   flow --> commit[WaterCommitSystem：NextFluid 写回 Fluid，唤醒边上的区块]
-  commit -.-> border
+  commit -.-> flow
 ```
 
 **唤醒。** 方块一变，不管是谁改的，都会从方块缓冲的变化看到（`[Changed<DynamicBuffer<Block>>]`），所以挖掘本身不用知道水，也不用知道天空。
@@ -230,22 +229,23 @@ flowchart LR
 
 <include lang="csharp" meta='tab="Water/Wake.cs"'>../../../samples/VoxelServer/Systems/Water/Wake.cs</include>
 
-**各趟。** `WaterBorderSystem` 从四周的区块收集这一步需要的东西：每个邻居朝向这边的那条边写进区块的 `Border` 缓冲，以及要算的层
-（`Reach`，由各区块的 `FluidCount` 得出，不用搜索）。然后 `WaterFlowSystem` 就是着色器：它把区块的各层和边复制进栈上一张带填充的纹理，
-每层外面多一圈一格宽的方块，所以循环采样邻居没有边界情况；每行 16 个方块用一个 `Vector128<byte>` 算。它只读自己这一行的组件，
-不持有 `World`，所以是[并行方法](/zh/docs/guide/systems#parallel-methods)。同时流动的区块只有几百个，每个要花几微秒，远少于写被追踪组件
-的遍历默认每块的 4,096 行，所以它设了 `ChunkRows = 64`，线程每次领 64 个区块（[块大小](/zh/docs/guide/threading#chunk-rows)）。
-字节通道是整数运算：每台机器上的水都一样。
+**各趟。** `WaterFlowSystem` 就是着色器。`Chunk` 是网格的一块[瓦片](/zh/docs/guide/high-performance#grid)
+（`ITile<ChunkPos>`：16 x 16 x 32 个格子，邻居是旁边的区块），所以方法以 `Tile<Fluid, Chunk>` 和 `Tile<Block, Chunk>` 接收区块的水和方块，
+生成器每个区块找一次四个邻居。要算的层来自这个区块和邻居的 `FluidCount`（通过 `Beside` 和 `Lookup<FluidCount>`，不用搜索）；
+`Load(from, to)` 把这些层填进这个线程的一张纹理，每层外面一圈一格宽的方块取自每个邻居朝向这边的那一行或一列，下面和上面各多一层，
+就像 CUDA 的线程块把它的瓦片和光环载入共享内存。循环采样邻居没有边界情况；每行 16 个方块用一个 `Vector128<byte>` 算。
+它读到的邻居都是这一遍之前的样子，只写 `NextFluid`，所以是[并行方法](/zh/docs/guide/systems#parallel-methods)。同时流动的区块只有几百个，
+每个要花几微秒，远少于写被追踪组件的遍历默认每块的 4,096 行，所以它设了 `ChunkRows = 64`，线程每次领 64 个区块
+（[块大小](/zh/docs/guide/threading#chunk-rows)）。字节通道是整数运算：每台机器上的水都一样。
 
-不必清零的都不清零。模板跳过自己、上面和旁边都没有水的行，直接写零。纹理是 `[SkipLocalsInit]` 下的 `stackalloc`：填充会写满循环要采样的每个纹素。
+不必清零的都不清零。模板（`Rows(TileReads.Layer | TileReads.Above)`）只访问自己、旁边或上面有水的行，其余的行不写：每次提交后这一步的缓冲
+就等于水，所以干的行在里面本来就是零。纹理每个线程只分配一次，加载会写满循环要采样的每个纹素。
 `NextFluid` 在两步之间保留它的长度，所以 `SetCount` 既不分配也不清零；这一步不算的层本来就是零：之前的各步只在这一步的范围覆盖的层上写过水。
 
-这一步的结果是数据 `FluidStep`：`WaterSleepSystem` 把水什么都没动的区块移出各趟，用 `TrimExcess` 把它们的临时缓冲（`NextFluid`、`Border`）
+这一步的结果是数据 `FluidStep`：`WaterSleepSystem` 把水什么都没动的区块移出各趟，用 `TrimExcess` 把它们的临时缓冲（`NextFluid`）
 还给缓冲池，所以只有还在流动的区块持有它们；它在提交之前运行，所以同一步里刚静下来的区块，仍会被水流到它这里的邻居唤醒。
 `WaterCommitSystem` 等所有区块都走完这一步，再把结果拷成水（每个区块都用邻居这一步之前的水来算，与区块的访问顺序无关），
 更新 `FluidCount`，并唤醒变化的边旁边的区块。
-
-<include lang="csharp" meta='tab="Water/Border.cs"'>../../../samples/VoxelServer/Systems/Water/Border.cs</include>
 
 <include lang="csharp" meta='tab="Water/Flow.cs"'>../../../samples/VoxelServer/Systems/Water/Flow.cs</include>
 
@@ -254,7 +254,7 @@ flowchart LR
 <include lang="csharp" meta='tab="Water/Commit.cs"'>../../../samples/VoxelServer/Systems/Water/Commit.cs</include>
 
 {/* TODO(water overlap): 计划中的推送光环（区块的边变了时推给邻居，而不是每个流动的区块每一步都去收集）和 MPI 式的内部/外圈重叠写在这里，
-连同 Border / Flow 的改动；再更新 guide/high-performance#grid。只拷贝变化过的边测过、已放弃（decisions#d73-survey-items-not-added）。 */}
+连同 Flow 的改动；再更新 guide/high-performance#grid。只拷贝变化过的边测过、已放弃（decisions#d73-survey-items-not-added）。 */}
 
 `FloatSystem` 把站在水里的东西（玩家、僵尸和掉落物）托起来，顺着水面的坡度推向周围更低的水，水位越低推得越弱：泉眼旁边或下落的水里是全力，
 水流末端只有八分之一。它遍历区块，按 `FluidCount` 跳过干的区块，其余的通过按区块索引的实体找到其中的物体，所以物体所在方块的水

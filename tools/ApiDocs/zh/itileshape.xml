@@ -1,0 +1,26 @@
+<doc>
+  <member name="T:EasyEcs.ITileShape" source="c2cf125c4a01">
+    <summary>
+      分块的形状，写在让实体成为网格分块的组件上（<see cref="T:EasyEcs.ITile`1" />）：实体的格子共
+      <see cref="P:EasyEcs.ITileShape.Width" /> × <see cref="P:EasyEcs.ITileShape.Depth" /> × <see cref="P:EasyEcs.ITileShape.Height" /> 个，
+      存在它的 <c>DynamicBuffer&lt;TCell&gt;</c> 里：每行 <see cref="P:EasyEcs.ITileShape.Width" /> 个（x），每层
+      <see cref="P:EasyEcs.ITileShape.Depth" /> 行（z），共 <see cref="P:EasyEcs.ITileShape.Height" /> 层（y）：格子 (x, y, z) 在
+      <c>(y * Depth + z) * Width + x</c>。都是静态成员，JIT 读一次：分块的代码按它的形状编译。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.ITileShape.Width" source="9ebf8da52997">
+    <summary>每行的格子数（x），至少 1。</summary>
+  </member>
+  <member name="P:EasyEcs.ITileShape.Depth" source="a4a47a34cf10">
+    <summary>每层的行数（z），1 到 64（一层的活跃行是一个 64 位字）。</summary>
+  </member>
+  <member name="P:EasyEcs.ITileShape.Height" source="cbc858cdd86b">
+    <summary>层数（y），至少 1：1（默认）是 2D 分块，它上下没有层。</summary>
+  </member>
+  <member name="P:EasyEcs.ITileShape.Faces" source="182d960008a7">
+    <summary>
+      有邻居的面（默认 <see cref="F:EasyEcs.TileFaces.Sides" />）；其他面的那一圈是填充值。
+      <see cref="F:EasyEcs.TileFaces.Below" /> 和 <see cref="F:EasyEcs.TileFaces.Above" /> 只对不止一层的分块有效。
+    </summary>
+  </member>
+</doc>

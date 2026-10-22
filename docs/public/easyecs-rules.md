@@ -105,6 +105,11 @@ available as Markdown: add `.md` to its URL.
   Read other entities through a `Lookup<T>` parameter (`lookup[id]`, `Read`, `Has`, `TryFind` by key), never a
   `World` parameter in parallel code (EECS010); it sees the values from before the pass, and the same method may not
   write `T` (EECS059): write another component and copy it back later.
+  A grid of cells updated from its neighbours is tiles: a component implementing `ITile<TKey>` (static `Width`,
+  `Depth`, optional `Height` / `Faces`, a `Key`, `Beside(key, face)`) beside a `DynamicBuffer<TCell>`, shaded by a
+  `[ForEach]` method with a `Tile<TCell, TTile>` parameter: `var p = tile.Load(); foreach (var row in
+  p.Rows(TileReads.Layer)) { var c = p.At(row); ... c.Load128<T>(dx, dy, dz) ... }`, writing a second buffer that a
+  later system commits (never the tile's own buffer, EECS059); never fetch neighbour buffers by hand.
 - Hot per-row arithmetic over numbers: a static, non-parallel `[ForEach]` method over components of 1 to 4 fields of
   one primitive type (no `Entity`, `World`, `Mut<T>` or `Maybe<T>` parameter) gets a generated `Vector<T>` loop; write
   the fields (`p.X += v.X`), not a new whole component, and do not mix `float` and `int`. EECS055 (a suggestion) names

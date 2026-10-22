@@ -48,6 +48,10 @@ icon: RotateCcwClock
 - `Lookup<T>`：`[ForEach]` 参数，读取任意实体在这一遍之前的组件 `T`（`lookup[id]`、`Read`、`Has`；带索引的 `T` 按键 `TryFind`、`Find`、`Count`），
   并行方法也能用。系统算作读 `T`；规则 [EECS059](/zh/docs/guide/analyzer#eecs059) 拒绝自己也写 `T` 的方法。见[查找](/zh/docs/guide/threading#lookups)
   和[决策](/zh/docs/decisions#d75-lookup)。
+- `Tile<TCell, TTile>`：切成瓦片的网格上的 `[ForEach]` 参数：`TTile` 实现 `ITile<TKey>`（形状、键、某个面旁边的键），实体持有
+  `DynamicBuffer<TCell>`。生成器找邻居、声明读取并让方法保持并行；`Load` 把瓦片连同邻居的边填进线程的纹理，`Rows` 走模板可能改变的行，
+  `At(row).Load128` 采样周围的格子。规则 [EECS059](/zh/docs/guide/analyzer#eecs059) 也拒绝旁边写它格子缓冲的瓦片。见
+  [给网格着色](/zh/docs/guide/high-performance#grid)和[决策](/zh/docs/decisions#d76-tiles)。
 - `world.ForEachBatchParallel<T1..Tn, TJob>(ref job, filter, chunkRows)`：在多个线程上按每块里连续的行段运行 `IForEachBatch` job。见
   [查询](/zh/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel)。
 - 分析器规则 [EECS060](/zh/docs/guide/analyzer#eecs060)（警告）：并行 `[ForEach]` 方法或 `ForEachParallel` 运行的 job 的 `Execute` 写了所有线程

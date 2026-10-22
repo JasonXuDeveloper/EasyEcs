@@ -57,6 +57,8 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `Scratch<T>` | ref struct | A `[ForEach]` parameter: working memory of the method on the running thread, kept between rows, passes and worlds: `Value`. |
 | `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out id)`, `Find(key)`, `Count(key)`. |
 | `Lanes` | static class | Stream compaction for batch methods: `Compact(source, mask, destination)` writes the elements a lane mask selects side by side. |
+| `Tile<TCell, TTile>`, `ITile<TKey>`, `ITileShape`, `TileFaces` | ref struct, interfaces, enum | A `[ForEach]` parameter: the entity's `DynamicBuffer<TCell>` with its neighbours' in the grid of `TTile` (an indexed component with a static shape and the key of each neighbour), scheduled as a read of both: `Load(from, to, fill, mask)`, `Beside(face)`, `Cells`. |
+| `PaddedTile<TCell, TTile>`, `TileRows<TTile>`, `TileRow<TTile>`, `TileCursor<TCell, TTile>`, `TileReads` | ref structs, struct, enum | The layers a stencil samples, padded with a halo of one cell: `Rows(reads)` walks the active rows, `At(row)` samples around one (`Load128`, `Load256`, `LoadVector`, `this[dx, dy, dz]`), `this[x, y, z]`. |
 | `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interfaces, attributes | System groups (with filters through interfaces) and ordering. |
 | `SystemErrorPolicy` | enum | `Throw` (default) or `Disable`: what an exception in a system does. |
 | `SystemStats`, `SystemList` | readonly structs | A system's run count, times, allocated bytes and visited entities; `world.Systems`, allocation-free. |
@@ -204,6 +206,18 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | API | Complexity | Notes |
 | --- | --- | --- |
 | `Lanes.Compact<T>(source, mask, destination)` | O(1): at most 64 elements; with AVX-512, 8 or 4 vector steps for elements of 8 or 4 bytes; otherwise one step per selected element, or per element up to the last selected one when more than 12 are | writes `source[i]` for each set bit `i` of `mask`, in order, to the start of `destination` and returns `PopCount(mask)`; reads only the selected elements and writes only that many; throws `ArgumentException` when a bit lies at or past `source.Length` or `destination` is shorter than `PopCount(mask)`; allocation-free |
+
+`Tile<TCell, TTile>`, the `[ForEach]` parameter of a stencil over a grid of tiles, and the padded layers it loads:
+
+| API | Complexity | Notes |
+| --- | --- | --- |
+| each entity of the pass | O(faces) hash probes | the generated job finds the neighbours by key once, for every tile of that grid the method takes; the grid's index is built before the pass |
+| `tile.Load(from, to, fill, mask)` / `tile.Load()` | O(layers × (Width + 2) × (Depth + 2)), each row one or two vector copies | the layers into this thread's texture with a ring of one cell and a layer under and over them (`fill` where there is no neighbour); with `mask`, a word of active rows per layer; allocation-free once the thread has its texture; throws for layers outside `0..Height - 1` or a buffer shorter than the shape |
+| `tile.Beside(face)` / `tile.Cells` | O(1) | the neighbour's id (default when none) / the entity's cells |
+| `padded.Rows(reads)` | O(1) per layer and per row visited: a trailing-zero count | the rows whose stencil (`TileReads`) holds a cell that is not zero, layer by layer; throws when loaded without `mask` |
+| `padded.At(row)` | O(1) | the row's first cell; checks the row is inside |
+| `cursor.Load128<TLane>(dx, dy, dz)` / `Load256` / `LoadVector` / `cursor[dx, dy, dz]` | O(1): one unaligned load | offsets within one cell, row and layer of the row; checked once, folded away when constant |
+| `padded[x, y, z]` | O(1) | any texel of the texture, checked |
 
 ## Disable and bulk changes [#bulk]
 

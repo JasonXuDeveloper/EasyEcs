@@ -37,8 +37,8 @@ Each technique below has its own section, with the code that uses it.
 - **Areas of interest without polling**: four systems react to four changes; who sees a chunk is counted through an
   index, and a [cleanup component](/en/docs/guide/cleanup-and-disable) keeps where a destroyed entity was seen until
   its despawn is sent ([areas of interest](#aoi)).
-- **Water as GPU passes**: a gather, a parallel SIMD shader that reads only its own row, a commit, with a stencil that
-  skips dry rows and buffers that are not cleared ([water](#water)).
+- **Water as GPU passes**: a parallel SIMD shader over a tile of the grid that loads its own halo, then a commit, with a
+  stencil that skips dry rows and buffers that are not cleared ([water](#water)).
 - **SIMD where the data is a grid or a column**: the water, the height map, fire damage in a
   [batch method](/en/docs/guide/systems#batch-methods) ([SIMD](#simd)).
 - **Time and state are data**: cooldowns, fires and an item's age are the tick they end; digging, death and respawn
@@ -129,8 +129,8 @@ two systems.
 The components, one file per part of the world. Comments say what each value means and who writes it. A chunk is an
 entity: its `Chunk` key is a [direct-indexed](/en/docs/guide/indexes-and-relations#direct-index) unique key
 (`world.ChunkIndex`, a chunk's slot its position modulo 64, so a lookup reads one array entry),
-its 8,192 blocks and their water two byte buffers, and the water passes keep their own data on it (`Border`,
-`Reach`, `NextFluid`, `FluidStep`).
+its 8,192 blocks and their water two byte buffers, and the water passes keep their own data on it (`NextFluid`,
+`FluidStep`); `Chunk` is also the grid's tile shape (`ITile<ChunkPos>`).
 
 <include lang="csharp" meta='tab="Chunks"'>../../../samples/VoxelServer/Components/Chunks.cs</include>
 
@@ -250,16 +250,15 @@ spring goes.
 
 It runs in passes, as a GPU draws ([where the ideas come from](#ideas)), and only on the chunks tagged `Flowing`, the
 ones whose water may still move: a settled lake is not visited again until something wakes it. Each pass is its own
-system in its own file (`Systems/Water/`), with one job: they hand each other data (`Border`, `NextFluid`, `FluidStep`,
+system in its own file (`Systems/Water/`), with one job: they hand each other data (`NextFluid`, `FluidStep`,
 the `Flowing` tag) and never call one another.
 
 ```mermaid
 flowchart LR
-  wake[WaterWakeSystem: blocks changed, Flowing] --> border[WaterBorderSystem: gather the edges around, Reach]
-  border --> flow[WaterFlowSystem: the shader, in parallel, into NextFluid]
+  wake[WaterWakeSystem: blocks changed, Flowing] --> flow[WaterFlowSystem: the tile and its halo, the shader, in parallel, into NextFluid]
   flow --> sleep[WaterSleepSystem: moved nothing, sleep]
   flow --> commit[WaterCommitSystem: NextFluid into Fluid, wake the edges]
-  commit -.-> border
+  commit -.-> flow
 ```
 
 **Waking.** A block change, whatever made it, is seen through the change of the block buffer
@@ -272,29 +271,32 @@ branch; `WaterWakeSystem` tags the chunk and its four neighbours `Flowing`.
 
 <include lang="csharp" meta='tab="Water/Wake.cs"'>../../../samples/VoxelServer/Systems/Water/Wake.cs</include>
 
-**The passes.** `WaterBorderSystem` gathers what the step needs from the chunks around: the facing edge of each
-neighbour into the chunk's `Border` buffer, and the layers to shade (`Reach`, from the chunks' `FluidCount`, no
-search). Then `WaterFlowSystem` is the shader: it copies the chunk's layers and its border into a padded texture on
-the stack, a ring of one block around each layer, so the loop samples neighbours with no edge case, and computes each
-row of 16 blocks in one `Vector128<byte>`. It reads nothing but its own row's components and holds no `World`, so it
-is a [parallel method](/en/docs/guide/systems#parallel-methods). A few hundred chunks flow at a time, each one costing
+**The passes.** `WaterFlowSystem` is the shader. `Chunk` is a [tile](/en/docs/guide/high-performance#grid) of the
+grid (`ITile<ChunkPos>`: 16 x 16 x 32 cells, its neighbours the chunks beside it), so the method takes the chunk's water
+and blocks as `Tile<Fluid, Chunk>` and `Tile<Block, Chunk>`, and the generator finds the four neighbours once per chunk.
+The layers to shade come from the `FluidCount` of the chunk and of its neighbours (through `Beside` and a
+`Lookup<FluidCount>`, no search); `Load(from, to)` pads them into a texture of the thread, a ring of one block around
+each layer from the facing row or column of each neighbour, and a layer under and over, as a CUDA block loads its tile
+and halo into shared memory. The loop samples neighbours with no edge case and computes each row of 16 blocks in one
+`Vector128<byte>`. Its neighbours are read as they were before the pass and only `NextFluid` is written, so it is a
+[parallel method](/en/docs/guide/systems#parallel-methods). A few hundred chunks flow at a time, each one costing
 microseconds, far under the 4,096 rows of a default chunk of a pass that writes a tracked component, so it sets
 `ChunkRows = 64` and the threads take 64 chunks at a time ([chunk size](/en/docs/guide/threading#chunk-rows)). Byte
 lanes are integer arithmetic: the same water on every machine.
 
-Nothing is cleared that does not have to be. The stencil skips a row with no water in it, above it or beside it, and
-writes zeros. The texture is a `stackalloc` under `[SkipLocalsInit]`: the pad writes every texel the loop samples.
-`NextFluid` keeps its count from one step to the next, so `SetCount` neither allocates nor clears it, and the layers
-the step does not shade are zero already: the steps before wrote water only on layers this one's reach covers.
+Nothing is cleared that does not have to be. The stencil (`Rows(TileReads.Layer | TileReads.Above)`) visits only a row
+with water in it, beside it or above it, and the others are not written: the step's buffer equals the water after
+every commit, so a dry row is zero in it already. The texture is allocated once per thread, and the load writes every
+texel the loop samples. `NextFluid` keeps its count from one step to the next, so `SetCount` neither allocates nor
+clears it, and the layers the step does not shade are zero already: the steps before wrote water only on layers this
+one's reach covers.
 
 The step's result is data, `FluidStep`: `WaterSleepSystem` takes the chunks whose water moved nothing out of the
-passes and gives their scratch buffers (`NextFluid`, `Border`) back to the pool with `TrimExcess`, so only flowing
+passes and gives their scratch buffer (`NextFluid`) back to the pool with `TrimExcess`, so only flowing
 chunks hold them; it runs before the commit, so a chunk that settled is still woken by a neighbour whose water reached
 it in the same step. `WaterCommitSystem` copies the step into the water once every chunk has stepped (each chunk steps
 from its neighbours' water before the step, whatever order the chunks are visited in), updates `FluidCount` and wakes
 the chunks beside the edges that changed.
-
-<include lang="csharp" meta='tab="Water/Border.cs"'>../../../samples/VoxelServer/Systems/Water/Border.cs</include>
 
 <include lang="csharp" meta='tab="Water/Flow.cs"'>../../../samples/VoxelServer/Systems/Water/Flow.cs</include>
 
@@ -304,7 +306,7 @@ the chunks beside the edges that changed.
 
 {/* TODO(water overlap): the planned push-halo design (a chunk hands its edges to its neighbours when they change,
 instead of each flowing chunk gathering them every step) and the MPI-style interior/ring overlap go here, with the
-Border / Flow changes; then guide/high-performance#grid. Copying only the changed edges was measured and dropped
+Flow changes; then guide/high-performance#grid. Copying only the changed edges was measured and dropped
 (decisions#d73-survey-items-not-added). */}
 
 `FloatSystem` lifts whatever stands in water, players, zombies and items, and pushes it along the slope of the water

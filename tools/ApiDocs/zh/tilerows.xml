@@ -1,0 +1,18 @@
+<doc>
+  <member name="T:EasyEcs.TileRows`1" source="0c1b79f92d41">
+    <summary>
+      带边分块的活跃行（<see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileReads)" />），用 <c>foreach</c> 遍历：
+      每层一个字，记着模板可能改变的行，然后每行一次尾零计数。
+    </summary>
+    <typeparam name="TTile">分块的组件和形状。</typeparam>
+  </member>
+  <member name="M:EasyEcs.TileRows`1.GetEnumerator" source="f0428a212a06">
+    <summary>它自己：<c>foreach</c> 遍历它。</summary>
+  </member>
+  <member name="P:EasyEcs.TileRows`1.Current" source="f8760ebd6028">
+    <summary>遍历所在的行。</summary>
+  </member>
+  <member name="M:EasyEcs.TileRows`1.MoveNext" source="760ce0d49af2">
+    <summary>移到下一个活跃行；最后一行之后返回 false。</summary>
+  </member>
+</doc>

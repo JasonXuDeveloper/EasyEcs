@@ -101,7 +101,7 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS056](#eecs056) | Error | `Simd = SimdMode.Require` on a method that qualifies | |
 | [EECS057](#eecs057) | Error | One write of a reduced singleton per pass | |
 | [EECS058](#eecs058) | Error | What a `Scratch<T>` holds is not stored into the world | |
-| [EECS059](#eecs059) | Error | A `Lookup<T>` reads a component the pass does not write | |
+| [EECS059](#eecs059) | Error | A `Lookup<T>` or `Tile<TCell, TTile>` reads a component the pass does not write | |
 | [EECS060](#eecs060) | Warning | Code on several threads writes no shared memory | |
 | [EECS061](#eecs061) | Warning | A parallel job's fields are not read after the pass | `ForEach` / `ForEachEntity` |
 
@@ -113,7 +113,8 @@ Every parameter must be a `ref` / `in` / `ref readonly` struct implementing `ICo
 `Span<T>` / `ReadOnlySpan<T>` of an `IComponent` struct, a `Maybe<T>` or `ReadOnlyMaybe<T>` of one (an optional
 component), a `Mut<T>`, a `ref Reduce<T>` ([reductions](/en/docs/guide/threading#reductions); without `ref` its
 partial result would be a copy), a [`Scratch<T>`](/en/docs/guide/threading#scratch), a
-[`Lookup<T>`](/en/docs/guide/threading#lookups) of a component, an `Entity`, or the `World`. A `[ForEach]` method [outside a system](/en/docs/guide/systems#foreach-outside-systems) may also take
+[`Lookup<T>`](/en/docs/guide/threading#lookups) of a component, a
+[`Tile<TCell, TTile>`](/en/docs/guide/high-performance#grid) of an `ITile<TKey>` component, an `Entity`, or the `World`. A `[ForEach]` method [outside a system](/en/docs/guide/systems#foreach-outside-systems) may also take
 values of any other type: its generated entry point takes them from the caller.
 
 ```csharp doccheck=expect-EECS002
@@ -1897,7 +1898,9 @@ Copy what the row produced into the component's own storage (values, or a
 
 A [`Lookup<T>`](/en/docs/guide/threading#lookups) reads `T` of any entity as it was before the pass, so nothing may
 write `T` while the pass runs. A method that writes `T` itself (a `ref`, `Mut`, writable `Maybe` or span parameter)
-would read some rows before their write and some after, and in parallel, rows another thread is writing.
+would read some rows before their write and some after, and in parallel, rows another thread is writing. A
+[`Tile<TCell, TTile>`](/en/docs/guide/high-performance#grid) is a lookup of its neighbours' `DynamicBuffer<TCell>` (and
+of `TTile`): a method that takes one writes neither, and writes its step into another buffer.
 
 ```csharp tab="Reported" doccheck=expect-EECS059
 public class Flock : EcsSystem

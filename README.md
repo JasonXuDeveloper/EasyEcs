@@ -323,6 +323,10 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   pass (MPI's one-sided `Get`, Unity's `ComponentLookup`), so a chase or a key lookup runs on every core
   ([scratch](https://ecs.xgamedev.net/en/docs/guide/threading#scratch),
   [lookups](https://ecs.xgamedev.net/en/docs/guide/threading#lookups)).
+- **Grid stencils without the plumbing.** A grid cut into tiles (`ITile<TKey>`: a shape and a key) is shaded by a
+  method that takes a `Tile<TCell, TTile>`: the generator finds the neighbours, `Load` pads the tile with their edges
+  (the halo), `Rows` skips rows a stencil cannot change and `Load128` samples the cells around, as fast as the
+  hand-written loop ([shade a grid](https://ecs.xgamedev.net/en/docs/guide/high-performance#grid)).
 - **Grid lookups at array speed.** A unique key that maps onto bounded slots (`IDirectIndexed<TKey>`: grid cells,
   chunks around the players) is found by one array entry instead of a hash probe, the hash behind it for the rest
   ([direct-mapped keys](https://ecs.xgamedev.net/en/docs/guide/indexes-and-relations#direct-index)).

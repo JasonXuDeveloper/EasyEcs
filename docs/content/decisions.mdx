@@ -93,6 +93,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D73](#d73-survey-items-not-added) | Survey items not added |
 | [D74](#d74-scratch) | Per-thread scratch is a parameter |
 | [D75](#d75-lookup) | Lookups of other entities are a read-only parameter |
+| [D76](#d76-tiles) | Grid tiles: a parameter that loads its halo |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1848,6 +1849,48 @@ yet throws inside a parallel region, and still builds lazily in a serial pass.
   from two threads; writes to other entities stay data (a component of the row, read by a later system).
 - **Building indexes lazily under a lock:** a lock on the first lookup of every pass, for an index that can be built
   before it.
+
+## D76. Grid tiles: a parameter that loads its halo [#d76-tiles]
+
+**Decision.** A grid of cells updated from its neighbours (water, light, heat) is cut into tiles, one entity each: a
+component that implements `ITile<TKey>` (its shape as static members, `Width`, `Depth`, `Height`, `Faces`; its key in
+a value index; `Beside(key, face)`, the key of a neighbour) and a `DynamicBuffer<TCell>` of its cells. A `[ForEach]`
+method takes a `Tile<TCell, TTile>` parameter, and the generator writes the plumbing: it finds the tile's neighbours in
+the index once per entity, declares the reads (the index, `DynamicBuffer<TCell>`), adds the shape and the buffer to the
+method's filter, and keeps the method parallel. `Load(from, to)` pads the layers into a texture of the thread with a
+ring of one cell from the facing edges of the neighbours (and a layer under and over), records a bit per row that
+holds a cell that is not zero, and returns a `PaddedTile`: `Rows(reads)` walks the rows a stencil can change with
+`TrailingZeroCount`, `At(row)` is a cursor whose `Load128` / `Load256` / `LoadVector` read a vector one cell, row or
+layer away. A tile parameter beside a write of its cell buffer is EECS059, the rule of `Lookup<T>`.
+
+**Why.**
+- **Every grid wrote the same 80 lines.** The VoxelServer water found its four neighbours, read their counts and
+  buffers through four `Lookup`s, padded a `stackalloc` texture with an edge case per face and kept its own row mask.
+  With a tile, `Flow.cs` keeps the rule and its row loop; the shape is four members of `Chunk`.
+- **As fast as the hand-written loop.** `WaterTileBenchmark` (400 chunks, one step, the hand-written system against
+  the tile one, outputs compared chunk by chunk): within noise at 1 and 4 threads, 0 B both, on a machine under load
+  from other benchmarks (StdDev 15 to 25 %).
+- **The constants fold.** The shape is static abstract members of a struct type argument, so the JIT compiles every
+  stride, every `Offset` check and every copy size as a constant: a sample is one `vmovdqu` from a fixed displacement.
+- **The method is its own compilation root.** The generated accessor that calls a method with a tile is
+  `NoInlining | NoOptimization`: inlined into the small `Execute` of the job, the method spent the inliner's budget
+  (about ten times the root's size) and its eleven `Load128` calls stayed calls. As its own root it inlines all of
+  them (192 inlinees, no call in the row loop). The hand-written version had the same effect by accident: a method
+  with `stackalloc` is never inlined.
+- **A texture per thread, not on the stack.** A `stackalloc` sized by a type argument is not a constant; the texture
+  is a `[ThreadStatic]` array per cell type and shape, allocated on the thread's first load for every layer, then
+  reused (the same rule as `Scratch<T>`, D74).
+
+**Considered.**
+- **A generated per-cell kernel (the user writes `Next(center, north, south, ...)`, the generator the loop):** not
+  built. C# arithmetic on `byte` promotes to `int`, so a scalar body does not map onto byte lanes; the vector loops
+  of the generator target `Vector<T>` (32 bytes on AVX2), not a 16-cell row; and the water reduces per row (wet
+  rows, the first and last layer that changed, edges that changed), which a per-cell function cannot say. What is
+  left in the user's method is the rule itself.
+- **A new analyzer id for a tile that writes its own cells:** it is the misuse EECS059 already reports for
+  `Lookup<T>` (a read of what the pass writes), so EECS059 covers both.
+- **A wider halo and tiles over several components:** no user yet; one cell of halo is what a five- or seven-point
+  stencil reads.
 
 ## Related [#related]
 

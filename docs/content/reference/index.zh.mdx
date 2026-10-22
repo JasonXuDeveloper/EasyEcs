@@ -61,6 +61,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`Lookup<T>`](/zh/docs/reference/lookup) | 从 [ForEach] 方法只读访问任意实体的组件 T（MPI 的单边 Get，Unity 的 ComponentLookup）：static void Chase(ref Velocity v, in Target target, Lookup&lt;Position&gt; positions) 用 positions[target.Id] 读目标的位置。 |
 | [`Maybe<T>`](/zh/docs/reference/maybe) | [ForEach] 方法所访问实体的一个可选组件：static void Regen(ref Health h, Maybe&lt;Buff&gt; buff) 访问所有带 Health 的实体，Maybe.HasValue 告诉你当前这个实体有没有 Buff。 |
 | [`Mut<T>`](/zh/docs/reference/mut) | [ForEach] 方法所访问实体的一个组件，只有方法真的写了它才算写入：static void Aim(Mut&lt;Target&gt; target, in Position p) =&gt; target.SetIfChanged(new Target(Nearest(p)))。 |
+| [`PaddedTile<TCell, TTile>`](/zh/docs/reference/paddedtile) | 带着 halo 拷入的分块各层（Tile.Load）：模板采样的纹理。 |
 | [`QueryEnumerator<T1..T9>`](/zh/docs/reference/queryenumerator) | 零分配的查询枚举器；遍历途中做结构变更也安全（访问规则和 ForEach 相同）。 |
 | [`QueryFilter`](/zh/docs/reference/queryfilter) | 查询的附加条件：必须存在但不读取的组件（QueryFilter.With），或者必须不存在的组件（QueryFilter.Without）。 |
 | [`QueryItem<T1..T9>`](/zh/docs/reference/queryitem) | 一条查询结果：实体，以及指向它所在行的 ref。 |
@@ -77,6 +78,10 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`SystemList.Enumerator`](/zh/docs/reference/systemlist-enumerator) | 依次遍历各个分组，以及每个分组里的系统。 |
 | [`SystemStats`](/zh/docs/reference/systemstats) | 系统运行了多少次、花了多长时间（WorldOptions.MeasureSystems）：每次运行包括 EcsSystem.OnUpdate 和它的 [ForEach] 方法，并记下分配的字节数和 [ForEach] 方法访问的实体数。 |
 | [`TableInfo`](/zh/docs/reference/tableinfo) | 一张表：拥有同一组组件列的实体（World.DescribeTables）。 |
+| [`Tile<TCell, TTile>`](/zh/docs/reference/tile) | 一个分块（由 TTile 变成分块的实体，ITile）的格子，连同邻居的格子：一个 [ForEach] 参数，就像 CUDA 线程块的分块和 halo。 |
+| [`TileCursor<TCell, TTile>`](/zh/docs/reference/tilecursor) | 带边分块在一行第一个格子处的位置（PaddedTile.At）：它周围的格子，一次一个或一个向量。 |
+| [`TileRow<TTile>`](/zh/docs/reference/tilerow) | 分块的一行：第 TileRow.Y 层的第 TileRow.Z 行，来自 PaddedTile.Rows。 |
+| [`TileRows<TTile>`](/zh/docs/reference/tilerows) | 带边分块的活跃行（PaddedTile.Rows），用 foreach 遍历：每层一个字，记着模板可能改变的行，然后每行一次尾零计数。 |
 | [`ValueIndex<T, TKey>.Matches`](/zh/docs/reference/valueindex-matches) | 枚举一个键对应的实体（foreach）。 |
 | [`ValueIndex<T, TKey>.Ordered`](/zh/docs/reference/valueindex-ordered) | 按键的顺序枚举实体（foreach）：先是一个键的所有实体，再到下一个键。 |
 | [`World.DescendantWalk`](/zh/docs/reference/world-descendantwalk) | World.Descendants 的深度优先遍历：一个栈，存着还没读完的子实体列表，由 World.DescendantWalk.Dispose 还给 World（foreach 会调用它）。 |
@@ -102,6 +107,8 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`ISystemGroup`](/zh/docs/reference/isystemgroup) | 系统分组的标记：标了 UpdateInGroupAttribute 的系统在调用 World.Update 时一起运行，和 World.Update 运行的默认分组互不相干。 |
 | [`ISystemGroupWith<T>`](/zh/docs/reference/isystemgroupwith) | 系统分组：其中的 [ForEach] 方法只访问有 T 的实体，效果和在分组上写 WithAttribute 一样。 |
 | [`ISystemGroupWithout<T>`](/zh/docs/reference/isystemgroupwithout) | 系统分组：其中的 [ForEach] 方法跳过有 T 的实体，效果和在分组上写 WithoutAttribute 一样（见 ISystemGroupWith）。 |
+| [`ITile<TKey>`](/zh/docs/reference/itile) | 让实体成为网格中一个分块的组件，按键查找（带索引的组件，IIndexed）：record struct Chunk(ChunkPos Pos) : IComponent, ITile&lt;ChunkPos&gt;，带着形状（ITileShape）和每个邻居的键（ITile.Beside）。 |
+| [`ITileShape`](/zh/docs/reference/itileshape) | 分块的形状，写在让实体成为网格分块的组件上（ITile）：实体的格子共 ITileShape.Width × ITileShape.Depth × ITileShape.Height 个，存在它的 DynamicBuffer&lt;TCell&gt; 里：每行 ITileShape.Width 个（x），每层 ITileShape.Depth 行（z），共 ITileShape.Height 层（y）：格子 (x, y, z) 在 (y \* Depth + z) \* Width + x。 |
 | [`ITracked`](/zh/docs/reference/itracked) | 标记一个追踪变更的组件：每一行都记下最后一次写入时 World 的 World.ChangeTick，[Changed&lt;T&gt;] / QueryFilter.Changed&lt;T&gt;(since) 选出系统上次运行以来写过的行。 |
 | [`IUniqueIndexed, IUniqueIndexed<TKey>`](/zh/docs/reference/iuniqueindexed) | 所有 IUniqueIndexed 共同的标记，不用反射就能知道一个组件类型是唯一的（JIT 会折叠掉的类型测试）。 |
 
@@ -112,6 +119,8 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`SimdMode`](/zh/docs/reference/simdmode) | ForEachAttribute 方法是否以向量循环运行（ForEachAttribute.Simd）。 |
 | [`SystemErrorPolicy`](/zh/docs/reference/systemerrorpolicy) | 系统抛出异常时怎么处理（WorldOptions.SystemErrors）。 |
 | [`TargetPolicy`](/zh/docs/reference/targetpolicy) | 实体销毁时，指向它的链接怎么处理（TargetPolicyExtensions.WhenTargetDestroyed、RelationIndex.WhenTargetDestroyed）。 |
+| [`TileFaces`](/zh/docs/reference/tilefaces) | 分块（ITileShape）的面：北是 −z，南 +z，西 −x，东 +x，下 −y，上 +y。 |
+| [`TileReads`](/zh/docs/reference/tilereads) | 模板在一个格子周围读什么，它决定 PaddedTile.Rows 访问哪些行：某一行读到的行里有不为零的格子时，访问这一行。 |
 
 ## 委托 [#delegates]
 

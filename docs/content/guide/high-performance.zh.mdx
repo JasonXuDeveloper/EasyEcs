@@ -75,56 +75,80 @@ span，方法自己用 `Vector<T>` 或 `Vector128<T>` 循环：相当于 Burst j
 
 <Step>
 
-### 给网格着色：着色器、模板掩码、乒乓缓冲、光环 [#grid]
+### 给网格着色：瓦片、着色器、模板掩码、乒乓缓冲、光环 [#grid]
 
-下一个值由邻居决定的网格（水、光照、热量）可以像 GPU 绘制那样运行。VoxelServer 的水是完整的例子，讲解见
-[思路来自哪里](/zh/docs/samples/voxel-server#ideas)和[水](/zh/docs/samples/voxel-server#water)：
+下一个值由邻居决定的网格（水、光照、热量）可以像 GPU 绘制那样运行。网格切成瓦片，每块一个实体：一个组件是瓦片的形状和键
+（`ITile<TKey>`），一个 `DynamicBuffer<T>` 装它的格子。接收 `Tile<TCell, TTile>` 参数的 `[ForEach]` 方法就是着色器，其余的由生成器写：
+它每个实体在键的索引里找一次瓦片的邻居，声明读取（索引、每块瓦片的格子缓冲），把形状和缓冲加进方法的过滤条件，并且让方法保持并行。
 
-- **每个区块一个着色器。** 每个格子一个函数，读这个格子和它的邻居，只写这个格子，所以 16 个字节格子走一条 `Vector128<byte>`，
-  区块之间并行。
-- **模板掩码。** 每行格子一位，表示这一行会不会变；循环只访问置位的位，每一位用一次 `TrailingZeroCount`（TZCNT）找到，
-  所以干的一行没有开销。
-- **不清空的乒乓缓冲。** 一遍读一个缓冲写另一个，所有区块都走完一步后再提交拷回，所以没有格子会读到同一遍里已经更新过的邻居。
-  两个缓冲都不清空：这一遍会写它之后要读的每个格子，跳过的行也写。
-- **光环。** 每一遍之前，每个区块把邻居朝向它的边拷进一个边界缓冲（MPI 光环交换里的幽灵格子），所以着色器只读它自己这一行的组件，
-  可以并行。
+- **光环。** `tile.Load()` 把瓦片的格子拷进这个线程的一张带填充的纹理，每层外面一圈一个格子，取自邻居朝向它的边（MPI 光环交换里的幽灵格子；
+  没有邻居时读到填充值），多层的瓦片还有下面和上面各一层。之后循环采样邻居时没有边界情况，方法读到的每个邻居仍是这一遍之前的样子。
+- **每行一个着色器。** `padded.At(row)` 是一行上的游标；`Load128<T>(dx, dy, dz)` 读相隔一个格子、一层或一行的 16 个字节（四个 float，
+  十六个字节格子），按光环检查范围，所以一行格子只要几条向量指令，瓦片之间并行。
+- **模板掩码。** 加载时记录哪些行有不为零的格子，每行一位；`padded.Rows(TileReads.Layer)` 只访问自己或它读的行不为零的行，每一行用一次
+  `TrailingZeroCount`（TZCNT）找到，所以冷的或干的一行没有开销。
+- **不清空的乒乓缓冲。** 一遍读一个缓冲写另一个，所有瓦片都走完一步后再提交拷回，所以没有格子会读到同一遍里已经更新过的邻居。
+  两个缓冲都不清空：这一遍会写它之后要读的每个格子，模板掩码跳过的行在两个缓冲里都是零，因为提交拷过上一步。
 
-模板掩码，以及对每一行的写入，在一层 16 x 16 的格子上：
+热量在 16 x 16 温度的板上扩散，五点模板：
 
 ```csharp
-using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 
-public static class Stencil
+public record struct PlatePos(int X, int Z);
+
+// 一块 16 x 16 格子的板，按位置查找；它的邻居是旁边的板。
+public record struct HeatPlate(PlatePos Pos) : IComponent, ITile<PlatePos>
 {
-    public const int Size = 16;
+    readonly PlatePos IIndexed<PlatePos>.Key => Pos;
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
 
-    // 一层 16 x 16 的格子；第 z 行有水时 wet 的第 z 位为 1。
-    public static void Spread(ReadOnlySpan<byte> water, Span<byte> next, uint wet)
+    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
     {
-        // 自己或旁边的行有水时，这一行才会变：这就是模板掩码。
-        uint shaded = (wet | wet << 1 | wet >> 1) & 0xFFFF;
-        for (uint rows = shaded; rows != 0; rows &= rows - 1)
-        {
-            int z = BitOperations.TrailingZeroCount(rows);
-            var beside = Vector128.Max(Row(water, z - 1), Row(water, z + 1));
-            // 水流进来低一级；没水的 lane 保持 0，不会回绕成 255。
-            var dry = Vector128.Equals(beside, Vector128<byte>.Zero);
-            var flowed = Vector128.ConditionalSelect(dry, beside, beside - Vector128<byte>.One);
-            Vector128.Max(Row(water, z), flowed).CopyTo(next.Slice(z * Size, Size));
-        }
-        // 模板掩码跳过的行也写一遍，所以 next 不用先清空。
-        for (uint rows = ~shaded & 0xFFFF; rows != 0; rows &= rows - 1)
-            next.Slice(BitOperations.TrailingZeroCount(rows) * Size, Size).Clear();
-    }
+        TileFaces.North => p with { Z = p.Z - 1 },
+        TileFaces.South => p with { Z = p.Z + 1 },
+        TileFaces.West => p with { X = p.X - 1 },
+        _ => p with { X = p.X + 1 },
+    };
+}
 
-    // 层外的行当作没水：真实区块的光环里放的是邻居的边。
-    private static Vector128<byte> Row(ReadOnlySpan<byte> water, int z) =>
-        (uint)z < Size ? Vector128.Create(water.Slice(z * Size, Size)) : Vector128<byte>.Zero;
+public record struct Temperature(float Value);     // 格子，每块板 256 个
+public record struct NextTemperature(float Value); // 这一步，所有板都走完后再提交
+
+public class DiffuseSystem : EcsSystem
+{
+    const float Rate = 0.2f;
+
+    [ForEach(Parallel = true, ChunkRows = 64)]
+    static void Diffuse(Tile<Temperature, HeatPlate> heat, Mut<DynamicBuffer<NextTemperature>> next)
+    {
+        var plate = heat.Load();
+        var into = MemoryMarshal.Cast<NextTemperature, float>(next.Write().AsSpan());
+        foreach (var row in plate.Rows(TileReads.Layer))
+        {
+            var cells = plate.At(row);
+            for (int x = 0; x < 16; x += Vector128<float>.Count)
+            {
+                var here = cells.Load128<float>(x);
+                var around = cells.Load128<float>(x - 1) + cells.Load128<float>(x + 1)
+                    + cells.Load128<float>(x, 0, -1) + cells.Load128<float>(x, 0, 1);
+                (here + (around - here * 4f) * Rate).CopyTo(into.Slice(row.Index + x));
+            }
+        }
+    }
 }
 ```
 
-示例的 `Systems/Water/Flow.cs` 是同一个循环，作用在栈上一张带填充的纹理上，每个格子六个邻居，写在设了 `ChunkRows = 64` 的并行方法里。
+VoxelServer 的水是同一个循环，作用在 16 x 16 x 32 方块的区块上，每个格子六个邻居，每个格子一个字节：
+[思路来自哪里](/zh/docs/samples/voxel-server#ideas)和[水](/zh/docs/samples/voxel-server#water)。
+
+<Callout type="warn" title="什么时候不用瓦片">
+瓦片用于连同邻居一起读的格子，一次读整块瓦片。不读邻居的逐格规则是缓冲上的普通 `[ForEach]` 方法；只有一个实体的网格是它的 span 上的
+批处理方法；隔一个格子以上的邻居需要比瓦片更宽的光环。一个方法每种格子类型和网格只接收一个 `Tile`：同一对类型在这个线程上的下一次加载会复用纹理。
+`Tile` 参数旁边写它的格子缓冲是 [EECS059](/zh/docs/guide/analyzer#eecs059)。
+</Callout>
 
 {/* TODO(water overlap): MPI 式的内部/外圈重叠（区块内部先着色，外圈等光环）以及只交换变化过的边的光环交换。各在这里写一条，
 链接 samples/voxel-server 的小节。 */}
@@ -145,13 +169,13 @@ public static class Stencil
 | 拥有一块子区域的 MPI rank | 每线程一个 World（每个区域或地图一个 World） | [每线程一个 World](/zh/docs/guide/threading#recommended-one-world-per-thread) |
 | MPI 把实体发给另一个 rank | `SaveEntities` / `MoveEntities` | [迁移](/zh/docs/guide/migration-and-unload#save-entities) |
 | MPI 单边的 `MPI_Get`、Unity 的 `ComponentLookup`（`[ReadOnly]`） | `Lookup<T>` 参数：任意实体在这一遍之前的 `T` | [查找](/zh/docs/guide/threading#lookups) |
-| MPI 光环交换（幽灵格子） | 一遍之前从邻居填好的边界缓冲 | [VoxelServer 的水](/zh/docs/samples/voxel-server#water) |
+| MPI 光环交换（幽灵格子） | `Tile<TCell, TTile>.Load`：瓦片四周填上邻居朝向它的边 | [给网格着色](#grid) |
 | Burst 自动向量化 | `[ForEach]` 方法的向量循环 | [向量循环](/zh/docs/guide/systems#vector-loops) |
 | Burst 里手写 `float4` / Unity.Mathematics | 用 `Vector<T>` / `Vector128<T>` 的批处理方法 | [批处理方法](/zh/docs/guide/systems#batch-methods) |
 | Burst `IJobParallelFor` 的 batch count | `ChunkRows` | [`ChunkRows`](/zh/docs/guide/threading#chunk-rows) |
 | Burst Inspector | EECS055，以及 `Simd = SimdMode.Require`（EECS056） | [分析器](/zh/docs/guide/analyzer#eecs055) |
-| GPU 片元着色器 | 在区块网格上每个格子一个函数 | [思路来自哪里](/zh/docs/samples/voxel-server#ideas) |
-| GPU 模板缓冲 | 每行一位，用 `TrailingZeroCount` 访问 | [给网格着色](#grid) |
+| GPU 片元着色器、纹理采样 | 接收 `Tile<TCell, TTile>` 的 `[ForEach]` 方法，用 `Load128` 读周围的格子 | [给网格着色](#grid) |
+| GPU 模板缓冲 | `padded.Rows(reads)`：每行一位，用 `TrailingZeroCount` 访问 | [给网格着色](#grid) |
 | GPU 乒乓渲染目标 | 两个缓冲，读一个写一个，再提交 | [VoxelServer 的水](/zh/docs/samples/voxel-server#water) |
 
 {/* TODO(mapping): 落地后补上 Burst 的 FloatMode.Fast 和 MPI 内部/外圈重叠这几行。 */}
@@ -162,7 +186,7 @@ public static class Stencil
   每种写法的小节都链接了它自己的基准表。
 - 先让数据合适，再写代码：向量循环要每个组件一种数值类型、最多 4 个字段，网格要每个格子一个字节或 `int`（每条指令 16 或 8 个 lane），
   这样活就是一列上的同一种形状。
-- 每个格子的中间结果放在寄存器或栈上（`[SkipLocalsInit]` 下的 `stackalloc`），最后拷进缓冲一次：一遍里反复读写一个缓冲，
+- 每个格子的中间结果放在寄存器、栈上（`[SkipLocalsInit]` 下的 `stackalloc`）或瓦片的纹理里，最后拷进缓冲一次：一遍里反复读写一个缓冲，
   比栈上的 span 慢得多。
 
 ## 常见陷阱 [#pitfalls]
@@ -175,7 +199,8 @@ public static class Stencil
 | 大量轻量行也设 `ChunkRows` | 同样的活要领更多次块 | 基准（[`ChunkRows`](/zh/docs/guide/threading#chunk-rows)） |
 | 网格的一遍读到了同一遍里已更新的格子 | 结果取决于访问顺序（并行时还取决于线程数） | 测试：写进第二个缓冲 |
 | 每一遍都清空输出缓冲 | 把这一遍本来就要重写的内存整个写一遍 | 代码审查：改为写跳过的行 |
-| 在并行方法里读另一个区块的网格 | 竞争，或者每行一次查找 | 结构变更由 EECS010 发现；先把边拷进光环 |
+| 在并行方法里手动读另一块瓦片的格子 | 每行一次查找，每个格子都有边界情况 | 代码审查：`Tile<TCell, TTile>` 参数一次加载光环 |
+| 同一个方法里有 `Tile` 参数又写它的格子缓冲 | 读邻居的同时别的线程在写它们 | [EECS059](/zh/docs/guide/analyzer#eecs059) |
 
 ## 相关页面 [#related]
 
