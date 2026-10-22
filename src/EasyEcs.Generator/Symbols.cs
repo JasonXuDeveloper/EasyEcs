@@ -732,6 +732,9 @@ internal static class Symbols
     /// <summary>The values of EasyEcs.SimdMode.</summary>
     public const int SimdAuto = 0, SimdRequire = 1, SimdOff = 2;
 
+    /// <summary>[ForEach(FloatMode = FloatMode.Fast)]: a vector loop may reorder float sums.</summary>
+    public static bool FastFloats(IMethodSymbol method) => ForEachArgument(method, "FloatMode", 0) == 1;
+
     private static int ForEachArgument(IMethodSymbol method, string name, int otherwise)
     {
         foreach (var attribute in method.GetAttributes())

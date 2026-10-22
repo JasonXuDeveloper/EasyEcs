@@ -300,7 +300,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
         {
             Symbols.ParamKind.Component when runs => $"{p.RefKind} global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i)",
-            Symbols.ParamKind.Entity when runs => "entities[(int)i]",
+            Symbols.ParamKind.Entity when runs => "entities.At(i)", // i < rows, the run's length: no bounds check
             Symbols.ParamKind.Optional when runs => $"m{i}[(int)i]",
             Symbols.ParamKind.Mutable when runs => $"new global::EasyEcs.Mut<{p.Type}>(ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i), in entities, (int)i)",
             Symbols.ParamKind.Component => $"{p.RefKind} c{++index}",
@@ -351,15 +351,21 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 sb.Append($"        public object k{i};\n");
         }
         if (sb[sb.Length - 2] != '{') sb.Append('\n'); // a blank line after the fields, if any
-        sb.Append("        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
+        string call = $"__ForEach{owner.TypeParameters}.{method.Name}_{number}{method.TypeParameters}({args});";
         string first = method.IsBatch ? "global::EasyEcs.EntitySpan entities, " : method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
-        sb.Append($"        public void Execute({first}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
-        string call = $"__ForEach{owner.TypeParameters}.{method.Name}_{number}{method.TypeParameters}({args});";
         // A grid's neighbours, found once per entity for every Tile of the grid the method takes.
         string grids = string.Concat(Enumerable.Range(0, method.Parameters.Length).Where(method.FirstOfGrid).Select(i =>
             $"var n{i} = global::EasyEcs.TileNeighbours.Of<{method.Parameters[i].Grid}, {method.Parameters[i].Key}>(k{i}, {(runs ? "entities[(int)i]" : "entity")}); "));
         if (grids.Length > 0) call = runs ? $"{{ {grids}{call} }}" : grids + call;
+        // A vector loop also takes the words of 64 rows of which some pass (IForEachMasked): their passing rows as a
+        // lane mask, the other lanes stored back as loaded.
+        for (int pass = 0; pass < (method.Simd != null ? 2 : 1); pass++)
+        {
+        bool masked = pass == 1;
+        if (masked) sb.Append('\n');
+        sb.Append("        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
+        sb.Append($"        public void Execute({first}{(masked ? "ulong pass, " : "")}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
         if (!runs && !local.Contains(true) && grids.Length == 0)
             sb.Append($"            => {call}\n");
         else
@@ -378,15 +384,19 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 for (int k = 1; k <= components.Length; k++)
                     sb.Append($"{indent}ref {components[k - 1]} r{k} = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{k});\n");
                 sb.Append($"{indent}nint rows = {(components.Length > 0 ? "c1.Length" : "entities.Length")};\n");
-                if (method.Simd is { } simd) EmitVectorLoop(sb, simd, components, indent);
-                sb.Append(method.Simd != null
-                    ? $"{indent}for (; i < rows; i++) // the rows after the last whole vector: the method itself\n{indent}    {call}\n"
-                    : $"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n");
+                if (method.Simd is { Flat: { } flat } && !masked) EmitFlatLoop(sb, flat, method.Simd, components, indent);
+                else if (method.Simd is { } simd) EmitVectorLoop(sb, simd, components, indent, call, masked);
+                sb.Append(method.Simd == null
+                    ? $"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n"
+                    : masked
+                        ? $"{indent}for (; i < rows; i++) // the rows after the last whole vector that pass: the method itself\n{indent}    if (((pass >> (int)i) & 1) != 0) {call}\n"
+                        : $"{indent}for (; i < rows; i++) // the rows after the last whole vector: the method itself\n{indent}    {call}\n");
             }
             else sb.Append($"{indent}{call}\n");
             for (int i = 0; i < method.Parameters.Length; i++)
                 if (local[i]) sb.Append($"            {Field(i)} = l{i};\n");
             sb.Append("        }\n");
+        }
         }
         // Its ref parameters (Span<T> for a batch, Mut<T>): carried over when the method moves the entity it visits,
         // and stamped when the component tracks changes: by the loop, every row it visits, except a Mut's, which
@@ -398,8 +408,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
             if (queried.Any(p => p.Type == components[k] && p.RefKind == "ref")) writes |= 1 << k;
             if (queried.Any(p => p.Type == components[k] && p.Kind == Symbols.ParamKind.Mutable)) own |= 1 << k;
         }
-        sb.Append($"\n        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.WriteMask => {writes};\n");
-        if (own != 0) sb.Append($"        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.SelfStamped => {own};\n");
+        string declaring = method.Simd != null ? "IForEachBatch" : iface; // IForEachMasked declares no masks of its own
+        sb.Append($"\n        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.WriteMask => {writes};\n");
+        if (own != 0) sb.Append($"        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.SelfStamped => {own};\n");
         var reductions = Enumerable.Range(0, method.Parameters.Length).Where(i => method.Parameters[i].Kind == Symbols.ParamKind.Reduction).ToArray();
         if (method.Parallel && reductions.Length > 0)
         {
@@ -425,24 +436,86 @@ public sealed class SystemGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// The vector loop of a method <see cref="Kernel"/> translated: each component's lane field as a ref of the lane
-    /// type, the uniform values broadcast once per run, then one Vector&lt;T&gt; of rows per iteration; the rows left
-    /// run the method. Without hardware acceleration (the JIT would emulate Vector&lt;T&gt;), every row runs the method.
+    /// The vector loops of a method <see cref="Kernel"/> translated: each component's lane field as a ref of the lane
+    /// type, the uniform values broadcast once per run, then one vector of rows per iteration: Vector512 where the
+    /// hardware runs it (AVX-512), then Vector&lt;T&gt; for the rows left (or all of them); the rows left after that
+    /// run the method. Without hardware acceleration (the JIT would emulate the vectors), every row runs the method.
+    /// The two loops are one text: the Vector512 one names Vector512 where the other names Vector.
     /// </summary>
-    private static void EmitVectorLoop(StringBuilder sb, Kernel.Code simd, string[] components, string indent)
+    private static void EmitVectorLoop(StringBuilder sb, Kernel.Code simd, string[] components, string indent, string call, bool masked)
     {
-        string vector = $"global::System.Numerics.Vector<{simd.Element}>";
         for (int k = 1; k <= components.Length; k++)
-            sb.Append($"{indent}ref {simd.Element} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Element}>(ref r{k});\n");
+            sb.Append($"{indent}ref {simd.Columns[k - 1]} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref r{k});\n");
+        sb.Append($"{indent}nint i = 0;\n");
+        var loop = new StringBuilder();
+        // Kernel.V stands for the vector type in both loops' text, and the tokens below for what their forms name apart.
+        string vector = $"{Kernel.V}<{simd.Columns[0]}>"; // every column has lanes of one size: one count
         // Components of several fields need the shuffles of Interleaved; without them, every row runs the method.
-        string interleaved = simd.Interleaves ? " && global::EasyEcs.Interleaved.IsAccelerated" : "";
-        sb.Append($"{indent}nint i = 0;\n{indent}if (global::System.Numerics.Vector.IsHardwareAccelerated{interleaved} && rows >= {vector}.Count)\n{indent}{{\n");
-        string inner = indent + "    ";
-        foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) sb.Append(inner).Append(line).Append('\n');
-        sb.Append($"{inner}for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{inner}{{\n");
-        foreach (var line in simd.Body.Split('\n')) if (line.Length > 0) sb.Append(inner).Append("    ").Append(line).Append('\n');
-        sb.Append($"{inner}}}\n{indent}}}\n");
+        string interleaved = simd.Interleaves ? $" && global::EasyEcs.Interleaved.{Accelerated}" : "";
+        loop.Append($"{indent}if ({Kernel.V}.IsHardwareAccelerated{interleaved} && rows - i >= {vector}.Count)\n{indent}{{\n");
+        string inner = indent + "    ", body = inner + "    ";
+        foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) loop.Append(inner).Append(line).Append('\n');
+        loop.Append($"{inner}for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{inner}{{\n");
+        if (masked)
+        {
+            // The rows of this vector that pass, one lane each: a vector with none is skipped.
+            loop.Append($"{body}var __pass = global::EasyEcs.Interleaved.Lanes{simd.Size * 8}{LanesForm}(pass, (int)i);\n");
+            loop.Append($"{body}if (__pass == {Kernel.V}<{simd.Mask}>.Zero) continue;\n");
+        }
+        foreach (var line in (masked ? simd.MaskedBody : simd.Body).Split('\n')) if (line.Length > 0) loop.Append(body).Append(line).Append('\n');
+        if (simd.Bails)
+        {
+            // A lane would throw (Math.Clamp with min above max): nothing is stored yet, so the method itself runs the
+            // rows of this vector (that pass), and throws as written. i walks them, and is set back for the loop's own step.
+            // The reductions' lanes go back to before this vector: the method adds those rows itself.
+            string row = masked ? $"if (((pass >> (int)i) & 1) != 0) {call}" : call;
+            loop.Append($"{body}if (__bail)\n{body}{{\n");
+            foreach (var line in simd.Restore.Split('\n')) if (line.Length > 0) loop.Append(body).Append("    ").Append(line).Append('\n');
+            loop.Append($"{body}    for (nint end = i + {vector}.Count; i < end; i++)\n{body}        {row}\n");
+            loop.Append($"{body}    i -= {vector}.Count;\n{body}    continue;\n{body}}}\n");
+        }
+        foreach (var line in (masked ? simd.MaskedStores : simd.Stores).Split('\n')) if (line.Length > 0) loop.Append(body).Append(line).Append('\n');
+        loop.Append($"{inner}}}\n");
+        foreach (var line in simd.Fold.Split('\n')) if (line.Length > 0) loop.Append(inner).Append(line).Append('\n');
+        loop.Append($"{indent}}}\n");
+        // Only the tokens are replaced: setup lines name user types (in Vector3 wind, in Vector<float> bias) as written.
+        // Vector512 names the same operations alike, except the square root (Vector.SquareRoot, Vector512.Sqrt).
+        var text = new StringBuilder(loop.ToString());
+        sb.Append(text.ToString().Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512)
+            .Replace(Accelerated, "IsAccelerated512").Replace(LanesForm, "In512"));
+        sb.Append(text.Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(LanesForm, ""));
     }
+
+    /// <summary>
+    /// The loop of a method that treats each field alike (<see cref="Kernel.FlatCode"/>): the columns as flat arrays of
+    /// <c>rows * fields</c> lanes, no shuffles. The vector loops end at a multiple of <c>Count * fields</c> lanes, whole
+    /// rows, so <c>i</c> becomes a row again for the rows left, which run the method.
+    /// </summary>
+    private static void EmitFlatLoop(StringBuilder sb, Kernel.FlatCode flat, Kernel.Code simd, string[] components, string indent)
+    {
+        for (int k = 1; k <= components.Length; k++)
+            sb.Append($"{indent}ref {simd.Columns[k - 1]} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref r{k});\n");
+        sb.Append($"{indent}nint i = 0, lanes = rows * {flat.Fields}; // i counts lanes: {flat.Fields} per row\n");
+        var loop = new StringBuilder();
+        string count = $"{Kernel.V}<{simd.Columns[0]}>.Count";
+        string chunk = $"{count} * {flat.Fields}"; // whole vectors of whole rows
+        loop.Append($"{indent}if ({Kernel.V}.IsHardwareAccelerated && lanes - i >= {chunk})\n{indent}{{\n");
+        string inner = indent + "    ", body = inner + "    ";
+        foreach (var line in flat.Setup.Split('\n')) if (line.Length > 0) loop.Append(inner).Append(line).Append('\n');
+        loop.Append($"{inner}for (nint end = lanes - (lanes - i) % ({chunk}); i < end; i += {count})\n{inner}{{\n");
+        foreach (var line in (flat.Body + flat.Stores).Split('\n')) if (line.Length > 0) loop.Append(body).Append(line).Append('\n');
+        loop.Append($"{inner}}}\n{indent}}}\n");
+        var text = new StringBuilder(loop.ToString());
+        sb.Append(text.ToString().Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512));
+        sb.Append(text.Replace(Kernel.V, Vector));
+        sb.Append($"{indent}i /= {flat.Fields}; // whole rows: the row the rows left start at\n");
+    }
+
+    // Tokens of EmitVectorLoop's text (U+0001 occurs in no C# token outside a literal): Interleaved.IsAccelerated /
+    // IsAccelerated512, Interleaved.Lanes32 / Lanes32In512.
+    private const string Accelerated = "\u0001Accelerated", LanesForm = "\u0001In512";
+
+    private const string Vector = "global::System.Numerics.Vector", Vector512 = "global::System.Runtime.Intrinsics.Vector512";
 
     /// <summary>
     /// A ChangedAny / RemovedAny set as calls of at most 9 components each (calls join one set): a set of one
@@ -562,7 +635,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         public bool NeedsWorld => Parameters.Any(p => p.Kind is Symbols.ParamKind.World or Symbols.ParamKind.Lookup);
 
         /// <summary>The World loop (and, with an I, the job interface) the method runs as.</summary>
-        public string Loop => IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
+        public string Loop => Simd != null ? "ForEachMasked" : IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
 
         /// <summary>Takes component spans, or runs per row inside runs of rows: World.ForEachBatch.</summary>
         public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) || Runs || Simd != null;
@@ -680,7 +753,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
                     Slices = Symbols.Slices(method), ChunkRows = Symbols.ChunkRows(method), Identifies = Symbols.OnlyIdentifies(method, syntax, model),
                     // Kernel.Vectorize decides alone (static, one thread, stable, its body): the analyzer reports its reasons.
-                    Simd = Kernel.Vectorize(method, syntax, model, static (i, kind) => kind == Symbols.ParamKind.Singleton ? $"s{i}" : $"x{i}", ct, out _),
+                    Simd = Kernel.Vectorize(method, syntax, model, static (i, kind) => kind switch
+                    {
+                        Symbols.ParamKind.Singleton => $"s{i}",
+                        Symbols.ParamKind.Reduction => $"l{i}", // the run's partial result, a local of the batch job
+                        _ => $"x{i}",
+                    }, ct, out _),
                 };
         }
     }

@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace EasyEcs;
 
@@ -102,7 +103,7 @@ public readonly ref struct ReadOnlyMaybe<T> where T : struct, IComponent
 public readonly ref struct MaybeColumn<T> where T : struct, IComponent
 {
     private readonly ref T _first;        // the run's first row; a null ref when the table has no such column
-    private readonly ulong[] _present;    // the column's presence bits; null when every row has it
+    private readonly ref ulong _present;  // the column's presence bits; a null ref when every row has it
     private readonly Archetype _table;    // for stamps: set only for a write of a tracked component
     private readonly ulong _tick;
     private readonly int _start;
@@ -112,6 +113,7 @@ public readonly ref struct MaybeColumn<T> where T : struct, IComponent
     public MaybeColumn(in EntitySpan entities, bool write)
     {
         _first = ref Unsafe.NullRef<T>();
+        _present = ref Unsafe.NullRef<ulong>();
         if (entities.Length == 0) return;
         var world = entities.World;
         ref var meta = ref world.MetaRef(entities.Slots[0].Index);   // the run's first row: its table and slot
@@ -120,7 +122,7 @@ public readonly ref struct MaybeColumn<T> where T : struct, IComponent
         _start = meta.Slot;
         if (column < 0) return;
         _first = ref Unsafe.Add(ref table.Data<T>(column), _start);
-        _present = table.Bits(column);
+        if (table.Bits(column) is { } bits) _present = ref MemoryMarshal.GetArrayDataReference(bits);
         if (write && default(T) is ITracked) (_table, _tick) = (table, world.ChangeTick);
     }
 
@@ -132,7 +134,8 @@ public readonly ref struct MaybeColumn<T> where T : struct, IComponent
         {
             if (Unsafe.IsNullRef(ref _first)) return default;
             int row = _start + index;
-            if (_present != null && (_present[row >> 6] & (1UL << row)) == 0) return default; // shift is mod 64
+            // No bounds check: the row is one of the table's, and its presence bits cover every row of its capacity.
+            if (!Unsafe.IsNullRef(ref _present) && (Unsafe.Add(ref _present, row >> 6) & (1UL << row)) == 0) return default; // shift is mod 64
             if (default(T) is ITracked && _table != null) _table.Stamp<T>(row, _tick);
             return new Maybe<T>(ref Unsafe.Add(ref _first, index));
         }

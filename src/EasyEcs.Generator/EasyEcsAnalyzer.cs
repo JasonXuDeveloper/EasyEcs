@@ -184,11 +184,12 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     public static readonly DiagnosticDescriptor NoVectorLoop = new("EECS056", "A required vector loop that the method does not qualify for",
         "[ForEach(Simd = SimdMode.Require)] method '{0}' gets no vector loop: {1}",
         Category, DiagnosticSeverity.Error, true,
-        "SimdMode.Require asks for the method's Vector<T> loop. A method qualifies when it is static, runs on one thread, " +
-        "makes no structural change, takes components of one lane field each (all of one type: float, double, int, uint, " +
-        "long or ulong), singletons and values, and computes with arithmetic, comparisons, branches and Math functions " +
-        "that have an exact vector counterpart. Change what the message names, or set SimdMode.Auto to accept the loop " +
-        "of one row at a time.", helpLinkUri: Help("EECS056"));
+        "SimdMode.Require asks for the method's vector loop. A method qualifies when it is static, runs on one thread, " +
+        "takes no Entity and makes no structural change, takes components of up to 4 fields whose lane types all have " +
+        "one size (float, int and uint, or double, long and ulong), singletons, values and Reduce<T> results (sums, Min " +
+        "and Max that T.Combine takes field by field; a float sum only with FloatMode.Fast), and computes with " +
+        "arithmetic, comparisons, branches, conversions and Math functions that have an exact vector counterpart. " +
+        "Change what the message names, or set SimdMode.Auto to accept the loop of one row at a time.", helpLinkUri: Help("EECS056"));
 
     public static readonly DiagnosticDescriptor ScratchEscape = new("EECS058", "Scratch memory stored into the world",
         "[ForEach] method '{0}' stores '{1}', which its Scratch<{2}> '{3}' holds, into '{4}'",

@@ -60,6 +60,16 @@ public sealed class ForEachAttribute : Attribute
     /// <see cref="SimdMode.Off"/> keeps the method one row at a time. Default <see cref="SimdMode.Auto"/>.
     /// </summary>
     public SimdMode Simd { get; init; }
+
+    /// <summary>
+    /// What a vector loop may change in floating-point results. <see cref="FloatMode.Exact"/> keeps every result the
+    /// method's bit for bit, so a float sum into a <see cref="Reduce{T}"/> stays one row at a time (EECS055 says so):
+    /// the lanes of a vector loop each add their own rows, in another order. <see cref="FloatMode.Fast"/> accepts that
+    /// order: the sum of the same rows, rounded differently (not bit for bit the method's, and not the same across
+    /// vector widths). Integer sums and the Min / Max of any lane type are exact either way. Default
+    /// <see cref="FloatMode.Exact"/>.
+    /// </summary>
+    public FloatMode FloatMode { get; init; }
 }
 
 /// <summary>
@@ -77,6 +87,16 @@ public enum SimdMode
 
     /// <summary>One row at a time, as written.</summary>
     Off,
+}
+
+/// <summary>What a vector loop of a <see cref="ForEachAttribute"/> method may change in floating-point results.</summary>
+public enum FloatMode
+{
+    /// <summary>Every result bit for bit the method's: float sums of a reduction stay one row at a time.</summary>
+    Exact,
+
+    /// <summary>Float sums of a reduction may add their rows in another order (per vector lane), so they round differently.</summary>
+    Fast,
 }
 
 /// <summary>
