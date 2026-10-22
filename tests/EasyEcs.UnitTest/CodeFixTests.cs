@@ -302,6 +302,9 @@ public class CodeFixTests
     [TestCase("EECS071", "Draw from EntityRandom",
         "public class S : EcsSystem { [ForEach] static void A(ref Q q, Entity e, in EntityRandom r) => q.V = r.Range(e.Id, 0, 0, 9) + (System.Random.Shared.NextSingle() < 0.5f ? 1 : 0); }",
         "q.V = r.Range(e.Id, 0, 0, 9) + (r.Float(e.Id, 1) < 0.5f ? 1 : 0); }")]
+    [TestCase("EECS088", "Give it a stream of its own",
+        "public class S : EcsSystem { [ForEach] static void A(ref P p, Entity e, in EntityRandom r) => p.V = r.Range(e.Id, 0, 1, 7) + r.Range(e.Id, 0, 1, 7) * r.Range(e.Id, 1, 1, 7); }",
+        "p.V = r.Range(e.Id, 0, 1, 7) + r.Range(e.Id, 2, 1, 7) * r.Range(e.Id, 1, 1, 7); }")]   // the next stream no draw uses
     [TestCase("EECS062", "Make it partial",
         "public static class Outer { internal class Mid { public struct Census : ISingletonComponent { [Sum] public int Alive; } } }",
         "public static partial class Outer { internal partial class Mid { public partial struct Census")]

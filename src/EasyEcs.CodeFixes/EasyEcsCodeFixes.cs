@@ -26,7 +26,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
             "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071",
-            "EECS080", "EECS081", "EECS082", "EECS084");
+            "EECS080", "EECS081", "EECS082", "EECS084", "EECS088");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 

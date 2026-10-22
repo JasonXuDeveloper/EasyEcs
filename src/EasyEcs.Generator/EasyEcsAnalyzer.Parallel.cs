@@ -44,10 +44,23 @@ public sealed partial class EasyEcsAnalyzer
         "System.Random gives numbers that depend on things outside the world. Random.Shared is seeded differently on every " +
         "run, and in a parallel pass its numbers go to rows in the order the threads happen to ask, so a replay, a " +
         "test or another machine sees other results. A new Random() per row allocates, is seeded from the clock unless " +
-        "given a seed, and a seed given gives every row the same numbers. EntityRandom (a singleton holding a seed and a tick, " +
+        "given a seed, and a seed given gives every row the same numbers. A Random a field holds is shared by every row: a " +
+        "row's numbers depend on how many rows drew before it, and in a parallel pass several threads draw at once " +
+        "(System.Random is not thread-safe). EntityRandom (a singleton holding a seed and a tick, " +
         "or its static members) is a pure function of the seed, the entity, the tick and a stream: the same numbers on " +
         "every run, whatever the threads. The fix takes the world's EntityRandom and the entity, and gives each draw of the " +
         "method its own stream.", helpLinkUri: Help("EECS071"));
+
+    public static readonly DiagnosticDescriptor SharedStream = new("EECS088", "EntityRandom draws of one stream",
+        "'{0}' {1}: {2}",
+        Category, DiagnosticSeverity.Warning, true,
+        "An EntityRandom draw is a pure function of the seed, the entity, the tick and the stream: the same four give the " +
+        "same bits. Two draws for one entity with the same stream in one tick are the same number, or numbers made from " +
+        "the same bits (a Chance and a Range of stream 0 agree), and a draw with a constant stream in a loop gives every " +
+        "iteration the same number. Draws in the two branches of an if (or two arms of a switch) never both run and may " +
+        "share a stream. Give each draw a stream of its own, and a draw in a loop the iteration in its stream " +
+        "(stream + (uint)i, with the other draws' streams outside that range).",
+        helpLinkUri: Help("EECS088"));
 
     /// <summary>EECS071's properties for its code fix: the draw, and the parameters to add (null: the method has them).</summary>
     public const string RandomText = "Text", RandomSingleton = "Random", RandomEntity = "Entity";
@@ -57,6 +70,113 @@ public sealed partial class EasyEcsAnalyzer
         context.RegisterOperationBlockAction(AnalyzeParallelWrites);
         context.RegisterOperationBlockAction(AnalyzeRandom);
         context.RegisterOperationAction(AnalyzeParallelJob, OperationKind.Invocation);
+        context.RegisterOperationAction(AnalyzeStreams, OperationKind.Invocation);
+    }
+
+    // ---------------- EECS088: EntityRandom streams ----------------
+
+    /// <summary>
+    /// An EntityRandom draw (Bits, Float, Range, Chance; the instance members or the static ones taking the seed and the
+    /// tick), its stream when constant, and the text that names the same bits: the receiver (or seed and tick), the entity.
+    /// </summary>
+    private static (uint? Stream, string Source, IArgumentOperation StreamArgument)? Draw(IInvocationOperation call)
+    {
+        if (call.TargetMethod is not { Name: "Bits" or "Float" or "Range" or "Chance" } method
+            || !Symbols.Named(method.ContainingType, "EasyEcs.EntityRandom")) return null;
+        IArgumentOperation? Argument(string name) => call.Arguments.FirstOrDefault(a => a.Parameter?.Name == name);
+        if (Argument("stream") is not { } stream || Argument("entity") is not { } entity) return null;
+        string Text(IOperation? operation) => operation == null ? "" : Stripped(operation).Syntax.ToString().Replace(" ", "");
+        string source = method.IsStatic ? Text(Argument("seed")?.Value) + "|" + Text(Argument("tick")?.Value) : Text(call.Instance);
+        var constant = stream.Value.ConstantValue;
+        return (constant is { HasValue: true, Value: uint or int } ? System.Convert.ToUInt32(constant.Value) : null,
+            source + "|" + Text(entity.Value), stream);
+    }
+
+    /// <summary>
+    /// EECS088 on the first draw of a [ForEach] or [ForEntity] method's body (or a job's Execute) (the others are seen from it): a draw whose stream, entity and source an
+    /// earlier draw of the body shares, unless the two sit in the two branches of an if or two arms of a switch (the fix:
+    /// the next stream no draw uses); a draw with a constant stream in a loop, of an entity and source the loop does not
+    /// change (no fix: the stream needs the iteration).
+    /// </summary>
+    private static void AnalyzeStreams(OperationAnalysisContext context)
+    {
+        var call = (IInvocationOperation)context.Operation;
+        // In the code a pass runs per row, where EntityRandom belongs (a test comparing a draw with itself is elsewhere).
+        if (Draw(call) == null || context.ContainingSymbol is not IMethodSymbol method
+            || !Symbols.IsGeneratedJob(method) && Symbols.JobInterface(method) == null) return;
+        var root = Symbols.Root(call);
+        var draws = root.Descendants().OfType<IInvocationOperation>().Select(c => (Call: c, Draw: Draw(c)))
+            .Where(d => d.Draw != null).OrderBy(d => d.Call.Syntax.SpanStart).ToList();
+        if (draws[0].Call != call) return;
+
+        var used = new HashSet<uint>(draws.Where(d => d.Draw!.Value.Stream != null).Select(d => d.Draw!.Value.Stream!.Value));
+        uint next = 0;
+        for (int i = 0; i < draws.Count; i++)
+        {
+            var (draw, (stream, source, argument)) = (draws[i].Call, draws[i].Draw!.Value);
+            if (stream == null) continue;
+            var earlier = draws.Take(i).FirstOrDefault(d => d.Draw!.Value.Stream == stream && d.Draw.Value.Source == source && !Exclusive(d.Call, draw));
+            if (earlier.Call != null)
+            {
+                while (used.Contains(next)) next++;
+                used.Add(next);
+                context.ReportDiagnostic(Diagnostic.Create(SharedStream, argument.Value.Syntax.GetLocation(), [earlier.Call.Syntax.GetLocation()],
+                    Fix(next.ToString(System.Globalization.CultureInfo.InvariantCulture), "Give it a stream of its own"),
+                    Shorten(draw.Syntax), $"draws stream {stream} for the same entity as '{Shorten(earlier.Call.Syntax)}'",
+                    "both come from the same bits; give it a stream of its own"));
+                continue;
+            }
+
+            if (SameEveryIteration(draw) != null)
+                context.ReportDiagnostic(Diagnostic.Create(SharedStream, argument.Value.Syntax.GetLocation(), Shorten(draw.Syntax),
+                    $"draws stream {stream} in a loop, for an entity the loop does not change",
+                    "every iteration gets the same number; add the iteration to the stream (stream + (uint)i)"));
+        }
+    }
+
+    /// <summary>Whether two operations of one body never both run: the two branches of an if (or ?:), two arms of a switch.</summary>
+    private static bool Exclusive(IOperation a, IOperation b)
+    {
+        var above = new List<IOperation>();
+        for (var o = a; o != null; o = o.Parent) above.Add(o);
+        IOperation? fromB = b;
+        while (fromB?.Parent != null && !above.Contains(fromB.Parent)) fromB = fromB.Parent;
+        var common = fromB?.Parent;
+        if (common == null) return false;
+        var fromA = above[above.IndexOf(common) - 1];
+        return common switch
+        {
+            IConditionalOperation c => c.WhenFalse != null && (fromA == c.WhenTrue && fromB == c.WhenFalse || fromA == c.WhenFalse && fromB == c.WhenTrue),
+            ISwitchOperation or ISwitchExpressionOperation => fromA != fromB,
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// The loop <paramref name="draw"/> runs in whose iterations give it the same arguments: none of the arguments but
+    /// the range's bounds reads a local the loop declares or writes (its variable, a local of its body).
+    /// </summary>
+    private static ILoopOperation? SameEveryIteration(IInvocationOperation draw)
+    {
+        ILoopOperation? loop = null;
+        for (var o = draw.Parent; o != null && loop == null; o = o.Parent)
+            if (o is ILoopOperation l && (l is not IForEachLoopOperation each || !each.Collection.Syntax.Span.Contains(draw.Syntax.Span))) loop = l;
+            else if (o is IAnonymousFunctionOperation or ILocalFunctionOperation) return null;
+        if (loop == null) return null;
+        var span = loop.Syntax.Span;
+        var written = new HashSet<ILocalSymbol>(loop.Descendants().Select(o => o switch
+        {
+            IAssignmentOperation { Target: ILocalReferenceOperation target } => target.Local,
+            IIncrementOrDecrementOperation { Target: ILocalReferenceOperation target } => target.Local,
+            _ => null,
+        }).Where(l => l != null)!, SymbolEqualityComparer.Default);
+        var inputs = draw.Arguments.Where(a => a.Parameter?.Name is not ("min" or "max" or "probability")).Select(a => a.Value)
+            .Concat(draw.Instance == null ? [] : [draw.Instance]);
+        foreach (var input in inputs)
+            foreach (var reference in input.DescendantsAndSelf().OfType<ILocalReferenceOperation>())
+                if (written.Contains(reference.Local) || reference.Local.DeclaringSyntaxReferences.Any(r => span.Contains(r.Span)))
+                    return null;
+        return loop;
     }
 
     /// <summary>EECS060 in a [ForEach(Parallel = true)] method that can run in parallel (else it is EECS010's).</summary>
@@ -73,7 +193,7 @@ public sealed partial class EasyEcsAnalyzer
     }
 
     /// <summary>
-    /// EECS071: <c>Random.Shared</c> or <c>new Random()</c> in a [ForEach] method. A draw the fix can translate
+    /// EECS071: <c>Random.Shared</c>, <c>new Random()</c> or a <c>Random</c> a field holds (<see cref="Draws"/>) in a [ForEach] method. A draw the fix can translate
     /// (<c>NextSingle</c>, <c>NextDouble</c>, <c>Next</c> with 0 to 2 arguments, on either receiver) is reported on the
     /// call, with its replacement: the method's <c>in EntityRandom</c> and <c>Entity</c> parameters (added when missing), and the
     /// next stream no draw of the method uses yet, so draws fixed one at a time still get one stream each.
@@ -83,10 +203,7 @@ public sealed partial class EasyEcsAnalyzer
         if (context.OwningSymbol is not IMethodSymbol method || !Symbols.IsForEach(method)) return;
         var body = context.OperationBlocks.FirstOrDefault(b => b is IMethodBodyOperation or IBlockOperation);
         if (body == null) return;
-        var draws = body.Descendants().Where(o =>
-                o is IPropertyReferenceOperation { Property: { Name: "Shared", IsStatic: true } shared } && Symbols.Named(shared.ContainingType, "System.Random")
-                || o is IObjectCreationOperation { Type: var created } && Symbols.Named(created, "System.Random"))
-            .OrderBy(o => o.Syntax.SpanStart).ToList();
+        var draws = body.Descendants().Where(Draws).OrderBy(o => o.Syntax.SpanStart).ToList();
         if (draws.Count == 0) return;
 
         bool outside = Symbols.IsRunner(method);
@@ -104,11 +221,13 @@ public sealed partial class EasyEcsAnalyzer
         int next = 0;
         foreach (var draw in draws)
         {
-            bool shared = draw is IPropertyReferenceOperation;
-            string why = shared
+            string why = draw is IPropertyReferenceOperation { Property.Name: "Shared", Property.IsStatic: true }
                 ? parallel ? "which every thread of the pass shares, in the order the threads ask, and which is seeded anew on every run"
                     : "which is seeded anew on every run"
-                : ((IObjectCreationOperation)draw).Arguments.Length == 0
+                : draw is not IObjectCreationOperation creation
+                    ? parallel ? "a generator every row shares, which several threads draw from at once (System.Random is not thread-safe)"
+                        : "a generator every row shares, so a row's numbers depend on how many rows drew before it"
+                : creation.Arguments.Length == 0
                     ? "which allocates a generator per row, seeded from the clock"
                     : "which allocates a generator per row, and a seed gives every row the same numbers";
             string? text = null;
@@ -142,6 +261,19 @@ public sealed partial class EasyEcsAnalyzer
     }
 
     /// <summary>
+    /// What EECS071 reports: <c>Random.Shared</c>, <c>new Random(…)</c>, or a draw from a <c>Random</c> a field or
+    /// property holds (the receiver of a call: a generator every row shares).
+    /// </summary>
+    private static bool Draws(IOperation operation) => operation switch
+    {
+        IPropertyReferenceOperation { Property: { Name: "Shared", IsStatic: true } shared } => Symbols.Named(shared.ContainingType, "System.Random"),
+        IObjectCreationOperation { Type: var created } => Symbols.Named(created, "System.Random"),
+        IFieldReferenceOperation or IPropertyReferenceOperation => Symbols.Named(operation.Type, "System.Random")
+                                                                  && operation.Parent is IInvocationOperation call && call.Instance == operation,
+        _ => false,
+    };
+
+    /// <summary>
     /// A shared write that races: not a constant every thread writes the same, and not a system's own mutable static
     /// (state in a system is EECS007's, whose fix moves it out).
     /// </summary>
@@ -163,7 +295,7 @@ public sealed partial class EasyEcsAnalyzer
             || Execute(job, method) is not { } execute
             || execute.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is not MethodDeclarationSyntax declaration
             || call.SemanticModel is not { } model) return;
-        var bodyModel = declaration.SyntaxTree == model.SyntaxTree ? model : model.Compilation.GetSemanticModel(declaration.SyntaxTree);
+        var bodyModel = Symbols.ModelOf(declaration.SyntaxTree, model);
         if (bodyModel.GetOperation(declaration, context.CancellationToken) is not { } body) return;
         var writes = Threads.Writes(body, job: true).ToList();
 
