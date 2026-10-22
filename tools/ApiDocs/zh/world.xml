@@ -154,8 +154,8 @@
       O(2) 加一次扩容。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.EnsureEntityCapacity(System.Int32)" source="c27f427b4f09">
-    <summary>预先扩好实体存储，之后创建的实体不超过 <paramref name="capacity" /> 个就不会再扩容。</summary>
+  <member name="M:EasyEcs.World.EnsureEntityCapacity(System.Int32)" source="9fdc082705de">
+    <summary>预先扩好实体存储，之后创建不超过 <paramref name="capacity" /> 个实体、再把它们销毁，都不会再扩容。</summary>
   </member>
   <member name="M:EasyEcs.World.ForEach``3(``2@,EasyEcs.QueryFilter@)" source="7462436280c2">
     <summary>

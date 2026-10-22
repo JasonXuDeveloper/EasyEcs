@@ -293,6 +293,10 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   a list the buffer pool keeps, so the blocks of chunks loaded and unloaded around players reuse one another's lists
   ([dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers#what-it-costs)). The pool is shared across
   threads, a prefab's empty buffer takes its list from it, and `LoadEntities` keeps the lists it reads.
+- **Reserve the peak, then allocate nothing.** `DynamicBuffer<T>.ReservePool(n)` fills the pool at start-up, and
+  `Reserve(prefab, n)` also covers index keys, the retired table and the free ids. Restores and loads reuse their
+  index lists, presence bits and buffer lists, and loads of a growing world grow by doubling
+  ([prefabs](https://ecs.xgamedev.net/en/docs/guide/prefabs#reserve)).
 - **Write a buffer in place, save without derived data.** `buffer.SetCount(n)` sizes a `DynamicBuffer<T>` and returns
   the span to write; `TrimExcess()` on an empty buffer gives its list back to the pool;
   `SaveEntitiesWithout(output, ids, set)` leaves out what entities compute again after a load.

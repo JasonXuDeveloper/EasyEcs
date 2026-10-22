@@ -81,3 +81,15 @@ public readonly ReadOnlySpan<T>.Enumerator GetEnumerator();
 Enumerates the elements (read-only, no allocation).
 
 **Complexity** ([API table](/en/docs/api)): O(1)
+
+### `ReservePool` [#reservepool]
+
+```csharp
+public static void ReservePool(int lists);
+```
+
+Fill the pool with lists until it holds `lists`, each of [`DynamicBuffer.PoolCapacity`](/en/docs/reference/dynamicbuffer#poolcapacity) elements, so the first writes of that many buffers take a list instead of allocating one: a server that knows how many buffers of `T` it keeps at its peak (the chunks around its players) pays for them at startup, and its ticks allocate nothing even while the world grows to that peak. Process-wide, like the pool; lists already in the pool count. O(`lists`) allocations once; nothing when the pool holds enough.
+
+**Exceptions**
+
+- `ArgumentOutOfRangeException`: `lists` is negative.

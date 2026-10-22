@@ -224,7 +224,9 @@ warlord.Destroy();                                   // ChildOf：销毁父实�
 ### 生成前先预留 [#reserve]
 
 `world.Reserve(prefab, count)` 先扩好预制体实例要进的表和实体记录，接下来 `count` 个实例都不再扩容。编组会预留每个成员的表。
-在生成的那个 tick 之前调用，这波生成就不用在 tick 里付扩容的代价。
+它也会预留实例在行之外要用的东西：[带索引](/zh/docs/guide/indexes-and-relations)组件的键、带[清理组件](/zh/docs/guide/cleanup-and-disable)的实例销毁后等待所在的表，
+以及销毁它们时会填进去的空闲 id 列表。在生成的那个 tick 之前调用，这波生成就不用在 tick 里付扩容的代价；服务器启动时预留好峰值（玩家、怪物、物品），
+增长到峰值时就不再分配。
 
 ```csharp
 world.Reserve(Kinds.Troll, 5_000);

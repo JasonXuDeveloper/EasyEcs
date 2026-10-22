@@ -400,7 +400,7 @@ public int EnableAll<T>(in QueryFilter filter = default) where T : struct, IComp
 public void EnsureEntityCapacity(int capacity);
 ```
 
-预先扩好实体存储，之后创建的实体不超过 `capacity` 个就不会再扩容。
+预先扩好实体存储，之后创建不超过 `capacity` 个实体、再把它们销毁，都不会再扩容。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(容量)
 

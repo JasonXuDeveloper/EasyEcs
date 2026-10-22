@@ -404,7 +404,9 @@ new buffers take the lists of the dead ones.
 - **Large buffers that come and go**, such as the 8,192 blocks of a chunk loaded and unloaded around players: raise
   the capacity once at startup, `DynamicBuffer<Block>.PoolCapacity = 8192;`, and each loaded chunk reuses the list of
   one that was unloaded. The setting is per element type and process-wide; the pool keeps at most the lists of its
-  peak, so it holds that peak times the capacity.
+  peak, so it holds that peak times the capacity. `DynamicBuffer<Block>.ReservePool(chunks)` fills the pool with that
+  many empty lists of the capacity at start-up, so even the first time the world reaches its peak takes lists instead of
+  allocating them.
 - **`TrimExcess`** gives back what a list that once grew large no longer needs. On an empty buffer it gives the list
   back to the pool: the buffer holds no list, and the next first write of any buffer of `T` reuses it. Scratch
   buffers used only while an entity is active (the step of a simulation that sleeps between bursts) then hold no memory

@@ -35,6 +35,10 @@ major or minor version that needs code changes? The
 - `world.SaveEntitiesWithout(output, ids, set)` saves a group of entities with every component but those of a
   `ComponentSet`: the data they compute again after a load stays out of the save. See
   [migration and unloading](/en/docs/guide/migration-and-unload#records).
+- `DynamicBuffer<T>.ReservePool(lists)` fills the buffer pool of `T` with that many empty lists of
+  `PoolCapacity` elements at start-up, so the buffers of the entities a world grows to (chunks around players) take a
+  list instead of allocating one while the server runs. See
+  [dynamic buffers](/en/docs/guide/dynamic-buffers#what-it-costs).
 
 ### Performance [#v4-8-0-performance]
 
@@ -48,6 +52,12 @@ major or minor version that needs code changes? The
   write of any buffer of `T` reuses it, so scratch buffers used only while an entity is active hold no memory in
   between. See [dynamic buffers](/en/docs/guide/dynamic-buffers#what-it-costs).
 
+- `world.Reserve(prefab, n)` and `Reserve<T1..Tn>(n)` also reserve what the entities bring beside their rows: the
+  keys of their indexed components and, for entities with cleanup components, the table they wait in once destroyed.
+  The list of free ids and an index's per-entity records grow with the entity records (`EnsureEntityCapacity`
+  included) instead of one destroyed or indexed entity at a time, so a world that reserved its peak allocates nothing to
+  reach it. See [prefabs](/en/docs/guide/prefabs#reserve).
+
 ### Changes that need code changes [#v4-8-0-breaking]
 
 - Analyzer rule [EECS027](/en/docs/guide/analyzer#eecs027) also reports per-row lookups of indexed components
@@ -57,6 +67,18 @@ major or minor version that needs code changes? The
   structural change of its entity, the same for every row (`[ForEach, With<Dead>] static void Bury(Entity e) =>
   e.Destroy();`): one bulk call in `OnUpdate` (`World.DestroyAll<Dead>()`) changes each table at once
   ([migration guide](/en/docs/migration#v4-8-analyzer)).
+
+### Fixes [#v4-8-0-fixes]
+
+- `Restore`, `Load` and `LoadEntities` no longer allocate again on every call into a world with value, unique or
+  relation indexes: the load emptied its indexes by dropping their lists instead of keeping them for the next load.
+- Loading entities that lack a component their table has (removed by `Remove`, so the save holds presence bits)
+  reuses the bits of the last load instead of allocating them each time.
+- Loading a world that grows between saves (`Load`, `LoadKeeping`) grew its records of ids by exactly the new ids,
+  so every load copied them all; they now double, and the world `LoadEntities` stages arrivals in is sized like the
+  world it loads into and doubles too.
+- `Restore` and `Capture` into an earlier snapshot copy each row's `DynamicBuffer` (and relation links) into the list
+  the row already holds, instead of a new list per row that left the old one to the GC.
 
 ## 4.7.0 [#v4-7-0]
 

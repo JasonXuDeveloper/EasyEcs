@@ -243,8 +243,11 @@ instantiates the group once per element.
 ### Reserve before the wave [#reserve]
 
 `world.Reserve(prefab, count)` grows the table the prefab's instances go to, and the entity records, so the
-next `count` instances grow nothing. For a group, it reserves every member's table. Call it before the tick that
-spawns, so the wave pays no growth inside it.
+next `count` instances grow nothing. For a group, it reserves every member's table. It also reserves what the
+instances bring beside their rows: the keys of their [indexed](/en/docs/guide/indexes-and-relations) components, the
+table they wait in once destroyed when they hold [cleanup components](/en/docs/guide/cleanup-and-disable), and the list of free
+ids their destruction fills. Call it before the tick that spawns, so the wave pays no growth inside it; a server that
+reserves its peak at start-up (players, mobs, items) allocates nothing to reach it.
 
 ```csharp
 world.Reserve(Kinds.Troll, 5_000);
