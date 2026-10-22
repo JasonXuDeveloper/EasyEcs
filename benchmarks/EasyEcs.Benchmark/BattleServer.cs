@@ -219,7 +219,8 @@ public class RespawnSystem : EcsSystem                                        //
         player.EnableVelocity();
     }
 
-    [ForEach, With<Npc>, With<Dead>]
+    // [Consume]: each NPC is destroyed after the method, which retires it (Spawn stays, with the Retired tag)
+    [ForEach, Consume, With<Npc>, With<Dead>]
     static void Despawn(Entity npc, in Position p, ref Spawn spawn, in Rules rules, World world)
     {
         spawn = new Spawn(new Position(p.Y, p.X), npc.Id.Index);              // where the next one appears
@@ -238,8 +239,6 @@ public class RespawnSystem : EcsSystem                                        //
             bag.Add(new Loot(npc.Id.Index & 15));
             hunter.SetKills(hunter.Kills.Count + 1);                          // the leaderboard follows
         }
-
-        npc.Destroy();                                                        // Spawn stays, with the Retired tag
     }
 
     [ForEach, With<Retired>]                                                  // what retired NPCs left behind
@@ -329,12 +328,14 @@ public class ReplicationSystem : EcsSystem                                    //
 // #endregion replication
 
 // #region requests
-/// <summary>A hit a client asked for, on one unit (<c>entity.Run</c>): the write is replicated with the next send.</summary>
-public readonly record struct TakeHit(int Damage) : IForEachEntity<Health>, INoStructuralChanges
+/// <summary>
+/// What a client asks of one unit: [ForEntity] writes the job <c>entity.Run</c> runs (one table lookup, Health its
+/// WriteMask) and the entry point <c>Requests.TakeHit(unit, damage)</c>. The write is replicated with the next send.
+/// </summary>
+public static class Requests
 {
-    public static int WriteMask => 1;
-
-    public void Execute(Entity unit, ref Health hp) => hp.Value -= Damage;
+    [ForEntity, Without<Dead>]
+    static void TakeHit(ref Health hp, int damage) => hp.Value -= damage;
 }
 // #endregion requests
 
@@ -558,12 +559,8 @@ public sealed class BattleServer : IDisposable
     /// A client's hit on the unit it names by id: the id turns back into a handle if that unit still lives, and the hit
     /// runs as a job on that one unit.
     /// </summary>
-    public bool Hit(EntityId target, int damage)
-    {
-        var hit = new TakeHit(damage);
-        return World.TryGetEntity(target, out var unit)
-            && unit.Run<Health, TakeHit>(ref hit, Alive);                     // false: dead, or no Health
-    }
+    public bool Hit(EntityId target, int damage) =>
+        World.TryGetEntity(target, out var unit) && Requests.TakeHit(unit, damage);   // false: dead, or no Health
     // #endregion queries
 
     // #region catch-up
