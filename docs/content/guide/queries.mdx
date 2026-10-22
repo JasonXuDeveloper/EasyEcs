@@ -340,7 +340,9 @@ a multiple of 4,096 rows, at least 4,096, when the job's `WriteMask` includes a 
 chunks share a block's change-tick summary). The calling thread and up to `WorldOptions.MaxDegreeOfParallelism - 1`
 thread-pool threads claim the chunks one at a time as they finish, like OpenMP's `schedule(dynamic, n)`. Each chunk
 runs on its own copy of the job, so state accumulated in its fields is not merged back. Fewer than two chunks run on
-the calling thread.
+the calling thread. `ForEachBatchParallel` (an `IForEachBatch` job) cuts the same chunks and hands each the runs of
+consecutive rows it holds as spans, as `ForEachBatch` does on one thread: the form a parallel
+[reduction](/en/docs/guide/threading#reductions) runs in, with a run's partial result in a local.
 
 ```csharp
 public struct Heal : IForEach<Health>, INoStructuralChanges

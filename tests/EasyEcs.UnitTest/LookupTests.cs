@@ -108,8 +108,21 @@ public class LookupTests
         Assert.That(check.Has(placed.Id), Is.False);
     }
 
+    [Test]
+    public void AnIdPastTheWorldsRecordsFindsNothing()
+    {
+        using var world = new World();
+        world.CreateEntity(new Place(3, 4));
+        var check = new Check(world);
+        var foreign = new EntityId(1 << 26, 1); // from data: another world, a message, a save
+        Assert.That(check.Has(foreign), Is.False);
+        Assert.That(check.Get(foreign), Is.False);
+        Assert.Throws<InvalidOperationException>(() => check.Read(foreign));
+    }
+
     private readonly struct Check(World world)
     {
+        public bool Get(EntityId id) => new Lookup<Place>(world, null)[id].HasValue;
         public Place Read(EntityId id) => new Lookup<Place>(world, null).Read(id);
         public bool Has(EntityId id) => new Lookup<Place>(world, null).Has(id);
     }

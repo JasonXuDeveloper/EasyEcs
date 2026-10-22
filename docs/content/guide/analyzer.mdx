@@ -100,6 +100,8 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS055](#eecs055) | Info | A `[ForEach]` method over numbers gets a vector loop | |
 | [EECS056](#eecs056) | Error | `Simd = SimdMode.Require` on a method that qualifies | |
 | [EECS057](#eecs057) | Error | One write of a reduced singleton per pass | |
+| [EECS058](#eecs058) | Error | What a `Scratch<T>` holds is not stored into the world | |
+| [EECS059](#eecs059) | Error | A `Lookup<T>` reads a component the pass does not write | |
 | [EECS060](#eecs060) | Warning | Code on several threads writes no shared memory | |
 | [EECS061](#eecs061) | Warning | A parallel job's fields are not read after the pass | `ForEach` / `ForEachEntity` |
 
@@ -110,8 +112,8 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 Every parameter must be a `ref` / `in` / `ref readonly` struct implementing `IComponent` or `ISingletonComponent`, a
 `Span<T>` / `ReadOnlySpan<T>` of an `IComponent` struct, a `Maybe<T>` or `ReadOnlyMaybe<T>` of one (an optional
 component), a `Mut<T>`, a `ref Reduce<T>` ([reductions](/en/docs/guide/threading#reductions); without `ref` its
-partial result would be a copy), an `Entity`, or the `World`.
-{/* TODO(parallel ForEach): add Scratch<T> and Lookup<T> to this list once they are merged. */} A `[ForEach]` method [outside a system](/en/docs/guide/systems#foreach-outside-systems) may also take
+partial result would be a copy), a [`Scratch<T>`](/en/docs/guide/threading#scratch), a
+[`Lookup<T>`](/en/docs/guide/threading#lookups) of a component, an `Entity`, or the `World`. A `[ForEach]` method [outside a system](/en/docs/guide/systems#foreach-outside-systems) may also take
 values of any other type: its generated entry point takes them from the caller.
 
 ```csharp doccheck=expect-EECS002
@@ -344,7 +346,8 @@ parallel method to this rule).
 A parallel method runs chunks of rows on several threads at once, so it must make no structural change (static, no
 `World`, its `Entity` used only to read: `Id`, `Has`, `Get`, ...; not `entity.Run`, which does the owner's pass
 bookkeeping and whose job may change structure), run per entity (not a batch method) and write no singleton (a `ref`
-singleton would race between chunks).
+singleton would race between chunks). To read other entities, take a
+[`Lookup<T>`](/en/docs/guide/threading#lookups) instead of the `World`; it is allowed in parallel.
 
 ```csharp doccheck=expect-EECS010
 public class KillSystem : EcsSystem
@@ -1842,6 +1845,97 @@ public class CountUnits : EcsSystem
 ```
 
 Reduce each result into a singleton of its own, and read the last result with `in T` in a later system.
+
+## EECS058 [#eecs058]
+
+**Scratch memory stored into the world.** Error. No code fix.
+
+A [`Scratch<T>`](/en/docs/guide/threading#scratch) value belongs to the thread running the method, and the next row
+that thread runs, of any pass, reuses it. A reference to what it holds (a list, an array, a span, a struct holding
+one) stored into a component, a singleton, a `Maybe`, a `Mut` or a `Reduce` hands that memory to the entity: later
+rows change it under the entity, on another thread in a parallel pass.
+
+```csharp tab="Reported" doccheck=expect-EECS058
+public struct Route : IComponent
+{
+    public int[] Steps;
+}
+
+public class ChartRoutes : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Chart(in Position position, ref Route route, Scratch<int[]> steps)
+    {
+        steps.Value ??= new int[16];
+        for (int i = 0; i < steps.Value.Length; i++) steps.Value[i] = (int)position.X + i;
+        route.Steps = steps.Value;   // the next row on this thread rewrites this entity's route
+    }
+}
+```
+
+```csharp tab="Fixed"
+public record struct Route(int First, int Last) : IComponent;
+
+public class ChartRoutes : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Chart(in Position position, ref Route route, Scratch<int[]> steps)
+    {
+        var buffer = steps.Value ??= new int[16];
+        for (int i = 0; i < buffer.Length; i++) buffer[i] = (int)position.X + i;
+        route = new Route(buffer[0], buffer[^1]);   // the row's result, copied into its own component
+    }
+}
+```
+
+Copy what the row produced into the component's own storage (values, or a
+[dynamic buffer](/en/docs/guide/dynamic-buffers)), or keep the data in a component from the start.
+
+## EECS059 [#eecs059]
+
+**A lookup of a component the pass writes.** Error. No code fix.
+
+A [`Lookup<T>`](/en/docs/guide/threading#lookups) reads `T` of any entity as it was before the pass, so nothing may
+write `T` while the pass runs. A method that writes `T` itself (a `ref`, `Mut`, writable `Maybe` or span parameter)
+would read some rows before their write and some after, and in parallel, rows another thread is writing.
+
+```csharp tab="Reported" doccheck=expect-EECS059
+public class Flock : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Follow(ref Position position, in Target target, Lookup<Position> positions)
+    {
+        var leader = positions[target.Id];   // another chunk may be moving the leader right now
+        if (leader.HasValue)
+            position = new Position((position.X + leader.Value.X) / 2, (position.Y + leader.Value.Y) / 2);
+    }
+}
+```
+
+```csharp tab="Fixed"
+public record struct NextPosition(float X, float Y) : IComponent;
+
+public class Flock : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Follow(in Position position, in Target target, ref NextPosition next, Lookup<Position> positions)
+    {
+        var leader = positions[target.Id];   // every leader where it was before the pass
+        next = leader.HasValue
+            ? new NextPosition((position.X + leader.Value.X) / 2, (position.Y + leader.Value.Y) / 2)
+            : new NextPosition(position.X, position.Y);
+    }
+}
+
+public class MoveFlock : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Move(ref Position position, in NextPosition next) => position = new Position(next.X, next.Y);
+}
+```
+
+Read the entity's own `T` through its parameter, write the result into another component and copy it back in a
+later system (double buffering, the GPU's ping-pong), or split the work into two systems.
 
 ## EECS060 [#eecs060]
 

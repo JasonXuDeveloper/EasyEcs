@@ -16,7 +16,7 @@ public readonly ref struct Lookup<T> where T : struct, IComponent
 
 带索引的 `T`（[`IIndexed`](/zh/docs/reference/iindexed)）还可以按键查找（[`LookupExtensions`](/zh/docs/reference/lookupextensions)：在参数本身上调用 `TryFind`、`Find`、`Count`）：它的索引在遍历之前、在系统所在的并行阶段之前创建并建好，所以遍历中的查找从不修改它。（值索引原本在第一次查找时构建；在并行阶段或并行遍历中通过其他途径访问尚未构建的索引会抛出异常，而不是构建它。）
 
-每次查找是一次实体查找（[`World.TryGetEntity`](/zh/docs/reference/world#trygetentity)，然后读该行的列）。只在传入它的那次调用内有效（ref struct）。
+每次查找是一次实体查找（与 [`World.TryGetEntity`](/zh/docs/reference/world#trygetentity) 一样检查范围和版本，然后读该行的列）。只在传入它的那次调用内有效（ref struct）。
 
 #### 类型参数 [#type-parameters]
 

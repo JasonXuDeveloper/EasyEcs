@@ -60,6 +60,18 @@ major or minor version that needs code changes? The
   replace `T`. Integer results are exact; a float result is the same on any thread count for a fixed `ChunkRows`.
   Analyzer rule [EECS057](/en/docs/guide/analyzer#eecs057) rejects a second write of `T` in the same pass. See
   [reductions](/en/docs/guide/threading#reductions) and the [decision](/en/docs/decisions#d69-reductions).
+- `Scratch<T>`, a `[ForEach]` parameter: the method's working memory on the running thread (OpenMP's
+  `threadprivate`), one `T` per method and thread, never reset, so a list a row fills is allocated once per thread
+  (`scratch.Value ??= new()`). Analyzer rule [EECS058](/en/docs/guide/analyzer#eecs058) rejects storing what it
+  holds into a component or a singleton. See [scratch](/en/docs/guide/threading#scratch) and the
+  [decision](/en/docs/decisions#d74-scratch).
+- `Lookup<T>`, a `[ForEach]` parameter that reads component `T` of any entity as it was before the pass
+  (`lookup[id]`, `Read`, `Has`; `TryFind`, `Find`, `Count` by key for an indexed `T`), in parallel methods too. The
+  system is a reader of `T`; rule [EECS059](/en/docs/guide/analyzer#eecs059) rejects a method that also writes `T`.
+  See [lookups](/en/docs/guide/threading#lookups) and the [decision](/en/docs/decisions#d75-lookup).
+- `world.ForEachBatchParallel<T1..Tn, TJob>(ref job, filter, chunkRows)`: an `IForEachBatch` job over the runs of
+  rows of each chunk, on several threads. See
+  [queries](/en/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel).
 - Analyzer rule [EECS060](/en/docs/guide/analyzer#eecs060) (warning): a parallel `[ForEach]` method or the `Execute`
   of a job run by `ForEachParallel` writes memory every thread shares (a static field, an object a context parameter
   or a job's field refers to): the writes race. Rule [EECS061](/en/docs/guide/analyzer#eecs061) (warning, with a code

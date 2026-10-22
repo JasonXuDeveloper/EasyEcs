@@ -138,6 +138,19 @@ gives each [chunk](#chunk) (or the pass on one thread) its own partial result st
 pass ends the partial results are combined with `T.Combine`, in row order, into singleton `T`. OpenMP's `reduction`,
 MPI's `Allreduce`. See [reductions](/en/docs/guide/threading#reductions).
 
+## Scratch [#scratch]
+
+A `[ForEach]` method's working memory on the thread running it: a `Scratch<T>` parameter holds one `T` per method
+and thread, kept between rows, passes and worlds and never reset, so a list is allocated once per thread. OpenMP's
+`threadprivate`. See [scratch](/en/docs/guide/threading#scratch).
+
+## Lookup [#lookup]
+
+A read of another entity's component from a `[ForEach]` method: a `Lookup<T>` parameter reads `T` of any entity
+(by id, or by key for an indexed `T`) as it was before the pass, and schedules the system as a reader of `T`, so the
+method may run in parallel. MPI's one-sided `Get`, Unity's `ComponentLookup`. See
+[lookups](/en/docs/guide/threading#lookups).
+
 ## Vector loop [#vector-loop]
 
 The `Vector<T>` loop the generator writes for a per-row `[ForEach]` method over components of 1 to 4 numbers of one

@@ -24,7 +24,8 @@ namespace EasyEcs;
 /// changes it. (A value index otherwise builds on its first lookup; reached any other way during a parallel stage or
 /// pass, an index not built yet throws instead of building.)
 /// </para>
-/// Each lookup is one entity lookup (<see cref="World.TryGetEntity"/>, then the row's column). Valid for the call it is
+/// Each lookup is one entity lookup (bounds and version checked like <see cref="World.TryGetEntity"/>, then the row's
+/// column). Valid for the call it is
 /// passed to (a ref struct).
 /// </summary>
 /// <typeparam name="T">The component read.</typeparam>
@@ -48,16 +49,24 @@ public readonly ref struct Lookup<T> where T : struct, IComponent
     public ReadOnlyMaybe<T> this[EntityId id]
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => new(in new Entity(_world, id).Find<T>(false));
+        get => new(in Of(id).Find<T>(false));
     }
 
     /// <summary>The <typeparamref name="T"/> of entity <paramref name="id"/>; throws when the entity lacks it or is not alive. O(1).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ref readonly T Read(EntityId id) => ref new Entity(_world, id).Find<T>(true);
+    public ref readonly T Read(EntityId id) => ref Of(id).Find<T>(true);
 
     /// <summary>Whether entity <paramref name="id"/> is alive and has <typeparamref name="T"/>. O(1).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Has(EntityId id) => new Entity(_world, id).Has<T>();
+    public bool Has(EntityId id) => Of(id).Has<T>();
+
+    /// <summary>
+    /// The handle of <paramref name="id"/>, or a default handle (which finds nothing) when its index is past this world's
+    /// records: the id comes from data (another world, a message, a save), not from one of this world's handles, so
+    /// <see cref="Entity.LocateArchetype"/>'s unchecked record read needs the bound first.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Entity Of(EntityId id) => (uint)id.Index < (uint)_world.Meta.Length ? new Entity(_world, id) : default;
 
     /// <summary>T's index, which the generated code resolved and built before the pass, or null.</summary>
     internal object Index => _index;
@@ -95,7 +104,7 @@ public static class LookupExtensions
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static ValueIndex<T, TKey> Unprepared<T, TKey>() where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey> =>
         throw new InvalidOperationException($"This Lookup<{typeof(T).Name}> holds no index by {typeof(TKey).Name}: a [ForEach] " +
-            "method gets one when it calls TryFind or Count on the parameter itself (the index is then built before the pass)");
+            "method gets one when it calls TryFind, Find or Count on the parameter itself (the index is then built before the pass)");
 
     /// <summary>
     /// <paramref name="world"/>'s index of <typeparamref name="T"/>, created and built: what a <see cref="Lookup{T}"/>

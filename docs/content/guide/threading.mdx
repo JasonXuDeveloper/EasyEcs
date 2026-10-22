@@ -162,7 +162,8 @@ first exception of a stage is rethrown on the calling thread after the stage; wi
 
 `[ForEach(Parallel = true)]` splits one method's rows into chunks across threads. It must make no structural change,
 run per entity and write no singleton ([EECS010](/en/docs/guide/analyzer#eecs010)); a total over the rows is a
-[`Reduce<T>`](#reductions):
+[`Reduce<T>`](#reductions), a row's working list a [`Scratch<T>`](#scratch), a read of another entity a
+[`Lookup<T>`](#lookups):
 
 ```csharp
 public record struct Regen(int PerTick) : ISingletonComponent;
@@ -370,25 +371,177 @@ Console.WriteLine($"{crowd.Count} units between x = {crowd.MinX} and x = {crowd.
   method merges its chunks' copies, so [EECS061](/en/docs/guide/analyzer#eecs061) (a job field read after a parallel
   pass) leaves it alone.
 
-`ReduceBenchmark` measures an integer sum, a float sum and a bounding box with `Reduce<T>` on several threads and on
-one, against a serial `ref` context value, an `Interlocked` add per row, a lock per row and
-`Parallel.For<TLocal>(from, to, localInit, body, localFinally)`.
+`ReduceBenchmark` measures an integer sum, a float sum and a bounding box over 1,000 and 1,000,000 rows with
+`Reduce<T>` on several threads and on one, against a serial `ref` context value, an `Interlocked` add per row, a lock
+per row, `Parallel.For` over the chunks a pass cuts and the per-row `Parallel.For<TLocal>(from, to, localInit, body,
+localFinally)`. The numbers, with the distinct float results of 200 runs of each, are in the
+[decision record](/en/docs/decisions#d69-reductions).
 
-{/* TODO(reductions): the ReduceBenchmark table (<BenchTable bench="ReduceBenchmark" />) once bench.json has it, and
-the link to the reductions decision record's numbers. */}
+{/* TODO(bench): <BenchTable bench="ReduceBenchmark" /> here once bench.json holds it. */}
 
-**Why not `Parallel.For` with `localInit` / `localFinally`** (pending numbers): it is .NET's thread-local pattern and
-the nearest thing to `Reduce<T>`, but it is not the runner. It has no overload that passes state, so a `static` lambda
-needs static state (the column, the result), which is not reentrant: two worlds cannot reduce at once. It allocates on
-every call (its delegates, its partition state). And its partitions follow the thread pool's work stealing, so a float
-result changes from run to run. The world's runner passes the job by `ref`, allocates nothing, and combines the
-partial results in chunk order ([reductions](/en/docs/decisions#d69-reductions)).
+**Why not `Parallel.For` with `localInit` / `localFinally`:** it is .NET's thread-local pattern and the nearest thing to
+`Reduce<T>`, and it lost on every count. It has no overload that passes state, so a `static` lambda needs static state
+(the column, the result), which is not reentrant: two worlds cannot reduce at once. It allocates on every call (its
+delegates, its partition state), so it never runs at 0 B. Its per-row form calls a delegate per row and runs several
+times slower than `Reduce<T>`; over a small pass its hand-off alone costs more than the pass. And its partitions follow
+the thread pool's work stealing, so a float total changes from run to run. `Parallel.For` over the pass's own chunks,
+with the partial results summed in order, keeps up in time and is deterministic, but it still allocates per call and
+still needs the static state. The world's runner passes the job by `ref`, allocates nothing, and combines the partial
+results in chunk order ([D69](/en/docs/decisions#d69-reductions)).
 
-{/* TODO(parallel ForEach): Scratch<T> (a method's working memory on the running thread, kept between rows, passes and
-worlds: OpenMP private / threadprivate) and Lookup<T> (read-only lookups of any entity, scheduled as a read of T;
-TryFind / Find / Count by key for an indexed T, where an index not built yet throws inside a parallel region and
-builds lazily in a serial pass), and World.ForEachBatchParallel. Each a #### section here with when, cost, a
-compiled example and its pitfalls; then the mapping table of guide/high-performance. */}
+A reducing method runs as a batch job: each chunk hands it the runs of consecutive rows it holds
+([`ForEachBatchParallel`](/en/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel)), and
+the run's partial result is a local the JIT keeps in a register. Run per row, the partial result would live in the
+chunk's copy of the job, a load and a store on every row.
+
+#### Working memory per thread: `Scratch<T>` [#scratch]
+
+A row that needs a list for its own work (the candidates of a neighbour search, the open set of a path search, a
+buffer to fill) should not allocate one per row, and may not share one between threads. A `Scratch<T>` parameter is
+the method's working memory on the thread running it: one `T` per method and thread, OpenMP's `threadprivate`. It
+starts as `default`, the first allocation (`scratch.Value ??= new()`) happens once per thread, and every later row on
+that thread finds what the last one left.
+
+<Callout type="idea" title="Use it for">
+  A list, a set or a buffer each row fills and reads within its call, whose size varies or is too big for the stack:
+  candidates, a frontier, a sorted window. In parallel and serial methods alike.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  A small buffer with a bound known up front: `stackalloc` (`Span<int> kept = stackalloc int[24];`) is fastest and
+  needs nothing else. Anything that must outlive the row: that belongs in a component, a
+  [dynamic buffer](/en/docs/guide/dynamic-buffers) or a singleton.
+</Callout>
+
+```csharp
+public record struct Neighbours(int Count, int Spread) : IComponent;
+
+public class CountNeighbours : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Count(in Position position, ref Neighbours neighbours, Scratch<List<int>> scratch)
+    {
+        var near = scratch.Value ??= new List<int>(32);   // once per thread // [!code highlight]
+        near.Clear();                                      // what the last row on this thread left
+        int cell = (int)position.X * 64 + (int)position.Y;
+        for (int i = 0; i < 24; i++)
+            if (((cell ^ (i * 40_503)) & 3) != 0) near.Add(i);
+        int spread = near.Count == 0 ? 0 : near[^1] - near[0];
+        neighbours = new Neighbours(near.Count, spread);
+    }
+}
+```
+
+- **Never reset.** A row finds what the last row on its thread left, of this pass or an earlier one, of this world or
+  another: clear what you use at the start of the row.
+- **Not data of the world.** It adds nothing to the system's reads or writes, so it changes no schedule; and storing
+  what it holds by reference into a component, a singleton, a `Maybe`, a `Mut` or a `Reduce` hands one thread's
+  memory to the next row that reuses it ([EECS058](/en/docs/guide/analyzer#eecs058)).
+- **Its memory is the thread's**, released when the thread ends, not when the world is disposed; thread-pool threads
+  live long, so a buffer that grew large stays large.
+- **What it costs:** one lookup of the thread's value per chunk (per pass on one thread), then a field read per row;
+  0 bytes after each thread's first use. [EECS028](/en/docs/guide/analyzer#eecs028) does not report the one-time
+  `??= new()`.
+
+`ScratchBenchmark` gathers 24 candidates per row over 10,000 and 100,000 rows in parallel, the list kept in a
+`Scratch<T>`, created per row, rented from `ArrayPool<int>.Shared` per row, kept in a hand-written `[ThreadStatic]`
+field, or a `stackalloc` span ([D74](/en/docs/decisions#d74-scratch)).
+
+{/* TODO(scratch): Scratch<T> is still behind a hand-written [ThreadStatic] list in ScratchBenchmark; a fix is being
+tried. Update this paragraph and D74 when it lands, and add <BenchTable bench="ScratchBenchmark" /> once bench.json
+holds it. */}
+
+#### Reading other entities: `Lookup<T>` [#lookups]
+
+A method that needs another entity's component (a chaser's target, a unit's leader, the account a request names)
+would take the `World` and call `TryGetEntity`, which keeps it on one thread. A `Lookup<T>` parameter reads component `T` of any entity instead: Unity's `ComponentLookup` with
+`[ReadOnly]`, MPI's one-sided `Get`. The method stays free of the world, so it may run in parallel.
+
+<Callout type="idea" title="Use it for">
+  Reads of entities other than the row's own: targets, leaders, parents, the holder of a key. Serial methods too: a
+  lookup is faster than the `World` parameter with `TryGetEntity` and `TryGet`.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  The row's own components: take them as parameters. A component the same method writes: a lookup would read rows
+  before or after their write ([EECS059](/en/docs/guide/analyzer#eecs059)).
+</Callout>
+
+| Member | Returns |
+| --- | --- |
+| `lookup[id]` | `ReadOnlyMaybe<T>`: the entity's `T`, or no value when it lacks it or is not alive |
+| `lookup.Read(id)` | `ref readonly T`; throws when the entity lacks it or is not alive |
+| `lookup.Has(id)` | whether the entity is alive and has `T` |
+| `lookup.TryFind(key, out id)`, `Find(key)`, `Count(key)` | for an indexed `T` (`IIndexed<TKey>`, `IUniqueIndexed<TKey>`): an entity of a key, all of them, how many |
+
+```csharp
+public record struct Quarry(EntityId Id) : IComponent;
+public record struct Heading(float X, float Y) : IComponent;
+
+public class ChaseSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Chase(in Position position, in Quarry quarry, ref Heading heading, Lookup<Position> positions)
+    {
+        var at = positions[quarry.Id];                 // the quarry's position from before the pass // [!code highlight]
+        heading = at.HasValue ? new Heading(at.Value.X - position.X, at.Value.Y - position.Y) : default;
+    }
+}
+```
+
+```csharp
+public record struct Login(int Number) : IComponent, IUniqueIndexed<int>
+{
+    public int Key => Number;
+}
+
+public record struct Asks(int Number) : IComponent;
+public record struct Answer(EntityId Login) : IComponent;
+
+public class MatchLogins : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Match(in Asks asks, ref Answer answer, Lookup<Login> logins) =>
+        answer = new Answer(logins.TryFind(asks.Number, out var id) ? id : default);   // the index is built before the pass
+}
+```
+
+- **Every read sees the value from before the pass.** The system is scheduled as a reader of `T`, so no system that
+  writes `T` shares its stage, and the method itself may not write `T` (EECS059). The pass makes no structural change,
+  so ids keep their rows.
+- **Key lookups on the parameter build the index first.** A method that calls `TryFind`, `Find` or `Count` on its
+  `Lookup<T>` gets `T`'s value index created and built before the pass (on the owner thread, before the parallel stage
+  of its system). An index reached any other way inside a parallel region that is not built yet throws instead of
+  building; serial passes still build it on the first lookup.
+- **[EECS010](/en/docs/guide/analyzer#eecs010) accepts it** in a parallel method, where a `World` parameter is
+  rejected.
+- **What it costs:** one entity lookup per read (`TryGetEntity`, then the row's column), a hash probe per key lookup.
+  On one thread it is faster than the `World` parameter with `TryGetEntity` and `TryGet`
+  ([D75](/en/docs/decisions#d75-lookup)); in parallel, lookups spread like any rows.
+
+`LookupBenchmark` chases 1,000 targets from 10,000 and 100,000 rows and finds accounts by a unique key, through a
+`Lookup<T>` in parallel and on one thread and through a `World` parameter.
+
+{/* TODO(bench): <BenchTable bench="LookupBenchmark" /> once bench.json holds it. */}
+
+#### How the runner synchronizes [#runner-contract]
+
+What a parallel pass costs in synchronization, and what orders a chunk's writes before the code after the pass:
+
+| When | Synchronization |
+| --- | --- |
+| Per row | None. The one exception is a method with [`ChunkRows`](#chunk-rows) that writes a tracked component: chunks that split a 4,096-row block set its change-tick summary with an atomic OR, once per 64 written rows ([D67](/en/docs/decisions#d67-chunk-rows)). |
+| Per chunk | One compare-and-swap on the run's cursor (tagged with the run's epoch, so a helper that starts late never claims a chunk of the next run) claims it; when it is done, one `Interlocked.Decrement` of the chunks remaining and one `Interlocked.Add` of the time it took. |
+| Per run | Two `Interlocked.Exchange` on the cursor (open and close), and per helper woken a compare-and-swap and one queued thread-pool work item. |
+| End of the run | The caller spins on `Volatile.Read` of the chunks remaining until it reads 0. The full fence of each chunk's `Decrement` orders its writes (its rows, its job copy and partial result) before the caller's merge and before the code after the pass. |
+
+`ParallelRunnerBenchmark` runs the steering pass of `ParallelForEachBenchmark` through the runner and through
+`Parallel.For` with static delegates: on a small pass the runner is faster and allocates nothing, at 10,000 rows the
+two are level, and at 100,000 rows `Parallel.For` measured faster on a loaded machine, within that machine's noise
+([D22](/en/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)).
+
+{/* TODO(bench): rerun ParallelRunnerBenchmark on a quiet machine; update this paragraph and D22, and add
+<BenchTable bench="ParallelRunnerBenchmark" /> once bench.json holds it. */}
 
 ### Input from other threads [#input-from-other-threads]
 
@@ -560,6 +713,10 @@ changes what an update computes, only how many threads compute it.
   [`ChunkRows`](#chunk-rows), so every thread gets some; one over many light rows keeps the default.
 - **Reduce, do not share.** A count or a sum over a parallel pass is a [`Reduce<T>`](#reductions) parameter: a
   partial result per chunk, no atomic per row.
+- **Scratch per thread, not per row.** A list each row fills is a [`Scratch<T>`](#scratch) (or `stackalloc` for a
+  small fixed bound), not a `new` per row.
+- **Look up, do not take the world.** Reads of other entities go through a [`Lookup<T>`](#lookups), which keeps the
+  method parallel and is faster on one thread too.
 
 One world of 100,000 entities, and the same entities in four worlds on four threads (`WorldSimulationBenchmark`,
 `MultiWorldBenchmark`): <BenchValue k="tick.oneWorld" /> per tick in one world, <BenchValue k="tick.fourWorlds" /> for
@@ -584,7 +741,9 @@ over 100,000 rows, sequential and parallel (`ParallelForEachBenchmark`):
   pass between ticks runs on the caller). Each chunk costs one claim and a copy of the job; with
   [`ChunkRows`](#chunk-rows) on a method that writes a tracked component, also one block opening per 4,096 rows before
   the pass and one atomic OR per 64 written rows. A [`Reduce<T>`](#reductions) adds a job copy per chunk, combined
-  once when the pass ends.
+  once when the pass ends; a [`Scratch<T>`](#scratch) one lookup of the thread's value per chunk; a
+  [`Lookup<T>`](#lookups) one entity lookup per read. The atomics of a pass: [how the runner
+  synchronizes](#runner-contract).
 - **Off:** `ParallelSystems` is off by default, and a world that never uses it pays nothing for it.
 
 ## Pitfalls [#pitfalls]
@@ -608,6 +767,11 @@ over 100,000 rows, sequential and parallel (`ParallelForEachBenchmark`):
 | Two `Reduce<T>` of one `T`, or a `ref T` beside it | One result replaces the other | [EECS057](/en/docs/guide/analyzer#eecs057) |
 | A `Combine` that is not associative (an average of averages) | The result depends on where chunks begin | Code review: reduce the sum and the count, divide after |
 | A float total compared across machines with the default chunks | It differs in the last bits | Set [`ChunkRows`](#chunk-rows) |
+| A `Scratch<T>` list used without clearing it | The row sees the last row's items | Code review: `Clear()` at the start of the row |
+| A reference a `Scratch<T>` holds stored into a component | The next row on that thread changes this entity's data | [EECS058](/en/docs/guide/analyzer#eecs058) |
+| A `Lookup<T>` of a component the same method writes | Rows read before or after their write, torn on another thread | [EECS059](/en/docs/guide/analyzer#eecs059): write another component (double buffering) |
+| A `World` parameter in a parallel method to read other entities | Compile error | [EECS010](/en/docs/guide/analyzer#eecs010): a `Lookup<T>` |
+| A value index reached through a helper inside a parallel pass, before anything built it | `InvalidOperationException` | Call `TryFind` / `Find` / `Count` on the `Lookup<T>` parameter itself |
 
 ## Compared with other ECS libraries [#compared-with-other-ecs-libraries]
 

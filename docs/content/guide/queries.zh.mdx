@@ -312,7 +312,7 @@ if (unit.Run<Health, ReadHealth>(ref read)) Console.WriteLine(read.Value);
 `ForEachEntityParallel`（`IForEachEntity` job）把匹配的行切成块（默认每个线程大约四块，块大小是 64 行的倍数，介于 1,024 和
 `World.ParallelChunkRows` = 16,384 之间；job 的 `WriteMask` 里有被追踪组件时，块大小是 4,096 行的倍数、至少 4,096 行，这样不会
 有两块共用同一个 4,096 行块的变更 tick 摘要）。调用线程加上最多 `WorldOptions.MaxDegreeOfParallelism - 1` 个线程池线程做完一块就领下一块，
-和 OpenMP 的 `schedule(dynamic, n)` 一样。每块跑在 job 的一份副本上，字段里累加的状态不会合并回来。不足两块时，直接在调用线程上跑。
+和 OpenMP 的 `schedule(dynamic, n)` 一样。每块跑在 job 的一份副本上，字段里累加的状态不会合并回来。不足两块时，直接在调用线程上跑。`ForEachBatchParallel`（`IForEachBatch` job）切出同样的块，把每块里连续的行段以 span 交给 job，和单线程的 `ForEachBatch` 一样：并行[归约](/zh/docs/guide/threading#reductions)就以这种形式运行，一段行的部分结果是局部变量。
 
 ```csharp
 public struct Heal : IForEach<Health>, INoStructuralChanges

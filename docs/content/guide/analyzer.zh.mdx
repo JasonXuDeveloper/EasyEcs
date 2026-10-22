@@ -88,6 +88,8 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS055](#eecs055) | 信息 | 数值组件的 `[ForEach]` 方法得到向量循环 | |
 | [EECS056](#eecs056) | 错误 | `Simd = SimdMode.Require` 只用于符合条件的方法 | |
 | [EECS057](#eecs057) | 错误 | 归约的单例每遍只写一次 | |
+| [EECS058](#eecs058) | 错误 | `Scratch<T>` 持有的东西不存进 World | |
+| [EECS059](#eecs059) | 错误 | `Lookup<T>` 读的组件这一遍不写 | |
 | [EECS060](#eecs060) | 警告 | 多线程上运行的代码不写共享内存 | |
 | [EECS061](#eecs061) | 警告 | 遍历之后不读并行 job 的字段 | `ForEach` / `ForEachEntity` |
 
@@ -97,8 +99,8 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 
 每个参数都必须是以下之一：实现 `IComponent` 或 `ISingletonComponent` 的 `ref` / `in` / `ref readonly` 结构体，`IComponent`
 结构体的 `Span<T>` / `ReadOnlySpan<T>`，它的 `Maybe<T>` 或 `ReadOnlyMaybe<T>`（可选组件），`Mut<T>`，`ref Reduce<T>`
-（[归约](/zh/docs/guide/threading#reductions)；不带 `ref` 时部分结果只是一份副本），`Entity`，或者 `World`。
-{/* TODO(parallel ForEach): Scratch<T> 和 Lookup<T> 合并后加进这个列表。 */}
+（[归约](/zh/docs/guide/threading#reductions)；不带 `ref` 时部分结果只是一份副本），[`Scratch<T>`](/zh/docs/guide/threading#scratch)，
+组件的 [`Lookup<T>`](/zh/docs/guide/threading#lookups)，`Entity`，或者 `World`。
 [系统之外](/zh/docs/guide/systems#foreach-outside-systems)的 `[ForEach]` 方法还可以接收任意其他类型的值，由生成的入口从调用方传进来。
 
 ```csharp doccheck=expect-EECS002
@@ -314,7 +316,8 @@ public class DriftAllSystem : EcsSystem
 改成 `static`（即 [EECS029](#eecs029) 的修法，那条规则把并行方法留给本规则）。
 
 并行方法会同时在多个线程上跑一块块的行，所以它不能做结构变更（static、不接收 `World`、`Entity` 只用来读：`Id`、`Has`、`Get` 等；不能调 `entity.Run`，它要做所有者线程上遍历的簿记，它的 job 也可能改结构），
-必须逐实体运行（不能是批量方法），也不能写单例（`ref` 单例会在块之间产生竞争）。
+必须逐实体运行（不能是批量方法），也不能写单例（`ref` 单例会在块之间产生竞争）。要读其他实体，用
+[`Lookup<T>`](/zh/docs/guide/threading#lookups) 代替 `World`；它在并行方法里是允许的。
 
 ```csharp doccheck=expect-EECS010
 public class KillSystem : EcsSystem
@@ -1720,6 +1723,93 @@ public class CountUnits : EcsSystem
 ```
 
 每个结果归约进它自己的单例，在之后的系统里用 `in T` 读最近一次的结果。
+
+## EECS058 [#eecs058]
+
+**把临时内存存进了 World。** 错误。没有代码修复。
+
+[`Scratch<T>`](/zh/docs/guide/threading#scratch) 的值属于运行方法的线程，这个线程接下来运行的行（任何一遍的）都会复用它。把它持有的东西
+（列表、数组、span、持有它们的结构体）的引用存进组件、单例、`Maybe`、`Mut` 或 `Reduce`，就把这块内存交给了实体：之后的行会在实体不知情时改掉它，
+并行遍历时还是在别的线程上改。
+
+```csharp tab="报告" doccheck=expect-EECS058
+public struct Route : IComponent
+{
+    public int[] Steps;
+}
+
+public class ChartRoutes : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Chart(in Position position, ref Route route, Scratch<int[]> steps)
+    {
+        steps.Value ??= new int[16];
+        for (int i = 0; i < steps.Value.Length; i++) steps.Value[i] = (int)position.X + i;
+        route.Steps = steps.Value;   // 这个线程的下一行会改写这个实体的路线
+    }
+}
+```
+
+```csharp tab="修正"
+public record struct Route(int First, int Last) : IComponent;
+
+public class ChartRoutes : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Chart(in Position position, ref Route route, Scratch<int[]> steps)
+    {
+        var buffer = steps.Value ??= new int[16];
+        for (int i = 0; i < buffer.Length; i++) buffer[i] = (int)position.X + i;
+        route = new Route(buffer[0], buffer[^1]);   // 这一行的结果，拷进它自己的组件
+    }
+}
+```
+
+把这一行算出的东西拷进组件自己的存储（值，或者[动态缓冲](/zh/docs/guide/dynamic-buffers)），或者一开始就把数据放在组件里。
+
+## EECS059 [#eecs059]
+
+**查找了这一遍会写的组件。** 错误。没有代码修复。
+
+[`Lookup<T>`](/zh/docs/guide/threading#lookups) 读取的是任意实体在这一遍之前的 `T`，所以这一遍运行时谁都不能写 `T`。方法自己写 `T`
+（`ref`、`Mut`、可写的 `Maybe` 或 span 参数）时，会读到一些写入之前的行、一些写入之后的行，并行时还会读到别的线程正在写的行。
+
+```csharp tab="报告" doccheck=expect-EECS059
+public class Flock : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Follow(ref Position position, in Target target, Lookup<Position> positions)
+    {
+        var leader = positions[target.Id];   // 别的块可能正在移动这个首领
+        if (leader.HasValue)
+            position = new Position((position.X + leader.Value.X) / 2, (position.Y + leader.Value.Y) / 2);
+    }
+}
+```
+
+```csharp tab="修正"
+public record struct NextPosition(float X, float Y) : IComponent;
+
+public class Flock : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Follow(in Position position, in Target target, ref NextPosition next, Lookup<Position> positions)
+    {
+        var leader = positions[target.Id];   // 每个首领都在这一遍之前的位置
+        next = leader.HasValue
+            ? new NextPosition((position.X + leader.Value.X) / 2, (position.Y + leader.Value.Y) / 2)
+            : new NextPosition(position.X, position.Y);
+    }
+}
+
+public class MoveFlock : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Move(ref Position position, in NextPosition next) => position = new Position(next.X, next.Y);
+}
+```
+
+通过参数读实体自己的 `T`，把结果写进另一个组件，再在之后的系统里拷回去（双缓冲，就是 GPU 的乒乓），或者把这件事拆成两个系统。
 
 ## EECS060 [#eecs060]
 

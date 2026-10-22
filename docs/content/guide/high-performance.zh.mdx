@@ -56,9 +56,10 @@ icon: Gauge
 单例，整数精确，`ChunkRows` 固定时浮点可复现：[归约](/zh/docs/guide/threading#reductions)。并行方法写静态计数器报
 [EECS060](/zh/docs/guide/analyzer#eecs060)，`ForEachParallel` 之后读 job 字段报 [EECS061](/zh/docs/guide/analyzer#eecs061)。
 
-{/* TODO(parallel ForEach): hpc-parallel 分支上的 Scratch<T>（线程私有的临时空间：OpenMP 的 private / threadprivate）和
-Lookup<T>（并行方法里对其他实体的只读查找）。每项在这里加一行，
-并在下面的对照表里加一行，链接 guide/threading 里的小节。 */}
+每行的工作列表（搜索的候选、边界）用 `Scratch<T>`：每个方法、每个线程一个，就像 OpenMP 的 `threadprivate`，每个线程只分配一次，由行自己清空；
+上限固定的小缓冲用 `stackalloc` 的 span：[临时空间](/zh/docs/guide/threading#scratch)。读另一个实体的组件用 `Lookup<T>`，就是 MPI 的单边 `Get`：
+每次读取看到的都是这一遍之前的值，所以方法能保持并行：[查找](/zh/docs/guide/threading#lookups)。两者每行都不加原子操作：
+[运行器怎样同步](/zh/docs/guide/threading#runner-contract)。
 
 </Step>
 
@@ -139,9 +140,11 @@ public static class Stencil
 | OpenMP `parallel for` | `[ForEach(Parallel = true)]` | [并行方法](/zh/docs/guide/systems#parallel-methods) |
 | OpenMP `schedule(dynamic, n)` | `ChunkRows = n`（不设时用默认大小） | [`ChunkRows`](/zh/docs/guide/threading#chunk-rows) |
 | OpenMP `reduction(+: x)`、MPI `Allreduce` | 归约进单例 `T : IReduction<T>` 的 `Reduce<T>` 参数 | [归约](/zh/docs/guide/threading#reductions) |
+| OpenMP 的 `private` / `threadprivate` 临时空间 | `Scratch<T>` 参数（从 `default` 开始，不是一份拷贝：没有 `firstprivate`） | [临时空间](/zh/docs/guide/threading#scratch) |
 | OpenMP `sections` / task | 同一阶段的系统，读写互不冲突时同时运行 | [并行系统](/zh/docs/guide/threading#parallel-systems) |
 | 拥有一块子区域的 MPI rank | 每线程一个 World（每个区域或地图一个 World） | [每线程一个 World](/zh/docs/guide/threading#recommended-one-world-per-thread) |
 | MPI 把实体发给另一个 rank | `SaveEntities` / `MoveEntities` | [迁移](/zh/docs/guide/migration-and-unload#save-entities) |
+| MPI 单边的 `MPI_Get`、Unity 的 `ComponentLookup`（`[ReadOnly]`） | `Lookup<T>` 参数：任意实体在这一遍之前的 `T` | [查找](/zh/docs/guide/threading#lookups) |
 | MPI 光环交换（幽灵格子） | 一遍之前从邻居填好的边界缓冲 | [VoxelServer 的水](/zh/docs/samples/voxel-server#water) |
 | Burst 自动向量化 | `[ForEach]` 方法的向量循环 | [向量循环](/zh/docs/guide/systems#vector-loops) |
 | Burst 里手写 `float4` / Unity.Mathematics | 用 `Vector<T>` / `Vector128<T>` 的批处理方法 | [批处理方法](/zh/docs/guide/systems#batch-methods) |
@@ -151,7 +154,7 @@ public static class Stencil
 | GPU 模板缓冲 | 每行一位，用 `TrailingZeroCount` 访问 | [给网格着色](#grid) |
 | GPU 乒乓渲染目标 | 两个缓冲，读一个写一个，再提交 | [VoxelServer 的水](/zh/docs/samples/voxel-server#water) |
 
-{/* TODO(mapping): 落地后补上 private / threadprivate 临时空间（Scratch<T>）、并行方法里的只读查找（Lookup<T>，Unity 带 [ReadOnly] 的 ComponentLookup）、Burst 的 FloatMode.Fast 和 MPI 内部/外圈重叠这几行。 */}
+{/* TODO(mapping): 落地后补上 Burst 的 FloatMode.Fast 和 MPI 内部/外圈重叠这几行。 */}
 
 ## 怎么用得快 [#how-to-use-it-fast]
 

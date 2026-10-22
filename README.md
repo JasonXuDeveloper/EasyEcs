@@ -318,6 +318,11 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   `reduction`), combined in row order into a singleton: no lock or atomic per row, exact integers, reproducible floats
   ([reductions](https://ecs.xgamedev.net/en/docs/guide/threading#reductions)). EECS060 reports parallel code that
   writes shared memory, EECS061 a parallel job's field read after the pass.
+- **Scratch and lookups that stay parallel.** A `Scratch<T>` parameter is a row's working list, allocated once per
+  thread (OpenMP's `threadprivate`); a `Lookup<T>` parameter reads another entity's component as it was before the
+  pass (MPI's one-sided `Get`, Unity's `ComponentLookup`), so a chase or a key lookup runs on every core
+  ([scratch](https://ecs.xgamedev.net/en/docs/guide/threading#scratch),
+  [lookups](https://ecs.xgamedev.net/en/docs/guide/threading#lookups)).
 - **Grid lookups at array speed.** A unique key that maps onto bounded slots (`IDirectIndexed<TKey>`: grid cells,
   chunks around the players) is found by one array entry instead of a hash probe, the hash behind it for the rest
   ([direct-mapped keys](https://ecs.xgamedev.net/en/docs/guide/indexes-and-relations#direct-index)).

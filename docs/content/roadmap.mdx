@@ -69,7 +69,7 @@ neighbours are still holds nothing to copy ([D73](/en/docs/decisions#d73-survey-
   ([D27](/en/docs/decisions#d27-reading-a-missing-singleton-throws-everywhere)).
 - Cached filters from attributes, counting members per component (`world.CountPlayer()`) and a named `TryGetXRef`:
   no line saved, more surface ([D56](/en/docs/decisions#d56-not-added)).
-- Parallel batch jobs, `entity.LastWriteTick<T>()`, public access sets and one parallelism budget for several worlds
+- `[ForEach(Parallel = true)]` on span methods, `entity.LastWriteTick<T>()`, public access sets and one parallelism budget for several worlds
   ([D36](/en/docs/decisions#d36-not-added)).
 - Run conditions (`[RunIf]`): system groups and the host already decide when a group runs, and a predicate per
   system is code the scheduler cannot see ([D51](/en/docs/decisions#d51-not-added)).
