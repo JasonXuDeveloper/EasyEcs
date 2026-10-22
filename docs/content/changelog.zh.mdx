@@ -37,6 +37,14 @@ icon: RotateCcwClock
   fields”、“lane types float and int differ”），就像 Burst 的 Inspector。`[ForEach(Simd = SimdMode.Require)]` 让这种情况成为错误
   （[EECS056](/zh/docs/guide/analyzer#eecs056)），热点循环不会悄悄失去向量；`SimdMode.Off` 让方法保持标量且不再提示。见
   [向量循环](/zh/docs/guide/systems#vector-loops)。
+- 向量循环能接下更多方法（[决策](/zh/docs/decisions#d90-vector-loops-reach)）：并行 `[ForEach]` 方法（每个块的行段）；`Maybe<T>` 参数（有 `T` 的行组成的通道掩码）；
+  `byte`、`sbyte`、`short` 和 `ushort` 组件（每个向量 64 或 32 行，每个运算都证明给出方法本身的位，饱和写法 `(byte)Math.Min(a + b, 255)` 和
+  `(byte)Math.Max(a - b, 0)` 是一条指令）；`Vector2` / `Vector3` / `Vector4` 字段（System.Numerics 和 Godot）、用 `new T(...)` 或 `with` 整体赋值的组件，
+  以及这些向量的运算符；条件下的调用（有通道走进它的向量由方法本身运行）；在 AVX-512 上，最多 16 个字的组件里的 4 字节字段，只要收集它们的置换划算。
+  在 `FloatMode.Fast` 下，`Sin`、`Cos`、`Exp`、`Log`、`Log2` 和 `Hypot` 采用 .NET 的向量近似；`FloatMode.Exact`（默认）让每个结果都与方法本身相同，
+  每台机器上都一样。
+- `SystemInfo.Loops`（在 `world.DescribeSchedule()` 里）列出系统每个 `[ForEach]` 方法得到的循环，或者它为什么一次一行；`tools/jitdisasm.sh` 打印循环的机器码。
+  关于组件太宽或太杂的 EECS055 原因，会在末尾列出方法用到的字段，建议拆成自己的组件。
 - `Reduce<T>`：对所有行求总数的 `[ForEach]` 参数，按 `ref` 传入（OpenMP 的 `reduction`），例如
   `static void Count(in Health h, ref Reduce<Census> census) => census.Value.Alive++;`。`T` 是实现了 `IReduction<T>`（`Identity`、`Combine`）的单例。
   并行遍历的每一块，或单线程时的整遍，累加进自己的部分结果，每行没有锁也没有原子操作；部分结果按块的顺序合并后替换 `T`。整数结果精确；

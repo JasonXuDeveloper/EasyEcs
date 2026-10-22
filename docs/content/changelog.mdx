@@ -53,6 +53,18 @@ major or minor version that needs code changes? The
   `[ForEach(Simd = SimdMode.Require)]` makes that an error ([EECS056](/en/docs/guide/analyzer#eecs056)), so a hot
   loop cannot lose its vectors unnoticed; `SimdMode.Off` keeps a method scalar without the message. See
   [vector loops](/en/docs/guide/systems#vector-loops).
+- Vector loops take more methods ([decision](/en/docs/decisions#d90-vector-loops-reach)): parallel `[ForEach]`
+  methods (each chunk's runs); `Maybe<T>` parameters (a lane mask of the rows that have `T`); components of `byte`,
+  `sbyte`, `short` and `ushort` (64 or 32 rows per vector, each operation proven to give the method's bits, the
+  saturating idioms `(byte)Math.Min(a + b, 255)` and `(byte)Math.Max(a - b, 0)` as one instruction); fields of
+  `Vector2` / `Vector3` / `Vector4` (System.Numerics and Godot), whole components assigned with `new T(...)` or `with`,
+  and the vectors' operators; a call under a condition (the vectors where a lane takes it run the method); and on
+  AVX-512, 4-byte fields of components of up to 16 words where the permutes that gather them pay. Under
+  `FloatMode.Fast`, `Sin`, `Cos`, `Exp`, `Log`, `Log2` and `Hypot` take .NET's vector approximations; `FloatMode.Exact`
+  (the default) keeps every result the method's, the same on every machine.
+- `SystemInfo.Loops` (in `world.DescribeSchedule()`) names the loop each `[ForEach]` method of a system got, or why it
+  runs one row at a time; `tools/jitdisasm.sh` prints a loop's machine code. EECS055 ends a reason about a component too
+  wide or too mixed with the fields the method uses, to split into a component of their own.
 - `Reduce<T>`, a `[ForEach]` parameter taken by `ref` for a total over the rows (OpenMP's `reduction`), as in
   `static void Count(in Health h, ref Reduce<Census> census) => census.Value.Alive++;`: `T` is a singleton that
   implements `IReduction<T>` (`Identity`, `Combine`). Each chunk of a parallel pass, or the pass on one thread, adds

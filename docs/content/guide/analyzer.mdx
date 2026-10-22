@@ -1732,29 +1732,35 @@ default chunks ([when to set it](/en/docs/guide/threading#chunk-rows)).
 **A `[ForEach]` method that runs one row at a time.** Suggestion (Info). No code fix.
 
 The generator turns a [`[ForEach]` method into a vector loop](/en/docs/guide/systems#vector-loops) when it qualifies.
-A method that looks meant for one (static, on one thread, taking only components of number fields, singletons and
-values) but misses a condition gets this message, which names the first reason: a component of 5 fields, two lane
-types, a call the loop has no vector form of, a write to something that is not a lane. It is the counterpart of
-Burst's inspector: the build says which method stayed scalar and why. The method still runs correctly, row by row.
+A method that looks meant for one (static, taking only components of plain values, singletons and values) but misses
+a condition gets this message, which names the first reason: a component too wide for the work the method does on
+it, a `bool` field, a call the loop has no vector form of, a write to something that is not a lane. When the method
+uses few fields of a wide component, the message ends with them: split them into a component of their own. It is the
+counterpart of Burst's inspector: the build says which method stayed scalar and why, and
+[`DescribeSchedule()`](/en/docs/guide/systems#vector-loops) lists the loop of every method. The method still runs
+correctly, row by row.
 
 ```csharp tab="Reported" doccheck=expect-EECS055
-public struct Body : IComponent { public float X, Y, Z, Mass; public int Squad; }   // 5 fields, float and int
+public struct Ship : IComponent { public float X, Y, Z, VX, VY, VZ, Fuel, Heat; }   // 8 fields
 
-public class Sink : EcsSystem
+public class Burn : EcsSystem
 {
-    [ForEach]   // "component Body has 5 fields (a vector loop splits up to 4)"
-    static void Fall(ref Body body) => body.Y -= body.Mass * 0.01f;
+    // "component Ship has 8 fields (a vector loop splits up to 4), and gathering the 1 field it uses takes ... permutes
+    // per 16 rows, more than its 1 vector operation gains; it uses 1 of Ship's 8 fields (Fuel): move it into a
+    // component of its own (a component of one field gets a vector loop)"
+    [ForEach]
+    static void Spend(ref Ship ship) => ship.Fuel -= 0.01f;
 }
 ```
 
 ```csharp tab="Fixed"
-public struct Body : IComponent { public float X, Y, Z, Mass; }   // 4 floats: one vector per field
-public struct Squad : IComponent { public int Value; }             // the int in a component of its own
+public struct Ship : IComponent { public float X, Y, Z, VX, VY, VZ, Heat; }
+public struct Fuel : IComponent { public float Value; }   // what Spend changes, in a component of its own
 
-public class Sink : EcsSystem
+public class Burn : EcsSystem
 {
     [ForEach]
-    static void Fall(ref Body body) => body.Y -= body.Mass * 0.01f;
+    static void Spend(ref Fuel fuel) => fuel.Value -= 0.01f;
 }
 ```
 
@@ -1771,29 +1777,31 @@ When the method does not qualify, the build fails with the reason EECS055 would 
 loop has no vector form of, a field of another type) cannot slow it down without anyone noticing.
 
 ```csharp tab="Reported" doccheck=expect-EECS056
-public struct Charge : IComponent { public float Value; }
+public struct Charge : IComponent { public float Value; public bool Full; }
 
 public class Recharge : EcsSystem
 {
-    [ForEach(Simd = SimdMode.Require)]   // "Math.Clamp is not supported"
-    static void Fill(ref Charge charge) => charge.Value = Math.Clamp(charge.Value + 0.1f, 0f, 1f);
+    [ForEach(Simd = SimdMode.Require)]   // "field Charge.Full is a bool, not a lane type (...)"
+    static void Fill(ref Charge charge)
+    {
+        if (charge.Full) return;
+        charge.Value = Math.Clamp(charge.Value + 0.1f, 0f, 1f);
+    }
 }
 ```
 
 ```csharp tab="Fixed"
 public struct Charge : IComponent { public float Value; }
+public struct Full : IComponent;   // a tag: the full batteries are a set of entities, not a flag
 
 public class Recharge : EcsSystem
 {
-    [ForEach(Simd = SimdMode.Require)]
-    static void Fill(ref Charge charge) => charge.Value = MathF.Min(MathF.Max(charge.Value + 0.1f, 0f), 1f);
+    [ForEach(Simd = SimdMode.Require), Without<Full>]
+    static void Fill(ref Charge charge) => charge.Value = Math.Clamp(charge.Value + 0.1f, 0f, 1f);
 }
 ```
 
 Change what the message names, or set `SimdMode.Auto` (the default) to accept the loop of one row at a time.
-
-{/* TODO(vector loops): when Math.Clamp, MathF.* and lerp get vector forms, replace this example's reason with one
-that still holds. */}
 
 ## EECS057 [#eecs057]
 

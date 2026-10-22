@@ -582,60 +582,73 @@ for (; i < rows; i++)   // 4. the tail, and every row without the shuffles: the 
 
 A method gets a vector loop when all of this holds; otherwise it runs row by row, exactly as before:
 
-- **The method:** `static`, per entity, not `Parallel` (a parallel method stays scalar), no `Entity`, `World`,
-  `Mut<T>` or `Maybe<T>` parameter.
-- **The components:** each holds 1 to 4 fields (or auto-properties) of `float`, `double`, `int`, `uint`, `long` or
-  `ulong`, declared in one part, and all of the method's fields the same type: one lane count. `ref` and `in` both
-  work; write the fields (`p.X += v.X`), not a new value of the whole component.
+- **The method:** `static`, per entity (on one thread or `Parallel`), no `Entity`, `World` or `Mut<T>` parameter. A
+  `Maybe<T>` / `ReadOnlyMaybe<T>` of a component is a lane mask of the rows that have it (on one thread).
+- **The components:** 1 to 4 lanes of one size: fields (or auto-properties) of `float`, `double`, `int`, `uint`,
+  `long`, `ulong`, `byte`, `sbyte`, `short` or `ushort`, or of structs of them (`Vector2`, `Vector3`, `Vector4`,
+  System.Numerics and Godot), declared in one part. `ref` and `in` both work; a whole component may be assigned
+  (`p = new Position(p.Value + v.Value * dt)`, `p = p with { ... }`). On AVX-512 a wider component (up to 16 words,
+  other fields of any plain type) also qualifies when the method uses only its 4-byte fields and the permutes that
+  gather them cost less than the work.
 - **Uniform values:** singletons, constants and `static readonly` fields.
-- **The body:** locals, `=`, compound assignments, `++` / `--`, `+ - *`, `/` on floats, `& | ^ ~`, shifts by a uniform
-  count, comparisons, `&& || !`, `?:`, `if` / `else`, `return`, and `Math` / `MathF` `Min`, `Max`, `Abs` (floats),
-  `Sqrt`, `Floor`, `Ceiling` and `FusedMultiplyAdd`.
+- **The body:** locals, `=`, compound assignments, `++` / `--`, `+ - *`, `/` on floats, `& | ^ ~`, shifts,
+  comparisons, `&& || !`, `?:`, `if` / `else`, `return`, conversions between lane types, the operators of the vector
+  types, and the `Math` / `MathF` functions with an exact vector counterpart (`Min`, `Max`, `Abs`, `Clamp`, `Sqrt`,
+  `Floor`, `Ceiling`, `Round`, `Truncate`, `CopySign`, `FusedMultiplyAdd`, `Lerp`); `Sin`, `Cos`, `Exp`, `Log`,
+  `Log2` and `Hypot` under `FloatMode.Fast`. A call the loop cannot express under a condition the loop computes is a
+  cold branch: the vectors where a lane takes it run the method.
 
 **The same results, bit for bit.** Each lane runs the same IEEE operation as the scalar code, in the same order: no
 reassociation, and no fused multiply-add the method did not write (`Vector.Min` / `Max` treat NaN and −0 as
-`Math.Min` / `Max` do). Change ticks and the system's read and write sets are those of the per-row method.
+`Math.Min` / `Max` do). Narrow lanes take an operation only where the result is proven to be the `int` result C#
+computes. Change ticks and the system's read and write sets are those of the per-row method. Only `FloatMode.Fast`
+changes results ([D90](/en/docs/decisions#d90-vector-loops-reach)).
 
 **A method that does not qualify** stays a scalar loop: it is correct, only slower, and
 [EECS055](/en/docs/guide/analyzer#eecs055) (a suggestion in the IDE) names the first reason, as Burst's inspector
-would. The common causes are a component of more than 4 fields, two number types in one method, a whole component
-assigned (`p = new Position(...)`) instead of its fields, and a call the rule does not cover. Rewrite it the way
-Burst code is written: one number type per method, at most 4 fields per component, the call moved out. A method
-whose speed depends on its loop says so with `Simd = SimdMode.Require`, and the build fails
+would: a `bool` field, a component too wide for the work done on it (with the fields to split out), a vector sum such
+as `Vector3.Dot` whose order the scalar code does not fix, a call outside a condition. A method whose speed depends
+on its loop says so with `Simd = SimdMode.Require`, and the build fails
 ([EECS056](/en/docs/guide/analyzer#eecs056)) when an edit takes the loop away.
 
 ```csharp tab="Stays scalar" doccheck=expect-EECS055
-public struct Fuel : IComponent { public float Value; }
-public struct Engines : IComponent { public int Value; }   // EECS055: lane types float and int differ
+public record struct Motion(System.Numerics.Vector3 Value) : IComponent;
+public struct Speed : IComponent { public float Value; }
 
-public class BurnFuel : EcsSystem
+public class MeasureSpeed : EcsSystem
 {
-    [ForEach]
-    static void Burn(ref Fuel fuel, in Engines engines) =>
-        fuel.Value = MathF.Max(fuel.Value - engines.Value * 0.5f, 0f);
+    [ForEach]   // EECS055: Vector3.Dot adds the fields of a vector together, in an order not proven to be the scalar code's
+    static void Measure(ref Speed speed, in Motion motion) =>
+        speed.Value = MathF.Sqrt(System.Numerics.Vector3.Dot(motion.Value, motion.Value));
 }
 ```
 
 ```csharp tab="Qualifies"
-public struct Fuel : IComponent { public float Value; }
-public struct BurnRate : IComponent { public float Value; }   // the engines' rate, kept as a float
+public record struct Motion(System.Numerics.Vector3 Value) : IComponent;
+public struct Speed : IComponent { public float Value; }
 
-public class BurnFuel : EcsSystem
+public class MeasureSpeed : EcsSystem
 {
-    [ForEach]
-    static void Burn(ref Fuel fuel, in BurnRate rate) =>
-        fuel.Value = MathF.Max(fuel.Value - rate.Value, 0f);
+    [ForEach]   // the sum written out: its order is the method's, so each lane computes it the same way
+    static void Measure(ref Speed speed, in Motion motion)
+    {
+        var v = motion.Value;
+        speed.Value = MathF.Sqrt(v.X * v.X + v.Y * v.Y + v.Z * v.Z);
+    }
 }
 ```
 
-The system's generated file (`<System>.….ForEach.g.cs`, under the project's generated sources, or with
-`<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>` under `obj/`) holds `Vector<` when the method got a
-loop; EECS055 names the methods that did not, without opening the file.
+`world.DescribeSchedule()` names the loop each method of a system got, one line per method (`SystemInfo.Loops`):
 
-{/* TODO(vector loops): Math.Clamp, MathF.* beyond Min/Max/Abs/Sqrt/Floor/Ceiling, lerp and conversions; vector
-reductions (Reduce<T> in a vector loop); FloatMode.Fast; presence-bit lane masks (Maybe<T> as a mask);
-Vector512; bounds-check-free scalar loops. Add each to the qualification list above, with its generated code
-where it changes the loop's shape. */}
+```text
+      loop Move: vector (Vector512 or Vector<float>), flat, masked words vector
+      loop Steer: vector (Vector512 only), wide component (permutes), masked words scalar
+      loop Spawn: scalar (it takes the Entity)
+```
+
+The system's generated file (`<System>.….ForEach.g.cs`, under the project's generated sources, or with
+`<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>` under `obj/`) holds the loop itself, and
+`tools/jitdisasm.sh <project> 'EasyEcs.World:Masked'` prints the machine code the JIT makes of it.
 
 `KernelBenchmark` runs the per-row job against the generated loop over 100,000 and 1,000 rows (a clamp with a branch,
 `h += v * dt`, an int increment, and positions of 2 to 4 fields moved, sought and travelled); its numbers are in [D68](/en/docs/decisions#d68-vector-loops-without-opting-in):

@@ -1614,6 +1614,8 @@ and the `Math` functions with an exact vector counterpart. It is on by default (
 method that looks meant for a loop stays scalar, `Simd = SimdMode.Require` makes that an error (EECS056) and
 `SimdMode.Off` opts a method out. The rows after the last whole vector, and all rows without a vector unit (or,
 for several fields, without the shuffles: AVX2 at 256 bits, permutes at 512), run the method itself.
+Later steps took `Vector512` (where the hardware runs it, then `Vector<T>`),
+`Reduce<T>` results (lane accumulators), masked words and the methods of [D90](#d90-vector-loops-reach).
 
 **Why.**
 - **The JIT does not do it.** In .NET 10 the Tier-1 code of `a[i] += b[i]`, `a[i] += b[i] * 0.5f`, a clamp, an int
@@ -1646,16 +1648,8 @@ for several fields, without the shuffles: AVX2 at 256 bits, permutes at 512), ru
 - **Opt-in, as Burst's `[BurstCompile]`:** Burst needs it because it changes the compiler and allows `FloatMode.Fast`.
   Here nothing changes but speed, so an opt-in would leave most code slow for no safety. `SimdMode` keeps `Auto` as
   the default and adds only the assertion (`Require`) and the way out (`Off`).
-
-{/* TODO(vector loops): the KernelBenchmark numbers of Move2 / Move3 / Move4 / Seek / Travel (several fields), and
-the items still coming (Math.Clamp and MathF.*, presence-bit lane masks, Vector512, bounds-check-free scalar loops,
-vector reductions), each as a bullet here when it lands. */}
 - **Leaving it to batch methods with `Vector<T>`:** still there for lanes the rule does not cover, but it asks every
   user to write SIMD by hand; a per-row method says the same thing.
-- **`Vector512` where the hardware has it:** a hand-written `Vector512` loop is about 1.4 times the generated
-  `Vector<T>` one on AVX-512; a later step of the same generator.
-- **Reductions inside the loop** (sums into a singleton): exact for integers, not for floats without reassociation;
-  parallel reductions are a `Reduce<T>` parameter ([D69](#d69-reductions)), which a vector loop does not take yet.
 
 ## D69. Reductions are a parameter, combined in chunk order [#d69-reductions]
 
@@ -2006,6 +2000,88 @@ per-chunk copies in an array, and the runtime creates no array of a value type t
 **Considered.**
 - **Per-thread bins** (above) and **a sparse list per chunk** (pairs sorted and merged): the second adds a sort per
   chunk to the same merge, so it was not built.
+
+## D90. Vector loops for parallel methods, optional and narrow lanes, struct values and wide rows [#d90-vector-loops-reach]
+
+**Decision.** The vector loop of [D68](#d68-vector-loops-without-opting-in) takes more of the methods real systems
+write, and each method's loop is listed:
+- **Parallel methods.** A `[ForEach(Parallel = true)]` method's chunks run their runs of rows through the same loop.
+- **`FloatMode.Fast` math.** `MathF.Sin`, `Cos`, `Exp`, `Log`, `Log2` and `Hypot` (and their `double` forms) take
+  .NET's vector approximations (`Vector512.Sin`...); under `FloatMode.Exact`, EECS055 names the call.
+- **`Maybe<T>` as a lane mask.** The presence bits of the run's optional column are a lane mask per vector, `HasValue`
+  is that mask and `Value`'s fields are lanes read (and written) where rows have `T`; a read of `Value` for a row
+  without it sends the vector's rows to the method, which throws as written.
+- **Narrow lanes.** `byte`, `sbyte`, `short` and `ushort` components get 64 or 32 rows per `Vector512`. C# computes
+  them as `int`, so the generator follows each value as low bits plus the interval it lies in, and takes an operation
+  only where that proves the narrow lane is the `int` result's: wrapping `+ - * & | ^ ~ <<` (the low bits of the `int`
+  result), `Math.Min` / `Max` chains around a sum or difference as `AddSaturate` / `SubtractSaturate`, compares against
+  a constant inside the range (a saturated sum against 255 is not), right shifts and `Abs` of exact values. Masked words
+  of narrow lanes run the method.
+- **Struct values.** A field of `System.Numerics` or Godot `Vector2` / `Vector3` / `Vector4` (or another struct of
+  lanes) gives its lanes; `new T(...)` (a record's positional constructor, or one that only sets fields), `with`, the
+  vector types' component-wise operators, `Min` / `Max` / `Abs` / `SquareRoot` and struct locals become one statement
+  per lane, so the Godot sample's `position = new Position(position.Value + velocity.Value * dt)` is a flat loop.
+- **Cold branches.** A call (or anything else the loop cannot express) under a condition the loop computes sends the
+  rows of a vector whose lanes take it to the method, in row order, before any store; the other vectors stay vectors.
+- **Wide components.** On AVX-512, a component the loop does not split (more than 4 lanes, fields of other types) gets
+  a `Vector512` loop when the method uses only 4-byte lanes of it on word boundaries, the row is at most 16 words, and
+  the permutes pay: the 16 rows of a vector are loaded as K whole vectors, a pruned tree of two-source permutes
+  (`vpermt2ps`) gathers each used field, and only the vectors holding written words are permuted and stored back.
+  The job's tables are `static readonly` fields, and a `static readonly bool` checks the runtime layout (the size, and
+  each used lane set through `with` and found in its word), so a layout the generator did not predict runs the method.
+- **An inspector.** `DescribeSchedule()` lists each method's loop (`SystemInfo.Loops`: "Move: vector (Vector512 or
+  Vector&lt;float&gt;), flat", "Steer: vector (Vector512 only), wide component (permutes), masked words scalar",
+  "Spawn: scalar (it takes the Entity)"); `tools/jitdisasm.sh` prints the Tier-1 code of a loop
+  (`DOTNET_JitDisasm`, `DOTNET_TC_CallCountingDelayMs=0`).
+- **The advice to split.** When a component is too wide or too mixed for the loop and the method uses at most half its
+  fields (at most 4, of one size), EECS055 ends with them: "it uses 3 of Body's 12 fields (X, VX, Y): split them into a
+  component of their own".
+
+**Why.**
+- **`FloatMode.Exact` is deterministic, and stays so.** Each lane is one IEEE operation of the scalar code, in its
+  order: `+ - * /`, `Sqrt`, `Min` / `Max` and the conversions are correctly rounded on x64 and on ARM64 (AdvSimd)
+  alike, so a vector loop gives every machine the scalar code's bits. `FloatMode.Fast` is the mode that may differ:
+  reordered float sums, and approximations, measured against `MathF` on 1.6 million random inputs each (`Sin` and
+  `Cos` in ±100, `Exp` in ±80, `Log` in 10^-30 to 10^30): `Sin`, `Cos`, `Log` and `Log2` within 1 ulp, `Exp` within 2
+  (`Exp(0)` is `1 + 1 ulp`), `Hypot` equal on every pair tried; for `double`, `Sin` within 1 ulp, `Exp` and `Log`
+  within 2.
+- **Narrow lanes are proven, lane by lane.** A unit test runs every pair of `byte` (and `sbyte`) values, 65,536 rows,
+  through each narrow kernel, with and without rows that lack a component, and compares the bits with the method;
+  swapping `AddSaturate` for `SubtractSaturate` fails it. Anything the interval does not prove stays scalar, with the
+  reason.
+- **Wide rows: where the permutes pay.** Prototype (BenchmarkDotNet, this machine, AVX-512), the permute tree against
+  the per-row loop at 1,000 / 10,000 / 100,000 rows: 3 of 12 fields under 11 vector operations 0.48 / 0.60 / 0.85 of
+  the scalar time; 4 of 8 fields under 4 operations 0.69 / 0.67 / 0.97; 3 of 12 under 3 operations 0.89 / 1.03 /
+  1.10; 4 of 16 under 4 operations 1.07 / 0.96 / 0.94; 2 of 8 under 2 operations 0.66 / 0.97 / 1.06. The gate is the
+  line between them: fewer permutes per 16 rows than 8 per vector operation of the body (31 permutes against 11
+  operations vectorizes, 42 against 4 stays scalar, and says so). The same rows split into a component of the 3 used
+  fields ran in 0.16 to 0.34 of the scalar time: the advice is worth more than the permutes.
+- **Cold branches cost only where taken.** Prototype at 10,000 rows, a call under a condition: 7.75 µs →
+  1.06 µs when no row takes it, 1.09 at 0.1 %, 1.94 at 1 %, 9.30 (against 12.74) at 10 %.
+- **The generated loops, against the same method per row** (`KernelBenchmark`, 1,000 / 100,000 rows, two runs): a
+  byte brightness with saturation 48 ns / 2.6 µs against 3.1 µs / 311 µs; `Vector3` movement 96 to 108 ns / 23 µs
+  against 488 to 565 ns / 53 to 58 µs; a `Maybe<T>` mask 261 to 298 ns / 24 µs against 1.5 µs / 148 to 156 µs
+  (`MaybeBenchmark.OneMethod` 109 → 10 µs, as fast as two methods); a parallel step 274 to 294 ns / 23 to 25 µs against
+  1.4 µs / 207 to 215 µs; a cold branch 87 ns / 10 µs when no row takes it and 281 to 287 ns / 27 µs when one row in
+  100 does, against 752 ns / 64 to 68 µs and 773 to 811 ns / 83 to 85 µs; `Sin` and `Exp` under `FloatMode.Fast`
+  1.8 µs / 178 µs against 7.2 µs / 1.43 ms; the wide component of 12 floats 898 to 916 ns / 186 to 196 µs against
+  1.6 to 1.8 µs / 209 to 217 µs. Every one allocates 0 B, and the loops the branch had before kept their times.
+
+**Considered.**
+- **A full transpose of 8 or 16 words a row** (butterflies, every word moved): 1.07 to 2.05 times the scalar time (8
+  words at 1,000 rows 983 against 531 ns, 16 words 2,666 against 1,301 ns). The pruned tree moves only the used words.
+- **Gathers.** .NET 10 has no AVX-512 gather API; AVX2 gathers of 8 rows ran in 0.8 to 1.18 of the scalar time, below
+  the tree wherever the tree paid.
+- **Strided loads** (one insert per lane): 1.0 to 2.9 times the scalar time.
+- **`[Lane]` / `[Hot]` field markings, `[Layout(Soa)]` storage.** The method already says which fields it uses, so
+  marking them adds nothing the generator lacks. A struct-of-arrays table was the fastest form (3 of 12 fields: 97 ns
+  against 765 at 1,000 rows, 19.9 against 185 µs at 100,000) but changes every API that hands out a `ref` to a row;
+  splitting the component gets most of it (263 ns, 30.7 µs) with storage unchanged, so EECS055 says that instead.
+- **Unrolling the loop** by 2 or 4: 37.4 → 33.1 / 34.1 ns at 1,000 rows, 1,018 → 1,037 / 1,076 ns at 10,000, within
+  noise at 100,000: no consistent gain, and twice the code.
+- **Left for later:** masked words of parallel methods (a chunk passes whole runs), `Maybe<T>` in parallel methods
+  and of narrow lanes, masked words of narrow lanes and of wide rows (they run the method), `Atan2`, `Asin`, `Pow`
+  and kin (no vector form in .NET 10), `Vector2.Clamp` (the sample clamps each field with `Math.Clamp`).
 
 ## Related [#related]
 
