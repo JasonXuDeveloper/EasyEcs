@@ -34,6 +34,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `ITracked` | 标记接口 | 每行记录最后一次写入或移除时的变更 tick（[变更追踪](/zh/docs/guide/change-tracking)）。 |
 | `IIndexed<TKey>` | 接口 | World 按 `Key` 建索引的组件；用 `Set` 写入（EECS015）。键是 `EntityId` 时就是指向实体的链接。 |
 | `IUniqueIndexed<TKey>`、`UniqueIndexExtensions` | 接口、扩展方法 | 一个键只对应一个实体的索引组件：把别人已有的键给第二个实体的写入会抛异常；`index.Get(key)`、`TryGet`（[索引与关系](/zh/docs/guide/indexes-and-relations)）。 |
+| `IDirectIndexed<TKey>` | 接口 | 键能映射到有限个槽的唯一组件（`static Slots`、`static SlotOf(key)`）：索引在哈希旁边多存一个槽数组，`Get` / `TryGet` 和写入时的唯一性检查只读一个元素（[索引与关系](/zh/docs/guide/indexes-and-relations)）。 |
 | `IRelation` | 接口 | `DynamicBuffer<T>` 的元素，把所在实体链接到 `Target`（[索引与关系](/zh/docs/guide/indexes-and-relations)）。 |
 | `ChildOf` | record struct | `ChildOf(EntityId Parent)`：层级；销毁父实体时子实体一起销毁（[层级](/zh/docs/guide/hierarchy)）。 |
 | `IGroup` | 接口 | 用 `Group` 的值拆分表的组件（`world.GroupBy<T>()`，[分组](/zh/docs/guide/groups)）。 |
@@ -73,6 +74,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.CreateEntities(Span<Entity> entities, in T1 … in Tn)` | 均摊 O(count × n) | 整波只过一次闸门，表最多扩容一次；写回句柄 |
 | `entity.Destroy()` | O(c) | 表的最后一行补上空位（遍历期间变成墓碑）；回收 id；失效句柄直接忽略；从索引里摘掉；级联销毁 `ChildOf` 子实体并执行目标策略；开了 `WorldOptions.DestroyLogCapacity` 时多写一条 16 字节的记录 |
 | `world.DestroyAll<T1..Tn>(filter)` | O(M + S) | 一次过闸门销毁所有匹配并返回数量；遍历期间也安全 |
+| `world.CollectIds<T1..Tn>(into, filter)` | O(M)，再加 `into` 写满前读过的行 | 按查询顺序把匹配实体的 id 写进 span，写满为止，返回写了几个：一批有上限的工作，交给 `DestroyEntities`、`SaveEntities` 或结构变更；所有行都匹配的表一次拷贝；不分配 |
 | `world.DestroyEntities(ids)` | O(ids × c) | 一次过闸门、一次级联销毁一组 id 并返回数量；失效的和重复的 id 会跳过；遍历期间也安全 |
 | `entity.IsAlive` / `world.IsAlive(id)` | O(1) | |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` | O(1) | 这个版本的实体不存活时返回 false（或抛异常） |
@@ -201,7 +203,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `index.Ascending()` / `Descending()` | 第一次遍历 O(键数 log 键数)，之后每个实体 O(1) | 键可比较时的有序遍历（排行榜、计时器）；第一次遍历之后索引保持键有序：每出现或消失一个键 O(log 键数) 加一次块移动 |
 | `index.Range(min, max)` / `RangeDescending(min, max)` | 第一次遍历 O(键数 log 键数)，之后 O(log 键数) 定位 `min`，每个实体 O(1) | 闭区间 |
 | `index.WhenTargetDestroyed(policy)` | O(1)；之后每个被销毁的实体 O(1) | `EntityId` 键：目标被销毁时，指向它的组件 `Keep`（默认）、`Remove` 或 `Destroy` |
-| `index.Get(key)` / `TryGet(key, out Entity)` | O(1)：一次哈希查找 | 唯一组件（`IUniqueIndexed<TKey>`）：这个键对应的那个实体；没有时 `Get` 抛 `InvalidOperationException` |
+| `index.Get(key)` / `TryGet(key, out Entity)` | O(1)：一次哈希查找；直接索引组件的键在自己的槽里时，读一次数组 | 唯一组件（`IUniqueIndexed<TKey>`）：这个键对应的那个实体；没有时 `Get` 抛 `InvalidOperationException` |
 
 唯一组件的索引在第一张含它的表出现时就建好，所以每次写入都在改动之前检查：`Set` 和 `CreateEntity` 每个变了的键多一次哈希查找；
 `SetAll` 和 `EnableAll` 对匹配的行多遍历一遍；`Clone`、`Instantiate`、`LoadEntities`、`LoadEntitiesInto` 和 `MoveEntities` 为
@@ -266,6 +268,7 @@ World 保持原样。
 | 生成的成员：单例 `X` 的 `world.X`、`HasX`、`GetOrAddX()`、`SetX(…)`、`RemoveX()` | 同对应的泛型调用 | |
 | `world.Systems` | 遍历 O(系统数)，`Count` 为 O(分组数) | 按执行顺序列出所有分组的系统，零分配 |
 | `world.DefaultUpdateCount` | O(1) | 默认分组已更新的次数 |
+| `world.UpdateCount<TGroup>()` | O(1) | 到目前为止 `Update<TGroup>()` 的调用次数，正在跑的这次也算（第一次之前为 0）：`UpdateInterval` 数的就是它 |
 | `world.RemoveTypes(assembly)` / `RemoveTypes(context)` | O(拥有这些组件的实体数 + 表数 + 已缓存查询数) | 把插件的系统、单例、索引和组件移出 World，它的 `AssemblyLoadContext` 才能卸载；会分配（冷路径） |
 | `world.DescribeTables()` | O(表数 + 列数) | 每张表的列、行数、容量和字节数；会分配（冷路径） |
 | `world.DescribeSchedule()` | O(分组数 × 系统数³) | 每个分组的阶段、每个系统的读写集、等待关系和只靠注册顺序的系统对；会分配（冷路径）；任何线程都能调用 |

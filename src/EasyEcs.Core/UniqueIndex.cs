@@ -26,6 +26,36 @@ public interface IUniqueIndexed : IIndexed;
 /// </summary>
 public interface IUniqueIndexed<TKey> : IIndexed<TKey>, IUniqueIndexed where TKey : IEquatable<TKey>;
 
+/// <summary>
+/// A unique component whose keys map to a bounded range of slots (grid cells, tiles, rooms, player slots): its index
+/// keeps an array of <see cref="Slots"/> entries beside the hash, the entry <see cref="SlotOf"/> of a key holding the
+/// key's entity, so <c>Get</c> / <c>TryGet</c> and the uniqueness check of a write read one array entry instead of
+/// probing the hash. The hash stays the index: a key whose slot is out of range, or taken by another key (two keys of
+/// one slot: a collision), is found through it, and <c>Find</c>, <c>Count</c> and the ordered walks use it as for
+/// any unique index. A slot function folds the keys a world holds at once onto distinct slots (a chunk coordinate
+/// modulo the side of the loaded area); its array costs <see cref="Slots"/> times the key and 12 bytes, allocated with
+/// the index.
+/// <code>
+/// public record struct Cell(int X, int Y) : IComponent, IDirectIndexed&lt;(int, int)&gt;
+/// {
+///     public (int, int) Key => (X, Y);
+///     static int IDirectIndexed&lt;(int, int)&gt;.Slots => 64 * 64;
+///     static int IDirectIndexed&lt;(int, int)&gt;.SlotOf((int, int) key) => (key.Item2 &amp; 63) * 64 + (key.Item1 &amp; 63);
+/// }
+/// </code>
+/// </summary>
+public interface IDirectIndexed<TKey> : IUniqueIndexed<TKey> where TKey : IEquatable<TKey>
+{
+    /// <summary>The length of the slot array (cold: read once, when a world creates the index).</summary>
+    static abstract int Slots { get; }
+
+    /// <summary>
+    /// The slot of <paramref name="key"/>, 0 to <see cref="Slots"/> - 1; any other value leaves the key to the hash.
+    /// Called on every lookup and write of a key: keep it a few instructions, with no state.
+    /// </summary>
+    static abstract int SlotOf(TKey key);
+}
+
 /// <summary>Lookups of a unique index (<see cref="IUniqueIndexed{TKey}"/>): the one entity of a key.</summary>
 public static class UniqueIndexExtensions
 {
@@ -58,4 +88,29 @@ public static class UniqueIndexExtensions
 internal static class UniqueIndexOf<T> where T : struct, IComponent
 {
     internal static Func<World, World.IValueIndex> Create;
+}
+
+/// <summary>
+/// The slot function of a direct-indexed component (<see cref="IDirectIndexed{TKey}"/>) for an index that knows only
+/// its key type: one sealed subclass per component, set when its module loads (<see cref="SavedTypes.DirectIndex{T,TKey}"/>,
+/// generated). Without it, the index of such a component is a plain unique index.
+/// </summary>
+internal abstract class KeySlots<TKey>
+{
+    public abstract int Length { get; }
+
+    public abstract int SlotOf(TKey key);
+}
+
+internal sealed class KeySlots<T, TKey> : KeySlots<TKey> where T : IDirectIndexed<TKey> where TKey : IEquatable<TKey>
+{
+    public override int Length => T.Slots;
+
+    public override int SlotOf(TKey key) => T.SlotOf(key);
+}
+
+/// <summary>The <see cref="KeySlots{TKey}"/> of component <typeparamref name="T"/>, when it is direct-indexed.</summary>
+internal static class KeySlotsOf<T> where T : struct, IComponent
+{
+    internal static object Map;
 }

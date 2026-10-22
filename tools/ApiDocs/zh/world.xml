@@ -547,7 +547,20 @@
       每种 job 类型第一次调用之后零分配。
     </summary>
   </member>
+
+  <member name="M:EasyEcs.World.CollectIds``2(System.Span{EasyEcs.EntityId},EasyEcs.QueryFilter@)" source="4fdbd9b93977">
+    <summary>
+      把拥有 <c>T1, T2</c> 全部组件（并且满足 <paramref name="filter" />）的存活实体的 id 写进 <paramref name="into" />，
+      顺序和 <c>Query</c>、<c>Read</c> 访问它们的顺序一样，写满为止，返回写了几个：一批有界的工作（一个 tick 的前几个请求、
+      接下来要卸载的区块），交给 <c>DestroyEntities</c>、<c>SaveEntities</c> 或者会做结构变更的循环，查询循环里不能做这些。
+      O(匹配的原型数)，加上写满 <paramref name="into" /> 之前读过的行（所有行都匹配的表是一次复制）。零分配。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.UpdateCount``1" source="e49c6802c43b">
+    <summary>
+      到目前为止分组 <typeparamref name="TGroup" /> 的 <see cref="M:EasyEcs.World.Update``1" /> 调用次数，包括正在执行的这一次
+      （第一次之前是 0；从没加过系统的分组也是 0）：分组里系统的 <see cref="P:EasyEcs.EcsSystem.UpdateInterval" /> 就按这个计数算
+      （计数对间隔取模等于系统的 <see cref="P:EasyEcs.EcsSystem.UpdatePhase" /> 时，系统执行）。O(1)。
+    </summary>
+  </member>
 </doc>
-
-
-

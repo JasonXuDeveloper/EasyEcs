@@ -23,6 +23,7 @@
     "groupinfo",
     "icleanupcomponent",
     "icomponent",
+    "idirectindexed",
     "iforeach",
     "iforeachbatch",
     "iforeachentity",

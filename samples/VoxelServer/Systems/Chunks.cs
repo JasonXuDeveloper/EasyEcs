@@ -20,20 +20,14 @@ public class ChunkReadSystem : EcsSystem
 {
     protected override void OnUpdate()
     {
-        if (!World.Any<LoadRequest>()) return;
-        var files = World.Regions.Files;
         Span<EntityId> served = stackalloc EntityId[Rules.MaxRequests];
+        int count = World.CollectIds<LoadRequest>(served, InFiles);           // the rest waits a tick
+        if (count == 0) return;
         Span<ChunkPos> saved = stackalloc ChunkPos[Rules.MaxRequests];
-        int count = 0;
-        foreach (var request in World.Read<LoadRequest>())
-        {
-            if (count == served.Length) break;                                   // the rest waits a tick
-            if (!files.Has(request.LoadRequest.Pos)) continue;                   // never saved: generated
-            saved[count] = request.LoadRequest.Pos;
-            served[count++] = request.Entity;
-        }
+        for (int i = 0; i < count; i++) saved[i] = World.GetEntity(served[i]).LoadRequest.Pos;
         World.DestroyEntities(served[..count]);
 
+        var files = World.Regions.Files;
         long tick = World.Clock.Tick;
         foreach (var pos in saved[..count])
         {
@@ -43,6 +37,8 @@ public class ChunkReadSystem : EcsSystem
             World.Stats.ChunksLoaded++;
         }
     }
+
+    static readonly QueryFilter InFiles = QueryFilter.Create().With<Saved>();
 }
 
 // Generates the chunks asked for that were never saved: an instance of the chunk prefab, its blocks written in place
@@ -52,18 +48,11 @@ public class ChunkGenerateSystem : EcsSystem
 {
     protected override void OnUpdate()
     {
-        if (!World.Any<LoadRequest>()) return;
         Span<EntityId> served = stackalloc EntityId[Rules.MaxRequests];
+        int count = World.CollectIds<LoadRequest>(served, NotInFiles);
+        if (count == 0) return;
         Span<ChunkPos> asked = stackalloc ChunkPos[Rules.MaxRequests];
-        int count = 0;
-        var files = World.Regions.Files;
-        foreach (var request in World.Read<LoadRequest>())
-        {
-            if (count == served.Length) break;
-            if (files.Has(request.LoadRequest.Pos)) continue;                    // saved: ChunkReadSystem's, next tick
-            asked[count] = request.LoadRequest.Pos;
-            served[count++] = request.Entity;
-        }
+        for (int i = 0; i < count; i++) asked[i] = World.GetEntity(served[i]).LoadRequest.Pos;
         World.DestroyEntities(served[..count]);
 
         var prefab = World.Prefabs.Chunk;
@@ -79,6 +68,8 @@ public class ChunkGenerateSystem : EcsSystem
             World.Stats.ChunksGenerated++;
         }
     }
+
+    static readonly QueryFilter NotInFiles = QueryFilter.Create().Without<Saved>();
 }
 // #endregion load
 
@@ -107,9 +98,7 @@ public class ChunkSaveSystem : EcsSystem
     {
         if (!World.Any<Unloading>()) return;
         Span<EntityId> marked = stackalloc EntityId[Rules.MaxRequests];
-        int count = 0;
-        foreach (var chunk in World.Read<Chunk>(Unload))
-            if (count < marked.Length) marked[count++] = chunk.Entity;
+        int count = World.CollectIds<Chunk>(marked, Unload);                  // the rest waits a tick
 
         var files = World.Regions.Files;
         Span<EntityId> group = stackalloc EntityId[Rules.MaxSaved];

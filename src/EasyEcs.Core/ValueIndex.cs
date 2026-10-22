@@ -298,10 +298,83 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
         public bool Linked;
     }
 
+    // A direct-indexed component (IDirectIndexed<TKey>): the slot of each key, holding the key and its entity, or
+    // counting the keys of the slot only the hash holds (Spilled: a collision). Kept by Link and Unlink, cleared with the
+    // index, so it always agrees with the hash. Null for any other index.
+    private readonly KeySlots<TKey> _keySlots;
+    private readonly KeySlot[] _slots;
+
+    private struct KeySlot
+    {
+        public TKey Key;
+        public EntityId Holder; // Null: the slot holds no key
+        public int Spilled;
+    }
+
     internal ValueIndex(World world)
     {
         _world = world;
         _built = Unique; // created before any row of T (World.IndexUnique)
+        if (Unique && KeySlotsOf<T>.Map is KeySlots<TKey> keySlots)
+        {
+            _keySlots = keySlots;
+            _slots = new KeySlot[keySlots.Length];
+        }
+    }
+
+    /// <summary>
+    /// Who has <paramref name="key"/> (not null) by its slot: 1 (<paramref name="holder"/>), 0 (no entity), or -1 when
+    /// the hash must say (the key's slot is out of range, or holds another key and some key of the slot is in the hash
+    /// alone).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int HolderBySlot(TKey key, out EntityId holder)
+    {
+        int slot = _keySlots.SlotOf(key);
+        var slots = _slots;
+        if ((uint)slot < (uint)slots.Length)
+        {
+            ref var entry = ref slots[slot];
+            if (!entry.Holder.IsNull && entry.Key.Equals(key))
+            {
+                holder = entry.Holder;
+                return 1;
+            }
+
+            holder = default;
+            return entry.Spilled == 0 ? 0 : -1;
+        }
+
+        holder = default;
+        return -1;
+    }
+
+    /// <summary>Key <paramref name="key"/> of a direct index was given to <paramref name="holder"/>: its slot holds it, unless another key is there.</summary>
+    private void Place(TKey key, EntityId holder)
+    {
+        int slot = _keySlots.SlotOf(key);
+        if ((uint)slot >= (uint)_slots.Length) return;
+        ref var entry = ref _slots[slot];
+        if (entry.Holder.IsNull)
+        {
+            entry.Key = key;
+            entry.Holder = holder;
+        }
+        else entry.Spilled++;
+    }
+
+    /// <summary>Key <paramref name="key"/> of a direct index left its entity: its slot forgets it, or counts one key less in the hash alone.</summary>
+    private void Displace(TKey key)
+    {
+        int slot = _keySlots.SlotOf(key);
+        if ((uint)slot >= (uint)_slots.Length) return;
+        ref var entry = ref _slots[slot];
+        if (!entry.Holder.IsNull && entry.Key.Equals(key))
+        {
+            entry.Holder = default;
+            entry.Key = default!; // let the GC collect a managed key
+        }
+        else entry.Spilled--;
     }
 
     /// <summary>The world the index belongs to.</summary>
@@ -339,6 +412,16 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     {
         if (Unique) // built from the start; a key's head holds its entity inline
         {
+            if (_keySlots != null && !IsNull(key))
+            {
+                int found = HolderBySlot(key, out var holder);
+                if (found >= 0)
+                {
+                    entity = found == 1 ? new Entity(_world, holder) : default;
+                    return found == 1;
+                }
+            }
+
             ref var head = ref HeadOf(key);
             entity = Unsafe.IsNullRef(ref head) ? default : new Entity(_world, head.Single);
             return !Unsafe.IsNullRef(ref head);
@@ -385,6 +468,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     void World.IValueIndex.Reset(bool rebuild)
     {
         _spares.Clear(_heads); // a restore indexes as many keys again: their arrays wait for them
+        if (_slots != null) Array.Clear(_slots);
         _byTarget.Clear(_spares);
         _keyCount = 0;
         Array.Clear(_nodes);
@@ -453,6 +537,13 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     private void Claim(int id, TKey key)
     {
         if (IsNull(key)) return;
+        if (_keySlots != null)
+        {
+            int found = HolderBySlot(key, out var holder);
+            if (found == 0 || (found == 1 && holder.Index == id)) return; // free, or its own key
+            if (found == 1) throw Taken(key, new ListWalk(holder, 1));
+        }
+
         ref var head = ref CollectionsMarshal.GetValueRefOrNullRef(_heads, key); // unique keys are never EntityIds
         if (Unsafe.IsNullRef(ref head)) return;
         if ((uint)id < (uint)_nodes.Length && _nodes[id].Linked && _nodes[id].Key.Equals(key)) return; // its own key
@@ -540,7 +631,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     void World.IValueIndex.ReserveKeys(int more)
     {
         _heads.EnsureCapacity(_heads.Count + more);
-        _spares.Reserve(more);
+        if (!Unique) _spares.Reserve(more); // a unique key holds its entity inline: no array
         if (_sorted != null && _sortedCount + more > _sorted.Length) Array.Resize(ref _sorted, _sortedCount + more);
     }
 
@@ -634,7 +725,11 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     {
         ref var node = ref _nodes[id];
         if (head.Count == 0) _keyCount++; // the key's first entity
-        if (Unique) head.AddSingle(new EntityId(id, version)); // claimed: the key had none
+        if (Unique)
+        {
+            head.AddSingle(new EntityId(id, version)); // claimed: the key had none
+            if (_keySlots != null) Place(key, new EntityId(id, version));
+        }
         else node.Place = head.Add(new EntityId(id, version), _spares);
         node.Key = key;
         node.Linked = true;
@@ -655,6 +750,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
         if (!inSlot) head = ref CollectionsMarshal.GetValueRefOrNullRef(_heads, node.Key);
         // An emptied _byTarget slot just stays (Count 0 marks it free); a dictionary entry goes.
         bool emptied = head.Remove(node.Place, _spares);
+        if (_keySlots != null) Displace(node.Key);
         if (emptied) _keyCount--;
         if (emptied && !inSlot)
         {

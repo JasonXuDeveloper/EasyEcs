@@ -22,7 +22,7 @@ extension<T, TKey>(ValueIndex<T, TKey> index) public Entity Get(TKey key);
 
 The entity whose `T` has key `key`; throws `InvalidOperationException` when none has it. O(1): a hash probe. Owner thread only.
 
-**Complexity** ([API table](/en/docs/api)): O(1): a hash probe
+**Complexity** ([API table](/en/docs/api)): O(1): a hash probe; one array read for a direct-indexed component's key in its own slot
 
 ### `TryGet` [#tryget]
 
@@ -32,4 +32,4 @@ extension<T, TKey>(ValueIndex<T, TKey> index) public bool TryGet(TKey key, out E
 
 The entity whose `T` has key `key`, if one has it. O(1): a hash probe. Owner thread only.
 
-**Complexity** ([API table](/en/docs/api)): O(1): a hash probe
+**Complexity** ([API table](/en/docs/api)): O(1): a hash probe; one array read for a direct-indexed component's key in its own slot

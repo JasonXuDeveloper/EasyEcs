@@ -42,6 +42,7 @@ public class IndexBenchmark
         _world?.Dispose();
         _sessions?.Dispose();
         _uniqueSessions?.Dispose();
+        _chunks?.Dispose();
     }
 
     private World _sessions, _uniqueSessions;
@@ -122,8 +123,85 @@ public class IndexBenchmark
     public int CreateUnique()
     {
         using var world = new World(new WorldOptions { InitialEntityCapacity = 10_000 });
+        world.Reserve<UniqueSession>(10_000);
         for (int i = 0; i < 10_000; i++) world.CreateEntity(new UniqueSession(i + 1));
         return world.EntityCount;
+    }
+
+    // Chunks of a voxel world by position: 600 loaded in a 30 x 20 area, 8,192 lookups of positions in and around it
+    // (a fifth not loaded). By a unique index (a hash probe), by a direct-indexed one (a 64 x 64 slot array), and by
+    // a hand-written grid of the same slots beside the unique index (what a game writes without the direct index).
+    private World _chunks;
+    private ValueIndex<UniqueChunk, (int, int)> _uniqueChunks;
+    private ValueIndex<DirectChunk, (int, int)> _directChunks;
+    private ((int, int) Pos, EntityId Id)[] _grid;
+    private (int, int)[] _lookups;
+
+    [GlobalSetup(Targets = [nameof(LookupUnique), nameof(LookupDirect), nameof(LookupGrid)])]
+    public void SetupChunks()
+    {
+        _chunks = new World();
+        _uniqueChunks = _chunks.Index<UniqueChunk, (int, int)>();
+        _directChunks = _chunks.Index<DirectChunk, (int, int)>();
+        _grid = new ((int, int), EntityId)[64 * 64];
+        for (int x = 0; x < 30; x++)
+        for (int z = 0; z < 20; z++)
+        {
+            var chunk = _chunks.CreateEntity(new UniqueChunk(x, z), new DirectChunk(x, z));
+            _grid[DirectChunk.Slot((x, z))] = ((x, z), chunk);
+        }
+
+        var random = new System.Random(1);
+        _lookups = new (int, int)[8192];
+        for (int i = 0; i < _lookups.Length; i++) _lookups[i] = (random.Next(-3, 33), random.Next(-2, 22));
+    }
+
+    /// <summary>8,192 chunk lookups by position through a unique index.</summary>
+    [Benchmark]
+    public int LookupUnique()
+    {
+        int found = 0;
+        foreach (var pos in _lookups)
+            if (_uniqueChunks.TryGet(pos, out _)) found++;
+        return found;
+    }
+
+    /// <summary>The same lookups through a direct-indexed component's index.</summary>
+    [Benchmark]
+    public int LookupDirect()
+    {
+        int found = 0;
+        foreach (var pos in _lookups)
+            if (_directChunks.TryGet(pos, out _)) found++;
+        return found;
+    }
+
+    /// <summary>The same lookups through a hand-written grid of slots, the unique index behind it.</summary>
+    [Benchmark]
+    public int LookupGrid()
+    {
+        int found = 0;
+        var grid = _grid;
+        foreach (var pos in _lookups)
+        {
+            ref var slot = ref grid[DirectChunk.Slot(pos)];
+            if (slot.Pos == pos && _chunks.TryGetEntity(slot.Id, out _) || _uniqueChunks.TryGet(pos, out _)) found++;
+        }
+
+        return found;
+    }
+
+    public record struct UniqueChunk(int X, int Z) : IComponent, IUniqueIndexed<(int, int)>
+    {
+        public (int, int) Key => (X, Z);
+    }
+
+    public record struct DirectChunk(int X, int Z) : IComponent, IDirectIndexed<(int, int)>
+    {
+        public (int, int) Key => (X, Z);
+        static int IDirectIndexed<(int, int)>.Slots => 64 * 64;
+        static int IDirectIndexed<(int, int)>.SlotOf((int, int) key) => Slot(key);
+        public static int Slot((int X, int Z) key) => (key.Z & 63) * 64 + (key.X & 63);
     }
 
     public record struct Session(long Token) : IComponent, IIndexed<long>

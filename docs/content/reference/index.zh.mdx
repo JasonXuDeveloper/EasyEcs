@@ -84,6 +84,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 |---|---|
 | [`ICleanupComponent`](/zh/docs/reference/icleanupcomponent) | 标记一个比所在实体活得更久的组件：销毁持有它的实体时，实体不会释放，而是去掉其他组件、加上 Retired 标签，让系统先释放这个组件代表的资源（一个 socket、一个预约、另一个服务里的一个名额），再移除组件。 |
 | [`IComponent`](/zh/docs/reference/icomponent) | 把结构体标记为组件数据。 |
+| [`IDirectIndexed<TKey>`](/zh/docs/reference/idirectindexed) | 键能映射到一个有界槽位范围的唯一组件（网格格子、地块、房间、玩家席位）：它的索引在哈希旁边多存一个 IDirectIndexed.Slots 项的数组，一个键的实体放在 IDirectIndexed.SlotOf 给出的那一项，所以 Get / TryGet 和写入时的唯一性检查只读一个数组项，不用探测哈希。 |
 | [`IForEach<T1..T9>`](/zh/docs/reference/iforeach) | World.ForEach 的结构体回调。 |
 | [`IForEachBatch<T1..T9>`](/zh/docs/reference/iforeachbatch) | World.ForEachBatch 的结构体回调：一次接收一整段行，每个组件一个 span，job 可以用 SIMD 处理（System.Numerics.Vector、MemoryMarshal.Cast），还能拿到这些行的实体（按下标访问时才构造）。 |
 | [`IForEachEntity<T1..T9>`](/zh/docs/reference/iforeachentity) | 和 IForEach 一样，但还接收 Entity 句柄。 |

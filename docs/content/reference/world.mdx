@@ -206,6 +206,26 @@ The children of `parent`: the entities whose [`ChildOf`](/en/docs/reference/chil
 - `world.Children(parent).Count`: O(1)
 - `world.Children(parent)`: O(1), then O(1) per child
 
+### `CollectIds` [#collectids]
+
+```csharp
+public int CollectIds<T1>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent;
+public int CollectIds<T1, T2>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent;
+public int CollectIds<T1, T2, T3>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
+public int CollectIds<T1, T2, T3, T4>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
+public int CollectIds<T1, T2, T3, T4, T5>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
+public int CollectIds<T1, T2, T3, T4, T5, T6>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
+public int CollectIds<T1, T2, T3, T4, T5, T6, T7>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
+public int CollectIds<T1, T2, T3, T4, T5, T6, T7, T8>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
+public int CollectIds<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Span<EntityId> into, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
+```
+
+One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
+
+Write the ids of the alive entities having all of `T1, T2` (and matching `filter`) into `into`, in the order `Query` and `Read` visit them, until it is full, and return how many: a bounded batch of work (the first requests of a tick, the next chunks to unload) to hand to `DestroyEntities`, `SaveEntities` or a loop that changes structure, which a query loop may not. O(matching archetypes), plus the rows read until `into` is full (a table whose rows all match is one copy). Allocation-free.
+
+**Complexity** ([API table](/en/docs/api)): O(M), + the rows read until `into` is full
+
 ### `Count` [#count]
 
 ```csharp
@@ -1032,3 +1052,13 @@ Run one update of every enabled system in group `TGroup` (synchronous, allocatio
 
 - `world.Update()`: Σ systems of the group
 - `world.Update<TGroup>()`: Σ systems of the group
+
+### `UpdateCount` [#updatecount]
+
+```csharp
+public long UpdateCount<TGroup>() where TGroup : struct, ISystemGroup;
+```
+
+Number of [`World.Update`](/en/docs/reference/world#update-2) calls of group `TGroup` so far, the one running included (0 before the first, and for a group no system was ever added to): the count an [`EcsSystem.UpdateInterval`](/en/docs/reference/ecssystem#updateinterval) of the group's systems is taken from (a system runs when it modulo the interval is its [`EcsSystem.UpdatePhase`](/en/docs/reference/ecssystem#updatephase)). O(1).
+
+**Complexity** ([API table](/en/docs/api)): O(1)
