@@ -175,6 +175,17 @@ public struct TileNeighbours
         var grid = index as ValueIndex<TTile, TKey> ?? Unprepared<TTile, TKey>();
         TKey key = entity.Find<TTile>(true).Key;
         around = default;
+        if (TTile.Neighbourhood == TileNeighbourhood.Faces)
+        {
+            // The faces alone (a constant): one Beside each, unrolled, the faces the shape lacks folded away.
+            Face(grid, key, TileFaces.North, 10, ref around);
+            Face(grid, key, TileFaces.South, 16, ref around);
+            Face(grid, key, TileFaces.West, 12, ref around);
+            Face(grid, key, TileFaces.East, 14, ref around);
+            Face(grid, key, TileFaces.Below, 4, ref around);
+            Face(grid, key, TileFaces.Above, 22, ref around);
+            return;
+        }
         for (uint slots = TileOffsets<TTile>.Slots; slots != 0; slots &= slots - 1)
         {
             int slot = BitOperations.TrailingZeroCount(slots);
@@ -185,6 +196,13 @@ public struct TileNeighbours
             if (dy != 0) at = TTile.Beside(at, dy < 0 ? TileFaces.Below : TileFaces.Above);
             if (grid.TryFind(at, out var found)) around[slot] = found.Id;
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Face<TTile, TKey>(ValueIndex<TTile, TKey> grid, TKey key, TileFaces face, int slot, ref TileNeighbours around)
+        where TTile : struct, IComponent, ITile<TKey> where TKey : IEquatable<TKey>
+    {
+        if ((TileOffsets<TTile>.Slots >> slot & 1) != 0 && grid.TryFind(TTile.Beside(key, face), out var found)) around[slot] = found.Id;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
