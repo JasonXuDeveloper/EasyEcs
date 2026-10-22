@@ -15,7 +15,7 @@ namespace EasyEcs;
 /// </summary>
 /// <remarks>
 /// Each call reads or writes exactly the rows of one vector (<c>Vector&lt;T&gt;.Count</c> or
-/// <c>Vector512&lt;T&gt;.Count</c> rows from <paramref name="row"/>): the caller guarantees the column holds them.
+/// <c>Vector512&lt;T&gt;.Count</c> rows from <c>row</c>): the caller guarantees the column holds them.
 /// Shuffles only move bits, so a lane of 4 bytes is moved as a float and one of 8 bytes as a double, whatever its type.
 /// </remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]
@@ -110,6 +110,7 @@ public static class Interleaved
 
     // The 256-bit forms run only behind IsAccelerated (AVX2): Avx / Avx2 calls have no software fallback here.
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Load2<T>(ref T column, nuint row, out Vector256<T> f0, out Vector256<T> f1)
     {
         if (Unsafe.SizeOf<T>() == 4)
@@ -131,6 +132,7 @@ public static class Interleaved
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Store2<T>(Vector256<T> f0, Vector256<T> f1, ref T column, nuint row)
     {
         if (Unsafe.SizeOf<T>() == 4)
@@ -154,6 +156,7 @@ public static class Interleaved
     // Three fields: the elements of one field sit in distinct lanes of the three loaded vectors (3 and the lane count
     // are coprime), so two blends gather them into one vector and one permute puts them in row order.
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Load3<T>(ref T column, nuint row, out Vector256<T> f0, out Vector256<T> f1, out Vector256<T> f2)
     {
         if (Unsafe.SizeOf<T>() == 4)
@@ -178,6 +181,7 @@ public static class Interleaved
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Store3<T>(Vector256<T> f0, Vector256<T> f1, Vector256<T> f2, ref T column, nuint row)
     {
         if (Unsafe.SizeOf<T>() == 4)
@@ -209,6 +213,7 @@ public static class Interleaved
 
     // Four fields: a 4 x 4 transpose (per 128-bit half for 4-byte lanes).
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Load4<T>(ref T column, nuint row, out Vector256<T> f0, out Vector256<T> f1, out Vector256<T> f2, out Vector256<T> f3)
     {
         if (Unsafe.SizeOf<T>() == 4)
@@ -249,6 +254,7 @@ public static class Interleaved
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Store4<T>(Vector256<T> f0, Vector256<T> f1, Vector256<T> f2, Vector256<T> f3, ref T column, nuint row)
     {
         if (Unsafe.SizeOf<T>() == 4)
@@ -454,7 +460,7 @@ public static class Interleaved
     }
 
     /// <summary>
-    /// The permute indices of the 512-bit forms for vectors of <paramref name="lanes"/> lanes (16 of 4 bytes, 8 of 8). In
+    /// The permute indices of the 512-bit forms for vectors of <c>lanes</c> lanes (16 of 4 bytes, 8 of 8). In
     /// a two-source permute, index i &lt; lanes takes lane i of the first vector, lanes + i lane i of the second.
     /// </summary>
     private static class Tables
