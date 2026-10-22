@@ -1333,7 +1333,9 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     where TJob : struct, {{job}}<{{tps}}>
                 {
                     public TJob Job;
-                    private TJob[] _parts = []; // each chunk's copy of the job, when it keeps partial results (TJob.Merges)
+                    // Each chunk's copy of the job, when it keeps partial results (TJob.Merges): a box per chunk, reused by
+                    // every call. Not a TJob[]: the runtime refuses arrays of value types of 64 KB or more (a large Reduce<T>).
+                    private Part[] _parts = [];
                     private World _world;
                     private Archetype[] _tables = [];
                     private RowFilter[] _filters = [];
@@ -1375,7 +1377,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                     Array.Resize(ref _filters, grown);
                                     Array.Resize(ref _starts, grown);
                                     Array.Resize(ref _ends, grown);
-                                    if (TJob.Merges) Array.Resize(ref _parts, grown);
+                                    if (TJob.Merges) Grow(grown);
                                 }
 
                                 _tables[chunks] = archetype;
@@ -1394,7 +1396,19 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         var job = Job;
                         _world.{{name}}Chunk<{{tps}}, TJob>(ref job, archetype, _filters[index], _starts[index], _ends[index], {{List(n, i => $"_b{i}")}});
                         // One write per chunk: neighbouring slots written by other threads share a line only for this store.
-                        if (TJob.Merges) _parts[index] = job;
+                        if (TJob.Merges) _parts[index].Job = job;
+                    }
+
+                    private void Grow(int length)
+                    {
+                        int old = _parts.Length;
+                        Array.Resize(ref _parts, length);
+                        for (int i = old; i < length; i++) _parts[i] = new Part();
+                    }
+
+                    private sealed class Part
+                    {
+                        public TJob Job;
                     }
 
                     /// <summary>
@@ -1403,7 +1417,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// </summary>
                     public void MergeInto(ref TJob job, int chunks)
                     {
-                        for (int i = 0; i < chunks; i++) TJob.Merge(ref job, in _parts[i]);
+                        for (int i = 0; i < chunks; i++) TJob.Merge(ref job, in _parts[i].Job);
                     }
 
                     /// <summary>Drop the references of the last call (tables, filters, the job's own) until the next one.</summary>
@@ -1411,7 +1425,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     {
                         Array.Clear(_tables);
                         Array.Clear(_filters);
-                        if (TJob.Merges) Array.Clear(_parts); // the copies hold the job's references
+                        if (TJob.Merges && RuntimeHelpers.IsReferenceOrContainsReferences<TJob>()) // the copies hold the job's references
+                            for (int i = 0; i < _parts.Length; i++) _parts[i].Job = default;
                         Job = default;
                         _world = null;
                     }

@@ -173,11 +173,76 @@ public partial class ReduceTests
         return world;
     }
 
+    /// <summary>
+    /// Histograms of 10,000 buckets (40 KB each): a job holding two of them is over 64 KB, too large to be the element of
+    /// an array (a single value that large cannot be passed by value at all).
+    /// </summary>
+    public struct Buckets : ISingletonComponent, IReduction<Buckets>
+    {
+        public Counts Values;
+
+        public static Buckets Identity => default;
+
+        public static Buckets Combine(Buckets left, Buckets right)
+        {
+            for (int i = 0; i < Counts.Length; i++) left.Values[i] += right.Values[i];
+            return left;
+        }
+    }
+
+    public struct OddBuckets : ISingletonComponent, IReduction<OddBuckets>
+    {
+        public Counts Values;
+
+        public static OddBuckets Identity => default;
+
+        public static OddBuckets Combine(OddBuckets left, OddBuckets right)
+        {
+            for (int i = 0; i < Counts.Length; i++) left.Values[i] += right.Values[i];
+            return left;
+        }
+    }
+
+    [System.Runtime.CompilerServices.InlineArray(Length)]
+    public struct Counts
+    {
+        public const int Length = 10_000;
+        private int _first;
+    }
+
+    public class ParallelBuckets : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 1024)]
+        static void Add(in Points points, ref Reduce<Buckets> all, ref Reduce<OddBuckets> odd)
+        {
+            all.Value.Values[points.Value % Counts.Length]++;
+            if (points.Value % 2 != 0) odd.Value.Values[points.Value % Counts.Length]++;
+        }
+    }
+
     /// <summary>The armor of the rows written since the last run: rows picked by change ticks, a chunk's runs at a time.</summary>
     public class ChangedArmor : EcsSystem
     {
         [ForEach(Parallel = true, ChunkRows = 64), Changed<Armor>]
         static void Add(in Armor armor, ref Reduce<Scores> tally) => tally.Combine(new Scores { Count = 1, Sum = armor.Value });
+    }
+
+    [Test]
+    public void AJobOfReductionsOver64KilobytesRunsInParallel()
+    {
+        using var world = Pointed(25_000);
+        world.AddSystem<ParallelBuckets>();
+        for (int run = 0; run < 2; run++)
+        {
+            world.Update();
+            ref var all = ref world.GetSingleton<Buckets>();
+            ref var odd = ref world.GetSingleton<OddBuckets>();
+            for (int i = 0; i < Counts.Length; i++)
+            {
+                Assert.That(all.Values[i], Is.EqualTo(i < 5_000 ? 3 : 2), $"bucket {i}");
+                Assert.That(odd.Values[i], Is.EqualTo(i % 2 == 0 ? 0 : i < 5_000 ? 3 : 2), $"odd bucket {i}");
+            }
+        }
     }
 
     [Test]
