@@ -9,7 +9,7 @@ EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/doc
 EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑、但有代价的写法（EECS017、EECS018、EECS020）。生成器会跳过无效输入，由分析器报出来，
 所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046、EECS052、EECS053）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
-（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入；瓦片规则（EECS072、EECS073）拒绝光环装不下的网格瓦片，以及会共用一张纹理的两个瓦片。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -92,6 +92,8 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS059](#eecs059) | 错误 | `Lookup<T>` 或 `Tile<TCell, TTile>` 读的组件这一遍不写 | |
 | [EECS060](#eecs060) | 警告 | 多线程上运行的代码不写共享内存 | |
 | [EECS061](#eecs061) | 警告 | 遍历之后不读并行 job 的字段 | `ForEach` / `ForEachEntity` |
+| [EECS072](#eecs072) | 错误 | 瓦片的形状装得下它的光环 | |
+| [EECS073](#eecs073) | 错误 | 一个方法每种格子类型和网格只接收一个瓦片 | |
 
 ## EECS002 [#eecs002]
 
@@ -1915,6 +1917,87 @@ public static class Reports
 
 要在所有核上对大量行求总数，改写成带 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 参数的 `[ForEach(Parallel = true)]` 方法：
 每一块保留一个部分结果，这一遍把它们合并起来。
+
+## EECS072 [#eecs072]
+
+**无效的瓦片形状。** 错误。没有代码修复。
+
+[瓦片](/zh/docs/guide/high-performance#grid-halo)（`ITileShape`）是 Width x Depth x Height 个格子，Depth 1 到 64（一层的活跃行是一个 64 位字），
+光环至少一个格子。光环从旁边瓦片朝向这边的格子拷来，所以在每条有邻居的轴上（它的 `Faces`）最多和瓦片一样长，边界镜像时每条轴都是如此：
+和 MPI 的幽灵格子宽度一样，不会比子区域更宽。规则读形状的常量成员；规则检查不了的形状，`Tile.Load` 会抛出异常。
+
+```csharp tab="报告" doccheck=expect-EECS072
+// 沿 x 做四阶模板的一条 16 格的带：默认的面包括北和南，
+// 宽 2 行的光环比它唯一的一行还深。
+public record struct Strip(int Index) : IComponent, ITile<int>
+{
+    readonly int IIndexed<int>.Key => Index;
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 1;
+    static int ITileShape.Halo => 2;
+    static int ITile<int>.Beside(int index, TileFaces face) => face == TileFaces.West ? index - 1 : index + 1;
+}
+```
+
+```csharp tab="修正"
+// 一维瓦片：只有西边和东边有邻居。
+public record struct Strip(int Index) : IComponent, ITile<int>
+{
+    readonly int IIndexed<int>.Key => Index;
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 1;
+    static int ITileShape.Halo => 2;
+    static TileFaces ITileShape.Faces => TileFaces.West | TileFaces.East;
+    static int ITile<int>.Beside(int index, TileFaces face) => face == TileFaces.West ? index - 1 : index + 1;
+}
+```
+
+收窄光环、加大瓦片，或者只声明有邻居的面。
+
+## EECS073 [#eecs073]
+
+**同一格子类型和网格的两个瓦片。** 错误。没有代码修复。
+
+`Tile<TCell, TTile>` 加载进当前线程为 `TCell` 和 `TTile` 准备的纹理，两个参数读的又是同一个实体的同一个 `DynamicBuffer<TCell>`：
+第二次加载会覆盖第一次，而方法还在采样第一次的结果。读多个字段的模板每个字段一种格子类型（一个 struct、一个缓冲），每种接收一个瓦片。
+
+```csharp tab="报告" doccheck=expect-EECS073
+public record struct Field(float Value);
+public record struct NextField(float Value);
+
+public class PressureSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(Tile<Field, Strip> pressure, Tile<Field, Strip> velocity, Mut<DynamicBuffer<NextField>> next)
+    {
+        var p = pressure.Load();
+        var v = velocity.Load();   // 同一张纹理：p 现在采样的是速度
+        var into = next.Write().AsSpan();
+        for (int x = 0; x < 16; x++)
+            into[x] = new NextField(p[x, 0, 0].Value - (v[x + 1, 0, 0].Value - v[x - 1, 0, 0].Value) * 0.5f);
+    }
+}
+```
+
+```csharp tab="修正"
+public record struct Pressure(float Value);
+public record struct Velocity1D(float Value);
+public record struct NextPressure(float Value);
+
+public class PressureSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(Tile<Pressure, Strip> pressure, Tile<Velocity1D, Strip> velocity,
+        Mut<DynamicBuffer<NextPressure>> next)
+    {
+        var p = pressure.Load();
+        var v = velocity.Load();   // 每种格子类型一张纹理
+        var into = next.Write().AsSpan();
+        for (int x = 0; x < 16; x++)
+            into[x] = new NextPressure(p[x, 0, 0].Value - (v[x + 1, 0, 0].Value - v[x - 1, 0, 0].Value) * 0.5f);
+    }
+}
+```
 
 ## 相关页面 [#related]
 

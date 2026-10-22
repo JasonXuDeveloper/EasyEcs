@@ -1,27 +1,34 @@
 <doc>
-  <member name="T:EasyEcs.TileReads" source="035407f50c95">
+  <member name="T:EasyEcs.TileReads" source="4e5f77d46c98">
     <summary>
       模板在一个格子周围读什么，它决定 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileReads)" /> 访问哪些行：
-      某一行读到的行里有不为零的格子时，访问这一行。只要读到的全是零、结果就是零的模板（水不会凭空流出，冷处不会升温），
-      就会跳过安静的行，结果不变。
+      某一行读到的行里有不为零的格子时，访问这一行（一行算上它的 halo 格子，所以沿 x 读的模板只需要这一行）。
+      只要读到的全是零、结果就是零的模板（水不会凭空流出，冷处不会升温），就会跳过安静的行，结果不变。
+      一行能读多远由形状的 <see cref="P:EasyEcs.ITileShape.Halo" /> 决定。
     </summary>
   </member>
-  <member name="F:EasyEcs.TileReads.Self" source="92e114354d59">
+  <member name="F:EasyEcs.TileReads.Self" source="fc2b367dc754">
     <summary>这一行自己，连同它前后的格子（西和东）。</summary>
   </member>
-  <member name="F:EasyEcs.TileReads.Sides" source="0fc2d1d984eb">
-    <summary>同一层中它北边和南边的行。</summary>
+  <member name="F:EasyEcs.TileReads.Sides" source="edbb012fb580">
+    <summary>同一层中它北边和南边的行，连同它们的 halo 格子（也就是 2D 的对角）。</summary>
   </member>
-  <member name="F:EasyEcs.TileReads.Above" source="f0f85a3923a6">
-    <summary>上一层中它上面的那一行。</summary>
+  <member name="F:EasyEcs.TileReads.Above" source="bd46d8a35fec">
+    <summary>它上方各层中它上面的行。</summary>
   </member>
-  <member name="F:EasyEcs.TileReads.Below" source="d20e4da8c203">
-    <summary>下一层中它下面的那一行。</summary>
+  <member name="F:EasyEcs.TileReads.Below" source="317795de7520">
+    <summary>它下方各层中它下面的行。</summary>
   </member>
-  <member name="F:EasyEcs.TileReads.Layer" source="78dc366c2f4d">
-    <summary>这一行和它的四邻：2D 五点模板。</summary>
+  <member name="F:EasyEcs.TileReads.Layer" source="ab37f273556c">
+    <summary>这一行和它的四邻：2D 五点或九点模板。</summary>
   </member>
-  <member name="F:EasyEcs.TileReads.All" source="22b5c038524d">
+  <member name="F:EasyEcs.TileReads.All" source="7bd74535670a">
+    <summary>周围的每一行：3D 27 点模板，也是稳妥的默认值。</summary>
+  </member>
+  <member name="F:EasyEcs.TileReads.Diagonals" source="2287d1554fc3">
+    <summary>它上方和下方各层中它北边和南边的行：3D 的棱和角。</summary>
+  </member>
+  <member name="F:EasyEcs.TileReads.Cross" source="22b5c038524d">
     <summary>这一行、它的四邻和上下的行：3D 七点模板。</summary>
   </member>
 </doc>

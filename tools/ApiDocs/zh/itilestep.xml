@@ -1,0 +1,27 @@
+<doc>
+  <member name="T:EasyEcs.ITileStep`3" source="92d2f75307e4">
+    <summary>
+      模板的一步，供 <see cref="M:EasyEcs.PaddedTile`2.Steps``2" /> 使用（时间分块）：一个 struct，它的静态
+      <see cref="M:EasyEcs.ITileStep`3.Step(EasyEcs.TileCursor{`0,`1},System.Int32)" /> 根据周围的格子算出 16 字节格子的下一个值。
+      Steps 在这一步还能算的每个纹素上运行它，所以方法体就是单步时的那个。
+    </summary>
+    <typeparam name="TCell">格子。</typeparam>
+    <typeparam name="TTile">分块的组件和形状。</typeparam>
+    <typeparam name="TLane">这一步计算用的道：float 格子用 <c>float</c>，byte 格子用 <c>byte</c>。</typeparam>
+  </member>
+  <member name="P:EasyEcs.ITileStep`3.Reach" source="1e8182eb127f">
+    <summary>
+      这一步读多远，以格子、行和层计（五点、九点、七点或 27 点模板为 1）：Steps 运行
+      <see cref="P:EasyEcs.ITileShape.Halo" /> / Reach 步，halo 是 Reach 的整数倍。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.ITileStep`3.Reads" source="f444cc85ad54">
+    <summary>这一步在格子周围读什么，决定它跳过哪些行（默认 <see cref="F:EasyEcs.TileReads.All" />）。</summary>
+  </member>
+  <member name="M:EasyEcs.ITileStep`3.Step(EasyEcs.TileCursor{`0,`1},System.Int32)" source="3f0c3c0af2ad">
+    <summary>
+      游标所在行从第 <paramref name="x" /> 个格子起 16 字节格子的下一个值：用
+      <c>cells.Load128&lt;TLane&gt;(x + dx, dy, dz)</c> 读它们和它们的邻居，|dx|、|dy|、|dz| ≤ Reach。
+    </summary>
+  </member>
+</doc>

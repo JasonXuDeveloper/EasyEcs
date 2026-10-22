@@ -1,31 +1,31 @@
 <doc>
-  <member name="T:EasyEcs.PaddedTile`2" source="bd965ab64af6">
+  <member name="T:EasyEcs.PaddedTile`2" source="d45bce2d4467">
     <summary>
       带着 halo 拷入的分块各层（<see cref="M:EasyEcs.Tile`2.Load(System.Int32,System.Int32,`0,System.Boolean)" />）：模板采样的纹理。
       用 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileReads)" /> 遍历要计算的行（活跃的行，用尾零计数找到），
-      用 <see cref="M:EasyEcs.PaddedTile`2.At(EasyEcs.TileRow{`1})" /> 在一行周围采样：离它一个格子、一行或一层的样本都在纹理内，
-      偏移不是常量时有检查，是常量时由 JIT 消掉。在线程再次加载这个分块类型之前有效。
+      用 <see cref="M:EasyEcs.PaddedTile`2.At(EasyEcs.TileRow{`1})" /> 在一行周围采样：离它 <see cref="P:EasyEcs.ITileShape.Halo" />
+      个格子、行或层以内的样本都在纹理内，偏移不是常量时有检查，是常量时由 JIT 消掉。在线程再次加载这个分块类型之前有效。
     </summary>
     <typeparam name="TCell">格子。</typeparam>
     <typeparam name="TTile">分块的组件和形状。</typeparam>
   </member>
-  <member name="P:EasyEcs.PaddedTile`2.From" source="6009ca3c19cb">
-    <summary>加载的第一层（halo 在它下面再加一层）。</summary>
+  <member name="P:EasyEcs.PaddedTile`2.From" source="7bdad3b3e587">
+    <summary>加载的第一层（halo 在它下面再加 r 层）。</summary>
   </member>
-  <member name="P:EasyEcs.PaddedTile`2.To" source="1747f2f22d85">
-    <summary>加载的最后一层（halo 在它上面再加一层）。</summary>
+  <member name="P:EasyEcs.PaddedTile`2.To" source="4cb0a3cbaff9">
+    <summary>加载的最后一层（halo 在它上面再加 r 层）。</summary>
   </member>
-  <member name="P:EasyEcs.PaddedTile`2.Item(System.Int32,System.Int32,System.Int32)" source="65de40e6c98f">
+  <member name="P:EasyEcs.PaddedTile`2.Item(System.Int32,System.Int32,System.Int32)" source="1a20e20ab59a">
     <summary>
-      纹理的格子 (x, y, z)：x 从 −1 到 Width，z 从 −1 到 Depth，y 从 From − 1 到 To + 1（2D 分块为 From 到 To）。
+      纹理的格子 (x, y, z)：x 从 −r 到 Width + r − 1，z 从 −r 到 Depth + r − 1，y 从 From − r 到 To + r（2D 分块为 From 到 To），r 是 halo 宽度。
       超出时抛出异常。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileReads)" source="94f44fa8f9c5">
+  <member name="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileReads)" source="129331d3cbae">
     <summary>
       读 <paramref name="reads" /> 的模板在 From 到 To 层中必须计算的行，逐层、按顺序
-      （<c>foreach (var row in padded.Rows(TileReads.Layer))</c>）：它读的行里有不为零格子的那些。每访问一行、每层 O(1)。
-      加载时没有记录 mask 则抛出异常。
+      （<c>foreach (var row in padded.Rows(TileReads.Layer))</c>）：它读的行里（最远到 halo 宽度）有不为零格子的那些。
+      每访问一行、每层 O(1)。加载时没有记录 mask 则抛出异常。
     </summary>
   </member>
   <member name="M:EasyEcs.PaddedTile`2.At(EasyEcs.TileRow{`1})" source="406b109f60da">
@@ -33,5 +33,28 @@
       纹理中 <paramref name="row" />（From 到 To 层中的一行，来自这个分块的 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileReads)" />，
       或来自按相同层加载的另一个分块）第一个格子处的位置：它的样本。行在范围外时抛出异常。O(1)。
     </summary>
+  </member>
+  <member name="M:EasyEcs.PaddedTile`2.CopyTo(System.Span{`0})" source="0b46bd26c062">
+    <summary>
+      把加载的各层格子（From 到 To，不含 halo）按分块缓冲的布局写进 <paramref name="cells" />：
+      把 <see cref="M:EasyEcs.PaddedTile`2.Steps``2" /> 的结果写进这一步的缓冲。O(层数 × Width × Depth)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.PaddedTile`2.Steps``2" source="2d9fd8556273">
+    <summary>
+      一次遍历内运行模板 <see cref="P:EasyEcs.ITileShape.Halo" /> / <c>TStep.Reach</c> 步（时间分块）：每一步用
+      <typeparamref name="TStep" /> 把纹理算进这个线程的第二个纹理，下一步再读它，来回交替（ping-pong）；每一步 halo 缩小一个 Reach
+      （更外面的格子已经没有它要读的数据），所以最后一步之后，分块自己的格子就是模板应用这么多次的结果，只加载一次。
+      一步跳过的行（<see cref="P:EasyEcs.ITileStep`3.Reads" />）每一步重新计算；没有邻居的地方，halo 继续按边界
+      （<see cref="P:EasyEcs.ITileShape.Boundary" />）处理。用 <see cref="M:EasyEcs.PaddedTile`2.CopyTo(System.Span{`0})" /> 写出结果。
+      需要分块的 mask；不止一步时邻域要是 <see cref="F:EasyEcs.TileNeighbourhood.All" />（几步之后读到的格子在角上）；
+      还要求 Depth + 2r ≤ 64，每行至少 16 字节。
+      <para>
+      最多 O(步数 × 层数 × (Width + 2r) × (Depth + 2r))；线程有了第二个纹理之后零分配。
+      结果在线程再次加载或步进这个分块类型之前有效。
+      </para>
+    </summary>
+    <typeparam name="TStep">这一步：一个 struct，它的 <c>Step</c> 编译进循环。</typeparam>
+    <typeparam name="TLane">这一步计算用的道。</typeparam>
   </member>
 </doc>

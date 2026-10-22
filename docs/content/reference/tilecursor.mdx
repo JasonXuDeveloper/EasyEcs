@@ -10,7 +10,7 @@ description: "A padded tile at the first cell of a row (PaddedTile.At): the cell
 public readonly ref struct TileCursor<TCell, TTile> where TCell : unmanaged where TTile : struct, IComponent, ITileShape
 ```
 
-A padded tile at the first cell of a row ([`PaddedTile.At`](/en/docs/reference/paddedtile#at)): the cells around it, one or a vector at a time. An offset is in cells: dx from −1 (the cell before the row) to Width (the cell after it), dy and dz from −1 to 1 (dy 0 for a 2D tile); a vector of cells must end by the cell after the row. Constant offsets are checked by the JIT, others by a compare.
+A padded tile at the first cell of a row ([`PaddedTile.At`](/en/docs/reference/paddedtile#at)): the cells around it, one or a vector at a time. An offset is in cells: dx from −r (the first halo cell before the row) to Width + r − 1 (the last after it), dy and dz from −r to r (dy 0 for a 2D tile), r the shape's [`ITileShape.Halo`](/en/docs/reference/itileshape#halo); a vector of cells must end by the last halo cell after the row. Constant offsets are checked by the JIT, others by a compare.
 
 #### Type parameters
 

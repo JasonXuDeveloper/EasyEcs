@@ -1,0 +1,11 @@
+<doc>
+  <member name="T:EasyEcs.TileIds" source="2552d8cc8432">
+    <summary><see cref="M:EasyEcs.Tile`2.Facing(EasyEcs.TileFaces)" /> 列出的分块邻居，用 <c>foreach</c> 遍历。</summary>
+  </member>
+  <member name="P:EasyEcs.TileIds.Current" source="c3701bbd5215">
+    <summary>遍历当前所在的邻居。</summary>
+  </member>
+  <member name="M:EasyEcs.TileIds.MoveNext" source="fad440d2eb08">
+    <summary>移到下一个邻居；最后一个之后返回 false。</summary>
+  </member>
+</doc>

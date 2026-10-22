@@ -50,8 +50,12 @@ icon: RotateCcwClock
   和[决策](/zh/docs/decisions#d75-lookup)。
 - `Tile<TCell, TTile>`：切成瓦片的网格上的 `[ForEach]` 参数：`TTile` 实现 `ITile<TKey>`（形状、键、某个面旁边的键），实体持有
   `DynamicBuffer<TCell>`。生成器找邻居、声明读取并让方法保持并行；`Load` 把瓦片连同邻居的边填进线程的纹理，`Rows` 走模板可能改变的行，
-  `At(row).Load128` 采样周围的格子。规则 [EECS059](/zh/docs/guide/analyzer#eecs059) 也拒绝旁边写它格子缓冲的瓦片。见
-  [给网格着色](/zh/docs/guide/high-performance#grid)和[决策](/zh/docs/decisions#d76-tiles)。
+  `At(row).Load128` 采样周围的格子。形状决定光环的宽度（`Halo`，MPI 的幽灵格子宽度）、读哪些邻居（`Neighbourhood`：面、棱、角，
+  用于九点和 27 点模板），以及没有邻居处放什么（`Boundary`：填充、钳制、镜像）；`Steps` 一次加载运行模板的多步（时间分块），
+  `Changes` / `Facing` 让安静的瓦片休眠，并唤醒边缘变化处旁边的瓦片。规则 [EECS059](/zh/docs/guide/analyzer#eecs059)
+  也拒绝旁边写它格子缓冲的瓦片，[EECS072](/zh/docs/guide/analyzer#eecs072) 拒绝光环比瓦片还宽的形状，
+  [EECS073](/zh/docs/guide/analyzer#eecs073) 拒绝一个方法接收同一格子类型的两个瓦片。见
+  [给网格着色](/zh/docs/guide/high-performance#grid)和[决策](/zh/docs/decisions#d77-tiles)。
 - `world.ForEachBatchParallel<T1..Tn, TJob>(ref job, filter, chunkRows)`：在多个线程上按每块里连续的行段运行 `IForEachBatch` job。见
   [查询](/zh/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel)。
 - 分析器规则 [EECS060](/zh/docs/guide/analyzer#eecs060)（警告）：并行 `[ForEach]` 方法或 `ForEachParallel` 运行的 job 的 `Execute` 写了所有线程

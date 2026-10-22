@@ -17,7 +17,7 @@ EECS040 to EECS045, EECS047 to EECS051) find calls and declarations that compile
 throws or the code cannot work, a warning where a write is lost or a ref can point at the wrong row. The vector-loop
 rules say why a method runs one row at a time (EECS055, a suggestion) and fail the build when a method that must
 vectorize does not (EECS056); EECS057 keeps a [reduction](/en/docs/guide/threading#reductions) the only write of its
-singleton; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
+singleton; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses; the tile rules (EECS072, EECS073) reject a grid tile whose halo does not fit and two tiles that would share a texture. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
 same package), and only when the result compiles.
 
 ## When to read it [#when-to-use-it]
@@ -104,6 +104,8 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS059](#eecs059) | Error | A `Lookup<T>` or `Tile<TCell, TTile>` reads a component the pass does not write | |
 | [EECS060](#eecs060) | Warning | Code on several threads writes no shared memory | |
 | [EECS061](#eecs061) | Warning | A parallel job's fields are not read after the pass | `ForEach` / `ForEachEntity` |
+| [EECS072](#eecs072) | Error | A tile's shape fits its halo | |
+| [EECS073](#eecs073) | Error | A method takes one tile per cell type and grid | |
 
 ## EECS002 [#eecs002]
 
@@ -2046,6 +2048,90 @@ public static class Reports
 For a total over many rows on all cores, write a `[ForEach(Parallel = true)]` method with a
 [`Reduce<T>`](/en/docs/guide/threading#reductions) parameter instead: each chunk keeps a partial result and the pass
 combines them.
+
+## EECS072 [#eecs072]
+
+**An invalid tile shape.** Error. No code fix.
+
+A [tile](/en/docs/guide/high-performance#grid-halo) (`ITileShape`) is Width x Depth x Height cells, Depth 1 to 64 (the
+active rows of a layer are one 64-bit word), with a halo of one cell or more. The halo is copied from the facing cells
+of the tile beside, so it is at most the tile's extent along every axis that has neighbours (its `Faces`), and along
+every axis when the boundary mirrors: like an MPI ghost width, never wider than the subdomain. The rule reads the
+shape's constant members; `Tile.Load` throws for a shape it could not check.
+
+```csharp tab="Reported" doccheck=expect-EECS072
+// A strip of 16 cells for a fourth-order stencil along x: its default faces include north and south,
+// and a halo of 2 rows is deeper than its one row.
+public record struct Strip(int Index) : IComponent, ITile<int>
+{
+    readonly int IIndexed<int>.Key => Index;
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 1;
+    static int ITileShape.Halo => 2;
+    static int ITile<int>.Beside(int index, TileFaces face) => face == TileFaces.West ? index - 1 : index + 1;
+}
+```
+
+```csharp tab="Fixed"
+// A 1D tile: neighbours to the west and east only.
+public record struct Strip(int Index) : IComponent, ITile<int>
+{
+    readonly int IIndexed<int>.Key => Index;
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 1;
+    static int ITileShape.Halo => 2;
+    static TileFaces ITileShape.Faces => TileFaces.West | TileFaces.East;
+    static int ITile<int>.Beside(int index, TileFaces face) => face == TileFaces.West ? index - 1 : index + 1;
+}
+```
+
+Narrow the halo, widen the tile, or declare only the faces that have neighbours.
+
+## EECS073 [#eecs073]
+
+**Two tiles of the same cells and grid.** Error. No code fix.
+
+A `Tile<TCell, TTile>` loads into the running thread's texture for `TCell` and `TTile`, and both parameters read the
+same `DynamicBuffer<TCell>` of the same entity: the second load replaces the first while the method still samples it.
+A stencil over several fields keeps one cell type per field (one struct, one buffer) and takes one tile of each.
+
+```csharp tab="Reported" doccheck=expect-EECS073
+public record struct Field(float Value);
+public record struct NextField(float Value);
+
+public class PressureSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(Tile<Field, Strip> pressure, Tile<Field, Strip> velocity, Mut<DynamicBuffer<NextField>> next)
+    {
+        var p = pressure.Load();
+        var v = velocity.Load();   // the same texture: p now samples the velocity
+        var into = next.Write().AsSpan();
+        for (int x = 0; x < 16; x++)
+            into[x] = new NextField(p[x, 0, 0].Value - (v[x + 1, 0, 0].Value - v[x - 1, 0, 0].Value) * 0.5f);
+    }
+}
+```
+
+```csharp tab="Fixed"
+public record struct Pressure(float Value);
+public record struct Velocity1D(float Value);
+public record struct NextPressure(float Value);
+
+public class PressureSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(Tile<Pressure, Strip> pressure, Tile<Velocity1D, Strip> velocity,
+        Mut<DynamicBuffer<NextPressure>> next)
+    {
+        var p = pressure.Load();
+        var v = velocity.Load();   // a texture per cell type
+        var into = next.Write().AsSpan();
+        for (int x = 0; x < 16; x++)
+            into[x] = new NextPressure(p[x, 0, 0].Value - (v[x + 1, 0, 0].Value - v[x - 1, 0, 0].Value) * 0.5f);
+    }
+}
+```
 
 ## Related [#related]
 

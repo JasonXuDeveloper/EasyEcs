@@ -1,11 +1,11 @@
 <doc>
-  <member name="T:EasyEcs.ITileShape" source="c2cf125c4a01">
+  <member name="T:EasyEcs.ITileShape" source="8f281407dbf4">
     <summary>
       分块的形状，写在让实体成为网格分块的组件上（<see cref="T:EasyEcs.ITile`1" />）：实体的格子共
       <see cref="P:EasyEcs.ITileShape.Width" /> × <see cref="P:EasyEcs.ITileShape.Depth" /> × <see cref="P:EasyEcs.ITileShape.Height" /> 个，
       存在它的 <c>DynamicBuffer&lt;TCell&gt;</c> 里：每行 <see cref="P:EasyEcs.ITileShape.Width" /> 个（x），每层
       <see cref="P:EasyEcs.ITileShape.Depth" /> 行（z），共 <see cref="P:EasyEcs.ITileShape.Height" /> 层（y）：格子 (x, y, z) 在
-      <c>(y * Depth + z) * Width + x</c>。都是静态成员，JIT 读一次：分块的代码按它的形状编译。
+      <c>(y * Depth + z) * Width + x</c>。都是静态成员，JIT 读一次：分块的代码按它的形状编译，每个尺寸和依赖它的分支都折叠成常量。
     </summary>
   </member>
   <member name="P:EasyEcs.ITileShape.Width" source="9ebf8da52997">
@@ -17,10 +17,23 @@
   <member name="P:EasyEcs.ITileShape.Height" source="cbc858cdd86b">
     <summary>层数（y），至少 1：1（默认）是 2D 分块，它上下没有层。</summary>
   </member>
-  <member name="P:EasyEcs.ITileShape.Faces" source="182d960008a7">
+  <member name="P:EasyEcs.ITileShape.Faces" source="c4735ffe82a3">
     <summary>
-      有邻居的面（默认 <see cref="F:EasyEcs.TileFaces.Sides" />）；其他面的那一圈是填充值。
-      <see cref="F:EasyEcs.TileFaces.Below" /> 和 <see cref="F:EasyEcs.TileFaces.Above" /> 只对不止一层的分块有效。
+      有邻居的面（默认 <see cref="F:EasyEcs.TileFaces.Sides" />）；其他面的 halo 按 <see cref="P:EasyEcs.ITileShape.Boundary" /> 处理。
+      <see cref="F:EasyEcs.TileFaces.Below" /> 和 <see cref="F:EasyEcs.TileFaces.Above" /> 只对不止一层的分块有效；一维分块（只有一行）声明
+      <c>West | East</c>。
     </summary>
+  </member>
+  <member name="P:EasyEcs.ITileShape.Boundary" source="22c7de156f3f">
+    <summary>没有邻居的地方 halo 里放什么（默认 <see cref="F:EasyEcs.TileBoundary.Fill" />）。</summary>
+  </member>
+  <member name="P:EasyEcs.ITileShape.Halo" source="9983bb5f34d3">
+    <summary>
+      halo 的宽度，以格子计（默认 1）：MPI halo 交换的 ghost 格子，CUDA 分块的 apron。模板读到 r 个格子、行或层之外，就需要 r。
+      最多是分块在每条有邻居的轴上的长度（<see cref="F:EasyEcs.TileBoundary.Mirror" /> 时是每条轴）：halo 不会越过旁边的分块。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.ITileShape.Neighbourhood" source="56806fc570ea">
+    <summary>找哪些周围的分块，读进 halo 的棱和角（默认 <see cref="F:EasyEcs.TileNeighbourhood.Faces" />）。</summary>
   </member>
 </doc>

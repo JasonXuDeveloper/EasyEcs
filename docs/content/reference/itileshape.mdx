@@ -10,9 +10,17 @@ description: "The shape of a tile, on the component that makes an entity a tile 
 public interface ITileShape
 ```
 
-The shape of a tile, on the component that makes an entity a tile of a grid ([`ITile`](/en/docs/reference/itile)): the entity's cells, [`ITileShape.Width`](/en/docs/reference/itileshape#width) × [`ITileShape.Depth`](/en/docs/reference/itileshape#depth) × [`ITileShape.Height`](/en/docs/reference/itileshape#height) of them, are in its `DynamicBuffer<TCell>` in rows of [`ITileShape.Width`](/en/docs/reference/itileshape#width) (x), [`ITileShape.Depth`](/en/docs/reference/itileshape#depth) rows (z) per layer and [`ITileShape.Height`](/en/docs/reference/itileshape#height) layers (y): cell (x, y, z) at `(y * Depth + z) * Width + x`. Static members, read once by the JIT: a tile's code is compiled for its shape.
+The shape of a tile, on the component that makes an entity a tile of a grid ([`ITile`](/en/docs/reference/itile)): the entity's cells, [`ITileShape.Width`](/en/docs/reference/itileshape#width) × [`ITileShape.Depth`](/en/docs/reference/itileshape#depth) × [`ITileShape.Height`](/en/docs/reference/itileshape#height) of them, are in its `DynamicBuffer<TCell>` in rows of [`ITileShape.Width`](/en/docs/reference/itileshape#width) (x), [`ITileShape.Depth`](/en/docs/reference/itileshape#depth) rows (z) per layer and [`ITileShape.Height`](/en/docs/reference/itileshape#height) layers (y): cell (x, y, z) at `(y * Depth + z) * Width + x`. Static members, read once by the JIT: a tile's code is compiled for its shape, every size and branch on it folded to a constant.
 
 ## Properties
+
+### `Boundary` [#boundary]
+
+```csharp
+static virtual TileBoundary Boundary { get; }
+```
+
+What the halo holds where there is no neighbour (default [`TileBoundary.Fill`](/en/docs/reference/tileboundary#fill)).
 
 ### `Depth` [#depth]
 
@@ -28,7 +36,15 @@ The rows of a layer (z), 1 to 64 (the active rows of a layer are one 64-bit word
 static virtual TileFaces Faces { get; }
 ```
 
-The faces that have neighbours (default [`TileFaces.Sides`](/en/docs/reference/tilefaces#sides)); the halo of the others is the fill value. [`TileFaces.Below`](/en/docs/reference/tilefaces#below) and [`TileFaces.Above`](/en/docs/reference/tilefaces#above) count only for a tile of more than one layer.
+The faces that have neighbours (default [`TileFaces.Sides`](/en/docs/reference/tilefaces#sides)); the halo of the others follows [`ITileShape.Boundary`](/en/docs/reference/itileshape#boundary). [`TileFaces.Below`](/en/docs/reference/tilefaces#below) and [`TileFaces.Above`](/en/docs/reference/tilefaces#above) count only for a tile of more than one layer; a 1D tile (one row) declares `West | East`.
+
+### `Halo` [#halo]
+
+```csharp
+static virtual int Halo { get; }
+```
+
+The width of the halo, in cells (default 1): the ghost cells of an MPI halo exchange, the apron of a CUDA tile. A stencil reaching r cells, rows or layers away needs r. At most the tile's extent along every axis with neighbours (and along every axis for [`TileBoundary.Mirror`](/en/docs/reference/tileboundary#mirror)): a halo never reaches past the tile beside.
 
 ### `Height` [#height]
 
@@ -37,6 +53,14 @@ static virtual int Height { get; }
 ```
 
 The layers (y), 1 or more: 1 (the default) is a 2D tile, which has no layers below or above.
+
+### `Neighbourhood` [#neighbourhood]
+
+```csharp
+static virtual TileNeighbourhood Neighbourhood { get; }
+```
+
+Which tiles around are found and read into the halo's edges and corners (default [`TileNeighbourhood.Faces`](/en/docs/reference/tileneighbourhood#faces)).
 
 ### `Width` [#width]
 

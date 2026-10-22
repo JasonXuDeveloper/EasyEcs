@@ -24,4 +24,4 @@ public interface ITile<TKey> : ITileShape, IIndexed<TKey>, IIndexed where TKey :
 static abstract TKey Beside(TKey key, TileFaces face);
 ```
 
-位于 `key` 的分块在 `face`（[`ITileShape.Faces`](/zh/docs/reference/itileshape#faces) 中的一个面）对面的分块的键。
+位于 `key` 的分块在 `face`（[`ITileShape.Faces`](/zh/docs/reference/itileshape#faces) 中的一个面）对面的分块的键。隔着一条棱或一个角的分块，一次跨一个面找到：先 x，再 z，最后 y。周期网格在这里回绕（最后一个分块的东边是第一个）。

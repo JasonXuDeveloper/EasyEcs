@@ -9,23 +9,23 @@
   <member name="F:EasyEcs.TileFaces.None" source="e0973fa8036f">
     <summary>没有面。</summary>
   </member>
-  <member name="F:EasyEcs.TileFaces.North" source="e37532064819">
-    <summary>−z：第 0 行之前的那一行。</summary>
+  <member name="F:EasyEcs.TileFaces.North" source="dcc1c121f978">
+    <summary>−z：第 0 行之前的那些行。</summary>
   </member>
-  <member name="F:EasyEcs.TileFaces.South" source="2f36b1f5f7fb">
-    <summary>+z：最后一行之后的那一行。</summary>
+  <member name="F:EasyEcs.TileFaces.South" source="2d0c7f91d694">
+    <summary>+z：最后一行之后的那些行。</summary>
   </member>
-  <member name="F:EasyEcs.TileFaces.West" source="ec101b1e9b2b">
-    <summary>−x：每行第 0 个格子之前的那个格子。</summary>
+  <member name="F:EasyEcs.TileFaces.West" source="c39d2c9f0b64">
+    <summary>−x：每行第 0 个格子之前的那些格子。</summary>
   </member>
-  <member name="F:EasyEcs.TileFaces.East" source="ff65d05d2b6a">
-    <summary>+x：每行最后一个格子之后的那个格子。</summary>
+  <member name="F:EasyEcs.TileFaces.East" source="9c722ca162ff">
+    <summary>+x：每行最后一个格子之后的那些格子。</summary>
   </member>
-  <member name="F:EasyEcs.TileFaces.Below" source="3c1bc9fe865d">
-    <summary>−y：第 0 层下面的那一层。</summary>
+  <member name="F:EasyEcs.TileFaces.Below" source="5b94cde3f31e">
+    <summary>−y：第 0 层下面的那些层。</summary>
   </member>
-  <member name="F:EasyEcs.TileFaces.Above" source="be383d420fdf">
-    <summary>+y：最后一层上面的那一层。</summary>
+  <member name="F:EasyEcs.TileFaces.Above" source="06a57c9fa6b4">
+    <summary>+y：最后一层上面的那些层。</summary>
   </member>
   <member name="F:EasyEcs.TileFaces.Sides" source="b5905362d343">
     <summary>北、南、西、东：2D 网格的邻居，或体素世界中各列的邻居。</summary>

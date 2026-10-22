@@ -73,8 +73,14 @@ major or minor version that needs code changes? The
   shape, its key, the key beside it across a face) and the entity holds a `DynamicBuffer<TCell>`. The generator finds
   the neighbours, declares the reads and keeps the method parallel; `Load` pads the tile with its neighbours' edges
   into a texture of the thread, `Rows` walks the rows a stencil can change and `At(row).Load128` samples the cells
-  around. Rule [EECS059](/en/docs/guide/analyzer#eecs059) also rejects a tile beside a write of its cell buffer. See
-  [shade a grid](/en/docs/guide/high-performance#grid) and the [decision](/en/docs/decisions#d76-tiles).
+  around. The shape sets the halo's width (`Halo`, the ghost width of MPI), which neighbours it reads
+  (`Neighbourhood`: faces, edges, corners, for 9- and 27-point stencils) and what it holds where there is none
+  (`Boundary`: fill, clamp, mirror); `Steps` runs several steps of a stencil per load (temporal blocking), and
+  `Changes` / `Facing` let quiet tiles sleep and wake the ones beside the edges that changed. Rule
+  [EECS059](/en/docs/guide/analyzer#eecs059) also rejects a tile beside a write of its cell buffer,
+  [EECS072](/en/docs/guide/analyzer#eecs072) a shape whose halo is wider than the tile and
+  [EECS073](/en/docs/guide/analyzer#eecs073) two tiles of the same cells in one method. See
+  [shade a grid](/en/docs/guide/high-performance#grid) and the [decision](/en/docs/decisions#d77-tiles).
 - `world.ForEachBatchParallel<T1..Tn, TJob>(ref job, filter, chunkRows)`: an `IForEachBatch` job over the runs of
   rows of each chunk, on several threads. See
   [queries](/en/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel).

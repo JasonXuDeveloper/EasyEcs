@@ -10,7 +10,7 @@ description: "Layers of a tile padded with their halo (Tile.Load): the texture a
 public readonly ref struct PaddedTile<TCell, TTile> where TCell : unmanaged where TTile : struct, IComponent, ITileShape
 ```
 
-Layers of a tile padded with their halo ([`Tile.Load`](/en/docs/reference/tile#load-2)): the texture a stencil samples. Walk the rows to shade with [`PaddedTile.Rows`](/en/docs/reference/paddedtile#rows) (the active ones, by counting trailing zeros) and sample around a row with [`PaddedTile.At`](/en/docs/reference/paddedtile#at): every sample one cell, row or layer away stays inside the texture, which is checked when the offsets are not constants and folded away when they are. Valid until the thread loads this tile type again.
+Layers of a tile padded with their halo ([`Tile.Load`](/en/docs/reference/tile#load-2)): the texture a stencil samples. Walk the rows to shade with [`PaddedTile.Rows`](/en/docs/reference/paddedtile#rows) (the active ones, by counting trailing zeros) and sample around a row with [`PaddedTile.At`](/en/docs/reference/paddedtile#at): every sample up to [`ITileShape.Halo`](/en/docs/reference/itileshape#halo) cells, rows or layers away stays inside the texture, which is checked when the offsets are not constants and folded away when they are. Valid until the thread loads this tile type again.
 
 #### Type parameters
 
@@ -25,7 +25,7 @@ Layers of a tile padded with their halo ([`Tile.Load`](/en/docs/reference/tile#l
 public int From { get; }
 ```
 
-The first layer loaded (the halo adds one under it).
+The first layer loaded (the halo adds r under it).
 
 ### `To` [#to]
 
@@ -33,7 +33,7 @@ The first layer loaded (the halo adds one under it).
 public int To { get; }
 ```
 
-The last layer loaded (the halo adds one over it).
+The last layer loaded (the halo adds r over it).
 
 ## Indexers
 
@@ -43,7 +43,7 @@ The last layer loaded (the halo adds one over it).
 public ref readonly TCell this[int x, int y, int z] { get; }
 ```
 
-Cell (x, y, z) of the texture: x from −1 to Width, z from −1 to Depth, y from From − 1 to To + 1 (From to To for a 2D tile). Throws outside. O(1).
+Cell (x, y, z) of the texture: x from −r to Width + r − 1, z from −r to Depth + r − 1, y from From − r to To + r (From to To for a 2D tile), r the halo. Throws outside. O(1).
 
 ## Methods
 
@@ -57,12 +57,39 @@ The texture at the first cell of `row` (a row of layers From to To, from [`Padde
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 
+### `CopyTo` [#copyto]
+
+```csharp
+public void CopyTo(Span<TCell> cells);
+```
+
+The loaded layers' cells (From to To, no halo) into `cells`, in the layout of the tile's buffer: the result of [`PaddedTile.Steps`](/en/docs/reference/paddedtile#steps) into the step's buffer. O(layers × Width × Depth).
+
+**Complexity** ([API table](/en/docs/api)): O(layers × Width × Depth)
+
 ### `Rows` [#rows]
 
 ```csharp
 public TileRows<TTile> Rows(TileReads reads = All);
 ```
 
-The rows of layers From to To that a stencil reading `reads` must shade, layer by layer, in order (`foreach (var row in padded.Rows(TileReads.Layer))`): those with a cell that is not zero among the rows it reads. O(1) per row visited and per layer. Throws when the tile was loaded without its mask.
+The rows of layers From to To that a stencil reading `reads` must shade, layer by layer, in order (`foreach (var row in padded.Rows(TileReads.Layer))`): those with a cell that is not zero among the rows it reads, up to the halo away. O(1) per row visited and per layer. Throws when the tile was loaded without its mask.
 
 **Complexity** ([API table](/en/docs/api)): O(1) per layer and per row visited: a trailing-zero count
+
+### `Steps` [#steps]
+
+```csharp
+public PaddedTile<TCell, TTile> Steps<TStep, TLane>() where TStep : struct, ITileStep<TCell, TTile, TLane>;
+```
+
+[`ITileShape.Halo`](/en/docs/reference/itileshape#halo) / `TStep.Reach` steps of a stencil in one pass (temporal blocking): each step computes the texture with `TStep` into this thread's second texture and the next step reads it, ping-pong, the halo shrinking by the reach each step (the cells further out no longer have what they read), so after the last the tile's own cells hold the stencil applied that many times, from one load. The rows a step skips ([`ITileStep.Reads`](/en/docs/reference/itilestep#reads)) are recomputed every step, and where there is no neighbour the halo keeps following the boundary ([`ITileShape.Boundary`](/en/docs/reference/itileshape#boundary)). Write the result with [`PaddedTile.CopyTo`](/en/docs/reference/paddedtile#copyto). Needs the tile's mask, a neighbourhood of [`TileNeighbourhood.All`](/en/docs/reference/tileneighbourhood#all) for more than one step (the cells a few steps reach lie across corners), Depth + 2r ≤ 64 and rows of at least 16 bytes.
+
+O(steps × layers × (Width + 2r) × (Depth + 2r)) at most, no allocation once the thread has its second texture. The result is valid until the thread loads or steps this tile type again.
+
+**Type parameters**
+
+- `TStep`: The step: a struct, its `Step` compiled into the loop.
+- `TLane`: The lanes the step computes in.
+
+**Complexity** ([API table](/en/docs/api)): O(steps × layers × (Width + 2r) × (Depth + 2r)) at most; steps = `Halo / TStep.Reach`

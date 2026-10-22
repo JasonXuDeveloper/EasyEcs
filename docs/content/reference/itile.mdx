@@ -24,4 +24,4 @@ A component that makes its entity a tile of a grid, found by its key (an indexed
 static abstract TKey Beside(TKey key, TileFaces face);
 ```
 
-The key of the tile beside the one at `key` across `face` (one face of [`ITileShape.Faces`](/en/docs/reference/itileshape#faces)).
+The key of the tile beside the one at `key` across `face` (one face of [`ITileShape.Faces`](/en/docs/reference/itileshape#faces)). The tiles across an edge or a corner are found by stepping across one face at a time, x first, then z, then y. On a periodic grid it wraps (the last tile's east is the first).

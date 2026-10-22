@@ -106,10 +106,15 @@ available as Markdown: add `.md` to its URL.
   `World` parameter in parallel code (EECS010); it sees the values from before the pass, and the same method may not
   write `T` (EECS059): write another component and copy it back later.
   A grid of cells updated from its neighbours is tiles: a component implementing `ITile<TKey>` (static `Width`,
-  `Depth`, optional `Height` / `Faces`, a `Key`, `Beside(key, face)`) beside a `DynamicBuffer<TCell>`, shaded by a
+  `Depth`, optional `Height` / `Faces` / `Halo` / `Neighbourhood` / `Boundary`, a `Key`, `Beside(key, face)`, which
+  wraps on a periodic grid) beside a `DynamicBuffer<TCell>`, shaded by a
   `[ForEach]` method with a `Tile<TCell, TTile>` parameter: `var p = tile.Load(); foreach (var row in
   p.Rows(TileReads.Layer)) { var c = p.At(row); ... c.Load128<T>(dx, dy, dz) ... }`, writing a second buffer that a
-  later system commits (never the tile's own buffer, EECS059); never fetch neighbour buffers by hand.
+  later system commits (never the tile's own buffer, EECS059); never fetch neighbour buffers by hand. A stencil
+  reaching r cells needs `Halo => r` (at most the tile, EECS072); a 9- or 27-point one needs
+  `Neighbourhood => TileNeighbourhood.All`; several steps per load are `Steps<TStep, TLane>()` with an `ITileStep`
+  struct; quiet tiles sleep through `tile.Changes` / `tile.Facing` and an awake tag. One cell type per field, one
+  `Tile` per field (two of the same cell type is EECS073).
 - Hot per-row arithmetic over numbers: a static, non-parallel `[ForEach]` method over components of 1 to 4 fields of
   one primitive type (no `Entity`, `World`, `Mut<T>` or `Maybe<T>` parameter) gets a generated `Vector<T>` loop; write
   the fields (`p.X += v.X`), not a new whole component, and do not mix `float` and `int`. EECS055 (a suggestion) names

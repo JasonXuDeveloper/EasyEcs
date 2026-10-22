@@ -8,7 +8,10 @@
     </summary>
     <typeparam name="TKey">键：分块在网格中的位置。</typeparam>
   </member>
-  <member name="M:EasyEcs.ITile`1.Beside(`0,EasyEcs.TileFaces)" source="79a2e5e8444b">
-    <summary>位于 <paramref name="key" /> 的分块在 <paramref name="face" />（<see cref="P:EasyEcs.ITileShape.Faces" /> 中的一个面）对面的分块的键。</summary>
+  <member name="M:EasyEcs.ITile`1.Beside(`0,EasyEcs.TileFaces)" source="4d3f19fdcde7">
+    <summary>
+      位于 <paramref name="key" /> 的分块在 <paramref name="face" />（<see cref="P:EasyEcs.ITileShape.Faces" /> 中的一个面）对面的分块的键。
+      隔着一条棱或一个角的分块，一次跨一个面找到：先 x，再 z，最后 y。周期网格在这里回绕（最后一个分块的东边是第一个）。
+    </summary>
   </member>
 </doc>

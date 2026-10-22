@@ -87,7 +87,7 @@ neighbours are still holds nothing to copy ([D73](/en/docs/decisions#d73-survey-
   time, and a halo that copies only the changed edges: measured, no net win, or superseded by `IDirectIndexed<TKey>`
   and the push-halo design ([D73](/en/docs/decisions#d73-survey-items-not-added)).
 - A generated per-cell kernel for grid tiles: byte arithmetic promotes to `int`, and stencils reduce per row; the
-  tile loads the halo and the method keeps the rule ([D76](/en/docs/decisions#d76-tiles)).
+  tile loads the halo and the method keeps the rule ([D77](/en/docs/decisions#d77-tiles)).
 - A partial-snapshot API: a system that copies the needed values into a ring held by a singleton (the
   lag-compensation pattern) copies exactly what is needed ([D51](/en/docs/decisions#d51-not-added)).
 

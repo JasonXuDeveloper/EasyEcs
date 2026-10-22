@@ -78,8 +78,9 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`SystemList.Enumerator`](/zh/docs/reference/systemlist-enumerator) | 依次遍历各个分组，以及每个分组里的系统。 |
 | [`SystemStats`](/zh/docs/reference/systemstats) | 系统运行了多少次、花了多长时间（WorldOptions.MeasureSystems）：每次运行包括 EcsSystem.OnUpdate 和它的 [ForEach] 方法，并记下分配的字节数和 [ForEach] 方法访问的实体数。 |
 | [`TableInfo`](/zh/docs/reference/tableinfo) | 一张表：拥有同一组组件列的实体（World.DescribeTables）。 |
-| [`Tile<TCell, TTile>`](/zh/docs/reference/tile) | 一个分块（由 TTile 变成分块的实体，ITile）的格子，连同邻居的格子：一个 [ForEach] 参数，就像 CUDA 线程块的分块和 halo。 |
+| [`Tile<TCell, TTile>`](/zh/docs/reference/tile) | 一个分块（由 TTile 变成分块的实体，ITile）的格子，连同邻居的格子：一个 [ForEach] 参数，就像 CUDA 线程块的分块和它的 apron，或 MPI 进程的子区域和它的 ghost 格子。 |
 | [`TileCursor<TCell, TTile>`](/zh/docs/reference/tilecursor) | 带边分块在一行第一个格子处的位置（PaddedTile.At）：它周围的格子，一次一个或一个向量。 |
+| [`TileIds`](/zh/docs/reference/tileids) | Tile.Facing 列出的分块邻居，用 foreach 遍历。 |
 | [`TileRow<TTile>`](/zh/docs/reference/tilerow) | 分块的一行：第 TileRow.Y 层的第 TileRow.Z 行，来自 PaddedTile.Rows。 |
 | [`TileRows<TTile>`](/zh/docs/reference/tilerows) | 带边分块的活跃行（PaddedTile.Rows），用 foreach 遍历：每层一个字，记着模板可能改变的行，然后每行一次尾零计数。 |
 | [`ValueIndex<T, TKey>.Matches`](/zh/docs/reference/valueindex-matches) | 枚举一个键对应的实体（foreach）。 |
@@ -98,6 +99,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`IForEach<T1..T9>`](/zh/docs/reference/iforeach) | World.ForEach 的结构体回调。 |
 | [`IForEachBatch<T1..T9>`](/zh/docs/reference/iforeachbatch) | World.ForEachBatch 的结构体回调：一次接收一整段行，每个组件一个 span，job 可以用 SIMD 处理（System.Numerics.Vector、MemoryMarshal.Cast），还能拿到这些行的实体（按下标访问时才构造）。 |
 | [`IForEachEntity<T1..T9>`](/zh/docs/reference/iforeachentity) | 和 IForEach 一样，但还接收 Entity 句柄。 |
+| [`IForEachMasked<T1..T9>`](/zh/docs/reference/iforeachmasked) | 还接收"只有部分行通过"的 64 行一字的批量 job（过滤条件要检查存在位或变更 tick）：World.ForEachMasked 把整个字交给它，通过的行以位的形式给出；IForEachBatch 则会把每段连续通过的行分开交给它。 |
 | [`IGroup`](/zh/docs/reference/igroup) | 标记一个按值拆分表的组件：在调用过 World.GroupBy 的 World 里，IGroup.Group 不同的实体放在不同的表，所以只查询一组（QueryFilter.InGroup）时只遍历这一组的行，这些行在内存里是连续的（一个区域、一张地图、一场对局、一支队伍）。 |
 | [`IIndexed, IIndexed<TKey>`](/zh/docs/reference/iindexed) | 所有 IIndexed 共同实现的接口：不用反射，就能知道一个组件类型建了索引（JIT 会把这个类型检测折叠掉）。 |
 | [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) | 标记一个不做结构变更的 ForEach job：不在它遍历的 World 里创建或销毁实体，也不增删、设置任何组件。 |
@@ -109,6 +111,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`ISystemGroupWithout<T>`](/zh/docs/reference/isystemgroupwithout) | 系统分组：其中的 [ForEach] 方法跳过有 T 的实体，效果和在分组上写 WithoutAttribute 一样（见 ISystemGroupWith）。 |
 | [`ITile<TKey>`](/zh/docs/reference/itile) | 让实体成为网格中一个分块的组件，按键查找（带索引的组件，IIndexed）：record struct Chunk(ChunkPos Pos) : IComponent, ITile&lt;ChunkPos&gt;，带着形状（ITileShape）和每个邻居的键（ITile.Beside）。 |
 | [`ITileShape`](/zh/docs/reference/itileshape) | 分块的形状，写在让实体成为网格分块的组件上（ITile）：实体的格子共 ITileShape.Width × ITileShape.Depth × ITileShape.Height 个，存在它的 DynamicBuffer&lt;TCell&gt; 里：每行 ITileShape.Width 个（x），每层 ITileShape.Depth 行（z），共 ITileShape.Height 层（y）：格子 (x, y, z) 在 (y \* Depth + z) \* Width + x。 |
+| [`ITileStep<TCell, TTile, TLane>`](/zh/docs/reference/itilestep) | 模板的一步，供 PaddedTile.Steps 使用（时间分块）：一个 struct，它的静态 ITileStep.Step 根据周围的格子算出 16 字节格子的下一个值。 |
 | [`ITracked`](/zh/docs/reference/itracked) | 标记一个追踪变更的组件：每一行都记下最后一次写入时 World 的 World.ChangeTick，[Changed&lt;T&gt;] / QueryFilter.Changed&lt;T&gt;(since) 选出系统上次运行以来写过的行。 |
 | [`IUniqueIndexed, IUniqueIndexed<TKey>`](/zh/docs/reference/iuniqueindexed) | 所有 IUniqueIndexed 共同的标记，不用反射就能知道一个组件类型是唯一的（JIT 会折叠掉的类型测试）。 |
 
@@ -116,11 +119,14 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 
 | 类型 | 说明 |
 |---|---|
+| [`FloatMode`](/zh/docs/reference/floatmode) | ForEachAttribute 方法的向量循环可以改变哪些浮点结果。 |
 | [`SimdMode`](/zh/docs/reference/simdmode) | ForEachAttribute 方法是否以向量循环运行（ForEachAttribute.Simd）。 |
 | [`SystemErrorPolicy`](/zh/docs/reference/systemerrorpolicy) | 系统抛出异常时怎么处理（WorldOptions.SystemErrors）。 |
 | [`TargetPolicy`](/zh/docs/reference/targetpolicy) | 实体销毁时，指向它的链接怎么处理（TargetPolicyExtensions.WhenTargetDestroyed、RelationIndex.WhenTargetDestroyed）。 |
+| [`TileBoundary`](/zh/docs/reference/tileboundary) | 分块没有邻居的地方 halo 里放什么（ITileShape.Boundary），即网格的边界条件。 |
 | [`TileFaces`](/zh/docs/reference/tilefaces) | 分块（ITileShape）的面：北是 −z，南 +z，西 −x，东 +x，下 −y，上 +y。 |
-| [`TileReads`](/zh/docs/reference/tilereads) | 模板在一个格子周围读什么，它决定 PaddedTile.Rows 访问哪些行：某一行读到的行里有不为零的格子时，访问这一行。 |
+| [`TileNeighbourhood`](/zh/docs/reference/tileneighbourhood) | 分块周围哪些分块算作邻居，按偏移沿几条轴移动来分（ITileShape.Neighbourhood）：隔着面的分块（von Neumann），加上隔着棱的，或再加上隔着角的（Moore）。 |
+| [`TileReads`](/zh/docs/reference/tilereads) | 模板在一个格子周围读什么，它决定 PaddedTile.Rows 访问哪些行：某一行读到的行里有不为零的格子时，访问这一行（一行算上它的 halo 格子，所以沿 x 读的模板只需要这一行）。 |
 
 ## 委托 [#delegates]
 

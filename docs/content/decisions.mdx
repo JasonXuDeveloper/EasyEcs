@@ -93,7 +93,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D73](#d73-survey-items-not-added) | Survey items not added |
 | [D74](#d74-scratch) | Per-thread scratch is a parameter |
 | [D75](#d75-lookup) | Lookups of other entities are a read-only parameter |
-| [D76](#d76-tiles) | Grid tiles: a parameter that loads its halo |
+| [D77](#d77-tiles) | Grid tiles: a parameter that loads its halo |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1850,7 +1850,7 @@ yet throws inside a parallel region, and still builds lazily in a serial pass.
 - **Building indexes lazily under a lock:** a lock on the first lookup of every pass, for an index that can be built
   before it.
 
-## D76. Grid tiles: a parameter that loads its halo [#d76-tiles]
+## D77. Grid tiles: a parameter that loads its halo [#d77-tiles]
 
 **Decision.** A grid of cells updated from its neighbours (water, light, heat) is cut into tiles, one entity each: a
 component that implements `ITile<TKey>` (its shape as static members, `Width`, `Depth`, `Height`, `Faces`; its key in

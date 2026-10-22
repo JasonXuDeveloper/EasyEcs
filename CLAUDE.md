@@ -48,9 +48,11 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   Scratch.cs                   Scratch<T>: per-thread working memory of a [ForEach] method, never shared, never reset
   Lookup.cs                    Lookup<T> + LookupExtensions: read-only lookups of any entity (and index keys) from a
                                [ForEach] method, parallel ones included; the system reads T, so no writer shares its stage
-  Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape and a key), Tile<TCell, TTile> (a [ForEach]
-                               parameter: the neighbours found by generated code), Load into a [ThreadStatic] texture
-                               padded with the halo and a row mask, PaddedTile.Rows (TZCNT walk), TileCursor.Load128
+  Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighbourhood, boundary and a key),
+                               Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbours found by generated code,
+                               TileNeighbours), Load into a [ThreadStatic] texture padded with the halo and a row mask,
+                               PaddedTile.Rows (TZCNT walk), TileCursor.Load128, Steps (ITileStep: several steps per load
+                               on two textures), Changes / Facing (sleeping tiles)
   Interleaved.cs               the deinterleaving loads / interleaving stores of generated vector loops over components
                                of 2 to 4 fields of one lane type
   SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
@@ -148,8 +150,9 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                world.XIndex, singletons world.X / HasX / GetOrAddX / SetX / RemoveX, query items
                                item.X per Query<T1..Tn> shape the code calls, SavedTypes registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                                lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
-  EasyEcsAnalyzer.cs           EECS002-024, EECS035-036, EECS054 and EECS056 (the declaration and [ForEach] rules of the
-                               range EECS002-061 that are not performance rules; generators never report diagnostics)
+  EasyEcsAnalyzer.cs           EECS002-024, EECS035-036, EECS054, EECS056 and EECS072-073 (the declaration and
+                               [ForEach] rules of the range EECS002-061 that are not performance rules; generators never
+                               report diagnostics)
   EasyEcsAnalyzer.Performance.cs  EECS025-034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the check of EECS056):
                                code that works but costs (write access that
                                only reads, unused or per-row lookups in [ForEach] methods and jobs, allocations per

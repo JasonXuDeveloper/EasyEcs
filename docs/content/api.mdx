@@ -57,8 +57,8 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `Scratch<T>` | ref struct | A `[ForEach]` parameter: working memory of the method on the running thread, kept between rows, passes and worlds: `Value`. |
 | `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out id)`, `Find(key)`, `Count(key)`. |
 | `Lanes` | static class | Stream compaction for batch methods: `Compact(source, mask, destination)` writes the elements a lane mask selects side by side. |
-| `Tile<TCell, TTile>`, `ITile<TKey>`, `ITileShape`, `TileFaces` | ref struct, interfaces, enum | A `[ForEach]` parameter: the entity's `DynamicBuffer<TCell>` with its neighbours' in the grid of `TTile` (an indexed component with a static shape and the key of each neighbour), scheduled as a read of both: `Load(from, to, fill, mask)`, `Beside(face)`, `Cells`. |
-| `PaddedTile<TCell, TTile>`, `TileRows<TTile>`, `TileRow<TTile>`, `TileCursor<TCell, TTile>`, `TileReads` | ref structs, struct, enum | The layers a stencil samples, padded with a halo of one cell: `Rows(reads)` walks the active rows, `At(row)` samples around one (`Load128`, `Load256`, `LoadVector`, `this[dx, dy, dz]`), `this[x, y, z]`. |
+| `Tile<TCell, TTile>`, `ITile<TKey>`, `ITileShape`, `TileFaces`, `TileNeighbourhood`, `TileBoundary`, `TileIds` | ref structs, interfaces, enums | A `[ForEach]` parameter: the entity's `DynamicBuffer<TCell>` with its neighbours' in the grid of `TTile` (an indexed component with a static shape, halo, neighbourhood and boundary, and the key of each neighbour), scheduled as a read of both: `Load(from, to, fill, mask)`, `Beside(face)`, `Beside(dx, dy, dz)`, `Cells`, `Changes(next, out changed)`, `Facing(edges)`. |
+| `PaddedTile<TCell, TTile>`, `TileRows<TTile>`, `TileRow<TTile>`, `TileCursor<TCell, TTile>`, `TileReads`, `ITileStep<TCell, TTile, TLane>` | ref structs, struct, enum, interface | The layers a stencil samples, padded with a halo of `Halo` cells: `Rows(reads)` walks the active rows, `At(row)` samples around one (`Load128`, `Load256`, `LoadVector`, `this[dx, dy, dz]`), `this[x, y, z]`, `Steps<TStep, TLane>()` runs several steps of a stencil in one pass, `CopyTo(cells)`. |
 | `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interfaces, attributes | System groups (with filters through interfaces) and ordering. |
 | `SystemErrorPolicy` | enum | `Throw` (default) or `Disable`: what an exception in a system does. |
 | `SystemStats`, `SystemList` | readonly structs | A system's run count, times, allocated bytes and visited entities; `world.Systems`, allocation-free. |
@@ -211,13 +211,17 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 
 | API | Complexity | Notes |
 | --- | --- | --- |
-| each entity of the pass | O(faces) hash probes | the generated job finds the neighbours by key once, for every tile of that grid the method takes; the grid's index is built before the pass |
-| `tile.Load(from, to, fill, mask)` / `tile.Load()` | O(layers × (Width + 2) × (Depth + 2)), each row one or two vector copies | the layers into this thread's texture with a ring of one cell and a layer under and over them (`fill` where there is no neighbour); with `mask`, a word of active rows per layer; allocation-free once the thread has its texture; throws for layers outside `0..Height - 1` or a buffer shorter than the shape |
-| `tile.Beside(face)` / `tile.Cells` | O(1) | the neighbour's id (default when none) / the entity's cells |
-| `padded.Rows(reads)` | O(1) per layer and per row visited: a trailing-zero count | the rows whose stencil (`TileReads`) holds a cell that is not zero, layer by layer; throws when loaded without `mask` |
+| each entity of the pass | O(neighbours) hash probes: 4 or 6 for `Faces`, 8 or 18 for `FacesAndEdges`, 8 or 26 for `All` | the generated job finds the neighbours by key once, for every tile of that grid the method takes; the grid's index is built before the pass |
+| `tile.Load(from, to, fill, mask)` / `tile.Load()` | O(layers × (Width + 2r) × (Depth + 2r)), r = `Halo`; each row one or two vector copies | the layers into this thread's texture with a ring of r cells and r layers under and over them (where there is no neighbour, the shape's `Boundary`: `fill`, clamped or mirrored); with `mask`, a word of active rows per layer; allocation-free once the thread has its texture; throws for an invalid shape (EECS072), layers outside `0..Height - 1` or a buffer shorter than the shape |
+| `tile.Beside(face)` / `tile.Beside(dx, dy, dz)` / `tile.Cells` | O(1) | a neighbour's id (default when none or outside the neighbourhood) / the entity's cells |
+| `tile.Changes(next, out changed)` | O(cells), row by row as bytes | whether the step differs from the cells, and the faces whose edge (r cells deep) changed |
+| `tile.Facing(edges)` | O(1) per neighbour | the neighbours that read those edges into their halo, across faces, edges and corners |
+| `padded.Rows(reads)` | O(1) per layer and per row visited: a trailing-zero count | the rows whose stencil (`TileReads`, up to r away) holds a cell that is not zero, layer by layer; throws when loaded without `mask` |
 | `padded.At(row)` | O(1) | the row's first cell; checks the row is inside |
-| `cursor.Load128<TLane>(dx, dy, dz)` / `Load256` / `LoadVector` / `cursor[dx, dy, dz]` | O(1): one unaligned load | offsets within one cell, row and layer of the row; checked once, folded away when constant |
+| `cursor.Load128<TLane>(dx, dy, dz)` / `Load256` / `LoadVector` / `cursor[dx, dy, dz]` | O(1): one unaligned load | offsets within r cells, rows and layers of the row; one unsigned compare per axis, folded away when constant |
 | `padded[x, y, z]` | O(1) | any texel of the texture, checked |
+| `padded.Steps<TStep, TLane>()` | O(steps × layers × (Width + 2r) × (Depth + 2r)) at most; steps = `Halo / TStep.Reach` | the stencil applied that many times from one load, on two textures of the thread (ping-pong), the region shrinking by the reach each step; needs the mask, `All` for more than one step, Depth + 2r ≤ 64 and rows of 16 bytes or more; allocation-free once the thread has its second texture |
+| `padded.CopyTo(cells)` | O(layers × Width × Depth) | the loaded layers' cells, without the halo, in the buffer's layout |
 
 ## Disable and bulk changes [#bulk]
 
