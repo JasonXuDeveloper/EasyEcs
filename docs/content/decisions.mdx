@@ -93,10 +93,10 @@ after the change on the machine of the time; they are history, not the current r
 | [D73](#d73-survey-items-not-added) | Survey items not added |
 | [D74](#d74-scratch) | Per-thread scratch is a parameter |
 | [D75](#d75-lookup) | Lookups of other entities are a read-only parameter |
-| [D76](#d76-emit) | Records out of a pass are an `Emit<T>` parameter, appended in row order |
-| [D77](#d77-entity-random) | Deterministic random numbers are a pure function, `EntityRandom` |
-| [D78](#d78-for-parallel) | A parallel loop over a range or a list is `world.ForParallel` |
-| [D79](#d79-keyed-reductions) | Keyed reductions not added |
+| [D78](#d78-emit) | Records out of a pass are an `Emit<T>` parameter, appended in row order |
+| [D79](#d79-entity-random) | Deterministic random numbers are a pure function, `EntityRandom` |
+| [D80](#d80-for-parallel) | A parallel loop over a range or a list is `world.ForParallel` |
+| [D81](#d81-keyed-reductions) | Keyed reductions not added |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1853,7 +1853,7 @@ yet throws inside a parallel region, and still builds lazily in a serial pass.
 - **Building indexes lazily under a lock:** a lock on the first lookup of every pass, for an index that can be built
   before it.
 
-## D76. Records out of a pass are an `Emit<T>` parameter, appended in row order [#d76-emit]
+## D78. Records out of a pass are an `Emit<T>` parameter, appended in row order [#d78-emit]
 
 **Decision.** An `Emit<T>` parameter of a `[ForEach]` method (taken by value, `T` a struct) appends records:
 `Add(in T)`, `AddRange(span)`. Each chunk of a parallel pass, or the whole pass on one thread, appends to its own list,
@@ -1892,7 +1892,7 @@ verb that says nothing about the pass).
 - **Per-thread lists:** a thread takes chunks in an order that depends on timing, so the records would come out of
   order.
 
-## D77. Deterministic random numbers are a pure function, `EntityRandom` [#d77-entity-random]
+## D79. Deterministic random numbers are a pure function, `EntityRandom` [#d79-entity-random]
 
 **Decision.** `EntityRandom` is a singleton (`Seed`, `Tick`) and a set of pure static functions of (seed, entity id,
 tick, stream): `Bits`, `Float` ([0, 1) in steps of 2^-24), `Range` (int by multiply-high, float) and `Chance`. The
@@ -1921,7 +1921,7 @@ and `new Random()` in a `[ForEach]` method; its fix draws from `EntityRandom` wi
 - **The seed only passed explicitly:** kept (the static members), and the singleton added so a `[ForEach]` method
   takes one `in` parameter.
 
-## D78. A parallel loop over a range or a list is `world.ForParallel` [#d78-for-parallel]
+## D80. A parallel loop over a range or a list is `world.ForParallel` [#d80-for-parallel]
 
 **Decision.** `world.ForParallel(count, ref job)` runs an `IForRange` job (`Execute(start, end)`) over indexes, and
 `world.ForParallel(ref buffer, ref job)` an `IForSpan<T>` job (`Execute(start, span)`) over the elements of a
@@ -1947,7 +1947,7 @@ cover the jobs.
 - **Taking a `Span<T>`:** a span cannot be captured by the runner's work items (a ref struct); the buffer, or a
   range over an array the job holds, covers it.
 
-## D79. Keyed reductions not added [#d79-keyed-reductions]
+## D81. Keyed reductions not added [#d81-keyed-reductions]
 
 **Decision.** No dedicated keyed (histogram) reduction. A histogram of up to a few thousand bins is a `Reduce<T>` of
 a singleton holding an `[InlineArray]` of counts (its `Combine` adds the bins); more bins are counted on one thread,

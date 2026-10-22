@@ -77,16 +77,16 @@ major or minor version that needs code changes? The
   and no atomic, and the lists are appended to singleton `Emitted<T>` in chunk order when the pass ends, so the
   records come out in row order on any number of threads. Passes append; the system that applies the records clears
   them. Rule [EECS070](/en/docs/guide/analyzer#eecs070) rejects a method that also reads `Emitted<T>` or emits one
-  type twice. See the [decision](/en/docs/decisions#d76-emit).
+  type twice. See the [decision](/en/docs/decisions#d78-emit).
 - `EntityRandom`, deterministic random numbers for `[ForEach]` methods, parallel ones included: a singleton holding a
   seed and a tick, and pure functions of (seed, entity, tick, stream): `Bits`, `Float`, `Range` (int and float) and
   `Chance`. Rule [EECS071](/en/docs/guide/analyzer#eecs071) (warning, with a code fix to `EntityRandom`) reports
   `Random.Shared` and `new Random()` in a `[ForEach]` method. See the
-  [decision](/en/docs/decisions#d77-entity-random).
+  [decision](/en/docs/decisions#d79-entity-random).
 - `world.ForParallel(count, ref job)` runs an `IForRange` job over a range of indexes, and
   `world.ForParallel(ref buffer, ref job)` an `IForSpan<T>` job over the elements of a list (an `Emitted<T>`'s
   records), on the world's runner with its chunks; EECS060 and EECS061 cover their jobs. See the
-  [decision](/en/docs/decisions#d78-for-parallel).
+  [decision](/en/docs/decisions#d80-for-parallel).
 - Analyzer rule [EECS060](/en/docs/guide/analyzer#eecs060) (warning): a parallel `[ForEach]` method or the `Execute`
   of a job run by `ForEachParallel` writes memory every thread shares (a static field, an object a context parameter
   or a job's field refers to): the writes race. Rule [EECS061](/en/docs/guide/analyzer#eecs061) (warning, with a code

@@ -90,10 +90,10 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D73](#d73-survey-items-not-added) | 调研中没有加入的改动 |
 | [D74](#d74-scratch) | 每个线程的临时空间是一个参数 |
 | [D75](#d75-lookup) | 对其他实体的查找是一个只读参数 |
-| [D76](#d76-emit) | 遍历产出的记录是 `Emit<T>` 参数，按行的顺序追加 |
-| [D77](#d77-entity-random) | 确定性随机数是纯函数 `EntityRandom` |
-| [D78](#d78-for-parallel) | 对一段区间或一个列表的并行循环是 `world.ForParallel` |
-| [D79](#d79-keyed-reductions) | 没有加入按键归约 |
+| [D78](#d78-emit) | 遍历产出的记录是 `Emit<T>` 参数，按行的顺序追加 |
+| [D79](#d79-entity-random) | 确定性随机数是纯函数 `EntityRandom` |
+| [D80](#d80-for-parallel) | 对一段区间或一个列表的并行循环是 `world.ForParallel` |
+| [D81](#d81-keyed-reductions) | 没有加入按键归约 |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1481,7 +1481,7 @@ EECS010 接受它出现在并行方法里。方法通过参数查询的值索引
 - **也能写的查找（不带 `[ReadOnly]` 的 Unity `ComponentLookup`）：** 两行可能从两个线程写同一个实体；对其他实体的写入仍然是数据（这一行的组件，由之后的系统读取）。
 - **加锁延迟建立索引：** 每一遍第一次查找都要加锁，而这个索引本可以在遍历之前建好。
 
-## D76. 遍历产出的记录是 `Emit<T>` 参数，按行的顺序追加 [#d76-emit]
+## D78. 遍历产出的记录是 `Emit<T>` 参数，按行的顺序追加 [#d78-emit]
 
 **决定。** `[ForEach]` 方法的 `Emit<T>` 参数（按值传入，`T` 是结构体）追加记录：`Add(in T)`、`AddRange(span)`。并行遍历的每个块（单线程时是整次遍历）
 追加到自己的列表，列表取自每个 `T` 一个的池；遍历结束时这些列表按块的顺序追加到单例 `Emitted<T>`（没有就先添加）的 `Items`（一个
@@ -1509,7 +1509,7 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 - **"写组件再扫描"的代码修复：** 没法可靠地识别（一个系统写组件、另一个系统收集，也是在 tick 之间保存状态的方式）；只有基准测试能说明它的代价。
 - **每个线程一个列表：** 线程认领块的顺序取决于时机，记录的顺序就乱了。
 
-## D77. 确定性随机数是纯函数 `EntityRandom` [#d77-entity-random]
+## D79. 确定性随机数是纯函数 `EntityRandom` [#d79-entity-random]
 
 **决定。** `EntityRandom` 是一个单例（`Seed`、`Tick`），加上一组（种子、实体 id、tick、流）的纯静态函数：`Bits`、`Float`（[0, 1)，步长 2^-24）、
 `Range`（整数用乘法取高位，以及浮点）和 `Chance`。这些位是 SplitMix64 终结函数的四轮，每个输入一轮，先混合种子。EECS071 报告 `[ForEach]`
@@ -1530,7 +1530,7 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 - **Philox 或 threefry：** 这里更慢；对相互独立的输入，四轮 64 位终结函数的质量对游戏和模拟足够（它不是密码学生成器，文档也没有这样说）。
 - **只显式传种子：** 保留了（静态成员），另外加了单例，让 `[ForEach]` 方法只要一个 `in` 参数。
 
-## D78. 对一段区间或一个列表的并行循环是 `world.ForParallel` [#d78-for-parallel]
+## D80. 对一段区间或一个列表的并行循环是 `world.ForParallel` [#d80-for-parallel]
 
 **决定。** `world.ForParallel(count, ref job)` 对下标运行 `IForRange` job（`Execute(start, end)`），`world.ForParallel(ref buffer, ref job)` 对一个
 `DynamicBuffer<T>`（`Emitted<T>` 的记录）的元素运行 `IForSpan<T>` job（`Execute(start, span)`），都在 World 的运行器上：并行 `[ForEach]` 的块
@@ -1547,7 +1547,7 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 - **合并 job 副本（在区间上归约）：** 对行求总数有 `Reduce<T>` 方法；在普通区间上就是第二套归约 API，没有用例需要它。
 - **接收 `Span<T>`：** span 不能被运行器的工作项捕获（ref struct）；缓冲区，或者 job 持有的数组上的区间，就能覆盖这种用法。
 
-## D79. 没有加入按键归约 [#d79-keyed-reductions]
+## D81. 没有加入按键归约 [#d81-keyed-reductions]
 
 **决定。** 不提供专门的按键（直方图）归约。最多几千个桶的直方图，是一个持有 `[InlineArray]` 计数的单例的 `Reduce<T>`（它的 `Combine` 把桶相加）；
 桶更多时在一个线程上计数，或者每个键一个组件。计数顺带在一个每行都有实际工作的并行遍历里时，这个写法才划算；只做计数的遍历在一个线程上更快。
