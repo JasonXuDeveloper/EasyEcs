@@ -485,7 +485,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
         }
     }
 
-    /// <summary>Entity <paramref name="id"/> is destroyed or loses <typeparamref name="T"/>. Inside the structural gate.</summary>
+    /// <summary>A node for every entity id below <paramref name="ids"/>. Inside the structural gate.</summary>
     void World.IValueIndex.Reserve(int ids)
     {
         if (ids > _nodes.Length) Array.Resize(ref _nodes, ids);
