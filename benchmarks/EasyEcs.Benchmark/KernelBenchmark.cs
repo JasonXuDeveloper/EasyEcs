@@ -20,7 +20,9 @@ namespace EasyEcs.Benchmark;
 /// vector per field (Interleaved), in a world of their own. <c>Clamp</c> (Math.Clamp by a singleton's bounds, checked
 /// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
 /// pattern) are the calls, conversions and masks a vector loop takes. <c>Tally</c> (an int count, sum, Min and Max) and
-/// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
+/// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order.
+/// <c>Wave</c> calls Sin and Exp per row (FloatMode.Fast: .NET's vector forms). <c>StepParallel</c> / <c>SeekParallel</c> run
+/// <c>Step</c> / <c>Seek</c> on several threads, the per-row parallel job against the vector loop in each chunk. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
 /// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
 /// leaves out (a lane mask per word of 64 rows). 0 bytes either way.
 /// </summary>
@@ -247,6 +249,16 @@ public class KernelBenchmark
     public void EnergyGenerated() => Kernels.Energy(_world);
 
     [Benchmark]
+    public void WaveScalar()
+    {
+        var job = new WaveRows();
+        _world.ForEach<Heat, Speed, Mass, WaveRows>(ref job);
+    }
+
+    [Benchmark]
+    public void WaveGenerated() => Kernels.Wave(_world);
+
+    [Benchmark]
     public void StepParallelScalar()
     {
         var job = new StepRows { Pull = _world.Pull };
@@ -381,6 +393,11 @@ public class KernelBenchmark
     public struct Mass : IComponent { public float Value; }
     public record struct Pull(float Value) : ISingletonComponent;
 
+    private struct WaveRows : IForEach<Heat, Speed, Mass>
+    {
+        public void Execute(ref Heat heat, ref Speed speed, ref Mass mass) => Kernels.Wave(ref heat, in speed, in mass);
+    }
+
     /// <summary>The per-row job [ForEach] compiled to before: one call of the method per row, inlined.</summary>
     private struct StepRows : IForEach<Heat, Speed, Mass>, INoStructuralChanges
     {
@@ -471,6 +488,11 @@ public class KernelBenchmark
             p.Y += v.Y * Dt;
             p.Z += v.Z * Dt;
         }
+
+        // Sin and Exp per row: .NET's vector approximations under FloatMode.Fast, the CRT's sinf / expf per row otherwise.
+        [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+        internal static void Wave(ref Heat heat, in Speed speed, in Mass mass) =>
+            heat.Value = MathF.Sin(speed.Value) * 0.5f + MathF.Exp(-mass.Value);
 
         // Step and Seek on several threads: each chunk's runs of rows through the vector loop (parallel for simd).
         [ForEach(Parallel = true, Simd = SimdMode.Require)]

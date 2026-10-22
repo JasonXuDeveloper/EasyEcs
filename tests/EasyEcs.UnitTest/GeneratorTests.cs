@@ -210,6 +210,12 @@ public class GeneratorTests
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;", true)]
     [TestCase("[ForEach] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;", false)]  // a float sum: Exact
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Ends> e) => e.Value.Last = p.V;", false)]  // not field by field
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f, in H h) => f.V = System.MathF.Sin(f.V) * System.MathF.Exp(h.V);", true)]
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref D d) => d.V = System.Math.Log2(d.V) + double.Hypot(d.V, 2);", true)]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Cos(f.V);", false)]                 // approximate: Exact
+    [TestCase("[ForEach] static void A(ref F f, in G g) => f.V *= System.MathF.Sin(g.Pull);", true)]      // uniform: the scalar call
+    [TestCase("[ForEach] static void A(ref F f) => f.V = float.DegreesToRadians(f.V);", true)]            // (x * Pi) / 180: exact
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Atan2(f.V, 1);", false)]            // no vector form
     public void QualifyingMethodsGetAVectorLoop(string members, bool vectorized)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"public partial class S : EcsSystem {{ {members} }}"),
@@ -228,7 +234,7 @@ public class GeneratorTests
         if (parallel) Assert.That(generated, Does.Contain("world.ForEachBatchParallel<"), generated);
 
         // Skipped means reported: the same method with SimdMode.Require is an error exactly when it got no loop.
-        string required = members.Replace("[ForEach]", "[ForEach(Simd = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(Simd = SimdMode.Require, Parallel");
+        string required = members.Replace("[ForEach]", "[ForEach(Simd = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(Simd = SimdMode.Require, Parallel").Replace("[ForEach(FloatMode", "[ForEach(Simd = SimdMode.Require, FloatMode");
         var errors = Diagnose(Components, Lanes, $"public partial class S : EcsSystem {{ {required} }}").Result;
         Assert.That(errors.Contains("EECS056"), Is.EqualTo(!vectorized), string.Join(", ", errors));
     }
@@ -252,6 +258,10 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Wide> w) => w.Value.N += p.V;", "field Wide.L of the reduction is a long, not a lane type of 4 bytes")]
     [TestCase("[ForEach] static void A(ref P p, ref Reduce<Count> c) { c.Value.N += p.V; p.V = c.Value.N; }", "it reads 'c.Value.N', a partial result the lanes of a vector loop hold in parts")]
     [TestCase("[ForEach(Parallel = true)] static void A(ref Five t) => t.A = t.B;", "component Five has 5 fields (a vector loop splits up to 4)")] // parallel too
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Sin(f.V);", "MathF.Sin is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
+    [TestCase("[ForEach] static void A(ref D d) => d.V = double.Hypot(d.V, 1);", "Double.Hypot is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Atan2(f.V, 1);", "MathF.Atan2 has no vector form in .NET 10")]
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Pow(f.V, 2);", "MathF.Pow has no vector form in .NET 10")]
     public void ScalarLoopsNameTheirReason(string members, string reason)
     {
         var diagnostics = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Where(d => d.Id == "EECS055").ToArray();
@@ -353,6 +363,21 @@ public class GeneratorTests
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
         string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
         Assert.That(generated, Does.Contain("ForEachBatchParallel<").And.Contain("Vector.LoadUnsafe"));
+    }
+
+    // FloatMode.Fast: the vector approximations of .NET (Vector.Sin, Vector512.Sin) in both loops; degrees to radians as
+    // the scalar's two operations; a uniform call computed once by the scalar function.
+    [Test]
+    public void FastMathCallsTheVectorForms()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { [ForEach(FloatMode = FloatMode.Fast, Simd = SimdMode.Require)] static void A(ref F f, in G g) => f.V = System.MathF.Sin(f.V) + System.MathF.Cos(g.Pull) * float.DegreesToRadians(f.V); }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("global::System.Numerics.Vector.Sin(__c1_0)").And.Contain("global::System.Runtime.Intrinsics.Vector512.Sin(__c1_0)")
+            .And.Contain("global::System.Numerics.Vector.Create<float>(global::System.MathF.Cos(__p1.Pull))")
+            .And.Contain("Vector.Create<float>(float.Pi)").And.Contain("Vector.Create<float>(180f)"), generated);
     }
 
     // The Vector512 loop is the Vector<T> loop's text with the vector type's token replaced: user types named

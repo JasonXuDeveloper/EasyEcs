@@ -364,6 +364,41 @@ public static class ParallelKernels
     internal static void Sum(in Level level, ref Reduce<Energy> energy) => energy.Value.Total += level.Value * 0.5f;
 }
 
+/// <summary>
+/// Math functions in vector loops: degrees to radians and a uniform Sin exactly; Sin, Cos, Exp, Log, Log2 and Hypot per
+/// lane only under FloatMode.Fast, as .NET's vector approximations.
+/// </summary>
+public static class MathKernels
+{
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Turn(ref Level level, in Heat heat, in Gravity gravity) =>
+        level.Value = float.DegreesToRadians(level.Value) * MathF.Sin(gravity.Pull) + float.RadiansToDegrees(heat.Value);
+
+    [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+    internal static void Waves(ref Color4 c, in Level level)
+    {
+        c.R = MathF.Sin(level.Value);
+        c.G = MathF.Cos(level.Value);
+        c.B = MathF.Exp(level.Value);
+        c.A = MathF.Log(MathF.Abs(level.Value));
+    }
+
+    [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+    internal static void Lengths(ref Spot2 spot, in Level level)
+    {
+        spot.X = MathF.Log2(MathF.Abs(level.Value));
+        spot.Y = float.Hypot(level.Value, spot.Y);
+    }
+
+    [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+    internal static void Far(ref Far3 p, in Pace pace)
+    {
+        p.X = Math.Sin(pace.Value);
+        p.Y = Math.Exp(pace.Value * 0.01);
+        p.Z = Math.Log(Math.Abs(pace.Value));
+    }
+}
+
 public class KernelTests
 {
     /// <summary>The lengths that cut a vector short or leave a tail, at both vector widths, and a long run.</summary>
@@ -981,6 +1016,74 @@ public class KernelTests
         Assert.That(BitConverter.SingleToInt32Bits(sum4), Is.EqualTo(BitConverter.SingleToInt32Bits(sum1)), $"{sum4} against {sum1}");
     }
 
+    /// <summary>
+    /// Degrees to radians (and back) are the scalar's two IEEE operations, and a uniform Sin is the scalar call once per
+    /// run: bit for bit the method's, under FloatMode.Exact.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void DegreesAndUniformCallsMatchTheMethodBitForBit(int count)
+    {
+        foreach (float pull in new[] { 0.3f, float.NaN, -1e7f })
+            Check(count, NextLevel, (r, i) => new Heat { Value = NextFloat(r, i + 1) }, w => { w.SetGravity(pull); MathKernels.Turn(w); },
+                (ref Level l, ref Heat h) => MathKernels.Turn(ref l, in h, new Gravity(pull)));
+    }
+
+    /// <summary>
+    /// Sin, Cos, Exp, Log, Log2 and Hypot under FloatMode.Fast: .NET's vector forms, within 2 ulps of the scalar
+    /// function (NaN where it is NaN, infinities and zeros where it has them), lane by lane; the rows after the last
+    /// vector are the scalar function's.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void FastMathIsWithinTwoUlpsOfTheScalarFunctions(int count)
+    {
+        static long Ulps(double a, double b, bool single)
+        {
+            if (double.IsNaN(a) || double.IsNaN(b)) return double.IsNaN(a) && double.IsNaN(b) ? 0 : long.MaxValue;
+            if (a == b) return 0;
+            if (double.IsInfinity(a) || double.IsInfinity(b) || Math.Sign(a) != Math.Sign(b)) return long.MaxValue;
+            return single ? Math.Abs(BitConverter.SingleToInt32Bits((float)a) - (long)BitConverter.SingleToInt32Bits((float)b))
+                : Math.Abs(BitConverter.DoubleToInt64Bits(a) - BitConverter.DoubleToInt64Bits(b));
+        }
+
+        using var world = new World();
+        var random = new Random(count);
+        var levels = new Level[count];
+        var paces = new Pace[count];
+        var spots = new Spot2[count];
+        var entities = new Entity[count];
+        world.Reserve<Color4, Level, Spot2, Far3, Pace>(count);
+        for (int i = 0; i < count; i++)
+        {
+            float x = i % 3 == 0 ? NextFloat(random, i) : (float)(random.NextDouble() * 200 - 100);
+            levels[i] = new Level { Value = x };
+            paces[i] = new Pace { Value = NextDouble(random, i) };
+            spots[i] = new Spot2 { Y = NextFloat(random, i + 1) };
+            entities[i] = world.CreateEntity(new Color4(), levels[i], spots[i], new Far3(), paces[i]);
+            if (i % 7 == 0) entities[i].Set(new Frozen());
+        }
+
+        MathKernels.Waves(world);
+        MathKernels.Lengths(world);
+        MathKernels.Far(world);
+        for (int i = 0; i < count; i++)
+        {
+            float x = levels[i].Value;
+            double d = paces[i].Value;
+            var c = entities[i].Get<Color4>();
+            var s = entities[i].Get<Spot2>();
+            var f = entities[i].Get<Far3>();
+            (string Name, double Got, double Want, bool Single)[] lanes =
+            [
+                ("Sin", c.R, MathF.Sin(x), true), ("Cos", c.G, MathF.Cos(x), true), ("Exp", c.B, MathF.Exp(x), true),
+                ("Log", c.A, MathF.Log(MathF.Abs(x)), true), ("Log2", s.X, MathF.Log2(MathF.Abs(x)), true),
+                ("Hypot", s.Y, float.Hypot(x, spots[i].Y), true), ("Math.Sin", f.X, Math.Sin(d), false),
+                ("Math.Exp", f.Y, Math.Exp(d * 0.01), false), ("Math.Log", f.Z, Math.Log(Math.Abs(d)), false),
+            ];
+            foreach (var (name, got, want, single) in lanes)
+                Assert.That(Ulps(got, want, single), Is.LessThanOrEqualTo(2), $"{name} of row {i} ({x}, {d}): {got} instead of {want}");
+        }
+    }
+
     [Test]
     public void VectorLoopsDoNotAllocate()
     {
@@ -1013,6 +1116,10 @@ public class KernelTests
             ReduceKernels.Count(world);
             ReduceKernels.Span(world);
             ReduceKernels.Sum(world);
+            MathKernels.Turn(world);
+            MathKernels.Lengths(world);
+            ParallelKernels.Glide(world);
+            ParallelKernels.Count(world);
         }
 
         for (int i = 0; i < 50; i++) Frame(); // warm-up: the query cache, the static index tables of Interleaved, JIT tiers

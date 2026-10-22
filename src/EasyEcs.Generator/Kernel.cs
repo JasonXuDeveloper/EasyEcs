@@ -93,6 +93,7 @@ internal sealed class Kernel
     private readonly HashSet<int> _written = new();
     private string? _alive; // lanes that have not returned yet, once a return under a condition cleared some
     private bool _bails;
+    private bool _fast; // FloatMode.Fast: float sums reordered and the vector approximations of Sin, Exp, Log and kin
     private int _temps;
     private int _flat = -1; // translating the statements of field _flat of a flat loop: that field is lane 0, others refused
 
@@ -228,7 +229,7 @@ internal sealed class Kernel
         // The parameters of a kernel: the main one, and one per field of a flat loop (Flat) with the same setup.
         Kernel Make(bool reductions)
         {
-            var made = new Kernel(SizeOf(first));
+            var made = new Kernel(SizeOf(first)) { _fast = Symbols.FastFloats(method) };
             for (int i = 0, k = 0; i < method.Parameters.Length; i++)
             {
                 var p = method.Parameters[i];
@@ -938,6 +939,21 @@ internal sealed class Kernel
             }
             case "Clamp" when m.Parameters.Length == 3:
                 return Clamp(call, type);
+            case "DegreesToRadians" or "RadiansToDegrees" when single && isFloat:
+            {
+                // float.DegreesToRadians is (x * Pi) / 180, and RadiansToDegrees (x * 180) / Pi: the same two IEEE
+                // operations per lane
+                bool toRadians = m.Name == "DegreesToRadians";
+                string pi = Broadcast(type.SpecialType == SpecialType.System_Single ? "float.Pi" : "double.Pi", type);
+                string half = Broadcast(Literal(System.Convert.ChangeType(180, ClrType(type), CultureInfo.InvariantCulture), type), type);
+                return toRadians ? $"(({Arg(0)} * {pi}) / {half})" : $"(({Arg(0)} * {half}) / {pi})";
+            }
+            case "Sin" or "Cos" or "Exp" or "Log" or "Log2" when single && isFloat:
+            case "Hypot" when m.Parameters.Length == 2 && isFloat:
+                // .NET's vector forms approximate within a few ulps (Vector.Exp(0) is 1 + 1 ulp): not the scalar
+                // function's bits, so only where the method accepts approximate floats
+                if (!_fast) throw new Unsupported($"{m.ContainingType.Name}.{m.Name} is not bit-exact in vector form: set FloatMode = FloatMode.Fast");
+                return m.Parameters.Length == 1 ? $"{V}.{m.Name}({Arg(0)})" : $"{V}.{m.Name}({Arg(0)}, {Arg(1)})";
             default:
                 throw Not(call);
         }
@@ -1019,7 +1035,11 @@ internal sealed class Kernel
                 return $"({UnaryText(u.OperatorKind)}{Scalar(u.Operand)})";
             case IInvocationOperation { Instance: null, TargetMethod: var m } call when IsMath(m)
                 && (m.Name is "Min" or "Max" or "Sqrt" or "Floor" or "Ceiling" or "Truncate" or "Round" or "FusedMultiplyAdd" or "Lerp"
-                    || m.Name is "Abs" or "CopySign" && IsFloat(m.ReturnType)):
+                    || m.Name is "Abs" or "CopySign" && IsFloat(m.ReturnType)
+                    // pure functions of floats: the scalar call once per run gives every lane its bits
+                    || IsFloat(m.ReturnType) && m.Parameters.All(q => IsFloat(q.Type)) && m.Name is "Sin" or "Cos" or "Tan" or "Asin" or "Acos"
+                        or "Atan" or "Atan2" or "Sinh" or "Cosh" or "Tanh" or "Exp" or "Log" or "Log2" or "Log10" or "Pow" or "Cbrt"
+                        or "Hypot" or "DegreesToRadians" or "RadiansToDegrees"):
                 return $"{m.ContainingType.ToDisplayString(Symbols.Fqn)}.{m.Name}({string.Join(", ", call.Arguments.Select(a => Scalar(a.Value)))})";
             default:
                 // a call or a property could do anything: not hoisted out of the rows
@@ -1063,6 +1083,8 @@ internal sealed class Kernel
     {
         IInvocationOperation { TargetMethod: var m } when IsMath(m) => m.Name is "Abs" or "CopySign" && !IsFloat(m.ReturnType)
             ? $"{m.ContainingType.Name}.{m.Name} of an integer is not supported (it throws on MinValue)"
+            : IsFloat(m.ReturnType) && m.Name is "Tan" or "Asin" or "Acos" or "Atan" or "Atan2" or "Sinh" or "Cosh" or "Tanh" or "Log10" or "Pow" or "Cbrt"
+            ? $"{m.ContainingType.Name}.{m.Name} has no vector form in .NET 10"
             : $"{m.ContainingType.Name}.{m.Name}{(m.Parameters.Length > 0 && !m.Parameters.All(p => IsLane(p.Type)) ? $" of {string.Join(", ", m.Parameters.Select(p => p.Type.ToDisplayString()))}" : "")} is not supported",
         IInvocationOperation { TargetMethod: var m } => $"it calls {m.ContainingType.Name}.{m.Name}",
         IConversionOperation c => $"the conversion of '{Text(c.Operand)}' from {c.Operand.Type?.ToDisplayString()} to {c.Type?.ToDisplayString()} is not supported",
