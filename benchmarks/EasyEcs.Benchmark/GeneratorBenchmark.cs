@@ -19,11 +19,15 @@ namespace EasyEcs.Benchmark;
 /// opening the project) on a new compilation. <c>EditMethodBody</c>: an IDE keystroke, one line changed in a [ForEach]
 /// method's body, the driver kept from the previous run; <c>EditUnrelatedFile</c>: the same in a file with no EasyEcs
 /// code. <c>Compile</c> and <c>CompileAndAnalyze</c>: a build's diagnostics without and with the analyzer.
+/// <see cref="OneNamespace"/>: every module in one namespace (a game's <c>Game</c>), as many projects lay out their
+/// components, instead of one namespace per module.
 /// </summary>
 [MemoryDiagnoser]
 public class GeneratorBenchmark
 {
     private const int Modules = 40;
+
+    [Params(false, true)] public bool OneNamespace;
     private static readonly CSharpParseOptions Parse = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
 
     private ImmutableArray<SyntaxTree> _trees;
@@ -108,14 +112,14 @@ public class GeneratorBenchmark
         .Where(d => d.Severity >= DiagnosticSeverity.Info && d.Id != "EECS055").ToArray();
 
     /// <summary>One module of a game: components, a buffer element, systems with [ForEach] methods and a query loop.</summary>
-    private static string Module(int m)
+    private string Module(int m)
     {
-        var sb = new StringBuilder("using EasyEcs;\n\nnamespace Game.Module").Append(m).Append(";\n\n");
+        var sb = new StringBuilder("using EasyEcs;\n\nnamespace Game").Append(OneNamespace ? "" : ".Module" + m).Append(";\n\n");
         for (int c = 0; c < 10; c++)
             sb.Append(c switch
             {
                 0 => $"public struct Tag{m}_{c} : IComponent;\n",
-                1 => $"public record struct Score{m}_{c}(int Value) : IComponent, IIndexed<int> {{ public int Key => Value; }}\n",
+                1 => $"public partial record struct Score{m}_{c}([Key] int Value) : IComponent;\n",
                 2 or 3 => $"public record struct Tracked{m}_{c}(int V, float W) : IComponent, ITracked;\n",
                 _ => $"public struct Data{m}_{c} : IComponent {{ public int V; public float X, Y; }}\n",
             });
