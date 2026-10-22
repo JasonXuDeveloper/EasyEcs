@@ -196,7 +196,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
-        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows);
+        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows,
+        SharedWrite);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -221,6 +222,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterCompilationStartAction(AnalyzeOrderings);
         InitializePerformance(context);
         InitializeUsage(context);
+        InitializeParallel(context);
     }
 
     /// <summary>
