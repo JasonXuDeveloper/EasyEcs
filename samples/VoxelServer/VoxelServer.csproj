@@ -6,6 +6,8 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
+        <!-- [SkipLocalsInit] (WaterFlowSystem: a stackalloc'd texture Pad writes whole) needs it; no unsafe code. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
     <!-- With the NuGet package this is one line: <PackageReference Include="EasyEcs" Version="..."/> (the package

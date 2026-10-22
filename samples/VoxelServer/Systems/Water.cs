@@ -125,7 +125,7 @@ public class WaterBorderSystem : EcsSystem
 // into a padded texture, a ring of one block around each layer, so the loop has no edge cases. It reads nothing but
 // the row's components, holds no World, and is Parallel. Byte lanes are integer arithmetic: the same water on every
 // machine.
-[UpdateInGroup<Simulation>]
+[UpdateInGroup<Simulation>, System.Runtime.CompilerServices.SkipLocalsInit]
 public class WaterFlowSystem : EcsSystem
 {
     public override int UpdateInterval => Rules.FlowDelay;
@@ -142,14 +142,22 @@ public class WaterFlowSystem : EcsSystem
             summary = new FluidStep(StepResult.Settled, default, 0, 0); // no water here or beside: nothing moves
             return;
         }
-        int layers = reach.To + 2 - reach.Bottom;                       // and one above the top, zeroed (no water)
+        // The texture is not cleared, as a fragment shader's target is not: Pad writes every texel the loop samples,
+        // and only the layer above the world's top, which no chunk holds, is set to no water and no block.
+        int layers = reach.To + 2 - reach.Bottom;
         Span<byte> water = stackalloc byte[layers * Layer];
         Span<byte> ground = stackalloc byte[layers * Layer];
+        if (reach.Top <= reach.To)
+        {
+            water.Slice((layers - 1) * Layer).Clear();
+            ground.Slice((layers - 1) * Layer).Clear();
+        }
         Pad(MemoryMarshal.Cast<Fluid, byte>(fluid.AsReadOnlySpan()), MemoryMarshal.Cast<Block, byte>(blocks.AsReadOnlySpan()),
             MemoryMarshal.Cast<Border, byte>(border.AsReadOnlySpan()), water, ground, reach);
 
-        // Every block of the layers in reach, 16 at a time, written straight into the step; the layers outside hold no
-        // water before the step or after it, and SetCount leaves them zero.
+        // Every block of the layers in reach, 16 at a time, written straight into the step. The layers outside hold no
+        // water before the step or after it: zero since the buffer was first sized, as the steps before wrote water only
+        // on layers the reach of this one covers. So the buffer keeps its count between steps and is not cleared.
         var next = MemoryMarshal.Cast<NextFluid, byte>(step.Write().SetCount(Blocks));
         int filled = 0, wet = 0, first = Terrain.Height, last = 0;
         uint edges = 0;
@@ -159,11 +167,19 @@ public class WaterFlowSystem : EcsSystem
         {
             int p = Texel(y - reach.Bottom, z);
             var here = Sample(water, p);
+            var row = next.Slice(Terrain.IndexOf(0, y, z), Size);
+            // The stencil: with no water in a row, above it or beside it, nothing can flow in, and the row stays dry.
+            if ((here | Sample(water, p + Layer) | Sample(water, p - 1) | Sample(water, p + 1) | Sample(water, p - Row)
+                 | Sample(water, p + Row)) == Vector128<byte>.Zero)
+            {
+                Vector128<byte>.Zero.CopyTo(row);
+                continue;
+            }
             var level = Shade(here, Sample(water, p + Layer),
                 Sample(water, p - 1), Sample(ground, p - 1 - Layer), Sample(water, p + 1), Sample(ground, p + 1 - Layer),
                 Sample(water, p - Row), Sample(ground, p - Row - Layer), Sample(water, p + Row), Sample(ground, p + Row - Layer),
                 Sample(ground, p));
-            level.CopyTo(next.Slice(Terrain.IndexOf(0, y, z), Size));
+            level.CopyTo(row);
 
             uint lanes = (~Vector128.Equals(level, Vector128<byte>.Zero)).ExtractMostSignificantBits();
             wet += BitOperations.PopCount(lanes);
@@ -240,26 +256,44 @@ public class WaterFlowSystem : EcsSystem
     }
 }
 
-// Makes the step the water: [Changed<FluidStep>] visits the chunks that stepped (and the chunks just created, whose
-// step is None). A step that moved water is copied into
+// A step that moved nothing lets the chunk sleep until something wakes it: it leaves the passes (Flowing goes) and gives
+// its scratch buffers, the step and the border, back to the pool (TrimExcess of an empty buffer), so only the chunks
+// whose water moves hold them, and the next chunk woken takes them back without allocating. It runs before the commit,
+// so a chunk that settled is still woken by a neighbour whose water reached it in the same step.
+[UpdateInGroup<Simulation>]
+public class WaterSleepSystem : EcsSystem
+{
+    [ForEach, Changed<FluidStep>]
+    static void Sleep(Entity chunk, in FluidStep step, Mut<DynamicBuffer<NextFluid>> next, Mut<DynamicBuffer<Border>> border)
+    {
+        if (step.Result != StepResult.Settled) return;
+        chunk.RemoveFlowing();
+        ref var scratch = ref next.Write();
+        scratch.Clear();
+        scratch.TrimExcess();
+        ref var edges = ref border.Write();
+        edges.Clear();
+        edges.TrimExcess();
+    }
+}
+// Makes the step the water: [Changed<FluidStep>] visits the chunks that stepped. A step that moved water is copied into
 // the Fluid buffer (a write, which replication sends), its summary becomes the chunk's FluidCount, and the chunks beside
-// the edges whose water changed are woken; a step that moved nothing lets the chunk sleep until something wakes it.
+// the edges whose water changed are woken.
 [UpdateInGroup<Simulation>]
 public class WaterCommitSystem : EcsSystem
 {
     [ForEach, Changed<FluidStep>]
-    void Commit(Entity chunk, in Chunk key, in FluidStep step, Mut<DynamicBuffer<NextFluid>> next,
-        Mut<DynamicBuffer<Fluid>> fluid, ref FluidCount count, ref Stats stats)
+    void Commit(in Chunk key, in FluidStep step, in DynamicBuffer<NextFluid> next, Mut<DynamicBuffer<Fluid>> fluid,
+        ref FluidCount count, ref Stats stats)
     {
-        if (step.Result == StepResult.Settled) chunk.RemoveFlowing();   // not visited again until woken
         if (step.Result != StepResult.Moved) return;
-        next.Value.AsReadOnlySpan().CopyTo(MemoryMarshal.Cast<Fluid, NextFluid>(fluid.Write().AsSpan()));
-        next.Write().Clear();
+        next.AsReadOnlySpan().CopyTo(MemoryMarshal.Cast<Fluid, NextFluid>(fluid.Write().AsSpan()));
         count = step.Water;
         stats.WaterCells += step.Filled;
         Terrain.Wake(World, key.Pos, step.Edges);
     }
 }
+
 // #endregion flow
 
 // #region float

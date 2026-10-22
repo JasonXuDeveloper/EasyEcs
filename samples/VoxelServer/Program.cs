@@ -37,6 +37,7 @@ world.AddSystem<HeightMapSystem>();
 world.AddSystem<WaterWakeSystem>();
 world.AddSystem<WaterBorderSystem>();
 world.AddSystem<WaterFlowSystem>();
+world.AddSystem<WaterSleepSystem>();
 world.AddSystem<WaterCommitSystem>();
 world.AddSystem<PlayerMoveSystem>();
 world.AddSystem<ZombieTargetSystem>();
