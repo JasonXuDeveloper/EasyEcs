@@ -12,35 +12,39 @@ namespace EasyEcs.UnitTest;
 /// <summary>Drives SystemGenerator and EasyEcsAnalyzer through Roslyn: output, diagnostics and incremental caching.</summary>
 public class GeneratorTests
 {
-    private static readonly CSharpParseOptions Parse = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+    internal static readonly CSharpParseOptions Parse = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
 
-    private static CSharpCompilation Compile(params string[] sources) => CSharpCompilation.Create("Test",
+    internal static CSharpCompilation Compile(params string[] sources) => CSharpCompilation.Create("Test",
         sources.Select(s => CSharpSyntaxTree.ParseText("using EasyEcs;\n" + s, Parse)),
         Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
         new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
 
-    private static GeneratorDriver Driver() => CSharpGeneratorDriver.Create(
-        [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator()], parseOptions: Parse,
+    internal static GeneratorDriver Driver() => CSharpGeneratorDriver.Create(
+        [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()], parseOptions: Parse,
         driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
 
     /// <summary>
     /// Errors and the diagnostics of the correctness rules (EECS002-024). The performance rules (EECS025-033) are left
     /// out: the cases here write the shortest code that shows a rule, which often also costs; <see cref="Costs"/> checks them.
+    /// So are the suggestion to declare a hand-written key with [Key] (EECS067, PartTests) and the formatter a managed type
+    /// lacks (EECS069): the shared components write keys by hand and hold references.
     /// </summary>
     private static async Task<string[]> Diagnose(params string[] sources) =>
-        (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id) && d.Id != "EECS055")
+        (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id) && d.Id != "EECS055" && d.Id is not ("EECS067" or "EECS069"))
             .Select(d => d.Id).Distinct().OrderBy(x => x).ToArray();
 
     /// <summary>The diagnostics of the performance rules (EECS025-034, EECS039, EECS046, EECS052, EECS053), with their properties for the code fixes.</summary>
     internal static async Task<Diagnostic[]> Costs(params string[] sources) =>
         (await Analyze(sources)).Where(d => IsPerformance(d.Id) || d.Id == "EECS034").OrderBy(d => d.Location.SourceSpan.Start).ToArray();
 
-    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id is "EECS039" or "EECS046" or "EECS052" or "EECS053";
+    // The performance rules, and the suggestions to declare with attributes what a hand-written reduction does (EECS065):
+    // the shortest code that shows a rule often writes one by hand.
+    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id is "EECS039" or "EECS046" or "EECS052" or "EECS053" or "EECS065";
 
     /// <summary>Every EasyEcs diagnostic but EECS055 (the vector loop's message, asserted by <see cref="ScalarLoopsNameTheirReason"/>).</summary>
-    internal static async Task<Diagnostic[]> All(string source) => (await Analyze([Components, Extra, source])).Where(d => d.Id.StartsWith("EECS") && d.Id != "EECS055" || d.Severity == DiagnosticSeverity.Error).OrderBy(d => d.Location.SourceSpan.Start).ToArray();
+    internal static async Task<Diagnostic[]> All(string source) => (await Analyze([Components, Extra, source])).Where(d => d.Id.StartsWith("EECS") && d.Id != "EECS055" && d.Id is not ("EECS067" or "EECS069") || d.Severity == DiagnosticSeverity.Error).OrderBy(d => d.Location.SourceSpan.Start).ToArray();
 
-    private static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
+    internal static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(sources), out var output, out _);
         return await output.WithAnalyzers([new EasyEcsAnalyzer()]).GetAllDiagnosticsAsync();
@@ -659,6 +663,13 @@ public class GeneratorTests
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 65; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }", "EECS072")]
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; static int ITileShape.Halo => 0; }", "EECS072")]
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; } public class S : EcsSystem { [ForEach(Parallel = true)] static void A(Tile<byte, G> t, Tile<byte, G> u, Mut<DynamicBuffer<int>> b) => b.Write().SetCount(t.Cells.Length + u.Cells.Length); }", "EECS073")]
+    [TestCase("public record struct H(int V); public class S : EcsSystem { [ForEach] static void A(in P p, Emit<H> a, Emit<H> b) { a.Add(new H(p.V)); b.Add(new H(1)); } }", "EECS070")]
+    [TestCase("public record struct H(int V); public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, Emit<H> a, in Emitted<H> seen) => a.Add(new H(seen.Items.Count)); }", "EECS070")]
+    [TestCase("public record struct H(int V); public class S : EcsSystem { [ForEach] static void A(in P p, ref Emit<H> a) => a.Add(new H(p.V)); }", "EECS002")]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p) => p.V = System.Random.Shared.Next(10); }", "EECS071")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V = System.Random.Shared.Next(); }", "EECS071")]
+    [TestCase("public static class R { [ForEach] public static void A(ref P p) => p.V = new System.Random(3).Next(); }", "EECS071")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V = new System.Random().Next(5); }", "EECS071")]
     public async Task MisuseIsReported(string source, string id)
     {
         var errors = await Diagnose(Components, source);
@@ -691,6 +702,10 @@ public class GeneratorTests
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 8; static int ITileShape.Depth => 1; static int ITileShape.Halo => 3; static TileFaces ITileShape.Faces => TileFaces.West | TileFaces.East; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }")]
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { public static int H = 9; int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITileShape.Halo => H; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }")]
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; } public record struct V(byte B); public class S : EcsSystem { [ForEach(Parallel = true)] static void A(Tile<byte, G> t, Tile<V, G> u, Mut<DynamicBuffer<int>> b) => b.Write().SetCount(t.Cells.Length + u.Cells.Length); }")]
+    [TestCase("public record struct H(int V); public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, Emit<H> hits) => hits.Add(new H(p.V)); }")]
+    [TestCase("public record struct H(int V); public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public static class R { [ForEach(Parallel = true)] public static void A(in P p, ref Reduce<Sum> sum, Emit<H> hits) { sum.Value.N += p.V; hits.AddRange(new H(p.V), new H(0)); } }")]
+    [TestCase("public record struct H(int V); public class S : EcsSystem { [ForEach] static void A(in P p, Emit<H> hits) => hits.Add(new H(p.V)); [ForEach] static void B(in Q q, Emit<H> hits) => hits.Add(new H(q.V)); }")]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, Entity e, in EntityRandom random) => p.V = random.Range(e.Id, 0, 0, 10) + (random.Chance(e.Id, 1, 0.5f) ? 1 : 0); }")]
     public async Task ValidCodeIsNotReported(string source)
     {
         var errors = await Diagnose(Components, source);
@@ -905,6 +920,9 @@ public class GeneratorTests
     [TestCase("public struct J : IForEachEntity<P>, INoStructuralChanges { public System.Collections.Generic.List<EntityId> Hits; public void Execute(Entity e, ref P p) { if (p.V > 0) Hits.Add(e.Id); } } public static class U { public static void F(World w) { var j = new J { Hits = new() }; w.ForEachEntityParallel<P, J>(ref j); } }", "EECS060")] // copies share the list
     [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s); return s.Total; } }", "EECS061")]
     [TestCase("public struct Seen : IForEach<P>, INoStructuralChanges { public bool Any; public void Execute(ref P p) { if (p.V > 0) Any = true; } } public static class U { public static bool F(World w) { var s = new Seen(); w.ForEachParallel<P, Seen>(ref s, default, 64); return s.Any; } }", "EECS061")]
+    [TestCase("public struct J : IForRange { public void Execute(int start, int end) => Counters.Hits += end - start; } public static class U { public static void F(World w) { var j = new J(); w.ForParallel(100, ref j); } }", "EECS060")]
+    [TestCase("public struct Sum : IForRange { public int Total; public void Execute(int start, int end) => Total += end - start; } public static class U { public static int F(World w) { var s = new Sum(); w.ForParallel(100, ref s); return s.Total; } }", "EECS061")]
+    [TestCase("public struct Sum : IForSpan<int> { public int Total; public void Execute(int start, System.Span<int> items) => Total += items.Length; } public static class U { public static int F(World w, ref DynamicBuffer<int> b) { var s = new Sum(); w.ForParallel(ref b, ref s); return s.Total; } }", "EECS061")]
     public async Task ParallelWritesAreReported(string source, string id)
     {
         var errors = await Diagnose(Components, Extra, Shared, source);
@@ -928,6 +946,8 @@ public class GeneratorTests
     [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total, Limit; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum { Limit = 3 }; w.ForEachParallel<P, Sum>(ref s); return s.Limit; } }")] // not written
     [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s); s.Total = 0; return s.Total; } }")] // set first
     [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; public static bool Merges => true; public static void Merge<TSelf>(ref TSelf job, in TSelf chunk) where TSelf : struct => System.Runtime.CompilerServices.Unsafe.As<TSelf, Sum>(ref job).Total += System.Runtime.CompilerServices.Unsafe.As<TSelf, Sum>(ref System.Runtime.CompilerServices.Unsafe.AsRef(in chunk)).Total; } public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s); return s.Total; } }")] // merges its copies back
+    [TestCase("public struct Double : IForSpan<int> { public void Execute(int start, System.Span<int> items) { for (int i = 0; i < items.Length; i++) items[i] *= 2; } } public static class U { public static void F(World w, ref DynamicBuffer<int> b) { var j = new Double(); w.ForParallel(ref b, ref j); } }")] // its own elements
+    [TestCase("public struct Fill : IForRange { public int[] Cells; public void Execute(int start, int end) { for (int i = start; i < end; i++) Cells[i] = i; } } public static class U { public static void F(World w, int[] cells) { var j = new Fill { Cells = cells }; w.ForParallel(cells.Length, ref j); } }")]
     public async Task ParallelWritesThatDoNotRaceAreNotReported(string source)
     {
         var errors = await Diagnose(Components, Extra, Shared, source);
@@ -1002,6 +1022,53 @@ public class GeneratorTests
     }
 
     [Test]
+    public void TheModuleRegistersTheWorldSetupItsTypesDeclare()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
+            [GroupBy] public partial record struct Zone([Group] int Id) : IComponent;
+            [GroupBy] public record struct Room(int Id) : IComponent, IGroup { public int Group => Id; }
+            [WhenTargetDestroyed(TargetPolicy.Destroy)] public partial record struct Summon([Key] EntityId Owner) : IComponent;
+            [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Ally(EntityId Target) : IRelation;
+            [NotSaved] public record struct Link2(object Socket) : IComponent;
+            [NotSaved] public record struct Pool(object Handle) : ISingletonComponent;
+            """), out var output, out _);
+        var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs")).ToString();
+        foreach (var call in new[] { "GroupBy<global::Zone>()", "GroupBy<global::Room>()", "WhenTargetDestroyed<global::Summon>((global::EasyEcs.TargetPolicy)2)",
+                     "RelationWhenTargetDestroyed<global::Ally>((global::EasyEcs.TargetPolicy)1)", "NotSaved<global::Link2>()", "NotSaved<global::Pool>()" })
+            Assert.That(source, Does.Contain("global::EasyEcs.SavedTypes." + call + ";"), call);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+    }
+
+    [TestCase("[GroupBy] public record struct Z(int Id) : IComponent;")]                                                     // not grouped
+    [TestCase("[GroupBy] public partial record struct Z([Group] int Id) : ISingletonComponent;")]                             // not a component
+    [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public record struct W(int Id) : IComponent;")]                   // no link
+    [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public partial record struct W([Key] int Id) : IComponent;")]     // not an EntityId key
+    [TestCase("[NotSaved] public record struct N(object O);")]                                                              // no component
+    public async Task AWorldSetupOnATypeItDoesNotFitIsReported(string source)
+    {
+        Assert.That((await Analyze([source])).Where(d => d.Id.StartsWith("EECS") || d.Severity == DiagnosticSeverity.Error).Select(d => d.Id).Distinct(),
+            Is.EqualTo(new[] { "EECS068" }));
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(source), out var output, out _);
+        var saved = output.SyntaxTrees.SingleOrDefault(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs"))?.ToString() ?? "";
+        Assert.That(saved, Does.Not.Contain("GroupBy<").And.Not.Contain("WhenTargetDestroyed<").And.Not.Contain("NotSaved<"));
+    }
+
+    [TestCase("public record struct S(object O) : IComponent;", DiagnosticSeverity.Info)]
+    [TestCase("public record struct S(string Name) : ISingletonComponent; public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.Save(o); }", DiagnosticSeverity.Warning)]
+    [TestCase("public record struct S(object O) : IComponent; public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.SaveEntities(o); }", DiagnosticSeverity.Warning)]
+    [TestCase("[NotSaved] public record struct S(object O) : IComponent; public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.Save(o); }", null)]
+    [TestCase("namespace Nino.Core { public sealed class NinoTypeAttribute : System.Attribute; } [Nino.Core.NinoType] public partial record struct S(string Name) : IComponent; public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.Save(o); }", null)]
+    [TestCase("public record struct S(int N) : IComponent; public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.Save(o); }", null)] // unmanaged: raw rows
+    [TestCase("public record struct S(object O); public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.Save(o); }", null)]           // not a component
+    [TestCase("public record struct S(object O) : IComponent; public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.SaveWithout(o, ComponentSet.Create().With<S>()); }", null)] // left out by the code
+    [TestCase("public record struct S(string Name) : ISingletonComponent; public static class U { static readonly ComponentSet Keep = ComponentSet.Create().WithSingleton<S>(); }", null)]  // named in a set
+    public async Task AManagedTypeASaveCannotWriteIsReported(string source, DiagnosticSeverity? severity)
+    {
+        var found = (await Analyze([source])).Where(d => d.Id == "EECS069").ToArray();
+        Assert.That(found.Select(d => (DiagnosticSeverity?)d.Severity), Is.EqualTo(severity == null ? [] : new[] { severity }));
+    }
+
+    [Test]
     public void TheModuleRegistersItsComponentsSingletonsAndBuffersForLoading()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components,
@@ -1041,7 +1108,8 @@ public class GeneratorTests
     private static readonly string[] TrackedStages =
     [
         "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "ExtensionMembers", "BufferUses",
-        "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers",
+        "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
+        "GroupBy", "TargetPolicies", "NotSaved",
     ];
 
     // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
@@ -1054,7 +1122,10 @@ public class GeneratorTests
         string code = "using EasyEcs;\n" + Components +
             "public struct L; public partial class S : EcsSystem { [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { } [ForEach(Slices = 4)] static void D(ref Q q) { } }" +
             "public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void B(ref T t) { } } public class H : G<P>;" +
-            "public static class U { static void C(World w) { foreach (var i in w.Query<P>()) i.P.V++; } }";
+            "public static class U { static void C(World w) { foreach (var i in w.Query<P>()) i.P.V++; } }" +
+            "public partial struct Census : ISingletonComponent { [Sum] public int N; [Min] public float L; }" +
+            "[GroupBy] public partial record struct Zn([Group] int Id) : IComponent; [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Tether(EntityId Target) : IRelation;" +
+            "[NotSaved] public record struct Wire(object O) : IComponent;";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         var edited = code.Contains(before) ? system : other;
@@ -1339,7 +1410,7 @@ public class GeneratorTests
             Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged));
     }
 
-    private static System.Collections.Generic.Dictionary<string, System.Collections.Generic.IEnumerable<IncrementalGeneratorRunStep>> Steps(GeneratorDriver driver) =>
+    internal static System.Collections.Generic.Dictionary<string, System.Collections.Generic.IEnumerable<IncrementalGeneratorRunStep>> Steps(GeneratorDriver driver) =>
         driver.GetRunResult().Results.SelectMany(r => r.TrackedSteps).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.SelectMany(p => p.Value));
 
     [Test]
@@ -1725,6 +1796,10 @@ public class GeneratorTests
     [TestCase("public static class U { public static int F(World w, Entity e) => w.Index<Owned, EntityId>().Count(e); }", "EECS033")]
     [TestCase("public static class U { public static EntityId F(Entity e) => e.Read<ChildOf>().Parent; }", "EECS033")]          // EasyEcs's ChildOf has its members
     [TestCase("public static class U { public static bool F(Entity e) => e.Has<Retired>(); }", "EECS033")]
+    [TestCase("public static class U { public static void F(Entity e, int v) { if (e.T.V != v) e.SetT(v); } }", "EECS033")]           // a guarded write: SetTIfChanged
+    [TestCase("public static class U { public static void F(Entity e, int v) { if (v != e.Read<T>().V) { e.SetT(v); } } }", "EECS033")]
+    [TestCase("public record struct Hp(int V) : IComponent, ITracked; public static class U { public static void F(Entity e, int v) { if (e.Hp.V != v) e.Set(new Hp(v)); } }", "EECS033")]
+    [TestCase("public record struct Hp(int V) : IComponent; public static class U { public static int F(Entity e) => e.GetOrAdd(new Hp(3)).V; }", "EECS033")] // GetOrAddHp(3)
     [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) n += item.Component1.V; return n; } }", "EECS033")]
     [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<DynamicBuffer<Loot>>().Add(new Loot()); static DynamicBuffer<Loot> named; }", "EECS033")]
     // EECS034: a world update from a system.
@@ -1799,6 +1874,10 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<DynamicBuffer<Loot>>().Add(new Loot()); }")]          // the only name of the buffer
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p) { } }")]
     [TestCase("public static class U { public static EntityId F(World w, Entity e) { foreach (var item in w.Query<P, ChildOf>()) _ = item.ChildOf; return e.ChildOf.Parent; } }")]   // EasyEcs's own component, by its members
+    [TestCase("public static class U { public static void F(Entity e, int v) { if (e.T.V != v) e.SetT(v); else e.SetT(0); } }")]     // an else
+    [TestCase("public static class U { public static void F(Entity e, Entity o, int v) { if (o.T.V != v) e.SetT(v); } }")]             // another entity
+    [TestCase("public static class U { public static void F(Entity e, int v) { if (e.T.V != v) e.SetT(v + 1); } }")]                // another value
+    [TestCase("public record struct Two(int A, int B) : IComponent, ITracked; public static class U { public static void F(Entity e, int v) { if (e.Two.A != v) e.SetTwo(v, 0); } }")] // two fields
     public async Task CheapCodeIsNotReported(string source)
     {
         var costs = await Costs(Components, Extra, source);

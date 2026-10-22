@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.EntityRandom" source="19c5e29c54b2">
+    <summary>
+      <c>[ForEach]</c> 方法（包括并行方法）用的确定性随机数（cuRAND 的 Philox，一种基于计数器的生成器）：每个数都是种子、实体、tick
+      和流的纯函数，没有要推进的状态，所以每次运行、任何线程数、行以任何顺序运行，结果都一样。它是存放种子和 tick 的单例：
+      <c>static void Wander(ref Velocity v, Entity entity, in EntityRandom random) =&gt; v.X = random.Range(entity.Id, 0,
+      -1f, 1f);</c>，推进模拟时钟的系统同时推进 <see cref="P:EasyEcs.EntityRandom.Tick" />。静态成员显式接收这四个输入（自己的种子、自己时钟的 tick）。
+      <para>
+      <c>stream</c> 区分同一个实体在同一个 tick 里的多次抽取：方法里每个调用点用自己的流（0、1、2……）。同样的四个输入得到同样的数，
+      所以两个调用点用同一个流会抽到同一个数。
+      </para>
+      <para>
+      这些位是 SplitMix64 终结函数的四轮，每个输入一轮：每一轮都是 64 位上的双射，所以只差一位的两个输入，输出大约有一半的位不同。
+      它是哈希，不是密码学生成器。
+      </para>
+    </summary>
+    <param name="Seed">World 的种子：换一个种子，每个实体的序列都不同。</param>
+    <param name="Tick">这些数所属的模拟步：每一步推进一次。</param>
+  </member>
+  <member name="P:EasyEcs.EntityRandom.Seed" source="29983aa0217d">
+    <summary>World 的种子：换一个种子，每个实体的序列都不同。</summary>
+  </member>
+  <member name="P:EasyEcs.EntityRandom.Tick" source="fa3f8a8a5110">
+    <summary>这些数所属的模拟步：每一步推进一次。</summary>
+  </member>
+  <member name="M:EasyEcs.EntityRandom.Bits(EasyEcs.EntityId,System.UInt32)" source="6d790572f301">
+    <summary><paramref name="entity" /> 在这个 tick、流 <paramref name="stream" /> 上的 64 个随机位。O(1)，纯函数。</summary>
+  </member>
+  <member name="M:EasyEcs.EntityRandom.Bits(System.UInt64,EasyEcs.EntityId,System.UInt64,System.UInt32)" source="cf04c55af49a">
+    <summary>
+      (<paramref name="seed" />, <paramref name="entity" />, <paramref name="tick" />, <paramref name="stream" />) 的 64 个随机位：
+      同样的输入总是得到同样的位。O(1)，纯函数，零分配。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.EntityRandom.Chance(EasyEcs.EntityId,System.UInt32,System.Single)" source="3cd1771dda6a">
+    <summary>以概率 <paramref name="probability" /> 返回 true（0：从不，1：总是）。O(1)，纯函数。</summary>
+  </member>
+  <member name="M:EasyEcs.EntityRandom.Chance(System.UInt64,EasyEcs.EntityId,System.UInt64,System.UInt32,System.Single)" source="3f5f2c35302d">
+    <summary>以概率 <paramref name="probability" /> 返回 true：<c>Float &lt; probability</c>。O(1)，纯函数。</summary>
+  </member>
+  <member name="M:EasyEcs.EntityRandom.Float(EasyEcs.EntityId,System.UInt32)" source="fd8737131223">
+    <summary><paramref name="entity" /> 在这个 tick、流 <paramref name="stream" /> 上的 [0, 1) 浮点数。O(1)，纯函数。</summary>
+  </member>
+  <member name="M:EasyEcs.EntityRandom.Float(System.UInt64,EasyEcs.EntityId,System.UInt64,System.UInt32)" source="a30ea9b58e40">
+    <summary>[0, 1) 的浮点数：<see cref="M:EasyEcs.EntityRandom.Bits(System.UInt64,EasyEcs.EntityId,System.UInt64,System.UInt32)" /> 的高 24 位，所以每个值都是 2^-24 的整数倍。O(1)，纯函数。</summary>
+  </member>
+  <member name="M:EasyEcs.EntityRandom.Range(EasyEcs.EntityId,System.UInt32,System.Single,System.Single)" source="ce9f886e14f3">
+    <summary>[<paramref name="min" />, <paramref name="max" />) 的浮点数。O(1)，纯函数。</summary>
+  </member>
+  <member name="M:EasyEcs.EntityRandom.Range(EasyEcs.EntityId,System.UInt32,System.Int32,System.Int32)" source="b29a1e600e64">
+    <summary>[<paramref name="min" />, <paramref name="max" />) 的整数（两者相等时是 <paramref name="min" />）。O(1)，纯函数。</summary>
+  </member>
+  <member name="M:EasyEcs.EntityRandom.Range(System.UInt64,EasyEcs.EntityId,System.UInt64,System.UInt32,System.Single,System.Single)" source="8a3210f961e7">
+    <summary>[<paramref name="min" />, <paramref name="max" />) 的浮点数：<c>min + Float × (max - min)</c>。O(1)，纯函数。</summary>
+  </member>
+  <member name="M:EasyEcs.EntityRandom.Range(System.UInt64,EasyEcs.EntityId,System.UInt64,System.UInt32,System.Int32,System.Int32)" source="a24112d9ec19">
+    <summary>
+      [<paramref name="min" />, <paramref name="max" />) 的整数（两者相等时是 <paramref name="min" />）：位乘以区间长度取高半部分，
+      不做除法，偏差小于 range / 2^64。O(1)，纯函数。
+    </summary>
+    <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="max" /> 小于 <paramref name="min" />。</exception>
+  </member>
+</doc>

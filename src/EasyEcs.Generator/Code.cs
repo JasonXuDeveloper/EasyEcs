@@ -32,6 +32,32 @@ internal static class Code
     /// <summary>A name as generated code writes it: a keyword gets its <c>@</c> (<c>@class</c>).</summary>
     public static string Escape(string name) => SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None ? "@" + name : name;
 
+    /// <summary>
+    /// A generated part of a type: <paramref name="body"/> (members, one per line, unindented) inside the type, which
+    /// gets <paramref name="bases"/> ("" for none), inside each of its containing types; <paramref name="heads"/> are
+    /// their declarations outermost first (<c>partial class Outer&lt;T&gt;</c>, Parts.Heads), in namespace
+    /// <paramref name="ns"/> ("" for the global one).
+    /// </summary>
+    public static string Part(string ns, EquatableArray<string> heads, string bases, string body)
+    {
+        var sb = new System.Text.StringBuilder(Header);
+        if (ns.Length > 0) sb.Append($"namespace {ns};\n\n");
+        for (int i = 0; i < heads.Length; i++)
+        {
+            string indent = new(' ', 4 * i);
+            sb.Append(indent).Append(heads[i]);
+            if (i == heads.Length - 1 && bases.Length > 0) sb.Append(" : ").Append(bases);
+            sb.Append('\n').Append(indent).Append("{\n");
+        }
+
+        string inner = new(' ', 4 * heads.Length);
+        foreach (var line in body.TrimEnd('\n').Split('\n'))
+            if (line.Length > 0) sb.Append(inner).Append(line).Append('\n');
+            else sb.Append('\n');
+        for (int i = heads.Length - 1; i >= 0; i--) sb.Append(new string(' ', 4 * i)).Append("}\n");
+        return sb.ToString();
+    }
+
     /// <summary>The FNV-1a hash of <paramref name="text"/>'s characters: stable across processes, unlike <c>GetHashCode</c>.</summary>
     public static uint Fnv(string text)
     {

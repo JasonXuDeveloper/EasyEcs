@@ -62,6 +62,38 @@ public static class SavedTypes
     }
 
     /// <summary>
+    /// [NotSaved] on component or singleton <typeparamref name="T"/>: no save writes it (<see cref="World.Save(System.Buffers.IBufferWriter{byte})"/>,
+    /// <see cref="World.SaveWithout"/>, <see cref="World.SaveEntities"/>, even with a set that names it), and a load
+    /// keeps the world's own singleton of it.
+    /// </summary>
+    public static void NotSaved<T>() where T : struct => NotSavedOf<T>.Value = true;
+
+    /// <summary>
+    /// [GroupBy] on <typeparamref name="T"/>: every world groups its tables by it (<see cref="World.GroupBy{T}"/>) from
+    /// its first table holding it, unless the world called GroupBy first.
+    /// </summary>
+    public static void GroupBy<T>() where T : struct, IComponent, IGroup => World.DefaultGroupBy<T>();
+
+    /// <summary>
+    /// [WhenTargetDestroyed] on component <typeparamref name="T"/> (indexed by an <see cref="EntityId"/>): every world
+    /// starts with <paramref name="policy"/> for it, as <see cref="TargetPolicyExtensions.WhenTargetDestroyed{T}"/>
+    /// sets it, unless the world set its own first.
+    /// </summary>
+    public static void WhenTargetDestroyed<T>(TargetPolicy policy) where T : struct, IComponent, IIndexed<EntityId>
+    {
+        if (policy != TargetPolicy.Keep) TypeDefaults<T>.GetOrAdd().Rule ??= world => world.Index<T, EntityId>().WhenTargetDestroyed(policy);
+    }
+
+    /// <summary>
+    /// [WhenTargetDestroyed] on relation <typeparamref name="T"/>: every world starts with <paramref name="policy"/> for
+    /// its links (<see cref="RelationIndex{T}.WhenTargetDestroyed"/>), unless the world set its own first.
+    /// </summary>
+    public static void RelationWhenTargetDestroyed<T>(TargetPolicy policy) where T : struct, IRelation
+    {
+        if (policy != TargetPolicy.Keep) TypeDefaults<DynamicBuffer<T>>.GetOrAdd().Rule ??= world => world.Relations<T>().WhenTargetDestroyed(policy);
+    }
+
+    /// <summary>
     /// <see cref="UniqueIndex{T,TKey}"/> for a direct-indexed component (<see cref="IDirectIndexed{TKey}"/>): its worlds'
     /// indexes also keep the slot array.
     /// </summary>

@@ -161,6 +161,12 @@ public class CodeFixTests
     [TestCase("EECS033", "Use .WriteT",
         "public static class U { public static void F(Entity e) => e.Get<T>().V = 1; }",
         "=> e.WriteT().V = 1;")]
+    [TestCase("EECS033", "Use .SetTIfChanged",
+        "public static class U { public static void F(Entity e, int v) { if (e.T.V != v) e.SetT(v); } }",
+        "{ e.SetTIfChanged(v); }")]
+    [TestCase("EECS033", "Use .GetOrAddHp",
+        "public record struct Hp(int V) : IComponent; public static class U { public static int F(Entity e) => e.GetOrAdd(new Hp(3)).V; }",
+        "=> e.GetOrAddHp(3).V;")]
     [TestCase("EECS033", "Use .T",
         "public static class U { public static int F(Entity e) => e.Read<T>().V; }",
         "=> e.T.V;")]
@@ -267,10 +273,58 @@ public class CodeFixTests
         "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
         + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, QueryFilter.Create().Without<Q>()); return s.Total; } }",
         "w.ForEach<P, Sum>(ref s, QueryFilter.Create().Without<Q>());")]
+    [TestCase("EECS071", "Draw from EntityRandom",
+        "public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p) => p.V = System.Random.Shared.Next(1, 7); }",
+        "static void A(ref P p, Entity entity, in EntityRandom random) => p.V = random.Range(entity.Id, 0, 1, 7); }")]
+    [TestCase("EECS071", "Draw from EntityRandom",
+        "public class S : EcsSystem { [ForEach] static void A(ref Q q, Entity e, in EntityRandom r) => q.V = r.Range(e.Id, 0, 0, 9) + (System.Random.Shared.NextSingle() < 0.5f ? 1 : 0); }",
+        "q.V = r.Range(e.Id, 0, 0, 9) + (r.Float(e.Id, 1) < 0.5f ? 1 : 0); }")]
+    [TestCase("EECS062", "Make it partial",
+        "public static class Outer { internal class Mid { public struct Census : ISingletonComponent { [Sum] public int Alive; } } }",
+        "public static partial class Outer { internal partial class Mid { public partial struct Census")]
+    [TestCase("EECS062", "Make it partial",
+        "class Outer\n{\n    [System.Serializable]\n    struct Census : ISingletonComponent { [Sum] public int Alive; }\n}",
+        "partial class Outer\n{\n    [System.Serializable]\n    partial struct Census")]
+    [TestCase("EECS065", "Declare it with attributes",
+        "public struct C : ISingletonComponent, IReduction<C> { public int N; public float L; public static C Identity => new C { L = float.MaxValue }; public static C Combine(C a, C b) => new C { N = a.N + b.N, L = System.Math.Min(a.L, b.L) }; }",
+        "public partial struct C : ISingletonComponent { [Sum] public int N; [Min] public float L; }")]
+    [TestCase("EECS065", "Declare it with attributes",
+        "public record struct C(int N, long M) : ISingletonComponent, IReduction<C>\n{\n    public static C Identity => new C { M = long.MinValue };\n\n    public static C Combine(C a, C b) => new C { N = a.N + b.N, M = System.Math.Max(a.M, b.M) };\n}",
+        "public partial record struct C([Sum] int N, [Max] long M) : ISingletonComponent\n{\n}")]
+    [TestCase("EECS066", "Fix the Identity",
+        "public struct C : ISingletonComponent, IReduction<C> { public float L; public int First; public static C Identity => default; public static C Combine(C a, C b) => new C { L = System.MathF.Min(a.L, b.L), First = a.First < 0 ? b.First : a.First }; }",
+        "public static C Identity => new C { L = float.PositiveInfinity };")]
+    [TestCase("EECS066", "Fix the Identity",
+        "public struct C : ISingletonComponent, IReduction<C> { public int Lo, Hi, First; public static C Identity => new C { Lo = int.MaxValue, First = -1 }; public static C Combine(C a, C b) => new C { Lo = System.Math.Min(a.Lo, b.Lo), Hi = System.Math.Max(a.Hi, b.Hi), First = a.First < 0 ? b.First : a.First }; }",
+        "public static C Identity => new C { Lo = int.MaxValue, Hi = int.MinValue, First = -1 };")]
+    [TestCase("EECS066", "Declare it with attributes",
+        "public struct C : ISingletonComponent, IReduction<C> { public int Lo; public static C Identity => default; public static C Combine(C a, C b) => new C { Lo = System.Math.Min(a.Lo, b.Lo) }; }",
+        "public partial struct C : ISingletonComponent { [Min] public int Lo; }")]
+    [TestCase("EECS067", "Declare it with [Key]",
+        "public struct M : IComponent, IIndexed<int> { public int BlocksDug; public int Key => BlocksDug; }",
+        "public partial struct M : IComponent { [Key] public int BlocksDug; }")]
+    [TestCase("EECS067", "Declare it with [UniqueKey]",
+        "public record struct A(int Id) : IComponent, IUniqueIndexed<int> { readonly int IIndexed<int>.Key => Id; }",
+        "public partial record struct A([UniqueKey] int Id) : IComponent { }")]
+    [TestCase("EECS067", "Declare it with [Key]",
+        "namespace N\n{\n    public readonly struct Tile : IComponent, IIndexed<Tile>, System.IEquatable<Tile>\n    {\n        public readonly int X;\n        Tile IIndexed<Tile>.Key => this;\n        public bool Equals(Tile o) => X == o.X;\n    }\n}",
+        "namespace N\n{\n    [Key]\n    public readonly partial struct Tile : IComponent, System.IEquatable<Tile>\n    {\n        public readonly int X;\n        public bool Equals(Tile o) => X == o.X;\n    }\n}")]
+    [TestCase("EECS067", "Declare it with [UniqueKey]",
+        "public struct D : IComponent, IDirectIndexed<int> { public int Cell; public int Key { get => Cell; } public static int Slots => 8; public static int SlotOf(int key) => key; }",
+        "public partial struct D : IComponent, IDirectIndexed<int> { [UniqueKey] public int Cell; public static int Slots")]  // IDirectIndexed stays
+    [TestCase("EECS043", "Declare it with [Key]",
+        "public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; }",
+        "[Key]\npublic readonly partial record struct Shop(long Id) : IComponent { }")]
+    [TestCase("EECS069", "Mark it [NinoType]",
+        "namespace Nino.Core { public sealed class NinoTypeAttribute : System.Attribute; }\npublic struct Name : IComponent { public string Text; }", // Nino's attribute, as its package declares it
+        "[Nino.Core.NinoType]\npublic partial struct Name : IComponent { public string Text; }")]
+    [TestCase("EECS069", "Mark it [NotSaved]",
+        "namespace N\n{\n    public record struct Wire(object Socket) : IComponent;\n}",
+        "namespace N\n{\n    [NotSaved]\n    public record struct Wire(object Socket) : IComponent;\n}")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
-        var diagnostic = (await Analyze(document)).First(d => d.Id == id);
+        var diagnostic = (await Analyze(document)).First(d => d.Id == id && d.Location.SourceSpan.Start >= Data.Length); // not one of Data's
 
         var actions = new List<CodeAction>();
         var context = new CodeFixContext(document, diagnostic, (action, _) => actions.Add(action), CancellationToken.None);
@@ -282,7 +336,7 @@ public class CodeFixTests
         var fixedDocument = operation.ChangedSolution.GetDocument(document.Id)!;
         var text = (await fixedDocument.GetTextAsync()).ToString();
         Assert.That(text, Does.Contain(expected));
-        Assert.That((await Analyze(fixedDocument)).Where(d => d.Id == id), Is.Empty, text);
+        Assert.That((await Analyze(fixedDocument)).Where(d => d.Id == id && d.Location.SourceSpan.Start >= Data.Length), Is.Empty, text);
         var errors = (await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error);
         Assert.That(errors, Is.Empty, text);
     }
@@ -322,6 +376,8 @@ public class CodeFixTests
     [TestCase("EECS027", "public static class R { [ForEach] public static void A(Entity e, ref P p) => p.V = e.Get<Q>().V; public static void Call(Entity e) { P p = default; A(e, ref p); } }")] // a caller
     [TestCase("EECS061", "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
                          + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, default, 64); return s.Total; } }")] // its chunk size: chosen for threads
+    [TestCase("EECS071", "public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V = (int)System.Random.Shared.NextInt64(9); }")] // no EntityRandom twin
+    [TestCase("EECS071", "public class S : EcsSystem { [ForEach] static void A(System.Span<P> p) => p[0].V = System.Random.Shared.Next(); }")] // a batch method: no Entity
     public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)
     {
         var document = Document(Data + source);
@@ -363,7 +419,7 @@ public class CodeFixTests
         public override ImmutableArray<DiagnosticAnalyzer> GetAnalyzersForAllLanguages() => [];
         // The same instances every call: the workspace maps each generator back to its reference.
         private readonly ImmutableArray<ISourceGenerator> _generators =
-            [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator()];
+            [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()];
 
         public override ImmutableArray<ISourceGenerator> GetGenerators(string language) => _generators;
     }

@@ -29,7 +29,7 @@
   <member name="M:EasyEcs.Tile`2.Load" source="bbd224585ada">
     <summary>带边拷入所有层，缺失邻居的那一圈为零：见 <see cref="M:EasyEcs.Tile`2.Load(System.Int32,System.Int32,`0,System.Boolean)" />。</summary>
   </member>
-  <member name="M:EasyEcs.Tile`2.Load(System.Int32,System.Int32,`0,System.Boolean)" source="b8b9b5ab612a">
+  <member name="M:EasyEcs.Tile`2.Load(System.Int32,System.Int32,`0,System.Boolean)" source="5e5fbbb22e66">
     <summary>
       把第 <paramref name="from" /> 到第 <paramref name="to" /> 层带边拷进这个线程的纹理：每层的格子在中间，每层外面一圈
       <see cref="P:EasyEcs.ITileShape.Halo" />（r）个格子（西、东邻居朝向这边的列，北、南邻居朝向这边的行；邻域包含棱时，角来自隔着棱的分块）；

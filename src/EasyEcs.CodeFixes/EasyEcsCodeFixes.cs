@@ -25,7 +25,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS018", "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
-            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061");
+            "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -85,9 +85,13 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                         context.RegisterCodeFix(CodeAction.Create($"Declare WriteMask => {writes}", _ => Task.FromResult(context.Document.WithSyntaxRoot(withWrites)),
                             diagnostic.Id), diagnostic);
                     break;
-                case "EECS043" when node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { } key
-                                    && await ExplicitKey(context.Document, key, context.CancellationToken).ConfigureAwait(false) is { } explicitKey:
-                    Register(context, diagnostic, "Implement it explicitly", root, key, explicitKey);
+                case "EECS043" or "EECS067" when node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { } key:
+                    if (diagnostic.Id == "EECS043" && await ExplicitKey(context.Document, key, context.CancellationToken).ConfigureAwait(false) is { } explicitKey)
+                        Register(context, diagnostic, "Implement it explicitly", root, key, explicitKey);
+                    if (await KeyAttribute(context.Document, root, key, diagnostic.Properties.TryGetValue("Member", out var member) ? member : "this",
+                            context.CancellationToken).ConfigureAwait(false) is { } keyed)
+                        context.RegisterCodeFix(CodeAction.Create($"Declare it with [{keyed.Attribute}]", _ => Task.FromResult(context.Document.WithSyntaxRoot(keyed.Root)),
+                            diagnostic.Id + "attribute"), diagnostic);
                     break;
                 case "EECS017" when kind == "EntityId" && node.FirstAncestorOrSelf<FieldDeclarationSyntax>() is { } field:
                     if (await ToEntityId(context.Document, field, context.CancellationToken).ConfigureAwait(false) is { } ids)
@@ -154,11 +158,62 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                     Register(context, diagnostic, "Remove ChunkRows", root, list,
                         list.Arguments.Count == 1 ? null : list.RemoveNode(chunks, SyntaxRemoveOptions.KeepNoTrivia));
                     break;
+                case "EECS071" when kind == "Random" && diagnostic.Properties.TryGetValue("Text", out var draw) && draw != null
+                                    && node.FirstAncestorOrSelf<InvocationExpressionSyntax>() is { } call
+                                    && call.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
+                                    && !await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false):
+                    diagnostic.Properties.TryGetValue("Random", out var rng);
+                    diagnostic.Properties.TryGetValue("Entity", out var entity);
+                    Register(context, diagnostic, "Draw from EntityRandom", root, method, FromRandom(method, call, draw, rng, entity));
+                    break;
+                case "EECS062" when node.FirstAncestorOrSelf<TypeDeclarationSyntax>() is { } type
+                                    && !type.AncestorsAndSelf().OfType<TypeDeclarationSyntax>().Any(t => t.Modifiers.Any(SyntaxKind.FileKeyword)):
+                    context.RegisterCodeFix(CodeAction.Create("Make it partial", _ => Task.FromResult(context.Document.WithSyntaxRoot(Partial(root, type))),
+                        diagnostic.Id), diagnostic);
+                    break;
+                case "EECS065" or "EECS066" when node.FirstAncestorOrSelf<TypeDeclarationSyntax>() is { } type:
+                    if (diagnostic.Id == "EECS066" && diagnostic.Properties.TryGetValue("Identity", out var identity) && identity != null
+                        && node.FirstAncestorOrSelf<ExpressionSyntax>() is { } start)
+                        Register(context, diagnostic, "Fix the Identity", root, start, SyntaxFactory.ParseExpression(identity).WithTriviaFrom(start));
+                    if (diagnostic.Properties.TryGetValue("Ops", out var ops) && ops != null
+                        && await Attributed(context.Document, root, type, ops, context.CancellationToken).ConfigureAwait(false) is { } attributed)
+                        context.RegisterCodeFix(CodeAction.Create("Declare it with attributes", _ => Task.FromResult(context.Document.WithSyntaxRoot(attributed)),
+                            diagnostic.Id + "attributes"), diagnostic);
+                    break;
+                case "EECS069" when node.FirstAncestorOrSelf<TypeDeclarationSyntax>() is { } type:
+                    if (!type.AncestorsAndSelf().OfType<TypeDeclarationSyntax>().Any(t => t.Modifiers.Any(SyntaxKind.FileKeyword))
+                        && await Marked(context.Document, root, type, true, context.CancellationToken).ConfigureAwait(false) is { } nino)
+                        context.RegisterCodeFix(CodeAction.Create("Mark it [NinoType]", _ => Task.FromResult(context.Document.WithSyntaxRoot(nino)), diagnostic.Id + "nino"), diagnostic);
+                    if (await Marked(context.Document, root, type, false, context.CancellationToken).ConfigureAwait(false) is { } notSaved)
+                        context.RegisterCodeFix(CodeAction.Create("Mark it [NotSaved]", _ => Task.FromResult(context.Document.WithSyntaxRoot(notSaved)), diagnostic.Id + "notsaved"), diagnostic);
+                    break;
                 case "EECS023" when node.FirstAncestorOrSelf<AttributeSyntax>() is { Parent: AttributeListSyntax list } attribute:
                     Register(context, diagnostic, "Remove the filter", root, list.Attributes.Count == 1 ? list : attribute, null);
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// EECS071: the draw from System.Random becomes the analyzer's EntityRandom draw (<paramref name="draw"/>), and the method
+    /// gets the parameters it names: <c>in EntityRandom</c> <paramref name="rng"/> and <c>Entity</c> <paramref name="entity"/>
+    /// (null: the method has it).
+    /// </summary>
+    private static MethodDeclarationSyntax FromRandom(MethodDeclarationSyntax method, InvocationExpressionSyntax call, string draw, string? rng, string? entity)
+    {
+        var updated = method.ReplaceNode(call, SyntaxFactory.ParseExpression(draw).WithTriviaFrom(call));
+        var added = new System.Collections.Generic.List<ParameterSyntax>();
+        if (entity != null) added.Add(SyntaxFactory.Parameter(SyntaxFactory.Identifier(entity)).WithType(SyntaxFactory.ParseTypeName("Entity ")));
+        if (rng != null)
+            added.Add(SyntaxFactory.Parameter(SyntaxFactory.Identifier(rng)).WithType(SyntaxFactory.ParseTypeName("EntityRandom "))
+                .WithModifiers(SyntaxFactory.TokenList(SyntaxFactory.Token(SyntaxKind.InKeyword).WithTrailingTrivia(SyntaxFactory.Space))));
+        if (added.Count == 0) return updated;
+        var list = updated.ParameterList;
+        var parameters = list.Parameters;
+        foreach (var parameter in added)
+            parameters = parameters.Count == 0 ? parameters.Add(parameter)
+                : parameters.Add(parameter.WithLeadingTrivia(SyntaxFactory.Space));
+        return updated.WithParameterList(list.WithParameters(parameters));
     }
 
     /// <summary>
@@ -273,8 +328,21 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
         if (model?.GetDeclaredSymbol(key, token) is not IPropertySymbol property || key.ExplicitInterfaceSpecifier != null) return null;
         var face = property.ContainingType.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == "EasyEcs.IIndexed<TKey>"
                                                                             && SymbolEqualityComparer.Default.Equals(i.TypeArguments[0], property.ContainingType));
-        if (face == null) return null;
-        // A read of .Key through the type (not the interface) would no longer compile.
+        if (face == null || await ReadThroughType(document, property, token).ConfigureAwait(false)) return null;
+
+        var modifiers = SyntaxFactory.TokenList(key.Modifiers.Where(m => !SyntaxFacts.IsAccessibilityModifier(m.Kind())));
+        return key.WithModifiers(modifiers)
+            .WithExplicitInterfaceSpecifier(SyntaxFactory.ExplicitInterfaceSpecifier(SyntaxFactory.ParseName(face.ToMinimalDisplayString(model, key.SpanStart))))
+            .WithLeadingTrivia(key.GetLeadingTrivia());
+    }
+
+    /// <summary>
+    /// Whether code of the project reads <paramref name="key"/> (an implicit Key) through its type, not the interface:
+    /// such a read stops compiling once the key is an explicit implementation or the generator's.
+    /// </summary>
+    private static async Task<bool> ReadThroughType(Document document, IPropertySymbol key, CancellationToken token)
+    {
+        if (key.ExplicitInterfaceImplementations.Length > 0) return false;
         foreach (var other in document.Project.Documents)
         {
             var otherRoot = await other.GetSyntaxRootAsync(token).ConfigureAwait(false);
@@ -282,16 +350,13 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
             SemanticModel? otherModel = null;
             foreach (var name in otherRoot.DescendantNodes().OfType<IdentifierNameSyntax>())
             {
-                if (name.Identifier.ValueText != "Key" || name.Parent == key) continue;
+                if (name.Identifier.ValueText != "Key" || name.Parent is PropertyDeclarationSyntax) continue;
                 otherModel ??= await other.GetSemanticModelAsync(token).ConfigureAwait(false);
-                if (SymbolEqualityComparer.Default.Equals(otherModel?.GetSymbolInfo(name, token).Symbol, property)) return null;
+                if (SymbolEqualityComparer.Default.Equals(otherModel?.GetSymbolInfo(name, token).Symbol, key)) return true;
             }
         }
 
-        var modifiers = SyntaxFactory.TokenList(key.Modifiers.Where(m => !SyntaxFacts.IsAccessibilityModifier(m.Kind())));
-        return key.WithModifiers(modifiers)
-            .WithExplicitInterfaceSpecifier(SyntaxFactory.ExplicitInterfaceSpecifier(SyntaxFactory.ParseName(face.ToMinimalDisplayString(model, key.SpanStart))))
-            .WithLeadingTrivia(key.GetLeadingTrivia());
+        return false;
     }
 
     /// <summary>
@@ -632,6 +697,164 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
     private static GenericNameSyntax? Generic(TypeSyntax? type) => type as GenericNameSyntax ?? (type as QualifiedNameSyntax)?.Right as GenericNameSyntax;
 
     /// <summary>The file's own line ending, for a line a fix adds: a CRLF file stays CRLF, an LF file LF.</summary>
+    /// <summary>
+    /// EECS062 and the fixes that declare a part: <paramref name="type"/> and every type containing it get
+    /// <c>partial</c> (last among their modifiers, where C# wants it), in <paramref name="root"/>.
+    /// </summary>
+    internal static SyntaxNode Partial(SyntaxNode root, TypeDeclarationSyntax type)
+    {
+        var chain = type.AncestorsAndSelf().OfType<TypeDeclarationSyntax>().Where(t => !t.Modifiers.Any(SyntaxKind.PartialKeyword)).ToList();
+        return root.ReplaceNodes(chain, (_, rewritten) =>
+        {
+            var t = (TypeDeclarationSyntax)rewritten;
+            var partial = SyntaxFactory.Token(SyntaxKind.PartialKeyword).WithTrailingTrivia(SyntaxFactory.Space);
+            if (t.Modifiers.Count > 0) return t.WithModifiers(t.Modifiers.Add(partial));
+            // No modifier: the keyword's leading trivia (indentation, or the line after the attributes) moves to partial.
+            return t.WithModifiers(SyntaxFactory.TokenList(partial.WithLeadingTrivia(t.Keyword.LeadingTrivia)))
+                .WithKeyword(t.Keyword.WithLeadingTrivia());
+        });
+    }
+
+    /// <summary>
+    /// EECS065 / EECS066: a hand-written reduction declared with attributes instead. <paramref name="ops"/> names each
+    /// field's attribute (<c>Alive=Sum;Lowest=Min</c>): it goes on the field, the auto-property or the record's
+    /// parameter; Identity, Combine and the IReduction&lt;T&gt; of the base list go; the type becomes partial along its
+    /// chain. Null when a declaration holds two fields of different attributes.
+    /// </summary>
+    private static async Task<SyntaxNode?> Attributed(Document document, SyntaxNode root, TypeDeclarationSyntax type, string ops, CancellationToken token)
+    {
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        if (model == null) return null;
+        var byName = ops.Split(';').Select(p => p.Split('=')).Where(p => p.Length == 2).ToDictionary(p => p[0], p => p[1]);
+        return Declare(model, root, type, byName, null,
+            static m => m is MethodDeclarationSyntax { Identifier.ValueText: "Combine" } or PropertyDeclarationSyntax { Identifier.ValueText: "Identity" }
+                        && m.Modifiers.Any(SyntaxKind.StaticKeyword),
+            static b => Generic(b.Type) is { Identifier.ValueText: "IReduction" });
+    }
+
+    /// <summary>
+    /// EECS067 (and EECS043's second fix): a hand-written Key returning <paramref name="member"/> (<c>this</c>: the value)
+    /// declared with <c>[Key]</c> (<c>[UniqueKey]</c> for a unique index) on that member or the type; the Key and the
+    /// IIndexed / IUniqueIndexed of the base list go (an IDirectIndexed stays: its Slots and SlotOf are the user's), the
+    /// type becomes partial along its chain. Null when code reads the Key through the type.
+    /// </summary>
+    private static async Task<(SyntaxNode Root, string Attribute)?> KeyAttribute(Document document, SyntaxNode root, PropertyDeclarationSyntax key,
+        string? member, CancellationToken token)
+    {
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        if (member == null || model?.GetDeclaredSymbol(key, token) is not IPropertySymbol property || key.Parent is not TypeDeclarationSyntax type
+            || await ReadThroughType(document, property, token).ConfigureAwait(false))
+            return null;
+        bool unique = property.ContainingType.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == "EasyEcs.IUniqueIndexed<TKey>");
+        string attribute = unique ? "UniqueKey" : "Key";
+        var byName = new System.Collections.Generic.Dictionary<string, string>();
+        if (member != "this") byName[member] = attribute;
+        var rewritten = Declare(model, root, type, byName, member == "this" ? attribute : null,
+            static m => m is PropertyDeclarationSyntax { Identifier.ValueText: "Key" } p && !p.Modifiers.Any(SyntaxKind.StaticKeyword), // the analyzer saw one Key
+            static b => Generic(b.Type) is { Identifier.ValueText: "IIndexed" or "IUniqueIndexed" });
+        return rewritten == null ? null : (rewritten, attribute);
+    }
+
+    /// <summary>
+    /// The declarations of a part written into <paramref name="type"/>: <paramref name="byName"/>'s attribute on each
+    /// member it names (a field, an auto-property, a record's parameter), <paramref name="onType"/> on the type itself,
+    /// the members <paramref name="remove"/> picks gone, the bases <paramref name="removeBase"/> picks gone when another
+    /// base stays (alone, one stays: declared twice is fine), and partial along the chain. Null when one field
+    /// declaration holds members of different attributes.
+    /// </summary>
+    private static SyntaxNode? Declare(SemanticModel model, SyntaxNode root, TypeDeclarationSyntax type, System.Collections.Generic.Dictionary<string, string> byName,
+        string? onType, System.Func<MemberDeclarationSyntax, bool> remove, System.Func<BaseTypeSyntax, bool> removeBase)
+    {
+        bool imported = model.LookupNamespacesAndTypes(type.SpanStart, name: "SumAttribute").Any(s => s.ToDisplayString() == "EasyEcs.SumAttribute");
+        AttributeListSyntax List(string attribute, SyntaxTriviaList leading, SyntaxTriviaList trailing) =>
+            SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Attribute(SyntaxFactory.ParseName(imported ? attribute : "EasyEcs." + attribute))))
+                .WithLeadingTrivia(leading).WithTrailingTrivia(trailing);
+        var annotate = new System.Collections.Generic.Dictionary<SyntaxNode, string>();
+        foreach (var member in type.Members)
+            switch (member)
+            {
+                case FieldDeclarationSyntax field when field.Declaration.Variables.Any(v => byName.ContainsKey(v.Identifier.ValueText)):
+                    var kinds = field.Declaration.Variables.Select(v => byName.TryGetValue(v.Identifier.ValueText, out var k) ? k : null).Distinct().ToList();
+                    if (kinds.Count != 1 || kinds[0] == null) return null;
+                    annotate[field] = kinds[0]!;
+                    break;
+                case PropertyDeclarationSyntax property when byName.TryGetValue(property.Identifier.ValueText, out var op):
+                    annotate[property] = op;
+                    break;
+            }
+
+        if (type.ParameterList != null)
+            foreach (var parameter in type.ParameterList.Parameters)
+                if (byName.TryGetValue(parameter.Identifier.ValueText, out var op))
+                    annotate[parameter] = op;
+
+        var rewritten = type.ReplaceNodes(annotate.Keys, (original, current) =>
+        {
+            var list = List(annotate[original], current.GetLeadingTrivia(), SyntaxFactory.TriviaList(SyntaxFactory.Space));
+            return current switch
+            {
+                FieldDeclarationSyntax f => f.WithoutLeadingTrivia().WithAttributeLists(f.WithoutLeadingTrivia().AttributeLists.Insert(0, list)),
+                PropertyDeclarationSyntax p => p.WithoutLeadingTrivia().WithAttributeLists(p.WithoutLeadingTrivia().AttributeLists.Insert(0, list)),
+                ParameterSyntax p => p.WithoutLeadingTrivia().WithAttributeLists(p.WithoutLeadingTrivia().AttributeLists.Insert(0, list)),
+                _ => current,
+            };
+        });
+        // The members and the bases go: found again, as the rewrite made new nodes.
+        rewritten = rewritten.RemoveNodes(rewritten.Members.Where(remove), SyntaxRemoveOptions.KeepNoTrivia)!;
+        if (rewritten.BaseList is { } bases)
+        {
+            var types = bases.Types;
+            foreach (var listed in bases.Types.Where(removeBase))
+            {
+                if (types.Count == 1) break;
+                var current = types.First(t => t.IsEquivalentTo(listed));
+                bool last = types.Last() == current;
+                types = types.Remove(current);
+                if (last) types = types.Replace(types.Last(), types.Last().WithTrailingTrivia(current.GetTrailingTrivia()));
+            }
+
+            rewritten = rewritten.WithBaseList(bases.WithTypes(types));
+        }
+
+        if (onType != null) rewritten = WithAttribute(rewritten, imported ? onType : "EasyEcs." + onType, root);
+
+        var marked = root.ReplaceNode(type, rewritten.WithAdditionalAnnotations(Marker));
+        return Partial(marked, marked.GetAnnotatedNodes(Marker).OfType<TypeDeclarationSyntax>().Single());
+    }
+
+    /// <summary>
+    /// <paramref name="type"/> with attribute <paramref name="attribute"/> (as written) first: on the type's line, its
+    /// indentation kept, the type on the next line indented the same.
+    /// </summary>
+    private static TypeDeclarationSyntax WithAttribute(TypeDeclarationSyntax type, string attribute, SyntaxNode root)
+    {
+        var leading = type.GetLeadingTrivia();
+        var indent = leading.Count > 0 && leading.Last().IsKind(SyntaxKind.WhitespaceTrivia) ? leading.Last() : default;
+        var next = indent == default ? SyntaxFactory.TriviaList(EndOfLine(root)) : SyntaxFactory.TriviaList(EndOfLine(root), indent);
+        var list = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Attribute(SyntaxFactory.ParseName(attribute))))
+            .WithLeadingTrivia(leading).WithTrailingTrivia(next);
+        var withoutLeading = type.WithoutLeadingTrivia();
+        return withoutLeading.WithAttributeLists(withoutLeading.AttributeLists.Insert(0, list));
+    }
+
+    /// <summary>
+    /// EECS069: <paramref name="type"/> marked <c>[NinoType]</c> and partial along its chain (the Nino generator writes
+    /// its formatter into a part), or <c>[NotSaved]</c>; each named as the file's usings allow.
+    /// </summary>
+    private static async Task<SyntaxNode?> Marked(Document document, SyntaxNode root, TypeDeclarationSyntax type, bool nino, CancellationToken token)
+    {
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        if (model == null) return null;
+        string name = nino ? "NinoType" : "NotSaved", ns = nino ? "Nino.Core" : "EasyEcs";
+        bool imported = model.LookupNamespacesAndTypes(type.SpanStart, name: name + "Attribute").Any(s => s.ToDisplayString() == ns + "." + name + "Attribute");
+        var marked = WithAttribute(type, imported ? name : ns + "." + name, root);
+        if (!nino) return root.ReplaceNode(type, marked);
+        var withMark = root.ReplaceNode(type, marked.WithAdditionalAnnotations(Marker));
+        return Partial(withMark, withMark.GetAnnotatedNodes(Marker).OfType<TypeDeclarationSyntax>().Single());
+    }
+
+    private static readonly SyntaxAnnotation Marker = new("EasyEcs.Part");
+
     private static SyntaxTrivia EndOfLine(SyntaxNode root) =>
         root.DescendantTrivia().FirstOrDefault(t => t.IsKind(SyntaxKind.EndOfLineTrivia)) is { RawKind: (int)SyntaxKind.EndOfLineTrivia } eol ? eol : SyntaxFactory.LineFeed;
 }

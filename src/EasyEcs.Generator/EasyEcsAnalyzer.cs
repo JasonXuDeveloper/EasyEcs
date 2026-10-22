@@ -18,7 +18,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     private const string Category = "EasyEcs";
 
     public static readonly DiagnosticDescriptor BadParameter = new("EECS002", "Invalid [ForEach] parameter",
-        "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe, Mut or Lookup of one, a 'ref Reduce' of a singleton, a Scratch, an Entity or the World (outside a system, also a value the caller passes, of any other type)",
+        "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe, Mut or Lookup of one, a 'ref Reduce' of a singleton, a Scratch, an Emit of a struct, an Entity or the World (outside a system, also a value the caller passes, of any other type)",
         Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS002"));
 
     public static readonly DiagnosticDescriptor ComponentCount = new("EECS003", "Invalid component count",
@@ -208,6 +208,16 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "the result into another component (double buffering: read Position, write NextPosition), or split the work " +
         "into two systems.", helpLinkUri: Help("EECS059"));
 
+    public static readonly DiagnosticDescriptor BadEmit = new("EECS070", "Records read or reordered by the pass that emits them",
+        "Parameter '{0}' of [ForEach] method '{1}' emits {2}, but {3}",
+        Category, DiagnosticSeverity.Error, true,
+        "An Emit<T> parameter gives each chunk of rows a list of records and appends the lists to singleton Emitted<T> " +
+        "in chunk order when the pass ends, so the records come out in row order whatever the threads. The same method " +
+        "taking Emitted<T> would read the records while they are added: none of the pass's in parallel, some on one " +
+        "thread. A second Emit<T> of the same method would order its records differently on one thread (interleaved row " +
+        "by row) and in parallel (each chunk's lists one after the other). Read the records in a system after the pass, " +
+        "and emit each kind of record through one parameter.", helpLinkUri: Help("EECS070"));
+
     public static readonly DiagnosticDescriptor BadTileShape = new("EECS072", "An invalid tile shape",
         "Tile shape '{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
@@ -232,7 +242,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "IUniqueIndexed<TKey>), so that key can never be indexed. A unique component is indexed by its unique key from " +
         "its first table, and every write is checked against that index. An EntityId key cannot be unique: loads and " +
         "moves rewrite such keys after they copy the rows, too late to check them first; index the relation with " +
-        "IIndexed<EntityId>.", helpLinkUri: Help("EECS036"));
+        "IIndexed<EntityId> (or [Key]). A key declared with [Key] / [UniqueKey] is IEquatable of itself, the only key of " +
+        "its component, of the type of any index interface the struct declares, and not written by hand as well; a " +
+        "[Group] member is an int or an enum of int, the only one.", helpLinkUri: Help("EECS036"));
 
     // EECS002's property for its code fix (EasyEcs.CodeFixes): a component or singleton taken by value.
     public const string ByValue = "ByValue";
@@ -248,7 +260,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
         UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScalarLoop, NoVectorLoop,
-        SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, BadTileShape, SharedTile);
+        SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, NotPartial, HandWrittenReduction, BadReductionField, FieldWiseReduction,
+        WrongIdentity, AttributeKey, BadSetup, NoFormatter, BadEmit, SharedRandom, BadTileShape, SharedTile);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -262,6 +275,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterSyntaxNodeAction(AnalyzeVectorLoop, SyntaxKind.MethodDeclaration);
         context.RegisterSyntaxNodeAction(AnalyzeLocalFunction, SyntaxKind.LocalFunctionStatement);
         context.RegisterSyntaxNodeAction(AnalyzeBufferOfEntities, SyntaxKind.GenericName);
+        context.RegisterSyntaxNodeAction(AnalyzeReduction, SyntaxKind.StructDeclaration, SyntaxKind.RecordStructDeclaration);
         context.RegisterSymbolAction(AnalyzeBufferHolder, SymbolKind.Field, SymbolKind.Property, SymbolKind.Method);
         context.RegisterOperationAction(AnalyzeBufferCopy, OperationKind.VariableDeclarator, OperationKind.SimpleAssignment,
             OperationKind.Argument);
@@ -273,6 +287,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterOperationAction(AnalyzeIndexedRef, OperationKind.Invocation, OperationKind.VariableDeclarator);
         context.RegisterOperationAction(AnalyzeSystemLookup, OperationKind.Invocation);
         context.RegisterCompilationStartAction(AnalyzeOrderings);
+        context.RegisterCompilationStartAction(AnalyzeFormatters);
         InitializePerformance(context);
         InitializeUsage(context);
         InitializeParallel(context);
@@ -536,7 +551,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (symbol.IsImplicitlyDeclared) return;
         switch (symbol)
         {
-            case IFieldSymbol field:
+            case IFieldSymbol field when field.RefKind == RefKind.None: // a ref field reaches the buffer itself
                 Report(field.Type, field, field.Locations.FirstOrDefault());
                 break;
             case IPropertySymbol property when property.RefKind == RefKind.None:
@@ -604,6 +619,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (type.TypeKind == TypeKind.Struct && (Symbols.Implements(type, Symbols.Component) || Symbols.Implements(type, Symbols.Singleton)))
             AnalyzeDataFields(context, type);
         if (type.TypeKind == TypeKind.Struct) AnalyzeUniqueKey(context, type, location);
+        if (type.TypeKind == TypeKind.Struct) AnalyzeParts(context, type);
+        if (type.TypeKind == TypeKind.Struct) AnalyzeAttributeKey(context, type);
+        if (type.TypeKind == TypeKind.Struct) AnalyzeSetup(context, type);
 
         if (type.TypeKind == TypeKind.Struct && !Symbols.Implements(type, "EasyEcs.ISystemGroup"))
             foreach (var attribute in type.GetAttributes())
@@ -874,6 +892,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                      && Symbols.LookedUp(p, context.Compilation).Select(t => (t, Symbols.LookupProblem(method, p, t))).FirstOrDefault(c => c.Item2 != null) is ({ } read, { } written))
                 context.ReportDiagnostic(Diagnostic.Create(LookupOfWritten, p.Locations.FirstOrDefault(), p.Name, method.Name,
                     read.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), written));
+            else if (kind == Symbols.ParamKind.Emit && Symbols.EmitProblem(method, p) is { } emit)
+                context.ReportDiagnostic(Diagnostic.Create(BadEmit, p.Locations.FirstOrDefault(), p.Name, method.Name,
+                    Symbols.EmitElement(p.Type)!.Name, emit));
             else if (kind == Symbols.ParamKind.Reduction && Symbols.ReductionProblem(method, p) is { } reduction)
                 context.ReportDiagnostic(Diagnostic.Create(BadReduction, p.Locations.FirstOrDefault(), p.Name, method.Name,
                     Symbols.ReduceElement(p.Type)!.Name, reduction));

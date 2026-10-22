@@ -172,6 +172,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 fields.Add(p.RefKind.Length == 0 || method.Parallel ? $"x{i} = {Escape(p.Name)}" : $"x{i} = ref {Escape(p.Name)}");
             else if (p.Kind == Symbols.ParamKind.Reduction)
                 fields.Add($"a{i} = new global::EasyEcs.Reduce<{p.Type}> {{ Value = {p.Type}.Identity }}"); // every partial result starts there
+            else if (p.Kind == Symbols.ParamKind.Emit) // on one thread the singleton's list itself; in parallel the target of the chunks' lists
+                fields.Add(method.Parallel ? $"o{i} = global::EasyEcs.Emitted<{p.Type}>.Target({world})"
+                    : $"e{i} = ref global::EasyEcs.Emitted<{p.Type}>.Target({world}).Value.Items");
             else if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // its index, built before the pass
                 fields.Add($"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Type}, {p.Key}>({world})");
             else if (p.Kind == Symbols.ParamKind.Tile && method.FirstOfGrid(i)) // the grid's index, built before the pass
@@ -274,6 +277,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 continue;
             }
 
+            if (p.Kind == Symbols.ParamKind.Emit) // appends to Emitted<T>, once per pass
+            {
+                sb.Append($"            access.WriteSingleton<global::EasyEcs.Emitted<{p.Type}>>();\n");
+                continue;
+            }
+
             string kind = p.Kind is Symbols.ParamKind.Singleton or Symbols.ParamKind.Reduction ? "Singleton" : "";
             sb.Append($"            access.{(p.RefKind == "ref" ? "Write" : "Read")}{kind}<{p.Type}>();\n");
         }
@@ -315,6 +324,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Scratch => $"new global::EasyEcs.Scratch<{p.Type}>(ref (t{i} ??= global::EasyEcs.Scratch<{p.Type}>.Of<{job}>()).Value)",
             Symbols.ParamKind.Lookup => $"new global::EasyEcs.Lookup<{p.Type}>(World, {(p.Key.Length > 0 ? $"k{i}" : "null")})",
             Symbols.ParamKind.Tile => $"new global::EasyEcs.Tile<{p.Cell}, {p.Grid}>({(runs ? "entities[(int)i]" : "entity")}, in n{method.GridOf(i)})",
+            Symbols.ParamKind.Emit => $"new global::EasyEcs.Emit<{p.Type}>(ref e{i})",
             Symbols.ParamKind.Context when local[i] => $"ref l{i}",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
             _ => "World",
@@ -349,6 +359,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 sb.Append($"        public global::System.Runtime.CompilerServices.StrongBox<{p.Type}> t{i};\n");
             else if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 } || p.Kind == Symbols.ParamKind.Tile && method.FirstOfGrid(i)) // an index, built
                 sb.Append($"        public object k{i};\n");
+            else if (p.Kind == Symbols.ParamKind.Emit) // the singleton's list, or a chunk's (from the pool) and where it goes
+                sb.Append(method.Parallel
+                    ? $"        public global::EasyEcs.SingletonRef<global::EasyEcs.Emitted<{p.Type}>> o{i};\n        public global::EasyEcs.DynamicBuffer<{p.Type}> e{i};\n"
+                    : $"        public ref global::EasyEcs.DynamicBuffer<{p.Type}> e{i};\n");
         }
         if (sb[sb.Length - 2] != '{') sb.Append('\n'); // a blank line after the fields, if any
         string call = $"__ForEach{owner.TypeParameters}.{method.Name}_{number}{method.TypeParameters}({args});";
@@ -412,9 +426,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append($"\n        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.WriteMask => {writes};\n");
         if (own != 0) sb.Append($"        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.SelfStamped => {own};\n");
         var reductions = Enumerable.Range(0, method.Parameters.Length).Where(i => method.Parameters[i].Kind == Symbols.ParamKind.Reduction).ToArray();
-        if (method.Parallel && reductions.Length > 0)
+        var emits = Enumerable.Range(0, method.Parameters.Length).Where(i => method.Parameters[i].Kind == Symbols.ParamKind.Emit).ToArray();
+        if (method.Parallel && reductions.Length + emits.Length > 0)
         {
-            // The chunks' partial results, combined in chunk order (TSelf is this job: the runtime passes its own TJob).
+            // The chunks' partial results and records, combined in chunk order (TSelf is this job: the runtime passes its own TJob).
             const string unsafeType = "global::System.Runtime.CompilerServices.Unsafe";
             sb.Append($"        static bool global::EasyEcs.{iface}<{method.ComponentTypes}>.Merges => true;\n\n");
             sb.Append($"        static void global::EasyEcs.{iface}<{method.ComponentTypes}>.Merge<TSelf>(ref TSelf job, in TSelf chunk)\n        {{\n");
@@ -422,6 +437,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append($"            ref var part = ref {unsafeType}.As<TSelf, {job}>(ref {unsafeType}.AsRef(in chunk));\n");
             foreach (int i in reductions)
                 sb.Append($"            into.a{i}.Value = {method.Parameters[i].Type}.Combine(into.a{i}.Value, part.a{i}.Value);\n");
+            foreach (int i in emits)
+                sb.Append($"            global::EasyEcs.Emit<{method.Parameters[i].Type}>.Join(into.o{i}, ref part.e{i});\n");
             sb.Append("        }\n");
         }
 
@@ -679,6 +696,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     Symbols.ParamKind.Reduction => new ParamModel(Symbols.ParamKind.Reduction, // a write of the singleton, once per pass
                         Symbols.ReduceElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared),
                     Symbols.ParamKind.Scratch => new ParamModel(Symbols.ParamKind.Scratch, Symbols.ScratchElement(p.Type)!.ToDisplayString(Symbols.Fqn), "", p.Name, declared),
+                    Symbols.ParamKind.Emit => new ParamModel(Symbols.ParamKind.Emit, // a write of Emitted<T>, once per pass
+                        Symbols.EmitElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared),
                     Symbols.ParamKind.Lookup => new ParamModel(Symbols.ParamKind.Lookup, Symbols.LookupElement(p.Type)!.ToDisplayString(Symbols.Fqn), "in", p.Name, declared,
                         Key: Symbols.LookupKey(p, method, Symbols.WithBody(method, syntax, model).Item1)?.ToDisplayString(Symbols.Fqn) ?? ""),
                     Symbols.ParamKind.Tile => TileModel(p, declared),

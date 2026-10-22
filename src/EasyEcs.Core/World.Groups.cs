@@ -20,6 +20,10 @@ public sealed partial class World
         int GroupOf(in T value);
     }
 
+    /// <summary>[GroupBy] on <typeparamref name="T"/>: every world groups by it from its first table holding it (<see cref="TypeDefaults"/>).</summary>
+    internal static void DefaultGroupBy<T>() where T : struct, IComponent, IGroup =>
+        TypeDefaults<T>.GetOrAdd().Group ??= static () => new GroupTables<T>();
+
     private sealed class GroupTables<T> : IGroupTables, IGroupOf<T> where T : struct, IComponent, IGroup
     {
         public int GroupOf(Archetype table, int slot) => table.Ref<T>(ComponentType<T>.Bit, slot).Group;
@@ -41,6 +45,7 @@ public sealed partial class World
             ThrowIfIterating(nameof(GroupBy)); // the existing rows move
             _groupByBit ??= [];
             if (bit >= _groupByBit.Length) Array.Resize(ref _groupByBit, bit + 1);
+            SetUp(bit);
             if (_groupByBit[bit] != null) return;
             _groupByBit[bit] = new GroupTables<T>();
             RegroupAll(bit);

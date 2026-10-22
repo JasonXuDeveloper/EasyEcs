@@ -280,3 +280,23 @@ internal static class Wide
 [System.Runtime.CompilerServices.InlineArray(31)] public struct Bytes31 : IComponent { private byte _first; }
 [System.Runtime.CompilerServices.InlineArray(33)] public struct Bytes33 : IComponent { private byte _first; }
 [System.Runtime.CompilerServices.InlineArray(100)] public struct Bytes100 : IComponent { private byte _first; }
+
+/// <summary>GetOrAdd with a value: the value only when the component is missing.</summary>
+public class GetOrAddValueTests
+{
+    [Test]
+    public void GetOrAddWithAValueAddsItOnlyWhenMissing()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new Position(1, 1));
+        Assert.That(e.GetOrAddHealth(7).Value, Is.EqualTo(7));            // missing: added with the value
+        e.GetOrAdd(new Health(9)).Value++;                                 // present: its own value, by ref
+        Assert.That(e.Health.Value, Is.EqualTo(8));
+        Assert.That(world.GetOrAddScore(1, 2), Is.EqualTo(new Score(1, 2)));
+        Assert.That(world.GetOrAddSingleton(new Score(5, 5)), Is.EqualTo(new Score(1, 2)));
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++) e.GetOrAdd(new Health(i)).Value++;
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+}

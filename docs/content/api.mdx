@@ -54,7 +54,13 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `ReadOnlyMaybe<T>` | ref struct | The same, read-only: `Value` is `ref readonly`, never stamped, allowed for indexed components; a `Maybe<T>` converts to it. |
 | `Mut<T>` | ref struct | A component parameter of a `[ForEach]` method that counts as written only on the rows the method writes: `Value`, `Write()`, `SetIfChanged(value)` ([change tracking](/en/docs/guide/change-tracking)). |
 | `Reduce<T>`, `IReduction<T>` | struct, interface | A `[ForEach]` parameter, taken by `ref`, reducing a pass into singleton `T`, which implements `IReduction<T>` (`Identity`, `Combine`): `Value`, `Combine(value)`. |
+| `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]`, `[Any]` | attributes | On every instance field of a partial struct: the generator writes its `IReduction<T>` (`Identity` and a field-wise `Combine`). |
+| `[Key]`, `[UniqueKey]`, `[Group]` | attributes | On a member of a partial component (`[Key]` on the type: the value itself): the generator writes the explicit `IIndexed<TKey>.Key` (`IUniqueIndexed<TKey>`) or `IGroup.Group`. |
+| `[GroupBy]`, `[WhenTargetDestroyed(policy)]`, `[NotSaved]` | attributes | Setup every world applies from its first table holding the type: its grouping, the policy of links to a destroyed target; `[NotSaved]`: no save writes the type, a load keeps the world's own singleton. |
 | `Scratch<T>` | ref struct | A `[ForEach]` parameter: working memory of the method on the running thread, kept between rows, passes and worlds: `Value`. |
+| `Emit<T>`, `Emitted<T>` | ref struct, struct | A `[ForEach]` parameter, taken by value, appending records (`Add`, `AddRange`) joined in chunk order into singleton `Emitted<T>` (`Items`, a `DynamicBuffer<T>`) when the pass ends. |
+| `EntityRandom` | record struct | A singleton (`Seed`, `Tick`) and pure static functions: deterministic random numbers per (seed, entity, tick, stream): `Bits`, `Float`, `Range`, `Chance`. |
+| `IForRange`, `IForSpan<T>` | interfaces | Jobs of `world.ForParallel`: `Execute(start, end)` over a range of indexes, `Execute(start, span)` over the elements of a list. |
 | `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out id)`, `Find(key)`, `Count(key)`. |
 | `Lanes` | static class | Stream compaction for batch methods: `Compact(source, mask, destination)` writes the elements a lane mask selects side by side. |
 | `Tile<TCell, TTile>`, `ITile<TKey>`, `ITileShape`, `TileFaces`, `TileNeighbourhood`, `TileBoundary`, `TileIds` | ref structs, interfaces, enums | A `[ForEach]` parameter: the entity's `DynamicBuffer<TCell>` with its neighbours' in the grid of `TTile` (an indexed component with a static shape, halo, neighbourhood and boundary, and the key of each neighbour), scheduled as a read of both: `Load(from, to, fill, mask)`, `Beside(face)`, `Beside(dx, dy, dz)`, `Cells`, `Changes(next, out changed)`, `Facing(edges)`. |
@@ -103,6 +109,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `entity.Set(in T1 … in Tn)` | O(n), or O(c) amortized when it moves | adds or overwrites, at most one row copy, returns the entity; a component the table has a column for only sets its bit; re-indexes a changed key (O(1)); a unique key another entity holds throws before anything changes |
 | `entity.SetIfChanged(in T value)` | O(1) plus a comparison (O(size of `T`)); as `Set` when the value differs | false, and nothing written, stamped or re-indexed, when the entity already has this value; adds `T` when missing; equality is `IEquatable<T>`, else the bytes of an unmanaged `T` |
 | `entity.GetOrAdd<T>()` | O(1); when missing, O(1) if the table has a column for `T`, else O(c) amortized | `ref T`; adds a default value only when missing; a write of a tracked component; an indexed `T` it adds is indexed by its default key (a unique one claims it) |
+| `entity.GetOrAdd<T>(in T value)` / generated `GetOrAddX(…)` | as `GetOrAdd<T>()` | `ref T`; adds `value` only when missing (indexed, grouped, a unique key claimed, as `Set`); an entity that has `T` keeps its own value |
 | `entity.Remove<T1..Tn>()` | O(n) | clears presence bits, the row stays; missing components are ignored; a tracked component's removal is stamped (`[Removed<T>]`); returns the entity |
 | `entity.Disable<T>()` / `Enable<T>()` | O(1); the first disable in a table moves the row once | keeps the value while queries, `Has` and `Get` see it as gone; a disable counts as a removal, an enable as a write; returns false when there was nothing to do |
 | `entity.IsDisabled<T>()` | O(1) | |
@@ -121,6 +128,7 @@ component it has; components the source lacks stay absent and are not removals.
 | `prefab.Remove<T1..Tn>()` | O(n) | missing ones are ignored; returns the prefab |
 | `prefab.Has<T>()` / `Read<T>()` | O(1) | `Read` throws if the prefab has no `T` |
 | `prefab.SetBuffer<T>(params ReadOnlySpan<T>)` | O(n) | a `DynamicBuffer<T>` of these elements; every instance gets a list of its own |
+| `prefab.Absent<T>()` | O(1) | a column for `T` without the component: instances lack it, and adding it later flips a presence bit in their table instead of moving the row |
 | `prefab.AddMember()` | O(1) | a member of the prefab's group: instantiating one creates all; `EntityId` fields naming members are rewritten per instance |
 | generated: `prefab.X`, `HasX`, `SetX(…)`, `RemoveX()`; tags `IsX`, `SetX()`; buffers `SetLoot(items…)` | as the generic call | writers return the prefab; the property is read-only; not structural changes of any world |
 | `world.Instantiate(prefab)` | O(c) | one row copy; the target table is found once per prefab table and cached; safe during a pass (which does not visit the new entity); O(members × c) for a group |
@@ -159,6 +167,7 @@ A snapshot, a save or a clone of a buffer column copies the elements: O(elements
 | `entity.Run<T1..Tn, TJob>(ref job)` / `Run(ref job, filter)` | O(n), plus O(1) per filter component | one entity; false when stale, missing a component or rejected by the filter; refs survive the job's structural changes |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + runs) | spans of consecutive rows; no structural changes |
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)` / `ForEachEntityParallel` / `ForEachBatchParallel` (spans of a chunk's runs of rows) | O(M + S), divided over up to `MaxDegreeOfParallelism` threads | `INoStructuralChanges` jobs; chunks of 1,024 to `World.ParallelChunkRows` rows (multiples of 4,096 when the job writes a tracked component), or `chunkRows` rounded up to 64 (`[ForEach(ChunkRows = n)]`; then O(B) block openings before the pass, B = 4,096-row blocks, and one atomic OR per 64 written rows), one job copy per chunk (kept, and combined in chunk order in O(chunks), when the job reduces: `Reduce<T>`); helpers are woken only when they pay |
+| `world.ForParallel<TJob>(count, ref job, chunkRows)` / `ForParallel<T, TJob>(ref buffer, ref job, chunkRows)` | O(count), divided over up to `MaxDegreeOfParallelism` threads | the same runner and chunks as `ForEachParallel` (no tables: no change ticks, chunks of 1,024 to `World.ParallelChunkRows`, or `chunkRows` rounded up to 64); one job copy per chunk, nothing merged back; the structure is frozen (a structural change throws); 0 B after the first call per job type |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | refs into the row: every visited row of a tracked component counts as written; no `await` in the loop |
 | `foreach (var item in world.Read<T1..Tn>(filter))` | O(M + S) | `ref readonly` into the row: nothing is stamped; otherwise as `Query` |
 | `world.Count<T1..Tn>(filter)` | O(M), + S / 64 for tables whose rows must be tested | sums table counts, or counts presence bits (and ticks), 8 words per step with AVX-512 |
@@ -191,6 +200,20 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | `reduce.Value` | O(1) | a field: the partial result of this chunk (of the pass, on one thread), which starts at `T.Identity` |
 | `reduce.Combine(T value)` | O(1) plus `T.Combine` | `Value = T.Combine(Value, value)` |
 | end of the pass | O(chunks) `T.Combine` calls | the partial results in chunk order (row order), then one write of the singleton (added when missing) |
+
+`Emit<T>`, the `[ForEach]` parameter of records a pass appends:
+
+| API | Complexity | Notes |
+| --- | --- | --- |
+| `emit.Add(in T record)` / `AddRange(records)` | O(1) amortized / O(records) | appends to this chunk's list (of the pass, on one thread), no lock and no atomic; lists come from a pool kept at the largest size a chunk needed |
+| end of the pass | O(records) | the chunks' lists appended to `Emitted<T>.Items` (added when missing) in chunk order (row order, the same for any thread count); one write of the singleton; the reader clears it |
+
+`EntityRandom`, deterministic random numbers:
+
+| API | Complexity | Notes |
+| --- | --- | --- |
+| `random.Bits(id, stream)` / `EntityRandom.Bits(seed, id, tick, stream)` | O(1): four 64-bit mixes | pure: the same inputs, the same bits, on any thread and in any row order |
+| `Float` / `Range(min, max)` (int, float) / `Chance(p)` | O(1) | [0, 1) in steps of 2^-24 / [min, max), an int range by multiply-high (bias below range / 2^64; `max < min` throws) / `Float < p` |
 
 `Scratch<T>` and `Lookup<T>`, `[ForEach]` parameters for parallel passes:
 
@@ -307,6 +330,7 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 | `world.Update()` / `world.Update<TGroup>()` | Σ systems of the group | synchronous, allocation-free; throws `ObjectDisposedException` after `Dispose` |
 | `world.ChangeTick` | O(1) | grows by one per stage of systems and once after each update |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` | O(1) | `ref T`; `AddSingleton` throws when the singleton exists; `GetSingleton` throws when missing |
+| `world.GetOrAddSingleton<T>(in T value)` / generated `GetOrAddX(…)` | O(1) | `ref T`; adds `value` only when missing; a world that has `T` keeps its own value |
 | `world.SingletonRef<T>()` | O(1) | a stable handle; throws when the singleton was not added; `.Value` is one load |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) | `RemoveSingleton` returns false when it was not added |
 | generated: `world.X`, `HasX`, `GetOrAddX()`, `SetX(…)`, `RemoveX()` for a singleton `X` | as the generic call | |

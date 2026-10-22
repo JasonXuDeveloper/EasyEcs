@@ -110,7 +110,7 @@ public PaddedTile<TCell, TTile> Load(int from, int to, TCell fill = default, boo
 
 把第 `from` 到第 `to` 层带边拷进这个线程的纹理：每层的格子在中间，每层外面一圈 [`ITileShape.Halo`](/zh/docs/reference/itileshape#halo)（r）个格子（西、东邻居朝向这边的列，北、南邻居朝向这边的行；邻域包含棱时，角来自隔着棱的分块）；分块不止一层时，`from` 下面和 `to` 上面各多 r 层（分块自己的，或下方、上方邻居朝向这边的层）。没有邻居的地方（网格里没有、缓冲为空，或在形状的面和邻域之外），halo 按 [`ITileShape.Boundary`](/zh/docs/reference/itileshape#boundary) 处理：`fill`，或分块自己的边缘格子钳制或镜像（沿没有邻居的那条轴；隔着棱或角、那条轴被钳制的分块，从旁边的分块读）。传入 `mask` 时，记录哪些行有不为零的格子（按位），供 [`PaddedTile.Rows`](/zh/docs/reference/paddedtile#rows) 使用。
 
-O(层数 × (Width + 2r) × (Depth + 2r))；线程有了纹理之后零分配（纹理在线程第一次加载时按全部层分配）。纹理属于线程和这个分块类型：线程下一次加载 `TCell` 和 `TTile` 时会覆盖它，所以一个方法对每种格子和网格只接收一个分块（EECS063）。形状无效（EECS062）、实体的缓冲或某个非空邻居的缓冲比形状的格子少，或层不满足 0 ≤ from ≤ to &lt; Height 时抛出异常。
+O(层数 × (Width + 2r) × (Depth + 2r))；线程有了纹理之后零分配（纹理在线程第一次加载时按全部层分配）。纹理属于线程和这个分块类型：线程下一次加载 `TCell` 和 `TTile` 时会覆盖它，所以一个方法对每种格子和网格只接收一个分块（EECS073）。形状无效（EECS072）、实体的缓冲或某个非空邻居的缓冲比形状的格子少，或层不满足 0 ≤ from ≤ to &lt; Height 时抛出异常。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 

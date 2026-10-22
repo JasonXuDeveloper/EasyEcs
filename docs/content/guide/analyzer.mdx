@@ -1,7 +1,7 @@
 ---
 title: Analyzer rules
-seoTitle: "EasyEcs analyzer rules EECS002-EECS061 for C# ECS code"
-description: Every EasyEcs analyzer rule, EECS002 to EECS061, with its severity, its code fix, the code it rejects and the code to write instead.
+seoTitle: "EasyEcs analyzer rules EECS002-EECS073 for C# ECS code"
+description: Every EasyEcs analyzer rule, EECS002 to EECS073, with its severity, its code fix, the code it rejects and the code to write instead.
 icon: ShieldCheck
 ---
 
@@ -17,7 +17,7 @@ EECS040 to EECS045, EECS047 to EECS051) find calls and declarations that compile
 throws or the code cannot work, a warning where a write is lost or a ref can point at the wrong row. The vector-loop
 rules say why a method runs one row at a time (EECS055, a suggestion) and fail the build when a method that must
 vectorize does not (EECS056); EECS057 keeps a [reduction](/en/docs/guide/threading#reductions) the only write of its
-singleton; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses; the tile rules (EECS072, EECS073) reject a grid tile whose halo does not fit and two tiles that would share a texture. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
+singleton; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses; EECS070 keeps the records of an `Emit<T>` in row order, and EECS071 finds random numbers a run cannot repeat; the tile rules (EECS072, EECS073) reject a grid tile whose halo does not fit and two tiles that would share a texture. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
 same package), and only when the result compiles.
 
 ## When to read it [#when-to-use-it]
@@ -101,9 +101,11 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS056](#eecs056) | Error | `Simd = SimdMode.Require` on a method that qualifies | |
 | [EECS057](#eecs057) | Error | One write of a reduced singleton per pass | |
 | [EECS058](#eecs058) | Error | What a `Scratch<T>` holds is not stored into the world | |
-| [EECS059](#eecs059) | Error | A `Lookup<T>` or `Tile<TCell, TTile>` reads a component the pass does not write | |
+| [EECS059](#eecs059) | Error | A `Lookup<T>` reads a component the pass does not write | |
 | [EECS060](#eecs060) | Warning | Code on several threads writes no shared memory | |
 | [EECS061](#eecs061) | Warning | A parallel job's fields are not read after the pass | `ForEach` / `ForEachEntity` |
+| [EECS070](#eecs070) | Error | A pass neither reads its own records nor emits one kind twice | |
+| [EECS071](#eecs071) | Warning | `[ForEach]` methods draw repeatable random numbers | `EntityRandom` |
 | [EECS072](#eecs072) | Error | A tile's shape fits its halo | |
 | [EECS073](#eecs073) | Error | A method takes one tile per cell type and grid | |
 
@@ -115,8 +117,7 @@ Every parameter must be a `ref` / `in` / `ref readonly` struct implementing `ICo
 `Span<T>` / `ReadOnlySpan<T>` of an `IComponent` struct, a `Maybe<T>` or `ReadOnlyMaybe<T>` of one (an optional
 component), a `Mut<T>`, a `ref Reduce<T>` ([reductions](/en/docs/guide/threading#reductions); without `ref` its
 partial result would be a copy), a [`Scratch<T>`](/en/docs/guide/threading#scratch), a
-[`Lookup<T>`](/en/docs/guide/threading#lookups) of a component, a
-[`Tile<TCell, TTile>`](/en/docs/guide/high-performance#grid) of an `ITile<TKey>` component, an `Entity`, or the `World`. A `[ForEach]` method [outside a system](/en/docs/guide/systems#foreach-outside-systems) may also take
+[`Lookup<T>`](/en/docs/guide/threading#lookups) of a component, an `Entity`, or the `World`. A `[ForEach]` method [outside a system](/en/docs/guide/systems#foreach-outside-systems) may also take
 values of any other type: its generated entry point takes them from the caller.
 
 ```csharp doccheck=expect-EECS002
@@ -1900,9 +1901,7 @@ Copy what the row produced into the component's own storage (values, or a
 
 A [`Lookup<T>`](/en/docs/guide/threading#lookups) reads `T` of any entity as it was before the pass, so nothing may
 write `T` while the pass runs. A method that writes `T` itself (a `ref`, `Mut`, writable `Maybe` or span parameter)
-would read some rows before their write and some after, and in parallel, rows another thread is writing. A
-[`Tile<TCell, TTile>`](/en/docs/guide/high-performance#grid) is a lookup of its neighbours' `DynamicBuffer<TCell>` (and
-of `TTile`): a method that takes one writes neither, and writes its step into another buffer.
+would read some rows before their write and some after, and in parallel, rows another thread is writing.
 
 ```csharp tab="Reported" doccheck=expect-EECS059
 public class Flock : EcsSystem
@@ -2048,6 +2047,88 @@ public static class Reports
 For a total over many rows on all cores, write a `[ForEach(Parallel = true)]` method with a
 [`Reduce<T>`](/en/docs/guide/threading#reductions) parameter instead: each chunk keeps a partial result and the pass
 combines them.
+
+## EECS070 [#eecs070]
+
+**Records read or reordered by the pass that emits them.** Error. No code fix.
+
+An [`Emit<T>`](/en/docs/reference/emit) parameter gives each chunk of rows its own list and appends the lists to
+singleton `Emitted<T>` in chunk order when the pass ends, so the records come out in row order on any number of
+threads. The same method taking `Emitted<T>` would read the records while they are being added: none of this pass's
+in parallel, some of them on one thread. A second `Emit<T>` of the same `T` would order its records one way on one
+thread (interleaved row by row) and another in parallel (each chunk's lists one after the other).
+
+```csharp tab="Reported" doccheck=expect-EECS070
+public record struct Hit(EntityId Target, int Amount);
+public record struct Aim(EntityId Target) : IComponent;
+
+public class Strike : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(in Aim aim, Emit<Hit> hits, in Emitted<Hit> sent)
+    {
+        if (sent.Items.Count < 100) hits.Add(new Hit(aim.Target, 1));   // sees none of this pass's hits
+    }
+}
+```
+
+```csharp tab="Fixed"
+public record struct Hit(EntityId Target, int Amount);
+public record struct Aim(EntityId Target) : IComponent;
+
+public class Strike : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(in Aim aim, Emit<Hit> hits) => hits.Add(new Hit(aim.Target, 1));
+}
+
+[UpdateAfter<Strike>]
+public class ApplyHits : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+        foreach (ref readonly var hit in hits.AsReadOnlySpan())
+            if (World.TryGetEntity(hit.Target, out var target)) target.Get<Health>().Value -= hit.Amount;
+        hits.Clear();   // the passes append: the reader clears
+    }
+}
+```
+
+Read the records in a system after the pass, and emit each kind of record through one parameter.
+
+## EECS071 [#eecs071]
+
+**Random numbers a `[ForEach]` method cannot repeat.** Warning. Code fix: draws from
+[`EntityRandom`](/en/docs/reference/entityrandom) (adds `Entity entity` and `in EntityRandom random` when the method
+lacks them), for `NextSingle`, `NextDouble` and `Next` in a per-row method.
+
+`Random.Shared` is seeded differently on every run, and in a parallel pass its numbers go to rows in the order the
+threads happen to ask, so a replay, a test or another machine sees other results. A `new Random()` per row
+allocates, is seeded from the clock unless given a seed, and a seed given gives every row the same numbers.
+`EntityRandom` is a pure function of a seed, the entity, the tick and a stream: the same numbers on every run, on any
+number of threads. The fix gives each draw of the method its own stream.
+
+```csharp tab="Reported" doccheck=expect-EECS071
+public class Wander : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Velocity velocity) =>
+        velocity = new Velocity(Random.Shared.NextSingle() * 2 - 1, velocity.Y);   // another run, other numbers
+}
+```
+
+```csharp tab="Fixed"
+public class Wander : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Velocity velocity, Entity entity, in EntityRandom random) =>
+        velocity = new Velocity(random.Range(entity.Id, 0, -1f, 1f), velocity.Y);
+}
+```
+
+The world needs the singleton (`world.SetEntityRandom(seed, 0)`), and the system that advances the simulation's clock
+advances its `Tick`, so each step draws new numbers.
 
 ## EECS072 [#eecs072]
 

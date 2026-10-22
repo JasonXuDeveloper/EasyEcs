@@ -15,10 +15,12 @@ namespace EasyEcs.Benchmark;
 /// write it (per row) and with a cached <c>ParallelOptions</c>, and <c>Parallel.For</c> over the chunks a parallel pass
 /// would cut, one partial result per chunk combined in chunk order (what a generator could emit). Parallel.For runs
 /// static lambdas over static state (no closure, delegates cached: the best a user can write, though not reentrant);
-/// the copy is made once, outside the measurement. Steady state of the world's passes allocates 0 bytes.
+/// the copy is made once, outside the measurement. Steady state of the world's passes allocates 0 bytes. The
+/// <c>Generated</c> cases reduce into singletons declared with field attributes ([Sum], [Min], [Max]), against the same
+/// reductions written by hand (<c>HandWritten</c>): the generated Identity and Combine cost what hand-written ones do.
 /// </summary>
 [MemoryDiagnoser]
-public class ReduceBenchmark
+public partial class ReduceBenchmark
 {
     [Params(1_000, 10_000, 100_000, 1_000_000)] public int Entities;
 
@@ -201,6 +203,27 @@ public class ReduceBenchmark
     }
 
     [Benchmark]
+    public long SumParallelGenerated()
+    {
+        Totals.SumGenerated(_world);
+        return _world.ScoreSum.Value;
+    }
+
+    [Benchmark]
+    public float BoundsParallelHandWritten()
+    {
+        Totals.BoundsHandWritten(_world);
+        return _world.HandBounds.MaxX;
+    }
+
+    [Benchmark]
+    public float BoundsParallelGenerated()
+    {
+        Totals.BoundsGenerated(_world);
+        return _world.Bounds.MaxX;
+    }
+
+    [Benchmark]
     public float BoundsParallelLock()
     {
         _box.Value = Area.Empty;
@@ -262,6 +285,33 @@ public class ReduceBenchmark
         };
     }
 
+    /// <summary><see cref="ScoreTotal"/> declared by its field's attribute: the generator writes Identity and Combine.</summary>
+    public partial struct ScoreSum : ISingletonComponent
+    {
+        [Sum] public long Value;
+    }
+
+    /// <summary>A bounding box written by hand, field by field.</summary>
+    public struct HandBounds : ISingletonComponent, IReduction<HandBounds>
+    {
+        public float MinX, MinY, MaxX, MaxY;
+
+        public static HandBounds Identity => new() { MinX = float.PositiveInfinity, MinY = float.PositiveInfinity, MaxX = float.NegativeInfinity, MaxY = float.NegativeInfinity };
+
+        public static HandBounds Combine(HandBounds left, HandBounds right) => new()
+        {
+            MinX = Math.Min(left.MinX, right.MinX), MinY = Math.Min(left.MinY, right.MinY),
+            MaxX = Math.Max(left.MaxX, right.MaxX), MaxY = Math.Max(left.MaxY, right.MaxY),
+        };
+    }
+
+    /// <summary><see cref="HandBounds"/> declared by attributes.</summary>
+    public partial struct Bounds : ISingletonComponent
+    {
+        [Min] public float MinX, MinY;
+        [Max] public float MaxX, MaxY;
+    }
+
     public static class Totals
     {
         [ForEach]
@@ -284,6 +334,29 @@ public class ReduceBenchmark
 
         [ForEach(Parallel = true)]
         public static void BoundsParallel(in Spot spot, ref Reduce<Extent> extent) => extent.Value.Area.Include(in spot);
+
+        [ForEach(Parallel = true)]
+        public static void SumGenerated(in Score score, ref Reduce<ScoreSum> total) => total.Value.Value += score.Value;
+
+        [ForEach(Parallel = true)]
+        public static void BoundsHandWritten(in Spot spot, ref Reduce<HandBounds> bounds)
+        {
+            ref var b = ref bounds.Value;
+            b.MinX = MathF.Min(b.MinX, spot.X);
+            b.MinY = MathF.Min(b.MinY, spot.Y);
+            b.MaxX = MathF.Max(b.MaxX, spot.X);
+            b.MaxY = MathF.Max(b.MaxY, spot.Y);
+        }
+
+        [ForEach(Parallel = true)]
+        public static void BoundsGenerated(in Spot spot, ref Reduce<Bounds> bounds)
+        {
+            ref var b = ref bounds.Value;
+            b.MinX = MathF.Min(b.MinX, spot.X);
+            b.MinY = MathF.Min(b.MinY, spot.Y);
+            b.MaxX = MathF.Max(b.MaxX, spot.X);
+            b.MaxY = MathF.Max(b.MaxY, spot.Y);
+        }
     }
 
     private struct InterlockedSum : IForEach<Score>, INoStructuralChanges

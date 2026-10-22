@@ -137,7 +137,23 @@ public ref T GetOrAdd<T>() where T : struct, IComponent;
 
 Ref to component `T`, adding it (default) first if missing; a disabled `T` is enabled with the value it kept ([`Entity.Enable`](/en/docs/reference/entity#enable)). Counts as a write of a tracked component. O(1); when missing, O(1) if the entity's table has a column for it (the row only gets its presence bit back), else O(c) amortized: the row moves to the table with the column (c components copied).
 
-**Complexity** ([API table](/en/docs/api)): O(1); when missing, O(1) if the table has a column for `T`, else O(c) amortized
+**Complexity** ([API table](/en/docs/api)):
+
+- `entity.GetOrAdd<T>()`: O(1); when missing, O(1) if the table has a column for `T`, else O(c) amortized
+- `entity.GetOrAdd<T>(in T value)`: as `GetOrAdd<T>()`
+
+### `GetOrAdd` [#getoradd-2]
+
+```csharp
+public ref T GetOrAdd<T>(scoped in T value) where T : struct, IComponent;
+```
+
+Ref to component `T`, adding it with `value` first if missing (its key indexed, its group joined, as `Set` would); an entity that has it keeps its own value, and a disabled `T` is enabled with the value it kept ([`Entity.Enable`](/en/docs/reference/entity#enable)). Counts as a write of a tracked component. The generated `GetOrAddHealth(100)` calls it. Same cost as [`Entity.GetOrAdd`](/en/docs/reference/entity#getoradd).
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `entity.GetOrAdd<T>()`: O(1); when missing, O(1) if the table has a column for `T`, else O(c) amortized
+- `entity.GetOrAdd<T>(in T value)`: as `GetOrAdd<T>()`
 
 ### `Has` [#has]
 

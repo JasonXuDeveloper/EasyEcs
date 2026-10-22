@@ -32,7 +32,7 @@ public static class TargetPolicyExtensions
     public static ValueIndex<T, EntityId> WhenTargetDestroyed<T>(this ValueIndex<T, EntityId> index, TargetPolicy policy)
         where T : struct, IComponent, IIndexed<EntityId>
     {
-        index.World.SetRule(index, policy, static index => new World.ComponentRule<T>(index));
+        index.World.SetRule(index, ComponentType<T>.Bit, policy, static index => new World.ComponentRule<T>(index));
         return index;
     }
 }
@@ -178,20 +178,22 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void PrepareCascade()
     {
-        if (_hierarchy | _ruleCount != 0) PrepareRules();
+        if (_hierarchy | _ruleCount != 0 | _pendingRuleCount != 0) PrepareRules();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void PrepareRules()
     {
+        if (_pendingRuleCount != 0) ApplyPendingRules();
         if (_hierarchy && _childRule == null) ChildRule(TargetPolicy.Destroy);
         _childRule?.Prepare();
         for (int i = 0; i < _ruleCount; i++) _rules[i].Prepare();
     }
 
     /// <summary>Set the policy of <paramref name="index"/>'s links (Keep drops its rule). Cold.</summary>
-    internal void SetRule<TIndex>(TIndex index, TargetPolicy policy, Func<TIndex, TargetRule> create) where TIndex : class
+    internal void SetRule<TIndex>(TIndex index, int bit, TargetPolicy policy, Func<TIndex, TargetRule> create) where TIndex : class
     {
+        SetUp(bit); // the type's declared policy no longer applies to this world
         if (index is ValueIndex<ChildOf, EntityId> children)
         {
             _children = children;

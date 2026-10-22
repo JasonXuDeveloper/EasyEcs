@@ -1,7 +1,7 @@
 ---
 title: 分析器规则
-seoTitle: "EasyEcs 分析器规则 EECS002-EECS061：每条 C# 诊断的含义与修法"
-description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS061：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
+seoTitle: "EasyEcs 分析器规则 EECS002-EECS073：每条 C# 诊断的含义与修法"
+description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS073：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
 icon: ShieldCheck
 ---
 
@@ -9,7 +9,7 @@ EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/doc
 EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑、但有代价的写法（EECS017、EECS018、EECS020）。生成器会跳过无效输入，由分析器报出来，
 所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046、EECS052、EECS053）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
-（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入；瓦片规则（EECS072、EECS073）拒绝光环装不下的网格瓦片，以及会共用一张纹理的两个瓦片。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入；EECS070 让 `Emit<T>` 的记录保持行的顺序，EECS071 找出一次运行无法重现的随机数；瓦片规则（EECS072、EECS073）拒绝光环装不下的网格瓦片，以及会共用一张纹理的两个瓦片。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -89,9 +89,11 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS056](#eecs056) | 错误 | `Simd = SimdMode.Require` 只用于符合条件的方法 | |
 | [EECS057](#eecs057) | 错误 | 归约的单例每遍只写一次 | |
 | [EECS058](#eecs058) | 错误 | `Scratch<T>` 持有的东西不存进 World | |
-| [EECS059](#eecs059) | 错误 | `Lookup<T>` 或 `Tile<TCell, TTile>` 读的组件这一遍不写 | |
+| [EECS059](#eecs059) | 错误 | `Lookup<T>` 读的组件这一遍不写 | |
 | [EECS060](#eecs060) | 警告 | 多线程上运行的代码不写共享内存 | |
 | [EECS061](#eecs061) | 警告 | 遍历之后不读并行 job 的字段 | `ForEach` / `ForEachEntity` |
+| [EECS070](#eecs070) | 错误 | 遍历不读自己产出的记录，同一种记录不产出两次 | |
+| [EECS071](#eecs071) | 警告 | `[ForEach]` 方法抽取可重现的随机数 | `EntityRandom` |
 | [EECS072](#eecs072) | 错误 | 瓦片的形状装得下它的光环 | |
 | [EECS073](#eecs073) | 错误 | 一个方法每种格子类型和网格只接收一个瓦片 | |
 
@@ -102,8 +104,7 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 每个参数都必须是以下之一：实现 `IComponent` 或 `ISingletonComponent` 的 `ref` / `in` / `ref readonly` 结构体，`IComponent`
 结构体的 `Span<T>` / `ReadOnlySpan<T>`，它的 `Maybe<T>` 或 `ReadOnlyMaybe<T>`（可选组件），`Mut<T>`，`ref Reduce<T>`
 （[归约](/zh/docs/guide/threading#reductions)；不带 `ref` 时部分结果只是一份副本），[`Scratch<T>`](/zh/docs/guide/threading#scratch)，
-组件的 [`Lookup<T>`](/zh/docs/guide/threading#lookups)，`ITile<TKey>` 组件的
-[`Tile<TCell, TTile>`](/zh/docs/guide/high-performance#grid)，`Entity`，或者 `World`。
+组件的 [`Lookup<T>`](/zh/docs/guide/threading#lookups)，`Entity`，或者 `World`。
 [系统之外](/zh/docs/guide/systems#foreach-outside-systems)的 `[ForEach]` 方法还可以接收任意其他类型的值，由生成的入口从调用方传进来。
 
 ```csharp doccheck=expect-EECS002
@@ -1776,8 +1777,6 @@ public class ChartRoutes : EcsSystem
 
 [`Lookup<T>`](/zh/docs/guide/threading#lookups) 读取的是任意实体在这一遍之前的 `T`，所以这一遍运行时谁都不能写 `T`。方法自己写 `T`
 （`ref`、`Mut`、可写的 `Maybe` 或 span 参数）时，会读到一些写入之前的行、一些写入之后的行，并行时还会读到别的线程正在写的行。
-[`Tile<TCell, TTile>`](/zh/docs/guide/high-performance#grid) 是对邻居 `DynamicBuffer<TCell>`（以及 `TTile`）的查找：接收它的方法两者都不写，
-把这一步写进另一个缓冲。
 
 ```csharp tab="报告" doccheck=expect-EECS059
 public class Flock : EcsSystem
@@ -1917,6 +1916,82 @@ public static class Reports
 
 要在所有核上对大量行求总数，改写成带 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 参数的 `[ForEach(Parallel = true)]` 方法：
 每一块保留一个部分结果，这一遍把它们合并起来。
+
+## EECS070 [#eecs070]
+
+**产出记录的遍历读取或打乱了这些记录。** 错误。没有代码修复。
+
+[`Emit<T>`](/zh/docs/reference/emit) 参数给每一块行一个自己的列表，遍历结束时按块的顺序把这些列表追加到单例 `Emitted<T>`，所以不管多少线程，
+记录都按行的顺序出来。同一个方法再接收 `Emitted<T>`，就是在记录还在追加时读它们：并行时读不到这次遍历的任何记录，单线程时读到一部分。
+同一个 `T` 的第二个 `Emit<T>`，在单线程上和在并行时记录的顺序不同（单线程逐行交错，并行时每块的列表一个接一个）。
+
+```csharp tab="报告" doccheck=expect-EECS070
+public record struct Hit(EntityId Target, int Amount);
+public record struct Aim(EntityId Target) : IComponent;
+
+public class Strike : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(in Aim aim, Emit<Hit> hits, in Emitted<Hit> sent)
+    {
+        if (sent.Items.Count < 100) hits.Add(new Hit(aim.Target, 1));   // 看不到这次遍历的命中
+    }
+}
+```
+
+```csharp tab="修复后"
+public record struct Hit(EntityId Target, int Amount);
+public record struct Aim(EntityId Target) : IComponent;
+
+public class Strike : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Hit(in Aim aim, Emit<Hit> hits) => hits.Add(new Hit(aim.Target, 1));
+}
+
+[UpdateAfter<Strike>]
+public class ApplyHits : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+        foreach (ref readonly var hit in hits.AsReadOnlySpan())
+            if (World.TryGetEntity(hit.Target, out var target)) target.Get<Health>().Value -= hit.Amount;
+        hits.Clear();   // 遍历是追加：由读的一方清空
+    }
+}
+```
+
+在遍历之后的系统里读这些记录，每种记录只通过一个参数产出。
+
+## EECS071 [#eecs071]
+
+**`[ForEach]` 方法无法重现的随机数。** 警告。代码修复：在逐行方法里，把 `NextSingle`、`NextDouble` 和 `Next` 改为从
+[`EntityRandom`](/zh/docs/reference/entityrandom) 抽取（方法没有时加上 `Entity entity` 和 `in EntityRandom random`）。
+
+`Random.Shared` 每次运行的种子都不同，并行遍历中它的数按线程恰好请求的顺序分给各行，所以回放、测试或另一台机器看到的结果不同。
+每行 `new Random()` 会分配，不给种子时用时钟做种子，给了种子又让每一行得到同样的数。`EntityRandom` 是种子、实体、tick 和流的纯函数：
+每次运行、任何线程数下都是同样的数。修复给方法里的每次抽取一个自己的流。
+
+```csharp tab="报告" doccheck=expect-EECS071
+public class Wander : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Velocity velocity) =>
+        velocity = new Velocity(Random.Shared.NextSingle() * 2 - 1, velocity.Y);   // 换一次运行，换一组数
+}
+```
+
+```csharp tab="修复后"
+public class Wander : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Velocity velocity, Entity entity, in EntityRandom random) =>
+        velocity = new Velocity(random.Range(entity.Id, 0, -1f, 1f), velocity.Y);
+}
+```
+
+World 里需要这个单例（`world.SetEntityRandom(seed, 0)`），推进模拟时钟的系统同时推进它的 `Tick`，每一步才会抽到新的数。
 
 ## EECS072 [#eecs072]
 

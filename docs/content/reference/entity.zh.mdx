@@ -137,7 +137,23 @@ public ref T GetOrAdd<T>() where T : struct, IComponent;
 
 组件 `T` 的 ref；没有时先添加（默认值）；`T` 被禁用时，带着它保留的值重新启用（[`Entity.Enable`](/zh/docs/reference/entity#enable)）。对被追踪组件算一次写入。O(1)；缺少这个组件时，实体所在的表已经有这一列就是 O(1)（这一行只是重新置上存在位），否则均摊 O(c)：这一行搬到有这一列的表（复制 c 个组件）。
 
-**复杂度**（[API 表](/zh/docs/api)）：O(1)；缺失时，表里有 `T` 的列为 O(1)，否则均摊 O(c)
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `entity.GetOrAdd<T>()`：O(1)；缺失时，表里有 `T` 的列为 O(1)，否则均摊 O(c)
+- `entity.GetOrAdd<T>(in T value)`：同 `GetOrAdd<T>()`
+
+### `GetOrAdd` [#getoradd-2]
+
+```csharp
+public ref T GetOrAdd<T>(scoped in T value) where T : struct, IComponent;
+```
+
+组件 `T` 的 ref，缺少时先以 `value` 添加（和 `Set` 一样登记键、进入分组）；已有这个组件的实体保留自己的值，被禁用的 `T` 以保留的值重新启用（[`Entity.Enable`](/zh/docs/reference/entity#enable)）。对追踪组件算一次写入。生成的 `GetOrAddHealth(100)` 调用它。开销和 [`Entity.GetOrAdd`](/zh/docs/reference/entity#getoradd) 相同。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `entity.GetOrAdd<T>()`：O(1)；缺失时，表里有 `T` 的列为 O(1)，否则均摊 O(c)
+- `entity.GetOrAdd<T>(in T value)`：同 `GetOrAdd<T>()`
 
 ### `Has` [#has]
 

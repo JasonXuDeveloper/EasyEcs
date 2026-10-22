@@ -90,6 +90,9 @@ neighbours are still holds nothing to copy ([D73](/en/docs/decisions#d73-survey-
   tile loads the halo and the method keeps the rule ([D77](/en/docs/decisions#d77-tiles)).
 - A partial-snapshot API: a system that copies the needed values into a ring held by a singleton (the
   lag-compensation pattern) copies exactly what is needed ([D51](/en/docs/decisions#d51-not-added)).
+- Dependency-driven scheduling of systems (a system starting once the systems it conflicts with finish, not at a
+  stage barrier): the measured worlds' graph paths equal their stage paths
+  ([D76](/en/docs/decisions#d76-stages-not-a-dependency-graph)).
 
 ## Related [#related]
 
