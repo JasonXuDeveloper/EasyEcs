@@ -7,6 +7,15 @@
     { "query": "ForEach", "page": "guide/systems" },
     { "query": "vector loop", "page": "guide/systems", "top": 3 },
     { "query": "chunk size", "page": "guide/threading", "top": 3 },
+    { "query": "ChunkRows", "page": "guide/threading", "top": 3 },
+    { "query": "PoolCapacity", "page": "guide/dynamic-buffers", "top": 3 },
+    { "query": "ReadOnlyMaybe", "page": "guide/systems", "top": 3 },
+    {
+      "query": "SaveEntitiesWithout",
+      "page": "guide/migration-and-unload",
+      "top": 3
+    },
+    { "query": "high-performance patterns", "page": "guide/high-performance" },
     { "query": "change tracking", "page": "guide/change-tracking" },
     { "query": "hot reload", "page": "guide/migration-and-unload" },
     { "query": "save load", "page": "guide/saves" },
@@ -27,6 +36,14 @@
   "zh": [
     { "query": "向量循环", "page": "guide/systems", "top": 3 },
     { "query": "块大小", "page": "guide/threading", "top": 3 },
+    { "query": "缓冲池", "page": "guide/dynamic-buffers", "top": 3 },
+    { "query": "ReadOnlyMaybe", "page": "guide/systems", "top": 3 },
+    {
+      "query": "SaveEntitiesWithout",
+      "page": "guide/migration-and-unload",
+      "top": 3
+    },
+    { "query": "高性能写法", "page": "guide/high-performance" },
     { "query": "单例", "page": "guide/singletons" },
     { "query": "遍历时删除", "page": "guide/structural-changes" },
     { "query": "并行", "page": "guide/threading" },
