@@ -367,7 +367,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string vector = $"global::System.Numerics.Vector<{simd.Element}>";
         for (int k = 1; k <= components.Length; k++)
             sb.Append($"{indent}ref {simd.Element} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Element}>(ref r{k});\n");
-        sb.Append($"{indent}nint i = 0;\n{indent}if (global::System.Numerics.Vector.IsHardwareAccelerated && rows >= {vector}.Count)\n{indent}{{\n");
+        // Components of several fields need the shuffles of Interleaved; without them, every row runs the method.
+        string interleaved = simd.Interleaves ? " && global::EasyEcs.Interleaved.IsAccelerated" : "";
+        sb.Append($"{indent}nint i = 0;\n{indent}if (global::System.Numerics.Vector.IsHardwareAccelerated{interleaved} && rows >= {vector}.Count)\n{indent}{{\n");
         string inner = indent + "    ";
         foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) sb.Append(inner).Append(line).Append('\n');
         sb.Append($"{inner}for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{inner}{{\n");

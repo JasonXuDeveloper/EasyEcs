@@ -1,0 +1,556 @@
+using System.ComponentModel;
+using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+
+namespace EasyEcs;
+
+/// <summary>
+/// The loads and stores of a generated vector loop over components of several fields (<c>Position { X, Y, Z }</c>):
+/// a column holds rows as <c>x0 y0 z0 x1 y1 z1 ...</c>, and the loop computes on one vector per field
+/// (<c>x0 x1 x2 ...</c>). <c>Load2</c> / <c>Load3</c> / <c>Load4</c> split the rows of one vector into one vector per
+/// field with shuffles, <c>Store2</c> / <c>Store3</c> / <c>Store4</c> put them back. The generator calls them; a
+/// [ForEach] method never does. Lanes of 4 bytes (float, int, uint) or 8 bytes (double, long, ulong).
+/// </summary>
+/// <remarks>
+/// Each call reads or writes exactly the rows of one vector (<c>Vector&lt;T&gt;.Count</c> or
+/// <c>Vector512&lt;T&gt;.Count</c> rows from <paramref name="row"/>): the caller guarantees the column holds them.
+/// Shuffles only move bits, so a lane of 4 bytes is moved as a float and one of 8 bytes as a double, whatever its type.
+/// </remarks>
+[EditorBrowsable(EditorBrowsableState.Never)]
+public static class Interleaved
+{
+    /// <summary>
+    /// Whether the loads and stores of <c>Vector&lt;T&gt;</c> run as shuffles on this hardware (AVX2 at 256 bits,
+    /// AVX-512 at 512); otherwise a generated loop leaves components of several fields to its rows one at a time.
+    /// </summary>
+    public static bool IsAccelerated
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Vector<byte>.Count == 32 ? Avx2.IsSupported : Vector<byte>.Count == 64 && Avx512F.IsSupported;
+    }
+
+    /// <summary>Whether the loads and stores of <c>Vector512&lt;T&gt;</c> run as shuffles on this hardware (AVX-512).</summary>
+    public static bool IsAccelerated512
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Avx512F.IsSupported;
+    }
+
+    // ---------------- Vector<T>: the 256-bit form, or the 512-bit one when Vector<T> is that wide ----------------
+
+    /// <summary>The two fields of <c>Vector&lt;T&gt;.Count</c> rows from <paramref name="row"/> of a column of 2-field structs.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Load2<T>(ref T column, nuint row, out Vector<T> f0, out Vector<T> f1)
+    {
+        if (Vector<byte>.Count == 64)
+        {
+            Load2(ref column, row, out Vector512<T> a, out Vector512<T> b);
+            (f0, f1) = (a.AsVector(), b.AsVector());
+            return;
+        }
+        Load2(ref column, row, out Vector256<T> x, out Vector256<T> y);
+        (f0, f1) = (x.AsVector(), y.AsVector());
+    }
+
+    /// <summary>The three fields of <c>Vector&lt;T&gt;.Count</c> rows from <paramref name="row"/> of a column of 3-field structs.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Load3<T>(ref T column, nuint row, out Vector<T> f0, out Vector<T> f1, out Vector<T> f2)
+    {
+        if (Vector<byte>.Count == 64)
+        {
+            Load3(ref column, row, out Vector512<T> a, out Vector512<T> b, out Vector512<T> c);
+            (f0, f1, f2) = (a.AsVector(), b.AsVector(), c.AsVector());
+            return;
+        }
+        Load3(ref column, row, out Vector256<T> x, out Vector256<T> y, out Vector256<T> z);
+        (f0, f1, f2) = (x.AsVector(), y.AsVector(), z.AsVector());
+    }
+
+    /// <summary>The four fields of <c>Vector&lt;T&gt;.Count</c> rows from <paramref name="row"/> of a column of 4-field structs.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Load4<T>(ref T column, nuint row, out Vector<T> f0, out Vector<T> f1, out Vector<T> f2, out Vector<T> f3)
+    {
+        if (Vector<byte>.Count == 64)
+        {
+            Load4(ref column, row, out Vector512<T> a, out Vector512<T> b, out Vector512<T> c, out Vector512<T> d);
+            (f0, f1, f2, f3) = (a.AsVector(), b.AsVector(), c.AsVector(), d.AsVector());
+            return;
+        }
+        Load4(ref column, row, out Vector256<T> x, out Vector256<T> y, out Vector256<T> z, out Vector256<T> w);
+        (f0, f1, f2, f3) = (x.AsVector(), y.AsVector(), z.AsVector(), w.AsVector());
+    }
+
+    /// <summary>Writes the two fields back to <c>Vector&lt;T&gt;.Count</c> rows from <paramref name="row"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Store2<T>(Vector<T> f0, Vector<T> f1, ref T column, nuint row)
+    {
+        if (Vector<byte>.Count == 64) Store2(f0.AsVector512(), f1.AsVector512(), ref column, row);
+        else Store2(f0.AsVector256(), f1.AsVector256(), ref column, row);
+    }
+
+    /// <summary>Writes the three fields back to <c>Vector&lt;T&gt;.Count</c> rows from <paramref name="row"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Store3<T>(Vector<T> f0, Vector<T> f1, Vector<T> f2, ref T column, nuint row)
+    {
+        if (Vector<byte>.Count == 64) Store3(f0.AsVector512(), f1.AsVector512(), f2.AsVector512(), ref column, row);
+        else Store3(f0.AsVector256(), f1.AsVector256(), f2.AsVector256(), ref column, row);
+    }
+
+    /// <summary>Writes the four fields back to <c>Vector&lt;T&gt;.Count</c> rows from <paramref name="row"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Store4<T>(Vector<T> f0, Vector<T> f1, Vector<T> f2, Vector<T> f3, ref T column, nuint row)
+    {
+        if (Vector<byte>.Count == 64) Store4(f0.AsVector512(), f1.AsVector512(), f2.AsVector512(), f3.AsVector512(), ref column, row);
+        else Store4(f0.AsVector256(), f1.AsVector256(), f2.AsVector256(), f3.AsVector256(), ref column, row);
+    }
+
+    // ---------------- 256 bits (AVX2) ----------------
+
+    // The 256-bit forms run only behind IsAccelerated (AVX2): Avx / Avx2 calls have no software fallback here.
+
+    private static void Load2<T>(ref T column, nuint row, out Vector256<T> f0, out Vector256<T> f1)
+    {
+        if (Unsafe.SizeOf<T>() == 4)
+        {
+            ref float s = ref Unsafe.As<T, float>(ref column);
+            var a = Vector256.LoadUnsafe(ref s, row * 2);     // x0 y0 x1 y1 | x2 y2 x3 y3
+            var b = Vector256.LoadUnsafe(ref s, row * 2 + 8); // x4 y4 x5 y5 | x6 y6 x7 y7
+            // x0 x1 x4 x5 | x2 x3 x6 x7, then the 64-bit pairs in order 0 2 1 3
+            f0 = Avx2.Permute4x64(Avx.Shuffle(a, b, 0b10_00_10_00).AsDouble(), 0b11_01_10_00).As<double, T>();
+            f1 = Avx2.Permute4x64(Avx.Shuffle(a, b, 0b11_01_11_01).AsDouble(), 0b11_01_10_00).As<double, T>();
+        }
+        else
+        {
+            ref double s = ref Unsafe.As<T, double>(ref column);
+            var a = Vector256.LoadUnsafe(ref s, row * 2);     // x0 y0 | x1 y1
+            var b = Vector256.LoadUnsafe(ref s, row * 2 + 4); // x2 y2 | x3 y3
+            f0 = Avx2.Permute4x64(Avx.UnpackLow(a, b), 0b11_01_10_00).As<double, T>();  // x0 x2 | x1 x3 -> 0 1 2 3
+            f1 = Avx2.Permute4x64(Avx.UnpackHigh(a, b), 0b11_01_10_00).As<double, T>();
+        }
+    }
+
+    private static void Store2<T>(Vector256<T> f0, Vector256<T> f1, ref T column, nuint row)
+    {
+        if (Unsafe.SizeOf<T>() == 4)
+        {
+            ref float d = ref Unsafe.As<T, float>(ref column);
+            var lo = Avx.UnpackLow(f0.AsSingle(), f1.AsSingle());  // x0 y0 x1 y1 | x4 y4 x5 y5
+            var hi = Avx.UnpackHigh(f0.AsSingle(), f1.AsSingle()); // x2 y2 x3 y3 | x6 y6 x7 y7
+            Avx.Permute2x128(lo, hi, 0x20).StoreUnsafe(ref d, row * 2);
+            Avx.Permute2x128(lo, hi, 0x31).StoreUnsafe(ref d, row * 2 + 8);
+        }
+        else
+        {
+            ref double d = ref Unsafe.As<T, double>(ref column);
+            var x = Avx2.Permute4x64(f0.AsDouble(), 0b11_01_10_00); // x0 x2 | x1 x3 (the order 0 2 1 3 is its own inverse)
+            var y = Avx2.Permute4x64(f1.AsDouble(), 0b11_01_10_00);
+            Avx.UnpackLow(x, y).StoreUnsafe(ref d, row * 2);
+            Avx.UnpackHigh(x, y).StoreUnsafe(ref d, row * 2 + 4);
+        }
+    }
+
+    // Three fields: the elements of one field sit in distinct lanes of the three loaded vectors (3 and the lane count
+    // are coprime), so two blends gather them into one vector and one permute puts them in row order.
+
+    private static void Load3<T>(ref T column, nuint row, out Vector256<T> f0, out Vector256<T> f1, out Vector256<T> f2)
+    {
+        if (Unsafe.SizeOf<T>() == 4)
+        {
+            ref float s = ref Unsafe.As<T, float>(ref column);
+            var a = Vector256.LoadUnsafe(ref s, row * 3);      // x0 y0 z0 x1 y1 z1 x2 y2
+            var b = Vector256.LoadUnsafe(ref s, row * 3 + 8);  // z2 x3 y3 z3 x4 y4 z4 x5
+            var c = Vector256.LoadUnsafe(ref s, row * 3 + 16); // y5 z5 x6 y6 z6 x7 y7 z7
+            f0 = Avx2.PermuteVar8x32(Avx.Blend(Avx.Blend(a, b, 0b1001_0010), c, 0b0010_0100), Permute3X).As<float, T>();
+            f1 = Avx2.PermuteVar8x32(Avx.Blend(Avx.Blend(a, b, 0b0010_0100), c, 0b0100_1001), Permute3Y).As<float, T>();
+            f2 = Avx2.PermuteVar8x32(Avx.Blend(Avx.Blend(a, b, 0b0100_1001), c, 0b1001_0010), Permute3Z).As<float, T>();
+        }
+        else
+        {
+            ref double s = ref Unsafe.As<T, double>(ref column);
+            var a = Vector256.LoadUnsafe(ref s, row * 3);     // x0 y0 z0 x1
+            var b = Vector256.LoadUnsafe(ref s, row * 3 + 4); // y1 z1 x2 y2
+            var c = Vector256.LoadUnsafe(ref s, row * 3 + 8); // z2 x3 y3 z3
+            f0 = Avx2.Permute4x64(Avx.Blend(Avx.Blend(a, b, 0b0100), c, 0b0010), 0b01_10_11_00).As<double, T>(); // x0 x3 x2 x1
+            f1 = Avx2.Permute4x64(Avx.Blend(Avx.Blend(a, b, 0b1001), c, 0b0100), 0b10_11_00_01).As<double, T>(); // y1 y0 y3 y2
+            f2 = Avx2.Permute4x64(Avx.Blend(Avx.Blend(a, b, 0b0010), c, 0b1001), 0b11_00_01_10).As<double, T>(); // z2 z1 z0 z3
+        }
+    }
+
+    private static void Store3<T>(Vector256<T> f0, Vector256<T> f1, Vector256<T> f2, ref T column, nuint row)
+    {
+        if (Unsafe.SizeOf<T>() == 4)
+        {
+            ref float d = ref Unsafe.As<T, float>(ref column);
+            var x = Avx2.PermuteVar8x32(f0.AsSingle(), Permute3X); // the permutes of Load3, inverted
+            var y = Avx2.PermuteVar8x32(f1.AsSingle(), Unpermute3Y);
+            var z = Avx2.PermuteVar8x32(f2.AsSingle(), Permute3Z);
+            Avx.Blend(Avx.Blend(x, y, 0b1001_0010), z, 0b0010_0100).StoreUnsafe(ref d, row * 3);
+            Avx.Blend(Avx.Blend(x, y, 0b0010_0100), z, 0b0100_1001).StoreUnsafe(ref d, row * 3 + 8);
+            Avx.Blend(Avx.Blend(x, y, 0b0100_1001), z, 0b1001_0010).StoreUnsafe(ref d, row * 3 + 16);
+        }
+        else
+        {
+            ref double d = ref Unsafe.As<T, double>(ref column);
+            var x = Avx2.Permute4x64(f0.AsDouble(), 0b01_10_11_00); // each permute of Load3 is its own inverse
+            var y = Avx2.Permute4x64(f1.AsDouble(), 0b10_11_00_01);
+            var z = Avx2.Permute4x64(f2.AsDouble(), 0b11_00_01_10);
+            Avx.Blend(Avx.Blend(x, y, 0b0010), z, 0b0100).StoreUnsafe(ref d, row * 3);
+            Avx.Blend(Avx.Blend(y, z, 0b0010), x, 0b0100).StoreUnsafe(ref d, row * 3 + 4);
+            Avx.Blend(Avx.Blend(z, x, 0b0010), y, 0b0100).StoreUnsafe(ref d, row * 3 + 8);
+        }
+    }
+
+    private static readonly Vector256<int> Permute3X = Vector256.Create(0, 3, 6, 1, 4, 7, 2, 5); // its own inverse
+    private static readonly Vector256<int> Permute3Y = Vector256.Create(1, 4, 7, 2, 5, 0, 3, 6);
+    private static readonly Vector256<int> Unpermute3Y = Vector256.Create(5, 0, 3, 6, 1, 4, 7, 2);
+    private static readonly Vector256<int> Permute3Z = Vector256.Create(2, 5, 0, 3, 6, 1, 4, 7); // its own inverse
+
+    // Four fields: a 4 x 4 transpose (per 128-bit half for 4-byte lanes).
+
+    private static void Load4<T>(ref T column, nuint row, out Vector256<T> f0, out Vector256<T> f1, out Vector256<T> f2, out Vector256<T> f3)
+    {
+        if (Unsafe.SizeOf<T>() == 4)
+        {
+            ref float s = ref Unsafe.As<T, float>(ref column);
+            var r0 = Vector256.LoadUnsafe(ref s, row * 4);      // row 0 | row 1
+            var r1 = Vector256.LoadUnsafe(ref s, row * 4 + 8);  // row 2 | row 3
+            var r2 = Vector256.LoadUnsafe(ref s, row * 4 + 16); // row 4 | row 5
+            var r3 = Vector256.LoadUnsafe(ref s, row * 4 + 24); // row 6 | row 7
+            var q0 = Avx.Permute2x128(r0, r2, 0x20); // row 0 | row 4
+            var q1 = Avx.Permute2x128(r0, r2, 0x31); // row 1 | row 5
+            var q2 = Avx.Permute2x128(r1, r3, 0x20); // row 2 | row 6
+            var q3 = Avx.Permute2x128(r1, r3, 0x31); // row 3 | row 7
+            var t0 = Avx.UnpackLow(q0, q1);  // x0 x1 y0 y1 | x4 x5 y4 y5
+            var t1 = Avx.UnpackHigh(q0, q1); // z0 z1 w0 w1 | z4 z5 w4 w5
+            var t2 = Avx.UnpackLow(q2, q3);
+            var t3 = Avx.UnpackHigh(q2, q3);
+            f0 = Avx.Shuffle(t0, t2, 0b01_00_01_00).As<float, T>();
+            f1 = Avx.Shuffle(t0, t2, 0b11_10_11_10).As<float, T>();
+            f2 = Avx.Shuffle(t1, t3, 0b01_00_01_00).As<float, T>();
+            f3 = Avx.Shuffle(t1, t3, 0b11_10_11_10).As<float, T>();
+        }
+        else
+        {
+            ref double s = ref Unsafe.As<T, double>(ref column);
+            var a = Vector256.LoadUnsafe(ref s, row * 4);
+            var b = Vector256.LoadUnsafe(ref s, row * 4 + 4);
+            var c = Vector256.LoadUnsafe(ref s, row * 4 + 8);
+            var d = Vector256.LoadUnsafe(ref s, row * 4 + 12);
+            var t0 = Avx.UnpackLow(a, b);  // x0 x1 | z0 z1
+            var t1 = Avx.UnpackHigh(a, b); // y0 y1 | w0 w1
+            var t2 = Avx.UnpackLow(c, d);
+            var t3 = Avx.UnpackHigh(c, d);
+            f0 = Avx.Permute2x128(t0, t2, 0x20).As<double, T>();
+            f1 = Avx.Permute2x128(t1, t3, 0x20).As<double, T>();
+            f2 = Avx.Permute2x128(t0, t2, 0x31).As<double, T>();
+            f3 = Avx.Permute2x128(t1, t3, 0x31).As<double, T>();
+        }
+    }
+
+    private static void Store4<T>(Vector256<T> f0, Vector256<T> f1, Vector256<T> f2, Vector256<T> f3, ref T column, nuint row)
+    {
+        if (Unsafe.SizeOf<T>() == 4)
+        {
+            ref float d = ref Unsafe.As<T, float>(ref column);
+            var t0 = Avx.UnpackLow(f0.AsSingle(), f1.AsSingle());  // x0 y0 x1 y1 | x4 y4 x5 y5
+            var t1 = Avx.UnpackHigh(f0.AsSingle(), f1.AsSingle()); // x2 y2 x3 y3 | x6 y6 x7 y7
+            var t2 = Avx.UnpackLow(f2.AsSingle(), f3.AsSingle());
+            var t3 = Avx.UnpackHigh(f2.AsSingle(), f3.AsSingle());
+            var q0 = Avx.Shuffle(t0, t2, 0b01_00_01_00); // row 0 | row 4
+            var q1 = Avx.Shuffle(t0, t2, 0b11_10_11_10); // row 1 | row 5
+            var q2 = Avx.Shuffle(t1, t3, 0b01_00_01_00); // row 2 | row 6
+            var q3 = Avx.Shuffle(t1, t3, 0b11_10_11_10); // row 3 | row 7
+            Avx.Permute2x128(q0, q1, 0x20).StoreUnsafe(ref d, row * 4);
+            Avx.Permute2x128(q2, q3, 0x20).StoreUnsafe(ref d, row * 4 + 8);
+            Avx.Permute2x128(q0, q1, 0x31).StoreUnsafe(ref d, row * 4 + 16);
+            Avx.Permute2x128(q2, q3, 0x31).StoreUnsafe(ref d, row * 4 + 24);
+        }
+        else
+        {
+            ref double d = ref Unsafe.As<T, double>(ref column);
+            var t0 = Avx.Permute2x128(f0.AsDouble(), f2.AsDouble(), 0x20); // x0 x1 | z0 z1
+            var t2 = Avx.Permute2x128(f0.AsDouble(), f2.AsDouble(), 0x31); // x2 x3 | z2 z3
+            var t1 = Avx.Permute2x128(f1.AsDouble(), f3.AsDouble(), 0x20);
+            var t3 = Avx.Permute2x128(f1.AsDouble(), f3.AsDouble(), 0x31);
+            Avx.UnpackLow(t0, t1).StoreUnsafe(ref d, row * 4);
+            Avx.UnpackHigh(t0, t1).StoreUnsafe(ref d, row * 4 + 4);
+            Avx.UnpackLow(t2, t3).StoreUnsafe(ref d, row * 4 + 8);
+            Avx.UnpackHigh(t2, t3).StoreUnsafe(ref d, row * 4 + 12);
+        }
+    }
+
+    // ---------------- 512 bits (AVX-512F): two-source permutes (vpermt2ps / vpermt2pd) ----------------
+    // Index tables are static readonly vectors (constants once the JIT optimizes the loop), one set per lane size.
+
+    /// <summary>The two fields of <c>Vector512&lt;T&gt;.Count</c> rows from <paramref name="row"/> of a column of 2-field structs.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Load2<T>(ref T column, nuint row, out Vector512<T> f0, out Vector512<T> f1)
+    {
+        if (Unsafe.SizeOf<T>() == 4)
+        {
+            ref float s = ref Unsafe.As<T, float>(ref column);
+            var a = Vector512.LoadUnsafe(ref s, row * 2);
+            var b = Vector512.LoadUnsafe(ref s, row * 2 + 16);
+            f0 = Avx512F.PermuteVar16x32x2(a, Tables32.Load2[0], b).As<float, T>();
+            f1 = Avx512F.PermuteVar16x32x2(a, Tables32.Load2[1], b).As<float, T>();
+        }
+        else
+        {
+            ref double s = ref Unsafe.As<T, double>(ref column);
+            var a = Vector512.LoadUnsafe(ref s, row * 2);
+            var b = Vector512.LoadUnsafe(ref s, row * 2 + 8);
+            f0 = Avx512F.PermuteVar8x64x2(a, Tables64.Load2[0], b).As<double, T>();
+            f1 = Avx512F.PermuteVar8x64x2(a, Tables64.Load2[1], b).As<double, T>();
+        }
+    }
+
+    /// <summary>Writes the two fields back to <c>Vector512&lt;T&gt;.Count</c> rows from <paramref name="row"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Store2<T>(Vector512<T> f0, Vector512<T> f1, ref T column, nuint row)
+    {
+        if (Unsafe.SizeOf<T>() == 4)
+        {
+            ref float d = ref Unsafe.As<T, float>(ref column);
+            Avx512F.PermuteVar16x32x2(f0.AsSingle(), Tables32.Store2[0], f1.AsSingle()).StoreUnsafe(ref d, row * 2);
+            Avx512F.PermuteVar16x32x2(f0.AsSingle(), Tables32.Store2[1], f1.AsSingle()).StoreUnsafe(ref d, row * 2 + 16);
+        }
+        else
+        {
+            ref double d = ref Unsafe.As<T, double>(ref column);
+            Avx512F.PermuteVar8x64x2(f0.AsDouble(), Tables64.Store2[0], f1.AsDouble()).StoreUnsafe(ref d, row * 2);
+            Avx512F.PermuteVar8x64x2(f0.AsDouble(), Tables64.Store2[1], f1.AsDouble()).StoreUnsafe(ref d, row * 2 + 8);
+        }
+    }
+
+    /// <summary>The three fields of <c>Vector512&lt;T&gt;.Count</c> rows from <paramref name="row"/> of a column of 3-field structs.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Load3<T>(ref T column, nuint row, out Vector512<T> f0, out Vector512<T> f1, out Vector512<T> f2)
+    {
+        // Each field: a permute of the first two vectors, then one that takes the third's elements into it.
+        if (Unsafe.SizeOf<T>() == 4)
+        {
+            ref float s = ref Unsafe.As<T, float>(ref column);
+            var a = Vector512.LoadUnsafe(ref s, row * 3);
+            var b = Vector512.LoadUnsafe(ref s, row * 3 + 16);
+            var c = Vector512.LoadUnsafe(ref s, row * 3 + 32);
+            var t = Tables32.Load3;
+            f0 = Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(a, t[0], b), t[1], c).As<float, T>();
+            f1 = Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(a, t[2], b), t[3], c).As<float, T>();
+            f2 = Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(a, t[4], b), t[5], c).As<float, T>();
+        }
+        else
+        {
+            ref double s = ref Unsafe.As<T, double>(ref column);
+            var a = Vector512.LoadUnsafe(ref s, row * 3);
+            var b = Vector512.LoadUnsafe(ref s, row * 3 + 8);
+            var c = Vector512.LoadUnsafe(ref s, row * 3 + 16);
+            var t = Tables64.Load3;
+            f0 = Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(a, t[0], b), t[1], c).As<double, T>();
+            f1 = Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(a, t[2], b), t[3], c).As<double, T>();
+            f2 = Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(a, t[4], b), t[5], c).As<double, T>();
+        }
+    }
+
+    /// <summary>Writes the three fields back to <c>Vector512&lt;T&gt;.Count</c> rows from <paramref name="row"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Store3<T>(Vector512<T> f0, Vector512<T> f1, Vector512<T> f2, ref T column, nuint row)
+    {
+        if (Unsafe.SizeOf<T>() == 4)
+        {
+            ref float d = ref Unsafe.As<T, float>(ref column);
+            Vector512<float> x = f0.AsSingle(), y = f1.AsSingle(), z = f2.AsSingle();
+            var t = Tables32.Store3;
+            Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(x, t[0], y), t[1], z).StoreUnsafe(ref d, row * 3);
+            Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(x, t[2], y), t[3], z).StoreUnsafe(ref d, row * 3 + 16);
+            Avx512F.PermuteVar16x32x2(Avx512F.PermuteVar16x32x2(x, t[4], y), t[5], z).StoreUnsafe(ref d, row * 3 + 32);
+        }
+        else
+        {
+            ref double d = ref Unsafe.As<T, double>(ref column);
+            Vector512<double> x = f0.AsDouble(), y = f1.AsDouble(), z = f2.AsDouble();
+            var t = Tables64.Store3;
+            Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(x, t[0], y), t[1], z).StoreUnsafe(ref d, row * 3);
+            Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(x, t[2], y), t[3], z).StoreUnsafe(ref d, row * 3 + 8);
+            Avx512F.PermuteVar8x64x2(Avx512F.PermuteVar8x64x2(x, t[4], y), t[5], z).StoreUnsafe(ref d, row * 3 + 16);
+        }
+    }
+
+    /// <summary>The four fields of <c>Vector512&lt;T&gt;.Count</c> rows from <paramref name="row"/> of a column of 4-field structs.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Load4<T>(ref T column, nuint row, out Vector512<T> f0, out Vector512<T> f1, out Vector512<T> f2, out Vector512<T> f3)
+    {
+        // Two rounds: the first two vectors to (x y) and (z w) halves of their rows, the same for the last two, then
+        // the halves of both joined per field.
+        if (Unsafe.SizeOf<T>() == 4)
+        {
+            ref float s = ref Unsafe.As<T, float>(ref column);
+            var a = Vector512.LoadUnsafe(ref s, row * 4);
+            var b = Vector512.LoadUnsafe(ref s, row * 4 + 16);
+            var c = Vector512.LoadUnsafe(ref s, row * 4 + 32);
+            var d = Vector512.LoadUnsafe(ref s, row * 4 + 48);
+            var t = Tables32.Load4;
+            var xy0 = Avx512F.PermuteVar16x32x2(a, t[0], b);
+            var zw0 = Avx512F.PermuteVar16x32x2(a, t[1], b);
+            var xy1 = Avx512F.PermuteVar16x32x2(c, t[0], d);
+            var zw1 = Avx512F.PermuteVar16x32x2(c, t[1], d);
+            f0 = Avx512F.PermuteVar16x32x2(xy0, t[2], xy1).As<float, T>();
+            f1 = Avx512F.PermuteVar16x32x2(xy0, t[3], xy1).As<float, T>();
+            f2 = Avx512F.PermuteVar16x32x2(zw0, t[2], zw1).As<float, T>();
+            f3 = Avx512F.PermuteVar16x32x2(zw0, t[3], zw1).As<float, T>();
+        }
+        else
+        {
+            ref double s = ref Unsafe.As<T, double>(ref column);
+            var a = Vector512.LoadUnsafe(ref s, row * 4);
+            var b = Vector512.LoadUnsafe(ref s, row * 4 + 8);
+            var c = Vector512.LoadUnsafe(ref s, row * 4 + 16);
+            var d = Vector512.LoadUnsafe(ref s, row * 4 + 24);
+            var t = Tables64.Load4;
+            var xy0 = Avx512F.PermuteVar8x64x2(a, t[0], b);
+            var zw0 = Avx512F.PermuteVar8x64x2(a, t[1], b);
+            var xy1 = Avx512F.PermuteVar8x64x2(c, t[0], d);
+            var zw1 = Avx512F.PermuteVar8x64x2(c, t[1], d);
+            f0 = Avx512F.PermuteVar8x64x2(xy0, t[2], xy1).As<double, T>();
+            f1 = Avx512F.PermuteVar8x64x2(xy0, t[3], xy1).As<double, T>();
+            f2 = Avx512F.PermuteVar8x64x2(zw0, t[2], zw1).As<double, T>();
+            f3 = Avx512F.PermuteVar8x64x2(zw0, t[3], zw1).As<double, T>();
+        }
+    }
+
+    /// <summary>Writes the four fields back to <c>Vector512&lt;T&gt;.Count</c> rows from <paramref name="row"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Store4<T>(Vector512<T> f0, Vector512<T> f1, Vector512<T> f2, Vector512<T> f3, ref T column, nuint row)
+    {
+        if (Unsafe.SizeOf<T>() == 4)
+        {
+            ref float d = ref Unsafe.As<T, float>(ref column);
+            Vector512<float> x = f0.AsSingle(), y = f1.AsSingle(), z = f2.AsSingle(), w = f3.AsSingle();
+            var t = Tables32.Store4;
+            var xy0 = Avx512F.PermuteVar16x32x2(x, t[0], y);
+            var xy1 = Avx512F.PermuteVar16x32x2(x, t[1], y);
+            var zw0 = Avx512F.PermuteVar16x32x2(z, t[0], w);
+            var zw1 = Avx512F.PermuteVar16x32x2(z, t[1], w);
+            Avx512F.PermuteVar16x32x2(xy0, t[2], zw0).StoreUnsafe(ref d, row * 4);
+            Avx512F.PermuteVar16x32x2(xy0, t[3], zw0).StoreUnsafe(ref d, row * 4 + 16);
+            Avx512F.PermuteVar16x32x2(xy1, t[2], zw1).StoreUnsafe(ref d, row * 4 + 32);
+            Avx512F.PermuteVar16x32x2(xy1, t[3], zw1).StoreUnsafe(ref d, row * 4 + 48);
+        }
+        else
+        {
+            ref double d = ref Unsafe.As<T, double>(ref column);
+            Vector512<double> x = f0.AsDouble(), y = f1.AsDouble(), z = f2.AsDouble(), w = f3.AsDouble();
+            var t = Tables64.Store4;
+            var xy0 = Avx512F.PermuteVar8x64x2(x, t[0], y);
+            var xy1 = Avx512F.PermuteVar8x64x2(x, t[1], y);
+            var zw0 = Avx512F.PermuteVar8x64x2(z, t[0], w);
+            var zw1 = Avx512F.PermuteVar8x64x2(z, t[1], w);
+            Avx512F.PermuteVar8x64x2(xy0, t[2], zw0).StoreUnsafe(ref d, row * 4);
+            Avx512F.PermuteVar8x64x2(xy0, t[3], zw0).StoreUnsafe(ref d, row * 4 + 8);
+            Avx512F.PermuteVar8x64x2(xy1, t[2], zw1).StoreUnsafe(ref d, row * 4 + 16);
+            Avx512F.PermuteVar8x64x2(xy1, t[3], zw1).StoreUnsafe(ref d, row * 4 + 24);
+        }
+    }
+
+    /// <summary>
+    /// The permute indices of the 512-bit forms for vectors of <paramref name="lanes"/> lanes (16 of 4 bytes, 8 of 8). In
+    /// a two-source permute, index i &lt; lanes takes lane i of the first vector, lanes + i lane i of the second.
+    /// </summary>
+    private static class Tables
+    {
+        /// <summary>Load2: field f of row j is element 2j + f of the two vectors.</summary>
+        public static int[][] Load2(int lanes) => [Fill(lanes, j => 2 * j), Fill(lanes, j => 2 * j + 1)];
+
+        /// <summary>Store2: element q of the two output vectors is field q % 2 of row q / 2.</summary>
+        public static int[][] Store2(int lanes) =>
+            [Fill(lanes, q => (q % 2) * lanes + q / 2), Fill(lanes, q => (q % 2) * lanes + (lanes + q) / 2)];
+
+        /// <summary>
+        /// Load3, per field f: element 3j + f of the three vectors; the first permute takes those of the first two
+        /// (any lane for the others), the second keeps them and takes those of the third.
+        /// </summary>
+        public static int[][] Load3(int lanes)
+        {
+            var t = new int[6][];
+            for (int f = 0; f < 3; f++)
+            {
+                t[2 * f] = Fill(lanes, j => 3 * j + f < 2 * lanes ? 3 * j + f : 0);
+                t[2 * f + 1] = Fill(lanes, j => 3 * j + f < 2 * lanes ? j : lanes + 3 * j + f - 2 * lanes);
+            }
+            return t;
+        }
+
+        /// <summary>
+        /// Store3, per output vector k: element q (of all three, 16k + q overall) is field q % 3 of row q / 3; the first
+        /// permute takes those of fields 0 and 1, the second keeps them and takes those of field 2.
+        /// </summary>
+        public static int[][] Store3(int lanes)
+        {
+            var t = new int[6][];
+            for (int k = 0; k < 3; k++)
+            {
+                t[2 * k] = Fill(lanes, j => ((k * lanes + j) % 3) switch { 0 => (k * lanes + j) / 3, 1 => lanes + (k * lanes + j) / 3, _ => 0 });
+                t[2 * k + 1] = Fill(lanes, j => (k * lanes + j) % 3 == 2 ? lanes + (k * lanes + j) / 3 : j);
+            }
+            return t;
+        }
+
+        /// <summary>
+        /// Load4: the first round splits two vectors (rows 0 to lanes / 4 * 2 - 1) into the x and y fields of their rows
+        /// (one half each) and the z and w fields; the second joins the halves of two such vectors per field.
+        /// </summary>
+        public static int[][] Load4(int lanes)
+        {
+            int half = lanes / 2; // rows of two vectors
+            return [Fill(lanes, j => j < half ? 4 * j : 4 * (j - half) + 1), Fill(lanes, j => j < half ? 4 * j + 2 : 4 * (j - half) + 3),
+                Fill(lanes, j => j < half ? j : lanes + j - half), Fill(lanes, j => j < half ? half + j : lanes + j)];
+        }
+
+        /// <summary>Store4: interleave fields pairwise (x with y, z with w), then pairs of pairs into rows.</summary>
+        public static int[][] Store4(int lanes)
+        {
+            int half = lanes / 2;
+            return [Fill(lanes, q => (q % 2) * lanes + q / 2), Fill(lanes, q => (q % 2) * lanes + half + q / 2),
+                Fill(lanes, q => (q / 2 % 2) * lanes + (q / 4) * 2 + q % 2), Fill(lanes, q => (q / 2 % 2) * lanes + half + (q / 4) * 2 + q % 2)];
+        }
+
+        private static int[] Fill(int lanes, System.Func<int, int> index)
+        {
+            var values = new int[lanes];
+            for (int i = 0; i < lanes; i++) values[i] = index(i);
+            return values;
+        }
+    }
+
+    private static class Tables32
+    {
+        public static readonly Vector512<int>[] Load2 = Of(Tables.Load2(16)), Store2 = Of(Tables.Store2(16)), Load3 = Of(Tables.Load3(16)),
+            Store3 = Of(Tables.Store3(16)), Load4 = Of(Tables.Load4(16)), Store4 = Of(Tables.Store4(16));
+
+        private static Vector512<int>[] Of(int[][] tables)
+        {
+            var vectors = new Vector512<int>[tables.Length];
+            for (int i = 0; i < tables.Length; i++) vectors[i] = Vector512.Create(tables[i]);
+            return vectors;
+        }
+    }
+
+    private static class Tables64
+    {
+        public static readonly Vector512<long>[] Load2 = Of(Tables.Load2(8)), Store2 = Of(Tables.Store2(8)), Load3 = Of(Tables.Load3(8)),
+            Store3 = Of(Tables.Store3(8)), Load4 = Of(Tables.Load4(8)), Store4 = Of(Tables.Store4(8));
+
+        private static Vector512<long>[] Of(int[][] tables)
+        {
+            var vectors = new Vector512<long>[tables.Length];
+            for (int i = 0; i < tables.Length; i++)
+            {
+                var wide = new long[tables[i].Length];
+                for (int j = 0; j < wide.Length; j++) wide[j] = tables[i][j];
+                vectors[i] = Vector512.Create(wide);
+            }
+            return vectors;
+        }
+    }
+}

@@ -172,6 +172,10 @@ public class GeneratorTests
         public struct F : IComponent { public float V; }
         public struct H : IComponent { public float V; }
         public struct Two : IComponent { public float A, B; }
+        public struct Five : IComponent { public float A, B, C, D, E; }
+        public struct Mixed : IComponent { public float A; public int B; }
+        public partial struct Split : IComponent { public float A; }
+        public partial struct Split { public float B; }
         public record struct G(float Pull) : ISingletonComponent;
         """;
 
@@ -184,7 +188,9 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref P p) => p.V = System.Math.Abs(p.V);", false)]               // Math.Abs(int.MinValue) throws
     [TestCase("[ForEach] static void A(ref P p) => p.V /= 3;", false)]                                 // integer division
     [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x;", false)] // a call
-    [TestCase("[ForEach] static void A(ref Two t) => t.A = t.B;", false)]                              // two fields
+    [TestCase("[ForEach] static void A(ref Two t) => t.A = t.B;", true)]                               // two fields: Interleaved
+    [TestCase("[ForEach] static void A(ref Five t) => t.A = t.B;", false)]                             // five fields
+    [TestCase("[ForEach] static void A(ref Mixed m) => m.A++;", false)]                                // float and int fields
     [TestCase("[ForEach(Parallel = true)] static void A(ref F f) => f.V++;", false)]                   // no parallel batch loop yet
     [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V++;", false)]
     public void QualifyingMethodsGetAVectorLoop(string members, bool vectorized)
@@ -193,7 +199,7 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("S.ForEach.g.cs") || t.FilePath.Contains("/S.") && t.FilePath.EndsWith(".ForEach.g.cs")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated.Contains("global::System.Numerics.Vector.LoadUnsafe"), Is.EqualTo(vectorized), generated);
+        Assert.That(generated.Contains("for (nint last = rows - global::System.Numerics.Vector<"), Is.EqualTo(vectorized), generated);
 
         // Skipped means reported: the same method with SimdMode.Require is an error exactly when it got no loop.
         string required = members.Replace("[ForEach]", "[ForEach(Simd = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(Simd = SimdMode.Require, Parallel");
@@ -202,7 +208,9 @@ public class GeneratorTests
     }
 
     // EECS055: the first reason a method that looks meant for a vector loop stays scalar, from Kernel.Vectorize.
-    [TestCase("[ForEach] static void A(ref Two t) => t.A = t.B;", "component Two has 2 fields")]
+    [TestCase("[ForEach] static void A(ref Five t) => t.A = t.B;", "component Five has 5 fields (a vector loop splits up to 4)")]
+    [TestCase("[ForEach] static void A(ref Mixed m) => m.A++;", "lane types float and int differ")]
+    [TestCase("[ForEach] static void A(ref Split s) => s.A++;", "component Split is declared in several parts, so the order of its fields is not defined")]
     [TestCase("[ForEach] static void A(ref F f, in P p) => f.V = p.V;", "lane types float and int differ")]
     [TestCase("[ForEach] static void A(ref P p) => p.V = System.Math.Abs(p.V);", "Math.Abs of an integer is not supported (it throws on MinValue)")]
     [TestCase("[ForEach] static void A(ref P p) => p.V /= 3;", "integer division is not supported (it throws on 0)")]
@@ -220,9 +228,9 @@ public class GeneratorTests
 
     // Not meant for a vector loop (or vectorized, or opted out): no EECS055.
     [TestCase("[ForEach] static void A(ref F f, in H h) => f.V += h.V;")]                              // vectorized
-    [TestCase("[ForEach(Simd = SimdMode.Off)] static void A(ref Two t) => t.A = t.B;")]               // opted out
-    [TestCase("[ForEach(Parallel = true)] static void A(ref Two t) => t.A = t.B;")]
-    [TestCase("[ForEach] static void A(Entity e, ref Two t) => t.A = t.B;")]
+    [TestCase("[ForEach(Simd = SimdMode.Off)] static void A(ref Five t) => t.A = t.B;")]              // opted out
+    [TestCase("[ForEach(Parallel = true)] static void A(ref Five t) => t.A = t.B;")]
+    [TestCase("[ForEach] static void A(Entity e, ref Five t) => t.A = t.B;")]
     [TestCase("[ForEach] static void A(ref Holder h) { }")]                                             // not numeric fields
     [TestCase("[ForEach] static void A(System.Span<F> f) { }")]                                          // a batch method
     public void MethodsNotMeantForAVectorLoopGetNoMessage(string members)
@@ -234,7 +242,7 @@ public class GeneratorTests
     [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(Entity e, ref F f) => f.V++;", "it takes the Entity")]
     [TestCase("[ForEach(Simd = SimdMode.Require)] void A(ref F f) => f.V++;", "it is not static")]
     [TestCase("[ForEach(Simd = SimdMode.Require, Parallel = true)] static void A(ref F f) => f.V++;", "it runs in parallel (Parallel = true), and parallel jobs have no vector loop")]
-    [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref Two t) => t.A++;", "component Two has 2 fields")]
+    [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4)")]
     public void ARequiredVectorLoopThatDoesNotQualifyIsAnError(string members, string reason)
     {
         var diagnostics = Analyze([Components, Lanes, $"public partial class S : EcsSystem {{ {members} }}"]).Result.Where(d => d.Id.StartsWith("EECS05")).ToArray();
@@ -254,6 +262,25 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("internal ref struct AJob0 : global::EasyEcs.IForEach<"), generated);  // per row
         Assert.That(generated, Does.Contain("internal ref struct BJob1 : global::EasyEcs.IForEachBatch<"), generated);
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "Vector.LoadUnsafe").Count, Is.EqualTo(1), generated);
+    }
+
+    [Test]
+    public void AFieldAddedToAComponentReemitsTheLoopsThatSplitIt()
+    {
+        var components = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic struct Pos : IComponent { public float X, Y; } public struct Other : IComponent { public float V; }", Parse);
+        var systems = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic class S : EcsSystem { [ForEach] static void A(ref Pos p) => p.X += p.Y; } " +
+            "public class O : EcsSystem { [ForEach] static void B(ref Other o) => o.V++; }", Parse);
+        var compilation = Compile().AddSyntaxTrees(components, systems);
+        var driver = Driver().RunGenerators(compilation);
+        Assert.That(driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\"")), Does.Contain("Interleaved.Load2("));
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(components, CSharpSyntaxTree.ParseText(
+            components.ToString().Replace("public float X, Y;", "public float X, Y, Z;"), Parse)));
+
+        var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
+        Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
+        string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
+        Assert.That(generated, Does.Contain("Interleaved.Load3(").And.Contain("Interleaved.Store3("), generated);
     }
 
     [Test]

@@ -11,8 +11,8 @@ namespace EasyEcs.Generator;
 /// <summary>
 /// A [ForEach] method written for one row, translated into a <c>System.Numerics.Vector&lt;T&gt;</c> loop over its runs of
 /// rows (the idea of Burst and ISPC: the method is the kernel of one lane, the generator writes the vector loop). A
-/// method qualifies when every component it takes holds one field of one primitive type <c>T</c> (all the same: one
-/// lane count), and its body is arithmetic, comparisons, <c>?:</c>, <c>if</c> / <c>else</c>, <c>return</c> and
+/// method qualifies when every component it takes holds 1 to 4 fields of one primitive type <c>T</c> (all the same: one
+/// lane count; a component of several fields is split into one vector per field, <c>EasyEcs.Interleaved</c>), and its body is arithmetic, comparisons, <c>?:</c>, <c>if</c> / <c>else</c>, <c>return</c> and
 /// <c>Math</c> / <c>MathF</c> functions with an exact vector counterpart, on those fields, locals and uniform values
 /// (constants, static readonly fields, singletons and context values, broadcast once per run). Branches become masks:
 /// an assignment under a condition is a <c>ConditionalSelect</c>, a <c>return</c> clears its lanes. The rows left
@@ -26,12 +26,14 @@ internal sealed class Kernel
     /// <param name="Element">The lane type (<c>float</c>).</param>
     /// <param name="Setup">Statements before the vector loop: the uniform values and their broadcasts.</param>
     /// <param name="Body">The vector loop's body: loads, the translated method, stores.</param>
-    internal sealed record Code(string Element, string Setup, string Body);
+    /// <param name="Interleaves">A component has several fields: the loop needs <c>EasyEcs.Interleaved.IsAccelerated</c>.</param>
+    internal sealed record Code(string Element, string Setup, string Body, bool Interleaves);
 
     private const string V = "global::System.Numerics.Vector";
     private readonly string _e, _vec;
     private readonly ITypeSymbol _element;
-    private readonly Dictionary<IParameterSymbol, (int Index, IFieldSymbol Field, bool Ref)> _components = new(SymbolEqualityComparer.Default);
+    /// <summary>The components: their index (job column k), their lane fields in memory order, and whether they are written.</summary>
+    private readonly Dictionary<IParameterSymbol, (int Index, IFieldSymbol[] Fields, bool Ref)> _components = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<IParameterSymbol, string> _uniformParams = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<ILocalSymbol, string> _locals = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<string, string> _broadcasts = new();
@@ -116,7 +118,7 @@ internal sealed class Kernel
         if (method.IsGenericMethod) throw new Unsupported("it is generic");
         (syntax, model) = Symbols.WithBody(method, syntax, model);
         ITypeSymbol? element = null;
-        var components = new List<(IParameterSymbol, IFieldSymbol)>();
+        var components = new List<(IParameterSymbol, IFieldSymbol[])>();
         bool outside = Symbols.IsRunner(method);
         foreach (var p in method.Parameters)
         {
@@ -124,11 +126,14 @@ internal sealed class Kernel
             switch (kind)
             {
                 case Symbols.ParamKind.Component:
-                    var field = Lane(p.Type);
-                    if (element != null && !SymbolEqualityComparer.Default.Equals(element, field.Type))
-                        throw new Unsupported($"lane types {element.ToDisplayString()} and {field.Type.ToDisplayString()} differ");
-                    element = field.Type;
-                    components.Add((p, field));
+                    var fields = Lanes(p.Type);
+                    foreach (var field in fields)
+                    {
+                        if (element != null && !SymbolEqualityComparer.Default.Equals(element, field.Type))
+                            throw new Unsupported($"lane types {element.ToDisplayString()} and {field.Type.ToDisplayString()} differ");
+                        element = field.Type;
+                    }
+                    components.Add((p, fields));
                     break;
                 case Symbols.ParamKind.Singleton:
                     break;
@@ -159,8 +164,8 @@ internal sealed class Kernel
             var kind = Symbols.Classify(p, outside);
             if (kind == Symbols.ParamKind.Component)
             {
-                var (_, field) = components[k];
-                kernel._components[p] = (++k, field, p.RefKind == RefKind.Ref);
+                var (_, fields) = components[k];
+                kernel._components[p] = (++k, fields, p.RefKind == RefKind.Ref);
                 continue;
             }
             string name = $"__p{i}";
@@ -171,31 +176,46 @@ internal sealed class Kernel
                 : $"ref readonly {p.Type.ToDisplayString(Symbols.Fqn)} {name} = ref {source};\n");
         }
 
-        foreach (var c in kernel._components.Values.OrderBy(c => c.Index))
-            kernel._body.Append($"var __c{c.Index} = {V}.LoadUnsafe(ref e{c.Index}, (nuint)i);\n");
+        // A component of several fields is deinterleaved into one vector per field (Interleaved: shuffles), and
+        // written back whole: the fields the method does not write keep the values loaded.
+        foreach (var (index, fields, _) in kernel._components.Values.OrderBy(c => c.Index))
+            kernel._body.Append(fields.Length == 1
+                ? $"var __c{index}_0 = {V}.LoadUnsafe(ref e{index}, (nuint)i);\n"
+                : $"{Interleaved}.Load{fields.Length}(ref e{index}, (nuint)i, {string.Join(", ", fields.Select((_, f) => $"out {kernel._vec} __c{index}_{f}"))});\n");
         kernel.Statement((IOperation?)body.BlockBody ?? body.ExpressionBody!, null);
-        foreach (int c in kernel._written.OrderBy(c => c))
-            kernel._body.Append($"{V}.StoreUnsafe(__c{c}, ref e{c}, (nuint)i);\n");
-        return new Code(kernel._e, kernel._setup.ToString(), kernel._body.ToString());
+        foreach (var (index, fields, _) in kernel._components.Values.Where(c => kernel._written.Contains(c.Index)).OrderBy(c => c.Index))
+            kernel._body.Append(fields.Length == 1
+                ? $"{V}.StoreUnsafe(__c{index}_0, ref e{index}, (nuint)i);\n"
+                : $"{Interleaved}.Store{fields.Length}({string.Join(", ", fields.Select((_, f) => $"__c{index}_{f}"))}, ref e{index}, (nuint)i);\n");
+        return new Code(kernel._e, kernel._setup.ToString(), kernel._body.ToString(), kernel._components.Values.Any(c => c.Fields.Length > 1));
     }
 
     /// <summary>
-    /// The one field of a component holding one primitive lane value with C# arithmetic of its own type (no promotion
-    /// to int), laid out without padding; otherwise the reason it is no lane.
+    /// The fields of a component, in memory order: 1 to <see cref="MaxFields"/> primitive lane values with C# arithmetic
+    /// of their own type (no promotion to int), laid out without padding (sequential, declared in one place); otherwise
+    /// the reason it has no lanes.
     /// </summary>
-    private static IFieldSymbol Lane(ITypeSymbol type)
+    private static IFieldSymbol[] Lanes(ITypeSymbol type)
     {
         if (type is not INamedTypeSymbol { TypeKind: TypeKind.Struct } named) throw new Unsupported($"component {type.Name} is not a struct");
         if (named.IsGenericType) throw new Unsupported($"component {type.Name} is generic");
         if (named.GetAttributes().Any(a => a.AttributeClass?.Name == "StructLayoutAttribute"))
             throw new Unsupported($"component {type.Name} sets its layout ([StructLayout])");
+        if (named.DeclaringSyntaxReferences.Length > 1)
+            throw new Unsupported($"component {type.Name} is declared in several parts, so the order of its fields is not defined");
         var fields = named.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray();
-        if (fields.Length != 1) throw new Unsupported($"component {type.Name} has {fields.Length} fields");
-        var field = fields[0];
-        if (field.IsFixedSizeBuffer || !IsLaneType(field.Type))
-            throw new Unsupported($"field {type.Name}.{field.AssociatedSymbol?.Name ?? field.Name} is a {field.Type.ToDisplayString()}, not a lane type (float, double, int, uint, long or ulong)");
-        return field;
+        if (fields.Length == 0) throw new Unsupported($"component {type.Name} has no fields");
+        if (fields.Length > MaxFields) throw new Unsupported($"component {type.Name} has {fields.Length} fields (a vector loop splits up to {MaxFields})");
+        foreach (var field in fields)
+            if (field.IsFixedSizeBuffer || !IsLaneType(field.Type))
+                throw new Unsupported($"field {type.Name}.{field.AssociatedSymbol?.Name ?? field.Name} is a {field.Type.ToDisplayString()}, not a lane type (float, double, int, uint, long or ulong)");
+        return fields;
     }
+
+    /// <summary>The most fields a component of a vector loop has: the forms of <c>EasyEcs.Interleaved</c>.</summary>
+    private const int MaxFields = 4;
+
+    private const string Interleaved = "global::EasyEcs.Interleaved";
 
     private bool IsFloat => _element.SpecialType is SpecialType.System_Single or SpecialType.System_Double;
     private bool IsSigned => _element.SpecialType is SpecialType.System_Int32 or SpecialType.System_Int64 || IsFloat;
@@ -291,16 +311,16 @@ internal sealed class Kernel
         if (LaneOf(target) is { Ref: true } c)
         {
             _written.Add(c.Index);
-            return $"__c{c.Index}";
+            return $"__c{c.Index}_{c.Field}";
         }
         throw new Unsupported($"it writes '{Text(target)}', which is neither a local nor the lane of a component taken by ref");
     }
 
     /// <summary>
-    /// The component whose lane <paramref name="op"/> is: its field, or the auto-property backed by it (a record
-    /// struct's positional member).
+    /// The component and field whose lane <paramref name="op"/> is: its field, or the auto-property backed by it (a
+    /// record struct's positional member).
     /// </summary>
-    private (int Index, IFieldSymbol Field, bool Ref)? LaneOf(IOperation op)
+    private (int Index, int Field, bool Ref)? LaneOf(IOperation op)
     {
         var (instance, member) = op switch
         {
@@ -310,8 +330,10 @@ internal sealed class Kernel
         };
         if (instance is not IParameterReferenceOperation { Parameter: var parameter } || !_components.TryGetValue(parameter, out var c))
             return null;
-        return SymbolEqualityComparer.Default.Equals(member, c.Field) || SymbolEqualityComparer.Default.Equals(member, c.Field.AssociatedSymbol)
-            ? c : null;
+        for (int f = 0; f < c.Fields.Length; f++)
+            if (SymbolEqualityComparer.Default.Equals(member, c.Fields[f]) || SymbolEqualityComparer.Default.Equals(member, c.Fields[f].AssociatedSymbol))
+                return (c.Index, f, c.Ref);
+        return null;
     }
 
     // ---------------- expressions ----------------
@@ -341,7 +363,7 @@ internal sealed class Kernel
             case IConversionOperation { Conversion.IsIdentity: true } c when IsLane(c.Type) || IsBool(c.Type):
                 return Expr(c.Operand);
             case IFieldReferenceOperation or IPropertyReferenceOperation when LaneOf(op) is { } c:
-                return $"__c{c.Index}";
+                return $"__c{c.Index}_{c.Field}";
             case ILocalReferenceOperation { Local: var local } when _locals.TryGetValue(local, out var name):
                 return name;
             case IBinaryOperation { OperatorMethod: null, IsChecked: false } b:
