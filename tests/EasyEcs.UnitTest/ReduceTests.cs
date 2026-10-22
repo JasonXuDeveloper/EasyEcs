@@ -145,6 +145,40 @@ public class ReduceTests
         return world;
     }
 
+    /// <summary>The armor of the rows written since the last run: rows picked by change ticks, a chunk's runs at a time.</summary>
+    public class ChangedArmor : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 64), Changed<Armor>]
+        static void Add(in Armor armor, Reduce<Scores> tally) => tally.Combine(new Scores { Count = 1, Sum = armor.Value });
+    }
+
+    [Test]
+    public void AParallelReductionVisitsOnlyTheRowsItsFilterPasses()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        var entities = new Entity[20_000];
+        world.CreateEntities(entities, new Armor(0), new Points(0));
+        world.AddSystem<ChangedArmor>();
+        world.Update(); // every row is new
+        Assert.That(world.Scores.Count, Is.EqualTo(entities.Length));
+        for (int run = 1; run <= 50; run++)
+        {
+            long sum = 0;
+            int count = 0;
+            for (int i = run % 7; i < entities.Length; i += 7 + run % 5) // scattered rows, runs of one row
+            {
+                entities[i].Set(new Armor(i));
+                sum += i;
+                count++;
+            }
+
+            for (int i = 0; i < entities.Length; i += 997) entities[i].Disable<Points>(); // presence bits: rows tested
+            world.Update();
+            Assert.That((world.Scores.Count, world.Scores.Sum), Is.EqualTo((count, sum)), $"run {run}");
+            for (int i = 0; i < entities.Length; i += 997) entities[i].Enable<Points>();
+        }
+    }
+
     [Test]
     public void ASerialPassReplacesItsSingleton()
     {

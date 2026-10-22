@@ -67,7 +67,7 @@ public class ParallelForEachBenchmark
         private (float X, float Y) _first;
     }
 
-    private static void SteerAgent(ref Agent agent, in Waypoints waypoints)
+    internal static void SteerAgent(ref Agent agent, in Waypoints waypoints)
     {
         float best = float.MaxValue, tx = 0, ty = 0;
         for (int i = 0; i < Waypoints.Count; i++)

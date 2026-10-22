@@ -297,7 +297,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
         // The JIT specializes World.ForEach on this struct and inlines Execute and the user's method into the loop.
         string iface = "I" + method.Loop;
-        bool stable = method.Stable && !method.IsBatch; // a batch job has no structural path at all
+        // A batch job has no structural path at all; ForEachBatchParallel asks for the marker all the same, as every parallel loop.
+        bool stable = method.Stable && (!method.IsBatch || method.Parallel);
         string marker = stable ? ", global::EasyEcs.INoStructuralChanges" : "";
         // A ref struct holds each singleton as a ref field, a register in the row loop: a SingletonRef's box would be
         // null-checked on every row. Parallel jobs are copied into work items on the heap, so they hold SingletonRefs.
@@ -519,10 +520,13 @@ public sealed class SystemGenerator : IIncrementalGenerator
         /// <summary>
         /// Changes no structure (on one thread) and takes a Maybe, a Mut, a Reduce or a caller's value by ref: its job walks
         /// runs of rows, finding each optional column once per run (a presence bit per row), stamping a Mut's writes by row
-        /// (no entity lookup) and keeping partial results and the caller's values in locals for the run.
+        /// (no entity lookup) and keeping partial results and the caller's values in locals for the run. In parallel, a
+        /// method that reduces (and takes no Maybe or Mut) runs the same way, a chunk's runs at a time
+        /// (ForEachBatchParallel): its partial results stay in registers instead of a load and a store per row.
         /// </summary>
-        public bool Runs => Stable && !Parallel && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan)
-            && Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Reduction || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" });
+        public bool Runs => Stable && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) && (Parallel
+            ? Parameters.Any(p => p.Kind == Symbols.ParamKind.Reduction) && !Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable)
+            : Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Reduction || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" }));
 
         public static ForEachModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
         {
@@ -611,7 +615,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
                     && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
                     Slices = Symbols.Slices(method), ChunkRows = Symbols.ChunkRows(method), Identifies = Symbols.OnlyIdentifies(method, syntax, model),
-                    // A stable method on one thread: a batch job holds no structural path (a parallel batch loop does not exist yet).
+                    // A stable method on one thread: a batch job holds no structural path (vector loops do not run in parallel yet).
                     Simd = stable && !parallel ? Kernel.Translate(method, syntax, model, static (i, kind) => kind == Symbols.ParamKind.Singleton ? $"s{i}" : $"x{i}", ct) : null,
                 };
         }

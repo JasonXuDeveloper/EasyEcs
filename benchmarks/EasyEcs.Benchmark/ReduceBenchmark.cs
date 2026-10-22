@@ -11,14 +11,16 @@ namespace EasyEcs.Benchmark;
 /// total of a resource, the mass of a crowd, its extent): <see cref="Reduce{T}"/> on several threads and on one,
 /// against what a pass writes without it: a <c>ref</c> context value on one thread; on several threads, one shared
 /// total updated per row (<see cref="Interlocked"/>, or a lock), and .NET's thread-local pattern,
-/// <c>Parallel.For&lt;TLocal&gt;(from, to, localInit, body, localFinally)</c> over a copy of the column (static lambdas
-/// over static state: the best a user can write; the copy is made once, outside the measurement). Steady state of the
-/// world's passes allocates 0 bytes.
+/// <c>Parallel.For&lt;TLocal&gt;(from, to, localInit, body, localFinally)</c> over a copy of the column, as the docs
+/// write it (per row) and with a cached <c>ParallelOptions</c>, and <c>Parallel.For</c> over the chunks a parallel pass
+/// would cut, one partial result per chunk combined in chunk order (what a generator could emit). Parallel.For runs
+/// static lambdas over static state (no closure, delegates cached: the best a user can write, though not reentrant);
+/// the copy is made once, outside the measurement. Steady state of the world's passes allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
 public class ReduceBenchmark
 {
-    [Params(100_000, 1_000_000)] public int Entities;
+    [Params(1_000, 10_000, 100_000, 1_000_000)] public int Entities;
 
     private World _world;
     private readonly StrongBox<long> _total = new();
@@ -38,6 +40,24 @@ public class ReduceBenchmark
     private static readonly Func<float> NoMass = static () => 0f;
     private static readonly Func<int, ParallelLoopState, float, float> AddWeight = static (i, _, sub) => sub + s_weights[i];
     private static readonly Action<float> AddMass = static sub => { lock (s_massLock) s_mass += sub; };
+    private static readonly ParallelOptions Options = new() { MaxDegreeOfParallelism = Environment.ProcessorCount };
+    private static int s_chunkRows, s_chunks;
+    private static long[] s_totals = [];
+    private static float[] s_masses = [];
+    private static readonly Action<int> SumChunk = static chunk =>
+    {
+        long sum = 0;
+        var rows = s_scores.AsSpan(chunk * s_chunkRows, Math.Min(s_chunkRows, s_scores.Length - chunk * s_chunkRows));
+        for (int i = 0; i < rows.Length; i++) sum += rows[i];
+        s_totals[chunk] = sum;
+    };
+    private static readonly Action<int> MassChunk = static chunk =>
+    {
+        float sum = 0;
+        var rows = s_weights.AsSpan(chunk * s_chunkRows, Math.Min(s_chunkRows, s_weights.Length - chunk * s_chunkRows));
+        for (int i = 0; i < rows.Length; i++) sum += rows[i];
+        s_masses[chunk] = sum;
+    };
 
     [GlobalSetup]
     public void Setup()
@@ -56,6 +76,13 @@ public class ReduceBenchmark
             s_scores[row] = item.Component1.Value;
             s_weights[row++] = item.Component2.X;
         }
+
+        // The chunks a parallel pass cuts (World.ChunkRows): about four per thread, 1,024 to ParallelChunkRows rows.
+        long share = Entities / (Environment.ProcessorCount * 4L);
+        s_chunkRows = (int)Math.Clamp((share + 63) & ~63L, 1024, World.ParallelChunkRows);
+        s_chunks = (Entities + s_chunkRows - 1) / s_chunkRows;
+        s_totals = new long[s_chunks];
+        s_masses = new float[s_chunks];
     }
 
     [GlobalCleanup]
@@ -101,6 +128,23 @@ public class ReduceBenchmark
     }
 
     [Benchmark]
+    public long SumParallelForOptions()
+    {
+        s_total = 0;
+        Parallel.For(0, Entities, Options, NoTotal, AddScore, AddTotal);
+        return s_total;
+    }
+
+    [Benchmark]
+    public long SumParallelForChunks()
+    {
+        Parallel.For(0, s_chunks, SumChunk);
+        long total = 0;
+        for (int i = 0; i < s_chunks; i++) total += s_totals[i];
+        return total;
+    }
+
+    [Benchmark]
     public float MassSerialRef()
     {
         float mass = 0;
@@ -130,6 +174,15 @@ public class ReduceBenchmark
         s_mass = 0;
         Parallel.For(0, Entities, NoMass, AddWeight, AddMass);
         return s_mass;
+    }
+
+    [Benchmark]
+    public float MassParallelForChunks()
+    {
+        Parallel.For(0, s_chunks, MassChunk);
+        float total = 0;
+        for (int i = 0; i < s_chunks; i++) total += s_masses[i];
+        return total;
     }
 
     [Benchmark]
@@ -183,7 +236,6 @@ public class ReduceBenchmark
         }
     }
 
-    /// <summary>The bounding box of every spot: a singleton that combines with itself.</summary>
     /// <summary>The summed X of every spot (a float: rounded per partial result).</summary>
     public struct SpotMass : ISingletonComponent, IReduction<SpotMass>
     {
@@ -193,6 +245,7 @@ public class ReduceBenchmark
         public static SpotMass Combine(SpotMass left, SpotMass right) => new() { Value = left.Value + right.Value };
     }
 
+    /// <summary>The bounding box of every spot: a singleton that combines with itself.</summary>
     public struct Extent : ISingletonComponent, IReduction<Extent>
     {
         public Area Area;
