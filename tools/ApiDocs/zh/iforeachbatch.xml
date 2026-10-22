@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+
 
 <doc>
   <member name="T:EasyEcs.IForEachBatch`1" source="b322f30d402d">
@@ -18,6 +18,19 @@
       <see cref="P:EasyEcs.IForEachBatch`1.WriteMask" /> 里由 job 自己打 tick、而且只在它写的行上打 tick 的组件（位的含义同
       <see cref="P:EasyEcs.IForEachBatch`1.WriteMask" />；默认没有）：循环不给这些组件的行打 tick。生成的 job 标出它们的
       <see cref="T:EasyEcs.Mut`1" /> 参数。
+    </summary>
+  </member>
+
+  <member name="P:EasyEcs.IForEachBatch`1.Merges" source="a4dd50c57632">
+    <summary>
+      job 在字段里保存部分结果（<see cref="T:EasyEcs.Reduce`1" />；默认 false）：并行遍历保留每个块的 job 副本，按块的顺序把它们合并进调用方的
+      job（<see cref="M:EasyEcs.IForEachBatch`1.Merge``1(``0@,``0@)" />）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.IForEachBatch`1.Merge``1(``0@,``0@)" source="d6ba537804ab">
+    <summary>
+      把 <paramref name="chunk" /> 里的部分结果合并进 <paramref name="job" />（两者都是这个 job 自己的类型；<see cref="P:EasyEcs.IForEachBatch`1.Merges" />）。
+      带 <see cref="T:EasyEcs.Reduce`1" /> 参数的生成 job 实现它。
     </summary>
   </member>
 </doc>

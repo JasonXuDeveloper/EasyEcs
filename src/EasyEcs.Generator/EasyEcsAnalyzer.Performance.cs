@@ -237,6 +237,7 @@ public sealed partial class EasyEcsAnalyzer
             }
 
             AnalyzeParameters(context, method, body, uses);
+            AnalyzeScratch(context, method, body);
             AnalyzeLookups(context, core, method, body);
             AnalyzeAllocations(context, method, body, "for every entity it visits, each update", true);
             // A parallel one is EECS010's: it cannot run in parallel until it is static, and offers the same fix.
@@ -332,6 +333,9 @@ public sealed partial class EasyEcsAnalyzer
                             Symbols.ParamKind.World => "it makes the system run alone; remove it",
                             Symbols.ParamKind.Entities => "remove it",
                             Symbols.ParamKind.Singleton => "it is resolved every pass and scheduled as an access; remove it",
+                            Symbols.ParamKind.Reduction => "it replaces its singleton every pass and is scheduled as its writer; remove it",
+                            Symbols.ParamKind.Scratch => "remove it",
+                            Symbols.ParamKind.Lookup => "it is scheduled as a reader of the component; remove it",
                             _ => "it is looked up for every row; remove it",
                         }));
                 continue;
@@ -702,6 +706,7 @@ public sealed partial class EasyEcsAnalyzer
             if (operation is IThrowOperation
                 || operation is IInvocationOperation call && (Conditional(call.TargetMethod) || Symbols.Named(call.TargetMethod.ContainingType, "System.Console")))
                 continue;
+            if (FillsOnce(operation)) continue; // allocated once (per thread): the next rows find it there
             if (Allocates(operation, pass) is { } what)
             {
                 var where = operation is IForEachLoopOperation loop ? loop.Collection.Syntax : operation.Syntax;
@@ -710,6 +715,43 @@ public sealed partial class EasyEcsAnalyzer
             }
 
             foreach (var child in operation.ChildOperations) pending.Push(child);
+        }
+    }
+
+    /// <summary>
+    /// An assignment that creates a value the next rows reuse: what a <c>Scratch&lt;T&gt;</c> parameter holds
+    /// (<c>s.Value ??= new()</c>, or an assignment under a condition: <c>if (s.Value.Ids == null) s.Value.Ids = new int[64];</c>),
+    /// or a static field filled on first use (<c>Cache.List ??= new()</c>, a <c>[ThreadStatic]</c> one per thread).
+    /// </summary>
+    private static bool FillsOnce(IOperation operation) =>
+        operation is ICoalesceAssignmentOperation coalesce
+            && (IsScratch(Uses.Root(coalesce.Target)) || coalesce.Target is IFieldReferenceOperation { Field.IsStatic: true })
+        || operation is ISimpleAssignmentOperation assignment && IsScratch(Uses.Root(assignment.Target))
+        && Ancestors(assignment).Any(a => a is IConditionalOperation);
+
+    private static bool IsScratch(IParameterSymbol? parameter) => parameter != null && Symbols.Classify(parameter) == Symbols.ParamKind.Scratch;
+
+    private static IEnumerable<IOperation> Ancestors(IOperation operation)
+    {
+        for (var parent = operation.Parent; parent != null; parent = parent.Parent) yield return parent;
+    }
+
+    /// <summary>
+    /// EECS058: an assignment storing what a <c>Scratch&lt;T&gt;</c> parameter holds by reference (a class, an array, a
+    /// span, a struct holding one) into data of the world: a component, singleton, Maybe, Mut or Reduce parameter.
+    /// </summary>
+    private static void AnalyzeScratch(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body)
+    {
+        if (!method.Parameters.Any(p => Symbols.Classify(p) == Symbols.ParamKind.Scratch)) return;
+        foreach (var operation in body.Descendants())
+        {
+            if (operation is not ISimpleAssignmentOperation assignment || Uses.Root(assignment.Value) is not { } source
+                || !IsScratch(source) || !Uses.Mutable(assignment.Value.Type, 0)) continue;
+            if (Uses.Root(assignment.Target) is not { } target || Symbols.Classify(target) is not (Symbols.ParamKind.Component
+                    or Symbols.ParamKind.Singleton or Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Reduction))
+                continue;
+            context.ReportDiagnostic(Diagnostic.Create(ScratchEscape, assignment.Syntax.GetLocation(), method.Name,
+                Shorten(assignment.Value.Syntax), Symbols.ScratchElement(source.Type)!.Name, source.Name, Shorten(assignment.Target.Syntax)));
         }
     }
 

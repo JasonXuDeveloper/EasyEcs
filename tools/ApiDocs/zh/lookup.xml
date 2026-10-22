@@ -1,0 +1,30 @@
+<doc>
+  <member name="T:EasyEcs.Lookup`1" source="f0ba1e944b68">
+    <summary>
+      从 <c>[ForEach]</c> 方法只读访问任意实体的组件 <typeparamref name="T" />（MPI 的单边 <c>Get</c>，Unity 的 <c>ComponentLookup</c>）：
+      <c>static void Chase(ref Velocity v, in Target target, Lookup&lt;Position&gt; positions)</c> 用 <c>positions[target.Id]</c> 读目标的位置。
+      方法不需要 World，所以可以并行运行（<see cref="P:EasyEcs.ForEachAttribute.Parallel" />），也可以和不写 <typeparamref name="T" /> 的系统共享一个并行阶段。
+      <para>
+      约定：遍历运行期间没有人写 <typeparamref name="T" />，所以每次读到的都是遍历之前的值。系统被调度为 <typeparamref name="T" /> 的读者，
+      所以写它的系统不会和它在同一阶段；自己写 <typeparamref name="T" /> 的方法（<c>ref</c>、<c>Mut</c>、可写的 <c>Maybe</c> 或 span 参数）
+      不能查找它（EECS059：遍历中被写的行会在写之前或之后被读到，或在另一个线程上读到写了一半的值）；遍历不做结构性修改，所以 id 一直对应同一行。
+      </para>
+      <para>
+      带索引的 <typeparamref name="T" />（<see cref="T:EasyEcs.IIndexed`1" />）还可以按键查找（<see cref="T:EasyEcs.LookupExtensions" />：
+      在参数本身上调用 <c>TryFind</c>、<c>Find</c>、<c>Count</c>）：它的索引在遍历之前、在系统所在的并行阶段之前创建并建好，所以遍历中的查找
+      从不修改它。（值索引原本在第一次查找时构建；在并行阶段或并行遍历中通过其他途径访问尚未构建的索引会抛出异常，而不是构建它。）
+      </para>
+      每次查找是一次实体查找（<see cref="M:EasyEcs.World.TryGetEntity(EasyEcs.EntityId,EasyEcs.Entity@)" />，然后读该行的列）。只在传入它的那次调用内有效（ref struct）。
+    </summary>
+    <typeparam name="T">读取的组件。</typeparam>
+  </member>
+  <member name="P:EasyEcs.Lookup`1.Item(EasyEcs.EntityId)" source="d0125b5fc9c1">
+    <summary>实体 <paramref name="id" /> 的 <typeparamref name="T" />，只读；实体没有它或已不存活时没有值。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.Lookup`1.Has(EasyEcs.EntityId)" source="f9ad1b18efed">
+    <summary>实体 <paramref name="id" /> 是否存活且有 <typeparamref name="T" />。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.Lookup`1.Read(EasyEcs.EntityId)" source="1e572f80c846">
+    <summary>实体 <paramref name="id" /> 的 <typeparamref name="T" />；实体没有它或已不存活时抛出异常。O(1)。</summary>
+  </member>
+</doc>

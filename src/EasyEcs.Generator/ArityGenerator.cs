@@ -369,6 +369,18 @@ public sealed class ArityGenerator : IIncrementalGenerator
             /// <see cref="Mut{T}"/> parameters.
             /// </summary>
             static virtual int SelfStamped => 0;
+
+            /// <summary>
+            /// The job keeps partial results in its fields (<see cref="Reduce{T}"/>; default false): a parallel pass keeps
+            /// each chunk's copy of the job and combines them into the caller's job in chunk order (<see cref="Merge{TSelf}"/>).
+            /// </summary>
+            static virtual bool Merges => false;
+
+            /// <summary>
+            /// Combine the partial results <paramref name="chunk"/> holds into <paramref name="job"/> (both of the job's
+            /// own type; <see cref="Merges"/>). Generated jobs with <see cref="Reduce{T}"/> parameters implement it.
+            /// </summary>
+            static virtual void Merge<TSelf>(ref TSelf job, in TSelf chunk) where TSelf : struct { }
         """;
 
     private static string Queries()
@@ -634,6 +646,43 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             {
                 {{BatchRun(n, "                ", "start", "length")}}
                             }
+                        }
+                    }
+
+                {{ParallelLoop(n, "ForEachBatch", "IForEachBatch")}}
+                    /// <summary>
+                    /// One chunk of a parallel batch pass: the runs of rows [<paramref name="start"/>, <paramref name="end"/>)
+                    /// of a table, as <c>Batches</c> walks a whole table (a dense chunk is a single call).
+                    /// </summary>
+                    private void ForEachBatchChunk<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int start, int end, {{List(n, i => $"ushort b{i}")}})
+                {{cons}}
+                        where TJob : struct, IForEachBatch<{{tps}}>
+                    {
+                        ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
+                {{Lines(n, i => $"        ref T{i} r{i} = ref archetype.Base<T{i}>(b{i});")}}
+                        if (rows.Mode(archetype) == RowFilter.Test)
+                        {
+                            for (int at = start; rows.NextRun(archetype, ref at, end, out int length); at += length)
+                            {
+                {{StampRows(n, "                ", "at", "length")}}
+                                job.Execute(new EntitySpan(this, archetype, at, ref Unsafe.Add(ref slots, at), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, at), length)")}});
+                            }
+
+                            return;
+                        }
+
+                        if (archetype.Count == archetype.AliveCount)
+                        {
+                            int rowCount = end - start;
+                {{StampRows(n, "            ", "start", "rowCount")}}
+                            job.Execute(new EntitySpan(this, archetype, start, ref Unsafe.Add(ref slots, start), rowCount), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), rowCount)")}});
+                            return;
+                        }
+
+                        for (int at = start; archetype.NextRun(ref at, end, out int length); at += length)
+                        {
+                {{StampRows(n, "            ", "at", "length")}}
+                            job.Execute(new EntitySpan(this, archetype, at, ref Unsafe.Add(ref slots, at), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, at), length)")}});
                         }
                     }
 
@@ -1212,12 +1261,38 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     return job;
                 }
 
+            {{ParallelLoop(n, name, job)}}
+                /// <summary>One chunk: rows [<paramref name="start"/>, <paramref name="end"/>) of a table, stable pass.</summary>
+                private void {{name}}Chunk<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int start, int end, {{ushorts}})
+            {{Constraints(n, "        ")}}
+                    where TJob : struct, {{job}}<{{tps}}>
+                {
+                    if (rows.Mode(archetype) == RowFilter.All && archetype.Count == archetype.AliveCount)
+                        job = {{name}}Rows<{{tps}}, TJob>(job, archetype, start, end, {{bits}});
+                    else
+                        job = {{name}}Filtered<{{tps}}, TJob>(job, archetype, rows, start, end, {{bits}});
+                }
+            """);
+    }
+
+    /// <summary>
+    /// <c>{name}Parallel</c> and its chunks (<c>{name}Chunks</c>): one template for every parallel pass. Each pass shape
+    /// supplies <c>{name}Chunk</c>, which runs one chunk of rows with the chunk's copy of the job.
+    /// </summary>
+    private static string ParallelLoop(int n, string name, string job)
+    {
+        string tps = TypeParams(n);
+        string bits = List(n, i => $"b{i}");
+        string ushorts = List(n, i => $"ushort b{i}");
+        return $$"""
                 /// <summary>
                 /// <see cref="{{name}}{{{tps}}, TJob}"/> on several threads: the matching rows are cut into chunks (about four per
                 /// thread, a multiple of 64 rows, at most <see cref="ParallelChunkRows"/>; or <paramref name="chunkRows"/> rounded
                 /// up to 64, for few heavy rows: <c>[ForEach(Parallel = true, ChunkRows = n)]</c>) that the calling thread and up to
                 /// <see cref="WorldOptions.MaxDegreeOfParallelism"/> - 1 thread-pool threads run at the same time, each with its own copy of <paramref name="job"/> (state
-                /// a job keeps in its fields is not merged back). The job must not change structure or write anything
+                /// a job keeps in its fields is not merged back, unless the job merges: <c>Merges</c>, a <c>Reduce&lt;T&gt;</c>;
+                /// its copies, one per chunk, the size of the job's fields, are then kept in an array reused by every call and
+                /// combined in chunk order). The job must not change structure or write anything
                 /// that another row's run reads (a singleton, another entity); nothing else may change the world
                 /// during the call. Fewer than two chunks of rows, or a runner already busy, run on the calling thread.
                 /// Allocation-free after the first call per job type.
@@ -1229,7 +1304,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
                     var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
                     int chunks = work.Cut(this, match, in filter, chunkRows, ref job, {{bits}});
-                    Gate.Freeze(); // the chunks may run on several threads: a structural change throws
+                    Gate.FreezeParallel(); // the chunks may run on several threads: a structural change throws
                     try
                     {
                         if (chunks < 2 || !TryRunChunks(work, chunks))
@@ -1237,21 +1312,11 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
                     finally
                     {
-                        Gate.Thaw();
+                        Gate.ThawParallel();
                     }
 
+                    if (TJob.Merges) work.MergeInto(ref job, chunks); // after the gate: the helpers are done with the copies
                     work.Release();
-                }
-
-                /// <summary>One chunk: rows [<paramref name="start"/>, <paramref name="end"/>) of a table, stable pass.</summary>
-                private void {{name}}Chunk<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int start, int end, {{ushorts}})
-            {{Constraints(n, "        ")}}
-                    where TJob : struct, {{job}}<{{tps}}>
-                {
-                    if (rows.Mode(archetype) == RowFilter.All && archetype.Count == archetype.AliveCount)
-                        job = {{name}}Rows<{{tps}}, TJob>(job, archetype, start, end, {{bits}});
-                    else
-                        job = {{name}}Filtered<{{tps}}, TJob>(job, archetype, rows, start, end, {{bits}});
                 }
 
                 /// <summary>The chunks of one <see cref="{{name}}Parallel{{{tps}}, TJob}"/> call: (table, first row) pairs.</summary>
@@ -1260,6 +1325,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     where TJob : struct, {{job}}<{{tps}}>
                 {
                     public TJob Job;
+                    private TJob[] _parts = []; // each chunk's copy of the job, when it keeps partial results (TJob.Merges)
                     private World _world;
                     private Archetype[] _tables = [];
                     private RowFilter[] _filters = [];
@@ -1301,6 +1367,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                     Array.Resize(ref _filters, grown);
                                     Array.Resize(ref _starts, grown);
                                     Array.Resize(ref _ends, grown);
+                                    if (TJob.Merges) Array.Resize(ref _parts, grown);
                                 }
 
                                 _tables[chunks] = archetype;
@@ -1318,6 +1385,17 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         var archetype = _tables[index];
                         var job = Job;
                         _world.{{name}}Chunk<{{tps}}, TJob>(ref job, archetype, _filters[index], _starts[index], _ends[index], {{List(n, i => $"_b{i}")}});
+                        // One write per chunk: neighbouring slots written by other threads share a line only for this store.
+                        if (TJob.Merges) _parts[index] = job;
+                    }
+
+                    /// <summary>
+                    /// Combine the chunks' partial results into <paramref name="job"/> in chunk order (tables in match order,
+                    /// rows in table order): the result depends on where chunks begin, never on which thread ran which.
+                    /// </summary>
+                    public void MergeInto(ref TJob job, int chunks)
+                    {
+                        for (int i = 0; i < chunks; i++) TJob.Merge(ref job, in _parts[i]);
                     }
 
                     /// <summary>Drop the references of the last call (tables, filters, the job's own) until the next one.</summary>
@@ -1325,12 +1403,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     {
                         Array.Clear(_tables);
                         Array.Clear(_filters);
+                        if (TJob.Merges) Array.Clear(_parts); // the copies hold the job's references
                         Job = default;
                         _world = null;
                     }
                 }
 
-            """);
+            """;
     }
 
     private static string QueryItems()
