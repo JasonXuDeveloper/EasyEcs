@@ -48,3 +48,28 @@ public record struct C8(int V) : IComponent;
 public record struct C9(int V) : IComponent;
 public record struct Clock(long Tick) : ISingletonComponent;
 public record struct Score(int Deaths, int Points) : ISingletonComponent;
+
+/// <summary>Allocation measurements of code that wakes helper threads.</summary>
+public static class Allocations
+{
+    /// <summary>
+    /// The fewest bytes one of three runs of <paramref name="run"/> allocated (<paramref name="bytes"/>: this thread's
+    /// allocated bytes, or another counter such as a system's stats). Waking helpers queues thread pool work, and the
+    /// pool may start a worker thread from the queuing thread (its Thread object counts here) when an idle one retired:
+    /// an allocation of the runtime, not of the world, which a run without it leaves out. An allocation per call shows
+    /// in every run.
+    /// </summary>
+    public static long Least(System.Action run, System.Func<long> bytes = null)
+    {
+        bytes ??= System.GC.GetAllocatedBytesForCurrentThread;
+        long least = long.MaxValue;
+        for (int window = 0; window < 3 && least != 0; window++)
+        {
+            long before = bytes();
+            run();
+            least = System.Math.Min(least, bytes() - before);
+        }
+
+        return least;
+    }
+}

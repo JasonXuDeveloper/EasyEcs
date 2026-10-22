@@ -211,21 +211,15 @@ public class ConsumeTests
             world.Update();
         }
 
-        long least = long.MaxValue;
-        for (int window = 0; window < 3 && least != 0; window++)
+        Assert.That(Allocations.Least(() =>
         {
-            long before = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < 50; i++)
             {
                 Fill();
                 world.Update();
                 world.Update();
             }
-
-            least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - before);
-        }
-
-        Assert.That(least, Is.Zero);
+        }), Is.Zero);
         Assert.That(world.Count<Hit>(), Is.Zero);
     }
 }

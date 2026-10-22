@@ -255,15 +255,7 @@ public class EmitTests
             world.AddSystem<ParallelStrikes>();
             world.AddSystem<ApplyHits>();
             for (int i = 0; i < 30; i++) world.Update();
-            long least = long.MaxValue;
-            for (int window = 0; window < 3 && least != 0; window++)
-            {
-                long before = GC.GetAllocatedBytesForCurrentThread();
-                for (int i = 0; i < 100; i++) world.Update();
-                least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - before);
-            }
-
-            Assert.That(least, Is.Zero);
+            Assert.That(Allocations.Least(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
         }
     }
 
@@ -277,14 +269,6 @@ public class EmitTests
         var strikes = world.AddSystem<ParallelStrikes>();
         world.AddSystem<ApplyHits>();
         for (int i = 0; i < 30; i++) world.Update();
-        long least = long.MaxValue;
-        for (int window = 0; window < 3 && least != 0; window++)
-        {
-            long before = strikes.Stats.TotalAllocated;
-            for (int i = 0; i < 100; i++) world.Update();
-            least = Math.Min(least, strikes.Stats.TotalAllocated - before);
-        }
-
-        Assert.That(least, Is.Zero);
+        Assert.That(Allocations.Least(() => { for (int i = 0; i < 100; i++) world.Update(); }, () => strikes.Stats.TotalAllocated), Is.Zero);
     }
 }

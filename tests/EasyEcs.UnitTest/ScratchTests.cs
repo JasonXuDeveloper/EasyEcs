@@ -162,15 +162,7 @@ public class ScratchTests
         using var world = Numbered(World.ParallelChunkRows * 4);
         world.AddSystem<SumDigits>();
         for (int i = 0; i < 20; i++) world.Update(); // every helper thread has created its list
-        long least = long.MaxValue;
-        for (int window = 0; window < 3 && least != 0; window++)
-        {
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int i = 0; i < 200; i++) world.Update();
-            least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - before);
-        }
-
-        Assert.That(least, Is.Zero);
+        Assert.That(Allocations.Least(() => { for (int i = 0; i < 200; i++) world.Update(); }), Is.Zero);
     }
 
     [Test]

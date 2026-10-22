@@ -433,14 +433,6 @@ public partial class ReduceTests
         using var world = Pointed(World.ParallelChunkRows * 4);
         world.AddSystem<ParallelScores>();
         for (int i = 0; i < 10; i++) world.Update();
-        long least = long.MaxValue;
-        for (int window = 0; window < 3 && least != 0; window++)
-        {
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int i = 0; i < 300; i++) world.Update();
-            least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - before);
-        }
-
-        Assert.That(least, Is.Zero);
+        Assert.That(Allocations.Least(() => { for (int i = 0; i < 300; i++) world.Update(); }), Is.Zero);
     }
 }

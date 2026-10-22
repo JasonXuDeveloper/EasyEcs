@@ -126,28 +126,19 @@ public class ForParallelTests
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
         var fill = new Fill { Cells = new int[100_000] };
-        ref var hits = ref world.GetOrAddSingleton<Emitted<EmitTests.Hit>>().Items;
-        hits.SetCount(100_000);
+        world.GetOrAddSingleton<Emitted<EmitTests.Hit>>().Items.SetCount(100_000);
         var scale = new Scale { Factor = 1 };
-        for (int i = 0; i < 20; i++)
+        void Calls(int count)
         {
-            world.ForParallel(fill.Cells.Length, ref fill);
-            world.ForParallel(ref hits, ref scale);
-        }
-
-        long least = long.MaxValue;
-        for (int window = 0; window < 3 && least != 0; window++)
-        {
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int i = 0; i < 200; i++)
+            ref var hits = ref world.GetSingleton<Emitted<EmitTests.Hit>>().Items;
+            for (int i = 0; i < count; i++)
             {
                 world.ForParallel(fill.Cells.Length, ref fill);
                 world.ForParallel(ref hits, ref scale);
             }
-
-            least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - before);
         }
 
-        Assert.That(least, Is.Zero);
+        Calls(20);
+        Assert.That(Allocations.Least(() => Calls(200)), Is.Zero);
     }
 }

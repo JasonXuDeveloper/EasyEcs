@@ -274,9 +274,7 @@ public class ParallelTests
 
         // Warm-up: helpers, JIT tiers, and the thread pool's own worker threads (started from the queuing thread).
         for (int i = 0; i < 500; i++) world.Update();
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 100; i++) world.Update();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(Allocations.Least(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
     }
 
     private struct StampId : IForEach<Counter>, INoStructuralChanges
@@ -339,7 +337,9 @@ public class ParallelTests
         world.CreateEntities(new Entity[300], new Counter(0)); // under the 1,024 rows of a default chunk
         world.AddSystem<HeavyRows>();
         var threads = new System.Collections.Generic.HashSet<int>();
-        for (int i = 0; i < 5 && threads.Count < 2; i++) // helpers start on the thread pool: give them a few passes
+        // Helpers start on the thread pool: on a loaded machine they may start too late to pay in the first pass, which then
+        // runs alone until its next probe of helpers (after 16 passes): give it the passes to get there.
+        for (int i = 0; i < 100 && threads.Count < 2; i++)
         {
             world.Update();
             foreach (var item in world.Query<Counter>()) threads.Add(item.Component1.N);

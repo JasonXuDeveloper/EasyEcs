@@ -1726,9 +1726,7 @@ public class KernelTests
         }
 
         for (int i = 0; i < 50; i++) Frame(); // warm-up: the query cache, the static index tables of Interleaved, JIT tiers
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 10; i++) Frame();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(Allocations.Least(() => { for (int i = 0; i < 10; i++) Frame(); }), Is.Zero); // parallel kernels wake helpers
     }
 
     // Lane counts that leave a tail, and two tables (the Frozen tag) so a pass sees several runs.

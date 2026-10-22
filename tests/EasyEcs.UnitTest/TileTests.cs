@@ -1258,15 +1258,7 @@ public class TileTests
         foreach (var world in new[] { heat, life })
         {
             for (int i = 0; i < 30; i++) world.Update(); // every thread gets its texture
-            long least = long.MaxValue;
-            for (int window = 0; window < 3 && least != 0; window++)
-            {
-                long before = GC.GetAllocatedBytesForCurrentThread();
-                for (int i = 0; i < 100; i++) world.Update();
-                least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - before);
-            }
-
-            Assert.That(least, Is.Zero);
+            Assert.That(Allocations.Least(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
         }
     }
 }
