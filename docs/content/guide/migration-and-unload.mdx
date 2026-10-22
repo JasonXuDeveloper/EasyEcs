@@ -153,7 +153,7 @@ world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
 - So one prefab per kind of actor serves both cases: a new actor keeps the prefab's defaults as its first state
   (written, so the next save stores them), and a restored one gets its record over them (not written). The
   [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) does this.
-- `SaveEntities` with a set also writes an entity that holds none of the set's components, as an empty entry, so the
+- `SaveEntitiesWith` also writes an entity that holds none of the set's components, as an empty entry, so the
   i-th saved entity still matches the i-th entity given.
 - `EntityId` fields are rewritten as below, onto the entities given; a `ChildOf` whose parent is not in the record is
   not set.
@@ -162,8 +162,8 @@ world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
   `[ForEach]` method only when it takes `Entity` or `World` ([EECS013](/en/docs/guide/analyzer#eecs013)).
 - A set names components for a save of entities. It can also name singletons (`WithSingleton<T>()`, or `With(typeof(...))`,
   which takes either kind) for a whole-world [restart](/en/docs/guide/saves#restart): `SaveWithout(output, in exclude)` leaves
-  its types out, `LoadKeeping(input, in keep)` keeps its singletons. A save of entities writes no singletons, so `SaveEntities`
-  with a set that names one throws `ArgumentException`.
+  its types out, `LoadKeeping(input, in keep)` keeps its singletons. A save of entities writes no singletons, so
+  `SaveEntitiesWith` and `SaveEntitiesWithout` with a set that names one throw `ArgumentException`.
 - A framework that learns its types at run time builds the set by `Type`:
 
 ```csharp
@@ -172,6 +172,8 @@ public static class RuntimeRecords
     public static readonly ComponentSet Persistent = ComponentSet.Create().With(typeof(Bank));
 }
 ```
+
+#### Everything but a set: `SaveEntitiesWithout` [#save-entities-without]
 
 The other way round, `SaveEntitiesWithout(output, ids, set)` writes everything but the set: the data an entity computes
 again after a load (a height map, a cache, a flow field), left out so the save stays small. The components left out need
@@ -195,6 +197,15 @@ world.SaveEntitiesWithout(chunkSave, [chunk.Id], ChunkSaves.Derived);   // Terra
 
 `LoadEntities` then creates the chunk with its `Terrain` and no `HeightMap`; a system with `[Without<HeightMap>]`
 computes it again.
+
+| The entity | Save it with |
+| --- | --- |
+| Everything persists | `SaveEntities(output, ids)` |
+| A few components persist among runtime state (a bank balance beside a connection, timers, caches) | `SaveEntitiesWith(output, ids, persistent)` |
+| Most components persist, a few are computed again after a load (a height map, a flow field, a path) | `SaveEntitiesWithout(output, ids, derived)` |
+
+Name the smaller set: a component added later then lands on the right side by default, persisted with `Without`,
+left out with `With`.
 
 ### How ids are rewritten [#entityid-rewriting]
 
@@ -454,6 +465,7 @@ deposit is.
 | Many small migrations of one entity | One migration of the whole party | A save's fixed cost (the types by id) is paid once |
 | `SaveEntities` of whole entities when only some components persist | A `ComponentSet` | The runtime components are not written, and need no formatter |
 | A `ComponentSet` built for every save | One `static readonly` set | Each `With` copies the set |
+| Saving what a load computes again (height maps, caches, flow fields) | `SaveEntitiesWithout` with a set of the derived components | A smaller save, and no formatter for them |
 | A reload that rebuilds the world | `RemoveTypes`, then `Load` | The host's entities and components stay where they are |
 | Living with the buffers a reload grew | `TrimExcess()` once the new version runs | The save and load buffers and empty tables are released |
 
@@ -488,7 +500,8 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 | Restoring a snapshot taken before `RemoveTypes` | `InvalidOperationException` | At run time |
 | Migrating from another thread | Both worlds belong to their owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
 | Moving or loading a player whose unique key the target holds | `InvalidOperationException`; nothing arrives, the originals stay | Destroy the stale holder first ([unique keys](#unique-keys)) |
-| A singleton in the set of `SaveEntities` | `ArgumentException`: a save of entities writes no singletons | Singletons go in a whole-world [restart](/en/docs/guide/saves#restart) save |
+| A singleton in the set of `SaveEntitiesWith` or `SaveEntitiesWithout` | `ArgumentException`: a save of entities writes no singletons | Singletons go in a whole-world [restart](/en/docs/guide/saves#restart) save |
+| A component left out by `SaveEntitiesWithout` that nothing computes again | The loaded entity lacks it for good | A system with `[Without<T>]` that rebuilds it, or keep it in the save |
 | A component that persists left out of the record's set | Not saved: the loaded entity keeps its own value, or has none | Build the set from the persisting components, in one place |
 | A record loaded with `LoadEntities` | New entities beside the live ones | `LoadEntitiesInto` with the live entities |
 | `LoadEntitiesInto` with another number of entities than the save holds, or a stale one | `ArgumentException`; nothing changes | One live entity per saved entity, in save order |
