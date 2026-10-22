@@ -53,7 +53,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D33](#d33-one-entity-runs-a-passs-job) | One entity runs a pass's job: `entity.Run` |
 | [D34](#d34-group-filters-through-interfaces) | Group filters through interfaces |
 | [D35](#d35-a-record-can-load-without-counting-as-a-change) | A record can load without counting as a change |
-| [D36](#d36-not-added) | Not added: parallel batch jobs, a row's last write tick, public access sets, a shared parallelism budget |
+| [D36](#d36-not-added) | Not added: parallel span methods, a row's last write tick, public access sets, a shared parallelism budget |
 | [D37](#d37-the-easyecs-package-brings-ninos-generator) | The EasyEcs package brings Nino's generator |
 | [D38](#d38-the-hidden-columns-are-not-generic-over-their-component) | The hidden columns are not generic over their component |
 | [D39](#d39-a-whole-load-can-leave-the-change-ticks-alone) | A whole load can leave the change ticks alone, and a system can start now |
@@ -91,6 +91,8 @@ after the change on the machine of the time; they are history, not the current r
 | [D71](#d71-direct-index) | Unique keys inline, and direct-mapped keys |
 | [D72](#d72-setall-whole-words) | `SetAll` fills whole words |
 | [D73](#d73-survey-items-not-added) | Survey items not added |
+| [D74](#d74-scratch) | Per-thread scratch is a parameter |
+| [D75](#d75-lookup) | Lookups of other entities are a read-only parameter |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -425,6 +427,11 @@ ParallelSystems 804-808 -> 746-768 μs, ParallelForEach 294-308 -> 267-271 μs, 
   per tick 990 against 760 μs.
 - `ThreadPool.UnfairSemaphoreSpinLimit`: closes the back-to-back gap, but it is process-wide and keeps pool threads
   spinning between ticks (49 ms CPU per 16 ms tick), so it stays the application's choice.
+- `Parallel.For` with static delegates as the runner (`ParallelRunnerBenchmark`, the steering pass of
+  `ParallelForEachBenchmark`, at a machine load of 10 to 30 on 4 cores): at 1,000 rows the runner took 18 µs at 0 B,
+  `Parallel.For` 24 to 42 µs at 1.5 to 1.9 KB; at 10,000 rows they were level within noise; at 100,000 rows
+  `Parallel.For` came out 15 to 40 % faster, inside that load's noise (runs swung by 2x). A rerun on a quiet machine
+  is pending. It also allocates per call and passes no state ([D69](#d69-reductions)).
 
 ## D23. Change summaries per block; removals summarized apart [#d23-change-summaries-per-block-removals-summarized-apart]
 
@@ -781,15 +788,16 @@ it does not hold keep their ticks. The default stays `true`.
 - **Clearing the row's ticks after the load:** components the record does not hold would lose their writes too.
 - **A separate `RestoreEntitiesInto`:** the same call with one difference; a parameter says it where it is used.
 
-## D36. Not added: parallel batch jobs, a row's last write tick, public access sets, a shared parallelism budget [#d36-not-added]
+## D36. Not added: parallel span methods, a row's last write tick, public access sets, a shared parallelism budget [#d36-not-added]
 
 **Decision.** Four requests were weighed and left out.
 
 **Why.**
-- **Parallel batch jobs** (`ForEachBatchParallel`, `[ForEach(Parallel = true)]` on span methods). 100,000 entities,
-  `ParallelForEachBenchmark`: a heavy steering pass took 766 µs as a parallel batch and 727 µs per entity in
-  parallel; a light drift took 54.5 µs and 55.6 µs (107 µs on one thread). On several threads the per-entity pass
-  already reaches memory's speed, so the batch form added an API, a job type and generator paths for no gain.
+- **`[ForEach(Parallel = true)]` on span methods.** 100,000 entities, `ParallelForEachBenchmark`: a heavy steering
+  pass took 766 µs as a parallel batch and 727 µs per entity in parallel; a light drift took 54.5 µs and 55.6 µs
+  (107 µs on one thread). On several threads the per-entity pass already reaches memory's speed, so a span method
+  stays serial (EECS010). `World.ForEachBatchParallel` exists for another reason: a parallel reduction keeps its
+  partial result in a local per run of rows ([D69](#d69-reductions)).
 - **`entity.LastWriteTick<T>()`.** `entity.Run(ref job, QueryFilter.Create().Changed<T>(tick))` answers "was it
   written since?" for one entity without exposing the tick column.
 - **Public `SystemAccess`.** The read and write sets are how the scheduler decides; publishing them freezes that shape
@@ -1672,26 +1680,41 @@ second write of `T` in the same pass.
   shape, pinned it in memory: a load and a store per row, a float sum chained through store forwarding and several
   times slower than the serial pass. A `Reduce<T>` not taken by `ref` would reduce into a copy, so it is EECS002.
 
-**Considered.**
-- **`Parallel.For<TLocal>` with `localInit` / `localFinally`** (pending numbers): .NET's thread-local reduction, and
-  the closest existing tool. It is not the runner: it has no overload that passes state, so a `static` lambda needs
-  static state (the column, the result), which is not reentrant (two worlds cannot reduce at once); it allocates per
-  call (delegates, partition state); and its partitions follow work stealing, so a float result changes from run to
-  run. `ReduceBenchmark` measures it next to `Reduce<T>`.
-- **An `Interlocked` add or a lock per row:** correct for integers, but every row contends for one line; measured in
-  `ReduceBenchmark` (pending numbers).
+**Considered.** Measured with `ReduceBenchmark` (BenchmarkDotNet, 1,000,000 rows, two runs each, 4 cores at a
+machine load of 10 to 30):
+
+| Variant | Integer sum | Float sum | Allocated per call |
+| --- | --- | --- | --- |
+| Serial `ref` context value | 0.41 / 0.47 ms | 0.74 / 0.76 ms | 0 B |
+| `ref Reduce<T>`, parallel | 0.37 / 0.46 ms | 0.74 / 0.77 ms | 0 B |
+| `Reduce<T>` as a `ref struct` with a `ref` field (the first shape) | | 3.3 to 4.6 ms | 0 B |
+| `Parallel.For` over the pass's chunks, partial results summed in order | about the same | about the same | 1.7 to 1.9 KB |
+| `Parallel.For<TLocal>` per row, static delegates | 2.4 to 3.5 ms | 3.3 to 6.8 ms | 1.7 to 2.1 KB |
+| `Interlocked` per row (a CAS loop for floats) | 8 to 13 ms | 15 to 24 ms | 0 B |
+| A lock per row | 25 to 33 ms | | 0 B |
+
+At 1,000 rows `Reduce<T>` takes about 0.45 µs, every `Parallel.For` variant 3.5 to 13 µs. Over 200 runs of the float
+sum, `Reduce<T>` and the chunked `Parallel.For` each gave 1 distinct result; the per-row `Parallel.For<TLocal>` gave
+up to 129, the CAS loop up to 137.
+
+- **`Parallel.For<TLocal>` with `localInit` / `localFinally`:** .NET's thread-local reduction, and the closest existing
+  tool; rejected. It never runs at 0 B, its per-row form is 5 to 9 times slower, its float results are not
+  deterministic, and it has no overload that passes state, so a `static` lambda needs static state (the column, the
+  result), which is not reentrant: two worlds cannot reduce at once. Over the pass's own chunks it keeps up in time
+  and is deterministic, but it still allocates per call and still needs the static state.
+- **An `Interlocked` add or a lock per row:** correct for integers, but every row contends for one line: 20 to 70
+  times slower than `Reduce<T>` above, and a float CAS loop is not deterministic.
+- **The partial result in the job's field, per row:** what a per-row parallel job would do; a field of the chunk's
+  job copy is a load and a store on every row. Parallel reductions run as batch jobs
+  (`World.ForEachBatchParallel`), the run's partial result in a local.
 - **Slots per thread, indexed by thread id:** padded against false sharing, but the combination order would follow
   the threads, not the rows, and a thread count change would resize them.
 - **Combining in the order chunks finish:** one fewer array, but float results and non-commutative combines would
   depend on timing.
 - **A `ref struct` wrapping a `ref` to the partial result** (`Reduce<T>` by value): reads like `Maybe<T>`, but keeps
-  the partial result in memory (above), so the reduction runs per row through a load and a store.
+  the partial result in memory (above): 3.3 to 4.6 ms for the float sum.
 - **Reductions inside a vector loop:** a later step ([D68](#d68-vector-loops-without-opting-in)); exact for integers,
   and for floats only with reassociation.
-
-{/* TODO(reductions): the ReduceBenchmark numbers (integer sum, float sum, bounding box; Reduce<T> on several threads
-and one, ref context value, Interlocked, lock, Parallel.For localInit/localFinally) once measured; then drop
-"pending numbers" here and on guide/threading#reductions. */}
 
 ## D70. Analyzer candidates not added [#d70-analyzer-candidates-not-added]
 
@@ -1772,6 +1795,59 @@ changes to the voxel server and the core too, and left them out.
 - **A water halo that copies only the edges that changed:** half the copies, but the step's time stayed within noise,
   and it cost 4 KB more per sleeping chunk to remember the edges. Superseded by the planned push-halo design, where a
   chunk hands its edges to its neighbours when they change ([roadmap](/en/docs/roadmap#push-halo)).
+
+## D74. Per-thread scratch is a parameter [#d74-scratch]
+
+**Decision.** A `Scratch<T>` parameter of a `[ForEach]` method is the method's working memory on the running thread:
+one `T` per method and thread (a `[ThreadStatic]` box per generated job type), `default` until the method fills it,
+never reset, released when the thread ends. It adds no access to the system. EECS058 rejects storing what it holds
+by reference into a component, a singleton, a `Maybe`, a `Mut` or a `Reduce`; EECS028 does not report its one-time
+`??= new()`.
+
+**Why.**
+- **A parallel method had nowhere to keep a list.** A `new` per row allocates (EECS028), a shared list races
+  (EECS060), and a hand-written `[ThreadStatic]` field is code every such method repeats. OpenMP's `threadprivate`
+  is the same idea.
+- **0 B and faster than allocating.** `ScratchBenchmark` (24 candidates per row, 10,000 and 100,000 rows, parallel):
+  about 1.8 times faster than a new list per row, 0 B after each thread's first row.
+- **Reset is the user's.** Clearing a list is one call the row makes when it needs it; a reset by the runner would be
+  a call per row for every scratch, needed or not.
+
+**Considered.**
+- **A hand-written `[ThreadStatic]` list:** currently 17 to 26 % faster than `Scratch<T>` in `ScratchBenchmark`; a fix
+  is being tried.
+- **`ArrayPool<T>.Shared` per row:** a rent and a return per row, and only arrays.
+- **`stackalloc`:** the fastest for a small bound known up front, and recommended for it; not for a size that varies
+  or a buffer too big for the stack.
+- **A scratch per world:** a world's parallel pass runs on threads no world owns, so it would still need one per
+  thread, inside the world.
+
+{/* TODO(scratch): update the [ThreadStatic] comparison once the fix lands. */}
+
+## D75. Lookups of other entities are a read-only parameter [#d75-lookup]
+
+**Decision.** A `Lookup<T>` parameter of a `[ForEach]` method reads component `T` of any entity (`this[id]`,
+`Read(id)`, `Has(id)`; for an indexed `T`, `TryFind`, `Find` and `Count` by key through `LookupExtensions`), as it was
+before the pass. The system is scheduled as a reader of `T`, so writers of `T` land in another stage; EECS059 rejects
+a method that writes `T` itself; EECS010 accepts it in a parallel method. A value index the method queries through the
+parameter is created and built before the pass (on the owner thread, before the stage); any other index not built
+yet throws inside a parallel region, and still builds lazily in a serial pass.
+
+**Why.**
+- **Reading another entity forced the method onto one thread.** The `World` parameter is rejected in parallel
+  (EECS010). A read-only view whose contract the scheduler enforces (no writer of `T` in the stage, none in the
+  method) keeps the reads race-free without a lock: Unity's `ComponentLookup` with `[ReadOnly]`, MPI's one-sided `Get`.
+- **Faster on one thread too.** `LookupBenchmark`: a serial `Lookup<T>` was 10 to 28 % faster than a `World`
+  parameter with `TryGetEntity` and `TryGet` (the chase at 10,000 and 100,000 rows, and the unique find). In
+  parallel it added nothing measurable under that machine's load.
+- **An index must not build itself on several threads.** Building it before the pass keeps every lookup during the
+  pass a read; an index reached any other way throws instead of racing.
+
+**Considered.**
+- **A lookup that also writes (Unity's `ComponentLookup` without `[ReadOnly]`):** two rows could write one entity
+  from two threads; writes to other entities stay data (a component of the row, read by a later system).
+- **Building indexes lazily under a lock:** a lock on the first lookup of every pass, for an index that can be built
+  before it.
 
 ## Related [#related]
 

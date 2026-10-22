@@ -57,7 +57,7 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
   （步长为零的时钟），所以所有读取都抛异常；确实要默认值的地方用 `GetOrAddX()`
   （[D27](/zh/docs/decisions#d27-reading-a-missing-singleton-throws-everywhere)）。
 - 由特性生成缓存过滤条件、按组件生成计数成员（`world.CountPlayer()`）、命名的 `TryGetXRef`：省不下代码，API 面却更大（[D56](/zh/docs/decisions#d56-not-added)）。
-- 并行批处理 job、`entity.LastWriteTick<T>()`、公开读写集、多个 World 共享并行预算
+- span 方法上的 `[ForEach(Parallel = true)]`、`entity.LastWriteTick<T>()`、公开读写集、多个 World 共享并行预算
   （[D36](/zh/docs/decisions#d36-not-added)）。
 - 运行条件（`[RunIf]`）：什么时候跑哪个分组，系统分组和宿主已经能决定；每个系统一个谓词，是调度器看不见的代码
   （[D51](/zh/docs/decisions#d51-not-added)）。
