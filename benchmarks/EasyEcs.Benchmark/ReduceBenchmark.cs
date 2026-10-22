@@ -268,22 +268,22 @@ public class ReduceBenchmark
         public static void SumByRef(in Score score, ref long total) => total += score.Value;
 
         [ForEach]
-        public static void SumSerial(in Score score, Reduce<ScoreTotal> total) => total.Value.Value += score.Value;
+        public static void SumSerial(in Score score, ref Reduce<ScoreTotal> total) => total.Value.Value += score.Value;
 
         [ForEach(Parallel = true)]
-        public static void SumParallel(in Score score, Reduce<ScoreTotal> total) => total.Value.Value += score.Value;
+        public static void SumParallel(in Score score, ref Reduce<ScoreTotal> total) => total.Value.Value += score.Value;
 
         [ForEach]
         public static void MassByRef(in Spot spot, ref float mass) => mass += spot.X;
 
         [ForEach(Parallel = true)]
-        public static void MassParallel(in Spot spot, Reduce<SpotMass> mass) => mass.Value.Value += spot.X;
+        public static void MassParallel(in Spot spot, ref Reduce<SpotMass> mass) => mass.Value.Value += spot.X;
 
         [ForEach]
         public static void BoundsByRef(in Spot spot, ref Area area) => area.Include(in spot);
 
         [ForEach(Parallel = true)]
-        public static void BoundsParallel(in Spot spot, Reduce<Extent> extent) => extent.Value.Area.Include(in spot);
+        public static void BoundsParallel(in Spot spot, ref Reduce<Extent> extent) => extent.Value.Area.Include(in spot);
     }
 
     private struct InterlockedSum : IForEach<Score>, INoStructuralChanges

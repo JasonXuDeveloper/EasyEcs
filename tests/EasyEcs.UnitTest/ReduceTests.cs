@@ -60,7 +60,7 @@ public class ReduceTests
     public class SerialScores : EcsSystem
     {
         [ForEach]
-        static void Add(in Points points, Reduce<Scores> tally)
+        static void Add(in Points points, ref Reduce<Scores> tally)
         {
             ref var t = ref tally.Value;
             t.Count++;
@@ -71,13 +71,13 @@ public class ReduceTests
     public class ParallelScores : EcsSystem
     {
         [ForEach(Parallel = true)]
-        static void Add(in Points points, Reduce<Scores> tally) => tally.Combine(new Scores { Count = 1, Sum = points.Value });
+        static void Add(in Points points, ref Reduce<Scores> tally) => tally.Combine(new Scores { Count = 1, Sum = points.Value });
     }
 
     public class ParallelBounds : EcsSystem
     {
         [ForEach(Parallel = true, ChunkRows = 1024)]
-        static void Grow(in Spot spot, Reduce<Bounds2> box)
+        static void Grow(in Spot spot, ref Reduce<Bounds2> box)
         {
             ref var b = ref box.Value;
             b.MinX = MathF.Min(b.MinX, spot.X);
@@ -90,20 +90,20 @@ public class ReduceTests
     public class FixedChunkMass : EcsSystem
     {
         [ForEach(Parallel = true, ChunkRows = 4096)]
-        static void Add(in Weight weight, Reduce<WeightSum> mass) => mass.Value.Total += weight.Value;
+        static void Add(in Weight weight, ref Reduce<WeightSum> mass) => mass.Value.Total += weight.Value;
     }
 
     public class ParallelEnds : EcsSystem
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
-        static void Visit(in Points points, Reduce<Ends2> ends) =>
+        static void Visit(in Points points, ref Reduce<Ends2> ends) =>
             ends.Combine(new Ends2 { First = points.Value, Last = points.Value, Any = true });
     }
 
     public class SerialEnds : EcsSystem
     {
         [ForEach]
-        static void Visit(in Points points, Reduce<Ends2> ends) =>
+        static void Visit(in Points points, ref Reduce<Ends2> ends) =>
             ends.Combine(new Ends2 { First = points.Value, Last = points.Value, Any = true });
     }
 
@@ -111,7 +111,7 @@ public class ReduceTests
     public class ScoresWithBonus : EcsSystem
     {
         [ForEach]
-        static void Add(in Points points, ReadOnlyMaybe<Weight> bonus, Reduce<Scores> tally)
+        static void Add(in Points points, ReadOnlyMaybe<Weight> bonus, ref Reduce<Scores> tally)
         {
             ref var t = ref tally.Value;
             t.Count++;
@@ -128,7 +128,7 @@ public class ReduceTests
     public static class Runners
     {
         [ForEach(Parallel = true)]
-        public static void Score(in Points points, Reduce<Scores> tally)
+        public static void Score(in Points points, ref Reduce<Scores> tally)
         {
             ref var t = ref tally.Value;
             t.Count++;
@@ -149,7 +149,7 @@ public class ReduceTests
     public class ChangedArmor : EcsSystem
     {
         [ForEach(Parallel = true, ChunkRows = 64), Changed<Armor>]
-        static void Add(in Armor armor, Reduce<Scores> tally) => tally.Combine(new Scores { Count = 1, Sum = armor.Value });
+        static void Add(in Armor armor, ref Reduce<Scores> tally) => tally.Combine(new Scores { Count = 1, Sum = armor.Value });
     }
 
     [Test]

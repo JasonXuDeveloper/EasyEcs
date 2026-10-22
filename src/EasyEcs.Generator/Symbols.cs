@@ -591,7 +591,7 @@ internal static class Symbols
         var kind = Classify(p);
         if (kind != ParamKind.Invalid || !outside || p.RefKind is not (RefKind.None or RefKind.Ref or RefKind.In)) return kind;
         var element = SpanElement(p.Type) ?? MaybeElement(p.Type) ?? MutElement(p.Type) ?? p.Type;
-        if (IsA(element, Component) || IsA(element, Singleton)) return ParamKind.Invalid; // a component by value
+        if (IsA(element, Component) || IsA(element, Singleton) || ReduceElement(p.Type) != null) return ParamKind.Invalid; // a component by value
         // A span or other ref struct goes into the job by value: a job holds no ref field to a ref struct.
         if (p.Type.IsRefLikeType && p.RefKind != RefKind.None) return ParamKind.Invalid;
         return Named(p.Type, Entity) || Named(p.Type, EntitySpan) || Named(p.Type, World) ? ParamKind.Invalid : ParamKind.Context;
@@ -811,6 +811,8 @@ internal static class Symbols
 
     public static ParamKind Classify(IParameterSymbol p)
     {
+        if (ReduceElement(p.Type) is { } reduced) // by ref only: the pass's partial result, which the method writes
+            return p.RefKind == RefKind.Ref && reduced.IsValueType && IsA(reduced, Singleton) ? ParamKind.Reduction : ParamKind.Invalid;
         if (p.RefKind is RefKind.Ref or RefKind.In or RefKind.RefReadOnlyParameter)
             return !p.Type.IsValueType ? ParamKind.Invalid
                 : IsA(p.Type, Component) ? ParamKind.Component
@@ -823,8 +825,6 @@ internal static class Symbols
             return optional.IsValueType && IsA(optional, Component) ? ParamKind.Optional : ParamKind.Invalid;
         if (MutElement(p.Type) is { } mutable)
             return mutable.IsValueType && IsA(mutable, Component) ? ParamKind.Mutable : ParamKind.Invalid;
-        if (ReduceElement(p.Type) is { } reduced)
-            return reduced.IsValueType && IsA(reduced, Singleton) ? ParamKind.Reduction : ParamKind.Invalid;
         if (ScratchElement(p.Type) != null) return ParamKind.Scratch;
         if (LookupElement(p.Type) is { } looked)
             return looked.IsValueType && IsA(looked, Component) ? ParamKind.Lookup : ParamKind.Invalid;

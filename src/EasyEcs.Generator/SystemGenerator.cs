@@ -165,7 +165,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             else if (p.Kind == Symbols.ParamKind.Context)
                 fields.Add(p.RefKind.Length == 0 || method.Parallel ? $"x{i} = {Escape(p.Name)}" : $"x{i} = ref {Escape(p.Name)}");
             else if (p.Kind == Symbols.ParamKind.Reduction)
-                fields.Add($"a{i} = {p.Type}.Identity"); // every partial result starts there
+                fields.Add($"a{i} = new global::EasyEcs.Reduce<{p.Type}> {{ Value = {p.Type}.Identity }}"); // every partial result starts there
             else if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // its index, built before the pass
                 fields.Add($"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Type}, {p.Key}>({world})");
         }
@@ -181,7 +181,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
     {
         for (int i = 0; i < method.Parameters.Length; i++)
             if (method.Parameters[i] is { Kind: Symbols.ParamKind.Reduction } p)
-                sb.Append($"{indent}{world}.GetOrAddSingleton<{p.Type}>() = {job}.a{i};\n");
+                sb.Append($"{indent}{world}.GetOrAddSingleton<{p.Type}>() = {job}.a{i}.Value;\n");
     }
 
     /// <summary>
@@ -297,7 +297,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Entity => "entity",
             Symbols.ParamKind.Entities => "entities",
             Symbols.ParamKind.Optional => $"global::EasyEcs.Maybe<{p.Type}>.{(p.RefKind == "ref" ? "ForWrite" : "ForRead")}(entity)",
-            Symbols.ParamKind.Reduction => $"new global::EasyEcs.Reduce<{p.Type}>(ref {(local[i] ? "l" : "a")}{i})",
+            Symbols.ParamKind.Reduction => $"ref {(local[i] ? "l" : "a")}{i}", // a run's local: registers (Reduce<T> holds no ref)
             // This thread's box, resolved once per chunk (per pass on one thread): the job's copy keeps it.
             Symbols.ParamKind.Scratch => $"new global::EasyEcs.Scratch<{p.Type}>(ref (t{i} ??= global::EasyEcs.Scratch<{p.Type}>.Of<{job}>()).Value)",
             Symbols.ParamKind.Lookup => $"new global::EasyEcs.Lookup<{p.Type}>(World, {(p.Key.Length > 0 ? $"k{i}" : "null")})",
@@ -330,7 +330,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 sb.Append(p.RefKind.Length == 0 || method.Parallel ? $"        public {p.Type} x{i};\n"
                     : $"        public ref {(p.RefKind == "in" ? "readonly " : "")}{p.Type} x{i};\n");
             else if (p.Kind == Symbols.ParamKind.Reduction) // the partial result: of the pass, or of a chunk's copy
-                sb.Append($"        public {p.Type} a{i};\n");
+                sb.Append($"        public global::EasyEcs.Reduce<{p.Type}> a{i};\n");
             else if (p.Kind == Symbols.ParamKind.Scratch) // this thread's box (null until the first row of a chunk)
                 sb.Append($"        public global::System.Runtime.CompilerServices.StrongBox<{p.Type}> t{i};\n");
             else if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // the component's index, built
@@ -392,7 +392,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append($"            ref var into = ref {unsafeType}.As<TSelf, {job}>(ref job);\n");
             sb.Append($"            ref var part = ref {unsafeType}.As<TSelf, {job}>(ref {unsafeType}.AsRef(in chunk));\n");
             foreach (int i in reductions)
-                sb.Append($"            into.a{i} = {method.Parameters[i].Type}.Combine(into.a{i}, part.a{i});\n");
+                sb.Append($"            into.a{i}.Value = {method.Parameters[i].Type}.Combine(into.a{i}.Value, part.a{i}.Value);\n");
             sb.Append("        }\n");
         }
 

@@ -18,7 +18,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     private const string Category = "EasyEcs";
 
     public static readonly DiagnosticDescriptor BadParameter = new("EECS002", "Invalid [ForEach] parameter",
-        "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe of one, an Entity or the World (outside a system, also a value the caller passes, of any other type)",
+        "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe, Mut or Lookup of one, a 'ref Reduce' of a singleton, a Scratch, an Entity or the World (outside a system, also a value the caller passes, of any other type)",
         Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS002"));
 
     public static readonly DiagnosticDescriptor ComponentCount = new("EECS003", "Invalid component count",

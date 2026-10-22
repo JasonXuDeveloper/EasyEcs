@@ -52,7 +52,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `Maybe<T>` | ref struct | An optional component parameter of a `[ForEach]` method: `HasValue`, `Value`. |
 | `ReadOnlyMaybe<T>` | ref struct | The same, read-only: `Value` is `ref readonly`, never stamped, allowed for indexed components; a `Maybe<T>` converts to it. |
 | `Mut<T>` | ref struct | A component parameter of a `[ForEach]` method that counts as written only on the rows the method writes: `Value`, `Write()`, `SetIfChanged(value)` ([change tracking](/en/docs/guide/change-tracking)). |
-| `Reduce<T>`, `IReduction<T>` | ref struct, interface | A `[ForEach]` parameter reducing a pass into singleton `T`, which implements `IReduction<T>` (`Identity`, `Combine`): `Value`, `Combine(value)`. |
+| `Reduce<T>`, `IReduction<T>` | struct, interface | A `[ForEach]` parameter, taken by `ref`, reducing a pass into singleton `T`, which implements `IReduction<T>` (`Identity`, `Combine`): `Value`, `Combine(value)`. |
 | `Scratch<T>` | ref struct | A `[ForEach]` parameter: working memory of the method on the running thread, kept between rows, passes and worlds: `Value`. |
 | `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out id)`, `Find(key)`, `Count(key)`. |
 | `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interfaces, attributes | System groups (with filters through interfaces) and ordering. |
@@ -178,11 +178,11 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | `mut.Write()` | O(1): one stamp (plus one entity lookup in a method that changes structure or runs in parallel) | `ref T`, the row stamped as written (a tracked `T`); call it once per write |
 | `mut.SetIfChanged(in T value)` | O(size of `T`), plus a `Write()` when it differs | true when it stored the value; equality is `IEquatable<T>`, else the bytes of an unmanaged `T`; a managed `T` without `IEquatable<T>` throws `NotSupportedException` |
 
-`Reduce<T>`, the `[ForEach]` parameter of a reduction into singleton `T`:
+`ref Reduce<T>`, the `[ForEach]` parameter of a reduction into singleton `T`:
 
 | API | Complexity | Notes |
 | --- | --- | --- |
-| `reduce.Value` | O(1) | `ref T`: the partial result of this chunk (of the pass, on one thread), which starts at `T.Identity` |
+| `reduce.Value` | O(1) | a field: the partial result of this chunk (of the pass, on one thread), which starts at `T.Identity` |
 | `reduce.Combine(T value)` | O(1) plus `T.Combine` | `Value = T.Combine(Value, value)` |
 | end of the pass | O(chunks) `T.Combine` calls | the partial results in chunk order (row order), then one write of the singleton (added when missing) |
 
