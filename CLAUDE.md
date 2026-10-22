@@ -51,6 +51,10 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   Scratch.cs                   Scratch<T>: per-thread working memory of a [ForEach] method, never shared, never reset
   Lookup.cs                    Lookup<T> + LookupExtensions: read-only lookups of any entity (and index keys) from a
                                [ForEach] method, parallel ones included; the system reads T, so no writer shares its stage
+  Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), joined in
+                               chunk order into singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear)
+  EntityRandom.cs              EntityRandom: deterministic random numbers, a pure function of (seed, entity, tick, stream)
+                               (four SplitMix64 finalizer rounds); a singleton (Seed, Tick) and static members
   Interleaved.cs               the deinterleaving loads / interleaving stores of generated vector loops over components
                                of 2 to 4 fields of one lane type
   SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
@@ -79,7 +83,8 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   World.Systems.cs             system groups, ordering, parallel stages (consecutive non-conflicting systems),
                                synchronous Update / Update<TGroup>, Dispose
   World.Parallel.cs            allocation-free runner (caller + reusable thread-pool work items, adaptive helper waking)
-                               for system stages and the row chunks of parallel [ForEach]
+                               for system stages and the row chunks of parallel [ForEach]; World.For.cs: ForParallel
+                               (IForRange over a range, IForSpan<T> over a buffer's elements) on the same runner
   World.Singletons.cs          per-world singletons (ref returns)
   World.Indexes.cs             world.Index<T, TKey>() (one ValueIndex per indexed component type) and its hooks
   ValueIndex.cs                IIndexed<TKey> + ValueIndex: key -> one id array per key (IndexHead), built by the first
@@ -151,8 +156,8 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                world.XIndex, singletons world.X / HasX / GetOrAddX / SetX / RemoveX, query items
                                item.X per Query<T1..Tn> shape the code calls, SavedTypes registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                                lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
-  EasyEcsAnalyzer.cs           EECS002-024, EECS035-036, EECS054 and EECS056 (the declaration and [ForEach] rules of the
-                               range EECS002-069 that are not performance rules; generators never report diagnostics)
+  EasyEcsAnalyzer.cs           EECS002-024, EECS035-036, EECS054, EECS056 and EECS070 (the declaration and [ForEach] rules of
+                               the range EECS002-071 that are not performance rules; generators never report diagnostics)
   EasyEcsAnalyzer.Performance.cs  EECS025-034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the check of EECS056):
                                code that works but costs (write access that
                                only reads, unused or per-row lookups in [ForEach] methods and jobs, allocations per
@@ -173,8 +178,9 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                a structural change, Disable of a component that cannot be disabled, filters no entity
                                passes, a second group in one filter, an update during a pass)
   EasyEcsAnalyzer.Parallel.cs  EECS060-061: code on several threads (a parallel [ForEach] method, the Execute of a job
-                               run by ForEachParallel) that writes memory every thread shares, a parallel job's field
-                               read after the call
+                               run by ForEachParallel or ForParallel) that writes memory every thread shares, a parallel
+                               job's field read after the call; EECS071: System.Random in a [ForEach] method (fix:
+                               EntityRandom)
   EasyEcsAnalyzer.Parts.cs     EECS062-069: generated parts (not partial, hand-written members, fields no attribute
                                combines), hand-written reductions and keys the attributes could declare, a wrong
                                Identity, a setup attribute on a type it does not fit, a managed type without a Nino
@@ -192,7 +198,7 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                Changed (and Mut, ChangedAny), Removed (and the destroy log), Instantiate, DynamicBuffer,
                                Index (and unique keys), OrderedIndex, Relation, Hierarchy, TargetPolicy, Group, Cleanup,
                                Disable, Bulk, Move, Part (generated parts, EECS062-069), Snapshot, Serialization (and restart saves), Unload, Introspection
-                               (and Trim, DescribeSchedule), Generic, Allocation (0 B budget),
+                               (and Trim, DescribeSchedule), Generic, Allocation (0 B budget), Emit, ForParallel, EntityRandom,
                                Generator (diagnostics + caching), CodeFix, BattleServer (the world of
                                docs/content/example.mdx as a whole, linked from EasyEcs.Benchmark); Fixtures.cs holds
                                the shared test components
@@ -202,10 +208,10 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                server tick; the world itself is WorldSimulation.cs), BattleServerBenchmark
                                (BattleServer.cs, every feature; docs/content/example.mdx includes its regions), one
                                benchmark per feature (Access: the analyzer's performance rules, Bulk, CallSite,
-                               ChangeTracking (+ ChangeTrackingWrite: Mut<T>, ChangeTrackingRead: Read, ChangeTrackingSomeRows: EECS053), Cleanup, Count, DestroyLog,
+                               ChangeTracking (+ ChangeTrackingWrite: Mut<T>, ChangeTrackingRead: Read, ChangeTrackingSomeRows: EECS053), Cleanup, Count, DestroyLog, Emit, EntityRandom, ForParallel,
                                DynamicBuffer (+ ChunkChurn: PoolCapacity), Generator (the generators per keystroke and the analyzer per
                                build, through
-                               Roslyn), Group, Hierarchy, Index (+ unique keys), Introspection (+ Schedule),
+                               Roslyn), Group, Hierarchy, Histogram (keyed reductions), Index (+ unique keys), Introspection (+ Schedule),
                                Maybe, Migration, OrderedIndex, Ordering, ParallelForEach, ParallelSystems (Measure),
                                Prefab, Relation, Runner, SingleEntity, Slices, Snapshot (+ SaveWithout / LoadKeeping),
                                Sparse, Trim, Unload) + MicroBenchmarks.
@@ -222,7 +228,7 @@ docs/content/                  the docs (source of https://ecs.xgamedev.net), ea
                                battle server through regions of BattleServer.cs, cheat-sheet, glossary), samples/ (one
                                page per sample of samples/, its files included, its output checked by
                                check-sample.sh), guide/ (one
-                               page per concept, analyzer lists EECS002-061), compare pages (performance, why-fast,
+                               page per concept, analyzer lists EECS002-071), compare pages (performance, why-fast,
                                comparison, vs-*, migrate-from-*), reference pages (api: API + complexity, read by
                                tools/ApiDocs; architecture, faq, ai, decisions, roadmap, changelog); reference/ (API
                                reference generated by tools/ApiDocs, <page>.mdx + <page>.zh.mdx); README.md (GitHub index);

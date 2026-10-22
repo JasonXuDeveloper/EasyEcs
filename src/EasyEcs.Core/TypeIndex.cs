@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using Nino.Core;
 
@@ -153,15 +154,48 @@ internal sealed class SingletonBox<T> : SingletonBox where T : struct, ISingleto
 
     public override int TypeId => SavedTypes.TypeId<T>.Value;
 
-    public override void Write(ref Writer writer) => NinoSerializer.Serialize(Value, ref writer);
+    // A singleton holding a list (Emitted<T>: its only field is a DynamicBuffer, whose only field is its store) is
+    // copied, saved and loaded through the list's elements, as a buffer column is (ComponentInfo); null for others.
+    private static readonly IBuffer Buffer = default(T) is IBuffer ? (IBuffer)default(T) : null;
 
-    public override void Read(ref Reader reader) => NinoDeserializer.Deserialize(ref Value, ref reader);
+    private ref BufferStore Store => ref Unsafe.As<T, BufferStore>(ref Value);
 
-    public override SingletonBox Clone() => new SingletonBox<T> { Value = Value };
+    public override void Write(ref Writer writer)
+    {
+        if (default(T) is IBuffer) Buffer.Write(ref writer, Store); // a JIT-time constant
+        else NinoSerializer.Serialize(Value, ref writer);
+    }
 
-    public override void CopyFrom(SingletonBox source) => Value = ((SingletonBox<T>)source).Value;
+    public override void Read(ref Reader reader)
+    {
+        if (default(T) is IBuffer) Store = Buffer.Read(ref reader, Store);
+        else NinoDeserializer.Deserialize(ref Value, ref reader);
+    }
 
-    public override void Clear() => Value = default;
+    public override SingletonBox Clone()
+    {
+        var copy = new SingletonBox<T>();
+        copy.CopyFrom(this);
+        return copy;
+    }
+
+    public override void CopyFrom(SingletonBox source)
+    {
+        var from = (SingletonBox<T>)source;
+        if (default(T) is IBuffer) BufferStore.Assign(ref Store, from.Store); // the elements, not the list
+        else Value = from.Value;
+    }
+
+    public override void Clear()
+    {
+        if (default(T) is IBuffer && Store is { } store)
+        {
+            Store = null;
+            store.Recycle();
+        }
+
+        Value = default;
+    }
 
     public override bool NotSaved => NotSavedOf<T>.Value;
 }

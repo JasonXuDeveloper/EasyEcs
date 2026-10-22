@@ -18,7 +18,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     private const string Category = "EasyEcs";
 
     public static readonly DiagnosticDescriptor BadParameter = new("EECS002", "Invalid [ForEach] parameter",
-        "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe, Mut or Lookup of one, a 'ref Reduce' of a singleton, a Scratch, an Entity or the World (outside a system, also a value the caller passes, of any other type)",
+        "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe, Mut or Lookup of one, a 'ref Reduce' of a singleton, a Scratch, an Emit of a struct, an Entity or the World (outside a system, also a value the caller passes, of any other type)",
         Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS002"));
 
     public static readonly DiagnosticDescriptor ComponentCount = new("EECS003", "Invalid component count",
@@ -210,6 +210,16 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "the result into another component (double buffering: read Position, write NextPosition), or split the work " +
         "into two systems.", helpLinkUri: Help("EECS059"));
 
+    public static readonly DiagnosticDescriptor BadEmit = new("EECS070", "Records read or reordered by the pass that emits them",
+        "Parameter '{0}' of [ForEach] method '{1}' emits {2}, but {3}",
+        Category, DiagnosticSeverity.Error, true,
+        "An Emit<T> parameter gives each chunk of rows a list of records and appends the lists to singleton Emitted<T> " +
+        "in chunk order when the pass ends, so the records come out in row order whatever the threads. The same method " +
+        "taking Emitted<T> would read the records while they are added: none of the pass's in parallel, some on one " +
+        "thread. A second Emit<T> of the same method would order its records differently on one thread (interleaved row " +
+        "by row) and in parallel (each chunk's lists one after the other). Read the records in a system after the pass, " +
+        "and emit each kind of record through one parameter.", helpLinkUri: Help("EECS070"));
+
     public static readonly DiagnosticDescriptor BadIndexKey = new("EECS036", "A component that cannot be indexed by its key",
         "'{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
@@ -236,7 +246,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
         UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScalarLoop, NoVectorLoop,
         SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, NotPartial, HandWrittenReduction, BadReductionField, FieldWiseReduction,
-        WrongIdentity, AttributeKey, BadSetup, NoFormatter);
+        WrongIdentity, AttributeKey, BadSetup, NoFormatter, BadEmit, SharedRandom);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -492,7 +502,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (symbol.IsImplicitlyDeclared) return;
         switch (symbol)
         {
-            case IFieldSymbol field:
+            case IFieldSymbol field when field.RefKind == RefKind.None: // a ref field reaches the buffer itself
                 Report(field.Type, field, field.Locations.FirstOrDefault());
                 break;
             case IPropertySymbol property when property.RefKind == RefKind.None:
@@ -828,6 +838,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             else if (kind == Symbols.ParamKind.Lookup && Symbols.LookupProblem(method, p) is { } written)
                 context.ReportDiagnostic(Diagnostic.Create(LookupOfWritten, p.Locations.FirstOrDefault(), p.Name, method.Name,
                     Symbols.LookupElement(p.Type)!.Name, written));
+            else if (kind == Symbols.ParamKind.Emit && Symbols.EmitProblem(method, p) is { } emit)
+                context.ReportDiagnostic(Diagnostic.Create(BadEmit, p.Locations.FirstOrDefault(), p.Name, method.Name,
+                    Symbols.EmitElement(p.Type)!.Name, emit));
             else if (kind == Symbols.ParamKind.Reduction && Symbols.ReductionProblem(method, p) is { } reduction)
                 context.ReportDiagnostic(Diagnostic.Create(BadReduction, p.Locations.FirstOrDefault(), p.Name, method.Name,
                     Symbols.ReduceElement(p.Type)!.Name, reduction));

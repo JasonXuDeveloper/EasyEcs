@@ -837,6 +837,13 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, Lookup<P> ps) => p.V = ps[default].HasValue ? 1 : 0; }", "EECS059")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<P> p, in Q q, Lookup<P> ps) => p.Write().V = ps.Has(default) ? q.V : 0; }", "EECS059")]
     [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, Reduce<Sum> a) => a.Value.N += p.V; }", "EECS002")]
+    [TestCase("public record struct H(int V); public class S : EcsSystem { [ForEach] static void A(in P p, Emit<H> a, Emit<H> b) { a.Add(new H(p.V)); b.Add(new H(1)); } }", "EECS070")]
+    [TestCase("public record struct H(int V); public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, Emit<H> a, in Emitted<H> seen) => a.Add(new H(seen.Items.Count)); }", "EECS070")]
+    [TestCase("public record struct H(int V); public class S : EcsSystem { [ForEach] static void A(in P p, ref Emit<H> a) => a.Add(new H(p.V)); }", "EECS002")]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p) => p.V = System.Random.Shared.Next(10); }", "EECS071")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V = System.Random.Shared.Next(); }", "EECS071")]
+    [TestCase("public static class R { [ForEach] public static void A(ref P p) => p.V = new System.Random(3).Next(); }", "EECS071")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V = new System.Random().Next(5); }", "EECS071")]
     public async Task MisuseIsReported(string source, string id)
     {
         var errors = await Diagnose(Components, source);
@@ -864,6 +871,10 @@ public class GeneratorTests
     [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, ref Reduce<Sum> sum, in Sum last) => sum.Value.N += p.V + last.N; }")]
     [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public class S : EcsSystem { [ForEach] static void A(in P p, Maybe<Q> q, ref Reduce<Sum> sum) => sum.Combine(new Sum { N = p.V + (q.HasValue ? q.Value.V : 0) }); }")]
     [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public static class R { [ForEach(Parallel = true, ChunkRows = 1024)] public static void A(in P p, ref Reduce<Sum> sum) => sum.Value.N += p.V; }")]
+    [TestCase("public record struct H(int V); public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, Emit<H> hits) => hits.Add(new H(p.V)); }")]
+    [TestCase("public record struct H(int V); public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public static class R { [ForEach(Parallel = true)] public static void A(in P p, ref Reduce<Sum> sum, Emit<H> hits) { sum.Value.N += p.V; hits.AddRange(new H(p.V), new H(0)); } }")]
+    [TestCase("public record struct H(int V); public class S : EcsSystem { [ForEach] static void A(in P p, Emit<H> hits) => hits.Add(new H(p.V)); [ForEach] static void B(in Q q, Emit<H> hits) => hits.Add(new H(q.V)); }")]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, Entity e, in EntityRandom random) => p.V = random.Range(e.Id, 0, 0, 10) + (random.Chance(e.Id, 1, 0.5f) ? 1 : 0); }")]
     public async Task ValidCodeIsNotReported(string source)
     {
         var errors = await Diagnose(Components, source);
@@ -1078,6 +1089,9 @@ public class GeneratorTests
     [TestCase("public struct J : IForEachEntity<P>, INoStructuralChanges { public System.Collections.Generic.List<EntityId> Hits; public void Execute(Entity e, ref P p) { if (p.V > 0) Hits.Add(e.Id); } } public static class U { public static void F(World w) { var j = new J { Hits = new() }; w.ForEachEntityParallel<P, J>(ref j); } }", "EECS060")] // copies share the list
     [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s); return s.Total; } }", "EECS061")]
     [TestCase("public struct Seen : IForEach<P>, INoStructuralChanges { public bool Any; public void Execute(ref P p) { if (p.V > 0) Any = true; } } public static class U { public static bool F(World w) { var s = new Seen(); w.ForEachParallel<P, Seen>(ref s, default, 64); return s.Any; } }", "EECS061")]
+    [TestCase("public struct J : IForRange { public void Execute(int start, int end) => Counters.Hits += end - start; } public static class U { public static void F(World w) { var j = new J(); w.ForParallel(100, ref j); } }", "EECS060")]
+    [TestCase("public struct Sum : IForRange { public int Total; public void Execute(int start, int end) => Total += end - start; } public static class U { public static int F(World w) { var s = new Sum(); w.ForParallel(100, ref s); return s.Total; } }", "EECS061")]
+    [TestCase("public struct Sum : IForSpan<int> { public int Total; public void Execute(int start, System.Span<int> items) => Total += items.Length; } public static class U { public static int F(World w, ref DynamicBuffer<int> b) { var s = new Sum(); w.ForParallel(ref b, ref s); return s.Total; } }", "EECS061")]
     public async Task ParallelWritesAreReported(string source, string id)
     {
         var errors = await Diagnose(Components, Extra, Shared, source);
@@ -1101,6 +1115,8 @@ public class GeneratorTests
     [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total, Limit; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum { Limit = 3 }; w.ForEachParallel<P, Sum>(ref s); return s.Limit; } }")] // not written
     [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; } public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s); s.Total = 0; return s.Total; } }")] // set first
     [TestCase("public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; public static bool Merges => true; public static void Merge<TSelf>(ref TSelf job, in TSelf chunk) where TSelf : struct => System.Runtime.CompilerServices.Unsafe.As<TSelf, Sum>(ref job).Total += System.Runtime.CompilerServices.Unsafe.As<TSelf, Sum>(ref System.Runtime.CompilerServices.Unsafe.AsRef(in chunk)).Total; } public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s); return s.Total; } }")] // merges its copies back
+    [TestCase("public struct Double : IForSpan<int> { public void Execute(int start, System.Span<int> items) { for (int i = 0; i < items.Length; i++) items[i] *= 2; } } public static class U { public static void F(World w, ref DynamicBuffer<int> b) { var j = new Double(); w.ForParallel(ref b, ref j); } }")] // its own elements
+    [TestCase("public struct Fill : IForRange { public int[] Cells; public void Execute(int start, int end) { for (int i = start; i < end; i++) Cells[i] = i; } } public static class U { public static void F(World w, int[] cells) { var j = new Fill { Cells = cells }; w.ForParallel(cells.Length, ref j); } }")]
     public async Task ParallelWritesThatDoNotRaceAreNotReported(string source)
     {
         var errors = await Diagnose(Components, Extra, Shared, source);
