@@ -166,6 +166,7 @@ internal sealed partial class Kernel
             : !Symbols.IsStable(method, syntax, model) ? "it can make structural changes"
             : null;
         if (reason != null) return null;
+        if ((reason = Declined(method, syntax, model)) != null) return null;
         try
         {
             return Translate(method, syntax, model, fieldOf, ct);
@@ -230,12 +231,49 @@ internal sealed partial class Kernel
         _ => 8,
     };
 
+    /// <summary>
+    /// The reason <see cref="Translate"/> would give from the method's signature alone, found before its body is bound
+    /// and without an exception (a Mut, an Entity, a span: most scalar methods): its first parameter that rules a vector
+    /// loop out, unless a component or optional parameter before it may give its own reason. Null to translate.
+    /// </summary>
+    private static string? Declined(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model)
+    {
+        if (!method.ReturnsVoid) return "it returns a value";
+        if (method.IsGenericMethod) return "it is generic";
+        if (Symbols.WithBody(method, syntax, model).Item1 is { Body: null, ExpressionBody: null }) return null; // Translate: "it has no body"
+        bool outside = Symbols.IsRunner(method);
+        foreach (var p in method.Parameters)
+        {
+            var kind = Symbols.Classify(p, outside);
+            if (Refused(p, kind, method) is { } refused) return refused;
+            if (kind is Symbols.ParamKind.Component or Symbols.ParamKind.Optional) return null; // its lanes decide
+        }
+
+        return null;
+    }
+
+    /// <summary>Why parameter <paramref name="p"/> of kind <paramref name="kind"/> rules a vector loop out whatever its type, or null.</summary>
+    private static string? Refused(IParameterSymbol p, Symbols.ParamKind kind, IMethodSymbol method) => kind switch
+    {
+        Symbols.ParamKind.Component or Symbols.ParamKind.Singleton or Symbols.ParamKind.Reduction => null,
+        Symbols.ParamKind.Context => p.RefKind == RefKind.Ref ? $"it takes '{p.Name}' by ref: a vector loop reduces only into a Reduce<T>" : null,
+        Symbols.ParamKind.Optional => Symbols.IsParallel(method)
+            ? $"it takes a Maybe<{Symbols.MaybeElement(p.Type)?.Name}> and runs in parallel: an optional column has a vector loop on one thread"
+            : null,
+        Symbols.ParamKind.Entity => "it takes the Entity",
+        Symbols.ParamKind.Entities => "it takes the EntitySpan",
+        Symbols.ParamKind.World => "it takes the World",
+        Symbols.ParamKind.ComponentSpan => "it takes spans: a batch method writes its own loop",
+        Symbols.ParamKind.Mutable => $"it takes a Mut<{Symbols.MutElement(p.Type)?.Name}>",
+        Symbols.ParamKind.Scratch => $"it takes a Scratch<{Element(p.Type)}>: working memory a row at a time, not one per lane",
+        Symbols.ParamKind.Lookup => $"it takes a Lookup<{Element(p.Type)}>: a lookup of another entity per row has no vector form",
+        _ => $"parameter '{p.Name}' is not a component, a singleton, a Reduce<T> or a value",
+    };
+
     private static Code Translate(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
         System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct)
     {
-        if (!method.ReturnsVoid) throw new Unsupported("it returns a value");
-        if (method.IsGenericMethod) throw new Unsupported("it is generic");
-        (syntax, model) = Symbols.WithBody(method, syntax, model);
+        (syntax, model) = Symbols.WithBody(method, syntax, model); // Declined: it returns nothing and is not generic
         if (model.GetOperation(syntax, ct) is not IMethodBodyOperation body) throw new Unsupported("it has no body");
         ITypeSymbol? first = null;
         var components = new List<IFieldSymbol[]>();
@@ -282,31 +320,12 @@ internal sealed partial class Kernel
                     components.Add(fields);
                     wides.Add(wide);
                     break;
-                case Symbols.ParamKind.Singleton:
-                    break;
-                case Symbols.ParamKind.Context when p.RefKind == RefKind.Ref:
-                    throw new Unsupported($"it takes '{p.Name}' by ref: a vector loop reduces only into a Reduce<T>");
-                case Symbols.ParamKind.Reduction:
-                    break;
-                case Symbols.ParamKind.Context:
-                    break;
-                case Symbols.ParamKind.Optional when Symbols.IsParallel(method):
-                    throw new Unsupported($"it takes a Maybe<{Symbols.MaybeElement(p.Type)?.Name}> and runs in parallel: an optional column has a vector loop on one thread");
-                case Symbols.ParamKind.Optional:
+                case Symbols.ParamKind.Optional when !Symbols.IsParallel(method):
                     optionals.Add(Lanes(Symbols.MaybeElement(p.Type)!));
                     break;
                 default:
-                    throw new Unsupported(kind switch
-                    {
-                        Symbols.ParamKind.Entity => "it takes the Entity",
-                        Symbols.ParamKind.Entities => "it takes the EntitySpan",
-                        Symbols.ParamKind.World => "it takes the World",
-                        Symbols.ParamKind.ComponentSpan => "it takes spans: a batch method writes its own loop",
-                        Symbols.ParamKind.Mutable => $"it takes a Mut<{Symbols.MutElement(p.Type)?.Name}>",
-                        Symbols.ParamKind.Scratch => $"it takes a Scratch<{Element(p.Type)}>: working memory a row at a time, not one per lane",
-                        Symbols.ParamKind.Lookup => $"it takes a Lookup<{Element(p.Type)}>: a lookup of another entity per row has no vector form",
-                        _ => $"parameter '{p.Name}' is not a component, a singleton, a Reduce<T> or a value",
-                    });
+                    if (Refused(p, kind, method) is { } refused) throw new Unsupported(refused);
+                    break;
             }
         }
         if (first == null) throw new Unsupported("it takes no component");
