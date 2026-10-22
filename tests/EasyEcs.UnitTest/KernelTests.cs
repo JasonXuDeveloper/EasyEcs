@@ -481,6 +481,40 @@ public static class StructKernels
     }
 }
 
+/// <summary>
+/// Kernels with a cold branch: a call the vector loop cannot express under a condition it can. A vector with a lane
+/// that takes it runs its rows through the method, so the calls happen as in the method, in row order.
+/// </summary>
+public static class ColdKernels
+{
+    /// <summary>What the calls saw, in order (a test's record: not a pattern for systems, which keep state in data).</summary>
+    internal static readonly System.Collections.Generic.List<float> Calls = new();
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    internal static void Died(float value) => Calls.Add(value);
+
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Hurt(ref Heat health, in Level damage)
+    {
+        health.Value -= damage.Value;
+        if (health.Value <= 0)
+        {
+            Died(health.Value);
+            health.Value = 0;
+        }
+    }
+
+    // A cold else, a reduction and a return: the reduction's lanes go back to before the vector when it bails.
+    [ForEach(Simd = SimdMode.Require)]
+    internal static void Census(in Rank rank, ref Reduce<Headcount> count)
+    {
+        if (rank.Value < -150) return;
+        if (rank.Value < 100) count.Value.Count++;
+        else for (int i = 0; i < 2; i++) Died(rank.Value + i);
+        count.Value.Sum += rank.Value;
+    }
+}
+
 // Narrow lanes: C# computes on bytes and shorts in int; the vector loop follows the int's low bits and its range.
 public record struct Shade : IComponent { public byte V; }
 public record struct Tone : IComponent { public byte V; }
@@ -688,6 +722,54 @@ public class KernelTests
             (ref Plain2 a, ref Heat _) => StructKernels.Swap(ref a));
         Check(count, (r, i) => new Body3 { P = NextVector3(r, i), M = NextFloat(r, i + 3) }, (r, i) => new Pace3(NextVector3(r, i + 4)), StructKernels.Weigh,
             (ref Body3 b, ref Pace3 v) => StructKernels.Weigh(ref b, in v));
+    }
+
+    /// <summary>
+    /// A cold branch: the rows of a vector where some lane takes it run the method, so the results and the calls (their
+    /// order included) are the method's, whether no row, a few or all take it.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void ColdBranchesRunTheirVectorsThroughTheMethod(int count)
+    {
+        foreach (int every in new[] { 0, 97, 7, 1 })
+        {
+            using var world = new World();
+            var random = new Random(count + every);
+            var healths = new Heat[count];
+            var damages = new Level[count];
+            var entities = new Entity[count];
+            for (int i = 0; i < count; i++)
+            {
+                healths[i] = new Heat { Value = every > 0 && i % every == 0 ? 1 : 100 + i };
+                damages[i] = new Level { Value = i % 3 == 0 ? NextFloat(random, i) : 2 };
+                entities[i] = world.CreateEntity(healths[i], damages[i]);
+            }
+            ColdKernels.Calls.Clear();
+            ColdKernels.Hurt(world);
+            var vector = ColdKernels.Calls.ToArray();
+            ColdKernels.Calls.Clear();
+            for (int i = 0; i < count; i++) ColdKernels.Hurt(ref healths[i], in damages[i]);
+            Assert.That(vector, Is.EqualTo(ColdKernels.Calls.ToArray()), $"the calls, one row in {every}");
+            for (int i = 0; i < count; i++)
+                Assert.That(Same(entities[i].Read<Heat>(), healths[i]), $"Heat of row {i}: {entities[i].Read<Heat>()} instead of {healths[i]}");
+        }
+
+        using var census = new World();
+        var r = new Random(count);
+        var ranks = new Rank[count];
+        for (int i = 0; i < count; i++)
+        {
+            ranks[i] = NextTally(r, i);
+            census.CreateEntity(ranks[i]);
+        }
+        ColdKernels.Calls.Clear();
+        ColdKernels.Census(census);
+        var calls = ColdKernels.Calls.ToArray();
+        ColdKernels.Calls.Clear();
+        var headcount = new Reduce<Headcount> { Value = Headcount.Identity };
+        for (int i = 0; i < count; i++) ColdKernels.Census(in ranks[i], ref headcount);
+        Assert.That(census.GetSingleton<Headcount>(), Is.EqualTo(headcount.Value));
+        Assert.That(calls, Is.EqualTo(ColdKernels.Calls.ToArray()));
     }
 
     private delegate void NarrowRow<TO, TA, TB>(ref TO o, in TA a, in TB b);

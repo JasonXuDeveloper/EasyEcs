@@ -411,6 +411,19 @@ public class GeneratorTests
         Assert.That(generated, Does.Not.Contain("__bail |= (__live & __m"), generated);
     }
 
+    // A call under an if the loop computes: a cold branch, whose lanes send the vector's rows to the method.
+    [Test]
+    public void ACallUnderAConditionIsAColdBranch()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public partial class S : EcsSystem { static void Log(float v) { } [ForEach(Simd = SimdMode.Require)] static void A(ref F f) { f.V -= 1; if (f.V < 0) { Log(f.V); f.V = 0; } } }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("__bail |= (__live & __m1) != global::System.Numerics.Vector<int>.Zero; // a cold branch: the method runs these rows")
+            .And.Contain("var __live = __pass;").And.Not.Contain("Log("), generated);
+    }
+
     // A component of a Vector2 assigned whole: one statement per lane, and as each lane is computed alike, the flat loop.
     [Test]
     public void AWholeComponentOfAVector2IsOneStatementPerLane()

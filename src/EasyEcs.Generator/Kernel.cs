@@ -119,6 +119,7 @@ internal sealed partial class Kernel
     private bool _live;       // a guard reads __live: the lanes of the vector the loop computes for
     private string? _alive; // lanes that have not returned yet, once a return under a condition cleared some
     private bool _bails;
+    private string? _cold; // the reason of the first cold branch: what its rows run the method for
     private bool _fast; // FloatMode.Fast: float sums reordered and the vector approximations of Sin, Exp, Log and kin
     private int _temps;
     private int _flat = -1; // translating the statements of field _flat of a flat loop: that field is lane 0, others refused
@@ -479,6 +480,7 @@ internal sealed partial class Kernel
             {
                 return null;
             }
+            if (kernel._bails) return null; // a branch of one field cold: the loop with bails
             if (f == 0)
             {
                 (setup, body, first) = (kernel._setup.ToString(), kernel._body.ToString(), kernel);
@@ -635,8 +637,8 @@ internal sealed partial class Kernel
                 _active = And(mask, _alive);
                 _body.Append($"var {condition} = {Expr(branch.Condition)};\n"); // before either branch writes what it reads
                 Prove(condition, branch.Condition);
-                Statement(whenTrue, And(mask, condition));
-                if (whenFalse != null) Statement(whenFalse, And(mask, $"~{condition}"));
+                Branch(whenTrue, And(mask, condition)!);
+                if (whenFalse != null) Branch(whenFalse, And(mask, $"~{condition}")!);
                 return true;
             }
             case IReturnOperation { ReturnedValue: null }:
@@ -656,6 +658,61 @@ internal sealed partial class Kernel
             default:
                 throw Not(op);
         }
+    }
+
+    /// <summary>
+    /// A branch under a condition the loop computes: translated, or, when it holds what the loop cannot express (a call,
+    /// a loop, logging), a cold branch: a vector with a lane that takes it sends its rows to the method itself before any
+    /// store, as a Math.Clamp that would throw does. The rows that never take it stay in the vector loop.
+    /// </summary>
+    private void Branch(IOperation op, string mask)
+    {
+        var saved = Save();
+        try
+        {
+            Statement(op, mask);
+        }
+        catch (Unsupported unsupported)
+        {
+            Restore(saved);
+            _cold ??= unsupported.Reason;
+            _bails = _live = true;
+            string lanes = And(mask, _alive)!;
+            _body.Append($"__bail |= (__live & {lanes}) != {Vec(_mask)}.Zero; // a cold branch: the method runs these rows\n");
+        }
+    }
+
+    /// <summary>What a translation changes, kept to undo a branch that turns out cold.</summary>
+    private sealed record State(int Body, int Setup, int Temps, Dictionary<ILocalSymbol, string> Locals, Dictionary<ILocalSymbol, Wide> Wides,
+        Dictionary<ILocalSymbol, string?[]> Structs, HashSet<int> Written, HashSet<int> WrittenOptionals, Dictionary<string, HashSet<int>> Implied,
+        HashSet<string> Guarded, Dictionary<string, string> Broadcasts, string? Alive, bool Bails, bool Live);
+
+    private State Save() => new(_body.Length, _setup.Length, _temps, new(_locals, SymbolEqualityComparer.Default), new(_wides, SymbolEqualityComparer.Default),
+        new(_structs, SymbolEqualityComparer.Default), [.. _written], [.. _writtenOptionals],
+        _implied.ToDictionary(e => e.Key, e => new HashSet<int>(e.Value)), [.. _guarded], new(_broadcasts), _alive, _bails, _live);
+
+    private void Restore(State state)
+    {
+        _body.Length = state.Body;
+        _setup.Length = state.Setup;
+        _temps = state.Temps;
+        static void Reset<TKey, TValue>(Dictionary<TKey, TValue> into, Dictionary<TKey, TValue> from)
+        {
+            into.Clear();
+            foreach (var e in from) into[e.Key] = e.Value;
+        }
+        Reset(_locals, state.Locals);
+        Reset(_wides, state.Wides);
+        Reset(_structs, state.Structs);
+        Reset(_implied, state.Implied);
+        Reset(_broadcasts, state.Broadcasts);
+        _written.Clear();
+        _written.UnionWith(state.Written);
+        _writtenOptionals.Clear();
+        _writtenOptionals.UnionWith(state.WrittenOptionals);
+        _guarded.Clear();
+        _guarded.UnionWith(state.Guarded);
+        (_alive, _bails, _live) = (state.Alive, state.Bails, state.Live);
     }
 
     private void Assignment(IOperation op, string? mask)

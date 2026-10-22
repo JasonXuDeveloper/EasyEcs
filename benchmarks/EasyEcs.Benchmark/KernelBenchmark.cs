@@ -22,7 +22,8 @@ namespace EasyEcs.Benchmark;
 /// pattern) are the calls, conversions and masks a vector loop takes. <c>Tally</c> (an int count, sum, Min and Max) and
 /// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order.
 /// <c>Optional</c> takes a <c>Maybe&lt;Mass&gt;</c> over <c>_holes</c> (a lane mask of the rows that have it).
-/// <c>MoveVector</c> is the Godot sample's move (a
+/// <c>Hurt</c> / <c>HurtHot</c> have a
+/// cold branch (a call when a health reaches 0) that no row / one row in a hundred takes. <c>MoveVector</c> is the Godot sample's move (a
 /// component of one Vector2 assigned whole: a flat loop). <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
 /// <c>Wave</c> calls Sin and Exp per row (FloatMode.Fast: .NET's vector forms). <c>StepParallel</c> / <c>SeekParallel</c> run
 /// <c>Step</c> / <c>Seek</c> on several threads, the per-row parallel job against the vector loop in each chunk. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
@@ -34,7 +35,7 @@ public class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _fields, _holes, _halves, _pixels, _vectors;
+    private World _world, _fields, _holes, _halves, _pixels, _vectors, _calm, _hot;
 
     [GlobalSetup]
     public void Setup()
@@ -57,6 +58,9 @@ public class KernelBenchmark
         for (int i = 0; i < Entities; i++)
             _pixels.CreateEntity(new Lum { V = (byte)random.Next(256) }, new Glow { V = (byte)random.Next(256) });
 
+        _calm = Wounded(Entities, 0);
+        _hot = Wounded(Entities, 0.01);
+
         _vectors = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _vectors.SetPull(1f / 60);
         _vectors.Reserve<Pos2D, Vel2D>(Entities);
@@ -71,6 +75,17 @@ public class KernelBenchmark
             _fields.CreateEntity(new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() }, new P3 { X = F(), Y = F(), Z = F() },
                 new V3 { X = F(), Y = F(), Z = F() }, new P4 { X = F(), Y = F(), Z = F(), W = F() }, new V4 { X = F(), Y = F(), Z = F(), W = F() },
                 new D3 { X = F(), Y = F(), Z = F() });
+    }
+
+    /// <summary>Healths that take no damage, a share <paramref name="rate"/> of them at 0: those take the cold branch every pass.</summary>
+    private static World Wounded(int entities, double rate)
+    {
+        var world = new World(new WorldOptions { InitialEntityCapacity = entities });
+        world.Reserve<Heat, Speed>(entities);
+        var random = new Random(3);
+        for (int i = 0; i < entities; i++)
+            world.CreateEntity(new Heat { Value = random.NextDouble() < rate ? 0 : 100 }, new Speed());
+        return world;
     }
 
     /// <summary>A world of Heat, Speed and Mass whose rows in <paramref name="hole"/> lose Mass (in place: a presence bit).</summary>
@@ -99,6 +114,8 @@ public class KernelBenchmark
         _halves.Dispose();
         _pixels.Dispose();
         _vectors.Dispose();
+        _calm.Dispose();
+        _hot.Dispose();
     }
 
     [Benchmark(Baseline = true)]
@@ -286,6 +303,26 @@ public class KernelBenchmark
     public void WaveGenerated() => Kernels.Wave(_world);
 
     [Benchmark]
+    public void HurtScalar()
+    {
+        var job = new HurtRows();
+        _calm.ForEach<Heat, Speed, HurtRows>(ref job);
+    }
+
+    [Benchmark]
+    public void HurtGenerated() => Kernels.Hurt(_calm);
+
+    [Benchmark]
+    public void HurtHotScalar()
+    {
+        var job = new HurtRows();
+        _hot.ForEach<Heat, Speed, HurtRows>(ref job);
+    }
+
+    [Benchmark]
+    public void HurtHotGenerated() => Kernels.Hurt(_hot);
+
+    [Benchmark]
     public void MoveVectorScalar()
     {
         var job = new MoveVectorRows { Pull = _vectors.Pull };
@@ -450,6 +487,12 @@ public class KernelBenchmark
         }
     }
 
+    private struct HurtRows : IForEach<Heat, Speed>, INoStructuralChanges
+    {
+        public void Execute(ref Heat heat, ref Speed speed) => Kernels.Hurt(ref heat, in speed);
+        static int IForEach<Heat, Speed>.WriteMask => 1;
+    }
+
     public record struct Pos2D(Vector2 Value) : IComponent;
     public record struct Vel2D(Vector2 Value) : IComponent;
 
@@ -572,6 +615,23 @@ public class KernelBenchmark
             if (mass.HasValue) heat.Value += speed.Value * Dt / MathF.Max(mass.Value.Value, 0.5f);
             else heat.Value += speed.Value * Dt;
         }
+
+        // A cold branch: a call under a condition few rows meet. A vector with such a row runs its rows through the method.
+        [ForEach(Simd = SimdMode.Require)]
+        internal static void Hurt(ref Heat health, in Speed damage)
+        {
+            health.Value -= damage.Value;
+            if (health.Value <= 0)
+            {
+                health.Value = 0;
+                Died();
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void Died() => Deaths++;
+
+        internal static int Deaths;
 
         // The Godot sample's move: a component of a Vector2 assigned whole, Vector2's operators lane by lane (a flat loop).
         [ForEach(Simd = SimdMode.Require)]
