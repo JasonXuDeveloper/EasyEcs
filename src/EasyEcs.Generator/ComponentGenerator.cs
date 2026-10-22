@@ -588,7 +588,8 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         /// have (<c>Entity.Id</c>, <c>Prefab.SetBuffer</c>) and those another struct or enum of its namespace (at any depth) is
         /// offered too: both would emit them, ambiguous wherever the namespace is imported, so both give them up
         /// (<c>Shield</c>'s <c>IsShieldDisabled</c> and the tag <c>ShieldDisabled</c>'s). A nested type named like another
-        /// struct of its namespace gets none at all; the namesake it yields to keeps its own.
+        /// struct of its namespace gets none at all; the namesake it yields to keeps its own. Only types that get members
+        /// count: a private or file-local struct takes nothing from another (<c>Tests.Census</c> and <c>Server.Census</c>).
         /// </summary>
         public string[] Members(INamedTypeSymbol type, INamespaceSymbol easyEcs, Compilation compilation)
         {
@@ -601,17 +602,14 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 var other = pending.Pop();
                 foreach (var nested in other.GetTypeMembers()) pending.Push(nested);
                 if (other.TypeKind is not (TypeKind.Struct or TypeKind.Enum) || SymbolEqualityComparer.Default.Equals(other, type)) continue;
-                if (other.Name == type.Name)
-                {
-                    if (type.ContainingType != null) return [];
-                    continue;
-                }
-
-                // Each of its names holds its own: one that holds none of ours shares none (the cheap test first).
-                if (!Overlaps(names, other.Name)
+                // Each of its names holds its own: one that holds none of ours shares none (the cheap test first). A type
+                // no other file can name (private, file-local) gets no members, so it takes none from its namesakes.
+                bool namesake = other.Name == type.Name;
+                if (namesake && type.ContainingType == null || !Overlaps(names, other.Name)
                     || !compilation.IsSymbolAccessibleWithin(other, compilation.Assembly)
                     || Of(other, easyEcs.ContainingAssembly) is not { } shape)
                     continue;
+                if (namesake) return [];
                 foreach (var name in shape.Names(other.Name)) (shared ??= []).Add(name);
             }
 
