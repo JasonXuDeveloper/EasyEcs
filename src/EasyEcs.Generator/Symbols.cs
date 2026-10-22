@@ -577,6 +577,11 @@ internal static class Symbols
         /// <summary><c>Lookup&lt;T&gt;</c>: read-only access to component <c>T</c> of any entity (a read of <c>T</c>).</summary>
         Lookup,
         /// <summary>
+        /// <c>Tile&lt;TCell, TTile&gt;</c>: the entity's <c>DynamicBuffer&lt;TCell&gt;</c> with its neighbours' in the grid of
+        /// <c>TTile</c> (an <c>ITile&lt;TKey&gt;</c>): a read of both, and of TTile's index.
+        /// </summary>
+        Tile,
+        /// <summary>
         /// A value the caller passes to the entry point of a [ForEach] method outside a system (<c>ref int dead</c>, a
         /// configuration): any type but a component, a singleton or the framework's own, by value, <c>ref</c> or <c>in</c>.
         /// </summary>
@@ -767,13 +772,13 @@ internal static class Symbols
     }
 
     /// <summary>
-    /// Why <paramref name="lookup"/>, a <c>Lookup&lt;T&gt;</c> parameter of <paramref name="method"/>, would read rows the
-    /// pass writes (EECS059), or null: another parameter writes T (<c>ref T</c>, <c>Mut&lt;T&gt;</c>, <c>Span&lt;T&gt;</c>,
+    /// Why <paramref name="lookup"/>, a <c>Lookup&lt;T&gt;</c> or <c>Tile&lt;TCell, TTile&gt;</c> parameter of
+    /// <paramref name="method"/>, would read rows of <paramref name="target"/> (one of <see cref="LookedUp"/>) the pass
+    /// writes (EECS059), or null: another parameter writes it (<c>ref T</c>, <c>Mut&lt;T&gt;</c>, <c>Span&lt;T&gt;</c>,
     /// or a <c>Maybe&lt;T&gt;</c> the method writes through).
     /// </summary>
-    public static string? LookupProblem(IMethodSymbol method, IParameterSymbol lookup)
+    public static string? LookupProblem(IMethodSymbol method, IParameterSymbol lookup, ITypeSymbol target)
     {
-        var target = LookupElement(lookup.Type);
         var body = (method.PartialImplementationPart ?? method).DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() as MethodDeclarationSyntax;
         foreach (var p in method.Parameters)
         {
@@ -835,6 +840,8 @@ internal static class Symbols
         if (ScratchElement(p.Type) != null) return ParamKind.Scratch;
         if (LookupElement(p.Type) is { } looked)
             return looked.IsValueType && IsA(looked, Component) ? ParamKind.Lookup : ParamKind.Invalid;
+        if (TileElements(p.Type) is { } tile)
+            return tile.Grid.IsValueType && TileKey(tile.Grid) != null ? ParamKind.Tile : ParamKind.Invalid;
         return Named(p.Type, Entity) ? ParamKind.Entity
             : Named(p.Type, EntitySpan) ? ParamKind.Entities
             : Named(p.Type, World) ? ParamKind.World
@@ -886,6 +893,28 @@ internal static class Symbols
         type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Lookup<T>")
             ? named.TypeArguments[0]
             : null;
+
+    /// <summary>The cell type and the tile component of a <c>Tile&lt;TCell, TTile&gt;</c>, else null.</summary>
+    public static (ITypeSymbol Cell, ITypeSymbol Grid)? TileElements(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Tile<TCell, TTile>")
+            ? (named.TypeArguments[0], named.TypeArguments[1])
+            : null;
+
+    /// <summary>The key type of a tile component (<c>ITile&lt;TKey&gt;</c>), else null.</summary>
+    public static ITypeSymbol? TileKey(ITypeSymbol grid) =>
+        grid.AllInterfaces.FirstOrDefault(i => Named(i.OriginalDefinition, "EasyEcs.ITile<TKey>"))?.TypeArguments[0];
+
+    /// <summary>
+    /// The components a parameter reads of other entities than its own: a <c>Lookup&lt;T&gt;</c>'s T, a
+    /// <c>Tile&lt;TCell, TTile&gt;</c>'s <c>DynamicBuffer&lt;TCell&gt;</c> and TTile; else none.
+    /// </summary>
+    public static IEnumerable<ITypeSymbol> LookedUp(IParameterSymbol p, Compilation compilation)
+    {
+        if (LookupElement(p.Type) is { } looked) yield return looked;
+        if (TileElements(p.Type) is not { } tile) yield break;
+        if (compilation.GetTypeByMetadataName("EasyEcs.DynamicBuffer`1") is { } buffer) yield return buffer.Construct(tile.Cell);
+        yield return tile.Grid;
+    }
 
     /// <summary>
     /// The key type of indexed component <paramref name="type"/> (<c>IIndexed&lt;TKey&gt;</c>) when a

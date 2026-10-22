@@ -99,6 +99,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
         // The instance parameter must not take the name of one of the method's own parameters (CS0100).
         string self = "owner";
         while (method.Parameters.Any(p => p.Name == self)) self = "_" + self;
+        // A stencil over a tile is compiled as a root of its own, so the JIT spends its inlining budget (a multiple of
+        // the root's size) on the method's loop, its samples and the helpers they call: inlined into this small
+        // accessor (or the job), a method of that size uses up the budget and calls its samples. The accessor runs
+        // unoptimized (NoOptimization: no inlining in it, one call per entity), and is never inlined itself.
+        if (method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Tile))
+            sb.Append("    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining | global::System.Runtime.CompilerServices.MethodImplOptions.NoOptimization)]\n");
         sb.Append($"    [global::System.Runtime.CompilerServices.UnsafeAccessor(global::System.Runtime.CompilerServices.UnsafeAccessorKind.{kind}, Name = \"{method.Name}\")]\n");
         sb.Append($"    internal static extern {method.Returns} {method.Name}_{index}{method.TypeParameters}([global::System.Runtime.CompilerServices.UnsafeAccessorType(\"{owner.AccessorType}\")] object {self}{parameters}){method.Constraints};\n\n");
     }
@@ -168,6 +174,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 fields.Add($"a{i} = new global::EasyEcs.Reduce<{p.Type}> {{ Value = {p.Type}.Identity }}"); // every partial result starts there
             else if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // its index, built before the pass
                 fields.Add($"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Type}, {p.Key}>({world})");
+            else if (p.Kind == Symbols.ParamKind.Tile && method.FirstOfGrid(i)) // the grid's index, built before the pass
+                fields.Add($"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Grid}, {p.Key}>({world})");
         }
 
         return fields.Count == 0 ? "()" : $" {{ {string.Join(", ", fields)} }}";
@@ -253,11 +261,16 @@ public sealed class SystemGenerator : IIncrementalGenerator
         }
 
         foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch))
-                     .Select(p => (p.Kind, p.Type, p.RefKind, p.Key)).Distinct())
+                     .Select(p => (p.Kind, p.Type, p.RefKind, p.Key, p.Grid)).Distinct())
         {
             if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // a read, and its index built before a parallel stage
             {
                 sb.Append($"            access.Index<{p.Type}, {p.Key}>();\n");
+                continue;
+            }
+            if (p.Kind == Symbols.ParamKind.Tile) // reads of the cells and the grid component, the grid's index built before
+            {
+                sb.Append($"            access.Index<{p.Grid}, {p.Key}>();\n            access.Read<{p.Type}>();\n");
                 continue;
             }
 
@@ -301,6 +314,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             // This thread's box, resolved once per chunk (per pass on one thread): the job's copy keeps it.
             Symbols.ParamKind.Scratch => $"new global::EasyEcs.Scratch<{p.Type}>(ref (t{i} ??= global::EasyEcs.Scratch<{p.Type}>.Of<{job}>()).Value)",
             Symbols.ParamKind.Lookup => $"new global::EasyEcs.Lookup<{p.Type}>(World, {(p.Key.Length > 0 ? $"k{i}" : "null")})",
+            Symbols.ParamKind.Tile => $"new global::EasyEcs.Tile<{p.Cell}, {p.Grid}>({(runs ? "entities[(int)i]" : "entity")}, in n{method.GridOf(i)})",
             Symbols.ParamKind.Context when local[i] => $"ref l{i}",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
             _ => "World",
@@ -333,7 +347,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 sb.Append($"        public global::EasyEcs.Reduce<{p.Type}> a{i};\n");
             else if (p.Kind == Symbols.ParamKind.Scratch) // this thread's box (null until the first row of a chunk)
                 sb.Append($"        public global::System.Runtime.CompilerServices.StrongBox<{p.Type}> t{i};\n");
-            else if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // the component's index, built
+            else if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 } || p.Kind == Symbols.ParamKind.Tile && method.FirstOfGrid(i)) // an index, built
                 sb.Append($"        public object k{i};\n");
         }
         if (sb[sb.Length - 2] != '{') sb.Append('\n'); // a blank line after the fields, if any
@@ -342,7 +356,11 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         sb.Append($"        public void Execute({first}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
         string call = $"__ForEach{owner.TypeParameters}.{method.Name}_{number}{method.TypeParameters}({args});";
-        if (!runs && !local.Contains(true))
+        // A grid's neighbours, found once per entity for every Tile of the grid the method takes.
+        string grids = string.Concat(Enumerable.Range(0, method.Parameters.Length).Where(method.FirstOfGrid).Select(i =>
+            $"var n{i} = global::EasyEcs.TileNeighbours.Of<{method.Parameters[i].Grid}, {method.Parameters[i].Key}>(k{i}, {(runs ? "entities[(int)i]" : "entity")}); "));
+        if (grids.Length > 0) call = runs ? $"{{ {grids}{call} }}" : grids + call;
+        if (!runs && !local.Contains(true) && grids.Length == 0)
             sb.Append($"            => {call}\n");
         else
         {
@@ -481,7 +499,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// <param name="Declared">The parameter as declared, with its modifier (<c>in global::Health</c>), for the accessor.</param>
     /// <param name="Tracked">A Maybe's or Mut's element tracks changes (a write through it is stamped).</param>
     /// <param name="Key">A Lookup's index key type when its index is built before the pass (<see cref="Symbols.LookupKey"/>), else "".</param>
-    private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name, string Declared, bool Tracked = false, string Key = "");
+    /// <param name="Cell">A Tile's cell type, else "".</param>
+    /// <param name="Grid">A Tile's tile component (its key is <paramref name="Key"/>), else "".</param>
+    private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name, string Declared, bool Tracked = false, string Key = "",
+        string Cell = "", string Grid = "");
 
     /// <param name="Stable">
     /// The method cannot make structural changes: it is static, takes no <c>World</c>, and uses its <c>Entity</c>
@@ -521,10 +542,21 @@ public sealed class SystemGenerator : IIncrementalGenerator
         /// <summary>The queried component types, as type arguments of World.ForEach / IForEach.</summary>
         public string ComponentTypes => string.Join(", ", Query);
 
-        /// <summary>Runs per entity with its handle: it takes the Entity, a Maybe looked up through it, or a Mut that stamps through it.</summary>
-        public bool TakesEntity => Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable);
+        /// <summary>Runs per entity with its handle: it takes the Entity, a Maybe looked up through it, a Mut that stamps through it, or a Tile of it.</summary>
+        public bool TakesEntity => Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Tile);
 
         public bool TakesWorld => Parameters.Any(p => p.Kind == Symbols.ParamKind.World);
+
+        /// <summary>The first Tile parameter of its grid (whose neighbours and index its fields hold): parameter <paramref name="i"/> is one.</summary>
+        public bool FirstOfGrid(int i) => Parameters[i].Kind == Symbols.ParamKind.Tile && GridOf(i) == i;
+
+        /// <summary>The first Tile parameter of the grid of Tile parameter <paramref name="i"/>.</summary>
+        public int GridOf(int i)
+        {
+            for (int j = 0; j < i; j++)
+                if (Parameters[j].Kind == Symbols.ParamKind.Tile && Parameters[j].Grid == Parameters[i].Grid) return j;
+            return i;
+        }
 
         /// <summary>The job holds the World: the method takes it, or a Lookup reads through it.</summary>
         public bool NeedsWorld => Parameters.Any(p => p.Kind is Symbols.ParamKind.World or Symbols.ParamKind.Lookup);
@@ -576,6 +608,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     Symbols.ParamKind.Scratch => new ParamModel(Symbols.ParamKind.Scratch, Symbols.ScratchElement(p.Type)!.ToDisplayString(Symbols.Fqn), "", p.Name, declared),
                     Symbols.ParamKind.Lookup => new ParamModel(Symbols.ParamKind.Lookup, Symbols.LookupElement(p.Type)!.ToDisplayString(Symbols.Fqn), "in", p.Name, declared,
                         Key: Symbols.LookupKey(p, method, Symbols.WithBody(method, syntax, model).Item1)?.ToDisplayString(Symbols.Fqn) ?? ""),
+                    Symbols.ParamKind.Tile => TileModel(p, declared),
                     Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn),
                         p.RefKind switch { RefKind.Ref => "ref", RefKind.In => "in", _ => "" }, p.Name, declared),
                     var kind => new ParamModel(kind, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.Ref ? "ref" : "in", p.Name, declared),
@@ -602,6 +635,13 @@ public sealed class SystemGenerator : IIncrementalGenerator
             }
 
             foreach (var (kind, type, _) in Symbols.AttributeFilters(method)) Add(kind, type);
+            // A Tile reads the entity's cells and tile component: the rows must have both.
+            foreach (var p in method.Parameters)
+                if (Symbols.TileElements(p.Type) is { } tile && Symbols.Classify(p) == Symbols.ParamKind.Tile)
+                {
+                    Add(Symbols.FilterKind.With, tile.Grid);
+                    if (model.Compilation.GetTypeByMetadataName("EasyEcs.DynamicBuffer`1") is { } buffer) Add(Symbols.FilterKind.With, buffer.Construct(tile.Cell));
+                }
 
             var query = parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan or Symbols.ParamKind.Mutable)
                 .Select(p => p.Type).ToList();
@@ -619,7 +659,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             // The system group's filters ([Without<Inactive>] public struct Gameplay : ISystemGroup, ISystemGroupWith<T> /
             // ISystemGroupWithout<T>) join every method's (after the queried component is chosen: a group's [With<T>] only filters).
             foreach (var (kind, type, _, _) in Symbols.GroupFilters(method)) Add(kind, type);
-            if (query.Count > 0) with.RemoveAll(query.Contains); // a group's [With<T>] the method already queries
+            if (query.Count > 0) with.RemoveAll(query.Contains); // a group's [With<T>] (or a Tile's) the method already queries
 
             bool stable = Symbols.IsStable(method, syntax, model);
             bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model) == null;
@@ -645,6 +685,14 @@ public sealed class SystemGenerator : IIncrementalGenerator
         }
     }
 
+
+    private static ParamModel TileModel(IParameterSymbol p, string declared)
+    {
+        var (cell, grid) = Symbols.TileElements(p.Type)!.Value;
+        string cellName = cell.ToDisplayString(Symbols.Fqn);
+        return new ParamModel(Symbols.ParamKind.Tile, $"global::EasyEcs.DynamicBuffer<{cellName}>", "in", p.Name, declared,
+            Key: Symbols.TileKey(grid)!.ToDisplayString(Symbols.Fqn), Cell: cellName, Grid: grid.ToDisplayString(Symbols.Fqn));
+    }
 
     private sealed record UpdateModel(OwnerModel Owner, EquatableArray<ForEachModel> Methods)
     {
