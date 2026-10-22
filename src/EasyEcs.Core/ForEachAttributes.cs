@@ -66,8 +66,9 @@ public sealed class ForEachAttribute : Attribute
     /// method's bit for bit, so a float sum into a <see cref="Reduce{T}"/> stays one row at a time (EECS055 says so):
     /// the lanes of a vector loop each add their own rows, in another order. <see cref="FloatMode.Fast"/> accepts that
     /// order: the sum of the same rows, rounded differently (not bit for bit the method's, and not the same across
-    /// vector widths). Integer sums and the Min / Max of any lane type are exact either way. Default
-    /// <see cref="FloatMode.Exact"/>.
+    /// vector widths), and the vector approximations of <c>Sin</c>, <c>Cos</c>, <c>Exp</c>, <c>Log</c>, <c>Log2</c> and
+    /// <c>Hypot</c> (within 1 or 2 ulp of the scalar functions). Integer sums and the Min / Max of any lane type are exact
+    /// either way. Default <see cref="FloatMode.Exact"/>: the same results on every machine (each lane an IEEE operation).
     /// </summary>
     public FloatMode FloatMode { get; init; }
 }
@@ -75,7 +76,9 @@ public sealed class ForEachAttribute : Attribute
 /// <summary>
 /// Whether a <see cref="ForEachAttribute"/> method runs as a vector loop (<see cref="ForEachAttribute.Simd"/>). A method
 /// qualifies when it is static, makes no structural change (on one thread or in parallel), takes components (by <c>ref</c> or
-/// <c>in</c>), singletons and values, and computes with operations that have an exact vector counterpart.
+/// <c>in</c>) and <see cref="Maybe{T}"/> of them, singletons and values, and computes with operations that have an exact
+/// vector counterpart. <see cref="World.DescribeSchedule"/> names the loop each method of a system got
+/// (<see cref="SystemInfo.Loops"/>).
 /// </summary>
 public enum SimdMode
 {
@@ -95,7 +98,11 @@ public enum FloatMode
     /// <summary>Every result bit for bit the method's: float sums of a reduction stay one row at a time.</summary>
     Exact,
 
-    /// <summary>Float sums of a reduction may add their rows in another order (per vector lane), so they round differently.</summary>
+    /// <summary>
+    /// Float sums of a reduction may add their rows in another order (per vector lane), so they round differently, and
+    /// Sin, Cos, Exp, Log, Log2 and Hypot take .NET's vector approximations: results may differ from the method's and
+    /// between machines.
+    /// </summary>
     Fast,
 }
 

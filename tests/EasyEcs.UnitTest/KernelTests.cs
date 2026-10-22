@@ -515,6 +515,43 @@ public static class ColdKernels
     }
 }
 
+// Wide components: more fields than a vector loop splits, or fields of other types beside the 4-byte lanes a method uses.
+public record struct Craft12(float X, float Y, float VX, float VY, float Fuel, float Mass, float Drag, float Heat, float Spin, float Tilt, float Yaw, float Roll) : IComponent;
+public struct Mixed : IComponent
+{
+    public float Speed;
+    public bool Alive;
+    public byte Team;
+    public short Rank;
+    public int Hp;
+    public double Score;
+    public float Armor;
+}
+
+/// <summary>
+/// Kernels over wide components: the lanes they use gathered by permutes (AVX-512), the rest of each row stored as
+/// loaded, so results are the method's bit for bit.
+/// </summary>
+public static class WideKernels
+{
+    [ForEach]
+    internal static void Steer(ref Craft12 c, in Dt2 step)
+    {
+        float d = c.VX * step.Seconds;
+        float s = MathF.Sqrt(c.VY * c.VY + d * d);
+        c.X = MathF.Max(c.X + s * step.Seconds, 0f);
+        c.VX = c.VX * c.VY - s;
+    }
+
+    [ForEach]
+    internal static void Wear(ref Mixed m, in Level damage)
+    {
+        if (m.Speed > 1) m.Hp -= 1;
+        m.Armor = MathF.Max(m.Armor - m.Speed * damage.Value, 0) * 0.5f + damage.Value * damage.Value;
+        m.Speed = m.Speed * 0.75f - m.Armor / 8;
+    }
+}
+
 /// <summary>A system of three methods for the schedule's loop lines: a flat vector loop, a cold branch, one scalar.</summary>
 public class LoopsSystem : EcsSystem
 {
@@ -739,6 +776,27 @@ public class KernelTests
             (ref Plain2 a, ref Heat _) => StructKernels.Swap(ref a));
         Check(count, (r, i) => new Body3 { P = NextVector3(r, i), M = NextFloat(r, i + 3) }, (r, i) => new Pace3(NextVector3(r, i + 4)), StructKernels.Weigh,
             (ref Body3 b, ref Pace3 v) => StructKernels.Weigh(ref b, in v));
+    }
+
+    private static Craft12 NextCraft(Random r, int i) => new(NextFloat(r, i), NextFloat(r, i + 1), NextFloat(r, i + 2), NextFloat(r, i + 3), i, -i, 2, 3, 4, 5, 6, 7);
+
+    private static Mixed NextMixed(Random r, int i) => new()
+    {
+        Speed = NextFloat(r, i), Alive = i % 2 == 0, Team = (byte)i, Rank = (short)-i, Hp = r.Next(-5, 5), Score = i * 0.5, Armor = NextFloat(r, i + 1),
+    };
+
+    /// <summary>
+    /// Wide components (12 fields of a record struct, fields of five types): the lanes a method uses are gathered and
+    /// written back by permutes, every other field kept as loaded, in tables of any length and with rows that lack the
+    /// component (their masked words run the method).
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void WideComponentsMatchTheMethodBitForBit(int count)
+    {
+        foreach (float dt in new[] { 1f / 60, float.NaN, -3e7f })
+            Check(count, NextCraft, (r, i) => new Heat(), w => { w.SetDt2(dt); WideKernels.Steer(w); }, (ref Craft12 c, ref Heat _) => WideKernels.Steer(ref c, new Dt2(dt)));
+        Check(count, NextMixed, NextLevel, WideKernels.Wear, (ref Mixed m, ref Level l) => WideKernels.Wear(ref m, in l));
+        CheckHoles(count, i => i % 3 == 1, NextMixed, NextLevel, WideKernels.Wear, (ref Mixed m, ref Level l) => WideKernels.Wear(ref m, in l));
     }
 
     /// <summary>
@@ -1628,6 +1686,8 @@ public class KernelTests
             var n = world.CreateEntity(new Ink(), new Shade { V = (byte)i }, new Tone { V = (byte)(i * 7) }, new Rgba(), new Tint4());
             if (i % 4 == 0) n.Remove<Tone>(); // narrow masked words: the method on their passing rows
             world.CreateEntity(new Place2(new Vector2(i, 1)), new Pace2(Vector2.One), new Body3 { M = 2 }, new Pace3(Vector3.One));
+            var w = world.CreateEntity(new Craft12 { VX = i }, new Mixed { Speed = i }, new Level());
+            if (i % 5 == 0) w.Remove<Craft12>(); // wide masked words: the method on their passing rows
         }
         world.SetBounds(-10, 10);
         world.SetDt2(0.5f);
@@ -1660,6 +1720,8 @@ public class KernelTests
             NarrowKernels.Blend(world);
             StructKernels.Move(world);
             StructKernels.Bounce(world);
+            WideKernels.Steer(world);
+            WideKernels.Wear(world);
             StructKernels.Weigh(world);
         }
 

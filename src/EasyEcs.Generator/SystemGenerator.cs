@@ -340,6 +340,11 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 sb.Append($"        public object k{i};\n");
         }
         if (sb[sb.Length - 2] != '{') sb.Append('\n'); // a blank line after the fields, if any
+        // A wide component's permute tables and layout check (Kernel.Wide.cs): statics, built once per job type.
+        if (method.Simd is { Statics.Length: > 0 } statics)
+        {
+            foreach (var line in statics.Statics.Split('\n')) sb.Append(line.Length > 0 ? "        " + line : "").Append('\n');
+        }
         string call = $"__ForEach{owner.TypeParameters}.{method.Name}_{number}{method.TypeParameters}({args});";
         string first = method.IsBatch ? "global::EasyEcs.EntitySpan entities, " : method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
@@ -373,7 +378,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 if (method.Simd is { Flat: { } flat } && !masked) EmitFlatLoop(sb, flat, method.Simd, components, indent);
                 // Narrow lanes have no lane masks of their own (a Vector512<byte> is a whole word): the passing rows of a
                 // masked word run the method.
-                else if (method.Simd is { Size: < 4 } && masked) sb.Append($"{indent}nint i = 0;\n");
+                // So do a wide component's (its write-back stores whole vectors of rows).
+                else if (method.Simd is { Size: < 4 } or { Wide: not null } && masked) sb.Append($"{indent}nint i = 0;\n");
                 else if (method.Simd is { } simd) EmitVectorLoop(sb, simd, components, indent, call, masked);
                 sb.Append(method.Simd == null
                     ? $"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n"
@@ -441,6 +447,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string vector = $"{Kernel.V}<{simd.Columns[0]}>"; // every column has lanes of one size: one count
         // Components of several fields need the shuffles of Interleaved; without them, every row runs the method.
         string interleaved = simd.Interleaves ? $" && global::EasyEcs.Interleaved.{Accelerated}" : "";
+        // A wide component's permutes are AVX-512's, and its layout the generator's (checked once per job type).
+        if (simd.Wide != null) interleaved += $" && global::System.Runtime.Intrinsics.X86.Avx512F.IsSupported && {simd.Wide}";
         loop.Append($"{indent}if ({Kernel.V}.IsHardwareAccelerated{interleaved} && rows - i >= {vector}.Count)\n{indent}{{\n");
         string inner = indent + "    ", body = inner + "    ";
         foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) loop.Append(inner).Append(line).Append('\n');
@@ -473,7 +481,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         text.Replace(Kernel.Visited, masked ? "pass" : "ulong.MaxValue");
         sb.Append(text.ToString().Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512)
             .Replace(Accelerated, "IsAccelerated512").Replace(Kernel.LanesForm, "In512"));
-        sb.Append(text.Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(Kernel.LanesForm, ""));
+        if (simd.Wide == null) sb.Append(text.Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(Kernel.LanesForm, ""));
     }
 
     /// <summary>
@@ -632,8 +640,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Columns[0]}>)" };
             if (simd.Flat != null) parts.Add("flat");
             else if (simd.Interleaves) parts.Add("interleaved fields");
+            if (simd.Wide != null) parts[0] = "vector (Vector512 only)";
+            if (simd.Wide != null) parts.Add("wide component (permutes)");
             if (Parallel) parts.Add("in parallel chunks");
-            else parts.Add(simd.Size < 4 ? "masked words scalar" : "masked words vector");
+            else parts.Add(simd.Size < 4 || simd.Wide != null ? "masked words scalar" : "masked words vector");
             if (simd.Cold != null) parts.Add($"cold branch ({simd.Cold})");
             return $"{Name}: {string.Join(", ", parts)}";
         }

@@ -24,7 +24,8 @@ namespace EasyEcs.Benchmark;
 /// <c>Optional</c> takes a <c>Maybe&lt;Mass&gt;</c> over <c>_holes</c> (a lane mask of the rows that have it).
 /// <c>Hurt</c> / <c>HurtHot</c> have a
 /// cold branch (a call when a health reaches 0) that no row / one row in a hundred takes. <c>MoveVector</c> is the Godot sample's move (a
-/// component of one Vector2 assigned whole: a flat loop). <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
+/// component of one Vector2 assigned whole: a flat loop). <c>Steer</c> uses 3 of the 12 fields of a wide component (permutes
+/// gather them into lanes and back on AVX-512, the other 9 kept as loaded). <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
 /// <c>Wave</c> calls Sin and Exp per row (FloatMode.Fast: .NET's vector forms). <c>StepParallel</c> / <c>SeekParallel</c> run
 /// <c>Step</c> / <c>Seek</c> on several threads, the per-row parallel job against the vector loop in each chunk. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
 /// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
@@ -35,7 +36,7 @@ public class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _fields, _holes, _halves, _pixels, _vectors, _calm, _hot;
+    private World _world, _fields, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft;
 
     [GlobalSetup]
     public void Setup()
@@ -67,6 +68,12 @@ public class KernelBenchmark
         for (int i = 0; i < Entities; i++)
             _vectors.CreateEntity(new Pos2D(new Vector2((float)random.NextDouble(), (float)random.NextDouble())),
                 new Vel2D(new Vector2((float)random.NextDouble() - 0.5f, (float)random.NextDouble() - 0.5f)));
+
+        _craft = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _craft.SetPull(1f / 60);
+        _craft.Reserve<Craft>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _craft.CreateEntity(new Craft { X = (float)random.NextDouble(), VX = (float)random.NextDouble() - 0.5f, VY = (float)random.NextDouble() - 0.5f, Fuel = i });
 
         _fields = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _fields.Reserve<P2, V2, P3, V3, P4, V4, D3>(Entities);
@@ -114,6 +121,7 @@ public class KernelBenchmark
         _halves.Dispose();
         _pixels.Dispose();
         _vectors.Dispose();
+        _craft.Dispose();
         _calm.Dispose();
         _hot.Dispose();
     }
@@ -333,6 +341,16 @@ public class KernelBenchmark
     public void MoveVectorGenerated() => Kernels.MoveVector(_vectors);
 
     [Benchmark]
+    public void SteerScalar()
+    {
+        var job = new SteerRows { Pull = _craft.Pull };
+        _craft.ForEach<Craft, SteerRows>(ref job);
+    }
+
+    [Benchmark]
+    public void SteerGenerated() => Kernels.Steer(_craft);
+
+    [Benchmark]
     public void BrightenScalar()
     {
         var job = new BrightenRows();
@@ -503,6 +521,19 @@ public class KernelBenchmark
         static int IForEach<Pos2D, Vel2D>.WriteMask => 1;
     }
 
+    /// <summary>A wide component: 12 floats a row, of which Steer uses 3.</summary>
+    public struct Craft : IComponent
+    {
+        public float X, Y, VX, VY, Fuel, Mass, Drag, Heat, Spin, Tilt, Yaw, Roll;
+    }
+
+    private struct SteerRows : IForEach<Craft>, INoStructuralChanges
+    {
+        public Pull Pull;
+        public void Execute(ref Craft craft) => Kernels.Steer(ref craft, in Pull);
+        static int IForEach<Craft>.WriteMask => 1;
+    }
+
     public struct Lum : IComponent { public byte V; }
     public struct Glow : IComponent { public byte V; }
 
@@ -637,6 +668,16 @@ public class KernelBenchmark
         [ForEach(Simd = SimdMode.Require)]
         internal static void MoveVector(ref Pos2D place, in Vel2D motion, in Pull pull) =>
             place = new Pos2D(place.Value + motion.Value * pull.Value);
+
+        // 3 of a wide component's 12 fields: gathered by permutes into lanes (AVX-512), a few dependent operations each.
+        [ForEach(Simd = SimdMode.Require)]
+        internal static void Steer(ref Craft craft, in Pull pull)
+        {
+            float d = craft.VX * pull.Value;
+            float s = MathF.Sqrt(craft.VY * craft.VY + d * d);
+            craft.X = MathF.Max(craft.X + s * pull.Value, 0f);
+            craft.VX = craft.VX * craft.VY - s;
+        }
 
         // Narrow lanes: a saturating byte sum (AddSaturate), then a wrapping one past a threshold: 64 rows per Vector512.
         [ForEach(Simd = SimdMode.Require)]

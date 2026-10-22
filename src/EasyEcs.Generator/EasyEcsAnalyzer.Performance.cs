@@ -144,11 +144,15 @@ public sealed partial class EasyEcsAnalyzer
         "[ForEach] method '{0}' runs one row at a time, without a vector loop: {1}",
         Category, DiagnosticSeverity.Info, true,
         "The generator turns a [ForEach] method into a Vector<T> loop (several rows per instruction, the same results bit " +
-        "for bit, except a float sum under FloatMode.Fast) when it is static, takes no Entity and " +
-        "makes no structural change, takes components of up to 4 fields whose lane types all have one size, singletons, " +
-        "values and Reduce<T> results, and computes with operations that have an exact vector counterpart. This method takes components of numeric fields but misses one of those: the message names the " +
-        "first. Change it to get the vector loop, set Simd = SimdMode.Off to keep the method scalar without this " +
-        "message, or SimdMode.Require to make it an error.", helpLinkUri: Help("EECS055"));
+        "for bit, except under FloatMode.Fast: reordered float sums, approximate Sin, Cos, Exp and Log) when it is static, " +
+        "takes no Entity and makes no structural change, takes components of up to 4 lanes of one size (numbers of 1 to " +
+        "8 bytes, Vector2/3/4 fields; on AVX-512 also 4-byte lanes of a wider row of up to 16 words, where the permutes " +
+        "that gather them pay), Maybe<T> of them, singletons, values and Reduce<T> results, and computes with operations " +
+        "that have an exact vector counterpart (a call it cannot express under a condition runs the method for the rows " +
+        "of the vectors that take it). This method takes components of plain values but misses one of those: the message " +
+        "names the first, and how to split a wide component when the method uses few of its fields. Change it to get the " +
+        "vector loop, set Simd = SimdMode.Off to keep the method scalar without this message, or SimdMode.Require to " +
+        "make it an error.", helpLinkUri: Help("EECS055"));
 
     /// <summary>
     /// EECS055 and EECS056: a [ForEach] method the generator leaves without a vector loop, with the reason

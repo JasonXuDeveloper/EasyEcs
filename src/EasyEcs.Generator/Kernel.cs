@@ -54,8 +54,14 @@ internal sealed partial class Kernel
     /// </param>
     /// <param name="Cold">The reason of the first cold branch (what the loop cannot express under a condition it computes:
     /// a vector with a lane that takes it runs the method), or null.</param>
+    /// <param name="Wide">
+    /// A component is wide (Kernel.Wide.cs): the job's layout checks the loop also needs (<c>__layout1 &amp;&amp; ...</c>),
+    /// on AVX-512 alone (no Vector&lt;T&gt; loop, masked words run the method); else null.
+    /// </param>
+    /// <param name="Statics">The job's static members: the permutes' index vectors and the layout checks.</param>
     internal sealed record Code(EquatableArray<string> Columns, string Setup, string Body, string Stores, string MaskedBody,
-        string MaskedStores, string Restore, string Fold, int Size, string Mask, bool Interleaves, bool Bails, FlatCode? Flat, string? Cold = null);
+        string MaskedStores, string Restore, string Fold, int Size, string Mask, bool Interleaves, bool Bails, FlatCode? Flat, string? Cold = null,
+        string? Wide = null, string Statics = "");
 
     /// <summary>
     /// A loop that reads the columns as flat arrays of lanes, <paramref name="Fields"/> lanes per row (a row's fields are
@@ -230,17 +236,43 @@ internal sealed partial class Kernel
         if (!method.ReturnsVoid) throw new Unsupported("it returns a value");
         if (method.IsGenericMethod) throw new Unsupported("it is generic");
         (syntax, model) = Symbols.WithBody(method, syntax, model);
+        if (model.GetOperation(syntax, ct) is not IMethodBodyOperation body) throw new Unsupported("it has no body");
         ITypeSymbol? first = null;
         var components = new List<IFieldSymbol[]>();
+        var wides = new List<WideLayout?>();
         var optionals = new List<IFieldSymbol[]>();
         bool outside = Symbols.IsRunner(method);
+        HashSet<IParameterSymbol>? whole = null;
+        Dictionary<IParameterSymbol, List<(IFieldSymbol[] Path, ISymbol[] Access)>>? touched = null;
+        // A component the loop does not split (more than MaxFields lanes, a field that is not a lane, lanes of two sizes)
+        // still has a vector loop on AVX-512 when the method uses only 4-byte lanes of it (Kernel.Wide.cs); else the reason,
+        // and the advice to split the lanes it uses into a component of their own when they are few.
+        WideLayout WideOr(IParameterSymbol p, string reason)
+        {
+            whole ??= new HashSet<IParameterSymbol>(SymbolEqualityComparer.Default);
+            touched ??= Touched(body, whole);
+            if (WideComponent(p, touched.TryGetValue(p, out var used) ? used : null, whole, model.Compilation) is { } wide) return wide with { Reason = reason };
+            throw new Unsupported(reason + (used != null && !whole.Contains(p) ? Split(p.Type, used.Select(u => u.Path).ToArray()) : ""));
+        }
         foreach (var p in method.Parameters)
         {
             var kind = Symbols.Classify(p, outside);
             switch (kind)
             {
                 case Symbols.ParamKind.Component:
-                    var fields = Lanes(p.Type);
+                    IFieldSymbol[] fields;
+                    WideLayout? wide = null;
+                    try
+                    {
+                        fields = Lanes(p.Type);
+                        if (fields.Any(f => SizeOf(f.Type) != SizeOf(fields[0].Type)))
+                            throw new Unsupported($"lane types {fields[0].Type.ToDisplayString()} and {fields.First(f => SizeOf(f.Type) != SizeOf(fields[0].Type)).Type.ToDisplayString()} differ in size");
+                    }
+                    catch (Unsupported unsupported)
+                    {
+                        wide = WideOr(p, unsupported.Reason);
+                        fields = wide.Paths.Select(path => path[path.Length - 1]).ToArray();
+                    }
                     foreach (var field in fields)
                     {
                         if (first != null && SizeOf(first) != SizeOf(field.Type))
@@ -248,6 +280,7 @@ internal sealed partial class Kernel
                         first ??= field.Type;
                     }
                     components.Add(fields);
+                    wides.Add(wide);
                     break;
                 case Symbols.ParamKind.Singleton:
                     break;
@@ -282,7 +315,6 @@ internal sealed partial class Kernel
                 throw new Unsupported($"lane types {first.ToDisplayString()} and {field.Type.ToDisplayString()} differ in size");
         if (SizeOf(first) < 4 && optionals.Count > 0)
             throw new Unsupported($"it takes a Maybe<{Symbols.MaybeElement(method.Parameters.First(q => Symbols.Classify(q, outside) == Symbols.ParamKind.Optional).Type)?.Name}> of {first.ToDisplayString()} lanes: optional columns have vector loops of 4- and 8-byte lanes");
-        if (model.GetOperation(syntax, ct) is not IMethodBodyOperation body) throw new Unsupported("it has no body");
 
         // The parameters of a kernel: the main one, and one per field of a flat loop (Flat) with the same setup.
         Kernel Make(bool reductions)
@@ -295,7 +327,8 @@ internal sealed partial class Kernel
                 if (kind == Symbols.ParamKind.Component)
                 {
                     made._components[p] = (k + 1, components[k], p.RefKind == RefKind.Ref);
-                    made._paths[p] = Paths(p.Type, p.Type.Name);
+                    if (wides[k] is { } wide) (made._paths[p], made._wideOf[p]) = (wide.Paths, wide);
+                    else made._paths[p] = Paths(p.Type, p.Type.Name);
                     k++;
                     continue;
                 }
@@ -332,10 +365,11 @@ internal sealed partial class Kernel
         // the fields the method does not write keep the values loaded.
         var loads = new StringBuilder();
         var stores = new StringBuilder();
-        foreach (var (index, fields, _) in kernel._components.Values.OrderBy(c => c.Index))
+        foreach (var (p, (index, fields, _)) in kernel._components.OrderBy(c => c.Value.Index).Select(c => (c.Key, c.Value)))
         {
             string column = Elem(fields[0].Type);
-            if (fields.Length == 1) loads.Append($"var __c{index}_0 = {V}.LoadUnsafe(ref e{index}, (nuint)i);\n");
+            if (kernel._wideOf.TryGetValue(p, out var wide)) kernel.WideLoads(index, wide, column, loads);
+            else if (fields.Length == 1) loads.Append($"var __c{index}_0 = {V}.LoadUnsafe(ref e{index}, (nuint)i);\n");
             else
             {
                 loads.Append($"{Interleaved}.Load{fields.Length}(ref e{index}, (nuint)i, {string.Join(", ", fields.Select((_, f) => $"out {Vec(column)} __s{index}_{f}"))});\n");
@@ -361,9 +395,15 @@ internal sealed partial class Kernel
         // pass: the rows are left as they were (their memory is the table's, whether a component is absent or not).
         var kept = new StringBuilder();
         var masked = new StringBuilder();
-        foreach (var (index, fields, _) in kernel._components.Values.Where(c => kernel._written.Contains(c.Index)).OrderBy(c => c.Index))
+        foreach (var (p, (index, fields, _)) in kernel._components.Where(c => kernel._written.Contains(c.Value.Index)).OrderBy(c => c.Value.Index).Select(c => (c.Key, c.Value)))
         {
             string column = Elem(fields[0].Type);
+            // A wide component's masked words run the method (SystemGenerator): only the loop's stores.
+            if (kernel._wideOf.TryGetValue(p, out var wide))
+            {
+                kernel.WideStores(index, wide, column, stores);
+                continue;
+            }
             string Blend(int f) => $"{V}.ConditionalSelect({As(kernel._mask, Elem(fields[f].Type), "__pass")}, __c{index}_{f}, __o{index}_{f})";
             for (int f = 0; f < fields.Length; f++) kept.Append($"var __o{index}_{f} = __c{index}_{f};\n");
             stores.Append(fields.Length == 1
@@ -411,13 +451,21 @@ internal sealed partial class Kernel
         string prologue = kernel._bails ? "bool __bail = false;\n" : "";
         string live = kernel._live ? $"var __live = {Vec(kernel._mask)}.AllBitsSet;\n" : "", maskedLive = kernel._live ? "var __live = __pass;\n" : "";
         string hold = kernel._bails ? held.ToString() : "";
+        if (kernel._wideOf.Count > 0) kernel.Gate();
         var flat = Flat(kernel, root, () => Make(false));
         // Narrow lanes have no shuffles: a component of several fields takes the flat loop or none.
-        if (kernel._narrow && flat == null && kernel._components.Values.FirstOrDefault(c => c.Fields.Length > 1) is { Fields: { } several })
-            throw new Unsupported($"component {several[0].ContainingType.Name} has {several.Length} fields of {several[0].Type.ToDisplayString()}: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field");
+        if (kernel._narrow && flat == null && kernel._components.FirstOrDefault(c => c.Value.Fields.Length > 1) is { Key: { } narrow, Value.Fields: { } several })
+        {
+            whole ??= new HashSet<IParameterSymbol>(SymbolEqualityComparer.Default);
+            touched ??= Touched(body, whole);
+            string split = !whole.Contains(narrow) && touched.TryGetValue(narrow, out var used) ? Split(narrow.Type, used.Select(u => u.Path).ToArray()) : "";
+            throw new Unsupported($"component {several[0].ContainingType.Name} has {several.Length} fields of {several[0].Type.ToDisplayString()}: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field{split}");
+        }
         return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
             kernel._setup.ToString(), prologue + live + loads + hold + kernel._body, stores.ToString(), prologue + maskedLive + loads + kept + held + kernel._body, masked.ToString(),
-            restore.ToString(), fold.ToString(), kernel._size, kernel._mask, kernel._components.Values.Any(c => c.Fields.Length > 1), kernel._bails, flat, kernel._cold);
+            restore.ToString(), fold.ToString(), kernel._size, kernel._mask, kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
+            kernel._bails, flat, kernel._cold, kernel._wideOf.Count == 0 ? null : string.Join(" && ", kernel._components.Where(c => kernel._wideOf.ContainsKey(c.Key)).Select(c => $"__layout{c.Value.Index}")),
+            kernel._statics.ToString());
     }
 
     /// <summary>
@@ -430,7 +478,7 @@ internal sealed partial class Kernel
     /// </summary>
     private static FlatCode? Flat(Kernel main, IOperation root, System.Func<Kernel> make)
     {
-        if (main._bails || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0 || main._wides.Count > 0 || main._structs.Count > 0 || main._optionals.Count > 0) return null;
+        if (main._bails || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0 || main._wides.Count > 0 || main._structs.Count > 0 || main._optionals.Count > 0 || main._wideOf.Count > 0) return null;
         var components = main._components.Values.ToArray();
         var type = components[0].Fields[0].Type;
         int fields = components[0].Fields.Length;
