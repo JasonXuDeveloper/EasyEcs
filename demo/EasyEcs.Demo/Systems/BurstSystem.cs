@@ -16,9 +16,11 @@ public ref struct BurstSystem
     private const float MinLife = 1.6f;
     private const float MaxLife = 4f;
 
+    // EntityRandom: numbers drawn for this emitter in this step, the same on every run. Each draw of a step has
+    // its own stream: 0 for the cooldown, then three per spark.
     [ForEach]
-    static void Burst(ref Emitter emitter, in Position at, in Arena arena, in Clock clock,
-        in Population population, World world)
+    static void Burst(Entity self, ref Emitter emitter, in Position at, in Arena arena, in Clock clock,
+        in Population population, in EntityRandom random, World world)
     {
         emitter.Cooldown -= clock.Dt;
         if (emitter.Cooldown > 0)
@@ -26,9 +28,7 @@ public ref struct BurstSystem
             return;
         }
 
-        long tick = clock.Tick;
-        int seed = (int)(emitter.Phase * 1000);
-        emitter.Cooldown = MinInterval + Units.Unit(tick, seed) * (MaxInterval - MinInterval);
+        emitter.Cooldown = random.Range(self.Id, 0, MinInterval, MaxInterval);
 
         // A burst takes at most a sixteenth of the target, so an empty world fills over a second
         // or so and the lifetimes of the first sparks are spread out
@@ -37,12 +37,12 @@ public ref struct BurstSystem
 
         for (int i = 0; i < missing; i++)
         {
-            int n = seed + i * 3;
-            float angle = Units.Unit(tick, n) * MathF.Tau;
+            uint stream = 1 + (uint)i * 3;
+            float angle = random.Range(self.Id, stream, 0, MathF.Tau);
 
             // Most sparks leave at nearly the same speed: the burst reads as a ring
-            float v = speed * (0.75f + 0.25f * Units.Unit(tick, n + 1));
-            float life = MinLife + Units.Unit(tick, n + 2) * (MaxLife - MinLife);
+            float v = speed * random.Range(self.Id, stream + 1, 0.75f, 1f);
+            float life = random.Range(self.Id, stream + 2, MinLife, MaxLife);
 
             world.Instantiate(
                 Units.Spark,

@@ -25,17 +25,4 @@ public static class Units
 
     // The emitters, spread evenly along their curve.
     public const int Emitters = 5;
-
-    // A deterministic random number per (tick, n): the same run every time, no generator object to
-    // keep.
-    public static uint Roll(long tick, int n)
-    {
-        ulong x = (ulong)tick * 0x9E3779B97F4A7C15UL ^ (uint)n * 0xBF58476D1CE4E5B9UL;
-        x ^= x >> 31;
-        x *= 0x94D049BB133111EBUL;
-        return (uint)(x ^ (x >> 29));
-    }
-
-    // A roll as a float in [0, 1).
-    public static float Unit(long tick, int n) => (Roll(tick, n) >> 8) * (1f / (1 << 24));
 }

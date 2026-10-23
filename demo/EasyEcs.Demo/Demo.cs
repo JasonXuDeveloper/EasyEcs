@@ -30,6 +30,7 @@ public static partial class Demo
         _world = new World(new WorldOptions { InitialEntityCapacity = count + Units.Emitters });
         _world.SetArena(width, height);
         _world.SetClock(0, 0);
+        _world.SetEntityRandom(Seed: 1, Tick: 0);
         _world.SetPopulation(count);
         _world.SetPointer(0, 0, false);
 
@@ -89,6 +90,7 @@ public static partial class Demo
         ref var clock = ref world.Clock;
         clock.Dt = dt;
         clock.Tick++;
+        world.EntityRandom.Tick++; // new random numbers for the new step
 
         // The two motion groups take turns, one per step. They do the same work, so the picture
         // does not change, and each is timed on the same sparks
