@@ -364,6 +364,19 @@ public class GeneratorTests
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "Vector.LoadUnsafe").Count, Is.EqualTo(2), generated); // B only: its batch and masked forms (and their Vector512.LoadUnsafe)
     }
 
+    [Test]
+    public void AVectorLoopLoadsOnlyTheColumnsItUses()
+    {
+        // H filters the rows (a component of the query) but the method never reads it: its column is not loaded.
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, in H h) => f.V++; }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t)).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("var __c1_0 = global::System.Numerics.Vector.LoadUnsafe(ref e1, (nuint)i);"), generated);
+        Assert.That(generated, Does.Not.Contain("__c2_0"), generated);
+    }
+
     // Each field alike (field i of every component to field i, the same operations): the columns as flat lanes.
     [TestCase("[ForEach] static void A(ref Two t, in Two u) { t.A += u.A * 2; t.B += u.B * 2; }", true)]
     [TestCase("[ForEach] static void A(ref Two t, in G g) { if (t.A > 1) t.A = 0; if (t.B > 1) t.B = 0; t.A -= g.Pull; t.B -= g.Pull; }", true)]

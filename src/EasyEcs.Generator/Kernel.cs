@@ -382,11 +382,15 @@ internal sealed partial class Kernel
         // A component of several fields is deinterleaved into one vector per field (Interleaved: shuffles, which move
         // bits, so fields of another type of the same size are reinterpreted after the load), and written back whole:
         // the fields the method does not write keep the values loaded.
-        var loads = new StringBuilder();
+        // Each column's loads, with the names that use them: a column the loop never reads nor stores is not loaded
+        // (an unused load of a byref stays in the JIT's code, as it may fault).
+        var columns = new List<(string[] Names, string Loads)>();
         var stores = new StringBuilder();
         foreach (var (p, (index, fields, _)) in kernel._components.OrderBy(c => c.Value.Index).Select(c => (c.Key, c.Value)))
         {
             string column = Elem(fields[0].Type);
+            var loads = new StringBuilder();
+            columns.Add(([kernel._wideOf.ContainsKey(p) ? "" : $"__c{index}_"], ""));
             if (kernel._wideOf.TryGetValue(p, out var wide)) kernel.WideLoads(index, wide, column, loads);
             else if (fields.Length == 1) loads.Append($"var __c{index}_0 = {V}.LoadUnsafe(ref e{index}, (nuint)i);\n");
             else
@@ -395,10 +399,12 @@ internal sealed partial class Kernel
                 for (int f = 0; f < fields.Length; f++)
                     loads.Append($"var __c{index}_{f} = {As(column, Elem(fields[f].Type), $"__s{index}_{f}")};\n");
             }
+            columns[columns.Count - 1] = (columns[columns.Count - 1].Names, loads.ToString());
         }
         foreach (var (index, fields) in kernel._optionals.Values.OrderBy(o => o.Index))
         {
             string column = Elem(fields[0].Type), row = $"(nuint)i & __z{index}";
+            var loads = new StringBuilder();
             loads.Append($"var __has{index} = {Interleaved}.Lanes{kernel._size * 8}{LanesForm}(m{index}.Present(i), 0);\n");
             if (fields.Length == 1) loads.Append($"var __q{index}_0 = {V}.LoadUnsafe(ref __r{index}, {row});\n");
             else
@@ -407,6 +413,7 @@ internal sealed partial class Kernel
                 for (int f = 0; f < fields.Length; f++)
                     loads.Append($"var __q{index}_{f} = {As(column, Elem(fields[f].Type), $"__t{index}_{f}")};\n");
             }
+            columns.Add(([$"__q{index}_", $"__has{index}"], loads.ToString()));
         }
         var root = (IOperation?)body.BlockBody ?? body.ExpressionBody!;
         kernel.Statement(root, null);
@@ -471,6 +478,10 @@ internal sealed partial class Kernel
         string live = kernel._live ? $"var __live = {Vec(kernel._mask)}.AllBitsSet;\n" : "", maskedLive = kernel._live ? "var __live = __pass;\n" : "";
         string hold = kernel._bails ? held.ToString() : "";
         if (kernel._wideOf.Count > 0) kernel.Gate();
+        string uses = kernel._body.ToString() + stores + masked + kernel._setup;
+        var read = new StringBuilder();
+        foreach (var (names, text) in columns)
+            if (names.Any(n => n.Length == 0 || uses.Contains(n))) read.Append(text);
         var flat = Flat(kernel, root, () => Make(false));
         // Narrow lanes have no shuffles: a component of several fields takes the flat loop or none.
         if (kernel._narrow && flat == null && kernel._components.FirstOrDefault(c => c.Value.Fields.Length > 1) is { Key: { } narrow, Value.Fields: { } several })
@@ -481,7 +492,7 @@ internal sealed partial class Kernel
             throw new Unsupported($"component {several[0].ContainingType.Name} has {several.Length} fields of {several[0].Type.ToDisplayString()}: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field{split}");
         }
         return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
-            kernel._setup.ToString(), prologue + live + loads + hold + kernel._body, stores.ToString(), prologue + maskedLive + loads + kept + held + kernel._body, masked.ToString(),
+            kernel._setup.ToString(), prologue + live + read + hold + kernel._body, stores.ToString(), prologue + maskedLive + read + kept + held + kernel._body, masked.ToString(),
             restore.ToString(), fold.ToString(), kernel._size, kernel._mask, kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
             kernel._bails, flat, kernel._cold, kernel._wideOf.Count == 0 ? null : string.Join(" && ", kernel._components.Where(c => kernel._wideOf.ContainsKey(c.Key)).Select(c => $"__layout{c.Value.Index}")),
             kernel._statics.ToString());
