@@ -176,4 +176,13 @@
       开销和 <see cref="M:EasyEcs.Entity.GetOrAdd``1" /> 相同。
     </summary>
   </member>
+
+  <member name="M:EasyEcs.Entity.Run``3(``2@,EasyEcs.QueryFilter@,System.UInt64)" source="92c8739a6bf6">
+    <summary>
+      以 <paramref name="since" /> 作为过滤器 tick 的 <see cref="M:EasyEcs.Entity.Run``3(``2@,EasyEcs.QueryFilter@)" />：
+      过滤器的 <c>Changed</c> 组件必须在 <paramref name="since" /> 或之后被写过（<c>Removed</c> 组件在那之后被移除）。
+      和 <c>filter.Since(since)</c> 做同样的检测，但不复制过滤器（静态过滤器就这样传入，<c>[ForEntity, Changed&lt;T&gt;]</c> 方法的入口点即如此）。
+      O(过滤器提到的组件数)。
+    </summary>
+  </member>
 </doc>
