@@ -396,7 +396,7 @@ chunk's copy of the job, a load and a store on every row.
 
 #### Working memory per thread: `Scratch<T>` [#scratch]
 
-A row that needs a list for its own work (the candidates of a neighbour search, the open set of a path search, a
+A row that needs a list for its own work (the candidates of a neighbor search, the open set of a path search, a
 buffer to fill) should not allocate one per row, and may not share one between threads. A `Scratch<T>` parameter is
 the method's working memory on the thread running it: one `T` per method and thread, OpenMP's `threadprivate`. It
 starts as `default`, the first allocation (`scratch.Value ??= new()`) happens once per thread, and every later row on
@@ -414,12 +414,12 @@ that thread finds what the last one left.
 </Callout>
 
 ```csharp
-public record struct Neighbours(int Count, int Spread) : IComponent;
+public record struct Neighbors(int Count, int Spread) : IComponent;
 
-public class CountNeighbours : EcsSystem
+public class CountNeighbors : EcsSystem
 {
     [ForEach(Parallel = true)]
-    static void Count(in Position position, ref Neighbours neighbours, Scratch<List<int>> scratch)
+    static void Count(in Position position, ref Neighbors neighbors, Scratch<List<int>> scratch)
     {
         var near = scratch.Value ??= new List<int>(32);   // once per thread // [!code highlight]
         near.Clear();                                      // what the last row on this thread left
@@ -427,7 +427,7 @@ public class CountNeighbours : EcsSystem
         for (int i = 0; i < 24; i++)
             if (((cell ^ (i * 40_503)) & 3) != 0) near.Add(i);
         int spread = near.Count == 0 ? 0 : near[^1] - near[0];
-        neighbours = new Neighbours(near.Count, spread);
+        neighbors = new Neighbors(near.Count, spread);
     }
 }
 ```

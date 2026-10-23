@@ -245,7 +245,7 @@ world.Instantiate(Kinds.Troll, army);                // 不扩容，不分配
 
 | `Reserve(prefab, n)` 和 `Reserve<T1..Tn>(n)` 会预留 | 不会预留：自己来 |
 | --- | --- |
-| 目标表的行（编组是每个成员的表） | `DynamicBuffer<T>` 元素的列表：[`ReservePool`](/zh/docs/guide/dynamic-buffers#pool) |
+| 目标表的行（编组是每个成员的表） | `DynamicBuffer<T>` 元素的列表：[`FillPool`](/zh/docs/guide/dynamic-buffers#pool) |
 | 实体记录，以及销毁它们时要填进去的空闲 id 列表 | [分组](/zh/docs/guide/groups)的其他表（`GroupBy` 按值放实例） |
 | [带索引](/zh/docs/guide/indexes-and-relations)组件的键，之后才创建的索引也算 | 关系链接（来自缓冲写入） |
 | 带[清理组件](/zh/docs/guide/cleanup-and-disable)的实例销毁后等待所在的表 | 其他组件组合的实体：只预留记录用 `EnsureEntityCapacity(n)` |
@@ -257,7 +257,7 @@ world.Instantiate(Kinds.Troll, army);                // 不扩容，不分配
 
 #### 缓冲列表 [#reserve-buffers]
 
-长缓冲先调高 `DynamicBuffer<T>.PoolCapacity`，再 `ReservePool(peak)`：对整个进程生效，要在任何 World 用到这个类型之前（[缓冲池](/zh/docs/guide/dynamic-buffers#pool)）。
+长缓冲先调高 `DynamicBuffer<T>.MaxPooledLength`，再 `FillPool(peak)`：对整个进程生效，要在任何 World 用到这个类型之前（[缓冲池](/zh/docs/guide/dynamic-buffers#pool)）。
 
 </Step>
 <Step>
@@ -446,7 +446,7 @@ boss 50 hp, twin 50 hp
 | 在不带 `Entity` 或 `World` 参数的 `[ForEach]` 方法里 `Instantiate` | 遍历以为不会有结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
 | 其他线程正在实例化时修改预制体 | 复制出残缺的数据 | 启动时建好预制体，之后只读 |
 | 对已销毁或已退休的实体调用 `Clone()` | 抛 `InvalidOperationException` | 先查 `IsAlive` 和 `IsRetired` |
-| 指望 `Reserve` 也预留实例缓冲的列表 | 每个缓冲第一次写入仍要分配 | 给元素类型调用 [`ReservePool`](/zh/docs/guide/dynamic-buffers#pool) |
+| 指望 `Reserve` 也预留实例缓冲的列表 | 每个缓冲第一次写入仍要分配 | 给元素类型调用 [`FillPool`](/zh/docs/guide/dynamic-buffers#pool) |
 | 在生成的那个 tick 里才 `Reserve` | 扩容照样发生在 tick 里 | 启动时或提前一个 tick 预留 |
 
 ## 相关页面 [#related]

@@ -37,12 +37,12 @@ evaluation covers what support would take: the generator and the analyzer in Uni
 and the headline benchmark measured inside a player. Godot needs none of this: a Godot 4 .NET project that targets
 `net10.0` runs EasyEcs already ([FAQ](/en/docs/faq#unity-godot)).
 
-### Push halos for grid neighbours [#push-halo]
+### Push halos for grid neighbors [#push-halo]
 
 A grid simulation over chunks (the water of the [voxel server](/en/docs/samples/voxel-server#water)) loads the
-edges of each flowing chunk's neighbours into its tile on every step (`Tile<TCell, TTile>.Load`). The planned design turns that around: a chunk hands its
-edges to its neighbours' halos when they change, so a step reads only its own components and a chunk whose
-neighbours are still holds nothing to copy ([D73](/en/docs/decisions#d73-survey-items-not-added)).
+edges of each flowing chunk's neighbors into its tile on every step (`Tile<TCell, TTile>.Pad`). The planned design turns that around: a chunk hands its
+edges to its neighbors' halos when they change, so a step reads only its own components and a chunk whose
+neighbors are still holds nothing to copy ([D73](/en/docs/decisions#d73-survey-items-not-added)).
 
 ## Dropped [#dropped]
 
@@ -89,7 +89,7 @@ neighbours are still holds nothing to copy ([D73](/en/docs/decisions#d73-survey-
 - A generated per-cell kernel for grid tiles: byte arithmetic promotes to `int`, and stencils reduce per row; the
   tile loads the halo and the method keeps the rule ([D77](/en/docs/decisions#d77-tiles)).
 - Several steps of a grid stencil per load (temporal blocking), a sliding window along y and a cache of a tile's
-  neighbours: measured, slower on grids that fit the cache or not worth per-entity state
+  neighbors: measured, slower on grids that fit the cache or not worth per-entity state
   ([D77](/en/docs/decisions#d77-tiles)).
 - A partial-snapshot API: a system that copies the needed values into a ring held by a singleton (the
   lag-compensation pattern) copies exactly what is needed ([D51](/en/docs/decisions#d51-not-added)).

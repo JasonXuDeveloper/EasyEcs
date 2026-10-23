@@ -200,7 +200,7 @@ public class MovementSystem : EcsSystem
 | --- | --- | --- |
 | `[ForEach]` / `[ForEach(Parallel = true)]` | 方法 | 方法就是循环；`Parallel` 把行分给多个线程（[EECS010](/zh/docs/guide/analyzer#eecs010)） |
 | `[ForEach(Parallel = true, ChunkRows = n)]` | 方法 | 线程每次领 `n` 行（OpenMP 的 `schedule(dynamic, n)`）：适合几百行重活（[块大小](/zh/docs/guide/threading#chunk-rows)、[EECS054](/zh/docs/guide/analyzer#eecs054)） |
-| `[ForEach(Simd = SimdMode.Require)]` | 方法 | 方法必须得到向量循环，否则构建报错（[EECS056](/zh/docs/guide/analyzer#eecs056)）；`SimdMode.Off` 保持标量，不再有 [EECS055](/zh/docs/guide/analyzer#eecs055) |
+| `[ForEach(SimdMode = SimdMode.Require)]` | 方法 | 方法必须得到向量循环，否则构建报错（[EECS056](/zh/docs/guide/analyzer#eecs056)）；`SimdMode.Off` 保持标量，不再有 [EECS055](/zh/docs/guide/analyzer#eecs055) |
 | `[ForEach(Slices = N)]` | 方法 | 每次运行只访问一片，约 1/N 的行：每 N 次运行每行一次（不能和 `Changed` / `Removed` 一起用：[EECS035](/zh/docs/guide/analyzer#eecs035)） |
 | `[With<T>]` | 方法、系统分组 | 要求有 `T`，但不作为参数传入 |
 | `[Without<T>]` | 方法、系统分组 | 排除有 `T` 的实体 |
@@ -351,7 +351,7 @@ if (!replicated.DestroyedSince(seen, gone, out int goneCount)) { /* 比日志还
 | 调用 | 作用 |
 | --- | --- |
 | `world.Index<T, TKey>()`（`world.TIndex`） | `T` 的值索引 |
-| `index.Find(key)` / `TryFind(key, out e)` / `Count(key)` | 所有匹配、唯一一个、数量 |
+| `index.Find(key)` / `TryFind(key, out id)` / `Count(key)` | 所有匹配、其中一个的 id、数量 |
 | `index.Find(key).Count` / `relations.Find(target).Count` | 循环会走过多少个，O(1)，用来确定缓冲区大小 |
 | `index.KeyCount` / `relations.TargetCount` | 有多少个不同的键 / 目标被持有，O(1)（被占用的格子、有成员的公会） |
 | `index.Get(key)` / `TryGet(key, out e)` | 唯一键（`IUniqueIndexed<TKey>`）对应的那个实体；没有时 `Get` 抛异常 |
@@ -420,8 +420,8 @@ world.DestroyAll<Dead>();
 | `EnsureCapacity(n)` / `TrimExcess()` | 已知数量时先扩容一次，或者把内存还回去 |
 | `AsSpan()` | 元素的 `Span<T>`，用来原地写 |
 | `SetCount(n)` | 设置元素个数（新增的是 `default`），返回 span，原地写整个缓冲 |
-| `DynamicBuffer<T>.PoolCapacity = n`（静态） | 死掉的 `T` 缓冲最多把多长的列表还给池，启动时设一次（[缓冲池](/zh/docs/guide/dynamic-buffers#pool)） |
-| `DynamicBuffer<T>.ReservePool(n)`（静态） | 启动时、设好 `PoolCapacity` 之后，往池里放 `n` 个空列表 |
+| `DynamicBuffer<T>.MaxPooledLength = n`（静态） | 死掉的 `T` 缓冲最多把多长的列表还给池，启动时设一次（[缓冲池](/zh/docs/guide/dynamic-buffers#pool)） |
+| `DynamicBuffer<T>.FillPool(n)`（静态） | 启动时、设好 `MaxPooledLength` 之后，往池里放 `n` 个空列表 |
 
 ```csharp
 unit.Set(new DynamicBuffer<Loot>());

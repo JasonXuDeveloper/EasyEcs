@@ -58,10 +58,10 @@ public bool Parallel { get; init; }
 
 Run chunks of the matching rows on several threads (`World.ForEachParallel`). The method must make no structural change, run per entity and write no singleton (EECS010); it pays off for heavy per-row work over tens of thousands of rows. Default false.
 
-### `Simd` [#simd]
+### `SimdMode` [#simdmode]
 
 ```csharp
-public SimdMode Simd { get; init; }
+public SimdMode SimdMode { get; init; }
 ```
 
 Whether the generator turns the method into a `System.Numerics.Vector<T>` loop over its runs of rows (several rows per instruction, the results of the method bit for bit). [`SimdMode.Auto`](/en/docs/reference/simdmode#auto) vectorizes a method that qualifies and reports why one that looks eligible does not (EECS055, a message); [`SimdMode.Require`](/en/docs/reference/simdmode#require) makes a method that does not qualify an error (EECS056); [`SimdMode.Off`](/en/docs/reference/simdmode#off) keeps the method one row at a time. Default [`SimdMode.Auto`](/en/docs/reference/simdmode#auto).

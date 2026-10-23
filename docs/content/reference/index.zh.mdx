@@ -26,7 +26,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`GroupAttribute`](/zh/docs/reference/groupattribute) | World 按哪个成员把组件的表分组（IGroup）：int，或底层类型为 int 的枚举。 |
 | [`GroupByAttribute`](/zh/docs/reference/groupbyattribute) | 每个 World 都按这个 IGroup 组件给表分组（World.GroupBy），从它第一张含这个组件的表开始：分组过滤条件（QueryFilter.InGroup）在每个 World 里都只访问这一组的表，不用记着调用设置方法。 |
 | [`GroupInfo`](/zh/docs/reference/groupinfo) | 一个分组的系统，按阶段排列（ScheduleInfo）。 |
-| [`KeyAttribute`](/zh/docs/reference/keyattribute) | World 为组件建索引用的键（IIndexed）：标在字段、属性或 record 的位置参数上，键就是这个成员（public partial struct Owner : IComponent \{ [Key] public EntityId Of; \}）；标在 struct 本身上，键是整个值。 |
+| [`IndexKeyAttribute`](/zh/docs/reference/indexkeyattribute) | World 为组件建索引用的键（IIndexed）：标在字段、属性或 record 的位置参数上，键就是这个成员（public partial struct Owner : IComponent \{ [IndexKey] public EntityId Of; \}）；标在 struct 本身上，键是整个值。 |
 | [`Lanes`](/zh/docs/reference/lanes) | 批处理方法的流压缩，在 CPU 上做 GPU 的 ballot 和压缩：一次向量比较得出通道掩码（Vector256.LessThan(hp, limit).ExtractMostSignificantBits()：CUDA 的 __ballot_sync；它的 __popc 是 PopCount），Lanes.Compact 把选中的元素紧挨着写出：批处理方法选中的行的 id（entities.Ids）、它们的值、它们的下标。 |
 | [`LookupExtensions`](/zh/docs/reference/lookupextensions) | 通过 Lookup 按键查找带索引的组件（IIndexed）。 |
 | [`MaxAttribute`](/zh/docs/reference/maxattribute) | 归约中保留较大值的字段：Identity 是类型的 MinValue（float 和 double 是 -∞），Combine 是 Math.Max(left, right)。 |
@@ -47,7 +47,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`SystemPair`](/zh/docs/reference/systempair) | 两个冲突的系统，按执行顺序排列，只靠注册顺序排先后（GroupInfo.RegistrationOrdered）。 |
 | [`TargetPolicyExtensions`](/zh/docs/reference/targetpolicyextensions) | 指向实体的组件（键是 EntityId 的 IIndexed）的目标策略。 |
 | [`UniqueIndexExtensions`](/zh/docs/reference/uniqueindexextensions) | 唯一索引（IUniqueIndexed）的查找：一个键对应的那一个实体。 |
-| [`UniqueKeyAttribute`](/zh/docs/reference/uniquekeyattribute) | 一个键只对应一个实体时用的 KeyAttribute（IUniqueIndexed）：生成器加上 IUniqueIndexed&lt;TKey&gt; 和显式的 Key。 |
+| [`UniqueKeyAttribute`](/zh/docs/reference/uniquekeyattribute) | 一个键只对应一个实体时用的 IndexKeyAttribute（IUniqueIndexed）：生成器加上 IUniqueIndexed&lt;TKey&gt; 和显式的 Key。 |
 | [`UpdateAfterAttribute<TSystem>`](/zh/docs/reference/updateafterattribute) | 让这个系统排在同一分组里的 TSystem（和它的派生系统）之后运行：见 UpdateBeforeAttribute。 |
 | [`UpdateBeforeAttribute<TSystem>`](/zh/docs/reference/updatebeforeattribute) | 让这个系统排在同一分组里的 TSystem（和它的派生系统）之前运行，不管它们的注册顺序。 |
 | [`UpdateInGroupAttribute<TGroup>`](/zh/docs/reference/updateingroupattribute) | 把系统（和它的派生系统）放进分组 TGroup。 |
@@ -80,7 +80,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`Lookup<T>`](/zh/docs/reference/lookup) | 从 [ForEach] 方法只读访问任意实体的组件 T（MPI 的单边 Get，Unity 的 ComponentLookup）：static void Chase(ref Velocity v, in Target target, Lookup&lt;Position&gt; positions) 用 positions[target.Id] 读目标的位置。 |
 | [`Maybe<T>`](/zh/docs/reference/maybe) | [ForEach] 方法所访问实体的一个可选组件：static void Regen(ref Health h, Maybe&lt;Buff&gt; buff) 访问所有带 Health 的实体，Maybe.HasValue 告诉你当前这个实体有没有 Buff。 |
 | [`Mut<T>`](/zh/docs/reference/mut) | [ForEach] 方法所访问实体的一个组件，只有方法真的写了它才算写入：static void Aim(Mut&lt;Target&gt; target, in Position p) =&gt; target.SetIfChanged(new Target(Nearest(p)))。 |
-| [`PaddedTile<TCell, TTile>`](/zh/docs/reference/paddedtile) | 带着 halo 拷入的分块各层（Tile.Load）：模板采样的纹理。 |
+| [`PaddedTile<TCell, TTile>`](/zh/docs/reference/paddedtile) | 带着 halo 拷入的分块各层（Tile.Pad）：模板采样的纹理。 |
 | [`QueryEnumerator<T1..T9>`](/zh/docs/reference/queryenumerator) | 零分配的查询枚举器；遍历途中做结构变更也安全（访问规则和 ForEach 相同）。 |
 | [`QueryFilter`](/zh/docs/reference/queryfilter) | 查询的附加条件：必须存在但不读取的组件（QueryFilter.With），或者必须不存在的组件（QueryFilter.Without）。 |
 | [`QueryItem<T1..T9>`](/zh/docs/reference/queryitem) | 一条查询结果：实体，以及指向它所在行的 ref。 |
@@ -140,16 +140,16 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | 类型 | 说明 |
 |---|---|
 | [`FloatMode`](/zh/docs/reference/floatmode) | ForEachAttribute 方法的向量循环可以改变哪些浮点结果。 |
-| [`SimdMode`](/zh/docs/reference/simdmode) | ForEachAttribute 方法是否以向量循环运行（ForEachAttribute.Simd）。 |
+| [`SimdMode`](/zh/docs/reference/simdmode) | ForEachAttribute 方法是否以向量循环运行（ForEachAttribute.SimdMode）。 |
 | [`SystemErrorPolicy`](/zh/docs/reference/systemerrorpolicy) | 系统抛出异常时怎么处理（WorldOptions.SystemErrors）。 |
 | [`TargetPolicy`](/zh/docs/reference/targetpolicy) | 实体销毁时，指向它的链接怎么处理（TargetPolicyExtensions.WhenTargetDestroyed、RelationIndex.WhenTargetDestroyed）。 |
 | [`TileBoundary`](/zh/docs/reference/tileboundary) | 分块没有邻居的地方 halo 里放什么（ITileShape.Boundary），即网格的边界条件。 |
 | [`TileFaces`](/zh/docs/reference/tilefaces) | 分块（ITileShape）的面：北是 −z，南 +z，西 −x，东 +x，下 −y，上 +y。 |
-| [`TileNeighbourhood`](/zh/docs/reference/tileneighbourhood) | 分块周围哪些分块算作邻居，按偏移沿几条轴移动来分（ITileShape.Neighbourhood）：隔着面的分块（von Neumann），加上隔着棱的，或再加上隔着角的（Moore）。 |
+| [`TileNeighborhood`](/zh/docs/reference/tileneighborhood) | 分块周围哪些分块算作邻居，按偏移沿几条轴移动来分（ITileShape.Neighborhood）：隔着面的分块（von Neumann），加上隔着棱的，或再加上隔着角的（Moore）。 |
 | [`TileReads`](/zh/docs/reference/tilereads) | 模板在一个格子周围读什么，它决定 PaddedTile.Rows 访问哪些行：某一行读到的行里有不为零的格子时，访问这一行（一行算上它的 halo 格子，所以沿 x 读的模板只需要这一行）。 |
 
 ## 委托 [#delegates]
 
 | 类型 | 说明 |
 |---|---|
-| [`EntityIdField<T>`](/zh/docs/reference/entityidfield) | value 里的一个 EntityId 字段（见 SavedTypes.EntityIds）。 |
+| [`EntityIdField<T>`](/zh/docs/reference/entityidfield) | value 里的一个 EntityId 字段（见 TypeRegistry.EntityIds）。 |

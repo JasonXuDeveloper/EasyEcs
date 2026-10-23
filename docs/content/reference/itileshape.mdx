@@ -20,7 +20,7 @@ The shape of a tile, on the component that makes an entity a tile of a grid ([`I
 static virtual TileBoundary Boundary { get; }
 ```
 
-What the halo holds where there is no neighbour (default [`TileBoundary.Fill`](/en/docs/reference/tileboundary#fill)).
+What the halo holds where there is no neighbor (default [`TileBoundary.Fill`](/en/docs/reference/tileboundary#fill)).
 
 ### `Depth` [#depth]
 
@@ -36,7 +36,7 @@ The rows of a layer (z), 1 to 64 (the active rows of a layer are one 64-bit word
 static virtual TileFaces Faces { get; }
 ```
 
-The faces that have neighbours (default [`TileFaces.Sides`](/en/docs/reference/tilefaces#sides)); the halo of the others follows [`ITileShape.Boundary`](/en/docs/reference/itileshape#boundary). [`TileFaces.Below`](/en/docs/reference/tilefaces#below) and [`TileFaces.Above`](/en/docs/reference/tilefaces#above) count only for a tile of more than one layer; a 1D tile (one row) declares `West | East`.
+The faces that have neighbors (default [`TileFaces.Sides`](/en/docs/reference/tilefaces#sides)); the halo of the others follows [`ITileShape.Boundary`](/en/docs/reference/itileshape#boundary). [`TileFaces.Below`](/en/docs/reference/tilefaces#below) and [`TileFaces.Above`](/en/docs/reference/tilefaces#above) count only for a tile of more than one layer; a 1D tile (one row) declares `West | East`.
 
 ### `Halo` [#halo]
 
@@ -44,7 +44,7 @@ The faces that have neighbours (default [`TileFaces.Sides`](/en/docs/reference/t
 static virtual int Halo { get; }
 ```
 
-The width of the halo, in cells (default 1): the ghost cells of an MPI halo exchange, the apron of a CUDA tile. A stencil reaching r cells, rows or layers away needs r. At most the tile's extent along every axis with neighbours (and along every axis for [`TileBoundary.Mirror`](/en/docs/reference/tileboundary#mirror)): a halo never reaches past the tile beside.
+The width of the halo, in cells (default 1): the ghost cells of an MPI halo exchange, the apron of a CUDA tile. A stencil reaching r cells, rows or layers away needs r. At most the tile's extent along every axis with neighbors (and along every axis for [`TileBoundary.Mirror`](/en/docs/reference/tileboundary#mirror)): a halo never reaches past the tile beside.
 
 ### `Height` [#height]
 
@@ -54,13 +54,13 @@ static virtual int Height { get; }
 
 The layers (y), 1 or more: 1 (the default) is a 2D tile, which has no layers below or above.
 
-### `Neighbourhood` [#neighbourhood]
+### `Neighborhood` [#neighborhood]
 
 ```csharp
-static virtual TileNeighbourhood Neighbourhood { get; }
+static virtual TileNeighborhood Neighborhood { get; }
 ```
 
-Which tiles around are found and read into the halo's edges and corners (default [`TileNeighbourhood.Faces`](/en/docs/reference/tileneighbourhood#faces)).
+Which tiles around are found and read into the halo's edges and corners (default [`TileNeighborhood.Faces`](/en/docs/reference/tileneighborhood#faces)).
 
 ### `Width` [#width]
 

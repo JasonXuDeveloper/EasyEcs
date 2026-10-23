@@ -361,12 +361,12 @@ Console.WriteLine($"{crowd.Count} 个单位，x 从 {crowd.MinX} 到 {crowd.MaxX
 </Callout>
 
 ```csharp
-public record struct Neighbours(int Count, int Spread) : IComponent;
+public record struct Neighbors(int Count, int Spread) : IComponent;
 
-public class CountNeighbours : EcsSystem
+public class CountNeighbors : EcsSystem
 {
     [ForEach(Parallel = true)]
-    static void Count(in Position position, ref Neighbours neighbours, Scratch<List<int>> scratch)
+    static void Count(in Position position, ref Neighbors neighbors, Scratch<List<int>> scratch)
     {
         var near = scratch.Value ??= new List<int>(32);   // 每个线程一次 // [!code highlight]
         near.Clear();                                      // 这个线程上一行留下的东西
@@ -374,7 +374,7 @@ public class CountNeighbours : EcsSystem
         for (int i = 0; i < 24; i++)
             if (((cell ^ (i * 40_503)) & 3) != 0) near.Add(i);
         int spread = near.Count == 0 ? 0 : near[^1] - near[0];
-        neighbours = new Neighbours(near.Count, spread);
+        neighbors = new Neighbors(near.Count, spread);
     }
 }
 ```

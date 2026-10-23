@@ -1,7 +1,7 @@
 <doc>
-  <member name="T:EasyEcs.SimdMode" source="e681757af9b1">
+  <member name="T:EasyEcs.SimdMode" source="d9ff6b82f8e3">
     <summary>
-      <see cref="T:EasyEcs.ForEachAttribute" /> 方法是否以向量循环运行（<see cref="P:EasyEcs.ForEachAttribute.Simd" />）。符合条件的方法：
+      <see cref="T:EasyEcs.ForEachAttribute" /> 方法是否以向量循环运行（<see cref="P:EasyEcs.ForEachAttribute.SimdMode" />）。符合条件的方法：
       是静态方法，不做结构变更（在一个线程上或并行都一样），只接收组件（<c>ref</c> 或 <c>in</c>）及其 <see cref="T:EasyEcs.Maybe`1" />、单例和值，
       并且只用有精确向量对应的运算。<see cref="M:EasyEcs.World.DescribeSchedule" /> 列出系统每个方法得到的循环（<see cref="P:EasyEcs.SystemInfo.Loops" />）。
     </summary>

@@ -51,7 +51,7 @@ int inOne = zones.Count(1);                         // O(1)
 foreach (var e in zones.Find(1)) { /* every entity in zone 1 */ }
 int toVisit = zones.Find(1).Count;                  // O(1): how many the loop sees, to size a buffer first
 int occupied = zones.KeyCount;                      // O(1): how many zones hold an entity (an admin metric)
-if (world.CallsignIndex.TryFind("alpha", out var found)) { /* any entity with that key */ }
+if (world.CallsignIndex.TryFind("alpha", out EntityId found)) { /* the id of any entity with that key */ }
 
 alpha.SetZone(2);                                   // a Set: the index moves alpha at once // [!code highlight]
 int inTwo = zones.Count(2);                         // 1
@@ -80,7 +80,7 @@ public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop>
 
 ```csharp
 var shop = world.CreateEntity(new Shop(7));
-if (world.ShopIndex.TryFind(new Shop(7), out var found)) { /* the shop with id 7 */ }
+if (world.ShopIndex.TryFind(new Shop(7), out EntityId found)) { /* the shop with id 7: world.GetEntity(found) */ }
 ```
 
 On a record struct, a public `Key => this` property joins the generated `ToString()`, which prints `Key`, which prints

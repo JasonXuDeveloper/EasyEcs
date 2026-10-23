@@ -150,7 +150,7 @@ one vector each, and the results are those of the per-row method bit for bit.
 - **Use it for:** arithmetic over many rows: decay, integration, clamps, counters.
 - **Skip it for:** nothing: it is automatic. A method that does not qualify (a `Vector3` field, two number types, a
   call, `Parallel`) runs row by row as before, and [EECS055](/en/docs/guide/analyzer#eecs055) names why;
-  `Simd = SimdMode.Require` makes that a build error ([EECS056](/en/docs/guide/analyzer#eecs056)), `SimdMode.Off`
+  `SimdMode = SimdMode.Require` makes that a build error ([EECS056](/en/docs/guide/analyzer#eecs056)), `SimdMode.Off`
   silences it.
 - **Cost:** none at run time; the loop is written at compile time.
 - **Guide:** [Systems](/en/docs/guide/systems#vector-loops)
@@ -465,7 +465,7 @@ write through `in` does not compile. Snapshots copy the elements.
   `[InlineArray]` in an unmanaged component).
 - **Cost:** one object and one array per entity, made by the first write; writes within the capacity allocate
   nothing. A dead buffer's list goes to a pool the next buffer of its type takes it from, on any thread:
-  `PoolCapacity` sets the longest list kept and `ReservePool(n)` fills the pool at start-up. `SetCount(n)` returns
+  `MaxPooledLength` sets the longest list kept and `FillPool(n)` fills the pool at start-up. `SetCount(n)` returns
   the span to write a whole buffer in place.
 - **Guide:** [Dynamic buffers](/en/docs/guide/dynamic-buffers), [the buffer pool](/en/docs/guide/dynamic-buffers#pool), [ECS principles, rule 8](/en/docs/ecs-principles#8-choose-how-to-hold-a-collection)
 

@@ -8,7 +8,7 @@
     { "query": "vector loop", "page": "guide/systems", "top": 3 },
     { "query": "chunk size", "page": "guide/threading", "top": 3 },
     { "query": "ChunkRows", "page": "guide/threading", "top": 3 },
-    { "query": "PoolCapacity", "page": "guide/dynamic-buffers", "top": 3 },
+    { "query": "MaxPooledLength", "page": "guide/dynamic-buffers", "top": 3 },
     { "query": "ReadOnlyMaybe", "page": "guide/systems", "top": 3 },
     {
       "query": "SaveEntitiesWithout",

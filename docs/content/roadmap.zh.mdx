@@ -34,7 +34,7 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
 
 ### 给网格邻居推送光环 [#push-halo]
 
-按区块划分的网格模拟（[体素服务器](/zh/docs/samples/voxel-server#water)里的水）每一步都要把每个流动区块的邻居的边载入它的瓦片（`Tile<TCell, TTile>.Load`）。计划中的设计反过来：
+按区块划分的网格模拟（[体素服务器](/zh/docs/samples/voxel-server#water)里的水）每一步都要把每个流动区块的邻居的边载入它的瓦片（`Tile<TCell, TTile>.Pad`）。计划中的设计反过来：
 区块的边变了时推进邻居的光环，这样一步只读自己的组件，邻居都静止的区块也没有东西要拷（[D73](/zh/docs/decisions#d73-survey-items-not-added)）。
 
 ## 已放弃 [#dropped]

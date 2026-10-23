@@ -49,13 +49,13 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `RelationIndex<T>` | sealed class | `world.Relations<T>()`: the entities linking to a target. |
 | `TargetPolicy`, `TargetPolicyExtensions` | enum, extensions | What destroying a target does to the links to it: `Keep`, `Remove`, `Destroy`. |
 | `EcsSystem` | abstract class | `World`, `Enabled`, `Error`, `Stats`, `LastRunTick`, `RunCount`; `OnCreate` / `OnUpdate` / `OnDestroy` ([systems](/en/docs/guide/systems)). |
-| `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`, `ChunkRows = n`, `Slices = N`, `Simd = SimdMode.Auto` / `Require` / `Off`), `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<T1..Tn>]`, `[RemovedAny<T1..Tn>]`; `[Consume]` (the visited rows destroyed after the pass); `[ForEntity]` (a static method run on one entity through its generated entry point). |
+| `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`, `ChunkRows = n`, `Slices = N`, `SimdMode = SimdMode.Auto` / `Require` / `Off`), `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<T1..Tn>]`, `[RemovedAny<T1..Tn>]`; `[Consume]` (the visited rows destroyed after the pass); `[ForEntity]` (a static method run on one entity through its generated entry point). |
 | `Maybe<T>` | ref struct | An optional component parameter of a `[ForEach]` method: `HasValue`, `Value`. |
 | `ReadOnlyMaybe<T>` | ref struct | The same, read-only: `Value` is `ref readonly`, never stamped, allowed for indexed components; a `Maybe<T>` converts to it. |
 | `Mut<T>` | ref struct | A component parameter of a `[ForEach]` method that counts as written only on the rows the method writes: `Value`, `Write()`, `SetIfChanged(value)` ([change tracking](/en/docs/guide/change-tracking)). |
 | `Reduce<T>`, `IReduction<T>` | struct, interface | A `[ForEach]` parameter, taken by `ref`, reducing a pass into singleton `T`, which implements `IReduction<T>` (`Identity`, `Combine`): `Value`, `Combine(value)`. |
 | `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]`, `[Any]` | attributes | On every instance field of a partial struct: the generator writes its `IReduction<T>` (`Identity` and a field-wise `Combine`). |
-| `[Key]`, `[UniqueKey]`, `[Group]` | attributes | On a member of a partial component (`[Key]` on the type: the value itself): the generator writes the explicit `IIndexed<TKey>.Key` (`IUniqueIndexed<TKey>`) or `IGroup.Group`. |
+| `[IndexKey]`, `[UniqueKey]`, `[Group]` | attributes | On a member of a partial component (`[IndexKey]` on the type: the value itself): the generator writes the explicit `IIndexed<TKey>.Key` (`IUniqueIndexed<TKey>`) or `IGroup.Group`. |
 | `[GroupBy]`, `[WhenTargetDestroyed(policy)]`, `[NotSaved]` | attributes | Setup every world applies from its first table holding the type: its grouping, the policy of links to a destroyed target; `[NotSaved]`: no save writes the type, a load keeps the world's own singleton. |
 | `Scratch<T>` | ref struct | A `[ForEach]` parameter: working memory of the method on the running thread, kept between rows, passes and worlds: `Value`. |
 | `Emit<T>`, `Emitted<T>` | ref struct, struct | A `[ForEach]` parameter, taken by value, appending records (`Add`, `AddRange`) joined in chunk order into singleton `Emitted<T>` (`Items`, a `DynamicBuffer<T>`) when the pass ends. |
@@ -63,7 +63,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `IForRange`, `IForSpan<T>` | interfaces | Jobs of `world.ForParallel`: `Execute(start, end)` over a range of indexes, `Execute(start, span)` over the elements of a list. |
 | `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out id)`, `Find(key)`, `Count(key)`. |
 | `Lanes` | static class | Stream compaction for batch methods: `Compact(source, mask, destination)` writes the elements a lane mask selects side by side. |
-| `Tile<TCell, TTile>`, `ITile<TKey>`, `ITileShape`, `TileFaces`, `TileNeighbourhood`, `TileBoundary`, `TileIds` | ref structs, interfaces, enums | A `[ForEach]` parameter: the entity's `DynamicBuffer<TCell>` with its neighbours' in the grid of `TTile` (an indexed component with a static shape, halo, neighbourhood and boundary, and the key of each neighbour), scheduled as a read of both: `Load(from, to, fill, mask)`, `Beside(face)`, `Beside(dx, dy, dz)`, `Cells`, `Changes(next, out changed)`, `Facing(edges)`. |
+| `Tile<TCell, TTile>`, `ITile<TKey>`, `ITileShape`, `TileFaces`, `TileNeighborhood`, `TileBoundary`, `TileIds` | ref structs, interfaces, enums | A `[ForEach]` parameter: the entity's `DynamicBuffer<TCell>` with its neighbors' in the grid of `TTile` (an indexed component with a static shape, halo, neighborhood and boundary, and the key of each neighbor), scheduled as a read of both: `Pad(from, to, fill, mask)`, `Beside(face)`, `Beside(dx, dy, dz)`, `Cells`, `Changes(next, out changed)`, `Facing(edges)`. |
 | `PaddedTile<TCell, TTile>`, `TileRows<TTile>`, `TileRow<TTile>`, `TileCursor<TCell, TTile>`, `TileReads` | ref structs, struct, enum | The layers a stencil samples, padded with a halo of `Halo` cells: `Rows(reads)` walks the active rows, `At(row)` samples around one (`Load128`, `Load256`, `LoadVector`, `this[dx, dy, dz]`), `this[x, y, z]`. |
 | `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]`, `[UpdateInterval(n, Phase = p)]` | interfaces, attributes | System groups (with filters through interfaces), ordering and cadence. |
 | `SystemErrorPolicy` | enum | `Throw` (default) or `Disable`: what an exception in a system does. |
@@ -128,14 +128,14 @@ component it has; components the source lacks stay absent and are not removals.
 | `prefab.Remove<T1..Tn>()` | O(n) | missing ones are ignored; returns the prefab |
 | `prefab.Has<T>()` / `Read<T>()` | O(1) | `Read` throws if the prefab has no `T` |
 | `prefab.SetBuffer<T>(params ReadOnlySpan<T>)` | O(n) | a `DynamicBuffer<T>` of these elements; every instance gets a list of its own |
-| `prefab.Absent<T>()` | O(1) | a column for `T` without the component: instances lack it, and adding it later flips a presence bit in their table instead of moving the row |
+| `prefab.SetAbsent<T>()` | O(1) | a column for `T` without the component: instances lack it, and adding it later flips a presence bit in their table instead of moving the row |
 | `prefab.AddMember()` | O(1) | a member of the prefab's group: instantiating one creates all; `EntityId` fields naming members are rewritten per instance |
 | generated: `prefab.X`, `HasX`, `SetX(…)`, `RemoveX()`; tags `IsX`, `SetX()`; buffers `SetLoot(items…)` | as the generic call | writers return the prefab; the property is read-only; not structural changes of any world |
 | `world.Instantiate(prefab)` | O(c) | one row copy; the target table is found once per prefab table and cached; safe during a pass (which does not visit the new entity); O(members × c) for a group |
 | `world.Instantiate(prefab, Span<Entity> entities)` | O(count × c) | one gate pass and at most one table growth for the wave |
 | `world.Instantiate(prefab, in T1 … in Tn)` | O(c + n) amortized | the prefab's values plus the given ones (replacing the prefab's, or added; a disabled one given is enabled), in one row copy into the final table, no intermediate table; a given `ChildOf` links the hierarchy, a unique key is checked first; O(members × c) plus one move for a group, whose entity of the prefab passed gets the components |
 | `world.Instantiate(prefab, Span<Entity> entities, in T1 … in Tn)` | O(count × (c + n)) | the same values for every instance; one gate pass, at most one table growth, each given column filled at once |
-| `world.Reserve(prefab, count)` | O(c), plus one growth | pre-sizes the tables the next `count` instances go to, so a spawn wave never grows them during a tick; also the instances' index keys, retired table and free ids (not their buffer lists: `ReservePool`) |
+| `world.Reserve(prefab, count)` | O(c), plus one growth | pre-sizes the tables the next `count` instances go to, so a spawn wave never grows them during a tick; also the instances' index keys, retired table and free ids (not their buffer lists: `FillPool`) |
 | `entity.Clone()` | O(c) | a new entity of the same world and table with a copy of every component; throws if not alive or retired (kept for its cleanup components) |
 
 ## Dynamic buffers [#dynamic-buffers]
@@ -153,8 +153,8 @@ need a `ref` and are tracked writes.
 | `bag.EnsureCapacity(n)` / `AsSpan()` | O(count) when it grows / O(1) | `AsSpan()` is writable |
 | `bag.SetCount(n)` | O(elements added or removed) | returns the span to write (`AsSpan()`); added elements are `default`; allocates only when the buffer grows |
 | `bag.TrimExcess()` | O(count) | reallocates to the count; an empty buffer gives its list back to the pool and holds none |
-| `DynamicBuffer<T>.PoolCapacity` | O(1) | the longest list a dead buffer of `T` gives back to the [buffer pool](/en/docs/guide/dynamic-buffers#pool) (default 4 KB of elements); per element type, process-wide, set at startup |
-| `DynamicBuffer<T>.ReservePool(lists)` | O(lists) allocations once; O(1) when the pool holds enough | fills the pool with empty lists of `PoolCapacity` elements until it holds `lists`; per element type, process-wide, after `PoolCapacity` |
+| `DynamicBuffer<T>.MaxPooledLength` | O(1) | the longest list a dead buffer of `T` gives back to the [buffer pool](/en/docs/guide/dynamic-buffers#pool) (default 4 KB of elements); per element type, process-wide, set at startup |
+| `DynamicBuffer<T>.FillPool(lists)` | O(lists) allocations once; O(1) when the pool holds enough | fills the pool with empty lists of `MaxPooledLength` elements until it holds `lists`; per element type, process-wide, after `MaxPooledLength` |
 
 A snapshot, a save or a clone of a buffer column copies the elements: O(elements), a new list per entity.
 
@@ -236,11 +236,11 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 
 | API | Complexity | Notes |
 | --- | --- | --- |
-| each entity of the pass | O(neighbours) hash probes: 4 or 6 for `Faces`, 8 or 18 for `FacesAndEdges`, 8 or 26 for `All` | the generated job finds the neighbours by key once, for every tile of that grid the method takes; the grid's index is built before the pass |
-| `tile.Load(from, to, fill, mask)` / `tile.Load()` | O(layers × (Width + 2r) × (Depth + 2r)), r = `Halo`; each row one or two vector copies | the layers into this thread's texture with a ring of r cells and r layers under and over them (where there is no neighbour, the shape's `Boundary`: `fill`, clamped or mirrored); with `mask`, a word of active rows per layer; allocation-free once the thread has its texture; throws for an invalid shape (EECS072), layers outside `0..Height - 1` or a buffer shorter than the shape |
-| `tile.Beside(face)` / `tile.Beside(dx, dy, dz)` / `tile.Cells` | O(1) | a neighbour's id (default when none or outside the neighbourhood) / the entity's cells |
-| `tile.Changes(next, out changed)` | O(cells), row by row as bytes | whether the step differs from the cells, and the faces whose edge (r cells deep) changed |
-| `tile.Facing(edges)` | O(1) per neighbour | the neighbours that read those edges into their halo, across faces, edges and corners |
+| each entity of the pass | O(neighbors) hash probes: 4 or 6 for `Faces`, 8 or 18 for `FacesAndEdges`, 8 or 26 for `All` | the generated job finds the neighbors by key once, for every tile of that grid the method takes; the grid's index is built before the pass |
+| `tile.Pad(from, to, fill, mask)` / `tile.Pad()` | O(layers × (Width + 2r) × (Depth + 2r)), r = `Halo`; each row one or two vector copies | the layers into this thread's texture with a ring of r cells and r layers under and over them (where there is no neighbor, the shape's `Boundary`: `fill`, clamped or mirrored); with `mask`, a word of active rows per layer; allocation-free once the thread has its texture; throws for an invalid shape (EECS072), layers outside `0..Height - 1` or a buffer shorter than the shape |
+| `tile.Beside(face)` / `tile.Beside(dx, dy, dz)` / `tile.Cells` | O(1) | a neighbor's id (default when none or outside the neighborhood) / the entity's cells |
+| `tile.ChangedEdges(next, out changed)` | O(cells), row by row as bytes | whether the step differs from the cells, and the faces whose edge (r cells deep) changed |
+| `tile.Facing(edges)` | O(1) per neighbor | the neighbors that read those edges into their halo, across faces, edges and corners |
 | `padded.Rows(reads)` | O(1) per layer and per row visited: a trailing-zero count | the rows whose stencil (`TileReads`, up to r away) holds a cell that is not zero, layer by layer; throws when loaded without `mask` |
 | `padded.At(row)` | O(1) | the row's first cell; checks the row is inside |
 | `cursor.Load128<TLane>(dx, dy, dz)` / `Load256` / `LoadVector` / `cursor[dx, dy, dz]` | O(1): one unaligned load | offsets within r cells, rows and layers of the row; one unsigned compare per axis, folded away when constant |
@@ -261,7 +261,7 @@ Details: [bulk changes](/en/docs/guide/bulk), [cleanup and disable](/en/docs/gui
 | API | Complexity | Notes |
 | --- | --- | --- |
 | `world.Index<T, TKey>()` | O(1); the first call creates it | one per world and indexed component; a second key type throws |
-| `index.Count(key)` / `TryFind(key, out Entity)` | O(1) | a hash probe (an array access for a key that is an entity); the first lookup indexes every row once |
+| `index.Count(key)` / `TryFind(key, out id)` | O(1) | a hash probe (an array access for a key that is an entity); the first lookup indexes every row once |
 | `index.KeyCount` | O(1) | distinct keys some entity has (how many guilds have a member), kept as entities join and leave keys |
 | `index.Find(key)` | O(1), then O(1) per entity | a `ref struct` for `foreach`; destroying entities during the loop is allowed, changing `T` is not |
 | `index.Find(key).Count` / `world.Children(parent).Count` | O(1) | how many entities had the key when found (size a buffer without walking twice); entities destroyed during the loop are skipped by it but still counted |

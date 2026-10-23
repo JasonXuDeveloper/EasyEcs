@@ -203,7 +203,7 @@ row; `p.X += v.X; p.Y += v.Y;` would get the loop, and [EECS055](/en/docs/guide/
 | --- | --- | --- |
 | `[ForEach]` / `[ForEach(Parallel = true)]` | Method | The method is the loop; `Parallel` splits rows across threads ([EECS010](/en/docs/guide/analyzer#eecs010)) |
 | `[ForEach(Parallel = true, ChunkRows = n)]` | Method | Threads claim `n` rows at a time (OpenMP's `schedule(dynamic, n)`): for a few hundred heavy rows ([chunk size](/en/docs/guide/threading#chunk-rows), [EECS054](/en/docs/guide/analyzer#eecs054)) |
-| `[ForEach(Simd = SimdMode.Require)]` | Method | The method must get its vector loop, else a build error ([EECS056](/en/docs/guide/analyzer#eecs056)); `SimdMode.Off` keeps it scalar without [EECS055](/en/docs/guide/analyzer#eecs055) |
+| `[ForEach(SimdMode = SimdMode.Require)]` | Method | The method must get its vector loop, else a build error ([EECS056](/en/docs/guide/analyzer#eecs056)); `SimdMode.Off` keeps it scalar without [EECS055](/en/docs/guide/analyzer#eecs055) |
 | `[ForEach(Slices = N)]` | Method | Each run visits one slice, about 1 / N of the rows: every row once per N runs (not with `Changed` / `Removed`: [EECS035](/en/docs/guide/analyzer#eecs035)) |
 | `[With<T>]` | Method, system group | Requires `T` without passing it |
 | `[Without<T>]` | Method, system group | Excludes entities with `T` |
@@ -355,7 +355,7 @@ Guide: [Change tracking](/en/docs/guide/change-tracking), with the
 | Call | Does |
 | --- | --- |
 | `world.Index<T, TKey>()` (`world.TIndex`) | The value index of `T` |
-| `index.Find(key)` / `TryFind(key, out e)` / `Count(key)` | Matching entities, one, how many |
+| `index.Find(key)` / `TryFind(key, out id)` / `Count(key)` | Matching entities, the id of one, how many |
 | `index.Find(key).Count` / `relations.Find(target).Count` | How many the loop walks, O(1), to size a buffer |
 | `index.KeyCount` / `relations.TargetCount` | How many distinct keys / targets are held, O(1) (occupied cells, guilds with a member) |
 | `index.Get(key)` / `TryGet(key, out e)` | The one entity of a unique key (`IUniqueIndexed<TKey>`); `Get` throws when none has it |
@@ -426,8 +426,8 @@ by `ref` from `e.WriteLoot()` (or `GetOrAddLoot()`), so each one counts for chan
 | `EnsureCapacity(n)` / `TrimExcess()` | Grows once before a known count, gives memory back |
 | `AsSpan()` | A `Span<T>` over the elements, for writes in place |
 | `SetCount(n)` | Sets the count (added elements `default`) and returns the span to write the whole buffer in place |
-| `DynamicBuffer<T>.PoolCapacity = n` (static) | The longest list a dead buffer of `T` gives back to its pool, set once at startup ([pool](/en/docs/guide/dynamic-buffers#pool)) |
-| `DynamicBuffer<T>.ReservePool(n)` (static) | Fills the pool with `n` empty lists at startup, after `PoolCapacity` |
+| `DynamicBuffer<T>.MaxPooledLength = n` (static) | The longest list a dead buffer of `T` gives back to its pool, set once at startup ([pool](/en/docs/guide/dynamic-buffers#pool)) |
+| `DynamicBuffer<T>.FillPool(n)` (static) | Fills the pool with `n` empty lists at startup, after `MaxPooledLength` |
 
 ```csharp
 unit.Set(new DynamicBuffer<Loot>());

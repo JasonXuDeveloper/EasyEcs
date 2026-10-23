@@ -107,6 +107,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D97](#d97-hand-written-parameters) | Rules for code that does by hand what a parameter does per chunk |
 | [D98](#d98-random-streams) | EECS088: one stream per draw, checked in pass code only |
 | [D99](#d99-singleton-saves) | EECS069 warns for a singleton only when the code saves whole worlds |
+| [D100](#d100-names-of-4-8) | The names of 4.8: one spelling, verbs for actions, the cadence of a system |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1469,7 +1470,7 @@ version check reads the parse options and the module initializer's check the ass
 ## D63. Newer Roslyn features: interceptors not used, the rest in use or not needed [#d63-roslyn-features]
 
 **Decision.** The generators use `ForAttributeWithMetadataName` (`[ForEach]`), implementation output for what user code
-never names (system code, `SavedTypes`), C# 14 extension members and generic attributes. They use no interceptors
+never names (system code, `TypeRegistry`), C# 14 extension members and generic attributes. They use no interceptors
 and no embedded attribute definitions.
 
 **Why.**
@@ -1528,7 +1529,7 @@ generated `LinkX(target)`, a job's `Writes` / `OwnStamps` → `WriteMask` / `Sel
 
 ## D65. The buffer pool's limit is a setting of each element type [#d65-buffer-pool-capacity]
 
-**Decision.** `DynamicBuffer<T>.PoolCapacity` sets the longest list, in elements, that a destroyed or removed buffer of
+**Decision.** `DynamicBuffer<T>.MaxPooledLength` sets the longest list, in elements, that a destroyed or removed buffer of
 `T` gives back to its thread's pool. It is a static of the element type, process-wide, defaulting to 4,096 bytes of
 elements; 0 pools none.
 
@@ -1620,7 +1621,7 @@ block of change ticks: before the pass, the blocks it covers are opened at its t
 `Mut<T>` / `Maybe<T>`, components of 1 to 4 fields of one primitive type (several fields split into one vector each
 by deinterleaving loads and interleaving stores, `EasyEcs.Interleaved`), a body of arithmetic, comparisons, branches
 and the `Math` functions with an exact vector counterpart. It is on by default (`SimdMode.Auto`): EECS055 names why a
-method that looks meant for a loop stays scalar, `Simd = SimdMode.Require` makes that an error (EECS056) and
+method that looks meant for a loop stays scalar, `SimdMode = SimdMode.Require` makes that an error (EECS056) and
 `SimdMode.Off` opts a method out. The rows after the last whole vector, and all rows without a vector unit (or,
 for several fields, without the shuffles: AVX2 at 256 bits, permutes at 512), run the method itself.
 Later steps took `Vector512` (where the hardware runs it, then `Vector<T>`),
@@ -1753,7 +1754,7 @@ component whose keys map onto a bounded range of slots may declare `IDirectIndex
 `static SlotOf(key)`): its index keeps an array of `Slots` entries beside the hash, each holding a key and its
 entity, so `Get`, `TryGet` and the uniqueness check of a write read one entry. A key whose slot is out of range or
 held by another key is found through the hash, which stays the index for `Find`, `Count` and the ordered walks. The
-generator registers the slot map with the unique index (`SavedTypes.DirectIndex`), with no reflection.
+generator registers the slot map with the unique index (`TypeRegistry.DirectIndex`), with no reflection.
 
 **Why.**
 - **A unique key has one entity.** An array per key held one id and cost an allocation per new key; inline,
@@ -1802,7 +1803,7 @@ changes to the voxel server and the core too, and left them out.
   the next), so no net win was shown.
 - **A water halo that copies only the edges that changed:** half the copies, but the step's time stayed within noise,
   and it cost 4 KB more per sleeping chunk to remember the edges. Superseded by the planned push-halo design, where a
-  chunk hands its edges to its neighbours when they change ([roadmap](/en/docs/roadmap#push-halo)).
+  chunk hands its edges to its neighbors when they change ([roadmap](/en/docs/roadmap#push-halo)).
 
 ## D74. Per-thread scratch is a parameter [#d74-scratch]
 
@@ -1907,36 +1908,36 @@ shows a graph path well below its stage path.
 
 ## D77. Grid tiles: a parameter that loads its halo [#d77-tiles]
 
-**Decision.** A grid of cells updated from its neighbours (water, light, heat) is cut into tiles, one entity each: a
+**Decision.** A grid of cells updated from its neighbors (water, light, heat) is cut into tiles, one entity each: a
 component that implements `ITile<TKey>` (its shape as static members, `Width`, `Depth`, `Height`, `Faces`; its key in
-a value index; `Beside(key, face)`, the key of a neighbour) and a `DynamicBuffer<TCell>` of its cells. A `[ForEach]`
-method takes a `Tile<TCell, TTile>` parameter, and the generator writes the plumbing: it finds the tile's neighbours in
+a value index; `Beside(key, face)`, the key of a neighbor) and a `DynamicBuffer<TCell>` of its cells. A `[ForEach]`
+method takes a `Tile<TCell, TTile>` parameter, and the generator writes the plumbing: it finds the tile's neighbors in
 the index once per entity, declares the reads (the index, `DynamicBuffer<TCell>`), adds the shape and the buffer to the
-method's filter, and keeps the method parallel. `Load(from, to)` pads the layers into a texture of the thread with a
-ring of `Halo` cells from the facing edges of the neighbours (and layers under and over), records a bit per row that
+method's filter, and keeps the method parallel. `Pad(from, to)` copies the layers into a texture of the thread with a
+ring of `Halo` cells from the facing edges of the neighbors (and layers under and over), records a bit per row that
 holds a cell that is not zero, and returns a `PaddedTile`: `Rows(reads)` walks the rows a stencil can change with
 `TrailingZeroCount`, `At(row)` is a cursor whose `Load128` / `Load256` / `LoadVector` read a vector one cell, row or
 layer away. A tile parameter beside a write of its cell buffer is EECS059, the rule of `Lookup<T>`.
 
 The shape also says how far and how wide a stencil reads: `Halo` (cells of halo, up to the tile's extent),
-`Neighbourhood` (the faces, the faces and edges, or all 26 neighbours) and `Boundary` (fill, clamp or mirror where a
-tile has no neighbour; a periodic grid is a `Beside` that wraps). `Tile.Changes` / `Tile.Facing` let a grid put its
+`Neighborhood` (the faces, the faces and edges, or all 26 neighbors) and `Boundary` (fill, clamp or mirror where a
+tile has no neighbor; a periodic grid is a `Beside` that wraps). `Tile.ChangedEdges` / `Tile.Facing` let a grid put its
 quiet tiles to sleep and wake only the tiles facing an edge that changed. A tile takes one step per pass. EECS072
 reports a shape a tile cannot hold, EECS073 two tiles of one cell type in one method.
 
 **Why.**
-- **Every grid wrote the same 80 lines.** The VoxelServer water found its four neighbours, read their counts and
+- **Every grid wrote the same 80 lines.** The VoxelServer water found its four neighbors, read their counts and
   buffers through four `Lookup`s, padded a `stackalloc` texture with an edge case per face and kept its own row mask.
   With a tile, `Flow.cs` keeps the rule and its row loop; the shape is four members of `Chunk`.
 - **As fast as the hand-written loop.** `WaterTileBenchmark` (400 chunks, one step, the hand-written system against
   the tile one, outputs compared chunk by chunk, two rounds): the tile 482–513 µs, by hand 516–524 µs at 1 thread
   (263 µs against 263–269 µs at 4), 0 B both.
-- **The load of the common shape is its own loop.** With halos, neighbourhoods and boundaries added, the general load
-  (every neighbour slot, a fill or a clamp per cell) made the water up to 40 % slower than its first version. Three
-  changes brought it back: a missing neighbour reads a blank array of the fill (no branch per cell), the rows are
+- **The load of the common shape is its own loop.** With halos, neighborhoods and boundaries added, the general load
+  (every neighbor slot, a fill or a clamp per cell) made the water up to 40 % slower than its first version. Three
+  changes brought it back: a missing neighbor reads a blank array of the fill (no branch per cell), the rows are
   copied through refs computed once per row, and a halo of 1 with faces only and a fill boundary (the water, the
-  Laplacian) takes a loop of its own, chosen by a condition of constants; the neighbour search is unrolled per face
-  for the faces neighbourhood. That loop is compiled twice, with and without the row masks (`Masked` / `Unmasked`, a
+  Laplacian) takes a loop of its own, chosen by a condition of constants; the neighbor search is unrolled per face
+  for the faces neighborhood. That loop is compiled twice, with and without the row masks (`Masked` / `Unmasked`, a
   `typeof` constant), so a tile only sampled (the water's blocks) tests no cell, and a halo cell is tested in the
   register it was moved through. The water's tile went from 566–585 µs to 482–513 µs at 1 thread; the first version
   took 528–547 µs. The row loop of the general load keeps its vectors in registers (no spill).
@@ -1956,7 +1957,7 @@ reports a shape a tile cannot hold, EECS073 two tiles of one cell type in one me
 - **Tiles against hand-written stencils.** `TileStencilBenchmark` (1,024 plates of 16 × 16 floats on a torus, outputs
   compared, two rounds): the 9-point blur 756–765 µs with a tile, 679–690 µs with a direct-mapped key, 389–432 µs by
   hand at 1 thread (406–428, 389–403 and 253–269 µs at 4); the Laplacian 661–678 µs against 385–397 µs (381–393 against
-  249–273 µs at 4); 0 B all. The gap is the general load (about 200 ns per plate: every neighbour slot through one copy
+  249–273 µs at 4); 0 B all. The gap is the general load (about 200 ns per plate: every neighbor slot through one copy
   loop with its row mask) and the index search (about 150 ns): a stencil this cheap per cell is dominated by them, and
   one that does real work per cell (the water) is not.
 - **Quiet tiles cost nothing.** `TileActiveBenchmark` (1,024 Life plates, 16 blinkers, two rounds): always on 369–378 µs,
@@ -1977,16 +1978,16 @@ reports a shape a tile cannot hold, EECS073 two tiles of one cell type in one me
   stepping layer y. A 7-point stencil over 8 × 8 chunks of 16 × 16 × Height floats, two rounds: Height 32, 416–443 µs
   whole against 434–454 µs sliding (1.03–1.04); Height 256, 3,821–4,091 µs against 3,847–3,894 µs (0.95–1.01, within the
   error). Not built: a texture of the whole tile fits the cache at these sizes.
-- **A cache of the neighbours' ids:** `TileNeighbourBenchmark` (1,024 plates, 8 neighbours, a pass that only finds
+- **A cache of the neighbors' ids:** `TileNeighborBenchmark` (1,024 plates, 8 neighbors, a pass that only finds
   them, two rounds): searching the index 147–159 µs, a direct-mapped key 107 µs, ids read from a component 1.4–1.5 µs
   at 1 thread (60–66, 46–48 and 2.8–2.9 µs at 4). Not built: in a stencil pass the search is about a fifth of the
   cost, and a cache needs per-entity state outside the tables and an invalidation on every create, destroy and key
   change; a key that implements `IDirectIndexed<TKey>` makes each search an array read without one.
-- **The neighbour search unrolled for every neighbourhood (each of the 26 slots a constant):** tried and dropped.
-  `TileNeighbourBenchmark` at 1 thread, two rounds against three of the loop over the slots: searching the index
+- **The neighbor search unrolled for every neighborhood (each of the 26 slots a constant):** tried and dropped.
+  `TileNeighborBenchmark` at 1 thread, two rounds against three of the loop over the slots: searching the index
   148–154 µs against 166–173 µs, but a direct-mapped key 127 µs against 117–123 µs (the unrolled body outgrows what an
-  array read per neighbour pays for); the 9-point blur and the Laplacian with a tile within noise (708–753 against
-  726–749 µs, 713–737 against 739–766 µs). The faces neighbourhood keeps its unrolled search.
+  array read per neighbor pays for); the 9-point blur and the Laplacian with a tile within noise (708–753 against
+  726–749 µs, 713–737 against 739–766 µs). The faces neighborhood keeps its unrolled search.
 - **A generated per-cell kernel (the user writes `Next(center, north, south, ...)`, the generator the loop):** not
   built. C# arithmetic on `byte` promotes to `int`, so a scalar body does not map onto byte lanes; the vector loops
   of the generator target `Vector<T>` (32 bytes on AVX2), not a 16-cell row; and the water reduces per row (wet
@@ -2415,6 +2416,41 @@ the code calls `Save`, `SaveWithout` or `SaveEntities`. It is a warning for a si
 **Considered.**
 - **Following which types each save can reach.** That would need the `ComponentSet` of every call and the data flow
   into it. The rule already leaves a type that a `ComponentSet` names to the code that chose it.
+
+## D100. The names of 4.8: one spelling, verbs for actions, the cadence of a system [#d100-names-of-4-8]
+
+**Decision.** A naming review before 4.8 renames, beyond [D64](#d64-names-of-4-7), names that are new in 4.8:
+`TileNeighbourhood` / `ITileShape.Neighbourhood` / `TileNeighbours` → `TileNeighborhood` / `Neighborhood` /
+`TileNeighbors`, `tile.Load()` → `tile.Pad()`, `tile.Changes(next, out changed)` → `ChangedEdges`,
+`TileReads.Sides` → `NorthSouth`, `[ForEach(Simd = …)]` → `[ForEach(SimdMode = …)]`, `DynamicBuffer<T>.ReservePool` /
+`PoolCapacity` → `FillPool` / `MaxPooledLength`, `[Key]` → `[IndexKey]`, `prefab.Absent<T>()` → `SetAbsent<T>()`, and
+the EECS082 descriptor (a system's cadence as an override; EECS083 is `BadUpdateInterval`). One released call changes:
+`ValueIndex.TryFind` gives an `EntityId`, as `Lookup<T>.TryFind` does. Hidden and internal names follow: `SavedTypes` →
+`TypeRegistry` (called by generated code only) and the analyzer's descriptor fields. No alias is kept.
+
+**Why.**
+- **One spelling.** The API and the analyzer write US English (`Color`, `Behavior` in .NET); "neighbour" was the one
+  British word, so a search for "neighbor" missed the tile API.
+- **A verb says what happens.** `Load` read like loading a save (`World.Load`); the call pads a tile with its halo
+  into a texture. `Changes` read like a collection; it compares and returns the faces whose edge changed. `Absent<T>`
+  read like a query; it sets a column without the component, as `Set` does with one.
+- **A name says what it holds.** `PoolCapacity` was a length of each pooled list, not a number of lists;
+  `ReservePool` fills the pool with lists. `Sides` of `TileReads` named two rows, not the four sides of `TileFaces.Sides`.
+  `[Key]` alone read like any key; `[IndexKey]` says the index, next to `[UniqueKey]`.
+- **The property names its type.** `Simd = SimdMode.Off` repeated the word in two forms; `SimdMode = SimdMode.Off`
+  reads like `FloatMode`.
+- **Cadence, not schedule.** `World.DescribeSchedule` is the order and the stages of systems; how often one runs is its
+  cadence (`[UpdateInterval]`), and the rule and its messages say so.
+- **One id type for a key's entity.** The index stores ids; `Lookup<T>.TryFind` gave an id and `ValueIndex.TryFind` a
+  handle, so code moving between the two changed types. The id is the cheaper form on the paths that need no handle
+  (tile neighbors, lookups, links): no world reference is built for them. Code that needs the handle asks
+  `world.GetEntity(id)`, and a unique index keeps `TryGet(key, out Entity)`.
+
+**Considered.**
+- **A `TryGet(key, out Entity)` on every value index:** two calls for one lookup that differ only in their out type;
+  the unique index's `TryGet` is the one with a single answer.
+- **`[Obsolete]` aliases:** pre-1.0, as in D54 and D64: the compiler finds every use, and every name but `TryFind` is
+  new in 4.8.
 
 ## Related [#related]
 

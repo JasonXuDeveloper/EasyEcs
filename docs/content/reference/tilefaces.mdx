@@ -10,7 +10,7 @@ description: "The faces of a tile (ITileShape): north is −z, south +z, west �
 public enum TileFaces : byte
 ```
 
-The faces of a tile ([`ITileShape`](/en/docs/reference/itileshape)): north is −z, south +z, west −x, east +x, below −y, above +y. One face names a neighbour ([`ITile.Beside`](/en/docs/reference/itile#beside), [`Tile.Beside`](/en/docs/reference/tile#beside)); a set of them is [`ITileShape.Faces`](/en/docs/reference/itileshape#faces), the faces that have neighbours.
+The faces of a tile ([`ITileShape`](/en/docs/reference/itileshape)): north is −z, south +z, west −x, east +x, below −y, above +y. One face names a neighbor ([`ITile.Beside`](/en/docs/reference/itile#beside), [`Tile.Beside`](/en/docs/reference/tile#beside)); a set of them is [`ITileShape.Faces`](/en/docs/reference/itileshape#faces), the faces that have neighbors.
 
 ## Fields
 
@@ -28,7 +28,7 @@ Above = 32;
 All = Sides | Below | Above;
 ```
 
-The six faces: the neighbours of a 3D grid of cubes.
+The six faces: the neighbors of a 3D grid of cubes.
 
 ### `Below` [#below]
 
@@ -68,7 +68,7 @@ North = 1;
 Sides = North | South | West | East;
 ```
 
-North, south, west and east: the neighbours of a 2D grid, or of the columns of a voxel world.
+North, south, west and east: the neighbors of a 2D grid, or of the columns of a voxel world.
 
 ### `South` [#south]
 

@@ -45,7 +45,7 @@ icon: Gauge
 - **合计：** [`Reduce<T>`](/zh/docs/guide/threading#reductions) 每个 lane 一个累加器，按 lane 顺序合并。
 - **系统得到了什么：** `world.DescribeSchedule()` 每个方法打印一行（`SystemInfo.Loops`）：循环、它的形状，或者保持标量的原因。
 - **为什么没有：** [EECS055](/zh/docs/guide/analyzer#eecs055) 像 Burst 的 Inspector 一样说出方法保持标量的第一个原因；热路径上的
-  `[ForEach(Simd = SimdMode.Require)]` 把它变成构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)），`SimdMode.Off` 不再提示。
+  `[ForEach(SimdMode = SimdMode.Require)]` 把它变成构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)），`SimdMode.Off` 不再提示。
 
 </Step>
 
@@ -87,7 +87,7 @@ span，方法自己用 `Vector<T>` 或 `Vector128<T>` 循环：相当于 Burst j
 （`ITile<TKey>`），一个 `DynamicBuffer<T>` 装它的格子。接收 `Tile<TCell, TTile>` 参数的 `[ForEach]` 方法就是着色器，其余的由生成器写：
 它每个实体在键的索引里找一次瓦片的邻居，声明读取（索引、每块瓦片的格子缓冲），把形状和缓冲加进方法的过滤条件，并且让方法保持并行。
 
-- **光环。** `tile.Load()` 把瓦片的格子拷进这个线程的一张带填充的纹理，每层外面一圈 `Halo` 个格子（默认一个），取自邻居朝向它的边
+- **光环。** `tile.Pad()` 把瓦片的格子拷进这个线程的一张带填充的纹理，每层外面一圈 `Halo` 个格子（默认一个），取自邻居朝向它的边
   （MPI 光环交换里的幽灵格子；没有邻居时按形状的 `Boundary`），多层的瓦片下面和上面也各多这么多层。之后循环采样邻居时没有边界情况，方法读到的每个邻居仍是这一遍之前的样子。
 - **每行一个着色器。** `padded.At(row)` 是一行上的游标；`Load128<T>(dx, dy, dz)` 读相隔一个格子、一层或一行的 16 个字节（四个 float，
   十六个字节格子），按光环检查范围，所以一行格子只要几条向量指令，瓦片之间并行。
@@ -130,7 +130,7 @@ public class DiffuseSystem : EcsSystem
     [ForEach(Parallel = true, ChunkRows = 64)]
     static void Diffuse(Tile<Temperature, HeatPlate> heat, Mut<DynamicBuffer<NextTemperature>> next)
     {
-        var plate = heat.Load();
+        var plate = heat.Pad();
         var into = MemoryMarshal.Cast<NextTemperature, float>(next.Write().AsSpan());
         foreach (var row in plate.Rows(TileReads.Layer))
         {
@@ -156,7 +156,7 @@ VoxelServer 的水是同一个循环，作用在 16 x 16 x 32 方块的区块上
 
 - **`Halo`**（默认 1）是这一圈的宽度，以格子、行和层计：模板读到 r 个格子之外就需要 r，比如四阶拉普拉斯算子（每条轴五个点，r = 2）。
   游标的采样最远到 r，`Rows(reads)` 把行掩码向外扩 r。
-- **`Neighbourhood`**（默认 `Faces`）选择找哪些瓦片、拷进这一圈的棱和角：`Faces`（von Neumann：2D 4 块，3D 6 块）、
+- **`Neighborhood`**（默认 `Faces`）选择找哪些瓦片、拷进这一圈的棱和角：`Faces`（von Neumann：2D 4 块，3D 6 块）、
   `FacesAndEdges`（8 或 18 块）或 `All`（Moore：8 或 26 块）。九点模板（生命游戏、盒式模糊）需要 `All`；七点模板不读角，
   也就省下多出来的查找。`tile.Beside(dx, dy, dz)` 返回其中任意一块。
 - **`Boundary`**（默认 `Fill`）是没有邻居处光环里放什么：填充值（Dirichlet 边界）、重复瓦片的边缘格子（`Clamp`），或在边缘镜像瓦片的格子
@@ -172,7 +172,7 @@ public record struct LifePlate(PlatePos Pos) : IComponent, ITile<PlatePos>
     readonly PlatePos IIndexed<PlatePos>.Key => Pos;
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
-    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+    static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
 
     static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
     {
@@ -191,7 +191,7 @@ public static class LifeRule
 {
     public static void Step(Tile<Alive, LifePlate> life, Span<byte> into)
     {
-        var plate = life.Load();
+        var plate = life.Pad();
         foreach (var row in plate.Rows(TileReads.Layer))
         {
             var c = plate.At(row); // 一行 16 个格子正好一个 Vector128<byte>
@@ -219,8 +219,8 @@ public class LifeSystem : EcsSystem
 | --- | --- | --- |
 | 一块瓦片（一个实体和它的 `DynamicBuffer<TCell>`） | 线程块的分块（tile） | 一个 rank 的子区域 |
 | `Halo` | apron | 幽灵格子的宽度（halo 深度） |
-| `tile.Load()` | 把分块和 apron 载入共享内存 | 光环交换 |
-| `TileNeighbourhood.Faces` / `All` | von Neumann / Moore 模板 | 只交换面 / 交换面、棱和角 |
+| `tile.Pad()` | 把分块和 apron 载入共享内存 | 光环交换 |
+| `TileNeighborhood.Faces` / `All` | von Neumann / Moore 模板 | 只交换面 / 交换面、棱和角 |
 | `TileBoundary.Fill` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / 钳制 / Neumann 边界 |
 | 回绕的 `Beside` | `cudaAddressModeWrap` | 带周期维度的 `MPI_Cart_create` |
 | 步进之后的提交系统 | 乒乓缓冲 | Jacobi 迭代的新旧两个数组 |
@@ -230,7 +230,7 @@ k 遍普通的遍历更快（[D77](/zh/docs/decisions#d77-tiles)）。
 
 #### 让安静的瓦片休眠 [#grid-active]
 
-`tile.Changes(next, out bool changed)` 把一步的结果和瓦片的格子比较，返回边缘变了的面（离这个面 `Halo` 以内的格子，对面的邻居会读它们）。
+`tile.ChangedEdges(next, out bool changed)` 把一步的结果和瓦片的格子比较，返回边缘变了的面（离这个面 `Halo` 以内的格子，对面的邻居会读它们）。
 瓦片没变、旁边瓦片朝向它的边缘也没变时，下一步会算出同样的结果，可以休眠；`tile.Facing(edges)` 给出要唤醒的邻居。
 用一个标签标出醒着的瓦片，网格的开销就只是活跃瓦片的开销：
 
@@ -245,7 +245,7 @@ public class SparseLifeSystem : EcsSystem
     {
         var step = next.Write().AsSpan();
         LifeRule.Step(life, MemoryMarshal.Cast<NextAlive, byte>(step));
-        var edges = life.Changes(MemoryMarshal.Cast<NextAlive, Alive>(step), out bool changed);
+        var edges = life.ChangedEdges(MemoryMarshal.Cast<NextAlive, Alive>(step), out bool changed);
         change = new LifeChange(edges, changed);
     }
 }
@@ -309,11 +309,11 @@ public class WakeSystem : EcsSystem
 | 拥有一块子区域的 MPI rank | 每线程一个 World（每个区域或地图一个 World） | [每线程一个 World](/zh/docs/guide/threading#recommended-one-world-per-thread) |
 | MPI 把实体发给另一个 rank | `SaveEntities` / `MoveEntities` | [迁移](/zh/docs/guide/migration-and-unload#save-entities) |
 | MPI 单边的 `MPI_Get`、Unity 的 `ComponentLookup`（`[ReadOnly]`） | `Lookup<T>` 参数：任意实体在这一遍之前的 `T` | [查找](/zh/docs/guide/threading#lookups) |
-| MPI 光环交换（幽灵格子） | `Tile<TCell, TTile>.Load`：瓦片四周填上邻居朝向它的边 | [给网格着色](#grid) |
+| MPI 光环交换（幽灵格子） | `Tile<TCell, TTile>.Pad`：瓦片四周填上邻居朝向它的边 | [给网格着色](#grid) |
 | Burst 自动向量化 | `[ForEach]` 方法的向量循环 | [向量循环](/zh/docs/guide/systems#vector-loops) |
 | Burst 里手写 `float4` / Unity.Mathematics | 用 `Vector<T>` / `Vector128<T>` 的批处理方法 | [批处理方法](/zh/docs/guide/systems#batch-methods) |
 | Burst `IJobParallelFor` 的 batch count | `ChunkRows` | [`ChunkRows`](/zh/docs/guide/threading#chunk-rows) |
-| Burst Inspector | EECS055，以及 `Simd = SimdMode.Require`（EECS056） | [分析器](/zh/docs/guide/analyzer#eecs055) |
+| Burst Inspector | EECS055，以及 `SimdMode = SimdMode.Require`（EECS056） | [分析器](/zh/docs/guide/analyzer#eecs055) |
 | GPU 片元着色器、纹理采样 | 接收 `Tile<TCell, TTile>` 的 `[ForEach]` 方法，用 `Load128` 读周围的格子 | [给网格着色](#grid) |
 | GPU 模板缓冲 | `padded.Rows(reads)`：每行一位，用 `TrailingZeroCount` 访问 | [给网格着色](#grid) |
 | GPU 乒乓渲染目标 | 两个缓冲，读一个写一个，再提交 | [VoxelServer 的水](/zh/docs/samples/voxel-server#water) |
@@ -334,7 +334,7 @@ public class WakeSystem : EcsSystem
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
 | 优化没人测过的系统 | 代码更难读，什么也没省下 | [`MeasureSystems`](/zh/docs/guide/systems#measuring-systems) |
-| 想向量化的方法里混用 `float` 和 `int` 字段 | 保持标量 | [EECS055](/zh/docs/guide/analyzer#eecs055)；`Simd = SimdMode.Require` 让它报错 |
+| 想向量化的方法里混用 `float` 和 `int` 字段 | 保持标量 | [EECS055](/zh/docs/guide/analyzer#eecs055)；`SimdMode = SimdMode.Require` 让它报错 |
 | 并行方法写共享计数器 | 更新丢失 | [EECS060](/zh/docs/guide/analyzer#eecs060)：改用 [`Reduce<T>`](/zh/docs/guide/threading#reductions) |
 | 大量轻量行也设 `ChunkRows` | 同样的活要领更多次块 | 基准（[`ChunkRows`](/zh/docs/guide/threading#chunk-rows)） |
 | 网格的一遍读到了同一遍里已更新的格子 | 结果取决于访问顺序（并行时还取决于线程数） | 测试：写进第二个缓冲 |

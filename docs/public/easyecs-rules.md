@@ -25,7 +25,7 @@ available as Markdown: add `.md` to its URL.
   it up with `world.XIndex.Get(key)` / `TryGet(key, out e)`, never with a hand-kept dictionary. A write that would give
   a second entity a taken key throws `InvalidOperationException`; to move a key, change the old holder first. Not for
   `EntityId` keys (EECS036). A component has one index key: never two `IIndexed<TKey>` (EECS036). A key that is a
-  member is declared, not written: `[Key]` (or `[UniqueKey]`) on the field of a partial struct, and the generator
+  member is declared, not written: `[IndexKey]` (or `[UniqueKey]`) on the field of a partial struct, and the generator
   writes the interface and an explicit `Key` (EECS067); `[GroupBy]` with `[Group]` on a member does the same for a
   group. When the keys a
   world holds at once map onto bounded slots (grid cells modulo the loaded area, small ids), make it
@@ -35,8 +35,8 @@ available as Markdown: add `.md` to its URL.
   `EnsureCapacity(n)` on it (and `world.Reserve<T…>(n)` on the world) before a wave of known size. Write a whole
   buffer through the span `SetCount(n)` returns; compute many passes over the same elements in a `stackalloc`'d span
   and copy it in once. `TrimExcess()` on an empty scratch buffer gives its list back to the pool. Buffers longer than
-  4 KB that come and go (a chunk's blocks, a path) set `DynamicBuffer<T>.PoolCapacity` to their length and call
-  `DynamicBuffer<T>.ReservePool(peak)` once at startup, after `PoolCapacity` (both process-wide); `world.Reserve` does not
+  4 KB that come and go (a chunk's blocks, a path) set `DynamicBuffer<T>.MaxPooledLength` to their length and call
+  `DynamicBuffer<T>.FillPool(peak)` once at startup, after `MaxPooledLength` (both process-wide); `world.Reserve` does not
   reserve buffer lists.
 - An external resource (a socket, a seat) lives in an `ICleanupComponent`: `Destroy` retires the entity (alive, with
   the `Retired` tag) until a system releases the resource and removes the component, which frees it. Never set or remove `Retired` or
@@ -127,15 +127,15 @@ available as Markdown: add `.md` to its URL.
   max)`, a pure function of seed, entity, tick and stream), never `Random.Shared`, a `new Random` or a `Random` field
   (EECS071). Each draw for the same entity in a pass has a stream of its own, and a draw in a loop adds the iteration
   to its stream (`stream + (uint)i`, EECS088); the system that advances the clock advances `EntityRandom.Tick`.
-  A grid of cells updated from its neighbours is tiles: a component implementing `ITile<TKey>` (static `Width`,
-  `Depth`, optional `Height` / `Faces` / `Halo` / `Neighbourhood` / `Boundary`, a `Key`, `Beside(key, face)`, which
+  A grid of cells updated from its neighbors is tiles: a component implementing `ITile<TKey>` (static `Width`,
+  `Depth`, optional `Height` / `Faces` / `Halo` / `Neighborhood` / `Boundary`, a `Key`, `Beside(key, face)`, which
   wraps on a periodic grid) beside a `DynamicBuffer<TCell>`, shaded by a
-  `[ForEach]` method with a `Tile<TCell, TTile>` parameter: `var p = tile.Load(); foreach (var row in
+  `[ForEach]` method with a `Tile<TCell, TTile>` parameter: `var p = tile.Pad(); foreach (var row in
   p.Rows(TileReads.Layer)) { var c = p.At(row); ... c.Load128<T>(dx, dy, dz) ... }`, writing a second buffer that a
-  later system commits (never the tile's own buffer, EECS059); never fetch neighbour buffers by hand. A stencil
+  later system commits (never the tile's own buffer, EECS059); never fetch neighbor buffers by hand. A stencil
   reaching r cells needs `Halo => r` (at most the tile, EECS072); a 9- or 27-point one needs
-  `Neighbourhood => TileNeighbourhood.All`; one step per pass (several steps per load lose on a cached grid);
-  quiet tiles sleep through `tile.Changes` / `tile.Facing` and an awake tag. One cell type per field, one
+  `Neighborhood => TileNeighborhood.All`; one step per pass (several steps per load lose on a cached grid);
+  quiet tiles sleep through `tile.ChangedEdges` / `tile.Facing` and an awake tag. One cell type per field, one
   `Tile` per field (two of the same cell type is EECS073).
 - Hot per-row arithmetic over numbers: a static per-entity `[ForEach]` method (on one thread or `Parallel`; no
   `Entity`, `World`, span or `Mut<T>` parameter) gets a generated vector loop when its components hold 1 to 4 lanes of
@@ -148,7 +148,7 @@ available as Markdown: add `.md` to its URL.
   cannot express (a call, a loop, logging) is cold, and the vectors where a lane takes it run the method. Do not mix
   `float` and `int`, and keep `bool` fields out of hot components. EECS055 (a suggestion) names
   why a method stayed scalar (a narrow value out of range, a component too wide for the work, a `Maybe<T>` in a
-  parallel method, a call outside a condition); put `[ForEach(Simd = SimdMode.Require)]` on a hot method so losing the loop fails the
+  parallel method, a call outside a condition); put `[ForEach(SimdMode = SimdMode.Require)]` on a hot method so losing the loop fails the
   build (EECS056), `SimdMode.Off` on one that should stay scalar.
 - A request or message for one entity is a private static `[ForEntity]` method (`ref` for what it writes, filter
   attributes such as `[Without<Dead>]`, the caller's values after the components), called through its generated entry

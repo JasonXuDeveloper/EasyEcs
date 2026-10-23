@@ -54,13 +54,13 @@ static virtual int Height { get; }
 
 层数（y），至少 1：1（默认）是 2D 分块，它上下没有层。
 
-### `Neighbourhood` [#neighbourhood]
+### `Neighborhood` [#neighborhood]
 
 ```csharp
-static virtual TileNeighbourhood Neighbourhood { get; }
+static virtual TileNeighborhood Neighborhood { get; }
 ```
 
-找哪些周围的分块，读进 halo 的棱和角（默认 [`TileNeighbourhood.Faces`](/zh/docs/reference/tileneighbourhood#faces)）。
+找哪些周围的分块，读进 halo 的棱和角（默认 [`TileNeighborhood.Faces`](/zh/docs/reference/tileneighborhood#faces)）。
 
 ### `Width` [#width]
 

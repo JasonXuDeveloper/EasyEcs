@@ -126,7 +126,7 @@ public class MovementSystem : EcsSystem
 
 - **适合：** 对大量行做算术：衰减、积分、截断、计数。
 - **别用于：** 不用管：它是自动的。不符合条件的方法（`Vector3` 字段、两种数值类型、函数调用、`Parallel`）照旧逐行运行，
-  [EECS055](/zh/docs/guide/analyzer#eecs055) 会说明原因；`Simd = SimdMode.Require` 让它成为构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)），
+  [EECS055](/zh/docs/guide/analyzer#eecs055) 会说明原因；`SimdMode = SimdMode.Require` 让它成为构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)），
   `SimdMode.Off` 不再提示。
 - **开销：** 运行时没有；循环在编译时写好。
 - **指南：** [系统](/zh/docs/guide/systems#vector-loops)
@@ -397,7 +397,7 @@ var guard = world.Instantiate(goblin, new ChildOf(archer));          // 自带�
 - **适合：** 属于某个实体、变了就要发送或保存的列表：背包、路径、最近的命中记录。
 - **别用于：** 有自己状态的元素（每个元素一个实体，加一条关系），或者数量固定的一小组值（非托管组件里的 `[InlineArray]`）。
 - **开销：** 每个实体一个对象加一个数组，第一次写入时创建；容量之内的写入不分配内存。销毁的缓冲把列表交给池，同类型的下一个缓冲
-  从池里取，不论在哪个线程：`PoolCapacity` 决定最长保留多长的列表，`ReservePool(n)` 在启动时把池填满。`SetCount(n)` 返回 span，原地写整个缓冲。
+  从池里取，不论在哪个线程：`MaxPooledLength` 决定最长保留多长的列表，`FillPool(n)` 在启动时把池填满。`SetCount(n)` 返回 span，原地写整个缓冲。
 - **指南：** [动态缓冲](/zh/docs/guide/dynamic-buffers)、[缓冲池](/zh/docs/guide/dynamic-buffers#pool)、[ECS 设计原则第 8 条](/zh/docs/ecs-principles#8-choose-how-to-hold-a-collection)
 
 ### 预制体与克隆 [#prefabs-and-cloning]

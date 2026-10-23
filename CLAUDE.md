@@ -28,7 +28,7 @@ BenchmarkDotNet reports); pages never type a number.
 src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written shared core only)
   Contracts.cs                 IComponent, ITracked, ISingletonComponent, INoStructuralChanges and the other markers
   Declarations.cs              attributes whose code the generators write: [Sum]/[Product]/[Min]/[Max]/[All]/[Any]
-                               (a reduction), [Key]/[UniqueKey]/[Group] (an index key, a group), and world setup:
+                               (a reduction), [IndexKey]/[UniqueKey]/[Group] (an index key, a group), and world setup:
                                [GroupBy], [WhenTargetDestroyed], [NotSaved]
   Entity.cs                    the entity handle (id, version, world): Has/Get/Read/TryGet/GetOrAdd/SetIfChanged/
                                Disable/Enable/Clone/Destroy
@@ -42,7 +42,7 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
                                [UpdateInterval(n, Phase = p)] (the cadence, read from the generated code);
                                SystemCode.cs: the generated jobs, access and cadence of a system type, registered by a
                                module initializer (systems need no partial)
-  ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkRows, Simd), [With<T>], [Without<T>], [WithAny<T>], [Changed<T>],
+  ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkRows, SimdMode), [With<T>], [Without<T>], [WithAny<T>], [Changed<T>],
                                [Removed<T>] ([ChangedAny<..>] / [RemovedAny<..>] are generated: Filters.g.cs),
                                [Consume] (the visited rows destroyed after the pass), [ForEntity] (a static method run
                                on one entity through a generated entry point)
@@ -54,10 +54,10 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   Scratch.cs                   Scratch<T>: per-thread working memory of a [ForEach] method, never shared, never reset
   Lookup.cs                    Lookup<T> + LookupExtensions: read-only lookups of any entity (and index keys) from a
                                [ForEach] method, parallel ones included; the system reads T, so no writer shares its stage
-  Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighbourhood, boundary and a key),
-                               Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbours found by generated code,
-                               TileNeighbours), Load into a [ThreadStatic] texture padded with the halo and a row mask,
-                               PaddedTile.Rows (TZCNT walk), TileCursor.Load128, Changes / Facing (sleeping tiles)
+  Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
+                               Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbors found by generated code,
+                               TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,
+                               PaddedTile.Rows (TZCNT walk), TileCursor.Load128, ChangedEdges / Facing (sleeping tiles)
   Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), joined in
                                chunk order into singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear)
   EntityRandom.cs              EntityRandom: deterministic random numbers, a pure function of (seed, entity, tick, stream)
@@ -111,7 +111,7 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   Prefab.cs                    a recipe of component values outside any world (one row of a private world)
   World.Snapshots.cs           Capture / Restore (WorldSnapshot.cs holds the copies)
   World.Serialization.cs       Save / Load of a whole world (SaveWithout(output, exclude) / LoadKeeping(input, keep) for a restart);
-                               SavedTypes.cs: the types a save may name (generated)
+                               TypeRegistry.cs: the types a save may name (generated)
   ComponentSet.cs              a set of component bits and singleton slots: what SaveEntities writes, what Save leaves
                                out, which singletons Load keeps
   World.Migration.cs           SaveEntities / LoadEntities / MoveEntities: a group of entities to another world or process
@@ -164,7 +164,7 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                tracked or indexed), HasX, TryGetX, GetOrAddX, SetX(ctor args), SetXIfChanged, RemoveX,
                                tags IsX,
                                world.XIndex, singletons world.X / HasX / GetOrAddX / SetX / RemoveX, query items
-                               item.X per Query<T1..Tn> shape the code calls, SavedTypes registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
+                               item.X per Query<T1..Tn> shape the code calls, TypeRegistry registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                                lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
   EasyEcsAnalyzer.cs           EECS002-024, EECS035-036, EECS054, EECS056, EECS070 and EECS072-073 (the declaration and
                                [ForEach] rules of the range EECS002-089 that are not performance rules; generators never
@@ -177,7 +177,7 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                that only reads, a Set right after a creation, a tracked ref written on some rows only, a
                                method left without a vector loop); each computes its fix as
                                diagnostic properties for EasyEcs.CodeFixes
-  PartGenerator.cs             [Sum]..[Any], [Key]/[UniqueKey], [Group] -> a part of the partial struct (IReduction<T>,
+  PartGenerator.cs             [Sum]..[Any], [IndexKey]/[UniqueKey], [Group] -> a part of the partial struct (IReduction<T>,
                                IIndexed<K>.Key, IGroup.Group); Parts.cs: the models and Problems read once for the
                                generator and the analyzer (other generators read keys and groups through Symbols)
   Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (Kernel.Vectorize: the loop, or the
@@ -232,7 +232,7 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                (BattleServer.cs, every feature; docs/content/example.mdx includes its regions), one
                                benchmark per feature (Access: the analyzer's performance rules, Bulk, CallSite,
                                ChangeTracking (+ ChangeTrackingWrite: Mut<T>, ChangeTrackingRead: Read, ChangeTrackingSomeRows: EECS053), Cleanup, Consume ([Consume] in bulk and per row against a hand-written Destroy), Count, DestroyLog, Emit, EntityRandom, ForEntity (against the hand-written job), ForParallel,
-                               DynamicBuffer (+ ChunkChurn: PoolCapacity), Generator (the generators per keystroke and the analyzer per
+                               DynamicBuffer (+ ChunkChurn: MaxPooledLength), Generator (the generators per keystroke and the analyzer per
                                build, through
                                Roslyn), Group, Hierarchy, Histogram (keyed reductions), Index (+ unique keys), Introspection (+ Schedule),
                                Maybe, Migration, OrderedIndex, Ordering, ParallelForEach, ParallelSystems (Measure),
@@ -322,7 +322,7 @@ fresh session working on a new request follows this list.
    - When several agents share a machine, run one benchmark at a time behind a shared lock file (`flock`).
    - Check the Tier1 asm of new hot loops (JitDisasm): no calls in the loop body, no unexpected range checks.
    - A change ships only if it is a net win at 0 B with no regression in WorldSimulation, BattleServer and the
-     feature's neighbours.
+     feature's neighbors.
    - Add a benchmark for anything not covered yet.
 7. **Docs**, written per `docs/WRITING.md`, en and zh structurally identical:
    - the feature's guide page follows the page anatomy (what it is, when to use it as idea/warn Callouts, how to use

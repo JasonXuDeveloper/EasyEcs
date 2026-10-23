@@ -1,5 +1,5 @@
 <doc>
-  <member name="T:EasyEcs.TileBoundary" source="df5f61ce5098">
+  <member name="T:EasyEcs.TileBoundary" source="7b9f7f986d7c">
     <summary>
       分块没有邻居的地方 halo 里放什么（<see cref="P:EasyEcs.ITileShape.Boundary" />），即网格的边界条件。周期网格不需要：
       它的 <see cref="M:EasyEcs.ITile`1.Beside(`0,EasyEcs.TileFaces)" /> 回绕，每个分块都有邻居。
@@ -8,8 +8,8 @@
   <member name="F:EasyEcs.TileBoundary.Clamp" source="dc85066fc645">
     <summary>重复分块自己的边缘格子：−k 处的 halo 格子是格子 0。</summary>
   </member>
-  <member name="F:EasyEcs.TileBoundary.Fill" source="6f9fd53b0822">
-    <summary><see cref="M:EasyEcs.Tile`2.Load(System.Int32,System.Int32,`0,System.Boolean)" /> 的填充值（默认零）：Dirichlet 边界。</summary>
+  <member name="F:EasyEcs.TileBoundary.Fill" source="c8bfe210ac9b">
+    <summary><see cref="M:EasyEcs.Tile`2.Pad(System.Int32,System.Int32,`0,System.Boolean)" /> 的填充值（默认零）：Dirichlet 边界。</summary>
   </member>
   <member name="F:EasyEcs.TileBoundary.Mirror" source="2577a7bea0f4">
     <summary>分块自己的格子在边缘处镜像：−k 处的 halo 格子是格子 k − 1（零通量的 Neumann 边界）。</summary>

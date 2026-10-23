@@ -252,7 +252,7 @@ var opened = world.Instantiate(chest);                        // 自己的列表
 
 - [`Save`](/zh/docs/guide/saves) 会写出元素：非托管元素按原始行写，托管元素走 Nino。
 
-### 反复出现又消失的缓冲：缓冲池、`PoolCapacity` 和 `ReservePool` [#pool]
+### 反复出现又消失的缓冲：缓冲池、`MaxPooledLength` 和 `FillPool` [#pool]
 
 缓冲销毁时（实体被销毁、组件被移除、空缓冲调用 `TrimExcess`），它的列表清空后进入这个元素类型的池；同类型的下一个缓冲写入第一个元素时
 （`Add`、`SetCount`、`EnsureCapacity`），直接从池里取，不再分配，不论在哪个线程。Actor 加载又卸载、单位生成又被击杀、玩家周围的区块
@@ -260,37 +260,37 @@ var opened = world.Instantiate(chest);                        // 自己的列表
 
 <TypeTable
   type={{
-    'DynamicBuffer<T>.PoolCapacity': {
+    'DynamicBuffer<T>.MaxPooledLength': {
       type: 'static int',
       description: '销毁的缓冲最多还回多长的列表（按元素个数）；更长的交给 GC。0 表示不入池。',
       default: '4 KB 能放下的元素个数（一字节的枚举是 4,096）',
     },
-    'DynamicBuffer<T>.ReservePool(lists)': {
+    'DynamicBuffer<T>.FillPool(lists)': {
       type: 'static void',
-      description: '现在就分配 PoolCapacity 个元素的空列表，直到池里有这么多个（池里已有的也算）。',
+      description: '现在就分配 MaxPooledLength 个元素的空列表，直到池里有这么多个（池里已有的也算）。',
       default: '不预留',
     },
   }}
 />
 
 <Callout type="idea" title="适合">
-  `PoolCapacity`：超过 4 KB、成批出现又消失的缓冲（区块的方块、大信箱）。保持默认的话，每个销毁的列表都交给 GC，每个新缓冲都重新分配。
-  `ReservePool`：知道自己峰值的服务器，连第一次涨到峰值也不想分配。
+  `MaxPooledLength`：超过 4 KB、成批出现又消失的缓冲（区块的方块、大信箱）。保持默认的话，每个销毁的列表都交给 GC，每个新缓冲都重新分配。
+  `FillPool`：知道自己峰值的服务器，连第一次涨到峰值也不想分配。
 </Callout>
 
 <Callout type="warn" title="不适合">
   缓冲和实体同生共死（一直在线的玩家的背包），或者不超过 4 KB：默认的池已经在回收它们。也别远超峰值去预留：这些列表进程活多久就占多久。
 </Callout>
 
-两者都对整个进程生效，所有 World、所有线程共用：启动时、在 World 用到这个类型之前设一次。先设容量，因为 `ReservePool`
+两者都对整个进程生效，所有 World、所有线程共用：启动时、在 World 用到这个类型之前设一次。先设容量，因为 `FillPool`
 按调用时的容量分配列表。一个体素服务器，每个区块 8,192 个方块，玩家周围最多同时加载 512 个区块：
 
 ```csharp
 const int ChunkBlocks = 16 * 16 * 32;
 const int PeakChunks = 512;
 
-DynamicBuffer<Block>.PoolCapacity = ChunkBlocks;           // 整个区块的列表都能还回池里
-DynamicBuffer<Block>.ReservePool(PeakChunks);              // 峰值在第一个 tick 之前就分配好
+DynamicBuffer<Block>.MaxPooledLength = ChunkBlocks;           // 整个区块的列表都能还回池里
+DynamicBuffer<Block>.FillPool(PeakChunks);              // 峰值在第一个 tick 之前就分配好
 
 using var server = new World();
 var loaded = new Entity[PeakChunks];
@@ -298,7 +298,7 @@ server.CreateEntities(loaded, new DynamicBuffer<Block>(), new Chunk());
 foreach (var chunk in loaded) chunk.WriteBlock().SetCount(ChunkBlocks);   // 每个都拿一个预留的列表
 ```
 
-- **池里存多少：** 最多是没人取用期间销毁的那些缓冲的列表，也就是峰值个数、每个 `PoolCapacity` 个元素。512 个 8,192 字节的方块列表是
+- **池里存多少：** 最多是没人取用期间销毁的那些缓冲的列表，也就是峰值个数、每个 `MaxPooledLength` 个元素。512 个 8,192 字节的方块列表是
   4 MB，进程活多久就占多久。
 - **跨线程：** 每个线程自己留几个列表，其余的按批和所有线程共享的池交换，每批加一次锁。所有者线程从销毁的缓冲收回的列表，也能给
   [并行 `[ForEach]`](/zh/docs/guide/threading#parallel-foreach-methods) 在辅助线程上的第一次写入用。
@@ -427,8 +427,8 @@ bags synced: 7
 | 只写一遍的整个缓冲，先在栈上填好一个 span 再 `AddRange` | 直接写 `SetCount(n)` 返回的 span | 元素只过一遍，也不用在栈上开一个缓冲那么大的空间 |
 | 在缓冲的 span 上反复读改写很多遍 | 在 `stackalloc` 的 span 上算完，再复制一次进 `SetCount(n)` 返回的 span | 每一遍都在方法自己的内存上跑，缓冲只写一次 |
 | `Add` 之后还用之前的 span | 可能扩容的调用之后重新取 span | `Add`、`AddRange`、`Insert`、`SetCount`、`EnsureCapacity`、`TrimExcess` 都可能换数组 |
-| 超过 4 KB、反复出现又消失的缓冲（区块、大信箱） | 启动时把 [`PoolCapacity`](#pool) 调到它们的长度 | 新缓冲重用销毁缓冲的列表，不再分配 |
-| World 涨到已知峰值的途中不断分配列表 | 启动时、设好 `PoolCapacity` 之后调用 [`ReservePool(peak)`](#pool) | 列表在第一个 tick 之前就付清 |
+| 超过 4 KB、反复出现又消失的缓冲（区块、大信箱） | 启动时把 [`MaxPooledLength`](#pool) 调到它们的长度 | 新缓冲重用销毁缓冲的列表，不再分配 |
+| World 涨到已知峰值的途中不断分配列表 | 启动时、设好 `MaxPooledLength` 之后调用 [`FillPool(peak)`](#pool) | 列表在第一个 tick 之前就付清 |
 | 只在部分行写入的 `ref` 缓冲 | 改成 [`Mut<DynamicBuffer<T>>`](/zh/docs/guide/change-tracking#set-if-changed)（`x.Write().Add(…)`） | 只给写过的行打 tick（[EECS053](/zh/docs/guide/analyzer#eecs053)） |
 
 10 万个装 8 件物品的背包，每 tick 有 1,000 个交易一件物品，再由一个 `[Changed]` 系统发送变化的背包
@@ -448,7 +448,7 @@ bags synced: 7
 - **每次写入：** 给这一行打一次 tick，和其他[被追踪组件](/zh/docs/guide/change-tracking#what-it-costs)一样。
 - **容量之内的添加** 不分配；扩容时数组翻倍（至少 4 个元素）。
 - **缓冲销毁时**（实体被销毁、组件被移除），它的列表清空后交给同一元素类型、下一个写入第一个元素的缓冲，不论在哪个线程；超过
-  `PoolCapacity` 的列表交给 GC，池里最多保留峰值数量的列表（[缓冲池](#pool)）。
+  `MaxPooledLength` 的列表交给 GC，池里最多保留峰值数量的列表（[缓冲池](#pool)）。
 - **空缓冲不持有列表**，预制体给实例的空缓冲（不带元素的 `SetBuffer<T>()`）也一样：写入第一个元素时才从池里取列表。`LoadEntities`
   和 `Load` 把每个缓冲读进池里取来的列表，再把这个列表直接交给实体，不再复制一遍。
 - **`TrimExcess`** 把曾经变大的列表多余的空间还回去。缓冲为空时，它把列表还给池：缓冲不再持有列表，任何 `T` 缓冲的下一次
@@ -464,9 +464,9 @@ bags synced: 7
 | `Add` 之后继续用之前的 `AsSpan()`（或 `SetCount` 返回的 span） | span 还指着旧数组 | 代码审查：重新取 span |
 | 用 `ref` 参数读取缓冲 | 访问到的每一行都算作已变化 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
 | `ref` 缓冲只在部分行写入（提前 `return`、`if` 里的 `Add`） | 访问到的每一行都算作已变化，没动过的也算 | [EECS053](/zh/docs/guide/analyzer#eecs053)：改用 `Mut<DynamicBuffer<T>>` |
-| 超过 `PoolCapacity` 的缓冲反复出现又消失 | 每个销毁的列表都交给 GC，每个新缓冲都要分配 | 启动时调高 [`PoolCapacity`](#pool)；创建它们的系统的 `TotalAllocated`（[诊断](/zh/docs/guide/diagnostics)）能看出来 |
-| 先 `ReservePool`，后调高 `PoolCapacity` | 预留的列表还是旧长度，第一次填满时扩容 | 代码审查：先设容量 |
-| `ReservePool` 远超峰值 | 内存一直被占着：列表数 × 容量 | 按实测的峰值预留 |
+| 超过 `MaxPooledLength` 的缓冲反复出现又消失 | 每个销毁的列表都交给 GC，每个新缓冲都要分配 | 启动时调高 [`MaxPooledLength`](#pool)；创建它们的系统的 `TotalAllocated`（[诊断](/zh/docs/guide/diagnostics)）能看出来 |
+| 先 `FillPool`，后调高 `MaxPooledLength` | 预留的列表还是旧长度，第一次填满时扩容 | 代码审查：先设容量 |
+| `FillPool` 远超峰值 | 内存一直被占着：列表数 × 容量 | 按实测的峰值预留 |
 | 纯值列表的每个元素都建一个实体 | 每件物品一个实体、一行、一条索引 | 纯值用缓冲 |
 
 ## 相关页面 [#related]

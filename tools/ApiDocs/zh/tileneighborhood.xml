@@ -1,18 +1,18 @@
 <doc>
-  <member name="T:EasyEcs.TileNeighbourhood" source="d632d24a7ac0">
+  <member name="T:EasyEcs.TileNeighborhood" source="1694392e2875">
     <summary>
-      分块周围哪些分块算作邻居，按偏移沿几条轴移动来分（<see cref="P:EasyEcs.ITileShape.Neighbourhood" />）：
+      分块周围哪些分块算作邻居，按偏移沿几条轴移动来分（<see cref="P:EasyEcs.ITileShape.Neighborhood" />）：
       隔着面的分块（von Neumann），加上隔着棱的，或再加上隔着角的（Moore）。2D 分块分别有 4、8、8 个；3D 分别有 6、18、26 个。
       只算 <see cref="P:EasyEcs.ITileShape.Faces" /> 中的轴：只有侧面有邻居的体素列分别有 4、8、8 个。
     </summary>
   </member>
-  <member name="F:EasyEcs.TileNeighbourhood.All" source="a554043af44a">
+  <member name="F:EasyEcs.TileNeighborhood.All" source="a554043af44a">
     <summary>周围的每个分块（偏移沿最多三条轴）：2D 九点或 3D 27 点模板。</summary>
   </member>
-  <member name="F:EasyEcs.TileNeighbourhood.Faces" source="c6f6d05af7be">
+  <member name="F:EasyEcs.TileNeighborhood.Faces" source="c6f6d05af7be">
     <summary>隔着面的分块（偏移沿一条轴）：五点或七点模板只读这些。</summary>
   </member>
-  <member name="F:EasyEcs.TileNeighbourhood.FacesAndEdges" source="0e38b84cf14a">
+  <member name="F:EasyEcs.TileNeighborhood.FacesAndEdges" source="0e38b84cf14a">
     <summary>再加上隔着棱的分块（偏移沿两条轴）：2D 网格的角，19 点模板。</summary>
   </member>
 </doc>

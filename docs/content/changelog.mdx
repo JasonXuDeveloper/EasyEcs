@@ -17,7 +17,7 @@ major or minor version that needs code changes? The
 - A `DynamicBuffer` of an enum (`DynamicBuffer<Block>`) gets the same generated members as one of a struct:
   `chunk.Block`, `HasBlock`, `WriteBlock()`, `GetOrAddBlock()`, `RemoveBlock()` and the prefab's `SetBlock(…)`. See
   [dynamic buffers](/en/docs/guide/dynamic-buffers).
-- `DynamicBuffer<T>.PoolCapacity` sets, per element type, the longest list a destroyed or removed buffer gives back
+- `DynamicBuffer<T>.MaxPooledLength` sets, per element type, the longest list a destroyed or removed buffer gives back
   to the pool (4 KB of elements by default). Raise it for large buffers that come and go, such as the blocks
   of chunks loaded and unloaded around players, and each new buffer reuses a dead one's list instead of allocating. See
   [dynamic buffers](/en/docs/guide/dynamic-buffers#pool).
@@ -35,8 +35,8 @@ major or minor version that needs code changes? The
 - `world.SaveEntitiesWithout(output, ids, set)` saves a group of entities with every component but those of a
   `ComponentSet`: the data they compute again after a load stays out of the save. See
   [migration and unloading](/en/docs/guide/migration-and-unload#save-entities-without).
-- `DynamicBuffer<T>.ReservePool(lists)` fills the buffer pool of `T` with that many empty lists of
-  `PoolCapacity` elements at start-up, so the buffers of the entities a world grows to (chunks around players) take a
+- `DynamicBuffer<T>.FillPool(lists)` fills the buffer pool of `T` with that many empty lists of
+  `MaxPooledLength` elements at start-up, so the buffers of the entities a world grows to (chunks around players) take a
   list instead of allocating one while the server runs. See
   [dynamic buffers](/en/docs/guide/dynamic-buffers#pool).
 
@@ -50,7 +50,7 @@ major or minor version that needs code changes? The
   [decision](/en/docs/decisions#d68-vector-loops-without-opting-in).
 - Analyzer rule [EECS055](/en/docs/guide/analyzer#eecs055) (suggestion) names why a `[ForEach]` method over numbers
   got no vector loop ("component Body has 5 fields", "lane types float and int differ"), as Burst's inspector does.
-  `[ForEach(Simd = SimdMode.Require)]` makes that an error ([EECS056](/en/docs/guide/analyzer#eecs056)), so a hot
+  `[ForEach(SimdMode = SimdMode.Require)]` makes that an error ([EECS056](/en/docs/guide/analyzer#eecs056)), so a hot
   loop cannot lose its vectors unnoticed; `SimdMode.Off` keeps a method scalar without the message. See
   [vector loops](/en/docs/guide/systems#vector-loops).
 - Vector loops take more methods ([decision](/en/docs/decisions#d90-vector-loops-reach)): parallel `[ForEach]`
@@ -83,11 +83,11 @@ major or minor version that needs code changes? The
   See [lookups](/en/docs/guide/threading#lookups) and the [decision](/en/docs/decisions#d75-lookup).
 - `Tile<TCell, TTile>`, a `[ForEach]` parameter over a grid cut into tiles: `TTile` implements `ITile<TKey>` (its
   shape, its key, the key beside it across a face) and the entity holds a `DynamicBuffer<TCell>`. The generator finds
-  the neighbours, declares the reads and keeps the method parallel; `Load` pads the tile with its neighbours' edges
+  the neighbors, declares the reads and keeps the method parallel; `Pad` copies the tile with its neighbors' edges
   into a texture of the thread, `Rows` walks the rows a stencil can change and `At(row).Load128` samples the cells
-  around. The shape sets the halo's width (`Halo`, the ghost width of MPI), which neighbours it reads
-  (`Neighbourhood`: faces, edges, corners, for 9- and 27-point stencils) and what it holds where there is none
-  (`Boundary`: fill, clamp, mirror), and `Changes` / `Facing` let quiet tiles sleep and wake the ones beside the edges that changed. Rule
+  around. The shape sets the halo's width (`Halo`, the ghost width of MPI), which neighbors it reads
+  (`Neighborhood`: faces, edges, corners, for 9- and 27-point stencils) and what it holds where there is none
+  (`Boundary`: fill, clamp, mirror), and `ChangedEdges` / `Facing` let quiet tiles sleep and wake the ones beside the edges that changed. Rule
   [EECS059](/en/docs/guide/analyzer#eecs059) also rejects a tile beside a write of its cell buffer,
   [EECS072](/en/docs/guide/analyzer#eecs072) a shape whose halo is wider than the tile and
   [EECS073](/en/docs/guide/analyzer#eecs073) two tiles of the same cells in one method. See
@@ -205,6 +205,8 @@ major or minor version that needs code changes? The
 - `EcsSystem.UpdateInterval` and `UpdatePhase` are removed: declare `[UpdateInterval(n, Phase = p)]` on the class.
   An override is [EECS082](/en/docs/guide/analyzer#eecs082), with a code fix; EECS018 is gone
   ([migration guide](/en/docs/migration#v4-8-update-interval)).
+- `ValueIndex.TryFind(key, out id)` gives an `EntityId`, as `Lookup<T>.TryFind` does; `world.GetEntity(id)` is the
+  handle, and a unique index's `TryGet` still gives it ([migration guide](/en/docs/migration#v4-8-try-find)).
 
 ### Fixes [#v4-8-0-fixes]
 

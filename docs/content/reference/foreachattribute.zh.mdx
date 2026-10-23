@@ -58,10 +58,10 @@ public bool Parallel { get; init; }
 
 把匹配的行分块，放到多个线程上执行（`World.ForEachParallel`）。方法不能做结构变更，必须逐实体执行，也不能写单例（EECS010）；每行工作量大、行数上万时才划算。默认 false。
 
-### `Simd` [#simd]
+### `SimdMode` [#simdmode]
 
 ```csharp
-public SimdMode Simd { get; init; }
+public SimdMode SimdMode { get; init; }
 ```
 
 生成器是否把方法写成按一段连续的行跑的 `System.Numerics.Vector<T>` 循环（一条指令算几行，结果与方法本身逐位相同）。[`SimdMode.Auto`](/zh/docs/reference/simdmode#auto) 给符合条件的方法生成向量循环，看起来适合却不符合的方法报告原因（EECS055，一条消息）；[`SimdMode.Require`](/zh/docs/reference/simdmode#require) 让不符合条件的方法编译失败（EECS056）；[`SimdMode.Off`](/zh/docs/reference/simdmode#off) 让方法保持一次一行。默认 [`SimdMode.Auto`](/zh/docs/reference/simdmode#auto)。

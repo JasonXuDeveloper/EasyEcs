@@ -424,7 +424,7 @@ public class RouteSystem : EcsSystem
 `[ForEach]` 方法照常按一行来写；组件都是普通数值时，生成器还会顺手写出它的 SIMD 循环：方法体变成在每段匹配行上跑的
 `System.Numerics.Vector<T>` 循环，一条指令处理 `Vector<T>` 装得下的行数（x64 上用 AVX2 是 8 个 float，Arm 上 4 个）。Unity 的
 Burst 和 ISPC 也是这样做的：方法就是一条通道（lane）的内核。.NET 的 JIT 自己不会把循环向量化，没有这一步的话，逐行方法就一次只算一行
-（[D68](/zh/docs/decisions#d68-vector-loops-without-opting-in)）。不用开启什么：`[ForEach(Simd = SimdMode.Require)]`
+（[D68](/zh/docs/decisions#d68-vector-loops-without-opting-in)）。不用开启什么：`[ForEach(SimdMode = SimdMode.Require)]`
 让失去向量循环的方法构建失败，`SimdMode.Off` 让方法保持标量。
 
 <Callout type="idea" title="适合">
@@ -577,7 +577,7 @@ for (; i < rows; i++)   // 4. 尾部，以及没有 shuffle 指令时的每一�
 
 **不符合条件的方法** 保持标量循环：结果是对的，只是慢，[EECS055](/zh/docs/guide/analyzer#eecs055)（IDE 里的建议）会像 Burst 的
 Inspector 一样说出第一个原因：`bool` 字段、组件对它上面的工作来说太宽（并列出该拆出的字段）、`Vector3.Dot` 这种标量代码没有固定顺序的向量求和、
-条件之外的调用。速度取决于向量循环的方法用 `Simd = SimdMode.Require` 写明，之后哪次改动让它失去循环，构建就会失败（[EECS056](/zh/docs/guide/analyzer#eecs056)）。
+条件之外的调用。速度取决于向量循环的方法用 `SimdMode = SimdMode.Require` 写明，之后哪次改动让它失去循环，构建就会失败（[EECS056](/zh/docs/guide/analyzer#eecs056)）。
 
 ```csharp tab="保持标量" doccheck=expect-EECS055
 public record struct Motion(System.Numerics.Vector3 Value) : IComponent;

@@ -240,7 +240,7 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 ## 缓冲池（Buffer pool） [#buffer-pool]
 
 销毁的[动态缓冲](#dynamic-buffer)的列表按元素类型在这里等着，给下一个缓冲的第一次写入用：带缓冲的实体反复出现又消失，预热后不分配。
-`DynamicBuffer<T>.PoolCapacity` 限定多长的列表能还回来，`DynamicBuffer<T>.ReservePool(n)` 在启动时把池填满。
+`DynamicBuffer<T>.MaxPooledLength` 限定多长的列表能还回来，`DynamicBuffer<T>.FillPool(n)` 在启动时把池填满。
 见[缓冲池](/zh/docs/guide/dynamic-buffers#pool)。
 
 ## 值索引（Value index） [#value-index]

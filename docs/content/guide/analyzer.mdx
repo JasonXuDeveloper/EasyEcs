@@ -18,7 +18,7 @@ throws or the code cannot work, a warning where a write is lost or a ref can poi
 rules say why a method runs one row at a time (EECS055, a suggestion) and fail the build when a method that must
 vectorize does not (EECS056); EECS057 keeps a [reduction](/en/docs/guide/threading#reductions) the only write of its
 singleton; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses; the part
-rules (EECS062 to EECS069) check the types whose members the generator writes from attributes (`[Sum]`, `[Key]`,
+rules (EECS062 to EECS069) check the types whose members the generator writes from attributes (`[Sum]`, `[IndexKey]`,
 `[Group]`) and the setup attributes, and suggest the attributes for a reduction or a key written by hand; EECS070 keeps the records of an `Emit<T>` in row order, and EECS071 finds random numbers a run cannot repeat; the tile rules (EECS072, EECS073) reject a grid tile whose halo does not fit and two tiles that would share a texture. The declaration rules (EECS080 to EECS085) suggest the attribute
 that writes what code does by hand (a one-entity job, a pass that destroys what it visits) and reject one that cannot
 apply. The parameter rules (EECS086 to EECS089) point code that keeps a method on one thread to the parameter that does
@@ -104,7 +104,7 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS053](#eecs053) | Warning | A tracked component written on some rows only is a `Mut<T>` | `Mut<T>` |
 | [EECS054](#eecs054) | Error | `ChunkRows` is 0 or more, on a parallel method | Remove `ChunkRows` |
 | [EECS055](#eecs055) | Info | A `[ForEach]` method over numbers gets a vector loop | |
-| [EECS056](#eecs056) | Error | `Simd = SimdMode.Require` on a method that qualifies | |
+| [EECS056](#eecs056) | Error | `SimdMode = SimdMode.Require` on a method that qualifies | |
 | [EECS057](#eecs057) | Error | One write of a reduced singleton per pass | |
 | [EECS058](#eecs058) | Error | What a `Scratch<T>` holds is not stored into the world | |
 | [EECS059](#eecs059) | Error | A `Lookup<T>` reads a component the pass does not write | |
@@ -115,7 +115,7 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS064](#eecs064) | Error | The reduction attributes combine every field | |
 | [EECS065](#eecs065) | Info | A field-wise reduction is declared by attributes | Declare it with attributes |
 | [EECS066](#eecs066) | Warning | A reduction's `Identity` is the identity of its `Combine` | The right `Identity`, or the attributes |
-| [EECS067](#eecs067) | Info | A key that returns a member is declared by `[Key]` | `[Key]` / `[UniqueKey]` |
+| [EECS067](#eecs067) | Info | A key that returns a member is declared by `[IndexKey]` | `[IndexKey]` / `[UniqueKey]` |
 | [EECS068](#eecs068) | Error | A setup attribute goes on a type it fits | |
 | [EECS069](#eecs069) | Warning / Info | A saved managed type has a Nino formatter | `[NinoType]` / `[NotSaved]` |
 | [EECS070](#eecs070) | Error | A pass neither reads its own records nor emits one kind twice | |
@@ -124,7 +124,7 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS073](#eecs073) | Error | A method takes one tile per cell type and grid | |
 | [EECS080](#eecs080) | Info | A one-entity job is a `[ForEntity]` method | Write it as a `[ForEntity]` method |
 | [EECS081](#eecs081) | Error | A `[ForEntity]` method is static and takes what one entity has | Make it static |
-| [EECS082](#eecs082) | Error | A system's schedule is `[UpdateInterval(n, Phase = p)]`, not an override | Declare it with the attribute |
+| [EECS082](#eecs082) | Error | A system's cadence is `[UpdateInterval(n, Phase = p)]`, not an override | Declare it with the attribute |
 | [EECS083](#eecs083) | Error | `[UpdateInterval]`: an interval of 1 or more, a phase 0 to n - 1, on a system | |
 | [EECS084](#eecs084) | Info | A `[ForEach]` method that destroys every entity it visits is `[Consume]` | `[Consume]` |
 | [EECS085](#eecs085) | Error | `[Consume]` goes with `[ForEach]`, without `Slices` | |
@@ -1766,7 +1766,7 @@ public class Burn : EcsSystem
 }
 ```
 
-Change what the message names, or set `[ForEach(Simd = SimdMode.Off)]` on a method that should stay scalar (a few
+Change what the message names, or set `[ForEach(SimdMode = SimdMode.Off)]` on a method that should stay scalar (a few
 rows, or a body the loop cannot take) to silence it. As a suggestion it shows in the IDE only;
 `dotnet_diagnostic.EECS055.severity = warning` in `.editorconfig` lists every scalar method in the build.
 
@@ -1774,7 +1774,7 @@ rows, or a body the loop cannot take) to silence it. As a suggestion it shows in
 
 **A required vector loop that the method does not qualify for.** Error. No code fix.
 
-`[ForEach(Simd = SimdMode.Require)]` says the method must get its vector loop: a hot path whose speed depends on it.
+`[ForEach(SimdMode = SimdMode.Require)]` says the method must get its vector loop: a hot path whose speed depends on it.
 When the method does not qualify, the build fails with the reason EECS055 would give, so a later edit (a call the
 loop has no vector form of, a field of another type) cannot slow it down without anyone noticing.
 
@@ -1783,7 +1783,7 @@ public struct Charge : IComponent { public float Value; public bool Full; }
 
 public class Recharge : EcsSystem
 {
-    [ForEach(Simd = SimdMode.Require)]   // "field Charge.Full is a bool, not a lane type (...)"
+    [ForEach(SimdMode = SimdMode.Require)]   // "field Charge.Full is a bool, not a lane type (...)"
     static void Fill(ref Charge charge)
     {
         if (charge.Full) return;
@@ -1798,7 +1798,7 @@ public struct Full : IComponent;   // a tag: the full batteries are a set of ent
 
 public class Recharge : EcsSystem
 {
-    [ForEach(Simd = SimdMode.Require), Without<Full>]
+    [ForEach(SimdMode = SimdMode.Require), Without<Full>]
     static void Fill(ref Charge charge) => charge.Value = Math.Clamp(charge.Value + 0.1f, 0f, 1f);
 }
 ```
@@ -2061,7 +2061,7 @@ combines them.
 **A type with generated members that is not partial.** Error. Code fix: makes it partial, with every type that
 contains it.
 
-`[Sum]`, `[Key]` and `[Group]` declare members that the generator writes into the type itself: the members of
+`[Sum]`, `[IndexKey]` and `[Group]` declare members that the generator writes into the type itself: the members of
 `IReduction<T>`, `IIndexed<TKey>` or `IGroup`, in a second part of the type. A part can only be added to a partial type
 nested in partial types. A `file` type cannot get one, because its part would live in another file.
 
@@ -2188,10 +2188,10 @@ public partial struct Weakest : ISingletonComponent
 
 ## EECS067 [#eecs067]
 
-**An index key that an attribute can declare.** Suggestion (Info). Code fix: declares it with `[Key]` (or
+**An index key that an attribute can declare.** Suggestion (Info). Code fix: declares it with `[IndexKey]` (or
 `[UniqueKey]` for a unique index) on the member, partial along its chain.
 
-A `Key` that returns a field, a property or the value itself is what `[Key]` declares on that member (or on the type,
+A `Key` that returns a field, a property or the value itself is what `[IndexKey]` declares on that member (or on the type,
 for the value itself). The generator writes the interface and an explicit `Key`, which no `ToString()` prints and no
 caller reaches by mistake. A key computed from several members stays hand-written.
 
@@ -2207,7 +2207,7 @@ public struct Owner : IComponent, IIndexed<EntityId>
 ```csharp tab="Fixed"
 public partial struct Owner : IComponent
 {
-    [Key] public EntityId Id;
+    [IndexKey] public EntityId Id;
 }
 ```
 
@@ -2348,9 +2348,9 @@ advances its `Tick`, so each step draws new numbers. Two draws for the same enti
 
 A [tile](/en/docs/guide/high-performance#grid-halo) (`ITileShape`) is Width x Depth x Height cells, Depth 1 to 64 (the
 active rows of a layer are one 64-bit word), with a halo of one cell or more. The halo is copied from the facing cells
-of the tile beside, so it is at most the tile's extent along every axis that has neighbours (its `Faces`), and along
+of the tile beside, so it is at most the tile's extent along every axis that has neighbors (its `Faces`), and along
 every axis when the boundary mirrors: like an MPI ghost width, never wider than the subdomain. The rule reads the
-shape's constant members; `Tile.Load` throws for a shape it could not check.
+shape's constant members; `Tile.Pad` throws for a shape it could not check.
 
 ```csharp tab="Reported" doccheck=expect-EECS072
 // A strip of 16 cells for a fourth-order stencil along x: its default faces include north and south,
@@ -2366,7 +2366,7 @@ public record struct Strip(int Index) : IComponent, ITile<int>
 ```
 
 ```csharp tab="Fixed"
-// A 1D tile: neighbours to the west and east only.
+// A 1D tile: neighbors to the west and east only.
 public record struct Strip(int Index) : IComponent, ITile<int>
 {
     readonly int IIndexed<int>.Key => Index;
@@ -2378,7 +2378,7 @@ public record struct Strip(int Index) : IComponent, ITile<int>
 }
 ```
 
-Narrow the halo, widen the tile, or declare only the faces that have neighbours.
+Narrow the halo, widen the tile, or declare only the faces that have neighbors.
 
 ## EECS073 [#eecs073]
 
@@ -2397,8 +2397,8 @@ public class PressureSystem : EcsSystem
     [ForEach(Parallel = true)]
     static void Step(Tile<Field, Strip> pressure, Tile<Field, Strip> velocity, Mut<DynamicBuffer<NextField>> next)
     {
-        var p = pressure.Load();
-        var v = velocity.Load();   // the same texture: p now samples the velocity
+        var p = pressure.Pad();
+        var v = velocity.Pad();   // the same texture: p now samples the velocity
         var into = next.Write().AsSpan();
         for (int x = 0; x < 16; x++)
             into[x] = new NextField(p[x, 0, 0].Value - (v[x + 1, 0, 0].Value - v[x - 1, 0, 0].Value) * 0.5f);
@@ -2417,8 +2417,8 @@ public class PressureSystem : EcsSystem
     static void Step(Tile<Pressure, Strip> pressure, Tile<Velocity1D, Strip> velocity,
         Mut<DynamicBuffer<NextPressure>> next)
     {
-        var p = pressure.Load();
-        var v = velocity.Load();   // a texture per cell type
+        var p = pressure.Pad();
+        var v = velocity.Pad();   // a texture per cell type
         var into = next.Write().AsSpan();
         for (int x = 0; x < 16; x++)
             into[x] = new NextPressure(p[x, 0, 0].Value - (v[x + 1, 0, 0].Value - v[x - 1, 0, 0].Value) * 0.5f);
@@ -2504,7 +2504,7 @@ public static class Healing
 
 ## EECS082 [#eecs082]
 
-**A system's schedule written as an override.** Error. Code fix: declares it with `[UpdateInterval(n, Phase = p)]`.
+**A system's cadence written as an override.** Error. Code fix: declares it with `[UpdateInterval(n, Phase = p)]`.
 
 A system's cadence is the [`[UpdateInterval(n, Phase = p)]`](/en/docs/guide/systems#update-interval) attribute on its
 class, which the generator writes into its registration; the `UpdateInterval` and `UpdatePhase` properties are gone.

@@ -26,7 +26,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`GroupAttribute`](/en/docs/reference/groupattribute) | The member a world groups the component's tables by (IGroup): an int or an enum of int. |
 | [`GroupByAttribute`](/en/docs/reference/groupbyattribute) | Every world groups its tables by this IGroup component (World.GroupBy), from its first table holding it: a group filter (QueryFilter.InGroup) then visits that group's tables only, in every world, with no setup call to forget. |
 | [`GroupInfo`](/en/docs/reference/groupinfo) | The systems of one group in stages (ScheduleInfo). |
-| [`KeyAttribute`](/en/docs/reference/keyattribute) | The key a world indexes the component by (IIndexed): on a field, a property or a record's positional parameter, the key is that member (public partial struct Owner : IComponent \{ [Key] public EntityId Of; \}); on the struct itself, the key is the whole value. |
+| [`IndexKeyAttribute`](/en/docs/reference/indexkeyattribute) | The key a world indexes the component by (IIndexed): on a field, a property or a record's positional parameter, the key is that member (public partial struct Owner : IComponent \{ [IndexKey] public EntityId Of; \}); on the struct itself, the key is the whole value. |
 | [`Lanes`](/en/docs/reference/lanes) | Stream compaction for batch methods, a GPU's ballot and compaction on a CPU: a vector compare decides a lane mask (Vector256.LessThan(hp, limit).ExtractMostSignificantBits(): CUDA's __ballot_sync; its __popc is PopCount), and Lanes.Compact writes the selected elements side by side: the ids of the rows a batch method picked (entities.Ids), their values, their indexes. |
 | [`LookupExtensions`](/en/docs/reference/lookupextensions) | Key lookups of an indexed component (IIndexed) through a Lookup. |
 | [`MaxAttribute`](/en/docs/reference/maxattribute) | A field of a reduction that keeps the larger value: Identity the type's MinValue (-∞ for float and double), Combine Math.Max(left, right). |
@@ -47,7 +47,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`SystemPair`](/en/docs/reference/systempair) | Two conflicting systems in execution order, ordered only by registration (GroupInfo.RegistrationOrdered). |
 | [`TargetPolicyExtensions`](/en/docs/reference/targetpolicyextensions) | Target policies of components that point at an entity (IIndexed of EntityId). |
 | [`UniqueIndexExtensions`](/en/docs/reference/uniqueindexextensions) | Lookups of a unique index (IUniqueIndexed): the one entity of a key. |
-| [`UniqueKeyAttribute`](/en/docs/reference/uniquekeyattribute) | KeyAttribute for a key that names one entity (IUniqueIndexed): the generator adds IUniqueIndexed&lt;TKey&gt; with the explicit Key. |
+| [`UniqueKeyAttribute`](/en/docs/reference/uniquekeyattribute) | IndexKeyAttribute for a key that names one entity (IUniqueIndexed): the generator adds IUniqueIndexed&lt;TKey&gt; with the explicit Key. |
 | [`UpdateAfterAttribute<TSystem>`](/en/docs/reference/updateafterattribute) | Run this system after TSystem (and systems derived from it) of the same group: see UpdateBeforeAttribute. |
 | [`UpdateBeforeAttribute<TSystem>`](/en/docs/reference/updatebeforeattribute) | Run this system before TSystem (and systems derived from it) of the same group, whatever their registration order. |
 | [`UpdateInGroupAttribute<TGroup>`](/en/docs/reference/updateingroupattribute) | Puts the system (and derived systems) into group TGroup. |
@@ -80,7 +80,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`Lookup<T>`](/en/docs/reference/lookup) | Read-only access to component T of any entity, from a [ForEach] method (MPI's one-sided Get, Unity's ComponentLookup): static void Chase(ref Velocity v, in Target target, Lookup&lt;Position&gt; positions) reads the target's position with positions[target.Id]. |
 | [`Maybe<T>`](/en/docs/reference/maybe) | An optional component of the entity a [ForEach] method visits: static void Regen(ref Health h, Maybe&lt;Buff&gt; buff) visits every entity with Health, and Maybe.HasValue tells whether this one also has a Buff. |
 | [`Mut<T>`](/en/docs/reference/mut) | A component of the entity a [ForEach] method visits that counts as written only when the method writes it: static void Aim(Mut&lt;Target&gt; target, in Position p) =&gt; target.SetIfChanged(new Target(Nearest(p))). |
-| [`PaddedTile<TCell, TTile>`](/en/docs/reference/paddedtile) | Layers of a tile padded with their halo (Tile.Load): the texture a stencil samples. |
+| [`PaddedTile<TCell, TTile>`](/en/docs/reference/paddedtile) | Layers of a tile padded with their halo (Tile.Pad): the texture a stencil samples. |
 | [`QueryEnumerator<T1..T9>`](/en/docs/reference/queryenumerator) | Allocation-free query enumerator; safe under structural changes during iteration (same visiting rules as ForEach). |
 | [`QueryFilter`](/en/docs/reference/queryfilter) | Extra query constraints: components that must be present without being read (QueryFilter.With) or must be absent (QueryFilter.Without). |
 | [`QueryItem<T1..T9>`](/en/docs/reference/queryitem) | One query result: the entity and refs into its row. |
@@ -90,16 +90,16 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`Reduce<T>`](/en/docs/reference/reduce) | A reduction of a [ForEach] pass into singleton T (OpenMP's reduction, MPI's Allreduce), taken by ref: static void Count(in Health h, ref Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;. |
 | [`RelationIndex<T>.Sources`](/en/docs/reference/relationindex-sources) | Enumerates the entities linking to one target (foreach), once per link. |
 | [`Retired`](/en/docs/reference/retired) | Tag of a retired entity: Destroy found ICleanupComponents on it, so it took the other components away and kept the entity alive until its last cleanup component is removed (then the entity is freed: destroyed). |
-| [`Scratch<T>`](/en/docs/reference/scratch) | A [ForEach] method's working memory on the thread running it (OpenMP's threadprivate): a list of neighbours, the open set of a path search, a buffer to fill. |
+| [`Scratch<T>`](/en/docs/reference/scratch) | A [ForEach] method's working memory on the thread running it (OpenMP's threadprivate): a list of neighbors, the open set of a path search, a buffer to fill. |
 | [`SingletonRef<T>`](/en/docs/reference/singletonref) | Handle to one world's singleton T. |
 | [`SystemAccess`](/en/docs/reference/systemaccess) | The data a system reads and writes, declared once when the system is added. |
 | [`SystemList`](/en/docs/reference/systemlist) | The systems of a world, every group in execution order (default group first): foreach it, or read SystemList.Count. |
 | [`SystemList.Enumerator`](/en/docs/reference/systemlist-enumerator) | Walks the groups and their systems. |
 | [`SystemStats`](/en/docs/reference/systemstats) | How often and how long a system ran (WorldOptions.MeasureSystems): EcsSystem.OnUpdate plus its [ForEach] methods, per run, with the bytes it allocated and the entities its [ForEach] methods visited. |
 | [`TableInfo`](/en/docs/reference/tableinfo) | A table: the entities with one set of component columns (World.DescribeTables). |
-| [`Tile<TCell, TTile>`](/en/docs/reference/tile) | The cells of a tile (an entity whose TTile makes it one, ITile) with those of its neighbours: a [ForEach] parameter, as a CUDA block's tile and its apron, or an MPI rank's subdomain and its ghost cells. |
+| [`Tile<TCell, TTile>`](/en/docs/reference/tile) | The cells of a tile (an entity whose TTile makes it one, ITile) with those of its neighbors: a [ForEach] parameter, as a CUDA block's tile and its apron, or an MPI rank's subdomain and its ghost cells. |
 | [`TileCursor<TCell, TTile>`](/en/docs/reference/tilecursor) | A padded tile at the first cell of a row (PaddedTile.At): the cells around it, one or a vector at a time. |
-| [`TileIds`](/en/docs/reference/tileids) | The neighbours of a tile that Tile.Facing names, walked with foreach. |
+| [`TileIds`](/en/docs/reference/tileids) | The neighbors of a tile that Tile.Facing names, walked with foreach. |
 | [`TileRow<TTile>`](/en/docs/reference/tilerow) | A row of a tile: layer TileRow.Y, row TileRow.Z, from PaddedTile.Rows. |
 | [`TileRows<TTile>`](/en/docs/reference/tilerows) | The active rows of a padded tile (PaddedTile.Rows), walked with foreach: per layer a word of the rows the stencil may change, then a trailing-zero count per row. |
 | [`ValueIndex<T, TKey>.Matches`](/en/docs/reference/valueindex-matches) | Enumerates the entities of one key (foreach). |
@@ -130,7 +130,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`ISystemGroup`](/en/docs/reference/isystemgroup) | Marker of a system group: systems marked UpdateInGroupAttribute run together when World.Update is called, independently of the default group run by World.Update. |
 | [`ISystemGroupWith<T>`](/en/docs/reference/isystemgroupwith) | A system group whose [ForEach] methods visit only entities with T, as WithAttribute on the group would. |
 | [`ISystemGroupWithout<T>`](/en/docs/reference/isystemgroupwithout) | A system group whose [ForEach] methods skip entities with T, as WithoutAttribute on the group would (see ISystemGroupWith). |
-| [`ITile<TKey>`](/en/docs/reference/itile) | A component that makes its entity a tile of a grid, found by its key (an indexed component, IIndexed): record struct Chunk(ChunkPos Pos) : IComponent, ITile&lt;ChunkPos&gt; with its shape (ITileShape) and the key of each neighbour (ITile.Beside). |
+| [`ITile<TKey>`](/en/docs/reference/itile) | A component that makes its entity a tile of a grid, found by its key (an indexed component, IIndexed): record struct Chunk(ChunkPos Pos) : IComponent, ITile&lt;ChunkPos&gt; with its shape (ITileShape) and the key of each neighbor (ITile.Beside). |
 | [`ITileShape`](/en/docs/reference/itileshape) | The shape of a tile, on the component that makes an entity a tile of a grid (ITile): the entity's cells, ITileShape.Width × ITileShape.Depth × ITileShape.Height of them, are in its DynamicBuffer&lt;TCell&gt; in rows of ITileShape.Width (x), ITileShape.Depth rows (z) per layer and ITileShape.Height layers (y): cell (x, y, z) at (y \* Depth + z) \* Width + x. |
 | [`ITracked`](/en/docs/reference/itracked) | Marks a component whose changes are tracked: every row records the world's World.ChangeTick of its last write, and [Changed&lt;T&gt;] / QueryFilter.Changed&lt;T&gt;(since) select the rows written since a system last ran. |
 | [`IUniqueIndexed, IUniqueIndexed<TKey>`](/en/docs/reference/iuniqueindexed) | What every IUniqueIndexed is, so a component type is known to be unique without reflection (a type test the JIT folds). |
@@ -140,16 +140,16 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | Type | Summary |
 |---|---|
 | [`FloatMode`](/en/docs/reference/floatmode) | What a vector loop of a ForEachAttribute method may change in floating-point results. |
-| [`SimdMode`](/en/docs/reference/simdmode) | Whether a ForEachAttribute method runs as a vector loop (ForEachAttribute.Simd). |
+| [`SimdMode`](/en/docs/reference/simdmode) | Whether a ForEachAttribute method runs as a vector loop (ForEachAttribute.SimdMode). |
 | [`SystemErrorPolicy`](/en/docs/reference/systemerrorpolicy) | What an exception thrown by a system does (WorldOptions.SystemErrors). |
 | [`TargetPolicy`](/en/docs/reference/targetpolicy) | What happens to the links to an entity when it is destroyed (TargetPolicyExtensions.WhenTargetDestroyed, RelationIndex.WhenTargetDestroyed). |
-| [`TileBoundary`](/en/docs/reference/tileboundary) | What the halo holds where a tile has no neighbour (ITileShape.Boundary), the boundary condition of the grid. |
+| [`TileBoundary`](/en/docs/reference/tileboundary) | What the halo holds where a tile has no neighbor (ITileShape.Boundary), the boundary condition of the grid. |
 | [`TileFaces`](/en/docs/reference/tilefaces) | The faces of a tile (ITileShape): north is −z, south +z, west −x, east +x, below −y, above +y. |
-| [`TileNeighbourhood`](/en/docs/reference/tileneighbourhood) | Which tiles around a tile are its neighbours, by how many axes their offset moves along (ITileShape.Neighbourhood): the tiles across a face (von Neumann), also across an edge, or also across a corner (Moore). |
+| [`TileNeighborhood`](/en/docs/reference/tileneighborhood) | Which tiles around a tile are its neighbors, by how many axes their offset moves along (ITileShape.Neighborhood): the tiles across a face (von Neumann), also across an edge, or also across a corner (Moore). |
 | [`TileReads`](/en/docs/reference/tilereads) | What a stencil reads around a cell, which decides the rows PaddedTile.Rows visits: a row is visited when one of the rows it reads holds a cell that is not zero (a row counts its halo cells, so a stencil reading along x needs nothing more than the row). |
 
 ## Delegates
 
 | Type | Summary |
 |---|---|
-| [`EntityIdField<T>`](/en/docs/reference/entityidfield) | An EntityId field of value (see SavedTypes.EntityIds). |
+| [`EntityIdField<T>`](/en/docs/reference/entityidfield) | An EntityId field of value (see TypeRegistry.EntityIds). |

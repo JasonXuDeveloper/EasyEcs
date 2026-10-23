@@ -10,7 +10,7 @@
   <member name="F:EasyEcs.TileReads.Self" source="fc2b367dc754">
     <summary>这一行自己，连同它前后的格子（西和东）。</summary>
   </member>
-  <member name="F:EasyEcs.TileReads.Sides" source="edbb012fb580">
+  <member name="F:EasyEcs.TileReads.NorthSouth" source="edbb012fb580">
     <summary>同一层中它北边和南边的行，连同它们的 halo 格子（也就是 2D 的对角）。</summary>
   </member>
   <member name="F:EasyEcs.TileReads.Above" source="bd46d8a35fec">

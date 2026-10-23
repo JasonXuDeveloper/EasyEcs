@@ -9,7 +9,7 @@ EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/doc
 EECS035、EECS036）除了两条警告都是错误；这两条针对的是能跑、但有代价的写法（EECS017、EECS020）。生成器会跳过无效输入，由分析器报出来，
 所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046、EECS052、EECS053）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
-（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入；部件规则（EECS062 到 EECS069）检查生成器按特性（`[Sum]`、`[Key]`、`[Group]`）写入成员的类型和设置特性，并为手写的归约或键建议对应的特性；EECS070 让 `Emit<T>` 的记录保持行的顺序，EECS071 找出一次运行无法重现的随机数；瓦片规则（EECS072、EECS073）拒绝光环装不下的网格瓦片，以及会共用一张纹理的两个瓦片。声明规则（EECS080 到 EECS085）为手写的代码（单实体 job、销毁所访问实体的遍历）建议能生成它的特性，并拒绝无法生效的特性。参数规则（EECS086 到 EECS089）把让方法只能单线程运行的代码指向按块做同样工作的参数：逐行累加的单例改用 `Reduce<T>`，通过 `World` 读取其他实体改用 `Lookup<T>`，追加到单例列表的记录改用 `Emit<T>`，抽了两次的随机流各用一个自己的流。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入；部件规则（EECS062 到 EECS069）检查生成器按特性（`[Sum]`、`[IndexKey]`、`[Group]`）写入成员的类型和设置特性，并为手写的归约或键建议对应的特性；EECS070 让 `Emit<T>` 的记录保持行的顺序，EECS071 找出一次运行无法重现的随机数；瓦片规则（EECS072、EECS073）拒绝光环装不下的网格瓦片，以及会共用一张纹理的两个瓦片。声明规则（EECS080 到 EECS085）为手写的代码（单实体 job、销毁所访问实体的遍历）建议能生成它的特性，并拒绝无法生效的特性。参数规则（EECS086 到 EECS089）把让方法只能单线程运行的代码指向按块做同样工作的参数：逐行累加的单例改用 `Reduce<T>`，通过 `World` 读取其他实体改用 `Lookup<T>`，追加到单例列表的记录改用 `Emit<T>`，抽了两次的随机流各用一个自己的流。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -85,7 +85,7 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS053](#eecs053) | 警告 | 只在部分行上写入的追踪变化组件用 `Mut<T>` | `Mut<T>` |
 | [EECS054](#eecs054) | 错误 | `ChunkRows` 不小于 0，且只用于并行方法 | 去掉 `ChunkRows` |
 | [EECS055](#eecs055) | 信息 | 数值组件的 `[ForEach]` 方法得到向量循环 | |
-| [EECS056](#eecs056) | 错误 | `Simd = SimdMode.Require` 只用于符合条件的方法 | |
+| [EECS056](#eecs056) | 错误 | `SimdMode = SimdMode.Require` 只用于符合条件的方法 | |
 | [EECS057](#eecs057) | 错误 | 归约的单例每遍只写一次 | |
 | [EECS058](#eecs058) | 错误 | `Scratch<T>` 持有的东西不存进 World | |
 | [EECS059](#eecs059) | 错误 | `Lookup<T>` 读的组件这一遍不写 | |
@@ -96,7 +96,7 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS064](#eecs064) | 错误 | 归约特性合并每一个字段 | |
 | [EECS065](#eecs065) | 信息 | 逐字段的归约用特性声明 | 用特性声明 |
 | [EECS066](#eecs066) | 警告 | 归约的 `Identity` 是其 `Combine` 的单位元 | 正确的 `Identity`，或改用特性 |
-| [EECS067](#eecs067) | 信息 | 返回某个成员的键用 `[Key]` 声明 | `[Key]` / `[UniqueKey]` |
+| [EECS067](#eecs067) | 信息 | 返回某个成员的键用 `[IndexKey]` 声明 | `[IndexKey]` / `[UniqueKey]` |
 | [EECS068](#eecs068) | 错误 | 设置特性放在适用的类型上 | |
 | [EECS069](#eecs069) | 警告 / 信息 | 会被保存的托管类型有 Nino 格式化器 | `[NinoType]` / `[NotSaved]` |
 | [EECS070](#eecs070) | 错误 | 遍历不读自己产出的记录，同一种记录不产出两次 | |
@@ -105,7 +105,7 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS073](#eecs073) | 错误 | 一个方法每种格子类型和网格只接收一个瓦片 | |
 | [EECS080](#eecs080) | 信息 | 单实体 job 写成 `[ForEntity]` 方法 | 改写成 `[ForEntity]` 方法 |
 | [EECS081](#eecs081) | 错误 | `[ForEntity]` 方法是静态的，只接收单个实体有的东西 | 改成静态方法 |
-| [EECS082](#eecs082) | 错误 | 系统的调度是 `[UpdateInterval(n, Phase = p)]`，不是重写属性 | 改用特性声明 |
+| [EECS082](#eecs082) | 错误 | 系统的节奏是 `[UpdateInterval(n, Phase = p)]`，不是重写属性 | 改用特性声明 |
 | [EECS083](#eecs083) | 错误 | `[UpdateInterval]`：间隔至少为 1，相位在 0 到 n - 1 之间，用在系统上 | |
 | [EECS084](#eecs084) | 信息 | 销毁每个访问到的实体的 `[ForEach]` 方法用 `[Consume]` | `[Consume]` |
 | [EECS085](#eecs085) | 错误 | `[Consume]` 和 `[ForEach]` 一起用，不带 `Slices` | |
@@ -1639,14 +1639,14 @@ public class Burn : EcsSystem
 }
 ```
 
-按消息改，或者给本来就该保持标量的方法（行很少，或者方法体循环接不了）加 `[ForEach(Simd = SimdMode.Off)]` 让它不再提示。
+按消息改，或者给本来就该保持标量的方法（行很少，或者方法体循环接不了）加 `[ForEach(SimdMode = SimdMode.Off)]` 让它不再提示。
 它是建议级别，只在 IDE 里显示；`.editorconfig` 里写 `dotnet_diagnostic.EECS055.severity = warning`，构建时就会列出所有保持标量的方法。
 
 ## EECS056 [#eecs056]
 
 **要求向量循环，方法却不符合条件。** 错误。没有代码修复。
 
-`[ForEach(Simd = SimdMode.Require)]` 表示这个方法必须有向量循环：它是速度取决于向量循环的热路径。方法不符合条件时构建失败，原因和
+`[ForEach(SimdMode = SimdMode.Require)]` 表示这个方法必须有向量循环：它是速度取决于向量循环的热路径。方法不符合条件时构建失败，原因和
 EECS055 给出的一样，所以之后的改动（循环没有向量版本的调用、换了类型的字段）不会悄悄把它变慢。
 
 ```csharp tab="报告" doccheck=expect-EECS056
@@ -1654,7 +1654,7 @@ public struct Charge : IComponent { public float Value; public bool Full; }
 
 public class Recharge : EcsSystem
 {
-    [ForEach(Simd = SimdMode.Require)]   // “field Charge.Full is a bool, not a lane type (...)”
+    [ForEach(SimdMode = SimdMode.Require)]   // “field Charge.Full is a bool, not a lane type (...)”
     static void Fill(ref Charge charge)
     {
         if (charge.Full) return;
@@ -1669,7 +1669,7 @@ public struct Full : IComponent;   // 标签：充满的电池是一组实体，
 
 public class Recharge : EcsSystem
 {
-    [ForEach(Simd = SimdMode.Require), Without<Full>]
+    [ForEach(SimdMode = SimdMode.Require), Without<Full>]
     static void Fill(ref Charge charge) => charge.Value = Math.Clamp(charge.Value + 0.1f, 0f, 1f);
 }
 ```
@@ -1921,7 +1921,7 @@ public static class Reports
 
 **有生成成员、却不是 partial 的类型。** 错误。代码修复：把它和包含它的每一层类型都改成 partial。
 
-`[Sum]`、`[Key]`、`[Group]` 声明的是生成器要写进这个类型本身的成员：`IReduction<T>`、`IIndexed<TKey>` 或 `IGroup` 的成员，
+`[Sum]`、`[IndexKey]`、`[Group]` 声明的是生成器要写进这个类型本身的成员：`IReduction<T>`、`IIndexed<TKey>` 或 `IGroup` 的成员，
 写在这个类型的另一个部分里。只有 partial 类型、并且外层也都是 partial，才能加上这个部分。`file` 类型加不了，因为它的部分会在另一个文件里。
 
 ```csharp tab="报告" doccheck=alone,expect-EECS062
@@ -2038,9 +2038,9 @@ public partial struct Weakest : ISingletonComponent
 
 ## EECS067 [#eecs067]
 
-**可以用特性声明的索引键。** 建议（信息级别）。代码修复：在那个成员上声明 `[Key]`（唯一索引用 `[UniqueKey]`），外层一并改成 partial。
+**可以用特性声明的索引键。** 建议（信息级别）。代码修复：在那个成员上声明 `[IndexKey]`（唯一索引用 `[UniqueKey]`），外层一并改成 partial。
 
-返回某个字段、属性或值本身的 `Key`，就是在那个成员上（值本身则在类型上）声明 `[Key]` 的效果。生成器会写出接口和显式实现的 `Key`，
+返回某个字段、属性或值本身的 `Key`，就是在那个成员上（值本身则在类型上）声明 `[IndexKey]` 的效果。生成器会写出接口和显式实现的 `Key`，
 `ToString()` 不会把它打印出来，调用方也不会误用它。由多个成员算出来的键仍然手写。
 
 ```csharp tab="报告" doccheck=alone,expect-EECS067
@@ -2055,7 +2055,7 @@ public struct Owner : IComponent, IIndexed<EntityId>
 ```csharp tab="修正"
 public partial struct Owner : IComponent
 {
-    [Key] public EntityId Id;
+    [IndexKey] public EntityId Id;
 }
 ```
 
@@ -2185,7 +2185,7 @@ World 里需要这个单例（`world.SetEntityRandom(seed, 0)`），推进模拟
 
 [瓦片](/zh/docs/guide/high-performance#grid-halo)（`ITileShape`）是 Width x Depth x Height 个格子，Depth 1 到 64（一层的活跃行是一个 64 位字），
 光环至少一个格子。光环从旁边瓦片朝向这边的格子拷来，所以在每条有邻居的轴上（它的 `Faces`）最多和瓦片一样长，边界镜像时每条轴都是如此：
-和 MPI 的幽灵格子宽度一样，不会比子区域更宽。规则读形状的常量成员；规则检查不了的形状，`Tile.Load` 会抛出异常。
+和 MPI 的幽灵格子宽度一样，不会比子区域更宽。规则读形状的常量成员；规则检查不了的形状，`Tile.Pad` 会抛出异常。
 
 ```csharp tab="报告" doccheck=expect-EECS072
 // 沿 x 做四阶模板的一条 16 格的带：默认的面包括北和南，
@@ -2231,8 +2231,8 @@ public class PressureSystem : EcsSystem
     [ForEach(Parallel = true)]
     static void Step(Tile<Field, Strip> pressure, Tile<Field, Strip> velocity, Mut<DynamicBuffer<NextField>> next)
     {
-        var p = pressure.Load();
-        var v = velocity.Load();   // 同一张纹理：p 现在采样的是速度
+        var p = pressure.Pad();
+        var v = velocity.Pad();   // 同一张纹理：p 现在采样的是速度
         var into = next.Write().AsSpan();
         for (int x = 0; x < 16; x++)
             into[x] = new NextField(p[x, 0, 0].Value - (v[x + 1, 0, 0].Value - v[x - 1, 0, 0].Value) * 0.5f);
@@ -2251,8 +2251,8 @@ public class PressureSystem : EcsSystem
     static void Step(Tile<Pressure, Strip> pressure, Tile<Velocity1D, Strip> velocity,
         Mut<DynamicBuffer<NextPressure>> next)
     {
-        var p = pressure.Load();
-        var v = velocity.Load();   // 每种格子类型一张纹理
+        var p = pressure.Pad();
+        var v = velocity.Pad();   // 每种格子类型一张纹理
         var into = next.Write().AsSpan();
         for (int x = 0; x < 16; x++)
             into[x] = new NextPressure(p[x, 0, 0].Value - (v[x + 1, 0, 0].Value - v[x - 1, 0, 0].Value) * 0.5f);
@@ -2333,7 +2333,7 @@ public static class Healing
 
 ## EECS082 [#eecs082]
 
-**用重写属性写系统的调度。** 错误。代码修复：改用 `[UpdateInterval(n, Phase = p)]` 声明。
+**用重写属性写系统的节奏。** 错误。代码修复：改用 `[UpdateInterval(n, Phase = p)]` 声明。
 
 系统的节奏是类上的 [`[UpdateInterval(n, Phase = p)]`](/zh/docs/guide/systems#update-interval) 特性，生成器把它写进系统的注册代码；
 `UpdateInterval` 和 `UpdatePhase` 属性已经没有了。修复把返回常量的重写移到特性上；如果它们表示的是“每次更新都跑”（间隔 1、相位 0），

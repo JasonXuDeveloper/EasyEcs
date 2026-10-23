@@ -48,7 +48,7 @@ dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*Gener
   is complete and that every stage and both outputs are `Cached` / `Unchanged` after an edit in another file, in a
   method body and in a `[ForEach]` body: a new stage goes into `TrackedStages`.
 - Implementation output (`RegisterImplementationSourceOutput`) for what user code never names (system code,
-  `SavedTypes`); source output for members user code calls.
+  `TypeRegistry`); source output for members user code calls.
 - No diagnostics from generators: the analyzer reports, through the same `Symbols` checks ("skipped by the
   generator" == "reported").
 - Deterministic output (sorted, culture-invariant), unique hint names, `[GeneratedCode("EasyEcs.Generator")]`

@@ -44,16 +44,6 @@ public EntityId Id { get; }
 
 ## 方法 [#methods]
 
-### `Absent` [#absent]
-
-```csharp
-public Prefab Absent<T>() where T : struct, IComponent;
-```
-
-给配方一列 `T`，但不带这个组件：实例没有它，但它们的表给它留了位置，所以之后加上它（每个 tick 设置又清除的标签、部分实例会进入的状态）只翻转一个存在位，不把行移到别的表，所有实例都留在一张表里。配方原有的值会丢掉。返回这个预制体。O(1)。
-
-**复杂度**（[API 表](/zh/docs/api)）：O(1)
-
 ### `AddMember` [#addmember]
 
 ```csharp
@@ -123,6 +113,16 @@ public Prefab Set<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in T1 c1, in T2 c2, in T3 
 给配方添加 2 个组件，或替换它们的值。返回这个预制体（可以链式调用）。O(2)。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(n)，新增组件时均摊 O(c)
+
+### `SetAbsent` [#setabsent]
+
+```csharp
+public Prefab SetAbsent<T>() where T : struct, IComponent;
+```
+
+给配方一列 `T`，但不带这个组件：实例没有它，但它们的表给它留了位置，所以之后加上它（每个 tick 设置又清除的标签、部分实例会进入的状态）只翻转一个存在位，不把行移到别的表，所有实例都留在一张表里。配方原有的值会丢掉。返回这个预制体。O(1)。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(1)
 
 ### `SetBuffer` [#setbuffer]
 

@@ -553,7 +553,7 @@ Measured on one system over 100,000 rows of a tracked component (`ChangeTracking
 
 <BenchSource />
 
-A few writes, or writes to neighbouring rows, skip almost the whole walk. A thousand writes scattered over 100,000
+A few writes, or writes to neighboring rows, skip almost the whole walk. A thousand writes scattered over 100,000
 rows touch most 64-row words, and then the saving is mostly the method calls that do not run.
 
 ## What it costs [#what-it-costs]

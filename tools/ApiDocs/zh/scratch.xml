@@ -1,5 +1,5 @@
 <doc>
-  <member name="T:EasyEcs.Scratch`1" source="90c9f4ba6ecf">
+  <member name="T:EasyEcs.Scratch`1" source="85ca67928fe0">
     <summary>
       <c>[ForEach]</c> 方法在运行它的线程上的工作内存（OpenMP 的 <c>threadprivate</c>）：邻居列表、寻路的开放集、要填充的缓冲区。
       <c>static void Plan(ref Path path, in Goal goal, Scratch&lt;Frontier&gt; frontier)</c>：<see cref="P:EasyEcs.Scratch`1.Value" /> 是每个方法、每个线程一个的

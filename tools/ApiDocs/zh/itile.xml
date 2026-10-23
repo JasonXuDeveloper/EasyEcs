@@ -1,5 +1,5 @@
 <doc>
-  <member name="T:EasyEcs.ITile`1" source="ccf8c9217df3">
+  <member name="T:EasyEcs.ITile`1" source="99d6b5caf66e">
     <summary>
       让实体成为网格中一个分块的组件，按键查找（带索引的组件，<see cref="T:EasyEcs.IIndexed`1" />）：
       <c>record struct Chunk(ChunkPos Pos) : IComponent, ITile&lt;ChunkPos&gt;</c>，带着形状（<see cref="T:EasyEcs.ITileShape" />）

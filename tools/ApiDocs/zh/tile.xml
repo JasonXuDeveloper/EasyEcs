@@ -1,10 +1,10 @@
 <doc>
-  <member name="T:EasyEcs.Tile`2" source="08c0b6aabb9c">
+  <member name="T:EasyEcs.Tile`2" source="68e6047826b0">
     <summary>
       一个分块（由 <typeparamref name="TTile" /> 变成分块的实体，<see cref="T:EasyEcs.ITile`1" />）的格子，连同邻居的格子：
       一个 <c>[ForEach]</c> 参数，就像 CUDA 线程块的分块和它的 apron，或 MPI 进程的子区域和它的 ghost 格子。<c>static void Diffuse(Tile&lt;Heat,
       Plate&gt; heat, Mut&lt;DynamicBuffer&lt;NextHeat&gt;&gt; next)</c>：生成的 job 按键找到邻居（网格的每个分块，每个邻居查找一次），
-      <see cref="M:EasyEcs.Tile`2.Load(System.Int32,System.Int32,`0,System.Boolean)" /> 把模板要计算的层拷进一个带边的分块
+      <see cref="M:EasyEcs.Tile`2.Pad(System.Int32,System.Int32,`0,System.Boolean)" /> 把模板要计算的层拷进一个带边的分块
       （<see cref="T:EasyEcs.PaddedTile`2" />）：中间是实体自己的格子，外面一圈 <see cref="P:EasyEcs.ITileShape.Halo" /> 个格子的 halo
       来自邻居朝向这边的格子，没有邻居的地方按边界（<see cref="P:EasyEcs.ITileShape.Boundary" />）处理，所以模板代码没有边界情况。
       <para>
@@ -20,16 +20,16 @@
   <member name="P:EasyEcs.Tile`2.Cells" source="1e148366e590">
     <summary>分块自己的格子，布局见 <see cref="T:EasyEcs.ITileShape" />。O(1)。</summary>
   </member>
-  <member name="M:EasyEcs.Tile`2.Beside(EasyEcs.TileFaces)" source="adb250563a46">
+  <member name="M:EasyEcs.Tile`2.Beside(EasyEcs.TileFaces)" source="5e2cf7bf1c1f">
     <summary>
       <paramref name="face" />（一个面）对面的邻居；网格在那里没有分块，或 <typeparamref name="TTile" /> 在这个面上没有声明邻居时为默认值：
       它的其他组件通过 <see cref="T:EasyEcs.Lookup`1" /> 读。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.Tile`2.Load" source="bbd224585ada">
-    <summary>带边拷入所有层，缺失邻居的那一圈为零：见 <see cref="M:EasyEcs.Tile`2.Load(System.Int32,System.Int32,`0,System.Boolean)" />。</summary>
+  <member name="M:EasyEcs.Tile`2.Pad" source="35127ca6b34f">
+    <summary>带边拷入所有层，缺失邻居的那一圈为零：见 <see cref="M:EasyEcs.Tile`2.Pad(System.Int32,System.Int32,`0,System.Boolean)" />。</summary>
   </member>
-  <member name="M:EasyEcs.Tile`2.Load(System.Int32,System.Int32,`0,System.Boolean)" source="5e5fbbb22e66">
+  <member name="M:EasyEcs.Tile`2.Pad(System.Int32,System.Int32,`0,System.Boolean)" source="e4a5e699dfb9">
     <summary>
       把第 <paramref name="from" /> 到第 <paramref name="to" /> 层带边拷进这个线程的纹理：每层的格子在中间，每层外面一圈
       <see cref="P:EasyEcs.ITileShape.Halo" />（r）个格子（西、东邻居朝向这边的列，北、南邻居朝向这边的行；邻域包含棱时，角来自隔着棱的分块）；
@@ -44,13 +44,13 @@
       </para>
     </summary>
   </member>
-  <member name="M:EasyEcs.Tile`2.Beside(System.Int32,System.Int32,System.Int32)" source="df3a558535d2">
+  <member name="M:EasyEcs.Tile`2.Beside(System.Int32,System.Int32,System.Int32)" source="711b99b05303">
     <summary>
       偏移 (<paramref name="dx" />, <paramref name="dy" />, <paramref name="dz" />) 处的邻居，每个分量 −1 到 1（隔着面、棱或角的分块）；
       那里没有分块，或形状的邻域不包含它时为默认值。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.Tile`2.Changes(System.ReadOnlySpan{`0},System.Boolean@)" source="09d5d41ce598">
+  <member name="M:EasyEcs.Tile`2.ChangedEdges(System.ReadOnlySpan{`0},System.Boolean@)" source="713a2134935f">
     <summary>
       <paramref name="next" />（分块的这一步，按它的格子布局）是否和分块的格子不同，以及哪些面的边缘变了：离这个面
       <see cref="P:EasyEcs.ITileShape.Halo" /> 个格子以内的格子，对面的邻居会把它读进 halo。没有变化、旁边分块朝向它的边缘也没变化的分块，
@@ -61,9 +61,9 @@
     <param name="changed">是否有格子变化。</param>
     <returns>边缘变化的面（<see cref="F:EasyEcs.TileFaces.Below" /> 和 <see cref="F:EasyEcs.TileFaces.Above" /> 只对不止一层的分块）。</returns>
   </member>
-  <member name="M:EasyEcs.Tile`2.Facing(EasyEcs.TileFaces)" source="9c229f74994f">
+  <member name="M:EasyEcs.Tile`2.Facing(EasyEcs.TileFaces)" source="255b0896339c">
     <summary>
-      把 <paramref name="edges" /> 中某条边缘读进 halo 的邻居（来自 <see cref="M:EasyEcs.Tile`2.Changes(System.ReadOnlySpan{`0},System.Boolean@)" />）：
+      把 <paramref name="edges" /> 中某条边缘读进 halo 的邻居（来自 <see cref="M:EasyEcs.Tile`2.ChangedEdges(System.ReadOnlySpan{`0},System.Boolean@)" />）：
       每个面对面的分块，以及在形状的邻域内、隔着其中两个或三个面的棱和角的分块，只列出存在的
       （<c>foreach (var id in tile.Facing(edges))</c>）。每个邻居 O(1)。
     </summary>

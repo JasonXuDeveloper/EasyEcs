@@ -57,10 +57,18 @@ Diagonals = 16;
 ### `Layer` [#layer]
 
 ```csharp
-Layer = Self | Sides;
+Layer = Self | NorthSouth;
 ```
 
 这一行和它的四邻：2D 五点或九点模板。
+
+### `NorthSouth` [#northsouth]
+
+```csharp
+NorthSouth = 2;
+```
+
+同一层中它北边和南边的行，连同它们的 halo 格子（也就是 2D 的对角）。
 
 ### `Self` [#self]
 
@@ -69,11 +77,3 @@ Self = 1;
 ```
 
 这一行自己，连同它前后的格子（西和东）。
-
-### `Sides` [#sides]
-
-```csharp
-Sides = 2;
-```
-
-同一层中它北边和南边的行，连同它们的 halo 格子（也就是 2D 的对角）。

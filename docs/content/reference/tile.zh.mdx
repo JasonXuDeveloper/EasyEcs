@@ -11,7 +11,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
 ```
 
 一个分块（由 `TTile` 变成分块的实体，[`ITile`](/zh/docs/reference/itile)）的格子，连同邻居的格子：一个 `[ForEach]` 参数，就像 CUDA 线程块的分块和它的 apron，或 MPI 进程的子区域和它的 ghost 格子。`static void Diffuse(Tile<Heat,
-Plate> heat, Mut<DynamicBuffer<NextHeat>> next)`：生成的 job 按键找到邻居（网格的每个分块，每个邻居查找一次），[`Tile.Load`](/zh/docs/reference/tile#load-2) 把模板要计算的层拷进一个带边的分块（[`PaddedTile`](/zh/docs/reference/paddedtile)）：中间是实体自己的格子，外面一圈 [`ITileShape.Halo`](/zh/docs/reference/itileshape#halo) 个格子的 halo 来自邻居朝向这边的格子，没有邻居的地方按边界（[`ITileShape.Boundary`](/zh/docs/reference/itileshape#boundary)）处理，所以模板代码没有边界情况。
+Plate> heat, Mut<DynamicBuffer<NextHeat>> next)`：生成的 job 按键找到邻居（网格的每个分块，每个邻居查找一次），[`Tile.Pad`](/zh/docs/reference/tile#pad-2) 把模板要计算的层拷进一个带边的分块（[`PaddedTile`](/zh/docs/reference/paddedtile)）：中间是实体自己的格子，外面一圈 [`ITileShape.Halo`](/zh/docs/reference/itileshape#halo) 个格子的 halo 来自邻居朝向这边的格子，没有邻居的地方按边界（[`ITileShape.Boundary`](/zh/docs/reference/itileshape#boundary)）处理，所以模板代码没有边界情况。
 
 约定：系统被调度为 `DynamicBuffer<TCell>` 和 `TTile` 的读者（并在遍历之前建好它的索引），所以每个邻居读到的都是遍历之前的值，方法可以并行运行；写其中任何一个的方法不能接收这个分块（EECS059）。把这一步的结果写进另一个组件，再由另一个系统提交（双缓冲）。
 
@@ -62,10 +62,10 @@ public EntityId Beside(int dx, int dy, int dz);
 - `tile.Beside(face)`：O(1)
 - `tile.Beside(dx, dy, dz)`：O(1)
 
-### `Changes` [#changes]
+### `ChangedEdges` [#changededges]
 
 ```csharp
-public TileFaces Changes(ReadOnlySpan<TCell> next, out bool changed);
+public TileFaces ChangedEdges(ReadOnlySpan<TCell> next, out bool changed);
 ```
 
 `next`（分块的这一步，按它的格子布局）是否和分块的格子不同，以及哪些面的边缘变了：离这个面 [`ITileShape.Halo`](/zh/docs/reference/itileshape#halo) 个格子以内的格子，对面的邻居会把它读进 halo。没有变化、旁边分块朝向它的边缘也没变化的分块，下一步算出的结果相同：让它休眠，并唤醒 [`Tile.Facing`](/zh/docs/reference/tile#facing) 变化边缘的分块，这样稀疏网格的开销只是活跃分块的开销。O(格子数)，逐行按字节比较。
@@ -85,27 +85,27 @@ public TileFaces Changes(ReadOnlySpan<TCell> next, out bool changed);
 public TileIds Facing(TileFaces edges);
 ```
 
-把 `edges` 中某条边缘读进 halo 的邻居（来自 [`Tile.Changes`](/zh/docs/reference/tile#changes)）：每个面对面的分块，以及在形状的邻域内、隔着其中两个或三个面的棱和角的分块，只列出存在的（`foreach (var id in tile.Facing(edges))`）。每个邻居 O(1)。
+把 `edges` 中某条边缘读进 halo 的邻居（来自 [`Tile.ChangedEdges`](/zh/docs/reference/tile#changededges)）：每个面对面的分块，以及在形状的邻域内、隔着其中两个或三个面的棱和角的分块，只列出存在的（`foreach (var id in tile.Facing(edges))`）。每个邻居 O(1)。
 
 **复杂度**（[API 表](/zh/docs/api)）：每个邻居 O(1)
 
-### `Load` [#load]
+### `Pad` [#pad]
 
 ```csharp
-public PaddedTile<TCell, TTile> Load();
+public PaddedTile<TCell, TTile> Pad();
 ```
 
-带边拷入所有层，缺失邻居的那一圈为零：见 [`Tile.Load`](/zh/docs/reference/tile#load-2)。
+带边拷入所有层，缺失邻居的那一圈为零：见 [`Tile.Pad`](/zh/docs/reference/tile#pad-2)。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
-- `tile.Load(from, to, fill, mask)`：O(层数 × (Width + 2r) × (Depth + 2r))，r 为 `Halo`；每行一到两次向量拷贝
-- `tile.Load()`：O(层数 × (Width + 2r) × (Depth + 2r))，r 为 `Halo`；每行一到两次向量拷贝
+- `tile.Pad(from, to, fill, mask)`：O(层数 × (Width + 2r) × (Depth + 2r))，r 为 `Halo`；每行一到两次向量拷贝
+- `tile.Pad()`：O(层数 × (Width + 2r) × (Depth + 2r))，r 为 `Halo`；每行一到两次向量拷贝
 
-### `Load` [#load-2]
+### `Pad` [#pad-2]
 
 ```csharp
-public PaddedTile<TCell, TTile> Load(int from, int to, TCell fill = default, bool mask = true);
+public PaddedTile<TCell, TTile> Pad(int from, int to, TCell fill = default, bool mask = true);
 ```
 
 把第 `from` 到第 `to` 层带边拷进这个线程的纹理：每层的格子在中间，每层外面一圈 [`ITileShape.Halo`](/zh/docs/reference/itileshape#halo)（r）个格子（西、东邻居朝向这边的列，北、南邻居朝向这边的行；邻域包含棱时，角来自隔着棱的分块）；分块不止一层时，`from` 下面和 `to` 上面各多 r 层（分块自己的，或下方、上方邻居朝向这边的层）。没有邻居的地方（网格里没有、缓冲为空，或在形状的面和邻域之外），halo 按 [`ITileShape.Boundary`](/zh/docs/reference/itileshape#boundary) 处理：`fill`，或分块自己的边缘格子钳制或镜像（沿没有邻居的那条轴；隔着棱或角、那条轴被钳制的分块，从旁边的分块读）。传入 `mask` 时，记录哪些行有不为零的格子（按位），供 [`PaddedTile.Rows`](/zh/docs/reference/paddedtile#rows) 使用。
@@ -114,5 +114,5 @@ O(层数 × (Width + 2r) × (Depth + 2r))；线程有了纹理之后零分配（
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
-- `tile.Load(from, to, fill, mask)`：O(层数 × (Width + 2r) × (Depth + 2r))，r 为 `Halo`；每行一到两次向量拷贝
-- `tile.Load()`：O(层数 × (Width + 2r) × (Depth + 2r))，r 为 `Halo`；每行一到两次向量拷贝
+- `tile.Pad(from, to, fill, mask)`：O(层数 × (Width + 2r) × (Depth + 2r))，r 为 `Halo`；每行一到两次向量拷贝
+- `tile.Pad()`：O(层数 × (Width + 2r) × (Depth + 2r))，r 为 `Halo`；每行一到两次向量拷贝

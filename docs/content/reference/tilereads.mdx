@@ -57,10 +57,18 @@ The rows north and south of it in the layers over and under it: the 3D edges and
 ### `Layer` [#layer]
 
 ```csharp
-Layer = Self | Sides;
+Layer = Self | NorthSouth;
 ```
 
 The row and its four sides: a 2D five- or nine-point stencil.
+
+### `NorthSouth` [#northsouth]
+
+```csharp
+NorthSouth = 2;
+```
+
+The rows north and south of it in its layer, with their halo cells (the 2D diagonals too).
 
 ### `Self` [#self]
 
@@ -69,11 +77,3 @@ Self = 1;
 ```
 
 The row itself, with the cells before and after it (west and east).
-
-### `Sides` [#sides]
-
-```csharp
-Sides = 2;
-```
-
-The rows north and south of it in its layer, with their halo cells (the 2D diagonals too).

@@ -12,16 +12,17 @@ current API.
 
 ## v4.7 → v4.8 [#v4-7-to-v4-8]
 
-Saves of 4.7 load. Code written for 4.7 compiles unchanged except a system's schedule: the `UpdateInterval` and
-`UpdatePhase` properties became the `[UpdateInterval(n, Phase = p)]` attribute. Two analyzer rules report more code,
+Saves of 4.7 load. Code written for 4.7 compiles unchanged except a system's cadence, where the `UpdateInterval` and
+`UpdatePhase` properties became the `[UpdateInterval(n, Phase = p)]` attribute, and `ValueIndex.TryFind`, which gives
+an `EntityId`. Two analyzer rules report more code,
 and three warnings are new: a build that treats warnings as errors fails on them until the code changes.
 
-### A system's schedule is an attribute: `[UpdateInterval(n, Phase = p)]` [#v4-8-update-interval]
+### A system's cadence is an attribute: `[UpdateInterval(n, Phase = p)]` [#v4-8-update-interval]
 
 `EcsSystem.UpdateInterval` and `EcsSystem.UpdatePhase` are gone. Declare the cadence on the class: the generator
 writes it into the system's registration, so it is a constant by construction, and a derived system inherits it
 unless it declares its own. An override of either property is [EECS082](/en/docs/guide/analyzer#eecs082), whose code
-fix writes the attribute (and removes overrides that said "every update"). EECS018, the warning for a schedule that
+fix writes the attribute (and removes overrides that said "every update"). EECS018, the warning for a cadence that
 was not a constant, is gone with the properties.
 
 ```csharp tab="4.7" doccheck=skip
@@ -45,6 +46,20 @@ public class SaveSystem : EcsSystem
 An interval that was computed at run time has no attribute form: fix the cadence, or put the system in a
 [system group](/en/docs/guide/systems#system-groups) and update the group when it is due. Code that read
 `system.UpdateInterval` reads the attribute (`typeof(T).GetCustomAttribute<UpdateIntervalAttribute>()`).
+
+### `ValueIndex.TryFind` gives an `EntityId` [#v4-8-try-find]
+
+`index.TryFind(key, out ...)` gives the id of the entity it found, as `lookup.TryFind` in a pass does: the index holds
+ids, and a link, a `Lookup<T>` and `DestroyEntities` take them. Code that needs the handle asks the world for it; a
+unique index's `TryGet(key, out Entity)` still gives the handle.
+
+```csharp tab="4.7" doccheck=skip
+if (world.CallsignIndex.TryFind("alpha", out var found)) found.Destroy();
+```
+
+```csharp tab="4.8" doccheck=skip
+if (world.CallsignIndex.TryFind("alpha", out var found)) world.GetEntity(found).Destroy();
+```
 
 ### Analyzer rules that report more: EECS027, EECS030 and EECS053 [#v4-8-analyzer]
 

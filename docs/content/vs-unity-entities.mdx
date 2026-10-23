@@ -55,7 +55,7 @@ apply immediately. This page maps the concepts; it has no benchmarks against Uni
 | Baking, authoring components | none | Build entities in code, from a prefab or from a save. |
 | `LinkedEntityGroup` (destroyed together) | `ChildOf(parent)`, cascading destroy | `world.Children(parent)` lists the children. |
 | Burst | the .NET JIT, Native AOT, and the generator's [vector loops](/en/docs/guide/systems#vector-loops) | Struct jobs are specialized and inlined per job type; a per-row method over components of 1 to 4 numbers of one type also gets a `Vector<T>` loop, with the scalar results bit for bit. |
-| Burst Inspector (does this job vectorize?) | [EECS055](/en/docs/guide/analyzer#eecs055), and `[ForEach(Simd = SimdMode.Require)]` ([EECS056](/en/docs/guide/analyzer#eecs056)) | The build names why a method stayed scalar; `Require` turns that into an error, so no inspector is needed. |
+| Burst Inspector (does this job vectorize?) | [EECS055](/en/docs/guide/analyzer#eecs055), and `[ForEach(SimdMode = SimdMode.Require)]` ([EECS056](/en/docs/guide/analyzer#eecs056)) | The build names why a method stayed scalar; `Require` turns that into an error, so no inspector is needed. |
 
 ## The same system [#same-system]
 

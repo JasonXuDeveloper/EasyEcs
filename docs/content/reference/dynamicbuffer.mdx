@@ -38,10 +38,10 @@ The number of elements.
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 
-### `PoolCapacity` [#poolcapacity]
+### `MaxPooledLength` [#maxpooledlength]
 
 ```csharp
-public static int PoolCapacity { get; set; }
+public static int MaxPooledLength { get; set; }
 ```
 
 The longest list, in elements, that a destroyed or removed buffer of `T` gives back to the pool, for the next buffer's first write to reuse instead of allocating one, on any thread: the lists the owner thread takes back serve the first writes of a parallel `[ForEach]` too (default: 4,096 bytes of elements, 4,096 for a `byte` or a byte-sized enum). A longer list is left to the GC. Raise it for buffers of one size that come and go in numbers, such as the blocks of chunks loaded and unloaded around players; 0 pools none. The pool holds at most as many lists as died while none were taken, so what it keeps is that peak times this capacity. Process-wide, for every world and thread: set it at startup, before a world uses the type.
@@ -72,6 +72,18 @@ The elements, read-only.
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 
+### `FillPool` [#fillpool]
+
+```csharp
+public static void FillPool(int lists);
+```
+
+Fill the pool with lists until it holds `lists`, each of [`DynamicBuffer.MaxPooledLength`](/en/docs/reference/dynamicbuffer#maxpooledlength) elements, so the first writes of that many buffers take a list instead of allocating one: a server that knows how many buffers of `T` it keeps at its peak (the chunks around its players) pays for them at startup, and its ticks allocate nothing even while the world grows to that peak. Process-wide, like the pool; lists already in the pool count. O(`lists`) allocations once; nothing when the pool holds enough.
+
+**Exceptions**
+
+- `ArgumentOutOfRangeException`: `lists` is negative.
+
 ### `GetEnumerator` [#getenumerator]
 
 ```csharp
@@ -81,15 +93,3 @@ public readonly ReadOnlySpan<T>.Enumerator GetEnumerator();
 Enumerates the elements (read-only, no allocation).
 
 **Complexity** ([API table](/en/docs/api)): O(1)
-
-### `ReservePool` [#reservepool]
-
-```csharp
-public static void ReservePool(int lists);
-```
-
-Fill the pool with lists until it holds `lists`, each of [`DynamicBuffer.PoolCapacity`](/en/docs/reference/dynamicbuffer#poolcapacity) elements, so the first writes of that many buffers take a list instead of allocating one: a server that knows how many buffers of `T` it keeps at its peak (the chunks around its players) pays for them at startup, and its ticks allocate nothing even while the world grows to that peak. Process-wide, like the pool; lists already in the pool count. O(`lists`) allocations once; nothing when the pool holds enough.
-
-**Exceptions**
-
-- `ArgumentOutOfRangeException`: `lists` is negative.

@@ -48,7 +48,7 @@
     </summary>
   </member>
 
-  <member name="M:EasyEcs.Prefab.Absent``1" source="aa4e9b711a2a">
+  <member name="M:EasyEcs.Prefab.SetAbsent``1" source="aa4e9b711a2a">
     <summary>
       给配方一列 <typeparamref name="T" />，但不带这个组件：实例没有它，但它们的表给它留了位置，所以之后加上它
       （每个 tick 设置又清除的标签、部分实例会进入的状态）只翻转一个存在位，不把行移到别的表，所有实例都留在一张表里。

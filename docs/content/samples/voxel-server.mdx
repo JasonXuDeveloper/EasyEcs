@@ -65,12 +65,12 @@ The differences are listed [below](#vanilla).
 **The GPU.** The water borrows three ideas from how a graphics card draws:
 
 - A *fragment shader* is a small function the GPU runs once per pixel, all pixels at once, reading the pixel's
-  neighbours from a texture and writing only its own pixel. The water step is that function per block: the next level
-  of a block from its own and its six neighbours', and nothing else, so 16 blocks go through one `Vector128<byte>`
+  neighbors from a texture and writing only its own pixel. The water step is that function per block: the next level
+  of a block from its own and its six neighbors', and nothing else, so 16 blocks go through one `Vector128<byte>`
   and chunks run on several threads.
 - A *stencil* is a mask that decides which pixels the shader runs on at all. Here a dry row of 16 blocks with no
   water above or beside it is skipped: nothing can flow into it.
-- *Ping-pong buffers*: a pass reads one buffer and writes another, then the two swap, so no pixel reads a neighbour
+- *Ping-pong buffers*: a pass reads one buffer and writes another, then the two swap, so no pixel reads a neighbor
   already updated in the same pass. The step reads `Fluid` and writes `NextFluid`, and a commit copies it back once
   every chunk has stepped. Like a GPU's targets, neither is cleared between passes: the shader writes every texel
   it later reads.
@@ -265,20 +265,20 @@ flowchart LR
 (`[Changed<DynamicBuffer<Block>>]`), so the dig knows nothing of water or of the sky. Two systems react to it:
 `HeightMapSystem` computes the chunk's height map, 16 vectors of 16 columns, each layer from the bottom up overwriting
 the lanes whose block is solid with its height, so after the 32 layers each lane holds the top of its column with no
-branch; `WaterWakeSystem` tags the chunk and its four neighbours `Flowing`.
+branch; `WaterWakeSystem` tags the chunk and its four neighbors `Flowing`.
 
 <include lang="csharp" meta='tab="Water/HeightMap.cs"'>../../../samples/VoxelServer/Systems/Water/HeightMap.cs</include>
 
 <include lang="csharp" meta='tab="Water/Wake.cs"'>../../../samples/VoxelServer/Systems/Water/Wake.cs</include>
 
 **The passes.** `WaterFlowSystem` is the shader. `Chunk` is a [tile](/en/docs/guide/high-performance#grid) of the
-grid (`ITile<ChunkPos>`: 16 x 16 x 32 cells, its neighbours the chunks beside it), so the method takes the chunk's water
-and blocks as `Tile<Fluid, Chunk>` and `Tile<Block, Chunk>`, and the generator finds the four neighbours once per chunk.
-The layers to shade come from the `FluidCount` of the chunk and of its neighbours (through `Beside` and a
-`Lookup<FluidCount>`, no search); `Load(from, to)` pads them into a texture of the thread, a ring of one block around
-each layer from the facing row or column of each neighbour, and a layer under and over, as a CUDA block loads its tile
-and halo into shared memory. The loop samples neighbours with no edge case and computes each row of 16 blocks in one
-`Vector128<byte>`. Its neighbours are read as they were before the pass and only `NextFluid` is written, so it is a
+grid (`ITile<ChunkPos>`: 16 x 16 x 32 cells, its neighbors the chunks beside it), so the method takes the chunk's water
+and blocks as `Tile<Fluid, Chunk>` and `Tile<Block, Chunk>`, and the generator finds the four neighbors once per chunk.
+The layers to shade come from the `FluidCount` of the chunk and of its neighbors (through `Beside` and a
+`Lookup<FluidCount>`, no search); `Pad(from, to)` copies them into a texture of the thread, a ring of one block around
+each layer from the facing row or column of each neighbor, and a layer under and over, as a CUDA block loads its tile
+and halo into shared memory. The loop samples neighbors with no edge case and computes each row of 16 blocks in one
+`Vector128<byte>`. Its neighbors are read as they were before the pass and only `NextFluid` is written, so it is a
 [parallel method](/en/docs/guide/systems#parallel-methods). A few hundred chunks flow at a time, each one costing
 microseconds, far under the 4,096 rows of a default chunk of a pass that writes a tracked component, so it sets
 `ChunkRows = 64` and the threads take 64 chunks at a time ([chunk size](/en/docs/guide/threading#chunk-rows)). Byte
@@ -293,9 +293,9 @@ one's reach covers.
 
 The step's result is data, `FluidStep`: `WaterSleepSystem` takes the chunks whose water moved nothing out of the
 passes and gives their scratch buffer (`NextFluid`) back to the pool with `TrimExcess`, so only flowing
-chunks hold them; it runs before the commit, so a chunk that settled is still woken by a neighbour whose water reached
+chunks hold them; it runs before the commit, so a chunk that settled is still woken by a neighbor whose water reached
 it in the same step. `WaterCommitSystem` copies the step into the water once every chunk has stepped (each chunk steps
-from its neighbours' water before the step, whatever order the chunks are visited in), updates `FluidCount` and wakes
+from its neighbors' water before the step, whatever order the chunks are visited in), updates `FluidCount` and wakes
 the chunks beside the edges that changed.
 
 <include lang="csharp" meta='tab="Water/Flow.cs"'>../../../samples/VoxelServer/Systems/Water/Flow.cs</include>
@@ -304,7 +304,7 @@ the chunks beside the edges that changed.
 
 <include lang="csharp" meta='tab="Water/Commit.cs"'>../../../samples/VoxelServer/Systems/Water/Commit.cs</include>
 
-{/* TODO(water overlap): the planned push-halo design (a chunk hands its edges to its neighbours when they change,
+{/* TODO(water overlap): the planned push-halo design (a chunk hands its edges to its neighbors when they change,
 instead of each flowing chunk gathering them every step) and the MPI-style interior/ring overlap go here, with the
 Flow changes; then guide/high-performance#grid. Copying only the changed edges was measured and dropped
 (decisions#d73-survey-items-not-added). */}
@@ -384,7 +384,7 @@ since they last ran. `Mut<T>` writes the health, the position and the inventory 
 
 Three shapes of data in this server suit SIMD:
 
-- **A grid with a shader**: the water, above. Each block's next level is the same function of its neighbours, and
+- **A grid with a shader**: the water, above. Each block's next level is the same function of its neighbors, and
   the grid is a byte buffer, so 16 blocks go through each instruction.
 - **A grid reduced along an axis**: the height map, the top of each of 256 columns, 16 columns per instruction and one
   `ConditionalSelect` per layer, no branch. Its 256 bytes are rewritten 32 times, so they stay on the stack and are

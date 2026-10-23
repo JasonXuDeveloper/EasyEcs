@@ -11,15 +11,15 @@ icon: CircleArrowUp
 
 ## v4.7 → v4.8 [#v4-7-to-v4-8]
 
-4.7 的存档照样能读。为 4.7 写的代码除了系统的调度都不用改就能编译：`UpdateInterval` 和 `UpdatePhase` 属性变成了
-`[UpdateInterval(n, Phase = p)]` 特性。有两条分析器规则报告的范围变大了，还有三条新的警告：把警告当错误的构建会在这些地方失败，
+4.7 的存档照样能读。为 4.7 写的代码除了两处都不用改就能编译：系统的节奏（`UpdateInterval` 和 `UpdatePhase` 属性变成了
+`[UpdateInterval(n, Phase = p)]` 特性），以及给出 `EntityId` 的 `ValueIndex.TryFind`。有两条分析器规则报告的范围变大了，还有三条新的警告：把警告当错误的构建会在这些地方失败，
 改完代码才能通过。
 
-### 系统的调度是特性：`[UpdateInterval(n, Phase = p)]` [#v4-8-update-interval]
+### 系统的节奏是特性：`[UpdateInterval(n, Phase = p)]` [#v4-8-update-interval]
 
 `EcsSystem.UpdateInterval` 和 `EcsSystem.UpdatePhase` 删掉了。在类上声明节奏：生成器把它写进系统的注册代码，所以它天然是常量；
 派生系统没有自己声明时沿用基类的。重写这两个属性之一会报 [EECS082](/zh/docs/guide/analyzer#eecs082)，它的代码修复会写出特性
-（表示“每次更新都跑”的重写直接删掉）。针对调度不是常量的警告 EECS018 随这两个属性一起删掉了。
+（表示“每次更新都跑”的重写直接删掉）。针对节奏不是常量的警告 EECS018 随这两个属性一起删掉了。
 
 ```csharp tab="4.7" doccheck=skip
 public class SaveSystem : EcsSystem
@@ -41,6 +41,19 @@ public class SaveSystem : EcsSystem
 
 运行时算出来的间隔没有对应的特性写法：要么定下节奏，要么把系统放进一个[系统分组](/zh/docs/guide/systems#system-groups)，到期时更新这个分组。
 读 `system.UpdateInterval` 的代码改成读特性（`typeof(T).GetCustomAttribute<UpdateIntervalAttribute>()`）。
+
+### `ValueIndex.TryFind` 给出 `EntityId` [#v4-8-try-find]
+
+`index.TryFind(key, out ...)` 给出找到的实体的 id，和遍历里的 `lookup.TryFind` 一样：索引存的就是 id，链接、`Lookup<T>` 和
+`DestroyEntities` 用的也是 id。需要句柄的代码向 World 要；唯一索引的 `TryGet(key, out Entity)` 仍然直接给出句柄。
+
+```csharp tab="4.7" doccheck=skip
+if (world.CallsignIndex.TryFind("alpha", out var found)) found.Destroy();
+```
+
+```csharp tab="4.8" doccheck=skip
+if (world.CallsignIndex.TryFind("alpha", out var found)) world.GetEntity(found).Destroy();
+```
 
 ### 报告范围变大的分析器规则：EECS027、EECS030 和 EECS053 [#v4-8-analyzer]
 

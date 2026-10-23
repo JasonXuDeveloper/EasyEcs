@@ -463,7 +463,7 @@ SIMD loop: the method's body becomes a `System.Numerics.Vector<T>` loop over eac
 per instruction as `Vector<T>` holds (8 floats on x64 with AVX2, 4 on Arm). Unity's Burst and ISPC work this way: the
 method is the kernel of one lane. The .NET JIT does not vectorize loops on its own, so without this a per-row method
 runs one row at a time ([D68](/en/docs/decisions#d68-vector-loops-without-opting-in)). There is nothing to opt into:
-`[ForEach(Simd = SimdMode.Require)]` makes a method that loses its loop a build error, `SimdMode.Off` keeps one
+`[ForEach(SimdMode = SimdMode.Require)]` makes a method that loses its loop a build error, `SimdMode.Off` keeps one
 scalar.
 
 <Callout type="idea" title="Use it for">
@@ -632,7 +632,7 @@ changes results ([D90](/en/docs/decisions#d90-vector-loops-reach)).
 [EECS055](/en/docs/guide/analyzer#eecs055) (a suggestion in the IDE) names the first reason, as Burst's inspector
 would: a `bool` field, a component too wide for the work done on it (with the fields to split out), a vector sum such
 as `Vector3.Dot` whose order the scalar code does not fix, a call outside a condition. A method whose speed depends
-on its loop says so with `Simd = SimdMode.Require`, and the build fails
+on its loop says so with `SimdMode = SimdMode.Require`, and the build fails
 ([EECS056](/en/docs/guide/analyzer#eecs056)) when an edit takes the loop away.
 
 ```csharp tab="Stays scalar" doccheck=expect-EECS055

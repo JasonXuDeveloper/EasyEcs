@@ -87,7 +87,7 @@ EasyEcs' features to their place in this file.
 
 Every component is a plain `record struct`. Four declarations change how the world stores one: `ITracked` gives it
 a hidden column of change ticks (`Health`, `Burning` and `Goal` are replicated), `[Group]` splits tables by a field's
-value (one table set per `Zone`), `[Key]` keeps a value index of it (`Kills`, the leaderboard), and `[UniqueKey]` makes
+value (one table set per `Zone`), `[IndexKey]` keeps a value index of it (`Kills`, the leaderboard), and `[UniqueKey]` makes
 its key name one entity (`Account`: one hero per account). The generator writes the `IGroup` / `IIndexed<TKey>` /
 `IUniqueIndexed<TKey>` part of these `partial` structs. `Spawn` is a cleanup component, `Loot` and `Friend` are the
 elements of dynamic buffers, and the empty structs are tags.

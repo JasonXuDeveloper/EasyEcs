@@ -1,5 +1,5 @@
 <doc>
-  <member name="T:EasyEcs.TileFaces" source="664c620162cb">
+  <member name="T:EasyEcs.TileFaces" source="05795604abfe">
     <summary>
       分块（<see cref="T:EasyEcs.ITileShape" />）的面：北是 −z，南 +z，西 −x，东 +x，下 −y，上 +y。一个面指一个邻居
       （<see cref="M:EasyEcs.ITile`1.Beside(`0,EasyEcs.TileFaces)" />、<see cref="M:EasyEcs.Tile`2.Beside(EasyEcs.TileFaces)" />）；
@@ -27,10 +27,10 @@
   <member name="F:EasyEcs.TileFaces.Above" source="06a57c9fa6b4">
     <summary>+y：最后一层上面的那些层。</summary>
   </member>
-  <member name="F:EasyEcs.TileFaces.Sides" source="b5905362d343">
+  <member name="F:EasyEcs.TileFaces.Sides" source="21975466d8f0">
     <summary>北、南、西、东：2D 网格的邻居，或体素世界中各列的邻居。</summary>
   </member>
-  <member name="F:EasyEcs.TileFaces.All" source="43eeb827dca4">
+  <member name="F:EasyEcs.TileFaces.All" source="58a16e32d093">
     <summary>六个面：3D 立方体网格的邻居。</summary>
   </member>
 </doc>

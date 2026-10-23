@@ -46,13 +46,13 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `RelationIndex<T>` | sealed class | `world.Relations<T>()`：链接到某个目标的实体。 |
 | `TargetPolicy`、`TargetPolicyExtensions` | 枚举、扩展方法 | 目标被销毁时链接怎么处理：`Keep`、`Remove`、`Destroy`。 |
 | `EcsSystem` | abstract class | `World`、`Enabled`、`Error`、`Stats`、`LastRunTick`、`RunCount`；`OnCreate` / `OnUpdate` / `OnDestroy`（[系统](/zh/docs/guide/systems)）。 |
-| `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`ChunkRows = n`、`Slices = N`、`Simd = SimdMode.Auto` / `Require` / `Off`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`；`[Consume]`（遍历结束后销毁访问过的行）；`[ForEntity]`（通过生成的入口在单个实体上运行的静态方法）。 |
+| `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`ChunkRows = n`、`Slices = N`、`SimdMode = SimdMode.Auto` / `Require` / `Off`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`；`[Consume]`（遍历结束后销毁访问过的行）；`[ForEntity]`（通过生成的入口在单个实体上运行的静态方法）。 |
 | `Maybe<T>` | ref struct | `[ForEach]` 方法的可选组件参数：`HasValue`、`Value`。 |
 | `ReadOnlyMaybe<T>` | ref struct | 只读版本：`Value` 是 `ref readonly`，从不打 tick，带索引的组件也能用；`Maybe<T>` 可以转换成它。 |
 | `Mut<T>` | ref struct | `[ForEach]` 方法的组件参数，只有方法真正写了的行才算写入：`Value`、`Write()`、`SetIfChanged(value)`（[变更追踪](/zh/docs/guide/change-tracking)）。 |
 | `Reduce<T>`、`IReduction<T>` | 结构体、接口 | `[ForEach]` 参数（按 `ref` 传入），把一次遍历归约到单例 `T`，`T` 实现 `IReduction<T>`（`Identity`、`Combine`）：`Value`、`Combine(value)`。 |
 | `[Sum]`、`[Product]`、`[Min]`、`[Max]`、`[All]`、`[Any]` | 特性 | 标在 partial struct 的每个实例字段上：生成器写出它的 `IReduction<T>`（`Identity` 和逐字段的 `Combine`）。 |
-| `[Key]`、`[UniqueKey]`、`[Group]` | 特性 | 标在 partial 组件的成员上（`[Key]` 标在类型上：键是整个值）：生成器显式实现 `IIndexed<TKey>.Key`（`IUniqueIndexed<TKey>`）或 `IGroup.Group`。 |
+| `[IndexKey]`、`[UniqueKey]`、`[Group]` | 特性 | 标在 partial 组件的成员上（`[IndexKey]` 标在类型上：键是整个值）：生成器显式实现 `IIndexed<TKey>.Key`（`IUniqueIndexed<TKey>`）或 `IGroup.Group`。 |
 | `[GroupBy]`、`[WhenTargetDestroyed(policy)]`、`[NotSaved]` | 特性 | 每个 World 从第一张含这个类型的表开始应用的设置：分组、目标被销毁时链接的策略；`[NotSaved]`：任何存档都不写这个类型，读档保留 World 自己的单例。 |
 | `Scratch<T>` | ref struct | `[ForEach]` 参数：方法在当前线程上的工作内存，在行、遍历和 World 之间保留：`Value`。 |
 | `Emit<T>`、`Emitted<T>` | ref struct、结构体 | `[ForEach]` 参数（按值传入），追加记录（`Add`、`AddRange`），遍历结束时按块的顺序并入单例 `Emitted<T>`（`Items`，一个 `DynamicBuffer<T>`）。 |
@@ -60,7 +60,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `IForRange`、`IForSpan<T>` | 接口 | `world.ForParallel` 的 job：`Execute(start, end)` 处理一段下标，`Execute(start, span)` 处理一个列表的元素。 |
 | `Lookup<T>`、`LookupExtensions` | ref struct、静态类 | `[ForEach]` 参数，读取任意实体的组件 `T`，调度为对 `T` 的读：`this[id]`、`Read(id)`、`Has(id)`；带索引的 `T` 还可按键查找：`TryFind(key, out id)`、`Find(key)`、`Count(key)`。 |
 | `Lanes` | 静态类 | 批处理方法的流压缩：`Compact(source, mask, destination)` 把掩码选中的元素紧挨着写出。 |
-| `Tile<TCell, TTile>`、`ITile<TKey>`、`ITileShape`、`TileFaces`、`TileNeighbourhood`、`TileBoundary`、`TileIds` | ref struct、接口、枚举 | `[ForEach]` 参数：实体的 `DynamicBuffer<TCell>`，连同它在 `TTile` 网格中邻居的（`TTile` 是带索引的组件，带静态的形状、光环、邻域和边界，以及每个邻居的键），被调度为两者的读：`Load(from, to, fill, mask)`、`Beside(face)`、`Beside(dx, dy, dz)`、`Cells`、`Changes(next, out changed)`、`Facing(edges)`。 |
+| `Tile<TCell, TTile>`、`ITile<TKey>`、`ITileShape`、`TileFaces`、`TileNeighborhood`、`TileBoundary`、`TileIds` | ref struct、接口、枚举 | `[ForEach]` 参数：实体的 `DynamicBuffer<TCell>`，连同它在 `TTile` 网格中邻居的（`TTile` 是带索引的组件，带静态的形状、光环、邻域和边界，以及每个邻居的键），被调度为两者的读：`Pad(from, to, fill, mask)`、`Beside(face)`、`Beside(dx, dy, dz)`、`Cells`、`Changes(next, out changed)`、`Facing(edges)`。 |
 | `PaddedTile<TCell, TTile>`、`TileRows<TTile>`、`TileRow<TTile>`、`TileCursor<TCell, TTile>`、`TileReads` | ref struct、结构体、枚举 | 模板采样的层，外面带一圈 `Halo` 个格子的 halo：`Rows(reads)` 遍历活跃行，`At(row)` 在一行周围采样（`Load128`、`Load256`、`LoadVector`、`this[dx, dy, dz]`），`this[x, y, z]`。 |
 | `ISystemGroup`、`ISystemGroupWith<T>`、`ISystemGroupWithout<T>`、`[UpdateInGroup<T>]`、`[UpdateBefore<T>]`、`[UpdateAfter<T>]`、`[UpdateInterval(n, Phase = p)]` | 接口、特性 | 系统分组（可通过接口加过滤条件）、排序与节奏。 |
 | `SystemErrorPolicy` | 枚举 | `Throw`（默认）或 `Disable`：系统抛异常时怎么办。 |
@@ -124,14 +124,14 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `prefab.Remove<T1..Tn>()` | O(n) | 缺失的忽略；返回预制体 |
 | `prefab.Has<T>()` / `Read<T>()` | O(1) | 预制体没有 `T` 时 `Read` 抛异常 |
 | `prefab.SetBuffer<T>(params ReadOnlySpan<T>)` | O(n) | 由这些元素组成的 `DynamicBuffer<T>`；每个实例都有自己的列表 |
-| `prefab.Absent<T>()` | O(1) | 有 `T` 的列但没有这个组件：实例没有它，之后加上它只在所在的表里翻转存在位，不搬行 |
+| `prefab.SetAbsent<T>()` | O(1) | 有 `T` 的列但没有这个组件：实例没有它，之后加上它只在所在的表里翻转存在位，不搬行 |
 | `prefab.AddMember()` | O(1) | 预制体组的一个成员：实例化任何一个都会创建全部；指向成员的 `EntityId` 字段在每个实例上改写 |
 | 生成的成员：`prefab.X`、`HasX`、`SetX(…)`、`RemoveX()`；标签 `IsX`、`SetX()`；缓冲 `SetLoot(items…)` | 同对应的泛型调用 | 写方法返回预制体；属性只读；不算任何 World 的结构变更 |
 | `world.Instantiate(prefab)` | O(c) | 一次行复制；目标表每个预制体表只找一次并缓存；遍历期间也安全（新实体不会被这次遍历访问）；预制体组为 O(成员数 × c) |
 | `world.Instantiate(prefab, Span<Entity> entities)` | O(count × c) | 整波只过一次闸门，表最多扩容一次 |
 | `world.Instantiate(prefab, in T1 … in Tn)` | 均摊 O(c + n) | 预制体的值加上给定的值（覆盖预制体里的，或者新加；给定的组件若在预制体里被禁用则启用），一次行复制直接进最终的表，不经过中间表；给定的 `ChildOf` 会挂上层级，唯一键先检查；预制体组为 O(成员数 × c) 再加一次搬行，组件给传入的那个预制体对应的实体 |
 | `world.Instantiate(prefab, Span<Entity> entities, in T1 … in Tn)` | O(count × (c + n)) | 每个实例都是同样的值；只过一次闸门，表最多扩容一次，每个给定的列一次填满 |
-| `world.Reserve(prefab, count)` | O(c)，外加一次扩容 | 为接下来 `count` 个实例要进的表预留空间，生成波次在 tick 中不再扩容；也预留实例的索引键、退休表和空闲 id（不含缓冲列表：用 `ReservePool`） |
+| `world.Reserve(prefab, count)` | O(c)，外加一次扩容 | 为接下来 `count` 个实例要进的表预留空间，生成波次在 tick 中不再扩容；也预留实例的索引键、退休表和空闲 id（不含缓冲列表：用 `FillPool`） |
 | `entity.Clone()` | O(c) | 同一 World、同一张表里的新实体，复制全部组件；实体不存活或已退休（因清理组件而保留）时抛异常 |
 
 ## 动态缓冲 [#dynamic-buffers]
@@ -148,8 +148,8 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `bag.EnsureCapacity(n)` / `AsSpan()` | 扩容时 O(count) / O(1) | `AsSpan()` 可写 |
 | `bag.SetCount(n)` | O(增加或去掉的元素数) | 返回要写的 span（`AsSpan()`）；增加的元素为 `default`；只有缓冲扩容时分配 |
 | `bag.TrimExcess()` | O(count) | 重新分配到 count 大小；空缓冲把列表还给池，不再持有列表 |
-| `DynamicBuffer<T>.PoolCapacity` | O(1) | 销毁的 `T` 缓冲还给[缓冲池](/zh/docs/guide/dynamic-buffers#pool)的列表最长多少个元素（默认 4 KB 能放下的个数）；按元素类型、整个进程生效，启动时设置 |
-| `DynamicBuffer<T>.ReservePool(lists)` | 一次性 O(lists) 次分配；池里够了就是 O(1) | 往池里放 `PoolCapacity` 个元素的空列表，直到有 `lists` 个；按元素类型、整个进程生效，在设好 `PoolCapacity` 之后调用 |
+| `DynamicBuffer<T>.MaxPooledLength` | O(1) | 销毁的 `T` 缓冲还给[缓冲池](/zh/docs/guide/dynamic-buffers#pool)的列表最长多少个元素（默认 4 KB 能放下的个数）；按元素类型、整个进程生效，启动时设置 |
+| `DynamicBuffer<T>.FillPool(lists)` | 一次性 O(lists) 次分配；池里够了就是 O(1) | 往池里放 `MaxPooledLength` 个元素的空列表，直到有 `lists` 个；按元素类型、整个进程生效，在设好 `MaxPooledLength` 之后调用 |
 
 快照、存档或克隆一列缓冲时会复制元素：O(元素数)，每个实体一个新列表。
 
@@ -231,9 +231,9 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | API | 复杂度 | 说明 |
 | --- | --- | --- |
 | 遍历中的每个实体 | O(邻居数) 次哈希探测：`Faces` 为 4 或 6，`FacesAndEdges` 为 8 或 18，`All` 为 8 或 26 | 生成的 job 按键找一次邻居，方法接收的同一网格的所有分块共用；网格的索引在遍历之前建好 |
-| `tile.Load(from, to, fill, mask)` / `tile.Load()` | O(层数 × (Width + 2r) × (Depth + 2r))，r 为 `Halo`；每行一到两次向量拷贝 | 把这些层拷进线程的纹理，外面一圈 r 个格子，上下各多 r 层（没有邻居处按形状的 `Boundary`：`fill`、钳制或镜像）；传 `mask` 时每层记一个活跃行的字；线程有了纹理之后不分配；形状无效（EECS072）、层超出 `0..Height - 1` 或缓冲比形状短时抛出异常 |
+| `tile.Pad(from, to, fill, mask)` / `tile.Pad()` | O(层数 × (Width + 2r) × (Depth + 2r))，r 为 `Halo`；每行一到两次向量拷贝 | 把这些层拷进线程的纹理，外面一圈 r 个格子，上下各多 r 层（没有邻居处按形状的 `Boundary`：`fill`、钳制或镜像）；传 `mask` 时每层记一个活跃行的字；线程有了纹理之后不分配；形状无效（EECS072）、层超出 `0..Height - 1` 或缓冲比形状短时抛出异常 |
 | `tile.Beside(face)` / `tile.Beside(dx, dy, dz)` / `tile.Cells` | O(1) | 邻居的 id（没有、或不在邻域内时为默认值）/ 实体的格子 |
-| `tile.Changes(next, out changed)` | O(格子数)，逐行按字节比较 | 这一步和格子是否不同，以及边缘（深 r 个格子）变了的面 |
+| `tile.ChangedEdges(next, out changed)` | O(格子数)，逐行按字节比较 | 这一步和格子是否不同，以及边缘（深 r 个格子）变了的面 |
 | `tile.Facing(edges)` | 每个邻居 O(1) | 把这些边缘读进光环的邻居，隔着面、棱和角 |
 | `padded.Rows(reads)` | 每层、每访问一行 O(1)：一次尾零计数 | 模板（`TileReads`，最远 r）读到不为零格子的行，逐层；加载时没传 `mask` 则抛出异常 |
 | `padded.At(row)` | O(1) | 这一行的第一个格子；检查行在范围内 |
@@ -255,7 +255,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | API | 复杂度 | 说明 |
 | --- | --- | --- |
 | `world.Index<T, TKey>()` | O(1)；第一次调用时创建 | 每个 World、每个被索引组件一个；换另一种键类型会抛异常 |
-| `index.Count(key)` / `TryFind(key, out Entity)` | O(1) | 一次哈希探测（键是实体时是一次数组访问）；第一次查找时把每行索引一遍 |
+| `index.Count(key)` / `TryFind(key, out id)` | O(1) | 一次哈希探测（键是实体时是一次数组访问）；第一次查找时把每行索引一遍 |
 | `index.KeyCount` | O(1) | 有实体持有的不同键的个数（有多少个公会有成员），随实体加入和离开各个键维护 |
 | `index.Find(key)` | O(1)，然后每个实体 O(1) | 用于 `foreach` 的 `ref struct`；循环中可以销毁实体，不能修改 `T` |
 | `index.Find(key).Count` / `world.Children(parent).Count` | O(1) | 查找时拥有这个键的实体数（不用遍历两次就能确定缓冲区大小）；循环中销毁的实体会被循环跳过，但仍计入 |

@@ -232,7 +232,7 @@ flowchart LR
 **各趟。** `WaterFlowSystem` 就是着色器。`Chunk` 是网格的一块[瓦片](/zh/docs/guide/high-performance#grid)
 （`ITile<ChunkPos>`：16 x 16 x 32 个格子，邻居是旁边的区块），所以方法以 `Tile<Fluid, Chunk>` 和 `Tile<Block, Chunk>` 接收区块的水和方块，
 生成器每个区块找一次四个邻居。要算的层来自这个区块和邻居的 `FluidCount`（通过 `Beside` 和 `Lookup<FluidCount>`，不用搜索）；
-`Load(from, to)` 把这些层填进这个线程的一张纹理，每层外面一圈一格宽的方块取自每个邻居朝向这边的那一行或一列，下面和上面各多一层，
+`Pad(from, to)` 把这些层填进这个线程的一张纹理，每层外面一圈一格宽的方块取自每个邻居朝向这边的那一行或一列，下面和上面各多一层，
 就像 CUDA 的线程块把它的瓦片和光环载入共享内存。循环采样邻居没有边界情况；每行 16 个方块用一个 `Vector128<byte>` 算。
 它读到的邻居都是这一遍之前的样子，只写 `NextFluid`，所以是[并行方法](/zh/docs/guide/systems#parallel-methods)。同时流动的区块只有几百个，
 每个要花几微秒，远少于写被追踪组件的遍历默认每块的 4,096 行，所以它设了 `ChunkRows = 64`，线程每次领 64 个区块

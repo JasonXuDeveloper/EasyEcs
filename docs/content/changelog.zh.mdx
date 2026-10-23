@@ -15,7 +15,7 @@ icon: RotateCcwClock
 
 - 枚举元素的 `DynamicBuffer`（`DynamicBuffer<Block>`）现在和结构体元素一样有生成的具名成员：`chunk.Block`、`HasBlock`、
   `WriteBlock()`、`GetOrAddBlock()`、`RemoveBlock()`，以及预制体的 `SetBlock(…)`。见[动态缓冲](/zh/docs/guide/dynamic-buffers)。
-- `DynamicBuffer<T>.PoolCapacity` 按元素类型设置：缓冲被销毁或移除时，最长多少个元素的列表还给回收池（默认是 4 KB 能放下的个数）。
+- `DynamicBuffer<T>.MaxPooledLength` 按元素类型设置：缓冲被销毁或移除时，最长多少个元素的列表还给回收池（默认是 4 KB 能放下的个数）。
   大缓冲反复出现又消失时调高它，比如玩家周围加载又卸载的区块，新缓冲就会重用旧列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#pool)。
 - 分析器规则 [EECS053](/zh/docs/guide/analyzer#eecs053)（警告，有代码修复）：`[ForEach]` 方法以 `ref` 传入追踪变化的组件（`ITracked`、
   `DynamicBuffer<T>`），却有路径不写它（提前 `return`、写在 `if` 里），访问到的每一行都会被打 tick，`[Changed<T>]` 系统就会看到它根本没改过的行。
@@ -26,7 +26,7 @@ icon: RotateCcwClock
   （EECS015 接受它，带索引组件的 `Maybe<T>` 仍然报错）。`Maybe<T>` 可以转换成它。见[系统](/zh/docs/guide/systems#read-only-maybe)。
 - `world.SaveEntitiesWithout(output, ids, set)` 保存一组实体，写 `ComponentSet` 以外的所有组件：加载后会重新算出的数据不进存档。见
   [迁移与卸载](/zh/docs/guide/migration-and-unload#save-entities-without)。
-- `DynamicBuffer<T>.ReservePool(lists)` 在启动时往 `T` 的回收池里放入这么多个容量为 `PoolCapacity` 的空列表，世界增长到的那些实体（玩家周围的区块）
+- `DynamicBuffer<T>.FillPool(lists)` 在启动时往 `T` 的回收池里放入这么多个容量为 `MaxPooledLength` 的空列表，世界增长到的那些实体（玩家周围的区块）
   的缓冲在服务器运行时从池里取列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#pool)。
 
 - 按一行写的 `[ForEach]` 方法，只要它的组件都只有 1 到 4 个同一类型的数值（`float`、`double`、`int`、`uint`、`long`、`ulong`），就以 SIMD
@@ -34,7 +34,7 @@ icon: RotateCcwClock
   由解交错加载和交错存储拆成每个字段一个向量（256 位用 AVX2，512 位用 permute；没有这些指令时逐行运行）。结果逐位相同；不符合条件的方法
   照旧逐行运行，代码不用改。见[向量循环](/zh/docs/guide/systems#vector-loops)和[决策](/zh/docs/decisions#d68-vector-loops-without-opting-in)。
 - 分析器规则 [EECS055](/zh/docs/guide/analyzer#eecs055)（建议）说明数值组件的 `[ForEach]` 方法为什么没有得到向量循环（“component Body has 5
-  fields”、“lane types float and int differ”），就像 Burst 的 Inspector。`[ForEach(Simd = SimdMode.Require)]` 让这种情况成为错误
+  fields”、“lane types float and int differ”），就像 Burst 的 Inspector。`[ForEach(SimdMode = SimdMode.Require)]` 让这种情况成为错误
   （[EECS056](/zh/docs/guide/analyzer#eecs056)），热点循环不会悄悄失去向量；`SimdMode.Off` 让方法保持标量且不再提示。见
   [向量循环](/zh/docs/guide/systems#vector-loops)。
 - 向量循环能接下更多方法（[决策](/zh/docs/decisions#d90-vector-loops-reach)）：并行 `[ForEach]` 方法（每个块的行段）；`Maybe<T>` 参数（有 `T` 的行组成的通道掩码）；
@@ -57,10 +57,10 @@ icon: RotateCcwClock
   并行方法也能用。系统算作读 `T`；规则 [EECS059](/zh/docs/guide/analyzer#eecs059) 拒绝自己也写 `T` 的方法。见[查找](/zh/docs/guide/threading#lookups)
   和[决策](/zh/docs/decisions#d75-lookup)。
 - `Tile<TCell, TTile>`：切成瓦片的网格上的 `[ForEach]` 参数：`TTile` 实现 `ITile<TKey>`（形状、键、某个面旁边的键），实体持有
-  `DynamicBuffer<TCell>`。生成器找邻居、声明读取并让方法保持并行；`Load` 把瓦片连同邻居的边填进线程的纹理，`Rows` 走模板可能改变的行，
-  `At(row).Load128` 采样周围的格子。形状决定光环的宽度（`Halo`，MPI 的幽灵格子宽度）、读哪些邻居（`Neighbourhood`：面、棱、角，
+  `DynamicBuffer<TCell>`。生成器找邻居、声明读取并让方法保持并行；`Pad` 把瓦片连同邻居的边填进线程的纹理，`Rows` 走模板可能改变的行，
+  `At(row).Load128` 采样周围的格子。形状决定光环的宽度（`Halo`，MPI 的幽灵格子宽度）、读哪些邻居（`Neighborhood`：面、棱、角，
   用于九点和 27 点模板），以及没有邻居处放什么（`Boundary`：填充、钳制、镜像）；
-  `Changes` / `Facing` 让安静的瓦片休眠，并唤醒边缘变化处旁边的瓦片。规则 [EECS059](/zh/docs/guide/analyzer#eecs059)
+  `ChangedEdges` / `Facing` 让安静的瓦片休眠，并唤醒边缘变化处旁边的瓦片。规则 [EECS059](/zh/docs/guide/analyzer#eecs059)
   也拒绝旁边写它格子缓冲的瓦片，[EECS072](/zh/docs/guide/analyzer#eecs072) 拒绝光环比瓦片还宽的形状，
   [EECS073](/zh/docs/guide/analyzer#eecs073) 拒绝一个方法接收同一格子类型的两个瓦片。见
   [给网格着色](/zh/docs/guide/high-performance#grid)和[决策](/zh/docs/decisions#d77-tiles)。
@@ -142,6 +142,8 @@ icon: RotateCcwClock
 
 - 删掉了 `EcsSystem.UpdateInterval` 和 `UpdatePhase`：在类上声明 `[UpdateInterval(n, Phase = p)]`。重写它们会报
   [EECS082](/zh/docs/guide/analyzer#eecs082)，带代码修复；EECS018 删掉了（[迁移指南](/zh/docs/migration#v4-8-update-interval)）。
+- `ValueIndex.TryFind(key, out id)` 给出 `EntityId`，和 `Lookup<T>.TryFind` 一样；`world.GetEntity(id)` 得到句柄，唯一索引的
+  `TryGet` 仍然直接给出句柄（[迁移指南](/zh/docs/migration#v4-8-try-find)）。
 
 ### 修复 [#v4-8-0-fixes]
 

@@ -104,6 +104,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D97](#d97-hand-written-parameters) | 为手写了某个参数按块所做工作的代码设立规则 |
 | [D98](#d98-random-streams) | EECS088：每次抽取一个流，只检查遍历代码 |
 | [D99](#d99-singleton-saves) | 只有代码保存整个 World 时，EECS069 才对单例报警告 |
+| [D100](#d100-names-of-4-8) | 4.8 的命名：统一拼写，动作用动词，系统的节奏 |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1195,7 +1196,7 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 
 ## D63. 较新的 Roslyn 特性：不用拦截器，其余已在用或不需要 [#d63-roslyn-features]
 
-**决定。** 生成器使用 `ForAttributeWithMetadataName`（`[ForEach]`）、给用户代码从不引用的内容（系统代码、`SavedTypes`）用实现输出（implementation output）、
+**决定。** 生成器使用 `ForAttributeWithMetadataName`（`[ForEach]`）、给用户代码从不引用的内容（系统代码、`TypeRegistry`）用实现输出（implementation output）、
 C# 14 扩展成员和泛型特性。不用拦截器，也不用嵌入式特性定义。
 
 **原因。**
@@ -1243,7 +1244,7 @@ C# 14 扩展成员和泛型特性。不用拦截器，也不用嵌入式特性�
 
 ## D65. 缓冲池的上限按元素类型设置 [#d65-buffer-pool-capacity]
 
-**决定。** `DynamicBuffer<T>.PoolCapacity` 设置 `T` 的缓冲在销毁或移除时，最长多少个元素的列表会还给本线程的池。
+**决定。** `DynamicBuffer<T>.MaxPooledLength` 设置 `T` 的缓冲在销毁或移除时，最长多少个元素的列表会还给本线程的池。
 它是元素类型上的静态属性，整个进程生效，默认是 4,096 字节的元素；设为 0 则不池化。
 
 **原因。**
@@ -1313,7 +1314,7 @@ C# 14 扩展成员和泛型特性。不用拦截器，也不用嵌入式特性�
 **决定。** 生成器为每个符合条件的 `[ForEach]` 方法写出 `Vector<T>` 循环（[向量循环](/zh/docs/guide/systems#vector-loops)）：静态、逐实体、
 非并行，没有 `Entity` / `World` / `Mut<T>` / `Maybe<T>`，组件有 1 到 4 个同一种基本类型的字段（多个字段由解交错加载和交错存储拆成每个字段一个向量，
 `EasyEcs.Interleaved`），方法体只有算术、比较、分支和有精确向量对应的 `Math` 函数。默认开启（`SimdMode.Auto`）：看起来是为向量循环写的方法
-保持标量时，EECS055 说明原因；`Simd = SimdMode.Require` 让这种情况成为错误（EECS056）；`SimdMode.Off` 让方法退出。最后一个完整向量之后的行，
+保持标量时，EECS055 说明原因；`SimdMode = SimdMode.Require` 让这种情况成为错误（EECS056）；`SimdMode.Off` 让方法退出。最后一个完整向量之后的行，
 以及没有向量单元时（多字段时还包括没有 shuffle 指令时：256 位的 AVX2、512 位的 permute）的所有行，都调用方法本身。
 之后的步骤加上了 `Vector512`（硬件支持时，其余用 `Vector<T>`）、`Reduce<T>` 结果（通道累加器）、掩码字，以及
 [D90](#d90-vector-loops-reach) 里的方法。
@@ -1411,7 +1412,7 @@ C# 14 扩展成员和泛型特性。不用拦截器，也不用嵌入式特性�
 **决定。** 唯一索引把每个键唯一的实体直接存在键的头部，每个键不再有 id 数组。键能映射到一段有界槽位上的唯一组件可以声明
 `IDirectIndexed<TKey>`（`static Slots`、`static SlotOf(key)`）：它的索引在哈希旁边存一个 `Slots` 项的数组，每项存一个键和它的实体，
 所以 `Get`、`TryGet` 和写入的唯一性检查都只读一项。槽位超出范围或被别的键占着的键通过哈希找到，哈希仍是 `Find`、`Count` 和有序遍历用的索引。
-生成器随唯一索引一起登记槽位映射（`SavedTypes.DirectIndex`），不用反射。
+生成器随唯一索引一起登记槽位映射（`TypeRegistry.DirectIndex`），不用反射。
 
 **原因。**
 - **一个唯一键只有一个实体。** 每个键一个数组只放一个 id，每出现一个新键就分配一次；改成内联后，`CreateUnique`（10,000 个键）从
@@ -1529,12 +1530,12 @@ EECS010 接受它出现在并行方法里。方法通过参数查询的值索引
 **决定。** 由邻居更新的格子网格（水、光照、热量）切成瓦片，每块一个实体：一个实现 `ITile<TKey>` 的组件（静态成员给出形状：`Width`、
 `Depth`、`Height`、`Faces`；键在值索引里；`Beside(key, face)` 给出邻居的键），以及装格子的 `DynamicBuffer<TCell>`。`[ForEach]` 方法接收
 `Tile<TCell, TTile>` 参数，管线代码由生成器写：每个实体在索引里找一次瓦片的邻居，声明读取（索引、`DynamicBuffer<TCell>`），把形状和缓冲
-加进方法的过滤条件，并让方法保持并行。`Load(from, to)` 把各层填进这个线程的一张纹理，外面一圈 `Halo` 格取自邻居朝向它的边（以及下面和上面的层），
+加进方法的过滤条件，并让方法保持并行。`Pad(from, to)` 把各层填进这个线程的一张纹理，外面一圈 `Halo` 格取自邻居朝向它的边（以及下面和上面的层），
 每行记一位表示有不为零的格子，返回 `PaddedTile`：`Rows(reads)` 用 `TrailingZeroCount` 走模板可能改变的行，`At(row)` 是一个游标，它的
 `Load128` / `Load256` / `LoadVector` 读相隔一个格子、一行或一层的向量。瓦片参数旁边写它的格子缓冲是 EECS059，即 `Lookup<T>` 的规则。
 
-形状还说明模板读多远、多宽：`Halo`（光环的格数，最多到瓦片的边长）、`Neighbourhood`（只有面、面和棱、或全部 26 个邻居）和
-`Boundary`（没有邻居处填充、钳制或镜像；周期网格就是一个会回绕的 `Beside`）。`Tile.Changes` / `Tile.Facing` 让网格把安静的瓦片休眠，
+形状还说明模板读多远、多宽：`Halo`（光环的格数，最多到瓦片的边长）、`Neighborhood`（只有面、面和棱、或全部 26 个邻居）和
+`Boundary`（没有邻居处填充、钳制或镜像；周期网格就是一个会回绕的 `Beside`）。`Tile.ChangedEdges` / `Tile.Facing` 让网格把安静的瓦片休眠，
 只唤醒朝向变化边的瓦片。瓦片每遍走一步。EECS072 报告瓦片装不下的形状，EECS073 报告一个方法里同一格子类型的两个瓦片。
 
 **原因。**
@@ -1574,10 +1575,10 @@ EECS010 接受它出现在并行方法里。方法通过参数查询的值索引
 - **沿 y 的滑动窗口（2.5D 流式）：** 原型只保留三层带光环的层，在算第 y 层前才填第 y + 1 层。8 × 8 个 16 × 16 × Height 浮点区块上的
   7 点模板，两轮：Height 32 时整块 416–443 µs 对滑动 434–454 µs（1.03–1.04）；Height 256 时 3,821–4,091 µs 对 3,847–3,894 µs
   （0.95–1.01，在误差之内）。没有做：在这些大小下整块瓦片的纹理装得进缓存。
-- **缓存邻居的 id：** `TileNeighbourBenchmark`（1,024 块板，8 个邻居，一遍只找邻居，两轮）：查索引 147–159 µs，直接映射的键 107 µs，
+- **缓存邻居的 id：** `TileNeighborBenchmark`（1,024 块板，8 个邻居，一遍只找邻居，两轮）：查索引 147–159 µs，直接映射的键 107 µs，
   从组件读 id 1.4–1.5 µs（1 个线程；4 个线程为 60–66、46–48 和 2.8–2.9 µs）。没有做：在模板遍历里查找约占五分之一的开销，而缓存需要
   表之外的每实体状态，并在每次创建、销毁和键变化时失效；实现 `IDirectIndexed<TKey>` 的键不用缓存就让每次查找变成一次数组读取。
-- **对每种邻域都展开邻居查找（26 个槽位各是一个常量）：** 试过，放弃了。`TileNeighbourBenchmark`，1 个线程，两轮对比遍历槽位的循环的三轮：
+- **对每种邻域都展开邻居查找（26 个槽位各是一个常量）：** 试过，放弃了。`TileNeighborBenchmark`，1 个线程，两轮对比遍历槽位的循环的三轮：
   查索引 148–154 µs 对 166–173 µs，但直接映射的键 127 µs 对 117–123 µs（展开后的代码体超过了每个邻居一次数组读取所值的）；带瓦片的 9 点模糊
   和拉普拉斯在噪声之内（708–753 对 726–749 µs，713–737 对 739–766 µs）。只有面的邻域保留展开的查找。
 - **生成的逐格内核（用户写 `Next(center, north, south, ...)`，生成器写循环）：** 没有做。C# 对 `byte` 的运算会提升成 `int`，标量函数体对不上
@@ -1888,6 +1889,33 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 
 **考虑过的方案。**
 - **追踪每次保存能触及哪些类型。** 这需要每次调用的 `ComponentSet`，以及流入它的数据流。`ComponentSet` 点名的类型，这条规则本来就交给选它的代码。
+
+## D100. 4.8 的命名：统一拼写，动作用动词，系统的节奏 [#d100-names-of-4-8]
+
+**决定。** 在 [D64](#d64-names-of-4-7) 之外，4.8 发布前的命名复查重命名了 4.8 新增的名字：
+`TileNeighbourhood` / `ITileShape.Neighbourhood` / `TileNeighbours` → `TileNeighborhood` / `Neighborhood` /
+`TileNeighbors`，`tile.Load()` → `tile.Pad()`，`tile.Changes(next, out changed)` → `ChangedEdges`，
+`TileReads.Sides` → `NorthSouth`，`[ForEach(Simd = …)]` → `[ForEach(SimdMode = …)]`，`DynamicBuffer<T>.ReservePool` /
+`PoolCapacity` → `FillPool` / `MaxPooledLength`，`[Key]` → `[IndexKey]`，`prefab.Absent<T>()` → `SetAbsent<T>()`，以及
+EECS082 的描述符（用重写属性写系统的节奏；EECS083 是 `BadUpdateInterval`）。已发布的调用只改了一个：`ValueIndex.TryFind` 给出
+`EntityId`，和 `Lookup<T>.TryFind` 一样。隐藏和内部的名字跟着改：`SavedTypes` → `TypeRegistry`（只有生成的代码调用）以及分析器的描述符字段。
+不保留别名。
+
+**原因。**
+- **统一拼写。** API 和分析器用美式英语（.NET 里的 `Color`、`Behavior`）；“neighbour”是唯一的英式拼写，搜“neighbor”找不到瓦片 API。
+- **动词说明做了什么。** `Load` 读起来像读存档（`World.Load`），这个调用其实是把瓦片连同光环填进纹理。`Changes` 读起来像一个集合，
+  它其实是比较并返回边缘变了的面。`Absent<T>` 读起来像查询，它其实是设置一列但不带组件，和 `Set` 设置一列相对。
+- **名字说明它装的是什么。** `PoolCapacity` 是每个池化列表的长度，不是列表的个数；`ReservePool` 是往池里填列表。`TileReads` 的
+  `Sides` 指的是两行，不是 `TileFaces.Sides` 的四个面。单独的 `[Key]` 读起来像任何一种键；`[IndexKey]` 点明是索引的键，和 `[UniqueKey]` 并列。
+- **属性名就是它的类型。** `Simd = SimdMode.Off` 把同一个词用两种形式写了两遍；`SimdMode = SimdMode.Off` 和 `FloatMode` 的写法一致。
+- **节奏，不是调度。** `World.DescribeSchedule` 讲的是系统的顺序和阶段；一个系统多久跑一次是它的节奏（`[UpdateInterval]`），规则和消息都这么说。
+- **一个键的实体只有一种 id 类型。** 索引存的是 id；`Lookup<T>.TryFind` 给 id，`ValueIndex.TryFind` 给句柄，代码在两者之间挪动就要换类型。
+  在不需要句柄的路径上（瓦片的邻居、查找、链接），id 更便宜：不用为它们构造带 World 引用的句柄。需要句柄的代码调用
+  `world.GetEntity(id)`，唯一索引保留 `TryGet(key, out Entity)`。
+
+**考虑过的方案。**
+- **给每个值索引加 `TryGet(key, out Entity)`：** 同一次查找有两个调用，只差 out 的类型；唯一索引的 `TryGet` 才是只有一个答案的那个。
+- **`[Obsolete]` 别名：** 1.0 之前，和 D54、D64 一样：编译器会找到每一处用法，而且除了 `TryFind`，这些名字都是 4.8 新增的。
 
 ## 相关页面 [#related]
 

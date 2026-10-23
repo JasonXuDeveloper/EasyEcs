@@ -10,7 +10,7 @@ description: "A component that makes its entity a tile of a grid, found by its k
 public interface ITile<TKey> : ITileShape, IIndexed<TKey>, IIndexed where TKey : IEquatable<TKey>
 ```
 
-A component that makes its entity a tile of a grid, found by its key (an indexed component, [`IIndexed`](/en/docs/reference/iindexed)): `record struct Chunk(ChunkPos Pos) : IComponent, ITile<ChunkPos>` with its shape ([`ITileShape`](/en/docs/reference/itileshape)) and the key of each neighbour ([`ITile.Beside`](/en/docs/reference/itile#beside)). A `[ForEach]` method taking a [`Tile`](/en/docs/reference/tile) of it gets the entity's cells with those of its neighbours, found through the index.
+A component that makes its entity a tile of a grid, found by its key (an indexed component, [`IIndexed`](/en/docs/reference/iindexed)): `record struct Chunk(ChunkPos Pos) : IComponent, ITile<ChunkPos>` with its shape ([`ITileShape`](/en/docs/reference/itileshape)) and the key of each neighbor ([`ITile.Beside`](/en/docs/reference/itile#beside)). A `[ForEach]` method taking a [`Tile`](/en/docs/reference/tile) of it gets the entity's cells with those of its neighbors, found through the index.
 
 #### Type parameters
 
