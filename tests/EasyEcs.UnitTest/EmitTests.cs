@@ -234,6 +234,31 @@ public class EmitTests
     }
 
     [Test]
+    public void ReplaysFromASnapshotDoNotAllocate()
+    {
+        var (world, _) = Fight(World.ParallelChunkRows * 4, 16, 4);
+        using (world)
+        {
+            world.AddSystem<ParallelStrikes>();
+            world.AddSystem<ApplyHits>();
+            for (int i = 0; i < 30; i++) world.Update();
+            var snapshot = world.Capture();                       // the records cleared: the copy holds none
+
+            void Replay()
+            {
+                for (int i = 0; i < 10; i++)
+                {
+                    world.Update();
+                    world.Restore(snapshot);                      // the singleton keeps its list, emptied
+                }
+            }
+
+            Replay();
+            Assert.That(Allocations.Least(Replay), Is.Zero);
+        }
+    }
+
+    [Test]
     public void SavesWriteTheRecords()
     {
         var (world, _) = Fight(2000, 4, 4);

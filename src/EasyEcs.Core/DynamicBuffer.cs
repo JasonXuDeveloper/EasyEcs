@@ -254,6 +254,9 @@ internal abstract class BufferStore
     /// <summary>Empty the store and keep it for the next first write (its buffer died: nothing refers to it).</summary>
     public abstract void Recycle();
 
+    /// <summary>Remove the elements; the store stays its owner's, with its capacity.</summary>
+    public abstract void Empty();
+
     /// <summary>
     /// <paramref name="target"/> (a store its owner replaces, or null) made a copy of <paramref name="source"/>: the
     /// elements are copied into it when both have some, a new store is taken from the pool when only the source has
@@ -270,8 +273,11 @@ internal abstract class BufferStore
         }
     }
 
-    /// <summary>Hold copies of the elements of <paramref name="source"/> (of the same element type); false when it has none.</summary>
-    protected abstract bool CopyFrom(BufferStore source);
+    /// <summary>
+    /// Hold copies of the elements of <paramref name="source"/> (of the same element type, or null); false, the store
+    /// untouched, when it has none.
+    /// </summary>
+    public abstract bool CopyFrom(BufferStore source);
 }
 
 internal sealed class BufferStore<T>(int capacity) : BufferStore
@@ -343,8 +349,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
 
     public override void Recycle()
     {
-        if (RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(Items, 0, Count);
-        Count = 0;
+        Empty();
         if (Items.Length > MaxPooledLength) return;
         var free = t_free ??= new BufferStore<T>[2 * Batch];
         if (t_freeCount == free.Length) Spill(free);
@@ -367,6 +372,12 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         t_freeCount = Batch;
     }
 
+    public override void Empty()
+    {
+        if (RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(Items, 0, Count);
+        Count = 0;
+    }
+
     /// <summary>Grow to hold at least <paramref name="needed"/> elements (doubling, at least 4).</summary>
     public void Grow(int needed) => Resize(Math.Max(needed, Math.Max(4, Items.Length * 2)));
 
@@ -379,7 +390,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         Items = grown;
     }
 
-    protected override bool CopyFrom(BufferStore source)
+    public override bool CopyFrom(BufferStore source)
     {
         var from = Unsafe.As<BufferStore<T>>(source);
         if (from == null || from.Count == 0) return false;
