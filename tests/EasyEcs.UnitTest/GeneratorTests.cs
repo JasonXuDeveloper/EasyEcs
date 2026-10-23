@@ -1774,8 +1774,10 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => IsCode(t)).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         const string noInlining = "global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]";
-        Assert.That(generated, Does.Contain($"Name = \"Loops\"), {noInlining}"), generated);
-        Assert.That(generated, Does.Contain($"Name = \"Calls\"), {noInlining}"), generated);   // a run of rows calls it too
+        // The wrapper is never inlined, not the accessor: an ordinary method, which the JIT tiers up with its profile.
+        Assert.That(generated, Does.Contain($"[{noInlining}\n    internal static void Loops_0(global::S owner, ref global::P p, global::EasyEcs.Scratch<int[]> s) =>\n        Loops_0_Accessor(owner, ref p, s);"), generated);
+        Assert.That(generated, Does.Contain($"[{noInlining}\n    internal static void Calls_1("), generated);   // a run of rows calls it too
+        Assert.That(generated, Does.Contain("Name = \"Loops\")]").And.Contain("Name = \"Calls\")]").And.Not.Contain($"), {noInlining}"), generated);
         Assert.That(generated, Does.Contain("internal ref struct CallsJob1 : global::EasyEcs.IForEachBatch<"), generated);
         Assert.That(generated, Does.Contain("Name = \"Counts\")]"), generated);
         Assert.That(generated, Does.Contain("Name = \"Plain\")]"), generated);

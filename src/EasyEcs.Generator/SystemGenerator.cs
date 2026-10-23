@@ -173,15 +173,23 @@ public sealed class SystemGenerator : IIncrementalGenerator
         // the root's size) on the method's loop, its samples and the helpers they call: inlined into this small
         // accessor (or the job), a method of that size uses up the budget and calls its samples. The accessor runs
         // unoptimized (NoOptimization: no inlining in it, one call per entity), and is never inlined itself.
-        // Otherwise a Scratch method that loops or calls runs in its own frame (ForEachModel.OutOfLine); the method
-        // still inlines into the accessor, so the call per row is the only cost.
-        string impl = method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Tile)
+        // Otherwise a Scratch method that loops or calls runs in its own frame (ForEachModel.OutOfLine): a wrapper that
+        // is never inlined, an ordinary method the JIT tiers up with its profile (an accessor is a stub without one),
+        // into which the accessor and the method inline, so the call per row is the only cost.
+        bool tile = method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Tile);
+        string impl = tile
             ? ", global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining | global::System.Runtime.CompilerServices.MethodImplOptions.NoOptimization)"
-            : method.OutOfLine
-                ? ", global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)"
-                : "";
+            : "";
+        string name = $"{method.Name}_{index}{(method.OutOfLine && !tile ? "_Accessor" : "")}";
         sb.Append($"    [global::System.Runtime.CompilerServices.UnsafeAccessor(global::System.Runtime.CompilerServices.UnsafeAccessorKind.StaticMethod, Name = \"{method.Name}\"){impl}]\n");
-        sb.Append($"    internal static extern {method.Returns} {method.Name}_{index}{method.TypeParameters}({owner.AccessorParameter} {self}{parameters}){method.Constraints};\n\n");
+        sb.Append($"    internal static extern {method.Returns} {name}{method.TypeParameters}({owner.AccessorParameter} {self}{parameters}){method.Constraints};\n\n");
+        if (!method.OutOfLine || tile) return;
+        // Each argument as declared (a ReadOnlyMaybe<T> reads, but is passed by value).
+        string forwarded = string.Concat(method.Parameters.Select(p =>
+            $", {(p.Declared.StartsWith("ref readonly ") || p.Declared.StartsWith("in ") ? "in " : p.Declared.StartsWith("ref ") ? "ref " : "")}{Escape(p.Name)}"));
+        sb.Append("    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]\n");
+        sb.Append($"    internal static {method.Returns} {method.Name}_{index}{method.TypeParameters}({(owner.IsSystem ? owner.FullName : "object")} {self}{parameters}){method.Constraints} =>\n");
+        sb.Append($"        {name}{method.TypeParameters}({self}{forwarded});\n\n");
     }
 
     /// <summary>
