@@ -999,6 +999,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     }
 
     /// <summary>Alive rows of <paramref name="archetype"/> that pass (O(rows / 64) plus one id check per passing row).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)] // its own loop with Visit inlined, not copied into every caller
     public int Count(Archetype archetype)
     {
         int rows = archetype.Count;
@@ -1008,13 +1009,13 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         return counter.Count;
     }
 
-    /// <summary>
-    /// What a walk of the passing rows (<see cref="Visit"/>) does with each word of them: the rows of word
-    /// <paramref name="word"/> of <paramref name="slots"/> that pass, one bit each (tombstones may pass: check ids). False
-    /// stops the walk. A struct, so the walk is compiled for it.
-    /// </summary>
+    /// <summary>What a walk of the passing rows (<see cref="Visit"/>) does with each word of them. A struct, so the walk is compiled for it.</summary>
     private interface IWordSink
     {
+        /// <summary>
+        /// The rows of word <paramref name="word"/> of <paramref name="slots"/> that pass, one bit each in
+        /// <paramref name="bits"/> (tombstones may pass: check ids). False stops the walk.
+        /// </summary>
         bool Word(EntityId[] slots, int word, ulong bits);
     }
 
@@ -1046,6 +1047,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     {
         public int Count;
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] // in the walk's loop: no call per word
         public bool Word(EntityId[] slots, int word, ulong bits)
         {
             for (; bits != 0; bits &= bits - 1)
@@ -1058,6 +1060,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     {
         public bool Found;
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] // in the walk's loop: no call per word
         public bool Word(EntityId[] slots, int word, ulong bits)
         {
             for (; bits != 0; bits &= bits - 1)
@@ -1076,6 +1079,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         private readonly Span<EntityId> _into = into;
         public int Written;
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] // in the walk's loop: no call per word
         public bool Word(EntityId[] slots, int word, ulong bits)
         {
             int first = word << 6;
@@ -1149,6 +1153,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     }
 
     /// <summary>Whether any alive row passes: <see cref="Count"/> stopping at the first.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)] // its own loop with Visit inlined, not copied into every caller
     public bool Any(Archetype archetype)
     {
         var finder = new Finder();
@@ -1160,6 +1165,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     /// The ids of the alive rows of <paramref name="archetype"/> that pass, in row order, into <paramref name="into"/>
     /// until it is full; how many. A table whose rows all pass and that has no tombstones is one copy of its slots.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)] // its own loop with Visit inlined, not copied into every caller
     public int Collect(Archetype archetype, Span<EntityId> into)
     {
         int mode = Mode(archetype);
