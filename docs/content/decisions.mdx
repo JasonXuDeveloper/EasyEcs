@@ -450,8 +450,10 @@ ParallelSystems 804-808 -> 746-768 μs, ParallelForEach 294-308 -> 267-271 μs, 
 - `Parallel.For` with static delegates as the runner (`ParallelRunnerBenchmark`, the steering pass of
   `ParallelForEachBenchmark`, at a machine load of 10 to 30 on 4 cores): at 1,000 rows the runner took 18 µs at 0 B,
   `Parallel.For` 24 to 42 µs at 1.5 to 1.9 KB; at 10,000 rows they were level within noise; at 100,000 rows
-  `Parallel.For` came out 15 to 40 % faster, inside that load's noise (runs swung by 2x). A rerun on a quiet machine
-  is pending. It also allocates per call and passes no state ([D69](#d69-reductions)).
+  `Parallel.For` came out 15 to 40 % faster, inside that load's noise (runs swung by 2x). Rerun with nothing else on
+  the machine: 1,000 rows 17.4 µs at 0 B (serial 17.3 µs) against 20.9 to 22.6 µs at 1.7 KB; 10,000 rows 76 µs
+  against 103 to 115 µs; 100,000 rows 871 µs against 862 to 948 µs, level within error. It also allocates per call and
+  passes no state ([D69](#d69-reductions)).
 
 ## D23. Change summaries per block; removals summarized apart [#d23-change-summaries-per-block-removals-summarized-apart]
 

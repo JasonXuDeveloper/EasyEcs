@@ -405,7 +405,9 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
   所以留给应用自己决定。
 - 用带静态委托的 `Parallel.For` 当运行器（`ParallelRunnerBenchmark`，`ParallelForEachBenchmark` 的转向遍历，4 核、机器负载 10 到 30）：
   1,000 行时运行器 18 µs、0 B，`Parallel.For` 24 到 42 µs、1.5 到 1.9 KB；10,000 行时两者在噪声范围内持平；100,000 行时 `Parallel.For`
-  快 15% 到 40%，但在这种负载的噪声范围内（运行之间相差 2 倍）。在空闲机器上重跑还没做。它每次调用还会分配，也不能传状态（[D69](#d69-reductions)）。
+  快 15% 到 40%，但在这种负载的噪声范围内（运行之间相差 2 倍）。在没有别的负载的机器上重跑：1,000 行时运行器 17.4 µs、0 B（串行 17.3 µs），
+  对 20.9 到 22.6 µs、1.7 KB；10,000 行时 76 µs 对 103 到 115 µs；100,000 行时 871 µs 对 862 到 948 µs，在误差范围内持平。
+  它每次调用还会分配，也不能传状态（[D69](#d69-reductions)）。
 
 ## D23. 按块维护变更摘要；移除单独汇总 [#d23-change-summaries-per-block-removals-summarized-apart]
 

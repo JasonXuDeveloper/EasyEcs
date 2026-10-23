@@ -397,7 +397,7 @@ per row, `Parallel.For` over the chunks a pass cuts and the per-row `Parallel.Fo
 localFinally)`. The numbers, with the distinct float results of 200 runs of each, are in the
 [decision record](/en/docs/decisions#d69-reductions).
 
-{/* TODO(bench): <BenchTable bench="ReduceBenchmark" /> here once bench.json holds it. */}
+<BenchTable bench="ReduceBenchmark" />
 
 **Why not `Parallel.For` with `localInit` / `localFinally`:** it is .NET's thread-local pattern and the nearest thing to
 `Reduce<T>`, and it lost on every count. It has no overload that passes state, so a `static` lambda needs static state
@@ -539,7 +539,7 @@ public class MatchLogins : EcsSystem
 `LookupBenchmark` chases 1,000 targets from 10,000 and 100,000 rows and finds accounts by a unique key, through a
 `Lookup<T>` in parallel and on one thread and through a `World` parameter.
 
-{/* TODO(bench): <BenchTable bench="LookupBenchmark" /> once bench.json holds it. */}
+<BenchTable bench="LookupBenchmark" />
 
 #### Records out of a pass: `Emit<T>` [#emit]
 
@@ -622,7 +622,7 @@ Records appended to a singleton's list by hand, row by row, keep the method on o
 `Emit<T>` with a component written per row and scanned after, a `ConcurrentQueue` and an `Interlocked` cursor into a
 shared array ([D78](/en/docs/decisions#d78-emit)).
 
-{/* TODO(bench): <BenchTable bench="EmitBenchmark" /> once bench.json holds it. */}
+<BenchTable bench="EmitBenchmark" />
 
 #### Random numbers in a pass: `EntityRandom` [#entity-random]
 
@@ -693,7 +693,7 @@ world.AddSystem<TickRandomSystem>();
 `EntityRandomBenchmark` measures a draw against SplitMix64, Philox, `Random.Shared` and a seeded `Random`, and a pass
 over 100,000 rows with `EntityRandom` and with `Random.Shared` ([D79](/en/docs/decisions#d79-entity-random)).
 
-{/* TODO(bench): <BenchTable bench="EntityRandomBenchmark" /> once bench.json holds it. */}
+<BenchTable bench="EntityRandomBenchmark" />
 
 #### How the runner synchronizes [#runner-contract]
 
@@ -707,12 +707,12 @@ What a parallel pass costs in synchronization, and what orders a chunk's writes 
 | End of the run | The caller spins on `Volatile.Read` of the chunks remaining until it reads 0. The full fence of each chunk's `Decrement` orders its writes (its rows, its job copy and partial result) before the caller's merge and before the code after the pass. |
 
 `ParallelRunnerBenchmark` runs the steering pass of `ParallelForEachBenchmark` through the runner and through
-`Parallel.For` with static delegates: on a small pass the runner is faster and allocates nothing, at 10,000 rows the
-two are level, and at 100,000 rows `Parallel.For` measured faster on a loaded machine, within that machine's noise
+`Parallel.For` with static delegates: on a small pass the runner keeps it on the calling thread, as fast as the serial
+loop and without allocating, where `Parallel.For` is slower than serial; at 10,000 rows the runner is the faster of the
+two; at 100,000 rows they are level
 ([D22](/en/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)).
 
-{/* TODO(bench): rerun ParallelRunnerBenchmark on a quiet machine; update this paragraph and D22, and add
-<BenchTable bench="ParallelRunnerBenchmark" /> once bench.json holds it. */}
+<BenchTable bench="ParallelRunnerBenchmark" />
 
 ### Data that is not rows: `world.ForParallel` [#for-parallel]
 
@@ -765,7 +765,7 @@ public class CriticalSystem : EcsSystem
 `ForParallelBenchmark` runs light and heavy work over 100,000 records serially, through `ForParallel` and through
 `Parallel.For` ([D80](/en/docs/decisions#d80-for-parallel)).
 
-{/* TODO(bench): <BenchTable bench="ForParallelBenchmark" /> once bench.json holds it. */}
+<BenchTable bench="ForParallelBenchmark" />
 
 ### Input from other threads [#input-from-other-threads]
 

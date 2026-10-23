@@ -564,8 +564,9 @@ tick 3  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
 （每个邻居一次 `Lookup`、栈上一张带填充的纹理）；`TileActiveBenchmark` 对比大部分安静的网格休眠与不休眠；`TileNeighborBenchmark`
 测找邻居。水着色器手写版本和瓦片版本的实测数字见 [D77](/zh/docs/decisions#d77-tiles)。
 
-{/* TODO(bench): bench.json 有了 TileStencilBenchmark 和 TileActiveBenchmark 之后加上 <BenchTable bench="TileStencilBenchmark" />
-和 <BenchTable bench="TileActiveBenchmark" />。 */}
+<BenchTable bench="TileStencilBenchmark" />
+
+<BenchTable bench="TileActiveBenchmark" />
 
 ## 开销 [#what-it-costs]
 
