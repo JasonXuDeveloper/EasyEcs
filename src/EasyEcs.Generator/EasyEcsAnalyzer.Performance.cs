@@ -1768,13 +1768,13 @@ public sealed partial class EasyEcsAnalyzer
             _ => null,
         };
         if (symbol == null) return false;
-        var compilation = prefab.SemanticModel!.Compilation;
+        var callerModel = prefab.SemanticModel!;
         foreach (var reference in symbol.DeclaringSyntaxReferences)
         {
             var declaration = reference.GetSyntax();
             var tree = declaration.SyntaxTree;
-            if (!compilation.ContainsSyntaxTree(tree)) continue;
-            var model = compilation.GetSemanticModel(tree);
+            if (!callerModel.Compilation.ContainsSyntaxTree(tree)) continue;
+            var model = Symbols.ModelOf(tree, callerModel); // the caller's own when the prefab is declared in its file
             foreach (var call in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
                 if (call.Expression is not MemberAccessExpressionSyntax { Name: GenericNameSyntax { Identifier.ValueText: "SetAbsent", TypeArgumentList.Arguments.Count: 1 } name } access
