@@ -39,6 +39,7 @@ public struct Saving : ISystemGroup;
 
 /// <summary>
 /// The actors the save group found written, for the host to save after the update: a pass refuses saves (EECS041),
-/// so the system records them as data.
+/// so the system records them as data. A save leaves the list out.
 /// </summary>
+[NotSaved]
 public record struct Unsaved(List<EntityId> Actors) : ISingletonComponent;

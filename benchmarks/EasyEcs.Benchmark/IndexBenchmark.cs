@@ -13,7 +13,7 @@ namespace EasyEcs.Benchmark;
 /// its key first, each lookup is a <c>Get</c>): the difference is the price of the check.
 /// </summary>
 [MemoryDiagnoser]
-public class IndexBenchmark
+public partial class IndexBenchmark
 {
     [Params(100_000)] public int Items;
     [Params(1_000)] public int Owners;
@@ -204,15 +204,9 @@ public class IndexBenchmark
         public static int Slot((int X, int Z) key) => (key.Z & 63) * 64 + (key.X & 63);
     }
 
-    public record struct Session(long Token) : IComponent, IIndexed<long>
-    {
-        public long Key => Token;
-    }
+    public partial record struct Session([IndexKey] long Token) : IComponent;
 
-    public record struct UniqueSession(long Token) : IComponent, IUniqueIndexed<long>
-    {
-        public long Key => Token;
-    }
+    public partial record struct UniqueSession([UniqueKey] long Token) : IComponent;
 
     [Benchmark]
     public int TradeAndCount()
@@ -228,10 +222,7 @@ public class IndexBenchmark
         return total;
     }
 
-    public record struct ItemOf(EntityId Owner) : IComponent, IIndexed<EntityId>
-    {
-        public EntityId Key => Owner;
-    }
+    public partial record struct ItemOf([IndexKey] EntityId Owner) : IComponent;
 
     public record struct Gold(int Amount) : IComponent;
 }

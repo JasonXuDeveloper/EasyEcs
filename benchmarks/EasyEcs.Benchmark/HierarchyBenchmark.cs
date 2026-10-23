@@ -8,7 +8,7 @@ namespace EasyEcs.Benchmark;
 /// follow their leader under <see cref="TargetPolicy.Remove"/> and lose the link (then go with the next round).
 /// </summary>
 [MemoryDiagnoser]
-public class HierarchyBenchmark
+public partial class HierarchyBenchmark
 {
     [Params(1_000)] public int Squads;
 
@@ -46,8 +46,5 @@ public class HierarchyBenchmark
         return destroyed + _world.DestroyAll<Energy>();
     }
 
-    public record struct Leader(EntityId Target) : IComponent, IIndexed<EntityId>
-    {
-        public EntityId Key => Target;
-    }
+    public partial record struct Leader([IndexKey] EntityId Target) : IComponent;
 }

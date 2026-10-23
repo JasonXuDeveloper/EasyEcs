@@ -32,7 +32,7 @@ namespace EasyEcs.Benchmark;
 /// leaves out (a lane mask per word of 64 rows). 0 bytes either way.
 /// </summary>
 [MemoryDiagnoser]
-public class KernelBenchmark
+public partial class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
@@ -383,24 +383,18 @@ public class KernelBenchmark
     public record struct Window(float Min, float Max) : ISingletonComponent;
 
     /// <summary>A count, a sum, a minimum and a maximum of ints: exact in any order of the rows.</summary>
-    public struct Tally : ISingletonComponent, IReduction<Tally>
+    public partial struct Tally : ISingletonComponent
     {
-        public int Count, Sum, Low, High;
-
-        public static Tally Identity => new() { Low = int.MaxValue, High = int.MinValue };
-        public static Tally Combine(Tally left, Tally right) => new()
-        {
-            Count = left.Count + right.Count, Sum = left.Sum + right.Sum, Low = Math.Min(left.Low, right.Low), High = Math.Max(left.High, right.High),
-        };
+        [Sum] public int Count;
+        [Sum] public int Sum;
+        [Min] public int Low;
+        [Max] public int High;
     }
 
     /// <summary>A float sum: vectorized only under FloatMode.Fast, since one sum per lane rounds in another order.</summary>
-    public struct Energy : ISingletonComponent, IReduction<Energy>
+    public partial struct Energy : ISingletonComponent
     {
-        public float Total;
-
-        public static Energy Identity => default;
-        public static Energy Combine(Energy left, Energy right) => new() { Total = left.Total + right.Total };
+        [Sum] public float Total;
     }
 
     /// <summary>The batch job [ForEach] compiled a reduction to before: the partial result in a local, the method per row.</summary>
