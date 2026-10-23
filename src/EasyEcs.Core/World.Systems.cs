@@ -451,9 +451,13 @@ public sealed partial class World
             {
                 int start = next;
                 var segments = new List<Segment>();
+                List<Action<World>> prepares = null;
                 for (int i = 0; i < order.Length; i++)
                 {
                     if (levels[i] != level) continue;
+                    if (codes[order[i]].Access.Indexes is { } indexes)
+                        foreach (var prepare in indexes)
+                            if (!(prepares ??= []).Contains(prepare)) prepares.Add(prepare);
                     var set = codes[order[i]].Set;
                     int at = next - start;
                     if (segments.Count > 0 && segments[^1].Set == set) segments[^1] = segments[^1] with { Count = segments[^1].Count + 1 };
@@ -461,7 +465,7 @@ public sealed partial class World
                     systems[next++] = registered[order[i]];
                 }
 
-                stages[level] = new SystemStage(systems[start..next], segments.ToArray());
+                stages[level] = new SystemStage(systems[start..next], segments.ToArray(), prepares?.ToArray() ?? []);
             }
 
             // An update reads only Stages: one reference, so it never mixes two versions of the list.

@@ -76,10 +76,9 @@ public sealed partial class World
         // Each system of the stage measures its own allocations (RunMeasured, on the thread that runs it).
         var runner = _systemRunner ??= new Runner(Helpers, false);
         // The indexes the stage's key lookups read, built here: an index builds (or is created) on first use, and the
-        // stage's threads may only read it.
-        for (int i = 0; i < systems.Length; i++)
-            if (SystemRows[systems[i].Index] is { Code: { } code } row && row.Version == systems[i].Version && code.Access.Indexes is { } indexes)
-                foreach (var prepare in indexes) prepare(this);
+        // stage's threads may only read it. Gathered once per schedule: the stage's systems are known when it is cut.
+        var prepares = stage.Prepares;
+        for (int i = 0; i < prepares.Length; i++) prepares[i](this);
         Gate.FreezeParallel(); // the stage's systems never change structure (they do not run alone): a change throws
         try
         {
@@ -268,10 +267,13 @@ public sealed partial class World
     /// One stage of a schedule: systems that run at once (a schedule rebuilds its stages when it changes), cut into
     /// segments of one set for a run on one thread. In parallel, each system is an item, run by its set with a span of one.
     /// </summary>
-    internal sealed unsafe class SystemStage(SystemSlot[] systems, Segment[] segments) : ParallelWork
+    internal sealed unsafe class SystemStage(SystemSlot[] systems, Segment[] segments, Action<World>[] prepares) : ParallelWork
     {
         public readonly SystemSlot[] Systems = systems;
         public readonly Segment[] Segments = segments;
+
+        /// <summary>What builds the indexes its systems' key lookups read (<see cref="SystemAccess"/>), each once.</summary>
+        public readonly Action<World>[] Prepares = prepares;
         public World World;
         public long Update;
 
