@@ -24,7 +24,10 @@ available as Markdown: add `.md` to its URL.
 - A key that must name one entity (an account id, a session token, a cell's occupant) is `IUniqueIndexed<TKey>`: look
   it up with `world.XIndex.Get(key)` / `TryGet(key, out e)`, never with a hand-kept dictionary. A write that would give
   a second entity a taken key throws `InvalidOperationException`; to move a key, change the old holder first. Not for
-  `EntityId` keys (EECS036). A component has one index key: never two `IIndexed<TKey>` (EECS036). When the keys a
+  `EntityId` keys (EECS036). A component has one index key: never two `IIndexed<TKey>` (EECS036). A key that is a
+  member is declared, not written: `[Key]` (or `[UniqueKey]`) on the field of a partial struct, and the generator
+  writes the interface and an explicit `Key` (EECS067); `[GroupBy]` with `[Group]` on a member does the same for a
+  group. When the keys a
   world holds at once map onto bounded slots (grid cells modulo the loaded area, small ids), make it
   `IDirectIndexed<TKey>` (`static Slots`, `static SlotOf(key)`, pure arithmetic) instead of keeping a grid of ids by
   hand; never for sparse keys or huge ranges.
@@ -100,14 +103,30 @@ available as Markdown: add `.md` to its URL.
   never writes shared state: no static field, no object a context parameter or a job field refers to (EECS060). A
   parallel job's fields are not merged back: each chunk runs a copy, so never read a field after `ForEachParallel`
   (EECS061). A total over the rows (a count, a sum, a min / max, a bounding box) is a `ref Reduce<T>` parameter (always `ref`:
-  without it, EECS002), with `T` a singleton implementing `IReduction<T>` (`Identity`, an associative `Combine`); read the result as `world.T` or `in T`
+  without it, EECS002), with `T` a singleton implementing `IReduction<T>`: declare it with field attributes on a
+  partial struct (`[Sum] public int Alive; [Min] public float Low;`, also `[Product]`, `[Max]`, `[All]`, `[Any]`), and
+  the generator writes `Identity` and `Combine`. Every field gets one attribute (EECS064), the struct and its outer
+  types are partial (EECS062), and it writes no `Identity` / `Combine` of its own (EECS063). Write `IReduction<T>` by
+  hand only for another combination (EECS065 suggests the attributes), with an `Identity` that changes nothing
+  (EECS066). Read the result as `world.T` or `in T`
   after the pass, never `Reduce<T>.Value` as the total (it is the chunk's part). One `Reduce<T>` per `T` per pass
-  (EECS057). Set `ChunkRows` when a float total must be the same on every machine. A list or buffer a row fills
+  (EECS057). A singleton that a system resets each update and a `[ForEach]` method then accumulates through `ref`
+  (`s.Count++`, `s.Max = Math.Max(s.Max, x)`) is that reduction written by hand (EECS086): take `ref Reduce<T>` and
+  drop the reset. A total that grows across updates (a score) stays a `ref T`. Set `ChunkRows` when a float total must be the same on every machine. A list or buffer a row fills
   is a `Scratch<T>` parameter (`var list = scratch.Value ??= new(); list.Clear();`), or `stackalloc` for a small
   fixed bound, never a `new` per row; never store what a scratch holds into a component or singleton (EECS058).
   Read other entities through a `Lookup<T>` parameter (`lookup[id]`, `Read`, `Has`, `TryFind` by key), never a
-  `World` parameter in parallel code (EECS010); it sees the values from before the pass, and the same method may not
+  `World` parameter in parallel code (EECS010), and never a `World` taken only for `TryGetEntity` and reads (EECS087:
+  it keeps the system alone in its stage); it sees the values from before the pass, and the same method may not
   write `T` (EECS059): write another component and copy it back later.
+  Records a pass produces (hits, events, messages) go through an `Emit<T>` parameter (`hits.Add(new Hit(...))`), joined
+  in row order into singleton `Emitted<T>` when the pass ends, never a `List<T>` in a `ref` singleton (EECS089). A
+  later system reads `world.Emitted<T>().Items` and clears it; the emitting method never takes `Emitted<T>` and emits
+  one kind of record through one parameter (EECS070).
+  Random numbers in a `[ForEach]` method come from `in EntityRandom random` (`random.Range(entity.Id, stream, min,
+  max)`, a pure function of seed, entity, tick and stream), never `Random.Shared`, a `new Random` or a `Random` field
+  (EECS071). Each draw for the same entity in a pass has a stream of its own, and a draw in a loop adds the iteration
+  to its stream (`stream + (uint)i`, EECS088); the system that advances the clock advances `EntityRandom.Tick`.
   A grid of cells updated from its neighbours is tiles: a component implementing `ITile<TKey>` (static `Width`,
   `Depth`, optional `Height` / `Faces` / `Halo` / `Neighbourhood` / `Boundary`, a `Key`, `Beside(key, face)`, which
   wraps on a periodic grid) beside a `DynamicBuffer<TCell>`, shaded by a
@@ -118,10 +137,18 @@ available as Markdown: add `.md` to its URL.
   `Neighbourhood => TileNeighbourhood.All`; one step per pass (several steps per load lose on a cached grid);
   quiet tiles sleep through `tile.Changes` / `tile.Facing` and an awake tag. One cell type per field, one
   `Tile` per field (two of the same cell type is EECS073).
-- Hot per-row arithmetic over numbers: a static, non-parallel `[ForEach]` method over components of 1 to 4 fields of
-  one primitive type (no `Entity`, `World`, `Mut<T>` or `Maybe<T>` parameter) gets a generated `Vector<T>` loop; write
-  the fields (`p.X += v.X`), not a new whole component, and do not mix `float` and `int`. EECS055 (a suggestion) names
-  why a method stayed scalar; put `[ForEach(Simd = SimdMode.Require)]` on a hot method so losing the loop fails the
+- Hot per-row arithmetic over numbers: a static per-entity `[ForEach]` method (on one thread or `Parallel`; no
+  `Entity`, `World`, span or `Mut<T>` parameter) gets a generated vector loop when its components hold 1 to 4 lanes of
+  one size: 4-byte `float` / `int` / `uint`, 8-byte `double` / `long` / `ulong`, or narrow `byte` / `sbyte` / `short`
+  / `ushort` lanes, whose `int` arithmetic must fit the lanes (`(byte)Math.Min(a.X + b.X, 255)` is a saturating add;
+  a value the lanes cannot hold stays scalar). Struct values are one vector per lane: `Vector2` / `Vector3` /
+  `Vector4` fields, `p = new Position(...)`, `p with { ... }`; a combining call (`Dot`, `Length`) stays scalar. On
+  AVX-512 a wider component (up to 16 words) qualifies when the method uses only its 4-byte fields. A `Maybe<T>` of a
+  lane component is a mask of the rows that have it (on one thread only). An `if` becomes a mask; a branch the loop
+  cannot express (a call, a loop, logging) is cold, and the vectors where a lane takes it run the method. Do not mix
+  `float` and `int`, and keep `bool` fields out of hot components. EECS055 (a suggestion) names
+  why a method stayed scalar (a narrow value out of range, a component too wide for the work, a `Maybe<T>` in a
+  parallel method, a call outside a condition); put `[ForEach(Simd = SimdMode.Require)]` on a hot method so losing the loop fails the
   build (EECS056), `SimdMode.Off` on one that should stay scalar.
 - A request or message for one entity is a private static `[ForEntity]` method (`ref` for what it writes, filter
   attributes such as `[Without<Dead>]`, the caller's values after the components), called through its generated entry
@@ -151,10 +178,11 @@ available as Markdown: add `.md` to its URL.
 
 ## Performance
 
-- An `EECS` warning means the code costs (EECS025 to EECS032, EECS052, and EECS017, EECS020), loses a write
-  (EECS037, EECS038), stamps rows it only reads or leaves alone (EECS046, EECS053) or uses a ref after a structural change (EECS047): apply
+- An `EECS` warning means the code costs (EECS025 to EECS032, EECS052, EECS087, and EECS017, EECS020), loses a write
+  (EECS037, EECS038), stamps rows it only reads or leaves alone (EECS046, EECS053), uses a ref after a structural
+  change (EECS047) or repeats a random stream (EECS088): apply
   its fix (one mistake gets one diagnostic: where two rules see the same code, one defers). The suggestions, EECS033 and EECS039, are
-  the same cost written shorter. An `EECS` error means the code cannot work.
+  the same cost written shorter; EECS086 and EECS089 name the parameter that lets a method run per chunk. An `EECS` error means the code cannot work.
 - Hot paths allocate nothing: no LINQ, closures, boxing, string formatting or `params object[]` in systems (EECS028).
 - Keep a `QueryFilter` in a `static readonly` field when a query runs every tick.
 - Give a new entity its components in `CreateEntity(a, b, c)` / `Instantiate(prefab, a, b)`, not a `Set` right
@@ -190,7 +218,9 @@ available as Markdown: add `.md` to its URL.
 ## Persistence
 
 - `world.Capture()` / `Restore(snapshot)` copy a world in memory (undo, rollback, tests); `world.Save` / `Load` write
-  bytes that survive a restart or go to another process.
+  bytes that survive a restart or go to another process. A component or singleton holding references (a `string`, an
+  array, a class) is `[NinoType]` and partial so a save can write it, or `[NotSaved]` when it is runtime state a
+  restart rebuilds (EECS069); `[NotSaved]`, `[GroupBy]` and `[WhenTargetDestroyed]` go only on types they fit (EECS068).
 - Collect a subtree with `world.Descendants(root).AddTo(ids, includeRoot: true)` (not only `Children`) before
   `SaveEntities` or `MoveEntities`, and pass `CollectionsMarshal.AsSpan(ids)`: a child left behind dies with the original.
 - Size a buffer from `index.Find(key).Count` (O(1)), never by walking the matches twice; `index.KeyCount` /

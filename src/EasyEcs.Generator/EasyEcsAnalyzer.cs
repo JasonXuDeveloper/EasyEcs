@@ -18,11 +18,11 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     private const string Category = "EasyEcs";
 
     public static readonly DiagnosticDescriptor BadParameter = new("EECS002", "Invalid [ForEach] parameter",
-        "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe, Mut or Lookup of one, a 'ref Reduce' of a singleton, a Scratch, an Emit of a struct, an Entity or the World (outside a system, also a value the caller passes, of any other type)",
+        "Parameter '{0}' of {1} must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe, Mut or Lookup of one, a 'ref Reduce' of a singleton, a Scratch, an Emit of a struct, an Entity or the World (outside a system, also a value the caller passes, of any other type)",
         Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS002"));
 
     public static readonly DiagnosticDescriptor ComponentCount = new("EECS003", "Invalid component count",
-        "[ForEach] method '{0}' must take between 1 and 9 components, or none with a [With<T>] or [Changed<T>] filter", Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS003"));
+        "{0} must take between 1 and 9 components, or none with a [With<T>] or [Changed<T>] filter", Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS003"));
 
     public static readonly DiagnosticDescriptor Generic = new("EECS004", "Generic [ForEach] method in a system",
         "[ForEach] method '{0}' of a system is generic, and nothing gives it type arguments: make the system generic instead (class Regen<T> : EcsSystem)",
@@ -66,7 +66,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "entity, and write nothing that another row's run reads, such as a singleton.", helpLinkUri: Help("EECS010"));
 
     public static readonly DiagnosticDescriptor WriteThroughReadOnly = new("EECS011", "Write through a read-only parameter",
-        "[ForEach] method '{0}' changes data that '{1}' holds by reference, but takes '{1}' as read-only; take it by 'ref'",
+        "{0} changes data that '{1}' holds by reference, but takes '{1}' as read-only; take it by 'ref'",
         Category, DiagnosticSeverity.Error, true,
         "A read-only component or singleton ('in', ReadOnlySpan) is scheduled as a read and never stamped as changed. A " +
         "collection or class it holds is still writable: changing it would race with parallel systems that read it, " +
@@ -81,7 +81,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "component value is 'new DynamicBuffer<T>()' (no list until its first write).", helpLinkUri: Help("EECS012"));
 
     public static readonly DiagnosticDescriptor HiddenStructuralChange = new("EECS013", "Structural change in a [ForEach] method that promises none",
-        "[ForEach] method '{0}' calls '{1}', a structural change, but {2}",
+        "{0} calls '{1}', a structural change, but {2}",
         Category, DiagnosticSeverity.Error, true,
         "A [ForEach] method that is static and takes no Entity or World (or uses its Entity only to read) cannot change " +
         "structure, so the generator walks its rows without re-checking storage, and the system shares a parallel stage " +
@@ -132,13 +132,13 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "Orderings apply within one group: World.Update() and World.Update<TGroup>() run their groups separately, in the " +
         "order the caller calls them. Order the systems of one group, or move the system into the other's group.", helpLinkUri: Help("EECS020"));
 
-    public static readonly DiagnosticDescriptor EntryPointCollision = new("EECS021", "[ForEach] entry point has the method's signature",
-        "The entry point of [ForEach] method '{0}' (the {1}the caller's values) would have the signature of a method '{0}' of its type, or of another [ForEach] overload's entry point: rename one of them",
+    public static readonly DiagnosticDescriptor EntryPointCollision = new("EECS021", "A generated entry point has a method's signature",
+        "The entry point of {2} (the {1}the caller's values) would have the signature of a method '{0}' of its type, or of another generated entry point: rename one of them",
         Category, DiagnosticSeverity.Error, true,
         "Outside a system, the generator writes an overload of a [ForEach] method that takes the World (and the change tick, for [Changed<T>] / [Removed<T>]) followed by the method's context parameters, and runs the method over every matching entity; for a [ForEntity] method, one that takes the entity and runs the method on it.", helpLinkUri: Help("EECS021"));
 
     public static readonly DiagnosticDescriptor Unnameable = new("EECS022", "Type out of reach of the generated code",
-        "[ForEach] method '{0}' uses '{1}', which code outside its declaring type cannot name: make it internal or public",
+        "{0} uses '{1}', which code outside its declaring type cannot name: make it internal or public",
         Category, DiagnosticSeverity.Error, true,
         "The generator writes the jobs of [ForEach] methods outside the user's type (no partial needed) and calls the method through UnsafeAccessor, so private methods and systems are fine; the types of its parameters, and the type of a [ForEach] method outside a system, must be internal or public.", helpLinkUri: Help("EECS022"));
 
@@ -196,7 +196,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "component's own storage (a DynamicBuffer, a value), or keep the data in a component.", helpLinkUri: Help("EECS058"));
 
     public static readonly DiagnosticDescriptor LookupOfWritten = new("EECS059", "A lookup of a component the pass writes",
-        "Parameter '{0}' of [ForEach] method '{1}' looks up {2}, which {3}",
+        "Parameter '{0}' of {1} looks up {2}, which {3}",
         Category, DiagnosticSeverity.Error, true,
         "A Lookup<T> reads T of any entity, as it was before the pass: nothing may write T while the pass runs. The " +
         "method writes T itself, so a lookup would read rows before or after their write in this pass, and a parallel " +
@@ -205,7 +205,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "into two systems.", helpLinkUri: Help("EECS059"));
 
     public static readonly DiagnosticDescriptor BadEmit = new("EECS070", "Records read or reordered by the pass that emits them",
-        "Parameter '{0}' of [ForEach] method '{1}' emits {2}, but {3}",
+        "Parameter '{0}' of {1} emits {2}, but {3}",
         Category, DiagnosticSeverity.Error, true,
         "An Emit<T> parameter gives each chunk of rows a list of records and appends the lists to singleton Emitted<T> " +
         "in chunk order when the pass ends, so the records come out in row order whatever the threads. The same method " +
@@ -258,7 +258,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScalarLoop, NoVectorLoop,
         SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, NotPartial, HandWrittenReduction, BadReductionField, FieldWiseReduction,
         WrongIdentity, AttributeKey, BadSetup, NoFormatter, BadEmit, SharedRandom,
-        HandWrittenEntityJob, BadForEntity, ScheduleOverride, BadSchedule, HandWrittenConsume, BadConsume, BadTileShape, SharedTile);
+        HandWrittenEntityJob, BadForEntity, ScheduleOverride, BadSchedule, HandWrittenConsume, BadConsume, BadTileShape, SharedTile,
+        HandWrittenReduce, HandWrittenLookup, SharedStream, HandWrittenEmit);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -491,10 +492,10 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
 
         if (context.ContainingSymbol is not IMethodSymbol method || !Symbols.IsGeneratedJob(method) || OwnWorld(call)) return;
         if (Symbols.IsBatch(method))
-            context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), method.Name, name,
+            context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), Symbols.Describe(method), name,
                 "it is a batch method, whose spans point into the tables; record the change as data for a method that runs per entity"));
         else if (Symbols.IsStable(method, context.Operation.SemanticModel!))
-            context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), method.Name, name,
+            context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), Symbols.Describe(method), name,
                 "takes no Entity or World to make it with; take the Entity as a parameter, or record the change as data"));
     }
 
@@ -513,7 +514,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                 // the parameter: its code fix, unless 'ref' would write a singleton from several threads (EECS010)
                 Symbols.IsParallel((IMethodSymbol)parameter.ContainingSymbol) && Symbols.Classify(parameter) == Symbols.ParamKind.Singleton
                     ? [] : parameter.Locations,
-                parameter.ContainingSymbol.Name, parameter.Name));
+                Symbols.Describe((IMethodSymbol)parameter.ContainingSymbol), parameter.Name));
         if (Symbols.IndexedRoot(target) is { } indexed)
             context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, context.Operation.Syntax.GetLocation(), indexed.Name,
                 "this writes it through a ref"));
@@ -839,7 +840,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(NotASystem, location, method.Name, method.ContainingType.Name));
         else if (outside && Symbols.EntryPointCollides(method))
             context.ReportDiagnostic(Diagnostic.Create(EntryPointCollision, location, method.Name,
-                (one ? "entity, " : "World, ") + (Symbols.TracksSince(method) ? "the tick, " : Symbols.Slices(method) > 1 ? "the slice, " : "")));
+                (one ? "entity, " : "World, ") + (Symbols.TracksSince(method) ? "the tick, " : Symbols.Slices(method) > 1 ? "the slice, " : ""),
+                Symbols.Describe(method)));
         if (method.IsGenericMethod && !outside)
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));
         if (Symbols.SlicesProblem(method) is { } slices)
@@ -850,7 +852,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (Symbols.Unnameable(method) is { } unnameable)
             context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, // the type its code fix makes internal, with its containers
                 Symbols.Hidden(unnameable)?.Locations.Where(l => l.IsInSource) ?? [],
-                method.Name, unnameable.ToDisplayString()));
+                Symbols.Describe(method), unnameable.ToDisplayString()));
 
         int components = 0;
         bool valid = true;
@@ -862,7 +864,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             {
                 valid = false;
                 context.ReportDiagnostic(Diagnostic.Create(BadParameter, p.Locations.FirstOrDefault(),
-                    Symbols.ByValueData(p) ? ImmutableDictionary<string, string?>.Empty.Add(ByValue, "") : null, p.Name, method.Name));
+                    Symbols.ByValueData(p) ? ImmutableDictionary<string, string?>.Empty.Add(ByValue, "") : null, p.Name, Symbols.Describe(method)));
             }
             else if (kind == Symbols.ParamKind.Tile && method.Parameters.FirstOrDefault(other => other.Ordinal < p.Ordinal
                          && SymbolEqualityComparer.Default.Equals(other.Type, p.Type)) is { } first)
@@ -870,10 +872,10 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                     string.Join(", ", ((INamedTypeSymbol)p.Type).TypeArguments.Select(t => t.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)))));
             else if (kind is Symbols.ParamKind.Lookup or Symbols.ParamKind.Tile
                      && Symbols.LookedUp(p, context.Compilation).Select(t => (t, Symbols.LookupProblem(method, p, t))).FirstOrDefault(c => c.Item2 != null) is ({ } read, { } written))
-                context.ReportDiagnostic(Diagnostic.Create(LookupOfWritten, p.Locations.FirstOrDefault(), p.Name, method.Name,
+                context.ReportDiagnostic(Diagnostic.Create(LookupOfWritten, p.Locations.FirstOrDefault(), p.Name, Symbols.Describe(method),
                     read.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), written));
             else if (kind == Symbols.ParamKind.Emit && Symbols.EmitProblem(method, p) is { } emit)
-                context.ReportDiagnostic(Diagnostic.Create(BadEmit, p.Locations.FirstOrDefault(), p.Name, method.Name,
+                context.ReportDiagnostic(Diagnostic.Create(BadEmit, p.Locations.FirstOrDefault(), p.Name, Symbols.Describe(method),
                     Symbols.EmitElement(p.Type)!.Name, emit));
             else if (kind == Symbols.ParamKind.Reduction && Symbols.ReductionProblem(method, p) is { } reduction)
                 context.ReportDiagnostic(Diagnostic.Create(BadReduction, p.Locations.FirstOrDefault(), p.Name, method.Name,
@@ -903,7 +905,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         }
 
         if (valid && !Symbols.ComponentCountValid(method, components))
-            context.ReportDiagnostic(Diagnostic.Create(ComponentCount, location, method.Name));
+            context.ReportDiagnostic(Diagnostic.Create(ComponentCount, location, Symbols.Describe(method)));
         if (valid && problem == null && Symbols.MixesBatch(method))
             context.ReportDiagnostic(Diagnostic.Create(MixedBatch, location, method.Name));
     }

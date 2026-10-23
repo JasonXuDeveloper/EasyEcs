@@ -5,6 +5,8 @@
         <ImplicitUsings>disable</ImplicitUsings>
         <Nullable>disable</Nullable>
         <IsPackable>false</IsPackable>
+        <!-- EECS069: fixtures hold references on purpose (SerializationTests asserts that a save of one throws). -->
+        <NoWarn>$(NoWarn);EECS069</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>

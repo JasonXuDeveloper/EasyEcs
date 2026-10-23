@@ -31,8 +31,8 @@ public sealed partial class EasyEcsAnalyzer
         "Entity.Get<T>() of a tracked component stamps the row too. Read with 'in', ReadOnlySpan<T> or Read<T>().",
         helpLinkUri: Help("EECS025"));
 
-    public static readonly DiagnosticDescriptor UnusedParameter = new("EECS026", "A [ForEach] parameter the method does not use",
-        "[ForEach] method '{0}' does not use parameter '{1}': {2}",
+    public static readonly DiagnosticDescriptor UnusedParameter = new("EECS026", "A [ForEach] or [ForEntity] parameter the method does not use",
+        "{0} does not use parameter '{1}': {2}",
         Category, DiagnosticSeverity.Warning, true,
         "Every parameter costs per row or per pass: a component loads and advances its column (and a 'ref' one is a " +
         "write), a singleton is resolved, an Entity builds a handle for every row and, like the World, makes the system " +
@@ -40,7 +40,7 @@ public sealed partial class EasyEcsAnalyzer
         helpLinkUri: Help("EECS026"));
 
     public static readonly DiagnosticDescriptor RowLookup = new("EECS027", "A lookup per row that a parameter makes once",
-        "{0} looks up '{1}' with '{2}' for every entity it visits; {3}",
+        "{0} looks up '{1}' with '{2}' {4}; {3}",
         Category, DiagnosticSeverity.Warning, true,
         "A [ForEach] method's parameters are resolved once per table or per pass: a component is a column the loop walks, " +
         "a singleton a ref taken before the loop. Looking the same data up through the visited Entity or the World " +
@@ -49,13 +49,14 @@ public sealed partial class EasyEcsAnalyzer
         helpLinkUri: Help("EECS027"));
 
     public static readonly DiagnosticDescriptor Allocation = new("EECS028", "An allocation in code that runs every update",
-        "'{0}' allocates {3} in '{1}', which runs {2}",
+        "'{0}' allocates {3} in '{1}', which runs {2}{4}",
         Category, DiagnosticSeverity.Warning, true,
         "A [ForEach] method runs for every entity it visits and OnUpdate once per update, so garbage there is garbage " +
         "every tick, and the collections it causes pause the world. Objects, arrays, capturing lambdas, LINQ, strings " +
         "built at run time, boxing, enumerators of interfaces and the cold calls of tools (TrimExcess, Capture(), " +
         "Describe, DescribeTables, DescribeSchedule, new Prefab) allocate; code inside a throw, and calls the compiler " +
-        "removes ([Conditional]), are left out.",
+        "removes ([Conditional]), are left out. A [ForEach] method keeps its working collections in a Scratch<T> " +
+        "parameter: one per thread, reused by the next rows.",
         helpLinkUri: Help("EECS028"));
 
     public static readonly DiagnosticDescriptor InstanceForEach = new("EECS029", "An instance [ForEach] method that uses no instance member",
@@ -108,7 +109,7 @@ public sealed partial class EasyEcsAnalyzer
         helpLinkUri: Help("EECS034"));
 
     public static readonly DiagnosticDescriptor UntrackedMut = new("EECS039", "A Mut<T> of a component that is not tracked",
-        "Parameter '{0}' of [ForEach] method '{1}' is a Mut<{2}>, but {2} is not tracked (ITracked): nothing is stamped either way; take it by 'ref'",
+        "Parameter '{0}' of {1} is a Mut<{2}>, but {2} is not tracked (ITracked): nothing is stamped either way; take it by 'ref'",
         Category, DiagnosticSeverity.Info, true,
         "Mut<T> stamps the rows a method writes, one by one, so [Changed<T>] systems visit only those. A component that " +
         "is not tracked has no stamps: a Mut of it is a 'ref' parameter behind a wrapper, Value and Write() where the " +
@@ -131,7 +132,7 @@ public sealed partial class EasyEcsAnalyzer
         helpLinkUri: Help("EECS052"));
 
     public static readonly DiagnosticDescriptor SomeRowsWritten = new("EECS053", "A tracked component written by ref on only some rows",
-        "Parameter '{0}' of [ForEach] method '{1}' takes {2} by 'ref', but some rows pass through without a write, and every row it visits is stamped as changed; take it as a Mut<{2}> and write through Write() or SetIfChanged",
+        "Parameter '{0}' of {1} takes {2} by 'ref', but {3}; take it as a Mut<{2}> and write through Write() or SetIfChanged",
         Category, DiagnosticSeverity.Warning, true,
         "A 'ref' parameter of a tracked component (ITracked, DynamicBuffer<T>) stamps every row the method visits, whether " +
         "the method writes it or returns first, so [Changed<T>] systems visit rows whose value never changed (and send, " +
@@ -164,10 +165,13 @@ public sealed partial class EasyEcsAnalyzer
     {
         var syntax = (MethodDeclarationSyntax)context.Node;
         if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
-            || !Symbols.IsValidForEach(method) || method.PartialDefinitionPart != null) return; // a partial method: once, on its definition
+            || !Symbols.IsValidForEach(method) || method.PartialDefinitionPart != null // a partial method: once, on its definition
+            || Symbols.IsForEntity(method)) return; // one entity per call: no loop to vectorize (the generator asks for none)
         int mode = Symbols.Simd(method);
         if (mode == Symbols.SimdOff || mode == Symbols.SimdAuto && !Kernel.LooksEligible(method)) return;
-        if (Kernel.Vectorize(method, syntax, context.SemanticModel, static (i, _) => "", context.CancellationToken, out var reason) != null) return;
+        if (Kernel.Vectorize(method, syntax, context.SemanticModel, static (i, _) => "", context.CancellationToken, out var reason) != null
+            || mode == Symbols.SimdAuto && AccumulatesByHand(method, syntax, context.SemanticModel, context.CancellationToken)) return; // EECS086's
+
         context.ReportDiagnostic(Diagnostic.Create(mode == Symbols.SimdRequire ? NoVectorLoop : ScalarLoop,
             method.Locations.FirstOrDefault(), method.Name, reason));
     }
@@ -209,7 +213,9 @@ public sealed partial class EasyEcsAnalyzer
         context.RegisterCompilationStartAction(start =>
         {
             if (Core.Create(start.Compilation) is not { } core) return;
-            start.RegisterOperationBlockAction(c => AnalyzeBody(c, core));
+            var resets = new Resets();
+            resets.Register(start);
+            start.RegisterOperationBlockAction(c => AnalyzeBody(c, core, resets));
             start.RegisterOperationAction(c => AnalyzeCall(c, core), OperationKind.Invocation);
             start.RegisterOperationAction(c => AnalyzeItem(c), OperationKind.PropertyReference);
             start.RegisterOperationAction(c => AnalyzeComparison(c, core), OperationKind.Binary);
@@ -220,7 +226,7 @@ public sealed partial class EasyEcsAnalyzer
 
     // ---------------- [ForEach] methods and OnUpdate: parameters, lookups, allocations ----------------
 
-    private static void AnalyzeBody(OperationBlockAnalysisContext context, Core core)
+    private static void AnalyzeBody(OperationBlockAnalysisContext context, Core core, Resets resets)
     {
         if (context.OwningSymbol is not IMethodSymbol method) return;
         var body = context.OperationBlocks.FirstOrDefault(b => b is IMethodBodyOperation or IBlockOperation);
@@ -242,9 +248,10 @@ public sealed partial class EasyEcsAnalyzer
             }
 
             AnalyzeParameters(context, method, body, uses);
+            AnalyzeHandWritten(context, method, body, core, resets);
             AnalyzeScratch(context, method, body);
             AnalyzeLookups(context, core, method, body);
-            AnalyzeAllocations(context, method, body, "for every entity it visits, each update", true);
+            AnalyzeAllocations(context, method, body, Symbols.IsForEntity(method) ? "on every call" : "for every entity it visits, each update", true);
             // A parallel one is EECS010's: it cannot run in parallel until it is static, and offers the same fix.
             if (!method.IsStatic && !usesInstance && Symbols.IsSystem(method.ContainingType) && !Symbols.SharesSignature(method)
                 && method.PartialDefinitionPart == null && method.PartialImplementationPart == null && !Symbols.IsParallel(method))
@@ -278,7 +285,8 @@ public sealed partial class EasyEcsAnalyzer
         Dictionary<IParameterSymbol, List<IOperation>> uses)
     {
         bool empty = body is IMethodBodyOperation { BlockBody.Operations.Length: 0, ExpressionBody: null } or IBlockOperation { Operations.Length: 0 };
-        bool outside = Symbols.IsRunner(method);
+        bool outside = Symbols.IsRunner(method), one = Symbols.IsForEntity(method);
+        string described = Symbols.Describe(method), each = one ? "on every call" : "for every row";
         var requirements = Symbols.Requirements(method, context.CancellationToken);
         var excluded = Excluded(method, context.CancellationToken);
         int spans = method.Parameters.Count(p => Symbols.Classify(p) == Symbols.ParamKind.ComponentSpan);
@@ -320,20 +328,23 @@ public sealed partial class EasyEcsAnalyzer
                     {
                         // [With<T>] or [Changed<T>] (the method's or its group's) already requires it: the parameter only adds the column's walk.
                         context.ReportDiagnostic(Diagnostic.Create(UnusedParameter, location, ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Remove"),
-                            method.Name, p.Name, $"its column is still loaded for every row, and a filter already requires {shown}; remove it"));
+                            described, p.Name, $"its column is still loaded {each}, and a filter already requires {shown}; remove it"));
                         continue;
                     }
 
                     var with = stamps ? null : ImmutableDictionary<string, string?>.Empty.Add(FixKind, "With")
                         .Add(WithType, shown);
-                    context.ReportDiagnostic(Diagnostic.Create(UnusedParameter, location, with, method.Name, p.Name, stamps
-                        ? $"it stamps every row it visits as changed without writing it; require the component with [With<{shown}>] unless the stamp is the point"
-                        : $"its column is still loaded for every row; require the component with [With<{shown}>] instead"));
+                    context.ReportDiagnostic(Diagnostic.Create(UnusedParameter, location, with, described, p.Name, stamps
+                        ? $"it stamps {(one ? "the entity's row" : "every row it visits")} as changed without writing it; require the component with [With<{shown}>] unless the stamp is the point"
+                        : $"its column is still loaded {each}; require the component with [With<{shown}>] instead"));
                 }
                 else
                     context.ReportDiagnostic(Diagnostic.Create(UnusedParameter, location,
-                        ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Remove"), method.Name, p.Name, kind switch
+                        ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Remove"), described, p.Name, kind switch
                         {
+                            // One entity per call: no rows to build handles for, no stage to run alone in.
+                            Symbols.ParamKind.Entity or Symbols.ParamKind.World when one => "remove it",
+                            Symbols.ParamKind.Singleton when one => "it is resolved on every call; remove it",
                             Symbols.ParamKind.Entity => "it builds a handle for every row and makes the system run alone; remove it",
                             Symbols.ParamKind.World => "it makes the system run alone; remove it",
                             Symbols.ParamKind.Entities => "remove it",
@@ -369,11 +380,11 @@ public sealed partial class EasyEcsAnalyzer
             string cost = kind == Symbols.ParamKind.Singleton
                 ? "the system is scheduled as the singleton's writer, so no parallel stage runs it beside a reader"
                 : Symbols.Implements(type, Symbols.TrackChanges)
-                    ? "every row it visits is stamped as changed, so [Changed<" + type.Name + ">] systems visit rows nobody changed"
+                    ? (one ? "the entity's row is" : "every row it visits is") + " stamped as changed, so [Changed<" + type.Name + ">] systems visit rows nobody changed"
                     : "the system is scheduled as the component's writer, so no parallel stage runs it beside a reader";
             context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, location,
                 ImmutableDictionary<string, string?>.Empty.Add(FixKind, span ? "ReadOnlySpan" : "In"),
-                $"Parameter '{p.Name}' of [ForEach] method '{method.Name}' ({(span ? "Span<" + type.Name + ">" : "ref")})", cost,
+                $"Parameter '{p.Name}' of {described} ({(span ? "Span<" + type.Name + ">" : "ref")})", cost,
                 span ? "take it as a ReadOnlySpan<" + type.Name + ">" : "take it by 'in'"));
         }
     }
@@ -447,7 +458,9 @@ public sealed partial class EasyEcsAnalyzer
             ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Mut").Add("Writes", writes.Count.ToString(System.Globalization.CultureInfo.InvariantCulture))
             : ImmutableDictionary<string, string?>.Empty;
         context.ReportDiagnostic(Diagnostic.Create(SomeRowsWritten, p.Locations.FirstOrDefault(), locations, properties,
-            p.Name, method.Name, component.ToMinimalDisplayString(body.SemanticModel!, p.Locations.FirstOrDefault()?.SourceSpan.Start ?? 0)));
+            p.Name, Symbols.Describe(method), component.ToMinimalDisplayString(body.SemanticModel!, p.Locations.FirstOrDefault()?.SourceSpan.Start ?? 0),
+            Symbols.IsForEntity(method) ? "some calls return without a write, and every call stamps the row as changed"
+                : "some rows pass through without a write, and every row it visits is stamped as changed"));
     }
 
     /// <summary>Whether <paramref name="region"/> is a finally or lies inside one.</summary>
@@ -513,11 +526,11 @@ public sealed partial class EasyEcsAnalyzer
         var location = p.Locations.FirstOrDefault();
         if (reads)
             context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, location, ImmutableDictionary<string, string?>.Empty.Add(FixKind, "MutIn"),
-                $"Parameter '{p.Name}' of [ForEach] method '{method.Name}' (Mut<{component.Name}>)",
+                $"Parameter '{p.Name}' of {Symbols.Describe(method)} (Mut<{component.Name}>)",
                 "the system is scheduled as the component's writer, so no parallel stage runs it beside a reader", "take it by 'in'"));
         else if (plain && !Symbols.Implements(component, Symbols.TrackChanges))
             context.ReportDiagnostic(Diagnostic.Create(UntrackedMut, location, ImmutableDictionary<string, string?>.Empty.Add(FixKind, "MutRef"),
-                p.Name, method.Name, component.Name));
+                p.Name, Symbols.Describe(method), component.Name));
     }
 
     /// <summary>
@@ -531,17 +544,17 @@ public sealed partial class EasyEcsAnalyzer
         foreach (var (operation, type, singleton, presence) in RowLookups(core, method, body, all))
         {
             string name = type.ToMinimalDisplayString(operation.SemanticModel!, operation.Syntax.SpanStart);
-            bool job = !Symbols.IsGeneratedJob(method);
+            bool job = !Symbols.IsGeneratedJob(method), one = !job && Symbols.IsForEntity(method);
             string advice = job ? (singleton ? $"keep it in a field of the job, set before the loop" : $"add {name} to the job's components")
-                : singleton ? $"take it as a parameter ('in {name}' or 'ref {name}'), resolved once per pass"
+                : singleton ? $"take it as a parameter ('in {name}' or 'ref {name}'), resolved once per {(one ? "call" : "pass")}"
                 : presence ? $"take a {(Symbols.IsIndexed(type) ? "ReadOnlyMaybe" : "Maybe")}<{name}> parameter, or split the method with [With<{name}>] / [Without<{name}>]"
                 : Symbols.IsIndexed(type) ? $"take it as an 'in {name}' parameter, or a ReadOnlyMaybe<{name}> when some entities lack it"
                 : $"take it as a parameter ('in {name}' or 'ref {name}'), or a Maybe<{name}> when some entities lack it";
             // The fix goes on the first lookup of each type: it replaces every lookup of the type at once.
             var fix = !job && !presence && fixedTypes.Add(type) ? ParameterFix(method, body, type, singleton, all, context.CancellationToken) : null;
             context.ReportDiagnostic(Diagnostic.Create(RowLookup, operation.Syntax.GetLocation(), fix?.Uses ?? [], fix?.Properties,
-                job ? $"Job '{method.ContainingType.Name}'" : $"[ForEach] method '{method.Name}'", name,
-                Shorten(operation.Syntax), advice));
+                job ? $"Job '{method.ContainingType.Name}'" : Symbols.Describe(method), name,
+                Shorten(operation.Syntax), advice, one ? "beside the lookup its entry point makes" : "for every entity it visits"));
         }
     }
 
@@ -783,10 +796,15 @@ public sealed partial class EasyEcsAnalyzer
                 || operation is IInvocationOperation call && (Conditional(call.TargetMethod) || Symbols.Named(call.TargetMethod.ContainingType, "System.Console")))
                 continue;
             if (FillsOnce(operation)) continue; // allocated once (per thread): the next rows find it there
+            // EECS071's: its fix draws from EntityRandom, which allocates nothing.
+            if (operation is IObjectCreationOperation { Type: var random } && Symbols.Named(random, "System.Random") && Symbols.IsForEach(method)) continue;
             if (Allocates(operation, pass) is { } what)
             {
                 var where = operation is IForEachLoopOperation loop ? loop.Collection.Syntax : operation.Syntax;
-                context.ReportDiagnostic(Diagnostic.Create(Allocation, where.GetLocation(), Shorten(where), method.Name, runs, what));
+                context.ReportDiagnostic(Diagnostic.Create(Allocation, where.GetLocation(), Shorten(where), method.Name, runs, what,
+                    Symbols.IsForEach(method) && ScratchType(operation) is { } kept
+                        ? $"; a Scratch<{kept.ToMinimalDisplayString(operation.SemanticModel!, where.SpanStart)}> parameter keeps one per thread for the next rows (clear it before use)"
+                        : ""));
                 if (operation is not ILoopOperation) continue; // one report per expression: its parts allocate as part of it
             }
 
@@ -804,6 +822,18 @@ public sealed partial class EasyEcsAnalyzer
             && (IsScratch(Uses.Root(coalesce.Target)) || coalesce.Target is IFieldReferenceOperation { Field.IsStatic: true })
         || operation is ISimpleAssignmentOperation assignment && IsScratch(Uses.Root(assignment.Target))
         && Ancestors(assignment).Any(a => a is IConditionalOperation);
+
+    /// <summary>
+    /// The type a <c>Scratch&lt;T&gt;</c> parameter could keep instead of <paramref name="operation"/> creating it per row:
+    /// an object or an array the code creates (not a params array, a closure or a string).
+    /// </summary>
+    private static ITypeSymbol? ScratchType(IOperation operation) => operation switch
+    {
+        IObjectCreationOperation { Type: { IsReferenceType: true } type } => type,
+        IArrayCreationOperation { IsImplicit: false, Type: { } type } => type,
+        ICollectionExpressionOperation { Type: { IsReferenceType: true } type } => type,
+        _ => null,
+    };
 
     private static bool IsScratch(IParameterSymbol? parameter) => parameter != null && Symbols.Classify(parameter) == Symbols.ParamKind.Scratch;
 
@@ -983,7 +1013,8 @@ public sealed partial class EasyEcsAnalyzer
             return;
         }
 
-        if (!generated && !RowLookupOf(call, context.ContainingSymbol, core) && !SetAfterCreation(call, core)) GeneratedEquivalent(context, call, core);
+        if (!generated && !RowLookupOf(call, context.ContainingSymbol, core) && !OtherLookupOf(call, context.ContainingSymbol, core)
+            && !SetAfterCreation(call, core)) GeneratedEquivalent(context, call, core);
     }
 
     /// <summary>
@@ -993,6 +1024,12 @@ public sealed partial class EasyEcsAnalyzer
     private static bool RowLookupOf(IInvocationOperation call, ISymbol containing, Core core) =>
         containing is IMethodSymbol method && (Symbols.IsGeneratedJob(method) || Symbols.JobInterface(method) != null)
         && RowLookups(core, method, Symbols.Root(call)).Any(l => l.Operation == call);
+
+    /// <summary>Whether <paramref name="call"/> is a read EECS087 hands to a Lookup&lt;T&gt; (which reads by id, no shorter spelling to give).</summary>
+    private static bool OtherLookupOf(IInvocationOperation call, ISymbol containing, Core core) =>
+        containing is IMethodSymbol method && Symbols.IsForEach(method)
+        && method.Parameters.Any(p => Symbols.Classify(p) == Symbols.ParamKind.World)
+        && OtherEntityReads(method, Symbols.Root(call), core) is { } found && found.Reads.Any(r => r.Operation == call);
 
     /// <summary>Whether <paramref name="call"/> is the Set EECS052 folds into the creation before it (and so removes).</summary>
     private static bool SetAfterCreation(IInvocationOperation call, Core core) =>

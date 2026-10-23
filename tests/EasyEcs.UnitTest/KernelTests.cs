@@ -813,6 +813,7 @@ public class KernelTests
             var healths = new Heat[count];
             var damages = new Level[count];
             var entities = new Entity[count];
+            world.Reserve<Heat, Level>(count);
             for (int i = 0; i < count; i++)
             {
                 healths[i] = new Heat { Value = every > 0 && i % every == 0 ? 1 : 100 + i };
@@ -832,6 +833,7 @@ public class KernelTests
         using var census = new World();
         var r = new Random(count);
         var ranks = new Rank[count];
+        census.Reserve<Rank>(count);
         for (int i = 0; i < count; i++)
         {
             ranks[i] = NextTally(r, i);
