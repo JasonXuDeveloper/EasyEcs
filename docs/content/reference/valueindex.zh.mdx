@@ -10,7 +10,7 @@ description: "一个 World 里组件 T 的值索引（World.Index）。EasyEcs�
 public sealed class ValueIndex<T, TKey> where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
 ```
 
-一个 World 里组件 `T` 的值索引（[`World.Index`](/zh/docs/reference/world#index)）。写入值时索引立即更新：`Set` 和 `CreateEntity` 当场重新索引实体（O(1)），实体一销毁或失去这个组件就离开索引，所以查找时没有欠账要补。第一次查找（以及 [`World.Restore`](/zh/docs/reference/world#restore) 之后的第一次）会把每一行索引一遍；唯一组件（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)）的索引则从 World 里第一张含有它的表起就是最新的，并且拒绝会让第二个实体拿到同一个键的写入。所有键都出现过之后，查找不再分配内存；索引和组件值一样，属于 World 的所有者线程（在 `OnUpdate` 或实例方法里查找的系统会独占运行）。
+一个 World 里组件 `T` 的值索引（[`World.Index`](/zh/docs/reference/world#index)）。写入值时索引立即更新：`Set` 和 `CreateEntity` 当场重新索引实体（O(1)），实体一销毁或失去这个组件就离开索引，所以查找时没有欠账要补。第一次查找（以及 [`World.Restore`](/zh/docs/reference/world#restore) 之后的第一次）会把每一行索引一遍；唯一组件（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)）的索引则从 World 里第一张含有它的表起就是最新的，并且拒绝会让第二个实体拿到同一个键的写入。所有键都出现过之后，查找不再分配内存；索引和组件值一样，属于 World 的所有者线程（在 `[OnUpdate]` 钩子或接收 `World` 的 `[ForEach]` 方法里查找的系统会独占运行）。
 
 ## 属性 [#properties]
 
