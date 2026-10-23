@@ -201,7 +201,7 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                EntityRandom); EECS088: two EntityRandom draws of one stream for one entity in pass code
                                (fix: the next free stream), or a draw in a loop that does not vary its stream
   EasyEcsAnalyzer.Parts.cs     EECS062-069: generated parts (not partial, hand-written members, fields no attribute
-                               combines), hand-written reductions and keys the attributes could declare, a wrong
+                               combines), hand-written reductions, keys and groups the attributes could declare, a wrong
                                Identity, a setup attribute on a type it does not fit, a managed type without a Nino
                                formatter (Warning when the code saves what holds it: entity saves write no singletons)
   EasyEcsAnalyzer.Forms.cs     EECS080-085: what the generator declares for code written by hand (a one-entity job
