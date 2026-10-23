@@ -1633,7 +1633,9 @@ use. Given to the creation, the component lands in the final table with the othe
 ([D59](/en/docs/decisions#d59-analyzer-rules)). The rule reports a creation stored in
 a local and followed directly by `local.Set(value)` or a generated `local.SetX(...)` of a component it was not given,
 when the value does not depend on the entity or on a call; the fix moves the value into the creation. A grouped
-component, the world's own tags and a creation that already has nine components are left alone.
+component, the world's own tags, a creation that already has nine components and an `Instantiate` of a prefab that
+declares the column with [`SetAbsent<T>()`](/en/docs/guide/prefabs#set-absent) (the Set flips a presence bit and moves
+no row) are left alone.
 
 ```csharp doccheck=expect-EECS052
 var bullet = world.CreateEntity(new Position(0, 0));

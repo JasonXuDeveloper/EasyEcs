@@ -1512,8 +1512,9 @@ world.Update();
 `CreateEntity` 和 `Instantiate` 会把实体放进它们收到的那组组件对应的表。紧接着的语句再 `Set` 另一个组件，又会把它搬一次：多一次行复制，
 途中还多出一张可能没有别的实体用的表。把组件交给创建调用，它就和其他组件一起落进最终的表
 （[D59](/zh/docs/decisions#d59-analyzer-rules)）。规则报出存进局部变量的创建调用，后面紧跟着对一个创建时没给的组件的 `local.Set(value)`
-或生成的 `local.SetX(...)`，且这个值不依赖该实体、也不来自方法调用；修复把值移进创建调用。分组组件、World 自己的标签，以及已经带了九个组件
-的创建不报。
+或生成的 `local.SetX(...)`，且这个值不依赖该实体、也不来自方法调用；修复把值移进创建调用。分组组件、World 自己的标签、已经带了九个组件
+的创建，以及用 [`SetAbsent<T>()`](/zh/docs/guide/prefabs#set-absent) 声明了这一列的预制体的 `Instantiate` 不报（这时 Set 只翻转一个
+存在位，不搬行）。
 
 ```csharp doccheck=expect-EECS052
 var bullet = world.CreateEntity(new Position(0, 0));
