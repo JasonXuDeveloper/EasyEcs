@@ -311,7 +311,12 @@ internal static class TileWorlds
 
 internal static class TileSystems
 {
-    /// <summary>The 9-point blur of one plate, a row of 16 in four vectors.</summary>
+    /// <summary>
+    /// The 9-point blur of one plate, a row of 16 in four vectors. Inlined by force: the systems' one-line methods are
+    /// the JIT's root, whose inline budget scales with its own IL, so inlined by size it would leave the cursor's loads
+    /// as calls (2.9x slower).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Blur<TTile>(Tile<Warmth, TTile> warmth, Mut<DynamicBuffer<NextWarmth>> next)
         where TTile : struct, IComponent, ITileShape
     {
