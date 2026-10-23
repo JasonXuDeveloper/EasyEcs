@@ -601,7 +601,12 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                         continue;
                                     }
 
-                                    if (bits == 0) continue;
+                                    if (bits == 0)
+                                    {
+                                        w = rows.NextPassing(archetype, w + 1, words) - 1; // words without a passing row
+                                        continue;
+                                    }
+
                                     int low = (w << 6) + BitOperations.TrailingZeroCount(bits), high = (w << 6) + 64 - BitOperations.LeadingZeroCount(bits);
                                     ulong passing = bits >> (low & 63);
                 {{StampWord(n, "                    ", "w", "bits")}}

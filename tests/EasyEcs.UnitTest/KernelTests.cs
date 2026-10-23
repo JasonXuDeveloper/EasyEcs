@@ -1044,6 +1044,7 @@ public class KernelTests
         ("one per word", i => (i & 63) == 5),
         ("all but one per word", i => (i & 63) != 40),
         ("after row 70", i => i >= 70),
+        ("one per 300 rows", i => i % 300 != 7), // words without a passing row between them: skipped
     ];
 
     private static readonly int[] HoleCounts = [1, 8, 17, 64, 65, 130, 1000];
