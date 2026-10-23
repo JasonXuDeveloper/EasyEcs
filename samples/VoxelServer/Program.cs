@@ -50,6 +50,9 @@ Console.WriteLine($"restarted from the save: {restarted.Count<Player>()} players
 Console.Error.WriteLine($"save: {save.WrittenCount / 1024} KiB");
 // #endregion save
 
+// Not part of the lesson: the check that a tick in steady state allocates nothing (Host/Steady.cs).
+Steady.Check(world, regions, capacity);
+
 // The server's world, the same on every start (and in Benchmark/): its options, its singletons, its prefabs and what
 // it reserves, its systems, its players.
 public static class Startup
@@ -137,8 +140,9 @@ public static class Startup
     // #region capacity
     // Pooling reuses what the world gave back; the first time the world reaches a size still allocates it. A server
     // sized for its players reserves that peak before the first tick instead: the tables and the entity storage of
-    // every kind (and the indexes, which follow the storage), and the buffer lists of the chunks. Then no tick
-    // allocates, even while the world grows to its peak; beyond it, the world grows as it would have.
+    // every kind (and the indexes, which follow the storage), and the buffer lists of the chunks. Then a tick
+    // allocates only for a peak no reserve sizes (a chunk holding more entities than any before it, a longer list of
+    // packets), once: a tick the world has been through allocates nothing (Host/Steady.cs checks it).
     static void Reserve(World world, in Capacity capacity)
     {
         // Each Reserve sizes the entity storage for its own count; the world holds them all at once.

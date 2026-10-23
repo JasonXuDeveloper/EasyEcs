@@ -4,7 +4,8 @@ using EasyEcs;
 namespace VoxelServer;
 
 // Not part of the lesson: the tick loop and the report. The world's state is printed every ten seconds of game time
-// (deterministic, so CI compares it with the README); the time each system took goes to stderr.
+// (deterministic, so CI compares it with the README); the time each system took, what it allocated, and the check that
+// a tick in steady state allocates nothing go to stderr.
 public static class Server
 {
     public static void Run(World world, int ticks, bool realtime)
@@ -14,11 +15,7 @@ public static class Server
         var warmUp = new long[world.Systems.Count];
         for (int i = 1; i <= ticks; i++)
         {
-            // #region tick
-            world.Update<ClientInput>();
-            world.Update<Simulation>();
-            world.Update<Replication>();
-            // #endregion tick
+            Tick(world);
             if (i == WarmUp) Allocated(world, warmUp);
             if (i % (10 * Rules.TicksPerSecond) == 0) Report(world);
             // A vanilla server sleeps until the next 50 ms boundary; without --realtime the run goes flat out.
@@ -32,10 +29,19 @@ public static class Server
         Timings(world, ticks, budget, warmUp);
     }
 
+    public static void Tick(World world)
+    {
+        // #region tick
+        world.Update<ClientInput>();
+        world.Update<Simulation>();
+        world.Update<Replication>();
+        // #endregion tick
+    }
+
     // The first fifteen seconds build what the world uses from then on: its queries, the tables of its kinds of
     // entities, the chunks' buffers until the pool has them back. Program.cs reserves the peak the world grows to, so
     // what a tick allocates after them is a new peak only (more entities in one chunk than any chunk held before, a
-    // kind of chunk save not seen yet), a few bytes now and then.
+    // kind of chunk save not seen yet), a few bytes now and then; Steady.Check replays ticks to show the rest is 0.
     const int WarmUp = 15 * Rules.TicksPerSecond;
 
     // What each system allocated so far.

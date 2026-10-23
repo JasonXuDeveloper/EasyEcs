@@ -36,7 +36,7 @@ public class TickBenchmark
         _start = new RegionFiles(capacity.Chunks * 4);
         _world = Startup.Create(_regions, capacity, measure: false);
         Startup.AddPlayers(_world, Players);
-        for (int i = 0; i < From; i++) Tick(_world);
+        for (int i = 0; i < From; i++) Server.Tick(_world);
         _startup = ComponentSet.Create().WithSingleton<Prefabs>().WithSingleton<Regions>();
         _world.SaveWithout(_save, in _startup);
         _regions.CopyTo(_start);
@@ -52,7 +52,7 @@ public class TickBenchmark
     [Benchmark]
     public void HundredTicks()
     {
-        for (int i = 0; i < Ticks; i++) Tick(_world);
+        for (int i = 0; i < Ticks; i++) Server.Tick(_world);
     }
 
     [GlobalCleanup]
@@ -61,12 +61,5 @@ public class TickBenchmark
         _world.Dispose();
         _regions.Dispose();
         _start.Dispose();
-    }
-
-    static void Tick(World world)
-    {
-        world.Update<ClientInput>();
-        world.Update<Simulation>();
-        world.Update<Replication>();
     }
 }
