@@ -72,7 +72,7 @@ EasyEcs' features to their place in this file.
 | [Change tracking](/en/docs/guide/change-tracking) and removal detection | `ReplicationSystem`; `WrittenSinceCheckpoint` |
 | [`ChangedAny`](/en/docs/guide/change-tracking#changed-any) per client, [destroy log](/en/docs/guide/change-tracking#destroy-log) | `CatchUp`: one kept filter, each client's tick; `DestroyedSince` |
 | [Dynamic buffers](/en/docs/guide/dynamic-buffers) | every player's bag of `Loot` |
-| [Groups](/en/docs/guide/groups) (`[Group]`, `GroupBy`, `InGroup`) | `Zone`: a table per zone |
+| [Groups](/en/docs/guide/groups) (`[Group]`, `[GroupBy]`, `InGroup`) | `Zone`: a table per zone |
 | [Ordered index, relations, target policies](/en/docs/guide/indexes-and-relations) | `Kills` leaderboard; `Friend` links, dropped when a player leaves |
 | [Unique keys](/en/docs/guide/indexes-and-relations#unique-keys) (`[UniqueKey]`, `Get` / `TryGet`) | `Account`: `Join` and `Kick` find a hero by account |
 | System groups, `[UpdateInterval(n, Phase = p)]`, ordering, lifecycle | `Replication`; `ManaSystem`, `RegenerationSystem`; `ClockSystem`; `PlanningSystem.OnCreate` |
@@ -89,8 +89,10 @@ Every component is a plain `record struct`. Four declarations change how the wor
 a hidden column of change ticks (`Health`, `Burning` and `Goal` are replicated), `[Group]` splits tables by a field's
 value (one table set per `Zone`), `[IndexKey]` keeps a value index of it (`Kills`, the leaderboard), and `[UniqueKey]` makes
 its key name one entity (`Account`: one hero per account). The generator writes the `IGroup` / `IIndexed<TKey>` /
-`IUniqueIndexed<TKey>` part of these `partial` structs. `Spawn` is a cleanup component, `Loot` and `Friend` are the
-elements of dynamic buffers, and the empty structs are tags.
+`IUniqueIndexed<TKey>` part of these `partial` structs. Two more declare the world's setup on the type, so every
+world holds it: `[GroupBy]` groups the tables by `Zone`, and `[WhenTargetDestroyed]` drops a destroyed player from
+the `Friend` links to it. `Spawn` is a cleanup component, `Loot` and `Friend` are the elements of dynamic buffers, and
+the empty structs are tags.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#components</include>
 
@@ -208,7 +210,7 @@ three values changed, and `Shot` holds only what every shot shares: the rest is 
 ### Setting up the world [#setup]
 
 The constructor configures the world (parallel systems, timings, a failing system switched off instead of thrown, a
-destroy log of one id per unit), groups tables by `Zone`, sets the friend links' target policy, registers the systems
+destroy log of one id per unit; the grouping and the target policy are declared on their types), registers the systems
 in tick order and spawns the units in bulk: one table growth per wave. `Reserve` sizes the NPC tables for
 respawn waves, so they never grow during a tick. `SpawnNpc` instantiates a respawned NPC with its position given.
 
