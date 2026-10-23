@@ -498,7 +498,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
 
                     /// <summary>
-                    /// <see cref="Match{{"{"}}{{tps}}{{"}"}}"/> for a pass of a job that runs one query (<paramref name="one"/>: its
+                    /// <see cref="Match{{"{"}}{{tps}}{{"}"}}(in QueryFilter, {{List(n, _ => "out ushort")}})"/> for a pass of a job that runs one query (<paramref name="one"/>: its
                     /// <c>OneQuery</c>, a JIT-time constant): the match kept for the job type, without comparing filters.
                     /// </summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
