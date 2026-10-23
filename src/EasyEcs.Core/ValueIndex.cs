@@ -258,8 +258,8 @@ internal struct TargetSlots
 /// (and the first after <see cref="World.Restore(WorldSnapshot)"/>) indexes every row once; the index of a unique
 /// component (<see cref="IUniqueIndexed{TKey}"/>) is current from the world's first table holding it instead, and
 /// refuses a write that would give a key to a second entity. Lookups allocate nothing once every key has
-/// been seen; the index belongs to the world's owner thread, like component values (systems that look up from
-/// <c>OnUpdate</c> or instance methods run alone).
+/// been seen; the index belongs to the world's owner thread, like component values (a system that looks up from an
+/// <c>[OnUpdate]</c> hook or a <c>[ForEach]</c> method taking the <see cref="World"/> runs alone).
 /// </summary>
 public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, World.IUniqueOf<T>, World.IUniqueIndex
     where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
