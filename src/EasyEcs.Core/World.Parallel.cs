@@ -100,10 +100,27 @@ public sealed partial class World
     /// </summary>
     internal void RunChunks(ParallelWork work, int chunks)
     {
+        if (chunks < 2)
+        {
+            // One chunk runs on this thread, as a serial pass does: the owner's plain freeze when nothing holds the gate
+            // (D105), no parallel region (four locked instructions otherwise); a held gate refuses changes anyway.
+            bool froze = Gate.FreezeAlone();
+            try
+            {
+                if (chunks == 1) work.Run(0);
+            }
+            finally
+            {
+                if (froze) Gate.ThawAlone();
+            }
+
+            return;
+        }
+
         Gate.FreezeParallel(); // the chunks may run on several threads: a structural change throws
         try
         {
-            if (chunks < 2 || !TryRunChunks(work, chunks))
+            if (!TryRunChunks(work, chunks))
                 for (int i = 0; i < chunks; i++) work.Run(i);
         }
         finally

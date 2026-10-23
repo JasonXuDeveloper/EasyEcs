@@ -513,4 +513,57 @@ public class ParallelTests
         Assert.DoesNotThrow(() => world.RunChunks(work, 8), "the next run is normal");
         Assert.That(world.CreateEntity(new Counter()).IsAlive, Is.True, "the gate is open again");
     }
+
+    /// <summary>One item that tries a structural change, and records whether the world was in a parallel region.</summary>
+    private sealed class StructuralWork(World world) : World.ParallelWork
+    {
+        public bool Refused, InParallel;
+
+        public override void Run(int index)
+        {
+            InParallel = world.Gate.InParallel;
+            try
+            {
+                world.CreateEntity(new Counter());
+            }
+            catch (InvalidOperationException)
+            {
+                Refused = true;
+            }
+        }
+    }
+
+    [Test]
+    public void OneChunkRunsAsASerialPassOnTheCallingThread()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        var work = new StructuralWork(world);
+        world.RunChunks(work, 1);
+        Assert.That((work.Refused, work.InParallel), Is.EqualTo((true, false)), "frozen as a serial pass, no parallel region");
+        Assert.That(world.Count<Counter>(), Is.Zero);
+        Assert.That(world.CreateEntity(new Counter()).IsAlive, Is.True, "the gate is open again");
+
+        world.RunChunks(work, 0); // no chunk: nothing runs, nothing stays frozen
+        Assert.That(world.CreateEntity(new Counter()).IsAlive, Is.True);
+    }
+
+    private struct OneChunkInside : IForEachBatch<Counter>
+    {
+        public World World;
+        public StructuralWork Work;
+
+        public void Execute(EntitySpan entities, Span<Counter> c1) => World.RunChunks(Work, 1);
+    }
+
+    [Test]
+    public void OneChunkInsideAFrozenRegionLeavesItFrozen()
+    {
+        using var world = new World();
+        world.CreateEntity(new Counter());
+        var work = new StructuralWork(world);
+        var job = new OneChunkInside { World = world, Work = work };
+        world.ForEachBatch<Counter, OneChunkInside>(ref job);
+        Assert.That(work.Refused, Is.True, "the batch job's freeze holds inside the chunk");
+        Assert.That(world.CreateEntity(new Counter()).IsAlive, Is.True, "and ends with the batch job");
+    }
 }
