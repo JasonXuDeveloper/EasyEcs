@@ -3,9 +3,9 @@
   <member name="T:EasyEcs.SystemErrorPolicy" source="0dc977ce01c0">
     <summary>系统抛出异常时怎么处理（<see cref="P:EasyEcs.WorldOptions.SystemErrors" />）。</summary>
   </member>
-  <member name="F:EasyEcs.SystemErrorPolicy.Disable" source="99e94d57ff38">
+  <member name="F:EasyEcs.SystemErrorPolicy.Disable" source="13c10d13f7f0">
     <summary>
-      停掉出错的系统（<see cref="P:EasyEcs.EcsSystem.Enabled" /> 设为 false），把异常存进 <see cref="P:EasyEcs.EcsSystem.Error" />，
+      停掉出错的系统（<see cref="P:EasyEcs.SystemHandle.Enabled" /> 设为 false），把异常存进 <see cref="P:EasyEcs.SystemHandle.Error" />，
       然后接着完成这次更新：失败成了数据，应用程序从 <see cref="P:EasyEcs.World.Systems" /> 里读取。
     </summary>
   </member>

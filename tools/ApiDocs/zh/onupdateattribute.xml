@@ -1,0 +1,9 @@
+<doc>
+  <member name="T:EasyEcs.OnUpdateAttribute" source="8e7cb7a7b0bd">
+    <summary>
+      <see cref="T:EasyEcs.EcsSystemAttribute">[EcsSystem]</see> 的一个静态方法，系统每次运行时在它的 [ForEach] 方法之前调用。它接收
+      <see cref="T:EasyEcs.World" />、<see cref="T:EasyEcs.SystemHandle" />、两者或都不接收，返回 void；每个系统一个（EECS076）。它可能碰任何数据，
+      所以这个系统永远不和别的系统共用并行阶段（<see cref="M:EasyEcs.SystemAccess.RunAlone" />）。
+    </summary>
+  </member>
+</doc>

@@ -48,22 +48,23 @@
       <c>GetOrAddX()</c>。
     </exception>
   </member>
-  <member name="M:EasyEcs.World.AddSystem(EasyEcs.EcsSystem,System.Boolean)" source="097ef113bf29">
+  <member name="M:EasyEcs.World.AddSystem``1(System.Boolean)" source="7f4e2a61acf7">
     <summary>
-      把 <paramref name="system" /> 挂到它的分组（<see cref="T:EasyEcs.UpdateInGroupAttribute`1" /> 指定的分组，没有就是默认分组），
-      然后调用它的 <see cref="M:EasyEcs.EcsSystem.OnCreate" />。
+      把系统 <typeparamref name="T" />（一个 <see cref="T:EasyEcs.EcsSystemAttribute">[EcsSystem]</see> ref struct）加到它的分组
+      （<see cref="T:EasyEcs.UpdateInGroupAttribute`1" /> 指定的分组，没有就是默认分组），然后运行它的
+      <see cref="T:EasyEcs.OnCreateAttribute">[OnCreate]</see> 方法。一个系统在每个 World 里只能加一次：再加会抛异常。冷路径：
+      分配它的记录和分组的新调度，划分阶段 O(系统数²)。
     </summary>
-    <param name="system">要挂上的系统，还不属于任何 World。</param>
     <param name="changesFromNow">
       为 false（默认）时，它的 <c>[Changed&lt;T&gt;]</c> 和 <c>[Removed&lt;T&gt;]</c> 方法第一次运行会访问 World 创建以来写过或移除过的每一行。
-      为 true 时只看这次调用之后的写入和移除，就像这个系统刚刚运行过一样（<see cref="P:EasyEcs.EcsSystem.LastRunTick" />）；
+      为 true 时只看这次调用之后的写入和移除，就像这个系统刚刚运行过一样（<see cref="P:EasyEcs.SystemHandle.LastRunTick" />）；
       适合加到已经有状态的 World 上的系统（<see cref="M:EasyEcs.World.Load(System.ReadOnlySpan{System.Byte},System.Boolean)" /> 之后的重启、
       之后才打开的系统）。
     </param>
-  </member>
-  <member name="M:EasyEcs.World.AddSystem``1(System.Boolean)" source="9bd82d35eb71">
-    <summary>创建一个系统，挂到这个 World 上，然后调用它的 <see cref="M:EasyEcs.EcsSystem.OnCreate" />。</summary>
-    <param name="changesFromNow">见 <see cref="M:EasyEcs.World.AddSystem(EasyEcs.EcsSystem,System.Boolean)" />。</param>
+    <returns>系统的句柄。</returns>
+    <exception cref="T:System.NotSupportedException">
+      没有程序集为 <typeparamref name="T" /> 注册代码：它不是 [EcsSystem]，或者是没有任何程序集用到的封闭泛型系统（用反射造出来的）。
+    </exception>
   </member>
   <member name="M:EasyEcs.World.Any``2(EasyEcs.QueryFilter@)" source="8d4f20b3c898">
     <summary>
@@ -128,11 +129,11 @@
       O(匹配的表数 + 行数)；一张表的行只搬一次，搬到带这个标签的表。只能在所有者线程调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.Dispose" source="29fd805099da">
+  <member name="M:EasyEcs.World.Dispose" source="0344323eac81">
     <summary>
-      销毁所有系统（按相反顺序调用 OnDestroy），然后释放全部存储。即使某个系统的 OnDestroy 抛出异常，其余系统的 OnDestroy
-      也都会执行，存储也照样释放；在 <see cref="F:EasyEcs.SystemErrorPolicy.Throw" /> 下，最后重新抛出第一个异常。之后的每个结构变更都会抛出
-      <see cref="T:System.ObjectDisposedException" />。
+      销毁所有系统（按相反顺序调用 [OnDestroy]），然后释放全部存储。即使某个系统的 [OnDestroy] 抛出异常，其余系统的 [OnDestroy]
+      也都会执行，存储也照样释放；在 <see cref="F:EasyEcs.SystemErrorPolicy.Throw" /> 下，最后重新抛出第一个异常。之后每个句柄都失效，
+      每个结构变更都会抛出 <see cref="T:System.ObjectDisposedException" />。
     </summary>
   </member>
   <member name="M:EasyEcs.World.EnableAll``1(EasyEcs.QueryFilter@)" source="bff27bef605f">
@@ -194,12 +195,6 @@
   </member>
   <member name="M:EasyEcs.World.GetSingleton``1" source="94e90f9efefe">
     <summary>单例 <typeparamref name="T" /> 的 ref；没有添加过时抛异常。O(1)。</summary>
-  </member>
-  <member name="M:EasyEcs.World.TryGetSystem``1(``0@)" source="f6721f062742">
-    <summary>
-      查找类型为 <typeparamref name="T" /> 的系统（给工具、测试和承载 World 的代码用，不要在别的系统里调用）。World 里没有时返回 false，
-      系统为 null。O(系统数)。
-    </summary>
   </member>
   <member name="M:EasyEcs.World.GroupBy``1" source="9181338b9284">
     <summary>
@@ -304,8 +299,11 @@
   <member name="M:EasyEcs.World.RemoveSingleton``1" source="89c98c21f4b6">
     <summary>移除单例 <typeparamref name="T" />；没有添加过时返回 false。O(1)。</summary>
   </member>
-  <member name="M:EasyEcs.World.RemoveSystem``1" source="aa99f60dfe1f">
-    <summary>移除类型为 <typeparamref name="T" /> 的系统（会调用它的 <see cref="M:EasyEcs.EcsSystem.OnDestroy" />）。</summary>
+  <member name="M:EasyEcs.World.RemoveSystem``1" source="8b81ff4b4e2d">
+    <summary>
+      移除系统 <typeparamref name="T" />（会运行它的 <see cref="T:EasyEcs.OnDestroyAttribute">[OnDestroy]</see> 方法）：World 里没有时返回 false。
+      它的句柄随之失效。
+    </summary>
   </member>
   <member name="M:EasyEcs.World.RemoveTypes(System.Reflection.Assembly)" source="46add46a7eaa">
     <summary>
@@ -426,11 +424,11 @@
       <see cref="P:EasyEcs.WorldOptions.DestroyLogCapacity" /> 的环第一次覆盖记录之前为 0；日志关闭时为 <see cref="F:System.UInt64.MaxValue" />。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.DescribeSchedule" source="7f61b9f32d48">
+  <member name="M:EasyEcs.World.DescribeSchedule" source="42f2038718ac">
     <summary>
       World 怎样运行它的系统，用于诊断（启动日志、仪表盘、文档里的图）：每个分组的阶段，每个系统按名字列出的读写，一个系统为什么要等它前面的阶段
       （先后约束，或者冲突的数据），以及只靠注册顺序排先后的冲突系统对：反过来注册，它们的顺序就会颠倒。冷路径：结果要分配内存，
-      每个分组 O(系统数³)；任何线程都能调用（它读的是最近一次 <see cref="M:EasyEcs.World.AddSystem(EasyEcs.EcsSystem,System.Boolean)" /> /
+      每个分组 O(系统数³)；任何线程都能调用（它读的是最近一次 <see cref="M:EasyEcs.World.AddSystem``1(System.Boolean)" /> /
       <see cref="M:EasyEcs.World.RemoveSystem``1" /> 发布的调度）。
     </summary>
   </member>
@@ -520,7 +518,6 @@
       被追踪组件的行打 tick）。零分配。
     </summary>
   </member>
-
   <member name="M:EasyEcs.World.SaveEntitiesWithout(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId},EasyEcs.ComponentSet@)" source="dc17a758c657">
     <summary>
       不写 <paramref name="exclude" /> 里的组件的 <see cref="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" />：
@@ -551,7 +548,6 @@
       每种 job 类型第一次调用之后零分配。
     </summary>
   </member>
-
   <member name="M:EasyEcs.World.ForEachBatchParallel``3(``2@,EasyEcs.QueryFilter@,System.Int32)" source="e090b2815c24">
     <summary>
       多线程版的 <see cref="M:EasyEcs.World.ForEachBatch``3(``2@,EasyEcs.QueryFilter@)" />：匹配的行切成块（每个线程大约四块，行数是 64 的倍数，最多
@@ -563,7 +559,6 @@
       每种 job 类型第一次调用之后零分配。
     </summary>
   </member>
-
   <member name="M:EasyEcs.World.CollectIds``2(System.Span{EasyEcs.EntityId},EasyEcs.QueryFilter@)" source="4fdbd9b93977">
     <summary>
       把拥有 <c>T1, T2</c> 全部组件（并且满足 <paramref name="filter" />）的存活实体的 id 写进 <paramref name="into" />，
@@ -579,14 +574,12 @@
       （计数对间隔取模等于它的相位时，系统执行）。O(1)。
     </summary>
   </member>
-
   <member name="M:EasyEcs.World.ForEachMasked``3(``2@,EasyEcs.QueryFilter@)" source="78b2042bb465">
     <summary>
       用于还接收"只有部分行通过"的字的 job 的 <see cref="M:EasyEcs.World.ForEachBatch``3(``2@,EasyEcs.QueryFilter@)" />：
       在需要逐行检查的表里，行全部通过的字并入前面几个字的那一段，部分行通过的字整个交给 job，通过的行以位的形式给出。零分配。
     </summary>
   </member>
-
   <member name="M:EasyEcs.World.GetOrAddSingleton``1(``0@)" source="8767f4018347">
     <summary>
       单例 <typeparamref name="T" /> 的 ref，缺少时先以 <paramref name="value" /> 添加；已有它的 World 保留自己的值。
@@ -611,4 +604,17 @@
       调用运行期间列表不能改变。
     </summary>
   </member>
+  <member name="M:EasyEcs.World.HasSystem``1" source="2147025184ce">
+    <summary>系统 <typeparamref name="T" /> 是否在这个 World 里。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.World.System``1" source="dbab64933b5f">
+    <summary>
+      系统 <typeparamref name="T" /> 的句柄（给工具、测试和承载 World 的代码用，不要在别的系统里调用）。World 里没有时抛出
+      <see cref="T:System.InvalidOperationException" />。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.TryGetSystem``1(EasyEcs.SystemHandle@)" source="88f2d15d9a2f">
+    <summary>查找系统 <typeparamref name="T" />：World 里没有时返回 false 和默认句柄。O(1)。</summary>
+  </member>
 </doc>
+

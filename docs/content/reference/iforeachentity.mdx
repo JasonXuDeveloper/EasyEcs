@@ -32,6 +32,14 @@ static virtual bool Merges { get; }
 
 The job keeps partial results in its fields ([`Reduce`](/en/docs/reference/reduce); default false): a parallel pass keeps each chunk's copy of the job and combines them into the caller's job in chunk order ([`IForEachEntity.Merge`](/en/docs/reference/iforeachentity#merge)).
 
+### `OneQuery` [#onequery]
+
+```csharp
+static virtual bool OneQuery { get; }
+```
+
+Every pass of the job type takes the same filter, its tick and slice aside (default false): a world keeps the query's match per job type and finds it without comparing filters. Generated jobs set it (their filter is a constant of the method).
+
 ### `OptionalWrites` [#optionalwrites]
 
 ```csharp

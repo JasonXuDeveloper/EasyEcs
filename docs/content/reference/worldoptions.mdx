@@ -52,7 +52,7 @@ Threads one parallel run uses at most (default: processor count): systems run by
 public bool MeasureSystems { get; init; }
 ```
 
-Measure every system run into [`EcsSystem.Stats`](/en/docs/reference/ecssystem#stats): its time and allocated bytes (two timestamp and two allocation-counter reads per run, and per helper chunk of a parallel `[ForEach]`), and the entities its `[ForEach]` methods visited (one count per pass when it starts). Default false.
+Measure every system run into [`SystemHandle.Stats`](/en/docs/reference/systemhandle#stats): its time and allocated bytes (two timestamp and two allocation-counter reads per run, and per helper chunk of a parallel `[ForEach]`), and the entities its `[ForEach]` methods visited (one count per pass when it starts). Default false.
 
 ### `ParallelSystems` [#parallelsystems]
 
@@ -68,4 +68,4 @@ Run systems with no order between them at the same time (thread pool) when their
 public SystemErrorPolicy SystemErrors { get; init; }
 ```
 
-What an exception thrown by a system does (default [`SystemErrorPolicy.Throw`](/en/docs/reference/systemerrorpolicy#throw)): propagate out of [`World.Update`](/en/docs/reference/world#update), or switch the system off and record it in [`EcsSystem.Error`](/en/docs/reference/ecssystem#error).
+What an exception thrown by a system does (default [`SystemErrorPolicy.Throw`](/en/docs/reference/systemerrorpolicy#throw)): propagate out of [`World.Update`](/en/docs/reference/world#update), or switch the system off and record it in [`SystemHandle.Error`](/en/docs/reference/systemhandle#error).

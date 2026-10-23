@@ -20,7 +20,7 @@ What an exception thrown by a system does ([`WorldOptions.SystemErrors`](/en/doc
 Disable = 1;
 ```
 
-Switch the failing system off ([`EcsSystem.Enabled`](/en/docs/reference/ecssystem#enabled) false), keep the exception in [`EcsSystem.Error`](/en/docs/reference/ecssystem#error) and go on with the update: a failure is data the application reads from [`World.Systems`](/en/docs/reference/world#systems).
+Switch the failing system off ([`SystemHandle.Enabled`](/en/docs/reference/systemhandle#enabled) false), keep the exception in [`SystemHandle.Error`](/en/docs/reference/systemhandle#error) and go on with the update: a failure is data the application reads from [`World.Systems`](/en/docs/reference/world#systems).
 
 ### `Throw` [#throw]
 

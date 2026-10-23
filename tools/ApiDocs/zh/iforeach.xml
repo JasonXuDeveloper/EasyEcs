@@ -23,7 +23,6 @@
       <see cref="T:EasyEcs.Mut`1" /> 参数。
     </summary>
   </member>
-
   <member name="P:EasyEcs.IForEach`1.Merges" source="f75735b5881e">
     <summary>
       job 在字段里保存部分结果（<see cref="T:EasyEcs.Reduce`1" />；默认 false）：并行遍历保留每个块的 job 副本，按块的顺序把它们合并进调用方的
@@ -36,7 +35,6 @@
       带 <see cref="T:EasyEcs.Reduce`1" /> 参数的生成 job 实现它。
     </summary>
   </member>
-
   <member name="P:EasyEcs.IForEach`1.OptionalWrites" source="95859cd4cbee">
     <summary>
       job 在自身组件之外写入的被追踪的组件（通过 <see cref="T:EasyEcs.Maybe`1" />；默认没有）：并行遍历打开它们的变更 tick 区块时，
@@ -44,4 +42,11 @@
       <see cref="T:EasyEcs.Maybe`1" /> 的写入。
     </summary>
   </member>
+  <member name="P:EasyEcs.IForEach`1.OneQuery" source="d9674044fbcd">
+    <summary>
+      这个 job 类型的每次遍历都用同一个过滤条件（tick 和分片除外；默认 false）：World 按 job 类型保存查询的匹配结果，不比较过滤条件就能找到它。
+      生成的 job 会设置它（它们的过滤条件是方法里的常量）。
+    </summary>
+  </member>
 </doc>
+

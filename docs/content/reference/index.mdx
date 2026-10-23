@@ -13,15 +13,15 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 |---|---|
 | [`AllAttribute`](/en/docs/reference/allattribute) | A bool field of a reduction that holds when it holds on every row: Identity true, Combine left & right (see SumAttribute). |
 | [`AnyAttribute`](/en/docs/reference/anyattribute) | A bool field of a reduction that holds when it holds on some row: Identity false, Combine left \| right (see SumAttribute). |
-| [`ChangedAnyAttribute<T1..T9>`](/en/docs/reference/changedanyattribute) | The ForEachAttribute method visits only entities where at least one of T1, T2 was written since its system last ran (EcsSystem.LastRunTick; on the first run, every entity having one): QueryFilter.ChangedAny. |
-| [`ChangedAttribute<T>`](/en/docs/reference/changedattribute) | The ForEachAttribute method visits only entities whose T was written since its system last ran (EcsSystem.LastRunTick; on the first run, every entity having it). |
+| [`ChangedAnyAttribute<T1..T9>`](/en/docs/reference/changedanyattribute) | The ForEachAttribute method visits only entities where at least one of T1, T2 was written since its system last ran (SystemHandle.LastRunTick; on the first run, every entity having one): QueryFilter.ChangedAny. |
+| [`ChangedAttribute<T>`](/en/docs/reference/changedattribute) | The ForEachAttribute method visits only entities whose T was written since its system last ran (SystemHandle.LastRunTick; on the first run, every entity having it). |
 | [`ChildOfEcsExtensions`](/en/docs/reference/childofecsextensions) | The named members of ChildOf (generated). |
 | [`ChildOfEcsPrefabExtensions`](/en/docs/reference/childofecsprefabextensions) | The named members of ChildOf on a Prefab (generated). |
 | [`ConsumeAttribute`](/en/docs/reference/consumeattribute) | The ForEachAttribute method consumes the rows it visits: when its pass ends, the entities it visited are destroyed, for event and command entities that are handled once. |
 | [`DynamicBufferExtensions`](/en/docs/reference/dynamicbufferextensions) | The writes of a DynamicBuffer. |
-| [`EcsSystem`](/en/docs/reference/ecssystem) | Logic that runs on a world. |
+| [`EcsSystemAttribute`](/en/docs/reference/ecssystemattribute) | Declares a system: a ref struct whose static methods are the logic that runs on a world. |
 | [`EntityRandomEcsExtensions`](/en/docs/reference/entityrandomecsextensions) | The named members of EntityRandom (generated). |
-| [`ForEachAttribute`](/en/docs/reference/foreachattribute) | Runs a method of an EcsSystem (or a static method of any other type, through a generated entry point) for every entity matching its component parameters (and the WithAttribute / WithoutAttribute / WithAnyAttribute filters), each update, after EcsSystem.OnUpdate, in declaration order. |
+| [`ForEachAttribute`](/en/docs/reference/foreachattribute) | Runs a static method of an [[EcsSystem]](/en/docs/reference/ecssystemattribute) (or of any other type, through a generated entry point) for every entity matching its component parameters (and the WithAttribute / WithoutAttribute / WithAnyAttribute filters), each update, after its [[OnUpdate]](/en/docs/reference/onupdateattribute) method, in declaration order. |
 | [`ForEntityAttribute`](/en/docs/reference/forentityattribute) | A static method that runs on one entity: the generator writes an entry point, a static member of the method's type named like the method, which takes the entity (then the tick with [Changed&lt;T&gt;] / [Removed&lt;T&gt;], then the method's other values) and returns whether the method ran. |
 | [`GroupAttribute`](/en/docs/reference/groupattribute) | The member a world groups the component's tables by (IGroup): an int or an enum of int. |
 | [`GroupByAttribute`](/en/docs/reference/groupbyattribute) | Every world groups its tables by this IGroup component (World.GroupBy), from its first table holding it: a group filter (QueryFilter.InGroup) then visits that group's tables only, in every world, with no setup call to forget. |
@@ -32,12 +32,15 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`MaxAttribute`](/en/docs/reference/maxattribute) | A field of a reduction that keeps the larger value: Identity the type's MinValue (-∞ for float and double), Combine Math.Max(left, right). |
 | [`MinAttribute`](/en/docs/reference/minattribute) | A field of a reduction that keeps the smaller value: Identity the type's MaxValue (+∞ for float and double), Combine Math.Min(left, right). |
 | [`NotSavedAttribute`](/en/docs/reference/notsavedattribute) | A component or singleton no save holds: runtime state (a connection, a cache, a handle to a service) that a restart rebuilds. |
+| [`OnCreateAttribute`](/en/docs/reference/oncreateattribute) | The static method of an [[EcsSystem]](/en/docs/reference/ecssystemattribute) called once when the system is added to a world. |
+| [`OnDestroyAttribute`](/en/docs/reference/ondestroyattribute) | The static method of an [[EcsSystem]](/en/docs/reference/ecssystemattribute) called once when the system is removed or the world is disposed. |
+| [`OnUpdateAttribute`](/en/docs/reference/onupdateattribute) | The static method of an [[EcsSystem]](/en/docs/reference/ecssystemattribute) called on every run of the system, before its [ForEach] methods. |
 | [`OrderedIndexExtensions`](/en/docs/reference/orderedindexextensions) | Ordered walks of a value index whose key is comparable (a score, a deadline, a level): ranges and sorted iteration for leaderboards, timers and matchmaking brackets. |
 | [`Prefab`](/en/docs/reference/prefab) | A recipe for entities: a set of component values that belongs to no world, so no query ever sees it. |
 | [`ProductAttribute`](/en/docs/reference/productattribute) | A field of a reduction that combines by multiplication: Identity 1, Combine left \* right. |
 | [`RelationIndex<T>`](/en/docs/reference/relationindex) | The links of relation T in one world, by target (World.Relations): which entities link to an entity, O(1) to start and O(1) per link. |
 | [`RemovedAnyAttribute<T1..T9>`](/en/docs/reference/removedanyattribute) | The ForEachAttribute method visits only entities that lost at least one of T1, T2 since its system last ran and have not got it back: QueryFilter.RemovedAny. |
-| [`RemovedAttribute<T>`](/en/docs/reference/removedattribute) | The ForEachAttribute method visits only entities that lost T since its system last ran (EcsSystem.LastRunTick) and have not got it back: replication sends the removal, a cleanup releases what the component stood for. |
+| [`RemovedAttribute<T>`](/en/docs/reference/removedattribute) | The ForEachAttribute method visits only entities that lost T since its system last ran (SystemHandle.LastRunTick) and have not got it back: replication sends the removal, a cleanup releases what the component stood for. |
 | [`RetiredEcsExtensions`](/en/docs/reference/retiredecsextensions) | The named members of Retired (generated). |
 | [`ScheduleInfo`](/en/docs/reference/scheduleinfo) | How a world runs its systems (World.DescribeSchedule): every group's stages, what each system reads and writes, why a system waits for an earlier stage, and which conflicting systems are ordered by nothing but their registration order. |
 | [`StageInfo`](/en/docs/reference/stageinfo) | One stage of a group: systems with no ordering and no conflict between them. |
@@ -48,10 +51,10 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`TargetPolicyExtensions`](/en/docs/reference/targetpolicyextensions) | Target policies of components that point at an entity (IIndexed of EntityId). |
 | [`UniqueIndexExtensions`](/en/docs/reference/uniqueindexextensions) | Lookups of a unique index (IUniqueIndexed): the one entity of a key. |
 | [`UniqueKeyAttribute`](/en/docs/reference/uniquekeyattribute) | IndexKeyAttribute for a key that names one entity (IUniqueIndexed): the generator adds IUniqueIndexed&lt;TKey&gt; with the explicit Key. |
-| [`UpdateAfterAttribute<TSystem>`](/en/docs/reference/updateafterattribute) | Run this system after TSystem (and systems derived from it) of the same group: see UpdateBeforeAttribute. |
-| [`UpdateBeforeAttribute<TSystem>`](/en/docs/reference/updatebeforeattribute) | Run this system before TSystem (and systems derived from it) of the same group, whatever their registration order. |
-| [`UpdateInGroupAttribute<TGroup>`](/en/docs/reference/updateingroupattribute) | Puts the system (and derived systems) into group TGroup. |
-| [`UpdateIntervalAttribute`](/en/docs/reference/updateintervalattribute) | Run the system (and derived systems without their own) on every interval-th update of its group only: the updates whose count (World.DefaultUpdateCount, World.UpdateCount) modulo the interval is UpdateIntervalAttribute.Phase. |
+| [`UpdateAfterAttribute<TSystem>`](/en/docs/reference/updateafterattribute) | Run this system after system TSystem of the same group: see UpdateBeforeAttribute. |
+| [`UpdateBeforeAttribute<TSystem>`](/en/docs/reference/updatebeforeattribute) | Run this system before system TSystem (an [[EcsSystem]](/en/docs/reference/ecssystemattribute), EECS077) of the same group, whatever their registration order. |
+| [`UpdateInGroupAttribute<TGroup>`](/en/docs/reference/updateingroupattribute) | Puts the system into group TGroup. |
+| [`UpdateIntervalAttribute`](/en/docs/reference/updateintervalattribute) | Run the system on every interval-th update of its group only: the updates whose count (World.DefaultUpdateCount, World.UpdateCount) modulo the interval is UpdateIntervalAttribute.Phase. |
 | [`ValueIndex<T, TKey>`](/en/docs/reference/valueindex) | The value index of component T in one world (World.Index). |
 | [`WhenTargetDestroyedAttribute`](/en/docs/reference/whentargetdestroyedattribute) | What destroying an entity does to the links to it, in every world (TargetPolicy): on a relation (IRelation) or a component indexed by an EntityId. |
 | [`WithAnyAttribute<T>`](/en/docs/reference/withanyattribute) | The ForEachAttribute method requires at least one of the components named by its [WithAny&lt;T&gt;] attributes (not passed in): [ForEach, WithAny&lt;Burning&gt;, WithAny&lt;Poisoned&gt;]. |
@@ -93,9 +96,10 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`Scratch<T>`](/en/docs/reference/scratch) | A [ForEach] method's working memory on the thread running it (OpenMP's threadprivate): a list of neighbors, the open set of a path search, a buffer to fill. |
 | [`SingletonRef<T>`](/en/docs/reference/singletonref) | Handle to one world's singleton T. |
 | [`SystemAccess`](/en/docs/reference/systemaccess) | The data a system reads and writes, declared once when the system is added. |
+| [`SystemHandle`](/en/docs/reference/systemhandle) | A system added to a world (World.AddSystem, World.System, World.Systems): a small handle over the world's record of it, as an Entity is over its row. |
 | [`SystemList`](/en/docs/reference/systemlist) | The systems of a world, every group in execution order (default group first): foreach it, or read SystemList.Count. |
 | [`SystemList.Enumerator`](/en/docs/reference/systemlist-enumerator) | Walks the groups and their systems. |
-| [`SystemStats`](/en/docs/reference/systemstats) | How often and how long a system ran (WorldOptions.MeasureSystems): EcsSystem.OnUpdate plus its [ForEach] methods, per run, with the bytes it allocated and the entities its [ForEach] methods visited. |
+| [`SystemStats`](/en/docs/reference/systemstats) | How often and how long a system ran (WorldOptions.MeasureSystems): its [[OnUpdate]](/en/docs/reference/onupdateattribute) method plus its [ForEach] methods, per run, with the bytes it allocated and the entities its [ForEach] methods visited. |
 | [`TableInfo`](/en/docs/reference/tableinfo) | A table: the entities with one set of component columns (World.DescribeTables). |
 | [`Tile<TCell, TTile>`](/en/docs/reference/tile) | The cells of a tile (an entity whose TTile makes it one, ITile) with those of its neighbors: a [ForEach] parameter, as a CUDA block's tile and its apron, or an MPI rank's subdomain and its ghost cells. |
 | [`TileCursor<TCell, TTile>`](/en/docs/reference/tilecursor) | A padded tile at the first cell of a row (PaddedTile.At): the cells around it, one or a vector at a time. |

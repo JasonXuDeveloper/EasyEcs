@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.UpdateAfterAttribute`1" source="2b0ac9f41307">
+  <member name="T:EasyEcs.UpdateAfterAttribute`1" source="7e4ae18d5727">
     <summary>
-      让这个系统排在同一分组里的 <typeparamref name="TSystem" />（和它的派生系统）之后运行：见
+      让这个系统排在同一分组里的 <typeparamref name="TSystem" /> 之后运行：见
       <see cref="T:EasyEcs.UpdateBeforeAttribute`1" />。
     </summary>
   </member>

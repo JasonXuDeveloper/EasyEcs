@@ -115,37 +115,22 @@ public ref T AddSingleton<T>() where T : struct, ISingletonComponent;
 ### `AddSystem` [#addsystem]
 
 ```csharp
-public void AddSystem(EcsSystem system, bool changesFromNow = false);
+public SystemHandle AddSystem<T>(bool changesFromNow = false) where T : struct, allows ref struct;
 ```
 
-把 `system` 挂到它的分组（[`UpdateInGroupAttribute`](/zh/docs/reference/updateingroupattribute) 指定的分组，没有就是默认分组），然后调用它的 [`EcsSystem.OnCreate`](/zh/docs/reference/ecssystem#oncreate)。
+把系统 `T`（一个 [[EcsSystem]](/zh/docs/reference/ecssystemattribute) ref struct）加到它的分组（[`UpdateInGroupAttribute`](/zh/docs/reference/updateingroupattribute) 指定的分组，没有就是默认分组），然后运行它的 [[OnCreate]](/zh/docs/reference/oncreateattribute) 方法。一个系统在每个 World 里只能加一次：再加会抛异常。冷路径：分配它的记录和分组的新调度，划分阶段 O(系统数²)。
 
 **参数**
 
-- `system`：要挂上的系统，还不属于任何 World。
-- `changesFromNow`：为 false（默认）时，它的 `[Changed<T>]` 和 `[Removed<T>]` 方法第一次运行会访问 World 创建以来写过或移除过的每一行。为 true 时只看这次调用之后的写入和移除，就像这个系统刚刚运行过一样（[`EcsSystem.LastRunTick`](/zh/docs/reference/ecssystem#lastruntick)）；适合加到已经有状态的 World 上的系统（[`World.Load`](/zh/docs/reference/world#load) 之后的重启、之后才打开的系统）。
+- `changesFromNow`：为 false（默认）时，它的 `[Changed<T>]` 和 `[Removed<T>]` 方法第一次运行会访问 World 创建以来写过或移除过的每一行。为 true 时只看这次调用之后的写入和移除，就像这个系统刚刚运行过一样（[`SystemHandle.LastRunTick`](/zh/docs/reference/systemhandle#lastruntick)）；适合加到已经有状态的 World 上的系统（[`World.Load`](/zh/docs/reference/world#load) 之后的重启、之后才打开的系统）。
 
-**复杂度**（[API 表](/zh/docs/api)）：
+**返回值**：系统的句柄。
 
-- `world.AddSystem<T>(changesFromNow)`：O(s²)，s 为所在分组的系统数
-- `AddSystem(system, changesFromNow)`：O(s²)，s 为所在分组的系统数
+**异常**
 
-### `AddSystem` [#addsystem-2]
+- `NotSupportedException`：没有程序集为 `T` 注册代码：它不是 [EcsSystem]，或者是没有任何程序集用到的封闭泛型系统（用反射造出来的）。
 
-```csharp
-public T AddSystem<T>(bool changesFromNow = false) where T : EcsSystem, new();
-```
-
-创建一个系统，挂到这个 World 上，然后调用它的 [`EcsSystem.OnCreate`](/zh/docs/reference/ecssystem#oncreate)。
-
-**参数**
-
-- `changesFromNow`：见 [`World.AddSystem`](/zh/docs/reference/world#addsystem)。
-
-**复杂度**（[API 表](/zh/docs/api)）：
-
-- `world.AddSystem<T>(changesFromNow)`：O(s²)，s 为所在分组的系统数
-- `AddSystem(system, changesFromNow)`：O(s²)，s 为所在分组的系统数
+**复杂度**（[API 表](/zh/docs/api)）：O(s²)，s 为所在分组的系统数
 
 ### `Any` [#any]
 
@@ -400,7 +385,7 @@ public int DisableAll<T>(in QueryFilter filter = default) where T : struct, ICom
 public void Dispose();
 ```
 
-销毁所有系统（按相反顺序调用 OnDestroy），然后释放全部存储。即使某个系统的 OnDestroy 抛出异常，其余系统的 OnDestroy 也都会执行，存储也照样释放；在 [`SystemErrorPolicy.Throw`](/zh/docs/reference/systemerrorpolicy#throw) 下，最后重新抛出第一个异常。之后的每个结构变更都会抛出 `ObjectDisposedException`。
+销毁所有系统（按相反顺序调用 [OnDestroy]），然后释放全部存储。即使某个系统的 [OnDestroy] 抛出异常，其余系统的 [OnDestroy] 也都会执行，存储也照样释放；在 [`SystemErrorPolicy.Throw`](/zh/docs/reference/systemerrorpolicy#throw) 下，最后重新抛出第一个异常。之后每个句柄都失效，每个结构变更都会抛出 `ObjectDisposedException`。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(系统数 + 实体数 + 表数)
 
@@ -660,6 +645,16 @@ public bool HasSingleton<T>() where T : struct, ISingletonComponent;
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 
+### `HasSystem` [#hassystem]
+
+```csharp
+public bool HasSystem<T>() where T : struct, allows ref struct;
+```
+
+系统 `T` 是否在这个 World 里。O(1)。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(1)
+
 ### `Index` [#index]
 
 ```csharp
@@ -912,10 +907,10 @@ public bool RemoveSingleton<T>() where T : struct, ISingletonComponent;
 ### `RemoveSystem` [#removesystem]
 
 ```csharp
-public bool RemoveSystem<T>() where T : EcsSystem;
+public bool RemoveSystem<T>() where T : struct, allows ref struct;
 ```
 
-移除类型为 `T` 的系统（会调用它的 [`EcsSystem.OnDestroy`](/zh/docs/reference/ecssystem#ondestroy)）。
+移除系统 `T`（会运行它的 [[OnDestroy]](/zh/docs/reference/ondestroyattribute) 方法）：World 里没有时返回 false。它的句柄随之失效。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(s²)
 
@@ -1071,6 +1066,16 @@ public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent;
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 
+### `System` [#system]
+
+```csharp
+public SystemHandle System<T>() where T : struct, allows ref struct;
+```
+
+系统 `T` 的句柄（给工具、测试和承载 World 的代码用，不要在别的系统里调用）。World 里没有时抛出 `InvalidOperationException`。O(1)。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(1)
+
 ### `TrimExcess` [#trimexcess]
 
 ```csharp
@@ -1106,12 +1111,12 @@ public bool TryGetSingleton<T>(out T value) where T : struct, ISingletonComponen
 ### `TryGetSystem` [#trygetsystem]
 
 ```csharp
-public bool TryGetSystem<T>(out T system) where T : EcsSystem;
+public bool TryGetSystem<T>(out SystemHandle system) where T : struct, allows ref struct;
 ```
 
-查找类型为 `T` 的系统（给工具、测试和承载 World 的代码用，不要在别的系统里调用）。World 里没有时返回 false，系统为 null。O(系统数)。
+查找系统 `T`：World 里没有时返回 false 和默认句柄。O(1)。
 
-**复杂度**（[API 表](/zh/docs/api)）：O(系统数)
+**复杂度**（[API 表](/zh/docs/api)）：O(1)
 
 ### `Update` [#update]
 

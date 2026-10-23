@@ -32,6 +32,14 @@ static virtual bool Merges { get; }
 
 job 在字段里保存部分结果（[`Reduce`](/zh/docs/reference/reduce)；默认 false）：并行遍历保留每个块的 job 副本，按块的顺序把它们合并进调用方的 job（[`IForEachBatch.Merge`](/zh/docs/reference/iforeachbatch#merge)）。
 
+### `OneQuery` [#onequery]
+
+```csharp
+static virtual bool OneQuery { get; }
+```
+
+这个 job 类型的每次遍历都用同一个过滤条件（tick 和分片除外；默认 false）：World 按 job 类型保存查询的匹配结果，不比较过滤条件就能找到它。生成的 job 会设置它（它们的过滤条件是方法里的常量）。
+
 ### `OptionalWrites` [#optionalwrites]
 
 ```csharp

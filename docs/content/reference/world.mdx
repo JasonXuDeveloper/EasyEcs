@@ -115,37 +115,22 @@ Add singleton `T` (default) and return a ref to it. O(1).
 ### `AddSystem` [#addsystem]
 
 ```csharp
-public void AddSystem(EcsSystem system, bool changesFromNow = false);
+public SystemHandle AddSystem<T>(bool changesFromNow = false) where T : struct, allows ref struct;
 ```
 
-Attach `system` to its group ([`UpdateInGroupAttribute`](/en/docs/reference/updateingroupattribute), default otherwise) and call its [`EcsSystem.OnCreate`](/en/docs/reference/ecssystem#oncreate).
+Add system `T` (an [[EcsSystem]](/en/docs/reference/ecssystemattribute) ref struct) to its group ([`UpdateInGroupAttribute`](/en/docs/reference/updateingroupattribute), default otherwise) and run its [[OnCreate]](/en/docs/reference/oncreateattribute) method. A system is added once per world: adding it again throws. Cold: allocates its record and the group's new schedule, O(systems²) for the stages.
 
 **Parameters**
 
-- `system`: The system, not attached to a world yet.
-- `changesFromNow`: False (the default): the first run of its `[Changed<T>]` and `[Removed<T>]` methods visits every row written or removed since the world began. True: only what is written or removed after this call, as if the system had run just now ([`EcsSystem.LastRunTick`](/en/docs/reference/ecssystem#lastruntick)); for a system added to a world that already holds its state (a restart after [`World.Load`](/en/docs/reference/world#load), a system switched on later).
+- `changesFromNow`: False (the default): the first run of its `[Changed<T>]` and `[Removed<T>]` methods visits every row written or removed since the world began. True: only what is written or removed after this call, as if the system had run just now ([`SystemHandle.LastRunTick`](/en/docs/reference/systemhandle#lastruntick)); for a system added to a world that already holds its state (a restart after [`World.Load`](/en/docs/reference/world#load), a system switched on later).
 
-**Complexity** ([API table](/en/docs/api)):
+**Returns** The system's handle.
 
-- `world.AddSystem<T>(changesFromNow)`: O(s²), s = systems of its group
-- `AddSystem(system, changesFromNow)`: O(s²), s = systems of its group
+**Exceptions**
 
-### `AddSystem` [#addsystem-2]
+- `NotSupportedException`: No assembly registers code for `T`: it is no [EcsSystem], or a closed generic system no assembly names (made by reflection).
 
-```csharp
-public T AddSystem<T>(bool changesFromNow = false) where T : EcsSystem, new();
-```
-
-Create a system, attach it to this world and call its [`EcsSystem.OnCreate`](/en/docs/reference/ecssystem#oncreate).
-
-**Parameters**
-
-- `changesFromNow`: See [`World.AddSystem`](/en/docs/reference/world#addsystem).
-
-**Complexity** ([API table](/en/docs/api)):
-
-- `world.AddSystem<T>(changesFromNow)`: O(s²), s = systems of its group
-- `AddSystem(system, changesFromNow)`: O(s²), s = systems of its group
+**Complexity** ([API table](/en/docs/api)): O(s²), s = systems of its group
 
 ### `Any` [#any]
 
@@ -400,7 +385,7 @@ public int DisableAll<T>(in QueryFilter filter = default) where T : struct, ICom
 public void Dispose();
 ```
 
-Destroy all systems (OnDestroy in reverse order), then release all storage. Every system's OnDestroy runs and the storage is released even when one throws; under [`SystemErrorPolicy.Throw`](/en/docs/reference/systemerrorpolicy#throw) the first exception is rethrown at the end. Afterwards every structural change throws `ObjectDisposedException`.
+Destroy all systems ([OnDestroy] in reverse order), then release all storage. Every system's [OnDestroy] runs and the storage is released even when one throws; under [`SystemErrorPolicy.Throw`](/en/docs/reference/systemerrorpolicy#throw) the first exception is rethrown at the end. Afterwards every handle is stale and every structural change throws `ObjectDisposedException`.
 
 **Complexity** ([API table](/en/docs/api)): O(systems + entities + tables)
 
@@ -660,6 +645,16 @@ Whether singleton `T` exists. O(1).
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 
+### `HasSystem` [#hassystem]
+
+```csharp
+public bool HasSystem<T>() where T : struct, allows ref struct;
+```
+
+Whether system `T` is in this world. O(1).
+
+**Complexity** ([API table](/en/docs/api)): O(1)
+
 ### `Index` [#index]
 
 ```csharp
@@ -912,10 +907,10 @@ Remove singleton `T`; false if it was not added. O(1).
 ### `RemoveSystem` [#removesystem]
 
 ```csharp
-public bool RemoveSystem<T>() where T : EcsSystem;
+public bool RemoveSystem<T>() where T : struct, allows ref struct;
 ```
 
-Remove the system of type `T` (calls its [`EcsSystem.OnDestroy`](/en/docs/reference/ecssystem#ondestroy)).
+Remove system `T` (runs its [[OnDestroy]](/en/docs/reference/ondestroyattribute) method): false when the world has none. Its handles turn stale.
 
 **Complexity** ([API table](/en/docs/api)): O(s²)
 
@@ -1071,6 +1066,16 @@ Stable handle to singleton `T`; throws if it was not added: resolve it once, the
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 
+### `System` [#system]
+
+```csharp
+public SystemHandle System<T>() where T : struct, allows ref struct;
+```
+
+The handle of system `T` (for tools, tests and the code that hosts the world, never from another system). Throws `InvalidOperationException` when the world has none. O(1).
+
+**Complexity** ([API table](/en/docs/api)): O(1)
+
 ### `TrimExcess` [#trimexcess]
 
 ```csharp
@@ -1106,12 +1111,12 @@ Copy of singleton `T` if present. O(1).
 ### `TryGetSystem` [#trygetsystem]
 
 ```csharp
-public bool TryGetSystem<T>(out T system) where T : EcsSystem;
+public bool TryGetSystem<T>(out SystemHandle system) where T : struct, allows ref struct;
 ```
 
-Find the system of type `T` (for tools, tests and the code that hosts the world, never from another system). Returns false and null when the world has none. O(systems).
+Find system `T`: false and a default handle when the world has none. O(1).
 
-**Complexity** ([API table](/en/docs/api)): O(systems)
+**Complexity** ([API table](/en/docs/api)): O(1)
 
 ### `Update` [#update]
 

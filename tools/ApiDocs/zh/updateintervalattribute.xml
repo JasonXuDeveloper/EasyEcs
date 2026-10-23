@@ -1,14 +1,14 @@
-<?xml version="1.0" encoding="utf-8"?>
+
 <doc>
-  <member name="T:EasyEcs.UpdateIntervalAttribute" source="575f7d74e960">
+  <member name="T:EasyEcs.UpdateIntervalAttribute" source="4aca06c8c904">
     <summary>
-      系统（以及没有自己声明的派生系统）只在所属分组每第 <paramref name="interval" /> 次更新时运行：更新计数
-      （<see cref="P:EasyEcs.World.DefaultUpdateCount" />、<see cref="M:EasyEcs.World.UpdateCount``1" />）对间隔取模等于
-      <see cref="P:EasyEcs.UpdateIntervalAttribute.Phase" /> 的那几次。间隔相同、相位不同的系统把工作分散到不同的更新里，不会全挤在同一次。
-      生成器把这两个值写进系统的注册代码；间隔至少为 1，相位在 0 到 interval - 1 之间（EECS083）。
+      系统只在所属分组每第 <paramref name="interval" /> 次更新时运行：更新计数（<see cref="P:EasyEcs.World.DefaultUpdateCount" />、
+      <see cref="M:EasyEcs.World.UpdateCount``1" />）对间隔取模等于 <see cref="P:EasyEcs.UpdateIntervalAttribute.Phase" /> 的那几次。
+      间隔相同、相位不同的系统把工作分散到不同的更新里，不会全挤在同一次。生成器把这两个值写进系统的代码；间隔至少为 1，
+      相位在 0 到 interval - 1 之间（EECS083）。
       <code>
-      [UpdateInterval(4, Phase = 1)]   // updates 1, 5, 9, ...
-      public class Regrowth : EcsSystem { ... }
+      [EcsSystem, UpdateInterval(4, Phase = 1)]   // updates 1, 5, 9, ...
+      ref struct Regrowth { ... }
       </code>
     </summary>
   </member>
@@ -17,5 +17,17 @@
   </member>
   <member name="P:EasyEcs.UpdateIntervalAttribute.Phase" source="17c11883c46e">
     <summary>系统在每 <see cref="P:EasyEcs.UpdateIntervalAttribute.Interval" /> 次更新里的第几次运行，0 到 interval - 1。默认 0。</summary>
+  </member>
+  <member name="M:EasyEcs.UpdateIntervalAttribute.#ctor(System.Int32)" source="4aca06c8c904">
+    <summary>
+      系统只在所属分组每第 <paramref name="interval" /> 次更新时运行：更新计数（<see cref="P:EasyEcs.World.DefaultUpdateCount" />、
+      <see cref="M:EasyEcs.World.UpdateCount``1" />）对间隔取模等于 <see cref="P:EasyEcs.UpdateIntervalAttribute.Phase" /> 的那几次。
+      间隔相同、相位不同的系统把工作分散到不同的更新里，不会全挤在同一次。生成器把这两个值写进系统的代码；间隔至少为 1，
+      相位在 0 到 interval - 1 之间（EECS083）。
+      <code>
+      [EcsSystem, UpdateInterval(4, Phase = 1)]   // updates 1, 5, 9, ...
+      ref struct Regrowth { ... }
+      </code>
+    </summary>
   </member>
 </doc>

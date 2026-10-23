@@ -1,0 +1,64 @@
+<doc>
+  <member name="T:EasyEcs.SystemHandle" source="a72f43eccfa6">
+    <summary>
+      加进 World 的一个系统（<see cref="M:EasyEcs.World.AddSystem``1(System.Boolean)" />、<see cref="M:EasyEcs.World.System``1" />、
+      <see cref="P:EasyEcs.World.Systems" />）：指向 World 里这个系统记录的小句柄，就像 <see cref="T:EasyEcs.Entity" /> 指向它的行。
+      记录是 World 拥有的数据（启用、错误、tick、计数、统计）；不存在系统对象。系统被移除（或 World 释放）之后，句柄就失效了：
+      <see cref="P:EasyEcs.SystemHandle.IsAlive" /> 为 false，其他成员抛出 <see cref="T:System.InvalidOperationException" />，即使 World
+      把这条记录复用给了另一个系统也一样。钩子（<see cref="T:EasyEcs.OnUpdateAttribute">[OnUpdate]</see> 等）可以接收它，读自己系统的记录。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.SystemHandle.Enabled" source="59bb9d4493b4">
+    <summary>
+      <see cref="M:EasyEcs.World.Update" /> 和 <see cref="M:EasyEcs.World.Update``1" /> 跳过禁用的系统。启用系统时会清掉它的
+      <see cref="P:EasyEcs.SystemHandle.Error" />。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.SystemHandle.Error" source="934e60ea3188">
+    <summary>
+      在 <see cref="F:EasyEcs.SystemErrorPolicy.Disable" /> 策略下让这个系统停掉的异常，重新启用之前一直保留；其他情况为 null。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.SystemHandle.IsAlive" source="7742fd6498de">
+    <summary>系统是否还在它的 World 里（没有被移除，World 也没有释放）。O(1)。</summary>
+  </member>
+  <member name="P:EasyEcs.SystemHandle.LastRunTick" source="eee3a45a2d3e">
+    <summary>
+      这个系统上次运行时 World 的 <see cref="P:EasyEcs.World.ChangeTick" />（第一次运行前为 0）：它的
+      <c>[Changed&lt;T&gt;]</c> 方法选出这个 tick 之后写入的行，所以不包括它们自己在那一轮的写入。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.SystemHandle.Name" source="24bc0442c157">
+    <summary>报告里显示的系统类型名（<c>Regen&lt;Health&gt;</c>）。</summary>
+  </member>
+  <member name="P:EasyEcs.SystemHandle.RunCount" source="43cf2eea9ace">
+    <summary>
+      系统在本次运行之前已经运行的次数（第一次运行时为 0；被 <see cref="T:EasyEcs.UpdateIntervalAttribute">[UpdateInterval]</see>
+      跳过或禁用期间的运行不算，抛异常的那次算）。<c>[ForEach(Slices = N)]</c> 方法访问它的行的第 <c>RunCount % N</c> 片，所以
+      <see cref="T:EasyEcs.OnUpdateAttribute">[OnUpdate]</see> 方法能知道这次运行访问的是哪一片。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.SystemHandle.Stats" source="99c56f432239">
+    <summary>
+      这个系统的运行次数、耗时、分配的字节数和访问的实体数；只在打开 <see cref="P:EasyEcs.WorldOptions.MeasureSystems" /> 时记录。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.SystemHandle.Type" source="377166606abf">
+    <summary>系统的类型（它的 <see cref="T:EasyEcs.EcsSystemAttribute">[EcsSystem]</see> ref struct），给工具和日志用。</summary>
+  </member>
+  <member name="P:EasyEcs.SystemHandle.World" source="1760002b6691">
+    <summary>系统所属的 World。</summary>
+  </member>
+  <member name="M:EasyEcs.SystemHandle.Equals(EasyEcs.SystemHandle)" source="2def8947c3b9">
+    <summary>同一个 World 的同一个系统（都失效或都是默认值的两个句柄也相等）。</summary>
+  </member>
+  <member name="M:EasyEcs.SystemHandle.ToString" source="6eb98ac81fa2">
+    <summary>系统的名字，或者 "stale system"。</summary>
+  </member>
+  <member name="M:EasyEcs.SystemHandle.op_Inequality(EasyEcs.SystemHandle,EasyEcs.SystemHandle)" source="a798648bd3a3">
+    <summary>两个句柄是否指向不同的系统。</summary>
+  </member>
+  <member name="M:EasyEcs.SystemHandle.op_Equality(EasyEcs.SystemHandle,EasyEcs.SystemHandle)" source="95d1a332a50b">
+    <summary>两个句柄是否指向同一个系统。</summary>
+  </member>
+</doc>

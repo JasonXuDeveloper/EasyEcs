@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.UpdateBeforeAttribute`1" source="7e9c2b3dc6c4">
+  <member name="T:EasyEcs.UpdateBeforeAttribute`1" source="038357c83a1e">
     <summary>
-      让这个系统排在同一分组里的 <typeparamref name="TSystem" />（和它的派生系统）之前运行，不管它们的注册顺序。没有指定顺序时，
+      让这个系统排在同一分组里的 <typeparamref name="TSystem" />（一个 <see cref="T:EasyEcs.EcsSystemAttribute">[EcsSystem]</see>，EECS077）之前运行，不管它们的注册顺序。没有指定顺序时，
       系统按注册顺序运行。不管哪种情况，读写冲突的两个系统，排在前面的总是先跑完；彼此没有顺序约束、也不冲突的系统可能同时运行
       （<see cref="P:EasyEcs.WorldOptions.ParallelSystems" />）。顺序在添加系统时解析一次；有环就在那时抛异常，分析器也会报告它能看出来的环（EECS019）。
     </summary>

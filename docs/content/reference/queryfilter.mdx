@@ -124,7 +124,7 @@ The same filter with its [`QueryFilter.Changed`](/en/docs/reference/queryfilter#
 public QueryFilter Slice(int index, int of);
 ```
 
-Visit only slice `index` of `of` of every matching table's rows: passes with each index from 0 to `of` - 1 in turn visit every row once, each about 1 / `of` of the rows. `[ForEach(Slices = N)]` methods pass the slice of their system's run ([`EcsSystem.RunCount`](/en/docs/reference/ecssystem#runcount) mod N). O(1).
+Visit only slice `index` of `of` of every matching table's rows: passes with each index from 0 to `of` - 1 in turn visit every row once, each about 1 / `of` of the rows. `[ForEach(Slices = N)]` methods pass the slice of their system's run ([`SystemHandle.RunCount`](/en/docs/reference/systemhandle#runcount) mod N). O(1).
 
 A table is cut at multiples of 64 rows (its presence words), from its row count when the pass starts, so a table of fewer than 64 rows is one piece; table i of the match starts its cut at slice (`index` + i) mod `of`, so many small tables spread over the slices too. Rows that move between passes (a swap-remove fills a hole with the table's last row, a structural change moves an entity to another table, the table grows or shrinks across a cut) may be skipped or visited twice in one cycle of `of` passes; the next cycle sees them again.
 

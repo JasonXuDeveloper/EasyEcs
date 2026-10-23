@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 
 <doc>
-  <member name="T:EasyEcs.SystemStats" source="969491eaaefc">
+  <member name="T:EasyEcs.SystemStats" source="5695458a7083">
     <summary>
       系统运行了多少次、花了多长时间（<see cref="P:EasyEcs.WorldOptions.MeasureSystems" />）：每次运行包括
-      <see cref="M:EasyEcs.EcsSystem.OnUpdate" /> 和它的 <c>[ForEach]</c> 方法，并记下分配的字节数和 <c>[ForEach]</c> 方法访问的实体数。
+      <see cref="T:EasyEcs.OnUpdateAttribute">[OnUpdate]</see> 方法和它的 <c>[ForEach]</c> 方法，并记下分配的字节数和 <c>[ForEach]</c> 方法访问的实体数。
       在两次更新之间读取；打开 <see cref="P:EasyEcs.WorldOptions.ParallelSystems" /> 时，每个系统各自记录自己的运行。
     </summary>
   </member>
@@ -26,11 +26,11 @@
       （每段前后各取一次 <c>GC.GetAllocatedBytesForCurrentThread</c>）。
     </summary>
   </member>
-  <member name="P:EasyEcs.SystemStats.LastEntities" source="e869b2134c1b">
+  <member name="P:EasyEcs.SystemStats.LastEntities" source="c412b95b8b38">
     <summary>
       最近一次运行的 <c>[ForEach]</c> 方法访问的实体数：每个方法的遍历开始时它的查询匹配的实体（通过过滤条件的行；
       <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c> 还要求在系统上次运行之后写过或移除过），各方法相加；<c>[ForEach(Slices = N)]</c> 方法只算它这次访问的那一片的行。
-      <see cref="M:EasyEcs.EcsSystem.OnUpdate" /> 里做的查询不算。
+      [OnUpdate] 方法里做的查询不算。
     </summary>
   </member>
   <member name="P:EasyEcs.SystemStats.TotalAllocated" source="05a2791c4ab1">

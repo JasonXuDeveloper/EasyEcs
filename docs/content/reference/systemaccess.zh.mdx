@@ -12,7 +12,7 @@ public struct SystemAccess
 
 系统读写的数据，添加系统时声明一次。打开 [`WorldOptions.ParallelSystems`](/zh/docs/reference/worldoptions#parallelsystems) 后，彼此没有顺序约束、读写也不冲突的系统会同时运行。两个系统冲突，是指一个写了另一个读或写的组件或单例，或者其中一个要 [独占运行](/zh/docs/reference/systemaccess#runalone)。
 
-生成器为每个有 [[ForEach]](/zh/docs/reference/foreachattribute) 方法的系统声明它：`ref` 参数算写，`in` 参数算读。系统能碰到参数以外的 World 数据时就独占运行：有 [`Entity`](/zh/docs/reference/entity) 或 [`World`](/zh/docs/reference/world) 参数、有实例 `[ForEach]` 方法、重写了 [`EcsSystem.OnUpdate`](/zh/docs/reference/ecssystem#onupdate)，或者根本没有 `[ForEach]` 方法。
+生成器为每个有 [[ForEach]](/zh/docs/reference/foreachattribute) 方法的系统声明它：`ref` 参数算写，`in` 参数算读。系统能碰到参数以外的 World 数据时就独占运行：有 [`Entity`](/zh/docs/reference/entity) 或 [`World`](/zh/docs/reference/world) 参数、有 [[OnUpdate]](/zh/docs/reference/onupdateattribute) 方法、有 `[Consume]` 方法，或者根本没有 `[ForEach]` 方法。
 
 ## 方法 [#methods]
 

@@ -10,12 +10,13 @@ description: "对每个匹配组件参数（以及 WithAttribute / WithoutAttrib
 public sealed class ForEachAttribute : Attribute
 ```
 
-对每个匹配组件参数（以及 [`WithAttribute`](/zh/docs/reference/withattribute) / [`WithoutAttribute`](/zh/docs/reference/withoutattribute) / [`WithAnyAttribute`](/zh/docs/reference/withanyattribute) 过滤条件）的实体，执行 [`EcsSystem`](/zh/docs/reference/ecssystem) 的一个方法（或者通过生成的入口点，执行任何其他类型的静态方法）。每次更新执行一次，在 [`EcsSystem.OnUpdate`](/zh/docs/reference/ecssystem#onupdate) 之后，按声明顺序。
+对每个匹配组件参数（以及 [`WithAttribute`](/zh/docs/reference/withattribute) / [`WithoutAttribute`](/zh/docs/reference/withoutattribute) / [`WithAnyAttribute`](/zh/docs/reference/withanyattribute) 过滤条件）的实体，执行 [[EcsSystem]](/zh/docs/reference/ecssystemattribute) 的一个静态方法（或者通过生成的入口点，执行任何其他类型的静态方法）。每次更新执行一次，在它的 [[OnUpdate]](/zh/docs/reference/onupdateattribute) 方法之后，按声明顺序。
 
-参数：1 到 9 个组件（`ref` 表示写，`in` 表示读，[`Mut`](/zh/docs/reference/mut) 表示只写其中一部分行；按段接收行的批处理方法用 `Span<T>` / `ReadOnlySpan<T>`）、单例（`ref` / `in`），还可以加上 [`Entity`](/zh/docs/reference/entity) 和 [`World`](/zh/docs/reference/world)。静态方法和实例方法都支持。
+参数：1 到 9 个组件（`ref` 表示写，`in` 表示读，[`Mut`](/zh/docs/reference/mut) 表示只写其中一部分行；按段接收行的批处理方法用 `Span<T>` / `ReadOnlySpan<T>`）、单例（`ref` / `in`），还可以加上 [`Entity`](/zh/docs/reference/entity) 和 [`World`](/zh/docs/reference/world)。
 
 ```csharp
-public class MovementSystem : EcsSystem
+[EcsSystem]
+ref struct Movement
 {
     [ForEach, Without<Frozen>]
     static void Move(ref Position p, in Velocity v) { p.X += v.X; p.Y += v.Y; }
@@ -72,4 +73,4 @@ public SimdMode SimdMode { get; init; }
 public int Slices { get; init; }
 ```
 
-把方法的行分摊到系统的 N 次运行上：每次运行访问一片，约为每个匹配表行数的 1 / N（第 [`EcsSystem.RunCount`](/zh/docs/reference/ecssystem#runcount) mod N 片，见 [`QueryFilter.Slice`](/zh/docs/reference/queryfilter#slice)），所以每 N 次运行每行访问一次，处理大量实体的系统每次更新只花约 1 / N，而不是集中在某一次更新上出现尖峰。配合 [[UpdateInterval(M)]](/zh/docs/reference/updateintervalattribute)，每行每 N \* M 次更新访问一次。两次运行之间移动了的行（交换删除、结构变更、表扩容或缩小）在一轮里可能被跳过，也可能被访问两次。逐实体、批处理和 [`ForEachAttribute.Parallel`](/zh/docs/reference/foreachattribute#parallel) 都能用（这一片再切成块）。不能和 `[Changed<T>]` / `[Removed<T>]` 一起用（EECS035）：其他片的行会丢掉系统上次运行之后的变更。默认 1：每次运行访问每一行。
+把方法的行分摊到系统的 N 次运行上：每次运行访问一片，约为每个匹配表行数的 1 / N（第 [`SystemHandle.RunCount`](/zh/docs/reference/systemhandle#runcount) mod N 片，见 [`QueryFilter.Slice`](/zh/docs/reference/queryfilter#slice)），所以每 N 次运行每行访问一次，处理大量实体的系统每次更新只花约 1 / N，而不是集中在某一次更新上出现尖峰。配合 [[UpdateInterval(M)]](/zh/docs/reference/updateintervalattribute)，每行每 N \* M 次更新访问一次。两次运行之间移动了的行（交换删除、结构变更、表扩容或缩小）在一轮里可能被跳过，也可能被访问两次。逐实体、批处理和 [`ForEachAttribute.Parallel`](/zh/docs/reference/foreachattribute#parallel) 都能用（这一片再切成块）。不能和 `[Changed<T>]` / `[Removed<T>]` 一起用（EECS035）：其他片的行会丢掉系统上次运行之后的变更。默认 1：每次运行访问每一行。

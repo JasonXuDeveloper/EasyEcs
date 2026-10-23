@@ -52,7 +52,7 @@ public int MaxDegreeOfParallelism { get; init; }
 public bool MeasureSystems { get; init; }
 ```
 
-把每个系统每次运行的数据记进 [`EcsSystem.Stats`](/zh/docs/reference/ecssystem#stats)：耗时和分配的字节数（每次运行读两次时间戳、两次分配计数，并行 `[ForEach]` 的每个辅助块也一样），以及它的 `[ForEach]` 方法访问过的实体数（每次遍历开始时数一次）。默认 false。
+把每个系统每次运行的数据记进 [`SystemHandle.Stats`](/zh/docs/reference/systemhandle#stats)：耗时和分配的字节数（每次运行读两次时间戳、两次分配计数，并行 `[ForEach]` 的每个辅助块也一样），以及它的 `[ForEach]` 方法访问过的实体数（每次遍历开始时数一次）。默认 false。
 
 ### `ParallelSystems` [#parallelsystems]
 
@@ -68,4 +68,4 @@ public bool ParallelSystems { get; init; }
 public SystemErrorPolicy SystemErrors { get; init; }
 ```
 
-系统抛出异常时怎么处理（默认 [`SystemErrorPolicy.Throw`](/zh/docs/reference/systemerrorpolicy#throw)）：抛出 [`World.Update`](/zh/docs/reference/world#update)，或者停掉这个系统，把异常记进 [`EcsSystem.Error`](/zh/docs/reference/ecssystem#error)。
+系统抛出异常时怎么处理（默认 [`SystemErrorPolicy.Throw`](/zh/docs/reference/systemerrorpolicy#throw)）：抛出 [`World.Update`](/zh/docs/reference/world#update)，或者停掉这个系统，把异常记进 [`SystemHandle.Error`](/zh/docs/reference/systemhandle#error)。

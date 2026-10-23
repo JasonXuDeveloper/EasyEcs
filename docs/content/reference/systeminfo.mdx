@@ -19,7 +19,7 @@ A system of a schedule and the data it declares ([`SystemAccess`](/en/docs/refer
 - `Writes`: Components its [ForEach] methods write (`ref` parameters).
 - `ReadsSingletons`: Singletons it reads.
 - `WritesSingletons`: Singletons it writes.
-- `RunsAlone`: It may touch anything (an OnUpdate override, an Entity or World parameter...): it never shares a stage.
+- `RunsAlone`: It may touch anything (an [OnUpdate] method, an Entity or World parameter...): it never shares a stage.
 - `After`: Why it is not in an earlier stage: the systems of the stage just before its own that it must follow (empty in the first stage).
 
 ## Constructors
@@ -39,7 +39,7 @@ A system of a schedule and the data it declares ([`SystemAccess`](/en/docs/refer
 - `Writes`: Components its [ForEach] methods write (`ref` parameters).
 - `ReadsSingletons`: Singletons it reads.
 - `WritesSingletons`: Singletons it writes.
-- `RunsAlone`: It may touch anything (an OnUpdate override, an Entity or World parameter...): it never shares a stage.
+- `RunsAlone`: It may touch anything (an [OnUpdate] method, an Entity or World parameter...): it never shares a stage.
 - `After`: Why it is not in an earlier stage: the systems of the stage just before its own that it must follow (empty in the first stage).
 
 ## Properties
@@ -90,7 +90,7 @@ Singletons it reads.
 public bool RunsAlone { get; init; }
 ```
 
-It may touch anything (an OnUpdate override, an Entity or World parameter...): it never shares a stage.
+It may touch anything (an [OnUpdate] method, an Entity or World parameter...): it never shares a stage.
 
 ### `Writes` [#writes]
 

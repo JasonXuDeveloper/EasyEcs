@@ -20,7 +20,7 @@ public enum SystemErrorPolicy
 Disable = 1;
 ```
 
-停掉出错的系统（[`EcsSystem.Enabled`](/zh/docs/reference/ecssystem#enabled) 设为 false），把异常存进 [`EcsSystem.Error`](/zh/docs/reference/ecssystem#error)，然后接着完成这次更新：失败成了数据，应用程序从 [`World.Systems`](/zh/docs/reference/world#systems) 里读取。
+停掉出错的系统（[`SystemHandle.Enabled`](/zh/docs/reference/systemhandle#enabled) 设为 false），把异常存进 [`SystemHandle.Error`](/zh/docs/reference/systemhandle#error)，然后接着完成这次更新：失败成了数据，应用程序从 [`World.Systems`](/zh/docs/reference/world#systems) 里读取。
 
 ### `Throw` [#throw]
 

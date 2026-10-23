@@ -1,6 +1,6 @@
 
 <doc>
-  <member name="T:EasyEcs.SystemAccess" source="ba0d9aac7f64">
+  <member name="T:EasyEcs.SystemAccess" source="c84b1785b7bb">
     <summary>
       系统读写的数据，添加系统时声明一次。打开 <see cref="P:EasyEcs.WorldOptions.ParallelSystems" /> 后，彼此没有顺序约束、
       读写也不冲突的系统会同时运行。两个系统冲突，是指一个写了另一个读或写的组件或单例，或者其中一个要
@@ -8,7 +8,7 @@
       <para>
         生成器为每个有 <see cref="T:EasyEcs.ForEachAttribute">[ForEach]</see> 方法的系统声明它：<c>ref</c> 参数算写，<c>in</c>
         参数算读。系统能碰到参数以外的 World 数据时就独占运行：有 <see cref="T:EasyEcs.Entity" /> 或 <see cref="T:EasyEcs.World" />
-        参数、有实例 <c>[ForEach]</c> 方法、重写了 <see cref="M:EasyEcs.EcsSystem.OnUpdate" />，或者根本没有 <c>[ForEach]</c> 方法。
+        参数、有 <see cref="T:EasyEcs.OnUpdateAttribute">[OnUpdate]</see> 方法、有 <c>[Consume]</c> 方法，或者根本没有 <c>[ForEach]</c> 方法。
       </para>
     </summary>
   </member>
