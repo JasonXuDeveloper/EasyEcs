@@ -175,6 +175,17 @@ public class FormTests
     public async Task RecordsAppendedToASingletonAreReported(string source, string message) =>
         Assert.That(await Hand(source, "EECS089"), Is.EqualTo(new[] { message }));
 
+    [Test]
+    public void TheEmitRuleNamesTheSingletonReadersUse()
+    {
+        // The description's call is the one readers write (EmitTests): the records are the singleton's Items.
+        string description = EasyEcs.Generator.EasyEcsAnalyzer.HandWrittenEmit.Description.ToString();
+        Assert.That(description, Does.Contain("world.GetSingleton<Emitted<T>>().Items"));
+        using var world = new World();
+        world.AddSingleton<Emitted<int>>();
+        Assert.That(world.GetSingleton<Emitted<int>>().Items.Count, Is.Zero);
+    }
+
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Log log) { log.Hits.Add(new Hit { Amount = p.V }); if (log.Hits.Count > 9) log.Hits.Clear(); } }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Log log) { log.Hits.Add(new Hit { Amount = p.V }); log.Count++; } }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(in P p, ref Log log) => log.Hits.Add(new Hit { Amount = p.V }); }")] // EECS010's

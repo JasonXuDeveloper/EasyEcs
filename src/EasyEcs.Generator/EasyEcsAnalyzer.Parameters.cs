@@ -48,7 +48,7 @@ public sealed partial class EasyEcsAnalyzer
         "A list a singleton holds, filled through a 'ref' parameter, is one list every row writes: the method cannot run in " +
         "parallel, and the list grows by doubling as the records come. An Emit<T> parameter gives each chunk of rows a " +
         "pooled list and appends the lists to Emitted<T> in chunk order when the pass ends: the same records in the same " +
-        "row order, on one thread or several. Systems after the pass read world.Emitted<T>().Items and clear it.",
+        "row order, on one thread or several. Systems after the pass read world.GetSingleton<Emitted<T>>().Items and clear it.",
         helpLinkUri: Help("EECS089"));
 
     /// <summary>
