@@ -9,7 +9,7 @@
 # (a container restart) goes on where it stopped; --fresh clears the marks. Each project is built once, the classes
 # run with --no-build. One run at a time on a machine: the runs share a lock (BENCH_LOCK, flock -o, so a build server
 # left behind does not keep it). --sync merges the reports into docs/src/data/bench.json (sync-benchmarks --merge):
-# the classes run replace theirs, the others stay.
+# the classes run replace theirs, the others stay, and the rows that moved (15 %, or their allocation) are listed.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 art=$root/BenchmarkDotNet.Artifacts
@@ -58,5 +58,25 @@ for cls in "${classes[@]}"; do
 done
 echo "$(date +%T) done"
 if [ $sync = 1 ]; then
+  before=$(mktemp)
+  cp docs/src/data/bench.json "$before"
   (cd docs && BENCH_RESULTS="$art/results" bun scripts/sync-benchmarks.ts --merge)
+  # What moved: a row 15 % slower or faster, or allocating differently, is checked before it is published.
+  python3 - "$before" docs/src/data/bench.json <<'PY'
+import json, sys
+old, new = (json.load(open(f))["benchmarks"] for f in sys.argv[1:])
+key = lambda r: (r["method"], tuple(sorted(r["params"].items())))
+for cls, entry in new.items():
+    rows = {key(r): r for r in old.get(cls, {}).get("rows", [])}
+    for r in entry["rows"]:
+        o = rows.get(key(r))
+        if o is None or not o["meanNs"]: continue
+        d = r["meanNs"] / o["meanNs"] - 1
+        alloc = o["allocatedBytes"] != r["allocatedBytes"]
+        if abs(d) > 0.15 or alloc:
+            params = ",".join(f"{k}={v}" for k, v in key(r)[1])
+            print(f"  {cls}.{r['method']}({params}) {o['meanNs']:.0f} -> {r['meanNs']:.0f} ns {d:+.0%}"
+                  + (f", {o['allocatedBytes']} -> {r['allocatedBytes']} B" if alloc else ""))
+PY
+  rm -f "$before"
 fi
