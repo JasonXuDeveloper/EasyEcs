@@ -189,6 +189,119 @@ public class CommitHeatSystem : EcsSystem
 </Step>
 </Steps>
 
+### 生成器写了什么 [#generated]
+
+在生成器眼里，着色器就是一个普通的 `[ForEach]` 方法：按实体运行的并行 job，只是为瓦片多做了两件事。它的过滤条件要求有瓦片组件和格子缓冲，
+所以只有瓦片会进到方法里；方法运行之前，job 在键的索引里找到瓦片的邻居，交给它构造的 `Tile`。
+
+```csharp tab="你写的" doccheck=skip
+[ForEach(Parallel = true, ChunkRows = 64)]
+static void Diffuse(Tile<Temperature, HeatPlate> heat, Mut<DynamicBuffer<NextTemperature>> next)
+```
+
+```csharp tab="生成器写的" doccheck=skip
+// 生成的代码（DiffuseSystem.….ForEach.g.cs，有删节，去掉了 global::）。不要照抄：Diffuse_0 是指向你的私有方法的
+// [UnsafeAccessor]，TileNeighbors 是生成器的辅助类型。
+internal struct DiffuseJob0 : IForEachEntity<DynamicBuffer<NextTemperature>>, INoStructuralChanges
+{
+    public object k0;   // HeatPlate 按键建的索引，遍历之前建好
+
+    public void Execute(Entity entity, ref DynamicBuffer<NextTemperature> c1)
+    {
+        // 邻居每个实体找一次，方法里这个网格的每个 Tile 共用。
+        TileNeighbors.Of<HeatPlate, PlatePos>(k0, entity, out var n0);
+        __ForEach.Diffuse_0(null, new Tile<Temperature, HeatPlate>(entity, in n0),
+            new Mut<DynamicBuffer<NextTemperature>>(ref c1, entity));
+    }
+
+    static int IForEachEntity<DynamicBuffer<NextTemperature>>.WriteMask => 1;
+    static int IForEachEntity<DynamicBuffer<NextTemperature>>.SelfStamped => 1;   // Mut：只给写过的行打 tick
+}
+
+// 只要瓦片：网格组件和格子，外加查询的下一步缓冲。
+internal static readonly QueryFilter DiffuseFilter0 =
+    QueryFilter.Create().With<HeatPlate>().With<DynamicBuffer<Temperature>>();
+
+// 系统的 Update 和 Access：
+var job0 = new DiffuseJob0 { k0 = LookupExtensions.Prepared<HeatPlate, PlatePos>(world) };
+world.ForEachEntityParallel<DynamicBuffer<NextTemperature>, DiffuseJob0>(ref job0, in DiffuseFilter0, chunkRows: 64);
+
+access.Index<HeatPlate, PlatePos>();          // 读网格，它的索引在阶段之前建好
+access.Read<DynamicBuffer<Temperature>>();    // 读每块瓦片的格子
+access.Write<DynamicBuffer<NextTemperature>>();
+```
+
+- **网格的读者。** 系统读瓦片组件和格子缓冲，所以写它们的系统不会和它同一阶段，每个邻居读到的都是这一遍之前的值。写其中任何一个的方法是
+  [EECS059](/zh/docs/guide/analyzer#eecs059)。
+- **索引先建好。** `Prepared` 在所有者线程上、并行阶段之前创建并建好键的索引，线程只读它。
+- **每块瓦片一次调用。** 方法单独编译，每个实体调用一次，JIT 的内联预算花在模板的循环和采样上，而不是外面的 job 上。
+
+### 高瓦片：多层、`Height` 和 `Pad(from, to)` [#layers]
+
+多于一层（`Height` 大于 1）的瓦片是一箱格子：体素世界的一个区块，3D 场的一个立方体。`Faces` 说明哪些面有邻居：立方体网格用
+`TileFaces.All`，从世界底部一直到顶部的柱子用默认的 `Sides`。`Pad()` 加载每一层，上下各加 `Halo` 层；游标用 `dy` 采样上一层或下一层：
+
+```csharp
+public record struct CubePos(int X, int Y, int Z);
+
+// 16 x 16 x 16 个气体格子的立方体，六个面各有一个邻居。
+// Mirror：气体不会穿过世界的边缘流走。
+public partial record struct GasCube([IndexKey] CubePos Pos) : IComponent, ITile<CubePos>
+{
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
+    static int ITileShape.Height => 16;
+    static TileFaces ITileShape.Faces => TileFaces.All;
+    static TileBoundary ITileShape.Boundary => TileBoundary.Mirror;
+
+    static CubePos ITile<CubePos>.Beside(CubePos p, TileFaces face) => face switch
+    {
+        TileFaces.North => p with { Z = p.Z - 1 },
+        TileFaces.South => p with { Z = p.Z + 1 },
+        TileFaces.West => p with { X = p.X - 1 },
+        TileFaces.East => p with { X = p.X + 1 },
+        TileFaces.Below => p with { Y = p.Y - 1 },
+        _ => p with { Y = p.Y + 1 },
+    };
+}
+
+public record struct Gas(float Value);
+public record struct NextGas(float Value);
+
+public class SpreadGasSystem : EcsSystem
+{
+    const float Rate = 0.1f;
+
+    [ForEach(Parallel = true, ChunkRows = 64)]
+    static void Spread(Tile<Gas, GasCube> gas, Mut<DynamicBuffer<NextGas>> next)
+    {
+        var cube = gas.Pad();
+        var into = MemoryMarshal.Cast<NextGas, float>(next.Write().AsSpan());
+        // 七点模板读这一行、它的四边，以及上下层的行。
+        foreach (var row in cube.Rows(TileReads.Cross))
+        {
+            var cells = cube.At(row);
+            for (int x = 0; x < 16; x += Vector128<float>.Count)
+            {
+                var here = cells.Load128<float>(x);
+                var around = cells.Load128<float>(x - 1) + cells.Load128<float>(x + 1)
+                    + cells.Load128<float>(x, 0, -1) + cells.Load128<float>(x, 0, 1)
+                    + cells.Load128<float>(x, -1, 0) + cells.Load128<float>(x, 1, 0);
+                (here + (around - here * 6f) * Rate).CopyTo(into.Slice(row.Index + x));
+            }
+        }
+    }
+}
+```
+
+- **只加载一部分层。** `tile.Pad(from, to)` 只加载第 `from` 到 `to` 层（连同它们的光环层），适合知道活在哪里的模板：区块里水到得了的层、
+  波前经过的那一段。`Rows` 只遍历这些层，`row.Y` / `row.Z` 是行的位置；`row.Index` 是它在任何同布局缓冲里的第一个格子。
+- **自定义填充值。** `TileBoundary.Fill` 下，`Pad(from, to, fill)` 设置没有邻居时光环里的值：地图外的温度、洞穴四周的岩石。
+- **只采样的字段。** `Pad(from, to, fill, mask: false)` 不再逐格检查活跃行。方法遍历第一个字段的行、同时采样第二个字段时用它：
+  `At(row)` 接受用同样的层加载的另一块瓦片的行。没带掩码加载的瓦片调用 `Rows` 会抛出异常。
+- **单个格子。** `cursor[dx, dy, dz]` 读一行周围的一个格子，`padded[x, y, z]` 读纹理里的任意格子（含光环），`tile.Cells` 不加载就能读瓦片自己的格子。
+  行足够宽时，`Load256` 和 `LoadVector` 读 32 字节或一个 `Vector<T>`。
+
 ### 更宽的光环、棱和角 [#halo]
 
 形状上另有三个静态成员决定光环里放什么。它们都有默认值，JIT 像折叠尺寸一样折叠它们：
@@ -559,6 +672,8 @@ tick 3  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
 | 通过哈希找邻居 | `IDirectIndexed<TKey>` 加 `[UniqueKey]` | 每个邻居一次数组读取 |
 | 一个 `byte` 就放得下的值用 `float` 格子 | 放得下的最窄的格子 | 每个向量多四倍的格子 |
 | 每遍都清空下一步的缓冲 | 写这一遍之后要读的每一行 | 不必把这一遍本来就要重写的内存整个写一遍 |
+| 高瓦片的活只在几层，却 `Pad()` 所有层 | 对有活的层 `Pad(from, to)` | 拷贝和遍历只覆盖这些层 |
+| 方法只采样的第二个字段也用 `Pad()` | `Pad(from, to, fill, mask: false)` | 不再为活跃行逐格检查 |
 
 `TileStencilBenchmark` 在 32 x 32 块、每块 16 x 16 个格子的板上跑九点模糊和四阶拉普拉斯算子，对比瓦片、直接映射的瓦片和手写版本
 （每个邻居一次 `Lookup`、栈上一张带填充的纹理）；`TileActiveBenchmark` 对比大部分安静的网格休眠与不休眠；`TileNeighborBenchmark`
@@ -571,7 +686,8 @@ tick 3  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
 ## 开销 [#what-it-costs]
 
 - **每块瓦片每遍：** 形状的邻居范围里每个邻居查找一次（4 到 26 个，每个一次哈希探测，`IDirectIndexed` 下是一次数组读取），每个实体只做一次，
-  方法里同一网格的瓦片参数共用。
+  方法里同一网格的瓦片参数共用；外加一次方法调用（它不内联进 job，见[生成器写了什么](#generated)）。
+- **遍历之前：** 在所有者线程上创建并建好键的索引，第一次 O(瓦片数)；之后的遍历直接用建好的索引。
 - **每次 `Pad`：** 拷贝瓦片的格子和邻居朝向它的边，O(层数 × (Width + 2r) × (Depth + 2r))，外加每行一位。线程有了纹理之后不再分配。
 - **内存：** 每个线程、每种（格子类型，瓦片类型）一张纹理，在线程第一次加载时分配，大小是瓦片的格子加上光环；格子本身是动态缓冲
   （带下一步缓冲时每块瓦片两个）。
@@ -589,6 +705,9 @@ tick 3  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
 | 读到的全是零时结果不为零的模板用 `Rows(reads)` | 跳过的行留着上一步的值 | 代码审查：`Rows(TileReads.All)` 或遍历每一行 |
 | 九点模板用默认的 `Neighborhood` | 光环的角放的是边界值，不是对角的瓦片 | 测试：`TileNeighborhood.All` |
 | 格子缓冲比形状的格子少 | `Pad` 抛出异常 | 创建时用 `SetCount` 定好两个缓冲的大小 |
+| `Pad(from, to)` 的层超出 `0` 到 `Height - 1`，或 `from` 大于 `to` | `Pad` 抛出 `ArgumentOutOfRangeException` | 代码审查：形状的层数 |
+| 用 `mask: false` 加载的瓦片调用 `Rows` | `InvalidOperationException`：它没有活跃行 | 要遍历哪块瓦片的行，就带掩码加载哪块 |
+| 采样距离超过 `Halo` | `ArgumentOutOfRangeException`（超出带填充的瓦片） | 代码审查：模板伸出 r 格就写 `Halo => r` |
 | 新瓦片第一步之前就休眠 | 它永远不会读到创建时旁边的邻居 | 创建时让瓦片醒着 |
 
 ## 相关页面 [#related]

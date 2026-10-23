@@ -49,7 +49,7 @@ major or minor version that needs code changes? The
   [vector loops](/en/docs/guide/systems#vector-loops) and the
   [decision](/en/docs/decisions#d68-vector-loops-without-opting-in).
 - Analyzer rule [EECS055](/en/docs/guide/analyzer#eecs055) (suggestion) names why a `[ForEach]` method over numbers
-  got no vector loop ("component Body has 5 fields", "lane types float and int differ"), as Burst's inspector does.
+  got no vector loop ("component Body has 5 fields", "lane types float and double differ in size"), as Burst's inspector does.
   `[ForEach(SimdMode = SimdMode.Require)]` makes that an error ([EECS056](/en/docs/guide/analyzer#eecs056)), so a hot
   loop cannot lose its vectors unnoticed; `SimdMode.Off` keeps a method scalar without the message. See
   [vector loops](/en/docs/guide/systems#vector-loops).

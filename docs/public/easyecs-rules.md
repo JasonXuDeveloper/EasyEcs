@@ -123,7 +123,7 @@ available as Markdown: add `.md` to its URL.
   write `T` (EECS059): write another component and copy it back later.
   Records a pass produces (hits, events, messages) go through an `Emit<T>` parameter (`hits.Add(new Hit(...))`), joined
   in row order into singleton `Emitted<T>` when the pass ends, never a `List<T>` in a `ref` singleton (EECS089). A
-  later system reads `world.Emitted<T>().Items` and clears it; the emitting method never takes `Emitted<T>` and emits
+  later system reads `world.GetSingleton<Emitted<T>>().Items` and clears it; the emitting method never takes `Emitted<T>` and emits
   one kind of record through one parameter (EECS070).
   Random numbers in a `[ForEach]` method come from `in EntityRandom random` (`random.Range(entity.Id, stream, min,
   max)`, a pure function of seed, entity, tick and stream), never `Random.Shared`, a `new Random` or a `Random` field
@@ -140,7 +140,7 @@ available as Markdown: add `.md` to its URL.
   quiet tiles sleep through `tile.ChangedEdges` / `tile.Facing` and an awake tag. One cell type per field, one
   `Tile` per field (two of the same cell type is EECS073).
 - Hot per-row arithmetic over numbers: a static per-entity `[ForEach]` method (on one thread or `Parallel`; no
-  `Entity`, `World`, span or `Mut<T>` parameter) gets a generated vector loop when its components hold 1 to 4 lanes of
+  `Entity`, `World`, span, `Mut<T>`, `Scratch<T>`, `Lookup<T>`, `Emit<T>`, `Tile` or `ref` value parameter) gets a generated vector loop when its components hold 1 to 4 lanes of
   one size: 4-byte `float` / `int` / `uint`, 8-byte `double` / `long` / `ulong`, or narrow `byte` / `sbyte` / `short`
   / `ushort` lanes, whose `int` arithmetic must fit the lanes (`(byte)Math.Min(a.X + b.X, 255)` is a saturating add;
   a value the lanes cannot hold stays scalar). Struct values are one vector per lane: `Vector2` / `Vector3` /
@@ -148,7 +148,10 @@ available as Markdown: add `.md` to its URL.
   AVX-512 a wider component (up to 16 words) qualifies when the method uses only its 4-byte fields. A `Maybe<T>` of a
   lane component is a mask of the rows that have it (on one thread only). An `if` becomes a mask; a branch the loop
   cannot express (a call, a loop, logging) is cold, and the vectors where a lane takes it run the method. Do not mix
-  `float` and `int`, and keep `bool` fields out of hot components. Results are bit for bit the method's
+  lane sizes (`float` with `double`, `int` with `byte`; `float` with `int` is fine), and keep `bool` fields out of hot
+  components. A `Reduce<T>` keeps lane accumulators when its hand-written `Combine` sums, `Min`s or `Max`es each field
+  (one declared with `[Sum]` / `[Min]` / `[Max]` stays scalar: the vector generator does not see the generated
+  `Combine`). Results are bit for bit the method's
   (`FloatMode.Exact`, the default); `[ForEach(FloatMode = FloatMode.Fast)]` lets `MathF.Sin` / `Cos` / `Exp` / `Log`
   / `Log2` / `Hypot` and a float `Reduce<T>` sum vectorize, with results that are not bit for bit the method's (nor the
   same across vector widths): keep `Exact` where results must match on every machine. EECS055 (a suggestion) names

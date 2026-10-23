@@ -180,8 +180,9 @@ public class MovementSystem : EcsSystem
 }
 ```
 
-A static per-entity method whose components hold 1 to 4 numbers of one type (`float`, `int`, …) also gets a
-`Vector<T>` loop written by the generator, with the same results bit for bit
+A static per-entity method whose components hold 1 to 4 numbers of one size (`float`, `int`, …) also gets a vector
+loop written by the generator (`Vector512` where the CPU has AVX-512, then `Vector<T>`), with the same results bit for
+bit
 ([vector loops](/en/docs/guide/systems#vector-loops)). This one gets it: two `float`s per component.
 [EECS055](/en/docs/guide/analyzer#eecs055) says why a method did not, and `SystemInfo.Loops` in
 `world.DescribeSchedule()` names the loop each method got.
@@ -215,7 +216,7 @@ A static per-entity method whose components hold 1 to 4 numbers of one type (`fl
 | `[ForEach]` / `[ForEach(Parallel = true)]` | Method | The method is the loop; `Parallel` splits rows across threads ([EECS010](/en/docs/guide/analyzer#eecs010)) |
 | `[ForEach(Parallel = true, ChunkRows = n)]` | Method | Threads claim `n` rows at a time (OpenMP's `schedule(dynamic, n)`): for a few hundred heavy rows ([chunk size](/en/docs/guide/threading#chunk-rows), [EECS054](/en/docs/guide/analyzer#eecs054)) |
 | `[ForEach(SimdMode = SimdMode.Require)]` | Method | The method must get its vector loop, else a build error ([EECS056](/en/docs/guide/analyzer#eecs056)); `SimdMode.Off` keeps it scalar without [EECS055](/en/docs/guide/analyzer#eecs055) |
-| `[ForEach(FloatMode = FloatMode.Fast)]` | Method | `Sin`, `Cos`, `Exp`, `Log`, `Log2`, `Hypot` in the vector loop take .NET's vector approximations; `Exact` (the default) keeps the method's results bit for bit ([FloatMode](/en/docs/guide/systems#float-mode)) |
+| `[ForEach(FloatMode = FloatMode.Fast)]` | Method | `Sin`, `Cos`, `Exp`, `Log`, `Log2`, `Hypot` in the vector loop take .NET's vector approximations, and a float `Reduce<T>` sum adds lane by lane; `Exact` (the default) keeps the method's results bit for bit ([FloatMode](/en/docs/guide/systems#float-mode)) |
 | `[ForEach, Consume]` | Method | The rows the pass visited are destroyed when it ends: events, commands ([Consume](/en/docs/guide/systems#consume), [EECS084](/en/docs/guide/analyzer#eecs084)) |
 | `[ForEntity]` | Static method | Runs on one entity through a generated entry point, `Owner.Method(entity, values)` ([one entity](/en/docs/guide/queries#run-on-one-entity), [EECS080](/en/docs/guide/analyzer#eecs080)) |
 | `[ForEach(Slices = N)]` | Method | Each run visits one slice, about 1 / N of the rows: every row once per N runs (not with `Changed` / `Removed`: [EECS035](/en/docs/guide/analyzer#eecs035)) |

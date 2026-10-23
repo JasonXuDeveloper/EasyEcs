@@ -532,8 +532,9 @@ public class RouteSystem : EcsSystem
 
 ### 向量循环：生成器写的 SIMD [#vector-loops]
 
-`[ForEach]` 方法照常按一行来写；组件都是普通数值时，生成器还会顺手写出它的 SIMD 循环：方法体变成在每段匹配行上跑的
-`System.Numerics.Vector<T>` 循环，一条指令处理 `Vector<T>` 装得下的行数（x64 上用 AVX2 是 8 个 float，Arm 上 4 个）。Unity 的
+`[ForEach]` 方法照常按一行来写；组件都是普通数值时，生成器还会顺手写出它的 SIMD 循环：方法体变成在每段匹配行上跑的向量循环，
+一条指令处理一个向量装得下的行数：CPU 支持 AVX-512 时先跑 `Vector512<T>` 循环（16 个 float），剩下的行再跑
+`System.Numerics.Vector<T>` 循环（x64 上用 AVX2 是 8 个 float，Arm 上 4 个）。Unity 的
 Burst 和 ISPC 也是这样做的：方法就是一条通道（lane）的内核。.NET 的 JIT 自己不会把循环向量化，没有这一步的话，逐行方法就一次只算一行
 （[D68](/zh/docs/decisions#d68-vector-loops-without-opting-in)）。不用开启什么：`[ForEach(SimdMode = SimdMode.Require)]`
 让失去向量循环的方法构建失败，`SimdMode.Off` 让方法保持标量。
@@ -568,7 +569,7 @@ public class CoolingSystem : EcsSystem
 
 ```csharp tab="生成器写的" doccheck=skip
 // 生成的代码：在每段匹配行上跑的 IForEachBatch job。别照抄：它通过 [UnsafeAccessor]（Cool_0）调用你的私有方法，
-// 还用 Unsafe.As 重新解释列。
+// 还用 Unsafe.As 重新解释列。这里只保留 Vector<T> 循环：CPU 支持 AVX-512 时，同样的 Vector512 循环先跑。
 public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2)
 {
     ref Heat r1 = ref MemoryMarshal.GetReference(c1);
@@ -577,7 +578,7 @@ public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2)
     ref float e1 = ref Unsafe.As<Heat, float>(ref r1);            // 把列当 float 看
     ref float e2 = ref Unsafe.As<Speed, float>(ref r2);
     nint i = 0;
-    if (Vector.IsHardwareAccelerated && rows >= Vector<float>.Count)
+    if (Vector.IsHardwareAccelerated && rows - i >= Vector<float>.Count)
     {
         // 1. 统一值，每段行广播一次：单例和常量
         var __u0 = new Vector<float>(s2.Value);                   // pull.Value
@@ -643,7 +644,7 @@ public class FallSystem : EcsSystem
 ref float e1 = ref Unsafe.As<Position3, float>(ref r1);   // 把列看成一串 float：X, Y, Z, X, Y, Z, ...
 ref float e2 = ref Unsafe.As<Velocity3, float>(ref r2);
 nint i = 0;
-if (Vector.IsHardwareAccelerated && Interleaved.IsAccelerated && rows >= Vector<float>.Count)
+if (Vector.IsHardwareAccelerated && Interleaved.IsAccelerated && rows - i >= Vector<float>.Count)
 {
     var __u0 = new Vector<float>(s2.Pull);   // 单例，每段行广播一次
     var __u2 = new Vector<float>(0f);
@@ -670,8 +671,12 @@ for (; i < rows; i++)   // 4. 尾部，以及没有 shuffle 指令时的每一�
 
 下面这些条件都满足时，方法才会得到向量循环；否则它照旧逐行运行，和以前完全一样：
 
-- **方法：** `static`、逐实体（单线程或 `Parallel` 都行），没有 `Entity`、`World` 或 `Mut<T>` 参数。组件的 `Maybe<T>` / `ReadOnlyMaybe<T>`
-  是有这个组件的行组成的通道掩码（单线程时）。
+- **方法：** `static`、逐实体（单线程或 `Parallel` 都行）、没有返回值；没有 `Entity`、`World`、`Mut<T>`、span、`Scratch<T>`、
+  `Lookup<T>`、`Emit<T>` 或 `Tile` 参数，也没有按 `ref` 传的值。组件的 `Maybe<T>` / `ReadOnlyMaybe<T>` 是有这个组件的行组成的通道掩码（单线程时）。
+- **汇总：** [`Reduce<T>`](/zh/docs/guide/threading#reductions) 每条通道一个累加器，循环结束后按通道顺序合进这段行的部分结果。条件是 `T`
+  的每个字段都是方法那么大的通道，并且 `T.Combine` 把每个字段设成两边该字段的和、`Min` 或 `Max`。浮点求和要 `FloatMode.Fast`
+  （[见下](#float-mode)）。生成器在你的源码里读 `Combine`：用 `[Sum]` / `[Min]` / `[Max]` 声明的归约，`Combine` 是另一个生成器写的，
+  它看不到，所以这样的方法逐行运行（`SystemInfo.Loops` 会说明原因）。
 - **组件：** 1 到 4 个同样大小的通道：`float`、`double`、`int`、`uint`、`long`、`ulong`、`byte`、`sbyte`、`short` 或 `ushort` 的字段
   （或自动属性），或由它们组成的结构体（`Vector2`、`Vector3`、`Vector4`，System.Numerics 和 Godot 的都行），只在一处声明。`ref` 和 `in`
   都可以；可以给整个组件赋值（`p = new Position(p.Value + v.Value * dt)`、`p = p with { ... }`）。在 AVX-512 上，更宽的组件（最多 16 个字，
@@ -765,7 +770,9 @@ public class SteeringSystem : EcsSystem
 ```
 
 系统的生成文件（`<System>.….ForEach.g.cs`，在项目的生成源码下；开启 `<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>`
-后在 `obj/` 下）里就是循环本身，`tools/jitdisasm.sh <project> 'EasyEcs.World:Masked'` 打印 JIT 为它生成的机器码。
+后在 `obj/` 下）里就是循环本身。想看 JIT 把它编成了什么，`tools/jitdisasm.sh <project> 'EasyEcs.World:Masked'` 会用 Release 构建项目、
+带上 `DOTNET_JitDisasm` 运行，打印每个单线程向量方法优化后的代码（job 的 `Execute` 内联进了运行它的 World 循环；并行方法在
+`ForEachBatch*` 运行器里）。程序只跑这个方法几次时加 `FULLOPTS=1`，直接编译优化代码。好的循环体里是向量指令，没有 `call`。
 
 `KernelBenchmark` 在 10 万行和 1,000 行上对比逐行 job 和生成的循环（带分支的钳制、`h += v * dt`、整数自增，以及 2 到 4 个字段的位置的移动、寻向和行进）；数字见
 [D68](/zh/docs/decisions#d68-vector-loops-without-opting-in)：

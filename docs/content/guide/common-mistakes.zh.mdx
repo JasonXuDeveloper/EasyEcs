@@ -856,6 +856,227 @@ public class HealAll : EcsSystem
 
 由 [EECS010](/zh/docs/guide/analyzer#eecs010) 发现。详见[`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)。
 
+### 并行方法里共享的计数器 [#shared-counter]
+
+```csharp doccheck=expect-EECS060
+public static class Combat
+{
+    public static long Damage;
+}
+
+public class Bleed : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Drain(ref Health hp)
+    {
+        hp.Value -= 1;
+        Combat.Damage += 1;   // 每个线程都加到同一个 long 上：加法会丢
+    }
+}
+```
+
+并行方法同时在每个线程上跑一块行，静态字段对它们都是同一块内存：自增是读、加、写三步，两个线程读到同一个值，就丢掉一次加法。
+把总数做成归约：每一块数进自己的副本，遍历结束时按行的顺序合并这些副本。
+
+```csharp
+public partial struct Damage : ISingletonComponent
+{
+    [Sum] public long Total;
+}
+
+public class Bleed : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Drain(ref Health hp, ref Reduce<Damage> damage)
+    {
+        hp.Value -= 1;
+        damage.Value.Total += 1;   // 这一块的计数
+    }
+}
+```
+
+由 [EECS060](/zh/docs/guide/analyzer#eecs060) 发现。详见[归约](/zh/docs/guide/threading#reductions)。
+
+### 把 `Reduce<T>.Value` 当成总数 [#reduce-value]
+
+```csharp
+public class Bleed : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Drain(ref Health hp, ref Reduce<Damage> damage)
+    {
+        hp.Value -= 1;
+        damage.Value.Total += 1;
+        if (damage.Value.Total > 1000) hp.Value = 0;   // 这一块到目前为止的计数，不是整遍的
+    }
+}
+```
+
+`Reduce<T>.Value` 是当前行所在那一块的部分结果：它从归约的单位元开始（求和是 0），换个线程数，块就从别处开始。总数要到遍历结束才有，
+而且它替换单例，所以是这一遍的总数，不是累计值。在后面的系统里读它：
+
+```csharp
+[UpdateAfter<Bleed>]
+public class BleedOut : EcsSystem
+{
+    [ForEach]
+    static void Collapse(ref Health hp, in Damage damage)   // 刚结束的那一遍的总数
+    {
+        if (damage.Total > 1000) hp.Value = 0;
+    }
+}
+```
+
+没有规则能发现：方法能编译，也能运行。详见[归约](/zh/docs/guide/threading#reductions)。
+
+### 调用之后读并行 job 的字段 [#job-field-after-parallel]
+
+```csharp doccheck=expect-EECS061
+public struct HealthTotal : IForEach<Health>, INoStructuralChanges
+{
+    public long Sum;
+
+    public static int WriteMask => 0;
+
+    public void Execute(ref Health hp) => Sum += hp.Value;
+}
+
+public static class Census
+{
+    public static long Total(World world)
+    {
+        var total = new HealthTotal();
+        world.ForEachParallel<Health, HealthTotal>(ref total);
+        return total.Sum;   // 仍是 0
+    }
+}
+```
+
+`ForEachParallel` 每一块跑一份 job 的副本，哪一份都不写回：按 `ref` 传入的 job 保持原来的值。字段里存结果的 job 放到一个线程上跑
+（`world.ForEach`），或者写一个带 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 参数的 `[ForEach(Parallel = true)]` 方法，
+它生成的 job 会合并各块。
+
+由 [EECS061](/zh/docs/guide/analyzer#eecs061) 发现，代码修复改成 `ForEach`。
+
+### 让 `Emitted<T>` 一直满着 [#emitted-not-cleared]
+
+```csharp
+public record struct Hit(EntityId Target, int Amount);   // 一条记录，不是组件
+public record struct Attack(int Power) : IComponent;
+public record struct Aim(EntityId Target) : IComponent;
+
+public class StrikeSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits) => hits.Add(new Hit(aim.Target, attack.Power));
+}
+
+public class ApplyHitsSystem : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+        foreach (ref readonly var hit in hits.AsReadOnlySpan())
+            if (World.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
+    }
+}
+```
+
+遍历只往 `Emitted<T>` 里追加，从不清空：这是读取方的事，因为只有它知道记录什么时候应用完了。没有 `Clear()`，下一次更新会把之前的命中
+全部再应用一遍，列表每次更新还会多出一遍的记录。应用完就清掉：
+
+```csharp
+public class ApplyHitsSystem : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+        foreach (ref readonly var hit in hits.AsReadOnlySpan())
+            if (World.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
+        hits.Clear();   // 只应用一次
+    }
+}
+```
+
+没有规则能发现：分析器分不清是哪个系统在应用这些记录。详见[一遍产出的记录](/zh/docs/guide/threading#emit)。
+
+### 在 `[ForEach]` 方法里用 `Random.Shared` [#shared-random]
+
+```csharp doccheck=expect-EECS071
+public record struct Blow(int Damage) : IComponent;
+
+public class Crits : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Roll(ref Blow blow)
+    {
+        if (Random.Shared.NextSingle() < 0.1f) blow = new Blow(blow.Damage * 2);   // 每次运行暴击都不一样
+    }
+}
+```
+
+`Random.Shared` 每个进程重新取种子，并行遍历里它的数按线程碰巧请求的顺序分给各行，所以重放、测试或另一台机器看到的是别的结果。
+从 `EntityRandom` 抽取，它是种子、实体、tick 和流的纯函数：
+
+```csharp
+public record struct Blow(int Damage) : IComponent;
+
+public class Crits : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Roll(ref Blow blow, Entity entity, in EntityRandom random)
+    {
+        if (random.Chance(entity.Id, 0, 0.1f)) blow = new Blow(blow.Damage * 2);   // 流 0：暴击判定
+    }
+}
+```
+
+由 [EECS071](/zh/docs/guide/analyzer#eecs071) 发现，带代码修复。详见[遍历里的随机数](/zh/docs/guide/threading#entity-random)。
+
+### 查找这一遍要写的组件 [#lookup-written]
+
+```csharp doccheck=expect-EECS059
+public record struct Leader(EntityId Id) : IComponent;
+
+public class Escort : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Keep(ref Velocity velocity, in Leader leader, Lookup<Velocity> velocities)
+    {
+        var lead = velocities[leader.Id];   // 另一块此刻可能正在写首领的速度
+        if (lead.HasValue) velocity = lead.Value;
+    }
+}
+```
+
+`Lookup<T>` 读的是其他实体在这一遍之前的 `T`，所以这一遍不能写 `T`：有的行会读到首领写之前的值，有的读到写之后的，并行时还会读到另一个
+线程正在写的行。[`Tile`](/zh/docs/guide/grids) 参数也一样：它读邻居的格子，所以方法把结果写进另一个缓冲。写进你自己的组件，再在后面的
+系统里拷回去（双缓冲）：
+
+```csharp
+public record struct Leader(EntityId Id) : IComponent;
+public record struct Heading(float X, float Y) : IComponent;
+
+public class Escort : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Keep(ref Heading heading, in Leader leader, Lookup<Velocity> velocities)
+    {
+        var lead = velocities[leader.Id];   // 每个首领都是这一遍之前的样子
+        if (lead.HasValue) heading = new Heading(lead.Value.X, lead.Value.Y);
+    }
+}
+
+[UpdateAfter<Escort>]
+public class Steer : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Apply(ref Velocity velocity, in Heading heading) => velocity = new Velocity(heading.X, heading.Y);
+}
+```
+
+由 [EECS059](/zh/docs/guide/analyzer#eecs059) 发现。详见[读取其他实体](/zh/docs/guide/threading#lookups)。
+
 ## 相关页面 [#related]
 
 <Cards>

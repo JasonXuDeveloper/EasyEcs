@@ -43,7 +43,9 @@ Native AOT 下发布时加上 `<IlcInstructionSet>native</IlcInstructionSet>`（
 - **数据：** `byte` 和 `short` lane（每个 `Vector512` 64 行和 32 行）、`Vector2` / `Vector3` / `Vector4` 字段、作为拥有 `T` 的行的
   lane 掩码的 `Maybe<T>`，以及在 AVX-512 上最多 16 个字、方法只用其中若干 4 字节字段的组件（置换代价超过运算时，EECS055 会说出该拆出
   哪些字段）。
-- **合计：** [`Reduce<T>`](/zh/docs/guide/threading#reductions) 每个 lane 一个累加器，按 lane 顺序合并。
+- **合计：** `Combine` 对每个字段求和、取 `Min` 或 `Max` 的 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 每个 lane 一个累加器，
+  按 lane 顺序合并；浮点求和只在 `FloatMode.Fast` 下。
+- **不进循环的：** `Scratch<T>`、`Lookup<T>`、`Emit<T>` 和 `Tile` 参数让方法逐行运行，这对它们正合适：每行一次查找或追加没有向量写法。
 - **系统得到了什么：** `world.DescribeSchedule()` 每个方法打印一行（`SystemInfo.Loops`）：循环、它的形状，或者保持标量的原因。
 - **为什么没有：** [EECS055](/zh/docs/guide/analyzer#eecs055) 像 Burst 的 Inspector 一样说出方法保持标量的第一个原因；热路径上的
   `[ForEach(SimdMode = SimdMode.Require)]` 把它变成构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)），`SimdMode.Off` 不再提示。
@@ -133,7 +135,7 @@ span，方法自己用 `Vector<T>` 或 `Vector128<T>` 循环：相当于 Burst j
 
 - 先测：[`MeasureSystems`](/zh/docs/guide/systems#measuring-systems) 指出占了 tick 的系统，BenchmarkDotNet 用例证明改动有效；
   每种写法的小节都链接了它自己的基准表。
-- 先让数据合适，再写代码：向量循环要每个组件一种数值类型、最多 4 个字段，网格要每个格子一个字节或 `int`（每条指令 16 或 8 个 lane），
+- 先让数据合适，再写代码：向量循环要每个组件的 lane 大小相同、最多 4 个字段，网格要每个格子一个字节或一个 `int`（每个 `Vector128` 16 或 4 个格子），
   这样活就是一列上的同一种形状。
 - 每个格子的中间结果放在寄存器、栈上（`[SkipLocalsInit]` 下的 `stackalloc`）或瓦片的纹理里，最后拷进缓冲一次：一遍里反复读写一个缓冲，
   比栈上的 span 慢得多。
@@ -143,7 +145,7 @@ span，方法自己用 `Vector<T>` 或 `Vector128<T>` 循环：相当于 Burst j
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
 | 优化没人测过的系统 | 代码更难读，什么也没省下 | [`MeasureSystems`](/zh/docs/guide/systems#measuring-systems) |
-| 想向量化的方法里混用 `float` 和 `int` 字段 | 保持标量 | [EECS055](/zh/docs/guide/analyzer#eecs055)；`SimdMode = SimdMode.Require` 让它报错 |
+| 想向量化的方法里混用不同大小的 lane（`float` 和 `double`、`int` 和 `byte`） | 保持标量 | [EECS055](/zh/docs/guide/analyzer#eecs055)；`SimdMode = SimdMode.Require` 让它报错 |
 | 并行方法写共享计数器 | 更新丢失 | [EECS060](/zh/docs/guide/analyzer#eecs060)：改用 [`Reduce<T>`](/zh/docs/guide/threading#reductions) |
 | 大量轻量行也设 `ChunkRows` | 同样的活要领更多次块 | 基准（[`ChunkRows`](/zh/docs/guide/threading#chunk-rows)） |
 | 在并行方法里手动读另一块瓦片的格子 | 每行一次查找，每个格子都有边界情况 | 代码审查：`Tile<TCell, TTile>` 参数一次填好瓦片（[网格瓦片](/zh/docs/guide/grids#pitfalls)） |
