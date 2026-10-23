@@ -1355,13 +1355,23 @@ internal struct BlockTicks
     /// <summary>An upper bound of the ticks of the words not in <see cref="Words"/>.</summary>
     public ulong Rest;
 
+    /// <summary>
+    /// The tick of the last parallel pass that opened the block (<see cref="Open"/>): while it is the tick being
+    /// stamped, threads may share the block, so <see cref="Raise"/> ORs atomically; at any other tick one thread owns it.
+    /// </summary>
+    public ulong Shared;
+
     /// <summary>Words <paramref name="words"/> (bits) got tick <paramref name="tick"/>, each raised to it, never lowered.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Raise(ulong words, ulong tick)
     {
-        // Atomic: chunks of a parallel pass smaller than a block share it, opened at the pass's tick (Open), so they
-        // only ever take this branch. Once per word and tick (the word's first stamp), so the lock costs little.
-        if (tick == Latest) Interlocked.Or(ref Words, words);
+        if (tick == Latest)
+        {
+            // Chunks of a parallel pass smaller than a block share it, opened at the pass's tick (Open), so they only
+            // ever take this branch: atomic for them, a plain OR for the owner thread's stamps of any other tick.
+            if (tick == Shared) Interlocked.Or(ref Words, words);
+            else Words |= words;
+        }
         else if (tick > Latest)
         {
             Rest = Latest; // every word of the block held at most the previous latest
@@ -1379,6 +1389,7 @@ internal struct BlockTicks
     /// </summary>
     public void Open(ulong tick)
     {
+        Shared = tick; // before the early return: a block already at the tick is shared too
         if (tick <= Latest) return;
         Rest = Latest;
         Latest = tick;
