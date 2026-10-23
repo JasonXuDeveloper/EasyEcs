@@ -43,6 +43,10 @@ internal sealed partial class Kernel
     /// </param>
     /// <param name="Size">The lanes' size in bytes: 1, 2, 4 or 8.</param>
     /// <param name="Mask">The element type of a lane mask: <c>sbyte</c>, <c>short</c>, <c>int</c> or <c>long</c>.</param>
+    /// <param name="Lane">
+    /// The lane type of the narrowest columns, whose vector count is the loop's step (a column of lanes twice as wide is
+    /// read as two vectors per step).
+    /// </param>
     /// <param name="Interleaves">A component has several fields: the loop needs <c>EasyEcs.Interleaved.IsAccelerated</c>.</param>
     /// <param name="Bails">
     /// The body sets <c>__bail</c> when a lane would throw: the rows of that vector then run the method itself, before any
@@ -60,7 +64,7 @@ internal sealed partial class Kernel
     /// </param>
     /// <param name="Statics">The job's static members: the permutes' index vectors and the layout checks.</param>
     internal sealed record Code(EquatableArray<string> Columns, string Setup, string Body, string Stores, string MaskedBody,
-        string MaskedStores, string Restore, string Fold, int Size, string Mask, bool Interleaves, bool Bails, FlatCode? Flat, string? Cold = null,
+        string MaskedStores, string Restore, string Fold, int Size, string Mask, string Lane, bool Interleaves, bool Bails, FlatCode? Flat, string? Cold = null,
         string? Wide = null, string Statics = "");
 
     /// <summary>
@@ -98,8 +102,8 @@ internal sealed partial class Kernel
     /// <summary>The most fields a component of a vector loop has: the forms of <c>EasyEcs.Interleaved</c>.</summary>
     private const int MaxFields = 4;
 
-    private readonly int _size;      // bytes per lane: 1, 2, 4 or 8
-    private readonly string _mask;   // the lane type of masks: sbyte, short, int or long (all bits set where true)
+    private int _size;      // bytes per lane: 1, 2, 4 or 8 (twice _base while a half of a pair is translated)
+    private string _mask;   // the lane type of masks: sbyte, short, int or long (all bits set where true)
     /// <summary>The components: their index (job column k), their lane fields in memory order, and whether they are written.</summary>
     private readonly Dictionary<IParameterSymbol, (int Index, IFieldSymbol[] Fields, bool Ref)> _components = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<IParameterSymbol, string> _uniformParams = new(SymbolEqualityComparer.Default);
@@ -134,9 +138,12 @@ internal sealed partial class Kernel
 
     private Kernel(int size)
     {
-        _size = size;
-        _mask = size switch { 1 => "sbyte", 2 => "short", 4 => "int", _ => "long" };
+        _size = _base = size;
+        _mask = MaskOf(size);
     }
+
+    /// <summary>The lane type of masks of lanes of <paramref name="size"/> bytes.</summary>
+    private static string MaskOf(int size) => size switch { 1 => "sbyte", 2 => "short", 4 => "int", _ => "long" };
 
     /// <param name="Index">The parameter's position: its accumulators are <c>__a{Index}_{field}</c>.</param>
     /// <param name="Type">T, the singleton reduced into.</param>
@@ -277,6 +284,7 @@ internal sealed partial class Kernel
         if (model.GetOperation(syntax, ct) is not IMethodBodyOperation body) throw new Unsupported("it has no body");
         ITypeSymbol? first = null;
         var components = new List<IFieldSymbol[]>();
+        var componentTypes = new List<ITypeSymbol>();
         var wides = new List<WideLayout?>();
         var optionals = new List<IFieldSymbol[]>();
         bool outside = Symbols.IsRunner(method);
@@ -311,13 +319,8 @@ internal sealed partial class Kernel
                         wide = WideOr(p, unsupported.Reason);
                         fields = wide.Paths.Select(path => path[path.Length - 1]).ToArray();
                     }
-                    foreach (var field in fields)
-                    {
-                        if (first != null && SizeOf(first) != SizeOf(field.Type))
-                            throw new Unsupported($"lane types {first.ToDisplayString()} and {field.Type.ToDisplayString()} differ in size");
-                        first ??= field.Type;
-                    }
                     components.Add(fields);
+                    componentTypes.Add(p.Type);
                     wides.Add(wide);
                     break;
                 case Symbols.ParamKind.Optional when !Symbols.IsParallel(method):
@@ -328,7 +331,21 @@ internal sealed partial class Kernel
                     break;
             }
         }
-        if (first == null) throw new Unsupported("it takes no component");
+        if (components.Count == 0) throw new Unsupported("it takes no component");
+        // The loop's lanes are the narrowest columns'; a column of lanes twice as wide is a pair of vectors per row
+        // vector (Kernel.Pairs.cs), but a component the loop gathers (Kernel.Wide.cs) takes lanes of its own size only.
+        first = components.Select(f => f[0].Type).OrderBy(SizeOf).First();
+        for (int k = 0; k < components.Count; k++)
+        {
+            var field = components[k][0];
+            int size = SizeOf(field.Type);
+            if (size == SizeOf(first)) continue;
+            if (size != 2 * SizeOf(first) || wides.Any(w => w != null))
+                throw new Unsupported($"lane types {first.ToDisplayString()} and {field.Type.ToDisplayString()} differ in size"
+                    + (size == 2 * SizeOf(first) ? "" : $": a vector loop takes lanes of one size and of twice that size, not {size / SizeOf(first)} times"));
+            if (components[k].Length > 1 && size < 4)
+                throw new Unsupported($"component {componentTypes[k].Name} has {components[k].Length} fields of {field.Type.ToDisplayString()}, twice as wide as the {first.ToDisplayString()} lanes: a vector loop splits fields of 4 or 8 bytes");
+        }
         foreach (var field in optionals.SelectMany(f => f))
             if (SizeOf(first) != SizeOf(field.Type))
                 throw new Unsupported($"lane types {first.ToDisplayString()} and {field.Type.ToDisplayString()} differ in size");
@@ -339,6 +356,7 @@ internal sealed partial class Kernel
         Kernel Make(bool reductions)
         {
             var made = new Kernel(SizeOf(first)) { _fast = Symbols.FastFloats(method), _compilation = model.Compilation };
+            made._pairs = components.Any(f => SizeOf(f[0].Type) > SizeOf(first));
             for (int i = 0, k = 0, o = 0; i < method.Parameters.Length; i++)
             {
                 var p = method.Parameters[i];
@@ -346,6 +364,7 @@ internal sealed partial class Kernel
                 if (kind == Symbols.ParamKind.Component)
                 {
                     made._components[p] = (k + 1, components[k], p.RefKind == RefKind.Ref);
+                    if (SizeOf(components[k][0].Type) > SizeOf(first)) made._doubled.Add(k + 1);
                     if (wides[k] is { } wide) (made._paths[p], made._wideOf[p]) = (wide.Paths, wide);
                     else made._paths[p] = Paths(p.Type, p.Type.Name);
                     k++;
@@ -392,13 +411,17 @@ internal sealed partial class Kernel
             var loads = new StringBuilder();
             columns.Add(([kernel._wideOf.ContainsKey(p) ? "" : $"__c{index}_"], ""));
             if (kernel._wideOf.TryGetValue(p, out var wide)) kernel.WideLoads(index, wide, column, loads);
-            else if (fields.Length == 1) loads.Append($"var __c{index}_0 = {V}.LoadUnsafe(ref e{index}, (nuint)i);\n");
             else
-            {
-                loads.Append($"{Interleaved}.Load{fields.Length}(ref e{index}, (nuint)i, {string.Join(", ", fields.Select((_, f) => $"out {Vec(column)} __s{index}_{f}"))});\n");
-                for (int f = 0; f < fields.Length; f++)
-                    loads.Append($"var __c{index}_{f} = {As(column, Elem(fields[f].Type), $"__s{index}_{f}")};\n");
-            }
+                foreach (var (h, row) in kernel.Rows(index, column))
+                {
+                    if (fields.Length == 1) loads.Append($"var __c{index}_0{h} = {V}.LoadUnsafe(ref e{index}, {row});\n");
+                    else
+                    {
+                        loads.Append($"{Interleaved}.Load{fields.Length}(ref e{index}, {row}, {string.Join(", ", fields.Select((_, f) => $"out {Vec(column)} __s{index}_{f}{h}"))});\n");
+                        for (int f = 0; f < fields.Length; f++)
+                            loads.Append($"var __c{index}_{f}{h} = {As(column, Elem(fields[f].Type), $"__s{index}_{f}{h}")};\n");
+                    }
+                }
             columns[columns.Count - 1] = (columns[columns.Count - 1].Names, loads.ToString());
         }
         foreach (var (index, fields) in kernel._optionals.Values.OrderBy(o => o.Index))
@@ -430,14 +453,17 @@ internal sealed partial class Kernel
                 kernel.WideStores(index, wide, column, stores);
                 continue;
             }
-            string Blend(int f) => $"{V}.ConditionalSelect({As(kernel._mask, Elem(fields[f].Type), "__pass")}, __c{index}_{f}, __o{index}_{f})";
-            for (int f = 0; f < fields.Length; f++) kept.Append($"var __o{index}_{f} = __c{index}_{f};\n");
-            stores.Append(fields.Length == 1
-                ? $"{V}.StoreUnsafe(__c{index}_0, ref e{index}, (nuint)i);\n"
-                : $"{Interleaved}.Store{fields.Length}({string.Join(", ", fields.Select((field, f) => As(Elem(field.Type), column, $"__c{index}_{f}")))}, ref e{index}, (nuint)i);\n");
-            masked.Append(fields.Length == 1
-                ? $"{V}.StoreUnsafe({Blend(0)}, ref e{index}, (nuint)i);\n"
-                : $"{Interleaved}.Store{fields.Length}({string.Join(", ", fields.Select((field, f) => As(Elem(field.Type), column, Blend(f))))}, ref e{index}, (nuint)i);\n");
+            foreach (var (h, row) in kernel.Rows(index, column))
+            {
+                string Blend(int f) => $"{V}.ConditionalSelect({kernel.PassAs(h, Elem(fields[f].Type))}, __c{index}_{f}{h}, __o{index}_{f}{h})";
+                for (int f = 0; f < fields.Length; f++) kept.Append($"var __o{index}_{f}{h} = __c{index}_{f}{h};\n");
+                stores.Append(fields.Length == 1
+                    ? $"{V}.StoreUnsafe(__c{index}_0{h}, ref e{index}, {row});\n"
+                    : $"{Interleaved}.Store{fields.Length}({string.Join(", ", fields.Select((field, f) => As(Elem(field.Type), column, $"__c{index}_{f}{h}")))}, ref e{index}, {row});\n");
+                masked.Append(fields.Length == 1
+                    ? $"{V}.StoreUnsafe({Blend(0)}, ref e{index}, {row});\n"
+                    : $"{Interleaved}.Store{fields.Length}({string.Join(", ", fields.Select((field, f) => As(Elem(field.Type), column, Blend(f))))}, ref e{index}, {row});\n");
+            }
         }
         // A written optional column is stored whole, the lanes of rows without the component as loaded (a read or a
         // write of m.Value runs only where the row has it, else the vector's rows go to the method); nothing for a table
@@ -466,11 +492,18 @@ internal sealed partial class Kernel
             fold.Append($"for (int __j = 0; __j < {count}; __j++)\n{{\n    var __v = default({t});\n");
             for (int f = 0; f < r.Fields.Length; f++)
             {
-                string acc = $"__a{r.Index}_{f}";
-                held.Append($"var __h{r.Index}_{f} = {acc};\n");
-                restore.Append($"{acc} = __h{r.Index}_{f};\n");
-                masked.Insert(0, $"{acc} = {V}.ConditionalSelect({As(kernel._mask, Elem(r.Fields[f].Type), "__pass")}, {acc}, __h{r.Index}_{f});\n");
-                fold.Append($"    __v.{r.Fields[f].Name} = {acc}[__j];\n");
+                string acc = $"__a{r.Index}_{f}", type = Elem(r.Fields[f].Type);
+                bool pair = kernel.IsDoubled(r.Fields[f].Type);
+                foreach (var h in Suffixes(pair))
+                {
+                    held.Append($"var __h{r.Index}_{f}{h} = {acc}{h};\n");
+                    restore.Append($"{acc}{h} = __h{r.Index}_{f}{h};\n");
+                    masked.Insert(0, $"{acc}{h} = {V}.ConditionalSelect({kernel.PassAs(h, type)}, {acc}{h}, __h{r.Index}_{f}{h});\n");
+                }
+                // lane j of the loop's vectors: lane j of a pair's lower half, or lane j - Count of its upper one
+                fold.Append(pair
+                    ? $"    __v.{r.Fields[f].Name} = __j < {Vec(type)}.Count ? {acc}_0[__j] : {acc}_1[__j - {Vec(type)}.Count];\n"
+                    : $"    __v.{r.Fields[f].Name} = {acc}[__j];\n");
             }
             fold.Append($"    {r.Partial}.Combine(__v);\n}}\n");
         }
@@ -484,16 +517,18 @@ internal sealed partial class Kernel
             if (names.Any(n => n.Length == 0 || uses.Contains(n))) read.Append(text);
         var flat = Flat(kernel, root, () => Make(false));
         // Narrow lanes have no shuffles: a component of several fields takes the flat loop or none.
-        if (kernel._narrow && flat == null && kernel._components.FirstOrDefault(c => c.Value.Fields.Length > 1) is { Key: { } narrow, Value.Fields: { } several })
+        if (kernel._narrow && flat == null && kernel._components.FirstOrDefault(c => c.Value.Fields.Length > 1 && !kernel._doubled.Contains(c.Value.Index)) is { Key: { } narrow, Value.Fields: { } several })
         {
             whole ??= new HashSet<IParameterSymbol>(SymbolEqualityComparer.Default);
             touched ??= Touched(body, whole);
             string split = !whole.Contains(narrow) && touched.TryGetValue(narrow, out var used) ? Split(narrow.Type, used.Select(u => u.Path).ToArray()) : "";
             throw new Unsupported($"component {several[0].ContainingType.Name} has {several.Length} fields of {several[0].Type.ToDisplayString()}: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field{split}");
         }
+        // The passing rows of a masked word as masks of a pair's halves, for the stores and the lanes of what it writes.
+        if (kernel._halvesPass) kept.Insert(0, $"var __pw_0 = {V}.WidenLower(__pass);\nvar __pw_1 = {V}.WidenUpper(__pass);\n");
         return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
             kernel._setup.ToString(), prologue + live + read + hold + kernel._body, stores.ToString(), prologue + maskedLive + read + kept + held + kernel._body, masked.ToString(),
-            restore.ToString(), fold.ToString(), kernel._size, kernel._mask, kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
+            restore.ToString(), fold.ToString(), kernel._size, kernel._mask, Elem(first), kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
             kernel._bails, flat, kernel._cold, kernel._wideOf.Count == 0 ? null : string.Join(" && ", kernel._components.Where(c => kernel._wideOf.ContainsKey(c.Key)).Select(c => $"__layout{c.Value.Index}")),
             kernel._statics.ToString());
     }
@@ -670,6 +705,7 @@ internal sealed partial class Kernel
     /// <returns>False after a return every remaining lane takes: what follows is not reached.</returns>
     private bool Statement(IOperation op, string? mask)
     {
+        _held.Clear(); // the values a pair's halves share are a statement's, read before it writes
         switch (op)
         {
             case IBlockOperation block:
@@ -686,6 +722,16 @@ internal sealed partial class Kernel
                     var init = declarator.GetVariableInitializer()?.Value ?? declaration.Initializer?.Value;
                     if (local.IsRef) throw new Unsupported($"ref local '{local.Name}' is not supported");
                     if (init == null) throw new Unsupported($"local '{local.Name}' has no initializer");
+                    if (PairLocal(local, init))
+                    {
+                        _active = And(mask, _alive);
+                        var (lower, upper) = Halves(() => Expr(init));
+                        string pair = Temp("l");
+                        _body.Append($"var {pair}_0 = {lower};\nvar {pair}_1 = {upper};\n");
+                        _locals[local] = pair;
+                        _pairLocals.Add(local);
+                        continue;
+                    }
                     if (_narrow && IsInt(local.Type))
                     {
                         _active = And(mask, _alive);
@@ -699,12 +745,13 @@ internal sealed partial class Kernel
                         continue;
                     }
                     if (!IsLane(local.Type) && !IsBool(local.Type))
-                        throw new Unsupported($"local '{local.Name}' is a {local.Type.ToDisplayString()}, not a lane type of {_size} bytes");
+                        throw new Unsupported($"local '{local.Name}' is a {local.Type.ToDisplayString()}, not a lane type of {LaneSizes} bytes");
                     string name = Temp("l");
                     _active = And(mask, _alive);
                     string value = Expr(init);
                     _locals[local] = name;
                     _body.Append($"var {name} = {value};\n"); // a fresh local: its value in other lanes is never read
+                    Alias(name, value);
                 }
                 return true;
             case IExpressionStatementOperation { Operation: var e }:
@@ -715,7 +762,9 @@ internal sealed partial class Kernel
             {
                 string condition = Temp("m");
                 _active = And(mask, _alive);
-                _body.Append($"var {condition} = {Expr(branch.Condition)};\n"); // before either branch writes what it reads
+                string tested = Expr(branch.Condition);
+                _body.Append($"var {condition} = {tested};\n"); // before either branch writes what it reads
+                Alias(condition, tested);
                 Prove(condition, branch.Condition);
                 Branch(whenTrue, And(mask, condition)!);
                 if (whenFalse != null) Branch(whenFalse, And(mask, $"~{condition}")!);
@@ -763,13 +812,14 @@ internal sealed partial class Kernel
     }
 
     /// <summary>What a translation changes, kept to undo a branch that turns out cold.</summary>
-    private sealed record State(int Body, int Setup, int Temps, Dictionary<ILocalSymbol, string> Locals, Dictionary<ILocalSymbol, Wide> Wides,
+    private sealed record State(int Body, int Setup, int Temps, Dictionary<ILocalSymbol, string> Locals, HashSet<ILocalSymbol> PairLocals, Dictionary<ILocalSymbol, Wide> Wides,
         Dictionary<ILocalSymbol, string?[]> Structs, HashSet<int> Written, HashSet<int> WrittenOptionals, Dictionary<string, HashSet<int>> Implied,
-        HashSet<string> Guarded, Dictionary<string, string> Broadcasts, string? Alive, bool Bails, bool Live);
+        HashSet<string> Guarded, Dictionary<string, string> Broadcasts, Dictionary<string, (string, string)> MaskHalves, string? Alive, bool Bails, bool Live);
 
-    private State Save() => new(_body.Length, _setup.Length, _temps, new(_locals, SymbolEqualityComparer.Default), new(_wides, SymbolEqualityComparer.Default),
+    private State Save() => new(_body.Length, _setup.Length, _temps, new(_locals, SymbolEqualityComparer.Default),
+        new(_pairLocals, SymbolEqualityComparer.Default), new(_wides, SymbolEqualityComparer.Default),
         new(_structs, SymbolEqualityComparer.Default), [.. _written], [.. _writtenOptionals],
-        _implied.ToDictionary(e => e.Key, e => new HashSet<int>(e.Value)), [.. _guarded], new(_broadcasts), _alive, _bails, _live);
+        _implied.ToDictionary(e => e.Key, e => new HashSet<int>(e.Value)), [.. _guarded], new(_broadcasts), new(_maskHalves), _alive, _bails, _live);
 
     private void Restore(State state)
     {
@@ -782,10 +832,13 @@ internal sealed partial class Kernel
             foreach (var e in from) into[e.Key] = e.Value;
         }
         Reset(_locals, state.Locals);
+        _pairLocals.Clear();
+        _pairLocals.UnionWith(state.PairLocals);
         Reset(_wides, state.Wides);
         Reset(_structs, state.Structs);
         Reset(_implied, state.Implied);
         Reset(_broadcasts, state.Broadcasts);
+        Reset(_maskHalves, state.MaskHalves);
         _written.Clear();
         _written.UnionWith(state.Written);
         _writtenOptionals.Clear();
@@ -797,6 +850,15 @@ internal sealed partial class Kernel
 
     private void Assignment(IOperation op, string? mask)
     {
+        // A write of a value twice as wide as the lanes: each half of the pair, the lower lanes first (each reads only
+        // its own half of what the other writes, and the values of the lanes' width both read are held before).
+        bool pair = PairTarget(op);
+        if (pair && _half < 0)
+        {
+            EachHalf(() => Assignment(op, mask));
+            return;
+        }
+        if (!pair && _half >= 0) throw new Unsupported($"'{Text(op)}' writes lanes of two sizes in one statement");
         if (Reduces(op, mask)) return;
         IOperation target;
         string value;
@@ -859,8 +921,9 @@ internal sealed partial class Kernel
     private void Write(string name, string value, ITypeSymbol type, string? mask)
     {
         string? active = And(mask, _alive);
+        _maskHalves.Remove(name); // a bool local written: the halves it held are not its value any more
         _body.Append(active == null ? $"{name} = {value};\n"
-            : $"{name} = {V}.ConditionalSelect({MaskAs(active, type)}, {value}, {name});\n");
+            : $"{name} = {V}.ConditionalSelect({(_half < 0 ? MaskAs(active, type) : As(_mask, IsBool(type) ? _mask : Elem(type), WidenMask(active)))}, {value}, {name});\n");
     }
 
     /// <summary>
@@ -878,12 +941,12 @@ internal sealed partial class Kernel
     /// <summary>The vector a write goes to: a kernel local, or the lane field of a component taken by ref.</summary>
     private string Target(IOperation target)
     {
-        if (target is ILocalReferenceOperation { Local: var local } && _locals.TryGetValue(local, out var name)) return name;
+        if (target is ILocalReferenceOperation { Local: var local } && _locals.TryGetValue(local, out var name)) return Local(local, name, target);
         if (StructLocalLane(target) is { } lane) return lane;
         if (LaneOf(target) is { Ref: true } c)
         {
             _written.Add(c.Index);
-            return $"__c{c.Index}_{c.Field}";
+            return ComponentLane(c.Index, c.Field, target);
         }
         if (OptionalLane(target) is { } q)
         {
@@ -912,7 +975,8 @@ internal sealed partial class Kernel
         {
             if (field.AssociatedSymbol != null) throw new Unsupported($"reduction {name} holds {field.AssociatedSymbol.Name} in a property: the lanes fold into fields");
             if (field.IsReadOnly) throw new Unsupported($"field {name}.{field.Name} of the reduction is readonly");
-            if (!IsLane(field.Type)) throw new Unsupported($"field {name}.{field.Name} of the reduction is a {field.Type.ToDisplayString()}, not a lane type of {_size} bytes");
+            if (!IsLane(field.Type) && !IsDoubled(field.Type)) throw new Unsupported($"field {name}.{field.Name} of the reduction is a {field.Type.ToDisplayString()}, not a lane type of {LaneSizes} bytes");
+            if (IsDoubled(field.Type)) _pairs = true;
         }
 
         var ops = AttributeOps(type, fields) ?? CombineOps(type, fields, compilation, ct);
@@ -923,7 +987,8 @@ internal sealed partial class Kernel
         string t = type.ToDisplayString(Symbols.Fqn);
         _setup.Append($"var __id{index} = {t}.Identity;\n");
         for (int f = 0; f < fields.Length; f++)
-            _setup.Append($"var __a{index}_{f} = {V}.Create<{Elem(fields[f].Type)}>(__id{index}.{fields[f].Name});\n");
+            foreach (var h in Suffixes(IsDoubled(fields[f].Type)))
+                _setup.Append($"var __a{index}_{f}{h} = {V}.Create<{Elem(fields[f].Type)}>(__id{index}.{fields[f].Name});\n");
         return new Reduction(index, type, fields, ops, partial);
     }
 
@@ -1047,13 +1112,15 @@ internal sealed partial class Kernel
             for (int f = 0; f < values.Length; f++)
             {
                 if (values[f] == null) throw new Unsupported($"it combines a {reduction.Type.Name} without {reduction.Fields[f].Name}, which then is not its identity");
-                Fold(reduction, f, Expr(values[f]!), mask);
+                var given = values[f]!;
+                if (IsDoubled(reduction.Fields[f].Type)) EachHalf(() => Fold(reduction, f, Expr(given), mask));
+                else Fold(reduction, f, Expr(given), mask);
             }
             return true;
         }
         if (target is not var (r, field)) return false;
 
-        string acc = $"__a{r.Index}_{field}", op2 = r.Ops[field];
+        string acc = Acc(r, field), op2 = r.Ops[field];
         var type = r.Fields[field].Type;
         string NotCombined(string what) => $"it {what} '{Text(op)}', where {r.Type.Name}.Combine takes the {(op2 == "+" ? "sum" : op2)} of {r.Fields[field].Name}";
         switch (op)
@@ -1061,6 +1128,11 @@ internal sealed partial class Kernel
             case ICompoundAssignmentOperation { OperatorKind: BinaryOperatorKind.Add or BinaryOperatorKind.Subtract, IsChecked: false, OperatorMethod: null } a
                 when op2 == "+" && a.InConversion.IsIdentity && a.OutConversion.IsIdentity:
                 Write(acc, $"({acc} {(a.OperatorKind == BinaryOperatorKind.Add ? "+" : "-")} {Expr(a.Value)})", type, mask);
+                return true;
+            case ICompoundAssignmentOperation { OperatorKind: BinaryOperatorKind.Add or BinaryOperatorKind.Subtract, IsChecked: false, OperatorMethod: null } a
+                when op2 == "+" && _narrow && IsLane(type):
+                // b += x is b = (byte)(b + x): a sum of lanes that wrap, the low bits of x added
+                Write(acc, $"({acc} {(a.OperatorKind == BinaryOperatorKind.Add ? "+" : "-")} {Truncate(WideOf(a.Value), type, a)})", type, mask);
                 return true;
             case IIncrementOrDecrementOperation { IsChecked: false, OperatorMethod: null } a when op2 == "+":
                 Write(acc, $"({acc} {(a.Kind == OperationKind.Increment ? "+" : "-")} {Vec(Elem(type))}.One)", type, mask);
@@ -1081,7 +1153,7 @@ internal sealed partial class Kernel
     /// <summary>Field <paramref name="field"/> of <paramref name="r"/>'s lanes combined with <paramref name="value"/> as T.Combine does.</summary>
     private void Fold(Reduction r, int field, string value, string? mask)
     {
-        string acc = $"__a{r.Index}_{field}";
+        string acc = Acc(r, field);
         Write(acc, r.Ops[field] == "+" ? $"({acc} + {value})" : $"{V}.{r.Ops[field]}({acc}, {value})", r.Fields[field].Type, mask);
     }
 
@@ -1227,9 +1299,10 @@ internal sealed partial class Kernel
         {
             string scalar = Scalar(op);
             if (IsBool(op.Type)) return $"({scalar} ? {Vec(_mask)}.AllBitsSet : {Vec(_mask)}.Zero)";
-            if (!IsLane(op.Type)) throw new Unsupported($"'{Text(op)}' is a {op.Type?.ToDisplayString()}, not a lane type of {_size} bytes");
+            if (!IsLane(op.Type)) throw new Unsupported($"'{Text(op)}' is a {op.Type?.ToDisplayString()}, not a lane type of {LaneSizes} bytes");
             return Broadcast(scalar, op.Type!);
         }
+        if (PairExpr(op) is { } pair) return pair;
 
         switch (op)
         {
@@ -1240,7 +1313,7 @@ internal sealed partial class Kernel
             case IConversionOperation { Conversion.IsNumeric: true, IsChecked: false, OperatorMethod: null } c when IsLane(c.Type) && IsLane(c.Operand.Type):
                 return Convert(Expr(c.Operand), c.Operand.Type!, c.Type!) ?? throw Not(c);
             case IFieldReferenceOperation or IPropertyReferenceOperation when LaneOf(op) is { } c:
-                return $"__c{c.Index}_{c.Field}";
+                return ComponentLane(c.Index, c.Field, op);
             case IPropertyReferenceOperation { Property.Name: "HasValue", Instance: IParameterReferenceOperation { Parameter: var p } } when _optionals.TryGetValue(p, out var o):
                 return $"__has{o.Index}";
             case IFieldReferenceOperation or IPropertyReferenceOperation when OptionalLane(op) is { } q:
@@ -1252,7 +1325,7 @@ internal sealed partial class Kernel
             case IFieldReferenceOperation when Accumulator(op) != null:
                 throw new Unsupported($"it reads '{Text(op)}', a partial result the lanes of a vector loop hold in parts");
             case ILocalReferenceOperation { Local: var local } when _locals.TryGetValue(local, out var name):
-                return name;
+                return Local(local, name, op);
             case IBinaryOperation { OperatorMethod: null, IsChecked: false } b:
                 return Binary(b.OperatorKind, b.LeftOperand, b.RightOperand, b.Type);
             case IUnaryOperation { OperatorMethod: null, IsChecked: false } u:
@@ -1268,7 +1341,7 @@ internal sealed partial class Kernel
             case IConditionalOperation { IsRef: false, WhenFalse: { } whenFalse } t when IsLane(t.Type) || IsBool(t.Type):
             {
                 string condition = Expr(t.Condition);
-                if (_optionals.Count == 0)
+                if (_optionals.Count == 0 || _half >= 0) // a half's masks are not the lanes' (an optional's reads are, Narrowed)
                     return $"{V}.ConditionalSelect({MaskAs(condition, t.Type!)}, {Expr(t.WhenTrue)}, {Expr(whenFalse)})";
                 // Each arm reads under its lanes (m.HasValue ? m.Value.X : 0 reads only rows that have it).
                 condition = Hold(condition, t.Condition.Type!);
@@ -1352,7 +1425,7 @@ internal sealed partial class Kernel
             return WideCompare(kind, WideOf(leftOp), WideOf(right), leftOp, right);
         bool lanes = IsLane(leftType) && IsLane(right.Type) && SymbolEqualityComparer.Default.Equals(leftType, right.Type);
         bool masks = IsBool(leftType) && IsBool(right.Type);
-        if (masks && _optionals.Count > 0 && kind is BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.ConditionalOr)
+        if (masks && _optionals.Count > 0 && _half < 0 && kind is BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.ConditionalOr)
         {
             // The right side reads under the lanes the left lets through (m.HasValue && m.Value.X > 0).
             string left = Hold(Expr(leftOp), leftType!);
@@ -1524,6 +1597,7 @@ internal sealed partial class Kernel
         if (value.StartsWith("__", System.StringComparison.Ordinal) && value.All(c => char.IsLetterOrDigit(c) || c == '_')) return value;
         string name = Temp("t");
         _body.Append($"var {name} = {value};\n");
+        Alias(name, value);
         return name;
     }
 

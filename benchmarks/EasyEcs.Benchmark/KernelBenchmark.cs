@@ -21,6 +21,8 @@ namespace EasyEcs.Benchmark;
 /// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
 /// pattern) are the calls, conversions and masks a vector loop takes. <c>Tally</c> (an int count, sum, Min and Max) and
 /// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order.
+/// <c>Wealth</c> sums the int column into a long and <c>Accrue</c> adds it to a column of longs: lanes of two sizes, each
+/// long a pair of vectors per step (Kernel.Pairs.cs).
 /// <c>Optional</c> takes a <c>Maybe&lt;Mass&gt;</c> over <c>_holes</c> (a lane mask of the rows that have it).
 /// <c>Hurt</c> / <c>HurtHot</c> have a
 /// cold branch (a call when a health reaches 0) that no row / one row in a hundred takes. <c>MoveVector</c> is the Godot sample's move (a
@@ -36,7 +38,7 @@ public partial class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _fields, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft;
+    private World _world, _fields, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger;
 
     [GlobalSetup]
     public void Setup()
@@ -50,6 +52,11 @@ public partial class KernelBenchmark
             _world.CreateEntity(new Heat { Value = (float)random.NextDouble() * 200 - 50 },
                 new Speed { Value = (float)random.NextDouble() * 20 - 10 }, new Mass { Value = (float)random.NextDouble() * 5 },
                 new Ticks { Value = i });
+
+        _ledger = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _ledger.Reserve<Ticks, Balance>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _ledger.CreateEntity(new Ticks { Value = random.Next(int.MinValue, int.MaxValue) }, new Balance { Value = random.NextInt64() });
 
         _holes = Holes(Entities, i => i % 3 == 0);
         _halves = Holes(Entities, i => random.Next(2) == 0);
@@ -124,6 +131,7 @@ public partial class KernelBenchmark
         _craft.Dispose();
         _calm.Dispose();
         _hot.Dispose();
+        _ledger.Dispose();
     }
 
     [Benchmark(Baseline = true)]
@@ -291,6 +299,27 @@ public partial class KernelBenchmark
     public void EnergyGenerated() => Kernels.Energy(_world);
 
     [Benchmark]
+    public void WealthScalar()
+    {
+        var job = new WealthRows { Wealth = new Reduce<Wealth> { Value = Wealth.Identity } };
+        _ledger.ForEachBatch<Ticks, WealthRows>(ref job);
+        _ledger.GetOrAddSingleton<Wealth>() = job.Wealth.Value;
+    }
+
+    [Benchmark]
+    public void WealthGenerated() => Kernels.Wealth(_ledger);
+
+    [Benchmark]
+    public void AccrueScalar()
+    {
+        var job = new AccrueRows();
+        _ledger.ForEach<Balance, Ticks, AccrueRows>(ref job);
+    }
+
+    [Benchmark]
+    public void AccrueGenerated() => Kernels.Accrue(_ledger);
+
+    [Benchmark]
     public void OptionalScalar()
     {
         var job = new OptionalRows();
@@ -389,6 +418,34 @@ public partial class KernelBenchmark
         [Sum] public int Sum;
         [Min] public int Low;
         [Max] public int High;
+    }
+
+    /// <summary>A long sum of int rows: exact in any order, as a pair of long accumulators per vector of rows.</summary>
+    public partial struct Wealth : ISingletonComponent
+    {
+        [Sum] public long Total;
+    }
+
+    public struct Balance : IComponent { public long Value; }
+
+    private struct WealthRows : IForEachBatch<Ticks>
+    {
+        public Reduce<Wealth> Wealth;
+
+        public void Execute(EntitySpan entities, Span<Ticks> ticks)
+        {
+            var wealth = Wealth;
+            for (int i = 0; i < ticks.Length; i++) Kernels.Wealth(in ticks[i], ref wealth);
+            Wealth = wealth;
+        }
+
+        static int IForEachBatch<Ticks>.WriteMask => 0;
+    }
+
+    private struct AccrueRows : IForEach<Balance, Ticks>, INoStructuralChanges
+    {
+        public void Execute(ref Balance balance, ref Ticks ticks) => Kernels.Accrue(ref balance, in ticks);
+        static int IForEach<Balance, Ticks>.WriteMask => 1;
     }
 
     /// <summary>A float sum: vectorized only under FloatMode.Fast, since one sum per lane rounds in another order.</summary>
@@ -588,6 +645,13 @@ public partial class KernelBenchmark
             tally.Value.Low = Math.Min(tally.Value.Low, ticks.Value);
             tally.Value.High = Math.Max(tally.Value.High, ticks.Value);
         }
+
+        // An int column summed into a long, and added to a column of longs: lanes of two sizes.
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void Wealth(in Ticks ticks, ref Reduce<Wealth> wealth) => wealth.Value.Total += ticks.Value;
+
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void Accrue(ref Balance balance, in Ticks ticks) => balance.Value += ticks.Value * 3L;
 
         [ForEach(SimdMode = SimdMode.Require, FloatMode = FloatMode.Fast)]
         internal static void Energy(in Heat heat, in Speed speed, ref Reduce<Energy> energy) => energy.Value.Total += heat.Value * speed.Value * speed.Value;

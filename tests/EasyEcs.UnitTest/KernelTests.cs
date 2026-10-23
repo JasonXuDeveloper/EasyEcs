@@ -266,6 +266,159 @@ public static class ReduceKernels
     }
 }
 
+/// <summary>Sums of int rows into longs: exact in any order, no FloatMode needed.</summary>
+public record struct Wallet : ISingletonComponent, IReduction<Wallet>
+{
+    public long Sum, Squares, Max;
+    public int Count;
+
+    public static Wallet Identity => new() { Max = long.MinValue };
+    public static Wallet Combine(Wallet left, Wallet right) => new()
+    {
+        Sum = left.Sum + right.Sum, Squares = left.Squares + right.Squares, Max = Math.Max(left.Max, right.Max), Count = left.Count + right.Count,
+    };
+}
+
+/// <summary>Sums, a minimum and a maximum of 8-byte integers over 4-byte rows, declared by attributes.</summary>
+public partial record struct Purses : ISingletonComponent
+{
+    [Sum] public long Sum;
+    [Min] public long Low;
+    [Max] public ulong High;
+    [Sum] public int Count;
+}
+
+/// <summary>A double sum of float rows: its rounding depends on the order of the rows.</summary>
+public struct Fluid : ISingletonComponent, IReduction<Fluid>
+{
+    public double Total;
+
+    public static Fluid Identity => default;
+    public static Fluid Combine(Fluid left, Fluid right) => new() { Total = left.Total + right.Total };
+}
+
+/// <summary>An int sum and maximum of short rows.</summary>
+public partial record struct Loudness : ISingletonComponent
+{
+    [Sum] public int Sum;
+    [Max] public int Peak;
+}
+
+/// <summary>Kernels over lanes of two sizes: a value twice as wide as the lanes is a pair of vectors (Kernel.Pairs.cs).</summary>
+public static class PairKernels
+{
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Spend(in Rank rank, ref Reduce<Wallet> wallet)
+    {
+        wallet.Value.Sum += rank.Value;                         // int to long: each half widened
+        wallet.Value.Squares += (long)rank.Value * rank.Value;  // a product of longs: no int overflow
+        wallet.Value.Max = Math.Max(wallet.Value.Max, rank.Value * 3L - 1);
+        if (rank.Value > 0) wallet.Value.Count++;              // an int field beside the long ones
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Combined(in Rank rank, ref Reduce<Wallet> wallet) =>
+        wallet.Combine(new Wallet { Sum = rank.Value, Squares = (long)rank.Value * rank.Value, Max = rank.Value, Count = 1 });
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Purse(in Rank rank, in Code32 code, ref Reduce<Purses> purses)
+    {
+        long net = (long)rank.Value - code.Value;               // uint to long: zero-extended
+        if (net < 0) purses.Value.Sum += net;                   // a comparison of longs: a mask of the lanes
+        purses.Value.Low = Math.Min(purses.Value.Low, net);
+        purses.Value.High = Math.Max(purses.Value.High, (ulong)rank.Value + code.Value); // int to ulong: sign-extended
+        purses.Value.Count++;
+    }
+
+    [ForEach(SimdMode = SimdMode.Require, FloatMode = FloatMode.Fast)]
+    internal static void Pour(in Level level, ref Reduce<Fluid> fluid) => fluid.Value.Total += level.Value * 0.5;
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Loud(in Wave16 wave, in Gain16 gain, ref Reduce<Loudness> loud)
+    {
+        loud.Value.Sum += wave.V;
+        loud.Value.Peak = Math.Max(loud.Value.Peak, wave.V * gain.V);
+    }
+
+    // A component of long lanes beside int ones: written in place, compared, narrowed back.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Accrue(ref Stamp stamp, ref Rank rank, in Code32 code)
+    {
+        long next = stamp.Value + rank.Value * 2L - code.Value;
+        if (next > 1000) next = -next;
+        stamp.Value = next;
+        rank.Value = (int)(next >> 1) ^ rank.Value;             // the low bits, as unchecked C# keeps them
+        ulong mixed = (ulong)rank.Value + code.Value;
+        if (mixed < 100 || stamp.Value == long.MinValue) rank.Value++;
+    }
+
+    // A condition on longs is a mask of each half, narrowed; its halves serve the writes of longs under it again.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Settle(ref Stamp stamp, in Rank rank)
+    {
+        bool big = stamp.Value > 100;
+        if (big) stamp.Value -= rank.Value;
+        if (rank.Value < 0) big = !big; // written: the halves it held are not its value any more
+        stamp.Value = stamp.Value * 2 + (big ? 1L : 0L);
+        if (!big && stamp.Value < -100) return;
+        stamp.Value ^= rank.Value;
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Earn(ref Stamp stamp, in Rank rank)
+    {
+        stamp.Value += rank.Value;
+        if (rank.Value < 0) stamp.Value -= (long)rank.Value * rank.Value;
+    }
+
+    // Floats and doubles: float to double is exact, double to float rounds once, as C# converts.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Refine(ref Depth depth, ref Level level, in Rank rank)
+    {
+        double precise = level.Value * 0.1 + depth.Value;
+        depth.Value = precise > 50 ? precise - rank.Value : Math.Sqrt(Math.Abs(precise)); // int to double: exact
+        level.Value = (float)(precise * 2) + level.Value;
+        if (double.IsNaN(precise) || level.Value < -5) level.Value = 0;
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Soak(ref Depth depth, in Level level) => depth.Value = depth.Value * 0.5 + level.Value;
+
+    // Wide components of several fields: two deinterleaved loads per step.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Sway(ref Far3 far, in Level level)
+    {
+        far.X += level.Value;
+        far.Y = far.X * level.Value - far.Z;
+        if (far.Y > 10) far.Z = (float)far.Y;
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Walk(ref Cell2 cell, in Rank rank)
+    {
+        cell.X += rank.Value;
+        cell.Y = (cell.Y << 1) ^ cell.X;
+    }
+
+    // Short lanes into int lanes: the int local is a pair, exact, as the method writes pairs.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Gather(ref Rank total, in Wave16 wave, in Gain16 gain)
+    {
+        int product = wave.V * gain.V;
+        total.Value += product - (wave.V >> 2);
+        if (total.Value > 1 << 24) total.Value = (short)total.Value; // narrowed and widened back
+    }
+
+    // Byte lanes into ushort lanes: C#'s int arithmetic, its low 16 bits.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Count(ref Sum16 sum, in Shade a, in Tone b)
+    {
+        sum.V += a.V;
+        sum.V -= (ushort)(b.V * 3);
+        if (sum.V > 60000) sum.V = (ushort)(a.V + b.V);
+    }
+}
+
 /// <summary>Kernels over components of several fields.</summary>
 public static class FieldKernels
 {
@@ -370,6 +523,16 @@ public record struct Warmth : IComponent, ITracked { public float Value; }
 /// </summary>
 public static class ParallelKernels
 {
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require)]
+    internal static void Spend(in Rank rank, ref Reduce<Wallet> wallet)
+    {
+        wallet.Value.Sum += rank.Value;
+        wallet.Value.Max = Math.Max(wallet.Value.Max, (long)rank.Value * rank.Value);
+    }
+
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require)]
+    internal static void Earn(ref Stamp stamp, in Rank rank) => stamp.Value = stamp.Value * 3 + rank.Value;
+
     [ForEach(Parallel = true, SimdMode = SimdMode.Require)]
     internal static void Seek(ref Spot3 p, ref Drift3 v, in Gravity gravity, float speed)
     {
@@ -1509,6 +1672,37 @@ public class KernelTests
         }
     }
 
+    /// <summary>Parallel loops over lanes of two sizes: a long column beside an int one and a long sum of ints, at any thread count.</summary>
+    [TestCase(1)]
+    [TestCase(4)]
+    public void ParallelPairsMatchTheMethodBitForBit(int threads)
+    {
+        const int count = 30_017;
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var random = new Random(9);
+        var stamps = new Stamp[count];
+        var ranks = new Rank[count];
+        var entities = new Entity[count];
+        world.Reserve<Stamp, Rank>(count);
+        for (int i = 0; i < count; i++)
+        {
+            (stamps[i], ranks[i]) = (NextStamp(random, i), NextTally(random, i));
+            entities[i] = world.CreateEntity(stamps[i], ranks[i]);
+            if (i % 11 == 0) entities[i].Set(new Frozen());
+        }
+
+        var wallet = new Reduce<Wallet> { Value = Wallet.Identity };
+        for (int i = 0; i < count; i++) ParallelKernels.Spend(in ranks[i], ref wallet);
+        ParallelKernels.Spend(world);
+        Assert.That(world.GetSingleton<Wallet>(), Is.EqualTo(wallet.Value), $"Spend at {threads} threads");
+        for (int round = 0; round < 3; round++)
+        {
+            ParallelKernels.Earn(world);
+            for (int i = 0; i < count; i++) ParallelKernels.Earn(ref stamps[i], in ranks[i]);
+        }
+        for (int i = 0; i < count; i++) Assert.That(entities[i].Get<Stamp>(), Is.EqualTo(stamps[i]), $"Stamp of row {i}");
+    }
+
     /// <summary>
     /// The rows a parallel vector loop writes are stamped, those it does not visit are not, so a [Changed&lt;T&gt;]
     /// filter (which skips words and blocks by their summaries) finds exactly them: chunks of whole blocks and chunks
@@ -1544,6 +1738,138 @@ public class KernelTests
     /// order. Integer sums, counts, Min and Max are exact at any thread count; a Fast float sum with fixed chunks is the
     /// same at 1 and 4 threads.
     /// </summary>
+    private static Stamp NextStamp(Random r, int i) => new()
+    {
+        Value = i % 6 == 0 ? new[] { long.MinValue, long.MaxValue, 0, -1, 1001, 999 }[r.Next(6)] : r.Next(3) == 0 ? r.NextInt64(long.MinValue, long.MaxValue) : r.Next(-5000, 5000),
+    };
+
+    /// <summary>
+    /// Lanes of two sizes: a column of long or double lanes beside int or float ones is a pair of vectors per step,
+    /// widened, compared, narrowed back and stored as the method does, bit for bit, at every length and in two tables.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void LanesOfTwiceTheWidthMatchTheMethodBitForBit(int count)
+    {
+        Check3(count, NextStamp, NextTally, NextCode, PairKernels.Accrue, (ref Stamp s, ref Rank r, ref Code32 c) => PairKernels.Accrue(ref s, ref r, in c));
+        Check3(count, (r, i) => new Depth { Value = NextDouble(r, i) }, NextLevel, NextTally, PairKernels.Refine,
+            (ref Depth d, ref Level l, ref Rank r) => PairKernels.Refine(ref d, ref l, in r));
+        Check(count, NextStamp, NextTally, PairKernels.Earn, (ref Stamp s, ref Rank r) => PairKernels.Earn(ref s, in r));
+        Check(count, NextStamp, NextTally, PairKernels.Settle, (ref Stamp s, ref Rank r) => PairKernels.Settle(ref s, in r));
+        Check(count, (r, i) => new Depth { Value = NextDouble(r, i) }, NextLevel, PairKernels.Soak, (ref Depth d, ref Level l) => PairKernels.Soak(ref d, in l));
+        Check(count, (r, i) => new Far3 { X = NextDouble(r, i), Y = NextDouble(r, i + 1), Z = NextDouble(r, i + 2) }, NextLevel,
+            PairKernels.Sway, (ref Far3 f, ref Level l) => PairKernels.Sway(ref f, in l));
+        Check(count, (r, i) => new Cell2 { X = r.NextInt64(long.MinValue, long.MaxValue), Y = r.NextInt64() }, NextTally,
+            PairKernels.Walk, (ref Cell2 c, ref Rank r) => PairKernels.Walk(ref c, in r));
+    }
+
+    /// <summary>A pair's masked words: the halves of the passing rows' mask keep the other rows as they were.</summary>
+    [TestCaseSource(nameof(HoleCases))]
+    public void PairsLeaveTheRowsWithoutAComponentAlone(string pattern, int count)
+    {
+        var hole = Holes.First(h => h.Name == pattern).Hole;
+        CheckHoles(count, hole, NextStamp, NextTally, PairKernels.Earn, (ref Stamp s, ref Rank r) => PairKernels.Earn(ref s, in r));
+        CheckHoles(count, hole, NextStamp, NextTally, PairKernels.Settle, (ref Stamp s, ref Rank r) => PairKernels.Settle(ref s, in r));
+        CheckHoles(count, hole, (r, i) => new Depth { Value = NextDouble(r, i) }, NextLevel, PairKernels.Soak, (ref Depth d, ref Level l) => PairKernels.Soak(ref d, in l));
+        CheckHoles(count, hole, (r, i) => new Far3 { X = NextDouble(r, i), Y = NextDouble(r, i + 1), Z = NextDouble(r, i + 2) }, NextLevel,
+            PairKernels.Sway, (ref Far3 f, ref Level l) => PairKernels.Sway(ref f, in l));
+        CheckHoles(count, hole, (r, i) => new Cell2 { X = r.NextInt64(long.MinValue, long.MaxValue), Y = r.NextInt64() }, NextTally,
+            PairKernels.Walk, (ref Cell2 c, ref Rank r) => PairKernels.Walk(ref c, in r));
+    }
+
+    /// <summary>
+    /// Reductions of int rows into long fields (by hand, through Combine, by attributes) and of short rows into int ones:
+    /// one pair of accumulators per field, folded in lane order, the method's result bit for bit, with rows to test.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void ReductionsIntoWiderFieldsMatchTheMethodBitForBit(int count)
+    {
+        foreach (var hole in new Func<int, bool>[] { _ => false, i => i % 3 == 0, i => (uint)(i * 2654435761u) >> 31 == 1 })
+        {
+            using var world = new World();
+            var random = new Random(count);
+            var ranks = new Rank[count];
+            var codes = new Code32[count];
+            var waves = new Wave16[count];
+            var gains = new Gain16[count];
+            var entities = new Entity[count];
+            world.Reserve<Rank, Code32, Wave16, Gain16>(count);
+            for (int i = 0; i < count; i++)
+            {
+                (ranks[i], codes[i]) = (NextTally(random, i), NextCode(random, i));
+                (waves[i], gains[i]) = (new Wave16 { V = (short)random.Next() }, new Gain16 { V = i % 5 == 0 ? short.MinValue : (short)random.Next() });
+                entities[i] = world.CreateEntity(ranks[i], codes[i], waves[i], gains[i]);
+            }
+            for (int i = 0; i < count; i++)
+            {
+                if (i % 7 == 0) entities[i].Set(new Frozen());
+                if (hole(i))
+                {
+                    entities[i].Remove<Code32>();
+                    entities[i].Remove<Gain16>();
+                }
+            }
+
+            var order = Enumerable.Range(0, count).OrderBy(i => i % 7 == 0 ? 1 : 0).ToArray();
+            var wallet = new Reduce<Wallet> { Value = Wallet.Identity };
+            foreach (int i in order) PairKernels.Spend(in ranks[i], ref wallet);
+            PairKernels.Spend(world);
+            Assert.That(world.GetSingleton<Wallet>(), Is.EqualTo(wallet.Value), "Spend");
+
+            wallet = new Reduce<Wallet> { Value = Wallet.Identity };
+            foreach (int i in order) PairKernels.Combined(in ranks[i], ref wallet);
+            PairKernels.Combined(world);
+            Assert.That(world.GetSingleton<Wallet>(), Is.EqualTo(wallet.Value), "Combined");
+
+            var purses = new Reduce<Purses> { Value = Purses.Identity };
+            foreach (int i in order) if (!hole(i)) PairKernels.Purse(in ranks[i], in codes[i], ref purses);
+            PairKernels.Purse(world);
+            Assert.That(world.GetSingleton<Purses>(), Is.EqualTo(purses.Value), "Purse");
+
+            var loud = new Reduce<Loudness> { Value = Loudness.Identity };
+            foreach (int i in order) if (!hole(i)) PairKernels.Loud(in waves[i], in gains[i], ref loud);
+            PairKernels.Loud(world);
+            Assert.That(world.GetSingleton<Loudness>(), Is.EqualTo(loud.Value), "Loud");
+        }
+    }
+
+    /// <summary>A double sum of float rows under FloatMode.Fast: one sum per lane, within the error bound of the sum.</summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void AFastDoubleSumOfFloatRowsIsTheSumOfTheRows(int count)
+    {
+        using var world = new World();
+        world.Reserve<Level>(count);
+        var random = new Random(count);
+        decimal exact = 0;
+        double magnitude = 0;
+        for (int i = 0; i < count; i++)
+        {
+            float value = (float)(random.NextDouble() * 2e6 - 1e6);
+            world.CreateEntity(new Level { Value = value });
+            exact += (decimal)(value * 0.5);
+            magnitude += Math.Abs(value * 0.5);
+        }
+
+        PairKernels.Pour(world);
+        double total = world.GetSingleton<Fluid>().Total;
+        Assert.That(Math.Abs(total - (double)exact), Is.LessThanOrEqualTo(count * 1.2e-16 * magnitude), $"{total} against {exact}");
+    }
+
+    /// <summary>
+    /// Short lanes widened into int lanes (a pair local, a narrowing and a widening back) over random values and the
+    /// edges, and byte lanes into ushort lanes over every pair of bytes: the method's result, row by row.
+    /// </summary>
+    [TestCase(false), TestCase(true)]
+    public void NarrowLanesWidenedMatchTheMethod(bool holes)
+    {
+        int[] edges = [short.MinValue, short.MinValue + 1, -256, -1, 0, 1, 255, short.MaxValue];
+        var random = new Random(17);
+        CheckNarrow(30000, holes, i => new Rank { Value = i % 9 == 0 ? (1 << 24) - i : random.Next(-1 << 20, 1 << 20) },
+            i => new Wave16 { V = (short)(i % 4 == 0 ? edges[random.Next(edges.Length)] : random.Next()) },
+            i => new Gain16 { V = (short)(i % 4 == 1 ? edges[random.Next(edges.Length)] : random.Next()) }, PairKernels.Gather, PairKernels.Gather, "Gather");
+        CheckNarrow(Pairs, holes, i => new Sum16 { V = (ushort)(i * 977) }, i => new Shade { V = (byte)i }, i => new Tone { V = (byte)(i >> 8) },
+            PairKernels.Count, PairKernels.Count, "Count");
+    }
+
     [Test]
     public void ParallelVectorReductionsAreExactAndDoNotDependOnTheThreads()
     {
@@ -1756,6 +2082,8 @@ public class KernelTests
             world.CreateEntity(new Place2(new Vector2(i, 1)), new Pace2(Vector2.One), new Body3 { M = 2 }, new Pace3(Vector3.One));
             var w = world.CreateEntity(new Craft12 { VX = i }, new Mixed { Speed = i }, new Level());
             if (i % 5 == 0) w.Remove<Craft12>(); // wide masked words: the method on their passing rows
+            var p = world.CreateEntity(new Stamp { Value = i }, new Depth { Value = i }, new Rank { Value = i }, new Code32 { Value = (uint)i }, new Level { Value = i });
+            if (i % 6 == 0) p.Remove<Rank>(); // the masked words of pairs
         }
         world.SetBounds(-10, 10);
         world.SetDt2(0.5f);
@@ -1791,6 +2119,12 @@ public class KernelTests
             WideKernels.Steer(world);
             WideKernels.Wear(world);
             StructKernels.Weigh(world);
+            PairKernels.Spend(world);
+            PairKernels.Purse(world);
+            PairKernels.Accrue(world);
+            PairKernels.Refine(world);
+            PairKernels.Earn(world);
+            ParallelKernels.Spend(world);
         }
 
         for (int i = 0; i < 50; i++) Frame(); // warm-up: the query cache, the static index tables of Interleaved, JIT tiers

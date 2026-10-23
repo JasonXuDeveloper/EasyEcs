@@ -196,6 +196,7 @@ public class GeneratorTests
         public struct Five : IComponent { public float A, B, C, D, E; }
         public struct Mixed : IComponent { public float A; public int B; }
         public struct D : IComponent { public double V; }
+        public struct L64 : IComponent { public long V; }
         public struct B8 : IComponent { public byte V; }
         public struct C8 : IComponent { public byte V; }
         public struct S8 : IComponent { public sbyte V; }
@@ -224,7 +225,13 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Keyed k) => k.V++;", true)]                                  // parts without fields                     // a singleton: uniform
     [TestCase("[ForEach] static void A(ref P p) => p.V = (p.V << 2) | 1;", true)]
     [TestCase("[ForEach] static void A(ref F f, in P p) => f.V = p.V;", true)]                         // int to float: one size
-    [TestCase("[ForEach] static void A(ref F f, in D d) => f.V = (float)d.V;", false)]                 // float and double
+    [TestCase("[ForEach] static void A(ref F f, in D d) => f.V = (float)d.V;", true)]                  // a pair of double vectors, narrowed
+    [TestCase("[ForEach] static void A(in F f, ref D d) { if (d.V > 1) d.V += f.V; }", true)]           // float to double, compared in halves
+    [TestCase("[ForEach] static void A(ref P p, ref L64 l) { long x = (long)p.V * p.V + l.V; l.V = x; p.V = (int)(x >> 3); }", true)] // a long local
+    [TestCase("[ForEach] static void A(in P p, ref Reduce<Wide> w) { w.Value.N += p.V; w.Value.L += p.V; }", true)] // an int and a long sum
+    [TestCase("[ForEach(Parallel = true)] static void A(in P p, ref Reduce<Wide> w) => w.Value.L += (long)p.V * p.V;", true)]
+    [TestCase("[ForEach] static void A(in B8 b, ref F f) => f.V += b.V;", false)]                     // four times as wide
+    [TestCase("[ForEach] static void A(ref F f, in L64 l) => f.V = l.V;", false)]                     // long to float rounds twice
     [TestCase("[ForEach] static void A(ref F f, in G g) => f.V = System.Math.Clamp(f.V, -g.Pull, g.Pull);", true)]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.Math.Clamp(f.V, 2, 1);", false)]       // throws
     [TestCase("[ForEach] static void A(ref F f, in H h) => f.V = float.Lerp(f.V, h.V, 0.5f);", true)]
@@ -280,7 +287,12 @@ public class GeneratorTests
 
     // EECS055: the first reason a method that looks meant for a vector loop stays scalar, from Kernel.Vectorize.
     [TestCase("[ForEach] static void A(ref Five t) => t.A = t.B;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 2 fields it uses takes 11 permutes per 16 rows, for no vector operation; it uses 2 of Five's 5 fields (A, B): split them into a component of their own (a component of 2 fields gets a vector loop)")]
-    [TestCase("[ForEach] static void A(ref F f, in D d) => f.V = (float)d.V;", "lane types float and double differ in size")]
+    [TestCase("[ForEach] static void A(in B8 b, ref F f) => f.V += b.V;", "lane types byte and float differ in size: a vector loop takes lanes of one size and of twice that size, not 4 times")]
+    [TestCase("[ForEach] static void A(ref F f, in L64 l) => f.V = l.V;", "the conversion of 'l.V' from long to float is not supported")]
+    [TestCase("[ForEach] static void A(ref P p, in D d) => p.V = (int)d.V;", "the conversion of 'd.V' from double to int is not supported")]
+    [TestCase("[ForEach] static void A(ref L64 l, in F f) => l.V = (long)f.V;", "the conversion of 'f.V' from float to long is not supported")]
+    [TestCase("[ForEach] static void A(ref F f, in D d) => f.V = (float)System.Math.Floor(d.V / 3) + (float)(d.V % 2);", "'%' is not supported (no vector remainder)")] // the reason of a half
+    [TestCase("[ForEach] static void A(ref P p, in L64 l) => p.V = (int)(l.V / 3);", "integer division is not supported (it throws on 0)")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.Math.Clamp(f.V, 2, 1);", "Math.Clamp's min is above its max, so the call throws")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Round(f.V, 2);", "MathF.Round is not supported")]
     [TestCase("[ForEach] static void A(ref F f) => f.V %= 2;", "'%' is not supported (no vector remainder)")]
@@ -290,12 +302,13 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x;", "it calls S.M")]
     [TestCase("[ForEach] static void A(ref F f) { for (int i = 0; i < 2; i++) f.V++; }", "'for (int i = 0; i < 2; i++) f.V++;' is not supported")]
     [TestCase("[ForEach] static void A(ref F f, in H h) => h.V.ToString();", "it calls Single.ToString")]
-    [TestCase("[ForEach] static void A(in F f, ref H h) { double d = f.V; h.V = (float)d; }", "local 'd' is a double, not a lane type of 4 bytes")]
+    [TestCase("[ForEach] static void A(in B8 b, ref C8 c) { float d = b.V; c.V = (byte)d; }", "local 'd' is a float, not a lane type of 1 or 2 bytes")]
     [TestCase("[ForEach] static void A(in P p, ref Purse u) => u.Sum = p.V + 1L;", "it writes 'u.Sum', which is neither a local nor the lane of a component taken by ref")] // the write, not the conversion of its value
     [TestCase("[ForEach] static void A(ref F f, ref int n) => n++;", "it takes 'n' by ref: a vector loop reduces only into a Reduce<T>")]
     [TestCase("[ForEach] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;", "the float sum Total.V would add its rows in another order (one sum per lane): set FloatMode = FloatMode.Fast to accept a sum that is not bit for bit the method's")]
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Ends> e) => e.Value.Last = p.V;", "Ends.Combine sets First to 'a.First', not the sum, Min or Max of both sides' First")]
-    [TestCase("[ForEach] static void A(in P p, ref Reduce<Wide> w) => w.Value.N += p.V;", "field Wide.L of the reduction is a long, not a lane type of 4 bytes")]
+    [TestCase("[ForEach] static void A(in B8 b, ref Reduce<Wide> w) => w.Value.N += b.V;", "field Wide.N of the reduction is a int, not a lane type of 1 or 2 bytes")]
+    [TestCase("[ForEach] static void A(in P p, ref Reduce<Count> c) { long x = p.V; c.Value.N += x; }", "it writes 'c.Value.N += x', where Count.Combine takes the sum of N")]
     [TestCase("[ForEach] static void A(ref P p, ref Reduce<Count> c) { c.Value.N += p.V; p.V = c.Value.N; }", "it reads 'c.Value.N', a partial result the lanes of a vector loop hold in parts")]
     [TestCase("[ForEach(Parallel = true)] static void A(ref Five t) => t.A = t.B;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 2 fields it uses takes 11 permutes per 16 rows, for no vector operation; it uses 2 of Five's 5 fields (A, B): split them into a component of their own (a component of 2 fields gets a vector loop)")] // parallel too
     [TestCase("[ForEach] static void A(ref F f, Maybe<D> d) { if (d.HasValue) f.V++; }", "lane types float and double differ in size")]
@@ -341,7 +354,7 @@ public class GeneratorTests
     }
 
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, ref F f) => f.V++;", "it takes the Entity")]
-    [TestCase("[ForEach(SimdMode = SimdMode.Require, Parallel = true)] static void A(ref F f, in D d) => f.V++;", "lane types float and double differ in size")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require, Parallel = true)] static void A(ref F f, in B8 b) => f.V++;", "lane types byte and float differ in size: a vector loop takes lanes of one size and of twice that size, not 4 times")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 1 field it uses takes 9 permutes per 16 rows, more than its 1 vector operation gains; it uses 1 of Five's 5 fields (A): move it into a component of its own (a component of one field gets a vector loop)")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, Scratch<int> s) => f.V += s.Value;", "it takes a Scratch<Int32>: working memory a row at a time, not one per lane")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, Lookup<H> h) => f.V++;", "it takes a Lookup<H>: a lookup of another entity per row has no vector form")]

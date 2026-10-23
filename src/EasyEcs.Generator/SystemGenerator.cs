@@ -639,7 +639,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append($"{indent}nint i = 0;\n");
         var loop = new StringBuilder();
         // Kernel.V stands for the vector type in both loops' text, and the tokens below for what their forms name apart.
-        string vector = $"{Kernel.V}<{simd.Columns[0]}>"; // every column has lanes of one size: one count
+        string vector = $"{Kernel.V}<{simd.Lane}>"; // the narrowest lanes: a column of lanes twice as wide takes two vectors
         // Components of several fields need the shuffles of Interleaved; without them, every row runs the method.
         string interleaved = simd.Interleaves ? $" && global::EasyEcs.Interleaved.{Accelerated}" : "";
         // A wide component's permutes are AVX-512's, and its layout the generator's (checked once per job type).
@@ -690,7 +690,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append($"{indent}ref {simd.Columns[k - 1]} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref r{k});\n");
         sb.Append($"{indent}nint i = 0, lanes = rows * {flat.Fields}; // i counts lanes: {flat.Fields} per row\n");
         var loop = new StringBuilder();
-        string count = $"{Kernel.V}<{simd.Columns[0]}>.Count";
+        string count = $"{Kernel.V}<{simd.Lane}>.Count";
         string chunk = $"{count} * {flat.Fields}"; // whole vectors of whole rows
         loop.Append($"{indent}if ({Kernel.V}.IsHardwareAccelerated && lanes - i >= {chunk})\n{indent}{{\n");
         string inner = indent + "    ", body = inner + "    ";
@@ -867,7 +867,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         public string Describe()
         {
             if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")})";
-            var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Columns[0]}>)" };
+            var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Lane}>)" };
             if (simd.Flat != null) parts.Add("flat");
             else if (simd.Interleaves) parts.Add("interleaved fields");
             if (simd.Wide != null) parts[0] = "vector (Vector512 only)";

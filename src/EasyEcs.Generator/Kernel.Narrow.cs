@@ -97,7 +97,7 @@ internal sealed partial class Kernel
             if (op.ConstantValue is { HasValue: true, Value: { } c } && c is int or byte or sbyte or short or ushort)
                 return Constant(System.Convert.ToInt64(c, System.Globalization.CultureInfo.InvariantCulture));
             if (!IsInt(op.Type) && !(IsLane(op.Type) && !IsFloat(op.Type)))
-                throw new Unsupported($"'{Text(op)}' is a {op.Type?.ToDisplayString()}, not an int or a lane type of {_size} bytes");
+                throw new Unsupported($"'{Text(op)}' is a {op.Type?.ToDisplayString()}, not an int or a lane type of {LaneSizes} bytes");
             var (lo, hi) = Range(op.Type);
             return new Wide(Broadcast($"unchecked(({Unsigned})({Scalar(op)}))", Unsigned), lo, hi, null);
         }
@@ -105,10 +105,11 @@ internal sealed partial class Kernel
         {
             case IConversionOperation { Conversion.IsIdentity: true } c:
                 return WideOf(c.Operand);
-            case IConversionOperation { Conversion.IsNumeric: true, IsChecked: false, OperatorMethod: null } c when IsInt(c.Type) && IsLane(c.Operand.Type):
+            case IConversionOperation { Conversion.IsNumeric: true, IsChecked: false, OperatorMethod: null } c when IsInt(c.Type) && (IsLane(c.Operand.Type) || PairLane(c.Operand)):
                 return FromLane(c.Operand);
             case ILocalReferenceOperation { Local: var local } when _wides.TryGetValue(local, out var value):
-                return value;
+                // inside a half (ushort lanes of byte ones), the value widened where the lanes hold it exactly
+                return _half < 0 ? value : new Wide(As(MaskOf(_size), Unsigned, HalfOf(value, op)), value.Lo, value.Hi, null);
             case IBinaryOperation { OperatorMethod: null, IsChecked: false } b when IsInt(b.Type):
                 return WideBinary(b.OperatorKind, WideOf(b.LeftOperand), WideOf(b.RightOperand), b);
             case IUnaryOperation { OperatorMethod: null, IsChecked: false } u when IsInt(u.Type):
@@ -132,7 +133,7 @@ internal sealed partial class Kernel
                 && call.TargetMethod.Parameters.All(p => IsInt(p.Type)):
                 return WideCall(call);
             default:
-                if (IsLane(op.Type) && !IsFloat(op.Type)) return FromLane(op);
+                if (IsLane(op.Type) && !IsFloat(op.Type) || PairLane(op)) return FromLane(op);
                 throw Not(op);
         }
     }
@@ -140,6 +141,7 @@ internal sealed partial class Kernel
     /// <summary>A lane value promoted to int: its bits, and its type's range.</summary>
     private Wide FromLane(IOperation op)
     {
+        if (PairLane(op)) return PairWide(op);
         var (lo, hi) = Range(op.Type);
         return new Wide(As(Elem(op.Type!), Unsigned, Expr(op)), lo, hi, null);
     }

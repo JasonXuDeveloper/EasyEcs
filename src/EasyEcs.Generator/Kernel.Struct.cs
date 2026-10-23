@@ -36,7 +36,8 @@ internal sealed partial class Kernel
         TryPaths(type) is { } paths && paths.All(p => IsLane(p[p.Length - 1].Type)) ? paths : null;
 
     /// <summary>Lane f of component k: in a flat loop the field it translates is lane 0, the others are left out.</summary>
-    private string? ComponentLane(int index, int f) => _flat < 0 ? $"__c{index}_{f}" : f == _flat ? $"__c{index}_0" : null;
+    private string? ComponentLane(int index, int f) =>
+        _flat < 0 ? $"__c{index}_{f}{(_doubled.Contains(index) && _half >= 0 ? $"_{_half}" : "")}" : f == _flat ? $"__c{index}_0" : null;
 
     private string?[] Each(int lanes, System.Func<int, string?> lane)
     {
