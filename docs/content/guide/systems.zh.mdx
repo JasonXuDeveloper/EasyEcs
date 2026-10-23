@@ -642,7 +642,7 @@ public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2)
         var __u5 = new Vector<float>(0.125f);
         for (nint last = rows - Vector<float>.Count; i <= last; i += Vector<float>.Count)
         {
-            // 2. 加载：从每列读一个向量的行
+            // 2. 加载：从循环读或存的每一列读一个向量的行
             var __c1 = Vector.LoadUnsafe(ref e1, (nuint)i);           // heat
             var __c2 = Vector.LoadUnsafe(ref e2, (nuint)i);           // speed
             // 3. 方法体，逐通道执行，顺序和你写的一样
@@ -729,9 +729,9 @@ for (; i < rows; i++)   // 4. 尾部，以及没有 shuffle 指令时的每一�
 - **方法：** `static`、逐实体（单线程或 `Parallel` 都行）、没有返回值；没有 `Entity`、`World`、`Mut<T>`、span、`Scratch<T>`、
   `Lookup<T>`、`Emit<T>` 或 `Tile` 参数，也没有按 `ref` 传的值。组件的 `Maybe<T>` / `ReadOnlyMaybe<T>` 是有这个组件的行组成的通道掩码（单线程时）。
 - **汇总：** [`Reduce<T>`](/zh/docs/guide/threading#reductions) 每条通道一个累加器，循环结束后按通道顺序合进这段行的部分结果。条件是 `T`
-  的每个字段都是方法那么大的通道，并且 `T.Combine` 把每个字段设成两边该字段的和、`Min` 或 `Max`。浮点求和要 `FloatMode.Fast`
-  （[见下](#float-mode)）。生成器在你的源码里读 `Combine`：用 `[Sum]` / `[Min]` / `[Max]` 声明的归约，`Combine` 是另一个生成器写的，
-  它看不到，所以这样的方法逐行运行（`SystemInfo.Loops` 会说明原因）。
+  的每个字段都是方法那么大的通道，并且按求和、`Min` 或 `Max` 合并：用 `[Sum]` / `[Min]` / `[Max]` 声明，或者手写的 `T.Combine`
+  把它设成两边该字段的和、`Min` 或 `Max`。浮点求和要 `FloatMode.Fast`（[见下](#float-mode)）。
+  标了 `[Product]`、`[All]` 或 `[Any]` 的字段让方法逐行运行，EECS055 会指出是哪个字段。
 - **组件：** 1 到 4 个同样大小的通道：`float`、`double`、`int`、`uint`、`long`、`ulong`、`byte`、`sbyte`、`short` 或 `ushort` 的字段
   （或自动属性），或由它们组成的结构体（`Vector2`、`Vector3`、`Vector4`，System.Numerics 和 Godot 的都行），只在一处声明。`ref` 和 `in`
   都可以；可以给整个组件赋值（`p = new Position(p.Value + v.Value * dt)`、`p = p with { ... }`）。在 AVX-512 上，更宽的组件（最多 16 个字，

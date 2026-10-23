@@ -394,8 +394,9 @@ Console.WriteLine($"{crowd.Count} units between x = {crowd.MinX} and x = {crowd.
 - **On one thread** the partial result is a local of the job, one per run of rows; the method, the result and its
   scheduling are the same. A `[ForEach]` method outside a system reduces into the world it is called with.
 - **In a vector loop** each lane keeps its own accumulator, folded in lane order into the run's partial result, when
-  `Combine` sets every field to the sum, `Min` or `Max` of both sides' field and the fields are lanes of the method's
-  size ([vector loops](/en/docs/guide/systems#vector-loops)). A float sum takes the loop only under
+  every field is declared `[Sum]`, `[Min]` or `[Max]` (or a hand-written `Combine` sets it to the sum, `Min` or `Max`
+  of both sides' field) and the fields are lanes of the method's size
+  ([vector loops](/en/docs/guide/systems#vector-loops)); `[Product]`, `[All]` and `[Any]` stay row by row. A float sum takes the loop only under
   `FloatMode.Fast`, since lanes add in another order; integer sums, minimums and maximums stay exact.
 - **What it costs:** per row, an add into a local: a reducing method runs over each chunk's runs of rows, and the JIT
   keeps the run's partial result, passed by `ref` to the inlined method, in a register. Per chunk, its job copy, kept
@@ -632,16 +633,17 @@ static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits)
 ```
 
 ```csharp tab="The generator writes" doccheck=skip
-// Generated (StrikeSystem.….ForEach.g.cs, trimmed, global:: dropped). Do not copy it: Strike_0 is an
+// Generated (StrikeSystem.….System.g.cs, trimmed, global:: dropped). Do not copy it: Strike_0 is an
 // [UnsafeAccessor] to your private method.
 internal struct StrikeJob0 : IForEach<Attack, Aim>, INoStructuralChanges
 {
     public SingletonRef<Emitted<Hit>> o2;   // the singleton the lists join
     public DynamicBuffer<Hit> e2;           // the list of this chunk: each chunk runs its own copy of the job
 
-    public void Execute(ref Attack c1, ref Aim c2) => __ForEach.Strike_0(null, in c1, in c2, new Emit<Hit>(ref e2));
+    public void Execute(ref Attack c1, ref Aim c2) => __ForEach.Strike_0(default, in c1, in c2, new Emit<Hit>(ref e2));
 
     static int IForEach<Attack, Aim>.WriteMask => 0;
+    static bool IForEach<Attack, Aim>.OneQuery => true;   // the method's filter is a constant
     static bool IForEach<Attack, Aim>.Merges => true;
 
     // Called once per chunk, in chunk order, on the thread that started the pass.
@@ -653,9 +655,12 @@ internal struct StrikeJob0 : IForEach<Attack, Aim>, INoStructuralChanges
     }
 }
 
+// No filter attribute: an empty one, passed by reference (no 192-byte temporary per pass).
+internal static readonly QueryFilter StrikeFilter0 = default;
+
 // The system's Update and Access:
 var job0 = new StrikeJob0 { o2 = Emitted<Hit>.Joined(world) };   // Emitted<Hit> added when missing
-world.ForEachParallel<Attack, Aim, StrikeJob0>(ref job0);
+world.ForEachParallel<Attack, Aim, StrikeJob0>(ref job0, in StrikeFilter0);
 
 access.Read<Attack>();
 access.Read<Aim>();

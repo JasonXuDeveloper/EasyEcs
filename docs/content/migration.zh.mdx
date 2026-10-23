@@ -12,7 +12,8 @@ icon: CircleArrowUp
 ## v4.7 → v4.8 [#v4-7-to-v4-8]
 
 4.7 的存档照样能读。系统换了写法：`EcsSystem` 基类变成了[标在只有静态方法的 ref struct 上的 `[EcsSystem]`](#v4-8-systems)，
-有代码修复可以改写类；系统的节奏是 [`[UpdateInterval(n, Phase = p)]` 特性](#v4-8-update-interval)。为 4.7 写的其他代码都不用改就能编译。
+有代码修复可以改写类；系统的节奏是 [`[UpdateInterval(n, Phase = p)]` 特性](#v4-8-update-interval)。在批处理 job 里为某一行手写的 `Mut<T>`
+[改为接收这段行的 `MutColumn`](#v4-8-mut-column)。为 4.7 写的其他代码都不用改就能编译。
 有两条分析器规则报告的范围变大了，还有三条新的警告：把警告当错误的构建会在这些地方失败，改完代码才能通过。
 
 ### 系统是 `[EcsSystem]` ref struct [#v4-8-systems]
@@ -232,6 +233,44 @@ public ref struct Wander
 }
 ```
 
+### 一段行的 `Mut<T>` 改为接收这段行的 `MutColumn` [#v4-8-mut-column]
+
+在批处理 job 里为某一行手写构造 `Mut<T>` 的代码（生成的代码就是这样做的，这个构造函数在 IntelliSense 里是隐藏的）不再能编译：
+`new Mut<T>(ref value, in entities, index)` 改成了 `new Mut<T>(ref value, in column, index)`，`column` 是这段行的变更 tick 列，
+每段行用 `MutColumn.Of<T>(in entities)` 查一次。之后经 `Mut<T>` 的写入直接给它那一行打 tick，不再查找。`new Mut<T>(ref value, entity)` 不变。
+
+```csharp tab="4.7" doccheck=skip
+public void Execute(EntitySpan entities, Span<Hp> hp)
+{
+    for (int i = 0; i < hp.Length; i++)
+        Medic.Heal(new Mut<Hp>(ref hp[i], in entities, i));
+}
+```
+
+```csharp tab="4.8"
+public record struct Hp(int Value) : IComponent, ITracked;
+
+public static class Medic
+{
+    public static void Heal(Mut<Hp> hp)
+    {
+        if (hp.Value.Value < 100) hp.Write() = new Hp(100);   // 只给治疗过的行打 tick
+    }
+}
+
+public struct HealJob : IForEachBatch<Hp>, INoStructuralChanges
+{
+    public static int SelfStamped => 1;   // Mut 自己给写过的行打 tick
+
+    public void Execute(EntitySpan entities, Span<Hp> hp)
+    {
+        var column = MutColumn.Of<Hp>(in entities);   // 每段行一次
+        for (int i = 0; i < hp.Length; i++)
+            Medic.Heal(new Mut<Hp>(ref hp[i], in column, i));
+    }
+}
+```
+
 ### 新的公开类型 [#v4-8-new-types]
 
 `namespace EasyEcs` 里新增了 `ReadOnlyMaybe<T>`、`Reduce<T>`、`IReduction<T>`、`Scratch<T>`、`Lookup<T>`、`LookupExtensions`、
@@ -242,7 +281,7 @@ public ref struct Wander
 `MinAttribute`、`MaxAttribute`、`AllAttribute`、`AnyAttribute`、`IndexKeyAttribute`、`UniqueKeyAttribute`、`GroupAttribute`、
 `GroupByAttribute`、`WhenTargetDestroyedAttribute`、`NotSavedAttribute`，以及系统相关类型（`EcsSystemAttribute`、`OnCreateAttribute`、
 `OnUpdateAttribute`、`OnDestroyAttribute`、`SystemHandle`，供生成代码使用的 `ISystemCode`、`ISystemSet`、`SystemDeclarations`、`SystemCode`、
-`GenericSystemCodeAttribute`）。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
+`GenericSystemCodeAttribute`、`MutColumn`）。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
 或者用 `using` 起个别名。
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]

@@ -14,8 +14,8 @@ current API.
 
 Saves of 4.7 load. Systems change form: the `EcsSystem` base class became [`[EcsSystem]` on a ref struct of static
 methods](#v4-8-systems), with a code fix that rewrites a class, and a system's cadence is the
-[`[UpdateInterval(n, Phase = p)]` attribute](#v4-8-update-interval). Everything else written for 4.7 compiles
-unchanged. Two analyzer rules report more code, and three warnings are new: a build that treats warnings as errors
+[`[UpdateInterval(n, Phase = p)]` attribute](#v4-8-update-interval). A `Mut<T>` built by hand for a row of a batch
+job [takes the run's `MutColumn`](#v4-8-mut-column). Everything else written for 4.7 compiles unchanged. Two analyzer rules report more code, and three warnings are new: a build that treats warnings as errors
 fails on them until the code changes.
 
 ### Systems are `[EcsSystem]` ref structs [#v4-8-systems]
@@ -246,6 +246,46 @@ public ref struct Wander
 }
 ```
 
+### A `Mut<T>` of a run of rows takes the run's `MutColumn` [#v4-8-mut-column]
+
+Code that builds a `Mut<T>` by hand for a row of a batch job (generated code does this, and the constructor is hidden
+from IntelliSense) no longer compiles: `new Mut<T>(ref value, in entities, index)` became
+`new Mut<T>(ref value, in column, index)`, with `column` the run's change-tick column, looked up once per run with
+`MutColumn.Of<T>(in entities)`. A write through the `Mut<T>` then stamps its row with no lookup. `new Mut<T>(ref value,
+entity)` is unchanged.
+
+```csharp tab="4.7" doccheck=skip
+public void Execute(EntitySpan entities, Span<Hp> hp)
+{
+    for (int i = 0; i < hp.Length; i++)
+        Medic.Heal(new Mut<Hp>(ref hp[i], in entities, i));
+}
+```
+
+```csharp tab="4.8"
+public record struct Hp(int Value) : IComponent, ITracked;
+
+public static class Medic
+{
+    public static void Heal(Mut<Hp> hp)
+    {
+        if (hp.Value.Value < 100) hp.Write() = new Hp(100);   // stamps only the rows it heals
+    }
+}
+
+public struct HealJob : IForEachBatch<Hp>, INoStructuralChanges
+{
+    public static int SelfStamped => 1;   // the Mut stamps the rows it writes
+
+    public void Execute(EntitySpan entities, Span<Hp> hp)
+    {
+        var column = MutColumn.Of<Hp>(in entities);   // once per run
+        for (int i = 0; i < hp.Length; i++)
+            Medic.Heal(new Mut<Hp>(ref hp[i], in column, i));
+    }
+}
+```
+
 ### New public types [#v4-8-new-types]
 
 `ReadOnlyMaybe<T>`, `Reduce<T>`, `IReduction<T>`, `Scratch<T>`, `Lookup<T>`, `LookupExtensions`,
@@ -257,7 +297,7 @@ public ref struct Wander
 `AllAttribute`, `AnyAttribute`, `IndexKeyAttribute`, `UniqueKeyAttribute`, `GroupAttribute`, `GroupByAttribute`,
 `WhenTargetDestroyedAttribute`, `NotSavedAttribute`, the system types (`EcsSystemAttribute`, `OnCreateAttribute`,
 `OnUpdateAttribute`, `OnDestroyAttribute`, `SystemHandle`, and for the generated code `ISystemCode`, `ISystemSet`,
-`SystemDeclarations`, `SystemCode`, `GenericSystemCodeAttribute`) are new in `namespace EasyEcs`. A file that imports another namespace with a type of that name gets
+`SystemDeclarations`, `SystemCode`, `GenericSystemCodeAttribute`, `MutColumn`) are new in `namespace EasyEcs`. A file that imports another namespace with a type of that name gets
 CS0104 (ambiguous reference): qualify the name, or alias it with a `using` directive.
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]

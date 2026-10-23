@@ -202,17 +202,18 @@ static void Diffuse(Tile<Temperature, HeatPlate> heat, Mut<DynamicBuffer<NextTem
 ```
 
 ```csharp tab="生成器写的" doccheck=skip
-// 生成的代码（DiffuseSystem.….ForEach.g.cs，有删节，去掉了 global::）。不要照抄：Diffuse_0 是指向你的私有方法的
+// 生成的代码（DiffuseSystem.….System.g.cs，有删节，去掉了 global::）。不要照抄：Diffuse_0 是指向你的私有方法的
 // [UnsafeAccessor]，TileNeighbors 是生成器的辅助类型。
 internal struct DiffuseJob0 : IForEachEntity<DynamicBuffer<NextTemperature>>, INoStructuralChanges
 {
-    public object k0;   // HeatPlate 按键建的索引，遍历之前建好
+    public object k0;          // HeatPlate 按键建的索引，遍历之前建好
+    public TileNeighbors n0;   // 实体的邻居：放在字段里，每遍清零一次，而不是每行一个局部变量
 
     public void Execute(Entity entity, ref DynamicBuffer<NextTemperature> c1)
     {
         // 邻居每个实体找一次，方法里这个网格的每个 Tile 共用。
-        TileNeighbors.Of<HeatPlate, PlatePos>(k0, entity, out var n0);
-        __ForEach.Diffuse_0(null, new Tile<Temperature, HeatPlate>(entity, in n0),
+        TileNeighbors.Of<HeatPlate, PlatePos>(k0, entity, out n0);
+        __ForEach.Diffuse_0(default, new Tile<Temperature, HeatPlate>(entity, in n0),
             new Mut<DynamicBuffer<NextTemperature>>(ref c1, entity));
     }
 

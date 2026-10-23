@@ -310,8 +310,8 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   EECS074 to EECS077 keep the new form ([systems](https://ecs.xgamedev.net/en/docs/guide/systems)).
 - **SIMD without writing it.** A `[ForEach]` method over numbers runs as a vector loop the generator writes from its
   body, the way Burst compiles a job, with the same results bit for bit: components of 1 to 4 fields, narrow lanes
-  (`byte`, `short`), `Vector2` / `Vector3` / `Vector4` fields, `Maybe<T>` parameters, parallel methods, and on
-  AVX-512 components of up to 16 words. EECS055 names why a method stayed scalar, `SimdMode = SimdMode.Require` makes
+  (`byte`, `short`), `Vector2` / `Vector3` / `Vector4` fields, `Maybe<T>` parameters, parallel methods, totals into a
+  `Reduce<T>` of `[Sum]` / `[Min]` / `[Max]` fields, and on AVX-512 components of up to 16 words. EECS055 names why a method stayed scalar, `SimdMode = SimdMode.Require` makes
   that a build error, and `FloatMode.Fast` takes the vector approximations of `Sin`, `Exp` and the rest
   ([vector loops](https://ecs.xgamedev.net/en/docs/guide/systems#vector-loops)).
 - **Parallel passes that need no locks.** `[ForEach]` parameters do per chunk what shared state would do with locks:
@@ -339,7 +339,9 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 - **Smaller additions.** `ReadOnlyMaybe<T>`, `buffer.SetCount(n)`, `entity.GetOrAdd(value)`,
   `SaveEntitiesWithout`, `world.CollectIds`, enum elements in a `DynamicBuffer`, generic systems closed in another
   assembly under Native AOT, `<IlcInstructionSet>native</IlcInstructionSet>` in the templates for the `Vector512`
-  loops, and the generators do about half the work per edit.
+  loops, `entity.Run(ref job, in filter, since)` for a static filter, and the generators do about half the work per
+  edit. A `Mut<T>` built by hand for a row of a batch job takes the run's `MutColumn`
+  ([migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-8-mut-column)).
 - **A Minecraft-style sample and a Samples section.** [VoxelServer](https://ecs.xgamedev.net/en/docs/samples/voxel-server)
   runs chunks, flowing water, areas of interest, zombies, replication and saves at 20 ticks a second; the
   [Samples](https://ecs.xgamedev.net/en/docs/samples) section of the site walks through every sample.

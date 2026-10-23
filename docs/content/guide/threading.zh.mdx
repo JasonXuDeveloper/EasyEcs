@@ -349,8 +349,9 @@ Console.WriteLine($"{crowd.Count} 个单位，x 从 {crowd.MinX} 到 {crowd.MaxX
   固定时，每次运行、任何线程数下结果都相同（测试检查了 1、2、3、4 和 8 个线程），但和同一个方法 `Parallel = false` 的结果不逐位相同。
   默认块大小随线程数变化：浮点总数要在不同机器上复现时，设定 `ChunkRows`。最小值、最大值和包围盒不涉及舍入，怎样都精确。
 - **单线程时**，部分结果是 job 的局部变量，每段连续的行一个；方法、结果和调度都一样。系统之外的 `[ForEach]` 方法归约进调用它时传入的 World。
-- **在向量循环里**，每条通道有自己的累加器，按通道顺序合进这段行的部分结果。条件是 `Combine` 把每个字段设成两边该字段的和、`Min` 或 `Max`，
-  并且字段是方法那么大的通道（[向量循环](/zh/docs/guide/systems#vector-loops)）。浮点求和只有在 `FloatMode.Fast` 下才进向量循环，
+- **在向量循环里**，每条通道有自己的累加器，按通道顺序合进这段行的部分结果。条件是每个字段都标了 `[Sum]`、`[Min]` 或 `[Max]`
+  （或者手写的 `Combine` 把它设成两边该字段的和、`Min` 或 `Max`），并且字段是方法那么大的通道（[向量循环](/zh/docs/guide/systems#vector-loops)）；
+  `[Product]`、`[All]` 和 `[Any]` 仍然逐行。浮点求和只有在 `FloatMode.Fast` 下才进向量循环，
   因为各通道的相加顺序不同；整数求和、最小值和最大值都保持精确。
 - **开销：** 每行一次累加到局部变量：归约方法按每块里连续的行运行，这段行的部分结果按 `ref` 传给内联的方法，JIT 把它留在寄存器里。
   每块一个 job 副本，留到这一遍结束再按块的顺序合并；第一遍之后零分配。没有锁、没有 `Interlocked`、没有伪共享：每块的部分结果只存一次。
@@ -554,16 +555,17 @@ static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits)
 ```
 
 ```csharp tab="生成器写的" doccheck=skip
-// 生成的代码（StrikeSystem.….ForEach.g.cs，有删节，去掉了 global::）。不要照抄：Strike_0 是指向你的私有方法的
+// 生成的代码（StrikeSystem.….System.g.cs，有删节，去掉了 global::）。不要照抄：Strike_0 是指向你的私有方法的
 // [UnsafeAccessor]。
 internal struct StrikeJob0 : IForEach<Attack, Aim>, INoStructuralChanges
 {
     public SingletonRef<Emitted<Hit>> o2;   // 列表要接进的单例
     public DynamicBuffer<Hit> e2;           // 这一块的列表：每块跑自己的一份 job
 
-    public void Execute(ref Attack c1, ref Aim c2) => __ForEach.Strike_0(null, in c1, in c2, new Emit<Hit>(ref e2));
+    public void Execute(ref Attack c1, ref Aim c2) => __ForEach.Strike_0(default, in c1, in c2, new Emit<Hit>(ref e2));
 
     static int IForEach<Attack, Aim>.WriteMask => 0;
+    static bool IForEach<Attack, Aim>.OneQuery => true;   // 方法的过滤条件是常量
     static bool IForEach<Attack, Aim>.Merges => true;
 
     // 每块调用一次，按块的顺序，在发起这一遍的线程上。
@@ -575,9 +577,12 @@ internal struct StrikeJob0 : IForEach<Attack, Aim>, INoStructuralChanges
     }
 }
 
+// 没有过滤特性：一个空的过滤条件，按引用传入（每遍不用临时拷一份 192 字节）。
+internal static readonly QueryFilter StrikeFilter0 = default;
+
 // 系统的 Update 和 Access：
 var job0 = new StrikeJob0 { o2 = Emitted<Hit>.Joined(world) };   // 没有 Emitted<Hit> 时添加
-world.ForEachParallel<Attack, Aim, StrikeJob0>(ref job0);
+world.ForEachParallel<Attack, Aim, StrikeJob0>(ref job0, in StrikeFilter0);
 
 access.Read<Attack>();
 access.Read<Aim>();

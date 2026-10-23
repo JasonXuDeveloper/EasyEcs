@@ -270,6 +270,7 @@ Run `job` on this entity when it has all of `T1, T2`, with the refs `World.ForEa
 
 - `entity.Run<T1..Tn, TJob>(ref job)`: O(n), plus O(1) per filter component
 - `Run(ref job, filter)`: O(n), plus O(1) per filter component
+- `entity.Run<T1..Tn, TJob>(ref job, in filter, since)`: O(n), plus O(components the filter names)
 
 ### `Run` [#run-2]
 
@@ -293,6 +294,7 @@ One overload per number of components, 1 to 9 (generated from one template); thi
 
 - `entity.Run<T1..Tn, TJob>(ref job)`: O(n), plus O(1) per filter component
 - `Run(ref job, filter)`: O(n), plus O(1) per filter component
+- `entity.Run<T1..Tn, TJob>(ref job, in filter, since)`: O(n), plus O(components the filter names)
 
 ### `Run` [#run-3]
 
@@ -316,6 +318,7 @@ One overload per number of components, 1 to 9 (generated from one template); thi
 
 - `entity.Run<T1..Tn, TJob>(ref job)`: O(n), plus O(1) per filter component
 - `Run(ref job, filter)`: O(n), plus O(1) per filter component
+- `entity.Run<T1..Tn, TJob>(ref job, in filter, since)`: O(n), plus O(components the filter names)
 
 ### `Set` [#set]
 

@@ -215,17 +215,18 @@ static void Diffuse(Tile<Temperature, HeatPlate> heat, Mut<DynamicBuffer<NextTem
 ```
 
 ```csharp tab="The generator writes" doccheck=skip
-// Generated (DiffuseSystem.….ForEach.g.cs, trimmed, global:: dropped). Do not copy it: Diffuse_0 is an
+// Generated (DiffuseSystem.….System.g.cs, trimmed, global:: dropped). Do not copy it: Diffuse_0 is an
 // [UnsafeAccessor] to your private method, and TileNeighbors is the generator's helper.
 internal struct DiffuseJob0 : IForEachEntity<DynamicBuffer<NextTemperature>>, INoStructuralChanges
 {
-    public object k0;   // the index of HeatPlate by its key, built before the pass
+    public object k0;          // the index of HeatPlate by its key, built before the pass
+    public TileNeighbors n0;   // the entity's neighbors: a field, cleared once per pass, not a local per row
 
     public void Execute(Entity entity, ref DynamicBuffer<NextTemperature> c1)
     {
         // The neighbors, found once per entity for every Tile of this grid the method takes.
-        TileNeighbors.Of<HeatPlate, PlatePos>(k0, entity, out var n0);
-        __ForEach.Diffuse_0(null, new Tile<Temperature, HeatPlate>(entity, in n0),
+        TileNeighbors.Of<HeatPlate, PlatePos>(k0, entity, out n0);
+        __ForEach.Diffuse_0(default, new Tile<Temperature, HeatPlate>(entity, in n0),
             new Mut<DynamicBuffer<NextTemperature>>(ref c1, entity));
     }
 

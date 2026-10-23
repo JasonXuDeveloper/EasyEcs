@@ -131,10 +131,11 @@ major or minor version that needs code changes? The
   records), on the world's runner with its chunks; EECS060 and EECS061 cover their jobs. See the
   [decision](/en/docs/decisions#d80-for-parallel).
 - Analyzer rule [EECS060](/en/docs/guide/analyzer#eecs060) (warning): a parallel `[ForEach]` method or the `Execute`
-  of a job run by `ForEachParallel` writes memory every thread shares (a static field, an object a context parameter
-  or a job's field refers to): the writes race. Rule [EECS061](/en/docs/guide/analyzer#eecs061) (warning, with a code
-  fix): a parallel job's field read after `ForEachParallel`, which ran a copy per chunk and merged nothing back; the
-  fix runs the job on one thread.
+  of a job run by `ForEachParallel`, `ForEachEntityParallel` or `ForEachBatchParallel` writes memory every thread
+  shares (a static field, an object a context parameter or a job's field refers to): the writes race. Rule
+  [EECS061](/en/docs/guide/analyzer#eecs061) (warning, with a code fix): a parallel job's field read after the call,
+  which ran a copy per chunk and merged nothing back (a job that implements `Merges` itself is left out); the fix runs
+  the job on one thread (`ForEach`, `ForEachEntity`, `ForEachBatch`).
 - `IDirectIndexed<TKey>`: a unique component whose keys map onto a bounded range of slots (grid cells, chunks around
   the players, small ids) declares `static int Slots` and `static int SlotOf(TKey key)`; its index keeps a slot array
   beside the hash, so `Get`, `TryGet` and the uniqueness check of a write read one array entry. Keys out of range or
@@ -164,6 +165,9 @@ major or minor version that needs code changes? The
   [EECS080](/en/docs/guide/analyzer#eecs080) (suggestion, with a code fix) finds a hand-written one-entity job and
   converts it with its calls; [EECS081](/en/docs/guide/analyzer#eecs081) rejects a method that cannot run on one
   entity. See [queries](/en/docs/guide/queries#run-on-one-entity).
+- `entity.Run<T1..Tn, TJob>(ref job, in filter, since)` runs a job with `since` as the filter's tick: the test of
+  `filter.Since(since)` without a copy of the filter, so a `static readonly` filter serves every call. The entry point
+  of a `[ForEntity, Changed<T>]` method passes its filter this way. See the [API](/en/docs/api#queries).
 - `[ForEach, Consume]` destroys exactly the rows a pass visited when it ends, for event and command entities handled
   once: in bulk (a `DestroyAll` of the method's filter) after a method without structural changes, row by row after
   one that may make them. Analyzer rule [EECS084](/en/docs/guide/analyzer#eecs084) (suggestion, with a code fix)
@@ -184,7 +188,10 @@ major or minor version that needs code changes? The
 - Declaration attributes: what a component or singleton is, written once on its type, and the generator writes the
   rest ([decision](/en/docs/decisions#d101-declaration-attributes)). `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]` and
   `[Any]` on the fields of a partial struct declare a reduction: the generator writes its `Identity` and `Combine`
-  (see [reductions](/en/docs/guide/threading#reductions)). `[IndexKey]` or `[UniqueKey]` on a member (or `[IndexKey]` on
+  (see [reductions](/en/docs/guide/threading#reductions)). A reduction of `[Sum]`, `[Min]` and `[Max]` fields gets a
+  vector loop under the same rules as a hand-written `Combine` (a float sum needs `FloatMode.Fast`); a `[Product]`,
+  `[All]` or `[Any]` field keeps the method row by row, and [EECS055](/en/docs/guide/analyzer#eecs055) names it (see
+  [vector loops](/en/docs/guide/systems#vector-loops)). `[IndexKey]` or `[UniqueKey]` on a member (or `[IndexKey]` on
   the type, for the value itself) and `[Group]` on an `int` or enum member declare an index key or a group, as an
   explicit `Key` or `Group` that `ToString()` does not print:
   `public partial record struct Account([UniqueKey] int Id) : IComponent;` (see
@@ -218,6 +225,21 @@ major or minor version that needs code changes? The
   `CollectIds` does. See the [API reference](/en/docs/api#queries).
 
 ### Performance [#v4-8-0-performance]
+
+- A generated pass without a filter attribute passes an empty `static readonly` filter by reference, so a system's
+  update no longer zeroes a 192-byte filter on every call (twice with `MeasureSystems`).
+- A `Mut<T>` of a run of rows refers to the change-tick column its job looks up once per run (`MutColumn`): a write
+  stamps its row with no lookup of the world's tick, the column or its arrays. See
+  [change tracking](/en/docs/guide/change-tracking).
+- The entry point of a `[ForEntity, Changed<T>]` method runs its static filter with the tick beside it instead of a
+  copy of the filter per call.
+- A tile job keeps the neighbors it finds in a field of the job: no 216-byte local cleared on every row before
+  `TileNeighbors.Of` clears it again. See [grids](/en/docs/guide/grids#generated).
+- A vector loop loads only the columns it reads or stores: a component taken only to select rows costs no load. See
+  [vector loops](/en/docs/guide/systems#vector-loops).
+- A `[ForEach]` method with a `Scratch<T>` that loops or calls runs out of line through a generated wrapper that is
+  never inlined, an ordinary method the JIT optimizes with its profile, instead of through the `[UnsafeAccessor]`
+  itself.
 
 - A pass of a generated `[ForEach]` job finds its query by the job's type instead of comparing filters: the filter of
   a generated method is a constant, so the world keeps the match per job type. A hand-written job opts in with
@@ -278,6 +300,9 @@ major or minor version that needs code changes? The
   fix on CS0246 rewrites a class system ([migration guide](/en/docs/migration#v4-8-systems)).
 - `EcsSystem.UpdateInterval` and `UpdatePhase` are removed: declare `[UpdateInterval(n, Phase = p)]` on the system;
   EECS018 is gone ([migration guide](/en/docs/migration#v4-8-update-interval)).
+- The `Mut<T>` constructor for a row of a batch job takes the run's change-tick column instead of the run:
+  `var column = MutColumn.Of<T>(in entities);` once per run, then `new Mut<T>(ref value, in column, index)` in place
+  of `new Mut<T>(ref value, in entities, index)`. Only code that builds a `Mut<T>` by hand sees it ([migration guide](/en/docs/migration#v4-8-mut-column)).
 
 ### Fixes [#v4-8-0-fixes]
 

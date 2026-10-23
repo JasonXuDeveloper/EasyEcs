@@ -243,7 +243,8 @@ world.ForEachBatch<Position, Velocity, Drift>(ref drift, Filters.Active);
 一次只处理一个实体的代码（一个请求、发给 actor 的一条消息、客户端的一个命令）写成标了 `[ForEntity]` 的静态方法，就像只在一个实体上运行的
 `[ForEach]` 方法。生成器写出 job，并在方法旁边写一个同名入口，接收实体和方法的其他值，返回方法有没有运行。它拿到的 ref 和遍历时一行拿到的一样：
 所有组件只查一次表，不用每个 `Get` 查一次。`ref` 组件算作写入并打 tick，`in` 组件只读，过滤特性（`[Without<Dead>]`）像遍历的过滤条件跳过行那样
-拒绝实体；带 `[Changed<T>]` 的方法，入口的第二个参数是往回看的起始 tick。方法保持 private：入口用的是它的名字。
+拒绝实体；带 `[Changed<T>]` 的方法，入口的第二个参数是往回看的起始 tick，入口把它和方法的静态过滤条件一起传下去
+（`entity.Run(ref job, in filter, since)`），每次调用都不拷贝过滤条件。方法保持 private：入口用的是它的名字。
 
 <Tabs items={['你写的', '生成器写的']}>
 <Tab value="你写的">

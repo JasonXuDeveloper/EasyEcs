@@ -694,7 +694,7 @@ public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2)
         var __u5 = new Vector<float>(0.125f);
         for (nint last = rows - Vector<float>.Count; i <= last; i += Vector<float>.Count)
         {
-            // 2. Loads: one vector of rows from each column
+            // 2. Loads: one vector of rows from each column the loop reads or stores
             var __c1 = Vector.LoadUnsafe(ref e1, (nuint)i);           // heat
             var __c2 = Vector.LoadUnsafe(ref e2, (nuint)i);           // speed
             // 3. The body, lane by lane, in the order you wrote it
@@ -788,10 +788,9 @@ A method gets a vector loop when all of this holds; otherwise it runs row by row
   `Maybe<T>` / `ReadOnlyMaybe<T>` of a component is a lane mask of the rows that have it (on one thread).
 - **Totals:** a [`Reduce<T>`](/en/docs/guide/threading#reductions) keeps one accumulator per lane, folded into the
   run's partial result in lane order after the loop, when each field of `T` is a lane of the method's size and
-  `T.Combine` sets it to the sum, `Min` or `Max` of both sides' field. A float sum needs `FloatMode.Fast`
-  ([below](#float-mode)). The generator reads `Combine` in your source: a reduction declared with `[Sum]` / `[Min]` /
-  `[Max]` gets its `Combine` from another generator, which it does not see, so that method runs row by row
-  (`SystemInfo.Loops` says why).
+  combines by a sum, a `Min` or a `Max`: declared with `[Sum]` / `[Min]` / `[Max]`, or a hand-written `T.Combine` that
+  sets it to the sum, `Min` or `Max` of both sides' field. A float sum needs `FloatMode.Fast` ([below](#float-mode)).
+  A field declared `[Product]`, `[All]` or `[Any]` keeps the method row by row, and EECS055 names it.
 - **The components:** 1 to 4 lanes of one size: fields (or auto-properties) of `float`, `double`, `int`, `uint`,
   `long`, `ulong`, `byte`, `sbyte`, `short` or `ushort`, or of structs of them (`Vector2`, `Vector3`, `Vector4`,
   System.Numerics and Godot), declared in one part. `ref` and `in` both work; a whole component may be assigned

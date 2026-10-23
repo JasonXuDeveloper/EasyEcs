@@ -43,8 +43,9 @@ Native AOT 下发布时加上 `<IlcInstructionSet>native</IlcInstructionSet>`（
 - **数据：** `byte` 和 `short` lane（每个 `Vector512` 64 行和 32 行）、`Vector2` / `Vector3` / `Vector4` 字段、作为拥有 `T` 的行的
   lane 掩码的 `Maybe<T>`，以及在 AVX-512 上最多 16 个字、方法只用其中若干 4 字节字段的组件（置换代价超过运算时，EECS055 会说出该拆出
   哪些字段）。
-- **合计：** `Combine` 对每个字段求和、取 `Min` 或 `Max` 的 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 每个 lane 一个累加器，
-  按 lane 顺序合并；浮点求和只在 `FloatMode.Fast` 下。
+- **合计：** 字段按求和、`Min` 或 `Max` 合并的 [`Reduce<T>`](/zh/docs/guide/threading#reductions)（`[Sum]`、`[Min]`、`[Max]`，
+  或手写的 `Combine`）每个 lane 一个累加器，按 lane 顺序合并；浮点求和只在 `FloatMode.Fast` 下。
+- **加载：** 循环只加载它读或存的列，只用来筛选行的组件不产生加载。
 - **不进循环的：** `Scratch<T>`、`Lookup<T>`、`Emit<T>` 和 `Tile` 参数让方法逐行运行，这对它们正合适：每行一次查找或追加没有向量写法。
 - **系统得到了什么：** `world.DescribeSchedule()` 每个方法打印一行（`SystemInfo.Loops`）：循环、它的形状，或者保持标量的原因。
 - **为什么没有：** [EECS055](/zh/docs/guide/analyzer#eecs055) 像 Burst 的 Inspector 一样说出方法保持标量的第一个原因；热路径上的

@@ -89,7 +89,7 @@ EECS076（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS058](#eecs058) | 错误 | `Scratch<T>` 持有的东西不存进 World | |
 | [EECS059](#eecs059) | 错误 | `Lookup<T>` 读的组件这一遍不写 | |
 | [EECS060](#eecs060) | 警告 | 多线程上运行的代码不写共享内存 | |
-| [EECS061](#eecs061) | 警告 | 遍历之后不读并行 job 的字段 | `ForEach` / `ForEachEntity` |
+| [EECS061](#eecs061) | 警告 | 遍历之后不读并行 job 的字段 | `ForEach` / `ForEachEntity` / `ForEachBatch` |
 | [EECS062](#eecs062) | 错误 | 有生成成员的类型是 partial | 改成 partial |
 | [EECS063](#eecs063) | 错误 | 用特性声明的归约不手写 `Identity` 或 `Combine` | |
 | [EECS064](#eecs064) | 错误 | 归约特性合并每一个字段 | |
@@ -1867,7 +1867,7 @@ public ref struct MoveFlock
 
 **在多个线程上运行的代码写共享内存。** 警告。没有代码修复。
 
-`[ForEach(Parallel = true)]` 方法，以及由 `ForEachParallel`、`ForEachEntityParallel` 或 `world.ForParallel` 运行的 job 的 `Execute`，会同时在多个线程上跑，
+`[ForEach(Parallel = true)]` 方法，以及由 `ForEachParallel`、`ForEachEntityParallel`、`ForEachBatchParallel` 或 `world.ForParallel` 运行的 job 的 `Execute`，会同时在多个线程上跑，
 每个线程一块行。静态字段或自动属性、上下文参数引用的对象、job 字段持有的对象（每一块的 job 副本共享它），对所有线程都是同一块内存：
 自增会丢更新，列表的 `Add` 会把列表写坏，普通写入最后留下哪个取决于时机。规则不报：每个线程都写同一个常量、`[ThreadStatic]` 字段、
 并发集合、`Interlocked` 和 `Volatile` 调用、`lock` 里的写入、数组和列表的元素（不同的行可以各占不同的元素）以及局部变量。
@@ -1914,11 +1914,12 @@ public ref struct TakeHits
 ## EECS061 [#eecs061]
 
 **并行 job 的字段在遍历之后被读取。** 警告。代码修复：在调用没有传 `chunkRows` 时，改成在一个线程上运行这个 job（`ForEach` /
-`ForEachEntity`）；`ForParallel` 没有对应的单线程调用，不提供修复。
+`ForEachEntity` / `ForEachBatch`）；`ForParallel` 没有对应的单线程调用，不提供修复。
 
-`ForEachParallel`、`ForEachEntityParallel` 和 `world.ForParallel` 给每一块运行一个 job 副本，什么都不合并回来：按 `ref` 传入的 job 保持调用之前的值。
+`ForEachParallel`、`ForEachEntityParallel`、`ForEachBatchParallel` 和 `world.ForParallel` 给每一块运行一个 job 副本，什么都不合并回来：按 `ref` 传入的 job 保持调用之前的值。
 `Execute` 写的字段（总和、计数、标记），调用方之后再读，读到的还是旧值。调用之后对这个 job 的第一次使用是读这样的字段时，规则报告这次调用。
-会把各块副本合并回来的 job（带 `Reduce<T>` 参数的方法生成的 job）不报。
+会把各块副本合并回来的 job 不报：job 自己实现了 `Merges`，隐式或显式都算（带 `Reduce<T>` 参数的方法生成的 job 就是这样）。
+接口默认的 `Merges` 什么都不合并，只继承它的 job 照样报告。
 
 ```csharp tab="报告" doccheck=expect-EECS061
 public struct TotalHealth : IForEach<Health>, INoStructuralChanges
@@ -2723,7 +2724,7 @@ public ref struct Flutter
 
 单例持有的列表、通过 `ref` 参数填充，就是每一行都在写的同一个列表。方法不能并行，列表也随着记录进来不断翻倍扩容。
 [`Emit<T>`](/zh/docs/reference/emit) 参数给每一块行一个池化的列表，遍历结束时按块的顺序把这些列表追加到 `Emitted<T>`。
-记录还是那些记录、顺序还是行的顺序，单线程和多线程都一样。遍历之后的系统读取 `Emitted<T>` 并清空它（[EECS070](#eecs070)）。
+记录还是那些记录、顺序还是行的顺序，单线程和多线程都一样。遍历之后的系统读取 `world.GetSingleton<Emitted<T>>().Items` 并清空它（[EECS070](#eecs070)）。
 
 ```csharp tab="报告" doccheck=alone,expect-EECS089
 public record struct Shot(EntityId From, float Power);

@@ -90,9 +90,10 @@ icon: RotateCcwClock
 - `world.ForParallel(count, ref job)` 对一段下标运行 `IForRange` job，`world.ForParallel(ref buffer, ref job)` 对一个列表的元素
   （`Emitted<T>` 的记录）运行 `IForSpan<T>` job，都在 World 的运行器上、用它的块；EECS060 和 EECS061 也检查这些 job。
   见[决策](/zh/docs/decisions#d80-for-parallel)。
-- 分析器规则 [EECS060](/zh/docs/guide/analyzer#eecs060)（警告）：并行 `[ForEach]` 方法或 `ForEachParallel` 运行的 job 的 `Execute` 写了所有线程
-  共享的内存（静态字段、上下文参数或 job 字段引用的对象），这些写入会竞争。规则 [EECS061](/zh/docs/guide/analyzer#eecs061)（警告，有代码修复）：
-  `ForEachParallel` 之后读并行 job 的字段，而它给每块跑一个副本、什么都不合并回来；修复改为在一个线程上运行这个 job。
+- 分析器规则 [EECS060](/zh/docs/guide/analyzer#eecs060)（警告）：并行 `[ForEach]` 方法，或 `ForEachParallel`、`ForEachEntityParallel`、
+  `ForEachBatchParallel` 运行的 job 的 `Execute` 写了所有线程共享的内存（静态字段、上下文参数或 job 字段引用的对象），这些写入会竞争。
+  规则 [EECS061](/zh/docs/guide/analyzer#eecs061)（警告，有代码修复）：并行调用之后读 job 的字段，而它给每块跑一个副本、什么都不合并回来
+  （自己实现了 `Merges` 的 job 不报）；修复改为在一个线程上运行这个 job（`ForEach`、`ForEachEntity`、`ForEachBatch`）。
 - `IDirectIndexed<TKey>`：键能映射到一段有界槽位上的唯一组件（网格格子、玩家周围的区块、小 id）声明 `static int Slots` 和
   `static int SlotOf(TKey key)`；它的索引在哈希旁边多存一个槽位数组，`Get`、`TryGet` 和写入的唯一性检查都只读一个数组元素。超出范围或
   槽位被占的键通过哈希找到，`Find`、`Count` 和有序遍历仍由哈希负责。见[直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index)和
@@ -114,6 +115,9 @@ icon: RotateCcwClock
   再写一个和方法同名的入口，接收实体和方法的其他值，返回方法有没有运行（`Requests.TakeHit(unit, damage)`）。分析器规则
   [EECS080](/zh/docs/guide/analyzer#eecs080)（建议，带代码修复）找出手写的单实体 job，连同调用一起改写；
   [EECS081](/zh/docs/guide/analyzer#eecs081) 拒绝无法在单个实体上运行的方法。见[查询](/zh/docs/guide/queries#run-on-one-entity)。
+- `entity.Run<T1..Tn, TJob>(ref job, in filter, since)` 以 `since` 作过滤条件的 tick 运行 job：和 `filter.Since(since)` 的检查一样，
+  但不拷贝过滤条件，一个 `static readonly` 过滤条件就能服务所有调用。`[ForEntity, Changed<T>]` 方法的入口就这样传过滤条件。
+  见 [API](/zh/docs/api#queries)。
 - `[ForEach, Consume]` 在遍历结束时恰好销毁这次访问过的行，用于只处理一次的事件和命令实体：方法不做结构变更时整批销毁（按方法的过滤条件做一次
   `DestroyAll`），可能做结构变更时逐行销毁。分析器规则 [EECS084](/zh/docs/guide/analyzer#eecs084)（建议，带代码修复）找出以
   `entity.Destroy()` 结尾的方法；[EECS085](/zh/docs/guide/analyzer#eecs085) 拒绝没有 `[ForEach]` 或带 `Slices` 的 `[Consume]`。
@@ -128,7 +132,9 @@ icon: RotateCcwClock
 
 - 声明特性：组件或单例是什么，在类型上写一次，其余由生成器写出（[决策](/zh/docs/decisions#d101-declaration-attributes)）。
   partial 结构体的字段标 `[Sum]`、`[Product]`、`[Min]`、`[Max]`、`[All]` 和 `[Any]` 就声明了一个归约：生成器写出它的 `Identity` 和
-  `Combine`（见[归约](/zh/docs/guide/threading#reductions)）。成员上标 `[IndexKey]` 或 `[UniqueKey]`（值本身就是键时，`[IndexKey]`
+  `Combine`（见[归约](/zh/docs/guide/threading#reductions)）。字段都是 `[Sum]`、`[Min]`、`[Max]` 的归约，按和手写 `Combine` 相同的规则得到向量循环
+  （浮点求和要 `FloatMode.Fast`）；`[Product]`、`[All]` 或 `[Any]` 字段让方法逐行运行，[EECS055](/zh/docs/guide/analyzer#eecs055) 会指出是哪个字段
+  （见[向量循环](/zh/docs/guide/systems#vector-loops)）。成员上标 `[IndexKey]` 或 `[UniqueKey]`（值本身就是键时，`[IndexKey]`
   标在类型上），`int` 或枚举成员上标 `[Group]`，就声明了索引键或分组，生成的是 `ToString()` 不会打印的显式 `Key` 或 `Group`：
   `public partial record struct Account([UniqueKey] int Id) : IComponent;`（见[索引](/zh/docs/guide/indexes-and-relations)和
   [分组](/zh/docs/guide/groups)）。`[GroupBy]`、`[WhenTargetDestroyed(policy)]` 和 `[NotSaved]` 在类型上声明 World 的设置，
@@ -151,6 +157,17 @@ icon: RotateCcwClock
   紧挨着写出（有 AVX-512 时用 compress 指令），供挑选行的批处理方法使用，`CollectIds` 就是这样做的。见 [API 参考](/zh/docs/api#queries)。
 
 ### 性能 [#v4-8-0-performance]
+
+- 没有过滤特性的生成遍历按引用传一个空的 `static readonly` 过滤条件，系统每次更新不再为每次调用清零一个 192 字节的过滤条件
+  （开着 `MeasureSystems` 时是两次）。
+- 一段行的 `Mut<T>` 引用 job 每段行只查一次的变更 tick 列（`MutColumn`）：写入时直接给它那一行打 tick，不再查 World 的 tick、列和列的数组。
+  见[变更追踪](/zh/docs/guide/change-tracking)。
+- `[ForEntity, Changed<T>]` 方法的入口把 tick 和它的静态过滤条件一起传下去，不再每次调用拷贝一份过滤条件。
+- 瓦片 job 把找到的邻居放在 job 的字段里：不再每行先清零一个 216 字节的局部变量、再由 `TileNeighbors.Of` 清零一次。
+  见[网格](/zh/docs/guide/grids#generated)。
+- 向量循环只加载它读或存的列：只用来筛选行的组件不产生加载。见[向量循环](/zh/docs/guide/systems#vector-loops)。
+- 带 `Scratch<T>`、方法体里有循环或调用的 `[ForEach]` 方法，经由一个从不内联的生成包装方法在行外运行：它是普通方法，JIT 会按 profile
+  优化它，不再直接经由 `[UnsafeAccessor]` 调用。
 
 - 生成的 `[ForEach]` job 的遍历按 job 类型找到它的查询，不再比较过滤条件：生成方法的过滤条件是常量，所以 World 按 job 类型保存匹配结果。
   手写的 job 写 `static bool OneQuery => true` 也能用上（[决策](/zh/docs/decisions#d104-one-query-per-job-type)）。
@@ -193,6 +210,10 @@ icon: RotateCcwClock
   EECS029 和 EECS082 随它们报告的写法一起删掉了。CS0246 上的一个代码修复会改写类系统（[迁移指南](/zh/docs/migration#v4-8-systems)）。
 - `EcsSystem.UpdateInterval` 和 `UpdatePhase` 删掉了：在系统上声明 `[UpdateInterval(n, Phase = p)]`；EECS018 删掉了
   （[迁移指南](/zh/docs/migration#v4-8-update-interval)）。
+- 批处理 job 里一行的 `Mut<T>` 构造函数改为接收这段行的变更 tick 列，而不是这段行本身：用
+  每段行一次 `var column = MutColumn.Of<T>(in entities);`，再用 `new Mut<T>(ref value, in column, index)` 代替
+  `new Mut<T>(ref value, in entities, index)`。
+  只有手写构造 `Mut<T>` 的代码受影响（[迁移指南](/zh/docs/migration#v4-8-mut-column)）。
 
 ### 修复 [#v4-8-0-fixes]
 

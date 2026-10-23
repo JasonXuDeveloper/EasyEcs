@@ -107,10 +107,11 @@ available as Markdown: add `.md` to its URL.
   owner thread acts on that data. A few hundred heavy rows (microseconds each) set `ChunkRows = 64` so threads take 64
   rows at a time (EECS054: only with `Parallel = true`); light rows keep the default. Threads claim chunks from one
   shared counter, like OpenMP's `schedule(dynamic, n)`: never assume an order between chunks.
-- Code that runs on several threads (a parallel `[ForEach]` method, the `Execute` of a job run by `ForEachParallel`)
-  never writes shared state: no static field, no object a context parameter or a job field refers to (EECS060). A
-  parallel job's fields are not merged back: each chunk runs a copy, so never read a field after `ForEachParallel`
-  (EECS061). A total over the rows (a count, a sum, a min / max, a bounding box) is a `ref Reduce<T>` parameter (always `ref`:
+- Code that runs on several threads (a parallel `[ForEach]` method, the `Execute` of a job run by `ForEachParallel`,
+  `ForEachEntityParallel`, `ForEachBatchParallel` or `ForParallel`) never writes shared state: no static field, no
+  object a context parameter or a job field refers to (EECS060). A parallel job's fields are not merged back unless
+  the job implements `Merges` itself: each chunk runs a copy, so never read a field after the parallel call; run it
+  with `ForEach` / `ForEachEntity` / `ForEachBatch` instead (EECS061). A total over the rows (a count, a sum, a min / max, a bounding box) is a `ref Reduce<T>` parameter (always `ref`:
   without it, EECS002), with `T` a singleton implementing `IReduction<T>`: declare it with field attributes on a
   partial struct (`[Sum] public int Alive; [Min] public float Low;`, also `[Product]`, `[Max]`, `[All]`, `[Any]`), and
   the generator writes `Identity` and `Combine`. Every field gets one attribute (EECS064), the struct and its outer
@@ -155,9 +156,9 @@ available as Markdown: add `.md` to its URL.
   lane component is a mask of the rows that have it (on one thread only). An `if` becomes a mask; a branch the loop
   cannot express (a call, a loop, logging) is cold, and the vectors where a lane takes it run the method. Do not mix
   lane sizes (`float` with `double`, `int` with `byte`; `float` with `int` is fine), and keep `bool` fields out of hot
-  components. A `Reduce<T>` keeps lane accumulators when its hand-written `Combine` sums, `Min`s or `Max`es each field
-  (one declared with `[Sum]` / `[Min]` / `[Max]` stays scalar: the vector generator does not see the generated
-  `Combine`). Results are bit for bit the method's
+  components. A `Reduce<T>` keeps lane accumulators when each field is declared `[Sum]` / `[Min]` / `[Max]` (or a
+  hand-written `Combine` sums, `Min`s or `Max`es each field); `[Product]` / `[All]` / `[Any]` stay scalar (EECS055
+  names the field). Results are bit for bit the method's
   (`FloatMode.Exact`, the default); `[ForEach(FloatMode = FloatMode.Fast)]` lets `MathF.Sin` / `Cos` / `Exp` / `Log`
   / `Log2` / `Hypot` and a float `Reduce<T>` sum vectorize, with results that are not bit for bit the method's (nor the
   same across vector widths): keep `Exact` where results must match on every machine. EECS055 (a suggestion) names

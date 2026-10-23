@@ -262,7 +262,9 @@ job and an entry point next to the method, named like it, that takes the entity 
 returns whether it ran. It gets the refs a pass gives a row: one table lookup for all its components instead of one
 per `Get`. Its `ref` components are the ones stamped as written, `in` ones are read, and filter attributes
 (`[Without<Dead>]`) refuse an entity the way a pass's filter skips a row; a method with `[Changed<T>]` takes the tick
-to look back from as its second argument. Keep the method private: the entry point has its name.
+to look back from as its second argument, and the entry point passes it beside the method's static filter
+(`entity.Run(ref job, in filter, since)`), so no filter is copied per call. Keep the method private: the entry point
+has its name.
 
 <Tabs items={['You write', 'The generator writes']}>
 <Tab value="You write">

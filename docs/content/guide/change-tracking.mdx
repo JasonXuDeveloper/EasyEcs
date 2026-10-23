@@ -588,8 +588,8 @@ rows touch most 64-row words, and then the saving is mostly the method calls tha
 - **Each pass** skips a table nobody wrote with one load, then unwritten 4,096-row blocks and 64-row words (four per
   SIMD compare), and takes the written rows of a word from its summary.
 - **A removal** costs the same as a write: one tick and its word's summary.
-- **A `Mut<T>` write** stamps its row: directly in a method that changes no structure on one thread, after one
-  record lookup in a method that changes structure or runs in parallel (the entity may have moved); `Value` and an
+- **A `Mut<T>` write** stamps its row: directly in a method that changes no structure on one thread (through the
+  change-tick column the job looks up once per run of rows), after one record lookup in a method that changes structure or runs in parallel (the entity may have moved); `Value` and an
   unchanged `SetIfChanged` stamp nothing, and `SetIfChanged` compares the values, O(size of `T`).
 - **A `ChangedAny` / `RemovedAny` set** skips a table none of whose columns was written since the tick, then
   words and blocks like a `Changed` filter.

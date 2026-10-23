@@ -50,8 +50,11 @@ default baseline has no `Vector512` ([FAQ](/en/docs/faq#native-aot)).
 - **The data:** `byte` and `short` lanes (64 and 32 rows per `Vector512`), fields of `Vector2` / `Vector3` / `Vector4`,
   a `Maybe<T>` as the lane mask of the rows that have `T`, and on AVX-512 a component of up to 16 words of which the
   method uses some 4-byte fields (EECS055 names the fields to split out when the permutes cost more than the work).
-- **Totals:** a [`Reduce<T>`](/en/docs/guide/threading#reductions) whose `Combine` is a sum, `Min` or `Max` per field
-  keeps one accumulator per lane, folded in lane order; a float sum only under `FloatMode.Fast`.
+- **Totals:** a [`Reduce<T>`](/en/docs/guide/threading#reductions) whose fields combine by a sum, `Min` or `Max`
+  (`[Sum]`, `[Min]`, `[Max]`, or a hand-written `Combine`) keeps one accumulator per lane, folded in lane order; a
+  float sum only under `FloatMode.Fast`.
+- **The loads:** the loop loads only the columns it reads or stores, so a component taken only to select rows costs
+  no load.
 - **Not in the loop:** `Scratch<T>`, `Lookup<T>`, `Emit<T>` and `Tile` parameters keep a method row by row, which is
   right for them: a lookup or an append per row has no vector form.
 - **What a system got:** `world.DescribeSchedule()` prints one line per method (`SystemInfo.Loops`): the loop, its
