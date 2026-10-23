@@ -1980,6 +1980,11 @@ reports a shape a tile cannot hold, EECS073 two tiles of one cell type in one me
   at 1 thread (60–66, 46–48 and 2.8–2.9 µs at 4). Not built: in a stencil pass the search is about a fifth of the
   cost, and a cache needs per-entity state outside the tables and an invalidation on every create, destroy and key
   change; a key that implements `IDirectIndexed<TKey>` makes each search an array read without one.
+- **The neighbour search unrolled for every neighbourhood (each of the 26 slots a constant):** tried and dropped.
+  `TileNeighbourBenchmark` at 1 thread, two rounds against three of the loop over the slots: searching the index
+  148–154 µs against 166–173 µs, but a direct-mapped key 127 µs against 117–123 µs (the unrolled body outgrows what an
+  array read per neighbour pays for); the 9-point blur and the Laplacian with a tile within noise (708–753 against
+  726–749 µs, 713–737 against 739–766 µs). The faces neighbourhood keeps its unrolled search.
 - **A generated per-cell kernel (the user writes `Next(center, north, south, ...)`, the generator the loop):** not
   built. C# arithmetic on `byte` promotes to `int`, so a scalar body does not map onto byte lanes; the vector loops
   of the generator target `Vector<T>` (32 bytes on AVX2), not a 16-cell row; and the water reduces per row (wet
