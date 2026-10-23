@@ -44,10 +44,16 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   EntitySpan.cs                the entities of a batch job's run of rows (lazy handles over the run's EntitySlots; its
                                table and first row, through which a Mut<T> of the run stamps its row)
   EntityDebugView.cs           what a debugger shows for an entity (Entity.Describe)
-  EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy, RunCount (completed runs: the slice of a sliced method),
-                               [UpdateInterval(n, Phase = p)] (the cadence, read from the generated code);
-                               SystemCode.cs: the generated jobs, access and cadence of a system type, registered by a
-                               module initializer (systems need no partial)
+  EcsSystem.cs                 [EcsSystem] (a system: a ref struct of static members, never instantiated), the hooks
+                               [OnCreate] / [OnUpdate] / [OnDestroy] (static methods taking the World, the SystemHandle,
+                               both or neither), [UpdateInterval(n, Phase = p)] (the cadence, read from the generated code);
+                               SystemHandle.cs: what world.AddSystem<T>() / System<T>() / TryGetSystem<T>() / Systems
+                               hand out (Enabled, Error, RunCount: completed runs, the slice of a sliced method;
+                               LastRunTick, Stats, Type, World), a (world, slot, version) that throws once its system
+                               is removed; SystemCode.cs: ISystemCode (a system's generated Update / Create / Destroy,
+                               access and cadence) and ISystemSet (one generated __EasyEcsSystems per assembly: the
+                               switch over its systems' codes, registered by a module initializer, weakly held for
+                               collectible assemblies), the registry World.AddSystem<T> resolves a type through
   ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkRows, SimdMode), [With<T>], [Without<T>], [WithAny<T>], [Changed<T>],
                                [Removed<T>] ([ChangedAny<..>] / [RemovedAny<..>] are generated: Filters.g.cs),
                                [Consume] (the visited rows destroyed after the pass), [ForEntity] (a static method run
@@ -168,17 +174,27 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                write; Slices -> the slice of the run; ChunkRows -> the chunkRows argument; [Consume] -> DestroyAll of
                                the filter after a pass without structural changes, a destroy per row otherwise;
                                [ForEntity] -> the IForEachEntity job and an entry point Owner.Method(entity, values)
-                               over entity.Run; [UpdateInterval] -> the Code's constructor), registered as SystemCode
+                               over entity.Run; [EcsSystem] -> the code struct __X_SystemCode (hooks, then the
+                               methods in declaration order; [UpdateInterval] -> its Interval / Phase), and per
+                               assembly the set __EasyEcsSystems: one Add per system and per closed generic system any
+                               API names (AddSystem<G<P>>, [UpdateAfter<G<P>>], ...), a switch per hook; no system
+                               needs partial, its methods are reached through UnsafeAccessor)
   ComponentGenerator.cs        C# 14 extension members per component / singleton: entity.X (ref T; ref readonly for
                                tracked or indexed), HasX, TryGetX, GetOrAddX, SetX(ctor args), SetXIfChanged, RemoveX,
                                tags IsX,
                                world.XIndex, singletons world.X / HasX / GetOrAddX / SetX / RemoveX, query items
                                item.X per Query<T1..Tn> shape the code calls, TypeRegistry registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                                lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
-  EasyEcsAnalyzer.cs           EECS002-024, EECS035-036, EECS054, EECS056, EECS070 and EECS072-073 (the declaration and
-                               [ForEach] rules of the range EECS002-089 that are not performance rules; generators never
-                               report diagnostics)
-  EasyEcsAnalyzer.Performance.cs  EECS025-034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the check of EECS056):
+  EasyEcsAnalyzer.cs           EECS002-006, EECS009-024, EECS035-036, EECS054, EECS056, EECS070 and EECS072-073 (the
+                               declaration and [ForEach] rules of the range EECS002-089 that are not performance rules;
+                               generators never report diagnostics)
+  EasyEcsAnalyzer.Systems.cs   EECS007-008 and EECS074-077: systems as declarations (state in a static field, a reach
+                               into another system; an [EcsSystem] that is no ref struct, an instance member, a hook
+                               no signature fits, a system API given a type that is no [EcsSystem])
+  UnusedSuppressor.cs          suppresses IDE0051 / IDE0052 on [ForEach], [ForEntity] and hook methods (called through
+                               UnsafeAccessor; Rider reads their [MeansImplicitUse])
+  EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the
+                               check of EECS056):
                                code that works but costs (write access that
                                only reads, unused or per-row lookups in [ForEach] methods and jobs, allocations per
                                update, per-entity structural changes and counting over queries, creation loops, the
@@ -212,8 +228,7 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                formatter (Warning when the code saves what holds it: entity saves write no singletons)
   EasyEcsAnalyzer.Forms.cs     EECS080-085: what the generator declares for code written by hand (a one-entity job
                                [ForEntity] writes, a [ForEach] method that destroys every entity it visits: [Consume])
-                               and those attributes (and [UpdateInterval], an override of the removed schedule
-                               properties) where they cannot apply
+                               and those attributes (and [UpdateInterval]) where they cannot apply (EECS082 is retired)
   EasyEcsAnalyzer.Parameters.cs  EECS086, EECS087, EECS089: a [ForEach] method doing by hand what a parameter does per
                                chunk (a singleton reset by system code and accumulated row by row: Reduce<T>, reported
                                at the end of the compilation; other entities read through the World: Lookup<T>; records
@@ -227,7 +242,9 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
   Polyfills.cs                 IsExternalInit for netstandard2.0 (records); do not delete
 src/EasyEcs.CodeFixes/         EasyEcsCodeFixes.cs: fixes for the analyzer's diagnostics (bundled in the package);
                                EasyEcsCodeFixes.Forms.cs: EECS080 (a job and its calls to [ForEntity], solution-wide),
-                               EECS082 ([UpdateInterval]), EECS084 ([Consume])
+                               EECS084 ([Consume]); EasyEcsCodeFixes.Systems.cs: EECS074 (a ref struct), EECS075
+                               (static), and the migration of a class deriving from the removed EcsSystem (the
+                               compiler's CS0246) into an [EcsSystem] ref struct
 tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, Presence, Query, System (and stats),
                                ForEachSystem (and Slices), Singleton, Concurrency, Parallel, Runner, Run (entity.Run),
                                ForEntity, Consume, Form (EECS080 / EECS084),
@@ -250,7 +267,8 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                Roslyn), Group, Hierarchy, Histogram (keyed reductions), Index (+ unique keys), Introspection (+ Schedule),
                                Maybe, Migration, OrderedIndex, Ordering, ParallelForEach, ParallelSystems (Measure),
                                Prefab, Relation, Runner, SingleEntity, Slices, Snapshot (+ SaveWithout / LoadKeeping),
-                               Sparse, Trim, Unload) + MicroBenchmarks.
+                               Sparse, SystemDispatch (what a system costs per update apart from its rows), Trim,
+                               Unload) + MicroBenchmarks.
                                Always measure with BenchmarkDotNet.
 benchmarks/EasyEcs.Benchmark.Plugin/  a collectible plugin (Scoring.cs) the Unload benchmark loads and unloads
 benchmarks/EasyEcs.Comparison/ BenchmarkDotNet against Arch, Friflo.Engine.ECS and DefaultEcs, every result checked in
