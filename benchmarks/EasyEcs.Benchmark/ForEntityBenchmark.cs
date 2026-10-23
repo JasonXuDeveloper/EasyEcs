@@ -6,8 +6,8 @@ namespace EasyEcs.Benchmark;
 /// Requests on one entity at a time: 1,000 calls, each on another of 10,000 units (a tenth of them dead), applying a
 /// hit to <c>Health</c> (tracked) and counting it in <c>Hits</c>, refused for a dead unit. <c>Handwritten</c> is the
 /// struct job and <c>static readonly</c> filter a request handler writes for <c>entity.Run</c>; <c>ForEntity</c> is
-/// the same method declared with <c>[ForEntity, Without&lt;Dead&gt;]</c>, run through its generated entry point.
-/// 0 bytes either way.
+/// the same method declared with <c>[ForEntity, Without&lt;Dead&gt;]</c>, run through its generated entry point;
+/// <c>ForEntityChanged</c> adds <c>[Changed&lt;Health&gt;]</c> (every unit passes: tick 1). 0 bytes every way.
 /// </summary>
 [MemoryDiagnoser]
 public class ForEntityBenchmark
@@ -52,6 +52,16 @@ public class ForEntityBenchmark
         return done;
     }
 
+    /// <summary>The method with <c>[Changed&lt;Health&gt;]</c> too: its entry point takes the tick to look back from.</summary>
+    [Benchmark]
+    public int ForEntityChanged()
+    {
+        int done = 0;
+        for (int i = 0; i < Calls; i++)
+            if (UnitRequests.HitIfHit(_units[i * 7 % Count], 1, 1)) done++;
+        return done;
+    }
+
     private static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>();
 
     public record struct Health(int Value) : IComponent, ITracked;
@@ -74,6 +84,13 @@ public static class UnitRequests
 {
     [ForEntity, Without<ForEntityBenchmark.Dead>]
     static void Hit(ref ForEntityBenchmark.Health hp, ref ForEntityBenchmark.Hits hits, int damage)
+    {
+        hp.Value -= damage;
+        hits.Count++;
+    }
+
+    [ForEntity, Without<ForEntityBenchmark.Dead>, Changed<ForEntityBenchmark.Health>]
+    static void HitIfHit(ref ForEntityBenchmark.Health hp, ref ForEntityBenchmark.Hits hits, int damage)
     {
         hp.Value -= damage;
         hits.Count++;

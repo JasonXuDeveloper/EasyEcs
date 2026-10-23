@@ -1535,7 +1535,7 @@ public class GeneratorTests
         Assert.That(all, Does.Contain("systems.Add<global::G<global::P>, global::__G_1_SystemCode<global::P>>();"));
         Assert.That(all, Does.Contain("public static bool C(global::EasyEcs.Entity e, ulong since, int n)"));
         Assert.That(all, Does.Contain("if (e.World is not { } world) return false;"));
-        Assert.That(all, Does.Contain("return e.Run<global::P, __ForEach.CJob0>(ref job, __ForEach.CFilter0.Since(since));"));
+        Assert.That(all, Does.Contain("return e.Run<global::P, __ForEach.CJob0>(ref job, in __ForEach.CFilter0, since);"));
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, all);
     }
 

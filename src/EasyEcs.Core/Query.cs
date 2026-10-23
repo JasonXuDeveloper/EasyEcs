@@ -153,14 +153,15 @@ public readonly partial struct QueryFilter
     /// Whether row <paramref name="slot"/> of <paramref name="archetype"/> passes the filter, tested as a query tests a
     /// row (<c>entity.Run</c>): its <c>With</c> components present, its <c>Without</c> ones absent, one of its
     /// <c>WithAny</c> ones present, its <c>Changed</c> ones written and its <c>Removed</c> ones removed at or after
-    /// <see cref="Tick"/>, its group. O(components named). Filters without bits past 255 only (<see cref="HasOverflow"/>).
+    /// <paramref name="since"/> (the filter's <see cref="Tick"/>, or the tick an entry point is given: no copy of the
+    /// filter), its group. O(components named). Filters without bits past 255 only (<see cref="HasOverflow"/>).
     /// </summary>
-    internal bool Passes(Archetype archetype, int slot)
+    internal bool Passes(Archetype archetype, int slot, ulong since)
     {
         if (GroupBit != 0 && archetype.GroupOf(GroupBit - 1) != Group) return false;
         if (_all != Vector256<long>.Zero && !Each(_all, archetype, slot, true)) return false;
         if (_none != Vector256<long>.Zero && !Each(_none, archetype, slot, false)) return false;
-        if (((_tracked | _removals) != Vector256<long>.Zero || _anySets != 0) && !Ticked(archetype, slot)) return false;
+        if (((_tracked | _removals) != Vector256<long>.Zero || _anySets != 0) && !Ticked(archetype, slot, since)) return false;
         if (_any == Vector256<long>.Zero) return true;
         for (int w = 0; w < 4; w++)
             for (ulong bits = (ulong)_any.GetElement(w); bits != 0; bits &= bits - 1)
@@ -177,10 +178,10 @@ public readonly partial struct QueryFilter
         return true;
     }
 
-    /// <summary>The <c>Changed</c> components written, the <c>Removed</c> ones removed, at or after <see cref="Tick"/>.</summary>
-    private bool Ticked(Archetype archetype, int slot)
+    /// <summary>The <c>Changed</c> components written, the <c>Removed</c> ones removed, at or after <paramref name="tick"/>.</summary>
+    private bool Ticked(Archetype archetype, int slot, ulong tick)
     {
-        ulong since = Math.Max(Tick, 1); // tick 0: never written nor removed (see RowFilter)
+        ulong since = Math.Max(tick, 1); // tick 0: never written nor removed (see RowFilter)
         for (int w = 0; w < 4; w++)
         {
             int at = w << 6;

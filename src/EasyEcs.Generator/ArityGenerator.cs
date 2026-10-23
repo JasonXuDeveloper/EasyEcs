@@ -810,12 +810,25 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 public bool Run<{{tps}}, TJob>(ref TJob job, in QueryFilter filter)
             {{cons}}
                     where TJob : struct, IForEachEntity<{{tps}}>, allows ref struct
+                    => Run<{{tps}}, TJob>(ref job, in filter, filter.Tick);
+
+                /// <summary>
+                /// <see cref="Run{{{tps}}, TJob}(ref TJob, in QueryFilter)"/> with <paramref name="since"/> as the filter's
+                /// tick: its <c>Changed</c> components must have been written (its <c>Removed</c> ones removed) at or after
+                /// <paramref name="since"/>. The same test as <c>filter.Since(since)</c>, without the copy of the filter
+                /// (a static filter, as the entry point of a <c>[ForEntity, Changed&lt;T&gt;]</c> method passes it).
+                /// O(components the filter names).
+                /// </summary>
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                public bool Run<{{tps}}, TJob>(ref TJob job, in QueryFilter filter, ulong since)
+            {{cons}}
+                    where TJob : struct, IForEachEntity<{{tps}}>, allows ref struct
                 {
                     filter.Whole();
                     var archetype = LocateArchetype(out int slot, false);
                     if (archetype == null) return false;
                     // The filter first: it rules out an entity (a dead one) before any column is looked up.
-                    if (filter.HasOverflow ? !World.RowPasses(_world.Match<{{tps}}>(in filter, {{List(n, i => "out _")}}), archetype, slot, filter.Tick) : !filter.Passes(archetype, slot))
+                    if (filter.HasOverflow ? !World.RowPasses(_world.Match<{{tps}}>(in filter, {{List(n, i => "out _")}}), archetype, slot, since) : !filter.Passes(archetype, slot, since))
                         return false;
             {{refs}}
                     RunJob<{{tps}}, TJob>(ref job, archetype, slot, {{args}});

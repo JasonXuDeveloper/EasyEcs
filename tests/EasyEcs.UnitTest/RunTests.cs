@@ -99,6 +99,24 @@ public class RunTests
         Assert.That(e.Run<Health, Read>(ref job, fresh), Is.True);
     }
 
+    [Test]
+    public void ATickGivenBesideTheFilterReplacesItsTick()
+    {
+        // Run(ref job, in filter, since) tests what Run(ref job, filter.Since(since)) tests, without copying the filter.
+        using var world = new World();
+        var e = world.CreateEntity(new Health(1), new Armor(1));
+        world.Update();
+        var job = new Read();
+        var changed = QueryFilter.Create().Changed<Armor>(0);
+        ulong since = world.ChangeTick + 1;
+        Assert.That((e.Run<Health, Read>(ref job, in changed, since), e.Run<Health, Read>(ref job, changed.Since(since))), Is.EqualTo((false, false)));
+        Assert.That(e.Run<Health, Read>(ref job, in changed, 0), Is.True); // tick 0: every write since creation
+        world.Update();
+        e.Get<Armor>().Value++;
+        Assert.That((e.Run<Health, Read>(ref job, in changed, since), e.Run<Health, Read>(ref job, changed.Since(since))), Is.EqualTo((true, true)));
+        Assert.That(changed.Tick, Is.Zero); // the filter itself is unchanged
+    }
+
     // Runs a job on the entity it visits, from the threads of a parallel pass.
     private struct RunFromChunks : IForEachEntity<Health>, INoStructuralChanges
     {

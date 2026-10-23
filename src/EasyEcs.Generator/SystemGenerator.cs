@@ -213,7 +213,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
             string forEach = "__ForEach" + owner.TypeParameters, job = $"{forEach}.{method.Name}Job{m}{method.TypeParameters}";
             // A pass takes its filter field, even an empty one (NoFilter); entity.Run without a filter tests none.
-            string filter = method.Since ? $", {forEach}.{method.Name}Filter{m}.Since({since})" : method.HasFilter || !perEntity ? $", in {forEach}.{method.Name}Filter{m}" : "";
+            string filter = method.Since
+                ? perEntity ? $", in {forEach}.{method.Name}Filter{m}, {since}" : $", {forEach}.{method.Name}Filter{m}.Since({since})" // the static filter and the tick: no copy per call
+                : method.HasFilter || !perEntity ? $", in {forEach}.{method.Name}Filter{m}" : "";
             if (sliced) filter = method.Sliced($"{forEach}.{method.Name}Filter{m}", slice);
             if (perEntity)
             {
