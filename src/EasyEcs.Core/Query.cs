@@ -1292,6 +1292,7 @@ internal sealed class QueryWalk
     private QueryMatch _match;
     private ulong _since; // the filter's change tick
     private int[] _counts = new int[8]; // row counts of the matching tables at the start of the walk
+    private bool _alone; // the walk began its pass with the owner's plain count (World.BeginPassAlone)
     private int _archetype;
     private RowFilter _filter;
     private int _count;  // rows of the current table to walk
@@ -1351,7 +1352,7 @@ internal sealed class QueryWalk
         var archetypes = match.Archetypes;
         if (walk._counts.Length < archetypes.Length) walk._counts = new int[Math.Max(archetypes.Length, walk._counts.Length * 2)];
         for (int i = 0; i < archetypes.Length; i++) walk._counts[i] = archetypes[i].Count;
-        world.BeginPass();
+        walk._alone = world.BeginPassAlone(); // a plain count on the owner thread while nothing holds the gate
         return walk;
     }
 
@@ -1365,7 +1366,7 @@ internal sealed class QueryWalk
         _filter = default;
         _next = _free;
         _free = this;
-        world.EndPass();
+        world.EndPassAlone(_alone);
     }
 
     private QueryStep Found(int slot) => new()

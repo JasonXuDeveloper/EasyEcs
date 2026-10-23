@@ -502,14 +502,16 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {{cons}}
                         where TJob : struct, IForEachBatch<{{tps}}>, allows ref struct
                     {
-                        Gate.Freeze(); // the job holds spans into the tables: a structural change throws
+                        // The job holds spans into the tables: a structural change throws. The owner's plain freeze while
+                        // nothing holds the gate (two locked instructions per pass otherwise); a held gate throws anyway.
+                        bool froze = Gate.FreezeAlone();
                         try
                         {
                             Batches<{{tps}}, TJob>(ref job, in filter);
                         }
                         finally
                         {
-                            Gate.Thaw();
+                            if (froze) Gate.ThawAlone();
                         }
                     }
 
@@ -540,14 +542,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {{cons}}
                         where TJob : struct, IForEachMasked<{{tps}}>, allows ref struct
                     {
-                        Gate.Freeze();
+                        bool froze = Gate.FreezeAlone(); // as ForEachBatch
                         try
                         {
                             Masked<{{tps}}, TJob>(ref job, in filter);
                         }
                         finally
                         {
-                            Gate.Thaw();
+                            if (froze) Gate.ThawAlone();
                         }
                     }
 
@@ -934,14 +936,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         // The job promises no structural change (the type test is a JIT-time constant), so its pass keeps no
                         // bookkeeping; the frozen gate turns a broken promise (a change made in a helper the analyzer does
                         // not follow) into an exception instead of torn rows.
-                        Gate.Freeze();
+                        bool froze = Gate.FreezeAlone(); // the owner's plain freeze, as ForEachBatch
                         try
                         {
                             job = {{name}}Stable<{{tps}}, TJob>(job, in filter);
                         }
                         finally
                         {
-                            Gate.Thaw();
+                            if (froze) Gate.ThawAlone();
                         }
 
                         return;
@@ -957,7 +959,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     // of tiered compilation (no OSR, no PGO), and with it the inlining of the job into the loop.
                     int[] counts = PassCounts(archetypes.Length);
                     for (int ai = 0; ai < archetypes.Length; ai++) counts[ai] = archetypes[ai].Count;
-                    BeginPass();
+                    bool alone = BeginPassAlone(); // a plain count on the owner thread while nothing holds the gate
                     try // a job that throws still ends the pass, so its tombstones are closed
                     {
                         for (int ai = 0; ai < archetypes.Length; ai++)
@@ -986,7 +988,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
                     finally
                     {
-                        EndPass();
+                        EndPassAlone(alone);
                     }
                 }
 
