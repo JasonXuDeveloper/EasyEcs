@@ -28,7 +28,7 @@ available as Markdown: add `.md` to its URL.
   member is declared, not written: `[IndexKey]` (or `[UniqueKey]`) on the field or positional parameter of a partial
   struct (`public partial record struct Account([UniqueKey] int Id) : IComponent;`; `[IndexKey]` on the type when the
   value itself is the key), and the generator writes the interface and an explicit `Key` (EECS067). `[Group]` on an
-  `int` or enum member declares a table group the same way, and `[GroupBy]` on the type makes every world group by it
+  `int` or enum member declares a table group the same way (a hand-written `Group` returning one: EECS067), and `[GroupBy]` on the type makes every world group by it
   (no `world.GroupBy<T>()` per world). A key computed from several members stays a hand-written `Key`. When the keys a
   world holds at once map onto bounded slots (grid cells modulo the loaded area, small ids), make it
   `IDirectIndexed<TKey>` (`static Slots`, `static SlotOf(key)`, pure arithmetic) instead of keeping a grid of ids by

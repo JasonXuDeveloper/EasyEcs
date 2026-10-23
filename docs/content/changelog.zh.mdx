@@ -89,6 +89,8 @@ icon: RotateCcwClock
   [系统](/zh/docs/guide/systems#system-groups)。
 - [EECS027](/zh/docs/guide/analyzer#eecs027)（把查找的组件或单例改成参数）和 [EECS054](/zh/docs/guide/analyzer#eecs054)（去掉 `ChunkRows`）
   有了代码修复。
+- 分析器规则 [EECS067](/zh/docs/guide/analyzer#eecs067) 也会对返回一个 `int` 成员（或把 `int` 枚举转成 `int`）的手写
+  `IGroup.Group` 建议改用 `[Group]`，代码修复把它声明在那个成员上。
 - `[ForEach(Parallel = true, ChunkRows = n)]` 指定并行方法的一个线程每次取多少行（向上取整到 64；`world.ForEachParallel` 等并行调用用
   `chunkRows:` 参数）。默认每块至少 1,024 行，方法写被追踪组件时至少 4,096 行，所以几百个重的行只落在一个线程上；现在它们会分到所有线程，
   写被追踪组件时也一样。分析器规则 [EECS054](/zh/docs/guide/analyzer#eecs054) 拒绝负数，以及没有 `Parallel` 的 `ChunkRows`。见

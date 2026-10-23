@@ -116,7 +116,7 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS064](#eecs064) | Error | The reduction attributes combine every field | |
 | [EECS065](#eecs065) | Info | A field-wise reduction is declared by attributes | Declare it with attributes |
 | [EECS066](#eecs066) | Warning | A reduction's `Identity` is the identity of its `Combine` | The right `Identity`, or the attributes |
-| [EECS067](#eecs067) | Info | A key that returns a member is declared by `[IndexKey]` | `[IndexKey]` / `[UniqueKey]` |
+| [EECS067](#eecs067) | Info | A key or group that returns a member is declared by `[IndexKey]` / `[Group]` | `[IndexKey]` / `[UniqueKey]` / `[Group]` |
 | [EECS068](#eecs068) | Error | A setup attribute goes on a type it fits | |
 | [EECS069](#eecs069) | Warning / Info | A saved managed type has a Nino formatter | `[NinoType]` / `[NotSaved]` |
 | [EECS070](#eecs070) | Error | A pass neither reads its own records nor emits one kind twice | |
@@ -2192,12 +2192,13 @@ public partial struct Weakest : ISingletonComponent
 
 ## EECS067 [#eecs067]
 
-**An index key that an attribute can declare.** Suggestion (Info). Code fix: declares it with `[IndexKey]` (or
-`[UniqueKey]` for a unique index) on the member, partial along its chain.
+**An index key or a group that an attribute can declare.** Suggestion (Info). Code fix: declares it with `[IndexKey]`
+(or `[UniqueKey]` for a unique index) or `[Group]` on the member, partial along its chain.
 
 A `Key` that returns a field, a property or the value itself is what `[IndexKey]` declares on that member (or on the type,
-for the value itself). The generator writes the interface and an explicit `Key`, which no `ToString()` prints and no
-caller reaches by mistake. A key computed from several members stays hand-written.
+for the value itself). A `Group` that returns an `int` member, or an enum of `int` cast to `int`, is what `[Group]`
+declares on that member. The generator writes the interface and an explicit `Key` or `Group`, which no `ToString()`
+prints and no caller reaches by mistake. A key or group computed from several members stays hand-written.
 
 ```csharp tab="Reported" doccheck=alone,expect-EECS067
 public struct Owner : IComponent, IIndexed<EntityId>
@@ -2213,6 +2214,17 @@ public partial struct Owner : IComponent
 {
     [IndexKey] public EntityId Id;
 }
+```
+
+```csharp tab="Reported" doccheck=alone,expect-EECS067
+public record struct Room(int Id) : IComponent, IGroup
+{
+    public int Group => Id;
+}
+```
+
+```csharp tab="Fixed"
+public partial record struct Room([Group] int Id) : IComponent;
 ```
 
 ## EECS068 [#eecs068]

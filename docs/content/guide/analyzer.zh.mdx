@@ -96,7 +96,7 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS064](#eecs064) | 错误 | 归约特性合并每一个字段 | |
 | [EECS065](#eecs065) | 信息 | 逐字段的归约用特性声明 | 用特性声明 |
 | [EECS066](#eecs066) | 警告 | 归约的 `Identity` 是其 `Combine` 的单位元 | 正确的 `Identity`，或改用特性 |
-| [EECS067](#eecs067) | 信息 | 返回某个成员的键用 `[IndexKey]` 声明 | `[IndexKey]` / `[UniqueKey]` |
+| [EECS067](#eecs067) | 信息 | 返回某个成员的键或分组用 `[IndexKey]` / `[Group]` 声明 | `[IndexKey]` / `[UniqueKey]` / `[Group]` |
 | [EECS068](#eecs068) | 错误 | 设置特性放在适用的类型上 | |
 | [EECS069](#eecs069) | 警告 / 信息 | 会被保存的托管类型有 Nino 格式化器 | `[NinoType]` / `[NotSaved]` |
 | [EECS070](#eecs070) | 错误 | 遍历不读自己产出的记录，同一种记录不产出两次 | |
@@ -2038,10 +2038,11 @@ public partial struct Weakest : ISingletonComponent
 
 ## EECS067 [#eecs067]
 
-**可以用特性声明的索引键。** 建议（信息级别）。代码修复：在那个成员上声明 `[IndexKey]`（唯一索引用 `[UniqueKey]`），外层一并改成 partial。
+**可以用特性声明的索引键或分组。** 建议（信息级别）。代码修复：在那个成员上声明 `[IndexKey]`（唯一索引用 `[UniqueKey]`）或 `[Group]`，外层一并改成 partial。
 
-返回某个字段、属性或值本身的 `Key`，就是在那个成员上（值本身则在类型上）声明 `[IndexKey]` 的效果。生成器会写出接口和显式实现的 `Key`，
-`ToString()` 不会把它打印出来，调用方也不会误用它。由多个成员算出来的键仍然手写。
+返回某个字段、属性或值本身的 `Key`，就是在那个成员上（值本身则在类型上）声明 `[IndexKey]` 的效果。返回一个 `int` 成员、或把 `int`
+枚举转成 `int` 的 `Group`，就是在那个成员上声明 `[Group]` 的效果。生成器会写出接口和显式实现的 `Key` 或 `Group`，
+`ToString()` 不会把它打印出来，调用方也不会误用它。由多个成员算出来的键或分组仍然手写。
 
 ```csharp tab="报告" doccheck=alone,expect-EECS067
 public struct Owner : IComponent, IIndexed<EntityId>
@@ -2057,6 +2058,17 @@ public partial struct Owner : IComponent
 {
     [IndexKey] public EntityId Id;
 }
+```
+
+```csharp tab="报告" doccheck=alone,expect-EECS067
+public record struct Room(int Id) : IComponent, IGroup
+{
+    public int Group => Id;
+}
+```
+
+```csharp tab="修正"
+public partial record struct Room([Group] int Id) : IComponent;
 ```
 
 ## EECS068 [#eecs068]

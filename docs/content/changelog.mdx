@@ -129,6 +129,8 @@ major or minor version that needs code changes? The
   `UpdateInterval`s are taken from. See [systems](/en/docs/guide/systems#system-groups).
 - Code fixes for [EECS027](/en/docs/guide/analyzer#eecs027) (takes the looked-up component or singleton as a
   parameter) and [EECS054](/en/docs/guide/analyzer#eecs054) (removes `ChunkRows`).
+- Analyzer rule [EECS067](/en/docs/guide/analyzer#eecs067) also suggests `[Group]` for a hand-written `IGroup.Group`
+  that returns an `int` member (or an enum of `int` cast to `int`), and its code fix declares it on that member.
 - `[ForEach(Parallel = true, ChunkRows = n)]` sets the rows a thread of a parallel method takes at a time (rounded up
   to 64; `chunkRows:` on `world.ForEachParallel` and the other parallel calls). By default a chunk holds at least
   1,024 rows, 4,096 when the method writes a tracked component, so a few hundred heavy rows ran on one thread; now they
