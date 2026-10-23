@@ -568,6 +568,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         }
         string declaring = method.Simd != null ? "IForEachBatch" : iface; // IForEachMasked declares no masks of its own
         sb.Append($"\n        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.WriteMask => {writes};\n");
+        sb.Append($"\n        static bool global::EasyEcs.{declaring}<{method.ComponentTypes}>.OneQuery => true; // the method's filter is a constant\n");
         if (own != 0) sb.Append($"        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.SelfStamped => {own};\n");
         // Tracked components written through a Maybe: the parallel pass opens their blocks as it opens its own columns'.
         var optional = method.Parallel

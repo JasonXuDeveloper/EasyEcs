@@ -16,7 +16,7 @@ internal static class TypeIndex<TFamily>
 }
 
 /// <inheritdoc cref="TypeIndex{TFamily}"/>
-internal static class TypeIndex<TFamily, T>
+internal static class TypeIndex<TFamily, T> where T : allows ref struct
 {
     internal static readonly int Value = Interlocked.Increment(ref TypeIndex<TFamily>.Count) - 1;
 }
@@ -26,6 +26,9 @@ internal static class TypeIndex<TFamily, T>
 /// index keys the transition caches of each archetype (Archetype.GetAddSetEdge).
 /// </summary>
 internal readonly struct ComponentSignature;
+
+/// <summary>Family of the job types whose passes run one query (a job's OneQuery): their dense index keys World._kept.</summary>
+internal readonly struct KeptQuery;
 
 /// <summary>Bit of component type <typeparamref name="T"/> in archetype masks (registers its <see cref="ComponentInfo"/>).</summary>
 internal static class ComponentType<T> where T : struct, IComponent

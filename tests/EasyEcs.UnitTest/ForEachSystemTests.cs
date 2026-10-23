@@ -633,4 +633,28 @@ public class ForEachSystemTests
         for (int i = 0; i < 120; i++) world.Update();
         Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
+    [Test]
+    public void APassKeepsItsQueryPerWorldAndSeesNewTables()
+    {
+        // The match of a generated pass is kept per world and job type: tables made after the first pass, another
+        // world's tables and the tables left after Dispose of a world must all be what the pass sees.
+        using var a = new World();
+        using var b = new World();
+        a.AddSystem<Movement>();
+        b.AddSystem<Movement>();
+        var first = a.CreateEntity(new Position(0, 0), new Velocity(1, 0));
+        a.Update();
+        var later = a.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Health(1)); // a new table after the first pass
+        var other = b.CreateEntity(new Position(0, 0), new Velocity(0, 1), new Health(2));
+        a.Update();
+        b.Update();
+        Assert.That(first.Get<Position>().X, Is.EqualTo(2));
+        Assert.That(later.Get<Position>().X, Is.EqualTo(1));
+        Assert.That(other.Get<Position>().Y, Is.EqualTo(1));
+        Assert.That(b.Count<Position>(), Is.EqualTo(1)); // b's pass never saw a's tables
+        later.Set(new Frozen()); // a table the filter excludes
+        a.Update();
+        Assert.That(later.Get<Position>().X, Is.EqualTo(1));
+        Assert.That(first.Get<Position>().X, Is.EqualTo(3));
+    }
 }

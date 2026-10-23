@@ -56,6 +56,11 @@ public sealed partial class World
     // signature's ways are full, other filters take the dictionary (no allocation in steady state).
     private QueryMemo[][] _queryMemo = [];
     private readonly Lock _memoLock = new();
+
+    // Per job type that always runs one query (TypeIndex<KeptQuery, TJob>; a job's OneQuery, which generated jobs set):
+    // the query's cache entry, so a pass of the job reads its match without comparing filters. Immutable snapshots
+    // replaced copy-on-write like the memo, emptied with it.
+    private QueryCacheEntry[] _kept = [];
     private const int MemoWays = 4;
 
     // A struct: a hit reads the ways' filters in one array, without a hop to an object per way.
@@ -238,6 +243,40 @@ public sealed partial class World
     }
 
     /// <summary>
+    /// The match of the one query of job type <paramref name="job"/> (<c>TypeIndex&lt;KeptQuery, TJob&gt;</c>): two loads
+    /// and a null test when the world has run the job before, else <see cref="KeepQuery"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal QueryMatch KeptMatch(int job, ReadOnlySpan<ushort> bits, in QueryFilter filter)
+    {
+        var kept = Volatile.Read(ref _kept);
+        return (uint)job < (uint)kept.Length && kept[job] is { } entry ? Volatile.Read(ref entry.Match) : KeepQuery(job, bits, in filter);
+    }
+
+    /// <summary>The first pass of a job type in this world: its query's entry is kept for the next ones (cold path).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private QueryMatch KeepQuery(int job, ReadOnlySpan<ushort> bits, in QueryFilter filter)
+    {
+        var entry = GetQueryEntry(bits, in filter);
+        lock (_memoLock)
+        {
+            var kept = _kept;
+            kept = job < kept.Length ? (QueryCacheEntry[])kept.Clone() : Grown(kept, job);
+            kept[job] = entry;
+            Volatile.Write(ref _kept, kept);
+        }
+
+        return Volatile.Read(ref entry.Match);
+    }
+
+    private static QueryCacheEntry[] Grown(QueryCacheEntry[] kept, int job)
+    {
+        var grown = new QueryCacheEntry[Math.Max(job + 1, kept.Length * 2)];
+        Array.Copy(kept, grown, kept.Length);
+        return grown;
+    }
+
+    /// <summary>
     /// Whether row <paramref name="slot"/> of <paramref name="archetype"/> passes a query (<c>entity.Run</c> with a
     /// filter): the table must be one of the query's and the row must pass its row test. O(matching tables).
     /// </summary>
@@ -367,6 +406,10 @@ public sealed partial class World
         _prefabTables?.Clear();
         _allArchetypes = Array.Empty<Archetype>();
         _queryCache.Clear();
-        lock (_memoLock) _queryMemo = [];
+        lock (_memoLock)
+        {
+            _queryMemo = [];
+            _kept = [];
+        }
     }
 }

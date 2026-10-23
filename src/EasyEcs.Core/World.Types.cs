@@ -120,7 +120,11 @@ public sealed partial class World
             else Volatile.Write(ref pair.Value.Match, pair.Value.Match.Without(dropped));
         }
 
-        lock (_memoLock) _queryMemo = []; // refilled by the next queries
+        lock (_memoLock)
+        {
+            _queryMemo = []; // refilled by the next queries
+            _kept = [];
+        }
 
         if (_prefabTables != null)
             foreach (var pair in new List<KeyValuePair<PrefabKey, Archetype>>(_prefabTables))

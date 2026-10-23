@@ -384,6 +384,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
             static virtual bool Merges => false;
 
             /// <summary>
+            /// Every pass of the job type takes the same filter, its tick and slice aside (default false): a world keeps the
+            /// query's match per job type and finds it without comparing filters. Generated jobs set it (their filter is a
+            /// constant of the method).
+            /// </summary>
+            static virtual bool OneQuery => false;
+
+            /// <summary>
             /// Combine the partial results <paramref name="chunk"/> holds into <paramref name="job"/> (both of the job's
             /// own type; <see cref="Merges"/>). Generated jobs with <see cref="Reduce{T}"/> parameters implement it.
             /// </summary>
@@ -490,6 +497,20 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         return GetMatchingArchetypes(TypeIndex<ComponentSignature, {{(n == 1 ? "T1" : $"({tps})")}}>.Value, [{{bits}}], in filter);
                     }
 
+                    /// <summary>
+                    /// <see cref="Match{{"{"}}{{tps}}{{"}"}}"/> for a pass of a job that runs one query (<paramref name="one"/>: its
+                    /// <c>OneQuery</c>, a JIT-time constant): the match kept for the job type, without comparing filters.
+                    /// </summary>
+                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                    internal QueryMatch Match<{{tps}}, TJob>(bool one, in QueryFilter filter, {{List(n, i => $"out ushort b{i}")}})
+                {{cons}}
+                        where TJob : allows ref struct
+                    {
+                        if (!one) return Match<{{tps}}>(in filter, {{List(n, i => $"out b{i}")}});
+                {{Lines(n, i => $"        b{i} = ComponentType<T{i}>.Bit;")}}
+                        return KeptMatch(TypeIndex<KeptQuery, TJob>.Value, [{{bits}}], in filter);
+                    }
+
                 {{ForEach(n, "ForEach", "IForEach", "", "", "the components")}}
                 {{ForEach(n, "ForEachEntity", "IForEachEntity", "new Entity(this, idp)", "new Entity(this, ids)", "the entity handle")}}
                     /// <summary>
@@ -520,7 +541,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {{cons}}
                         where TJob : struct, IForEachBatch<{{tps}}>, allows ref struct
                     {
-                        var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
+                        var match = Match<{{tps}}, TJob>(TJob.OneQuery, in filter, {{List(n, i => $"out var b{i}")}});
                         var archetypes = match.Archetypes;
                         for (int ai = 0; ai < archetypes.Length; ai++)
                         {
@@ -559,7 +580,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {{cons}}
                         where TJob : struct, IForEachMasked<{{tps}}>, allows ref struct
                     {
-                        var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
+                        var match = Match<{{tps}}, TJob>(TJob.OneQuery, in filter, {{List(n, i => $"out var b{i}")}});
                         var archetypes = match.Archetypes;
                         for (int ai = 0; ai < archetypes.Length; ai++)
                         {
@@ -967,7 +988,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         return;
                     }
 
-                    var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
+                    var match = Match<{{tps}}, TJob>(TJob.OneQuery, in filter, {{List(n, i => $"out var b{i}")}});
                     var archetypes = match.Archetypes;
 
                     // Row counts at the start of the pass: rows appended during the pass are not visited.
@@ -1160,7 +1181,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
-                    var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
+                    var match = Match<{{tps}}, TJob>(TJob.OneQuery, in filter, {{List(n, i => $"out var b{i}")}});
                     var archetypes = match.Archetypes;
                     // The job cannot change rows or reallocate storage. The row
                     // loops live in small methods of their own, so the JIT keeps their refs in registers. They take the
@@ -1312,7 +1333,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, INoStructuralChanges
                 {
-                    var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
+                    var match = Match<{{tps}}, TJob>(TJob.OneQuery, in filter, {{List(n, i => $"out var b{i}")}});
                     var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
                     int chunks = work.Cut(this, match, in filter, chunkRows, ref job, {{bits}});
                     try
