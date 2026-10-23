@@ -890,7 +890,7 @@ internal sealed partial class Kernel
             if (!IsLane(field.Type)) throw new Unsupported($"field {name}.{field.Name} of the reduction is a {field.Type.ToDisplayString()}, not a lane type of {_size} bytes");
         }
 
-        var ops = CombineOps(type, fields, compilation, ct);
+        var ops = AttributeOps(type, fields) ?? CombineOps(type, fields, compilation, ct);
         for (int f = 0; f < fields.Length; f++)
             if (ops[f] == "+" && IsFloat(fields[f].Type) && !fast)
                 throw new Unsupported($"the float sum {name}.{fields[f].Name} would add its rows in another order (one sum per lane): set FloatMode = FloatMode.Fast to accept a sum that is not bit for bit the method's");
@@ -900,6 +900,37 @@ internal sealed partial class Kernel
         for (int f = 0; f < fields.Length; f++)
             _setup.Append($"var __a{index}_{f} = {V}.Create<{Elem(fields[f].Type)}>(__id{index}.{fields[f].Name});\n");
         return new Reduction(index, type, fields, ops, partial);
+    }
+
+    /// <summary>
+    /// How the Combine that PartGenerator writes from T's <c>[Sum]</c> / <c>[Min]</c> / <c>[Max]</c> fields combines each
+    /// field of T, or null when T declares no reduction by attributes (its Combine is written by hand). The generators of
+    /// a compilation do not see that part, so its declaration is read from the attributes (<see cref="Parts"/>), the same
+    /// way for the generator and the analyzer.
+    /// </summary>
+    private static string[]? AttributeOps(INamedTypeSymbol type, IFieldSymbol[] fields)
+    {
+        if (!Parts.Declares(type, Parts.Sum) && !Parts.Declares(type, Parts.Product) && !Parts.Declares(type, Parts.Min)
+            && !Parts.Declares(type, Parts.Max) && !Parts.Declares(type, Parts.All) && !Parts.Declares(type, Parts.Any)) return null;
+        string name = type.Name;
+        if (Parts.Of(type) is not { WritesReduction: true } parts)
+            throw new Unsupported($"the generator writes no Combine for {name}: its reduction attributes are reported");
+        var ops = new string[fields.Length];
+        for (int f = 0; f < fields.Length; f++)
+        {
+            string field = global::EasyEcs.Generator.Code.Escape(fields[f].Name);
+            int at = parts.Fields.FindIndex(x => x.Name == field);
+            if (at < 0) throw new Unsupported($"field {name}.{fields[f].Name} carries no reduction attribute");
+            ops[f] = parts.Fields[at].Op switch
+            {
+                Parts.Op.Sum => "+",
+                Parts.Op.Min => "Min",
+                Parts.Op.Max => "Max",
+                var op => throw new Unsupported($"{name}.{fields[f].Name} combines by [{op}]: a vector loop reduces sums, Min and Max"),
+            };
+        }
+
+        return ops;
     }
 
     /// <summary>

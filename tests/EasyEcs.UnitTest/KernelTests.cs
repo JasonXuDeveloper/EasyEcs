@@ -173,9 +173,56 @@ public record struct Ledger : ISingletonComponent, IReduction<Ledger>
     public static Ledger Combine(Ledger left, Ledger right) => new() { Sum = left.Sum + right.Sum, Max = Math.Max(left.Max, right.Max) };
 }
 
+/// <summary>Headcount declared by attributes: PartGenerator writes its Identity and Combine.</summary>
+public partial record struct Tallies : ISingletonComponent
+{
+    [Sum] public int Count;
+    [Sum] public int Sum;
+    [Min] public int Low;
+    [Max] public int High;
+}
+
+/// <summary>Extent declared by attributes.</summary>
+public partial record struct Reach : ISingletonComponent
+{
+    [Min] public float Low;
+    [Max] public float High;
+}
+
+/// <summary>Ledger declared by attributes.</summary>
+public partial record struct Books : ISingletonComponent
+{
+    [Sum] public long Sum;
+    [Max] public long Max;
+}
+
 /// <summary>Kernels that reduce into a singleton: one accumulator per lane, folded in lane order.</summary>
 public static class ReduceKernels
 {
+    // The reductions of Count, Span and Book declared by [Sum] / [Min] / [Max]: the same vector loops.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Tallies(in Rank rank, ref Reduce<Tallies> tallies)
+    {
+        tallies.Value.Count++;
+        if (rank.Value > 0) tallies.Value.Sum += rank.Value;
+        tallies.Value.Low = Math.Min(tallies.Value.Low, rank.Value);
+        tallies.Value.High = Math.Max(rank.Value, tallies.Value.High);
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Reach(in Level level, ref Reduce<Reach> reach)
+    {
+        reach.Value.Low = MathF.Min(reach.Value.Low, level.Value);
+        reach.Value.High = float.Max(reach.Value.High, level.Value);
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Books(in Stamp stamp, ref Reduce<Books> books)
+    {
+        books.Value.Sum += stamp.Value;
+        books.Value.Max = Math.Max(books.Value.Max, stamp.Value);
+    }
+
     [ForEach(SimdMode = SimdMode.Require)]
     internal static void Count(in Rank rank, ref Reduce<Headcount> headcount)
     {
@@ -1212,6 +1259,12 @@ public class KernelTests
             ReduceKernels.Count(world);
             Assert.That(world.GetSingleton<Headcount>(), Is.EqualTo(headcount.Value), "Count");
 
+            var tallies = new Reduce<Tallies> { Value = Tallies.Identity };
+            foreach (int i in order) if (!hole(i)) ReduceKernels.Tallies(in ranks[i], ref tallies);
+            ReduceKernels.Tallies(world);
+            Assert.That(world.GetSingleton<Tallies>(), Is.EqualTo(tallies.Value), "Tallies");
+            Assert.That((tallies.Value.Count, tallies.Value.Sum, tallies.Value.Low, tallies.Value.High), Is.EqualTo((headcount.Value.Count, headcount.Value.Sum, headcount.Value.Low, headcount.Value.High)), "Tallies is Count");
+
             headcount = new Reduce<Headcount> { Value = Headcount.Identity };
             foreach (int i in order) if (!hole(i)) ReduceKernels.Tally(ref ranks[i], ref headcount);
             ReduceKernels.Tally(world);
@@ -1223,10 +1276,21 @@ public class KernelTests
             ReduceKernels.Span(world);
             Assert.That(Same(world.GetSingleton<Extent>(), extent.Value), $"Span: {Bits(world.GetSingleton<Extent>())} instead of {Bits(extent.Value)}");
 
+            var reach = new Reduce<Reach> { Value = Reach.Identity };
+            foreach (int i in order) ReduceKernels.Reach(in levels[i], ref reach);
+            ReduceKernels.Reach(world);
+            var vector = world.GetSingleton<Reach>();
+            Assert.That(Same(new Extent { Low = vector.Low, High = vector.High }, new Extent { Low = reach.Value.Low, High = reach.Value.High }), "Reach");
+
             var ledger = new Reduce<Ledger> { Value = Ledger.Identity };
             foreach (int i in order) ReduceKernels.Book(in stamps[i], ref ledger);
             ReduceKernels.Book(world);
             Assert.That(world.GetSingleton<Ledger>(), Is.EqualTo(ledger.Value), "Book");
+
+            var books = new Reduce<Books> { Value = Books.Identity };
+            foreach (int i in order) ReduceKernels.Books(in stamps[i], ref books);
+            ReduceKernels.Books(world);
+            Assert.That(world.GetSingleton<Books>(), Is.EqualTo(books.Value), "Books");
 
             headcount = new Reduce<Headcount> { Value = Headcount.Identity };
             foreach (int i in order) ReduceKernels.Bounded(ref spots[i], ref headcount);
