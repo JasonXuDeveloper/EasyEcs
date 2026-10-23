@@ -481,7 +481,8 @@ public class SlowSystem : EcsSystem
     [ForEach, WithAny<Frozen>, WithAny<Burning>]
     static void Slow(ref Velocity velocity)
     {
-        velocity = new Velocity(velocity.X / 2, velocity.Y / 2);
+        velocity.X /= 2;
+        velocity.Y /= 2;
     }
 }
 
@@ -492,7 +493,8 @@ public class MoveSystem : EcsSystem
     [ForEach, Without<Frozen>]
     static void Move(ref Position position, in Velocity velocity)
     {
-        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+        position.X += velocity.X;
+        position.Y += velocity.Y;
     }
 }
 ```

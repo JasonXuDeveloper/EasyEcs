@@ -51,12 +51,11 @@ public static class Kinds
 
 ### 生成一个 [#instantiate]
 
-新实体拿到每个值的副本，只需要改不一样的部分。
+新实体拿到每个值的副本。不一样的值直接传进去，替换配方里的值（[每个实例带上自己的值](#instantiate-with-values)）。
 
 ```csharp
 var world = new World();
-var goblin = world.Instantiate(Kinds.Goblin);
-goblin.Position = new Position(100, 40);
+var goblin = world.Instantiate(Kinds.Goblin, new Position(100, 40));
 ```
 
 </Step>
@@ -69,7 +68,7 @@ goblin.Position = new Position(100, 40);
 ```csharp
 var wave = new Entity[500];
 world.Instantiate(Kinds.Troll, wave);
-for (int i = 0; i < wave.Length; i++) wave[i].Position = new Position(i * 8, 0);
+for (int i = 0; i < wave.Length; i++) wave[i].SetPosition(i * 8, 0);
 ```
 
 </Step>
@@ -129,6 +128,7 @@ den.Destroy();                                       // ChildOf：巢穴的哥�
 | `Has<T>()` | 预制体是否有 `T`。 |
 | `Read<T>()` → `ref readonly T` | 预制体里的值；没有时抛异常。 |
 | `SetBuffer<T>(params ReadOnlySpan<T>)` → `Prefab` | 带这些元素的 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers)。 |
+| `SetAbsent<T>()` → `Prefab` | 给 `T` 留一列但不带这个组件，之后加上它不用挪行（[给以后留位置](#set-absent)）。 |
 | `AddMember()` → `Prefab` | 给预制体的编组加一个新[成员](#prefab-groups)。 |
 | `Id` | 在编组的组件里指代这个成员的 `EntityId`。 |
 
@@ -187,6 +187,34 @@ int inRecipe = Chests.Common.Loot.Count;             // 仍然是 2
 ```
 
 不要先在外面填好一个 `DynamicBuffer<T>` 再 `Set` 进预制体：缓冲值被复制后会共用同一个列表（[EECS012](/zh/docs/guide/analyzer#eecs012)）。
+
+### 给以后才加的组件留位置：`SetAbsent<T>` [#set-absent]
+
+`prefab.SetAbsent<T>()` 给配方留一列 `T`，但不带这个组件：实例没有 `T`，它们的表却有它的位置。之后再加 `T`（每隔几个 tick 加上又去掉的标签、
+部分实例才进入的状态）只翻转一个存在位，不用把行挪到另一张表，所有实例不管处在什么状态都留在同一张表里。配方原有的值会被丢掉。
+
+```csharp
+public struct Enraged : IComponent;                          // 部分哥布林会进入的状态
+
+public static class Raging
+{
+    public static readonly Prefab Goblin = new Prefab()
+        .SetPosition(0, 0).SetHealth(30, 30).SetAttack(4, 0)
+        .SetAbsent<Enraged>();                               // 留出列，不加标签 // [!code highlight]
+}
+```
+
+```csharp
+public class RageSystem : EcsSystem
+{
+    [ForEach]
+    static void Rage(Entity goblin, in Health health)
+    {
+        if (health.Value < 10) goblin.SetEnraged();          // 一个存在位：行不动
+        else goblin.RemoveEnraged();
+    }
+}
+```
 
 ### 预制体编组 [#prefab-groups]
 
@@ -361,9 +389,8 @@ using EasyEcs;
 
 using var world = new World();
 
-// 一个实体：复制配方里的所有值，再只改不一样的部分。
-Entity first = world.Instantiate(Kinds.Goblin);
-first.Position = new Position(10, 20);
+// 一个实体：复制配方里的所有值，位置是它自己的。
+Entity first = world.Instantiate(Kinds.Goblin, new Position(10, 20));
 
 // 一波：一次生成一百个。
 var wave = new Entity[100];
@@ -372,7 +399,7 @@ world.Instantiate(Kinds.Goblin, wave);
 Entity boss = world.Instantiate(Kinds.Chief);
 
 // Clone 复制的是活着的实体当前的样子，不是它来自的配方。
-boss.Health = new Health(50);
+boss.Health.Value = 50;
 Entity twin = boss.Clone();
 
 var enemies = QueryFilter.Create().With<Enemy>();
@@ -410,6 +437,8 @@ boss 50 hp, twin 50 hp
 | 先 `CreateEntity`，再逐个 `Set` 同一类实体的组件 | 用预制体 | 一次行复制，目标表按预制体缓存 |
 | 每次生成都 new 一个 `Prefab` | 每类一个预制体，放在字段里 | 第一次实例化后，表查找就缓存了 |
 | 把模板做成隐藏实体 | 用 `Prefab` | 查询不用付跳过它们的代价 |
+| 实例会得到又失去、配方里没有的标签或状态 | 预制体上 [`SetAbsent<T>()`](#set-absent) | 加上它只翻转一个存在位；不挪行，所有状态在同一张表 |
+| 用 `.SetX(default).RemoveX()` 给配方留一列 | `SetAbsent<X>()` | 同样的列，一次调用说清楚 |
 
 生成并销毁 1,000 个有四个组件（其中一个被追踪）的实体，逐个 `Instantiate` 对比一次 `Instantiate(prefab, span)`；再加上每个实体带一个
 `ChildOf` 的三种写法：`Instantiate` 之后再设、直接交给 `Instantiate`、交给批量形式（`PrefabBenchmark`）：

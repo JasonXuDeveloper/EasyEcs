@@ -141,8 +141,8 @@ public class RecordPositions : EcsSystem
 [UpdateAfter<RecordPositions>]
 public class ResolveShots : EcsSystem
 {
-    [ForEach]
-    static void Resolve(Entity shot, in Shot claim, in PositionHistory history, World world)
+    [ForEach, Consume]                                       // 每发子弹在遍历结束后销毁
+    static void Resolve(in Shot claim, in PositionHistory history, World world)
     {
         if (Rewind(in history, claim.Target, claim.Lag, out var then)
             && world.TryGetEntity(claim.Target, out var target)
@@ -156,8 +156,6 @@ public class ResolveShots : EcsSystem
                 if (found) health.Value -= 10;
             }
         }
-
-        shot.Destroy();
     }
 
     // target 在 lag 个 tick 之前站在哪，前提是环里还留着那个 tick。

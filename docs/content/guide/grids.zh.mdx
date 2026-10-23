@@ -1,0 +1,608 @@
+---
+title: 网格瓦片
+seoTitle: "C# ECS 网格模板计算：瓦片、光环与着色器"
+description: "把网格切成瓦片来更新水、热量、光照或元胞自动机：Tile<TCell, TTile> 给每块瓦片填上邻居的边缘，瓦片之间并行。"
+icon: Grid3x3
+---
+
+服务器里有些状态是网格：在方块之间流动的水、在地图上扩散的热量、光照、寻路场、元胞自动机。每个格子的下一个值取决于周围的格子，
+写成逐格的普通 `[ForEach]` 方法就要每个格子查一次邻居。EasyEcs 把网格切成瓦片，每块一个实体，格子放在
+[动态缓冲](/zh/docs/guide/dynamic-buffers)里；`Tile<TCell, TTile>` 参数交给方法的是四周填好邻居边缘的瓦片。方法就是一个着色器：
+用向量采样格子，没有边界情况，瓦片之间并行，安静的瓦片还能休眠。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  按邻居更新、一次处理整块瓦片的格子：水和岩浆的流动、热量或气体的扩散、光照和声音的传播、距离场和流场、生命游戏、影响力图的模糊。
+  几千到几百万个格子的 2D 或 3D 网格，大部分活是对一行行格子做运算。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  不读邻居的规则：缓冲上的普通 `[ForEach]` 方法，或组件上的向量循环。只有一个实体的网格：它的 span 上的
+  [批处理方法](/zh/docs/guide/systems#batch-methods)。地图上稀疏的对象（单位、物品）：按格子建[索引](/zh/docs/guide/indexes-and-relations)，
+  而不是一张格子网格。读得比旁边瓦片还远的模板：用更大的瓦片（[EECS072](/zh/docs/guide/analyzer#eecs072)）。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### 声明瓦片：形状和键 [#declare]
+
+瓦片是一个实现 `ITile<TKey>` 的组件：静态成员是它的形状（`ITileShape`），键是瓦片的位置（建了索引才能找到邻居），`Beside`
+给出某个面对面那块瓦片的键。位置上的 `[IndexKey]` 生成键；形状都是常量，JIT 会折叠所有尺寸和步长。
+
+```csharp
+public record struct PlatePos(int X, int Z);
+
+// 16 x 16 个温度的一块板，按位置查找；它的邻居是旁边的板。
+public partial record struct HeatPlate([IndexKey] PlatePos Pos) : IComponent, ITile<PlatePos>
+{
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
+
+    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
+    {
+        TileFaces.North => p with { Z = p.Z - 1 },
+        TileFaces.South => p with { Z = p.Z + 1 },
+        TileFaces.West => p with { X = p.X - 1 },
+        _ => p with { X = p.X + 1 },
+    };
+}
+```
+
+<TypeTable
+  type={{
+    Width: {
+      type: 'static int',
+      description: '一行的格子数（x），至少 1。',
+      default: '必须声明',
+    },
+    Depth: {
+      type: 'static int',
+      description: '一层的行数（z），1 到 64：一层的活跃行是一个 64 位字。',
+      default: '必须声明',
+    },
+    Height: {
+      type: 'static int',
+      description: '层数（y）：1 是 2D 瓦片，上下都没有东西。',
+      default: '1',
+    },
+    Faces: {
+      type: 'static TileFaces',
+      description: '有邻居的面；一维瓦片（一行）声明 West | East，立方体组成的 3D 网格声明 All。',
+      default: 'TileFaces.Sides',
+    },
+    Halo: {
+      type: 'static int',
+      description: '邻居格子这一圈的宽度，以格子、行和层计：模板读到 r 个格子之外就需要 r。',
+      default: '1',
+    },
+    Neighborhood: {
+      type: 'static TileNeighborhood',
+      description: '读进光环的瓦片：Faces（von Neumann）、FacesAndEdges，或 All（Moore：连角也要）。',
+      default: 'TileNeighborhood.Faces',
+    },
+    Boundary: {
+      type: 'static TileBoundary',
+      description: '没有邻居处光环里放什么：Fill（一个值）、Clamp（重复边缘格子）或 Mirror（镜像）。',
+      default: 'TileBoundary.Fill',
+    },
+  }}
+/>
+
+瓦片在 (x, y, z) 的格子是它的缓冲的第 `(y * Depth + z) * Width + x` 个元素：每行 `Width` 个格子（x），每层 `Depth` 行（z），共
+`Height` 层（y）。
+
+</Step>
+<Step>
+
+### 给每块瓦片放格子 [#cells]
+
+格子是瓦片实体上的 `DynamicBuffer<TCell>`，元素可以是任意 unmanaged struct（一个 `float`、一个 `byte`，或两者组成的 struct）。
+第二个缓冲放着色器写出的下一步，这样没有瓦片会读到已经更新过的邻居。`SetCount` 一次定好两个缓冲的大小：
+
+```csharp
+public record struct Temperature(float Value);     // 格子，每块板 256 个
+public record struct NextTemperature(float Value); // 下一步，所有板都走完后再提交
+```
+
+```csharp
+var plate = world.CreateEntity(new HeatPlate(new PlatePos(0, 0)));
+plate.GetOrAddTemperature().SetCount(16 * 16);
+plate.GetOrAddNextTemperature().SetCount(16 * 16);
+```
+
+经常生成瓦片的网格可以从带两个缓冲的[预制体](/zh/docs/guide/prefabs#prefab-buffers)实例化。
+
+</Step>
+<Step>
+
+### 写着色器 [#shader]
+
+接收 `Tile<TCell, TTile>` 的 `[ForEach]` 方法就是着色器。生成器每个实体在键的索引里找一次瓦片的邻居，声明读取（索引、每块瓦片的格子缓冲），
+把形状和缓冲加进方法的过滤条件，并让方法保持并行。
+
+- **`tile.Pad()`** 把瓦片的格子拷进这个线程的一张纹理，每层外面一圈 `Halo` 个格子，取自邻居朝向它的边（MPI 光环交换里的幽灵格子；
+  没有邻居时按形状的 `Boundary`）。之后循环采样邻居没有边界情况，每个邻居读到的都是这一遍之前的样子。
+- **`padded.Rows(reads)`** 只访问有不为零的格子、或者会读到这样一行的行：加载时每行记一位，遍历时每一行用一次 `TrailingZeroCount` 找到。
+  冷的或干的一行没有开销。
+- **`padded.At(row)`** 是一行上的游标：`Load128<T>(dx, dy, dz)` 读相隔一个格子、一层或一行的 16 个字节（四个 float、十六个字节格子），
+  按光环检查范围。`Load256` 和 `LoadVector` 读更宽的向量。
+
+```csharp
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+
+public class DiffuseSystem : EcsSystem
+{
+    const float Rate = 0.2f;
+
+    [ForEach(Parallel = true, ChunkRows = 64)]
+    static void Diffuse(Tile<Temperature, HeatPlate> heat, Mut<DynamicBuffer<NextTemperature>> next)
+    {
+        var plate = heat.Pad();
+        var into = MemoryMarshal.Cast<NextTemperature, float>(next.Write().AsSpan());
+        foreach (var row in plate.Rows(TileReads.Layer))
+        {
+            var cells = plate.At(row);
+            for (int x = 0; x < 16; x += Vector128<float>.Count)
+            {
+                var here = cells.Load128<float>(x);
+                var around = cells.Load128<float>(x - 1) + cells.Load128<float>(x + 1)
+                    + cells.Load128<float>(x, 0, -1) + cells.Load128<float>(x, 0, 1);
+                (here + (around - here * 4f) * Rate).CopyTo(into.Slice(row.Index + x));
+            }
+        }
+    }
+}
+```
+
+`TileReads` 说明模板在一行周围读什么（`Self`、`NorthSouth`、`Above`、`Below`、`Diagonals`，以及组合：2D 用 `Layer`，3D 七点模板用
+`Cross`，还有 `All`）：读到的这些行里有不为零的格子，这一行才被访问。这适合“读到的全是零、结果也是零”的模板（冷处不会升温，水不会凭空流出）；
+带源项的模板用 `Rows(TileReads.All)` 或者遍历每一行。
+
+</Step>
+<Step>
+
+### 提交这一步 [#commit]
+
+这一遍读一个缓冲、写另一个；所有瓦片都走完后，后面的系统把下一步拷回格子（乒乓缓冲）。两个缓冲都不清空：这一遍会写它之后要读的每一行，
+模板掩码跳过的行在两个缓冲里都是零，因为提交拷过上一步。
+
+```csharp
+public class CommitHeatSystem : EcsSystem
+{
+    [ForEach]
+    static void Commit(in DynamicBuffer<NextTemperature> next, Mut<DynamicBuffer<Temperature>> cells)
+    {
+        var into = MemoryMarshal.Cast<Temperature, NextTemperature>(cells.Write().AsSpan());
+        next.AsReadOnlySpan().CopyTo(into);
+    }
+}
+```
+
+提交系统加在着色器之后（先 `world.AddSystem<DiffuseSystem>()`，再 `AddSystem<CommitHeatSystem>()`）：它写着色器要读的
+`DynamicBuffer<Temperature>`，所以两者不会在同一个并行阶段。
+
+</Step>
+</Steps>
+
+### 更宽的光环、棱和角 [#halo]
+
+形状上另有三个静态成员决定光环里放什么。它们都有默认值，JIT 像折叠尺寸一样折叠它们：
+
+- **`Halo`**（默认 1）是这一圈的宽度：模板读到 r 个格子之外就需要 r，比如四阶拉普拉斯算子（每条轴五个点，r = 2）。游标的采样最远到 r，
+  `Rows(reads)` 把行掩码向外扩 r。光环在每条有邻居的轴上最多和瓦片一样宽，再宽就越过了旁边的瓦片
+  （[EECS072](/zh/docs/guide/analyzer#eecs072)，第一次加载时也会抛出异常）。
+- **`Neighborhood`**（默认 `Faces`）选择读进这一圈棱和角的瓦片：`Faces`（von Neumann：2D 4 块，3D 6 块）、`FacesAndEdges`（8 或 18 块）
+  或 `All`（Moore：8 或 26 块）。九点模板（生命游戏、盒式模糊）需要 `All`；七点模板不读角，也就省下多出来的查找。
+  `tile.Beside(dx, dy, dz)` 返回其中任意一块，`tile.Beside(face)` 返回某个面对面的那块。
+- **`Boundary`**（默认 `Fill`）是没有邻居处光环里放什么：`Pad(from, to, fill)` 的填充值（Dirichlet 边界）、重复瓦片的边缘格子（`Clamp`），
+  或在边缘镜像瓦片的格子（`Mirror`，零通量的 Neumann 边界）。周期网格不需要模式：它的 `Beside` 回绕，每块瓦片都有邻居。
+
+```csharp
+// 16 x 16 字节格子的板上的生命游戏：九点模板，所以角也要。
+public partial record struct LifePlate([IndexKey] PlatePos Pos) : IComponent, ITile<PlatePos>
+{
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
+    static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
+
+    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
+    {
+        TileFaces.North => p with { Z = p.Z - 1 },
+        TileFaces.South => p with { Z = p.Z + 1 },
+        TileFaces.West => p with { X = p.X - 1 },
+        _ => p with { X = p.X + 1 },
+    };
+}
+
+public record struct Alive(byte Value);
+public record struct NextAlive(byte Value);
+
+// 规则，步进一块板的系统共用：三个邻居时出生，两个或三个时存活。
+public static class LifeRule
+{
+    public static void Step(Tile<Alive, LifePlate> life, Span<byte> into)
+    {
+        var plate = life.Pad();
+        foreach (var row in plate.Rows(TileReads.Layer))
+        {
+            var c = plate.At(row); // 一行 16 个格子就是一个 Vector128<byte>
+            var count = c.Load128<byte>(-1, 0, -1) + c.Load128<byte>(0, 0, -1) + c.Load128<byte>(1, 0, -1)
+                + c.Load128<byte>(-1) + c.Load128<byte>(1)
+                + c.Load128<byte>(-1, 0, 1) + c.Load128<byte>(0, 0, 1) + c.Load128<byte>(1, 0, 1);
+            var born = Vector128.Equals(count, Vector128.Create((byte)3));
+            var stays = Vector128.Equals(count, Vector128.Create((byte)2)) & c.Load128<byte>();
+            ((born | stays) & Vector128<byte>.One).CopyTo(into.Slice(row.Index));
+        }
+    }
+}
+
+public class LifeSystem : EcsSystem
+{
+    [ForEach(Parallel = true, ChunkRows = 64)]
+    static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next) =>
+        LifeRule.Step(life, MemoryMarshal.Cast<NextAlive, byte>(next.Write().AsSpan()));
+}
+```
+
+瓦片每遍走一步。一次加载走多步的深光环（时间分块）测量过后放弃了：每一步还要算下一步读的光环格子，格子装得进缓存的网格上，
+k 遍普通的遍历更快（[D77](/zh/docs/decisions#d77-tiles)）。
+
+### 让安静的瓦片休眠 [#sleep]
+
+`tile.ChangedEdges(next, out bool changed)` 把一步的结果和瓦片的格子比较，返回边缘变了的面（离这个面 `Halo` 以内的格子，对面的邻居会读它们）。
+瓦片没变、旁边瓦片朝向它的边缘也没变时，下一步会算出同样的结果，可以休眠；`tile.Facing(edges)` 给出要唤醒的邻居。
+用一个标签标出醒着的瓦片，网格的开销就只是活跃瓦片的开销：
+
+```csharp
+public struct Awake : IComponent;                                            // 瓦片还可能变
+public record struct LifeChange(TileFaces Edges, bool Changed) : IComponent; // 它上一步改了什么
+
+public class SparseLifeSystem : EcsSystem
+{
+    [ForEach(Parallel = true, ChunkRows = 64), With<Awake>]
+    static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next, ref LifeChange change)
+    {
+        var step = next.Write().AsSpan();
+        LifeRule.Step(life, MemoryMarshal.Cast<NextAlive, byte>(step));
+        var edges = life.ChangedEdges(MemoryMarshal.Cast<NextAlive, Alive>(step), out bool changed);
+        change = new LifeChange(edges, changed);
+    }
+}
+
+public class SleepSystem : EcsSystem
+{
+    [ForEach, With<Awake>]
+    static void Sleep(Entity plate, in LifeChange change)
+    {
+        if (!change.Changed) plate.RemoveAwake();
+    }
+}
+
+public class WakeSystem : EcsSystem
+{
+    [ForEach, With<Awake>]
+    void Wake(in LifeChange change, Tile<Alive, LifePlate> life)
+    {
+        foreach (var id in life.Facing(change.Edges)) World.GetEntity(id).SetAwake();
+    }
+}
+```
+
+提交也加上 `With<Awake>`，新瓦片创建时是醒着的：第一步决定它要不要休眠。穿过网格的波会唤醒前方的瓦片，让身后的瓦片休眠。
+`TileActiveBenchmark` 对比了大部分安静的网格和每块都步进。
+
+### 一次数组读取找到邻居：直接映射的键 [#direct-index]
+
+生成器在键的索引里找瓦片的邻居，每个一次哈希探测（每块瓦片每遍 4 到 26 个）。键能映射到有界的槽位范围时（固定地图上的板、玩家周围加载的区块，
+彼此不会相隔 64），瓦片再实现 [`IDirectIndexed<TKey>`](/zh/docs/guide/indexes-and-relations#direct-index) 并用 `[UniqueKey]`，
+每次查找就是一次数组读取：
+
+```csharp
+public partial record struct MapPlate([UniqueKey] PlatePos Pos)
+    : IComponent, ITile<PlatePos>, IDirectIndexed<PlatePos>
+{
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
+    static int IDirectIndexed<PlatePos>.Slots => 64 * 64;
+    static int IDirectIndexed<PlatePos>.SlotOf(PlatePos p) => (p.Z & 63) * 64 + (p.X & 63);
+
+    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
+    {
+        TileFaces.North => p with { Z = p.Z - 1 },
+        TileFaces.South => p with { Z = p.Z + 1 },
+        TileFaces.West => p with { X = p.X - 1 },
+        _ => p with { X = p.X + 1 },
+    };
+}
+```
+
+超出范围或槽位已被占用的键仍然能找到，走哈希。VoxelServer 的 `Chunk` 就是这样的瓦片。
+
+### 常见做法：波前、红黑、可分离核、多个字段 [#patterns]
+
+- **跨瓦片的波前（波前传播、洪水填充、距离场）。** 一步只把信息传到模板读到的距离，一个格子，所以每块瓦片读邻居上一步结果的松弛迭代
+  （Jacobi）要 O(直径) 遍才能穿过网格；配合休眠，只有波前在计算。
+- **红黑排序（Gauss-Seidel）。** 按位置的奇偶给瓦片打标签（`Red`、`Black`），每个 tick 走两步：红瓦片先步进并提交（两个系统都加
+  `[With<Red>]`），黑瓦片再从提交后的红瓦片步进（`[With<Black>]`）。每一半读到的另一种颜色都是本 tick 更新过的，所以松弛需要的 tick
+  比 Jacobi 少，每一半仍是一遍并行。
+- **可分离核拆成两个系统。** 先沿 x 再沿 z 的高斯模糊是两个系统：第一个沿 x 读瓦片（`TileReads.Self`），写进中间缓冲；第二个接收那个缓冲的
+  `Tile`，沿 z 读。每遍 2r + 1 次采样，而不是 (2r + 1)²，中间缓冲是它自己的格子类型。
+- **每个字段一种格子类型。** 瓦片填充一个 `DynamicBuffer<TCell>`。有多个字段的网格（水和方块、温度和压力）每个字段一种格子类型，每个字段接收一个
+  `Tile`（`Tile<Fluid, Chunk> water, Tile<Block, Chunk> blocks`）：每个字段各自填充，用同样的偏移采样。同一格子类型和网格的两个瓦片会共用线程的纹理
+  （[EECS073](/zh/docs/guide/analyzer#eecs073)）。
+
+{/* TODO(water overlap): MPI 式的内部/外圈重叠（区块内部先着色，外圈等光环）以及只交换变化过的边的光环交换。各在这里写一条，
+链接 samples/voxel-server 的小节。 */}
+
+### 来自 CUDA 和 MPI 的名字 [#names]
+
+这些名字来自 CUDA 和 MPI，它们在 GPU 上和跨机器时解决的是同一个问题：
+
+| EasyEcs | CUDA | MPI |
+| --- | --- | --- |
+| 一块瓦片（一个实体和它的 `DynamicBuffer<TCell>`） | 线程块的分块（tile） | 一个 rank 的子区域 |
+| `Halo` | apron | 幽灵格子的宽度（halo 深度） |
+| `tile.Pad()` | 把分块和 apron 载入共享内存 | 光环交换 |
+| `TileNeighborhood.Faces` / `All` | von Neumann / Moore 模板 | 只交换面 / 交换面、棱和角 |
+| `TileBoundary.Fill` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / 钳制 / Neumann 边界 |
+| 回绕的 `Beside` | `cudaAddressModeWrap` | 带周期维度的 `MPI_Cart_create` |
+| 步进之后的提交系统 | 乒乓缓冲 | Jacobi 迭代的新旧两个数组 |
+
+## 完整例子 [#full-example]
+
+三块排成一行的板上的生命游戏。板 0 上是一个方块，永远不变，所以第一步之后就休眠；板 1 东边缘上是一个闪烁子，它通过光环伸进板 2，
+把板 2 唤醒。把这些文件放进一个引用 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// 板在网格里的位置：它的键。
+public record struct PlatePos(int X, int Z);
+
+// 16 x 16 个格子的一块板：瓦片的形状、它的键，以及每个面对面那块板的键。
+// 生命游戏数周围八个格子，所以也要读对角上的板。
+public partial record struct Plate([IndexKey] PlatePos Pos) : IComponent, ITile<PlatePos>
+{
+    public const int Size = 16;
+
+    static int ITileShape.Width => Size;
+    static int ITileShape.Depth => Size;
+    static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
+
+    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
+    {
+        TileFaces.North => p with { Z = p.Z - 1 },
+        TileFaces.South => p with { Z = p.Z + 1 },
+        TileFaces.West => p with { X = p.X - 1 },
+        _ => p with { X = p.X + 1 },
+    };
+}
+
+// 一个格子：1 活，0 死。一块板的 DynamicBuffer<Cell> 里有 256 个。
+public record struct Cell(byte Alive);
+
+// 格子的下一步，着色器写出，所有板都走完后再提交。
+public record struct NextCell(byte Alive);
+
+// 板上一步改了什么：有没有改，以及邻居会读的哪些边。
+public record struct Change(TileFaces Edges, bool Changed) : IComponent;
+
+// 还可能变的板。其余的休眠，没有开销。
+public struct Awake : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using EasyEcs;
+
+// 着色器：每块醒着的板走一步生命游戏，板之间并行。
+public class StepSystem : EcsSystem
+{
+    [ForEach(Parallel = true, ChunkRows = 64), With<Awake>]
+    static void Step(Tile<Cell, Plate> life, Mut<DynamicBuffer<NextCell>> next, ref Change change)
+    {
+        var step = next.Write().AsSpan();
+        var into = MemoryMarshal.Cast<NextCell, byte>(step);
+
+        // 四周围着一圈邻居格子的板：下面没有边界情况。
+        var plate = life.Pad();
+
+        // 只访问有活格子或挨着这样一行的行。
+        foreach (var row in plate.Rows(TileReads.Layer))
+        {
+            // 一行 16 个字节格子就是一个 Vector128<byte>。
+            var c = plate.At(row);
+            var above = c.Load128<byte>(-1, 0, -1) + c.Load128<byte>(0, 0, -1) + c.Load128<byte>(1, 0, -1);
+            var below = c.Load128<byte>(-1, 0, 1) + c.Load128<byte>(0, 0, 1) + c.Load128<byte>(1, 0, 1);
+            var around = above + c.Load128<byte>(-1) + c.Load128<byte>(1) + below;
+            var born = Vector128.Equals(around, Vector128.Create((byte)3));
+            var stays = Vector128.Equals(around, Vector128.Create((byte)2)) & c.Load128<byte>();
+            ((born | stays) & Vector128<byte>.One).CopyTo(into.Slice(row.Index));
+        }
+
+        var edges = life.ChangedEdges(MemoryMarshal.Cast<NextCell, Cell>(step), out bool changed);
+        change = new Change(edges, changed);
+    }
+}
+
+// 乒乓：所有板都走完后，下一步才变成格子，
+// 所以没有板会读到邻居的新格子。
+public class CommitSystem : EcsSystem
+{
+    [ForEach, With<Awake>]
+    static void Commit(in Change change, in DynamicBuffer<NextCell> next, Mut<DynamicBuffer<Cell>> cells)
+    {
+        if (!change.Changed) return;
+        var into = MemoryMarshal.Cast<Cell, NextCell>(cells.Write().AsSpan());
+        next.AsReadOnlySpan().CopyTo(into);
+    }
+}
+
+// 一步什么也没改的板休眠，直到邻居唤醒它。
+public class SleepSystem : EcsSystem
+{
+    [ForEach, With<Awake>]
+    static void Sleep(Entity plate, in Change change)
+    {
+        if (!change.Changed) plate.RemoveAwake();
+    }
+}
+
+// 读到变了的边的邻居，下个 tick 再走一步。
+public class WakeSystem : EcsSystem
+{
+    [ForEach, With<Awake>]
+    void Wake(in Change change, Tile<Cell, Plate> life)
+    {
+        foreach (var id in life.Facing(change.Edges)) World.GetEntity(id).SetAwake();
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Report.cs">
+
+```csharp title="Report.cs" doccheck=example
+using EasyEcs;
+
+public static class Report
+{
+    // 每块板的活格子数，以及它是否醒着。
+    public static string Describe(Entity[] plates)
+    {
+        var line = new System.Text.StringBuilder();
+        foreach (var plate in plates)
+        {
+            int alive = 0;
+            foreach (var cell in plate.Cell.AsReadOnlySpan()) alive += cell.Alive;
+            line.Append($"  [{alive} alive, {(plate.IsAwake ? "awake" : "asleep")}]");
+        }
+        return line.ToString();
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<StepSystem>();
+world.AddSystem<CommitSystem>();
+world.AddSystem<SleepSystem>();
+world.AddSystem<WakeSystem>();
+
+// 三块排成一行的板，都醒着：第一步决定谁休眠。
+var plates = new Entity[3];
+for (int x = 0; x < 3; x++)
+{
+    plates[x] = world.CreateEntity(new Plate(new PlatePos(x, 0)), new Change(), new Awake());
+    plates[x].GetOrAddCell().SetCount(Plate.Size * Plate.Size);
+    plates[x].GetOrAddNextCell().SetCount(Plate.Size * Plate.Size);
+}
+
+// 板 0：一个方块，永远不变。板 1：东边缘上的一个闪烁子，会伸进板 2。
+Seed(plates[0], (7, 7), (8, 7), (7, 8), (8, 8));
+Seed(plates[1], (15, 6), (15, 7), (15, 8));
+
+Console.WriteLine($"tick 0{Report.Describe(plates)}");
+for (int tick = 1; tick <= 3; tick++)
+{
+    world.Update();
+    Console.WriteLine($"tick {tick}{Report.Describe(plates)}");
+}
+
+static void Seed(Entity plate, params (int X, int Z)[] cells)
+{
+    var span = plate.WriteCell().AsSpan();
+    foreach (var (x, z) in cells) span[z * Plate.Size + x] = new Cell(1);
+}
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+tick 0  [4 alive, awake]  [3 alive, awake]  [0 alive, awake]
+tick 1  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
+tick 2  [4 alive, asleep]  [3 alive, awake]  [0 alive, awake]
+tick 3  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
+```
+
+板 0 上的方块第一步什么也没改，所以这块板休眠，之后再也不步进。闪烁子在板 1 和板 2 之间翻转：板 2 通过光环读板 1 的东边缘，
+所以每隔一个 tick 在自己的西边缘上出生一个格子，两块板通过 `Facing` 互相保持醒着。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 不要 | 要 | 为什么 |
+| --- | --- | --- |
+| 每个格子用一次 `Lookup<T>` 读另一块瓦片的格子 | `Tile<TCell, TTile>` 参数和 `Pad()` | 每遍每条朝向的边只拷一次，之后采样没有边界情况 |
+| 每次 `Load` 一个格子 | 对一行格子用 `Load128` / `Load256` | 一行 16 个字节格子就是一条指令 |
+| 2D 五点模板用 `Rows(TileReads.All)` | `Rows(TileReads.Layer)`（3D 用 `Cross`） | 访问的行更少，结果相同 |
+| 每块瓦片都步进 | `ChangedEdges`、`Facing` 和一个 `Awake` 标签 | 网格的开销只是活跃瓦片的开销 |
+| 通过哈希找邻居 | `IDirectIndexed<TKey>` 加 `[UniqueKey]` | 每个邻居一次数组读取 |
+| 一个 `byte` 就放得下的值用 `float` 格子 | 放得下的最窄的格子 | 每个向量多四倍的格子 |
+| 每遍都清空下一步的缓冲 | 写这一遍之后要读的每一行 | 不必把这一遍本来就要重写的内存整个写一遍 |
+
+`TileStencilBenchmark` 在 32 x 32 块、每块 16 x 16 个格子的板上跑九点模糊和四阶拉普拉斯算子，对比瓦片、直接映射的瓦片和手写版本
+（每个邻居一次 `Lookup`、栈上一张带填充的纹理）；`TileActiveBenchmark` 对比大部分安静的网格休眠与不休眠；`TileNeighborBenchmark`
+测找邻居。水着色器手写版本和瓦片版本的实测数字见 [D77](/zh/docs/decisions#d77-tiles)。
+
+{/* TODO(bench): bench.json 有了 TileStencilBenchmark 和 TileActiveBenchmark 之后加上 <BenchTable bench="TileStencilBenchmark" />
+和 <BenchTable bench="TileActiveBenchmark" />。 */}
+
+## 开销 [#what-it-costs]
+
+- **每块瓦片每遍：** 形状的邻居范围里每个邻居查找一次（4 到 26 个，每个一次哈希探测，`IDirectIndexed` 下是一次数组读取），每个实体只做一次，
+  方法里同一网格的瓦片参数共用。
+- **每次 `Pad`：** 拷贝瓦片的格子和邻居朝向它的边，O(层数 × (Width + 2r) × (Depth + 2r))，外加每行一位。线程有了纹理之后不再分配。
+- **内存：** 每个线程、每种（格子类型，瓦片类型）一张纹理，在线程第一次加载时分配，大小是瓦片的格子加上光环；格子本身是动态缓冲
+  （带下一步缓冲时每块瓦片两个）。
+- **休眠的瓦片：** `ChangedEdges` 按字节逐行比较下一步和格子，O(格子数)；休眠的瓦片每遍没有开销。
+- **不用时：** 没有开销。没有瓦片参数的 World 不查找邻居，没有纹理，也没有掩码。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 同一个方法里有 `Tile` 参数又写它的格子缓冲 | 读邻居的同时别的线程在写它们 | [EECS059](/zh/docs/guide/analyzer#eecs059)：写第二个缓冲 |
+| 光环比瓦片还宽 | 会越过旁边的瓦片 | [EECS072](/zh/docs/guide/analyzer#eecs072)，第一次加载时也会抛出异常 |
+| 一个方法里有同一格子类型和网格的两个瓦片 | 第二次 `Pad` 覆盖线程纹理里的第一次 | [EECS073](/zh/docs/guide/analyzer#eecs073)：每个字段一种格子类型 |
+| 一遍读到了同一遍里已更新的格子 | 结果取决于访问顺序和线程数 | 代码审查：写进下一步的缓冲，之后再提交 |
+| 读到的全是零时结果不为零的模板用 `Rows(reads)` | 跳过的行留着上一步的值 | 代码审查：`Rows(TileReads.All)` 或遍历每一行 |
+| 九点模板用默认的 `Neighborhood` | 光环的角放的是边界值，不是对角的瓦片 | 测试：`TileNeighborhood.All` |
+| 格子缓冲比形状的格子少 | `Pad` 抛出异常 | 创建时用 `SetCount` 定好两个缓冲的大小 |
+| 新瓦片第一步之前就休眠 | 它永远不会读到创建时旁边的邻居 | 创建时让瓦片醒着 |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="高性能写法" href="/zh/docs/guide/high-performance">
+    向量循环、并行块和批处理方法，以及瓦片在其中的位置。
+  </Card>
+  <Card title="动态缓冲" href="/zh/docs/guide/dynamic-buffers">
+    瓦片的格子：`SetCount`、缓冲池和变更追踪。
+  </Card>
+  <Card title="索引与关系" href="/zh/docs/guide/indexes-and-relations#direct-index">
+    找到瓦片用的键，以及直接映射的键。
+  </Card>
+  <Card title="VoxelServer" href="/zh/docs/samples/voxel-server">
+    水：16 x 16 x 32 方块的区块作为瓦片，一个着色器、一张模板掩码和休眠的区块。
+  </Card>
+</Cards>

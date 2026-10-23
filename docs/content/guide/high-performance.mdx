@@ -80,8 +80,13 @@ A row's working list (the candidates of a search, a frontier) is a `Scratch<T>`:
 OpenMP's `threadprivate`, allocated once per thread and cleared by the row; a small buffer with a fixed bound is a
 `stackalloc` span: [scratch](/en/docs/guide/threading#scratch). Another entity's component is read through a
 `Lookup<T>`, MPI's one-sided `Get`: every read sees the value from before the pass, so the method stays parallel:
-[lookups](/en/docs/guide/threading#lookups). Neither adds an atomic per row: [how the runner
-synchronizes](/en/docs/guide/threading#runner-contract).
+[lookups](/en/docs/guide/threading#lookups). Records a pass produces for a later system (hits, packets) are an
+`Emit<T>`, appended per chunk and joined in row order: [emit](/en/docs/guide/threading#emit). Random numbers come from
+`EntityRandom`, a pure function of the entity, the tick and a stream, so a parallel pass draws the same numbers on
+any thread count: [random numbers](/en/docs/guide/threading#entity-random). None of them adds an atomic per row:
+[how the runner synchronizes](/en/docs/guide/threading#runner-contract). Data that is not rows (an `Emitted<T>`'s
+records, a range of indexes) runs on the same runner through
+[`world.ForParallel`](/en/docs/guide/threading#for-parallel).
 
 </Step>
 
@@ -102,235 +107,19 @@ sample is that loop: [SIMD where the data is a column](/en/docs/samples/voxel-se
 
 A grid whose next value is a function of its neighbors (water, light, heat) runs like a GPU draws. The grid is cut
 into tiles, one entity each: a component that is the tile's shape and key (`ITile<TKey>`) and a `DynamicBuffer<T>` of
-its cells. A `[ForEach]` method that takes a `Tile<TCell, TTile>` parameter is the shader, and the generator writes the
-rest: it finds the tile's neighbors in the key's index once per entity, declares the reads (the index, the cell
-buffer of every tile), adds the shape and the buffer to the method's filter, and keeps the method parallel.
+its cells. A `[ForEach]` method that takes a `Tile<TCell, TTile>` parameter is the shader; the generator finds the
+neighbors, declares the reads and keeps the method parallel. `tile.Pad()` copies the tile with a ring of its
+neighbors' edges into a texture of the thread (an MPI halo exchange), `padded.Rows(reads)` visits only the rows a
+stencil can change (a bit per row, found with `TrailingZeroCount`), `At(row).Load128` samples the cells around with
+vectors, and a commit system after the pass is the ping-pong. How to declare a tile, write the shader, commit and
+sleep the quiet tiles, with a full example: [grid tiles](/en/docs/guide/grids).
 
-- **A halo.** `tile.Pad()` copies the tile's cells into a padded texture of this thread, with a ring of `Halo` cells
-  (one by default) around each layer taken from the facing edges of its neighbors (the ghost cells of an MPI halo
-  exchange; where there is no neighbor, the shape's `Boundary`), and, for a tile of several layers, as many layers
-  under and over. The loop then samples neighbors with no edge case, and the method still reads every neighbor as
-  it was before the pass.
-- **A shader per row.** `padded.At(row)` is a cursor on a row; `Load128<T>(dx, dy, dz)` reads 16 bytes (four floats,
-  sixteen byte cells) one cell, layer or row away, checked against the halo, so one row of cells is a few vector
-  instructions and tiles run in parallel.
-- **A stencil.** The load records which rows hold a cell that is not zero, a bit per row; `padded.Rows(TileReads.Layer)`
-  visits a row only when it or a row it reads is not zero, each found with one `TrailingZeroCount` (TZCNT), so a cold
-  or dry row costs nothing.
-- **Ping-pong without clearing.** The pass reads one buffer and writes another, then a commit copies it back once
-  every tile has stepped, so no cell reads a neighbor already updated. Neither buffer is cleared: the pass writes
-  every cell it later reads, and a row the stencil skips is zero in both, since the commit copied the last step.
+#### Halo, neighborhood and boundary [#grid-halo]
 
-Heat spreading over plates of 16 x 16 temperatures, a five-point stencil:
-
-```csharp
-using System.Runtime.InteropServices;
-using System.Runtime.Intrinsics;
-
-public record struct PlatePos(int X, int Z);
-
-// A plate of 16 x 16 cells, found by its position; its neighbors are the plates beside it.
-public record struct HeatPlate(PlatePos Pos) : IComponent, ITile<PlatePos>
-{
-    readonly PlatePos IIndexed<PlatePos>.Key => Pos;
-    static int ITileShape.Width => 16;
-    static int ITileShape.Depth => 16;
-
-    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
-    {
-        TileFaces.North => p with { Z = p.Z - 1 },
-        TileFaces.South => p with { Z = p.Z + 1 },
-        TileFaces.West => p with { X = p.X - 1 },
-        _ => p with { X = p.X + 1 },
-    };
-}
-
-public record struct Temperature(float Value);     // the cells, 256 per plate
-public record struct NextTemperature(float Value); // the step, committed once every plate has stepped
-
-public class DiffuseSystem : EcsSystem
-{
-    const float Rate = 0.2f;
-
-    [ForEach(Parallel = true, ChunkRows = 64)]
-    static void Diffuse(Tile<Temperature, HeatPlate> heat, Mut<DynamicBuffer<NextTemperature>> next)
-    {
-        var plate = heat.Pad();
-        var into = MemoryMarshal.Cast<NextTemperature, float>(next.Write().AsSpan());
-        foreach (var row in plate.Rows(TileReads.Layer))
-        {
-            var cells = plate.At(row);
-            for (int x = 0; x < 16; x += Vector128<float>.Count)
-            {
-                var here = cells.Load128<float>(x);
-                var around = cells.Load128<float>(x - 1) + cells.Load128<float>(x + 1)
-                    + cells.Load128<float>(x, 0, -1) + cells.Load128<float>(x, 0, 1);
-                (here + (around - here * 4f) * Rate).CopyTo(into.Slice(row.Index + x));
-            }
-        }
-    }
-}
-```
-
-The VoxelServer water is the same loop over chunks of 16 x 16 x 32 blocks, six neighbors per cell, a byte per cell:
-[where the ideas come from](/en/docs/samples/voxel-server#ideas) and [water](/en/docs/samples/voxel-server#water).
-
-#### Wider halos, edges and corners [#grid-halo]
-
-Three more static members of the shape decide what the halo holds; each has a default, and the JIT folds them like
-the sizes:
-
-- **`Halo`** (default 1) is the width of the ring, in cells, rows and layers: what a stencil reaching r cells away
-  needs, such as the fourth-order Laplacian (five points along each axis, r = 2). A cursor's samples reach up to r
-  away, and `Rows(reads)` widens its row mask by r.
-- **`Neighborhood`** (default `Faces`) picks the tiles found and copied into the ring's edges and corners: `Faces`
-  (von Neumann: 4 tiles in 2D, 6 in 3D), `FacesAndEdges` (8 or 18) or `All` (Moore: 8 or 26). A nine-point stencil
-  (the Game of Life, a box blur) needs `All`; a seven-point one reads no corner, so it skips the extra searches.
-  `tile.Beside(dx, dy, dz)` returns any of them.
-- **`Boundary`** (default `Fill`) is what the halo holds where there is no neighbor: the fill value (a Dirichlet
-  boundary), the tile's edge cell repeated (`Clamp`) or its cells mirrored at the edge (`Mirror`, a zero-flux Neumann
-  boundary). A periodic grid needs no mode: its `Beside` wraps around, so every tile has neighbors.
-
-A halo wider than the tile would reach past the tile beside, which is EECS072 (and an exception at the first load);
-a 1D tile is a shape of one row with `Faces => TileFaces.West | TileFaces.East`.
-
-```csharp
-// The Game of Life on plates of 16 x 16 byte cells: nine points, so the corners too.
-public record struct LifePlate(PlatePos Pos) : IComponent, ITile<PlatePos>
-{
-    readonly PlatePos IIndexed<PlatePos>.Key => Pos;
-    static int ITileShape.Width => 16;
-    static int ITileShape.Depth => 16;
-    static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
-
-    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
-    {
-        TileFaces.North => p with { Z = p.Z - 1 },
-        TileFaces.South => p with { Z = p.Z + 1 },
-        TileFaces.West => p with { X = p.X - 1 },
-        _ => p with { X = p.X + 1 },
-    };
-}
-
-public record struct Alive(byte Value);
-public record struct NextAlive(byte Value);
-
-// The rule, shared by the systems that step a plate: born with three neighbors, alive on with two or three.
-public static class LifeRule
-{
-    public static void Step(Tile<Alive, LifePlate> life, Span<byte> into)
-    {
-        var plate = life.Pad();
-        foreach (var row in plate.Rows(TileReads.Layer))
-        {
-            var c = plate.At(row); // a row of 16 cells is one Vector128<byte>
-            var count = c.Load128<byte>(-1, 0, -1) + c.Load128<byte>(0, 0, -1) + c.Load128<byte>(1, 0, -1)
-                + c.Load128<byte>(-1) + c.Load128<byte>(1)
-                + c.Load128<byte>(-1, 0, 1) + c.Load128<byte>(0, 0, 1) + c.Load128<byte>(1, 0, 1);
-            var born = Vector128.Equals(count, Vector128.Create((byte)3));
-            var stays = Vector128.Equals(count, Vector128.Create((byte)2)) & c.Load128<byte>();
-            ((born | stays) & Vector128<byte>.One).CopyTo(into.Slice(row.Index));
-        }
-    }
-}
-
-public class LifeSystem : EcsSystem
-{
-    [ForEach(Parallel = true, ChunkRows = 64)]
-    static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next) =>
-        LifeRule.Step(life, MemoryMarshal.Cast<NextAlive, byte>(next.Write().AsSpan()));
-}
-```
-
-The names come from CUDA and MPI, which solve the same problem on a GPU and across machines:
-
-| EasyEcs | CUDA | MPI |
-| --- | --- | --- |
-| a tile (an entity and its `DynamicBuffer<TCell>`) | a thread block's tile | a rank's subdomain |
-| `Halo` | the apron | the ghost width (halo depth) |
-| `tile.Pad()` | the tile and its apron loaded into shared memory | a halo exchange |
-| `TileNeighborhood.Faces` / `All` | a von Neumann / Moore stencil | the face / face, edge and corner exchanges |
-| `TileBoundary.Fill` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / clamped / Neumann boundary |
-| a `Beside` that wraps | `cudaAddressModeWrap` | `MPI_Cart_create` with periodic dimensions |
-| a commit system after the step | ping-pong buffers | the old and new arrays of a Jacobi sweep |
-
-A tile takes one step per pass. A deeper halo that runs several steps per load (temporal blocking) was measured and
-dropped: each step also computes the halo cells the next one reads, and on grids whose cells fit the cache k plain
-passes were faster ([D77](/en/docs/decisions#d77-tiles)).
-
-#### Sleep the quiet tiles [#grid-active]
-
-`tile.ChangedEdges(next, out bool changed)` compares a step with the tile's cells and returns the faces whose edge (the
-cells within `Halo` of the face, which the neighbor across it reads) changed. A tile that did not change, beside
-tiles whose facing edges did not change, would compute the same step again, so it can sleep; `tile.Facing(edges)` names
-the neighbors to wake. With a tag that marks the tiles awake, a grid costs what its active tiles cost:
-
-```csharp
-public struct Awake : IComponent;                                        // the tile may still change
-public record struct LifeChange(TileFaces Edges, bool Changed) : IComponent; // what its last step changed
-
-public class SparseLifeSystem : EcsSystem
-{
-    [ForEach(Parallel = true, ChunkRows = 64), With<Awake>]
-    static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next, ref LifeChange change)
-    {
-        var step = next.Write().AsSpan();
-        LifeRule.Step(life, MemoryMarshal.Cast<NextAlive, byte>(step));
-        var edges = life.ChangedEdges(MemoryMarshal.Cast<NextAlive, Alive>(step), out bool changed);
-        change = new LifeChange(edges, changed);
-    }
-}
-
-public class SleepSystem : EcsSystem
-{
-    [ForEach, With<Awake>]
-    static void Sleep(Entity plate, in LifeChange change)
-    {
-        if (!change.Changed) plate.RemoveAwake();
-    }
-}
-
-public class WakeSystem : EcsSystem
-{
-    [ForEach, With<Awake>]
-    void Wake(in LifeChange change, Tile<Alive, LifePlate> life)
-    {
-        foreach (var id in life.Facing(change.Edges)) World.GetEntity(id).SetAwake();
-    }
-}
-```
-
-The commit runs `With<Awake>` too. A wave that crosses the grid wakes the tiles ahead of it and lets the ones behind it
-sleep. `TileActiveBenchmark` measures a mostly quiet grid against stepping every tile.
-
-#### Patterns: fronts, red-black, separable kernels, several fields [#grid-patterns]
-
-- **A front across tiles (wavefront, flood fill, distance fields).** A step moves information as far as the stencil
-  reads, one cell, so a relaxation in which every tile reads its neighbors' last step (Jacobi) crosses the grid in
-  O(diameter) passes; `Steps` moves it k cells per pass, and with sleeping tiles only the front is computed.
-- **Red-black ordering (Gauss-Seidel).** Tag the tiles by the parity of their position (`Red`, `Black`) and run two
-  steps per tick: the red tiles step and commit (`[With<Red>]` on both systems), then the black tiles step from the
-  committed red ones (`[With<Black>]`). Each half reads the other colour as updated this tick, so a relaxation
-  converges in fewer ticks than Jacobi, and each half is still one parallel pass. Red-black between cells is the same
-  two passes, each writing only the cells of its colour.
-- **Separable kernels as two systems.** A Gaussian blur along x then z is two systems: the first reads the tile
-  along x (`TileReads.Self`) into an intermediate buffer, the second takes a `Tile` of that buffer and reads along z.
-  Each pass is 2r + 1 samples instead of (2r + 1)², and the intermediate buffer is a cell type of its own.
-- **One struct per field.** A tile loads one `DynamicBuffer<TCell>`. A grid with several fields (water and blocks,
-  temperature and pressure) keeps one cell type per field and takes one `Tile` per field
-  (`Tile<Fluid, Chunk> water, Tile<Block, Chunk> blocks`): each field is padded on its own and sampled with the same
-  offsets. Two tiles of the same cell type and grid would share the thread's texture, which is EECS073.
-
-<Callout type="warn" title="When not to use a tile">
-A tile is for cells read with their neighbors, all of a tile at once. A per-cell rule that reads no neighbor is a
-plain `[ForEach]` method over the buffer; a grid that is one entity is a batch method over its span. A halo is at
-most the tile's extent (EECS072), so a stencil reaching farther than the tile beside needs larger tiles. A tile
-parameter beside a write of its cell buffer is [EECS059](/en/docs/guide/analyzer#eecs059).
-</Callout>
-
-{/* TODO(water overlap): the MPI-style interior/ring overlap (the interior of a chunk shaded while its ring waits for
-the halo) and a halo exchange of the changed edges only. Describe them here in one bullet each, linking the
-samples/voxel-server sections. */}
+The shape's `Halo` (how far a stencil reads), `Neighborhood` (faces, edges, corners: 5-, 9- and 27-point stencils)
+and `Boundary` (fill, clamp or mirror where there is no neighbor) decide what the ring holds:
+[wider halos, edges and corners](/en/docs/guide/grids#halo). `ChangedEdges` and `Facing` let quiet tiles sleep:
+[sleep the quiet tiles](/en/docs/guide/grids#sleep).
 
 </Step>
 
@@ -348,16 +137,20 @@ samples/voxel-server sections. */}
 | MPI rank owning a subdomain | one world per thread (a world per zone or map) | [One world per thread](/en/docs/guide/threading#recommended-one-world-per-thread) |
 | MPI send of entities to another rank | `SaveEntities` / `MoveEntities` | [Migration](/en/docs/guide/migration-and-unload#save-entities) |
 | MPI one-sided `MPI_Get`, Unity `ComponentLookup` (`[ReadOnly]`) | a `Lookup<T>` parameter: `T` of any entity, as it was before the pass | [Lookups](/en/docs/guide/threading#lookups) |
-| MPI halo exchange (ghost cells) | `Tile<TCell, TTile>.Pad`: the tile padded with its neighbors' facing edges | [Shade a grid](#grid) |
+| Unity `NativeStream`, GPU stream compaction | an `Emit<T>` parameter: records per chunk, joined in row order into `Emitted<T>` | [Emit](/en/docs/guide/threading#emit) |
+| cuRAND Philox, a counter-based generator | `EntityRandom`: a pure function of (seed, entity, tick, stream) | [Random numbers](/en/docs/guide/threading#entity-random) |
+| Kokkos `RangePolicy`, Unity `IJobParallelForBatch` | `world.ForParallel(count, ref job)` with an `IForRange` / `IForSpan<T>` job | [ForParallel](/en/docs/guide/threading#for-parallel) |
+| MPI halo exchange (ghost cells) | `Tile<TCell, TTile>.Pad`: the tile padded with its neighbors' facing edges | [Grid tiles](/en/docs/guide/grids) |
 | Burst auto-vectorization | vector loops of `[ForEach]` methods | [Vector loops](/en/docs/guide/systems#vector-loops) |
 | Burst `float4` / Unity.Mathematics by hand | a batch method with `Vector<T>` / `Vector128<T>` | [Batch methods](/en/docs/guide/systems#batch-methods) |
 | Burst `IJobParallelFor` batch count | `ChunkRows` | [Chunk size](/en/docs/guide/threading#chunk-rows) |
 | Burst Inspector | EECS055, and `SimdMode = SimdMode.Require` (EECS056) | [Analyzer](/en/docs/guide/analyzer#eecs055) |
-| GPU fragment shader, texture sampling | a `[ForEach]` method over a `Tile<TCell, TTile>`, `Load128` of the cells around | [Shade a grid](#grid) |
-| GPU stencil | `padded.Rows(reads)`: a bit per row, visited with `TrailingZeroCount` | [Shade a grid](#grid) |
-| GPU ping-pong targets | two buffers, read one, write the other, commit | [VoxelServer water](/en/docs/samples/voxel-server#water) |
+| GPU fragment shader, texture sampling | a `[ForEach]` method over a `Tile<TCell, TTile>`, `Load128` of the cells around | [Grid tiles](/en/docs/guide/grids) |
+| GPU stencil | `padded.Rows(reads)`: a bit per row, visited with `TrailingZeroCount` | [Grid tiles](/en/docs/guide/grids) |
+| GPU ping-pong targets | two buffers, read one, write the other, commit | [Grid tiles](/en/docs/guide/grids#commit) |
+| Burst `FloatMode.Fast` | `[ForEach(FloatMode = FloatMode.Fast)]`: vector approximations and float sums in lane order | [Vector loops](/en/docs/guide/systems#float-mode) |
 
-{/* TODO(mapping): rows for Burst's FloatMode.Fast and the MPI interior/ring overlap, once they land. */}
+{/* TODO(mapping): a row for the MPI interior/ring overlap, once it lands. */}
 
 ## How to use it fast [#how-to-use-it-fast]
 
@@ -376,10 +169,7 @@ samples/voxel-server sections. */}
 | Mixing `float` and `int` fields in a method meant to vectorize | It stays scalar | [EECS055](/en/docs/guide/analyzer#eecs055); `SimdMode = SimdMode.Require` makes it an error |
 | A shared counter written by a parallel method | Lost updates | [EECS060](/en/docs/guide/analyzer#eecs060): a [`Reduce<T>`](/en/docs/guide/threading#reductions) instead |
 | `ChunkRows` on many light rows | Many more claims for the same work | Benchmark ([chunk size](/en/docs/guide/threading#chunk-rows)) |
-| A grid pass that reads cells it updated in the same pass | Results depend on the visit order (and on the thread count in parallel) | Tests: write into a second buffer |
-| Clearing the output buffer every pass | A full write of memory the pass rewrites anyway | Review: write the skipped rows instead |
-| Reading another tile's cells by hand from a parallel method | A lookup per row, edge cases per cell | Review: a `Tile<TCell, TTile>` parameter loads the halo once |
-| A `Tile` parameter and a write of its cell buffer in one method | Neighbors read while other threads write them | [EECS059](/en/docs/guide/analyzer#eecs059) |
+| Reading another tile's cells by hand from a parallel method | A lookup per row, edge cases per cell | Review: a `Tile<TCell, TTile>` parameter pads the tile once ([grid tiles](/en/docs/guide/grids#pitfalls)) |
 
 ## Related [#related]
 
@@ -390,10 +180,10 @@ samples/voxel-server sections. */}
   <Card title="Threading and parallel systems" href="/en/docs/guide/threading">
     Owner threads, parallel stages and chunk size.
   </Card>
+  <Card title="Grid tiles" href="/en/docs/guide/grids">
+    Tiles, halos, stencils and sleeping tiles, with a full example.
+  </Card>
   <Card title="VoxelServer" href="/en/docs/samples/voxel-server">
     The water: a shader, a stencil, ping-pong buffers and a halo in a real server.
-  </Card>
-  <Card title="Performance" href="/en/docs/performance">
-    The measured cost of every feature.
   </Card>
 </Cards>

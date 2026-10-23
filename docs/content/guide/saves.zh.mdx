@@ -96,7 +96,7 @@ long tick = restarted.Clock.Tick;                                      // 1234
 | 每个组件：非托管的按原始行，托管的走 Nino | 索引（下次查找时重建） |
 | 被禁用的组件及其保留的值 | 分组设置（`Load` 按本 World 的 `GroupBy` 调用分组） |
 | [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 的元素 | 变更 tick（每个加载的行都算作被写入；`markWritten: false` 时都不算，见[重启](#restart)） |
-| 每个单例 | 用 `SaveWithout(output, in exclude)` 排除的组件和单例（见[重启](#restart)） |
+| 每个单例 | 用 `SaveWithout(output, in exclude)` 排除的组件和单例（见[重启](#restart)），以及标了 [`[NotSaved]`](#not-saved) 的类型 |
 
 类型按 Nino 类型 id 记录（带命名空间的完整名字的哈希），每列是一个带长度前缀的片段，所以加载时会跳过当前进程没有的组件类型。当前进程
 用过的类型、或者生成器注册过的类型都能找到：使用 EasyEcs 的程序集，其中每个组件和单例都会在模块加载时注册。
@@ -169,6 +169,37 @@ int interest = resumed.Rates.Interest;                                 // 7：�
 
 之后才加到已经有状态的 World 上的系统（不管状态是谁写的），也可以从当前 tick 开始算：`world.AddSystem<T>(changesFromNow: true)`
 让它第一次运行只访问调用之后写入的行（[tick](/zh/docs/guide/change-tracking#ticks)）。托管的服务器在哪里存档、读档，见[托管](/zh/docs/guide/hosting#persistence)。
+
+### 永不保存：`[NotSaved]` [#not-saved]
+
+无论出现在哪里都是运行时状态的类型（连接、缓存、服务句柄），声明一次就够，不必在每个集合里点名：组件或单例标上 `[NotSaved]`，
+任何存档都不包含它。
+
+```csharp
+[NotSaved] public record struct Link(Stream Socket) : IComponent;           // 连接：任何存档都不包含它
+[NotSaved] public record struct Throttle(int Sent) : ISingletonComponent;   // 每个进程自己重建
+```
+
+```csharp
+using var server = new World();
+server.SetThrottle(3);
+server.CreateEntity(new Balance(100), new Link(Stream.Null));
+var bytes = new NinoArrayBufferWriter();
+server.Save(bytes);                                    // 不含 Link 和 Throttle：不需要格式化器 // [!code highlight]
+
+using var next = new World();
+next.SetThrottle(0);
+next.Load(bytes.WrittenSpan);                          // 保留 next 自己的 Throttle
+int sent = next.Throttle.Sent;                         // 0
+int linked = next.Count<Link>();                       // 0：余额回来了，Link 没有
+```
+
+- **任何存档都不包含它：**`Save`、`SaveWithout`，以及实体存档，即使集合里点了它的名。所以它不需要 Nino 格式化器；存档会包含、
+  却没有格式化器的托管组件会报 [EECS069](/zh/docs/guide/analyzer#eecs069)，`[NotSaved]` 是修复之一。
+- **读档保留 World 自己的值：**标了 `[NotSaved]` 的单例和 `LoadKeeping` 保留的单例一样不被替换，新进程在读档之前或之后设置它都行。
+- **快照和搬移照常复制它。**[`Capture`](/zh/docs/guide/snapshots) 和 `MoveEntities` 都在同一个进程里，运行时状态在这里仍然有意义。
+- **其余的用 `SaveWithout`：**在一种存档里要保存、在另一种存档里不保存的类型（重启时换新的配置），仍放在 `ComponentSet` 里
+  （见[重启](#restart)）。
 
 ### 代码改了之后 [#versioning]
 
@@ -320,7 +351,7 @@ bob follows alice
 | 能用值的地方用了托管组件 | 非托管组件（id、数字、定长数组） | 原始行每列一个块；Nino 要逐个值编码 |
 | 结构从不变化的非托管组件也标 `[NinoType]` | 这些按原始行写，结构会变的才标 `[NinoType]` | 原始行一列只拷贝一次 |
 | 自己在 `Query` 上写序列化 | `Save` / `Load` | id、版本号、缓冲、禁用值和单例都一起带上 |
-| 为了让 `Save` 能跑，给运行时状态写格式化器 | `SaveWithout(output, in exclude)` | 排除的类型根本不写，也不需要格式化器 |
+| 为了让 `Save` 能跑，给运行时状态写格式化器 | 类型上标 [`[NotSaved]`](#not-saved)，或用 `SaveWithout(output, in exclude)` | 排除的类型根本不写，也不需要格式化器 |
 | `Load` 之后再把新配置设一遍 | `LoadKeeping(input, in keep)` | 保留的单例在存档里直接跳过，不反序列化 |
 
 10 万个实体分布在两张表，存档到复用的缓冲区再读回；以及排除一个组件存档、保留一个单例读档（`SnapshotBenchmark`）：
@@ -339,7 +370,7 @@ bob follows alice
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 托管组件没有 `[NinoType]` | `Save` 抛 `InvalidOperationException`（没有格式化器） | 运行时；只在运行时有意义的类型用 `SaveWithout(output, in exclude)` 排除 |
+| 托管组件没有 `[NinoType]` | `Save` 抛 `InvalidOperationException`（没有格式化器） | [EECS069](/zh/docs/guide/analyzer#eecs069)（有代码修复）；只在运行时有意义的类型标 [`[NotSaved]`](#not-saved)，或用 `SaveWithout(output, in exclude)` 排除 |
 | 复用 `NinoArrayBufferWriter` 却没调 `ResetWrittenCount()` | 新存档接在旧存档后面 | 代码审查：每次存档前先重置 |
 | 设好新配置之后用普通的 `Load` | 存档里的单例把它替换掉，存档里没有的单例被删掉 | 用 `LoadKeeping(input, in keep)` 保留配置单例 |
 | `Load` 的保留集合里放了组件 | 抛 `ArgumentException` | 改为存档时排除它 |

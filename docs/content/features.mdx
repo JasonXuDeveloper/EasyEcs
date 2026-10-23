@@ -22,12 +22,12 @@ after warm-up, and is covered by the unit tests and a BenchmarkDotNet benchmark.
 
 | Job | Features |
 | --- | --- |
-| [Simulate](#simulate) | [worlds and entities](#worlds-and-entities), [components and tags](#components-and-tags), [generated members](#generated-members), systems and [`[ForEach]`](#systems-and-foreach), [generic systems](#generic-systems), [filters](#filters), [optional components](#optional-components), [batch methods](#batch-methods), [singletons](#singletons), [ordering, groups and intervals](#system-groups-and-intervals), [slices](#slices), [immediate structural changes](#immediate-structural-changes), [ad-hoc queries](#ad-hoc-queries) |
+| [Simulate](#simulate) | [worlds and entities](#worlds-and-entities), [components and tags](#components-and-tags), [generated members](#generated-members), [generated parts](#generated-parts), systems and [`[ForEach]`](#systems-and-foreach), [generic systems](#generic-systems), [filters](#filters), [optional components](#optional-components), [batch methods](#batch-methods), [singletons](#singletons), [ordering, groups and intervals](#system-groups-and-intervals), [slices](#slices), [immediate structural changes](#immediate-structural-changes), [events destroyed after the pass](#consume), [ad-hoc queries](#ad-hoc-queries) |
 | [React to changes](#react) | [change tracking](#change-tracking), [writes that count only when the value changed](#write-only-when-changed), [removal detection](#removal-detection), [destroy log](#destroy-log), [cleanup components](#cleanup-components), [disable and enable](#disable-and-enable) |
 | [Find](#find) | [value indexes](#value-indexes), [unique keys](#unique-keys), [ordered ranges](#ordered-ranges), [table groups](#table-groups) |
 | [Structure](#structure) | [relations](#relations), [hierarchy](#hierarchy), [dynamic buffers](#dynamic-buffers), [prefabs and cloning](#prefabs-and-cloning) |
 | [Persist](#persist) | [snapshots](#snapshots), [saves](#saves), [migration](#migration), [unloading plugin types](#unloading) |
-| [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), parallel [`[ForEach]`](#parallel-foreach), [reductions](#reductions), [scratch and lookups](#scratch-and-lookups), [bulk operations](#bulk-operations) |
+| [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), parallel [`[ForEach]`](#parallel-foreach), [reductions](#reductions), [scratch and lookups](#scratch-and-lookups), [records out of a pass](#emit), [deterministic random numbers](#entity-random), [parallel loops over other data](#for-parallel), [grid tiles](#grid-tiles), [bulk operations](#bulk-operations) |
 | [Build and operate](#operate) | [analyzer and code fixes](#analyzer), [per-system timing](#per-system-timing), [the schedule](#schedule), [errors](#errors), [introspection](#introspection), [giving memory back](#trim-excess), [Native AOT](#native-aot), [hosting and testing](#hosting-and-testing), [templates and samples](#templates) |
 
 ## Simulate [#simulate]
@@ -45,8 +45,11 @@ public record struct Clock(float Dt) : ISingletonComponent;
 public class MovementSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
-    static void Move(ref Position p, in Velocity v, in Clock clock) =>
-        p = new Position(p.X + v.X * clock.Dt, p.Y + v.Y * clock.Dt);
+    static void Move(ref Position p, in Velocity v, in Clock clock)
+    {
+        p.X += v.X * clock.Dt;
+        p.Y += v.Y * clock.Dt;
+    }
 }
 ```
 
@@ -88,6 +91,28 @@ a read is never a write.
 - **Cost:** none. Each member is an inlined call to the generic API, and the generator knows which ones are
   structural.
 - **Guide:** [Entities and components](/en/docs/guide/entities-and-components), [Cheat sheet](/en/docs/cheat-sheet#generated-members)
+
+### Generated parts [#generated-parts]
+
+Attributes declare what a component or singleton would otherwise implement by hand, and the generator writes it into
+the `partial` type: `[IndexKey]` / `[UniqueKey]` on a member (or on the struct) write `IIndexed<TKey>` /
+`IUniqueIndexed<TKey>` and their `Key`, `[Group]` writes `IGroup`, and `[Sum]`, `[Product]`, `[Min]`, `[Max]`,
+`[All]`, `[Any]` on a singleton's fields write a reduction's `Identity` and `Combine`. Setup every world shares is
+declared on the type too: `[GroupBy]` groups the tables, `[WhenTargetDestroyed(policy)]` sets a link's target policy,
+`[NotSaved]` keeps runtime state out of every save.
+
+```csharp
+public partial record struct Faction([IndexKey] int Id) : IComponent;
+public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Max] public int Oldest; }
+```
+
+- **Use it for:** every key, group and field-wise total: one attribute instead of an interface and its members.
+- **Skip it for:** a key computed from several members, a reduction that is not field by field: implement the
+  interface by hand.
+- **Cost:** none at run time; the members are the ones you would write. A setup attribute applies from a world's
+  first table holding the type.
+- **Guide:** [Generated parts](/en/docs/guide/entities-and-components#declared-parts),
+  [EECS062-069](/en/docs/guide/analyzer#eecs062)
 
 ### Systems and [ForEach] [#systems-and-foreach]
 
@@ -148,12 +173,14 @@ job: `if` and `?:` become masks, singletons and constants are copied to every la
 one vector each, and the results are those of the per-row method bit for bit.
 
 - **Use it for:** arithmetic over many rows: decay, integration, clamps, counters.
-- **Skip it for:** nothing: it is automatic. A method that does not qualify (a `Vector3` field, two number types, a
-  call, `Parallel`) runs row by row as before, and [EECS055](/en/docs/guide/analyzer#eecs055) names why;
+- **Skip it for:** nothing: it is automatic. A method that does not qualify (two number types, a call on every
+  path) runs row by row as before, and [EECS055](/en/docs/guide/analyzer#eecs055) names why;
   `SimdMode = SimdMode.Require` makes that a build error ([EECS056](/en/docs/guide/analyzer#eecs056)), `SimdMode.Off`
-  silences it.
+  silences it. Parallel methods, `Maybe<T>` parameters, `byte` and `short` lanes, `Vector2` / `Vector3` fields, whole
+  values (`new T(...)`, `with`) and a call under a condition get the loop too; `FloatMode.Fast` lets `Sin`, `Exp`,
+  `Log` and friends take vector approximations. `SystemInfo.Loops` names the loop each method got.
 - **Cost:** none at run time; the loop is written at compile time.
-- **Guide:** [Systems](/en/docs/guide/systems#vector-loops)
+- **Guide:** [Systems](/en/docs/guide/systems#vector-loops), [FloatMode](/en/docs/guide/systems#float-mode)
 
 ### Batch methods [#batch-methods]
 
@@ -216,6 +243,18 @@ most once: entities that leave before their turn are skipped, entities that join
 - **Cost:** a pass that may change structure checks one counter after each entity; methods that cannot change
   structure skip even that.
 - **Guide:** [Structural changes](/en/docs/guide/structural-changes), [ref and await](/en/docs/guide/refs-and-await)
+
+### Events destroyed after the pass [#consume]
+
+`[ForEach, Consume]` destroys exactly the rows its pass visited, when the pass ends: a method over event or command
+entities handles each one once, with no `entity.Destroy()` in its body.
+
+- **Use it for:** damage events, client commands, requests: entities that live for one pass.
+- **Skip it for:** entities that outlive the system that reads them; sliced methods
+  ([EECS085](/en/docs/guide/analyzer#eecs085)).
+- **Cost:** one `DestroyAll` per table after a pass without structural changes, instead of a destroy per row; a pass
+  that throws destroys nothing. [EECS084](/en/docs/guide/analyzer#eecs084) reports the hand-written destroy.
+- **Guide:** [Systems](/en/docs/guide/systems#consume)
 
 ### Ad-hoc queries [#ad-hoc-queries]
 
@@ -337,14 +376,13 @@ back. The entity carries the tag `Disabled<T>` meanwhile, so the paused entities
 Lookups by value without a dictionary kept in sync by hand.
 
 ```csharp
-public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
-public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
-public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; }
+public partial record struct Team([IndexKey] int Id) : IComponent;
+[GroupBy] public partial record struct Zone([Group] int Id) : IComponent;   // grouped in every world
+public partial record struct Account([UniqueKey] int Id) : IComponent;
 ```
 
 ```csharp
 using var world = new World();
-world.GroupBy<Zone>();                                          // at setup
 world.CreateEntity(new Team(1), new Zone(3), new Position(0, 0), new Account(7));
 
 int red = world.TeamIndex.Count(1);                             // a hash probe
@@ -354,7 +392,7 @@ Entity owner = world.AccountIndex.Get(7);                       // the one entit
 
 ### Value indexes [#value-indexes]
 
-A component implementing `IIndexed<TKey>` is found by its `Key`: `world.Index<T, TKey>()` (or `world.TeamIndex`)
+A component whose key is marked `[IndexKey]` (the generator implements `IIndexed<TKey>`) is found by its `Key`: `world.Index<T, TKey>()` (or `world.TeamIndex`)
 with `Find`, `TryFind` and `Count`. Every `Set`, create and destroy keeps the index current; writes through a `ref`,
 which the index could not see, fail the build ([EECS015](/en/docs/guide/analyzer#eecs015)).
 
@@ -366,7 +404,7 @@ which the index could not see, fail the build ([EECS015](/en/docs/guide/analyzer
 
 ### Unique keys [#unique-keys]
 
-A component implementing `IUniqueIndexed<TKey>` names one entity per key: `index.Get(key)` returns it (and throws
+A component whose key is marked `[UniqueKey]` (`IUniqueIndexed<TKey>`) names one entity per key: `index.Get(key)` returns it (and throws
 when none has it), `TryGet(key, out e)` asks. Every write that would give a second entity a key that another one
 holds (`Set`, create, `Instantiate`, `Clone`, `SetAll`, `Enable`, loads and moves) throws
 `InvalidOperationException` before it changes anything. A null reference key is no key.
@@ -374,7 +412,7 @@ holds (`Set`, create, `Instantiate`, `Clone`, `SetAll`, `Enable`, loads and move
 - **Use it for:** an account id, a player name, a session token, the occupant of a grid cell: keys that must never
   name two entities.
 - **Skip it for:** `EntityId` keys ([EECS036](/en/docs/guide/analyzer#eecs036)); keys several entities share (a plain
-  `IIndexed<TKey>`).
+  `[IndexKey]`).
 - **Cost:** the index exists from the first table holding the component, so every write is checked: one hash probe
   per changed key, an extra pass over the rows for the bulk calls and loads. `Get` and `TryGet` are a hash probe
   that reads the key's record alone: a unique key holds its entity inline, with no array per key. A key that maps
@@ -393,7 +431,8 @@ and `Descending()`.
 
 ### Table groups [#table-groups]
 
-After `world.GroupBy<T>()`, the value of an `IGroup` component splits tables: the entities of one zone, map or match
+With `[GroupBy]` on the type (every world) or after `world.GroupBy<T>()` (one world), the value of an `IGroup`
+component (its `[Group]` member) splits tables: the entities of one zone, map or match
 share tables, and `QueryFilter.InGroup<T>(group)` walks only their rows, contiguous in memory. Setting a new value
 moves the entity to its group's tables.
 
@@ -407,7 +446,7 @@ moves the entity to its group's tables.
 Links between entities, lists inside entities, and kinds of entities to spawn from.
 
 ```csharp
-public record struct OwnedBy(EntityId Owner) : IComponent, IIndexed<EntityId> { public EntityId Key => Owner; }
+public partial record struct OwnedBy([IndexKey] EntityId Owner) : IComponent;
 public record struct Loot(int Item);
 ```
 
@@ -475,7 +514,8 @@ A `Prefab` is a recipe of component values that belongs to no world, so no query
 out. `world.Instantiate(prefab)` creates an entity, `Instantiate(prefab, span)` a wave; `new Prefab(base)` makes a
 variant, `AddMember()` a group (a boss with its minions). `Instantiate(prefab, new ChildOf(boss), new Position(x, y))`
 gives the instance up to nine components of its own in the same call: they replace the prefab's values or add to them.
-`entity.Clone()` copies a living entity.
+`entity.Clone()` copies a living entity. `SetAbsent<T>()` gives the recipe a column for `T` without the component, so
+a state its instances enter later (`SetEnraged()`) flips a presence bit instead of moving the row.
 
 - **Use it for:** kinds of entities spawned again and again: NPC types, projectiles, loot, defined in code or
   loaded from configuration; with components, a spawn whose parent, position or owner differs per instance.
@@ -519,7 +559,8 @@ components the process no longer has, and `[NinoFormerName]` keeps a renamed one
 
 For a restart, `SaveWithout(writer, in exclude)` leaves out the components and singletons of a `ComponentSet` (runtime
 state, caches, configuration), which then need no formatter, and `LoadKeeping(bytes, in keep, markWritten: false)` keeps the
-singletons the new process has already set, such as its configuration.
+singletons the new process has already set, such as its configuration. A type that is runtime state wherever it
+appears is marked `[NotSaved]`: every save leaves it out, and it needs no formatter.
 
 - **Use it for:** persistence across restarts, replays on disk, shipping a world to another machine.
 - **Skip it for:** changing an unmanaged component's layout in place: add a new component type, or old saves will
@@ -597,8 +638,8 @@ for struct jobs.
 
 ### Totals over the rows (reductions) [#reductions]
 
-A `ref Reduce<T>` parameter turns a `[ForEach]` pass into a total: `T` is a singleton implementing `IReduction<T>`
-(`Identity`, `Combine`), each chunk of a parallel pass (or the pass on one thread) adds into its own partial result,
+A `ref Reduce<T>` parameter turns a `[ForEach]` pass into a total: `T` is a singleton whose fields carry `[Sum]`, `[Min]`, `[Max]`, ... (or that implements `IReduction<T>`
+by hand: `Identity`, `Combine`), each chunk of a parallel pass (or the pass on one thread) adds into its own partial result,
 and the partial results, combined in row order, replace `T` when the pass ends: OpenMP's `reduction`, MPI's
 `Allreduce`.
 
@@ -627,6 +668,60 @@ it runs. `Lookup<T>` reads component `T` of any entity as it was before the pass
   `T`; [EECS058](/en/docs/guide/analyzer#eecs058) keeps scratch memory out of the world,
   [EECS059](/en/docs/guide/analyzer#eecs059) a lookup away from a component the method writes.
 - **Guide:** [Scratch](/en/docs/guide/threading#scratch), [lookups](/en/docs/guide/threading#lookups)
+
+### Records out of a pass [#emit]
+
+An `Emit<T>` parameter appends records (hits, sounds, messages) to its chunk's own list, with no lock or atomic; when
+the pass ends, the lists join singleton `Emitted<T>` in row order (Unity's `NativeStream`, a parallel append). A later
+system applies the records and clears them.
+
+- **Use it for:** what a parallel pass produces for other entities or for the network: damage to apply, events to
+  send.
+- **Skip it for:** a result per row (a component of the row) or one total (a [reduction](#reductions)).
+- **Cost:** an append into the chunk's pooled list per record, one copy of each list when the pass ends; 0 bytes in
+  steady state. [EECS089](/en/docs/guide/analyzer#eecs089) reports a list filled by hand,
+  [EECS070](/en/docs/guide/analyzer#eecs070) a pass that reads its own records.
+- **Guide:** [Threading](/en/docs/guide/threading#emit)
+
+### Deterministic random numbers [#entity-random]
+
+`EntityRandom` is a singleton holding a seed and a tick; each number is a pure function of (seed, entity, tick,
+stream), so a parallel pass draws the same numbers on any thread count, in any row order, and a replay from the same
+seed repeats them.
+
+- **Use it for:** wandering, spawn rolls, loot, critical hits, AI choices: randomness a replay or a test must repeat.
+- **Skip it for:** secrets (`RandomNumberGenerator`) and randomness nobody repeats outside a pass (`Random.Shared`).
+- **Cost:** four integer mixing rounds per number, no state written, so the method stays a reader and parallel.
+  [EECS071](/en/docs/guide/analyzer#eecs071) reports `System.Random` in a `[ForEach]` method,
+  [EECS088](/en/docs/guide/analyzer#eecs088) two draws of one stream.
+- **Guide:** [Threading](/en/docs/guide/threading#entity-random)
+
+### Parallel loops over other data [#for-parallel]
+
+`world.ForParallel` runs a struct job over data that is not rows of a table, on the runner of parallel `[ForEach]`
+methods: an `IForRange` job over a range of indexes, an `IForSpan<T>` job over the elements of a `DynamicBuffer<T>`
+(the records of an `Emitted<T>`), each chunk as a writable span (Kokkos' `RangePolicy`).
+
+- **Use it for:** heavy work over a list or an array: rolling the records a pass emitted, filling a grid.
+- **Skip it for:** rows of entities (a parallel `[ForEach]`) and light work over a few thousand items.
+- **Cost:** the chunks and helpers of a parallel `[ForEach]`, allocation-free after the first call per job type; a
+  copy of the job per chunk ([EECS061](/en/docs/guide/analyzer#eecs061) reports a field read after the call).
+- **Guide:** [Threading](/en/docs/guide/threading#for-parallel)
+
+### Grid tiles [#grid-tiles]
+
+A grid cut into tiles, one entity per tile with its cells in a `DynamicBuffer<TCell>`: a `Tile<TCell, TTile>`
+parameter gives a `[ForEach]` method the tile with its neighbours' edges (the halo of a stencil, MPI's ghost cells).
+The generator finds the neighbours, declares the reads and keeps the method parallel; quiet tiles sleep and wake when
+an edge beside them changes.
+
+- **Use it for:** heat, fluids, cellular automata, fields of influence, voxel lighting: a cell's next value from the
+  cells around it.
+- **Skip it for:** sparse objects on a map (an [index](#value-indexes) of cells) and grids small enough for one buffer.
+- **Cost:** one copy of the tile and its halo into a texture of the thread per tile; the rows a stencil cannot change
+  are skipped. [EECS059](/en/docs/guide/analyzer#eecs059), [EECS072](/en/docs/guide/analyzer#eecs072) and
+  [EECS073](/en/docs/guide/analyzer#eecs073) report the misuses.
+- **Guide:** [Grid tiles](/en/docs/guide/grids)
 
 ### Bulk operations [#bulk-operations]
 

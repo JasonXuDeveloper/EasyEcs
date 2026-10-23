@@ -295,7 +295,7 @@ public class Regeneration : EcsSystem
 | 在最热的循环里、跑很多行 | 拆成 `[With<T>]` 和 `[Without<T>]` 两个方法：每行不用判断 |
 
 ```csharp
-public record struct Guild(int Id, int Level) : IComponent, IIndexed<int> { public int Key => Id; }
+public partial record struct Guild([IndexKey] int Id, int Level) : IComponent;
 public record struct Morale(int Value) : IComponent;
 ```
 
@@ -335,7 +335,7 @@ public class ApplyHeals : EcsSystem
     [ForEach, Consume]
     static void Apply(in Heal heal, World world)
     {
-        if (world.TryGetEntity(heal.Target, out var target)) target.Get<Health>().Value += heal.Amount;
+        if (world.TryGetEntity(heal.Target, out var target)) target.Health.Value += heal.Amount;
     }
 }
 ```
@@ -381,8 +381,11 @@ public record struct Clock(float Time) : ISingletonComponent;
 public class SteeringSystem : EcsSystem
 {
     [ForEach(Parallel = true), Without<Dead>]
-    static void Steer(ref Velocity velocity, in Position position, in Clock clock) =>
-        velocity = new Velocity(MathF.Cos(clock.Time + position.X), MathF.Sin(clock.Time + position.Y));
+    static void Steer(ref Velocity velocity, in Position position, in Clock clock)
+    {
+        velocity.X = MathF.Cos(clock.Time + position.X);
+        velocity.Y = MathF.Sin(clock.Time + position.Y);
+    }
 }
 ```
 
@@ -432,8 +435,8 @@ Burst 和 ISPC 也是这样做的：方法就是一条通道（lane）的内核�
 </Callout>
 
 <Callout type="warn" title="不适合">
-  不是数值算术的活：查找、函数调用、缓冲、结构变更。这些方法照旧逐行跑，本来就该这样。规则覆盖不到的通道（字节、混合类型），
-  手写一个用 `Vector128<T>` 或 `Vector<T>` 的[批处理方法](#batch-methods)。
+  不是数值算术的活：查找、函数调用、缓冲、结构变更。这些方法照旧逐行跑，本来就该这样。规则覆盖不到的数据（混合的 lane 类型、查找表、
+  字段多到方法用不完的组件），手写一个用 `Vector128<T>` 或 `Vector<T>` 的[批处理方法](#batch-methods)。
 </Callout>
 
 下面的方法符合条件。第二个标签页是生成器为它写的 job（取自系统的 `CoolingSystem.….ForEach.g.cs`，只保留循环，去掉了 `global::` 前缀）：
@@ -575,7 +578,9 @@ for (; i < rows; i++)   // 4. 尾部，以及没有 shuffle 指令时的每一�
 `Max` 对 NaN 和 −0 的处理与 `Math.Min` / `Max` 一致）。窄通道只在证明结果就是 C# 算出的 `int` 结果时才接受一个运算。变更 tick 和系统的读写集合都和逐行方法相同。
 只有 `FloatMode.Fast` 会改变结果（[D90](/zh/docs/decisions#d90-vector-loops-reach)）。
 
-**不符合条件的方法** 保持标量循环：结果是对的，只是慢，[EECS055](/zh/docs/guide/analyzer#eecs055)（IDE 里的建议）会像 Burst 的
+#### `SimdMode` [#simd-mode]
+
+不符合条件的方法保持标量循环：结果是对的，只是慢，[EECS055](/zh/docs/guide/analyzer#eecs055)（IDE 里的建议）会像 Burst 的
 Inspector 一样说出第一个原因：`bool` 字段、组件对它上面的工作来说太宽（并列出该拆出的字段）、`Vector3.Dot` 这种标量代码没有固定顺序的向量求和、
 条件之外的调用。速度取决于向量循环的方法用 `SimdMode = SimdMode.Require` 写明，之后哪次改动让它失去循环，构建就会失败（[EECS056](/zh/docs/guide/analyzer#eecs056)）。
 
@@ -605,6 +610,43 @@ public class MeasureSpeed : EcsSystem
     }
 }
 ```
+
+#### 浮点结果：`FloatMode` [#float-mode]
+
+默认（`FloatMode.Exact`）下，向量循环在每台机器上都给出和方法逐位相同的结果。这时有两样它保持标量：`Sin`、`Cos`、`Exp`、`Log`、`Log2`
+和 `Hypot`，它们的向量形式是近似；以及累加进 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 的浮点总和，向量循环会按 lane 各自相加，
+顺序不同。`[ForEach(FloatMode = FloatMode.Fast)]` 两样都接受：.NET 的向量近似（和标量函数相差 1 到 2 ulp），以及按 lane 舍入的浮点总和，
+所以结果可能和标量方法不同，不同机器之间也可能不同（同 Burst 的 `FloatMode.Fast`）。整数总和以及任何 lane 类型的 `Min` / `Max` 怎样都精确。
+
+```csharp tab="Exact" doccheck=expect-EECS055
+public record struct Clock(float Time) : ISingletonComponent;
+
+public class SteeringSystem : EcsSystem
+{
+    [ForEach]   // EECS055：MathF.Cos 的向量形式不是逐位精确的
+    static void Steer(ref Velocity velocity, in Position position, in Clock clock)
+    {
+        velocity.X = MathF.Cos(clock.Time + position.X);
+        velocity.Y = MathF.Sin(clock.Time + position.Y);
+    }
+}
+```
+
+```csharp tab="Fast"
+public record struct Clock(float Time) : ISingletonComponent;
+
+public class SteeringSystem : EcsSystem
+{
+    [ForEach(FloatMode = FloatMode.Fast)]   // 向量近似：差几个 ulp，更快
+    static void Steer(ref Velocity velocity, in Position position, in Clock clock)
+    {
+        velocity.X = MathF.Cos(clock.Time + position.X);
+        velocity.Y = MathF.Sin(clock.Time + position.Y);
+    }
+}
+```
+
+要回放、帧同步对端要比较、测试要逐位检查的状态保持 `Exact`；最后几位没人比较的效果（转向噪声、粒子、视觉上的衰减）用 `Fast`。
 
 `world.DescribeSchedule()` 列出系统每个方法得到的循环，每个方法一行（`SystemInfo.Loops`）：
 
@@ -637,7 +679,11 @@ public struct InputGroup : ISystemGroup;
 public class ApplyInputSystem : EcsSystem
 {
     [ForEach, With<Player>]
-    static void Apply(ref Velocity velocity) => velocity = new Velocity(velocity.X * 0.9f, velocity.Y * 0.9f);
+    static void Apply(ref Velocity velocity)
+    {
+        velocity.X *= 0.9f;
+        velocity.Y *= 0.9f;
+    }
 }
 ```
 
@@ -668,7 +714,11 @@ public struct Gameplay : ISystemGroup;              // 分组里的方法都看�
 public class MoveSystem : EcsSystem
 {
     [ForEach]
-    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+    static void Move(ref Position p, in Velocity v)
+    {
+        p.X += v.X;
+        p.Y += v.Y;
+    }
 }
 ```
 
@@ -685,12 +735,10 @@ public struct In<TActor> : IComponent;             // 某一种 actor 的标签
 public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;   // IIndexed 要求 IEquatable
 
-// 键组件、索引键、系统分组都是这一个类型。Key 显式实现：公开的 Key 属性会被 record 的
-// ToString() 打印，而打印 Key 又会调用同一个 ToString()，没有尽头。
-public readonly record struct Shop(long Id) : IActor<Shop>
-{
-    Shop IIndexed<Shop>.Key => this;
-}
+// 键组件、索引键、系统分组都是这一个类型：类型上的 [IndexKey] 让整个值作为键，
+// 生成器显式实现 Key，所以 record 的 ToString() 不会打印它。
+[IndexKey]
+public readonly partial record struct Shop(long Id) : IActor<Shop>;
 
 public record struct Stock(int Items) : IComponent;
 
@@ -854,7 +902,8 @@ public class MoveSystem : EcsSystem
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)
     {
-        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+        position.X += velocity.X;
+        position.Y += velocity.Y;
     }
 }
 
@@ -865,7 +914,8 @@ public class FrictionSystem : EcsSystem
     [ForEach, With<Grounded>]
     static void Slow(ref Velocity velocity)
     {
-        velocity = new Velocity(velocity.X / 2, velocity.Y / 2);
+        velocity.X /= 2;
+        velocity.Y /= 2;
     }
 }
 ```
@@ -925,13 +975,15 @@ run order: MoveSystem
 | 方法用不到却带了 `Entity` 或 `World` 参数 | 去掉（[EECS026](/zh/docs/guide/analyzer#eecs026)） | job 跳过结构变更簿记，还能并行 |
 | 实例 `[ForEach]` 方法 | 改成静态方法（[EECS029](/zh/docs/guide/analyzer#eecs029)） | 能证明不改结构：可以共享阶段，每行不用检查 |
 | 热点方法里一个组件装了 4 个以上的数，或两种数值类型 | 拆成每个 1 到 4 个同类型字段的组件 | 方法得到[向量循环](#vector-loops) |
-| 向量循环覆盖不到的通道（字节、混合类型） | 用 `Vector<T>` 的批处理方法 | 对整段行做 SIMD |
+| 向量循环覆盖不到的数据（混合的 lane 类型、查找表） | 用 `Vector<T>` 的批处理方法 | 对整段行做 SIMD |
 | 最热的循环里用 `Maybe<T>` | 用 `[With<T>]` / `[Without<T>]` 拆成两个方法 | 每行不用判断存在位 |
 | 很轻的计算也 `Parallel = true` | 普通 `[ForEach]` | 分发的开销比省下的多 |
 | 只有几百行重活的 `Parallel = true`，默认只成一块 | [`ChunkRows = 64`](/zh/docs/guide/threading#chunk-rows) | 每个线程都领块，而不是一个线程包圆 |
 | 只读的 `Maybe<T>`（或通过 `Entity` 逐行查找） | [`ReadOnlyMaybe<T>`](#read-only-maybe) | 调度时算读，从不打 tick，也不用每行查找（[EECS027](/zh/docs/guide/analyzer#eecs027)） |
 | 同一个节奏的每个方法都重复写一个过滤 | [分组过滤](#group-filters) | 只写一次 |
 | 可以等的工作每个 tick 都做 | `[UpdateInterval(N, Phase = P)]` | 分摊到多个 tick |
+| 处理事件实体的方法最后 `entity.Destroy()` | [`[Consume]`](#consume) | 这一遍之后每张表一次 `DestroyAll` |
+| 最后几位没人比较的热点方法里用 `Sin` / `Cos` / `Exp` | [`FloatMode = FloatMode.Fast`](#float-mode) | 方法得到向量循环 |
 | 每 N 个 tick 把所有实体维护一遍 | [`Slices = N`](#slices) | 每次更新开销平稳，没有尖峰 |
 | 每个 tick 都重算、但很少变的被追踪值用 `ref` 写 | [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 加 `SetIfChanged` | 只有真正的变化打 tick：`[Changed<T>]` 读取方访问的行更少 |
 
@@ -996,13 +1048,17 @@ run order: MoveSystem
 | 分组的 `[With<T>]` 或 `ISystemGroupWith<T>` 碰上方法的 `[Removed<T>]` | 要求一行既有 `T` 又没有 `T`：方法永远不会运行 | [EECS016](/zh/docs/guide/analyzer#eecs016) |
 | 分组的 `[With<X>]` 碰上方法的 `[Without<X>]` | 没有实体能满足：方法永远不会运行 | [EECS049](/zh/docs/guide/analyzer#eecs049) |
 | 分组的 `[WithAny<A>]` 加方法的 `[WithAny<B>]`，当成“A 且 B” | 两个集合合并：选出有 `A` 或有 `B` 的实体 | 代码审查 |
-| record struct 的 actor 键上写公开的 `Key => this` | `ToString()` 无限打印 `Key`：栈溢出 | [EECS043](/zh/docs/guide/analyzer#eecs043)（有代码修复）：显式实现 `IIndexed<T>.Key` |
+| record struct 的 actor 键上写公开的 `Key => this` | `ToString()` 无限打印 `Key`：栈溢出 | [EECS043](/zh/docs/guide/analyzer#eecs043)（有代码修复）：类型上标 `[IndexKey]`，由它显式实现 `IIndexed<T>.Key` |
 | 只读的组件写成 `ref` | 被追踪的组件被打 tick，系统也没法共享阶段 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
 | 方法从不使用的 `Entity` 或 `World` 参数 | job 保留结构变更簿记 | [EECS026](/zh/docs/guide/analyzer#eecs026) |
 | `OnUpdate` 或 `[ForEach]` 方法里分配内存 | 每次更新都产生垃圾 | [EECS028](/zh/docs/guide/analyzer#eecs028) |
 | 实例 `[ForEach]` 方法没用到系统的任何成员 | 被当作可能改结构：单独运行，每行都要检查 | [EECS029](/zh/docs/guide/analyzer#eecs029) |
 | 在系统里调用 `World.Update()` | 系统在自己的运行里再次运行 | [EECS034](/zh/docs/guide/analyzer#eecs034) |
-| 热点方法用了 `Vector2` / `Vector3` 组件，或方法体里有一次调用 | 没有[向量循环](#vector-loops)：一次一行 | 生成文件里没有 `Vector<`；拆开组件，把调用挪出去 |
+| 一次修改让热点方法丢了[向量循环](#vector-loops)（一个 `bool` 字段、条件之外的一次调用） | 一次一行，结果不变 | [EECS055](/zh/docs/guide/analyzer#eecs055)；`SimdMode = SimdMode.Require` 让它报 [EECS056](/zh/docs/guide/analyzer#eecs056) |
+| 要回放或对端要比较的状态用了 `FloatMode.Fast` | 不同机器之间末几位不同 | 代码审查：保持 `FloatMode.Exact`（[浮点结果](#float-mode)） |
+| 重写已删除的 `UpdateInterval` / `UpdatePhase` 属性 | 编译错误 | [EECS082](/zh/docs/guide/analyzer#eecs082)（带代码修复）：`[UpdateInterval(n, Phase = p)]` |
+| `[ForEach]` 方法每条路径最后都 `entity.Destroy()` | 每行销毁一次，而不是每张表一次 | [EECS084](/zh/docs/guide/analyzer#eecs084)（带代码修复）：`[Consume]` |
+| `[Consume]` 没有配 `[ForEach]`，或配了 `Slices` | 编译错误：销毁一个分片会挪动其他分片的行，事件可能要等很多次运行 | [EECS085](/zh/docs/guide/analyzer#eecs085) |
 
 ## 相关页面 [#related]
 

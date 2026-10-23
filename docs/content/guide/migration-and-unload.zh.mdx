@@ -40,10 +40,7 @@ using Nino.Core;
 public record struct Sword(int Damage) : IComponent;
 
 // 按主人建索引：找英雄的宠物不用把所有宠物扫一遍。
-public record struct Pet(EntityId Owner) : IComponent, IIndexed<EntityId>
-{
-    EntityId IIndexed<EntityId>.Key => Owner;
-}
+public partial record struct Pet([IndexKey] EntityId Owner) : IComponent;
 ```
 
 ```csharp
@@ -279,10 +276,7 @@ public record struct Sword(int Damage) : IComponent;
 public record struct Gem(int Bonus) : IComponent;
 
 // 指向主人。按主人建索引，找某人的宠物不用扫描。
-public record struct Pet(EntityId Owner) : IComponent, IIndexed<EntityId>
-{
-    EntityId IIndexed<EntityId>.Key => Owner;
-}
+public partial record struct Pet([IndexKey] EntityId Owner) : IComponent;
 
 // Actor 上需要持久化的部分，和不需要的部分。
 public record struct Bank(long Gold) : IComponent, ITracked;

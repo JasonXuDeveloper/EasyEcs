@@ -119,21 +119,18 @@ caster.EnableCooldown();                // 眩晕结束：还是原来的值
 
 ### record struct 键上写了公开的 `Key => this` [#public-key]
 
-```csharp doccheck=expect-EECS043
-public readonly record struct Market(long Id) : IActor<Market>
+```csharp doccheck=alone,expect-EECS043
+public readonly record struct Market(long Id) : IComponent, IIndexed<Market>
 {
     public Market Key => this;          // 公开属性：会进 record 的 ToString()
 }
 ```
 
 record struct 的 `ToString()` 会打印所有公开属性。`Key` 返回 record 自己，打印它又要打印它的 `Key`，再打印 `Key`……
-第一次写日志或在调试器里查看这个值，栈就溢出了。显式实现 `Key`，让它只属于接口：
+第一次写日志或在调试器里查看这个值，栈就溢出了。在类型上用 `[IndexKey]` 声明键：生成器显式实现 `Key`，让它只属于接口：
 
 ```csharp
-public readonly record struct Market(long Id) : IActor<Market>
-{
-    Market IIndexed<Market>.Key => this;
-}
+[IndexKey] public readonly partial record struct Market(long Id) : IComponent;
 ```
 
 由 [EECS043](/zh/docs/guide/analyzer#eecs043) 发现（带代码修复）。完整的写法见 [Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)。
@@ -225,7 +222,8 @@ public class Throttle : EcsSystem
 {
     [ForEach] static void Apply(ref Velocity v, ref Speed max)   // max 只是读
     {
-        v = new Velocity(Math.Min(v.X, max.Value), Math.Min(v.Y, max.Value));
+        v.X = Math.Min(v.X, max.Value);
+        v.Y = Math.Min(v.Y, max.Value);
     }
 }
 ```
@@ -238,7 +236,8 @@ public class Throttle : EcsSystem
 {
     [ForEach] static void Apply(ref Velocity v, in Speed max)
     {
-        v = new Velocity(Math.Min(v.X, max.Value), Math.Min(v.Y, max.Value));
+        v.X = Math.Min(v.X, max.Value);
+        v.Y = Math.Min(v.Y, max.Value);
     }
 }
 ```
@@ -467,12 +466,13 @@ public readonly record struct Guild(long Id) : IComponent;
 每加一种 actor 都要把分组再写一遍，而泛型接口没法用特性带上过滤条件：C# 不允许特性里出现类型参数（`[With<In<TSelf>>]` 是 CS8968）。
 接口 `ISystemGroupWith<T>` 和 `ISystemGroupWithout<T>` 可以写类型参数，所以一个泛型接口就能让每种 actor 类型同时成为自己的键组件、分组和过滤条件：
 
-```csharp
+```csharp doccheck=alone
+public struct In<TActor> : IComponent;
 public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;
 
-public readonly record struct Shop(long Id) : IActor<Shop> { Shop IIndexed<Shop>.Key => this; }
-public readonly record struct Guild(long Id) : IActor<Guild> { Guild IIndexed<Guild>.Key => this; }
+[IndexKey] public readonly partial record struct Shop(long Id) : IActor<Shop>;
+[IndexKey] public readonly partial record struct Guild(long Id) : IActor<Guild>;
 ```
 
 没有规则能发现。详见[分组过滤](/zh/docs/guide/systems#group-filters)。
@@ -516,7 +516,7 @@ if (hero.HasHealth) hero.Health.Value -= 10;
 ### 通过 `ref` 写被索引的键 [#indexed-by-ref]
 
 ```csharp
-public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public partial record struct Zone([IndexKey] int Id) : IComponent;
 ```
 
 ```csharp doccheck=expect-EECS015
@@ -540,7 +540,7 @@ public static class Portals
 ### 唯一键先给了新主人 [#rekey-order]
 
 ```csharp
-public record struct Seat(int Number) : IComponent, IUniqueIndexed<int> { public int Key => Number; }
+public partial record struct Seat([UniqueKey] int Number) : IComponent;
 ```
 
 ```csharp

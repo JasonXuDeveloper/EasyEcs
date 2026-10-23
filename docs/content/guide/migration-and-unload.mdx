@@ -45,10 +45,7 @@ using Nino.Core;
 public record struct Sword(int Damage) : IComponent;
 
 // Indexed by its owner: a hero's pets are found without a scan of every pet.
-public record struct Pet(EntityId Owner) : IComponent, IIndexed<EntityId>
-{
-    EntityId IIndexed<EntityId>.Key => Owner;
-}
+public partial record struct Pet([IndexKey] EntityId Owner) : IComponent;
 ```
 
 ```csharp
@@ -317,10 +314,7 @@ public record struct Sword(int Damage) : IComponent;
 public record struct Gem(int Bonus) : IComponent;
 
 // Points at its owner. Indexed by the owner, so the owner's pets are found without a scan.
-public record struct Pet(EntityId Owner) : IComponent, IIndexed<EntityId>
-{
-    EntityId IIndexed<EntityId>.Key => Owner;
-}
+public partial record struct Pet([IndexKey] EntityId Owner) : IComponent;
 
 // What persists of an actor, and what does not.
 public record struct Bank(long Gold) : IComponent, ITracked;

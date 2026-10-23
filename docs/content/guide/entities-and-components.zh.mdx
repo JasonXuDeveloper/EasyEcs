@@ -160,14 +160,11 @@ public class Chase : EcsSystem
 
 #### 按唯一键找实体 [#unique-key]
 
-只对应一个实体的键（账号 id、会话令牌），做成实现 `IUniqueIndexed<TKey>` 的组件。第一个拥有它的实体出现时索引就建好了；
+只对应一个实体的键（账号 id、会话令牌），做成加了 `[UniqueKey]` 的组件（它实现 `IUniqueIndexed<TKey>`）。第一个拥有它的实体出现时索引就建好了；
 任何会让第二个实体拿到同一个键的写入，都会在改动任何东西之前抛异常；生成的 `world.XIndex` 直接找到那一个实体：
 
 ```csharp
-public record struct Account(long Id) : IComponent, IUniqueIndexed<long>
-{
-    public long Key => Id;
-}
+public partial record struct Account([UniqueKey] long Id) : IComponent;
 ```
 
 ```csharp
@@ -192,6 +189,7 @@ bool known = world.AccountIndex.TryGet(2002, out var other);     // false：没�
 | `Entity Set(in T1 … in Tn)` | 添加或替换 1 到 9 个值，最多搬一次行；可链式调用。 |
 | `bool SetIfChanged<T>(in T value)` | 和 `Set` 一样设置 `value`，但实体已经是这个值时返回 false，不写入、不打 tick、不动索引（[值变了才写](/zh/docs/guide/change-tracking#set-if-changed)）。 |
 | `ref T GetOrAdd<T>()` | 返回 ref，没有就先加一个 `default`；已有的值保持不变。 |
+| `ref T GetOrAdd<T>(in T value)` | 返回 ref，没有就先加上 `value`（像 `Set` 一样登记键、进入分组）；已有的值保持不变。 |
 | `Entity Remove<T1..Tn>()` | 移除 1 到 9 个组件，没有的忽略；可链式调用。 |
 
 ```csharp
@@ -199,7 +197,7 @@ var hero = world.CreateEntity(new Position(0, 0), new Health(100), new Name("Ayl
 hero.Set(new Armor(3), new Position(5, 5));        // 一次调用：写法更简洁，性能相同
 ref var hp = ref hero.TryGetRef<Health>(out bool has);
 if (has) hp.Value -= 10;                           // 一次查找，原地写入
-ref var shield = ref hero.GetOrAdd<Armor>();       // 保留原值：Armor(3)
+ref var shield = ref hero.GetOrAddArmor(1);        // 保留原值：Armor(3)；没有时是 Armor(1)
 hero.Remove<Armor, Name>();
 bool both = hero.Has<Position, Health>();
 ```
@@ -213,11 +211,11 @@ bool both = hero.Has<Position, Health>();
 
 | 声明 | 生成 | 等价于 |
 | --- | --- | --- |
-| `record struct Position(float X, float Y) : IComponent` | `e.Position`（`ref`）、`e.HasPosition`、`e.TryGetPosition(out p)`、`e.GetOrAddPosition()`、`e.SetPosition(x, y)`、`e.RemovePosition()` | `Get`、`Has`、`TryGet`、`GetOrAdd`、`Set(new Position(x, y))`、`Remove` |
+| `record struct Position(float X, float Y) : IComponent` | `e.Position`（`ref`）、`e.HasPosition`、`e.TryGetPosition(out p)`、`e.GetOrAddPosition()`、`e.GetOrAddPosition(x, y)`、`e.SetPosition(x, y)`、`e.RemovePosition()` | `Get`、`Has`、`TryGet`、`GetOrAdd`、`GetOrAdd(new Position(x, y))`、`Set(new Position(x, y))`、`Remove` |
 | 被追踪的组件（`Armor : ITracked`） | `e.Armor` 是 `ref readonly`；`e.WriteArmor()` 返回 `ref`；`e.SetArmorIfChanged(v)` | `Read`；`Get`（记为写入）；`SetIfChanged(new Armor(v))` |
-| 索引组件（`Zone : IIndexed<int>`） | `e.Zone` 是 `ref readonly`，没有 `GetOrAddZone` 和 `WriteZone`；`e.SetZoneIfChanged(id)`；`world.ZoneIndex` | `Read`；`SetIfChanged(new Zone(id))`；`world.Index<Zone, int>()` |
-| 唯一组件（`Account : IUniqueIndexed<long>`） | 同索引组件；外加 `world.AccountIndex.Get(key)`、`world.AccountIndex.TryGet(key, out e)` | [一个键对应的那个实体](#unique-key) |
-| 分组组件（`Team : IGroup`） | `e.Team` 是 `ref readonly`，没有 `GetOrAddTeam` 和 `WriteTeam`；`e.SetTeamIfChanged(…)`；`filter.InTeam(group)` | `Read`；`SetIfChanged`；`filter.InGroup<Team>(group)`（[分组](/zh/docs/guide/groups)） |
+| 索引组件（`[IndexKey]`、`Zone : IIndexed<int>`） | `e.Zone` 是 `ref readonly`，没有 `GetOrAddZone` 和 `WriteZone`；`e.SetZoneIfChanged(id)`；`world.ZoneIndex` | `Read`；`SetIfChanged(new Zone(id))`；`world.Index<Zone, int>()` |
+| 唯一组件（`[UniqueKey]`、`Account : IUniqueIndexed<long>`） | 同索引组件；外加 `world.AccountIndex.Get(key)`、`world.AccountIndex.TryGet(key, out e)` | [一个键对应的那个实体](#unique-key) |
+| 分组组件（`[Group]`、`Team : IGroup`） | `e.Team` 是 `ref readonly`，没有 `GetOrAddTeam` 和 `WriteTeam`；`e.SetTeamIfChanged(…)`；`filter.InTeam(group)` | `Read`；`SetIfChanged`；`filter.InGroup<Team>(group)`（[分组](/zh/docs/guide/groups)） |
 | 标签（`struct Dead : IComponent`） | `e.IsDead`、`e.SetDead()`、`e.RemoveDead()` | `Has`、`Set(new Dead())`、`Remove` |
 | 任何带字段的组件（清理组件除外） | `e.DisableHealth()`、`e.EnableHealth()`、`e.IsHealthDisabled` | [`Disable`](/zh/docs/guide/cleanup-and-disable) / [`Enable`](/zh/docs/guide/cleanup-and-disable) |
 | 代码里写到 `DynamicBuffer<Loot>` 的缓冲元素 | `e.Loot`（`ref readonly`）、`e.HasLoot`、`e.WriteLoot()`、`e.GetOrAddLoot()`、`e.RemoveLoot()` | `DynamicBuffer<Loot>` 的 `Read`、`Has`、`Get`、`GetOrAdd`、`Remove`（[动态缓冲](/zh/docs/guide/dynamic-buffers)） |
@@ -247,6 +245,36 @@ bool changed = hero.SetArmorIfChanged(6);                  // false：Armor 已�
   嵌套的组件或缓冲元素和所在命名空间里另一个结构体同名时（`Npc.State` 和 `Player.State`），一个成员都不生成：两者都会生成 `entity.State`。
 - EasyEcs 自带的 `ChildOf` 也有生成成员（`entity.ChildOf`、`SetChildOf(parent)`、`world.ChildOfIndex` 等，没有 `DisableChildOf`），
   `Retired` 标签有 `entity.IsRetired`。
+
+### 用特性声明：生成的部分 [#declared-parts]
+
+组件在字段之外的含义（按哪个键建索引、按哪个字段分表、归约怎样合并）写成声明上的特性。生成器在类型的另一个部分里写出接口成员，所以类型要是
+`partial`（[EECS062](/zh/docs/guide/analyzer#eecs062)）；设置类的特性只登记一次，每个 World 从第一张存放这个类型的表开始遵守它们。
+
+| 特性 | 加在 | 得到什么 | 页面 |
+| --- | --- | --- | --- |
+| `[IndexKey]` | 字段、属性或位置参数；或者 struct 本身（整个值就是键） | `IIndexed<TKey>` 和它的 `Key`：一个值索引，`world.XIndex` | [值索引](/zh/docs/guide/indexes-and-relations#value-indexes) |
+| `[UniqueKey]` | 同上 | `IUniqueIndexed<TKey>`：每个键一个实体 | [唯一键](/zh/docs/guide/indexes-and-relations#unique-keys) |
+| `[Group]` | `int` 或枚举成员 | `IGroup` 和它的 `Group`：按值分表 | [分组](/zh/docs/guide/groups#mark-the-component) |
+| `[GroupBy]` | 一个 `IGroup` struct | 每个 World 都按它分组，不用调用 `GroupBy<T>()` | [分组](/zh/docs/guide/groups#group-by) |
+| `[WhenTargetDestroyed(policy)]` | 关系，或按 `EntityId` 建索引的组件 | 销毁目标时链接怎样处理，每个 World 都一样 | [目标销毁时](/zh/docs/guide/indexes-and-relations#target-policies) |
+| `[NotSaved]` | 组件或单例 | 所有存档都不写它；它不需要格式化器 | [存档](/zh/docs/guide/saves#not-saved) |
+| `[Sum]`、`[Product]`、`[Min]`、`[Max]`、`[All]`、`[Any]` | 单例的每个字段 | `IReduction<T>`：逐字段的 `Identity` 和 `Combine` | [归约](/zh/docs/guide/threading#reductions) |
+
+```csharp tab="你写的"
+public partial record struct Owner([IndexKey] EntityId Of) : IComponent;
+```
+
+```csharp tab="生成器写的" doccheck=skip
+// 生成的代码（Owner.….Part.g.cs，去掉了 global::）
+public partial record struct Owner : IIndexed<EntityId>
+{
+    readonly EntityId IIndexed<EntityId>.Key => Of;
+}
+```
+
+由几个成员算出的键仍然手写（`public (int, int) Key => (X, Y);`），字段要一起合并的归约也是。只返回一个成员的手写 `Key` 报
+[EECS067](/zh/docs/guide/analyzer#eecs067)，代码修复改成特性；设置类特性加在不合适的类型上报 [EECS068](/zh/docs/guide/analyzer#eecs068)。
 
 ### 标签 [#tags]
 

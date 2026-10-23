@@ -104,7 +104,7 @@ long tick = restarted.Clock.Tick;                                      // 1234
 | Every component, unmanaged as raw rows, managed through Nino | Indexes (they rebuild on the next lookup) |
 | Disabled components, with their kept values | Groupings (`Load` follows this world's `GroupBy` calls) |
 | [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) elements | Change ticks (every loaded row counts as written, or none with `markWritten: false`: [restart](#restart)) |
-| Every singleton | Components and singletons left out with `SaveWithout(output, in exclude)` ([restart](#restart)) |
+| Every singleton | Components and singletons left out with `SaveWithout(output, in exclude)` ([restart](#restart)) or marked [`[NotSaved]`](#not-saved) |
 
 Types are recorded by their Nino type id (a hash of the namespace-qualified name), and each column is a
 length-prefixed slice, so a load skips the components this process has no type for. A type is found when the process
@@ -193,6 +193,40 @@ records nothing; the next deposit is recorded as usual.
 A system added later to a world that already holds its state, whatever wrote it, can start from the current tick
 instead: `world.AddSystem<T>(changesFromNow: true)` makes its first run visit only what is written after the call
 ([ticks](/en/docs/guide/change-tracking#ticks)). Where a hosted server saves and loads: [hosting](/en/docs/guide/hosting#persistence).
+
+### Never saved: `[NotSaved]` [#not-saved]
+
+A type that is runtime state wherever it appears (a connection, a cache, a handle to a service) is declared once
+instead of named in every set: `[NotSaved]` on a component or a singleton leaves it out of every save.
+
+```csharp
+[NotSaved] public record struct Link(Stream Socket) : IComponent;           // a connection: no save holds it
+[NotSaved] public record struct Throttle(int Sent) : ISingletonComponent;   // rebuilt by each process
+```
+
+```csharp
+using var server = new World();
+server.SetThrottle(3);
+server.CreateEntity(new Balance(100), new Link(Stream.Null));
+var bytes = new NinoArrayBufferWriter();
+server.Save(bytes);                                    // no Link, no Throttle: no formatter needed // [!code highlight]
+
+using var next = new World();
+next.SetThrottle(0);
+next.Load(bytes.WrittenSpan);                          // keeps next's own Throttle
+int sent = next.Throttle.Sent;                         // 0
+int linked = next.Count<Link>();                       // 0: the balance came back without its Link
+```
+
+- **Every save leaves it out:** `Save`, `SaveWithout`, and the saves of entities, even with a set that names it. So it
+  needs no Nino formatter; a managed component without one that a save would hold is
+  [EECS069](/en/docs/guide/analyzer#eecs069), with `[NotSaved]` as one of its fixes.
+- **A load keeps the world's own value** of a `[NotSaved]` singleton, as `LoadKeeping` does for a kept one: the new
+  process sets it before or after the load.
+- **Snapshots and moves copy it.** [`Capture`](/en/docs/guide/snapshots) and `MoveEntities` stay in one process, where
+  runtime state still means something.
+- **`SaveWithout` for the rest:** a type that is persisted in one save and left out of another (configuration a
+  restart brings anew) stays in a `ComponentSet` ([restart](#restart)).
 
 ### When the code changed [#versioning]
 
@@ -352,7 +386,7 @@ Bob's `Follows` still names Alice without any rewriting.
 | Managed components where values would do | Unmanaged components (ids, numbers, fixed arrays) | Raw rows are one block per column; Nino encodes value by value |
 | `[NinoType]` on unmanaged components that never change | Raw rows for those, `[NinoType]` where the shape will change | A raw column is one copy |
 | Your own serializer over a `Query` | `Save` / `Load` | Ids, versions, buffers, disabled values and singletons come along |
-| Formatters for runtime state only to make `Save` work | `SaveWithout(output, in exclude)` | Left-out types are never written, and need no formatter |
+| Formatters for runtime state only to make `Save` work | [`[NotSaved]`](#not-saved) on the type, or `SaveWithout(output, in exclude)` | Left-out types are never written, and need no formatter |
 | Setting the new configuration again after `Load` | `LoadKeeping(input, in keep)` | Kept singletons are skipped in the save, never deserialized |
 
 100,000 entities in two tables, saved into a reused buffer and loaded back, and the same without a component and
@@ -373,7 +407,7 @@ loaded keeping a singleton (`SnapshotBenchmark`):
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| A managed component without `[NinoType]` | `Save` throws `InvalidOperationException` (no formatter) | At run time; leave runtime-only types out with `SaveWithout(output, in exclude)` |
+| A managed component without `[NinoType]` | `Save` throws `InvalidOperationException` (no formatter) | [EECS069](/en/docs/guide/analyzer#eecs069) (with a code fix); mark runtime-only types [`[NotSaved]`](#not-saved) or leave them out with `SaveWithout(output, in exclude)` |
 | Reusing a `NinoArrayBufferWriter` without `ResetWrittenCount()` | The new save is appended after the old one | Code review: reset before each save |
 | A plain `Load` after setting the new configuration | The save's singletons replace it, and one the save lacks is removed | `LoadKeeping(input, in keep)` with the configuration's singletons |
 | A component in the keep set of `Load` | `ArgumentException` | Leave it out of the save instead |
