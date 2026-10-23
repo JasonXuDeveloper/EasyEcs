@@ -210,6 +210,7 @@ public class GeneratorTests
         public struct Unit : IComponent { public float Speed; public bool Alive; public byte Team; public int Hp; }
         public struct Sixteen : IComponent { public float F0, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F14, F15; }
         public record struct G(float Pull) : ISingletonComponent;
+        public struct Purse : ISingletonComponent { public long Sum; }
         public struct Count : ISingletonComponent, IReduction<Count> { public int N, Low; public static Count Identity => new() { Low = int.MaxValue }; public static Count Combine(Count a, Count b) => new() { N = a.N + b.N, Low = System.Math.Min(a.Low, b.Low) }; }
         public struct Total : ISingletonComponent, IReduction<Total> { public float V; public static Total Identity => default; public static Total Combine(Total a, Total b) => new() { V = a.V + b.V }; }
         public struct Ends : ISingletonComponent, IReduction<Ends> { public int First, Last; public static Ends Identity => default; public static Ends Combine(Ends a, Ends b) => new() { First = a.First, Last = b.Last }; }
@@ -290,6 +291,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f) { for (int i = 0; i < 2; i++) f.V++; }", "'for (int i = 0; i < 2; i++) f.V++;' is not supported")]
     [TestCase("[ForEach] static void A(ref F f, in H h) => h.V.ToString();", "it calls Single.ToString")]
     [TestCase("[ForEach] static void A(in F f, ref H h) { double d = f.V; h.V = (float)d; }", "local 'd' is a double, not a lane type of 4 bytes")]
+    [TestCase("[ForEach] static void A(in P p, ref Purse u) => u.Sum = p.V + 1L;", "it writes 'u.Sum', which is neither a local nor the lane of a component taken by ref")] // the write, not the conversion of its value
     [TestCase("[ForEach] static void A(ref F f, ref int n) => n++;", "it takes 'n' by ref: a vector loop reduces only into a Reduce<T>")]
     [TestCase("[ForEach] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;", "the float sum Total.V would add its rows in another order (one sum per lane): set FloatMode = FloatMode.Fast to accept a sum that is not bit for bit the method's")]
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Ends> e) => e.Value.Last = p.V;", "Ends.Combine sets First to 'a.First', not the sum, Min or Max of both sides' First")]

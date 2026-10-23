@@ -812,6 +812,7 @@ internal sealed partial class Kernel
                 WriteWide(a.Target, WideOf(a.Value), mask);
                 return;
             case ISimpleAssignmentOperation { IsRef: false } a:
+                Writable(a.Target);
                 if (a.Value is ISimpleAssignmentOperation inner) // a = b = value: b first, then a from it
                 {
                     Assignment(inner, mask);
@@ -834,6 +835,7 @@ internal sealed partial class Kernel
                 break;
             }
             case ICompoundAssignmentOperation a when !a.IsChecked && a.OperatorMethod == null && a.InConversion.IsIdentity && a.OutConversion.IsIdentity:
+                Writable(a.Target);
                 target = a.Target;
                 value = Binary(a.OperatorKind, a.Target, a.Value, a.Target.Type);
                 break;
@@ -859,6 +861,18 @@ internal sealed partial class Kernel
         string? active = And(mask, _alive);
         _body.Append(active == null ? $"{name} = {value};\n"
             : $"{name} = {V}.ConditionalSelect({MaskAs(active, type)}, {value}, {name});\n");
+    }
+
+    /// <summary>
+    /// Refuses a write to a singleton or a value before its value is translated, so the reason names the write (a sum
+    /// into a singleton: Reduce&lt;T&gt;), not an operation of the value the loop could not have used anyway.
+    /// </summary>
+    private void Writable(IOperation target)
+    {
+        var root = target;
+        while (root is IMemberReferenceOperation { Instance: { } instance }) root = instance;
+        if (root is IParameterReferenceOperation { Parameter: var p } && _uniformParams.ContainsKey(p))
+            throw new Unsupported($"it writes '{Text(target)}', which is neither a local nor the lane of a component taken by ref");
     }
 
     /// <summary>The vector a write goes to: a kernel local, or the lane field of a component taken by ref.</summary>
