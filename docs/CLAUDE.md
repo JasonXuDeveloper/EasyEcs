@@ -91,8 +91,9 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, lint-seo.ts, 
 - Input: `BENCH_RESULTS`, else `../BenchmarkDotNet.Artifacts/results`. The committed file is kept when the directory is
   missing (Cloudflare) or lacks classes the committed data has (a filtered local run); `--partial` overrides that,
   `--merge` replaces only the classes the directory holds and keeps the others (refused for another machine).
-- After a full run on the reference machine: `BENCH_RESULTS=<results> bun run sync:benchmarks`, check the diff, commit
-  the JSON.
+- After a run on the reference machine: `tools/bench.sh <classes> --sync` (or `--site --sync` for every class the site
+  shows) runs the classes one process each, resumable, and merges them (`--merge`); check the diff, commit the JSON.
+  A new class enters the site's set once it has been run and merged.
 - Named numbers for prose are `keys` in `src/lib/benchmarks.ts`; charts and tables take a class
   (`Features.RemovalComparison`) and a [Params] filter.
 

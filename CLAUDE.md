@@ -10,7 +10,13 @@ dotnet build                                                   # whole solution
 dotnet test                                                    # NUnit
 dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*'            # all benchmarks
 dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*'    # a subset
+tools/bench.sh BulkBenchmark Features.RemovalComparison --sync   # classes, resumable, merged into the site's numbers
+tools/bench.sh --site --sync                                   # every class the site shows (before a release)
 ```
+
+A full run of both projects takes hours. Run what a change touches (its benchmark and the neighbors the definition of
+done names) and merge it with `--sync`; `--site` refreshes the site's numbers; `--all` adds the classes that serve
+A/B comparisons only.
 
 Both benchmark projects use the job in `benchmarks/EasyEcs.Benchmark/BenchmarkConfig.cs` (no `--job` needed).
 
@@ -282,6 +288,8 @@ demo/EasyEcs.Demo/             the docs site's live demo (docs/content/demo.mdx)
                                [JSExport] host in Demo.cs, Components.cs, Systems/ one file per system); the page
                                includes its files. docs/scripts/build-demo.sh publishes it into docs/public/demo
                                (committed: Cloudflare has no .NET); rerun it after changing the demo or EasyEcs.Core
+tools/bench.sh                 benchmark classes one BenchmarkDotNet process per class (resumable, under a shared lock),
+                               merged into docs/src/data/bench.json (--sync); --site runs the classes the site shows
 tools/jitdisasm.sh             the Tier1 machine code of a [ForEach] method's job (DOTNET_JitDisasm), to check a vector
                                loop: no call in the loop body, no needless range check
 tools/DocCheck/                compiles the C# fences of the docs pages (`doccheck=` flags on a fence; `example`
