@@ -387,8 +387,8 @@ from replicating or saving the whole world again ([restart](/en/docs/guide/saves
 
 - **Native AOT:** `<PublishAot>true</PublishAot>` publishes the world and its systems as a native executable:
   `EasyEcs.Core` is marked `IsAotCompatible` and the generated code calls your methods directly, and the publish has no
-  warnings. A generic system closed only by another assembly needs `MakeGenericType`, which Native AOT cannot do
-  ([FAQ](/en/docs/faq#native-aot)). ASP.NET Core has AOT rules of its own (`WebApplication.CreateSlimBuilder`, JSON
+  warnings. Add `<IlcInstructionSet>native</IlcInstructionSet>` (or a level such as `x86-64-v4`): the default baseline
+  compiles out the `Vector512` tier of the generated vector loops ([FAQ](/en/docs/faq#native-aot)). ASP.NET Core has AOT rules of its own (`WebApplication.CreateSlimBuilder`, JSON
   source generation): see Microsoft's
   [Native AOT guide for ASP.NET Core](https://learn.microsoft.com/aspnet/core/fundamentals/native-aot).
 - **Containers:** `docker stop` and Kubernetes send `SIGTERM`, which the host turns into the shutdown above. Give the

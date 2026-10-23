@@ -34,6 +34,7 @@ icon: Gauge
 `Vector512`，否则用 `Vector<T>`），把其中的 `if` 变成掩码，再加一段标量收尾：这就是 Burst 为 Unity job 做的事，只是在编译期完成。
 你写的代码仍是标量的，除 `FloatMode.Fast` 外结果与标量代码逐位相同。哪些方法符合条件、生成的代码对照、怎样改写一个保持标量的方法：
 [向量循环](/zh/docs/guide/systems#vector-loops)。
+Native AOT 下发布时加上 `<IlcInstructionSet>native</IlcInstructionSet>`（或 `x86-64-v4` 这样的级别）：默认的基线没有 `Vector512`（[FAQ](/zh/docs/faq#native-aot)）。
 
 - **多个字段：** `Position { X, Y, Z }` 由解交错加载和交错存储拆成每个字段一个向量（AVX2、AVX-512）；没有这些指令时逐行运行。
 - **方法体：** lane 类型之间的转换、`Math.Clamp`、`Round`、`CopySign`、`Lerp` 以及其他有精确向量形式的 `Math` / `MathF`

@@ -158,8 +158,19 @@ world.Load(output.WrittenSpan);  // 组件里存的 EntityId 仍然指向同样�
 
 支持。`EasyEcs.Core` 标记了 `IsAotCompatible`，库的每次构建都会跑裁剪和 AOT 分析器；生成的代码直接调用你的方法，热路径上没有反射
 （[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。基于它的程序可以用 `PublishAot` 无警告地发布并正常运行：CI 把战斗服务器示例（含被追踪组件、
-禁用组件和存档）以“警告即错误”发布成原生可执行文件并运行它。一点限制：在别的程序集里才闭合（给出类型实参）的泛型系统会退回
-`MakeGenericType`，Native AOT 做不到（[D20](/zh/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)）。服务器部署见[托管](/zh/docs/guide/hosting#deploy)。
+禁用组件、存档和在另一个程序集里闭合的泛型系统）以“警告即错误”发布成原生可执行文件并运行它。泛型系统由每个写出它某个闭合类型的程序集注册
+（`AddSystem<Regen<Health>>()`、基类）；只有运行时用反射造出的闭合类型没有代码，Native AOT 下会抛出写明该类型的异常
+（[D20](/zh/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)）。
+
+要设置指令集。Native AOT 默认按基线 CPU 编译，生成的向量循环里 `Vector512` 那一档会被编译掉，`Vector<T>` 也只有 16 字节。知道自己跑在什么 CPU 上的服务器应当写明：
+
+```xml
+<PublishAot>true</PublishAot>
+<!-- 发布所在机器的 CPU；或写一个级别，如 x86-64-v3（AVX2）、x86-64-v4（AVX-512） -->
+<IlcInstructionSet>native</IlcInstructionSet>
+```
+
+这样生成的程序只能在具备这些指令的 CPU 上运行：`native` 适合在运行它的机器（或镜像）上构建，级别适合一批机器。服务器部署见[托管](/zh/docs/guide/hosting#deploy)。
 
 ## 为什么没有事件？ [#why-are-there-no-events]
 

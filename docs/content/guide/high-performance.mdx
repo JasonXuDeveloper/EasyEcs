@@ -38,6 +38,8 @@ a generated vector loop (`Vector512` where the CPU has it, `Vector<T>` otherwise
 and a scalar tail: what Burst does for a Unity job, done at compile time. The code you write stays scalar, and outside
 `FloatMode.Fast` the results are the scalar code's, bit for bit. Which methods qualify, the generated code side by
 side and how to rewrite a method that stays scalar: [vector loops](/en/docs/guide/systems#vector-loops).
+Under Native AOT, publish with `<IlcInstructionSet>native</IlcInstructionSet>` (or a level such as `x86-64-v4`): the
+default baseline has no `Vector512` ([FAQ](/en/docs/faq#native-aot)).
 
 - **Several fields:** `Position { X, Y, Z }` is split into one vector per field by deinterleaving loads and
   interleaving stores (AVX2, AVX-512); without those instructions the rows run one at a time.

@@ -360,7 +360,7 @@ public static class Restart
 ### 部署 [#deploy]
 
 - **Native AOT：**`<PublishAot>true</PublishAot>` 把 World 和系统发布成原生可执行文件：`EasyEcs.Core` 标记了
-  `IsAotCompatible`，生成的代码直接调用你的方法，发布没有警告。只由另一个程序集闭合的泛型系统需要 `MakeGenericType`，Native AOT 做不到（[FAQ](/zh/docs/faq#native-aot)）。ASP.NET
+  `IsAotCompatible`，生成的代码直接调用你的方法，发布没有警告。再加上 `<IlcInstructionSet>native</IlcInstructionSet>`（或 `x86-64-v4` 这样的级别）：默认的基线会把生成的向量循环里 `Vector512` 那一档编译掉（[FAQ](/zh/docs/faq#native-aot)）。ASP.NET
   Core 有自己的 AOT 规则（`WebApplication.CreateSlimBuilder`、JSON 源生成）：见微软的
   [ASP.NET Core Native AOT 指南](https://learn.microsoft.com/aspnet/core/fundamentals/native-aot)。
 - **容器：**`docker stop` 和 Kubernetes 发送 `SIGTERM`，主机把它变成上面的停机流程。容器的宽限期要比最后一次存档长。

@@ -194,9 +194,22 @@ Yes. `EasyEcs.Core` is marked `IsAotCompatible`, so the trimming and AOT analyze
 and the generated code calls your methods directly (no reflection on hot paths;
 [D16](/en/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)). A program built on it
 publishes with `PublishAot` without warnings and runs: CI publishes the battle server example, with tracked
-components, disabled components and saves, as a native executable with warnings as errors and runs it. One limit: a
-generic system closed only by another assembly falls back to `MakeGenericType`, which Native AOT cannot do
-([D20](/en/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)). Deploying a server: [hosting](/en/docs/guide/hosting#deploy).
+components, disabled components, saves and a generic system closed in another assembly, as a native executable with
+warnings as errors and runs it. A generic system is registered by every assembly that names a closed type of it
+(`AddSystem<Regen<Health>>()`, a base type); only a closed type made by reflection at run time has no code, which Native
+AOT reports with an exception naming it ([D20](/en/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)).
+
+Set the instruction set. Native AOT compiles for a baseline CPU by default, so the `Vector512` tier of the generated
+vector loops is compiled out and `Vector<T>` is 16 bytes. A server that knows its CPUs should say so:
+
+```xml
+<PublishAot>true</PublishAot>
+<!-- the CPU of the machine that publishes; or a level such as x86-64-v3 (AVX2) or x86-64-v4 (AVX-512) -->
+<IlcInstructionSet>native</IlcInstructionSet>
+```
+
+The binary then runs only on CPUs with those instructions: `native` fits a build on the machine (or the image) that
+runs it, a level fits a fleet. Deploying a server: [hosting](/en/docs/guide/hosting#deploy).
 
 ## Why are there no events? [#why-are-there-no-events]
 
