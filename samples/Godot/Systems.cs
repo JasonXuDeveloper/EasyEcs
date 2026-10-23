@@ -6,7 +6,8 @@ namespace GodotSample;
 
 // Moves every entity by its velocity over one tick. Vector2's fields are lanes and its operators work field by field,
 // so the generator runs this method as a vector loop over the position and velocity columns.
-public class MoveSystem : EcsSystem
+[EcsSystem]
+public ref struct MoveSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity, in Step step)
@@ -17,7 +18,8 @@ public class MoveSystem : EcsSystem
 
 // Turns an entity back when it leaves the arena, so every entity stays inside it. Each field is clamped on its own
 // (Math.Clamp, not Vector2.Clamp, a call the vector loop cannot see into), so this one is a vector loop too.
-public class BounceSystem : EcsSystem
+[EcsSystem]
+public ref struct BounceSystem
 {
     [ForEach]
     static void Bounce(ref Position position, ref Velocity velocity, in Arena arena)

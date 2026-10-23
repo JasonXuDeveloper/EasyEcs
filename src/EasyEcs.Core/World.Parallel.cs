@@ -68,7 +68,7 @@ public sealed partial class World
     /// <summary>Thread-pool work items a runner keeps: the calling thread is the other one.</summary>
     private int Helpers => Math.Max(1, _options.MaxDegreeOfParallelism) - 1;
 
-    private void RunStage(SystemStage stage, long update)
+    private unsafe void RunStage(SystemStage stage, long update)
     {
         var systems = stage.Systems;
         stage.World = this;
@@ -78,13 +78,14 @@ public sealed partial class World
         // The indexes the stage's key lookups read, built here: an index builds (or is created) on first use, and the
         // stage's threads may only read it.
         for (int i = 0; i < systems.Length; i++)
-            if (systems[i].Access.Indexes is { } indexes)
+            if (SystemRows[systems[i].Index] is { Code: { } code } row && row.Version == systems[i].Version && code.Access.Indexes is { } indexes)
                 foreach (var prepare in indexes) prepare(this);
         Gate.FreezeParallel(); // the stage's systems never change structure (they do not run alone): a change throws
         try
         {
             if (runner.TryRun(stage, systems.Length, out _)) return;
-            for (int i = 0; i < systems.Length; i++) RunSystem(systems[i], update); // an update from inside a running stage
+            foreach (var segment in stage.Segments) // an update from inside a running stage: one system after the other
+                segment.Set.Run(this, systems.AsSpan(segment.Start, segment.Count), update);
         }
         finally
         {
@@ -243,14 +244,23 @@ public sealed partial class World
             average == 0 ? ticks : (average * 3 + Math.Min(ticks, average * 3 / 2)) / 4;
     }
 
-    /// <summary>One stage of a schedule: systems that run at once (a schedule rebuilds its stages when it changes).</summary>
-    internal sealed class SystemStage(EcsSystem[] systems) : ParallelWork
+    /// <summary>
+    /// One stage of a schedule: systems that run at once (a schedule rebuilds its stages when it changes), cut into
+    /// segments of one set for a run on one thread. In parallel, each system is an item, run by its set with a span of one.
+    /// </summary>
+    internal sealed unsafe class SystemStage(SystemSlot[] systems, Segment[] segments) : ParallelWork
     {
-        public readonly EcsSystem[] Systems = systems;
+        public readonly SystemSlot[] Systems = systems;
+        public readonly Segment[] Segments = segments;
         public World World;
         public long Update;
 
-        public override void Run(int index) => World.RunSystem(Systems[index], Update);
+        public override void Run(int index)
+        {
+            var slot = Systems[index];
+            ref var row = ref World.SystemRows[slot.Index];
+            if (row.Version == slot.Version && row.Code is { } code) code.Set.Run(World, Systems.AsSpan(index, 1), Update);
+        }
     }
 
     /// <summary>

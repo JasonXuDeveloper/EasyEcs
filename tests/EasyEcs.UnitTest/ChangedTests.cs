@@ -6,28 +6,32 @@ namespace EasyEcs.UnitTest;
 public class ChangedTests
 {
     /// <summary>Counts, per entity, the runs in which its Armor had changed since the system's previous run.</summary>
-    public class ArmorWatch : EcsSystem
+    [EcsSystem]
+    public ref struct ArmorWatch
     {
         [ForEach, Changed<Armor>]
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
     /// <summary>Wears down the armor of stunned entities: a writer the watch runs after.</summary>
-    public class Wear : EcsSystem
+    [EcsSystem]
+    public ref struct Wear
     {
         [ForEach, With<Stun>]
         private static void Apply(ref Armor armor) => armor = armor with { Value = armor.Value - 1 };
     }
 
     /// <summary>Reads armor only: an <c>in</c> parameter is not a write.</summary>
-    public class Inspect : EcsSystem
+    [EcsSystem]
+    public ref struct Inspect
     {
         [ForEach]
         private static void Read(in Armor armor, ref Health health) => health = new Health(armor.Value);
     }
 
     /// <summary>The batch form: runs of changed rows as spans.</summary>
-    public class ArmorWatchBatch : EcsSystem
+    [EcsSystem]
+    public ref struct ArmorWatchBatch
     {
         [ForEach, Changed<Armor>]
         private static void Count(System.Span<Seen> seen)
@@ -37,21 +41,24 @@ public class ChangedTests
     }
 
     /// <summary>The parallel form: chunks of rows on several threads, changed rows only.</summary>
-    public class ArmorWatchParallel : EcsSystem
+    [EcsSystem]
+    public ref struct ArmorWatchParallel
     {
         [ForEach(Parallel = true), Changed<Armor>]
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
     /// <summary>Changed combined with other filters, and with a second tracked component (both must have changed).</summary>
-    public class LivingArmorAndShieldWatch : EcsSystem
+    [EcsSystem]
+    public ref struct LivingArmorAndShieldWatch
     {
         [ForEach, Changed<Armor>, Changed<Shield>, Without<Dead>]
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
     /// <summary>No component parameter: the Changed component is the queried one.</summary>
-    public class ArmorEntityWatch : EcsSystem
+    [EcsSystem]
+    public ref struct ArmorEntityWatch
     {
         [ForEach, Changed<Armor>]
 #pragma warning disable EECS027 // no component parameter is what this system covers
@@ -60,7 +67,8 @@ public class ChangedTests
     }
 
     /// <summary>Destroys entities whose armor changed: structural changes inside a Changed pass.</summary>
-    public class BreakChanged : EcsSystem
+    [EcsSystem]
+    public ref struct BreakChanged
     {
         [ForEach, Changed<Armor>]
         private static void Break(Entity entity, in Armor armor)
@@ -70,7 +78,8 @@ public class ChangedTests
     }
 
     /// <summary>A watch that also writes what it watches: its own writes are not changes for its next run.</summary>
-    public class Regen : EcsSystem
+    [EcsSystem]
+    public ref struct Regen
     {
         [ForEach, Changed<Armor>]
 #pragma warning disable EECS026 // the write access is the point: it stamps the rows this system then must not see
@@ -79,44 +88,48 @@ public class ChangedTests
     }
 
     /// <summary>A writer ordered after the watch.</summary>
-    [UpdateAfter<ArmorWatch>]
-    public class LateWear : EcsSystem
+    [EcsSystem, UpdateAfter<ArmorWatch>]
+    public ref struct LateWear
     {
         [ForEach, With<Stun>]
         private static void Apply(ref Armor armor) => armor = armor with { Value = armor.Value - 1 };
     }
 
     /// <summary>A watch that runs every other update.</summary>
-    [UpdateInterval(2)]
-    public class SlowArmorWatch : EcsSystem
+    [EcsSystem, UpdateInterval(2)]
+    public ref struct SlowArmorWatch
     {
         [ForEach, Changed<Armor>]
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
     /// <summary>Caps armor at 3 through a Mut: only the rows whose value changes are written (and stamped).</summary>
-    public class CapArmor : EcsSystem
+    [EcsSystem]
+    public ref struct CapArmor
     {
         [ForEach]
         private static void Cap(Mut<Armor> armor) => armor.SetIfChanged(new Armor(Math.Min(armor.Value.Value, 3)));
     }
 
     /// <summary>The same cap through a ref: every visited row is stamped, changed or not.</summary>
-    public class CapArmorByRef : EcsSystem
+    [EcsSystem]
+    public ref struct CapArmorByRef
     {
         [ForEach]
         private static void Cap(ref Armor armor) => armor = new Armor(Math.Min(armor.Value, 3));
     }
 
     /// <summary>The cap on several threads.</summary>
-    public class CapArmorParallel : EcsSystem
+    [EcsSystem]
+    public ref struct CapArmorParallel
     {
         [ForEach(Parallel = true)]
         private static void Cap(Mut<Armor> armor) => armor.SetIfChanged(new Armor(Math.Min(armor.Value.Value, 3)));
     }
 
     /// <summary>Reads armor through a Mut and writes the stunned rows' with Write().</summary>
-    public class PeekAndHit : EcsSystem
+    [EcsSystem]
+    public ref struct PeekAndHit
     {
         [ForEach]
         private static void Apply(Mut<Armor> armor, ref Health health, Maybe<Stun> stun)
@@ -127,7 +140,8 @@ public class ChangedTests
     }
 
     /// <summary>A Mut in a method that changes structure: the shield moves the row, then the armor is written.</summary>
-    public class ShieldUp : EcsSystem
+    [EcsSystem]
+    public ref struct ShieldUp
     {
         [ForEach]
         private static void Raise(Entity entity, Mut<Armor> armor)
@@ -142,28 +156,32 @@ public class ChangedTests
     public record struct Ward(int Value) : IComponent, ITracked;
 
     /// <summary>Visits the entities whose armor or shield changed (or both).</summary>
-    public class ArmorOrShieldWatch : EcsSystem
+    [EcsSystem]
+    public ref struct ArmorOrShieldWatch
     {
         [ForEach, ChangedAny<Armor, Shield>]
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
     /// <summary>ChangedAny combined with Changed and Without: armor changed AND (shield OR ward changed) AND not dead.</summary>
-    public class MixedWatch : EcsSystem
+    [EcsSystem]
+    public ref struct MixedWatch
     {
         [ForEach, Changed<Armor>, ChangedAny<Shield, Ward>, Without<Dead>]
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
     /// <summary>The parallel form of <see cref="ArmorOrShieldWatch"/>.</summary>
-    public class ArmorOrShieldWatchParallel : EcsSystem
+    [EcsSystem]
+    public ref struct ArmorOrShieldWatchParallel
     {
         [ForEach(Parallel = true), ChangedAny<Armor, Shield>]
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
     /// <summary>The batch form, two attributes joining one group.</summary>
-    public class ArmorOrShieldWatchBatch : EcsSystem
+    [EcsSystem]
+    public ref struct ArmorOrShieldWatchBatch
     {
         [ForEach, ChangedAny<Armor, Shield>, ChangedAny<Shield, Ward>]
         private static void Count(System.Span<Seen> seen)

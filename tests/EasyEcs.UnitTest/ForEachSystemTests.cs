@@ -2,7 +2,8 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
-public class Movement : EcsSystem
+[EcsSystem]
+public ref struct Movement
 {
     [ForEach, Without<Frozen>]
     private static void Move(ref Position p, in Velocity v)
@@ -16,11 +17,12 @@ public class Movement : EcsSystem
 /// Instance method, Entity and singleton parameters, With filter, structural changes, declaration order. Stateless: the
 /// outcome is data only: the entity's state (Dead) and the world's statistics (Score singleton).
 /// </summary>
-public class Damage : EcsSystem
+[EcsSystem]
+public ref struct Damage
 {
     [ForEach, With<Velocity>, Without<Dead>]
 #pragma warning disable EECS029 // the instance form is what this system covers
-    private void Hurt(Entity entity, ref Health health, ref Score score)
+    private static void Hurt(Entity entity, ref Health health, ref Score score)
     {
         if (--health.Value > 0) return;
         entity.Set(new Dead());
@@ -35,7 +37,8 @@ public class Damage : EcsSystem
 }
 
 /// <summary>Optional component: one method for entities with and without Armor.</summary>
-public class Regenerate : EcsSystem
+[EcsSystem]
+public ref struct Regenerate
 {
     [ForEach]
     private static void Heal(ref Health health, Maybe<Armor> armor)
@@ -46,7 +49,8 @@ public class Regenerate : EcsSystem
 }
 
 /// <summary>Reads an optional tracked component: not a write, so its rows are not stamped.</summary>
-public class ArmorBonus : EcsSystem
+[EcsSystem]
+public ref struct ArmorBonus
 {
     [ForEach]
     private static void Add(ref Health health, Maybe<Armor> armor)
@@ -56,7 +60,8 @@ public class ArmorBonus : EcsSystem
 }
 
 /// <summary>Reads an optional indexed component: a ReadOnlyMaybe, which a Maybe of it cannot be (EECS015).</summary>
-public class LoginBonus : EcsSystem
+[EcsSystem]
+public ref struct LoginBonus
 {
     [ForEach]
     private static void Add(ref Health health, ReadOnlyMaybe<Login> login)
@@ -71,15 +76,24 @@ public class LoginBonus : EcsSystem
     }
 }
 
-/// <summary>Derived partial systems compose: base [ForEach] methods run first.</summary>
-public class MovementWithGravity : Movement
+/// <summary>A system's [ForEach] methods run in their declaration order.</summary>
+[EcsSystem]
+public ref struct MovementWithGravity
 {
+    [ForEach, Without<Frozen>]
+    private static void Move(ref Position p, in Velocity v)
+    {
+        p.X += v.X;
+        p.Y += v.Y;
+    }
+
     [ForEach]
     private static void Fall(ref Velocity v) => v.Y -= 1;
 }
 
 /// <summary>Changes the archetype of the visited entity, then keeps writing through its refs.</summary>
-public class BurnThenHeal : EcsSystem
+[EcsSystem]
+public ref struct BurnThenHeal
 {
     [ForEach, Without<Dead>]
     private static void Tick(Entity entity, ref Health health, in Position position)
@@ -92,7 +106,8 @@ public class BurnThenHeal : EcsSystem
 }
 
 /// <summary>Moves every visited entity into another archetype that the same pass also matches.</summary>
-public class Promote : EcsSystem
+[EcsSystem]
+public ref struct Promote
 {
     [ForEach]
     private static void Visit(Entity entity, ref Health health)
@@ -104,7 +119,8 @@ public class Promote : EcsSystem
 }
 
 /// <summary>Batch method: whole runs of rows as spans (vectorizable).</summary>
-public class BatchMovement : EcsSystem
+[EcsSystem]
+public ref struct BatchMovement
 {
     [ForEach, Without<Frozen>]
     private static void Move(System.Span<Position> p, System.ReadOnlySpan<Velocity> v, ref Score score)
@@ -121,7 +137,8 @@ public class BatchMovement : EcsSystem
 }
 
 /// <summary>Batch method with the run's entities: records the id of every row whose health is low.</summary>
-public class FindLowHealth : EcsSystem
+[EcsSystem]
+public ref struct FindLowHealth
 {
     [ForEach, Without<Frozen>]
     private static void Find(EntitySpan entities, System.ReadOnlySpan<Health> health, ref Score score)
@@ -146,21 +163,24 @@ public struct DestroyDespitePromise : IForEachEntity<Health>, INoStructuralChang
 }
 
 /// <summary>Counts positioned entities that are frozen or dead (or both): [WithAny] filters.</summary>
-public class CountHalted : EcsSystem
+[EcsSystem]
+public ref struct CountHalted
 {
     [ForEach, With<Position>, WithAny<Frozen>, WithAny<Dead>]
     static void Count(ref Score score) => score.Points++;
 }
 
 /// <summary>[ForEach(Slices = 4)]: one of four slices of every matching table's rows per run (a stable pass).</summary>
-public class SlicedVisit : EcsSystem
+[EcsSystem]
+public ref struct SlicedVisit
 {
     [ForEach(Slices = 4)]
     private static void Visit(ref Health health) => health.Value++;
 }
 
 /// <summary>A sliced pass that may change structure: it destroys the entities it finds below zero.</summary>
-public class SlicedStructural : EcsSystem
+[EcsSystem]
+public ref struct SlicedStructural
 {
     [ForEach(Slices = 3)]
     private static void Visit(Entity entity, ref Health health)
@@ -171,7 +191,8 @@ public class SlicedStructural : EcsSystem
 }
 
 /// <summary>A sliced batch method with a filter: runs of the slice's rows.</summary>
-public class SlicedBatch : EcsSystem
+[EcsSystem]
+public ref struct SlicedBatch
 {
     [ForEach(Slices = 4), Without<Dead>]
     private static void Visit(System.Span<Health> health)
@@ -181,22 +202,24 @@ public class SlicedBatch : EcsSystem
 }
 
 /// <summary>A sliced parallel method: the slice is cut into chunks.</summary>
-public class SlicedParallel : EcsSystem
+[EcsSystem]
+public ref struct SlicedParallel
 {
     [ForEach(Parallel = true, Slices = 4)]
     private static void Visit(ref Health health) => health.Value++;
 }
 
 /// <summary>A sliced method over a tracked component whose removals leave rows without it (presence bits).</summary>
-public class SlicedArmor : EcsSystem
+[EcsSystem]
+public ref struct SlicedArmor
 {
     [ForEach(Slices = 4)]
     private static void Visit(ref Armor armor) => armor.Value++;
 }
 
 /// <summary>Slices and [UpdateInterval]: a slice per run, a run every other update.</summary>
-[UpdateInterval(2)]
-public class SlicedEveryOther : EcsSystem
+[EcsSystem, UpdateInterval(2)]
+public ref struct SlicedEveryOther
 {
     [ForEach(Slices = 2)]
     private static void Visit(ref Health health) => health.Value++;
@@ -431,7 +454,7 @@ public class ForEachSystemTests
     }
 
     [Test]
-    public void DerivedSystemsRunBaseMethodsFirst()
+    public void ASystemsMethodsRunInDeclarationOrder()
     {
         using var world = new World();
         var e = world.CreateEntity(new Position(0, 0), new Velocity(0, 0));

@@ -10,21 +10,23 @@ public class EntityRandomTests
 {
     public record struct Roll(int Value, float Fraction) : IComponent;
 
-    public class ParallelRolls : EcsSystem
+    [EcsSystem]
+    public ref struct ParallelRolls
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Roll(ref Roll roll, Entity entity, in EntityRandom random) =>
             roll = new Roll(random.Range(entity.Id, 0, 1, 7), random.Float(entity.Id, 1));
     }
 
-    public class SerialRolls : EcsSystem
+    [EcsSystem]
+    public ref struct SerialRolls
     {
         [ForEach]
         static void Roll(ref Roll roll, Entity entity, in EntityRandom random) =>
             roll = new Roll(random.Range(entity.Id, 0, 1, 7), random.Float(entity.Id, 1));
     }
 
-    private static Roll[] Rolls<TSystem>(int threads, ulong seed, ulong tick) where TSystem : EcsSystem, new()
+    private static Roll[] Rolls<TSystem>(int threads, ulong seed, ulong tick) where TSystem : struct, allows ref struct
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
         var entities = new Entity[20_000];

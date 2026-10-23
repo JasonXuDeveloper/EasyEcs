@@ -13,7 +13,7 @@ public static partial class Complexity
     {
         ["world"] = ["World"], ["World"] = ["World"], ["entity"] = ["Entity"], ["prefab"] = ["Prefab"],
         ["bag"] = ["DynamicBuffer", "DynamicBufferExtensions"], ["index"] = ["ValueIndex", "OrderedIndexExtensions", "UniqueIndexExtensions"],
-        ["filter"] = ["QueryFilter"], ["QueryFilter"] = ["QueryFilter"], ["system"] = ["EcsSystem"],
+        ["filter"] = ["QueryFilter"], ["QueryFilter"] = ["QueryFilter"], ["system"] = ["SystemHandle"],
         ["snapshot"] = ["WorldSnapshot"], ["singletonRef"] = ["SingletonRef"], ["relations"] = ["RelationIndex"],
         ["id"] = ["EntityId"], ["mut"] = ["Mut"], ["schedule"] = ["ScheduleInfo"], ["ComponentSet"] = ["ComponentSet"],
         ["Lanes"] = ["Lanes"], ["tile"] = ["Tile"], ["padded"] = ["PaddedTile"], ["cursor"] = ["TileCursor"], ["rows"] = ["TileRows"],

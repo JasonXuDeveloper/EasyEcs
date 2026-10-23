@@ -24,7 +24,8 @@ public class SingletonTests
         Assert.That(world.GetOrAddSingleton<Clock>().Tick, Is.EqualTo(1));
     }
 
-    public class Ticker : EcsSystem
+    [EcsSystem]
+    public ref struct Ticker
     {
         [ForEach, With<Health>] static void Tick(ref Clock clock) => clock.Tick++;
     }

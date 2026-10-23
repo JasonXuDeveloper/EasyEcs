@@ -25,7 +25,11 @@ internal static class Symbols
     public const string WithAnyAttribute = "EasyEcs.WithAnyAttribute<T>";
     public const string ChangedAttribute = "EasyEcs.ChangedAttribute<T>";
     public const string RemovedAttribute = "EasyEcs.RemovedAttribute<T>";
-    public const string EcsSystem = "EasyEcs.EcsSystem";
+    public const string EcsSystemAttribute = "EasyEcs.EcsSystemAttribute";
+    public const string OnCreateAttribute = "EasyEcs.OnCreateAttribute";
+    public const string OnUpdateAttribute = "EasyEcs.OnUpdateAttribute";
+    public const string OnDestroyAttribute = "EasyEcs.OnDestroyAttribute";
+    public const string SystemHandle = "EasyEcs.SystemHandle";
     public const string Component = "EasyEcs.IComponent";
     public const string Singleton = "EasyEcs.ISingletonComponent";
     public const string Entity = "EasyEcs.Entity";
@@ -205,11 +209,82 @@ internal static class Symbols
             else if (Is(face, GroupWithout)) yield return (false, face.TypeArguments[0]);
     }
 
-    public static bool IsSystem(INamedTypeSymbol type)
+    /// <summary>A system: a type marked [EcsSystem] (valid only as a ref struct, <see cref="SystemProblem"/>).</summary>
+    public static bool IsSystem(INamedTypeSymbol? type) =>
+        type != null && type.OriginalDefinition.GetAttributes().Any(static a => Named(a.AttributeClass, EcsSystemAttribute));
+
+    /// <summary>
+    /// Why an [EcsSystem] type cannot be a system (EECS074), or null: it is no ref struct (a class or a struct could
+    /// be instantiated, stored and captured; a system is a name for static functions).
+    /// </summary>
+    public static string? SystemProblem(INamedTypeSymbol type)
     {
-        for (var b = type.BaseType; b != null; b = b.BaseType)
-            if (Named(b, EcsSystem)) return true;
-        return false;
+        if (!IsSystem(type)) return null;
+        if (type.TypeKind != TypeKind.Struct || !type.IsRefLikeType)
+            return type.TypeKind == TypeKind.Struct ? "is a struct, which can be instantiated, stored and boxed: make it a ref struct"
+                : $"is {(type.IsRecord ? "a record" : type.TypeKind == TypeKind.Interface ? "an interface" : "a class")}: a system is a ref struct of static members";
+        return null;
+    }
+
+    /// <summary>A system the generator writes code for: [EcsSystem] on a ref struct.</summary>
+    public static bool IsValidSystem(INamedTypeSymbol? type) => IsSystem(type) && SystemProblem(type!) == null;
+
+    /// <summary>
+    /// A system the generator writes code for: valid (<see cref="IsValidSystem"/>) and nameable by code outside it, its
+    /// code struct and its set's (EECS022 otherwise): UnsafeAccessor reaches a ref struct's private methods only by its
+    /// type, never by name.
+    /// </summary>
+    public static bool GeneratesSystem(INamedTypeSymbol? type) => IsValidSystem(type) && IsVisible(type!);
+
+    /// <summary>The kinds of hook a system method may be: [OnCreate], [OnUpdate], [OnDestroy].</summary>
+    public enum HookKind { None, Create, Update, Destroy }
+
+    /// <summary>The hook attribute on <paramref name="method"/>, or <see cref="HookKind.None"/> (the first, when there are several).</summary>
+    public static HookKind Hook(IMethodSymbol method)
+    {
+        foreach (var attribute in method.GetAttributes())
+        {
+            if (Named(attribute.AttributeClass, OnCreateAttribute)) return HookKind.Create;
+            if (Named(attribute.AttributeClass, OnUpdateAttribute)) return HookKind.Update;
+            if (Named(attribute.AttributeClass, OnDestroyAttribute)) return HookKind.Destroy;
+        }
+
+        return HookKind.None;
+    }
+
+    /// <summary>
+    /// Why hook method <paramref name="method"/> cannot be called (EECS076, or EECS075 for an instance hook), or null: it is outside an [EcsSystem], an
+    /// instance or generic method, does not return void, takes something but one World and one SystemHandle by value,
+    /// carries two hook attributes, or is the second method of its system for its hook.
+    /// </summary>
+    public static string? HookProblem(IMethodSymbol method)
+    {
+        var kind = Hook(method);
+        if (kind == HookKind.None) return null;
+        int marks = method.GetAttributes().Count(a => Named(a.AttributeClass, OnCreateAttribute) || Named(a.AttributeClass, OnUpdateAttribute) || Named(a.AttributeClass, OnDestroyAttribute));
+        if (!IsSystem(method.ContainingType)) return "is not in an [EcsSystem] ref struct, so no system runs it";
+        if (marks > 1) return "carries several hook attributes: one method per hook";
+        if (!method.IsStatic) return "is an instance method: make it static (a system has no instance)";
+        if (method.IsGenericMethod) return "is generic, and nothing gives it type arguments: make the system generic instead";
+        if (!method.ReturnsVoid) return "must return void";
+        bool world = false, handle = false;
+        foreach (var p in method.Parameters)
+        {
+            bool isWorld = Named(p.Type, World), isHandle = Named(p.Type, SystemHandle);
+            if (p.RefKind != RefKind.None || !isWorld && !isHandle || isWorld && world || isHandle && handle)
+                return $"takes '{p.Name}': a hook takes the World, the SystemHandle, both (once each, by value) or neither";
+            world |= isWorld;
+            handle |= isHandle;
+        }
+
+        foreach (var other in method.ContainingType.GetMembers().OfType<IMethodSymbol>())
+        {
+            if (SymbolEqualityComparer.Default.Equals(other, method)) break; // the first one of a kind is the hook
+            if (Hook(other) == kind)
+                return $"is a second [On{kind}] method of '{method.ContainingType.Name}' ('{other.Name}' is the first): one method per hook";
+        }
+
+        return null;
     }
 
     /// <summary>The system whose code <paramref name="symbol"/> is (its type, or a type it is nested in), or null.</summary>
@@ -588,7 +663,7 @@ internal static class Symbols
     /// </summary>
     public static ITypeSymbol? Unnameable(IMethodSymbol method)
     {
-        if (IsRunner(method) && !IsVisible(method.ContainingType)) return method.ContainingType;
+        if (!IsVisible(method.ContainingType)) return method.ContainingType; // a runner's entry point extends it, a system's code names it
         for (var t = method.ContainingType; t != null; t = t.ContainingType)
             if (t.IsFileLocal) return t; // a system too: the runtime finds its code by a name the compiler mangles
         if (!method.ReturnsVoid && !IsNameable(method.ReturnType)) return method.ReturnType;
@@ -820,7 +895,7 @@ internal static class Symbols
     public static string? ScheduleProblem(INamedTypeSymbol type)
     {
         if (Schedule(type) is not var (interval, phase, _)) return null;
-        if (!IsSystem(type)) return "it is no EcsSystem, so nothing runs it on a schedule";
+        if (!IsSystem(type)) return "it is no [EcsSystem], so nothing runs it on a schedule";
         if (interval < 1) return $"its interval {interval} must be 1 or more";
         if (phase < 0 || phase >= interval) return $"its phase {phase} must be 0 to {interval - 1} (the interval - 1)";
         return null;
@@ -1204,7 +1279,8 @@ internal static class Symbols
         var type = method.ContainingType;
         bool outside = IsRunner(method);
         if (IsForEntity(method) ? ForEntityProblem(method) != null : ConsumeProblem(method) != null) return false;
-        if (outside && (!method.IsStatic || EntryPointCollides(method))) return false;
+        if (!method.IsStatic || outside && EntryPointCollides(method)) return false;
+        if (!outside && !IsValidSystem(type)) return false; // EECS074: no system code
         if (method.IsGenericMethod && !outside || Unnameable(method) != null) return false; // a system's method gets no type arguments
         if (SlicesProblem(method) != null || ChunkRowsProblem(method) != null) return false;
         int components = 0;
@@ -1360,11 +1436,12 @@ internal static class Symbols
     public const string GeneratorName = "EasyEcs.Generator";
 
     /// <summary>
-    /// A member ComponentGenerator wrote: its class carries <c>[GeneratedCode("EasyEcs.Generator", …)]</c>, in source or
-    /// in a referenced assembly.
+    /// A member an EasyEcs generator wrote: its class carries <c>[GeneratedCode("EasyEcs.Generator", …)]</c>
+    /// (ComponentGenerator's), or the member does (SystemGenerator's entry points), in source or in a referenced assembly.
     /// </summary>
     public static bool IsGenerated(ISymbol member)
     {
+        if (member.GetAttributes().Any(IsGeneratorMark)) return true;
         var type = member.ContainingType;
         while (type?.ContainingType != null) type = type.ContainingType; // an extension block's member: up to its class
         return type != null && type.GetAttributes().Any(IsGeneratorMark);

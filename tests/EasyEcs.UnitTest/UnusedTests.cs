@@ -43,7 +43,8 @@ public class UnusedTests
     {
         GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile("""
             public struct Hp : IComponent { public int V; }
-            public class Regen : EcsSystem
+            [EcsSystem]
+            public ref struct Regen
             {
                 [ForEach] static void Heal(ref Hp hp) => hp.V++;
                 static void Helper() { }

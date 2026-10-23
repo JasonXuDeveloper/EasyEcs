@@ -6,8 +6,8 @@ namespace Actors;
 // since this system last ran, so an actor is listed once per change: not again until a message or a system writes it.
 
 /// <summary>Lists the actors whose persistent state changed since the last save.</summary>
-[UpdateInGroup<Saving>]
-public class ListUnsavedSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Saving>]
+public ref struct ListUnsavedSystem
 {
     [ForEach, Changed<Stock>]
     static void ListShop(Entity shop, ref Unsaved unsaved) => unsaved.Actors.Add(shop.Id);

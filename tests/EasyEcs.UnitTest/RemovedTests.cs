@@ -6,14 +6,16 @@ namespace EasyEcs.UnitTest;
 public class RemovedTests
 {
     /// <summary>Counts, per entity, the runs in which it had lost its Armor since the system's previous run.</summary>
-    public class ArmorLoss : EcsSystem
+    [EcsSystem]
+    public ref struct ArmorLoss
     {
         [ForEach, Removed<Armor>]
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
     /// <summary>The batch form, with the entities of each run.</summary>
-    public class ArmorLossBatch : EcsSystem
+    [EcsSystem]
+    public ref struct ArmorLossBatch
     {
         [ForEach, Removed<Armor>]
         private static void Count(EntitySpan entities, Span<Seen> seen)
@@ -23,7 +25,8 @@ public class RemovedTests
     }
 
     /// <summary>Watches changes of the same component: removed rows are not changed rows.</summary>
-    public class ArmorChange : EcsSystem
+    [EcsSystem]
+    public ref struct ArmorChange
     {
         [ForEach, Changed<Armor>]
         private static void Count(ref Health seen) => seen.Value++;
@@ -402,7 +405,8 @@ public class RemovedTests
     }
 
     /// <summary>Visits the entities that lost their armor or their shield.</summary>
-    public class ArmorOrShieldLoss : EcsSystem
+    [EcsSystem]
+    public ref struct ArmorOrShieldLoss
     {
         [ForEach, RemovedAny<Armor, Shield>]
         private static void Count(ref Seen seen) => seen.Count++;

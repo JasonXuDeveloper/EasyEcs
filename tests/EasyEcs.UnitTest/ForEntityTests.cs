@@ -40,8 +40,28 @@ public static class Orders
     static void Found<T>(in T component, ref bool found) where T : struct, IComponent => found = true;
 }
 
+// A system's [ForEntity] method: its entry point is a static member of the system, like any type's.
+[EcsSystem]
+public ref struct Restock
+{
+    [ForEach] static void Daily(ref Orders.Stock stock) => stock = stock with { Items = stock.Items + 1 };
+
+    [ForEntity] static void Now(ref Orders.Stock stock, int items) => stock = stock with { Items = stock.Items + items };
+}
+
 public class ForEntityTests
 {
+    [Test]
+    public void ASystemsMethodGetsAnEntryPointToo()
+    {
+        using var world = new World();
+        world.AddSystem<Restock>();
+        var shop = world.CreateEntity(new Orders.Stock(0));
+        world.Update();
+        Assert.That(Restock.Now(shop, 10), Is.True);
+        Assert.That(shop.Read<Orders.Stock>().Items, Is.EqualTo(11));
+    }
+
     [Test]
     public void TheEntryPointRunsTheMethodOnTheEntity()
     {

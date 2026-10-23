@@ -37,15 +37,15 @@ public struct Sink : ISingletonComponent
     public long Value;
 }
 
-[UpdateInGroup<Iterate1>]
-public class SumHealth : EcsSystem
+[EcsSystem, UpdateInGroup<Iterate1>]
+public ref struct SumHealth
 {
     [ForEach]
     private static void Flip(ref Health h) => h.Max ^= 1;
 }
 
-[UpdateInGroup<Iterate2>]
-public class Integrate : EcsSystem
+[EcsSystem, UpdateInGroup<Iterate2>]
+public ref struct Integrate
 {
     [ForEach, Without<Stunned>, Without<Dead>]
     private static void Move(ref Position p, ref Velocity v)
@@ -58,8 +58,8 @@ public class Integrate : EcsSystem
 }
 
 /// <summary>Iterate2 as a batch method: the same movement on whole runs of rows with SIMD (shared kernel).</summary>
-[UpdateInGroup<Iterate2Simd>]
-public class IntegrateSimd : EcsSystem
+[EcsSystem, UpdateInGroup<Iterate2Simd>]
+public ref struct IntegrateSimd
 {
     [ForEach, Without<Stunned>, Without<Dead>]
     private static void Move(Span<Position> p, Span<Velocity> v) =>
@@ -93,22 +93,22 @@ public static class SimdMove
     }
 }
 
-[UpdateInGroup<Iterate3>]
-public class Read3 : EcsSystem
+[EcsSystem, UpdateInGroup<Iterate3>]
+public ref struct Read3
 {
     [ForEach]
     private static void Write(ref Position p, in Velocity v, in Health h) => p.X = v.X + h.Max;
 }
 
-[UpdateInGroup<IterateWith>]
-public class PlayersHealth : EcsSystem
+[EcsSystem, UpdateInGroup<IterateWith>]
+public ref struct PlayersHealth
 {
     [ForEach, With<Player>, Without<Dead>]
     private static void Flip(ref Health h) => h.Max ^= 1;
 }
 
-[UpdateInGroup<IterateEntity>]
-public class EntityIds : EcsSystem
+[EcsSystem, UpdateInGroup<IterateEntity>]
+public ref struct EntityIds
 {
     [ForEach, Without<Dead>]
     private static void Sum(Entity entity, in Health h, ref Sink sink)
@@ -117,8 +117,8 @@ public class EntityIds : EcsSystem
     }
 }
 
-[UpdateInGroup<IterateEntityBatch>]
-public class EntityIdsBatch : EcsSystem
+[EcsSystem, UpdateInGroup<IterateEntityBatch>]
+public ref struct EntityIdsBatch
 {
     [ForEach, Without<Dead>]
     private static void Sum(EntitySpan entities, ReadOnlySpan<Health> h, ref Sink sink)
@@ -128,8 +128,8 @@ public class EntityIdsBatch : EcsSystem
     }
 }
 
-[UpdateInGroup<IterateSingleton>]
-public class Cells : EcsSystem
+[EcsSystem, UpdateInGroup<IterateSingleton>]
+public ref struct Cells
 {
     [ForEach, Without<Dead>]
     private static void UpdateCell(in Position p, ref AoiCell aoi, ref Sink sink)
@@ -144,8 +144,8 @@ public class Cells : EcsSystem
 /// <summary>Stun 5% of the fighters, then recover all of them: 2 structural changes per stunned entity.</summary>
 // The ports to the other libraries query the same components, so every library does the same work per row.
 #pragma warning disable EECS026, EECS030 // and remove one entity at a time as they do (RemoveAll is the bulk benchmarks')
-[UpdateInGroup<Toggle>]
-public class StunToggle : EcsSystem
+[EcsSystem, UpdateInGroup<Toggle>]
+public ref struct StunToggle
 {
     [ForEach, Without<Stunned>]
     private static void Stun(Entity entity, in Attack attack)
@@ -154,8 +154,8 @@ public class StunToggle : EcsSystem
     }
 }
 
-[UpdateInGroup<Toggle>]
-public class StunRecover : EcsSystem
+[EcsSystem, UpdateInGroup<Toggle>]
+public ref struct StunRecover
 {
     [ForEach]
     private static void Recover(Entity entity, ref Stunned stunned) => entity.Remove<Stunned>();

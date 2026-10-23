@@ -11,41 +11,13 @@ using Microsoft.CodeAnalysis.Editing;
 namespace EasyEcs.CodeFixes;
 
 /// <summary>
-/// The fixes that turn hand-written forms into the declarations the generator reads: an override of the removed
-/// schedule properties into [UpdateInterval] (EECS082), a [ForEach] method's final destroy into [Consume] (EECS084), and
+/// The fixes that turn hand-written forms into the declarations the generator reads: a [ForEach] method's final destroy
+/// into [Consume] (EECS084), and
 /// a one-entity job with its calls into a [ForEntity] method and its entry point's calls (EECS080). The analyzer decided
 /// each (its properties); these only rewrite.
 /// </summary>
 public sealed partial class EasyEcsCodeFixes
 {
-    /// <summary>EECS082: the class without its UpdateInterval / UpdatePhase overrides, with <paramref name="schedule"/> on it.</summary>
-    private static SyntaxNode Scheduled(ClassDeclarationSyntax type, PropertyDeclarationSyntax property,
-        IReadOnlyList<Location> others, string? schedule)
-    {
-        var remove = new List<SyntaxNode> { property };
-        foreach (var other in others)
-            if (type.Members.OfType<PropertyDeclarationSyntax>().FirstOrDefault(p => p.Span.Contains(other.SourceSpan) || other.SourceSpan.Contains(p.Span)) is { } p)
-                remove.Add(p);
-        var without = type.RemoveNodes(remove, SyntaxRemoveOptions.KeepNoTrivia)!;
-        if (string.IsNullOrEmpty(schedule)) return without;
-        return WithAttributeList(without, schedule!.Trim('[', ']'));
-    }
-
-    /// <summary><paramref name="type"/> with the attribute <paramref name="attribute"/> (its text, arguments included) first, on its own line.</summary>
-    private static TypeDeclarationSyntax WithAttributeList(TypeDeclarationSyntax type, string attribute)
-    {
-        var leading = type.GetLeadingTrivia();
-        var indent = leading.Count > 0 && leading.Last().IsKind(SyntaxKind.WhitespaceTrivia) ? leading.Last() : default;
-        var eol = EndOfLine(type.SyntaxTree.GetRoot());
-        var next = indent == default ? SyntaxFactory.TriviaList(eol) : SyntaxFactory.TriviaList(eol, indent);
-        var list = Attribute(attribute).WithLeadingTrivia(leading).WithTrailingTrivia(next);
-        var withoutLeading = type.WithoutLeadingTrivia();
-        return withoutLeading.WithAttributeLists(withoutLeading.AttributeLists.Insert(0, list));
-    }
-
-    private static AttributeListSyntax Attribute(string text) =>
-        ((TypeDeclarationSyntax)SyntaxFactory.ParseCompilationUnit($"[{text}] class __C {{ }}").Members[0]).AttributeLists[0].WithoutTrivia();
-
     /// <summary>
     /// EECS084: the method without its final destroy, with <c>Consume</c> after <c>ForEach</c> in its attribute list,
     /// and without its Entity parameter <paramref name="entity"/> when that was its only use (null: kept).

@@ -22,7 +22,7 @@ public sealed class WorldOptions
     public int InitialEntityCapacity { get; init; } = 1024;
 
     /// <summary>
-    /// Measure every system run into <see cref="EcsSystem.Stats"/>: its time and allocated bytes (two timestamp and two
+    /// Measure every system run into <see cref="SystemHandle.Stats"/>: its time and allocated bytes (two timestamp and two
     /// allocation-counter reads per run, and per helper chunk of a parallel <c>[ForEach]</c>), and the entities its
     /// <c>[ForEach]</c> methods visited (one count per pass when it starts). Default false.
     /// </summary>
@@ -30,7 +30,7 @@ public sealed class WorldOptions
 
     /// <summary>
     /// What an exception thrown by a system does (default <see cref="SystemErrorPolicy.Throw"/>): propagate out of
-    /// <see cref="World.Update()"/>, or switch the system off and record it in <see cref="EcsSystem.Error"/>.
+    /// <see cref="World.Update()"/>, or switch the system off and record it in <see cref="SystemHandle.Error"/>.
     /// </summary>
     public SystemErrorPolicy SystemErrors { get; init; }
 
@@ -52,8 +52,8 @@ public enum SystemErrorPolicy
     Throw,
 
     /// <summary>
-    /// Switch the failing system off (<see cref="EcsSystem.Enabled"/> false), keep the exception in
-    /// <see cref="EcsSystem.Error"/> and go on with the update: a failure is data the application reads from
+    /// Switch the failing system off (<see cref="SystemHandle.Enabled"/> false), keep the exception in
+    /// <see cref="SystemHandle.Error"/> and go on with the update: a failure is data the application reads from
     /// <see cref="World.Systems"/>.
     /// </summary>
     Disable,

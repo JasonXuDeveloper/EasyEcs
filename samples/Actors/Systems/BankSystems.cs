@@ -5,8 +5,8 @@ namespace Actors;
 // The bank group: world.Update<Bank>() runs it, and its methods see only entities tagged In<Bank>.
 
 /// <summary>Each update pays one percent of interest.</summary>
-[UpdateInGroup<Bank>]
-public class InterestSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Bank>]
+public ref struct InterestSystem
 {
     // Mut<Balance>: only a balance that grew is stamped, so an account too small to earn interest is not saved again.
     [ForEach]

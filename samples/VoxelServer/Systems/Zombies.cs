@@ -10,12 +10,12 @@ namespace VoxelServer;
 // in Minecraft, which spawns no hostile mob closer than 24 blocks. A column whose chunk is not loaded gets none. What
 // a zombie hunts is up to its eyes (ZombieTargetSystem). Phase = 1: the first spawn of a night is at its first
 // tick.
-[UpdateInGroup<Simulation>, UpdateInterval(Rules.SpawnEvery, Phase = 1)]
-public class NightSpawnSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.SpawnEvery, Phase = 1)]
+public ref struct NightSpawnSystem
 {
 
     [ForEach]
-    void Spawn(in Player client, in Position position, in Clock clock, in Prefabs prefabs, ref Stats stats)
+    static void Spawn(in Player client, in Position position, in Clock clock, in Prefabs prefabs, ref Stats stats, World world)
     {
         if (!Rules.IsNight(clock)) return;
         int seed = (int)(clock.Tick / Rules.SpawnEvery);
@@ -28,10 +28,10 @@ public class NightSpawnSystem : EcsSystem
             else dz = dz < 0 ? -Rules.SpawnMin : Rules.SpawnMin;
         }
         var feet = Terrain.Cell(position.Value);
-        var near = new Nearby(World);
+        var near = new Nearby(world);
         int x = feet.X + dx, z = feet.Z + dz, top = near.Top(x, z);
         if (top < 0 || near.Water(new BlockPos(x, top + 1, z)) > 0) return;
-        World.Instantiate(prefabs.Zombie, new Position(new Vector3(x + 0.5f, top + 1, z + 0.5f)),
+        world.Instantiate(prefabs.Zombie, new Position(new Vector3(x + 0.5f, top + 1, z + 0.5f)),
             new InChunk(Terrain.ChunkOf(x, z)));
         stats.ZombiesSpawned++;
     }
@@ -45,14 +45,14 @@ public class NightSpawnSystem : EcsSystem
 // first ring that cannot hold anyone nearer than the nearest found: in a crowd, one or two rings of the seven by
 // seven. It looks twice a second, a tenth of the zombies each tick (Slices), so a horde costs the same every tick;
 // none in reach, it has no target and stands.
-[UpdateInGroup<Simulation>]
-public class ZombieTargetSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct ZombieTargetSystem
 {
     [ForEach(Slices = Rules.LookEvery), With<Zombie>]
-    void Pick(in Position position, in InChunk at, in Vision vision, ref Target target)
+    static void Pick(in Position position, in InChunk at, in Vision vision, ref Target target, World world)
     {
         float nearest = vision.Range * vision.Range;
-        if (World.TryGetEntity(target.Player, out var hunting)
+        if (world.TryGetEntity(target.Player, out var hunting)
             && (hunting.Position.Value - position.Value).LengthSquared() <= nearest) return;   // still in reach
         EntityId hunted = default;
         int reach = Rules.ChunksIn(vision.Range);
@@ -63,7 +63,7 @@ public class ZombieTargetSystem : EcsSystem
             float gap = Math.Max(ring - 2, 0) * Terrain.Size;
             if (gap * gap >= nearest) break;
             foreach (var chunk in new ChunkRing(at.Pos, ring))
-            foreach (var other in World.ViewCenterIndex.Find(chunk))
+            foreach (var other in world.ViewCenterIndex.Find(chunk))
             {
                 float distance = (other.Position.Value - position.Value).LengthSquared();
                 if (distance >= nearest) continue;
@@ -79,17 +79,18 @@ public class ZombieTargetSystem : EcsSystem
 // #region chase
 // Walks a zombie toward the player it hunts while the player is within its Vision (it may have walked off since the
 // zombie looked); with none in sight, the player gone or too far, it stands.
-[UpdateInGroup<Simulation>]
-public class ZombieChaseSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct ZombieChaseSystem
 {
     [ForEach, With<Zombie>]
-    void Chase(in Position position, in Target target, in Vision vision, ref Velocity velocity)
+    static void Chase(in Position position, in Target target, in Vision vision, ref Velocity velocity, Lookup<Position> positions)
     {
         var v = velocity.Value;
         v.X = v.Z = 0;
-        if (World.TryGetEntity(target.Player, out var player))
+        var player = positions[target.Player];                           // no value: the player is gone
+        if (player.HasValue)
         {
-            var to = player.Position.Value - position.Value;
+            var to = player.Value.Value - position.Value;
             var flat = new Vector2(to.X, to.Z);
             float distance = flat.Length();
             if (distance > 0.1f && distance <= vision.Range)
@@ -107,13 +108,13 @@ public class ZombieChaseSystem : EcsSystem
 // #region attack
 // A zombie close to the player it hunts hits it, then waits a second: its Cooldown is the tick it may hit again, so a
 // zombie that waits costs one comparison and no system counts the cooldowns down.
-[UpdateInGroup<Simulation>]
-public class ZombieAttackSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct ZombieAttackSystem
 {
     [ForEach, With<Zombie>]
-    void Attack(in Position position, in Target target, ref Cooldown cooldown, in Clock clock, ref Stats stats)
+    static void Attack(in Position position, in Target target, ref Cooldown cooldown, in Clock clock, ref Stats stats, World world)
     {
-        if (clock.Tick < cooldown.Until || !World.TryGetEntity(target.Player, out var player)) return;
+        if (clock.Tick < cooldown.Until || !world.TryGetEntity(target.Player, out var player)) return;
         int health = player.Health.Value;                                   // one lookup for the read and the write
         if (health <= 0) return;
         var to = player.Position.Value - position.Value;
@@ -130,15 +131,15 @@ public class ZombieAttackSystem : EcsSystem
 // A zombie under the open sky by day catches fire, as in Minecraft: no block above it and no water at its feet. It
 // looks every Rules.BurnEvery ticks, the cadence of the fire's damage, so a zombie catches fire before it is first
 // hurt, and not at all at night. Burning is in the zombie prefab, so catching fire flips a presence bit.
-[UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
-public class SunlightSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
+public ref struct SunlightSystem
 {
     [ForEach, With<Zombie>]
-    void Expose(Entity zombie, in Position position, in Clock clock)
+    static void Expose(Entity zombie, in Position position, in Clock clock, World world)
     {
         if (Rules.IsNight(clock)) return;
         var feet = Terrain.Cell(position.Value);
-        var near = new Nearby(World);
+        var near = new Nearby(world);
         if (near.Water(feet) == 0 && near.UnderSky(feet)) zombie.SetBurning(clock.Tick + Rules.BurnFor);
     }
 }
@@ -151,8 +152,8 @@ public class SunlightSystem : EcsSystem
 // tracked, and a batch method writing it stamps its whole run, so it is written only on the ticks that hurt and the
 // death systems ([Changed<Health>]) find nothing to do on the others. Putting the fire out is a structural change,
 // which a batch method may not make (its spans point into the table), so it is the next system's job.
-[UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
-public class FireDamageSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
+public ref struct FireDamageSystem
 {
     [ForEach, With<Burning>]
     static void Hurt(Span<Health> health)
@@ -166,13 +167,13 @@ public class FireDamageSystem : EcsSystem
 
 // Puts out the fires that burned down, and those of the zombies that walked into water: it visits only the burning,
 // at the fire's own cadence.
-[UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
-public class ExtinguishSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
+public ref struct ExtinguishSystem
 {
     [ForEach]
-    void Out(Entity zombie, in Burning fire, in Position position, in Clock clock)
+    static void Out(Entity zombie, in Burning fire, in Position position, in Clock clock, World world)
     {
-        if (clock.Tick >= fire.Until || new Nearby(World).Water(Terrain.Cell(position.Value)) > 0) zombie.RemoveBurning();
+        if (clock.Tick >= fire.Until || new Nearby(world).Water(Terrain.Cell(position.Value)) > 0) zombie.RemoveBurning();
     }
 }
 // #endregion burn

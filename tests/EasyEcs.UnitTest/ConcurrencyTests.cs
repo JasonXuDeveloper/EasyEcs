@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 
@@ -16,7 +17,8 @@ public class ConcurrencyTests
 #pragma warning restore EECS017
 
     /// <summary>Changes structure through a handle a component holds: wrong in a system that shares a parallel stage.</summary>
-    public class SpawnInStage : EcsSystem
+    [EcsSystem]
+    public ref struct SpawnInStage
     {
 #pragma warning disable EECS013 // the misuse under test: the runtime must catch what the analyzer reports
         [ForEach]
@@ -24,7 +26,8 @@ public class ConcurrencyTests
 #pragma warning restore EECS013
     }
 
-    public class Heal : EcsSystem
+    [EcsSystem]
+    public ref struct Heal
     {
         [ForEach]
         static void Run(ref Health health) => health.Value++;
@@ -89,6 +92,58 @@ public class ConcurrencyTests
         });
 
         Assert.That(world.HasSingleton<Clock>(), Is.True);
+    }
+
+    // The memo of filters per call signature is published lock-free (CAS copy-on-write) and reset by the owner
+    // (RemoveTypes, Dispose): threads that make first matches of new filters while it is reset again and again still
+    // get every matching table, through the memo or the query cache, and the memo serves them after.
+    [Test]
+    public void QueriesFromManyThreadsStayRightWhileTheMemoIsReset()
+    {
+        using var world = new World();
+        world.CreateEntity(new C1(1));
+        world.CreateEntity(new C1(1), new C2(2));
+        world.CreateEntity(new C1(1), new C2(2), new C3(3));
+        // More filters than a signature's ways: some take the memo, the others the query cache.
+        var filters = new[]
+        {
+            QueryFilter.Create(), QueryFilter.Create().With<C2>(), QueryFilter.Create().Without<C2>(), QueryFilter.Create().With<C3>(),
+            QueryFilter.Create().Without<C3>(), QueryFilter.Create().With<C2>().Without<C3>(),
+        };
+        int[] expected = [3, 2, 1, 1, 2, 1];
+        int[] pairs = [2, 2, 0, 1, 1, 1];  // Count<C1, C2> under the same filters
+
+        int running = 4;
+        var readers = new Task[running];
+        for (int t = 0; t < readers.Length; t++)
+        {
+            int seed = t;
+            readers[t] = Task.Run(() =>
+            {
+                try
+                {
+                    for (int i = 0; i < 20_000; i++)
+                    {
+                        int f = (i + seed) % filters.Length;
+                        if (world.Count<C1>(filters[f]) != expected[f]) throw new InvalidOperationException($"Count<C1> of filter {f}");
+                        if (world.Count<C1, C2>(filters[f]) != pairs[f]) throw new InvalidOperationException($"Count<C1, C2> of filter {f}");
+                    }
+                }
+                finally { Interlocked.Decrement(ref running); }
+            });
+        }
+
+        int resets = 0;
+        while (Volatile.Read(ref running) > 0)
+        {
+            world.ResetQueryMemo();
+            resets++;
+        }
+
+        Task.WaitAll(readers);
+        Assert.That(resets, Is.GreaterThan(0));
+        for (int f = 0; f < filters.Length; f++)
+            Assert.That((world.Count<C1>(filters[f]), world.Count<C1, C2>(filters[f])), Is.EqualTo((expected[f], pairs[f])), $"filter {f}");
     }
 
     private static Exception Flatten(Exception error) =>

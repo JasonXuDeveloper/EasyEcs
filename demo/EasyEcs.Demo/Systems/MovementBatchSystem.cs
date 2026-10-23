@@ -6,8 +6,8 @@ namespace EasyEcs.Demo;
 
 // MovementSystem as a batch method: element i of both spans is the same spark, so the positions
 // and velocities of a run line up and add as vectors.
-[UpdateInGroup<Batched>]
-public class MovementBatchSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Batched>]
+public ref struct MovementBatchSystem
 {
     [ForEach]
     static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities, in Clock clock)

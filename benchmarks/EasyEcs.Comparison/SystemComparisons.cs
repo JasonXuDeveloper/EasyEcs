@@ -17,22 +17,26 @@ public record struct Vigour(int Value, int Max) : EasyEcs.IComponent;
 public record struct Mana(int Value, int Max) : EasyEcs.IComponent;
 public record struct Recharge(int Ticks) : EasyEcs.IComponent;
 
-public class MoveBodies : EcsSystem
+[EcsSystem]
+public ref struct MoveBodies
 {
     [ForEach] private static void Move(ref Body b) => SystemRules.Move(ref b.X, ref b.Y, ref b.Vx, ref b.Vy);
 }
 
-public class RegenerateVigour : EcsSystem
+[EcsSystem]
+public ref struct RegenerateVigour
 {
     [ForEach] private static void Regenerate(ref Vigour v) => v.Value = SystemRules.Regenerate(v.Value, v.Max);
 }
 
-public class RegenerateMana : EcsSystem
+[EcsSystem]
+public ref struct RegenerateMana
 {
     [ForEach] private static void Regenerate(ref Mana m) => m.Value = SystemRules.Regenerate(m.Value, m.Max);
 }
 
-public class TickRecharge : EcsSystem
+[EcsSystem]
+public ref struct TickRecharge
 {
     [ForEach] private static void Tick(ref Recharge r) => r.Ticks = SystemRules.Recharge(r.Ticks);
 }

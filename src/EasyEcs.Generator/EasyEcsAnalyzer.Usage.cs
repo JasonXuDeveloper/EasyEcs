@@ -443,11 +443,12 @@ public sealed partial class EasyEcsAnalyzer
             && DuringPass(call, context.ContainingSymbol, core) is { } running)
             context.ReportDiagnostic(Diagnostic.Create(UpdateInPass, call.Syntax.GetLocation(), Shorten(call.Syntax), running));
 
-        // EECS038: TryGet's copy changed and dropped.
+        // EECS038: TryGet's copy changed and dropped (handles, an Entity's or a SystemHandle's, write through to the world).
         if (method.Name.StartsWith("TryGet") && method.Name != "TryGetRef" && ((onEntity || onWorld) || Symbols.IsGenerated(method)))
             foreach (var argument in call.Arguments)
                 if (argument.Parameter?.RefKind == RefKind.Out && argument.Value is IDeclarationExpressionOperation { Expression: ILocalReferenceOperation { Local: var local } }
-                    && local.Type.IsValueType && !Symbols.Named(local.Type, Symbols.Entity) && DeadAfterWrite(local, argument))
+                    && local.Type.IsValueType && !Symbols.Named(local.Type, Symbols.Entity) && !Symbols.Named(local.Type, Symbols.SystemHandle)
+                    && DeadAfterWrite(local, argument))
                     context.ReportDiagnostic(Diagnostic.Create(DroppedCopy, argument.Syntax.GetLocation(), local.Name,
                         (method.ContainingType!.IsExtension ? "" : method.ContainingType.Name + ".") + method.Name,
                         "write through a ref instead (Get after Has, or TryGetRef), or write the copy back with Set"));

@@ -3,7 +3,8 @@ using EasyEcs;
 namespace EasyEcs.Demo;
 
 // Moves the emitters along a slow Lissajous curve through the arena.
-public class OrbitSystem : EcsSystem
+[EcsSystem]
+public ref struct OrbitSystem
 {
     // Radians of the curve per second.
     private const float Speed = 0.11f;

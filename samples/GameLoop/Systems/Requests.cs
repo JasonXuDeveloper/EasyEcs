@@ -7,7 +7,8 @@ namespace GameLoop;
 
 // Removes a player that left. It runs before JoinSystem, so a client that
 // leaves and joins again in the same tick ends up joined.
-public sealed class LeaveSystem : EcsSystem
+[EcsSystem]
+public ref struct LeaveSystem
 {
     [ForEach, Consume]
     static void Leave(in LeaveRequest leave, ref Stats stats, World world)
@@ -21,7 +22,8 @@ public sealed class LeaveSystem : EcsSystem
 }
 
 // Creates a player from the prefab. A second join of the same client is ignored.
-public sealed class JoinSystem : EcsSystem
+[EcsSystem]
+public ref struct JoinSystem
 {
     [ForEach, Consume]
     static void Join(
@@ -45,7 +47,8 @@ public sealed class JoinSystem : EcsSystem
 }
 
 // Sets the velocity a client asked for.
-public sealed class MoveSystem : EcsSystem
+[EcsSystem]
+public ref struct MoveSystem
 {
     [ForEach, Consume]
     static void Steer(in MoveRequest move, World world)
@@ -58,7 +61,8 @@ public sealed class MoveSystem : EcsSystem
 }
 
 // Fires a bullet from the player's position, in the direction the player moves.
-public sealed class FireSystem : EcsSystem
+[EcsSystem]
+public ref struct FireSystem
 {
     const float BulletSpeed = 4;
 

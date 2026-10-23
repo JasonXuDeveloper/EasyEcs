@@ -485,8 +485,8 @@ public struct Fallen : EasyEcs.IComponent;
 
 public struct KillPass : ISystemGroup;
 
-[UpdateInGroup<KillPass>]
-public class Reap : EcsSystem
+[EcsSystem, UpdateInGroup<KillPass>]
+public ref struct Reap
 {
     [ForEach, Without<Fallen>]
     private static void Kill(EasyEcs.Entity unit, in Life life, ref Deaths deaths)
@@ -497,8 +497,8 @@ public class Reap : EcsSystem
     }
 }
 
-[UpdateInGroup<KillPass>, UpdateAfter<Reap>]
-public class Raise : EcsSystem
+[EcsSystem, UpdateInGroup<KillPass>, UpdateAfter<Reap>]
+public ref struct Raise
 {
     [ForEach, With<Fallen>]
     private static void Revive(EasyEcs.Entity unit, ref Life life)

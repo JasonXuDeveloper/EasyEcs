@@ -307,7 +307,8 @@ public class QueryTests
         public void Execute(ref Health health) => Rows += health.Value;
     }
 
-    private class FreezeHalf : EcsSystem
+    [EcsSystem]
+    internal ref struct FreezeHalf
     {
         [ForEach]
         private static void Toggle(Entity entity, in Health health)

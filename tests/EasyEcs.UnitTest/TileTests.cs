@@ -517,7 +517,8 @@ public class TileTests
     /// writes. Plates missing from the grid are cold (the fill). Quiet rows (cold, beside cold) stay cold, so the
     /// stencil skips them, and the step's buffer already holds their zeros (it equals the heat after every commit).
     /// </summary>
-    public class DiffuseSystem : EcsSystem
+    [EcsSystem]
+    public ref struct DiffuseSystem
     {
         public const float Rate = 0.2f;
 
@@ -541,7 +542,8 @@ public class TileTests
     }
 
     /// <summary>Makes the step the heat, once every plate has stepped.</summary>
-    public class CommitHeatSystem : EcsSystem
+    [EcsSystem]
+    public ref struct CommitHeatSystem
     {
         [ForEach]
         static void Commit(in DynamicBuffer<NextHeat> next, Mut<DynamicBuffer<Heat>> heat) =>
@@ -675,25 +677,29 @@ public class TileTests
         }
     }
 
-    public class BlurFillSystem : EcsSystem
+    [EcsSystem]
+    public ref struct BlurFillSystem
     {
         [ForEach(Parallel = true, ChunkRows = 4)]
         static void Step(Tile<Heat, BlurFill> heat, Mut<DynamicBuffer<NextHeat>> next) => Blur(heat, next);
     }
 
-    public class BlurClampSystem : EcsSystem
+    [EcsSystem]
+    public ref struct BlurClampSystem
     {
         [ForEach(Parallel = true, ChunkRows = 4)]
         static void Step(Tile<Heat, BlurClamp> heat, Mut<DynamicBuffer<NextHeat>> next) => Blur(heat, next);
     }
 
-    public class BlurMirrorSystem : EcsSystem
+    [EcsSystem]
+    public ref struct BlurMirrorSystem
     {
         [ForEach(Parallel = true, ChunkRows = 4)]
         static void Step(Tile<Heat, BlurMirror> heat, Mut<DynamicBuffer<NextHeat>> next) => Blur(heat, next);
     }
 
-    public class BlurTorusSystem : EcsSystem
+    [EcsSystem]
+    public ref struct BlurTorusSystem
     {
         [ForEach(Parallel = true, ChunkRows = 4)]
         static void Step(Tile<Heat, BlurTorus> heat, Mut<DynamicBuffer<NextHeat>> next) => Blur(heat, next);
@@ -723,7 +729,7 @@ public class TileTests
     /// blurred with the boundary.
     /// </summary>
     private static void BlurGrid<TTile, TSystem>(int threads, Func<TilePos, TTile> make, TileBoundary? boundary, params TilePos[] holes)
-        where TTile : struct, IComponent, ITile<TilePos> where TSystem : EcsSystem, new()
+        where TTile : struct, IComponent, ITile<TilePos> where TSystem : struct, allows ref struct
     {
         const int size = Torus, cells = size * 16;
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
@@ -788,7 +794,8 @@ public class TileTests
     public record struct NextLife(byte Alive);
 
     /// <summary>A cell lives on with two or three live neighbors, and is born with three; a row of 16 in one vector.</summary>
-    public class LifeSystem : EcsSystem
+    [EcsSystem]
+    public ref struct LifeSystem
     {
         [ForEach(Parallel = true, ChunkRows = 2)]
         static void Step(Tile<Life, LifePlate> life, Mut<DynamicBuffer<NextLife>> next)
@@ -809,7 +816,8 @@ public class TileTests
         }
     }
 
-    public class CommitLifeSystem : EcsSystem
+    [EcsSystem]
+    public ref struct CommitLifeSystem
     {
         [ForEach]
         static void Commit(in DynamicBuffer<NextLife> next, Mut<DynamicBuffer<Life>> life) =>
@@ -879,7 +887,8 @@ public class TileTests
     /// <summary>What the tile's last step changed: whether anything, and the faces whose edge.</summary>
     public record struct HeatChange(TileFaces Edges, bool Changed) : IComponent;
 
-    public class SparseDiffuseSystem : EcsSystem
+    [EcsSystem]
+    public ref struct SparseDiffuseSystem
     {
         [ForEach(Parallel = true, ChunkRows = 8), With<Awake>]
         static void Diffuse(Tile<Heat, SparsePlate> heat, Mut<DynamicBuffer<NextHeat>> next, ref HeatChange change)
@@ -904,14 +913,16 @@ public class TileTests
         }
     }
 
-    public class CommitAwakeSystem : EcsSystem
+    [EcsSystem]
+    public ref struct CommitAwakeSystem
     {
         [ForEach, With<Awake>]
         static void Commit(in DynamicBuffer<NextHeat> next, Mut<DynamicBuffer<Heat>> heat) =>
             next.AsReadOnlySpan().CopyTo(MemoryMarshal.Cast<Heat, NextHeat>(heat.Write().AsSpan()));
     }
 
-    public class SleepSystem : EcsSystem
+    [EcsSystem]
+    public ref struct SleepSystem
     {
         [ForEach, With<Awake>]
         static void Sleep(Entity plate, in HeatChange change)
@@ -920,12 +931,13 @@ public class TileTests
         }
     }
 
-    public class WakeSystem : EcsSystem
+    [EcsSystem]
+    public ref struct WakeSystem
     {
         [ForEach, With<Awake>]
-        void Wake(in HeatChange change, Tile<Heat, SparsePlate> heat)
+        static void Wake(in HeatChange change, Tile<Heat, SparsePlate> heat, World world)
         {
-            foreach (var id in heat.Facing(change.Edges)) World.GetEntity(id).SetAwake();
+            foreach (var id in heat.Facing(change.Edges)) world.GetEntity(id).SetAwake();
         }
     }
 
@@ -985,7 +997,8 @@ public class TileTests
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
-    public class WaveSystem : EcsSystem
+    [EcsSystem]
+    public ref struct WaveSystem
     {
         public const float Rate = 0.05f;
 
@@ -1062,7 +1075,8 @@ public class TileTests
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
-    public class SumSystem : EcsSystem
+    [EcsSystem]
+    public ref struct SumSystem
     {
         [ForEach(Parallel = true, ChunkRows = 2)]
         static void Step(Tile<Cell, Box8> cells, Mut<DynamicBuffer<NextCell>> next)
@@ -1084,7 +1098,8 @@ public class TileTests
         }
     }
 
-    public class CommitCellSystem : EcsSystem
+    [EcsSystem]
+    public ref struct CommitCellSystem
     {
         [ForEach]
         static void Commit(in DynamicBuffer<NextCell> next, Mut<DynamicBuffer<Cell>> cells) =>
@@ -1168,7 +1183,8 @@ public class TileTests
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
-    public class SmoothSystem : EcsSystem
+    [EcsSystem]
+    public ref struct SmoothSystem
     {
         [ForEach(Parallel = true, ChunkRows = 2)]
         static void Step(Tile<Heat, Strip> heat, Mut<DynamicBuffer<NextHeat>> next)
@@ -1242,7 +1258,8 @@ public class TileTests
         }
     }
 
-    public class ReadHeatSystem : EcsSystem
+    [EcsSystem]
+    public ref struct ReadHeatSystem
     {
         [ForEach]
         static void Read(in DynamicBuffer<Heat> heat, in HeatPlate plate, ref Health health) => health.Value = heat.Count + plate.Pos.X;

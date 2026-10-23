@@ -72,8 +72,8 @@ public sealed partial class Snippet
 
         if (Fence.InSystem)
         {
-            // A fragment of a system: everything but its types is the body of a system class.
-            var system = new StringBuilder($"public class DocSystem_{Fence.Line} : EcsSystem\n{{\n");
+            // A fragment of a system: everything but its types is the body of an [EcsSystem] ref struct.
+            var system = new StringBuilder($"[EcsSystem]\npublic ref struct DocSystem_{Fence.Line}\n{{\n");
             foreach (var member in root.Members)
                 if (!IsType(member))
                     Mapped(system, member, member is GlobalStatementSyntax global ? global.Statement.ToFullString() : member.ToFullString());

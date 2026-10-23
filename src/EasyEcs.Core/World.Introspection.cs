@@ -61,7 +61,7 @@ public partial class World
     /// each system's reads and writes by name, why a system waits for the stage before its own (an ordering, or the
     /// data it conflicts on), and the conflicting pairs that only registration order orders, whose order flips when they
     /// are registered the other way round. Cold: allocates the result, O(systems³) per group; any thread (it reads the
-    /// schedule published by the latest <see cref="AddSystem(EcsSystem, bool)"/> / <see cref="RemoveSystem{T}"/>).
+    /// schedule published by the latest <see cref="AddSystem{T}"/> / <see cref="RemoveSystem{T}"/>).
     /// </summary>
     public ScheduleInfo DescribeSchedule()
     {
@@ -71,22 +71,14 @@ public partial class World
         return new ScheduleInfo(groups.ToArray());
     }
 
-    private static GroupInfo DescribeGroup(SystemSchedule group)
+    private GroupInfo DescribeGroup(SystemSchedule group)
     {
         var stages = group.Stages;
-        var order = group.Systems; // the stages' systems, stage after stage
+        var order = new SystemCode.Entry[group.Systems.Length]; // the stages' systems, stage after stage
+        for (int i = 0; i < order.Length; i++) order[i] = SystemRows[group.Systems[i].Index].Code;
         int n = order.Length;
-
-        // Names, unique within the group (the same type may be added twice).
         var names = new string[n];
-        var seen = new Dictionary<string, int>();
-        for (int i = 0; i < n; i++)
-        {
-            string name = ScheduleInfo.NameOf(order[i].GetType());
-            int count = seen.GetValueOrDefault(name) + 1;
-            seen[name] = count;
-            names[i] = count == 1 ? name : name + " #" + count;
-        }
+        for (int i = 0; i < n; i++) names[i] = ScheduleInfo.NameOf(order[i].Type); // a type is added once per world
 
         // Orderings, transitively: reach[i, j] when a chain of [UpdateBefore] / [UpdateAfter] puts i before j.
         var reach = new bool[n, n];
@@ -121,7 +113,7 @@ public partial class World
                 ref readonly var access = ref order[at].Access;
                 systems[i] = new SystemInfo(names[at], ComponentNames(access.ReadComponents), ComponentNames(access.WriteComponents),
                     SingletonNamesOf(access.ReadSingletons), SingletonNamesOf(access.WriteSingletons), access.Alone, waits.ToArray())
-                    { Loops = order[at].Loops() };
+                    { Loops = order[at].Loops };
             }
 
             infos[s] = new StageInfo(systems);

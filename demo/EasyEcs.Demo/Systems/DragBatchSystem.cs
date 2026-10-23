@@ -5,8 +5,8 @@ using EasyEcs;
 namespace EasyEcs.Demo;
 
 // DragSystem as a batch method: the same slowdown over runs of whole rows at once.
-[UpdateInGroup<Batched>]
-public class DragBatchSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Batched>]
+public ref struct DragBatchSystem
 {
     [ForEach]
     static void Slow(Span<Velocity> velocities, in Clock clock)

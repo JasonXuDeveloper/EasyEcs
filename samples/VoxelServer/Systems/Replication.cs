@@ -9,8 +9,8 @@ namespace VoxelServer;
 // takes either buffer. A chunk that comes into a view is sent whole by AoiViewSystem, and so is a Fresh one, just
 // loaded or generated: its buffers count as written, but no client has it yet; ChunkSentSystem clears the tag. Here the packets are counted; a real
 // server would encode them.
-[UpdateInGroup<Replication>]
-public class SendChunksSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Replication>]
+public ref struct SendChunksSystem
 {
     [ForEach, With<Chunk>, Without<Fresh>, ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]
     static void Send(in Viewers viewers, ref Stats stats) => stats.BlockUpdates += viewers.Count;
@@ -19,10 +19,11 @@ public class SendChunksSystem : EcsSystem
 
 // From the next tick on, a chunk loaded this tick is like any other: its changes are block changes. One bulk removal
 // clears the tag of every chunk at once, whole words of presence bits, after the systems that read it.
-[UpdateInGroup<Replication>]
-public class ChunkSentSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Replication>]
+public ref struct ChunkSentSystem
 {
-    protected override void OnUpdate() => World.RemoveAll<Fresh>();
+    [OnUpdate]
+    static void OnUpdate(World world) => world.RemoveAll<Fresh>();
 }
 // #endregion chunks
 
@@ -31,13 +32,13 @@ public class ChunkSentSystem : EcsSystem
 // zombies do, a dropped item does not. Maybe<Health> reads the health where the entity has it, so one method serves
 // all three kinds instead of one per kind. It goes to the players that have the entity's chunk in view, as the
 // entity's spawn did (AoiSpawnSystem): the chunk's Viewers, one lookup instead of a walk of every viewer.
-[UpdateInGroup<Replication>]
-public class SendEntitiesSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Replication>]
+public ref struct SendEntitiesSystem
 {
     [ForEach, Changed<Position>]
-    void Send(in InChunk at, Maybe<Health> health, ref Stats stats)
+    static void Send(in InChunk at, Maybe<Health> health, ref Stats stats, World world)
     {
-        if (!World.ChunkIndex.TryGet(at.Pos, out var chunk)) return;
+        if (!world.ChunkIndex.TryGet(at.Pos, out var chunk)) return;
         int watching = chunk.Viewers.Count;
         stats.EntityUpdates += watching;
         stats.BytesSent += watching * (Rules.PositionBytes + (health.HasValue ? Rules.HealthBytes : 0));
@@ -49,9 +50,10 @@ public class SendEntitiesSystem : EcsSystem
 // Starts a tick of the simulation: the clock goes first, so every system of the tick, and the replication after it,
 // sees the same tick. In the Simulation group, not Replication, so a server that replicates less often than it
 // simulates keeps game time.
-[UpdateInGroup<Simulation>]
-public class ClockSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate() => World.Clock.Tick++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.Clock.Tick++;
 }
 // #endregion clock

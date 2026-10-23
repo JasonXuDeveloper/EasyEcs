@@ -3,7 +3,8 @@ using EasyEcs;
 namespace EasyEcs.Demo;
 
 // Pulls the sparks towards the pointer while it is over the canvas, and swirls them around it.
-public class AttractSystem : EcsSystem
+[EcsSystem]
+public ref struct AttractSystem
 {
     // Pull and swirl, in pixels per second squared at the softening distance.
     private const float Pull = 1800f;

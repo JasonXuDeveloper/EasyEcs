@@ -15,26 +15,27 @@ namespace VoxelServer;
 //
 // Reads and generation are OnUpdates, not [ForEach] methods: LoadEntities and Instantiate may not run while a pass
 // walks the world. Each serves Rules.MaxRequests a tick at most; the others wait a tick.
-[UpdateInGroup<Simulation>]
-public class ChunkReadSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct ChunkReadSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
         Span<EntityId> served = stackalloc EntityId[Rules.MaxRequests];
-        int count = World.CollectIds<LoadRequest>(served, InFiles);           // the rest waits a tick
+        int count = world.CollectIds<LoadRequest>(served, InFiles);           // the rest waits a tick
         if (count == 0) return;
         Span<ChunkPos> saved = stackalloc ChunkPos[Rules.MaxRequests];
-        for (int i = 0; i < count; i++) saved[i] = World.GetEntity(served[i]).LoadRequest.Pos;
-        World.DestroyEntities(served[..count]);
+        for (int i = 0; i < count; i++) saved[i] = world.GetEntity(served[i]).LoadRequest.Pos;
+        world.DestroyEntities(served[..count]);
 
-        var files = World.Regions.Files;
-        long tick = World.Clock.Tick;
+        var files = world.Regions.Files;
+        long tick = world.Clock.Tick;
         foreach (var pos in saved[..count])
         {
             files.TryRead(pos, out var bytes);
-            World.LoadEntities(bytes);                                           // the chunk and what was in it
-            World.ChunkIndex.Get(pos).Set(new Fresh(), new Flowing());           // two presence bits
-            World.Stats.ChunksLoaded++;
+            world.LoadEntities(bytes);                                           // the chunk and what was in it
+            world.ChunkIndex.Get(pos).Set(new Fresh(), new Flowing());           // two presence bits
+            world.Stats.ChunksLoaded++;
         }
     }
 
@@ -43,29 +44,30 @@ public class ChunkReadSystem : EcsSystem
 
 // Generates the chunks asked for that were never saved: an instance of the chunk prefab, its blocks written in place
 // (SetCount gives the span to write), its water empty but for a spring in one chunk in four.
-[UpdateInGroup<Simulation>]
-public class ChunkGenerateSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct ChunkGenerateSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
         Span<EntityId> served = stackalloc EntityId[Rules.MaxRequests];
-        int count = World.CollectIds<LoadRequest>(served, NotInFiles);
+        int count = world.CollectIds<LoadRequest>(served, NotInFiles);
         if (count == 0) return;
         Span<ChunkPos> asked = stackalloc ChunkPos[Rules.MaxRequests];
-        for (int i = 0; i < count; i++) asked[i] = World.GetEntity(served[i]).LoadRequest.Pos;
-        World.DestroyEntities(served[..count]);
+        for (int i = 0; i < count; i++) asked[i] = world.GetEntity(served[i]).LoadRequest.Pos;
+        world.DestroyEntities(served[..count]);
 
-        var prefab = World.Prefabs.Chunk;
+        var prefab = world.Prefabs.Chunk;
         foreach (var pos in asked[..count])
         {
             int x = pos.X * Terrain.Size + Terrain.Size / 2, z = pos.Z * Terrain.Size + Terrain.Size / 2;
             int y = Terrain.SurfaceHeight(x, z) + 1;                             // a spring's block, on the ground
             bool spring = Rules.HasSpring(pos);
-            var chunk = World.Instantiate(prefab, new Chunk(pos), spring ? new FluidCount(1, (byte)y, (byte)y) : FluidCount.Dry);
+            var chunk = world.Instantiate(prefab, new Chunk(pos), spring ? new FluidCount(1, (byte)y, (byte)y) : FluidCount.Dry);
             Terrain.Generate(pos, chunk.WriteBlock().SetCount(Terrain.BlocksPerChunk));
             var water = chunk.WriteFluid().SetCount(Terrain.BlocksPerChunk);    // zeroed: no water
             if (spring) water[Terrain.IndexOf(x, y, z)] = new Fluid(Fluid.Spring);
-            World.Stats.ChunksGenerated++;
+            world.Stats.ChunksGenerated++;
         }
     }
 
@@ -76,8 +78,8 @@ public class ChunkGenerateSystem : EcsSystem
 // #region unload
 // Marks the chunks no player has had in view for five seconds. Slices = 20 spreads the check over a second: each tick
 // visits a twentieth of the chunks.
-[UpdateInGroup<Simulation>]
-public class ChunkUnloadSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct ChunkUnloadSystem
 {
     [ForEach(Slices = Rules.TicksPerSecond), With<Chunk>, Without<Unloading>]
     static void Unload(Entity chunk, in Viewers viewers, in Clock clock)
@@ -91,26 +93,27 @@ public class ChunkUnloadSystem : EcsSystem
 // so nothing ticks where no player is, and a player who comes back finds the holes it dug and the zombies it left.
 // After the pass, like the loads. A chunk a player stands in (one who just respawned there) or holding more than
 // Rules.MaxSaved entities stays loaded and is marked again later.
-[UpdateInGroup<Simulation>]
-public class ChunkSaveSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct ChunkSaveSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        if (!World.Any<Unloading>()) return;
+        if (!world.Any<Unloading>()) return;
         Span<EntityId> marked = stackalloc EntityId[Rules.MaxRequests];
-        int count = World.CollectIds<Chunk>(marked, Unload);                  // the rest waits a tick
+        int count = world.CollectIds<Chunk>(marked, Unload);                  // the rest waits a tick
 
-        var files = World.Regions.Files;
+        var files = world.Regions.Files;
         Span<EntityId> group = stackalloc EntityId[Rules.MaxSaved];
         foreach (var id in marked[..count])
         {
-            var chunk = World.GetEntity(id);
+            var chunk = world.GetEntity(id);
             chunk.RemoveUnloading();                                         // not in the region file
             var pos = chunk.Chunk.Pos;
             int size = 0;
             group[size++] = id;
             bool keep = false;
-            foreach (var entity in World.InChunkIndex.Find(pos))
+            foreach (var entity in world.InChunkIndex.Find(pos))
             {
                 if (entity.HasPlayer || size == group.Length)
                 {
@@ -120,10 +123,10 @@ public class ChunkSaveSystem : EcsSystem
                 group[size++] = entity;
             }
             if (keep) continue;
-            World.SaveEntities(files.Buffer, group[..size]);
+            world.SaveEntities(files.Buffer, group[..size]);
             files.Write(pos);
-            World.DestroyEntities(group[..size]);
-            World.Stats.ChunksUnloaded++;
+            world.DestroyEntities(group[..size]);
+            world.Stats.ChunksUnloaded++;
         }
     }
 

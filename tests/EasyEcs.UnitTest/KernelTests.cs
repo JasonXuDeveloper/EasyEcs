@@ -553,7 +553,8 @@ public static class WideKernels
 }
 
 /// <summary>A system of three methods for the schedule's loop lines: a flat vector loop, a cold branch, one scalar.</summary>
-public class LoopsSystem : EcsSystem
+[EcsSystem]
+public ref struct LoopsSystem
 {
     [ForEach]
     static void Move(ref Place2 position, in Pace2 velocity) => position = new Place2(position.Value + velocity.Value);

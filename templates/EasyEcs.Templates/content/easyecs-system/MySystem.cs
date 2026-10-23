@@ -3,7 +3,8 @@ using EasyEcs;
 namespace MyNamespace;
 
 /// <summary>What MySystem does, in one sentence: one system, one responsibility.</summary>
-public class MySystem : EcsSystem
+[EcsSystem]
+public ref struct MySystem
 {
     // A system keeps no state of its own: put state in components or singletons.
     //

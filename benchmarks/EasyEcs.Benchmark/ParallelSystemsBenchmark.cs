@@ -43,7 +43,8 @@ public class ParallelSystemsBenchmark
     public record struct Mana(int Value, int Max) : IComponent;
     public record struct Cooldown(int Ticks) : IComponent;
 
-    public class MoveBodies : EcsSystem
+    [EcsSystem]
+    public ref struct MoveBodies
     {
         [ForEach]
         static void Move(ref Body b)
@@ -55,19 +56,22 @@ public class ParallelSystemsBenchmark
         }
     }
 
-    public class RegenerateHealth : EcsSystem
+    [EcsSystem]
+    public ref struct RegenerateHealth
     {
         [ForEach]
         static void Regenerate(ref Vitals v) => v.Health = v.Health < v.Max ? v.Health + 1 : 0;
     }
 
-    public class RegenerateMana : EcsSystem
+    [EcsSystem]
+    public ref struct RegenerateMana
     {
         [ForEach]
         static void Regenerate(ref Mana m) => m.Value = m.Value < m.Max ? m.Value + 1 : 0;
     }
 
-    public class TickCooldowns : EcsSystem
+    [EcsSystem]
+    public ref struct TickCooldowns
     {
         [ForEach]
         static void Tick(ref Cooldown c) => c.Ticks = c.Ticks > 0 ? c.Ticks - 1 : 30;

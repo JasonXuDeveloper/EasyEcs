@@ -4,7 +4,8 @@ namespace EasyEcs.Demo;
 
 // Turns sparks back at the walls and makes them flash: the hit is written as data (Flash),
 // FadeSystem takes it from there.
-public class BounceSystem : EcsSystem
+[EcsSystem]
+public ref struct BounceSystem
 {
     [ForEach]
     static void Bounce(Entity spark, ref Position p, ref Velocity v, in Arena arena)

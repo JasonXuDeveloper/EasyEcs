@@ -8,8 +8,8 @@ namespace VoxelServer;
 // but itself, so the rows may be split across threads (Parallel = true). The runner times the split against one
 // thread and keeps it only while the helpers make the pass faster: a row this cheap pays from tens of thousands of
 // players, and below that the pass stays on the calling thread at no cost.
-[UpdateInGroup<Simulation>]
-public class PlayerMoveSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct PlayerMoveSystem
 {
     [ForEach(Parallel = true)]
     static void Walk(in Input input, ref Velocity velocity)
@@ -28,15 +28,15 @@ public class PlayerMoveSystem : EcsSystem
 // cost one block lookup. The position is a Mut<Position>, written only when it changes, so a body standing still is
 // not sent again. It stays on one thread: the block lookups go through World (the chunk index), and a parallel method may not hold the
 // World (EECS010).
-[UpdateInGroup<Simulation>]
-public class PhysicsSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct PhysicsSystem
 {
     [ForEach]
-    void Move(Mut<Position> position, ref Velocity velocity, ref Body body)
+    static void Move(Mut<Position> position, ref Velocity velocity, ref Body body, World world)
     {
         var p = position.Value.Value;
         var v = velocity.Value;
-        var near = new Nearby(World);
+        var near = new Nearby(world);
         if (body.OnGround && v == Vector3.Zero && near.IsSolid(p.X, p.Y - 1, p.Z)) return;   // at rest
         v.Y = MathF.Max(v.Y - Rules.Gravity, -3.9f);
 
@@ -86,8 +86,8 @@ public class PhysicsSystem : EcsSystem
 // Keeps the InChunk of everything that moves on the chunk it is in: players, zombies, items. [Changed<Position>] visits
 // only what moved this tick (physics writes a position only when it changes), and SetInChunkIfChanged writes only when
 // the entity crossed into another chunk, so the index is touched a few times a second, not every tick.
-[UpdateInGroup<Simulation>]
-public class GridSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct GridSystem
 {
     [ForEach, With<InChunk>, Changed<Position>]
     static void Track(Entity entity, in Position position)

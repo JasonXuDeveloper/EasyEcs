@@ -17,7 +17,7 @@ public sealed record Fence(string Page, int Line, string Language, string Meta, 
     /// </summary>
     public bool Example => Options.Contains("example");
 
-    /// <summary>A fragment of a system's body (<c>[ForEach]</c> methods, overrides): compiled inside an <c>EcsSystem</c>.</summary>
+    /// <summary>A fragment of a system's body (<c>[ForEach]</c> methods, hooks): compiled inside an <c>[EcsSystem]</c> ref struct.</summary>
     public bool InSystem => Options.Contains("system");
 
     /// <summary>The diagnostics this fence must report (a bad example): <c>expect-EECS007</c>.</summary>

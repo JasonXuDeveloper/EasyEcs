@@ -4,7 +4,7 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// What a system costs per update apart from its rows: 16 systems whose [ForEach] method visits one entity, and the
-/// same 16 with an OnUpdate override that does nothing. The update calls each system's generated code and runs one
+/// same 16 with an [OnUpdate] method that does nothing. The update calls each system's generated code and runs one
 /// pass per system, so the numbers divided by 16 are the cost of a system on an update. Allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
@@ -44,39 +44,38 @@ public class SystemDispatchBenchmark
 
     public record struct Counter(int Value) : IComponent;
 
-    public sealed class S0 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S1 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S2 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S3 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S4 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S5 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S6 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S7 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S8 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S9 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S10 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S11 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S12 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S13 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S14 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class S15 : EcsSystem { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S0 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S1 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S2 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S3 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S4 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S5 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S6 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S7 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S8 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S9 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S10 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S11 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S12 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S13 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S14 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S15 { [ForEach] static void Run(ref Counter c) => c.Value++; }
 
-    // An OnUpdate that does nothing: the system runs alone, and the runtime calls OnUpdate before the pass.
-    public abstract class WithHook : EcsSystem { protected override void OnUpdate() { } }
-    public sealed class U0 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U1 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U2 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U3 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U4 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U5 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U6 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U7 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U8 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U9 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U10 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U11 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U12 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U13 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U14 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    public sealed class U15 : WithHook { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    // An [OnUpdate] method that does nothing: the system runs alone, and the runtime calls it before the pass.
+    [EcsSystem] public ref struct U0 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U1 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U2 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U3 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U4 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U5 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U6 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U7 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U8 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U9 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U10 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U11 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U12 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U13 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U14 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U15 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
 }

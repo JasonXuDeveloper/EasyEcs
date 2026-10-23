@@ -17,16 +17,16 @@ public class SparseBenchmark
     public struct CoolPass : ISystemGroup;
 
     /// <summary>The burning lose health.</summary>
-    [UpdateInGroup<BurnPass>]
-    public class Burn : EcsSystem
+    [EcsSystem, UpdateInGroup<BurnPass>]
+    public ref struct Burn
     {
         [ForEach, With<Burning>]
         private static void Hurt(ref Health health) => health.Value--;
     }
 
     /// <summary>The others heal.</summary>
-    [UpdateInGroup<CoolPass>]
-    public class Heal : EcsSystem
+    [EcsSystem, UpdateInGroup<CoolPass>]
+    public ref struct Heal
     {
         [ForEach, Without<Burning>]
         private static void Mend(ref Health health) => health.Value++;

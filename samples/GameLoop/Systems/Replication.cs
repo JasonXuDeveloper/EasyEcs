@@ -8,8 +8,8 @@ namespace GameLoop;
 // from the entity it had), then X and Y.
 // [Changed<Position>] skips the entities that did not move, so a quiet world costs
 // almost nothing. The host sends the bytes and clears the outbox.
-[UpdateInGroup<ReplicationGroup>]
-public sealed class ReplicationSystem : EcsSystem
+[EcsSystem, UpdateInGroup<ReplicationGroup>]
+public ref struct ReplicationSystem
 {
     const int UpdateSize = 16;
 

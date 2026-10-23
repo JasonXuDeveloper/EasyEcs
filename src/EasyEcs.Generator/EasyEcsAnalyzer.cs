@@ -25,32 +25,19 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "{0} must take between 1 and 9 components, or none with a [With<T>] or [Changed<T>] filter", Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS003"));
 
     public static readonly DiagnosticDescriptor Generic = new("EECS004", "Generic [ForEach] method in a system",
-        "[ForEach] method '{0}' of a system is generic, and nothing gives it type arguments: make the system generic instead (class Regen<T> : EcsSystem)",
+        "[ForEach] method '{0}' of a system is generic, and nothing gives it type arguments: make the system generic instead ([EcsSystem] ref struct Regen<T>)",
         Category, DiagnosticSeverity.Error, true,
         "A system runs its [ForEach] methods itself, once per update, so a generic method would have no type arguments. " +
         "Generic systems are fine (each closed type is a system of its own), and so are generic [ForEach] methods outside " +
         "systems, whose entry points take the type arguments.", helpLinkUri: Help("EECS004"));
 
     public static readonly DiagnosticDescriptor NotASystem = new("EECS005", "Instance [ForEach] method outside a system",
-        "[ForEach] method '{0}' is an instance method of '{1}', which is no EcsSystem: make it static (the generator writes an entry point that takes the world) or move it into a system",
+        "[ForEach] method '{0}' is an instance method of '{1}', which is no system: make it static (the generator writes an entry point that takes the world) or move it into an [EcsSystem]",
         Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS005"));
 
     public static readonly DiagnosticDescriptor NotStruct = new("EECS006", "ECS data must be a struct",
         "'{0}' implements {1} and must be a struct: components and singletons are stored by value",
         Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS006"));
-
-    public static readonly DiagnosticDescriptor StatefulSystem = new("EECS007", "Systems must be stateless",
-        "System '{0}' keeps mutable state in '{1}'; store it in a component (per entity) or a singleton (per world)",
-        Category, DiagnosticSeverity.Error, true,
-        "A system is behavior only. State in a system is invisible to other systems, queries and persistence, and it is " +
-        "lost or duplicated when the system is removed or re-added; a static field is also shared by every world. " +
-        "Readonly fields (dependencies, reusable scratch buffers) are allowed.", helpLinkUri: Help("EECS007"));
-
-    public static readonly DiagnosticDescriptor SystemReference = new("EECS008", "Systems must not reference systems",
-        "System '{0}' references system '{1}' through '{2}'; communicate through components or singletons",
-        Category, DiagnosticSeverity.Error, true,
-        "Systems that call each other, through a field or World.TryGetSystem, are coupled: neither can be removed, reordered " +
-        "or tested alone. Write the data another system reads (a component or a singleton).", helpLinkUri: Help("EECS008"));
 
     public static readonly DiagnosticDescriptor MixedBatch = new("EECS009", "Batch [ForEach] mixes spans and per-entity parameters",
         "[ForEach] method '{0}' mixes batch and per-entity parameters: a batch method takes component spans, an EntitySpan and singletons ('ref'/'in'); an EntitySpan needs component spans",
@@ -252,14 +239,14 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
         MixedBatch, NotParallel, WriteThroughReadOnly, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
         RemovedRequired, EntityInData, OrderCycle, OrderAcrossGroups, EntryPointCollision, Unnameable, FilterOutsideGroup, LocalForEach,
-        WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
+        WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
         UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, ReductionOverwritten, ScalarLoop, NoVectorLoop,
         SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, NotPartial, ReductionWrittenTwice, BadReductionField, HandWrittenReduction,
         WrongIdentity, HandWrittenKey, BadSetup, NoFormatter, BadEmit, SharedRandom,
-        HandWrittenEntityJob, BadForEntity, CadenceOverride, BadUpdateInterval, HandWrittenConsume, BadConsume, BadTileShape, SharedTile,
-        HandWrittenReduce, HandWrittenLookup, SharedStream, HandWrittenEmit);
+        HandWrittenEntityJob, BadForEntity, BadUpdateInterval, HandWrittenConsume, BadConsume, BadTileShape, SharedTile,
+        HandWrittenReduce, HandWrittenLookup, SharedStream, HandWrittenEmit, BadSystemType, InstanceMember, BadHook, NotASystemType);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -279,16 +266,14 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterOperationAction(AnalyzeWrite, OperationKind.SimpleAssignment, OperationKind.CompoundAssignment,
             OperationKind.CoalesceAssignment, OperationKind.Increment, OperationKind.Decrement, OperationKind.Invocation);
         context.RegisterOperationAction(AnalyzeStructuralCall, OperationKind.Invocation);
-        context.RegisterOperationAction(AnalyzeCapturedWrite, OperationKind.SimpleAssignment, OperationKind.CompoundAssignment,
-            OperationKind.Increment, OperationKind.Decrement);
         context.RegisterOperationAction(AnalyzeIndexedRef, OperationKind.Invocation, OperationKind.VariableDeclarator);
-        context.RegisterOperationAction(AnalyzeSystemLookup, OperationKind.Invocation);
         context.RegisterCompilationStartAction(AnalyzeOrderings);
         context.RegisterCompilationStartAction(AnalyzeFormatters);
         InitializePerformance(context);
         InitializeUsage(context);
         InitializeParallel(context);
         InitializeForms(context);
+        InitializeSystems(context);
     }
 
     /// <summary>
@@ -301,12 +286,12 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         start.RegisterSymbolAction(context =>
         {
             var type = (INamedTypeSymbol)context.Symbol;
-            if (type.TypeKind != TypeKind.Class || !Symbols.IsSystem(type)) return;
+            if (!Symbols.IsValidSystem(type)) return;
             foreach (var attribute in type.GetAttributes())
             {
                 bool before = Symbols.Is(attribute.AttributeClass, Symbols.UpdateBeforeAttribute);
                 if (!before && !Symbols.Is(attribute.AttributeClass, Symbols.UpdateAfterAttribute)) continue;
-                // Generic systems by definition: G2<int> and G2<T> are one node of the order (orderings cover subclasses).
+                // Generic systems by definition: G2<int> and G2<T> are one node of the order.
                 if (attribute.AttributeClass!.TypeArguments[0] is not INamedTypeSymbol { TypeKind: not TypeKind.Error } argument) continue;
                 var other = argument.OriginalDefinition;
                 var location = attribute.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken).GetLocation() ?? type.Locations[0];
@@ -351,17 +336,6 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             foreach (var type in next.Keys.ToArray())
                 if (!state.ContainsKey(type)) Visit(type);
         });
-    }
-
-    /// <summary>EECS008: a system that finds another system through <c>World.TryGetSystem&lt;T&gt;()</c>.</summary>
-    private static void AnalyzeSystemLookup(OperationAnalysisContext context)
-    {
-        var call = (IInvocationOperation)context.Operation;
-        if (call.TargetMethod is not { Name: "TryGetSystem", TypeArguments.Length: 1 } method
-            || !Symbols.Named(method.ContainingType, Symbols.World) || method.TypeArguments[0].TypeKind == TypeKind.Error) return;
-        if (Symbols.SystemOf(context.ContainingSymbol.ContainingType) is { } system)
-            context.ReportDiagnostic(Diagnostic.Create(SystemReference, call.Syntax.GetLocation(), system.Name,
-                method.TypeArguments[0].Name, "World.TryGetSystem"));
     }
 
     /// <summary>
@@ -606,9 +580,6 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                     context.ReportDiagnostic(Diagnostic.Create(FilterOutsideGroup,
                         attribute.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken).GetLocation() ?? location,
                         type.Name, cls.Name.Replace("Attribute", "") + "<" + cls.TypeArguments[0].Name + ">"));
-
-        if (type.TypeKind != TypeKind.Class) return;
-        if (Symbols.IsSystem(type)) AnalyzeSystemFields(context, type);
     }
 
     /// <summary>EECS036: a unique component with an EntityId key, or a component with a second index key.</summary>
@@ -704,46 +675,6 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     }
 
     /// <summary>
-    /// EECS007/008: a system's own fields and auto-properties, static ones included (state shared by every world's
-    /// instance); inherited ones are reported on their declaring type.
-    /// </summary>
-    private static void AnalyzeSystemFields(SymbolAnalysisContext context, INamedTypeSymbol system)
-    {
-        foreach (var member in system.GetMembers())
-        {
-            if (member.IsImplicitlyDeclared) continue;
-            ITypeSymbol? type;
-            bool mutable;
-            switch (member)
-            {
-                case IFieldSymbol field when field.AssociatedSymbol == null && !field.IsConst:
-                    type = field.Type;
-                    mutable = !field.IsReadOnly;
-                    break;
-                case IPropertySymbol { IsIndexer: false } property when IsAutoProperty(property):
-                    type = property.Type;
-                    mutable = property.SetMethod is { IsInitOnly: false };
-                    break;
-                case IEventSymbol { AddMethod.IsImplicitlyDeclared: true } field: // a field-like event: a delegate field
-                    type = field.Type;
-                    mutable = true;
-                    break;
-                default:
-                    continue;
-            }
-
-            var location = member.Locations.FirstOrDefault();
-            if (SystemIn(type) is { } named)
-                context.ReportDiagnostic(Diagnostic.Create(SystemReference, location, system.Name, named.Name, member.Name));
-            else if (mutable)
-                context.ReportDiagnostic(Diagnostic.Create(StatefulSystem, location,
-                    member is IFieldSymbol plain && AssignedOnlyAtConstruction(plain, context.CancellationToken)
-                        ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Readonly") : null,
-                    system.Name, member.Name));
-        }
-    }
-
-    /// <summary>
     /// EECS007's fix: a private field, declared alone, of a type a readonly field keeps the same (a class, a readonly
     /// struct, a number or enum: no mutating call on a copy), written only by its initializer and the constructors (the
     /// static ones for a static field), not in a lambda there. Syntax only: any other write of its name blocks the fix.
@@ -793,32 +724,6 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         return true;
     }
 
-    /// <summary>EECS007: a system's member writes a primary constructor parameter, a hidden mutable field.</summary>
-    private static void AnalyzeCapturedWrite(OperationAnalysisContext context)
-    {
-        var target = context.Operation switch
-        {
-            IAssignmentOperation assignment => assignment.Target,
-            IIncrementOrDecrementOperation step => step.Target,
-            _ => null,
-        };
-        if (target is not IParameterReferenceOperation { Parameter: { ContainingSymbol: IMethodSymbol { MethodKind: MethodKind.Constructor } ctor } parameter }
-            || SymbolEqualityComparer.Default.Equals(context.ContainingSymbol, ctor)
-            || ctor.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is not TypeDeclarationSyntax
-            || !Symbols.IsSystem(ctor.ContainingType))
-            return;
-        context.ReportDiagnostic(Diagnostic.Create(StatefulSystem, target.Syntax.GetLocation(), ctor.ContainingType.Name, parameter.Name));
-    }
-
-    /// <summary>The system a field's type holds (itself, an element, a type argument; EcsSystem too), or null.</summary>
-    private static INamedTypeSymbol? SystemIn(ITypeSymbol? type) => type switch
-    {
-        IArrayTypeSymbol array => SystemIn(array.ElementType),
-        INamedTypeSymbol named when Symbols.Named(named, Symbols.EcsSystem) || Symbols.IsSystem(named) => named,
-        INamedTypeSymbol named => named.TypeArguments.Select(SystemIn).FirstOrDefault(t => t != null),
-        _ => null,
-    };
-
     /// <summary>An auto-property has a compiler-generated backing field (computed properties hold no state).</summary>
     private static bool IsAutoProperty(IPropertySymbol property) => property.ContainingType.GetMembers()
         .OfType<IFieldSymbol>().Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, property));
@@ -836,7 +741,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(BadForEntity, location,
                 !method.IsStatic && problem.StartsWith("is an instance") ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Static") : null,
                 method.Name, problem));
-        else if (outside && !method.IsStatic)
+        else if (outside && !method.IsStatic && !Symbols.IsSystem(method.ContainingType)) // in a system: EECS075
             context.ReportDiagnostic(Diagnostic.Create(NotASystem, location, method.Name, method.ContainingType.Name));
         else if (outside && Symbols.EntryPointCollides(method))
             context.ReportDiagnostic(Diagnostic.Create(EntryPointCollision, location, method.Name,
@@ -949,7 +854,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             || !Symbols.IsForEach(method) || !Symbols.IsParallel(method)
             || method.PartialDefinitionPart != null) return; // a partial method: reported once, on its definition
         if (Symbols.ParallelProblem(method, syntax, context.SemanticModel) is not { } problem) return;
-        // An instance method that 'static' alone makes stable: the fix EECS029 would offer (it defers to this rule).
+        // An instance method that 'static' alone makes stable: the fix offers 'static'.
         bool makeStatic = !method.IsStatic && !Symbols.SharesSignature(method) && method.PartialImplementationPart == null
                           && Symbols.StableIfStatic(method, syntax, context.SemanticModel);
         context.ReportDiagnostic(Diagnostic.Create(NotParallel, method.Locations.FirstOrDefault(),

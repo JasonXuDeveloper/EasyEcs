@@ -5,7 +5,7 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// What a [ForEach] method's declarations cost, one world update over 100,000 entities per case: the pairs the
-/// analyzer's performance rules choose between (EECS025-EECS029; EECS052: 1,000 entities created and destroyed). Each
+/// analyzer's performance rules choose between (EECS025-EECS028; EECS052: 1,000 entities created and destroyed). Each
 /// pair does the same work; the first of a category is the declaration the analyzer reports, the baseline the one it
 /// suggests. 0 bytes.
 /// </summary>
@@ -30,7 +30,7 @@ public class AccessBenchmark
     [Params(100_000)] public int Entities;
 
     private World _trackedRef, _trackedIn, _untrackedRef, _untrackedIn, _unused, _with, _tag, _withTag,
-        _entityRead, _parameter, _entityHas, _maybe, _worldSingleton, _singleton, _instance, _static, _mixed;
+        _entityRead, _parameter, _entityHas, _maybe, _worldSingleton, _singleton, _mixed;
 
     private Entity[] _handles, _wide;
     private World _wideWorld, _spawn;
@@ -38,84 +38,94 @@ public class AccessBenchmark
     private readonly EntityId[] _spawned = new EntityId[Spawns];
     private static readonly QueryFilter Bosses = QueryFilter.Create().With<Boss>();
 
-#pragma warning disable EECS025, EECS026, EECS027, EECS029 // the reported side of each pair
-    public sealed class TrackedRef : EcsSystem
+#pragma warning disable EECS025, EECS026, EECS027 // the reported side of each pair
+    [EcsSystem]
+    public ref struct TrackedRef
     {
         [ForEach] static void Sum(ref Gold gold, ref Total total) => total.V += gold.V;
     }
 
-    public sealed class UntrackedRef : EcsSystem
+    [EcsSystem]
+    public ref struct UntrackedRef
     {
         [ForEach] static void Sum(ref Speed speed, ref Total total) => total.V += speed.V;
     }
 
-    public sealed class UnusedParameter : EcsSystem
+    [EcsSystem]
+    public ref struct UnusedParameter
     {
         [ForEach] static void Run(ref Speed speed, in Armor armor) => speed.V++;
     }
 
-    public sealed class TagParameter : EcsSystem
+    [EcsSystem]
+    public ref struct TagParameter
     {
         [ForEach] static void Run(ref Speed speed, in Boss boss) => speed.V++;
     }
 
-    public sealed class EntityRead : EcsSystem
+    [EcsSystem]
+    public ref struct EntityRead
     {
         [ForEach] static void Run(Entity e, ref Speed speed) => speed.V += e.Read<Armor>().V;
     }
 
-    public sealed class EntityHas : EcsSystem
+    [EcsSystem]
+    public ref struct EntityHas
     {
         [ForEach] static void Run(Entity e, ref Speed speed) { if (e.Has<Boss>()) speed.V++; }
     }
 
-    public sealed class WorldSingleton : EcsSystem
+    [EcsSystem]
+    public ref struct WorldSingleton
     {
         [ForEach] static void Run(ref Speed speed, World world) => speed.V += world.GetSingleton<Step>().V;
     }
+#pragma warning restore EECS025, EECS026, EECS027
 
-    public sealed class InstanceMethod : EcsSystem
-    {
-        [ForEach] void Run(ref Speed speed) => speed.V++;
-    }
-#pragma warning restore EECS025, EECS026, EECS027, EECS029
-
-    public sealed class TrackedIn : EcsSystem
+    [EcsSystem]
+    public ref struct TrackedIn
     {
         [ForEach] static void Sum(in Gold gold, ref Total total) => total.V += gold.V;
     }
 
-    public sealed class UntrackedIn : EcsSystem
+    [EcsSystem]
+    public ref struct UntrackedIn
     {
         [ForEach] static void Sum(in Speed speed, ref Total total) => total.V += speed.V;
     }
 
-    public sealed class WithFilter : EcsSystem
+    [EcsSystem]
+    public ref struct WithFilter
     {
         [ForEach, With<Armor>] static void Run(ref Speed speed) => speed.V++;
     }
 
-    public sealed class WithTag : EcsSystem
+    [EcsSystem]
+    public ref struct WithTag
     {
         [ForEach, With<Boss>] static void Run(ref Speed speed) => speed.V++;
     }
 
-    public sealed class Parameter : EcsSystem
+    [EcsSystem]
+    public ref struct Parameter
     {
         [ForEach] static void Run(ref Speed speed, in Armor armor) => speed.V += armor.V;
     }
 
-    public sealed class MaybeParameter : EcsSystem
+    [EcsSystem]
+    public ref struct MaybeParameter
     {
         [ForEach] static void Run(ref Speed speed, Maybe<Boss> boss) { if (boss.HasValue) speed.V++; }
     }
 
-    public sealed class SingletonParameter : EcsSystem
+    [EcsSystem]
+    public ref struct SingletonParameter
     {
         [ForEach] static void Run(ref Speed speed, in Step step) => speed.V += step.V;
     }
 
-    public sealed class StaticMethod : EcsSystem
+    [EcsSystem]
+    public ref struct StaticMethod
     {
         [ForEach] static void Run(ref Speed speed) => speed.V++;
     }
@@ -123,22 +133,20 @@ public class AccessBenchmark
     [GlobalSetup]
     public void Setup()
     {
-        _trackedRef = Build(new TrackedRef());
-        _trackedIn = Build(new TrackedIn());
-        _untrackedRef = Build(new UntrackedRef());
-        _untrackedIn = Build(new UntrackedIn());
-        _unused = Build(new UnusedParameter());
-        _with = Build(new WithFilter());
-        _tag = Build(new TagParameter());
-        _withTag = Build(new WithTag());
-        _entityRead = Build(new EntityRead());
-        _parameter = Build(new Parameter());
-        _entityHas = Build(new EntityHas());
-        _maybe = Build(new MaybeParameter());
-        _worldSingleton = Build(new WorldSingleton());
-        _singleton = Build(new SingletonParameter());
-        _instance = Build(new InstanceMethod());
-        _static = Build(new StaticMethod());
+        _trackedRef = Build<TrackedRef>();
+        _trackedIn = Build<TrackedIn>();
+        _untrackedRef = Build<UntrackedRef>();
+        _untrackedIn = Build<UntrackedIn>();
+        _unused = Build<UnusedParameter>();
+        _with = Build<WithFilter>();
+        _tag = Build<TagParameter>();
+        _withTag = Build<WithTag>();
+        _entityRead = Build<EntityRead>();
+        _parameter = Build<Parameter>();
+        _entityHas = Build<EntityHas>();
+        _maybe = Build<MaybeParameter>();
+        _worldSingleton = Build<WorldSingleton>();
+        _singleton = Build<SingletonParameter>();
 
         // 16 tables (every combination of four tags), half of the rows bosses; the handles of 10,000 of them. The rows
         // spread over 32 tables, so the entity storage is what grows large: reserve it.
@@ -156,7 +164,7 @@ public class AccessBenchmark
             if (i < _handles.Length) _handles[i] = e;
         }
 
-        _wideWorld = Build(new StaticMethod());
+        _wideWorld = Build<StaticMethod>();
         _wide = new Entity[10_000];
         int n = 0;
         foreach (var item in _wideWorld.Query<Speed>())
@@ -171,7 +179,7 @@ public class AccessBenchmark
     }
 
     /// <summary>One table of every component (a boss tag on every row), the singletons, and the one system.</summary>
-    private World Build(EcsSystem system)
+    private World Build<TSystem>() where TSystem : struct, allows ref struct
     {
         var world = new World(new WorldOptions { InitialEntityCapacity = Entities });
         world.Reserve<Speed, Armor, Gold, Boss>(Entities);
@@ -179,7 +187,7 @@ public class AccessBenchmark
             world.CreateEntity(new Speed { V = i }, new Armor { V = 1 }, new Gold { V = i }, new Boss());
         world.AddSingleton<Total>();
         world.AddSingleton<Step>().V = 1;
-        world.AddSystem(system);
+        world.AddSystem<TSystem>();
         return world;
     }
 
@@ -187,7 +195,7 @@ public class AccessBenchmark
     public void Cleanup()
     {
         foreach (var world in new[] { _trackedRef, _trackedIn, _untrackedRef, _untrackedIn, _unused, _with, _tag, _withTag,
-                     _entityRead, _parameter, _entityHas, _maybe, _worldSingleton, _singleton, _instance, _static, _mixed, _wideWorld, _spawn })
+                     _entityRead, _parameter, _entityHas, _maybe, _worldSingleton, _singleton, _mixed, _wideWorld, _spawn })
             world.Dispose();
     }
 
@@ -211,9 +219,6 @@ public class AccessBenchmark
 
     [Benchmark, BenchmarkCategory("Singleton")] public void WorldSingletonPerRow() => _worldSingleton.Update();
     [Benchmark(Baseline = true), BenchmarkCategory("Singleton")] public void SingletonParameterRow() => _singleton.Update();
-
-    [Benchmark, BenchmarkCategory("Static")] public void InstanceForEach() => _instance.Update();
-    [Benchmark(Baseline = true), BenchmarkCategory("Static")] public void StaticForEach() => _static.Update();
 
     [Benchmark, BenchmarkCategory("SeveralComponents")]
     public int SetOneByOne()

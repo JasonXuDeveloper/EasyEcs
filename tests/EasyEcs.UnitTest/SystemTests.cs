@@ -9,50 +9,56 @@ public class SystemTests
 {
     private static readonly List<string> Log = [];
 
-#pragma warning disable EECS028 // one test system, many names: its log is the test's record
-    private class Logged(string name) : EcsSystem
+    /// <summary>The test's record of a hook: the system's type name and the hook.</summary>
+    private static void Note(SystemHandle system, string hook) => Log.Add(system.Type.Name + "." + hook);
+
+    /// <summary>A system that logs every hook.</summary>
+    [EcsSystem]
+    internal ref struct Tick
     {
-        protected string Name => name;
-        protected override void OnCreate() => Log.Add($"{name}.create");
-        protected override void OnUpdate() => Log.Add($"{name}.update");
-        protected override void OnDestroy() => Log.Add($"{name}.destroy");
+        [OnCreate] static void Create(SystemHandle system) => Note(system, "create");
+        [OnUpdate] static void Update(SystemHandle system) => Note(system, "update");
+        [OnDestroy] static void Destroy(SystemHandle system) => Note(system, "destroy");
     }
 
-    [UpdateInterval(3)]
-    private class Every3(string name) : Logged(name);
+    [EcsSystem] internal ref struct X { [OnUpdate] static void Update(SystemHandle system) => Note(system, "update"); }
+    [EcsSystem] internal ref struct Y { [OnUpdate] static void Update(SystemHandle system) => Note(system, "update"); }
 
-    [UpdateInterval(3, Phase = 1)]
-    private sealed class Every3Phase1(string name) : Every3(name);   // its own schedule replaces its base's
+    [EcsSystem, UpdateInterval(3)]
+    internal ref struct Every3 { [OnUpdate] static void Update(SystemHandle system) => Note(system, "update"); }
 
-    [UpdateInterval(3, Phase = 2)]
-    private sealed class Every3Phase2(string name) : Logged(name);
+    [EcsSystem, UpdateInterval(3, Phase = 1)]
+    internal ref struct Every3Phase1 { [OnUpdate] static void Update(SystemHandle system) => Note(system, "update"); }
 
-    private sealed class Inherits(string name) : Every3(name);      // no attribute of its own: its base's
+    [EcsSystem, UpdateInterval(3, Phase = 2)]
+    internal ref struct Every3Phase2 { [OnUpdate] static void Update(SystemHandle system) => Note(system, "update"); }
 
-    // A run as short as Logged's can take less than a TimeSpan tick (100 ns), so its measured time may round to zero:
+    // A run as short as Tick's can take less than a TimeSpan tick (100 ns), so its measured time may round to zero:
     // this one lasts at least a microsecond.
-    [UpdateInterval(2)]
-    private sealed class Slow() : Logged("slow")
+    [EcsSystem, UpdateInterval(2)]
+    internal ref struct Slow
     {
-        protected override void OnUpdate()
+        [OnUpdate]
+        static void Update()
         {
-            base.OnUpdate();
             long start = Stopwatch.GetTimestamp();
             while (Stopwatch.GetElapsedTime(start) < TimeSpan.FromMicroseconds(1)) { }
         }
     }
-#pragma warning restore EECS028
 
     [Test]
     public void PhasesSpreadSystemsOfOneInterval()
     {
         using var world = new World();
-        world.AddSystem(new Every3("a"));
-        world.AddSystem(new Every3Phase1("b"));
-        world.AddSystem(new Every3Phase2("c"));
+        world.AddSystem<Every3>();
+        world.AddSystem<Every3Phase1>();
+        world.AddSystem<Every3Phase2>();
         Log.Clear();
         for (int i = 0; i < 6; i++) world.Update();                           // updates 1..6
-        Assert.That(Log, Is.EqualTo(new[] { "b.update", "c.update", "a.update", "b.update", "c.update", "a.update" }));
+        Assert.That(Log, Is.EqualTo(new[]
+        {
+            "Every3Phase1.update", "Every3Phase2.update", "Every3.update", "Every3Phase1.update", "Every3Phase2.update", "Every3.update",
+        }));
     }
 
     [SetUp]
@@ -62,11 +68,11 @@ public class SystemTests
     public void SystemsListsEveryGroupWithoutAllocating()
     {
         using var world = new World();
-        world.AddSystem(new InInputGroup());
-        world.AddSystem(new Logged("tick"));
+        world.AddSystem<InInputGroup>();
+        world.AddSystem<Tick>();
         var names = new List<string>();
-        foreach (var system in world.Systems) names.Add(system.GetType().Name);
-        Assert.That(names, Is.EqualTo(new[] { nameof(Logged), nameof(InInputGroup) }));   // default group first
+        foreach (var system in world.Systems) names.Add(system.Type.Name);
+        Assert.That(names, Is.EqualTo(new[] { nameof(Tick), nameof(InInputGroup) }));   // default group first
         Assert.That(world.Systems.Count, Is.EqualTo(2));
 
         long before = GC.GetAllocatedBytesForCurrentThread();
@@ -81,106 +87,183 @@ public class SystemTests
     public void MeasureSystemsRecordsRunsOnlyWhenEnabled()
     {
         using var measured = new World(new WorldOptions { MeasureSystems = true });
-        var a = new Slow();
-        measured.AddSystem(a);
+        var a = measured.AddSystem<Slow>();
         for (int i = 0; i < 4; i++) measured.Update();
         Assert.That(a.Stats.Runs, Is.EqualTo(2));
         Assert.That(a.Stats.TotalTime, Is.GreaterThanOrEqualTo(a.Stats.LastTime));
-        Assert.That(a.Stats.AverageTime, Is.GreaterThan(System.TimeSpan.Zero));
+        Assert.That(a.Stats.AverageTime, Is.GreaterThan(TimeSpan.Zero));
 
         using var plain = new World();
-        var b = new Logged("b");
-        plain.AddSystem(b);
+        var b = plain.AddSystem<Tick>();
         plain.Update();
         Assert.That(b.Stats.Runs, Is.Zero);
     }
 
-    [UpdateAfter<Mid>] private sealed class Late() : Logged("late");
-    [UpdateBefore<Mid>] private sealed class Early() : Logged("early");
-    private sealed class Mid() : Logged("mid");
+    [EcsSystem, UpdateAfter<Mid>]
+    internal ref struct Late
+    {
+        [OnCreate] static void Create(SystemHandle system) => Note(system, "create");
+        [OnUpdate] static void Update(SystemHandle system) => Note(system, "update");
+        [OnDestroy] static void Destroy(SystemHandle system) => Note(system, "destroy");
+    }
+
+    [EcsSystem, UpdateBefore<Mid>]
+    internal ref struct Early
+    {
+        [OnCreate] static void Create(SystemHandle system) => Note(system, "create");
+        [OnUpdate] static void Update(SystemHandle system) => Note(system, "update");
+        [OnDestroy] static void Destroy(SystemHandle system) => Note(system, "destroy");
+    }
+
+    [EcsSystem]
+    internal ref struct Mid
+    {
+        [OnCreate] static void Create(SystemHandle system) => Note(system, "create");
+        [OnUpdate] static void Update(SystemHandle system) => Note(system, "update");
+        [OnDestroy] static void Destroy(SystemHandle system) => Note(system, "destroy");
+    }
 
 #pragma warning disable EECS019 // the cycle under test
-    [UpdateBefore<CycleB>] private sealed class CycleA() : Logged("a");
-    [UpdateBefore<CycleA>] private sealed class CycleB() : Logged("b");
+    [EcsSystem, UpdateBefore<CycleB>]
+    internal ref struct CycleA { [OnCreate] static void Create(SystemHandle system) => Note(system, "create"); }
+
+    [EcsSystem, UpdateBefore<CycleA>]
+    internal ref struct CycleB { [OnCreate] static void Create(SystemHandle system) => Note(system, "create"); }
 #pragma warning restore EECS019
 
     [Test]
     public void ACycleOfOrderingsIsRefusedAndTheSystemStaysOut()
     {
         using var world = new World();
-        world.AddSystem(new CycleA());
-        var b = new CycleB();
-        var error = Assert.Throws<InvalidOperationException>(() => world.AddSystem(b));
+        world.AddSystem<CycleA>();
+        var error = Assert.Throws<InvalidOperationException>(() => world.AddSystem<CycleB>());
         Assert.That(error!.Message, Does.Contain("CycleA").And.Contain("CycleB"));
-        Assert.That(b.World, Is.Null);
-        Assert.That(world.TryGetSystem(out CycleB found), Is.False);
-        Assert.That(found, Is.Null);
+        Assert.That(world.HasSystem<CycleB>(), Is.False);
+        Assert.That(world.TryGetSystem<CycleB>(out var found), Is.False);
+        Assert.That(found, Is.EqualTo(default(SystemHandle)));
         Assert.That(world.Systems.Count, Is.EqualTo(1));
-        Assert.That(Log, Is.EqualTo(new[] { "a.create" }));                   // OnCreate only for the system that joined
+        Assert.That(Log, Is.EqualTo(new[] { "CycleA.create" }));               // [OnCreate] only for the system that joined
     }
 
     [Test]
     public void AnOrderingMovesOnlyItsOwnSystem()
     {
         using var world = new World();
-        world.AddSystem(new Late());                                          // after Mid
-        world.AddSystem(new Logged("x"));
-        world.AddSystem(new Mid());
-        world.AddSystem(new Logged("y"));
+        world.AddSystem<Late>();                                              // after Mid
+        world.AddSystem<X>();
+        world.AddSystem<Mid>();
+        world.AddSystem<Y>();
         Log.Clear();
         world.Update();
-        Assert.That(Log, Is.EqualTo(new[] { "x.update", "mid.update", "late.update", "y.update" }));
+        Assert.That(Log, Is.EqualTo(new[] { "X.update", "Mid.update", "Late.update", "Y.update" }));
     }
 
     [Test]
     public void LifecycleAndDependencyOrder()
     {
         var world = new World();
-        world.AddSystem(new Late());
-        world.AddSystem(new Early());
-        world.AddSystem(new Mid());
+        world.AddSystem<Late>();
+        world.AddSystem<Early>();
+        world.AddSystem<Mid>();
         world.Update();
         world.Dispose();
 
         Assert.That(Log, Is.EqualTo(new[]
         {
-            "late.create", "early.create", "mid.create",
-            "early.update", "mid.update", "late.update",
-            "late.destroy", "mid.destroy", "early.destroy",
+            "Late.create", "Early.create", "Mid.create",
+            "Early.update", "Mid.update", "Late.update",
+            "Late.destroy", "Mid.destroy", "Early.destroy",
         }));
-    }
-
-    [Test]
-    public void ADerivedSystemRunsOnItsBasesSchedule()
-    {
-        using var world = new World();
-        world.AddSystem(new Inherits("i"));
-        for (int i = 0; i < 6; i++) world.Update();
-        Assert.That(Log.FindAll(l => l == "i.update"), Has.Count.EqualTo(2)); // updates 3 and 6
     }
 
     [Test]
     public void IntervalEnabledAndRemoval()
     {
         using var world = new World();
-        var every3 = new Every3("every3");
-        world.AddSystem(every3);
+        var every3 = world.AddSystem<Every3>();
         for (int i = 0; i < 6; i++) world.Update();
         every3.Enabled = false;
         world.Update();
         world.Update();
         world.Update();
 
-        Assert.That(Log.FindAll(l => l == "every3.update"), Has.Count.EqualTo(2));
-        Assert.That(world.RemoveSystem<Logged>(), Is.True);
-        Assert.That(world.TryGetSystem<Logged>(out _), Is.False);
-        Assert.That(Log[^1], Is.EqualTo("every3.destroy"));
+        Assert.That(Log.FindAll(l => l == "Every3.update"), Has.Count.EqualTo(2));
+        Assert.That(every3.RunCount, Is.EqualTo(2));
+        Assert.That(world.RemoveSystem<Every3>(), Is.True);
+        Assert.That(world.RemoveSystem<Every3>(), Is.False);
+        Assert.That(world.TryGetSystem<Every3>(out _), Is.False);
         Assert.That(world.DefaultUpdateCount, Is.EqualTo(9));
     }
 
-    private sealed class Throwing : EcsSystem
+    [Test]
+    public void AHandleTurnsStaleWhenItsSystemIsRemoved()
     {
-        protected override void OnUpdate() => throw new InvalidOperationException("boom");
+        using var world = new World();
+        var tick = world.AddSystem<Tick>();
+        Assert.That((tick.IsAlive, tick.World, tick.Type, tick.Name), Is.EqualTo((true, world, typeof(Tick), "Tick")));
+        Assert.That(world.System<Tick>(), Is.EqualTo(tick));
+        Assert.That(world.HasSystem<Tick>(), Is.True);
+
+        world.RemoveSystem<Tick>();
+        Assert.That(Log, Is.EqualTo(new[] { "Tick.create", "Tick.destroy" }));
+        Assert.That(tick.IsAlive, Is.False);
+        Assert.Throws<InvalidOperationException>(() => _ = tick.Enabled);
+        Assert.Throws<InvalidOperationException>(() => _ = tick.RunCount);
+        Assert.Throws<InvalidOperationException>(() => _ = tick.World);
+        Assert.Throws<InvalidOperationException>(() => world.System<Tick>());
+        Assert.Throws<InvalidOperationException>(() => _ = default(SystemHandle).Stats);
+
+        // The record is reused for the next system: the old handle stays stale.
+        var x = world.AddSystem<X>();
+        var again = world.AddSystem<Tick>();
+        Assert.That((tick.IsAlive, x.IsAlive, again.IsAlive, again == tick), Is.EqualTo((false, true, true, false)));
+    }
+
+    [Test]
+    public void AddingASystemTwiceThrowsAndEachWorldHasItsOwn()
+    {
+        var world = new World();
+        var first = world.AddSystem<Tick>();
+        Assert.Throws<InvalidOperationException>(() => world.AddSystem<Tick>());
+        Assert.That(world.Systems.Count, Is.EqualTo(1));
+        using (var other = new World())
+        {
+            var second = other.AddSystem<Tick>();
+            Assert.That((second.World, second == first), Is.EqualTo((other, false)));
+        }
+
+        world.Dispose();
+        Assert.That(first.IsAlive, Is.False, "a disposed world's systems are gone");
+        Assert.Throws<ObjectDisposedException>(() => world.Update());
+        Assert.Throws<ObjectDisposedException>(() => world.AddSystem<X>());
+    }
+
+#pragma warning disable EECS028 // the test's record
+    /// <summary>The hooks' parameters in either order, or none.</summary>
+    [EcsSystem]
+    internal ref struct Parameters
+    {
+        [OnCreate] static void Create() => Log.Add("create");
+        [OnUpdate] static void Update(SystemHandle system, World world) => Log.Add($"update {system.RunCount} {system.World == world}");
+        [OnDestroy] static void Destroy(World world, SystemHandle system) => Log.Add($"destroy {system.RunCount} {world.DefaultUpdateCount}");
+    }
+#pragma warning restore EECS028
+
+    [Test]
+    public void HooksTakeTheWorldAndTheHandleInEitherOrder()
+    {
+        using var world = new World();
+        world.AddSystem<Parameters>();
+        world.Update();
+        world.Update();
+        world.RemoveSystem<Parameters>();
+        Assert.That(Log, Is.EqualTo(new[] { "create", "update 0 True", "update 1 True", "destroy 2 2" }));
+    }
+
+    [EcsSystem]
+    internal ref struct Throwing
+    {
+        [OnUpdate] static void Update() => throw new InvalidOperationException("boom");
     }
 
     [Test]
@@ -204,117 +287,113 @@ public class SystemTests
 
     public struct InputGroup : ISystemGroup;
 
-    [UpdateInGroup<InputGroup>]
-    private class InInputGroup() : Logged("input");
+    [EcsSystem, UpdateInGroup<InputGroup>]
+    internal ref struct InInputGroup { [OnUpdate] static void Update(SystemHandle system) => Note(system, "update"); }
 
     [Test]
     public void GroupsUpdateIndependently()
     {
         using var world = new World();
-        world.AddSystem(new Logged("tick"));
-        world.AddSystem(new InInputGroup());
+        world.AddSystem<Tick>();
+        world.AddSystem<InInputGroup>();
         world.Update<InputGroup>();
         world.Update<InputGroup>();
         world.Update();
 
-        Assert.That(Log.FindAll(l => l.EndsWith(".update")), Is.EqualTo(new[] { "input.update", "input.update", "tick.update" }));
+        Assert.That(Log.FindAll(l => l.EndsWith(".update")), Is.EqualTo(new[] { "InInputGroup.update", "InInputGroup.update", "Tick.update" }));
         Assert.That(world.DefaultUpdateCount, Is.EqualTo(1), "DefaultUpdateCount counts the default group");
         Assert.That((world.UpdateCount<InputGroup>(), world.UpdateCount<EmptyGroup>()), Is.EqualTo((2L, 0L)));
-        Assert.That(world.TryGetSystem(out InInputGroup input) && input.World == world, Is.True);
+        Assert.That(world.TryGetSystem<InInputGroup>(out var input) && input.World == world, Is.True);
         Assert.That(world.RemoveSystem<InInputGroup>(), Is.True);
         world.Update<InputGroup>();
-        Assert.That(Log.FindAll(l => l == "input.update"), Has.Count.EqualTo(2));
+        Assert.That(Log.FindAll(l => l == "InInputGroup.update"), Has.Count.EqualTo(2));
     }
-
-    [UpdateInGroup<InputGroup>]
-    private class InputBase() : Logged("base");
-
-    private class InheritsInput : InputBase;                                    // the group attribute is inherited
 
     private struct EmptyGroup : ISystemGroup;
 
-    private sealed class FailsEverywhere(string name) : Logged(name)
-    {
-        protected override void OnUpdate() => throw new InvalidOperationException(Name);
-        protected override void OnDestroy() => throw new InvalidOperationException(Name + ".destroy");
-    }
-
     [Test]
-    public void GroupMembershipIsInheritedAndAnUnusedGroupIsANoOp()
+    public void AGroupsSystemSkipsTheDefaultUpdateAndAnUnusedGroupIsANoOp()
     {
         using var world = new World();
-        world.AddSystem(new InheritsInput());
+        world.AddSystem<InInputGroup>();
         world.Update();
-        Assert.That(Log, Has.No.Member("base.update"));
+        Assert.That(Log, Has.No.Member("InInputGroup.update"));
         world.Update<InputGroup>();
-        Assert.That(Log, Has.Member("base.update"));
+        Assert.That(Log, Has.Member("InInputGroup.update"));
         Assert.DoesNotThrow(() => world.Update<EmptyGroup>());
     }
 
-    [Test]
-    public void ASystemBelongsToOneWorldAndADisposedWorldDoesNotUpdate()
+    [EcsSystem]
+    internal ref struct FailsEverywhere
     {
-        var system = new Logged("once");
-        var world = new World();
-        world.AddSystem(system);
-        Assert.Throws<InvalidOperationException>(() => world.AddSystem(system));
-        using (var other = new World()) Assert.Throws<InvalidOperationException>(() => other.AddSystem(system));
-        world.Dispose();
-        Assert.Throws<ObjectDisposedException>(() => world.Update());
+        [OnUpdate] static void Update(SystemHandle system) => throw new InvalidOperationException(system.Name);
+        [OnDestroy] static void Destroy(SystemHandle system) => throw new InvalidOperationException(system.Name + ".destroy");
     }
 
     [Test]
-    public void AFailedRunStillCountsAsRunAndDestroyErrorsAreRecorded()
+    public void AFailedRunStillCountsAsRun()
     {
-        var world = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
-        var failing = new FailsEverywhere("bad");
-        world.AddSystem(failing);
+        using var world = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
+        var failing = world.AddSystem<FailsEverywhere>();
         world.Update();
-        Assert.That(failing.Error.Message, Is.EqualTo("bad"));
+        Assert.That(failing.Error.Message, Is.EqualTo("FailsEverywhere"));
         Assert.That(failing.LastRunTick, Is.Positive);                          // its changes are not delivered again
-        world.Dispose();
-        Assert.That(failing.Error.Message, Is.EqualTo("bad.destroy"));          // OnDestroy during Dispose
+        Assert.That(failing.RunCount, Is.EqualTo(1));
+        Assert.DoesNotThrow(world.Dispose, "under Disable, an [OnDestroy] error does not escape Dispose");
     }
 
     [Test]
     public void AThrowingOnDestroyStillDestroysTheOtherSystemsAndReleasesTheWorld()
     {
         var world = new World();
-        world.AddSystem(new Logged("first"));
-        world.AddSystem(new FailsEverywhere("bad"));
+        world.AddSystem<Tick>();
+        world.AddSystem<FailsEverywhere>();
         var entity = world.CreateEntity(new Position());
         var error = Assert.Throws<InvalidOperationException>(world.Dispose);
-        Assert.That(error.Message, Is.EqualTo("bad.destroy"));                  // rethrown after the rest ran
-        Assert.That(Log, Has.Member("first.destroy"));
+        Assert.That(error.Message, Is.EqualTo("FailsEverywhere.destroy"));      // rethrown after the rest ran
+        Assert.That(Log, Has.Member("Tick.destroy"));
         Assert.That(entity.IsAlive, Is.False);                                   // the storage was released
         Assert.DoesNotThrow(world.Dispose);                                      // once
         Assert.Throws<ObjectDisposedException>(() => world.CreateEntity(new Position()));
         Assert.Throws<ObjectDisposedException>(() => world.GetOrAddSingleton<Clock>());
     }
 
+    [Test]
+    public void AThrowingOnDestroyOfARemovedSystemStillRemovesIt()
+    {
+        using var world = new World();
+        var failing = world.AddSystem<FailsEverywhere>();
+        Assert.Throws<InvalidOperationException>(() => world.RemoveSystem<FailsEverywhere>());
+        Assert.That((world.HasSystem<FailsEverywhere>(), failing.IsAlive, world.Systems.Count), Is.EqualTo((false, false, 0)));
+    }
+
     // ---------------- SystemStats: allocated bytes and visited entities ----------------
 
-    internal sealed class Moves : EcsSystem
+    [EcsSystem]
+    internal ref struct Moves
     {
         [ForEach]
         private static void Move(ref Position position, in Velocity velocity) => position.X += velocity.X;
     }
 
 #pragma warning disable EECS028 // the allocation the stats measure
-    private sealed class Renames : EcsSystem
+    [EcsSystem]
+    internal ref struct Renames
     {
         [ForEach]
         private static void Rename(ref Name name) => name.Value = new string('x', 1000);
     }
 
-    private sealed class RenamesInParallel : EcsSystem
+    [EcsSystem]
+    internal ref struct RenamesInParallel
     {
         [ForEach(Parallel = true)]
         private static void Rename(ref Name name) => name.Value = new string('x', 64);
     }
 #pragma warning restore EECS028
 
-    private sealed class SeesArmor : EcsSystem
+    [EcsSystem]
+    internal ref struct SeesArmor
     {
         [ForEach, Changed<Armor>]
         private static void See(ref Seen seen) => seen.Count++;

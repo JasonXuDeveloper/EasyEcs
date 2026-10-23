@@ -11,12 +11,15 @@ using static EasyEcs.Generator.Code;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// Generates the plumbing of <c>EcsSystem</c>s (no partial needed): one struct job per <c>[ForEach]</c> method and a
-/// <c>GeneratedUpdate</c> override running them, and a <c>GeneratedAccess</c> override declaring the data they read
-/// and write (the parallel scheduler batches systems by it).
+/// Generates the plumbing of systems (<c>[EcsSystem]</c> ref structs, no partial needed): per system a code struct
+/// (<c>ISystemCode</c>) with one struct job per <c>[ForEach]</c> method, the calls of its hooks and the data its methods
+/// read and write (the parallel scheduler batches systems by it); per assembly one system set (<c>ISystemSet</c>,
+/// <c>__EasyEcsSystems</c>) whose switches call every system's code directly, registered by a module initializer.
+/// [ForEach] methods of other types get entry points.
 /// Incremental-generator rules followed: <c>ForAttributeWithMetadataName</c> / cheap syntax predicates as entry points,
 /// models are equatable records of strings (no symbols, syntax or locations survive the transform), invalid input is
-/// skipped silently (EasyEcsAnalyzer reports it), and every stage has a tracking name for cache tests.
+/// skipped silently (EasyEcsAnalyzer reports it), and every stage has a tracking name for cache tests. The set's model
+/// holds the systems' names only, so an edit inside a system's body never regenerates it.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class SystemGenerator : IIncrementalGenerator
@@ -30,45 +33,41 @@ public sealed class SystemGenerator : IIncrementalGenerator
             .Where(static m => m is not null)
             .WithTrackingName("ForEachMethods");
 
-        // [UpdateInterval(n, Phase = p)] of system types: written into their code's registration.
-        var schedules = context.SyntaxProvider
-            .ForAttributeWithMetadataName(Symbols.UpdateIntervalAttribute,
-                static (node, _) => node is ClassDeclarationSyntax,
-                static (ctx, _) => ScheduleModel.Create((INamedTypeSymbol)ctx.TargetSymbol))
+        // [EcsSystem] ref structs: their hooks and [UpdateInterval(n, Phase = p)], declarations only.
+        var systems = context.SyntaxProvider
+            .ForAttributeWithMetadataName(Symbols.EcsSystemAttribute,
+                static (node, _) => node is StructDeclarationSyntax,
+                static (ctx, _) => SystemModel.Create((INamedTypeSymbol)ctx.TargetSymbol))
             .Where(static m => m is not null)
-            .WithTrackingName("Schedules");
+            .WithTrackingName("Systems");
 
-        // Group per system: Collect re-runs this cheap step on any change, but each grouped model is equatable, so
-        // RegisterSourceOutput only re-emits systems whose methods or schedule actually changed.
-        var updates = methods.Collect().Combine(schedules.Collect())
+        // Group per type: Collect re-runs this cheap step on any change, but each grouped model is equatable, so
+        // RegisterSourceOutput only re-emits types whose methods or declaration actually changed.
+        var updates = methods.Collect().Combine(systems.Collect())
             .SelectMany(static (pair, _) => UpdateModel.Group(pair.Left!, pair.Right!))
             .WithTrackingName("SystemUpdates");
-        // Closed types of generic systems this assembly names: their code is registered without runtime code generation.
-        var closed = context.SyntaxProvider
-            .CreateSyntaxProvider(static (node, _) => ClosedUse.IsCandidate(node), static (ctx, ct) => ClosedUse.Create(ctx, ct))
-            .SelectMany(static (uses, _) => uses)
-            .WithTrackingName("ClosedSystems")
-            .Collect();
-        updates = updates.Combine(closed)
-            .Select(static (pair, _) => pair.Left with
-            {
-                Closed = new EquatableArray<ClosedUse>(pair.Right.Where(c => c.Code.Length == 0 && c.Owner == pair.Left.Owner.FullName)
-                    .Distinct().OrderBy(c => c.Closed, System.StringComparer.Ordinal).ToArray()),
-            })
-            .WithTrackingName("SystemCode");
-        // Closed types of other assemblies' public generic systems: this assembly registers their code.
-        var external = closed
-            .Select(static (all, _) => new EquatableArray<ClosedUse>(all.Where(c => c.Code.Length > 0).Distinct()
-                .OrderBy(c => c.Closed, System.StringComparer.Ordinal).ToArray()))
-            .WithTrackingName("ExternalSystems");
-        context.RegisterImplementationSourceOutput(external, static (spc, uses) =>
-        {
-            if (uses.Length > 0) spc.AddSource("__EasyEcsExternalSystems.g.cs", SourceText.From(EmitExternal(uses), Encoding.UTF8));
-        });
-        // A system's code is reached only through its module initializer: implementation output, which IDEs skip while
-        // typing. Entry points of other types are API the user's code calls.
+        // A system's code is reached only through the set's module initializer: implementation output, which IDEs skip
+        // while typing. Entry points of other types are API the user's code calls.
         context.RegisterImplementationSourceOutput(updates.Where(static m => m.Owner.IsSystem), static (spc, model) => Add(spc, model));
         context.RegisterSourceOutput(updates.Where(static m => !m.Owner.IsSystem), static (spc, model) => Add(spc, model));
+
+        // The assembly's system set: its non-generic systems and the closed generic systems it names (its own generic
+        // systems' and those of referenced assemblies' public ones), registered without runtime code generation.
+        var closed = context.SyntaxProvider
+            .CreateSyntaxProvider(static (node, _) => SetEntry.IsCandidate(node), static (ctx, _) => SetEntry.Closed(ctx))
+            .Where(static e => e is not null)
+            .WithTrackingName("ClosedSystems")
+            .Collect();
+        var set = systems.Where(static s => s!.Owner.TypeParameters.Length == 0)
+            .Select(static (s, _) => new SetEntry(s!.Owner.FullName, CodeName(s.Owner)))
+            .Collect().Combine(closed)
+            .Select(static (pair, _) => new EquatableArray<SetEntry>(pair.Left.Concat(pair.Right!).Distinct()
+                .OrderBy(e => e!.System, System.StringComparer.Ordinal).ToArray()!))
+            .WithTrackingName("SystemSet");
+        context.RegisterImplementationSourceOutput(set, static (spc, entries) =>
+        {
+            if (entries.Length > 0) spc.AddSource("__EasyEcsSystems.g.cs", SourceText.From(EmitSet(entries), Encoding.UTF8));
+        });
 
         // [ForEntity] methods: entry points that run the method's job on one entity (entity.Run), in a system too.
         var ones = context.SyntaxProvider
@@ -78,7 +77,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             .Where(static m => m is not null)
             .WithTrackingName("ForEntityMethods");
         var entityTypes = ones.Collect()
-            .SelectMany(static (all, _) => UpdateModel.Group(all!, []).Select(m => m with { One = true }))
+            .SelectMany(static (all, _) => UpdateModel.Group(all!, [], entryPoints: true).Select(m => m with { One = true }))
             .WithTrackingName("ForEntityTypes");
         context.RegisterSourceOutput(entityTypes, static (spc, model) => Add(spc, model));
     }
@@ -86,11 +85,11 @@ public sealed class SystemGenerator : IIncrementalGenerator
     private static void Add(SourceProductionContext context, UpdateModel model)
     {
         var owner = model.Owner;
-        context.AddSource($"{owner.HintName}.{(model.One ? "ForEntity" : "ForEach")}.g.cs", SourceText.From(Emit(model), Encoding.UTF8));
+        context.AddSource($"{owner.HintName}.{(model.One ? "ForEntity" : owner.IsSystem ? "System" : "ForEach")}.g.cs", SourceText.From(Emit(model), Encoding.UTF8));
         if (model.One || !owner.IsSystem || !owner.IsPublic || owner.TypeParameters.Length == 0) return;
         // Assembly attributes cannot follow the namespace of the code's file.
         string ns = owner.Namespace.Length > 0 ? owner.Namespace + "." : "";
-        string open = $"global::{ns}{PublicCodeName(owner)}<{new string(',', owner.Arity - 1)}>";
+        string open = $"global::{ns}{CodeTypeName(owner)}<{new string(',', owner.Arity - 1)}>";
         context.AddSource($"{owner.HintName}.SystemCode.g.cs", SourceText.From(
             $"{Header}\n[assembly: global::EasyEcs.GenericSystemCode(typeof({owner.Definition}), typeof({open}))]\n", Encoding.UTF8));
     }
@@ -98,10 +97,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
     // ---------------- emit ----------------
 
     /// <summary>
-    /// One file per type with [ForEach] methods, outside the type (which needs no partial): a file-local class holds
-    /// an UnsafeAccessor per method (private methods of private types too), its struct job and its filter. A system
-    /// type gets a <c>SystemCode</c> that runs the jobs and declares their access, registered by a module initializer;
-    /// any other type gets entry points, static extension members of the type.
+    /// One file per type with [ForEach] methods or [EcsSystem], outside the type (which needs no partial): a file-local
+    /// class holds an UnsafeAccessor per method (private methods too), its struct job and its filter. A system gets its
+    /// code struct (<see cref="EmitSystemCode"/>), which the set calls; any other type gets entry points, static
+    /// extension members of the type.
     /// </summary>
     private static string Emit(UpdateModel model)
     {
@@ -119,44 +118,43 @@ public sealed class SystemGenerator : IIncrementalGenerator
         }
 
         bool system = owner.IsSystem && !model.One;
-        if (system) EmitSystemCode(sb, model);
+        if (system)
+            foreach (var hook in model.Hooks) EmitHookAccessor(sb, owner, hook);
         sb.Append("}\n");
-        if (system && owner.TypeParameters.Length > 0)
-        {
-            if (owner.IsPublic) EmitPublicCode(sb, model);
-            EmitGenericRegistration(sb, model);
-        }
+        if (system) EmitSystemCode(sb, model);
         return sb.ToString();
     }
 
+    /// <summary>The code struct of a system (<c>__Movement_SystemCode</c>), public for a public generic system, whose closed types other assemblies' sets name.</summary>
+    private static string CodeTypeName(OwnerModel owner) => $"__{owner.FlatName}_SystemCode";
+
+    /// <summary>The code struct as a set names it, closed over the system's own type parameters.</summary>
+    private static string CodeName(OwnerModel owner) =>
+        $"global::{(owner.Namespace.Length > 0 ? owner.Namespace + "." : "")}{CodeTypeName(owner)}{owner.TypeParameters}";
+
     /// <summary>
-    /// A public generic system's code as a public struct, which [GenericSystemCode] names for the generators of
-    /// referencing assemblies: they register the closed types they name (Native AOT and WebAssembly cannot make them at run
-    /// time). It forwards to the file-local code, which a type of another file cannot name.
+    /// The assembly's system set: its systems numbered in name order, a module initializer that registers it, and one
+    /// switch per hook whose cases call each system's code directly (a direct call the JIT may inline).
     /// </summary>
-    private static void EmitPublicCode(StringBuilder sb, UpdateModel model)
-    {
-        var owner = model.Owner;
-        string code = $"__ForEach{owner.TypeParameters}.Code";
-        sb.Append($"\n[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
-        sb.Append($"public readonly struct {PublicCodeName(owner)}{owner.TypeParameters} : global::EasyEcs.ISystemCode{owner.Constraints}\n{{\n");
-        sb.Append($"    public static void Update(global::EasyEcs.EcsSystem system) => {code}.Update(system);\n\n");
-        sb.Append($"    public static void Access(ref global::EasyEcs.SystemAccess access) => {code}.Access(ref access);\n\n");
-        sb.Append($"    public static string[] Loops => {code}.Loops;\n");
-        if (model.Interval > 0) sb.Append($"\n    public static int Interval => {model.Interval};\n\n    public static int Phase => {model.Phase};\n");
-        if (owner.OverridesOnUpdate) sb.Append("\n    public static bool OverridesOnUpdate => true;\n");
-        sb.Append("}\n");
-    }
-
-    private static string PublicCodeName(OwnerModel owner) => $"__{owner.FlatName}_SystemCode";
-
-    /// <summary>The registrations of the closed types this assembly names of generic systems of referenced assemblies.</summary>
-    private static string EmitExternal(EquatableArray<ClosedUse> uses)
+    private static string EmitSet(EquatableArray<SetEntry> entries)
     {
         var sb = new StringBuilder(Header).Append('\n');
-        sb.Append($"file static class __EasyEcsExternalSystems\n{{\n    {Code.ModuleInitializer}\n    internal static void Register()\n    {{\n");
-        foreach (var use in uses) sb.Append($"        global::EasyEcs.SystemCode.Register<{use.Code}>(typeof({use.Closed}));\n");
-        sb.Append("    }\n}\n");
+        const string world = "global::EasyEcs.World", handle = "global::EasyEcs.SystemHandle";
+        sb.Append("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
+        sb.Append("file readonly struct __EasyEcsSystems : global::EasyEcs.ISystemSet\n{\n");
+        sb.Append($"    {Code.ModuleInitializer}\n    internal static void Register() => global::EasyEcs.SystemCode.Register<__EasyEcsSystems>();\n\n");
+        sb.Append("    public static void Declare(ref global::EasyEcs.SystemDeclarations systems)\n    {\n");
+        foreach (var entry in entries) sb.Append($"        systems.Add<{entry.System}, {entry.Code}>();\n");
+        sb.Append("    }\n");
+        foreach (var hook in new[] { "Update", "Create", "Destroy" })
+        {
+            sb.Append($"\n    public static void {hook}({world} world, int system, {handle} handle)\n    {{\n        switch (system)\n        {{\n");
+            for (int i = 0; i < entries.Length; i++)
+                sb.Append($"            case {i}: {entries[i].Code}.{hook}(world, handle); return;\n");
+            sb.Append("        }\n    }\n");
+        }
+
+        sb.Append("}\n");
         return sb.ToString();
     }
 
@@ -167,7 +165,6 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// </summary>
     private static void EmitAccessor(StringBuilder sb, OwnerModel owner, ForEachModel method, int index)
     {
-        string kind = method.IsStatic ? "StaticMethod" : "Method";
         string parameters = string.Concat(method.Parameters.Select(p => $", {p.Declared} {Escape(p.Name)}"));
         // The instance parameter must not take the name of one of the method's own parameters (CS0100).
         string self = "owner";
@@ -183,8 +180,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
             : method.OutOfLine
                 ? ", global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)"
                 : "";
-        sb.Append($"    [global::System.Runtime.CompilerServices.UnsafeAccessor(global::System.Runtime.CompilerServices.UnsafeAccessorKind.{kind}, Name = \"{method.Name}\"){impl}]\n");
-        sb.Append($"    internal static extern {method.Returns} {method.Name}_{index}{method.TypeParameters}([global::System.Runtime.CompilerServices.UnsafeAccessorType(\"{owner.AccessorType}\")] object {self}{parameters}){method.Constraints};\n\n");
+        sb.Append($"    [global::System.Runtime.CompilerServices.UnsafeAccessor(global::System.Runtime.CompilerServices.UnsafeAccessorKind.StaticMethod, Name = \"{method.Name}\"){impl}]\n");
+        sb.Append($"    internal static extern {method.Returns} {method.Name}_{index}{method.TypeParameters}({owner.AccessorParameter} {self}{parameters}){method.Constraints};\n\n");
     }
 
     /// <summary>
@@ -235,7 +232,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             // The world, for singletons, lookups and a World parameter: a default handle has none (Run returns false for it).
             if (perEntity && (method.NeedsWorld || method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Singleton)))
                 sb.Append($"            if ({Escape(entity)}.World is not {{ }} {world}) return false;\n");
-            sb.Append($"            var {local} = new {job}{Fields(method, world, null)};\n");
+            sb.Append($"            var {local} = new {job}{Fields(method, world)};\n");
             if (perEntity) sb.Append($"            return {Escape(entity)}.Run<{method.ComponentTypes}, {job}>(ref {local}{filter});\n");
             else
             {
@@ -270,10 +267,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// The job's initializer: the system (instance methods), the world, singletons resolved once per pass, and the
     /// caller's values (by reference, unless a parallel job copies them for its threads).
     /// </summary>
-    private static string Fields(ForEachModel method, string world, string? system)
+    private static string Fields(ForEachModel method, string world)
     {
         var fields = new List<string>();
-        if (system != null && !method.IsStatic) fields.Add($"System = {system}");
         if (method.NeedsWorld) fields.Add($"World = {world}");
         for (int i = 0; i < method.Parameters.Length; i++)
             if (JobField(method, i, world) is { Initializer: { } initializer }) fields.Add(initializer);
@@ -328,80 +324,88 @@ public sealed class SystemGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// The system type's code: Update runs the [ForEach] methods in declaration order (after OnUpdate), Access declares
-    /// what they read and write. The runtime runs the code of base types first.
+    /// A hook method of the system, reached from outside its type (an UnsafeAccessor by the system's type: a private
+    /// method of a ref struct has no other way in).
+    /// </summary>
+    private static void EmitHookAccessor(StringBuilder sb, OwnerModel owner, HookModel hook)
+    {
+        string parameters = string.Concat(hook.Arguments.Select((a, i) => a == 'W' ? $", global::EasyEcs.World world{i}" : $", global::EasyEcs.SystemHandle system{i}"));
+        sb.Append($"    [global::System.Runtime.CompilerServices.UnsafeAccessor(global::System.Runtime.CompilerServices.UnsafeAccessorKind.StaticMethod, Name = \"{hook.Name}\")]\n");
+        sb.Append($"    internal static extern void {hook.Name}_{hook.Kind}({owner.AccessorParameter} owner{parameters});\n\n");
+    }
+
+    /// <summary>
+    /// The system's code struct (<c>ISystemCode</c>), static members only, called directly by the assembly's set:
+    /// Update runs the [OnUpdate] method, then the [ForEach] methods in declaration order; Create and Destroy run the
+    /// other hooks; Access declares what the methods read and write; Interval and Phase are its [UpdateInterval].
     /// </summary>
     private static void EmitSystemCode(StringBuilder sb, UpdateModel model)
     {
         var owner = model.Owner;
-        // Static members only: the runtime binds them once per AddSystem and calls Update through a function pointer.
-        sb.Append("    internal readonly struct Code : global::EasyEcs.ISystemCode\n    {\n");
-        // [UpdateInterval(n, Phase = p)]: the runtime reads the values from the registered code.
+        const string world = "global::EasyEcs.World", handle = "global::EasyEcs.SystemHandle";
+        string forEach = "__ForEach" + owner.TypeParameters;
+        sb.Append("\n[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
+        sb.Append($"{(owner.IsPublic && owner.TypeParameters.Length > 0 ? "public" : "internal")} readonly struct {CodeTypeName(owner)}{owner.TypeParameters} : global::EasyEcs.ISystemCode{owner.Constraints}\n{{\n");
         if (model.Interval > 0)
-            sb.Append($"        public static int Interval => {model.Interval};\n\n        public static int Phase => {model.Phase};\n\n");
-        if (owner.OverridesOnUpdate) sb.Append("        public static bool OverridesOnUpdate => true;\n\n"); // otherwise the runtime skips it
-        sb.Append("        public static void Update(global::EasyEcs.EcsSystem system)\n        {\n");
-        if (model.Methods.Length > 0) sb.Append("            var world = system.World;\n");
+            sb.Append($"    public static int Interval => {model.Interval};\n\n    public static int Phase => {model.Phase};\n\n");
+        sb.Append($"    public static void Update({world} world, {handle} system)\n    {{\n");
+        EmitHookCall(sb, model, "Update");
         for (int i = 0; i < model.Methods.Length; i++)
         {
             var method = model.Methods[i];
+            string job = $"{forEach}.{method.Name}Job{i}", filterName = $"{forEach}.{method.Name}Filter{i}";
             // [Changed<T>] / [Removed<T>]: rows written (or that lost T) since this system last ran.
-            string filter = method.Since ? $", {method.Name}Filter{i}.Since(system.LastRunTick + 1)" : method.HasFilter ? $", in {method.Name}Filter{i}" : "";
+            string filter = method.Since ? $", {filterName}.Since(system.LastRunTick + 1)" : method.HasFilter ? $", in {filterName}" : "";
             string whole = filter;
-            if (method.Slices > 1) filter = method.Sliced($"{method.Name}Filter{i}", $"(int)(system.RunCount % {method.Slices})"); // this run's slice
-            sb.Append($"            var job{i} = new {method.Name}Job{i}{Fields(method, "world", "system")};\n");
+            if (method.Slices > 1) filter = method.Sliced(filterName, $"(int)(system.RunCount % {method.Slices})"); // this run's slice
+            sb.Append($"        var job{i} = new {job}{Fields(method, "world")};\n");
             // WorldOptions.MeasureSystems: the entities the pass matches as it starts (SystemStats.LastEntities); one
             // field test per pass otherwise, nothing in the row loop. Count takes no slice: a sliced pass reports its share.
             string count = $"world.Count<{method.ComponentTypes}>({(whole.Length == 0 ? "" : whole.Substring(2))})";
             if (method.Slices > 1) count = $"{count} / {method.Slices}";
-            sb.Append($"            if (global::EasyEcs.SystemCode.Measuring(world)) global::EasyEcs.SystemCode.Visit(system, {count});\n");
-            sb.Append($"            world.{method.ForEach}<{method.ComponentTypes}, {method.Name}Job{i}>(ref job{i}{filter}{method.Chunks});\n");
-            EmitReductions(sb, method, "world", $"job{i}", "            ");
-            EmitConsume(sb, method, "world", whole, "            ");
+            sb.Append($"        if (global::EasyEcs.SystemCode.Measuring(world)) global::EasyEcs.SystemCode.Visit(system, {count});\n");
+            sb.Append($"        world.{method.ForEach}<{method.ComponentTypes}, {job}>(ref job{i}{filter}{method.Chunks});\n");
+            EmitReductions(sb, method, "world", $"job{i}", "        ");
+            EmitConsume(sb, method, "world", whole, "        ");
         }
 
-        sb.Append("        }\n\n");
+        sb.Append("    }\n\n");
+        foreach (var hook in new[] { "Create", "Destroy" })
+        {
+            sb.Append($"    public static void {hook}({world} world, {handle} system)\n    {{\n");
+            EmitHookCall(sb, model, hook);
+            sb.Append("    }\n\n");
+        }
+
         // How each method runs (SystemInfo.Loops): one array for the type, made once.
-        sb.Append($"        private static readonly string[] __loops = [{string.Join(", ", model.Methods.Select(m => Code.Literal(m.Describe())))}];\n\n");
-        sb.Append("        public static string[] Loops => __loops;\n\n");
+        sb.Append($"    private static readonly string[] __loops = [{string.Join(", ", model.Methods.Select(m => Code.Literal(m.Describe())))}];\n\n");
+        sb.Append("    public static string[] Loops => __loops;\n\n");
         EmitAccess(sb, model);
-        sb.Append("    }\n");
-        if (owner.TypeParameters.Length > 0) return; // registered by EmitGenericRegistration: a module initializer is never generic
-        string type = owner.IsVisible ? $"typeof({owner.FullName})" : $"global::System.Type.GetType(\"{owner.MetadataName}\")";
-        sb.Append($"\n    {Code.ModuleInitializer}\n");
-        sb.Append($"    internal static void Register() => global::EasyEcs.SystemCode.Register<Code>({type});\n");
+        sb.Append("}\n");
     }
 
-    /// <summary>
-    /// A generic system's registration: its code's definition, closed at run time for closed types this assembly does
-    /// not name, and the code of each closed type it names (no runtime code generation: Native AOT keeps them).
-    /// </summary>
-    private static void EmitGenericRegistration(StringBuilder sb, UpdateModel model)
+    /// <summary>The call of the system's <paramref name="kind"/> hook, if it has one: its parameters in its order.</summary>
+    private static void EmitHookCall(StringBuilder sb, UpdateModel model, string kind)
     {
-        var owner = model.Owner;
-        string open = $"__ForEach<{new string(',', owner.Arity - 1)}>.Code";
-        string definition = owner.IsVisible ? $"typeof({owner.Definition})" : $"global::System.Type.GetType(\"{owner.MetadataName}\")";
-        sb.Append($"\nfile static class __ForEachRegistration\n{{\n    {Code.ModuleInitializer}\n    internal static void Register()\n    {{\n");
-        sb.Append($"        global::EasyEcs.SystemCode.RegisterGeneric({definition}, typeof({open}));\n");
-        foreach (var use in model.Closed)
-            sb.Append($"        global::EasyEcs.SystemCode.Register<__ForEach<{use.Arguments}>.Code>(typeof({use.Closed}));\n");
-        sb.Append("    }\n}\n");
+        foreach (var hook in model.Hooks)
+            if (hook.Kind == kind)
+                sb.Append($"        __ForEach{model.Owner.TypeParameters}.{hook.Name}_{kind}(default{string.Concat(hook.Arguments.Select(a => a == 'W' ? ", world" : ", system"))});\n");
     }
 
     /// <summary>
     /// <c>ref</c> parameters are writes, <c>in</c> parameters reads. Anything that can reach the world beyond its
-    /// parameters (EntitySpan / World parameters, an Entity parameter used for more than its identity, instance methods
-    /// that see <c>World</c>, an OnUpdate override) runs alone.
+    /// parameters (EntitySpan / World parameters, an Entity parameter used for more than its identity, [Consume], an
+    /// [OnUpdate] method) runs alone.
     /// </summary>
     private static void EmitAccess(StringBuilder sb, UpdateModel model)
     {
-        sb.Append("        public static void Access(ref global::EasyEcs.SystemAccess access)\n        {\n");
-        bool alone = model.Owner.OverridesOnUpdate || model.Methods.Any(m => !m.IsStatic || m.Consume // [Consume] destroys
+        sb.Append("    public static void Access(ref global::EasyEcs.SystemAccess access)\n    {\n");
+        bool alone = model.Hooks.Any(h => h.Kind == "Update") || model.Methods.Any(m => m.Consume // [Consume] destroys
             || m.Parameters.Any(p => p.Kind is Symbols.ParamKind.Entities or Symbols.ParamKind.World
                 || p.Kind == Symbols.ParamKind.Entity && !m.Identifies));
         if (alone)
         {
-            sb.Append("            access.RunAlone();\n        }\n");
+            sb.Append("        access.RunAlone();\n    }\n");
             return;
         }
 
@@ -440,8 +444,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
         foreach (var type in model.Methods.SelectMany(m => m.Changed.Concat(m.Removed).Concat(m.ChangedAny).Concat(m.RemovedAny)).Distinct())
             Declare($"Read<{type}>()");
 
-        foreach (var line in lines) sb.Append("            access.").Append(line).Append(";\n");
-        sb.Append("        }\n");
+        foreach (var line in lines) sb.Append("        access.").Append(line).Append(";\n");
+        sb.Append("    }\n");
     }
 
     private static void EmitJob(StringBuilder sb, OwnerModel owner, ForEachModel method, int number)
@@ -477,7 +481,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Context when local[i] => $"ref l{i}",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
             _ => "World",
-        }).Prepend(method.IsStatic ? "null" : "System"));
+        }).Prepend(owner.AccessorArgument));
 
         // The JIT specializes World.ForEach on this struct and inlines Execute and the user's method into the loop (only
         // Execute for a method that runs out of line: ForEachModel.OutOfLine).
@@ -489,7 +493,6 @@ public sealed class SystemGenerator : IIncrementalGenerator
         // null-checked on every row. Parallel jobs are copied into work items on the heap, so they hold SingletonRefs.
         string kind = method.Parallel ? "struct" : "ref struct";
         sb.Append($"    internal {kind} {job} : global::EasyEcs.{iface}<{method.ComponentTypes}>{marker}{method.Constraints}\n    {{\n");
-        if (!method.IsStatic) sb.Append("        public object System;\n");
         // Only when the method takes the World: an unused field would still be copied into the row loop, where it
         // holds a callee-saved register a job that calls out (a structural change) needs for its loop state.
         if (method.NeedsWorld) sb.Append("        public global::EasyEcs.World World;\n");
@@ -711,14 +714,23 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// <param name="FullName">The type as C# names it (<c>global::Ns.Outer.Inner</c>).</param>
     /// <param name="MetadataName">The type as the runtime names it (<c>Ns.Outer+Inner</c>), for UnsafeAccessorType.</param>
     /// <param name="IsVisible">Generated code can name the type (it and its containing types are internal or public).</param>
-    /// <param name="OverridesOnUpdate">The type or a base type below EcsSystem overrides OnUpdate.</param>
+    /// <param name="IsSystem">An [EcsSystem] ref struct the generator writes code for (<see cref="Symbols.GeneratesSystem"/>).</param>
     /// <param name="AccessorType">MetadataName closed over the generated class's type parameters (<c>Ns.Regen`1[[!0]]</c>).</param>
     /// <param name="TypeParameters">The type parameters of the type and its containing types (<c>&lt;T&gt;</c>), or "".</param>
     /// <param name="Definition">The generic definition as <c>typeof</c> names it (<c>global::Ns.Regen&lt;&gt;</c>), or "".</param>
     private sealed record OwnerModel(string Namespace, string FullName, string MetadataName, string FlatName, string HintName,
-        bool IsVisible, bool IsPublic, bool OverridesOnUpdate, bool IsSystem, string AccessorType, string TypeParameters,
+        bool IsVisible, bool IsPublic, bool IsSystem, string AccessorType, string TypeParameters,
         string Constraints, string Definition, int Arity)
     {
+        /// <summary>
+        /// The owner parameter of an UnsafeAccessor of the type's static methods: a system by its type (UnsafeAccessorType
+        /// takes no value type), any other type by name (private types too).
+        /// </summary>
+        public string AccessorParameter => IsSystem ? FullName : $"[global::System.Runtime.CompilerServices.UnsafeAccessorType(\"{AccessorType}\")] object";
+
+        /// <summary>The value an accessor call passes for the owner (ignored by a static method).</summary>
+        public string AccessorArgument => IsSystem ? "default" : "null";
+
         public static OwnerModel From(INamedTypeSymbol type)
         {
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
@@ -730,13 +742,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 : metadata + "[" + string.Join(",", typeParameters.Select((_, i) => $"[!{i}]")) + "]";
             string definition = typeParameters.Count == 0 ? ""
                 : "global::" + (ns.Length > 0 ? ns + "." : "") + string.Join(".", levels.Select(t => t.Arity == 0 ? t.Name : $"{t.Name}<{new string(',', t.Arity - 1)}>"));
-            bool overridesOnUpdate = false;
-            for (var t = type; t != null && !Symbols.Named(t, Symbols.EcsSystem); t = t.BaseType)
-                overridesOnUpdate |= t.GetMembers("OnUpdate").Any(m => m is IMethodSymbol { IsOverride: true, Parameters.Length: 0 });
             bool isPublic = true;
             for (var t = type; t != null; t = t.ContainingType) isPublic &= t.DeclaredAccessibility == Accessibility.Public;
             return new OwnerModel(ns, type.ToDisplayString(Symbols.Fqn), metadata, Symbols.FlatName(type), Symbols.HintName(type),
-                Symbols.IsVisible(type), isPublic, overridesOnUpdate, Symbols.IsSystem(type), accessor,
+                Symbols.IsVisible(type), isPublic, Symbols.GeneratesSystem(type), accessor,
                 Symbols.TypeParameterList(typeParameters), Symbols.Constraints(typeParameters), definition, typeParameters.Count);
         }
     }
@@ -1011,9 +1020,6 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
     private sealed record UpdateModel(OwnerModel Owner, EquatableArray<ForEachModel> Methods)
     {
-        /// <summary>The closed types of a generic system that this assembly names.</summary>
-        public EquatableArray<ClosedUse> Closed { get; init; } = new([]);
-
         /// <summary>The type's [ForEntity] methods: entry points only (in a file of their own).</summary>
         public bool One { get; init; }
 
@@ -1022,18 +1028,33 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
         public int Phase { get; init; }
 
+        /// <summary>The system's hooks.</summary>
+        public EquatableArray<HookModel> Hooks { get; init; } = new([]);
+
         /// <summary>
-        /// One model per type with [ForEach] methods or an [UpdateInterval], its methods in declaration order: a system
-        /// with a schedule and no method still registers code that carries it.
+        /// One model per type with [ForEach] methods, and per system (with or without methods), its methods in
+        /// declaration order. A [ForEach] method of an [EcsSystem] the generator writes no code for (EECS074, EECS022)
+        /// is left out; <paramref name="entryPoints"/> ([ForEntity] methods) keeps every owner, a system's too, since
+        /// its entry points need no system code.
         /// </summary>
-        public static IEnumerable<UpdateModel> Group(ImmutableArray<ForEachModel> methods, ImmutableArray<ScheduleModel> schedules)
+        public static IEnumerable<UpdateModel> Group(ImmutableArray<ForEachModel> methods, ImmutableArray<SystemModel> systems, bool entryPoints = false)
         {
             var owners = new List<OwnerModel>();
             var byOwner = new Dictionary<OwnerModel, List<ForEachModel>>();
+            var bySystem = new Dictionary<OwnerModel, SystemModel>();
+            foreach (var system in systems)
+            {
+                if (bySystem.ContainsKey(system.Owner)) continue; // a partial type: one attribute (AllowMultiple = false)
+                bySystem[system.Owner] = system;
+                byOwner[system.Owner] = [];
+                owners.Add(system.Owner);
+            }
+
             foreach (var method in methods)
             {
                 if (!byOwner.TryGetValue(method.Owner, out var list))
                 {
+                    if (method.Owner.IsSystem && !entryPoints) continue; // a valid system always has its model
                     byOwner[method.Owner] = list = [];
                     owners.Add(method.Owner);
                 }
@@ -1041,88 +1062,73 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 list.Add(method);
             }
 
-            var bySchedule = new Dictionary<OwnerModel, ScheduleModel>();
-            foreach (var schedule in schedules)
-            {
-                if (bySchedule.ContainsKey(schedule.Owner)) continue; // a partial type: one attribute (AllowMultiple = false)
-                bySchedule[schedule.Owner] = schedule;
-                if (!byOwner.ContainsKey(schedule.Owner))
-                {
-                    byOwner[schedule.Owner] = [];
-                    owners.Add(schedule.Owner);
-                }
-            }
-
             foreach (var owner in owners)
             {
                 var model = new UpdateModel(owner, new EquatableArray<ForEachModel>(byOwner[owner].OrderBy(m => m.Order).ToArray()));
-                yield return bySchedule.TryGetValue(owner, out var s) ? model with { Interval = s.Interval, Phase = s.Phase } : model;
+                yield return bySystem.TryGetValue(owner, out var s) ? model with { Interval = s.Interval, Phase = s.Phase, Hooks = s.Hooks } : model;
             }
         }
     }
 
-    /// <summary>A system type's valid [UpdateInterval(n, Phase = p)] (an invalid one is EECS083's, and runs every update).</summary>
-    private sealed record ScheduleModel(OwnerModel Owner, int Interval, int Phase)
+    /// <summary>A hook of a system: its kind ("Create", "Update", "Destroy"), its method and its parameters ('W' the World, 'S' the SystemHandle).</summary>
+    private sealed record HookModel(string Kind, string Name, string Arguments);
+
+    /// <summary>
+    /// A system the generator writes code for: its valid [UpdateInterval(n, Phase = p)] (an invalid one is EECS083's,
+    /// and the system runs every update) and its valid hooks (EECS077 otherwise). Declarations only, no body.
+    /// </summary>
+    private sealed record SystemModel(OwnerModel Owner, int Interval, int Phase, EquatableArray<HookModel> Hooks)
     {
-        public static ScheduleModel? Create(INamedTypeSymbol type) =>
-            Symbols.IsSystem(type) && Symbols.ScheduleProblem(type) == null && Symbols.Schedule(type) is var (interval, phase, _)
-                ? new ScheduleModel(OwnerModel.From(type), interval, phase)
-                : null;
+        public static SystemModel? Create(INamedTypeSymbol type)
+        {
+            if (!Symbols.GeneratesSystem(type)) return null;
+            var (interval, phase) = Symbols.ScheduleProblem(type) == null && Symbols.Schedule(type) is var (i, p, _) ? (i, p) : (0, 0);
+            var hooks = new List<HookModel>();
+            foreach (var method in type.GetMembers().OfType<IMethodSymbol>())
+                if (Symbols.Hook(method) is var kind and not Symbols.HookKind.None && Symbols.HookProblem(method) == null)
+                    hooks.Add(new HookModel(kind.ToString(), method.Name,
+                        new string(method.Parameters.Select(p => Symbols.Named(p.Type, Symbols.World) ? 'W' : 'S').ToArray())));
+            return new SystemModel(OwnerModel.From(type), interval, phase, new EquatableArray<HookModel>(hooks.ToArray()));
+        }
     }
 
     /// <summary>
-    /// A closed type of a generic system with [ForEach] methods, named in this assembly: <c>AddSystem&lt;Regen&lt;Health&gt;&gt;()</c>,
-    /// <c>new Regen&lt;Health&gt;()</c>, a target-typed <c>Regen&lt;Health&gt; r = new()</c> (local, field or property),
-    /// <c>typeof(Regen&lt;Health&gt;)</c>, or a base type (<c>class X : Regen&lt;Health&gt;</c>), and each generic base system of it.
+    /// A system of the assembly's set: its type and its code struct as C# names them. Besides the assembly's own
+    /// non-generic systems, a closed type of a generic system named in this assembly in the API that takes a system type
+    /// (<c>AddSystem&lt;Regen&lt;Health&gt;&gt;()</c>, <c>RemoveSystem</c>, <c>HasSystem</c>, <c>System</c>,
+    /// <c>TryGetSystem</c>, <c>[UpdateBefore&lt;...&gt;]</c> / <c>[UpdateAfter&lt;...&gt;]</c>): of this assembly's
+    /// systems, or of a referenced assembly's public one through the code its [GenericSystemCode] names.
     /// </summary>
-    /// <param name="Owner">The generic definition as its OwnerModel names it (<c>global::Ns.Regen&lt;T&gt;</c>).</param>
-    /// <param name="Closed">The closed type (<c>global::Ns.Regen&lt;global::Health&gt;</c>).</param>
-    /// <param name="Arguments">Its type arguments, outermost first (<c>global::Health</c>).</param>
-    /// <param name="Code">For a system of a referenced assembly, its public code type closed over the arguments (named
-    /// by the assembly's [GenericSystemCode]); "" for a system of this assembly.</param>
-    private sealed record ClosedUse(string Owner, string Closed, string Arguments, string Code = "")
+    private sealed record SetEntry(string System, string Code)
     {
+        private static readonly HashSet<string> Takers = ["AddSystem", "RemoveSystem", "HasSystem", "System", "TryGetSystem",
+            "UpdateBefore", "UpdateAfter", "UpdateBeforeAttribute", "UpdateAfterAttribute"];
+
         public static bool IsCandidate(SyntaxNode node)
         {
             if (node is not GenericNameSyntax name) return false;
             SyntaxNode type = name;
             while (type.Parent is QualifiedNameSyntax qualified && qualified.Right == type
-                   || type.Parent is AliasQualifiedNameSyntax alias && alias.Name == type || type.Parent is NullableTypeSyntax)
+                   || type.Parent is AliasQualifiedNameSyntax alias && alias.Name == type)
                 type = type.Parent;
-            return type.Parent is ObjectCreationExpressionSyntax or SimpleBaseTypeSyntax or TypeOfExpressionSyntax
-                || type.Parent is TypeArgumentListSyntax { Parent: GenericNameSyntax { Identifier.ValueText: "AddSystem" } }
-                // Target-typed: Regen<Health> r = new(); (locals and fields) and Regen<Health> P { get; } = new();
-                || type.Parent is VariableDeclarationSyntax { Variables: var variables } && variables.Any(v => v.Initializer?.Value is ImplicitObjectCreationExpressionSyntax)
-                || type.Parent is PropertyDeclarationSyntax { Initializer.Value: ImplicitObjectCreationExpressionSyntax };
+            return type.Parent is TypeArgumentListSyntax { Parent: GenericNameSyntax taker } && Takers.Contains(taker.Identifier.ValueText);
         }
 
-        public static EquatableArray<ClosedUse> Create(GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
+        public static SetEntry? Closed(GeneratorSyntaxContext ctx)
         {
             if (Symbols.TypeNamed(ctx.SemanticModel, ctx.Node) is not INamedTypeSymbol { IsGenericType: true } type
-                || type.TypeKind != TypeKind.Class || !Symbols.IsSystem(type))
-                return new([]);
-            var uses = new List<ClosedUse>();
-            var assembly = ctx.SemanticModel.Compilation.Assembly;
-            for (var t = type; t != null && !Symbols.Named(t, Symbols.EcsSystem); t = t.BaseType)
-            {
-                var arguments = Symbols.ChainTypeArguments(t);
-                if (arguments.Count == 0 || !Symbols.IsVisible(t) || arguments.Any(a => !Symbols.IsNameable(a) || Symbols.ContainsTypeParameter(a)))
-                    continue;
-                string code = "";
-                if (!SymbolEqualityComparer.Default.Equals(t.ContainingAssembly, assembly))
-                {
-                    // Another assembly's system: its code, if that assembly published it, closed here (no runtime code
-                    // generation under Native AOT). Private [ForEach] methods are not in a reference assembly.
-                    if (Symbols.GenericSystemCode(t) is not { } open) continue;
-                    code = open.Construct(arguments.ToArray()).ToDisplayString(Symbols.Fqn);
-                }
-                else if (!t.OriginalDefinition.GetMembers().OfType<IMethodSymbol>().Any(Symbols.IsForEach) && Symbols.Schedule(t.OriginalDefinition) == null)
-                    continue;
-                uses.Add(new ClosedUse(t.OriginalDefinition.ToDisplayString(Symbols.Fqn), t.ToDisplayString(Symbols.Fqn),
-                    string.Join(", ", arguments.Select(a => a.ToDisplayString(Symbols.Fqn))), code));
-            }
-
-            return new(uses.ToArray());
+                || !Symbols.IsValidSystem(type) || !Symbols.IsVisible(type))
+                return null;
+            var arguments = Symbols.ChainTypeArguments(type);
+            if (arguments.Any(a => !Symbols.IsNameable(a) || Symbols.ContainsTypeParameter(a))) return null;
+            string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString() + ".";
+            string code;
+            if (SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, ctx.SemanticModel.Compilation.Assembly))
+                code = $"global::{ns}{CodeTypeName(OwnerModel.From(type.OriginalDefinition))}<{string.Join(", ", arguments.Select(a => a.ToDisplayString(Symbols.Fqn)))}>";
+            else if (Symbols.GenericSystemCode(type) is { } open) // another assembly's public system, its code closed here
+                code = open.Construct(arguments.ToArray()).ToDisplayString(Symbols.Fqn);
+            else return null;
+            return new SetEntry(type.ToDisplayString(Symbols.Fqn), code);
         }
     }
 }

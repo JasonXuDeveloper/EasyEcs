@@ -129,7 +129,8 @@ public class GeneratorBenchmark
         {
             string a = $"Data{m}_{4 + s}", b = $"Data{m}_{5 + s % 5}", t = $"Tracked{m}_{2 + s % 2}";
             sb.Append($$"""
-                public class System{{m}}_{{s}} : EcsSystem
+                [EcsSystem]
+                public ref struct System{{m}}_{{s}}
                 {
                     [ForEach, Without<Tag{{m}}_0>]
                     static void Move(ref {{a}} p, in {{b}} q)

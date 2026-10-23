@@ -15,7 +15,8 @@ public class LookupTests
     public record struct Wants(int Login) : IComponent;
     public record struct Found(EntityId Id, int Followers) : IComponent;
 
-    public class Chase : EcsSystem
+    [EcsSystem]
+    public ref struct Chase
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Steer(in Place place, in Chaser chaser, ref Aim2 heading, Lookup<Place> places)
@@ -27,20 +28,23 @@ public class LookupTests
         }
     }
 
-    public class MovePlaces : EcsSystem
+    [EcsSystem]
+    public ref struct MovePlaces
     {
         [ForEach]
         static void Move(ref Place place) => place.X += 1;
     }
 
-    public class ReadPlaces : EcsSystem
+    [EcsSystem]
+    public ref struct ReadPlaces
     {
         [ForEach]
         static void Read(in Place place, ref Wants wants) => wants.Login = (int)place.X;
     }
 
     /// <summary>A unique index found by key in a parallel pass.</summary>
-    public class FindLogin : EcsSystem
+    [EcsSystem]
+    public ref struct FindLogin
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Find(in Wants wants, ref Found found, Lookup<Login> logins) =>
@@ -48,7 +52,8 @@ public class LookupTests
     }
 
     /// <summary>A value index counted by key: built before the pass, never by a lookup during it.</summary>
-    public class CountFollowers : EcsSystem
+    [EcsSystem]
+    public ref struct CountFollowers
     {
         [ForEach(Parallel = true, ChunkRows = 64), With<Place>]
         static void Count(ref Found found, Lookup<Follows> follows) =>
@@ -56,7 +61,8 @@ public class LookupTests
     }
 
     /// <summary>The lookup reaches TryFind through a helper: the method has no index for it.</summary>
-    public class FindThroughHelper : EcsSystem
+    [EcsSystem]
+    public ref struct FindThroughHelper
     {
         [ForEach]
         static void Find(ref Found found, Lookup<Follows> follows) => found.Followers = Has(follows, found.Id) ? 1 : 0;
@@ -194,7 +200,8 @@ public class LookupTests
     }
 
     /// <summary>Walks the followers of each leader (a value index's Find) in a parallel pass.</summary>
-    public class SumFollowers : EcsSystem
+    [EcsSystem]
+    public ref struct SumFollowers
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Sum(ref Found found, Lookup<Follows> follows, Lookup<Place> places)
@@ -205,14 +212,16 @@ public class LookupTests
         }
     }
 
-    public class Refollow : EcsSystem
+    [EcsSystem]
+    public ref struct Refollow
     {
         [ForEach]
         static void Turn(Entity entity, in Follows follows) => entity.Set(follows);
     }
 
     /// <summary>Reaches an index around the lookup (a static field): a lazy build in a parallel pass.</summary>
-    public class CountThroughStatic : EcsSystem
+    [EcsSystem]
+    public ref struct CountThroughStatic
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Count(ref Found found) => found.Followers = Stray.Index.Count(found.Id);
@@ -275,7 +284,8 @@ public class LookupTests
     }
 
     /// <summary>A serial pass reaching an index through the World: it may still build it on its first lookup.</summary>
-    public class CountInSerial : EcsSystem
+    [EcsSystem]
+    public ref struct CountInSerial
     {
         [ForEach]
         static void Count(World world, ref Found found) => found.Followers = world.FollowsIndex.Count(found.Id);

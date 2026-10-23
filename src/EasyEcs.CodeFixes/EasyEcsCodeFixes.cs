@@ -24,9 +24,9 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
 {
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
-            "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
+            "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
             "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071",
-            "EECS080", "EECS081", "EECS082", "EECS084", "EECS088");
+            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS088", "CS0246");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -79,10 +79,17 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                                     && !await UsesInstance(context.Document, method, context.CancellationToken).ConfigureAwait(false):
                     MakeStatic(context, diagnostic, generator, root, method);
                     break;
-                case "EECS082" when kind == "Schedule" && node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { Parent: ClassDeclarationSyntax type } property:
-                    diagnostic.Properties.TryGetValue("Schedule", out var schedule);
-                    Register(context, diagnostic, string.IsNullOrEmpty(schedule) ? "Remove it: the system runs every update" : $"Declare it with {schedule}",
-                        root, type, Scheduled(type, property, diagnostic.AdditionalLocations, schedule));
+                case "EECS074" when kind == "RefStruct" && node.FirstAncestorOrSelf<TypeDeclarationSyntax>() is { } type
+                                    && ToRefStruct(type) is { } system:
+                    Register(context, diagnostic, "Make it a ref struct", root, type, system);
+                    break;
+                case "EECS075" when kind == "Static" && node.FirstAncestorOrSelf<MemberDeclarationSyntax>() is { } instance and not BaseTypeDeclarationSyntax:
+                    Register(context, diagnostic, "Make it static", root, instance, generator.WithModifiers(instance, generator.GetModifiers(instance).WithIsStatic(true)));
+                    break;
+                case "CS0246" when node.FirstAncestorOrSelf<SimpleBaseTypeSyntax>() is { Parent: BaseListSyntax { Parent: ClassDeclarationSyntax old } } baseType
+                                   && IsOldSystemBase(baseType.Type) && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false)
+                                   && ToSystem(old, baseType) is { } system:
+                    Register(context, diagnostic, "Make it an [EcsSystem] ref struct", root, old, system);
                     break;
                 case "EECS084" when kind == "Consume" && node.FirstAncestorOrSelf<ExpressionStatementSyntax>() is { Parent: BlockSyntax { Parent: MethodDeclarationSyntax method } } destroy:
                     diagnostic.Properties.TryGetValue("DropEntity", out var dropEntity);
@@ -117,11 +124,6 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     Register(context, diagnostic, with == null ? "Remove the parameter" : $"Require it with [With<{with}>]", root, method,
                         Unused(method, p, with));
                     break;
-                case "EECS029" when node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } instance
-                                    && !await HasCallers(context.Document, instance.ParameterList.Parameters.FirstOrDefault(), context.CancellationToken, instance)
-                                        .ConfigureAwait(false):
-                    MakeStatic(context, diagnostic, generator, root, instance);
-                    break;
                 case "EECS002" when diagnostic.Properties.ContainsKey("ByValue") && node is ParameterSyntax parameter:
                     Register(context, diagnostic, "Take it by 'in' (read)", root, parameter, Modify(parameter, SyntaxKind.InKeyword));
                     Register(context, diagnostic, "Take it by 'ref' (write)", root, parameter, Modify(parameter, SyntaxKind.RefKeyword));
@@ -143,7 +145,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     Register(context, diagnostic, "Make it a struct", root, type, data);
                     break;
                 case "EECS010" when node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method:
-                    // An instance method 'static' alone makes stable (the analyzer checked): the fix EECS029 would offer.
+                    // An instance method 'static' alone makes stable (the analyzer checked).
                     if (kind == "Static" && !await UsesInstance(context.Document, method, context.CancellationToken).ConfigureAwait(false)
                         && !await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false))
                         MakeStatic(context, diagnostic, generator, root, method);
@@ -460,7 +462,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         return false;
     }
 
-    /// <summary>EECS005, EECS010, EECS029: the method becomes static (the caller checked that it reads no instance state).</summary>
+    /// <summary>EECS005, EECS010, EECS081: the method becomes static (the caller checked that it reads no instance state).</summary>
     private static void MakeStatic(CodeFixContext context, Diagnostic diagnostic, SyntaxGenerator generator, SyntaxNode root, MethodDeclarationSyntax method) =>
         Register(context, diagnostic, "Make it static", root, method, generator.WithModifiers(method, generator.GetModifiers(method).WithIsStatic(true)));
 

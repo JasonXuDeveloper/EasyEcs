@@ -123,7 +123,7 @@ public sealed partial class EasyEcsAnalyzer
 
         private void Collect(OperationAnalysisContext context)
         {
-            if (context.ContainingSymbol is not IMethodSymbol { Name: not ("OnCreate" or "OnDestroy") } method
+            if (context.ContainingSymbol is not IMethodSymbol method || Symbols.Hook(method) is Symbols.HookKind.Create or Symbols.HookKind.Destroy
                 || method.ContainingType is not { } system || !Symbols.IsSystem(system)) return;
             switch (context.Operation)
             {

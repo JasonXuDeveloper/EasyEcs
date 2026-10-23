@@ -20,7 +20,8 @@ public class EmitTests
     /// <summary>An area-of-interest packet: who sees whom.</summary>
     public record struct Seen(EntityId Viewer, EntityId Subject);
 
-    public class ParallelStrikes : EcsSystem
+    [EcsSystem]
+    public ref struct ParallelStrikes
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits)
@@ -30,7 +31,8 @@ public class EmitTests
         }
     }
 
-    public class SerialStrikes : EcsSystem
+    [EcsSystem]
+    public ref struct SerialStrikes
     {
         [ForEach]
         static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits)
@@ -41,19 +43,21 @@ public class EmitTests
     }
 
     /// <summary>The serial system the records are data for: applies each hit, then clears them.</summary>
-    [UpdateAfter<ParallelStrikes>]
-    public class ApplyHits : EcsSystem
+    [EcsSystem, UpdateAfter<ParallelStrikes>]
+    public ref struct ApplyHits
     {
-        protected override void OnUpdate()
+        [OnUpdate]
+        static void OnUpdate(World world)
         {
-            ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+            ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
             foreach (ref readonly var hit in hits.AsReadOnlySpan())
-                if (World.TryGetEntity(hit.Target, out var target)) target.Get<Hp>().Value -= hit.Amount;
+                if (world.TryGetEntity(hit.Target, out var target)) target.Get<Hp>().Value -= hit.Amount;
             hits.Clear();
         }
     }
 
-    public class ReadsHits : EcsSystem
+    [EcsSystem]
+    public ref struct ReadsHits
     {
         [ForEach]
         static void Read(ref Hp hp, in Emitted<Hit> hits) => hp.Value = hits.Items.Count;

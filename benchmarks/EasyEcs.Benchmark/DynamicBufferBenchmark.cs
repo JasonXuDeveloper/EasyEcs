@@ -85,8 +85,8 @@ public class DynamicBufferBenchmark
     /// <summary>A checksum of what clients last received.</summary>
     public record struct Sent(int Sum) : IComponent;
 
-    [UpdateInGroup<Replication>]
-    public class SendBuffers : EcsSystem
+    [EcsSystem, UpdateInGroup<Replication>]
+    public ref struct SendBuffers
     {
         [ForEach, Changed<DynamicBuffer<int>>]
         private static void Send(in DynamicBuffer<int> bag, ref Sent sent)
@@ -97,8 +97,8 @@ public class DynamicBufferBenchmark
         }
     }
 
-    [UpdateInGroup<Replication>]
-    public class SendLists : EcsSystem
+    [EcsSystem, UpdateInGroup<Replication>]
+    public ref struct SendLists
     {
         [ForEach, Changed<ListBag>]
         private static void Send(in ListBag bag, ref Sent sent)
@@ -281,7 +281,8 @@ public class ParallelBufferChurnBenchmark
 
     public record struct Actor(int Shard) : IComponent;
 
-    public class PostSystem : EcsSystem
+    [EcsSystem]
+    public ref struct PostSystem
     {
         [ForEach(Parallel = true), With<Actor>]
         static void Post(Mut<DynamicBuffer<long>> mailbox)

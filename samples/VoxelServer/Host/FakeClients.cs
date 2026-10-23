@@ -6,8 +6,8 @@ namespace VoxelServer;
 // Not part of the lesson: stands in for the players' clients. A real server fills Input from each connection's
 // packets. A bot walks in one of eight directions (or stands) for five seconds and,
 // while it walks freely, digs the block under its feet every two seconds (a bot that stands, or walks into a wall, would dig itself a pit).
-[UpdateInGroup<ClientInput>]
-public class FakeClientsSystem : EcsSystem
+[EcsSystem, UpdateInGroup<ClientInput>]
+public ref struct FakeClientsSystem
 {
     const float D = 0.70710677f;
     static readonly Vector2[] Directions =

@@ -32,9 +32,10 @@ world.SetPrefabs(
     Bullet: new Prefab().SetPosition(0, 0).SetVelocity(0, 0).SetLifetime(TicksPerSecond));
 world.SetOutbox(Bytes: new ArrayBufferWriter<byte>(64 * 1024), Updates: 0);
 world.AddSingleton<Stats>();
+world.SetInbox(mailbox);
 
-// Input group: runs whenever the host wakes up. The system keeps the mailbox it drains.
-world.AddSystem(new ReceiveInputSystem(mailbox));
+// Input group: runs whenever the host wakes up. Its system drains the mailbox in Inbox.
+world.AddSystem<ReceiveInputSystem>();
 
 // Default group: the fixed simulation tick, in this order.
 world.AddSystem<LeaveSystem>();

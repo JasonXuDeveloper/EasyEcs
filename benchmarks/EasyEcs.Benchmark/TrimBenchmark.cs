@@ -86,7 +86,8 @@ public class TrimBenchmark
     public struct T6 : IComponent;
     public struct T7 : IComponent;
 
-    public class Drift : EcsSystem
+    [EcsSystem]
+    public ref struct Drift
     {
         [ForEach]
         private static void Move(ref Position position, in Velocity velocity)

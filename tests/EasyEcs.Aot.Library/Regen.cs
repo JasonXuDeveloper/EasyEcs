@@ -9,8 +9,8 @@ public interface ILife : IComponent
 }
 
 /// <summary>Heals every <typeparamref name="T"/> by one on every second update.</summary>
-[UpdateInterval(2)]
-public class Regen<T> : EcsSystem where T : struct, ILife
+[EcsSystem, UpdateInterval(2)]
+public ref struct Regen<T> where T : struct, ILife
 {
     [ForEach]
     static void Heal(ref T life) => life.Value++;

@@ -6,18 +6,18 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// Suppresses "private member is unused" (IDE0051, IDE0052) on [ForEach] and [ForEntity] methods: the generated code
-/// calls them through UnsafeAccessor, by name, which the IDE's analyzers do not see as a use. Rider and ReSharper read
-/// the [MeansImplicitUse] those attributes carry instead.
+/// Suppresses "private member is unused" (IDE0051, IDE0052) on [ForEach], [ForEntity] and hook ([OnCreate],
+/// [OnUpdate], [OnDestroy]) methods: the generated code calls them through UnsafeAccessor, by name, which the IDE's
+/// analyzers do not see as a use. Rider and ReSharper read the [MeansImplicitUse] those attributes carry instead.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class UnusedSuppressor : DiagnosticSuppressor
 {
     public static readonly SuppressionDescriptor Unused = new("EECSS01", "IDE0051",
-        "The generated code calls [ForEach] and [ForEntity] methods through UnsafeAccessor");
+        "The generated code calls [ForEach], [ForEntity] and hook methods through UnsafeAccessor");
 
     public static readonly SuppressionDescriptor Unread = new("EECSS02", "IDE0052",
-        "The generated code calls [ForEach] and [ForEntity] methods through UnsafeAccessor");
+        "The generated code calls [ForEach], [ForEntity] and hook methods through UnsafeAccessor");
 
     public override ImmutableArray<SuppressionDescriptor> SupportedSuppressions { get; } = [Unused, Unread];
 
@@ -29,7 +29,7 @@ public sealed class UnusedSuppressor : DiagnosticSuppressor
             if (tree == null) continue;
             var node = tree.GetRoot(context.CancellationToken).FindNode(diagnostic.Location.SourceSpan);
             if (context.GetSemanticModel(tree).GetDeclaredSymbol(node, context.CancellationToken) is not IMethodSymbol method
-                || !method.GetAttributes().Any(static a => Symbols.Named(a.AttributeClass, Symbols.ForEachAttribute) || Symbols.Named(a.AttributeClass, Symbols.ForEntityAttribute)))
+                || !Symbols.IsGeneratedJob(method) && Symbols.Hook(method) == Symbols.HookKind.None)
                 continue;
             context.ReportSuppression(Suppression.Create(diagnostic.Id == Unused.SuppressedDiagnosticId ? Unused : Unread, diagnostic));
         }

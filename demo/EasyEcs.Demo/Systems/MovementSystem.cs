@@ -3,8 +3,8 @@ using EasyEcs;
 namespace EasyEcs.Demo;
 
 // Moves every spark by its velocity over the step. One call per spark.
-[UpdateInGroup<PerEntity>]
-public class MovementSystem : EcsSystem
+[EcsSystem, UpdateInGroup<PerEntity>]
+public ref struct MovementSystem
 {
     [ForEach]
     static void Move(ref Position p, in Velocity v, in Clock clock)

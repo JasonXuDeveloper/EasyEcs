@@ -17,7 +17,8 @@ public class ConsumeTests
     public record struct Ledger(int Slot) : ICleanupComponent;
 
     // No structural change: its rows go at once after the pass.
-    public class ApplyHits : EcsSystem
+    [EcsSystem]
+    public ref struct ApplyHits
     {
         [ForEach, Consume, Without<Held>]
         static void Apply(in Hit hit, ref Tally tally)
@@ -28,7 +29,8 @@ public class ConsumeTests
     }
 
     // Creates entities that match its own query: they are not destroyed, the next run visits them.
-    public class Spawner : EcsSystem
+    [EcsSystem]
+    public ref struct Spawner
     {
         [ForEach, Consume]
         static void Run(in Spawn spawn, World world, ref Tally tally)
@@ -39,14 +41,16 @@ public class ConsumeTests
     }
 
     // Visits rows whose Score changed since its last run, and consumes only those.
-    public class ScoreChanges : EcsSystem
+    [EcsSystem]
+    public ref struct ScoreChanges
     {
         [ForEach, Consume, Changed<Score>]
         static void Count(in Score score, ref Tally tally) => tally.Total += score.Value;
     }
 
     // A batch method: no structural change can happen, its rows go in bulk.
-    public class BatchHits : EcsSystem
+    [EcsSystem]
+    public ref struct BatchHits
     {
         [ForEach, Consume]
         static void Apply(ReadOnlySpan<Hit> hits, ref Tally tally)
@@ -55,14 +59,16 @@ public class ConsumeTests
         }
     }
 
-    public class ParallelHits : EcsSystem
+    [EcsSystem]
+    public ref struct ParallelHits
     {
         [ForEach(Parallel = true), Consume]
         static void Apply(ref Hit hit) => hit.Amount++;
     }
 
     // Throws on a negative amount: the pass ends early, and destroys nothing.
-    public class Strict : EcsSystem
+    [EcsSystem]
+    public ref struct Strict
     {
         [ForEach, Consume]
         static void Apply(in Hit hit, ref Tally tally)

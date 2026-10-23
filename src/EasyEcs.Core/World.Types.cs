@@ -45,14 +45,10 @@ public sealed partial class World
         if (_disposed) throw new ObjectDisposedException(nameof(World));
         ThrowIfIterating(nameof(RemoveTypes));
 
-        // Systems first: their OnDestroy may still use the types (remove a singleton, destroy entities).
-        foreach (var group in _groups)
-        {
-            if (group == null) continue;
-            foreach (var system in (EcsSystem[])group.Systems.Clone())
-                if (doomed(system.GetType()) || BaseTypes(system.GetType(), doomed))
-                    RemoveSystem(system);
-        }
+        // Systems first: their [OnDestroy] may still use the types (remove a singleton, destroy entities).
+        for (int i = 0; i < SystemRows.Length; i++)
+            if (SystemRows[i].Code is { } code && doomed(code.Type))
+                RemoveSystem(i);
 
         var bits = new List<ushort>();
         var mask = default(BitMask);
@@ -78,14 +74,6 @@ public sealed partial class World
         }
 
         ComponentInfo.Reclaim(); // the bits of a context that unloaded already
-    }
-
-    private static bool BaseTypes(Type type, Func<Type, bool> doomed)
-    {
-        for (var t = type.BaseType; t != null && t != typeof(EcsSystem); t = t.BaseType)
-            if (doomed(t))
-                return true;
-        return false;
     }
 
     /// <summary>Move every row of <paramref name="table"/> to the table without the columns of <paramref name="bits"/> (its groups kept). Inside the gate.</summary>
@@ -120,11 +108,7 @@ public sealed partial class World
             else Volatile.Write(ref pair.Value.Match, pair.Value.Match.Without(dropped));
         }
 
-        lock (_memoLock)
-        {
-            _queryMemo = []; // refilled by the next queries
-            _kept = [];
-        }
+        ResetQueryMemo(); // after the cache: refilled by the next queries
 
         if (_prefabTables != null)
             foreach (var pair in new List<KeyValuePair<PrefabKey, Archetype>>(_prefabTables))

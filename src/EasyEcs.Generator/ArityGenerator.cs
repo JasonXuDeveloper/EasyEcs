@@ -81,7 +81,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             attributes.Append($$"""
                 /// <summary>
                 /// The <see cref="ForEachAttribute"/> method visits only entities where at least one of <c>{{tps}}</c> was
-                /// written since its system last ran (<see cref="EcsSystem.LastRunTick"/>; on the first run, every entity
+                /// written since its system last ran (<see cref="SystemHandle.LastRunTick"/>; on the first run, every entity
                 /// having one): <see cref="QueryFilter.ChangedAny{{{tps}}}(ulong)"/>. Several attributes join one set;
                 /// combined with <c>[Changed&lt;T&gt;]</c> and the other filters with AND.
                 /// </summary>

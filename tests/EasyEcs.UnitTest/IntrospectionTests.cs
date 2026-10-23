@@ -219,49 +219,55 @@ public class IntrospectionTests
 
     // ---------------- DescribeSchedule ----------------
 
-    private sealed class Move : EcsSystem
+    [EcsSystem]
+    internal ref struct Move
     {
         [ForEach] private static void Run(ref Position position, in Velocity velocity) => position.X += velocity.X;
     }
 
-    private sealed class Heal : EcsSystem
+    [EcsSystem]
+    internal ref struct Heal
     {
         [ForEach] private static void Run(ref Health health) => health.Value++;
     }
 
-    private sealed class Watch : EcsSystem // reads what Move writes, ordered by nothing: registration order decides
+    [EcsSystem]
+    internal ref struct Watch    // reads what Move writes, ordered by nothing: registration order decides
     {
         [ForEach] private static void Run(in Position position, ref Seen seen) => seen.Count += (int)position.X;
     }
 
-    [UpdateAfter<Heal>]
-    private sealed class Wake : EcsSystem // disjoint from Heal, but ordered after it
+    [EcsSystem, UpdateAfter<Heal>]
+    internal ref struct Wake    // disjoint from Heal, but ordered after it
     {
         [ForEach] private static void Run(ref Stun stun) => stun.Ticks--;
     }
 
-    [UpdateAfter<Move>]
-    private sealed class Follow : EcsSystem // ordered after Move and reads what it writes
+    [EcsSystem, UpdateAfter<Move>]
+    internal ref struct Follow    // ordered after Move and reads what it writes
     {
         [ForEach] private static void Run(in Position position, ref C3 trail) => trail.V = (int)position.X;
     }
 
-    private sealed class Tick : EcsSystem
+    [EcsSystem]
+    internal ref struct Tick
     {
         [ForEach] private static void Run(ref C1 c, ref Clock clock) => clock.Tick += ++c.V;
     }
 
-    private sealed class Read : EcsSystem
+    [EcsSystem]
+    internal ref struct Read
     {
         [ForEach] private static void Run(ref C2 c, in Clock clock) => c.V = (int)clock.Tick;
     }
 
     private struct LateGroup : ISystemGroup;
 
-    [UpdateInGroup<LateGroup>]
-    private sealed class Late : EcsSystem
+    [EcsSystem, UpdateInGroup<LateGroup>]
+    internal ref struct Late
     {
-        protected override void OnUpdate() { } // runs alone
+        [OnUpdate]
+        static void OnUpdate(World world) { } // runs alone
     }
 
     private static World Scheduled()
@@ -336,14 +342,14 @@ public class IntrospectionTests
     }
 
     [Test]
-    public void AScheduleNamesGenericAndRepeatedSystems()
+    public void AScheduleNamesGenericSystems()
     {
         Assert.That(ScheduleInfo.NameOf(typeof(System.Collections.Generic.Dictionary<int, Position>)), Is.EqualTo("Dictionary<Int32, Position>"));
         using var world = new World();
-        world.AddSystem(new Heal());
-        world.AddSystem(new Heal());                                                               // the same type twice
+        world.AddSystem<CountOf<Position>>();
+        world.AddSystem<CountOf<Health>>();                                                        // both write Tally
         var stages = world.DescribeSchedule().Groups.Single().Stages;
-        Assert.That(stages.Select(s => s.Systems.Single().Name), Is.EqualTo(new[] { "Heal", "Heal #2" }));
-        Assert.That(stages[1].Systems[0].After.Single().System, Is.EqualTo("Heal"));
+        Assert.That(stages.Select(s => s.Systems.Single().Name), Is.EqualTo(new[] { "CountOf<Position>", "CountOf<Health>" }));
+        Assert.That(stages[1].Systems[0].After.Single().System, Is.EqualTo("CountOf<Position>"));
     }
 }

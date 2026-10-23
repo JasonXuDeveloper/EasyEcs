@@ -9,7 +9,8 @@ namespace HelloWorld;
 // `ref` marks what the method writes, `in` what it only reads.
 
 // Moves every entity that has a position and a velocity.
-public class MoveSystem : EcsSystem
+[EcsSystem]
+public ref struct MoveSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)
@@ -20,7 +21,8 @@ public class MoveSystem : EcsSystem
 
 // Prints where the players are. [With<Player>] limits the method to entities
 // that carry the Player tag. A singleton can be a parameter too.
-public class ReportSystem : EcsSystem
+[EcsSystem]
+public ref struct ReportSystem
 {
     [ForEach, With<Player>]
     static void Report(in Position position, in Clock clock)
@@ -30,10 +32,12 @@ public class ReportSystem : EcsSystem
 }
 
 // Advances the clock once per update. OnUpdate runs once per update, not per entity.
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        World.Clock.Tick++;
+        world.Clock.Tick++;
     }
 }

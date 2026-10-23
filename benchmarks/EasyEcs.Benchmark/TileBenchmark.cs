@@ -329,13 +329,15 @@ internal static class TileSystems
         }
     }
 
-    public class BlurSystem : EcsSystem
+    [EcsSystem]
+    public ref struct BlurSystem
     {
         [ForEach(Parallel = true, ChunkRows = 16)]
         static void Step(Tile<Warmth, BlurPlot> warmth, Mut<DynamicBuffer<NextWarmth>> next) => Blur(warmth, next);
     }
 
-    public class BlurDirectSystem : EcsSystem
+    [EcsSystem]
+    public ref struct BlurDirectSystem
     {
         [ForEach(Parallel = true, ChunkRows = 16)]
         static void Step(Tile<Warmth, DirectPlot> warmth, Mut<DynamicBuffer<NextWarmth>> next) => Blur(warmth, next);
@@ -343,7 +345,8 @@ internal static class TileSystems
 
     public const float Rate = 0.05f;
 
-    public class WaveSystem : EcsSystem
+    [EcsSystem]
+    public ref struct WaveSystem
     {
         [ForEach(Parallel = true, ChunkRows = 16)]
         static void Step(Tile<Warmth, WavePlot> warmth, Mut<DynamicBuffer<NextWarmth>> next)
@@ -364,7 +367,8 @@ internal static class TileSystems
         }
     }
 
-    public class CommitWarmthSystem : EcsSystem
+    [EcsSystem]
+    public ref struct CommitWarmthSystem
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Commit(in DynamicBuffer<NextWarmth> next, Mut<DynamicBuffer<Warmth>> warmth) =>
@@ -373,8 +377,8 @@ internal static class TileSystems
 
     // The hand-written blur: the eight neighbors found through the key index, their cells read through a lookup, the
     // plate and its ring of one cell copied into an 18 x 18 texture on the stack, then the same row loop.
-    [SkipLocalsInit]
-    public class HandBlurSystem : EcsSystem
+    [EcsSystem, SkipLocalsInit]
+    public ref struct HandBlurSystem
     {
         const int Row = 18;
 
@@ -422,8 +426,8 @@ internal static class TileSystems
     }
 
     // The hand-written fourth-order Laplacian: the four face neighbors, a 20 x 20 texture (a ring of two cells).
-    [SkipLocalsInit]
-    public class HandWaveSystem : EcsSystem
+    [EcsSystem, SkipLocalsInit]
+    public ref struct HandWaveSystem
     {
         const int Row = 20;
 
@@ -497,7 +501,8 @@ internal static class TileSystems
         }
     }
 
-    public class LifeSystem : EcsSystem
+    [EcsSystem]
+    public ref struct LifeSystem
     {
         [ForEach(Parallel = true, ChunkRows = 16)]
         static void Step(Tile<Seed, LifePlot> life, Mut<DynamicBuffer<NextSeed>> next)
@@ -508,14 +513,16 @@ internal static class TileSystems
         }
     }
 
-    public class CommitSeedSystem : EcsSystem
+    [EcsSystem]
+    public ref struct CommitSeedSystem
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Commit(in DynamicBuffer<NextSeed> next, Mut<DynamicBuffer<Seed>> seeds) =>
             next.AsReadOnlySpan().CopyTo(MemoryMarshal.Cast<Seed, NextSeed>(seeds.Write().AsSpan()));
     }
 
-    public class SparseLifeSystem : EcsSystem
+    [EcsSystem]
+    public ref struct SparseLifeSystem
     {
         [ForEach(Parallel = true, ChunkRows = 16), With<Awake>]
         static void Step(Tile<Seed, LifePlot> life, Mut<DynamicBuffer<NextSeed>> next, ref SeedChange change)
@@ -529,14 +536,16 @@ internal static class TileSystems
         }
     }
 
-    public class CommitAwakeSystem : EcsSystem
+    [EcsSystem]
+    public ref struct CommitAwakeSystem
     {
         [ForEach, With<Awake>]
         static void Commit(in DynamicBuffer<NextSeed> next, Mut<DynamicBuffer<Seed>> seeds) =>
             next.AsReadOnlySpan().CopyTo(MemoryMarshal.Cast<Seed, NextSeed>(seeds.Write().AsSpan()));
     }
 
-    public class SleepSystem : EcsSystem
+    [EcsSystem]
+    public ref struct SleepSystem
     {
         [ForEach, With<Awake>]
         static void Sleep(Entity plate, in SeedChange change)
@@ -545,30 +554,34 @@ internal static class TileSystems
         }
     }
 
-    public class WakeSystem : EcsSystem
+    [EcsSystem]
+    public ref struct WakeSystem
     {
         [ForEach, With<Awake>]
-        void Wake(in SeedChange change, Tile<Seed, LifePlot> life)
+        static void Wake(in SeedChange change, Tile<Seed, LifePlot> life, World world)
         {
-            foreach (var id in life.Facing(change.Edges)) World.GetEntity(id).SetAwake();
+            foreach (var id in life.Facing(change.Edges)) world.GetEntity(id).SetAwake();
         }
     }
 
-    public class SearchSystem : EcsSystem
+    [EcsSystem]
+    public ref struct SearchSystem
     {
         [ForEach(Parallel = true, ChunkRows = 16)]
         static void Find(Tile<Warmth, BlurPlot> warmth, ref Probe probe) =>
             probe = new Probe(warmth.Beside(TileFaces.North), warmth.Beside(1, 0, 1));
     }
 
-    public class SearchDirectSystem : EcsSystem
+    [EcsSystem]
+    public ref struct SearchDirectSystem
     {
         [ForEach(Parallel = true, ChunkRows = 16)]
         static void Find(Tile<Warmth, DirectPlot> warmth, ref Probe probe) =>
             probe = new Probe(warmth.Beside(TileFaces.North), warmth.Beside(1, 0, 1));
     }
 
-    public class CacheSystem : EcsSystem
+    [EcsSystem]
+    public ref struct CacheSystem
     {
         [ForEach, With<Probe>]
         static void Keep(Entity plate, Tile<Warmth, BlurPlot> warmth)
@@ -582,7 +595,8 @@ internal static class TileSystems
         }
     }
 
-    public class CachedSystem : EcsSystem
+    [EcsSystem]
+    public ref struct CachedSystem
     {
         [ForEach(Parallel = true, ChunkRows = 16)]
         static void Find(in Around around, ref Probe probe) => probe = new Probe(around.Of[1], around.Of[7]);

@@ -56,15 +56,18 @@ public struct Replication : ISystemGroup;                                     //
 // #endregion singletons
 
 // #region movement
-public class PlanningSystem : EcsSystem                                       // where each NPC heads next
+[EcsSystem]
+public ref struct PlanningSystem                                          // where each NPC heads next
 {
-    protected override void OnCreate()                                        // the system sets up the data it plans with
+    [OnCreate]
+    static void OnCreate(World world)                                        // the system sets up the data it plans with
     {
-        ref var waypoints = ref World.GetOrAddWaypoints();
+        ref var waypoints = ref world.GetOrAddWaypoints();
         for (int i = 0; i < Waypoints.Count; i++) waypoints.Points[i] = new Position(512 + i * 400, 512 + i * 1777 % 3000);
     }
 
-    protected override void OnDestroy() => World.RemoveWaypoints();
+    [OnDestroy]
+    static void OnDestroy(World world) => world.RemoveWaypoints();
 
     // A plan need not be fresh every tick: each run plans a quarter of the NPCs, so each one every fourth tick
     [ForEach(Slices = 4), Without<Dead>]
@@ -82,7 +85,8 @@ public class PlanningSystem : EcsSystem                                       //
     }
 }
 
-public class SteeringSystem : EcsSystem                                       // heavy per-entity math: on all cores
+[EcsSystem]
+public ref struct SteeringSystem                                          // heavy per-entity math: on all cores
 {
     [ForEach(Parallel = true), With<Npc>, Without<Dead>, Without<Frozen>]
     static void Steer(in Position p, in Goal goal, ref Velocity v, in Waypoints waypoints)
@@ -93,7 +97,8 @@ public class SteeringSystem : EcsSystem                                       //
     }
 }
 
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Dead>]                                                  // whole runs of rows, vectorized
     static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
@@ -110,7 +115,8 @@ public class MovementSystem : EcsSystem
 }
 
 [UpdateInterval(10, Phase = 5)]                                               // every 10th update, five updates after
-public class ManaSystem : EcsSystem                                           // RegenerationSystem: their work spreads;
+[EcsSystem]
+public ref struct ManaSystem                                              // RegenerationSystem: their work spreads;
 {                                                                             // data no earlier system touches: it runs
                                                                               // beside PlanningSystem
 
@@ -118,7 +124,8 @@ public class ManaSystem : EcsSystem                                           //
     static void Regenerate(ref Mana mana) => mana.Value = Math.Min(mana.Max, mana.Value + 10);
 }
 
-public class ZoneSystem : EcsSystem                                           // a new zone moves the row to its table
+[EcsSystem]
+public ref struct ZoneSystem                                              // a new zone moves the row to its table
 {
     [ForEach]
     static void Enter(Entity player, in Position p, in Zone zone)              // `in`: reading is not a change
@@ -130,7 +137,8 @@ public class ZoneSystem : EcsSystem                                           //
 // #endregion movement
 
 // #region combat
-public class CombatSystem : EcsSystem                                         // damage only: statuses are StatusSystem's
+[EcsSystem]
+public ref struct CombatSystem                                            // damage only: statuses are StatusSystem's
 {
     [ForEach, Without<Dead>]                                                  // a frozen unit's Attack is disabled
     static void Fight(ref Attack attack, Mut<Health> hp, ref Battle battle)
@@ -144,7 +152,8 @@ public class CombatSystem : EcsSystem                                         //
     }
 }
 
-public class StatusSystem : EcsSystem
+[EcsSystem]
+public ref struct StatusSystem
 {
     [ForEach, Without<Dead>]                                                  // the units that attacked this tick
     static void Afflict(Entity unit, in Attack attack, in Battle battle)
@@ -177,14 +186,17 @@ public class StatusSystem : EcsSystem
     }
 }
 
-public sealed class AfflictionSystem : EcsSystem                              // registered after StatusSystem
+[EcsSystem]
+public ref struct AfflictionSystem                                 // registered after StatusSystem
 {
     // A count, not a loop: Count reads presence bits, 64 rows per load
-    protected override void OnUpdate() =>
-        World.Battle.Afflicted += World.Count<Health>(BattleServer.Afflicted);
+    [OnUpdate]
+    static void OnUpdate(World world) =>
+        world.Battle.Afflicted += world.Count<Health>(BattleServer.Afflicted);
 }
 
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]                                                  // a plain scan: most healths change often
     static void Die(Entity unit, in Health hp, ref Battle battle)
@@ -197,7 +209,8 @@ public class DeathSystem : EcsSystem
 // #endregion combat
 
 // #region respawn
-public class RespawnSystem : EcsSystem                                        // DeathSystem does not know it exists
+[EcsSystem]
+public ref struct RespawnSystem                                           // DeathSystem does not know it exists
 {
     [ForEach, With<Player>, With<Dead>]
     static void Respawn(Entity player, ref Health hp, ref DynamicBuffer<Loot> bag, in DynamicBuffer<Friend> friends,
@@ -253,7 +266,8 @@ public class RespawnSystem : EcsSystem                                        //
 // #endregion respawn
 
 // #region projectiles
-public class ProjectileSystem : EcsSystem
+[EcsSystem]
+public ref struct ProjectileSystem
 {
     [ForEach, With<Player>, Without<Dead>]                                    // a frozen player's Velocity is disabled
     static void Shoot(Entity player, in Position p, in Velocity v, ref Mana mana, ref Battle battle, in Rules rules, World world)
@@ -272,7 +286,8 @@ public class ProjectileSystem : EcsSystem
 }
 
 [UpdateInterval(10)]                                                          // every 10th update
-public class RegenerationSystem : EcsSystem
+[EcsSystem]
+public ref struct RegenerationSystem
 {
     [ForEach, With<Player>, Without<Dead>]
     static void Regenerate(Mut<Health> hp, Maybe<Burning> burning)            // burning or not: one method
@@ -283,16 +298,19 @@ public class RegenerationSystem : EcsSystem
 }
 
 [UpdateAfter<RegenerationSystem>]                                             // registered first, runs last
-public sealed class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnCreate() => World.GetOrAddBattle();
-    protected override void OnUpdate() => World.Battle.Tick++;
+    [OnCreate]
+    static void OnCreate(World world) => world.GetOrAddBattle();
+    [OnUpdate]
+    static void OnUpdate(World world) => world.Battle.Tick++;
 }
 // #endregion projectiles
 
 // #region replication
-[UpdateInGroup<Replication>]
-public class ReplicationSystem : EcsSystem                                    // only what changed since the last send
+[EcsSystem, UpdateInGroup<Replication>]
+public ref struct ReplicationSystem                                       // only what changed since the last send
 {
     [ForEach, Changed<Health>]
     static void Send(in Health hp, ref Replica replica, ref Battle battle)
@@ -504,7 +522,7 @@ public sealed class BattleServer : IDisposable
     public ref Battle Battle => ref _battle.Value;
 
     /// <summary>A system that threw: it was switched off and the battle went on (its Error is the failure, as data).</summary>
-    public EcsSystem Failure
+    public SystemHandle? Failure
     {
         get
         {
@@ -724,11 +742,11 @@ public sealed class BattleServer : IDisposable
     public ScheduleInfo Schedule() => World.DescribeSchedule();
 
     /// <summary>The system that took the most time per run so far (<see cref="WorldOptions.MeasureSystems"/>).</summary>
-    public EcsSystem Slowest()
+    public SystemHandle? Slowest()
     {
-        EcsSystem slowest = null;
+        SystemHandle? slowest = null;
         foreach (var system in World.Systems)
-            if (slowest == null || system.Stats.AverageTime > slowest.Stats.AverageTime) slowest = system;
+            if (slowest is not { } other || system.Stats.AverageTime > other.Stats.AverageTime) slowest = system;
         return slowest;
     }
 

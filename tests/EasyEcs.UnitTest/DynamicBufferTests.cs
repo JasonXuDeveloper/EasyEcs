@@ -12,7 +12,8 @@ public class DynamicBufferTests
     public record struct Mail(long Value);    // the pool of this element type serves only the tests below
 
     /// <summary>Counts, per entity, the runs in which its bag had changed since the system's previous run.</summary>
-    public class BagWatch : EcsSystem
+    [EcsSystem]
+    public ref struct BagWatch
     {
         [ForEach, Changed<DynamicBuffer<Loot>>]
         private static void Count(ref Seen seen) => seen.Count++;
@@ -22,7 +23,8 @@ public class DynamicBufferTests
     /// Stunned entities drop their first item: a write through a <c>ref</c> parameter, which stamps every row it visits
     /// (also an empty bag it leaves alone: the stamp this test checks; EECS053 points real code to a Mut&lt;T&gt;).
     /// </summary>
-    public class Drop : EcsSystem
+    [EcsSystem]
+    public ref struct Drop
     {
 #pragma warning disable EECS053
         [ForEach, With<Stun>]
@@ -34,7 +36,8 @@ public class DynamicBufferTests
     }
 
     /// <summary>Reads every bag: an <c>in</c> parameter is not a write.</summary>
-    public class Weigh : EcsSystem
+    [EcsSystem]
+    public ref struct Weigh
     {
         [ForEach]
         private static void Sum(in DynamicBuffer<Loot> bag, ref Health weight)
@@ -46,7 +49,8 @@ public class DynamicBufferTests
     }
 
     /// <summary>Refills every bag with one item, in place: no allocation once the capacity is reached.</summary>
-    public class Refill : EcsSystem
+    [EcsSystem]
+    public ref struct Refill
     {
         [ForEach]
         private static void Apply(ref DynamicBuffer<Loot> bag)

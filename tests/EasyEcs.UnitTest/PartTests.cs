@@ -252,7 +252,8 @@ public class PartTests
     /// A vector loop over a component with an [IndexKey] part: the generated part declares no field, so the field order is
     /// defined (with SimdMode.Require, a method left scalar would not compile: EECS056).
     /// </summary>
-    public class AddDug : EcsSystem
+    [EcsSystem]
+    public ref struct AddDug
     {
         [ForEach(SimdMode = SimdMode.Require)]
         static void Add(in Miner miner, ref Dug dug) => dug.Total += miner.BlocksDug;
@@ -272,7 +273,8 @@ public class PartTests
     }
 
     /// <summary>A unique index declared by [UniqueKey], found by key from a parallel pass (the system's access and lookup see the key).</summary>
-    public class FindSubscriber : EcsSystem
+    [EcsSystem]
+    public ref struct FindSubscriber
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Find(in LookupTests.Wants wants, ref LookupTests.Found found, Lookup<Subscriber> accounts) =>

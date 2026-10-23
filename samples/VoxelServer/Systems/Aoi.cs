@@ -24,98 +24,98 @@ namespace VoxelServer;
 // A player's view: the chunks it gains go whole, with their entities (or a LoadRequest when not loaded), the chunks it
 // loses are forgotten, each chunk's Viewers follow, and ViewCenter moves. ViewCenter is a cleanup component, so a player
 // who leaves stays, Retired, until its view is released.
-[UpdateInGroup<Replication>]
-public class AoiViewSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Replication>]
+public ref struct AoiViewSystem
 {
     [ForEach, With<Player>, Changed<InChunk>]
-    void Look(Entity player, in InChunk at, ReadOnlyMaybe<ViewCenter> view, in Clock clock, in Regions regions, ref Stats stats)
+    static void Look(Entity player, in InChunk at, ReadOnlyMaybe<ViewCenter> view, in Clock clock, in Regions regions, ref Stats stats, World world)
     {
         bool placed = view.HasValue;                                      // none yet: the player just appeared
         var from = placed ? view.Value.Chunk : default;
         if (placed && from == at.Pos) return;
         foreach (var chunk in new ChunkStrip(at.Pos, from, placed, Aoi.Range))
         {
-            if (Aoi.Known(World, chunk, out var loaded))
+            if (Aoi.Known(world, chunk, out var loaded))
             {
                 loaded.Viewers.Count++;
                 stats.ChunksSent++;
-                stats.CameIntoView += World.InChunkIndex.Count(chunk);
+                stats.CameIntoView += world.InChunkIndex.Count(chunk);
             }
-            else if (loaded == default && !World.LoadRequestIndex.TryGet(chunk, out _))
+            else if (loaded == default && !world.LoadRequestIndex.TryGet(chunk, out _))
             {
-                var request = World.CreateEntity(new LoadRequest(chunk), new Saved());
+                var request = world.CreateEntity(new LoadRequest(chunk), new Saved());
                 if (!regions.Files.Has(chunk)) request.RemoveSaved();     // never saved: generated
             }
         }
-        if (placed) Release(from, at.Pos, true, clock.Tick, ref stats);
+        if (placed) Release(world, from, at.Pos, true, clock.Tick, ref stats);
         player.SetViewCenter(at.Pos);                                     // last: the view is not read after it
     }
 
     [ForEach, With<Retired>]
-    void Left(Entity player, in ViewCenter view, in Clock clock, ref Stats stats)
+    static void Left(Entity player, in ViewCenter view, in Clock clock, ref Stats stats, World world)
     {
-        Release(view.Chunk, default, false, clock.Tick, ref stats);
+        Release(world, view.Chunk, default, false, clock.Tick, ref stats);
         player.RemoveViewCenter();
     }
 
     // The chunks a view around `center` holds and one around `other` does not: forgotten by the client, one viewer less
     // each, and a chunk left with none notes since when.
-    void Release(ChunkPos center, ChunkPos other, bool hasOther, long tick, ref Stats stats)
+    static void Release(World world, ChunkPos center, ChunkPos other, bool hasOther, long tick, ref Stats stats)
     {
         foreach (var chunk in new ChunkStrip(center, other, hasOther, Aoi.Range))
         {
-            if (!Aoi.Known(World, chunk, out var loaded)) continue;
+            if (!Aoi.Known(world, chunk, out var loaded)) continue;
             ref var viewers = ref loaded.Viewers;
             if (--viewers.Count == 0) viewers.EmptySince = tick;
             stats.ChunksForgotten++;
-            stats.LeftView += World.InChunkIndex.Count(chunk);
+            stats.LeftView += world.InChunkIndex.Count(chunk);
         }
     }
 }
 
 // A chunk loaded this tick goes whole, with its entities, to the players around it, who become its viewers.
-[UpdateInGroup<Replication>]
-public class AoiChunkSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Replication>]
+public ref struct AoiChunkSystem
 {
     [ForEach, With<Fresh>]
-    void Loaded(in Chunk key, ref Viewers viewers, in Clock clock, ref Stats stats)
+    static void Loaded(in Chunk key, ref Viewers viewers, in Clock clock, ref Stats stats, World world)
     {
         int watching = 0;
-        foreach (var chunk in Terrain.ChunksAround(key.Pos, Aoi.Range)) watching += World.ViewCenterIndex.Count(chunk);
+        foreach (var chunk in Terrain.ChunksAround(key.Pos, Aoi.Range)) watching += world.ViewCenterIndex.Count(chunk);
         viewers = new Viewers(watching, clock.Tick);
         stats.ChunksSent += watching;
-        stats.CameIntoView += watching * World.InChunkIndex.Count(key.Pos);
+        stats.CameIntoView += watching * world.InChunkIndex.Count(key.Pos);
     }
 }
 
 // An entity that crossed into another chunk is spawned for the players that see its new chunk and not its old one, and
 // despawned for the reverse; one just created is spawned for the viewers of its chunk. Visible keeps the chunk the
 // clients know it in.
-[UpdateInGroup<Replication>]
-public class AoiSpawnSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Replication>]
+public ref struct AoiSpawnSystem
 {
     [ForEach, Changed<InChunk>]
-    void Moved(in InChunk at, ref Visible visible, ref Stats stats)
+    static void Moved(in InChunk at, ref Visible visible, ref Stats stats, World world)
     {
         var from = visible;
         visible = new Visible(at.Pos, true);
-        if (!from.Placed) stats.CameIntoView += Aoi.ViewersOf(World, at.Pos);
+        if (!from.Placed) stats.CameIntoView += Aoi.ViewersOf(world, at.Pos);
         else if (from.Chunk != at.Pos)
         {
-            stats.CameIntoView += Aoi.Watching(World, at.Pos, from.Chunk);
-            stats.LeftView += Aoi.Watching(World, from.Chunk, at.Pos);
+            stats.CameIntoView += Aoi.Watching(world, at.Pos, from.Chunk);
+            stats.LeftView += Aoi.Watching(world, from.Chunk, at.Pos);
         }
     }
 }
 
 // Visible is a cleanup component: a destroyed entity stays, Retired, until it is despawned for its chunk's viewers.
-[UpdateInGroup<Replication>]
-public class AoiDespawnSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Replication>]
+public ref struct AoiDespawnSystem
 {
     [ForEach, With<Retired>]
-    void Gone(Entity entity, in Visible visible, ref Stats stats)
+    static void Gone(Entity entity, in Visible visible, ref Stats stats, World world)
     {
-        if (visible.Placed) stats.Despawns += Aoi.ViewersOf(World, visible.Chunk);
+        if (visible.Placed) stats.Despawns += Aoi.ViewersOf(world, visible.Chunk);
         entity.RemoveVisible();                                           // freed once its view is released too
     }
 }

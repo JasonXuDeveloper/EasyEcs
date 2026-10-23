@@ -3,7 +3,8 @@ using EasyEcs;
 namespace EasyEcs.Demo;
 
 // Dims the flash of the sparks that hit a wall and removes it when it is gone.
-public class FadeSystem : EcsSystem
+[EcsSystem]
+public ref struct FadeSystem
 {
     [ForEach]
     static void Fade(Entity spark, ref Flash flash, in Clock clock)

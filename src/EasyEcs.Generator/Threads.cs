@@ -245,11 +245,22 @@ internal static class Threads
     private static bool ThreadSafe(ITypeSymbol? type) =>
         type?.ContainingNamespace is { } ns && (Symbols.Named(ns, "System.Collections.Concurrent") || Symbols.Named(ns, "System.Threading.Channels"));
 
-    /// <summary>Inside a <c>lock</c> statement of <paramref name="body"/>.</summary>
+    /// <summary>
+    /// Inside a <c>lock</c> statement of <paramref name="body"/>, or a <c>using</c> of a
+    /// <c>System.Threading.Lock</c>'s <c>EnterScope()</c> (what <c>lock</c> on a Lock compiles to).
+    /// </summary>
     private static bool Locked(IOperation operation, IOperation body)
     {
         for (var node = operation.Parent; node != null && node != body; node = node.Parent)
-            if (node is ILockOperation) return true;
+            if (node is ILockOperation || node is IUsingOperation { Resources: var resource } && EntersLock(resource)) return true;
         return false;
     }
+
+    private static bool EntersLock(IOperation resource) => resource switch
+    {
+        IInvocationOperation { TargetMethod: { Name: "EnterScope" } method } => Symbols.Named(method.ContainingType, "System.Threading.Lock"),
+        IVariableDeclarationGroupOperation group => group.Declarations.Any(d => d.Declarators.Any(v => v.Initializer?.Value is { } value && EntersLock(value))),
+        IConversionOperation conversion => EntersLock(conversion.Operand),
+        _ => false,
+    };
 }

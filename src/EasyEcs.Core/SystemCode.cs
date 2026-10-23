@@ -1,24 +1,28 @@
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Diagnostics.CodeAnalysis;
-using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace EasyEcs;
 
 /// <summary>
-/// The code EasyEcs.Generator writes for a system type: a struct of static members that runs its [ForEach] methods as
-/// struct jobs and declares the data they read and write. No instance and no virtual call: the runtime calls
-/// <see cref="Update"/> through a function pointer per system and update. Do not implement it by hand.
+/// The code EasyEcs.Generator writes for one system type: a struct of static members that runs its hooks and its
+/// [ForEach] methods as struct jobs, and declares the data they read and write. No instance and no virtual call: the
+/// system set of an assembly (<see cref="ISystemSet"/>) calls it directly. Do not implement it by hand.
 /// </summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public interface ISystemCode
 {
-    /// <summary>Runs the type's [ForEach] methods in declaration order (after OnUpdate).</summary>
-    static abstract void Update(EcsSystem system);
+    /// <summary>Runs the system: its [OnUpdate] method, then its [ForEach] methods in declaration order.</summary>
+    static abstract void Update(World world, SystemHandle system);
 
-    /// <summary>Declares what the type's [ForEach] methods read and write (parallel stages).</summary>
+    /// <summary>Runs its [OnCreate] method, if it has one.</summary>
+    static abstract void Create(World world, SystemHandle system);
+
+    /// <summary>Runs its [OnDestroy] method, if it has one.</summary>
+    static abstract void Destroy(World world, SystemHandle system);
+
+    /// <summary>Declares what the system reads and writes (parallel stages).</summary>
     static abstract void Access(ref SystemAccess access);
 
     /// <summary>
@@ -27,20 +31,56 @@ public interface ISystemCode
     /// </summary>
     static abstract string[] Loops { get; }
 
-    /// <summary>The type's <c>[UpdateInterval(n)]</c>: 0 when it has none (its base's, or every update, applies).</summary>
-    static virtual int Interval => 0;
+    /// <summary>The type's <c>[UpdateInterval(n)]</c>: 1 (every update) without one.</summary>
+    static virtual int Interval => 1;
 
     /// <summary>The phase of the type's <c>[UpdateInterval(n, Phase = p)]</c>, 0 to <see cref="Interval"/> - 1.</summary>
     static virtual int Phase => 0;
+}
 
-    /// <summary>Whether the type or a base type below <see cref="EcsSystem"/> overrides OnUpdate: when none does, the
-    /// runtime skips the call.</summary>
-    static virtual bool OverridesOnUpdate => false;
+/// <summary>
+/// The systems of one assembly, written by EasyEcs.Generator (<c>__EasyEcsSystems</c>): every system the assembly
+/// declares and every closed generic system it names, numbered from 0, and a switch per hook over those numbers whose
+/// cases call each system's code (<see cref="ISystemCode"/>) directly. The world runs consecutive systems of one set
+/// with one call (<see cref="World.RunSystems{TSet}"/>), so systems of one assembly call each other's code directly.
+/// Registered by a module initializer (<see cref="SystemCode.Register{TSet}"/>). Do not implement it by hand.
+/// </summary>
+[EditorBrowsable(EditorBrowsableState.Never)]
+public interface ISystemSet
+{
+    /// <summary>Declares the set's systems, in the order of their numbers.</summary>
+    static abstract void Declare(ref SystemDeclarations systems);
+
+    /// <summary>Runs system <paramref name="system"/> of the set (<see cref="ISystemCode.Update"/>).</summary>
+    static abstract void Update(World world, int system, SystemHandle handle);
+
+    /// <summary>Runs the [OnCreate] method of system <paramref name="system"/> of the set.</summary>
+    static abstract void Create(World world, int system, SystemHandle handle);
+
+    /// <summary>Runs the [OnDestroy] method of system <paramref name="system"/> of the set.</summary>
+    static abstract void Destroy(World world, int system, SystemHandle handle);
+}
+
+/// <summary>The systems an <see cref="ISystemSet"/> declares (<see cref="ISystemSet.Declare"/>). Called by generated code only.</summary>
+[EditorBrowsable(EditorBrowsableState.Never)]
+public ref struct SystemDeclarations
+{
+    internal SystemCode.Entry[] Entries;
+    internal int Count;
+    internal SystemCode.Set Set;
+
+    /// <summary>Declares system <typeparamref name="TSystem"/>, run by <typeparamref name="TCode"/>: the next number of the set.</summary>
+    public void Add<TSystem, TCode>() where TSystem : struct, allows ref struct where TCode : struct, ISystemCode
+    {
+        if (Count == Entries.Length) Array.Resize(ref Entries, Math.Max(4, Count * 2));
+        Entries[Count] = SystemCode.Entry.Of<TCode>(typeof(TSystem), Set, Count);
+        Count++;
+    }
 }
 
 /// <summary>
 /// Names the public code type of a public generic system (an open <see cref="ISystemCode"/> struct over the system's type
-/// parameters), so that the generator of an assembly that closes the system registers the closed code itself: no
+/// parameters), so that the generator of an assembly that closes the system puts the closed code into its own set: no
 /// runtime code generation, as Native AOT and WebAssembly need. Written by the generator, read by it in referencing
 /// assemblies.
 /// </summary>
@@ -55,32 +95,150 @@ public sealed class GenericSystemCodeAttribute(Type system, Type code) : Attribu
 }
 
 /// <summary>
-/// The registry of generated system code (<see cref="ISystemCode"/>), filled by a module initializer per system type;
-/// <see cref="World.AddSystem"/> collects the code of the system's type and of its base types (base first, across
-/// assemblies). Called by generated code only.
+/// The registry of the generated system sets (<see cref="ISystemSet"/>), filled by one module initializer per assembly,
+/// and the helpers generated system code calls. <see cref="World.AddSystem{T}"/> finds a system's code here by its type.
+/// Called by generated code only.
 /// <br/>
-/// The registry holds types weakly: an assembly of systems loaded into a collectible AssemblyLoadContext unloads once
-/// its systems are removed from every world, and a newer version of it registers its own types.
-/// <br/>
-/// A generic system registers its code once per closed type its assembly names (<c>AddSystem&lt;Regen&lt;Health&gt;&gt;()</c>,
-/// <c>new Regen&lt;Health&gt;()</c>, <c>class X : Regen&lt;Health&gt;</c>), which needs no runtime code generation, and
-/// its code's generic definition for any other closed type, made on first use.
+/// The registry holds systems weakly: an assembly of systems loaded into a collectible AssemblyLoadContext unloads once
+/// its systems are removed from every world, and a newer version of it registers its own. A closed generic system that
+/// several assemblies name is registered by the first of them to load.
 /// </summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static unsafe class SystemCode
 {
-    /// <summary>One registered code type: its static members as function pointers and values, read once per AddSystem.</summary>
-    internal sealed class Entry
+    /// <summary>
+    /// One registered set: the function pointers of its switches, bound once (<see cref="World.RunSystems{TSet}"/> and
+    /// the hooks), and its systems by number.
+    /// </summary>
+    internal sealed class Set
     {
-        public delegate*<EcsSystem, void> Update;
-        public delegate*<ref SystemAccess, void> Access;
-        public string[] Loops = [];
-        public int Interval, Phase;
-        public bool OverridesOnUpdate;
+        public delegate*<World, ReadOnlySpan<World.SystemSlot>, long, void> Run;
+        public delegate*<World, int, SystemHandle, void> Create, Destroy;
+        public Entry[] Systems = [];
     }
 
-    private static readonly ConditionalWeakTable<Type, Entry> Registered = new();
-    private static readonly ConditionalWeakTable<Type, Type> Generic = new(); // system definition -> open code type
+    /// <summary>One system of a set: its type, its set and number, and its code's values, read once per AddSystem.</summary>
+    internal sealed class Entry
+    {
+        public Type Type;
+        public Set Set;
+        public int Id;
+        public string[] Loops = [];
+        public int Interval = 1, Phase;
+        private delegate*<ref SystemAccess, void> _access;
+
+        // Read from the type's attributes on first use (reflection, cold): its group and orderings.
+        private bool _scheduled;
+        public int Group;
+        public string GroupName;
+        public Type[] Before = [], After = [];
+
+        // Built on first use: component bits are taken as their types are first touched.
+        private SystemAccess _declared;
+        private bool _hasAccess;
+        private readonly Lock _lock = new(); // cold: the first AddSystem of the type, in whichever world
+
+        public static Entry Of<TCode>(Type type, Set set, int id) where TCode : struct, ISystemCode => new()
+        {
+            Type = type,
+            Set = set,
+            Id = id,
+            Loops = TCode.Loops,
+            Interval = TCode.Interval,
+            Phase = TCode.Phase,
+            _access = &Declare<TCode>,
+        };
+
+        private static void Declare<TCode>(ref SystemAccess access) where TCode : struct, ISystemCode => TCode.Access(ref access);
+
+        /// <summary>What the system reads and writes (declared once per process).</summary>
+        public ref readonly SystemAccess Access
+        {
+            get
+            {
+                if (!Volatile.Read(ref _hasAccess))
+                    lock (_lock)
+                        if (!_hasAccess)
+                        {
+                            var access = default(SystemAccess);
+                            _access(ref access);
+                            _declared = access;
+                            Volatile.Write(ref _hasAccess, true);
+                        }
+
+                return ref _declared;
+            }
+        }
+
+        /// <summary>Reads the group and orderings from the type's attributes once.</summary>
+        public void Schedule()
+        {
+            if (Volatile.Read(ref _scheduled)) return;
+            lock (_lock)
+            {
+                if (_scheduled) return;
+                (Group, GroupName, Before, After) = World.GroupOf(Type);
+                Volatile.Write(ref _scheduled, true);
+            }
+        }
+    }
+
+    // System type -> its entry, weakly both ways: a collectible type's key goes with its context, and an entry of a
+    // collectible set registered for a type of another context does not root the set (its own assembly does, through
+    // Sets<TSet>.Instance).
+    private static readonly ConditionalWeakTable<Type, WeakReference<Entry>> Registered = new();
+    private static readonly Lock RegisterLock = new(); // cold: module initializers and the first AddSystem of a type
+
+    private static class Sets<TSet> where TSet : struct, ISystemSet
+    {
+        public static Set Instance; // roots the set for as long as its assembly lives
+    }
+
+    /// <summary>
+    /// Registers the system set <typeparamref name="TSet"/> (called by its assembly's module initializer): its systems,
+    /// and the function pointers of its switches.
+    /// </summary>
+    public static void Register<TSet>() where TSet : struct, ISystemSet
+    {
+        var set = new Set
+        {
+            Run = &World.RunSystems<TSet>,
+            Create = &Create<TSet>,
+            Destroy = &Destroy<TSet>,
+        };
+        var declarations = new SystemDeclarations { Entries = [], Set = set };
+        TSet.Declare(ref declarations);
+        set.Systems = declarations.Entries.AsSpan(0, declarations.Count).ToArray();
+        Sets<TSet>.Instance = set;
+        lock (RegisterLock)
+            foreach (var entry in set.Systems)
+                if (!Registered.TryGetValue(entry.Type, out var known) || !known.TryGetTarget(out _))
+                    Registered.AddOrUpdate(entry.Type, new WeakReference<Entry>(entry));
+    }
+
+    private static void Create<TSet>(World world, int system, SystemHandle handle) where TSet : struct, ISystemSet => TSet.Create(world, system, handle);
+
+    private static void Destroy<TSet>(World world, int system, SystemHandle handle) where TSet : struct, ISystemSet => TSet.Destroy(world, system, handle);
+
+    /// <summary>
+    /// The entry of system type <paramref name="type"/>: registered by a set, or by the set of the type's own assembly
+    /// once its module initializer runs (a library whose code nothing has called yet). Cold: once per AddSystem.
+    /// </summary>
+    internal static Entry Of(Type type)
+    {
+        if (Find(type) is { } entry) return entry;
+        RuntimeHelpers.RunModuleConstructor(type.Module.ModuleHandle);
+        if (Find(type) is { } loaded) return loaded;
+        throw new NotSupportedException(type.IsConstructedGenericType
+            ? $"No generated code is registered for {ScheduleInfo.NameOf(type)}: name the closed type in a project that references EasyEcs.Generator (AddSystem<{ScheduleInfo.NameOf(type)}>(), HasSystem, System, TryGetSystem, RemoveSystem or [UpdateBefore] / [UpdateAfter]), and its system set runs it. A closed type made at run time (by reflection) has no code."
+            : $"{ScheduleInfo.NameOf(type)} is no system: declare it [EcsSystem] ref struct in a project that references EasyEcs.Generator (EECS077)");
+    }
+
+    private static Entry Find(Type type)
+    {
+        lock (RegisterLock)
+            return Registered.TryGetValue(type, out var weak) && weak.TryGetTarget(out var entry) ? entry : null;
+    }
 
     /// <summary>
     /// Whether <paramref name="world"/> measures its systems (<see cref="WorldOptions.MeasureSystems"/>): the generated
@@ -90,70 +248,5 @@ public static unsafe class SystemCode
     public static bool Measuring(World world) => world.MeasuresSystems;
 
     /// <summary>Count <paramref name="entities"/> visited by a [ForEach] pass of <paramref name="system"/> (<see cref="SystemStats.LastEntities"/>).</summary>
-    public static void Visit(EcsSystem system, int entities) => system.Visited += entities;
-
-    /// <summary>Registers <typeparamref name="TCode"/> as the generated code of <paramref name="system"/> (called by its module initializer).</summary>
-    public static void Register<TCode>(Type system) where TCode : struct, ISystemCode => Registered.AddOrUpdate(system, Of<TCode>());
-
-    // Generic over a struct: one instantiation per code type, its static members bound directly (no shared generic code,
-    // so the function pointers need no generic context), Update inlined into the trampoline.
-    private static Entry Of<TCode>() where TCode : struct, ISystemCode => new()
-    {
-        Update = &Run<TCode>,
-        Access = &Declare<TCode>,
-        Loops = TCode.Loops,
-        Interval = TCode.Interval,
-        Phase = TCode.Phase,
-        OverridesOnUpdate = TCode.OverridesOnUpdate,
-    };
-
-    private static void Run<TCode>(EcsSystem system) where TCode : struct, ISystemCode => TCode.Update(system);
-
-    private static void Declare<TCode>(ref SystemAccess access) where TCode : struct, ISystemCode => TCode.Access(ref access);
-
-    /// <summary>
-    /// Registers the generated code of generic system <paramref name="definition"/>: <paramref name="code"/> is the
-    /// code's type, open over the system's type parameters (called by the system's module initializer).
-    /// </summary>
-    public static void RegisterGeneric(Type definition, Type code) => Generic.AddOrUpdate(definition, code);
-
-    /// <summary>
-    /// The code of <paramref name="type"/> and its base types, base first; <paramref name="own"/> is whether
-    /// <paramref name="type"/> itself has generated code (a type without may override OnUpdate unseen). Cold: once per
-    /// AddSystem.
-    /// </summary>
-    internal static Entry[] For(Type type, out bool own)
-    {
-        var chain = new List<Entry>();
-        own = TryGet(type, out _);
-        for (var t = type; t != null && t != typeof(EcsSystem); t = t.BaseType)
-            if (TryGet(t, out var code)) chain.Add(code);
-
-        chain.Reverse();
-        return chain.ToArray();
-    }
-
-    private static bool TryGet(Type type, out Entry code)
-    {
-        if (Registered.TryGetValue(type, out code!)) return true;
-        if (!type.IsConstructedGenericType || !Generic.TryGetValue(type.GetGenericTypeDefinition(), out var open)) return false;
-        code = Close(open, type);
-        Registered.AddOrUpdate(type, code);
-        return true;
-    }
-
-    private static readonly MethodInfo OfDefinition = typeof(SystemCode).GetMethod(nameof(Of), BindingFlags.NonPublic | BindingFlags.Static)!;
-
-    // A closed type the system's assembly does not name (another assembly closes it): the code is made at run time.
-    // Native AOT then needs the instantiation kept, which naming the closed type in the system's assembly does.
-    [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Closed types named in the system's assembly are registered without it")]
-    [UnconditionalSuppressMessage("Trimming", "IL2055", Justification = "The code type is a struct of static members the generated code names")]
-    [UnconditionalSuppressMessage("Trimming", "IL2060", Justification = "Of<TCode> only reads static members the generated code names")]
-    [UnconditionalSuppressMessage("Trimming", "IL2071", Justification = "The code type is a struct of static members the generated code names")]
-    private static Entry Close(Type open, Type system)
-    {
-        if (!RuntimeFeature.IsDynamicCodeSupported)
-            throw new NotSupportedException($"No generated code is registered for {system}: under Native AOT, name the closed type in a project that references EasyEcs.Generator (AddSystem<{system.Name}>(), new, typeof or a base type), and it registers the code itself.");
-        return (Entry)OfDefinition.MakeGenericMethod(open.MakeGenericType(system.GetGenericArguments())).Invoke(null, null)!;
-    }
+    public static void Visit(SystemHandle system, int entities) => system.Row.Visited += entities;
 }

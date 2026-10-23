@@ -54,12 +54,18 @@ public sealed partial class World
     // their cache entries. A hit compares the filter's masks instead of building a key, hashing it and probing the
     // dictionary. Queries run on any thread, so the arrays are immutable snapshots replaced copy-on-write; once a
     // signature's ways are full, other filters take the dictionary (no allocation in steady state).
+    //
+    // Lock-free: a writer (MatchAndMemo, KeepQuery) reads the array, then looks up its cache entry, then publishes its
+    // copy with Interlocked.CompareExchange against the array it read, retrying from the start when another writer
+    // or a reset got there first. A reset (RemoveTypes, ClearArchetypes) first drops the query cache's stale entries,
+    // then swaps in an empty array with Interlocked.Exchange: a writer that read the array before the reset fails its
+    // CAS and retries on the empty array with an entry looked up again, so a stale entry is never republished; one that
+    // published before the reset is wiped by it. Readers only Volatile.Read the array.
     private QueryMemo[][] _queryMemo = [];
-    private readonly Lock _memoLock = new();
 
     // Per job type that always runs one query (TypeIndex<KeptQuery, TJob>; a job's OneQuery, which generated jobs set):
     // the query's cache entry, so a pass of the job reads its match without comparing filters. Immutable snapshots
-    // replaced copy-on-write like the memo, emptied with it.
+    // published by CAS and reset like the memo (the same invariant).
     private QueryCacheEntry[] _kept = [];
     private const int MemoWays = 4;
 
@@ -257,22 +263,22 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.NoInlining)]
     private QueryMatch KeepQuery(int job, ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
-        var entry = GetQueryEntry(bits, in filter);
-        lock (_memoLock)
+        while (true)
         {
-            var kept = _kept;
-            kept = job < kept.Length ? (QueryCacheEntry[])kept.Clone() : Grown(kept, job);
+            var old = Volatile.Read(ref _kept);
+            var entry = GetQueryEntry(bits, in filter); // after the read: see _queryMemo
+            if ((uint)job < (uint)old.Length && old[job] != null) return Volatile.Read(ref old[job].Match);
+            var kept = job < old.Length ? (QueryCacheEntry[])old.Clone() : Grown(old, job);
             kept[job] = entry;
-            Volatile.Write(ref _kept, kept);
+            if (Interlocked.CompareExchange(ref _kept, kept, old) == old) return Volatile.Read(ref entry.Match);
         }
-
-        return Volatile.Read(ref entry.Match);
     }
 
-    private static QueryCacheEntry[] Grown(QueryCacheEntry[] kept, int job)
+    /// <summary>A copy of <paramref name="array"/> long enough for index <paramref name="index"/> (doubled at least).</summary>
+    private static T[] Grown<T>(T[] array, int index)
     {
-        var grown = new QueryCacheEntry[Math.Max(job + 1, kept.Length * 2)];
-        Array.Copy(kept, grown, kept.Length);
+        var grown = new T[Math.Max(index + 1, array.Length * 2)];
+        Array.Copy(array, grown, array.Length);
         return grown;
     }
 
@@ -294,25 +300,20 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.NoInlining)]
     private QueryMatch MatchAndMemo(int signature, ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
-        var entry = GetQueryEntry(bits, in filter);
-        lock (_memoLock)
+        while (true)
         {
-            var memo = _queryMemo;
-            if (signature >= memo.Length) Array.Resize(ref memo, Math.Max(signature + 1, memo.Length * 2));
-            else memo = (QueryMemo[][])memo.Clone();
-            var ways = memo[signature] ?? [];
-            bool known = false;
-            for (int i = 0; i < ways.Length; i++) known |= ways[i].Filter.SameQuery(in filter);
-            if (!known && ways.Length < MemoWays)
-            {
-                Array.Resize(ref ways, ways.Length + 1);
-                ways[^1] = new QueryMemo(in filter, entry);
-                memo[signature] = ways;
-                Volatile.Write(ref _queryMemo, memo);
-            }
+            var old = Volatile.Read(ref _queryMemo);
+            var entry = GetQueryEntry(bits, in filter); // after the read: see _queryMemo
+            var ways = (uint)signature < (uint)old.Length ? old[signature] ?? [] : [];
+            for (int i = 0; i < ways.Length; i++)
+                if (ways[i].Filter.SameQuery(in filter)) return Volatile.Read(ref ways[i].Entry.Match); // another writer's
+            if (ways.Length == MemoWays) return Volatile.Read(ref entry.Match); // full: the dictionary serves it
+            var memo = signature < old.Length ? (QueryMemo[][])old.Clone() : Grown(old, signature);
+            Array.Resize(ref ways, ways.Length + 1);
+            ways[^1] = new QueryMemo(in filter, entry);
+            memo[signature] = ways;
+            if (Interlocked.CompareExchange(ref _queryMemo, memo, old) == old) return Volatile.Read(ref entry.Match);
         }
-
-        return Volatile.Read(ref entry.Match);
     }
 
     /// <summary>
@@ -406,10 +407,16 @@ public sealed partial class World
         _prefabTables?.Clear();
         _allArchetypes = Array.Empty<Archetype>();
         _queryCache.Clear();
-        lock (_memoLock)
-        {
-            _queryMemo = [];
-            _kept = [];
-        }
+        ResetQueryMemo();
+    }
+
+    /// <summary>
+    /// Empties the per-signature memo and the kept queries, after the caller dropped the query cache's stale entries
+    /// (see <see cref="_queryMemo"/>): a writer that read the arrays before fails its CAS and retries on the empty ones.
+    /// </summary>
+    internal void ResetQueryMemo()
+    {
+        Interlocked.Exchange(ref _queryMemo, []);
+        Interlocked.Exchange(ref _kept, []);
     }
 }

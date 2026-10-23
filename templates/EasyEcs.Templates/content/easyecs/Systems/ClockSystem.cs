@@ -4,10 +4,12 @@ namespace EasyEcsApp;
 
 // Advances the clock once per update. OnUpdate runs once per update, not once per entity.
 // Program.cs adds it last, so every other system sees the tick the update started with.
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        World.Clock.Tick++;
+        world.Clock.Tick++;
     }
 }

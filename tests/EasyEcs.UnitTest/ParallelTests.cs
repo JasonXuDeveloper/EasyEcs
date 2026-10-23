@@ -11,14 +11,16 @@ namespace EasyEcs.UnitTest;
 public class ParallelTests
 {
     /// <summary>Heavy per-row work cut into chunks of rows on several threads.</summary>
-    public class ChunkedIncrement : EcsSystem
+    [EcsSystem]
+    public ref struct ChunkedIncrement
     {
         [ForEach(Parallel = true), Without<Dead>]
         static void Add(ref Counter counter, in Seen step, Entity entity) => counter.N += step.N + (entity.Id.Index & 0);
     }
 
     /// <summary>Few heavy rows: chunks of 64 rows, so a few hundred rows reach every thread.</summary>
-    public class HeavyRows : EcsSystem
+    [EcsSystem]
+    public ref struct HeavyRows
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Work(ref Counter counter)
@@ -29,7 +31,8 @@ public class ParallelTests
     }
 
     /// <summary>Writes Armor on the rows whose Seen matches the world's step, in chunks that split blocks of change ticks.</summary>
-    public class SomeArmor : EcsSystem
+    [EcsSystem]
+    public ref struct SomeArmor
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Write(in Seen seen, Mut<Armor> armor, in Step step)
@@ -39,7 +42,8 @@ public class ParallelTests
     }
 
     // The same through a Maybe: the optional column's blocks are shared by the chunks too.
-    public class MaybeArmor : EcsSystem
+    [EcsSystem]
+    public ref struct MaybeArmor
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Write(in Seen seen, Maybe<Armor> armor)
@@ -58,14 +62,16 @@ public class ParallelTests
     public record struct Seen(int N) : IComponent;
     public record struct Fault(bool Throw) : IComponent;
 
-    public class WriteLeft : EcsSystem
+    [EcsSystem]
+    public ref struct WriteLeft
     {
         [ForEach]
         static void Meet(ref Left left, in Rendezvous rendezvous) =>
             left.Met = rendezvous.Barrier.SignalAndWait(rendezvous.TimeoutMs);
     }
 
-    public class WriteRight : EcsSystem
+    [EcsSystem]
+    public ref struct WriteRight
     {
         [ForEach]
         static void Meet(ref Right right, in Rendezvous rendezvous) =>
@@ -73,8 +79,8 @@ public class ParallelTests
     }
 
     /// <summary>Disjoint data from WriteLeft, but ordered after it: never at the same time.</summary>
-    [UpdateAfter<WriteLeft>]
-    public class WriteRightAfterLeft : EcsSystem
+    [EcsSystem, UpdateAfter<WriteLeft>]
+    public ref struct WriteRightAfterLeft
     {
         [ForEach]
         static void Meet(ref Right right, in Rendezvous rendezvous) =>
@@ -82,7 +88,8 @@ public class ParallelTests
     }
 
     /// <summary>An Entity parameter can reach any component (and make structural changes): it runs alone.</summary>
-    public class WriteRightThroughEntity : EcsSystem
+    [EcsSystem]
+    public ref struct WriteRightThroughEntity
     {
         [ForEach, With<Left>]
         static void Meet(Entity entity, in Rendezvous rendezvous) =>
@@ -91,25 +98,34 @@ public class ParallelTests
 #pragma warning restore EECS027
     }
 
-    /// <summary>Inherits WriteRight's [ForEach] method and adds an OnUpdate the generator never saw: it runs alone.</summary>
-    public sealed class WriteRightWithUpdate : WriteRight
+    /// <summary>WriteRight's [ForEach] method with an [OnUpdate] method: it runs alone.</summary>
+    [EcsSystem]
+    public ref struct WriteRightWithUpdate
     {
-        protected override void OnUpdate() { } // could reach any data: the scheduler cannot know
+        [OnUpdate]
+        static void Tick() { } // could reach any data: the scheduler cannot know
+
+        [ForEach]
+        static void Meet(ref Right right, in Rendezvous rendezvous) =>
+            right.Met = rendezvous.Barrier.SignalAndWait(rendezvous.TimeoutMs);
     }
 
-    public class Count : EcsSystem
+    [EcsSystem]
+    public ref struct Count
     {
         [ForEach]
         static void Increment(ref Counter counter) => counter.N++;
     }
 
-    public class Observe : EcsSystem
+    [EcsSystem]
+    public ref struct Observe
     {
         [ForEach]
         static void Copy(in Counter counter, ref Seen seen) => seen.N = counter.N;
     }
 
-    public class Throwing : EcsSystem
+    [EcsSystem]
+    public ref struct Throwing
     {
         [ForEach]
         static void Fail(in Fault fault)
@@ -214,9 +230,9 @@ public class ParallelTests
 
         foreach (var item in world.Query<Left, Right>())
             Assert.That((item.Component1.Met, item.Component2.Met), Is.EqualTo((false, false)));
-        var order = new System.Collections.Generic.List<EcsSystem>();
-        foreach (var system in world.Systems) order.Add(system);
-        Assert.That(order[0], Is.TypeOf<WriteLeft>());
+        var order = new System.Collections.Generic.List<System.Type>();
+        foreach (var system in world.Systems) order.Add(system.Type);
+        Assert.That(order[0], Is.EqualTo(typeof(WriteLeft)));
     }
 
     [Test]

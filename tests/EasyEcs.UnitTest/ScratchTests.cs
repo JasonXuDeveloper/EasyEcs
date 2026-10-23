@@ -22,7 +22,8 @@ public class ScratchTests
         public int Busy; // 1 while a row uses it: a second row finding 1 means two threads share it
     }
 
-    public class SumDigits : EcsSystem
+    [EcsSystem]
+    public ref struct SumDigits
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Sum(in Number number, ref DigitSum sum, Scratch<Digits> scratch)
@@ -45,7 +46,8 @@ public class ScratchTests
     /// A Scratch method that loops, beside a Maybe: its job walks runs of rows (ForEachBatch) and calls the method out of
     /// line, once per row.
     /// </summary>
-    public class SumDigitsWithBonus : EcsSystem
+    [EcsSystem]
+    public ref struct SumDigitsWithBonus
     {
         [ForEach]
         static void Sum(in Number number, ref DigitSum sum, ReadOnlyMaybe<Bonus> bonus, Scratch<List<int>> digits)
@@ -60,14 +62,16 @@ public class ScratchTests
     }
 
     /// <summary>Counts the rows its thread ran: what the last row left is what the next one finds.</summary>
-    public class CountRows : EcsSystem
+    [EcsSystem]
+    public ref struct CountRows
     {
         [ForEach]
         static void Count(ref Order order, Scratch<int> rows) => order.Value = ++rows.Value;
     }
 
     /// <summary>A second method with the same scratch type: its own value.</summary>
-    public class CountRowsAgain : EcsSystem
+    [EcsSystem]
+    public ref struct CountRowsAgain
     {
         [ForEach]
         static void Count(ref Order order, Scratch<int> rows) => order.Value = 1_000_000 + ++rows.Value;

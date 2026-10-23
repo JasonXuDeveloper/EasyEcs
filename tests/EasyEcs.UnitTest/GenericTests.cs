@@ -1,4 +1,6 @@
 using System;
+using System.Reflection;
+using EasyEcs.Aot.Library;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -7,18 +9,15 @@ namespace EasyEcs.UnitTest;
 public record struct Tally(int Count) : ISingletonComponent;
 
 /// <summary>A generic system: each closed type is a system of its own, with its own access set.</summary>
-public class CountOf<T> : EcsSystem where T : struct, IComponent
+[EcsSystem]
+public ref struct CountOf<T> where T : struct, IComponent
 {
     [ForEach]
     private static void Count(in T component, ref Tally tally) => tally.Count++;
 }
 
-/// <summary>A closed generic system as a base type: its code runs, and this type adds a pass of its own.</summary>
-public class CountHealthy : CountOf<Health>
-{
-    [ForEach, With<Health>, Without<Dead>]
-    private static void Healthy(ref Score score) => score.Points++;
-}
+/// <summary>A component of this assembly that a library's generic system (Regen&lt;T&gt;) heals.</summary>
+public record struct Vigor(int Value) : ILife;
 
 /// <summary>Generic [ForEach] methods outside systems: the entry point takes the type arguments.</summary>
 public static class Census
@@ -37,8 +36,8 @@ public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISys
 public readonly partial record struct MapActor(long Id) : IActor<MapActor> { MapActor IIndexed<MapActor>.Key => this; }
 public readonly partial record struct ShopActor(long Id) : IActor<ShopActor> { ShopActor IIndexed<ShopActor>.Key => this; }
 
-[UpdateInGroup<MapActor>]
-public class TickMaps : EcsSystem
+[EcsSystem, UpdateInGroup<MapActor>]
+public ref struct TickMaps
 {
     [ForEach]
     private static void Tick(ref Health health) => health.Value++;
@@ -98,22 +97,24 @@ public class GenericTests
     }
 
     [Test]
-    public void AClosedGenericBaseRunsBeforeItsSubclass()
+    public void AnotherAssemblysGenericSystemRunsClosedHere()
     {
-        _world.AddSystem<CountHealthy>();
-        _world.Update();
-        Assert.That(_world.GetSingleton<Tally>().Count, Is.EqualTo(2), "CountOf<Health>");
-        Assert.That(_world.GetSingleton<Score>().Points, Is.EqualTo(1), "the subclass's own pass");
+        // Regen<T> is EasyEcs.Aot.Library's; this assembly names Regen<Vigor>, so its generated set holds the code.
+        var vigor = _world.CreateEntity(new Vigor(0));
+        var regen = _world.AddSystem<Regen<Vigor>>();
+        for (int i = 0; i < 4; i++) _world.Update();
+        Assert.That((regen.RunCount, vigor.Vigor.Value), Is.EqualTo((2L, 2)), "every second update ([UpdateInterval(2)])");
+        Assert.That(regen.Type, Is.EqualTo(typeof(Regen<Vigor>)));
     }
 
     [Test]
-    public void AClosedTypeTheAssemblyNeverNamesIsMadeAtRunTime()
+    public void AClosedTypeNoAssemblyNamesThrows()
     {
-        // Built by reflection, so the generator never sees the closed type: its code is closed on first use.
-        var system = (EcsSystem)Activator.CreateInstance(typeof(CountOf<>).MakeGenericType(typeof(Velocity)))!;
-        _world.AddSystem(system);
-        _world.Update();
-        Assert.That(_world.GetSingleton<Tally>().Count, Is.EqualTo(1));
+        // Made by reflection: no assembly's generated code names CountOf<Velocity>, so there is no code to run it.
+        var add = typeof(World).GetMethod(nameof(World.AddSystem))!.MakeGenericMethod(typeof(CountOf<>).MakeGenericType(typeof(Velocity)));
+        var thrown = Assert.Throws<TargetInvocationException>(() => add.Invoke(_world, [false]));
+        Assert.That(thrown!.InnerException, Is.TypeOf<NotSupportedException>());
+        Assert.That(_world.Systems.Count, Is.Zero, "nothing was added");
     }
 
     [Test]
@@ -150,8 +151,8 @@ public class GenericTests
 [Without<Frozen>]
 public struct Thawed : ISystemGroup;
 
-[UpdateInGroup<Thawed>]
-public class CountThawed : EcsSystem
+[EcsSystem, UpdateInGroup<Thawed>]
+public ref struct CountThawed
 {
     [ForEach, With<Position>]
     private static void Count(ref Tally tally) => tally.Count++;

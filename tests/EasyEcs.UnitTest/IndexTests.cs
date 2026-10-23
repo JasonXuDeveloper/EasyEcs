@@ -7,18 +7,20 @@ namespace EasyEcs.UnitTest;
 public class IndexTests
 {
     /// <summary>The cascade of the relations guide: children of dying (Dead) parents are destroyed.</summary>
-    public class DestroyOrphans : EcsSystem
+    [EcsSystem]
+    public ref struct DestroyOrphans
     {
         [ForEach, With<Dead>]
-        private void Cascade(Entity parent)
+        private static void Cascade(Entity parent, World world)
         {
-            foreach (Entity child in World.Index<Follows, EntityId>().Find(parent)) child.Destroy();
+            foreach (Entity child in world.Index<Follows, EntityId>().Find(parent)) child.Destroy();
         }
     }
 
 #pragma warning disable EECS028 // a new key is a new string: the renames are what these systems test
     /// <summary>Renames every callsign: a system writes keys with Set.</summary>
-    public class Rename : EcsSystem
+    [EcsSystem]
+    public ref struct Rename
     {
         [ForEach]
         private static void Apply(Entity entity, in Callsign callsign) => entity.Set(new Callsign(callsign.Value + "!"));
@@ -28,13 +30,14 @@ public class IndexTests
     /// Looks up the index it writes, in the middle of a pass over the indexed component: before renaming each entity it
     /// records how many renamed ones the index already finds.
     /// </summary>
-    public class RenameAfterLookup : EcsSystem
+    [EcsSystem]
+    public ref struct RenameAfterLookup
     {
         [ForEach]
-        private void Apply(Entity entity, in Callsign callsign)
+        private static void Apply(Entity entity, in Callsign callsign, World world)
         {
-            var index = World.Index<Callsign, string>();
-            World.GetOrAddScore().Points = index.Count(callsign.Value + "!");
+            var index = world.Index<Callsign, string>();
+            world.GetOrAddScore().Points = index.Count(callsign.Value + "!");
             entity.Set(new Callsign(callsign.Value + "!"));
         }
     }

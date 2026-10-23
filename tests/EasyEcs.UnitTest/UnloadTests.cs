@@ -30,7 +30,8 @@ public class UnloadTests
         public record struct Team(int Id) : IComponent, IGroup { public int Group => Id; }
         public record struct Settings(int Bonus) : ISingletonComponent;
 
-        public class Scoring : EcsSystem
+        [EcsSystem]
+        public ref struct Scoring
         {
             [ForEach, With<Position>]
             static void Add(ref Score score, in Settings settings) => score.Value += settings.Bonus * VERSION;
@@ -46,6 +47,8 @@ public class UnloadTests
                 world.BadgeIndex.Count(1);   // an index the world keeps
                 world.GroupBy<Team>();       // tables split by a plugin's group
             }
+
+            public static void AddScoring(World world) => world.AddSystem<Scoring>();
 
             public static int ScoreOf(Entity player) => player.Score.Value;
         }
@@ -102,7 +105,7 @@ public class UnloadTests
         Assert.That(ComponentInfo.Count, Is.LessThanOrEqualTo(bits), "released bits are reused");
         Assert.That(Entry(plugin, "ScoreOf").Invoke(null, [players[0]]), Is.EqualTo(3), "three updates of version 1");
 
-        world.AddSystem((EcsSystem)Activator.CreateInstance(plugin.GetType("Plugin.Scoring")!)!);
+        Entry(plugin, "AddScoring").Invoke(null, [world]);
         world.Update();
         Assert.That(Entry(plugin, "ScoreOf").Invoke(null, [players[0]]), Is.EqualTo(5), "version 2 adds twice the bonus");
         Assert.That(bystander.Get<Velocity>(), Is.EqualTo(new Velocity(1, 1)));

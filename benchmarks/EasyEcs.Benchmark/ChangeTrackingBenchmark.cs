@@ -84,15 +84,15 @@ public class ChangeTrackingBenchmark
     /// <summary>The value last sent to clients.</summary>
     public record struct Replica(int Value) : IComponent;
 
-    [UpdateInGroup<Replication>]
-    public class ReplicateChanged : EcsSystem
+    [EcsSystem, UpdateInGroup<Replication>]
+    public ref struct ReplicateChanged
     {
         [ForEach, Changed<Health>]
         private static void Copy(in Health health, ref Replica replica) => replica = new Replica(health.Value);
     }
 
-    [UpdateInGroup<Replication>]
-    public class ReplicateAll : EcsSystem
+    [EcsSystem, UpdateInGroup<Replication>]
+    public ref struct ReplicateAll
     {
         [ForEach]
         private static void Copy(in Health health, ref Replica replica)
@@ -165,22 +165,22 @@ public class ChangeTrackingWriteBenchmark
     /// <summary>The aim last sent to clients.</summary>
     public record struct Sent(int Value) : IComponent;
 
-    [UpdateInGroup<Aiming>]
-    public class AimByRef : EcsSystem
+    [EcsSystem, UpdateInGroup<Aiming>]
+    public ref struct AimByRef
     {
         [ForEach]
         private static void Recompute(in Phase phase, ref Aim aim, in Clock clock) => aim = new Aim((clock.Tick + phase.Value) / 10);
     }
 
-    [UpdateInGroup<Aiming>]
-    public class AimIfChanged : EcsSystem
+    [EcsSystem, UpdateInGroup<Aiming>]
+    public ref struct AimIfChanged
     {
         [ForEach]
         private static void Recompute(in Phase phase, Mut<Aim> aim, in Clock clock) => aim.SetIfChanged(new Aim((clock.Tick + phase.Value) / 10));
     }
 
-    [UpdateInGroup<Sending>]
-    public class SendChanged : EcsSystem
+    [EcsSystem, UpdateInGroup<Sending>]
+    public ref struct SendChanged
     {
         [ForEach, Changed<Aim>]
         private static void Send(in Aim aim, ref Sent sent) => sent = new Sent(aim.Value);
@@ -257,8 +257,8 @@ public class ChangeTrackingSomeRowsBenchmark
     /// <summary>The position last sent to clients.</summary>
     public record struct Sent(int Value) : IComponent;
 
-    [UpdateInGroup<Respawning>]
-    public class RespawnRef : EcsSystem
+    [EcsSystem, UpdateInGroup<Respawning>]
+    public ref struct RespawnRef
     {
 #pragma warning disable EECS053 // the reported side
         [ForEach]
@@ -271,8 +271,8 @@ public class ChangeTrackingSomeRowsBenchmark
 #pragma warning restore EECS053
     }
 
-    [UpdateInGroup<Respawning>]
-    public class RespawnMut : EcsSystem
+    [EcsSystem, UpdateInGroup<Respawning>]
+    public ref struct RespawnMut
     {
         [ForEach]
         private static void Respawn(ref Health health, Mut<Position> position)
@@ -283,8 +283,8 @@ public class ChangeTrackingSomeRowsBenchmark
         }
     }
 
-    [UpdateInGroup<Sending>]
-    public class SendChanged : EcsSystem
+    [EcsSystem, UpdateInGroup<Sending>]
+    public ref struct SendChanged
     {
         [ForEach, Changed<Position>]
         private static void Send(in Position position, ref Sent sent) => sent = new Sent(position.Value);

@@ -69,7 +69,8 @@ public partial class ReduceTests
         [Any] public bool AnyTen;
     }
 
-    public class ParallelCensus : EcsSystem
+    [EcsSystem]
+    public ref struct ParallelCensus
     {
         [ForEach(Parallel = true, ChunkRows = 256)]
         static void Count(in Points points, ref Reduce<Census> census)
@@ -85,7 +86,8 @@ public partial class ReduceTests
         }
     }
 
-    public class SerialScores : EcsSystem
+    [EcsSystem]
+    public ref struct SerialScores
     {
         [ForEach]
         static void Add(in Points points, ref Reduce<Scores> tally)
@@ -96,13 +98,15 @@ public partial class ReduceTests
         }
     }
 
-    public class ParallelScores : EcsSystem
+    [EcsSystem]
+    public ref struct ParallelScores
     {
         [ForEach(Parallel = true)]
         static void Add(in Points points, ref Reduce<Scores> tally) => tally.Combine(new Scores { Count = 1, Sum = points.Value });
     }
 
-    public class ParallelBounds : EcsSystem
+    [EcsSystem]
+    public ref struct ParallelBounds
     {
         [ForEach(Parallel = true, ChunkRows = 1024)]
         static void Grow(in Spot spot, ref Reduce<Bounds2> box)
@@ -115,20 +119,23 @@ public partial class ReduceTests
         }
     }
 
-    public class FixedChunkMass : EcsSystem
+    [EcsSystem]
+    public ref struct FixedChunkMass
     {
         [ForEach(Parallel = true, ChunkRows = 4096)]
         static void Add(in Weight weight, ref Reduce<WeightSum> mass) => mass.Value.Total += weight.Value;
     }
 
-    public class ParallelEnds : EcsSystem
+    [EcsSystem]
+    public ref struct ParallelEnds
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Visit(in Points points, ref Reduce<Ends2> ends) =>
             ends.Combine(new Ends2 { First = points.Value, Last = points.Value, Any = true });
     }
 
-    public class SerialEnds : EcsSystem
+    [EcsSystem]
+    public ref struct SerialEnds
     {
         [ForEach]
         static void Visit(in Points points, ref Reduce<Ends2> ends) =>
@@ -136,7 +143,8 @@ public partial class ReduceTests
     }
 
     /// <summary>An optional component and a reduction: the serial job walks runs of rows, the partial result in a local.</summary>
-    public class ScoresWithBonus : EcsSystem
+    [EcsSystem]
+    public ref struct ScoresWithBonus
     {
         [ForEach]
         static void Add(in Points points, ReadOnlyMaybe<Weight> bonus, ref Reduce<Scores> tally)
@@ -147,7 +155,8 @@ public partial class ReduceTests
         }
     }
 
-    public class ReadsScores : EcsSystem
+    [EcsSystem]
+    public ref struct ReadsScores
     {
         [ForEach]
         static void Read(ref Weight weight, in Scores scores) => weight.Value = scores.Count;
@@ -210,7 +219,8 @@ public partial class ReduceTests
         private int _first;
     }
 
-    public class ParallelBuckets : EcsSystem
+    [EcsSystem]
+    public ref struct ParallelBuckets
     {
         [ForEach(Parallel = true, ChunkRows = 1024)]
         static void Add(in Points points, ref Reduce<Buckets> all, ref Reduce<OddBuckets> odd)
@@ -221,7 +231,8 @@ public partial class ReduceTests
     }
 
     /// <summary>The armor of the rows written since the last run: rows picked by change ticks, a chunk's runs at a time.</summary>
-    public class ChangedArmor : EcsSystem
+    [EcsSystem]
+    public ref struct ChangedArmor
     {
         [ForEach(Parallel = true, ChunkRows = 64), Changed<Armor>]
         static void Add(in Armor armor, ref Reduce<Scores> tally) => tally.Combine(new Scores { Count = 1, Sum = armor.Value });

@@ -30,8 +30,8 @@ namespace VoxelServer;
 // found by counting trailing zeros. The others are not written at all: the step's buffer equals the water after every
 // commit (a moved step is copied into it, a settled one wrote back what was there), so a row whose stencil is dry is
 // already zero in it.
-[UpdateInGroup<Simulation>, UpdateInterval(Rules.FlowDelay)]
-public class WaterFlowSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.FlowDelay)]
+public ref struct WaterFlowSystem
 {
     const int Size = Terrain.Size, Blocks = Terrain.BlocksPerChunk;
 

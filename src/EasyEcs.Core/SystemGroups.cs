@@ -9,8 +9,8 @@ namespace EasyEcs;
 /// <code>
 /// public struct NetworkGroup : ISystemGroup;
 ///
-/// [UpdateInGroup&lt;NetworkGroup&gt;]
-/// public class ReceiveSystem : EcsSystem { ... }
+/// [EcsSystem, UpdateInGroup&lt;NetworkGroup&gt;]
+/// ref struct Receive { ... }
 ///
 /// world.Update&lt;NetworkGroup&gt;();   // whenever packets arrive
 /// world.Update();                     // fixed tick: default group
@@ -19,7 +19,7 @@ namespace EasyEcs;
 /// <see cref="WithAnyAttribute{T}"/> filters: the generator adds them to every [ForEach] method of its systems
 /// (<c>[Without&lt;Inactive&gt;] public struct Gameplay : ISystemGroup;</c> keeps inactive entities out of the whole
 /// group), and so may the interfaces it implements: <see cref="ISystemGroupWith{T}"/>, <see cref="ISystemGroupWithout{T}"/>.
-/// Queries a system makes in OnUpdate are its own.
+/// Queries a system makes in its <see cref="OnUpdateAttribute">[OnUpdate]</see> method are its own.
 /// </summary>
 public interface ISystemGroup;
 
@@ -39,8 +39,8 @@ public interface ISystemGroupWith<T> : ISystemGroup where T : struct, IComponent
 /// </summary>
 public interface ISystemGroupWithout<T> : ISystemGroup where T : struct, IComponent;
 
-/// <summary>Puts the system (and derived systems) into group <typeparamref name="TGroup"/>.</summary>
-[AttributeUsage(AttributeTargets.Class, Inherited = true)]
+/// <summary>Puts the system into group <typeparamref name="TGroup"/>.</summary>
+[AttributeUsage(AttributeTargets.Struct)]
 public sealed class UpdateInGroupAttribute<TGroup> : Attribute, ISystemGroupAttribute where TGroup : struct, ISystemGroup
 {
     int ISystemGroupAttribute.Index => SystemGroup<TGroup>.Index;

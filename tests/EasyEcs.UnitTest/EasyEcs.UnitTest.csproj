@@ -25,6 +25,8 @@
         <!-- as analyzer: generates [ForEach] systems in this assembly; as reference: driven directly by GeneratorTests -->
         <ProjectReference Include="..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true"/>
         <ProjectReference Include="..\..\src\EasyEcs.CodeFixes\EasyEcs.CodeFixes.csproj"/>
+        <!-- a library's public generic system, closed here (GenericTests) -->
+        <ProjectReference Include="..\EasyEcs.Aot.Library\EasyEcs.Aot.Library.csproj"/>
         <!-- the README's battle server, compiled unchanged (BattleServerTests) -->
         <Compile Include="..\..\benchmarks\EasyEcs.Benchmark\BattleServer.cs" Link="BattleServer.cs"/>
     </ItemGroup>

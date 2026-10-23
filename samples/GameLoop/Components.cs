@@ -1,5 +1,6 @@
 using System.Buffers;
 using EasyEcs;
+using GameLoop.Host;
 
 namespace GameLoop;
 
@@ -36,6 +37,10 @@ public record struct Simulation(float DeltaTime, long Tick) : ISingletonComponen
 // The recipes that players and bullets are created from (built at startup, so a save leaves them out).
 [NotSaved]
 public record struct Prefabs(Prefab Player, Prefab Bullet) : ISingletonComponent;
+
+// The messages the network thread hands over (the host's mailbox: a connection, never saved).
+[NotSaved]
+public record struct Inbox(Mailbox<ClientMessage> Messages) : ISingletonComponent;
 
 // Replicated positions waiting to be sent, and how many updates they hold (a send buffer, never saved).
 [NotSaved]

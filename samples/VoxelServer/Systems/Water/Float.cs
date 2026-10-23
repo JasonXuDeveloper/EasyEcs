@@ -9,17 +9,17 @@ namespace VoxelServer;
 // and, through the index of entities by chunk, finds the bodies in the others: the water of a body's block is the
 // loop's own row, and its four neighbors are read only for the few bodies in water. Runs after the walk set the
 // velocity and before physics moves the body.
-[UpdateInGroup<Simulation>]
-public class FloatSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct FloatSystem
 {
     [ForEach]
-    void Float(in Chunk key, in FluidCount count, in DynamicBuffer<Fluid> fluid, in DynamicBuffer<Block> blocks, ref Stats stats)
+    static void Float(in Chunk key, in FluidCount count, in DynamicBuffer<Fluid> fluid, in DynamicBuffer<Block> blocks, ref Stats stats, World world)
     {
         if (count.Blocks == 0) return;                                 // dry: nothing floats here
         var levels = fluid.AsReadOnlySpan();
         var solid = blocks.AsReadOnlySpan();
-        var near = new Nearby(World);                                   // the neighbors across the edge
-        foreach (var body in World.InChunkIndex.Find(key.Pos))
+        var near = new Nearby(world);                                   // the neighbors across the edge
+        foreach (var body in world.InChunkIndex.Find(key.Pos))
         {
             var at = Terrain.Cell(body.Position.Value);
             if ((uint)at.Y >= Terrain.Height || Terrain.ChunkOf(at.X, at.Z) != key.Pos) continue;   // crossing: next tick

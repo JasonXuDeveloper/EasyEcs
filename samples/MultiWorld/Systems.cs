@@ -5,7 +5,8 @@ using EasyEcs;
 namespace MultiWorld;
 
 // Moves every unit by its velocity, a whole run of rows per call: the method takes spans of the table's columns.
-public class MoveSystem : EcsSystem
+[EcsSystem]
+public ref struct MoveSystem
 {
     [ForEach]
     static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
@@ -30,7 +31,8 @@ public class MoveSystem : EcsSystem
 }
 
 // The zone's hazard: units farther than SafeRadius from the centre lose one health per tick.
-public class DamageSystem : EcsSystem
+[EcsSystem]
+public ref struct DamageSystem
 {
     const float SafeRadius = 500;
 
@@ -53,7 +55,8 @@ public class DamageSystem : EcsSystem
 }
 
 // The dead come back at the centre with full health.
-public class RespawnSystem : EcsSystem
+[EcsSystem]
+public ref struct RespawnSystem
 {
     [ForEach]
     static void Respawn(ref Position position, ref Health health)

@@ -49,13 +49,18 @@ public class OrderingBenchmark
 
     public record struct Stock(int Ore, int Gold) : IComponent;
 
-    public sealed class Gather : EcsSystem { [ForEach] static void Run(ref Stock s) => s.Ore += 3; }
-    public sealed class Craft : EcsSystem { [ForEach] static void Run(ref Stock s) => s.Ore -= s.Ore > 2 ? 2 : 0; }
-    public sealed class Trade : EcsSystem { [ForEach] static void Run(ref Stock s) => s.Gold += s.Ore & 1; }
-    public sealed class Spend : EcsSystem { [ForEach] static void Run(ref Stock s) => s.Gold -= s.Gold > 10 ? 10 : 0; }
+    [EcsSystem]
+    public ref struct Gather { [ForEach] static void Run(ref Stock s) => s.Ore += 3; }
+    [EcsSystem]
+    public ref struct Craft { [ForEach] static void Run(ref Stock s) => s.Ore -= s.Ore > 2 ? 2 : 0; }
+    [EcsSystem]
+    public ref struct Trade { [ForEach] static void Run(ref Stock s) => s.Gold += s.Ore & 1; }
+    [EcsSystem]
+    public ref struct Spend { [ForEach] static void Run(ref Stock s) => s.Gold -= s.Gold > 10 ? 10 : 0; }
 
-    public sealed class GatherFirst : EcsSystem { [ForEach] static void Run(ref Stock s) => s.Ore += 3; }
-    [UpdateAfter<GatherFirst>] public sealed class CraftAfter : EcsSystem { [ForEach] static void Run(ref Stock s) => s.Ore -= s.Ore > 2 ? 2 : 0; }
-    [UpdateAfter<CraftAfter>] public sealed class TradeAfter : EcsSystem { [ForEach] static void Run(ref Stock s) => s.Gold += s.Ore & 1; }
-    [UpdateAfter<TradeAfter>] public sealed class SpendAfter : EcsSystem { [ForEach] static void Run(ref Stock s) => s.Gold -= s.Gold > 10 ? 10 : 0; }
+    [EcsSystem]
+    public ref struct GatherFirst { [ForEach] static void Run(ref Stock s) => s.Ore += 3; }
+    [EcsSystem, UpdateAfter<GatherFirst>] public ref struct CraftAfter { [ForEach] static void Run(ref Stock s) => s.Ore -= s.Ore > 2 ? 2 : 0; }
+    [EcsSystem, UpdateAfter<CraftAfter>] public ref struct TradeAfter { [ForEach] static void Run(ref Stock s) => s.Gold += s.Ore & 1; }
+    [EcsSystem, UpdateAfter<TradeAfter>] public ref struct SpendAfter { [ForEach] static void Run(ref Stock s) => s.Gold -= s.Gold > 10 ? 10 : 0; }
 }

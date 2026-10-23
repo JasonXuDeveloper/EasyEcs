@@ -12,7 +12,7 @@ public readonly partial struct QueryFilter
     /// Visit only slice <paramref name="index"/> of <paramref name="of"/> of every matching table's rows: passes with
     /// each index from 0 to <paramref name="of"/> - 1 in turn visit every row once, each about
     /// 1 / <paramref name="of"/> of the rows. <c>[ForEach(Slices = N)]</c> methods pass the slice of their system's
-    /// run (<see cref="EcsSystem.RunCount"/> mod N). O(1).
+    /// run (<see cref="SystemHandle.RunCount"/> mod N). O(1).
     /// <para>A table is cut at multiples of 64 rows (its presence words), from its row count when the pass starts, so a
     /// table of fewer than 64 rows is one piece; table i of the match starts its cut at slice
     /// (<paramref name="index"/> + i) mod <paramref name="of"/>, so many small tables spread over the slices too.

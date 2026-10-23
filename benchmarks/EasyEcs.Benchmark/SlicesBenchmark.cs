@@ -26,15 +26,15 @@ public class SlicesBenchmark
         _world.CreateEntities(new Entity[Entities], new Npc(0, 0, 1, 0));
         int entity = 0;
         foreach (var item in _world.Query<Npc>()) item.Component1 = new Npc(entity % 1_000, entity++ / 1_000, 1, 0);
-        _world.AddSystem((Slices, Form) switch
+        switch (Slices, Form)
         {
-            (1, "Stable") => new Think(),
-            (1, "Entity") => new ThinkWithEntity(),
-            (1, _) => new ThinkInParallel(),
-            (_, "Stable") => new ThinkSliced(),
-            (_, "Entity") => new ThinkWithEntitySliced(),
-            _ => (EcsSystem)new ThinkInParallelSliced(),
-        });
+            case (1, "Stable"): _world.AddSystem<Think>(); break;
+            case (1, "Entity"): _world.AddSystem<ThinkWithEntity>(); break;
+            case (1, _): _world.AddSystem<ThinkInParallel>(); break;
+            case (_, "Stable"): _world.AddSystem<ThinkSliced>(); break;
+            case (_, "Entity"): _world.AddSystem<ThinkWithEntitySliced>(); break;
+            default: _world.AddSystem<ThinkInParallelSliced>(); break;
+        }
         for (int i = 0; i < 20; i++) _world.Update();
     }
 
@@ -64,19 +64,22 @@ public class SlicesBenchmark
         npc.Y += npc.Dy;
     }
 
-    public class Think : EcsSystem
+    [EcsSystem]
+    public ref struct Think
     {
         [ForEach]
         private static void Run(ref Npc npc) => Decide(ref npc);
     }
 
-    public class ThinkSliced : EcsSystem
+    [EcsSystem]
+    public ref struct ThinkSliced
     {
         [ForEach(Slices = 4)]
         private static void Run(ref Npc npc) => Decide(ref npc);
     }
 
-    public class ThinkWithEntity : EcsSystem
+    [EcsSystem]
+    public ref struct ThinkWithEntity
     {
         [ForEach]
         private static void Run(Entity entity, ref Npc npc)
@@ -86,7 +89,8 @@ public class SlicesBenchmark
         }
     }
 
-    public class ThinkWithEntitySliced : EcsSystem
+    [EcsSystem]
+    public ref struct ThinkWithEntitySliced
     {
         [ForEach(Slices = 4)]
         private static void Run(Entity entity, ref Npc npc)
@@ -96,13 +100,15 @@ public class SlicesBenchmark
         }
     }
 
-    public class ThinkInParallel : EcsSystem
+    [EcsSystem]
+    public ref struct ThinkInParallel
     {
         [ForEach(Parallel = true)]
         private static void Run(ref Npc npc) => Decide(ref npc);
     }
 
-    public class ThinkInParallelSliced : EcsSystem
+    [EcsSystem]
+    public ref struct ThinkInParallelSliced
     {
         [ForEach(Parallel = true, Slices = 4)]
         private static void Run(ref Npc npc) => Decide(ref npc);

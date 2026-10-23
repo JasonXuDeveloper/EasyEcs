@@ -98,13 +98,15 @@ public class ParallelForEachBenchmark
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private static void Diverged(Entity entity) => throw new InvalidOperationException($"{entity} diverged");
 
-    public class Steer : EcsSystem
+    [EcsSystem]
+    public ref struct Steer
     {
         [ForEach]
         static void Run(ref Agent agent, in Waypoints waypoints) => SteerAgent(ref agent, in waypoints);
     }
 
-    public class SteerInParallel : EcsSystem
+    [EcsSystem]
+    public ref struct SteerInParallel
     {
         [ForEach(Parallel = true)]
         static void Run(ref Agent agent, in Waypoints waypoints) => SteerAgent(ref agent, in waypoints);

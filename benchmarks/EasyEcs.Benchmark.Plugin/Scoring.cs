@@ -12,7 +12,8 @@ public record struct Badge(int Level) : IComponent, IIndexed<int>
 
 public record struct Bonus(int Points) : ISingletonComponent;
 
-public class Scoring : EcsSystem
+[EcsSystem]
+public ref struct Scoring
 {
     [ForEach]
     private static void Add(ref Score score, in Bonus bonus) => score.Value += bonus.Points;

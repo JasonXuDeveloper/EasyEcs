@@ -6,8 +6,8 @@ namespace VoxelServer;
 // its scratch buffer, the step, back to the pool (TrimExcess of an empty buffer), so only the chunks whose water moves
 // hold one, and the next chunk woken takes it back without allocating. It runs before the commit,
 // so a chunk that settled is still woken by a neighbor whose water reached it in the same step.
-[UpdateInGroup<Simulation>]
-public class WaterSleepSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct WaterSleepSystem
 {
     [ForEach, Changed<FluidStep>]
     static void Sleep(Entity chunk, in FluidStep step, Mut<DynamicBuffer<NextFluid>> next)

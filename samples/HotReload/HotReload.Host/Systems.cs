@@ -3,7 +3,8 @@ using EasyEcs;
 namespace HotReload.Host;
 
 // The host's own logic. It is not in the plugin, so it keeps running through reloads.
-public class MoveSystem : EcsSystem
+[EcsSystem]
+public ref struct MoveSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)

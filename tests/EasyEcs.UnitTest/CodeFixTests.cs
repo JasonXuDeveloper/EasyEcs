@@ -32,10 +32,10 @@ public class CodeFixTests
         """;
 
     [TestCase("EECS002", "Take it by 'in' (read)",
-        "public class S : EcsSystem { [ForEach] static void A(P p, ref Clock c) => c.Ticks += p.V; }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(P p, ref Clock c) => c.Ticks += p.V; }",
         "static void A(in P p, ref Clock c)")]
     [TestCase("EECS002", "Take it by 'ref' (write)",
-        "public class S : EcsSystem { [ForEach] static void A(P p) => p.V++; }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(P p) => p.V++; }",
         "static void A(ref P p)")]
     [TestCase("EECS005", "Make it static",
         "public class Runner { [ForEach] void A(ref P p) => p.V++; }",
@@ -50,53 +50,46 @@ public class CodeFixTests
         "public record R(int V) : IComponent;",
         "public record struct R(int V) : IComponent;")]
     [TestCase("EECS010", "Run it on one thread",
-        "public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, ref Clock c) => c.Ticks += p.V; }",
+        "[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(ref P p, ref Clock c) => c.Ticks += p.V; }",
         "[ForEach] static void A")]
-    // An instance method only 'static' keeps from running in parallel: EECS010 offers EECS029's fix (which defers to it).
-    [TestCase("EECS010", "Make it static",
-        "public class S : EcsSystem { [ForEach(Parallel = true)] void A(ref P p) => p.V++; }",
-        "[ForEach(Parallel = true)] static void A(ref P p)")]
-    [TestCase("EECS010", "Run it on one thread",
-        "public class S : EcsSystem { [ForEach(Parallel = true)] void A(ref P p) => p.V++; }",
-        "[ForEach] void A(ref P p)")]
     [TestCase("EECS011", "Take it by 'ref'",
-        "public class S : EcsSystem { [ForEach] static void A(in Holder h) => h.Items.Add(1); }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(in Holder h) => h.Items.Add(1); }",
         "static void A(ref Holder h)")]
     [TestCase("EECS011", "Take it by 'ref'",
-        "public class S : EcsSystem { [ForEach] static void A(System.ReadOnlySpan<Holder> h) => h[0].Items.Add(1); }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(System.ReadOnlySpan<Holder> h) => h[0].Items.Add(1); }",
         "static void A(System.Span<Holder> h)")]
     [TestCase("EECS012", "Take it by 'in' (read)",
         "public static class Use { public static int Count(DynamicBuffer<int> items) => items.Count; }",
         "Count(in DynamicBuffer<int> items)")]
     [TestCase("EECS022", "Make it internal",
-        "public class S : EcsSystem { private struct Hidden : IComponent { public int V; } [ForEach] static void A(ref Hidden h) => h.V++; }",
+        "[EcsSystem] public ref struct S { private struct Hidden : IComponent { public int V; } [ForEach] static void A(ref Hidden h) => h.V++; }",
         "internal struct Hidden")]
     [TestCase("EECS022", "Make it internal",
-        "public class S : EcsSystem {\n    struct Hidden : IComponent { public int V; }\n    [ForEach] static void A(ref Hidden h) => h.V++; }",
+        "[EcsSystem] public ref struct S {\n    struct Hidden : IComponent { public int V; }\n    [ForEach] static void A(ref Hidden h) => h.V++; }",
         "\n    internal struct Hidden")]
     [TestCase("EECS002", "Take it by 'in' (read)",
-        "public class S : EcsSystem { [ForEach] static void A(\n        P p, ref Clock c) => c.Ticks += p.V; }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(\n        P p, ref Clock c) => c.Ticks += p.V; }",
         "(\n        in P p, ref Clock c)")]
     [TestCase("EECS005", "Make it static",
         "public class Runner { static int x = 1; [ForEach] void A(ref P p) => p.V += x; }",
         "[ForEach] static void A(ref P p)")]
     [TestCase("EECS011", "Take it by 'ref'",
-        "public class S : EcsSystem { [ForEach] static void A(RO h) => h[0].Items.Add(1); }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(RO h) => h[0].Items.Add(1); }",
         "static void A(System.Span<Holder> h)")]
     [TestCase("EECS011", "Take it by 'ref'",
         "public struct Grid : ISingletonComponent { public System.Collections.Generic.List<int> Cells; }\n"
-        + "public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, in Holder h) => h.Items.Add(p.V); }",
+        + "[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(ref P p, in Holder h) => h.Items.Add(p.V); }",
         "ref Holder h) => h.Items.Add(p.V); }")] // a component's ref is fine in parallel: each row is one thread's
     [TestCase("EECS012", "Take it by 'ref' (write)",
         "public static class Use { public static int Count(DynamicBuffer<int> items) => items.Count;\n"
         + "  public static int Call(Entity e) { ref var b = ref e.Get<DynamicBuffer<int>>(); return Count(b); } }",
         "return Count(ref b);")]
     [TestCase("EECS022", "Make it internal",
-        "public class S : EcsSystem { private class Outer { public struct C : IComponent { public int V; } } [ForEach] static void A(ref Outer.C c) => c.V++; }",
+        "[EcsSystem] public ref struct S { private class Outer { public struct C : IComponent { public int V; } } [ForEach] static void A(ref Outer.C c) => c.V++; }",
         "internal class Outer")]
     [TestCase("EECS022", "Make it internal",
-        "public partial class S : EcsSystem { private partial class Outer { internal struct C : IComponent { public int V; } } [ForEach] static void A(ref Outer.C c) => c.V++; }\n"
-        + "public partial class S { private partial class Outer { } }",
+        "[EcsSystem] public ref partial struct S { private partial class Outer { internal struct C : IComponent { public int V; } } [ForEach] static void A(ref Outer.C c) => c.V++; }\n"
+        + "public ref partial struct S { private partial class Outer { } }",
         "internal partial class Outer { } }")]
     [TestCase("EECS023", "Remove the filter",
         "[With<P>] public struct R : IComponent { public int V; }",
@@ -105,10 +98,10 @@ public class CodeFixTests
         "[System.Serializable, With<P>] public struct R : IComponent { public int V; }",
         "[System.Serializable] public struct R")]
     [TestCase("EECS025", "Take it by 'in'",
-        "public class S : EcsSystem { [ForEach] static void A(ref P p, ref Clock c) => c.Ticks += p.V; }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, ref Clock c) => c.Ticks += p.V; }",
         "static void A(in P p, ref Clock c)")]
     [TestCase("EECS025", "Take it as a ReadOnlySpan",
-        "public class S : EcsSystem { [ForEach] static void A(System.Span<P> p, ref Clock c) { for (int i = 0; i < p.Length; i++) c.Ticks += p[i].V; } }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(System.Span<P> p, ref Clock c) { for (int i = 0; i < p.Length; i++) c.Ticks += p[i].V; } }",
         "static void A(System.ReadOnlySpan<P> p, ref Clock c)")]
     [TestCase("EECS025", "Read it with Read<T>()",
         "public static class U { public static int F(Entity e) => e.Get<T>().V; }",
@@ -117,17 +110,14 @@ public class CodeFixTests
         "public static class U { public static int F(Entity e) => e.WriteT().V; }",
         "=> e.T.V;")]
     [TestCase("EECS026", "Require it with [With<P>]",
-        "public class S : EcsSystem { [ForEach] static void A(in P p, ref Clock c) => c.Ticks++; }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Clock c) => c.Ticks++; }",
         "[ForEach, With<P>] static void A(ref Clock c)")]
     [TestCase("EECS026", "Remove the parameter",
-        "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V++; }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p) => p.V++; }",
         "[ForEach] static void A(ref P p)")]
     [TestCase("EECS026", "Remove the parameter",
-        "public class S : EcsSystem { [ForEach, Changed<T>] static void A(in T t, ref P p) => p.V++; }",
+        "[EcsSystem] public ref struct S { [ForEach, Changed<T>] static void A(in T t, ref P p) => p.V++; }",
         "[ForEach, Changed<T>] static void A(ref P p)")]
-    [TestCase("EECS029", "Make it static",
-        "public class S : EcsSystem { [ForEach] void A(ref P p) => p.V++; }",
-        "[ForEach] static void A(ref P p)")]
     [TestCase("EECS030", "Make it one bulk call",
         "public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Destroy(); } }",
         "{ w.DestroyAll<P>(); }")]
@@ -204,10 +194,10 @@ public class CodeFixTests
         "public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<T>()) n += item.T.V; return n; } }",
         "foreach (var item in w.Read<T>()) n += item.T.V;")]
     [TestCase("EECS039", "Take it by 'ref'",
-        "public class S : EcsSystem { [ForEach] static void A(Mut<P> p, in Q q) { if (q.V > p.Value.V) p.Write().V = q.V; } }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(Mut<P> p, in Q q) { if (q.V > p.Value.V) p.Write().V = q.V; } }",
         "static void A(ref P p, in Q q) { if (q.V > p.V) p.V = q.V; }")]
     [TestCase("EECS025", "Take it by 'in'",
-        "public class S : EcsSystem { [ForEach] static void A(Mut<T> t, ref P p) => p.V = t.Value.V; }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(Mut<T> t, ref P p) => p.V = t.Value.V; }",
         "static void A(in T t, ref P p) => p.V = t.V;")]
     [TestCase("EECS015", "Read it with Read<T>()",
         "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public static class U { public static int F(Entity e) => e.Get<Owned>().K; }",
@@ -216,26 +206,17 @@ public class CodeFixTests
         "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<Owned>()) { ref var o = ref item.Component1; n += o.K; } return n; } }",
         "ref readonly var o = ref item.Component1;")]
     [TestCase("EECS015", "Take it by 'in'",
-        "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public class S : EcsSystem { [ForEach] static void A(ref Owned o, ref Clock c) => c.Ticks += o.K; }",
+        "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } [EcsSystem] public ref struct S { [ForEach] static void A(ref Owned o, ref Clock c) => c.Ticks += o.K; }",
         "static void A(in Owned o, ref Clock c)")]
     [TestCase("EECS015", "Take it as a ReadOnlySpan",
-        "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public class S : EcsSystem { [ForEach] static void A(System.Span<Owned> o, ref Clock c) => c.Ticks += o[0].K; }",
+        "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } [EcsSystem] public ref struct S { [ForEach] static void A(System.Span<Owned> o, ref Clock c) => c.Ticks += o[0].K; }",
         "static void A(System.ReadOnlySpan<Owned> o, ref Clock c)")]
     [TestCase("EECS007", "Make it readonly",
-        "public class S : EcsSystem { private System.Collections.Generic.List<int> _scratch = new(); public int Count => _scratch.Count; }",
-        "private readonly System.Collections.Generic.List<int> _scratch = new();")]
+        "[EcsSystem] public ref struct S { private static System.Collections.Generic.List<int> _scratch = new(); public static int Count => _scratch.Count; }",
+        "private static readonly System.Collections.Generic.List<int> _scratch = new();")]
     [TestCase("EECS007", "Make it readonly",
-        "public class S : EcsSystem { private int _limit; public S(int limit) { _limit = limit; } public int Limit => _limit; }",
-        "private readonly int _limit;")]
-    [TestCase("EECS082", "Declare it with [UpdateInterval(5)]",
-        "public class S : EcsSystem { public override int UpdateInterval { get; } = 5; }",
-        "[UpdateInterval(5)]\npublic class S : EcsSystem { }")]
-    [TestCase("EECS082", "Declare it with [UpdateInterval(10, Phase = 5)]",
-        "namespace N\n{\n    public class S : EcsSystem\n    {\n        public override int UpdateInterval => 10;\n        public override int UpdatePhase => 5;\n        protected override void OnUpdate() { }\n    }\n}",
-        "namespace N\n{\n    [UpdateInterval(10, Phase = 5)]\n    public class S : EcsSystem\n    {\n        protected override void OnUpdate() { }\n    }\n}")]
-    [TestCase("EECS082", "Remove it: the system runs every update",
-        "public class S : EcsSystem { public override int UpdatePhase => 3; }",
-        "public class S : EcsSystem { }")]
+        "[EcsSystem] public ref struct S { private static int _limit; static S() { _limit = 3; } public static int Limit => _limit; }",
+        "private static readonly int _limit;")]
     [TestCase("EECS080", "Write it as a [ForEntity] method",
         "public struct Closed : IComponent;\npublic struct Buy : IForEachEntity<P, Q>\n{\n    public int Quantity;\n    public static int WriteMask => 0b01;\n\n    // Sells and closes the shop when it runs out.\n    public void Execute(Entity shop, ref P p, ref Q q)\n    {\n        p.V -= Quantity;\n        if (p.V == 0) shop.Set(new Closed());\n    }\n}\n"
         + "public static class Mailman\n{\n    private static readonly QueryFilter Open = QueryFilter.Create().Without<Closed>();\n\n    public static bool Send(Entity shop, int quantity)\n    {\n        var buy = new Buy { Quantity = quantity };\n        return shop.Run<P, Q, Buy>(ref buy, Open);\n    }\n}",
@@ -248,10 +229,10 @@ public class CodeFixTests
         "public static class R { [ForEntity] void A(ref P p) => p.V++; }",
         "[ForEntity] static void A(ref P p)")]
     [TestCase("EECS084", "Consume its rows with [Consume]",
-        "public struct Hit : IComponent { public int Amount; }\npublic class S : EcsSystem\n{\n    [ForEach]\n    static void A(Entity e, in Hit hit, ref P p)\n    {\n        p.V -= hit.Amount;\n        e.Destroy();\n    }\n}",
+        "public struct Hit : IComponent { public int Amount; }\n[EcsSystem] public ref struct S\n{\n    [ForEach]\n    static void A(Entity e, in Hit hit, ref P p)\n    {\n        p.V -= hit.Amount;\n        e.Destroy();\n    }\n}",
         "    [ForEach, Consume]\n    static void A(in Hit hit, ref P p)\n    {\n        p.V -= hit.Amount;\n    }")]
     [TestCase("EECS084", "Consume its rows with [Consume]",
-        "public struct Hit : IComponent { public int Amount; }\npublic class S : EcsSystem\n{\n    [ForEach]\n    static void A(Entity e, in Hit hit, ref P p)\n    {\n        if (e.Has<Q>()) p.V = 0;\n        e.Destroy();\n    }\n}",
+        "public struct Hit : IComponent { public int Amount; }\n[EcsSystem] public ref struct S\n{\n    [ForEach]\n    static void A(Entity e, in Hit hit, ref P p)\n    {\n        if (e.Has<Q>()) p.V = 0;\n        e.Destroy();\n    }\n}",
         "    [ForEach, Consume]\n    static void A(Entity e, in Hit hit, ref P p)\n    {\n        if (e.Has<Q>()) p.V = 0;\n    }")]
     [TestCase("EECS017", "Store its EntityId",
         "public struct Target : IComponent { public Entity Of; }\npublic static class U { public static bool F(Entity e, Entity other) { e.Set(new Target { Of = other }); return e.Read<Target>().Of.Id == other.Id; } }",
@@ -269,41 +250,41 @@ public class CodeFixTests
         "public static class U { public static Entity F(World w, Prefab p) { Entity e = w.Instantiate(p); e.Set(new Q()); return e; } }",
         "{ Entity e = w.Instantiate(p, new Q()); return e; }")]
     [TestCase("EECS027", "Take it as a parameter ('in Q q')",
-        "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V = e.Get<Q>().V; }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p) => p.V = e.Get<Q>().V; }",
         "static void A(Entity e, ref P p, in Q q) => p.V = q.V; }")]
     [TestCase("EECS027", "Take it as a parameter ('in Q q')",
-        "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { p.V = e.Q.V; if (p.V > 0) p.V += e.Read<Q>().V; } }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p) { p.V = e.Q.V; if (p.V > 0) p.V += e.Read<Q>().V; } }",
         "static void A(Entity e, ref P p, in Q q) { p.V = q.V; if (p.V > 0) p.V += q.V; } }")]                 // every lookup of the type
     [TestCase("EECS027", "Take it as a parameter ('ref Q q')",
-        "public class S : EcsSystem { [ForEach] static void A(Entity e, in P p) => e.Get<Q>().V = p.V; }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, in P p) => e.Get<Q>().V = p.V; }",
         "static void A(Entity e, in P p, ref Q q) => q.V = p.V; }")]
     [TestCase("EECS027", "Take it as a parameter ('in Clock clock')",
-        "public class S : EcsSystem { [ForEach] static void A(ref P p, World w) => p.V = w.Clock.Ticks; }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, World w) => p.V = w.Clock.Ticks; }",
         "static void A(ref P p, World w, in Clock clock) => p.V = clock.Ticks; }")]
     [TestCase("EECS027", "Take it as a parameter ('in Clock clock')",
-        "public class S : EcsSystem { [ForEach] void A(ref P p) => p.V = World.GetSingleton<Clock>().Ticks; }",
-        "void A(ref P p, in Clock clock) => p.V = clock.Ticks; }")]
+        "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, World world) => p.V = world.GetSingleton<Clock>().Ticks; }",
+        "static void A(ref P p, World world, in Clock clock) => p.V = clock.Ticks; }")]
     [TestCase("EECS027", "Use parameter 'q'",
-        "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p, in Q q) => p.V = e.Read<Q>().V + q.V; }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p, in Q q) => p.V = e.Read<Q>().V + q.V; }",
         "static void A(Entity e, ref P p, in Q q) => p.V = q.V + q.V; }")]
     [TestCase("EECS054", "Remove ChunkRows",
-        "public class S : EcsSystem { [ForEach(ChunkRows = 64)] static void A(ref P p) => p.V++; }",
+        "[EcsSystem] public ref struct S { [ForEach(ChunkRows = 64)] static void A(ref P p) => p.V++; }",
         "[ForEach] static void A(ref P p)")]
     [TestCase("EECS054", "Remove ChunkRows",
-        "public class S : EcsSystem { [ForEach(Parallel = true, ChunkRows = -1)] static void A(ref P p) => p.V++; }",
+        "[EcsSystem] public ref struct S { [ForEach(Parallel = true, ChunkRows = -1)] static void A(ref P p) => p.V++; }",
         "[ForEach(Parallel = true)] static void A(ref P p)")]
     [TestCase("EECS061", "Run it on one thread",
         "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
         + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, QueryFilter.Create().Without<Q>()); return s.Total; } }",
         "w.ForEach<P, Sum>(ref s, QueryFilter.Create().Without<Q>());")]
     [TestCase("EECS071", "Draw from EntityRandom",
-        "public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p) => p.V = System.Random.Shared.Next(1, 7); }",
+        "[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(ref P p) => p.V = System.Random.Shared.Next(1, 7); }",
         "static void A(ref P p, Entity entity, in EntityRandom random) => p.V = random.Range(entity.Id, 0, 1, 7); }")]
     [TestCase("EECS071", "Draw from EntityRandom",
-        "public class S : EcsSystem { [ForEach] static void A(ref Q q, Entity e, in EntityRandom r) => q.V = r.Range(e.Id, 0, 0, 9) + (System.Random.Shared.NextSingle() < 0.5f ? 1 : 0); }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(ref Q q, Entity e, in EntityRandom r) => q.V = r.Range(e.Id, 0, 0, 9) + (System.Random.Shared.NextSingle() < 0.5f ? 1 : 0); }",
         "q.V = r.Range(e.Id, 0, 0, 9) + (r.Float(e.Id, 1) < 0.5f ? 1 : 0); }")]
     [TestCase("EECS088", "Give it a stream of its own",
-        "public class S : EcsSystem { [ForEach] static void A(ref P p, Entity e, in EntityRandom r) => p.V = r.Range(e.Id, 0, 1, 7) + r.Range(e.Id, 0, 1, 7) * r.Range(e.Id, 1, 1, 7); }",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Entity e, in EntityRandom r) => p.V = r.Range(e.Id, 0, 1, 7) + r.Range(e.Id, 0, 1, 7) * r.Range(e.Id, 1, 1, 7); }",
         "p.V = r.Range(e.Id, 0, 1, 7) + r.Range(e.Id, 2, 1, 7) * r.Range(e.Id, 1, 1, 7); }")]   // the next stream no draw uses
     [TestCase("EECS062", "Make it partial",
         "public static class Outer { internal class Mid { public struct Census : ISingletonComponent { [Sum] public int Alive; } } }",
@@ -353,6 +334,18 @@ public class CodeFixTests
     [TestCase("EECS069", "Mark it [NotSaved]",
         "namespace N\n{\n    public record struct Wire(object Socket) : IComponent;\n}",
         "namespace N\n{\n    [NotSaved]\n    public record struct Wire(object Socket) : IComponent;\n}")]
+    [TestCase("EECS074", "Make it a ref struct",
+        "[EcsSystem] public struct S { [ForEach] static void A(ref P p) => p.V++; }",
+        "[EcsSystem] public ref struct S {")]
+    [TestCase("EECS074", "Make it a ref struct",
+        "[EcsSystem] public partial struct S { [ForEach] static void A(ref P p) => p.V++; }",
+        "[EcsSystem] public ref partial struct S {")]
+    [TestCase("EECS075", "Make it static",
+        "[EcsSystem] public ref struct S { [ForEach] void A(ref P p) => p.V++; }",
+        "[ForEach] static void A(ref P p) => p.V++;")]
+    [TestCase("EECS075", "Make it static",
+        "[EcsSystem] public ref struct S { [OnUpdate] void U(World world) => world.GetSingleton<Clock>().Ticks++; }",
+        "[OnUpdate] static void U(World world)")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
@@ -379,40 +372,38 @@ public class CodeFixTests
     [TestCase("EECS006", "public class Base { } public class R : Base, IComponent { public int V; }")]
     [TestCase("EECS006", "public class R : IComponent { protected int V; }")]
     [TestCase("EECS011", "public struct Grid : ISingletonComponent { public System.Collections.Generic.List<int> Cells; }\n"
-                         + "public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, in Grid g) => g.Cells.Add(p.V); }")]
-    [TestCase("EECS010", "public class S : EcsSystem { [ForEach(Parallel = true)] void A(ref P p) => p.V = World.Clock.Ticks; }",
-        "Run it on one thread")]                                                                                    // reads the system: not static
+                         + "[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(ref P p, in Grid g) => g.Cells.Add(p.V); }")]
+    [TestCase("EECS010", "[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(ref P p, World world) => p.V = world.Clock.Ticks; }",
+        "Run it on one thread")]                                                                                    // reaches the world
     [TestCase("EECS012", "public interface IUse { int Count(DynamicBuffer<int> items); }\n"
                          + "public class Use : IUse { public int Count(DynamicBuffer<int> items) => items.Count; }")]
     [TestCase("EECS012", "public static class Use { public static int Count(DynamicBuffer<int> items) => items.Count;\n"
                          + "  public static int Call(Entity e) => Count(e.Read<DynamicBuffer<int>>()); }", "Take it by 'in' (read)")]
-    [TestCase("EECS022", "file struct C : IComponent { public int V; } public class S : EcsSystem { [ForEach] static void A(ref C c) => c.V++; }")]
-    [TestCase("EECS026", "public class S : EcsSystem { [ForEach] static void A(ref P p, ref T t) => p.V++; }")]  // the stamp: [With<T>] would change it
+    [TestCase("EECS022", "file struct C : IComponent { public int V; } [EcsSystem] public ref struct S { [ForEach] static void A(ref C c) => c.V++; }")]
+    [TestCase("EECS026", "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, ref T t) => p.V++; }")]  // the stamp: [With<T>] would change it
     [TestCase("EECS025", "public static class R { [ForEach] static void A(ref P p, ref int n) => n += p.V;\n"
                          + "  public static int Call() { P p = default; int n = 0; A(ref p, ref n); return n; } }")]       // a caller passes 'ref'
     [TestCase("EECS032", "public static class U { public static bool F(World w) => w.Count<P>(QueryFilter.Create().With<Q>()) > 0; }", "Use Any")]
     [TestCase("EECS017", "public struct Target : IComponent { public Entity Of; } public static class U { public static void F(Entity e) => e.Read<Target>().Of.Destroy(); }")]
-    [TestCase("EECS007", "public class S : EcsSystem { int _kills; void K() => _kills++; }")]
-    [TestCase("EECS007", "public class S : EcsSystem { private int _limit; public S(int limit) { System.Action a = () => _limit = limit; a(); } }")]
+    [TestCase("EECS007", "[EcsSystem] public ref struct S { static int _kills; static void K() => _kills++; }")]
+    [TestCase("EECS007", "[EcsSystem] public ref struct S { private static int _limit; static S() { System.Action a = () => _limit = 3; a(); } }")]
     [TestCase("EECS043", "public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; } public static class U { public static long F(Shop s) => s.Key.Id; }")]
     [TestCase("EECS015", "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public static class U { public static void F(Entity e) => e.Get<Owned>().K = 1; }")]
-    [TestCase("EECS015", "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public class S : EcsSystem { [ForEach] static void A(ref Owned o) => o.K++; }")]
+    [TestCase("EECS015", "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } [EcsSystem] public ref struct S { [ForEach] static void A(ref Owned o) => o.K++; }")]
     [TestCase("EECS038", "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public static class U { public static void F(Entity e) { var o = e.Read<Owned>(); o.K = 1; } }")]
     [TestCase("EECS039", "public static class R { [ForEach] public static void B(Mut<P> p, in Q q) { if (q.V > 0) p.Write().V = q.V; }\n"
                          + "  public static void Call() { P p = default; B(new Mut<P>(ref p, default), default); } }")]                 // a caller passes a Mut
     [TestCase("EECS046", "public static class U { public static int F(World w) { int n = 0; foreach (QueryItem<T> item in w.Query<T>()) n += item.Component1.V; return n; } }")] // typed by hand
-    [TestCase("EECS027", "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { int q = 1; p.V = e.Get<Q>().V + q; } }")]   // the name is taken
-    [TestCase("EECS027", "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { p.V = e.Get<Q>().V; if (e.TryGet<Q>(out var x)) p.V += x.V; } }")] // a TryGet stays
-    [TestCase("EECS027", "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p, Maybe<Q> m) { p.V = e.Get<Q>().V; if (m.HasValue) p.V++; } }")]   // taken as a Maybe
-    [TestCase("EECS027", "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p, in Q q) => e.Get<Q>().V = p.V + q.V; }")]                     // 'in' cannot write
+    [TestCase("EECS027", "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p) { int q = 1; p.V = e.Get<Q>().V + q; } }")]   // the name is taken
+    [TestCase("EECS027", "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p) { p.V = e.Get<Q>().V; if (e.TryGet<Q>(out var x)) p.V += x.V; } }")] // a TryGet stays
+    [TestCase("EECS027", "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p, Maybe<Q> m) { p.V = e.Get<Q>().V; if (m.HasValue) p.V++; } }")]   // taken as a Maybe
+    [TestCase("EECS027", "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p, in Q q) => e.Get<Q>().V = p.V + q.V; }")]                     // 'in' cannot write
     [TestCase("EECS027", "public static class R { [ForEach] public static void A(Entity e, ref P p) => p.V = e.Get<Q>().V; public static void Call(Entity e) { P p = default; A(e, ref p); } }")] // a caller
     [TestCase("EECS061", "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
                          + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, default, 64); return s.Total; } }")] // its chunk size: chosen for threads
-    [TestCase("EECS082", "public class S : EcsSystem { public override int UpdateInterval => World.EntityCount; }")]            // not a constant
-    [TestCase("EECS082", "[UpdateInterval(2)] public class S : EcsSystem { public override int UpdateInterval => 4; }")]          // declared already
     [TestCase("EECS081", "public class R { int x = 1; [ForEntity] void A(ref P p) => p.V += x; }")]                              // uses its instance
-    [TestCase("EECS071", "public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V = (int)System.Random.Shared.NextInt64(9); }")] // no EntityRandom twin
-    [TestCase("EECS071", "public class S : EcsSystem { [ForEach] static void A(System.Span<P> p) => p[0].V = System.Random.Shared.Next(); }")] // a batch method: no Entity
+    [TestCase("EECS071", "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p) => p.V = (int)System.Random.Shared.NextInt64(9); }")] // no EntityRandom twin
+    [TestCase("EECS071", "[EcsSystem] public ref struct S { [ForEach] static void A(System.Span<P> p) => p[0].V = System.Random.Shared.Next(); }")] // a batch method: no Entity
     public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)
     {
         var document = Document(Data + source);
@@ -423,10 +414,59 @@ public class CodeFixTests
         Assert.That(await Analyze(document), Has.Some.Matches<Diagnostic>(d => d.Id == id), "the case reports " + id);
     }
 
+    // The migration of a system of the old form (a class deriving from EcsSystem, which no longer exists: CS0246): the
+    // members turn static, the hooks take the world and the handle they use, the members the base class gave become
+    // the handle's, and the calls between the methods pass them on.
+    [TestCase("public class Move : EcsSystem { [ForEach] void A(ref P p) => p.V++; }",
+        "[EcsSystem]\npublic ref struct Move { [ForEach] static void A(ref P p) => p.V++; }")]
+    [TestCase("public sealed class Tick : EcsSystem\n{\n    protected override void OnUpdate() => World.GetSingleton<Clock>().Ticks++;\n}",
+        "[EcsSystem]\npublic ref struct Tick\n{\n    [OnUpdate] static void OnUpdate(World world) => world.GetSingleton<Clock>().Ticks++;\n}")]
+    [TestCase("public class Once : EcsSystem { protected override void OnUpdate() { if (RunCount > 2) Enabled = false; } }",
+        "[OnUpdate] static void OnUpdate(SystemHandle system) { if (system.RunCount > 2) system.Enabled = false; } }")]
+    [TestCase("public class Spawn : EcsSystem { protected override void OnCreate() => Make(); void Make() => World.CreateEntity(new P()); }",
+        "[OnCreate] static void OnCreate(World world) => Make(world); static void Make(World world) => world.CreateEntity(new P()); }")]
+    [TestCase("[UpdateInterval(2)] internal class Pace : EcsSystem { private const int Step = 2; [ForEach] void A(ref P p) => p.V += Step; }",
+        "[UpdateInterval(2), EcsSystem] internal ref struct Pace { private const int Step = 2; [ForEach] static void A(ref P p) => p.V += Step; }")]
+    public async Task MigratesASystemOfTheOldForm(string source, string expected)
+    {
+        var document = Document(Data + source);
+        var actions = await MigrationsOf(document);
+        Assert.That(actions.Select(a => a.Title), Is.EqualTo(new[] { "Make it an [EcsSystem] ref struct" }));
+        var operation = (await actions[0].GetOperationsAsync(CancellationToken.None)).OfType<ApplyChangesOperation>().Single();
+        var fixedDocument = operation.ChangedSolution.GetDocument(document.Id)!;
+        var text = (await fixedDocument.GetTextAsync()).ToString();
+        Assert.That(text, Does.Contain(expected));
+        var errors = (await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error);
+        Assert.That(errors, Is.Empty, text);
+        Assert.That((await Analyze(fixedDocument)).Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, text);
+    }
+
+    // What the migration cannot write mechanically: configuration taken by a constructor (it goes into a singleton),
+    // a base class of other systems, a [ForEach] method that reads the system's run (the handle is no [ForEach]
+    // parameter).
+    [TestCase("public class Slow(int every) : EcsSystem { [ForEach] void A(ref P p) => p.V += every; }")]
+    [TestCase("public class Slow : EcsSystem { private readonly int _every; public Slow(int every) => _every = every; [ForEach] void A(ref P p) => p.V += _every; }")]
+    [TestCase("public abstract class Base : EcsSystem { [ForEach] void A(ref P p) => p.V++; }")]
+    [TestCase("public class Count : EcsSystem { [ForEach] void A(ref P p) => p.V = (int)RunCount; }")]
+    public async Task OffersNoMigrationThatBreaksTheCode(string source)
+    {
+        var document = Document(Data + source);
+        Assert.That((await document.Project.GetCompilationAsync())!.GetDiagnostics(), Has.Some.Matches<Diagnostic>(d => d.Id == "CS0246"));
+        Assert.That(await MigrationsOf(document), Is.Empty);
+    }
+
+    private static async Task<List<CodeAction>> MigrationsOf(Document document)
+    {
+        var actions = new List<CodeAction>();
+        foreach (var diagnostic in (await document.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Id == "CS0246"))
+            await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        return actions;
+    }
+
     [Test]
     public async Task ByValueParameterOfOtherTypesHasNoFix()
     {
-        var document = Document(Data + "public class S : EcsSystem { [ForEach] static void A(ref P p, Box b) { } }");
+        var document = Document(Data + "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Box b) { } }");
         var diagnostic = (await Analyze(document)).First(d => d.Id == "EECS002");
         var actions = new List<CodeAction>();
         await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));

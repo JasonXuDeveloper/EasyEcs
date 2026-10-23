@@ -51,7 +51,7 @@ public sealed partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor Allocation = new("EECS028", "An allocation in code that runs every update",
         "'{0}' allocates {3} in '{1}', which runs {2}{4}",
         Category, DiagnosticSeverity.Warning, true,
-        "A [ForEach] method runs for every entity it visits and OnUpdate once per update, so garbage there is garbage " +
+        "A [ForEach] method runs for every entity it visits and an [OnUpdate] method once per update, so garbage there is garbage " +
         "every tick, and the collections it causes pause the world. Objects, arrays, capturing lambdas, LINQ, strings " +
         "built at run time, boxing, enumerators of interfaces and the cold calls of tools (TrimExcess, Capture(), " +
         "Describe, DescribeTables, DescribeSchedule, new Prefab) allocate; code inside a throw, and calls the compiler " +
@@ -59,21 +59,13 @@ public sealed partial class EasyEcsAnalyzer
         "parameter: one per thread, reused by the next rows.",
         helpLinkUri: Help("EECS028"));
 
-    public static readonly DiagnosticDescriptor InstanceForEach = new("EECS029", "An instance [ForEach] method that uses no instance member",
-        "[ForEach] method '{0}' uses nothing of its system; make it static",
-        Category, DiagnosticSeverity.Warning, true,
-        "An instance method could reach the World through its system, so the generator treats it as one that may change " +
-        "structure: its system runs alone in a parallel stage, and its rows are walked with the checks a structural " +
-        "change needs. A static method that takes no Entity or World is proven not to change structure.",
-        helpLinkUri: Help("EECS029"));
-
     public static readonly DiagnosticDescriptor PerEntityChange = new("EECS030", "A structural change entity by entity over a query",
         "This {0} {1} each entity {2} one by one; {3} does it for all of them in one call",
         Category, DiagnosticSeverity.Warning, true,
         "A structural change through each entity moves (or flips) one row per call, through the structural gate each " +
         "time. SetAll, RemoveAll, DisableAll, EnableAll and DestroyAll change every matching row of a table " +
         "together, whole words of rows at once. A [ForEach] method whose whole body is such a change is the same loop, " +
-        "written by the generator: make the bulk call in the system's OnUpdate instead.",
+        "written by the generator: make the bulk call in the system's [OnUpdate] method instead.",
         helpLinkUri: Help("EECS030"));
 
     public static readonly DiagnosticDescriptor CreateInLoop = new("EECS031", "Entities created one by one in a counted loop",
@@ -190,18 +182,17 @@ public sealed partial class EasyEcsAnalyzer
     /// <summary>EasyEcs's types in the compilation (null without a reference to it).</summary>
     private sealed class Core
     {
-        public INamedTypeSymbol Entity = null!, World = null!, EntitySpan = null!, EcsSystem = null!, Track = null!, Prefab = null!;
+        public INamedTypeSymbol Entity = null!, World = null!, EntitySpan = null!, Track = null!, Prefab = null!;
 
         public static Core? Create(Compilation compilation)
         {
             var entity = compilation.GetTypeByMetadataName(Symbols.Entity);
             var world = compilation.GetTypeByMetadataName(Symbols.World);
             var span = compilation.GetTypeByMetadataName(Symbols.EntitySpan);
-            var system = compilation.GetTypeByMetadataName(Symbols.EcsSystem);
             var track = compilation.GetTypeByMetadataName(Symbols.TrackChanges);
             var prefab = compilation.GetTypeByMetadataName("EasyEcs.Prefab");
-            return entity == null || world == null || span == null || system == null || track == null || prefab == null ? null
-                : new Core { Entity = entity, World = world, EntitySpan = span, EcsSystem = system, Track = track, Prefab = prefab };
+            return entity == null || world == null || span == null || track == null || prefab == null ? null
+                : new Core { Entity = entity, World = world, EntitySpan = span, Track = track, Prefab = prefab };
         }
 
         public bool Is(ITypeSymbol? type, INamedTypeSymbol core) => SymbolEqualityComparer.Default.Equals(type, core);
@@ -236,26 +227,18 @@ public sealed partial class EasyEcsAnalyzer
         {
             if (ForEachBulk(context, method, body, core)) return; // the method goes: what it costs per row is moot
             var uses = new Dictionary<IParameterSymbol, List<IOperation>>(SymbolEqualityComparer.Default);
-            bool usesInstance = false;
             foreach (var operation in body.Descendants())
-            {
                 if (operation is IParameterReferenceOperation reference)
                 {
                     if (!uses.TryGetValue(reference.Parameter, out var list)) uses[reference.Parameter] = list = [];
                     list.Add(reference);
                 }
-                else if (operation is IInstanceReferenceOperation) usesInstance = true;
-            }
 
             AnalyzeParameters(context, method, body, uses);
             AnalyzeHandWritten(context, method, body, core, resets);
             AnalyzeScratch(context, method, body);
             AnalyzeLookups(context, core, method, body);
             AnalyzeAllocations(context, method, body, Symbols.IsForEntity(method) ? "on every call" : "for every entity it visits, each update", true);
-            // A parallel one is EECS010's: it cannot run in parallel until it is static, and offers the same fix.
-            if (!method.IsStatic && !usesInstance && Symbols.IsSystem(method.ContainingType) && !Symbols.SharesSignature(method)
-                && method.PartialDefinitionPart == null && method.PartialImplementationPart == null && !Symbols.IsParallel(method))
-                context.ReportDiagnostic(Diagnostic.Create(InstanceForEach, method.Locations.FirstOrDefault(), method.Name));
         }
         else if (Symbols.JobInterface(method) != null)
         {
@@ -264,20 +247,11 @@ public sealed partial class EasyEcsAnalyzer
             AnalyzeLookups(context, core, method, body);
             AnalyzeAllocations(context, method, body, "for every entity its loop visits", true);
         }
-        else if (method is { Name: "OnUpdate", IsOverride: true, Parameters.Length: 0 } && Symbols.IsSystem(method.ContainingType)
-                 && !HasCadence(method.ContainingType, core))
+        // An [OnUpdate] method of a system with [UpdateInterval(n)], n above 1, runs on the cadence its author chose: what
+        // it allocates there is a choice, not garbage of every update.
+        else if (Symbols.Hook(method) == Symbols.HookKind.Update && Symbols.IsSystem(method.ContainingType)
+                 && Symbols.Schedule(method.ContainingType) is not { Interval: > 1 })
             AnalyzeAllocations(context, method, body, "every update", false);
-    }
-
-    /// <summary>
-    /// Whether the system (or a base below EcsSystem) has [UpdateInterval(n)] with n above 1: its OnUpdate runs on the cadence its
-    /// author chose, so what it allocates there is a choice, not garbage of every update.
-    /// </summary>
-    private static bool HasCadence(INamedTypeSymbol? type, Core core)
-    {
-        for (; type != null && !core.Is(type, core.EcsSystem); type = type.BaseType)
-            if (Symbols.Schedule(type) is { Interval: > 1 }) return true;
-        return false;
     }
 
     /// <summary>EECS025 for 'ref' / Span parameters that only read, EECS026 for parameters not used at all.</summary>

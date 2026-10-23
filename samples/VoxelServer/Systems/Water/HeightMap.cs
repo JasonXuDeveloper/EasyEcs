@@ -12,8 +12,8 @@ namespace VoxelServer;
 // with its height, so after the 32 layers each lane holds the top of its column, with no branch. The 256 bytes are read
 // and written once per layer, on the stack (measured: an order of magnitude faster than in the buffer's array), and
 // copied into the buffer once, through the span SetCount returns.
-[UpdateInGroup<Simulation>]
-public class HeightMapSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct HeightMapSystem
 {
     const int Columns = Terrain.Size * Terrain.Size;
 

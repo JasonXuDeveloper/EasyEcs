@@ -5,7 +5,8 @@ namespace GameLoop;
 // Moves players and bullets by their velocity over one fixed time step.
 // Mut<Position> stamps only the positions that changed: a player standing still is not
 // replicated (a ref parameter would stamp every row the method visits).
-public sealed class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach]
     static void Move(Mut<Position> position, in Velocity velocity, in Simulation simulation)
@@ -18,7 +19,8 @@ public sealed class MovementSystem : EcsSystem
 
 // Counts down a bullet's lifetime and destroys it when it runs out.
 // Destroying an entity in the middle of the pass is safe.
-public sealed class LifetimeSystem : EcsSystem
+[EcsSystem]
+public ref struct LifetimeSystem
 {
     [ForEach]
     static void Age(Entity bullet, ref Lifetime lifetime)
@@ -32,10 +34,12 @@ public sealed class LifetimeSystem : EcsSystem
 }
 
 // Counts the simulated ticks.
-public sealed class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        World.Simulation.Tick++;
+        world.Simulation.Tick++;
     }
 }

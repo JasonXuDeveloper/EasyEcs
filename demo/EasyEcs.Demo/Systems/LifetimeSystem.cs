@@ -3,7 +3,8 @@ using EasyEcs;
 namespace EasyEcs.Demo;
 
 // Ages every spark and destroys the ones whose time ran out.
-public class LifetimeSystem : EcsSystem
+[EcsSystem]
+public ref struct LifetimeSystem
 {
     [ForEach]
     static void Age(Entity spark, ref Lifetime life, in Clock clock)

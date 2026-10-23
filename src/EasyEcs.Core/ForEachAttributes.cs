@@ -3,14 +3,15 @@ using System;
 namespace EasyEcs;
 
 /// <summary>
-/// Runs a method of an <see cref="EcsSystem"/> (or a static method of any other type, through a generated entry point) for every entity matching its component parameters (and
+/// Runs a static method of an <see cref="EcsSystemAttribute">[EcsSystem]</see> (or of any other type, through a generated entry point) for every entity matching its component parameters (and
 /// the <see cref="WithAttribute{T}"/> / <see cref="WithoutAttribute{T}"/> / <see cref="WithAnyAttribute{T}"/> filters), each update, after
-/// <see cref="EcsSystem.OnUpdate"/>, in declaration order.
+/// its <see cref="OnUpdateAttribute">[OnUpdate]</see> method, in declaration order.
 /// <para>Parameters: 1..9 components (<c>ref</c> to write, <c>in</c> to read, <see cref="Mut{T}"/> to write some rows; or <c>Span&lt;T&gt;</c> /
 /// <c>ReadOnlySpan&lt;T&gt;</c> for a batch method that receives runs of rows), singletons (<c>ref</c> / <c>in</c>), and
-/// optionally <see cref="Entity"/> and <see cref="World"/>. Static and instance methods are supported.</para>
+/// optionally <see cref="Entity"/> and <see cref="World"/>.</para>
 /// <code>
-/// public class MovementSystem : EcsSystem
+/// [EcsSystem]
+/// ref struct Movement
 /// {
 ///     [ForEach, Without&lt;Frozen&gt;]
 ///     static void Move(ref Position p, in Velocity v) { p.X += v.X; p.Y += v.Y; }
@@ -31,7 +32,7 @@ public sealed class ForEachAttribute : Attribute
 
     /// <summary>
     /// Spread the method's rows over N runs of its system: each run visits one slice, about 1 / N of the rows of every
-    /// matching table (slice <see cref="EcsSystem.RunCount"/> mod N, <see cref="QueryFilter.Slice"/>), so every row is
+    /// matching table (slice <see cref="SystemHandle.RunCount"/> mod N, <see cref="QueryFilter.Slice"/>), so every row is
     /// visited once per N runs and a system over many entities costs about 1 / N per update instead of a spike on one.
     /// With <see cref="UpdateIntervalAttribute">[UpdateInterval(M)]</see>, a row is visited once per N * M updates. Rows that move between
     /// runs (swap-removes, structural changes, tables that grow or shrink) may be skipped or visited twice in one cycle.
@@ -172,7 +173,7 @@ public sealed class WithAnyAttribute<T> : Attribute where T : struct, IComponent
 
 /// <summary>
 /// The <see cref="ForEachAttribute"/> method visits only entities whose <typeparamref name="T"/> was written since its
-/// system last ran (<see cref="EcsSystem.LastRunTick"/>; on the first run, every entity having it). Requires
+/// system last ran (<see cref="SystemHandle.LastRunTick"/>; on the first run, every entity having it). Requires
 /// <typeparamref name="T"/> like <see cref="WithAttribute{T}"/>; <typeparamref name="T"/> tracks changes
 /// (<see cref="ITracked"/>). Several attributes require all of the components to have changed; for any of them,
 /// use <c>[ChangedAny&lt;T1, T2&gt;]</c>.
@@ -182,7 +183,7 @@ public sealed class ChangedAttribute<T> : Attribute where T : struct, IComponent
 
 /// <summary>
 /// The <see cref="ForEachAttribute"/> method visits only entities that lost <typeparamref name="T"/> since its system
-/// last ran (<see cref="EcsSystem.LastRunTick"/>) and have not got it back: replication sends the removal, a cleanup
+/// last ran (<see cref="SystemHandle.LastRunTick"/>) and have not got it back: replication sends the removal, a cleanup
 /// releases what the component stood for. Removing a component keeps the entity's row, so the method can read the
 /// entity's other components; destroyed entities are not visited. <typeparamref name="T"/> tracks changes
 /// (<see cref="ITracked"/>) and is not a parameter (the entity no longer has it, EECS016).

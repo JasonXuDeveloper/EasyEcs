@@ -400,8 +400,8 @@ public class BattleServerTests
         server.World.AddSystem<FaultySystem>();
         long tick = server.Battle.Tick;
         for (int i = 0; i < 10; i++) server.Tick();
-        Assert.That(server.Failure, Is.InstanceOf<FaultySystem>());
-        Assert.That(server.Failure.Enabled, Is.False);
+        Assert.That(server.Failure?.Type, Is.EqualTo(typeof(FaultySystem)));
+        Assert.That(server.Failure!.Value.Enabled, Is.False);
         Assert.That(server.Battle.Tick, Is.EqualTo(tick + 10));
     }
 
@@ -409,14 +409,14 @@ public class BattleServerTests
     public void SystemsAreMeasuredAndOwnTheirSingletons()
     {
         using var server = Run(20);
-        Assert.That(server.Slowest().Stats.Runs, Is.Positive);
-        Assert.That(server.World.TryGetSystem(out RegenerationSystem regeneration), Is.True);
-        Assert.That(server.World.TryGetSystem(out ManaSystem mana), Is.True);
+        Assert.That(server.Slowest()!.Value.Stats.Runs, Is.Positive);
+        Assert.That(server.World.TryGetSystem<RegenerationSystem>(out var regeneration), Is.True);
+        Assert.That(server.World.TryGetSystem<ManaSystem>(out var mana), Is.True);
         Assert.That(regeneration.Stats.Runs, Is.EqualTo(2));                  // every 10th update
         Assert.That(mana.Stats.Runs, Is.EqualTo(2));                          // the same, phase 5
         int npcs = server.World.Count<Goal>(QueryFilter.Create().Without<Dead>());
         server.Tick();
-        Assert.That(server.World.TryGetSystem(out PlanningSystem planning), Is.True);
+        Assert.That(server.World.TryGetSystem<PlanningSystem>(out var planning), Is.True);
         Assert.That(planning.RunCount, Is.EqualTo(21));
         Assert.That(planning.Stats.LastEntities, Is.EqualTo(npcs / 4));      // Slices = 4: a quarter per run
         Assert.That(server.World.HasSingleton<Waypoints>(), Is.True);         // PlanningSystem.OnCreate
@@ -573,8 +573,10 @@ public class BattleServerTests
         return server;
     }
 
-    private sealed class FaultySystem : EcsSystem
+    [EcsSystem]
+    internal ref struct FaultySystem
     {
-        protected override void OnUpdate() => throw new InvalidOperationException("a bug in one system");
+        [OnUpdate]
+        static void OnUpdate(World world) => throw new InvalidOperationException("a bug in one system");
     }
 }

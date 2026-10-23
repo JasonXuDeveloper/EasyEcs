@@ -4,12 +4,14 @@ namespace EasyEcsApp;
 
 // Spawns a wave of bullets from the spawner's prefab every Interval ticks.
 // The game's rules live in systems like this one, never in Program.cs.
-public class SpawnSystem : EcsSystem
+[EcsSystem]
+public ref struct SpawnSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        ref readonly var spawner = ref World.Spawner;
-        bool waveDue = World.Clock.Tick % spawner.Interval == 0;
+        ref readonly var spawner = ref world.Spawner;
+        bool waveDue = world.Clock.Tick % spawner.Interval == 0;
         if (!waveDue)
         {
             return;
@@ -17,7 +19,7 @@ public class SpawnSystem : EcsSystem
 
         for (int i = 0; i < spawner.Wave; i++)
         {
-            World.Instantiate(spawner.Bullet);
+            world.Instantiate(spawner.Bullet);
         }
     }
 }

@@ -1,18 +1,32 @@
 using System;
 using System.Diagnostics;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading;
 namespace EasyEcs;
 
-// System scheduling. Systems run synchronously, in registration order as [UpdateBefore<T>] / [UpdateAfter<T>] reorder
-// it, in stages: a system's stage follows the stages of the systems it must run after and of the earlier systems whose
-// SystemAccess conflicts with its own, so a stage holds systems with no order and no conflict between them; with
-// WorldOptions.ParallelSystems a stage runs at the same time (World.Parallel.cs). Each update calls OnUpdate() then the
-// generated [ForEach] methods.
+// System scheduling. A system is a type ([EcsSystem] ref struct) and a record in the world (SystemRow); its code is a
+// case of its assembly's system set (ISystemSet). Systems run synchronously, in registration order as
+// [UpdateBefore<T>] / [UpdateAfter<T>] reorder it, in stages: a system's stage follows the stages of the systems it
+// must run after and of the earlier systems whose SystemAccess conflicts with its own, so a stage holds systems with
+// no order and no conflict between them; with WorldOptions.ParallelSystems a stage runs at the same time
+// (World.Parallel.cs). A stage is cut into segments, consecutive systems of one set, each run by one call of its set.
 public sealed partial class World
 {
     // Group 0 is the default group (World.Update()); others are [UpdateInGroup<T>] groups (World.Update<T>()).
     private SystemSchedule[] _groups = [new()];
+
+    /// <summary>The records of the added systems, by index (<see cref="SystemHandle"/>); free records have no code.</summary>
+    internal SystemRow[] SystemRows = [];
+
+    private int[] _freeSystems = [];
+    private int _freeSystemCount;
+
+    // TypeIndex<SystemCode.Entry, T> -> index + 1 of its record (0: not added). O(1) for HasSystem / System<T>.
+    private int[] _systemOfType = [];
+
+    /// <summary>A system of a schedule: its record and the record's version when it was scheduled.</summary>
+    internal readonly record struct SystemSlot(int Index, int Version);
 
     /// <summary>
     /// Number of <see cref="Update()"/> calls so far, the one running included (0 before the first): updates of the default
@@ -35,82 +49,136 @@ public sealed partial class World
     }
 
     /// <summary>Systems of every group, each group in execution order (default group first). Allocation-free.</summary>
-    public SystemList Systems => new(_groups);
-
-    /// <summary>Create a system, attach it to this world and call its <see cref="EcsSystem.OnCreate"/>.</summary>
-    /// <param name="changesFromNow">See <see cref="AddSystem(EcsSystem, bool)"/>.</param>
-    public T AddSystem<T>(bool changesFromNow = false) where T : EcsSystem, new()
-    {
-        var system = new T();
-        AddSystem(system, changesFromNow);
-        return system;
-    }
+    public SystemList Systems => new(this, _groups);
 
     /// <summary>
-    /// Attach <paramref name="system"/> to its group (<see cref="UpdateInGroupAttribute{TGroup}"/>, default otherwise)
-    /// and call its <see cref="EcsSystem.OnCreate"/>.
+    /// Add system <typeparamref name="T"/> (an <see cref="EcsSystemAttribute">[EcsSystem]</see> ref struct) to its group
+    /// (<see cref="UpdateInGroupAttribute{TGroup}"/>, default otherwise) and run its
+    /// <see cref="OnCreateAttribute">[OnCreate]</see> method. A system is added once per world: adding it again throws.
+    /// Cold: allocates its record and the group's new schedule, O(systems²) for the stages.
     /// </summary>
-    /// <param name="system">The system, not attached to a world yet.</param>
     /// <param name="changesFromNow">
     /// False (the default): the first run of its <c>[Changed&lt;T&gt;]</c> and <c>[Removed&lt;T&gt;]</c> methods visits
     /// every row written or removed since the world began. True: only what is written or removed after this call, as if
-    /// the system had run just now (<see cref="EcsSystem.LastRunTick"/>); for a system added to a world that already
+    /// the system had run just now (<see cref="SystemHandle.LastRunTick"/>); for a system added to a world that already
     /// holds its state (a restart after <see cref="Load(System.ReadOnlySpan{byte}, bool)"/>, a system switched on later).
     /// </param>
-    public void AddSystem(EcsSystem system, bool changesFromNow = false)
+    /// <returns>The system's handle.</returns>
+    /// <exception cref="NotSupportedException">No assembly registers code for <typeparamref name="T"/>: it is no
+    /// [EcsSystem], or a closed generic system no assembly names (made by reflection).</exception>
+    public unsafe SystemHandle AddSystem<T>(bool changesFromNow = false) where T : struct, allows ref struct
     {
-        if (system.World != null)
-            throw new InvalidOperationException($"{system.GetType().Name} already belongs to a world");
-
-        system.Group = GroupOf(system.GetType(), out string group, out system.RunsBefore, out system.RunsAfter);
-        system.DeclareAccess();
+        if (_disposed) throw new ObjectDisposedException(nameof(World));
+        int typeSlot = TypeIndex<SystemCode.Entry, T>.Value;
+        if (Find(typeSlot) >= 0)
+            throw new InvalidOperationException($"{ScheduleInfo.NameOf(typeof(T))} is already a system of this world");
+        var code = SystemCode.Of(typeof(T));
+        code.Schedule();
+        _ = code.Access; // declared before the schedule reads it
+        int index;
         using (Structural())
         {
-            if (system.Group >= _groups.Length) Array.Resize(ref _groups, system.Group + 1);
-            (_groups[system.Group] ??= new SystemSchedule { Name = group }).Insert(system); // throws on a cycle: the system stays out
-            if (changesFromNow) system.LastRunTick = _changeTick++; // writes from here on are newer than its "last run"
+            index = TakeSystemRow();
+            ref var row = ref SystemRows[index];
+            row.Code = code;
+            row.Id = code.Id;
+            row.Enabled = true;
+            row.Interval = code.Interval;
+            row.Phase = code.Phase;
+            row.Group = code.Group;
+            row.TypeSlot = typeSlot;
+            if (code.Group >= _groups.Length) Array.Resize(ref _groups, code.Group + 1);
+            var group = _groups[code.Group] ??= new SystemSchedule { Name = code.GroupName };
+            try
+            {
+                group.Insert(this, new SystemSlot(index, row.Version)); // throws on a cycle: the system stays out
+            }
+            catch
+            {
+                FreeSystemRow(index);
+                throw;
+            }
+
+            if (changesFromNow) SystemRows[index].LastRunTick = _changeTick++; // writes from here on are newer than its "last run"
         }
 
-        system.World = this;
-
-        system.Create();
+        if (typeSlot >= _systemOfType.Length) Array.Resize(ref _systemOfType, Math.Max(typeSlot + 1, _systemOfType.Length * 2));
+        _systemOfType[typeSlot] = index + 1;
+        var handle = new SystemHandle(this, index, SystemRows[index].Version);
+        code.Set.Create(this, code.Id, handle);
+        return handle;
     }
 
-    /// <summary>Remove the system of type <typeparamref name="T"/> (calls its <see cref="EcsSystem.OnDestroy"/>).</summary>
-    public bool RemoveSystem<T>() where T : EcsSystem
+    /// <summary>Remove system <typeparamref name="T"/> (runs its <see cref="OnDestroyAttribute">[OnDestroy]</see> method): false when the world has none. Its handles turn stale.</summary>
+    public bool RemoveSystem<T>() where T : struct, allows ref struct
     {
-        if (!TryGetSystem<T>(out var removed)) return false;
-        RemoveSystem(removed);
+        int index = Find(TypeIndex<SystemCode.Entry, T>.Value);
+        if (index < 0) return false;
+        RemoveSystem(index);
         return true;
     }
 
-    private void RemoveSystem(EcsSystem system)
-    {
-        using (Structural()) _groups[system.Group].Remove(system);
-        system.Destroy();
-        system.World = null;
-    }
+    /// <summary>Whether system <typeparamref name="T"/> is in this world. O(1).</summary>
+    public bool HasSystem<T>() where T : struct, allows ref struct => Find(TypeIndex<SystemCode.Entry, T>.Value) >= 0;
 
     /// <summary>
-    /// Find the system of type <typeparamref name="T"/> (for tools, tests and the code that hosts the world, never from
-    /// another system). Returns false and null when the world has none. O(systems).
+    /// The handle of system <typeparamref name="T"/> (for tools, tests and the code that hosts the world, never from
+    /// another system). Throws <see cref="InvalidOperationException"/> when the world has none. O(1).
     /// </summary>
-    public bool TryGetSystem<T>(out T system) where T : EcsSystem
+    public SystemHandle System<T>() where T : struct, allows ref struct
     {
-        foreach (var group in _groups)
-        {
-            if (group == null) continue;
-            var systems = group.Systems;
-            for (int i = 0; i < systems.Length; i++)
-                if (systems[i] is T match)
-                {
-                    system = match;
-                    return true;
-                }
-        }
+        if (!TryGetSystem<T>(out var system))
+            throw new InvalidOperationException($"{ScheduleInfo.NameOf(typeof(T))} is no system of this world");
+        return system;
+    }
 
-        system = null;
-        return false;
+    /// <summary>Find system <typeparamref name="T"/>: false and a default handle when the world has none. O(1).</summary>
+    public bool TryGetSystem<T>(out SystemHandle system) where T : struct, allows ref struct
+    {
+        int index = Find(TypeIndex<SystemCode.Entry, T>.Value);
+        system = index < 0 ? default : new SystemHandle(this, index, SystemRows[index].Version);
+        return index >= 0;
+    }
+
+    private int Find(int typeSlot) => typeSlot < _systemOfType.Length ? _systemOfType[typeSlot] - 1 : -1;
+
+    private unsafe void RemoveSystem(int index)
+    {
+        ref var row = ref SystemRows[index];
+        var code = row.Code;
+        var handle = new SystemHandle(this, index, row.Version);
+        using (Structural()) _groups[row.Group].Remove(this, index);
+        _systemOfType[row.TypeSlot] = 0;
+        try
+        {
+            code.Set.Destroy(this, code.Id, handle); // its handle still reads the record
+        }
+        finally
+        {
+            FreeSystemRow(index);
+        }
+    }
+
+    private int TakeSystemRow()
+    {
+        if (_freeSystemCount > 0) return _freeSystems[--_freeSystemCount];
+        int index = SystemRows.Length;
+        Array.Resize(ref SystemRows, Math.Max(8, index * 2));
+        for (int i = SystemRows.Length - 1; i > index; i--) PushFree(i); // the lowest first
+        return index;
+    }
+
+    /// <summary>Clear record <paramref name="index"/>: its version moves on, so every handle of its system is stale.</summary>
+    private void FreeSystemRow(int index)
+    {
+        SystemRows[index] = new SystemRow { Version = SystemRows[index].Version + 1 }; // drops the code, its set and its error
+        PushFree(index);
+    }
+
+    private void PushFree(int index)
+    {
+        if (_freeSystemCount == _freeSystems.Length) Array.Resize(ref _freeSystems, Math.Max(8, _freeSystemCount * 2));
+        _freeSystems[_freeSystemCount++] = index;
     }
 
     /// <summary>Run one update of every enabled system of the default group (synchronous). Allocation-free.</summary>
@@ -127,7 +195,7 @@ public sealed partial class World
         if (index < groups.Length && groups[index] is { } group) Run(group);
     }
 
-    private void Run(SystemSchedule group)
+    private unsafe void Run(SystemSchedule group)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(World));
         // No pass can run across an update: one still counted was interrupted by an exception. Close its tombstones.
@@ -139,99 +207,144 @@ public sealed partial class World
         for (int b = 0; b < stages.Length; b++)
         {
             var stage = stages[b];
-            var systems = stage.Systems;
             // One change tick per stage: its systems never write what another one of them reads (Changed<T> reads T).
             _changeTick++;
-            if (parallel && systems.Length > 1)
+            if (parallel && stage.Systems.Length > 1)
             {
                 RunStage(stage, update);
                 continue;
             }
 
-            for (int i = 0; i < systems.Length; i++)
-                RunSystem(systems[i], update);
+            var segments = stage.Segments;
+            for (int s = 0; s < segments.Length; s++)
+            {
+                var segment = segments[s];
+                segment.Set.Run(this, stage.Systems.AsSpan(segment.Start, segment.Count), update);
+            }
         }
 
         _changeTick++; // writes between updates are newer than every system's last run
     }
 
-    private void RunSystem(EcsSystem system, long update)
+    /// <summary>
+    /// Run <paramref name="systems"/>, systems of set <typeparamref name="TSet"/>, for update <paramref name="update"/>
+    /// of their group: the enabled ones due on it (<see cref="UpdateIntervalAttribute">[UpdateInterval]</see>), each
+    /// through the set's switch, so a system's code is a direct call. A segment of a stage runs with one call, a system
+    /// of a parallel stage with a span of one. Bound once per set (<see cref="SystemCode.Register{TSet}"/>).
+    /// </summary>
+    internal static void RunSystems<TSet>(World world, ReadOnlySpan<SystemSlot> systems, long update) where TSet : struct, ISystemSet
     {
-        if (!system.Enabled) return;
-        int interval = system.Interval;
-        if (interval > 1 && update % interval != system.Phase) return;
+        for (int i = 0; i < systems.Length; i++)
+        {
+            var slot = systems[i];
+            // Re-read per system: one may add systems (a new array) or remove a later one (a new version) as it runs.
+            ref var row = ref world.SystemRows[slot.Index];
+            if (row.Version != slot.Version || !row.Enabled) continue;
+            int interval = row.Interval;
+            if (interval > 1 && update % interval != row.Phase) continue;
+            var handle = new SystemHandle(world, slot.Index, slot.Version);
+            int id = row.Id;
+            if (world._options.MeasureSystems)
+            {
+                world.RunMeasured<TSet>(id, handle);
+                continue;
+            }
 
-        try
-        {
-            RunMeasured(system);
-        }
-        catch (Exception e) when (_options.SystemErrors == SystemErrorPolicy.Disable)
-        {
-            system.Fail(e);
-        }
-        finally
-        {
-            system.LastRunTick = _changeTick; // its own writes of this run are not changes for its next run
-            system.RunCount++; // the next run visits the next slice of its [ForEach(Slices = N)] methods
+            try
+            {
+                TSet.Update(world, id, handle);
+            }
+            catch (Exception e) when (world._options.SystemErrors == SystemErrorPolicy.Disable)
+            {
+                world.Fail(handle, e);
+            }
+            finally
+            {
+                world.Ran(handle);
+            }
         }
     }
 
-    private void RunMeasured(EcsSystem system)
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void RunMeasured<TSet>(int id, SystemHandle handle) where TSet : struct, ISystemSet
     {
-        if (!_options.MeasureSystems)
-        {
-            system.Update();
-            return;
-        }
-
         // The thread's own allocations, plus those of the threads that ran chunks of its parallel [ForEach] passes
         // (TryRunChunks adds them to HelperAllocated of this thread).
-        system.Visited = 0;
+        SystemRows[handle.Index].Visited = 0;
         long helpers = HelperAllocated;
         long allocated = GC.GetAllocatedBytesForCurrentThread();
         long start = Stopwatch.GetTimestamp();
         try
         {
-            system.Update();
+            TSet.Update(this, id, handle);
+        }
+        catch (Exception e) when (_options.SystemErrors == SystemErrorPolicy.Disable)
+        {
+            Fail(handle, e);
         }
         finally
         {
             long ticks = Stopwatch.GetTimestamp() - start;
             allocated = GC.GetAllocatedBytesForCurrentThread() - allocated + (HelperAllocated - helpers);
-            system.Stats = system.Stats.Add(ticks, allocated, system.Visited);
+            if (handle.IsAlive)
+            {
+                ref var row = ref SystemRows[handle.Index];
+                row.Stats = row.Stats.Add(ticks, allocated, row.Visited);
+            }
+
+            Ran(handle);
         }
+    }
+
+    /// <summary>After a run: its own writes are not changes for its next run, and the next run visits the next slice.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void Ran(SystemHandle handle)
+    {
+        ref var row = ref SystemRows[handle.Index]; // the array as it is now: the run may have grown it
+        if (row.Version != handle.Version) return; // it removed itself
+        row.LastRunTick = _changeTick;
+        row.RunCount++;
+    }
+
+    /// <summary>Switch the system off for <paramref name="error"/> (<see cref="SystemErrorPolicy.Disable"/>).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Fail(SystemHandle handle, Exception error)
+    {
+        if (!handle.IsAlive) return;
+        ref var row = ref SystemRows[handle.Index];
+        row.Enabled = false;
+        row.Error = error;
     }
 
     /// <summary>Whether this world measures its systems (<see cref="WorldOptions.MeasureSystems"/>).</summary>
     internal bool MeasuresSystems => _options.MeasureSystems;
 
     /// <summary>
-    /// Group index of a system type (its inherited [UpdateInGroup] attribute, or the default group), the group's name and
-    /// the system types it runs before and after.
+    /// Group index of a system type (its [UpdateInGroup] attribute, or the default group), the group's name and the
+    /// system types it runs before and after. Cold: once per system type.
     /// </summary>
-    private static int GroupOf(Type type, out string name, out Type[] before, out Type[] after)
+    internal static (int Group, string Name, Type[] Before, Type[] After) GroupOf(Type type)
     {
-        // Cold path (once per AddSystem); the attribute instance knows its group index, so no MakeGenericType.
+        // The attribute instance knows its group index, so no MakeGenericType.
         int group = 0;
-        name = SystemSchedule.DefaultName;
+        string name = SystemSchedule.DefaultName;
         List<Type> runsBefore = null, runsAfter = null;
-        foreach (var attribute in Attribute.GetCustomAttributes(type, typeof(Attribute), inherit: true))
+        foreach (var attribute in Attribute.GetCustomAttributes(type, typeof(Attribute), inherit: false))
         {
             if (attribute is ISystemGroupAttribute grouping) (group, name) = (grouping.Index, grouping.Name);
             else if (attribute is ISystemOrder order) ((order.Before ? runsBefore ??= [] : runsAfter ??= [])).Add(order.Other);
         }
 
-        before = runsBefore?.ToArray() ?? [];
-        after = runsAfter?.ToArray() ?? [];
-        return group;
+        return (group, name, runsBefore?.ToArray() ?? [], runsAfter?.ToArray() ?? []);
     }
 
     /// <summary>
-    /// Destroy all systems (OnDestroy in reverse order), then release all storage. Every system's OnDestroy runs and the
-    /// storage is released even when one throws; under <see cref="SystemErrorPolicy.Throw"/> the first exception is
-    /// rethrown at the end. Afterwards every structural change throws <see cref="ObjectDisposedException"/>.
+    /// Destroy all systems ([OnDestroy] in reverse order), then release all storage. Every system's [OnDestroy] runs and
+    /// the storage is released even when one throws; under <see cref="SystemErrorPolicy.Throw"/> the first exception is
+    /// rethrown at the end. Afterwards every handle is stale and every structural change throws
+    /// <see cref="ObjectDisposedException"/>.
     /// </summary>
-    public void Dispose()
+    public unsafe void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
@@ -243,24 +356,28 @@ public sealed partial class World
             var systems = groups[g]?.Systems ?? [];
             for (int i = systems.Length - 1; i >= 0; i--)
             {
+                var slot = systems[i];
+                ref var row = ref SystemRows[slot.Index];
+                if (row.Version != slot.Version || row.Code is not { } code) continue;
+                var handle = new SystemHandle(this, slot.Index, slot.Version);
                 try
                 {
-                    systems[i].Destroy();
+                    code.Set.Destroy(this, code.Id, handle);
                 }
                 catch (Exception e) when (_options.SystemErrors == SystemErrorPolicy.Disable)
                 {
-                    systems[i].Fail(e);
+                    Fail(handle, e);
                 }
                 catch (Exception e)
                 {
                     first ??= e; // the other systems still get their OnDestroy
                 }
-
-                systems[i].World = null;
             }
         }
 
         _groups = [new()];
+        for (int i = 0; i < SystemRows.Length; i++) SystemRows[i] = new SystemRow { Version = SystemRows[i].Version + 1 };
+        _systemOfType = [];
 
         // Meta keeps its length (handles index it unchecked); every record moves past its version, so every handle
         // is stale (a handle matching its record's version is alive: Entity.LocateArchetype).
@@ -276,30 +393,33 @@ public sealed partial class World
         Collectible.Untrack(this);
         ComponentInfo.Reclaim(); // bits of unloaded contexts this world still mentioned
         Gate.Close(); // the cleared tables take no rows: every later structural change throws
-        if (first != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(first);
+        if (first != null) global::System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(first);
     }
+
+    /// <summary>Consecutive systems of a stage that belong to one set: run by one call of the set.</summary>
+    internal readonly record struct Segment(SystemCode.Set Set, int Start, int Count);
 
     /// <summary>
     /// Systems of one group in execution order (registration order as [UpdateBefore] / [UpdateAfter] reorder it), with
-    /// their parallel stages. Mutated under
-    /// the structural gate by publishing new arrays (copy-on-write), so a running update never sees a torn list.
+    /// their parallel stages. Mutated under the structural gate by publishing new arrays (copy-on-write), so a running
+    /// update never sees a torn list.
     /// </summary>
     internal sealed class SystemSchedule
     {
-        public EcsSystem[] Systems = []; // execution order
+        public SystemSlot[] Systems = []; // execution order
         public SystemStage[] Stages = [];
         public long Updates;
         public string Name = DefaultName; // the group type's (World.DescribeSchedule)
-        private EcsSystem[] _registered = [];
+        private SystemSlot[] _registered = [];
 
         public const string DefaultName = "Default";
 
-        public void Insert(EcsSystem system) => Publish([.. _registered, system]);
+        public void Insert(World world, SystemSlot system) => Publish(world, [.. _registered, system]);
 
-        public void Remove(EcsSystem system)
+        public void Remove(World world, int index)
         {
-            int index = Array.IndexOf(_registered, system);
-            Publish([.. _registered.AsSpan(0, index), .. _registered.AsSpan(index + 1)]);
+            int at = Array.FindIndex(_registered, s => s.Index == index);
+            Publish(world, [.. _registered.AsSpan(0, at), .. _registered.AsSpan(at + 1)]);
         }
 
         /// <summary>
@@ -307,29 +427,41 @@ public sealed partial class World
         /// topological sort) and split it into stages: each system goes to the stage after the latest stage of a
         /// system it must follow, by an ordering or by an earlier system whose access conflicts with its own. Of two
         /// conflicting systems the earlier one always finishes first; unordered, non-conflicting systems share a stage.
-        /// Throws on a cycle, before anything changes. O(systems²), once per AddSystem / RemoveSystem.
+        /// Each stage is cut into segments of one set. Throws on a cycle, before anything changes. O(systems²), once per
+        /// AddSystem / RemoveSystem.
         /// </summary>
-        private void Publish(EcsSystem[] registered)
+        private void Publish(World world, SystemSlot[] registered)
         {
-            var order = Sort(registered);
+            var codes = new SystemCode.Entry[registered.Length];
+            for (int i = 0; i < codes.Length; i++) codes[i] = world.SystemRows[registered[i].Index].Code;
+            var order = Sort(codes);
             var levels = new int[order.Length];
             int stageCount = 0;
             for (int i = 0; i < order.Length; i++)
             {
                 for (int j = 0; j < i; j++)
-                    if (levels[j] >= levels[i] && (Precedes(order[j], order[i]) || order[j].Access.ConflictsWith(order[i].Access)))
+                    if (levels[j] >= levels[i] && (Precedes(codes[order[j]], codes[order[i]]) || codes[order[j]].Access.ConflictsWith(codes[order[i]].Access)))
                         levels[i] = levels[j] + 1;
                 stageCount = Math.Max(stageCount, levels[i] + 1);
             }
 
             var stages = new SystemStage[stageCount];
-            var systems = new EcsSystem[order.Length];
+            var systems = new SystemSlot[order.Length];
             for (int level = 0, next = 0; level < stageCount; level++)
             {
                 int start = next;
+                var segments = new List<Segment>();
                 for (int i = 0; i < order.Length; i++)
-                    if (levels[i] == level) systems[next++] = order[i];
-                stages[level] = new SystemStage(systems[start..next]);
+                {
+                    if (levels[i] != level) continue;
+                    var set = codes[order[i]].Set;
+                    int at = next - start;
+                    if (segments.Count > 0 && segments[^1].Set == set) segments[^1] = segments[^1] with { Count = segments[^1].Count + 1 };
+                    else segments.Add(new Segment(set, at, 1));
+                    systems[next++] = registered[order[i]];
+                }
+
+                stages[level] = new SystemStage(systems[start..next], segments.ToArray());
             }
 
             // An update reads only Stages: one reference, so it never mixes two versions of the list.
@@ -339,17 +471,18 @@ public sealed partial class World
         }
 
         /// <summary>
-        /// Registration order, with each system that names others moved: an [UpdateBefore&lt;X&gt;] system goes just
-        /// before X, an [UpdateAfter&lt;X&gt;] one just after X, repeated until every ordering holds; the other systems
-        /// keep their relative order. Orderings that cannot all hold (a cycle) throw; orderings that hold only if
-        /// systems that name nobody move too (X before Y, Y registered first, and a system between them) take the
-        /// earliest-registered-first topological order instead.
+        /// Registration order (indexes into <paramref name="codes"/>), with each system that names others moved: an
+        /// [UpdateBefore&lt;X&gt;] system goes just before X, an [UpdateAfter&lt;X&gt;] one just after X, repeated until
+        /// every ordering holds; the other systems keep their relative order. Orderings that cannot all hold (a cycle)
+        /// throw; orderings that hold only if systems that name nobody move too (X before Y, Y registered first, and a
+        /// system between them) take the earliest-registered-first topological order instead.
         /// </summary>
-        private static EcsSystem[] Sort(EcsSystem[] registered)
+        private static int[] Sort(SystemCode.Entry[] codes)
         {
-            var sorted = TopologicalOrder(registered);
-            var order = new List<EcsSystem>(registered);
-            int rounds = registered.Length * registered.Length + 1; // a bound: moves that settle need far fewer rounds
+            var sorted = TopologicalOrder(codes);
+            var order = new List<int>(codes.Length);
+            for (int i = 0; i < codes.Length; i++) order.Add(i);
+            int rounds = codes.Length * codes.Length + 1; // a bound: moves that settle need far fewer rounds
             for (bool moved = true; moved;)
             {
                 if (--rounds < 0) return sorted; // the moves keep undoing each other
@@ -357,14 +490,14 @@ public sealed partial class World
                 for (int b = 0; b < order.Count; b++)
                 for (int a = b + 1; a < order.Count; a++) // a runs after b, but must it run before?
                 {
-                    var first = order[a];
-                    var second = order[b];
-                    if (Names(first.RunsBefore, second)) // first moves: just before second
+                    int first = order[a];
+                    int second = order[b];
+                    if (Names(codes[first].Before, codes[second])) // first moves: just before second
                     {
                         order.RemoveAt(a);
                         order.Insert(b, first);
                     }
-                    else if (Names(second.RunsAfter, first)) // second moves: just after first
+                    else if (Names(codes[second].After, codes[first])) // second moves: just after first
                     {
                         order.RemoveAt(b);
                         order.Insert(a, second);
@@ -382,11 +515,11 @@ public sealed partial class World
         /// Kahn's algorithm, the earliest registered free system first; throws when the orderings form a cycle (some
         /// systems never become free of predecessors).
         /// </summary>
-        private static EcsSystem[] TopologicalOrder(EcsSystem[] registered)
+        private static int[] TopologicalOrder(SystemCode.Entry[] codes)
         {
-            int n = registered.Length;
+            int n = codes.Length;
             var placed = new bool[n];
-            var order = new EcsSystem[n];
+            var order = new int[n];
             for (int count = 0; count < n; count++)
             {
                 int next = -1;
@@ -394,33 +527,28 @@ public sealed partial class World
                 {
                     if (placed[i]) continue;
                     bool ready = true;
-                    for (int j = 0; j < n && ready; j++) ready = placed[j] || j == i || !Precedes(registered[j], registered[i]);
+                    for (int j = 0; j < n && ready; j++) ready = placed[j] || j == i || !Precedes(codes[j], codes[i]);
                     if (ready) next = i;
                 }
 
-                if (next < 0) throw Cycle(registered, placed);
+                if (next < 0) throw Cycle(codes, placed);
                 placed[next] = true;
-                order[count] = registered[next];
+                order[count] = next;
             }
 
             return order;
         }
 
         /// <summary>Whether <paramref name="first"/> must run before <paramref name="second"/> by an ordering of either.</summary>
-        internal static bool Precedes(EcsSystem first, EcsSystem second) => Names(first.RunsBefore, second) || Names(second.RunsAfter, first);
+        internal static bool Precedes(SystemCode.Entry first, SystemCode.Entry second) => Names(first.Before, second) || Names(second.After, first);
 
-        private static bool Names(Type[] types, EcsSystem system)
-        {
-            foreach (var type in types)
-                if (type.IsInstanceOfType(system)) return true;
-            return false;
-        }
+        private static bool Names(Type[] types, SystemCode.Entry system) => Array.IndexOf(types, system.Type) >= 0;
 
-        private static InvalidOperationException Cycle(EcsSystem[] registered, bool[] placed)
+        private static InvalidOperationException Cycle(SystemCode.Entry[] codes, bool[] placed)
         {
             var names = new List<string>();
-            for (int i = 0; i < registered.Length; i++)
-                if (!placed[i]) names.Add(registered[i].GetType().Name);
+            for (int i = 0; i < codes.Length; i++)
+                if (!placed[i]) names.Add(ScheduleInfo.NameOf(codes[i].Type));
             return new InvalidOperationException("[UpdateBefore] / [UpdateAfter] form a cycle among " + string.Join(", ", names));
         }
     }
@@ -432,9 +560,14 @@ public sealed partial class World
 /// </summary>
 public readonly struct SystemList
 {
+    private readonly World _world;
     private readonly World.SystemSchedule[] _groups;
 
-    internal SystemList(World.SystemSchedule[] groups) => _groups = groups;
+    internal SystemList(World world, World.SystemSchedule[] groups)
+    {
+        _world = world;
+        _groups = groups;
+    }
 
     /// <summary>Number of systems in every group. O(groups).</summary>
     public int Count
@@ -449,18 +582,20 @@ public readonly struct SystemList
     }
 
     /// <summary>The enumerator of <c>foreach</c>: every group's systems in execution order, allocation-free.</summary>
-    public Enumerator GetEnumerator() => new(_groups);
+    public Enumerator GetEnumerator() => new(_world, _groups);
 
     /// <summary>Walks the groups and their systems.</summary>
     public struct Enumerator
     {
+        private readonly World _world;
         private readonly World.SystemSchedule[] _groups;
-        private EcsSystem[] _systems;
+        private World.SystemSlot[] _systems;
         private int _group;
         private int _index;
 
-        internal Enumerator(World.SystemSchedule[] groups)
+        internal Enumerator(World world, World.SystemSchedule[] groups)
         {
+            _world = world;
             _groups = groups;
             _systems = [];
             _group = -1;
@@ -468,7 +603,7 @@ public readonly struct SystemList
         }
 
         /// <summary>The current system.</summary>
-        public readonly EcsSystem Current => _systems[_index];
+        public readonly SystemHandle Current => new(_world, _systems[_index].Index, _systems[_index].Version);
 
         /// <summary>Move to the next system. O(1) amortized.</summary>
         public bool MoveNext()

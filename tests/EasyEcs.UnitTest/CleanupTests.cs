@@ -7,7 +7,8 @@ public record struct Lease(int Slot) : ICleanupComponent;   // a resource outsid
 public record struct Ticket(int Seat) : ICleanupComponent;  // a second one
 
 /// <summary>Releases leases of retired entities: the system a cleanup component asks for.</summary>
-public class ReleaseLeases : EcsSystem
+[EcsSystem]
+public ref struct ReleaseLeases
 {
     [ForEach, With<Retired>, With<Lease>]
     static void Release(Entity entity, ref Released released)

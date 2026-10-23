@@ -13,8 +13,7 @@ namespace EasyEcs.Generator;
 /// <summary>
 /// The rules of the declarations the generator turns into code for one entity, a schedule and a consuming pass
 /// (EECS080-EECS085): a hand-written one-entity job [ForEntity] would write (EECS080), a [ForEntity] method that cannot
-/// be one (EECS081), an override of the schedule properties systems no longer have (EECS082), an [UpdateInterval] that
-/// cannot apply (EECS083), a [ForEach] method that destroys every entity it visits by hand (EECS084), a [Consume] that
+/// be one (EECS081), an [UpdateInterval] that cannot apply (EECS083), a [ForEach] method that destroys every entity it visits by hand (EECS084), a [Consume] that
 /// cannot apply (EECS085). Each computes its code fix as diagnostic properties.
 /// </summary>
 public sealed partial class EasyEcsAnalyzer
@@ -36,18 +35,11 @@ public sealed partial class EasyEcsAnalyzer
         "Scratch) has no meaning for one entity, and a method cannot be both a pass ([ForEach]) and a run on one entity.",
         helpLinkUri: Help("EECS081"));
 
-    public static readonly DiagnosticDescriptor CadenceOverride = new("EECS082", "A system's cadence as an override",
-        "'{0}' overrides '{1}', which systems no longer have: declare the cadence on the class with {2}",
-        Category, DiagnosticSeverity.Error, true,
-        "A system's cadence is the [UpdateInterval(n, Phase = p)] attribute on its class, which the generator writes into " +
-        "its registration: the values are constants by construction, read once when the system is added. The " +
-        "UpdateInterval and UpdatePhase properties are gone.", helpLinkUri: Help("EECS082"));
-
     public static readonly DiagnosticDescriptor BadUpdateInterval = new("EECS083", "An [UpdateInterval] that cannot apply",
         "[UpdateInterval] on '{0}' cannot apply: {1}",
         Category, DiagnosticSeverity.Error, true,
         "[UpdateInterval(n, Phase = p)] runs a system on the updates whose count modulo n is p: n is 1 or more, p is 0 to " +
-        "n - 1, and the type is an EcsSystem. The generator leaves an invalid one out, so the system would run every update.",
+        "n - 1, and the type is an [EcsSystem]. The generator leaves an invalid one out, so the system would run every update.",
         helpLinkUri: Help("EECS083"));
 
     public static readonly DiagnosticDescriptor HandWrittenConsume = new("EECS084", "A [ForEach] method that destroys every entity it visits",
@@ -64,51 +56,18 @@ public sealed partial class EasyEcsAnalyzer
         "[Consume] destroys the rows a [ForEach] pass visited, when it ends. A method without [ForEach] has no pass, and a " +
         "sliced one would move the rows of the other slices with every destroy.", helpLinkUri: Help("EECS085"));
 
-    /// <summary>EECS080's properties: field=parameter pairs, the components' modifiers, the filter attributes, the calls' replacements.</summary>
-    public const string JobParameters = "Parameters", JobModifiers = "Modifiers", JobFilter = "Filter", JobCall = "Call", DropEntity = "DropEntity",
-        ScheduleText = "Schedule";
+    /// <summary>EECS080's properties: field=parameter pairs, the components' modifiers, the filter attributes, the calls' replacements; EECS084's entity parameter to drop.</summary>
+    public const string JobParameters = "Parameters", JobModifiers = "Modifiers", JobFilter = "Filter", JobCall = "Call", DropEntity = "DropEntity";
 
     private static void InitializeForms(AnalysisContext context)
     {
-        context.RegisterSyntaxNodeAction(AnalyzeCadenceOverride, SyntaxKind.PropertyDeclaration);
         context.RegisterSymbolAction(AnalyzeScheduleAttribute, SymbolKind.NamedType);
         context.RegisterSyntaxNodeAction(AnalyzeHandWrittenConsume, SyntaxKind.MethodDeclaration);
         context.RegisterSymbolAction(AnalyzeConsume, SymbolKind.Method);
         context.RegisterCompilationStartAction(AnalyzeEntityJobs);
     }
 
-    // ---------------- EECS082 / EECS083: [UpdateInterval] ----------------
-
-    private static void AnalyzeCadenceOverride(SyntaxNodeAnalysisContext context)
-    {
-        var declaration = (PropertyDeclarationSyntax)context.Node;
-        string name = declaration.Identifier.ValueText;
-        if (name is not ("UpdateInterval" or "UpdatePhase") || !declaration.Modifiers.Any(SyntaxKind.OverrideKeyword)
-            || declaration.Parent is not ClassDeclarationSyntax type
-            || context.SemanticModel.GetDeclaredSymbol(type, context.CancellationToken) is not { } system || !Symbols.IsSystem(system)) return;
-        var other = type.Members.OfType<PropertyDeclarationSyntax>().FirstOrDefault(p =>
-            p != declaration && p.Identifier.ValueText is "UpdateInterval" or "UpdatePhase" && p.Modifiers.Any(SyntaxKind.OverrideKeyword));
-        if (name == "UpdatePhase" && other != null) return; // reported once, on UpdateInterval
-
-        int? Constant(PropertyDeclarationSyntax? property)
-        {
-            if (property == null) return null;
-            var value = Symbols.Returned(property) ?? property.Initializer?.Value;
-            return value != null && context.SemanticModel.GetConstantValue(value, context.CancellationToken) is { HasValue: true, Value: int n } ? n : null;
-        }
-
-        var intervalSyntax = name == "UpdateInterval" ? declaration : other;
-        var phaseSyntax = name == "UpdatePhase" ? declaration : other;
-        int? interval = intervalSyntax == null ? 1 : Constant(intervalSyntax), phase = phaseSyntax == null ? 0 : Constant(phaseSyntax);
-        string text = interval is int n && phase is int p ? n <= 1 ? "nothing (it runs every update)" : p == 0 ? $"[UpdateInterval({n})]" : $"[UpdateInterval({n}, Phase = {p})]"
-            : "[UpdateInterval(n, Phase = p)]";
-        // The fix needs both values constant, a phase in range and no [UpdateInterval] already on the class.
-        bool fixable = interval is int i && phase is int f && (i <= 1 || f >= 0 && f < i) && Symbols.Schedule(system) == null;
-        var properties = fixable ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Schedule")
-            .Add(ScheduleText, interval <= 1 ? "" : text) : null;
-        context.ReportDiagnostic(Diagnostic.Create(CadenceOverride, declaration.Identifier.GetLocation(),
-            other == null ? [] : [other.GetLocation()], properties, system.Name, name, text));
-    }
+    // ---------------- EECS083: [UpdateInterval] ----------------
 
     private static void AnalyzeScheduleAttribute(SymbolAnalysisContext context)
     {

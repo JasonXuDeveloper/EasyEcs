@@ -4,7 +4,8 @@ namespace EasyEcs.Demo;
 
 // Keeps the population at its target: each emitter whose cooldown is over fires the sparks missing
 // as one ring from where it stands.
-public class BurstSystem : EcsSystem
+[EcsSystem]
+public ref struct BurstSystem
 {
     // Seconds between two bursts of an emitter, at least and at most.
     private const float MinInterval = 0.25f;

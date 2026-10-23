@@ -21,15 +21,15 @@ public record struct Replica(int Value) : EasyEcs.IComponent;
 public struct ChangedOnly : ISystemGroup;
 public struct ScanAll : ISystemGroup;
 
-[UpdateInGroup<ChangedOnly>]
-public class ReplicateChanged : EcsSystem
+[EcsSystem, UpdateInGroup<ChangedOnly>]
+public ref struct ReplicateChanged
 {
     [ForEach, Changed<Hp>]
     private static void Copy(in Hp hp, ref Replica replica) => replica = new Replica(hp.Value);
 }
 
-[UpdateInGroup<ScanAll>]
-public class ReplicateScan : EcsSystem
+[EcsSystem, UpdateInGroup<ScanAll>]
+public ref struct ReplicateScan
 {
     [ForEach]
     private static void Copy(in Hp hp, ref Replica replica)
@@ -283,8 +283,8 @@ public record struct Expired(int Count) : EasyEcs.IComponent;
 
 public struct RemovalsOnly : ISystemGroup;
 
-[UpdateInGroup<RemovalsOnly>]
-public class ReplicateRemovals : EcsSystem
+[EcsSystem, UpdateInGroup<RemovalsOnly>]
+public ref struct ReplicateRemovals
 {
     [ForEach, Removed<Buff>]
     private static void Send(ref Expired expired) => expired.Count++;
