@@ -2265,6 +2265,9 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(World w) { var e = w.CreateEntity(new P()); e.Set(new Q { V = 1 }); } }", "EECS052")]
     [TestCase("public static class U { public static void F(World w) { var e = w.CreateEntity(); e.SetBoss(); } }", "EECS052")]
     [TestCase("public static class U { public static void F(World w, Prefab p) { Entity e = w.Instantiate(p, new P()); e.Set(new Q()); } }", "EECS052")]
+    [TestCase("public static class U { static readonly Prefab Room = new Prefab().Set(new P()).SetAbsent<Q>(); public static void F(World w) { var e = w.Instantiate(Room); e.Set(new Q()); } }")] // the column is there
+    [TestCase("public static class U { public static void F(World w) { var p = new Prefab().Set(new P()); p.SetAbsent<Q>(); var e = w.Instantiate(p); e.Set(new Q()); } }")]            // set on the local
+    [TestCase("public static class U { static readonly Prefab Room = new Prefab().Set(new P()).SetAbsent<T>(); public static void F(World w) { var e = w.Instantiate(Room); e.Set(new Q()); } }", "EECS052")] // another column
     public async Task UsageCostsAreReported(string source, params string[] ids)
     {
         var costs = await Costs(Components, Extra, source);

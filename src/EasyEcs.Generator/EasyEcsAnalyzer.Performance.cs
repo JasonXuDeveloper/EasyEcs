@@ -1742,6 +1742,7 @@ public sealed partial class EasyEcsAnalyzer
         var given = create.TargetMethod.TypeArguments;
         if (component is not INamedTypeSymbol || given.Length >= Symbols.MaxComponents || given.Contains(component, SymbolEqualityComparer.Default)
             || Symbols.IsGrouped(component) || Symbols.IsWorldTag(component)
+            || create.TargetMethod.Name == "Instantiate" && LeavesRoomFor(create.Arguments[0].Value, component)
             || !Invariant(set.Arguments.Where(a => !a.IsImplicit).Select(a => a.Value), next, declarator.Symbol)) return null;
 
         var model = create.SemanticModel!;
@@ -1750,5 +1751,40 @@ public sealed partial class EasyEcsAnalyzer
         string name = created.Name is GenericNameSyntax typed ? typed.Identifier.ValueText : created.Name.ToString(); // CreateEntity<P>(…): inferred again
         string text = $"{created.Expression}.{name}({string.Join(", ", creation.ArgumentList.Arguments.Select(a => a.ToString()).Append(value))})";
         return (create, set, next, component, text);
+    }
+
+    /// <summary>
+    /// Whether the prefab <paramref name="prefab"/> (a field, property or local) calls <c>SetAbsent&lt;T&gt;()</c> of
+    /// <paramref name="component"/> where it is declared or on itself: its table has the column, so a Set after the
+    /// Instantiate flips a presence bit and moves no row.
+    /// </summary>
+    private static bool LeavesRoomFor(IOperation prefab, ITypeSymbol component)
+    {
+        var symbol = Symbols.Unwrap(prefab) switch
+        {
+            IFieldReferenceOperation f => (ISymbol)f.Field,
+            IPropertyReferenceOperation p => p.Property,
+            ILocalReferenceOperation l => l.Local,
+            _ => null,
+        };
+        if (symbol == null) return false;
+        var compilation = prefab.SemanticModel!.Compilation;
+        foreach (var reference in symbol.DeclaringSyntaxReferences)
+        {
+            var declaration = reference.GetSyntax();
+            var tree = declaration.SyntaxTree;
+            if (!compilation.ContainsSyntaxTree(tree)) continue;
+            var model = compilation.GetSemanticModel(tree);
+            foreach (var call in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                if (call.Expression is not MemberAccessExpressionSyntax { Name: GenericNameSyntax { Identifier.ValueText: "SetAbsent", TypeArgumentList.Arguments.Count: 1 } name } access
+                    || !SymbolEqualityComparer.Default.Equals(model.GetTypeInfo(name.TypeArgumentList.Arguments[0]).Type, component)) continue;
+                if (call.Ancestors().Contains(declaration)) return true;          // in the declaration's initializer
+                ExpressionSyntax root = access.Expression;                        // prefab.SetX(…).SetAbsent<T>(): its first receiver
+                while (root is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax inner }) root = inner.Expression;
+                if (SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(root).Symbol, symbol)) return true;
+            }
+        }
+        return false;
     }
 }
