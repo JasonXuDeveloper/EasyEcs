@@ -19,7 +19,7 @@ namespace EasyEcs;
 /// EasyEcs.Generator compiles it to a struct job (<see cref="IForEach{T1}"/>, <see cref="IForEachEntity{T1}"/> or
 /// <see cref="IForEachBatch{T1}"/>): no delegate, no allocation, inlined.
 /// </summary>
-[AttributeUsage(AttributeTargets.Method)]
+[AttributeUsage(AttributeTargets.Method), JetBrains.Annotations.MeansImplicitUse]
 public sealed class ForEachAttribute : Attribute
 {
     /// <summary>
@@ -111,7 +111,7 @@ public sealed class ConsumeAttribute : Attribute;
 /// bool sold = Orders.Buy(shop, 3);   // false: closed, no Stock or Sales, or not alive
 /// </code>
 /// </summary>
-[AttributeUsage(AttributeTargets.Method)]
+[AttributeUsage(AttributeTargets.Method), JetBrains.Annotations.MeansImplicitUse]
 public sealed class ForEntityAttribute : Attribute;
 
 /// <summary>
