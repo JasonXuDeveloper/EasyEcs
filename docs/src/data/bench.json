@@ -1,6 +1,6 @@
 {
   "source": "BenchmarkDotNet *-report.csv (scripts/sync-benchmarks.ts)",
-  "generatedAt": "2026-10-23T11:13:50.923Z",
+  "generatedAt": "2026-10-23T11:35:38.898Z",
   "environment": {
     "benchmarkDotNet": "0.15.2",
     "os": "Linux Ubuntu 24.04.5 LTS (Noble Numbat)",
@@ -2543,6 +2543,252 @@
           "errorNs": 10676,
           "stdDevNs": 10486,
           "ratio": 4.29,
+          "allocatedBytes": 0
+        }
+      ]
+    },
+    "ScratchBenchmark": {
+      "namespace": "EasyEcs.Benchmark",
+      "job": "EnvironmentVariables=DOTNET_TC_CallCountingDelayMs=0 IterationCount=8 IterationTime=250ms LaunchCount=2 WarmupCount=6",
+      "rows": [
+        {
+          "method": "Stackalloc",
+          "params": {
+            "Entities": "10000",
+            "Threads": "1"
+          },
+          "meanNs": 474000,
+          "errorNs": 34830,
+          "stdDevNs": 34210,
+          "ratio": 1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Scratch",
+          "params": {
+            "Entities": "10000",
+            "Threads": "1"
+          },
+          "meanNs": 505700,
+          "errorNs": 37070,
+          "stdDevNs": 32870,
+          "ratio": 1.07,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "NewList",
+          "params": {
+            "Entities": "10000",
+            "Threads": "1"
+          },
+          "meanNs": 1009000,
+          "errorNs": 68860,
+          "stdDevNs": 64410,
+          "ratio": 2.14,
+          "allocatedBytes": 1520000
+        },
+        {
+          "method": "ArrayPoolRent",
+          "params": {
+            "Entities": "10000",
+            "Threads": "1"
+          },
+          "meanNs": 451000,
+          "errorNs": 25950,
+          "stdDevNs": 23000,
+          "ratio": 0.96,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "ThreadStaticList",
+          "params": {
+            "Entities": "10000",
+            "Threads": "1"
+          },
+          "meanNs": 496300,
+          "errorNs": 18440,
+          "stdDevNs": 17250,
+          "ratio": 1.05,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Stackalloc",
+          "params": {
+            "Entities": "10000",
+            "Threads": "4"
+          },
+          "meanNs": 243000,
+          "errorNs": 20050,
+          "stdDevNs": 17770,
+          "ratio": 1.01,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Scratch",
+          "params": {
+            "Entities": "10000",
+            "Threads": "4"
+          },
+          "meanNs": 264800,
+          "errorNs": 27880,
+          "stdDevNs": 27380,
+          "ratio": 1.1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "NewList",
+          "params": {
+            "Entities": "10000",
+            "Threads": "4"
+          },
+          "meanNs": 531600,
+          "errorNs": 37890,
+          "stdDevNs": 37210,
+          "ratio": 2.2,
+          "allocatedBytes": 1520000
+        },
+        {
+          "method": "ArrayPoolRent",
+          "params": {
+            "Entities": "10000",
+            "Threads": "4"
+          },
+          "meanNs": 243500,
+          "errorNs": 13380,
+          "stdDevNs": 13140,
+          "ratio": 1.01,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "ThreadStaticList",
+          "params": {
+            "Entities": "10000",
+            "Threads": "4"
+          },
+          "meanNs": 307100,
+          "errorNs": 27340,
+          "stdDevNs": 26850,
+          "ratio": 1.27,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Stackalloc",
+          "params": {
+            "Entities": "100000",
+            "Threads": "1"
+          },
+          "meanNs": 4654500,
+          "errorNs": 184570,
+          "stdDevNs": 181270,
+          "ratio": 1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Scratch",
+          "params": {
+            "Entities": "100000",
+            "Threads": "1"
+          },
+          "meanNs": 5289500,
+          "errorNs": 376640,
+          "stdDevNs": 352310,
+          "ratio": 1.14,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "NewList",
+          "params": {
+            "Entities": "100000",
+            "Threads": "1"
+          },
+          "meanNs": 9611800,
+          "errorNs": 463100,
+          "stdDevNs": 410530,
+          "ratio": 2.07,
+          "allocatedBytes": 15200000
+        },
+        {
+          "method": "ArrayPoolRent",
+          "params": {
+            "Entities": "100000",
+            "Threads": "1"
+          },
+          "meanNs": 5043700,
+          "errorNs": 151120,
+          "stdDevNs": 133970,
+          "ratio": 1.09,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "ThreadStaticList",
+          "params": {
+            "Entities": "100000",
+            "Threads": "1"
+          },
+          "meanNs": 5170000,
+          "errorNs": 269180,
+          "stdDevNs": 264370,
+          "ratio": 1.11,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Stackalloc",
+          "params": {
+            "Entities": "100000",
+            "Threads": "4"
+          },
+          "meanNs": 2038700,
+          "errorNs": 120110,
+          "stdDevNs": 112350,
+          "ratio": 1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Scratch",
+          "params": {
+            "Entities": "100000",
+            "Threads": "4"
+          },
+          "meanNs": 2141400,
+          "errorNs": 177790,
+          "stdDevNs": 174620,
+          "ratio": 1.05,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "NewList",
+          "params": {
+            "Entities": "100000",
+            "Threads": "4"
+          },
+          "meanNs": 4146600,
+          "errorNs": 235780,
+          "stdDevNs": 231560,
+          "ratio": 2.04,
+          "allocatedBytes": 15200000
+        },
+        {
+          "method": "ArrayPoolRent",
+          "params": {
+            "Entities": "100000",
+            "Threads": "4"
+          },
+          "meanNs": 2071400,
+          "errorNs": 205490,
+          "stdDevNs": 201820,
+          "ratio": 1.02,
+          "allocatedBytes": 16
+        },
+        {
+          "method": "ThreadStaticList",
+          "params": {
+            "Entities": "100000",
+            "Threads": "4"
+          },
+          "meanNs": 2192900,
+          "errorNs": 176340,
+          "stdDevNs": 164950,
+          "ratio": 1.08,
           "allocatedBytes": 0
         }
       ]

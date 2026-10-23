@@ -405,8 +405,7 @@ public class CountNeighbors : EcsSystem
 `ScratchBenchmark` 在 10,000 和 100,000 行上并行地每行收集 24 个候选，列表分别放在 `Scratch<T>` 里、每行新建、每行从 `ArrayPool<int>.Shared`
 租用、放在手写的 `[ThreadStatic]` 字段里，或者用 `stackalloc` 的 span（[D74](/zh/docs/decisions#d74-scratch)）。
 
-{/* TODO(scratch): ScratchBenchmark 里 Scratch<T> 还落后于手写的 [ThreadStatic] 列表，正在尝试修复。落地后更新这一段和 D74，
-bench.json 有了 ScratchBenchmark 之后加上 <BenchTable bench="ScratchBenchmark" />。 */}
+<BenchTable bench="ScratchBenchmark" />
 
 #### 读取其他实体：`Lookup<T>` [#lookups]
 

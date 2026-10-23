@@ -467,9 +467,7 @@ public class CountNeighbors : EcsSystem
 `Scratch<T>`, created per row, rented from `ArrayPool<int>.Shared` per row, kept in a hand-written `[ThreadStatic]`
 field, or a `stackalloc` span ([D74](/en/docs/decisions#d74-scratch)).
 
-{/* TODO(scratch): Scratch<T> is still behind a hand-written [ThreadStatic] list in ScratchBenchmark; a fix is being
-tried. Update this paragraph and D74 when it lands, and add <BenchTable bench="ScratchBenchmark" /> once bench.json
-holds it. */}
+<BenchTable bench="ScratchBenchmark" />
 
 #### Reading other entities: `Lookup<T>` [#lookups]
 
