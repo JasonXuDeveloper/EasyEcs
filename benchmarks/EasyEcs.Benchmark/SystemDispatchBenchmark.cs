@@ -7,12 +7,15 @@ namespace EasyEcs.Benchmark;
 /// same 16 with an [OnUpdate] method that does nothing. The update calls each system's generated code and runs one
 /// pass per system, so the numbers divided by 16 are the cost of a system on an update. <see cref="ParallelStage"/>: 16
 /// systems of disjoint components in a world with <see cref="WorldOptions.ParallelSystems"/>, one stage handed to the
-/// runner, whose work is too small for helpers: what a stage costs when it settles on running alone. Allocates 0 bytes.
+/// runner, whose work is too small for helpers: what a stage costs when it settles on running alone.
+/// <see cref="ParallelPasses"/>: the 16 systems of <see cref="Plain"/> as <c>[ForEach(Parallel = true)]</c> methods, whose
+/// one row is one chunk, run on the calling thread: what a parallel method costs over a table too small to split.
+/// Allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
 public class SystemDispatchBenchmark
 {
-    private World _plain, _withOnUpdate, _parallel;
+    private World _plain, _withOnUpdate, _parallel, _parallelPasses;
 
     [GlobalSetup]
     public void Setup()
@@ -37,6 +40,12 @@ public class SystemDispatchBenchmark
         _parallel.CreateEntity(new C0(), new C1(), new C2(), new C3(), new C4(), new C5(), new C6(), new C7());
         _parallel.CreateEntity(new C8(), new C9(), new C10(), new C11(), new C12(), new C13(), new C14(), new C15());
         for (int i = 0; i < 2_000; i++) _parallel.Update(); // the runner settles on running the stage alone
+        _parallelPasses = new World();
+        _parallelPasses.AddSystem<Q0>(); _parallelPasses.AddSystem<Q1>(); _parallelPasses.AddSystem<Q2>(); _parallelPasses.AddSystem<Q3>();
+        _parallelPasses.AddSystem<Q4>(); _parallelPasses.AddSystem<Q5>(); _parallelPasses.AddSystem<Q6>(); _parallelPasses.AddSystem<Q7>();
+        _parallelPasses.AddSystem<Q8>(); _parallelPasses.AddSystem<Q9>(); _parallelPasses.AddSystem<Q10>(); _parallelPasses.AddSystem<Q11>();
+        _parallelPasses.AddSystem<Q12>(); _parallelPasses.AddSystem<Q13>(); _parallelPasses.AddSystem<Q14>(); _parallelPasses.AddSystem<Q15>();
+        _parallelPasses.CreateEntity(new Counter(0));
     }
 
     [GlobalCleanup]
@@ -45,6 +54,7 @@ public class SystemDispatchBenchmark
         _plain.Dispose();
         _withOnUpdate.Dispose();
         _parallel.Dispose();
+        _parallelPasses.Dispose();
     }
 
     [Benchmark(Baseline = true)]
@@ -55,6 +65,9 @@ public class SystemDispatchBenchmark
 
     [Benchmark]
     public void ParallelStage() => _parallel.Update();
+
+    [Benchmark]
+    public void ParallelPasses() => _parallelPasses.Update();
 
     public record struct Counter(int Value) : IComponent;
 
@@ -127,4 +140,22 @@ public class SystemDispatchBenchmark
     [EcsSystem] public ref struct P13 { [ForEach] static void Run(ref C13 c) => c.Value++; }
     [EcsSystem] public ref struct P14 { [ForEach] static void Run(ref C14 c) => c.Value++; }
     [EcsSystem] public ref struct P15 { [ForEach] static void Run(ref C15 c) => c.Value++; }
+
+    // Parallel methods over one row: one chunk, run on the calling thread.
+    [EcsSystem] public ref struct Q0 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q1 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q2 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q3 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q4 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q5 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q6 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q7 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q8 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q9 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q10 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q11 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q12 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q13 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q14 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct Q15 { [ForEach(Parallel = true)] static void Run(ref Counter c) => c.Value++; }
 }
