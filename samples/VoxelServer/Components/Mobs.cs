@@ -23,6 +23,12 @@ public record struct Cooldown(long Until) : IComponent;
 // out flip a presence bit, and the zombie stays in its table.
 public record struct Burning(long Until) : IComponent;
 
+// What a zombie's surroundings do to it, looked at every Rules.BurnEvery ticks (ZombieExposureSystem): by day under the
+// open sky and out of the water, the sun sets it on fire (SunlightSystem); in water, its fire goes out
+// (ExtinguishSystem). The look is the costly part, reads of the chunks around the zombie, and runs on several threads;
+// catching fire and putting it out are presence flips, the cheap part, after it.
+public record struct Exposure(bool Sunlit, bool InWater) : IComponent;
+
 // A stack of dug blocks lying on the ground, for any player who walks over it.
 public record struct Item(Block Kind, int Count) : IComponent;
 

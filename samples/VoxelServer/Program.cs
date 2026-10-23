@@ -46,7 +46,7 @@ restarted.SetRegions(regions);
 Startup.SetPrefabs(restarted);
 restarted.LoadKeeping(save.WrittenSpan, in startup, markWritten: false);   // a client that reconnects gets it all anyway
 Console.WriteLine($"restarted from the save: {restarted.Count<Player>()} players, {restarted.Count<Chunk>()} chunks, " +
-                  $"{Terrain.WaterIn(restarted)} water, {restarted.Count<Zombie>()} zombies; {regions.Count} chunks in the region files");
+                  $"{Server.WaterIn(restarted)} water, {restarted.Count<Zombie>()} zombies; {regions.Count} chunks in the region files");
 Console.Error.WriteLine($"save: {save.WrittenCount / 1024} KiB");
 // #endregion save
 
@@ -103,12 +103,14 @@ public static class Startup
         world.AddSystem<PickupSystem>();
         world.AddSystem<ItemExpirySystem>();
         world.AddSystem<NightSpawnSystem>();
+        world.AddSystem<ZombieExposureSystem>();
         world.AddSystem<SunlightSystem>();
         world.AddSystem<FireDamageSystem>();
         world.AddSystem<ExtinguishSystem>();
         world.AddSystem<ZombieDeathSystem>();
         world.AddSystem<ChunkUnloadSystem>();
         world.AddSystem<ChunkSaveSystem>();
+        world.AddSystem<TallySystem>();
         world.AddSystem<AoiViewSystem>();
         world.AddSystem<AoiChunkSystem>();
         world.AddSystem<AoiSpawnSystem>();
@@ -116,6 +118,7 @@ public static class Startup
         world.AddSystem<SendChunksSystem>();
         world.AddSystem<ChunkSentSystem>();
         world.AddSystem<SendEntitiesSystem>();
+        world.AddSystem<SendPacketsSystem>();
         // #endregion systems
     }
 
@@ -172,7 +175,7 @@ public static class Startup
             Zombie: new Prefab()
                 .Set(new Zombie()).SetVision(Rules.ZombieVision).SetInChunk(default).SetVisible(default, false).SetTarget(default)
                 .SetPosition(default).SetVelocity(default).SetBody(false, false)
-                .SetHealth(Rules.ZombieHealth).SetCooldown(0).SetBurning(0).RemoveBurning(),
+                .SetHealth(Rules.ZombieHealth).SetCooldown(0).SetExposure(false, false).SetBurning(0).RemoveBurning(),
             Item: new Prefab()
                 .SetItem(default, 1).SetInChunk(default).SetVisible(default, false).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
                 .SetBody(false, false).SetDropped(0));

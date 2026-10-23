@@ -15,7 +15,8 @@ public ref struct NightSpawnSystem
 {
 
     [ForEach]
-    static void Spawn(in Player client, in Position position, in Clock clock, in Prefabs prefabs, ref Stats stats, World world)
+    static void Spawn(in Player client, in Position position, in Clock clock, in Prefabs prefabs, ref Stats stats,
+        Lookup<Chunk> chunks, Lookup<DynamicBuffer<Fluid>> water, Lookup<DynamicBuffer<Surface>> surface, World world)
     {
         if (!Rules.IsNight(clock)) return;
         int seed = (int)(clock.Tick / Rules.SpawnEvery);
@@ -28,7 +29,7 @@ public ref struct NightSpawnSystem
             else dz = dz < 0 ? -Rules.SpawnMin : Rules.SpawnMin;
         }
         var feet = Terrain.Cell(position.Value);
-        var near = new Nearby(world);
+        var near = new Nearby(chunks, water: water, surface: surface);
         int x = feet.X + dx, z = feet.Z + dz, top = near.Top(x, z);
         if (top < 0 || near.Water(new BlockPos(x, top + 1, z)) > 0) return;
         world.Instantiate(prefabs.Zombie, new Position(new Vector3(x + 0.5f, top + 1, z + 0.5f)),
@@ -44,16 +45,19 @@ public ref struct NightSpawnSystem
 // vanilla mob keeps its target. The chunks are walked ring by ring from the zombie's own, and the walk stops at the
 // first ring that cannot hold anyone nearer than the nearest found: in a crowd, one or two rings of the seven by
 // seven. It looks twice a second, a tenth of the zombies each tick (Slices), so a horde costs the same every tick;
-// none in reach, it has no target and stands.
+// none in reach, it has no target and stands. It reads the players through lookups, their view centers by key (the
+// index is built before the pass) and their positions by id, and writes its own Target only: the zombies are split
+// across threads.
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct ZombieTargetSystem
 {
-    [ForEach(Slices = Rules.LookEvery), With<Zombie>]
-    static void Pick(in Position position, in InChunk at, in Vision vision, ref Target target, World world)
+    [ForEach(Parallel = true, Slices = Rules.LookEvery), With<Zombie>]
+    static void Pick(in Position position, in InChunk at, in Vision vision, ref Target target, Lookup<ViewCenter> views,
+        Lookup<Position> positions)
     {
         float nearest = vision.Range * vision.Range;
-        if (world.TryGetEntity(target.Player, out var hunting)
-            && (hunting.Position.Value - position.Value).LengthSquared() <= nearest) return;   // still in reach
+        var hunting = positions[target.Player];                          // no value: no target, or the player is gone
+        if (hunting.HasValue && (hunting.Value.Value - position.Value).LengthSquared() <= nearest) return;   // still in reach
         EntityId hunted = default;
         int reach = Rules.ChunksIn(vision.Range);
         for (int ring = 0; ring <= reach; ring++)
@@ -63,9 +67,9 @@ public ref struct ZombieTargetSystem
             float gap = Math.Max(ring - 2, 0) * Terrain.Size;
             if (gap * gap >= nearest) break;
             foreach (var chunk in new ChunkRing(at.Pos, ring))
-            foreach (var other in world.ViewCenterIndex.Find(chunk))
+            foreach (var other in views.Find(chunk))
             {
-                float distance = (other.Position.Value - position.Value).LengthSquared();
+                float distance = (positions.Read(other.Id).Value - position.Value).LengthSquared();
                 if (distance >= nearest) continue;
                 nearest = distance;
                 hunted = other;
@@ -78,11 +82,12 @@ public ref struct ZombieTargetSystem
 
 // #region chase
 // Walks a zombie toward the player it hunts while the player is within its Vision (it may have walked off since the
-// zombie looked); with none in sight, the player gone or too far, it stands.
+// zombie looked); with none in sight, the player gone or too far, it stands. The player's position is a lookup, so the
+// zombies are split across threads.
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct ZombieChaseSystem
 {
-    [ForEach, With<Zombie>]
+    [ForEach(Parallel = true), With<Zombie>]
     static void Chase(in Position position, in Target target, in Vision vision, ref Velocity velocity, Lookup<Position> positions)
     {
         var v = velocity.Value;
@@ -130,17 +135,30 @@ public ref struct ZombieAttackSystem
 // #region sunlight
 // A zombie under the open sky by day catches fire, as in Minecraft: no block above it and no water at its feet. It
 // looks every Rules.BurnEvery ticks, the cadence of the fire's damage, so a zombie catches fire before it is first
-// hurt, and not at all at night. Burning is in the zombie prefab, so catching fire flips a presence bit.
+// hurt, and not at all at night. The look reads the chunks around each zombie (the height map, the water) through
+// lookups and writes the zombie's Exposure: a parallel pass. Catching fire is a presence flip of Burning, in the zombie
+// prefab, so the zombie stays in its table: the next system, on one thread, a comparison per zombie.
+[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
+public ref struct ZombieExposureSystem
+{
+    [ForEach(Parallel = true), With<Zombie>]
+    static void Look(in Position position, in Clock clock, ref Exposure exposure, Lookup<Chunk> chunks,
+        Lookup<DynamicBuffer<Fluid>> water, Lookup<DynamicBuffer<Surface>> surface)
+    {
+        var feet = Terrain.Cell(position.Value);
+        var near = new Nearby(chunks, water: water, surface: surface);
+        bool wet = near.Water(feet) > 0;
+        exposure = new Exposure(Sunlit: !wet && !Rules.IsNight(clock) && near.UnderSky(feet), InWater: wet);
+    }
+}
+
 [EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
 public ref struct SunlightSystem
 {
     [ForEach, With<Zombie>]
-    static void Expose(Entity zombie, in Position position, in Clock clock, World world)
+    static void Expose(Entity zombie, in Exposure exposure, in Clock clock)
     {
-        if (Rules.IsNight(clock)) return;
-        var feet = Terrain.Cell(position.Value);
-        var near = new Nearby(world);
-        if (near.Water(feet) == 0 && near.UnderSky(feet)) zombie.SetBurning(clock.Tick + Rules.BurnFor);
+        if (exposure.Sunlit) zombie.SetBurning(clock.Tick + Rules.BurnFor);
     }
 }
 // #endregion sunlight
@@ -165,15 +183,15 @@ public ref struct FireDamageSystem
     }
 }
 
-// Puts out the fires that burned down, and those of the zombies that walked into water: it visits only the burning,
-// at the fire's own cadence.
+// Puts out the fires that burned down, and those of the zombies that walked into water (their Exposure): it visits only
+// the burning, at the fire's own cadence.
 [EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
 public ref struct ExtinguishSystem
 {
     [ForEach]
-    static void Out(Entity zombie, in Burning fire, in Position position, in Clock clock, World world)
+    static void Out(Entity zombie, in Burning fire, in Exposure exposure, in Clock clock)
     {
-        if (clock.Tick >= fire.Until || new Nearby(world).Water(Terrain.Cell(position.Value)) > 0) zombie.RemoveBurning();
+        if (clock.Tick >= fire.Until || exposure.InWater) zombie.RemoveBurning();
     }
 }
 // #endregion burn

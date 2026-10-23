@@ -26,17 +26,17 @@ public ref struct PlayerMoveSystem
 // block at a time so a fast fall cannot pass through the ground: land on the block below, or stop at the one above the
 // head. A body at rest (on the ground, not walking, ground still under it) is left as it is: most items and idle players
 // cost one block lookup. The position is a Mut<Position>, written only when it changes, so a body standing still is
-// not sent again. It stays on one thread: the block lookups go through World (the chunk index), and a parallel method may not hold the
-// World (EECS010).
+// not sent again. Each body writes its own row and reads the blocks through lookups (Nearby), which no system writes
+// while it runs, so the bodies are split across threads (Parallel = true).
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct PhysicsSystem
 {
-    [ForEach]
-    static void Move(Mut<Position> position, ref Velocity velocity, ref Body body, World world)
+    [ForEach(Parallel = true)]
+    static void Move(Mut<Position> position, ref Velocity velocity, ref Body body, Lookup<Chunk> chunks, Lookup<DynamicBuffer<Block>> blocks)
     {
         var p = position.Value.Value;
         var v = velocity.Value;
-        var near = new Nearby(world);
+        var near = new Nearby(chunks, blocks);
         if (body.OnGround && v == Vector3.Zero && near.IsSolid(p.X, p.Y - 1, p.Z)) return;   // at rest
         v.Y = MathF.Max(v.Y - Rules.Gravity, -3.9f);
 

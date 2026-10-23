@@ -25,3 +25,8 @@ public partial record struct InChunk([IndexKey] ChunkPos Pos) : IComponent, ITra
 // The chunk the clients see an entity in (Placed once it has one): what AoiSpawnSystem compares a crossing with. A cleanup
 // component: a destroyed entity keeps it, Retired, until AoiDespawnSystem has despawned it for that chunk's viewers.
 public record struct Visible(ChunkPos Chunk, bool Placed) : ICleanupComponent;
+
+// The packet of an entity that moved, for the players that have its chunk in view: its position, its health bar where it
+// has one (players and zombies; -1 for an item), and how many players get it. A record SendEntitiesSystem emits
+// (Emit<EntityUpdate>) and SendPacketsSystem sends, not a component.
+public record struct EntityUpdate(EntityId Entity, Vector3 Position, int Health, int Viewers);

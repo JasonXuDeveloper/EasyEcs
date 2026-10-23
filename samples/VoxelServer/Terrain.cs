@@ -78,39 +78,29 @@ public static class Terrain
 
     // The chunks a view of `range` blocks around `center` reaches and one around `other` does not.
     public static ChunkStrip Gained(ChunkPos center, ChunkPos other, float range) => new(center, other, true, range);
-
-
-    // The four sides of a chunk, one bit each, and the chunk beside it on each side.
-    public const byte North = 1, South = 2, West = 4, East = 8, AllSides = North | South | West | East;
-
-    // The water of the chunks beside `pos` on `sides` may move again: the water or a block at that edge changed.
-    public static void Wake(World world, ChunkPos pos, byte sides)
-    {
-        ReadOnlySpan<(byte Side, int Dx, int Dz)> around = [(North, 0, -1), (South, 0, 1), (West, -1, 0), (East, 1, 0)];
-        foreach (var (side, dx, dz) in around)
-            if ((sides & side) != 0 && world.ChunkIndex.TryGet(new ChunkPos(pos.X + dx, pos.Z + dz), out var chunk))
-                chunk.SetFlowing();
-    }
-
-    // The blocks of water in the world, for the report.
-    public static int WaterIn(World world)
-    {
-        int count = 0;
-        foreach (var chunk in world.Read<FluidCount>()) count += chunk.FluidCount.Blocks;
-        return count;
-    }
 }
 
-// The blocks and the water around one body. The chunk of the first block read is looked up in the chunk index once,
-// and the reads after it in the same chunk, most of them (a body is a block wide, a chunk sixteen), read its buffers
-// straight; a read across the edge looks up that chunk instead. Each buffer is fetched on its first read: a body out of
-// the water never fetches the blocks for FloatSystem. A ref struct, on the stack of one row: the spans stay valid until
-// the next structural change, and the systems that read through it make none before they are done with it.
-public ref struct Nearby(World world)
+// The blocks and the water around one body, read through the lookups of the system that walks the bodies: the
+// chunk of a column found by its key (Lookup<Chunk>: the direct-indexed unique index, one array read), its buffers
+// read by id. A system takes the lookups of the buffers it reads (the blocks, the water, the height map) and passes
+// the others as default, never read. The method holds no World, so it may run on several threads: every lookup reads
+// the world as it was before the pass, which no system writes while it runs. The chunk of the first block read is
+// found once, and the reads after it in the same chunk, most of them (a body is a block wide, a chunk sixteen), read
+// its buffers straight; a read across the edge finds that chunk instead. Each buffer is fetched on its first read: a
+// body out of the water never fetches the blocks for FloatSystem. A ref struct, on the stack of one row.
+public ref struct Nearby(
+    Lookup<Chunk> chunks,
+    Lookup<DynamicBuffer<Block>> blocks = default,
+    Lookup<DynamicBuffer<Fluid>> water = default,
+    Lookup<DynamicBuffer<Surface>> surface = default)
 {
+    readonly Lookup<Chunk> _chunks = chunks;
+    readonly Lookup<DynamicBuffer<Block>> _blockOf = blocks;
+    readonly Lookup<DynamicBuffer<Fluid>> _waterOf = water;
+    readonly Lookup<DynamicBuffer<Surface>> _surfaceOf = surface;
     ChunkPos _pos;
     bool _looked;
-    Entity _chunk;                     // default when the chunk is not loaded
+    EntityId _chunk;                   // default when the chunk is not loaded
     ReadOnlySpan<Block> _blocks;       // empty until read: a loaded chunk's buffers never are
     ReadOnlySpan<Fluid> _water;
     ReadOnlySpan<Surface> _surface;
@@ -120,18 +110,22 @@ public ref struct Nearby(World world)
     {
         if (y < 0) return VoxelServer.Block.Bedrock;
         if (y >= Terrain.Height) return VoxelServer.Block.Air;
-        return Look(x, z) ? Blocks()[Terrain.IndexOf(x, y, z)] : VoxelServer.Block.Stone;
+        if (!Look(x, z)) return VoxelServer.Block.Stone;
+        if (_blocks.IsEmpty) _blocks = _blockOf.Read(_chunk).AsReadOnlySpan();
+        return _blocks[Terrain.IndexOf(x, y, z)];
     }
 
     public Block Block(BlockPos at) => Block(at.X, at.Y, at.Z);
 
     public bool IsSolid(float x, float y, float z) => Terrain.IsSolid(Block(Terrain.Cell(x, y, z)));
 
+    public bool IsSolid(BlockPos at) => Terrain.IsSolid(Block(at));
+
     // The water level at a block, 0 where there is none or the chunk is not loaded.
     public int Water(BlockPos at)
     {
         if (at.Y < 0 || at.Y >= Terrain.Height || !Look(at.X, at.Z)) return 0;
-        if (_water.IsEmpty) _water = _chunk.Fluid.AsReadOnlySpan();
+        if (_water.IsEmpty) _water = _waterOf.Read(_chunk).AsReadOnlySpan();
         return _water[Terrain.IndexOf(at.X, at.Y, at.Z)].Level;
     }
 
@@ -139,20 +133,14 @@ public ref struct Nearby(World world)
     public int Top(int x, int z)
     {
         if (!Look(x, z)) return -1;
-        if (_surface.IsEmpty) _surface = _chunk.Surface.AsReadOnlySpan();
+        if (_surface.IsEmpty) _surface = _surfaceOf.Read(_chunk).AsReadOnlySpan();
         return _surface[(z & 15) * Terrain.Size + (x & 15)].Top;
     }
 
     // Whether nothing solid is above a block: the sky reaches it.
     public bool UnderSky(BlockPos at) => Top(at.X, at.Z) < at.Y;
 
-    ReadOnlySpan<Block> Blocks()
-    {
-        if (_blocks.IsEmpty) _blocks = _chunk.Block.AsReadOnlySpan();
-        return _blocks;
-    }
-
-    // Whether the chunk of a column is loaded, looked up only when it is not the chunk of the last read.
+    // Whether the chunk of a column is loaded, found only when it is not the chunk of the last read.
     bool Look(int x, int z)
     {
         var pos = Terrain.ChunkOf(x, z);
@@ -162,7 +150,7 @@ public ref struct Nearby(World world)
         _blocks = default;
         _water = default;
         _surface = default;
-        if (!world.ChunkIndex.TryGet(pos, out _chunk)) _chunk = default;
+        _chunk = _chunks.TryFind(pos, out var chunk) ? chunk.Id : default;
         return _chunk != default;
     }
 }

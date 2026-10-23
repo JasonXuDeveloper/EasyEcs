@@ -50,8 +50,16 @@ public static class Server
         ref readonly var clock = ref world.Clock;
         Console.WriteLine(
             $"tick {clock.Tick,5} ({(Rules.IsNight(clock) ? "night" : "day  ")}): {world.Count<Player>()} players, " +
-            $"{world.Count<Chunk>()} chunks, {Terrain.WaterIn(world)} water, {world.Count<Zombie>()} zombies, " +
+            $"{world.Count<Chunk>()} chunks, {WaterIn(world)} water, {world.Count<Zombie>()} zombies, " +
             $"{world.Count<Item>()} items");
+    }
+
+    // The blocks of water in the world.
+    public static int WaterIn(World world)
+    {
+        int count = 0;
+        foreach (var chunk in world.Read<FluidCount>()) count += chunk.FluidCount.Blocks;
+        return count;
     }
 
     static void Totals(World world)

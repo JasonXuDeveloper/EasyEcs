@@ -14,7 +14,8 @@ namespace VoxelServer;
 // It runs as a GPU runs a shader, in passes that hand data to each other, on the chunks that may still move (Flowing):
 // WaterFlowSystem shades every block into NextFluid, in parallel; WaterSleepSystem lets the chunks whose step moved
 // nothing sleep; WaterCommitSystem makes the step the water once every chunk has stepped (each chunk steps from its
-// neighbors' water before the step, as a GPU ping-pongs two buffers) and wakes the chunks beside the edges that changed.
+// neighbors' water before the step, as a GPU ping-pongs two buffers), in parallel too; WaterWakeSystem wakes the
+// chunks beside the edges that changed, at the start of the next tick.
 //
 // The shader. Shade computes one block's next level from its own and its six neighbors', nothing else, and runs on
 // 16 blocks at once (a row of the chunk, one Vector128<byte>). Each chunk first loads its tile and the halo around it,
@@ -66,7 +67,7 @@ public ref struct WaterFlowSystem
         // water before the step or after it, so the buffer keeps its count between steps.
         var next = MemoryMarshal.Cast<NextFluid, byte>(step.Write().SetCount(Blocks));
         int filled = 0, wet = 0, first = Terrain.Height, last = 0;
-        uint edges = 0;
+        var edges = TileFaces.None;
         bool changed = false;
         foreach (var row in water.Rows(TileReads.Layer | TileReads.Above))
         {
@@ -87,13 +88,13 @@ public ref struct WaterFlowSystem
             uint moved = (~Vector128.Equals(level, here)).ExtractMostSignificantBits();
             if (moved == 0) continue;
             changed = true;
-            if (row.Z == 0) edges |= Terrain.North;
-            if (row.Z == Size - 1) edges |= Terrain.South;
-            if ((moved & 1) != 0) edges |= Terrain.West;
-            if ((moved & 1u << (Size - 1)) != 0) edges |= Terrain.East;
+            if (row.Z == 0) edges |= TileFaces.North;
+            if (row.Z == Size - 1) edges |= TileFaces.South;
+            if ((moved & 1) != 0) edges |= TileFaces.West;
+            if ((moved & 1u << (Size - 1)) != 0) edges |= TileFaces.East;
         }
         summary = new FluidStep(changed ? StepResult.Moved : StepResult.Settled, new FluidCount(wet, (byte)first, (byte)last),
-            filled, (byte)edges);
+            filled, edges);
     }
 
     // One block's next level from its own, the one above and the four beside, with the block under each of those

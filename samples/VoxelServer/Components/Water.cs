@@ -9,6 +9,9 @@ namespace VoxelServer;
 public record struct Fluid(byte Level)
 {
     public const byte Spring = 9, Falling = 8;
+
+    // How hard water of `level` pushes or drops: a spring or falling water counts as 8.
+    public static int Strength(int level) => Math.Min(level, Falling);
 }
 
 // The water of a chunk after the next step, in the layout of Fluid: WaterFlowSystem writes it, WaterCommitSystem copies
@@ -31,13 +34,14 @@ public record struct FluidCount(int Blocks, byte Low, byte High) : IComponent
 }
 
 // What the step in NextFluid did: nothing yet (a chunk just created), settled (no water moved), or moved; then its water
-// (as FluidCount counts it), the blocks it filled, and the edges whose water changed (one bit per side, Terrain.North
-// ...). ITracked: WaterFlowSystem writes it with every step, and WaterSleepSystem and WaterCommitSystem visit the
-// chunks that stepped.
-public record struct FluidStep(StepResult Result, FluidCount Water, int Filled, byte Edges) : IComponent, ITracked;
+// (as FluidCount counts it), the blocks it filled, and the edges whose water changed. ITracked: WaterFlowSystem writes
+// it with every step, and the systems after it (WaterSleepSystem, WaterCommitSystem, and WaterWakeSystem, which wakes
+// the chunks across those edges) visit the chunks that stepped.
+public record struct FluidStep(StepResult Result, FluidCount Water, int Filled, TileFaces Edges) : IComponent, ITracked;
 
 public enum StepResult : byte { None, Settled, Moved }
 
 // A tag on a chunk whose water may still move: the water systems visit only these. A chunk loses it when a step changed
-// nothing, and gets it back when a block changes in it or beside it, or the water at the edge beside it changed.
+// nothing (WaterSleepSystem), and gets it back when a block changes in it or beside it, or the water at the edge beside
+// it changed (WaterWakeSystem, the one system that wakes).
 public struct Flowing : IComponent;

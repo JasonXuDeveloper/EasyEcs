@@ -13,7 +13,8 @@ public record struct Prefabs(Prefab Chunk, Prefab Player, Prefab Zombie, Prefab 
 // Where unloaded chunks are kept: the region files of a vanilla server. Host/RegionFiles.cs stands in for the disk.
 public record struct Regions(RegionFiles Files) : ISingletonComponent;
 
-// What happened, for the report.
+// What happened since the server started, for the report. The systems on one thread add to it; a system on several
+// threads counts into a reduction of its own (below), which TallySystem adds to it at the end of the tick.
 public record struct Stats(
     long ChunksGenerated,
     long ChunksLoaded,
@@ -35,3 +36,19 @@ public record struct Stats(
     long CameIntoView,
     long LeftView,
     long Despawns) : ISingletonComponent;
+
+// What this tick's passes on several threads counted: each a Reduce<T> of its system, every chunk of rows counting into
+// its own copy, combined when the pass ends (an OpenMP reduction), so no row waits on a lock. A pass replaces its
+// result, it does not add to it: TallySystem adds the tick's results to Stats.
+
+// The bodies water carried this tick (FloatSystem).
+public partial struct Carried : ISingletonComponent
+{
+    [Sum] public long Bodies;
+}
+
+// The blocks water filled this tick (WaterCommitSystem).
+public partial struct Filled : ISingletonComponent
+{
+    [Sum] public long Blocks;
+}
