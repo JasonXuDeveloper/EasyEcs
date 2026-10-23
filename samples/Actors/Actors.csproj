@@ -6,6 +6,10 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
+        <!-- Read by Native AOT only (dotnet publish -p:PublishAot=true): compile for the CPU of the machine that
+             publishes, or the Vector512 tier of the generated vector loops is compiled out. A fleet names a level
+             instead (x86-64-v3: AVX2, x86-64-v4: AVX-512). -->
+        <IlcInstructionSet>native</IlcInstructionSet>
     </PropertyGroup>
 
     <!-- With the NuGet package this is one line: <PackageReference Include="EasyEcs" Version="..."/> (the package

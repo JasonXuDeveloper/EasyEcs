@@ -9,6 +9,9 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <IsPackable>false</IsPackable>
         <PublishAot>true</PublishAot>
+        <!-- The CPU that publishes (CI publishes and runs on one machine): the default baseline compiles out the
+             Vector512 tier of the generated vector loops. A fleet names a level instead (x86-64-v3, x86-64-v4). -->
+        <IlcInstructionSet>native</IlcInstructionSet>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     </PropertyGroup>
 
