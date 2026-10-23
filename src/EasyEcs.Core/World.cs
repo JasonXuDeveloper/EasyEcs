@@ -571,8 +571,15 @@ public sealed partial class World : IDisposable
         Meta.AsSpan().CopyTo(grown);
         Meta = grown;
         // As many ids as the records may be free at once (all destroyed): the free list grows with the records, so
-        // destroying what a reservation made room for grows nothing. 4 bytes per id beside the record's 16.
-        if (_freeIds.Length < capacity) Array.Resize(ref _freeIds, capacity);
+        // destroying what a reservation made room for grows nothing. 4 bytes per id beside the record's 16, on the heap
+        // of the records (a large list on the large object heap would add to that heap's budget, D28) and not cleared:
+        // only the first _freeIdCount ids are ever read.
+        if (_freeIds.Length < capacity)
+        {
+            var free = GC.AllocateUninitializedArray<int>(capacity, pinned: sized && capacity >= LargeFreeIds);
+            _freeIds.AsSpan(0, _freeIdCount).CopyTo(free);
+            _freeIds = free;
+        }
         var indexes = _indexes;
         for (int i = 0; i < indexes.Length; i++) indexes[i]?.Reserve(capacity);
         StorageVersion++;
@@ -594,6 +601,9 @@ public sealed partial class World : IDisposable
 
     /// <summary>Records from which an <see cref="EntityMeta"/> array is a large object (85,000 bytes).</summary>
     private const int LargeMeta = 85_000 / 16;
+
+    /// <summary>Ids from which the free list is a large object (85,000 bytes).</summary>
+    private const int LargeFreeIds = 85_000 / sizeof(int);
 
     private readonly Archetype _emptyArchetype;
 
