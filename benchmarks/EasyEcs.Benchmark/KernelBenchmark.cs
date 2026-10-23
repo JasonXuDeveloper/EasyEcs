@@ -586,7 +586,7 @@ public class KernelBenchmark
         internal static void Integrate(ref Heat heat, in Speed speed) => heat.Value += speed.Value * Dt;
 
         // Reductions into a singleton: integers exact, so vectorized as written; a float sum only under FloatMode.Fast.
-        [ForEach(Simd = SimdMode.Require)]
+        [ForEach(SimdMode = SimdMode.Require)]
         internal static void Tally(in Ticks ticks, ref Reduce<Tally> tally)
         {
             tally.Value.Count++;
@@ -595,7 +595,7 @@ public class KernelBenchmark
             tally.Value.High = Math.Max(tally.Value.High, ticks.Value);
         }
 
-        [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+        [ForEach(SimdMode = SimdMode.Require, FloatMode = FloatMode.Fast)]
         internal static void Energy(in Heat heat, in Speed speed, ref Reduce<Energy> energy) => energy.Value.Total += heat.Value * speed.Value * speed.Value;
 
         [ForEach]
@@ -640,7 +640,7 @@ public class KernelBenchmark
         }
 
         // An optional component: Maybe<Mass> as a lane mask of the rows that have it (every third row of _holes lacks it).
-        [ForEach(Simd = SimdMode.Require)]
+        [ForEach(SimdMode = SimdMode.Require)]
         internal static void Optional(ref Heat heat, in Speed speed, Maybe<Mass> mass)
         {
             if (mass.HasValue) heat.Value += speed.Value * Dt / MathF.Max(mass.Value.Value, 0.5f);
@@ -648,7 +648,7 @@ public class KernelBenchmark
         }
 
         // A cold branch: a call under a condition few rows meet. A vector with such a row runs its rows through the method.
-        [ForEach(Simd = SimdMode.Require)]
+        [ForEach(SimdMode = SimdMode.Require)]
         internal static void Hurt(ref Heat health, in Speed damage)
         {
             health.Value -= damage.Value;
@@ -665,12 +665,12 @@ public class KernelBenchmark
         internal static int Deaths;
 
         // The Godot sample's move: a component of a Vector2 assigned whole, Vector2's operators lane by lane (a flat loop).
-        [ForEach(Simd = SimdMode.Require)]
+        [ForEach(SimdMode = SimdMode.Require)]
         internal static void MoveVector(ref Pos2D place, in Vel2D motion, in Pull pull) =>
             place = new Pos2D(place.Value + motion.Value * pull.Value);
 
         // 3 of a wide component's 12 fields: gathered by permutes into lanes (AVX-512), a few dependent operations each.
-        [ForEach(Simd = SimdMode.Require)]
+        [ForEach(SimdMode = SimdMode.Require)]
         internal static void Steer(ref Craft craft, in Pull pull)
         {
             float d = craft.VX * pull.Value;
@@ -680,7 +680,7 @@ public class KernelBenchmark
         }
 
         // Narrow lanes: a saturating byte sum (AddSaturate), then a wrapping one past a threshold: 64 rows per Vector512.
-        [ForEach(Simd = SimdMode.Require)]
+        [ForEach(SimdMode = SimdMode.Require)]
         internal static void Brighten(ref Lum lum, in Glow glow)
         {
             lum.V = (byte)Math.Min(lum.V + (glow.V >> 2), 255);
@@ -688,12 +688,12 @@ public class KernelBenchmark
         }
 
         // Sin and Exp per row: .NET's vector approximations under FloatMode.Fast, the CRT's sinf / expf per row otherwise.
-        [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+        [ForEach(SimdMode = SimdMode.Require, FloatMode = FloatMode.Fast)]
         internal static void Wave(ref Heat heat, in Speed speed, in Mass mass) =>
             heat.Value = MathF.Sin(speed.Value) * 0.5f + MathF.Exp(-mass.Value);
 
         // Step and Seek on several threads: each chunk's runs of rows through the vector loop (parallel for simd).
-        [ForEach(Parallel = true, Simd = SimdMode.Require)]
+        [ForEach(Parallel = true, SimdMode = SimdMode.Require)]
         internal static void StepParallel(ref Heat heat, ref Speed speed, in Mass mass, in Pull pull)
         {
             float force = heat.Value * 0.5f - mass.Value * pull.Value;
@@ -702,7 +702,7 @@ public class KernelBenchmark
             else heat.Value += speed.Value * 0.125f;
         }
 
-        [ForEach(Parallel = true, Simd = SimdMode.Require)]
+        [ForEach(Parallel = true, SimdMode = SimdMode.Require)]
         internal static void SeekParallel(ref P3 p, ref V3 v)
         {
             float dx = 1 - p.X, dy = 2 - p.Y, dz = 3 - p.Z;

@@ -407,8 +407,12 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
         if (!_built) Build();
     }
 
-    /// <summary>The first entity found with key <paramref name="key"/> (any, when several have it).</summary>
-    public bool TryFind(TKey key, out Entity entity)
+    /// <summary>
+    /// The id of the first entity found with key <paramref name="key"/> (any, when several have it): O(1), a hash probe
+    /// (the first lookup indexes every row once). An id, as <see cref="Lookup{T}"/> takes it and a link stores it;
+    /// <c>world.GetEntity(id)</c> is its handle. A unique index's <c>TryGet</c> returns the handle. Owner thread only.
+    /// </summary>
+    public bool TryFind(TKey key, out EntityId id)
     {
         if (Unique) // built from the start; a key's head holds its entity inline
         {
@@ -417,24 +421,17 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
                 int found = HolderBySlot(key, out var holder);
                 if (found >= 0)
                 {
-                    entity = found == 1 ? new Entity(_world, holder) : default;
+                    id = found == 1 ? holder : default;
                     return found == 1;
                 }
             }
 
             ref var head = ref HeadOf(key);
-            entity = Unsafe.IsNullRef(ref head) ? default : new Entity(_world, head.Single);
+            id = Unsafe.IsNullRef(ref head) ? default : head.Single;
             return !Unsafe.IsNullRef(ref head);
         }
 
-        foreach (var found in Find(key))
-        {
-            entity = found;
-            return true;
-        }
-
-        entity = default;
-        return false;
+        return WalkOf(key).Next(out id);
     }
 
     /// <summary>
@@ -689,7 +686,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     private void Build()
     {
         // Building writes the index: in a parallel region other threads may be looking it up, or building it too.
-        if (_world.Gate.Parallel) ThrowBuildInRegion();
+        if (_world.Gate.InParallel) ThrowBuildInRegion();
         _built = true;
         var job = new BuildJob { Index = this };
         _world.ForEachEntity<T, BuildJob>(ref job);

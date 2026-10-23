@@ -256,8 +256,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
             case Symbols.ParamKind.Emit: // on one thread the singleton's list itself; in parallel the target of the chunks' lists (from the pool)
                 return method.Parallel
                     ? ($"public global::EasyEcs.SingletonRef<global::EasyEcs.Emitted<{p.Type}>> o{i};\npublic global::EasyEcs.DynamicBuffer<{p.Type}> e{i};",
-                        $"o{i} = global::EasyEcs.Emitted<{p.Type}>.Target({world})")
-                    : ($"public ref global::EasyEcs.DynamicBuffer<{p.Type}> e{i};", $"e{i} = ref global::EasyEcs.Emitted<{p.Type}>.Target({world}).Value.Items");
+                        $"o{i} = global::EasyEcs.Emitted<{p.Type}>.Joined({world})")
+                    : ($"public ref global::EasyEcs.DynamicBuffer<{p.Type}> e{i};", $"e{i} = ref global::EasyEcs.Emitted<{p.Type}>.Joined({world}).Value.Items");
             default:
                 return null;
         }
@@ -442,9 +442,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string call = $"__ForEach{owner.TypeParameters}.{method.Name}_{number}{method.TypeParameters}({args});";
         string first = method.IsBatch ? "global::EasyEcs.EntitySpan entities, " : method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
-        // A grid's neighbours, found once per entity for every Tile of the grid the method takes.
+        // A grid's neighbors, found once per entity for every Tile of the grid the method takes.
         string grids = string.Concat(Enumerable.Range(0, method.Parameters.Length).Where(method.FirstOfGrid).Select(i =>
-            $"global::EasyEcs.TileNeighbours.Of<{method.Parameters[i].Grid}, {method.Parameters[i].Key}>(k{i}, {(runs ? "entities[(int)i]" : "entity")}, out var n{i}); "));
+            $"global::EasyEcs.TileNeighbors.Of<{method.Parameters[i].Grid}, {method.Parameters[i].Key}>(k{i}, {(runs ? "entities[(int)i]" : "entity")}, out var n{i}); "));
         if (grids.Length > 0) call = runs ? $"{{ {grids}{call} }}" : grids + call;
         // A vector loop also takes the words of 64 rows of which some pass (IForEachMasked): their passing rows as a
         // lane mask, the other lanes stored back as loaded.
@@ -745,7 +745,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
         public bool TakesWorld => Parameters.Any(p => p.Kind == Symbols.ParamKind.World);
 
-        /// <summary>The first Tile parameter of its grid (whose neighbours and index its fields hold): parameter <paramref name="i"/> is one.</summary>
+        /// <summary>The first Tile parameter of its grid (whose neighbors and index its fields hold): parameter <paramref name="i"/> is one.</summary>
         public bool FirstOfGrid(int i) => Parameters[i].Kind == Symbols.ParamKind.Tile && GridOf(i) == i;
 
         /// <summary>The first Tile parameter of the grid of Tile parameter <paramref name="i"/>.</summary>

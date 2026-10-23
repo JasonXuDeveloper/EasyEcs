@@ -152,7 +152,7 @@ public sealed partial class EasyEcsAnalyzer
         "that have an exact vector counterpart (a call it cannot express under a condition runs the method for the rows " +
         "of the vectors that take it). This method takes components of plain values but misses one of those: the message " +
         "names the first, and how to split a wide component when the method uses few of its fields. Change it to get the " +
-        "vector loop, set Simd = SimdMode.Off to keep the method scalar without this message, or SimdMode.Require to " +
+        "vector loop, set SimdMode = SimdMode.Off to keep the method scalar without this message, or SimdMode.Require to " +
         "make it an error.", helpLinkUri: Help("EECS055"));
 
     /// <summary>

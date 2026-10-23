@@ -6,7 +6,7 @@ using BenchmarkDotNet.Attributes;
 namespace EasyEcs.Benchmark;
 
 /// <summary>
-/// A per-row working list in a parallel [ForEach]: each entity gathers the 24 candidate cells around it (a neighbour
+/// A per-row working list in a parallel [ForEach]: each entity gathers the 24 candidate cells around it (a neighbor
 /// search's shape), keeps those its rule accepts, and stores how many and their spread. Where the list lives:
 /// <see cref="Scratch{T}"/> (one list per method and thread), a new list per row (the obvious code), a rented array per
 /// row (<c>ArrayPool&lt;int&gt;.Shared</c>), a user's own <c>[ThreadStatic]</c> list, and <c>stackalloc</c> (only for a

@@ -5,7 +5,7 @@ namespace EasyEcs;
 
 /// <summary>
 /// The setup every world gives one component type, declared on the type ([GroupBy], [WhenTargetDestroyed]) and
-/// registered when its module loads (<see cref="SavedTypes.GroupBy{T}"/>, <see cref="SavedTypes.WhenTargetDestroyed{T}"/>):
+/// registered when its module loads (<see cref="TypeRegistry.GroupBy{T}"/>, <see cref="TypeRegistry.WhenTargetDestroyed{T}"/>):
 /// a world applies it with its first table holding the type, unless the world was set up for the type by hand first.
 /// </summary>
 internal sealed class TypeDefaults

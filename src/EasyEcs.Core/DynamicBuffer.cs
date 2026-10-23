@@ -38,35 +38,35 @@ public struct DynamicBuffer<T> : IComponent, ITracked, IBuffer
     /// this capacity. Process-wide, for every world and thread: set it at startup, before a world uses the type.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
-    public static int PoolCapacity
+    public static int MaxPooledLength
     {
-        get => BufferStore<T>.PoolCapacity;
+        get => BufferStore<T>.MaxPooledLength;
         set
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
-            BufferStore<T>.PoolCapacity = value;
+            BufferStore<T>.MaxPooledLength = value;
         }
     }
 
     /// <summary>
-    /// Fill the pool with lists until it holds <paramref name="lists"/>, each of <see cref="PoolCapacity"/> elements, so
+    /// Fill the pool with lists until it holds <paramref name="lists"/>, each of <see cref="MaxPooledLength"/> elements, so
     /// the first writes of that many buffers take a list instead of allocating one: a server that knows how many
     /// buffers of <typeparamref name="T"/> it keeps at its peak (the chunks around its players) pays for them at
     /// startup, and its ticks allocate nothing even while the world grows to that peak. Process-wide, like the pool;
     /// lists already in the pool count. O(<paramref name="lists"/>) allocations once; nothing when the pool holds enough.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="lists"/> is negative.</exception>
-    public static void ReservePool(int lists)
+    public static void FillPool(int lists)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(lists);
-        BufferStore<T>.Reserve(lists);
+        BufferStore<T>.Fill(lists);
     }
 
     readonly bool IBuffer.Relational => default(T) is IRelation;
 
-    readonly int IBuffer.RowSize => SavedTypes.RowSize<T>();
+    readonly int IBuffer.RowSize => TypeRegistry.RowSize<T>();
 
-    readonly int IBuffer.Layout => SavedTypes.RowSize<T>() != 0 ? SavedTypes.RawLayout<T>.Hash : 0;
+    readonly int IBuffer.Layout => TypeRegistry.RowSize<T>() != 0 ? TypeRegistry.RawLayout<T>.Hash : 0;
 
     readonly void IBuffer.Write(ref Writer writer, BufferStore store) => BufferStore<T>.Write(ref writer, Unsafe.As<BufferStore<T>>(store));
 
@@ -226,10 +226,10 @@ internal interface IBuffer
     /// <summary>Its elements are <see cref="IRelation"/>s: the buffer is indexed by their targets.</summary>
     bool Relational { get; }
 
-    /// <summary>How a save writes the elements (<see cref="SavedTypes.RowSize{T}"/>).</summary>
+    /// <summary>How a save writes the elements (<see cref="TypeRegistry.RowSize{T}"/>).</summary>
     int RowSize { get; }
 
-    /// <summary>The layout hash of raw elements (<see cref="SavedTypes.Raw{T}"/>), else 0.</summary>
+    /// <summary>The layout hash of raw elements (<see cref="TypeRegistry.Raw{T}"/>), else 0.</summary>
     int Layout { get; }
 
     /// <summary>Write the elements of <paramref name="store"/> (a buffer of this type's; null: none) for a save.</summary>
@@ -285,9 +285,9 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     // hands Batch of them to a pool every thread shares, and a thread whose own run out takes Batch back from it, one
     // lock per Batch stores: the lists the owner thread takes back serve the first writes of a parallel [ForEach] on
     // the helper threads too. Bounded like a table's rows: the pools hold at most as many stores as died while none
-    // were taken (the peak a table's capacity keeps too), each with at most PoolCapacity elements (a list that grew
-    // larger is left to the GC; DynamicBuffer<T>.PoolCapacity sets it).
-    internal static int PoolCapacity = 4096 / Unsafe.SizeOf<T>();
+    // were taken (the peak a table's capacity keeps too), each with at most MaxPooledLength elements (a list that grew
+    // larger is left to the GC; DynamicBuffer<T>.MaxPooledLength sets it).
+    internal static int MaxPooledLength = 4096 / Unsafe.SizeOf<T>();
 
     private const int Batch = 32;
 
@@ -309,17 +309,17 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         return store;
     }
 
-    /// <summary>Add stores of PoolCapacity elements to the shared pool until the pools hold <paramref name="count"/> (cold).</summary>
-    public static void Reserve(int count)
+    /// <summary>Add stores of MaxPooledLength elements to the shared pool until the pools hold <paramref name="count"/> (cold).</summary>
+    public static void Fill(int count)
     {
-        if (PoolCapacity == 0) return;
+        if (MaxPooledLength == 0) return;
         t_free ??= new BufferStore<T>[2 * Batch]; // the calling thread's own stores: its first refill allocates nothing
         lock (s_gate)
         {
             int missing = count - s_freeCount - t_freeCount;
             if (missing <= 0) return;
             if (s_freeCount + missing > s_free.Length) Array.Resize(ref s_free, Math.Max(s_freeCount + missing, s_free.Length * 2));
-            for (int i = 0; i < missing; i++) s_free[s_freeCount++] = new BufferStore<T>(PoolCapacity);
+            for (int i = 0; i < missing; i++) s_free[s_freeCount++] = new BufferStore<T>(MaxPooledLength);
         }
     }
 
@@ -345,7 +345,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     {
         if (RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(Items, 0, Count);
         Count = 0;
-        if (Items.Length > PoolCapacity) return;
+        if (Items.Length > MaxPooledLength) return;
         var free = t_free ??= new BufferStore<T>[2 * Batch];
         if (t_freeCount == free.Length) Spill(free);
         free[t_freeCount++] = this;
@@ -407,7 +407,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         writer.Write(count);
         if (count == 0) return;
         var items = store!.Items.AsSpan(0, count);
-        if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) SavedTypes.WriteRows<T>(ref writer, Bytes(items)); // raw or [NinoType]
+        if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) TypeRegistry.WriteRows<T>(ref writer, Bytes(items)); // raw or [NinoType]
         else for (int i = 0; i < items.Length; i++) NinoSerializer.Serialize(items[i], ref writer);
     }
 
@@ -421,7 +421,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     /// </summary>
     public static BufferStore<T> Read(ref Reader reader, BufferStore<T> reuse)
     {
-        int count = reader.ReadLength(Math.Max(1, SavedTypes.RowSize<T>()));
+        int count = reader.ReadLength(Math.Max(1, TypeRegistry.RowSize<T>()));
         if (count < 0) throw new System.IO.InvalidDataException("A damaged save: a buffer longer than its bytes");
         if (reuse != null && RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(reuse.Items, 0, reuse.Count);
         if (count == 0)
@@ -435,7 +435,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         if (store.Items.Length < count) store.Resize(count);
         store.Count = count;
         var items = store.Items.AsSpan(0, count);
-        if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) SavedTypes.ReadRows<T>(ref reader, Bytes(items));
+        if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) TypeRegistry.ReadRows<T>(ref reader, Bytes(items));
         else for (int i = 0; i < items.Length; i++) NinoDeserializer.Deserialize(ref items[i], ref reader);
         return store;
     }

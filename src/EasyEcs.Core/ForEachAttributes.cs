@@ -59,7 +59,7 @@ public sealed class ForEachAttribute : Attribute
     /// <see cref="SimdMode.Require"/> makes a method that does not qualify an error (EECS056);
     /// <see cref="SimdMode.Off"/> keeps the method one row at a time. Default <see cref="SimdMode.Auto"/>.
     /// </summary>
-    public SimdMode Simd { get; init; }
+    public SimdMode SimdMode { get; init; }
 
     /// <summary>
     /// What a vector loop may change in floating-point results. <see cref="FloatMode.Exact"/> keeps every result the
@@ -115,7 +115,7 @@ public sealed class ConsumeAttribute : Attribute;
 public sealed class ForEntityAttribute : Attribute;
 
 /// <summary>
-/// Whether a <see cref="ForEachAttribute"/> method runs as a vector loop (<see cref="ForEachAttribute.Simd"/>). A method
+/// Whether a <see cref="ForEachAttribute"/> method runs as a vector loop (<see cref="ForEachAttribute.SimdMode"/>). A method
 /// qualifies when it is static, makes no structural change (on one thread or in parallel), takes components (by <c>ref</c> or
 /// <c>in</c>) and <see cref="Maybe{T}"/> of them, singletons and values, and computes with operations that have an exact
 /// vector counterpart. <see cref="World.DescribeSchedule"/> names the loop each method of a system got

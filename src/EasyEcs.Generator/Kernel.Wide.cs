@@ -10,7 +10,7 @@ namespace EasyEcs.Generator;
 /// Wide components: a row of up to 16 four-byte words (more fields than a vector loop splits, or fields of other types
 /// beside the 4-byte lanes the method uses). On AVX-512 the loop loads the 16 rows of a vector as K whole vectors
 /// (K words per row), gathers each field the method uses into one vector with a pruned tree of two-source permutes
-/// (<c>vpermt2ps</c>: neighbouring vectors merged while their used words fit one vector, then each field picked out of
+/// (<c>vpermt2ps</c>: neighboring vectors merged while their used words fit one vector, then each field picked out of
 /// the merged ones), and writes back only the vectors holding written words: one permute per field in each, then a whole
 /// store (the other words as loaded). Lanes run the scalar code's operations, so results are the method's bit for bit.
 /// Only where the permutes cost less than the method's operations gain (<see cref="Gate"/>), and only on AVX-512 (a
@@ -196,7 +196,7 @@ internal sealed partial class Kernel
 
     /// <summary>
     /// The loads of a wide component's 16 rows and the vectors of the lanes the method uses (<c>__c{index}_{f}</c>):
-    /// neighbouring vectors merged while their used words fit one, for the number of levels that makes the fewest
+    /// neighboring vectors merged while their used words fit one, for the number of levels that makes the fewest
     /// permutes, then each lane picked out of the vectors holding it.
     /// </summary>
     private void WideLoads(int index, WideLayout wide, string column, StringBuilder loads)

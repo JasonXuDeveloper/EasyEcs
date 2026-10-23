@@ -14,7 +14,7 @@ public sealed class LeaveSystem : EcsSystem
     {
         if (world.ClientIndex.TryFind(leave.Client, out var player))
         {
-            player.Destroy();
+            world.GetEntity(player).Destroy();
             stats.Left++;
         }
     }
@@ -52,7 +52,7 @@ public sealed class MoveSystem : EcsSystem
     {
         if (world.ClientIndex.TryFind(move.Client, out var player))
         {
-            player.Velocity = new Velocity(move.X, move.Y);
+            world.GetEntity(player).Velocity = new Velocity(move.X, move.Y);
         }
     }
 }
@@ -69,8 +69,9 @@ public sealed class FireSystem : EcsSystem
         ref Stats stats,
         World world)
     {
-        if (world.ClientIndex.TryFind(fire.Client, out var player))
+        if (world.ClientIndex.TryFind(fire.Client, out var id))
         {
+            var player = world.GetEntity(id);
             Position from = player.Position;
             Velocity aim = player.Velocity;
             world.Instantiate(

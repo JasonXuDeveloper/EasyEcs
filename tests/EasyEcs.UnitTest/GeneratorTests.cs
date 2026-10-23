@@ -26,7 +26,7 @@ public class GeneratorTests
     /// <summary>
     /// Errors and the diagnostics of the correctness rules (EECS002-024). The performance rules (EECS025-033) are left
     /// out: the cases here write the shortest code that shows a rule, which often also costs; <see cref="Costs"/> checks them.
-    /// So are the suggestion to declare a hand-written key with [Key] (EECS067, PartTests) and the formatter a managed type
+    /// So are the suggestion to declare a hand-written key with [IndexKey] (EECS067, PartTests) and the formatter a managed type
     /// lacks (EECS069): the shared components write keys by hand and hold references. So are the suggestions to write
     /// a hand-written one-entity job or consuming pass with attributes (EECS080, EECS084; FormTests).
     /// </summary>
@@ -254,7 +254,7 @@ public class GeneratorTests
         if (parallel && vectorized) Assert.That(generated, Does.Contain("world.ForEachBatchParallel<"), generated);
 
         // Skipped means reported: the same method with SimdMode.Require is an error exactly when it got no loop.
-        string required = members.Replace("[ForEach]", "[ForEach(Simd = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(Simd = SimdMode.Require, Parallel").Replace("[ForEach(FloatMode", "[ForEach(Simd = SimdMode.Require, FloatMode");
+        string required = members.Replace("[ForEach]", "[ForEach(SimdMode = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(SimdMode = SimdMode.Require, Parallel").Replace("[ForEach(FloatMode", "[ForEach(SimdMode = SimdMode.Require, FloatMode");
         var errors = Diagnose(Components, Lanes, $"public partial class S : EcsSystem {{ {required} }}").Result;
         Assert.That(errors.Contains("EECS056"), Is.EqualTo(!vectorized), string.Join(", ", errors));
     }
@@ -307,7 +307,7 @@ public class GeneratorTests
 
     // Not meant for a vector loop (or vectorized, or opted out): no EECS055.
     [TestCase("[ForEach] static void A(ref F f, in H h) => f.V += h.V;")]                              // vectorized
-    [TestCase("[ForEach(Simd = SimdMode.Off)] static void A(ref Five t) => t.A = t.B;")]              // opted out
+    [TestCase("[ForEach(SimdMode = SimdMode.Off)] static void A(ref Five t) => t.A = t.B;")]              // opted out
     [TestCase("[ForEach] static void A(Entity e, ref Five t) => t.A = t.B;")]
     [TestCase("[ForEach] static void A(ref Holder h) { }")]                                             // not numeric fields
     [TestCase("[ForEach] static void A(System.Span<F> f) { }")]                                          // a batch method
@@ -320,17 +320,17 @@ public class GeneratorTests
         Assert.That(ids, Has.None.EqualTo("EECS055"));
     }
 
-    [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(Entity e, ref F f) => f.V++;", "it takes the Entity")]
-    [TestCase("[ForEach(Simd = SimdMode.Require)] void A(ref F f) => f.V++;", "it is not static")]
-    [TestCase("[ForEach(Simd = SimdMode.Require, Parallel = true)] static void A(ref F f, in D d) => f.V++;", "lane types float and double differ in size")]
-    [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 1 field it uses takes 9 permutes per 16 rows, more than its 1 vector operation gains; it uses 1 of Five's 5 fields (A): move it into a component of its own (a component of one field gets a vector loop)")]
-    [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref F f, Scratch<int> s) => f.V += s.Value;", "it takes a Scratch<Int32>: working memory a row at a time, not one per lane")]
-    [TestCase("[ForEach(Simd = SimdMode.Require)] static void A(ref F f, Lookup<H> h) => f.V++;", "it takes a Lookup<H>: a lookup of another entity per row has no vector form")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, ref F f) => f.V++;", "it takes the Entity")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] void A(ref F f) => f.V++;", "it is not static")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require, Parallel = true)] static void A(ref F f, in D d) => f.V++;", "lane types float and double differ in size")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 1 field it uses takes 9 permutes per 16 rows, more than its 1 vector operation gains; it uses 1 of Five's 5 fields (A): move it into a component of its own (a component of one field gets a vector loop)")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, Scratch<int> s) => f.V += s.Value;", "it takes a Scratch<Int32>: working memory a row at a time, not one per lane")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, Lookup<H> h) => f.V++;", "it takes a Lookup<H>: a lookup of another entity per row has no vector form")]
     public void ARequiredVectorLoopThatDoesNotQualifyIsAnError(string members, string reason)
     {
         var diagnostics = Analyze([Components, Lanes, $"public partial class S : EcsSystem {{ {members} }}"]).Result.Where(d => d.Id.StartsWith("EECS05")).ToArray();
         Assert.That(diagnostics.Select(d => d.Id + " " + d.GetMessage()),
-            Is.EqualTo(new[] { $"EECS056 [ForEach(Simd = SimdMode.Require)] method 'A' gets no vector loop: {reason}" }));
+            Is.EqualTo(new[] { $"EECS056 [ForEach(SimdMode = SimdMode.Require)] method 'A' gets no vector loop: {reason}" }));
         Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Error));
     }
 
@@ -338,7 +338,7 @@ public class GeneratorTests
     public void SimdOffKeepsAQualifyingMethodScalar()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "public partial class S : EcsSystem { [ForEach(Simd = SimdMode.Off)] static void A(ref F f, in H h) => f.V += h.V; [ForEach(Simd = SimdMode.Require)] static void B(ref F f) => f.V++; }"),
+            "public partial class S : EcsSystem { [ForEach(SimdMode = SimdMode.Off)] static void A(ref F f, in H h) => f.V += h.V; [ForEach(SimdMode = SimdMode.Require)] static void B(ref F f) => f.V++; }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
@@ -373,7 +373,7 @@ public class GeneratorTests
     public void AParallelVectorLoopRunsInEachChunk()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "public partial class S : EcsSystem { [ForEach(Parallel = true, Simd = SimdMode.Require)] static void A(ref F f, in G g, ref Reduce<Count> c) { f.V -= g.Pull; c.Value.N++; } }"),
+            "public partial class S : EcsSystem { [ForEach(Parallel = true, SimdMode = SimdMode.Require)] static void A(ref F f, in G g, ref Reduce<Count> c) { f.V -= g.Pull; c.Value.N++; } }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
@@ -410,7 +410,7 @@ public class GeneratorTests
     public void AMaybeIsALaneMask()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "public partial class S : EcsSystem { [ForEach(Simd = SimdMode.Require)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V += h.Value.V; f.V -= h.Value.V; } }"),
+            "public partial class S : EcsSystem { [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V += h.Value.V; f.V -= h.Value.V; } }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
@@ -429,7 +429,7 @@ public class GeneratorTests
     public void ACallUnderAConditionIsAColdBranch()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "public partial class S : EcsSystem { static void Log(float v) { } [ForEach(Simd = SimdMode.Require)] static void A(ref F f) { f.V -= 1; if (f.V < 0) { Log(f.V); f.V = 0; } } }"),
+            "public partial class S : EcsSystem { static void Log(float v) { } [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f) { f.V -= 1; if (f.V < 0) { Log(f.V); f.V = 0; } } }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
@@ -442,7 +442,7 @@ public class GeneratorTests
     public void AWholeComponentOfAVector2IsOneStatementPerLane()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "public partial class S : EcsSystem { [ForEach(Simd = SimdMode.Require)] static void A(ref Pos p, in Vel v, in G g) => p = new Pos(p.Value + v.Value * g.Pull); }"),
+            "public partial class S : EcsSystem { [ForEach(SimdMode = SimdMode.Require)] static void A(ref Pos p, in Vel v, in G g) => p = new Pos(p.Value + v.Value * g.Pull); }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
@@ -456,7 +456,7 @@ public class GeneratorTests
     public void AWideComponentsLanesAreGatheredByPermutes()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "public partial class S : EcsSystem { [ForEach(Simd = SimdMode.Require)] static void A(ref Unit u) => u.Speed = System.MathF.Max(u.Speed * 0.5f - 1, 0); }"),
+            "public partial class S : EcsSystem { [ForEach(SimdMode = SimdMode.Require)] static void A(ref Unit u) => u.Speed = System.MathF.Max(u.Speed * 0.5f - 1, 0); }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
@@ -475,7 +475,7 @@ public class GeneratorTests
     public void ByteSaturationIdiomsAreTheSaturatingForms()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "public partial class S : EcsSystem { [ForEach(Simd = SimdMode.Require)] static void A(ref B8 b, in C8 c) { b.V = (byte)System.Math.Max(b.V - c.V, 0); b.V = (byte)System.Math.Min(b.V + c.V, 255); b.V += c.V; } }"),
+            "public partial class S : EcsSystem { [ForEach(SimdMode = SimdMode.Require)] static void A(ref B8 b, in C8 c) { b.V = (byte)System.Math.Max(b.V - c.V, 0); b.V = (byte)System.Math.Min(b.V + c.V, 255); b.V += c.V; } }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
@@ -494,7 +494,7 @@ public class GeneratorTests
     public void FastMathCallsTheVectorForms()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "public partial class S : EcsSystem { [ForEach(FloatMode = FloatMode.Fast, Simd = SimdMode.Require)] static void A(ref F f, in G g) => f.V = System.MathF.Sin(f.V) + System.MathF.Cos(g.Pull) * float.DegreesToRadians(f.V); }"),
+            "public partial class S : EcsSystem { [ForEach(FloatMode = FloatMode.Fast, SimdMode = SimdMode.Require)] static void A(ref F f, in G g) => f.V = System.MathF.Sin(f.V) + System.MathF.Cos(g.Pull) * float.DegreesToRadians(f.V); }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs") && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
@@ -505,9 +505,9 @@ public class GeneratorTests
 
     // The Vector512 loop is the Vector<T> loop's text with the vector type's token replaced: user types named
     // Vector-something in the setup (a context value, a singleton's field) stay as written.
-    [TestCase("public static partial class R { [ForEach(Simd = SimdMode.Require)] public static void A(ref F f, in System.Numerics.Vector3 wind) => f.V += wind.X * wind.Y; }")]
-    [TestCase("public static partial class R { [ForEach(Simd = SimdMode.Require)] public static void A(ref F f, in System.Numerics.Vector<float> bias, float gain) => f.V *= gain; }")]
-    [TestCase("public struct Wind : ISingletonComponent { public System.Numerics.Vector3 V; } public class S : EcsSystem { [ForEach(Simd = SimdMode.Require)] static void A(ref F f, in Wind w) => f.V += w.V.X; }")]
+    [TestCase("public static partial class R { [ForEach(SimdMode = SimdMode.Require)] public static void A(ref F f, in System.Numerics.Vector3 wind) => f.V += wind.X * wind.Y; }")]
+    [TestCase("public static partial class R { [ForEach(SimdMode = SimdMode.Require)] public static void A(ref F f, in System.Numerics.Vector<float> bias, float gain) => f.V *= gain; }")]
+    [TestCase("public struct Wind : ISingletonComponent { public System.Numerics.Vector3 V; } public class S : EcsSystem { [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, in Wind w) => f.V += w.V.X; }")]
     public void UserTypesNamedVectorStayAsWritten(string source)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, source), out var output, out _);
@@ -583,7 +583,7 @@ public class GeneratorTests
         var compilation = Compile().AddSyntaxTrees(tree, CSharpSyntaxTree.ParseText("using EasyEcs;\n" + other, Parse));
         var driver = Driver().RunGenerators(compilation);
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(tree, CSharpSyntaxTree.ParseText(
-            tree.ToString().Replace("[ForEach] static void A", "[ForEach(Simd = SimdMode.Off)] static void A"), Parse)));
+            tree.ToString().Replace("[ForEach] static void A", "[ForEach(SimdMode = SimdMode.Off)] static void A"), Parse)));
 
         var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
@@ -886,7 +886,7 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, Scratch<int[]> work) { if (work.Value == null) work.Value = new int[8]; work.Value[0] = p.V; p.V = work.Value[0]; } }")]
     [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref Q q, in Link link, Lookup<P> ps) { var t = ps[link.Target]; q.V = t.HasValue ? t.Value.V : 0; } }")]
     [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, ref Q q, Lookup<P> ps) => q.V = ps.Has(default) ? p.V : 0; }")]
-    [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; } public class S : EcsSystem { [ForEach(Parallel = true)] static void A(Tile<byte, G> t, Mut<DynamicBuffer<int>> next) { var pad = t.Load(); foreach (var row in pad.Rows(TileReads.Layer)) next.Write().AsSpan()[row.Index] = pad.At(row)[1, 0, 0]; } }")]
+    [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; } public class S : EcsSystem { [ForEach(Parallel = true)] static void A(Tile<byte, G> t, Mut<DynamicBuffer<int>> next) { var pad = t.Pad(); foreach (var row in pad.Rows(TileReads.Layer)) next.Write().AsSpan()[row.Index] = pad.At(row)[1, 0, 0]; } }")]
     [TestCase("public struct Named : IComponent { public string Name; } public class S : EcsSystem { [ForEach] static void A(in Named n, ref P p) => p.V = n.Name.Remove(0, 1).Length; }")]
     [TestCase("public static class U { public static async System.Threading.Tasks.Task F(World world) { await System.Threading.Tasks.Task.Run(() => world.CreateEntity(new P())); world.CreateEntity(new P()); } }")]
     [TestCase("public static class U { public static void F(World world) { System.Threading.Tasks.Task.Run(() => world.CreateEntity(new P())).Wait(); world.CreateEntity(new P()); } }")]
@@ -902,7 +902,7 @@ public class GeneratorTests
     [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, ref Reduce<Sum> sum, in Sum last) => sum.Value.N += p.V + last.N; }")]
     [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public class S : EcsSystem { [ForEach] static void A(in P p, Maybe<Q> q, ref Reduce<Sum> sum) => sum.Combine(new Sum { N = p.V + (q.HasValue ? q.Value.V : 0) }); }")]
     [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public static class R { [ForEach(Parallel = true, ChunkRows = 1024)] public static void A(in P p, ref Reduce<Sum> sum) => sum.Value.N += p.V; }")]
-    [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; static int ITileShape.Halo => 4; static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All; }")]
+    [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; static int ITileShape.Halo => 4; static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All; }")]
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 8; static int ITileShape.Depth => 1; static int ITileShape.Halo => 3; static TileFaces ITileShape.Faces => TileFaces.West | TileFaces.East; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }")]
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { public static int H = 9; int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITileShape.Halo => H; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }")]
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; } public record struct V(byte B); public class S : EcsSystem { [ForEach(Parallel = true)] static void A(Tile<byte, G> t, Tile<V, G> u, Mut<DynamicBuffer<int>> b) => b.Write().SetCount(t.Cells.Length + u.Cells.Length); }")]
@@ -1252,9 +1252,9 @@ public class GeneratorTests
             public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; }
             public record struct Mount(EntityId Rider) : IComponent, IUniqueIndexed<EntityId> { public EntityId Key => Rider; }
             """), out var output, out _);
-        var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs")).ToString();
-        Assert.That(source, Does.Contain("global::EasyEcs.SavedTypes.Component<global::Account>()"));
-        Assert.That(source, Does.Contain("global::EasyEcs.SavedTypes.UniqueIndex<global::Account, int>()"));
+        var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.TypeRegistry.g.cs")).ToString();
+        Assert.That(source, Does.Contain("global::EasyEcs.TypeRegistry.Component<global::Account>()"));
+        Assert.That(source, Does.Contain("global::EasyEcs.TypeRegistry.UniqueIndex<global::Account, int>()"));
         Assert.That(source, Does.Not.Contain("UniqueIndex<global::Mount"));            // an EntityId key cannot be unique (EECS036)
         Assert.That(source, Does.Not.Contain("UniqueIndex<global::Owned"));            // IIndexed only
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
@@ -1266,29 +1266,29 @@ public class GeneratorTests
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
             [GroupBy] public partial record struct Zone([Group] int Id) : IComponent;
             [GroupBy] public record struct Room(int Id) : IComponent, IGroup { public int Group => Id; }
-            [WhenTargetDestroyed(TargetPolicy.Destroy)] public partial record struct Summon([Key] EntityId Owner) : IComponent;
+            [WhenTargetDestroyed(TargetPolicy.Destroy)] public partial record struct Summon([IndexKey] EntityId Owner) : IComponent;
             [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Ally(EntityId Target) : IRelation;
             [NotSaved] public record struct Link2(object Socket) : IComponent;
             [NotSaved] public record struct Pool(object Handle) : ISingletonComponent;
             """), out var output, out _);
-        var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs")).ToString();
+        var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.TypeRegistry.g.cs")).ToString();
         foreach (var call in new[] { "GroupBy<global::Zone>()", "GroupBy<global::Room>()", "WhenTargetDestroyed<global::Summon>((global::EasyEcs.TargetPolicy)2)",
                      "RelationWhenTargetDestroyed<global::Ally>((global::EasyEcs.TargetPolicy)1)", "NotSaved<global::Link2>()", "NotSaved<global::Pool>()" })
-            Assert.That(source, Does.Contain("global::EasyEcs.SavedTypes." + call + ";"), call);
+            Assert.That(source, Does.Contain("global::EasyEcs.TypeRegistry." + call + ";"), call);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
     }
 
     [TestCase("[GroupBy] public record struct Z(int Id) : IComponent;")]                                                     // not grouped
     [TestCase("[GroupBy] public partial record struct Z([Group] int Id) : ISingletonComponent;")]                             // not a component
     [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public record struct W(int Id) : IComponent;")]                   // no link
-    [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public partial record struct W([Key] int Id) : IComponent;")]     // not an EntityId key
+    [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public partial record struct W([IndexKey] int Id) : IComponent;")]     // not an EntityId key
     [TestCase("[NotSaved] public record struct N(object O);")]                                                              // no component
     public async Task AWorldSetupOnATypeItDoesNotFitIsReported(string source)
     {
         Assert.That((await Analyze([source])).Where(d => d.Id.StartsWith("EECS") || d.Severity == DiagnosticSeverity.Error).Select(d => d.Id).Distinct(),
             Is.EqualTo(new[] { "EECS068" }));
         Driver().RunGeneratorsAndUpdateCompilation(Compile(source), out var output, out _);
-        var saved = output.SyntaxTrees.SingleOrDefault(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs"))?.ToString() ?? "";
+        var saved = output.SyntaxTrees.SingleOrDefault(t => t.FilePath.EndsWith("EasyEcs.TypeRegistry.g.cs"))?.ToString() ?? "";
         Assert.That(saved, Does.Not.Contain("GroupBy<").And.Not.Contain("WhenTargetDestroyed<").And.Not.Contain("NotSaved<"));
     }
 
@@ -1313,13 +1313,13 @@ public class GeneratorTests
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components,
             "public partial class S : EcsSystem { [ForEach] static void A(in DynamicBuffer<P> b) { } }"), out var output, out _);
-        var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs")).ToString();
+        var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.TypeRegistry.g.cs")).ToString();
         Assert.That(source, Does.Contain("[global::System.Runtime.CompilerServices.ModuleInitializer]"));
         foreach (var call in new[] { "Component<global::P>()", "Component<global::T>()", "Singleton<global::Clock>()",
                      "Component<global::EasyEcs.DynamicBuffer<global::P>>()" })
-            Assert.That(source, Does.Contain("global::EasyEcs.SavedTypes." + call), call);
+            Assert.That(source, Does.Contain("global::EasyEcs.TypeRegistry." + call), call);
         // Link's id is a public field, Owned's an auto-property's backing field: both are reached through UnsafeAccessor.
-        Assert.That(source, Does.Contain("global::EasyEcs.SavedTypes.EntityIds<global::Link>(static (ref value) => ref Field"));
+        Assert.That(source, Does.Contain("global::EasyEcs.TypeRegistry.EntityIds<global::Link>(static (ref value) => ref Field"));
         Assert.That(source, Does.Contain("Name = \"Target\""));
         Assert.That(source, Does.Contain("Name = \"<Owner>k__BackingField\"").Or.Contain("Name = \"Owner\""));
         Assert.That(source, Does.Not.Contain("EntityIds<global::Handle>"));  // an Entity handle is not an id
@@ -1332,8 +1332,8 @@ public class GeneratorTests
         string Registration(string fields)
         {
             Driver().RunGeneratorsAndUpdateCompilation(Compile("public struct R : IComponent { " + fields + " }"), out var output, out _);
-            var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs")).ToString();
-            return source.Split('\n').Single(l => l.Contains("SavedTypes.Raw<global::R>")).Trim();
+            var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.TypeRegistry.g.cs")).ToString();
+            return source.Split('\n').Single(l => l.Contains("TypeRegistry.Raw<global::R>")).Trim();
         }
 
         var original = Registration("public int A; public float B;");
@@ -1341,7 +1341,7 @@ public class GeneratorTests
         Assert.That(Registration("public float A; public int B;"), Is.Not.EqualTo(original));   // same size, other fields
         Assert.That(Registration("public int B; public float A;"), Is.Not.EqualTo(original));   // renamed
         Driver().RunGeneratorsAndUpdateCompilation(Compile("public struct M : IComponent { public string S; }"), out var managed, out _);
-        Assert.That(managed.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs")).ToString(), Does.Not.Contain("Raw<"));
+        Assert.That(managed.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.TypeRegistry.g.cs")).ToString(), Does.Not.Contain("Raw<"));
     }
 
     // Every tracked stage of ComponentGenerator and SystemGenerator: a new stage is added here (the test fails until it is).

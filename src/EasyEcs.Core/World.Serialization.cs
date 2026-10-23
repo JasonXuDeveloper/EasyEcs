@@ -441,7 +441,7 @@ public sealed partial class World
             bool disabled = reader.Read<bool>();
             int size = reader.Read<int>();
             int layout = reader.Read<int>();
-            int bit = SavedTypes.FindComponent(id);
+            int bit = TypeRegistry.FindComponent(id);
             if (bit < 0) bits[t] = -1;
             else
             {
@@ -485,7 +485,7 @@ public sealed partial class World
             {
                 int id = reader.Read<int>();
                 var slice = reader.ReadSlice(); // skipped when this process has no such singleton
-                var box = Find(loaded, id) ?? SavedTypes.NewSingleton(id);
+                var box = Find(loaded, id) ?? TypeRegistry.NewSingleton(id);
                 if (box == null) continue;
                 box.Clear();
                 if (!keep.ContainsSingleton(box.Slot) && !box.NotSaved) // a kept one's box stays in the snapshot, empty: Restore skips it

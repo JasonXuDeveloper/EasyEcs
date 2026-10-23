@@ -379,7 +379,7 @@ internal static class Symbols
 
     /// <summary>
     /// The key type of indexed component <paramref name="type"/>, or null: by the interfaces it implements
-    /// (<c>IUniqueIndexed&lt;TKey&gt;</c> first, then <c>IIndexed&lt;TKey&gt;</c>), else by its <c>[Key]</c> /
+    /// (<c>IUniqueIndexed&lt;TKey&gt;</c> first, then <c>IIndexed&lt;TKey&gt;</c>), else by its <c>[IndexKey]</c> /
     /// <c>[UniqueKey]</c> when the generator writes that key (<see cref="Parts"/>). Every generator asks this, never the
     /// interfaces alone: the interface a generated part adds is not in another generator's compilation.
     /// <paramref name="unique"/>: the key is unique.
@@ -658,7 +658,7 @@ internal static class Symbols
         /// <summary><c>Lookup&lt;T&gt;</c>: read-only access to component <c>T</c> of any entity (a read of <c>T</c>).</summary>
         Lookup,
         /// <summary>
-        /// <c>Tile&lt;TCell, TTile&gt;</c>: the entity's <c>DynamicBuffer&lt;TCell&gt;</c> with its neighbours' in the grid of
+        /// <c>Tile&lt;TCell, TTile&gt;</c>: the entity's <c>DynamicBuffer&lt;TCell&gt;</c> with its neighbors' in the grid of
         /// <c>TTile</c> (an <c>ITile&lt;TKey&gt;</c>): a read of both, and of TTile's index.
         /// </summary>
         Tile,
@@ -895,8 +895,8 @@ internal static class Symbols
     /// <summary>[ForEach(ChunkRows = N)]: the rows a thread of a parallel pass takes at a time (0: chosen by the runtime).</summary>
     public static int ChunkRows(IMethodSymbol method) => ForEachArgument(method, "ChunkRows", 0);
 
-    /// <summary>[ForEach(Simd = SimdMode.X)]: <see cref="SimdAuto"/>, <see cref="SimdRequire"/> or <see cref="SimdOff"/>.</summary>
-    public static int Simd(IMethodSymbol method) => ForEachArgument(method, "Simd", SimdAuto);
+    /// <summary>[ForEach(SimdMode = SimdMode.X)]: <see cref="SimdAuto"/>, <see cref="SimdRequire"/> or <see cref="SimdOff"/>.</summary>
+    public static int Simd(IMethodSymbol method) => ForEachArgument(method, "SimdMode", SimdAuto);
 
     /// <summary>The values of EasyEcs.SimdMode.</summary>
     public const int SimdAuto = 0, SimdRequire = 1, SimdOff = 2;

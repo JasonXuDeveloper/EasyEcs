@@ -123,7 +123,7 @@ public struct Emitted<T> : ISingletonComponent, IBuffer where T : struct
     /// joined into. Owner thread (or before the parallel stage). Generated code calls this.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public static SingletonRef<Emitted<T>> Target(World world)
+    public static SingletonRef<Emitted<T>> Joined(World world)
     {
         world.GetOrAddSingleton<Emitted<T>>();
         return world.SingletonRef<Emitted<T>>();

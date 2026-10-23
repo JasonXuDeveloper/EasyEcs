@@ -12,7 +12,7 @@ namespace EasyEcs.Generator;
 /// Writes the members a struct's attributes declare into a part of the struct (so the struct and every type
 /// containing it are partial, EECS062): a reduction's <c>IReduction&lt;T&gt;</c> from its <c>[Sum]</c> /
 /// <c>[Product]</c> / <c>[Min]</c> / <c>[Max]</c> / <c>[All]</c> / <c>[Any]</c> fields, an index's explicit
-/// <c>IIndexed&lt;TKey&gt;.Key</c> from <c>[Key]</c> / <c>[UniqueKey]</c> (on a member, or the type for the value
+/// <c>IIndexed&lt;TKey&gt;.Key</c> from <c>[IndexKey]</c> / <c>[UniqueKey]</c> (on a member, or the type for the value
 /// itself), a group's explicit <c>IGroup.Group</c> from <c>[Group]</c>. Each attribute is found with
 /// <c>ForAttributeWithMetadataName</c>; a type's declaration is read once (<see cref="Parts"/>), the part written only
 /// when nothing is in the way (the analyzer reports what is).
@@ -76,7 +76,7 @@ public sealed class PartGenerator : IIncrementalGenerator
         {
             if (key.Interface.Length > 0) bases.Add(key.Interface);
             string type = key.Type;
-            body.Append($"/// <summary>The key the world indexes the entity by: {(key.Member == "this" ? "the whole value" : key.Member)} (from [{(key.Unique ? "UniqueKey" : "Key")}]).</summary>\n");
+            body.Append($"/// <summary>The key the world indexes the entity by: {(key.Member == "this" ? "the whole value" : key.Member)} (from [{(key.Unique ? "UniqueKey" : "IndexKey")}]).</summary>\n");
             body.Append($"{code}\n{(key.ReadOnly ? "readonly " : "")}{type} global::EasyEcs.IIndexed<{type}>.Key => {key.Member};\n");
         }
 

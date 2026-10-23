@@ -420,10 +420,10 @@ internal readonly struct IdMap(World source, EntityId[] arrived, int[] stamps, i
     public EntityId this[EntityId id] =>
         (uint)id.Index < (uint)stamps.Length && stamps[id.Index] == stamp && source.IsAlive(id) ? arrived[id.Index] : EntityId.Null;
 
-    /// <summary>Rewrite the <see cref="EntityId"/> fields of <paramref name="values"/> (see <see cref="SavedTypes.EntityIds{T}"/>).</summary>
+    /// <summary>Rewrite the <see cref="EntityId"/> fields of <paramref name="values"/> (see <see cref="TypeRegistry.EntityIds{T}"/>).</summary>
     public void Apply<T>(Span<T> values)
     {
-        var offsets = SavedTypes.EntityIdOffsets<T>.Value;
+        var offsets = TypeRegistry.EntityIdOffsets<T>.Value;
         if (offsets.Length == 0) return;
         foreach (ref var value in values)
         {

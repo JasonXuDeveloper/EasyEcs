@@ -36,14 +36,14 @@ public sealed partial class EasyEcsAnalyzer
         "Scratch) has no meaning for one entity, and a method cannot be both a pass ([ForEach]) and a run on one entity.",
         helpLinkUri: Help("EECS081"));
 
-    public static readonly DiagnosticDescriptor ScheduleOverride = new("EECS082", "A system's schedule as an override",
-        "'{0}' overrides '{1}', which systems no longer have: declare the schedule on the class with {2}",
+    public static readonly DiagnosticDescriptor CadenceOverride = new("EECS082", "A system's cadence as an override",
+        "'{0}' overrides '{1}', which systems no longer have: declare the cadence on the class with {2}",
         Category, DiagnosticSeverity.Error, true,
         "A system's cadence is the [UpdateInterval(n, Phase = p)] attribute on its class, which the generator writes into " +
         "its registration: the values are constants by construction, read once when the system is added. The " +
         "UpdateInterval and UpdatePhase properties are gone.", helpLinkUri: Help("EECS082"));
 
-    public static readonly DiagnosticDescriptor BadSchedule = new("EECS083", "An [UpdateInterval] that cannot apply",
+    public static readonly DiagnosticDescriptor BadUpdateInterval = new("EECS083", "An [UpdateInterval] that cannot apply",
         "[UpdateInterval] on '{0}' cannot apply: {1}",
         Category, DiagnosticSeverity.Error, true,
         "[UpdateInterval(n, Phase = p)] runs a system on the updates whose count modulo n is p: n is 1 or more, p is 0 to " +
@@ -70,7 +70,7 @@ public sealed partial class EasyEcsAnalyzer
 
     private static void InitializeForms(AnalysisContext context)
     {
-        context.RegisterSyntaxNodeAction(AnalyzeScheduleOverride, SyntaxKind.PropertyDeclaration);
+        context.RegisterSyntaxNodeAction(AnalyzeCadenceOverride, SyntaxKind.PropertyDeclaration);
         context.RegisterSymbolAction(AnalyzeScheduleAttribute, SymbolKind.NamedType);
         context.RegisterSyntaxNodeAction(AnalyzeHandWrittenConsume, SyntaxKind.MethodDeclaration);
         context.RegisterSymbolAction(AnalyzeConsume, SymbolKind.Method);
@@ -79,7 +79,7 @@ public sealed partial class EasyEcsAnalyzer
 
     // ---------------- EECS082 / EECS083: [UpdateInterval] ----------------
 
-    private static void AnalyzeScheduleOverride(SyntaxNodeAnalysisContext context)
+    private static void AnalyzeCadenceOverride(SyntaxNodeAnalysisContext context)
     {
         var declaration = (PropertyDeclarationSyntax)context.Node;
         string name = declaration.Identifier.ValueText;
@@ -106,7 +106,7 @@ public sealed partial class EasyEcsAnalyzer
         bool fixable = interval is int i && phase is int f && (i <= 1 || f >= 0 && f < i) && Symbols.Schedule(system) == null;
         var properties = fixable ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Schedule")
             .Add(ScheduleText, interval <= 1 ? "" : text) : null;
-        context.ReportDiagnostic(Diagnostic.Create(ScheduleOverride, declaration.Identifier.GetLocation(),
+        context.ReportDiagnostic(Diagnostic.Create(CadenceOverride, declaration.Identifier.GetLocation(),
             other == null ? [] : [other.GetLocation()], properties, system.Name, name, text));
     }
 
@@ -114,7 +114,7 @@ public sealed partial class EasyEcsAnalyzer
     {
         var type = (INamedTypeSymbol)context.Symbol;
         if (Symbols.ScheduleProblem(type) is not { } problem || Symbols.Schedule(type) is not var (_, _, attribute)) return;
-        context.ReportDiagnostic(Diagnostic.Create(BadSchedule,
+        context.ReportDiagnostic(Diagnostic.Create(BadUpdateInterval,
             attribute.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken).GetLocation() ?? type.Locations.FirstOrDefault(),
             type.Name, problem));
     }

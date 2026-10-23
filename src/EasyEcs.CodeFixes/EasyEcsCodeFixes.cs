@@ -101,7 +101,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                 case "EECS043" or "EECS067" when node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { } key:
                     if (diagnostic.Id == "EECS043" && await ExplicitKey(context.Document, key, context.CancellationToken).ConfigureAwait(false) is { } explicitKey)
                         Register(context, diagnostic, "Implement it explicitly", root, key, explicitKey);
-                    if (await KeyAttribute(context.Document, root, key, diagnostic.Properties.TryGetValue("Member", out var member) ? member : "this",
+                    if (await IndexKeyAttribute(context.Document, root, key, diagnostic.Properties.TryGetValue("Member", out var member) ? member : "this",
                             context.CancellationToken).ConfigureAwait(false) is { } keyed)
                         context.RegisterCodeFix(CodeAction.Create($"Declare it with [{keyed.Attribute}]", _ => Task.FromResult(context.Document.WithSyntaxRoot(keyed.Root)),
                             diagnostic.Id + "attribute"), diagnostic);
@@ -747,11 +747,11 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
 
     /// <summary>
     /// EECS067 (and EECS043's second fix): a hand-written Key returning <paramref name="member"/> (<c>this</c>: the value)
-    /// declared with <c>[Key]</c> (<c>[UniqueKey]</c> for a unique index) on that member or the type; the Key and the
+    /// declared with <c>[IndexKey]</c> (<c>[UniqueKey]</c> for a unique index) on that member or the type; the Key and the
     /// IIndexed / IUniqueIndexed of the base list go (an IDirectIndexed stays: its Slots and SlotOf are the user's), the
     /// type becomes partial along its chain. Null when code reads the Key through the type.
     /// </summary>
-    private static async Task<(SyntaxNode Root, string Attribute)?> KeyAttribute(Document document, SyntaxNode root, PropertyDeclarationSyntax key,
+    private static async Task<(SyntaxNode Root, string Attribute)?> IndexKeyAttribute(Document document, SyntaxNode root, PropertyDeclarationSyntax key,
         string? member, CancellationToken token)
     {
         var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
@@ -759,7 +759,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
             || await ReadThroughType(document, property, token).ConfigureAwait(false))
             return null;
         bool unique = property.ContainingType.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == "EasyEcs.IUniqueIndexed<TKey>");
-        string attribute = unique ? "UniqueKey" : "Key";
+        string attribute = unique ? "UniqueKey" : "IndexKey";
         var byName = new System.Collections.Generic.Dictionary<string, string>();
         if (member != "this") byName[member] = attribute;
         var rewritten = Declare(model, root, type, byName, member == "this" ? attribute : null,

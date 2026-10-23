@@ -11,11 +11,11 @@ int ticks = Support.Option(args, "--ticks", 1200);
 // #region options
 // A chunk's blocks, its water and the water's next step are 8 KB each, more than a buffer's pool keeps by default: let
 // each chunk loaded reuse the lists of one that was unloaded.
-DynamicBuffer<Block>.PoolCapacity = Terrain.BlocksPerChunk;
-DynamicBuffer<Fluid>.PoolCapacity = Terrain.BlocksPerChunk;
-DynamicBuffer<NextFluid>.PoolCapacity = Terrain.BlocksPerChunk;
-DynamicBuffer<Surface>.PoolCapacity = Terrain.Size * Terrain.Size;
-DynamicBuffer<ItemStack>.PoolCapacity = Rules.InventorySlots;
+DynamicBuffer<Block>.MaxPooledLength = Terrain.BlocksPerChunk;
+DynamicBuffer<Fluid>.MaxPooledLength = Terrain.BlocksPerChunk;
+DynamicBuffer<NextFluid>.MaxPooledLength = Terrain.BlocksPerChunk;
+DynamicBuffer<Surface>.MaxPooledLength = Terrain.Size * Terrain.Size;
+DynamicBuffer<ItemStack>.MaxPooledLength = Rules.InventorySlots;
 
 using var world = new World(new WorldOptions { MeasureSystems = true });
 // #endregion options
@@ -128,11 +128,11 @@ static void Reserve(World world, in Capacity capacity)
     world.Reserve(prefabs.Zombie, capacity.Zombies);
     world.Reserve(prefabs.Item, capacity.Items);
     world.Reserve<LoadRequest>(capacity.Requests);
-    DynamicBuffer<Block>.ReservePool(capacity.Chunks);
-    DynamicBuffer<Fluid>.ReservePool(capacity.Chunks);
-    DynamicBuffer<Surface>.ReservePool(capacity.Chunks);
-    DynamicBuffer<NextFluid>.ReservePool(capacity.Flowing);
-    DynamicBuffer<ItemStack>.ReservePool(capacity.Players);
+    DynamicBuffer<Block>.FillPool(capacity.Chunks);
+    DynamicBuffer<Fluid>.FillPool(capacity.Chunks);
+    DynamicBuffer<Surface>.FillPool(capacity.Chunks);
+    DynamicBuffer<NextFluid>.FillPool(capacity.Flowing);
+    DynamicBuffer<ItemStack>.FillPool(capacity.Players);
 }
 // #endregion capacity
 

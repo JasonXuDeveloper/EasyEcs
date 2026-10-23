@@ -7,8 +7,8 @@ using BenchmarkDotNet.Attributes;
 namespace EasyEcs.Benchmark;
 
 // Stencils over a torus of 32 x 32 plates of 16 x 16 cells (262,144 cells): what Tile<TCell, TTile> costs against the
-// same stencil written by hand (a Lookup per neighbour, a padded texture on the stack), what sleeping tiles save, and
-// what finding the neighbours costs in a pass.
+// same stencil written by hand (a Lookup per neighbor, a padded texture on the stack), what sleeping tiles save, and
+// what finding the neighbors costs in a pass.
 
 public record struct Plot(int X, int Z)
 {
@@ -33,23 +33,23 @@ public record struct NextWarmth(float T);
 public record struct Seed(byte Alive);
 public record struct NextSeed(byte Alive);
 
-/// <summary>A plate of the 9-point blur: every neighbour, edges and corners.</summary>
+/// <summary>A plate of the 9-point blur: every neighbor, edges and corners.</summary>
 public record struct BlurPlot(Plot Pos) : IComponent, ITile<Plot>
 {
     readonly Plot IIndexed<Plot>.Key => Pos;
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
-    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+    static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
     static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
 }
 
-/// <summary>A plate of the blur whose key maps onto a slot of an array (IDirectIndexed): a neighbour is one array read.</summary>
+/// <summary>A plate of the blur whose key maps onto a slot of an array (IDirectIndexed): a neighbor is one array read.</summary>
 public record struct DirectPlot(Plot Pos) : IComponent, ITile<Plot>, IDirectIndexed<Plot>
 {
     readonly Plot IIndexed<Plot>.Key => Pos;
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
-    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+    static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
     static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
     static int IDirectIndexed<Plot>.Slots => Plot.Side * Plot.Side;
     static int IDirectIndexed<Plot>.SlotOf(Plot p) => p.Z * Plot.Side + p.X;
@@ -71,11 +71,11 @@ public record struct LifePlot(Plot Pos) : IComponent, ITile<Plot>
     readonly Plot IIndexed<Plot>.Key => Pos;
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
-    static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+    static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
     static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
 }
 
-/// <summary>A plate of the hand-written stencils: only its key, the neighbours found by hand.</summary>
+/// <summary>A plate of the hand-written stencils: only its key, the neighbors found by hand.</summary>
 public record struct HandPlot(Plot Pos) : IComponent, IIndexed<Plot>
 {
     readonly Plot IIndexed<Plot>.Key => Pos;
@@ -87,10 +87,10 @@ public struct Awake : IComponent;
 /// <summary>What a plate's last step changed: whether anything, and the faces whose edge.</summary>
 public record struct SeedChange(TileFaces Edges, bool Changed) : IComponent;
 
-/// <summary>Where the neighbours were found: an id that keeps the search from being dropped.</summary>
+/// <summary>Where the neighbors were found: an id that keeps the search from being dropped.</summary>
 public record struct Probe(EntityId North, EntityId SouthEast) : IComponent;
 
-/// <summary>The eight neighbours of a plate, found once and kept (the alternative to a search per pass).</summary>
+/// <summary>The eight neighbors of a plate, found once and kept (the alternative to a search per pass).</summary>
 public record struct Around(Around.Ids Of) : IComponent
 {
     [InlineArray(8)]
@@ -198,13 +198,13 @@ public class TileActiveBenchmark
 }
 
 /// <summary>
-/// What finding a plate's eight neighbours costs in a pass: Search is a pass whose method takes the tile (the
+/// What finding a plate's eight neighbors costs in a pass: Search is a pass whose method takes the tile (the
 /// generated code searches the key index for the eight keys) and does nothing else; SearchDirect the same with a
-/// direct-mapped key (an array read per neighbour); Cached reads the eight ids from a component kept beside the plate
+/// direct-mapped key (an array read per neighbor); Cached reads the eight ids from a component kept beside the plate
 /// instead.
 /// </summary>
 [MemoryDiagnoser]
-public class TileNeighbourBenchmark
+public class TileNeighborBenchmark
 {
     [Params(1, 4)] public int Threads;
 
@@ -320,7 +320,7 @@ internal static class TileSystems
     private static void Blur<TTile>(Tile<Warmth, TTile> warmth, Mut<DynamicBuffer<NextWarmth>> next)
         where TTile : struct, IComponent, ITileShape
     {
-        var plate = warmth.Load();
+        var plate = warmth.Pad();
         var into = MemoryMarshal.Cast<NextWarmth, float>(next.Write().AsSpan());
         foreach (var row in plate.Rows(TileReads.Layer))
         {
@@ -352,7 +352,7 @@ internal static class TileSystems
         [ForEach(Parallel = true, ChunkRows = 16)]
         static void Step(Tile<Warmth, WavePlot> warmth, Mut<DynamicBuffer<NextWarmth>> next)
         {
-            var plate = warmth.Load();
+            var plate = warmth.Pad();
             var into = MemoryMarshal.Cast<NextWarmth, float>(next.Write().AsSpan());
             foreach (var row in plate.Rows(TileReads.Layer))
             {
@@ -375,7 +375,7 @@ internal static class TileSystems
             next.AsReadOnlySpan().CopyTo(MemoryMarshal.Cast<Warmth, NextWarmth>(warmth.Write().AsSpan()));
     }
 
-    // The hand-written blur: the eight neighbours found through the key index, their cells read through a lookup, the
+    // The hand-written blur: the eight neighbors found through the key index, their cells read through a lookup, the
     // plate and its ring of one cell copied into an 18 x 18 texture on the stack, then the same row loop.
     [SkipLocalsInit]
     public class HandBlurSystem : EcsSystem
@@ -392,7 +392,7 @@ internal static class TileSystems
             var south = Cells(plots.TryFind(plot.Pos.Offset(0, 1), out EntityId southId), southId, warmths);
             var west = Cells(plots.TryFind(plot.Pos.Offset(-1, 0), out EntityId westId), westId, warmths);
             var east = Cells(plots.TryFind(plot.Pos.Offset(1, 0), out EntityId eastId), eastId, warmths);
-            // The corners: the cell of each diagonal neighbour nearest this plate.
+            // The corners: the cell of each diagonal neighbor nearest this plate.
             pad[0] = Corner(plots.TryFind(plot.Pos.Offset(-1, -1), out EntityId nw), nw, 255, warmths);
             pad[Row - 1] = Corner(plots.TryFind(plot.Pos.Offset(1, -1), out EntityId ne), ne, 240, warmths);
             pad[(Row - 1) * Row] = Corner(plots.TryFind(plot.Pos.Offset(-1, 1), out EntityId sw), sw, 15, warmths);
@@ -425,7 +425,7 @@ internal static class TileSystems
             found ? warmths.Read(id)[cell].T : 0;
     }
 
-    // The hand-written fourth-order Laplacian: the four face neighbours, a 20 x 20 texture (a ring of two cells).
+    // The hand-written fourth-order Laplacian: the four face neighbors, a 20 x 20 texture (a ring of two cells).
     [SkipLocalsInit]
     public class HandWaveSystem : EcsSystem
     {
@@ -473,22 +473,22 @@ internal static class TileSystems
         }
     }
 
-    /// <summary>A neighbour's cells, empty when no plate was found (the search stays in the method: a Lookup gets its
+    /// <summary>A neighbor's cells, empty when no plate was found (the search stays in the method: a Lookup gets its
     /// index when the method calls TryFind on the parameter itself).</summary>
     private static ReadOnlySpan<float> Cells(bool found, EntityId id, Lookup<DynamicBuffer<Warmth>> warmths) =>
         found ? MemoryMarshal.Cast<Warmth, float>(warmths.Read(id).AsReadOnlySpan()) : default;
 
-    /// <summary>A neighbour's facing row of 16 into the ring, or zeros.</summary>
+    /// <summary>A neighbor's facing row of 16 into the ring, or zeros.</summary>
     private static void Band(ReadOnlySpan<float> cells, int at, Span<float> into)
     {
         if (cells.IsEmpty) into.Clear();
         else cells.Slice(at, 16).CopyTo(into);
     }
 
-    /// <summary>Life on bytes: born with three live neighbours, lives on with two or three; a row of 16 in one vector.</summary>
+    /// <summary>Life on bytes: born with three live neighbors, lives on with two or three; a row of 16 in one vector.</summary>
     private static void Life(Tile<Seed, LifePlot> life, Span<byte> into)
     {
-        var plate = life.Load();
+        var plate = life.Pad();
         foreach (var row in plate.Rows(TileReads.Layer))
         {
             var c = plate.At(row);
@@ -528,7 +528,7 @@ internal static class TileSystems
             var into = MemoryMarshal.Cast<NextSeed, byte>(step);
             into.Clear();
             Life(life, into);
-            var edges = life.Changes(MemoryMarshal.Cast<NextSeed, Seed>(step), out bool changed);
+            var edges = life.ChangedEdges(MemoryMarshal.Cast<NextSeed, Seed>(step), out bool changed);
             change = new SeedChange(edges, changed);
         }
     }

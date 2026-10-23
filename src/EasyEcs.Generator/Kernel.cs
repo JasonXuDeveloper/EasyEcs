@@ -161,7 +161,7 @@ internal sealed partial class Kernel
     public static Code? Vectorize(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
         System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct, out string? reason)
     {
-        reason = Symbols.Simd(method) == Symbols.SimdOff ? "Simd = SimdMode.Off"
+        reason = Symbols.Simd(method) == Symbols.SimdOff ? "SimdMode = SimdMode.Off"
             : !method.IsStatic ? "it is not static"
             : !Symbols.IsStable(method, syntax, model) ? "it can make structural changes"
             : null;

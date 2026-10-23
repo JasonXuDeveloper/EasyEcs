@@ -83,7 +83,7 @@ public sealed partial class Prefab
     /// presence bit instead of moving the row to another table, and every instance stays in one table. A value the
     /// recipe had is dropped. Returns this prefab. O(1).
     /// </summary>
-    public Prefab Absent<T>() where T : struct, IComponent
+    public Prefab SetAbsent<T>() where T : struct, IComponent
     {
         Row.Set(default(T)); // the column...
         Row.Remove<T>();     // ...its row absent: the table keeps the column

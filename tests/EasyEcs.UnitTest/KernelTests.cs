@@ -176,7 +176,7 @@ public record struct Ledger : ISingletonComponent, IReduction<Ledger>
 /// <summary>Kernels that reduce into a singleton: one accumulator per lane, folded in lane order.</summary>
 public static class ReduceKernels
 {
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Count(in Rank rank, ref Reduce<Headcount> headcount)
     {
         headcount.Value.Count++;
@@ -186,24 +186,24 @@ public static class ReduceKernels
     }
 
     // The same through Combine, and a write to the component in the same pass.
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Tally(ref Rank rank, ref Reduce<Headcount> headcount)
     {
         rank.Value = rank.Value * 3 - 1;
         headcount.Combine(new Headcount { Count = 1, Sum = rank.Value, Low = rank.Value, High = rank.Value });
     }
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Span(in Level level, ref Reduce<Extent> extent)
     {
         extent.Value.Low = MathF.Min(extent.Value.Low, level.Value);
         extent.Value.High = float.Max(extent.Value.High, level.Value);
     }
 
-    [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+    [ForEach(SimdMode = SimdMode.Require, FloatMode = FloatMode.Fast)]
     internal static void Sum(in Level level, ref Reduce<Energy> energy) => energy.Value.Total += level.Value * 0.5f;
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Book(in Stamp stamp, ref Reduce<Ledger> ledger)
     {
         ledger.Value.Sum += stamp.Value;
@@ -211,7 +211,7 @@ public static class ReduceKernels
     }
 
     // Clamp bounds out of order send a vector's rows to the method, which throws as written.
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Bounded(ref Spot2 spot, ref Reduce<Headcount> headcount)
     {
         spot.X = Math.Clamp(spot.X, 0, spot.Y);
@@ -269,14 +269,14 @@ public static class FieldKernels
     }
 
     // Each field alike: a flat loop over the columns' lanes (no shuffles).
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Glide(ref Spot2 p, in Drift2 v)
     {
         p.X += v.X * Dt;
         p.Y += v.Y * Dt;
     }
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Bounce(ref Spot3 p, ref Drift3 v, float speed)
     {
         if (p.X > 5 || p.X < -5) v.X = -v.X; // a branch per field
@@ -287,7 +287,7 @@ public static class FieldKernels
         p.Z = MathF.FusedMultiplyAdd(v.Z, speed, p.Z);
     }
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Shade(ref Color4 c)
     {
         c.R = MathF.Min(c.R * 0.5f, 1);
@@ -296,7 +296,7 @@ public static class FieldKernels
         c.A = MathF.Min(c.A * 0.5f, 1);
     }
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Scramble(ref Cell2 c)
     {
         c.X = c.X * 6364136223846793005L + 1442695040888963407L; // wraps
@@ -323,7 +323,7 @@ public record struct Warmth : IComponent, ITracked { public float Value; }
 /// </summary>
 public static class ParallelKernels
 {
-    [ForEach(Parallel = true, Simd = SimdMode.Require)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require)]
     internal static void Seek(ref Spot3 p, ref Drift3 v, in Gravity gravity, float speed)
     {
         float dx = 1 - p.X, dy = gravity.Pull - p.Y, dz = 3 - p.Z;
@@ -338,20 +338,20 @@ public static class ParallelKernels
         p.Z += v.Z * FieldKernels.Dt;
     }
 
-    [ForEach(Parallel = true, Simd = SimdMode.Require, ChunkRows = 64)] // chunks split the blocks of 4,096 rows: opened, shared
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require, ChunkRows = 64)] // chunks split the blocks of 4,096 rows: opened, shared
     internal static void Glide(ref Spot2 p, in Drift2 v)
     {
         p.X += v.X * FieldKernels.Dt;
         p.Y += v.Y * FieldKernels.Dt;
     }
 
-    [ForEach(Parallel = true, Simd = SimdMode.Require)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require)]
     internal static void Warm(ref Warmth warmth, in Mass mass) => warmth.Value = MathF.Min(warmth.Value + mass.Value * 0.5f, 100f);
 
-    [ForEach(Parallel = true, Simd = SimdMode.Require, ChunkRows = 64)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require, ChunkRows = 64)]
     internal static void WarmFine(ref Warmth warmth, in Mass mass) => warmth.Value = MathF.Max(warmth.Value - mass.Value, -100f);
 
-    [ForEach(Parallel = true, Simd = SimdMode.Require, ChunkRows = 128)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require, ChunkRows = 128)]
     internal static void Count(in Rank rank, ref Reduce<Headcount> headcount)
     {
         headcount.Value.Count++;
@@ -360,7 +360,7 @@ public static class ParallelKernels
         headcount.Value.High = Math.Max(rank.Value, headcount.Value.High);
     }
 
-    [ForEach(Parallel = true, Simd = SimdMode.Require, FloatMode = FloatMode.Fast, ChunkRows = 256)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require, FloatMode = FloatMode.Fast, ChunkRows = 256)]
     internal static void Sum(in Level level, ref Reduce<Energy> energy) => energy.Value.Total += level.Value * 0.5f;
 }
 
@@ -370,11 +370,11 @@ public static class ParallelKernels
 /// </summary>
 public static class MathKernels
 {
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Turn(ref Level level, in Heat heat, in Gravity gravity) =>
         level.Value = float.DegreesToRadians(level.Value) * MathF.Sin(gravity.Pull) + float.RadiansToDegrees(heat.Value);
 
-    [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+    [ForEach(SimdMode = SimdMode.Require, FloatMode = FloatMode.Fast)]
     internal static void Waves(ref Color4 c, in Level level)
     {
         c.R = MathF.Sin(level.Value);
@@ -383,14 +383,14 @@ public static class MathKernels
         c.A = MathF.Log(MathF.Abs(level.Value));
     }
 
-    [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+    [ForEach(SimdMode = SimdMode.Require, FloatMode = FloatMode.Fast)]
     internal static void Lengths(ref Spot2 spot, in Level level)
     {
         spot.X = MathF.Log2(MathF.Abs(level.Value));
         spot.Y = float.Hypot(level.Value, spot.Y);
     }
 
-    [ForEach(Simd = SimdMode.Require, FloatMode = FloatMode.Fast)]
+    [ForEach(SimdMode = SimdMode.Require, FloatMode = FloatMode.Fast)]
     internal static void Far(ref Far3 p, in Pace pace)
     {
         p.X = Math.Sin(pace.Value);
@@ -406,14 +406,14 @@ public record struct Wind2 : IComponent, ITracked { public float X, Y; }
 /// <summary>Kernels taking a Maybe&lt;T&gt;: HasValue is a lane mask, Value's fields are lanes read (and written) where rows have T.</summary>
 public static class OptionalKernels
 {
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Push(ref Heat heat, Maybe<Boost> boost)
     {
         if (boost.HasValue) heat.Value += boost.Value.Value * 2;
         else heat.Value -= 1;
     }
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Blow(ref Spot2 p, Maybe<Wind2> wind)
     {
         if (!wind.HasValue) return;      // the lanes left have Wind2: no check per read
@@ -422,12 +422,12 @@ public static class OptionalKernels
         p.Y += wind.Value.Y;
     }
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Peek(ref Level level, in Heat heat, ReadOnlyMaybe<Boost> boost) =>
         level.Value = boost.HasValue && boost.Value.Value > 0 ? boost.Value.Value : heat.Value;
 
     // Reads Value without HasValue: a row without Boost throws, as the method does.
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Careless(ref Level level, Maybe<Boost> boost) => level.Value = boost.Value.Value + 1;
 }
 
@@ -448,18 +448,18 @@ public record struct Gust3(Vector3 Value) : ISingletonComponent;
 /// <summary>Kernels over struct values: each lane the IEEE operation the scalar code performs on it.</summary>
 public static class StructKernels
 {
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Move(ref Place2 position, in Pace2 velocity, in Dt2 step) =>
         position = new Place2(position.Value + velocity.Value * step.Seconds);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Drift(ref Place3 position, in Pace3 velocity, in Dt2 step) => position.Value += velocity.Value * step.Seconds;
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Blow(ref Place3 position, in Pace3 velocity, in Gust3 gust) =>
         position = position with { Value = position.Value * 0.5f - velocity.Value / 3f + gust.Value };
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Bounce(ref Place2 position, ref Pace2 velocity)
     {
         Vector2 p = position.Value, v = velocity.Value;
@@ -469,10 +469,10 @@ public static class StructKernels
         velocity = new Pace2(v);
     }
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Swap(ref Plain2 a) => a = new Plain2(a.Y, a.X);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Weigh(ref Body3 body, in Pace3 velocity)
     {
         body = body with { M = body.M * 0.99f };
@@ -493,7 +493,7 @@ public static class ColdKernels
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static void Died(float value) => Calls.Add(value);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Hurt(ref Heat health, in Level damage)
     {
         health.Value -= damage.Value;
@@ -505,7 +505,7 @@ public static class ColdKernels
     }
 
     // A cold else, a reduction and a return: the reduction's lanes go back to before the vector when it bails.
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Census(in Rank rank, ref Reduce<Headcount> count)
     {
         if (rank.Value < -150) return;
@@ -588,22 +588,22 @@ public record struct Tint4 : IComponent { public byte R, G, B, A; }
 /// <summary>Kernels of narrow lanes: wrap-around arithmetic, saturating Min / Max idioms, comparisons, shifts, locals.</summary>
 public static class NarrowKernels
 {
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Wrap(ref Ink o, in Shade a, in Tone b) => o.V = (byte)(a.V + b.V * 3 - 7);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Times(ref Ink o, in Shade a, in Tone b) => o.V = (byte)(a.V * b.V ^ ~a.V);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void AddSat(ref Ink o, in Shade a, in Tone b) => o.V = (byte)Math.Min(a.V + b.V, 255);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void SubSat(ref Ink o, in Shade a, in Tone b) => o.V = (byte)Math.Max(a.V - b.V, 0);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Band(ref Ink o, in Shade a, in Tone b) => o.V = (byte)Math.Clamp(a.V + b.V, 16, 235);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Pick(ref Ink o, in Shade a, in Tone b)
     {
         if (a.V + b.V > 200) o.V = 1;           // the saturated sum compares alike against 200
@@ -611,13 +611,13 @@ public static class NarrowKernels
         else o.V = a.V > b.V ? a.V : (byte)(b.V >> 1);
     }
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Bits(ref Ink o, in Shade a, in Tone b) => o.V = (byte)((a.V << 3) | (b.V >> 5) ^ (a.V & 0x0F) << 9);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Least(ref Ink o, in Shade a, in Tone b) => o.V = Math.Max(Math.Min(a.V, b.V), (byte)10);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Compound(ref Ink o, in Shade a, in Tone b)
     {
         o.V += a.V;
@@ -627,7 +627,7 @@ public static class NarrowKernels
         o.V++;
     }
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Distance(ref Ink o, in Shade a, in Tone b)
     {
         int d = a.V - b.V;
@@ -635,36 +635,36 @@ public static class NarrowKernels
         o.V = (byte)d;
     }
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void SignedSat(ref Echo o, in Volume a, in Pitch b) => o.V = (sbyte)Math.Clamp(a.V + b.V, -128, 127);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void SignedSubSat(ref Echo o, in Volume a, in Pitch b) => o.V = (sbyte)Math.Max(Math.Min(a.V - b.V, 127), -128);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void SignedShift(ref Echo o, in Volume a, in Pitch b) => o.V = (sbyte)((a.V >> 2) + (b.V >> 9) + (b.V << 1));
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void SignedAbs(ref Echo o, in Volume a, in Pitch b)
     {
         int x = Math.Abs((int)a.V);
         o.V = a.V - b.V > 50 ? (sbyte)x : a.V < b.V ? a.V : b.V;
     }
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Mix(ref Mix16 o, in Wave16 a, in Gain16 b) => o.V = (short)Math.Clamp(a.V + b.V, short.MinValue, short.MaxValue);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Scale(ref Mix16 o, in Wave16 a, in Gain16 b) => o.V = (short)(a.V * b.V + (a.V >> 3));
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Drain(ref Sum16 o, in Word16 a, in Bias16 b) => o.V = (ushort)Math.Max(a.V - b.V, 0);
 
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Fill(ref Sum16 o, in Word16 a, in Bias16 b) => o.V = a.V > b.V ? (ushort)Math.Min(a.V + b.V, ushort.MaxValue) : (ushort)(b.V >>> 4);
 
     // Each field alike: the flat loop of narrow lanes.
-    [ForEach(Simd = SimdMode.Require)]
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Blend(ref Rgba c, in Tint4 t)
     {
         c.R = (byte)Math.Min(c.R + t.R, 255);

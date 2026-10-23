@@ -64,7 +64,7 @@ internal struct StructuralGate
 
     /// <summary>
     /// A frozen region whose code may run on several threads at once starts (a parallel stage of systems, the chunks of
-    /// a parallel pass): <see cref="Parallel"/> holds until it ends. Two atomic adds per region.
+    /// a parallel pass): <see cref="InParallel"/> holds until it ends. Two atomic adds per region.
     /// </summary>
     public void FreezeParallel()
     {
@@ -82,7 +82,7 @@ internal struct StructuralGate
     /// A parallel region runs: other threads may be reading the world, so lazily built state (a value index) must not be
     /// built now. A serial pass, frozen too, may still build it on the owner thread.
     /// </summary>
-    public bool Parallel
+    public bool InParallel
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Volatile.Read(ref _parallel) != 0;

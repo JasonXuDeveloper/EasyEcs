@@ -7,7 +7,7 @@ public class DynamicBufferTests
 {
     public record struct Loot(int Item, int Count);
     public enum Tile : byte { Air, Stone }
-    public enum Voxel : byte { Air, Stone }   // PoolCapacity is process-wide: only this test sets it
+    public enum Voxel : byte { Air, Stone }   // MaxPooledLength is process-wide: only this test sets it
     public enum Ore : byte { Air, Iron }      // and only the reload test sets this one's
     public record struct Mail(long Value);    // the pool of this element type serves only the tests below
 
@@ -287,24 +287,24 @@ public class DynamicBufferTests
     }
 
     [Test]
-    public void PoolCapacityKeepsLongerListsForTheNextBuffer()
+    public void MaxPooledLengthKeepsLongerListsForTheNextBuffer()
     {
-        Assert.That(DynamicBuffer<Voxel>.PoolCapacity, Is.EqualTo(4096));   // 4,096 bytes of one-byte elements
-        Assert.That(DynamicBuffer<Loot>.PoolCapacity, Is.EqualTo(512));     // of eight-byte ones
-        Assert.Throws<ArgumentOutOfRangeException>(() => DynamicBuffer<Voxel>.PoolCapacity = -1);
+        Assert.That(DynamicBuffer<Voxel>.MaxPooledLength, Is.EqualTo(4096));   // 4,096 bytes of one-byte elements
+        Assert.That(DynamicBuffer<Loot>.MaxPooledLength, Is.EqualTo(512));     // of eight-byte ones
+        Assert.Throws<ArgumentOutOfRangeException>(() => DynamicBuffer<Voxel>.MaxPooledLength = -1);
 
         using var world = new World();
         var chunk = new Voxel[8192];
         try
         {
-            DynamicBuffer<Voxel>.PoolCapacity = chunk.Length;
+            DynamicBuffer<Voxel>.MaxPooledLength = chunk.Length;
             Cycle(world, chunk);
             Cycle(world, chunk);                                             // warm: the table, the pool
             long before = GC.GetAllocatedBytesForCurrentThread();
             Cycle(world, chunk);
             Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);   // the list came back
 
-            DynamicBuffer<Voxel>.PoolCapacity = 4096;
+            DynamicBuffer<Voxel>.MaxPooledLength = 4096;
             Cycle(world, chunk);                                             // takes the pooled list, keeps it not
             before = GC.GetAllocatedBytesForCurrentThread();
             Cycle(world, chunk);
@@ -312,7 +312,7 @@ public class DynamicBufferTests
         }
         finally
         {
-            DynamicBuffer<Voxel>.PoolCapacity = 4096;
+            DynamicBuffer<Voxel>.MaxPooledLength = 4096;
         }
     }
 
@@ -389,7 +389,7 @@ public class DynamicBufferTests
         var ids = new EntityId[4];
         try
         {
-            DynamicBuffer<Ore>.PoolCapacity = blocks.Length;
+            DynamicBuffer<Ore>.MaxPooledLength = blocks.Length;
             using var world = new World();
             world.CreateEntities(loaded, new DynamicBuffer<Ore>());
             for (int i = 0; i < loaded.Length; i++)
@@ -406,7 +406,7 @@ public class DynamicBufferTests
         }
         finally
         {
-            DynamicBuffer<Ore>.PoolCapacity = 4096;
+            DynamicBuffer<Ore>.MaxPooledLength = 4096;
         }
     }
 

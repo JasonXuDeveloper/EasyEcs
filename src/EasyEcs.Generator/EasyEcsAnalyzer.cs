@@ -168,7 +168,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "more sets it (rounded up to 64). A method without Parallel = true runs on one thread and has no chunks: set " +
         "Parallel = true or drop ChunkRows.", helpLinkUri: Help("EECS054"));
 
-    public static readonly DiagnosticDescriptor BadReduction = new("EECS057", "A reduction whose result another write replaces",
+    public static readonly DiagnosticDescriptor ReductionOverwritten = new("EECS057", "A reduction whose result another write replaces",
         "Parameter '{0}' of [ForEach] method '{1}' reduces into {2}, but {3}",
         Category, DiagnosticSeverity.Error, true,
         "A Reduce<T> parameter gives each chunk of rows a partial result of singleton T and replaces T with the combined " +
@@ -176,7 +176,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "method, writes T in the same pass: one result would silently replace the other. Reduce each result into a " +
         "singleton of its own, and read the last result with 'in T'.", helpLinkUri: Help("EECS057"));
     public static readonly DiagnosticDescriptor NoVectorLoop = new("EECS056", "A required vector loop that the method does not qualify for",
-        "[ForEach(Simd = SimdMode.Require)] method '{0}' gets no vector loop: {1}",
+        "[ForEach(SimdMode = SimdMode.Require)] method '{0}' gets no vector loop: {1}",
         Category, DiagnosticSeverity.Error, true,
         "SimdMode.Require asks for the method's vector loop. A method qualifies when it is static, " +
         "takes no Entity and makes no structural change, takes components of up to 4 lanes of one size (byte and sbyte; " +
@@ -219,8 +219,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         Category, DiagnosticSeverity.Error, true,
         "A tile (ITileShape) is Width x Depth x Height cells, Depth 1 to 64 (a layer's active rows are one 64-bit " +
         "word), with a halo of 1 or more cells. A halo reads the cells of the tile beside, so it is at most the tile's " +
-        "extent along every axis with neighbours (its Faces), and along every axis when the boundary mirrors: like an " +
-        "MPI ghost width, never wider than the subdomain. Tile.Load throws for such a shape; widen the tile or narrow " +
+        "extent along every axis with neighbors (its Faces), and along every axis when the boundary mirrors: like an " +
+        "MPI ghost width, never wider than the subdomain. Tile.Pad throws for such a shape; widen the tile or narrow " +
         "the halo.", helpLinkUri: Help("EECS072"));
 
     public static readonly DiagnosticDescriptor SharedTile = new("EECS073", "Two tiles of the same cells and grid",
@@ -238,7 +238,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "IUniqueIndexed<TKey>), so that key can never be indexed. A unique component is indexed by its unique key from " +
         "its first table, and every write is checked against that index. An EntityId key cannot be unique: loads and " +
         "moves rewrite such keys after they copy the rows, too late to check them first; index the relation with " +
-        "IIndexed<EntityId> (or [Key]). A key declared with [Key] / [UniqueKey] is IEquatable of itself, the only key of " +
+        "IIndexed<EntityId> (or [IndexKey]). A key declared with [IndexKey] / [UniqueKey] is IEquatable of itself, the only key of " +
         "its component, of the type of any index interface the struct declares, and not written by hand as well; a " +
         "[Group] member is an int or an enum of int, the only one.", helpLinkUri: Help("EECS036"));
 
@@ -255,10 +255,10 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
-        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, BadReduction, ScalarLoop, NoVectorLoop,
-        SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, NotPartial, HandWrittenReduction, BadReductionField, FieldWiseReduction,
-        WrongIdentity, AttributeKey, BadSetup, NoFormatter, BadEmit, SharedRandom,
-        HandWrittenEntityJob, BadForEntity, ScheduleOverride, BadSchedule, HandWrittenConsume, BadConsume, BadTileShape, SharedTile,
+        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, ReductionOverwritten, ScalarLoop, NoVectorLoop,
+        SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, NotPartial, ReductionWrittenTwice, BadReductionField, HandWrittenReduction,
+        WrongIdentity, HandWrittenKey, BadSetup, NoFormatter, BadEmit, SharedRandom,
+        HandWrittenEntityJob, BadForEntity, CadenceOverride, BadUpdateInterval, HandWrittenConsume, BadConsume, BadTileShape, SharedTile,
         HandWrittenReduce, HandWrittenLookup, SharedStream, HandWrittenEmit);
 
     public override void Initialize(AnalysisContext context)
@@ -366,7 +366,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
 
     /// <summary>
     /// EECS072: a tile shape whose static members are constants (expression-bodied, or left to their defaults) and
-    /// that Tile.Load would reject: the checks of Shape&lt;TTile&gt;.Validate, read at build time.
+    /// that Tile.Pad would reject: the checks of TileShapeCheck&lt;TTile&gt;.Validate, read at build time.
     /// </summary>
     private static void AnalyzeTileShape(SyntaxNodeAnalysisContext context)
     {
@@ -596,7 +596,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             AnalyzeDataFields(context, type);
         if (type.TypeKind == TypeKind.Struct) AnalyzeUniqueKey(context, type, location);
         if (type.TypeKind == TypeKind.Struct) AnalyzeParts(context, type);
-        if (type.TypeKind == TypeKind.Struct) AnalyzeAttributeKey(context, type);
+        if (type.TypeKind == TypeKind.Struct) AnalyzeHandWrittenKey(context, type);
         if (type.TypeKind == TypeKind.Struct) AnalyzeSetup(context, type);
 
         if (type.TypeKind == TypeKind.Struct && !Symbols.Implements(type, "EasyEcs.ISystemGroup"))
@@ -878,7 +878,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                 context.ReportDiagnostic(Diagnostic.Create(BadEmit, p.Locations.FirstOrDefault(), p.Name, Symbols.Describe(method),
                     Symbols.EmitElement(p.Type)!.Name, emit));
             else if (kind == Symbols.ParamKind.Reduction && Symbols.ReductionProblem(method, p) is { } reduction)
-                context.ReportDiagnostic(Diagnostic.Create(BadReduction, p.Locations.FirstOrDefault(), p.Name, method.Name,
+                context.ReportDiagnostic(Diagnostic.Create(ReductionOverwritten, p.Locations.FirstOrDefault(), p.Name, method.Name,
                     Symbols.ReduceElement(p.Type)!.Name, reduction));
             else if (kind == Symbols.ParamKind.Optional && !Symbols.IsReadOnlyMaybe(p.Type)
                      && Symbols.MaybeElement(p.Type) is { } optional && Symbols.IsIndexed(optional))

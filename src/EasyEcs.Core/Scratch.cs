@@ -6,7 +6,7 @@ namespace EasyEcs;
 
 /// <summary>
 /// A <c>[ForEach]</c> method's working memory on the thread running it (OpenMP's <c>threadprivate</c>): a list of
-/// neighbours, the open set of a path search, a buffer to fill. <c>static void Plan(ref Path path, in Goal goal,
+/// neighbors, the open set of a path search, a buffer to fill. <c>static void Plan(ref Path path, in Goal goal,
 /// Scratch&lt;Frontier&gt; frontier)</c>: <see cref="Value"/> is one <typeparamref name="T"/> per method and thread,
 /// created (<c>default</c>) the first time the thread runs the method and kept for the thread's lifetime, so what it
 /// allocates (<c>value.Ids ??= new int[256]</c>) it allocates once per thread, and steady state allocates nothing. Two

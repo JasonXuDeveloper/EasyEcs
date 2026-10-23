@@ -12,7 +12,7 @@ public record struct Fluid(byte Level)
 }
 
 // The water of a chunk after the next step, in the layout of Fluid: WaterFlowSystem writes it, WaterCommitSystem copies
-// it into the Fluid buffer once every chunk has stepped, so each chunk steps from its neighbours' water before the
+// it into the Fluid buffer once every chunk has stepped, so each chunk steps from its neighbors' water before the
 // step, as a GPU ping-pongs two buffers. A flowing chunk keeps it from one step to the next, never cleared (each step
 // writes every layer the last one wrote water on); a chunk that settles gives it back to the pool (WaterSleepSystem).
 public record struct NextFluid(byte Level);
@@ -23,7 +23,7 @@ public record struct NextFluid(byte Level);
 public record struct Surface(byte Top);
 
 // Where a chunk's water is: how many blocks hold some, and the lowest and highest layer holding any (Low > High when
-// none). WaterCommitSystem writes it with each step; WaterFlowSystem reads it for the chunk and its neighbours instead
+// none). WaterCommitSystem writes it with each step; WaterFlowSystem reads it for the chunk and its neighbors instead
 // of searching 8 KB, FloatSystem skips the dry chunks, and the report sums the column.
 public record struct FluidCount(int Blocks, byte Low, byte High) : IComponent
 {

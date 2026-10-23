@@ -155,7 +155,7 @@ public class BufferChurnBenchmark
 /// <summary>
 /// Chunks that load and unload around players: each operation creates <see cref="Chunks"/> entities with 8,192 blocks
 /// (a <see cref="DynamicBuffer{T}"/> of a byte-sized enum, 8 KB) and destroys them. The lists are longer than the pool
-/// keeps by default (4 KB); <see cref="Pooled"/> raises <see cref="DynamicBuffer{T}.PoolCapacity"/> to a chunk, so
+/// keeps by default (4 KB); <see cref="Pooled"/> raises <see cref="DynamicBuffer{T}.MaxPooledLength"/> to a chunk, so
 /// each chunk reuses the list of one unloaded before.
 /// </summary>
 [MemoryDiagnoser]
@@ -173,7 +173,7 @@ public class ChunkChurnBenchmark
     [GlobalSetup]
     public void Setup()
     {
-        DynamicBuffer<Block>.PoolCapacity = Pooled ? Blocks : 4096;
+        DynamicBuffer<Block>.MaxPooledLength = Pooled ? Blocks : 4096;
         _world = new World(new WorldOptions { InitialEntityCapacity = Chunks });
         _chunks = new Entity[Chunks];
         _blocks = new Block[Blocks];
@@ -184,7 +184,7 @@ public class ChunkChurnBenchmark
     public void Cleanup()
     {
         _world.Dispose();
-        DynamicBuffer<Block>.PoolCapacity = 4096;
+        DynamicBuffer<Block>.MaxPooledLength = 4096;
     }
 
     [Benchmark]
@@ -312,7 +312,7 @@ public class ChunkReloadBenchmark
     [GlobalSetup]
     public void Setup()
     {
-        DynamicBuffer<Block>.PoolCapacity = Blocks;
+        DynamicBuffer<Block>.MaxPooledLength = Blocks;
         _world = new World(new WorldOptions { InitialEntityCapacity = Chunks });
         _ids = new EntityId[Chunks];
         _loaded = new Entity[Chunks];
@@ -331,7 +331,7 @@ public class ChunkReloadBenchmark
     public void Cleanup()
     {
         _world.Dispose();
-        DynamicBuffer<Block>.PoolCapacity = 4096;
+        DynamicBuffer<Block>.MaxPooledLength = 4096;
     }
 
     [Benchmark]

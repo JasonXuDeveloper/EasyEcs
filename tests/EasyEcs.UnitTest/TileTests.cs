@@ -8,8 +8,8 @@ using NUnit.Framework;
 namespace EasyEcs.UnitTest;
 
 /// <summary>
-/// <see cref="Tile{TCell, TTile}"/>: a tile's cells padded with its neighbours' (faces, edges and corners, halos of one to
-/// five cells, missing and empty neighbours, the boundaries, layers under and over it), the active rows, the samples,
+/// <see cref="Tile{TCell, TTile}"/>: a tile's cells padded with its neighbors' (faces, edges and corners, halos of one to
+/// five cells, missing and empty neighbors, the boundaries, layers under and over it), the active rows, the samples,
 /// its scheduling as a read, and stencils over grids of tiles (heat, a blur per boundary, the Game of Life on a torus, a
 /// fourth-order Laplacian, a 27-point sum, a 1D smoothing) checked against the whole grid computed at once, on one thread
 /// and on four.
@@ -39,7 +39,7 @@ public class TileTests
 
     // ---------------- shapes ----------------
 
-    /// <summary>A cube of 4 x 3 x 2 cells with a neighbour on each of its six faces.</summary>
+    /// <summary>A cube of 4 x 3 x 2 cells with a neighbor on each of its six faces.</summary>
     public record struct Cube(TilePos Pos) : IComponent, ITile<TilePos>
     {
         readonly TilePos IIndexed<TilePos>.Key => Pos;
@@ -50,7 +50,7 @@ public class TileTests
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
-    /// <summary>The cube with its 26 neighbours (Moore).</summary>
+    /// <summary>The cube with its 26 neighbors (Moore).</summary>
     public record struct MooreCube(TilePos Pos) : IComponent, ITile<TilePos>
     {
         readonly TilePos IIndexed<TilePos>.Key => Pos;
@@ -58,11 +58,11 @@ public class TileTests
         static int ITileShape.Depth => 3;
         static int ITileShape.Height => 2;
         static TileFaces ITileShape.Faces => TileFaces.All;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
-    /// <summary>The cube with its 18 neighbours across faces and edges, a halo of 2 (its height), clamped.</summary>
+    /// <summary>The cube with its 18 neighbors across faces and edges, a halo of 2 (its height), clamped.</summary>
     public record struct EdgeCube(TilePos Pos) : IComponent, ITile<TilePos>
     {
         readonly TilePos IIndexed<TilePos>.Key => Pos;
@@ -71,12 +71,12 @@ public class TileTests
         static int ITileShape.Height => 2;
         static int ITileShape.Halo => 2;
         static TileFaces ITileShape.Faces => TileFaces.All;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.FacesAndEdges;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.FacesAndEdges;
         static TileBoundary ITileShape.Boundary => TileBoundary.Clamp;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
-    /// <summary>The cube with its 26 neighbours, a halo of 2, mirrored.</summary>
+    /// <summary>The cube with its 26 neighbors, a halo of 2, mirrored.</summary>
     public record struct MirrorCube(TilePos Pos) : IComponent, ITile<TilePos>
     {
         readonly TilePos IIndexed<TilePos>.Key => Pos;
@@ -85,12 +85,12 @@ public class TileTests
         static int ITileShape.Height => 2;
         static int ITileShape.Halo => 2;
         static TileFaces ITileShape.Faces => TileFaces.All;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
         static TileBoundary ITileShape.Boundary => TileBoundary.Mirror;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
-    /// <summary>A column of 16 x 16 x 4 cells, neighbours on its sides only (a voxel world's chunk).</summary>
+    /// <summary>A column of 16 x 16 x 4 cells, neighbors on its sides only (a voxel world's chunk).</summary>
     public record struct Column(TilePos Pos) : IComponent, ITile<TilePos>
     {
         readonly TilePos IIndexed<TilePos>.Key => Pos;
@@ -100,7 +100,7 @@ public class TileTests
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
-    /// <summary>A column of 8 x 8 x 6 cells with a halo of 2, its corners and its neighbours below and above.</summary>
+    /// <summary>A column of 8 x 8 x 6 cells with a halo of 2, its corners and its neighbors below and above.</summary>
     public record struct DeepColumn(TilePos Pos) : IComponent, ITile<TilePos>
     {
         readonly TilePos IIndexed<TilePos>.Key => Pos;
@@ -109,7 +109,7 @@ public class TileTests
         static int ITileShape.Height => 6;
         static int ITileShape.Halo => 2;
         static TileFaces ITileShape.Faces => TileFaces.All;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
@@ -122,25 +122,25 @@ public class TileTests
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
-    /// <summary>The plate with a halo of 2 and its 8 neighbours.</summary>
+    /// <summary>The plate with a halo of 2 and its 8 neighbors.</summary>
     public record struct WidePlate(TilePos Pos) : IComponent, ITile<TilePos>
     {
         readonly TilePos IIndexed<TilePos>.Key => Pos;
         static int ITileShape.Width => 5;
         static int ITileShape.Depth => 7;
         static int ITileShape.Halo => 2;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
-    /// <summary>The plate with a halo of 3, its 8 neighbours, clamped.</summary>
+    /// <summary>The plate with a halo of 3, its 8 neighbors, clamped.</summary>
     public record struct ClampPlate(TilePos Pos) : IComponent, ITile<TilePos>
     {
         readonly TilePos IIndexed<TilePos>.Key => Pos;
         static int ITileShape.Width => 5;
         static int ITileShape.Depth => 7;
         static int ITileShape.Halo => 3;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
         static TileBoundary ITileShape.Boundary => TileBoundary.Clamp;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
@@ -152,12 +152,12 @@ public class TileTests
         static int ITileShape.Width => 5;
         static int ITileShape.Depth => 7;
         static int ITileShape.Halo => 5;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
         static TileBoundary ITileShape.Boundary => TileBoundary.Mirror;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
-    /// <summary>A halo one cell wider than the plate: it would reach past the tile beside (EECS072; Load throws too).</summary>
+    /// <summary>A halo one cell wider than the plate: it would reach past the tile beside (EECS072; Pad throws too).</summary>
 #pragma warning disable EECS072
     public record struct OverPlate(TilePos Pos) : IComponent, ITile<TilePos>
     {
@@ -169,7 +169,7 @@ public class TileTests
     }
 #pragma warning restore EECS072
 
-    /// <summary>A 1D tile: one row of 8 cells, neighbours west and east, a halo of 2.</summary>
+    /// <summary>A 1D tile: one row of 8 cells, neighbors west and east, a halo of 2.</summary>
     public record struct Line(TilePos Pos) : IComponent, ITile<TilePos>
     {
         readonly TilePos IIndexed<TilePos>.Key => Pos;
@@ -214,7 +214,7 @@ public class TileTests
 
     /// <summary>
     /// What texel (x, y, z) of a tile at <paramref name="at"/> holds, from the definition: the cell at that place of the
-    /// whole grid when its tile is one the shape reads (its faces' axes, its neighbourhood) and has cells; where the tile
+    /// whole grid when its tile is one the shape reads (its faces' axes, its neighborhood) and has cells; where the tile
     /// across an axis is missing, the clamped or mirrored coordinate of the tile's own along that axis; else the fill.
     /// </summary>
     private static int Expected<TTile>(ISet<TilePos> grid, TilePos at, int x, int y, int z, int fill) where TTile : ITileShape
@@ -238,7 +238,7 @@ public class TileTests
         {
             var faces = TTile.Faces;
             if (h == 1) faces &= TileFaces.Sides;
-            if (Math.Abs(dx) + Math.Abs(dy) + Math.Abs(dz) > (int)TTile.Neighbourhood + 1) return false;
+            if (Math.Abs(dx) + Math.Abs(dy) + Math.Abs(dz) > (int)TTile.Neighborhood + 1) return false;
             if (dx != 0 && (faces & (dx < 0 ? TileFaces.West : TileFaces.East)) == 0) return false;
             if (dz != 0 && (faces & (dz < 0 ? TileFaces.North : TileFaces.South)) == 0) return false;
             if (dy != 0 && (faces & (dy < 0 ? TileFaces.Below : TileFaces.Above)) == 0) return false;
@@ -246,10 +246,10 @@ public class TileTests
         }
     }
 
-    private static Tile<TCell, TTile> TileOf<TCell, TTile>(Entity entity, [System.Diagnostics.CodeAnalysis.UnscopedRef] out TileNeighbours around)
+    private static Tile<TCell, TTile> TileOf<TCell, TTile>(Entity entity, [System.Diagnostics.CodeAnalysis.UnscopedRef] out TileNeighbors around)
         where TCell : unmanaged where TTile : struct, IComponent, ITile<TilePos>
     {
-        TileNeighbours.Of<TTile, TilePos>(LookupExtensions.Prepared<TTile, TilePos>(entity.World), entity, out around);
+        TileNeighbors.Of<TTile, TilePos>(LookupExtensions.Prepared<TTile, TilePos>(entity.World), entity, out around);
         return new Tile<TCell, TTile>(entity, in around);
     }
 
@@ -278,7 +278,7 @@ public class TileTests
             if (empty.Contains(at)) continue;
             foreach (bool mask in new[] { true, false }) // the texture is the same with or without the row masks
             {
-                var padded = TileOf<Cell, TTile>(tile, out var around).Load(from, to, new Cell(fill), mask);
+                var padded = TileOf<Cell, TTile>(tile, out var around).Pad(from, to, new Cell(fill), mask);
                 Assert.That((padded.From, padded.To), Is.EqualTo((from, to)));
                 for (int y = from - hy; y <= to + hy; y++)
                 for (int z = -r; z < d + r; z++)
@@ -300,7 +300,7 @@ public class TileTests
 
     [TestCase(0)]
     [TestCase(-7)]
-    public void ACubesHaloComesFromItsSixNeighbours(int fill)
+    public void ACubesHaloComesFromItsSixNeighbors(int fill)
     {
         var places = new HashSet<TilePos>(Box(3, 3, 3, CubeHoles));
         Assert.That(CheckHalo(places, CubeEmpty, s => new Cube(s), fill), Is.EqualTo((places.Count - CubeEmpty.Length) * 6 * 5 * 4));
@@ -308,7 +308,7 @@ public class TileTests
 
     [TestCase(0)]
     [TestCase(-7)]
-    public void AMooreCubesHaloComesFromItsTwentySixNeighbours(int fill)
+    public void AMooreCubesHaloComesFromItsTwentySixNeighbors(int fill)
     {
         var places = new HashSet<TilePos>(Box(3, 3, 3, CubeHoles));
         Assert.That(CheckHalo(places, CubeEmpty, s => new MooreCube(s), fill), Is.Positive);
@@ -332,7 +332,7 @@ public class TileTests
     }
 
     [Test]
-    public void EdgesAndCornersFollowTheNeighbourhoodAndTheBoundary()
+    public void EdgesAndCornersFollowTheNeighborhoodAndTheBoundary()
     {
         // Clamped, and mirrored, over a full grid (every axis a boundary somewhere) and one with holes.
         var full = new HashSet<TilePos>(Box(3, 3, 3));
@@ -374,7 +374,7 @@ public class TileTests
         Assert.That(tile.Beside(TileFaces.West), Is.EqualTo(default(EntityId)));
         Assert.That(tile.Beside(TileFaces.East), Is.EqualTo(plates[2].Id)); // Box orders x, then z: (1, 0, 0)
         Assert.That(tile.Beside(TileFaces.Above), Is.EqualTo(default(EntityId)));
-        Assert.That(tile.Beside(1, 0, 1), Is.EqualTo(default(EntityId)), "no corners in a neighbourhood of faces");
+        Assert.That(tile.Beside(1, 0, 1), Is.EqualTo(default(EntityId)), "no corners in a neighborhood of faces");
         Assert.That(TileOf<Cell, Plate>(plates[0], out first).Cells.Length, Is.EqualTo(35));
     }
 
@@ -386,10 +386,10 @@ public class TileTests
         var columns = Grid(world, Box(1, 1, 1), s => new Column(s));
         var wide = Grid(world, Box(1, 1, 1), s => new WidePlate(s));
         var over = Grid(world, Box(1, 1, 1), s => new OverPlate(s));
-        Assert.Throws<ArgumentOutOfRangeException>(() => Load<Column>(columns[0], 2, 1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => Load<Column>(columns[0], 0, 4));
-        Assert.Throws<ArgumentOutOfRangeException>(() => Load<Plate>(plates[0], 0, 1));
-        var shape = Assert.Throws<InvalidOperationException>(() => Load<OverPlate>(over[0], 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Pad<Column>(columns[0], 2, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Pad<Column>(columns[0], 0, 4));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Pad<Plate>(plates[0], 0, 1));
+        var shape = Assert.Throws<InvalidOperationException>(() => Pad<OverPlate>(over[0], 0, 0));
         Assert.That(shape.Message, Does.Contain("halo of 6"));
         Assert.Throws<InvalidOperationException>(() => NoMask(plates[0]));
         Assert.Throws<ArgumentOutOfRangeException>(() => _ = Sample<Plate>(plates[0], -2, 0, 0));
@@ -400,23 +400,23 @@ public class TileTests
         Assert.Throws<ArgumentOutOfRangeException>(() => _ = Load128<WidePlate>(wide[0], 4));     // 4 ints from 4: past the halo
         Assert.That(Load128<WidePlate>(wide[0], 3), Is.Zero);                                    // 3 to 6, the last two the halo
         Assert.That(Sample<WidePlate>(wide[0], -2, 0, -2), Is.Zero);
-        Assert.That(Sample<Plate>(plates[0], 5, 0, 0), Is.EqualTo(Value(5, 0, 0)));              // the cell after the row: the east neighbour's
+        Assert.That(Sample<Plate>(plates[0], 5, 0, 0), Is.EqualTo(Value(5, 0, 0)));              // the cell after the row: the east neighbor's
         Assert.That(Sample<Plate>(plates[0], -1, 0, -1), Is.Zero);                               // a corner: the fill
-        plates[1].GetOrAdd<DynamicBuffer<Cell>>().SetCount(3);                                   // a neighbour of 3 cells
-        Assert.Throws<InvalidOperationException>(() => Load<Plate>(plates[0], 0, 0));
-        plates[1].GetOrAdd<DynamicBuffer<Cell>>().Clear();                                       // no cells: no neighbour
-        Assert.DoesNotThrow(() => Load<Plate>(plates[0], 0, 0));
+        plates[1].GetOrAdd<DynamicBuffer<Cell>>().SetCount(3);                                   // a neighbor of 3 cells
+        Assert.Throws<InvalidOperationException>(() => Pad<Plate>(plates[0], 0, 0));
+        plates[1].GetOrAdd<DynamicBuffer<Cell>>().Clear();                                       // no cells: no neighbor
+        Assert.DoesNotThrow(() => Pad<Plate>(plates[0], 0, 0));
 
-        static void Load<TTile>(Entity e, int from, int to) where TTile : struct, IComponent, ITile<TilePos> =>
-            TileOf<Cell, TTile>(e, out _).Load(from, to);
+        static void Pad<TTile>(Entity e, int from, int to) where TTile : struct, IComponent, ITile<TilePos> =>
+            TileOf<Cell, TTile>(e, out _).Pad(from, to);
 
-        static void NoMask(Entity e) => TileOf<Cell, Plate>(e, out _).Load(0, 0, mask: false).Rows();
+        static void NoMask(Entity e) => TileOf<Cell, Plate>(e, out _).Pad(0, 0, mask: false).Rows();
 
         static int Sample<TTile>(Entity e, int dx, int dy, int dz) where TTile : struct, IComponent, ITile<TilePos> =>
-            TileOf<Cell, TTile>(e, out _).Load().At(new TileRow<TTile>(0, 0))[dx, dy, dz].V;
+            TileOf<Cell, TTile>(e, out _).Pad().At(new TileRow<TTile>(0, 0))[dx, dy, dz].V;
 
         static int Load128<TTile>(Entity e, int dx) where TTile : struct, IComponent, ITile<TilePos> =>
-            TileOf<Cell, TTile>(e, out _).Load().At(new TileRow<TTile>(0, 0)).Load128<int>(dx).GetElement(3);
+            TileOf<Cell, TTile>(e, out _).Pad().At(new TileRow<TTile>(0, 0)).Load128<int>(dx).GetElement(3);
     }
 
     // ---------------- the active rows ----------------
@@ -426,7 +426,7 @@ public class TileTests
     [TestCase(TileReads.Layer | TileReads.Above)]
     [TestCase(TileReads.Cross)]
     [TestCase(TileReads.All)]
-    [TestCase(TileReads.Sides | TileReads.Below)]
+    [TestCase(TileReads.NorthSouth | TileReads.Below)]
     [TestCase(TileReads.Diagonals)]
     public void RowsVisitsTheRowsWhoseStencilReadsACellThatIsNotZero(TileReads reads)
     {
@@ -455,7 +455,7 @@ public class TileTests
         foreach (var tile in tiles)
         foreach (var (from, to) in ranges)
         {
-            var padded = TileOf<Voxel, TTile>(tile, out var around).Load(from, to);
+            var padded = TileOf<Voxel, TTile>(tile, out var around).Pad(from, to);
             var visited = new HashSet<(int, int)>();
             var order = new List<(int, int)>();
             foreach (var row in padded.Rows(reads))
@@ -473,7 +473,7 @@ public class TileTests
                 bool needed = (reads & TileReads.Self) != 0 && Active(padded, y, z);
                 for (int k = 1; k <= r; k++)
                 {
-                    needed |= (reads & TileReads.Sides) != 0 && (Active(padded, y, z - k) || Active(padded, y, z + k));
+                    needed |= (reads & TileReads.NorthSouth) != 0 && (Active(padded, y, z - k) || Active(padded, y, z + k));
                     if (k > hy) continue;
                     needed |= (reads & TileReads.Above) != 0 && Active(padded, y + k, z);
                     needed |= (reads & TileReads.Below) != 0 && Active(padded, y - k, z);
@@ -524,7 +524,7 @@ public class TileTests
         [ForEach(Parallel = true, ChunkRows = 8)]
         static void Diffuse(Tile<Heat, HeatPlate> heat, Mut<DynamicBuffer<NextHeat>> next)
         {
-            var plate = heat.Load();
+            var plate = heat.Pad();
             var into = MemoryMarshal.Cast<NextHeat, float>(next.Write().AsSpan());
             foreach (var row in plate.Rows(TileReads.Layer))
             {
@@ -624,7 +624,7 @@ public class TileTests
         readonly TilePos IIndexed<TilePos>.Key => Pos;
         static int ITileShape.Width => 16;
         static int ITileShape.Depth => 16;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
@@ -633,7 +633,7 @@ public class TileTests
         readonly TilePos IIndexed<TilePos>.Key => Pos;
         static int ITileShape.Width => 16;
         static int ITileShape.Depth => 16;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
         static TileBoundary ITileShape.Boundary => TileBoundary.Clamp;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
@@ -643,7 +643,7 @@ public class TileTests
         readonly TilePos IIndexed<TilePos>.Key => Pos;
         static int ITileShape.Width => 16;
         static int ITileShape.Depth => 16;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
         static TileBoundary ITileShape.Boundary => TileBoundary.Mirror;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
@@ -653,14 +653,14 @@ public class TileTests
         readonly TilePos IIndexed<TilePos>.Key => Pos;
         static int ITileShape.Width => 16;
         static int ITileShape.Depth => 16;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Wrap(p, face);
     }
 
     /// <summary>The blur of one tile: the nine cells around each, summed row by row, a row of 16 in four vectors.</summary>
     private static void Blur<TTile>(Tile<Heat, TTile> heat, Mut<DynamicBuffer<NextHeat>> next) where TTile : struct, IComponent, ITileShape
     {
-        var plate = heat.Load();
+        var plate = heat.Pad();
         var into = MemoryMarshal.Cast<NextHeat, float>(next.Write().AsSpan());
         foreach (var row in plate.Rows(TileReads.Layer))
         {
@@ -780,20 +780,20 @@ public class TileTests
         readonly TilePos IIndexed<TilePos>.Key => Pos;
         static int ITileShape.Width => 16;
         static int ITileShape.Depth => 16;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Wrap(p, face);
     }
 
     public record struct Life(byte Alive);
     public record struct NextLife(byte Alive);
 
-    /// <summary>A cell lives on with two or three live neighbours, and is born with three; a row of 16 in one vector.</summary>
+    /// <summary>A cell lives on with two or three live neighbors, and is born with three; a row of 16 in one vector.</summary>
     public class LifeSystem : EcsSystem
     {
         [ForEach(Parallel = true, ChunkRows = 2)]
         static void Step(Tile<Life, LifePlate> life, Mut<DynamicBuffer<NextLife>> next)
         {
-            var plate = life.Load();
+            var plate = life.Pad();
             var into = MemoryMarshal.Cast<NextLife, byte>(next.Write().AsSpan());
             foreach (var row in plate.Rows(TileReads.Layer))
             {
@@ -884,7 +884,7 @@ public class TileTests
         [ForEach(Parallel = true, ChunkRows = 8), With<Awake>]
         static void Diffuse(Tile<Heat, SparsePlate> heat, Mut<DynamicBuffer<NextHeat>> next, ref HeatChange change)
         {
-            var plate = heat.Load();
+            var plate = heat.Pad();
             var step = next.Write().AsSpan();
             var into = MemoryMarshal.Cast<NextHeat, float>(step);
             foreach (var row in plate.Rows(TileReads.Layer))
@@ -899,7 +899,7 @@ public class TileTests
                 }
             }
 
-            var edges = heat.Changes(MemoryMarshal.Cast<NextHeat, Heat>(step), out bool changed);
+            var edges = heat.ChangedEdges(MemoryMarshal.Cast<NextHeat, Heat>(step), out bool changed);
             change = new HeatChange(edges, changed);
         }
     }
@@ -992,7 +992,7 @@ public class TileTests
         [ForEach(Parallel = true, ChunkRows = 4)]
         static void Step(Tile<Heat, WavePlate> heat, Mut<DynamicBuffer<NextHeat>> next)
         {
-            var plate = heat.Load();
+            var plate = heat.Pad();
             var into = MemoryMarshal.Cast<NextHeat, float>(next.Write().AsSpan());
             foreach (var row in plate.Rows(TileReads.Layer))
             {
@@ -1058,7 +1058,7 @@ public class TileTests
         static int ITileShape.Depth => 8;
         static int ITileShape.Height => 8;
         static TileFaces ITileShape.Faces => TileFaces.All;
-        static TileNeighbourhood ITileShape.Neighbourhood => TileNeighbourhood.All;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
@@ -1067,7 +1067,7 @@ public class TileTests
         [ForEach(Parallel = true, ChunkRows = 2)]
         static void Step(Tile<Cell, Box8> cells, Mut<DynamicBuffer<NextCell>> next)
         {
-            var box = cells.Load();
+            var box = cells.Pad();
             var into = MemoryMarshal.Cast<NextCell, int>(next.Write().AsSpan());
             foreach (var row in box.Rows())
             {
@@ -1173,7 +1173,7 @@ public class TileTests
         [ForEach(Parallel = true, ChunkRows = 2)]
         static void Step(Tile<Heat, Strip> heat, Mut<DynamicBuffer<NextHeat>> next)
         {
-            var strip = heat.Load();
+            var strip = heat.Pad();
             var into = MemoryMarshal.Cast<NextHeat, float>(next.Write().AsSpan());
             foreach (var row in strip.Rows(TileReads.Self))
             {

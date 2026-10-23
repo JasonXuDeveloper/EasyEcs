@@ -1368,7 +1368,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         var archetype = _tables[index];
                         var job = Job;
                         _world.{{name}}Chunk<{{tps}}, TJob>(ref job, archetype, _filters[index], _starts[index], _ends[index], {{List(n, i => $"_b{i}")}});
-                        // One write per chunk: neighbouring slots written by other threads share a line only for this store.
+                        // One write per chunk: neighboring slots written by other threads share a line only for this store.
                         if (TJob.Merges) _parts[index].Job = job;
                     }
 

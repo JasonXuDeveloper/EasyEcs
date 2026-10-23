@@ -18,7 +18,7 @@ namespace EasyEcs;
 /// it. Types the world used are known anyway. Generated code calls this; user code does not need to.
 /// </summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public static class SavedTypes
+public static class TypeRegistry
 {
     private static readonly Lock Gate = new();
     // By type id, the types registered under it: one loads, several are ambiguous (two types of one name in two
@@ -339,5 +339,5 @@ public static class SavedTypes
     }
 }
 
-/// <summary>An <see cref="EntityId"/> field of <paramref name="value"/> (see <see cref="SavedTypes.EntityIds{T}"/>).</summary>
+/// <summary>An <see cref="EntityId"/> field of <paramref name="value"/> (see <see cref="TypeRegistry.EntityIds{T}"/>).</summary>
 public delegate ref EntityId EntityIdField<T>(ref T value);

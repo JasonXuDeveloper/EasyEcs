@@ -302,7 +302,7 @@ public class AllocationTests
     [Test]
     public void UnloadingAndLoadingBackEntitiesDoesNotAllocateOnceWarm()
     {
-        DynamicBuffer<Cell>.PoolCapacity = 1024;
+        DynamicBuffer<Cell>.MaxPooledLength = 1024;
         using var world = new World();
         var others = new Entity[3000];
         for (int i = 0; i < others.Length; i++) others[i] = world.CreateEntity(new Health(i));
@@ -388,9 +388,9 @@ public class AllocationTests
     [Test]
     public void ReservedPoolListsServeTheFirstBuffers()
     {
-        // ReservePool pays at startup for the lists the world's buffers take when it first grows to its peak.
-        DynamicBuffer<Grain>.PoolCapacity = 256;
-        DynamicBuffer<Grain>.ReservePool(500);
+        // FillPool pays at startup for the lists the world's buffers take when it first grows to its peak.
+        DynamicBuffer<Grain>.MaxPooledLength = 256;
+        DynamicBuffer<Grain>.FillPool(500);
         using var world = new World();
         world.Reserve<Position, DynamicBuffer<Grain>>(500);
         var entities = new Entity[500];
@@ -402,7 +402,7 @@ public class AllocationTests
         }
 
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
-        Assert.Throws<ArgumentOutOfRangeException>(() => DynamicBuffer<Grain>.ReservePool(-1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => DynamicBuffer<Grain>.FillPool(-1));
     }
 
     [Test]

@@ -28,7 +28,7 @@ internal static class Collectible
     private static void Unloading(AssemblyLoadContext context)
     {
         bool From(Type type) => Uses(type, assembly => AssemblyLoadContext.GetLoadContext(assembly) == context);
-        SavedTypes.Forget(From);
+        TypeRegistry.Forget(From);
         ComponentInfo.Release(From);
     }
 

@@ -68,12 +68,17 @@ public static class UniqueIndexExtensions
         /// </summary>
         public Entity Get(TKey key)
         {
-            if (!index.TryFind(key, out var entity)) ThrowNone(key);
-            return entity;
+            if (!index.TryFind(key, out var id)) ThrowNone(key);
+            return new Entity(index.World, id);
         }
 
         /// <summary>The entity whose <typeparamref name="T"/> has key <paramref name="key"/>, if one has it. O(1): a hash probe. Owner thread only.</summary>
-        public bool TryGet(TKey key, out Entity entity) => index.TryFind(key, out entity);
+        public bool TryGet(TKey key, out Entity entity)
+        {
+            bool found = index.TryFind(key, out var id);
+            entity = found ? new Entity(index.World, id) : default;
+            return found;
+        }
     }
 
     [DoesNotReturn, MethodImpl(MethodImplOptions.NoInlining)]
@@ -82,7 +87,7 @@ public static class UniqueIndexExtensions
 
 /// <summary>
 /// How a world creates the index of unique component <typeparamref name="T"/> without knowing its key type: set when
-/// the module of <typeparamref name="T"/> loads (<see cref="SavedTypes.UniqueIndex{T,TKey}"/>, generated) or by the
+/// the module of <typeparamref name="T"/> loads (<see cref="TypeRegistry.UniqueIndex{T,TKey}"/>, generated) or by the
 /// first <see cref="World.Index{T,TKey}"/> of it in any world.
 /// </summary>
 internal static class UniqueIndexOf<T> where T : struct, IComponent
@@ -92,7 +97,7 @@ internal static class UniqueIndexOf<T> where T : struct, IComponent
 
 /// <summary>
 /// The slot function of a direct-indexed component (<see cref="IDirectIndexed{TKey}"/>) for an index that knows only
-/// its key type: one sealed subclass per component, set when its module loads (<see cref="SavedTypes.DirectIndex{T,TKey}"/>,
+/// its key type: one sealed subclass per component, set when its module loads (<see cref="TypeRegistry.DirectIndex{T,TKey}"/>,
 /// generated). Without it, the index of such a component is a plain unique index.
 /// </summary>
 internal abstract class KeySlots<TKey>

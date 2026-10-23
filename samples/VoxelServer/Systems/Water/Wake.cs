@@ -2,7 +2,7 @@ using EasyEcs;
 
 namespace VoxelServer;
 
-// The other half of a block update (HeightMapSystem is the first): the chunk's water, and its neighbours', may move again.
+// The other half of a block update (HeightMapSystem is the first): the chunk's water, and its neighbors', may move again.
 [UpdateInGroup<Simulation>]
 public class WaterWakeSystem : EcsSystem
 {

@@ -449,31 +449,31 @@ public class SerializationTests
         byte[] bytes;
         try
         {
-            SavedTypes.Forget(type => type == typeof(Vitals) || type == typeof(RawStats)); // the build that has Stats
+            TypeRegistry.Forget(type => type == typeof(Vitals) || type == typeof(RawStats)); // the build that has Stats
             using (var world = new World())
             {
                 world.CreateEntity(new Stats { Hp = 7 }, new Position(1, 1));
                 bytes = Save(world);
             }
 
-            SavedTypes.Forget(type => type == typeof(Stats));                                // the build that renamed it
-            SavedTypes.Component<Vitals>();
+            TypeRegistry.Forget(type => type == typeof(Stats));                                // the build that renamed it
+            TypeRegistry.Component<Vitals>();
             using var loaded = new World();
             loaded.Load(bytes);
             foreach (var item in loaded.Query<Vitals, Position>())
                 Assert.That((item.Component1.Hp, item.Component1.Mana, item.Component2), Is.EqualTo((7, 0, new Position(1, 1))));
             Assert.That(loaded.Count<Vitals>(), Is.EqualTo(1));
 
-            SavedTypes.Forget(type => type == typeof(Vitals));                               // a raw type of that name
-            SavedTypes.Component<RawStats>();
+            TypeRegistry.Forget(type => type == typeof(Vitals));                               // a raw type of that name
+            TypeRegistry.Component<RawStats>();
             var refused = Assert.Throws<InvalidDataException>(() => loaded.Load(bytes));
             Assert.That(refused!.Message, Does.Contain("Nino formatter"));
         }
         finally
         {
-            SavedTypes.Component<Stats>();
-            SavedTypes.Component<Vitals>();
-            SavedTypes.Component<RawStats>();
+            TypeRegistry.Component<Stats>();
+            TypeRegistry.Component<Vitals>();
+            TypeRegistry.Component<RawStats>();
         }
     }
 

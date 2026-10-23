@@ -43,8 +43,8 @@ public readonly struct ComponentSet
     public ComponentSet With(Type type)
     {
         ArgumentNullException.ThrowIfNull(type);
-        int bit = SavedTypes.BitOf(type);
-        int slot = SavedTypes.SlotOf(type);
+        int bit = TypeRegistry.BitOf(type);
+        int slot = TypeRegistry.SlotOf(type);
         if (bit >= 0 && slot >= 0)
             throw new ArgumentException($"{type} is both a component and a singleton type: add it with With<T>() or WithSingleton<T>()", nameof(type));
         if (bit >= 0) return new ComponentSet(Adding(in _bits, bit), _singletons);

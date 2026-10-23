@@ -7,7 +7,7 @@ namespace VoxelServer;
 // along the slope of the water toward the lower water around it, and the weaker the lower the water: full next to the
 // spring or under falling water, an eighth at the edge of a run. It visits the chunks, skips the dry ones (FluidCount)
 // and, through the index of entities by chunk, finds the bodies in the others: the water of a body's block is the
-// loop's own row, and its four neighbours are read only for the few bodies in water. Runs after the walk set the
+// loop's own row, and its four neighbors are read only for the few bodies in water. Runs after the walk set the
 // velocity and before physics moves the body.
 [UpdateInGroup<Simulation>]
 public class FloatSystem : EcsSystem
@@ -18,7 +18,7 @@ public class FloatSystem : EcsSystem
         if (count.Blocks == 0) return;                                 // dry: nothing floats here
         var levels = fluid.AsReadOnlySpan();
         var solid = blocks.AsReadOnlySpan();
-        var near = new Nearby(World);                                   // the neighbours across the edge
+        var near = new Nearby(World);                                   // the neighbors across the edge
         foreach (var body in World.InChunkIndex.Find(key.Pos))
         {
             var at = Terrain.Cell(body.Position.Value);

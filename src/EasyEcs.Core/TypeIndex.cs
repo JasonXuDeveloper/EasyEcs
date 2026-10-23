@@ -61,7 +61,7 @@ internal static class ComponentType<T> where T : struct, IComponent
         if (default(T) is IDisabledTag tag) return ComponentInfo.DisablerOf(tag.Component); // Disabled<U>: U's tag bit
         int index = ComponentInfo.Allocate(new ComponentInfo<T>());
         Collectible.Watch(typeof(T)); // its bit is released when its context unloads
-        SavedTypes.Component<T>(); // a type the process uses can be loaded
+        TypeRegistry.Component<T>(); // a type the process uses can be loaded
         // A tracked component brings a hidden column of change ticks into every archetype that has it: a RowTick
         // column with a bit of its own, described by the component's type so it is released with it. Not a generic
         // RowTicks<T> registered through ComponentType: the AOT compiler cannot see that such a registration stops
@@ -79,7 +79,7 @@ internal static class SingletonType<T> where T : struct, ISingletonComponent
     private static int Register()
     {
         Collectible.Watch(typeof(T)); // its save id is forgotten when its context unloads
-        SavedTypes.Singleton<T>(); // a type the process uses can be loaded
+        TypeRegistry.Singleton<T>(); // a type the process uses can be loaded
         int index = TypeIndex<ISingletonComponent, T>.Value;
         SingletonNames.Set(index, ScheduleInfo.NameOf(typeof(T)));
         return index;
@@ -119,10 +119,10 @@ internal abstract class SingletonBox
     /// <summary>The singleton's slot in every world (<see cref="SingletonType{T}.Index"/>).</summary>
     public abstract int Slot { get; }
 
-    /// <summary>The name of the type in messages (<see cref="SavedTypes.NameOf{T}"/>).</summary>
+    /// <summary>The name of the type in messages (<see cref="TypeRegistry.NameOf{T}"/>).</summary>
     public abstract string Name { get; }
 
-    /// <summary>The id a save records the type by (<see cref="SavedTypes.IdOf"/>).</summary>
+    /// <summary>The id a save records the type by (<see cref="TypeRegistry.IdOf"/>).</summary>
     public abstract int TypeId { get; }
 
     /// <summary>Write the value (Nino).</summary>
@@ -139,7 +139,7 @@ internal abstract class SingletonBox
     /// <summary>Reset the value to default (a load then reads into an empty value).</summary>
     public abstract void Clear();
 
-    /// <summary>Whether the type is [NotSaved]: no save writes it, a load keeps the world's own (<see cref="SavedTypes.NotSaved{T}"/>).</summary>
+    /// <summary>Whether the type is [NotSaved]: no save writes it, a load keeps the world's own (<see cref="TypeRegistry.NotSaved{T}"/>).</summary>
     public abstract bool NotSaved { get; }
 }
 
@@ -150,9 +150,9 @@ internal sealed class SingletonBox<T> : SingletonBox where T : struct, ISingleto
 
     public override int Slot => SingletonType<T>.Index;
 
-    public override string Name => SavedTypes.NameOf<T>.Value;
+    public override string Name => TypeRegistry.NameOf<T>.Value;
 
-    public override int TypeId => SavedTypes.TypeId<T>.Value;
+    public override int TypeId => TypeRegistry.TypeId<T>.Value;
 
     // A singleton holding a list (Emitted<T>: its only field is a DynamicBuffer, whose only field is its store) is
     // copied, saved and loaded through the list's elements, as a buffer column is (ComponentInfo); null for others.
@@ -200,7 +200,7 @@ internal sealed class SingletonBox<T> : SingletonBox where T : struct, ISingleto
     public override bool NotSaved => NotSavedOf<T>.Value;
 }
 
-/// <summary>Whether <typeparamref name="T"/> (a component or a singleton) is [NotSaved]: set when its module loads (<see cref="SavedTypes.NotSaved{T}"/>).</summary>
+/// <summary>Whether <typeparamref name="T"/> (a component or a singleton) is [NotSaved]: set when its module loads (<see cref="TypeRegistry.NotSaved{T}"/>).</summary>
 internal static class NotSavedOf<T> where T : struct
 {
     public static bool Value;

@@ -16,8 +16,8 @@ public record struct BlockPos(int X, int Y, int Z);
 // modulo 64, so the chunks loaded around the players, never 64 apart, each have their own slot, and a lookup reads one
 // array entry (the hash finds the others). Every chunk is an instance of one prefab (Program.cs), with every component
 // and tag below and in Water.cs, so all chunks share one table whatever happens to them. It is also a tile of the
-// world's grid (ITile): 16 x 16 x 32 cells in its buffers, with a neighbour on each side, so the water shader takes a
-// Tile<Fluid, Chunk> and gets its water with the halo of its neighbours' (WaterFlowSystem).
+// world's grid (ITile): 16 x 16 x 32 cells in its buffers, with a neighbor on each side, so the water shader takes a
+// Tile<Fluid, Chunk> and gets its water with the halo of its neighbors' (WaterFlowSystem).
 public record struct Chunk(ChunkPos Pos) : IComponent, IDirectIndexed<ChunkPos>, ITile<ChunkPos>
 {
     ChunkPos IIndexed<ChunkPos>.Key => Pos;

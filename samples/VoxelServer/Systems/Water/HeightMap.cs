@@ -5,7 +5,7 @@ using EasyEcs;
 namespace VoxelServer;
 
 // A block update: a chunk whose blocks changed (dug, or just created or loaded) gets its height map computed again
-// (here) and its water, and its neighbours', moving again (WaterWakeSystem): two systems, one job each, both
+// (here) and its water, and its neighbors', moving again (WaterWakeSystem): two systems, one job each, both
 // [Changed<DynamicBuffer<Block>>], so they visit only those chunks and the dig itself knows nothing of water or of the sky.
 //
 // The height map is 16 vectors of 16 columns: each layer from the bottom up overwrites the lanes whose block is solid

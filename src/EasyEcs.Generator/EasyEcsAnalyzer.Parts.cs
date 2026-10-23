@@ -22,12 +22,12 @@ public sealed partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor NotPartial = new("EECS062", "A type with generated members is not partial",
         "'{0}' has members the generator writes ({1}), so it and every type containing it must be partial: {2}",
         Category, DiagnosticSeverity.Error, true,
-        "An attribute such as [Sum], [Key] or [Group] declares what the generator writes into the type itself: the " +
+        "An attribute such as [Sum], [IndexKey] or [Group] declares what the generator writes into the type itself: the " +
         "members of IReduction<T>, IIndexed<TKey> or IGroup, in a part of the type. A part can only be added to a partial " +
         "type, nested in partial types; a file type (file struct) cannot get one, since the part lives in another file.",
         helpLinkUri: Help("EECS062"));
 
-    public static readonly DiagnosticDescriptor HandWrittenReduction = new("EECS063", "A reduction declared by attributes writes its own members",
+    public static readonly DiagnosticDescriptor ReductionWrittenTwice = new("EECS063", "A reduction declared by attributes writes its own members",
         "'{0}' declares its reduction with field attributes, and also writes '{1}': the generator writes Identity and Combine from the attributes; remove '{1}', or the attributes",
         Category, DiagnosticSeverity.Error, true,
         "The reduction attributes ([Sum], [Product], [Min], [Max], [All], [Any]) declare IReduction<T> field by field, and " +
@@ -43,7 +43,7 @@ public sealed partial class EasyEcsAnalyzer
         "value, so each is a field or an auto-property with a setter. A field without an attribute would be dropped by " +
         "every Combine.", helpLinkUri: Help("EECS064"));
 
-    public static readonly DiagnosticDescriptor FieldWiseReduction = new("EECS065", "A reduction the field attributes can declare",
+    public static readonly DiagnosticDescriptor HandWrittenReduction = new("EECS065", "A reduction the field attributes can declare",
         "'{0}' combines field by field ({1}): declare it with attributes, and the generator writes Identity and Combine",
         Category, DiagnosticSeverity.Info, true,
         "A hand-written IReduction<T> whose Identity and Combine apply one of sum, product, minimum, maximum, and, or to " +
@@ -59,10 +59,10 @@ public sealed partial class EasyEcsAnalyzer
         "of negative values) adds itself once per chunk, so the result depends on how many chunks the pass had: on the " +
         "thread count and the table sizes.", helpLinkUri: Help("EECS066"));
 
-    public static readonly DiagnosticDescriptor AttributeKey = new("EECS067", "An index key an attribute can declare",
+    public static readonly DiagnosticDescriptor HandWrittenKey = new("EECS067", "An index key an attribute can declare",
         "'{0}.Key' returns {1}: declare it with [{2}] on {3}, and the generator writes the key",
         Category, DiagnosticSeverity.Info, true,
-        "A Key that returns a field, a property or the value itself is what [Key] (and [UniqueKey] for a unique index) " +
+        "A Key that returns a field, a property or the value itself is what [IndexKey] (and [UniqueKey] for a unique index) " +
         "declares on that member, or on the type for the value itself, of a partial struct: the generator writes the " +
         "interface and its explicit Key, which no ToString() prints and no caller reaches by mistake. A computed key stays " +
         "hand-written.", helpLinkUri: Help("EECS067"));
@@ -107,7 +107,7 @@ public sealed partial class EasyEcsAnalyzer
                         : $"declare '{level.Name}' partial, and every type between it and '{type.Name}'"));
                     break;
                 case Parts.Rule.HandWritten:
-                    context.ReportDiagnostic(Diagnostic.Create(HandWrittenReduction, where, type.Name, problem.Text));
+                    context.ReportDiagnostic(Diagnostic.Create(ReductionWrittenTwice, where, type.Name, problem.Text));
                     break;
                 case Parts.Rule.BadField:
                     context.ReportDiagnostic(Diagnostic.Create(BadReductionField, where, problem.Where.Name, type.Name, problem.Text));
@@ -119,7 +119,7 @@ public sealed partial class EasyEcsAnalyzer
         }
     }
 
-    // EECS067's property for its code fix: the member [Key] goes on ("this" for the type).
+    // EECS067's property for its code fix: the member [IndexKey] goes on ("this" for the type).
     public const string KeyMember = "Member";
 
     /// <summary>
@@ -127,7 +127,7 @@ public sealed partial class EasyEcsAnalyzer
     /// expression body or a <c>get =&gt;</c>), of exactly the key's type. Not for a file type (no part can be added),
     /// nor the public self key of a record EECS043 reports.
     /// </summary>
-    private static void AnalyzeAttributeKey(SymbolAnalysisContext context, INamedTypeSymbol type)
+    private static void AnalyzeHandWrittenKey(SymbolAnalysisContext context, INamedTypeSymbol type)
     {
         if (Parts.Declares(type, Parts.Key) || Parts.Declares(type, Parts.UniqueKey)
             || Symbols.InterfaceKey(type, out bool unique) is not { } key
@@ -159,8 +159,8 @@ public sealed partial class EasyEcsAnalyzer
                  || !SymbolEqualityComparer.Default.Equals(target.Type, key) || SymbolEqualityComparer.Default.Equals(target.Where, property))
             return;
 
-        string attribute = unique ? "UniqueKey" : "Key";
-        context.ReportDiagnostic(Diagnostic.Create(AttributeKey, syntax.Identifier.GetLocation(),
+        string attribute = unique ? "UniqueKey" : "IndexKey";
+        context.ReportDiagnostic(Diagnostic.Create(HandWrittenKey, syntax.Identifier.GetLocation(),
             ImmutableDictionary<string, string?>.Empty.Add(KeyMember, member), type.Name,
             member == "this" ? "the value itself" : $"'{member}'", attribute, member == "this" ? "the type" : $"'{member}'"));
     }
@@ -228,7 +228,7 @@ public sealed partial class EasyEcsAnalyzer
     private static string What(Parts parts) => string.Join(", ", new[]
     {
         parts.Fields.Count > 0 || parts.Reduces ? "IReduction<T> from its field attributes" : null,
-        parts.KeyOf != null ? $"the Key of [{(parts.KeyOf.Unique ? "UniqueKey" : "Key")}]" : null,
+        parts.KeyOf != null ? $"the Key of [{(parts.KeyOf.Unique ? "UniqueKey" : "IndexKey")}]" : null,
         parts.GroupOf != null ? "the Group of [Group]" : null,
     }.Where(w => w != null));
 
@@ -282,7 +282,7 @@ public sealed partial class EasyEcsAnalyzer
         }
 
         if (all)
-            context.ReportDiagnostic(Diagnostic.Create(FieldWiseReduction, declaration.Identifier.GetLocation(),
+            context.ReportDiagnostic(Diagnostic.Create(HandWrittenReduction, declaration.Identifier.GetLocation(),
                 ImmutableDictionary<string, string?>.Empty.Add(ReductionOps, opsText), type.Name,
                 string.Join(", ", members.Select(m => $"{m.Name} by {ops[m.Name]}"))));
     }

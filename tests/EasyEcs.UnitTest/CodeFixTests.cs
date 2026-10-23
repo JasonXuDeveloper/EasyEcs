@@ -326,21 +326,21 @@ public class CodeFixTests
     [TestCase("EECS066", "Declare it with attributes",
         "public struct C : ISingletonComponent, IReduction<C> { public int Lo; public static C Identity => default; public static C Combine(C a, C b) => new C { Lo = System.Math.Min(a.Lo, b.Lo) }; }",
         "public partial struct C : ISingletonComponent { [Min] public int Lo; }")]
-    [TestCase("EECS067", "Declare it with [Key]",
+    [TestCase("EECS067", "Declare it with [IndexKey]",
         "public struct M : IComponent, IIndexed<int> { public int BlocksDug; public int Key => BlocksDug; }",
-        "public partial struct M : IComponent { [Key] public int BlocksDug; }")]
+        "public partial struct M : IComponent { [IndexKey] public int BlocksDug; }")]
     [TestCase("EECS067", "Declare it with [UniqueKey]",
         "public record struct A(int Id) : IComponent, IUniqueIndexed<int> { readonly int IIndexed<int>.Key => Id; }",
         "public partial record struct A([UniqueKey] int Id) : IComponent { }")]
-    [TestCase("EECS067", "Declare it with [Key]",
+    [TestCase("EECS067", "Declare it with [IndexKey]",
         "namespace N\n{\n    public readonly struct Tile : IComponent, IIndexed<Tile>, System.IEquatable<Tile>\n    {\n        public readonly int X;\n        Tile IIndexed<Tile>.Key => this;\n        public bool Equals(Tile o) => X == o.X;\n    }\n}",
-        "namespace N\n{\n    [Key]\n    public readonly partial struct Tile : IComponent, System.IEquatable<Tile>\n    {\n        public readonly int X;\n        public bool Equals(Tile o) => X == o.X;\n    }\n}")]
+        "namespace N\n{\n    [IndexKey]\n    public readonly partial struct Tile : IComponent, System.IEquatable<Tile>\n    {\n        public readonly int X;\n        public bool Equals(Tile o) => X == o.X;\n    }\n}")]
     [TestCase("EECS067", "Declare it with [UniqueKey]",
         "public struct D : IComponent, IDirectIndexed<int> { public int Cell; public int Key { get => Cell; } public static int Slots => 8; public static int SlotOf(int key) => key; }",
         "public partial struct D : IComponent, IDirectIndexed<int> { [UniqueKey] public int Cell; public static int Slots")]  // IDirectIndexed stays
-    [TestCase("EECS043", "Declare it with [Key]",
+    [TestCase("EECS043", "Declare it with [IndexKey]",
         "public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; }",
-        "[Key]\npublic readonly partial record struct Shop(long Id) : IComponent { }")]
+        "[IndexKey]\npublic readonly partial record struct Shop(long Id) : IComponent { }")]
     [TestCase("EECS069", "Mark it [NinoType]",
         "namespace Nino.Core { public sealed class NinoTypeAttribute : System.Attribute; }\npublic struct Name : IComponent { public string Text; }", // Nino's attribute, as its package declares it
         "[Nino.Core.NinoType]\npublic partial struct Name : IComponent { public string Text; }")]

@@ -109,14 +109,14 @@ internal abstract class ComponentInfo
 
     /// <summary>
     /// A new index of this unique component for <paramref name="world"/> (<see cref="Unique"/> types only); throws when
-    /// no module registered how to create it (<see cref="SavedTypes.UniqueIndex{T,TKey}"/>). Cold.
+    /// no module registered how to create it (<see cref="TypeRegistry.UniqueIndex{T,TKey}"/>). Cold.
     /// </summary>
     public virtual World.IValueIndex CreateUniqueIndex(World world) => null;
 
     /// <summary>The setup every world gives the type (<see cref="TypeDefaults"/>), or null. Cold: read once per new table.</summary>
     public virtual TypeDefaults Defaults => null;
 
-    /// <summary>Whether the type is [NotSaved]: saves leave its column out (<see cref="SavedTypes.NotSaved{T}"/>). Cold: once per column per save.</summary>
+    /// <summary>Whether the type is [NotSaved]: saves leave its column out (<see cref="TypeRegistry.NotSaved{T}"/>). Cold: once per column per save.</summary>
     public virtual bool NotSaved => false;
 
     /// <summary>Whether the type holds managed references (cleared when its row dies, copied by type).</summary>
@@ -254,10 +254,10 @@ internal abstract class ComponentInfo
     /// <summary>Bytes of one row of the column (an element of a managed column: its references, not what they point at).</summary>
     public abstract int Stride { get; }
 
-    /// <summary>The name of the type in messages (<see cref="SavedTypes.NameOf{T}"/>).</summary>
+    /// <summary>The name of the type in messages (<see cref="TypeRegistry.NameOf{T}"/>).</summary>
     public abstract string Name { get; }
 
-    /// <summary>The id a save records the type by (<see cref="SavedTypes.IdOf"/>).</summary>
+    /// <summary>The id a save records the type by (<see cref="TypeRegistry.IdOf"/>).</summary>
     public abstract int TypeId { get; }
 
 
@@ -281,11 +281,11 @@ internal abstract class ComponentInfo
 
     /// <summary>
     /// How a save writes the rows (of a buffer column: its elements): the size of a raw row, 0 when Nino writes them
-    /// (<see cref="SavedTypes.RowSize{T}"/>).
+    /// (<see cref="TypeRegistry.RowSize{T}"/>).
     /// </summary>
     public abstract int SavedSize { get; }
 
-    /// <summary>The layout hash of raw rows the generator registered (<see cref="SavedTypes.Raw{T}"/>), else 0.</summary>
+    /// <summary>The layout hash of raw rows the generator registered (<see cref="TypeRegistry.Raw{T}"/>), else 0.</summary>
     public abstract int SavedLayout { get; }
 
     /// <summary>Read <paramref name="count"/> rows written by <see cref="Write"/> into managed column <paramref name="column"/> from <paramref name="start"/>.</summary>
@@ -315,9 +315,9 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
     // components then never straddle two lines. Managed columns are plain T[] (the GC must see their references).
     public override Type Type => owner ?? typeof(T);
 
-    public override string Name => SavedTypes.NameOf<T>.Value;
+    public override string Name => TypeRegistry.NameOf<T>.Value;
 
-    public override int TypeId => SavedTypes.TypeId<T>.Value;
+    public override int TypeId => TypeRegistry.TypeId<T>.Value;
 
     public override int Stride => Unsafe.SizeOf<T>();
 
@@ -337,13 +337,13 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
             for (int i = start; i < start + count; i++) NinoSerializer.Serialize(rows[i], ref writer);
     }
 
-    public override void WriteRows(ref Writer writer, ReadOnlySpan<byte> rows) => SavedTypes.WriteRows<T>(ref writer, rows);
+    public override void WriteRows(ref Writer writer, ReadOnlySpan<byte> rows) => TypeRegistry.WriteRows<T>(ref writer, rows);
 
-    public override void ReadRows(ref Reader reader, Span<byte> rows) => SavedTypes.ReadRows<T>(ref reader, rows);
+    public override void ReadRows(ref Reader reader, Span<byte> rows) => TypeRegistry.ReadRows<T>(ref reader, rows);
 
-    public override int SavedSize => default(T) is IBuffer ? Buffer.RowSize : SavedTypes.RowSize<T>();
+    public override int SavedSize => default(T) is IBuffer ? Buffer.RowSize : TypeRegistry.RowSize<T>();
 
-    public override int SavedLayout => default(T) is IBuffer ? Buffer.Layout : SavedTypes.RowSize<T>() != 0 ? SavedTypes.RawLayout<T>.Hash : 0;
+    public override int SavedLayout => default(T) is IBuffer ? Buffer.Layout : TypeRegistry.RowSize<T>() != 0 ? TypeRegistry.RawLayout<T>.Hash : 0;
 
     public override void Remap(Array column, int start, int count, IdMap map)
     {
@@ -354,7 +354,7 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
             return;
         }
 
-        if (SavedTypes.EntityIdOffsets<T>.Value.Length == 0) return;
+        if (TypeRegistry.EntityIdOffsets<T>.Value.Length == 0) return;
         ref T row0 = ref Managed ? ref MemoryMarshal.GetArrayDataReference(Unsafe.As<T[]>(column)) : ref Archetype.Row0<T>(column);
         map.Apply(MemoryMarshal.CreateSpan(ref Unsafe.Add(ref row0, start), count));
     }

@@ -14,13 +14,13 @@ namespace VoxelServer;
 // It runs as a GPU runs a shader, in passes that hand data to each other, on the chunks that may still move (Flowing):
 // WaterFlowSystem shades every block into NextFluid, in parallel; WaterSleepSystem lets the chunks whose step moved
 // nothing sleep; WaterCommitSystem makes the step the water once every chunk has stepped (each chunk steps from its
-// neighbours' water before the step, as a GPU ping-pongs two buffers) and wakes the chunks beside the edges that changed.
+// neighbors' water before the step, as a GPU ping-pongs two buffers) and wakes the chunks beside the edges that changed.
 //
-// The shader. Shade computes one block's next level from its own and its six neighbours', nothing else, and runs on
+// The shader. Shade computes one block's next level from its own and its six neighbors', nothing else, and runs on
 // 16 blocks at once (a row of the chunk, one Vector128<byte>). Each chunk first loads its tile and the halo around it,
 // as a CUDA block loads its tile and halo into shared memory: a Tile<Fluid, Chunk> parameter is the chunk's water with
-// its neighbours' (Chunk is a tile of the grid, ITile), and Load pads the layers in reach into a texture with a ring of
-// one block around each layer, from the facing row or column of each neighbour (read as they were before the pass, so
+// its neighbors' (Chunk is a tile of the grid, ITile), and Pad copies the layers in reach into a texture with a ring of
+// one block around each layer, from the facing row or column of each neighbor (read as they were before the pass, so
 // the method stays parallel, and only NextFluid is written), and a layer under and over them. The loop then has no
 // edge cases. Byte lanes are integer arithmetic: the same water on every machine.
 //
@@ -58,9 +58,9 @@ public class WaterFlowSystem : EcsSystem
             return;
         }
         // The textures: the water with its stencil, the blocks (only sampled). Above the world's top, no chunk holds a
-        // layer: it is no water and no block, as a neighbour that is not loaded.
-        var water = fluid.Load(from, to);
-        var ground = blocks.Load(from, to, mask: false);
+        // layer: it is no water and no block, as a neighbor that is not loaded.
+        var water = fluid.Pad(from, to);
+        var ground = blocks.Pad(from, to, mask: false);
 
         // The rows the stencil keeps, 16 blocks at a time, written straight into the step. The layers outside hold no
         // water before the step or after it, so the buffer keeps its count between steps.
