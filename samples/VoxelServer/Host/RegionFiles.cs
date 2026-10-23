@@ -53,6 +53,25 @@ public sealed class RegionFiles : IDisposable
         return true;
     }
 
+    // Makes `into` hold what this one holds, its chunks and their bytes: a world loaded from a save made beside this copy
+    // replays the same ticks (Benchmark/). Not on a tick's path.
+    public void CopyTo(RegionFiles into)
+    {
+        into._chunks.Clear();
+        foreach (var (pos, at) in _chunks) into._chunks[pos] = at;
+        if (into._used.Length < _used.Length) into._used = new ulong[_used.Length];
+        _used.CopyTo(into._used, 0);
+        into._used.AsSpan(_used.Length).Clear();
+        long length = RandomAccess.GetLength(_file);
+        RandomAccess.SetLength(into._file, length);
+        var block = new byte[64 * 1024];
+        for (long at = 0; at < length; at += block.Length)
+        {
+            int read = RandomAccess.Read(_file, block, at);
+            RandomAccess.Write(into._file, block.AsSpan(0, read), at);
+        }
+    }
+
     public void Dispose() => _file.Dispose();
 
     // The first run of `count` free sectors, marked taken; the map doubles when no run fits.

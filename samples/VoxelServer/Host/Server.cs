@@ -84,7 +84,7 @@ public static class Server
         foreach (var system in world.Systems)
         {
             long late = system.Stats.TotalAllocated - warmUp[i];
-            Console.Error.WriteLine($"  {system.GetType().Name,-22} {system.Stats.TotalTime.TotalMilliseconds / ticks:F4} ms, " +
+            Console.Error.WriteLine($"  {system.Name,-22} {system.Stats.TotalTime.TotalMilliseconds / ticks:F4} ms, " +
                                     $"{warmUp[i++] / 1024} KiB warming up{(late != 0 ? $", {late} bytes after" : "")}");
         }
     }

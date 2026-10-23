@@ -8,64 +8,9 @@ using VoxelServer;
 int players = Support.Option(args, "--players", 50);
 int ticks = Support.Option(args, "--ticks", 1200);
 
-// #region options
-// A chunk's blocks, its water and the water's next step are 8 KB each, more than a buffer's pool keeps by default: let
-// each chunk loaded reuse the lists of one that was unloaded.
-DynamicBuffer<Block>.MaxPooledLength = Terrain.BlocksPerChunk;
-DynamicBuffer<Fluid>.MaxPooledLength = Terrain.BlocksPerChunk;
-DynamicBuffer<NextFluid>.MaxPooledLength = Terrain.BlocksPerChunk;
-DynamicBuffer<Surface>.MaxPooledLength = Terrain.Size * Terrain.Size;
-DynamicBuffer<ItemStack>.MaxPooledLength = Rules.InventorySlots;
-
-using var world = new World(new WorldOptions { MeasureSystems = true });
-// #endregion options
-
-world.SetClock(Tick: 0, DayLength: Rules.DayLength);
-world.AddSingleton<Stats>();
 var capacity = Rules.CapacityFor(players);
 using var regions = new RegionFiles(capacity.Chunks * 4);
-world.SetRegions(regions);
-SetPrefabs(world);
-Reserve(world, capacity);
-
-// #region systems
-// One tick, in this order: what the clients asked for, the world around them, movement, the rules of the game, what
-// is sent back.
-world.AddSystem<FakeClientsSystem>();
-world.AddSystem<ClockSystem>();
-world.AddSystem<ChunkReadSystem>();
-world.AddSystem<ChunkGenerateSystem>();
-world.AddSystem<HeightMapSystem>();
-world.AddSystem<WaterWakeSystem>();
-world.AddSystem<WaterFlowSystem>();
-world.AddSystem<WaterSleepSystem>();
-world.AddSystem<WaterCommitSystem>();
-world.AddSystem<PlayerMoveSystem>();
-world.AddSystem<ZombieTargetSystem>();
-world.AddSystem<ZombieChaseSystem>();
-world.AddSystem<ZombieAttackSystem>();
-world.AddSystem<PlayerRespawnSystem>();
-world.AddSystem<FloatSystem>();
-world.AddSystem<PhysicsSystem>();
-world.AddSystem<GridSystem>();
-world.AddSystem<DigSystem>();
-world.AddSystem<PickupSystem>();
-world.AddSystem<ItemExpirySystem>();
-world.AddSystem<NightSpawnSystem>();
-world.AddSystem<SunlightSystem>();
-world.AddSystem<FireDamageSystem>();
-world.AddSystem<ExtinguishSystem>();
-world.AddSystem<ZombieDeathSystem>();
-world.AddSystem<ChunkUnloadSystem>();
-world.AddSystem<ChunkSaveSystem>();
-world.AddSystem<AoiViewSystem>();
-world.AddSystem<AoiChunkSystem>();
-world.AddSystem<AoiSpawnSystem>();
-world.AddSystem<AoiDespawnSystem>();
-world.AddSystem<SendChunksSystem>();
-world.AddSystem<ChunkSentSystem>();
-world.AddSystem<SendEntitiesSystem>();
-// #endregion systems
+using var world = Startup.Create(regions, capacity, measure: true);
 
 if (args.Contains("--schedule"))
 {
@@ -73,15 +18,7 @@ if (args.Contains("--schedule"))
     return;
 }
 
-// #region players
-var player = world.Prefabs.Player;
-for (int i = 0; i < players; i++)
-{
-    var at = Rules.SpawnPoint(i);
-    world.Instantiate(player, new Player(i), new Position(at), new InChunk(Terrain.ChunkOf(at)));
-}
-// #endregion players
-
+Startup.AddPlayers(world, players);
 Server.Run(world, ticks, args.Contains("--realtime"));
 
 // #region leaderboard
@@ -106,56 +43,138 @@ world.SaveWithout(save, in startup);
 
 using var restarted = new World();
 restarted.SetRegions(regions);
-SetPrefabs(restarted);
+Startup.SetPrefabs(restarted);
 restarted.LoadKeeping(save.WrittenSpan, in startup, markWritten: false);   // a client that reconnects gets it all anyway
 Console.WriteLine($"restarted from the save: {restarted.Count<Player>()} players, {restarted.Count<Chunk>()} chunks, " +
                   $"{Terrain.WaterIn(restarted)} water, {restarted.Count<Zombie>()} zombies; {regions.Count} chunks in the region files");
 Console.Error.WriteLine($"save: {save.WrittenCount / 1024} KiB");
 // #endregion save
 
-// #region capacity
-// Pooling reuses what the world gave back; the first time the world reaches a size still allocates it. A server sized
-// for its players reserves that peak before the first tick instead: the tables and the entity storage of every kind
-// (and the indexes, which follow the storage), and the buffer lists of the chunks. Then no tick allocates, even while
-// the world grows to its peak; beyond it, the world grows as it would have.
-static void Reserve(World world, in Capacity capacity)
+// The server's world, the same on every start (and in Benchmark/): its options, its singletons, its prefabs and what
+// it reserves, its systems, its players.
+public static class Startup
 {
-    // Each Reserve sizes the entity storage for its own count; the world holds them all at once.
-    world.EnsureEntityCapacity(capacity.Chunks + capacity.Players + capacity.Zombies + capacity.Items + capacity.Requests);
-    ref readonly var prefabs = ref world.Prefabs;
-    world.Reserve(prefabs.Chunk, capacity.Chunks);
-    world.Reserve(prefabs.Player, capacity.Players);
-    world.Reserve(prefabs.Zombie, capacity.Zombies);
-    world.Reserve(prefabs.Item, capacity.Items);
-    world.Reserve<LoadRequest>(capacity.Requests);
-    DynamicBuffer<Block>.FillPool(capacity.Chunks);
-    DynamicBuffer<Fluid>.FillPool(capacity.Chunks);
-    DynamicBuffer<Surface>.FillPool(capacity.Chunks);
-    DynamicBuffer<NextFluid>.FillPool(capacity.Flowing);
-    DynamicBuffer<ItemStack>.FillPool(capacity.Players);
-}
-// #endregion capacity
+    public static World Create(RegionFiles regions, in Capacity capacity, bool measure)
+    {
+        // #region options
+        // A chunk's blocks, its water and the water's next step are 8 KB each, more than a buffer's pool keeps by
+        // default: let each chunk loaded reuse the lists of one that was unloaded.
+        DynamicBuffer<Block>.MaxPooledLength = Terrain.BlocksPerChunk;
+        DynamicBuffer<Fluid>.MaxPooledLength = Terrain.BlocksPerChunk;
+        DynamicBuffer<NextFluid>.MaxPooledLength = Terrain.BlocksPerChunk;
+        DynamicBuffer<Surface>.MaxPooledLength = Terrain.Size * Terrain.Size;
+        DynamicBuffer<ItemStack>.MaxPooledLength = Rules.InventorySlots;
 
-// #region prefabs
-// The recipes chunks, players, zombies and items are created from: every start builds them. A chunk has every
-// component and tag it will ever have, the tags absent, so all chunks share one table (Systems/Chunks.cs); a zombie
-// has Burning, absent, for the same reason. A zombie carries the Vision it hunts within; a player's view is
-// Rules.PlayerVision, the same for every player (Aoi.Range).
-static void SetPrefabs(World world) =>
-    world.SetPrefabs(
-        Chunk: new Prefab()
-            .SetChunk(default).SetBuffer<Block>().SetBuffer<Fluid>().SetBuffer<NextFluid>().SetBuffer<Surface>()
-            .SetViewers(0, 0).Set(FluidCount.Dry).SetFluidStep(StepResult.None, FluidCount.Dry, 0, 0)
-            .Set(new Fresh(), new Flowing(), new Unloading()).RemoveUnloading(),
-        Player: new Prefab()
-            .SetPlayer(0).SetInChunk(default).SetVisible(default, false).SetScore(0)
-            .SetPosition(default).SetVelocity(default).SetBody(false, false)
-            .SetHealth(Rules.PlayerHealth).SetInput(default, false).SetBuffer<ItemStack>(),
-        Zombie: new Prefab()
-            .Set(new Zombie()).SetVision(Rules.ZombieVision).SetInChunk(default).SetVisible(default, false).SetTarget(default)
-            .SetPosition(default).SetVelocity(default).SetBody(false, false)
-            .SetHealth(Rules.ZombieHealth).SetCooldown(0).SetBurning(0).RemoveBurning(),
-        Item: new Prefab()
-            .SetItem(default, 1).SetInChunk(default).SetVisible(default, false).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
-            .SetBody(false, false).SetDropped(0));
-// #endregion prefabs
+        var world = new World(new WorldOptions { MeasureSystems = measure });
+        // #endregion options
+
+        world.SetClock(Tick: 0, DayLength: Rules.DayLength);
+        world.AddSingleton<Stats>();
+        world.SetRegions(regions);
+        SetPrefabs(world);
+        Reserve(world, capacity);
+        AddSystems(world);
+        return world;
+    }
+
+    public static void AddSystems(World world)
+    {
+        // #region systems
+        // One tick, in this order: what the clients asked for, the world around them, movement, the rules of the game,
+        // what is sent back.
+        world.AddSystem<FakeClientsSystem>();
+        world.AddSystem<ClockSystem>();
+        world.AddSystem<ChunkReadSystem>();
+        world.AddSystem<ChunkGenerateSystem>();
+        world.AddSystem<HeightMapSystem>();
+        world.AddSystem<WaterWakeSystem>();
+        world.AddSystem<WaterFlowSystem>();
+        world.AddSystem<WaterSleepSystem>();
+        world.AddSystem<WaterCommitSystem>();
+        world.AddSystem<PlayerMoveSystem>();
+        world.AddSystem<ZombieTargetSystem>();
+        world.AddSystem<ZombieChaseSystem>();
+        world.AddSystem<ZombieAttackSystem>();
+        world.AddSystem<PlayerRespawnSystem>();
+        world.AddSystem<FloatSystem>();
+        world.AddSystem<PhysicsSystem>();
+        world.AddSystem<GridSystem>();
+        world.AddSystem<DigSystem>();
+        world.AddSystem<PickupSystem>();
+        world.AddSystem<ItemExpirySystem>();
+        world.AddSystem<NightSpawnSystem>();
+        world.AddSystem<SunlightSystem>();
+        world.AddSystem<FireDamageSystem>();
+        world.AddSystem<ExtinguishSystem>();
+        world.AddSystem<ZombieDeathSystem>();
+        world.AddSystem<ChunkUnloadSystem>();
+        world.AddSystem<ChunkSaveSystem>();
+        world.AddSystem<AoiViewSystem>();
+        world.AddSystem<AoiChunkSystem>();
+        world.AddSystem<AoiSpawnSystem>();
+        world.AddSystem<AoiDespawnSystem>();
+        world.AddSystem<SendChunksSystem>();
+        world.AddSystem<ChunkSentSystem>();
+        world.AddSystem<SendEntitiesSystem>();
+        // #endregion systems
+    }
+
+    public static void AddPlayers(World world, int count)
+    {
+        // #region players
+        var player = world.Prefabs.Player;
+        for (int i = 0; i < count; i++)
+        {
+            var at = Rules.SpawnPoint(i);
+            world.Instantiate(player, new Player(i), new Position(at), new InChunk(Terrain.ChunkOf(at)));
+        }
+        // #endregion players
+    }
+
+    // #region capacity
+    // Pooling reuses what the world gave back; the first time the world reaches a size still allocates it. A server
+    // sized for its players reserves that peak before the first tick instead: the tables and the entity storage of
+    // every kind (and the indexes, which follow the storage), and the buffer lists of the chunks. Then no tick
+    // allocates, even while the world grows to its peak; beyond it, the world grows as it would have.
+    static void Reserve(World world, in Capacity capacity)
+    {
+        // Each Reserve sizes the entity storage for its own count; the world holds them all at once.
+        world.EnsureEntityCapacity(capacity.Chunks + capacity.Players + capacity.Zombies + capacity.Items + capacity.Requests);
+        ref readonly var prefabs = ref world.Prefabs;
+        world.Reserve(prefabs.Chunk, capacity.Chunks);
+        world.Reserve(prefabs.Player, capacity.Players);
+        world.Reserve(prefabs.Zombie, capacity.Zombies);
+        world.Reserve(prefabs.Item, capacity.Items);
+        world.Reserve<LoadRequest>(capacity.Requests);
+        DynamicBuffer<Block>.FillPool(capacity.Chunks);
+        DynamicBuffer<Fluid>.FillPool(capacity.Chunks);
+        DynamicBuffer<Surface>.FillPool(capacity.Chunks);
+        DynamicBuffer<NextFluid>.FillPool(capacity.Flowing);
+        DynamicBuffer<ItemStack>.FillPool(capacity.Players);
+    }
+    // #endregion capacity
+
+    // #region prefabs
+    // The recipes chunks, players, zombies and items are created from: every start builds them. A chunk has every
+    // component and tag it will ever have, the tags absent, so all chunks share one table (Systems/Chunks.cs); a zombie
+    // has Burning, absent, for the same reason. A zombie carries the Vision it hunts within; a player's view is
+    // Rules.PlayerVision, the same for every player (Aoi.Range).
+    public static void SetPrefabs(World world) =>
+        world.SetPrefabs(
+            Chunk: new Prefab()
+                .SetChunk(default).SetBuffer<Block>().SetBuffer<Fluid>().SetBuffer<NextFluid>().SetBuffer<Surface>()
+                .SetViewers(0, 0).Set(FluidCount.Dry).SetFluidStep(StepResult.None, FluidCount.Dry, 0, 0)
+                .Set(new Fresh(), new Flowing(), new Unloading()).RemoveUnloading(),
+            Player: new Prefab()
+                .SetPlayer(0).SetInChunk(default).SetVisible(default, false).SetScore(0)
+                .SetPosition(default).SetVelocity(default).SetBody(false, false)
+                .SetHealth(Rules.PlayerHealth).SetInput(default, false).SetBuffer<ItemStack>(),
+            Zombie: new Prefab()
+                .Set(new Zombie()).SetVision(Rules.ZombieVision).SetInChunk(default).SetVisible(default, false).SetTarget(default)
+                .SetPosition(default).SetVelocity(default).SetBody(false, false)
+                .SetHealth(Rules.ZombieHealth).SetCooldown(0).SetBurning(0).RemoveBurning(),
+            Item: new Prefab()
+                .SetItem(default, 1).SetInChunk(default).SetVisible(default, false).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
+                .SetBody(false, false).SetDropped(0));
+    // #endregion prefabs
+}

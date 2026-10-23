@@ -12,6 +12,8 @@
              publishes, or the Vector512 tier of the generated vector loops is compiled out. A fleet names a level
              instead (x86-64-v3: AVX2, x86-64-v4: AVX-512). -->
         <IlcInstructionSet>native</IlcInstructionSet>
+        <!-- Benchmark/ is a project of its own, which references this one. -->
+        <DefaultItemExcludes>$(DefaultItemExcludes);Benchmark/**</DefaultItemExcludes>
     </PropertyGroup>
 
     <!-- With the NuGet package this is one line: <PackageReference Include="EasyEcs" Version="..."/> (the package

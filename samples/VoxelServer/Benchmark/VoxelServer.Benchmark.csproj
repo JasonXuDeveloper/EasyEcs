@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <!-- The server's ticks under BenchmarkDotNet (TickBenchmark.cs: how to run it). -->
+    <ItemGroup>
+        <PackageReference Include="BenchmarkDotNet" Version="0.15.2"/>
+        <ProjectReference Include="..\VoxelServer.csproj"/>
+        <ProjectReference Include="..\..\..\src\EasyEcs.Core\EasyEcs.Core.csproj"/>
+    </ItemGroup>
+
+</Project>
