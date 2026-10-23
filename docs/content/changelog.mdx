@@ -153,6 +153,10 @@ major or minor version that needs code changes? The
 
 ### Performance [#v4-8-0-performance]
 
+- The generators do about half the work per edit: the types offered the same member names are looked up by name
+  instead of by walking the namespace once per component, and a `[ForEach]` method whose signature rules out a vector
+  loop is decided without binding its body. Generated code is unchanged
+  ([decision](/en/docs/decisions#d95-generator-per-edit)).
 - The buffer pool is shared across threads: each thread keeps a few lists and trades the rest in batches with a pool
   every thread takes from, so the lists the owner thread gets back from destroyed buffers serve the first writes of a
   parallel `[ForEach]`, which used to allocate. See [dynamic buffers](/en/docs/guide/dynamic-buffers#pool).

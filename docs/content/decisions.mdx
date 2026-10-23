@@ -103,6 +103,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D83](#d83-update-interval-attribute) | A system's cadence is an attribute |
 | [D84](#d84-consume) | `[Consume]` destroys the visited rows in bulk when it can |
 | [D94](#d94-optional-writes) | A parallel pass opens the blocks its `Maybe<T>` writes |
+| [D95](#d95-generator-per-edit) | The generators find namesakes by name and rule out vector loops before binding |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -2299,6 +2300,28 @@ of the rows they cover are opened at the pass's tick before any chunk runs.
   single-threaded ones included, to fix a case the parallel pass can avoid.
 - **Making the component a type parameter of the call.** A type parameter of `ForEachParallel` is a queried
   component: the pass would then skip the rows without it.
+
+## D95. The generators find namesakes by name and rule out vector loops before binding [#d95-generator-per-edit]
+
+**Decision.** Two parts of the generators' work per edit no longer grow with the code around them. The structs and
+enums of a namespace are indexed by name once per compilation, and a member a type would get is checked only against
+the types whose name a member pattern cuts out of it. A `[ForEach]` method whose signature rules out a vector loop
+(it returns a value, is generic, or takes a parameter the loop cannot hold) is decided from the signature, without
+binding the body or throwing.
+
+**Why.**
+- **Quadratic per keystroke.** Every component and every `DynamicBuffer<T>` element walked all the structs of its
+  namespace on each edit to find the types offered the same member names: n squared in the types of a namespace.
+- **Exceptions as control flow.** The vector-loop translator gave up by throwing: 419 exceptions per edit of the
+  generator benchmark's input, 14 after.
+- **Numbers.** `GeneratorBenchmark` (BenchmarkDotNet, two rounds each, 60 modules), base / after:
+  `EditMethodBody` 357 / 338 ms against 172 / 168 ms and 39.2 MB against 28.4 MB; with every module in one namespace
+  443 / 405 ms against 166 / 151 ms and 59.5 MB against 28.0 MB. `Cold` 368 / 372 ms against 249 / 215 ms. `Compile`
+  and `CompileAndAnalyze` stayed within the error. The generated code is the same, file for file.
+
+**Considered.**
+- **Caching the members per type across compilations.** A type's member names depend on the other types of its
+  namespace, which any edit can change; the index lives as long as its compilation and needs no invalidation.
 
 ## Related [#related]
 
