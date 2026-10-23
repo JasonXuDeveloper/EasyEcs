@@ -110,6 +110,13 @@ after the change on the machine of the time; they are history, not the current r
 | [D99](#d99-singleton-saves) | EECS069 warns for a singleton only when the code saves whole worlds |
 | [D100](#d100-names-of-4-8) | The names of 4.8: one spelling, verbs for actions, the cadence of a system |
 | [D101](#d101-declaration-attributes) | A type declares what it is with attributes; the generator writes the members and the setup |
+| [D102](#d102-systems-are-ref-structs) | Systems are ref structs of static methods; the world holds their bookkeeping |
+| [D103](#d103-system-sets) | One system set per assembly: a switch over its systems, one call per stretch of the schedule |
+| [D104](#d104-one-query-per-job-type) | A generated job's pass finds its query by job type |
+| [D105](#d105-owner-thread-passes) | Passes on the owner thread take the gate with plain stores |
+| [D106](#d106-lock-or-cas) | The runtime synchronizes with a `Lock` or a compare-and-swap, never a locked object |
+| [D107](#d107-never-used-warnings) | `[ForEach]` and hook methods are not reported as unused |
+| [D108](#d108-aot-instruction-set) | Native AOT: the instruction set is the program's choice, `native` in the templates |
 
 The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
 reused.
@@ -144,14 +151,15 @@ data; a system after it, on the owner thread, makes the structural change from t
 ```csharp
 public record struct Poison(int DamagePerTick) : IComponent;
 
-public class PoisonSystem : EcsSystem
+[EcsSystem]
+public ref struct PoisonSystem
 {
     [ForEach(Parallel = true)]                                    // data, on every core
     static void Hurt(ref Health hp, in Poison poison) => hp.Value -= poison.DamagePerTick;
 }
 
-[UpdateAfter<PoisonSystem>]
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<PoisonSystem>]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]                                      // structure, after it, on the owner thread
     static void Die(Entity entity, in Health hp) { if (hp.Value <= 0) entity.SetDead(); }
@@ -174,7 +182,8 @@ a tag that the reacting system removes:
 ```csharp
 public struct Spawned : IComponent;                                  // a tag: "new since the last Greet"
 
-public class GreetSystem : EcsSystem
+[EcsSystem]
+public ref struct GreetSystem
 {
     [ForEach, With<Spawned>]
     static void Greet(Entity entity, ref Health health)
@@ -237,7 +246,8 @@ copy when a table grows, which `InitialEntityCapacity` and `Reserve` remove.
 public struct Inactive : IComponent;                        // the whole entity is off
 public struct Bullet : IComponent;
 
-public class BulletSystem : EcsSystem
+[EcsSystem]
+public ref struct BulletSystem
 {
     [ForEach, With<Bullet>, Without<Inactive>]              // the systems that skip it say so
     static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
@@ -337,11 +347,11 @@ older runtimes lack. Unity support waits for a Unity that runs .NET 10 ([roadmap
 ## D16. No `partial`: generated code lives outside the user's type [#d16-no-partial-generated-code-lives-outside-the-users-type]
 
 **Decision.** The generator writes a `[ForEach]` method's job in a `file` class of its own and calls the method,
-private or not, through `[UnsafeAccessor]`. A system's update and access set are a `SystemCode` registered by a module
-initializer (held weakly, so a collectible assembly can unload); a runner's entry point is a C# 14 static extension
-member of its type. Types the generated code cannot name (a private component, a private runner type) are EECS022.
+private or not, through `[UnsafeAccessor]`. A system's hooks, methods and access set are a code struct in its
+assembly's system set, registered by a module initializer (held weakly, so a collectible assembly can unload;
+[D103](#d103-system-sets)); a runner's entry point is a C# 14 static extension member of its type. Types the generated code cannot name (a private component, a private runner type) are EECS022.
 
-**Why.** A system is an ordinary class: no `partial` on it or on its outer types, nothing generated in its body, so
+**Why.** A system is an ordinary type: no `partial` on it or on its outer types, nothing generated in its body, so
 generated members cannot collide with the user's. `UnsafeAccessor` compiles to the direct call (the same machine
 code, inlined), and the ticks did not move (ForEachSystemWrite, ParallelSystems within noise).
 
@@ -391,20 +401,31 @@ change stays a call.
 
 ## D20. Generic systems register the closed types their assembly names [#d20-generic-systems-register-the-closed-types-their-assembly-names]
 
-**Decision.** A generic system's code is a generic class over the system's type parameters. Its module initializer
-registers an instance for each closed type the assembly names (`AddSystem<CountOf<Health>>()`, `new CountOf<Health>()`,
-a base type `CountOf<Health>`, and their generic bases), and the code's definition for any other closed type, which
-`AddSystem` closes with `MakeGenericType` on first use. A generic `[ForEach]` method of a system stays EECS004.
+**Decision.** A closed generic system is a system of the set of every assembly that names it
+(`AddSystem<Regen<Health>>()`, `[UpdateAfter<Regen<Health>>]`, `HasSystem`, `System`, `TryGetSystem` and
+`RemoveSystem` of it): the generator closes the system's code struct over those type arguments in that assembly's set
+([D103](#d103-system-sets)). A public generic system in a library gets a public code struct, named by
+`[assembly: GenericSystemCode(typeof(Regen<>), typeof(__Regen_1_SystemCode<>))]`, so the generator of a referencing
+assembly can close it there. A closed type no assembly names (made by reflection) has no code: `AddSystem` throws a
+`NotSupportedException` naming the type and where to name it. A generic `[ForEach]` method of a system stays EECS004.
 
-**Why.** A module initializer cannot know the type arguments a program will use, and the system class gets nothing
-generated in it (D16). Closed types named in the system's assembly need no runtime code generation, so Native AOT
-keeps them; a closed type only another assembly names still works under the JIT. Runners need neither: their entry
-points are generic, so the caller's type arguments close the job at compile time. A system's own generic method has
-no caller to give it type arguments.
+**Why.**
+- **Native AOT and WebAssembly cannot make code at run time.** Closing a generic method over a value type with
+  `MakeGenericMethod` fails there, and components are structs; every closed system named in source has its code
+  compiled.
+- **The assembly that names the type is the one that knows it.** A library cannot know the components a game closes
+  it over; the game's own generator sees the call.
+- **One path everywhere.** The JIT, Native AOT and WebAssembly run the same generated code; there is no fallback that
+  works on one runtime only.
+- **Runners need none of this:** their entry points are generic, so the caller's type arguments close the job at
+  compile time. A system's own generic method has no caller to give it type arguments.
 
-**Considered.** Reflection only (breaks Native AOT for every value-type argument, and components are structs); a
-virtual generic hook on the system (needs `partial` or a base class per arity); scanning referenced assemblies for
-closed uses (the generated code is file-local to the system's assembly).
+**Considered.**
+- **Reflection at run time** (the earlier fallback for types closed in another assembly): breaks Native AOT for every
+  value-type argument.
+- **Scanning referenced assemblies for closed uses:** a library's generated code is internal to it; the public code
+  struct is what a reference assembly keeps.
+- **A virtual generic hook on the system:** systems have no instance (D102).
 
 ## D21. .NET 10 features only where they measure [#d21-net-10-features-only-where-they-measure]
 
@@ -545,7 +566,7 @@ default, and the code that calls it says so.
   `world.X` threw. A world built without its `SetClock(...)` then ran on a clock with no step: entities stood still,
   a test passed for the wrong reason, and nothing pointed at the missing line. Now the first `Update()` names the
   singleton and the call to add.
-- **One rule for every read.** The same singleton read in `OnUpdate` and taken as a parameter behaved differently;
+- **One rule for every read.** The same singleton read in an `[OnUpdate]` method and taken as a parameter behaved differently;
   now a read is a read, and only a call named `GetOrAdd` adds.
 - **Nothing on the hot path.** A job resolves its singletons once per pass, when it is built; the check is the null
   test the old add made, and the throw is a cold method.
@@ -620,7 +641,6 @@ Candidates without a measured cost, or with a fix that changes behavior, were dr
 | EECS026 an unused parameter | Warning | per row equal (41 / 46 µs); an `Entity` or `World` makes the system run alone, a `ref` of a tracked component stamps every row |
 | EECS027 a lookup per row | Warning | `entity.Read<T>()` 258 µs, a parameter 40 µs; `Has<T>()` 208 µs, `Maybe<T>` 86 µs; a singleton through the `World` 105 µs, a parameter 48 µs |
 | EECS028 an allocation every update | Warning | garbage every tick; the [Don't](/en/docs/performance#dont) list |
-| EECS029 an instance `[ForEach]` method | Warning | instance 104 µs, static 41 µs |
 | EECS030 a structural change per entity over a query | Warning | `BulkBenchmark`: entity by entity 19.1x the time of `SetAll` / `RemoveAll`, about 99x that of `DisableAll` / `EnableAll` |
 | EECS031 creation one by one in a counted loop | Warning | a fresh world only ([D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)); `MicroBenchmarks.Churn` 2.1x the time of `ChurnBatch` |
 | EECS032 counting and testing by hand | Warning | `Count() > 0` 429 ns, `Any()` 18.6 ns; a `Has<T>()` test in the loop 332 µs, a filter 59.5 µs |
@@ -635,7 +655,7 @@ allocates nothing.
   every use before they report: EECS025 counts an assignment, `++`, a `ref` or `out` argument, a method that is not
   `readonly`, a `ref` local and a `this ref` extension as a write; EECS027 reports only lookups made on every row,
   of components the method does not change itself; EECS028 leaves out `throw`, `[Conditional]` calls, console
-  output, and the `OnUpdate` of a system with its own `UpdateInterval`; EECS030 leaves out a `Set` that overwrites
+  output, and the `[OnUpdate]` method of a system with its own `UpdateInterval`; EECS030 leaves out a `Set` that overwrites
   a component the query requires and one of a grouped component (its rows move one by one in `SetAll` too); EECS031
   leaves out constant counts under 4,096 and arrays created with one (no array reaches the large object heap), loops
   after a reservation, creations under a branch or in an inner loop, and loops in systems (a running world reuses its
@@ -662,7 +682,7 @@ allocates nothing.
   host adds systems in, at run time; a redundant `[UpdateAfter<T>]` costs nothing.
 - **`World.Update` from another thread**: a world may run on any one thread that owns it (one world per thread), and
   EECS014 reports the structural calls that race with its owner.
-- **Hand-written `Query` loops in `OnUpdate`, `Capture` or `Describe` on the hot path, value index lookups in loops**:
+- **Hand-written `Query` loops in `[OnUpdate]` methods, `Capture` or `Describe` on the hot path, value index lookups in loops**:
   `Query` is a supported API whose costs EECS030 and EECS032 already name; a snapshot per tick is how rollback works;
   an index lookup is O(1) and a `[ForEach]` method cannot hoist it. No rule.
 - **A `QueryFilter` built per call instead of kept in a `static readonly` field**: a filter is a small struct with no
@@ -866,7 +886,7 @@ context unloads). The public `Disabled<T>` stays: its bit is the tag bit of `T`.
 ## D39. A whole load can leave the change ticks alone, and a system can start now [#d39-a-whole-load-can-leave-the-change-ticks-alone]
 
 **Decision.** `world.Load(input, markWritten: false)` clears the change ticks of every loaded row (no write, no
-removal), as `LoadEntitiesInto(..., markWritten: false)` does for a record. `AddSystem(system, changesFromNow: true)`
+removal), as `LoadEntitiesInto(..., markWritten: false)` does for a record. `AddSystem<T>(changesFromNow: true)`
 sets the new system's last run to the current tick and moves the world's tick on, so its first run sees only later
 writes. Both defaults stay as they were.
 
@@ -996,7 +1016,7 @@ records of names (groups, stages, systems with their reads and writes, waits, re
 
 ## D44. Slices: a filter cut at 64-row words, chosen by the system's run count [#d44-slices]
 
-**Decision.** `[ForEach(Slices = N)]` passes `QueryFilter.Slice(RunCount % N, N)`, where `EcsSystem.RunCount` counts
+**Decision.** `[ForEach(Slices = N)]` passes `QueryFilter.Slice(RunCount % N, N)`, where `SystemHandle.RunCount` counts
 the system's completed runs. A table is cut at multiples of 64 rows from its row count when the pass starts; table i
 of the match starts at slice (index + i) mod N. The `ForEach` family honours a slice; `Query`, `Count`, `Any`,
 `DestroyAll`, `entity.Run` and the bulk calls throw for one. `[Changed<T>]` / `[Removed<T>]` methods cannot be
@@ -1168,7 +1188,7 @@ a component.
 
 **Why.**
 - **Run conditions** (`[RunIf]`, a predicate per system). System groups give each cadence its `Update<TGroup>()`, and
-  the host decides when a group runs; inside a system, `Enabled` and an early return in `OnUpdate` cover the rest. A
+  the host decides when a group runs; inside a system, `Enabled` and an early return in an `[OnUpdate]` method cover the rest. A
   predicate per system would be code the scheduler cannot see.
 - **`UpdatePeriod` / a system time** (intervals in seconds). The host's fixed-step loop owns time; `UpdateInterval`
   counts updates, which keeps runs deterministic, and a clock singleton gives systems the time.
@@ -1385,7 +1405,6 @@ other's case. No rule was merged or removed, and the ids stay as they are.
 | --- | --- | --- | --- |
 | `var t = e.Get<T>(); t.V = 1;` (a copy changed and dropped) | EECS038 | EECS025, EECS015 | Keeping the ref (or `Set`) is the fix; `Read` would keep the lost write |
 | `[ForEach, Without<P>] static void A(ref P p, ...)` | EECS049 (EECS016 for `[Removed<T>]`) | EECS025, EECS026, EECS015 on `p` | The method never runs; what its parameter costs is moot |
-| `[ForEach(Parallel = true)] void A(ref P p)` | EECS010, with "Make it static" | EECS029 | Same fix; the error is what stops the build |
 | `[ForEach(Parallel = true)] static void A(..., ref Clock c)` | EECS010 | EECS025 | Its message already says "take it as `in`" |
 | A query loop that counts, or that changes each entity the same way | EECS032, EECS030 | EECS046 | The fix removes the loop, so there is nothing left to read |
 | `w.TrimExcess()` in a `[ForEach]` method or a job | EECS041, EECS013 | EECS028 | The call throws there; its allocation never happens |
@@ -1406,8 +1425,6 @@ other's case. No rule was merged or removed, and the ids stay as they are.
 **Considered.**
 - **Merging EECS016 into EECS049** (both are filters no entity passes): EECS016 has its own wording and cause
   (`[Removed<T>]` visits entities that lost T), and ids are stable. Kept apart, read from one list.
-- **Merging EECS029 into EECS010**: EECS029 also covers sequential methods, where it is a cost, not an error. Kept;
-  EECS010 offers its fix.
 - **Kept as two diagnostics:** a component's buffer field that holds entities (EECS012 copies a buffer, EECS017 stores
   an `Entity`: two mistakes, two fixes), EECS017 at each place a `DynamicBuffer<Pair>` is named, EECS026 next to
   EECS034, and EECS046 next to EECS032's presence test or EECS033 on another expression (the fixes compose).
@@ -1499,7 +1516,7 @@ it on every keystroke); post-initialization attribute sources.
 
 **Decision.** A naming review before 4.7 renames, beyond [D54](#d54-names): `ITrackChanges` → `ITracked`,
 `IGroupWith<T>` / `IGroupWithout<T>` → `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`, the `Destroyed` tag →
-`Retired` (`entity.IsRetired`), `GetSystem<T>()` → `TryGetSystem<T>(out T)`, `world.Describe()` → `DescribeTables()`,
+`Retired` (`entity.IsRetired`), `GetSystem<T>()` → `TryGetSystem<T>(out …)`, `world.Describe()` → `DescribeTables()`,
 `ColumnInfo.Without` → `Absent`, `SystemStats.Last` / `Total` / `Average` → `LastTime` / `TotalTime` / `AverageTime`,
 `UpdateCount` → `DefaultUpdateCount`, `SystemAccess.RunsAlone()` → `RunAlone()`, `TargetRules` →
 `TargetPolicyExtensions`, `AddRelation` / `RemoveRelation` / `HasRelation` → `Link` / `Unlink` / `Links` with the
@@ -1512,8 +1529,8 @@ generated `LinkX(target)`, a job's `Writes` / `OwnStamps` → `WriteMask` / `Sel
   a count; "Destroyed" both a freed entity and one kept alive for its cleanup components
   ([D57](#d57-retired-is-gone)). Each now has its own word, and "destroyed" means gone.
 - **The signature tells the miss.** `GetSystem<T>()` returned null for a system the world does not have.
-  `TryGetSystem` says so; no caller in the repository needed a throwing form, so none was added: code that added the
-  system keeps the reference `AddSystem` returns.
+  `TryGetSystem` says so. The throwing `System<T>()` came with the system handles of 4.8
+  ([D102](#d102-systems-are-ref-structs)), for code that knows the system was added.
 - **A link is not a component added.** `AddX(target)` read like `SetX`; `LinkX` / `UnlinkX` / `LinksX` and the
   generic `Link` / `Unlink` / `Links` are one family. The generic names are short at a cost: a component named `Link`,
   `Unlink` or `Links` gets no `entity.X` property (the generator skips a name the entity already has), the other
@@ -1528,7 +1545,6 @@ generated `LinkX(target)`, a job's `Writes` / `OwnStamps` → `WriteMask` / `Sel
 
 **Considered.**
 - **`[Obsolete]` aliases for a release:** as in D54, two names in completion lists for a change the compiler points at.
-- **A throwing `GetSystem` next to `TryGetSystem`:** no caller needed it.
 - **Only named members for relations (no generic `Link<T>`):** generic code over relation types (`Link<T>(in T)`)
   would then have no entry point.
 - **A new save id for `Retired`:** every save holding a retired entity would fail to load.
@@ -1894,7 +1910,7 @@ not as soon as the systems it conflicts with have (TBB's flow graph, Unity's `Jo
 | ParallelSystems | 1 (1) | 126 µs | 126 µs | 227 µs |
 | WorldSimulation, `ParallelSystems` on, 10,000 / 100,000 | 9 (0) | 1,261 / 2,395 µs | same | 0 |
 
-- **Systems that run alone are barriers in any schedule.** An `Entity` or `World` parameter, an `OnUpdate` override
+- **Systems that run alone are barriers in any schedule.** An `Entity` or `World` parameter, an `[OnUpdate]` method
   or a structural change makes a system run alone: 7 of BattleServer's 13 default systems, 7 of WorldSimulation's 9.
   A graph waits for them exactly as stages do, and real servers are written this way.
 - **The best case is small.** `BarrierBenchmark` (outside the repository; 100,000 rows): a heavy system beside a
@@ -2158,24 +2174,22 @@ whether the method ran.
 
 ## D83. A system's cadence is an attribute [#d83-update-interval-attribute]
 
-**Decision.** `[UpdateInterval(n, Phase = p)]` on a system class sets how often the system runs, and the `UpdateInterval`
-and `UpdatePhase` properties are removed. The generator passes the two values to the system's generated code, which
-`AddSystem` reads once. A derived system inherits its base's attribute unless it declares its own. EECS082 reports an
-override of the old properties, and its fix writes the attribute; EECS083 reports an interval below 1 or a phase
-outside 0 to n - 1.
+**Decision.** `[UpdateInterval(n, Phase = p)]` on a system sets how often the system runs; there are no `UpdateInterval`
+and `UpdatePhase` properties. The generator writes the two values into the system's code struct, which `AddSystem`
+reads once into the system's record. EECS083 reports an interval below 1 or a phase outside 0 to n - 1.
 
 **Why.**
 - **The cadence was meant to be a constant, and a property could not say so.** EECS018 warned on a computed override
   after the fact. An attribute argument is a compile-time constant, so that warning and its code fix go away.
 - **One virtual call less per update, below what measures.** `RunSystem` used to make one virtual call per system per update to read the interval;
-  it now reads a field set when the system is added. In `OrderingBenchmark` (four systems over 10,000 entities per
+  it now reads a field of the system's record, set when the system is added. In `OrderingBenchmark` (four systems over 10,000 entities per
   update): before and after, 6.96 and 7.21 µs in one round, 7.55 and 7.16 µs in a second (registered order; ordered: 6.99 and 7.09, then 7.96 and 7.02 µs), each inside its error (±0.22 to 0.69 µs): one virtual call per system is below what the benchmark can see, so the reason for the change is the constant, not the speed. 0 B either way.
-- **The cadence is visible without running code.** Tools, the analyzer (EECS028 exempts the `OnUpdate` of a system
-  with a cadence) and readers all see it on the declaration.
+- **The cadence is visible without running code.** Tools, the analyzer (EECS028 exempts the `[OnUpdate]` method of a
+  system with a cadence) and readers all see it on the declaration.
 
 **Considered.**
 - **Keeping the properties next to the attribute.** That gives two ways to say one thing, with an order between them to
-  learn. The breaking change is one line per system, the code fix makes it, and the migration guide shows it.
+  learn. The breaking change is one line per system, and the migration guide shows it.
 - **Run-time cadence.** A server that changes how often a system runs puts the system in a group and updates the group
   when it is due ([system groups](/en/docs/guide/systems#system-groups)), as
   [D51](#d51-not-added) already recommends over a time-based interval.
@@ -2367,8 +2381,8 @@ them has a code fix.
 - **EECS086 waits for a reset.** A first version reported every accumulation. In the docs it fired on 16 examples, and
   each was a running total: a score, deaths so far, rows sent. A reduction replaces its singleton with one pass's
   result, so for a running total it is not the same code. A singleton that a system resets each update (a whole
-  assignment, a constant given to a field, `AddSingleton`, `RemoveSingleton`, `SetX`, `RemoveX`, outside `OnCreate`
-  and `OnDestroy`) does hold one pass's result. The reset can be in any file, so the rule reports at the end of the
+  assignment, a constant given to a field, `AddSingleton`, `RemoveSingleton`, `SetX`, `RemoveX`, outside `[OnCreate]`
+  and `[OnDestroy]` methods) does hold one pass's result. The reset can be in any file, so the rule reports at the end of the
   compilation, and the message names the reset that the reduction makes redundant.
 - **EECS087 is a warning.** The cost is the whole system's, a stage of its own, and the fix is one parameter per
   component. EECS086 and EECS089 change two places (the reset, the readers of the list), so they stay suggestions.
@@ -2431,7 +2445,7 @@ the code calls `Save`, `SaveWithout` or `SaveEntities`. It is a warning for a si
 `TileNeighbors`, `tile.Load()` → `tile.Pad()`, `tile.Changes(next, out changed)` → `ChangedEdges`,
 `TileReads.Sides` → `NorthSouth`, `[ForEach(Simd = …)]` → `[ForEach(SimdMode = …)]`, `DynamicBuffer<T>.ReservePool` /
 `PoolCapacity` → `FillPool` / `MaxPooledLength`, `[Key]` → `[IndexKey]`, `prefab.Absent<T>()` → `SetAbsent<T>()`, and
-the EECS082 descriptor (a system's cadence as an override; EECS083 is `BadUpdateInterval`). `Lookup<T>.TryFind`, new
+the EECS083 descriptor (`BadUpdateInterval`). `Lookup<T>.TryFind`, new
 in 4.8, gives an `Entity`, as the released `ValueIndex.TryFind` does. Hidden and internal names follow: `SavedTypes` →
 `TypeRegistry` (called by generated code only) and the analyzer's descriptor fields. No alias is kept, and no released
 call changes.
@@ -2509,6 +2523,169 @@ can write).
 - **Setup through `WorldOptions`:** it is still one setting per world, so it can still be forgotten.
 - **Reading the attributes by reflection when a world starts:** every world would pay at its start for every loaded
   type, and trimming could drop what it reads. The generated registration costs nothing until a table holds the type.
+
+## D102. Systems are ref structs of static methods; the world holds their bookkeeping [#d102-systems-are-ref-structs]
+
+**Decision.** A system is a `ref struct` marked `[EcsSystem]` whose members are all static: `[ForEach]` methods and
+the `[OnCreate]`, `[OnUpdate]` and `[OnDestroy]` hooks, each hook taking the `World`, the `SystemHandle`, both or
+neither. The world never creates a system. It adds one by type (`AddSystem<T>()`, `T : struct, allows ref struct`)
+and keeps a record of it: enabled, error, interval and phase, last run tick, run count, stats. A `SystemHandle` is a
+(world, slot, version) over that record, and a handle to a removed system throws, as a stale `Entity` does. There is
+no inheritance: what a base class shared is a generic system or a static class of helpers, and a constructor argument
+is a [`[NotSaved]`](/en/docs/guide/saves#not-saved) singleton. EECS074 to EECS077 keep the form, and a code fix on
+CS0246 rewrites a class system of 4.7.
+
+**Why.**
+- **A system is a name for static functions.** State belongs in components and singletons
+  ([ECS principles](/en/docs/ecs-principles)); an instance only invited fields (EECS007 policed them one by one), and
+  cost a heap object per system and a virtual call per hook per update.
+- **A ref struct is never an object, and still a type argument.** It cannot be boxed, stored in a field or captured,
+  so nothing can hold a system, and with `allows ref struct` it names the system in `AddSystem<T>()`,
+  `[UpdateAfter<T>]` and `HasSystem<T>()`. A static class cannot be a type argument.
+- **Bookkeeping is the world's data.** One system type added to several worlds has a record in each, and a tool reads
+  every record through `world.Systems` without knowing the types.
+- **The handle is checked like an entity.** A removed system frees its slot; the version tells a handle to the old
+  system from one to a system added later.
+
+**Considered.**
+- **Static classes:** no type argument, so ordering and lookups would take `typeof` or strings.
+- **Classes with virtual hooks** (the 4.7 form): an object and a virtual call per system, and instance fields.
+- **A struct implementing an interface of static abstract members:** the user would write the plumbing the generator
+  writes now, and a plain struct can be created, stored and boxed.
+- **A generated `world.AddMovement()` per system:** names clash between assemblies, and the ordering attributes still
+  need the type.
+
+## D103. One system set per assembly: a switch over its systems, one call per stretch of the schedule [#d103-system-sets]
+
+**Decision.** The generator writes one code struct per system (`__X_SystemCode : ISystemCode`, static `Update`,
+`Create`, `Destroy` and `Access`) and one set per assembly (`__EasyEcsSystems : ISystemSet`): every system the assembly
+declares and every closed generic system it names, numbered from 0, with a switch per hook whose cases call each code
+struct directly. A module initializer registers the set, held weakly. The world schedules at run time as before
+(registration order, groups, orderings, parallel stages, cadence) and cuts each stage into segments of consecutive
+systems of one set. A segment runs as one call through a function pointer to `World.RunSystems<TSet>`, bound once per
+set, which loops over its systems and switches into their code.
+
+**Why.**
+- **One indirect call per segment, direct calls inside.** The cases are static calls the JIT can inline. A program
+  whose systems live in one assembly pays one indirect call per group update, whatever the number of systems.
+- **A function pointer per system costs more than its call.** Each update made one indirect call per system, and
+  under the JIT a pointer to a method that is not yet at its final tier lands on its precode stub: one more jump.
+  `SystemDispatchBenchmark` measures what a system costs per update apart from its rows.
+- **Per assembly, so it stays incremental.** The set depends on the list of systems and their declarations; an edit
+  inside a method body regenerates only that system's code (GeneratorBenchmark's `EditMethodBody`).
+- **Weakly held, so plugins unload.** A collectible assembly's set goes with its context once its systems leave every
+  world ([D17](#d17-unloading-removes-types-from-worlds-bits-are-reused)).
+
+**Considered.**
+- **A function pointer per system** (the previous form): an indirect call per system and the precode jump.
+- **One generated switch over the whole schedule:** the schedule is decided at run time (registration order, groups,
+  `Enabled`, cadence) and spans assemblies; the generator sees neither.
+- **Interceptors at `AddSystem` calls:** the call that adds a system is not where it runs, and interceptors key on
+  call sites the generator would have to find in every file.
+- **Guarded devirtualization:** the JIT guesses one or a few targets per call site; one loop over all systems has as
+  many targets as systems.
+
+## D104. A generated job's pass finds its query by job type [#d104-one-query-per-job-type]
+
+**Decision.** The job interfaces have `static virtual bool OneQuery => false`. Generated jobs set it true: the filter
+of a generated method is a constant of its declaration, so every pass of the job type takes the same filter, its tick
+and slice aside. The world keeps the query's cache entry per job type (`TypeIndex<KeptQuery, TJob>`), and a pass reads
+its match with two loads and a null test instead of comparing its filter against the memo's ways. The kept entries
+are an immutable array published by compare-and-swap and reset with the memo. A hand-written job opts in by setting
+`OneQuery`.
+
+**Why.**
+- **Comparing filters was the bulk of a small system's pass.** A profile of a system over a few rows showed the
+  memo's `SameQuery`, a compare of filters of about 200 bytes against each way, ahead of the rows themselves.
+- **The key is safe because it is a constant.** `OneQuery` is a JIT-time constant of the job type; a job that is
+  false takes the memo as before. The tick (`Since`) and the slice vary per run, but they are not part of the match.
+- **No new invalidation.** The kept entries hold the same cache entries the memo does and are emptied with it
+  (`RemoveTypes`, `ClearArchetypes`), so a table added later reaches them as it reaches the memo.
+
+**Considered.**
+- **Hashing the filter:** still reads all of it on every pass.
+- **Keying by call site:** for generated code the job type is the call site.
+- **`OneQuery` by default:** a hand-written job type run with different filters would get the tables of the first.
+
+## D105. Passes on the owner thread take the gate with plain stores [#d105-owner-thread-passes]
+
+**Decision.** `ForEach`, `ForEachBatch`, `ForEachMasked` and query walks on the owner thread freeze the structural gate
+with `FreezeAlone` and count the pass with `BeginPassAlone` when nothing holds the gate: plain stores, no locked
+instruction. When the gate is held or frozen already, they take the atomic forms. The parallel runner's claim cursor
+sits alone on a cache line, and each participant adds its sums once when it leaves.
+
+**Why.**
+- **No other thread touches the flag then.** The threads of a stage or of parallel chunks run only inside a region
+  the owner opened, so while the gate is free on the owner thread a locked instruction orders nothing.
+- **A pass is the unit users repeat.** A system of a few rows runs several passes per update; an atomic
+  read-modify-write per pass was a fixed cost on each.
+- **The cursor is the one contended word.** On its own line, the threads that claim chunks do not invalidate the
+  line that holds the job.
+
+**Considered.**
+- **Always atomic** (the previous form): correct, and the cost of each pass.
+- **No freeze for passes that cannot change structure:** a job's `Execute` could still call a structural change, and
+  the freeze is what turns that into an exception instead of torn tables.
+
+## D106. The runtime synchronizes with a `Lock` or a compare-and-swap, never a locked object [#d106-lock-or-cas]
+
+**Decision.** Where the runtime synchronizes, it takes a `System.Threading.Lock` (cold, process-wide registries:
+component types, systems, interned filters, the buffer and record pools) or swaps an immutable array by
+compare-and-swap (the query cache, the query memo and the queries kept per job type). The memo's writer reads the
+array, looks up its cache entry after that read, and publishes its copy with `Interlocked.CompareExchange` against
+the array it read, retrying from the start when another writer or a reset got there first. A reset drops the stale
+cache entries first, then swaps in an empty array with `Interlocked.Exchange`. Nothing locks a plain object.
+
+**Why.**
+- **`Lock` is the lock .NET 9 made for this.** A `lock` statement over one compiles to `Lock.EnterScope`; a
+  `lock (object)` takes the object's monitor, whose state moves into a sync block when contended.
+- **Readers never wait.** Queries run on any thread; an immutable array read with `Volatile.Read` is always whole.
+- **The order makes a reset safe.** A writer that read the array before a reset fails its compare-and-swap and
+  retries on the empty array with an entry looked up again, so a stale entry is never published again; one that
+  published before the reset is wiped by it.
+
+**Considered.**
+- **A lock around the memo's writers:** a parallel stage's threads reach the memo on a first query, and would queue
+  there.
+- **`ReaderWriterLockSlim`:** heavier when uncontended, and the readers need no lock at all.
+
+## D107. `[ForEach]` and hook methods are not reported as unused [#d107-never-used-warnings]
+
+**Decision.** A `DiagnosticSuppressor` in the package hides IDE0051 (EECSS01) and IDE0052 (EECSS02) on `[ForEach]`,
+`[ForEntity]`, `[OnCreate]`, `[OnUpdate]` and `[OnDestroy]` methods. The attributes carry JetBrains'
+`[MeansImplicitUse]` (an internal copy, which Rider and ReSharper read by name), `[EcsSystem]` with `WithMembers`.
+
+**Why.**
+- **The generated code calls them by name.** It reaches them through `UnsafeAccessor`
+  ([D16](#d16-no-partial-generated-code-lives-outside-the-users-type)), which the IDE does not see as a use, so every
+  private method of a system showed as dead code, and the IDE's fix deletes it.
+- **Exactly these methods.** The suppressor checks the attribute through the same `Symbols` test the generator uses;
+  a private helper that nothing calls is still reported.
+- **Two IDE families, two mechanisms.** Roslyn hosts (Visual Studio, the C# extension of VS Code, `dotnet build`) run
+  suppressors; Rider and ReSharper run inspections of their own and read the JetBrains annotation.
+
+**Considered.**
+- **Making the methods public:** a system's methods would be callable from everywhere, which EECS008 forbids.
+- **`[SuppressMessage]` or `.editorconfig` in each project:** written by every user, and too wide.
+- **A reference to `JetBrains.Annotations`:** a package dependency for one attribute that the IDE matches by name.
+
+## D108. Native AOT: the instruction set is the program's choice, `native` in the templates [#d108-aot-instruction-set]
+
+**Decision.** The `easyecs` template, the server samples and the Native AOT test set
+`<IlcInstructionSet>native</IlcInstructionSet>`. The FAQ and the hosting guide tell a server to set it, or a level
+such as `x86-64-v3` (AVX2) or `x86-64-v4` (AVX-512) for a fleet. The package sets nothing.
+
+**Why.**
+- **The default baseline compiles out the wide tier.** Native AOT compiles hardware checks to constants for its
+  target; at the default baseline `Vector512` is not accelerated, so the `Vector512` tier of generated vector loops
+  is removed and `Vector<T>` is 16 bytes. Under the JIT the same checks are decided at run time.
+- **`native` fits a binary built where it runs.** The samples and the CI test publish and run on one machine.
+- **A level fits a fleet.** A binary built on an AVX-512 machine with `native` does not run on one without it; a
+  level states the contract every machine meets.
+
+**Considered.**
+- **Leaving the default:** the AVX-512 loops never run under Native AOT.
+- **Setting it in the package's build files:** a library would choose the CPUs its users' programs run on.
 
 ## Related [#related]
 

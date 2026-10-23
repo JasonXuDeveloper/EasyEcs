@@ -107,6 +107,13 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D99](#d99-singleton-saves) | 只有代码保存整个 World 时，EECS069 才对单例报警告 |
 | [D100](#d100-names-of-4-8) | 4.8 的命名：统一拼写，动作用动词，系统的节奏 |
 | [D101](#d101-declaration-attributes) | 类型用特性声明自己是什么，生成器写出成员和设置 |
+| [D102](#d102-systems-are-ref-structs) | 系统是只有静态方法的 ref struct；它的簿记归 World |
+| [D103](#d103-system-sets) | 每个程序集一个系统集：对它的系统做 switch，调度里连续的一段只调用一次 |
+| [D104](#d104-one-query-per-job-type) | 生成的 job 的遍历按 job 类型找到查询 |
+| [D105](#d105-owner-thread-passes) | 所有者线程上的遍历用普通写入占用闸门 |
+| [D106](#d106-lock-or-cas) | 运行时用 `Lock` 或比较并交换做同步，从不锁普通对象 |
+| [D107](#d107-never-used-warnings) | `[ForEach]` 和钩子方法不会被报成未使用 |
+| [D108](#d108-aot-instruction-set) | Native AOT：指令集由程序决定，模板里是 `native` |
 
 D85 到 D89、D91 到 D93 和 D96 这几个编号没有用过：编号事先分给进行中的工作，用不上也不再复用。
 
@@ -137,14 +144,15 @@ D85 到 D89、D91 到 D93 和 D96 这几个编号没有用过：编号事先分�
 ```csharp
 public record struct Poison(int DamagePerTick) : IComponent;
 
-public class PoisonSystem : EcsSystem
+[EcsSystem]
+public ref struct PoisonSystem
 {
     [ForEach(Parallel = true)]                                    // 数据，在所有核心上
     static void Hurt(ref Health hp, in Poison poison) => hp.Value -= poison.DamagePerTick;
 }
 
-[UpdateAfter<PoisonSystem>]
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<PoisonSystem>]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]                                      // 结构，随后在所有者线程上
     static void Die(Entity entity, in Health hp) { if (hp.Value <= 0) entity.SetDead(); }
@@ -164,7 +172,8 @@ public class DeathSystem : EcsSystem
 ```csharp
 public struct Spawned : IComponent;                                  // 标签："上次 Greet 之后新出现的"
 
-public class GreetSystem : EcsSystem
+[EcsSystem]
+public ref struct GreetSystem
 {
     [ForEach, With<Spawned>]
     static void Greet(Entity entity, ref Health health)
@@ -220,7 +229,8 @@ world.CreateEntity(new Health(100), new Spawned());                  // 创建�
 public struct Inactive : IComponent;                        // 整个实体关掉
 public struct Bullet : IComponent;
 
-public class BulletSystem : EcsSystem
+[EcsSystem]
+public ref struct BulletSystem
 {
     [ForEach, With<Bullet>, Without<Inactive>]              // 要跳过它的系统自己写明
     static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
@@ -313,10 +323,10 @@ Unity 支持要等到 Unity 能运行 .NET 10（[路线图](/zh/docs/roadmap#uni
 ## D16. 不需要 `partial`：生成的代码不放进用户的类型 [#d16-no-partial-generated-code-lives-outside-the-users-type]
 
 **决定。** 生成器把 `[ForEach]` 方法的 job 写进单独的 `file` 类，通过 `[UnsafeAccessor]` 调用这个方法（不管是不是私有）。
-系统的更新逻辑和访问集是一个 `SystemCode`，由模块初始化器注册（弱引用持有，可回收的程序集才能卸载）；runner 的入口是它所在类型上的
-C# 14 静态扩展成员。生成的代码无法引用的类型（私有组件、私有 runner 类型）报 EECS022。
+系统的钩子、方法和访问集是它所在程序集系统集里的一个代码 struct，由模块初始化器注册（弱引用持有，可回收的程序集才能卸载；
+[D103](#d103-system-sets)）；runner 的入口是它所在类型上的 C# 14 静态扩展成员。生成的代码无法引用的类型（私有组件、私有 runner 类型）报 EECS022。
 
-**原因。** 系统就是普通的类：它和外层类型都不用写 `partial`，类体里也不生成任何东西，生成的成员不会和用户的冲突。`UnsafeAccessor`
+**原因。** 系统就是普通的类型：它和外层类型都不用写 `partial`，类体里也不生成任何东西，生成的成员不会和用户的冲突。`UnsafeAccessor`
 编译出来就是直接调用（机器码相同，可内联），tick 时间没有变化（ForEachSystemWrite、ParallelSystems 在误差范围内）。
 
 **比较过。** partial 类（缺失时报 EECS001，成员注入用户类型）；指向方法的委托或函数指针（每行一次间接调用，无法内联）；启动时反射（不支持 AOT）。
@@ -356,16 +366,23 @@ C# 14 静态扩展成员。生成的代码无法引用的类型（私有组件�
 
 ## D20. 泛型系统注册所在程序集用到的封闭类型 [#d20-generic-systems-register-the-closed-types-their-assembly-names]
 
-**决定。** 泛型系统的代码是一个以系统类型参数为参数的泛型类。它的模块初始化器为所在程序集里出现过的每个封闭类型注册一个实例
-（`AddSystem<CountOf<Health>>()`、`new CountOf<Health>()`、基类型 `CountOf<Health>` 及其泛型基类），其他封闭类型则注册泛型定义，
-由 `AddSystem` 在第一次使用时用 `MakeGenericType` 封闭。系统自己的泛型 `[ForEach]` 方法仍报 EECS004。
+**决定。** 封闭的泛型系统属于每个用到它的程序集的系统集（`AddSystem<Regen<Health>>()`、`[UpdateAfter<Regen<Health>>]`，以及对它的 `HasSystem`、
+`System`、`TryGetSystem` 和 `RemoveSystem`）：生成器在那个程序集的集里用这些类型实参封闭系统的代码 struct（[D103](#d103-system-sets)）。
+库里的公开泛型系统有一个公开的代码 struct，由 `[assembly: GenericSystemCode(typeof(Regen<>), typeof(__Regen_1_SystemCode<>))]` 指出，
+引用它的程序集的生成器就能在那里封闭它。没有任何程序集用到的封闭类型（用反射造出来的）没有代码：`AddSystem` 抛出 `NotSupportedException`，
+写明类型和该在哪里写出它。系统自己的泛型 `[ForEach]` 方法仍报 EECS004。
 
-**原因。** 模块初始化器无从知道程序会用哪些类型参数，系统类里又不生成任何东西（D16）。系统所在程序集里出现过的封闭类型不需要运行时生成代码，
-Native AOT 能保留它们；只在其他程序集里出现的封闭类型在 JIT 下照样能用。runner 两者都不需要：入口本身是泛型的，调用方的类型参数在编译期就封闭了 job。
-系统自己的泛型方法则没有调用方来提供类型参数。
+**原因。**
+- **Native AOT 和 WebAssembly 不能在运行时生成代码。** 在那里用 `MakeGenericMethod` 把泛型方法封闭到值类型上会失败，而组件都是结构体；
+  源码里写出的每个封闭系统，代码都已经编译好了。
+- **用到这个类型的程序集才知道它。** 库不知道游戏会用哪些组件封闭它；游戏自己的生成器看得到那次调用。
+- **处处一条路径。** JIT、Native AOT 和 WebAssembly 运行同样的生成代码；没有只在一种运行时下才管用的后备方案。
+- **runner 都不需要这些：** 入口本身是泛型的，调用方的类型参数在编译期就封闭了 job。系统自己的泛型方法则没有调用方来提供类型参数。
 
-**比较过。** 只用反射（任何值类型参数都会破坏 Native AOT，而组件都是结构体）；系统上的虚泛型钩子（需要 `partial` 或每个元数一个基类）；
-扫描被引用程序集里的封闭用法（生成的代码对系统所在程序集是 file 级私有的）。
+**比较过。**
+- **运行时反射**（以前对在其他程序集里封闭的类型的后备方案）：任何值类型参数都会破坏 Native AOT。
+- **扫描被引用程序集里的封闭用法：** 库的生成代码是它内部的；引用程序集保留的是那个公开的代码 struct。
+- **系统上的虚泛型钩子：** 系统没有实例（D102）。
 
 ## D21. .NET 10 新特性，测得出收益才用 [#d21-net-10-features-only-where-they-measure]
 
@@ -480,7 +497,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **漏掉的初始化在出错的地方暴露。** 4.2 之前，`[ForEach]` 参数会添加默认值的单例，而 `world.X` 会抛异常。漏写 `SetClock(...)`
   的 World 于是跑在一个步长为零的时钟上：实体原地不动，测试因为错误的原因通过，没有任何线索指向漏掉的那一行。现在第一次
   `Update()` 就报出单例的名字和该加的调用。
-- **所有读取一个规则。** 同一个单例，在 `OnUpdate` 里读和作为参数接收，行为却不一样；现在读就是读，只有名字里带 `GetOrAdd` 的调用才会添加。
+- **所有读取一个规则。** 同一个单例，在 `[OnUpdate]` 方法里读和作为参数接收，行为却不一样；现在读就是读，只有名字里带 `GetOrAdd` 的调用才会添加。
 - **热路径上没有额外开销。** job 在创建时解析单例，每次遍历一次；检查的还是原来添加前就有的那次判空，抛异常放在冷路径方法里。
 
 **比较过。**
@@ -535,7 +552,6 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 | EECS026 没用到的参数 | 警告 | 每行一样（41 / 46 µs）；`Entity` 或 `World` 让系统单独运行，追踪组件的 `ref` 给每一行打 tick |
 | EECS027 每行查一次 | 警告 | `entity.Read<T>()` 258 µs，参数 40 µs；`Has<T>()` 208 µs，`Maybe<T>` 86 µs；通过 `World` 取单例 105 µs，参数 48 µs |
 | EECS028 每次更新都分配 | 警告 | 每个 tick 都产生垃圾；见[不该做的](/zh/docs/performance#dont)清单 |
-| EECS029 实例 `[ForEach]` 方法 | 警告 | 实例方法 104 µs，静态方法 41 µs |
 | EECS030 对查询结果逐个实体做结构变化 | 警告 | `BulkBenchmark`：逐个实体的耗时是 `SetAll` / `RemoveAll` 的 19.1 倍，是 `DisableAll` / `EnableAll` 的约 99 倍 |
 | EECS031 计数循环里逐个创建 | 警告 | 只对新 World 有效（[D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)）；`MicroBenchmarks.Churn` 的耗时是 `ChurnBatch` 的 2.1 倍 |
 | EECS032 手写计数和判断 | 警告 | `Count() > 0` 429 ns，`Any()` 18.6 ns；循环里判断 `Has<T>()` 332 µs，过滤条件 59.5 µs |
@@ -548,7 +564,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **警告会让把警告当错误的构建失败**，所以每条警告在任何触发的地方都必须是对的。规则报告之前会检查每一处用法：EECS025 把赋值、
   `++`、`ref` 或 `out` 实参、非 `readonly` 方法、`ref` 局部变量和 `this ref` 扩展方法都算作写入；EECS027 只报告每一行都会执行、
   而且方法自己不改的组件的查询；EECS028 不报告 `throw`、`[Conditional]` 调用、控制台输出，以及自己设置了 `UpdateInterval`
-  的系统的 `OnUpdate`；EECS030 不报告覆盖查询已要求组件的 `Set`，也不报告分组组件的 `Set`（在 `SetAll` 里它的行同样逐个移动）；
+  的系统的 `[OnUpdate]` 方法；EECS030 不报告覆盖查询已要求组件的 `Set`，也不报告分组组件的 `Set`（在 `SetAll` 里它的行同样逐个移动）；
   EECS031 不报告小于 4,096 的常量次数和用这样的常量创建的数组（没有数组会进入大对象堆），也不报告预留过容量之后的循环、只在分支里或内层循环里的创建，
   以及系统里的循环（运行中的 World 会复用已有的行）；EECS032 只报告和 0 或 1 比较的 `Count`、只计数的循环，以及作为循环第一条语句的判断。
 - **只要有代价就是警告，不论大小。** 预留容量在 World 第一次长到这么大时收益最大，`Any` 和过滤条件的收益与循环本来要访问的行数成正比；
@@ -566,7 +582,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **对结构变化或很小的工作用 `Parallel = true`**：结构变化是 EECS010；一遍算不算小取决于运行时的实体数量。
 - **并行阶段内系统之间的冲突、多余的排序**：阶段是运行时按宿主添加系统的顺序划分的；多余的 `[UpdateAfter<T>]` 没有代价。
 - **从别的线程调用 `World.Update`**：World 可以在拥有它的任意一个线程上运行（每个线程一个 World），和所有者线程竞争的结构调用由 EECS014 报告。
-- **`OnUpdate` 里手写的 `Query` 循环、热路径上的 `Capture` 或 `Describe`、循环里的值索引查询**：`Query` 是正式支持的 API，
+- **`[OnUpdate]` 方法里手写的 `Query` 循环、热路径上的 `Capture` 或 `Describe`、循环里的值索引查询**：`Query` 是正式支持的 API，
   它的代价 EECS030 和 EECS032 已经指出；每个 tick 拍快照正是回滚的做法；索引查询是 O(1)，`[ForEach]` 方法也没法把它提到循环外。不加规则。
 - **每次调用都构建 `QueryFilter`，而不是放进 `static readonly` 字段**：过滤条件是不含引用的小结构体
   （[D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references)）；测不出代价。不加规则。
@@ -726,7 +742,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 ## D39. 整个读档可以不打变更 tick，系统可以从现在开始算 [#d39-a-whole-load-can-leave-the-change-ticks-alone]
 
 **决定。** `world.Load(input, markWritten: false)` 清掉每个加载行的变更 tick（不算写入，也不算移除），和
-`LoadEntitiesInto(..., markWritten: false)` 对一条记录的做法一样。`AddSystem(system, changesFromNow: true)` 把新系统的上次运行设为当前 tick，
+`LoadEntitiesInto(..., markWritten: false)` 对一条记录的做法一样。`AddSystem<T>(changesFromNow: true)` 把新系统的上次运行设为当前 tick，
 并把 World 的 tick 往前推一格，所以它第一次运行只看到之后的写入。两者的默认行为都不变。
 
 **原因。**
@@ -821,7 +837,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 
 ## D44. 分片：按 64 行位字切分的过滤条件，由系统的运行次数选片 [#d44-slices]
 
-**决定。** `[ForEach(Slices = N)]` 传入 `QueryFilter.Slice(RunCount % N, N)`，其中 `EcsSystem.RunCount` 是系统已完成的运行次数。
+**决定。** `[ForEach(Slices = N)]` 传入 `QueryFilter.Slice(RunCount % N, N)`，其中 `SystemHandle.RunCount` 是系统已完成的运行次数。
 每张表从遍历开始时的行数出发，按 64 行的整数倍切分；匹配结果里的第 i 张表从第 (index + i) mod N 片开始。`ForEach` 系列调用遵守分片；
 `Query`、`Count`、`Any`、`DestroyAll`、`entity.Run` 和批量调用遇到分片过的过滤条件直接抛异常。`[Changed<T>]` / `[Removed<T>]` 方法不能分片（EECS035）。
 
@@ -958,7 +974,7 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 
 **原因。**
 - **运行条件**（`[RunIf]`，每个系统一个谓词）。系统分组让每种节奏有自己的 `Update<TGroup>()`，什么时候跑哪个分组由宿主决定；系统内部，
-  `Enabled` 和 `OnUpdate` 里提前返回就够了。每个系统一个谓词，就是调度器看不见的代码。
+  `Enabled` 和 `[OnUpdate]` 方法里提前返回就够了。每个系统一个谓词，就是调度器看不见的代码。
 - **`UpdatePeriod` / 系统时间**（以秒为单位的间隔）。时间归宿主的固定步长循环管；`UpdateInterval` 数的是更新次数，运行结果可复现，
   系统要时间就读一个时钟单例。
 - **`[Requires<B>]`**（加 A 时自动加 B）。每种实体一个预制体，一次拷贝就带齐整套组件；隐式添加则是读代码的人看不到的结构变更。
@@ -1132,7 +1148,6 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 | --- | --- | --- | --- |
 | `var t = e.Get<T>(); t.V = 1;`（改了又丢掉的副本） | EECS038 | EECS025、EECS015 | 修法是保留 ref（或用 `Set`）；改成 `Read` 写入照样丢 |
 | `[ForEach, Without<P>] static void A(ref P p, ...)` | EECS049（`[Removed<T>]` 时是 EECS016） | `p` 上的 EECS025、EECS026、EECS015 | 方法永远不跑，参数的代价无从谈起 |
-| `[ForEach(Parallel = true)] void A(ref P p)` | EECS010，附“改成 static” | EECS029 | 修法相同；挡住构建的是这条错误 |
 | `[ForEach(Parallel = true)] static void A(..., ref Clock c)` | EECS010 | EECS025 | 它的消息已经说了“改成 `in`” |
 | 只计数、或对每个实体做同一个修改的查询循环 | EECS032、EECS030 | EECS046 | 修法去掉了循环，没有可读的了 |
 | `[ForEach]` 方法或 job 里的 `w.TrimExcess()` | EECS041、EECS013 | EECS028 | 调用在那里会抛异常，分配根本不会发生 |
@@ -1151,7 +1166,6 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 **考虑过的做法。**
 - **把 EECS016 并进 EECS049**（都是没有实体能通过的过滤条件）：EECS016 的原因和措辞不同（`[Removed<T>]` 访问的是失去 T 的实体），
   编号也要稳定。分开保留，读同一个列表。
-- **把 EECS029 并进 EECS010**：EECS029 也管顺序执行的方法，在那里它是代价而不是错误。保留；EECS010 提供它的修法。
 - **保留为两条诊断的：** 组件里存实体的 buffer 字段（EECS012 是复制 buffer，EECS017 是存 `Entity`：两个错误、两个修法），每处写出
   `DynamicBuffer<Pair>` 的 EECS017，EECS034 旁的 EECS026，以及 EECS032 的存在性判断或另一个表达式上 EECS033 旁的 EECS046（修法可以叠加）。
 
@@ -1220,7 +1234,7 @@ C# 14 扩展成员和泛型特性。不用拦截器，也不用嵌入式特性�
 
 **决定。** 4.7 发布前做了一轮命名审查，在 [D54](#d54-names) 之外又改了这些名字：`ITrackChanges` → `ITracked`，
 `IGroupWith<T>` / `IGroupWithout<T>` → `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`，`Destroyed` 标签 → `Retired`
-（`entity.IsRetired`），`GetSystem<T>()` → `TryGetSystem<T>(out T)`，`world.Describe()` → `DescribeTables()`，
+（`entity.IsRetired`），`GetSystem<T>()` → `TryGetSystem<T>(out …)`，`world.Describe()` → `DescribeTables()`，
 `ColumnInfo.Without` → `Absent`，`SystemStats.Last` / `Total` / `Average` → `LastTime` / `TotalTime` / `AverageTime`，
 `UpdateCount` → `DefaultUpdateCount`，`SystemAccess.RunsAlone()` → `RunAlone()`，`TargetRules` → `TargetPolicyExtensions`，
 `AddRelation` / `RemoveRelation` / `HasRelation` → `Link` / `Unlink` / `Links`（生成成员是 `LinkX(target)`），job 的
@@ -1230,8 +1244,8 @@ C# 14 扩展成员和泛型特性。不用拦截器，也不用嵌入式特性�
 **原因。**
 - **一个词，一个意思。** “Group”既指系统分组，又指 `IGroup` 组件；“Without”既是过滤条件，又是一个计数；“Destroyed”既指被释放的实体，
   又指为了清理组件而活着的实体（[D57](#d57-retired-is-gone)）。现在各有各的词，“销毁”只表示已经没了。
-- **签名说明会找不到。** World 里没有这个系统时，`GetSystem<T>()` 返回 null。`TryGetSystem` 把这一点写进签名；仓库里没有调用需要会抛异常的版本，
-  所以没有加：添加系统的代码留着 `AddSystem` 返回的引用。
+- **签名说明会找不到。** World 里没有这个系统时，`GetSystem<T>()` 返回 null。`TryGetSystem` 把这一点写进签名。会抛异常的 `System<T>()`
+  随 4.8 的系统句柄一起出现（[D102](#d102-systems-are-ref-structs)），给确知系统已添加的代码用。
 - **建立链接不是加组件。** `AddX(target)` 读起来像 `SetX`；`LinkX` / `UnlinkX` / `LinksX` 和泛型的 `Link` / `Unlink` / `Links`
   是一组。泛型名字短，也有代价：名为 `Link`、`Unlink` 或 `Links` 的组件拿不到 `entity.X` 属性（实体上已有的名字，生成器会跳过），
   其他成员照常生成。
@@ -1243,7 +1257,6 @@ C# 14 扩展成员和泛型特性。不用拦截器，也不用嵌入式特性�
 
 **考虑过的方案。**
 - **保留一个版本的 `[Obsolete]` 别名：** 和 D54 一样，编译器已经能指出的改动，不值得在补全列表里放两个名字。
-- **在 `TryGetSystem` 旁边再加一个会抛异常的 `GetSystem`：** 没有调用需要它。
 - **关系只有生成成员（没有泛型 `Link<T>`）：** 那么对关系类型写的泛型代码（`Link<T>(in T)`）就没有入口。
 - **给 `Retired` 一个新的存档 id：** 每份带退休实体的存档都会读不了。
 - **把 `entity.Describe()` 和 `DescribeSchedule()` 也改名：** 它们的名字已经说明了描述的是什么。
@@ -1519,7 +1532,7 @@ EECS010 接受它出现在并行方法里。方法通过参数查询的值索引
 | ParallelSystems | 1（1） | 126 µs | 126 µs | 227 µs |
 | WorldSimulation，开启 `ParallelSystems`，10,000 / 100,000 | 9（0） | 1,261 / 2,395 µs | 相同 | 0 |
 
-- **单独运行的系统在任何调度里都是屏障。** `Entity` 或 `World` 参数、重写 `OnUpdate`、结构变更都会让系统单独运行：BattleServer 默认组 13 个系统中
+- **单独运行的系统在任何调度里都是屏障。** `Entity` 或 `World` 参数、`[OnUpdate]` 方法、结构变更都会让系统单独运行：BattleServer 默认组 13 个系统中
   有 7 个，WorldSimulation 9 个中有 7 个。依赖图等它们的方式和阶段完全一样，而真实的服务器就是这样写的。
 - **最好的情况收益也很小。** `BarrierBenchmark`（不在仓库里；100,000 行）：一个重系统旁边一条由三个轻系统组成的链，按阶段为 `{重, 第一}`、`{第二}`、
   `{第三}`；对照组把同样三遍放进一个系统、与重系统同一阶段（依赖图会采用的调度，用现在的运行器）：一次是 6.36 对 6.08 ms，另一次是 6.73 对 7.13 ms，都在各自的误差之内（±0.3 到 0.9 ms）。
@@ -1701,15 +1714,14 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 
 ## D83. 系统的节奏是一个特性 [#d83-update-interval-attribute]
 
-**决定。** 系统类上的 `[UpdateInterval(n, Phase = p)]` 决定系统多久运行一次；`UpdateInterval` 和 `UpdatePhase` 属性删掉了。生成器把这两个值
-传给系统的生成代码，`AddSystem` 只读一次；派生系统没有自己声明时沿用基类的特性。EECS082 报告对旧属性的重写，修复会写出特性；EECS083 报告小于 1
-的间隔和不在 0 到 n - 1 之间的相位。
+**决定。** 系统上的 `[UpdateInterval(n, Phase = p)]` 决定系统多久运行一次；没有 `UpdateInterval` 和 `UpdatePhase` 属性。生成器把这两个值
+写进系统的代码 struct，`AddSystem` 只读一次，存进系统的记录。EECS083 报告小于 1 的间隔和不在 0 到 n - 1 之间的相位。
 
 **原因。**
 - **节奏本来就该是常量，属性却表达不了。** EECS018 只能事后警告计算出来的重写；特性参数是编译期常量，这条警告和它的代码修复都不需要了。
-- **每次更新少一次虚调用，但测不出来。** `RunSystem` 原来每次更新对每个系统做一次虚调用来读间隔，现在读的是添加系统时设好的字段。`OrderingBenchmark`
+- **每次更新少一次虚调用，但测不出来。** `RunSystem` 原来每次更新对每个系统做一次虚调用来读间隔，现在读的是系统记录里添加系统时设好的字段。`OrderingBenchmark`
   （每次更新四个系统，10,000 个实体）：改前和改后，一轮是 6.96 和 7.21 µs，另一轮是 7.55 和 7.16 µs（按注册顺序；按特性排序：6.99 和 7.09，然后 7.96 和 7.02 µs），都在误差之内（±0.22 到 0.69 µs）：每个系统一次虚调用低于这个基准能分辨的范围，所以这次改动的理由是常量，而不是速度。两者都是 0 B。
-- **不运行代码就能看到节奏。** 工具、分析器（EECS028 不报告有节奏的系统的 `OnUpdate`）和读代码的人都在声明上看到它。
+- **不运行代码就能看到节奏。** 工具、分析器（EECS028 不报告有节奏的系统的 `[OnUpdate]` 方法）和读代码的人都在声明上看到它。
 
 **考虑过的方案。**
 - **属性和特性并存：** 同一件事两种说法，还得学两者的先后规则。这个破坏性变更每个系统改一行，代码修复替你改，迁移指南里有示例。
@@ -1852,8 +1864,8 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
   参数让系统在自己的阶段里单独运行。[D69](#d69-reductions)、[D75](#d75-lookup) 和 [D78](#d78-emit) 已经把这些参数和手写形式比过。
   有了这些规则，用户遇到的就是更快的写法。
 - **EECS086 要看到重置才报告。** 第一版报告所有累加。它在文档里命中了 16 个示例，每一个都是累计总数：分数、到目前为止的死亡数、
-  已发送的行数。归约用一遍的结果替换它的单例，所以对累计总数来说，它不是同一段代码。系统每次更新都重置的单例（在 `OnCreate` 和
-  `OnDestroy` 之外整体赋值、给字段赋常量、`AddSingleton`、`RemoveSingleton`、`SetX`、`RemoveX`）存的才是一遍的结果。重置可能在任何
+  已发送的行数。归约用一遍的结果替换它的单例，所以对累计总数来说，它不是同一段代码。系统每次更新都重置的单例（在 `[OnCreate]` 和
+  `[OnDestroy]` 方法之外整体赋值、给字段赋常量、`AddSingleton`、`RemoveSingleton`、`SetX`、`RemoveX`）存的才是一遍的结果。重置可能在任何
   一个文件里，所以这条规则在编译结束时报告，消息里会指出归约让哪一处重置变得多余。
 - **EECS087 是警告。** 代价落在整个系统上（单独占一个阶段），修法是每个组件一个参数。EECS086 和 EECS089 要改两处（重置、列表的读者），
   所以保持为建议。
@@ -1903,7 +1915,7 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 `TileNeighbors`，`tile.Load()` → `tile.Pad()`，`tile.Changes(next, out changed)` → `ChangedEdges`，
 `TileReads.Sides` → `NorthSouth`，`[ForEach(Simd = …)]` → `[ForEach(SimdMode = …)]`，`DynamicBuffer<T>.ReservePool` /
 `PoolCapacity` → `FillPool` / `MaxPooledLength`，`[Key]` → `[IndexKey]`，`prefab.Absent<T>()` → `SetAbsent<T>()`，以及
-EECS082 的描述符（用重写属性写系统的节奏；EECS083 是 `BadUpdateInterval`）。4.8 新增的 `Lookup<T>.TryFind` 给出 `Entity`，
+EECS083 的描述符（`BadUpdateInterval`）。4.8 新增的 `Lookup<T>.TryFind` 给出 `Entity`，
 和已发布的 `ValueIndex.TryFind` 一样。隐藏和内部的名字跟着改：`SavedTypes` → `TypeRegistry`（只有生成的代码调用）以及分析器的描述符字段。
 不保留别名，已发布的调用一个都没改。
 
@@ -1958,6 +1970,126 @@ EECS082 的描述符（用重写属性写系统的节奏；EECS083 是 `BadUpdat
 - **只用手写的接口：** 接口保留，但每个归约都要重复写单位元，每个键都要有人记得写成显式实现。分析器现在建议改用特性（EECS065、EECS067）。
 - **通过 `WorldOptions` 设置：** 仍然是每个 World 一项设置，仍然会忘。
 - **World 启动时用反射读特性：** 每个 World 启动时都要为所有已加载的类型付出代价，裁剪也可能删掉它要读的信息。生成的登记在有表含这个类型之前没有任何开销。
+
+## D102. 系统是只有静态方法的 ref struct；它的簿记归 World [#d102-systems-are-ref-structs]
+
+**决定。** 系统是标了 `[EcsSystem]`、所有成员都是静态的 `ref struct`：`[ForEach]` 方法，以及 `[OnCreate]`、`[OnUpdate]` 和 `[OnDestroy]`
+钩子，每个钩子接收 `World`、`SystemHandle`、两者或都不接收。World 从不创建系统。它按类型添加系统（`AddSystem<T>()`，`T : struct, allows ref struct`），
+并为系统保存一条记录：是否启用、错误、间隔和相位、上次运行的 tick、运行次数、统计。`SystemHandle` 是指向这条记录的（world、槽位、版本），
+指向已移除系统的句柄会抛异常，就像失效的 `Entity` 一样。没有继承：基类共享的东西改成泛型系统或放辅助函数的静态类，构造函数参数改成
+[`[NotSaved]`](/zh/docs/guide/saves#not-saved) 单例。EECS074 到 EECS077 维护这种写法，CS0246 上的一个代码修复会改写 4.7 的类系统。
+
+**原因。**
+- **系统是一组静态函数的名字。** 状态属于组件和单例（[ECS 原则](/zh/docs/ecs-principles)）；实例只会招来字段（EECS007 只能一个个地管），
+  还让每个系统一个堆对象、每次更新每个钩子一次虚调用。
+- **ref struct 永远不是对象，却仍是类型实参。** 它不能装箱、不能存进字段、不能被捕获，所以什么都存不住系统；有了 `allows ref struct`，
+  它照样能在 `AddSystem<T>()`、`[UpdateAfter<T>]` 和 `HasSystem<T>()` 里指名系统。静态类做不了类型实参。
+- **簿记是 World 的数据。** 同一个系统类型加进几个 World，每个里都有一条记录；工具通过 `world.Systems` 读所有记录，不需要知道类型。
+- **句柄像实体一样校验。** 移除的系统释放它的槽位；版本号区分指向旧系统的句柄和之后添加的系统。
+
+**比较过。**
+- **静态类：** 不能做类型实参，排序和查找就得用 `typeof` 或字符串。
+- **带虚钩子的类**（4.7 的写法）：每个系统一个对象、一次虚调用，还有实例字段。
+- **实现一个静态抽象成员接口的 struct：** 用户得自己写现在由生成器写的管道代码，而且普通 struct 能被创建、存储和装箱。
+- **为每个系统生成 `world.AddMovement()`：** 不同程序集之间名字会冲突，排序特性也仍然需要类型。
+
+## D103. 每个程序集一个系统集：对它的系统做 switch，调度里连续的一段只调用一次 [#d103-system-sets]
+
+**决定。** 生成器为每个系统写一个代码 struct（`__X_SystemCode : ISystemCode`，静态的 `Update`、`Create`、`Destroy` 和 `Access`），为每个程序集写一个系统集
+（`__EasyEcsSystems : ISystemSet`）：程序集声明的每个系统和它用到的每个封闭泛型系统，从 0 开始编号，每种钩子一个 switch，各分支直接调用对应的代码 struct。
+模块初始化器注册这个集，以弱引用持有。World 仍在运行时排定调度（注册顺序、分组、排序、并行阶段、节奏），再把每个阶段切成段：同一个集里连续的系统是一段。
+一段通过指向 `World.RunSystems<TSet>` 的函数指针调用一次（每个集只绑定一次），它在段内循环，switch 进各系统的代码。
+
+**原因。**
+- **每段一次间接调用，段内是直接调用。** 各分支是 JIT 可以内联的静态调用。系统都在一个程序集里的程序，每次分组更新只付一次间接调用，不管有多少系统。
+- **每个系统一个函数指针，代价不止那次调用。** 每次更新每个系统一次间接调用，而且在 JIT 下，指向还没到最终层级的方法的指针会落到它的
+  precode 桩上：再多一次跳转。`SystemDispatchBenchmark` 测的就是除去行之外每个系统每次更新的代价。
+- **按程序集，才能保持增量。** 集只依赖系统列表和它们的声明；改方法体只重新生成那个系统的代码（GeneratorBenchmark 的 `EditMethodBody`）。
+- **弱引用持有，插件才能卸载。** 可回收程序集的系统都离开所有 World 之后，它的集随上下文一起卸载（[D17](#d17-unloading-removes-types-from-worlds-bits-are-reused)）。
+
+**比较过。**
+- **每个系统一个函数指针**（之前的写法）：每个系统一次间接调用，外加 precode 跳转。
+- **覆盖整个调度的一个生成 switch：** 调度是运行时决定的（注册顺序、分组、`Enabled`、节奏），还跨程序集；生成器两样都看不到。
+- **在 `AddSystem` 调用处用拦截器：** 添加系统的调用不是系统运行的地方，而拦截器按调用点工作，生成器得在每个文件里找它们。
+- **带保护的去虚化：** JIT 每个调用点猜一个或几个目标；遍历所有系统的循环有多少系统就有多少目标。
+
+## D104. 生成的 job 的遍历按 job 类型找到查询 [#d104-one-query-per-job-type]
+
+**决定。** job 接口有 `static virtual bool OneQuery => false`。生成的 job 把它设为 true：生成方法的过滤条件是它声明里的常量，所以这个 job 类型的每次遍历
+用的都是同一个过滤条件（tick 和分片除外）。World 按 job 类型保存查询的缓存项（`TypeIndex<KeptQuery, TJob>`），遍历用两次读取加一次判空拿到匹配结果，
+不再把过滤条件和备忘的各路逐一比较。保存的缓存项是一个不可变数组，用比较并交换发布，随备忘一起重置。手写的 job 设置 `OneQuery` 也能用上。
+
+**原因。**
+- **比较过滤条件占了小系统遍历的大头。** 对一个只有几行的系统做性能分析，备忘的 `SameQuery`（拿约 200 字节的过滤条件和每一路比较）排在处理行本身之前。
+- **键是安全的，因为它是常量。** `OneQuery` 是 job 类型在 JIT 时的常量；为 false 的 job 照旧走备忘。tick（`Since`）和分片每次运行都不同，但它们不属于匹配结果。
+- **不需要新的失效逻辑。** 保存的缓存项就是备忘持有的那些，和备忘一起清空（`RemoveTypes`、`ClearArchetypes`），之后新增的表到达它们的方式和到达备忘一样。
+
+**比较过。**
+- **对过滤条件做哈希：** 每次遍历还是要把它整个读一遍。
+- **按调用点做键：** 对生成的代码来说，job 类型就是调用点。
+- **默认开启 `OneQuery`：** 用不同过滤条件运行的手写 job 类型会拿到第一次的表。
+
+## D105. 所有者线程上的遍历用普通写入占用闸门 [#d105-owner-thread-passes]
+
+**决定。** 所有者线程上的 `ForEach`、`ForEachBatch`、`ForEachMasked` 和查询遍历，在闸门空闲时用 `FreezeAlone` 冻结结构闸门、用 `BeginPassAlone`
+给遍历计数：普通写入，没有带锁的指令。闸门已被占用或已经冻结时，它们走原子的版本。并行执行器领取块的游标独占一条缓存行，每个参与者离开时只把它的累计值加一次。
+
+**原因。**
+- **这时没有别的线程碰这个标志。** 阶段的线程和并行块的线程只在所有者打开的区域里运行，所以所有者线程上闸门空闲时，带锁的指令什么也没排序。
+- **遍历是用户反复执行的单位。** 只有几行的系统每次更新要跑好几次遍历；每次遍历一次原子读改写，是每次都要付的固定代价。
+- **游标是唯一有争用的字。** 放在单独的一行上，领取块的线程就不会让保存 job 的那一行失效。
+
+**比较过。**
+- **始终用原子操作**（之前的写法）：正确，代价落在每次遍历上。
+- **不能改结构的遍历不冻结：** job 的 `Execute` 仍可能调用结构变更，冻结正是把它变成异常而不是撕裂的表。
+
+## D106. 运行时用 `Lock` 或比较并交换做同步，从不锁普通对象 [#d106-lock-or-cas]
+
+**决定。** 运行时需要同步的地方，要么拿 `System.Threading.Lock`（冷的、进程级的注册表：组件类型、系统、驻留的过滤条件、buffer 池和记录池），
+要么用比较并交换替换不可变数组（查询缓存、查询备忘和按 job 类型保存的查询）。备忘的写入方先读数组，读完之后再查它的缓存项，
+然后用 `Interlocked.CompareExchange` 对照它读到的数组发布自己的副本；如果别的写入方或一次重置抢先了，就从头重试。重置先丢掉过期的缓存项，
+再用 `Interlocked.Exchange` 换上空数组。不锁任何普通对象。
+
+**原因。**
+- **`Lock` 是 .NET 9 专门为此做的锁。** 对它写 `lock` 语句会编译成 `Lock.EnterScope`；`lock (object)` 拿的是对象的监视器，争用时它的状态会挪进同步块。
+- **读的一方从不等待。** 查询可以在任何线程上运行；用 `Volatile.Read` 读到的不可变数组总是完整的。
+- **顺序保证重置是安全的。** 在重置前读了数组的写入方，比较并交换会失败，于是在空数组上重新查缓存项再重试，过期的项永远不会被再次发布；
+  在重置前就发布了的，会被重置清掉。
+
+**比较过。**
+- **给备忘的写入方加锁：** 并行阶段的线程第一次查询时会走到备忘，就会在那里排队。
+- **`ReaderWriterLockSlim`：** 没有争用时更重，而读的一方根本不需要锁。
+
+## D107. `[ForEach]` 和钩子方法不会被报成未使用 [#d107-never-used-warnings]
+
+**决定。** 包里的 `DiagnosticSuppressor` 在 `[ForEach]`、`[ForEntity]`、`[OnCreate]`、`[OnUpdate]` 和 `[OnDestroy]` 方法上隐藏 IDE0051（EECSS01）
+和 IDE0052（EECSS02）。这些特性带有 JetBrains 的 `[MeansImplicitUse]`（内部的一份拷贝，Rider 和 ReSharper 按名字识别），`[EcsSystem]` 带 `WithMembers`。
+
+**原因。**
+- **生成的代码按名字调用它们。** 它通过 `UnsafeAccessor` 调用（[D16](#d16-no-partial-generated-code-lives-outside-the-users-type)），IDE 不把这算作使用，
+  于是系统的每个私有方法都显示成死代码，IDE 的修复还会把它删掉。
+- **只针对这些方法。** 抑制器用和生成器相同的 `Symbols` 检查来判断特性；没人调用的私有辅助函数照样会报。
+- **两类 IDE，两种机制。** Roslyn 宿主（Visual Studio、VS Code 的 C# 扩展、`dotnet build`）运行抑制器；Rider 和 ReSharper 运行自己的检查，读 JetBrains 注解。
+
+**比较过。**
+- **把方法改成 public：** 系统的方法就能从任何地方调用，而这是 EECS008 禁止的。
+- **每个项目里写 `[SuppressMessage]` 或 `.editorconfig`：** 每个用户都得写，范围还太宽。
+- **引用 `JetBrains.Annotations`：** 为一个 IDE 按名字匹配的特性多一个包依赖。
+
+## D108. Native AOT：指令集由程序决定，模板里是 `native` [#d108-aot-instruction-set]
+
+**决定。** `easyecs` 模板、服务器示例和 Native AOT 测试设置 `<IlcInstructionSet>native</IlcInstructionSet>`。FAQ 和托管指南告诉服务器设置它，
+集群则设置一个级别，例如 `x86-64-v3`（AVX2）或 `x86-64-v4`（AVX-512）。包本身什么都不设置。
+
+**原因。**
+- **默认的基线会把宽的那一档编译掉。** Native AOT 按目标把硬件检查编译成常量；默认基线下 `Vector512` 没有加速，所以生成的向量循环里
+  `Vector512` 那一档被删掉，`Vector<T>` 是 16 字节。JIT 下同样的检查在运行时决定。
+- **`native` 适合在哪里构建就在哪里运行的程序。** 示例和 CI 测试在同一台机器上发布和运行。
+- **级别适合集群。** 在 AVX-512 机器上用 `native` 构建的程序，在没有 AVX-512 的机器上跑不起来；级别写明了每台机器都满足的约定。
+
+**比较过。**
+- **保留默认值：** Native AOT 下 AVX-512 循环永远不会运行。
+- **在包的构建文件里设置：** 一个库就替用户的程序决定了它跑在什么 CPU 上。
 
 ## 相关页面 [#related]
 
