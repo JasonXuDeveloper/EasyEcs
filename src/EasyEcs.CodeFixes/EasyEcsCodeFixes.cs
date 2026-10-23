@@ -350,8 +350,8 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
     }
 
     /// <summary>
-    /// Whether code of the project reads <paramref name="key"/> (an implicit Key) through its type, not the interface:
-    /// such a read stops compiling once the key is an explicit implementation or the generator's.
+    /// Whether code of the project reads <paramref name="key"/> (an implicit Key or Group) through its type, not the
+    /// interface: such a read stops compiling once the member is an explicit implementation or the generator's.
     /// </summary>
     private static async Task<bool> ReadThroughType(Document document, IPropertySymbol key, CancellationToken token)
     {
@@ -363,7 +363,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
             SemanticModel? otherModel = null;
             foreach (var name in otherRoot.DescendantNodes().OfType<IdentifierNameSyntax>())
             {
-                if (name.Identifier.ValueText != "Key" || name.Parent is PropertyDeclarationSyntax) continue;
+                if (name.Identifier.ValueText != key.Name || name.Parent is PropertyDeclarationSyntax) continue;
                 otherModel ??= await other.GetSemanticModelAsync(token).ConfigureAwait(false);
                 if (SymbolEqualityComparer.Default.Equals(otherModel?.GetSymbolInfo(name, token).Symbol, key)) return true;
             }
@@ -749,7 +749,8 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
     /// EECS067 (and EECS043's second fix): a hand-written Key returning <paramref name="member"/> (<c>this</c>: the value)
     /// declared with <c>[IndexKey]</c> (<c>[UniqueKey]</c> for a unique index) on that member or the type; the Key and the
     /// IIndexed / IUniqueIndexed of the base list go (an IDirectIndexed stays: its Slots and SlotOf are the user's), the
-    /// type becomes partial along its chain. Null when code reads the Key through the type.
+    /// type becomes partial along its chain. A hand-written Group (EECS067) gets <c>[Group]</c> on its member the same
+    /// way, its IGroup going. Null when code reads the member through the type.
     /// </summary>
     private static async Task<(SyntaxNode Root, string Attribute)?> IndexKeyAttribute(Document document, SyntaxNode root, PropertyDeclarationSyntax key,
         string? member, CancellationToken token)
@@ -758,13 +759,18 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         if (member == null || model?.GetDeclaredSymbol(key, token) is not IPropertySymbol property || key.Parent is not TypeDeclarationSyntax type
             || await ReadThroughType(document, property, token).ConfigureAwait(false))
             return null;
-        bool unique = property.ContainingType.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == "EasyEcs.IUniqueIndexed<TKey>");
-        string attribute = unique ? "UniqueKey" : "IndexKey";
+        bool group = key.Identifier.ValueText == "Group";
+        string attribute = group ? "Group"
+            : property.ContainingType.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == "EasyEcs.IUniqueIndexed<TKey>") ? "UniqueKey" : "IndexKey";
         var byName = new System.Collections.Generic.Dictionary<string, string>();
         if (member != "this") byName[member] = attribute;
-        var rewritten = Declare(model, root, type, byName, member == "this" ? attribute : null,
-            static m => m is PropertyDeclarationSyntax { Identifier.ValueText: "Key" } p && !p.Modifiers.Any(SyntaxKind.StaticKeyword), // the analyzer saw one Key
-            static b => Generic(b.Type) is { Identifier.ValueText: "IIndexed" or "IUniqueIndexed" });
+        var rewritten = group
+            ? Declare(model, root, type, byName, null,
+                static m => m is PropertyDeclarationSyntax { Identifier.ValueText: "Group" } p && !p.Modifiers.Any(SyntaxKind.StaticKeyword), // the analyzer saw one Group
+                static b => b.Type is IdentifierNameSyntax { Identifier.ValueText: "IGroup" } or QualifiedNameSyntax { Right.Identifier.ValueText: "IGroup" })
+            : Declare(model, root, type, byName, member == "this" ? attribute : null,
+                static m => m is PropertyDeclarationSyntax { Identifier.ValueText: "Key" } p && !p.Modifiers.Any(SyntaxKind.StaticKeyword), // the analyzer saw one Key
+                static b => Generic(b.Type) is { Identifier.ValueText: "IIndexed" or "IUniqueIndexed" });
         return rewritten == null ? null : (rewritten, attribute);
     }
 

@@ -199,6 +199,26 @@ public class PartTests
     public async Task AKeyTheAttributesCanDeclareIsReported(string source, string id = null) =>
         Assert.That(await Ids(source), id == null ? Is.Empty : Is.EqualTo(new[] { id }));
 
+    [TestCase("public struct Z : IComponent, IGroup { public int Zone; public int Group => Zone; }", "EECS067")]
+    [TestCase("public struct Z : IComponent, IGroup { public int Zone; readonly int IGroup.Group => this.Zone; }", "EECS067")]
+    [TestCase("public struct Z : IComponent, IGroup { int zone; public int Zone => zone; public int Group { get => Zone; } }", "EECS067")]  // a computed member, named
+    [TestCase("public enum E { A, B } public record struct Z(E Biome) : IComponent, IGroup { readonly int IGroup.Group => (int)Biome; }", "EECS067")]
+    [TestCase("public struct Z : IComponent, IGroup { public int X, Y; public int Group => X * 16 + Y; }")]                 // computed from several fields
+    [TestCase("public struct Z : IComponent, IGroup { public short Level; public int Group => Level; }")]                   // converted: [Group] takes an int
+    [TestCase("public struct Z : IComponent, IGroup { public long Id; public int Group => (int)Id; }")]                     // a cast of a long
+    [TestCase("public enum E : byte { A } public struct Z : IComponent, IGroup { public E B; public int Group => (int)B; }")]   // an enum of byte
+    [TestCase("public enum E { A } public struct Z : IComponent, IGroup { public E B; public int Group => (short)B; }")]   // not a cast to int
+    [TestCase("public struct Z : IComponent, IGroup { public static int Shared; public int Group => Shared; }")]            // not the value's
+    [TestCase("file struct Z : IComponent, IGroup { public int Zone; public int Group => Zone; }")]                         // no part for a file type
+    [TestCase("public struct Z : IComponent, IGroup { public int Zone; public int Group { get { return Zone; } } }")]       // a block body stays
+    public async Task AGroupTheAttributeCanDeclareIsReported(string source, string id = null)
+    {
+        var ids = await Ids(source);
+        Assert.That(ids, id == null ? Is.Empty : Is.EqualTo(new[] { id }));
+        if (id != null)
+            Assert.That((await GeneratorTests.Analyze([source])).Single(d => d.Id == id).GetMessage(), Does.Contain(".Group' returns").And.Contain("[Group]"));
+    }
+
     [Test]
     public void KeysDeclaredByAttributesIndexTheirEntities()
     {

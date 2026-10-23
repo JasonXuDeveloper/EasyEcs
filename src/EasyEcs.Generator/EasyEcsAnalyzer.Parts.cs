@@ -59,13 +59,14 @@ public sealed partial class EasyEcsAnalyzer
         "of negative values) adds itself once per chunk, so the result depends on how many chunks the pass had: on the " +
         "thread count and the table sizes.", helpLinkUri: Help("EECS066"));
 
-    public static readonly DiagnosticDescriptor HandWrittenKey = new("EECS067", "An index key an attribute can declare",
-        "'{0}.Key' returns {1}: declare it with [{2}] on {3}, and the generator writes the key",
+    public static readonly DiagnosticDescriptor HandWrittenKey = new("EECS067", "An index key or a group an attribute can declare",
+        "'{0}.{1}' returns {2}: declare it with [{3}] on {4}, and the generator writes {1}",
         Category, DiagnosticSeverity.Info, true,
         "A Key that returns a field, a property or the value itself is what [IndexKey] (and [UniqueKey] for a unique index) " +
-        "declares on that member, or on the type for the value itself, of a partial struct: the generator writes the " +
-        "interface and its explicit Key, which no ToString() prints and no caller reaches by mistake. A computed key stays " +
-        "hand-written.", helpLinkUri: Help("EECS067"));
+        "declares on that member, or on the type for the value itself, of a partial struct; a Group that returns an int " +
+        "member, or an enum of int cast to int, is what [Group] declares on that member. The generator writes the " +
+        "interface and its explicit member, which no ToString() prints and no caller reaches by mistake. A computed key " +
+        "or group stays hand-written.", helpLinkUri: Help("EECS067"));
 
     public static readonly DiagnosticDescriptor BadSetup = new("EECS068", "A world setup attribute on a type it does not fit",
         "[{0}] on '{1}': '{1}' {2}",
@@ -119,51 +120,76 @@ public sealed partial class EasyEcsAnalyzer
         }
     }
 
-    // EECS067's property for its code fix: the member [IndexKey] goes on ("this" for the type).
+    // EECS067's property for its code fix: the member the attribute goes on ("this" for the type).
     public const string KeyMember = "Member";
 
     /// <summary>
-    /// EECS067: a struct indexed by one key whose hand-written Key returns one of its own members or <c>this</c> (an
-    /// expression body or a <c>get =&gt;</c>), of exactly the key's type. Not for a file type (no part can be added),
-    /// nor the public self key of a record EECS043 reports.
+    /// EECS067: a struct indexed by one key whose hand-written Key returns one of its own members or <c>this</c>, of
+    /// exactly the key's type, or a grouped struct whose hand-written Group returns an <c>int</c> member or an enum of
+    /// <c>int</c> cast to <c>int</c>: what <see cref="Parts"/> accepts for <c>[IndexKey]</c> / <c>[UniqueKey]</c> and
+    /// <c>[Group]</c>. Not for a file type (no part can be added), nor the public self key of a record EECS043 reports.
     /// </summary>
     private static void AnalyzeHandWrittenKey(SymbolAnalysisContext context, INamedTypeSymbol type)
     {
-        if (Parts.Declares(type, Parts.Key) || Parts.Declares(type, Parts.UniqueKey)
-            || Symbols.InterfaceKey(type, out bool unique) is not { } key
-            || type.AllInterfaces.Count(i => Symbols.Named(i.OriginalDefinition, Symbols.Indexed)) != 1
-            || SelfPrintingKey(type) != null)
-            return;
         for (var level = type; level != null; level = level.ContainingType)
             if (level.IsFileLocal) return;
-        var face = type.AllInterfaces.First(i => Symbols.Named(i.OriginalDefinition, Symbols.Indexed));
-        if (type.FindImplementationForInterfaceMember(face.GetMembers("Key").First()) is not IPropertySymbol { IsStatic: false } property
+        if (!Parts.Declares(type, Parts.Key) && !Parts.Declares(type, Parts.UniqueKey)
+            && Symbols.InterfaceKey(type, out bool unique) is { } key
+            && type.AllInterfaces.Count(i => Symbols.Named(i.OriginalDefinition, Symbols.Indexed)) == 1
+            && SelfPrintingKey(type) == null
+            && HandWrittenPart(type, type.AllInterfaces.First(i => Symbols.Named(i.OriginalDefinition, Symbols.Indexed)), "Key", context.CancellationToken) is ({ } syntax, { } property, { } returned)
+            && ReturnedMember(returned) is { } member)
+        {
+            if (member == "this" ? SymbolEqualityComparer.Default.Equals(key, type)
+                : Parts.Members(type).FirstOrDefault(m => m.Name == member) is { } target
+                  && SymbolEqualityComparer.Default.Equals(target.Type, key) && !SymbolEqualityComparer.Default.Equals(target.Where, property))
+                Report(unique ? "UniqueKey" : "IndexKey", "Key", syntax, member);
+        }
+
+        if (!Parts.Declares(type, Parts.Group)
+            && type.AllInterfaces.FirstOrDefault(i => Symbols.Named(i, Symbols.Group)) is { } group
+            && HandWrittenPart(type, group, "Group", context.CancellationToken) is ({ } groupSyntax, { } groupProperty, { } value))
+        {
+            // [Group] on an int member returns it; on an enum of int, the member cast to int (Parts.ReadGroup).
+            bool cast = value is CastExpressionSyntax { Type: PredefinedTypeSyntax { Keyword.RawKind: (int)SyntaxKind.IntKeyword } };
+            if (ReturnedMember(value is CastExpressionSyntax c && cast ? c.Expression : value) is { } grouped && grouped != "this"
+                && Parts.Members(type).FirstOrDefault(m => m.Name == grouped) is { } target && !SymbolEqualityComparer.Default.Equals(target.Where, groupProperty)
+                && (cast ? target.Type is INamedTypeSymbol { TypeKind: TypeKind.Enum, EnumUnderlyingType.SpecialType: SpecialType.System_Int32 }
+                    : target.Type.SpecialType == SpecialType.System_Int32))
+                Report("Group", "Group", groupSyntax, grouped);
+        }
+
+        void Report(string attribute, string name, PropertyDeclarationSyntax at, string member) =>
+            context.ReportDiagnostic(Diagnostic.Create(HandWrittenKey, at.Identifier.GetLocation(),
+                ImmutableDictionary<string, string?>.Empty.Add(KeyMember, member), type.Name, name,
+                member == "this" ? "the value itself" : $"'{member}'", attribute, member == "this" ? "the type" : $"'{member}'"));
+    }
+
+    /// <summary>
+    /// The hand-written implementation of <paramref name="face"/>'s <paramref name="name"/> in <paramref name="type"/>
+    /// itself (not a generated part) and the expression it returns (an expression body or a lone <c>get =&gt;</c>).
+    /// </summary>
+    private static (PropertyDeclarationSyntax Syntax, IPropertySymbol Property, ExpressionSyntax Returned)? HandWrittenPart(INamedTypeSymbol type,
+        INamedTypeSymbol face, string name, CancellationToken token)
+    {
+        if (face.GetMembers(name).FirstOrDefault() is not { } declared
+            || type.FindImplementationForInterfaceMember(declared) is not IPropertySymbol { IsStatic: false } property
             || !SymbolEqualityComparer.Default.Equals(property.ContainingType, type) || Parts.IsGeneratedPart(property)
-            || property.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is not PropertyDeclarationSyntax syntax)
-            return;
+            || property.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(token) is not PropertyDeclarationSyntax syntax)
+            return null;
         var returned = syntax.ExpressionBody?.Expression
                        ?? (syntax.AccessorList?.Accessors is { Count: 1 } accessors && accessors[0] is { Keyword.ValueText: "get", ExpressionBody.Expression: { } body } ? body : null);
-        string? member = returned switch
-        {
-            ThisExpressionSyntax => "this",
-            IdentifierNameSyntax name => name.Identifier.ValueText,
-            MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax, Name: IdentifierNameSyntax name } => name.Identifier.ValueText,
-            _ => null,
-        };
-        if (member == null) return;
-        if (member == "this")
-        {
-            if (!SymbolEqualityComparer.Default.Equals(key, type)) return;
-        }
-        else if (Parts.Members(type).FirstOrDefault(m => m.Name == member) is not { } target
-                 || !SymbolEqualityComparer.Default.Equals(target.Type, key) || SymbolEqualityComparer.Default.Equals(target.Where, property))
-            return;
-
-        string attribute = unique ? "UniqueKey" : "IndexKey";
-        context.ReportDiagnostic(Diagnostic.Create(HandWrittenKey, syntax.Identifier.GetLocation(),
-            ImmutableDictionary<string, string?>.Empty.Add(KeyMember, member), type.Name,
-            member == "this" ? "the value itself" : $"'{member}'", attribute, member == "this" ? "the type" : $"'{member}'"));
+        return returned == null ? null : (syntax, property, returned);
     }
+
+    /// <summary>The member an expression names (<c>N</c>, <c>this.N</c>), <c>"this"</c> for the value, else null.</summary>
+    private static string? ReturnedMember(ExpressionSyntax returned) => returned switch
+    {
+        ThisExpressionSyntax => "this",
+        IdentifierNameSyntax name => name.Identifier.ValueText,
+        MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax, Name: IdentifierNameSyntax name } => name.Identifier.ValueText,
+        _ => null,
+    };
 
     /// <summary>
     /// EECS069: the managed components and singletons of the compilation with neither [NinoType] nor [NotSaved], reported

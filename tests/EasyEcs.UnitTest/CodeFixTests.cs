@@ -338,6 +338,12 @@ public class CodeFixTests
     [TestCase("EECS067", "Declare it with [UniqueKey]",
         "public struct D : IComponent, IDirectIndexed<int> { public int Cell; public int Key { get => Cell; } public static int Slots => 8; public static int SlotOf(int key) => key; }",
         "public partial struct D : IComponent, IDirectIndexed<int> { [UniqueKey] public int Cell; public static int Slots")]  // IDirectIndexed stays
+    [TestCase("EECS067", "Declare it with [Group]",
+        "public struct Z : IComponent, IGroup { public int Zone; public int Group => Zone; }",
+        "public partial struct Z : IComponent { [Group] public int Zone; }")]
+    [TestCase("EECS067", "Declare it with [Group]",
+        "public enum E { A, B }\npublic record struct Z(E Biome, int Hp) : IComponent, EasyEcs.IGroup { readonly int IGroup.Group => (int)this.Biome; }",
+        "public partial record struct Z([Group] E Biome, int Hp) : IComponent { }")]
     [TestCase("EECS043", "Declare it with [IndexKey]",
         "public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; }",
         "[IndexKey]\npublic readonly partial record struct Shop(long Id) : IComponent { }")]
