@@ -462,4 +462,55 @@ public class ParallelTests
             Assert.That(e.Get<Seen>().N, Is.EqualTo(dead ? -1 : e.Id.Index + e.Id.Version));
         }
     }
+    /// <summary>Items that count their runs, and throw on a chosen run of a chosen item.</summary>
+    private sealed class CountingWork(int items) : World.ParallelWork
+    {
+        public readonly int[] Runs = new int[items];
+        public int ThrowAt = -1;
+
+        public override void Run(int index)
+        {
+            if (Interlocked.Increment(ref Runs[index]) == ThrowAt) throw new InvalidOperationException("item " + index);
+        }
+    }
+
+    [Test]
+    public void WorkThatSettlesOnRunningAloneStillRunsEveryItemOnce()
+    {
+        // Items too small for helpers: the runner runs them alone after its first runs, and probes helpers now and then.
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        var work = new CountingWork(8);
+        bool alone = false;
+        int runs = 0;
+        for (; runs < 20_000 && !(alone && runs >= 2_000); runs++)
+        {
+            world.RunChunks(work, 8);
+            alone |= work.Alone;
+        }
+
+        Assert.That(alone, Is.True, "tiny items run alone");
+        Assert.That(work.Runs, Is.All.EqualTo(runs), "every item once per run, alone or with helpers");
+        Assert.That(Allocations.Least(() => { for (int i = 0; i < 100; i++) world.RunChunks(work, 8); }), Is.Zero);
+    }
+
+    [Test]
+    public void AnItemThatThrowsWhileRunningAloneLetsTheOthersRun()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        var work = new CountingWork(8);
+        int runs = 0;
+        while (!work.Alone && runs < 20_000)
+        {
+            world.RunChunks(work, 8);
+            runs++;
+        }
+
+        Assume.That(work.Alone, Is.True, "the runner chose to run the items alone");
+        work.ThrowAt = runs + 1; // every item's next run throws: the first one's exception reaches the caller
+        var error = Assert.Throws<InvalidOperationException>(() => world.RunChunks(work, 8));
+        Assert.That(error.Message, Is.EqualTo("item 0"));
+        Assert.That(work.Runs, Is.All.EqualTo(runs + 1), "the items after the one that threw ran too");
+        Assert.DoesNotThrow(() => world.RunChunks(work, 8), "the next run is normal");
+        Assert.That(world.CreateEntity(new Counter()).IsAlive, Is.True, "the gate is open again");
+    }
 }

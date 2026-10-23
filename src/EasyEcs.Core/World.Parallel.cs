@@ -212,6 +212,9 @@ public sealed partial class World
             return true;
         }
 
+        /// <summary>Whether the work has chosen to run alone (its runs wake no helper until the next probe).</summary>
+        internal bool Alone => _single;
+
         /// <summary>Helpers pay when they make a run at least a fifth faster than its work.</summary>
         private static bool Beats(long wide, long work) => wide < work - work / 5;
 
@@ -310,8 +313,7 @@ public sealed partial class World
             if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return false;
             try
             {
-                Run(work, count);
-                allocated = _claims.Allocated; // read while the runner is still this run's
+                allocated = Run(work, count);
             }
             finally
             {
@@ -322,8 +324,12 @@ public sealed partial class World
             return true;
         }
 
-        private void Run(ParallelWork work, int count)
+        /// <summary>Run the items; returns the bytes helpers allocated (read while the runner is still this run's).</summary>
+        private long Run(ParallelWork work, int count)
         {
+            bool wide = work.Wide(out bool sample);
+            if (!wide) return RunAlone(work, count);
+
             // Close the last run's claims first: a late participant of it that read its cursor before this can no longer
             // claim (its compare-exchange fails), and one reading after it finds no item. Without this, one that read
             // the cursor at its end and then the larger _count of this run would claim an item of this run under the
@@ -340,9 +346,8 @@ public sealed partial class World
             // Publishes the fields above: a participant reads them only after a successful claim in this epoch.
             Interlocked.Exchange(ref claims.Cursor, (long)epoch << 32);
 
-            bool wide = work.Wide(out bool sample);
             long start = Stopwatch.GetTimestamp();
-            int wanted = wide ? Math.Min(_helpers.Length, count - 1) : 0;
+            int wanted = Math.Min(_helpers.Length, count - 1);
             for (int i = 0; i < _helpers.Length && wanted > 0; i++)
             {
                 // A helper still queued from an earlier run is skipped (it will exit on its stale epoch).
@@ -357,8 +362,37 @@ public sealed partial class World
             // block): a blocking event allocates its lock the first time it waits.
             var spinner = new SpinWait();
             while (Volatile.Read(ref claims.Remaining) != 0) spinner.SpinOnce(sleep1Threshold: -1);
-            if (sample) work.Took(wide, Stopwatch.GetTimestamp() - start, Volatile.Read(ref claims.Spent));
+            if (sample) work.Took(true, Stopwatch.GetTimestamp() - start, Volatile.Read(ref claims.Spent));
             if (_error != null) ExceptionDispatchInfo.Throw(_error);
+            return claims.Allocated;
+        }
+
+        /// <summary>
+        /// A run the work chose to make alone (<see cref="ParallelWork.Wide"/>): every item on the caller, in order, with
+        /// no claim, no per-item timestamp and no epoch. The last run's claims are closed already (each participant
+        /// claimed until its count), and its count stays, so a helper queued by it that starts now still finds no
+        /// item; the next run with helpers closes them again before it publishes anything. An item that throws does
+        /// not stop the others; the first exception is rethrown once all have run, as with helpers.
+        /// </summary>
+        private static long RunAlone(ParallelWork work, int count)
+        {
+            Exception error = null;
+            long start = Stopwatch.GetTimestamp();
+            for (int i = 0; i < count; i++)
+            {
+                try
+                {
+                    work.Run(i);
+                }
+                catch (Exception e)
+                {
+                    error ??= e;
+                }
+            }
+
+            work.Took(false, Stopwatch.GetTimestamp() - start, 0); // a run alone always counts
+            if (error != null) ExceptionDispatchInfo.Throw(error);
+            return 0;
         }
 
         private void Work(int epoch, bool helper)
