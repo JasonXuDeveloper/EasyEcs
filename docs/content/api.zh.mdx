@@ -161,7 +161,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` | O(M + S) | job 还会拿到 `Entity` |
 | `entity.Run<T1..Tn, TJob>(ref job)` / `Run(ref job, filter)` | O(n)，过滤条件每个组件再加 O(1) | 单个实体；实体失效、缺组件或被过滤掉时返回 false；job 做结构变更后 ref 仍然有效 |
 | `[ForEntity]` 方法：生成的 `Owner.Method(entity, values…)` | 同 `entity.Run` | 用生成的 job 调 `entity.Run`（`ref` 参数构成 `WriteMask`，过滤特性构成一个 `static readonly` 过滤条件）；返回 false 的情况同 `Run`；带 `[Changed<T>]` 的方法第二个参数是 `since`；接收单例或 `World` 的方法，对不属于任何 World 的实体返回 false |
-| `[ForEach, Consume]` | 遍历本身，之后 O(M + S)：一次 `DestroyAll`（整张表一起释放）或每行一次销毁 | 遍历结束时销毁访问过的行：方法不做结构变更时按它的过滤条件做一次 `DestroyAll`，否则在方法处理完每一行后销毁那一行；遍历期间才开始匹配的行保留；遍历抛异常时什么也不销毁；不能和 `Slices` 一起用（EECS085） |
+| `[ForEach, Consume]` | 遍历本身，之后 O(M + S)：一次 `DestroyAll`（整张表一起释放）或每行一次销毁 | 遍历结束时销毁访问过的行：方法不做结构变更时按它的过滤条件做一次 `DestroyAll`，否则在方法处理完每一行后销毁那一行；遍历期间才开始匹配的行保留；批量销毁的遍历抛异常时什么也不销毁；所在的系统独自运行；不能和 `Slices` 一起用（EECS085） |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数) | 连续行的 span；不能做结构变更 |
 | `world.ForEachMasked<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数 + 部分通过的字数) | 同 `ForEachBatch`，但只有部分行通过的 64 行字整个交给 job，通过的行记成位（`IForEachMasked`），不再按每一段通过的行各调一次；全部通过的字并进连续段 |
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)` / `ForEachEntityParallel` / `ForEachBatchParallel`（一块中连续行的 span） | O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | `INoStructuralChanges` job；每块 1,024 到 `World.ParallelChunkRows` 行（job 写被追踪组件时为 4,096 的整数倍），或 `chunkRows` 向上取整到 64（`[ForEach(ChunkRows = n)]`；这时遍历前打开 O(B) 个区块，B 为 4,096 行的区块数，每写 64 行一次原子 OR），每块一个 job 副本（job 做归约 `Reduce<T>` 时保留这些副本，按块的顺序合并，O(块数)）；只在划算时唤醒助手线程 |

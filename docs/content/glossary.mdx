@@ -27,6 +27,14 @@ point at other entities; `world.TryGetEntity(id, out entity)` turns one back int
 A struct implementing `IComponent`: plain data for one aspect of an entity (`Position`, `Health`). Components hold
 no behaviour and no references to systems or services. See [ECS principles](/en/docs/ecs-principles).
 
+## Generated part [#generated-part]
+
+The members the generator adds to a `partial` struct from attributes on its declaration: `[IndexKey]` or
+`[UniqueKey]` writes the explicit `Key` of `IIndexed<TKey>`, `[Group]` the `Group` of `IGroup`, and `[Sum]`,
+`[Min]`, `[Max]` and their kin the `Identity` and `Combine` of a reduction. Setup attributes on the type
+(`[GroupBy]`, `[WhenTargetDestroyed]`, `[NotSaved]`) are registered for every world instead. See
+[Entities and components](/en/docs/guide/entities-and-components#declared-parts).
+
 ## Tag [#tag]
 
 A component with no fields (`Dead`, `Stunned`). It only says yes or no, so systems use it in filters
@@ -98,7 +106,7 @@ it implements (the way a generic interface gives each actor type its own group).
 ## Update and tick [#update]
 
 An update is one call of `world.Update()` (or `world.Update<G>()`): every enabled system of the group runs once, in
-order, unless its `UpdateInterval` skips this update. A tick is one step of the simulation at a fixed rate; a
+order, unless its `[UpdateInterval]` skips this update. A tick is one step of the simulation at a fixed rate; a
 server's loop calls `Update()` once per tick. See [Systems](/en/docs/guide/systems#one-update).
 
 ## Stage [#stage]
@@ -112,7 +120,7 @@ See [Threading](/en/docs/guide/threading#parallel-systems).
 What a system reads and writes, generated from its `[ForEach]` parameters: a `ref` component or singleton is a
 write, an `in` one a read, a `Mut<T>` parameter a write of `T`, and `[Changed<T>]` or `[Removed<T>]` reads `T`. Two systems conflict when one writes what
 the other reads or writes. A system that can reach the whole world (an `Entity` or `World` parameter, an instance
-method, an `OnUpdate` override) runs alone. Only systems that do not conflict share a [stage](#stage). See
+method, an `OnUpdate` override, a `[Consume]` method) runs alone. Only systems that do not conflict share a [stage](#stage). See
 [Threading](/en/docs/guide/threading#parallel-systems).
 
 ## Runner [#runner]
@@ -179,6 +187,19 @@ loop calls. The JIT inlines it, so there is no delegate and no virtual call per 
 every `[ForEach]` method. `entity.Run<T…, TJob>(ref job)` runs an `IForEachEntity` job on one entity. A job's
 `static int WriteMask` names the components it writes; implementing `INoStructuralChanges` promises no structural change.
 See [Queries and filters](/en/docs/guide/queries#foreach-a-struct-job).
+
+## Entry point [#entry-point]
+
+The static method the generator writes next to a `[ForEach]` method outside a system (a [runner](/en/docs/guide/systems#foreach-outside-systems))
+or a `[ForEntity]` method, named like it: `Reports.SumHealth(world, ref total)` runs the pass over a world,
+`Requests.TakeHit(unit, damage)` runs the method on one entity and returns whether it ran. See
+[one entity](/en/docs/guide/queries#run-on-one-entity).
+
+## Event entity [#event-entity]
+
+An entity that stands for something that happened or was asked (a hit, a sale, a client's command), created by one
+system or thread and handled once by another. `[ForEach, Consume]` destroys the rows its pass visited, so each event
+is handled once and none is left behind. See [Systems](/en/docs/guide/systems#consume).
 
 ## Batch method [#batch-method]
 

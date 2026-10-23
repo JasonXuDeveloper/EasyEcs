@@ -15,9 +15,9 @@ writes, which the source generator compiles into a struct job as fast as a hand-
 <Callout type="idea" title="Use it for">
   All per-tick behavior: one responsibility per system, one `[ForEach]` method per loop, ordering with
   `[UpdateAfter<T>]`, groups for different cadences (input whenever it arrives, simulation at a fixed tick),
-  `UpdateInterval` for work that runs every N-th tick, [`Slices`](#slices) for work spread over several ticks.
-  [Group filters](#group-filters) keep a whole group to one kind
-  of entity, and a generic group interface gives each type its own group (one group per actor type).
+  [`[UpdateInterval(N)]`](#update-interval) for work that runs every N-th tick, [`Slices`](#slices) for work spread
+  over several ticks, [`[Consume]`](#consume) for event entities handled once. [Group filters](#group-filters) keep a
+  whole group to one kind of entity, and a generic group interface gives each type its own group (one group per actor type).
 </Callout>
 
 <Callout type="warn" title="Skip it for">
@@ -151,6 +151,45 @@ public class SaveSystem : EcsSystem
     protected override void OnUpdate() => World.GetOrAddAutosave().Count++;
 }
 ```
+
+The attribute is all there is to write: the generator puts the cadence into the code it registers for the system, and
+the world reads it once, when the system is added.
+
+<Tabs items={['You write', 'The generator writes']}>
+<Tab value="You write">
+
+```csharp doccheck=skip
+[UpdateInterval(60, Phase = 30)]
+public class SaveSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.GetOrAddAutosave().Count++;
+}
+```
+
+</Tab>
+<Tab value="The generator writes">
+
+```csharp doccheck=skip
+file static class __ForEach
+{
+    internal sealed class Code : SystemCode
+    {
+        public Code() : base(60, 30) { }                       // [UpdateInterval(60, Phase = 30)]
+
+        protected override void Update(EcsSystem system) { }   // no [ForEach] method: OnUpdate is the work
+    }
+
+    [ModuleInitializer]
+    internal static void Register() => SystemCode.Register(typeof(SaveSystem), new Code());
+}
+```
+
+</Tab>
+</Tabs>
+
+A cadence computed at run time has no attribute form: put the system in a [system group](#system-groups) and update
+the group when it is due. An override of the removed `UpdateInterval` / `UpdatePhase` properties is
+[EECS082](/en/docs/guide/analyzer#eecs082), whose code fix writes the attribute.
 
 ### Slices: part of the rows per run [#slices]
 
@@ -348,16 +387,45 @@ take the read-only one from either.
 
 ### `[Consume]`: events destroyed after the pass [#consume]
 
-`[ForEach, Consume]` destroys exactly the rows the pass visited, when it ends: a method over event or command
-entities (a hit, a request) does its work and leaves the destroying to the pass. A method without structural changes
-has them destroyed at once, a `DestroyAll` of its filter that frees whole tables; one that may change structure (it
-takes the `World`, or uses its `Entity` to change something) destroys each row after the method ran on it. An entity
-that starts to match during the pass is not destroyed: the next run visits it. Cleanup components retire a consumed
-entity as they do any destroyed one, and the [destroy log](/en/docs/guide/change-tracking#destroy-log) records it. A
-pass that throws destroys nothing, so its rows are visited again. `[Consume]` cannot be combined with `Slices`
-([EECS085](/en/docs/guide/analyzer#eecs085)).
+`[ForEach, Consume]` destroys exactly the rows the pass visited: a method over event or command entities (a hit, a
+sale, a request from a client) does its work and leaves the destroying to the pass, so no event is handled twice and
+none is left behind.
+
+<Callout type="idea" title="Use it for">
+  Entities that exist to be handled once, by one system: hits and heals another system spawned, commands a network
+  thread queued as entities, messages to an actor, one-shot timers that fired.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Entities that live on after the method (a buff that lasts, a projectile in flight): `[Consume]` destroys every row
+  it visits, so destroy those with `entity.Destroy()` where the method decides. Events that several systems read:
+  consume them in the last one, ordered with `[UpdateAfter<T>]`. Sliced methods: a slice's destroys move the rows of
+  the other slices ([EECS085](/en/docs/guide/analyzer#eecs085)).
+</Callout>
+
+How the rows go depends on the method:
+
+- **A method without structural changes** (static, no `World`, its `Entity` used only to read) has its rows destroyed
+  in bulk once the pass ends: one `DestroyAll` of the method's filter, which frees each table at once. Nothing makes a
+  row start or stop matching during such a pass, so the rows that match at its end are the rows it visited. A pass
+  that throws destroys nothing, and its rows are visited again.
+- **A method that may change structure** (it takes the `World`, or changes something through its `Entity`) destroys
+  each row right after the method ran on it. An entity that starts to match during the pass is not destroyed: the
+  next run visits it.
+
+<Tabs items={['You write', 'The generator writes']}>
+<Tab value="You write">
 
 ```csharp
+public record struct Sale(int Price) : IComponent;                     // an event entity
+public record struct Takings(long Gold) : ISingletonComponent;
+
+public class BankSales : EcsSystem
+{
+    [ForEach, Consume]
+    static void Bank(in Sale sale, ref Takings takings) => takings.Gold += sale.Price;
+}
+
 public record struct Heal(int Amount, EntityId Target) : IComponent;   // an event entity
 
 public class ApplyHeals : EcsSystem
@@ -369,6 +437,52 @@ public class ApplyHeals : EcsSystem
     }
 }
 ```
+
+</Tab>
+<Tab value="The generator writes">
+
+```csharp doccheck=skip
+// BankSales makes no structural change: one DestroyAll after the pass.
+protected override void Update(EcsSystem system)
+{
+    var world = system.World;
+    var job0 = new BankJob0 { /* the Takings singleton, resolved once */ };
+    world.ForEach<Sale, BankJob0>(ref job0);
+    world.DestroyAll<Sale>(); // [Consume]: the rows the pass visited
+}
+
+// ApplyHeals takes the World: each row is destroyed after the method ran on it.
+internal ref struct ApplyJob0 : IForEachEntity<Heal>
+{
+    public World World;
+
+    public void Execute(Entity entity, ref Heal c1)
+    {
+        __ForEach.Apply_0(null, in c1, World);
+        entity.Destroy();
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+```csharp
+world.AddSingleton<Takings>();
+world.AddSystem<BankSales>();
+world.CreateEntity(new Sale(30));
+world.CreateEntity(new Sale(12));
+world.Update();
+long banked = world.Takings.Gold;              // 42
+int pending = world.Count<Sale>();             // 0: both sales were consumed
+```
+
+Cleanup components retire a consumed entity as they do any destroyed one, and the
+[destroy log](/en/docs/guide/change-tracking#destroy-log) records it. A [runner](#foreach-outside-systems) with
+`[Consume]` consumes through its entry point the same way. A system with a `[Consume]` method runs alone, as a
+system that destroys entities must ([parallel systems](/en/docs/guide/threading#parallel-systems)). A method that
+ends with `entity.Destroy()` on every path is [EECS084](/en/docs/guide/analyzer#eecs084), whose code fix writes
+`[Consume]`.
 
 ### Batch methods [#batch-methods]
 
@@ -1103,6 +1217,9 @@ needed, and a method that writes a singleton:
 - **Parallel methods** allocate nothing after their first update; the runner's work items are reused.
 - **Vector loops** cost nothing to qualify for: they are written at compile time, run per run of rows, and allocate
   nothing.
+- **`[UpdateInterval]`** is read once, when the system is added; each update tests one count per system.
+- **`[Consume]`** costs the destroys: one `DestroyAll` per pass for a method without structural changes, one `Destroy`
+  per row otherwise. Its system runs alone.
 - **Generated code** is registered by a module initializer: systems need no `partial`, no registration call and no
   reflection at update time.
 

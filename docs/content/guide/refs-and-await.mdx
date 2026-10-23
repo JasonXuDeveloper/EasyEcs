@@ -58,7 +58,7 @@ Use `ref` freely inside `[ForEach]` methods, `ForEach` jobs and `Query` loops: e
 - The **`ref` parameters of a `[ForEach]` method** (or a `ForEach` job) stay writable even when the body changes
   the archetype of the entity it visits: the pass copies those writes (for a job, the components in its `WriteMask`)
   to the entity's new row after the body returns. `in` parameters keep showing the values from before the change.
-- **A job run on one entity** with [`entity.Run`](/en/docs/guide/queries#run-on-one-entity) gets the same guarantee:
+- **A [`[ForEntity]`](/en/docs/guide/queries#run-on-one-entity) method**, or a job run on one entity with `entity.Run`, gets the same guarantee:
   its refs stay the entity's values across its own structural changes, and the components in its `WriteMask` are
   carried to the new row when it returns.
 - **Any other `ref`** (from `entity.Get<T>()`, an item of a `Query` loop, or into another entity) is guaranteed only

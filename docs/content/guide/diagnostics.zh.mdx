@@ -176,7 +176,7 @@ Group Default
 `MoveSystem` 写的 `Position`：没有任何特性规定它们的先后，复制发出去的是这个 tick 还是上个 tick 的位置，取决于它们是按什么
 顺序加进来的。这就是**只靠注册顺序的系统对**：两个系统有冲突，又没有任何一条 `[UpdateBefore]` / `[UpdateAfter]` 链给它们排序。
 反过来注册，后跑的那个看到的数据就变了，所以每一对都要给出它需要的顺序，这里是在 `ReplicateSystem` 上加
-`[UpdateAfter<MoveSystem>]`。`RunsAlone` 的系统（有 `OnUpdate`、`World` 参数，或不只当身份用的 `Entity`）和所有系统都冲突，显示为 `runs alone`。
+`[UpdateAfter<MoveSystem>]`。`RunsAlone` 的系统（有 `OnUpdate`、`World` 参数、`[Consume]` 方法，或不只当身份用的 `Entity`）和所有系统都冲突，显示为 `runs alone`。
 
 `server.DescribeSchedule().ToMermaid()` 把同一份调度画成流程图：每个组、每个阶段一个子图，每个等待是一条实线箭头，标着冲突的
 数据，每个只靠注册顺序的系统对是一条虚线箭头：

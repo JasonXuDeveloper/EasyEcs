@@ -22,7 +22,7 @@ Read them in this order:
 | 3 | [SaveLoad](SaveLoad) | `Save` / `Load` of a world, `SaveEntities` / `LoadEntities` of a group, `MoveEntities` between worlds | `dotnet run --project samples/SaveLoad` |
 | 4 | [MultiWorld](MultiWorld) | one world per thread (one zone each), no locks | `dotnet run -c Release --project samples/MultiWorld` |
 | 5 | [HotReload](HotReload) | systems and components in a collectible plugin: unload, reload, keep the world's data | `dotnet run --project samples/HotReload/HotReload.Host` |
-| 6 | [Actors](Actors) | actors: one type per kind as key component, index and system group (`ISystemGroupWith`), messages as `entity.Run` jobs, records loaded with `markWritten: false`, saving only what changed | `dotnet run --project samples/Actors` |
+| 6 | [Actors](Actors) | actors: one type per kind as key component, index and system group (`ISystemGroupWith`), messages as `[ForEntity]` methods, records loaded with `markWritten: false`, saving only what changed | `dotnet run --project samples/Actors` |
 | 7 | [VoxelServer](VoxelServer) | a Minecraft-style server: chunks as entities saved and loaded around the players, an area of interest by chunk, water as a SIMD stencil, zombies by night | `dotnet run -c Release --project samples/VoxelServer` |
 | 8 | [Godot](Godot) | a Godot 4 .NET project: the scene's root node owns the world, steps it per physics tick and draws the entities with one multimesh | open it in the Godot editor, or `godot --headless --path samples/Godot -- --ticks 120` |
 

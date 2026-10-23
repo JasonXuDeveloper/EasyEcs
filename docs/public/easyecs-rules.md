@@ -92,7 +92,7 @@ available as Markdown: add `.md` to its URL.
   (EECS013). Changes apply at once; the pass stays safe.
 - Event and command entities handled once: `[ForEach, Consume]` destroys exactly the rows the pass visited when it
   ends (in bulk when the method changes no structure), not `entity.Destroy()` at the end of the body (EECS084); not
-  with `Slices` (EECS085).
+  with `Slices` (EECS085). Its system runs alone, as any system that destroys entities.
 - Order systems with `[UpdateBefore<T>]` / `[UpdateAfter<T>]` inside the same group; no cycles (EECS019, EECS020).
   There is no `Priority`. Groups are `ISystemGroup` structs with `[UpdateInGroup<T>]`; cadence is
   `[UpdateInterval(n, Phase = p)]` on the class (EECS082: no overrides; EECS083: n >= 1, 0 <= p < n).
@@ -201,11 +201,11 @@ available as Markdown: add `.md` to its URL.
   `world.Count<T>()`, and filter with `QueryFilter`, instead of counting or testing in a loop (EECS032).
 - Removing a component keeps the row (one bit flips), so status components that come and go are cheap; adding a new
   kind of component moves the row once.
-- Use `Prefab` + `world.Instantiate` for repeated spawns, `GroupBy<T>()` to split tables by zone or team, and value
+- Use `Prefab` + `world.Instantiate` for repeated spawns, `[GroupBy]` (or `world.GroupBy<T>()`) to split tables by zone or team, and value
   indexes for lookups by key. Give an instance its own values in the same call, `world.Instantiate(prefab, new
   ChildOf(parent), new Position(x, y))`, not `Instantiate` then `Set` (two row copies). A component instances gain
   later (a `Stunned`, a `Target`) goes into the recipe as `prefab.SetAbsent<T>()`: its column is there, so adding it
-  flips a presence bit instead of moving the row. `entity.GetOrAddX(…)` adds a component with a value only when it is
+  flips a presence bit instead of moving the row. `entity.GetOrAddX(…)` (and `world.GetOrAddX(…)` for a singleton) adds a value only when it is
   missing.
 - Call `world.TrimExcess()` only at a quiet moment after a peak (a wave cleared, a match ended), never every tick:
   what it drops is allocated again by the next structural changes (EECS028 in `OnUpdate` and `[ForEach]` methods).

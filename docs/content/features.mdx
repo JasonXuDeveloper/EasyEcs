@@ -252,8 +252,9 @@ entities handles each one once, with no `entity.Destroy()` in its body.
 - **Use it for:** damage events, client commands, requests: entities that live for one pass.
 - **Skip it for:** entities that outlive the system that reads them; sliced methods
   ([EECS085](/en/docs/guide/analyzer#eecs085)).
-- **Cost:** one `DestroyAll` per table after a pass without structural changes, instead of a destroy per row; a pass
-  that throws destroys nothing. [EECS084](/en/docs/guide/analyzer#eecs084) reports the hand-written destroy.
+- **Cost:** one `DestroyAll` per table after a pass without structural changes, instead of a destroy per row (a pass
+  that throws then destroys nothing); its system runs alone. [EECS084](/en/docs/guide/analyzer#eecs084) reports the
+  hand-written destroy.
 - **Guide:** [Systems](/en/docs/guide/systems#consume)
 
 ### Ad-hoc queries [#ad-hoc-queries]
@@ -267,12 +268,12 @@ A static `[ForEntity]` method runs on one entity, with the refs a pass would giv
 components that count as written (default: all); a job implementing `INoStructuralChanges` skips the structural
 bookkeeping.
 
-- **Use it for:** tools, tests, request handlers between updates, one-off passes; `entity.Run` for a request or a
+- **Use it for:** tools, tests, request handlers between updates, one-off passes; `[ForEntity]` for a request or a
   message to one entity.
 - **Skip it for:** per-tick logic: a system is ordered, scheduled and measured.
 - **Cost:** allocation-free. `Count` sums table counts; `Any` stops at the first match; a struct job is the fastest
-  ad-hoc pass. `entity.Run` is O(1), plus O(1) per component its filter names.
-- **Guide:** [Queries and filters](/en/docs/guide/queries), [`entity.Run`](/en/docs/guide/queries#run-on-one-entity)
+  ad-hoc pass. A `[ForEntity]` entry point (`entity.Run`) is O(1), plus O(1) per component its filter names.
+- **Guide:** [Queries and filters](/en/docs/guide/queries), [`[ForEntity]`](/en/docs/guide/queries#run-on-one-entity)
 
 ## React to changes [#react]
 

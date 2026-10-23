@@ -33,10 +33,37 @@ Mark the member the entity is found by with `[IndexKey]` (on a positional parame
 creates the index on first use; the generated `world.XIndex` property returns the same one. A key computed from several
 members is written by hand: implement `IIndexed<TKey>` and its `Key` ([below](#direct-index) a cell's `(X, Y)`).
 
+<Tabs items={['You write', 'The generator writes']}>
+<Tab value="You write">
+
 ```csharp
 public partial record struct Callsign([IndexKey] string Value) : IComponent;
 public partial record struct Zone([IndexKey] int Id) : IComponent;
 ```
+
+</Tab>
+<Tab value="The generator writes">
+
+```csharp doccheck=skip
+partial record struct Callsign : IIndexed<string>
+{
+    readonly string IIndexed<string>.Key => Value;
+}
+
+partial record struct Zone : IIndexed<int>
+{
+    readonly int IIndexed<int>.Key => Id;
+}
+```
+
+</Tab>
+</Tabs>
+
+The key is explicit, so it stays out of the record's members and its `ToString()`. The struct, and every type it is
+nested in, is `partial` so the generator can add to it ([EECS062](/en/docs/guide/analyzer#eecs062), with a code fix).
+A `Key` written by hand that returns one member is reported with the attribute as its fix
+([EECS067](/en/docs/guide/analyzer#eecs067)), and two keys on one component are
+[EECS036](/en/docs/guide/analyzer#eecs036).
 
 ```csharp
 var alpha = world.CreateEntity(new Callsign("alpha"), new Zone(1));
@@ -623,6 +650,9 @@ follow, then the followers of 100 players counted and walked (`RelationBenchmark
 | Storing an `Entity` handle in a component | A managed column, write barriers, not saved | [EECS017](/en/docs/guide/analyzer#eecs017) |
 | Giving entities the indexed component or a new key inside a `Find` loop over it | The walk can read another key's entities (removing the component and destroying entities are fine) | [EECS042](/en/docs/guide/analyzer#eecs042): collect first, then change |
 | A public `Key => this` on a record struct | `ToString()` prints `Key` forever: a stack overflow | [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix): `[IndexKey]` on the struct, or `Shop IIndexed<Shop>.Key => this;` |
+| `[IndexKey]` or `[UniqueKey]` on a struct (or in a type) that is not `partial` | Compile error: the generator cannot add the key | [EECS062](/en/docs/guide/analyzer#eecs062) (with a code fix) |
+| A hand-written `Key` that returns one member | Works, but a public `Key` joins the record's `ToString()` and equality members | [EECS067](/en/docs/guide/analyzer#eecs067) (with a code fix): `[IndexKey]` on the member |
+| `[WhenTargetDestroyed]` on a type that links to no entity | Compile error: no target to watch | [EECS068](/en/docs/guide/analyzer#eecs068) |
 | Using an index from another thread | Indexes belong to the owner thread | [Threading](/en/docs/guide/threading#what-the-world-synchronizes) |
 | Indexing one component by two key types | `InvalidOperationException`: one index per component | At run time |
 | A `null` key (the default of a `string`) | The entity is indexed nowhere | By design |

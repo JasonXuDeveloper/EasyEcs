@@ -54,7 +54,7 @@ entity.Get<Health>().Value -= 10;      // 同上，用泛型 API
 
 - **`[ForEach]` 方法（或 `ForEach` job）的 `ref` 参数**，即使方法体改变了当前实体的原型，也仍然可写：遍历会在方法返回后把这些写入（结构体 job 则是 `WriteMask` 里的组件）复制到实体的新行。
   `in` 参数看到的仍是变更前的值。
-- **用 [`entity.Run`](/zh/docs/guide/queries#run-on-one-entity) 在单个实体上跑的 job** 有同样的保证：job 的 ref 跨过它自己做的结构变更仍指向这个实体的值，job 返回时，`WriteMask` 里的组件会被带到新行。
+- **[`[ForEntity]`](/zh/docs/guide/queries#run-on-one-entity) 方法**，或用 `entity.Run` 在单个实体上跑的 job，有同样的保证：它的 ref 跨过它自己做的结构变更仍指向这个实体的值，job 返回时，`WriteMask` 里的组件会被带到新行。
 - **其他任何 `ref`**（来自 `entity.Get<T>()`、`Query` 循环的元素，或者指向别的实体）只保证在下一次结构变更之前有效。要么在变更前写完，要么变更后重新获取。
 
 ```csharp

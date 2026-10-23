@@ -2,7 +2,7 @@
 title: "Actors: entities that answer messages"
 navTitle: Actors
 seoTitle: "Actor Model on a C# ECS: the EasyEcs Actors Sample"
-description: "Actors on an EasyEcs world: one type per kind as key, index and system group, messages as entity.Run jobs, records loaded on activation, saves of what changed."
+description: "Actors on an EasyEcs world: one type per kind as key, index and system group, messages as [ForEntity] methods, records loaded on activation, changes saved."
 icon: Mailbox
 ---
 
@@ -113,7 +113,7 @@ not. After the restart the shop has its saved stock but no sales: `Sales` lives 
     System groups and their filters, one per kind of actor.
   </Card>
   <Card icon={<Workflow />} title="Queries" href="/en/docs/guide/queries#run-on-one-entity">
-    entity.Run: a job on one entity, the shape of a message.
+    `[ForEntity]` methods: work on one entity, the shape of a message.
   </Card>
   <Card icon={<Database />} title="Migration and records" href="/en/docs/guide/migration-and-unload#records">
     A record of what persists, loaded onto an actor.

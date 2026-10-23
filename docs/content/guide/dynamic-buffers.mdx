@@ -309,7 +309,7 @@ const int ChunkBlocks = 16 * 16 * 32;
 const int PeakChunks = 512;
 
 DynamicBuffer<Block>.MaxPooledLength = ChunkBlocks;           // a whole chunk's list goes back to the pool
-DynamicBuffer<Block>.FillPool(PeakChunks);              // the peak, allocated before the first tick
+DynamicBuffer<Block>.FillPool(PeakChunks);                    // the peak, allocated before the first tick
 
 using var server = new World();
 var loaded = new Entity[PeakChunks];

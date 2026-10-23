@@ -191,7 +191,7 @@ because `[UpdateAfter<RegenSystem>]` says so (`ordered`) and both write `Health`
 they were added in decides whether replication sends this tick's positions or last tick's. That is what a
 **registration-only pair** is: two systems that conflict and that no chain of `[UpdateBefore]` / `[UpdateAfter]`
 orders. Registering them the other way round changes what the later one sees, so give each such pair the order it
-needs, here `[UpdateAfter<MoveSystem>]` on `ReplicateSystem`. A system that `RunsAlone` (an `OnUpdate`, a `World` parameter, an
+needs, here `[UpdateAfter<MoveSystem>]` on `ReplicateSystem`. A system that `RunsAlone` (an `OnUpdate`, a `World` parameter, a `[Consume]` method, an
 `Entity` used for more than its identity) conflicts with every other one and shows as `runs alone`.
 
 `server.DescribeSchedule().ToMermaid()` returns the same schedule as a flowchart, a subgraph per group and per stage,
