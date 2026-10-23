@@ -68,7 +68,9 @@ public static class Startup
         DynamicBuffer<Surface>.MaxPooledLength = Terrain.Size * Terrain.Size;
         DynamicBuffer<ItemStack>.MaxPooledLength = Rules.InventorySlots;
 
-        var world = new World(new WorldOptions { MeasureSystems = measure });
+        // ParallelSystems: consecutive systems whose data do not conflict share a stage and run at once (the order
+        // below puts such systems next to each other); the result is the one of running them one by one.
+        var world = new World(new WorldOptions { MeasureSystems = measure, ParallelSystems = true });
         // #endregion options
 
         world.SetClock(Tick: 0, DayLength: Rules.DayLength);
@@ -84,19 +86,21 @@ public static class Startup
     {
         // #region systems
         // One tick, in this order: what the clients asked for, the world around them, movement, the rules of the game,
-        // what is sent back.
+        // what is sent back. Systems that touch other data sit side by side, so they share a stage (--schedule shows
+        // the stages): the walk and the zombies' targets beside the height map, the chase beside the water's step.
+        // None of them reads what the water writes, so the order gives the same world as one system at a time.
         world.AddSystem<FakeClientsSystem>();
         world.AddSystem<ClockSystem>();
         world.AddSystem<ChunkReadSystem>();
         world.AddSystem<ChunkGenerateSystem>();
-        world.AddSystem<HeightMapSystem>();
-        world.AddSystem<WaterWakeSystem>();
-        world.AddSystem<WaterFlowSystem>();
-        world.AddSystem<WaterSleepSystem>();
-        world.AddSystem<WaterCommitSystem>();
+        world.AddSystem<HeightMapSystem>();                  // a stage of three
         world.AddSystem<PlayerMoveSystem>();
         world.AddSystem<ZombieTargetSystem>();
+        world.AddSystem<WaterWakeSystem>();
+        world.AddSystem<WaterFlowSystem>();                  // a stage of two
         world.AddSystem<ZombieChaseSystem>();
+        world.AddSystem<WaterSleepSystem>();
+        world.AddSystem<WaterCommitSystem>();
         world.AddSystem<ZombieAttackSystem>();
         world.AddSystem<PlayerRespawnSystem>();
         world.AddSystem<FloatSystem>();
