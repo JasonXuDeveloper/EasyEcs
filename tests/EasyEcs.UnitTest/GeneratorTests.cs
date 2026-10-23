@@ -164,9 +164,11 @@ public class GeneratorTests
     [TestCase("[ForEach, RemovedAny<T, T>] static void A(ref P p) { }", ".RemovedAny<global::T, global::T>(0)", "access.Read<global::T>();", "Since(system.LastRunTick + 1)")]
     [TestCase("[ForEach] static void A(in P p, World world) { }", "access.RunAlone();")]                        // reaches the world
     [TestCase("[ForEach] static void A(in P p) { } [OnUpdate] static void U() { }", "access.RunAlone();")]       // an [OnUpdate] method
-    [TestCase("[ForEach(Slices = 3)] static void A(ref P p) { }", "access.Write<global::P>();", "global::EasyEcs.QueryFilter.Create().Slice((int)(system.RunCount % 3), 3)")]
+    [TestCase("[ForEach] static void A(ref P p) { }", "internal static readonly global::EasyEcs.QueryFilter AFilter0 = default;",
+        "world.Count<global::P>(in __ForEach.AFilter0)", "(ref job0, in __ForEach.AFilter0);")]                          // no filter: no zeroed temporary
+    [TestCase("[ForEach(Slices = 3)] static void A(ref P p) { }", "access.Write<global::P>();", "(ref job0, __ForEach.AFilter0.Slice((int)(system.RunCount % 3), 3));")]
     [TestCase("[ForEach(Slices = 2, Parallel = true), Without<Q>] static void A(ref P p) { }", "ForEachBatchParallel<", "AFilter0.Slice((int)(system.RunCount % 2), 2)")]
-    [TestCase("[ForEach(Parallel = true, ChunkRows = 100)] static void A(ref P p) { }", "ForEachBatchParallel<", "(ref job0, chunkRows: 100);")]
+    [TestCase("[ForEach(Parallel = true, ChunkRows = 100)] static void A(ref P p) { }", "ForEachBatchParallel<", "(ref job0, in __ForEach.AFilter0, chunkRows: 100);")]
     [TestCase("[ForEach(Slices = 4)] static void A(System.Span<P> p) { }", "ForEachBatch<", "Slice((int)(system.RunCount % 4), 4)")]
     public void AccessIsDeclaredFromParameters(string members, params string[] expected)
     {
@@ -387,7 +389,7 @@ public class GeneratorTests
             .And.Contain("var l2 = a2;")
             .And.Contain("l2.Combine(__v);")
             .And.Contain("static bool global::EasyEcs.IForEachBatch<global::F>.Merges => true;")
-            .And.Contain("world.ForEachBatchParallel<global::F, __ForEach.AJob0>(ref job0);")
+            .And.Contain("world.ForEachBatchParallel<global::F, __ForEach.AJob0>(ref job0, in __ForEach.AFilter0);")
             .And.Not.Contain("ulong pass"), generated);
     }
 
@@ -1528,7 +1530,7 @@ public class GeneratorTests
         string all = string.Join("\n", output.SyntaxTrees.Skip(2).Select(t => t.ToString()));
         Assert.That(all, Does.Contain("world.DestroyAll<global::P>(in __ForEach.AFilter0); // [Consume]"));
         Assert.That(all, Does.Contain("__ForEach.B_1(default, entity, ref c1);\n            entity.Destroy();"));
-        Assert.That(all, Does.Contain("world.DestroyAll<global::Q>(); // [Consume]"));                         // a runner's
+        Assert.That(all, Does.Contain("world.DestroyAll<global::Q>(in __ForEach.DFilter0); // [Consume]"));          // a runner's
         Assert.That(all, Does.Contain("public static int Interval => 4;\n\n    public static int Phase => 3;").And.Contain("public static int Interval => 2;\n\n    public static int Phase => 0;"));
         Assert.That(all, Does.Contain("systems.Add<global::G<global::P>, global::__G_1_SystemCode<global::P>>();"));
         Assert.That(all, Does.Contain("public static bool C(global::EasyEcs.Entity e, ulong since, int n)"));

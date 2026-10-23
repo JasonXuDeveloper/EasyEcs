@@ -212,7 +212,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
             signature.AddRange(contexts.Select(p => $"{p.Declared} {Escape(p.Name)}"));
 
             string forEach = "__ForEach" + owner.TypeParameters, job = $"{forEach}.{method.Name}Job{m}{method.TypeParameters}";
-            string filter = method.Since ? $", {forEach}.{method.Name}Filter{m}.Since({since})" : method.HasFilter ? $", in {forEach}.{method.Name}Filter{m}" : "";
+            // A pass takes its filter field, even an empty one (NoFilter); entity.Run without a filter tests none.
+            string filter = method.Since ? $", {forEach}.{method.Name}Filter{m}.Since({since})" : method.HasFilter || !perEntity ? $", in {forEach}.{method.Name}Filter{m}" : "";
             if (sliced) filter = method.Sliced($"{forEach}.{method.Name}Filter{m}", slice);
             if (perEntity)
             {
@@ -355,7 +356,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var method = model.Methods[i];
             string job = $"{forEach}.{method.Name}Job{i}", filterName = $"{forEach}.{method.Name}Filter{i}";
             // [Changed<T>] / [Removed<T>]: rows written (or that lost T) since this system last ran.
-            string filter = method.Since ? $", {filterName}.Since(system.LastRunTick + 1)" : method.HasFilter ? $", in {filterName}" : "";
+            string filter = method.Since ? $", {filterName}.Since(system.LastRunTick + 1)" : $", in {filterName}";
             string whole = filter;
             if (method.Slices > 1) filter = method.Sliced(filterName, $"(int)(system.RunCount % {method.Slices})"); // this run's slice
             sb.Append($"        var job{i} = new {job}{Fields(method, "world")};\n");
@@ -601,7 +602,14 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
         sb.Append("    }\n\n");
 
-        if (!method.HasFilter) return;
+        if (!method.HasFilter)
+        {
+            // A pass without a filter takes this empty one by reference: the optional default argument would be a
+            // 192-byte temporary the caller zeroes on every call (twice with the count of MeasureSystems).
+            if (!method.One) sb.Append($"    internal static readonly global::EasyEcs.QueryFilter {method.Name}Filter{number} = default;\n\n");
+            return;
+        }
+
         var chain = method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"))
             .Concat(method.WithAny.Select(t => $".WithAny<{t}>()")).Concat(method.Changed.Select(t => $".Changed<{t}>(0)")).Concat(method.Removed.Select(t => $".Removed<{t}>(0)"))
             .Concat(AnyCalls("ChangedAny", method.ChangedAny)).Concat(AnyCalls("RemovedAny", method.RemovedAny));
@@ -808,7 +816,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
         /// <summary>The filter argument of a sliced method: its filter (or none) cut to slice <paramref name="slice"/>.</summary>
         public string Sliced(string filter, string slice) =>
-            $", {(HasFilter ? filter : "global::EasyEcs.QueryFilter.Create()")}.Slice({slice}, {Slices})";
+            $", {filter}.Slice({slice}, {Slices})";
 
         /// <summary>The queried component types, as type arguments of World.ForEach / IForEach.</summary>
         public string ComponentTypes => string.Join(", ", Query);
