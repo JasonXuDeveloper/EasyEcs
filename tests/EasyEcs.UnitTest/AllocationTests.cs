@@ -365,6 +365,15 @@ public class AllocationTests
     public void DestroyingAReservedWorldDoesNotAllocate()
     {
         // The ids of a reservation's entities, all destroyed one by one, go to the free list without growing it.
+        // The first destroy of the process can allocate about 6 KB in the runtime (about 1 run in 40 of a fresh process,
+        // racing the tiering thread; never with a warm-up): a destroy in another world runs the path first.
+        using (var warm = new World())
+        {
+            warm.EnsureEntityCapacity(2);
+            warm.CreateEntity(new Health(0)).Destroy();
+            warm.CreateEntity(new Health(1)).Destroy();
+        }
+
         using var world = new World();
         world.EnsureEntityCapacity(20_000);
         var entities = new Entity[20_000];
