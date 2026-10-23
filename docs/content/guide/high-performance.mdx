@@ -48,8 +48,10 @@ side and how to rewrite a method that stays scalar: [vector loops](/en/docs/guid
 - **The data:** `byte` and `short` lanes (64 and 32 rows per `Vector512`), fields of `Vector2` / `Vector3` / `Vector4`,
   a `Maybe<T>` as the lane mask of the rows that have `T`, and on AVX-512 a component of up to 16 words of which the
   method uses some 4-byte fields (EECS055 names the fields to split out when the permutes cost more than the work).
-- **Totals:** a [`Reduce<T>`](/en/docs/guide/threading#reductions) keeps one accumulator per lane, folded in lane
-  order.
+- **Totals:** a [`Reduce<T>`](/en/docs/guide/threading#reductions) whose `Combine` is a sum, `Min` or `Max` per field
+  keeps one accumulator per lane, folded in lane order; a float sum only under `FloatMode.Fast`.
+- **Not in the loop:** `Scratch<T>`, `Lookup<T>`, `Emit<T>` and `Tile` parameters keep a method row by row, which is
+  right for them: a lookup or an append per row has no vector form.
 - **What a system got:** `world.DescribeSchedule()` prints one line per method (`SystemInfo.Loops`): the loop, its
   shape, or the reason it stayed scalar.
 - **Why not:** [EECS055](/en/docs/guide/analyzer#eecs055) names the first reason a method stayed scalar, as Burst's
@@ -156,8 +158,8 @@ and `Boundary` (fill, clamp or mirror where there is no neighbor) decide what th
 
 - Measure first: [`MeasureSystems`](/en/docs/guide/systems#measuring-systems) names the system that costs the tick,
   and a BenchmarkDotNet case proves the change; each pattern's section links its own benchmark table.
-- Make the data fit before the code: one number type and at most 4 fields per component for vector loops, a byte or `int` per cell for a grid
-  (16 or 8 lanes per instruction), so the work is one shape over a column.
+- Make the data fit before the code: lanes of one size and at most 4 fields per component for vector loops, a byte or
+  an `int` per cell for a grid (16 or 4 cells per `Vector128`), so the work is one shape over a column.
 - Keep per-cell work in registers, on the stack (`stackalloc` under `[SkipLocalsInit]`) or in a tile's texture and
   copy into a buffer once: a buffer read and written many times per pass is far slower than a stack span.
 
@@ -166,7 +168,7 @@ and `Boundary` (fill, clamp or mirror where there is no neighbor) decide what th
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
 | Optimizing a system nobody measured | Code that is harder to read and saves nothing | [`MeasureSystems`](/en/docs/guide/systems#measuring-systems) |
-| Mixing `float` and `int` fields in a method meant to vectorize | It stays scalar | [EECS055](/en/docs/guide/analyzer#eecs055); `SimdMode = SimdMode.Require` makes it an error |
+| Mixing lanes of different sizes (`float` and `double`, `int` and `byte`) in a method meant to vectorize | It stays scalar | [EECS055](/en/docs/guide/analyzer#eecs055); `SimdMode = SimdMode.Require` makes it an error |
 | A shared counter written by a parallel method | Lost updates | [EECS060](/en/docs/guide/analyzer#eecs060): a [`Reduce<T>`](/en/docs/guide/threading#reductions) instead |
 | `ChunkRows` on many light rows | Many more claims for the same work | Benchmark ([chunk size](/en/docs/guide/threading#chunk-rows)) |
 | Reading another tile's cells by hand from a parallel method | A lookup per row, edge cases per cell | Review: a `Tile<TCell, TTile>` parameter pads the tile once ([grid tiles](/en/docs/guide/grids#pitfalls)) |

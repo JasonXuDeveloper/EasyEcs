@@ -1961,10 +1961,10 @@ later system (double buffering, the GPU's ping-pong), or split the work into two
 
 **Code running on several threads writes shared memory.** Warning. No code fix.
 
-A `[ForEach(Parallel = true)]` method, and the `Execute` of a job run by `ForEachParallel` or `ForEachEntityParallel`,
-run on several threads at once, one chunk of rows each. A static field or auto-property, an object a context parameter
-refers to, or the object a job's field holds (every chunk's copy of the job shares it) is the same memory for all of
-them: an increment loses updates, a list's `Add` corrupts the list, and which plain write is kept depends on timing.
+A `[ForEach(Parallel = true)]` method, and the `Execute` of a job run by `ForEachParallel`, `ForEachEntityParallel` or
+`world.ForParallel`, run on several threads at once, one chunk each. A static field or auto-property, an object a
+context parameter refers to, or the object a job's field holds (every chunk's copy of the job shares it) is the same
+memory for all of them: an increment loses updates, a list's `Add` corrupts the list, and which plain write is kept depends on timing.
 The rule leaves out a constant every thread writes, `[ThreadStatic]` fields, concurrent collections, `Interlocked` and
 `Volatile` calls, writes inside a `lock`, elements of arrays and lists (rows may own different elements) and locals.
 
@@ -2009,11 +2009,11 @@ at the cost of a contended cache line on every row.
 ## EECS061 [#eecs061]
 
 **A parallel job's field read after the pass.** Warning. Code fix: runs the job on one thread (`ForEach` /
-`ForEachEntity`), when the call passes no `chunkRows`.
+`ForEachEntity`), when the call passes no `chunkRows`; a `ForParallel` call has no such twin and gets no fix.
 
-`ForEachParallel` and `ForEachEntityParallel` run a copy of the job per chunk and merge nothing back: the job passed by
-`ref` keeps the values it had before the call. A field `Execute` writes (a sum, a count, a flag) and the caller reads
-afterwards holds its old value. The rule reports the call when the first use of the job after it reads such a field.
+`ForEachParallel`, `ForEachEntityParallel` and `world.ForParallel` run a copy of the job per chunk and merge nothing
+back: the job passed by `ref` keeps the values it had before the call. A field `Execute` writes (a sum, a count, a
+flag) and the caller reads afterwards holds its old value. The rule reports the call when the first use of the job after it reads such a field.
 Jobs that merge their chunks' copies back (the generated jobs of methods with a `Reduce<T>` parameter) are left out.
 
 ```csharp tab="Reported" doccheck=expect-EECS061

@@ -29,9 +29,14 @@ page for the first words of your message.
 | `X is unique: entity … has key … already`, `X is unique: key … would be given to several entities at once`, `The save holds key … of unique X twice`, `X is unique, but its module registered no index` | [A unique key that is taken](#unique-key-taken) |
 | `A sliced filter (QueryFilter.Slice) applies to ForEach passes only` | [A sliced filter outside a pass](#sliced-filter) |
 | `The world keeps no destroy log` | [Reading a destroy log that is off](#no-destroy-log) |
+| `The index of X by K is not built yet` | [An index first looked up in a parallel pass](#index-not-built) |
+| `This Lookup<X> holds no index by K` | [A lookup whose key the job did not prepare](#lookup-no-index) |
+| `Layers … of a X tile`, `The DynamicBuffer<X> of … holds … cells`, `X is a … tile with a halo of …`, `Outside the padded tile`, `The tile was loaded without its mask` | [A tile that throws](#tile-throws) |
 
 The problems that throw nothing: [a system that never runs](#system-does-not-run),
-[systems that do not run in parallel](#not-parallel), [a missing generated member](#member-missing),
+[systems that do not run in parallel](#not-parallel), [a method without a vector loop](#no-vector-loop),
+[a parallel method on one thread](#parallel-one-thread), [a float total that differs](#float-total),
+[random numbers that repeat](#random-repeats), [a missing generated member](#member-missing),
 [a job on one entity that does not run](#run-false), [a lost write through a ref](#ref-lost),
 [a component dropped by a load](#save-dropped-data), [an entity a move left behind](#move-skipped),
 [an interface another generator adds](#other-generators) and
@@ -321,6 +326,82 @@ alone when it takes a `World` parameter or an `Entity` it uses for more than its
 other reads or writes, and a `ref` parameter counts as a write even when the body only reads it: use `in`
 ([parallel systems](/en/docs/guide/threading#parallel-systems)). An ordering (`[UpdateAfter<T>]`) also puts the later
 system in a later stage.
+
+## Why does a parallel pass say an index "is not built yet"? [#index-not-built]
+
+```text
+InvalidOperationException: The index of Unit by Team is not built yet, and building it now, while a parallel stage or pass runs, would change it under the threads reading it. Find it through a Lookup<Unit> parameter (its index is built before the pass), or look it up once on the owner thread before the update.
+```
+
+A value index is built by its first lookup. Code on several threads (a parallel `[ForEach]` method, a system of a
+parallel stage, `world.ForParallel`) that looks one up through the `World` would build it while other threads read it,
+so the lookup refuses. **Fix:** take a [`Lookup<T>`](/en/docs/guide/threading#lookups) parameter and call `TryFind`,
+`Find` or `Count` on it: the generated job builds the index before the pass. Or look the key up once on the owner
+thread before the update, which builds the index for the passes after it.
+
+## Why does a `Lookup<T>` say it "holds no index"? [#lookup-no-index]
+
+```text
+InvalidOperationException: This Lookup<Unit> holds no index by Team: a [ForEach] method gets one when it calls TryFind, Find or Count on the parameter itself (the index is then built before the pass)
+```
+
+The generator prepares the index of a `Lookup<T>` from the calls it sees on the parameter in the method's body. A call
+made elsewhere, in a helper the parameter was passed to, names no index the job knows of. **Fix:** call `TryFind`,
+`Find` or `Count` with that key type on the parameter in the `[ForEach]` method itself, and pass the result to the
+helper ([lookups](/en/docs/guide/threading#lookups)).
+
+## Why does a tile throw when it is padded or read? [#tile-throws]
+
+```text
+ArgumentOutOfRangeException: Layers 0 to 20 of a GasCube tile of 16 layers
+InvalidOperationException: The DynamicBuffer<Gas> of … holds 200 cells; a GasCube tile has 4096
+InvalidOperationException: GasCube is a 16 x 16 x 16 tile with a halo of 20: a halo of 20 is wider than its rows (16 cells)
+ArgumentOutOfRangeException: Outside the padded tile: a cell, row or layer past the halo
+InvalidOperationException: The tile was loaded without its mask (mask: false): it has no active rows
+```
+
+- **Layers:** `Pad(from, to)` takes layers `0 <= from < to <= Height`.
+- **Cells:** a tile's buffer holds `Width × Depth × Height` cells; fill it to that length when the tile is created
+  ([grids](/en/docs/guide/grids)).
+- **Shape:** the width, depth (1 to 64), height and halo of the `ITileShape` do not fit together; the analyzer reports
+  the shape where it is declared ([EECS072](/en/docs/guide/analyzer#eecs072)).
+- **Outside the padded tile:** a cursor or `padded[x, y, z]` read reached past the halo. Keep every offset within
+  `Halo`, or declare a larger halo.
+- **Without its mask:** `Rows(...)` walks the active rows of the mask; a tile padded with `mask: false` has none. Pad
+  with the mask, or walk every row yourself ([tall tiles](/en/docs/guide/grids#layers)).
+
+## Why did my method not get a vector loop? [#no-vector-loop]
+
+The generator writes a vector loop only for a method whose parameters and body it can turn into lanes: components of
+numbers of one size, no `Entity`, `World`, `Mut<T>`, span, `Scratch<T>`, `Lookup<T>`, `Emit<T>` or `Tile` parameter,
+no calls it cannot vectorize. Otherwise the method runs row by row, which is correct and only slower. **Fix:** read
+the reason and change what it names: [EECS055](/en/docs/guide/analyzer#eecs055) (a suggestion, shown in the IDE)
+names it for a method that looks meant for a vector loop, `SimdMode = SimdMode.Require` turns it into a build error
+([EECS056](/en/docs/guide/analyzer#eecs056)), and `world.DescribeSchedule()` prints the loop of every method
+(`SystemInfo.Loops`, [vector loops](/en/docs/guide/systems#vector-loops)).
+
+## Why does my parallel method run on one thread? [#parallel-one-thread]
+
+A parallel `[ForEach]` method splits its rows into chunks, at least 1,024 rows each (4,096 when it writes a tracked
+component), and fewer than two chunks run on the calling thread. A pass whose helpers do not make it faster runs there
+too. A few hundred heavy rows are then one chunk. **Fix:** set
+[`ChunkRows`](/en/docs/guide/threading#chunk-rows) to the rows a thread should take at a time (rows ÷ threads ÷ 4 is a
+good start, never below 64); light rows keep the default.
+
+## Why does a float total differ between runs or machines? [#float-total]
+
+A floating-point `Reduce<T>` sum is rounded per chunk, and the default chunk size follows the thread count, so another
+machine cuts other chunks. **Fix:** set [`ChunkRows`](/en/docs/guide/threading#chunk-rows): the total is then the same
+on every run and for any thread count, though not bit for bit the total of the same method with `Parallel = false`
+([reductions](/en/docs/guide/threading#reductions)). Integer totals, minimum and maximum are exact either way.
+
+## Why does `EntityRandom` draw the same numbers? [#random-repeats]
+
+A draw is a pure function of (seed, entity, tick, stream). A tick that is not advanced draws the numbers of the last
+step again, and two draws of one stream for one entity in one step are equal
+([EECS088](/en/docs/guide/analyzer#eecs088)). **Fix:** advance `World.EntityRandom.Tick` once per step, in the system
+that advances the simulation's clock, and give each draw of a row its own stream
+([random numbers](/en/docs/guide/threading#entity-random)).
 
 ## Why is a generated member missing? [#member-missing]
 

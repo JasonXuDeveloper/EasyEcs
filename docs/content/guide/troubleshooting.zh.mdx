@@ -28,8 +28,11 @@ faq: true
 | `X is unique: entity … has key … already`、`X is unique: key … would be given to several entities at once`、`The save holds key … of unique X twice`、`X is unique, but its module registered no index` | [唯一键已被占用](#unique-key-taken) |
 | `A sliced filter (QueryFilter.Slice) applies to ForEach passes only` | [在遍历之外用了分片过滤条件](#sliced-filter) |
 | `The world keeps no destroy log` | [销毁日志没开就去读](#no-destroy-log) |
+| `The index of X by K is not built yet` | [在并行遍历里第一次查索引](#index-not-built) |
+| `This Lookup<X> holds no index by K` | [job 没有准备这个键的查找](#lookup-no-index) |
+| `Layers … of a X tile`、`The DynamicBuffer<X> of … holds … cells`、`X is a … tile with a halo of …`、`Outside the padded tile`、`The tile was loaded without its mask` | [瓦片抛异常](#tile-throws) |
 
-不抛异常的问题：[系统从不运行](#system-does-not-run)、[系统没有并行](#not-parallel)、[生成成员缺失](#member-missing)、
+不抛异常的问题：[系统从不运行](#system-does-not-run)、[系统没有并行](#not-parallel)、[方法没有向量循环](#no-vector-loop)、[并行方法只在一个线程上跑](#parallel-one-thread)、[浮点总和不一致](#float-total)、[随机数重复](#random-repeats)、[生成成员缺失](#member-missing)、
 [单个实体上的 job 没有运行](#run-false)、[通过 ref 写的值丢了](#ref-lost)、[加载后组件不见了](#save-dropped-data)、[搬迁时留下的实体](#move-skipped)、
 [另一个生成器加上的接口](#other-generators)、[actor 键打印自己时栈溢出](#key-tostring-overflow)。
 
@@ -282,6 +285,69 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 重写了 `OnUpdate`，或者一个 `[ForEach]` 方法都没有的系统，都单独运行。一个写另一个读或写的东西，两个系统就冲突；`ref` 参数即使
 方法体只读也算写：改用 `in`（[并行系统](/zh/docs/guide/threading#parallel-systems)）。顺序（`[UpdateAfter<T>]`）也会把后面的
 系统放进后面的阶段。
+
+## 为什么并行遍历说索引 “is not built yet”？ [#index-not-built]
+
+```text
+InvalidOperationException: The index of Unit by Team is not built yet, and building it now, while a parallel stage or pass runs, would change it under the threads reading it. Find it through a Lookup<Unit> parameter (its index is built before the pass), or look it up once on the owner thread before the update.
+```
+
+值索引由第一次查找建立。在多个线程上跑的代码（并行 `[ForEach]` 方法、并行阶段里的系统、`world.ForParallel`）通过 `World` 去查，
+就会在别的线程读它的同时建它，所以查找会拒绝。**修法：**用 [`Lookup<T>`](/zh/docs/guide/threading#lookups) 参数，在它上面调
+`TryFind`、`Find` 或 `Count`：生成的 job 会在遍历前建好索引。或者在更新前，在所有者线程上查一次这个键，之后的遍历就有索引了。
+
+## 为什么 `Lookup<T>` 说它 “holds no index”？ [#lookup-no-index]
+
+```text
+InvalidOperationException: This Lookup<Unit> holds no index by Team: a [ForEach] method gets one when it calls TryFind, Find or Count on the parameter itself (the index is then built before the pass)
+```
+
+生成器按方法体里对这个参数的调用来准备 `Lookup<T>` 的索引。在别处发起的调用（参数被传进的辅助方法里）指向的索引，job 并不知道。
+**修法：**在 `[ForEach]` 方法本身里，用这个键类型对参数调 `TryFind`、`Find` 或 `Count`，再把结果传给辅助方法
+（[查找](/zh/docs/guide/threading#lookups)）。
+
+## 为什么瓦片在加载或读取时抛异常？ [#tile-throws]
+
+```text
+ArgumentOutOfRangeException: Layers 0 to 20 of a GasCube tile of 16 layers
+InvalidOperationException: The DynamicBuffer<Gas> of … holds 200 cells; a GasCube tile has 4096
+InvalidOperationException: GasCube is a 16 x 16 x 16 tile with a halo of 20: a halo of 20 is wider than its rows (16 cells)
+ArgumentOutOfRangeException: Outside the padded tile: a cell, row or layer past the halo
+InvalidOperationException: The tile was loaded without its mask (mask: false): it has no active rows
+```
+
+- **层：**`Pad(from, to)` 要求 `0 <= from < to <= Height`。
+- **格子：**瓦片的缓冲要有 `Width × Depth × Height` 个格子；创建瓦片时就填到这个长度（[网格](/zh/docs/guide/grids)）。
+- **形状：**`ITileShape` 的宽、深（1 到 64）、高和光环对不上；分析器在声明处报告这个形状（[EECS072](/zh/docs/guide/analyzer#eecs072)）。
+- **超出加载后的瓦片：**游标或 `padded[x, y, z]` 读到了光环之外。让每个偏移都在 `Halo` 之内，或者声明更大的光环。
+- **没有掩码：**`Rows(...)` 走掩码里的活跃行；用 `mask: false` 加载的瓦片一行都没有。带掩码加载，或者自己走每一行
+  （[高瓦片](/zh/docs/guide/grids#layers)）。
+
+## 为什么我的方法没有得到向量循环？ [#no-vector-loop]
+
+只有参数和方法体能变成通道的方法，生成器才写向量循环：组件里是同一种大小的数，没有 `Entity`、`World`、`Mut<T>`、span、`Scratch<T>`、
+`Lookup<T>`、`Emit<T>` 或 `Tile` 参数，没有它无法向量化的调用。否则方法逐行运行，结果正确，只是慢一些。**修法：**读出原因，改掉它点名的东西：
+看起来是为向量循环写的方法，[EECS055](/zh/docs/guide/analyzer#eecs055)（建议，在 IDE 里显示）会点名原因；`SimdMode = SimdMode.Require`
+把它变成构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)）；`world.DescribeSchedule()` 打印每个方法拿到的循环
+（`SystemInfo.Loops`，[向量循环](/zh/docs/guide/systems#vector-loops)）。
+
+## 为什么我的并行方法只在一个线程上跑？ [#parallel-one-thread]
+
+并行 `[ForEach]` 方法把行切成块，每块至少 1,024 行（写被追踪的组件时 4,096 行），不到两块就在调用线程上跑。辅助线程帮不上忙的遍历，
+也在那里跑。几百个很重的行于是只有一块。**修法：**把 [`ChunkRows`](/zh/docs/guide/threading#chunk-rows) 设成一个线程每次拿的行数
+（从 行数 ÷ 线程数 ÷ 4 开始，不低于 64）；轻的行保持默认。
+
+## 为什么浮点总和在不同运行或机器上不一样？ [#float-total]
+
+浮点的 `Reduce<T>` 求和按块舍入，默认块大小跟着线程数走，所以换台机器就切出别的块。**修法：**设
+[`ChunkRows`](/zh/docs/guide/threading#chunk-rows)：这样每次运行、任何线程数下总和都一样，只是不与同一方法 `Parallel = false` 时的总和逐位相同
+（[归约](/zh/docs/guide/threading#reductions)）。整数总和、最小值和最大值怎样都是精确的。
+
+## 为什么 `EntityRandom` 抽出同样的数？ [#random-repeats]
+
+一次抽取是 (seed, entity, tick, stream) 的纯函数。tick 不推进，就会再抽出上一步的数；同一步里同一实体对同一个流抽两次，结果相等
+（[EECS088](/zh/docs/guide/analyzer#eecs088)）。**修法：**每一步把 `World.EntityRandom.Tick` 推进一次，放在推进模拟时钟的那个系统里；
+一行里的每次抽取用自己的流（[随机数](/zh/docs/guide/threading#entity-random)）。
 
 ## 为什么某个生成成员不见了？ [#member-missing]
 

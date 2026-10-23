@@ -462,8 +462,9 @@ How the chunks are claimed, how to choose `n` and what it costs: [chunk size](/e
 ### Vector loop (SIMD) [#vector-loops]
 
 You write a `[ForEach]` method for one row; when its components are plain numbers, the generator also writes its
-SIMD loop: the method's body becomes a `System.Numerics.Vector<T>` loop over each run of matching rows, as many rows
-per instruction as `Vector<T>` holds (8 floats on x64 with AVX2, 4 on Arm). Unity's Burst and ISPC work this way: the
+SIMD loop: the method's body becomes a vector loop over each run of matching rows, as many rows per instruction as a
+vector holds: a `Vector512<T>` loop first where the CPU runs AVX-512 (16 floats), then a `System.Numerics.Vector<T>`
+loop for the rows left (8 floats on x64 with AVX2, 4 on Arm). Unity's Burst and ISPC work this way: the
 method is the kernel of one lane. The .NET JIT does not vectorize loops on its own, so without this a per-row method
 runs one row at a time ([D68](/en/docs/decisions#d68-vector-loops-without-opting-in)). There is nothing to opt into:
 `[ForEach(SimdMode = SimdMode.Require)]` makes a method that loses its loop a build error, `SimdMode.Off` keeps one
@@ -502,7 +503,8 @@ public class CoolingSystem : EcsSystem
 
 ```csharp tab="The generator writes" doccheck=skip
 // Generated: an IForEachBatch job over each run of matching rows. Do not copy it: it calls your private
-// method through an [UnsafeAccessor] (Cool_0) and reinterprets the columns with Unsafe.As.
+// method through an [UnsafeAccessor] (Cool_0) and reinterprets the columns with Unsafe.As. Trimmed to the
+// Vector<T> loop: the same loop with Vector512 runs before it where the CPU has AVX-512.
 public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2)
 {
     ref Heat r1 = ref MemoryMarshal.GetReference(c1);
@@ -511,7 +513,7 @@ public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2)
     ref float e1 = ref Unsafe.As<Heat, float>(ref r1);            // the columns as floats
     ref float e2 = ref Unsafe.As<Speed, float>(ref r2);
     nint i = 0;
-    if (Vector.IsHardwareAccelerated && rows >= Vector<float>.Count)
+    if (Vector.IsHardwareAccelerated && rows - i >= Vector<float>.Count)
     {
         // 1. Uniform values, broadcast once per run: the singleton and the constants
         var __u0 = new Vector<float>(s2.Value);                   // pull.Value
@@ -582,7 +584,7 @@ public class FallSystem : EcsSystem
 ref float e1 = ref Unsafe.As<Position3, float>(ref r1);   // the columns as runs of floats: X, Y, Z, X, Y, Z, ...
 ref float e2 = ref Unsafe.As<Velocity3, float>(ref r2);
 nint i = 0;
-if (Vector.IsHardwareAccelerated && Interleaved.IsAccelerated && rows >= Vector<float>.Count)
+if (Vector.IsHardwareAccelerated && Interleaved.IsAccelerated && rows - i >= Vector<float>.Count)
 {
     var __u0 = new Vector<float>(s2.Pull);   // the singleton, broadcast once per run
     var __u2 = new Vector<float>(0f);
@@ -609,8 +611,15 @@ for (; i < rows; i++)   // 4. the tail, and every row without the shuffles: the 
 
 A method gets a vector loop when all of this holds; otherwise it runs row by row, exactly as before:
 
-- **The method:** `static`, per entity (on one thread or `Parallel`), no `Entity`, `World` or `Mut<T>` parameter. A
+- **The method:** `static`, per entity (on one thread or `Parallel`), returning nothing; no `Entity`, `World`,
+  `Mut<T>`, span, `Scratch<T>`, `Lookup<T>`, `Emit<T>` or `Tile` parameter, and no value taken by `ref`. A
   `Maybe<T>` / `ReadOnlyMaybe<T>` of a component is a lane mask of the rows that have it (on one thread).
+- **Totals:** a [`Reduce<T>`](/en/docs/guide/threading#reductions) keeps one accumulator per lane, folded into the
+  run's partial result in lane order after the loop, when each field of `T` is a lane of the method's size and
+  `T.Combine` sets it to the sum, `Min` or `Max` of both sides' field. A float sum needs `FloatMode.Fast`
+  ([below](#float-mode)). The generator reads `Combine` in your source: a reduction declared with `[Sum]` / `[Min]` /
+  `[Max]` gets its `Combine` from another generator, which it does not see, so that method runs row by row
+  (`SystemInfo.Loops` says why).
 - **The components:** 1 to 4 lanes of one size: fields (or auto-properties) of `float`, `double`, `int`, `uint`,
   `long`, `ulong`, `byte`, `sbyte`, `short` or `ushort`, or of structs of them (`Vector2`, `Vector3`, `Vector4`,
   System.Numerics and Godot), declared in one part. `ref` and `in` both work; a whole component may be assigned
@@ -716,8 +725,12 @@ last bits nobody compares (steering noise, particles, visual decay).
 ```
 
 The system's generated file (`<System>.….ForEach.g.cs`, under the project's generated sources, or with
-`<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>` under `obj/`) holds the loop itself, and
-`tools/jitdisasm.sh <project> 'EasyEcs.World:Masked'` prints the machine code the JIT makes of it.
+`<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>` under `obj/`) holds the loop itself. To see what the
+JIT makes of it, `tools/jitdisasm.sh <project> 'EasyEcs.World:Masked'` builds the project in Release, runs it with
+`DOTNET_JitDisasm` and prints the optimized code of every vector method on one thread (the job's `Execute` is inlined
+into the world's loop that runs it; a parallel one is inside a `ForEachBatch*` runner). `FULLOPTS=1` compiles optimized
+code at once, for a program that runs the method only a few times. In a good loop the body holds vector instructions
+and no `call`.
 
 `KernelBenchmark` runs the per-row job against the generated loop over 100,000 and 1,000 rows (a clamp with a branch,
 `h += v * dt`, an int increment, and positions of 2 to 4 fields moved, sought and travelled); its numbers are in [D68](/en/docs/decisions#d68-vector-loops-without-opting-in):

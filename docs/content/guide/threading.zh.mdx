@@ -89,7 +89,10 @@ public static class Zones
 | 没有任何 `[ForEach]` 方法 | 单独运行 |
 
 一个系统写了另一个系统读或写的东西，或者其中一个要单独运行，两者就冲突。系统放在哪个阶段：先找出它必须排在后面的系统（有顺序约束的，
-或与它冲突、注册更早的），再放进其中最晚那个阶段的下一个阶段。阶段依次运行，同一阶段的系统同时运行。`world.DescribeSchedule()` 能列出 World 排出的阶段、每个系统读写了什么、
+或与它冲突、注册更早的），再放进其中最晚那个阶段的下一个阶段。阶段依次运行，同一阶段的系统同时运行。系统要等前一个阶段全部结束，而不只是等和它冲突的系统：
+在实测的 World 里，依赖图并没有更早跑完，而且保证 `[Changed<T>]` 准确的“每阶段一个变更 tick”会变成每个系统一个
+（[D76](/zh/docs/decisions#d76-stages-not-a-dependency-graph)）。一串轻量系统在重系统旁边干等时，把它们合成一个带多个 `[ForEach]`
+方法的系统会更早跑完。`world.DescribeSchedule()` 能列出 World 排出的阶段、每个系统读写了什么、
 某个系统为什么要等上一个阶段；它读的是最近一次 `AddSystem` / `RemoveSystem` 发布的调度，所以诊断接口可以在任何线程上调用
 （[调试与诊断](/zh/docs/guide/diagnostics#schedule)）。
 
@@ -339,6 +342,9 @@ Console.WriteLine($"{crowd.Count} 个单位，x 从 {crowd.MinX} 到 {crowd.MaxX
   固定时，每次运行、任何线程数下结果都相同（测试检查了 1、2、3、4 和 8 个线程），但和同一个方法 `Parallel = false` 的结果不逐位相同。
   默认块大小随线程数变化：浮点总数要在不同机器上复现时，设定 `ChunkRows`。最小值、最大值和包围盒不涉及舍入，怎样都精确。
 - **单线程时**，部分结果是 job 的局部变量，每段连续的行一个；方法、结果和调度都一样。系统之外的 `[ForEach]` 方法归约进调用它时传入的 World。
+- **在向量循环里**，每条通道有自己的累加器，按通道顺序合进这段行的部分结果。条件是 `Combine` 把每个字段设成两边该字段的和、`Min` 或 `Max`，
+  并且字段是方法那么大的通道（[向量循环](/zh/docs/guide/systems#vector-loops)）。浮点求和只有在 `FloatMode.Fast` 下才进向量循环，
+  因为各通道的相加顺序不同；整数求和、最小值和最大值都保持精确。
 - **开销：** 每行一次累加到局部变量：归约方法按每块里连续的行运行，这段行的部分结果按 `ref` 传给内联的方法，JIT 把它留在寄存器里。
   每块一个 job 副本，留到这一遍结束再按块的顺序合并；第一遍之后零分配。没有锁、没有 `Interlocked`、没有伪共享：每块的部分结果只存一次。
 - **分析器检查什么：** 方法或系统里同一个 `T` 的第二个 `Reduce<T>`，或旁边的 `ref T`，会让一个结果覆盖另一个
@@ -400,7 +406,8 @@ public class CountNeighbors : EcsSystem
   交给了下一个复用它的行（[EECS058](/zh/docs/guide/analyzer#eecs058)）。
 - **它的内存属于线程**，线程结束时才释放，不随 World 释放；线程池的线程活得很久，所以长大的缓冲会一直那么大。
 - **开销：** 每块查一次这个线程的值（单线程时每遍一次），之后每行读一个字段；每个线程第一次用过之后零分配。
-  [EECS028](/zh/docs/guide/analyzer#eecs028) 不报一次性的 `??= new()`。
+  [EECS028](/zh/docs/guide/analyzer#eecs028) 不报一次性的 `??= new()`。方法体里有循环或调用时，每行调用一次方法，而不是内联进行循环：
+  内联的话，它自己的循环和行循环抢寄存器，计数器只能放到栈上。
 
 `ScratchBenchmark` 在 10,000 和 100,000 行上并行地每行收集 24 个候选，列表分别放在 `Scratch<T>` 里、每行新建、每行从 `ArrayPool<int>.Shared`
 租用、放在手写的 `[ThreadStatic]` 字段里，或者用 `stackalloc` 的 span（[D74](/zh/docs/decisions#d74-scratch)）。
@@ -525,6 +532,47 @@ public class ApplyHitsSystem : EcsSystem
     }
 }
 ```
+
+生成器给每块一个自己的列表，遍历结束时把列表接起来。它为 `Strike` 写的是：
+
+```csharp tab="你写的" doccheck=skip
+[ForEach(Parallel = true)]
+static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits)
+```
+
+```csharp tab="生成器写的" doccheck=skip
+// 生成的代码（StrikeSystem.….ForEach.g.cs，有删节，去掉了 global::）。不要照抄：Strike_0 是指向你的私有方法的
+// [UnsafeAccessor]。
+internal struct StrikeJob0 : IForEach<Attack, Aim>, INoStructuralChanges
+{
+    public SingletonRef<Emitted<Hit>> o2;   // 列表要接进的单例
+    public DynamicBuffer<Hit> e2;           // 这一块的列表：每块跑自己的一份 job
+
+    public void Execute(ref Attack c1, ref Aim c2) => __ForEach.Strike_0(null, in c1, in c2, new Emit<Hit>(ref e2));
+
+    static int IForEach<Attack, Aim>.WriteMask => 0;
+    static bool IForEach<Attack, Aim>.Merges => true;
+
+    // 每块调用一次，按块的顺序，在发起这一遍的线程上。
+    static void IForEach<Attack, Aim>.Merge<TSelf>(ref TSelf job, in TSelf chunk)
+    {
+        ref var into = ref Unsafe.As<TSelf, StrikeJob0>(ref job);
+        ref var part = ref Unsafe.As<TSelf, StrikeJob0>(ref Unsafe.AsRef(in chunk));
+        Emit<Hit>.Join(into.o2, ref part.e2);   // 追加这一块的记录，把列表还给池
+    }
+}
+
+// 系统的 Update 和 Access：
+var job0 = new StrikeJob0 { o2 = Emitted<Hit>.Joined(world) };   // 没有 Emitted<Hit> 时添加
+world.ForEachParallel<Attack, Aim, StrikeJob0>(ref job0);
+
+access.Read<Attack>();
+access.Read<Aim>();
+access.WriteSingleton<Emitted<Hit>>();   // 读记录的系统等它跑完
+```
+
+`Reduce<T>` 参数也这样合并：job 的 `Merge` 按块的顺序用每块的部分结果调用 `T.Combine`，遍历结束后系统的代码把合并结果写进单例 `T`
+（没有时添加）。
 
 - **任何线程数下都是行的顺序。** 记录的顺序和同一个方法 `Parallel = false` 时一样，每次运行都一样，所以回放或帧同步的对端按同样的顺序结算。
 - **每一遍都是追加。** 一次更新里可以有几个系统发出同一种 `T`（近战和法术都发出伤害），各在自己的位置；结算的系统负责清空。发出记录的系统按

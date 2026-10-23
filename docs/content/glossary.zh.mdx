@@ -127,9 +127,24 @@ World 用来跑并行工作的部件：一个阶段里的系统，或者一个�
 在 `[ForEach]` 方法里读另一个实体的组件：`Lookup<T>` 参数读取任意实体在这一遍之前的 `T`（按 id，带索引的 `T` 还能按键），系统按 `T` 的读者调度，
 所以方法可以并行。就是 MPI 的单边 `Get`、Unity 的 `ComponentLookup`。见[查找](/zh/docs/guide/threading#lookups)。
 
+## 发出的记录（Emit） [#emit]
+
+一遍产生、留给后面系统处理的记录（命中、数据包）：`Emit<T>` 参数追加到所在[块](#chunk)自己的列表，遍历结束时这些列表按行的顺序追加到单例
+`Emitted<T>`，由结算它们的系统清空。就是 Unity 的 `NativeStream`。见[发出记录](/zh/docs/guide/threading#emit)。
+
+## 流（`EntityRandom` 的 stream） [#stream]
+
+`EntityRandom` 抽取的第四个输入，和种子、实体、tick 并列：方法里每个调用点用自己的流（0、1、2……），同一个实体在同一个 tick 的两次抽取才不同。
+同样的四个输入在任何线程、任何行顺序下都得到同一个数。见[随机数](/zh/docs/guide/threading#entity-random)。
+
+## 瓦片和光环（Tile、Halo） [#tile]
+
+瓦片是把网格切成一箱箱格子后的一个实体：一个实现 `ITile<TKey>` 的组件（形状和键），加上格子的 `DynamicBuffer<TCell>`。光环是围着它、
+宽 `Halo` 个格子的一圈，`Tile<TCell, TTile>.Pad()` 从邻居朝向它的边拷进来（MPI 的幽灵格子、CUDA 瓦片的 apron）。见[网格瓦片](/zh/docs/guide/grids)。
+
 ## 向量循环（Vector loop） [#vector-loop]
 
-生成器为组件有 1 到 4 个同类型数值的逐行 `[ForEach]` 方法写出的 `Vector<T>` 循环：一条指令按向量能装下的行数计算方法体，分支变成掩码，
+生成器为组件有 1 到 4 个同样大小数值的逐行 `[ForEach]` 方法写出的 SIMD 循环（CPU 支持 AVX-512 时用 `Vector512`，之后用 `Vector<T>`）：一条指令按向量能装下的行数计算方法体，分支变成掩码，
 剩下的行调用方法本身。方法没有得到向量循环时，EECS055 说明原因。见[向量循环](/zh/docs/guide/systems#vector-loops)。
 
 ## 分片（Slice） [#slice]

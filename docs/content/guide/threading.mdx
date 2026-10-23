@@ -99,7 +99,11 @@ Each system's access comes from its `[ForEach]` parameters:
 
 Two systems conflict when one writes something the other reads or writes, or when either runs alone. A system goes to
 the stage after the latest one holding a system it must follow (by an ordering, or by an earlier system it conflicts
-with). Stages run one after another; the systems of a stage run at once. `world.DescribeSchedule()` shows the stages
+with). Stages run one after another; the systems of a stage run at once. A system waits for the whole stage before
+its own, not only for the systems it conflicts with: in the measured worlds a dependency graph finished no sooner,
+and the one change tick per stage that keeps `[Changed<T>]` exact would become one per system
+([D76](/en/docs/decisions#d76-stages-not-a-dependency-graph)). A chain of light systems that waits beside a heavy one
+runs sooner as one system with several `[ForEach]` methods. `world.DescribeSchedule()` shows the stages
 the world built, each system's reads and writes, and why a system waits for the stage before its own; it reads the
 schedule published by the last `AddSystem` / `RemoveSystem`, so a diagnostics endpoint may call it from any thread
 ([Debugging and diagnostics](/en/docs/guide/diagnostics#schedule)).
@@ -382,6 +386,10 @@ Console.WriteLine($"{crowd.Count} units between x = {crowd.MinX} and x = {crowd.
   must reproduce across machines. Minimum, maximum and bounding boxes do not round, so they are exact either way.
 - **On one thread** the partial result is a local of the job, one per run of rows; the method, the result and its
   scheduling are the same. A `[ForEach]` method outside a system reduces into the world it is called with.
+- **In a vector loop** each lane keeps its own accumulator, folded in lane order into the run's partial result, when
+  `Combine` sets every field to the sum, `Min` or `Max` of both sides' field and the fields are lanes of the method's
+  size ([vector loops](/en/docs/guide/systems#vector-loops)). A float sum takes the loop only under
+  `FloatMode.Fast`, since lanes add in another order; integer sums, minimums and maximums stay exact.
 - **What it costs:** per row, an add into a local: a reducing method runs over each chunk's runs of rows, and the JIT
   keeps the run's partial result, passed by `ref` to the inlined method, in a register. Per chunk, its job copy, kept
   until the pass ends and then combined in chunk order; 0 bytes after the first pass. No lock, no `Interlocked`, no
@@ -461,7 +469,8 @@ public class CountNeighbors : EcsSystem
   live long, so a buffer that grew large stays large.
 - **What it costs:** one lookup of the thread's value per chunk (per pass on one thread), then a field read per row;
   0 bytes after each thread's first use. [EECS028](/en/docs/guide/analyzer#eecs028) does not report the one-time
-  `??= new()`.
+  `??= new()`. A method whose body loops or calls is called once per row instead of inlined into the row loop: inlined,
+  its own loop would run out of registers beside the row loop's and keep its counters on the stack.
 
 `ScratchBenchmark` gathers 24 candidates per row over 10,000 and 100,000 rows in parallel, the list kept in a
 `Scratch<T>`, created per row, rented from `ArrayPool<int>.Shared` per row, kept in a hand-written `[ThreadStatic]`
@@ -601,6 +610,48 @@ public class ApplyHitsSystem : EcsSystem
     }
 }
 ```
+
+The generator gives each chunk its own list and joins the lists when the pass ends. What it writes for `Strike`:
+
+```csharp tab="You write" doccheck=skip
+[ForEach(Parallel = true)]
+static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits)
+```
+
+```csharp tab="The generator writes" doccheck=skip
+// Generated (StrikeSystem.….ForEach.g.cs, trimmed, global:: dropped). Do not copy it: Strike_0 is an
+// [UnsafeAccessor] to your private method.
+internal struct StrikeJob0 : IForEach<Attack, Aim>, INoStructuralChanges
+{
+    public SingletonRef<Emitted<Hit>> o2;   // the singleton the lists join
+    public DynamicBuffer<Hit> e2;           // the list of this chunk: each chunk runs its own copy of the job
+
+    public void Execute(ref Attack c1, ref Aim c2) => __ForEach.Strike_0(null, in c1, in c2, new Emit<Hit>(ref e2));
+
+    static int IForEach<Attack, Aim>.WriteMask => 0;
+    static bool IForEach<Attack, Aim>.Merges => true;
+
+    // Called once per chunk, in chunk order, on the thread that started the pass.
+    static void IForEach<Attack, Aim>.Merge<TSelf>(ref TSelf job, in TSelf chunk)
+    {
+        ref var into = ref Unsafe.As<TSelf, StrikeJob0>(ref job);
+        ref var part = ref Unsafe.As<TSelf, StrikeJob0>(ref Unsafe.AsRef(in chunk));
+        Emit<Hit>.Join(into.o2, ref part.e2);   // appends the chunk's records, gives its list back to the pool
+    }
+}
+
+// The system's Update and Access:
+var job0 = new StrikeJob0 { o2 = Emitted<Hit>.Joined(world) };   // Emitted<Hit> added when missing
+world.ForEachParallel<Attack, Aim, StrikeJob0>(ref job0);
+
+access.Read<Attack>();
+access.Read<Aim>();
+access.WriteSingleton<Emitted<Hit>>();   // a reader of the records waits for this system
+```
+
+A `Reduce<T>` parameter is joined the same way: the job's `Merge` calls `T.Combine` with each chunk's partial result
+in chunk order, and after the pass the system's code writes the combined result into singleton `T` (added when
+missing).
 
 - **Row order on any thread count.** The records come out in the order of the same method with `Parallel = false`,
   on every run, so a replay or a lockstep peer applies them in the same order.

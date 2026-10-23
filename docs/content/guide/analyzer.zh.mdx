@@ -1822,7 +1822,7 @@ public class MoveFlock : EcsSystem
 
 **在多个线程上运行的代码写共享内存。** 警告。没有代码修复。
 
-`[ForEach(Parallel = true)]` 方法，以及由 `ForEachParallel` 或 `ForEachEntityParallel` 运行的 job 的 `Execute`，会同时在多个线程上跑，
+`[ForEach(Parallel = true)]` 方法，以及由 `ForEachParallel`、`ForEachEntityParallel` 或 `world.ForParallel` 运行的 job 的 `Execute`，会同时在多个线程上跑，
 每个线程一块行。静态字段或自动属性、上下文参数引用的对象、job 字段持有的对象（每一块的 job 副本共享它），对所有线程都是同一块内存：
 自增会丢更新，列表的 `Add` 会把列表写坏，普通写入最后留下哪个取决于时机。规则不报：每个线程都写同一个常量、`[ThreadStatic]` 字段、
 并发集合、`Interlocked` 和 `Volatile` 调用、`lock` 里的写入、数组和列表的元素（不同的行可以各占不同的元素）以及局部变量。
@@ -1867,9 +1867,9 @@ public class TakeHits : EcsSystem
 ## EECS061 [#eecs061]
 
 **并行 job 的字段在遍历之后被读取。** 警告。代码修复：在调用没有传 `chunkRows` 时，改成在一个线程上运行这个 job（`ForEach` /
-`ForEachEntity`）。
+`ForEachEntity`）；`ForParallel` 没有对应的单线程调用，不提供修复。
 
-`ForEachParallel` 和 `ForEachEntityParallel` 给每一块运行一个 job 副本，什么都不合并回来：按 `ref` 传入的 job 保持调用之前的值。
+`ForEachParallel`、`ForEachEntityParallel` 和 `world.ForParallel` 给每一块运行一个 job 副本，什么都不合并回来：按 `ref` 传入的 job 保持调用之前的值。
 `Execute` 写的字段（总和、计数、标记），调用方之后再读，读到的还是旧值。调用之后对这个 job 的第一次使用是读这样的字段时，规则报告这次调用。
 会把各块副本合并回来的 job（带 `Reduce<T>` 参数的方法生成的 job）不报。
 

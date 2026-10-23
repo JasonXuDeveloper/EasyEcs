@@ -34,7 +34,7 @@ icon: RotateCcwClock
   由解交错加载和交错存储拆成每个字段一个向量（256 位用 AVX2，512 位用 permute；没有这些指令时逐行运行）。结果逐位相同；不符合条件的方法
   照旧逐行运行，代码不用改。见[向量循环](/zh/docs/guide/systems#vector-loops)和[决策](/zh/docs/decisions#d68-vector-loops-without-opting-in)。
 - 分析器规则 [EECS055](/zh/docs/guide/analyzer#eecs055)（建议）说明数值组件的 `[ForEach]` 方法为什么没有得到向量循环（“component Body has 5
-  fields”、“lane types float and int differ”），就像 Burst 的 Inspector。`[ForEach(SimdMode = SimdMode.Require)]` 让这种情况成为错误
+  fields”、“lane types float and double differ in size”），就像 Burst 的 Inspector。`[ForEach(SimdMode = SimdMode.Require)]` 让这种情况成为错误
   （[EECS056](/zh/docs/guide/analyzer#eecs056)），热点循环不会悄悄失去向量；`SimdMode.Off` 让方法保持标量且不再提示。见
   [向量循环](/zh/docs/guide/systems#vector-loops)。
 - 向量循环能接下更多方法（[决策](/zh/docs/decisions#d90-vector-loops-reach)）：并行 `[ForEach]` 方法（每个块的行段）；`Maybe<T>` 参数（有 `T` 的行组成的通道掩码）；

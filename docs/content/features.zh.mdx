@@ -141,17 +141,18 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 
 ### 生成器写出的向量循环（SIMD） [#vector-loops]
 
-组件有 1 到 4 个同类型数值（`float`、`int` 等；`Position { X, Y, Z }` 也行）的逐行 `[ForEach]` 方法，会以生成器根据方法体写出的
-`Vector<T>` 循环运行，和 Burst 编译 job 的做法一样：`if` 和 `?:` 变成掩码，单例和常量复制到每条通道，多个字段拆成每个字段一个向量，
+组件有 1 到 4 个同样大小数值（`float`、`int` 等；`Position { X, Y, Z }` 也行）的逐行 `[ForEach]` 方法，会以生成器根据方法体写出的
+向量循环运行（CPU 支持 AVX-512 时用 `Vector512`，之后用 `Vector<T>`），和 Burst 编译 job 的做法一样：`if` 和 `?:` 变成掩码，单例和常量复制到每条通道，多个字段拆成每个字段一个向量，
 结果和逐行方法逐位相同。
 
 - **适合：** 对大量行做算术：衰减、积分、截断、计数。
-- **别用于：** 不用管：它是自动的。不符合条件的方法（两种数值类型、每条路径上都有函数调用）照旧逐行运行，
+- **别用于：** 不用管：它是自动的。不符合条件的方法（两种大小的通道、每条路径上都有函数调用）照旧逐行运行，
   [EECS055](/zh/docs/guide/analyzer#eecs055) 会说明原因；`SimdMode = SimdMode.Require` 让它成为构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)），
   `SimdMode.Off` 不再提示。并行方法、`Maybe<T>` 参数、`byte` 和 `short` 通道、`Vector2` / `Vector3` 字段、整体赋值（`new T(...)`、`with`）
   和条件分支里的调用也能得到循环；`FloatMode.Fast` 让 `Sin`、`Exp`、`Log` 等改用向量近似。`SystemInfo.Loops` 列出每个方法得到的循环。
-- **开销：** 运行时没有；循环在编译时写好。
-- **指南：** [系统](/zh/docs/guide/systems#vector-loops)、[FloatMode](/zh/docs/guide/systems#float-mode)
+- **开销：** 运行时只有循环本身，循环在编译时写好；`Reduce<T>` 每条通道一个累加器。
+- **指南：** [系统](/zh/docs/guide/systems#vector-loops)、[FloatMode](/zh/docs/guide/systems#float-mode)、
+  [高性能写法](/zh/docs/guide/high-performance)
 
 ### 批量方法 [#batch-methods]
 

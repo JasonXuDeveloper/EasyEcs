@@ -178,7 +178,8 @@ public class MovementSystem : EcsSystem
 }
 ```
 
-静态、逐实体、组件有 1 到 4 个同类型数值（`float`、`int`……）的方法，生成器还会给它写一个 `Vector<T>` 循环，结果逐位相同
+静态、逐实体、组件有 1 到 4 个同样大小的数值（`float`、`int`……）的方法，生成器还会给它写一个向量循环（CPU 支持 AVX-512 时用 `Vector512`，
+之后用 `Vector<T>`），结果逐位相同
 （[向量循环](/zh/docs/guide/systems#vector-loops)）。这个方法就有：每个组件两个 `float`。方法没得到循环时
 [EECS055](/zh/docs/guide/analyzer#eecs055) 会说明原因，`world.DescribeSchedule()` 里的 `SystemInfo.Loops` 列出每个方法得到的循环。
 
@@ -211,7 +212,7 @@ public class MovementSystem : EcsSystem
 | `[ForEach]` / `[ForEach(Parallel = true)]` | 方法 | 方法就是循环；`Parallel` 把行分给多个线程（[EECS010](/zh/docs/guide/analyzer#eecs010)） |
 | `[ForEach(Parallel = true, ChunkRows = n)]` | 方法 | 线程每次领 `n` 行（OpenMP 的 `schedule(dynamic, n)`）：适合几百行重活（[块大小](/zh/docs/guide/threading#chunk-rows)、[EECS054](/zh/docs/guide/analyzer#eecs054)） |
 | `[ForEach(SimdMode = SimdMode.Require)]` | 方法 | 方法必须得到向量循环，否则构建报错（[EECS056](/zh/docs/guide/analyzer#eecs056)）；`SimdMode.Off` 保持标量，不再有 [EECS055](/zh/docs/guide/analyzer#eecs055) |
-| `[ForEach(FloatMode = FloatMode.Fast)]` | 方法 | 向量循环里的 `Sin`、`Cos`、`Exp`、`Log`、`Log2`、`Hypot` 改用 .NET 的向量近似；`Exact`（默认）让结果和方法逐位相同（[FloatMode](/zh/docs/guide/systems#float-mode)） |
+| `[ForEach(FloatMode = FloatMode.Fast)]` | 方法 | 向量循环里的 `Sin`、`Cos`、`Exp`、`Log`、`Log2`、`Hypot` 改用 .NET 的向量近似，浮点 `Reduce<T>` 求和按通道相加；`Exact`（默认）让结果和方法逐位相同（[FloatMode](/zh/docs/guide/systems#float-mode)） |
 | `[ForEach, Consume]` | 方法 | 这一遍结束时销毁它访问过的行：事件、命令（[Consume](/zh/docs/guide/systems#consume)、[EECS084](/zh/docs/guide/analyzer#eecs084)） |
 | `[ForEntity]` | 静态方法 | 通过生成的入口方法 `Owner.Method(entity, values)` 在一个实体上运行（[单个实体](/zh/docs/guide/queries#run-on-one-entity)、[EECS080](/zh/docs/guide/analyzer#eecs080)） |
 | `[ForEach(Slices = N)]` | 方法 | 每次运行只访问一片，约 1/N 的行：每 N 次运行每行一次（不能和 `Changed` / `Removed` 一起用：[EECS035](/zh/docs/guide/analyzer#eecs035)） |

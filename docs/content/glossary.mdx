@@ -151,10 +151,30 @@ A read of another entity's component from a `[ForEach]` method: a `Lookup<T>` pa
 method may run in parallel. MPI's one-sided `Get`, Unity's `ComponentLookup`. See
 [lookups](/en/docs/guide/threading#lookups).
 
+## Emitted records [#emit]
+
+Records a pass produces for a later system (hits, packets): an `Emit<T>` parameter appends to its [chunk](#chunk)'s
+own list, and when the pass ends the lists are appended in row order to singleton `Emitted<T>`, which the system that
+applies them clears. Unity's `NativeStream`. See [emit](/en/docs/guide/threading#emit).
+
+## Stream (`EntityRandom`) [#stream]
+
+The fourth input of an `EntityRandom` draw, beside the seed, the entity and the tick: each call site of a method
+draws from its own stream (0, 1, 2, ...), so two draws for one entity in one tick differ. The same four inputs give
+the same number on any thread and in any row order. See [random numbers](/en/docs/guide/threading#entity-random).
+
+## Tile and halo [#tile]
+
+A tile is one entity of a grid cut into boxes of cells: a component implementing `ITile<TKey>` (its shape and key) and
+a `DynamicBuffer<TCell>` of its cells. The halo is the ring of cells around it, `Halo` cells wide, that
+`Tile<TCell, TTile>.Pad()` copies from the facing edges of its neighbors (MPI's ghost cells, a CUDA tile's apron).
+See [grid tiles](/en/docs/guide/grids).
+
 ## Vector loop [#vector-loop]
 
-The `Vector<T>` loop the generator writes for a per-row `[ForEach]` method over components of 1 to 4 numbers of one
-type: the method's body computed for as many rows per instruction as a vector holds, with masks for its branches and
+The SIMD loop the generator writes for a per-row `[ForEach]` method over components of 1 to 4 numbers of one size
+(`Vector512` where the CPU has AVX-512, then `Vector<T>`): the method's body computed for as many rows per
+instruction as a vector holds, with masks for its branches and
 the method itself for the rows left over. EECS055 names why a method got none. See
 [vector loops](/en/docs/guide/systems#vector-loops).
 

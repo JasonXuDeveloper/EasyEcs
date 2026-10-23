@@ -167,20 +167,23 @@ indexed component accepts.
 
 ### Vector loops the generator writes (SIMD) [#vector-loops]
 
-A per-row `[ForEach]` method whose components hold 1 to 4 numbers of one type (`float`, `int`, ...;
-`Position { X, Y, Z }` too) runs as a `Vector<T>` loop the generator writes from its body, the way Burst compiles a
+A per-row `[ForEach]` method whose components hold 1 to 4 numbers of one size (`float`, `int`, ...;
+`Position { X, Y, Z }` too) runs as a vector loop the generator writes from its body (`Vector512` where the CPU has
+AVX-512, then `Vector<T>`), the way Burst compiles a
 job: `if` and `?:` become masks, singletons and constants are copied to every lane, several fields are split into
 one vector each, and the results are those of the per-row method bit for bit.
 
 - **Use it for:** arithmetic over many rows: decay, integration, clamps, counters.
-- **Skip it for:** nothing: it is automatic. A method that does not qualify (two number types, a call on every
+- **Skip it for:** nothing: it is automatic. A method that does not qualify (lanes of two sizes, a call on every
   path) runs row by row as before, and [EECS055](/en/docs/guide/analyzer#eecs055) names why;
   `SimdMode = SimdMode.Require` makes that a build error ([EECS056](/en/docs/guide/analyzer#eecs056)), `SimdMode.Off`
   silences it. Parallel methods, `Maybe<T>` parameters, `byte` and `short` lanes, `Vector2` / `Vector3` fields, whole
   values (`new T(...)`, `with`) and a call under a condition get the loop too; `FloatMode.Fast` lets `Sin`, `Exp`,
   `Log` and friends take vector approximations. `SystemInfo.Loops` names the loop each method got.
-- **Cost:** none at run time; the loop is written at compile time.
-- **Guide:** [Systems](/en/docs/guide/systems#vector-loops), [FloatMode](/en/docs/guide/systems#float-mode)
+- **Cost:** none at run time beyond the loop itself, written at compile time; a `Reduce<T>` keeps one accumulator per
+  lane.
+- **Guide:** [Systems](/en/docs/guide/systems#vector-loops), [FloatMode](/en/docs/guide/systems#float-mode),
+  [high-performance patterns](/en/docs/guide/high-performance)
 
 ### Batch methods [#batch-methods]
 
