@@ -202,24 +202,37 @@ public sealed partial class World
         if (Volatile.Read(ref PassDepth) != 0) CompactArchetypes();
 
         long update = ++group.Updates;
-        var stages = group.Stages;
-        bool parallel = _options.ParallelSystems;
-        for (int b = 0; b < stages.Length; b++)
+        if (!_options.ParallelSystems)
         {
-            var stage = stages[b];
-            // One change tick per stage: its systems never write what another one of them reads (Changed<T> reads T).
-            _changeTick++;
-            if (parallel && stage.Systems.Length > 1)
+            // One thread: the whole group in runs of one set across stages, the tick moved on where a stage starts.
+            var serial = group.Serial;
+            var runs = serial.Runs;
+            for (int r = 0; r < runs.Length; r++)
             {
-                RunStage(stage, update);
-                continue;
+                var run = runs[r];
+                run.Set.Run(this, serial.Systems.AsSpan(run.Start, run.Count), update, serial.Starts.AsSpan(run.Start, run.Count));
             }
-
-            var segments = stage.Segments;
-            for (int s = 0; s < segments.Length; s++)
+        }
+        else
+        {
+            var stages = group.Stages;
+            for (int b = 0; b < stages.Length; b++)
             {
-                var segment = segments[s];
-                segment.Set.Run(this, stage.Systems.AsSpan(segment.Start, segment.Count), update);
+                var stage = stages[b];
+                // One change tick per stage: its systems never write what another one of them reads (Changed<T> reads T).
+                _changeTick++;
+                if (stage.Systems.Length > 1)
+                {
+                    RunStage(stage, update);
+                    continue;
+                }
+
+                var segments = stage.Segments;
+                for (int s = 0; s < segments.Length; s++)
+                {
+                    var segment = segments[s];
+                    segment.Set.Run(this, stage.Systems.AsSpan(segment.Start, segment.Count), update, default);
+                }
             }
         }
 
@@ -231,11 +244,14 @@ public sealed partial class World
     /// of their group: the enabled ones due on it (<see cref="UpdateIntervalAttribute">[UpdateInterval]</see>), each
     /// through the set's switch, so a system's code is a direct call. A segment of a stage runs with one call, a system
     /// of a parallel stage with a span of one. Bound once per set (<see cref="SystemCode.Register{TSet}"/>).
+    /// <paramref name="starts"/>, when not empty, marks the systems that start a stage (a run of the serial plan, across
+    /// stages): the change tick moves on before each, as it does before every stage, run or not.
     /// </summary>
-    internal static void RunSystems<TSet>(World world, ReadOnlySpan<SystemSlot> systems, long update) where TSet : struct, ISystemSet
+    internal static void RunSystems<TSet>(World world, ReadOnlySpan<SystemSlot> systems, long update, ReadOnlySpan<bool> starts) where TSet : struct, ISystemSet
     {
         for (int i = 0; i < systems.Length; i++)
         {
+            if ((uint)i < (uint)starts.Length && starts[i]) world._changeTick++; // one change tick per stage
             var slot = systems[i];
             // Re-read per system: one may add systems (a new array) or remove a later one (a new version) as it runs.
             ref var row = ref world.SystemRows[slot.Index];
@@ -400,6 +416,40 @@ public sealed partial class World
     internal readonly record struct Segment(SystemCode.Set Set, int Start, int Count);
 
     /// <summary>
+    /// A group's stages as one thread runs them: every system in execution order (stage after stage), cut into runs of
+    /// consecutive systems of one set whatever the stages, and which systems start a stage. Sixteen systems of one
+    /// assembly in sixteen stages are one call of their set, not sixteen; the change tick still moves on once per stage.
+    /// </summary>
+    internal sealed class SerialPlan(SystemSlot[] systems, bool[] starts, Segment[] runs)
+    {
+        public static readonly SerialPlan Empty = new([], [], []);
+
+        public readonly SystemSlot[] Systems = systems;
+        public readonly bool[] Starts = starts;
+        public readonly Segment[] Runs = runs;
+
+        /// <summary>The plan of <paramref name="stages"/>, whose systems are <paramref name="systems"/> in order.</summary>
+        public static SerialPlan Of(SystemStage[] stages, SystemSlot[] systems)
+        {
+            var starts = new bool[systems.Length];
+            var runs = new List<Segment>();
+            for (int b = 0, at = 0; b < stages.Length; b++)
+            {
+                starts[at] = true;
+                foreach (var segment in stages[b].Segments)
+                {
+                    if (runs.Count > 0 && runs[^1].Set == segment.Set) runs[^1] = runs[^1] with { Count = runs[^1].Count + segment.Count };
+                    else runs.Add(segment with { Start = at + segment.Start });
+                }
+
+                at += stages[b].Systems.Length;
+            }
+
+            return new SerialPlan(systems, starts, runs.ToArray());
+        }
+    }
+
+    /// <summary>
     /// Systems of one group in execution order (registration order as [UpdateBefore] / [UpdateAfter] reorder it), with
     /// their parallel stages. Mutated under the structural gate by publishing new arrays (copy-on-write), so a running
     /// update never sees a torn list.
@@ -408,6 +458,7 @@ public sealed partial class World
     {
         public SystemSlot[] Systems = []; // execution order
         public SystemStage[] Stages = [];
+        public SerialPlan Serial = SerialPlan.Empty; // the stages as one thread runs them (no ParallelSystems)
         public long Updates;
         public string Name = DefaultName; // the group type's (World.DescribeSchedule)
         private SystemSlot[] _registered = [];
@@ -468,9 +519,10 @@ public sealed partial class World
                 stages[level] = new SystemStage(systems[start..next], segments.ToArray(), prepares?.ToArray() ?? []);
             }
 
-            // An update reads only Stages: one reference, so it never mixes two versions of the list.
+            // An update reads only Stages, or only Serial: one reference, so it never mixes two versions of the list.
             _registered = registered;
             Systems = systems;
+            Serial = SerialPlan.Of(stages, systems);
             Stages = stages;
         }
 

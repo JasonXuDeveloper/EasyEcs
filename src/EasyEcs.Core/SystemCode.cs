@@ -112,7 +112,7 @@ public static unsafe class SystemCode
     /// </summary>
     internal sealed class Set
     {
-        public delegate*<World, ReadOnlySpan<World.SystemSlot>, long, void> Run;
+        public delegate*<World, ReadOnlySpan<World.SystemSlot>, long, ReadOnlySpan<bool>, void> Run;
         public delegate*<World, int, SystemHandle, void> Create, Destroy;
         public Entry[] Systems = [];
     }

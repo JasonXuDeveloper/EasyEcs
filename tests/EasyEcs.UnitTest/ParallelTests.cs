@@ -276,6 +276,38 @@ public class ParallelTests
     }
 
     [Test]
+    public void OneThreadMovesTheChangeTickPerStageAsParallelStagesDo()
+    {
+        // Count and Movement share the first stage, Observe (reads Counter) is the second: run on one thread, the three
+        // systems of this assembly are one call of its set, and the tick still moves on before each stage, also before a
+        // stage whose only system is switched off.
+        var ticks = new System.Collections.Generic.List<ulong>[2];
+        for (int mode = 0; mode < 2; mode++)
+        {
+            using var world = new World(new WorldOptions { ParallelSystems = mode == 1 });
+            world.CreateEntity(new Counter(), new Seen(), new Position(), new Velocity(1, 1));
+            world.AddSystem<Count>();
+            world.AddSystem<Movement>();
+            var observe = world.AddSystem<Observe>();
+            ticks[mode] = [];
+            for (int update = 0; update < 6; update++)
+            {
+                observe.Enabled = update % 2 == 0;
+                ulong before = world.ChangeTick;
+                world.Update();
+                ticks[mode].Add(world.ChangeTick - before);
+                foreach (var system in world.Systems) ticks[mode].Add(system.LastRunTick - before);
+            }
+
+            Assert.That(world.Query<Seen>().GetEnumerator().MoveNext(), Is.True);
+            foreach (var item in world.Query<Seen>()) Assert.That(item.Component1.N, Is.EqualTo(5), "Observe ran on updates 1, 3, 5");
+        }
+
+        Assert.That(ticks[0], Is.EqualTo(ticks[1]), "the same ticks on one thread as in parallel stages");
+        Assert.That(ticks[0][0], Is.EqualTo(3UL), "two stages and the tick after the update");
+    }
+
+    [Test]
     public void ErrorsOnHelperThreadsReachTheCaller()
     {
         using var world = ParallelWorld(timeoutMs: 0);
