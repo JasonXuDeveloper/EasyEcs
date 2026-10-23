@@ -11,7 +11,7 @@ namespace EasyEcs.Generator;
 
 /// <summary>
 /// The rules for code that runs on several threads at once (EECS060, EECS061): a parallel [ForEach] method, or the
-/// <c>Execute</c> of a job run by <c>ForEachParallel</c> / <c>ForEachEntityParallel</c>, that writes memory every
+/// <c>Execute</c> of a job run by <c>ForEachParallel</c> / <c>ForEachEntityParallel</c> / <c>ForEachBatchParallel</c>, that writes memory every
 /// thread shares, and a parallel job whose fields the caller reads after the call (each chunk ran a copy). Both find
 /// the writes with <see cref="Threads.Writes"/>.
 /// </summary>
@@ -20,7 +20,8 @@ public sealed partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor SharedWrite = new("EECS060", "Code running on several threads writes shared memory",
         "{0} writes {1}, which every thread running its chunks shares: the writes race{2}",
         Category, DiagnosticSeverity.Warning, true,
-        "A parallel [ForEach] method, and the Execute of a job run by ForEachParallel, ForEachEntityParallel or ForParallel, run on " +
+        "A parallel [ForEach] method, and the Execute of a job run by ForEachParallel, ForEachEntityParallel, ForEachBatchParallel or " +
+        "ForParallel, run on " +
         "several threads at once, one chunk of rows each. A static field or auto-property, an object a context parameter " +
         "or a job's field refers to, is the same memory for all of them: an increment or a compound assignment loses " +
         "updates, a collection's Add corrupts it, and which plain write is kept depends on the threads' timing. Write the " +
@@ -32,9 +33,10 @@ public sealed partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor LostJobWrite = new("EECS061", "A parallel job's field read after the pass",
         "'{0}' is run by {1}, which gives each chunk its own copy of the job, so what Execute writes to its field '{2}' never reaches '{3}', read after the call",
         Category, DiagnosticSeverity.Warning, true,
-        "ForEachParallel, ForEachEntityParallel and ForParallel run a copy of the job per chunk, on several threads, and merge nothing " +
-        "back: the job passed by ref keeps the values it had before the call. A field Execute writes (a sum, a count, a " +
-        "flag) and the caller reads afterwards holds its old value. Run the job on one thread (ForEach, ForEachEntity), " +
+        "ForEachParallel, ForEachEntityParallel, ForEachBatchParallel and ForParallel run a copy of the job per chunk, on several " +
+        "threads, and merge nothing back unless the job merges (Merges): the job passed by ref keeps the values it had before the " +
+        "call. A field Execute writes (a sum, a count, a flag) and the caller reads afterwards holds its old value. Run the job " +
+        "on one thread (ForEach, ForEachEntity, ForEachBatch), " +
         "which writes the job back, or write the results into the rows.",
         helpLinkUri: Help("EECS061"));
 
@@ -283,16 +285,16 @@ public sealed partial class EasyEcsAnalyzer
              && Symbols.IsSystem(write.Symbol.ContainingType));
 
     /// <summary>
-    /// EECS060 and EECS061 at a <c>ForEachParallel</c> / <c>ForEachEntityParallel</c> call: the job's Execute writes
-    /// shared memory, or a field of the job the caller reads after the call.
+    /// EECS060 and EECS061 at a <c>ForEachParallel</c> / <c>ForEachEntityParallel</c> / <c>ForEachBatchParallel</c> /
+    /// <c>ForParallel</c> call: the job's Execute writes shared memory, or a field of the job the caller reads after the call.
     /// </summary>
     private static void AnalyzeParallelJob(OperationAnalysisContext context)
     {
         var call = (IInvocationOperation)context.Operation;
-        if (call.TargetMethod is not { Name: "ForEachParallel" or "ForEachEntityParallel" or "ForParallel", TypeArguments.Length: > 0 } method
+        if (call.TargetMethod is not { Name: "ForEachParallel" or "ForEachEntityParallel" or "ForEachBatchParallel" or "ForParallel", TypeArguments.Length: > 0 } method
             || !Symbols.Named(method.ContainingType, Symbols.World)
             || method.TypeArguments[method.TypeArguments.Length - 1] is not INamedTypeSymbol job
-            || Execute(job, method) is not { } execute
+            || Execute(job, method) is not ({ } execute, var face)
             || execute.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is not MethodDeclarationSyntax declaration
             || call.SemanticModel is not { } model) return;
         var bodyModel = Symbols.ModelOf(declaration.SyntaxTree, model);
@@ -305,7 +307,7 @@ public sealed partial class EasyEcsAnalyzer
 
         // EECS061: the first use of the job local after the call reads a field Execute writes; a job that merges
         // its chunks' copies back (Merges, as generated jobs with Reduce<T> do) keeps them.
-        if (job.GetMembers("Merges").Length > 0) return;
+        if (Merges(job, face)) return;
         var own = new HashSet<ISymbol>(writes.Where(w => !w.Shared).Select(w => w.Symbol), SymbolEqualityComparer.Default);
         if (own.Count == 0 || call.Arguments.FirstOrDefault(a => a.Parameter?.Name == "job")?.Value is not ILocalReferenceOperation { Local: var local }) return;
         int after = call.Syntax.Span.End;
@@ -329,16 +331,18 @@ public sealed partial class EasyEcsAnalyzer
     }
 
     /// <summary>
-    /// The job's Execute for the type arguments of a parallel call before the job's (its interface: IForEach&lt;…&gt; or
-    /// IForEachEntity&lt;…&gt; of the components; IForRange, or IForSpan&lt;T&gt; of the element, for ForParallel).
+    /// The job's Execute for the type arguments of a parallel call before the job's, and the interface it implements:
+    /// IForEach&lt;…&gt;, IForEachEntity&lt;…&gt; or IForEachBatch&lt;…&gt; of the components; IForRange, or IForSpan&lt;T&gt;
+    /// of the element, for ForParallel.
     /// </summary>
-    private static IMethodSymbol? Execute(INamedTypeSymbol job, IMethodSymbol call)
+    private static (IMethodSymbol? Execute, INamedTypeSymbol Face)? Execute(INamedTypeSymbol job, IMethodSymbol call)
     {
         int n = call.TypeArguments.Length - 1;
         string face = call.Name switch
         {
             "ForEachParallel" => "IForEach",
             "ForEachEntityParallel" => "IForEachEntity",
+            "ForEachBatchParallel" => "IForEachBatch",
             _ => n == 0 ? "IForRange" : "IForSpan",
         };
         foreach (var candidate in job.AllInterfaces)
@@ -347,9 +351,18 @@ public sealed partial class EasyEcsAnalyzer
             bool same = true;
             for (int i = 0; i < n && same; i++) same = SymbolEqualityComparer.Default.Equals(candidate.TypeArguments[i], call.TypeArguments[i]);
             if (same && candidate.GetMembers("Execute").FirstOrDefault() is { } member)
-                return job.FindImplementationForInterfaceMember(member) as IMethodSymbol;
+                return (job.FindImplementationForInterfaceMember(member) as IMethodSymbol, candidate);
         }
 
         return null;
     }
+
+    /// <summary>
+    /// Whether the job merges its chunks' copies back into the caller's (<c>Merges</c>, implicitly or explicitly
+    /// implemented: generated jobs with a <c>Reduce&lt;T&gt;</c> do). The interface's own default merges nothing.
+    /// </summary>
+    private static bool Merges(INamedTypeSymbol job, INamedTypeSymbol face) =>
+        face.GetMembers("Merges").FirstOrDefault() is { } member
+            ? job.FindImplementationForInterfaceMember(member) is { } merges && SymbolEqualityComparer.Default.Equals(merges.ContainingType, job)
+            : job.GetMembers("Merges").Length > 0;
 }

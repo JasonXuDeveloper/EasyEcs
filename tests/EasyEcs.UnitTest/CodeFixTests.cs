@@ -277,6 +277,10 @@ public class CodeFixTests
         "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
         + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, QueryFilter.Create().Without<Q>()); return s.Total; } }",
         "w.ForEach<P, Sum>(ref s, QueryFilter.Create().Without<Q>());")]
+    [TestCase("EECS061", "Run it on one thread",
+        "public struct Sum : IForEachBatch<P>, INoStructuralChanges { public int Total; public void Execute(EntitySpan e, System.Span<P> p) => Total += p.Length; }\n"
+        + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachBatchParallel<P, Sum>(ref s); return s.Total; } }",
+        "w.ForEachBatch<P, Sum>(ref s);")]
     [TestCase("EECS071", "Draw from EntityRandom",
         "[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(ref P p) => p.V = System.Random.Shared.Next(1, 7); }",
         "static void A(ref P p, Entity entity, in EntityRandom random) => p.V = random.Range(entity.Id, 0, 1, 7); }")]
