@@ -259,7 +259,7 @@ internal struct TargetSlots
 /// component (<see cref="IUniqueIndexed{TKey}"/>) is current from the world's first table holding it instead, and
 /// refuses a write that would give a key to a second entity. Lookups allocate nothing once every key has
 /// been seen; the index belongs to the world's owner thread, like component values (a system that looks up from an
-/// <c>[OnUpdate]</c> hook or a <c>[ForEach]</c> method taking the <see cref="World"/> runs alone).
+/// <c>[OnUpdate]</c> hook or a <c>[ForEach]</c> method taking the <c>World</c> runs alone).
 /// </summary>
 public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, World.IUniqueOf<T>, World.IUniqueIndex
     where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>

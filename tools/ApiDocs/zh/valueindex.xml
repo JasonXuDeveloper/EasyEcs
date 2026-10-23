@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 
 <doc>
-  <member name="T:EasyEcs.ValueIndex`2" source="89a9ff99197a">
+  <member name="T:EasyEcs.ValueIndex`2" source="28d67960610c">
     <summary>
       一个 World 里组件 <typeparamref name="T" /> 的值索引（<see cref="M:EasyEcs.World.Index``2" />）。写入值时索引立即更新：
       <c>Set</c> 和 <c>CreateEntity</c> 当场重新索引实体（O(1)），实体一销毁或失去这个组件就离开索引，所以查找时没有欠账要补。
       第一次查找（以及 <see cref="M:EasyEcs.World.Restore(EasyEcs.WorldSnapshot)" /> 之后的第一次）会把每一行索引一遍；唯一组件
       （<see cref="T:EasyEcs.IUniqueIndexed`1" />）的索引则从 World 里第一张含有它的表起就是最新的，并且拒绝会让第二个实体拿到同一个键的写入。
-      所有键都出现过之后，查找不再分配内存；索引和组件值一样，属于 World 的所有者线程（在 <c>[OnUpdate]</c> 钩子或接收 <see cref="T:EasyEcs.World" /> 的 <c>[ForEach]</c> 方法里查找的系统会独占运行）。
+      所有键都出现过之后，查找不再分配内存；索引和组件值一样，属于 World 的所有者线程（在 <c>[OnUpdate]</c> 钩子或接收 <c>World</c> 的 <c>[ForEach]</c> 方法里查找的系统会独占运行）。
     </summary>
   </member>
   <member name="M:EasyEcs.ValueIndex`2.Count(`1)" source="170137d9ae8d">
