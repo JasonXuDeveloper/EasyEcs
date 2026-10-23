@@ -23,9 +23,9 @@ namespace EasyEcs;
 public readonly ref struct Mut<T> where T : struct, IComponent
 {
     private readonly ref T _value;
-    private readonly Entity _entity; // the visited entity: a write finds its row (it may have moved) and stamps it
-    private readonly Archetype _table; // set when the row cannot move during the call: a write stamps it directly
-    private readonly int _row;
+    private readonly ref readonly MutColumn _run; // the run's change ticks when the row cannot move during the call; a null ref otherwise
+    private readonly Entity _entity; // otherwise the visited entity: a write finds its row (it may have moved) and stamps it
+    private readonly int _index;     // the row in the run
 
     /// <summary>
     /// Wraps <paramref name="value"/>, the component of <paramref name="entity"/> a pass hands out (its row in the table
@@ -39,17 +39,16 @@ public readonly ref struct Mut<T> where T : struct, IComponent
     }
 
     /// <summary>
-    /// Wraps <paramref name="value"/>, the component of row <paramref name="index"/> of <paramref name="entities"/>, a
-    /// run of rows of a pass that changes no structure: a write stamps the row without looking the entity up. Generated
-    /// code calls this.
+    /// Wraps <paramref name="value"/>, the component of row <paramref name="index"/> of a run of rows of a pass that
+    /// changes no structure, whose change-tick column <paramref name="run"/> holds (<see cref="MutColumn.Of{T}"/>, made
+    /// once per run): a write stamps the row without looking the entity or the column up. Generated code calls this.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Mut(ref T value, in EntitySpan entities, int index)
+    public Mut(ref T value, in MutColumn run, int index)
     {
         _value = ref value;
-        _entity = new Entity(entities.World, default(EntityId)); // only its world: the row is known
-        _table = entities.Table;
-        _row = entities.First + index;
+        _run = ref run;
+        _index = index;
     }
 
     /// <summary>The component, read-only: not a write, nothing is stamped. O(1).</summary>
@@ -69,7 +68,7 @@ public readonly ref struct Mut<T> where T : struct, IComponent
     {
         if (default(T) is ITracked) // a JIT-time constant: nothing for other components
         {
-            if (_table != null) _table.Stamp<T>(_row, _entity.World.ChangeTick);
+            if (!Unsafe.IsNullRef(in _run)) _run.Stamp(_index);
             else Entity.Stamp<T>(_entity);
         }
         return ref _value;
@@ -91,6 +90,59 @@ public readonly ref struct Mut<T> where T : struct, IComponent
         if (Values.Same(in _value, in value)) return false;
         Write() = value;
         return true;
+    }
+}
+
+/// <summary>
+/// The change-tick column of a tracked component in the table of a run of rows, looked up once per run: each
+/// <see cref="Mut{T}"/> of the run stamps the row it writes through it, with the stamp of <c>Archetype.Stamp</c>
+/// (word summary, then the row's tick) and no lookup of the world's tick, the column or its arrays. Valid for the run
+/// (a pass that changes no structure: the table's storage is not reallocated). Generated code makes it.
+/// </summary>
+[EditorBrowsable(EditorBrowsableState.Never)]
+public readonly unsafe struct MutColumn
+{
+    private readonly Archetype _table;
+    private readonly WordTicks[] _words;
+    private readonly RowTick* _ticks; // a pinned column (Archetype.TicksOf)
+    private readonly int _column, _first;
+    private readonly ulong _tick;
+
+    private MutColumn(Archetype table, WordTicks[] words, RowTick* ticks, int column, int first, ulong tick)
+    {
+        _table = table;
+        _words = words;
+        _ticks = ticks;
+        _column = column;
+        _first = first;
+        _tick = tick;
+    }
+
+    /// <summary>
+    /// The change-tick column of <typeparamref name="T"/> for the run <paramref name="entities"/> (default for a
+    /// component that does not track changes: its <see cref="Mut{T}"/> stamps nothing). Generated code calls this.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static MutColumn Of<T>(in EntitySpan entities) where T : struct, IComponent
+    {
+        if (default(T) is not ITracked) return default; // a JIT-time constant
+        var table = entities.Table;
+        int column = table.TicksOf<T>(out var words, out var ticks);
+        return new MutColumn(table, words, ticks, column, entities.First, entities.World.ChangeTick);
+    }
+
+    /// <summary>Stamps row <paramref name="index"/> of the run as written at the pass's tick.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void Stamp(int index)
+    {
+        int row = _first + index;
+        // No bounds checks: the row is one of the run's, below the table's capacity, which its summaries cover. Summaries
+        // only grow and no row holds a later tick than the world's: a word at this tick has its block and column at it.
+        ref var word = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_words), row >> 6);
+        ulong bit = 1UL << row; // shift is mod 64
+        if (word.Write == _tick) word.Rows |= bit;
+        else _table.NoteWord(_column, row, bit, _tick);
+        _ticks[row].Value = _tick;
     }
 }
 

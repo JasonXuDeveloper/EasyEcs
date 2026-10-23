@@ -127,6 +127,14 @@ public class ChangedTests
         private static void Cap(Mut<Armor> armor) => armor.SetIfChanged(new Armor(Math.Min(armor.Value.Value, 3)));
     }
 
+    /// <summary>The cap over the unstunned rows only: runs that start inside a table, and inside a 64-row word.</summary>
+    [EcsSystem]
+    public ref struct CapArmorUnstunned
+    {
+        [ForEach, Without<Stun>]
+        private static void Cap(Mut<Armor> armor) => armor.SetIfChanged(new Armor(Math.Min(armor.Value.Value, 3)));
+    }
+
     /// <summary>Reads armor through a Mut and writes the stunned rows' with Write().</summary>
     [EcsSystem]
     public ref struct PeekAndHit
@@ -786,6 +794,31 @@ public class ChangedTests
         world.Update(); // the watch runs first now, the cap after it
         world.Update();
         Assert.That((SeenCount(high), SeenCount(low)), Is.EqualTo((2, 3)));
+    }
+
+    [Test]
+    public void MutStampsTheRowsItWritesInRunsThatStartAnywhere()
+    {
+        using var world = new World();
+        world.AddSystem<CapArmorUnstunned>();
+        var entities = new Entity[1_000];
+        world.CreateEntities(entities, new Armor(1));
+        for (int i = 0; i < entities.Length; i += 3) entities[i].Set(new Stun(1)); // presence bits: runs between them
+        world.Update();
+        for (int i = 0; i < entities.Length; i += 5) entities[i].Get<Armor>() = new Armor(9); // stamped at this tick
+        ulong mark = world.ChangeTick + 1; // the update's stage: the cap's writes only
+        world.Update(); // the cap writes the unstunned rows of those: each its own row, word and block summaries
+        var expected = new System.Collections.Generic.HashSet<Entity>();
+        for (int i = 0; i < entities.Length; i += 5)
+            if (i % 3 != 0) expected.Add(entities[i]);
+        var changed = new System.Collections.Generic.HashSet<Entity>();
+        foreach (var item in world.Read<Armor>(QueryFilter.Create().Changed<Armor>(mark))) changed.Add(item.Entity);
+        Assert.That(changed, Is.EquivalentTo(expected));
+        for (int i = 0; i < entities.Length; i++)
+            Assert.That(entities[i].Armor.Value, Is.EqualTo(i % 5 == 0 && i % 3 != 0 ? 3 : i % 5 == 0 ? 9 : 1));
+        mark = world.ChangeTick;
+        world.Update(); // nothing to cap: nothing stamped
+        Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(mark)), Is.Zero);
     }
 
     [Test]

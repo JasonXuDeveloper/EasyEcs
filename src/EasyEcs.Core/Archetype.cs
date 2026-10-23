@@ -487,6 +487,19 @@ internal sealed class Archetype
     }
 
     /// <summary>
+    /// The change-tick column of <typeparamref name="T"/> for <see cref="MutColumn"/>: its index (-1 when the table has
+    /// none), its word summaries and its ticks. The ticks are a pinned column, so their address holds as long as the
+    /// table's storage is not reallocated: for the run of a pass that changes no structure.
+    /// </summary>
+    internal unsafe int TicksOf<T>(out WordTicks[] words, out RowTick* ticks) where T : struct, IComponent
+    {
+        int column = TicksColumn<T>();
+        words = column < 0 ? null : Words[column];
+        ticks = column < 0 ? null : (RowTick*)Unsafe.AsPointer(ref Data<RowTick>(column));
+        return column;
+    }
+
+    /// <summary>
     /// The summaries of <see cref="StampVisited{T}"/> alone: they then cover any row of the word stamped at
     /// <paramref name="tick"/> with <see cref="StampRowTick{T}"/> (a pass notes each word once).
     /// </summary>
@@ -551,7 +564,7 @@ internal sealed class Archetype
     /// Rows <paramref name="rows"/> of the word of <paramref name="slot"/> get tick <paramref name="tick"/>, the world's
     /// current one (no row of the column holds a later tick). Keeps the word's summary exact (<see cref="WordTicks"/>).
     /// </summary>
-    private void NoteWord(int column, int slot, ulong rows, ulong tick)
+    internal void NoteWord(int column, int slot, ulong rows, ulong tick)
     {
         ref var word = ref Summary(Words, column, slot >> 6);
         if (word.Write == tick) word.Rows |= rows;

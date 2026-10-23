@@ -465,7 +465,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Component when runs => $"{p.RefKind} global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i)",
             Symbols.ParamKind.Entity when runs => "entities.At(i)", // i < rows, the run's length: no bounds check
             Symbols.ParamKind.Optional when runs => $"m{i}[(int)i]",
-            Symbols.ParamKind.Mutable when runs => $"new global::EasyEcs.Mut<{p.Type}>(ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i), in entities, (int)i)",
+            Symbols.ParamKind.Mutable when runs => $"new global::EasyEcs.Mut<{p.Type}>(ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i), in u{i}, (int)i)",
             Symbols.ParamKind.Component => $"{p.RefKind} c{++index}",
             Symbols.ParamKind.Mutable => $"new global::EasyEcs.Mut<{p.Type}>(ref c{++index}, entity)",
             Symbols.ParamKind.ComponentSpan => $"c{++index}", // Span<T> converts to ReadOnlySpan<T> for read-only parameters
@@ -533,6 +533,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
             for (int i = 0; i < method.Parameters.Length; i++)
                 if (runs && method.Parameters[i] is { Kind: Symbols.ParamKind.Optional } p)
                     sb.Append($"{indent}var m{i} = new global::EasyEcs.MaybeColumn<{p.Type}>(in entities, {(p.RefKind == "ref" && p.Tracked ? "true" : "false")});\n");
+            // A Mut's change-tick column, looked up once per run: a write stamps its row with no lookup.
+            for (int i = 0; i < method.Parameters.Length; i++)
+                if (runs && method.Parameters[i] is { Kind: Symbols.ParamKind.Mutable } p)
+                    sb.Append($"{indent}var u{i} = global::EasyEcs.MutColumn.Of<{p.Type}>(in entities);\n");
             if (runs)
             {
                 // The columns' refs and the row count in locals: the spans are passed in memory, and a caller's value
