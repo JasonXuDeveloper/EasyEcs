@@ -50,7 +50,7 @@ flowchart TB
   只有一列有差异时，`Count` 和 `Any` 直接用这些计数作答，不读位。
 - **禁用组件**也是存在位：`entity.Disable<T>()` 清掉 `T` 的位并加上 `Disabled<T>` 标签；表在第一次禁用时多出这个标签列
   （每张表搬一次行，之后只是翻位）。
-- **分组。** `world.GroupBy<T>()` 让表除了按掩码，还按 [`IGroup`](/zh/docs/guide/groups) 组件的值区分，同一分组的实体在内存里连续，
+- **分组。** 类型上的 `[GroupBy]`（或 `world.GroupBy<T>()`）让表除了按掩码，还按 [`IGroup`](/zh/docs/guide/groups) 组件的值区分，同一分组的实体在内存里连续，
   `QueryFilter.InGroup<T>(g)` 只走这个分组的表。
 - **掩码**（`BitMask`）是带溢出区的 256 位 SIMD 位集。组件位是 `ushort`，一个进程最多可用 65,536 种组件：前 256 种内联
   （每次匹配表只需一次 `Vector256` 测试），其余放进溢出数组；溢出数组在第一次建表或建迁移边时分配，从不在热路径上分配。
@@ -223,9 +223,10 @@ flowchart LR
 | 部分 | 做什么 |
 | --- | --- |
 | `ArityGenerator` | 用一个模板生成 `EasyEcs.Core` 里每一族 T1..T9 重载（`Entity.Set` / `Remove`、`World.CreateEntity` / `CreateEntities` / `DestroyAll`、各个 job 接口、`ForEach` 及其变体、`Query`、`Count`、`Any`）。只对 `EasyEcs.Core` 运行。 |
-| `SystemGenerator` | 把 `[ForEach]` 方法变成结构体 job（逐实体，或对 span 参数按连续行段），放在单独的 file 类里，通过 `[UnsafeAccessor]` 调用用户方法（[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。每个系统得到一个 `SystemCode`（更新逻辑和访问集），由模块初始化器注册；系统之外的静态方法得到一个入口。`[Changed<T>]` / `[Removed<T>]` 变成 `Since(LastRunTick + 1)` 加一次对 `T` 的读声明；`Parallel = true` 把 job 分块执行。不可能做结构变更的 job 会加上 `INoStructuralChanges`。 |
-| `ComponentGenerator` | 为每个组件和单例生成 C# 14 扩展成员：`entity.Health`、`HasHealth`、`SetHealth(…)`、`IsDead`、`world.Clock`、`world.KillsIndex`、每种查询形状的 `item.Position`、缓冲和预制体的写方法，以及存档可以引用的类型的注册。 |
-| `EasyEcsAnalyzer` | 报告 EECS002–EECS046：生成器跳过的无效输入，以及违反 [ECS 设计原则](/zh/docs/ecs-principles)的代码。生成器从不报诊断，两者共用同一套检查。机械性的修复由 [EasyEcs.CodeFixes](/zh/docs/guide/analyzer) 提供。 |
+| `SystemGenerator` | 把 `[ForEach]` 方法变成结构体 job（逐实体，或对 span 参数按连续行段），放在单独的 file 类里，通过 `[UnsafeAccessor]` 调用用户方法（[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。每个系统得到一个 `SystemCode`（更新逻辑和访问集），由模块初始化器注册；系统之外的静态方法得到一个入口。`[Changed<T>]` / `[Removed<T>]` 变成 `Since(LastRunTick + 1)` 加一次对 `T` 的读声明；`Parallel = true` 把 job 分块执行。不可能做结构变更的 job 会加上 `INoStructuralChanges`。处理数值的逐实体方法会按方法体生成向量循环（`Kernel`：分支用掩码，支持窄通道、结构体值、宽行；[D68](/zh/docs/decisions#d68-vector-loops-without-opting-in)），否则给出逐行运行的原因；`[ForEntity]`、`[Consume]` 和 `[UpdateInterval]` 也在这里编译。 |
+| `ComponentGenerator` | 为每个组件和单例生成 C# 14 扩展成员：`entity.Health`、`HasHealth`、`SetHealth(…)`、`IsDead`、`world.Clock`、`world.KillsIndex`、每种查询形状的 `item.Position`、缓冲和预制体的写方法，以及存档可以引用的类型和类型声明的设置（`[GroupBy]`、`[WhenTargetDestroyed]`、`[NotSaved]`）的注册。 |
+| `PartGenerator` | 把 partial 结构体用特性声明的内容写进它的另一个部分：由 `[Sum]` .. `[Any]` 生成 `IReduction<T>`，由 `[IndexKey]` / `[UniqueKey]` 生成显式的 `Key`，由 `[Group]` 生成 `Group`（[D101](/zh/docs/decisions#d101-declaration-attributes)）。 |
+| `EasyEcsAnalyzer` | 报告 EECS002–EECS089：生成器跳过的无效输入，以及违反 [ECS 设计原则](/zh/docs/ecs-principles)的代码，以及能用但有开销的代码。生成器从不报诊断，两者共用同一套检查。机械性的修复由 [EasyEcs.CodeFixes](/zh/docs/guide/analyzer) 提供。 |
 
 生成器遵循增量生成的规则：先用 `ForAttributeWithMetadataName` 或纯语法谓词过滤；模型是由字符串组成、可比较相等的 record
 （任何符号、语法节点或位置都不会留到变换之后）；每个阶段都有追踪名；还有一个测试（`GeneratorTests`）保证无关的编辑不会让这些阶段失效。

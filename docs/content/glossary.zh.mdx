@@ -113,7 +113,8 @@ World 用来跑并行工作的部件：一个阶段里的系统，或者一个�
 ## 归约（Reduction） [#reduction]
 
 对一遍里所有行求的总数，分段计算再合并：`[ForEach]` 方法的 `Reduce<T>` 参数给每个[块](#chunk)（单线程时是整遍）一个从 `T.Identity`
-开始的部分结果，这一遍结束时用 `T.Combine` 按行的顺序把部分结果合并进单例 `T`。就是 OpenMP 的 `reduction`、MPI 的 `Allreduce`。
+开始的部分结果，这一遍结束时用 `T.Combine` 按行的顺序把部分结果合并进单例 `T`。字段上标 `[Sum]`、`[Min]`、`[Max]` 等特性，生成器就会写出这两个成员。
+就是 OpenMP 的 `reduction`、MPI 的 `Allreduce`。
 见[归约](/zh/docs/guide/threading#reductions)。
 
 ## 临时空间（Scratch） [#scratch]
@@ -245,8 +246,8 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 
 ## 值索引（Value index） [#value-index]
 
-从键到实体的查找表：组件实现 `IIndexed<TKey>`，用 `world.Index<T, TKey>()` 查询。每次 `Set` 索引都会跟着更新；
-键可比较时还能按区间有序遍历。唯一索引（`IUniqueIndexed<TKey>`）一个键只对应一个实体，用 `Get` 查找，并拒绝会让键重复的写入。
+从键到实体的查找表：在作为键的成员上标 `[IndexKey]`（生成器写出 `IIndexed<TKey>`），用 `world.XIndex` 或 `world.Index<T, TKey>()` 查询。每次 `Set` 索引都会跟着更新；
+键可比较时还能按区间有序遍历。唯一索引（`[UniqueKey]`、`IUniqueIndexed<TKey>`）一个键只对应一个实体，用 `Get` 查找，并拒绝会让键重复的写入。
 见[索引与关系](/zh/docs/guide/indexes-and-relations)。
 
 ## 关系（Relation） [#relation]
@@ -262,7 +263,7 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 
 ## 分组（IGroup） [#group]
 
-实现 `IGroup` 的组件；调用 `world.GroupBy<T>()` 后，它的值会把表拆开：同一个场景、地图或对局的实体共用一批表，
+实现 `IGroup` 的组件（成员上标 `[Group]`）；类型标了 `[GroupBy]`（或调用了 `world.GroupBy<T>()`）后，它的值会把表拆开：同一个场景、地图或对局的实体共用一批表，
 查询这一组时只遍历它自己的行。不要和[系统分组](#system-group)混淆。见[分组](/zh/docs/guide/groups)。
 
 ## 清理组件（Cleanup component） [#cleanup-component]

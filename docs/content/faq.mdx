@@ -176,7 +176,8 @@ world.Load(output.WrittenSpan);  // EntityIds stored in components still point a
 Saves are built in from 4.1 ([D9](/en/docs/decisions#d9-saves-are-built-in-with-nino)): unmanaged components are
 written as their raw rows with a hash of their fields, so a changed struct is detected at load; managed components,
 singletons and the unmanaged components marked `[NinoType]` go through [Nino](https://github.com/JasonXuDeveloper/Nino).
-Types are recorded by their Nino type id, so a load skips a component the process no longer has.
+Types are recorded by their Nino type id, so a load skips a component the process no longer has. Runtime state that a
+restart rebuilds (a connection, a cache) is `[NotSaved]`: no save holds it, so it needs no formatter.
 
 ## Can I hot-reload game logic? [#hot-reload]
 
@@ -305,7 +306,9 @@ on a hot path ([Architecture](/en/docs/architecture#storage-model)).
 No. The generator writes each system's jobs in a file class of its own and calls your `[ForEach]` methods, private
 or not, through `[UnsafeAccessor]`, which compiles to a direct call
 ([D16](/en/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)). A system is an ordinary
-class, and generated members never collide with yours. `partial` still compiles.
+class, and generated members never collide with yours. `partial` still compiles. A component or singleton that
+declares members with attributes (`[Sum]`, `[IndexKey]`, `[Group]`) is partial, with the types around it: the
+generator writes those members into the type itself ([EECS062](/en/docs/guide/analyzer#eecs062)).
 
 ## Related [#related]
 

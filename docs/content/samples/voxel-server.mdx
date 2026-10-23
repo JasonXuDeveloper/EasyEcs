@@ -169,7 +169,7 @@ stateDiagram-v2
 ```
 
 Each step is one system and each state is data. The chunks a player needs are asked for by
-[`AoiViewSystem`](#aoi) as `LoadRequest` entities, one per chunk: the request is `IUniqueIndexed`, so a second player
+[`AoiViewSystem`](#aoi) as `LoadRequest` entities, one per chunk: the request has a `[UniqueKey]`, so a second player
 asking finds it and asks nothing more. A request is created with the `Saved` tag, which it loses when the region
 files lack its chunk: a presence bit, so all requests share one table and keep the order they came in. A pass may
 not load or create entities (EECS041), so `ChunkReadSystem` (`With<Saved>`) and `ChunkGenerateSystem`
@@ -400,7 +400,7 @@ positions are `Vector3`s, three floats next to each other, not three columns.
 
 ## A scoreboard that stays sorted [#leaderboard]
 
-`Score` is the blocks a player dug, an `IIndexed<int>`, so `world.ScoreIndex` is an
+`Score` is the blocks a player dug, with an `[IndexKey]`, so `world.ScoreIndex` is an
 [ordered index](/en/docs/guide/indexes-and-relations#ordered-index) of the players by score. Its key is comparable, so
 the index walks in order: `Descending()` starts at the best digger. The index is kept sorted as `DigSystem` writes
 the scores, so the top of the board is a walk of three entries, never a sort of every player.

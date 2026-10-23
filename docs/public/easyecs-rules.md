@@ -25,9 +25,11 @@ available as Markdown: add `.md` to its URL.
   it up with `world.XIndex.Get(key)` / `TryGet(key, out e)`, never with a hand-kept dictionary. A write that would give
   a second entity a taken key throws `InvalidOperationException`; to move a key, change the old holder first. Not for
   `EntityId` keys (EECS036). A component has one index key: never two `IIndexed<TKey>` (EECS036). A key that is a
-  member is declared, not written: `[IndexKey]` (or `[UniqueKey]`) on the field of a partial struct, and the generator
-  writes the interface and an explicit `Key` (EECS067); `[GroupBy]` with `[Group]` on a member does the same for a
-  group. When the keys a
+  member is declared, not written: `[IndexKey]` (or `[UniqueKey]`) on the field or positional parameter of a partial
+  struct (`public partial record struct Account([UniqueKey] int Id) : IComponent;`; `[IndexKey]` on the type when the
+  value itself is the key), and the generator writes the interface and an explicit `Key` (EECS067). `[Group]` on an
+  `int` or enum member declares a table group the same way, and `[GroupBy]` on the type makes every world group by it
+  (no `world.GroupBy<T>()` per world). A key computed from several members stays a hand-written `Key`. When the keys a
   world holds at once map onto bounded slots (grid cells modulo the loaded area, small ids), make it
   `IDirectIndexed<TKey>` (`static Slots`, `static SlotOf(key)`, pure arithmetic) instead of keeping a grid of ids by
   hand; never for sparse keys or huge ranges.
@@ -146,7 +148,10 @@ available as Markdown: add `.md` to its URL.
   AVX-512 a wider component (up to 16 words) qualifies when the method uses only its 4-byte fields. A `Maybe<T>` of a
   lane component is a mask of the rows that have it (on one thread only). An `if` becomes a mask; a branch the loop
   cannot express (a call, a loop, logging) is cold, and the vectors where a lane takes it run the method. Do not mix
-  `float` and `int`, and keep `bool` fields out of hot components. EECS055 (a suggestion) names
+  `float` and `int`, and keep `bool` fields out of hot components. Results are bit for bit the method's
+  (`FloatMode.Exact`, the default); `[ForEach(FloatMode = FloatMode.Fast)]` lets `MathF.Sin` / `Cos` / `Exp` / `Log`
+  / `Log2` / `Hypot` and a float `Reduce<T>` sum vectorize, with results that are not bit for bit the method's (nor the
+  same across vector widths): keep `Exact` where results must match on every machine. EECS055 (a suggestion) names
   why a method stayed scalar (a narrow value out of range, a component too wide for the work, a `Maybe<T>` in a
   parallel method, a call outside a condition); put `[ForEach(SimdMode = SimdMode.Require)]` on a hot method so losing the loop fails the
   build (EECS056), `SimdMode.Off` on one that should stay scalar.
@@ -198,7 +203,10 @@ available as Markdown: add `.md` to its URL.
   kind of component moves the row once.
 - Use `Prefab` + `world.Instantiate` for repeated spawns, `GroupBy<T>()` to split tables by zone or team, and value
   indexes for lookups by key. Give an instance its own values in the same call, `world.Instantiate(prefab, new
-  ChildOf(parent), new Position(x, y))`, not `Instantiate` then `Set` (two row copies).
+  ChildOf(parent), new Position(x, y))`, not `Instantiate` then `Set` (two row copies). A component instances gain
+  later (a `Stunned`, a `Target`) goes into the recipe as `prefab.SetAbsent<T>()`: its column is there, so adding it
+  flips a presence bit instead of moving the row. `entity.GetOrAddX(…)` adds a component with a value only when it is
+  missing.
 - Call `world.TrimExcess()` only at a quiet moment after a peak (a wave cleared, a match ended), never every tick:
   what it drops is allocated again by the next structural changes (EECS028 in `OnUpdate` and `[ForEach]` methods).
 
@@ -210,8 +218,9 @@ available as Markdown: add `.md` to its URL.
 - It has no actor type. An actor is a pattern: one type per kind of actor that is its key component
   (`IIndexed<TSelf>`), its system group and the group's filter (`ISystemGroupWith<In<TSelf>>`), declared once through a
   generic interface (`interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>`).
-  Implement `Key` explicitly on a record struct (`Shop IIndexed<Shop>.Key => this;`): a public `Key => this` makes
-  the record's `ToString()` recurse until the stack overflows (EECS043).
+  Declare the key with `[IndexKey]` on the type (`[IndexKey] public readonly partial record struct Shop(long Id) :
+  IActor<Shop>;`): the generated `Key` is explicit, while a public `Key => this` makes the record's `ToString()` recurse
+  until the stack overflows (EECS043).
   https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors
 - It has no shared components: put shared data in a singleton and store an id.
 
@@ -251,6 +260,7 @@ available as Markdown: add `.md` to its URL.
   https://ecs.xgamedev.net/en/docs/guide/diagnostics
 - Log `world.DescribeSchedule()` at startup (or `.ToMermaid()` for a chart) to see stages and why systems wait; a
   pair listed as ordered only by registration needs `[UpdateBefore<T>]` / `[UpdateAfter<T>]` if its order matters.
+  Each system's `Loops` names the loop each `[ForEach]` method got (a vector loop, or why it runs row by row).
 
 ## Example
 

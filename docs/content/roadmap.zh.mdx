@@ -37,6 +37,13 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
 按区块划分的网格模拟（[体素服务器](/zh/docs/samples/voxel-server#water)里的水）每一步都要把每个流动区块的邻居的边载入它的瓦片（`Tile<TCell, TTile>.Pad`）。计划中的设计反过来：
 区块的边变了时推进邻居的光环，这样一步只读自己的组件，邻居都静止的区块也没有东西要拷（[D73](/zh/docs/decisions#d73-survey-items-not-added)）。
 
+### 向量循环：留待以后的形式 [#vector-loops-left]
+
+`[ForEach]` 方法在单线程和并行时都能得到向量循环，支持窄通道、结构体值、`Maybe<T>` 掩码、冷分支和宽行
+（[D90](/zh/docs/decisions#d90-vector-loops-reach)）。留待以后：并行方法里的掩码字（一个块传的是整段行）、并行方法里和窄通道上的
+`Maybe<T>`、窄通道和宽行的掩码字（它们改为逐行运行方法），以及 `Atan2`、`Asin`、`Pow` 这类在 .NET 10 里没有向量形式的函数。
+用得上它的方法测出更快时才发布。
+
 ## 已放弃 [#dropped]
 
 - `Added<T>`：`[Changed<T>]` 也会选出新添加的行；要区分新出现和被写过，用一个由响应系统移除的标签
@@ -79,6 +86,17 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
   （[D76](/zh/docs/decisions#d76-stages-not-a-dependency-graph)）。
 - 为累计总数（跨更新增长的分数）建议归约，以及为手写的 `Scratch<T>` 单设规则：前者不是同一段代码，EECS028 已经指出 `Scratch<T>`
   （[D97](/zh/docs/decisions#d97-hand-written-parameters)）。
+- 每个实体一份随机数生成器状态，以及 Philox 或 threefry：每次抽取都要写一次，存档更大，也比四轮终结混合慢
+  （[D79](/zh/docs/decisions#d79-entity-random)）。
+- 按键（直方图）归约：在这种 API 面向的规模上没有一个候选方案明显胜出；几千个桶以内用 `[InlineArray]` 桶的 `Reduce<T>` 就够
+  （[D81](/zh/docs/decisions#d81-keyed-reductions)）。
+- 把 `[ForEntity]` 入口写成 `Entity` 的扩展成员：所有模块的所有请求都会堆进同一个类型的成员列表（[D82](/zh/docs/decisions#d82-for-entity)）。
+- 用可重写的属性或在运行时设置系统的节奏：特性是调度能读到的常量；要变的节奏就放进一个分组，由宿主决定何时更新
+  （[D83](/zh/docs/decisions#d83-update-interval-attribute)）。
+- 宽行的完整转置、gather 和跨步加载，`[Lane]` / `[Hot]` 字段标记，`[Layout(Soa)]` 存储，以及展开的向量循环：测下来更慢或不更快，
+  或者方法本身已经说明了用哪些字段（[D90](/zh/docs/decisions#d90-vector-loops-reach)）。
+- 通过 `WorldOptions` 做 World 设置，以及用反射读声明特性：每个 World 一项设置仍然会忘，反射让每个 World 启动时都付出代价
+  （[D101](/zh/docs/decisions#d101-declaration-attributes)）。
 
 ## 相关页面 [#related]
 

@@ -49,7 +49,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `RelationIndex<T>` | sealed class | `world.Relations<T>()`: the entities linking to a target. |
 | `TargetPolicy`, `TargetPolicyExtensions` | enum, extensions | What destroying a target does to the links to it: `Keep`, `Remove`, `Destroy`. |
 | `EcsSystem` | abstract class | `World`, `Enabled`, `Error`, `Stats`, `LastRunTick`, `RunCount`; `OnCreate` / `OnUpdate` / `OnDestroy` ([systems](/en/docs/guide/systems)). |
-| `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`, `ChunkRows = n`, `Slices = N`, `SimdMode = SimdMode.Auto` / `Require` / `Off`), `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<T1..Tn>]`, `[RemovedAny<T1..Tn>]`; `[Consume]` (the visited rows destroyed after the pass); `[ForEntity]` (a static method run on one entity through its generated entry point). |
+| `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`, `ChunkRows = n`, `Slices = N`, `SimdMode = SimdMode.Auto` / `Require` / `Off`, `FloatMode = FloatMode.Exact` / `Fast`), `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<T1..Tn>]`, `[RemovedAny<T1..Tn>]`; `[Consume]` (the visited rows destroyed after the pass); `[ForEntity]` (a static method run on one entity through its generated entry point). |
 | `Maybe<T>` | ref struct | An optional component parameter of a `[ForEach]` method: `HasValue`, `Value`. |
 | `ReadOnlyMaybe<T>` | ref struct | The same, read-only: `Value` is `ref readonly`, never stamped, allowed for indexed components; a `Maybe<T>` converts to it. |
 | `Mut<T>` | ref struct | A component parameter of a `[ForEach]` method that counts as written only on the rows the method writes: `Value`, `Write()`, `SetIfChanged(value)` ([change tracking](/en/docs/guide/change-tracking)). |
@@ -68,11 +68,11 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]`, `[UpdateInterval(n, Phase = p)]` | interfaces, attributes | System groups (with filters through interfaces), ordering and cadence. |
 | `SystemErrorPolicy` | enum | `Throw` (default) or `Disable`: what an exception in a system does. |
 | `SystemStats`, `SystemList` | readonly structs | A system's run count, times, allocated bytes and visited entities; `world.Systems`, allocation-free. |
-| `ScheduleInfo`, `GroupInfo`, `StageInfo`, `SystemInfo`, `StageWait`, `SystemPair` | sealed records | What `world.DescribeSchedule()` returns: stages, reads and writes, waits, registration-only pairs; `ToString()`, `ToMermaid()`. |
+| `ScheduleInfo`, `GroupInfo`, `StageInfo`, `SystemInfo`, `StageWait`, `SystemPair` | sealed records | What `world.DescribeSchedule()` returns: stages, reads and writes, waits, registration-only pairs, the loop each `[ForEach]` method got (`SystemInfo.Loops`); `ToString()`, `ToMermaid()`. |
 | `SystemAccess` | struct | What a system reads and writes; filled only by generated code. |
 | `QueryFilter` | readonly struct | `With`, `Without`, `WithAny`, `Changed`, `Removed`, `ChangedAny`, `RemovedAny`, `InGroup`, `Since`, `Slice`; holds no object reference. |
 | `QueryEnumerator<T1..Tn>`, `QueryItem<T1..Tn>` | ref structs | The result of `Query`: `item.Entity` and refs into the row (`item.Position`). |
-| `IForEach<…>`, `IForEachEntity<…>`, `IForEachBatch<…>`, `INoStructuralChanges` | interfaces | Struct jobs for ad-hoc passes; `EntitySpan` holds a batch run's entities. |
+| `IForEach<…>`, `IForEachEntity<…>`, `IForEachBatch<…>`, `IForEachMasked<…>`, `INoStructuralChanges` | interfaces | Struct jobs for ad-hoc passes (`IForEachMasked`: a batch job that also takes a word of 64 rows with its passing rows as bits, what a vector loop compiles to); `EntitySpan` holds a batch run's entities. |
 | `SingletonRef<T>` | readonly struct | A stable singleton handle; `.Value` is `ref T`. |
 | `WorldSnapshot` | sealed class | A copy of a world in memory (`world.Capture()`). |
 | `ComponentSet` | readonly struct | Component and singleton types, built once: what `SaveEntitiesWith` writes, what `SaveWithout` leaves out, which singletons `LoadKeeping` keeps. |
@@ -168,6 +168,7 @@ A snapshot, a save or a clone of a buffer column copies the elements: O(elements
 | `[ForEntity]` method: generated `Owner.Method(entity, values…)` | as `entity.Run` | `entity.Run` of the generated job (its `ref` parameters the `WriteMask`, its filter attributes a `static readonly` filter); false as `Run`; a method with `[Changed<T>]` takes `since` second; one that takes singletons or the `World` is false for an entity of no world |
 | `[ForEach, Consume]` | the pass, then O(M + S): a `DestroyAll` (whole tables freed at once) or one destroy per row | destroys the rows the pass visited when it ends: a `DestroyAll` of the method's filter after a method without structural changes, one destroy per row after the method otherwise; rows that start to match during the pass stay; a pass that throws destroys nothing; not with `Slices` (EECS085) |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + runs) | spans of consecutive rows; no structural changes |
+| `world.ForEachMasked<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + runs + partly passing words) | as `ForEachBatch`, but a 64-row word of which only some rows pass goes to the job whole, its passing rows as bits (`IForEachMasked`), instead of one run per stretch of passing rows; words whose rows all pass join the runs |
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)` / `ForEachEntityParallel` / `ForEachBatchParallel` (spans of a chunk's runs of rows) | O(M + S), divided over up to `MaxDegreeOfParallelism` threads | `INoStructuralChanges` jobs; chunks of 1,024 to `World.ParallelChunkRows` rows (multiples of 4,096 when the job writes a tracked component), or `chunkRows` rounded up to 64 (`[ForEach(ChunkRows = n)]`; then O(B) block openings before the pass, B = 4,096-row blocks, and one atomic OR per 64 written rows), one job copy per chunk (kept, and combined in chunk order in O(chunks), when the job reduces: `Reduce<T>`); helpers are woken only when they pay |
 | `world.ForParallel<TJob>(count, ref job, chunkRows)` / `ForParallel<T, TJob>(ref buffer, ref job, chunkRows)` | O(count), divided over up to `MaxDegreeOfParallelism` threads | the same runner and chunks as `ForEachParallel` (no tables: no change ticks, chunks of 1,024 to `World.ParallelChunkRows`, or `chunkRows` rounded up to 64); one job copy per chunk, nothing merged back; the structure is frozen (a structural change throws); 0 B after the first call per job type |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | refs into the row: every visited row of a tracked component counts as written; no `await` in the loop |
@@ -296,7 +297,7 @@ columns); `Load` O(rows). A taken key throws `InvalidOperationException` (a save
 
 | API | Complexity | Notes |
 | --- | --- | --- |
-| `world.GroupBy<T>()` | O(entities with `T`), once | splits tables by `T.Group`; setting a new value moves the entity to its group's tables (one row copy); call it at setup |
+| `world.GroupBy<T>()` | O(entities with `T`), once | splits tables by `T.Group`; setting a new value moves the entity to its group's tables (one row copy); call it at setup, or declare `[GroupBy]` on the type for every world |
 
 ## Snapshots, saves and moves [#saves]
 

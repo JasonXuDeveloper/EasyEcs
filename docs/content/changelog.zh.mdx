@@ -110,6 +110,30 @@ icon: RotateCcwClock
   改用 `Emit<T>`。[EECS088](/zh/docs/guide/analyzer#eecs088)（警告，带代码修复）报告对同一个实体用同一个流的两次 `EntityRandom` 抽取，
   以及循环里不改变流的抽取。见[决策](/zh/docs/decisions#d97-hand-written-parameters)。
 
+- 声明特性：组件或单例是什么，在类型上写一次，其余由生成器写出（[决策](/zh/docs/decisions#d101-declaration-attributes)）。
+  partial 结构体的字段标 `[Sum]`、`[Product]`、`[Min]`、`[Max]`、`[All]` 和 `[Any]` 就声明了一个归约：生成器写出它的 `Identity` 和
+  `Combine`（见[归约](/zh/docs/guide/threading#reductions)）。成员上标 `[IndexKey]` 或 `[UniqueKey]`（值本身就是键时，`[IndexKey]`
+  标在类型上），`int` 或枚举成员上标 `[Group]`，就声明了索引键或分组，生成的是 `ToString()` 不会打印的显式 `Key` 或 `Group`：
+  `public partial record struct Account([UniqueKey] int Id) : IComponent;`（见[索引](/zh/docs/guide/indexes-and-relations)和
+  [分组](/zh/docs/guide/groups)）。`[GroupBy]`、`[WhenTargetDestroyed(policy)]` 和 `[NotSaved]` 在类型上声明 World 的设置，
+  每个 World 从第一张含这个类型的表开始应用：按它分组、目标销毁时指向它的链接怎么处理、哪个组件或单例不进任何存档（运行时状态，
+  不需要 Nino 格式化器）。World 自己调用的 `GroupBy` 或 `WhenTargetDestroyed` 仍然优先。
+- 检查这些声明的分析器规则：[EECS062](/zh/docs/guide/analyzer#eecs062)（类型或外层类型不是 partial；带代码修复）、
+  [EECS063](/zh/docs/guide/analyzer#eecs063)（特性旁边又写了 `Identity` 或 `Combine`）、[EECS064](/zh/docs/guide/analyzer#eecs064)
+  （字段没有可用的特性）、[EECS065](/zh/docs/guide/analyzer#eecs065) 和 [EECS067](/zh/docs/guide/analyzer#eecs067)（建议，带代码修复：
+  手写的归约或键可以用特性声明）、[EECS066](/zh/docs/guide/analyzer#eecs066)（警告，带代码修复：`Identity` 不是 `Combine` 的单位元，
+  结果会随线程数变化）、[EECS068](/zh/docs/guide/analyzer#eecs068)（设置特性标在不适用的类型上）和
+  [EECS069](/zh/docs/guide/analyzer#eecs069)（托管组件或单例没有 Nino 格式化器，代码修复改为 `[NinoType]` 或 `[NotSaved]`）。
+  [EECS036](/zh/docs/guide/analyzer#eecs036) 也报告用特性声明错的键和分组，[EECS043](/zh/docs/guide/analyzer#eecs043) 新增改为
+  `[IndexKey]` 的修复。
+- `entity.GetOrAdd(in value)` 和 `world.GetOrAddSingleton(in value)` 在组件或单例缺失时用这个值添加，已有时直接交出现有的；生成器按
+  构造函数参数写出 `GetOrAddX(…)`。`prefab.SetAbsent<T>()` 让配方有 `T` 的列但不带这个组件，之后给实例加上它只翻转存在位，不搬行。
+  [EECS033](/zh/docs/guide/analyzer#eecs033) 也把 `if (e.X.F != v) e.SetX(v)` 报告为 `e.SetXIfChanged(v)`，把 `GetOrAdd(new X(a))`
+  报告为 `GetOrAddX(a)`，都带修复。见[实体与组件](/zh/docs/guide/entities-and-components)和[预制体](/zh/docs/guide/prefabs)。
+- `world.ForEachMasked<T1..Tn, TJob>(ref job, filter)` 运行 `IForEachMasked` job：批处理 job，还会整个接收只有部分行通过的 64 行字，
+  通过的行记成位，而不是每一段通过的行各调一次。向量循环就编译成它。`Lanes.Compact(source, mask, destination)` 把通道掩码选中的元素
+  紧挨着写出（有 AVX-512 时用 compress 指令），供挑选行的批处理方法使用，`CollectIds` 就是这样做的。见 [API 参考](/zh/docs/api#queries)。
+
 ### 性能 [#v4-8-0-performance]
 
 - 生成器每次编辑的工作量约减半：被提供同名成员的类型按名字查找，不再为每个组件遍历一遍命名空间；签名就排除了向量循环的

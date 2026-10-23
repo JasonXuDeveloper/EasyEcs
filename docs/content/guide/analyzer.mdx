@@ -17,7 +17,8 @@ EECS040 to EECS045, EECS047 to EECS051) find calls and declarations that compile
 throws or the code cannot work, a warning where a write is lost or a ref can point at the wrong row. The vector-loop
 rules say why a method runs one row at a time (EECS055, a suggestion) and fail the build when a method that must
 vectorize does not (EECS056); EECS057 keeps a [reduction](/en/docs/guide/threading#reductions) the only write of its
-singleton; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses; the part
+singleton, EECS058 keeps a `Scratch<T>`'s memory out of the world, and EECS059 keeps a `Lookup<T>` (or a tile) off
+what its pass writes; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses; the part
 rules (EECS062 to EECS069) check the types whose members the generator writes from attributes (`[Sum]`, `[IndexKey]`,
 `[Group]`) and the setup attributes, and suggest the attributes for a reduction or a key written by hand; EECS070 keeps the records of an `Emit<T>` in row order, and EECS071 finds random numbers a run cannot repeat; the tile rules (EECS072, EECS073) reject a grid tile whose halo does not fit and two tiles that would share a texture. The declaration rules (EECS080 to EECS085) suggest the attribute
 that writes what code does by hand (a one-entity job, a pass that destroys what it visits) and reject one that cannot
@@ -91,7 +92,7 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS040](#eecs040) | Error | `SetIfChanged` can compare its type | |
 | [EECS041](#eecs041) | Error | A pass does not run the calls it refuses | |
 | [EECS042](#eecs042) | Error | An indexed component is not changed while its index is walked | |
-| [EECS043](#eecs043) | Error | A record struct key does not print itself | Implement `Key` explicitly |
+| [EECS043](#eecs043) | Error | A record struct key does not print itself | `[IndexKey]` on the type, or `Key` implemented explicitly |
 | [EECS044](#eecs044) | Error | A sliced filter goes to passes only | |
 | [EECS045](#eecs045) | Error | `Retired` and `Disabled<T>` are the world's to write | |
 | [EECS046](#eecs046) | Warning | A loop that only reads tracked components uses `Read` | `Read<T1..Tn>` |
@@ -597,7 +598,7 @@ A [value index](/en/docs/guide/indexes-and-relations#value-indexes) follows `Set
   `Maybe<T>` hands out a `ref`; take a `ReadOnlyMaybe<T>` to read it).
 
 ```csharp
-public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public partial record struct Zone([IndexKey] int Id) : IComponent;
 public record struct Portal(int To) : IComponent;
 ```
 
@@ -1196,21 +1197,24 @@ public class SendFire : EcsSystem
 **A component that cannot be indexed by its key.** Error. No code fix.
 
 A world indexes an `IIndexed<TKey>` or `IUniqueIndexed<TKey>` component by its key, and checks every write of a
-unique one against that index. The rule reports two declarations that cannot work:
+unique one against that index. The rule reports declarations that cannot work:
 
 - **An `EntityId` key.** Loads and moves rewrite `EntityId` values after they copy the rows, too late to check them
   first, so a relation key cannot be unique.
 - **A second key.** A component is indexed once: a second `IIndexed<TKey>` or `IUniqueIndexed<TKey>` on it, unique or
   not, could never be indexed, and `world.Index` throws for it.
+- **A key or a group the attributes cannot declare.** An `[IndexKey]` / `[UniqueKey]` member whose type is not
+  `IEquatable` of itself, of another type than an index interface the struct declares, beside a second one or beside a
+  `Key` written by hand; a `[Group]` member that is not an `int` or an enum of `int`, or a second one.
 
-```csharp doccheck=expect-EECS036
-public record struct Mount(EntityId Rider) : IComponent, IUniqueIndexed<EntityId> { public EntityId Key => Rider; }
+```csharp doccheck=alone,expect-EECS036
+public partial record struct Mount([UniqueKey] EntityId Rider) : IComponent;
 ```
 
-Index a relation with `IIndexed<EntityId>`, and give a second key a component of its own:
+Index a relation with `[IndexKey]` (`IIndexed<EntityId>`), and give a second key a component of its own:
 
-```csharp
-public record struct Mount(EntityId Rider) : IComponent, IIndexed<EntityId> { public EntityId Key => Rider; }
+```csharp doccheck=alone
+public partial record struct Mount([IndexKey] EntityId Rider) : IComponent;
 ```
 
 [Unique keys](/en/docs/guide/indexes-and-relations#unique-keys) explains what a unique index checks.
@@ -1378,7 +1382,7 @@ destroying entities leave holes the walk steps past, and a change followed by a 
 walk before it reads another list: neither is reported.
 
 ```csharp
-public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public partial record struct Team([IndexKey] int Id) : IComponent;
 ```
 
 ```csharp doccheck=expect-EECS042
@@ -1396,19 +1400,27 @@ foreach (var member in moving) member.SetTeam(2);
 
 ## EECS043 [#eecs043]
 
-**A record struct key that prints itself.** Error. Code fix: implement `Key` explicitly.
+**A record struct key that prints itself.** Error. Code fixes: declare the key with `[IndexKey]` on the type, or
+implement `Key` explicitly.
 
 A component that is its own key (`IIndexed<TSelf>` or `IUniqueIndexed<TSelf>` with `Key => this`) works, but on a
 `record struct` a public `Key` is one of the properties `ToString()` prints. `Key` returns the record, which prints
 its `Key`, which prints its `Key`: the first log line or debugger view overflows the stack.
 
-```csharp doccheck=expect-EECS043
+```csharp doccheck=alone,expect-EECS043
 public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { public Market Key => this; }
 ```
 
-Implement `Key` explicitly, so it belongs to the interface only (the fix also rewrites `.Key` reads):
+Declare the key with `[IndexKey]` on the type: the generator writes `Key` explicitly, so it belongs to the interface
+only and `ToString()` does not print it. The other fix implements `Key` explicitly by hand (and rewrites `.Key`
+reads):
 
-```csharp
+```csharp tab="[IndexKey]" doccheck=alone
+[IndexKey]
+public readonly partial record struct Market(long Id) : IComponent;
+```
+
+```csharp tab="Explicit Key" doccheck=alone
 public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { Market IIndexed<Market>.Key => this; }
 ```
 
@@ -1571,18 +1583,18 @@ public class ReviveSystem : EcsSystem
 constant value, throws `ArgumentException` when the filter is built. The rule reports the second call of a chain.
 
 ```csharp
-public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
+public partial record struct Region([Group] int Id) : IComponent;
 ```
 
 ```csharp doccheck=expect-EECS050
-var border = QueryFilter.Create().InGroup<Zone>(1).InGroup<Zone>(2);   // ArgumentException
+var border = QueryFilter.Create().InGroup<Region>(1).InGroup<Region>(2);   // ArgumentException
 ```
 
 Walk each group with its own filter:
 
 ```csharp
-int count = world.Count<Health>(QueryFilter.Create().InGroup<Zone>(1))
-          + world.Count<Health>(QueryFilter.Create().InGroup<Zone>(2));
+int count = world.Count<Health>(QueryFilter.Create().InGroup<Region>(1))
+          + world.Count<Health>(QueryFilter.Create().InGroup<Region>(2));
 ```
 
 ## EECS051 [#eecs051]
@@ -1813,12 +1825,10 @@ A [`Reduce<T>` parameter](/en/docs/guide/threading#reductions) gives each chunk 
 singleton `T` with the combined result when the pass ends. A second `Reduce<T>` of the same method or system, or a
 `ref T` parameter of the same method, writes `T` in the same pass: one result would silently replace the other.
 
-```csharp tab="Reported" doccheck=expect-EECS057
-public struct Census : ISingletonComponent, IReduction<Census>
+```csharp tab="Reported" doccheck=alone,expect-EECS057
+public partial struct Census : ISingletonComponent
 {
-    public long Health;
-    public static Census Identity => default;
-    public static Census Combine(Census left, Census right) => new() { Health = left.Health + right.Health };
+    [Sum] public long Health;
 }
 
 public class CountUnits : EcsSystem
@@ -1831,19 +1841,15 @@ public class CountUnits : EcsSystem
 }
 ```
 
-```csharp tab="Fixed"
-public struct Census : ISingletonComponent, IReduction<Census>
+```csharp tab="Fixed" doccheck=alone
+public partial struct Census : ISingletonComponent
 {
-    public long Health;
-    public static Census Identity => default;
-    public static Census Combine(Census left, Census right) => new() { Health = left.Health + right.Health };
+    [Sum] public long Health;
 }
 
-public struct Casualties : ISingletonComponent, IReduction<Casualties>
+public partial struct Casualties : ISingletonComponent
 {
-    public long Health;
-    public static Casualties Identity => default;
-    public static Casualties Combine(Casualties left, Casualties right) => new() { Health = left.Health + right.Health };
+    [Sum] public long Health;
 }
 
 public class CountUnits : EcsSystem
@@ -1978,11 +1984,9 @@ public class TakeHits : EcsSystem
 ```
 
 ```csharp tab="Fixed"
-public struct Hits : ISingletonComponent, IReduction<Hits>
+public partial struct Hits : ISingletonComponent
 {
-    public int Count;
-    public static Hits Identity => default;
-    public static Hits Combine(Hits left, Hits right) => new() { Count = left.Count + right.Count };
+    [Sum] public int Count;
 }
 
 public class TakeHits : EcsSystem
@@ -2352,12 +2356,11 @@ of the tile beside, so it is at most the tile's extent along every axis that has
 every axis when the boundary mirrors: like an MPI ghost width, never wider than the subdomain. The rule reads the
 shape's constant members; `Tile.Pad` throws for a shape it could not check.
 
-```csharp tab="Reported" doccheck=expect-EECS072
+```csharp tab="Reported" doccheck=alone,expect-EECS072
 // A strip of 16 cells for a fourth-order stencil along x: its default faces include north and south,
 // and a halo of 2 rows is deeper than its one row.
-public record struct Strip(int Index) : IComponent, ITile<int>
+public partial record struct Strip([IndexKey] int Index) : IComponent, ITile<int>
 {
-    readonly int IIndexed<int>.Key => Index;
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 1;
     static int ITileShape.Halo => 2;
@@ -2367,9 +2370,8 @@ public record struct Strip(int Index) : IComponent, ITile<int>
 
 ```csharp tab="Fixed"
 // A 1D tile: neighbors to the west and east only.
-public record struct Strip(int Index) : IComponent, ITile<int>
+public partial record struct Strip([IndexKey] int Index) : IComponent, ITile<int>
 {
-    readonly int IIndexed<int>.Key => Index;
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 1;
     static int ITileShape.Halo => 2;

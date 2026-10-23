@@ -44,6 +44,14 @@ edges of each flowing chunk's neighbors into its tile on every step (`Tile<TCell
 edges to its neighbors' halos when they change, so a step reads only its own components and a chunk whose
 neighbors are still holds nothing to copy ([D73](/en/docs/decisions#d73-survey-items-not-added)).
 
+### Vector loops: the forms left for later [#vector-loops-left]
+
+A `[ForEach]` method gets a vector loop on one thread and in parallel, with narrow lanes, struct values, `Maybe<T>`
+masks, cold branches and wide rows ([D90](/en/docs/decisions#d90-vector-loops-reach)). Left for later: masked words in
+parallel methods (a chunk passes whole runs), `Maybe<T>` in parallel methods and with narrow lanes, masked words of
+narrow lanes and of wide rows (they run the method), and `Atan2`, `Asin`, `Pow` and their kin, which have no vector
+form in .NET 10. Each ships when the methods that need it measure faster.
+
 ## Dropped [#dropped]
 
 - `Added<T>`: `[Changed<T>]` selects added rows too; a tag the reacting system removes tells new from written
@@ -99,6 +107,21 @@ neighbors are still holds nothing to copy ([D73](/en/docs/decisions#d73-survey-i
 - A reduction suggested for a running total (a score that grows across updates), and a rule for a `Scratch<T>`
   written by hand: the first is not the same code, EECS028 already names `Scratch<T>`
   ([D97](/en/docs/decisions#d97-hand-written-parameters)).
+- A random generator state per entity, and Philox or threefry: a write per draw, a larger save, and slower than four
+  finalizer rounds ([D79](/en/docs/decisions#d79-entity-random)).
+- Keyed (histogram) reductions: no candidate wins at the sizes such an API would serve; a `Reduce<T>` of
+  `[InlineArray]` bins covers a few thousand ([D81](/en/docs/decisions#d81-keyed-reductions)).
+- `[ForEntity]` entry points as extension members of `Entity`: every request of every module would land in one type's
+  member list ([D82](/en/docs/decisions#d82-for-entity)).
+- A system's cadence as an overridable property or set at run time: the attribute is a constant the schedule reads; a
+  cadence that changes is a group the host updates when it wants
+  ([D83](/en/docs/decisions#d83-update-interval-attribute)).
+- Full transposes, gathers and strided loads for wide rows, `[Lane]` / `[Hot]` field markings, a `[Layout(Soa)]`
+  storage, and unrolled vector loops: measured slower or no faster, or the method already says which fields it uses
+  ([D90](/en/docs/decisions#d90-vector-loops-reach)).
+- World setup through `WorldOptions`, and declaration attributes read by reflection: one setting per world can still
+  be forgotten, and reflection costs every world at its start
+  ([D101](/en/docs/decisions#d101-declaration-attributes)).
 
 ## Related [#related]
 

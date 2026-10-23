@@ -135,8 +135,8 @@ as they finish (OpenMP's `schedule(dynamic, n)`); fewer than two chunks run on t
 
 A total over the rows of a pass, computed in parts and combined: a `Reduce<T>` parameter of a `[ForEach]` method
 gives each [chunk](#chunk) (or the pass on one thread) its own partial result starting at `T.Identity`, and when the
-pass ends the partial results are combined with `T.Combine`, in row order, into singleton `T`. OpenMP's `reduction`,
-MPI's `Allreduce`. See [reductions](/en/docs/guide/threading#reductions).
+pass ends the partial results are combined with `T.Combine`, in row order, into singleton `T`. `[Sum]`, `[Min]`,
+`[Max]` and their kin on its fields make the generator write both. OpenMP's `reduction`, MPI's `Allreduce`. See [reductions](/en/docs/guide/threading#reductions).
 
 ## Scratch [#scratch]
 
@@ -297,9 +297,9 @@ list may have to go back, and `DynamicBuffer<T>.FillPool(n)` fills it at start-u
 
 ## Value index [#value-index]
 
-A lookup from a key to the entities whose component has that key: `IIndexed<TKey>` on the component,
-`world.Index<T, TKey>()` to query it. The index follows every `Set`; a comparable key also gives sorted ranges. A
-unique index (`IUniqueIndexed<TKey>`) holds one entity per key, found with `Get`, and refuses a write that would
+A lookup from a key to the entities whose component has that key: `[IndexKey]` on the member that is the key (the
+generator writes `IIndexed<TKey>`), `world.XIndex` or `world.Index<T, TKey>()` to query it. The index follows every `Set`; a comparable key also gives sorted ranges. A
+unique index (`[UniqueKey]`, `IUniqueIndexed<TKey>`) holds one entity per key, found with `Get`, and refuses a write that would
 duplicate a key. See [Indexes and relations](/en/docs/guide/indexes-and-relations).
 
 ## Relation [#relation]
@@ -315,7 +315,8 @@ Parent and child entities linked by the built-in `ChildOf` component. `world.Chi
 
 ## Group (IGroup) [#group]
 
-A component implementing `IGroup` whose value splits tables after `world.GroupBy<T>()`: the entities of one zone,
+A component implementing `IGroup` (`[Group]` on its member) whose value splits tables once the type is `[GroupBy]`
+(or after `world.GroupBy<T>()`): the entities of one zone,
 map or match share tables, so a query of that group walks only its rows. Not to be confused with a
 [system group](#system-group). See [Groups](/en/docs/guide/groups).
 

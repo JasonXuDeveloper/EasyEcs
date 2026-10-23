@@ -46,7 +46,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `RelationIndex<T>` | sealed class | `world.Relations<T>()`：链接到某个目标的实体。 |
 | `TargetPolicy`、`TargetPolicyExtensions` | 枚举、扩展方法 | 目标被销毁时链接怎么处理：`Keep`、`Remove`、`Destroy`。 |
 | `EcsSystem` | abstract class | `World`、`Enabled`、`Error`、`Stats`、`LastRunTick`、`RunCount`；`OnCreate` / `OnUpdate` / `OnDestroy`（[系统](/zh/docs/guide/systems)）。 |
-| `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`ChunkRows = n`、`Slices = N`、`SimdMode = SimdMode.Auto` / `Require` / `Off`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`；`[Consume]`（遍历结束后销毁访问过的行）；`[ForEntity]`（通过生成的入口在单个实体上运行的静态方法）。 |
+| `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`ChunkRows = n`、`Slices = N`、`SimdMode = SimdMode.Auto` / `Require` / `Off`、`FloatMode = FloatMode.Exact` / `Fast`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`；`[Consume]`（遍历结束后销毁访问过的行）；`[ForEntity]`（通过生成的入口在单个实体上运行的静态方法）。 |
 | `Maybe<T>` | ref struct | `[ForEach]` 方法的可选组件参数：`HasValue`、`Value`。 |
 | `ReadOnlyMaybe<T>` | ref struct | 只读版本：`Value` 是 `ref readonly`，从不打 tick，带索引的组件也能用；`Maybe<T>` 可以转换成它。 |
 | `Mut<T>` | ref struct | `[ForEach]` 方法的组件参数，只有方法真正写了的行才算写入：`Value`、`Write()`、`SetIfChanged(value)`（[变更追踪](/zh/docs/guide/change-tracking)）。 |
@@ -65,11 +65,11 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `ISystemGroup`、`ISystemGroupWith<T>`、`ISystemGroupWithout<T>`、`[UpdateInGroup<T>]`、`[UpdateBefore<T>]`、`[UpdateAfter<T>]`、`[UpdateInterval(n, Phase = p)]` | 接口、特性 | 系统分组（可通过接口加过滤条件）、排序与节奏。 |
 | `SystemErrorPolicy` | 枚举 | `Throw`（默认）或 `Disable`：系统抛异常时怎么办。 |
 | `SystemStats`、`SystemList` | readonly struct | 系统的运行次数、耗时、分配字节数和访问的实体数；`world.Systems`，零分配。 |
-| `ScheduleInfo`、`GroupInfo`、`StageInfo`、`SystemInfo`、`StageWait`、`SystemPair` | sealed record | `world.DescribeSchedule()` 的返回值：阶段、读写集、等待关系、只靠注册顺序的系统对；`ToString()`、`ToMermaid()`。 |
+| `ScheduleInfo`、`GroupInfo`、`StageInfo`、`SystemInfo`、`StageWait`、`SystemPair` | sealed record | `world.DescribeSchedule()` 的返回值：阶段、读写集、等待关系、只靠注册顺序的系统对，以及每个 `[ForEach]` 方法得到的循环（`SystemInfo.Loops`）；`ToString()`、`ToMermaid()`。 |
 | `SystemAccess` | struct | 系统读写了哪些数据；只由生成的代码填写。 |
 | `QueryFilter` | readonly struct | `With`、`Without`、`WithAny`、`Changed`、`Removed`、`ChangedAny`、`RemovedAny`、`InGroup`、`Since`、`Slice`；不持有对象引用。 |
 | `QueryEnumerator<T1..Tn>`、`QueryItem<T1..Tn>` | ref struct | `Query` 的结果：`item.Entity` 和指向行内数据的 ref（`item.Position`）。 |
-| `IForEach<…>`、`IForEachEntity<…>`、`IForEachBatch<…>`、`INoStructuralChanges` | 接口 | 临时遍历用的结构体 job；`EntitySpan` 是批处理一段行对应的实体。 |
+| `IForEach<…>`、`IForEachEntity<…>`、`IForEachBatch<…>`、`IForEachMasked<…>`、`INoStructuralChanges` | 接口 | 临时遍历用的结构体 job（`IForEachMasked`：批处理 job，还接收一个 64 行的字，通过的行记成位，向量循环就编译成它）；`EntitySpan` 是批处理一段行对应的实体。 |
 | `SingletonRef<T>` | readonly struct | 稳定的单例句柄；`.Value` 是 `ref T`。 |
 | `WorldSnapshot` | sealed class | World 的内存副本（`world.Capture()`）。 |
 | `ComponentSet` | readonly struct | 组件和单例类型的集合，建一次：`SaveEntitiesWith` 写哪些组件，`SaveWithout` 不写哪些，`LoadKeeping` 保留哪些单例。 |
@@ -163,6 +163,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `[ForEntity]` 方法：生成的 `Owner.Method(entity, values…)` | 同 `entity.Run` | 用生成的 job 调 `entity.Run`（`ref` 参数构成 `WriteMask`，过滤特性构成一个 `static readonly` 过滤条件）；返回 false 的情况同 `Run`；带 `[Changed<T>]` 的方法第二个参数是 `since`；接收单例或 `World` 的方法，对不属于任何 World 的实体返回 false |
 | `[ForEach, Consume]` | 遍历本身，之后 O(M + S)：一次 `DestroyAll`（整张表一起释放）或每行一次销毁 | 遍历结束时销毁访问过的行：方法不做结构变更时按它的过滤条件做一次 `DestroyAll`，否则在方法处理完每一行后销毁那一行；遍历期间才开始匹配的行保留；遍历抛异常时什么也不销毁；不能和 `Slices` 一起用（EECS085） |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数) | 连续行的 span；不能做结构变更 |
+| `world.ForEachMasked<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数 + 部分通过的字数) | 同 `ForEachBatch`，但只有部分行通过的 64 行字整个交给 job，通过的行记成位（`IForEachMasked`），不再按每一段通过的行各调一次；全部通过的字并进连续段 |
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)` / `ForEachEntityParallel` / `ForEachBatchParallel`（一块中连续行的 span） | O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | `INoStructuralChanges` job；每块 1,024 到 `World.ParallelChunkRows` 行（job 写被追踪组件时为 4,096 的整数倍），或 `chunkRows` 向上取整到 64（`[ForEach(ChunkRows = n)]`；这时遍历前打开 O(B) 个区块，B 为 4,096 行的区块数，每写 64 行一次原子 OR），每块一个 job 副本（job 做归约 `Reduce<T>` 时保留这些副本，按块的顺序合并，O(块数)）；只在划算时唤醒助手线程 |
 | `world.ForParallel<TJob>(count, ref job, chunkRows)` / `ForParallel<T, TJob>(ref buffer, ref job, chunkRows)` | O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | 和 `ForEachParallel` 同一个运行器、同样的块（没有表：没有变更 tick，每块 1,024 到 `World.ParallelChunkRows`，或 `chunkRows` 向上取整到 64）；每块一个 job 副本，不合并回来；结构被冻结（结构变更抛异常）；每种 job 类型第一次调用之后 0 B |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | 指向行内的 ref：被追踪组件的每个被访问行都算写入；循环里不能 `await` |
@@ -289,7 +290,7 @@ World 保持原样。
 
 | API | 复杂度 | 说明 |
 | --- | --- | --- |
-| `world.GroupBy<T>()` | O(拥有 `T` 的实体数)，只做一次 | 按 `T.Group` 拆分表；改成新值会把实体搬到对应分组的表（一次行复制）；在初始化时调用 |
+| `world.GroupBy<T>()` | O(拥有 `T` 的实体数)，只做一次 | 按 `T.Group` 拆分表；改成新值会把实体搬到对应分组的表（一次行复制）；在初始化时调用，或在类型上声明 `[GroupBy]`，对每个 World 生效 |
 
 ## 快照、存档与迁移 [#saves]
 

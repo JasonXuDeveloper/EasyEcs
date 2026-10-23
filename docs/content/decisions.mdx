@@ -102,12 +102,17 @@ after the change on the machine of the time; they are history, not the current r
 | [D82](#d82-for-entity) | One entity is a `[ForEntity]` method |
 | [D83](#d83-update-interval-attribute) | A system's cadence is an attribute |
 | [D84](#d84-consume) | `[Consume]` destroys the visited rows in bulk when it can |
+| [D90](#d90-vector-loops-reach) | Vector loops for parallel methods, optional and narrow lanes, struct values and wide rows |
 | [D94](#d94-optional-writes) | A parallel pass opens the blocks its `Maybe<T>` writes |
 | [D95](#d95-generator-per-edit) | The generators find namesakes by name and rule out vector loops before binding |
 | [D97](#d97-hand-written-parameters) | Rules for code that does by hand what a parameter does per chunk |
 | [D98](#d98-random-streams) | EECS088: one stream per draw, checked in pass code only |
 | [D99](#d99-singleton-saves) | EECS069 warns for a singleton only when the code saves whole worlds |
 | [D100](#d100-names-of-4-8) | The names of 4.8: one spelling, verbs for actions, the cadence of a system |
+| [D101](#d101-declaration-attributes) | A type declares what it is with attributes; the generator writes the members and the setup |
+
+The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
+reused.
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1891,7 +1896,7 @@ not as soon as the systems it conflicts with have (TBB's flow graph, Unity's `Jo
   or a structural change makes a system run alone: 7 of BattleServer's 13 default systems, 7 of WorldSimulation's 9.
   A graph waits for them exactly as stages do, and real servers are written this way.
 - **The best case is small.** `BarrierBenchmark` (outside the repository; 100,000 rows): a heavy system beside a
-  chain of three light ones staged {heavy, first}, {second}, {third}, against the same three passes in one system
+  chain of three light ones staged `{heavy, first}`, `{second}`, `{third}`, against the same three passes in one system
   beside the heavy one (the schedule a graph would run, on today's runner): 6.36 against 6.08 ms in one run, 6.73
   against 7.13 ms in a second, each inside its error (±0.3 to 0.9 ms).
 - **A graph would cost on every update.** One change tick per stage is what keeps `[Changed<T>]` exact (a stage's
@@ -2163,7 +2168,7 @@ outside 0 to n - 1.
 - **One virtual call less per update, below what measures.** `RunSystem` used to make one virtual call per system per update to read the interval;
   it now reads a field set when the system is added. In `OrderingBenchmark` (four systems over 10,000 entities per
   update): before and after, 6.96 and 7.21 µs in one round, 7.55 and 7.16 µs in a second (registered order; ordered: 6.99 and 7.09, then 7.96 and 7.02 µs), each inside its error (±0.22 to 0.69 µs): one virtual call per system is below what the benchmark can see, so the reason for the change is the constant, not the speed. 0 B either way.
-- **The schedule is visible without running code.** Tools, the analyzer (EECS028 exempts the `OnUpdate` of a system
+- **The cadence is visible without running code.** Tools, the analyzer (EECS028 exempts the `OnUpdate` of a system
   with a cadence) and readers all see it on the declaration.
 
 **Considered.**
@@ -2454,6 +2459,54 @@ call changes.
   the unique index's `TryGet` is the one with a single answer.
 - **`[Obsolete]` aliases:** pre-1.0, as in D54 and D64: the compiler finds every use, and every renamed name is new in
   4.8.
+
+## D101. A type declares what it is with attributes; the generator writes the members and the setup [#d101-declaration-attributes]
+
+**Decision.** What a component or singleton is, declared once on its type, is an attribute:
+- **A reduction** ([D69](#d69-reductions)): `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]` or `[Any]` on every
+  instance field of a partial struct. The generator writes `IReduction<T>`: `Identity` (0, 1, `MaxValue` or +∞,
+  `MinValue` or -∞, `true`, `false`) and `Combine`, field by field.
+- **A key or a group:** `[IndexKey]` or `[UniqueKey]` on a member (`[IndexKey]` on the type for the value itself), and
+  `[Group]` on an `int` or enum member. The generator adds `IIndexed<TKey>`, `IUniqueIndexed<TKey>` or `IGroup` with an
+  explicit `Key` or `Group`, unless an interface the struct declares brings it (`IDirectIndexed<TKey>` keeps its
+  `Slots` and `SlotOf`).
+- **World setup:** `[GroupBy]`, `[WhenTargetDestroyed(policy)]` and `[NotSaved]` are registered when the module loads.
+  Every world applies them from its first table holding the type. A world's own `GroupBy` or `WhenTargetDestroyed`
+  call wins and is never overridden. A `[NotSaved]` type is left out of every save, and a load keeps the world's own singleton of it.
+
+The generator writes the members into a part of the type, so the type and the types around it are partial. The
+runtime never reads the attributes: the generated code registers what they mean. The interfaces stay, for a key
+computed from several members or a reduction the attributes cannot say. Rules EECS062 to EECS069 check the
+declarations, and the generator and the analyzer read them once, through the same `Parts` and `Symbols` code
+(EECS062: a type not partial; EECS063: members written beside the attributes; EECS064: a field no attribute
+combines; EECS065 and EECS067: a reduction or a key written by hand that an attribute declares, with code fixes;
+EECS066: a wrong `Identity`; EECS068: a setup attribute on a type it does not fit; EECS069: a managed type no save
+can write).
+
+**Why.**
+- **The identity is where hand-written reductions go wrong.** Each chunk starts at `Identity`, so a minimum that
+  starts at 0 adds that 0 once per chunk, and the result depends on the thread count and the table sizes. The
+  attribute names the operation and the generator picks the identity for the field's type. `ReduceBenchmark` measures
+  the generated reductions against the same ones written by hand: the same time, 0 B.
+- **An explicit `Key` is the right one, and nobody writes it.** A public `Key => this` on a record struct makes
+  `ToString()` print the key forever (EECS043), and a public `Key` is a second name for a field that callers reach
+  by mistake. The generated member is explicit.
+- **Setup was a call each world had to make.** A world without its `GroupBy` call puts every table in group 0, so an
+  `InGroup` filter walks them all. A world without its `WhenTargetDestroyed` call keeps the links to destroyed
+  targets. Nothing fails in either case. A test world, a tool that loads a save, or the second world of a process
+  behaved unlike the server. Declared on the type, the setup holds in every world.
+- **Applied with the first table, not when a world is created.** A world that never holds the type pays nothing, and
+  a grouping installed before any row holds the type moves no row.
+- **Runtime state needs no formatter.** A connection or a cache in a component would make every save throw without a
+  Nino formatter, and a restart builds it again anyway. `[NotSaved]` says so where the type is declared, so a save
+  never needs a `ComponentSet` that leaves it out.
+
+**Considered.**
+- **Only the interfaces, written by hand:** they stay, but each reduction repeats its identities and each key is a
+  member someone must remember to make explicit. The analyzer now points them to the attributes (EECS065, EECS067).
+- **Setup through `WorldOptions`:** it is still one setting per world, so it can still be forgotten.
+- **Reading the attributes by reflection when a world starts:** every world would pay at its start for every loaded
+  type, and trimming could drop what it reads. The generated registration costs nothing until a table holds the type.
 
 ## Related [#related]
 

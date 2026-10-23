@@ -63,7 +63,9 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   EntityRandom.cs              EntityRandom: deterministic random numbers, a pure function of (seed, entity, tick, stream)
                                (four SplitMix64 finalizer rounds); a singleton (Seed, Tick) and static members
   Interleaved.cs               the deinterleaving loads / interleaving stores of generated vector loops over components
-                               of 2 to 4 fields of one lane type
+                               of 2 to 4 fields of one lane type, and the lane masks of the passing rows of a word
+  Lanes.cs                     Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress),
+                               for batch methods and CollectIds
   SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
   SystemOrder.cs               [UpdateBefore<T>] / [UpdateAfter<T>]
   SystemAccess.cs              a system's read/write sets (generated from [ForEach] parameters) and the conflict rule
@@ -149,9 +151,10 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   BitMask.cs                   256-bit SIMD bitset with overflow (component masks, query sets)
 src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, required by Roslyn hosts)
   ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove, World.CreateEntity/CreateEntities/
-                               DestroyAll, Instantiate with components, IForEach/IForEachEntity/IForEachBatch,
-                               ForEach/ForEachEntity/ForEachBatch/ForEachParallel/ForEachEntityParallel with their row
-                               loops, Query/Count/Any, QueryItem/QueryEnumerator, Filters.g.cs: QueryFilter.ChangedAny /
+                               DestroyAll, Instantiate with components, IForEach/IForEachEntity/IForEachBatch/
+                               IForEachMasked, ForEach/ForEachEntity/ForEachBatch/ForEachMasked/ForEachParallel/
+                               ForEachEntityParallel/ForEachBatchParallel with their row loops, CollectIds,
+                               Query/Count/Any, QueryItem/QueryEnumerator, Filters.g.cs: QueryFilter.ChangedAny /
                                RemovedAny and their attributes), one template each
   SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                                the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] /
@@ -181,7 +184,11 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                IIndexed<K>.Key, IGroup.Group); Parts.cs: the models and Problems read once for the
                                generator and the analyzer (other generators read keys and groups through Symbols)
   Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (Kernel.Vectorize: the loop, or the
-                               reason EECS055 / EECS056 report)
+                               reason EECS055 / EECS056 report); Kernel.Narrow.cs: byte / sbyte / short / ushort lanes
+                               (int values followed as low bits and an interval, saturating idioms); Kernel.Struct.cs:
+                               struct values (Vector2/3/4 fields, new T(...), with) as one vector per lane;
+                               Kernel.Wide.cs: components of up to 16 words on AVX-512 (fields gathered by a pruned
+                               permute tree, where it pays)
   EasyEcsAnalyzer.Usage.cs     EECS037-038, EECS040-045 and EECS047-051: calls and declarations that compile but do not
                                do what they say (a job's WriteMask, a dropped copy, SetIfChanged that cannot compare, calls
                                a pass refuses, an index added to while walked, a record key that prints itself, a sliced
@@ -275,6 +282,8 @@ demo/EasyEcs.Demo/             the docs site's live demo (docs/content/demo.mdx)
                                [JSExport] host in Demo.cs, Components.cs, Systems/ one file per system); the page
                                includes its files. docs/scripts/build-demo.sh publishes it into docs/public/demo
                                (committed: Cloudflare has no .NET); rerun it after changing the demo or EasyEcs.Core
+tools/jitdisasm.sh             the Tier1 machine code of a [ForEach] method's job (DOTNET_JitDisasm), to check a vector
+                               loop: no call in the loop body, no needless range check
 tools/DocCheck/                compiles the C# fences of the docs pages (`doccheck=` flags on a fence; `example`
                                fences of a page compile together as its full example)
 tools/ApiDocs/                 writes docs/content/reference/ from the XML docs and the complexity tables of api.mdx /

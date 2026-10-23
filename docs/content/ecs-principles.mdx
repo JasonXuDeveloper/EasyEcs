@@ -290,19 +290,20 @@ Then pick the representation by what the items are:
 | Read-mostly data replaced as a whole (a patrol route) | **An immutable collection** (`ImmutableArray<T>`) | Assigning a new one through `ref` is a tracked write; a snapshot keeps the old one |
 
 ```csharp
+using Nino.Core;
+
 [System.Runtime.CompilerServices.InlineArray(4)]
 public struct Slots4 { private int _first; }                                 // 4 ints stored inline
 
 public struct Cooldowns : IComponent, ITracked { public Slots4 ReadyAt; }  // unmanaged: nothing to share
-public struct Quests : IComponent, ITracked                             // saved and loaded with the player
+
+[NinoType]                                                                // managed: Nino writes it in saves
+public partial struct Quests : IComponent, ITracked                     // saved and loaded with the player
 {
     public Dictionary<int, int> Progress;
 }
 
-public record struct ItemOf(EntityId Owner) : IComponent, IIndexed<EntityId> // an inventory: items point at players
-{
-    public EntityId Key => Owner;
-}
+public partial record struct ItemOf([IndexKey] EntityId Owner) : IComponent;  // an inventory: items point at players
 
 public static class PlayerRules
 {

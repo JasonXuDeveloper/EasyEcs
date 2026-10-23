@@ -270,19 +270,20 @@ public class DeathSystem : EcsSystem
 | 读多写少、整体替换的数据（一条巡逻路线） | **不可变集合**（`ImmutableArray<T>`） | 经 `ref` 赋一个新值就是一次被追踪的写入；快照保留旧值 |
 
 ```csharp
+using Nino.Core;
+
 [System.Runtime.CompilerServices.InlineArray(4)]
 public struct Slots4 { private int _first; }                                 // 4 个 int 内联存放
 
 public struct Cooldowns : IComponent, ITracked { public Slots4 ReadyAt; }  // 非托管：没有共享问题
-public struct Quests : IComponent, ITracked                             // 随玩家一起保存和加载
+
+[NinoType]                                                                // 托管：存档由 Nino 写入
+public partial struct Quests : IComponent, ITracked                     // 随玩家一起保存和加载
 {
     public Dictionary<int, int> Progress;
 }
 
-public record struct ItemOf(EntityId Owner) : IComponent, IIndexed<EntityId> // 背包：物品指向玩家
-{
-    public EntityId Key => Owner;
-}
+public partial record struct ItemOf([IndexKey] EntityId Owner) : IComponent;  // 背包：物品指向玩家
 
 public static class PlayerRules
 {

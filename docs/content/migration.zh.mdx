@@ -49,7 +49,7 @@ public class SaveSystem : EcsSystem
 [`ReadOnlyMaybe<T>`](/zh/docs/guide/systems#read-only-maybe)：
 
 ```csharp
-public record struct Guild(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public partial record struct Guild([IndexKey] int Id) : IComponent;
 public record struct Morale(int Value) : IComponent;
 ```
 
@@ -93,11 +93,9 @@ public class CorpseSystem : EcsSystem
 总数改用 [`ref Reduce<T>`](/zh/docs/guide/threading#reductions) 参数：
 
 ```csharp
-public struct Hits : ISingletonComponent, IReduction<Hits>
+public partial struct Hits : ISingletonComponent
 {
-    public int Count;
-    public static Hits Identity => default;
-    public static Hits Combine(Hits left, Hits right) => new() { Count = left.Count + right.Count };
+    [Sum] public int Count;
 }
 ```
 
@@ -155,7 +153,13 @@ public class Wander : EcsSystem
 
 ### 新的公开类型 [#v4-8-new-types]
 
-`namespace EasyEcs` 里新增了 `ReadOnlyMaybe<T>`、`Reduce<T>`、`IReduction<T>`、`Scratch<T>`、`Lookup<T>`、`LookupExtensions`、`IDirectIndexed<TKey>`、`SimdMode`、`Interleaved`、`Emit<T>`、`Emitted<T>`、`EntityRandom`、`IForRange`、`IForSpan<T>`、`ForEntityAttribute`、`ConsumeAttribute` 和 `UpdateIntervalAttribute`。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
+`namespace EasyEcs` 里新增了 `ReadOnlyMaybe<T>`、`Reduce<T>`、`IReduction<T>`、`Scratch<T>`、`Lookup<T>`、`LookupExtensions`、
+`IDirectIndexed<TKey>`、`SimdMode`、`FloatMode`、`Interleaved`、`Lanes`、`IForEachMasked<…>`、`Emit<T>`、`Emitted<T>`、`EntityRandom`、
+`EntityRandomEcsExtensions`、`IForRange`、`IForSpan<T>`，瓦片相关类型（`Tile<TCell, TTile>`、`ITile<TKey>`、`ITileShape`、`TileFaces`、
+`TileNeighborhood`、`TileBoundary`、`TileIds`、`PaddedTile<TCell, TTile>`、`TileRows<TTile>`、`TileRow<TTile>`、`TileCursor<TCell, TTile>`、
+`TileReads`），以及特性 `ForEntityAttribute`、`ConsumeAttribute`、`UpdateIntervalAttribute`、`SumAttribute`、`ProductAttribute`、
+`MinAttribute`、`MaxAttribute`、`AllAttribute`、`AnyAttribute`、`IndexKeyAttribute`、`UniqueKeyAttribute`、`GroupAttribute`、
+`GroupByAttribute`、`WhenTargetDestroyedAttribute` 和 `NotSavedAttribute`。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
 或者用 `using` 起个别名。
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]

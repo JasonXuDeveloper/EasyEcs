@@ -542,6 +542,8 @@ One overload per number of components, 1 to 9 (generated from one template); thi
 
 [`World.ForEachBatch`](/en/docs/reference/world#foreachbatch) for a job that also takes a word of rows of which only some pass: in a table whose rows must be tested, each word whose rows all pass joins the run of the words before it, and each word with some passing rows goes to the job whole with those rows as bits. Allocation-free.
 
+**Complexity** ([API table](/en/docs/api)): O(M + S / 64 + runs + partly passing words)
+
 ### `ForEachParallel` [#foreachparallel]
 
 ```csharp

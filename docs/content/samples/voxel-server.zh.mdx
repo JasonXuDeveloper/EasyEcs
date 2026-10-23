@@ -144,7 +144,7 @@ stateDiagram-v2
 ```
 
 每一步是一个系统，每个状态是数据。玩家需要的区块由 [`AoiViewSystem`](#aoi) 请求，记成 `LoadRequest` 实体，每个区块一个：
-请求是 `IUniqueIndexed`，第二个要它的玩家能找到它，就不再重复请求。请求创建时带着 `Saved` 标签，区域文件里没有这个区块时去掉它：
+请求带 `[UniqueKey]`，第二个要它的玩家能找到它，就不再重复请求。请求创建时带着 `Saved` 标签，区域文件里没有这个区块时去掉它：
 这是存在位，所以所有请求都在同一张表里，保持到来的顺序。遍历期间不能加载或创建实体（EECS041），所以 `ChunkReadSystem`（`With<Saved>`）
 和 `ChunkGenerateSystem`（`Without<Saved>`）在遍历之后的 `OnUpdate` 里处理这些请求：每个 tick 各用
 [`CollectIds`](/zh/docs/guide/queries#collect-ids) 最多取 `Rules.MaxRequests` 个，只销毁这些，其余的等下一个 tick。卸载过的区块用 `LoadEntities` 从区域文件读回，里面的僵尸和掉落物也一起回来；
@@ -331,7 +331,7 @@ flowchart LR
 
 ## 自动排好序的排行榜 [#leaderboard]
 
-`Score` 是玩家挖的方块数，一个 `IIndexed<int>`，所以 `world.ScoreIndex` 是按分数索引玩家的[有序索引](/zh/docs/guide/indexes-and-relations#ordered-index)。键可比较，
+`Score` 是玩家挖的方块数，标了 `[IndexKey]`，所以 `world.ScoreIndex` 是按分数索引玩家的[有序索引](/zh/docs/guide/indexes-and-relations#ordered-index)。键可比较，
 所以索引能按顺序遍历：`Descending()` 从挖得最多的人开始。`DigSystem` 写分数时索引就保持有序，所以榜首只是走三项，从不对所有玩家排序。
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#leaderboard</include>

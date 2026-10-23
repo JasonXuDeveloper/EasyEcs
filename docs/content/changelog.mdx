@@ -159,6 +159,42 @@ major or minor version that needs code changes? The
   one stream for the same entity, or a draw in a loop that does not vary its stream. See the
   [decision](/en/docs/decisions#d97-hand-written-parameters).
 
+- Declaration attributes: what a component or singleton is, written once on its type, and the generator writes the
+  rest ([decision](/en/docs/decisions#d101-declaration-attributes)). `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]` and
+  `[Any]` on the fields of a partial struct declare a reduction: the generator writes its `Identity` and `Combine`
+  (see [reductions](/en/docs/guide/threading#reductions)). `[IndexKey]` or `[UniqueKey]` on a member (or `[IndexKey]` on
+  the type, for the value itself) and `[Group]` on an `int` or enum member declare an index key or a group, as an
+  explicit `Key` or `Group` that `ToString()` does not print:
+  `public partial record struct Account([UniqueKey] int Id) : IComponent;` (see
+  [indexes](/en/docs/guide/indexes-and-relations) and [groups](/en/docs/guide/groups)). `[GroupBy]`,
+  `[WhenTargetDestroyed(policy)]` and `[NotSaved]` declare a world's setup on the type, and every world applies it
+  from its first table holding the type: its grouping, what destroying a target does to the links to it, and a
+  component or singleton that no save holds (runtime state that needs no Nino formatter). A world's own `GroupBy` or
+  `WhenTargetDestroyed` call still wins.
+- Analyzer rules for the declarations: [EECS062](/en/docs/guide/analyzer#eecs062) (a type, or a type around it, that
+  is not partial; with a code fix), [EECS063](/en/docs/guide/analyzer#eecs063) (`Identity` or `Combine` written beside
+  the attributes), [EECS064](/en/docs/guide/analyzer#eecs064) (a field no attribute combines),
+  [EECS065](/en/docs/guide/analyzer#eecs065) and [EECS067](/en/docs/guide/analyzer#eecs067) (suggestions, with code
+  fixes: a reduction or a key written by hand that the attributes declare),
+  [EECS066](/en/docs/guide/analyzer#eecs066) (warning, with code fixes: an `Identity` that is not the identity of its
+  `Combine`, so the result depends on the thread count), [EECS068](/en/docs/guide/analyzer#eecs068) (a setup attribute
+  on a type it does not fit) and [EECS069](/en/docs/guide/analyzer#eecs069) (a managed component or singleton without a
+  Nino formatter, with code fixes to `[NinoType]` or `[NotSaved]`). [EECS036](/en/docs/guide/analyzer#eecs036) also
+  reports keys and groups the attributes declare wrongly, and [EECS043](/en/docs/guide/analyzer#eecs043) gains a fix
+  to `[IndexKey]`.
+- `entity.GetOrAdd(in value)` and `world.GetOrAddSingleton(in value)` add the component or singleton with that value
+  when it is missing and hand out the existing one otherwise; the generator writes `GetOrAddX(…)` with the
+  constructor's arguments. `prefab.SetAbsent<T>()` gives a recipe a column for `T` without the component, so adding
+  it to an instance later flips a presence bit instead of moving the row. [EECS033](/en/docs/guide/analyzer#eecs033)
+  also reports `if (e.X.F != v) e.SetX(v)` as `e.SetXIfChanged(v)`, and `GetOrAdd(new X(a))` as `GetOrAddX(a)`, with
+  their fixes. See [entities and components](/en/docs/guide/entities-and-components) and
+  [prefabs](/en/docs/guide/prefabs).
+- `world.ForEachMasked<T1..Tn, TJob>(ref job, filter)` runs an `IForEachMasked` job: a batch job that also takes a word
+  of 64 rows of which only some pass, whole, with the passing rows as bits, instead of one run per stretch of passing
+  rows. It is what a vector loop compiles to. `Lanes.Compact(source, mask, destination)` writes the elements a lane
+  mask selects side by side (AVX-512 compress where there is one), for a batch method that picks rows, as
+  `CollectIds` does. See the [API reference](/en/docs/api#queries).
+
 ### Performance [#v4-8-0-performance]
 
 - The generators do about half the work per edit: the types offered the same member names are looked up by name
