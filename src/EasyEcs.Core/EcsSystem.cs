@@ -11,7 +11,7 @@ namespace EasyEcs;
 /// calling thread, or with <see cref="WorldOptions.ParallelSystems"/> on a thread-pool thread next to systems whose
 /// <see cref="SystemAccess">access</see> does not conflict.
 /// </summary>
-public abstract class EcsSystem
+public abstract unsafe class EcsSystem
 {
     /// <summary>The world this system belongs to (set before <see cref="OnCreate"/>).</summary>
     public World World { get; internal set; }
@@ -97,14 +97,20 @@ public abstract class EcsSystem
     /// <summary>What the system reads and writes, declared once by <see cref="World.AddSystem(EcsSystem, bool)"/>.</summary>
     internal SystemAccess Access;
 
-    // The generated code of the system's type and its base types, base first (SystemCode.For).
-    private SystemCode[] _code = [];
+    // The generated code of the system's type and its base types, base first (SystemCode.For); _run holds their Update
+    // functions, called directly each update (no instance, no virtual call).
+    private SystemCode.Entry[] _code = [];
+    private delegate*<EcsSystem, void>[] _run = [];
+
+    // Whether OnUpdate is called: the generated code says whether the type or a base overrides it; a type without
+    // generated code of its own may override it unseen.
+    private bool _callsOnUpdate = true;
 
     /// <summary>How each [ForEach] method of the system's type (and its base types, base first) runs (<see cref="SystemInfo.Loops"/>).</summary>
     internal string[] Loops()
     {
         var loops = new List<string>();
-        foreach (var code in _code) loops.AddRange(code.Describe());
+        foreach (var code in _code) loops.AddRange(code.Loops);
         return loops.ToArray();
     }
 
@@ -115,23 +121,28 @@ public abstract class EcsSystem
     {
         Access = default;
         _code = SystemCode.For(GetType(), out bool own);
+        _run = new delegate*<EcsSystem, void>[_code.Length];
         Interval = 1;
         Phase = 0;
-        foreach (var code in _code)
+        for (int i = 0; i < _code.Length; i++)
         {
-            code.Declare(ref Access);
+            var code = _code[i];
+            _run[i] = code.Update;
+            code.Access(ref Access);
             // Base first: the nearest type with [UpdateInterval] wins.
             if (code.Interval > 0) (Interval, Phase) = (code.Interval, code.Phase);
         }
 
+        // The type's own code walks its base types too, so its flag covers the chain.
+        _callsOnUpdate = !own || _code[^1].OverridesOnUpdate;
         if (!own) Access.RunAlone(); // no generated code of its own: it may override OnUpdate, or have no [ForEach]
     }
 
     internal void Update()
     {
-        OnUpdate();
-        var code = _code;
-        for (int i = 0; i < code.Length; i++) code[i].Run(this);
+        if (_callsOnUpdate) OnUpdate();
+        var run = _run;
+        for (int i = 0; i < run.Length; i++) run[i](this);
     }
 
     internal void Destroy() => OnDestroy();

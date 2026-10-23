@@ -599,14 +599,14 @@ public class GeneratorTests
               + "public static class U { public static void F(World w) { w.AddSystem<G<P>>(); w.AddSystem(new G<Q>()); } }",
         "file static class __ForEach<T> where T : struct, global::EasyEcs.IComponent", "UnsafeAccessorType(\"G`1[[!0]]\")",
         "access.Write<T>();", "RegisterGeneric(typeof(global::G<>), typeof(__ForEach<>.Code));",
-        "Register(typeof(global::G<global::P>), new __ForEach<global::P>.Code());", "Register(typeof(global::G<global::Q>), new __ForEach<global::Q>.Code());")]
+        "Register<__ForEach<global::P>.Code>(typeof(global::G<global::P>));", "Register<__ForEach<global::Q>.Code>(typeof(global::G<global::Q>));")]
     // Target-typed creations and typeof: without a registration, the closed type's code is made by reflection (not AOT-safe).
     [TestCase("public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void A(ref T t) { } } "
               + "public static class U { static G<P> field = new(); static G<Q> Property { get; } = new(); static System.Type Type = typeof(G<Settings>); "
               + "public static void F() { G<T>? local = new(); global::G<Link> qualified = new(); } }",
-        "Register(typeof(global::G<global::P>), new __ForEach<global::P>.Code());", "Register(typeof(global::G<global::Q>), new __ForEach<global::Q>.Code());",
-        "Register(typeof(global::G<global::Settings>), new __ForEach<global::Settings>.Code());", "Register(typeof(global::G<global::T>), new __ForEach<global::T>.Code());",
-        "Register(typeof(global::G<global::Link>), new __ForEach<global::Link>.Code());")]
+        "Register<__ForEach<global::P>.Code>(typeof(global::G<global::P>));", "Register<__ForEach<global::Q>.Code>(typeof(global::G<global::Q>));",
+        "Register<__ForEach<global::Settings>.Code>(typeof(global::G<global::Settings>));", "Register<__ForEach<global::T>.Code>(typeof(global::G<global::T>));",
+        "Register<__ForEach<global::Link>.Code>(typeof(global::G<global::Link>));")]
     [TestCase("public static class R { [ForEach] static void A<T>(in T t, ref int n) where T : struct, IComponent { } }",
         "public static void A<T>(global::EasyEcs.World world, ref int n) where T : struct, global::EasyEcs.IComponent",
         "internal ref struct AJob0<T> : global::EasyEcs.IForEachBatch<T> where T : struct, global::EasyEcs.IComponent",
@@ -1404,7 +1404,7 @@ public class GeneratorTests
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
         Assert.That(Steps(driver)["ForEntityTypes"].SelectMany(s => s.Outputs).Select(o => o.Reason),
             Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged));
-        Assert.That(driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("typeof(global::S)")), Does.Contain("public Code() : base(5, 2) { }"));
+        Assert.That(driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("typeof(global::S)")), Does.Contain("public static int Interval => 5;\n\n        public static int Phase => 2;"));
     }
 
     [Test]
@@ -1426,8 +1426,8 @@ public class GeneratorTests
         Assert.That(all, Does.Contain("world.DestroyAll<global::P>(in AFilter0); // [Consume]"));
         Assert.That(all, Does.Contain("__ForEach.B_1(null, entity, ref c1);\n            entity.Destroy();"));
         Assert.That(all, Does.Contain("world.DestroyAll<global::Q>(); // [Consume]"));                         // a runner's
-        Assert.That(all, Does.Contain("public Code() : base(4, 3) { }").And.Contain("public Code() : base(2, 0) { }"));
-        Assert.That(all, Does.Contain("global::EasyEcs.SystemCode.Register(typeof(global::G<global::P>), new __ForEach<global::P>.Code());"));
+        Assert.That(all, Does.Contain("public static int Interval => 4;\n\n        public static int Phase => 3;").And.Contain("public static int Interval => 2;\n\n        public static int Phase => 0;"));
+        Assert.That(all, Does.Contain("global::EasyEcs.SystemCode.Register<__ForEach<global::P>.Code>(typeof(global::G<global::P>));"));
         Assert.That(all, Does.Contain("public static bool C(global::EasyEcs.Entity e, ulong since, int n)"));
         Assert.That(all, Does.Contain("if (e.World is not { } world) return false;"));
         Assert.That(all, Does.Contain("return e.Run<global::P, __ForEach.CJob0>(ref job, __ForEach.CFilter0.Since(since));"));

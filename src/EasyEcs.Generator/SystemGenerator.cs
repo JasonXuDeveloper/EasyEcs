@@ -281,10 +281,13 @@ public sealed class SystemGenerator : IIncrementalGenerator
     private static void EmitSystemCode(StringBuilder sb, UpdateModel model)
     {
         var owner = model.Owner;
-        sb.Append("    internal sealed class Code : global::EasyEcs.SystemCode\n    {\n");
+        // Static members only: the runtime binds them once per AddSystem and calls Update through a function pointer.
+        sb.Append("    internal readonly struct Code : global::EasyEcs.ISystemCode\n    {\n");
         // [UpdateInterval(n, Phase = p)]: the runtime reads the values from the registered code.
-        if (model.Interval > 0) sb.Append($"        public Code() : base({model.Interval}, {model.Phase}) {{ }}\n\n");
-        sb.Append("        protected override void Update(global::EasyEcs.EcsSystem system)\n        {\n");
+        if (model.Interval > 0)
+            sb.Append($"        public static int Interval => {model.Interval};\n\n        public static int Phase => {model.Phase};\n\n");
+        if (owner.OverridesOnUpdate) sb.Append("        public static bool OverridesOnUpdate => true;\n\n"); // otherwise the runtime skips it
+        sb.Append("        public static void Update(global::EasyEcs.EcsSystem system)\n        {\n");
         if (model.Methods.Length > 0) sb.Append("            var world = system.World;\n");
         for (int i = 0; i < model.Methods.Length; i++)
         {
@@ -298,7 +301,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             // field test per pass otherwise, nothing in the row loop. Count takes no slice: a sliced pass reports its share.
             string count = $"world.Count<{method.ComponentTypes}>({(whole.Length == 0 ? "" : whole.Substring(2))})";
             if (method.Slices > 1) count = $"{count} / {method.Slices}";
-            sb.Append($"            if (Measuring(world)) Visit(system, {count});\n");
+            sb.Append($"            if (global::EasyEcs.SystemCode.Measuring(world)) global::EasyEcs.SystemCode.Visit(system, {count});\n");
             sb.Append($"            world.{method.ForEach}<{method.ComponentTypes}, {method.Name}Job{i}>(ref job{i}{filter}{method.Chunks});\n");
             EmitReductions(sb, method, "world", $"job{i}", "            ");
             EmitConsume(sb, method, "world", whole, "            ");
@@ -307,13 +310,13 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append("        }\n\n");
         // How each method runs (SystemInfo.Loops): one array for the type, made once.
         sb.Append($"        private static readonly string[] __loops = [{string.Join(", ", model.Methods.Select(m => Code.Literal(m.Describe())))}];\n\n");
-        sb.Append("        protected override string[] Loops => __loops;\n\n");
+        sb.Append("        public static string[] Loops => __loops;\n\n");
         EmitAccess(sb, model);
         sb.Append("    }\n");
         if (owner.TypeParameters.Length > 0) return; // registered by EmitGenericRegistration: a module initializer is never generic
         string type = owner.IsVisible ? $"typeof({owner.FullName})" : $"global::System.Type.GetType(\"{owner.MetadataName}\")";
         sb.Append($"\n    {Code.ModuleInitializer}\n");
-        sb.Append($"    internal static void Register() => global::EasyEcs.SystemCode.Register({type}, new Code());\n");
+        sb.Append($"    internal static void Register() => global::EasyEcs.SystemCode.Register<Code>({type});\n");
     }
 
     /// <summary>
@@ -328,7 +331,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append($"\nfile static class __ForEachRegistration\n{{\n    {Code.ModuleInitializer}\n    internal static void Register()\n    {{\n");
         sb.Append($"        global::EasyEcs.SystemCode.RegisterGeneric({definition}, typeof({open}));\n");
         foreach (var use in model.Closed)
-            sb.Append($"        global::EasyEcs.SystemCode.Register(typeof({use.Closed}), new __ForEach<{use.Arguments}>.Code());\n");
+            sb.Append($"        global::EasyEcs.SystemCode.Register<__ForEach<{use.Arguments}>.Code>(typeof({use.Closed}));\n");
         sb.Append("    }\n}\n");
     }
 
@@ -339,7 +342,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// </summary>
     private static void EmitAccess(StringBuilder sb, UpdateModel model)
     {
-        sb.Append("        protected override void Access(ref global::EasyEcs.SystemAccess access)\n        {\n");
+        sb.Append("        public static void Access(ref global::EasyEcs.SystemAccess access)\n        {\n");
         bool alone = model.Owner.OverridesOnUpdate || model.Methods.Any(m => !m.IsStatic || m.Consume // [Consume] destroys
             || m.Parameters.Any(p => p.Kind is Symbols.ParamKind.Entities or Symbols.ParamKind.World
                 || p.Kind == Symbols.ParamKind.Entity && !m.Identifies));
@@ -349,35 +352,42 @@ public sealed class SystemGenerator : IIncrementalGenerator
             return;
         }
 
+        // One line per declaration: a type taken twice (a parameter and a [Changed<T>] filter, a lookup and a tile of one
+        // grid) is declared once.
+        var lines = new List<string>();
+        void Declare(string line) { if (!lines.Contains(line)) lines.Add(line); }
+
         foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch))
                      .Select(p => (p.Kind, p.Type, p.RefKind, p.Key, p.Grid)).Distinct())
         {
             if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // a read, and its index built before a parallel stage
             {
-                sb.Append($"            access.Index<{p.Type}, {p.Key}>();\n");
+                Declare($"Index<{p.Type}, {p.Key}>()");
                 continue;
             }
             if (p.Kind == Symbols.ParamKind.Tile) // reads of the cells and the grid component, the grid's index built before
             {
-                sb.Append($"            access.Index<{p.Grid}, {p.Key}>();\n            access.Read<{p.Type}>();\n");
+                Declare($"Index<{p.Grid}, {p.Key}>()");
+                Declare($"Read<{p.Type}>()");
                 continue;
             }
 
             if (p.Kind == Symbols.ParamKind.Emit) // appends to Emitted<T>, once per pass
             {
-                sb.Append($"            access.WriteSingleton<global::EasyEcs.Emitted<{p.Type}>>();\n");
+                Declare($"WriteSingleton<global::EasyEcs.Emitted<{p.Type}>>()");
                 continue;
             }
 
             string kind = p.Kind is Symbols.ParamKind.Singleton or Symbols.ParamKind.Reduction ? "Singleton" : "";
-            sb.Append($"            access.{(p.RefKind == "ref" ? "Write" : "Read")}{kind}<{p.Type}>();\n");
+            Declare($"{(p.RefKind == "ref" ? "Write" : "Read")}{kind}<{p.Type}>()");
         }
 
         // [Changed<T>], [Removed<T>] and the ChangedAny / RemovedAny sets read T's change ticks, which writers and
         // removers of T stamp.
         foreach (var type in model.Methods.SelectMany(m => m.Changed.Concat(m.Removed).Concat(m.ChangedAny).Concat(m.RemovedAny)).Distinct())
-            sb.Append($"            access.Read<{type}>();\n");
+            Declare($"Read<{type}>()");
 
+        foreach (var line in lines) sb.Append("            access.").Append(line).Append(";\n");
         sb.Append("        }\n");
     }
 
