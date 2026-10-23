@@ -2364,7 +2364,7 @@ advances its `Tick`, so each step draws new numbers. Two draws for the same enti
 
 **An invalid tile shape.** Error. No code fix.
 
-A [tile](/en/docs/guide/high-performance#grid-halo) (`ITileShape`) is Width x Depth x Height cells, Depth 1 to 64 (the
+A [tile](/en/docs/guide/grids#halo) (`ITileShape`) is Width x Depth x Height cells, Depth 1 to 64 (the
 active rows of a layer are one 64-bit word), with a halo of one cell or more. The halo is copied from the facing cells
 of the tile beside, so it is at most the tile's extent along every axis that has neighbors (its `Faces`), and along
 every axis when the boundary mirrors: like an MPI ghost width, never wider than the subdomain. The rule reads the

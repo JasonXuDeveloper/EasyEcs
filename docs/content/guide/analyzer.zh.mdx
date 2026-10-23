@@ -2196,7 +2196,7 @@ World 里需要这个单例（`world.SetEntityRandom(seed, 0)`），推进模拟
 
 **无效的瓦片形状。** 错误。没有代码修复。
 
-[瓦片](/zh/docs/guide/high-performance#grid-halo)（`ITileShape`）是 Width x Depth x Height 个格子，Depth 1 到 64（一层的活跃行是一个 64 位字），
+[瓦片](/zh/docs/guide/grids#halo)（`ITileShape`）是 Width x Depth x Height 个格子，Depth 1 到 64（一层的活跃行是一个 64 位字），
 光环至少一个格子。光环从旁边瓦片朝向这边的格子拷来，所以在每条有邻居的轴上（它的 `Faces`）最多和瓦片一样长，边界镜像时每条轴都是如此：
 和 MPI 的幽灵格子宽度一样，不会比子区域更宽。规则读形状的常量成员；规则检查不了的形状，`Tile.Pad` 会抛出异常。
 

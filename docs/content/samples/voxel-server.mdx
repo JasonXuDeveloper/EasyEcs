@@ -271,7 +271,7 @@ branch; `WaterWakeSystem` tags the chunk and its four neighbors `Flowing`.
 
 <include lang="csharp" meta='tab="Water/Wake.cs"'>../../../samples/VoxelServer/Systems/Water/Wake.cs</include>
 
-**The passes.** `WaterFlowSystem` is the shader. `Chunk` is a [tile](/en/docs/guide/high-performance#grid) of the
+**The passes.** `WaterFlowSystem` is the shader. `Chunk` is a [tile](/en/docs/guide/grids) of the
 grid (`ITile<ChunkPos>`: 16 x 16 x 32 cells, its neighbors the chunks beside it), so the method takes the chunk's water
 and blocks as `Tile<Fluid, Chunk>` and `Tile<Block, Chunk>`, and the generator finds the four neighbors once per chunk.
 The layers to shade come from the `FluidCount` of the chunk and of its neighbors (through `Beside` and a
@@ -306,7 +306,7 @@ the chunks beside the edges that changed.
 
 {/* TODO(water overlap): the planned push-halo design (a chunk hands its edges to its neighbors when they change,
 instead of each flowing chunk gathering them every step) and the MPI-style interior/ring overlap go here, with the
-Flow changes; then guide/high-performance#grid. Copying only the changed edges was measured and dropped
+Flow changes; then guide/grids. Copying only the changed edges was measured and dropped
 (decisions#d73-survey-items-not-added). */}
 
 `FloatSystem` lifts whatever stands in water, players, zombies and items, and pushes it along the slope of the water

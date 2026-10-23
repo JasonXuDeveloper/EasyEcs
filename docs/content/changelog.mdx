@@ -91,7 +91,7 @@ major or minor version that needs code changes? The
   [EECS059](/en/docs/guide/analyzer#eecs059) also rejects a tile beside a write of its cell buffer,
   [EECS072](/en/docs/guide/analyzer#eecs072) a shape whose halo is wider than the tile and
   [EECS073](/en/docs/guide/analyzer#eecs073) two tiles of the same cells in one method. See
-  [shade a grid](/en/docs/guide/high-performance#grid) and the [decision](/en/docs/decisions#d77-tiles).
+  [shade a grid](/en/docs/guide/grids) and the [decision](/en/docs/decisions#d77-tiles).
 - `world.ForEachBatchParallel<T1..Tn, TJob>(ref job, filter, chunkRows)`: an `IForEachBatch` job over the runs of
   rows of each chunk, on several threads. See
   [queries](/en/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel).
