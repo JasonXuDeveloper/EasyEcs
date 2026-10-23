@@ -18,9 +18,8 @@ public record struct BlockPos(int X, int Y, int Z);
 // and tag below and in Water.cs, so all chunks share one table whatever happens to them. It is also a tile of the
 // world's grid (ITile): 16 x 16 x 32 cells in its buffers, with a neighbor on each side, so the water shader takes a
 // Tile<Fluid, Chunk> and gets its water with the halo of its neighbors' (WaterFlowSystem).
-public record struct Chunk(ChunkPos Pos) : IComponent, IDirectIndexed<ChunkPos>, ITile<ChunkPos>
+public partial record struct Chunk([UniqueKey] ChunkPos Pos) : IComponent, IDirectIndexed<ChunkPos>, ITile<ChunkPos>
 {
-    ChunkPos IIndexed<ChunkPos>.Key => Pos;
     static int IDirectIndexed<ChunkPos>.Slots => 64 * 64;
     static int IDirectIndexed<ChunkPos>.SlotOf(ChunkPos pos) => (pos.Z & 63) * 64 + (pos.X & 63);
     static int ITileShape.Width => Terrain.Size;
@@ -39,10 +38,7 @@ public record struct Chunk(ChunkPos Pos) : IComponent, IDirectIndexed<ChunkPos>,
 // A chunk a player needs that is not loaded: AoiViewSystem records it as an entity, one per chunk (the unique index), and
 // ChunkReadSystem reads it from the region files or ChunkGenerateSystem generates it, after the pass (a pass may not
 // load or create entities, EECS041).
-public record struct LoadRequest(ChunkPos Pos) : IComponent, IUniqueIndexed<ChunkPos>
-{
-    ChunkPos IIndexed<ChunkPos>.Key => Pos;
-}
+public partial record struct LoadRequest([UniqueKey] ChunkPos Pos) : IComponent;
 
 // A tag on a LoadRequest whose chunk the region files have: ChunkReadSystem reads those, ChunkGenerateSystem generates
 // the others. A request is created with it and loses it when the files lack the chunk (a presence bit), so all requests

@@ -16,17 +16,12 @@ public struct In<TActor> : IComponent;
 public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;
 
-// The key is the actor itself. Implemented explicitly: a public Key property would be printed by the record's
-// ToString(), which would print Key again, forever.
-public readonly record struct Shop(long Id) : IActor<Shop>
-{
-    Shop IIndexed<Shop>.Key => this;
-}
+// The key is the actor itself: [IndexKey] on the type, and the generator writes the explicit Key.
+[IndexKey]
+public readonly partial record struct Shop(long Id) : IActor<Shop>;
 
-public readonly record struct Bank(long Id) : IActor<Bank>
-{
-    Bank IIndexed<Bank>.Key => this;
-}
+[IndexKey]
+public readonly partial record struct Bank(long Id) : IActor<Bank>;
 
 // State that persists: tracked, so the host saves only the actors whose state changed.
 public record struct Stock(int Items) : IComponent, ITracked;

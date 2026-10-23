@@ -20,10 +20,7 @@ public record struct Health(int Value) : IComponent, ITracked;
 // The chunk an entity that moves is in. An index of them by chunk (world.InChunkIndex.Find(chunk)): the grid through
 // which players and zombies see who is near. GridSystem keeps it current and writes it only when the entity crosses
 // into another chunk; ITracked, so AoiViewSystem and AoiSpawnSystem visit only the entities that crossed.
-public record struct InChunk(ChunkPos Pos) : IComponent, IIndexed<ChunkPos>, ITracked
-{
-    ChunkPos IIndexed<ChunkPos>.Key => Pos;
-}
+public partial record struct InChunk([IndexKey] ChunkPos Pos) : IComponent, ITracked;
 
 // The chunk the clients see an entity in (Placed once it has one): what AoiSpawnSystem compares a crossing with. A cleanup
 // component: a destroyed entity keeps it, Retired, until AoiDespawnSystem has despawned it for that chunk's viewers.

@@ -9,7 +9,7 @@ namespace EasyEcs.Benchmark;
 /// component a scan compares. Steady state allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
-public class GroupBenchmark
+public partial class GroupBenchmark
 {
     [Params(100_000)] public int Players;
     private const int Zones = 16;
@@ -101,7 +101,7 @@ public class GroupBenchmark
     private int Destination(int i) => (_next + i) % Zones;
 
     public record struct Vitality(int Value) : IComponent;
-    public record struct GroupedZone(int Id) : IComponent, IGroup { public int Group => Id; }
-    public record struct IndexedZone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+    public partial record struct GroupedZone([Group] int Id) : IComponent;
+    public partial record struct IndexedZone([IndexKey] int Id) : IComponent;
     public record struct PlainZone(int Id) : IComponent;
 }

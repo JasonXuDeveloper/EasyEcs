@@ -17,11 +17,8 @@ public record struct LeaveRequest(int Client) : IComponent;
 
 // ---- Simulation state ----
 
-// A connected player. IIndexed makes world.ClientIndex find a player by its client id.
-public record struct Client(int Id) : IComponent, IIndexed<int>
-{
-    public int Key => Id;
-}
+// A connected player. [IndexKey] makes world.ClientIndex find a player by its client id.
+public partial record struct Client([IndexKey] int Id) : IComponent;
 
 // ITracked records every write, so replication can visit only the entities that moved.
 public record struct Position(float X, float Y) : IComponent, ITracked;

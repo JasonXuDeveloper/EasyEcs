@@ -9,7 +9,7 @@ namespace EasyEcs.Benchmark;
 /// e.TryGet&lt;T&gt;(out var value)</c> (and <c>world.AccountIndex.TryGet</c>), which keeps the method on one thread.
 /// </summary>
 [MemoryDiagnoser]
-public class LookupBenchmark
+public partial class LookupBenchmark
 {
     [Params(10_000, 100_000)] public int Entities;
 
@@ -62,10 +62,7 @@ public class LookupBenchmark
     public record struct Place(float X, float Y) : IComponent;
     public record struct Chaser(EntityId Target) : IComponent;
     public record struct Aim(float X, float Y) : IComponent;
-    public record struct Account(int Login) : IComponent, IUniqueIndexed<int>
-    {
-        public readonly int Key => Login;
-    }
+    public partial record struct Account([UniqueKey] int Login) : IComponent;
 
     public record struct Wants(int Login) : IComponent;
     public record struct Found(EntityId Account) : IComponent;
