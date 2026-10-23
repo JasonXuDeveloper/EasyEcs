@@ -449,7 +449,7 @@ internal sealed class Archetype
     }
 
     /// <summary>
-    /// <see cref="StampVisited{T}"/> with the change-tick column of <typeparamref name="T"/> looked up once
+    /// <see cref="StampVisited{T}"/> with the change-tick column of a component looked up once
     /// (<see cref="Visiting{T}"/>): a pass that may change structure stamps row after row through it, and ends at the
     /// first structural change (a reallocation bumps StorageVersion), so its refs stay valid while it is used.
     /// </summary>
