@@ -190,7 +190,8 @@ JIT 不会把常规写法的循环向量化，而且行一多，反弹的分支�
 （X, Y, X, Y, ...），让 `Vector<float>` 的每个通道都是一个坐标，再把分支变成掩码：
 
 ```csharp tab="BounceSystem.cs"
-public class BounceSystem : EcsSystem
+[EcsSystem]
+public ref struct BounceSystem
 {
     [ForEach, Without<Dead>]
     static void Move(ref Position p, ref Velocity v)
@@ -206,7 +207,8 @@ public class BounceSystem : EcsSystem
 using System.Numerics;
 using System.Runtime.InteropServices;
 
-public class BounceSimdSystem : EcsSystem
+[EcsSystem]
+public ref struct BounceSimdSystem
 {
     [ForEach, Without<Dead>]
     static void Move(Span<Position> positions, Span<Velocity> velocities)
@@ -307,7 +309,8 @@ Census.CountWounded(world, ref wounded);   // 生成的入口：job 跑一遍
 ```csharp tab="标志"
 public record struct Unit(int Hp, bool Stunned) : IComponent;   // 常规：每个系统都要测这个标志
 
-public class StunnedFlagSystem : EcsSystem
+[EcsSystem]
+public ref struct StunnedFlagSystem
 {
     [ForEach]
     static void Act(ref Unit unit)
@@ -319,7 +322,8 @@ public class StunnedFlagSystem : EcsSystem
 ```
 
 ```csharp tab="标签"
-public class StunnedTagSystem : EcsSystem   // 最快：让过滤来做判断
+[EcsSystem]
+public ref struct StunnedTagSystem // 最快：让过滤来做判断
 {
     [ForEach, Without<Stunned>]
     static void Act(ref Health hp) => hp = hp with { Value = hp.Value + 1 };
@@ -343,7 +347,8 @@ public class StunnedTagSystem : EcsSystem   // 最快：让过滤来做判断
 public record struct Shield(int Value) : IComponent, ITracked;
 public record struct ShieldReplica(int Value) : IComponent;
 
-public class ShieldReplicationSystem : EcsSystem
+[EcsSystem]
+public ref struct ShieldReplicationSystem
 {
     [ForEach, Changed<Shield>]
     static void Send(in Shield shield, ref ShieldReplica replica) => replica = new ShieldReplica(shield.Value);
@@ -369,7 +374,8 @@ public class ShieldReplicationSystem : EcsSystem
 一样：
 
 ```csharp title="ShieldLossSystem.cs"
-public class ShieldLossSystem : EcsSystem
+[EcsSystem]
+public ref struct ShieldLossSystem
 {
     [ForEach, Removed<Shield>]                       // Shield : ITracked（见上）
     static void Send(ref ShieldReplica replica) => replica = new ShieldReplica(0);
@@ -443,8 +449,6 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 - **被追踪的组件只读时不要按 `ref` 接**：否则访问过的每一行都算变了（[EECS025](/zh/docs/guide/analyzer#eecs025)）。
 - **不要在 `[ForEach]` 方法里通过被访问的实体查它的组件，或查单例**：作为参数，每张表只解析一次
   （[EECS027](/zh/docs/guide/analyzer#eecs027)）。
-- **`[ForEach]` 方法用不到系统的任何成员时，不要写成实例方法**：否则它只能单独运行，还要承担结构变化的检查
-  （[EECS029](/zh/docs/guide/analyzer#eecs029)）。
 - **不要遍历查询逐个修改、计数或判断实体**：`SetAll`、`DestroyAll`、`Count`、`Any` 和过滤条件按表处理
   （[EECS030](/zh/docs/guide/analyzer#eecs030)、[EECS032](/zh/docs/guide/analyzer#eecs032)）。
 - **不要在别的线程上使用值索引或销毁实体**：索引在所有者线程上跟随这些变化，没有做同步。

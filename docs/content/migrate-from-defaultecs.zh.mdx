@@ -7,7 +7,7 @@ icon: ArrowRightLeft
 
 DefaultEcs 把每种组件放在各自的池里，系统遍历实体集合；EasyEcs 把组件相同的实体放进同一张表，在上面跑生成好的 job。
 移植主要是换个形状：带 `[With]` / `[Without]` 特性、靠 `World.GetComponents<T>()` 循环的 `AEntitySetSystem`，变成只有
-一个 `[ForEach]` 方法的 `EcsSystem`，方法参数就是组件；一个组件一次 `Set` 拼起来的实体，改成一次带齐所有组件创建；
+一个 `[ForEach]` 方法的 `[EcsSystem]`，方法参数就是组件；一个组件一次 `Set` 拼起来的实体，改成一次带齐所有组件创建；
 靠 `NotifyChanged<T>()` 喂数据的 `WhenChanged<T>()` 集合，变成 `[Changed<T>]` 方法，什么都不用通知。示例就是仓库里真实的
 移植：[`DefaultEcsSimulation.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Comparison/DefaultEcsSimulation.cs)，
 以及它的原版 EasyEcs World
@@ -31,7 +31,7 @@ dotnet add package EasyEcs
 | 任意 struct 都是组件 | 实现 `IComponent` 的 struct | 加上接口。 |
 | 每种组件一个池 | 原型表 | 一个实体的组件在同一行；多一个新组件要复制整行。 |
 | `EntitySet`（`GetEntities().With<A>().AsSet()`） | `[ForEach]` 方法上的过滤，或 `QueryFilter` | 没有集合要保存或释放。 |
-| `AEntitySetSystem<T>`、`AComponentSystem<T, C>` | 带 `[ForEach]` 方法的 `EcsSystem` | 循环和组件访问由生成器写。 |
+| `AEntitySetSystem<T>`、`AComponentSystem<T, C>` | 带 `[ForEach]` 方法的 `[EcsSystem]` | 循环和组件访问由生成器写。 |
 | `SequentialSystem<T>`、`ParallelSystem<T>` | `world.AddSystem<T>()`、`WorldOptions.ParallelSystems` | 按注册顺序，或用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 排。 |
 | `World.Set<T>()` / `Get<T>()` | `ISingletonComponent` | 作为 `[ForEach]` 方法的 `ref` 参数。 |
 | `NotifyChanged<T>()` + `WhenChanged<T>()` | `ITracked` + `[Changed<T>]` | 每次 `ref` 写入就是变更。 |
@@ -114,7 +114,8 @@ public struct WorldStats : ISingletonComponent
 EasyEcs：特性变成过滤，取组件变成参数。
 
 ```csharp tab="EasyEcs" title="MovementSystem.cs"
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Stunned>, Without<Dead>]
     static void Move(ref Position p, in Velocity v)
@@ -153,7 +154,8 @@ DefaultEcs 里，遍历时要销毁或创建实体的系统得传 `useBuffer: tr
 要创建就拿 `World`，而且实体一次带齐所有组件创建。
 
 ```csharp title="ProjectileSystems.cs"
-public class LifetimeSystem : EcsSystem
+[EcsSystem]
+public ref struct LifetimeSystem
 {
     [ForEach]
     static void Expire(Entity entity, ref Lifetime lifetime)
@@ -162,7 +164,8 @@ public class LifetimeSystem : EcsSystem
     }
 }
 
-public class ShootingSystem : EcsSystem
+[EcsSystem]
+public ref struct ShootingSystem
 {
     [ForEach, With<Player>, Without<Dead>]
     static void Shoot(Entity shooter, in Position p, in Velocity v, ref WorldStats stats, World world)
@@ -186,7 +189,8 @@ DefaultEcs 每次写入后都要调 `NotifyChanged<T>()`，读完集合还要 `C
 public record struct Hp(int Value) : IComponent, ITracked;
 public record struct Replica(int Value) : IComponent;
 
-public class Replication : EcsSystem
+[EcsSystem]
+public ref struct Replication
 {
     [ForEach, Changed<Hp>]
     static void Copy(in Hp hp, ref Replica replica) => replica = new Replica(hp.Value);

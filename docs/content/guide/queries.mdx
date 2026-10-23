@@ -453,15 +453,17 @@ that serves requests: the ids then go to `DestroyEntities`, `SaveEntities` or a 
 query loop may not do while it runs.
 
 ```csharp
-public class BuryTheFallen : EcsSystem
+[EcsSystem]
+public ref struct BuryTheFallen
 {
     static readonly QueryFilter Fallen = QueryFilter.Create().With<Dead>();
 
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
         Span<EntityId> batch = stackalloc EntityId[64];
-        int count = World.CollectIds<Health>(batch, Fallen);   // the first 64, in query order // [!code highlight]
-        World.DestroyEntities(batch[..count]);                 // the rest wait for the next tick
+        int count = world.CollectIds<Health>(batch, Fallen);   // the first 64, in query order // [!code highlight]
+        world.DestroyEntities(batch[..count]);                 // the rest wait for the next tick
     }
 }
 ```
@@ -503,7 +505,8 @@ public struct Burning : IComponent;
 using EasyEcs;
 
 // Halves the velocity of every unit that is frozen, burning, or both.
-public class SlowSystem : EcsSystem
+[EcsSystem]
+public ref struct SlowSystem
 {
     [ForEach, WithAny<Frozen>, WithAny<Burning>]
     static void Slow(ref Velocity velocity)
@@ -514,8 +517,8 @@ public class SlowSystem : EcsSystem
 }
 
 // Moves every unit that is not frozen.
-[UpdateAfter<SlowSystem>]
-public class MoveSystem : EcsSystem
+[EcsSystem, UpdateAfter<SlowSystem>]
+public ref struct MoveSystem
 {
     [ForEach, Without<Frozen>]
     static void Move(ref Position position, in Velocity velocity)

@@ -144,7 +144,8 @@ buffer to the method's filter, and keeps the method parallel.
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 
-public class DiffuseSystem : EcsSystem
+[EcsSystem]
+public ref struct DiffuseSystem
 {
     const float Rate = 0.2f;
 
@@ -184,7 +185,8 @@ stepped (ping-pong buffers). Neither buffer is cleared: the pass writes every ro
 stencil skips is zero in both, since the commit copied the last step.
 
 ```csharp
-public class CommitHeatSystem : EcsSystem
+[EcsSystem]
+public ref struct CommitHeatSystem
 {
     [ForEach]
     static void Commit(in DynamicBuffer<NextTemperature> next, Mut<DynamicBuffer<Temperature>> cells)
@@ -286,7 +288,8 @@ public partial record struct GasCube([IndexKey] CubePos Pos) : IComponent, ITile
 public record struct Gas(float Value);
 public record struct NextGas(float Value);
 
-public class SpreadGasSystem : EcsSystem
+[EcsSystem]
+public ref struct SpreadGasSystem
 {
     const float Rate = 0.1f;
 
@@ -381,7 +384,8 @@ public static class LifeRule
     }
 }
 
-public class LifeSystem : EcsSystem
+[EcsSystem]
+public ref struct LifeSystem
 {
     [ForEach(Parallel = true, ChunkRows = 64)]
     static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next) =>
@@ -404,7 +408,8 @@ names the neighbors to wake. With a tag that marks the awake tiles, a grid costs
 public struct Awake : IComponent;                                            // the tile may still change
 public record struct LifeChange(TileFaces Edges, bool Changed) : IComponent; // what its last step changed
 
-public class SparseLifeSystem : EcsSystem
+[EcsSystem]
+public ref struct SparseLifeSystem
 {
     [ForEach(Parallel = true, ChunkRows = 64), With<Awake>]
     static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next, ref LifeChange change)
@@ -416,7 +421,8 @@ public class SparseLifeSystem : EcsSystem
     }
 }
 
-public class SleepSystem : EcsSystem
+[EcsSystem]
+public ref struct SleepSystem
 {
     [ForEach, With<Awake>]
     static void Sleep(Entity plate, in LifeChange change)
@@ -425,12 +431,13 @@ public class SleepSystem : EcsSystem
     }
 }
 
-public class WakeSystem : EcsSystem
+[EcsSystem]
+public ref struct WakeSystem
 {
     [ForEach, With<Awake>]
-    void Wake(in LifeChange change, Tile<Alive, LifePlate> life)
+    static void Wake(World world, in LifeChange change, Tile<Alive, LifePlate> life)
     {
-        foreach (var id in life.Facing(change.Edges)) World.GetEntity(id).SetAwake();
+        foreach (var id in life.Facing(change.Edges)) world.GetEntity(id).SetAwake();
     }
 }
 ```
@@ -559,7 +566,8 @@ using System.Runtime.Intrinsics;
 using EasyEcs;
 
 // The shader: one step of the Game of Life for each awake plate, plates in parallel.
-public class StepSystem : EcsSystem
+[EcsSystem]
+public ref struct StepSystem
 {
     [ForEach(Parallel = true, ChunkRows = 64), With<Awake>]
     static void Step(Tile<Cell, Plate> life, Mut<DynamicBuffer<NextCell>> next, ref Change change)
@@ -590,7 +598,8 @@ public class StepSystem : EcsSystem
 
 // Ping-pong: the steps become the cells once every plate has stepped,
 // so no plate reads a neighbor's new cells.
-public class CommitSystem : EcsSystem
+[EcsSystem]
+public ref struct CommitSystem
 {
     [ForEach, With<Awake>]
     static void Commit(in Change change, in DynamicBuffer<NextCell> next, Mut<DynamicBuffer<Cell>> cells)
@@ -602,7 +611,8 @@ public class CommitSystem : EcsSystem
 }
 
 // A plate whose step changed nothing sleeps until a neighbor wakes it.
-public class SleepSystem : EcsSystem
+[EcsSystem]
+public ref struct SleepSystem
 {
     [ForEach, With<Awake>]
     static void Sleep(Entity plate, in Change change)
@@ -612,12 +622,13 @@ public class SleepSystem : EcsSystem
 }
 
 // The neighbors that read an edge that changed step again next tick.
-public class WakeSystem : EcsSystem
+[EcsSystem]
+public ref struct WakeSystem
 {
     [ForEach, With<Awake>]
-    void Wake(in Change change, Tile<Cell, Plate> life)
+    static void Wake(World world, in Change change, Tile<Cell, Plate> life)
     {
-        foreach (var id in life.Facing(change.Edges)) World.GetEntity(id).SetAwake();
+        foreach (var id in life.Facing(change.Edges)) world.GetEntity(id).SetAwake();
     }
 }
 ```

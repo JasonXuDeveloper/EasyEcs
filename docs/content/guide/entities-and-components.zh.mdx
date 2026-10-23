@@ -146,7 +146,8 @@ bool same = reused.Id == fromClient;                   // false
 ```csharp
 public record struct Target(EntityId Id) : IComponent;   // 8 字节，非托管
 
-public class Chase : EcsSystem
+[EcsSystem]
+public ref struct Chase
 {
     [ForEach]
     static void Follow(ref Position p, in Target target, World world)

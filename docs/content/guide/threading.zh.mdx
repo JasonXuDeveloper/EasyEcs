@@ -85,7 +85,7 @@ public static class Zones
 | `[Changed<T>]`、`[Removed<T>]` | 读 `T`（它的变更 tick） |
 | `[ChangedAny<T1, …, Tn>]`、`[RemovedAny<T1, …, Tn>]` | 读 `T1` 到 `Tn` 中的每一个 |
 | 只当身份用的 `Entity`（`Id`、`Version`、`IsAlive`、`==`、`EntityId`） | 无 |
-| 其他用法的 `Entity`、`World`、实例方法、重写 `OnUpdate` | 单独运行 |
+| 其他用法的 `Entity`、`World`、`[OnUpdate]` 方法、`[Consume]` 方法 | 单独运行 |
 | 没有任何 `[ForEach]` 方法 | 单独运行 |
 
 一个系统写了另一个系统读或写的东西，或者其中一个要单独运行，两者就冲突。系统放在哪个阶段：先找出它必须排在后面的系统（有顺序约束的，
@@ -101,17 +101,20 @@ public record struct Body(float X, float Y, float Vx, float Vy) : IComponent;
 public record struct Vitals(int Health, int Max) : IComponent;
 public record struct Alarms(int Count) : ISingletonComponent;
 
-public class MoveBodies : EcsSystem        // 写 Body
+[EcsSystem]
+public ref struct MoveBodies // 写 Body
 {
     [ForEach] static void Move(ref Body b) { b.X += b.Vx; b.Y += b.Vy; }
 }
 
-public class RegenerateHealth : EcsSystem  // 写 Vitals
+[EcsSystem]
+public ref struct RegenerateHealth // 写 Vitals
 {
     [ForEach] static void Regenerate(ref Vitals v) => v.Health = Math.Min(v.Health + 1, v.Max);
 }
 
-public class LowHealthAlarm : EcsSystem    // 读 Vitals：和 RegenerateHealth 冲突
+[EcsSystem]
+public ref struct LowHealthAlarm // 读 Vitals：和 RegenerateHealth 冲突
 {
     [ForEach] static void Count(in Vitals v, ref Alarms alarms) { if (v.Health < 10) alarms.Count++; }
 }
@@ -157,7 +160,8 @@ using var zone = new World(new WorldOptions { ParallelSystems = true, MaxDegreeO
 ```csharp
 public record struct Regen(int PerTick) : ISingletonComponent;
 
-public class RegenerateAll : EcsSystem
+[EcsSystem]
+public ref struct RegenerateAll
 {
     [ForEach(Parallel = true), Without<Dead>]
     static void Regenerate(ref Health hp, in Regen regen) => hp.Value += regen.PerTick;   // 单例只读
@@ -194,7 +198,8 @@ public record struct Crowd(float Pressure) : IComponent;
 ```
 
 ```csharp tab="默认块大小"
-public class CrowdPressure : EcsSystem
+[EcsSystem]
+public ref struct CrowdPressure
 {
     const int Iterations = 2_000;   // 每个格子几微秒的活
 
@@ -211,7 +216,8 @@ public class CrowdPressure : EcsSystem
 ```
 
 ```csharp tab="ChunkRows = 64"
-public class CrowdPressure : EcsSystem
+[EcsSystem]
+public ref struct CrowdPressure
 {
     const int Iterations = 2_000;   // 每个格子几微秒的活
 
@@ -315,7 +321,8 @@ public partial struct Extent : IReduction<Extent>
 ```
 
 ```csharp
-public class MeasureCrowd : EcsSystem
+[EcsSystem]
+public ref struct MeasureCrowd
 {
     [ForEach(Parallel = true)]
     static void Measure(in Position position, ref Reduce<Extent> extent)
@@ -385,7 +392,8 @@ Console.WriteLine($"{crowd.Count} 个单位，x 从 {crowd.MinX} 到 {crowd.MaxX
 ```csharp
 public record struct Neighbors(int Count, int Spread) : IComponent;
 
-public class CountNeighbors : EcsSystem
+[EcsSystem]
+public ref struct CountNeighbors
 {
     [ForEach(Parallel = true)]
     static void Count(in Position position, ref Neighbors neighbors, Scratch<List<int>> scratch)
@@ -438,7 +446,8 @@ public class CountNeighbors : EcsSystem
 public record struct Quarry(EntityId Id) : IComponent;
 public record struct Heading(float X, float Y) : IComponent;
 
-public class ChaseSystem : EcsSystem
+[EcsSystem]
+public ref struct ChaseSystem
 {
     [ForEach(Parallel = true)]
     static void Chase(in Position position, in Quarry quarry, ref Heading heading, Lookup<Position> positions)
@@ -455,7 +464,8 @@ public partial record struct Login([UniqueKey] int Number) : IComponent;
 public record struct Asks(int Number) : IComponent;
 public record struct Answer(EntityId Login) : IComponent;
 
-public class MatchLogins : EcsSystem
+[EcsSystem]
+public ref struct MatchLogins
 {
     [ForEach(Parallel = true)]
     static void Match(in Asks asks, ref Answer answer, Lookup<Login> logins) =>
@@ -514,20 +524,23 @@ public record struct Hit(EntityId Target, int Amount);   // 一条记录，不�
 public record struct Attack(int Power) : IComponent;
 public record struct Aim(EntityId Target) : IComponent;
 
-public class StrikeSystem : EcsSystem
+[EcsSystem]
+public ref struct StrikeSystem
 {
     [ForEach(Parallel = true)]
     static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits) =>
         hits.Add(new Hit(aim.Target, attack.Power));   // 这一块的列表 // [!code highlight]
 }
 
-public class ApplyHitsSystem : EcsSystem
+[EcsSystem]
+public ref struct ApplyHitsSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+        ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
         foreach (ref readonly var hit in hits.AsReadOnlySpan())
-            if (World.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
+            if (world.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
         hits.Clear();   // 只结算一次
     }
 }
@@ -607,7 +620,8 @@ access.WriteSingleton<Emitted<Hit>>();   // 读记录的系统等它跑完
 ```csharp
 public record struct Wander(float X, float Y) : IComponent;
 
-public class WanderSystem : EcsSystem
+[EcsSystem]
+public ref struct WanderSystem
 {
     [ForEach(Parallel = true)]
     static void Pick(ref Wander wander, Entity entity, in EntityRandom random)
@@ -619,10 +633,11 @@ public class WanderSystem : EcsSystem
 }
 
 // 推进模拟时钟的系统顺便推进随机数的 tick。
-[UpdateAfter<WanderSystem>]
-public class TickRandomSystem : EcsSystem
+[EcsSystem, UpdateAfter<WanderSystem>]
+public ref struct TickRandomSystem
 {
-    protected override void OnUpdate() => World.EntityRandom.Tick++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.EntityRandom.Tick++;
 }
 ```
 
@@ -695,12 +710,14 @@ public struct RollCriticals : IForSpan<Hit>
     }
 }
 
-public class CriticalSystem : EcsSystem
+[EcsSystem]
+public ref struct CriticalSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        var job = new RollCriticals { Random = World.EntityRandom };
-        World.ForParallel(ref World.GetSingleton<Emitted<Hit>>().Items, ref job);
+        var job = new RollCriticals { Random = world.EntityRandom };
+        world.ForParallel(ref world.GetSingleton<Emitted<Hit>>().Items, ref job);
     }
 }
 ```
@@ -727,21 +744,25 @@ using System.Collections.Concurrent;
 public record struct MoveRequest(int PlayerId, float X, float Y);           // 一条消息，不是组件
 public record struct MoveIntent(int PlayerId, float X, float Y) : IComponent;
 
-public sealed class ReceiveMoves(ConcurrentQueue<MoveRequest> inbox) : EcsSystem
-{
-    private readonly ConcurrentQueue<MoveRequest> _inbox = inbox;          // 由网络线程写入
+[NotSaved]
+public record struct MoveInbox(ConcurrentQueue<MoveRequest> Moves) : ISingletonComponent;   // 由网络线程写入
 
-    protected override void OnUpdate()
+[EcsSystem]
+public ref struct ReceiveMoves
+{
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_inbox.TryDequeue(out var move))
-            World.CreateEntity(new MoveIntent(move.PlayerId, move.X, move.Y));   // 输入变成数据
+        var moves = world.MoveInbox.Moves;
+        while (moves.TryDequeue(out var move))
+            world.CreateEntity(new MoveIntent(move.PlayerId, move.X, move.Y));   // 输入变成数据
     }
 }
 ```
 
-用 `world.AddSystem(new ReceiveMoves(inbox))` 注册，放在消费 `MoveIntent` 的系统之前。队列的类型、容量上限和背压策略由你决定。队列放在收取它的系统的
-`readonly` 字段里（[EECS007](/zh/docs/guide/analyzer#eecs007) 允许），不要放进单例：`World.Save` 会写出每个单例，托管的队列就得配
-格式化器。
+用 `world.SetMoveInbox(inbox)` 设置队列，用 `world.AddSystem<ReceiveMoves>()` 注册系统，放在消费 `MoveIntent` 的系统之前。
+队列的类型、容量上限和背压策略由你决定。队列放进 [`[NotSaved]`](/zh/docs/guide/saves#not-saved) 单例：存档不会写它，
+托管队列也就不需要格式化器，读档也保留宿主设置的那个。
 [GameLoop 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop)就是这样从网络线程收取邮箱里的消息。
 
 ### World 同步了什么 [#what-the-world-synchronizes]
@@ -796,7 +817,8 @@ using EasyEcs;
 // 让每个速度都指向目标。
 // Parallel = true 把行切成块，分给多个线程：每次调用只读
 // 自己这一行和单例，也只写自己这一行。
-public class SteeringSystem : EcsSystem
+[EcsSystem]
+public ref struct SteeringSystem
 {
     [ForEach(Parallel = true)]
     static void Steer(in Position position, ref Velocity velocity, in Target target)
@@ -811,7 +833,8 @@ public class SteeringSystem : EcsSystem
 }
 
 // 只写 Health，SteeringSystem 不碰它：两个系统可以在同一个阶段运行。
-public class RegenerateSystem : EcsSystem
+[EcsSystem]
+public ref struct RegenerateSystem
 {
     [ForEach]
     static void Regenerate(ref Health health)
@@ -821,7 +844,8 @@ public class RegenerateSystem : EcsSystem
 }
 
 // 写 Position，而 SteeringSystem 要读它：所以要等 SteeringSystem 跑完。
-public class MoveSystem : EcsSystem
+[EcsSystem]
+public ref struct MoveSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)
@@ -932,7 +956,7 @@ unit 0 at (7.06, 7.06) with 60 hp
 | 并行遍历里通过辅助方法碰到还没人建好的值索引 | `InvalidOperationException` | 在 `Lookup<T>` 参数本身上调用 `TryFind` / `Find` / `Count` |
 | 归约类型不是 `partial`，或有字段没加特性 | 编译错误：生成器写不出 `Identity` 和 `Combine` | [EECS062](/zh/docs/guide/analyzer#eecs062)、[EECS064](/zh/docs/guide/analyzer#eecs064) |
 | 手写的最小值 `Identity` 是 0 | 每块的最小值都变成 0 | [EECS066](/zh/docs/guide/analyzer#eecs066)：用 `[Min]` |
-| 单例在 `OnUpdate` 里清零，再逐行累加 | 只能单线程，也没有向量循环 | [EECS086](/zh/docs/guide/analyzer#eecs086)：`ref Reduce<T>` |
+| 单例在 `[OnUpdate]` 里清零，再逐行累加 | 只能单线程，也没有向量循环 | [EECS086](/zh/docs/guide/analyzer#eecs086)：`ref Reduce<T>` |
 | 发出 `T` 的方法同时读 `Emitted<T>` | 编译错误：记录在这一遍结束时才到 | [EECS070](/zh/docs/guide/analyzer#eecs070) |
 | 结算 `Emitted<T>` 之后没清空 | 下一次更新又结算同样的记录 | 代码审查：结算的系统里 `Items.Clear()` |
 | 逐行往单例的列表里追加记录 | 只能单线程 | [EECS089](/zh/docs/guide/analyzer#eecs089)：`Emit<T>` |

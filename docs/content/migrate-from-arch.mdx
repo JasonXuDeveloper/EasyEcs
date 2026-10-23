@@ -35,10 +35,10 @@ The package carries the source generator and the analyzer: `[ForEach]` systems, 
 | `World.Create()` | `new World(options)` | A world has one owner thread; run one world per thread. |
 | Any struct is a component | A struct implementing `IComponent` | Add the interface; the analyzer rejects classes ([EECS006](/en/docs/guide/analyzer#eecs006)). |
 | `QueryDescription` | Filter attributes on a `[ForEach]` method, or a `QueryFilter` | Written once, on the method; the generator keeps the filter in a static field. |
-| `IForEach<T...>` + `InlineQuery` | A `[ForEach]` method in an `EcsSystem` | The generator writes the struct job and the call. |
+| `IForEach<T...>` + `InlineQuery` | A `[ForEach]` method in an `[EcsSystem]` | The generator writes the struct job and the call. |
 | `CommandBuffer` + `Playback` | Direct calls | Changes apply at once; later systems see them. |
 | A counters object passed to jobs | A singleton (`ISingletonComponent`) | Taken as a `ref` parameter, resolved once per pass. |
-| Arch.Extended systems | `EcsSystem`, `ISystemGroup`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]` | Built in. |
+| Arch.Extended systems | `[EcsSystem]`, `ISystemGroup`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]` | Built in. |
 | Events | `[Changed<T>]`, `[Removed<T>]`, tags queried later | State changes are data. |
 
 ## API mapping [#api-mapping]
@@ -129,7 +129,8 @@ public struct WorldStats : ISingletonComponent
 EasyEcs: the filter goes on the method, the parameters are the components.
 
 ```csharp tab="EasyEcs" title="MovementSystem.cs"
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Stunned>, Without<Dead>]
     static void Move(ref Position p, ref Velocity v)
@@ -164,7 +165,8 @@ Arch records the status change and plays it back after the query.
 EasyEcs applies it on the spot. The counters are a `ref` singleton parameter.
 
 ```csharp tab="EasyEcs" title="CombatSystem.cs"
-public class CombatSystem : EcsSystem
+[EcsSystem]
+public ref struct CombatSystem
 {
     [ForEach, Without<Dead>, Without<Stunned>]
     static void Fight(Entity entity, ref Attack attack, ref Health health, ref WorldStats stats)
@@ -178,7 +180,8 @@ public class CombatSystem : EcsSystem
     }
 }
 
-public class StatusSystem : EcsSystem
+[EcsSystem]
+public ref struct StatusSystem
 {
     [ForEach]
     static void Burn(Entity entity, ref Burning burning, ref Health health)
@@ -188,7 +191,8 @@ public class StatusSystem : EcsSystem
     }
 }
 
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
@@ -225,7 +229,8 @@ with its components in one call, placed in its final table; a method that create
 `Entity`.
 
 ```csharp title="ShootingSystem.cs"
-public class ShootingSystem : EcsSystem
+[EcsSystem]
+public ref struct ShootingSystem
 {
     [ForEach, With<Player>, Without<Dead>]
     static void Shoot(Entity shooter, in Position p, in Velocity v, ref WorldStats stats, World world)
@@ -237,7 +242,8 @@ public class ShootingSystem : EcsSystem
     }
 }
 
-public class LifetimeSystem : EcsSystem
+[EcsSystem]
+public ref struct LifetimeSystem
 {
     [ForEach]
     static void Expire(Entity entity, ref Lifetime lifetime)
@@ -246,9 +252,11 @@ public class LifetimeSystem : EcsSystem
     }
 }
 
-public sealed class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate() => World.WorldStats.Tick++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.WorldStats.Tick++;
 }
 ```
 

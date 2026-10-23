@@ -34,10 +34,10 @@ Both libraries name their component interface `IComponent`. During a port, alias
 | `EntityStore` | `World` | One owner thread per world. |
 | `IComponent` struct | `IComponent` struct | Nothing but the namespace. |
 | `ITag` | An empty `IComponent` struct | Tags are components; removing one flips a bit. |
-| `ArchetypeQuery<A, B>` + `Chunks` loops | A `[ForEach]` method in an `EcsSystem` | The generator writes the loop. |
+| `ArchetypeQuery<A, B>` + `Chunks` loops | A `[ForEach]` method in an `[EcsSystem]` | The generator writes the loop. |
 | `CommandBuffer` + `Playback()` | Direct calls | Changes apply at once, also mid-pass. |
 | `UniqueEntity` | `ISingletonComponent` | Per-world data, a `ref` parameter. |
-| `SystemRoot`, `SystemGroup`, `QuerySystem` | `World.AddSystem<T>()`, `ISystemGroup`, `EcsSystem` | |
+| `SystemRoot`, `SystemGroup`, `QuerySystem` | `World.AddSystem<T>()`, `ISystemGroup`, `[EcsSystem]` | |
 | `OnComponentRemoved` / `OnComponentAdded` events | `[Removed<T>]`, `[Changed<T>]` | State changes are data. |
 | `entity.Enabled` | A tag and `[Without<T>]`, or `entity.Disable<T>()` | EasyEcs disables components, not whole entities ([D8](/en/docs/decisions)). |
 
@@ -131,7 +131,8 @@ public struct WorldStats : ISingletonComponent
 EasyEcs: one method per row; the counters are a `ref` singleton parameter, resolved once per pass.
 
 ```csharp tab="EasyEcs" title="AoiSystem.cs"
-public class AoiSystem : EcsSystem
+[EcsSystem]
+public ref struct AoiSystem
 {
     [ForEach, Without<Dead>]
     static void UpdateCell(in Position p, ref AoiCell aoi, ref WorldStats stats)
@@ -170,7 +171,8 @@ Friflo records the tag and plays the buffer back after the loop.
 EasyEcs adds it where it is decided, and the respawn system after it already sees the dead:
 
 ```csharp tab="EasyEcs" title="DeathSystem.cs"
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
@@ -182,7 +184,8 @@ public class DeathSystem : EcsSystem
     }
 }
 
-public class RespawnSystem : EcsSystem
+[EcsSystem]
+public ref struct RespawnSystem
 {
     [ForEach, With<Dead>, With<Player>]
     static void Respawn(Entity entity, ref Health health)
@@ -239,7 +242,8 @@ must be tracked:
 public record struct Buff(int Ticks) : IComponent, ITracked;
 public record struct Expired(int Count) : IComponent;
 
-public class BuffReplication : EcsSystem
+[EcsSystem]
+public ref struct BuffReplication
 {
     [ForEach, Removed<Buff>]
     static void Send(ref Expired expired) => expired.Count++;

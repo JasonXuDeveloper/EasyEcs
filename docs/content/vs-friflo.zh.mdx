@@ -31,7 +31,7 @@ chunk，把结构变更记进命令缓冲；EasyEcs 从 `[ForEach]` 方法生成
 | 存储 | 原型表，每列有存在位 | 原型 |
 | 查询途中的变更 | 当场生效 | 抛 `StructuralChangeException`；记进 `CommandBuffer` |
 | 移除组件或标签 | 翻一个位，实体留在原行 | 把实体搬到另一个原型 |
-| 系统 | 带生成的 `[ForEach]` job 的 `EcsSystem` | `SystemRoot`、`SystemGroup`、`QuerySystem` |
+| 系统 | 带生成的 `[ForEach]` job 的 `[EcsSystem]` | `SystemRoot`、`SystemGroup`、`QuerySystem` |
 | 变更追踪 | `[Changed<T>]`：上次运行以来写过的行 | 没有（组件事件） |
 | 移除追踪 | `[Removed<T>]` | `OnComponentRemoved` 事件 |
 | 存档 | 二进制 `Save` / `Load`，内存快照 | JSON（`EntitySerializer`） |
@@ -80,7 +80,8 @@ public struct Hp : IComponent { public int Value, Max; }
 public struct Npc : IComponent { public int TemplateId; }
 public struct Deaths : ISingletonComponent { public int Count, NpcKills; }
 
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void CheckDeath(Entity entity, in Hp hp, ref Deaths deaths)

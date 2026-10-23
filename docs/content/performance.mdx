@@ -207,7 +207,8 @@ two-float components as one float span (X, Y, X, Y, ...) so every lane of a `Vec
 turns the branches into a mask:
 
 ```csharp tab="BounceSystem.cs"
-public class BounceSystem : EcsSystem
+[EcsSystem]
+public ref struct BounceSystem
 {
     [ForEach, Without<Dead>]
     static void Move(ref Position p, ref Velocity v)
@@ -223,7 +224,8 @@ public class BounceSystem : EcsSystem
 using System.Numerics;
 using System.Runtime.InteropServices;
 
-public class BounceSimdSystem : EcsSystem
+[EcsSystem]
+public ref struct BounceSimdSystem
 {
     [ForEach, Without<Dead>]
     static void Move(Span<Position> positions, Span<Velocity> velocities)
@@ -328,7 +330,8 @@ skipped 64 at a time, and adding or removing it flips a presence bit while the e
 ```csharp tab="Flag"
 public record struct Unit(int Hp, bool Stunned) : IComponent;   // regular: every system tests the flag
 
-public class StunnedFlagSystem : EcsSystem
+[EcsSystem]
+public ref struct StunnedFlagSystem
 {
     [ForEach]
     static void Act(ref Unit unit)
@@ -340,7 +343,8 @@ public class StunnedFlagSystem : EcsSystem
 ```
 
 ```csharp tab="Tag"
-public class StunnedTagSystem : EcsSystem   // fastest: the filter does the test
+[EcsSystem]
+public ref struct StunnedTagSystem // fastest: the filter does the test
 {
     [ForEach, Without<Stunned>]
     static void Act(ref Health hp) => hp = hp with { Value = hp.Value + 1 };
@@ -366,7 +370,8 @@ Take the component by `in`, so the visit does not count as a write.
 public record struct Shield(int Value) : IComponent, ITracked;
 public record struct ShieldReplica(int Value) : IComponent;
 
-public class ShieldReplicationSystem : EcsSystem
+[EcsSystem]
+public ref struct ShieldReplicationSystem
 {
     [ForEach, Changed<Shield>]
     static void Send(in Shield shield, ref ShieldReplica replica) => replica = new ShieldReplica(shield.Value);
@@ -393,7 +398,8 @@ the tags; comparing every row with what clients last received costs a scan. A tr
 stamps its row, so `[Removed<T>]` visits only the entities that lost it, with the same skipping as `[Changed<T>]`:
 
 ```csharp title="ShieldLossSystem.cs"
-public class ShieldLossSystem : EcsSystem
+[EcsSystem]
+public ref struct ShieldLossSystem
 {
     [ForEach, Removed<Shield>]                       // Shield : ITracked (above)
     static void Send(ref ShieldReplica replica) => replica = new ShieldReplica(0);
@@ -481,8 +487,6 @@ times every system run.
   changed ([EECS025](/en/docs/guide/analyzer#eecs025)).
 - **Don't look up the visited entity's components or a singleton inside a `[ForEach]` method**: a parameter resolves
   them once per table ([EECS027](/en/docs/guide/analyzer#eecs027)).
-- **Don't make a `[ForEach]` method an instance method when it uses nothing of its system**: it then runs alone and
-  pays the checks of a structural change ([EECS029](/en/docs/guide/analyzer#eecs029)).
 - **Don't loop over a query to change, count or test entities one by one**: `SetAll`, `DestroyAll`, `Count`,
   `Any` and filters do it per table ([EECS030](/en/docs/guide/analyzer#eecs030),
   [EECS032](/en/docs/guide/analyzer#eecs032)).

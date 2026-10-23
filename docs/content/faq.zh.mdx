@@ -158,8 +158,8 @@ world.Load(output.WrittenSpan);  // 组件里存的 EntityId 仍然指向同样�
 
 支持。`EasyEcs.Core` 标记了 `IsAotCompatible`，库的每次构建都会跑裁剪和 AOT 分析器；生成的代码直接调用你的方法，热路径上没有反射
 （[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。基于它的程序可以用 `PublishAot` 无警告地发布并正常运行：CI 把战斗服务器示例（含被追踪组件、
-禁用组件、存档和在另一个程序集里闭合的泛型系统）以“警告即错误”发布成原生可执行文件并运行它。泛型系统由每个写出它某个闭合类型的程序集注册
-（`AddSystem<Regen<Health>>()`、基类）；只有运行时用反射造出的闭合类型没有代码，Native AOT 下会抛出写明该类型的异常
+禁用组件、存档和在另一个程序集里闭合的泛型系统）以“警告即错误”发布成原生可执行文件并运行它。泛型系统由每个写出它某个封闭类型的程序集注册
+（`AddSystem<Regen<Health>>()`、`[UpdateAfter<Regen<Health>>]`）；只有运行时用反射造出的封闭类型没有代码，`AddSystem` 会抛出写明该类型的异常
 （[D20](/zh/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)）。
 
 要设置指令集。Native AOT 默认按基线 CPU 编译，生成的向量循环里 `Vector512` 那一档会被编译掉，`Vector<T>` 也只有 16 字节。知道自己跑在什么 CPU 上的服务器应当写明：
@@ -189,7 +189,8 @@ world.Load(output.WrittenSpan);  // 组件里存的 EntityId 仍然指向同样�
 ```csharp
 public record struct Hit(EntityId Target, int Damage) : IComponent;    // 消息就是实体
 
-public class ApplyHitsSystem : EcsSystem
+[EcsSystem]
+public ref struct ApplyHitsSystem
 {
     [ForEach]
     static void Apply(in Hit hit, World world)
@@ -200,10 +201,11 @@ public class ApplyHitsSystem : EcsSystem
     }
 }
 
-[UpdateAfter<ApplyHitsSystem>]                                          // 排在所有读者之后
-public sealed class ClearHitsSystem : EcsSystem
+[EcsSystem, UpdateAfter<ApplyHitsSystem>]                               // 排在所有读者之后
+public ref struct ClearHitsSystem
 {
-    protected override void OnUpdate() => World.DestroyAll<Hit>(); // 一次遍历清掉所有消息
+    [OnUpdate]
+    static void OnUpdate(World world) => world.DestroyAll<Hit>(); // 一次遍历清掉所有消息
 }
 ```
 
@@ -218,7 +220,7 @@ public sealed class ClearHitsSystem : EcsSystem
 
 ## 系统怎么排顺序？ [#order-systems]
 
-系统按注册顺序运行。要让一个系统依赖另一个，就把依赖写出来：类上的 `[UpdateBefore<T>]` 或 `[UpdateAfter<T>]` 只在所在分组内移动这一个系统，
+系统按注册顺序运行。要让一个系统依赖另一个，就把依赖写出来：系统上的 `[UpdateBefore<T>]` 或 `[UpdateAfter<T>]` 只在所在分组内移动这一个系统，
 加一条排序不会打乱其他系统（[D5](/zh/docs/decisions#d5-order-systems-by-dependencies-not-priorities)）。出现环时 `AddSystem` 抛异常，
 分析器能看到时报 EECS019。没有整数优先级：`Priority` 在 4.1 中删除了。运行节奏不同的系统放进单独调用更新的[系统分组](/zh/docs/guide/systems)，
 或者给它标上 `[UpdateInterval(N, Phase = P)]`。
@@ -231,7 +233,8 @@ public sealed class ClearHitsSystem : EcsSystem
 public record struct Poison(int DamagePerTick) : IComponent;
 public record struct Mana(int Value) : IComponent;
 
-public class PoisonSystem : EcsSystem
+[EcsSystem]
+public ref struct PoisonSystem
 {
     [ForEach, Without<Dead>]
     static void Hurt(ref Health hp, in Poison poison) => hp = hp with { Value = hp.Value - poison.DamagePerTick };
@@ -266,10 +269,18 @@ foreach (var item in world.Query<Position, Velocity>())
 
 ## 系统必须是 `partial` 吗？ [#partial]
 
-不必。生成器把每个系统的 job 写进单独的 `file` 类，通过 `[UnsafeAccessor]` 调用你的 `[ForEach]` 方法（私有的也行），编译出来就是直接调用
-（[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。系统就是普通的类，生成的成员也不会和你的成员冲突。
+不必。生成器把每个系统的 job 写进单独的 `file` 类，通过 `[UnsafeAccessor]` 调用你的 `[ForEach]` 方法和钩子（私有的也行），编译出来就是直接调用
+（[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。系统就是普通的 `[EcsSystem] ref struct`，生成的成员也不会和你的成员冲突。
 写了 `partial` 照样能编译。用特性声明成员的组件或单例（`[Sum]`、`[IndexKey]`、`[Group]`）连同外层类型都要是 `partial`：生成器把这些成员写进类型本身
 （[EECS062](/zh/docs/guide/analyzer#eecs062)）。
+
+## 为什么 IDE 说 `[ForEach]` 方法从没被使用？ [#never-used]
+
+你的代码里确实没人调用它：调用它的是生成的代码，经 `[UnsafeAccessor]` 按名字调用，IDE 的“未使用的私有成员”分析器不把这算作使用。
+EasyEcs 对两类 IDE 都有交代：分析器包里带一个诊断抑制器，在 `[ForEach]`、`[ForEntity]`、`[OnCreate]`、`[OnUpdate]` 和 `[OnDestroy]`
+方法上隐藏 IDE0051 和 IDE0052（Visual Studio、VS Code、`dotnet build`）；这些特性和 `[EcsSystem]` 还标了 JetBrains 的 `[MeansImplicitUse]`，
+Rider 和 ReSharper 会读它（[D107](/zh/docs/decisions#d107-never-used-warnings)）。如果提示还在，说明项目引用 EasyEcs 时没带上它的分析器
+（包上写了 `ExcludeAssets="analyzers"`，或者引用源码时没把生成器作为 `Analyzer` 引用），这时代码也根本没有生成。
 
 ## 相关页面 [#related]
 

@@ -38,7 +38,8 @@ public record struct Seats(int Released) : ISingletonComponent;
 ```
 
 ```csharp title="ReleaseSeats.cs"
-public class ReleaseSeats : EcsSystem
+[EcsSystem]
+public ref struct ReleaseSeats
 {
     [ForEach, With<Retired>, With<Seat>]                    // only retired entities         // [!code highlight]
     static void Release(Entity entity, ref Seats seats)
@@ -66,7 +67,8 @@ world.Update();                        // ReleaseSeats frees it: guest.IsAlive i
 ```csharp
 public record struct NextSeat(int Number) : ISingletonComponent;
 
-public class AssignSeats : EcsSystem
+[EcsSystem]
+public ref struct AssignSeats
 {
     [ForEach, Without<Retired>]                            // never seat an entity that already left // [!code highlight]
     static void Assign(ref Seat seat, ref NextSeat next)
@@ -114,7 +116,8 @@ cleanup component removed), not when it is retired, since until then it is still
 ```csharp
 public record struct Cooldown(int Ticks) : IComponent;
 
-public class TickCooldowns : EcsSystem
+[EcsSystem]
+public ref struct TickCooldowns
 {
     [ForEach]
     static void Tick(ref Cooldown cooldown) => cooldown.Ticks--;
@@ -155,7 +158,8 @@ There is no "disabled entity" that queries skip by default. A tag and `Without<T
 public struct Inactive : IComponent;                         // the whole entity is off
 public struct Bullet : IComponent;
 
-public class MoveBullets : EcsSystem
+[EcsSystem]
+public ref struct MoveBullets
 {
     [ForEach, Without<Inactive>]                             // the systems that skip it say so // [!code highlight]
     static void Move(ref Position p, in Velocity v)
@@ -204,7 +208,8 @@ removes it ([decision D4](/en/docs/decisions#d4-no-addedt-filter)):
 public struct Spawned : IComponent;
 public record struct Greeted(int Count) : ISingletonComponent;
 
-public class GreetNewcomers : EcsSystem
+[EcsSystem]
+public ref struct GreetNewcomers
 {
     [ForEach, With<Spawned>, With<Health>]
     static void Greet(Entity entity, ref Greeted greeted)
@@ -252,7 +257,8 @@ public record struct Seats(int Released) : ISingletonComponent;
 using EasyEcs;
 
 // Counts every cooldown down. A disabled cooldown is hidden from this method, so it is paused.
-public class CooldownSystem : EcsSystem
+[EcsSystem]
+public ref struct CooldownSystem
 {
     [ForEach]
     static void Tick(ref Cooldown cooldown)
@@ -265,7 +271,8 @@ public class CooldownSystem : EcsSystem
 }
 
 // Gives back the seats of retired players. Removing the last cleanup component frees the entity.
-public class ReleaseSeatsSystem : EcsSystem
+[EcsSystem]
+public ref struct ReleaseSeatsSystem
 {
     [ForEach, With<Retired>, With<Seat>]
     static void Release(Entity player, ref Seats seats)

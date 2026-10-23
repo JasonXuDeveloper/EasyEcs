@@ -42,7 +42,8 @@ public record struct Armor(int Value) : IComponent;
 public struct Dead : IComponent;
 public record struct Clock(float Dt) : ISingletonComponent;
 
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Dead>]
     static void Move(ref Position p, in Velocity v, in Clock clock)
@@ -116,26 +117,29 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 
 ### Systems and [ForEach] [#systems-and-foreach]
 
-A system derives from `EcsSystem` and has one job. A `[ForEach]` method is its whole loop: components (`ref` to
+A system is an `[EcsSystem] ref struct` of static methods with one job, never an object. A `[ForEach]` method is its whole loop: components (`ref` to
 write, `in` to read), singletons, the `Entity`, the `World`. The generator compiles each method into a struct job
-that the JIT inlines into the row loop. `OnCreate`, `OnUpdate` and `OnDestroy` cover setup and per-update work.
+that the JIT inlines into the row loop. Static methods marked `[OnCreate]`, `[OnUpdate]` and `[OnDestroy]` cover setup and per-update work; the world keeps
+each system's record (enabled, error, ticks, stats) and hands out a `SystemHandle` to it.
 
 - **Use it for:** all per-entity logic of a tick.
 - **Cost:** a `[ForEach]` system that adds `Velocity` to `Position` costs <BenchValue k="forEach.perEntity" /> per
   entity, against <BenchValue k="rawArray.perEntity" /> for the same loop over two plain arrays. Per system and
-  update: three virtual calls plus one query-cache lookup per method.
+  update: one direct call from its assembly's system set (no virtual call), and per method a pass that reads the query
+  kept for its job type.
 - **Guide:** [Systems](/en/docs/guide/systems), [ECS principles](/en/docs/ecs-principles)
 
 ### Generic systems [#generic-systems]
 
-A system class can be generic: each closed type (`CountOf<Position>`, `CountOf<Health>`) is a system of its own, with
-its own generated job and access set, added, ordered and scheduled on its own. A closed generic system can also be a
-base class.
+A system can be generic: each closed type (`CountOf<Position>`, `CountOf<Health>`) is a system of its own, with its
+own generated job and access set, added, ordered and scheduled on its own. Systems share code this way, or through
+static helpers: a ref struct has no base class.
 
 - **Use it for:** one rule applied to several component types (a counter, a decay, a cleanup per kind of resource).
 - **Skip it for:** a generic `[ForEach]` method: nothing would supply its type arguments
-  ([EECS004](/en/docs/guide/analyzer#eecs004)); make the class generic instead.
-- **Cost:** none beyond the closed systems; a type built by reflection has its code closed on first use.
+  ([EECS004](/en/docs/guide/analyzer#eecs004)); make the system generic instead.
+- **Cost:** none beyond the closed systems. Their code is written into the assembly that names them, so Native AOT and
+  WebAssembly run them too; a type closed by reflection only has no code (`AddSystem` throws).
 - **Guide:** [Systems](/en/docs/guide/systems#generic-systems)
 
 ### Filters [#filters]
@@ -286,7 +290,8 @@ records changes as data, so a system visits only those rows.
 ```csharp
 public record struct Replica(int Health) : IComponent;
 
-public class ReplicationSystem : EcsSystem
+[EcsSystem]
+public ref struct ReplicationSystem
 {
     [ForEach, Changed<Health>]                       // only rows written since this system last ran
     static void Send(in Health hp, ref Replica replica) => replica = new Replica(hp.Value);

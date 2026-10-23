@@ -35,7 +35,7 @@ Unity 的跑分，因为没有这样的测试。
 | `IEnableableComponent`、`SetComponentEnabled` | `entity.Disable<T>()` / `Enable<T>()` | 值保留，查询跳过它；第一次之后不再挪行。 |
 | `ICleanupComponentData` | `ICleanupComponent` + `Retired` 标签 | 对带清理组件的实体调用 `Destroy` 会让它退休：清理组件留着，直到某个系统把它们移除。 |
 | `SystemAPI.GetSingleton<T>()` | `ISingletonComponent`，`[ForEach]` 方法的 `ref T` 参数 | 每个 World 一份，不需要实体。 |
-| `ISystem` / `SystemBase` 的 `OnCreate` / `OnUpdate` / `OnDestroy` | `EcsSystem` 的 `OnCreate` / `OnUpdate` / `OnDestroy` | 系统无状态：状态放进组件或单例（[EECS007](/zh/docs/guide/analyzer#eecs007)）。 |
+| `ISystem` / `SystemBase` 的 `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` | `[EcsSystem]` 的 `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` | 系统无状态：状态放进组件或单例（[EECS007](/zh/docs/guide/analyzer#eecs007)）。 |
 | `SystemAPI.Query<RefRW<A>, RefRO<B>>()` | 参数为 `ref A`、`in B` 的 `[ForEach]` 方法 | job 由生成器写；`ref` 是写，`in` 是读。 |
 | `IJobEntity` | `[ForEach]` 方法（生成的 struct job） | |
 | `ScheduleParallel` | `[ForEach(Parallel = true)]` | 按行分块交给线程池；会产生竞争的方法由分析器拦下（[EECS010](/zh/docs/guide/analyzer#eecs010)）。 |
@@ -67,7 +67,8 @@ Unity 的跑分，因为没有这样的测试。
 public record struct Speed(float Value) : IComponent;
 public record struct TickLength(float Seconds) : ISingletonComponent;
 
-public class MoveSystem : EcsSystem
+[EcsSystem]
+public ref struct MoveSystem
 {
     [ForEach, Without<Stunned>]
     static void Move(ref Position position, in Speed speed, in TickLength tick) =>
@@ -109,7 +110,8 @@ public partial struct MoveSystem : ISystem
 哪里改，同一次更新里后面的系统都能看到：
 
 ```csharp title="DeathSystem.cs"
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health health)

@@ -58,7 +58,8 @@ entity. The singleton must exist by then: a system whose singleton was never add
 `InvalidOperationException` on its first run, even when no entity matches, so add it where the world is built.
 
 ```csharp
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Score score)
@@ -69,9 +70,11 @@ public class DeathSystem : EcsSystem
     }
 }
 
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate() => World.Clock.Tick++;   // in OnUpdate: through the system's World
+    [OnUpdate]
+    static void OnUpdate(World world) => world.Clock.Tick++;   // in an [OnUpdate] method: through its World
 }
 ```
 
@@ -166,17 +169,19 @@ public record struct Score(int Deaths) : ISingletonComponent;
 using EasyEcs;
 
 // Advances the clock once per update, through the system's World.
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        World.Clock.Tick++;
+        world.Clock.Tick++;
     }
 }
 
 // Reads the configuration by `in`: resolved once per pass, not once per unit.
-[UpdateAfter<ClockSystem>]
-public class PoisonSystem : EcsSystem
+[EcsSystem, UpdateAfter<ClockSystem>]
+public ref struct PoisonSystem
 {
     [ForEach, Without<Dead>]
     static void Hurt(ref Health hp, in Poison poison)
@@ -186,8 +191,8 @@ public class PoisonSystem : EcsSystem
 }
 
 // Writes the score by `ref`, reads the clock by `in`.
-[UpdateAfter<PoisonSystem>]
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<PoisonSystem>]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Score score, in Clock clock)

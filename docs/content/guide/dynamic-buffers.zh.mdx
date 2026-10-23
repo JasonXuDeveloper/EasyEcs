@@ -75,7 +75,8 @@ foreach (var p in players) p.WriteLoot().EnsureCapacity(8);   // 预留满背包
 写入方法都按 `ref` 接收缓冲，所以和普通被追踪组件一样，每次写入都会打上 tick。
 
 ```csharp title="Pickup.cs"
-public class Pickup : EcsSystem
+[EcsSystem]
+public ref struct Pickup
 {
     [ForEach, With<Player>]
     static void Collect(ref DynamicBuffer<Loot> bag) // [!code highlight]
@@ -94,7 +95,8 @@ public class Pickup : EcsSystem
 `[Changed<DynamicBuffer<Loot>>]` 方法只访问系统上次运行后被写过的背包。用 `in` 读取，不算写入。
 
 ```csharp title="SendBags.cs"
-public class SendBags : EcsSystem
+[EcsSystem]
+public ref struct SendBags
 {
     [ForEach, Changed<DynamicBuffer<Loot>>] // [!code highlight]
     static void Send(in DynamicBuffer<Loot> bag, ref Sent sent)
@@ -173,7 +175,8 @@ ref var stash = ref hero.GetOrAddLoot();                       // 英雄没有�
 public record struct Waypoint(float X, float Y);
 public record struct Destination(float X, float Y) : IComponent, ITracked;
 
-public class PathSystem : EcsSystem
+[EcsSystem]
+public ref struct PathSystem
 {
     const int Steps = 8;
 
@@ -198,7 +201,8 @@ public class PathSystem : EcsSystem
 ```csharp
 public record struct Shade(byte Level);
 
-public class ShadeSystem : EcsSystem
+[EcsSystem]
+public ref struct ShadeSystem
 {
     const int Cells = 256;                                     // 16 × 16 的一根柱子
     const int Layers = 32;
@@ -337,7 +341,8 @@ public record struct Synced(int Bags) : ISingletonComponent;
 using EasyEcs;
 
 // 每个拾取者捡起下一件物品。背包满了就先扔掉最旧的一件。
-public class PickupSystem : EcsSystem
+[EcsSystem]
+public ref struct PickupSystem
 {
     const int BagSize = 4;
 
@@ -356,8 +361,8 @@ public class PickupSystem : EcsSystem
 }
 
 // 只发送自本系统上次运行以来被写过的背包。
-[UpdateAfter<PickupSystem>]
-public class SyncBagsSystem : EcsSystem
+[EcsSystem, UpdateAfter<PickupSystem>]
+public ref struct SyncBagsSystem
 {
     [ForEach, Changed<DynamicBuffer<Loot>>]
     static void Sync(ref Synced synced)

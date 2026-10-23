@@ -40,7 +40,8 @@ public record struct Lifetime(int Ticks) : IComponent;
 public record struct Projectile(EntityId Owner) : IComponent;
 public record struct Weapon(int Cooldown) : IComponent;
 
-public class ExpireSystem : EcsSystem
+[EcsSystem]
+public ref struct ExpireSystem
 {
     [ForEach]
     static void Expire(Entity shot, ref Lifetime life)
@@ -49,7 +50,8 @@ public class ExpireSystem : EcsSystem
     }
 }
 
-public class FireSystem : EcsSystem
+[EcsSystem]
+public ref struct FireSystem
 {
     [ForEach, Without<Dead>]
     static void Fire(Entity shooter, ref Weapon weapon, in Position at, World world)
@@ -114,7 +116,8 @@ flowchart LR
   own structural changes, and the components in its `WriteMask` are carried to the new row when it returns.
 
 ```csharp
-public class HitSystem : EcsSystem
+[EcsSystem]
+public ref struct HitSystem
 {
     [ForEach, Without<Dead>]
     static void Hit(Entity unit, ref Health hp)
@@ -238,7 +241,8 @@ public struct Dead : IComponent;
 using EasyEcs;
 
 // The turret loses 30 health a tick, and is tagged Dead where that is decided.
-public class WearSystem : EcsSystem
+[EcsSystem]
+public ref struct WearSystem
 {
     [ForEach, Without<Dead>]
     static void Wear(Entity turret, ref Health hp)
@@ -256,8 +260,8 @@ public class WearSystem : EcsSystem
 }
 
 // Fires every other tick. A turret tagged Dead earlier in this update no longer matches.
-[UpdateAfter<WearSystem>]
-public class FireSystem : EcsSystem
+[EcsSystem, UpdateAfter<WearSystem>]
+public ref struct FireSystem
 {
     [ForEach, Without<Dead>]
     static void Fire(Entity turret, ref Weapon weapon, World world)
@@ -276,8 +280,8 @@ public class FireSystem : EcsSystem
 
 // Counts down every shot, including the ones fired earlier in this update,
 // and destroys a shot in the middle of its own pass.
-[UpdateAfter<FireSystem>]
-public class ExpireSystem : EcsSystem
+[EcsSystem, UpdateAfter<FireSystem>]
+public ref struct ExpireSystem
 {
     [ForEach]
     static void Expire(Entity shot, ref Lifetime life)

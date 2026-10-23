@@ -54,7 +54,8 @@ score.Deaths++;
 从没添加过的话，系统第一次运行就抛 `InvalidOperationException`，哪怕一个匹配的实体都没有，所以要在建 World 的地方把它加上。
 
 ```csharp
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Score score)
@@ -65,9 +66,11 @@ public class DeathSystem : EcsSystem
     }
 }
 
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate() => World.Clock.Tick++;   // 在 OnUpdate 里：通过系统的 World 访问
+    [OnUpdate]
+    static void OnUpdate(World world) => world.Clock.Tick++;   // 在 [OnUpdate] 方法里：通过它的 World 参数访问
 }
 ```
 
@@ -152,17 +155,19 @@ public record struct Score(int Deaths) : ISingletonComponent;
 using EasyEcs;
 
 // 每次更新通过系统的 World 把时钟推进一格。
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        World.Clock.Tick++;
+        world.Clock.Tick++;
     }
 }
 
 // 用 `in` 读配置：每次遍历解析一次，而不是每个单位一次。
-[UpdateAfter<ClockSystem>]
-public class PoisonSystem : EcsSystem
+[EcsSystem, UpdateAfter<ClockSystem>]
+public ref struct PoisonSystem
 {
     [ForEach, Without<Dead>]
     static void Hurt(ref Health hp, in Poison poison)
@@ -172,8 +177,8 @@ public class PoisonSystem : EcsSystem
 }
 
 // 用 `ref` 写分数，用 `in` 读时钟。
-[UpdateAfter<PoisonSystem>]
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<PoisonSystem>]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Score score, in Clock clock)

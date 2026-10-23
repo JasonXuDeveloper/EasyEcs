@@ -342,7 +342,8 @@ for the relation:
 ```csharp
 public record struct PartyCount(int Parties) : IComponent;
 
-public class CountParties : EcsSystem
+[EcsSystem]
+public ref struct CountParties
 {
     [ForEach]
     static void Count(in DynamicBuffer<MemberOf> parties, ref PartyCount count) => count = new PartyCount(parties.Count);
@@ -449,7 +450,8 @@ an index needs, since it belongs to the world's owner thread.
 ```csharp
 public record struct Hazard(int Zone, int Damage) : IComponent;
 
-public class BurnZones : EcsSystem
+[EcsSystem]
+public ref struct BurnZones
 {
     [ForEach]
     static void Burn(in Hazard hazard, World world)

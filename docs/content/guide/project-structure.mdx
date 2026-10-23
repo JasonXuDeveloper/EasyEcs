@@ -143,7 +143,8 @@ public static class Game
 
 public record struct Ttl(int Ticks) : IComponent;
 
-public class MoveSystem : EcsSystem
+[EcsSystem]
+public ref struct MoveSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)
@@ -153,7 +154,8 @@ public class MoveSystem : EcsSystem
     }
 }
 
-public class ExpireSystem : EcsSystem
+[EcsSystem]
+public ref struct ExpireSystem
 {
     [ForEach]
     static void Expire(Entity entity, ref Ttl ttl)
@@ -177,10 +179,11 @@ runs a slow system every N-th update, and its phase spreads systems with the sam
 public record struct Census(int Entities) : ISingletonComponent;
 
 // Every 20th update of its group: once a second at 20 ticks a second.
-[UpdateInterval(20)]
-public class CensusSystem : EcsSystem
+[EcsSystem, UpdateInterval(20)]
+public ref struct CensusSystem
 {
-    protected override void OnUpdate() => World.GetOrAddCensus().Entities = World.EntityCount;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.GetOrAddCensus().Entities = world.EntityCount;
 }
 ```
 
@@ -201,9 +204,8 @@ flowchart LR
 
 The network, timers and the database run on other threads; the world belongs to the one thread that updates it.
 They meet in a queue you own: other threads post messages, and a system on the world's thread takes them and turns
-each into data. The queue is a `readonly` field of that system, handed in when it is added: a dependency, not state,
-so [EECS007](/en/docs/guide/analyzer#eecs007) allows it. Not a singleton: `World.Save` writes every singleton, and a
-queue has no formatter.
+each into data. The queue is a [`[NotSaved]`](/en/docs/guide/saves#not-saved) singleton the host sets: the system
+reads it from the world like any other data, no save writes it (a queue has no formatter), and a load keeps it.
 
 ```csharp
 using System.Collections.Concurrent;
@@ -213,20 +215,24 @@ public record struct FireRequest(float Vx, float Vy) : IComponent;
 
 public struct InputGroup : ISystemGroup;
 
-[UpdateInGroup<InputGroup>]
-public class ReceiveCommandsSystem(ConcurrentQueue<FireCommand> inbox) : EcsSystem
-{
-    private readonly ConcurrentQueue<FireCommand> _inbox = inbox;   // filled by the network threads
+[NotSaved]
+public record struct Inbox(ConcurrentQueue<FireCommand> Commands) : ISingletonComponent;   // filled by the network threads
 
-    protected override void OnUpdate()
+[EcsSystem, UpdateInGroup<InputGroup>]
+public ref struct ReceiveCommandsSystem
+{
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_inbox.TryDequeue(out var command))
-            World.CreateEntity(new FireRequest(command.Vx, command.Vy));
+        var commands = world.Inbox.Commands;
+        while (commands.TryDequeue(out var command))
+            world.CreateEntity(new FireRequest(command.Vx, command.Vy));
     }
 }
 ```
 
-Add it with `world.AddSystem(new ReceiveCommandsSystem(inbox))`, and give the same queue to the network code.
+Set the queue with `world.SetInbox(inbox)`, add the system with `world.AddSystem<ReceiveCommandsSystem>()`, and give
+the same queue to the network code.
 
 The queue's bound and what happens when it is full are yours to choose. The details are in
 [input from other threads](/en/docs/guide/threading#input-from-other-threads); a server that answers requests is in
@@ -332,6 +338,7 @@ public record struct Spawner(Prefab Bullet, int Wave, int Interval) : ISingleton
 <Accordion title="Components/Input.cs (new)">
 
 ```csharp title="Components/Input.cs" doccheck=example
+using System.Collections.Concurrent;
 using EasyEcs;
 
 namespace MyServer;
@@ -341,6 +348,11 @@ public readonly record struct FireCommand(float Vx, float Vy);
 
 // A command as data: FireSystem handles it on the next tick, then destroys it.
 public record struct FireRequest(float Vx, float Vy) : IComponent;
+
+// The mailbox from the network threads, set by the host. [NotSaved]: no save writes it
+// (a queue has no formatter), and a load keeps the one the host set.
+[NotSaved]
+public record struct Inbox(ConcurrentQueue<FireCommand> Commands) : ISingletonComponent;
 ```
 
 </Accordion>
@@ -360,7 +372,6 @@ public struct InputGroup : ISystemGroup;
 <Accordion title="Systems/ReceiveCommandsSystem.cs (new)">
 
 ```csharp title="Systems/ReceiveCommandsSystem.cs" doccheck=example
-using System.Collections.Concurrent;
 using EasyEcs;
 
 namespace MyServer;
@@ -368,18 +379,16 @@ namespace MyServer;
 // Turns every command waiting in the inbox into a FireRequest entity.
 // It runs on the world's thread, so creating entities here is safe; the network
 // threads only ever touch the queue.
-[UpdateInGroup<InputGroup>]
-public class ReceiveCommandsSystem(ConcurrentQueue<FireCommand> inbox) : EcsSystem
+[EcsSystem, UpdateInGroup<InputGroup>]
+public ref struct ReceiveCommandsSystem
 {
-    // The mailbox from the network threads. A readonly field is a dependency, not state
-    // (EECS007 allows it); a singleton would not do, since World.Save writes every singleton.
-    private readonly ConcurrentQueue<FireCommand> _inbox = inbox;
-
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_inbox.TryDequeue(out var command))
+        var commands = world.Inbox.Commands;
+        while (commands.TryDequeue(out var command))
         {
-            World.CreateEntity(new FireRequest(command.Vx, command.Vy));
+            world.CreateEntity(new FireRequest(command.Vx, command.Vy));
         }
     }
 }
@@ -395,7 +404,8 @@ namespace MyServer;
 
 // Fires one bullet per request, from the spawner's prefab; [Consume] destroys the requests after the pass.
 // Creating entities in the middle of the pass is safe.
-public class FireSystem : EcsSystem
+[EcsSystem]
+public ref struct FireSystem
 {
     [ForEach, Consume]                                       // each request goes after the pass
     static void Fire(World world, in FireRequest fire, in Spawner spawner)
@@ -415,12 +425,14 @@ namespace MyServer;
 
 // Spawns a wave of bullets from the spawner's prefab every Interval ticks.
 // The game's rules live in systems like this one, never in Program.cs.
-public class SpawnSystem : EcsSystem
+[EcsSystem]
+public ref struct SpawnSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        ref readonly var spawner = ref World.Spawner;
-        bool waveDue = World.Clock.Tick % spawner.Interval == 0;
+        ref readonly var spawner = ref world.Spawner;
+        bool waveDue = world.Clock.Tick % spawner.Interval == 0;
         if (!waveDue)
         {
             return;
@@ -428,7 +440,7 @@ public class SpawnSystem : EcsSystem
 
         for (int i = 0; i < spawner.Wave; i++)
         {
-            World.Instantiate(spawner.Bullet);
+            world.Instantiate(spawner.Bullet);
         }
     }
 }
@@ -445,7 +457,8 @@ namespace MyServer;
 // Moves every entity with a position and a velocity over one tick.
 // A [ForEach] method runs once per entity that has all of its component parameters:
 // `ref` for what it writes, `in` for what it reads. A singleton can be a parameter too.
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity, in Clock clock)
@@ -467,7 +480,8 @@ namespace MyServer;
 
 // Counts down every lifetime and destroys the entity when it runs out.
 // Destroying an entity in the middle of the pass is safe.
-public class LifetimeSystem : EcsSystem
+[EcsSystem]
+public ref struct LifetimeSystem
 {
     [ForEach]
     static void Age(Entity entity, ref Lifetime lifetime)
@@ -489,13 +503,15 @@ using EasyEcs;
 
 namespace MyServer;
 
-// Advances the clock once per update. OnUpdate runs once per update, not once per entity.
+// Advances the clock once per update. [OnUpdate] runs once per update, not once per entity.
 // Game.AddSystems adds it last, so every other system sees the tick the update started with.
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        World.Clock.Tick++;
+        world.Clock.Tick++;
     }
 }
 ```
@@ -516,7 +532,8 @@ public static class Game
     public static void AddSystems(World world, ConcurrentQueue<FireCommand> inbox)
     {
         // Input group: runs on world.Update<InputGroup>(), when the host reads input.
-        world.AddSystem(new ReceiveCommandsSystem(inbox));
+        world.SetInbox(inbox);
+        world.AddSystem<ReceiveCommandsSystem>();
 
         // Default group: the simulation, once per world.Update(), in this order.
         world.AddSystem<FireSystem>();
@@ -698,7 +715,7 @@ feature.
 | A game rule in `Program.cs` (a wave every second, a win condition) | It cannot be tested alone or ordered against the systems | Review: move it into a system that reads a singleton |
 | Program and tests adding the systems in different orders | The tests pass on a tick the server never runs | Share one `Game.AddSystems` |
 | A singleton set after the first update, or never | The first system that reads it throws `InvalidOperationException` naming it | The runtime, on the first update |
-| A system keeping a counter or a timer in a field | State no save, snapshot or test sees | [EECS007](/en/docs/guide/analyzer#eecs007) |
+| A system keeping a counter or a timer in a static field | State no save, snapshot or test sees | [EECS007](/en/docs/guide/analyzer#eecs007) |
 | The network thread creating entities itself | An exception from the structural gate, or torn tables when it misses the race | [EECS014](/en/docs/guide/analyzer#eecs014) when it can see it; post to the mailbox |
 | The test folder inside the server project | NUnit types compiled into the server | `<Compile Remove="MyServer.Tests\**"/>` (the template has it) |
 

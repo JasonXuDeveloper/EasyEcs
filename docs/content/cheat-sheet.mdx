@@ -61,10 +61,10 @@ Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an ent
 
 | Call | Does |
 | --- | --- |
-| `new World(options)` | An isolated world; `Dispose()` runs every `OnDestroy` |
+| `new World(options)` | An isolated world; `Dispose()` runs every `[OnDestroy]` |
 | `world.Update()` | Runs the default group's systems once |
 | `world.Update<TGroup>()` | Runs one system group |
-| `world.AddSystem<T>()` / `AddSystem(instance)` | Adds a system (runs `OnCreate`) |
+| `world.AddSystem<T>()` | Adds a system (runs `[OnCreate]`) |
 | `world.RemoveSystem<T>()` / `TryGetSystem<T>(out s)` / `Systems` | Removes, finds, lists systems |
 | `world.EntityCount` / `Entities` | Live entities and an allocation-free walk over them |
 | `world.ChangeTick` | The current change tick |
@@ -169,7 +169,8 @@ Guide: [Entities and components](/en/docs/guide/entities-and-components).
 ## Systems and [ForEach] [#systems]
 
 ```csharp title="MovementSystem.cs"
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Dead>]                         // once per entity with Position and Velocity, without Dead
     static void Move(ref Position p, in Velocity v)
@@ -230,7 +231,8 @@ bit
 | `[UpdateInGroup<G>]` | System | Runs on `world.Update<G>()` only |
 
 ```csharp
-public class DecaySystem : EcsSystem
+[EcsSystem]
+public ref struct DecaySystem
 {
     [ForEach(Slices = 4)]                            // a quarter of the rows per run, every row once per 4 runs
     static void Decay(ref Velocity v)
@@ -255,7 +257,7 @@ public struct Shop : IActorGroup<Shop>;             // the systems of [UpdateInG
 
 | Member | Does |
 | --- | --- |
-| `OnCreate()` / `OnUpdate()` / `OnDestroy()` | Lifecycle; `OnUpdate` runs before the `[ForEach]` methods |
+| `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` | Lifecycle; `[OnUpdate]` runs before the `[ForEach]` methods |
 | `World` | The system's world |
 | `[UpdateInterval(N, Phase = P)]` | Run every N-th update, on phase 0 to N-1 |
 | `Enabled` | Skip the system; setting `true` clears `Error` |
@@ -339,7 +341,8 @@ int changed = world.Count<Health>(QueryFilter.Create().Changed<Health>(mark));
 ```
 
 ```csharp tab="Mut<T>"
-public class ClampSystem : EcsSystem
+[EcsSystem]
+public ref struct ClampSystem
 {
     [ForEach]                                        // stamps only the rows it writes
     static void Clamp(Mut<Health> hp)

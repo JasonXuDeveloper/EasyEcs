@@ -100,7 +100,7 @@ world.Restore(history[(100 - 3) % Rollback.Ticks]);                             
   takes away (alive before it, not in the snapshot). The log itself is not part of a snapshot.
 
 Both calls take the structural gate and throw while a query iterates: call them between updates, or from a system's
-`OnUpdate` outside its `[ForEach]` methods. A snapshot belongs to the world it was taken from (`ArgumentException`
+`[OnUpdate]` outside its `[ForEach]` methods. A snapshot belongs to the world it was taken from (`ArgumentException`
 otherwise), and one taken before [`RemoveTypes`](/en/docs/guide/migration-and-unload#remove-types) cannot be restored
 after it (`InvalidOperationException`). It can be captured into again: `world.Capture(snapshot)` replaces every copy
 that belonged to a table `RemoveTypes` dropped, so a ring of snapshots kept across a reload goes on working once each
@@ -134,10 +134,12 @@ public struct PositionHistory : ISingletonComponent
 
 ```csharp tab="Systems.cs"
 // Copies this tick's hitbox positions into the ring.
-public class RecordPositions : EcsSystem
+[EcsSystem]
+public ref struct RecordPositions
 {
     // Once per tick, before the method below: the next frame of the ring.
-    protected override void OnUpdate() => World.PositionHistory.Tick++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.PositionHistory.Tick++;
 
     [ForEach, With<Hitbox>]
     static void Record(Entity entity, in Position at, ref PositionHistory history)
@@ -150,8 +152,8 @@ public class RecordPositions : EcsSystem
 }
 
 // Checks each shot against where its target stood at the shooter's tick.
-[UpdateAfter<RecordPositions>]
-public class ResolveShots : EcsSystem
+[EcsSystem, UpdateAfter<RecordPositions>]
+public ref struct ResolveShots
 {
     [ForEach, Consume]                                       // each shot goes after the pass
     static void Resolve(in Shot claim, in PositionHistory history, World world)
@@ -230,7 +232,8 @@ public struct Poisoned : IComponent;
 using EasyEcs;
 
 // Poisoned units lose 10 health a tick.
-public class PoisonSystem : EcsSystem
+[EcsSystem]
+public ref struct PoisonSystem
 {
     [ForEach, With<Poisoned>]
     static void Hurt(ref Health health)

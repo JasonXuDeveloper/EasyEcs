@@ -66,7 +66,8 @@ world.Update(); // Position is now (1, 0)
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
 
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach] // [!code highlight]
     static void Move(ref Position p, in Velocity v) => p = new(p.X + v.X, p.Y + v.Y);

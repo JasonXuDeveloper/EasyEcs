@@ -7,7 +7,7 @@ icon: ArrowRightLeft
 
 DefaultEcs keeps each component in its own pool and lets systems iterate entity sets; EasyEcs keeps entities with
 the same components together in tables and runs generated jobs over them. The port is mostly a change of shape: an
-`AEntitySetSystem` with `[With]` / `[Without]` attributes and a `World.GetComponents<T>()` loop becomes an `EcsSystem`
+`AEntitySetSystem` with `[With]` / `[Without]` attributes and a `World.GetComponents<T>()` loop becomes an `[EcsSystem]`
 with one `[ForEach]` method whose parameters are the components; an entity built with one `Set` per component is
 created with all of them at once; `WhenChanged<T>()` sets fed by `NotifyChanged<T>()` become `[Changed<T>]` methods
 with nothing to notify. The worked example is the real port in the repository:
@@ -33,7 +33,7 @@ dotnet add package EasyEcs
 | Any struct is a component | A struct implementing `IComponent` | Add the interface. |
 | A pool per component type | Archetype tables | An entity's components sit in one row; gaining a new one copies the row. |
 | `EntitySet` (`GetEntities().With<A>().AsSet()`) | Filters on a `[ForEach]` method, or a `QueryFilter` | No set to keep or dispose. |
-| `AEntitySetSystem<T>`, `AComponentSystem<T, C>` | `EcsSystem` with `[ForEach]` methods | The generator writes the loop and the component access. |
+| `AEntitySetSystem<T>`, `AComponentSystem<T, C>` | `[EcsSystem]` with `[ForEach]` methods | The generator writes the loop and the component access. |
 | `SequentialSystem<T>`, `ParallelSystem<T>` | `world.AddSystem<T>()`, `WorldOptions.ParallelSystems` | Order by registration or `[UpdateBefore<T>]` / `[UpdateAfter<T>]`. |
 | `World.Set<T>()` / `Get<T>()` | `ISingletonComponent` | A `ref` parameter of a `[ForEach]` method. |
 | `NotifyChanged<T>()` + `WhenChanged<T>()` | `ITracked` + `[Changed<T>]` | Every `ref` write is the change. |
@@ -117,7 +117,8 @@ public struct WorldStats : ISingletonComponent
 EasyEcs: the attributes become filters, the component lookups become parameters.
 
 ```csharp tab="EasyEcs" title="MovementSystem.cs"
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Stunned>, Without<Dead>]
     static void Move(ref Position p, in Velocity v)
@@ -157,7 +158,8 @@ they are: a method that destroys takes the `Entity`, one that creates takes the 
 with all its components at once.
 
 ```csharp title="ProjectileSystems.cs"
-public class LifetimeSystem : EcsSystem
+[EcsSystem]
+public ref struct LifetimeSystem
 {
     [ForEach]
     static void Expire(Entity entity, ref Lifetime lifetime)
@@ -166,7 +168,8 @@ public class LifetimeSystem : EcsSystem
     }
 }
 
-public class ShootingSystem : EcsSystem
+[EcsSystem]
+public ref struct ShootingSystem
 {
     [ForEach, With<Player>, Without<Dead>]
     static void Shoot(Entity shooter, in Position p, in Velocity v, ref WorldStats stats, World world)
@@ -191,7 +194,8 @@ EasyEcs: mark the component tracked; every write through a `ref` is the change.
 public record struct Hp(int Value) : IComponent, ITracked;
 public record struct Replica(int Value) : IComponent;
 
-public class Replication : EcsSystem
+[EcsSystem]
+public ref struct Replication
 {
     [ForEach, Changed<Hp>]
     static void Copy(in Hp hp, ref Replica replica) => replica = new Replica(hp.Value);

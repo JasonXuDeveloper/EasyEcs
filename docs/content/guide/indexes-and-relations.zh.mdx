@@ -315,7 +315,8 @@ knight.Unlink<MemberOf>(blue);                                // 退出 blue
 ```csharp
 public record struct PartyCount(int Parties) : IComponent;
 
-public class CountParties : EcsSystem
+[EcsSystem]
+public ref struct CountParties
 {
     [ForEach]
     static void Count(in DynamicBuffer<MemberOf> parties, ref PartyCount count) => count = new PartyCount(parties.Count);
@@ -417,7 +418,8 @@ bool stillLinked = ben.Links<Friend>(ana);                 // false
 ```csharp
 public record struct Hazard(int Zone, int Damage) : IComponent;
 
-public class BurnZones : EcsSystem
+[EcsSystem]
+public ref struct BurnZones
 {
     [ForEach]
     static void Burn(in Hazard hazard, World world)

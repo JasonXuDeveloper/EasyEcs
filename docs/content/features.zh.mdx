@@ -39,7 +39,8 @@ public record struct Armor(int Value) : IComponent;
 public struct Dead : IComponent;
 public record struct Clock(float Dt) : ISingletonComponent;
 
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Dead>]
     static void Move(ref Position p, in Velocity v, in Clock clock)
@@ -100,22 +101,23 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 
 ### 系统与 [ForEach] [#systems-and-foreach]
 
-系统继承 `EcsSystem`，只做一件事。`[ForEach]` 方法就是它的整个循环，参数可以是组件（`ref` 写、`in` 读）、单例、`Entity` 和 `World`。
-生成器把每个方法编译成结构体 job，JIT 把它内联到行循环里。`OnCreate`、`OnUpdate` 和 `OnDestroy` 负责初始化和每次更新的额外工作。
+系统是一个只有静态方法的 `[EcsSystem] ref struct`，只做一件事，从来不是对象。`[ForEach]` 方法就是它的整个循环，参数可以是组件（`ref` 写、`in` 读）、单例、`Entity` 和 `World`。
+生成器把每个方法编译成结构体 job，JIT 把它内联到行循环里。标了 `[OnCreate]`、`[OnUpdate]` 和 `[OnDestroy]` 的静态方法负责初始化和每次更新的额外工作；World 为每个系统保存一条记录
+（启用、错误、tick、统计），并给出指向它的 `SystemHandle`。
 
 - **适合：** 一个 tick 里所有逐实体的逻辑。
 - **开销：** 把 `Velocity` 加到 `Position` 的 `[ForEach]` 系统，每个实体 <BenchValue k="forEach.perEntity" />；同样的循环手写在两个普通数组上是
-  <BenchValue k="rawArray.perEntity" />。每个系统每次更新：三次虚调用，加每个方法一次查询缓存查找。
+  <BenchValue k="rawArray.perEntity" />。每个系统每次更新：所在程序集的系统集合直接调用一次（没有虚调用），每个方法一次遍历，直接读按 job 类型保存的查询。
 - **指南：** [系统](/zh/docs/guide/systems)、[ECS 设计原则](/zh/docs/ecs-principles)
 
 ### 泛型系统 [#generic-systems]
 
-系统类可以是泛型的：每个闭合类型（`CountOf<Position>`、`CountOf<Health>`）都是一个独立的系统，有自己生成的 job 和读写集合，
-各自添加、排序、调度。闭合的泛型系统也可以当基类。
+系统可以是泛型的：每个封闭类型（`CountOf<Position>`、`CountOf<Health>`）都是一个独立的系统，有自己生成的 job 和读写集合，
+各自添加、排序、调度。系统之间就靠它或静态辅助方法共享代码：ref struct 没有基类。
 
 - **适合：** 同一条规则作用于几种组件类型（计数、衰减、按资源种类清理）。
-- **别用于：** 泛型的 `[ForEach]` 方法：没人能给它提供类型实参（[EECS004](/zh/docs/guide/analyzer#eecs004)）；把类做成泛型。
-- **开销：** 除了闭合出来的系统本身没有额外开销；靠反射构造的类型在第一次用到时才闭合代码。
+- **别用于：** 泛型的 `[ForEach]` 方法：没人能给它提供类型实参（[EECS004](/zh/docs/guide/analyzer#eecs004)）；把系统做成泛型。
+- **开销：** 除了封闭出来的系统本身没有额外开销。它们的代码写进点名它们的程序集，Native AOT 和 WebAssembly 也能跑；只有靠反射构造的封闭类型没有代码（`AddSystem` 抛异常）。
 - **指南：** [系统](/zh/docs/guide/systems#generic-systems)
 
 ### 过滤条件 [#filters]
@@ -240,7 +242,8 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 ```csharp
 public record struct Replica(int Health) : IComponent;
 
-public class ReplicationSystem : EcsSystem
+[EcsSystem]
+public ref struct ReplicationSystem
 {
     [ForEach, Changed<Health>]                       // 只访问本系统上次执行后被写过的行
     static void Send(in Health hp, ref Replica replica) => replica = new Replica(hp.Value);

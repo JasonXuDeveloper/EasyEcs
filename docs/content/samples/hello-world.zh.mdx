@@ -29,7 +29,7 @@ dotnet run --project samples/HelloWorld
 
 [系统](/zh/docs/guide/systems)各管一件事，自己不存状态。`[ForEach]` 方法对每个具备其组件参数的实体跑一次：`ref` 表示要写，
 `in` 表示只读。`MoveSystem` 移动所有有位置和速度的实体，`ReportSystem` 只打印玩家（`[With<Player>]` 是一个
-[过滤条件](/zh/docs/guide/queries#filters)），`ClockSystem` 在 `OnUpdate` 里每次更新推进一次时钟，而不是每个实体一次。
+[过滤条件](/zh/docs/guide/queries#filters)），`ClockSystem` 在 `[OnUpdate]` 里每次更新推进一次时钟，而不是每个实体一次。
 
 <include lang="csharp" meta='title="Systems.cs"'>../../../samples/HelloWorld/Systems.cs</include>
 

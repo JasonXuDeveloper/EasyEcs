@@ -68,12 +68,13 @@ foreach (var table in world.DescribeTables())
 
 ### 给每个系统计时 [#timing]
 
-打开 `WorldOptions.MeasureSystems` 后，每个系统的每次运行（`OnUpdate` 加上它的 `[ForEach]` 方法）都会被统计：`system.Stats`
+打开 `WorldOptions.MeasureSystems` 后，每个系统的每次运行（`[OnUpdate]` 加上它的 `[ForEach]` 方法）都会被统计：`system.Stats`
 里有 `Runs`、`LastTime`、`TotalTime`、`AverageTime`，还有下面的字节数和实体数。`world.Systems` 列出所有系统且不分配内存，状态页可以直接找出最慢的那个
 （[统计系统耗时](/zh/docs/guide/systems#measuring-systems)）。
 
 ```csharp
-public class RegenSystem : EcsSystem
+[EcsSystem]
+public ref struct RegenSystem
 {
     [ForEach]
     static void Regen(ref Health health) => health.Value++;
@@ -85,7 +86,7 @@ using var measured = new World(new WorldOptions { MeasureSystems = true });
 measured.AddSystem<RegenSystem>();
 measured.Update();
 foreach (var system in measured.Systems)
-    Console.WriteLine($"{system.GetType().Name}: last {system.Stats.LastTime.TotalMicroseconds} μs");
+    Console.WriteLine($"{system.Name}: last {system.Stats.LastTime.TotalMicroseconds} μs");
 ```
 
 每次运行还会记下分配了多少内存、访问了多少实体。状态页不光能找出最慢的系统，还能找出在制造垃圾的系统，或者人口涨了的系统：
@@ -98,14 +99,14 @@ foreach (var system in measured.Systems)
 实体数怎么理解：
 
 - **开始时匹配的数量，不是逐个访问的数量。** 会改结构的遍历里，这是个上限：轮到之前就被销毁或移走的实体算进去了，但没被访问。
-- **只算 `[ForEach]` 方法。** `OnUpdate` 里的查询和循环不算。
+- **只算 `[ForEach]` 方法。** `[OnUpdate]` 里的查询和循环不算。
 - **分片的方法只报自己那一份。** `[ForEach(Slices = N)]` 方法报的是匹配数除以 N（[分片](/zh/docs/guide/systems#slices)）。
 
 ```csharp
 foreach (var system in measured.Systems)
 {
     var stats = system.Stats;
-    Console.WriteLine($"{system.GetType().Name}: {stats.LastTime.TotalMicroseconds} μs, " +
+    Console.WriteLine($"{system.Name}: {stats.LastTime.TotalMicroseconds} μs, " +
                       $"{stats.LastAllocated} B, {stats.LastEntities} entities");
 }
 ```
@@ -123,7 +124,8 @@ foreach (var system in measured.Systems)
 public record struct Poisoned(int DamagePerTick) : IComponent;
 public record struct NetPosition(float X, float Y) : IComponent;   // 上次发给客户端的位置
 
-public class MoveSystem : EcsSystem
+[EcsSystem]
+public ref struct MoveSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)
@@ -133,14 +135,15 @@ public class MoveSystem : EcsSystem
     }
 }
 
-[UpdateAfter<RegenSystem>]
-public class PoisonSystem : EcsSystem
+[EcsSystem, UpdateAfter<RegenSystem>]
+public ref struct PoisonSystem
 {
     [ForEach]
     static void Hurt(ref Health health, in Poisoned poisoned) => health.Value -= poisoned.DamagePerTick;
 }
 
-public class ReplicateSystem : EcsSystem
+[EcsSystem]
+public ref struct ReplicateSystem
 {
     [ForEach]
     static void Copy(in Position position, ref NetPosition sent) => sent = new NetPosition(position.X, position.Y);
@@ -176,7 +179,7 @@ Group Default
 `MoveSystem` 写的 `Position`：没有任何特性规定它们的先后，复制发出去的是这个 tick 还是上个 tick 的位置，取决于它们是按什么
 顺序加进来的。这就是**只靠注册顺序的系统对**：两个系统有冲突，又没有任何一条 `[UpdateBefore]` / `[UpdateAfter]` 链给它们排序。
 反过来注册，后跑的那个看到的数据就变了，所以每一对都要给出它需要的顺序，这里是在 `ReplicateSystem` 上加
-`[UpdateAfter<MoveSystem>]`。`RunsAlone` 的系统（有 `OnUpdate`、`World` 参数、`[Consume]` 方法，或不只当身份用的 `Entity`）和所有系统都冲突，显示为 `runs alone`。
+`[UpdateAfter<MoveSystem>]`。`RunsAlone` 的系统（有 `[OnUpdate]`、`World` 参数、`[Consume]` 方法，或不只当身份用的 `Entity`）和所有系统都冲突，显示为 `runs alone`。
 
 `server.DescribeSchedule().ToMermaid()` 把同一份调度画成流程图：每个组、每个阶段一个子图，每个等待是一条实线箭头，标着冲突的
 数据，每个只靠注册顺序的系统对是一条虚线箭头：
@@ -224,7 +227,7 @@ public sealed class SystemMetrics : IDisposable
         _tags = new KeyValuePair<string, object>[_stats.Length][];
         int i = 0;
         foreach (var system in world.Systems)
-            _tags[i++] = [new KeyValuePair<string, object>("system", system.GetType().Name)];
+            _tags[i++] = [new KeyValuePair<string, object>("system", system.Name)];
 
         _meter.CreateObservableGauge<double>("ecs.system.duration",
             () => Read(static stats => stats.LastTime.TotalMilliseconds), unit: "ms");
@@ -301,7 +304,7 @@ using var guarded = new World(new WorldOptions { SystemErrors = SystemErrorPolic
 guarded.AddSystem<RegenSystem>();
 guarded.Update();
 foreach (var system in guarded.Systems)
-    if (system.Error is { } error) Console.Error.WriteLine($"{system.GetType().Name} is off: {error.Message}");
+    if (system.Error is { } error) Console.Error.WriteLine($"{system.Name} is off: {error.Message}");
 ```
 
 ### 在哪个线程读 [#threads]
@@ -334,7 +337,8 @@ public record struct Cooldown(int Ticks) : IComponent;
 ```csharp title="Systems.cs" doccheck=example
 using EasyEcs;
 
-public class MoveSystem : EcsSystem
+[EcsSystem]
+public ref struct MoveSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)
@@ -345,7 +349,8 @@ public class MoveSystem : EcsSystem
 }
 
 // 一个待查的 bug：冷却结束时应该移除组件，这里却抛了异常。
-public class CooldownSystem : EcsSystem
+[EcsSystem]
+public ref struct CooldownSystem
 {
     [ForEach]
     static void Tick(ref Cooldown cooldown)
@@ -434,7 +439,7 @@ public static class Diagnostics
     {
         foreach (var system in world.Systems)
         {
-            string name = system.GetType().Name;
+            string name = system.Name;
             string state = system.Error is { } error ? $"off: {error.Message}" : "on";
             Console.WriteLine($"{name}: {system.Stats.Runs} runs, {state}");
         }
@@ -507,7 +512,7 @@ CooldownSystem: 3 runs, off: a cooldown went below zero
 | 每个 tick 都调 `TrimExcess()` | 表被丢掉又重建，扩容重新付一遍：tick 上出现分配 | 放进维护任务里调（[常见错误](/zh/docs/guide/common-mistakes#trim-every-tick)） |
 | 在 `Query` 循环或 `[ForEach]` 方法里调 `TrimExcess()` | `InvalidOperationException` | [EECS041](/zh/docs/guide/analyzer#eecs041)：在两次更新之间调 |
 | 在导出器的线程上读 `system.Stats` | tick 正在写的结构体被读到一半 | 在所有者线程上发布一份拷贝 |
-| 以为 `LastEntities` 会算上 `OnUpdate` 里的查询 | 只统计 `[ForEach]` 遍历 | 真需要就在 `OnUpdate` 里自己数 |
+| 以为 `LastEntities` 会算上 `[OnUpdate]` 里的查询 | 只统计 `[ForEach]` 遍历 | 真需要就在 `[OnUpdate]` 里自己数 |
 | 调度里留着只靠注册顺序的系统对 | 调换 `AddSystem` 的顺序，系统看到的数据就变了 | 加上 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |
 | 测试里也开着 `SystemErrorPolicy.Disable` | 出错的系统悄悄停掉，测试却在检查别的东西 | 测试里保持默认的 `Throw`（[测试](/zh/docs/guide/testing#errors)） |
 | 日志里只记 `entity.Id.Index` | 下标会被之后的实体复用 | 记实体本身或它的 `EntityId`（`1000v1`） |

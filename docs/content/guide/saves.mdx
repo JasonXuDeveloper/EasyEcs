@@ -141,7 +141,8 @@ public static class Restart
     public static readonly ComponentSet Runtime = Startup.With<Connection>();
 }
 
-public class SaveBalances : EcsSystem
+[EcsSystem]
+public ref struct SaveBalances
 {
     [ForEach, Changed<Balance>]
     private static void Save(ref Outbox outbox) => outbox.Records++;   // one record per changed balance
@@ -271,7 +272,8 @@ public record struct Workshop(int Recipe, int Progress, int Queue) : IComponent;
 
 // Runs in the build that knows both types: every loaded Crafting becomes a Workshop.
 // A later build deletes Crafting and this system.
-public class UpgradeCrafting : EcsSystem
+[EcsSystem]
+public ref struct UpgradeCrafting
 {
     [ForEach]
     static void Upgrade(Entity player, in Crafting old)

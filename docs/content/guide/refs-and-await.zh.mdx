@@ -60,7 +60,8 @@ entity.Get<Health>().Value -= 10;      // 同上，用泛型 API
 ```csharp
 public record struct Target(EntityId Id) : IComponent;
 
-public class StrikeSystem : EcsSystem
+[EcsSystem]
+public ref struct StrikeSystem
 {
     [ForEach, Without<Dead>]
     static void Strike(Entity attacker, in Target target, World world)
@@ -112,27 +113,31 @@ using System.Collections.Concurrent;
 
 public record struct PotionRedeemed(EntityId Player, int Heal);   // 消息，不是组件
 
-// 队列是放在 readonly 字段里的依赖，EECS007 允许这样做。托管队列放进单例的话，
-// World.Save 就得为它准备一个格式化器。
-public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : EcsSystem
-{
-    private readonly ConcurrentQueue<PotionRedeemed> _inbox = inbox;   // 任何线程上的异步代码都可以往里放
+// 队列放在宿主设置的 [NotSaved] 单例里：存档不会写它，所以托管队列不需要格式化器，
+// 读档也保留它。
+[NotSaved]
+public record struct RedemptionInbox(ConcurrentQueue<PotionRedeemed> Queue) : ISingletonComponent;
 
-    protected override void OnUpdate()
+[EcsSystem]
+public ref struct ApplyRedemptions
+{
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_inbox.TryDequeue(out var done))
-            if (World.TryGetEntity(done.Player, out var player) && player.HasHealth)
+        var queue = world.RedemptionInbox.Queue;                              // 任何线程上的异步代码都可以往里放
+        while (queue.TryDequeue(out var done))
+            if (world.TryGetEntity(done.Player, out var player) && player.HasHealth)
                 player.Health.Value += done.Heal;                     // 在所有者线程上、更新过程中执行
     }
 }
 ```
 
-这个系统通过构造函数拿到队列，`AddSystem<T>()` 没法创建它，要添加一个实例。异步那一侧在所有者线程上读出需要的数据，
-之后只往队列里放：
+宿主在添加系统时顺便设置一次队列。异步那一侧在所有者线程上读出需要的数据，之后只往队列里放：
 
 ```csharp
 var inbox = new ConcurrentQueue<PotionRedeemed>();
-world.AddSystem(new ApplyRedemptions(inbox));
+world.SetRedemptionInbox(inbox);
+world.AddSystem<ApplyRedemptions>();
 ```
 
 ```csharp
@@ -223,20 +228,24 @@ public static class Redemptions
 using System.Collections.Concurrent;
 using EasyEcs;
 
-// 在所有者线程上、更新过程中应用兑换结果。
-// 队列是放在 readonly 字段里的依赖（EECS007 允许）；托管队列放进单例的话，
-// World.Save 就得为它准备一个格式化器。
-public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : EcsSystem
-{
-    private readonly ConcurrentQueue<PotionRedeemed> _inbox = inbox;
+// 宿主设置的队列：[NotSaved] 单例，存档不会写它，
+// 托管队列也就不需要格式化器。
+[NotSaved]
+public record struct RedemptionInbox(ConcurrentQueue<PotionRedeemed> Queue) : ISingletonComponent;
 
-    protected override void OnUpdate()
+// 在所有者线程上、更新过程中应用兑换结果。
+[EcsSystem]
+public ref struct ApplyRedemptions
+{
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_inbox.TryDequeue(out var done))
+        var queue = world.RedemptionInbox.Queue;
+        while (queue.TryDequeue(out var done))
         {
             // EntityId 带着版本号：已销毁的玩家在这里查不到，
             // 复用了它索引的新实体也查不到。
-            if (World.TryGetEntity(done.Player, out var player) && player.HasHealth)
+            if (world.TryGetEntity(done.Player, out var player) && player.HasHealth)
             {
                 player.Health.Value += done.Heal;
             }
@@ -260,8 +269,9 @@ var inbox = new ConcurrentQueue<PotionRedeemed>();
 var shop = new Shop();
 
 using var world = new World();
-// 系统通过构造函数拿到队列，所以要添加一个实例。
-world.AddSystem(new ApplyRedemptions(inbox));
+// 队列作为数据放进 World，系统从那里读它。
+world.SetRedemptionInbox(inbox);
+world.AddSystem<ApplyRedemptions>();
 
 var alice = world.CreateEntity(new Health(40), new Account(1));
 var bob = world.CreateEntity(new Health(60), new Account(2));

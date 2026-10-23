@@ -142,7 +142,8 @@ of the spike for `Slices = 4`:
 ```csharp
 public record struct Wander(float TargetX, float TargetY) : IComponent;
 
-public class ThinkSystem : EcsSystem
+[EcsSystem]
+public ref struct ThinkSystem
 {
     // 100,000 NPCs: a quarter of them think per tick, each one every fourth tick.
     [ForEach(Slices = 4)]
@@ -207,15 +208,20 @@ using System.Threading.Channels;
 
 public readonly record struct SpawnRequest(float X, float Y, TaskCompletionSource<EntityId> Reply);
 
-public sealed class ReceiveSpawns(ChannelReader<SpawnRequest> requests) : EcsSystem
-{
-    private readonly ChannelReader<SpawnRequest> _requests = requests;   // a dependency: allowed (EECS007)
+// The world's end of the channel: a singleton no save holds (a channel has no formatter).
+[NotSaved]
+public record struct SpawnInbox(ChannelReader<SpawnRequest> Requests) : ISingletonComponent;
 
-    protected override void OnUpdate()
+[EcsSystem]
+public ref struct ReceiveSpawns
+{
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_requests.TryRead(out var request))
+        var requests = world.SpawnInbox.Requests;
+        while (requests.TryRead(out var request))
         {
-            var unit = World.CreateEntity(new Position(request.X, request.Y));
+            var unit = world.CreateEntity(new Position(request.X, request.Y));
             request.Reply.TrySetResult(unit.Id);                       // answer with an id, never a handle
         }
     }
@@ -229,8 +235,8 @@ of the values: an `Entity` handle used by the handler later would touch the worl
 Bound the channel (`Channel.CreateBounded`) so a world that falls behind slows its callers down
 (`BoundedChannelFullMode.Wait`) or refuses them (`DropWrite`, `TryWrite` returning false) instead of growing without
 limit. The [threading guide](/en/docs/guide/threading#input-from-other-threads) shows the same pattern with a plain
-`ConcurrentQueue<T>`. The reader lives in a `readonly` field of the system, not in a singleton: `World.Save` writes
-every singleton, and a channel has no formatter.
+`ConcurrentQueue<T>`. The reader lives in a [`[NotSaved]`](/en/docs/guide/saves#not-saved) singleton the host sets:
+no save writes it, so the channel needs no formatter, and a load keeps the world's own.
 
 On shutdown, complete the writer (`requests.Writer.TryComplete()`) after the last tick, then answer what is still in
 the channel. A handler that writes after that gets a `ChannelClosedException` at once instead of a reply that never
@@ -252,15 +258,19 @@ public static class Heals
     static void Heal(ref Health health, int amount) => health.Value += amount;
 }
 
-public sealed class ReceiveHeals(ChannelReader<HealRequest> requests) : EcsSystem
-{
-    private readonly ChannelReader<HealRequest> _requests = requests;
+[NotSaved]
+public record struct HealInbox(ChannelReader<HealRequest> Requests) : ISingletonComponent;   // its own channel
 
-    protected override void OnUpdate()
+[EcsSystem]
+public ref struct ReceiveHeals
+{
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_requests.TryRead(out var request))
+        var requests = world.HealInbox.Requests;
+        while (requests.TryRead(out var request))
         {
-            bool healed = World.TryGetEntity(request.Unit, out var unit)
+            bool healed = world.TryGetEntity(request.Unit, out var unit)
                 && Heals.Heal(unit, request.Amount);                       // false: gone, dead or no Health
             request.Reply.TrySetResult(healed);
         }
@@ -286,13 +296,16 @@ public sealed class StatusBoard
     public void Publish(ArenaStatus status) => Volatile.Write(ref _current, status);
 }
 
-[UpdateInterval(20)]                                                   // once a second at 20 Hz
-public sealed class PublishStatus(StatusBoard board) : EcsSystem
-{
-    private readonly StatusBoard _board = board;
+// The board, set by the host: a [NotSaved] singleton like the inbox.
+[NotSaved]
+public record struct Publisher(StatusBoard Board) : ISingletonComponent;
 
-    protected override void OnUpdate() =>
-        _board.Publish(new ArenaStatus(World.DefaultUpdateCount, World.Count<Position>()));
+[EcsSystem, UpdateInterval(20)]                                        // once a second at 20 Hz
+public ref struct PublishStatus
+{
+    [OnUpdate]
+    static void OnUpdate(World world) =>
+        world.Publisher.Board.Publish(new ArenaStatus(world.DefaultUpdateCount, world.Count<Position>()));
 }
 ```
 
@@ -429,6 +442,14 @@ public readonly record struct SpawnRequest(float X, float Y, TaskCompletionSourc
 // What request handlers read: an immutable copy the world's thread publishes.
 public sealed record ArenaStatus(long Tick, int Units);
 
+// The world's ends of the two: singletons no save holds (a channel and a board have no formatter),
+// and that a load leaves as the host set them.
+[NotSaved]
+public record struct SpawnInbox(ChannelReader<SpawnRequest> Requests) : ISingletonComponent;
+
+[NotSaved]
+public record struct Publisher(StatusBoard Board) : ISingletonComponent;
+
 // The one object both sides share: the world's thread writes it, any thread reads it.
 public sealed class StatusBoard
 {
@@ -448,22 +469,23 @@ using System.Threading.Channels;
 using EasyEcs;
 
 // Turns the requests that arrived since the last tick into units, on the world's thread.
-public sealed class ReceiveSpawns(ChannelReader<SpawnRequest> requests) : EcsSystem
+[EcsSystem]
+public ref struct ReceiveSpawns
 {
-    // A dependency, not state: readonly fields are allowed (EECS007).
-    private readonly ChannelReader<SpawnRequest> _requests = requests;
-
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_requests.TryRead(out var request))
+        var requests = world.SpawnInbox.Requests;
+        while (requests.TryRead(out var request))
         {
-            var unit = World.CreateEntity(new Position(request.X, request.Y), new Velocity(1, 0));
+            var unit = world.CreateEntity(new Position(request.X, request.Y), new Velocity(1, 0));
             request.Reply.TrySetResult(unit.Id);
         }
     }
 }
 
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity, in Clock clock)
@@ -473,20 +495,21 @@ public class MovementSystem : EcsSystem
     }
 }
 
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate() => World.Clock.Tick++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.Clock.Tick++;
 }
 
 // Copies what request handlers may read, once a second at 20 ticks per second.
-[UpdateInterval(20)]
-public sealed class PublishStatus(StatusBoard board) : EcsSystem
+[EcsSystem, UpdateInterval(20)]
+public ref struct PublishStatus
 {
-    private readonly StatusBoard _board = board;
-
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        _board.Publish(new ArenaStatus(World.Clock.Tick, World.Count<Position>()));
+        world.Publisher.Board.Publish(new ArenaStatus(world.Clock.Tick, world.Count<Position>()));
     }
 }
 ```
@@ -525,11 +548,15 @@ public sealed class Arena : IDisposable
             _world.SetClock(Tick: 0, DeltaTime: 1f / TicksPerSecond);
         }
 
+        // The world's connections to the handlers: [NotSaved], so a load keeps them.
+        _world.SetSpawnInbox(requests.Reader);
+        _world.SetPublisher(board);
+
         // Registration order is the tick's order.
-        _world.AddSystem(new ReceiveSpawns(requests.Reader));
+        _world.AddSystem<ReceiveSpawns>();
         _world.AddSystem<MovementSystem>();
         _world.AddSystem<ClockSystem>();
-        _world.AddSystem(new PublishStatus(board));
+        _world.AddSystem<PublishStatus>();
     }
 
     public async Task RunAsync(CancellationToken stop)

@@ -81,7 +81,8 @@ foreach (var p in players) p.WriteLoot().EnsureCapacity(8);   // room for a full
 The writing methods take the buffer by `ref`, so the write is stamped like any write of a tracked component.
 
 ```csharp title="Pickup.cs"
-public class Pickup : EcsSystem
+[EcsSystem]
+public ref struct Pickup
 {
     [ForEach, With<Player>]
     static void Collect(ref DynamicBuffer<Loot> bag) // [!code highlight]
@@ -101,7 +102,8 @@ A `[Changed<DynamicBuffer<Loot>>]` method visits only the bags written since its
 `in`, which is not a write.
 
 ```csharp title="SendBags.cs"
-public class SendBags : EcsSystem
+[EcsSystem]
+public ref struct SendBags
 {
     [ForEach, Changed<DynamicBuffer<Loot>>] // [!code highlight]
     static void Send(in DynamicBuffer<Loot> bag, ref Sent sent)
@@ -182,7 +184,8 @@ with no span to fill first and no copy:
 public record struct Waypoint(float X, float Y);
 public record struct Destination(float X, float Y) : IComponent, ITracked;
 
-public class PathSystem : EcsSystem
+[EcsSystem]
+public ref struct PathSystem
 {
     const int Steps = 8;
 
@@ -209,7 +212,8 @@ the cache. A computation that writes each element once still writes straight int
 ```csharp
 public record struct Shade(byte Level);
 
-public class ShadeSystem : EcsSystem
+[EcsSystem]
+public ref struct ShadeSystem
 {
     const int Cells = 256;                                     // a 16 × 16 column
     const int Layers = 32;
@@ -358,7 +362,8 @@ public record struct Synced(int Bags) : ISingletonComponent;
 using EasyEcs;
 
 // Every collector picks up the next item. A full bag drops its oldest item first.
-public class PickupSystem : EcsSystem
+[EcsSystem]
+public ref struct PickupSystem
 {
     const int BagSize = 4;
 
@@ -377,8 +382,8 @@ public class PickupSystem : EcsSystem
 }
 
 // Sends only the bags written since this system last ran.
-[UpdateAfter<PickupSystem>]
-public class SyncBagsSystem : EcsSystem
+[EcsSystem, UpdateAfter<PickupSystem>]
+public ref struct SyncBagsSystem
 {
     [ForEach, Changed<DynamicBuffer<Loot>>]
     static void Sync(ref Synced synced)

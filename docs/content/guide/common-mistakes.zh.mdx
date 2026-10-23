@@ -70,7 +70,8 @@ if (world.TryGetEntity(item.Owner.Id, out var owner)) { /* 还活着 */ }
 ```csharp
 public record struct Mobility(bool Rooted) : IComponent;
 
-public class MoveRooted : EcsSystem
+[EcsSystem]
+public ref struct MoveRooted
 {
     [ForEach] static void Move(ref Position p, in Velocity v, in Mobility m)
     {
@@ -85,7 +86,8 @@ public class MoveRooted : EcsSystem
 ```csharp
 public struct Rooted : IComponent;
 
-public class MoveFree : EcsSystem
+[EcsSystem]
+public ref struct MoveFree
 {
     [ForEach, Without<Rooted>]                 // 被定身的实体根本不会被访问
     static void Move(ref Position p, in Velocity v) { p.X += v.X; p.Y += v.Y; }
@@ -160,21 +162,26 @@ world.SetRound(2, 0);              // 下一回合，从 tick 0 开始
 ### 系统里存状态 [#state-in-system]
 
 ```csharp doccheck=expect-EECS007
-public class WaveSystem : EcsSystem
+[EcsSystem]
+public ref struct WaveSystem
 {
-    private int _wave;
-    protected override void OnUpdate() => _wave++;
+    static int _wave;
+
+    [OnUpdate]
+    static void OnUpdate() => _wave++;
 }
 ```
 
-这个字段别的代码读不到、存不了档、拍不了快照，系统一移除就没了。每个 World 一份的状态放进单例：
+这个字段别的代码读不到、存不了档、拍不了快照，所有 World 共用它，系统移除后它还在。每个 World 一份的状态放进单例：
 
 ```csharp
 public record struct Wave(int Number) : ISingletonComponent;
 
-public class WaveSystem : EcsSystem
+[EcsSystem]
+public ref struct WaveSystem
 {
-    protected override void OnUpdate() => World.GetOrAddWave().Number++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.GetOrAddWave().Number++;
 }
 ```
 
@@ -183,11 +190,13 @@ public class WaveSystem : EcsSystem
 ### 一个系统调用另一个系统 [#system-calls-system]
 
 ```csharp doccheck=expect-EECS008
-public class LootSystem : EcsSystem { }
+[EcsSystem] public ref struct LootSystem { }
 
-public class KillRewards : EcsSystem
+[EcsSystem]
+public ref struct KillRewards
 {
-    protected override void OnUpdate() { if (World.TryGetSystem(out LootSystem loot)) loot.Enabled = false; }
+    [OnUpdate]
+    static void OnUpdate(World world) { if (world.TryGetSystem<LootSystem>(out var loot)) loot.Enabled = false; }
 }
 ```
 
@@ -196,13 +205,15 @@ public class KillRewards : EcsSystem
 ```csharp
 public struct Looted : IComponent;
 
-public class LootSystem : EcsSystem
+[EcsSystem]
+public ref struct LootSystem
 {
-    protected override void OnUpdate() => World.SetAll(new Looted(), QueryFilter.Create().With<Dead>().Without<Looted>());
+    [OnUpdate]
+    static void OnUpdate(World world) => world.SetAll(new Looted(), QueryFilter.Create().With<Dead>().Without<Looted>());
 }
 
-[UpdateAfter<LootSystem>]
-public class KillRewards : EcsSystem
+[EcsSystem, UpdateAfter<LootSystem>]
+public ref struct KillRewards
 {
     [ForEach, With<Looted>]
     static void Reward(in Health hp) { }
@@ -218,7 +229,8 @@ public record struct Speed(float Value) : IComponent;
 ```
 
 ```csharp doccheck=expect-EECS025
-public class Throttle : EcsSystem
+[EcsSystem]
+public ref struct Throttle
 {
     [ForEach] static void Apply(ref Velocity v, ref Speed max)   // max 只是读
     {
@@ -232,7 +244,8 @@ public class Throttle : EcsSystem
 每一行还会被算作改过。只读就用 `in`：
 
 ```csharp
-public class Throttle : EcsSystem
+[EcsSystem]
+public ref struct Throttle
 {
     [ForEach] static void Apply(ref Velocity v, in Speed max)
     {
@@ -250,7 +263,8 @@ public class Throttle : EcsSystem
 public record struct Gold(int Amount) : IComponent;
 public record struct Hud(int Gold) : IComponent;
 
-public class ShowGold : EcsSystem
+[EcsSystem]
+public ref struct ShowGold
 {
     [ForEach, Changed<Gold>] static void Show(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
 }
@@ -262,7 +276,8 @@ public class ShowGold : EcsSystem
 public record struct Gold(int Amount) : IComponent, ITracked;
 public record struct Hud(int Gold) : IComponent;
 
-public class ShowGold : EcsSystem
+[EcsSystem]
+public ref struct ShowGold
 {
     [ForEach, Changed<Gold>] static void Show(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
 }
@@ -292,7 +307,8 @@ public record struct Facing(int Direction) : IComponent, ITracked;   // 值变�
 ```
 
 ```csharp
-public class Face : EcsSystem
+[EcsSystem]
+public ref struct Face
 {
     [ForEach]
     static void Turn(ref Facing facing, in Velocity velocity)      // 访问到的每一行都打 tick
@@ -308,7 +324,8 @@ public class Face : EcsSystem
 `Mut<T>`：它只给写入的行打 tick，`SetIfChanged` 只在值不同时才写：
 
 ```csharp
-public class Face : EcsSystem
+[EcsSystem]
+public ref struct Face
 {
     [ForEach]
     static void Turn(Mut<Facing> facing, in Velocity velocity) =>
@@ -352,7 +369,8 @@ public record struct Glow(bool On) : IComponent;
 ```
 
 ```csharp doccheck=expect-EECS016
-public class Extinguish : EcsSystem
+[EcsSystem]
+public ref struct Extinguish
 {
     [ForEach, Removed<Burning>] static void Out(in Burning burning, ref Glow glow) => glow = new Glow(false);
 }
@@ -361,7 +379,8 @@ public class Extinguish : EcsSystem
 `[Removed<Burning>]` 访问的实体已经没有 `Burning` 了，这个方法永远不会运行。读行里的其他组件：
 
 ```csharp
-public class Extinguish : EcsSystem
+[EcsSystem]
+public ref struct Extinguish
 {
     [ForEach, Removed<Burning>] static void Out(ref Glow glow) => glow = new Glow(false);
 }
@@ -377,7 +396,8 @@ public record struct Despawns(int Count) : ISingletonComponent;
 ```
 
 ```csharp
-public class CountDespawns : EcsSystem
+[EcsSystem]
+public ref struct CountDespawns
 {
     [ForEach, With<Position>, Removed<Avatar>]       // 只有移除：被销毁的实体已经没有行了
     static void Count(ref Despawns despawns) => despawns = new Despawns(despawns.Count + 1);
@@ -430,7 +450,8 @@ int npcs = world.Count<Position>(QueryFilter.Create().With<Npc>());   // 全部�
 ### 给 `[Changed<T>]` 方法分片 [#slice-changed]
 
 ```csharp doccheck=expect-EECS035
-public class SendGold : EcsSystem
+[EcsSystem]
+public ref struct SendGold
 {
     [ForEach(Slices = 4), Changed<Gold>]
     static void Send(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
@@ -441,7 +462,8 @@ public class SendGold : EcsSystem
 变过的行，去掉 `Slices` 即可。如果重的是变更引发的工作，就把这份工作记成数据，再用一个没有变更过滤条件的分片方法去摊开：
 
 ```csharp
-public class SendGold : EcsSystem
+[EcsSystem]
+public ref struct SendGold
 {
     [ForEach, Changed<Gold>]
     static void Send(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
@@ -776,7 +798,7 @@ if (world.DefaultUpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // 2
     world.TrimExcess();
 ```
 
-在 `OnUpdate` 或 `[ForEach]` 方法里由 [EECS028](/zh/docs/guide/analyzer#eecs028) 发现（警告）；宿主的循环里没有规则能发现。详见[高峰过后还回内存](/zh/docs/guide/diagnostics#trim)。
+在 `[OnUpdate]` 或 `[ForEach]` 方法里由 [EECS028](/zh/docs/guide/analyzer#eecs028) 发现（警告）；宿主的循环里没有规则能发现。详见[高峰过后还回内存](/zh/docs/guide/diagnostics#trim)。
 
 ## 线程 [#threads]
 
@@ -801,7 +823,8 @@ World 的结构属于它的所有者线程，World 也不会加锁来共享它�
 ### 在并行方法里做结构变更 [#parallel-change]
 
 ```csharp doccheck=expect-EECS010
-public class Reap : EcsSystem
+[EcsSystem]
+public ref struct Reap
 {
     [ForEach(Parallel = true)]
     static void Kill(Entity e, in Health hp) { if (hp.Value <= 0) e.SetDead(); }
@@ -811,7 +834,8 @@ public class Reap : EcsSystem
 一块块的行同时在多个线程上运行，谁都不能搬行。并行的部分只改值，结构变更交给顺序执行的方法：
 
 ```csharp
-public class Reap : EcsSystem
+[EcsSystem]
+public ref struct Reap
 {
     [ForEach, Without<Dead>]
     static void Kill(Entity e, in Health hp) { if (hp.Value <= 0) e.SetDead(); }
@@ -832,7 +856,8 @@ public struct Mend : IForEachEntity<Health>
 ```
 
 ```csharp doccheck=expect-EECS010
-public class HealAll : EcsSystem
+[EcsSystem]
+public ref struct HealAll
 {
     [ForEach(Parallel = true), With<Health>]
     static void Heal(Entity e)
@@ -847,7 +872,8 @@ public class HealAll : EcsSystem
 `[ForEach]` 方法本来就拿到了 job 会拿到的 `ref`，直接通过它们写：
 
 ```csharp
-public class HealAll : EcsSystem
+[EcsSystem]
+public ref struct HealAll
 {
     [ForEach(Parallel = true)]
     static void Heal(ref Health hp) => hp.Value += 1;
@@ -864,7 +890,8 @@ public static class Combat
     public static long Damage;
 }
 
-public class Bleed : EcsSystem
+[EcsSystem]
+public ref struct Bleed
 {
     [ForEach(Parallel = true)]
     static void Drain(ref Health hp)
@@ -884,7 +911,8 @@ public partial struct Damage : ISingletonComponent
     [Sum] public long Total;
 }
 
-public class Bleed : EcsSystem
+[EcsSystem]
+public ref struct Bleed
 {
     [ForEach(Parallel = true)]
     static void Drain(ref Health hp, ref Reduce<Damage> damage)
@@ -900,7 +928,8 @@ public class Bleed : EcsSystem
 ### 把 `Reduce<T>.Value` 当成总数 [#reduce-value]
 
 ```csharp
-public class Bleed : EcsSystem
+[EcsSystem]
+public ref struct Bleed
 {
     [ForEach(Parallel = true)]
     static void Drain(ref Health hp, ref Reduce<Damage> damage)
@@ -916,8 +945,8 @@ public class Bleed : EcsSystem
 而且它替换单例，所以是这一遍的总数，不是累计值。在后面的系统里读它：
 
 ```csharp
-[UpdateAfter<Bleed>]
-public class BleedOut : EcsSystem
+[EcsSystem, UpdateAfter<Bleed>]
+public ref struct BleedOut
 {
     [ForEach]
     static void Collapse(ref Health hp, in Damage damage)   // 刚结束的那一遍的总数
@@ -965,19 +994,22 @@ public record struct Hit(EntityId Target, int Amount);   // 一条记录，不�
 public record struct Attack(int Power) : IComponent;
 public record struct Aim(EntityId Target) : IComponent;
 
-public class StrikeSystem : EcsSystem
+[EcsSystem]
+public ref struct StrikeSystem
 {
     [ForEach(Parallel = true)]
     static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits) => hits.Add(new Hit(aim.Target, attack.Power));
 }
 
-public class ApplyHitsSystem : EcsSystem
+[EcsSystem]
+public ref struct ApplyHitsSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+        ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
         foreach (ref readonly var hit in hits.AsReadOnlySpan())
-            if (World.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
+            if (world.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
     }
 }
 ```
@@ -986,13 +1018,15 @@ public class ApplyHitsSystem : EcsSystem
 全部再应用一遍，列表每次更新还会多出一遍的记录。应用完就清掉：
 
 ```csharp
-public class ApplyHitsSystem : EcsSystem
+[EcsSystem]
+public ref struct ApplyHitsSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+        ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
         foreach (ref readonly var hit in hits.AsReadOnlySpan())
-            if (World.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
+            if (world.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
         hits.Clear();   // 只应用一次
     }
 }
@@ -1005,7 +1039,8 @@ public class ApplyHitsSystem : EcsSystem
 ```csharp doccheck=expect-EECS071
 public record struct Blow(int Damage) : IComponent;
 
-public class Crits : EcsSystem
+[EcsSystem]
+public ref struct Crits
 {
     [ForEach(Parallel = true)]
     static void Roll(ref Blow blow)
@@ -1021,7 +1056,8 @@ public class Crits : EcsSystem
 ```csharp
 public record struct Blow(int Damage) : IComponent;
 
-public class Crits : EcsSystem
+[EcsSystem]
+public ref struct Crits
 {
     [ForEach(Parallel = true)]
     static void Roll(ref Blow blow, Entity entity, in EntityRandom random)
@@ -1038,7 +1074,8 @@ public class Crits : EcsSystem
 ```csharp doccheck=expect-EECS059
 public record struct Leader(EntityId Id) : IComponent;
 
-public class Escort : EcsSystem
+[EcsSystem]
+public ref struct Escort
 {
     [ForEach(Parallel = true)]
     static void Keep(ref Velocity velocity, in Leader leader, Lookup<Velocity> velocities)
@@ -1057,7 +1094,8 @@ public class Escort : EcsSystem
 public record struct Leader(EntityId Id) : IComponent;
 public record struct Heading(float X, float Y) : IComponent;
 
-public class Escort : EcsSystem
+[EcsSystem]
+public ref struct Escort
 {
     [ForEach(Parallel = true)]
     static void Keep(ref Heading heading, in Leader leader, Lookup<Velocity> velocities)
@@ -1067,8 +1105,8 @@ public class Escort : EcsSystem
     }
 }
 
-[UpdateAfter<Escort>]
-public class Steer : EcsSystem
+[EcsSystem, UpdateAfter<Escort>]
+public ref struct Steer
 {
     [ForEach(Parallel = true)]
     static void Apply(ref Velocity velocity, in Heading heading) => velocity = new Velocity(heading.X, heading.Y);

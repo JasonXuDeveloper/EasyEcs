@@ -125,19 +125,21 @@ foreach (var item in world.Query<Position>(alive))
 
 ### 写一个系统 [#write-a-system]
 
-系统继承 `EcsSystem`，只做一件事。`[ForEach]` 方法就是它的整个循环：凡是拥有这些组件参数的实体，都会执行一次；`ref` 表示要写，
+系统是一个只有静态方法的 `[EcsSystem] ref struct`，只做一件事。`[ForEach]` 方法就是它的整个循环：凡是拥有这些组件参数的实体，都会执行一次；`ref` 表示要写，
 `in` 表示只读，过滤条件写成特性。新建 `Systems.cs`：
 
 ```csharp title="Systems.cs"
 using EasyEcs;
 
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Dead>]                                  // 没死的、会动的单位
     static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
 }
 
-public class BurnSystem : EcsSystem
+[EcsSystem]
+public ref struct BurnSystem
 {
     [ForEach, Without<Dead>]
     static void Burn(Entity unit, ref Burning burning, ref Health hp)
@@ -167,9 +169,11 @@ public record struct Arena(long Tick, int Deaths) : ISingletonComponent;
 `World.GetSingleton<Arena>()`。加到 `Systems.cs`：
 
 ```csharp title="Systems.cs"
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate() => World.Arena.Tick++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.Arena.Tick++;
 }
 ```
 
@@ -184,8 +188,8 @@ public class ClockSystem : EcsSystem
 尸体系统响应这个状态，死亡系统根本不知道它存在。`[UpdateAfter<T>]` 按数据流给它们排序。加到 `Systems.cs`：
 
 ```csharp title="Systems.cs"
-[UpdateAfter<BurnSystem>]                                     // 伤害结算之后
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>]                          // 伤害结算之后
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Arena arena)
@@ -196,10 +200,11 @@ public class DeathSystem : EcsSystem
     }
 }
 
-[UpdateAfter<DeathSystem>]
-public class CorpseSystem : EcsSystem
+[EcsSystem, UpdateAfter<DeathSystem>]
+public ref struct CorpseSystem
 {
-    protected override void OnUpdate() => World.DestroyAll<Dead>();   // 一次遍历清掉所有尸体
+    [OnUpdate]
+    static void OnUpdate(World world) => world.DestroyAll<Dead>();   // 一次遍历清掉所有尸体
 }
 ```
 
@@ -247,12 +252,13 @@ public struct Report : ISystemGroup;
 ```
 
 ```csharp tab="Systems.cs"
-[UpdateInGroup<Report>]
-public class ReportSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Report>]
+public ref struct ReportSystem
 {
-    protected override void OnUpdate() =>
-        Console.WriteLine($"tick {World.Arena.Tick}: {World.EntityCount} units, " +
-                          $"{World.Count<Burning>()} burning, {World.Arena.Deaths} dead");
+    [OnUpdate]
+    static void OnUpdate(World world) =>
+        Console.WriteLine($"tick {world.Arena.Tick}: {world.EntityCount} units, " +
+                          $"{world.Count<Burning>()} burning, {world.Arena.Deaths} dead");
 }
 ```
 
@@ -321,13 +327,15 @@ public struct Report : ISystemGroup;
 ```csharp title="Systems.cs"
 using EasyEcs;
 
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Dead>]
     static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
 }
 
-public class BurnSystem : EcsSystem
+[EcsSystem]
+public ref struct BurnSystem
 {
     [ForEach, Without<Dead>]
     static void Burn(Entity unit, ref Burning burning, ref Health hp)
@@ -337,8 +345,8 @@ public class BurnSystem : EcsSystem
     }
 }
 
-[UpdateAfter<BurnSystem>]
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Arena arena)
@@ -349,23 +357,27 @@ public class DeathSystem : EcsSystem
     }
 }
 
-[UpdateAfter<DeathSystem>]
-public class CorpseSystem : EcsSystem
+[EcsSystem, UpdateAfter<DeathSystem>]
+public ref struct CorpseSystem
 {
-    protected override void OnUpdate() => World.DestroyAll<Dead>();
+    [OnUpdate]
+    static void OnUpdate(World world) => world.DestroyAll<Dead>();
 }
 
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate() => World.Arena.Tick++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.Arena.Tick++;
 }
 
-[UpdateInGroup<Report>]
-public class ReportSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Report>]
+public ref struct ReportSystem
 {
-    protected override void OnUpdate() =>
-        Console.WriteLine($"tick {World.Arena.Tick}: {World.EntityCount} units, " +
-                          $"{World.Count<Burning>()} burning, {World.Arena.Deaths} dead");
+    [OnUpdate]
+    static void OnUpdate(World world) =>
+        Console.WriteLine($"tick {world.Arena.Tick}: {world.EntityCount} units, " +
+                          $"{world.Count<Burning>()} burning, {world.Arena.Deaths} dead");
 }
 ```
 

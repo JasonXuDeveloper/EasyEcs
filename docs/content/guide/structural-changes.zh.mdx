@@ -35,7 +35,8 @@ public record struct Lifetime(int Ticks) : IComponent;
 public record struct Projectile(EntityId Owner) : IComponent;
 public record struct Weapon(int Cooldown) : IComponent;
 
-public class ExpireSystem : EcsSystem
+[EcsSystem]
+public ref struct ExpireSystem
 {
     [ForEach]
     static void Expire(Entity shot, ref Lifetime life)
@@ -44,7 +45,8 @@ public class ExpireSystem : EcsSystem
     }
 }
 
-public class FireSystem : EcsSystem
+[EcsSystem]
+public ref struct FireSystem
 {
     [ForEach, Without<Dead>]
     static void Fire(Entity shooter, ref Weapon weapon, in Position at, World world)
@@ -99,7 +101,8 @@ flowchart LR
 - **处理单个实体的代码**（一个请求、一条消息）用 [`[ForEntity]`](/zh/docs/guide/queries#run-on-one-entity) 方法（或用 `entity.Run` 跑的 job）得到和方法自己的 `ref` 参数同样的保证：它的 ref 跨过它自己做的结构变更仍指向这个实体的值，job 返回时，`WriteMask` 里的组件会被带到新行。
 
 ```csharp
-public class HitSystem : EcsSystem
+[EcsSystem]
+public ref struct HitSystem
 {
     [ForEach, Without<Dead>]
     static void Hit(Entity unit, ref Health hp)
@@ -212,7 +215,8 @@ public struct Dead : IComponent;
 using EasyEcs;
 
 // 炮塔每个 tick 掉 30 点血，在做出判断的地方打上 Dead。
-public class WearSystem : EcsSystem
+[EcsSystem]
+public ref struct WearSystem
 {
     [ForEach, Without<Dead>]
     static void Wear(Entity turret, ref Health hp)
@@ -230,8 +234,8 @@ public class WearSystem : EcsSystem
 }
 
 // 每隔一个 tick 开一次火。本次更新里早先打上 Dead 的炮塔不再匹配。
-[UpdateAfter<WearSystem>]
-public class FireSystem : EcsSystem
+[EcsSystem, UpdateAfter<WearSystem>]
+public ref struct FireSystem
 {
     [ForEach, Without<Dead>]
     static void Fire(Entity turret, ref Weapon weapon, World world)
@@ -250,8 +254,8 @@ public class FireSystem : EcsSystem
 
 // 给每颗子弹倒计时，包括本次更新里刚打出的，
 // 并在子弹自己的遍历途中销毁它。
-[UpdateAfter<FireSystem>]
-public class ExpireSystem : EcsSystem
+[EcsSystem, UpdateAfter<FireSystem>]
+public ref struct ExpireSystem
 {
     [ForEach]
     static void Expire(Entity shot, ref Lifetime life)

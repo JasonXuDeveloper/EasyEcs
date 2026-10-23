@@ -32,10 +32,10 @@ dotnet add package EasyEcs
 | `World.Create()` | `new World(options)` | 每个 World 只属于一个线程；一个线程跑一个 World。 |
 | 任意 struct 都是组件 | 实现 `IComponent` 的 struct | 加上接口；class 会被分析器拒绝（[EECS006](/zh/docs/guide/analyzer#eecs006)）。 |
 | `QueryDescription` | `[ForEach]` 方法上的过滤特性，或 `QueryFilter` | 只在方法上写一次；生成器把过滤存进静态字段。 |
-| `IForEach<T...>` + `InlineQuery` | `EcsSystem` 里的 `[ForEach]` 方法 | struct job 和调用由生成器写。 |
+| `IForEach<T...>` + `InlineQuery` | `[EcsSystem]` 里的 `[ForEach]` 方法 | struct job 和调用由生成器写。 |
 | `CommandBuffer` + `Playback` | 直接调用 | 变更当场生效，后面的系统能看到。 |
 | 传给 job 的计数器对象 | 单例（`ISingletonComponent`） | 作为 `ref` 参数，每一遍只解析一次。 |
-| Arch.Extended 的系统 | `EcsSystem`、`ISystemGroup`、`[UpdateBefore<T>]` / `[UpdateAfter<T>]` | 内置。 |
+| Arch.Extended 的系统 | `[EcsSystem]`、`ISystemGroup`、`[UpdateBefore<T>]` / `[UpdateAfter<T>]` | 内置。 |
 | 事件 | `[Changed<T>]`、`[Removed<T>]`、之后再查询的标签 | 状态变化就是数据。 |
 
 ## API 对照 [#api-mapping]
@@ -124,7 +124,8 @@ public struct WorldStats : ISingletonComponent
 EasyEcs：过滤写在方法上，参数就是组件。
 
 ```csharp tab="EasyEcs" title="MovementSystem.cs"
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Stunned>, Without<Dead>]
     static void Move(ref Position p, ref Velocity v)
@@ -158,7 +159,8 @@ world.InlineQuery<Move, Position, Velocity>(in Moving, ref move);
 Arch 先记下状态变更，查询结束后再回放。EasyEcs 当场生效。计数器是一个 `ref` 单例参数。
 
 ```csharp tab="EasyEcs" title="CombatSystem.cs"
-public class CombatSystem : EcsSystem
+[EcsSystem]
+public ref struct CombatSystem
 {
     [ForEach, Without<Dead>, Without<Stunned>]
     static void Fight(Entity entity, ref Attack attack, ref Health health, ref WorldStats stats)
@@ -172,7 +174,8 @@ public class CombatSystem : EcsSystem
     }
 }
 
-public class StatusSystem : EcsSystem
+[EcsSystem]
+public ref struct StatusSystem
 {
     [ForEach]
     static void Burn(Entity entity, ref Burning burning, ref Health health)
@@ -182,7 +185,8 @@ public class StatusSystem : EcsSystem
     }
 }
 
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
@@ -218,7 +222,8 @@ Arch 通过缓冲按签名创建子弹，再一个组件一次 `Set`。EasyEcs �
 销毁的方法拿 `World` 或 `Entity` 参数。
 
 ```csharp title="ShootingSystem.cs"
-public class ShootingSystem : EcsSystem
+[EcsSystem]
+public ref struct ShootingSystem
 {
     [ForEach, With<Player>, Without<Dead>]
     static void Shoot(Entity shooter, in Position p, in Velocity v, ref WorldStats stats, World world)
@@ -230,7 +235,8 @@ public class ShootingSystem : EcsSystem
     }
 }
 
-public class LifetimeSystem : EcsSystem
+[EcsSystem]
+public ref struct LifetimeSystem
 {
     [ForEach]
     static void Expire(Entity entity, ref Lifetime lifetime)
@@ -239,9 +245,11 @@ public class LifetimeSystem : EcsSystem
     }
 }
 
-public sealed class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate() => World.WorldStats.Tick++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.WorldStats.Tick++;
 }
 ```
 

@@ -35,7 +35,8 @@ public record struct Seats(int Released) : ISingletonComponent;
 ```
 
 ```csharp title="ReleaseSeats.cs"
-public class ReleaseSeats : EcsSystem
+[EcsSystem]
+public ref struct ReleaseSeats
 {
     [ForEach, With<Retired>, With<Seat>]                    // 只处理已退休的实体   // [!code highlight]
     static void Release(Entity entity, ref Seats seats)
@@ -62,7 +63,8 @@ world.Update();                        // ReleaseSeats 释放它：guest.IsAlive
 ```csharp
 public record struct NextSeat(int Number) : ISingletonComponent;
 
-public class AssignSeats : EcsSystem
+[EcsSystem]
+public ref struct AssignSeats
 {
     [ForEach, Without<Retired>]                            // 已经离开的实体不再分配座位 // [!code highlight]
     static void Assign(ref Seat seat, ref NextSeat next)
@@ -106,7 +108,8 @@ public class AssignSeats : EcsSystem
 ```csharp
 public record struct Cooldown(int Ticks) : IComponent;
 
-public class TickCooldowns : EcsSystem
+[EcsSystem]
+public ref struct TickCooldowns
 {
     [ForEach]
     static void Tick(ref Cooldown cooldown) => cooldown.Ticks--;
@@ -146,7 +149,8 @@ EasyEcs 没有“查询默认跳过”的禁用实体。用一个标签加 `With
 public struct Inactive : IComponent;                         // 整个实体关闭
 public struct Bullet : IComponent;
 
-public class MoveBullets : EcsSystem
+[EcsSystem]
+public ref struct MoveBullets
 {
     [ForEach, Without<Inactive>]                             // 要跳过它的系统自己说明 // [!code highlight]
     static void Move(ref Position p, in Velocity v)
@@ -192,7 +196,8 @@ EasyEcs 没有 `Added<T>` 过滤条件。`[Changed<T>]` 已经会选中新得到
 public struct Spawned : IComponent;
 public record struct Greeted(int Count) : ISingletonComponent;
 
-public class GreetNewcomers : EcsSystem
+[EcsSystem]
+public ref struct GreetNewcomers
 {
     [ForEach, With<Spawned>, With<Health>]
     static void Greet(Entity entity, ref Greeted greeted)
@@ -239,7 +244,8 @@ public record struct Seats(int Released) : ISingletonComponent;
 using EasyEcs;
 
 // 所有冷却倒数。被禁用的冷却对这个方法不可见，所以会暂停。
-public class CooldownSystem : EcsSystem
+[EcsSystem]
+public ref struct CooldownSystem
 {
     [ForEach]
     static void Tick(ref Cooldown cooldown)
@@ -252,7 +258,8 @@ public class CooldownSystem : EcsSystem
 }
 
 // 归还已退休玩家的座位。最后一个清理组件被移除后，实体才被释放。
-public class ReleaseSeatsSystem : EcsSystem
+[EcsSystem]
+public ref struct ReleaseSeatsSystem
 {
     [ForEach, With<Retired>, With<Seat>]
     static void Release(Entity player, ref Seats seats)

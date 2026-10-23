@@ -75,7 +75,8 @@ No rule catches it. More in [ids, versions and recycling](/en/docs/guide/entitie
 ```csharp
 public record struct Mobility(bool Rooted) : IComponent;
 
-public class MoveRooted : EcsSystem
+[EcsSystem]
+public ref struct MoveRooted
 {
     [ForEach] static void Move(ref Position p, in Velocity v, in Mobility m)
     {
@@ -91,7 +92,8 @@ skip the whole table, and adding or removing it is the state change:
 ```csharp
 public struct Rooted : IComponent;
 
-public class MoveFree : EcsSystem
+[EcsSystem]
+public ref struct MoveFree
 {
     [ForEach, Without<Rooted>]                 // rooted entities are never visited
     static void Move(ref Position p, in Velocity v) { p.X += v.X; p.Y += v.Y; }
@@ -171,22 +173,27 @@ No rule catches it; the exception names the call to write. More in
 ### State in a system [#state-in-system]
 
 ```csharp doccheck=expect-EECS007
-public class WaveSystem : EcsSystem
+[EcsSystem]
+public ref struct WaveSystem
 {
-    private int _wave;
-    protected override void OnUpdate() => _wave++;
+    static int _wave;
+
+    [OnUpdate]
+    static void OnUpdate() => _wave++;
 }
 ```
 
-Nothing else can read, save or snapshot that field, and it is lost when the system is removed. Per-world state is a
-singleton:
+Nothing else can read, save or snapshot that field, every world shares it, and it outlives the system's removal.
+Per-world state is a singleton:
 
 ```csharp
 public record struct Wave(int Number) : ISingletonComponent;
 
-public class WaveSystem : EcsSystem
+[EcsSystem]
+public ref struct WaveSystem
 {
-    protected override void OnUpdate() => World.GetOrAddWave().Number++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.GetOrAddWave().Number++;
 }
 ```
 
@@ -196,11 +203,13 @@ Caught by [EECS007](/en/docs/guide/analyzer#eecs007). More in
 ### A system that calls another [#system-calls-system]
 
 ```csharp doccheck=expect-EECS008
-public class LootSystem : EcsSystem { }
+[EcsSystem] public ref struct LootSystem { }
 
-public class KillRewards : EcsSystem
+[EcsSystem]
+public ref struct KillRewards
 {
-    protected override void OnUpdate() { if (World.TryGetSystem(out LootSystem loot)) loot.Enabled = false; }
+    [OnUpdate]
+    static void OnUpdate(World world) { if (world.TryGetSystem<LootSystem>(out var loot)) loot.Enabled = false; }
 }
 ```
 
@@ -210,13 +219,15 @@ singleton), and the other reads it, ordered after it:
 ```csharp
 public struct Looted : IComponent;
 
-public class LootSystem : EcsSystem
+[EcsSystem]
+public ref struct LootSystem
 {
-    protected override void OnUpdate() => World.SetAll(new Looted(), QueryFilter.Create().With<Dead>().Without<Looted>());
+    [OnUpdate]
+    static void OnUpdate(World world) => world.SetAll(new Looted(), QueryFilter.Create().With<Dead>().Without<Looted>());
 }
 
-[UpdateAfter<LootSystem>]
-public class KillRewards : EcsSystem
+[EcsSystem, UpdateAfter<LootSystem>]
+public ref struct KillRewards
 {
     [ForEach, With<Looted>]
     static void Reward(in Health hp) { }
@@ -233,7 +244,8 @@ public record struct Speed(float Value) : IComponent;
 ```
 
 ```csharp doccheck=expect-EECS025
-public class Throttle : EcsSystem
+[EcsSystem]
+public ref struct Throttle
 {
     [ForEach] static void Apply(ref Velocity v, ref Speed max)   // max is only read
     {
@@ -247,7 +259,8 @@ A `ref` parameter declares a write. With `ParallelSystems`, a system that writes
 other system that touches it, and if `Speed` were tracked, every row would count as changed. Read with `in`:
 
 ```csharp
-public class Throttle : EcsSystem
+[EcsSystem]
+public ref struct Throttle
 {
     [ForEach] static void Apply(ref Velocity v, in Speed max)
     {
@@ -266,7 +279,8 @@ Caught by [EECS025](/en/docs/guide/analyzer#eecs025) (warning, with a code fix).
 public record struct Gold(int Amount) : IComponent;
 public record struct Hud(int Gold) : IComponent;
 
-public class ShowGold : EcsSystem
+[EcsSystem]
+public ref struct ShowGold
 {
     [ForEach, Changed<Gold>] static void Show(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
 }
@@ -278,7 +292,8 @@ Change ticks cost a column, so only components that ask for them have them. Mark
 public record struct Gold(int Amount) : IComponent, ITracked;
 public record struct Hud(int Gold) : IComponent;
 
-public class ShowGold : EcsSystem
+[EcsSystem]
+public ref struct ShowGold
 {
     [ForEach, Changed<Gold>] static void Show(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
 }
@@ -310,7 +325,8 @@ public record struct Facing(int Direction) : IComponent, ITracked;   // sent to 
 ```
 
 ```csharp
-public class Face : EcsSystem
+[EcsSystem]
+public ref struct Face
 {
     [ForEach]
     static void Turn(ref Facing facing, in Velocity velocity)      // every visited row is stamped
@@ -327,7 +343,8 @@ replication sends values nobody changed. The analyzer cannot tell, because the m
 `Mut<T>`: it stamps only the rows it writes, and `SetIfChanged` writes only when the value differs:
 
 ```csharp
-public class Face : EcsSystem
+[EcsSystem]
+public ref struct Face
 {
     [ForEach]
     static void Turn(Mut<Facing> facing, in Velocity velocity) =>
@@ -373,7 +390,8 @@ public record struct Glow(bool On) : IComponent;
 ```
 
 ```csharp doccheck=expect-EECS016
-public class Extinguish : EcsSystem
+[EcsSystem]
+public ref struct Extinguish
 {
     [ForEach, Removed<Burning>] static void Out(in Burning burning, ref Glow glow) => glow = new Glow(false);
 }
@@ -383,7 +401,8 @@ The entities `[Removed<Burning>]` visits no longer have `Burning`, so the method
 components:
 
 ```csharp
-public class Extinguish : EcsSystem
+[EcsSystem]
+public ref struct Extinguish
 {
     [ForEach, Removed<Burning>] static void Out(ref Glow glow) => glow = new Glow(false);
 }
@@ -400,7 +419,8 @@ public record struct Despawns(int Count) : ISingletonComponent;
 ```
 
 ```csharp
-public class CountDespawns : EcsSystem
+[EcsSystem]
+public ref struct CountDespawns
 {
     [ForEach, With<Position>, Removed<Avatar>]       // removals only: a destroyed entity has no row left
     static void Count(ref Despawns despawns) => despawns = new Despawns(despawns.Count + 1);
@@ -453,7 +473,8 @@ With `MeasureSystems`, `system.Stats.LastEntities` of a `[ForEach(Slices = N)]` 
 ### Slicing a `[Changed<T>]` method [#slice-changed]
 
 ```csharp doccheck=expect-EECS035
-public class SendGold : EcsSystem
+[EcsSystem]
+public ref struct SendGold
 {
     [ForEach(Slices = 4), Changed<Gold>]
     static void Send(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
@@ -466,7 +487,8 @@ work a change causes is what is heavy, record it as data and spread that with a 
 filter:
 
 ```csharp
-public class SendGold : EcsSystem
+[EcsSystem]
+public ref struct SendGold
 {
     [ForEach, Changed<Gold>]
     static void Send(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
@@ -821,7 +843,7 @@ if (world.DefaultUpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // e
     world.TrimExcess();
 ```
 
-Caught by [EECS028](/en/docs/guide/analyzer#eecs028) (warning) in an `OnUpdate` or a `[ForEach]` method; no rule
+Caught by [EECS028](/en/docs/guide/analyzer#eecs028) (warning) in an `[OnUpdate]` or a `[ForEach]` method; no rule
 catches it in the host's loop. More in [give memory back after a peak](/en/docs/guide/diagnostics#trim).
 
 ## Threads [#threads]
@@ -848,7 +870,8 @@ Caught by [EECS014](/en/docs/guide/analyzer#eecs014). More in
 ### A structural change in a parallel method [#parallel-change]
 
 ```csharp doccheck=expect-EECS010
-public class Reap : EcsSystem
+[EcsSystem]
+public ref struct Reap
 {
     [ForEach(Parallel = true)]
     static void Kill(Entity e, in Health hp) { if (hp.Value <= 0) e.SetDead(); }
@@ -859,7 +882,8 @@ Chunks of rows run on several threads at once, so none may move rows. Keep the p
 sequential method change structure:
 
 ```csharp
-public class Reap : EcsSystem
+[EcsSystem]
+public ref struct Reap
 {
     [ForEach, Without<Dead>]
     static void Kill(Entity e, in Health hp) { if (hp.Value <= 0) e.SetDead(); }
@@ -881,7 +905,8 @@ public struct Mend : IForEachEntity<Health>
 ```
 
 ```csharp doccheck=expect-EECS010
-public class HealAll : EcsSystem
+[EcsSystem]
+public ref struct HealAll
 {
     [ForEach(Parallel = true), With<Health>]
     static void Heal(Entity e)
@@ -897,7 +922,8 @@ owner's pass and its job may change structure, so a parallel method cannot call 
 the refs a job would get; write through them:
 
 ```csharp
-public class HealAll : EcsSystem
+[EcsSystem]
+public ref struct HealAll
 {
     [ForEach(Parallel = true)]
     static void Heal(ref Health hp) => hp.Value += 1;
@@ -915,7 +941,8 @@ public static class Combat
     public static long Damage;
 }
 
-public class Bleed : EcsSystem
+[EcsSystem]
+public ref struct Bleed
 {
     [ForEach(Parallel = true)]
     static void Drain(ref Health hp)
@@ -936,7 +963,8 @@ public partial struct Damage : ISingletonComponent
     [Sum] public long Total;
 }
 
-public class Bleed : EcsSystem
+[EcsSystem]
+public ref struct Bleed
 {
     [ForEach(Parallel = true)]
     static void Drain(ref Health hp, ref Reduce<Damage> damage)
@@ -952,7 +980,8 @@ Caught by [EECS060](/en/docs/guide/analyzer#eecs060). More in [reductions](/en/d
 ### Reading `Reduce<T>.Value` as the total [#reduce-value]
 
 ```csharp
-public class Bleed : EcsSystem
+[EcsSystem]
+public ref struct Bleed
 {
     [ForEach(Parallel = true)]
     static void Drain(ref Health hp, ref Reduce<Damage> damage)
@@ -969,8 +998,8 @@ sum), and on another thread count the chunks begin elsewhere. The total exists o
 replaces the singleton, so it is this pass's total, not a running one. Read it in a later system:
 
 ```csharp
-[UpdateAfter<Bleed>]
-public class BleedOut : EcsSystem
+[EcsSystem, UpdateAfter<Bleed>]
+public ref struct BleedOut
 {
     [ForEach]
     static void Collapse(ref Health hp, in Damage damage)   // the total of the pass that just ended
@@ -1019,19 +1048,22 @@ public record struct Hit(EntityId Target, int Amount);   // a record, not a comp
 public record struct Attack(int Power) : IComponent;
 public record struct Aim(EntityId Target) : IComponent;
 
-public class StrikeSystem : EcsSystem
+[EcsSystem]
+public ref struct StrikeSystem
 {
     [ForEach(Parallel = true)]
     static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits) => hits.Add(new Hit(aim.Target, attack.Power));
 }
 
-public class ApplyHitsSystem : EcsSystem
+[EcsSystem]
+public ref struct ApplyHitsSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+        ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
         foreach (ref readonly var hit in hits.AsReadOnlySpan())
-            if (World.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
+            if (world.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
     }
 }
 ```
@@ -1041,13 +1073,15 @@ records are applied. Without a `Clear()` the next update applies every earlier h
 pass's records per update. Clear what was applied:
 
 ```csharp
-public class ApplyHitsSystem : EcsSystem
+[EcsSystem]
+public ref struct ApplyHitsSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+        ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
         foreach (ref readonly var hit in hits.AsReadOnlySpan())
-            if (World.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
+            if (world.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
         hits.Clear();   // applied once
     }
 }
@@ -1061,7 +1095,8 @@ No rule catches it: the analyzer cannot tell which system applies the records. M
 ```csharp doccheck=expect-EECS071
 public record struct Blow(int Damage) : IComponent;
 
-public class Crits : EcsSystem
+[EcsSystem]
+public ref struct Crits
 {
     [ForEach(Parallel = true)]
     static void Roll(ref Blow blow)
@@ -1078,7 +1113,8 @@ function of the seed, the entity, the tick and a stream:
 ```csharp
 public record struct Blow(int Damage) : IComponent;
 
-public class Crits : EcsSystem
+[EcsSystem]
+public ref struct Crits
 {
     [ForEach(Parallel = true)]
     static void Roll(ref Blow blow, Entity entity, in EntityRandom random)
@@ -1096,7 +1132,8 @@ Caught by [EECS071](/en/docs/guide/analyzer#eecs071), with a code fix. More in
 ```csharp doccheck=expect-EECS059
 public record struct Leader(EntityId Id) : IComponent;
 
-public class Escort : EcsSystem
+[EcsSystem]
+public ref struct Escort
 {
     [ForEach(Parallel = true)]
     static void Keep(ref Velocity velocity, in Leader leader, Lookup<Velocity> velocities)
@@ -1116,7 +1153,8 @@ result into another buffer. Write into a component of your own and copy it in a 
 public record struct Leader(EntityId Id) : IComponent;
 public record struct Heading(float X, float Y) : IComponent;
 
-public class Escort : EcsSystem
+[EcsSystem]
+public ref struct Escort
 {
     [ForEach(Parallel = true)]
     static void Keep(ref Heading heading, in Leader leader, Lookup<Velocity> velocities)
@@ -1126,8 +1164,8 @@ public class Escort : EcsSystem
     }
 }
 
-[UpdateAfter<Escort>]
-public class Steer : EcsSystem
+[EcsSystem, UpdateAfter<Escort>]
+public ref struct Steer
 {
     [ForEach(Parallel = true)]
     static void Apply(ref Velocity velocity, in Heading heading) => velocity = new Velocity(heading.X, heading.Y);

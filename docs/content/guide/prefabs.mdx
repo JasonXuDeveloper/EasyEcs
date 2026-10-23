@@ -90,7 +90,8 @@ lacks copies the row, then moves it to the table that has the new column.
 ```csharp
 public record struct Spawner(int Every, int Countdown) : IComponent;
 
-public class SpawnSystem : EcsSystem
+[EcsSystem]
+public ref struct SpawnSystem
 {
     [ForEach]
     static void Spawn(Entity den, ref Spawner spawner, in Position at, World world)
@@ -225,7 +226,8 @@ public static class Raging
 ```
 
 ```csharp
-public class RageSystem : EcsSystem
+[EcsSystem]
+public ref struct RageSystem
 {
     [ForEach]
     static void Rage(Entity goblin, in Health health)

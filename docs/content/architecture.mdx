@@ -239,7 +239,7 @@ The rules from the user's side: [Structural changes during iteration](/en/docs/g
 flowchart LR
     Add["AddSystem"] --> Sort["Order: registration order,<br/>moved by UpdateBefore / UpdateAfter"]
     Sort --> Stages["Stages: after the latest system<br/>it follows or conflicts with"]
-    Stages --> Run["Update(): stage by stage,<br/>OnUpdate + generated [ForEach]"]
+    Stages --> Run["Update(): stage by stage,<br/>one call per segment of a set"]
     Run --> Tick["ChangeTick + 1 per stage"]
 ```
 
@@ -249,9 +249,22 @@ flowchart LR
   by an ordering or by an earlier conflicting access (`SystemAccess`). Of two conflicting systems the earlier one
   always finishes first. Both arrays are copy-on-write; rebuilding them is O(systems²), once per `AddSystem` or
   `RemoveSystem`.
-- `Update()` and `Update<TGroup>()` are synchronous. For each due, enabled system they call `OnUpdate()` and the
-  generated `[ForEach]` methods. Each stage advances the change tick once, and each update once more.
-- `AddSystem` calls `OnCreate()`; `RemoveSystem` and `Dispose` call `OnDestroy()`, `Dispose` in reverse order.
+- A system is never an object. Its type is an `[EcsSystem] ref struct` of static methods; the generator writes its
+  code as a struct of static members (`ISystemCode`: `Update`, `Create`, `Destroy`, `Access`, the cadence), and per
+  assembly one **system set** (`__EasyEcsSystems : ISystemSet`) that numbers the assembly's systems, and the closed
+  generic systems it names, with a `switch` per hook whose cases call each code struct directly. A module initializer
+  registers the set; the registry holds it weakly, so a collectible assembly unloads
+  ([D102](/en/docs/decisions#d102-systems-are-ref-structs), [D103](/en/docs/decisions#d103-system-sets)).
+- What the world knows of a system is a record in an array (enabled, error, interval and phase, last run tick, run
+  count, stats, its set and number); `SystemHandle` is the world, the record's index and its version, as `Entity` is
+  for a row, so a handle of a removed system is stale.
+- Each stage is cut into **segments**, consecutive systems of one set. `Update()` and `Update<TGroup>()` are
+  synchronous: per segment one call through a function pointer bound once per set, which walks its systems (enabled,
+  due) and calls each one's code through the set's `switch`, so the systems of one assembly call each other's code
+  directly. A system's code runs its `[OnUpdate]` method, then the generated `[ForEach]` jobs. Each stage advances
+  the change tick once, and each update once more.
+- `AddSystem` calls the `[OnCreate]` method; `RemoveSystem` and `Dispose` call the `[OnDestroy]` method, `Dispose`
+  in reverse order.
 - An exception propagates out of the update, or, with `SystemErrorPolicy.Disable`, switches its system off and stays
   in `system.Error`.
 - Systems cooperate through data only ([D1](/en/docs/decisions#d1-state-changes-are-data-no-events-or-callbacks)),
@@ -262,7 +275,7 @@ flowchart LR
 | Part | What it does |
 | --- | --- |
 | `ArityGenerator` | Writes every T1..T9 family of `EasyEcs.Core` from one template each (`Entity.Set` / `Remove`, `World.CreateEntity` / `CreateEntities` / `DestroyAll`, the job interfaces, `ForEach` and its variants, `Query`, `Count`, `Any`). Runs only for `EasyEcs.Core`. |
-| `SystemGenerator` | Turns `[ForEach]` methods into struct jobs (per entity, or per run of rows for span parameters) in a file class of their own, which call the user's method through `[UnsafeAccessor]` ([D16](/en/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)). Each system gets a `SystemCode` (its update and access set) registered by a module initializer; a static method outside a system gets an entry point. `[Changed<T>]` / `[Removed<T>]` become `Since(LastRunTick + 1)` and a declared read of `T`; `Parallel = true` runs the job over chunks. Jobs that cannot change structure get `INoStructuralChanges`. A per-entity method over numbers gets a vector loop written from its body (`Kernel`: masks for branches, narrow lanes, struct values, wide rows; [D68](/en/docs/decisions#d68-vector-loops-without-opting-in)), or the reason it runs row by row; `[ForEntity]`, `[Consume]` and `[UpdateInterval]` are compiled here too. |
+| `SystemGenerator` | Turns `[ForEach]` methods into struct jobs (per entity, or per run of rows for span parameters) in a file class of their own, which call the user's method through `[UnsafeAccessor]` ([D16](/en/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)). Each `[EcsSystem]` gets a code struct (`__X_SystemCode : ISystemCode`: its hooks, jobs, access set and cadence), and each assembly a system set (`__EasyEcsSystems`) registered by a module initializer; a static method outside a system gets an entry point. A generated job declares `OneQuery` (its filter is a constant), so its passes read the query the world keeps for the job type ([D104](/en/docs/decisions#d104-one-query-per-job-type)). `[Changed<T>]` / `[Removed<T>]` become `Since(LastRunTick + 1)` and a declared read of `T`; `Parallel = true` runs the job over chunks. Jobs that cannot change structure get `INoStructuralChanges`. A per-entity method over numbers gets a vector loop written from its body (`Kernel`: masks for branches, narrow lanes, struct values, wide rows; [D68](/en/docs/decisions#d68-vector-loops-without-opting-in)), or the reason it runs row by row; `[ForEntity]`, `[Consume]` and `[UpdateInterval]` are compiled here too. |
 | `ComponentGenerator` | C# 14 extension members per component and singleton: `entity.Health`, `HasHealth`, `SetHealth(…)`, `IsDead`, `world.Clock`, `world.KillsIndex`, `item.Position` per query shape, the buffer and prefab writers, and the registration of the types a save may name and of the setup a type declares (`[GroupBy]`, `[WhenTargetDestroyed]`, `[NotSaved]`). |
 | `PartGenerator` | Writes what a partial struct declares with attributes into a part of it: `IReduction<T>` from `[Sum]` .. `[Any]`, the explicit `Key` of `[IndexKey]` / `[UniqueKey]`, the `Group` of `[Group]` ([D101](/en/docs/decisions#d101-declaration-attributes)). |
 | `EasyEcsAnalyzer` | Reports EECS002–EECS089: input the generators skip, code that breaks the [ECS principles](/en/docs/ecs-principles), and code that works but costs. Generators never report diagnostics; both use the same checks. [EasyEcs.CodeFixes](/en/docs/guide/analyzer) offers the mechanical fixes. |
@@ -301,7 +314,9 @@ flowchart TB
   the owner thread: a plain flag, checked and set on the way in, cleared on the way out, with no atomic instruction.
   A parallel stage of systems, the chunks of a parallel `[ForEach]` and a batch job freeze it while they run, so a
   structural change inside them throws `InvalidOperationException`, deterministically, as does one reentered under
-  the gate.
+  the gate. A pass on the owner thread while nothing holds the gate (a `ForEach`, a batch or masked pass, a query
+  walk) freezes it and counts itself with plain stores, no locked instruction: no other thread touches the gate
+  outside a region the owner opened ([D105](/en/docs/decisions#d105-owner-thread-passes)).
 - The cold paths that the threads of a parallel stage reach on their own (the first match of a query shape, a
   singleton resolved first, closing tombstones when the last pass ends) take a separate **shared gate**, a
   compare-and-swap flag with a spinning wait. Both flags sit on a cache line of their own.
@@ -309,9 +324,14 @@ flowchart TB
   **one world per owner thread** ([D13](/en/docs/decisions#d13-one-owner-thread-per-world)). The analyzer reports
   structural changes in `[ForEach]` methods that promise none (EECS013) and in delegates handed to other threads
   (EECS014).
+- Where the runtime synchronizes, it takes a `System.Threading.Lock` (a `lock` statement over one compiles to
+  `Lock.EnterScope`; cold, process-wide registries: component types, systems, interned filters, the buffer and record
+  pools) or swaps an immutable array by compare-and-swap (the query cache, the query memo and the queries kept per job
+  type, whose reset is one `Interlocked.Exchange`). It never locks a plain object (`lock (this)`, `lock (list)`), whose
+  monitor sits in the object header and inflates under contention ([D106](/en/docs/decisions#d106-lock-or-cas)).
 - Parallel runs use the calling thread plus reusable `IThreadPoolWorkItem` helpers that claim items through one
-  `Interlocked` cursor (the run's epoch in the high 32 bits, so a helper that starts late never touches the next
-  run): dynamic scheduling, OpenMP's `schedule(dynamic, n)`. The chunks of a parallel `[ForEach]` are multiples of
+  `Interlocked` cursor, alone on its cache line (the run's epoch in the high 32 bits, so a helper that starts late never
+  touches the next run): dynamic scheduling, OpenMP's `schedule(dynamic, n)`. The chunks of a parallel `[ForEach]` are multiples of
   64 rows, so no two threads share a presence-bit word; by default a job that writes a tracked component cuts at
   multiples of 4,096 rows, so no two threads share a block's change-tick summary. With `ChunkRows` its chunks may split
   a block: the pass opens the blocks it covers at its tick first, and their summaries take an atomic OR per 64 written

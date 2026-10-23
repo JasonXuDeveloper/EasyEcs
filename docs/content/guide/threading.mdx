@@ -94,7 +94,7 @@ Each system's access comes from its `[ForEach]` parameters:
 | `[Changed<T>]`, `[Removed<T>]` | reads `T` (its change ticks) |
 | `[ChangedAny<T1, …, Tn>]`, `[RemovedAny<T1, …, Tn>]` | reads each of `T1` to `Tn` |
 | `Entity` used only as an identity (`Id`, `Version`, `IsAlive`, `==`, an `EntityId`) | nothing |
-| `Entity` used otherwise, `World`, an instance method, an `OnUpdate` override | runs alone |
+| `Entity` used otherwise, `World`, an `[OnUpdate]` method, a `[Consume]` method | runs alone |
 | no `[ForEach]` method at all | runs alone |
 
 Two systems conflict when one writes something the other reads or writes, or when either runs alone. A system goes to
@@ -113,17 +113,20 @@ public record struct Body(float X, float Y, float Vx, float Vy) : IComponent;
 public record struct Vitals(int Health, int Max) : IComponent;
 public record struct Alarms(int Count) : ISingletonComponent;
 
-public class MoveBodies : EcsSystem        // writes Body
+[EcsSystem]
+public ref struct MoveBodies // writes Body
 {
     [ForEach] static void Move(ref Body b) { b.X += b.Vx; b.Y += b.Vy; }
 }
 
-public class RegenerateHealth : EcsSystem  // writes Vitals
+[EcsSystem]
+public ref struct RegenerateHealth // writes Vitals
 {
     [ForEach] static void Regenerate(ref Vitals v) => v.Health = Math.Min(v.Health + 1, v.Max);
 }
 
-public class LowHealthAlarm : EcsSystem    // reads Vitals: conflicts with RegenerateHealth
+[EcsSystem]
+public ref struct LowHealthAlarm // reads Vitals: conflicts with RegenerateHealth
 {
     [ForEach] static void Count(in Vitals v, ref Alarms alarms) { if (v.Health < 10) alarms.Count++; }
 }
@@ -173,7 +176,8 @@ run per entity and write no singleton ([EECS010](/en/docs/guide/analyzer#eecs010
 ```csharp
 public record struct Regen(int PerTick) : ISingletonComponent;
 
-public class RegenerateAll : EcsSystem
+[EcsSystem]
+public ref struct RegenerateAll
 {
     [ForEach(Parallel = true), Without<Dead>]
     static void Regenerate(ref Health hp, in Regen regen) => hp.Value += regen.PerTick;   // reads the singleton only
@@ -217,7 +221,8 @@ public record struct Crowd(float Pressure) : IComponent;
 ```
 
 ```csharp tab="Default chunks"
-public class CrowdPressure : EcsSystem
+[EcsSystem]
+public ref struct CrowdPressure
 {
     const int Iterations = 2_000;   // a few microseconds of work per cell
 
@@ -234,7 +239,8 @@ public class CrowdPressure : EcsSystem
 ```
 
 ```csharp tab="ChunkRows = 64"
-public class CrowdPressure : EcsSystem
+[EcsSystem]
+public ref struct CrowdPressure
 {
     const int Iterations = 2_000;   // a few microseconds of work per cell
 
@@ -353,7 +359,8 @@ public partial struct Extent : IReduction<Extent>
 ```
 
 ```csharp
-public class MeasureCrowd : EcsSystem
+[EcsSystem]
+public ref struct MeasureCrowd
 {
     [ForEach(Parallel = true)]
     static void Measure(in Position position, ref Reduce<Extent> extent)
@@ -444,7 +451,8 @@ that thread finds what the last one left.
 ```csharp
 public record struct Neighbors(int Count, int Spread) : IComponent;
 
-public class CountNeighbors : EcsSystem
+[EcsSystem]
+public ref struct CountNeighbors
 {
     [ForEach(Parallel = true)]
     static void Count(in Position position, ref Neighbors neighbors, Scratch<List<int>> scratch)
@@ -505,7 +513,8 @@ would take the `World` and call `TryGetEntity`, which keeps it on one thread. A 
 public record struct Quarry(EntityId Id) : IComponent;
 public record struct Heading(float X, float Y) : IComponent;
 
-public class ChaseSystem : EcsSystem
+[EcsSystem]
+public ref struct ChaseSystem
 {
     [ForEach(Parallel = true)]
     static void Chase(in Position position, in Quarry quarry, ref Heading heading, Lookup<Position> positions)
@@ -522,7 +531,8 @@ public partial record struct Login([UniqueKey] int Number) : IComponent;
 public record struct Asks(int Number) : IComponent;
 public record struct Answer(EntityId Login) : IComponent;
 
-public class MatchLogins : EcsSystem
+[EcsSystem]
+public ref struct MatchLogins
 {
     [ForEach(Parallel = true)]
     static void Match(in Asks asks, ref Answer answer, Lookup<Login> logins) =>
@@ -592,20 +602,23 @@ public record struct Hit(EntityId Target, int Amount);   // a record, not a comp
 public record struct Attack(int Power) : IComponent;
 public record struct Aim(EntityId Target) : IComponent;
 
-public class StrikeSystem : EcsSystem
+[EcsSystem]
+public ref struct StrikeSystem
 {
     [ForEach(Parallel = true)]
     static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits) =>
         hits.Add(new Hit(aim.Target, attack.Power));   // this chunk's list // [!code highlight]
 }
 
-public class ApplyHitsSystem : EcsSystem
+[EcsSystem]
+public ref struct ApplyHitsSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+        ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
         foreach (ref readonly var hit in hits.AsReadOnlySpan())
-            if (World.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
+            if (world.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
         hits.Clear();   // applied once
     }
 }
@@ -696,7 +709,8 @@ count and any order the rows run in.
 ```csharp
 public record struct Wander(float X, float Y) : IComponent;
 
-public class WanderSystem : EcsSystem
+[EcsSystem]
+public ref struct WanderSystem
 {
     [ForEach(Parallel = true)]
     static void Pick(ref Wander wander, Entity entity, in EntityRandom random)
@@ -708,10 +722,11 @@ public class WanderSystem : EcsSystem
 }
 
 // The system that advances the simulation's clock advances the random tick with it.
-[UpdateAfter<WanderSystem>]
-public class TickRandomSystem : EcsSystem
+[EcsSystem, UpdateAfter<WanderSystem>]
+public ref struct TickRandomSystem
 {
-    protected override void OnUpdate() => World.EntityRandom.Tick++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.EntityRandom.Tick++;
 }
 ```
 
@@ -790,12 +805,14 @@ public struct RollCriticals : IForSpan<Hit>
     }
 }
 
-public class CriticalSystem : EcsSystem
+[EcsSystem]
+public ref struct CriticalSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        var job = new RollCriticals { Random = World.EntityRandom };
-        World.ForParallel(ref World.GetSingleton<Emitted<Hit>>().Items, ref job);
+        var job = new RollCriticals { Random = world.EntityRandom };
+        world.ForParallel(ref world.GetSingleton<Emitted<Hit>>().Items, ref job);
     }
 }
 ```
@@ -828,22 +845,26 @@ using System.Collections.Concurrent;
 public record struct MoveRequest(int PlayerId, float X, float Y);           // a message, not a component
 public record struct MoveIntent(int PlayerId, float X, float Y) : IComponent;
 
-public sealed class ReceiveMoves(ConcurrentQueue<MoveRequest> inbox) : EcsSystem
-{
-    private readonly ConcurrentQueue<MoveRequest> _inbox = inbox;          // filled by the network threads
+[NotSaved]
+public record struct MoveInbox(ConcurrentQueue<MoveRequest> Moves) : ISingletonComponent;   // filled by the network threads
 
-    protected override void OnUpdate()
+[EcsSystem]
+public ref struct ReceiveMoves
+{
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_inbox.TryDequeue(out var move))
-            World.CreateEntity(new MoveIntent(move.PlayerId, move.X, move.Y));   // input becomes data
+        var moves = world.MoveInbox.Moves;
+        while (moves.TryDequeue(out var move))
+            world.CreateEntity(new MoveIntent(move.PlayerId, move.X, move.Y));   // input becomes data
     }
 }
 ```
 
-Register it with `world.AddSystem(new ReceiveMoves(inbox))` before the systems that consume `MoveIntent`. The queue's
-type, bound and back-pressure are your choice. Keep the queue in a `readonly` field of the system that drains it
-([EECS007](/en/docs/guide/analyzer#eecs007) allows it), not in a singleton: `World.Save` writes every singleton, and a
-managed queue would need a formatter. The [GameLoop sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop)
+Set the queue with `world.SetMoveInbox(inbox)` and register the system with `world.AddSystem<ReceiveMoves>()` before
+the systems that consume `MoveIntent`. The queue's type, bound and back-pressure are your choice. Keep the queue in a
+[`[NotSaved]`](/en/docs/guide/saves#not-saved) singleton: no save writes it, so a managed queue needs no formatter,
+and a load keeps the one the host set. The [GameLoop sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop)
 drains a mailbox from a network thread this way.
 
 ### What the world synchronizes [#what-the-world-synchronizes]
@@ -901,7 +922,8 @@ using EasyEcs;
 // Points every velocity at the target.
 // Parallel = true splits the rows into chunks on several threads: each call reads
 // its own row and the singleton, and writes only its own row.
-public class SteeringSystem : EcsSystem
+[EcsSystem]
+public ref struct SteeringSystem
 {
     [ForEach(Parallel = true)]
     static void Steer(in Position position, ref Velocity velocity, in Target target)
@@ -916,7 +938,8 @@ public class SteeringSystem : EcsSystem
 }
 
 // Writes only Health, which SteeringSystem does not touch: the two can run in the same stage.
-public class RegenerateSystem : EcsSystem
+[EcsSystem]
+public ref struct RegenerateSystem
 {
     [ForEach]
     static void Regenerate(ref Health health)
@@ -926,7 +949,8 @@ public class RegenerateSystem : EcsSystem
 }
 
 // Writes Position, which SteeringSystem reads: it waits for SteeringSystem to finish.
-public class MoveSystem : EcsSystem
+[EcsSystem]
+public ref struct MoveSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)
@@ -1054,7 +1078,7 @@ over 100,000 rows, sequential and parallel (`ParallelForEachBenchmark`):
 | A value index reached through a helper inside a parallel pass, before anything built it | `InvalidOperationException` | Call `TryFind` / `Find` / `Count` on the `Lookup<T>` parameter itself |
 | A reduction type that is not `partial`, or a field without an attribute | Compile error: the generator cannot write `Identity` and `Combine` | [EECS062](/en/docs/guide/analyzer#eecs062), [EECS064](/en/docs/guide/analyzer#eecs064) |
 | `Identity` 0 for a minimum, written by hand | Every chunk's minimum becomes 0 | [EECS066](/en/docs/guide/analyzer#eecs066): `[Min]` |
-| A singleton reset in `OnUpdate` and added to row by row | One thread, no vector loop | [EECS086](/en/docs/guide/analyzer#eecs086): `ref Reduce<T>` |
+| A singleton reset in `[OnUpdate]` and added to row by row | One thread, no vector loop | [EECS086](/en/docs/guide/analyzer#eecs086): `ref Reduce<T>` |
 | Reading `Emitted<T>` in the method that emits `T` | Compile error: the records arrive when the pass ends | [EECS070](/en/docs/guide/analyzer#eecs070) |
 | Not clearing `Emitted<T>` after applying it | The next update applies the same records again | Code review: `Items.Clear()` in the applying system |
 | Records added to a singleton's list row by row | One thread | [EECS089](/en/docs/guide/analyzer#eecs089): `Emit<T>` |

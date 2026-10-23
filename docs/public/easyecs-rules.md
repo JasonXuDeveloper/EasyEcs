@@ -51,15 +51,21 @@ available as Markdown: add `.md` to its URL.
 
 ## Systems
 
-- A system derives from `EcsSystem` and holds no state: no instance fields (EECS007), no references to other systems
-  (EECS008). State goes into components or singletons.
+- A system is an `[EcsSystem] public ref struct` of static members only, never instantiated (not a ref struct:
+  EECS074; an instance member: EECS075). Code a system once ran per update goes into hooks: `[OnCreate]`,
+  `[OnUpdate]` and `[OnDestroy]` static methods taking the `World`, the `SystemHandle`, both or neither (another
+  signature: EECS076). An `[OnUpdate]` method runs before the system's `[ForEach]` methods and makes it run alone.
+  A system holds no state: no mutable static field (EECS007), no reach into another system or `world.System<T>()` from
+  system code (EECS008). State goes into components or singletons; what the host hands in (a channel, a queue) is a
+  `[NotSaved]` singleton the host sets before `AddSystem<T>()`. The system APIs (`AddSystem<T>`, `[UpdateAfter<T>]`,
+  ...) take `[EcsSystem]` types only (EECS077).
 - One system per responsibility. Per-entity logic is a `static` `[ForEach]` method (EECS005):
   `[ForEach, Without<Dead>] static void Move(ref Position p, in Velocity v) => ...`.
   Take components by `ref` to write and `in` to read (EECS002); a `ref` that only reads is EECS025. Do not change
   what an `in` parameter holds (EECS011). Take only what the method uses: a component it only requires is a
   `[With<T>]` filter (EECS026), and a component or singleton it reads is a parameter, not a lookup through the
   `Entity` or `World` on every row (EECS027; an indexed component too: `in` or
-  `ReadOnlyMaybe<T>`). A method that uses nothing of its system is `static` (EECS029).
+  `ReadOnlyMaybe<T>`).
   A `[ForEach]` method takes 1 to 9 components (or none with a `[With<T>]` / `[Changed<T>]`, EECS003), is not generic
   (EECS004) nor a local function (EECS024), and its types are visible to the generated code (EECS022); a batch method
   takes spans, singletons and an `EntitySpan` only (EECS009).
@@ -95,7 +101,7 @@ available as Markdown: add `.md` to its URL.
   with `Slices` (EECS085). Its system runs alone, as any system that destroys entities.
 - Order systems with `[UpdateBefore<T>]` / `[UpdateAfter<T>]` inside the same group; no cycles (EECS019, EECS020).
   There is no `Priority`. Groups are `ISystemGroup` structs with `[UpdateInGroup<T>]`; cadence is
-  `[UpdateInterval(n, Phase = p)]` on the class (EECS082: no overrides; EECS083: n >= 1, 0 <= p < n).
+  `[UpdateInterval(n, Phase = p)]` on the system (EECS083: n >= 1, 0 <= p < n).
 - A system never calls `World.Update()` (EECS034): the host runs the world.
 - `[ForEach(Parallel = true)]` methods write data only and make no structural changes (EECS010); a later system on the
   owner thread acts on that data. A few hundred heavy rows (microseconds each) set `ChunkRows = 64` so threads take 64
@@ -275,14 +281,15 @@ public record struct Velocity(float X, float Y) : IComponent;
 public record struct Health(int Value) : IComponent;
 public struct Dead : IComponent;
 
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Dead>]
     static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
 }
 
-[UpdateAfter<MovementSystem>]
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<MovementSystem>]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp) { if (hp.Value <= 0) unit.SetDead(); }

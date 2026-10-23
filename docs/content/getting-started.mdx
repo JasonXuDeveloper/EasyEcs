@@ -133,20 +133,22 @@ ad-hoc pass.
 
 ### Write a system [#write-a-system]
 
-A system derives from `EcsSystem` and has one job. A `[ForEach]` method is its whole loop: it runs once per entity
+A system is an `[EcsSystem] ref struct` of static methods with one job. A `[ForEach]` method is its whole loop: it runs once per entity
 that has its component parameters, `ref` for what it writes and `in` for what it reads. Filters are attributes.
 Create `Systems.cs`:
 
 ```csharp title="Systems.cs"
 using EasyEcs;
 
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Dead>]                                  // movers that are not dead
     static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
 }
 
-public class BurnSystem : EcsSystem
+[EcsSystem]
+public ref struct BurnSystem
 {
     [ForEach, Without<Dead>]
     static void Burn(Entity unit, ref Burning burning, ref Health hp)
@@ -178,9 +180,11 @@ A `[ForEach]` method takes a singleton as a parameter, resolved once per pass. C
 as `World.Arena` (generated) or `World.GetSingleton<Arena>()`. Add to `Systems.cs`:
 
 ```csharp title="Systems.cs"
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate() => World.Arena.Tick++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.Arena.Tick++;
 }
 ```
 
@@ -196,8 +200,8 @@ death system writes a state, the `Dead` tag, and the corpse system reacts to it 
 exists. `[UpdateAfter<T>]` orders them by data flow. Add to `Systems.cs`:
 
 ```csharp title="Systems.cs"
-[UpdateAfter<BurnSystem>]                                     // after the damage is dealt
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>]                          // after the damage is dealt
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Arena arena)
@@ -208,10 +212,11 @@ public class DeathSystem : EcsSystem
     }
 }
 
-[UpdateAfter<DeathSystem>]
-public class CorpseSystem : EcsSystem
+[EcsSystem, UpdateAfter<DeathSystem>]
+public ref struct CorpseSystem
 {
-    protected override void OnUpdate() => World.DestroyAll<Dead>();   // every corpse in one pass
+    [OnUpdate]
+    static void OnUpdate(World world) => world.DestroyAll<Dead>();   // every corpse in one pass
 }
 ```
 
@@ -260,12 +265,13 @@ public struct Report : ISystemGroup;
 ```
 
 ```csharp tab="Systems.cs"
-[UpdateInGroup<Report>]
-public class ReportSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Report>]
+public ref struct ReportSystem
 {
-    protected override void OnUpdate() =>
-        Console.WriteLine($"tick {World.Arena.Tick}: {World.EntityCount} units, " +
-                          $"{World.Count<Burning>()} burning, {World.Arena.Deaths} dead");
+    [OnUpdate]
+    static void OnUpdate(World world) =>
+        Console.WriteLine($"tick {world.Arena.Tick}: {world.EntityCount} units, " +
+                          $"{world.Count<Burning>()} burning, {world.Arena.Deaths} dead");
 }
 ```
 
@@ -335,13 +341,15 @@ public struct Report : ISystemGroup;
 ```csharp title="Systems.cs"
 using EasyEcs;
 
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Dead>]
     static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
 }
 
-public class BurnSystem : EcsSystem
+[EcsSystem]
+public ref struct BurnSystem
 {
     [ForEach, Without<Dead>]
     static void Burn(Entity unit, ref Burning burning, ref Health hp)
@@ -351,8 +359,8 @@ public class BurnSystem : EcsSystem
     }
 }
 
-[UpdateAfter<BurnSystem>]
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Arena arena)
@@ -363,23 +371,27 @@ public class DeathSystem : EcsSystem
     }
 }
 
-[UpdateAfter<DeathSystem>]
-public class CorpseSystem : EcsSystem
+[EcsSystem, UpdateAfter<DeathSystem>]
+public ref struct CorpseSystem
 {
-    protected override void OnUpdate() => World.DestroyAll<Dead>();
+    [OnUpdate]
+    static void OnUpdate(World world) => world.DestroyAll<Dead>();
 }
 
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate() => World.Arena.Tick++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.Arena.Tick++;
 }
 
-[UpdateInGroup<Report>]
-public class ReportSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Report>]
+public ref struct ReportSystem
 {
-    protected override void OnUpdate() =>
-        Console.WriteLine($"tick {World.Arena.Tick}: {World.EntityCount} units, " +
-                          $"{World.Count<Burning>()} burning, {World.Arena.Deaths} dead");
+    [OnUpdate]
+    static void OnUpdate(World world) =>
+        Console.WriteLine($"tick {world.Arena.Tick}: {world.EntityCount} units, " +
+                          $"{world.Count<Burning>()} burning, {world.Arena.Deaths} dead");
 }
 ```
 

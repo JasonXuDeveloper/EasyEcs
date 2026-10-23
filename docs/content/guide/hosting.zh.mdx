@@ -136,7 +136,8 @@ public sealed class FixedStepLoop(World world)
 ```csharp
 public record struct Wander(float TargetX, float TargetY) : IComponent;
 
-public class ThinkSystem : EcsSystem
+[EcsSystem]
+public ref struct ThinkSystem
 {
     // 100,000 个 NPC：每个 tick 四分之一在思考，每个 NPC 每四个 tick 思考一次。
     [ForEach(Slices = 4)]
@@ -195,15 +196,20 @@ using System.Threading.Channels;
 
 public readonly record struct SpawnRequest(float X, float Y, TaskCompletionSource<EntityId> Reply);
 
-public sealed class ReceiveSpawns(ChannelReader<SpawnRequest> requests) : EcsSystem
-{
-    private readonly ChannelReader<SpawnRequest> _requests = requests;   // 依赖，允许（EECS007）
+// World 这一端的通道：存档不会写它的单例（通道没有格式化器）。
+[NotSaved]
+public record struct SpawnInbox(ChannelReader<SpawnRequest> Requests) : ISingletonComponent;
 
-    protected override void OnUpdate()
+[EcsSystem]
+public ref struct ReceiveSpawns
+{
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_requests.TryRead(out var request))
+        var requests = world.SpawnInbox.Requests;
+        while (requests.TryRead(out var request))
         {
-            var unit = World.CreateEntity(new Position(request.X, request.Y));
+            var unit = world.CreateEntity(new Position(request.X, request.Y));
             request.Reply.TrySetResult(unit.Id);                       // 回复 id，不回复句柄
         }
     }
@@ -215,8 +221,8 @@ public sealed class ReceiveSpawns(ChannelReader<SpawnRequest> requests) : EcsSys
 
 通道要有界（`Channel.CreateBounded`）：World 跟不上时，让调用方等待（`BoundedChannelFullMode.Wait`）或被拒绝（`DropWrite`、
 `TryWrite` 返回 false），而不是无限增长。[多线程与并行](/zh/docs/guide/threading#input-from-other-threads)一页用普通的
-`ConcurrentQueue<T>` 展示了同样的做法。读取端放在系统的 `readonly` 字段里，不要放进单例：`World.Save` 会写出每个单例，而通道
-没有格式化器。
+`ConcurrentQueue<T>` 展示了同样的做法。读取端放进宿主设置的 [`[NotSaved]`](/zh/docs/guide/saves#not-saved) 单例：
+存档不会写它，所以通道不需要格式化器，读档也保留 World 自己的值。
 
 停机时，在最后一个 tick 之后完成写入端（`requests.Writer.TryComplete()`），再答复通道里剩下的请求。之后再写入的处理代码会立刻
 拿到 `ChannelClosedException`，而不是等一个永远不来的答复（见[完整例子](#full-example)的 `Arena.RunAsync`）。
@@ -236,15 +242,19 @@ public static class Heals
     static void Heal(ref Health health, int amount) => health.Value += amount;
 }
 
-public sealed class ReceiveHeals(ChannelReader<HealRequest> requests) : EcsSystem
-{
-    private readonly ChannelReader<HealRequest> _requests = requests;
+[NotSaved]
+public record struct HealInbox(ChannelReader<HealRequest> Requests) : ISingletonComponent;   // 它自己的通道
 
-    protected override void OnUpdate()
+[EcsSystem]
+public ref struct ReceiveHeals
+{
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_requests.TryRead(out var request))
+        var requests = world.HealInbox.Requests;
+        while (requests.TryRead(out var request))
         {
-            bool healed = World.TryGetEntity(request.Unit, out var unit)
+            bool healed = world.TryGetEntity(request.Unit, out var unit)
                 && Heals.Heal(unit, request.Amount);                       // false：不在了、死了或没有 Health
             request.Reply.TrySetResult(healed);
         }
@@ -269,13 +279,16 @@ public sealed class StatusBoard
     public void Publish(ArenaStatus status) => Volatile.Write(ref _current, status);
 }
 
-[UpdateInterval(20)]                                                   // 20 Hz 下每秒一次
-public sealed class PublishStatus(StatusBoard board) : EcsSystem
-{
-    private readonly StatusBoard _board = board;
+// 宿主设置的看板：和收件箱一样是 [NotSaved] 单例。
+[NotSaved]
+public record struct Publisher(StatusBoard Board) : ISingletonComponent;
 
-    protected override void OnUpdate() =>
-        _board.Publish(new ArenaStatus(World.DefaultUpdateCount, World.Count<Position>()));
+[EcsSystem, UpdateInterval(20)]                                        // 20 Hz 下每秒一次
+public ref struct PublishStatus
+{
+    [OnUpdate]
+    static void OnUpdate(World world) =>
+        world.Publisher.Board.Publish(new ArenaStatus(world.DefaultUpdateCount, world.Count<Position>()));
 }
 ```
 
@@ -399,6 +412,13 @@ public readonly record struct SpawnRequest(float X, float Y, TaskCompletionSourc
 // 请求处理代码读取的内容：World 的线程发布的不可变拷贝。
 public sealed record ArenaStatus(long Tick, int Units);
 
+// 两者在 World 这一端：存档不会写的单例（通道和看板都没有格式化器），读档也保持宿主设置的值。
+[NotSaved]
+public record struct SpawnInbox(ChannelReader<SpawnRequest> Requests) : ISingletonComponent;
+
+[NotSaved]
+public record struct Publisher(StatusBoard Board) : ISingletonComponent;
+
 // 双方唯一共享的对象：World 的线程写，任何线程都可以读。
 public sealed class StatusBoard
 {
@@ -418,22 +438,23 @@ using System.Threading.Channels;
 using EasyEcs;
 
 // 在 World 的线程上，把上个 tick 以来到达的请求变成单位。
-public sealed class ReceiveSpawns(ChannelReader<SpawnRequest> requests) : EcsSystem
+[EcsSystem]
+public ref struct ReceiveSpawns
 {
-    // 依赖，不是状态：readonly 字段是允许的（EECS007）。
-    private readonly ChannelReader<SpawnRequest> _requests = requests;
-
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_requests.TryRead(out var request))
+        var requests = world.SpawnInbox.Requests;
+        while (requests.TryRead(out var request))
         {
-            var unit = World.CreateEntity(new Position(request.X, request.Y), new Velocity(1, 0));
+            var unit = world.CreateEntity(new Position(request.X, request.Y), new Velocity(1, 0));
             request.Reply.TrySetResult(unit.Id);
         }
     }
 }
 
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity, in Clock clock)
@@ -443,20 +464,21 @@ public class MovementSystem : EcsSystem
     }
 }
 
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate() => World.Clock.Tick++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.Clock.Tick++;
 }
 
 // 拷贝请求处理代码可以读的内容，每秒 20 个 tick 时每秒一次。
-[UpdateInterval(20)]
-public sealed class PublishStatus(StatusBoard board) : EcsSystem
+[EcsSystem, UpdateInterval(20)]
+public ref struct PublishStatus
 {
-    private readonly StatusBoard _board = board;
-
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        _board.Publish(new ArenaStatus(World.Clock.Tick, World.Count<Position>()));
+        world.Publisher.Board.Publish(new ArenaStatus(world.Clock.Tick, world.Count<Position>()));
     }
 }
 ```
@@ -495,11 +517,15 @@ public sealed class Arena : IDisposable
             _world.SetClock(Tick: 0, DeltaTime: 1f / TicksPerSecond);
         }
 
+        // World 和处理代码之间的连接：[NotSaved]，读档会保留它们。
+        _world.SetSpawnInbox(requests.Reader);
+        _world.SetPublisher(board);
+
         // 注册顺序就是 tick 里的执行顺序。
-        _world.AddSystem(new ReceiveSpawns(requests.Reader));
+        _world.AddSystem<ReceiveSpawns>();
         _world.AddSystem<MovementSystem>();
         _world.AddSystem<ClockSystem>();
-        _world.AddSystem(new PublishStatus(board));
+        _world.AddSystem<PublishStatus>();
     }
 
     public async Task RunAsync(CancellationToken stop)

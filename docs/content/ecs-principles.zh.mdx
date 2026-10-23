@@ -40,7 +40,7 @@ flowchart LR
 | **组件** | 描述某个实体某一方面的字段结构体（`Health`、`Velocity`）；计算属性没问题 | 类、带行为的对象、引用系统或服务的地方 |
 | **标签** | 用作过滤的空组件（`Dead`、`Frozen`） | 每个 tick 翻来翻去的布尔值（那该用字段） |
 | **单例** | 每个 World 一份的结构体：时钟、配置、计数器、空间网格 | 静态字段（会被所有 World 共享） |
-| **系统** | 只负责一件事的行为，读写组件和单例 | 存状态的地方，或者供其他系统调用的服务 |
+| **系统** | 只负责一件事的行为，读写组件和单例：一个只有静态方法的 `[EcsSystem] ref struct`，从来不是对象 | 存状态的地方，或者供其他系统调用的服务 |
 
 ## 规则 [#rules]
 
@@ -59,7 +59,8 @@ public struct Dead : IComponent;                                           // �
 ```csharp tab="之前"
 // 之前：燃烧“并且”死亡写在一个系统里。只有着火的单位才会被判定死亡：
 // 被别的原因打死的单位永远不会被标记为 Dead。
-public class StatusSystem : EcsSystem
+[EcsSystem]
+public ref struct StatusSystem
 {
     [ForEach, Without<Dead>]
     static void Tick(Entity unit, ref Burning burning, ref Health hp)
@@ -73,7 +74,8 @@ public class StatusSystem : EcsSystem
 
 ```csharp tab="之后"
 // 之后：每块逻辑都能单独移除、调整顺序、单独测试，死亡判定也覆盖了所有伤害来源。
-public class BurnSystem : EcsSystem
+[EcsSystem]
+public ref struct BurnSystem
 {
     [ForEach, Without<Dead>]
     static void Burn(Entity unit, ref Burning burning, ref Health hp)
@@ -83,8 +85,8 @@ public class BurnSystem : EcsSystem
     }
 }
 
-[UpdateAfter<BurnSystem>]   // 排在造成伤害的系统之后
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>] // 排在造成伤害的系统之后
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)   // `in`：只读 Health
@@ -94,8 +96,9 @@ public class DeathSystem : EcsSystem
 }
 ```
 
-拆分在运行时没有代价。每个 `[ForEach]` 方法本来就是各自内联的结构体 job；每个系统每次更新的开销是两次虚调用
-（`OnUpdate` 和生成的代码），再加每个 `[ForEach]` 方法一次查询缓存查找、每个单例参数一次查找。拿不准就拆。
+拆分在运行时没有代价。每个 `[ForEach]` 方法本来就是各自内联的结构体 job；每个系统每次更新的开销是对生成代码的一次直接调用
+（所在程序集系统集合里的一个 `switch` 分支，没有虚调用），有 `[OnUpdate]` 方法时再加一次调用，以及每个单例参数一次查找；每次遍历直接读按 job
+类型保存的查询。拿不准就拆。
 
 ### 2. 系统不保存状态 [#2-systems-are-stateless]
 
@@ -107,16 +110,18 @@ public class DeathSystem : EcsSystem
 | 每个实体一份（冷却、目标、路径） | 组件 |
 | 每个 World 一份（tick、比分、配置、空间网格） | 单例 |
 | 按值查找（按名字找玩家、找某人拥有的物品） | 被索引的组件（[索引与关系](/zh/docs/guide/indexes-and-relations)），不要手工维护一个字典 |
-| 派生、可重建的数据（每次更新复用的临时列表） | 系统上的 `readonly` 字段即可 |
+| 派生、可重建的数据（每次更新复用的临时列表） | [`Scratch<T>`](/zh/docs/guide/threading#scratch) 参数，或者系统上的 `static readonly` 字段 |
+| 宿主提供的依赖（邮箱、连接、服务） | 由宿主设置的 [`[NotSaved]`](/zh/docs/guide/saves#not-saved) 单例 |
 
 ```csharp tab="之前" doccheck=expect-EECS007
 // 之前（EECS007）：计数放在系统里，查询、测试和其他系统都看不到。
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
-    public int Deaths;
+    static int Deaths;
 
     [ForEach, Without<Dead>]
-    void Die(Entity unit, in Health hp)
+    static void Die(Entity unit, in Health hp)
     {
         if (hp.Value > 0) return;
         unit.SetDead();
@@ -129,8 +134,8 @@ public class DeathSystem : EcsSystem
 // 之后：计数是 World 级状态，谁都能读（world.Score.Deaths）。
 public record struct Score(int Deaths) : ISingletonComponent;
 
-[UpdateAfter<BurnSystem>]
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Score score)   // 单例参数
@@ -142,11 +147,12 @@ public class DeathSystem : EcsSystem
 }
 ```
 
-用于依赖或可复用临时缓冲的 `readonly` 字段、`init` 属性和计算属性都是允许的（[EECS007](/zh/docs/guide/analyzer#eecs007)）。
+系统只声明静态成员（[EECS075](/zh/docs/guide/analyzer#eecs075)）。常量和 `static readonly` 字段（查找表、可复用的临时缓冲）可以有；
+可变的静态字段报 [EECS007](/zh/docs/guide/analyzer#eecs007)：它是所有 World 共享的状态，系统移除后还留着。
 
 ### 3. 系统从不引用系统 [#3-systems-never-reference-systems]
 
-持有另一个系统（[EECS008](/zh/docs/guide/analyzer#eecs008)），或者通过 `World.TryGetSystem<T>(out …)` 拿到它的系统，再也没法单独移除、
+调用另一个系统的成员（[EECS008](/zh/docs/guide/analyzer#eecs008)），或者通过 `world.System<T>()`、`TryGetSystem<T>(out …)` 拿到它的系统，再也没法单独移除、
 调整顺序或单独测试。改为通过数据协作：
 
 - **流水线：** 前一个系统写组件，后一个系统读。先注册写的那个，或者用 `[UpdateAfter<T>]` 排序。
@@ -154,10 +160,11 @@ public class DeathSystem : EcsSystem
 
 ```csharp
 // 响应 Dead；DeathSystem 不知道它存在。
-[UpdateAfter<DeathSystem>]
-public sealed class CorpseSystem : EcsSystem
+[EcsSystem, UpdateAfter<DeathSystem>]
+public ref struct CorpseSystem
 {
-    protected override void OnUpdate() => World.DestroyAll<Dead>();   // 一次遍历清掉所有尸体
+    [OnUpdate]
+    static void OnUpdate(World world) => world.DestroyAll<Dead>();   // 一次遍历清掉所有尸体
 }
 ```
 
@@ -200,7 +207,8 @@ public record struct Facing(float Angle) : IComponent, ITracked;      // 被追�
 public record struct NetSync(Facing Sent) : IComponent;               // 客户端上次收到的值
 public record struct Outbox(int Updates) : ISingletonComponent;
 
-public class FacingSystem : EcsSystem
+[EcsSystem]
+public ref struct FacingSystem
 {
     // 每个 tick 都重算，但很少变：只有新的角度才给这一行打上 tick。
     [ForEach]
@@ -208,8 +216,8 @@ public class FacingSystem : EcsSystem
         facing.SetIfChanged(new Facing(MathF.Atan2(v.Y, v.X)));
 }
 
-[UpdateAfter<FacingSystem>]
-public class SyncSystem : EcsSystem
+[EcsSystem, UpdateAfter<FacingSystem>]
+public ref struct SyncSystem
 {
     [ForEach, Changed<Facing>]   // 只访问本系统上次执行后 Facing 变过的实体
     static void Sync(in Facing facing, ref NetSync sync, ref Outbox outbox)
@@ -226,8 +234,8 @@ public class SyncSystem : EcsSystem
 遍历途中新进入匹配表的实体（新建的，或者搬进匹配表的）留到下一次遍历。所以效果的先后就是系统的先后，而不是某个系统碰巧访问实体的顺序：
 
 ```csharp
-[UpdateAfter<BurnSystem>]   // 排在伤害之后；复活和掉落排在它之后
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>] // 排在伤害之后；复活和掉落排在它之后
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Score score)
@@ -315,8 +323,9 @@ public static class PlayerRules
 | 规则 | 怎么会被破坏 | 由谁拦下 |
 | --- | --- | --- |
 | 组件是数据 | 一个实现了 `IComponent` 的类 | [EECS006](/zh/docs/guide/analyzer#eecs006) |
-| [2. 系统不保存状态](#2-systems-are-stateless) | 系统上的可变字段、可写属性或事件 | [EECS007](/zh/docs/guide/analyzer#eecs007) |
-| [3. 系统从不引用系统](#3-systems-never-reference-systems) | 类型为系统的成员，系统内调用 `TryGetSystem<T>(out …)` | [EECS008](/zh/docs/guide/analyzer#eecs008) |
+| 系统不是对象 | `[EcsSystem]` 标在 class 或普通 struct 上；系统里有实例成员 | [EECS074](/zh/docs/guide/analyzer#eecs074)、[EECS075](/zh/docs/guide/analyzer#eecs075) |
+| [2. 系统不保存状态](#2-systems-are-stateless) | 系统上的可变静态字段 | [EECS007](/zh/docs/guide/analyzer#eecs007) |
+| [3. 系统从不引用系统](#3-systems-never-reference-systems) | 调用另一个系统的成员，系统内调用 `System<T>()` / `TryGetSystem<T>(out …)` | [EECS008](/zh/docs/guide/analyzer#eecs008) |
 | [5. 频繁的变化选最便宜的表示](#5-choose-the-cheapest-representation-for-frequent-changes) | 只读追踪组件的 `Query` 循环（每一行都被打 tick） | [EECS046](/zh/docs/guide/analyzer#eecs046)（警告） |
 | [6. 让调度决定效果的先后](#6-let-the-schedule-order-effects) | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 成环 | [EECS019](/zh/docs/guide/analyzer#eecs019) |
 | [7. 保存句柄，不要保存 ref](#7-keep-entity-handles-never-refs-across-boundaries) | 组件里的 `Entity` 字段；结构变更之后还用旧的 `ref` | [EECS017](/zh/docs/guide/analyzer#eecs017)、[EECS047](/zh/docs/guide/analyzer#eecs047)（警告） |

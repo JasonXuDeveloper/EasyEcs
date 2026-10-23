@@ -203,7 +203,7 @@ flowchart LR
 flowchart LR
     Add["AddSystem"] --> Sort["排序：注册顺序，<br/>按 UpdateBefore / UpdateAfter 调整"]
     Sort --> Stages["分阶段：排在它所跟随<br/>或冲突的最后一个系统之后"]
-    Stages --> Run["Update()：逐阶段运行<br/>OnUpdate + 生成的 [ForEach]"]
+    Stages --> Run["Update()：逐阶段运行<br/>每个集合片段一次调用"]
     Run --> Tick["每个阶段 ChangeTick + 1"]
 ```
 
@@ -211,9 +211,17 @@ flowchart LR
   `AddSystem` 在改动任何东西之前抛异常）。调度再切成阶段：一个系统进入“它必须跟随的系统所在的最后一个阶段”的下一个阶段，
   跟随关系来自排序约束，或来自更早注册且访问冲突的系统（`SystemAccess`）。两个冲突的系统，先注册的总是先跑完。两个数组都是写时复制；
   重建是 O(系统数²)，每次 `AddSystem` 或 `RemoveSystem` 做一次。
-- `Update()` 和 `Update<TGroup>()` 是同步的。对每个到期且启用的系统，先调用 `OnUpdate()`，再跑生成的 `[ForEach]` 方法。
-  每个阶段让变更 tick 加一，每次更新结束再加一。
-- `AddSystem` 调用 `OnCreate()`；`RemoveSystem` 和 `Dispose` 调用 `OnDestroy()`，`Dispose` 按逆序调用。
+- 系统从来不是对象。它的类型是只有静态方法的 `[EcsSystem] ref struct`；生成器把它的代码写成一个只有静态成员的结构体
+  （`ISystemCode`：`Update`、`Create`、`Destroy`、`Access` 和节奏），并为每个程序集写一个**系统集合**
+  （`__EasyEcsSystems : ISystemSet`）：给程序集里的系统、以及它点名的封闭泛型系统编号，每个钩子一个 `switch`，各个 case 直接调用对应的代码结构体。
+  模块初始化器注册这个集合；注册表弱引用它，可回收程序集照样能卸载
+  （[D102](/zh/docs/decisions#d102-systems-are-ref-structs)、[D103](/zh/docs/decisions#d103-system-sets)）。
+- World 对一个系统的了解是数组里的一条记录（启用、错误、间隔和相位、上次运行 tick、运行次数、统计、所属集合和编号）；`SystemHandle`
+  是 World、记录下标和记录版本，就像 `Entity` 之于一行，所以已移除系统的句柄会失效。
+- 每个阶段再切成**片段**：属于同一个集合的连续系统。`Update()` 和 `Update<TGroup>()` 是同步的：每个片段通过按集合绑定一次的函数指针调用一次，
+  这次调用遍历片段里启用且到期的系统，经集合的 `switch` 调用各自的代码，所以同一个程序集的系统互相之间是直接调用。系统的代码先跑它的
+  `[OnUpdate]` 方法，再跑生成的 `[ForEach]` job。每个阶段让变更 tick 加一，每次更新结束再加一。
+- `AddSystem` 调用 `[OnCreate]` 方法；`RemoveSystem` 和 `Dispose` 调用 `[OnDestroy]` 方法，`Dispose` 按逆序调用。
 - 异常会从更新中抛出；在 `SystemErrorPolicy.Disable` 下，抛异常的系统被关掉，异常留在 `system.Error` 里。
 - 系统之间只通过数据协作（[D1](/zh/docs/decisions#d1-state-changes-are-data-no-events-or-callbacks)），所有行为都按调度顺序执行。
   使用细节见[系统](/zh/docs/guide/systems)。
@@ -223,7 +231,7 @@ flowchart LR
 | 部分 | 做什么 |
 | --- | --- |
 | `ArityGenerator` | 用一个模板生成 `EasyEcs.Core` 里每一族 T1..T9 重载（`Entity.Set` / `Remove`、`World.CreateEntity` / `CreateEntities` / `DestroyAll`、各个 job 接口、`ForEach` 及其变体、`Query`、`Count`、`Any`）。只对 `EasyEcs.Core` 运行。 |
-| `SystemGenerator` | 把 `[ForEach]` 方法变成结构体 job（逐实体，或对 span 参数按连续行段），放在单独的 file 类里，通过 `[UnsafeAccessor]` 调用用户方法（[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。每个系统得到一个 `SystemCode`（更新逻辑和访问集），由模块初始化器注册；系统之外的静态方法得到一个入口。`[Changed<T>]` / `[Removed<T>]` 变成 `Since(LastRunTick + 1)` 加一次对 `T` 的读声明；`Parallel = true` 把 job 分块执行。不可能做结构变更的 job 会加上 `INoStructuralChanges`。处理数值的逐实体方法会按方法体生成向量循环（`Kernel`：分支用掩码，支持窄通道、结构体值、宽行；[D68](/zh/docs/decisions#d68-vector-loops-without-opting-in)），否则给出逐行运行的原因；`[ForEntity]`、`[Consume]` 和 `[UpdateInterval]` 也在这里编译。 |
+| `SystemGenerator` | 把 `[ForEach]` 方法变成结构体 job（逐实体，或对 span 参数按连续行段），放在单独的 file 类里，通过 `[UnsafeAccessor]` 调用用户方法（[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。每个 `[EcsSystem]` 得到一个代码结构体（`__X_SystemCode : ISystemCode`：钩子、job、访问集和节奏），每个程序集得到一个系统集合（`__EasyEcsSystems`），由模块初始化器注册；系统之外的静态方法得到一个入口。生成的 job 声明 `OneQuery`（它的过滤条件是常量），遍历直接读 World 按 job 类型保存的查询（[D104](/zh/docs/decisions#d104-one-query-per-job-type)）。`[Changed<T>]` / `[Removed<T>]` 变成 `Since(LastRunTick + 1)` 加一次对 `T` 的读声明；`Parallel = true` 把 job 分块执行。不可能做结构变更的 job 会加上 `INoStructuralChanges`。处理数值的逐实体方法会按方法体生成向量循环（`Kernel`：分支用掩码，支持窄通道、结构体值、宽行；[D68](/zh/docs/decisions#d68-vector-loops-without-opting-in)），否则给出逐行运行的原因；`[ForEntity]`、`[Consume]` 和 `[UpdateInterval]` 也在这里编译。 |
 | `ComponentGenerator` | 为每个组件和单例生成 C# 14 扩展成员：`entity.Health`、`HasHealth`、`SetHealth(…)`、`IsDead`、`world.Clock`、`world.KillsIndex`、每种查询形状的 `item.Position`、缓冲和预制体的写方法，以及存档可以引用的类型和类型声明的设置（`[GroupBy]`、`[WhenTargetDestroyed]`、`[NotSaved]`）的注册。 |
 | `PartGenerator` | 把 partial 结构体用特性声明的内容写进它的另一个部分：由 `[Sum]` .. `[Any]` 生成 `IReduction<T>`，由 `[IndexKey]` / `[UniqueKey]` 生成显式的 `Key`，由 `[Group]` 生成 `Group`（[D101](/zh/docs/decisions#d101-declaration-attributes)）。 |
 | `EasyEcsAnalyzer` | 报告 EECS002–EECS089：生成器跳过的无效输入，以及违反 [ECS 设计原则](/zh/docs/ecs-principles)的代码，以及能用但有开销的代码。生成器从不报诊断，两者共用同一套检查。机械性的修复由 [EasyEcs.CodeFixes](/zh/docs/guide/analyzer) 提供。 |
@@ -256,13 +264,18 @@ flowchart TB
 
 - 结构变更、增删系统、`Capture` 和 `Restore` 都要进入 World 的**结构闸门**。它属于所有者线程：一个普通标志位，进入时检查并置位，
   离开时清零，没有任何原子指令。并行的系统阶段、并行 `[ForEach]` 的分块和批处理 job 运行期间会冻结它，所以在其中做结构变更会确定地抛出
-  `InvalidOperationException`；在闸门内重入也一样。
+  `InvalidOperationException`；在闸门内重入也一样。闸门空闲时，所有者线程上的遍历（`ForEach`、批处理或掩码遍历、查询遍历）用普通写冻结它并给自己计数，
+  不用带 lock 前缀的指令：所有者打开的区域之外，没有别的线程碰闸门（[D105](/zh/docs/decisions#d105-owner-thread-passes)）。
 - 并行阶段的线程各自会走到的冷路径（某种查询形状的第一次匹配、第一次解析某个单例、最后一个遍历结束时关闭墓碑）走另一个**共享闸门**：
   一个带自旋等待的 CAS 标志位。两个标志位独占一条缓存行。
 - 查询、`Get` 和 `Has` 无锁；组件值按设计不做同步。推荐的模型是**每个 World 一个所有者线程**
   （[D13](/zh/docs/decisions#d13-one-owner-thread-per-world)）。分析器会报告声称不做结构变更的 `[ForEach]` 方法里的结构变更（EECS013），
   以及交给其他线程的委托里的结构变更（EECS014）。
-- 并行运行使用调用线程，加上可复用的 `IThreadPoolWorkItem` 助手；助手通过一个 `Interlocked` 游标领取任务（高 32 位是本次运行的纪元，
+- 运行时需要同步的地方，要么取一个 `System.Threading.Lock`（对它写 `lock` 语句会编译成 `Lock.EnterScope`；用于冷的、进程级的注册表：
+  组件类型、系统、驻留的过滤条件、缓冲池和记录池），要么用 CAS 换掉一个不可变数组（查询缓存、查询备忘，以及按 job 类型保存的查询，
+  重置是一次 `Interlocked.Exchange`）。从不锁普通对象（`lock (this)`、`lock (list)`）：它的监视器在对象头里，竞争时会膨胀
+  （[D106](/zh/docs/decisions#d106-lock-or-cas)）。
+- 并行运行使用调用线程，加上可复用的 `IThreadPoolWorkItem` 助手；助手通过一个独占缓存行的 `Interlocked` 游标领取任务（高 32 位是本次运行的纪元，
   启动太晚的助手不会碰到下一次运行），也就是动态调度，OpenMP 的 `schedule(dynamic, n)`。并行 `[ForEach]` 的块是 64 行的倍数，两个线程
   不会共用一个存在位字；写追踪组件的 job 默认按 4,096 行的倍数切块，两个线程不会共用一个块的变更 tick 摘要。设了 `ChunkRows` 时块可以切开
   一个 4,096 行块：遍历先按自己的 tick 打开它覆盖的块，摘要每写 64 行做一次原子 OR（[D67](/zh/docs/decisions#d67-chunk-rows)）。每个 job 和阶段都会测量自己的运行，只有当助手能让一次运行快至少五分之一时才唤醒它们

@@ -67,7 +67,7 @@ From each package's public API and the comparison ports, which compile against t
 | Structural changes inside a query loop | ✅ immediate, each entity visited once | ❌ throws `StructuralChangeException`; `CommandBuffer` | ⚠️ not guarded; `CommandBuffer` | ⚠️ `useBuffer` sets or `EntityCommandRecorder` |
 | Tags | ✅ empty components; removing one flips a bit | ✅ `ITag` (part of the archetype) | ⚠️ empty structs, moved like any component | ❌ |
 | Singletons | ✅ `ISingletonComponent`, `[ForEach]` parameters | ⚠️ `UniqueEntity` | ❌ | ✅ `World.Set<T>` / `Get<T>` |
-| Systems, ordering, groups | ✅ `EcsSystem`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`, `ISystemGroup`, `UpdateInterval` | ✅ `SystemRoot`, `SystemGroup`, `QuerySystem` | ❌ in core (Arch.Extended) | ✅ `ISystem<T>`, `SequentialSystem`, `AEntitySetSystem` |
+| Systems, ordering, groups | ✅ `[EcsSystem]`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`, `ISystemGroup`, `UpdateInterval` | ✅ `SystemRoot`, `SystemGroup`, `QuerySystem` | ❌ in core (Arch.Extended) | ✅ `ISystem<T>`, `SequentialSystem`, `AEntitySetSystem` |
 | Source-generated systems | ✅ `[ForEach]` → inlined struct jobs | ❌ | ❌ in core | ❌ |
 | Generated named API per component | ✅ `e.Position`, `HasX`, `SetX(...)`, `IsDead`, `world.Battle` | ❌ | ❌ | ❌ |
 | Compile-time analyzer | ✅ EECS002-EECS089, with code fixes | ❌ | ❌ | ❌ |
@@ -109,7 +109,8 @@ flushed. EasyEcs applies every change at once, also in the middle of a pass over
 each entity at most once:
 
 ```csharp title="DeathSystem.cs"
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)
@@ -429,7 +430,7 @@ The [battle server example](/en/docs/example) shows most of them.
 | Tags | Friflo | empty components; removing one flips a bit |
 | Unique entity, world components | Friflo, DefaultEcs | singletons, as `[ForEach]` parameters or a `SingletonRef<T>` |
 | Enable / disable an entity | Friflo, DefaultEcs | a tag (`[Without<Asleep>]`), or `Disable<T>()` for one component |
-| Systems, groups, ordering | Friflo, DefaultEcs, Arch.Extended | `EcsSystem`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`, `ISystemGroup`, `UpdateInterval` |
+| Systems, groups, ordering | Friflo, DefaultEcs, Arch.Extended | `[EcsSystem]`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`, `ISystemGroup`, `UpdateInterval` |
 | Struct query jobs, chunk iteration | Arch, Friflo | `IForEach`, `IForEachEntity`, `IForEachBatch`; batch `[ForEach]` methods |
 | Parallel query | Friflo, Arch, DefaultEcs | `[ForEach(Parallel = true)]`, `ForEachParallel`, `ForEachEntityParallel` |
 | Parallel systems | DefaultEcs | `WorldOptions.ParallelSystems` |

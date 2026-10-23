@@ -75,7 +75,8 @@ public record struct Clock(float Dt) : ISingletonComponent;     // 每个 World 
 只通过写入的数据协作。
 
 ```csharp
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Dead>]
     static void Move(ref Position p, in Velocity v, in Clock clock)

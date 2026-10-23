@@ -79,7 +79,8 @@ A **system** is the logic. It names the components it reads and writes, and the 
 has them. Systems do not call each other: they cooperate through the data they write.
 
 ```csharp
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Dead>]
     static void Move(ref Position p, in Velocity v, in Clock clock)

@@ -189,7 +189,8 @@ public record struct WorldPosition(float X, float Y) : IComponent;
 ```
 
 ```csharp title="PropagateTransforms.cs"
-public class PropagateTransforms : EcsSystem
+[EcsSystem]
+public ref struct PropagateTransforms
 {
     // 根：世界坐标就是本地坐标；然后每棵子树跟随它的父实体
     [ForEach, Without<ChildOf>]
@@ -272,7 +273,8 @@ using EasyEcs;
 
 // 从根往下计算每个世界坐标，
 // 每个子实体都跟着父实体的新位置走。
-public class PropagateTransforms : EcsSystem
+[EcsSystem]
+public ref struct PropagateTransforms
 {
     // 根实体没有 ChildOf：世界坐标就是本地坐标。
     [ForEach, Without<ChildOf>]

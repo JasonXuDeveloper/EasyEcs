@@ -31,7 +31,7 @@ EasyEcs and allocates <BenchValue k="peers.defaultecs.alloc" /> per tick, where 
 | | EasyEcs | DefaultEcs |
 | --- | --- | --- |
 | Storage | archetype tables, presence bits per column | a pool per component type, entity sets |
-| A system | an `EcsSystem` with generated `[ForEach]` jobs | `AEntitySetSystem<T>` / `AComponentSystem<T, TComponent>` with `[With]` / `[Without]` attributes |
+| A system | an `[EcsSystem]` with generated `[ForEach]` jobs | `AEntitySetSystem<T>` / `AComponentSystem<T, TComponent>` with `[With]` / `[Without]` attributes |
 | Changes during a pass | applied at once | applied at once to sets; `useBuffer` copies the set first, or an `EntityCommandRecorder` |
 | Change tracking | every `ref` write, `[Changed<T>]` | `NotifyChanged<T>()` at each write, `WhenChanged<T>()` sets |
 | Removal tracking | `[Removed<T>]` | `WhenRemoved<T>()` sets, completed by hand |
@@ -50,7 +50,7 @@ EasyEcs and allocates <BenchValue k="peers.defaultecs.alloc" /> per tick, where 
 | Tag | `e.Set<Dead>()` | `entity.SetDead()` |
 | Destroy | `e.Dispose()` | `entity.Destroy()` |
 | Singleton | `world.Set<T>(value)`, `world.Get<T>()` | `ISingletonComponent`, `world.SetClock(…)`, `world.Clock`, a `ref T` parameter |
-| System over a set | `[With(typeof(A)), Without(typeof(B))] class S : AEntitySetSystem<TState>` | `class S : EcsSystem` with `[ForEach, Without<B>] static void M(ref A a)` |
+| System over a set | `[With(typeof(A)), Without(typeof(B))] class S : AEntitySetSystem<TState>` | `[EcsSystem] ref struct S` with `[ForEach, Without<B>] static void M(ref A a)` |
 | System over one component | `AComponentSystem<TState, A>` | a `[ForEach]` method taking `ref A` |
 | Sequence of systems | `new SequentialSystem<T>(systems)` | `world.AddSystem<S>()` in order, or `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |
 | Parallel systems | `new ParallelSystem<T>(runner, systems)` | `WorldOptions.ParallelSystems` (conflicts from generated access) |
@@ -78,7 +78,8 @@ before the update (`DefaultEcsSimulation.cs`).
 public struct Hp : IComponent { public int Value, Max; }
 public struct Fire : IComponent { public int Ticks, DamagePerTick; }
 
-public class StatusSystem : EcsSystem
+[EcsSystem]
+public ref struct StatusSystem
 {
     [ForEach]
     static void Burn(Entity entity, ref Fire fire, ref Hp hp)

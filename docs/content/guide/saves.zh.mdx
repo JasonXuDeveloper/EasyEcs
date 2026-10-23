@@ -127,7 +127,8 @@ public static class Restart
     public static readonly ComponentSet Runtime = Startup.With<Connection>();
 }
 
-public class SaveBalances : EcsSystem
+[EcsSystem]
+public ref struct SaveBalances
 {
     [ForEach, Changed<Balance>]
     private static void Save(ref Outbox outbox) => outbox.Records++;   // 每个变了的余额一条记录
@@ -239,7 +240,8 @@ public record struct Workshop(int Recipe, int Progress, int Queue) : IComponent;
 
 // 在同时认识两个类型的版本里运行：加载进来的每个 Crafting 都变成 Workshop。
 // 之后的版本删掉 Crafting 和这个系统。
-public class UpgradeCrafting : EcsSystem
+[EcsSystem]
+public ref struct UpgradeCrafting
 {
     [ForEach]
     static void Upgrade(Entity player, in Crafting old)

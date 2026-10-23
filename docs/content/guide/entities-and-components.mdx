@@ -158,7 +158,8 @@ analyzer warns ([EECS017](/en/docs/guide/analyzer#eecs017)).
 ```csharp
 public record struct Target(EntityId Id) : IComponent;   // 8 bytes, unmanaged
 
-public class Chase : EcsSystem
+[EcsSystem]
+public ref struct Chase
 {
     [ForEach]
     static void Follow(ref Position p, in Target target, World world)

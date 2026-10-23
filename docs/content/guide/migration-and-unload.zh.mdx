@@ -211,7 +211,7 @@ World 已经分出去的键。`LoadEntities`、`LoadEntitiesInto` 和 `MoveEntit
 ### 卸载插件的类型 [#remove-types]
 
 `world.RemoveTypes(assembly)`（或 `RemoveTypes(context)`，针对一个 `AssemblyLoadContext` 里的所有程序集）把插件的一切从 World 中移除：
-它的系统（会执行 `OnDestroy`）、单例、索引和分组设置，以及所有实体上它的组件。实体本身保留，只是没了这些组件。含有这类列的表会连同
+它的系统（会执行 `[OnDestroy]`）、单例、索引和分组设置，以及所有实体上它的组件。实体本身保留，只是没了这些组件。含有这类列的表会连同
 引用它们的所有缓存一起丢弃，World 不再持有对这个程序集的任何引用。所有 World 都移除之后，可回收上下文就能卸载；卸载时，EasyEcs
 会忘掉这些类型的存档 id，并在没有存活 World 用到它们时复用其组件位。
 
@@ -291,7 +291,8 @@ public record struct Connection(int Socket) : IComponent;
 using EasyEcs;
 
 // 把上次运行之后被写过的 Bank 存进存储。
-public class SaveChangedBanks : EcsSystem
+[EcsSystem]
+public ref struct SaveChangedBanks
 {
     [ForEach, Changed<Bank>]
     static void Save(Entity actor, in Bank bank)

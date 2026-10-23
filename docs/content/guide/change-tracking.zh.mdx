@@ -42,7 +42,8 @@ public record struct Replica(int Health) : IComponent;
 `[Changed<Health>]` 只选出系统上次运行之后被写过的行。被追踪的组件用 `in` 读取。
 
 ```csharp title="Replicate.cs"
-public class Replicate : EcsSystem
+[EcsSystem]
+public ref struct Replicate
 {
     // 只处理自本系统上次运行以来 Health 被写过的实体
     // （第一次运行时是全部实体）
@@ -124,7 +125,8 @@ public record struct Position(float X, float Y) : IComponent, ITracked;
 public record struct Destination(float X, float Y) : IComponent;
 public record struct PositionReplica(float X, float Y) : IComponent;
 
-public class StepSystem : EcsSystem
+[EcsSystem]
+public ref struct StepSystem
 {
     // 每个 tick 处理每个 NPC：其中大多数已经站在目的地上。
     [ForEach]
@@ -137,8 +139,8 @@ public class StepSystem : EcsSystem
     }
 }
 
-[UpdateAfter<StepSystem>]
-public class ReplicatePositionSystem : EcsSystem
+[EcsSystem, UpdateAfter<StepSystem>]
+public ref struct ReplicatePositionSystem
 {
     // 只访问位置变了的 NPC，而不是 StepSystem 访问过的每一个。
     [ForEach, Changed<Position>]
@@ -212,7 +214,8 @@ bool moved = npcs[7].SetPositionIfChanged(1, 0);   // false：走了一步，已
 public record struct Burning(int Ticks) : IComponent, ITracked;           // 被追踪：移除也会被记录
 public record struct FireReplica(bool Burning) : IComponent;              // 客户端知道的着火状态
 
-public class ReplicateFire : EcsSystem
+[EcsSystem]
+public ref struct ReplicateFire
 {
     [ForEach, Changed<Burning>]                     // 上次运行后被点燃（或火势被改写）
     static void Lit(ref FireReplica replica) => replica.Burning = true;
@@ -271,7 +274,8 @@ public record struct Poisoned(int Ticks) : IComponent, ITracked;
 public record struct UnitReplica(int Health, int Armor, float X, float Y) : IComponent;
 public record struct StatusReplica(bool Burning, bool Poisoned) : IComponent;
 
-public class ReplicateUnitSystem : EcsSystem
+[EcsSystem]
+public ref struct ReplicateUnitSystem
 {
     // 上次运行后血量、护甲或位置被写过：不管变了几个，每个单位只访问一次。
     [ForEach, ChangedAny<Health, Armor, Position>] // [!code highlight]
@@ -421,7 +425,8 @@ public partial struct Sent : ISingletonComponent { [Sum] public int Rows; }
 using EasyEcs;
 
 // 着火的单位每个 tick 掉 10 点血，直到火熄灭。
-public class BurnSystem : EcsSystem
+[EcsSystem]
+public ref struct BurnSystem
 {
     [ForEach]
     static void Burn(Entity unit, ref Burning burning, ref Health health)
@@ -436,8 +441,8 @@ public class BurnSystem : EcsSystem
 }
 
 // 发送自本系统上次运行以来血量被写过的单位。
-[UpdateAfter<BurnSystem>]
-public class ReplicateHealthSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>]
+public ref struct ReplicateHealthSystem
 {
     // Health 用 `in` 读：用 `ref` 会算作一次写入。
     [ForEach, Changed<Health>]
@@ -449,8 +454,8 @@ public class ReplicateHealthSystem : EcsSystem
 }
 
 // 告诉客户端火熄灭了：访问自上次运行以来失去 Burning 的单位。
-[UpdateAfter<BurnSystem>]
-public class ReplicateFireOutSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>]
+public ref struct ReplicateFireOutSystem
 {
     [ForEach, Removed<Burning>]
     static void FireOut(Entity unit, in Health health)

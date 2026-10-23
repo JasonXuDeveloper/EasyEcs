@@ -201,7 +201,8 @@ public record struct WorldPosition(float X, float Y) : IComponent;
 ```
 
 ```csharp title="PropagateTransforms.cs"
-public class PropagateTransforms : EcsSystem
+[EcsSystem]
+public ref struct PropagateTransforms
 {
     // Roots: their world position is their local one; then each subtree follows its parent.
     [ForEach, Without<ChildOf>]
@@ -287,7 +288,8 @@ using EasyEcs;
 
 // Computes every world position from the roots down,
 // so each child follows its parent's new position.
-public class PropagateTransforms : EcsSystem
+[EcsSystem]
+public ref struct PropagateTransforms
 {
     // Roots have no ChildOf: their world position is their local one.
     [ForEach, Without<ChildOf>]

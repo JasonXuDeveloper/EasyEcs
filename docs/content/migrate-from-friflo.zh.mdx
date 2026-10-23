@@ -32,10 +32,10 @@ dotnet add package EasyEcs
 | `EntityStore` | `World` | 每个 World 只属于一个线程。 |
 | `IComponent` struct | `IComponent` struct | 只换命名空间。 |
 | `ITag` | 空的 `IComponent` struct | 标签就是组件；移除时只翻一个位。 |
-| `ArchetypeQuery<A, B>` + `Chunks` 循环 | `EcsSystem` 里的 `[ForEach]` 方法 | 循环由生成器写。 |
+| `ArchetypeQuery<A, B>` + `Chunks` 循环 | `[EcsSystem]` 里的 `[ForEach]` 方法 | 循环由生成器写。 |
 | `CommandBuffer` + `Playback()` | 直接调用 | 变更当场生效，遍历途中也一样。 |
 | `UniqueEntity` | `ISingletonComponent` | 每个 World 一份的数据，作为 `ref` 参数。 |
-| `SystemRoot`、`SystemGroup`、`QuerySystem` | `World.AddSystem<T>()`、`ISystemGroup`、`EcsSystem` | |
+| `SystemRoot`、`SystemGroup`、`QuerySystem` | `World.AddSystem<T>()`、`ISystemGroup`、`[EcsSystem]` | |
 | `OnComponentRemoved` / `OnComponentAdded` 事件 | `[Removed<T>]`、`[Changed<T>]` | 状态变化就是数据。 |
 | `entity.Enabled` | 标签加 `[Without<T>]`，或 `entity.Disable<T>()` | EasyEcs 禁用的是组件，不是整个实体（[D8](/zh/docs/decisions)）。 |
 
@@ -128,7 +128,8 @@ public struct WorldStats : ISingletonComponent
 EasyEcs：每行调一次方法；计数器是 `ref` 单例参数，每一遍只解析一次。
 
 ```csharp tab="EasyEcs" title="AoiSystem.cs"
-public class AoiSystem : EcsSystem
+[EcsSystem]
+public ref struct AoiSystem
 {
     [ForEach, Without<Dead>]
     static void UpdateCell(in Position p, ref AoiCell aoi, ref WorldStats stats)
@@ -166,7 +167,8 @@ foreach (var (positions, cells, _) in _cells.Chunks)
 Friflo 先记下标签，循环结束后回放缓冲。EasyEcs 在决定的地方直接加上，紧随其后的复活系统已经能看到死者：
 
 ```csharp tab="EasyEcs" title="DeathSystem.cs"
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
@@ -178,7 +180,8 @@ public class DeathSystem : EcsSystem
     }
 }
 
-public class RespawnSystem : EcsSystem
+[EcsSystem]
+public ref struct RespawnSystem
 {
     [ForEach, With<Dead>, With<Player>]
     static void Respawn(Entity entity, ref Health health)
@@ -234,7 +237,8 @@ world.Instantiate(Grunt, wave);
 public record struct Buff(int Ticks) : IComponent, ITracked;
 public record struct Expired(int Count) : IComponent;
 
-public class BuffReplication : EcsSystem
+[EcsSystem]
+public ref struct BuffReplication
 {
     [ForEach, Removed<Buff>]
     static void Send(ref Expired expired) => expired.Count++;

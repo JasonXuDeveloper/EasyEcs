@@ -71,7 +71,7 @@ the columns), or a job marked `INoStructuralChanges`. The analyzer reports the c
 helper or a handle it could not follow.
 
 **Fix:** record the change as data (a tag, a component, a request entity) and make it in a system or `[ForEach]`
-method that runs alone: one that takes `Entity` or `World`, or an `OnUpdate`.
+method that runs alone: one that takes `Entity` or `World`, or an `[OnUpdate]` method.
 
 ## Why is my entity "not alive"? [#entity-not-alive]
 
@@ -150,14 +150,16 @@ InvalidOperationException: The entity has no Mana (check HasValue)
 The entity the method visits has no `T`. **Fix:** test `HasValue` before reading `Value`
 ([`Maybe<T>`](/en/docs/guide/systems#maybe)).
 
-## Why does `AddSystem` say the system "already belongs to a world"? [#system-in-a-world]
+## Why does `AddSystem` say the system "is already a system of this world"? [#system-in-a-world]
 
 ```text
-InvalidOperationException: ReceiveSpawns already belongs to a world
+InvalidOperationException: ReceiveSpawns is already a system of this world
 ```
 
-A system instance lives in one world. **Fix:** create one instance per world (`world.AddSystem<T>()` creates a new
-one each time). Note that the same system type can be added twice to one world, and then runs twice per update.
+A world runs each system type once. **Fix:** add it once per world; every world has its own record of it, so the
+same type can be added to many worlds. To run one rule twice, over different components, make it a
+[generic system](/en/docs/guide/systems#generic-systems) and add two closed types; to run it more often, update its
+group more often.
 
 ## Why does `AddSystem` report a cycle? [#ordering-cycle]
 
@@ -321,8 +323,8 @@ look up the entity again by its `EntityId` when it may have been replaced
 ## Why do my systems not run in parallel? [#not-parallel]
 
 With `ParallelSystems`, a system shares a stage only when its access is known and does not conflict. A system runs
-alone when it takes a `World` parameter or an `Entity` it uses for more than its identity, has an instance
-`[ForEach]` method, overrides `OnUpdate`, or has no `[ForEach]` method. Two systems conflict when one writes what the
+alone when it takes a `World` parameter or an `Entity` it uses for more than its identity, has an `[OnUpdate]`
+method, has a `[Consume]` method, or has no `[ForEach]` method. Two systems conflict when one writes what the
 other reads or writes, and a `ref` parameter counts as a write even when the body only reads it: use `in`
 ([parallel systems](/en/docs/guide/threading#parallel-systems)). An ordering (`[UpdateAfter<T>]`) also puts the later
 system in a later stage.

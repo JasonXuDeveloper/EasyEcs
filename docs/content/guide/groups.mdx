@@ -134,7 +134,7 @@ so the analyzer rejects it as it does for indexed components ([EECS015](/en/docs
 ### Groups in systems [#in-systems]
 
 `[ForEach]` filters are attributes and cannot name a group value. A system that works on one group at a time runs a
-struct job from `OnUpdate`, with the group it reads from a singleton:
+struct job from its `[OnUpdate]` method, with the group it reads from a singleton:
 
 ```csharp
 public record struct ActiveZone(int Id) : ISingletonComponent;
@@ -144,18 +144,20 @@ public struct Regenerate : IForEach<Health>
     public void Execute(ref Health health) => health.Value += 1;
 }
 
-public class RegenerateActiveZone : EcsSystem
+[EcsSystem]
+public ref struct RegenerateActiveZone
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        var filter = QueryFilter.Create().InZone(World.ActiveZone.Id);
+        var filter = QueryFilter.Create().InZone(world.ActiveZone.Id);
         var job = new Regenerate();
-        World.ForEach<Health, Regenerate>(ref job, filter);
+        world.ForEach<Health, Regenerate>(ref job, filter);
     }
 }
 ```
 
-An `OnUpdate` override runs alone in its stage. Building the filter per update is cheap: a `QueryFilter` holds no
+An `[OnUpdate]` method runs alone in its stage. Building the filter per update is cheap: a `QueryFilter` holds no
 object reference.
 
 ### What follows a grouping [#what-follows]
@@ -227,15 +229,17 @@ public struct SumHealth : IForEach<Health>
 using EasyEcs;
 
 // Heals the units of the active zone only. [ForEach] attributes cannot name a group value,
-// so the system runs a struct job with an InGroup filter from OnUpdate.
-public class RegenerateActiveZone : EcsSystem
+// so the system runs a struct job with an InGroup filter from its [OnUpdate] method.
+[EcsSystem]
+public ref struct RegenerateActiveZone
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        int zone = World.ActiveZone.Id;
+        int zone = world.ActiveZone.Id;
         var inZone = QueryFilter.Create().InZone(zone);
         var job = new Regenerate();
-        World.ForEach<Health, Regenerate>(ref job, inZone);
+        world.ForEach<Health, Regenerate>(ref job, inZone);
     }
 }
 ```

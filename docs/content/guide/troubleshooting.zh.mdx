@@ -63,7 +63,7 @@ InvalidOperationException: A structural change was made while the world's struct
 方法或句柄发生的。
 
 **修法：**把变更记成数据（标签、组件、请求实体），在一个单独运行的系统或 `[ForEach]` 方法里执行：带 `Entity` 或 `World` 参数的
-方法，或者 `OnUpdate`。
+方法，或者 `[OnUpdate]` 方法。
 
 ## 为什么实体 “not alive”？ [#entity-not-alive]
 
@@ -138,11 +138,11 @@ InvalidOperationException: The entity has no Mana (check HasValue)
 ## 为什么 `AddSystem` 说系统 “already belongs to a world”？ [#system-in-a-world]
 
 ```text
-InvalidOperationException: ReceiveSpawns already belongs to a world
+InvalidOperationException: ReceiveSpawns is already a system of this world
 ```
 
-一个系统实例只属于一个 World。**修法：**每个 World 各建一个实例（`world.AddSystem<T>()` 每次都新建）。另外，同一个系统类型可以
-在一个 World 里添加两次，那样它每次更新会运行两次。
+每个系统类型在一个 World 里只跑一份。**修法：**每个 World 只加一次；每个 World 都有自己的一条记录，所以同一个类型可以加到很多 World 里。
+同一条规则要对不同的组件各跑一遍，就写成[泛型系统](/zh/docs/guide/systems#generic-systems)，加两个封闭类型；要跑得更频繁，就更频繁地更新它的分组。
 
 ## 为什么 `AddSystem` 报顺序成环？ [#ordering-cycle]
 
@@ -283,8 +283,8 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 
 ## 为什么我的系统没有并行？ [#not-parallel]
 
-开了 `ParallelSystems`，系统只有在访问集已知、且不冲突时才会共享一个阶段。带 `World` 参数或不只当身份用的 `Entity` 参数、有实例 `[ForEach]` 方法、
-重写了 `OnUpdate`，或者一个 `[ForEach]` 方法都没有的系统，都单独运行。一个写另一个读或写的东西，两个系统就冲突；`ref` 参数即使
+开了 `ParallelSystems`，系统只有在访问集已知、且不冲突时才会共享一个阶段。带 `World` 参数或不只当身份用的 `Entity` 参数、有 `[OnUpdate]` 方法、
+有 `[Consume]` 方法，或者一个 `[ForEach]` 方法都没有的系统，都单独运行。一个写另一个读或写的东西，两个系统就冲突；`ref` 参数即使
 方法体只读也算写：改用 `in`（[并行系统](/zh/docs/guide/threading#parallel-systems)）。顺序（`[UpdateAfter<T>]`）也会把后面的
 系统放进后面的阶段。
 

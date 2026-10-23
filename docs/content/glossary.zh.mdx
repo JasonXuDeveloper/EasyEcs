@@ -78,8 +78,19 @@ World 最初的几次更新：建好表、查询缓存和之后反复使用的�
 
 ## 系统（System） [#system]
 
-继承 `EcsSystem`、只做一件事的类。每次更新，它的 `[ForEach]` 方法会处理所有匹配的实体；系统自身不保存状态，也从不调用别的系统。
-见[系统](/zh/docs/guide/systems)。
+只有静态方法、只做一件事的 `[EcsSystem] ref struct`，从来不是对象。每次更新，它的 `[ForEach]` 方法会处理所有匹配的实体；系统自身不保存状态，
+也从不调用别的系统。见[系统](/zh/docs/guide/systems)。
+
+## 系统句柄（System handle） [#system-handle]
+
+即 `SystemHandle`：`AddSystem<T>()`、`System<T>()` 和 `world.Systems` 返回的东西，指向 World 里某个系统的记录（`Enabled`、`Error`、
+`LastRunTick`、`RunCount`、`Stats`、`Name`）。和 `Entity` 一样，系统被移除后它就失效。钩子可以接收它，读自己系统的记录。
+见[系统](/zh/docs/guide/systems#lifecycle)。
+
+## 系统集合（System set） [#system-set]
+
+生成器为每个程序集写的代码（`__EasyEcsSystems`）：给程序集里的每个系统、以及它点名的每个封闭泛型系统编号，每个钩子一个 `switch`，
+直接调用各系统的代码。World 用一次调用跑完同一个集合里的连续系统。见[架构](/zh/docs/architecture#systems)。
 
 ## 系统分组（System group） [#system-group]
 
@@ -101,8 +112,8 @@ actor 类型各配一个分组）。见[系统](/zh/docs/guide/systems#system-gr
 ## 访问集（Access set） [#access-set]
 
 一个系统读什么、写什么，由生成器根据 `[ForEach]` 参数得出：`ref` 的组件或单例算写，`in` 的算读，`Mut<T>` 参数算写 `T`，
-`[Changed<T>]`、`[Removed<T>]` 算读 `T`。一个写了另一个读或写的东西，两个系统就冲突。能碰到整个 World 的系统（带 `Entity` 或 `World` 参数、实例方法、
-重写了 `OnUpdate`、有 `[Consume]` 方法）独占运行。只有互不冲突的系统才会进同一个[阶段](#stage)。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
+`[Changed<T>]`、`[Removed<T>]` 算读 `T`。一个写了另一个读或写的东西，两个系统就冲突。能碰到整个 World 的系统（带 `Entity` 或 `World` 参数、
+有 `[OnUpdate]` 方法、有 `[Consume]` 方法）独占运行。只有互不冲突的系统才会进同一个[阶段](#stage)。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
 
 ## 执行器（Runner） [#runner]
 

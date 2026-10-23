@@ -96,7 +96,7 @@ int cleared = world.DestroyAll<Shot>();                          // every shot, 
 | On a disabled `T` | replaced: enabled, with the new value | | | |
 | [Cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) | | the last one frees a retired entity | refused (throws) | |
 
-All four are structural changes of the owner thread: call them between updates, from a system's `OnUpdate`, or from a
+All four are structural changes of the owner thread: call them between updates, from a system's `[OnUpdate]`, or from a
 `[ForEach]` method that takes an `Entity` or the `World` (a method that takes neither promises no structural change).
 
 ## Full example [#full-example]
@@ -132,7 +132,8 @@ public record struct Shot(int Damage) : IComponent;
 using EasyEcs;
 
 // Fighters that are not stunned regain health. A disabled Regen is hidden, so it pauses too.
-public class RegenerateSystem : EcsSystem
+[EcsSystem]
+public ref struct RegenerateSystem
 {
     [ForEach, Without<Stun>]
     static void Heal(ref Health health, in Regen regen)

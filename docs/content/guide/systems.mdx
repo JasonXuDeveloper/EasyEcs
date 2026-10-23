@@ -6,9 +6,10 @@ icon: Cog
 ---
 
 A system is one job of the server's tick: move units, apply burning damage, kill the dead, send state to clients.
-It derives from `EcsSystem`, keeps no state of its own (state is in components and singletons) and never references
-another system. Its loops are `[ForEach]` methods: a static method whose parameters name the components it reads and
-writes, which the source generator compiles into a struct job as fast as a hand-written loop.
+It is an `[EcsSystem] ref struct` of static methods, never an object: it keeps no state of its own (state is in
+components and singletons) and never references another system. Its loops are `[ForEach]` methods: a static method
+whose parameters name the components it reads and writes, which the source generator compiles into a struct job as
+fast as a hand-written loop.
 
 ## When to use it [#when-to-use-it]
 
@@ -23,7 +24,7 @@ writes, which the source generator compiles into a struct job as fast as a hand-
 <Callout type="warn" title="Skip it for">
   A one-off pass that a request or a tool runs between ticks: write a [`[ForEach]`](#foreach-outside-systems) runner
   or a [query](/en/docs/guide/queries). State that must survive between ticks: put it in a component or a
-  [singleton](/en/docs/guide/singletons), never in a system field ([EECS007](/en/docs/guide/analyzer#eecs007)).
+  [singleton](/en/docs/guide/singletons), never in a static field of the system ([EECS007](/en/docs/guide/analyzer#eecs007)).
 </Callout>
 
 ## How to use it [#how-to-use-it]
@@ -33,15 +34,16 @@ writes, which the source generator compiles into a struct job as fast as a hand-
 
 ### Write the system [#write-the-system]
 
-Each `[ForEach]` method runs once per matching entity, every update. `ref` parameters are written, `in` parameters
-read; attributes filter the entities.
+A system is a `ref struct` marked `[EcsSystem]` that declares static members only. Each `[ForEach]` method runs once
+per matching entity, every update. `ref` parameters are written, `in` parameters read; attributes filter the entities.
 
 ```csharp title="Combat.cs"
 public record struct Burning(int Ticks, int Damage) : IComponent;
 public struct Player : IComponent;                                         // a tag
 public record struct BurnTotals(int Damage) : ISingletonComponent;
 
-public class BurnSystem : EcsSystem
+[EcsSystem]
+public ref struct BurnSystem
 {
     [ForEach, Without<Dead>]                                               // living entities only
     static void Burn(ref Health hp, in Burning burning, ref BurnTotals totals)
@@ -51,8 +53,8 @@ public class BurnSystem : EcsSystem
     }
 }
 
-[UpdateAfter<BurnSystem>]                                                  // damage first, then death
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>]                                       // damage first, then death
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)
@@ -83,26 +85,59 @@ int dealt = world.BurnTotals.Damage;               // 10
 
 ### Lifecycle [#lifecycle]
 
-| Hook or member | When |
+A system's hooks are static methods marked with an attribute. Each takes the `World`, the `SystemHandle`, both (in
+either order) or neither, returns void, and a system has at most one of each
+([EECS076](/en/docs/guide/analyzer#eecs076)):
+
+| Hook | When |
 | --- | --- |
-| `OnCreate()` | once, when the system is added (`world.AddSystem<T>()` / `AddSystem(system)`) |
-| `OnUpdate()` | every update of its group, before its `[ForEach]` methods |
-| `[ForEach]` methods | every update, after `OnUpdate`, in source order (a base class's first) |
-| `OnDestroy()` | once, on `world.RemoveSystem<T>()` or `world.Dispose()` (reverse order) |
-| `World` | the owning world, set before `OnCreate` |
-| `Enabled` | `false` skips the system in `Update()` and `Update<TGroup>()` |
+| `[OnCreate]` | once, when the system is added (`world.AddSystem<T>()`) |
+| `[OnUpdate]` | every run of the system, before its `[ForEach]` methods |
+| `[ForEach]` methods | every run, after the `[OnUpdate]` method, in declaration order |
+| `[OnDestroy]` | once, on `world.RemoveSystem<T>()` or `world.Dispose()` (reverse order) |
+
+```csharp
+public record struct Wave(int Number) : ISingletonComponent;
+
+[EcsSystem]
+public ref struct WaveSystem
+{
+    [OnCreate]
+    static void OnCreate(World world) => world.SetWave(0);             // the data it works on
+
+    [OnUpdate]
+    static void OnUpdate(World world, SystemHandle system)
+    {
+        if (system.RunCount % 600 == 0) world.Wave.Number++;              // every 600th run
+    }
+
+    [OnDestroy]
+    static void OnDestroy(World world) => world.RemoveWave();
+}
+```
+
+The world keeps what it knows about a system as data, and a `SystemHandle` points at it, as an `Entity` points at a
+row:
+
+| `SystemHandle` member | What it is |
+| --- | --- |
+| `Enabled` | `false` skips the system in `Update()` and `Update<TGroup>()`; `true` clears `Error` |
 | `LastRunTick` | the change tick of its last run ([change tracking](/en/docs/guide/change-tracking#ticks)) |
 | `RunCount` | how many times it ran before the current run (0 during the first); a [sliced](#slices) method visits slice `RunCount % N` |
 | `Stats`, `Error` | [measurements](#measuring-systems) and the [exception that switched it off](#errors) |
+| `Name`, `Type`, `World` | its type's name (`Regen<Health>`), the type, the world it was added to |
+| `IsAlive` | false once the system is removed or the world disposed; the other members then throw |
 
-`AddSystem<T>()` returns the system; `TryGetSystem<T>(out system)` finds one (for tools and tests, never from another system:
-[EECS008](/en/docs/guide/analyzer#eecs008)); `world.Systems` lists every system without allocating; `DefaultUpdateCount`
-counts the default group's updates. A system belongs to one world: adding it to a second throws.
+`AddSystem<T>()` returns the handle, and adding a system the world already has throws; `System<T>()` and
+`TryGetSystem<T>(out handle)` find one (for tools and tests, never from another system:
+[EECS008](/en/docs/guide/analyzer#eecs008)), `HasSystem<T>()` asks; `world.Systems` lists every handle without
+allocating; `DefaultUpdateCount` counts the default group's updates. A type that is no `[EcsSystem]` given to any of
+them is [EECS077](/en/docs/guide/analyzer#eecs077).
 
 ```csharp
-if (world.TryGetSystem(out BurnSystem burn)) burn.Enabled = false;
-foreach (var system in world.Systems) Console.WriteLine(system.GetType().Name);
-world.RemoveSystem<BurnSystem>();                  // OnDestroy runs
+if (world.TryGetSystem<BurnSystem>(out var burn)) burn.Enabled = false;
+foreach (var system in world.Systems) Console.WriteLine(system.Name);
+world.RemoveSystem<BurnSystem>();                  // its [OnDestroy] runs, its handles turn stale
 long updates = world.DefaultUpdateCount;
 ```
 
@@ -112,7 +147,7 @@ long updates = world.DefaultUpdateCount;
 flowchart TB
     U["world.Update()"] --> S{"enabled and due?"}
     S -- no --> N["next system"]
-    S -- yes --> O["OnUpdate()"]
+    S -- yes --> O["[OnUpdate] method"]
     O --> F["[ForEach] methods, in source order"]
     F --> N
 ```
@@ -127,8 +162,7 @@ the stages the world built, what each system reads and writes and why a system w
 
 ### Ordering [#ordering]
 
-`[UpdateBefore<T>]` and `[UpdateAfter<T>]` move a system just before or after system `T` (and its subclasses) of the
-same group, whatever the order they were added in; the others keep their relative order. The order is resolved when
+`[UpdateBefore<T>]` and `[UpdateAfter<T>]` move a system just before or after system `T` of the same group, whatever the order they were added in; the others keep their relative order. The order is resolved when
 a system is added: a cycle throws there and the system stays out. The analyzer reports the cycles
 ([EECS019](/en/docs/guide/analyzer#eecs019)) and cross-group orderings ([EECS020](/en/docs/guide/analyzer#eecs020))
 it can see.
@@ -138,17 +172,18 @@ it can see.
 A system marked `[UpdateInterval(N)]` runs every N-th update of its group: on the updates whose count is a
 multiple of N, so first on the N-th. `Phase` (0 to N - 1) shifts which of the N updates it takes, so systems
 with the same interval spread their work instead of all running on the same tick. The attribute takes constants, so
-the cadence is fixed when the system is compiled; the generator writes it into the system's registration, and a
-derived system inherits it unless it declares its own ([EECS083](/en/docs/guide/analyzer#eecs083) reports an interval
-below 1 or a phase outside 0 to N - 1). To pause a system, set `Enabled`.
+the cadence is fixed when the system is compiled; the generator writes it into the system's code
+([EECS083](/en/docs/guide/analyzer#eecs083) reports an interval below 1 or a phase outside 0 to N - 1). To pause a
+system, set `Enabled` on its handle.
 
 ```csharp
 public record struct Autosave(long Count) : ISingletonComponent;
 
-[UpdateInterval(60, Phase = 30)]                   // every 60th update, half a cycle after the others
-public class SaveSystem : EcsSystem
+[EcsSystem, UpdateInterval(60, Phase = 30)]        // every 60th update, half a cycle after the others
+public ref struct SaveSystem
 {
-    protected override void OnUpdate() => World.GetOrAddAutosave().Count++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.GetOrAddAutosave().Count++;
 }
 ```
 
@@ -159,10 +194,11 @@ the world reads it once, when the system is added.
 <Tab value="You write">
 
 ```csharp doccheck=skip
-[UpdateInterval(60, Phase = 30)]
-public class SaveSystem : EcsSystem
+[EcsSystem, UpdateInterval(60, Phase = 30)]
+public ref struct SaveSystem
 {
-    protected override void OnUpdate() => World.GetOrAddAutosave().Count++;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.GetOrAddAutosave().Count++;
 }
 ```
 
@@ -170,17 +206,23 @@ public class SaveSystem : EcsSystem
 <Tab value="The generator writes">
 
 ```csharp doccheck=skip
-file static class __ForEach
+internal readonly struct __SaveSystem_SystemCode : ISystemCode
 {
-    internal sealed class Code : SystemCode
-    {
-        public Code() : base(60, 30) { }                       // [UpdateInterval(60, Phase = 30)]
+    public static int Interval => 60;                          // [UpdateInterval(60, Phase = 30)]
 
-        protected override void Update(EcsSystem system) { }   // no [ForEach] method: OnUpdate is the work
+    public static int Phase => 30;
+
+    public static void Update(World world, SystemHandle system)
+    {
+        __ForEach.OnUpdate_Update(default, world);             // the [OnUpdate] method, through UnsafeAccessor
     }
 
-    [ModuleInitializer]
-    internal static void Register() => SystemCode.Register(typeof(SaveSystem), new Code());
+    public static void Access(ref SystemAccess access)
+    {
+        access.RunAlone();                                     // an [OnUpdate] method may touch anything
+    }
+
+    // Create and Destroy: empty (no [OnCreate] or [OnDestroy] method); Loops: none (no [ForEach] method)
 }
 ```
 
@@ -188,8 +230,7 @@ file static class __ForEach
 </Tabs>
 
 A cadence computed at run time has no attribute form: put the system in a [system group](#system-groups) and update
-the group when it is due. An override of the removed `UpdateInterval` / `UpdatePhase` properties is
-[EECS082](/en/docs/guide/analyzer#eecs082), whose code fix writes the attribute.
+the group when it is due.
 
 ### Slices: part of the rows per run [#slices]
 
@@ -201,7 +242,8 @@ needs now and then but not every tick: AI that re-plans, needs that decay, sessi
 ```csharp
 public record struct Hunger(float Value) : IComponent;
 
-public class HungerSystem : EcsSystem
+[EcsSystem]
+public ref struct HungerSystem
 {
     // A quarter of the NPCs per update: each one once every four updates, with four updates' worth of hunger.
     [ForEach(Slices = 4)]
@@ -211,7 +253,7 @@ public class HungerSystem : EcsSystem
 
 - **Which slice:** a run visits slice `RunCount % N`. `RunCount` counts the system's runs before the current one (0
   during the first); runs skipped by `UpdateInterval` or while the system is disabled do not count, a run that throws
-  does. `OnUpdate` reads it to know which slice the run visits.
+  does. An `[OnUpdate]` method that takes the `SystemHandle` reads it to know which slice the run visits.
 - **Where a table is cut:** at multiples of 64 rows (its presence words), from its row count when the pass starts:
   of a table's w words, slice k takes words w × k / N to w × (k + 1) / N, and the last slice ends at the last row. A
   table of fewer than 64 rows is one piece, visited by one run of the N.
@@ -233,8 +275,8 @@ call; a [runner](#foreach-outside-systems) with `Slices = N` takes the slice to 
 
 ### `[ForEach]` methods [#foreach-methods]
 
-A `[ForEach]` method is declared in a class that derives from `EcsSystem` (no `partial` needed). It may be static or
-an instance method. Its parameters say what it runs over:
+A `[ForEach]` method is a static method of an `[EcsSystem]` (no `partial` needed). Its parameters say what it runs
+over:
 
 | Parameter | Meaning |
 | --- | --- |
@@ -291,7 +333,8 @@ The properties of `[ForEach]`:
 With no component parameter, the first `[With<T>]` (else the first `[Changed<T>]`) names the queried component:
 
 ```csharp doccheck=expect-EECS030
-public class CorpseCleanup : EcsSystem
+[EcsSystem]
+public ref struct CorpseCleanup
 {
     [ForEach, With<Dead>]
     static void Remove(Entity corpse) => corpse.Destroy();
@@ -299,17 +342,19 @@ public class CorpseCleanup : EcsSystem
 ```
 
 A method whose whole body is one structural change, the same for every row, is a loop the world runs faster itself: one
-[bulk call](/en/docs/guide/bulk) in `OnUpdate` changes each table at once
+[bulk call](/en/docs/guide/bulk) in the `[OnUpdate]` method changes each table at once
 ([EECS030](/en/docs/guide/analyzer#eecs030) says so):
 
 ```csharp
-public class CorpseCleanup : EcsSystem
+[EcsSystem]
+public ref struct CorpseCleanup
 {
-    protected override void OnUpdate() => World.DestroyAll<Dead>();
+    [OnUpdate]
+    static void OnUpdate(World world) => world.DestroyAll<Dead>();
 }
 ```
 
-A method that is static, takes no `World` and uses its `Entity` (if any) only to read (`Id`, `IsAlive`, `Has`,
+A method that takes no `World` and uses its `Entity` (if any) only to read (`Id`, `IsAlive`, `Has`,
 `Get`, `Read`, `TryGet`, `TryGetRef`) cannot change structure: its job implements `INoStructuralChanges` and walks
 each table with no per-entity check. A method that may change structure runs alone, and each entity is still visited
 at most once per pass ([Structural changes](/en/docs/guide/structural-changes)).
@@ -319,8 +364,8 @@ component, so it adds nothing to the system's access: the system is scheduled by
 parallel stage. Any other use of the handle (`Has`, `Get`, another call, passing the `Entity` on) can reach any
 component, and the system runs alone ([parallel systems](/en/docs/guide/threading#parallel-systems)).
 
-Methods run in source order, and a derived system runs its base class's `[ForEach]` methods first. Keep a system's
-methods in one file: across the files of a partial class the order is per file.
+Methods run in declaration order. Keep a system's methods in one file: across the files of a partial struct the
+order is per file.
 
 #### Optional components: `Maybe<T>` [#maybe]
 
@@ -332,7 +377,8 @@ reading only is a read.
 public record struct Shield(int Bonus) : IComponent;
 public record struct Stamina(int Value) : IComponent;
 
-public class Regeneration : EcsSystem
+[EcsSystem]
+public ref struct Regeneration
 {
     [ForEach]
     static void Regenerate(ref Stamina stamina, Maybe<Shield> shield) =>
@@ -365,7 +411,8 @@ public record struct Morale(int Value) : IComponent;
 ```
 
 ```csharp tab="Lookup per row" doccheck=expect-EECS027
-public class Rally : EcsSystem
+[EcsSystem]
+public ref struct Rally
 {
     [ForEach]
     static void Raise(Entity member, ref Morale morale) =>
@@ -374,7 +421,8 @@ public class Rally : EcsSystem
 ```
 
 ```csharp tab="ReadOnlyMaybe<T>"
-public class Rally : EcsSystem
+[EcsSystem]
+public ref struct Rally
 {
     [ForEach]
     static void Raise(ref Morale morale, ReadOnlyMaybe<Guild> guild) =>
@@ -405,7 +453,7 @@ none is left behind.
 
 How the rows go depends on the method:
 
-- **A method without structural changes** (static, no `World`, its `Entity` used only to read) has its rows destroyed
+- **A method without structural changes** (no `World`, its `Entity` used only to read) has its rows destroyed
   in bulk once the pass ends: one `DestroyAll` of the method's filter, which frees each table at once. Nothing makes a
   row start or stop matching during such a pass, so the rows that match at its end are the rows it visited. A pass
   that throws destroys nothing, and its rows are visited again.
@@ -420,7 +468,8 @@ How the rows go depends on the method:
 public record struct Sale(int Price) : IComponent;                     // an event entity
 public record struct Takings(long Gold) : ISingletonComponent;
 
-public class BankSales : EcsSystem
+[EcsSystem]
+public ref struct BankSales
 {
     [ForEach, Consume]
     static void Bank(in Sale sale, ref Takings takings) => takings.Gold += sale.Price;
@@ -428,7 +477,8 @@ public class BankSales : EcsSystem
 
 public record struct Heal(int Amount, EntityId Target) : IComponent;   // an event entity
 
-public class ApplyHeals : EcsSystem
+[EcsSystem]
+public ref struct ApplyHeals
 {
     [ForEach, Consume]
     static void Apply(in Heal heal, World world)
@@ -443,12 +493,15 @@ public class ApplyHeals : EcsSystem
 
 ```csharp doccheck=skip
 // BankSales makes no structural change: one DestroyAll after the pass.
-protected override void Update(EcsSystem system)
+internal readonly struct __BankSales_SystemCode : ISystemCode
 {
-    var world = system.World;
-    var job0 = new BankJob0 { /* the Takings singleton, resolved once */ };
-    world.ForEach<Sale, BankJob0>(ref job0);
-    world.DestroyAll<Sale>(); // [Consume]: the rows the pass visited
+    public static void Update(World world, SystemHandle system)
+    {
+        var job0 = new __ForEach.BankJob0 { s1 = ref world.SingletonRef<Takings>().Value };
+        if (SystemCode.Measuring(world)) SystemCode.Visit(system, world.Count<Sale>());
+        world.ForEach<Sale, __ForEach.BankJob0>(ref job0);
+        world.DestroyAll<Sale>(); // [Consume]: the rows the pass visited
+    }
 }
 
 // ApplyHeals takes the World: each row is destroyed after the method ran on it.
@@ -458,7 +511,7 @@ internal ref struct ApplyJob0 : IForEachEntity<Heal>
 
     public void Execute(Entity entity, ref Heal c1)
     {
-        __ForEach.Apply_0(null, in c1, World);
+        __ForEach.Apply_0(default, in c1, World);
         entity.Destroy();
     }
 }
@@ -496,7 +549,8 @@ runs: a change throws, and [EECS013](/en/docs/guide/analyzer#eecs013) reports it
 using System.Numerics;
 using System.Runtime.InteropServices;
 
-public class DriftSystem : EcsSystem
+[EcsSystem]
+public ref struct DriftSystem
 {
     [ForEach, Without<Dead>]
     static void Drift(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
@@ -526,7 +580,8 @@ costs more than it saves.
 ```csharp
 public record struct Clock(float Time) : ISingletonComponent;
 
-public class SteeringSystem : EcsSystem
+[EcsSystem]
+public ref struct SteeringSystem
 {
     [ForEach(Parallel = true), Without<Dead>]
     static void Steer(ref Velocity velocity, in Position position, in Clock clock)
@@ -551,7 +606,8 @@ the `n` of `schedule(dynamic, n)`, rounded up to 64, for a few hundred heavy row
 public record struct Route(int Length) : IComponent;
 public record struct Goal(int X, int Y) : IComponent;
 
-public class RouteSystem : EcsSystem
+[EcsSystem]
+public ref struct RouteSystem
 {
     const int Steps = 4_096;   // a path search per agent: microseconds each
 
@@ -596,14 +652,15 @@ scalar.
 </Callout>
 
 The method below qualifies. The second tab is the job the generator wrote for it (from the system's
-`CoolingSystem.….ForEach.g.cs`, trimmed to the loop and with the `global::` prefixes dropped):
+`CoolingSystem.….System.g.cs`, trimmed to the loop and with the `global::` prefixes dropped):
 
 ```csharp tab="You write"
 public struct Heat : IComponent { public float Value; }
 public struct Speed : IComponent { public float Value; }
 public record struct Pull(float Value) : ISingletonComponent;
 
-public class CoolingSystem : EcsSystem
+[EcsSystem]
+public ref struct CoolingSystem
 {
     [ForEach]
     static void Cool(ref Heat heat, ref Speed speed, in Pull pull)
@@ -653,7 +710,7 @@ public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2)
     }
     // 6. The tail: the rows after the last whole vector run your method itself
     for (; i < rows; i++)
-        __ForEach.Cool_0(null, ref Unsafe.Add(ref r1, i), ref Unsafe.Add(ref r2, i), in s2);
+        __ForEach.Cool_0(default, ref Unsafe.Add(ref r1, i), ref Unsafe.Add(ref r2, i), in s2);
 }
 ```
 
@@ -678,7 +735,8 @@ public struct Position3 : IComponent { public float X, Y, Z; }
 public struct Velocity3 : IComponent { public float X, Y, Z; }
 public record struct Gravity(float Pull) : ISingletonComponent;
 
-public class FallSystem : EcsSystem
+[EcsSystem]
+public ref struct FallSystem
 {
     [ForEach]
     static void Fall(ref Position3 position, ref Velocity3 velocity, in Gravity gravity)
@@ -693,7 +751,7 @@ public class FallSystem : EcsSystem
 ```
 
 ```csharp tab="The generator writes" doccheck=skip
-// Generated (FallSystem.….ForEach.g.cs, trimmed, global:: dropped). Do not copy it: Interleaved is the generator's
+// Generated (FallSystem.….System.g.cs, trimmed, global:: dropped). Do not copy it: Interleaved is the generator's
 // helper, and Fall_0 is an [UnsafeAccessor] to your private method.
 ref float e1 = ref Unsafe.As<Position3, float>(ref r1);   // the columns as runs of floats: X, Y, Z, X, Y, Z, ...
 ref float e2 = ref Unsafe.As<Velocity3, float>(ref r2);
@@ -720,7 +778,7 @@ if (Vector.IsHardwareAccelerated && Interleaved.IsAccelerated && rows - i >= Vec
     }
 }
 for (; i < rows; i++)   // 4. the tail, and every row without the shuffles: the method itself
-    __ForEach.Fall_0(null, ref Unsafe.Add(ref r1, i), ref Unsafe.Add(ref r2, i), in s2);
+    __ForEach.Fall_0(default, ref Unsafe.Add(ref r1, i), ref Unsafe.Add(ref r2, i), in s2);
 ```
 
 A method gets a vector loop when all of this holds; otherwise it runs row by row, exactly as before:
@@ -767,7 +825,8 @@ on its loop says so with `SimdMode = SimdMode.Require`, and the build fails
 public record struct Motion(System.Numerics.Vector3 Value) : IComponent;
 public struct Speed : IComponent { public float Value; }
 
-public class MeasureSpeed : EcsSystem
+[EcsSystem]
+public ref struct MeasureSpeed
 {
     [ForEach]   // EECS055: Vector3.Dot adds the fields of a vector together, in an order not proven to be the scalar code's
     static void Measure(ref Speed speed, in Motion motion) =>
@@ -779,7 +838,8 @@ public class MeasureSpeed : EcsSystem
 public record struct Motion(System.Numerics.Vector3 Value) : IComponent;
 public struct Speed : IComponent { public float Value; }
 
-public class MeasureSpeed : EcsSystem
+[EcsSystem]
+public ref struct MeasureSpeed
 {
     [ForEach]   // the sum written out: its order is the method's, so each lane computes it the same way
     static void Measure(ref Speed speed, in Motion motion)
@@ -802,7 +862,8 @@ machines (as Burst's `FloatMode.Fast`). Integer sums and the `Min` / `Max` of an
 ```csharp tab="Exact" doccheck=expect-EECS055
 public record struct Clock(float Time) : ISingletonComponent;
 
-public class SteeringSystem : EcsSystem
+[EcsSystem]
+public ref struct SteeringSystem
 {
     [ForEach]   // EECS055: MathF.Cos is not bit-exact in vector form
     static void Steer(ref Velocity velocity, in Position position, in Clock clock)
@@ -816,7 +877,8 @@ public class SteeringSystem : EcsSystem
 ```csharp tab="Fast"
 public record struct Clock(float Time) : ISingletonComponent;
 
-public class SteeringSystem : EcsSystem
+[EcsSystem]
+public ref struct SteeringSystem
 {
     [ForEach(FloatMode = FloatMode.Fast)]   // the vector approximations: a few ulp, faster
     static void Steer(ref Velocity velocity, in Position position, in Clock clock)
@@ -838,7 +900,7 @@ last bits nobody compares (steering noise, particles, visual decay).
       loop Spawn: scalar (it takes the Entity)
 ```
 
-The system's generated file (`<System>.….ForEach.g.cs`, under the project's generated sources, or with
+The system's generated file (`<System>.….System.g.cs`, under the project's generated sources, or with
 `<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>` under `obj/`) holds the loop itself. To see what the
 JIT makes of it, `tools/jitdisasm.sh <project> 'EasyEcs.World:Masked'` builds the project in Release, runs it with
 `DOTNET_JitDisasm` and prints the optimized code of every vector method on one thread (the job's `Execute` is inlined
@@ -863,8 +925,8 @@ server can apply input whenever it arrives and simulate at a fixed tick.
 ```csharp
 public struct InputGroup : ISystemGroup;
 
-[UpdateInGroup<InputGroup>]
-public class ApplyInputSystem : EcsSystem
+[EcsSystem, UpdateInGroup<InputGroup>]
+public ref struct ApplyInputSystem
 {
     [ForEach, With<Player>]
     static void Apply(ref Velocity velocity)
@@ -882,8 +944,7 @@ world.Update();               // fixed tick: the default group
 long inputs = world.UpdateCount<InputGroup>();   // Update<InputGroup>() calls so far
 ```
 
-Ordering, `[UpdateInterval]` and `Enabled` apply within each group, and the attribute is inherited.
-Updating a group with no systems does nothing. `world.UpdateCount<TGroup>()` counts a group's updates, the running
+Ordering, `[UpdateInterval]` and `Enabled` apply within each group. Updating a group with no systems does nothing. `world.UpdateCount<TGroup>()` counts a group's updates, the running
 one included, as `DefaultUpdateCount` does for the default group: it is the count the group's `UpdateInterval`s are
 taken from, so a tool or a test can tell which systems run on the next update. O(1); 0 for a group no system was
 added to.
@@ -893,8 +954,8 @@ added to.
 `[With<T>]`, `[Without<T>]` and `[WithAny<T>]` on the group struct join every `[ForEach]` method of its systems: a
 whole group can leave frozen or inactive entities out without repeating the filter on each method. A group's
 `[WithAny<T>]` joins the method's own `[WithAny<T>]` set, so it widens the "at least one of" test: a group with
-`[WithAny<A>]` and a method with `[WithAny<B>]` select entities with `A` or `B`. Queries a system makes in `OnUpdate`
-are its own, and [`[ForEach]`](#foreach-outside-systems) runners belong to no group, so no group filter applies to
+`[WithAny<A>]` and a method with `[WithAny<B>]` select entities with `A` or `B`. Queries a system makes in its
+`[OnUpdate]` method are its own, and [`[ForEach]`](#foreach-outside-systems) runners belong to no group, so no group filter applies to
 them. A filter attribute on a struct that is not a group is a compile error
 ([EECS023](/en/docs/guide/analyzer#eecs023)).
 
@@ -902,8 +963,8 @@ them. A filter attribute on a struct that is not a group is a compile error
 [Without<Frozen>]
 public struct Gameplay : ISystemGroup;              // no method of the group sees a frozen entity
 
-[UpdateInGroup<Gameplay>]
-public class MoveSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Gameplay>]
+public ref struct MoveSystem
 {
     [ForEach]
     static void Move(ref Position p, in Velocity v)
@@ -935,8 +996,8 @@ public readonly partial record struct Shop(long Id) : IActor<Shop>;
 
 public record struct Stock(int Items) : IComponent;
 
-[UpdateInGroup<Shop>]
-public class RestockSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Shop>]
+public ref struct RestockSystem
 {
     [ForEach]                                       // only entities tagged In<Shop>
     static void Restock(ref Stock stock) => stock.Items = Math.Max(stock.Items, 10);
@@ -957,14 +1018,20 @@ saving.
 ### Generic systems [#generic-systems]
 
 A system can be generic. Each closed type is a system of its own, with its own generated job and access set, so
-`CountOf<Position>` and `CountOf<Health>` are added, ordered and scheduled independently. A closed generic system can
-be a base class: its `[ForEach]` methods run before the subclass's. A closed type the code never names (built by
-reflection) has its code closed on first use.
+`CountOf<Position>` and `CountOf<Health>` are added, ordered and scheduled independently. A generic system is how
+systems share code: a ref struct has no base class, so what a base class held is a generic system or a static helper.
+
+The code of a closed type is written into the assembly that names it (`AddSystem<CountOf<Position>>()`, `System<…>`,
+`HasSystem<…>`, `TryGetSystem<…>`, `RemoveSystem<…>`, `[UpdateBefore<…>]`, `[UpdateAfter<…>]`), even when the
+generic system comes from a library: nothing is made at run time, so JIT, Native AOT and WebAssembly run the same code
+([D20](/en/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)). A closed type that no code names (one
+built by reflection) has no code: `AddSystem` throws `NotSupportedException` and says where to name it.
 
 ```csharp
 public record struct Tally(int Count) : ISingletonComponent;
 
-public class CountOf<T> : EcsSystem where T : struct, IComponent   // world.AddSystem<CountOf<Position>>()
+[EcsSystem]
+public ref struct CountOf<T> where T : struct, IComponent   // world.AddSystem<CountOf<Position>>()
 {
     [ForEach] static void Count(in T component, ref Tally tally) => tally.Count++;
 }
@@ -976,7 +1043,7 @@ so filters such as `[With<T>]` name concrete types.
 
 ### `[ForEach]` outside systems [#foreach-outside-systems]
 
-A `[ForEach]` method in a type that is not an `EcsSystem` is a runner: a pass the host runs itself, for example
+A `[ForEach]` method in a type that is not an `[EcsSystem]` is a runner: a pass the host runs itself, for example
 between ticks to answer a request. The generator writes an entry point for it, a static method of the type with the
 same name that takes the `World` and then the method's other values, and runs the job once over the world.
 
@@ -1029,7 +1096,7 @@ Census.CountAlive<Health>(world, ref alive);      // a generic runner: the type 
 
 ### Measuring systems [#measuring-systems]
 
-With `WorldOptions.MeasureSystems`, every run of a system (its `OnUpdate` plus its `[ForEach]` methods) is measured:
+With `WorldOptions.MeasureSystems`, every run of a system (its `[OnUpdate]` method plus its `[ForEach]` methods) is measured:
 `system.Stats` holds `Runs`, `LastTime`, `TotalTime` and `AverageTime`, the bytes the run allocated (`LastAllocated`,
 `TotalAllocated`) and the entities its `[ForEach]` methods matched (`LastEntities`, `TotalEntities`). Each run reads
 the clock and the thread's allocation counter twice, and each `[ForEach]` pass counts its matches once; off, it costs
@@ -1046,10 +1113,10 @@ Console.WriteLine($"burn: {stats.LastTime.TotalMicroseconds} μs, average {stats
 
 ### Errors [#errors]
 
-By default an exception thrown by a system propagates out of `Update()` (and out of `Dispose()` for `OnDestroy`).
+By default an exception thrown by a system propagates out of `Update()` (and out of `Dispose()` for `[OnDestroy]`).
 With `SystemErrors = SystemErrorPolicy.Disable`, the failing system is switched off, its exception is kept in
-`system.Error`, and the update goes on with the next system. A failure is data: read it between updates. Setting
-`Enabled = true` clears `Error` and retries the system. A system that failed still counts as run: its
+its handle's `Error`, and the update goes on with the next system. A failure is data: read it between updates.
+Setting `Enabled = true` clears `Error` and retries the system. A system that failed still counts as run: its
 `LastRunTick` moves on, so its `[Changed<T>]` methods do not visit again the rows written before the failed
 run.
 
@@ -1059,7 +1126,7 @@ guarded.AddSingleton<BurnTotals>();
 guarded.AddSystem<BurnSystem>();
 guarded.Update();
 foreach (var system in guarded.Systems)                   // a health check, between updates
-    if (system.Error is { } error) Console.Error.WriteLine($"{system.GetType().Name} is off: {error.Message}");
+    if (system.Error is { } error) Console.Error.WriteLine($"{system.Name} is off: {error.Message}");
 ```
 
 `Update()` after `Dispose()` throws `ObjectDisposedException`.
@@ -1100,8 +1167,8 @@ public struct Simulation : ISystemGroup;
 using EasyEcs;
 
 // Moves every unit by its velocity.
-[UpdateInGroup<Simulation>]
-public class MoveSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>]
+public ref struct MoveSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)
@@ -1112,8 +1179,8 @@ public class MoveSystem : EcsSystem
 }
 
 // Halves the velocity of grounded units, before they move.
-[UpdateInGroup<Simulation>, UpdateBefore<MoveSystem>]
-public class FrictionSystem : EcsSystem
+[EcsSystem, UpdateInGroup<Simulation>, UpdateBefore<MoveSystem>]
+public ref struct FrictionSystem
 {
     [ForEach, With<Grounded>]
     static void Slow(ref Velocity velocity)
@@ -1152,7 +1219,7 @@ for (int tick = 1; tick <= 2; tick++)
 // World.Systems lists the systems in the order they run.
 foreach (var system in world.Systems)
 {
-    Console.WriteLine($"run order: {system.GetType().Name}");
+    Console.WriteLine($"run order: {system.Name}");
 }
 ```
 
@@ -1177,7 +1244,6 @@ move although it was added second, so the grounded unit loses half its speed bef
 | --- | --- | --- |
 | `ref` on a component the method only reads | `in` ([EECS025](/en/docs/guide/analyzer#eecs025)) | The system can share a stage; a tracked component is not stamped |
 | An `Entity` or `World` parameter the method does not need | Drop it ([EECS026](/en/docs/guide/analyzer#eecs026)) | The job skips structural bookkeeping and may run in parallel |
-| An instance `[ForEach]` method | A static one ([EECS029](/en/docs/guide/analyzer#eecs029)) | Proven not to change structure: may share a stage, no per-row checks |
 | A component of more than 4 numbers, or of two number types, in a hot method | Components of 1 to 4 fields of one number type | The method gets a [vector loop](#vector-loops) |
 | Data a vector loop does not cover (mixed lane types, a lookup table) | A batch method with `Vector<T>` | SIMD over whole runs of rows |
 | `Maybe<T>` in the hottest loop | Two methods with `[With<T>]` / `[Without<T>]` | No presence test per row |
@@ -1218,7 +1284,10 @@ needed, and a method that writes a singleton:
 ## What it costs [#what-it-costs]
 
 - **A `[ForEach]` method** is a struct job the JIT inlines into the row loop: no delegate, no allocation.
-- **Per system and update:** the `OnUpdate` call, one call per generated job, and one query-cache lookup per method.
+- **Per system and update:** a direct call from its assembly's system set (a `switch` case, no virtual call), the
+  `[OnUpdate]` call, and one call per generated job, whose pass reads the query kept for its job type (no filter
+  comparison).
+- **Per system in memory:** one record in the world (enabled, error, ticks, counts, stats); no object.
 - **A group's filters** (`[With<T>]`, `[Without<T>]`, `[WithAny<T>]` on the group type, `ISystemGroupWith<T>`,
   `ISystemGroupWithout<T>`) are read by the generator, so they cost nothing at run time. The tables they exclude cost
   nothing per update: a query's cache holds only the tables that match, so the tables of other kinds of entities in
@@ -1233,14 +1302,18 @@ needed, and a method that writes a singleton:
 - **`[UpdateInterval]`** is read once, when the system is added; each update tests one count per system.
 - **`[Consume]`** costs the destroys: one `DestroyAll` per pass for a method without structural changes, one `Destroy`
   per row otherwise. Its system runs alone.
-- **Generated code** is registered by a module initializer: systems need no `partial`, no registration call and no
-  reflection at update time.
+- **Generated code** is registered by a module initializer, one system set per assembly: systems need no `partial`,
+  no registration call and no reflection or runtime code generation.
 
 ## Pitfalls [#pitfalls]
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| A mutable field in a system | State nothing else can see, save or restore | [EECS007](/en/docs/guide/analyzer#eecs007) |
+| `[EcsSystem]` on a class or a plain struct | No code is generated for it | [EECS074](/en/docs/guide/analyzer#eecs074) (with a code fix): `ref struct` |
+| An instance member in a system | The world never creates a system: it could never be reached | [EECS075](/en/docs/guide/analyzer#eecs075) (with a code fix): `static` |
+| A hook with parameters other than `World` / `SystemHandle`, or two methods for one hook | Nothing calls it | [EECS076](/en/docs/guide/analyzer#eecs076) |
+| `AddSystem<T>`, `[UpdateAfter<T>]` and the like with a `T` that is no `[EcsSystem]` | `AddSystem` throws, the others never find it | [EECS077](/en/docs/guide/analyzer#eecs077) |
+| A mutable static field in a system | State nothing else can see, shared by every world, kept when the system is removed | [EECS007](/en/docs/guide/analyzer#eecs007) |
 | A system referencing another system | The two can no longer change apart | [EECS008](/en/docs/guide/analyzer#eecs008) |
 | A parameter of another type in a system's method | Nothing can supply it | [EECS002](/en/docs/guide/analyzer#eecs002) |
 | No component and no `[With<T>]` | Nothing names what to iterate | [EECS003](/en/docs/guide/analyzer#eecs003) |
@@ -1265,12 +1338,10 @@ needed, and a method that writes a singleton:
 | A public `Key => this` on a record struct actor key | `ToString()` prints `Key` forever: stack overflow | [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix): `[IndexKey]` on the type, which implements `IIndexed<T>.Key` explicitly |
 | `ref` on a component the method only reads | Stamps a tracked component, keeps the system out of shared stages | [EECS025](/en/docs/guide/analyzer#eecs025) |
 | An `Entity` or `World` parameter the method never uses | The job keeps its structural bookkeeping | [EECS026](/en/docs/guide/analyzer#eecs026) |
-| An allocation in `OnUpdate` or a `[ForEach]` method | Garbage every update | [EECS028](/en/docs/guide/analyzer#eecs028) |
-| An instance `[ForEach]` method that uses nothing of its system | Treated as one that may change structure: runs alone, with per-row checks | [EECS029](/en/docs/guide/analyzer#eecs029) |
+| An allocation in an `[OnUpdate]` or `[ForEach]` method | Garbage every update | [EECS028](/en/docs/guide/analyzer#eecs028) |
 | `World.Update()` called from a system | The system runs again inside its own run | [EECS034](/en/docs/guide/analyzer#eecs034) |
 | An edit that takes a hot method's [vector loop](#vector-loops) away (a `bool` field, a call outside a condition) | One row at a time, with the same results | [EECS055](/en/docs/guide/analyzer#eecs055); `SimdMode = SimdMode.Require` makes it [EECS056](/en/docs/guide/analyzer#eecs056) |
 | `FloatMode.Fast` on state that replays or that peers compare | Results differ in the last bits between machines | Code review: keep `FloatMode.Exact` ([float results](#float-mode)) |
-| An override of the removed `UpdateInterval` / `UpdatePhase` properties | Compile error | [EECS082](/en/docs/guide/analyzer#eecs082) (with a code fix): `[UpdateInterval(n, Phase = p)]` |
 | A `[ForEach]` method that ends with `entity.Destroy()` on every path | A destroy per row instead of one per table | [EECS084](/en/docs/guide/analyzer#eecs084) (with a code fix): `[Consume]` |
 | `[Consume]` without `[ForEach]`, or with `Slices` | Compile error: destroying a slice moves the rows of the other slices, so an event could wait many runs | [EECS085](/en/docs/guide/analyzer#eecs085) |
 

@@ -134,7 +134,8 @@ public static class Game
 
 public record struct Ttl(int Ticks) : IComponent;
 
-public class MoveSystem : EcsSystem
+[EcsSystem]
+public ref struct MoveSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)
@@ -144,7 +145,8 @@ public class MoveSystem : EcsSystem
     }
 }
 
-public class ExpireSystem : EcsSystem
+[EcsSystem]
+public ref struct ExpireSystem
 {
     [ForEach]
     static void Expire(Entity entity, ref Ttl ttl)
@@ -168,10 +170,11 @@ public class ExpireSystem : EcsSystem
 public record struct Census(int Entities) : ISingletonComponent;
 
 // 所在分组每更新 20 次跑一次：每秒 20 个 tick 时就是每秒一次。
-[UpdateInterval(20)]
-public class CensusSystem : EcsSystem
+[EcsSystem, UpdateInterval(20)]
+public ref struct CensusSystem
 {
-    protected override void OnUpdate() => World.GetOrAddCensus().Entities = World.EntityCount;
+    [OnUpdate]
+    static void OnUpdate(World world) => world.GetOrAddCensus().Entities = world.EntityCount;
 }
 ```
 
@@ -191,8 +194,8 @@ flowchart LR
 ### 输入走邮箱 [#input]
 
 网络、定时器、数据库都跑在别的线程上，而 World 只属于更新它的那一个线程。两边在一个由你持有的队列里交接：别的线程投递消息，
-World 所在线程上的一个系统取出消息，把每条变成数据。队列是这个系统的 `readonly` 字段，添加系统时传进去：它是依赖，不是状态，
-所以 [EECS007](/zh/docs/guide/analyzer#eecs007) 允许。不要放进单例：`World.Save` 会写出每个单例，而队列没有格式化器。
+World 所在线程上的一个系统取出消息，把每条变成数据。队列是宿主设置的 [`[NotSaved]`](/zh/docs/guide/saves#not-saved) 单例：
+系统像读其他数据一样从 World 读它，存档不会写它（队列没有格式化器），读档也保留它。
 
 ```csharp
 using System.Collections.Concurrent;
@@ -202,20 +205,23 @@ public record struct FireRequest(float Vx, float Vy) : IComponent;
 
 public struct InputGroup : ISystemGroup;
 
-[UpdateInGroup<InputGroup>]
-public class ReceiveCommandsSystem(ConcurrentQueue<FireCommand> inbox) : EcsSystem
-{
-    private readonly ConcurrentQueue<FireCommand> _inbox = inbox;   // 由网络线程填充
+[NotSaved]
+public record struct Inbox(ConcurrentQueue<FireCommand> Commands) : ISingletonComponent;   // 由网络线程填充
 
-    protected override void OnUpdate()
+[EcsSystem, UpdateInGroup<InputGroup>]
+public ref struct ReceiveCommandsSystem
+{
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_inbox.TryDequeue(out var command))
-            World.CreateEntity(new FireRequest(command.Vx, command.Vy));
+        var commands = world.Inbox.Commands;
+        while (commands.TryDequeue(out var command))
+            world.CreateEntity(new FireRequest(command.Vx, command.Vy));
     }
 }
 ```
 
-用 `world.AddSystem(new ReceiveCommandsSystem(inbox))` 添加，同一个队列交给网络代码。
+用 `world.SetInbox(inbox)` 设置队列，用 `world.AddSystem<ReceiveCommandsSystem>()` 添加系统，同一个队列交给网络代码。
 
 队列的容量上限、满了怎么办，都由你决定。细节见[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)；
 处理请求的服务器见[托管](/zh/docs/guide/hosting#requests)。
@@ -315,6 +321,7 @@ public record struct Spawner(Prefab Bullet, int Wave, int Interval) : ISingleton
 <Accordion title="Components/Input.cs（新增）">
 
 ```csharp title="Components/Input.cs" doccheck=example
+using System.Collections.Concurrent;
 using EasyEcs;
 
 namespace MyServer;
@@ -324,6 +331,11 @@ public readonly record struct FireCommand(float Vx, float Vy);
 
 // 变成数据的指令：FireSystem 在下一个 tick 处理它，然后销毁。
 public record struct FireRequest(float Vx, float Vy) : IComponent;
+
+// 来自网络线程的邮箱，由宿主设置。[NotSaved]：存档不会写它（队列没有格式化器），
+// 读档也保留宿主设置的那个。
+[NotSaved]
+public record struct Inbox(ConcurrentQueue<FireCommand> Commands) : ISingletonComponent;
 ```
 
 </Accordion>
@@ -343,7 +355,6 @@ public struct InputGroup : ISystemGroup;
 <Accordion title="Systems/ReceiveCommandsSystem.cs（新增）">
 
 ```csharp title="Systems/ReceiveCommandsSystem.cs" doccheck=example
-using System.Collections.Concurrent;
 using EasyEcs;
 
 namespace MyServer;
@@ -351,18 +362,16 @@ namespace MyServer;
 // 把收件箱里等着的每条指令变成一个 FireRequest 实体。
 // 它跑在 World 所在的线程上，所以在这里创建实体是安全的；
 // 网络线程只碰队列。
-[UpdateInGroup<InputGroup>]
-public class ReceiveCommandsSystem(ConcurrentQueue<FireCommand> inbox) : EcsSystem
+[EcsSystem, UpdateInGroup<InputGroup>]
+public ref struct ReceiveCommandsSystem
 {
-    // 来自网络线程的邮箱。readonly 字段是依赖，不是状态（EECS007 允许）；
-    // 放进单例不行，因为 World.Save 会写出每个单例。
-    private readonly ConcurrentQueue<FireCommand> _inbox = inbox;
-
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_inbox.TryDequeue(out var command))
+        var commands = world.Inbox.Commands;
+        while (commands.TryDequeue(out var command))
         {
-            World.CreateEntity(new FireRequest(command.Vx, command.Vy));
+            world.CreateEntity(new FireRequest(command.Vx, command.Vy));
         }
     }
 }
@@ -378,7 +387,8 @@ namespace MyServer;
 
 // 每个请求用刷新器的预制体发一颗子弹；[Consume] 在遍历结束后销毁这些请求。
 // 遍历途中创建实体是安全的。
-public class FireSystem : EcsSystem
+[EcsSystem]
+public ref struct FireSystem
 {
     [ForEach, Consume]                                       // 每个请求在遍历结束后销毁
     static void Fire(World world, in FireRequest fire, in Spawner spawner)
@@ -398,12 +408,14 @@ namespace MyServer;
 
 // 每 Interval 个 tick 用刷新器的预制体刷一波子弹。
 // 游戏规则写在这样的系统里，永远不写在 Program.cs 里。
-public class SpawnSystem : EcsSystem
+[EcsSystem]
+public ref struct SpawnSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        ref readonly var spawner = ref World.Spawner;
-        bool waveDue = World.Clock.Tick % spawner.Interval == 0;
+        ref readonly var spawner = ref world.Spawner;
+        bool waveDue = world.Clock.Tick % spawner.Interval == 0;
         if (!waveDue)
         {
             return;
@@ -411,7 +423,7 @@ public class SpawnSystem : EcsSystem
 
         for (int i = 0; i < spawner.Wave; i++)
         {
-            World.Instantiate(spawner.Bullet);
+            world.Instantiate(spawner.Bullet);
         }
     }
 }
@@ -428,7 +440,8 @@ namespace MyServer;
 // 按速度把每个有位置和速度的实体移动一个 tick。
 // [ForEach] 方法对每个拥有它全部组件参数的实体各执行一次：
 // 要写的用 `ref`，只读的用 `in`。单例也可以作为参数。
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach]
     static void Move(ref Position position, in Velocity velocity, in Clock clock)
@@ -450,7 +463,8 @@ namespace MyServer;
 
 // 每个 tick 把剩余寿命减一，用完就销毁实体。
 // 遍历途中销毁实体是安全的。
-public class LifetimeSystem : EcsSystem
+[EcsSystem]
+public ref struct LifetimeSystem
 {
     [ForEach]
     static void Age(Entity entity, ref Lifetime lifetime)
@@ -472,13 +486,15 @@ using EasyEcs;
 
 namespace MyServer;
 
-// 每次更新把时钟推进一格。OnUpdate 每次更新执行一次，不是每个实体一次。
+// 每次更新把时钟推进一格。[OnUpdate] 每次更新执行一次，不是每个实体一次。
 // Game.AddSystems 最后才添加它，所以其他系统看到的都是这次更新开始时的 tick。
-public class ClockSystem : EcsSystem
+[EcsSystem]
+public ref struct ClockSystem
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        World.Clock.Tick++;
+        world.Clock.Tick++;
     }
 }
 ```
@@ -499,7 +515,8 @@ public static class Game
     public static void AddSystems(World world, ConcurrentQueue<FireCommand> inbox)
     {
         // 输入分组：宿主读输入时，通过 world.Update<InputGroup>() 执行。
-        world.AddSystem(new ReceiveCommandsSystem(inbox));
+        world.SetInbox(inbox);
+        world.AddSystem<ReceiveCommandsSystem>();
 
         // 默认分组：模拟本身，每次 world.Update() 按这个顺序执行一遍。
         world.AddSystem<FireSystem>();
@@ -678,7 +695,7 @@ tick 才出生，所以还活着。`Program.cs` 没有一行知道子弹的存�
 | 游戏规则写在 `Program.cs` 里（每秒刷一波、胜负判定） | 没法单独测试，也没法和系统排顺序 | 代码审查：改成读单例的系统 |
 | `Program.cs` 和测试各自按不同顺序添加系统 | 测试通过的 tick 是服务器从来不跑的那个 | 共用一个 `Game.AddSystems` |
 | 第一次更新之后才设置单例，或者根本没设 | 第一个读它的系统抛 `InvalidOperationException`，并说出它的名字 | 运行时，第一次更新时 |
-| 系统用字段保存计数器或计时器 | 存档、快照和测试都看不到这份状态 | [EECS007](/zh/docs/guide/analyzer#eecs007) |
+| 系统用静态字段保存计数器或计时器 | 存档、快照和测试都看不到这份状态 | [EECS007](/zh/docs/guide/analyzer#eecs007) |
 | 网络线程自己创建实体 | 结构闸门抛异常；闸门没赶上竞争时，表被写坏 | [EECS014](/zh/docs/guide/analyzer#eecs014)（能看到时）；改成投递到邮箱 |
 | 测试目录放在服务器项目里 | NUnit 的类型被编译进服务器 | `<Compile Remove="MyServer.Tests\**"/>`（模板已经写好） |
 

@@ -36,7 +36,7 @@ apply immediately. This page maps the concepts; it has no benchmarks against Uni
 | `IEnableableComponent`, `SetComponentEnabled` | `entity.Disable<T>()` / `Enable<T>()` | The value stays and queries skip it; no row moves after the first time. |
 | `ICleanupComponentData` | `ICleanupComponent` + the `Retired` tag | `Destroy` retires an entity that has cleanup components: it keeps them until a system removes them. |
 | `SystemAPI.GetSingleton<T>()` | `ISingletonComponent`, a `ref T` parameter of a `[ForEach]` method | Per-world singletons, no entity needed. |
-| `ISystem` / `SystemBase` with `OnCreate` / `OnUpdate` / `OnDestroy` | `EcsSystem` with `OnCreate` / `OnUpdate` / `OnDestroy` | Systems are stateless: state goes into components or singletons ([EECS007](/en/docs/guide/analyzer#eecs007)). |
+| `ISystem` / `SystemBase` with `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` | `[EcsSystem]` with `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` | Systems are stateless: state goes into components or singletons ([EECS007](/en/docs/guide/analyzer#eecs007)). |
 | `SystemAPI.Query<RefRW<A>, RefRO<B>>()` | a `[ForEach]` method taking `ref A`, `in B` | The generator writes the job; `ref` is a write, `in` a read. |
 | `IJobEntity` | a `[ForEach]` method (a generated struct job) | |
 | `ScheduleParallel` | `[ForEach(Parallel = true)]` | Chunks of rows on the thread pool; the analyzer rejects methods that would race ([EECS010](/en/docs/guide/analyzer#eecs010)). |
@@ -69,7 +69,8 @@ is data, a singleton.
 public record struct Speed(float Value) : IComponent;
 public record struct TickLength(float Seconds) : ISingletonComponent;
 
-public class MoveSystem : EcsSystem
+[EcsSystem]
+public ref struct MoveSystem
 {
     [ForEach, Without<Stunned>]
     static void Move(ref Position position, in Speed speed, in TickLength tick) =>
@@ -112,7 +113,8 @@ a sync point. In EasyEcs a system changes structure where it decides to, and the
 system in the same update:
 
 ```csharp title="DeathSystem.cs"
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health health)

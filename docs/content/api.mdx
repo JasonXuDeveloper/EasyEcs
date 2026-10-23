@@ -48,7 +48,8 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `ValueIndex<T, TKey>` | sealed class | `world.Index<T, TKey>()`: `Find`, `TryFind`, `Count`; ordered walks for a comparable key (`OrderedIndexExtensions`). |
 | `RelationIndex<T>` | sealed class | `world.Relations<T>()`: the entities linking to a target. |
 | `TargetPolicy`, `TargetPolicyExtensions` | enum, extensions | What destroying a target does to the links to it: `Keep`, `Remove`, `Destroy`. |
-| `EcsSystem` | abstract class | `World`, `Enabled`, `Error`, `Stats`, `LastRunTick`, `RunCount`; `OnCreate` / `OnUpdate` / `OnDestroy` ([systems](/en/docs/guide/systems)). |
+| `[EcsSystem]` | attribute | On a `ref struct` of static members: a system. Its hooks are static methods marked `[OnCreate]`, `[OnUpdate]`, `[OnDestroy]`, each taking the `World`, the `SystemHandle`, both or neither ([systems](/en/docs/guide/systems)). |
+| `SystemHandle` | readonly struct | A system added to a world: `Enabled`, `Error`, `Stats`, `LastRunTick`, `RunCount`, `Name`, `Type`, `World`, `IsAlive`; stale (its members throw) once the system is removed. |
 | `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`, `ChunkRows = n`, `Slices = N`, `SimdMode = SimdMode.Auto` / `Require` / `Off`, `FloatMode = FloatMode.Exact` / `Fast`), `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<T1..Tn>]`, `[RemovedAny<T1..Tn>]`; `[Consume]` (the visited rows destroyed after the pass); `[ForEntity]` (a static method run on one entity through its generated entry point). |
 | `Maybe<T>` | ref struct | An optional component parameter of a `[ForEach]` method: `HasValue`, `Value`. |
 | `ReadOnlyMaybe<T>` | ref struct | The same, read-only: `Value` is `ref readonly`, never stamped, allowed for indexed components; a `Maybe<T>` converts to it. |
@@ -326,9 +327,11 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 
 | API | Complexity | Notes |
 | --- | --- | --- |
-| `world.AddSystem<T>(changesFromNow)` / `AddSystem(system, changesFromNow)` | O(s²), s = systems of its group | calls `OnCreate`; rebuilds the order and stages (cold); throws if the system already belongs to a world, or on an ordering cycle; `changesFromNow: true`: its first run sees only what is written after the call |
-| `world.RemoveSystem<T>()` | O(s²) | calls `OnDestroy`; returns whether a system was removed |
-| `world.TryGetSystem<T>(out system)` | O(systems) | false (and null) when absent |
+| `world.AddSystem<T>(changesFromNow)` | O(s²), s = systems of its group | returns the `SystemHandle`; calls the `[OnCreate]` method; rebuilds the order and stages (cold); throws if the world has the system already, on an ordering cycle, or `NotSupportedException` for a type no assembly generated code for; `changesFromNow: true`: its first run sees only what is written after the call |
+| `world.RemoveSystem<T>()` | O(s²) | calls the `[OnDestroy]` method; returns whether a system was removed; its handles turn stale |
+| `world.HasSystem<T>()` / `System<T>()` / `TryGetSystem<T>(out system)` | O(1) | `System<T>` throws when absent; `TryGetSystem` gives false and a default handle |
+| `system.Enabled` / `Error` / `LastRunTick` / `RunCount` / `Stats` / `Name` / `Type` / `World` | O(1) | the world's record of the system; throws `InvalidOperationException` once the handle is stale |
+| `system.IsAlive` | O(1) | false once the system is removed or the world disposed |
 | `world.Update()` / `world.Update<TGroup>()` | Σ systems of the group | synchronous, allocation-free; throws `ObjectDisposedException` after `Dispose` |
 | `world.ChangeTick` | O(1) | grows by one per stage of systems and once after each update |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` | O(1) | `ref T`; `AddSingleton` throws when the singleton exists; `GetSingleton` throws when missing |
@@ -336,7 +339,7 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 | `world.SingletonRef<T>()` | O(1) | a stable handle; throws when the singleton was not added; `.Value` is one load |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) | `RemoveSingleton` returns false when it was not added |
 | generated: `world.X`, `HasX`, `GetOrAddX()`, `SetX(…)`, `RemoveX()` for a singleton `X` | as the generic call | |
-| `world.Systems` | O(systems) to walk, `Count` O(groups) | every group's systems in execution order, allocation-free |
+| `world.Systems` | O(systems) to walk, `Count` O(groups) | every group's system handles in execution order, allocation-free |
 | `world.DefaultUpdateCount` | O(1) | default-group updates so far |
 | `world.UpdateCount<TGroup>()` | O(1) | `Update<TGroup>()` calls so far, the running one included (0 before the first): what `[UpdateInterval]` counts |
 | `world.RemoveTypes(assembly)` / `RemoveTypes(context)` | O(entities with such components + tables + cached queries) | takes a plugin's systems, singletons, indexes and components out of the world so its `AssemblyLoadContext` can unload; allocates (cold) |
@@ -347,10 +350,10 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 | `world.DestroyedSince(since, Span<EntityId> into, out int count)` | O(count) | the entities destroyed at or after `since`, oldest first; false (nothing written) when `since` is older than `DestroyLogOldestTick`: resynchronize; throws when `WorldOptions.DestroyLogCapacity` is 0; allocation-free; owner thread or a thread of a parallel stage |
 | `world.DestroyLogOldestTick` | O(1) | the oldest tick `DestroyedSince` answers for; `ulong.MaxValue` when the log is off |
 | `entity.Describe()` | O(c) | boxed copies of the entity's components, disabled ones marked; allocates (cold) |
-| `world.Dispose()` | O(systems + entities + tables) | `OnDestroy` on every system in reverse order, then releases storage |
+| `world.Dispose()` | O(systems + entities + tables) | the `[OnDestroy]` method of every system in reverse order, then releases storage; every system handle turns stale |
 
 `WorldOptions.SystemErrors`: `SystemErrorPolicy.Throw` (default: the exception propagates out of `Update()`, and of
-`Dispose` for `OnDestroy`) or `Disable` (the system is switched off and keeps the exception in `system.Error` until it
+`Dispose` for `[OnDestroy]`) or `Disable` (the system is switched off and keeps the exception in `system.Error` until it
 is enabled again; a failed run still moves `LastRunTick` on). `WorldOptions.MeasureSystems` records every run into
 `system.Stats` (`Runs`, `LastTime`, `TotalTime`, `AverageTime`, `LastAllocated`, `TotalAllocated`, `LastEntities`,
 `TotalEntities`, all O(1) to read) for two timestamp reads and two allocation-counter reads per run (and per helper

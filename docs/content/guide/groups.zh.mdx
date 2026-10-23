@@ -129,7 +129,7 @@ walker.SetZone(2);                                             // 之后由 InGr
 
 ### 在系统里使用分组 [#in-systems]
 
-`[ForEach]` 的过滤条件是特性，写不进分组的值。一次只处理一个分组的系统，在 `OnUpdate` 里跑一个结构体 job，分组号从单例里读：
+`[ForEach]` 的过滤条件是特性，写不进分组的值。一次只处理一个分组的系统，在 `[OnUpdate]` 方法里跑一个结构体 job，分组号从单例里读：
 
 ```csharp
 public record struct ActiveZone(int Id) : ISingletonComponent;
@@ -139,18 +139,20 @@ public struct Regenerate : IForEach<Health>
     public void Execute(ref Health health) => health.Value += 1;
 }
 
-public class RegenerateActiveZone : EcsSystem
+[EcsSystem]
+public ref struct RegenerateActiveZone
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        var filter = QueryFilter.Create().InZone(World.ActiveZone.Id);
+        var filter = QueryFilter.Create().InZone(world.ActiveZone.Id);
         var job = new Regenerate();
-        World.ForEach<Health, Regenerate>(ref job, filter);
+        world.ForEach<Health, Regenerate>(ref job, filter);
     }
 }
 ```
 
-重写了 `OnUpdate` 的系统会单独占一个阶段。每次更新都新建过滤条件也很便宜：`QueryFilter` 不持有任何对象引用。
+有 `[OnUpdate]` 方法的系统会单独占一个阶段。每次更新都新建过滤条件也很便宜：`QueryFilter` 不持有任何对象引用。
 
 ### 哪些操作会遵守分组 [#what-follows]
 
@@ -220,15 +222,17 @@ public struct SumHealth : IForEach<Health>
 using EasyEcs;
 
 // 只给活跃区域的单位回血。[ForEach] 的特性没法写出分组的值，
-// 所以系统在 OnUpdate 里用带 InGroup 过滤条件的结构体 job 来跑。
-public class RegenerateActiveZone : EcsSystem
+// 所以系统在它的 [OnUpdate] 方法里用带 InGroup 过滤条件的结构体 job 来跑。
+[EcsSystem]
+public ref struct RegenerateActiveZone
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        int zone = World.ActiveZone.Id;
+        int zone = world.ActiveZone.Id;
         var inZone = QueryFilter.Create().InZone(zone);
         var job = new Regenerate();
-        World.ForEach<Health, Regenerate>(ref job, inZone);
+        world.ForEach<Health, Regenerate>(ref job, inZone);
     }
 }
 ```

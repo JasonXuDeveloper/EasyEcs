@@ -196,8 +196,8 @@ and the generated code calls your methods directly (no reflection on hot paths;
 publishes with `PublishAot` without warnings and runs: CI publishes the battle server example, with tracked
 components, disabled components, saves and a generic system closed in another assembly, as a native executable with
 warnings as errors and runs it. A generic system is registered by every assembly that names a closed type of it
-(`AddSystem<Regen<Health>>()`, a base type); only a closed type made by reflection at run time has no code, which Native
-AOT reports with an exception naming it ([D20](/en/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)).
+(`AddSystem<Regen<Health>>()`, `[UpdateAfter<Regen<Health>>]`); only a closed type made by reflection at run time has
+no code, which `AddSystem` reports with an exception naming it ([D20](/en/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)).
 
 Set the instruction set. Native AOT compiles for a baseline CPU by default, so the `Vector512` tier of the generated
 vector loops is compiled out and `Vector<T>` is 16 bytes. A server that knows its CPUs should say so:
@@ -230,7 +230,8 @@ scheduler, so systems could not run in parallel safely. What an event would say 
 ```csharp
 public record struct Hit(EntityId Target, int Damage) : IComponent;    // a message is an entity
 
-public class ApplyHitsSystem : EcsSystem
+[EcsSystem]
+public ref struct ApplyHitsSystem
 {
     [ForEach]
     static void Apply(in Hit hit, World world)
@@ -241,10 +242,11 @@ public class ApplyHitsSystem : EcsSystem
     }
 }
 
-[UpdateAfter<ApplyHitsSystem>]                                          // after every reader
-public sealed class ClearHitsSystem : EcsSystem
+[EcsSystem, UpdateAfter<ApplyHitsSystem>]                               // after every reader
+public ref struct ClearHitsSystem
 {
-    protected override void OnUpdate() => World.DestroyAll<Hit>(); // every message, one pass
+    [OnUpdate]
+    static void OnUpdate(World world) => world.DestroyAll<Hit>(); // every message, one pass
 }
 ```
 
@@ -263,7 +265,7 @@ sees when you change structure inside it: [Structural changes](/en/docs/guide/st
 ## How do I order systems? [#order-systems]
 
 Systems run in the order you register them. To make one depend on another, name the dependency:
-`[UpdateBefore<T>]` or `[UpdateAfter<T>]` on the class moves only that system within its group, so adding one
+`[UpdateBefore<T>]` or `[UpdateAfter<T>]` on the system moves only that system within its group, so adding one
 ordering never reshuffles the others ([D5](/en/docs/decisions#d5-order-systems-by-dependencies-not-priorities)).
 A cycle throws in `AddSystem` and is reported by EECS019 when the analyzer can see it. There are no integer
 priorities: `Priority` was removed in 4.1. Systems that run on a different cadence go into a
@@ -277,7 +279,8 @@ Through a `ref`. In a `[ForEach]` method, a `ref` parameter is a write and `in` 
 public record struct Poison(int DamagePerTick) : IComponent;
 public record struct Mana(int Value) : IComponent;
 
-public class PoisonSystem : EcsSystem
+[EcsSystem]
+public ref struct PoisonSystem
 {
     [ForEach, Without<Dead>]
     static void Hurt(ref Health hp, in Poison poison) => hp = hp with { Value = hp.Value - poison.DamagePerTick };
@@ -316,10 +319,21 @@ on a hot path ([Architecture](/en/docs/architecture#storage-model)).
 
 ## Do systems have to be `partial`? [#partial]
 
-No. The generator writes each system's jobs in a file class of its own and calls your `[ForEach]` methods, private
-or not, through `[UnsafeAccessor]`, which compiles to a direct call
-([D16](/en/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)). A system is an ordinary
-class, and generated members never collide with yours. `partial` still compiles. A component or singleton that
+No. The generator writes each system's jobs in a file class of its own and calls your `[ForEach]` methods and hooks,
+private or not, through `[UnsafeAccessor]`, which compiles to a direct call
+([D16](/en/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)). A system is a plain
+`[EcsSystem] ref struct`, and generated members never collide with yours. `partial` still compiles.
+
+## Why does my IDE say a `[ForEach]` method is never used? [#never-used]
+
+Nothing in your code calls it: the generated code does, through `[UnsafeAccessor]`, by name, which the IDE's "unused
+private member" analyzers do not count as a use. EasyEcs answers both IDEs. Its analyzer package ships a diagnostic
+suppressor that hides IDE0051 and IDE0052 on `[ForEach]`, `[ForEntity]`, `[OnCreate]`, `[OnUpdate]` and
+`[OnDestroy]` methods (Visual Studio, VS Code, `dotnet build`), and those attributes and `[EcsSystem]` carry
+JetBrains' `[MeansImplicitUse]`, which Rider and ReSharper read
+([D107](/en/docs/decisions#d107-never-used-warnings)). If the hint still shows, the project references
+EasyEcs without its analyzers (`ExcludeAssets="analyzers"` on the package, or a reference to the sources without
+the generator as an `Analyzer`), and then no code is generated either. A component or singleton that
 declares members with attributes (`[Sum]`, `[IndexKey]`, `[Group]`) is partial, with the types around it: the
 generator writes those members into the type itself ([EECS062](/en/docs/guide/analyzer#eecs062)).
 

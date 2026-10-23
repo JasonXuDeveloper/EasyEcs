@@ -135,7 +135,8 @@ plate.GetOrAddNextTemperature().SetCount(16 * 16);
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 
-public class DiffuseSystem : EcsSystem
+[EcsSystem]
+public ref struct DiffuseSystem
 {
     const float Rate = 0.2f;
 
@@ -172,7 +173,8 @@ public class DiffuseSystem : EcsSystem
 模板掩码跳过的行在两个缓冲里都是零，因为提交拷过上一步。
 
 ```csharp
-public class CommitHeatSystem : EcsSystem
+[EcsSystem]
+public ref struct CommitHeatSystem
 {
     [ForEach]
     static void Commit(in DynamicBuffer<NextTemperature> next, Mut<DynamicBuffer<Temperature>> cells)
@@ -268,7 +270,8 @@ public partial record struct GasCube([IndexKey] CubePos Pos) : IComponent, ITile
 public record struct Gas(float Value);
 public record struct NextGas(float Value);
 
-public class SpreadGasSystem : EcsSystem
+[EcsSystem]
+public ref struct SpreadGasSystem
 {
     const float Rate = 0.1f;
 
@@ -354,7 +357,8 @@ public static class LifeRule
     }
 }
 
-public class LifeSystem : EcsSystem
+[EcsSystem]
+public ref struct LifeSystem
 {
     [ForEach(Parallel = true, ChunkRows = 64)]
     static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next) =>
@@ -375,7 +379,8 @@ k 遍普通的遍历更快（[D77](/zh/docs/decisions#d77-tiles)）。
 public struct Awake : IComponent;                                            // 瓦片还可能变
 public record struct LifeChange(TileFaces Edges, bool Changed) : IComponent; // 它上一步改了什么
 
-public class SparseLifeSystem : EcsSystem
+[EcsSystem]
+public ref struct SparseLifeSystem
 {
     [ForEach(Parallel = true, ChunkRows = 64), With<Awake>]
     static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next, ref LifeChange change)
@@ -387,7 +392,8 @@ public class SparseLifeSystem : EcsSystem
     }
 }
 
-public class SleepSystem : EcsSystem
+[EcsSystem]
+public ref struct SleepSystem
 {
     [ForEach, With<Awake>]
     static void Sleep(Entity plate, in LifeChange change)
@@ -396,12 +402,13 @@ public class SleepSystem : EcsSystem
     }
 }
 
-public class WakeSystem : EcsSystem
+[EcsSystem]
+public ref struct WakeSystem
 {
     [ForEach, With<Awake>]
-    void Wake(in LifeChange change, Tile<Alive, LifePlate> life)
+    static void Wake(World world, in LifeChange change, Tile<Alive, LifePlate> life)
     {
-        foreach (var id in life.Facing(change.Edges)) World.GetEntity(id).SetAwake();
+        foreach (var id in life.Facing(change.Edges)) world.GetEntity(id).SetAwake();
     }
 }
 ```
@@ -521,7 +528,8 @@ using System.Runtime.Intrinsics;
 using EasyEcs;
 
 // 着色器：每块醒着的板走一步生命游戏，板之间并行。
-public class StepSystem : EcsSystem
+[EcsSystem]
+public ref struct StepSystem
 {
     [ForEach(Parallel = true, ChunkRows = 64), With<Awake>]
     static void Step(Tile<Cell, Plate> life, Mut<DynamicBuffer<NextCell>> next, ref Change change)
@@ -552,7 +560,8 @@ public class StepSystem : EcsSystem
 
 // 乒乓：所有板都走完后，下一步才变成格子，
 // 所以没有板会读到邻居的新格子。
-public class CommitSystem : EcsSystem
+[EcsSystem]
+public ref struct CommitSystem
 {
     [ForEach, With<Awake>]
     static void Commit(in Change change, in DynamicBuffer<NextCell> next, Mut<DynamicBuffer<Cell>> cells)
@@ -564,7 +573,8 @@ public class CommitSystem : EcsSystem
 }
 
 // 一步什么也没改的板休眠，直到邻居唤醒它。
-public class SleepSystem : EcsSystem
+[EcsSystem]
+public ref struct SleepSystem
 {
     [ForEach, With<Awake>]
     static void Sleep(Entity plate, in Change change)
@@ -574,12 +584,13 @@ public class SleepSystem : EcsSystem
 }
 
 // 读到变了的边的邻居，下个 tick 再走一步。
-public class WakeSystem : EcsSystem
+[EcsSystem]
+public ref struct WakeSystem
 {
     [ForEach, With<Awake>]
-    void Wake(in Change change, Tile<Cell, Plate> life)
+    static void Wake(World world, in Change change, Tile<Cell, Plate> life)
     {
-        foreach (var id in life.Facing(change.Edges)) World.GetEntity(id).SetAwake();
+        foreach (var id in life.Facing(change.Edges)) world.GetEntity(id).SetAwake();
     }
 }
 ```

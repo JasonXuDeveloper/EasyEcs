@@ -33,7 +33,7 @@ older .NET (netstandard2.1, net6.0-8.0); EasyEcs needs .NET 10.
 | Storage | archetype tables, presence bits per column | archetypes |
 | Changes during a query | applied at once | `StructuralChangeException`; recorded in a `CommandBuffer` |
 | Removing a component or a tag | flips a bit, the entity keeps its row | moves the entity to another archetype |
-| Systems | `EcsSystem` with generated `[ForEach]` jobs | `SystemRoot`, `SystemGroup`, `QuerySystem` |
+| Systems | `[EcsSystem]` with generated `[ForEach]` jobs | `SystemRoot`, `SystemGroup`, `QuerySystem` |
 | Change tracking | `[Changed<T>]`: rows written since the last run | none (component events) |
 | Removal tracking | `[Removed<T>]` | `OnComponentRemoved` events |
 | Saves | binary `Save` / `Load`, in-memory snapshots | JSON (`EntitySerializer`) |
@@ -83,7 +83,8 @@ public struct Hp : IComponent { public int Value, Max; }
 public struct Npc : IComponent { public int TemplateId; }
 public struct Deaths : ISingletonComponent { public int Count, NpcKills; }
 
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void CheckDeath(Entity entity, in Hp hp, ref Deaths deaths)

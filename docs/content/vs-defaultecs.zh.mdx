@@ -30,7 +30,7 @@ netstandard1.1-2.1 和 Unity，EasyEcs 只支持 .NET 10。
 | | EasyEcs | DefaultEcs |
 | --- | --- | --- |
 | 存储 | 原型表，每列有存在位 | 每种组件一个池，加实体集合 |
-| 系统 | `EcsSystem`，`[ForEach]` 生成 job | `AEntitySetSystem<T>` / `AComponentSystem<T, TComponent>`，配 `[With]` / `[Without]` 特性 |
+| 系统 | `[EcsSystem]`，`[ForEach]` 生成 job | `AEntitySetSystem<T>` / `AComponentSystem<T, TComponent>`，配 `[With]` / `[Without]` 特性 |
 | 遍历途中的变更 | 当场生效 | 当场作用于集合；`useBuffer` 先复制一份集合，或者用 `EntityCommandRecorder` |
 | 变更追踪 | 每次 `ref` 写入，`[Changed<T>]` | 每次写入后调 `NotifyChanged<T>()`，`WhenChanged<T>()` 集合 |
 | 移除追踪 | `[Removed<T>]` | `WhenRemoved<T>()` 集合，手动 Complete |
@@ -49,7 +49,7 @@ netstandard1.1-2.1 和 Unity，EasyEcs 只支持 .NET 10。
 | 标签 | `e.Set<Dead>()` | `entity.SetDead()` |
 | 销毁 | `e.Dispose()` | `entity.Destroy()` |
 | 单例 | `world.Set<T>(value)`、`world.Get<T>()` | `ISingletonComponent`、`world.SetClock(…)`、`world.Clock`、`ref T` 参数 |
-| 遍历集合的系统 | `[With(typeof(A)), Without(typeof(B))] class S : AEntitySetSystem<TState>` | `class S : EcsSystem`，内含 `[ForEach, Without<B>] static void M(ref A a)` |
+| 遍历集合的系统 | `[With(typeof(A)), Without(typeof(B))] class S : AEntitySetSystem<TState>` | `[EcsSystem] ref struct S`，内含 `[ForEach, Without<B>] static void M(ref A a)` |
 | 遍历单个组件的系统 | `AComponentSystem<TState, A>` | 参数为 `ref A` 的 `[ForEach]` 方法 |
 | 系统序列 | `new SequentialSystem<T>(systems)` | 按顺序 `world.AddSystem<S>()`，或用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |
 | 并行系统 | `new ParallelSystem<T>(runner, systems)` | `WorldOptions.ParallelSystems`（冲突由生成的访问集判断） |
@@ -76,7 +76,8 @@ netstandard1.1-2.1 和 Unity，EasyEcs 只支持 .NET 10。
 public struct Hp : IComponent { public int Value, Max; }
 public struct Fire : IComponent { public int Ticks, DamagePerTick; }
 
-public class StatusSystem : EcsSystem
+[EcsSystem]
+public ref struct StatusSystem
 {
     [ForEach]
     static void Burn(Entity entity, ref Fire fire, ref Hp hp)

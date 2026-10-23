@@ -61,10 +61,10 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 
 | 调用 | 作用 |
 | --- | --- |
-| `new World(options)` | 一个独立的 World；`Dispose()` 会调用每个系统的 `OnDestroy` |
+| `new World(options)` | 一个独立的 World；`Dispose()` 会调用每个系统的 `[OnDestroy]` |
 | `world.Update()` | 把默认分组的系统执行一遍 |
 | `world.Update<TGroup>()` | 执行一个系统分组 |
-| `world.AddSystem<T>()` / `AddSystem(instance)` | 添加系统（调用 `OnCreate`） |
+| `world.AddSystem<T>()` | 添加系统（调用 `[OnCreate]`） |
 | `world.RemoveSystem<T>()` / `TryGetSystem<T>(out s)` / `Systems` | 移除、查找、列出系统 |
 | `world.EntityCount` / `Entities` | 存活实体数，以及零分配的遍历 |
 | `world.ChangeTick` | 当前的变更 tick |
@@ -167,7 +167,8 @@ bool dead = unit.IsDead;
 ## 系统与 [ForEach] [#systems]
 
 ```csharp title="MovementSystem.cs"
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Dead>]                         // 每个有 Position 和 Velocity、没有 Dead 的实体执行一次
     static void Move(ref Position p, in Velocity v)
@@ -226,7 +227,8 @@ public class MovementSystem : EcsSystem
 | `[UpdateInGroup<G>]` | 系统 | 只在 `world.Update<G>()` 时执行 |
 
 ```csharp
-public class DecaySystem : EcsSystem
+[EcsSystem]
+public ref struct DecaySystem
 {
     [ForEach(Slices = 4)]                            // 每次运行四分之一的行，每 4 次运行每行一次
     static void Decay(ref Velocity v)
@@ -251,7 +253,7 @@ public struct Shop : IActorGroup<Shop>;             // [UpdateInGroup<Shop>] 的
 
 | 成员 | 作用 |
 | --- | --- |
-| `OnCreate()` / `OnUpdate()` / `OnDestroy()` | 生命周期；`OnUpdate` 在 `[ForEach]` 方法之前执行 |
+| `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` | 生命周期；`[OnUpdate]` 在 `[ForEach]` 方法之前执行 |
 | `World` | 系统所属的 World |
 | `[UpdateInterval(N, Phase = P)]` | 每 N 次更新执行一次，落在第 0 到 N-1 个相位 |
 | `Enabled` | 跳过这个系统；设回 `true` 会清掉 `Error` |
@@ -335,7 +337,8 @@ int changed = world.Count<Health>(QueryFilter.Create().Changed<Health>(mark));
 ```
 
 ```csharp tab="Mut<T>"
-public class ClampSystem : EcsSystem
+[EcsSystem]
+public ref struct ClampSystem
 {
     [ForEach]                                        // 只给真正写了的行打 tick
     static void Clamp(Mut<Health> hp)

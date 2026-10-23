@@ -91,8 +91,22 @@ test runs one update before it counts bytes. See [Testing systems](/en/docs/guid
 
 ## System [#system]
 
-A class deriving from `EcsSystem` with one job. Its `[ForEach]` methods run over every matching entity on each
-update; it keeps no state of its own and never calls another system. See [Systems](/en/docs/guide/systems).
+An `[EcsSystem] ref struct` of static methods with one job, never an object. Its `[ForEach]` methods run over every
+matching entity on each update; it keeps no state of its own and never calls another system. See
+[Systems](/en/docs/guide/systems).
+
+## System handle [#system-handle]
+
+A `SystemHandle`: what `AddSystem<T>()`, `System<T>()` and `world.Systems` return, a handle to the world's record of
+one system (`Enabled`, `Error`, `LastRunTick`, `RunCount`, `Stats`, `Name`). Like an `Entity`, it turns stale when its
+system is removed. Hooks may take it to read their own system's record. See
+[Systems](/en/docs/guide/systems#lifecycle).
+
+## System set [#system-set]
+
+The code the generator writes per assembly (`__EasyEcsSystems`): every system of the assembly, and every closed
+generic system it names, numbered, with a `switch` per hook that calls each system's code directly. The world runs
+consecutive systems of one set with one call. See [Architecture](/en/docs/architecture#systems).
 
 ## System group [#system-group]
 
@@ -119,8 +133,8 @@ See [Threading](/en/docs/guide/threading#parallel-systems).
 
 What a system reads and writes, generated from its `[ForEach]` parameters: a `ref` component or singleton is a
 write, an `in` one a read, a `Mut<T>` parameter a write of `T`, and `[Changed<T>]` or `[Removed<T>]` reads `T`. Two systems conflict when one writes what
-the other reads or writes. A system that can reach the whole world (an `Entity` or `World` parameter, an instance
-method, an `OnUpdate` override, a `[Consume]` method) runs alone. Only systems that do not conflict share a [stage](#stage). See
+the other reads or writes. A system that can reach the whole world (an `Entity` or `World` parameter, an
+`[OnUpdate]` method, a `[Consume]` method) runs alone. Only systems that do not conflict share a [stage](#stage). See
 [Threading](/en/docs/guide/threading#parallel-systems).
 
 ## Runner [#runner]

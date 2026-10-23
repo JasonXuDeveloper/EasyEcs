@@ -41,7 +41,7 @@ the schedule, in registration order or in the order `[UpdateBefore<T>]` / `[Upda
 | **Component** | A struct of fields for one aspect of one entity (`Health`, `Velocity`); computed getters are fine | A class, an object with behaviour, a holder of references to systems or services |
 | **Tag** | An empty component (`Dead`, `Frozen`) used as a filter | A boolean flipped every tick (use a field) |
 | **Singleton** | One struct per world: clock, configuration, counters, a spatial grid | A static field (it would be shared by every world) |
-| **System** | Behaviour with one responsibility, reading and writing components and singletons | A place to keep state, or a service other systems call |
+| **System** | Behaviour with one responsibility, reading and writing components and singletons: an `[EcsSystem] ref struct` of static methods, never an object | A place to keep state, or a service other systems call |
 
 ## The rules [#rules]
 
@@ -60,7 +60,8 @@ Name a system after the one thing it does. If its description needs "and", split
 ```csharp tab="Before"
 // Before: burning AND death in one system. Death is noticed only for burning units:
 // a unit killed by anything else is never marked Dead.
-public class StatusSystem : EcsSystem
+[EcsSystem]
+public ref struct StatusSystem
 {
     [ForEach, Without<Dead>]
     static void Tick(Entity unit, ref Burning burning, ref Health hp)
@@ -74,7 +75,8 @@ public class StatusSystem : EcsSystem
 
 ```csharp tab="After"
 // After: each concern can be removed, reordered or tested alone, and death covers every damage source.
-public class BurnSystem : EcsSystem
+[EcsSystem]
+public ref struct BurnSystem
 {
     [ForEach, Without<Dead>]
     static void Burn(Entity unit, ref Burning burning, ref Health hp)
@@ -84,8 +86,8 @@ public class BurnSystem : EcsSystem
     }
 }
 
-[UpdateAfter<BurnSystem>]   // after the systems that deal damage
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>] // after the systems that deal damage
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)   // `in`: it only reads Health
@@ -96,8 +98,9 @@ public class DeathSystem : EcsSystem
 ```
 
 Splitting costs nothing at run time. Every `[ForEach]` method is its own inlined struct job either way, and the
-per-system cost of an update is two virtual calls (`OnUpdate` and the generated code) plus one
-query-cache lookup per `[ForEach]` method and one lookup per singleton parameter. When in doubt, split.
+per-system cost of an update is one direct call of its generated code (a `switch` case of its assembly's system set,
+no virtual call), the `[OnUpdate]` call when it has one, and one lookup per singleton parameter; each pass reads the
+query kept for its job type. When in doubt, split.
 
 ### 2. Systems are stateless [#2-systems-are-stateless]
 
@@ -109,16 +112,18 @@ when the system is removed or added twice. Put it in data:
 | Per entity (cooldown, target, path) | A component |
 | Per world (tick, score, configuration, spatial grid) | A singleton |
 | Lookups by value (a player by name, the items of an owner) | An indexed component ([indexes and relations](/en/docs/guide/indexes-and-relations)), not a dictionary kept in sync by hand |
-| Derived and rebuildable (a scratch list reused every update) | A `readonly` field on the system is fine |
+| Derived and rebuildable (a scratch list reused every update) | A [`Scratch<T>`](/en/docs/guide/threading#scratch) parameter, or a `static readonly` field on the system |
+| A dependency of the host (a mailbox, a connection, a service) | A [`[NotSaved]`](/en/docs/guide/saves#not-saved) singleton the host sets |
 
 ```csharp tab="Before" doccheck=expect-EECS007
 // Before (EECS007): the count lives in the system, where no query, test or other system can see it.
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
-    public int Deaths;
+    static int Deaths;
 
     [ForEach, Without<Dead>]
-    void Die(Entity unit, in Health hp)
+    static void Die(Entity unit, in Health hp)
     {
         if (hp.Value > 0) return;
         unit.SetDead();
@@ -131,8 +136,8 @@ public class DeathSystem : EcsSystem
 // After: the count is world state; anyone can read it (world.Score.Deaths).
 public record struct Score(int Deaths) : ISingletonComponent;
 
-[UpdateAfter<BurnSystem>]
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Score score)   // a singleton parameter
@@ -144,13 +149,14 @@ public class DeathSystem : EcsSystem
 }
 ```
 
-`readonly` fields for dependencies or reusable scratch buffers, `init`-only properties and computed properties are
-allowed ([EECS007](/en/docs/guide/analyzer#eecs007)).
+A system declares static members only ([EECS075](/en/docs/guide/analyzer#eecs075)). Constants and `static readonly`
+fields (a lookup table, a reusable scratch buffer) are allowed; a mutable static field is
+[EECS007](/en/docs/guide/analyzer#eecs007): it would be state shared by every world and kept when the system is removed.
 
 ### 3. Systems never reference systems [#3-systems-never-reference-systems]
 
-A system that holds another system ([EECS008](/en/docs/guide/analyzer#eecs008)), or reaches one through
-`World.TryGetSystem<T>(out …)`, can no longer be removed, reordered or tested alone. Cooperate through data instead:
+A system that calls another system's members ([EECS008](/en/docs/guide/analyzer#eecs008)), or reaches one through
+`world.System<T>()` or `TryGetSystem<T>(out …)`, can no longer be removed, reordered or tested alone. Cooperate through data instead:
 
 - **Pipeline:** an earlier system writes a component, a later one reads it. Register the writer first, or order them
   with `[UpdateAfter<T>]`.
@@ -159,10 +165,11 @@ A system that holds another system ([EECS008](/en/docs/guide/analyzer#eecs008)),
 
 ```csharp
 // Reacts to Dead; DeathSystem does not know it exists.
-[UpdateAfter<DeathSystem>]
-public sealed class CorpseSystem : EcsSystem
+[EcsSystem, UpdateAfter<DeathSystem>]
+public ref struct CorpseSystem
 {
-    protected override void OnUpdate() => World.DestroyAll<Dead>();   // every corpse in one pass
+    [OnUpdate]
+    static void OnUpdate(World world) => world.DestroyAll<Dead>();   // every corpse in one pass
 }
 ```
 
@@ -213,7 +220,8 @@ public record struct Facing(float Angle) : IComponent, ITracked;      // tracked
 public record struct NetSync(Facing Sent) : IComponent;               // what clients last heard
 public record struct Outbox(int Updates) : ISingletonComponent;
 
-public class FacingSystem : EcsSystem
+[EcsSystem]
+public ref struct FacingSystem
 {
     // Recomputed every tick, rarely different: only a new angle stamps the row.
     [ForEach]
@@ -221,8 +229,8 @@ public class FacingSystem : EcsSystem
         facing.SetIfChanged(new Facing(MathF.Atan2(v.Y, v.X)));
 }
 
-[UpdateAfter<FacingSystem>]
-public class SyncSystem : EcsSystem
+[EcsSystem, UpdateAfter<FacingSystem>]
+public ref struct SyncSystem
 {
     [ForEach, Changed<Facing>]   // only entities whose Facing changed since this system last ran
     static void Sync(in Facing facing, ref NetSync sync, ref Outbox outbox)
@@ -241,8 +249,8 @@ during the pass (created, or moved into a matching table) wait for the next pass
 order of systems, never the order in which a system happens to visit entities:
 
 ```csharp
-[UpdateAfter<BurnSystem>]   // after the damage; respawn and loot are ordered after it
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>] // after the damage; respawn and loot are ordered after it
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Score score)
@@ -336,8 +344,9 @@ them:
 | Rule | Broken by | Caught by |
 | --- | --- | --- |
 | Components are data | A class implementing `IComponent` | [EECS006](/en/docs/guide/analyzer#eecs006) |
-| [2. Systems are stateless](#2-systems-are-stateless) | A mutable field, settable property or event on a system | [EECS007](/en/docs/guide/analyzer#eecs007) |
-| [3. Systems never reference systems](#3-systems-never-reference-systems) | A system-typed member, `TryGetSystem<T>(out …)` inside a system | [EECS008](/en/docs/guide/analyzer#eecs008) |
+| Systems are not objects | `[EcsSystem]` on a class or a plain struct; an instance member in a system | [EECS074](/en/docs/guide/analyzer#eecs074), [EECS075](/en/docs/guide/analyzer#eecs075) |
+| [2. Systems are stateless](#2-systems-are-stateless) | A mutable static field on a system | [EECS007](/en/docs/guide/analyzer#eecs007) |
+| [3. Systems never reference systems](#3-systems-never-reference-systems) | A call of another system's members, `System<T>()` / `TryGetSystem<T>(out …)` inside a system | [EECS008](/en/docs/guide/analyzer#eecs008) |
 | [5. Choose the cheapest representation](#5-choose-the-cheapest-representation-for-frequent-changes) | A `Query` loop that only reads tracked components (every row stamped) | [EECS046](/en/docs/guide/analyzer#eecs046) (warning) |
 | [6. Let the schedule order effects](#6-let-the-schedule-order-effects) | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` in a cycle | [EECS019](/en/docs/guide/analyzer#eecs019) |
 | [7. Keep handles, not refs](#7-keep-entity-handles-never-refs-across-boundaries) | An `Entity` field in a component; a `ref` used after a structural change | [EECS017](/en/docs/guide/analyzer#eecs017), [EECS047](/en/docs/guide/analyzer#eecs047) (warnings) |

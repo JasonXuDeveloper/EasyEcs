@@ -46,7 +46,8 @@ public record struct Replica(int Health) : IComponent;
 `[Changed<Health>]` selects the rows written after the system's last run. Read the tracked component with `in`.
 
 ```csharp title="Replicate.cs"
-public class Replicate : EcsSystem
+[EcsSystem]
+public ref struct Replicate
 {
     // Only entities whose Health was written since this system's previous run
     // (all of them on its first run).
@@ -133,7 +134,8 @@ public record struct Position(float X, float Y) : IComponent, ITracked;
 public record struct Destination(float X, float Y) : IComponent;
 public record struct PositionReplica(float X, float Y) : IComponent;
 
-public class StepSystem : EcsSystem
+[EcsSystem]
+public ref struct StepSystem
 {
     // Every NPC, every tick: most of them already stand at their destination.
     [ForEach]
@@ -146,8 +148,8 @@ public class StepSystem : EcsSystem
     }
 }
 
-[UpdateAfter<StepSystem>]
-public class ReplicatePositionSystem : EcsSystem
+[EcsSystem, UpdateAfter<StepSystem>]
+public ref struct ReplicatePositionSystem
 {
     // Visits only the NPCs whose position changed, not every NPC the step visited.
     [ForEach, Changed<Position>]
@@ -227,7 +229,8 @@ Replication has to tell clients when something goes away too: a fire went out, a
 public record struct Burning(int Ticks) : IComponent, ITracked;           // tracked: removals are recorded too
 public record struct FireReplica(bool Burning) : IComponent;              // what the clients know of the fire
 
-public class ReplicateFire : EcsSystem
+[EcsSystem]
+public ref struct ReplicateFire
 {
     [ForEach, Changed<Burning>]                     // set on fire (or the fire written) since the last run
     static void Lit(ref FireReplica replica) => replica.Burning = true;
@@ -293,7 +296,8 @@ public record struct Poisoned(int Ticks) : IComponent, ITracked;
 public record struct UnitReplica(int Health, int Armor, float X, float Y) : IComponent;
 public record struct StatusReplica(bool Burning, bool Poisoned) : IComponent;
 
-public class ReplicateUnitSystem : EcsSystem
+[EcsSystem]
+public ref struct ReplicateUnitSystem
 {
     // Health, armor or position written since the last run: one visit per unit, however many changed.
     [ForEach, ChangedAny<Health, Armor, Position>] // [!code highlight]
@@ -454,7 +458,8 @@ public partial struct Sent : ISingletonComponent { [Sum] public int Rows; }
 using EasyEcs;
 
 // Burning units lose 10 health a tick until the fire goes out.
-public class BurnSystem : EcsSystem
+[EcsSystem]
+public ref struct BurnSystem
 {
     [ForEach]
     static void Burn(Entity unit, ref Burning burning, ref Health health)
@@ -469,8 +474,8 @@ public class BurnSystem : EcsSystem
 }
 
 // Sends the health of every unit whose health was written since this system last ran.
-[UpdateAfter<BurnSystem>]
-public class ReplicateHealthSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>]
+public ref struct ReplicateHealthSystem
 {
     // Health is read with `in`: a `ref` would count as a write.
     [ForEach, Changed<Health>]
@@ -482,8 +487,8 @@ public class ReplicateHealthSystem : EcsSystem
 }
 
 // Tells the clients that a fire went out: visits each unit that lost Burning since the last run.
-[UpdateAfter<BurnSystem>]
-public class ReplicateFireOutSystem : EcsSystem
+[EcsSystem, UpdateAfter<BurnSystem>]
+public ref struct ReplicateFireOutSystem
 {
     [ForEach, Removed<Burning>]
     static void FireOut(Entity unit, in Health health)

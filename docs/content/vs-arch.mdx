@@ -52,7 +52,7 @@ Arch runs on more runtimes (netstandard2.1, net6.0, net8.0 and Unity); EasyEcs n
 | Struct job | `IForEach<A, B>` with `Update(ref A, ref B)`, run by `world.InlineQuery<Job, A, B>(in query, ref job)` | `IForEach<A, B>` with `Execute(ref A, ref B)`, run by `world.ForEach<A, B, Job>(ref job, in filter)` |
 | Job with the entity | `IForEachWithEntity<A>`, `InlineEntityQuery` | `IForEachEntity<A>`, `ForEachEntity`, or an `Entity` parameter of a `[ForEach]` method |
 | Chunks | `world.Query(in query).GetChunkIterator()`, then `chunk.GetSpan<T>()` | batch `[ForEach]` methods taking `Span<T>`, or `ForEachBatch` |
-| System | Arch.Extended `BaseSystem` | `EcsSystem` with `[ForEach]` methods |
+| System | Arch.Extended `BaseSystem` | `[EcsSystem]` with `[ForEach]` methods |
 | Command buffer | `CommandBuffer`, `Playback(world)` | none: `entity.SetFire(10)`, `RemoveFire()`, `Destroy()` apply at once |
 | Bulk change | `world.Add(in query, value)`, `world.Remove<T>(in query)` | `world.SetAll(value, filter)`, `world.RemoveAll<T>(filter)` |
 | Reserve before creating | `world.EnsureCapacity(in signature, n)` | `world.Reserve<A, B>(n)`, or `world.CreateEntities(span, a, b)` at once |
@@ -73,7 +73,8 @@ public struct Attack : IComponent { public int Damage, Cooldown, Interval; }
 public struct Hp : IComponent { public int Value, Max; }
 public struct Fire : IComponent { public int Ticks; }
 
-public class CombatSystem : EcsSystem
+[EcsSystem]
+public ref struct CombatSystem
 {
     [ForEach, Without<Dead>, Without<Stunned>]
     static void Fight(Entity entity, ref Attack attack, ref Hp hp)

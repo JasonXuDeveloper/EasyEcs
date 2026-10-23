@@ -107,9 +107,11 @@ By default an exception in a system propagates out of `Update()`, so a test asse
 
 ```csharp doccheck=skip
 // Prints the score; it reads the singleton without adding it.
-public class ScoreReport : EcsSystem
+[EcsSystem]
+public ref struct ScoreReport
 {
-    protected override void OnUpdate() => Console.WriteLine($"kills: {World.Score.Kills}");
+    [OnUpdate]
+    static void OnUpdate(World world) => Console.WriteLine($"kills: {world.Score.Kills}");
 }
 
 [Test]
@@ -125,8 +127,7 @@ public void AMissingSingletonThrowsOutOfUpdate()
 public void UnderDisableTheSystemIsSwitchedOff()
 {
     using var world = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
-    var report = new ScoreReport();
-    world.AddSystem(report);
+    var report = world.AddSystem<ScoreReport>();
 
     world.Update();
 
@@ -225,7 +226,8 @@ public record struct Score(int Kills) : ISingletonComponent;
 ```csharp title="Systems.cs" doccheck=example
 using EasyEcs;
 
-public class PoisonSystem : EcsSystem
+[EcsSystem]
+public ref struct PoisonSystem
 {
     [ForEach, Without<Dead>]
     static void Hurt(Entity unit, ref Poison poison, ref Health health)
@@ -238,8 +240,8 @@ public class PoisonSystem : EcsSystem
     }
 }
 
-[UpdateAfter<PoisonSystem>]
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<PoisonSystem>]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health health, ref Score score)

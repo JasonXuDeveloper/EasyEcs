@@ -415,15 +415,17 @@ job 不能读别的行的 job 会写的东西（别的实体、单例组件）�
 这些都不能在查询循环进行中做。
 
 ```csharp
-public class BuryTheFallen : EcsSystem
+[EcsSystem]
+public ref struct BuryTheFallen
 {
     static readonly QueryFilter Fallen = QueryFilter.Create().With<Dead>();
 
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
         Span<EntityId> batch = stackalloc EntityId[64];
-        int count = World.CollectIds<Health>(batch, Fallen);   // 按查询顺序取前 64 个 // [!code highlight]
-        World.DestroyEntities(batch[..count]);                 // 其余的等下一个 tick
+        int count = world.CollectIds<Health>(batch, Fallen);   // 按查询顺序取前 64 个 // [!code highlight]
+        world.DestroyEntities(batch[..count]);                 // 其余的等下一个 tick
     }
 }
 ```
@@ -461,7 +463,8 @@ public struct Burning : IComponent;
 using EasyEcs;
 
 // 冻住、着火或两者都有的单位，速度减半。
-public class SlowSystem : EcsSystem
+[EcsSystem]
+public ref struct SlowSystem
 {
     [ForEach, WithAny<Frozen>, WithAny<Burning>]
     static void Slow(ref Velocity velocity)
@@ -472,8 +475,8 @@ public class SlowSystem : EcsSystem
 }
 
 // 移动所有没被冻住的单位。
-[UpdateAfter<SlowSystem>]
-public class MoveSystem : EcsSystem
+[EcsSystem, UpdateAfter<SlowSystem>]
+public ref struct MoveSystem
 {
     [ForEach, Without<Frozen>]
     static void Move(ref Position position, in Velocity velocity)

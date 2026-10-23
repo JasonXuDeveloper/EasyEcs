@@ -62,7 +62,7 @@ EasyEcs 领先，但不到上面的幅度；完整服务器 tick 就在这里。
 | 查询循环里做结构变更 | ✅ 当场生效，每个实体只访问一次 | ❌ 抛 `StructuralChangeException`；`CommandBuffer` | ⚠️ 无保护；`CommandBuffer` | ⚠️ `useBuffer` 集合或 `EntityCommandRecorder` |
 | 标签 | ✅ 空组件；移除时只翻一个位 | ✅ `ITag`（属于原型的一部分） | ⚠️ 空 struct，和普通组件一样搬行 | ❌ |
 | 单例 | ✅ `ISingletonComponent`，可作 `[ForEach]` 参数 | ⚠️ `UniqueEntity` | ❌ | ✅ `World.Set<T>` / `Get<T>` |
-| 系统、顺序、分组 | ✅ `EcsSystem`、`[UpdateBefore<T>]` / `[UpdateAfter<T>]`、`ISystemGroup`、`UpdateInterval` | ✅ `SystemRoot`、`SystemGroup`、`QuerySystem` | ❌ 核心里没有（Arch.Extended） | ✅ `ISystem<T>`、`SequentialSystem`、`AEntitySetSystem` |
+| 系统、顺序、分组 | ✅ `[EcsSystem]`、`[UpdateBefore<T>]` / `[UpdateAfter<T>]`、`ISystemGroup`、`UpdateInterval` | ✅ `SystemRoot`、`SystemGroup`、`QuerySystem` | ❌ 核心里没有（Arch.Extended） | ✅ `ISystem<T>`、`SequentialSystem`、`AEntitySetSystem` |
 | 源生成的系统 | ✅ `[ForEach]` → 内联的 struct job | ❌ | ❌ 核心里没有 | ❌ |
 | 每个组件生成具名 API | ✅ `e.Position`、`HasX`、`SetX(...)`、`IsDead`、`world.Battle` | ❌ | ❌ | ❌ |
 | 编译期分析器 | ✅ EECS002-EECS089，附代码修复 | ❌ | ❌ | ❌ |
@@ -102,7 +102,8 @@ EasyEcs 领先，但不到上面的幅度；完整服务器 tick 就在这里。
 遍历同一张表的途中也一样，并且每个实体仍然最多访问一次：
 
 ```csharp title="DeathSystem.cs"
-public class DeathSystem : EcsSystem
+[EcsSystem]
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)
@@ -397,7 +398,7 @@ DefaultEcs 用配 `DefaultParallelRunner` 的 `AEntitySetSystem`。
 | 标签 | Friflo | 空组件；移除时只翻一个位 |
 | 唯一实体、World 组件 | Friflo、DefaultEcs | 单例，作为 `[ForEach]` 参数或 `SingletonRef<T>` |
 | 启用 / 禁用实体 | Friflo、DefaultEcs | 一个标签（`[Without<Asleep>]`），或对单个组件用 `Disable<T>()` |
-| 系统、分组、顺序 | Friflo、DefaultEcs、Arch.Extended | `EcsSystem`、`[UpdateBefore<T>]` / `[UpdateAfter<T>]`、`ISystemGroup`、`UpdateInterval` |
+| 系统、分组、顺序 | Friflo、DefaultEcs、Arch.Extended | `[EcsSystem]`、`[UpdateBefore<T>]` / `[UpdateAfter<T>]`、`ISystemGroup`、`UpdateInterval` |
 | struct 查询 job、chunk 遍历 | Arch、Friflo | `IForEach`、`IForEachEntity`、`IForEachBatch`；批量 `[ForEach]` 方法 |
 | 并行查询 | Friflo、Arch、DefaultEcs | `[ForEach(Parallel = true)]`、`ForEachParallel`、`ForEachEntityParallel` |
 | 并行系统 | DefaultEcs | `WorldOptions.ParallelSystems` |

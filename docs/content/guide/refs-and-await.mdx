@@ -67,7 +67,8 @@ Use `ref` freely inside `[ForEach]` methods, `ForEach` jobs and `Query` loops: e
 ```csharp
 public record struct Target(EntityId Id) : IComponent;
 
-public class StrikeSystem : EcsSystem
+[EcsSystem]
+public ref struct StrikeSystem
 {
     [ForEach, Without<Dead>]
     static void Strike(Entity attacker, in Target target, World world)
@@ -121,27 +122,32 @@ using System.Collections.Concurrent;
 
 public record struct PotionRedeemed(EntityId Player, int Heal);   // a message, not a component
 
-// The queue is a dependency in a readonly field, which EECS007 allows. A managed queue in a singleton
-// would make World.Save need a formatter for it.
-public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : EcsSystem
-{
-    private readonly ConcurrentQueue<PotionRedeemed> _inbox = inbox;   // filled by async code on any thread
+// The queue lives in a [NotSaved] singleton the host sets: no save writes it, so the managed
+// queue needs no formatter, and a load keeps it.
+[NotSaved]
+public record struct RedemptionInbox(ConcurrentQueue<PotionRedeemed> Queue) : ISingletonComponent;
 
-    protected override void OnUpdate()
+[EcsSystem]
+public ref struct ApplyRedemptions
+{
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_inbox.TryDequeue(out var done))
-            if (World.TryGetEntity(done.Player, out var player) && player.HasHealth)
+        var queue = world.RedemptionInbox.Queue;                              // filled by async code on any thread
+        while (queue.TryDequeue(out var done))
+            if (world.TryGetEntity(done.Player, out var player) && player.HasHealth)
                 player.Health.Value += done.Heal;                     // on the owner thread, during the update
     }
 }
 ```
 
-The system takes the queue through its constructor, so `AddSystem<T>()` cannot create it: add an instance. The
-async side reads what it needs on the owner thread, then only enqueues:
+The host sets the queue once, next to the system. The async side reads what it needs on the owner thread, then only
+enqueues:
 
 ```csharp
 var inbox = new ConcurrentQueue<PotionRedeemed>();
-world.AddSystem(new ApplyRedemptions(inbox));
+world.SetRedemptionInbox(inbox);
+world.AddSystem<ApplyRedemptions>();
 ```
 
 ```csharp
@@ -233,20 +239,24 @@ public static class Redemptions
 using System.Collections.Concurrent;
 using EasyEcs;
 
-// Applies the redemptions on the owner thread, during the update.
-// The queue is a dependency in a readonly field (EECS007 allows it); a managed queue in a singleton
-// would make World.Save need a formatter for it.
-public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : EcsSystem
-{
-    private readonly ConcurrentQueue<PotionRedeemed> _inbox = inbox;
+// The queue, set by the host: a [NotSaved] singleton, so no save writes it and the managed
+// queue needs no formatter.
+[NotSaved]
+public record struct RedemptionInbox(ConcurrentQueue<PotionRedeemed> Queue) : ISingletonComponent;
 
-    protected override void OnUpdate()
+// Applies the redemptions on the owner thread, during the update.
+[EcsSystem]
+public ref struct ApplyRedemptions
+{
+    [OnUpdate]
+    static void OnUpdate(World world)
     {
-        while (_inbox.TryDequeue(out var done))
+        var queue = world.RedemptionInbox.Queue;
+        while (queue.TryDequeue(out var done))
         {
             // The EntityId carries a version: a destroyed player fails here,
             // and so does a new entity on its index.
-            if (World.TryGetEntity(done.Player, out var player) && player.HasHealth)
+            if (world.TryGetEntity(done.Player, out var player) && player.HasHealth)
             {
                 player.Health.Value += done.Heal;
             }
@@ -270,8 +280,9 @@ var inbox = new ConcurrentQueue<PotionRedeemed>();
 var shop = new Shop();
 
 using var world = new World();
-// The system takes the queue through its constructor, so it is added as an instance.
-world.AddSystem(new ApplyRedemptions(inbox));
+// The queue goes into the world as data; the system reads it from there.
+world.SetRedemptionInbox(inbox);
+world.AddSystem<ApplyRedemptions>();
 
 var alice = world.CreateEntity(new Health(40), new Account(1));
 var bob = world.CreateEntity(new Health(60), new Account(2));
