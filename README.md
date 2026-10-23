@@ -123,7 +123,8 @@ public record struct Health(int Value) : IComponent, ITracked;         // tracke
 public struct Dead : IComponent;                                       // a tag
 public record struct Clock(float Dt) : ISingletonComponent;           // one value per world
 
-public class MovementSystem : EcsSystem
+[EcsSystem]
+public ref struct MovementSystem
 {
     [ForEach, Without<Dead>]                                           // in reads, ref writes
     static void Move(ref Position p, in Velocity v, in Clock clock)
@@ -133,8 +134,8 @@ public class MovementSystem : EcsSystem
     }
 }
 
-[UpdateAfter<MovementSystem>]                                          // registration order otherwise
-public class DeathSystem : EcsSystem
+[EcsSystem, UpdateAfter<MovementSystem>]                               // registration order otherwise
+public ref struct DeathSystem
 {
     [ForEach, Without<Dead>, Changed<Health>]                          // only healths written since its last run
     static void Die(Entity unit, in Health hp)
@@ -301,6 +302,12 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 
 ## What's new in 4.8
 
+- **Systems are static code.** A system is an `[EcsSystem]` ref struct of static methods: `[ForEach]` methods and
+  `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` hooks that take the `World` or the system's `SystemHandle` when they need
+  them. No object per system, no virtual call: an assembly's systems run through one generated switch, and a generated
+  pass finds its query by its job type. Classes deriving from `EcsSystem` change (a code change, with a code fix on
+  the compiler's error: see the [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-8-systems)), and
+  EECS074 to EECS077 keep the new form ([systems](https://ecs.xgamedev.net/en/docs/guide/systems)).
 - **SIMD without writing it.** A `[ForEach]` method over numbers runs as a vector loop the generator writes from its
   body, the way Burst compiles a job, with the same results bit for bit: components of 1 to 4 fields, narrow lanes
   (`byte`, `short`), `Vector2` / `Vector3` / `Vector4` fields, `Maybe<T>` parameters, parallel methods, and on
@@ -321,8 +328,7 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   reduction; `[IndexKey]`, `[UniqueKey]` and `[Group]` on a member declare an index key or a group; `[GroupBy]`,
   `[WhenTargetDestroyed]` and `[NotSaved]` on a type declare every world's setup for it
   ([declared parts](https://ecs.xgamedev.net/en/docs/guide/entities-and-components#declared-parts)).
-  `[UpdateInterval(n, Phase = p)]` on a system replaces the removed overrides (a code change: see the
-  [migration guide](https://ecs.xgamedev.net/en/docs/migration)); `[ForEntity]` writes the job and the entry point that
+  `[UpdateInterval(n, Phase = p)]` on a system declares its cadence; `[ForEntity]` writes the job and the entry point that
   run a method on one entity; `[Consume]` destroys the rows a pass handled
   ([systems](https://ecs.xgamedev.net/en/docs/guide/systems#consume)).
 - **Servers that reach their peak and stop allocating.** `Reserve(prefab, n)` covers index keys, the retired table and
@@ -331,8 +337,9 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   enter later, so entering it moves no row; restores and loads reuse what the last one allocated
   ([prefabs](https://ecs.xgamedev.net/en/docs/guide/prefabs#reserve)).
 - **Smaller additions.** `ReadOnlyMaybe<T>`, `buffer.SetCount(n)`, `entity.GetOrAdd(value)`,
-  `SaveEntitiesWithout`, `world.CollectIds`, enum elements in a `DynamicBuffer`, and the generators do about half
-  the work per edit.
+  `SaveEntitiesWithout`, `world.CollectIds`, enum elements in a `DynamicBuffer`, generic systems closed in another
+  assembly under Native AOT, `<IlcInstructionSet>native</IlcInstructionSet>` in the templates for the `Vector512`
+  loops, and the generators do about half the work per edit.
 - **A Minecraft-style sample and a Samples section.** [VoxelServer](https://ecs.xgamedev.net/en/docs/samples/voxel-server)
   runs chunks, flowing water, areas of interest, zombies, replication and saves at 20 ticks a second; the
   [Samples](https://ecs.xgamedev.net/en/docs/samples) section of the site walks through every sample.

@@ -11,15 +11,86 @@ icon: CircleArrowUp
 
 ## v4.7 → v4.8 [#v4-7-to-v4-8]
 
-4.7 的存档照样能读。为 4.7 写的代码除了系统的节奏都不用改就能编译：`UpdateInterval` 和 `UpdatePhase` 属性变成了
-`[UpdateInterval(n, Phase = p)]` 特性。有两条分析器规则报告的范围变大了，还有三条新的警告：把警告当错误的构建会在这些地方失败，
-改完代码才能通过。
+4.7 的存档照样能读。系统换了写法：`EcsSystem` 基类变成了[标在只有静态方法的 ref struct 上的 `[EcsSystem]`](#v4-8-systems)，
+有代码修复可以改写类；系统的节奏是 [`[UpdateInterval(n, Phase = p)]` 特性](#v4-8-update-interval)。为 4.7 写的其他代码都不用改就能编译。
+有两条分析器规则报告的范围变大了，还有三条新的警告：把警告当错误的构建会在这些地方失败，改完代码才能通过。
+
+### 系统是 `[EcsSystem]` ref struct [#v4-8-systems]
+
+`EcsSystem` 基类删掉了。系统是标了 `[EcsSystem]`、只有静态方法的 `ref struct`：World 从不创建系统，它自己保存系统的簿记（启用、错误、
+运行次数、统计），并为系统发一个 [`SystemHandle`](/zh/docs/guide/systems#lifecycle)（[D102](/zh/docs/decisions#d102-systems-are-ref-structs)）。
+为 4.7 写的代码会在基类上编译失败（CS0246），IDE 在那里提供一个[代码修复](/zh/docs/guide/analyzer#migration-fix)来改写这个类。
+
+| 4.7 | 4.8 |
+| --- | --- |
+| `public class X : EcsSystem` | `[EcsSystem] public ref struct X` |
+| `[ForEach] void M(...)` | `[ForEach] static void M(...)`（唯一的写法） |
+| `protected override void OnCreate()` / `OnUpdate()` / `OnDestroy()` | `[OnCreate]` / `[OnUpdate]` / `[OnDestroy] static void M(...)`，接收 `World`、`SystemHandle`、两者或都不接收 |
+| `World` 属性 | `World world` 参数 |
+| 系统的 `RunCount`、`LastRunTick`、`Enabled`、`Error`、`Stats` | 它的 `SystemHandle` 上的同名成员 |
+| `T system = world.AddSystem<T>()` | `SystemHandle system = world.AddSystem<T>()` |
+| `world.AddSystem(new X(dependency))` | 对一个 `[NotSaved]` 单例调用 `world.SetX(dependency)`，再 `world.AddSystem<X>()` |
+| `world.TryGetSystem<T>(out T system)` | `world.TryGetSystem<T>(out SystemHandle system)`、`world.HasSystem<T>()`、`world.System<T>()` |
+| `world.Systems`（元素是 `EcsSystem`） | `world.Systems`（元素是 `SystemHandle`） |
+| `system.GetType().Name` | `system.Name`（类型用 `system.Type`） |
+| 几个系统共用的基类 | 泛型系统（`Regen<T>`）或放辅助函数的静态类 |
+
+带构造函数参数的系统改为把参数放进 World，作为宿主设置的 [`[NotSaved]`](/zh/docs/guide/saves#not-saved) 单例：存档不会写它
+（队列或服务没有格式化器），读档也保留它。
+
+```csharp tab="4.7" doccheck=skip
+public class ReceiveMoves(ConcurrentQueue<MoveRequest> inbox) : EcsSystem
+{
+    private readonly ConcurrentQueue<MoveRequest> _inbox = inbox;
+
+    protected override void OnUpdate()
+    {
+        while (_inbox.TryDequeue(out var move))
+            World.CreateEntity(new MoveIntent(move.X, move.Y));
+        if (RunCount % 600 == 0) Console.WriteLine($"{Stats.Runs} runs");
+    }
+}
+
+world.AddSystem(new ReceiveMoves(inbox));
+```
+
+```csharp tab="4.8"
+using System.Collections.Concurrent;
+
+public record struct MoveRequest(float X, float Y);
+public record struct MoveIntent(float X, float Y) : IComponent;
+
+[NotSaved]
+public record struct MoveInbox(ConcurrentQueue<MoveRequest> Moves) : ISingletonComponent;
+
+[EcsSystem]
+public ref struct ReceiveMoves
+{
+    [OnUpdate]
+    static void OnUpdate(World world, SystemHandle system)
+    {
+        var moves = world.MoveInbox.Moves;
+        while (moves.TryDequeue(out var move))
+            world.CreateEntity(new MoveIntent(move.X, move.Y));
+        if (system.RunCount % 600 == 0) Console.WriteLine($"{system.Stats.Runs} runs");
+    }
+}
+```
+
+```csharp doccheck=skip
+world.SetMoveInbox(inbox);
+world.AddSystem<ReceiveMoves>();
+```
+
+没有构造函数参数、没有抽象基类、也没有读系统簿记的 `[ForEach]` 方法的类才会提供这个修复；其余的照上面手动改。分析器跟着新写法走：
+新增 EECS074 到 EECS077（[`[EcsSystem]` 标在不是 ref struct 的类型上](/zh/docs/guide/analyzer#eecs074)、实例成员、无效的钩子、
+需要系统的地方给了非系统类型），[EECS007](/zh/docs/guide/analyzer#eecs007) 改为针对可变静态字段的警告，EECS029（实例 `[ForEach]`
+方法）和 EECS082（重写节奏属性）随它们报告的写法一起删掉了。
 
 ### 系统的节奏是特性：`[UpdateInterval(n, Phase = p)]` [#v4-8-update-interval]
 
-`EcsSystem.UpdateInterval` 和 `EcsSystem.UpdatePhase` 删掉了。在类上声明节奏：生成器把它写进系统的注册代码，所以它天然是常量；
-派生系统没有自己声明时沿用基类的。重写这两个属性之一会报 [EECS082](/zh/docs/guide/analyzer#eecs082)，它的代码修复会写出特性
-（表示“每次更新都跑”的重写直接删掉）。针对节奏不是常量的警告 EECS018 随这两个属性一起删掉了。
+`EcsSystem.UpdateInterval` 和 `EcsSystem.UpdatePhase` 随基类一起删掉了。在系统上声明节奏：生成器把它写进系统的代码，所以它天然是常量。
+针对节奏不是常量的警告 EECS018 随这两个属性一起删掉了。
 
 ```csharp tab="4.7" doccheck=skip
 public class SaveSystem : EcsSystem
@@ -32,10 +103,11 @@ public class SaveSystem : EcsSystem
 ```
 
 ```csharp tab="4.8"
-[UpdateInterval(60, Phase = 30)]
-public class SaveSystem : EcsSystem
+[EcsSystem, UpdateInterval(60, Phase = 30)]
+public ref struct SaveSystem
 {
-    protected override void OnUpdate() { }
+    [OnUpdate]
+    static void OnUpdate() { }
 }
 ```
 
@@ -54,7 +126,8 @@ public record struct Morale(int Value) : IComponent;
 ```
 
 ```csharp tab="4.7" doccheck=expect-EECS027
-public class Rally : EcsSystem
+[EcsSystem]
+public ref struct Rally
 {
     [ForEach, With<Guild>]
     static void Raise(Entity member, ref Morale morale) => morale.Value += member.Guild.Id;   // 每行查一次
@@ -62,7 +135,8 @@ public class Rally : EcsSystem
 ```
 
 ```csharp tab="4.8"
-public class Rally : EcsSystem
+[EcsSystem]
+public ref struct Rally
 {
     [ForEach]
     static void Raise(ref Morale morale, in Guild guild) => morale.Value += guild.Id;
@@ -73,7 +147,8 @@ public class Rally : EcsSystem
 挪到 `OnUpdate` 里，写成一次批量调用：
 
 ```csharp tab="4.7" doccheck=expect-EECS030
-public class CorpseSystem : EcsSystem
+[EcsSystem]
+public ref struct CorpseSystem
 {
     [ForEach, With<Dead>]
     static void Bury(Entity entity) => entity.Destroy();                // 同一个变更，一个实体一个实体地做
@@ -81,9 +156,11 @@ public class CorpseSystem : EcsSystem
 ```
 
 ```csharp tab="4.8"
-public class CorpseSystem : EcsSystem
+[EcsSystem]
+public ref struct CorpseSystem
 {
-    protected override void OnUpdate() => World.DestroyAll<Dead>();
+    [OnUpdate]
+    static void OnUpdate(World world) => world.DestroyAll<Dead>();
 }
 ```
 
@@ -105,7 +182,8 @@ public static class HitStats
     public static int Hits;
 }
 
-public class TakeHits : EcsSystem
+[EcsSystem]
+public ref struct TakeHits
 {
     [ForEach(Parallel = true)]
     static void Hit(ref Health health)
@@ -117,7 +195,8 @@ public class TakeHits : EcsSystem
 ```
 
 ```csharp tab="4.8"
-public class TakeHits : EcsSystem
+[EcsSystem]
+public ref struct TakeHits
 {
     [ForEach(Parallel = true)]
     static void Hit(ref Health health, ref Reduce<Hits> hits)
@@ -135,7 +214,8 @@ public class TakeHits : EcsSystem
 代码修复改为从单例 [`EntityRandom`](/zh/docs/reference/entityrandom) 抽取，World 需要这个单例（`world.SetEntityRandom(seed, 0)`，每一步推进它的 `Tick`）：
 
 ```csharp tab="4.7" doccheck=expect-EECS071
-public class Wander : EcsSystem
+[EcsSystem]
+public ref struct Wander
 {
     [ForEach(Parallel = true)]
     static void Step(ref Velocity velocity) => velocity = new Velocity(Random.Shared.NextSingle() * 2 - 1, velocity.Y);
@@ -143,7 +223,8 @@ public class Wander : EcsSystem
 ```
 
 ```csharp tab="4.8"
-public class Wander : EcsSystem
+[EcsSystem]
+public ref struct Wander
 {
     [ForEach(Parallel = true)]
     static void Step(ref Velocity velocity, Entity entity, in EntityRandom random) =>
@@ -159,7 +240,9 @@ public class Wander : EcsSystem
 `TileNeighborhood`、`TileBoundary`、`TileIds`、`PaddedTile<TCell, TTile>`、`TileRows<TTile>`、`TileRow<TTile>`、`TileCursor<TCell, TTile>`、
 `TileReads`），以及特性 `ForEntityAttribute`、`ConsumeAttribute`、`UpdateIntervalAttribute`、`SumAttribute`、`ProductAttribute`、
 `MinAttribute`、`MaxAttribute`、`AllAttribute`、`AnyAttribute`、`IndexKeyAttribute`、`UniqueKeyAttribute`、`GroupAttribute`、
-`GroupByAttribute`、`WhenTargetDestroyedAttribute` 和 `NotSavedAttribute`。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
+`GroupByAttribute`、`WhenTargetDestroyedAttribute`、`NotSavedAttribute`，以及系统相关类型（`EcsSystemAttribute`、`OnCreateAttribute`、
+`OnUpdateAttribute`、`OnDestroyAttribute`、`SystemHandle`，供生成代码使用的 `ISystemCode`、`ISystemSet`、`SystemDeclarations`、`SystemCode`、
+`GenericSystemCodeAttribute`）。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
 或者用 `using` 起个别名。
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]
@@ -220,11 +303,13 @@ public class Spawner : EcsSystem
 ```
 
 ```csharp tab="4.7"
-public class Spawner : EcsSystem
+[EcsSystem]
+public ref struct Spawner
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(SystemHandle system)
     {
-        if (RunCount % 10 == 0) { /* 每十次运行一次 */ }
+        if (system.RunCount % 10 == 0) { /* 每十次运行一次 */ }
     }
 }
 ```
@@ -382,9 +467,11 @@ dotnet_diagnostic.EECS028.severity = suggestion
 它会在系统自己运行的途中把这个系统再跑一遍。更新和分组应该由托管 World 的代码来跑。
 
 ```csharp tab="4.2" doccheck=expect-EECS034
-public class CatchUp : EcsSystem
+[EcsSystem]
+public ref struct CatchUp
 {
-    protected override void OnUpdate() => World.Update();
+    [OnUpdate]
+    static void OnUpdate(World world) => world.Update();
 }
 ```
 
@@ -416,7 +503,8 @@ Singleton Clock was not added to this world: set it before the systems that read
 ```csharp
 public record struct Clock(long Tick, float DeltaTime) : ISingletonComponent;
 
-public class Ticker : EcsSystem
+[EcsSystem]
+public ref struct Ticker
 {
     [ForEach] static void Advance(in Clock clock, ref Position position) => position.X += clock.DeltaTime;
 }
@@ -605,13 +693,16 @@ public class S : SystemBase, IInitSystem, IExecuteSystem
 ```
 
 ```csharp tab="v4"
-public partial class S : EcsSystem
+[EcsSystem]
+public ref struct S
 {
     // 加入 World 时
-    protected override void OnCreate() { }
+    [OnCreate]
+    static void OnCreate() { }
 
     // 每次更新（可以用 World 属性）
-    protected override void OnUpdate() { }
+    [OnUpdate]
+    static void OnUpdate() { }
 
     // 逐个实体，在 OnUpdate 之后
     [ForEach] static void Step(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);

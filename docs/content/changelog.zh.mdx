@@ -13,6 +13,20 @@ icon: RotateCcwClock
 
 ### 新功能 [#v4-8-0-new]
 
+- 系统是只有静态方法的 `[EcsSystem]` ref struct：`[ForEach]` 方法，以及 `[OnCreate]`、`[OnUpdate]` 和 `[OnDestroy]` 钩子，钩子接收
+  `World`、`SystemHandle`、两者或都不接收。World 保存每个系统的簿记，通过 `AddSystem<T>()`、`System<T>()`、`TryGetSystem<T>(out …)` 和
+  `world.Systems` 发出 `SystemHandle`（`Enabled`、`Error`、`RunCount`、`LastRunTick`、`Stats`、`Name`、`Type`）；新增 `HasSystem<T>()`。
+  一个程序集里所有系统的生成代码是一个 switch，调度里连续的一段只调用一次，没有虚调用，也不为每个系统创建对象。见[系统](/zh/docs/guide/systems)
+  和[决策](/zh/docs/decisions#d102-systems-are-ref-structs)。
+- 系统相关的分析器规则：[EECS074](/zh/docs/guide/analyzer#eecs074)（`[EcsSystem]` 标在不是 ref struct 的类型上，有代码修复）、
+  [EECS075](/zh/docs/guide/analyzer#eecs075)（实例成员，有代码修复）、[EECS076](/zh/docs/guide/analyzer#eecs076)（签名不对的钩子）和
+  [EECS077](/zh/docs/guide/analyzer#eecs077)（把不是系统的类型交给 `AddSystem<T>` 等系统 API）。CS0246 上的一个代码修复把 4.7 的类系统改写成
+  `[EcsSystem]` ref struct（[分析器](/zh/docs/guide/analyzer#migration-fix)）。
+- IDE 不再把 `[ForEach]`、`[ForEntity]` 和钩子方法报成未使用：包里的抑制器在这些方法上隐藏 IDE0051 和 IDE0052，这些特性还带有给 Rider 和
+  ReSharper 读的 JetBrains `[MeansImplicitUse]`。见[未使用成员警告](/zh/docs/guide/analyzer#never-used)。
+- 在另一个程序集里封闭的泛型系统（游戏里 `AddSystem<Regen<Health>>()`，库里 `Regen<T>`）由用到它的程序集注册，所以在 Native AOT
+  下运行时不需要运行时生成代码。见[系统](/zh/docs/guide/systems#generic-systems)和
+  [决策](/zh/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)。
 - 枚举元素的 `DynamicBuffer`（`DynamicBuffer<Block>`）现在和结构体元素一样有生成的具名成员：`chunk.Block`、`HasBlock`、
   `WriteBlock()`、`GetOrAddBlock()`、`RemoveBlock()`，以及预制体的 `SetBlock(…)`。见[动态缓冲](/zh/docs/guide/dynamic-buffers)。
 - `DynamicBuffer<T>.MaxPooledLength` 按元素类型设置：缓冲被销毁或移除时，最长多少个元素的列表还给回收池（默认是 4 KB 能放下的个数）。
@@ -104,7 +118,7 @@ icon: RotateCcwClock
   `DestroyAll`），可能做结构变更时逐行销毁。分析器规则 [EECS084](/zh/docs/guide/analyzer#eecs084)（建议，带代码修复）找出以
   `entity.Destroy()` 结尾的方法；[EECS085](/zh/docs/guide/analyzer#eecs085) 拒绝没有 `[ForEach]` 或带 `Slices` 的 `[Consume]`。
   见[系统](/zh/docs/guide/systems#consume)。
-- `[UpdateInterval(n, Phase = p)]` 在类上声明系统的节奏；生成器把它写进注册代码（[EECS083](/zh/docs/guide/analyzer#eecs083)
+- `[UpdateInterval(n, Phase = p)]` 声明系统的节奏；生成器把它写进系统的代码（[EECS083](/zh/docs/guide/analyzer#eecs083)
   拒绝小于 1 的间隔和不在 0 到 n - 1 之间的相位）。见[系统](/zh/docs/guide/systems#update-interval)。
 - 把 `[ForEach]` 方法指向按块做同样工作的参数的分析器规则：[EECS086](/zh/docs/guide/analyzer#eecs086)（建议），系统每次更新都重置、
   方法又通过 `ref` 累加的单例，改用 `ref Reduce<T>` 和它需要的 `[Sum]` / `[Min]` / ... 特性；[EECS087](/zh/docs/guide/analyzer#eecs087)
@@ -138,6 +152,13 @@ icon: RotateCcwClock
 
 ### 性能 [#v4-8-0-performance]
 
+- 生成的 `[ForEach]` job 的遍历按 job 类型找到它的查询，不再比较过滤条件：生成方法的过滤条件是常量，所以 World 按 job 类型保存匹配结果。
+  手写的 job 写 `static bool OneQuery => true` 也能用上（[决策](/zh/docs/decisions#d104-one-query-per-job-type)）。
+- 所有者线程上的遍历冻结结构闸门、给自己计数时用普通写入，不再用带锁的指令；并行执行器的游标独占一条缓存行
+  （[决策](/zh/docs/decisions#d105-owner-thread-passes)）。
+- 模板、服务器示例和 Native AOT 测试发布时带上 `<IlcInstructionSet>native</IlcInstructionSet>`：默认的基线会把生成的向量循环里
+  `Vector512` 那一档编译掉。机器已知的集群改为指定一个级别（`x86-64-v3`、`x86-64-v4`）。见 [Native AOT](/zh/docs/faq#native-aot) 和
+  [决策](/zh/docs/decisions#d108-aot-instruction-set)。
 - 生成器每次编辑的工作量约减半：被提供同名成员的类型按名字查找，不再为每个组件遍历一遍命名空间；签名就排除了向量循环的
   `[ForEach]` 方法不绑定方法体即可判定。生成的代码不变（[决策](/zh/docs/decisions#d95-generator-per-edit)）。
 - 缓冲回收池在线程之间共享：每个线程自己留几个列表，其余的按批和所有线程都能取用的池交换，所以拥有者线程从销毁的缓冲收回的列表，也能给并行
@@ -160,14 +181,18 @@ icon: RotateCcwClock
 - 分析器规则 [EECS027](/zh/docs/guide/analyzer#eecs027) 也会报告通过被访问的 `Entity` 逐行查带索引的组件；改成 `in` 参数，部分实体没有它时用
   `ReadOnlyMaybe<T>`。把警告当错误的构建会看到它：见[迁移指南](/zh/docs/migration#v4-8-analyzer)。
 - 分析器规则 [EECS030](/zh/docs/guide/analyzer#eecs030) 也会报告整个方法体只是对自己实体做一次结构变更、每行都一样的 `[ForEach]` 方法
-  （`[ForEach, With<Dead>] static void Bury(Entity e) => e.Destroy();`）：在 `OnUpdate` 里一次批量调用（`World.DestroyAll<Dead>()`）就能一次改完整张表（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
+  （`[ForEach, With<Dead>] static void Bury(Entity e) => e.Destroy();`）：在 `[OnUpdate]` 方法里一次批量调用（`world.DestroyAll<Dead>()`）就能一次改完整张表（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
 - 新的警告 [EECS060](/zh/docs/guide/analyzer#eecs060) 和 [EECS061](/zh/docs/guide/analyzer#eecs061) 报告在共享内存上竞争、或读了遍历从未写回的
   job 字段的并行代码；总数改用 `Reduce<T>` 参数（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
 - 新的警告 [EECS071](/zh/docs/guide/analyzer#eecs071) 报告 `[ForEach]` 方法里的 `Random.Shared` 和 `new Random()`；修复改为从单例
   `EntityRandom` 抽取（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
 
-- 删掉了 `EcsSystem.UpdateInterval` 和 `UpdatePhase`：在类上声明 `[UpdateInterval(n, Phase = p)]`。重写它们会报
-  [EECS082](/zh/docs/guide/analyzer#eecs082)，带代码修复；EECS018 删掉了（[迁移指南](/zh/docs/migration#v4-8-update-interval)）。
+- `EcsSystem` 基类删掉了：系统是只有静态方法的 `[EcsSystem]` ref struct，钩子是 `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` 方法，
+  `World` 是参数，簿记（`RunCount`、`Enabled`、`Error`、`Stats`）通过它的 `SystemHandle` 读取。`AddSystem<T>()` 和
+  `TryGetSystem<T>(out …)` 发出 `SystemHandle`，`AddSystem(instance)` 删掉了（构造函数参数改成 `[NotSaved]` 单例），EECS007 改为针对可变静态字段的警告。
+  EECS029 和 EECS082 随它们报告的写法一起删掉了。CS0246 上的一个代码修复会改写类系统（[迁移指南](/zh/docs/migration#v4-8-systems)）。
+- `EcsSystem.UpdateInterval` 和 `UpdatePhase` 删掉了：在系统上声明 `[UpdateInterval(n, Phase = p)]`；EECS018 删掉了
+  （[迁移指南](/zh/docs/migration#v4-8-update-interval)）。
 
 ### 修复 [#v4-8-0-fixes]
 
@@ -398,7 +423,7 @@ icon: RotateCcwClock
   `Span<T>` 参数、`Get<T>()` 或 `WriteX()`；[EECS026](/zh/docs/guide/analyzer#eecs026) 方法没用到的 `[ForEach]` 参数；
   [EECS027](/zh/docs/guide/analyzer#eecs027) 每一行都通过被访问的 `Entity` 或 `World` 查组件或单例；
   [EECS028](/zh/docs/guide/analyzer#eecs028) `[ForEach]` 方法或 `OnUpdate` 里的内存分配；
-  [EECS029](/zh/docs/guide/analyzer#eecs029) 没用到系统任何成员的实例 `[ForEach]` 方法；
+  EECS029 没用到系统任何成员的实例 `[ForEach]` 方法；
   [EECS030](/zh/docs/guide/analyzer#eecs030) 遍历查询逐个实体做结构变化；
   [EECS031](/zh/docs/guide/analyzer#eecs031) 在计数循环里逐个创建实体；[EECS032](/zh/docs/guide/analyzer#eecs032) 用
   `Count() > 0` 代替 `Any()`，以及在循环里计数或过滤。建议（信息级别，代价相同、写法更简洁）：

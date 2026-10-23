@@ -14,6 +14,26 @@ major or minor version that needs code changes? The
 
 ### New [#v4-8-0-new]
 
+- Systems are `[EcsSystem]` ref structs of static methods: `[ForEach]` methods, and `[OnCreate]`, `[OnUpdate]` and
+  `[OnDestroy]` hooks that take the `World`, the `SystemHandle`, both or neither. The world keeps each system's
+  bookkeeping and hands out a `SystemHandle` (`Enabled`, `Error`, `RunCount`, `LastRunTick`, `Stats`, `Name`, `Type`)
+  from `AddSystem<T>()`, `System<T>()`, `TryGetSystem<T>(out …)` and `world.Systems`; `HasSystem<T>()` is new. The
+  generated code of an assembly's systems is one switch, run in one call per stretch of the schedule, with no
+  virtual call and no object per system. See [systems](/en/docs/guide/systems) and the
+  [decision](/en/docs/decisions#d102-systems-are-ref-structs).
+- Analyzer rules for systems: [EECS074](/en/docs/guide/analyzer#eecs074) (`[EcsSystem]` on a type that is no ref
+  struct, with a code fix), [EECS075](/en/docs/guide/analyzer#eecs075) (an instance member, with a code fix),
+  [EECS076](/en/docs/guide/analyzer#eecs076) (a hook no signature fits) and
+  [EECS077](/en/docs/guide/analyzer#eecs077) (a type that is no system given to `AddSystem<T>` and the other system
+  APIs). A code fix on CS0246 rewrites a 4.7 class system as an `[EcsSystem]` ref struct
+  ([analyzer](/en/docs/guide/analyzer#migration-fix)).
+- The IDE no longer reports `[ForEach]`, `[ForEntity]` and hook methods as unused: a suppressor in the package hides
+  IDE0051 and IDE0052 on them, and the attributes carry JetBrains `[MeansImplicitUse]` for Rider and ReSharper. See
+  [unused-member warnings](/en/docs/guide/analyzer#never-used).
+- A generic system closed in another assembly (`AddSystem<Regen<Health>>()` in the game, `Regen<T>` in a library) is
+  registered by the assembly that names it, so it runs under Native AOT without code made at run time. See
+  [systems](/en/docs/guide/systems#generic-systems) and the
+  [decision](/en/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names).
 - A `DynamicBuffer` of an enum (`DynamicBuffer<Block>`) gets the same generated members as one of a struct:
   `chunk.Block`, `HasBlock`, `WriteBlock()`, `GetOrAddBlock()`, `RemoveBlock()` and the prefab's `SetBlock(…)`. See
   [dynamic buffers](/en/docs/guide/dynamic-buffers).
@@ -149,8 +169,8 @@ major or minor version that needs code changes? The
   one that may make them. Analyzer rule [EECS084](/en/docs/guide/analyzer#eecs084) (suggestion, with a code fix)
   finds a method that ends with `entity.Destroy()`; [EECS085](/en/docs/guide/analyzer#eecs085) rejects `[Consume]`
   without `[ForEach]` or with `Slices`. See [systems](/en/docs/guide/systems#consume).
-- `[UpdateInterval(n, Phase = p)]` declares a system's cadence on its class; the generator writes it into the
-  registration ([EECS083](/en/docs/guide/analyzer#eecs083) rejects an interval below 1 or a phase outside 0 to n - 1).
+- `[UpdateInterval(n, Phase = p)]` declares a system's cadence; the generator writes it into the system's
+  code ([EECS083](/en/docs/guide/analyzer#eecs083) rejects an interval below 1 or a phase outside 0 to n - 1).
   See [systems](/en/docs/guide/systems#update-interval).
 - Analyzer rules that point a `[ForEach]` method to the parameter that does its work per chunk:
   [EECS086](/en/docs/guide/analyzer#eecs086) (suggestion), a singleton that a system resets each update and the method
@@ -199,6 +219,16 @@ major or minor version that needs code changes? The
 
 ### Performance [#v4-8-0-performance]
 
+- A pass of a generated `[ForEach]` job finds its query by the job's type instead of comparing filters: the filter of
+  a generated method is a constant, so the world keeps the match per job type. A hand-written job opts in with
+  `static bool OneQuery => true` ([decision](/en/docs/decisions#d104-one-query-per-job-type)).
+- Passes on the owner thread freeze the structural gate and count themselves with plain stores instead of locked
+  instructions, and the parallel runner's cursor sits on a cache line of its own
+  ([decision](/en/docs/decisions#d105-owner-thread-passes)).
+- The templates, the server samples and the Native AOT test publish with `<IlcInstructionSet>native</IlcInstructionSet>`:
+  the default baseline compiles out the `Vector512` tier of the generated vector loops. A fleet of known machines sets a
+  level instead (`x86-64-v3`, `x86-64-v4`). See [Native AOT](/en/docs/faq#native-aot) and the
+  [decision](/en/docs/decisions#d108-aot-instruction-set).
 - The generators do about half the work per edit: the types offered the same member names are looked up by name
   instead of by walking the namespace once per component, and a `[ForEach]` method whose signature rules out a vector
   loop is decided without binding its body. Generated code is unchanged
@@ -232,7 +262,7 @@ major or minor version that needs code changes? The
   that treats warnings as errors sees it: see the [migration guide](/en/docs/migration#v4-8-analyzer).
 - Analyzer rule [EECS030](/en/docs/guide/analyzer#eecs030) also reports a `[ForEach]` method whose whole body is one
   structural change of its entity, the same for every row (`[ForEach, With<Dead>] static void Bury(Entity e) =>
-  e.Destroy();`): one bulk call in `OnUpdate` (`World.DestroyAll<Dead>()`) changes each table at once
+  e.Destroy();`): one bulk call in an `[OnUpdate]` method (`world.DestroyAll<Dead>()`) changes each table at once
   ([migration guide](/en/docs/migration#v4-8-analyzer)).
 - The new warnings [EECS060](/en/docs/guide/analyzer#eecs060) and [EECS061](/en/docs/guide/analyzer#eecs061) report
   parallel code that races on shared memory or reads a job field the pass never wrote back; a total becomes a
@@ -240,9 +270,14 @@ major or minor version that needs code changes? The
 - The new warning [EECS071](/en/docs/guide/analyzer#eecs071) reports `Random.Shared` and `new Random()` in `[ForEach]`
   methods; its fix draws from an `EntityRandom` singleton ([migration guide](/en/docs/migration#v4-8-analyzer)).
 
-- `EcsSystem.UpdateInterval` and `UpdatePhase` are removed: declare `[UpdateInterval(n, Phase = p)]` on the class.
-  An override is [EECS082](/en/docs/guide/analyzer#eecs082), with a code fix; EECS018 is gone
-  ([migration guide](/en/docs/migration#v4-8-update-interval)).
+- The `EcsSystem` base class is removed: a system is an `[EcsSystem]` ref struct of static methods, its hooks are
+  `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` methods, `World` is a parameter and the bookkeeping (`RunCount`,
+  `Enabled`, `Error`, `Stats`) is read through its `SystemHandle`. `AddSystem<T>()` and `TryGetSystem<T>(out …)` hand
+  out a `SystemHandle`, `AddSystem(instance)` is gone (constructor arguments become a `[NotSaved]` singleton), and
+  EECS007 is a warning about mutable static fields. EECS029 and EECS082 are gone with the forms they reported. A code
+  fix on CS0246 rewrites a class system ([migration guide](/en/docs/migration#v4-8-systems)).
+- `EcsSystem.UpdateInterval` and `UpdatePhase` are removed: declare `[UpdateInterval(n, Phase = p)]` on the system;
+  EECS018 is gone ([migration guide](/en/docs/migration#v4-8-update-interval)).
 
 ### Fixes [#v4-8-0-fixes]
 
@@ -547,7 +582,7 @@ major or minor version that needs code changes? The
   reads, [EECS026](/en/docs/guide/analyzer#eecs026) a `[ForEach]` parameter the method does not use,
   [EECS027](/en/docs/guide/analyzer#eecs027) a component or singleton looked up through the visited `Entity` or the
   `World` on every row, [EECS028](/en/docs/guide/analyzer#eecs028) an allocation in a `[ForEach]` method or
-  `OnUpdate`, [EECS029](/en/docs/guide/analyzer#eecs029) an instance `[ForEach]` method that uses nothing of its
+  `OnUpdate`, EECS029 an instance `[ForEach]` method that uses nothing of its
   system, [EECS030](/en/docs/guide/analyzer#eecs030) a structural change entity by entity over a query,
   [EECS031](/en/docs/guide/analyzer#eecs031) entities created one by one in a counted loop,
   [EECS032](/en/docs/guide/analyzer#eecs032) `Count() > 0` instead of `Any()` and counting or filtering in a loop.

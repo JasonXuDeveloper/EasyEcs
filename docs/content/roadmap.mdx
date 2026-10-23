@@ -122,6 +122,13 @@ form in .NET 10. Each ships when the methods that need it measure faster.
 - World setup through `WorldOptions`, and declaration attributes read by reflection: one setting per world can still
   be forgotten, and reflection costs every world at its start
   ([D101](/en/docs/decisions#d101-declaration-attributes)).
+- Systems as classes with virtual hooks, or as structs behind an interface: an object per system and an indirect call
+  per run, and an instance whose fields invite state
+  ([D102](/en/docs/decisions#d102-systems-are-ref-structs)).
+- A function pointer per system, one generated switch over the whole schedule, interceptors and guarded devirtualization
+  for system dispatch: an assembly's switch makes each system a direct call, pays one indirect call per stretch of
+  the schedule, and keeps the generator incremental
+  ([D103](/en/docs/decisions#d103-system-sets)).
 
 ## Related [#related]
 

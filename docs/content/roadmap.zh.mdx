@@ -97,6 +97,10 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
   或者方法本身已经说明了用哪些字段（[D90](/zh/docs/decisions#d90-vector-loops-reach)）。
 - 通过 `WorldOptions` 做 World 设置，以及用反射读声明特性：每个 World 一项设置仍然会忘，反射让每个 World 启动时都付出代价
   （[D101](/zh/docs/decisions#d101-declaration-attributes)）。
+- 用带虚钩子的类或接口背后的 struct 表示系统：每个系统一个对象、每次运行一次间接调用，实例的字段还会诱人往里放状态
+  （[D102](/zh/docs/decisions#d102-systems-are-ref-structs)）。
+- 系统分派用每个系统一个函数指针、覆盖整个调度的一个生成 switch、拦截器或带保护的去虚化：按程序集的 switch 让每个系统都是直接调用，调度里连续的一段只付一次间接调用，生成器也保持增量
+  （[D103](/zh/docs/decisions#d103-system-sets)）。
 
 ## 相关页面 [#related]
 

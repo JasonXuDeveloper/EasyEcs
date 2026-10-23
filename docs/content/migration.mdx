@@ -12,17 +12,94 @@ current API.
 
 ## v4.7 → v4.8 [#v4-7-to-v4-8]
 
-Saves of 4.7 load. Code written for 4.7 compiles unchanged except a system's cadence: the `UpdateInterval` and
-`UpdatePhase` properties became the `[UpdateInterval(n, Phase = p)]` attribute. Two analyzer rules report more code,
-and three warnings are new: a build that treats warnings as errors fails on them until the code changes.
+Saves of 4.7 load. Systems change form: the `EcsSystem` base class became [`[EcsSystem]` on a ref struct of static
+methods](#v4-8-systems), with a code fix that rewrites a class, and a system's cadence is the
+[`[UpdateInterval(n, Phase = p)]` attribute](#v4-8-update-interval). Everything else written for 4.7 compiles
+unchanged. Two analyzer rules report more code, and three warnings are new: a build that treats warnings as errors
+fails on them until the code changes.
+
+### Systems are `[EcsSystem]` ref structs [#v4-8-systems]
+
+The `EcsSystem` base class is gone. A system is a `ref struct` of static methods marked `[EcsSystem]`: the world never
+creates one, keeps its bookkeeping (enabled, error, run count, stats) itself and hands out a
+[`SystemHandle`](/en/docs/guide/systems#lifecycle) for it
+([D102](/en/docs/decisions#d102-systems-are-ref-structs)). Code written for 4.7 fails to compile on the base class
+(CS0246), and the IDE offers a [code fix](/en/docs/guide/analyzer#migration-fix) there that rewrites the class.
+
+| 4.7 | 4.8 |
+| --- | --- |
+| `public class X : EcsSystem` | `[EcsSystem] public ref struct X` |
+| `[ForEach] void M(...)` | `[ForEach] static void M(...)` (the only form) |
+| `protected override void OnCreate()` / `OnUpdate()` / `OnDestroy()` | `[OnCreate]` / `[OnUpdate]` / `[OnDestroy] static void M(...)`, taking the `World`, the `SystemHandle`, both or neither |
+| the `World` property | a `World world` parameter |
+| `RunCount`, `LastRunTick`, `Enabled`, `Error`, `Stats` of the system | the same members of its `SystemHandle` |
+| `T system = world.AddSystem<T>()` | `SystemHandle system = world.AddSystem<T>()` |
+| `world.AddSystem(new X(dependency))` | `world.SetX(dependency)` on a `[NotSaved]` singleton, then `world.AddSystem<X>()` |
+| `world.TryGetSystem<T>(out T system)` | `world.TryGetSystem<T>(out SystemHandle system)`, `world.HasSystem<T>()`, `world.System<T>()` |
+| `world.Systems` (of `EcsSystem`) | `world.Systems` (of `SystemHandle`) |
+| `system.GetType().Name` | `system.Name` (`system.Type` for the type) |
+| a base class shared by several systems | a generic system (`Regen<T>`) or a static class of helpers |
+
+A system with constructor arguments keeps them in the world instead, as a
+[`[NotSaved]`](/en/docs/guide/saves#not-saved) singleton the host sets: no save writes it (a queue or a service has no
+formatter) and a load keeps it.
+
+```csharp tab="4.7" doccheck=skip
+public class ReceiveMoves(ConcurrentQueue<MoveRequest> inbox) : EcsSystem
+{
+    private readonly ConcurrentQueue<MoveRequest> _inbox = inbox;
+
+    protected override void OnUpdate()
+    {
+        while (_inbox.TryDequeue(out var move))
+            World.CreateEntity(new MoveIntent(move.X, move.Y));
+        if (RunCount % 600 == 0) Console.WriteLine($"{Stats.Runs} runs");
+    }
+}
+
+world.AddSystem(new ReceiveMoves(inbox));
+```
+
+```csharp tab="4.8"
+using System.Collections.Concurrent;
+
+public record struct MoveRequest(float X, float Y);
+public record struct MoveIntent(float X, float Y) : IComponent;
+
+[NotSaved]
+public record struct MoveInbox(ConcurrentQueue<MoveRequest> Moves) : ISingletonComponent;
+
+[EcsSystem]
+public ref struct ReceiveMoves
+{
+    [OnUpdate]
+    static void OnUpdate(World world, SystemHandle system)
+    {
+        var moves = world.MoveInbox.Moves;
+        while (moves.TryDequeue(out var move))
+            world.CreateEntity(new MoveIntent(move.X, move.Y));
+        if (system.RunCount % 600 == 0) Console.WriteLine($"{system.Stats.Runs} runs");
+    }
+}
+```
+
+```csharp doccheck=skip
+world.SetMoveInbox(inbox);
+world.AddSystem<ReceiveMoves>();
+```
+
+The fix is offered for a class without constructor arguments, an abstract base or a `[ForEach]` method that reads the
+system's bookkeeping; those change by hand as above. The analyzer follows the new form: EECS074 to EECS077 are new
+([`[EcsSystem]` on a type that is no ref struct](/en/docs/guide/analyzer#eecs074), an instance member, an invalid
+hook, a type that is no system where one is named), [EECS007](/en/docs/guide/analyzer#eecs007) is a warning about
+mutable static fields, and EECS029 (an instance `[ForEach]` method) and EECS082 (a cadence override) are gone with
+what they reported.
 
 ### A system's cadence is an attribute: `[UpdateInterval(n, Phase = p)]` [#v4-8-update-interval]
 
-`EcsSystem.UpdateInterval` and `EcsSystem.UpdatePhase` are gone. Declare the cadence on the class: the generator
-writes it into the system's registration, so it is a constant by construction, and a derived system inherits it
-unless it declares its own. An override of either property is [EECS082](/en/docs/guide/analyzer#eecs082), whose code
-fix writes the attribute (and removes overrides that said "every update"). EECS018, the warning for a cadence that
-was not a constant, is gone with the properties.
+`EcsSystem.UpdateInterval` and `EcsSystem.UpdatePhase` are gone with the base class. Declare the cadence on the
+system: the generator writes it into the system's code, so it is a constant by construction. EECS018, the warning for
+a cadence that was not a constant, is gone with the properties.
 
 ```csharp tab="4.7" doccheck=skip
 public class SaveSystem : EcsSystem
@@ -35,10 +112,11 @@ public class SaveSystem : EcsSystem
 ```
 
 ```csharp tab="4.8"
-[UpdateInterval(60, Phase = 30)]
-public class SaveSystem : EcsSystem
+[EcsSystem, UpdateInterval(60, Phase = 30)]
+public ref struct SaveSystem
 {
-    protected override void OnUpdate() { }
+    [OnUpdate]
+    static void OnUpdate() { }
 }
 ```
 
@@ -59,7 +137,8 @@ public record struct Morale(int Value) : IComponent;
 ```
 
 ```csharp tab="4.7" doccheck=expect-EECS027
-public class Rally : EcsSystem
+[EcsSystem]
+public ref struct Rally
 {
     [ForEach, With<Guild>]
     static void Raise(Entity member, ref Morale morale) => morale.Value += member.Guild.Id;   // a lookup per row
@@ -67,7 +146,8 @@ public class Rally : EcsSystem
 ```
 
 ```csharp tab="4.8"
-public class Rally : EcsSystem
+[EcsSystem]
+public ref struct Rally
 {
     [ForEach]
     static void Raise(ref Morale morale, in Guild guild) => morale.Value += guild.Id;
@@ -78,7 +158,8 @@ public class Rally : EcsSystem
 change of its entity, the same for every row. Move the change into one bulk call in `OnUpdate`:
 
 ```csharp tab="4.7" doccheck=expect-EECS030
-public class CorpseSystem : EcsSystem
+[EcsSystem]
+public ref struct CorpseSystem
 {
     [ForEach, With<Dead>]
     static void Bury(Entity entity) => entity.Destroy();                // one change, entity by entity
@@ -86,9 +167,11 @@ public class CorpseSystem : EcsSystem
 ```
 
 ```csharp tab="4.8"
-public class CorpseSystem : EcsSystem
+[EcsSystem]
+public ref struct CorpseSystem
 {
-    protected override void OnUpdate() => World.DestroyAll<Dead>();
+    [OnUpdate]
+    static void OnUpdate(World world) => world.DestroyAll<Dead>();
 }
 ```
 
@@ -112,7 +195,8 @@ public static class HitStats
     public static int Hits;
 }
 
-public class TakeHits : EcsSystem
+[EcsSystem]
+public ref struct TakeHits
 {
     [ForEach(Parallel = true)]
     static void Hit(ref Health health)
@@ -124,7 +208,8 @@ public class TakeHits : EcsSystem
 ```
 
 ```csharp tab="4.8"
-public class TakeHits : EcsSystem
+[EcsSystem]
+public ref struct TakeHits
 {
     [ForEach(Parallel = true)]
     static void Hit(ref Health health, ref Reduce<Hits> hits)
@@ -143,7 +228,8 @@ whose numbers no run repeats. Its code fix draws from an [`EntityRandom`](/en/do
 singleton, which the world needs (`world.SetEntityRandom(seed, 0)`, its `Tick` advanced each step):
 
 ```csharp tab="4.7" doccheck=expect-EECS071
-public class Wander : EcsSystem
+[EcsSystem]
+public ref struct Wander
 {
     [ForEach(Parallel = true)]
     static void Step(ref Velocity velocity) => velocity = new Velocity(Random.Shared.NextSingle() * 2 - 1, velocity.Y);
@@ -151,7 +237,8 @@ public class Wander : EcsSystem
 ```
 
 ```csharp tab="4.8"
-public class Wander : EcsSystem
+[EcsSystem]
+public ref struct Wander
 {
     [ForEach(Parallel = true)]
     static void Step(ref Velocity velocity, Entity entity, in EntityRandom random) =>
@@ -168,7 +255,9 @@ public class Wander : EcsSystem
 `TileRows<TTile>`, `TileRow<TTile>`, `TileCursor<TCell, TTile>`, `TileReads`) and the attributes `ForEntityAttribute`,
 `ConsumeAttribute`, `UpdateIntervalAttribute`, `SumAttribute`, `ProductAttribute`, `MinAttribute`, `MaxAttribute`,
 `AllAttribute`, `AnyAttribute`, `IndexKeyAttribute`, `UniqueKeyAttribute`, `GroupAttribute`, `GroupByAttribute`,
-`WhenTargetDestroyedAttribute` and `NotSavedAttribute` are new in `namespace EasyEcs`. A file that imports another namespace with a type of that name gets
+`WhenTargetDestroyedAttribute`, `NotSavedAttribute`, the system types (`EcsSystemAttribute`, `OnCreateAttribute`,
+`OnUpdateAttribute`, `OnDestroyAttribute`, `SystemHandle`, and for the generated code `ISystemCode`, `ISystemSet`,
+`SystemDeclarations`, `SystemCode`, `GenericSystemCodeAttribute`) are new in `namespace EasyEcs`. A file that imports another namespace with a type of that name gets
 CS0104 (ambiguous reference): qualify the name, or alias it with a `using` directive.
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]
@@ -235,11 +324,13 @@ public class Spawner : EcsSystem
 ```
 
 ```csharp tab="4.7"
-public class Spawner : EcsSystem
+[EcsSystem]
+public ref struct Spawner
 {
-    protected override void OnUpdate()
+    [OnUpdate]
+    static void OnUpdate(SystemHandle system)
     {
-        if (RunCount % 10 == 0) { /* every tenth run */ }
+        if (system.RunCount % 10 == 0) { /* every tenth run */ }
     }
 }
 ```
@@ -413,9 +504,11 @@ dotnet_diagnostic.EECS028.severity = suggestion
 It ran the system again inside its own run. Run updates and groups from the code that hosts the world.
 
 ```csharp tab="4.2" doccheck=expect-EECS034
-public class CatchUp : EcsSystem
+[EcsSystem]
+public ref struct CatchUp
 {
-    protected override void OnUpdate() => World.Update();
+    [OnUpdate]
+    static void OnUpdate(World world) => world.Update();
 }
 ```
 
@@ -449,7 +542,8 @@ this singleton and system:
 ```csharp
 public record struct Clock(long Tick, float DeltaTime) : ISingletonComponent;
 
-public class Ticker : EcsSystem
+[EcsSystem]
+public ref struct Ticker
 {
     [ForEach] static void Advance(in Clock clock, ref Position position) => position.X += clock.DeltaTime;
 }
@@ -693,13 +787,16 @@ public class S : SystemBase, IInitSystem, IExecuteSystem
 ```
 
 ```csharp tab="v4"
-public partial class S : EcsSystem
+[EcsSystem]
+public ref struct S
 {
     // when added to the world
-    protected override void OnCreate() { }
+    [OnCreate]
+    static void OnCreate() { }
 
     // every update (World property available)
-    protected override void OnUpdate() { }
+    [OnUpdate]
+    static void OnUpdate() { }
 
     // per entity, after OnUpdate
     [ForEach] static void Step(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
