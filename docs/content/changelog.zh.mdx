@@ -166,8 +166,6 @@ icon: RotateCcwClock
 - 瓦片 job 把找到的邻居放在 job 的字段里：不再每行先清零一个 216 字节的局部变量、再由 `TileNeighbors.Of` 清零一次。
   见[网格](/zh/docs/guide/grids#generated)。
 - 向量循环只加载它读或存的列：只用来筛选行的组件不产生加载。见[向量循环](/zh/docs/guide/systems#vector-loops)。
-- 带 `Scratch<T>`、方法体里有循环或调用的 `[ForEach]` 方法，经由一个从不内联的生成包装方法在行外运行：它是普通方法，JIT 会按 profile
-  优化它，不再直接经由 `[UnsafeAccessor]` 调用。
 
 - 生成的 `[ForEach]` job 的遍历按 job 类型找到它的查询，不再比较过滤条件：生成方法的过滤条件是常量，所以 World 按 job 类型保存匹配结果。
   手写的 job 写 `static bool OneQuery => true` 也能用上（[决策](/zh/docs/decisions#d104-one-query-per-job-type)）。

@@ -237,9 +237,6 @@ major or minor version that needs code changes? The
   `TileNeighbors.Of` clears it again. See [grids](/en/docs/guide/grids#generated).
 - A vector loop loads only the columns it reads or stores: a component taken only to select rows costs no load. See
   [vector loops](/en/docs/guide/systems#vector-loops).
-- A `[ForEach]` method with a `Scratch<T>` that loops or calls runs out of line through a generated wrapper that is
-  never inlined, an ordinary method the JIT optimizes with its profile, instead of through the `[UnsafeAccessor]`
-  itself.
 
 - A pass of a generated `[ForEach]` job finds its query by the job's type instead of comparing filters: the filter of
   a generated method is a constant, so the world keeps the match per job type. A hand-written job opts in with
