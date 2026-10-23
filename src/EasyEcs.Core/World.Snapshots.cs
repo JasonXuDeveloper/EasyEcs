@@ -89,6 +89,9 @@ public sealed partial class World
         using (Structural())
         {
             ThrowIfIterating(call);
+            // Tombstones left by a pass an exception interrupted are closed first, while the entity records still
+            // match the rows: the tables are dense, so each buffer list a table drops belongs to the row it drops.
+            FillDirtyTables();
             // Entity records. Versions only grow: a recorded id keeps the snapshot's version if its entity was alive
             // then (its old handles work again), else it moves past every version it ever had, so no handle made after
             // the capture can match a later incarnation.
@@ -124,8 +127,6 @@ public sealed partial class World
             }
 
             ResetIndexes(true);
-            Array.Clear(_dirty, 0, _dirtyCount);
-            _dirtyCount = 0;
 
             for (int i = 0; i < _singletons.Length; i++)
             {

@@ -10,6 +10,7 @@ public class DynamicBufferTests
     public enum Voxel : byte { Air, Stone }   // MaxPooledLength is process-wide: only this test sets it
     public enum Ore : byte { Air, Iron }      // and only the reload test sets this one's
     public record struct Mail(long Value);    // the pool of this element type serves only the tests below
+    public record struct Rewind(long Value);  // and this one's only the restore test
 
     /// <summary>Counts, per entity, the runs in which its bag had changed since the system's previous run.</summary>
     [EcsSystem]
@@ -171,6 +172,40 @@ public class DynamicBufferTests
         e.Get<DynamicBuffer<Loot>>().AsSpan()[0].Count = 9;   // the restored list is not the snapshot's either
         world.Restore(snapshot);
         Assert.That(e.Read<DynamicBuffer<Loot>>()[0], Is.EqualTo(new Loot(1, 1)));
+    }
+
+    [Test]
+    public void RestoreGivesTheListsOfTheRowsItDropsBackToThePool()
+    {
+        using var world = new World();
+        world.CreateEntity(new DynamicBuffer<Rewind>()).Get<DynamicBuffer<Rewind>>().Add(new Rewind(1));
+        var snapshot = world.Capture();
+        var save = new Nino.Core.NinoArrayBufferWriter();
+        world.Save(save);
+        var created = new Entity[16];
+
+        // A replay: entities made after the capture (each with its list), then the world put back without them.
+        void Replay(bool load)
+        {
+            world.CreateEntities(created, new DynamicBuffer<Rewind>());
+            foreach (var e in created) e.Get<DynamicBuffer<Rewind>>().Add(new Rewind(2));
+            if (load) world.Load(save.WrittenSpan);
+            else world.Restore(snapshot);
+        }
+
+        for (int i = 0; i < 3; i++)
+        {
+            Replay(false);
+            Replay(true);
+        }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 50; i++) Replay(false);
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 50; i++) Replay(true);
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(world.Count<DynamicBuffer<Rewind>>(), Is.EqualTo(1));
     }
 
     [Test]

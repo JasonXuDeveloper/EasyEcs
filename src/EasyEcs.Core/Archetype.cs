@@ -1142,12 +1142,20 @@ internal sealed class Archetype
     /// <summary>
     /// Put the rows of <paramref name="rows"/> back (null: empty the table). The entity records are restored by the
     /// world. With <paramref name="swap"/> the lists of buffer columns change sides (see
-    /// <see cref="ComponentInfo.CopyRows"/>). O(rows × columns). Inside the structural gate, outside passes.
+    /// <see cref="ComponentInfo.CopyRows"/>). O(rows × columns). Inside the structural gate, outside passes, on a dense
+    /// table (no tombstones: World.Restore fills the holes first).
     /// </summary>
     public void Restore(TableCopy rows, bool swap = false)
     {
         int count = rows?.Count ?? 0;
-        if (_hasManaged && Count > count) ReleaseRows(count, Count - count);
+        if (_hasManaged && Count > count)
+        {
+            // The rows past the restored ones are gone: their buffers' lists go back to their pool. Dense, so each list
+            // belongs to its row only (a tombstone may still name the list of the row it moved to).
+            ReleaseBuffers(count, Count - count);
+            ReleaseRows(count, Count - count);
+        }
+
         Reserve(count);
         if (rows != null)
         {
