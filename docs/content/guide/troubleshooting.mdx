@@ -382,8 +382,8 @@ A record struct that is its own key (`IIndexed<TSelf>`, the actor pattern) and i
 until the stack overflows. A log line, a string interpolation or the debugger's view of the value is enough to
 trigger it.
 
-**Fix:** implement `Key` explicitly, `Shop IIndexed<Shop>.Key => this;`: the index still finds it, and `ToString()`
-no longer sees it ([common mistakes](/en/docs/guide/common-mistakes#public-key)).
+**Fix:** declare the key with `[IndexKey]` on the type, which implements `Key` explicitly (or write
+`Shop IIndexed<Shop>.Key => this;` by hand): the index still finds it, and `ToString()` no longer sees it ([common mistakes](/en/docs/guide/common-mistakes#public-key)).
 
 ## Related [#related]
 

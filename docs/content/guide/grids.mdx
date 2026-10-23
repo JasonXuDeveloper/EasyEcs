@@ -1,0 +1,641 @@
+---
+title: Grid tiles
+seoTitle: "Grid stencils in a C# ECS: tiles, halos and shaders"
+description: "Update water, heat, light or a cellular automaton over a grid cut into tiles: Tile<TCell, TTile> pads each tile with its neighbors' edges, in parallel."
+icon: Grid3x3
+---
+
+A server simulates some state as a grid: water that flows between blocks, heat that spreads over a map, light, a nav
+field, a cellular automaton. Each cell's next value depends on the cells around it, so a plain `[ForEach]` method
+over cells would look up neighbors per cell. EasyEcs cuts the grid into tiles, one entity each with its cells in a
+[dynamic buffer](/en/docs/guide/dynamic-buffers), and a `Tile<TCell, TTile>` parameter hands the method the tile
+padded with its neighbors' edges: the method is a shader that samples cells with vectors and no edge cases, tiles run
+in parallel, and quiet tiles can sleep.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  Cells updated from their neighbors, all of a tile at once: water and lava flow, heat or gas diffusion, light and
+  sound propagation, distance and flow fields, the Game of Life, blurs of an influence map. Grids of thousands to
+  millions of cells, 2D or 3D, where most of the work is arithmetic over rows of cells.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  A rule that reads no neighbor: a plain `[ForEach]` method over the buffer, or a vector loop over a component.
+  A grid that is one entity: a [batch method](/en/docs/guide/systems#batch-methods) over its span. Sparse objects on
+  a map (units, items): an [index](/en/docs/guide/indexes-and-relations) by cell, not a grid of cells. A stencil that
+  reaches farther than the tile beside: larger tiles ([EECS072](/en/docs/guide/analyzer#eecs072)).
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### Declare the tile: its shape and its key [#declare]
+
+A tile is a component that implements `ITile<TKey>`: its shape as static members (`ITileShape`), its key (the tile's
+position, indexed so neighbors are found), and `Beside`, the key of the tile across a face. `[IndexKey]` on the
+position writes the key; the shape is constants, so the JIT folds every size and stride.
+
+```csharp
+public record struct PlatePos(int X, int Z);
+
+// A plate of 16 x 16 temperatures, found by its position; its neighbors are the plates beside it.
+public partial record struct HeatPlate([IndexKey] PlatePos Pos) : IComponent, ITile<PlatePos>
+{
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
+
+    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
+    {
+        TileFaces.North => p with { Z = p.Z - 1 },
+        TileFaces.South => p with { Z = p.Z + 1 },
+        TileFaces.West => p with { X = p.X - 1 },
+        _ => p with { X = p.X + 1 },
+    };
+}
+```
+
+<TypeTable
+  type={{
+    Width: {
+      type: 'static int',
+      description: 'The cells of a row (x), 1 or more.',
+      default: 'required',
+    },
+    Depth: {
+      type: 'static int',
+      description: 'The rows of a layer (z), 1 to 64: the active rows of a layer are one 64-bit word.',
+      default: 'required',
+    },
+    Height: {
+      type: 'static int',
+      description: 'The layers (y): 1 is a 2D tile, with nothing below or above.',
+      default: '1',
+    },
+    Faces: {
+      type: 'static TileFaces',
+      description: 'The faces that have neighbors; a 1D tile (one row) declares West | East, a 3D grid of cubes All.',
+      default: 'TileFaces.Sides',
+    },
+    Halo: {
+      type: 'static int',
+      description: 'The width of the ring of neighbor cells, in cells, rows and layers: what a stencil reaching r cells away needs.',
+      default: '1',
+    },
+    Neighborhood: {
+      type: 'static TileNeighborhood',
+      description: 'The tiles read into the halo: Faces (von Neumann), FacesAndEdges, or All (Moore: corners too).',
+      default: 'TileNeighborhood.Faces',
+    },
+    Boundary: {
+      type: 'static TileBoundary',
+      description: 'What the halo holds where there is no neighbor: Fill (a value), Clamp (the edge cell repeated) or Mirror.',
+      default: 'TileBoundary.Fill',
+    },
+  }}
+/>
+
+A cell of the tile at (x, y, z) is element `(y * Depth + z) * Width + x` of its buffer: rows of `Width` cells (x),
+`Depth` rows per layer (z), `Height` layers (y).
+
+</Step>
+<Step>
+
+### Give each tile its cells [#cells]
+
+The cells are a `DynamicBuffer<TCell>` on the tile's entity, of any unmanaged struct (a `float`, a `byte`, a struct of
+both). A second buffer holds the step the shader writes, so no tile reads a neighbor already updated. `SetCount` sizes
+both at once:
+
+```csharp
+public record struct Temperature(float Value);     // the cells, 256 per plate
+public record struct NextTemperature(float Value); // the step, committed once every plate has stepped
+```
+
+```csharp
+var plate = world.CreateEntity(new HeatPlate(new PlatePos(0, 0)));
+plate.GetOrAddTemperature().SetCount(16 * 16);
+plate.GetOrAddNextTemperature().SetCount(16 * 16);
+```
+
+A grid that spawns tiles often builds them from a [prefab](/en/docs/guide/prefabs#prefab-buffers) with both buffers.
+
+</Step>
+<Step>
+
+### Write the shader [#shader]
+
+A `[ForEach]` method that takes a `Tile<TCell, TTile>` is the shader. The generator finds the tile's neighbors in the
+key's index once per entity, declares the reads (the index, the cell buffer of every tile), adds the shape and the
+buffer to the method's filter, and keeps the method parallel.
+
+- **`tile.Pad()`** copies the tile's cells into a texture of this thread with a ring of `Halo` cells around each layer,
+  taken from the facing edges of its neighbors (the ghost cells of an MPI halo exchange; where there is no neighbor,
+  the shape's `Boundary`). The loop then samples neighbors with no edge case, and every neighbor reads as it was
+  before the pass.
+- **`padded.Rows(reads)`** visits only the rows that hold a cell that is not zero, or that read such a row: the load
+  records a bit per row and the walk finds each with one `TrailingZeroCount`. A cold or dry row costs nothing.
+- **`padded.At(row)`** is a cursor on a row: `Load128<T>(dx, dy, dz)` reads 16 bytes (four floats, sixteen byte
+  cells) one cell, layer or row away, checked against the halo. `Load256` and `LoadVector` read wider vectors.
+
+```csharp
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+
+public class DiffuseSystem : EcsSystem
+{
+    const float Rate = 0.2f;
+
+    [ForEach(Parallel = true, ChunkRows = 64)]
+    static void Diffuse(Tile<Temperature, HeatPlate> heat, Mut<DynamicBuffer<NextTemperature>> next)
+    {
+        var plate = heat.Pad();
+        var into = MemoryMarshal.Cast<NextTemperature, float>(next.Write().AsSpan());
+        foreach (var row in plate.Rows(TileReads.Layer))
+        {
+            var cells = plate.At(row);
+            for (int x = 0; x < 16; x += Vector128<float>.Count)
+            {
+                var here = cells.Load128<float>(x);
+                var around = cells.Load128<float>(x - 1) + cells.Load128<float>(x + 1)
+                    + cells.Load128<float>(x, 0, -1) + cells.Load128<float>(x, 0, 1);
+                (here + (around - here * 4f) * Rate).CopyTo(into.Slice(row.Index + x));
+            }
+        }
+    }
+}
+```
+
+`TileReads` says what the stencil reads around a row (`Self`, `NorthSouth`, `Above`, `Below`, `Diagonals`, and the
+sets `Layer` for 2D, `Cross` for a 3D seven-point stencil, `All`): a row is visited when one of those rows holds a
+cell that is not zero. That is right for a stencil whose result is zero wherever everything it reads is zero (heat
+that does not rise from cold, water that does not flow out of nothing); a stencil with a source term walks
+`Rows(TileReads.All)` or every row.
+
+</Step>
+<Step>
+
+### Commit the step [#commit]
+
+The pass reads one buffer and writes the other; a system after it copies the step into the cells once every tile has
+stepped (ping-pong buffers). Neither buffer is cleared: the pass writes every row it later reads, and a row the
+stencil skips is zero in both, since the commit copied the last step.
+
+```csharp
+public class CommitHeatSystem : EcsSystem
+{
+    [ForEach]
+    static void Commit(in DynamicBuffer<NextTemperature> next, Mut<DynamicBuffer<Temperature>> cells)
+    {
+        var into = MemoryMarshal.Cast<Temperature, NextTemperature>(cells.Write().AsSpan());
+        next.AsReadOnlySpan().CopyTo(into);
+    }
+}
+```
+
+Add the commit after the shader (`world.AddSystem<DiffuseSystem>()`, then `AddSystem<CommitHeatSystem>()`): it
+writes `DynamicBuffer<Temperature>`, which the shader reads, so the two never share a parallel stage.
+
+</Step>
+</Steps>
+
+### Wider halos, edges and corners [#halo]
+
+Three static members of the shape decide what the halo holds; each has a default, and the JIT folds them like the
+sizes:
+
+- **`Halo`** (default 1) is the width of the ring: a stencil reaching r cells away needs r, such as the fourth-order
+  Laplacian (five points along each axis, r = 2). A cursor's samples reach up to r away, and `Rows(reads)` widens its
+  row mask by r. A halo is at most the tile's extent along every axis with neighbors: wider would reach past the tile
+  beside ([EECS072](/en/docs/guide/analyzer#eecs072), and an exception at the first load).
+- **`Neighborhood`** (default `Faces`) picks the tiles read into the ring's edges and corners: `Faces` (von Neumann:
+  4 tiles in 2D, 6 in 3D), `FacesAndEdges` (8 or 18) or `All` (Moore: 8 or 26). A nine-point stencil (the Game of
+  Life, a box blur) needs `All`; a seven-point one reads no corner, so it skips the extra searches.
+  `tile.Beside(dx, dy, dz)` returns any of them, `tile.Beside(face)` the one across a face.
+- **`Boundary`** (default `Fill`) is what the halo holds where there is no neighbor: the fill value of
+  `Pad(from, to, fill)` (a Dirichlet boundary), the tile's edge cell repeated (`Clamp`) or its cells mirrored at the
+  edge (`Mirror`, a zero-flux Neumann boundary). A periodic grid needs no mode: its `Beside` wraps around, so every
+  tile has neighbors.
+
+```csharp
+// The Game of Life on plates of 16 x 16 byte cells: nine points, so the corners too.
+public partial record struct LifePlate([IndexKey] PlatePos Pos) : IComponent, ITile<PlatePos>
+{
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
+    static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
+
+    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
+    {
+        TileFaces.North => p with { Z = p.Z - 1 },
+        TileFaces.South => p with { Z = p.Z + 1 },
+        TileFaces.West => p with { X = p.X - 1 },
+        _ => p with { X = p.X + 1 },
+    };
+}
+
+public record struct Alive(byte Value);
+public record struct NextAlive(byte Value);
+
+// The rule, shared by the systems that step a plate: born with three neighbors, alive on with two or three.
+public static class LifeRule
+{
+    public static void Step(Tile<Alive, LifePlate> life, Span<byte> into)
+    {
+        var plate = life.Pad();
+        foreach (var row in plate.Rows(TileReads.Layer))
+        {
+            var c = plate.At(row); // a row of 16 cells is one Vector128<byte>
+            var count = c.Load128<byte>(-1, 0, -1) + c.Load128<byte>(0, 0, -1) + c.Load128<byte>(1, 0, -1)
+                + c.Load128<byte>(-1) + c.Load128<byte>(1)
+                + c.Load128<byte>(-1, 0, 1) + c.Load128<byte>(0, 0, 1) + c.Load128<byte>(1, 0, 1);
+            var born = Vector128.Equals(count, Vector128.Create((byte)3));
+            var stays = Vector128.Equals(count, Vector128.Create((byte)2)) & c.Load128<byte>();
+            ((born | stays) & Vector128<byte>.One).CopyTo(into.Slice(row.Index));
+        }
+    }
+}
+
+public class LifeSystem : EcsSystem
+{
+    [ForEach(Parallel = true, ChunkRows = 64)]
+    static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next) =>
+        LifeRule.Step(life, MemoryMarshal.Cast<NextAlive, byte>(next.Write().AsSpan()));
+}
+```
+
+A tile takes one step per pass. A deeper halo that runs several steps per load (temporal blocking) was measured and
+dropped: each step also computes the halo cells the next one reads, and on grids whose cells fit the cache k plain
+passes were faster ([D77](/en/docs/decisions#d77-tiles)).
+
+### Sleep the quiet tiles [#sleep]
+
+`tile.ChangedEdges(next, out bool changed)` compares a step with the tile's cells and returns the faces whose edge
+(the cells within `Halo` of the face, which the neighbor across it reads) changed. A tile that did not change, beside
+tiles whose facing edges did not change, would compute the same step again, so it can sleep; `tile.Facing(edges)`
+names the neighbors to wake. With a tag that marks the awake tiles, a grid costs what its active tiles cost:
+
+```csharp
+public struct Awake : IComponent;                                            // the tile may still change
+public record struct LifeChange(TileFaces Edges, bool Changed) : IComponent; // what its last step changed
+
+public class SparseLifeSystem : EcsSystem
+{
+    [ForEach(Parallel = true, ChunkRows = 64), With<Awake>]
+    static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next, ref LifeChange change)
+    {
+        var step = next.Write().AsSpan();
+        LifeRule.Step(life, MemoryMarshal.Cast<NextAlive, byte>(step));
+        var edges = life.ChangedEdges(MemoryMarshal.Cast<NextAlive, Alive>(step), out bool changed);
+        change = new LifeChange(edges, changed);
+    }
+}
+
+public class SleepSystem : EcsSystem
+{
+    [ForEach, With<Awake>]
+    static void Sleep(Entity plate, in LifeChange change)
+    {
+        if (!change.Changed) plate.RemoveAwake();
+    }
+}
+
+public class WakeSystem : EcsSystem
+{
+    [ForEach, With<Awake>]
+    void Wake(in LifeChange change, Tile<Alive, LifePlate> life)
+    {
+        foreach (var id in life.Facing(change.Edges)) World.GetEntity(id).SetAwake();
+    }
+}
+```
+
+The commit runs `With<Awake>` too, and new tiles start awake: their first step decides whether they sleep. A wave
+that crosses the grid wakes the tiles ahead of it and lets the ones behind it sleep. `TileActiveBenchmark` measures
+a mostly quiet grid against stepping every tile.
+
+### Find neighbors in one array read: direct-mapped keys [#direct-index]
+
+The generator finds a tile's neighbors in the key's index, a hash probe each (4 to 26 per tile and pass). When the
+keys map onto a bounded range of slots (the plates of a fixed map, the chunks loaded around the players, never 64
+apart), the tile also implements [`IDirectIndexed<TKey>`](/en/docs/guide/indexes-and-relations#direct-index) with a
+`[UniqueKey]`, and each search is one array read:
+
+```csharp
+public partial record struct MapPlate([UniqueKey] PlatePos Pos)
+    : IComponent, ITile<PlatePos>, IDirectIndexed<PlatePos>
+{
+    static int ITileShape.Width => 16;
+    static int ITileShape.Depth => 16;
+    static int IDirectIndexed<PlatePos>.Slots => 64 * 64;
+    static int IDirectIndexed<PlatePos>.SlotOf(PlatePos p) => (p.Z & 63) * 64 + (p.X & 63);
+
+    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
+    {
+        TileFaces.North => p with { Z = p.Z - 1 },
+        TileFaces.South => p with { Z = p.Z + 1 },
+        TileFaces.West => p with { X = p.X - 1 },
+        _ => p with { X = p.X + 1 },
+    };
+}
+```
+
+A key out of range or in a taken slot is still found, through the hash. The VoxelServer `Chunk` is such a tile.
+
+### Patterns: fronts, red-black, separable kernels, several fields [#patterns]
+
+- **A front across tiles (wavefront, flood fill, distance fields).** A step moves information as far as the stencil
+  reads, one cell, so a relaxation in which every tile reads its neighbors' last step (Jacobi) crosses the grid in
+  O(diameter) passes; with sleeping tiles only the front is computed.
+- **Red-black ordering (Gauss-Seidel).** Tag the tiles by the parity of their position (`Red`, `Black`) and run two
+  steps per tick: the red tiles step and commit (`[With<Red>]` on both systems), then the black tiles step from the
+  committed red ones (`[With<Black>]`). Each half reads the other color as updated this tick, so a relaxation
+  converges in fewer ticks than Jacobi, and each half is still one parallel pass.
+- **Separable kernels as two systems.** A Gaussian blur along x then z is two systems: the first reads the tile
+  along x (`TileReads.Self`) into an intermediate buffer, the second takes a `Tile` of that buffer and reads along z.
+  Each pass is 2r + 1 samples instead of (2r + 1)², and the intermediate buffer is a cell type of its own.
+- **One cell type per field.** A tile pads one `DynamicBuffer<TCell>`. A grid with several fields (water and blocks,
+  temperature and pressure) keeps one cell type per field and takes one `Tile` per field
+  (`Tile<Fluid, Chunk> water, Tile<Block, Chunk> blocks`): each field is padded on its own and sampled with the same
+  offsets. Two tiles of the same cell type and grid would share the thread's texture
+  ([EECS073](/en/docs/guide/analyzer#eecs073)).
+
+{/* TODO(water overlap): the MPI-style interior/ring overlap (the interior of a chunk shaded while its ring waits for
+the halo) and a halo exchange of the changed edges only. Describe them here in one bullet each, linking the
+samples/voxel-server sections. */}
+
+### The names from CUDA and MPI [#names]
+
+The terms come from CUDA and MPI, which solve the same problem on a GPU and across machines:
+
+| EasyEcs | CUDA | MPI |
+| --- | --- | --- |
+| a tile (an entity and its `DynamicBuffer<TCell>`) | a thread block's tile | a rank's subdomain |
+| `Halo` | the apron | the ghost width (halo depth) |
+| `tile.Pad()` | the tile and its apron loaded into shared memory | a halo exchange |
+| `TileNeighborhood.Faces` / `All` | a von Neumann / Moore stencil | the face / face, edge and corner exchanges |
+| `TileBoundary.Fill` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / clamped / Neumann boundary |
+| a `Beside` that wraps | `cudaAddressModeWrap` | `MPI_Cart_create` with periodic dimensions |
+| a commit system after the step | ping-pong buffers | the old and new arrays of a Jacobi sweep |
+
+## Full example [#full-example]
+
+The Game of Life on three plates in a row. Plate 0 holds a block, which never changes, so it sleeps after its first
+step; plate 1 holds a blinker on its east edge, which reaches into plate 2 through the halo and wakes it. Put the
+files in a console project that references EasyEcs (`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// Where a plate is in the grid: its key.
+public record struct PlatePos(int X, int Z);
+
+// A plate of 16 x 16 cells: the tile's shape, its key, and the key beside it across each face.
+// The Game of Life counts the eight cells around, so the plates across the corners are read too.
+public partial record struct Plate([IndexKey] PlatePos Pos) : IComponent, ITile<PlatePos>
+{
+    public const int Size = 16;
+
+    static int ITileShape.Width => Size;
+    static int ITileShape.Depth => Size;
+    static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
+
+    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
+    {
+        TileFaces.North => p with { Z = p.Z - 1 },
+        TileFaces.South => p with { Z = p.Z + 1 },
+        TileFaces.West => p with { X = p.X - 1 },
+        _ => p with { X = p.X + 1 },
+    };
+}
+
+// A cell: 1 alive, 0 dead. A plate holds 256 of them in its DynamicBuffer<Cell>.
+public record struct Cell(byte Alive);
+
+// The next step of a cell, written by the shader and committed once every plate has stepped.
+public record struct NextCell(byte Alive);
+
+// What the plate's last step changed: anything, and the edges its neighbors read.
+public record struct Change(TileFaces Edges, bool Changed) : IComponent;
+
+// A plate that may still change. The others sleep and cost nothing.
+public struct Awake : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using EasyEcs;
+
+// The shader: one step of the Game of Life for each awake plate, plates in parallel.
+public class StepSystem : EcsSystem
+{
+    [ForEach(Parallel = true, ChunkRows = 64), With<Awake>]
+    static void Step(Tile<Cell, Plate> life, Mut<DynamicBuffer<NextCell>> next, ref Change change)
+    {
+        var step = next.Write().AsSpan();
+        var into = MemoryMarshal.Cast<NextCell, byte>(step);
+
+        // The plate inside a ring of its neighbors' cells: no edge case below.
+        var plate = life.Pad();
+
+        // Only the rows that hold a live cell or lie beside one.
+        foreach (var row in plate.Rows(TileReads.Layer))
+        {
+            // A row of 16 byte cells is one Vector128<byte>.
+            var c = plate.At(row);
+            var above = c.Load128<byte>(-1, 0, -1) + c.Load128<byte>(0, 0, -1) + c.Load128<byte>(1, 0, -1);
+            var below = c.Load128<byte>(-1, 0, 1) + c.Load128<byte>(0, 0, 1) + c.Load128<byte>(1, 0, 1);
+            var around = above + c.Load128<byte>(-1) + c.Load128<byte>(1) + below;
+            var born = Vector128.Equals(around, Vector128.Create((byte)3));
+            var stays = Vector128.Equals(around, Vector128.Create((byte)2)) & c.Load128<byte>();
+            ((born | stays) & Vector128<byte>.One).CopyTo(into.Slice(row.Index));
+        }
+
+        var edges = life.ChangedEdges(MemoryMarshal.Cast<NextCell, Cell>(step), out bool changed);
+        change = new Change(edges, changed);
+    }
+}
+
+// Ping-pong: the steps become the cells once every plate has stepped,
+// so no plate reads a neighbor's new cells.
+public class CommitSystem : EcsSystem
+{
+    [ForEach, With<Awake>]
+    static void Commit(in Change change, in DynamicBuffer<NextCell> next, Mut<DynamicBuffer<Cell>> cells)
+    {
+        if (!change.Changed) return;
+        var into = MemoryMarshal.Cast<Cell, NextCell>(cells.Write().AsSpan());
+        next.AsReadOnlySpan().CopyTo(into);
+    }
+}
+
+// A plate whose step changed nothing sleeps until a neighbor wakes it.
+public class SleepSystem : EcsSystem
+{
+    [ForEach, With<Awake>]
+    static void Sleep(Entity plate, in Change change)
+    {
+        if (!change.Changed) plate.RemoveAwake();
+    }
+}
+
+// The neighbors that read an edge that changed step again next tick.
+public class WakeSystem : EcsSystem
+{
+    [ForEach, With<Awake>]
+    void Wake(in Change change, Tile<Cell, Plate> life)
+    {
+        foreach (var id in life.Facing(change.Edges)) World.GetEntity(id).SetAwake();
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Report.cs">
+
+```csharp title="Report.cs" doccheck=example
+using EasyEcs;
+
+public static class Report
+{
+    // The live cells of each plate, and whether it is awake.
+    public static string Describe(Entity[] plates)
+    {
+        var line = new System.Text.StringBuilder();
+        foreach (var plate in plates)
+        {
+            int alive = 0;
+            foreach (var cell in plate.Cell.AsReadOnlySpan()) alive += cell.Alive;
+            line.Append($"  [{alive} alive, {(plate.IsAwake ? "awake" : "asleep")}]");
+        }
+        return line.ToString();
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<StepSystem>();
+world.AddSystem<CommitSystem>();
+world.AddSystem<SleepSystem>();
+world.AddSystem<WakeSystem>();
+
+// Three plates in a row, awake: their first step decides who sleeps.
+var plates = new Entity[3];
+for (int x = 0; x < 3; x++)
+{
+    plates[x] = world.CreateEntity(new Plate(new PlatePos(x, 0)), new Change(), new Awake());
+    plates[x].GetOrAddCell().SetCount(Plate.Size * Plate.Size);
+    plates[x].GetOrAddNextCell().SetCount(Plate.Size * Plate.Size);
+}
+
+// Plate 0: a block, which never changes. Plate 1: a blinker on its east edge, which reaches into plate 2.
+Seed(plates[0], (7, 7), (8, 7), (7, 8), (8, 8));
+Seed(plates[1], (15, 6), (15, 7), (15, 8));
+
+Console.WriteLine($"tick 0{Report.Describe(plates)}");
+for (int tick = 1; tick <= 3; tick++)
+{
+    world.Update();
+    Console.WriteLine($"tick {tick}{Report.Describe(plates)}");
+}
+
+static void Seed(Entity plate, params (int X, int Z)[] cells)
+{
+    var span = plate.WriteCell().AsSpan();
+    foreach (var (x, z) in cells) span[z * Plate.Size + x] = new Cell(1);
+}
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+tick 0  [4 alive, awake]  [3 alive, awake]  [0 alive, awake]
+tick 1  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
+tick 2  [4 alive, asleep]  [3 alive, awake]  [0 alive, awake]
+tick 3  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
+```
+
+The block on plate 0 changed nothing in its first step, so the plate sleeps and is never stepped again. The blinker
+turns between plates 1 and 2: plate 2 reads plate 1's east edge through its halo, so a cell is born on its own west
+edge every other tick, and each plate keeps the other awake through `Facing`.
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| Reading another tile's cells through a `Lookup<T>` per cell | A `Tile<TCell, TTile>` parameter and `Pad()` | One copy of each facing edge per pass, then samples with no edge case |
+| One cell per `Load` | `Load128` / `Load256` over a row of cells | A row of 16 byte cells is one instruction |
+| `Rows(TileReads.All)` for a 2D five-point stencil | `Rows(TileReads.Layer)` (`Cross` in 3D) | Fewer rows visited, the same result |
+| Stepping every tile | `ChangedEdges`, `Facing` and an `Awake` tag | A grid costs what its active tiles cost |
+| Neighbors found through the hash | `IDirectIndexed<TKey>` with a `[UniqueKey]` | One array read per neighbor |
+| `float` cells where a `byte` holds the value | The narrowest cell that holds it | Four times the cells per vector |
+| Clearing the step buffer every pass | Writing every row the pass later reads | No full write of memory the pass rewrites anyway |
+
+`TileStencilBenchmark` runs a nine-point blur and a fourth-order Laplacian over 32 x 32 plates of 16 x 16 cells, as
+tiles, as direct-indexed tiles and written by hand (a `Lookup` per neighbor, a padded texture on the stack);
+`TileActiveBenchmark` a mostly quiet grid with and without sleeping tiles; `TileNeighborBenchmark` the neighbor
+search. The measured numbers of the water shader, by hand against the tile, are in
+[D77](/en/docs/decisions#d77-tiles).
+
+{/* TODO(bench): <BenchTable bench="TileStencilBenchmark" /> and <BenchTable bench="TileActiveBenchmark" /> once
+bench.json holds them. */}
+
+## What it costs [#what-it-costs]
+
+- **Per tile and pass:** one search per neighbor in the shape's neighborhood (4 to 26, a hash probe each, one array
+  read with `IDirectIndexed`), done once per entity and shared by the method's tile parameters of one grid.
+- **Per `Pad`:** a copy of the tile's cells and the facing edges of its neighbors, O(layers × (Width + 2r) ×
+  (Depth + 2r)), and a bit per row. No allocation once the thread has its texture.
+- **Memory:** one texture per thread and per (cell type, tile type), allocated on the thread's first load, of the
+  tile's cells with their halo; the cells themselves are dynamic buffers (two per tile with a step buffer).
+- **Sleeping tiles:** `ChangedEdges` compares the step with the cells row by row as bytes, O(cells); a sleeping tile
+  costs nothing per pass.
+- **Unused:** nothing. A world without tile parameters pays no search, no texture and no mask.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| A `Tile` parameter and a write of its cell buffer in one method | Neighbors read while other threads write them | [EECS059](/en/docs/guide/analyzer#eecs059): write a second buffer |
+| A halo wider than the tile | It would reach past the tile beside | [EECS072](/en/docs/guide/analyzer#eecs072), and an exception at the first load |
+| Two tiles of the same cell type and grid in one method | The second `Pad` replaces the first in the thread's texture | [EECS073](/en/docs/guide/analyzer#eecs073): one cell type per field |
+| A pass that reads cells it updated in the same pass | Results depend on the visit order and the thread count | Review: write into a step buffer, commit after |
+| `Rows(reads)` for a stencil whose result is not zero where everything it reads is zero | The rows it skips keep the last step's values | Review: `Rows(TileReads.All)` or every row |
+| A nine-point stencil with the default `Neighborhood` | The corners of the halo hold the boundary, not the diagonal tiles | Tests: `TileNeighborhood.All` |
+| A cell buffer with fewer cells than the shape | `Pad` throws | Size both buffers with `SetCount` at creation |
+| Sleeping a new tile before its first step | It never reads the neighbors it was created beside | Create tiles awake |
+
+## Related [#related]
+
+<Cards>
+  <Card title="High-performance patterns" href="/en/docs/guide/high-performance">
+    Vector loops, parallel chunks and batch methods, and where tiles fit among them.
+  </Card>
+  <Card title="Dynamic buffers" href="/en/docs/guide/dynamic-buffers">
+    The cells of a tile: `SetCount`, the buffer pool and change tracking.
+  </Card>
+  <Card title="Indexes and relations" href="/en/docs/guide/indexes-and-relations#direct-index">
+    The key a tile is found by, and direct-mapped keys.
+  </Card>
+  <Card title="VoxelServer" href="/en/docs/samples/voxel-server">
+    The water: chunks as tiles of 16 x 16 x 32 blocks, a shader, a stencil and sleeping chunks.
+  </Card>
+</Cards>

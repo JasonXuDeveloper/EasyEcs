@@ -19,12 +19,12 @@ EasyEcs 的全部功能都在这一页，按它在服务器上承担的工作分
 
 | 用途 | 功能 |
 | --- | --- |
-| [模拟](#simulate) | [World 与实体](#worlds-and-entities)、[组件与标签](#components-and-tags)、[生成成员](#generated-members)、系统与 [`[ForEach]`](#systems-and-foreach)、[泛型系统](#generic-systems)、[过滤条件](#filters)、[可选组件](#optional-components)、[批量方法](#batch-methods)、[单例](#singletons)、[排序、分组与间隔](#system-groups-and-intervals)、[分片](#slices)、[立即生效的结构变更](#immediate-structural-changes)、[临时查询](#ad-hoc-queries) |
+| [模拟](#simulate) | [World 与实体](#worlds-and-entities)、[组件与标签](#components-and-tags)、[生成成员](#generated-members)、[生成的部分](#generated-parts)、系统与 [`[ForEach]`](#systems-and-foreach)、[泛型系统](#generic-systems)、[过滤条件](#filters)、[可选组件](#optional-components)、[批量方法](#batch-methods)、[单例](#singletons)、[排序、分组与间隔](#system-groups-and-intervals)、[分片](#slices)、[立即生效的结构变更](#immediate-structural-changes)、[遍历后销毁的事件](#consume)、[临时查询](#ad-hoc-queries) |
 | [响应变化](#react) | [变更追踪](#change-tracking)、[值变了才算写入](#write-only-when-changed)、[移除检测](#removal-detection)、[销毁日志](#destroy-log)、[清理组件](#cleanup-components)、[禁用与启用](#disable-and-enable) |
 | [查找](#find) | [值索引](#value-indexes)、[唯一键](#unique-keys)、[有序区间](#ordered-ranges)、[按值分表](#table-groups) |
 | [组织](#structure) | [关系](#relations)、[层级](#hierarchy)、[动态缓冲](#dynamic-buffers)、[预制体与克隆](#prefabs-and-cloning) |
 | [持久化](#persist) | [快照](#snapshots)、[存档](#saves)、[迁移](#migration)、[卸载插件类型](#unloading) |
-| [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、并行 [`[ForEach]`](#parallel-foreach)、[归约](#reductions)、[临时空间和查找](#scratch-and-lookups)、[批量操作](#bulk-operations) |
+| [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、并行 [`[ForEach]`](#parallel-foreach)、[归约](#reductions)、[临时空间和查找](#scratch-and-lookups)、[遍历产出的记录](#emit)、[确定性随机数](#entity-random)、[其他数据上的并行循环](#for-parallel)、[网格瓦片](#grid-tiles)、[批量操作](#bulk-operations) |
 | [构建与运维](#operate) | [分析器与代码修复](#analyzer)、[系统耗时统计](#per-system-timing)、[调度](#schedule)、[异常处理](#errors)、[运行时自省](#introspection)、[归还内存](#trim-excess)、[Native AOT](#native-aot)、[托管与测试](#hosting-and-testing)、[模板与示例程序](#templates) |
 
 ## 模拟 [#simulate]
@@ -42,8 +42,11 @@ public record struct Clock(float Dt) : ISingletonComponent;
 public class MovementSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
-    static void Move(ref Position p, in Velocity v, in Clock clock) =>
-        p = new Position(p.X + v.X * clock.Dt, p.Y + v.Y * clock.Dt);
+    static void Move(ref Position p, in Velocity v, in Clock clock)
+    {
+        p.X += v.X * clock.Dt;
+        p.Y += v.Y * clock.Dt;
+    }
 }
 ```
 
@@ -76,6 +79,24 @@ public class MovementSystem : EcsSystem
 - **适合：** 所有写明具体组件的代码。泛型 API（`Get<T>()`、`Set(…)`）留给泛型代码。
 - **开销：** 没有。每个成员都是对泛型 API 的内联调用，生成器也知道哪些是结构变更。
 - **指南：** [实体与组件](/zh/docs/guide/entities-and-components)、[速查表](/zh/docs/cheat-sheet#generated-members)
+
+### 生成的部分 [#generated-parts]
+
+组件或单例原本要手写实现的东西，用特性声明，生成器把它写进 `partial` 类型：成员（或结构体本身）上的 `[IndexKey]` / `[UniqueKey]`
+写出 `IIndexed<TKey>` / `IUniqueIndexed<TKey>` 和它们的 `Key`，`[Group]` 写出 `IGroup`，单例字段上的 `[Sum]`、`[Product]`、`[Min]`、
+`[Max]`、`[All]`、`[Any]` 写出归约的 `Identity` 和 `Combine`。每个 World 共用的设置也声明在类型上：`[GroupBy]` 拆表，
+`[WhenTargetDestroyed(policy)]` 设置链接的目标销毁策略，`[NotSaved]` 让运行时状态不进任何存档。
+
+```csharp
+public partial record struct Faction([IndexKey] int Id) : IComponent;
+public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Max] public int Oldest; }
+```
+
+- **适合：** 所有的键、分组和逐字段的总数：一个特性代替一个接口及其成员。
+- **别用于：** 由多个成员算出的键、不是逐字段的归约：手写接口。
+- **开销：** 运行时没有；生成的成员就是你本来要写的那些。设置类特性从 World 第一张包含该类型的表起生效。
+- **指南：** [生成的部分](/zh/docs/guide/entities-and-components#declared-parts)、
+  [EECS062-069](/zh/docs/guide/analyzer#eecs062)
 
 ### 系统与 [ForEach] [#systems-and-foreach]
 
@@ -125,11 +146,12 @@ public class MovementSystem : EcsSystem
 结果和逐行方法逐位相同。
 
 - **适合：** 对大量行做算术：衰减、积分、截断、计数。
-- **别用于：** 不用管：它是自动的。不符合条件的方法（`Vector3` 字段、两种数值类型、函数调用、`Parallel`）照旧逐行运行，
+- **别用于：** 不用管：它是自动的。不符合条件的方法（两种数值类型、每条路径上都有函数调用）照旧逐行运行，
   [EECS055](/zh/docs/guide/analyzer#eecs055) 会说明原因；`SimdMode = SimdMode.Require` 让它成为构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)），
-  `SimdMode.Off` 不再提示。
+  `SimdMode.Off` 不再提示。并行方法、`Maybe<T>` 参数、`byte` 和 `short` 通道、`Vector2` / `Vector3` 字段、整体赋值（`new T(...)`、`with`）
+  和条件分支里的调用也能得到循环；`FloatMode.Fast` 让 `Sin`、`Exp`、`Log` 等改用向量近似。`SystemInfo.Loops` 列出每个方法得到的循环。
 - **开销：** 运行时没有；循环在编译时写好。
-- **指南：** [系统](/zh/docs/guide/systems#vector-loops)
+- **指南：** [系统](/zh/docs/guide/systems#vector-loops)、[FloatMode](/zh/docs/guide/systems#float-mode)
 
 ### 批量方法 [#batch-methods]
 
@@ -184,6 +206,16 @@ public class MovementSystem : EcsSystem
   EasyEcs 没有需要回放的缓冲。
 - **开销：** 可能做结构变更的遍历，每个实体之后检查一个计数器；不可能做结构变更的方法连这一步都省了。
 - **指南：** [结构变更](/zh/docs/guide/structural-changes)、[ref 与 await](/zh/docs/guide/refs-and-await)
+
+### 遍历后销毁的事件 [#consume]
+
+`[ForEach, Consume]` 在遍历结束时正好销毁这一遍访问过的行：处理事件或命令实体的方法每个只处理一次，方法体里不用写 `entity.Destroy()`。
+
+- **适合：** 伤害事件、客户端命令、请求：只活一遍的实体。
+- **别用于：** 比读它的系统活得更久的实体；分片的方法（[EECS085](/zh/docs/guide/analyzer#eecs085)）。
+- **开销：** 没有结构变更的遍历之后，每张表一次 `DestroyAll`，而不是每行一次销毁；抛异常的遍历什么都不销毁。
+  手写的销毁由 [EECS084](/zh/docs/guide/analyzer#eecs084) 报告。
+- **指南：** [系统](/zh/docs/guide/systems#consume)
 
 ### 临时查询 [#ad-hoc-queries]
 
@@ -285,14 +317,13 @@ public class ReplicationSystem : EcsSystem
 按值查找，不用手工维护一个同步的字典。
 
 ```csharp
-public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
-public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
-public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; }
+public partial record struct Team([IndexKey] int Id) : IComponent;
+[GroupBy] public partial record struct Zone([Group] int Id) : IComponent;   // 每个 World 都按它分组
+public partial record struct Account([UniqueKey] int Id) : IComponent;
 ```
 
 ```csharp
 using var world = new World();
-world.GroupBy<Zone>();                                          // 初始化时调用
 world.CreateEntity(new Team(1), new Zone(3), new Position(0, 0), new Account(7));
 
 int red = world.TeamIndex.Count(1);                             // 一次哈希查找
@@ -302,7 +333,7 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 
 ### 值索引 [#value-indexes]
 
-实现 `IIndexed<TKey>` 的组件可以按 `Key` 查找：`world.Index<T, TKey>()`（或 `world.TeamIndex`）的 `Find`、`TryFind` 和 `Count`。
+键标了 `[IndexKey]` 的组件（生成器实现 `IIndexed<TKey>`）可以按 `Key` 查找：`world.Index<T, TKey>()`（或 `world.TeamIndex`）的 `Find`、`TryFind` 和 `Count`。
 每次 `Set`、创建和销毁都会更新索引；经 `ref` 写入时索引看不到，所以编译期直接报错（[EECS015](/zh/docs/guide/analyzer#eecs015)）。
 
 - **适合：** 按名字找玩家、找公会里的单位、找某个网格格子里的实体。
@@ -312,12 +343,12 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 
 ### 唯一键 [#unique-keys]
 
-实现 `IUniqueIndexed<TKey>` 的组件，一个键只对应一个实体：`index.Get(key)` 返回它（没有就抛异常），`TryGet(key, out e)` 试着取。
+键标了 `[UniqueKey]` 的组件（`IUniqueIndexed<TKey>`），一个键只对应一个实体：`index.Get(key)` 返回它（没有就抛异常），`TryGet(key, out e)` 试着取。
 任何会让第二个实体拿到别人已有的键的写入（`Set`、创建、`Instantiate`、`Clone`、`SetAll`、`Enable`、读档和搬移），都会在改动任何东西之前抛出
 `InvalidOperationException`。引用类型键为 null 时视为没有键。
 
 - **适合：** 账号 id、玩家名、会话令牌、格子的占用者：绝不能对应两个实体的键。
-- **别用于：** `EntityId` 键（[EECS036](/zh/docs/guide/analyzer#eecs036)）；几个实体共用的键（用普通的 `IIndexed<TKey>`）。
+- **别用于：** `EntityId` 键（[EECS036](/zh/docs/guide/analyzer#eecs036)）；几个实体共用的键（用普通的 `[IndexKey]`）。
 - **开销：** 第一张含该组件的表出现时索引就建好了，所以每次写入都会检查：每个变了的键一次哈希查找，批量调用和读档多遍历一遍行。
   `Get` 和 `TryGet` 是一次哈希查找，只读这个键自己的记录：唯一键直接存它的实体，每个键没有数组。能映射到有界槽位的键
   （`IDirectIndexed<TKey>`：网格格子、小 id）改为读一个数组元素（[直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index)）。
@@ -333,7 +364,7 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 
 ### 按值分表 [#table-groups]
 
-调用 `world.GroupBy<T>()` 后，`IGroup` 组件的值会把表拆开：同一个场景、地图或对局的实体共用一批表，`QueryFilter.InGroup<T>(group)`
+类型上标 `[GroupBy]`（每个 World）或调用 `world.GroupBy<T>()`（一个 World）后，`IGroup` 组件的值（它的 `[Group]` 成员）会把表拆开：同一个场景、地图或对局的实体共用一批表，`QueryFilter.InGroup<T>(group)`
 只遍历它们的行，在内存里是连续的。设置新值会把实体搬到新分组的表里。
 
 - **适合：** 一个 World 里有很多场景或对局，各自单独更新、单独查询。
@@ -346,7 +377,7 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 实体之间的链接、实体内部的列表，以及用来刷出实体的配方。
 
 ```csharp
-public record struct OwnedBy(EntityId Owner) : IComponent, IIndexed<EntityId> { public EntityId Key => Owner; }
+public partial record struct OwnedBy([IndexKey] EntityId Owner) : IComponent;
 public record struct Loot(int Item);
 ```
 
@@ -405,7 +436,8 @@ var guard = world.Instantiate(goblin, new ChildOf(archer));          // 自带�
 `Prefab` 是一份不属于任何 World 的组件值配方，所以没有查询能看到它，也没有系统需要过滤它。`world.Instantiate(prefab)` 创建一个实体，
 `Instantiate(prefab, span)` 创建一整波；`new Prefab(base)` 生成变体，`AddMember()` 组成一组（首领带着小怪和坐骑）。
 `Instantiate(prefab, new ChildOf(boss), new Position(x, y))` 在同一次调用里给实例最多九个自己的组件：覆盖预制体里的值，或者新加上去。
-`entity.Clone()` 复制一个活着的实体。
+`entity.Clone()` 复制一个活着的实体。`SetAbsent<T>()` 给配方留一列 `T` 但不带这个组件，实例之后进入的状态（`SetEnraged()`）只翻一个存在位，
+不用搬行。
 
 - **适合：** 反复刷出的实体种类：NPC 类型、投射物、掉落物，写在代码里或启动时从配置加载；带组件的形式适合父实体、位置或主人每个实例都不同的刷怪。
 - **别用于：** 每个值都不一样的实体：直接带值创建。
@@ -443,7 +475,8 @@ restarted.Load(bytes.WrittenSpan);
 非托管组件按原始行写出；托管组件、单例和标了 `[NinoType]` 的非托管组件由 Nino 写出。类型按 Nino 类型 id 记录，所以加载时会跳过进程里已经不存在的组件，改了名的组件用 `[NinoFormerName]` 就能留住。
 
 重启时，`SaveWithout(writer, in exclude)` 不写 `ComponentSet` 里的组件和单例（运行时状态、缓存、配置），这些类型也就不需要格式化器；
-`LoadKeeping(bytes, in keep, markWritten: false)` 保留新进程已经设好的单例，比如它的配置。
+`LoadKeeping(bytes, in keep, markWritten: false)` 保留新进程已经设好的单例，比如它的配置。无论在哪里都是运行时状态的类型标上
+`[NotSaved]`：任何存档都不包含它，它也不需要格式化器。
 
 - **适合：** 跨重启持久化、落盘的回放、把一个 World 发到另一台机器。
 - **别用于：** 原地修改非托管组件的内存布局：请新增一个组件类型，否则旧存档加载不了。
@@ -510,7 +543,7 @@ restarted.Load(bytes.WrittenSpan);
 
 ### 对所有行求总数（归约） [#reductions]
 
-`ref Reduce<T>` 参数把一遍 `[ForEach]` 变成求一个总数：`T` 是实现了 `IReduction<T>`（`Identity`、`Combine`）的单例，并行遍历的每一块
+`ref Reduce<T>` 参数把一遍 `[ForEach]` 变成求一个总数：`T` 是字段标了 `[Sum]`、`[Min]`、`[Max]` 等的单例（或手写实现 `IReduction<T>` 的 `Identity`、`Combine`），并行遍历的每一块
 （单线程时是整遍）累加进自己的部分结果，这一遍结束时按行的顺序合并部分结果并替换 `T`：就是 OpenMP 的 `reduction`、MPI 的 `Allreduce`。
 
 - **适合：** 存活的单位数、一种资源的总量、人群的范围：每遍对大量行求一个结果。
@@ -532,6 +565,50 @@ restarted.Load(bytes.WrittenSpan);
   系统算作读 `T`；[EECS058](/zh/docs/guide/analyzer#eecs058) 不让临时内存进入 World，[EECS059](/zh/docs/guide/analyzer#eecs059)
   不让方法查找自己会写的组件。
 - **指南：** [临时空间](/zh/docs/guide/threading#scratch)、[查找](/zh/docs/guide/threading#lookups)
+
+### 遍历产出的记录 [#emit]
+
+`Emit<T>` 参数把记录（命中、声音、消息）追加到所在块自己的列表里，不加锁也不用原子操作；遍历结束时，这些列表按行的顺序并入单例
+`Emitted<T>`（Unity 的 `NativeStream`，一种并行追加）。之后的系统处理这些记录并清空它们。
+
+- **适合：** 并行遍历给其他实体或网络产出的东西：要结算的伤害、要发送的事件。
+- **别用于：** 每行一个的结果（行自己的组件）或一个总数（[归约](#reductions)）。
+- **开销：** 每条记录追加一次到块的池化列表，遍历结束时每个列表拷贝一次；稳定运行时零分配。手工填充的列表由
+  [EECS089](/zh/docs/guide/analyzer#eecs089) 报告，读自己记录的遍历由 [EECS070](/zh/docs/guide/analyzer#eecs070) 报告。
+- **指南：** [多线程与并行](/zh/docs/guide/threading#emit)
+
+### 确定性随机数 [#entity-random]
+
+`EntityRandom` 是保存种子和 tick 的单例；每个数都是（种子、实体、tick、流）的纯函数，所以并行遍历不管多少线程、行按什么顺序跑，
+抽到的数都一样，用同一个种子回放也会重复出来。
+
+- **适合：** 游荡、刷怪判定、掉落、暴击、AI 选择：回放或测试必须重现的随机性。
+- **别用于：** 机密（`RandomNumberGenerator`），以及遍历之外没人需要重现的随机性（`Random.Shared`）。
+- **开销：** 每个数四轮整数混合，不写任何状态，所以方法仍是只读的，可以并行。`[ForEach]` 方法里的 `System.Random` 由
+  [EECS071](/zh/docs/guide/analyzer#eecs071) 报告，同一个流抽两次由 [EECS088](/zh/docs/guide/analyzer#eecs088) 报告。
+- **指南：** [多线程与并行](/zh/docs/guide/threading#entity-random)
+
+### 其他数据上的并行循环 [#for-parallel]
+
+`world.ForParallel` 在并行 `[ForEach]` 方法用的执行器上，对不是表中行的数据运行结构体 job：`IForRange` job 遍历一段下标，
+`IForSpan<T>` job 遍历 `DynamicBuffer<T>` 的元素（`Emitted<T>` 的记录），每块是一个可写的 span（Kokkos 的 `RangePolicy`）。
+
+- **适合：** 列表或数组上的重活：处理遍历产出的记录、填充网格。
+- **别用于：** 实体的行（用并行 `[ForEach]`），以及几千个元素的轻活。
+- **开销：** 和并行 `[ForEach]` 一样的分块和辅助线程，每种 job 第一次调用之后零分配；每块一份 job 拷贝
+  （调用之后读 job 字段由 [EECS061](/zh/docs/guide/analyzer#eecs061) 报告）。
+- **指南：** [多线程与并行](/zh/docs/guide/threading#for-parallel)
+
+### 网格瓦片 [#grid-tiles]
+
+把网格切成瓦片，每个瓦片一个实体，格子存在 `DynamicBuffer<TCell>` 里：`Tile<TCell, TTile>` 参数把瓦片连同邻居的边交给 `[ForEach]` 方法
+（模板计算的光环，MPI 的 ghost 格子）。生成器查找邻居、声明读取、让方法保持并行；安静的瓦片会休眠，旁边的边变了再醒来。
+
+- **适合：** 热量、流体、元胞自动机、影响力场、体素光照：格子的下一个值由周围的格子算出。
+- **别用于：** 地图上稀疏的物体（用格子的[索引](#value-indexes)），以及一个缓冲就装得下的小网格。
+- **开销：** 每个瓦片把自己和光环拷贝一次到线程的纹理里；模板计算改变不了的行直接跳过。误用由
+  [EECS059](/zh/docs/guide/analyzer#eecs059)、[EECS072](/zh/docs/guide/analyzer#eecs072) 和 [EECS073](/zh/docs/guide/analyzer#eecs073) 报告。
+- **指南：** [网格瓦片](/zh/docs/guide/grids)
 
 ### 批量操作 [#bulk-operations]
 

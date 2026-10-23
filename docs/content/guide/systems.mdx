@@ -321,7 +321,7 @@ instead is a lookup per row ([EECS027](/en/docs/guide/analyzer#eecs027)).
 | runs in the hottest loop, over many rows | two methods, `[With<T>]` and `[Without<T>]`: no test per row |
 
 ```csharp
-public record struct Guild(int Id, int Level) : IComponent, IIndexed<int> { public int Key => Id; }
+public partial record struct Guild([IndexKey] int Id, int Level) : IComponent;
 public record struct Morale(int Value) : IComponent;
 ```
 
@@ -365,7 +365,7 @@ public class ApplyHeals : EcsSystem
     [ForEach, Consume]
     static void Apply(in Heal heal, World world)
     {
-        if (world.TryGetEntity(heal.Target, out var target)) target.Get<Health>().Value += heal.Amount;
+        if (world.TryGetEntity(heal.Target, out var target)) target.Health.Value += heal.Amount;
     }
 }
 ```
@@ -415,8 +415,11 @@ public record struct Clock(float Time) : ISingletonComponent;
 public class SteeringSystem : EcsSystem
 {
     [ForEach(Parallel = true), Without<Dead>]
-    static void Steer(ref Velocity velocity, in Position position, in Clock clock) =>
-        velocity = new Velocity(MathF.Cos(clock.Time + position.X), MathF.Sin(clock.Time + position.Y));
+    static void Steer(ref Velocity velocity, in Position position, in Clock clock)
+    {
+        velocity.X = MathF.Cos(clock.Time + position.X);
+        velocity.Y = MathF.Sin(clock.Time + position.Y);
+    }
 }
 ```
 
@@ -456,7 +459,7 @@ public class RouteSystem : EcsSystem
 
 How the chunks are claimed, how to choose `n` and what it costs: [chunk size](/en/docs/guide/threading#chunk-rows).
 
-### Vector loops: SIMD the generator writes [#vector-loops]
+### Vector loop (SIMD) [#vector-loops]
 
 You write a `[ForEach]` method for one row; when its components are plain numbers, the generator also writes its
 SIMD loop: the method's body becomes a `System.Numerics.Vector<T>` loop over each run of matching rows, as many rows
@@ -473,8 +476,8 @@ scalar.
 
 <Callout type="warn" title="Skip it when">
   The work is not arithmetic on numbers: lookups, calls, buffers, structural changes. Those methods stay row by row,
-  which is right for them. For lanes the rule does not cover (bytes, mixed types) write a
-  [batch method](#batch-methods) with `Vector128<T>` or `Vector<T>` by hand.
+  which is right for them. For data the rule does not cover (mixed lane types, a lookup table, a component of more
+  fields than the method can use) write a [batch method](#batch-methods) with `Vector128<T>` or `Vector<T>` by hand.
 </Callout>
 
 The method below qualifies. The second tab is the job the generator wrote for it (from the system's
@@ -628,7 +631,9 @@ reassociation, and no fused multiply-add the method did not write (`Vector.Min` 
 computes. Change ticks and the system's read and write sets are those of the per-row method. Only `FloatMode.Fast`
 changes results ([D90](/en/docs/decisions#d90-vector-loops-reach)).
 
-**A method that does not qualify** stays a scalar loop: it is correct, only slower, and
+#### `SimdMode` [#simd-mode]
+
+A method that does not qualify stays a scalar loop: it is correct, only slower, and
 [EECS055](/en/docs/guide/analyzer#eecs055) (a suggestion in the IDE) names the first reason, as Burst's inspector
 would: a `bool` field, a component too wide for the work done on it (with the fields to split out), a vector sum such
 as `Vector3.Dot` whose order the scalar code does not fix, a call outside a condition. A method whose speed depends
@@ -661,6 +666,46 @@ public class MeasureSpeed : EcsSystem
     }
 }
 ```
+
+#### Float results: `FloatMode` [#float-mode]
+
+By default (`FloatMode.Exact`) a vector loop gives the method's results bit for bit, on every machine. Two things it
+then leaves scalar: `Sin`, `Cos`, `Exp`, `Log`, `Log2` and `Hypot`, whose vector forms are approximations, and a float
+sum into a [`Reduce<T>`](/en/docs/guide/threading#reductions), which a vector loop would add lane by lane, in another
+order. `[ForEach(FloatMode = FloatMode.Fast)]` accepts both: .NET's vector approximations (within 1 or 2 ulp of the
+scalar functions) and float sums rounded per lane, so results may differ from the scalar method's and between
+machines (as Burst's `FloatMode.Fast`). Integer sums and the `Min` / `Max` of any lane type are exact either way.
+
+```csharp tab="Exact" doccheck=expect-EECS055
+public record struct Clock(float Time) : ISingletonComponent;
+
+public class SteeringSystem : EcsSystem
+{
+    [ForEach]   // EECS055: MathF.Cos is not bit-exact in vector form
+    static void Steer(ref Velocity velocity, in Position position, in Clock clock)
+    {
+        velocity.X = MathF.Cos(clock.Time + position.X);
+        velocity.Y = MathF.Sin(clock.Time + position.Y);
+    }
+}
+```
+
+```csharp tab="Fast"
+public record struct Clock(float Time) : ISingletonComponent;
+
+public class SteeringSystem : EcsSystem
+{
+    [ForEach(FloatMode = FloatMode.Fast)]   // the vector approximations: a few ulp, faster
+    static void Steer(ref Velocity velocity, in Position position, in Clock clock)
+    {
+        velocity.X = MathF.Cos(clock.Time + position.X);
+        velocity.Y = MathF.Sin(clock.Time + position.Y);
+    }
+}
+```
+
+Keep `Exact` for state that replays, lockstep peers compare or tests check bit for bit; take `Fast` for effects whose
+last bits nobody compares (steering noise, particles, visual decay).
 
 `world.DescribeSchedule()` names the loop each method of a system got, one line per method (`SystemInfo.Loops`):
 
@@ -695,7 +740,11 @@ public struct InputGroup : ISystemGroup;
 public class ApplyInputSystem : EcsSystem
 {
     [ForEach, With<Player>]
-    static void Apply(ref Velocity velocity) => velocity = new Velocity(velocity.X * 0.9f, velocity.Y * 0.9f);
+    static void Apply(ref Velocity velocity)
+    {
+        velocity.X *= 0.9f;
+        velocity.Y *= 0.9f;
+    }
 }
 ```
 
@@ -730,7 +779,11 @@ public struct Gameplay : ISystemGroup;              // no method of the group se
 public class MoveSystem : EcsSystem
 {
     [ForEach]
-    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+    static void Move(ref Position p, in Velocity v)
+    {
+        p.X += v.X;
+        p.Y += v.Y;
+    }
 }
 ```
 
@@ -748,12 +801,10 @@ public struct In<TActor> : IComponent;             // the tag of one kind of act
 public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;   // IIndexed requires IEquatable
 
-// Key component, index key and system group in one type. Key is implemented explicitly: a public
-// Key property would be printed by the record's ToString(), which would print Key again, forever.
-public readonly record struct Shop(long Id) : IActor<Shop>
-{
-    Shop IIndexed<Shop>.Key => this;
-}
+// Key component, index key and system group in one type: [IndexKey] on the type makes the whole value
+// the key, and the generator writes Key explicitly, so the record's ToString() never prints it.
+[IndexKey]
+public readonly partial record struct Shop(long Id) : IActor<Shop>;
 
 public record struct Stock(int Items) : IComponent;
 
@@ -928,7 +979,8 @@ public class MoveSystem : EcsSystem
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)
     {
-        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+        position.X += velocity.X;
+        position.Y += velocity.Y;
     }
 }
 
@@ -939,7 +991,8 @@ public class FrictionSystem : EcsSystem
     [ForEach, With<Grounded>]
     static void Slow(ref Velocity velocity)
     {
-        velocity = new Velocity(velocity.X / 2, velocity.Y / 2);
+        velocity.X /= 2;
+        velocity.Y /= 2;
     }
 }
 ```
@@ -999,13 +1052,15 @@ move although it was added second, so the grounded unit loses half its speed bef
 | An `Entity` or `World` parameter the method does not need | Drop it ([EECS026](/en/docs/guide/analyzer#eecs026)) | The job skips structural bookkeeping and may run in parallel |
 | An instance `[ForEach]` method | A static one ([EECS029](/en/docs/guide/analyzer#eecs029)) | Proven not to change structure: may share a stage, no per-row checks |
 | A component of more than 4 numbers, or of two number types, in a hot method | Components of 1 to 4 fields of one number type | The method gets a [vector loop](#vector-loops) |
-| Lanes a vector loop does not cover (bytes, mixed types) | A batch method with `Vector<T>` | SIMD over whole runs of rows |
+| Data a vector loop does not cover (mixed lane types, a lookup table) | A batch method with `Vector<T>` | SIMD over whole runs of rows |
 | `Maybe<T>` in the hottest loop | Two methods with `[With<T>]` / `[Without<T>]` | No presence test per row |
 | `Parallel = true` on light work | A plain `[ForEach]` | The hand-off costs more than it saves |
 | `Parallel = true` over a few hundred heavy rows, one chunk by default | [`ChunkRows = 64`](/en/docs/guide/threading#chunk-rows) | Every thread claims chunks instead of one doing them all |
 | `Maybe<T>` (or a lookup through the `Entity`) that only reads | [`ReadOnlyMaybe<T>`](#read-only-maybe) | A read for the scheduler, never stamped, no lookup per row ([EECS027](/en/docs/guide/analyzer#eecs027)) |
 | A filter repeated on every method of a cadence | A [group filter](#group-filters) | Written once |
 | Work every tick that could wait | `[UpdateInterval(N, Phase = P)]` | Spread over ticks |
+| `entity.Destroy()` at the end of a method over event entities | [`[Consume]`](#consume) | One `DestroyAll` per table after the pass |
+| `Sin` / `Cos` / `Exp` in a hot method whose last bits nobody compares | [`FloatMode = FloatMode.Fast`](#float-mode) | The method gets its vector loop |
 | Upkeep over every entity on every N-th tick | [`Slices = N`](#slices) | A flat cost per update instead of a spike |
 | A `ref` on a tracked value recomputed every tick that rarely changes | [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) with `SetIfChanged` | Only real changes are stamped: `[Changed<T>]` readers visit fewer rows |
 
@@ -1077,13 +1132,17 @@ needed, and a method that writes a singleton:
 | A group's `[With<T>]` or `ISystemGroupWith<T>` with a method's `[Removed<T>]` | Asks for rows that have and lack `T`: the method never runs | [EECS016](/en/docs/guide/analyzer#eecs016) |
 | A group's `[With<X>]` with a method's `[Without<X>]` | No entity matches: the method never runs | [EECS049](/en/docs/guide/analyzer#eecs049) |
 | A group's `[WithAny<A>]` with a method's `[WithAny<B>]`, read as "A and B" | The sets merge: entities with `A` or `B` | Code review |
-| A public `Key => this` on a record struct actor key | `ToString()` prints `Key` forever: stack overflow | [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix): implement `IIndexed<T>.Key` explicitly |
+| A public `Key => this` on a record struct actor key | `ToString()` prints `Key` forever: stack overflow | [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix): `[IndexKey]` on the type, which implements `IIndexed<T>.Key` explicitly |
 | `ref` on a component the method only reads | Stamps a tracked component, keeps the system out of shared stages | [EECS025](/en/docs/guide/analyzer#eecs025) |
 | An `Entity` or `World` parameter the method never uses | The job keeps its structural bookkeeping | [EECS026](/en/docs/guide/analyzer#eecs026) |
 | An allocation in `OnUpdate` or a `[ForEach]` method | Garbage every update | [EECS028](/en/docs/guide/analyzer#eecs028) |
 | An instance `[ForEach]` method that uses nothing of its system | Treated as one that may change structure: runs alone, with per-row checks | [EECS029](/en/docs/guide/analyzer#eecs029) |
 | `World.Update()` called from a system | The system runs again inside its own run | [EECS034](/en/docs/guide/analyzer#eecs034) |
-| A hot method over a `Vector2` / `Vector3` component, or one call in its body | No [vector loop](#vector-loops): one row at a time | The generated file has no `Vector<`; split the component, move the call out |
+| An edit that takes a hot method's [vector loop](#vector-loops) away (a `bool` field, a call outside a condition) | One row at a time, with the same results | [EECS055](/en/docs/guide/analyzer#eecs055); `SimdMode = SimdMode.Require` makes it [EECS056](/en/docs/guide/analyzer#eecs056) |
+| `FloatMode.Fast` on state that replays or that peers compare | Results differ in the last bits between machines | Code review: keep `FloatMode.Exact` ([float results](#float-mode)) |
+| An override of the removed `UpdateInterval` / `UpdatePhase` properties | Compile error | [EECS082](/en/docs/guide/analyzer#eecs082) (with a code fix): `[UpdateInterval(n, Phase = p)]` |
+| A `[ForEach]` method that ends with `entity.Destroy()` on every path | A destroy per row instead of one per table | [EECS084](/en/docs/guide/analyzer#eecs084) (with a code fix): `[Consume]` |
+| `[Consume]` without `[ForEach]`, or with `Slices` | Compile error: destroying a slice moves the rows of the other slices, so an event could wait many runs | [EECS085](/en/docs/guide/analyzer#eecs085) |
 
 ## Related [#related]
 

@@ -127,22 +127,19 @@ No rule catches it. More in [disable a component](/en/docs/guide/cleanup-and-dis
 
 ### A public `Key => this` on a record struct key [#public-key]
 
-```csharp doccheck=expect-EECS043
-public readonly record struct Market(long Id) : IActor<Market>
+```csharp doccheck=alone,expect-EECS043
+public readonly record struct Market(long Id) : IComponent, IIndexed<Market>
 {
     public Market Key => this;          // a public property: part of the record's ToString()
 }
 ```
 
 A record struct prints its public properties in `ToString()`. `Key` returns the record itself, which prints its `Key`,
-which prints its `Key`: the first log line or debugger view of the value overflows the stack. Implement `Key`
-explicitly, so it belongs to the interface only:
+which prints its `Key`: the first log line or debugger view of the value overflows the stack. Declare the key with
+`[IndexKey]` on the type: the generator implements `Key` explicitly, so it belongs to the interface only:
 
 ```csharp
-public readonly record struct Market(long Id) : IActor<Market>
-{
-    Market IIndexed<Market>.Key => this;
-}
+[IndexKey] public readonly partial record struct Market(long Id) : IComponent;
 ```
 
 Caught by [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix). The [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) shows
@@ -240,7 +237,8 @@ public class Throttle : EcsSystem
 {
     [ForEach] static void Apply(ref Velocity v, ref Speed max)   // max is only read
     {
-        v = new Velocity(Math.Min(v.X, max.Value), Math.Min(v.Y, max.Value));
+        v.X = Math.Min(v.X, max.Value);
+        v.Y = Math.Min(v.Y, max.Value);
     }
 }
 ```
@@ -253,7 +251,8 @@ public class Throttle : EcsSystem
 {
     [ForEach] static void Apply(ref Velocity v, in Speed max)
     {
-        v = new Velocity(Math.Min(v.X, max.Value), Math.Min(v.Y, max.Value));
+        v.X = Math.Min(v.X, max.Value);
+        v.Y = Math.Min(v.Y, max.Value);
     }
 }
 ```
@@ -494,12 +493,13 @@ attribute: C# refuses a type parameter there (`[With<In<TSelf>>]` is CS8968). Th
 `ISystemGroupWithout<T>` can name it, so one generic interface makes each actor type its own key component, group and
 filter:
 
-```csharp
+```csharp doccheck=alone
+public struct In<TActor> : IComponent;
 public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;
 
-public readonly record struct Shop(long Id) : IActor<Shop> { Shop IIndexed<Shop>.Key => this; }
-public readonly record struct Guild(long Id) : IActor<Guild> { Guild IIndexed<Guild>.Key => this; }
+[IndexKey] public readonly partial record struct Shop(long Id) : IActor<Shop>;
+[IndexKey] public readonly partial record struct Guild(long Id) : IActor<Guild>;
 ```
 
 No rule catches it. More in [group filters](/en/docs/guide/systems#group-filters).
@@ -546,7 +546,7 @@ Caught by the C# compiler. More in [ref and await](/en/docs/guide/refs-and-await
 ### Writing an indexed key through a `ref` [#indexed-by-ref]
 
 ```csharp
-public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public partial record struct Zone([IndexKey] int Id) : IComponent;
 ```
 
 ```csharp doccheck=expect-EECS015
@@ -572,7 +572,7 @@ Caught by [EECS015](/en/docs/guide/analyzer#eecs015). More in
 ### Moving a unique key to its new holder first [#rekey-order]
 
 ```csharp
-public record struct Seat(int Number) : IComponent, IUniqueIndexed<int> { public int Key => Number; }
+public partial record struct Seat([UniqueKey] int Number) : IComponent;
 ```
 
 ```csharp

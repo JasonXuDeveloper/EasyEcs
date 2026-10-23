@@ -34,26 +34,51 @@ icon: Boxes
 
 ### 标记组件 [#mark-the-component]
 
-`IGroup.Group` 就是实体所属的分区。
+`[Group]` 标出表示实体所属分区的成员，类型是 `int` 或以 `int` 为底层类型的枚举：生成器给组件加上 `IGroup`，并显式实现返回该成员的
+`Group`。类型上的 `[GroupBy]` 让每个 World 都按它分组。
+
+<Tabs items={['你写的', '生成器写的']}>
+<Tab value="你写的">
 
 ```csharp
-public record struct Zone(int Id) : IComponent, IGroup
-{
-    public int Group => Id;
-}
+[GroupBy] public partial record struct Zone([Group] int Id) : IComponent;
 ```
+
+</Tab>
+<Tab value="生成器写的">
+
+```csharp doccheck=skip
+partial record struct Zone : IGroup
+{
+    readonly int IGroup.Group => Id;
+}
+// 另外为每个 World 注册：从第一张包含 Zone 的表起 GroupBy<Zone>()
+```
+
+</Tab>
+</Tabs>
 
 </Step>
 <Step>
 
 ### 初始化时分组 [#group-by]
 
-`GroupBy<T>()` 把已有实体挪到各自分组的表里，之后的写入也都会放到正确的位置：带着 `Zone` 创建的实体直接进入所属分组的表。
+有了 `[GroupBy]`，每个 World 从第一张包含该组件的表起就按它分组：带着 `Zone` 创建的实体直接进入所属分组的表，测试或工具新建的 World
+也不会忘了调用设置。只有部分 World 才分组的组件只标 `[Group]`，由这些 World 调用 `world.GroupBy<T>()`：它把已有实体挪到各自分组的表里，
+之后的写入也都会放到正确的位置。
 
 ```csharp
-world.GroupBy<Zone>();                                         // 只调用一次，最好在 World 填满之前
-for (int i = 0; i < 9; i++) world.CreateEntity(new Zone(i % 3), new Health(10 * i));
+for (int i = 0; i < 9; i++) world.CreateEntity(new Zone(i % 3), new Health(10 * i));   // 创建时就已分组
 ```
+
+```csharp
+public partial record struct Match([Group] int Id) : IComponent;   // 只在 World 要求时分组
+
+world.GroupBy<Match>();                                        // 只调用一次，最好在 World 填满之前
+```
+
+`[GroupBy]` 标在不是 `IGroup` 组件的类型上，或 `[Group]` 标在不是 `int` 或 `int` 枚举的成员上，都会被报告
+（[EECS068](/zh/docs/guide/analyzer#eecs068)、[EECS036](/zh/docs/guide/analyzer#eecs036)）。
 
 </Step>
 <Step>
@@ -135,9 +160,9 @@ public class RegenerateActiveZone : EcsSystem
 | 对分组组件 `Set`、`SetAll` | 新值的分组（值变了才拷贝一次行） |
 | `Instantiate(prefab)`、`Clone()`、`LoadEntities`、`MoveEntities` | 拷贝过来的值所在的分组 |
 | `Restore(snapshot)` | 快照里原来的分组 |
-| `Load(bytes)` | 按本 World 的 `GroupBy` 调用重新分组（存档里不保存分组设置） |
+| `Load(bytes)` | 按标了 `[GroupBy]` 的类型和本 World 的 `GroupBy` 调用重新分组（存档里不保存分组设置） |
 
-在从未调用过 `GroupBy<T>()` 的 World 里，所有表都属于 0 组：`InGroup<T>(0)` 匹配所有带 `T` 的实体。
+在没按 `T` 分组的 World 里（没有 `[GroupBy]`，也没调用 `GroupBy<T>()`），所有表都属于 0 组：`InGroup<T>(0)` 匹配所有带 `T` 的实体。
 
 ## 完整例子 [#full-example]
 
@@ -150,11 +175,8 @@ public class RegenerateActiveZone : EcsSystem
 ```csharp title="Components.cs" doccheck=example
 using EasyEcs;
 
-// IGroup：World 把每个区域的实体放在各自的表里。
-public record struct Zone(int Id) : IComponent, IGroup
-{
-    public int Group => Id;
-}
+// [GroupBy]：每个 World 都把每个区域的实体放在各自的表里。
+[GroupBy] public partial record struct Zone([Group] int Id) : IComponent;
 
 public record struct Health(int Value) : IComponent;
 
@@ -241,8 +263,6 @@ using EasyEcs;
 
 using var world = new World();
 
-// 在 World 装满之前分组：之后每个实体都直接落进所在区域的表。
-world.GroupBy<Zone>();
 world.SetActiveZone(Id: 1);
 world.AddSystem<RegenerateActiveZone>();
 
@@ -279,7 +299,7 @@ zone 2: 0 units, 0 hp
 
 ## 怎么用得快 [#how-to-use-it-fast]
 
-- **初始化时分组。** 在满的 World 上调用 `GroupBy<T>()` 要把每个实体挪一次；在空 World 上没有开销。
+- **初始化时分组。** `[GroupBy]` 从第一张表起就分组；在满的 World 上调用 `GroupBy<T>()` 要把每个实体挪一次，在空 World 上没有开销。
 - **把过滤条件提出来。** 每个热点分组一个 `static readonly` 过滤条件，或者像上面那样每次更新建一个。
 - **要整组遍历就分组，要按键查找就建索引。** 整组遍历一个大分组时分组更快；一个键下只有几个实体时索引更快。
 
@@ -293,7 +313,7 @@ zone 2: 0 units, 0 hp
 - **内存：** 每种组件组合、每个分组各一张表，各带列的富余容量。成千上万个小分组会把 World 切得很碎，这种情况该用索引。
 - **换分组：** 一次行拷贝（和添加一个表里没有列的组件一样）。
 - **遍历分组：** 只碰这个分组自己的行，不用逐行比较值。
-- **没调用 `GroupBy` 时：** World 没按某个 `IGroup` 组件分组，对它 `Set` 只多一次判空；不是 `IGroup` 的组件连这一步都省了
+- **没有分组时：** World 没按某个 `IGroup` 组件分组，对它 `Set` 只多一次判空；不是 `IGroup` 的组件连这一步都省了
   （这个判断是常量，JIT 直接消掉）。不管分没分组，这个组件都只能用 `Set` 写。
 
 ## 常见陷阱 [#pitfalls]

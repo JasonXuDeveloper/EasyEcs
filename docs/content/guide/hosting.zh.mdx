@@ -145,7 +145,8 @@ public class ThinkSystem : EcsSystem
         float dx = wander.TargetX - position.X;
         float dy = wander.TargetY - position.Y;
         float length = MathF.Sqrt(dx * dx + dy * dy) + 0.001f;
-        velocity = new Velocity(dx / length, dy / length);
+        velocity.X = dx / length;
+        velocity.Y = dy / length;
     }
 }
 ```
@@ -220,35 +221,31 @@ public sealed class ReceiveSpawns(ChannelReader<SpawnRequest> requests) : EcsSys
 停机时，在最后一个 tick 之后完成写入端（`requests.Writer.TryComplete()`），再答复通道里剩下的请求。之后再写入的处理代码会立刻
 拿到 `ChannelClosedException`，而不是等一个永远不来的答复（见[完整例子](#full-example)的 `Arena.RunAsync`）。
 
-针对已有实体的请求带上它的 `EntityId`。系统找到这个实体，用 [`entity.Run`](/zh/docs/guide/queries#run-on-one-entity) 在它上面
-跑一个 job：job 的所有组件只查找一次，再用过滤条件排除死掉的单位。实体已经不在、过滤条件不通过或者缺组件时，`Run` 返回 `false`，
-这正好就是答复：
+针对已有实体的请求带上它的 `EntityId`。系统找到这个实体，在它上面跑一个
+[`[ForEntity]`](/zh/docs/guide/queries#run-on-one-entity) 方法：方法的所有组件只查找一次，再用过滤条件排除死掉的单位。实体已经不在、
+过滤条件不通过或者缺组件时，入口方法返回 `false`，这正好就是答复：
 
 ```csharp
 using System.Threading.Channels;
 
 public readonly record struct HealRequest(EntityId Unit, int Amount, TaskCompletionSource<bool> Reply);
 
-public struct Heal : IForEachEntity<Health>
+public static class Heals
 {
-    public int Amount;
-    public static int WriteMask => 1;
-
-    public void Execute(Entity unit, ref Health health) => health.Value += Amount;
+    [ForEntity, Without<Dead>]                                         // 死掉的单位被拒绝，就像遍历会跳过它
+    static void Heal(ref Health health, int amount) => health.Value += amount;
 }
 
 public sealed class ReceiveHeals(ChannelReader<HealRequest> requests) : EcsSystem
 {
-    private static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>();   // 只建一次
     private readonly ChannelReader<HealRequest> _requests = requests;
 
     protected override void OnUpdate()
     {
         while (_requests.TryRead(out var request))
         {
-            var heal = new Heal { Amount = request.Amount };
             bool healed = World.TryGetEntity(request.Unit, out var unit)
-                && unit.Run<Health, Heal>(ref heal, Alive);                // false：不在了、死了或没有 Health
+                && Heals.Heal(unit, request.Amount);                       // false：不在了、死了或没有 Health
             request.Reply.TrySetResult(healed);
         }
     }
@@ -441,9 +438,8 @@ public class MovementSystem : EcsSystem
     [ForEach]
     static void Move(ref Position position, in Velocity velocity, in Clock clock)
     {
-        position = new Position(
-            position.X + velocity.X * clock.DeltaTime,
-            position.Y + velocity.Y * clock.DeltaTime);
+        position.X += velocity.X * clock.DeltaTime;
+        position.Y += velocity.Y * clock.DeltaTime;
     }
 }
 

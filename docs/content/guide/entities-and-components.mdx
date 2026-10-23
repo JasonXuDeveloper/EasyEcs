@@ -173,15 +173,13 @@ To find every entity that points at a target, make the link an indexed component
 
 #### Find an entity by a unique key [#unique-key]
 
-A key that names one entity (an account id, a session token) is a component that implements `IUniqueIndexed<TKey>`.
+A key that names one entity (an account id, a session token) is a component with `[UniqueKey]` on it (it implements
+`IUniqueIndexed<TKey>`).
 Its index exists from the first entity that has it, a write that would give a second entity the same key throws
 before it changes anything, and the generated `world.XIndex` finds the one entity:
 
 ```csharp
-public record struct Account(long Id) : IComponent, IUniqueIndexed<long>
-{
-    public long Key => Id;
-}
+public partial record struct Account([UniqueKey] long Id) : IComponent;
 ```
 
 ```csharp
@@ -207,6 +205,7 @@ The generic API works for any component type; the [generated members](#generated
 | `Entity Set(in T1 … in Tn)` | Adds or replaces 1 to 9 values, with at most one row move; chainable. |
 | `bool SetIfChanged<T>(in T value)` | Sets `value` like `Set` unless the entity already has it: false then, with nothing written, stamped or indexed ([only when the value changed](/en/docs/guide/change-tracking#set-if-changed)). |
 | `ref T GetOrAdd<T>()` | A ref, adding `default` first if missing; an existing value is kept. |
+| `ref T GetOrAdd<T>(in T value)` | A ref, adding `value` first if missing (its key indexed and its group joined, as `Set` does); an existing value is kept. |
 | `Entity Remove<T1..Tn>()` | Removes 1 to 9 components; missing ones are ignored; chainable. |
 
 ```csharp
@@ -214,7 +213,7 @@ var hero = world.CreateEntity(new Position(0, 0), new Health(100), new Name("Ayl
 hero.Set(new Armor(3), new Position(5, 5));        // one call: shorter than two, same cost
 ref var hp = ref hero.TryGetRef<Health>(out bool has);
 if (has) hp.Value -= 10;                           // one lookup, written in place
-ref var shield = ref hero.GetOrAdd<Armor>();       // kept: Armor(3)
+ref var shield = ref hero.GetOrAddArmor(1);        // kept: Armor(3); without one, Armor(1)
 hero.Remove<Armor, Name>();
 bool both = hero.Has<Position, Health>();
 ```
@@ -230,11 +229,11 @@ the same.
 
 | Declared | Generated | Same as |
 | --- | --- | --- |
-| `record struct Position(float X, float Y) : IComponent` | `e.Position` (`ref`), `e.HasPosition`, `e.TryGetPosition(out p)`, `e.GetOrAddPosition()`, `e.SetPosition(x, y)`, `e.RemovePosition()` | `Get`, `Has`, `TryGet`, `GetOrAdd`, `Set(new Position(x, y))`, `Remove` |
+| `record struct Position(float X, float Y) : IComponent` | `e.Position` (`ref`), `e.HasPosition`, `e.TryGetPosition(out p)`, `e.GetOrAddPosition()`, `e.GetOrAddPosition(x, y)`, `e.SetPosition(x, y)`, `e.RemovePosition()` | `Get`, `Has`, `TryGet`, `GetOrAdd`, `GetOrAdd(new Position(x, y))`, `Set(new Position(x, y))`, `Remove` |
 | a tracked component (`Armor : ITracked`) | `e.Armor` is `ref readonly`; `e.WriteArmor()` returns the `ref`; `e.SetArmorIfChanged(v)` | `Read`; `Get` (stamped as written); `SetIfChanged(new Armor(v))` |
-| an indexed component (`Zone : IIndexed<int>`) | `e.Zone` is `ref readonly`, no `GetOrAddZone` or `WriteZone`; `e.SetZoneIfChanged(id)`; `world.ZoneIndex` | `Read`; `SetIfChanged(new Zone(id))`; `world.Index<Zone, int>()` |
-| a unique component (`Account : IUniqueIndexed<long>`) | as an indexed one; `world.AccountIndex.Get(key)`, `world.AccountIndex.TryGet(key, out e)` | the [one entity of a key](#unique-key) |
-| a grouped component (`Team : IGroup`) | `e.Team` is `ref readonly`, no `GetOrAddTeam` or `WriteTeam`; `e.SetTeamIfChanged(…)`; `filter.InTeam(group)` | `Read`; `SetIfChanged`; `filter.InGroup<Team>(group)` ([groups](/en/docs/guide/groups)) |
+| an indexed component (`[IndexKey]`, `Zone : IIndexed<int>`) | `e.Zone` is `ref readonly`, no `GetOrAddZone` or `WriteZone`; `e.SetZoneIfChanged(id)`; `world.ZoneIndex` | `Read`; `SetIfChanged(new Zone(id))`; `world.Index<Zone, int>()` |
+| a unique component (`[UniqueKey]`, `Account : IUniqueIndexed<long>`) | as an indexed one; `world.AccountIndex.Get(key)`, `world.AccountIndex.TryGet(key, out e)` | the [one entity of a key](#unique-key) |
+| a grouped component (`[Group]`, `Team : IGroup`) | `e.Team` is `ref readonly`, no `GetOrAddTeam` or `WriteTeam`; `e.SetTeamIfChanged(…)`; `filter.InTeam(group)` | `Read`; `SetIfChanged`; `filter.InGroup<Team>(group)` ([groups](/en/docs/guide/groups)) |
 | a tag (`struct Dead : IComponent`) | `e.IsDead`, `e.SetDead()`, `e.RemoveDead()` | `Has`, `Set(new Dead())`, `Remove` |
 | any component with fields, except a cleanup component | `e.DisableHealth()`, `e.EnableHealth()`, `e.IsHealthDisabled` | [`Disable`](/en/docs/guide/cleanup-and-disable) / [`Enable`](/en/docs/guide/cleanup-and-disable) |
 | a buffer element some code names as `DynamicBuffer<Loot>` | `e.Loot` (`ref readonly`), `e.HasLoot`, `e.WriteLoot()`, `e.GetOrAddLoot()`, `e.RemoveLoot()` | `Read`, `Has`, `Get`, `GetOrAdd`, `Remove` of `DynamicBuffer<Loot>` ([dynamic buffers](/en/docs/guide/dynamic-buffers)) |
@@ -271,6 +270,40 @@ bool changed = hero.SetArmorIfChanged(6);                  // false: Armor is 6 
   another struct of its namespace (`Npc.State` and `Player.State`) gets none at all: both would get `entity.State`.
 - EasyEcs's own `ChildOf` has them too (`entity.ChildOf`, `SetChildOf(parent)`, `world.ChildOfIndex`, ...; no
   `DisableChildOf`), and the `Retired` tag has `entity.IsRetired`.
+
+### Declared by attributes: generated parts [#declared-parts]
+
+What a component means beyond its fields (the key it is indexed by, the field its tables are grouped by, how a
+reduction combines) is an attribute on the declaration. The generator writes the interface members in a part of the
+type, so the type is `partial` ([EECS062](/en/docs/guide/analyzer#eecs062)); the setup attributes are registered
+once, and every world follows them from its first table holding the type.
+
+| Attribute | On | What it gives | Page |
+| --- | --- | --- | --- |
+| `[IndexKey]` | a field, a property or a positional parameter; or the struct (the whole value is the key) | `IIndexed<TKey>` and its `Key`: a value index, `world.XIndex` | [Value indexes](/en/docs/guide/indexes-and-relations#value-indexes) |
+| `[UniqueKey]` | the same | `IUniqueIndexed<TKey>`: one entity per key | [Unique keys](/en/docs/guide/indexes-and-relations#unique-keys) |
+| `[Group]` | an `int` or enum member | `IGroup` and its `Group`: tables split by the value | [Groups](/en/docs/guide/groups#mark-the-component) |
+| `[GroupBy]` | an `IGroup` struct | every world groups by it, with no `GroupBy<T>()` call | [Groups](/en/docs/guide/groups#group-by) |
+| `[WhenTargetDestroyed(policy)]` | a relation, or a component indexed by an `EntityId` | what destroying a target does to the links, in every world | [Target policies](/en/docs/guide/indexes-and-relations#target-policies) |
+| `[NotSaved]` | a component or a singleton | every save leaves it out; it needs no formatter | [Saves](/en/docs/guide/saves#not-saved) |
+| `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]`, `[Any]` | every field of a singleton | `IReduction<T>`: `Identity` and `Combine`, field by field | [Reductions](/en/docs/guide/threading#reductions) |
+
+```csharp tab="You write"
+public partial record struct Owner([IndexKey] EntityId Of) : IComponent;
+```
+
+```csharp tab="The generator writes" doccheck=skip
+// Generated (Owner.….Part.g.cs, global:: dropped)
+public partial record struct Owner : IIndexed<EntityId>
+{
+    readonly EntityId IIndexed<EntityId>.Key => Of;
+}
+```
+
+A key computed from several members is still written by hand (`public (int, int) Key => (X, Y);`), and so is a
+reduction whose fields combine together. A hand-written `Key` that returns one member is
+[EECS067](/en/docs/guide/analyzer#eecs067), with a code fix to the attribute; a setup attribute on a type it does
+not fit is [EECS068](/en/docs/guide/analyzer#eecs068).
 
 ### Tags [#tags]
 

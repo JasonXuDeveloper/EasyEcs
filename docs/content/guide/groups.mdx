@@ -36,27 +36,52 @@ memory, at the speed of a plain query over a smaller world.
 
 ### Mark the component [#mark-the-component]
 
-`IGroup.Group` is the partition the entity belongs to.
+`[Group]` marks the member that names the partition the entity belongs to, an `int` or an enum of `int`: the
+generator adds `IGroup` with an explicit `Group` returning it. `[GroupBy]` on the type groups every world by it.
+
+<Tabs items={['You write', 'The generator writes']}>
+<Tab value="You write">
 
 ```csharp
-public record struct Zone(int Id) : IComponent, IGroup
-{
-    public int Group => Id;
-}
+[GroupBy] public partial record struct Zone([Group] int Id) : IComponent;
 ```
+
+</Tab>
+<Tab value="The generator writes">
+
+```csharp doccheck=skip
+partial record struct Zone : IGroup
+{
+    readonly int IGroup.Group => Id;
+}
+// and, registered for every world: GroupBy<Zone>() from its first table holding a Zone
+```
+
+</Tab>
+</Tabs>
 
 </Step>
 <Step>
 
 ### Group the world at setup [#group-by]
 
-`GroupBy<T>()` moves the existing entities to their groups' tables and keeps every later write in place: entities
-created with a `Zone` go straight to their group's table.
+With `[GroupBy]`, every world groups by the component from its first table holding it: entities created with a
+`Zone` go straight to their group's table, and there is no setup call to forget in a world a test or a tool makes. A
+component that only some worlds group by keeps `[Group]` alone, and those worlds call `world.GroupBy<T>()`, which
+moves the entities they already hold to their groups' tables and keeps every later write in place.
 
 ```csharp
-world.GroupBy<Zone>();                                         // once, before the world fills
-for (int i = 0; i < 9; i++) world.CreateEntity(new Zone(i % 3), new Health(10 * i));
+for (int i = 0; i < 9; i++) world.CreateEntity(new Zone(i % 3), new Health(10 * i));   // grouped as they are created
 ```
+
+```csharp
+public partial record struct Match([Group] int Id) : IComponent;   // grouped only where a world asks
+
+world.GroupBy<Match>();                                        // once, before the world fills
+```
+
+`[GroupBy]` on a type that is not an `IGroup` component, or `[Group]` on a member that is not an `int` or an `int`
+enum, is reported ([EECS068](/en/docs/guide/analyzer#eecs068), [EECS036](/en/docs/guide/analyzer#eecs036)).
 
 </Step>
 <Step>
@@ -141,9 +166,9 @@ object reference.
 | `Set`, `SetAll` of the grouped component | the new value's group (one row copy if it changed) |
 | `Instantiate(prefab)`, `Clone()`, `LoadEntities`, `MoveEntities` | the group of the copied value |
 | `Restore(snapshot)` | the groups the snapshot had |
-| `Load(bytes)` | the groups of this world's `GroupBy` calls (a save holds no groupings) |
+| `Load(bytes)` | the groups of the `[GroupBy]` types and of this world's `GroupBy` calls (a save holds no groupings) |
 
-In a world that never called `GroupBy<T>()`, every table holds group 0: `InGroup<T>(0)` matches every entity with `T`.
+In a world that is not grouped by `T` (no `[GroupBy]`, no `GroupBy<T>()` call), every table holds group 0: `InGroup<T>(0)` matches every entity with `T`.
 
 ## Full example [#full-example]
 
@@ -157,11 +182,8 @@ zone, and three units walk from zone 2 into zone 1. Put the files in a console p
 ```csharp title="Components.cs" doccheck=example
 using EasyEcs;
 
-// IGroup: the world keeps the entities of each zone in tables of their own.
-public record struct Zone(int Id) : IComponent, IGroup
-{
-    public int Group => Id;
-}
+// [GroupBy]: every world keeps the entities of each zone in tables of their own.
+[GroupBy] public partial record struct Zone([Group] int Id) : IComponent;
 
 public record struct Health(int Value) : IComponent;
 
@@ -248,8 +270,6 @@ using EasyEcs;
 
 using var world = new World();
 
-// Group the world before it fills: every entity then lands in its zone's tables directly.
-world.GroupBy<Zone>();
 world.SetActiveZone(Id: 1);
 world.AddSystem<RegenerateActiveZone>();
 
@@ -287,7 +307,8 @@ is empty after they leave.
 
 ## How to use it fast [#how-to-use-it-fast]
 
-- **Group at setup.** `GroupBy<T>()` on a full world moves every entity once; on an empty one it costs nothing.
+- **Group at setup.** `[GroupBy]` groups from the first table; `GroupBy<T>()` on a full world moves every entity once,
+  on an empty one it costs nothing.
 - **Hoist the filters.** One `static readonly` filter per hot group, or a filter per update as above.
 - **Group by what you walk, index by what you look up.** A group wins when you walk all of a big group; an index wins
   when a key holds a handful of entities.
@@ -303,7 +324,7 @@ group, as a value index and as a plain component a scan compares (`GroupBenchmar
   tiny groups fragment the world: that is a job for an index.
 - **Changing group:** one row copy (like adding a component the table has no column for).
 - **Walking a group:** the group's own rows only; no per-row test of the value.
-- **Without `GroupBy`:** a `Set` of an `IGroup` component in a world that never grouped by it costs one null check
+- **Without a grouping:** a `Set` of an `IGroup` component in a world that never grouped by it costs one null check
   more; components that are not `IGroup` skip even that (the test is a constant the JIT folds away). The component is
   still written only with `Set`, grouped or not.
 

@@ -158,7 +158,11 @@ public struct Bullet : IComponent;
 public class MoveBullets : EcsSystem
 {
     [ForEach, Without<Inactive>]                             // the systems that skip it say so // [!code highlight]
-    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+    static void Move(ref Position p, in Velocity v)
+    {
+        p.X += v.X;
+        p.Y += v.Y;
+    }
 }
 ```
 

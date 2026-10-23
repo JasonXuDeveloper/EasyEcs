@@ -163,7 +163,8 @@ first exception of a stage is rethrown on the calling thread after the stage; wi
 `[ForEach(Parallel = true)]` splits one method's rows into chunks across threads. It must make no structural change,
 run per entity and write no singleton ([EECS010](/en/docs/guide/analyzer#eecs010)); a total over the rows is a
 [`Reduce<T>`](#reductions), a row's working list a [`Scratch<T>`](#scratch), a read of another entity a
-[`Lookup<T>`](#lookups):
+[`Lookup<T>`](#lookups), records for a later system an [`Emit<T>`](#emit), random numbers an
+[`EntityRandom`](#entity-random):
 
 ```csharp
 public record struct Regen(int PerTick) : ISingletonComponent;
@@ -298,9 +299,10 @@ combined and replace singleton `T`.
 <Steps>
 <Step>
 
-**Declare the result** as a singleton that implements `IReduction<T>` for itself: `Identity`, the value that changes
-nothing it is combined with (0 for a sum, `float.MaxValue` for a minimum), and `Combine`, which must be associative.
-It need not be commutative: partial results are combined in row order.
+**Declare the result** as a `partial` singleton with one attribute per field that says how it combines: `[Sum]`,
+`[Product]`, `[Min]`, `[Max]` (numbers), `[All]`, `[Any]` (`bool`). The generator writes its `IReduction<T>`:
+`Identity`, the value that changes nothing it is combined with (0 for a sum, +∞ for a minimum), and `Combine`, field
+by field.
 
 </Step>
 <Step>
@@ -319,31 +321,42 @@ it.
 </Step>
 </Steps>
 
-```csharp
-public struct Extent : ISingletonComponent, IReduction<Extent>
+```csharp tab="You write"
+public partial struct Extent : ISingletonComponent
 {
-    public int Count;
-    public float MinX, MaxX;
+    [Sum] public int Count;
+    [Min] public float MinX;
+    [Max] public float MaxX;
+}
+```
 
-    public static Extent Identity => new() { MinX = float.MaxValue, MaxX = float.MinValue };
+```csharp tab="The generator writes" doccheck=skip
+// Generated (Extent.….Part.g.cs, global:: dropped): the reduction, field by field.
+public partial struct Extent : IReduction<Extent>
+{
+    public static Extent Identity => new Extent
+    {
+        Count = 0, MinX = float.PositiveInfinity, MaxX = float.NegativeInfinity,
+    };
 
-    public static Extent Combine(Extent left, Extent right) => new()
+    public static Extent Combine(Extent left, Extent right) => new Extent
     {
         Count = left.Count + right.Count,
-        MinX = MathF.Min(left.MinX, right.MinX),
-        MaxX = MathF.Max(left.MaxX, right.MaxX),
+        MinX = Math.Min(left.MinX, right.MinX),
+        MaxX = Math.Max(left.MaxX, right.MaxX),
     };
 }
+```
 
+```csharp
 public class MeasureCrowd : EcsSystem
 {
     [ForEach(Parallel = true)]
     static void Measure(in Position position, ref Reduce<Extent> extent)
     {
-        ref var e = ref extent.Value;   // this chunk's partial result
-        e.Count++;
-        e.MinX = MathF.Min(e.MinX, position.X);
-        e.MaxX = MathF.Max(e.MaxX, position.X);
+        extent.Value.Count++;                                        // this chunk's partial result
+        extent.Value.MinX = MathF.Min(extent.Value.MinX, position.X);
+        extent.Value.MaxX = MathF.Max(extent.Value.MaxX, position.X);
     }
 }
 ```
@@ -355,6 +368,13 @@ var crowd = world.Extent;   // the combined result of every chunk
 Console.WriteLine($"{crowd.Count} units between x = {crowd.MinX} and x = {crowd.MaxX}");
 ```
 
+- **By hand when it is not field by field.** A result whose fields combine together (the busiest cell and its count,
+  a top three) implements `IReduction<T>` itself: `Identity` and an associative `Combine`, which need not be
+  commutative (partial results are combined in row order). An attribute reduction must give every field an
+  attribute ([EECS064](/en/docs/guide/analyzer#eecs064)), and its type must be `partial`
+  ([EECS062](/en/docs/guide/analyzer#eecs062)); a hand-written one that the attributes could declare is
+  [EECS065](/en/docs/guide/analyzer#eecs065), and an `Identity` that changes what it is combined with (0 for a
+  minimum) is [EECS066](/en/docs/guide/analyzer#eecs066).
 - **Exact or reproducible.** Integer results are exact on every run and thread count. A floating-point sum is rounded
   per chunk, so it depends on where chunks begin: with a fixed [`ChunkRows`](#chunk-rows) it is the same on every run
   and for any thread count (the tests check 1, 2, 3, 4 and 8 threads), but not bit for bit the result of the same
@@ -490,10 +510,7 @@ public class ChaseSystem : EcsSystem
 ```
 
 ```csharp
-public record struct Login(int Number) : IComponent, IUniqueIndexed<int>
-{
-    public int Key => Number;
-}
+public partial record struct Login([UniqueKey] int Number) : IComponent;
 
 public record struct Asks(int Number) : IComponent;
 public record struct Answer(EntityId Login) : IComponent;
@@ -524,6 +541,160 @@ public class MatchLogins : EcsSystem
 
 {/* TODO(bench): <BenchTable bench="LookupBenchmark" /> once bench.json holds it. */}
 
+#### Records out of a pass: `Emit<T>` [#emit]
+
+A pass often produces records for a later system: the hits an attack system finds for the system that applies
+damage, the packets of an area of interest, the spawns a rule asks for. A parallel method may not append to a shared
+list ([EECS060](/en/docs/guide/analyzer#eecs060)) or create entities ([EECS010](/en/docs/guide/analyzer#eecs010)).
+An `Emit<T>` parameter, taken by value, appends to its chunk's own list, with no lock and no atomic; when the pass
+ends, the lists are appended to singleton `Emitted<T>` in chunk order, which is row order: Unity's `NativeStream`, a
+GPU's stream compaction.
+
+<Callout type="idea" title="Use it for">
+  Records a later system applies or sends: hits and damage, area-of-interest packets, log lines, requests the owner
+  thread turns into entities. Any number per row, zero included, in parallel and serial methods alike.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  A result per entity: write it into a component of the row. A total over the rows: a [`Reduce<T>`](#reductions).
+  Records the same pass must read: they reach `Emitted<T>` only when the pass ends
+  ([EECS070](/en/docs/guide/analyzer#eecs070)).
+</Callout>
+
+<Steps>
+<Step>
+
+**Declare the record** as a plain struct: it is data in a list, not a component.
+
+</Step>
+<Step>
+
+**Take an `Emit<T>` parameter** and call `Add(record)` (or `AddRange(records)`) on the rows that produce one.
+
+</Step>
+<Step>
+
+**Apply and clear** in a later system: it reads `Emitted<T>.Items` (a [dynamic buffer](/en/docs/guide/dynamic-buffers)),
+applies the records, and clears them, so nothing is applied twice.
+
+</Step>
+</Steps>
+
+```csharp
+public record struct Hit(EntityId Target, int Amount);   // a record, not a component
+public record struct Attack(int Power) : IComponent;
+public record struct Aim(EntityId Target) : IComponent;
+
+public class StrikeSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits) =>
+        hits.Add(new Hit(aim.Target, attack.Power));   // this chunk's list // [!code highlight]
+}
+
+public class ApplyHitsSystem : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+        foreach (ref readonly var hit in hits.AsReadOnlySpan())
+            if (World.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
+        hits.Clear();   // applied once
+    }
+}
+```
+
+- **Row order on any thread count.** The records come out in the order of the same method with `Parallel = false`,
+  on every run, so a replay or a lockstep peer applies them in the same order.
+- **Passes append.** Several systems may emit one `T` in an update (melee and spells both emit damage), each in its
+  turn; the system that applies the records clears them. The emitting system is scheduled as a writer of
+  `Emitted<T>`, so a reader waits for it, and a method that both emits and takes `Emitted<T>`, or emits one type
+  through two parameters, is [EECS070](/en/docs/guide/analyzer#eecs070).
+- **Applying in parallel.** The records are a list: [`world.ForParallel`](#for-parallel) runs a job over its
+  elements in chunks, for work per record that writes only the record (a roll, an encoding).
+- **Saved like a buffer.** Snapshots and saves copy the records left in `Emitted<T>`.
+- **What it costs:** an append per record into the chunk's list. The lists come from a pool of their own, kept at the
+  largest size a chunk needed, so steady passes allocate nothing; per pass, one copy of each chunk's list into
+  `Emitted<T>`.
+
+Records appended to a singleton's list by hand, row by row, keep the method on one thread:
+[EECS089](/en/docs/guide/analyzer#eecs089) points them to `Emit<T>`. `EmitBenchmark` compares a parallel and a serial
+`Emit<T>` with a component written per row and scanned after, a `ConcurrentQueue` and an `Interlocked` cursor into a
+shared array ([D78](/en/docs/decisions#d78-emit)).
+
+{/* TODO(bench): <BenchTable bench="EmitBenchmark" /> once bench.json holds it. */}
+
+#### Random numbers in a pass: `EntityRandom` [#entity-random]
+
+`Random.Shared` is safe on any thread, but which row draws which number depends on the order the rows run in, so a
+parallel pass draws differently on every run; a seeded `new Random(seed)` is not safe on several threads at all.
+`EntityRandom` is a singleton holding a seed and a tick, and each number is a pure function of (seed, entity, tick,
+stream), with no state to advance (cuRAND's Philox, a counter-based generator): the same on every run, for any thread
+count and any order the rows run in.
+
+<Callout type="idea" title="Use it for">
+  Randomness in simulation code that must repeat: wandering, spawn rolls, loot, critical hits, AI choices. Replays,
+  lockstep peers, a server and its tests that must agree, and parallel methods that must give the results of a serial
+  run.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Secrets: tokens, keys, shuffles a player must not predict. It is a hash, not a cryptographic generator: use
+  `RandomNumberGenerator`. Randomness nobody needs to repeat outside a pass (a jittered retry delay): `Random.Shared`
+  is fine there.
+</Callout>
+
+```csharp
+public record struct Wander(float X, float Y) : IComponent;
+
+public class WanderSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Pick(ref Wander wander, Entity entity, in EntityRandom random)
+    {
+        // One stream per call site: 0 for x, 1 for y.
+        wander.X = random.Range(entity.Id, 0, -1f, 1f);
+        wander.Y = random.Range(entity.Id, 1, -1f, 1f);
+    }
+}
+
+// The system that advances the simulation's clock advances the random tick with it.
+[UpdateAfter<WanderSystem>]
+public class TickRandomSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.EntityRandom.Tick++;
+}
+```
+
+```csharp
+world.SetEntityRandom(Seed: 42, Tick: 0);   // a different seed, a different sequence for every entity
+world.AddSystem<WanderSystem>();
+world.AddSystem<TickRandomSystem>();
+```
+
+| Member | Returns |
+| --- | --- |
+| `random.Bits(entity, stream)` | 64 random bits |
+| `random.Float(entity, stream)` | a `float` in [0, 1), a multiple of 2⁻²⁴ |
+| `random.Range(entity, stream, min, max)` | an `int` or a `float` in [min, max) |
+| `random.Chance(entity, stream, probability)` | `true` with that probability (0 never, 1 always) |
+| `EntityRandom.Bits(seed, entity, tick, stream)` and the other static members | the same, with the four inputs given: a seed of your own, the tick of your clock |
+
+- **One stream per draw.** The same four inputs give the same number, so two draws of one stream for one entity in
+  one tick are equal: give each call site its own stream (0, 1, 2, ...), and vary it in a loop
+  ([EECS088](/en/docs/guide/analyzer#eecs088), with a code fix that takes the next free stream).
+- **Advance the tick once per step.** A tick that does not move draws the same numbers again; the numbers of an entity
+  depend on its id (index and version), so a recycled id draws a new sequence.
+- **Pure and allocation-free.** Four rounds of SplitMix64's finalizer: a draw is a few multiplications, no state is
+  written, so the method keeps its reads (`in EntityRandom`) and stays parallel.
+- **What the analyzer checks:** `Random.Shared`, `new Random()` and a `System.Random` field in a `[ForEach]` method
+  are [EECS071](/en/docs/guide/analyzer#eecs071) (warning), with a code fix to `EntityRandom`.
+
+`EntityRandomBenchmark` measures a draw against SplitMix64, Philox, `Random.Shared` and a seeded `Random`, and a pass
+over 100,000 rows with `EntityRandom` and with `Random.Shared` ([D79](/en/docs/decisions#d79-entity-random)).
+
+{/* TODO(bench): <BenchTable bench="EntityRandomBenchmark" /> once bench.json holds it. */}
+
 #### How the runner synchronizes [#runner-contract]
 
 What a parallel pass costs in synchronization, and what orders a chunk's writes before the code after the pass:
@@ -542,6 +713,59 @@ two are level, and at 100,000 rows `Parallel.For` measured faster on a loaded ma
 
 {/* TODO(bench): rerun ParallelRunnerBenchmark on a quiet machine; update this paragraph and D22, and add
 <BenchTable bench="ParallelRunnerBenchmark" /> once bench.json holds it. */}
+
+### Data that is not rows: `world.ForParallel` [#for-parallel]
+
+Some parallel work is over data that is not rows of a table: the records of an `Emitted<T>`, the cells of an array, a
+range of indexes. `world.ForParallel` runs a struct job over it on the world's runner, with the chunks, claims and
+helpers of a parallel `[ForEach]` (Kokkos' `RangePolicy`, Unity's `IJobParallelForBatch`):
+
+- `world.ForParallel(count, ref job)` runs an `IForRange` job, `Execute(start, end)`, over indexes 0 to count - 1.
+- `world.ForParallel(ref buffer, ref job)` runs an `IForSpan<T>` job, `Execute(start, items)`, over the elements of a
+  `DynamicBuffer<T>` (an `Emitted<T>`'s `Items`, a singleton's buffer), each chunk's elements as a writable span.
+
+```csharp
+// Doubles one hit in ten: each chunk writes only its own records.
+public struct RollCriticals : IForSpan<Hit>
+{
+    public EntityRandom Random;
+
+    public void Execute(int start, Span<Hit> items)
+    {
+        for (int i = 0; i < items.Length; i++)
+        {
+            ref var hit = ref items[i];
+            if (Random.Chance(hit.Target, (uint)(start + i), 0.1f))
+                hit = hit with { Amount = hit.Amount * 2 };
+        }
+    }
+}
+
+public class CriticalSystem : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        var job = new RollCriticals { Random = World.EntityRandom };
+        World.ForParallel(ref World.GetSingleton<Emitted<Hit>>().Items, ref job);
+    }
+}
+```
+
+- **A copy of the job per chunk.** What `Execute` writes into the job's fields is not merged back: a total is a
+  [`Reduce<T>`](#reductions) of a `[ForEach]` method, and a field read after the call is
+  [EECS061](/en/docs/guide/analyzer#eecs061). A write to memory every chunk shares is
+  [EECS060](/en/docs/guide/analyzer#eecs060).
+- **No structural change.** The world's structure is frozen while the job runs: a structural change throws. The list
+  must not change while the call runs, and a chunk writes only its own elements or indexes.
+- **Chunks.** About four per thread, a multiple of 64 indexes between 1,024 and `World.ParallelChunkRows`; the last
+  argument, `chunkRows`, sets them for few heavy items, as [`ChunkRows`](#chunk-rows) does. Fewer than two chunks, or
+  a runner already busy, run on the calling thread.
+- **Owner thread, allocation-free** after the first call per job type.
+
+`ForParallelBenchmark` runs light and heavy work over 100,000 records serially, through `ForParallel` and through
+`Parallel.For` ([D80](/en/docs/decisions#d80-for-parallel)).
+
+{/* TODO(bench): <BenchTable bench="ForParallelBenchmark" /> once bench.json holds it. */}
 
 ### Input from other threads [#input-from-other-threads]
 
@@ -637,7 +861,8 @@ public class SteeringSystem : EcsSystem
         float dy = target.Y - position.Y;
         // The + 1 keeps the length above zero when a unit stands on the target.
         float length = MathF.Sqrt(dx * dx + dy * dy) + 1;
-        velocity = new Velocity(dx / length, dy / length);
+        velocity.X = dx / length;
+        velocity.Y = dy / length;
     }
 }
 
@@ -657,7 +882,8 @@ public class MoveSystem : EcsSystem
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)
     {
-        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+        position.X += velocity.X;
+        position.Y += velocity.Y;
     }
 }
 ```
@@ -717,6 +943,10 @@ changes what an update computes, only how many threads compute it.
   small fixed bound), not a `new` per row.
 - **Look up, do not take the world.** Reads of other entities go through a [`Lookup<T>`](#lookups), which keeps the
   method parallel and is faster on one thread too.
+- **Emit, do not lock.** Records a pass produces go through an [`Emit<T>`](#emit): a list per chunk, no lock or
+  atomic per record, and row order kept.
+- **Draw from `EntityRandom`.** A pure function of the entity, the tick and a stream needs no lock and repeats on
+  every run ([random numbers](#entity-random)).
 
 One world of 100,000 entities, and the same entities in four worlds on four threads (`WorldSimulationBenchmark`,
 `MultiWorldBenchmark`): <BenchValue k="tick.oneWorld" /> per tick in one world, <BenchValue k="tick.fourWorlds" /> for
@@ -742,8 +972,9 @@ over 100,000 rows, sequential and parallel (`ParallelForEachBenchmark`):
   [`ChunkRows`](#chunk-rows) on a method that writes a tracked component, also one block opening per 4,096 rows before
   the pass and one atomic OR per 64 written rows. A [`Reduce<T>`](#reductions) adds a job copy per chunk, combined
   once when the pass ends; a [`Scratch<T>`](#scratch) one lookup of the thread's value per chunk; a
-  [`Lookup<T>`](#lookups) one entity lookup per read. The atomics of a pass: [how the runner
-  synchronizes](#runner-contract).
+  [`Lookup<T>`](#lookups) one entity lookup per read; an [`Emit<T>`](#emit) an append per record and one copy of
+  each chunk's list when the pass ends. `world.ForParallel` costs what a parallel pass does, without the rows. The
+  atomics of a pass: [how the runner synchronizes](#runner-contract).
 - **Off:** `ParallelSystems` is off by default, and a world that never uses it pays nothing for it.
 
 ## Pitfalls [#pitfalls]
@@ -772,6 +1003,16 @@ over 100,000 rows, sequential and parallel (`ParallelForEachBenchmark`):
 | A `Lookup<T>` of a component the same method writes | Rows read before or after their write, torn on another thread | [EECS059](/en/docs/guide/analyzer#eecs059): write another component (double buffering) |
 | A `World` parameter in a parallel method to read other entities | Compile error | [EECS010](/en/docs/guide/analyzer#eecs010): a `Lookup<T>` |
 | A value index reached through a helper inside a parallel pass, before anything built it | `InvalidOperationException` | Call `TryFind` / `Find` / `Count` on the `Lookup<T>` parameter itself |
+| A reduction type that is not `partial`, or a field without an attribute | Compile error: the generator cannot write `Identity` and `Combine` | [EECS062](/en/docs/guide/analyzer#eecs062), [EECS064](/en/docs/guide/analyzer#eecs064) |
+| `Identity` 0 for a minimum, written by hand | Every chunk's minimum becomes 0 | [EECS066](/en/docs/guide/analyzer#eecs066): `[Min]` |
+| A singleton reset in `OnUpdate` and added to row by row | One thread, no vector loop | [EECS086](/en/docs/guide/analyzer#eecs086): `ref Reduce<T>` |
+| Reading `Emitted<T>` in the method that emits `T` | Compile error: the records arrive when the pass ends | [EECS070](/en/docs/guide/analyzer#eecs070) |
+| Not clearing `Emitted<T>` after applying it | The next update applies the same records again | Code review: `Items.Clear()` in the applying system |
+| Records added to a singleton's list row by row | One thread | [EECS089](/en/docs/guide/analyzer#eecs089): `Emit<T>` |
+| `Random.Shared` or `new Random()` in a `[ForEach]` method | Different numbers on every run and thread count | [EECS071](/en/docs/guide/analyzer#eecs071): `EntityRandom` |
+| Two draws of one stream for one entity | The same number twice | [EECS088](/en/docs/guide/analyzer#eecs088): one stream per draw |
+| An `EntityRandom` tick that never advances | Every update draws the numbers of the last one | Code review: advance `Tick` with the clock |
+| Reading a `ForParallel` job's field after the call | Still the old value: each chunk ran a copy | [EECS061](/en/docs/guide/analyzer#eecs061) |
 
 ## Compared with other ECS libraries [#compared-with-other-ecs-libraries]
 
@@ -798,10 +1039,10 @@ against the parallel runners of the others:
     Parameters, ordering, groups and parallel methods.
   </Card>
   <Card title="Analyzer rules" href="/en/docs/guide/analyzer">
-    EECS010, EECS011, EECS013 and EECS014 in detail.
+    EECS010 to EECS014, the parallel rules EECS057 to EECS061, EECS070 and EECS071.
   </Card>
-  <Card title="Migration and unload" href="/en/docs/guide/migration-and-unload">
-    Moving entities between worlds.
+  <Card title="High-performance patterns" href="/en/docs/guide/high-performance">
+    Vector loops, chunks, grid tiles and their OpenMP, MPI and Burst names.
   </Card>
   <Card title="Sample: MultiWorld" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/MultiWorld">
     One world per thread, no locks.

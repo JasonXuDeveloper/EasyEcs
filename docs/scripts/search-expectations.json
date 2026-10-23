@@ -17,7 +17,8 @@
     },
     { "query": "high-performance patterns", "page": "guide/high-performance" },
     { "query": "parallel reduction", "page": "guide/threading", "top": 3 },
-    { "query": "SimdMode", "page": "reference/simdmode" },
+    { "query": "SimdMode", "page": "guide/systems", "top": 3 },
+    { "query": "grid stencil", "page": "guide/grids" },
     { "query": "EECS060", "page": "guide/analyzer", "top": 3 },
     {
       "query": "working memory per thread",
@@ -66,7 +67,8 @@
       "page": "guide/indexes-and-relations",
       "top": 3
     },
-    { "query": "SimdMode", "page": "reference/simdmode" },
+    { "query": "SimdMode", "page": "guide/systems", "top": 4 },
+    { "query": "网格瓦片", "page": "guide/grids" },
     { "query": "单例", "page": "guide/singletons" },
     { "query": "遍历时删除", "page": "guide/structural-changes" },
     { "query": "并行", "page": "guide/threading" },

@@ -148,7 +148,8 @@ using var zone = new World(new WorldOptions { ParallelSystems = true, MaxDegreeO
 ### 并行 `[ForEach]` 方法 [#parallel-foreach-methods]
 
 `[ForEach(Parallel = true)]` 把一个方法的行切成块分给多个线程。它不能做结构变更，必须逐实体运行，也不能写单例
-（[EECS010](/zh/docs/guide/analyzer#eecs010)）；对所有行求总数用 [`Reduce<T>`](#reductions)，每行的工作列表用 [`Scratch<T>`](#scratch)，读其他实体用 [`Lookup<T>`](#lookups)：
+（[EECS010](/zh/docs/guide/analyzer#eecs010)）；对所有行求总数用 [`Reduce<T>`](#reductions)，每行的工作列表用 [`Scratch<T>`](#scratch)，读其他实体用 [`Lookup<T>`](#lookups)，
+留给后面系统的记录用 [`Emit<T>`](#emit)，随机数用 [`EntityRandom`](#entity-random)：
 
 ```csharp
 public record struct Regen(int PerTick) : ISingletonComponent;
@@ -265,8 +266,8 @@ public class CrowdPressure : EcsSystem
 <Steps>
 <Step>
 
-**声明结果**：一个为自己实现 `IReduction<T>` 的单例。`Identity` 是和谁合并都不改变对方的值（求和是 0，求最小值是 `float.MaxValue`），
-`Combine` 必须满足结合律。不要求交换律：部分结果按行的顺序合并。
+**声明结果**：一个 `partial` 单例，每个字段加一个说明怎样合并的特性：`[Sum]`、`[Product]`、`[Min]`、`[Max]`（数值）、`[All]`、`[Any]`
+（`bool`）。生成器写出它的 `IReduction<T>`：`Identity` 是和谁合并都不改变对方的值（求和是 0，求最小值是 +∞），`Combine` 逐字段合并。
 
 </Step>
 <Step>
@@ -283,31 +284,42 @@ public class CrowdPressure : EcsSystem
 </Step>
 </Steps>
 
-```csharp
-public struct Extent : ISingletonComponent, IReduction<Extent>
+```csharp tab="你写的"
+public partial struct Extent : ISingletonComponent
 {
-    public int Count;
-    public float MinX, MaxX;
+    [Sum] public int Count;
+    [Min] public float MinX;
+    [Max] public float MaxX;
+}
+```
 
-    public static Extent Identity => new() { MinX = float.MaxValue, MaxX = float.MinValue };
+```csharp tab="生成器写的" doccheck=skip
+// 生成的代码（Extent.….Part.g.cs，去掉了 global::）：逐字段的归约。
+public partial struct Extent : IReduction<Extent>
+{
+    public static Extent Identity => new Extent
+    {
+        Count = 0, MinX = float.PositiveInfinity, MaxX = float.NegativeInfinity,
+    };
 
-    public static Extent Combine(Extent left, Extent right) => new()
+    public static Extent Combine(Extent left, Extent right) => new Extent
     {
         Count = left.Count + right.Count,
-        MinX = MathF.Min(left.MinX, right.MinX),
-        MaxX = MathF.Max(left.MaxX, right.MaxX),
+        MinX = Math.Min(left.MinX, right.MinX),
+        MaxX = Math.Max(left.MaxX, right.MaxX),
     };
 }
+```
 
+```csharp
 public class MeasureCrowd : EcsSystem
 {
     [ForEach(Parallel = true)]
     static void Measure(in Position position, ref Reduce<Extent> extent)
     {
-        ref var e = ref extent.Value;   // 这一块的部分结果
-        e.Count++;
-        e.MinX = MathF.Min(e.MinX, position.X);
-        e.MaxX = MathF.Max(e.MaxX, position.X);
+        extent.Value.Count++;                                        // 这一块的部分结果
+        extent.Value.MinX = MathF.Min(extent.Value.MinX, position.X);
+        extent.Value.MaxX = MathF.Max(extent.Value.MaxX, position.X);
     }
 }
 ```
@@ -319,6 +331,10 @@ var crowd = world.Extent;   // 所有块合并后的结果
 Console.WriteLine($"{crowd.Count} 个单位，x 从 {crowd.MinX} 到 {crowd.MaxX}");
 ```
 
+- **不是逐字段合并时手写。** 字段要一起合并的结果（最拥挤的格子和它的人数、前三名）自己实现 `IReduction<T>`：`Identity` 和满足结合律的
+  `Combine`，不要求交换律（部分结果按行的顺序合并）。用特性声明的归约每个字段都要有特性（[EECS064](/zh/docs/guide/analyzer#eecs064)），
+  类型要是 `partial`（[EECS062](/zh/docs/guide/analyzer#eecs062)）；特性能声明却手写的归约报 [EECS065](/zh/docs/guide/analyzer#eecs065)，
+  会改变合并对象的 `Identity`（求最小值用 0）报 [EECS066](/zh/docs/guide/analyzer#eecs066)。
 - **精确，或可复现。** 整数结果在每次运行、任何线程数下都精确。浮点求和按块舍入，所以取决于块从哪里开始：[`ChunkRows`](#chunk-rows)
   固定时，每次运行、任何线程数下结果都相同（测试检查了 1、2、3、4 和 8 个线程），但和同一个方法 `Parallel = false` 的结果不逐位相同。
   默认块大小随线程数变化：浮点总数要在不同机器上复现时，设定 `ChunkRows`。最小值、最大值和包围盒不涉及舍入，怎样都精确。
@@ -428,10 +444,7 @@ public class ChaseSystem : EcsSystem
 ```
 
 ```csharp
-public record struct Login(int Number) : IComponent, IUniqueIndexed<int>
-{
-    public int Key => Number;
-}
+public partial record struct Login([UniqueKey] int Number) : IComponent;
 
 public record struct Asks(int Number) : IComponent;
 public record struct Answer(EntityId Login) : IComponent;
@@ -456,6 +469,142 @@ public class MatchLogins : EcsSystem
 
 {/* TODO(bench): bench.json 有了 LookupBenchmark 之后放上 <BenchTable bench="LookupBenchmark" />。 */}
 
+#### 一遍产出的记录：`Emit<T>` [#emit]
+
+一遍常常要给后面的系统留下记录：攻击系统找到的命中交给结算伤害的系统，视野（AOI）的数据包，规则要求的生成请求。并行方法不能往共享列表里追加
+（[EECS060](/zh/docs/guide/analyzer#eecs060)），也不能创建实体（[EECS010](/zh/docs/guide/analyzer#eecs010)）。按值传入的 `Emit<T>`
+参数追加到这一块自己的列表里，没有锁也没有原子操作；这一遍结束时，各块的列表按块的顺序（也就是行的顺序）追加进单例 `Emitted<T>`：
+相当于 Unity 的 `NativeStream`、GPU 的流压缩。
+
+<Callout type="idea" title="适合">
+  后面的系统要结算或发送的记录：命中和伤害、视野数据包、日志行、交给所有者线程变成实体的请求。每行几条都行，零条也行，并行和单线程的方法都能用。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  每个实体各自的结果：写进这一行的组件。对所有行求总数：用 [`Reduce<T>`](#reductions)。同一遍里就要读的记录：它们这一遍结束时才进
+  `Emitted<T>`（[EECS070](/zh/docs/guide/analyzer#eecs070)）。
+</Callout>
+
+<Steps>
+<Step>
+
+**声明记录**：一个普通 struct。它是列表里的数据，不是组件。
+
+</Step>
+<Step>
+
+**接收一个 `Emit<T>` 参数**，在产生记录的行上调用 `Add(record)`（或 `AddRange(records)`）。
+
+</Step>
+<Step>
+
+**结算并清空**：后面的系统读 `Emitted<T>.Items`（一个[动态缓冲](/zh/docs/guide/dynamic-buffers)），结算这些记录，然后清空，这样不会结算两次。
+
+</Step>
+</Steps>
+
+```csharp
+public record struct Hit(EntityId Target, int Amount);   // 一条记录，不是组件
+public record struct Attack(int Power) : IComponent;
+public record struct Aim(EntityId Target) : IComponent;
+
+public class StrikeSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits) =>
+        hits.Add(new Hit(aim.Target, attack.Power));   // 这一块的列表 // [!code highlight]
+}
+
+public class ApplyHitsSystem : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        ref var hits = ref World.GetSingleton<Emitted<Hit>>().Items;
+        foreach (ref readonly var hit in hits.AsReadOnlySpan())
+            if (World.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
+        hits.Clear();   // 只结算一次
+    }
+}
+```
+
+- **任何线程数下都是行的顺序。** 记录的顺序和同一个方法 `Parallel = false` 时一样，每次运行都一样，所以回放或帧同步的对端按同样的顺序结算。
+- **每一遍都是追加。** 一次更新里可以有几个系统发出同一种 `T`（近战和法术都发出伤害），各在自己的位置；结算的系统负责清空。发出记录的系统按
+  `Emitted<T>` 的写者调度，读的系统会等它；一个方法既发出又接收 `Emitted<T>`，或用两个参数发出同一种类型，报
+  [EECS070](/zh/docs/guide/analyzer#eecs070)。
+- **并行结算。** 记录是一个列表：[`world.ForParallel`](#for-parallel) 按块对它的元素运行一个 job，适合每条记录只写记录本身的活（掷骰、编码）。
+- **像缓冲一样存档。** 快照和存档会拷贝 `Emitted<T>` 里剩下的记录。
+- **开销：** 每条记录追加一次到这一块的列表。列表来自它们自己的池，保持在一块用到过的最大尺寸，所以稳定的遍历零分配；每遍把每块的列表拷进
+  `Emitted<T>` 一次。
+
+逐行手动追加到单例列表里的记录会让方法只能单线程运行：[EECS089](/zh/docs/guide/analyzer#eecs089) 会建议改用 `Emit<T>`。`EmitBenchmark`
+对比并行和单线程的 `Emit<T>`、每行写一个组件再扫描、`ConcurrentQueue`，以及往共享数组里 `Interlocked` 推进游标
+（[D78](/zh/docs/decisions#d78-emit)）。
+
+{/* TODO(bench): bench.json 有了 EmitBenchmark 之后加上 <BenchTable bench="EmitBenchmark" />。 */}
+
+#### 遍历里的随机数：`EntityRandom` [#entity-random]
+
+`Random.Shared` 在任何线程上都安全，但哪一行抽到哪个数取决于行的运行顺序，所以并行的一遍每次运行抽到的都不一样；带种子的
+`new Random(seed)` 干脆不能在多个线程上用。`EntityRandom` 是一个保存种子和 tick 的单例，每个数都是（种子、实体、tick、流）的纯函数，
+没有要推进的状态（cuRAND 的 Philox，基于计数器的生成器）：每次运行、任何线程数、行按任何顺序运行，结果都一样。
+
+<Callout type="idea" title="适合">
+  模拟代码里需要重现的随机：游荡、刷怪掷骰、掉落、暴击、AI 的选择。回放、帧同步的对端、必须和测试一致的服务器，以及必须给出单线程结果的并行方法。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  机密：令牌、密钥、不能让玩家猜到的洗牌。它是哈希，不是密码学生成器：用 `RandomNumberGenerator`。遍历之外没人需要重现的随机（带抖动的重试延迟）：
+  那里用 `Random.Shared` 就行。
+</Callout>
+
+```csharp
+public record struct Wander(float X, float Y) : IComponent;
+
+public class WanderSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Pick(ref Wander wander, Entity entity, in EntityRandom random)
+    {
+        // 每个调用点一个流：x 用 0，y 用 1。
+        wander.X = random.Range(entity.Id, 0, -1f, 1f);
+        wander.Y = random.Range(entity.Id, 1, -1f, 1f);
+    }
+}
+
+// 推进模拟时钟的系统顺便推进随机数的 tick。
+[UpdateAfter<WanderSystem>]
+public class TickRandomSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.EntityRandom.Tick++;
+}
+```
+
+```csharp
+world.SetEntityRandom(Seed: 42, Tick: 0);   // 换个种子，每个实体就是另一串数
+world.AddSystem<WanderSystem>();
+world.AddSystem<TickRandomSystem>();
+```
+
+| 成员 | 返回 |
+| --- | --- |
+| `random.Bits(entity, stream)` | 64 个随机位 |
+| `random.Float(entity, stream)` | [0, 1) 之间的 `float`，是 2⁻²⁴ 的倍数 |
+| `random.Range(entity, stream, min, max)` | [min, max) 之间的 `int` 或 `float` |
+| `random.Chance(entity, stream, probability)` | 以这个概率为 `true`（0 从不，1 总是） |
+| `EntityRandom.Bits(seed, entity, tick, stream)` 及其他静态成员 | 同上，四个输入显式给出：你自己的种子、你自己时钟的 tick |
+
+- **每次抽取一个流。** 同样的四个输入给出同样的数，所以同一实体在同一 tick 用同一个流抽两次，结果相等：每个调用点给自己的流（0、1、2……），
+  循环里要让流随循环变化（[EECS088](/zh/docs/guide/analyzer#eecs088)，代码修复会取下一个没用过的流）。
+- **每一步推进一次 tick。** tick 不动，抽到的就还是同样的数；实体的数取决于它的 id（下标和版本号），所以回收的 id 抽到的是一串新的数。
+- **纯函数、零分配。** 四轮 SplitMix64 的终结函数：一次抽取是几次乘法，不写任何状态，所以方法只读它（`in EntityRandom`），保持并行。
+- **分析器检查什么：** `[ForEach]` 方法里的 `Random.Shared`、`new Random()` 和 `System.Random` 字段报
+  [EECS071](/zh/docs/guide/analyzer#eecs071)（警告），代码修复改成 `EntityRandom`。
+
+`EntityRandomBenchmark` 对比一次抽取和 SplitMix64、Philox、`Random.Shared`、带种子的 `Random`，以及用 `EntityRandom` 和 `Random.Shared`
+遍历 10 万行（[D79](/zh/docs/decisions#d79-entity-random)）。
+
+{/* TODO(bench): bench.json 有了 EntityRandomBenchmark 之后加上 <BenchTable bench="EntityRandomBenchmark" />。 */}
+
 #### 运行器怎样同步 [#runner-contract]
 
 一次并行遍历在同步上要付出什么，以及是什么让一块的写入排在遍历之后的代码之前：
@@ -472,6 +621,53 @@ public class MatchLogins : EcsSystem
 （[D22](/zh/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)）。
 
 {/* TODO(bench): 在空闲的机器上重跑 ParallelRunnerBenchmark；更新这一段和 D22，bench.json 有了它之后加上 <BenchTable bench="ParallelRunnerBenchmark" />。 */}
+
+### 不是行的数据：`world.ForParallel` [#for-parallel]
+
+有些并行的活面对的不是表里的行：`Emitted<T>` 的记录、数组的格子、一段下标。`world.ForParallel` 在 World 的运行器上对它运行一个结构体 job，
+块、领块和辅助线程都和并行的 `[ForEach]` 一样（相当于 Kokkos 的 `RangePolicy`、Unity 的 `IJobParallelForBatch`）：
+
+- `world.ForParallel(count, ref job)` 对下标 0 到 count - 1 运行 `IForRange` job，`Execute(start, end)`。
+- `world.ForParallel(ref buffer, ref job)` 对一个 `DynamicBuffer<T>`（`Emitted<T>` 的 `Items`、单例的缓冲）的元素运行 `IForSpan<T>` job，
+  `Execute(start, items)`，每块的元素是一个可写的 span。
+
+```csharp
+// 十次命中里翻倍一次：每块只写自己的记录。
+public struct RollCriticals : IForSpan<Hit>
+{
+    public EntityRandom Random;
+
+    public void Execute(int start, Span<Hit> items)
+    {
+        for (int i = 0; i < items.Length; i++)
+        {
+            ref var hit = ref items[i];
+            if (Random.Chance(hit.Target, (uint)(start + i), 0.1f))
+                hit = hit with { Amount = hit.Amount * 2 };
+        }
+    }
+}
+
+public class CriticalSystem : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        var job = new RollCriticals { Random = World.EntityRandom };
+        World.ForParallel(ref World.GetSingleton<Emitted<Hit>>().Items, ref job);
+    }
+}
+```
+
+- **每块一个 job 副本。** `Execute` 写进 job 字段的东西不会合并回来：总数用 `[ForEach]` 方法的 [`Reduce<T>`](#reductions)，调用之后读字段报
+  [EECS061](/zh/docs/guide/analyzer#eecs061)。写所有块共享的内存报 [EECS060](/zh/docs/guide/analyzer#eecs060)。
+- **不做结构变更。** job 运行时 World 的结构是冻结的：结构变更会抛出异常。调用期间列表不能变，每块只写自己的元素或下标。
+- **块。** 大约每个线程四块，是 64 的倍数，在 1,024 和 `World.ParallelChunkRows` 之间；最后一个参数 `chunkRows` 给少量重活设块大小，作用和
+  [`ChunkRows`](#chunk-rows) 一样。少于两块，或者运行器正忙时，在调用线程上运行。
+- **所有者线程，零分配**（每种 job 类型第一次调用之后）。
+
+`ForParallelBenchmark` 对 10 万条记录做轻活和重活，对比单线程、`ForParallel` 和 `Parallel.For`（[D80](/zh/docs/decisions#d80-for-parallel)）。
+
+{/* TODO(bench): bench.json 有了 ForParallelBenchmark 之后加上 <BenchTable bench="ForParallelBenchmark" />。 */}
 
 ### 来自其他线程的输入 [#input-from-other-threads]
 
@@ -562,7 +758,8 @@ public class SteeringSystem : EcsSystem
         float dy = target.Y - position.Y;
         // + 1 保证单位站在目标点上时长度也大于零。
         float length = MathF.Sqrt(dx * dx + dy * dy) + 1;
-        velocity = new Velocity(dx / length, dy / length);
+        velocity.X = dx / length;
+        velocity.Y = dy / length;
     }
 }
 
@@ -582,7 +779,8 @@ public class MoveSystem : EcsSystem
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)
     {
-        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+        position.X += velocity.X;
+        position.Y += velocity.Y;
     }
 }
 ```
@@ -634,6 +832,8 @@ unit 0 at (7.06, 7.06) with 60 hp
 - **归约，不要共享。** 并行遍历上的计数或求和用 [`Reduce<T>`](#reductions) 参数：每块一个部分结果，每行没有原子操作。
 - **每个线程一份临时空间，不是每行一份。** 每行要填的列表用 [`Scratch<T>`](#scratch)（上限固定的小缓冲用 `stackalloc`），不要每行 `new`。
 - **查找，不要拿 World。** 读其他实体走 [`Lookup<T>`](#lookups)，方法能保持并行，单线程时也更快。
+- **发出记录，不要加锁。** 一遍产出的记录走 [`Emit<T>`](#emit)：每块一个列表，每条记录没有锁也没有原子操作，还保持行的顺序。
+- **从 `EntityRandom` 抽随机数。** 实体、tick 和流的纯函数不需要锁，每次运行都能重现（[随机数](#entity-random)）。
 
 一个 World 里 10 万个实体，以及同样的实体分到四个线程上的四个 World（`WorldSimulationBenchmark`、`MultiWorldBenchmark`）：一个 World
 每 tick <BenchValue k="tick.oneWorld" />，四个 World 合计 <BenchValue k="tick.fourWorlds" />。
@@ -653,7 +853,8 @@ unit 0 at (7.06, 7.06) with 60 hp
 - **一个并行方法：** 同一个调度器，按块分配；调用线程总是参与。只有实测表明辅助线程能让这次遍历比单线程快至少五分之一时才唤醒它们，
   所以 tick 之间的小遍历就在调用线程上跑。每块要领一次、复制一份 job；写被追踪组件的方法设了 [`ChunkRows`](#chunk-rows) 时，
   遍历前每 4,096 行还要打开一次 tick 块，每写 64 行做一次原子 OR。[`Reduce<T>`](#reductions) 每块多一个 job 副本，这一遍结束时合并一次；
-  [`Scratch<T>`](#scratch) 每块查一次这个线程的值；[`Lookup<T>`](#lookups) 每次读取一次实体查找。一次遍历的原子操作：[运行器怎样同步](#runner-contract)。
+  [`Scratch<T>`](#scratch) 每块查一次这个线程的值；[`Lookup<T>`](#lookups) 每次读取一次实体查找；[`Emit<T>`](#emit) 每条记录追加一次，这一遍结束时每块的列表拷贝一次。`world.ForParallel`
+  的开销和并行遍历一样，只是没有行。一次遍历的原子操作：[运行器怎样同步](#runner-contract)。
 - **不用时：** `ParallelSystems` 默认关闭，从不使用它的 World 不为它付出任何开销。
 
 ## 常见陷阱 [#pitfalls]
@@ -682,6 +883,16 @@ unit 0 at (7.06, 7.06) with 60 hp
 | 用 `Lookup<T>` 查同一个方法会写的组件 | 读到写入之前或之后的行，在别的线程上还会读到写了一半的值 | [EECS059](/zh/docs/guide/analyzer#eecs059)：写到另一个组件（双缓冲） |
 | 并行方法里用 `World` 参数读其他实体 | 编译错误 | [EECS010](/zh/docs/guide/analyzer#eecs010)：改用 `Lookup<T>` |
 | 并行遍历里通过辅助方法碰到还没人建好的值索引 | `InvalidOperationException` | 在 `Lookup<T>` 参数本身上调用 `TryFind` / `Find` / `Count` |
+| 归约类型不是 `partial`，或有字段没加特性 | 编译错误：生成器写不出 `Identity` 和 `Combine` | [EECS062](/zh/docs/guide/analyzer#eecs062)、[EECS064](/zh/docs/guide/analyzer#eecs064) |
+| 手写的最小值 `Identity` 是 0 | 每块的最小值都变成 0 | [EECS066](/zh/docs/guide/analyzer#eecs066)：用 `[Min]` |
+| 单例在 `OnUpdate` 里清零，再逐行累加 | 只能单线程，也没有向量循环 | [EECS086](/zh/docs/guide/analyzer#eecs086)：`ref Reduce<T>` |
+| 发出 `T` 的方法同时读 `Emitted<T>` | 编译错误：记录在这一遍结束时才到 | [EECS070](/zh/docs/guide/analyzer#eecs070) |
+| 结算 `Emitted<T>` 之后没清空 | 下一次更新又结算同样的记录 | 代码审查：结算的系统里 `Items.Clear()` |
+| 逐行往单例的列表里追加记录 | 只能单线程 | [EECS089](/zh/docs/guide/analyzer#eecs089)：`Emit<T>` |
+| `[ForEach]` 方法里用 `Random.Shared` 或 `new Random()` | 每次运行、每种线程数抽到的数都不同 | [EECS071](/zh/docs/guide/analyzer#eecs071)：`EntityRandom` |
+| 同一实体用同一个流抽两次 | 两次是同一个数 | [EECS088](/zh/docs/guide/analyzer#eecs088)：每次抽取一个流 |
+| `EntityRandom` 的 tick 从不推进 | 每次更新抽到的都是上一次的数 | 代码审查：随时钟推进 `Tick` |
+| `ForParallel` 之后读 job 的字段 | 还是旧值：每一块跑的是副本 | [EECS061](/zh/docs/guide/analyzer#eecs061) |
 
 ## 和其他 ECS 库的对比 [#compared-with-other-ecs-libraries]
 
@@ -707,10 +918,10 @@ EasyEcs 采用 Bevy 和 Unity DOTS 基于访问集的模型，同时保持顺序
     参数、顺序、分组和并行方法。
   </Card>
   <Card title="分析器规则" href="/zh/docs/guide/analyzer">
-    EECS010、EECS011、EECS013 和 EECS014 详解。
+    EECS010 到 EECS014、并行规则 EECS057 到 EECS061、EECS070 和 EECS071。
   </Card>
-  <Card title="迁移与卸载" href="/zh/docs/guide/migration-and-unload">
-    在 World 之间迁移实体。
+  <Card title="高性能写法" href="/zh/docs/guide/high-performance">
+    向量循环、块、网格瓦片，以及它们在 OpenMP、MPI、Burst 里的名字。
   </Card>
   <Card title="示例：MultiWorld" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/MultiWorld">
     每线程一个 World，不加锁。

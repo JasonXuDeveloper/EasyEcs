@@ -418,8 +418,8 @@ public record struct Burning(int Ticks) : IComponent, ITracked;
 // What the clients were last told about a unit.
 public record struct Replica(int Health) : IComponent;
 
-// How many rows replication sent in the last update.
-public record struct Sent(int Rows) : ISingletonComponent;
+// How many rows replication sent in the last update: a total of its pass, from zero each time.
+public partial struct Sent : ISingletonComponent { [Sum] public int Rows; }
 ```
 
 </Accordion>
@@ -447,18 +447,12 @@ public class BurnSystem : EcsSystem
 [UpdateAfter<BurnSystem>]
 public class ReplicateHealthSystem : EcsSystem
 {
-    // OnUpdate runs before the [ForEach] method: each update counts from zero.
-    protected override void OnUpdate()
-    {
-        World.Sent.Rows = 0;
-    }
-
     // Health is read with `in`: a `ref` would count as a write.
     [ForEach, Changed<Health>]
-    static void Send(in Health health, ref Replica replica, ref Sent sent)
+    static void Send(in Health health, ref Replica replica, ref Reduce<Sent> sent)
     {
         replica.Health = health.Value;
-        sent.Rows++;
+        sent.Value.Rows++;
     }
 }
 

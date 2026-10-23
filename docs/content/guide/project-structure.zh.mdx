@@ -137,8 +137,11 @@ public record struct Ttl(int Ticks) : IComponent;
 public class MoveSystem : EcsSystem
 {
     [ForEach]
-    static void Move(ref Position position, in Velocity velocity) =>
-        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+    static void Move(ref Position position, in Velocity velocity)
+    {
+        position.X += velocity.X;
+        position.Y += velocity.Y;
+    }
 }
 
 public class ExpireSystem : EcsSystem
@@ -373,15 +376,14 @@ using EasyEcs;
 
 namespace MyServer;
 
-// 每个请求用刷新器的预制体发一颗子弹，然后销毁这个请求。
-// 遍历途中创建、销毁实体都是安全的。
+// 每个请求用刷新器的预制体发一颗子弹；[Consume] 在遍历结束后销毁这些请求。
+// 遍历途中创建实体是安全的。
 public class FireSystem : EcsSystem
 {
-    [ForEach]
-    static void Fire(World world, Entity request, in FireRequest fire, in Spawner spawner)
+    [ForEach, Consume]                                       // 每个请求在遍历结束后销毁
+    static void Fire(World world, in FireRequest fire, in Spawner spawner)
     {
         world.Instantiate(spawner.Bullet, new Velocity(fire.Vx, fire.Vy));
-        request.Destroy();
     }
 }
 ```
@@ -432,7 +434,8 @@ public class MovementSystem : EcsSystem
     static void Move(ref Position position, in Velocity velocity, in Clock clock)
     {
         float dt = clock.DeltaTime;
-        position = new Position(position.X + velocity.X * dt, position.Y + velocity.Y * dt);
+        position.X += velocity.X * dt;
+        position.Y += velocity.Y * dt;
     }
 }
 ```

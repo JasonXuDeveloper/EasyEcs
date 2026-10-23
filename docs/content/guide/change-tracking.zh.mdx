@@ -386,8 +386,8 @@ public record struct Burning(int Ticks) : IComponent, ITracked;
 // 上一次告诉客户端的单位状态。
 public record struct Replica(int Health) : IComponent;
 
-// 上一次更新里同步了多少行。
-public record struct Sent(int Rows) : ISingletonComponent;
+// 上一次更新里同步了多少行：这一遍的总数，每次从零开始。
+public partial struct Sent : ISingletonComponent { [Sum] public int Rows; }
 ```
 
 </Accordion>
@@ -415,18 +415,12 @@ public class BurnSystem : EcsSystem
 [UpdateAfter<BurnSystem>]
 public class ReplicateHealthSystem : EcsSystem
 {
-    // OnUpdate 在 [ForEach] 方法之前运行：每次更新从零开始计数。
-    protected override void OnUpdate()
-    {
-        World.Sent.Rows = 0;
-    }
-
     // Health 用 `in` 读：用 `ref` 会算作一次写入。
     [ForEach, Changed<Health>]
-    static void Send(in Health health, ref Replica replica, ref Sent sent)
+    static void Send(in Health health, ref Replica replica, ref Reduce<Sent> sent)
     {
         replica.Health = health.Value;
-        sent.Rows++;
+        sent.Value.Rows++;
     }
 }
 

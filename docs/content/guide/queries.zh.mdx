@@ -441,7 +441,8 @@ public class SlowSystem : EcsSystem
     [ForEach, WithAny<Frozen>, WithAny<Burning>]
     static void Slow(ref Velocity velocity)
     {
-        velocity = new Velocity(velocity.X / 2, velocity.Y / 2);
+        velocity.X /= 2;
+        velocity.Y /= 2;
     }
 }
 
@@ -452,7 +453,8 @@ public class MoveSystem : EcsSystem
     [ForEach, Without<Frozen>]
     static void Move(ref Position position, in Velocity velocity)
     {
-        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+        position.X += velocity.X;
+        position.Y += velocity.Y;
     }
 }
 ```
@@ -541,6 +543,7 @@ sum of X: 11
 | `Count(...) > 0` | `Any(...)` | 找到第一个就停（[EECS032](/zh/docs/guide/analyzer#eecs032)） |
 | 每个请求几次 `Get` / `TryGetRef` 再加一次 `Has<Dead>()` | 用 `static readonly` 过滤条件调 [`entity.Run`](#run-on-one-entity) | 只查一次；ref 跨结构变更依然有效 |
 | 扫描查找某个键 | [值索引](/zh/docs/guide/indexes-and-relations) | O(匹配数)，而不是 O(行数) |
+| 用 `Read` 循环把 id 拷进 span，满了就 break | [`CollectIds`](#collect-ids) | 所有行都匹配的表只拷贝一次 |
 
 同样的写入：对 1 万个实体做 `Position += Velocity`。两个普通数组（`RawArrayWrite`）、`[ForEach]` 系统（`ForEachSystemWrite`）、
 手写结构体 job（`ForEachWrite`）、`Query` 循环（`QueryWrite`）：

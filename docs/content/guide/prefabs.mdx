@@ -54,12 +54,12 @@ public static class Kinds
 
 ### Instantiate one [#instantiate]
 
-The new entity gets a copy of every value. Write only what differs.
+The new entity gets a copy of every value. Pass the values that differ: they replace the recipe's
+([its own values](#instantiate-with-values)).
 
 ```csharp
 var world = new World();
-var goblin = world.Instantiate(Kinds.Goblin);
-goblin.Position = new Position(100, 40);
+var goblin = world.Instantiate(Kinds.Goblin, new Position(100, 40));
 ```
 
 </Step>
@@ -73,7 +73,7 @@ copied into consecutive rows at once, at most one table growth.
 ```csharp
 var wave = new Entity[500];
 world.Instantiate(Kinds.Troll, wave);
-for (int i = 0; i < wave.Length; i++) wave[i].Position = new Position(i * 8, 0);
+for (int i = 0; i < wave.Length; i++) wave[i].SetPosition(i * 8, 0);
 ```
 
 </Step>
@@ -141,6 +141,7 @@ each) are written after the batch, or with one `Instantiate` per entity.
 | `Has<T>()` | Whether the prefab has `T`. |
 | `Read<T>()` → `ref readonly T` | The prefab's value; throws if it has none. |
 | `SetBuffer<T>(params ReadOnlySpan<T>)` → `Prefab` | A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) with these elements. |
+| `SetAbsent<T>()` → `Prefab` | A column for `T` without the component, so adding it later moves no row ([room for later](#set-absent)). |
 | `AddMember()` → `Prefab` | A new [member](#prefab-groups) of the prefab's group. |
 | `Id` | The `EntityId` that names this member inside the group's components. |
 
@@ -204,6 +205,36 @@ int inRecipe = Chests.Common.Loot.Count;             // still 2
 
 Do not `Set(new DynamicBuffer<T>())` and fill it outside the prefab: a buffer value copied around shares its list
 ([EECS012](/en/docs/guide/analyzer#eecs012)).
+
+### Room for a component added later: `SetAbsent<T>` [#set-absent]
+
+`prefab.SetAbsent<T>()` gives the recipe a column for `T` without the component: instances lack `T`, but their table
+has room for it. Adding `T` later (a tag set and cleared every few ticks, a state some instances enter) then flips a
+presence bit instead of moving the row to another table, and every instance stays in one table whatever state it is
+in. A value the recipe had is dropped.
+
+```csharp
+public struct Enraged : IComponent;                          // a state some goblins enter
+
+public static class Raging
+{
+    public static readonly Prefab Goblin = new Prefab()
+        .SetPosition(0, 0).SetHealth(30, 30).SetAttack(4, 0)
+        .SetAbsent<Enraged>();                               // the column, not the tag // [!code highlight]
+}
+```
+
+```csharp
+public class RageSystem : EcsSystem
+{
+    [ForEach]
+    static void Rage(Entity goblin, in Health health)
+    {
+        if (health.Value < 10) goblin.SetEnraged();          // a presence bit: the row stays
+        else goblin.RemoveEnraged();
+    }
+}
+```
 
 ### Prefab groups [#prefab-groups]
 
@@ -392,9 +423,8 @@ using EasyEcs;
 
 using var world = new World();
 
-// One entity: a copy of every value of the recipe, then only what differs.
-Entity first = world.Instantiate(Kinds.Goblin);
-first.Position = new Position(10, 20);
+// One entity: a copy of every value of the recipe, with its own position.
+Entity first = world.Instantiate(Kinds.Goblin, new Position(10, 20));
 
 // A wave: a hundred copies in one pass.
 var wave = new Entity[100];
@@ -403,7 +433,7 @@ world.Instantiate(Kinds.Goblin, wave);
 Entity boss = world.Instantiate(Kinds.Chief);
 
 // Clone copies a living entity as it is now, not the recipe it came from.
-boss.Health = new Health(50);
+boss.Health.Value = 50;
 Entity twin = boss.Clone();
 
 var enemies = QueryFilter.Create().With<Enemy>();
@@ -442,6 +472,8 @@ are not among the 103 entities.
 | `CreateEntity` then `Set` per component of a kind | A prefab | One row copy, the target table cached per prefab |
 | A new `Prefab` per spawn | One prefab per kind, kept in a field | Its table lookup is cached after the first instance |
 | Templates as hidden entities | A `Prefab` | No query pays to skip them |
+| A tag or state the instances gain and lose, missing from the recipe | [`SetAbsent<T>()`](#set-absent) on the prefab | Adding it flips a presence bit; no row moves, one table for every state |
+| `.SetX(default).RemoveX()` to give a recipe a column | `SetAbsent<X>()` | The same column, said in one call |
 
 Spawning 1,000 entities of four components (one tracked) and destroying them, one `Instantiate` per entity against
 one `Instantiate(prefab, span)`, and each with a `ChildOf`: set after `Instantiate`, given to it, and given to the

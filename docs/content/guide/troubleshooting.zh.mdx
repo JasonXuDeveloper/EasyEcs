@@ -330,7 +330,7 @@ record struct 自己就是自己的键（`IIndexed<TSelf>`，actor 写法），�
 `ToString()` 会打印所有公开属性：`Key` 打印 record，record 又打印 `Key`，直到栈溢出。写一行日志、做一次字符串插值，或者在调试器里看一眼这个值，
 都会触发。
 
-**修法：**显式实现 `Key`：`Shop IIndexed<Shop>.Key => this;`。索引照样找得到它，`ToString()` 却看不到它了
+**修法：**在类型上用 `[IndexKey]` 声明键，生成器会显式实现 `Key`（也可以手写 `Shop IIndexed<Shop>.Key => this;`）。索引照样找得到它，`ToString()` 却看不到它了
 （[常见错误](/zh/docs/guide/common-mistakes#public-key)）。
 
 ## 相关页面 [#related]

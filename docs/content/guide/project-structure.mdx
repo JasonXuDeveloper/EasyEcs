@@ -146,8 +146,11 @@ public record struct Ttl(int Ticks) : IComponent;
 public class MoveSystem : EcsSystem
 {
     [ForEach]
-    static void Move(ref Position position, in Velocity velocity) =>
-        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+    static void Move(ref Position position, in Velocity velocity)
+    {
+        position.X += velocity.X;
+        position.Y += velocity.Y;
+    }
 }
 
 public class ExpireSystem : EcsSystem
@@ -390,15 +393,14 @@ using EasyEcs;
 
 namespace MyServer;
 
-// Fires one bullet per request, from the spawner's prefab, then destroys the request.
-// Creating and destroying entities in the middle of the pass is safe.
+// Fires one bullet per request, from the spawner's prefab; [Consume] destroys the requests after the pass.
+// Creating entities in the middle of the pass is safe.
 public class FireSystem : EcsSystem
 {
-    [ForEach]
-    static void Fire(World world, Entity request, in FireRequest fire, in Spawner spawner)
+    [ForEach, Consume]                                       // each request goes after the pass
+    static void Fire(World world, in FireRequest fire, in Spawner spawner)
     {
         world.Instantiate(spawner.Bullet, new Velocity(fire.Vx, fire.Vy));
-        request.Destroy();
     }
 }
 ```
@@ -449,7 +451,8 @@ public class MovementSystem : EcsSystem
     static void Move(ref Position position, in Velocity velocity, in Clock clock)
     {
         float dt = clock.DeltaTime;
-        position = new Position(position.X + velocity.X * dt, position.Y + velocity.Y * dt);
+        position.X += velocity.X * dt;
+        position.Y += velocity.Y * dt;
     }
 }
 ```
