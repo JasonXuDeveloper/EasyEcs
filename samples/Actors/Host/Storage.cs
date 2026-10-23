@@ -22,19 +22,20 @@ public sealed class Storage
     }
 
     /// <summary>
-    /// Save the actors the save group listed (world.Update&lt;Saving&gt;()), then empty the list: the tracked components
-    /// told which actors changed, so an actor nobody wrote costs nothing.
+    /// Save the actors the save group listed (world.Update&lt;Saving&gt;()), then clear the records: the tracked
+    /// components told which actors changed, so an actor nobody wrote costs nothing.
     /// </summary>
-    public int Save(World world, List<EntityId> actors)
+    public int Save(World world)
     {
-        foreach (var id in actors)
+        ref var unsaved = ref world.GetOrAddSingleton<Emitted<Unsaved>>().Items;  // no record yet: none to save
+        foreach (var record in unsaved)
         {
-            var actor = world.GetEntity(id);
+            var actor = world.GetEntity(record.Actor);
             Save(actor, actor.HasShop ? actor.Shop : actor.Bank);
         }
 
-        int saved = actors.Count;
-        actors.Clear();
+        int saved = unsaved.Count;
+        unsaved.Clear();
         return saved;
     }
 

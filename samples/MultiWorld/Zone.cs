@@ -15,7 +15,6 @@ public static class Zone
     public static ZoneResult Run(int zone, int updates)
     {
         using var world = new World(new WorldOptions { InitialEntityCapacity = Units });
-        world.AddSingleton<Tally>();
         world.AddSystem<MoveSystem>();
         world.AddSystem<DamageSystem>();
         world.AddSystem<RespawnSystem>();
@@ -32,11 +31,13 @@ public static class Zone
         }
 
         var watch = Stopwatch.StartNew();
+        int deaths = 0;
         for (int i = 0; i < updates; i++)
         {
             world.Update();
+            deaths += world.Tally.Deaths; // each update's count replaces the last one
         }
 
-        return new ZoneResult(zone, world.Count<Health>(), world.Tally.Deaths, watch.Elapsed);
+        return new ZoneResult(zone, world.Count<Health>(), deaths, watch.Elapsed);
     }
 }

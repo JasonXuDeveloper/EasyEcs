@@ -8,7 +8,6 @@ using var world = new World();
 world.AddSystem<RestockSystem>();
 world.AddSystem<InterestSystem>();
 world.AddSystem<ListUnsavedSystem>();
-world.SetUnsaved(new List<EntityId>());
 
 // Each kind: what an actor starts with. A record from storage replaces the persistent part.
 var shopKind = new Prefab().SetSales(0).SetStock(5);
@@ -21,7 +20,7 @@ Console.WriteLine($"activated: shop 1 has {shop.Stock.Items}, shop 2 (new) has {
 
 // Only shop 2, which is new: the records loaded with markWritten: false are not changes.
 world.Update<Saving>();
-Console.WriteLine($"saved after activation: {storage.Save(world, world.Unsaved.Actors)}");
+Console.WriteLine($"saved after activation: {storage.Save(world)}");
 
 for (int i = 0; i < 3; i++)
 {
@@ -38,7 +37,7 @@ Console.WriteLine($"after the updates: shop 1 has {shop.Stock.Items} (sold {shop
 
 // Shop 1 and bank 7: shop 2 was saved after activation, and nothing wrote it since.
 world.Update<Saving>();
-Console.WriteLine($"saved after the messages: {storage.Save(world, world.Unsaved.Actors)}");
+Console.WriteLine($"saved after the messages: {storage.Save(world)}");
 
 // A second world, as after a restart: the actors come back with what was saved.
 using var restarted = new World();
