@@ -26,6 +26,10 @@ Follow AGENTS.md (performance first, zero allocation on hot paths, structural ga
   exceptions in the middle of a pass. Exception messages name the call that was refused.
 - **Hot paths**: allocations (allocation tests: 0 B), bounds checks, inlining, cache lines, a lookup done twice
   (`Has` then `Get`).
+- **Word loops** (any walk of a table by 64-row words: batch, masked, structural, bulk, query enumerators): a word
+  without a passing row jumps with `RowFilter.NextPassing`, a run of whole words with `WholeEnd`, and a Changed
+  filter's unwritten words with `NextWord`. A loop that tests every word costs a few rows in a large table as much as
+  a scan (`SparseBenchmark.PassOverTheFew`).
 
 ## Rules for fixes
 

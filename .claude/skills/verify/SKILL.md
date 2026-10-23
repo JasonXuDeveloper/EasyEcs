@@ -22,6 +22,9 @@ bash templates/smoke.sh                          # dotnet new templates pack, bu
   and commit `docs/public/demo` (Cloudflare has no .NET).
 - Changed a public XML doc comment? ApiDocs reports the stale Chinese entry in `tools/ApiDocs/zh/`; fix its text and hash.
 - Renamed a heading anchor? `bun run build` runs `lint:search`: update `docs/scripts/search-expectations.json`.
+- Changed a hot path? `tools/bench.sh <classes> --sync` (its classes and WorldSimulation, BattleServer, the
+  neighbors): `--sync` lists the rows that moved 15 % or allocate differently. Each slower row or new allocation is
+  run against `origin/master` (two rounds, the copy outside the repo) and fixed or explained before the numbers ship.
 - Long commands (`bun run build`, the demo, BenchmarkDotNet) run in the background.
 
 ## Landing
