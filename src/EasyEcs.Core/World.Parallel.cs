@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace EasyEcs;
@@ -253,7 +254,7 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Runs one piece of work at a time; items are claimed through <see cref="_cursor"/>: the run's epoch in the high
+    /// Runs one piece of work at a time; items are claimed through <c>Claims.Cursor</c>: the run's epoch in the high
     /// 32 bits, the next item index in the low 32. A helper that starts late (after its run finished) sees another
     /// epoch and leaves without touching the next run's state. The caller always takes part, so a run completes even
     /// when the thread pool is busy and no helper starts.
@@ -261,17 +262,25 @@ public sealed partial class World
     private sealed class Runner
     {
         private readonly Helper[] _helpers;
-        private readonly bool _measure; // helpers sum what they allocate running items (_allocated)
+        private readonly bool _measure; // helpers sum what they allocate running items (Claims.Allocated)
         private int _busy;
 
-        // Written by the caller before the epoch is published, read by participants after claiming in that epoch.
+        // Written by the caller before the epoch is published, read by participants after claiming in that epoch: a
+        // read-mostly line, apart from the cursor every claim writes and the sums each participant adds to as it leaves.
         private ParallelWork _work;
         private int _count;
-        private long _cursor;
-        private int _remaining;
-        private long _spent; // the items' summed thread time
-        private long _allocated; // bytes helpers allocated running items (_measure)
         private Exception _error;
+        private Claims _claims;
+
+        /// <summary>The cursor alone on its line (a compare-exchange per item), the sums on the next.</summary>
+        [StructLayout(LayoutKind.Explicit, Size = 3 * Archetype.CacheLine)]
+        private struct Claims
+        {
+            [FieldOffset(Archetype.CacheLine)] public long Cursor;
+            [FieldOffset(2 * Archetype.CacheLine)] public int Remaining;
+            [FieldOffset(2 * Archetype.CacheLine + 8)] public long Spent; // the items' summed thread time
+            [FieldOffset(2 * Archetype.CacheLine + 16)] public long Allocated; // bytes helpers allocated running items (_measure)
+        }
 
         public Runner(int helpers, bool measure)
         {
@@ -292,7 +301,7 @@ public sealed partial class World
             try
             {
                 Run(work, count);
-                allocated = _allocated; // read while the runner is still this run's
+                allocated = _claims.Allocated; // read while the runner is still this run's
             }
             finally
             {
@@ -308,17 +317,18 @@ public sealed partial class World
             // Close the last run's claims first: a late participant of it that read its cursor before this can no longer
             // claim (its compare-exchange fails), and one reading after it finds no item. Without this, one that read
             // the cursor at its end and then the larger _count of this run would claim an item of this run under the
-            // old epoch: that item would run twice and _remaining never reach zero.
-            Interlocked.Exchange(ref _cursor, (_cursor & ~0xFFFFFFFFL) | int.MaxValue);
+            // old epoch: that item would run twice and Remaining never reach zero.
+            ref var claims = ref _claims;
+            Interlocked.Exchange(ref claims.Cursor, (claims.Cursor & ~0xFFFFFFFFL) | int.MaxValue);
             _work = work;
             _count = count;
             _error = null;
-            _remaining = count;
-            _spent = 0;
-            _allocated = 0;
-            int epoch = (int)(_cursor >> 32) + 1;
+            claims.Remaining = count;
+            claims.Spent = 0;
+            claims.Allocated = 0;
+            int epoch = (int)(claims.Cursor >> 32) + 1;
             // Publishes the fields above: a participant reads them only after a successful claim in this epoch.
-            Interlocked.Exchange(ref _cursor, (long)epoch << 32);
+            Interlocked.Exchange(ref claims.Cursor, (long)epoch << 32);
 
             bool wide = work.Wide(out bool sample);
             long start = Stopwatch.GetTimestamp();
@@ -336,23 +346,27 @@ public sealed partial class World
             // Every item is claimed: at most one item per helper is still running. Spin and yield (never sleep, never
             // block): a blocking event allocates its lock the first time it waits.
             var spinner = new SpinWait();
-            while (Volatile.Read(ref _remaining) != 0) spinner.SpinOnce(sleep1Threshold: -1);
-            if (sample) work.Took(wide, Stopwatch.GetTimestamp() - start, Volatile.Read(ref _spent));
+            while (Volatile.Read(ref claims.Remaining) != 0) spinner.SpinOnce(sleep1Threshold: -1);
+            if (sample) work.Took(wide, Stopwatch.GetTimestamp() - start, Volatile.Read(ref claims.Spent));
             if (_error != null) ExceptionDispatchInfo.Throw(_error);
         }
 
         private void Work(int epoch, bool helper)
         {
             bool measure = helper && _measure;
+            ref var claims = ref _claims;
+            // Summed here and added once on leaving, after the participant's last item: the caller sees Remaining at 0
+            // only when every participant has left, so it reads complete sums.
+            int done = 0;
+            long spent = 0, allocated = measure ? GC.GetAllocatedBytesForCurrentThread() : 0;
             while (true)
             {
-                long cursor = Volatile.Read(ref _cursor);
+                long cursor = Volatile.Read(ref claims.Cursor);
                 int index = (int)cursor;
-                if ((int)(cursor >> 32) != epoch || index >= _count) return;
-                if (Interlocked.CompareExchange(ref _cursor, cursor + 1, cursor) != cursor) continue;
+                if ((int)(cursor >> 32) != epoch || index >= _count) break;
+                if (Interlocked.CompareExchange(ref claims.Cursor, cursor + 1, cursor) != cursor) continue;
 
                 long start = Stopwatch.GetTimestamp();
-                long allocated = measure ? GC.GetAllocatedBytesForCurrentThread() : 0;
                 try
                 {
                     _work.Run(index);
@@ -362,11 +376,14 @@ public sealed partial class World
                     Interlocked.CompareExchange(ref _error, e, null);
                 }
 
-                // Added before the item counts as done: the caller reads the sums once the last one is.
-                Interlocked.Add(ref _spent, Stopwatch.GetTimestamp() - start);
-                if (measure) Interlocked.Add(ref _allocated, GC.GetAllocatedBytesForCurrentThread() - allocated);
-                Interlocked.Decrement(ref _remaining);
+                spent += Stopwatch.GetTimestamp() - start;
+                done++;
             }
+
+            if (done == 0) return; // a late helper: it touches nothing of the run
+            Interlocked.Add(ref claims.Spent, spent);
+            if (measure) Interlocked.Add(ref claims.Allocated, GC.GetAllocatedBytesForCurrentThread() - allocated);
+            Interlocked.Add(ref claims.Remaining, -done);
         }
 
         private sealed class Helper(Runner runner) : IThreadPoolWorkItem

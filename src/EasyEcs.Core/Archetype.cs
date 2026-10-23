@@ -449,6 +449,44 @@ internal sealed class Archetype
     }
 
     /// <summary>
+    /// <see cref="StampVisited{T}"/> with the change-tick column of <typeparamref name="T"/> looked up once
+    /// (<see cref="Visiting{T}"/>): a pass that may change structure stamps row after row through it, and ends at the
+    /// first structural change (a reallocation bumps StorageVersion), so its refs stay valid while it is used.
+    /// </summary>
+    public ref struct VisitStamp
+    {
+        internal Archetype Table;
+        internal ref RowTick Ticks;
+        internal ref WordTicks Words;
+        internal int Column;
+
+        /// <summary>Stamps row <paramref name="slot"/> at <paramref name="tick"/> (nothing when <typeparamref name="T"/> tracks no changes).</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Visit<T>(int slot, ulong tick) where T : struct, IComponent
+        {
+            if (default(T) is not ITracked) return; // a JIT-time constant: the stamp is default then
+            ref var word = ref Unsafe.Add(ref Words, slot >> 6);
+            if (word.Rest != tick) Table.NoteVisitedWord(Column, slot, tick, ref word);
+            Unsafe.Add(ref Ticks, slot).Value = tick;
+        }
+    }
+
+    /// <summary>The <see cref="VisitStamp"/> of <typeparamref name="T"/> (default when it tracks no changes).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public VisitStamp Visiting<T>() where T : struct, IComponent
+    {
+        if (default(T) is not ITracked) return default;
+        int column = TicksColumn<T>();
+        return new VisitStamp
+        {
+            Table = this,
+            Ticks = ref Data<RowTick>(column),
+            Words = ref Summary(Words, column, 0),
+            Column = column,
+        };
+    }
+
+    /// <summary>
     /// The summaries of <see cref="StampVisited{T}"/> alone: they then cover any row of the word stamped at
     /// <paramref name="tick"/> with <see cref="StampRowTick{T}"/> (a pass notes each word once).
     /// </summary>
@@ -467,7 +505,7 @@ internal sealed class Archetype
         if (word.Rest != tick) NoteVisitedWord(column, slot, tick, ref word);
     }
 
-    private void NoteVisitedWord(int column, int slot, ulong tick, ref WordTicks word)
+    internal void NoteVisitedWord(int column, int slot, ulong tick, ref WordTicks word)
     {
         // Rest == Write: Rows is not read until a later tick notes the word again (NoteWord).
         word.Rest = tick;

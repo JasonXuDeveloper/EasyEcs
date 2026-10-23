@@ -527,8 +527,9 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             var archetype = archetypes[ai];
                             var rows = new RowFilter(match.Filters[ai], filter.Tick);
                             var (first, count) = filter.Rows(ai, archetype.Count); // all rows, or a slice's
-                            if (archetype.AliveCount == 0 || rows.Mode(archetype) == RowFilter.None || first >= count) continue;
-                            ForEachBatchChunk<{{tps}}, TJob>(ref job, archetype, rows, first, count, {{bits}});
+                            int mode = rows.Mode(archetype);
+                            if (archetype.AliveCount == 0 || mode == RowFilter.None || first >= count) continue;
+                            ForEachBatchRuns<{{tps}}, TJob>(ref job, archetype, rows, mode == RowFilter.Test, first, count, {{bits}});
                         }
                     }
 
@@ -623,7 +624,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 continue;
                             }
 
-                            ForEachBatchChunk<{{tps}}, TJob>(ref job, archetype, rows, first, count, {{bits}}); // every row passes: runs
+                            ForEachBatchRuns<{{tps}}, TJob>(ref job, archetype, rows, false, first, count, {{bits}}); // every row passes: runs
                         }
                     }
 
@@ -636,10 +637,19 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     private void ForEachBatchChunk<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int start, int end, {{List(n, i => $"ushort b{i}")}})
                 {{cons}}
                         where TJob : struct, IForEachBatch<{{tps}}>, allows ref struct
+                        => ForEachBatchRuns<{{tps}}, TJob>(ref job, archetype, rows, rows.Mode(archetype) == RowFilter.Test, start, end, {{bits}});
+
+                    /// <summary>
+                    /// <c>ForEachBatchChunk</c> with the table's mode known (<paramref name="test"/>: its rows must be tested),
+                    /// which the sequential passes have computed already.
+                    /// </summary>
+                    private void ForEachBatchRuns<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, bool test, int start, int end, {{List(n, i => $"ushort b{i}")}})
+                {{cons}}
+                        where TJob : struct, IForEachBatch<{{tps}}>, allows ref struct
                     {
                         ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
                 {{Lines(n, i => $"        ref T{i} r{i} = ref archetype.Base<T{i}>(b{i});")}}
-                        if (rows.Mode(archetype) == RowFilter.Test)
+                        if (test)
                         {
                             for (int at = start; rows.NextRun(archetype, ref at, end, out int length); at += length)
                             {
@@ -854,7 +864,15 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
     /// <summary>Stamp row <paramref name="row"/> of every component the job writes (only tracked ones emit code).</summary>
     private static string StampRow(int n, string indent, string row) =>
-        Lines(n, i => $"{indent}    if ((TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0) archetype.StampVisited<T{i}>({row}, _changeTick);");
+        Lines(n, i => $"{indent}    if ((TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0) s{i}.Visit<T{i}>({row}, tick);");
+
+    /// <summary>
+    /// The stamps of <see cref="StampRow"/>, looked up once per call of a loop that ends at a structural change, and the
+    /// pass's tick.
+    /// </summary>
+    private static string Stamps(int n, string indent) =>
+        $"{indent}    ulong tick = _changeTick;\n" +
+        Lines(n, i => $"{indent}    var s{i} = (TJob.WriteMask & ~TJob.SelfStamped & {1 << (i - 1)}) != 0 ? archetype.Visiting<T{i}>() : default;");
 
     /// <summary>A run of <paramref name="length"/> rows from <paramref name="start"/>: stamped, then the job's batch Execute.</summary>
     private static string BatchRun(int n, string indent, string start, string length) =>
@@ -1017,11 +1035,12 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     ref EntityId idp = ref Unsafe.Add(ref slots, start);
                     ref EntityId end = ref Unsafe.Add(ref slots, count);
             {{startAt}}
+            {{Stamps(n, "        ")}}
                     for (; Unsafe.IsAddressLessThan(ref idp, ref end); idp = ref Unsafe.Add(ref idp, 1), {{advance}})
                     {
                         if (typeof(TRows) == typeof(Tombstones) && idp.Index < 0) continue; // a JIT-time test
 
-            {{StampRow(n, "            ", "(int)(Unsafe.ByteOffset(ref slots, ref idp) / Unsafe.SizeOf<EntityId>())")}}
+            {{StampRow(n, "            ", "(int)((nuint)Unsafe.ByteOffset(ref slots, ref idp) / (nuint)Unsafe.SizeOf<EntityId>())")}}
                         {{execute}}
 
                         if (Volatile.Read(ref seen) != StorageVersion)
@@ -1113,6 +1132,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     int seen = StorageVersion;
                     ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
             {{Lines(n, i => $"            ref T{i} c{i} = ref archetype.Base<T{i}>(b{i});")}}
+            {{Stamps(n, "        ")}}
                     for (; pass != 0; pass &= pass - 1)
                     {
                         int row = (w << 6) + BitOperations.TrailingZeroCount(pass);
