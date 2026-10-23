@@ -37,7 +37,9 @@ public sealed partial class EasyEcsAnalyzer
         "threads, and merge nothing back unless the job merges (Merges): the job passed by ref keeps the values it had before the " +
         "call. A field Execute writes (a sum, a count, a flag) and the caller reads afterwards holds its old value. Run the job " +
         "on one thread (ForEach, ForEachEntity, ForEachBatch), " +
-        "which writes the job back, or write the results into the rows.",
+        "which writes the job back, or write the results into the rows. A job's own Merges that returns the constant false " +
+        "merges nothing and is reported; one whose value is not a constant (an auto-property, a field, a computation) is taken " +
+        "as merging and is not.",
         helpLinkUri: Help("EECS061"));
 
     public static readonly DiagnosticDescriptor SharedRandom = new("EECS071", "Random numbers a [ForEach] method cannot repeat",
@@ -307,7 +309,7 @@ public sealed partial class EasyEcsAnalyzer
 
         // EECS061: the first use of the job local after the call reads a field Execute writes; a job that merges
         // its chunks' copies back (Merges, as generated jobs with Reduce<T> do) keeps them.
-        if (Merges(job, face)) return;
+        if (Merges(job, face, model, context.CancellationToken)) return;
         var own = new HashSet<ISymbol>(writes.Where(w => !w.Shared).Select(w => w.Symbol), SymbolEqualityComparer.Default);
         if (own.Count == 0 || call.Arguments.FirstOrDefault(a => a.Parameter?.Name == "job")?.Value is not ILocalReferenceOperation { Local: var local }) return;
         int after = call.Syntax.Span.End;
@@ -359,10 +361,34 @@ public sealed partial class EasyEcsAnalyzer
 
     /// <summary>
     /// Whether the job merges its chunks' copies back into the caller's (<c>Merges</c>, implicitly or explicitly
-    /// implemented: generated jobs with a <c>Reduce&lt;T&gt;</c> do). The interface's own default merges nothing.
+    /// implemented: generated jobs with a <c>Reduce&lt;T&gt;</c> do). The interface's own default merges nothing, and
+    /// neither does a <c>Merges</c> of the job that returns the constant <c>false</c>; one whose value is not a
+    /// constant may merge, so the rule stays quiet (no false positive).
     /// </summary>
-    private static bool Merges(INamedTypeSymbol job, INamedTypeSymbol face) =>
-        face.GetMembers("Merges").FirstOrDefault() is { } member
-            ? job.FindImplementationForInterfaceMember(member) is { } merges && SymbolEqualityComparer.Default.Equals(merges.ContainingType, job)
-            : job.GetMembers("Merges").Length > 0;
+    private static bool Merges(INamedTypeSymbol job, INamedTypeSymbol face, SemanticModel model, System.Threading.CancellationToken token)
+    {
+        var merges = face.GetMembers("Merges").FirstOrDefault() is { } member
+            ? job.FindImplementationForInterfaceMember(member)
+            : job.GetMembers("Merges").FirstOrDefault();
+        if (merges is null || !SymbolEqualityComparer.Default.Equals(merges.ContainingType, job)) return false;
+        return merges is not IPropertySymbol property || Returned(property, model, token) is not false;
+    }
+
+    /// <summary>
+    /// The constant a property's getter returns: <c>=&gt; c</c>, <c>get =&gt; c</c> or <c>get { return c; }</c>, with
+    /// <c>c</c> a constant of the language (a literal, a const); null for any other body (an auto-property, a field read).
+    /// </summary>
+    private static bool? Returned(IPropertySymbol property, SemanticModel model, System.Threading.CancellationToken token)
+    {
+        var value = property.GetMethod?.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(token) switch
+        {
+            ArrowExpressionClauseSyntax arrow => arrow.Expression,
+            AccessorDeclarationSyntax { ExpressionBody: { } arrow } => arrow.Expression,
+            AccessorDeclarationSyntax { Body.Statements: { Count: 1 } statements } => (statements[0] as ReturnStatementSyntax)?.Expression,
+            _ => null,
+        };
+        return value is not null && Symbols.ModelOf(value.SyntaxTree, model).GetConstantValue(value, token) is { HasValue: true, Value: bool constant }
+            ? constant
+            : null;
+    }
 }
