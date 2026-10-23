@@ -777,6 +777,24 @@ internal static class Symbols
         return null;
     }
 
+    public const string GenericSystemCodeAttribute = "EasyEcs.GenericSystemCodeAttribute";
+
+    /// <summary>
+    /// The public code type (open) that <paramref name="system"/>'s assembly names for the generic system with
+    /// [assembly: GenericSystemCode], or null: an assembly built without it, or a system that is not public.
+    /// </summary>
+    public static INamedTypeSymbol? GenericSystemCode(INamedTypeSymbol system)
+    {
+        var definition = system.OriginalDefinition;
+        foreach (var attribute in system.ContainingAssembly.GetAttributes())
+            if (Named(attribute.AttributeClass, GenericSystemCodeAttribute) && attribute.ConstructorArguments.Length == 2
+                && attribute.ConstructorArguments[0].Value is INamedTypeSymbol named
+                && SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, definition)
+                && attribute.ConstructorArguments[1].Value is INamedTypeSymbol code)
+                return code.OriginalDefinition;
+        return null;
+    }
+
     /// <summary>
     /// The [UpdateInterval(n, Phase = p)] of a system type (its own, not a base's), or null without one. Invalid values
     /// are <see cref="ScheduleProblem"/>'s.

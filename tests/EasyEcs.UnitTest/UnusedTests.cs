@@ -15,8 +15,9 @@ namespace EasyEcs.UnitTest;
 /// </summary>
 public class UnusedTests
 {
-    // Stands in for the IDE's analyzer (not referenced by the tests): IDE0051 on every private method.
-    [DiagnosticAnalyzer(Microsoft.CodeAnalysis.LanguageNames.CSharp)]
+    // Stands in for the IDE's analyzer (not referenced by the tests): IDE0051 on every private method. Run by the test
+    // only, so the rules for shipped analyzers do not apply.
+#pragma warning disable RS1001, RS1036, RS2008
     private sealed class PrivateMethods : DiagnosticAnalyzer
     {
         private static readonly DiagnosticDescriptor Rule = new("IDE0051", "Remove unused private members", "'{0}' is unused", "Style", DiagnosticSeverity.Warning, true);
@@ -35,6 +36,7 @@ public class UnusedTests
             }, Microsoft.CodeAnalysis.CSharp.SyntaxKind.MethodDeclaration);
         }
     }
+#pragma warning restore RS1001, RS1036, RS2008
 
     [Test]
     public async Task MethodsTheGeneratedCodeCallsAreNotUnused()

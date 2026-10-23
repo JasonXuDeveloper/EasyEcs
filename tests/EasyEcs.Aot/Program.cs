@@ -48,6 +48,16 @@ for (int i = 0; i < 30; i++) server.Tick();
 Check(server.Failure is null, "the loaded battle plays on");
 Check(server.Tables().Length > 0 && server.Slowest() is not null, "introspection");
 
+// A generic system of another assembly closed here: this assembly's generator registers the closed code (no
+// MakeGenericMethod, which Native AOT cannot run for a value type it never compiled).
+using (var healing = new World())
+{
+    healing.AddSystem<EasyEcs.Aot.Library.Regen<Life>>();
+    var patient = healing.CreateEntity(new Life { Value = 0 });
+    for (int i = 0; i < 4; i++) healing.Update();
+    Check(patient.Read<Life>().Value == 2, "a library's generic system runs on every second update");
+}
+
 Console.WriteLine($"AOT battle: {battle.Tick} ticks, {battle.Hits} hits, {battle.Deaths} deaths, {server.World.EntityCount} entities");
 return 0;
 
@@ -56,4 +66,9 @@ static void Check(bool ok, string what)
     if (ok) return;
     Console.Error.WriteLine("failed: " + what);
     Environment.Exit(1);
+}
+
+struct Life : EasyEcs.Aot.Library.ILife
+{
+    public int Value { get; set; }
 }

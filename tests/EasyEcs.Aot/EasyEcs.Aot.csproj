@@ -14,6 +14,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\src\EasyEcs.Core\EasyEcs.Core.csproj"/>
+        <ProjectReference Include="..\EasyEcs.Aot.Library\EasyEcs.Aot.Library.csproj"/>
         <ProjectReference Include="..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
         <!-- compiled unchanged, as in the unit tests -->
         <Compile Include="..\..\benchmarks\EasyEcs.Benchmark\BattleServer.cs" Link="BattleServer.cs"/>

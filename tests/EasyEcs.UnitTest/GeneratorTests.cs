@@ -687,6 +687,60 @@ public class GeneratorTests
         finally { context.Unload(); }
     }
 
+    [Test]
+    public void AGenericSystemOfAnotherAssemblyIsRegisteredWhereItIsClosed()
+    {
+        // A library's public generic system, closed over a component of the user's assembly: the library cannot name the
+        // closed type, the user's generator registers its code (no MakeGenericMethod at run time: Native AOT, WebAssembly).
+        // The user compiles against the reference assembly, where the private [ForEach] method is gone.
+        var library = CSharpCompilation.Create("Library",
+            [CSharpSyntaxTree.ParseText("""
+                using EasyEcs;
+                namespace Library;
+                public interface ILife : IComponent { int Value { get; set; } }
+                [UpdateInterval(2)]
+                public class Regen<T> : EcsSystem where T : struct, ILife { [ForEach] static void Heal(ref T t) => t.Value++; }
+                """, Parse)],
+            Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        Driver().RunGeneratorsAndUpdateCompilation(library, out var built, out _);
+        Assert.That(built.GetDiagnostics().Where(d => d.Severity >= DiagnosticSeverity.Warning), Is.Empty);
+        using var image = new System.IO.MemoryStream();
+        using var reference = new System.IO.MemoryStream();
+        Assert.That(built.Emit(image, metadataPEStream: reference).Success, Is.True);
+
+        var user = Compile("""
+            using Library;
+            public record struct Hp(int Value) : ILife { public int Value { get; set; } = Value; }
+            public static class Game
+            {
+                public static int Run(World world)
+                {
+                    world.AddSystem<Regen<Hp>>();
+                    var e = world.CreateEntity(new Hp(0));
+                    for (int i = 0; i < 4; i++) world.Update();
+                    return e.Read<Hp>().Value;
+                }
+            }
+            """).AddReferences(MetadataReference.CreateFromImage(reference.ToArray()));
+        Driver().RunGeneratorsAndUpdateCompilation(user, out var output, out _);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity >= DiagnosticSeverity.Warning), Is.Empty);
+        string registration = string.Concat(output.SyntaxTrees.Where(t => t.FilePath.EndsWith("__EasyEcsExternalSystems.g.cs")).Select(t => t.ToString()));
+        Assert.That(registration, Does.Contain("global::EasyEcs.SystemCode.Register<global::Library.__Regen_1_SystemCode<global::Hp>>(typeof(global::Library.Regen<global::Hp>));"), registration);
+
+        using var userImage = new System.IO.MemoryStream();
+        Assert.That(output.Emit(userImage).Success, Is.True);
+        var context = new System.Runtime.Loader.AssemblyLoadContext("library", isCollectible: true);
+        try
+        {
+            context.LoadFromStream(new System.IO.MemoryStream(image.ToArray()));
+            var game = context.LoadFromStream(new System.IO.MemoryStream(userImage.ToArray())).GetType("Game")!;
+            using var world = new World();
+            Assert.That(game.GetMethod("Run")!.Invoke(null, [world]), Is.EqualTo(2));   // every 2nd of 4 updates
+        }
+        finally { context.Unload(); }
+    }
+
     [TestCase("[ForEach] static void A(ref P p, ref int n, in int floor, int add) { }",
         "public static void A(global::EasyEcs.World world, ref int n, in int floor, int add)", "x1 = ref n, x2 = ref floor, x3 = add")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p, ref Clock c, int world) { }",
@@ -1350,7 +1404,7 @@ public class GeneratorTests
     // Every tracked stage of ComponentGenerator and SystemGenerator: a new stage is added here (the test fails until it is).
     private static readonly string[] TrackedStages =
     [
-        "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "ExtensionMembers", "BufferUses",
+        "ForEachMethods", "SystemUpdates", "ClosedSystems", "ExternalSystems", "SystemCode", "Components", "ExtensionMembers", "BufferUses",
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
         "GroupBy", "TargetPolicies", "NotSaved", "Schedules", "ForEntityMethods", "ForEntityTypes",
     ];

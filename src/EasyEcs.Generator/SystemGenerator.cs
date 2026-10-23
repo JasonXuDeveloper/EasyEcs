@@ -52,10 +52,19 @@ public sealed class SystemGenerator : IIncrementalGenerator
         updates = updates.Combine(closed)
             .Select(static (pair, _) => pair.Left with
             {
-                Closed = new EquatableArray<ClosedUse>(pair.Right.Where(c => c.Owner == pair.Left.Owner.FullName)
+                Closed = new EquatableArray<ClosedUse>(pair.Right.Where(c => c.Code.Length == 0 && c.Owner == pair.Left.Owner.FullName)
                     .Distinct().OrderBy(c => c.Closed, System.StringComparer.Ordinal).ToArray()),
             })
             .WithTrackingName("SystemCode");
+        // Closed types of other assemblies' public generic systems: this assembly registers their code.
+        var external = closed
+            .Select(static (all, _) => new EquatableArray<ClosedUse>(all.Where(c => c.Code.Length > 0).Distinct()
+                .OrderBy(c => c.Closed, System.StringComparer.Ordinal).ToArray()))
+            .WithTrackingName("ExternalSystems");
+        context.RegisterImplementationSourceOutput(external, static (spc, uses) =>
+        {
+            if (uses.Length > 0) spc.AddSource("__EasyEcsExternalSystems.g.cs", SourceText.From(EmitExternal(uses), Encoding.UTF8));
+        });
         // A system's code is reached only through its module initializer: implementation output, which IDEs skip while
         // typing. Entry points of other types are API the user's code calls.
         context.RegisterImplementationSourceOutput(updates.Where(static m => m.Owner.IsSystem), static (spc, model) => Add(spc, model));
@@ -74,8 +83,17 @@ public sealed class SystemGenerator : IIncrementalGenerator
         context.RegisterSourceOutput(entityTypes, static (spc, model) => Add(spc, model));
     }
 
-    private static void Add(SourceProductionContext context, UpdateModel model) =>
-        context.AddSource($"{model.Owner.HintName}.{(model.One ? "ForEntity" : "ForEach")}.g.cs", SourceText.From(Emit(model), Encoding.UTF8));
+    private static void Add(SourceProductionContext context, UpdateModel model)
+    {
+        var owner = model.Owner;
+        context.AddSource($"{owner.HintName}.{(model.One ? "ForEntity" : "ForEach")}.g.cs", SourceText.From(Emit(model), Encoding.UTF8));
+        if (model.One || !owner.IsSystem || !owner.IsPublic || owner.TypeParameters.Length == 0) return;
+        // Assembly attributes cannot follow the namespace of the code's file.
+        string ns = owner.Namespace.Length > 0 ? owner.Namespace + "." : "";
+        string open = $"global::{ns}{PublicCodeName(owner)}<{new string(',', owner.Arity - 1)}>";
+        context.AddSource($"{owner.HintName}.SystemCode.g.cs", SourceText.From(
+            $"{Header}\n[assembly: global::EasyEcs.GenericSystemCode(typeof({owner.Definition}), typeof({open}))]\n", Encoding.UTF8));
+    }
 
     // ---------------- emit ----------------
 
@@ -103,7 +121,42 @@ public sealed class SystemGenerator : IIncrementalGenerator
         bool system = owner.IsSystem && !model.One;
         if (system) EmitSystemCode(sb, model);
         sb.Append("}\n");
-        if (system && owner.TypeParameters.Length > 0) EmitGenericRegistration(sb, model);
+        if (system && owner.TypeParameters.Length > 0)
+        {
+            if (owner.IsPublic) EmitPublicCode(sb, model);
+            EmitGenericRegistration(sb, model);
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// A public generic system's code as a public struct, which [GenericSystemCode] names for the generators of
+    /// referencing assemblies: they register the closed types they name (Native AOT and WebAssembly cannot make them at run
+    /// time). It forwards to the file-local code, which a type of another file cannot name.
+    /// </summary>
+    private static void EmitPublicCode(StringBuilder sb, UpdateModel model)
+    {
+        var owner = model.Owner;
+        string code = $"__ForEach{owner.TypeParameters}.Code";
+        sb.Append($"\n[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
+        sb.Append($"public readonly struct {PublicCodeName(owner)}{owner.TypeParameters} : global::EasyEcs.ISystemCode{owner.Constraints}\n{{\n");
+        sb.Append($"    public static void Update(global::EasyEcs.EcsSystem system) => {code}.Update(system);\n\n");
+        sb.Append($"    public static void Access(ref global::EasyEcs.SystemAccess access) => {code}.Access(ref access);\n\n");
+        sb.Append($"    public static string[] Loops => {code}.Loops;\n");
+        if (model.Interval > 0) sb.Append($"\n    public static int Interval => {model.Interval};\n\n    public static int Phase => {model.Phase};\n");
+        if (owner.OverridesOnUpdate) sb.Append("\n    public static bool OverridesOnUpdate => true;\n");
+        sb.Append("}\n");
+    }
+
+    private static string PublicCodeName(OwnerModel owner) => $"__{owner.FlatName}_SystemCode";
+
+    /// <summary>The registrations of the closed types this assembly names of generic systems of referenced assemblies.</summary>
+    private static string EmitExternal(EquatableArray<ClosedUse> uses)
+    {
+        var sb = new StringBuilder(Header).Append('\n');
+        sb.Append($"file static class __EasyEcsExternalSystems\n{{\n    {Code.ModuleInitializer}\n    internal static void Register()\n    {{\n");
+        foreach (var use in uses) sb.Append($"        global::EasyEcs.SystemCode.Register<{use.Code}>(typeof({use.Closed}));\n");
+        sb.Append("    }\n}\n");
         return sb.ToString();
     }
 
@@ -1024,7 +1077,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// <param name="Owner">The generic definition as its OwnerModel names it (<c>global::Ns.Regen&lt;T&gt;</c>).</param>
     /// <param name="Closed">The closed type (<c>global::Ns.Regen&lt;global::Health&gt;</c>).</param>
     /// <param name="Arguments">Its type arguments, outermost first (<c>global::Health</c>).</param>
-    private sealed record ClosedUse(string Owner, string Closed, string Arguments)
+    /// <param name="Code">For a system of a referenced assembly, its public code type closed over the arguments (named
+    /// by the assembly's [GenericSystemCode]); "" for a system of this assembly.</param>
+    private sealed record ClosedUse(string Owner, string Closed, string Arguments, string Code = "")
     {
         public static bool IsCandidate(SyntaxNode node)
         {
@@ -1050,12 +1105,20 @@ public sealed class SystemGenerator : IIncrementalGenerator
             for (var t = type; t != null && !Symbols.Named(t, Symbols.EcsSystem); t = t.BaseType)
             {
                 var arguments = Symbols.ChainTypeArguments(t);
-                if (arguments.Count == 0 || !SymbolEqualityComparer.Default.Equals(t.ContainingAssembly, assembly)
-                    || !Symbols.IsVisible(t) || arguments.Any(a => !Symbols.IsNameable(a) || Symbols.ContainsTypeParameter(a))
-                    || !t.OriginalDefinition.GetMembers().OfType<IMethodSymbol>().Any(Symbols.IsForEach) && Symbols.Schedule(t.OriginalDefinition) == null)
+                if (arguments.Count == 0 || !Symbols.IsVisible(t) || arguments.Any(a => !Symbols.IsNameable(a) || Symbols.ContainsTypeParameter(a)))
+                    continue;
+                string code = "";
+                if (!SymbolEqualityComparer.Default.Equals(t.ContainingAssembly, assembly))
+                {
+                    // Another assembly's system: its code, if that assembly published it, closed here (no runtime code
+                    // generation under Native AOT). Private [ForEach] methods are not in a reference assembly.
+                    if (Symbols.GenericSystemCode(t) is not { } open) continue;
+                    code = open.Construct(arguments.ToArray()).ToDisplayString(Symbols.Fqn);
+                }
+                else if (!t.OriginalDefinition.GetMembers().OfType<IMethodSymbol>().Any(Symbols.IsForEach) && Symbols.Schedule(t.OriginalDefinition) == null)
                     continue;
                 uses.Add(new ClosedUse(t.OriginalDefinition.ToDisplayString(Symbols.Fqn), t.ToDisplayString(Symbols.Fqn),
-                    string.Join(", ", arguments.Select(a => a.ToDisplayString(Symbols.Fqn)))));
+                    string.Join(", ", arguments.Select(a => a.ToDisplayString(Symbols.Fqn))), code));
             }
 
             return new(uses.ToArray());

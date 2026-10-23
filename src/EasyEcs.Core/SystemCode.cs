@@ -39,6 +39,22 @@ public interface ISystemCode
 }
 
 /// <summary>
+/// Names the public code type of a public generic system (an open <see cref="ISystemCode"/> struct over the system's type
+/// parameters), so that the generator of an assembly that closes the system registers the closed code itself: no
+/// runtime code generation, as Native AOT and WebAssembly need. Written by the generator, read by it in referencing
+/// assemblies.
+/// </summary>
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true), EditorBrowsable(EditorBrowsableState.Never)]
+public sealed class GenericSystemCodeAttribute(Type system, Type code) : Attribute
+{
+    /// <summary>The generic system's definition (<c>typeof(Regen&lt;&gt;)</c>).</summary>
+    public Type System { get; } = system;
+
+    /// <summary>Its code's definition, open over the same type parameters.</summary>
+    public Type Code { get; } = code;
+}
+
+/// <summary>
 /// The registry of generated system code (<see cref="ISystemCode"/>), filled by a module initializer per system type;
 /// <see cref="World.AddSystem"/> collects the code of the system's type and of its base types (base first, across
 /// assemblies). Called by generated code only.
@@ -134,6 +150,10 @@ public static unsafe class SystemCode
     [UnconditionalSuppressMessage("Trimming", "IL2055", Justification = "The code type is a struct of static members the generated code names")]
     [UnconditionalSuppressMessage("Trimming", "IL2060", Justification = "Of<TCode> only reads static members the generated code names")]
     [UnconditionalSuppressMessage("Trimming", "IL2071", Justification = "The code type is a struct of static members the generated code names")]
-    private static Entry Close(Type open, Type system) =>
-        (Entry)OfDefinition.MakeGenericMethod(open.MakeGenericType(system.GetGenericArguments())).Invoke(null, null)!;
+    private static Entry Close(Type open, Type system)
+    {
+        if (!RuntimeFeature.IsDynamicCodeSupported)
+            throw new NotSupportedException($"No generated code is registered for {system}: under Native AOT, name the closed type in a project that references EasyEcs.Generator (AddSystem<{system.Name}>(), new, typeof or a base type), and it registers the code itself.");
+        return (Entry)OfDefinition.MakeGenericMethod(open.MakeGenericType(system.GetGenericArguments())).Invoke(null, null)!;
+    }
 }
