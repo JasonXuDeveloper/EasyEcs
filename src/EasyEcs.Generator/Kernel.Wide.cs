@@ -83,7 +83,7 @@ internal sealed partial class Kernel
     private static WideLayout? WideComponent(IParameterSymbol p, List<(IFieldSymbol[] Path, ISymbol[] Access)>? used, HashSet<IParameterSymbol> whole, Compilation compilation)
     {
         if (used == null || whole.Contains(p) || p.Type is not INamedTypeSymbol { TypeKind: TypeKind.Struct, IsGenericType: false } type
-            || type.GetAttributes().Any(a => a.AttributeClass?.Name == "StructLayoutAttribute") || type.DeclaringSyntaxReferences.Length > 1
+            || type.GetAttributes().Any(a => a.AttributeClass?.Name == "StructLayoutAttribute") || Symbols.FieldsInSeveralParts(type)
             || Layout(type, 0, out int size, out _) is not { } leaves || size % 4 != 0 || size / 4 > Words)
             return null;
         var lanes = new List<(IFieldSymbol[] Path, ISymbol[] Access, int Word)>();
@@ -410,7 +410,7 @@ internal sealed partial class Kernel
     private static string Split(ITypeSymbol type, IFieldSymbol[][] used)
     {
         // Only for a component too wide or too mixed for the loop: a plain sequential struct of values.
-        if (type is not INamedTypeSymbol { TypeKind: TypeKind.Struct, IsGenericType: false, DeclaringSyntaxReferences.Length: <= 1 } named
+        if (type is not INamedTypeSymbol { TypeKind: TypeKind.Struct, IsGenericType: false } named || Symbols.FieldsInSeveralParts(named)
             || named.GetAttributes().Any(a => a.AttributeClass?.Name == "StructLayoutAttribute"))
             return "";
         int all = Layout(named, 0, out _, out _)?.Count ?? 0;

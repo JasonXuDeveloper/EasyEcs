@@ -111,6 +111,36 @@ internal static class Symbols
     /// a type name binds without the member; -1 outside a member body (a declaration's own types bind alone already)
     /// or in top-level statements.
     /// </summary>
+    /// <summary>
+    /// Whether the instance fields of <paramref name="type"/> come from more than one of its parts, so their order in
+    /// memory is not defined. A part without fields (a generated [IndexKey] or [Sum] part, a part of methods) does not
+    /// count: the generator sees the type without the generated parts and the analyzer with them, and both must agree.
+    /// </summary>
+    public static bool FieldsInSeveralParts(INamedTypeSymbol type)
+    {
+        if (type.DeclaringSyntaxReferences.Length <= 1) return false;
+        int parts = 0;
+        foreach (var reference in type.DeclaringSyntaxReferences)
+            if (reference.GetSyntax() is TypeDeclarationSyntax part && DeclaresFields(part) && ++parts > 1) return true;
+        return false;
+    }
+
+    private static bool DeclaresFields(TypeDeclarationSyntax part)
+    {
+        if (part.ParameterList is { Parameters.Count: > 0 }) return true; // primary constructor parameters may become fields
+        foreach (var member in part.Members)
+            switch (member)
+            {
+                case FieldDeclarationSyntax field when !field.Modifiers.Any(SyntaxKind.StaticKeyword) && !field.Modifiers.Any(SyntaxKind.ConstKeyword):
+                    return true;
+                case PropertyDeclarationSyntax { AccessorList: { } accessors } property
+                    when !property.Modifiers.Any(SyntaxKind.StaticKeyword) && property.ExpressionBody == null
+                         && accessors.Accessors.All(a => a.Body == null && a.ExpressionBody == null):
+                    return true; // an auto-property has a backing field
+            }
+        return false;
+    }
+
     public static int Outside(SyntaxNode node)
     {
         bool body = false;

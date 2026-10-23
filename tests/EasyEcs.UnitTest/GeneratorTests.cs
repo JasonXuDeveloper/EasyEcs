@@ -190,6 +190,8 @@ public class GeneratorTests
         public struct Odd : IComponent { public float X, Y; public Odd(float x, float y) { X = x; Y = x + y; } }
         public partial struct Split : IComponent { public float A; }
         public partial struct Split { public float B; }
+        public partial struct Keyed : IComponent { public float V; }      // a second part without fields keeps the loop
+        public partial struct Keyed { public override string ToString() => V.ToString(); }
         public struct Unit : IComponent { public float Speed; public bool Alive; public byte Team; public int Hp; }
         public struct Sixteen : IComponent { public float F0, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F14, F15; }
         public record struct G(float Pull) : ISingletonComponent;
@@ -202,7 +204,8 @@ public class GeneratorTests
     // Kernel.cs: a method on one lane type with vector counterparts for its operations gets a Vector<T> loop.
     [TestCase("[ForEach] static void A(ref F f, in H h) => f.V += h.V * 2;", true)]
     [TestCase("[ForEach] static void A(ref F f, in H h) { if (h.V > 0) return; f.V = h.V > 1 ? 1 : System.MathF.Sqrt(h.V); }", true)]
-    [TestCase("[ForEach] static void A(ref F f, in G g) => f.V -= g.Pull;", true)]                     // a singleton: uniform
+    [TestCase("[ForEach] static void A(ref F f, in G g) => f.V -= g.Pull;", true)]
+    [TestCase("[ForEach] static void A(ref Keyed k) => k.V++;", true)]                                  // parts without fields                     // a singleton: uniform
     [TestCase("[ForEach] static void A(ref P p) => p.V = (p.V << 2) | 1;", true)]
     [TestCase("[ForEach] static void A(ref F f, in P p) => f.V = p.V;", true)]                         // int to float: one size
     [TestCase("[ForEach] static void A(ref F f, in D d) => f.V = (float)d.V;", false)]                 // float and double
@@ -265,7 +268,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.Math.Clamp(f.V, 2, 1);", "Math.Clamp's min is above its max, so the call throws")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Round(f.V, 2);", "MathF.Round is not supported")]
     [TestCase("[ForEach] static void A(ref F f) => f.V %= 2;", "'%' is not supported (no vector remainder)")]
-    [TestCase("[ForEach] static void A(ref Split s) => s.A++;", "component Split is declared in several parts, so the order of its fields is not defined")]
+    [TestCase("[ForEach] static void A(ref Split s) => s.A++;", "component Split declares fields in several parts, so the order of its fields is not defined")]
     [TestCase("[ForEach] static void A(ref P p) => p.V = System.Math.Abs(p.V);", "Math.Abs of an integer is not supported (it throws on MinValue)")]
     [TestCase("[ForEach] static void A(ref P p) => p.V /= 3;", "integer division is not supported (it throws on 0)")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x;", "it calls S.M")]

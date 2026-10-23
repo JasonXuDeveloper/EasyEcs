@@ -592,8 +592,8 @@ internal sealed partial class Kernel
     {
         if (type is not INamedTypeSymbol { TypeKind: TypeKind.Struct } named) throw new Unsupported($"{what} is not a struct");
         if (named.IsGenericType) throw new Unsupported($"{what} is generic");
-        if (named.DeclaringSyntaxReferences.Length > 1)
-            throw new Unsupported($"{what} is declared in several parts, so the order of its fields is not defined");
+        if (Symbols.FieldsInSeveralParts(named))
+            throw new Unsupported($"{what} declares fields in several parts, so the order of its fields is not defined");
         var fields = named.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray();
         if (fields.Length == 0) throw new Unsupported($"{what} has no fields");
         var paths = new List<IFieldSymbol[]>();

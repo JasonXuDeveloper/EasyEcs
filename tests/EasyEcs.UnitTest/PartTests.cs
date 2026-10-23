@@ -246,6 +246,31 @@ public class PartTests
         Assert.That(world.Count<Health>(QueryFilter.Create().InGroup<Terrain>((int)Biome.Snow)), Is.EqualTo(1));
     }
 
+    public struct Dug : IComponent { public int Total; }
+
+    /// <summary>
+    /// A vector loop over a component with an [IndexKey] part: the generated part declares no field, so the field order is
+    /// defined (with SimdMode.Require, a method left scalar would not compile: EECS056).
+    /// </summary>
+    public class AddDug : EcsSystem
+    {
+        [ForEach(SimdMode = SimdMode.Require)]
+        static void Add(in Miner miner, ref Dug dug) => dug.Total += miner.BlocksDug;
+    }
+
+    [Test]
+    public void AKeyedComponentKeepsItsVectorLoop()
+    {
+        using var world = new World();
+        for (int i = 0; i < 100; i++) world.CreateEntity(new Miner { BlocksDug = i }, new Dug { Total = 1 });
+        world.AddSystem<AddDug>();
+        world.Update();
+        int sum = 0;
+        foreach (var item in world.Query<Miner, Dug>()) sum += item.Dug.Total - item.Miner.BlocksDug;
+        Assert.That(sum, Is.EqualTo(100));
+        Assert.That(world.Index<Miner, int>().Count(7), Is.EqualTo(1));
+    }
+
     /// <summary>A unique index declared by [UniqueKey], found by key from a parallel pass (the system's access and lookup see the key).</summary>
     public class FindSubscriber : EcsSystem
     {
