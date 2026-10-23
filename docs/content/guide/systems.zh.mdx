@@ -13,7 +13,8 @@ icon: Cog
 
 <Callout type="idea" title="适合">
   所有每个 tick 都要跑的行为：一个系统负责一件事，一个 `[ForEach]` 方法对应一个循环，用 `[UpdateAfter<T>]` 排顺序，用分组区分节奏
-  （输入随到随处理，模拟按固定 tick 跑），用 `UpdateInterval` 处理每 N 个 tick 才做一次的工作，用 [`Slices`](#slices) 把工作摊到几个 tick 上。用[分组过滤](#group-filters)
+  （输入随到随处理，模拟按固定 tick 跑），用 [`[UpdateInterval(N)]`](#update-interval) 处理每 N 个 tick 才做一次的工作，用 [`Slices`](#slices) 把工作摊到几个 tick 上，
+  用 [`[Consume]`](#consume) 处理只需处理一次的事件实体。用[分组过滤](#group-filters)
   把整组系统限定在一种实体上；用泛型分组接口给每个类型各配一个分组（每种 actor 一个分组）。
 </Callout>
 
@@ -139,6 +140,43 @@ public class SaveSystem : EcsSystem
     protected override void OnUpdate() => World.GetOrAddAutosave().Count++;
 }
 ```
+
+要写的只有这个特性：生成器把节奏写进它为系统注册的代码，World 在添加系统时读一次。
+
+<Tabs items={['你写的', '生成器写的']}>
+<Tab value="你写的">
+
+```csharp doccheck=skip
+[UpdateInterval(60, Phase = 30)]
+public class SaveSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.GetOrAddAutosave().Count++;
+}
+```
+
+</Tab>
+<Tab value="生成器写的">
+
+```csharp doccheck=skip
+file static class __ForEach
+{
+    internal sealed class Code : SystemCode
+    {
+        public Code() : base(60, 30) { }                       // [UpdateInterval(60, Phase = 30)]
+
+        protected override void Update(EcsSystem system) { }   // 没有 [ForEach] 方法：工作都在 OnUpdate 里
+    }
+
+    [ModuleInitializer]
+    internal static void Register() => SystemCode.Register(typeof(SaveSystem), new Code());
+}
+```
+
+</Tab>
+</Tabs>
+
+运行时才算出来的节奏写不成特性：把系统放进一个[系统分组](#system-groups)，到时候再更新这个分组。重写已删除的 `UpdateInterval` /
+`UpdatePhase` 属性报 [EECS082](/zh/docs/guide/analyzer#eecs082)，它的代码修复会改写成特性。
 
 ### 分片：每次运行只处理一部分行 [#slices]
 
@@ -321,13 +359,39 @@ public class Rally : EcsSystem
 
 ### `[Consume]`：遍历之后销毁事件 [#consume]
 
-`[ForEach, Consume]` 在遍历结束时销毁这次遍历访问过的行，不多也不少：处理事件或命令实体（一次命中、一个请求）的方法只管处理，
-销毁交给遍历。不做结构变更的方法，它的行在遍历结束时一次销毁，按它的过滤条件做一次 `DestroyAll`，整张表一起释放；可能做结构变更的方法
-（接收 `World`，或用 `Entity` 改了什么）在方法处理完每一行后销毁那一行。遍历期间才开始匹配的实体不会被销毁：下一次运行会访问它。
-清理组件让被消费的实体退休，和其他被销毁的实体一样，[销毁日志](/zh/docs/guide/change-tracking#destroy-log)也会记下它。遍历抛异常时
-什么也不销毁，这些行下次还会被访问。`[Consume]` 不能和 `Slices` 一起用（[EECS085](/zh/docs/guide/analyzer#eecs085)）。
+`[ForEach, Consume]` 销毁这次遍历访问过的行，不多也不少：处理事件或命令实体（一次命中、一笔交易、一个客户端请求）的方法只管处理，
+销毁交给遍历。这样每个事件只处理一次，也不会有漏掉的。
+
+<Callout type="idea" title="适合">
+  生来只被一个系统处理一次的实体：别的系统生成的命中和治疗、网络线程排进来的命令实体、发给 actor 的消息、到点的一次性计时器。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  方法处理完还要继续存在的实体（持续的 buff、飞行中的投射物）：`[Consume]` 会销毁它访问的每一行，这种实体在方法里按条件
+  `entity.Destroy()`。好几个系统都要读的事件：在最后一个系统里消费，用 `[UpdateAfter<T>]` 排好顺序。分片的方法：一个分片的销毁会挪动
+  其他分片的行（[EECS085](/zh/docs/guide/analyzer#eecs085)）。
+</Callout>
+
+行怎么销毁取决于方法：
+
+- **不做结构变更的方法**（静态，不接收 `World`，`Entity` 只用来读）：遍历结束后批量销毁，按方法的过滤条件做一次 `DestroyAll`，
+  整张表一起释放。这种遍历里没有行会开始或停止匹配，所以结束时匹配的行就是它访问过的行。遍历抛异常时什么也不销毁，这些行下次还会被访问。
+- **可能做结构变更的方法**（接收 `World`，或通过 `Entity` 改了什么）：方法处理完一行就销毁那一行。遍历期间才开始匹配的实体不会被销毁，
+  下一次运行会访问它。
+
+<Tabs items={['你写的', '生成器写的']}>
+<Tab value="你写的">
 
 ```csharp
+public record struct Sale(int Price) : IComponent;                     // 一个事件实体
+public record struct Takings(long Gold) : ISingletonComponent;
+
+public class BankSales : EcsSystem
+{
+    [ForEach, Consume]
+    static void Bank(in Sale sale, ref Takings takings) => takings.Gold += sale.Price;
+}
+
 public record struct Heal(int Amount, EntityId Target) : IComponent;   // 一个事件实体
 
 public class ApplyHeals : EcsSystem
@@ -339,6 +403,50 @@ public class ApplyHeals : EcsSystem
     }
 }
 ```
+
+</Tab>
+<Tab value="生成器写的">
+
+```csharp doccheck=skip
+// BankSales 不做结构变更：遍历后一次 DestroyAll。
+protected override void Update(EcsSystem system)
+{
+    var world = system.World;
+    var job0 = new BankJob0 { /* Takings 单例，只解析一次 */ };
+    world.ForEach<Sale, BankJob0>(ref job0);
+    world.DestroyAll<Sale>(); // [Consume]: the rows the pass visited
+}
+
+// ApplyHeals 接收 World：方法处理完一行就销毁那一行。
+internal ref struct ApplyJob0 : IForEachEntity<Heal>
+{
+    public World World;
+
+    public void Execute(Entity entity, ref Heal c1)
+    {
+        __ForEach.Apply_0(null, in c1, World);
+        entity.Destroy();
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+```csharp
+world.AddSingleton<Takings>();
+world.AddSystem<BankSales>();
+world.CreateEntity(new Sale(30));
+world.CreateEntity(new Sale(12));
+world.Update();
+long banked = world.Takings.Gold;              // 42
+int pending = world.Count<Sale>();             // 0：两笔交易都被消费了
+```
+
+清理组件让被消费的实体退休，和其他被销毁的实体一样，[销毁日志](/zh/docs/guide/change-tracking#destroy-log)也会记下它。带
+`[Consume]` 的 [runner](#foreach-outside-systems) 通过入口方法以同样的方式消费。有 `[Consume]` 方法的系统独自运行，销毁实体的系统都得这样
+（[并行系统](/zh/docs/guide/threading#parallel-systems)）。每条路径都以 `entity.Destroy()` 结尾的方法报
+[EECS084](/zh/docs/guide/analyzer#eecs084)，它的代码修复会改写成 `[Consume]`。
 
 ### 批处理方法 [#batch-methods]
 
@@ -1020,6 +1128,8 @@ run order: MoveSystem
   （[调试与诊断](/zh/docs/guide/diagnostics#what-it-costs)）；关闭时每次运行一次字段判断。
 - **并行方法**第一次更新之后不再分配内存，执行器的工作项会复用。
 - **向量循环**本身没有额外开销：它在编译时写好，按段运行，不分配内存。
+- **`[UpdateInterval]`** 只在添加系统时读一次；每次更新对每个系统判断一次计数。
+- **`[Consume]`** 的开销就是销毁本身：不做结构变更的方法每次遍历一次 `DestroyAll`，否则每行一次 `Destroy`。它所在的系统独自运行。
 - **生成的代码**由模块初始化器注册：系统不需要 `partial`、不需要注册调用，更新时也不用反射。
 
 ## 常见陷阱 [#pitfalls]

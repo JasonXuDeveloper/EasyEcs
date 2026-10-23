@@ -69,7 +69,7 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 | `world.EntityCount` / `Entities` | 存活实体数，以及零分配的遍历 |
 | `world.ChangeTick` | 当前的变更 tick |
 | `world.DefaultUpdateCount` | 默认分组已完成的 `Update()` 次数 |
-| `world.UpdateCount<TGroup>()` | 到目前为止 `Update<TGroup>()` 的次数，包括正在进行的这一次：分组里 `UpdateInterval` 按它计数 |
+| `world.UpdateCount<TGroup>()` | 到目前为止 `Update<TGroup>()` 的次数，包括正在进行的这一次：分组里的 `[UpdateInterval]` 按它计数 |
 | `world.Reserve<T1, …, Tn>(n)` / `Reserve(prefab, n)` / `EnsureEntityCapacity(n)` | 在已知峰值或一波刷怪之前预分配 |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | 从 `EntityId` 换回经过校验的句柄 |
 | `world.DescribeTables()` | 表、列、行数和字节数，供工具使用 |
@@ -142,7 +142,7 @@ bool applied = Requests.TakeHit(unit, 30);           // false：实体不在或�
 
 | 声明 | 生成 |
 | --- | --- |
-| 组件 `Position` | `e.Position`（`ref`）、`HasPosition`、`TryGetPosition(out p)`、`GetOrAddPosition()`、`SetPosition(x, y)`、`RemovePosition()`、`DisablePosition()`、`EnablePosition()`、`IsPositionDisabled` |
+| 组件 `Position` | `e.Position`（`ref`）、`HasPosition`、`TryGetPosition(out p)`、`GetOrAddPosition()`、`GetOrAddPosition(x, y)`、`SetPosition(x, y)`、`RemovePosition()`、`DisablePosition()`、`EnablePosition()`、`IsPositionDisabled` |
 | 被追踪或被索引的 `Health` | `e.Health` 是 `ref readonly`；用 `SetHealth(…)` 写，或者用 `WriteHealth()`（`ref`，仅被追踪的组件）；`SetHealthIfChanged(…)` 只写不同的值 |
 | 标签 `Dead` | `e.IsDead`、`SetDead()`、`RemoveDead()` |
 | 被索引的 `Team` | `world.TeamIndex`（即 `world.Index<Team, int>()`） |
@@ -150,7 +150,7 @@ bool applied = Requests.TakeHit(unit, 30);           // false：实体不在或�
 | 分组组件 `Zone` | `filter.InZone(id)`（即 `InGroup<Zone>(id)`） |
 | 缓冲元素 `Loot` | `e.Loot`（`ref readonly DynamicBuffer<Loot>`）、`HasLoot`、`WriteLoot()`、`GetOrAddLoot()`、`RemoveLoot()` |
 | 关系 `MemberOf` | `e.LinkMemberOf(target)`、`UnlinkMemberOf(target)`、`LinksMemberOf(target)`、`world.MemberOfIndex` |
-| 单例 `Clock` | `world.Clock`（`ref`）、`HasClock`、`GetOrAddClock()`、`SetClock(…)`、`RemoveClock()` |
+| 单例 `Clock` | `world.Clock`（`ref`）、`HasClock`、`GetOrAddClock()`、`GetOrAddClock(…)`、`SetClock(…)`、`RemoveClock()` |
 | `Prefab` 上 | `SetPosition(…)`、`RemovePosition()` 返回预制体本身；`prefab.Position`（只读）、`HasPosition`、`IsDead` |
 | `world.Query<Position, Velocity>()` 的元素 | `item.Position`、`item.Velocity` |
 
@@ -306,7 +306,7 @@ bool anyDead = world.Any<Dead>();
 | 调用 | 作用 |
 | --- | --- |
 | `world.AddSingleton<T>()` | 添加（默认值），返回 `ref T`；已存在时抛异常 |
-| `world.GetSingleton<T>()` / `GetOrAddSingleton<T>()` | `ref T`；前者在不存在时抛异常 |
+| `world.GetSingleton<T>()` / `GetOrAddSingleton<T>()` / `GetOrAddSingleton(in value)` | `ref T`；第一个在不存在时抛异常，后两个不存在时先加上（默认值或 `value`） |
 | `world.TryGetSingleton<T>(out copy)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | 拷贝、是否存在、移除 |
 | `world.SingletonRef<T>()` | 稳定的句柄：`.Value` 是 `ref T` |
 

@@ -24,6 +24,12 @@ EasyEcs 文档里的术语，每个用几句话讲清，并链接到详细讲解
 实现 `IComponent` 的结构体：描述实体某一方面的纯数据，比如 `Position`、`Health`。组件不带行为，也不引用系统或服务。
 见 [ECS 设计原则](/zh/docs/ecs-principles)。
 
+## 生成的部分（Generated part） [#generated-part]
+
+生成器根据声明上的特性往 `partial` 结构体里加的成员：`[IndexKey]` 或 `[UniqueKey]` 写出 `IIndexed<TKey>` 的显式 `Key`，`[Group]`
+写出 `IGroup` 的 `Group`，`[Sum]`、`[Min]`、`[Max]` 等写出归约的 `Identity` 和 `Combine`。类型上的初始化特性（`[GroupBy]`、
+`[WhenTargetDestroyed]`、`[NotSaved]`）则登记给每个 World。见[实体与组件](/zh/docs/guide/entities-and-components#declared-parts)。
+
 ## 标签（Tag） [#tag]
 
 没有字段的组件，比如 `Dead`、`Stunned`。它只表达“是或否”，系统拿它做过滤（`[Without<Dead>]`）；除了第一次，增删标签都不会搬数据。
@@ -84,7 +90,7 @@ actor 类型各配一个分组）。见[系统](/zh/docs/guide/systems#system-gr
 
 ## 更新与 tick（Update、tick） [#update]
 
-一次更新就是调用一次 `world.Update()`（或 `world.Update<G>()`）：分组里每个启用的系统按顺序各跑一次，被 `UpdateInterval`
+一次更新就是调用一次 `world.Update()`（或 `world.Update<G>()`）：分组里每个启用的系统按顺序各跑一次，被 `[UpdateInterval]`
 跳过的除外。tick 是模拟按固定频率走的一步；服务器的主循环每个 tick 调用一次 `Update()`。见[系统](/zh/docs/guide/systems#one-update)。
 
 ## 阶段（Stage） [#stage]
@@ -96,7 +102,7 @@ actor 类型各配一个分组）。见[系统](/zh/docs/guide/systems#system-gr
 
 一个系统读什么、写什么，由生成器根据 `[ForEach]` 参数得出：`ref` 的组件或单例算写，`in` 的算读，`Mut<T>` 参数算写 `T`，
 `[Changed<T>]`、`[Removed<T>]` 算读 `T`。一个写了另一个读或写的东西，两个系统就冲突。能碰到整个 World 的系统（带 `Entity` 或 `World` 参数、实例方法、
-重写了 `OnUpdate`）独占运行。只有互不冲突的系统才会进同一个[阶段](#stage)。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
+重写了 `OnUpdate`、有 `[Consume]` 方法）独占运行。只有互不冲突的系统才会进同一个[阶段](#stage)。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
 
 ## 执行器（Runner） [#runner]
 
@@ -150,6 +156,17 @@ World 执行系统的顺序：每个[分组](#system-group)的[阶段](#stage)�
 所以每个实体既没有委托调用，也没有虚调用。生成器为每个 `[ForEach]` 方法写一个。`entity.Run<T…, TJob>(ref job)` 在单个实体上跑一个
 `IForEachEntity` job。job 的 `static int WriteMask` 指明它写哪些组件；实现 `INoStructuralChanges` 表示保证不做结构变更。
 见[查询与过滤](/zh/docs/guide/queries#foreach-a-struct-job)。
+
+## 入口方法（Entry point） [#entry-point]
+
+生成器在系统之外的 `[ForEach]` 方法（[runner](/zh/docs/guide/systems#foreach-outside-systems)）或 `[ForEntity]` 方法旁边写的同名静态方法：
+`Reports.SumHealth(world, ref total)` 在一个 World 上跑这一遍，`Requests.TakeHit(unit, damage)` 在单个实体上运行方法，返回它有没有运行。
+见[单个实体](/zh/docs/guide/queries#run-on-one-entity)。
+
+## 事件实体（Event entity） [#event-entity]
+
+表示发生过或被请求的一件事的实体（一次命中、一笔交易、客户端的一个命令），由一个系统或线程创建，由另一个系统处理一次。
+`[ForEach, Consume]` 销毁这一遍访问过的行，所以每个事件只处理一次，也不会有遗留。见[系统](/zh/docs/guide/systems#consume)。
 
 ## 批量方法（Batch method） [#batch-method]
 

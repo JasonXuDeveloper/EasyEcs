@@ -73,8 +73,8 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
 
 给 World 指定一个所有者：一个 `BackgroundService` 负责建 World、按 `PeriodicTimer` 调用 `world.Update()`，主机停止时存档。请求
 处理代码从不碰 World：它们把请求写进有界的 `Channel<T>`，由一个系统每个 tick 读空（回复用 `TaskCompletionSource`），读取则看
-World 发布的不可变状态。发给单个实体（一个 actor、一个玩家）的请求，在所有者线程上用 `entity.Run(ref job, filter)` 直接在这个实体上处理：
-job 要的组件一次查找全部拿到，实体已经没了或不匹配时返回 `false`（[`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)）。
+World 发布的不可变状态。发给单个实体（一个 actor、一个玩家）的请求，在所有者线程上用 `[ForEntity]` 方法直接在这个实体上处理：
+方法要的组件一次查找全部拿到，实体已经没了或不匹配时返回 `false`（[单个实体](/zh/docs/guide/queries#run-on-one-entity)）。
 不需要专门的托管包；完整的服务器见[在 .NET 服务器里托管](/zh/docs/guide/hosting)。
 
 ## 怎么测试一个系统？ [#testing]

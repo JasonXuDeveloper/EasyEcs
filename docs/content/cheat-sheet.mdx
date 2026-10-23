@@ -69,7 +69,7 @@ Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an ent
 | `world.EntityCount` / `Entities` | Live entities and an allocation-free walk over them |
 | `world.ChangeTick` | The current change tick |
 | `world.DefaultUpdateCount` | Completed `Update()` calls of the default group |
-| `world.UpdateCount<TGroup>()` | `Update<TGroup>()` calls so far, the running one included: what the group's `UpdateInterval`s count |
+| `world.UpdateCount<TGroup>()` | `Update<TGroup>()` calls so far, the running one included: what the `[UpdateInterval]`s of the group count |
 | `world.Reserve<T1, …, Tn>(n)` / `Reserve(prefab, n)` / `EnsureEntityCapacity(n)` | Pre-size before a known peak or a wave |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | From an `EntityId` back to a checked handle |
 | `world.DescribeTables()` | Tables, columns, rows and bytes, for tools |
@@ -144,7 +144,7 @@ inlined call to the generic API above.
 
 | Declared | Generated |
 | --- | --- |
-| Component `Position` | `e.Position` (`ref`), `HasPosition`, `TryGetPosition(out p)`, `GetOrAddPosition()`, `SetPosition(x, y)`, `RemovePosition()`, `DisablePosition()`, `EnablePosition()`, `IsPositionDisabled` |
+| Component `Position` | `e.Position` (`ref`), `HasPosition`, `TryGetPosition(out p)`, `GetOrAddPosition()`, `GetOrAddPosition(x, y)`, `SetPosition(x, y)`, `RemovePosition()`, `DisablePosition()`, `EnablePosition()`, `IsPositionDisabled` |
 | Tracked or indexed `Health` | `e.Health` is `ref readonly`; write with `SetHealth(…)` or `WriteHealth()` (`ref`, tracked only); `SetHealthIfChanged(…)` writes only a different value |
 | Tag `Dead` | `e.IsDead`, `SetDead()`, `RemoveDead()` |
 | Indexed `Team` | `world.TeamIndex` (`world.Index<Team, int>()`) |
@@ -152,7 +152,7 @@ inlined call to the generic API above.
 | Grouped `Zone` | `filter.InZone(id)` (`InGroup<Zone>(id)`) |
 | Buffer element `Loot` | `e.Loot` (`ref readonly DynamicBuffer<Loot>`), `HasLoot`, `WriteLoot()`, `GetOrAddLoot()`, `RemoveLoot()` |
 | Relation `MemberOf` | `e.LinkMemberOf(target)`, `UnlinkMemberOf(target)`, `LinksMemberOf(target)`, `world.MemberOfIndex` |
-| Singleton `Clock` | `world.Clock` (`ref`), `HasClock`, `GetOrAddClock()`, `SetClock(…)`, `RemoveClock()` |
+| Singleton `Clock` | `world.Clock` (`ref`), `HasClock`, `GetOrAddClock()`, `GetOrAddClock(…)`, `SetClock(…)`, `RemoveClock()` |
 | On a `Prefab` | `SetPosition(…)`, `RemovePosition()` return the prefab; `prefab.Position` (read-only), `HasPosition`, `IsDead` |
 | `world.Query<Position, Velocity>()` items | `item.Position`, `item.Velocity` |
 
@@ -310,7 +310,7 @@ Guide: [Queries and filters](/en/docs/guide/queries).
 | Call | Does |
 | --- | --- |
 | `world.AddSingleton<T>()` | Adds it (default), returns `ref T`; throws when it exists |
-| `world.GetSingleton<T>()` / `GetOrAddSingleton<T>()` | `ref T`; the first throws when missing |
+| `world.GetSingleton<T>()` / `GetOrAddSingleton<T>()` / `GetOrAddSingleton(in value)` | `ref T`; the first throws when missing, the others add it first (the default, or `value`) |
 | `world.TryGetSingleton<T>(out copy)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | Copy, presence, removal |
 | `world.SingletonRef<T>()` | A stable handle: `.Value` is `ref T` |
 

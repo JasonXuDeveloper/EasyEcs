@@ -81,6 +81,7 @@ public class ClockSystem : EcsSystem
 | `ref T AddSingleton<T>()` | | 添加（`default`）；World 里已经有它时抛 `InvalidOperationException` |
 | `ref T GetSingleton<T>()` | `world.Clock` | 返回 ref；没添加时抛异常 |
 | `ref T GetOrAddSingleton<T>()` | `world.GetOrAddClock()` | 返回 ref，不存在就先加一个 `default` |
+| `ref T GetOrAddSingleton<T>(in value)` | `world.GetOrAddClock(tick, deltaTime)` | 返回 ref，不存在就先加上 `value`；已经有的保留原值 |
 | `GetOrAddSingleton<T>() = value` | `world.SetClock(tick, deltaTime)` | 设置值，不存在就添加 |
 | `bool HasSingleton<T>()` | `world.HasClock` | 是否存在 |
 | `bool TryGetSingleton<T>(out T)` | | 存在时拿到一份副本 |
@@ -94,7 +95,9 @@ if (world.TryGetSingleton<Clock>(out var copy)) Console.WriteLine(copy.Tick);
 world.RemoveScore();
 ```
 
-生成成员遵循[生成成员](/zh/docs/guide/entities-and-components#generated-members)的规则：`SetX` 每个公开构造函数一个重载，没有字段的单例组件不生成 `GetOrAddX`。
+生成成员遵循[生成成员](/zh/docs/guide/entities-and-components#generated-members)的规则：`SetX` 和 `GetOrAddX(…)` 每个公开构造函数一个重载，没有字段的单例组件不生成 `GetOrAddX`。
+`world.GetOrAddClock(0, 0.05f)` 是不动已有值的初始化（读档后的时钟保留它的 tick）；`world.SetClock(0, 0.05f)` 会覆盖它。
+不用生成成员、写成 `GetOrAddSingleton(new Clock(…))` 报 [EECS033](/zh/docs/guide/analyzer#eecs033)，有代码修复。
 
 ### 稳定句柄 [#stable-handles]
 
@@ -118,6 +121,8 @@ clock.Value.Tick++;                          // 之后：直接是 ref，不用�
 - 开启 `WorldOptions.ParallelSystems` 时，用 `ref` 接收单例组件的系统算作写它：不会和读写同一个单例组件的其他系统排进同一个阶段。
   只读时用 `in`。
 - `[ForEach(Parallel = true)]` 方法只能用 `in` 接收单例组件：用 `ref` 的话每个块都会抢着写（[EECS010](/zh/docs/guide/analyzer#eecs010)）。
+  对所有行求总数改用 `ref Reduce<T>` 参数：每个块往自己的部分结果里加，单例字段上的 `[Sum]`、`[Min]`、`[Max]`（以及 `[Product]`、
+  `[All]`、`[Any]`）声明部分结果怎么合并（[归约](/zh/docs/guide/threading#reductions)）。
 - 单例组件里有集合（格子网格、队列），又通过 `in` 参数修改它，会被当成读来调度：[EECS011](/zh/docs/guide/analyzer#eecs011) 要求改成 `ref`。
 
 ## 完整例子 [#full-example]
@@ -248,6 +253,7 @@ after tick 3: 3 dead
 | 宿主代码每次调用都查找 | 初始化时保存一个 `SingletonRef<T>` | 不用查找 |
 | 系统只读单例组件却写成 `ref` | 改成 `in` | 系统可以共享并行阶段（[EECS025](/zh/docs/guide/analyzer#eecs025)） |
 | 静态字段 | 单例组件 | 按 World 隔离，跟着 World 一起存档和快照 |
+| 存运行时状态（连接、缓存）的单例组件，只为编译通过才配 Nino 格式化器 | 类型上标 [`[NotSaved]`](/zh/docs/guide/saves#not-saved) | 存档跳过它，读档保留 World 自己的值 |
 
 通过 `GetSingleton<T>()` 读写单例组件 1,000 次，旁边是通过实体句柄写组件 1,000 次（`MicroBenchmarks`）：
 

@@ -290,7 +290,7 @@ const int ChunkBlocks = 16 * 16 * 32;
 const int PeakChunks = 512;
 
 DynamicBuffer<Block>.MaxPooledLength = ChunkBlocks;           // 整个区块的列表都能还回池里
-DynamicBuffer<Block>.FillPool(PeakChunks);              // 峰值在第一个 tick 之前就分配好
+DynamicBuffer<Block>.FillPool(PeakChunks);                    // 峰值在第一个 tick 之前就分配好
 
 using var server = new World();
 var loaded = new Entity[PeakChunks];

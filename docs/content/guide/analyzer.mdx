@@ -2585,7 +2585,7 @@ public class ApplyImpacts : EcsSystem
     [ForEach]
     static void Apply(Entity hit, in Impact impact, World world)
     {
-        if (world.TryGetEntity(impact.Target, out var target)) target.Get<Health>().Value -= impact.Amount;
+        if (world.TryGetEntity(impact.Target, out var target)) target.Health.Value -= impact.Amount;
         hit.Destroy();
     }
 }
@@ -2599,7 +2599,7 @@ public class ApplyImpacts : EcsSystem
     [ForEach, Consume]
     static void Apply(in Impact impact, World world)
     {
-        if (world.TryGetEntity(impact.Target, out var target)) target.Get<Health>().Value -= impact.Amount;
+        if (world.TryGetEntity(impact.Target, out var target)) target.Health.Value -= impact.Amount;
     }
 }
 ```

@@ -157,6 +157,27 @@ npcs[7].SetDestination(5, 0);       // 一个 NPC 开始走动
 world.Update();                     // StepSystem 访问 1,000 个 NPC；同步只发 1 个
 ```
 
+被追踪组件的 `ref` 参数，某条路径没写它（提前 `return`、写在 `if` 里），这正是 `Mut<T>` 要解决的情况，分析器会指出来
+（[EECS053](/zh/docs/guide/analyzer#eecs053)）：代码修复把组件改成 `Mut<T>`，读走 `Value`，要写的路径上走 `Write()`。
+
+```csharp tab="报告" doccheck=system,expect-EECS053
+[ForEach]
+static void Settle(ref Position position, in Destination destination)
+{
+    if (position.X == destination.X) return;   // 没动过的行照样打 tick
+    position.X = destination.X;
+}
+```
+
+```csharp tab="修正" doccheck=system
+[ForEach]
+static void Settle(Mut<Position> position, in Destination destination)
+{
+    if (position.Value.X == destination.X) return;
+    position.Write().X = destination.X;         // 只有这条路径给行打 tick
+}
+```
+
 系统外的代码也有同样的选择：`entity.SetIfChanged(value)` 和 `Set` 一样设置组件（没有就添加），但实体已经是这个值时
 什么都不做，返回 false：不写入、不打 tick、不动索引。被追踪、[建了索引](/zh/docs/guide/indexes-and-relations)或
 [分组](/zh/docs/guide/groups)的有字段组件，生成器还会给它生成 `SetXIfChanged(…)`，参数和 `SetX` 一样是构造函数的参数：
@@ -164,6 +185,9 @@ world.Update();                     // StepSystem 访问 1,000 个 NPC；同步�
 ```csharp
 bool moved = npcs[7].SetPositionIfChanged(1, 0);   // false：走了一步，已经在那儿了
 ```
+
+在 `Set` 前手写比较（`if (e.Position.X != x) e.SetPosition(x, y);`）就是 `SetXIfChanged` 做的事，
+[EECS033](/zh/docs/guide/analyzer#eecs033) 会建议改用它，有代码修复。
 
 - **怎么判断相等：** 组件实现了 `IEquatable<T>`（record struct 都实现了）就用它，不装箱；否则非托管组件逐字节比较；
   再否则 `SetIfChanged` 抛 `NotSupportedException`，也不会生成 `SetXIfChanged`。带托管字段的组件请实现

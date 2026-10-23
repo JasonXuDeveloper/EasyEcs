@@ -264,14 +264,16 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 
 `WorldOptions.MeasureSystems` 会在 `system.Stats.Runs` 里统计每次运行，能分清“从没跑过”和“跑了但什么都没做”。
 
-## 为什么 `entity.Run` 返回 `false`？ [#run-false]
+## 为什么 `[ForEntity]` 方法或 `entity.Run` 返回 `false`？ [#run-false]
 
-`entity.Run<T…, TJob>(ref job, filter)` 只在实体接得住时才跑 job，以下情况不跑，返回 `false`：
+`[ForEntity]` 方法的入口（`Requests.TakeHit(unit, 30)`）以及它底下的 `entity.Run<T…, TJob>(ref job, filter)`，只在实体接得住时才运行，
+以下情况不运行，返回 `false`：
 
 1. **实体已经不在了：**拿到句柄之后被销毁了，或者是 `default(Entity)`。`Run` 不会像 `Get` 那样抛异常。
-2. **缺少 job 要的组件：**`TJob` 之前的每个类型实参都必须存在（被禁用的组件算不存在）。用 `entity.Has<T1, T2>()` 检查。
-3. **不满足过滤条件：**有 `Without<T>` 排除的组件、缺 `WithAny` 要的组件、`Changed<T>(tick)` 之后没被写过、不在指定的分组里。
-   去掉过滤条件再跑一次，就能和前两种情况分开。
+2. **缺少方法要的组件：**方法的每个 `ref`、`in` 组件（job 则是 `TJob` 之前的每个类型实参）都必须存在，被禁用的组件算不存在。
+   用 `entity.Has<T1, T2>()` 检查。
+3. **不满足过滤条件：**有 `[Without<T>]` 排除的组件、缺 `[WithAny<T>]` 要的组件、`[Changed<T>]` 之后没被写过、不在指定的分组里。
+   去掉过滤条件再试一次，就能和前两种情况分开。
 
 **修法：**把 `false` 当成请求的结果（actor 没了、单位死了），而不是错误；实体可能已被替换时，按 `EntityId` 重新查找
 （[`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)）。

@@ -297,17 +297,17 @@ Check, in this order:
 `WorldOptions.MeasureSystems` counts every run in `system.Stats.Runs`, which tells "never ran" from "ran and did
 nothing".
 
-## Why does `entity.Run` return `false`? [#run-false]
+## Why does a `[ForEntity]` method or `entity.Run` return `false`? [#run-false]
 
-`entity.Run<T…, TJob>(ref job, filter)` runs the job only when the entity can take it, and says `false`, without
-running it, when:
+The entry point of a `[ForEntity]` method (`Requests.TakeHit(unit, 30)`), and `entity.Run<T…, TJob>(ref job, filter)`
+under it, run only when the entity can take the work, and say `false`, without running it, when:
 
 1. **The entity is not alive:** destroyed since you took its handle, or `default(Entity)`. `Run` does not throw for
    it, unlike `Get`.
-2. **It lacks a component the job takes:** every type argument before `TJob` must be present (a disabled component
-   counts as absent). Check with `entity.Has<T1, T2>()`.
-3. **It fails the filter:** a `Without<T>` it has, a `WithAny` it misses, a `Changed<T>(tick)` it was not written
-   since, a group it is not in. Run once without the filter to tell this case from the others.
+2. **It lacks a component the method takes:** every `ref` or `in` component of the method (every type argument before
+   `TJob` of a job) must be present, a disabled component counting as absent. Check with `entity.Has<T1, T2>()`.
+3. **It fails the filter:** a `[Without<T>]` it has, a `[WithAny<T>]` it misses, a `[Changed<T>]` it was not written
+   since, a group it is not in. Try once without the filter to tell this case from the others.
 
 **Fix:** treat `false` as the answer to the request (the actor is gone, the unit is dead) rather than an error, and
 look up the entity again by its `EntityId` when it may have been replaced

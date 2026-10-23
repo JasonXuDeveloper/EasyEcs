@@ -2,7 +2,7 @@
 title: "Actors：响应消息的实体"
 navTitle: Actors
 seoTitle: "C# ECS 上的 Actor 模型：EasyEcs Actors 示例"
-description: "在 EasyEcs World 上实现 Actor：每类一个类型兼作键、索引和系统分组，消息是 entity.Run 任务，激活时加载记录，只保存变过的数据。"
+description: "在 EasyEcs World 上实现 Actor：每类一个类型兼作键、索引和系统分组，消息是 [ForEntity] 方法，激活时加载记录，只保存变过的数据。"
 icon: Mailbox
 ---
 
@@ -100,7 +100,7 @@ restarted: shop 1 has 3 (sold 0), bank 7 has 1060
     系统分组和分组的过滤条件，每类 Actor 一个。
   </Card>
   <Card icon={<Workflow />} title="查询" href="/zh/docs/guide/queries#run-on-one-entity">
-    entity.Run：一个实体上的任务，也就是消息的形状。
+    `[ForEntity]` 方法：一个实体上的工作，也就是消息的形状。
   </Card>
   <Card icon={<Database />} title="迁移与记录" href="/zh/docs/guide/migration-and-unload#records">
     要持久化的记录，加载到 Actor 上。

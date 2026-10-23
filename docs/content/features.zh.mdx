@@ -213,7 +213,7 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 
 - **适合：** 伤害事件、客户端命令、请求：只活一遍的实体。
 - **别用于：** 比读它的系统活得更久的实体；分片的方法（[EECS085](/zh/docs/guide/analyzer#eecs085)）。
-- **开销：** 没有结构变更的遍历之后，每张表一次 `DestroyAll`，而不是每行一次销毁；抛异常的遍历什么都不销毁。
+- **开销：** 没有结构变更的遍历之后，每张表一次 `DestroyAll`，而不是每行一次销毁（这时遍历抛异常就什么都不销毁）；所在的系统独自运行。
   手写的销毁由 [EECS084](/zh/docs/guide/analyzer#eecs084) 报告。
 - **指南：** [系统](/zh/docs/guide/systems#consume)
 
@@ -226,11 +226,11 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 `entity.Run<Health, TJob>(ref job, filter)` 用同样的方式运行手写的 job。job 的 `static int WriteMask` 指明哪些组件算作写入（默认全部）；
 实现 `INoStructuralChanges` 的 job 省掉结构变更的簿记。
 
-- **适合：** 工具、测试、两次更新之间的请求处理、一次性的遍历；发给单个实体的请求或消息用 `entity.Run`。
+- **适合：** 工具、测试、两次更新之间的请求处理、一次性的遍历；发给单个实体的请求或消息用 `[ForEntity]`。
 - **别用于：** 每个 tick 都要跑的逻辑：系统有排序、有调度、有耗时统计。
 - **开销：** 零分配。`Count` 只是把表的行数加起来；`Any` 找到第一个就停；结构体 job 是最快的临时遍历。
-  `entity.Run` 是 O(1)，过滤条件每多一个组件多 O(1)。
-- **指南：** [查询与过滤](/zh/docs/guide/queries)、[`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)
+  `[ForEntity]` 的入口（`entity.Run`）是 O(1)，过滤条件每多一个组件多 O(1)。
+- **指南：** [查询与过滤](/zh/docs/guide/queries)、[`[ForEntity]`](/zh/docs/guide/queries#run-on-one-entity)
 
 ## 响应变化 [#react]
 

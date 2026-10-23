@@ -110,7 +110,7 @@ flowchart LR
   structural change: write through it before the change, or get it again afterwards ([EECS047](/en/docs/guide/analyzer#eecs047) reports a use
   after a change in the same block).
 - **Code that handles one entity** (a request, a message) gets the same guarantee as a method's own `ref` parameters
-  from [`entity.Run`](/en/docs/guide/queries#run-on-one-entity): the job's refs stay the entity's values across its
+  from a [`[ForEntity]`](/en/docs/guide/queries#run-on-one-entity) method (or a job run with `entity.Run`): its refs stay the entity's values across its
   own structural changes, and the components in its `WriteMask` are carried to the new row when it returns.
 
 ```csharp

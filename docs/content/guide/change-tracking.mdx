@@ -166,6 +166,28 @@ npcs[7].SetDestination(5, 0);       // one NPC starts walking
 world.Update();                     // the step visits 1,000 NPCs; the replication sends 1
 ```
 
+A `ref` parameter of a tracked component that some path leaves unwritten (an early `return`, a write inside an `if`)
+is the case `Mut<T>` is for, and the analyzer says so ([EECS053](/en/docs/guide/analyzer#eecs053)): its code fix
+takes the component as a `Mut<T>`, reads through `Value` and writes through `Write()` on the paths that write.
+
+```csharp tab="Reported" doccheck=system,expect-EECS053
+[ForEach]
+static void Settle(ref Position position, in Destination destination)
+{
+    if (position.X == destination.X) return;   // rows left alone are stamped all the same
+    position.X = destination.X;
+}
+```
+
+```csharp tab="Fixed" doccheck=system
+[ForEach]
+static void Settle(Mut<Position> position, in Destination destination)
+{
+    if (position.Value.X == destination.X) return;
+    position.Write().X = destination.X;         // only this path stamps the row
+}
+```
+
 Code outside systems has the same choice: `entity.SetIfChanged(value)` sets the component like `Set` (added when
 missing) unless the entity already has that value, and returns false then, with nothing written, stamped or indexed.
 The generator gives every tracked, [indexed](/en/docs/guide/indexes-and-relations) or
@@ -175,6 +197,9 @@ constructor's arguments like `SetX`:
 ```csharp
 bool moved = npcs[7].SetPositionIfChanged(1, 0);   // false: one step taken, it stands there already
 ```
+
+A comparison written by hand before a `Set` (`if (e.Position.X != x) e.SetPosition(x, y);`) is what
+`SetXIfChanged` does, and [EECS033](/en/docs/guide/analyzer#eecs033) suggests it, with a code fix.
 
 - **Equality** is `IEquatable<T>` when the component implements it (record structs do), called without boxing; else,
   for an unmanaged component, its bytes; else `SetIfChanged` throws `NotSupportedException` and no `SetXIfChanged` is
