@@ -81,7 +81,8 @@ public sealed partial class EasyEcsAnalyzer
         Category, DiagnosticSeverity.Info, true,
         "A save writes unmanaged components as raw rows and every other component and singleton with Nino, which needs " +
         "the formatter [NinoType] generates. Runtime state that a restart rebuilds (a connection, a cache) is [NotSaved] " +
-        "instead. A warning when the compilation saves (Save, SaveWithout, SaveEntities), a suggestion otherwise.",
+        "instead. A warning when the compilation saves what holds the type (a component: Save, SaveWithout, SaveEntities; " +
+        "a singleton: Save, SaveWithout, since entity saves write no singletons), a suggestion otherwise.",
         helpLinkUri: Help("EECS069"), customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     // EECS065 / EECS066's properties for their code fixes: the attribute of each field (name=Op;...), and the Identity
@@ -166,8 +167,8 @@ public sealed partial class EasyEcsAnalyzer
 
     /// <summary>
     /// EECS069: the managed components and singletons of the compilation with neither [NinoType] nor [NotSaved], reported
-    /// when it ends: a warning if some code saves a world (a call of World.Save, SaveWithout or SaveEntities), else a
-    /// suggestion. A type the code names in a ComponentSet (With&lt;T&gt; / WithSingleton&lt;T&gt;) is left alone: the
+    /// when it ends: a warning if some code saves what holds them (a component: a call of World.Save, SaveWithout or
+    /// SaveEntities*; a singleton: Save or SaveWithout, since entity saves write no singletons), else a suggestion. A type the code names in a ComponentSet (With&lt;T&gt; / WithSingleton&lt;T&gt;) is left alone: the
     /// code already chooses which saves hold it (SaveWithout, SaveEntitiesWith / Without).
     /// </summary>
     private static void AnalyzeFormatters(CompilationStartAnalysisContext start)
@@ -176,7 +177,7 @@ public sealed partial class EasyEcsAnalyzer
         var unwritten = new System.Collections.Concurrent.ConcurrentQueue<INamedTypeSymbol>();
         var chosen = new System.Collections.Concurrent.ConcurrentDictionary<ITypeSymbol, byte>(SymbolEqualityComparer.Default);
         var set = start.Compilation.GetTypeByMetadataName(Symbols.ComponentSet);
-        int saves = 0;
+        int saves = 0, worldSaves = 0;
         start.RegisterSymbolAction(context =>
         {
             var type = (INamedTypeSymbol)context.Symbol;
@@ -192,16 +193,20 @@ public sealed partial class EasyEcsAnalyzer
             var method = ((IInvocationOperation)context.Operation).TargetMethod;
             if (method is { Name: "With" or "WithSingleton", TypeArguments.Length: 1 } && SymbolEqualityComparer.Default.Equals(method.ContainingType, set))
                 chosen.TryAdd(method.TypeArguments[0].OriginalDefinition, 0);
-            else if (Volatile.Read(ref saves) == 0 && method is { Name: "Save" or "SaveWithout" or "SaveEntities" or "SaveEntitiesWith" or "SaveEntitiesWithout" }
+            else if (Volatile.Read(ref worldSaves) == 0 && method is { Name: "Save" or "SaveWithout" or "SaveEntities" or "SaveEntitiesWith" or "SaveEntitiesWithout" }
                 && SymbolEqualityComparer.Default.Equals(method.ContainingType, world))
+            {
                 Interlocked.Exchange(ref saves, 1);
+                if (method.Name is "Save" or "SaveWithout") Interlocked.Exchange(ref worldSaves, 1);
+            }
         }, OperationKind.Invocation);
         start.RegisterCompilationEndAction(context =>
         {
-            var severity = saves != 0 ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info;
             foreach (var type in unwritten)
                 if (!chosen.ContainsKey(type.OriginalDefinition))
-                    context.ReportDiagnostic(Diagnostic.Create(NoFormatter, type.Locations.First(l => l.IsInSource), severity, null, null, type.Name));
+                    context.ReportDiagnostic(Diagnostic.Create(NoFormatter, type.Locations.First(l => l.IsInSource),
+                        (Symbols.Implements(type, Symbols.Singleton) ? worldSaves : saves) != 0 ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info,
+                        null, null, type.Name));
         });
     }
 

@@ -150,6 +150,14 @@ major or minor version that needs code changes? The
 - `[UpdateInterval(n, Phase = p)]` declares a system's cadence on its class; the generator writes it into the
   registration ([EECS083](/en/docs/guide/analyzer#eecs083) rejects an interval below 1 or a phase outside 0 to n - 1).
   See [systems](/en/docs/guide/systems#update-interval).
+- Analyzer rules that point a `[ForEach]` method to the parameter that does its work per chunk:
+  [EECS086](/en/docs/guide/analyzer#eecs086) (suggestion), a singleton that a system resets each update and the method
+  accumulates by `ref`, to `ref Reduce<T>` and the `[Sum]` / `[Min]` / ... attributes it needs;
+  [EECS087](/en/docs/guide/analyzer#eecs087) (warning), a `World` parameter used only to read other entities, to
+  `Lookup<T>`; [EECS089](/en/docs/guide/analyzer#eecs089) (suggestion), records added to a singleton's list, to
+  `Emit<T>`. [EECS088](/en/docs/guide/analyzer#eecs088) (warning, with a code fix) reports two `EntityRandom` draws of
+  one stream for the same entity, or a draw in a loop that does not vary its stream. See the
+  [decision](/en/docs/decisions#d97-hand-written-parameters).
 
 ### Performance [#v4-8-0-performance]
 
@@ -200,6 +208,12 @@ major or minor version that needs code changes? The
 
 ### Fixes [#v4-8-0-fixes]
 
+- EECS071 also reports a `System.Random` held in a field; EECS028 leaves `new Random()` to it. EECS055 no longer
+  reports `[ForEntity]` methods, which the generator never vectorizes, and the messages of EECS002, EECS010,
+  EECS025 to EECS028 and the other `[ForEach]` rules name a `[ForEntity]` method as such. EECS028 in a `[ForEach]`
+  method names the `Scratch<T>` parameter, and EECS010 names the parameter a parallel method cannot take.
+- EECS069 warns for a managed singleton only when the code saves whole worlds (`Save`, `SaveWithout`): entity saves
+  write no singletons. See the [decision](/en/docs/decisions#d99-singleton-saves).
 - `Restore`, `Load` and `LoadEntities` no longer allocate again on every call into a world with value, unique or
   relation indexes: the load emptied its indexes by dropping their lists instead of keeping them for the next load.
 - Loading entities that lack a component their table has (removed by `Remove`, so the save holds presence bits)

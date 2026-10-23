@@ -104,6 +104,11 @@ icon: RotateCcwClock
   见[系统](/zh/docs/guide/systems#consume)。
 - `[UpdateInterval(n, Phase = p)]` 在类上声明系统的节奏；生成器把它写进注册代码（[EECS083](/zh/docs/guide/analyzer#eecs083)
   拒绝小于 1 的间隔和不在 0 到 n - 1 之间的相位）。见[系统](/zh/docs/guide/systems#update-interval)。
+- 把 `[ForEach]` 方法指向按块做同样工作的参数的分析器规则：[EECS086](/zh/docs/guide/analyzer#eecs086)（建议），系统每次更新都重置、
+  方法又通过 `ref` 累加的单例，改用 `ref Reduce<T>` 和它需要的 `[Sum]` / `[Min]` / ... 特性；[EECS087](/zh/docs/guide/analyzer#eecs087)
+  （警告），只用来读取其他实体的 `World` 参数，改用 `Lookup<T>`；[EECS089](/zh/docs/guide/analyzer#eecs089)（建议），追加到单例列表里的记录，
+  改用 `Emit<T>`。[EECS088](/zh/docs/guide/analyzer#eecs088)（警告，带代码修复）报告对同一个实体用同一个流的两次 `EntityRandom` 抽取，
+  以及循环里不改变流的抽取。见[决策](/zh/docs/decisions#d97-hand-written-parameters)。
 
 ### 性能 [#v4-8-0-performance]
 
@@ -140,6 +145,10 @@ icon: RotateCcwClock
 
 ### 修复 [#v4-8-0-fixes]
 
+- EECS071 也报告存放在字段里的 `System.Random`；`new Random()` 交给它，EECS028 不再报告。EECS055 不再报告 `[ForEntity]` 方法（生成器从不为它们生成向量循环），
+  EECS002、EECS010、EECS025 到 EECS028 以及其他 `[ForEach]` 规则的消息会如实称 `[ForEntity]` 方法。`[ForEach]` 方法里的 EECS028 会指出
+  `Scratch<T>` 参数，EECS010 会指出并行方法不能接收的那个参数。
+- 只有代码保存整个 World（`Save`、`SaveWithout`）时，EECS069 才对托管单例报警告：实体存档不写单例。见[决策](/zh/docs/decisions#d99-singleton-saves)。
 - 对带值索引、唯一索引或关系索引的世界调用 `Restore`、`Load` 和 `LoadEntities`，不再每次都重新分配：加载清空索引时把列表丢掉了，而不是留给下一次加载。
 - 加载缺少所在表某个组件的实体（被 `Remove` 移除，存档里带存在位）时，重用上一次加载的存在位，不再每次分配。
 - 加载两次保存之间会增长的世界（`Load`、`LoadKeeping`）时，id 记录按新 id 的个数精确增长，每次加载都要整体复制一遍；现在改为翻倍增长，

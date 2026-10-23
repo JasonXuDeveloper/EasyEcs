@@ -1,7 +1,7 @@
 ---
 title: 分析器规则
-seoTitle: "EasyEcs 分析器规则 EECS002-EECS085：每条 C# 诊断的含义与修法"
-description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS085：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
+seoTitle: "EasyEcs 分析器规则 EECS002-EECS089：每条 C# 诊断的含义与修法"
+description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS089：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
 icon: ShieldCheck
 ---
 
@@ -9,7 +9,7 @@ EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/doc
 EECS035、EECS036）除了两条警告都是错误；这两条针对的是能跑、但有代价的写法（EECS017、EECS020）。生成器会跳过无效输入，由分析器报出来，
 所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046、EECS052、EECS053）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
-（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入；EECS070 让 `Emit<T>` 的记录保持行的顺序，EECS071 找出一次运行无法重现的随机数；瓦片规则（EECS072、EECS073）拒绝光环装不下的网格瓦片，以及会共用一张纹理的两个瓦片。声明规则（EECS080 到 EECS085）为手写的代码（单实体 job、销毁所访问实体的遍历）建议能生成它的特性，并拒绝无法生效的特性。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入；部件规则（EECS062 到 EECS069）检查生成器按特性（`[Sum]`、`[Key]`、`[Group]`）写入成员的类型和设置特性，并为手写的归约或键建议对应的特性；EECS070 让 `Emit<T>` 的记录保持行的顺序，EECS071 找出一次运行无法重现的随机数；瓦片规则（EECS072、EECS073）拒绝光环装不下的网格瓦片，以及会共用一张纹理的两个瓦片。声明规则（EECS080 到 EECS085）为手写的代码（单实体 job、销毁所访问实体的遍历）建议能生成它的特性，并拒绝无法生效的特性。参数规则（EECS086 到 EECS089）把让方法只能单线程运行的代码指向按块做同样工作的参数：逐行累加的单例改用 `Reduce<T>`，通过 `World` 读取其他实体改用 `Lookup<T>`，追加到单例列表的记录改用 `Emit<T>`，抽了两次的随机流各用一个自己的流。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -50,12 +50,12 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS017](#eecs017) | 警告 | 组件存 `EntityId`，不存 `Entity` | 字段改成 `EntityId` |
 | [EECS019](#eecs019) | 错误 | 系统顺序不能成环 | |
 | [EECS020](#eecs020) | 警告 | 系统只在自己的分组内排序 | |
-| [EECS021](#eecs021) | 错误 | `[ForEach]` 入口不与已有方法冲突 | |
+| [EECS021](#eecs021) | 错误 | 生成的入口不与已有方法冲突 | |
 | [EECS022](#eecs022) | 错误 | 生成的代码能访问 `[ForEach]` 方法用到的类型 | 改成 internal |
 | [EECS023](#eecs023) | 错误 | 过滤条件只放在 `[ForEach]` 方法和系统分组上 | 删掉过滤条件 |
 | [EECS024](#eecs024) | 错误 | `[ForEach]` 不能放在局部函数上 | |
 | [EECS025](#eecs025) | 警告 | 写访问没有只读 | `in`、`ReadOnlySpan<T>`、`Read<T>()`，`Mut<T>` 改成 `in T` |
-| [EECS026](#eecs026) | 警告 | `[ForEach]` 方法用到自己的参数 | `[With<T>]`，或删掉参数 |
+| [EECS026](#eecs026) | 警告 | `[ForEach]` 或 `[ForEntity]` 方法用到自己的参数 | `[With<T>]`，或删掉参数 |
 | [EECS027](#eecs027) | 警告 | 每行都要查的数据，作为 `[ForEach]` 参数传入 | 把查找改成参数 |
 | [EECS028](#eecs028) | 警告 | 每次更新都执行的代码不分配内存 | |
 | [EECS029](#eecs029) | 警告 | 实例 `[ForEach]` 方法用到自己的系统 | 改成 static |
@@ -91,8 +91,16 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS059](#eecs059) | 错误 | `Lookup<T>` 读的组件这一遍不写 | |
 | [EECS060](#eecs060) | 警告 | 多线程上运行的代码不写共享内存 | |
 | [EECS061](#eecs061) | 警告 | 遍历之后不读并行 job 的字段 | `ForEach` / `ForEachEntity` |
+| [EECS062](#eecs062) | 错误 | 有生成成员的类型是 partial | 改成 partial |
+| [EECS063](#eecs063) | 错误 | 用特性声明的归约不手写 `Identity` 或 `Combine` | |
+| [EECS064](#eecs064) | 错误 | 归约特性合并每一个字段 | |
+| [EECS065](#eecs065) | 信息 | 逐字段的归约用特性声明 | 用特性声明 |
+| [EECS066](#eecs066) | 警告 | 归约的 `Identity` 是其 `Combine` 的单位元 | 正确的 `Identity`，或改用特性 |
+| [EECS067](#eecs067) | 信息 | 返回某个成员的键用 `[Key]` 声明 | `[Key]` / `[UniqueKey]` |
+| [EECS068](#eecs068) | 错误 | 设置特性放在适用的类型上 | |
+| [EECS069](#eecs069) | 警告 / 信息 | 会被保存的托管类型有 Nino 格式化器 | `[NinoType]` / `[NotSaved]` |
 | [EECS070](#eecs070) | 错误 | 遍历不读自己产出的记录，同一种记录不产出两次 | |
-| [EECS071](#eecs071) | 警告 | `[ForEach]` 方法抽取可重现的随机数 | `EntityRandom` |
+| [EECS071](#eecs071) | 警告 | `[ForEach]` 方法抽取可重现的随机数，不用 `System.Random` | `EntityRandom` |
 | [EECS072](#eecs072) | 错误 | 瓦片的形状装得下它的光环 | |
 | [EECS073](#eecs073) | 错误 | 一个方法每种格子类型和网格只接收一个瓦片 | |
 | [EECS080](#eecs080) | 信息 | 单实体 job 写成 `[ForEntity]` 方法 | 改写成 `[ForEntity]` 方法 |
@@ -101,6 +109,10 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS083](#eecs083) | 错误 | `[UpdateInterval]`：间隔至少为 1，相位在 0 到 n - 1 之间，用在系统上 | |
 | [EECS084](#eecs084) | 信息 | 销毁每个访问到的实体的 `[ForEach]` 方法用 `[Consume]` | `[Consume]` |
 | [EECS085](#eecs085) | 错误 | `[Consume]` 和 `[ForEach]` 一起用，不带 `Slices` | |
+| [EECS086](#eecs086) | 信息 | 每次更新重置、再逐行累加的单例用 `Reduce<T>` | |
+| [EECS087](#eecs087) | 警告 | 其他实体的组件通过 `Lookup<T>` 读取，而不是 `World` | |
+| [EECS088](#eecs088) | 警告 | 一行的每次 `EntityRandom` 抽取各用一个流 | 下一个空闲的流 |
+| [EECS089](#eecs089) | 信息 | 逐行追加的记录走 `Emit<T>` | |
 
 ## EECS002 [#eecs002]
 
@@ -886,7 +898,7 @@ public class Steer : EcsSystem
 }
 ```
 
-值放在结构体、span 和 `stackalloc` 里；要复用的集合放进组件，或者放进以 `ref` 传入的单例；传数值，不传字符串：
+值放在结构体、span 和 `stackalloc` 里；一行要填充的列表用 [`Scratch<T>`](/zh/docs/guide/threading#scratch) 参数，每个线程一个、用前清空，`[ForEach]` 方法的消息会指出它；传数值，不传字符串：
 
 ```csharp
 public class Steer : EcsSystem
@@ -1905,6 +1917,192 @@ public static class Reports
 要在所有核上对大量行求总数，改写成带 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 参数的 `[ForEach(Parallel = true)]` 方法：
 每一块保留一个部分结果，这一遍把它们合并起来。
 
+## EECS062 [#eecs062]
+
+**有生成成员、却不是 partial 的类型。** 错误。代码修复：把它和包含它的每一层类型都改成 partial。
+
+`[Sum]`、`[Key]`、`[Group]` 声明的是生成器要写进这个类型本身的成员：`IReduction<T>`、`IIndexed<TKey>` 或 `IGroup` 的成员，
+写在这个类型的另一个部分里。只有 partial 类型、并且外层也都是 partial，才能加上这个部分。`file` 类型加不了，因为它的部分会在另一个文件里。
+
+```csharp tab="报告" doccheck=alone,expect-EECS062
+public struct Headcount : ISingletonComponent
+{
+    [Sum] public int Alive;
+}
+```
+
+```csharp tab="修正"
+public partial struct Headcount : ISingletonComponent
+{
+    [Sum] public int Alive;
+}
+```
+
+## EECS063 [#eecs063]
+
+**用特性声明的归约又自己写了成员。** 错误。没有代码修复。
+
+归约特性（`[Sum]`、`[Product]`、`[Min]`、`[Max]`、`[All]`、`[Any]`）逐个字段声明 `IReduction<T>`，生成器根据它们写出 `Identity` 和
+`Combine`。手写的同名成员会和生成的成员冲突。用别的方式合并的归约（取第一个和最后一个值、拼接）自己实现 `IReduction<T>`，不用这些特性。
+
+```csharp tab="报告" doccheck=alone,expect-EECS063
+public partial struct Wealth : ISingletonComponent
+{
+    [Sum] public long Gold;
+
+    public static Wealth Identity => default;   // [Sum] 已经给出了单位元
+}
+```
+
+```csharp tab="修正"
+public partial struct Wealth : ISingletonComponent
+{
+    [Sum] public long Gold;
+}
+```
+
+## EECS064 [#eecs064]
+
+**归约特性合并不了的字段。** 错误。没有代码修复。
+
+用特性声明的归约会合并每一个实例字段。`[Sum]`、`[Product]`、`[Min]`、`[Max]` 合并数字（整数、`float`、`double`、`decimal`），
+`[All]`、`[Any]` 合并 bool。`Combine` 会给新值的每个字段赋值，所以每个字段都得是字段或带 setter 的自动属性。没有特性的字段会被每一次
+`Combine` 丢掉，带两个特性的字段、`readonly` 字段和计算属性也一样。消息会指出是哪个字段、缺了什么。
+
+```csharp tab="报告" doccheck=alone,expect-EECS064
+public partial struct Spread : ISingletonComponent
+{
+    [Min] public float Lowest;
+    [Max] public float Highest;
+    public int Rows;               // 没有特性：每次 Combine 都会丢掉它
+}
+```
+
+```csharp tab="修正"
+public partial struct Spread : ISingletonComponent
+{
+    [Min] public float Lowest;
+    [Max] public float Highest;
+    [Sum] public int Rows;
+}
+```
+
+## EECS065 [#eecs065]
+
+**可以用特性声明的手写归约。** 建议（信息级别）。代码修复：改用特性声明（外层一并改成 partial），删掉 `Identity` 和 `Combine`。
+
+手写的 `IReduction<T>` 如果对每个字段做的都是求和、求积、最小值、最大值、与或者或，就可以用特性声明。这样生成器会写出这两个成员，
+每个字段的单位元都是对的，求最小值的 `Identity` 不会留成 0（[EECS066](#eecs066)）。
+
+```csharp tab="报告" doccheck=alone,expect-EECS065
+public struct Extent : ISingletonComponent, IReduction<Extent>
+{
+    public float Left, Right;
+
+    public static Extent Identity => new() { Left = float.PositiveInfinity, Right = float.NegativeInfinity };
+    public static Extent Combine(Extent a, Extent b) => new() { Left = MathF.Min(a.Left, b.Left), Right = MathF.Max(a.Right, b.Right) };
+}
+```
+
+```csharp tab="修正"
+public partial struct Extent : ISingletonComponent
+{
+    [Min] public float Left;
+    [Max] public float Right;
+}
+```
+
+## EECS066 [#eecs066]
+
+**`Identity` 不是 `Combine` 的单位元的归约。** 警告。代码修复：写出符合 `Combine` 的 `Identity`；`Combine` 逐字段合并时，也可以改用特性声明。
+
+一遍里的每一块都从 `Identity` 开始算部分结果，遍历结束时再把各块合并起来。假设 `Identity` 会改变和它合并的值，比如求最小值用 0，
+或者求积、求负数的最大值时某个字段留成 0。那么它每一块都会掺进去一次，结果就取决于这一遍分成了多少块，也就是取决于线程数和表的大小。
+
+```csharp tab="报告" doccheck=alone,expect-EECS066
+public struct Weakest : ISingletonComponent, IReduction<Weakest>
+{
+    public float Health;
+
+    public static Weakest Identity => default;   // 0：任何一块的最小值都不会比它大
+    public static Weakest Combine(Weakest a, Weakest b) => new() { Health = MathF.Min(a.Health, b.Health) };
+}
+```
+
+```csharp tab="修正"
+public partial struct Weakest : ISingletonComponent
+{
+    [Min] public float Health;    // 生成器让它从 float.PositiveInfinity 开始
+}
+```
+
+## EECS067 [#eecs067]
+
+**可以用特性声明的索引键。** 建议（信息级别）。代码修复：在那个成员上声明 `[Key]`（唯一索引用 `[UniqueKey]`），外层一并改成 partial。
+
+返回某个字段、属性或值本身的 `Key`，就是在那个成员上（值本身则在类型上）声明 `[Key]` 的效果。生成器会写出接口和显式实现的 `Key`，
+`ToString()` 不会把它打印出来，调用方也不会误用它。由多个成员算出来的键仍然手写。
+
+```csharp tab="报告" doccheck=alone,expect-EECS067
+public struct Owner : IComponent, IIndexed<EntityId>
+{
+    public EntityId Id;
+
+    public EntityId Key => Id;
+}
+```
+
+```csharp tab="修正"
+public partial struct Owner : IComponent
+{
+    [Key] public EntityId Id;
+}
+```
+
+## EECS068 [#eecs068]
+
+**World 设置特性放在了不适用的类型上。** 错误。没有代码修复。
+
+每个设置特性只适用于某些类型，放在别的类型上，没有哪个 World 会应用它：
+
+- `[GroupBy]` 让每个 World 按一个分组组件（`IGroup`，或用 `[Group]` 声明的成员）给表分组。
+- `[WhenTargetDestroyed]` 设定销毁一个实体时指向它的链接怎么办，所以它放在关系（`IRelation`）或按 `EntityId` 索引的组件上。
+- `[NotSaved]` 让存档不包含某个组件或单例。
+
+```csharp tab="报告" doccheck=alone,expect-EECS068
+[GroupBy]
+public struct Squad : IComponent
+{
+    public int Id;              // 没有说明它就是分组
+}
+```
+
+```csharp tab="修正"
+[GroupBy]
+public partial struct Squad : IComponent
+{
+    [Group] public int Id;
+}
+```
+
+## EECS069 [#eecs069]
+
+**没有 Nino 格式化器的托管组件或单例。** 代码会保存包含这个类型的内容时是警告，否则是建议（信息级别）。代码修复：标记 `[NinoType]`
+并改成 partial，或者标记 `[NotSaved]`。
+
+[存档](/zh/docs/guide/saves)把非托管组件按原始行写出。其他组件和单例都用 Nino 写，而 Nino 需要 `[NinoType]` 生成的格式化器，所以包含这个类型的存档会抛异常。
+对组件来说，代码调用了 `Save`、`SaveWithout` 或 `SaveEntities` 时这条规则是警告。对单例来说，只有 `Save` 或 `SaveWithout` 才是警告，
+因为实体存档不写单例。重启后会重建的运行时状态（连接、缓存）改为标记 `[NotSaved]`。
+
+```csharp tab="报告" doccheck=alone,expect-EECS069
+public record struct Title(string Value) : IComponent;   // 一个 string：要由 Nino 来写
+```
+
+```csharp tab="修正"
+[Nino.Core.NinoType]
+public partial record struct Title(string Value) : IComponent;
+```
+
 ## EECS070 [#eecs070]
 
 **产出记录的遍历读取或打乱了这些记录。** 错误。没有代码修复。
@@ -1927,7 +2125,7 @@ public class Strike : EcsSystem
 }
 ```
 
-```csharp tab="修复后"
+```csharp tab="修正"
 public record struct Hit(EntityId Target, int Amount);
 public record struct Aim(EntityId Target) : IComponent;
 
@@ -1958,7 +2156,7 @@ public class ApplyHits : EcsSystem
 [`EntityRandom`](/zh/docs/reference/entityrandom) 抽取（方法没有时加上 `Entity entity` 和 `in EntityRandom random`）。
 
 `Random.Shared` 每次运行的种子都不同，并行遍历中它的数按线程恰好请求的顺序分给各行，所以回放、测试或另一台机器看到的结果不同。
-每行 `new Random()` 会分配，不给种子时用时钟做种子，给了种子又让每一行得到同样的数。`EntityRandom` 是种子、实体、tick 和流的纯函数：
+每行 `new Random()` 会分配，不给种子时用时钟做种子，给了种子又让每一行得到同样的数。存放在静态字段里的 `Random` 同样报告：它抽到的数取决于各行执行的顺序。`EntityRandom` 是种子、实体、tick 和流的纯函数：
 每次运行、任何线程数下都是同样的数。修复给方法里的每次抽取一个自己的流。
 
 ```csharp tab="报告" doccheck=expect-EECS071
@@ -1970,7 +2168,7 @@ public class Wander : EcsSystem
 }
 ```
 
-```csharp tab="修复后"
+```csharp tab="修正"
 public class Wander : EcsSystem
 {
     [ForEach(Parallel = true)]
@@ -1979,7 +2177,7 @@ public class Wander : EcsSystem
 }
 ```
 
-World 里需要这个单例（`world.SetEntityRandom(seed, 0)`），推进模拟时钟的系统同时推进它的 `Tick`，每一步才会抽到新的数。
+World 里需要这个单例（`world.SetEntityRandom(seed, 0)`），推进模拟时钟的系统同时推进它的 `Tick`，每一步才会抽到新的数。对同一个实体抽两次需要两个流（[EECS088](#eecs088)）。
 
 ## EECS072 [#eecs072]
 
@@ -2243,6 +2441,172 @@ public class CountDamage : EcsSystem
     static void Count(in Damage damage, ref DamageDealt dealt) => dealt.Total += damage.Amount;
 }
 ```
+
+## EECS086 [#eecs086]
+
+**每次更新都会重置、再逐行累加的单例。** 建议（信息级别）。没有代码修复。
+
+这一遍的每一行都写同一个 `ref` 单例参数，于是有两个后果。方法不能并行，因为每一块都会争用这个单例（[EECS010](#eecs010)）。
+它的向量循环也没有通道来放这个单例。[`ref Reduce<T>`](/zh/docs/guide/threading#reductions) 参数给每一块一个自己的部分结果，
+从 `T` 的单位元开始，遍历结束时把各个部分结果合并进 `T`。和、最小值、最大值都一样，但方法可以用 `Parallel = true`，也能进向量循环。
+
+这一遍的结果会替换 `T`。所以这条规则只报告系统代码在 `OnCreate` 之外重置的单例：整体赋值、给字段赋常量、`AddSingleton`、
+`RemoveSingleton`，或者生成的 `SetX`、`RemoveX`。这样的单例存的是一遍的结果，归约让它的重置变得多余。跨更新增长的总数（分数、
+到目前为止的死亡数）从不重置，这条规则不管它。
+
+参数的每一次使用都在累加某个字段时才报告：`+=`、`-=`、`++`、`--`、`*=`、bool 的 `|=` 和 `&=`、对这个字段取 `Math.Max` 或
+`Math.Min`，或者 `if (x > s.F) s.F = x;`。每个字段只能用一种方式累加，消息会给出声明它们的特性。
+
+```csharp tab="报告" doccheck=alone,expect-EECS086
+public struct Crowd : ISingletonComponent
+{
+    public int Alive;
+    public int Strongest;
+}
+
+public class CountCrowd : EcsSystem
+{
+    protected override void OnUpdate() => World.Crowd = default;   // 每次更新重新计数
+
+    [ForEach]
+    static void Count(in Health health, ref Crowd crowd)
+    {
+        crowd.Alive++;
+        crowd.Strongest = Math.Max(crowd.Strongest, health.Value);
+    }
+}
+```
+
+```csharp tab="修正"
+public partial struct Crowd : ISingletonComponent
+{
+    [Sum] public int Alive;
+    [Max] public int Strongest;
+}
+
+public class CountCrowd : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Count(in Health health, ref Reduce<Crowd> crowd)
+    {
+        crowd.Value.Alive++;
+        crowd.Value.Strongest = Math.Max(crowd.Value.Strongest, health.Value);
+    }
+}
+```
+
+没有代码修复，因为另一个方法里的重置也得一起删掉。它是建议，只在 IDE 里显示，而且要等完整分析结束才出现，因为重置可能在任何一个文件里。
+
+## EECS087 [#eecs087]
+
+**通过 `World` 读取其他实体的组件。** 警告。没有代码修复。
+
+接收 `World` 的 `[ForEach]` 方法可能做结构变更。所以它的系统在自己的阶段里单独运行，遍历它的行时也要做结构变更需要的检查。
+假设这个方法用 `World` 只是为了找到其他实体（`TryGetEntity`、`GetEntity`），并从它们身上读取自己不写的组件。那么每个组件一个
+[`Lookup<T>`](/zh/docs/guide/threading#lookups) 参数就能做同样的事，不需要 `World`：`lookup[id]` 是 `ReadOnlyMaybe<T>`，`Read(id)`
+是 `ref readonly`，`Has(id)` 判断有没有。系统按这些组件的读者调度，和不写它们的系统共用一个阶段，方法也可以并行。
+
+```csharp tab="报告" doccheck=alone,expect-EECS087
+public record struct Quarry(EntityId Id) : IComponent;
+public record struct Heading(float X, float Y) : IComponent;
+
+public class Pursuit : EcsSystem
+{
+    [ForEach]
+    static void Steer(in Position position, in Quarry quarry, ref Heading heading, World world)
+    {
+        heading = default;
+        if (world.TryGetEntity(quarry.Id, out var target))
+        {
+            var at = target.Read<Position>();
+            heading = new Heading(at.X - position.X, at.Y - position.Y);
+        }
+    }
+}
+```
+
+```csharp tab="修正"
+public record struct Quarry(EntityId Id) : IComponent;
+public record struct Heading(float X, float Y) : IComponent;
+
+public class Pursuit : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Steer(in Position position, in Quarry quarry, ref Heading heading, Lookup<Position> positions)
+    {
+        var at = positions[quarry.Id];
+        heading = at.HasValue ? new Heading(at.Value.X - position.X, at.Value.Y - position.Y) : default;
+    }
+}
+```
+
+还会写另一个实体、做结构变更、或者读取自己也写的组件（[EECS059](#eecs059)）的方法，保留 `World`。
+
+## EECS088 [#eecs088]
+
+**同一个流的两次 `EntityRandom` 抽取。** 警告。代码修复：给后一次抽取一个方法里没有用过的流。
+
+[`EntityRandom`](/zh/docs/reference/entityrandom) 的数是种子、实体、tick 和流的纯函数。同一遍里对同一个实体、用同一个流抽两次，
+得到的是同样的比特：方向的 X 永远等于 Y，命中骰永远等于伤害骰。循环里的抽取也一样：如果循环不改变它的流和实体，每次迭代都拿到同一个数。
+把迭代加进流里（`stream + (uint)i`），这种情况没有唯一的机械改法。这条规则检查 `[ForEach]`、`[ForEntity]` 方法和 job 的 `Execute`，
+在那里每一行每次更新抽一次。有意比较两次抽取的测试不报告。
+
+```csharp tab="报告" doccheck=alone,expect-EECS088
+public record struct Sway(float X, float Y) : IComponent;
+
+public class Flutter : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Sway sway, Entity entity, in EntityRandom random) =>
+        sway = new Sway(random.Range(entity.Id, 0, -1f, 1f), random.Range(entity.Id, 0, -1f, 1f));   // X == Y
+}
+```
+
+```csharp tab="修正"
+public record struct Sway(float X, float Y) : IComponent;
+
+public class Flutter : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Step(ref Sway sway, Entity entity, in EntityRandom random) =>
+        sway = new Sway(random.Range(entity.Id, 0, -1f, 1f), random.Range(entity.Id, 1, -1f, 1f));
+}
+```
+
+`if` 的两个分支、`switch` 的不同分支里的抽取不会一起执行，可以共用一个流。
+
+## EECS089 [#eecs089]
+
+**逐行追加到单例列表里的记录。** 建议（信息级别）。没有代码修复。
+
+单例持有的列表、通过 `ref` 参数填充，就是每一行都在写的同一个列表。方法不能并行，列表也随着记录进来不断翻倍扩容。
+[`Emit<T>`](/zh/docs/reference/emit) 参数给每一块行一个池化的列表，遍历结束时按块的顺序把这些列表追加到 `Emitted<T>`。
+记录还是那些记录、顺序还是行的顺序，单线程和多线程都一样。遍历之后的系统读取 `Emitted<T>` 并清空它（[EECS070](#eecs070)）。
+
+```csharp tab="报告" doccheck=alone,expect-EECS089
+public record struct Shot(EntityId From, float Power);
+public record struct Gun(float Power) : IComponent;
+public struct Volley : ISingletonComponent { public List<Shot> Shots; }
+
+public class Fire : EcsSystem
+{
+    [ForEach]
+    static void Pull(Entity entity, in Gun gun, ref Volley volley) => volley.Shots.Add(new Shot(entity.Id, gun.Power));
+}
+```
+
+```csharp tab="修正"
+public record struct Shot(EntityId From, float Power);
+public record struct Gun(float Power) : IComponent;
+
+public class Fire : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Pull(Entity entity, in Gun gun, Emit<Shot> shots) => shots.Add(new Shot(entity.Id, gun.Power));
+}
+```
+
+没有代码修复，因为列表的读者得改为读取 `Emitted<T>`。
 
 ## 相关页面 [#related]
 

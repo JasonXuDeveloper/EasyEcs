@@ -703,6 +703,9 @@ internal static class Symbols
     public static bool IsForEntity(IMethodSymbol method) =>
         method.GetAttributes().Any(a => Named(a.AttributeClass, ForEntityAttribute));
 
+    /// <summary>How a diagnostic names a generated job's method: "[ForEach] method 'Move'" or "[ForEntity] method 'Heal'".</summary>
+    public static string Describe(IMethodSymbol method) => (IsForEntity(method) ? "[ForEntity] method '" : "[ForEach] method '") + method.Name + "'";
+
     /// <summary>
     /// Why a [ForEntity] method cannot be generated (EECS081), or null: it is an instance method, also has [ForEach],
     /// or takes a parameter that has no meaning for one entity (a component span, an EntitySpan, a Reduce, a Scratch).
@@ -1233,8 +1236,15 @@ internal static class Symbols
         if (syntax.Body != null || syntax.ExpressionBody != null
             || method.PartialImplementationPart?.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is not MethodDeclarationSyntax body)
             return (syntax, model);
-        return (body, body.SyntaxTree == syntax.SyntaxTree ? model : model.Compilation.GetSemanticModel(body.SyntaxTree));
+        return (body, ModelOf(body.SyntaxTree, model));
     }
+
+    /// <summary>
+    /// The semantic model of <paramref name="tree"/>: <paramref name="model"/> when it is that tree's, else the
+    /// compilation's (a body in another file: a partial method's part, a job's Execute).
+    /// </summary>
+    public static SemanticModel ModelOf(SyntaxTree tree, SemanticModel model) =>
+        tree == model.SyntaxTree ? model : model.Compilation.GetSemanticModel(tree);
 
     /// <summary>The <c>Parallel</c> named argument of the method's [ForEach] attribute.</summary>
     public static bool IsParallel(IMethodSymbol method) => method.GetAttributes()
@@ -1250,12 +1260,15 @@ internal static class Symbols
     {
         if (!IsStable(method, syntax, model)) return "it can change structure (make it static, without World, and use its Entity only to read)";
         if (IsBatch(method)) return "batch methods run on one thread";
-        if (method.Parameters.Any(p => Classify(p) == ParamKind.Singleton && p.RefKind == RefKind.Ref))
-            return "it writes a singleton, which every chunk would race on (take it as 'in')";
-        if (IsRunner(method) && method.Parameters.Any(p => Classify(p, true) == ParamKind.Context && p.RefKind == RefKind.Ref))
-            return "it takes a context parameter by 'ref', which every chunk would race on (pass it by value or 'in')";
-        if (IsRunner(method) && method.Parameters.Any(p => Classify(p, true) == ParamKind.Context && p.Type.IsRefLikeType))
-            return "it takes a span or other ref struct, which a job on other threads cannot hold";
+        if (method.Parameters.FirstOrDefault(p => Classify(p) == ParamKind.Singleton && p.RefKind == RefKind.Ref) is { } singleton)
+            return $"'ref {singleton.Type.Name} {singleton.Name}' writes a singleton, which every chunk would race on: take it as 'in' to read it; "
+                   + "a result per chunk goes into a 'ref Reduce<T>' (sums, minimums, maximums) or an Emit<T> (records), combined when the pass ends";
+        if (!IsRunner(method)) return null;
+        foreach (var p in method.Parameters)
+            if (Classify(p, true) == ParamKind.Context && p.RefKind == RefKind.Ref)
+                return $"it takes '{p.Name}' by 'ref', which every chunk would race on: pass it by value or 'in', or collect per-chunk results with a Reduce<T> or an Emit<T>";
+            else if (Classify(p, true) == ParamKind.Context && p.Type.IsRefLikeType)
+                return $"it takes '{p.Name}', a {p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}, which the job the threads share cannot hold (a ref struct lives on one stack): pass an array, or read the data through a Lookup<T> or a singleton";
         return null;
     }
 

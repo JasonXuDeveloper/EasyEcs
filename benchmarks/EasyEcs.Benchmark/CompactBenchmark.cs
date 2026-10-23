@@ -27,6 +27,7 @@ public class CompactBenchmark
     public struct Frozen : IComponent;
 
     /// <summary>The ids found, and the health under which an entity is picked.</summary>
+    [NotSaved]
     public struct Hurt : ISingletonComponent
     {
         public EntityId[] Ids;

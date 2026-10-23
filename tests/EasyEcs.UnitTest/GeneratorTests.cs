@@ -38,9 +38,11 @@ public class GeneratorTests
     internal static async Task<Diagnostic[]> Costs(params string[] sources) =>
         (await Analyze(sources)).Where(d => IsPerformance(d.Id) || d.Id == "EECS034").OrderBy(d => d.Location.SourceSpan.Start).ToArray();
 
-    // The performance rules, and the suggestions to declare with attributes what a hand-written reduction does (EECS065):
-    // the shortest code that shows a rule often writes one by hand.
-    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id is "EECS039" or "EECS046" or "EECS052" or "EECS053" or "EECS065";
+    // The performance rules, and the suggestions to declare with attributes what a hand-written reduction does (EECS065)
+    // and to take the parameter that does what the method does by hand (EECS086, EECS087, EECS089): the shortest code
+    // that shows a rule often writes one by hand.
+    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0
+        || id is "EECS039" or "EECS046" or "EECS052" or "EECS053" or "EECS065" or "EECS086" or "EECS087" or "EECS089";
 
     /// <summary>Every EasyEcs diagnostic but EECS055 (the vector loop's message, asserted by <see cref="ScalarLoopsNameTheirReason"/>).</summary>
     internal static async Task<Diagnostic[]> All(string source) => (await Analyze([Components, Extra, source])).Where(d => d.Id.StartsWith("EECS") && d.Id != "EECS055" && d.Id is not ("EECS067" or "EECS069") || d.Severity == DiagnosticSeverity.Error).OrderBy(d => d.Location.SourceSpan.Start).ToArray();
@@ -310,6 +312,8 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Holder h) { }")]                                             // not numeric fields
     [TestCase("[ForEach] static void A(System.Span<F> f) { }")]                                          // a batch method
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;")] // vectorized
+    [TestCase("[ForEntity] static void A(ref F f, in H h) => f.V = h.V.GetHashCode();")]                // one entity: no loop
+    [TestCase("public struct Acc : ISingletonComponent { public float Sum; } [ForEach] static void A(in F f, ref Acc a) => a.Sum += f.V;")] // accumulated by hand: EECS086 when a system resets it, a running total otherwise
     public void MethodsNotMeantForAVectorLoopGetNoMessage(string members)
     {
         var ids = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Select(d => d.Id);
@@ -864,6 +868,12 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V = System.Random.Shared.Next(); }", "EECS071")]
     [TestCase("public static class R { [ForEach] public static void A(ref P p) => p.V = new System.Random(3).Next(); }", "EECS071")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V = new System.Random().Next(5); }", "EECS071")]
+    [TestCase("public class S : EcsSystem { static readonly System.Random R = new(1); [ForEach] static void A(ref P p) => p.V = R.Next(); }", "EECS071")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, Entity e, in EntityRandom r) => p.V = r.Range(e.Id, 0, 0, 6) + r.Range(e.Id, 0, 0, 6); }", "EECS088")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, Entity e, in EntityRandom r) { if (r.Chance(e.Id, 2, 0.5f)) p.V = r.Range(e.Id, 2, 0, 6); } }", "EECS088")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, Entity e, in EntityRandom r) { for (int i = 0; i < 3; i++) p.V += r.Range(e.Id, 0, 1, 7); } }", "EECS088")]
+    [TestCase("public static class R { [ForEach] static void A(ref P p, in Link l, in Clock c) => p.V = EntityRandom.Range(7, l.Target, (ulong)c.Ticks, 1, 0, 6) * EntityRandom.Range(7, l.Target, (ulong)c.Ticks, 1, 0, 6); }", "EECS088")]
+    [TestCase("public struct J : IForEachEntity<P> { public EntityRandom R; public void Execute(Entity e, ref P p) => p.V = R.Range(e.Id, 4, 0, 6) - R.Range(e.Id, 4, 0, 6); }", "EECS088")] // a job's Execute
     public async Task MisuseIsReported(string source, string id)
     {
         var errors = await Diagnose(Components, source);
@@ -900,10 +910,45 @@ public class GeneratorTests
     [TestCase("public record struct H(int V); public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public static class R { [ForEach(Parallel = true)] public static void A(in P p, ref Reduce<Sum> sum, Emit<H> hits) { sum.Value.N += p.V; hits.AddRange(new H(p.V), new H(0)); } }")]
     [TestCase("public record struct H(int V); public class S : EcsSystem { [ForEach] static void A(in P p, Emit<H> hits) => hits.Add(new H(p.V)); [ForEach] static void B(in Q q, Emit<H> hits) => hits.Add(new H(q.V)); }")]
     [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, Entity e, in EntityRandom random) => p.V = random.Range(e.Id, 0, 0, 10) + (random.Chance(e.Id, 1, 0.5f) ? 1 : 0); }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, Entity e, in EntityRandom r) { if (p.V > 0) p.V = r.Range(e.Id, 0, 0, 6); else p.V = r.Range(e.Id, 0, 6, 9); } }")] // never both
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, Entity e, in EntityRandom r) { switch (p.V) { case 0: p.V = r.Range(e.Id, 0, 0, 6); break; default: p.V = r.Range(e.Id, 0, 6, 9); break; } } }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, Entity e, in EntityRandom r) { for (int i = 0; i < 3; i++) p.V += r.Range(e.Id, 1 + (uint)i, 1, 7); } }")] // the iteration's stream
+    [TestCase("public static class U { public static int F(Entity[] es, in EntityRandom r) { int n = 0; foreach (var e in es) n += r.Range(e.Id, 0, 0, 6); return n; } }")] // an entity per iteration
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, Entity e, in Link l, in EntityRandom r) => p.V = r.Range(e.Id, 0, 0, 6) + r.Range(l.Target, 0, 0, 6); }")] // two entities
+    [TestCase("public static class U { public static bool F(in EntityRandom r, EntityId id) => r.Bits(id, 3) == EntityRandom.Bits(r.Seed, id, r.Tick, 3) && r.Float(id, 3) == r.Float(id, 3); }")] // outside a pass: a check of the function
     public async Task ValidCodeIsNotReported(string source)
     {
         var errors = await Diagnose(Components, source);
         Assert.That(errors, Is.Empty);
+    }
+
+    // A message names the method as what it is ([ForEach] or [ForEntity]), what it costs there, and the parameter at fault.
+    [TestCase("public static class H { [ForEntity] static void A(ref P p, in Q q, int n) => p.V += n; }", "EECS026",
+        "[ForEntity] method 'A' does not use parameter 'q': its column is still loaded on every call; require the component with [With<Q>] instead")]
+    [TestCase("public static class H { [ForEntity] static void A(Entity e, ref P p, int n) => p.V += n; }", "EECS026",
+        "[ForEntity] method 'A' does not use parameter 'e': remove it")]
+    [TestCase("public static class H { [ForEntity] static void A(ref P p, ref Q q) => p.V = q.V; }", "EECS025",
+        "Parameter 'q' of [ForEntity] method 'A' (ref) is a write access, but the code only reads it: the system is scheduled as the component's writer, so no parallel stage runs it beside a reader; take it by 'in'")]
+    [TestCase("public static class H { [ForEntity] static void A(ref T t, int v) { if (v > 0) t.V = v; } }", "EECS053",
+        "Parameter 't' of [ForEntity] method 'A' takes T by 'ref', but some calls return without a write, and every call stamps the row as changed; take it as a Mut<T> and write through Write() or SetIfChanged")]
+    [TestCase("public static class H { [ForEntity] static void A(Entity e, ref P p) => p.V = e.Read<Q>().V; }", "EECS027",
+        "[ForEntity] method 'A' looks up 'Q' with 'e.Read<Q>()' beside the lookup its entry point makes; take it as a parameter ('in Q' or 'ref Q'), or a Maybe<Q> when some entities lack it")]
+    [TestCase("public static class H { [ForEntity] static void A(ref P p) => p.V = new System.Collections.Generic.List<int>().Count; }", "EECS028",
+        "'new System.Collections.Generic.List<int>()' allocates a new List in 'A', which runs on every call")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) { var l = new System.Collections.Generic.List<int> { p.V }; p.V = l.Count; } }", "EECS028",
+        "'new System.Collections.Generic.List<int> { p.V }' allocates a new List in 'A', which runs for every entity it visits, each update; a Scratch<System.Collections.Generic.List<int>> parameter keeps one per thread for the next rows (clear it before use)")]
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, ref Clock c) => c.Ticks += p.V; }", "EECS010",
+        "[ForEach] method 'A' cannot run in parallel: 'ref Clock c' writes a singleton, which every chunk would race on: take it as 'in' to read it; a result per chunk goes into a 'ref Reduce<T>' (sums, minimums, maximums) or an Emit<T> (records), combined when the pass ends")]
+    [TestCase("public static class R { [ForEach(Parallel = true)] static void A(ref P p, ref int n) => p.V = n; }", "EECS010",
+        "[ForEach] method 'A' cannot run in parallel: it takes 'n' by 'ref', which every chunk would race on: pass it by value or 'in', or collect per-chunk results with a Reduce<T> or an Emit<T>")]
+    [TestCase("public static class R { [ForEach(Parallel = true)] static void A(ref P p, System.ReadOnlySpan<int> s) => p.V = s[0]; }", "EECS010",
+        "[ForEach] method 'A' cannot run in parallel: it takes 's', a ReadOnlySpan<int>, which the job the threads share cannot hold (a ref struct lives on one stack): pass an array, or read the data through a Lookup<T> or a singleton")]
+    [TestCase("public static class H { [ForEntity] static void A(P p) { } }", "EECS002",
+        "Parameter 'p' of [ForEntity] method 'A' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe, Mut or Lookup of one, a 'ref Reduce' of a singleton, a Scratch, an Emit of a struct, an Entity or the World (outside a system, also a value the caller passes, of any other type)")]
+    public async Task MessagesNameWhatTheyMean(string source, string id, string message)
+    {
+        var found = (await Analyze([Components, source])).Where(d => d.Id == id).Select(d => d.GetMessage()).ToArray();
+        Assert.That(found, Is.EqualTo(new[] { message }));
     }
 
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref Missing m) { } }")]
@@ -1256,6 +1301,7 @@ public class GeneratorTests
     [TestCase("public record struct S(object O); public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.Save(o); }", null)]           // not a component
     [TestCase("public record struct S(object O) : IComponent; public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.SaveWithout(o, ComponentSet.Create().With<S>()); }", null)] // left out by the code
     [TestCase("public record struct S(string Name) : ISingletonComponent; public static class U { static readonly ComponentSet Keep = ComponentSet.Create().WithSingleton<S>(); }", null)]  // named in a set
+    [TestCase("public record struct S(string Name) : ISingletonComponent; public static class U { public static void F(World w, System.Buffers.IBufferWriter<byte> o) => w.SaveEntities(o); }", DiagnosticSeverity.Info)] // entity saves write no singletons
     public async Task AManagedTypeASaveCannotWriteIsReported(string source, DiagnosticSeverity? severity)
     {
         var found = (await Analyze([source])).Where(d => d.Id == "EECS069").ToArray();
@@ -2245,6 +2291,8 @@ public class GeneratorTests
     [TestCase("public struct Pair { public Entity A; } public struct Pairs : IComponent { public int N; public DynamicBuffer<Pair> All; }", "EECS012", "EECS017")] // two mistakes, once each
     [TestCase("public class S : EcsSystem { static int _hits; [ForEach(Parallel = true)] static void A(in P p) => _hits += p.V; }", "EECS007")] // not EECS060
     [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(in P p, ref Clock c) { c.Ticks += p.V; G.N++; } } public static class G { public static int N; }", "EECS010")] // not EECS060
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V = new System.Random(p.V).Next(); }", "EECS071")]         // not EECS028
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Link l, World w) { if (w.TryGetEntity(l.Target, out var t)) p.V = t.Get<Q>().V; } }", "EECS087")] // not EECS033
     public async Task OneMistakeIsReportedOnce(string source, params string[] ids)
     {
         var all = await All(source);
