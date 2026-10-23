@@ -171,11 +171,21 @@ public class GeneratorTests
     [TestCase("[ForEach(Parallel = true, ChunkRows = 100)] static void A(ref P p) { }", "ForEachBatchParallel<", "(ref job0, in __ForEach.AFilter0, chunkRows: 100);")]
     [TestCase("[ForEach(Slices = 4)] static void A(System.Span<P> p) { }", "ForEachBatch<", "Slice((int)(system.RunCount % 4), 4)")]
     public void AccessIsDeclaredFromParameters(string members, params string[] expected)
+        => AccessOf("", members, expected);
+
+    // A tile job keeps the neighbors in a field: a local of the inlined Execute would be zeroed on every row.
+    [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }",
+        "[ForEach] static void A(Tile<byte, G> t, ref P p) => p.V = t.Cells.Length;",
+        "public global::EasyEcs.TileNeighbors n0;", "(k0, entity, out n0);", "new global::EasyEcs.Tile<byte, global::G>(entity, in n0)")]
+    public void AccessIsDeclaredFromParametersBeside(string declarations, string members, params string[] expected)
+        => AccessOf(declarations, members, expected);
+
+    private void AccessOf(string declarations, string members, string[] expected)
     {
-        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"[EcsSystem] public ref struct S {{ {members} }}"),
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"{declarations} [EcsSystem] public ref struct S {{ {members} }}"),
             out var output, out _);
-        string generated = output.SyntaxTrees.Single(t => IsCode(t)).ToString();
-        foreach (var line in expected) Assert.That(generated, Does.Contain(line));
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("struct __S_SystemCode")).ToString();
+        foreach (var line in expected) Assert.That(generated, Does.Contain(line), generated);
         if (!expected.Contains("access.RunAlone();")) Assert.That(generated, Does.Not.Contain("RunAlone"));
     }
 

@@ -311,8 +311,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 return ($"public global::System.Runtime.CompilerServices.StrongBox<{p.Type}> t{i};", null);
             case Symbols.ParamKind.Lookup when p.Key.Length > 0: // its index, built before the pass
                 return ($"public object k{i};", $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Type}, {p.Key}>({world})");
-            case Symbols.ParamKind.Tile when method.FirstOfGrid(i): // the grid's index, built before the pass
-                return ($"public object k{i};", $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Grid}, {p.Key}>({world})");
+            // The grid's index, built before the pass, and the entity's neighbors: a field, not a local, which the
+            // caller's zero-initialized locals would clear on every row before TileNeighbors.Of clears it again.
+            case Symbols.ParamKind.Tile when method.FirstOfGrid(i):
+                return ($"public object k{i};\npublic global::EasyEcs.TileNeighbors n{i};", $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Grid}, {p.Key}>({world})");
             case Symbols.ParamKind.Emit: // on one thread the singleton's list itself; in parallel the target of the chunks' lists (from the pool)
                 return method.Parallel
                     ? ($"public global::EasyEcs.SingletonRef<global::EasyEcs.Emitted<{p.Type}>> o{i};\npublic global::EasyEcs.DynamicBuffer<{p.Type}> e{i};",
@@ -521,7 +523,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         // A grid's neighbors, found once per entity for every Tile of the grid the method takes.
         string grids = string.Concat(Enumerable.Range(0, method.Parameters.Length).Where(method.FirstOfGrid).Select(i =>
-            $"global::EasyEcs.TileNeighbors.Of<{method.Parameters[i].Grid}, {method.Parameters[i].Key}>(k{i}, {(runs ? "entities[(int)i]" : "entity")}, out var n{i}); "));
+            $"global::EasyEcs.TileNeighbors.Of<{method.Parameters[i].Grid}, {method.Parameters[i].Key}>(k{i}, {(runs ? "entities[(int)i]" : "entity")}, out n{i}); "));
         if (grids.Length > 0) call = runs ? $"{{ {grids}{call} }}" : grids + call;
         // A vector loop also takes the words of 64 rows of which some pass (IForEachMasked): their passing rows as a
         // lane mask, the other lanes stored back as loaded.
