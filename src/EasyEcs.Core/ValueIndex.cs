@@ -407,12 +407,20 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
         if (!_built) Build();
     }
 
+    /// <summary>The first entity found with key <paramref name="key"/> (any, when several have it).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryFind(TKey key, out Entity entity)
+    {
+        bool found = TryFindId(key, out var id);
+        entity = found ? new Entity(_world, id) : default;
+        return found;
+    }
+
     /// <summary>
-    /// The id of the first entity found with key <paramref name="key"/> (any, when several have it): O(1), a hash probe
-    /// (the first lookup indexes every row once). An id, as <see cref="Lookup{T}"/> takes it and a link stores it;
-    /// <c>world.GetEntity(id)</c> is its handle. A unique index's <c>TryGet</c> returns the handle. Owner thread only.
+    /// The id of the first entity found with key <paramref name="key"/>: the core of <see cref="TryFind"/>, for the
+    /// paths that store ids (the neighbors of a tile) and need no handle.
     /// </summary>
-    public bool TryFind(TKey key, out EntityId id)
+    internal bool TryFindId(TKey key, out EntityId id)
     {
         if (Unique) // built from the start; a key's head holds its entity inline
         {

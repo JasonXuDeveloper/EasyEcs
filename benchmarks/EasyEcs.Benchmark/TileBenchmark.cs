@@ -388,15 +388,15 @@ internal static class TileSystems
         {
             Span<float> pad = stackalloc float[Row * Row];
             var self = MemoryMarshal.Cast<Warmth, float>(warmth.AsReadOnlySpan());
-            var north = Cells(plots.TryFind(plot.Pos.Offset(0, -1), out EntityId northId), northId, warmths);
-            var south = Cells(plots.TryFind(plot.Pos.Offset(0, 1), out EntityId southId), southId, warmths);
-            var west = Cells(plots.TryFind(plot.Pos.Offset(-1, 0), out EntityId westId), westId, warmths);
-            var east = Cells(plots.TryFind(plot.Pos.Offset(1, 0), out EntityId eastId), eastId, warmths);
+            var north = Cells(plots.TryFind(plot.Pos.Offset(0, -1), out Entity northId), northId, warmths);
+            var south = Cells(plots.TryFind(plot.Pos.Offset(0, 1), out Entity southId), southId, warmths);
+            var west = Cells(plots.TryFind(plot.Pos.Offset(-1, 0), out Entity westId), westId, warmths);
+            var east = Cells(plots.TryFind(plot.Pos.Offset(1, 0), out Entity eastId), eastId, warmths);
             // The corners: the cell of each diagonal neighbor nearest this plate.
-            pad[0] = Corner(plots.TryFind(plot.Pos.Offset(-1, -1), out EntityId nw), nw, 255, warmths);
-            pad[Row - 1] = Corner(plots.TryFind(plot.Pos.Offset(1, -1), out EntityId ne), ne, 240, warmths);
-            pad[(Row - 1) * Row] = Corner(plots.TryFind(plot.Pos.Offset(-1, 1), out EntityId sw), sw, 15, warmths);
-            pad[Row * Row - 1] = Corner(plots.TryFind(plot.Pos.Offset(1, 1), out EntityId se), se, 0, warmths);
+            pad[0] = Corner(plots.TryFind(plot.Pos.Offset(-1, -1), out Entity nw), nw, 255, warmths);
+            pad[Row - 1] = Corner(plots.TryFind(plot.Pos.Offset(1, -1), out Entity ne), ne, 240, warmths);
+            pad[(Row - 1) * Row] = Corner(plots.TryFind(plot.Pos.Offset(-1, 1), out Entity sw), sw, 15, warmths);
+            pad[Row * Row - 1] = Corner(plots.TryFind(plot.Pos.Offset(1, 1), out Entity se), se, 0, warmths);
             Band(north, 15 * 16, pad.Slice(1, 16));
             Band(south, 0, pad.Slice((Row - 1) * Row + 1, 16));
             for (int z = 0; z < 16; z++)
@@ -437,10 +437,10 @@ internal static class TileSystems
         {
             Span<float> pad = stackalloc float[Row * Row];
             var self = MemoryMarshal.Cast<Warmth, float>(warmth.AsReadOnlySpan());
-            var north = Cells(plots.TryFind(plot.Pos.Offset(0, -1), out EntityId northId), northId, warmths);
-            var south = Cells(plots.TryFind(plot.Pos.Offset(0, 1), out EntityId southId), southId, warmths);
-            var west = Cells(plots.TryFind(plot.Pos.Offset(-1, 0), out EntityId westId), westId, warmths);
-            var east = Cells(plots.TryFind(plot.Pos.Offset(1, 0), out EntityId eastId), eastId, warmths);
+            var north = Cells(plots.TryFind(plot.Pos.Offset(0, -1), out Entity northId), northId, warmths);
+            var south = Cells(plots.TryFind(plot.Pos.Offset(0, 1), out Entity southId), southId, warmths);
+            var west = Cells(plots.TryFind(plot.Pos.Offset(-1, 0), out Entity westId), westId, warmths);
+            var east = Cells(plots.TryFind(plot.Pos.Offset(1, 0), out Entity eastId), eastId, warmths);
             for (int k = 0; k < 2; k++)
             {
                 Band(north, (14 + k) * 16, pad.Slice(k * Row + 2, 16));

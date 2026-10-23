@@ -231,7 +231,7 @@ public class PartTests
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Find(in LookupTests.Wants wants, ref LookupTests.Found found, Lookup<Subscriber> accounts) =>
-            found.Id = accounts.TryFind(wants.Login, out var id) ? id : default;
+            found.Id = accounts.TryFind(wants.Login, out var entity) ? entity : default;
     }
 
     [Test]

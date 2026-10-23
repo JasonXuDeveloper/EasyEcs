@@ -44,7 +44,7 @@ public class LookupTests
     {
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Find(in Wants wants, ref Found found, Lookup<Login> logins) =>
-            found.Id = logins.TryFind(wants.Login, out var id) ? id : default;
+            found.Id = logins.TryFind(wants.Login, out var entity) ? entity : default;
     }
 
     /// <summary>A value index counted by key: built before the pass, never by a lookup during it.</summary>

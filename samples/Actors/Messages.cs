@@ -36,13 +36,7 @@ public static class Mailman
     public static bool Buy(World world, Shop to, int quantity)
     {
         // Read first: a refused order writes nothing, so the next save does not store an unchanged shop.
-        if (!world.ShopIndex.TryFind(to, out var id))
-        {
-            return false;
-        }
-
-        var shop = world.GetEntity(id);
-        if (shop.Stock.Items < quantity)
+        if (!world.ShopIndex.TryFind(to, out var shop) || shop.Stock.Items < quantity)
         {
             return false;
         }
@@ -52,5 +46,5 @@ public static class Mailman
 
     /// <summary>False when the bank is not active.</summary>
     public static bool Deposit(World world, Bank to, long coins) =>
-        world.BankIndex.TryFind(to, out var bank) && Messages.Deposit(world.GetEntity(bank), coins);
+        world.BankIndex.TryFind(to, out var bank) && Messages.Deposit(bank, coins);
 }

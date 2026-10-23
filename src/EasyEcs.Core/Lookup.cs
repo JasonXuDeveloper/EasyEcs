@@ -81,7 +81,7 @@ public static class LookupExtensions
         /// An entity whose <typeparamref name="T"/> has key <paramref name="key"/>: the one of a unique index
         /// (<see cref="IUniqueIndexed{TKey}"/>), any of them otherwise. O(1): a hash probe.
         /// </summary>
-        public bool TryFind(TKey key, out EntityId id) => IndexOf<T, TKey>(lookup).TryFind(key, out id);
+        public bool TryFind(TKey key, out Entity entity) => IndexOf<T, TKey>(lookup).TryFind(key, out entity);
 
         /// <summary>
         /// The entities whose <typeparamref name="T"/> has key <paramref name="key"/> (<c>foreach</c>). O(1), then O(1)

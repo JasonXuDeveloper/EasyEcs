@@ -68,17 +68,12 @@ public static class UniqueIndexExtensions
         /// </summary>
         public Entity Get(TKey key)
         {
-            if (!index.TryFind(key, out var id)) ThrowNone(key);
-            return new Entity(index.World, id);
+            if (!index.TryFind(key, out var entity)) ThrowNone(key);
+            return entity;
         }
 
         /// <summary>The entity whose <typeparamref name="T"/> has key <paramref name="key"/>, if one has it. O(1): a hash probe. Owner thread only.</summary>
-        public bool TryGet(TKey key, out Entity entity)
-        {
-            bool found = index.TryFind(key, out var id);
-            entity = found ? new Entity(index.World, id) : default;
-            return found;
-        }
+        public bool TryGet(TKey key, out Entity entity) => index.TryFind(key, out entity);
     }
 
     [DoesNotReturn, MethodImpl(MethodImplOptions.NoInlining)]

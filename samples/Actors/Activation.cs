@@ -18,7 +18,7 @@ public static class Activation
     {
         if (world.Index<TActor, TActor>().TryFind(key, out var active))
         {
-            return world.GetEntity(active);
+            return active;
         }
 
         // The key and the inbox tag land with the prefab's components in one row copy.

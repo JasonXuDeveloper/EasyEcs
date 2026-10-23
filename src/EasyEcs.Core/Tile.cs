@@ -194,7 +194,7 @@ public struct TileNeighbors
             if (dx != 0) at = TTile.Beside(at, dx < 0 ? TileFaces.West : TileFaces.East);
             if (dz != 0) at = TTile.Beside(at, dz < 0 ? TileFaces.North : TileFaces.South);
             if (dy != 0) at = TTile.Beside(at, dy < 0 ? TileFaces.Below : TileFaces.Above);
-            if (grid.TryFind(at, out var found)) around[slot] = found;
+            if (grid.TryFindId(at, out var found)) around[slot] = found;
         }
     }
 
@@ -202,7 +202,7 @@ public struct TileNeighbors
     private static void Face<TTile, TKey>(ValueIndex<TTile, TKey> grid, TKey key, TileFaces face, int slot, ref TileNeighbors around)
         where TTile : struct, IComponent, ITile<TKey> where TKey : IEquatable<TKey>
     {
-        if ((TileOffsets<TTile>.SlotMask >> slot & 1) != 0 && grid.TryFind(TTile.Beside(key, face), out var found)) around[slot] = found;
+        if ((TileOffsets<TTile>.SlotMask >> slot & 1) != 0 && grid.TryFindId(TTile.Beside(key, face), out var found)) around[slot] = found;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

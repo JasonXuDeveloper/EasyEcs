@@ -75,7 +75,7 @@ public class IndexTests
         var b = world.CreateEntity(new Callsign("bravo"));
 
         Assert.That(index.TryFind("alpha", out var found), Is.True);
-        Assert.That(found, Is.EqualTo(a.Id));
+        Assert.That(found, Is.EqualTo(a));
         Assert.That(index.Count("bravo"), Is.EqualTo(1));
         Assert.That(index.TryFind("charlie", out _), Is.False);
         Assert.That(index.KeyCount, Is.EqualTo(2));

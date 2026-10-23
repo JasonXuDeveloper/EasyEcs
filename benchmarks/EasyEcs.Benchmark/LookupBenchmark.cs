@@ -98,10 +98,10 @@ public class LookupBenchmark
 
         [ForEach]
         public static void FindBySerialLookup(in Wants wants, ref Found found, Lookup<Account> accounts) =>
-            found = new Found(accounts.TryFind(wants.Login, out var id) ? id : default);
+            found = new Found(accounts.TryFind(wants.Login, out var entity) ? entity : default);
 
         [ForEach(Parallel = true)]
         public static void FindByLookup(in Wants wants, ref Found found, Lookup<Account> accounts) =>
-            found = new Found(accounts.TryFind(wants.Login, out var id) ? id : default);
+            found = new Found(accounts.TryFind(wants.Login, out var entity) ? entity : default);
     }
 }
