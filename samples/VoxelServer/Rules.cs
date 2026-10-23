@@ -54,7 +54,10 @@ public static class Rules
         return new Vector3(x + 0.5f, Terrain.SurfaceHeight(x, z) + 1, z + 0.5f);
     }
 
-    // A deterministic number from 0 to 255 for any pair of integers: the same world and the same bots on every run.
+    // The seed of the world's EntityRandom: what the bots and the zombies draw is the same on every run.
+    public const ulong Seed = 0x5EED;
+
+    // A deterministic number from 0 to 255 for any pair of integers: the same terrain on every run.
     public static int Hash(int a, int b)
     {
         unchecked

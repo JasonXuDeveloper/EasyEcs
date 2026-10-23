@@ -6,23 +6,23 @@ namespace VoxelServer;
 
 // #region spawn
 // At night, every five seconds, a zombie rises near each player: 24 to 32 blocks away on the larger axis, in a
-// direction the hash picks, on top of the highest block of that column (a dug pit included) and out of the water, as
-// in Minecraft, which spawns no hostile mob closer than 24 blocks. A column whose chunk is not loaded gets none. What
+// direction drawn for the player (EntityRandom: a pure function of the seed, the player, the tick and a stream per
+// draw, so the same on every run and on any thread), on top of the highest block of that column (a dug pit included)
+// and out of the water, as in Minecraft, which spawns no hostile mob closer than 24 blocks. A column whose chunk is not loaded gets none. What
 // a zombie hunts is up to its eyes (ZombieTargetSystem). Phase = 1: the first spawn of a night is at its first
 // tick.
 [EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.SpawnEvery, Phase = 1)]
 public ref struct NightSpawnSystem
 {
 
-    [ForEach]
-    static void Spawn(in Player client, in Position position, in Clock clock, in Prefabs prefabs, ref Stats stats,
-        Lookup<Chunk> chunks, Lookup<DynamicBuffer<Fluid>> water, Lookup<DynamicBuffer<Surface>> surface, World world)
+    [ForEach, With<Player>]
+    static void Spawn(Entity player, in Position position, in Clock clock, in EntityRandom random, in Prefabs prefabs,
+        ref Stats stats, Lookup<Chunk> chunks, Lookup<DynamicBuffer<Fluid>> water, Lookup<DynamicBuffer<Surface>> surface,
+        World world)
     {
         if (!Rules.IsNight(clock)) return;
-        int seed = (int)(clock.Tick / Rules.SpawnEvery);
-        int span = 2 * Rules.SpawnMax + 1;
-        int dx = Rules.Hash(client.Client, seed) % span - Rules.SpawnMax;
-        int dz = Rules.Hash(seed, client.Client) % span - Rules.SpawnMax;
+        int dx = random.Range(player.Id, 0, -Rules.SpawnMax, Rules.SpawnMax + 1);
+        int dz = random.Range(player.Id, 1, -Rules.SpawnMax, Rules.SpawnMax + 1);
         if (Math.Max(Math.Abs(dx), Math.Abs(dz)) < Rules.SpawnMin)              // too close: out to the ring
         {
             if (Math.Abs(dx) >= Math.Abs(dz)) dx = dx < 0 ? -Rules.SpawnMin : Rules.SpawnMin;

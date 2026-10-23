@@ -87,12 +87,16 @@ public ref struct TallySystem
 
 // #region clock
 // Starts a tick of the simulation: the clock goes first, so every system of the tick, and the replication after it,
-// sees the same tick. In the Simulation group, not Replication, so a server that replicates less often than it
-// simulates keeps game time.
+// sees the same tick, and draws the same random numbers: EntityRandom's tick follows the clock. In the Simulation
+// group, not Replication, so a server that replicates less often than it simulates keeps game time.
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct ClockSystem
 {
     [OnUpdate]
-    static void OnUpdate(World world) => world.Clock.Tick++;
+    static void OnUpdate(World world)
+    {
+        long tick = ++world.Clock.Tick;
+        world.GetSingleton<EntityRandom>().Tick = (ulong)tick;
+    }
 }
 // #endregion clock
