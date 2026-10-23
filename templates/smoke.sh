@@ -36,7 +36,7 @@ dotnet new easyecs -n SmokeServer --tests "${hive[@]}"
 # The item template goes into Systems/ and takes the project's root namespace without --namespace.
 (cd SmokeServer && dotnet new easyecs-system -n RegenSystem -o Systems "${hive[@]}")
 grep -q "^namespace SmokeServer;" SmokeServer/Systems/RegenSystem.cs
-grep -q "public class RegenSystem : EcsSystem" SmokeServer/Systems/RegenSystem.cs
+grep -q "public ref struct RegenSystem" SmokeServer/Systems/RegenSystem.cs
 grep -q "Version=\"$version\"" SmokeServer/SmokeServer.csproj
 dotnet build SmokeServer/SmokeServer.Tests/SmokeServer.Tests.csproj -c Release -warnaserror -nologo -v q
 dotnet run --project SmokeServer/SmokeServer.csproj -c Release --no-build -- --ticks 60 | tee run.txt
