@@ -287,7 +287,10 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     // Ordered walks (Range / Ascending / Descending, TKey : IComparable): the keys that have entities, sorted. Built by
     // the first ordered walk, then kept by AddHead / Unlink (a binary search and a block move per new or emptied key).
     // _keysVersion changes when a key enters or leaves, so a walk that outlives the change finds its place again.
+    // A reset drops the sorted keys and keeps their array for the next sort (_sortedSpare): a restore every tick
+    // (rollback, replays) sorts into the same array.
     private TKey[] _sorted;
+    private TKey[] _sortedSpare;
     private int _sortedCount;
     private int _keysVersion;
 
@@ -477,7 +480,13 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
         _byTarget.Clear(_spares);
         _keyCount = 0;
         Array.Clear(_nodes);
-        _sorted = null; // sorted again by the next ordered walk (one sort instead of one insertion per key)
+        if (_sorted != null) // sorted again by the next ordered walk (one sort instead of one insertion per key)
+        {
+            if (RuntimeHelpers.IsReferenceOrContainsReferences<TKey>()) Array.Clear(_sorted, 0, _sortedCount);
+            _sortedSpare = _sorted;
+            _sorted = null;
+        }
+
         _sortedCount = 0;
         _keysVersion++;
         _built = !rebuild || Unique; // a unique index is given the restored rows at once (World.ResetIndexes)
@@ -791,7 +800,8 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void SortKeys()
     {
-        var sorted = new TKey[Math.Max(16, _heads.Count)];
+        var sorted = _sortedSpare is { } spare && spare.Length >= _heads.Count ? spare : new TKey[Math.Max(16, _heads.Count)];
+        _sortedSpare = null;
         _heads.Keys.CopyTo(sorted, 0);
         _sortedCount = _heads.Count;
         Array.Sort(sorted, 0, _sortedCount, Comparer<TKey>.Default);

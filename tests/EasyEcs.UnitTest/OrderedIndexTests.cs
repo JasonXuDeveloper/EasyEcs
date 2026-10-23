@@ -97,4 +97,30 @@ public class OrderedIndexTests
         foreach (var e in deadlines.Descending()) order.Add(e.Read<Deadline>().At);
         Assert.That(order, Is.EqualTo(new[] { "b", "a" }));
     }
+
+    [Test]
+    public void WalksAfterARestoreSortIntoTheSameArray()
+    {
+        using var world = new World();
+        for (int points = 0; points < 100; points++) world.CreateEntity(new Rating(points));
+        var scores = world.Index<Rating, int>();
+        var snapshot = world.Capture();
+
+        // A replay: a new key, a walk of the oldest keys (sorted again after the restore), then back to the capture.
+        int Replay()
+        {
+            int seen = 0;
+            for (int i = 0; i < 10; i++)
+            {
+                world.CreateEntity(new Rating(1000 + i));
+                foreach (var _ in scores.Range(0, 9)) seen++;
+                world.Restore(snapshot);
+            }
+
+            return seen;
+        }
+
+        Assert.That(Replay(), Is.EqualTo(100));
+        Assert.That(Allocations.Least(() => Replay()), Is.Zero);
+    }
 }
