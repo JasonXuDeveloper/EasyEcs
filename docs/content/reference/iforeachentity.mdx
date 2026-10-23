@@ -32,6 +32,14 @@ static virtual bool Merges { get; }
 
 The job keeps partial results in its fields ([`Reduce`](/en/docs/reference/reduce); default false): a parallel pass keeps each chunk's copy of the job and combines them into the caller's job in chunk order ([`IForEachEntity.Merge`](/en/docs/reference/iforeachentity#merge)).
 
+### `OptionalWrites` [#optionalwrites]
+
+```csharp
+static virtual ComponentSet OptionalWrites { get; }
+```
+
+Tracked components the job writes besides its own (through a [`Maybe`](/en/docs/reference/maybe); default none): a parallel pass opens their change-tick blocks with those of [`IForEachEntity.WriteMask`](/en/docs/reference/iforeachentity#writemask), so chunks splitting a block share it. Generated parallel jobs set their [`Maybe`](/en/docs/reference/maybe) writes.
+
 ### `SelfStamped` [#selfstamped]
 
 ```csharp

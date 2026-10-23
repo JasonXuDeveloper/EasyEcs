@@ -705,6 +705,22 @@ internal sealed class Archetype
         for (int b = start >> 12; b <= (end - 1) >> 12; b++) blocks[b].Open(tick);
     }
 
+    /// <summary>
+    /// <see cref="OpenBlocks{T}"/> for every tracked component of <paramref name="components"/> the table has: those a
+    /// parallel job writes through a <c>Maybe&lt;T&gt;</c> (its <c>OptionalWrites</c>). Cold path: once per table and pass.
+    /// </summary>
+    public void OpenBlocks(in ComponentSet components, int start, int end, ulong tick)
+    {
+        if (start >= end) return;
+        for (int c = 0; c < Components.Length; c++)
+        {
+            int owner = _infos[c].Owner; // a change-tick column: the component it tracks
+            if (owner < 0 || !components.Contains(owner)) continue;
+            var blocks = Blocks[c];
+            for (int b = start >> 12; b <= (end - 1) >> 12; b++) blocks[b].Open(tick);
+        }
+    }
+
     /// <summary><see cref="Stamp{T}"/> for the rows of word <paramref name="word"/> whose bit is set in <paramref name="rows"/>.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void StampWord<T>(int word, ulong rows, ulong tick) where T : struct, IComponent

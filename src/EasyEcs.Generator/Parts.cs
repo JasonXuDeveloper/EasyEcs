@@ -301,13 +301,17 @@ internal sealed class Parts
         return -1;
     }
 
+    /// <summary>Whether <paramref name="op"/> can combine a field of <paramref name="type"/> (what the attribute accepts).</summary>
+    public static bool Fits(Op op, ITypeSymbol type) =>
+        op is Op.All or Op.Any ? type.SpecialType == SpecialType.System_Boolean : Numeric(type);
+
     /// <summary>Why <paramref name="op"/> cannot combine a field of <paramref name="type"/>, or null.</summary>
     private static string? Unsupported(Op op, ITypeSymbol type)
     {
-        bool boolean = type.SpecialType == SpecialType.System_Boolean;
-        if (op is Op.All or Op.Any)
-            return boolean ? null : $"is {type.ToDisplayString()}, but [{op}] combines bools";
-        return Numeric(type) ? null : $"is {type.ToDisplayString()}, but [{op}] combines numbers (an integer type, float, double or decimal)";
+        if (Fits(op, type)) return null;
+        return op is Op.All or Op.Any
+            ? $"is {type.ToDisplayString()}, but [{op}] combines bools"
+            : $"is {type.ToDisplayString()}, but [{op}] combines numbers (an integer type, float, double or decimal)";
     }
 
     private static bool Numeric(ITypeSymbol type) => type.SpecialType is SpecialType.System_SByte or SpecialType.System_Byte

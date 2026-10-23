@@ -112,6 +112,8 @@ icon: RotateCcwClock
 
 ### 性能 [#v4-8-0-performance]
 
+- 生成器每次编辑的工作量约减半：被提供同名成员的类型按名字查找，不再为每个组件遍历一遍命名空间；签名就排除了向量循环的
+  `[ForEach]` 方法不绑定方法体即可判定。生成的代码不变（[决策](/zh/docs/decisions#d95-generator-per-edit)）。
 - 缓冲回收池在线程之间共享：每个线程自己留几个列表，其余的按批和所有线程都能取用的池交换，所以拥有者线程从销毁的缓冲收回的列表，也能给并行
   `[ForEach]` 的第一次写入用，以前那里要分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#pool)。
 - 预制体上的空缓冲（不带元素的 `SetBuffer<T>()`）不再给实例一个列表：实例写入第一个元素时从池里取，不再新建一个再扩容。
@@ -152,6 +154,10 @@ icon: RotateCcwClock
 - 加载两次保存之间会增长的世界（`Load`、`LoadKeeping`）时，id 记录按新 id 的个数精确增长，每次加载都要整体复制一遍；现在改为翻倍增长，
   `LoadEntities` 暂存新到实体的那个世界也按目标世界的大小创建，并同样翻倍增长。
 - `Restore` 以及往已有快照里 `Capture` 时，每行的 `DynamicBuffer`（以及关系链接）复制进这一行已有的列表，不再每行新建一个列表、把旧的丢给 GC。
+- 并行 `[ForEach]` 方法通过 `Maybe<T>` 写追踪组件时，像对它查询的组件一样，在各块运行前先打开该组件的变更 tick 区块：同一区块里的两个块
+  可能争写区块摘要，`[Changed<T>]` 系统随后会漏掉这次遍历写过的行（[决策](/zh/docs/decisions#d94-optional-writes)）。
+- 私有或 `file` 结构体不再夺走另一个类型里同名嵌套结构体的生成成员（`Tests.Census` 与 `Server.Census`）：此前 `world.Census`
+  不存在（CS1061）。只有自身也获得成员的类型才会彼此让出。
 
 ## 4.7.0 [#v4-7-0]
 

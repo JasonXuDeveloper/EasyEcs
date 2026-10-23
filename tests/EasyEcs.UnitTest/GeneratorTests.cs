@@ -1879,6 +1879,27 @@ public class GeneratorTests
     }
 
     [Test]
+    public void ANamesakeNoOtherFileCanNameTakesNoMembers()
+    {
+        // A private or file-local namesake gets no members of its own: the nested type it shares a name with keeps them.
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
+            namespace N
+            {
+                public class Tests { private struct Census : ISingletonComponent { public int Players; } }
+                file struct Health { public int V; }
+                public class Server
+                {
+                    public struct Census : ISingletonComponent { public int Players; }
+                    public struct Health : IComponent { public int V; }
+                    public static int Use(World w, Entity e) => w.Census.Players + e.Health.V;
+                }
+            }
+            """), out var output, out var diagnostics);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+    }
+
+    [Test]
     public void ARelationNamedLikeAnEntityMemberKeepsItsOtherMembers()
     {
         // Entity.Id takes Id: LinksId is another name, still generated.

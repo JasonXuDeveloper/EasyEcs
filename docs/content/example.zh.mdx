@@ -66,9 +66,9 @@ flowchart LR
 | [变更追踪](/zh/docs/guide/change-tracking)与移除检测 | `ReplicationSystem`；`WrittenSinceCheckpoint` |
 | 每个客户端一份 tick 的 [`ChangedAny`](/zh/docs/guide/change-tracking#changed-any)、[销毁日志](/zh/docs/guide/change-tracking#destroy-log) | `CatchUp`：过滤条件只存一个，每个客户端用自己的 tick；`DestroyedSince` |
 | [动态缓冲](/zh/docs/guide/dynamic-buffers) | 每个玩家的 `Loot` 背包 |
-| [分组](/zh/docs/guide/groups)（`IGroup`、`GroupBy`、`InGroup`） | `Zone`：每个区域一组表 |
+| [分组](/zh/docs/guide/groups)（`[Group]`、`GroupBy`、`InGroup`） | `Zone`：每个区域一组表 |
 | [有序索引、关系、目标策略](/zh/docs/guide/indexes-and-relations) | `Kills` 击杀榜；`Friend` 好友关系，玩家离开时自动清掉 |
-| [唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)（`IUniqueIndexed`、`Get` / `TryGet`） | `Account`：`Join` 和 `Kick` 按账号找到英雄 |
+| [唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)（`[UniqueKey]`、`Get` / `TryGet`） | `Account`：`Join` 和 `Kick` 按账号找到英雄 |
 | 系统分组、`[UpdateInterval(n, Phase = p)]`、排序、生命周期 | `Replication`；`ManaSystem`、`RegenerationSystem`；`ClockSystem`；`PlanningSystem.OnCreate` |
 | [查询](/zh/docs/guide/queries)、实体句柄与[单实体方法](/zh/docs/guide/queries#run-on-one-entity) | `NearestPlayer`、`Census`、`ShotsLeft`；`Hit` 调用 `[ForEntity]` 方法 `Requests.TakeHit` |
 | [批量操作](/zh/docs/guide/bulk) | `Instantiate(prefab, span)`、`DestroyAll`、`RemoveAll`、`EnableAll` |
@@ -79,9 +79,10 @@ flowchart LR
 
 ### 组件 [#components]
 
-所有组件都是普通的 `record struct`。有四个标记接口会改变组件的存储方式：`ITracked` 会给组件加一列隐藏的变更 tick
-（`Health`、`Burning` 和 `Goal` 需要同步）；`IGroup` 按值拆分表（每个 `Zone` 一组表）；`IIndexed<TKey>` 为它维护一个值索引
-（击杀榜 `Kills`）；`IUniqueIndexed<TKey>` 让一个键只对应一个实体（`Account`：一个账号只有一个英雄）。`Spawn` 是清理组件，`Loot` 和 `Friend` 是动态缓冲的元素，空结构体就是标签。
+所有组件都是普通的 `record struct`。有四种声明会改变组件的存储方式：`ITracked` 会给组件加一列隐藏的变更 tick
+（`Health`、`Burning` 和 `Goal` 需要同步）；`[Group]` 按一个字段的值拆分表（每个 `Zone` 一组表）；`[Key]` 为它维护一个值索引
+（击杀榜 `Kills`）；`[UniqueKey]` 让一个键只对应一个实体（`Account`：一个账号只有一个英雄）。这些 `partial` 结构体的
+`IGroup` / `IIndexed<TKey>` / `IUniqueIndexed<TKey>` 部分由生成器写出。`Spawn` 是清理组件，`Loot` 和 `Friend` 是动态缓冲的元素，空结构体就是标签。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#components</include>
 
@@ -199,7 +200,7 @@ tick 中表不会再扩容。`SpawnNpc` 实例化重生的 NPC 时直接给出�
 
 ### 用账号加入 [#accounts]
 
-客户端用账号登录。`Account` 实现了 `IUniqueIndexed<int>`：一个键只对应一个实体，所以 `TryGet` 一次哈希查找就能找到账号的英雄；
+客户端用账号登录。`Account` 带 `[UniqueKey]`（因此实现了 `IUniqueIndexed<int>`）：一个键只对应一个实体，所以 `TryGet` 一次哈希查找就能找到账号的英雄；
 要是某次写入会让第二个英雄拿到已被占用的账号，它会在改动任何东西之前抛异常。`Join` 用
 `Instantiate(Hero, at, new Account(account))` 给新账号生成英雄，位置和账号跟预制体的组件在同一次行拷贝里写入；
 已经有英雄的账号拿回原来那个（重连）。`Kick` 也这样找英雄。`Get` 也是查找，只是没有实体持有这个键时会抛异常。

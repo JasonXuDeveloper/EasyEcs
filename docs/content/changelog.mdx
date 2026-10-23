@@ -161,6 +161,10 @@ major or minor version that needs code changes? The
 
 ### Performance [#v4-8-0-performance]
 
+- The generators do about half the work per edit: the types offered the same member names are looked up by name
+  instead of by walking the namespace once per component, and a `[ForEach]` method whose signature rules out a vector
+  loop is decided without binding its body. Generated code is unchanged
+  ([decision](/en/docs/decisions#d95-generator-per-edit)).
 - The buffer pool is shared across threads: each thread keeps a few lists and trades the rest in batches with a pool
   every thread takes from, so the lists the owner thread gets back from destroyed buffers serve the first writes of a
   parallel `[ForEach]`, which used to allocate. See [dynamic buffers](/en/docs/guide/dynamic-buffers#pool).
@@ -219,6 +223,13 @@ major or minor version that needs code changes? The
   world it loads into and doubles too.
 - `Restore` and `Capture` into an earlier snapshot copy each row's `DynamicBuffer` (and relation links) into the list
   the row already holds, instead of a new list per row that left the old one to the GC.
+- A parallel `[ForEach]` method that writes a tracked component through a `Maybe<T>` opens that component's
+  change-tick blocks before its chunks run, as it does for the components it queries: two chunks of one block could
+  race on the block's summary, and a `[Changed<T>]` system then missed rows the pass had written
+  ([decision](/en/docs/decisions#d94-optional-writes)).
+- A private or `file` struct no longer takes the generated members of a struct of the same name nested in another type
+  (`Tests.Census` and `Server.Census`): `world.Census` was missing (CS1061). Only types that get members of their own
+  give way to each other.
 
 ## 4.7.0 [#v4-7-0]
 

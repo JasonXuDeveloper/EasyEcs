@@ -102,6 +102,8 @@ after the change on the machine of the time; they are history, not the current r
 | [D82](#d82-for-entity) | One entity is a `[ForEntity]` method |
 | [D83](#d83-update-interval-attribute) | A system's cadence is an attribute |
 | [D84](#d84-consume) | `[Consume]` destroys the visited rows in bulk when it can |
+| [D94](#d94-optional-writes) | A parallel pass opens the blocks its `Maybe<T>` writes |
+| [D95](#d95-generator-per-edit) | The generators find namesakes by name and rule out vector loops before binding |
 | [D97](#d97-hand-written-parameters) | Rules for code that does by hand what a parameter does per chunk |
 | [D98](#d98-random-streams) | EECS088: one stream per draw, checked in pass code only |
 | [D99](#d99-singleton-saves) | EECS069 warns for a singleton only when the code saves whole worlds |
@@ -2290,6 +2292,53 @@ write, and each method's loop is listed:
 - **Left for later:** masked words of parallel methods (a chunk passes whole runs), `Maybe<T>` in parallel methods
   and of narrow lanes, masked words of narrow lanes and of wide rows (they run the method), `Atan2`, `Asin`, `Pow`
   and kin (no vector form in .NET 10), `Vector2.Clamp` (the sample clamps each field with `Math.Clamp`).
+
+## D94. A parallel pass opens the blocks its `Maybe<T>` writes [#d94-optional-writes]
+
+**Decision.** A generated parallel job that writes a tracked component through a `Maybe<T>` names it in
+`OptionalWrites`, a `ComponentSet` held in a static field of the job type. `ForEachParallel` treats those components
+as it treats the written components it queries: its chunks end on multiples of 4,096 rows, or the change-tick blocks
+of the rows they cover are opened at the pass's tick before any chunk runs.
+
+**Why.**
+- **The race.** A block's summary of change ticks is raised without a lock only once it holds the pass's tick
+  (`Open`). A chunk that stamps an unopened block first resets the block's words while another chunk of the same block
+  may be adding its own. The queried columns were opened; a `Maybe<T>` column, outside the query, was not.
+  `ChunksSplittingBlocksKeepTheChangeTicksOfAMaybeExact` (10,000 rows in chunks of 64, 6,666 of them with the
+  component, 1,000 passes) found 6,623 changed rows after a pass before the change, and every row of every pass after.
+- **The cost stays out of the rows.** The set is a constant of the job type, read once per table and pass; the row
+  loop is unchanged. `ChangeTrackingWrite` and `ParallelForEach`, which take no `Maybe<T>`, kept their times within
+  the error, 0 B.
+
+**Considered.**
+- **Opening every tracked column of a table when a job takes a `Maybe<T>`.** Simpler, but a block the pass does not
+  write then moves its latest words into the rest, and a later `[Changed<T>]` reader visits all of its words.
+- **An atomic update of every summary.** It costs a locked instruction per first stamp of a word in every pass,
+  single-threaded ones included, to fix a case the parallel pass can avoid.
+- **Making the component a type parameter of the call.** A type parameter of `ForEachParallel` is a queried
+  component: the pass would then skip the rows without it.
+
+## D95. The generators find namesakes by name and rule out vector loops before binding [#d95-generator-per-edit]
+
+**Decision.** Two parts of the generators' work per edit no longer grow with the code around them. The structs and
+enums of a namespace are indexed by name once per compilation, and a member a type would get is checked only against
+the types whose name a member pattern cuts out of it. A `[ForEach]` method whose signature rules out a vector loop
+(it returns a value, is generic, or takes a parameter the loop cannot hold) is decided from the signature, without
+binding the body or throwing.
+
+**Why.**
+- **Quadratic per keystroke.** Every component and every `DynamicBuffer<T>` element walked all the structs of its
+  namespace on each edit to find the types offered the same member names: n squared in the types of a namespace.
+- **Exceptions as control flow.** The vector-loop translator gave up by throwing: 419 exceptions per edit of the
+  generator benchmark's input, 14 after.
+- **Numbers.** `GeneratorBenchmark` (BenchmarkDotNet, two rounds each, 60 modules), base / after:
+  `EditMethodBody` 357 / 338 ms against 172 / 168 ms and 39.2 MB against 28.4 MB; with every module in one namespace
+  443 / 405 ms against 166 / 151 ms and 59.5 MB against 28.0 MB. `Cold` 368 / 372 ms against 249 / 215 ms. `Compile`
+  and `CompileAndAnalyze` stayed within the error. The generated code is the same, file for file.
+
+**Considered.**
+- **Caching the members per type across compilations.** A type's member names depend on the other types of its
+  namespace, which any edit can change; the index lives as long as its compilation and needs no invalidation.
 
 ## D97. Rules for code that does by hand what a parameter does per chunk [#d97-hand-written-parameters]
 

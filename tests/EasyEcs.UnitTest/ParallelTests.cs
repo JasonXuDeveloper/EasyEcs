@@ -38,6 +38,16 @@ public class ParallelTests
         }
     }
 
+    // The same through a Maybe: the optional column's blocks are shared by the chunks too.
+    public class MaybeArmor : EcsSystem
+    {
+        [ForEach(Parallel = true, ChunkRows = 64)]
+        static void Write(in Seen seen, Maybe<Armor> armor)
+        {
+            if (armor.HasValue) armor.Value.Value += seen.N & 1;
+        }
+    }
+
     public record struct Step(int Every, int Phase) : ISingletonComponent;
 
     // Each system waits at the rendezvous: it reports Met only if another system arrived while it was running.
@@ -390,6 +400,27 @@ public class ParallelTests
             for (int i = 0; i < rows; i++)
                 if (i % every >= from && i % every <= to) count++;
             return count;
+        }
+    }
+
+    [Test]
+    public void ChunksSplittingBlocksKeepTheChangeTicksOfAMaybeExact()
+    {
+        // A Maybe's column is not queried: its blocks are opened as the queried columns' are, or two chunks of one
+        // block race on its summary and a Changed query misses the words one of them stamped.
+        if (Environment.ProcessorCount < 2) Assert.Ignore("one processor: nothing to race");
+        const int rows = 10_000;
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        var entities = new Entity[rows];
+        world.CreateEntities(entities, new Seen(0), new Armor(0));
+        for (int i = 0; i < rows; i += 3) entities[i].Remove<Armor>(); // a table with the column and one without
+        int armored = world.Count<Armor>();
+        world.AddSystem<MaybeArmor>();
+        for (int i = 0; i < 1_000; i++)
+        {
+            ulong mark = world.ChangeTick;
+            world.Update();
+            Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(mark)), Is.EqualTo(armored), $"pass {i}");
         }
     }
 

@@ -588,52 +588,98 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         /// have (<c>Entity.Id</c>, <c>Prefab.SetBuffer</c>) and those another struct or enum of its namespace (at any depth) is
         /// offered too: both would emit them, ambiguous wherever the namespace is imported, so both give them up
         /// (<c>Shield</c>'s <c>IsShieldDisabled</c> and the tag <c>ShieldDisabled</c>'s). A nested type named like another
-        /// struct of its namespace gets none at all; the namesake it yields to keeps its own.
+        /// struct of its namespace gets none at all; the namesake it yields to keeps its own. Only types that get members
+        /// count: a private or file-local struct takes nothing from another (<c>Tests.Census</c> and <c>Server.Census</c>).
         /// </summary>
         public string[] Members(INamedTypeSymbol type, INamespaceSymbol easyEcs, Compilation compilation)
         {
-            // Every component of a namespace walks it on every edit: no string is built until a name is kept.
+            // Every component of a namespace asks on every edit: the namespace's types are indexed by name once per
+            // compilation, and only the types whose name some pattern cuts out of one of ours are looked at.
             var names = Names(type.Name);
-            HashSet<(string, string)>? shared = null;
-            var pending = new Stack<INamedTypeSymbol>(type.ContainingNamespace.GetTypeMembers());
-            while (pending.Count > 0)
-            {
-                var other = pending.Pop();
-                foreach (var nested in other.GetTypeMembers()) pending.Push(nested);
-                if (other.TypeKind is not (TypeKind.Struct or TypeKind.Enum) || SymbolEqualityComparer.Default.Equals(other, type)) continue;
-                if (other.Name == type.Name)
-                {
-                    if (type.ContainingType != null) return [];
-                    continue;
-                }
-
-                // Each of its names holds its own: one that holds none of ours shares none (the cheap test first).
-                if (!Overlaps(names, other.Name)
-                    || !compilation.IsSymbolAccessibleWithin(other, compilation.Assembly)
-                    || Of(other, easyEcs.ContainingAssembly) is not { } shape)
-                    continue;
-                foreach (var name in shape.Names(other.Name)) (shared ??= []).Add(name);
-            }
+            var types = TypesOf(type.ContainingNamespace);
+            var core = easyEcs.ContainingAssembly;
+            bool Offered(INamedTypeSymbol other) => !SymbolEqualityComparer.Default.Equals(other, type)
+                && compilation.IsSymbolAccessibleWithin(other, compilation.Assembly) && Of(other, core) != null;
+            if (type.ContainingType != null && types.TryGetValue(type.Name, out var namesakes))
+                foreach (var other in namesakes)
+                    if (Offered(other)) return [];
 
             var members = new List<string>(names.Count);
             string? last = null;
             INamedTypeSymbol? receiver = null;
             foreach (var name in names)
             {
-                if (shared != null && shared.Contains(name)) continue;
+                if (OfferedToAnother(name)) continue;
                 if (name.Receiver != last) receiver = easyEcs.GetTypeMembers(last = name.Receiver).FirstOrDefault();
                 if (receiver != null && receiver.GetMembers(name.Name).Length == 0) members.Add(name.Receiver + "." + name.Name);
             }
 
             return members.ToArray();
+
+            // Another struct or enum of the namespace is offered this name too: it is <prefix><its name><suffix>.
+            bool OfferedToAnother((string Receiver, string Name) name)
+            {
+                foreach (var (on, prefix, suffix) in Patterns)
+                {
+                    if (on != name.Receiver || name.Name.Length <= prefix.Length + suffix.Length
+                        || !name.Name.StartsWith(prefix, System.StringComparison.Ordinal) || !name.Name.EndsWith(suffix, System.StringComparison.Ordinal))
+                        continue;
+                    string other = name.Name.Substring(prefix.Length, name.Name.Length - prefix.Length - suffix.Length);
+                    if (other == type.Name || !types.TryGetValue(other, out var candidates)) continue; // a namesake: handled above
+                    foreach (var candidate in candidates)
+                        if (Offered(candidate) && Of(candidate, core)!.Names(other).Contains(name)) return true;
+                }
+
+                return false;
+            }
         }
 
-        private static bool Overlaps(List<(string Receiver, string Name)> names, string other)
+        /// <summary>
+        /// Every way a name is built from a type's name, as (receiver, prefix, suffix): <see cref="Names"/> of every
+        /// shape, computed once.
+        /// </summary>
+        private static readonly (string Receiver, string Prefix, string Suffix)[] Patterns = AllPatterns();
+
+        private static (string, string, string)[] AllPatterns()
         {
-            foreach (var name in names)
-                if (name.Name.IndexOf(other, System.StringComparison.Ordinal) >= 0) return true;
-            return false;
+            const string marker = "\u0001";
+            var all = new HashSet<(string, string, string)>();
+            foreach (var kind in new[] { Kind.Component, Kind.Singleton, Kind.Element, Kind.Relation })
+                for (int f = 0; f < 1 << 8; f++)
+                {
+                    bool Bit(int i) => (f & (1 << i)) != 0;
+                    var shape = new Shape(kind, Bit(0), Bit(1), Bit(2), Bit(3), Bit(4), Bit(5), Bit(6), Bit(7));
+                    foreach (var (receiver, name) in shape.Names(marker))
+                    {
+                        int at = name.IndexOf(marker, System.StringComparison.Ordinal);
+                        all.Add((receiver, name.Substring(0, at), name.Substring(at + 1)));
+                    }
+                }
+
+            return all.ToArray();
         }
+
+        /// <summary>
+        /// The structs and enums of <paramref name="ns"/> at any depth, by name: built once per namespace of a
+        /// compilation (its symbols live as long as it does).
+        /// </summary>
+        private static Dictionary<string, List<INamedTypeSymbol>> TypesOf(INamespaceSymbol ns) => Namespaces.GetValue(ns, static ns =>
+        {
+            var byName = new Dictionary<string, List<INamedTypeSymbol>>(System.StringComparer.Ordinal);
+            var pending = new Stack<INamedTypeSymbol>(((INamespaceSymbol)ns).GetTypeMembers());
+            while (pending.Count > 0)
+            {
+                var type = pending.Pop();
+                foreach (var nested in type.GetTypeMembers()) pending.Push(nested);
+                if (type.TypeKind is not (TypeKind.Struct or TypeKind.Enum)) continue;
+                if (!byName.TryGetValue(type.Name, out var list)) byName[type.Name] = list = new List<INamedTypeSymbol>(1);
+                list.Add(type);
+            }
+
+            return byName;
+        });
+
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<INamespaceSymbol, Dictionary<string, List<INamedTypeSymbol>>> Namespaces = new();
     }
 
     /// <summary>
