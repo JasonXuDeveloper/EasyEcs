@@ -351,7 +351,7 @@ if (!replicated.DestroyedSince(seen, gone, out int goneCount)) { /* 比日志还
 | 调用 | 作用 |
 | --- | --- |
 | `world.Index<T, TKey>()`（`world.TIndex`） | `T` 的值索引 |
-| `index.Find(key)` / `TryFind(key, out id)` / `Count(key)` | 所有匹配、其中一个的 id、数量 |
+| `index.Find(key)` / `TryFind(key, out e)` / `Count(key)` | 所有匹配、唯一一个、数量 |
 | `index.Find(key).Count` / `relations.Find(target).Count` | 循环会走过多少个，O(1)，用来确定缓冲区大小 |
 | `index.KeyCount` / `relations.TargetCount` | 有多少个不同的键 / 目标被持有，O(1)（被占用的格子、有成员的公会） |
 | `index.Get(key)` / `TryGet(key, out e)` | 唯一键（`IUniqueIndexed<TKey>`）对应的那个实体；没有时 `Get` 抛异常 |

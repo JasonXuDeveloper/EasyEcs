@@ -33,7 +33,7 @@ extension<T, TKey>(Lookup<T> lookup) public ValueIndex<T, TKey>.Matches Find(TKe
 ### `TryFind` [#tryfind]
 
 ```csharp
-extension<T, TKey>(Lookup<T> lookup) public bool TryFind(TKey key, out EntityId id);
+extension<T, TKey>(Lookup<T> lookup) public bool TryFind(TKey key, out Entity entity);
 ```
 
 一个 `T` 的键为 `key` 的实体：唯一索引（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)）时就是那一个，否则是其中任意一个。O(1)：一次哈希探测。

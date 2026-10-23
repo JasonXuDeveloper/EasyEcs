@@ -472,7 +472,7 @@ would take the `World` and call `TryGetEntity`, which keeps it on one thread. A 
 | `lookup[id]` | `ReadOnlyMaybe<T>`: the entity's `T`, or no value when it lacks it or is not alive |
 | `lookup.Read(id)` | `ref readonly T`; throws when the entity lacks it or is not alive |
 | `lookup.Has(id)` | whether the entity is alive and has `T` |
-| `lookup.TryFind(key, out id)`, `Find(key)`, `Count(key)` | for an indexed `T` (`IIndexed<TKey>`, `IUniqueIndexed<TKey>`): an entity of a key, all of them, how many |
+| `lookup.TryFind(key, out entity)`, `Find(key)`, `Count(key)` | for an indexed `T` (`IIndexed<TKey>`, `IUniqueIndexed<TKey>`): an entity of a key, all of them, how many |
 
 ```csharp
 public record struct Quarry(EntityId Id) : IComponent;
@@ -502,7 +502,7 @@ public class MatchLogins : EcsSystem
 {
     [ForEach(Parallel = true)]
     static void Match(in Asks asks, ref Answer answer, Lookup<Login> logins) =>
-        answer = new Answer(logins.TryFind(asks.Number, out var id) ? id : default);   // the index is built before the pass
+        answer = new Answer(logins.TryFind(asks.Number, out var found) ? found : default);   // the index is built before the pass
 }
 ```
 

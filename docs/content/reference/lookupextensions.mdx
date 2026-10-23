@@ -33,7 +33,7 @@ The entities whose `T` has key `key` (`foreach`). O(1), then O(1) per entity. No
 ### `TryFind` [#tryfind]
 
 ```csharp
-extension<T, TKey>(Lookup<T> lookup) public bool TryFind(TKey key, out EntityId id);
+extension<T, TKey>(Lookup<T> lookup) public bool TryFind(TKey key, out Entity entity);
 ```
 
 An entity whose `T` has key `key`: the one of a unique index ([`IUniqueIndexed`](/en/docs/reference/iuniqueindexed)), any of them otherwise. O(1): a hash probe.

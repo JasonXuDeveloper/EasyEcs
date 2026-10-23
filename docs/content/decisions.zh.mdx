@@ -1897,9 +1897,9 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 `TileNeighbors`，`tile.Load()` → `tile.Pad()`，`tile.Changes(next, out changed)` → `ChangedEdges`，
 `TileReads.Sides` → `NorthSouth`，`[ForEach(Simd = …)]` → `[ForEach(SimdMode = …)]`，`DynamicBuffer<T>.ReservePool` /
 `PoolCapacity` → `FillPool` / `MaxPooledLength`，`[Key]` → `[IndexKey]`，`prefab.Absent<T>()` → `SetAbsent<T>()`，以及
-EECS082 的描述符（用重写属性写系统的节奏；EECS083 是 `BadUpdateInterval`）。已发布的调用只改了一个：`ValueIndex.TryFind` 给出
-`EntityId`，和 `Lookup<T>.TryFind` 一样。隐藏和内部的名字跟着改：`SavedTypes` → `TypeRegistry`（只有生成的代码调用）以及分析器的描述符字段。
-不保留别名。
+EECS082 的描述符（用重写属性写系统的节奏；EECS083 是 `BadUpdateInterval`）。4.8 新增的 `Lookup<T>.TryFind` 给出 `Entity`，
+和已发布的 `ValueIndex.TryFind` 一样。隐藏和内部的名字跟着改：`SavedTypes` → `TypeRegistry`（只有生成的代码调用）以及分析器的描述符字段。
+不保留别名，已发布的调用一个都没改。
 
 **原因。**
 - **统一拼写。** API 和分析器用美式英语（.NET 里的 `Color`、`Behavior`）；“neighbour”是唯一的英式拼写，搜“neighbor”找不到瓦片 API。
@@ -1909,13 +1909,15 @@ EECS082 的描述符（用重写属性写系统的节奏；EECS083 是 `BadUpdat
   `Sides` 指的是两行，不是 `TileFaces.Sides` 的四个面。单独的 `[Key]` 读起来像任何一种键；`[IndexKey]` 点明是索引的键，和 `[UniqueKey]` 并列。
 - **属性名就是它的类型。** `Simd = SimdMode.Off` 把同一个词用两种形式写了两遍；`SimdMode = SimdMode.Off` 和 `FloatMode` 的写法一致。
 - **节奏，不是调度。** `World.DescribeSchedule` 讲的是系统的顺序和阶段；一个系统多久跑一次是它的节奏（`[UpdateInterval]`），规则和消息都这么说。
-- **一个键的实体只有一种 id 类型。** 索引存的是 id；`Lookup<T>.TryFind` 给 id，`ValueIndex.TryFind` 给句柄，代码在两者之间挪动就要换类型。
-  在不需要句柄的路径上（瓦片的邻居、查找、链接），id 更便宜：不用为它们构造带 World 引用的句柄。需要句柄的代码调用
-  `world.GetEntity(id)`，唯一索引保留 `TryGet(key, out Entity)`。
+- **一个键的实体只有一种 out 类型。** `Lookup<T>.TryFind` 给 id，`ValueIndex.TryFind` 给句柄，代码在遍历和所有者线程之间挪动就要换类型。
+  已发布的调用保留句柄，新调用跟着它；需要存 id 的地方，句柄可以直接转成 id。存 id 的瓦片邻居查找调用一个返回 id 的内部核心，
+  那里不构造句柄。
 
 **考虑过的方案。**
+- **让 `ValueIndex.TryFind` 给出 `EntityId`：** 它和索引的存储一致，但会破坏已发布的代码，而且每个想要句柄的所有者线程调用方都要多付一次
+  存活检查（`world.GetEntity`），而索引本来就知道实体活着。
 - **给每个值索引加 `TryGet(key, out Entity)`：** 同一次查找有两个调用，只差 out 的类型；唯一索引的 `TryGet` 才是只有一个答案的那个。
-- **`[Obsolete]` 别名：** 1.0 之前，和 D54、D64 一样：编译器会找到每一处用法，而且除了 `TryFind`，这些名字都是 4.8 新增的。
+- **`[Obsolete]` 别名：** 1.0 之前，和 D54、D64 一样：编译器会找到每一处用法，而且改名的这些名字都是 4.8 新增的。
 
 ## 相关页面 [#related]
 

@@ -205,8 +205,6 @@ major or minor version that needs code changes? The
 - `EcsSystem.UpdateInterval` and `UpdatePhase` are removed: declare `[UpdateInterval(n, Phase = p)]` on the class.
   An override is [EECS082](/en/docs/guide/analyzer#eecs082), with a code fix; EECS018 is gone
   ([migration guide](/en/docs/migration#v4-8-update-interval)).
-- `ValueIndex.TryFind(key, out id)` gives an `EntityId`, as `Lookup<T>.TryFind` does; `world.GetEntity(id)` is the
-  handle, and a unique index's `TryGet` still gives it ([migration guide](/en/docs/migration#v4-8-try-find)).
 
 ### Fixes [#v4-8-0-fixes]
 

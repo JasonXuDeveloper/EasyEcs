@@ -2424,9 +2424,10 @@ the code calls `Save`, `SaveWithout` or `SaveEntities`. It is a warning for a si
 `TileNeighbors`, `tile.Load()` → `tile.Pad()`, `tile.Changes(next, out changed)` → `ChangedEdges`,
 `TileReads.Sides` → `NorthSouth`, `[ForEach(Simd = …)]` → `[ForEach(SimdMode = …)]`, `DynamicBuffer<T>.ReservePool` /
 `PoolCapacity` → `FillPool` / `MaxPooledLength`, `[Key]` → `[IndexKey]`, `prefab.Absent<T>()` → `SetAbsent<T>()`, and
-the EECS082 descriptor (a system's cadence as an override; EECS083 is `BadUpdateInterval`). One released call changes:
-`ValueIndex.TryFind` gives an `EntityId`, as `Lookup<T>.TryFind` does. Hidden and internal names follow: `SavedTypes` →
-`TypeRegistry` (called by generated code only) and the analyzer's descriptor fields. No alias is kept.
+the EECS082 descriptor (a system's cadence as an override; EECS083 is `BadUpdateInterval`). `Lookup<T>.TryFind`, new
+in 4.8, gives an `Entity`, as the released `ValueIndex.TryFind` does. Hidden and internal names follow: `SavedTypes` →
+`TypeRegistry` (called by generated code only) and the analyzer's descriptor fields. No alias is kept, and no released
+call changes.
 
 **Why.**
 - **One spelling.** The API and the analyzer write US English (`Color`, `Behavior` in .NET); "neighbour" was the one
@@ -2441,16 +2442,18 @@ the EECS082 descriptor (a system's cadence as an override; EECS083 is `BadUpdate
   reads like `FloatMode`.
 - **Cadence, not schedule.** `World.DescribeSchedule` is the order and the stages of systems; how often one runs is its
   cadence (`[UpdateInterval]`), and the rule and its messages say so.
-- **One id type for a key's entity.** The index stores ids; `Lookup<T>.TryFind` gave an id and `ValueIndex.TryFind` a
-  handle, so code moving between the two changed types. The id is the cheaper form on the paths that need no handle
-  (tile neighbors, lookups, links): no world reference is built for them. Code that needs the handle asks
-  `world.GetEntity(id)`, and a unique index keeps `TryGet(key, out Entity)`.
+- **One out type for a key's entity.** `Lookup<T>.TryFind` gave an id and `ValueIndex.TryFind` a handle, so code moving
+  between a pass and the owner thread changed types. The released call keeps its handle and the new one follows it; a
+  handle converts to its id where one is stored. The tile neighbor search, which stores ids, calls an internal core
+  that returns the id, so no handle is built there.
 
 **Considered.**
+- **`ValueIndex.TryFind` giving an `EntityId`:** it matches the index's storage, but breaks released code, and every
+  owner-thread caller that wants the handle would pay a liveness check (`world.GetEntity`) the index already knows.
 - **A `TryGet(key, out Entity)` on every value index:** two calls for one lookup that differ only in their out type;
   the unique index's `TryGet` is the one with a single answer.
-- **`[Obsolete]` aliases:** pre-1.0, as in D54 and D64: the compiler finds every use, and every name but `TryFind` is
-  new in 4.8.
+- **`[Obsolete]` aliases:** pre-1.0, as in D54 and D64: the compiler finds every use, and every renamed name is new in
+  4.8.
 
 ## Related [#related]
 

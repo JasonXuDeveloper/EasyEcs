@@ -48,7 +48,7 @@ int inOne = zones.Count(1);                         // O(1)
 foreach (var e in zones.Find(1)) { /* 1 号区域里的每个实体 */ }
 int toVisit = zones.Find(1).Count;                  // O(1)：循环会看到多少个，先按它确定缓冲区大小
 int occupied = zones.KeyCount;                      // O(1)：有实体的区域有几个（管理后台的指标）
-if (world.CallsignIndex.TryFind("alpha", out EntityId found)) { /* 拥有这个键的任一实体的 id */ }
+if (world.CallsignIndex.TryFind("alpha", out var found)) { /* 拥有这个键的任一实体 */ }
 
 alpha.SetZone(2);                                   // 一次 Set：索引立即把 alpha 挪过去 // [!code highlight]
 int inTwo = zones.Count(2);                         // 1
@@ -75,7 +75,7 @@ public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop>
 
 ```csharp
 var shop = world.CreateEntity(new Shop(7));
-if (world.ShopIndex.TryFind(new Shop(7), out EntityId found)) { /* id 为 7 的商店：world.GetEntity(found) */ }
+if (world.ShopIndex.TryFind(new Shop(7), out var found)) { /* id 为 7 的商店 */ }
 ```
 
 record struct 上如果写公开的 `Key => this`，生成的 `ToString()` 会打印 `Key`，`Key` 又打印 `Key`，直到栈溢出。显式实现让

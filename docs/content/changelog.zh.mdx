@@ -142,8 +142,6 @@ icon: RotateCcwClock
 
 - 删掉了 `EcsSystem.UpdateInterval` 和 `UpdatePhase`：在类上声明 `[UpdateInterval(n, Phase = p)]`。重写它们会报
   [EECS082](/zh/docs/guide/analyzer#eecs082)，带代码修复；EECS018 删掉了（[迁移指南](/zh/docs/migration#v4-8-update-interval)）。
-- `ValueIndex.TryFind(key, out id)` 给出 `EntityId`，和 `Lookup<T>.TryFind` 一样；`world.GetEntity(id)` 得到句柄，唯一索引的
-  `TryGet` 仍然直接给出句柄（[迁移指南](/zh/docs/migration#v4-8-try-find)）。
 
 ### 修复 [#v4-8-0-fixes]
 

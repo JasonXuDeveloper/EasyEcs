@@ -61,7 +61,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `Emit<T>`, `Emitted<T>` | ref struct, struct | A `[ForEach]` parameter, taken by value, appending records (`Add`, `AddRange`) joined in chunk order into singleton `Emitted<T>` (`Items`, a `DynamicBuffer<T>`) when the pass ends. |
 | `EntityRandom` | record struct | A singleton (`Seed`, `Tick`) and pure static functions: deterministic random numbers per (seed, entity, tick, stream): `Bits`, `Float`, `Range`, `Chance`. |
 | `IForRange`, `IForSpan<T>` | interfaces | Jobs of `world.ForParallel`: `Execute(start, end)` over a range of indexes, `Execute(start, span)` over the elements of a list. |
-| `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out id)`, `Find(key)`, `Count(key)`. |
+| `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out entity)`, `Find(key)`, `Count(key)`. |
 | `Lanes` | static class | Stream compaction for batch methods: `Compact(source, mask, destination)` writes the elements a lane mask selects side by side. |
 | `Tile<TCell, TTile>`, `ITile<TKey>`, `ITileShape`, `TileFaces`, `TileNeighborhood`, `TileBoundary`, `TileIds` | ref structs, interfaces, enums | A `[ForEach]` parameter: the entity's `DynamicBuffer<TCell>` with its neighbors' in the grid of `TTile` (an indexed component with a static shape, halo, neighborhood and boundary, and the key of each neighbor), scheduled as a read of both: `Pad(from, to, fill, mask)`, `Beside(face)`, `Beside(dx, dy, dz)`, `Cells`, `Changes(next, out changed)`, `Facing(edges)`. |
 | `PaddedTile<TCell, TTile>`, `TileRows<TTile>`, `TileRow<TTile>`, `TileCursor<TCell, TTile>`, `TileReads` | ref structs, struct, enum | The layers a stencil samples, padded with a halo of `Halo` cells: `Rows(reads)` walks the active rows, `At(row)` samples around one (`Load128`, `Load256`, `LoadVector`, `this[dx, dy, dz]`), `this[x, y, z]`. |
@@ -223,7 +223,7 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | --- | --- | --- |
 | `scratch.Value` | O(1): one thread-static read per chunk | `ref T`, this method's value on this thread: `default` on the thread's first row, never reset |
 | `lookup[id]` / `lookup.Read(id)` / `lookup.Has(id)` | O(1): one entity lookup | a `ReadOnlyMaybe<T>` (no value when stale or missing) / `ref readonly T` (throws) / `bool` |
-| `lookup.TryFind(key, out id)` / `Find(key)` / `Count(key)` | O(1) hash probe, then O(1) per entity of `Find` | indexed `T` only, called on the parameter: the index is created and built before the pass and before the parallel stage of its system (O(N) the first time) |
+| `lookup.TryFind(key, out entity)` / `Find(key)` / `Count(key)` | O(1) hash probe, then O(1) per entity of `Find` | indexed `T` only, called on the parameter: the index is created and built before the pass and before the parallel stage of its system (O(N) the first time) |
 | a value index reached otherwise during a parallel stage or pass | throws `InvalidOperationException` when not built yet | building it would change it under the threads reading it |
 
 `Lanes`, for batch methods that pick rows with a vector compare:
@@ -261,7 +261,7 @@ Details: [bulk changes](/en/docs/guide/bulk), [cleanup and disable](/en/docs/gui
 | API | Complexity | Notes |
 | --- | --- | --- |
 | `world.Index<T, TKey>()` | O(1); the first call creates it | one per world and indexed component; a second key type throws |
-| `index.Count(key)` / `TryFind(key, out id)` | O(1) | a hash probe (an array access for a key that is an entity); the first lookup indexes every row once |
+| `index.Count(key)` / `TryFind(key, out Entity)` | O(1) | a hash probe (an array access for a key that is an entity); the first lookup indexes every row once |
 | `index.KeyCount` | O(1) | distinct keys some entity has (how many guilds have a member), kept as entities join and leave keys |
 | `index.Find(key)` | O(1), then O(1) per entity | a `ref struct` for `foreach`; destroying entities during the loop is allowed, changing `T` is not |
 | `index.Find(key).Count` / `world.Children(parent).Count` | O(1) | how many entities had the key when found (size a buffer without walking twice); entities destroyed during the loop are skipped by it but still counted |

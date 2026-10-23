@@ -52,9 +52,9 @@ The entities whose `T` has key `key` (none for a null key): O(1), then O(1) per 
 ### `TryFind` [#tryfind]
 
 ```csharp
-public bool TryFind(TKey key, out EntityId id);
+public bool TryFind(TKey key, out Entity entity);
 ```
 
-The id of the first entity found with key `key` (any, when several have it): O(1), a hash probe (the first lookup indexes every row once). An id, as [`Lookup`](/en/docs/reference/lookup) takes it and a link stores it; `world.GetEntity(id)` is its handle. A unique index's `TryGet` returns the handle. Owner thread only.
+The first entity found with key `key` (any, when several have it).
 
 **Complexity** ([API table](/en/docs/api)): O(1)

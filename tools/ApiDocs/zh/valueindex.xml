@@ -21,12 +21,8 @@
       （第一次查找会把每一行索引一遍）。只能在所有者线程调用。循环里可以销毁实体，但不能改 <typeparamref name="T" />（键清空后，它的列表会交给接下来增长的键）：先收集实体，再修改。
     </summary>
   </member>
-  <member name="M:EasyEcs.ValueIndex`2.TryFind(`1,EasyEcs.EntityId@)" source="deaaacfae2b0">
-    <summary>
-      找到的第一个键为 <paramref name="key" /> 的实体的 id（有多个时任取一个）：O(1)，一次哈希探测（第一次查找时把每行索引一遍）。
-      返回 id，和 <see cref="T:EasyEcs.Lookup`1" /> 接受的、链接存的一样；<c>world.GetEntity(id)</c> 得到它的句柄。
-      唯一索引的 <c>TryGet</c> 直接返回句柄。只能在所有者线程上调用。
-    </summary>
+  <member name="M:EasyEcs.ValueIndex`2.TryFind(`1,EasyEcs.Entity@)" source="eac8fcf57893">
+    <summary>找到的第一个键为 <paramref name="key" /> 的实体（有多个时任取一个）。</summary>
   </member>
   <member name="P:EasyEcs.ValueIndex`2.KeyCount" source="5f061a8c590c">
     <summary>

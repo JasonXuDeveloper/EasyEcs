@@ -11,7 +11,7 @@
       遍历期间没有人写 <typeparamref name="T" />，所以遍历这个列表时它保持不变。
     </summary>
   </member>
-  <member name="M:EasyEcs.LookupExtensions.&lt;G&gt;$F4407922E4D47C2CF72BA2E9B00869E2`2.TryFind(`1,EasyEcs.EntityId@)" source="d6ff7ecb15b9">
+  <member name="M:EasyEcs.LookupExtensions.&lt;G&gt;$F4407922E4D47C2CF72BA2E9B00869E2`2.TryFind(`1,EasyEcs.Entity@)" source="d6ff7ecb15b9">
     <summary>
       一个 <typeparamref name="T" /> 的键为 <paramref name="key" /> 的实体：唯一索引（<see cref="T:EasyEcs.IUniqueIndexed`1" />）时就是那一个，
       否则是其中任意一个。O(1)：一次哈希探测。

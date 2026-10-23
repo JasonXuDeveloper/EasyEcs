@@ -52,9 +52,9 @@ public ValueIndex<T, TKey>.Matches Find(TKey key);
 ### `TryFind` [#tryfind]
 
 ```csharp
-public bool TryFind(TKey key, out EntityId id);
+public bool TryFind(TKey key, out Entity entity);
 ```
 
-找到的第一个键为 `key` 的实体的 id（有多个时任取一个）：O(1)，一次哈希探测（第一次查找时把每行索引一遍）。返回 id，和 [`Lookup`](/zh/docs/reference/lookup) 接受的、链接存的一样；`world.GetEntity(id)` 得到它的句柄。唯一索引的 `TryGet` 直接返回句柄。只能在所有者线程上调用。
+找到的第一个键为 `key` 的实体（有多个时任取一个）。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)

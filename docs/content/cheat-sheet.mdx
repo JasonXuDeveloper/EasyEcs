@@ -355,7 +355,7 @@ Guide: [Change tracking](/en/docs/guide/change-tracking), with the
 | Call | Does |
 | --- | --- |
 | `world.Index<T, TKey>()` (`world.TIndex`) | The value index of `T` |
-| `index.Find(key)` / `TryFind(key, out id)` / `Count(key)` | Matching entities, the id of one, how many |
+| `index.Find(key)` / `TryFind(key, out e)` / `Count(key)` | Matching entities, one, how many |
 | `index.Find(key).Count` / `relations.Find(target).Count` | How many the loop walks, O(1), to size a buffer |
 | `index.KeyCount` / `relations.TargetCount` | How many distinct keys / targets are held, O(1) (occupied cells, guilds with a member) |
 | `index.Get(key)` / `TryGet(key, out e)` | The one entity of a unique key (`IUniqueIndexed<TKey>`); `Get` throws when none has it |

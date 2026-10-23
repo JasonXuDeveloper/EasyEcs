@@ -410,7 +410,7 @@ bench.json 有了 ScratchBenchmark 之后加上 <BenchTable bench="ScratchBenchm
 | `lookup[id]` | `ReadOnlyMaybe<T>`：实体的 `T`；实体没有它或已不存活时没有值 |
 | `lookup.Read(id)` | `ref readonly T`；实体没有它或已不存活时抛异常 |
 | `lookup.Has(id)` | 实体是否存活且有 `T` |
-| `lookup.TryFind(key, out id)`、`Find(key)`、`Count(key)` | 带索引的 `T`（`IIndexed<TKey>`、`IUniqueIndexed<TKey>`）：某个键的一个实体、全部实体、数量 |
+| `lookup.TryFind(key, out entity)`、`Find(key)`、`Count(key)` | 带索引的 `T`（`IIndexed<TKey>`、`IUniqueIndexed<TKey>`）：某个键的一个实体、全部实体、数量 |
 
 ```csharp
 public record struct Quarry(EntityId Id) : IComponent;
@@ -440,7 +440,7 @@ public class MatchLogins : EcsSystem
 {
     [ForEach(Parallel = true)]
     static void Match(in Asks asks, ref Answer answer, Lookup<Login> logins) =>
-        answer = new Answer(logins.TryFind(asks.Number, out var id) ? id : default);   // 索引在这一遍之前建好
+        answer = new Answer(logins.TryFind(asks.Number, out var found) ? found : default);   // 索引在这一遍之前建好
 }
 ```
 
