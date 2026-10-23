@@ -34,9 +34,8 @@ public record struct Seed(byte Alive);
 public record struct NextSeed(byte Alive);
 
 /// <summary>A plate of the 9-point blur: every neighbor, edges and corners.</summary>
-public record struct BlurPlot(Plot Pos) : IComponent, ITile<Plot>
+public partial record struct BlurPlot([IndexKey] Plot Pos) : IComponent, ITile<Plot>
 {
-    readonly Plot IIndexed<Plot>.Key => Pos;
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
     static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
@@ -44,9 +43,8 @@ public record struct BlurPlot(Plot Pos) : IComponent, ITile<Plot>
 }
 
 /// <summary>A plate of the blur whose key maps onto a slot of an array (IDirectIndexed): a neighbor is one array read.</summary>
-public record struct DirectPlot(Plot Pos) : IComponent, ITile<Plot>, IDirectIndexed<Plot>
+public partial record struct DirectPlot([UniqueKey] Plot Pos) : IComponent, ITile<Plot>, IDirectIndexed<Plot>
 {
-    readonly Plot IIndexed<Plot>.Key => Pos;
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
     static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
@@ -56,9 +54,8 @@ public record struct DirectPlot(Plot Pos) : IComponent, ITile<Plot>, IDirectInde
 }
 
 /// <summary>A plate of the fourth-order Laplacian: five points along each axis, a halo of 2, faces only.</summary>
-public record struct WavePlot(Plot Pos) : IComponent, ITile<Plot>
+public partial record struct WavePlot([IndexKey] Plot Pos) : IComponent, ITile<Plot>
 {
-    readonly Plot IIndexed<Plot>.Key => Pos;
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
     static int ITileShape.Halo => 2;
@@ -66,9 +63,8 @@ public record struct WavePlot(Plot Pos) : IComponent, ITile<Plot>
 }
 
 /// <summary>A plate of the Game of Life.</summary>
-public record struct LifePlot(Plot Pos) : IComponent, ITile<Plot>
+public partial record struct LifePlot([IndexKey] Plot Pos) : IComponent, ITile<Plot>
 {
-    readonly Plot IIndexed<Plot>.Key => Pos;
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
     static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;

@@ -33,10 +33,12 @@ public record struct Lifetime(int Ticks) : IComponent;
 // The fixed time step and the number of ticks simulated so far.
 public record struct Simulation(float DeltaTime, long Tick) : ISingletonComponent;
 
-// The recipes that players and bullets are created from.
+// The recipes that players and bullets are created from (built at startup, so a save leaves them out).
+[NotSaved]
 public record struct Prefabs(Prefab Player, Prefab Bullet) : ISingletonComponent;
 
-// Replicated positions waiting to be sent, and how many updates they hold.
+// Replicated positions waiting to be sent, and how many updates they hold (a send buffer, never saved).
+[NotSaved]
 public record struct Outbox(ArrayBufferWriter<byte> Bytes, int Updates) : ISingletonComponent;
 
 // Counters the host prints when it stops.

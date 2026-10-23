@@ -9,7 +9,7 @@ namespace EasyEcs.Benchmark;
 /// sorted as they change) and through a scan keeping the best 10 by hand. Steady state allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
-public class OrderedIndexBenchmark
+public partial class OrderedIndexBenchmark
 {
     [Params(100_000)] public int Players;
 
@@ -95,6 +95,6 @@ public class OrderedIndexBenchmark
 
     private int NewScore(int i) => (int)((uint)(_next * 31 + i * 17) % 5_000);
 
-    public record struct RankedScore(int Value) : IComponent, IIndexed<int> { public int Key => Value; }
+    public partial record struct RankedScore([IndexKey] int Value) : IComponent;
     public record struct PlainScore(int Value) : IComponent;
 }

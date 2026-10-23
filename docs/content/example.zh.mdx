@@ -66,7 +66,7 @@ flowchart LR
 | [变更追踪](/zh/docs/guide/change-tracking)与移除检测 | `ReplicationSystem`；`WrittenSinceCheckpoint` |
 | 每个客户端一份 tick 的 [`ChangedAny`](/zh/docs/guide/change-tracking#changed-any)、[销毁日志](/zh/docs/guide/change-tracking#destroy-log) | `CatchUp`：过滤条件只存一个，每个客户端用自己的 tick；`DestroyedSince` |
 | [动态缓冲](/zh/docs/guide/dynamic-buffers) | 每个玩家的 `Loot` 背包 |
-| [分组](/zh/docs/guide/groups)（`[Group]`、`GroupBy`、`InGroup`） | `Zone`：每个区域一组表 |
+| [分组](/zh/docs/guide/groups)（`[Group]`、`[GroupBy]`、`InGroup`） | `Zone`：每个区域一组表 |
 | [有序索引、关系、目标策略](/zh/docs/guide/indexes-and-relations) | `Kills` 击杀榜；`Friend` 好友关系，玩家离开时自动清掉 |
 | [唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)（`[UniqueKey]`、`Get` / `TryGet`） | `Account`：`Join` 和 `Kick` 按账号找到英雄 |
 | 系统分组、`[UpdateInterval(n, Phase = p)]`、排序、生命周期 | `Replication`；`ManaSystem`、`RegenerationSystem`；`ClockSystem`；`PlanningSystem.OnCreate` |
@@ -82,7 +82,8 @@ flowchart LR
 所有组件都是普通的 `record struct`。有四种声明会改变组件的存储方式：`ITracked` 会给组件加一列隐藏的变更 tick
 （`Health`、`Burning` 和 `Goal` 需要同步）；`[Group]` 按一个字段的值拆分表（每个 `Zone` 一组表）；`[IndexKey]` 为它维护一个值索引
 （击杀榜 `Kills`）；`[UniqueKey]` 让一个键只对应一个实体（`Account`：一个账号只有一个英雄）。这些 `partial` 结构体的
-`IGroup` / `IIndexed<TKey>` / `IUniqueIndexed<TKey>` 部分由生成器写出。`Spawn` 是清理组件，`Loot` 和 `Friend` 是动态缓冲的元素，空结构体就是标签。
+`IGroup` / `IIndexed<TKey>` / `IUniqueIndexed<TKey>` 部分由生成器写出。另有两个声明把 World 的设置写在类型上，每个 World 都照此运行：
+`[GroupBy]` 按 `Zone` 分组建表，`[WhenTargetDestroyed]` 在玩家被销毁时把它从指向它的 `Friend` 链接里删掉。`Spawn` 是清理组件，`Loot` 和 `Friend` 是动态缓冲的元素，空结构体就是标签。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#components</include>
 
@@ -184,8 +185,8 @@ NPC），以及通过 `ref` 写过的背包（`[Changed<DynamicBuffer<Loot>>]`�
 
 ### 搭建 World [#setup]
 
-构造函数配置 World（并行系统、计时、出错的系统直接关掉而不是抛异常、每个单位一条的销毁日志），按 `Zone` 分组建表，
-设置好友关系的目标策略，按 tick 顺序注册系统，再批量生成单位：每一波只扩容一次表。`Reserve` 为 NPC 的重生波次预留空间，
+构造函数配置 World（并行系统、计时、出错的系统直接关掉而不是抛异常、每个单位一条的销毁日志；分组和目标策略都声明在类型上），
+按 tick 顺序注册系统，再批量生成单位：每一波只扩容一次表。`Reserve` 为 NPC 的重生波次预留空间，
 tick 中表不会再扩容。`SpawnNpc` 实例化重生的 NPC 时直接给出位置。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#setup</include>

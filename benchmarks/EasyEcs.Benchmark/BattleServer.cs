@@ -25,11 +25,13 @@ public record struct Frozen(int Ticks) : IComponent;                          //
 public record struct Goal(int Waypoint) : IComponent, ITracked;              // where an NPC heads: replicated,
                                                                               // re-planned often, rarely different
 public record struct Lifetime(int Ticks) : IComponent;
-public partial record struct Zone([Group] int Id) : IComponent;              // a table per zone
+[GroupBy]                                                                     // every world: a table per zone,
+public partial record struct Zone([Group] int Id) : IComponent;              // its players contiguous
 public partial record struct Kills([IndexKey] int Count) : IComponent;            // indexed, ordered: a leaderboard
 public partial record struct Account([UniqueKey] int Id) : IComponent;       // one hero per account
 public record struct Spawn(Position At, int Seed) : ICleanupComponent;        // outlives its NPC: where the next appears
 public record struct Loot(int Item);                                          // players carry a DynamicBuffer<Loot>
+[WhenTargetDestroyed(TargetPolicy.Remove)]                                    // a player who leaves leaves friend lists
 public record struct Friend(EntityId Target) : IRelation;                     // and a DynamicBuffer<Friend> of links
 public struct Player : IComponent;                                            // tags: empty components
 public struct Npc : IComponent;
@@ -445,8 +447,6 @@ public sealed class BattleServer : IDisposable
             SystemErrors = SystemErrorPolicy.Disable,                         // a failing system goes off, the battle goes on
             DestroyLogCapacity = units,                                       // the ids gone while a client lags (CatchUp)
         });
-        World.GroupBy<Zone>();                                                // a zone's players contiguous, in its table
-        World.FriendIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // a player who leaves leaves friend lists
         World.SetRules(ShotCost, BagSize, false);
 
         World.AddSystem<ClockSystem>();                                       // OnCreate adds the Battle singleton
