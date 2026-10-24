@@ -1,24 +1,45 @@
 ---
 title: 让 AI 助手用好 EasyEcs
-seoTitle: "在 AI 助手中使用 EasyEcs：llms.txt、Markdown 与规则文件"
-description: "把 EasyEcs 的规则和文档交给 Claude、Cursor、Codex 或 Copilot：智能体技能（npx skills add）、llms.txt、Markdown 版本和规则文件。"
+seoTitle: "在 AI 助手中使用 EasyEcs：智能体技能、llms.txt 与 Markdown"
+description: "为 Claude Code、Cursor、Codex 或 Copilot 安装 EasyEcs 智能体技能（npx skills add），或把 llms.txt 和 Markdown 文档交给任何助手。"
 icon: Bot
 ---
 
 import { BookOpen, CircleQuestionMark, Shapes } from 'lucide-react';
 
-EasyEcs 比大多数模型的训练数据都新，它的规则（无状态系统、状态变化即数据、`in` 和 `ref` 参数、所有者线程）恰恰是 AI 助手最先写错的地方。
-本页介绍四种把真实文档交给助手的办法：一个在助手处理 EasyEcs 代码时才加载的智能体技能、`llms.txt` 文件、每页的 Markdown 版本，以及放进项目的规则文件。
+EasyEcs 比大多数模型的训练数据都新，它的规则（无状态系统、状态变化即数据、`in` 和 `ref` 参数、所有者线程）恰恰是 AI 助手最先写错的地方。在项目里工作的编码智能体从 EasyEcs 技能获得这些规则；聊天助手则直接读文档：`llms.txt`，或任意页面的 Markdown 版本。
 
-## 智能体技能 [#agent-skill]
+## EasyEcs 技能 [#agent-skill]
 
-最快的办法：用 [skills CLI](https://github.com/vercel-labs/skills) 把 EasyEcs 技能装进项目。Claude Code、Cursor、Codex、GitHub Copilot、Gemini CLI 以及其他支持 [Agent Skills](https://agentskills.io) 的智能体都能用：
+技能收录了编写 EasyEcs 代码时最要紧的规则：组件和系统、方法过滤条件和组过滤条件、结构性变更、用 `entity.Run` 处理单个实体的请求、线程与引用、性能、持久化（快照、存档、用 `LoadEntitiesInto` 写入记录）、EasyEcs 不做的事（包括留给你实现的 actor 模式）、项目结构与调试，以及一个示例。它们来自 [ECS 原则](/zh/docs/ecs-principles)、[分析器规则](/zh/docs/guide/analyzer)、[性能指南](/zh/docs/performance)、[项目结构](/zh/docs/guide/project-structure)和[诊断](/zh/docs/guide/diagnostics)。
+
+智能体平时只读技能的描述，任务编写、审查或迁移 EasyEcs 代码时才加载规则，其他对话不占上下文。Claude Code、Cursor、Codex、GitHub Copilot、Gemini CLI 以及其他支持 [Agent Skills](https://agentskills.io) 的智能体都能加载它。
+
+<Tabs items={['skills CLI', '手动安装']}>
+<Tab value="skills CLI">
 
 ```bash
 npx skills add JasonXuDeveloper/EasyEcs
 ```
 
-仓库只发布一个技能 `easyecs`；CLI 会询问要装给哪些智能体（`-a claude-code` 指定一个，`-g` 装到用户目录而不是项目里）。智能体能看到技能的描述，只在任务编写、审查或迁移 EasyEcs 代码时才加载规则，其他对话不占上下文。技能的内容与下面的[规则文件](#rules-file)相同；新版本发布后运行 `npx skills update` 即可更新。
+[skills CLI](https://github.com/vercel-labs/skills) 会询问要装给哪些智能体：`-a claude-code` 指定一个，`-g` 装到用户目录而不是项目里。仓库只发布一个技能 `easyecs`。新版本发布后运行 `npx skills update` 即可更新。
+
+</Tab>
+<Tab value="手动安装">
+
+技能就是一个包含 `SKILL.md` 的文件夹。把它下载到智能体读取技能的目录（Claude Code 用 `.claude/skills`，Codex、Cursor 等用 `.agents/skills`）：
+
+```bash
+curl -fsSL --create-dirs -o .claude/skills/easyecs/SKILL.md \
+  https://raw.githubusercontent.com/JasonXuDeveloper/EasyEcs/master/skills/easyecs/SKILL.md
+```
+
+新版本发布后重新下载一次。
+
+</Tab>
+</Tabs>
+
+分析器仍会检查每次构建，所以智能体漏掉的规则会变成编译错误或警告，而不是 bug。
 
 ## 纯文本形式的文档 [#docs-as-text]
 
@@ -41,67 +62,6 @@ curl -H "Accept: text/markdown" https://ecs.xgamedev.net/zh/docs/guide/systems
 
 每页顶部的菜单可以复制本页 Markdown，或者带着本页在 ChatGPT、Claude、T3 Chat、Scira 中打开。
 
-## 给项目用的规则文件 [#rules-file]
-
-[`easyecs-rules.md`](https://ecs.xgamedev.net/easyecs-rules.md)
-是一份简短的英文文件，列出写 EasyEcs 代码时要紧的规则：组件和系统、方法与分组上的过滤条件、结构变更、用 `entity.Run` 处理单个实体的请求、线程与 ref、性能、
-持久化（快照、存档、用 `LoadEntitiesInto` 恢复的记录）、EasyEcs 不做的事（包括交给你自己写的 actor 模式）、项目结构与调试，外加一个示例。
-内容取自 [ECS 设计原则](/zh/docs/ecs-principles)、[分析器规则](/zh/docs/guide/analyzer)、[性能指南](/zh/docs/performance)、
-[项目结构](/zh/docs/guide/project-structure)和[调试与诊断](/zh/docs/guide/diagnostics)。
-把它下载到仓库的 `docs/` 目录，下面的配置片段就从那里引用它：
-
-```bash
-curl -fsSL --create-dirs -o docs/easyecs-rules.md https://ecs.xgamedev.net/easyecs-rules.md
-```
-
-再让助手读它。分析器仍会检查每次构建，助手漏掉的规则会变成编译错误，而不是 bug。
-
-### AGENTS.md [#agents-md]
-
-Codex、Jules、Cursor、Zed 等代理会读仓库根目录的 `AGENTS.md`。加一行指向这个文件：
-
-```markdown title="AGENTS.md"
-## EasyEcs
-
-Follow docs/easyecs-rules.md when writing code that uses EasyEcs.
-```
-
-### Claude Code [#claude-code]
-
-`CLAUDE.md` 可以导入这个文件，Claude Code 加载项目说明时会一并读到：
-
-```markdown title="CLAUDE.md"
-@docs/easyecs-rules.md
-```
-
-也可以安装[智能体技能](#agent-skill)，它只在任务涉及 EasyEcs 时加载。
-
-### Cursor [#cursor]
-
-`.cursor/rules/` 下的规则带 `.mdc` frontmatter，作用于 globs 匹配的文件：
-
-```markdown title=".cursor/rules/easyecs.mdc"
----
-description: EasyEcs rules
-globs: "**/*.cs"
-alwaysApply: false
----
-
-（把 easyecs-rules.md 的内容粘贴到这里）
-```
-
-### GitHub Copilot [#github-copilot]
-
-Copilot 对整个仓库读 `.github/copilot-instructions.md`，对 `applyTo` glob 匹配的文件读 `.github/instructions/*.instructions.md`：
-
-```markdown title=".github/instructions/easyecs.instructions.md"
----
-applyTo: "**/*.cs"
----
-
-（把 easyecs-rules.md 的内容粘贴到这里）
-```
-
 ## 其他工具 [#other-tools]
 
 [Context7](https://context7.com)、[DeepWiki](https://deepwiki.com) 这类为 AI 助手索引 GitHub 仓库和文档的服务，可以在它们自己的网站上指向
@@ -111,7 +71,7 @@ applyTo: "**/*.cs"
 
 <Cards>
   <Card icon={<Shapes />} title="ECS 设计原则" href="/zh/docs/ecs-principles">
-    规则文件背后的规则。
+    这个技能背后的规则。
   </Card>
   <Card icon={<BookOpen />} title="快速开始" href="/zh/docs/getting-started">
     第一个 World、系统和查询。

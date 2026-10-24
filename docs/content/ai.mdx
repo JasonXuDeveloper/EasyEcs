@@ -1,31 +1,58 @@
 ---
 title: Using EasyEcs with AI assistants
-seoTitle: "EasyEcs with AI assistants: llms.txt, Markdown, rules file"
-description: "Give Claude, Cursor, Codex or Copilot the EasyEcs rules and docs: an agent skill (npx skills add), llms.txt, Markdown copies and a rules file."
+seoTitle: "EasyEcs with AI assistants: agent skill, llms.txt, Markdown"
+description: "Install the EasyEcs agent skill (npx skills add) for Claude Code, Cursor, Codex or Copilot, or give any assistant the docs as llms.txt and Markdown."
 icon: Bot
 ---
 
 import { BookOpen, CircleQuestionMark, Shapes } from 'lucide-react';
 
 EasyEcs is newer than most models' training data, and its rules (stateless systems, state changes as data, `in` and
-`ref` parameters, the owner thread) are what an assistant gets wrong first. This page shows the three ways to put the
-real docs in front of one: an agent skill your assistant loads when it touches EasyEcs code, the `llms.txt` files, the
-Markdown copy of each page, and a rules file for your project.
+`ref` parameters, the owner thread) are what an assistant gets wrong first. A coding agent working in your project
+gets them from the EasyEcs skill; a chat assistant gets the docs themselves, as `llms.txt` or a Markdown copy of any
+page.
 
-## An agent skill [#agent-skill]
+## The EasyEcs skill [#agent-skill]
 
-The quickest way: install the EasyEcs skill into your project with the [skills CLI](https://github.com/vercel-labs/skills).
-It works with Claude Code, Cursor, Codex, GitHub Copilot, Gemini CLI and the other agents that read
-[Agent Skills](https://agentskills.io):
+The skill holds the rules that matter when writing EasyEcs code: components and systems, method and group filters,
+structural changes, `entity.Run` for a request on one entity, threads and refs, performance, persistence (snapshots,
+saves, records with `LoadEntitiesInto`), what EasyEcs does not do (including the actor pattern it leaves to you),
+project layout and debugging, and an example. They are drawn from the [ECS principles](/en/docs/ecs-principles), the
+[analyzer rules](/en/docs/guide/analyzer), the [performance guide](/en/docs/performance),
+[project structure](/en/docs/guide/project-structure) and [diagnostics](/en/docs/guide/diagnostics).
+
+An agent reads only the skill's description until a task writes, reviews or migrates EasyEcs code; then it loads the
+rules. Other conversations pay nothing for them. Claude Code, Cursor, Codex, GitHub Copilot, Gemini CLI and the other
+agents that read [Agent Skills](https://agentskills.io) all load it.
+
+<Tabs items={['skills CLI', 'By hand']}>
+<Tab value="skills CLI">
 
 ```bash
 npx skills add JasonXuDeveloper/EasyEcs
 ```
 
-The repository publishes one skill, `easyecs`; the CLI asks which agents to install it for (`-a claude-code` picks one,
-`-g` installs it for your user instead of the project). The agent sees the skill's description and loads the rules
-when a task writes, reviews or migrates EasyEcs code, so they cost nothing in other conversations. The skill holds
-the same text as the [rules file](#rules-file) below; `npx skills update` brings it up to date after a release.
+The [skills CLI](https://github.com/vercel-labs/skills) asks which agents to install it for: `-a claude-code` picks
+one, `-g` installs it for your user instead of the project. The repository publishes one skill, `easyecs`.
+`npx skills update` brings it up to date after a release.
+
+</Tab>
+<Tab value="By hand">
+
+A skill is a folder with a `SKILL.md`. Download it into the folder your agent reads skills from
+(`.claude/skills` for Claude Code, `.agents/skills` for Codex, Cursor and others):
+
+```bash
+curl -fsSL --create-dirs -o .claude/skills/easyecs/SKILL.md \
+  https://raw.githubusercontent.com/JasonXuDeveloper/EasyEcs/master/skills/easyecs/SKILL.md
+```
+
+Download it again after a release.
+
+</Tab>
+</Tabs>
+
+The analyzer still checks every build, so a rule the agent misses becomes a compile error or a warning, not a bug.
 
 ## The docs as text [#docs-as-text]
 
@@ -51,72 +78,6 @@ curl -H "Accept: text/markdown" https://ecs.xgamedev.net/en/docs/guide/systems
 The menu at the top of each page copies its Markdown or opens it in ChatGPT, Claude, T3 Chat or Scira with the page
 attached.
 
-## A rules file for your project [#rules-file]
-
-[`easyecs-rules.md`](https://ecs.xgamedev.net/easyecs-rules.md)
-is a short file of the rules that matter when writing EasyEcs code: components and systems, method and group filters,
-structural changes, `entity.Run` for a request on one entity, threads and refs, performance, persistence (snapshots,
-saves, records with `LoadEntitiesInto`), what EasyEcs does not do (including the actor pattern it leaves to you),
-project layout and debugging, and an example. It is
-drawn from the [ECS principles](/en/docs/ecs-principles), the [analyzer rules](/en/docs/guide/analyzer), the
-[performance guide](/en/docs/performance), [project structure](/en/docs/guide/project-structure) and
-[diagnostics](/en/docs/guide/diagnostics). Download it into the `docs/` folder of your repository, where the snippets
-below look for it:
-
-```bash
-curl -fsSL --create-dirs -o docs/easyecs-rules.md https://ecs.xgamedev.net/easyecs-rules.md
-```
-
-Then point your assistant at it. The analyzer still checks every build, so a rule the assistant misses becomes a
-compile error, not a bug.
-
-### AGENTS.md [#agents-md]
-
-Codex, Jules, Cursor, Zed and other agents read `AGENTS.md` at the repository root. Add a line that names the file:
-
-```markdown title="AGENTS.md"
-## EasyEcs
-
-Follow docs/easyecs-rules.md when writing code that uses EasyEcs.
-```
-
-### Claude Code [#claude-code]
-
-`CLAUDE.md` can import the file, so Claude Code loads it with the project instructions:
-
-```markdown title="CLAUDE.md"
-@docs/easyecs-rules.md
-```
-
-Or install the [agent skill](#agent-skill), which loads only when the task touches EasyEcs.
-
-### Cursor [#cursor]
-
-A rule in `.cursor/rules/` with `.mdc` frontmatter applies to the files its globs match:
-
-```markdown title=".cursor/rules/easyecs.mdc"
----
-description: EasyEcs rules
-globs: "**/*.cs"
-alwaysApply: false
----
-
-(paste the contents of easyecs-rules.md here)
-```
-
-### GitHub Copilot [#github-copilot]
-
-Copilot reads `.github/copilot-instructions.md` for the whole repository, and `.github/instructions/*.instructions.md`
-for the files an `applyTo` glob matches:
-
-```markdown title=".github/instructions/easyecs.instructions.md"
----
-applyTo: "**/*.cs"
----
-
-(paste the contents of easyecs-rules.md here)
-```
-
 ## Other tools [#other-tools]
 
 Services that index GitHub repositories and documentation for assistants, such as [Context7](https://context7.com)
@@ -128,7 +89,7 @@ what they return against these docs, which are the source.
 
 <Cards>
   <Card icon={<Shapes />} title="ECS principles" href="/en/docs/ecs-principles">
-    The rules behind the rules file.
+    The rules behind the skill.
   </Card>
   <Card icon={<BookOpen />} title="Getting started" href="/en/docs/getting-started">
     The first world, systems and queries.

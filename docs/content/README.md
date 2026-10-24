@@ -90,7 +90,7 @@ One page per concept, under [guide/](guide):
 | [API and complexity](https://ecs.xgamedev.net/en/docs/api) | [api.mdx](api.mdx) | Every public API with its complexity (read by `tools/ApiDocs`). |
 | [Architecture](https://ecs.xgamedev.net/en/docs/architecture) | [architecture.mdx](architecture.mdx) | Storage, entity lifecycle, query cache, systems, generators, threads. |
 | [FAQ](https://ecs.xgamedev.net/en/docs/faq) | [faq.mdx](faq.mdx) | Short answers to common questions. |
-| [Using EasyEcs with AI assistants](https://ecs.xgamedev.net/en/docs/ai) | [ai.mdx](ai.mdx) | `llms.txt`, Markdown copies and a rules file ([easyecs-rules.md](../public/easyecs-rules.md)). |
+| [Using EasyEcs with AI assistants](https://ecs.xgamedev.net/en/docs/ai) | [ai.mdx](ai.mdx) | The agent skill ([skills/easyecs](../../skills/easyecs/SKILL.md), `npx skills add JasonXuDeveloper/EasyEcs`), `llms.txt` and Markdown copies. |
 | [Design decisions](https://ecs.xgamedev.net/en/docs/decisions) | [decisions.mdx](decisions.mdx) | Why EasyEcs is the way it is. |
 | [Roadmap](https://ecs.xgamedev.net/en/docs/roadmap) | [roadmap.mdx](roadmap.mdx) | What is planned and what was dropped. |
 | [Changelog](https://ecs.xgamedev.net/en/docs/changelog) | [changelog.mdx](changelog.mdx) | What changed in each release. |

@@ -310,7 +310,7 @@ npx skills add JasonXuDeveloper/EasyEcs
 ```
 
 [Using EasyEcs with AI assistants](https://ecs.xgamedev.net/en/docs/ai#agent-skill) covers the skill, `llms.txt`, the
-Markdown copy of every page and the rules file.
+Markdown copy of every page.
 
 ## What's new in 4.8
 

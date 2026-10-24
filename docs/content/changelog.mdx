@@ -15,8 +15,8 @@ major or minor version that needs code changes? The
 ### New [#v4-8-0-new]
 
 - An agent skill: `npx skills add JasonXuDeveloper/EasyEcs` installs the EasyEcs rules for Claude Code, Cursor, Codex,
-  GitHub Copilot and the other agents that read Agent Skills
-  ([AI assistants](/en/docs/ai#agent-skill)).
+  GitHub Copilot and the other agents that read Agent Skills; it replaces the rules file, whose URL now serves the
+  skill's text ([AI assistants](/en/docs/ai#agent-skill)).
 - Systems are `[EcsSystem]` ref structs of static methods: `[ForEach]` methods, and `[OnCreate]`, `[OnUpdate]` and
   `[OnDestroy]` hooks that take the `World`, the `SystemHandle`, both or neither. The world keeps each system's
   bookkeeping and hands out a `SystemHandle` (`Enabled`, `Error`, `RunCount`, `LastRunTick`, `Stats`, `Name`, `Type`)
