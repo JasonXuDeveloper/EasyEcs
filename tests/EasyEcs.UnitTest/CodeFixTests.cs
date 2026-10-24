@@ -103,6 +103,12 @@ public class CodeFixTests
     [TestCase("EECS025", "Take it by 'in'",
         "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, ref Clock c) => c.Ticks += p.V; }",
         "static void A(in P p, ref Clock c)")]
+    [TestCase("EECS025", "Take it as a ReadOnlyMaybe<Q>",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; } }",
+        "static void A(ref P p, ReadOnlyMaybe<Q> q)")]
+    [TestCase("EECS015", "Take it as a ReadOnlyMaybe<Owned>",
+        "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } [EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Maybe<Owned> o) { if (o.HasValue) p.V = o.Value.K; } }",
+        "static void A(ref P p, ReadOnlyMaybe<Owned> o)")]
     [TestCase("EECS025", "Take it as a ReadOnlySpan",
         "[EcsSystem] public ref struct S { [ForEach] static void A(System.Span<P> p, ref Clock c) { for (int i = 0; i < p.Length; i++) c.Ticks += p[i].V; } }",
         "static void A(System.ReadOnlySpan<P> p, ref Clock c)")]

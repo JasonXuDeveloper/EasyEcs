@@ -787,7 +787,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                 context.ReportDiagnostic(Diagnostic.Create(ReductionOverwritten, p.Locations.FirstOrDefault(), p.Name, method.Name,
                     Symbols.ReduceElement(p.Type)!.Name, reduction));
             else if (kind == Symbols.ParamKind.Optional && !Symbols.IsReadOnlyMaybe(p.Type)
-                     && Symbols.MaybeElement(p.Type) is { } optional && Symbols.IsIndexed(optional))
+                     && Symbols.MaybeElement(p.Type) is { } optional && Symbols.IsIndexed(optional) && !HasBody(method))
                 context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, p.Locations.FirstOrDefault(), optional.Name,
                     $"parameter '{p.Name}' hands out a ref to it (take a ReadOnlyMaybe<{optional.Name}> to read it)"));
             else if (kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan or Symbols.ParamKind.Mutable)

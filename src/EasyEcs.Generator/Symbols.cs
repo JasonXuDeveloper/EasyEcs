@@ -759,8 +759,9 @@ internal static class Symbols
         /// <summary><c>EntitySpan</c>: the entities of a batch method's run of rows.</summary>
         Entities,
         /// <summary>
-        /// <c>Maybe&lt;T&gt;</c>: a component the entity may lack (looked up per entity, a write when present unless the
-        /// method only reads it); <c>ReadOnlyMaybe&lt;T&gt;</c>: the same, always a read.
+        /// <c>Maybe&lt;T&gt;</c>: a component the entity may lack, a write (stamped where present, as a <c>ref T</c> is
+        /// where visited); <c>ReadOnlyMaybe&lt;T&gt;</c>: the same, a read. The type declares the access, as <c>ref</c> /
+        /// <c>in</c> do: EECS025 reports a <c>Maybe&lt;T&gt;</c> the method only reads.
         /// </summary>
         Optional,
         /// <summary><c>Mut&lt;T&gt;</c>: a queried component written only where the method writes it (stamped per write).</summary>
@@ -1089,11 +1090,10 @@ internal static class Symbols
     /// Why <paramref name="lookup"/>, a <c>Lookup&lt;T&gt;</c> or <c>Tile&lt;TCell, TTile&gt;</c> parameter of
     /// <paramref name="method"/>, would read rows of <paramref name="target"/> (one of <see cref="LookedUp"/>) the pass
     /// writes (EECS059), or null: another parameter writes it (<c>ref T</c>, <c>Mut&lt;T&gt;</c>, <c>Span&lt;T&gt;</c>,
-    /// or a <c>Maybe&lt;T&gt;</c> the method writes through).
+    /// or <c>Maybe&lt;T&gt;</c>).
     /// </summary>
     public static string? LookupProblem(IMethodSymbol method, IParameterSymbol lookup, ITypeSymbol target)
     {
-        var body = (method.PartialImplementationPart ?? method).DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() as MethodDeclarationSyntax;
         foreach (var p in method.Parameters)
         {
             var kind = Classify(p, IsRunner(method));
@@ -1102,7 +1102,7 @@ internal static class Symbols
                 ParamKind.Component => p.RefKind == RefKind.Ref,
                 ParamKind.Mutable => true,
                 ParamKind.ComponentSpan => Named(p.Type.OriginalDefinition, "System.Span<T>"),
-                ParamKind.Optional => !IsReadOnlyMaybe(p.Type) && (body == null || !OnlyReadsValue(body, p.Name)),
+                ParamKind.Optional => !IsReadOnlyMaybe(p.Type),
                 _ => false,
             };
             var written = kind == ParamKind.Optional ? MaybeElement(p.Type) : QueriedComponent(p);
@@ -1588,41 +1588,6 @@ internal static class Symbols
         foreach (var identifier in body.DescendantNodes().OfType<IdentifierNameSyntax>())
             if (identifier.Identifier.ValueText == name && !test(identifier))
                 return false;
-        return true;
-    }
-
-    /// <summary>
-    /// Whether the method only reads through <c>Maybe</c> parameter <paramref name="name"/>: every use is
-    /// <c>name.HasValue</c> or a read of <c>name.Value</c> (or of a field of it). Syntax only and conservative: an
-    /// assignment, increment, <c>ref</c>, a call on the value or passing the Maybe on counts as a write.
-    /// </summary>
-    public static bool OnlyReadsValue(MethodDeclarationSyntax method, string name)
-    {
-        SyntaxNode? body = (SyntaxNode?)method.Body ?? method.ExpressionBody;
-        if (body == null) return false;
-        foreach (var identifier in body.DescendantNodes().OfType<IdentifierNameSyntax>())
-        {
-            if (identifier.Identifier.ValueText != name) continue;
-            if (identifier.Parent is not MemberAccessExpressionSyntax access || access.Expression != identifier) return false;
-            if (access.Name.Identifier.ValueText == "HasValue") continue;
-            if (access.Name.Identifier.ValueText != "Value") return false;
-            SyntaxNode top = access; // name.Value.Field[i].Field: the outermost field or element read, unparenthesized
-            while (top.Parent is MemberAccessExpressionSyntax { Expression: var e } && e == top
-                   || top.Parent is ElementAccessExpressionSyntax { Expression: var x } && x == top
-                   || top.Parent is ParenthesizedExpressionSyntax)
-                top = top.Parent;
-            switch (top.Parent)
-            {
-                case ArgumentSyntax { Parent: TupleExpressionSyntax }: // (t.Value.V, p.V) = ...: conservative
-                case AssignmentExpressionSyntax assignment when assignment.Left == top:
-                case PrefixUnaryExpressionSyntax or PostfixUnaryExpressionSyntax: // ++, -- (and !, - on a read: conservative)
-                case RefExpressionSyntax:
-                case ArgumentSyntax { RefKindKeyword.ValueText: "ref" or "out" }:
-                case InvocationExpressionSyntax:
-                    return false;
-            }
-        }
-
         return true;
     }
 

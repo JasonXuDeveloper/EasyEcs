@@ -68,6 +68,12 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     else
                         Register(context, diagnostic, "Take it by 'in'", root, p, Modify(p, SyntaxKind.InKeyword));
                     break;
+                case "EECS025" or "EECS015" when kind == "ReadOnlyMaybe" && node.FirstAncestorOrSelf<ParameterSyntax>() is { Type: { } maybeType } p
+                                    && Generic(maybeType) is { Identifier.ValueText: "Maybe", TypeArgumentList.Arguments.Count: 1 } maybe
+                                    && !await HasCallers(context.Document, p, context.CancellationToken).ConfigureAwait(false):
+                    Register(context, diagnostic, $"Take it as a ReadOnlyMaybe<{maybe.TypeArgumentList.Arguments[0]}>", root, maybe,
+                        maybe.WithIdentifier(SyntaxFactory.Identifier("ReadOnlyMaybe").WithTriviaFrom(maybe.Identifier)));
+                    break;
                 case "EECS015" when kind == "RefReadOnly" && node.FirstAncestorOrSelf<VariableDeclarationSyntax>() is { Type: RefTypeSyntax { ReadOnlyKeyword.RawKind: 0 } type }:
                     Register(context, diagnostic, "Bind it 'ref readonly'", root, type,
                         type.WithReadOnlyKeyword(SyntaxFactory.Token(SyntaxKind.ReadOnlyKeyword).WithTrailingTrivia(SyntaxFactory.Space)));

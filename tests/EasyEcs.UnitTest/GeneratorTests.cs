@@ -146,7 +146,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(System.Span<P> p, System.ReadOnlySpan<Q> q) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "IForEachBatch<global::P, global::Q>")]
     [TestCase("[ForEach, Changed<DynamicBuffer<int>>] static void A(in DynamicBuffer<int> b, ref P p) { }", ".Changed<global::EasyEcs.DynamicBuffer<int>>(0)", "access.Read<global::EasyEcs.DynamicBuffer<int>>();")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>(0)", "Since(system.LastRunTick + 1)", "WriteMask => 1;")]
-    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Read<global::Q>();", "IForEachBatch<global::P>", "new global::EasyEcs.MaybeColumn<global::Q>(in entities, false)", "ref global::System.Runtime.CompilerServices.Unsafe.Add(")]
+    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Write<global::Q>();", "IForEachBatch<global::P>", "new global::EasyEcs.MaybeColumn<global::Q>(in entities, false)", "ref global::System.Runtime.CompilerServices.Unsafe.Add(")]
     [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) q.Value.V++; }", "access.Write<global::Q>();", "MaybeColumn<global::Q>(in entities, false)")]  // untracked: no stamp
     [TestCase("[ForEach] static void A(ref P p, ReadOnlyMaybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Read<global::Q>();", "MaybeColumn<global::Q>(in entities, false)")]
     [TestCase("[ForEach] static void A(ref P p, Maybe<T> t) { if (t.HasValue) t.Value = default; }", "access.Write<global::T>();", "MaybeColumn<global::T>(in entities, true)")]  // tracked: stamped
@@ -1909,7 +1909,7 @@ public class GeneratorTests
     public void AMaybeOfAStructuralMethodIsLookedUpPerEntity()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components,
-            "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p, Maybe<Q> q) { if (q.HasValue) e.Destroy(); } }"),
+            "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p, ReadOnlyMaybe<Q> q) { if (q.HasValue) e.Destroy(); } }"),
             out var output, out _);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => IsCode(t)).Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("IForEachEntity<global::P>").And.Contain("global::EasyEcs.Maybe<global::Q>.ForRead(entity)"));
@@ -2242,6 +2242,8 @@ public class GeneratorTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref T t, ref P p) => p.V = t.V; }", "EECS025")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, ref Q q) => p.V = q.V; }", "EECS025")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, ref Clock c) => p.V = c.Ticks; }", "EECS025")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; } }", "EECS025")]  // a Maybe declares a write
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Maybe<T> t) => p.V = t.HasValue ? t.Value.V : 0; }", "EECS025")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(System.Span<P> p, ref Clock c) { for (int i = 0; i < p.Length; i++) c.Ticks += p[i].V; } }", "EECS025")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref Counter c, ref P p) => p.V = c.Peek(); }", "EECS025")]          // a readonly method
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, ref Q q) => p.V = Helpers.Look(q.V == 0 ? p : default); }", "EECS025")]

@@ -140,7 +140,7 @@ public class ChangedTests
     public ref struct PeekAndHit
     {
         [ForEach]
-        private static void Apply(Mut<Armor> armor, ref Health health, Maybe<Stun> stun)
+        private static void Apply(Mut<Armor> armor, ref Health health, ReadOnlyMaybe<Stun> stun)
         {
             health = new Health(armor.Value.Value);
             if (stun.HasValue) armor.Write().Value--;

@@ -297,7 +297,7 @@ public ref struct ProjectileSystem
 public ref struct RegenerationSystem
 {
     [ForEach, With<Player>, Without<Dead>]
-    static void Regenerate(Mut<Health> hp, Maybe<Burning> burning)            // burning or not: one method
+    static void Regenerate(Mut<Health> hp, ReadOnlyMaybe<Burning> burning)    // burning or not: one method
     {
         var (value, max) = hp.Value;                                          // a read: nothing stamped
         if (value < max) hp.Write().Value = Math.Min(max, value + (burning.HasValue ? 5 : 20));

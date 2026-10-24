@@ -115,7 +115,7 @@ public class AccessBenchmark
     [EcsSystem]
     public ref struct MaybeParameter
     {
-        [ForEach] static void Run(ref Speed speed, Maybe<Boss> boss) { if (boss.HasValue) speed.V++; }
+        [ForEach] static void Run(ref Speed speed, ReadOnlyMaybe<Boss> boss) { if (boss.HasValue) speed.V++; }
     }
 
     [EcsSystem]

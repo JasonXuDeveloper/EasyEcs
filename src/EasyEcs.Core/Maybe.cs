@@ -12,10 +12,10 @@ namespace EasyEcs;
 /// has a Buff. One method instead of a With and a Without variant when the optional part is small. A method that
 /// changes no structure finds the column once per run of rows and tests a presence bit per row; one that changes
 /// structure looks the component up through each entity. Split the method in two with <c>[With&lt;T&gt;]</c> /
-/// <c>[Without&lt;T&gt;]</c> in the hottest loops (no test per row). A method that only reads <see cref="Value"/> reads <typeparamref name="T"/>;
-/// one that writes through it (assigns, increments, passes it by <c>ref</c>, calls a method on it) writes
-/// <typeparamref name="T"/>, and a tracked component is stamped when present. Valid for the call it is passed to (a
-/// ref struct).
+/// <c>[Without&lt;T&gt;]</c> in the hottest loops (no test per row). The type declares the access, as <c>ref</c> does:
+/// the method writes <typeparamref name="T"/>, so the system is scheduled as its writer and a tracked component is
+/// stamped on every row that has it; a method that only reads takes a <see cref="ReadOnlyMaybe{T}"/> (EECS025). Valid
+/// for the call it is passed to (a ref struct).
 /// </summary>
 public readonly ref struct Maybe<T> where T : struct, IComponent
 {
@@ -60,9 +60,9 @@ public readonly ref struct Maybe<T> where T : struct, IComponent
 }
 
 /// <summary>
-/// An optional component of the entity a <c>[ForEach]</c> method visits, read-only: <see cref="Value"/> is a
-/// <c>ref readonly</c>, so the method is scheduled as a reader of <typeparamref name="T"/>, a tracked component is never
-/// stamped, and an indexed one (<see cref="IIndexed{TKey}"/>) may be taken, which a <see cref="Maybe{T}"/> may not
+/// An optional component of the entity a <c>[ForEach]</c> method visits, read-only (as <c>in</c> beside <c>ref</c>):
+/// <see cref="Value"/> is a <c>ref readonly</c>, so the method is scheduled as a reader of <typeparamref name="T"/>, a
+/// tracked component is never stamped, and an indexed one (<see cref="IIndexed{TKey}"/>) may be taken, which a <see cref="Maybe{T}"/> may not
 /// (EECS015: its ref could change the key behind the index's back). The same lookups as a <see cref="Maybe{T}"/>: the
 /// column once per run of rows in a method that changes no structure, the entity otherwise. Valid for the call it is
 /// passed to (a ref struct).

@@ -28,7 +28,8 @@ public sealed partial class EasyEcsAnalyzer
         "A 'ref' component or singleton parameter (a Span<T> in a batch method) puts the type in the system's write set, " +
         "so no parallel stage runs it beside a system that reads the type, and every row it visits of a tracked " +
         "component (ITracked) is stamped as changed, so [Changed<T>] systems visit rows nobody changed. " +
-        "Entity.Get<T>() of a tracked component stamps the row too. Read with 'in', ReadOnlySpan<T> or Read<T>().",
+        "Entity.Get<T>() of a tracked component stamps the row too, and so does a Maybe<T> on every row that has the component. " +
+        "Read with 'in', ReadOnlySpan<T>, ReadOnlyMaybe<T> or Read<T>().",
         helpLinkUri: Help("EECS025"));
 
     public static readonly DiagnosticDescriptor UnusedParameter = new("EECS026", "A [ForEach] or [ForEntity] parameter the method does not use",
@@ -284,6 +285,15 @@ public sealed partial class EasyEcsAnalyzer
                 context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, location,
                     used == null || !used.Any(Uses.MayWrite) ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, span ? "ReadOnlySpan" : "In") : null,
                     component.Name, $"parameter '{p.Name}' can write it (take it as 'in' or ReadOnlySpan)"));
+            // The same for a Maybe<T> of one (a ref to its key): the fix is a ReadOnlyMaybe<T> when the method only reads it.
+            if (kind == Symbols.ParamKind.Optional && !Symbols.IsReadOnlyMaybe(p.Type) && Symbols.MaybeElement(p.Type) is { } optional
+                && Symbols.IsIndexed(optional) && EasyEcsAnalyzer.HasBody(method))
+            {
+                context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, location,
+                    (used == null || MaybeOnlyReads(used)) && !Symbols.SharesSignature(method) ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "ReadOnlyMaybe") : null,
+                    optional.Name, $"parameter '{p.Name}' hands out a ref to it (take a ReadOnlyMaybe<{optional.Name}> to read it)"));
+                continue;
+            }
 
             if (used is not { } references)
             {
@@ -335,6 +345,12 @@ public sealed partial class EasyEcsAnalyzer
             if (kind == Symbols.ParamKind.Mutable)
             {
                 MutParameter(context, method, p, component, references);
+                continue;
+            }
+
+            if (kind == Symbols.ParamKind.Optional)
+            {
+                MaybeParameter(context, method, p, references);
                 continue;
             }
 
@@ -469,6 +485,33 @@ public sealed partial class EasyEcsAnalyzer
         foreach (var operation in root.Descendants())
             if (operation is IParameterReferenceOperation reference && writes.Contains(reference.Syntax)) return true;
         return false;
+    }
+
+    /// <summary>Whether every use of a <c>Maybe&lt;T&gt;</c> parameter only reads it (<c>HasValue</c>, reads of <c>Value</c>).</summary>
+    private static bool MaybeOnlyReads(List<IOperation> references)
+    {
+        foreach (var reference in references)
+            if (reference.Parent is not IPropertyReferenceOperation { Property.Name: "HasValue" or "Value" } use || use.Instance != reference
+                || use.Property.Name == "Value" && Uses.MayWrite(use))
+                return false;
+        return true;
+    }
+
+    /// <summary>
+    /// EECS025 for a <c>Maybe&lt;T&gt;</c> parameter the method only reads: it takes a <c>ReadOnlyMaybe&lt;T&gt;</c> (the fix). A
+    /// <c>Maybe&lt;T&gt;</c> declares a write, as <c>ref T</c> does. One of an indexed component got EECS015 already.
+    /// </summary>
+    private static void MaybeParameter(OperationBlockAnalysisContext context, IMethodSymbol method, IParameterSymbol p, List<IOperation> references)
+    {
+        if (Symbols.IsReadOnlyMaybe(p.Type) || Symbols.MaybeElement(p.Type) is not { } component || !MaybeOnlyReads(references)) return;
+        var location = p.Locations.FirstOrDefault();
+        var fix = !Symbols.SharesSignature(method) ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "ReadOnlyMaybe") : null;
+        context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, location, fix,
+                $"Parameter '{p.Name}' of {Symbols.Describe(method)} (Maybe<{component.Name}>)",
+                Symbols.Implements(component, Symbols.TrackChanges)
+                    ? (Symbols.IsForEntity(method) ? "the entity's row is" : "every row it visits that has one is") + " stamped as changed, so [Changed<" + component.Name + ">] systems visit rows nobody changed"
+                    : "the system is scheduled as the component's writer, so no parallel stage runs it beside a reader",
+                $"take it as a ReadOnlyMaybe<{component.Name}>"));
     }
 
     /// <summary>

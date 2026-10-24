@@ -4,7 +4,7 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// An optional component: 100,000 units, half of them with a <c>Shield</c>; every unit regenerates, a shielded one
-/// more. One [ForEach] method taking <c>Maybe&lt;Shield&gt;</c> (a lookup per entity) against two methods split by
+/// more. One [ForEach] method taking <c>ReadOnlyMaybe&lt;Shield&gt;</c> (a lookup per entity) against two methods split by
 /// <c>[With&lt;Shield&gt;]</c> / <c>[Without&lt;Shield&gt;]</c> (no lookup), both as runners. Allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
@@ -45,7 +45,7 @@ public class MaybeBenchmark
 public static class Regeneration
 {
     [ForEach]
-    static void WithMaybe(ref MaybeBenchmark.Stamina stamina, Maybe<MaybeBenchmark.Shield> shield) =>
+    static void WithMaybe(ref MaybeBenchmark.Stamina stamina, ReadOnlyMaybe<MaybeBenchmark.Shield> shield) =>
         stamina.Value += shield.HasValue ? 1 + shield.Value.Bonus : 1;
 
     [ForEach]

@@ -53,7 +53,7 @@ public ref struct Regenerate
 public ref struct ArmorBonus
 {
     [ForEach]
-    private static void Add(ref Health health, Maybe<Armor> armor)
+    private static void Add(ref Health health, ReadOnlyMaybe<Armor> armor)
     {
         if (armor.HasValue) health = health with { Value = health.Value + armor.Value.Value };
     }

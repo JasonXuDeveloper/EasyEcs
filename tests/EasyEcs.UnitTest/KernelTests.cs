@@ -617,7 +617,7 @@ public record struct Wind2 : IComponent, ITracked { public float X, Y; }
 public static class OptionalKernels
 {
     [ForEach(SimdMode = SimdMode.Require)]
-    internal static void Push(ref Heat heat, Maybe<Boost> boost)
+    internal static void Push(ref Heat heat, ReadOnlyMaybe<Boost> boost)
     {
         if (boost.HasValue) heat.Value += boost.Value.Value * 2;
         else heat.Value -= 1;
@@ -638,7 +638,7 @@ public static class OptionalKernels
 
     // Reads Value without HasValue: a row without Boost throws, as the method does.
     [ForEach(SimdMode = SimdMode.Require)]
-    internal static void Careless(ref Level level, Maybe<Boost> boost) => level.Value = boost.Value.Value + 1;
+    internal static void Careless(ref Level level, ReadOnlyMaybe<Boost> boost) => level.Value = boost.Value.Value + 1;
 }
 
 // Struct fields as lanes: Vector2 / Vector3 inside components, whole components assigned, component-wise operators.

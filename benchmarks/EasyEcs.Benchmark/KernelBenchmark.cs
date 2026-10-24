@@ -697,9 +697,9 @@ public partial class KernelBenchmark
             p.Z += v.Z * Dt;
         }
 
-        // An optional component: Maybe<Mass> as a lane mask of the rows that have it (every third row of _holes lacks it).
+        // An optional component: ReadOnlyMaybe<Mass> as a lane mask of the rows that have it (every third row of _holes lacks it).
         [ForEach(SimdMode = SimdMode.Require)]
-        internal static void Optional(ref Heat heat, in Speed speed, Maybe<Mass> mass)
+        internal static void Optional(ref Heat heat, in Speed speed, ReadOnlyMaybe<Mass> mass)
         {
             if (mass.HasValue) heat.Value += speed.Value * Dt / MathF.Max(mass.Value.Value, 0.5f);
             else heat.Value += speed.Value * Dt;

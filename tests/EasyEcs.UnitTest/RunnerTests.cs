@@ -25,7 +25,7 @@ public static class Reports
     private static void Changed(ref int seen) => seen++;
 
     [ForEach]
-    private static void Total(in Health hp, Maybe<Armor> armor, ref int total) => total += hp.Value + (armor.HasValue ? armor.Value.Value : 0);
+    private static void Total(in Health hp, ReadOnlyMaybe<Armor> armor, ref int total) => total += hp.Value + (armor.HasValue ? armor.Value.Value : 0);
 
     [ForEach]
     private static void Harden(in Health hp, Maybe<Armor> armor)            // a write through Maybe: stamped

@@ -14,7 +14,7 @@ public static class Frame
     // A [ForEach] method outside a system: the generator writes
     // Frame.Write(world, frame, ref count) for the host.
     [ForEach]
-    static void Write(in Position p, in Velocity v, in Lifetime life, Maybe<Flash> flash,
+    static void Write(in Position p, in Velocity v, in Lifetime life, ReadOnlyMaybe<Flash> flash,
         in Arena arena, float[] frame, ref int count)
     {
         // Heat is the speed against a fresh spark's: drag cools a spark from hot to cold
