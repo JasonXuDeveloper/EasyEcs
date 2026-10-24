@@ -19,7 +19,7 @@ namespace EasyEcs;
 /// that any idle thread takes from, so the worlds of a process share the threads as they share the pool's. A thread
 /// with nothing to run spins for <see cref="SpinTicks"/> first (the next pass of a tick finds it awake, as the pool's
 /// threads do), then parks on an event of its own; a post wakes as many parked threads as it queued items, the last
-/// parked first (its cache is the warmest). One lock per post and per item taken.
+/// parked first (its cache is the warmest). One <see cref="SpinGate"/> entry per post and per item taken.
 /// </para>
 /// </summary>
 internal static class Workers
@@ -39,7 +39,7 @@ internal static class Workers
         public int SetUp;       // the ThreadSetup steps the thread ran (tests wait for it: Behind)
     }
 
-    private static readonly Lock Gate = new();
+    private static SpinGate Gate;  // the queue and the parked threads (D128: a Lock would allocate when first waited on)
     private static Worker[] _all = [];  // started threads (copied on write, under Gate)
     private static Item _head, _tail; // queued items (under Gate)
     private static int _queued;      // how many: written under Gate, read without it by spinning threads
@@ -75,7 +75,7 @@ internal static class Workers
     public static void Ensure(int count)
     {
         if (Volatile.Read(ref _threads) >= count) return;
-        lock (Gate)
+        using (new SpinScope(ref Gate))
         {
             while (_threads < count)
             {
@@ -99,7 +99,7 @@ internal static class Workers
     public static void Post(Item first, Item last, int count)
     {
         Worker wake = null;
-        lock (Gate)
+        using (new SpinScope(ref Gate))
         {
             if (_tail == null) _head = first;
             else _tail.Next = first;
@@ -121,7 +121,7 @@ internal static class Workers
     public static void WakeAll()
     {
         Worker wake;
-        lock (Gate)
+        using (new SpinScope(ref Gate))
         {
             wake = _idle;
             _idle = null;
@@ -145,7 +145,7 @@ internal static class Workers
     private static Item Take()
     {
         if (Volatile.Read(ref _queued) == 0) return null;
-        lock (Gate)
+        using (new SpinScope(ref Gate))
         {
             var item = _head;
             if (item == null) return null;
@@ -177,7 +177,7 @@ internal static class Workers
             }
 
             if (Spin()) continue;
-            lock (Gate)
+            using (new SpinScope(ref Gate))
             {
                 // Queued, or a step added, meanwhile: the post (or the step's wake) found no parked thread to wake. Both
                 // publish before they take the lock, so a thread that parks after them sees them here.
