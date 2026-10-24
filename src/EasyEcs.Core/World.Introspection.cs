@@ -113,7 +113,7 @@ public partial class World
                 ref readonly var access = ref order[at].Access;
                 systems[i] = new SystemInfo(names[at], ComponentNames(access.ReadComponents), ComponentNames(access.WriteComponents),
                     SingletonNamesOf(access.ReadSingletons), SingletonNamesOf(access.WriteSingletons), access.Alone, waits.ToArray())
-                    { Loops = order[at].Loops };
+                    { Loops = order[at].Loops, FusedWith = FusedWithNext(group, at) ? names[at + 1] : null };
             }
 
             infos[s] = new StageInfo(systems);
@@ -130,6 +130,14 @@ public partial class World
 
         return new GroupInfo(group.Name, infos, pairs.ToArray());
     }
+
+    /// <summary>
+    /// Whether system <paramref name="at"/> of <paramref name="group"/> runs as one walk with the next one when both run
+    /// (pass fusion): one thread runs the group and nothing measures systems apart.
+    /// </summary>
+    private bool FusedWithNext(SystemSchedule group, int at) =>
+        !_options.ParallelSystems && !_options.MeasureSystems && group.Serial.Fused is var fused
+        && at + 1 < fused.Length && fused[at] >= 0 && at + 1 < group.Systems.Length;
 
     /// <summary>What two systems conflict on (<see cref="SystemAccess.ConflictsWith"/>), by name.</summary>
     private static string[] Conflicts(in SystemAccess first, in SystemAccess second)

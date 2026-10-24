@@ -52,6 +52,15 @@ public readonly ref struct EntitySpan
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Entity At(nint index) => new Entity(_world, Unsafe.Add(ref MemoryMarshal.GetReference(_slots), index));
 
+    /// <summary>
+    /// Rows [<paramref name="start"/>, <paramref name="start"/> + <paramref name="length"/>) of the run, a run of their
+    /// own: a fused walk (methods of a system run as one pass) hands each method a block of a run at a time. Generated code
+    /// calls it. O(1).
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public EntitySpan Slice(int start, int length) =>
+        new(_world, _table, _first + start, ref MemoryMarshal.GetReference(_slots.Slice(start, length)), length);
+
     /// <summary>The ids of the run's entities, read straight from the table (no copy): to store or send them.</summary>
     public ReadOnlySpan<EntityId> Ids
     {

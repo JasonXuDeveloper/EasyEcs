@@ -71,22 +71,25 @@ public class SystemDispatchBenchmark
 
     public record struct Counter(int Value) : IComponent;
 
-    [EcsSystem] public ref struct S0 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S1 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S2 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S3 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S4 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S5 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S6 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S7 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S8 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S9 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S10 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S11 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S12 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S13 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S14 { [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct S15 { [ForEach] static void Run(ref Counter c) => c.Value++; }
+    // FusionMode.Off: one pass per system, which is what this measures (the next system walks the same rows, so two
+    // systems would otherwise share one walk; FusionBenchmark measures that).
+
+    [EcsSystem] public ref struct S0 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S1 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S2 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S3 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S4 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S5 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S6 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S7 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S8 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S9 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S10 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S11 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S12 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S13 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S14 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct S15 { [ForEach(FusionMode = FusionMode.Off)] static void Run(ref Counter c) => c.Value++; }
 
     // An OnUpdate method that does nothing: the system runs alone, and the runtime calls it before the pass.
     [EcsSystem] public ref struct U0 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }

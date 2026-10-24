@@ -64,9 +64,14 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             .Select(static (pair, _) => new EquatableArray<SetEntry>(pair.Left.Concat(pair.Right!).Distinct()
                 .OrderBy(e => e!.System, System.StringComparer.Ordinal).ToArray()!))
             .WithTrackingName("SystemSet");
-        context.RegisterImplementationSourceOutput(set, static (spc, entries) =>
+        // Pairs of systems that may share one walk (SystemGenerator.Fusion.cs): their code, and the set's declarations.
+        var fusions = FusionPairs(context, updates);
+        context.RegisterImplementationSourceOutput(fusions, static (spc, pair) => AddFusion(spc, pair));
+        var declared = fusions.Select(static (p, _) => new SetFusion(p.First.Owner.FullName, p.Second.Owner.FullName, p.FullCodeName))
+            .Collect().WithTrackingName("SetFusions");
+        context.RegisterImplementationSourceOutput(set.Combine(declared), static (spc, input) =>
         {
-            if (entries.Length > 0) spc.AddSource("__EasyEcsSystems.g.cs", SourceText.From(EmitSet(entries), Encoding.UTF8));
+            if (input.Left.Length > 0) spc.AddSource("__EasyEcsSystems.g.cs", SourceText.From(EmitSet(input.Left, input.Right), Encoding.UTF8));
         });
 
         // [ForEntity] methods: entry points that run the method's job on one entity (entity.Run), in a system too.
@@ -122,7 +127,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
         bool system = owner.IsSystem && !model.One;
         if (system)
+        {
             foreach (var hook in model.Hooks) EmitHookAccessor(sb, owner, hook);
+            EmitFusedJobs(sb, model);
+        }
+
         sb.Append("}\n");
         if (system) EmitSystemCode(sb, model);
         return sb.ToString();
@@ -139,7 +148,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// The assembly's system set: its systems numbered in name order, a module initializer that registers it, and one
     /// switch per hook whose cases call each system's code directly (a direct call the JIT may inline).
     /// </summary>
-    private static string EmitSet(EquatableArray<SetEntry> entries)
+    private static string EmitSet(EquatableArray<SetEntry> entries, ImmutableArray<SetFusion> fusions)
     {
         var sb = new StringBuilder(Header).Append('\n');
         const string world = "global::EasyEcs.World", handle = "global::EasyEcs.SystemHandle";
@@ -148,7 +157,18 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         sb.Append($"    {Code.ModuleInitializer}\n    internal static void Register() => global::EasyEcs.SystemCode.Register<__EasyEcsSystems>();\n\n");
         sb.Append("    public static void Declare(ref global::EasyEcs.SystemDeclarations systems)\n    {\n");
         foreach (var entry in entries) sb.Append($"        systems.Add<{entry.System}, {entry.Code}>();\n");
+        // Pairs of systems that run as one walk when the schedule puts them next to each other (by their numbers).
+        var known = fusions.Where(f => entries.Any(e => e.System == f.First) && entries.Any(e => e.System == f.Second)).ToArray();
+        int Number(string system) { for (int i = 0; ; i++) if (entries[i].System == system) return i; }
+        foreach (var fusion in known) sb.Append($"        systems.Fuse({Number(fusion.First)}, {Number(fusion.Second)}); // {fusion.Code}\n");
         sb.Append("    }\n");
+        if (known.Length > 0)
+        {
+            sb.Append($"\n    public static bool RunFused({world} world, int fusion, {handle} first, {handle} second, ulong secondTick)\n    {{\n        switch (fusion)\n        {{\n");
+            for (int i = 0; i < known.Length; i++)
+                sb.Append($"            case {i}: return {known[i].Code}.Update(world, first, second, secondTick);\n");
+            sb.Append("        }\n\n        return false;\n    }\n");
+        }
         foreach (var hook in new[] { "Update", "Create", "Destroy" })
         {
             sb.Append($"\n    public static void {hook}({world} world, int system, {handle} handle)\n    {{\n        switch (system)\n        {{\n");
@@ -393,7 +413,38 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             sb.Append($"    public static int Interval => {model.Interval};\n\n    public static int Phase => {model.Phase};\n\n");
         sb.Append($"    public static void Update({world} world, {handle} system)\n    {{\n");
         EmitHookCall(sb, model, "Update");
+        var groups = FusionGroups(model);
         for (int i = 0; i < model.Methods.Length; i++)
+        {
+            if (groups[i] > 1) // methods that share one walk (SystemGenerator.Fusion.cs)
+            {
+                EmitFusedCall(sb, model, i, groups[i]);
+                i += groups[i] - 1;
+                continue;
+            }
+
+            EmitMethodPass(sb, model, i);
+        }
+
+        sb.Append("    }\n\n");
+        foreach (var hook in new[] { "Create", "Destroy" })
+        {
+            sb.Append($"    public static void {hook}({world} world, {handle} system)\n    {{\n");
+            EmitHookCall(sb, model, hook);
+            sb.Append("    }\n\n");
+        }
+
+        // How each method runs (SystemInfo.Loops): one array for the type, made once.
+        sb.Append($"    private static readonly string[] __loops = [{string.Join(", ", model.Methods.Select((m, i) => Code.Literal(m.Describe() + FusionNote(model, groups, i))))}];\n\n");
+        sb.Append("    public static string[] Loops => __loops;\n\n");
+        EmitAccess(sb, model);
+        sb.Append("}\n");
+    }
+
+    /// <summary>The pass of method <paramref name="i"/> of the system's Update, on its own (no other method in its walk).</summary>
+    private static void EmitMethodPass(StringBuilder sb, UpdateModel model, int i)
+    {
+        string forEach = "__ForEach" + model.Owner.TypeParameters;
         {
             var method = model.Methods[i];
             string job = $"{forEach}.{method.Name}Job{i}", filterName = $"{forEach}.{method.Name}Filter{i}";
@@ -408,20 +459,6 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             sb.Append($"        if (global::EasyEcs.SystemCode.Measuring(world)) global::EasyEcs.SystemCode.Visit(system, {count});\n");
             EmitPass(sb, method, forEach, i, "world", $"job{i}", filter, whole, "        ");
         }
-
-        sb.Append("    }\n\n");
-        foreach (var hook in new[] { "Create", "Destroy" })
-        {
-            sb.Append($"    public static void {hook}({world} world, {handle} system)\n    {{\n");
-            EmitHookCall(sb, model, hook);
-            sb.Append("    }\n\n");
-        }
-
-        // How each method runs (SystemInfo.Loops): one array for the type, made once.
-        sb.Append($"    private static readonly string[] __loops = [{string.Join(", ", model.Methods.Select(m => Code.Literal(m.Describe())))}];\n\n");
-        sb.Append("    public static string[] Loops => __loops;\n\n");
-        EmitAccess(sb, model);
-        sb.Append("}\n");
     }
 
     /// <summary>The call of the system's <paramref name="kind"/> hook, if it has one: its parameters in its order.</summary>
@@ -670,10 +707,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             sb.Append($"        static void global::EasyEcs.{iface}<{method.ComponentTypes}>.Merge<TSelf>(ref TSelf job, in TSelf chunk)\n        {{\n");
             sb.Append($"            ref var into = ref {unsafeType}.As<TSelf, {job}>(ref job);\n");
             sb.Append($"            ref var part = ref {unsafeType}.As<TSelf, {job}>(ref {unsafeType}.AsRef(in chunk));\n");
-            foreach (int i in reductions)
-                sb.Append($"            into.a{i}.Value = {method.Parameters[i].Type}.Combine(into.a{i}.Value, part.a{i}.Value);\n");
-            foreach (int i in emits)
-                sb.Append($"            global::EasyEcs.Emit<{method.Parameters[i].Type}>.Join(into.o{i}, ref part.e{i});\n");
+            MergeLines(sb, method, "into", "part");
             sb.Append("        }\n");
         }
 
@@ -688,12 +722,15 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             return;
         }
 
-        var chain = method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"))
-            .Concat(AnyCalls("WithAny", method.WithAny, "()")).Concat(method.Changed.Select(t => $".Changed<{t}>(0)")).Concat(method.Removed.Select(t => $".Removed<{t}>(0)"))
-            .Concat(AnyCalls("ChangedAny", method.ChangedAny, "(0)")).Concat(AnyCalls("RemovedAny", method.RemovedAny, "(0)"));
         // Attribute type arguments cannot name type parameters (CS8968): the filter is one field, even for a generic method.
-        sb.Append($"    internal static readonly global::EasyEcs.QueryFilter {method.Name}Filter{number} = global::EasyEcs.QueryFilter.Create(){string.Concat(chain)};\n\n");
+        sb.Append($"    internal static readonly global::EasyEcs.QueryFilter {method.Name}Filter{number} = {FilterChain(method)};\n\n");
     }
+
+    /// <summary>The filter of <paramref name="method"/> as the expression that builds it.</summary>
+    private static string FilterChain(ForEachModel method) => "global::EasyEcs.QueryFilter.Create()" + string.Concat(
+        method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"))
+            .Concat(AnyCalls("WithAny", method.WithAny, "()")).Concat(method.Changed.Select(t => $".Changed<{t}>(0)")).Concat(method.Removed.Select(t => $".Removed<{t}>(0)"))
+            .Concat(AnyCalls("ChangedAny", method.ChangedAny, "(0)")).Concat(AnyCalls("RemovedAny", method.RemovedAny, "(0)")));
 
     /// <summary>
     /// The vector loops of a method <see cref="Kernel"/> translated: each component's lane field as a ref of the lane
@@ -1000,6 +1037,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// </summary>
         public bool OutOfLine { get; init; }
 
+        /// <summary>What pass fusion knows of a system's method (<see cref="Generator.Fusion"/>); null outside a system.</summary>
+        public FusionSide? Fusion { get; init; }
+
         /// <summary>
         /// Changes no structure (on one thread) and takes a Maybe, a Mut, a Reduce or a caller's value by ref: its job walks
         /// runs of rows, finding each optional column once per run (a presence bit per row), stamping a Mut's writes by row
@@ -1098,6 +1138,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
             bool stable = Symbols.IsStable(method, syntax, model);
             bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model) == null;
+            bool identifies = Symbols.OnlyIdentifies(method, syntax, model);
                         // Declaration order by member index: a text position would change (and re-emit the file) on any edit above it.
             int order = method.ContainingType.GetMembers().IndexOf(method);
             string? scalar = null; // why the method runs scalar; a [ForEntity] method has no loop to explain
@@ -1114,7 +1155,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 // A public entry point names only public types: its context parameters' and its constraints'.
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
                     && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
-                    Slices = Symbols.Slices(method), ChunkRows = Symbols.ChunkRows(method), Identifies = Symbols.OnlyIdentifies(method, syntax, model),
+                    Slices = Symbols.Slices(method), ChunkRows = Symbols.ChunkRows(method), Identifies = identifies,
                     One = Symbols.IsForEntity(method), Consume = Symbols.IsConsume(method),
                     // Kernel.Vectorize decides alone (static, stable, its body; in parallel too): the analyzer reports its reasons.
                     // One entity has no run of rows to vectorize.
@@ -1131,6 +1172,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     }, ct, out scalar),
                     Scalar = scalar ?? "",
                     OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LoopsOrCalls(syntax),
+                    Fusion = outside ? null : FusionSide.Of(method, stable, identifies, parallel),
                 };
         }
 
@@ -1231,6 +1273,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// <c>TryGetSystem</c>, <c>[UpdateBefore&lt;...&gt;]</c> / <c>[UpdateAfter&lt;...&gt;]</c>): of this assembly's
     /// systems, or of a referenced assembly's public one through the code its [GenericSystemCode] names.
     /// </summary>
+    /// <summary>A pair of systems the set declares as one walk: both by name, and the code that runs it.</summary>
+    private sealed record SetFusion(string First, string Second, string Code);
+
     private sealed record SetEntry(string System, string Code)
     {
         private static readonly HashSet<string> Takers = ["AddSystem", "RemoveSystem", "HasSystem", "System", "TryGetSystem",

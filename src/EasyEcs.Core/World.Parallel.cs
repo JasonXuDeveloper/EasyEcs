@@ -97,7 +97,7 @@ public sealed partial class World
         {
             if (runner.TryRun(stage, systems.Length, out _)) return;
             foreach (var segment in stage.Segments) // an update from inside a running stage: one system after the other
-                segment.Set.Run(this, systems.AsSpan(segment.Start, segment.Count), update, default);
+                segment.Set.Run(this, systems.AsSpan(segment.Start, segment.Count), update, default, default);
         }
         finally
         {
@@ -296,7 +296,7 @@ public sealed partial class World
         {
             var slot = Systems[index];
             ref var row = ref World.SystemRows[slot.Index];
-            if (row.Version == slot.Version && row.Code is { } code) code.Set.Run(World, Systems.AsSpan(index, 1), Update, default);
+            if (row.Version == slot.Version && row.Code is { } code) code.Set.Run(World, Systems.AsSpan(index, 1), Update, default, default);
         }
     }
 

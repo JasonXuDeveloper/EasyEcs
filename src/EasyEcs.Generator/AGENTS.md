@@ -25,7 +25,13 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              methods in declaration order; [UpdateInterval] -> its Interval / Phase), and per
                              assembly the set __EasyEcsSystems: one Add per system and per closed generic system any
                              API names (AddSystem<G<P>>, [UpdateAfter<G<P>>], ...), a switch per hook; no system
-                             needs partial, its methods are reached through UnsafeAccessor)
+                             needs partial, its methods are reached through UnsafeAccessor);
+                             SystemGenerator.Fusion.cs: pass fusion, consecutive [ForEach] methods of a system as one
+                             walk (one fused job per group: per row, per block of FusedBlock rows, per word of a
+                             masked walk) and pairs of systems declared or ordered one after the other as one job
+                             (__A__B_Fusion, run by the set's RunFused switch when both are adjacent, enabled and due)
+Fusion.cs                    the fusion rule read once for the generator and the analyzer (FusionSide: what a method
+                             reads, writes, filters and blocks it; Fusion.Problem: why two passes cannot share a walk)
 SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(values..., static (ref P p, ...) => ...)
                              -> an interceptor per call ([InterceptsLocation], one file per source file in the namespace
                              EasyEcs.Generated) running the job a [ForEach] method with the lambda's parameters and body
@@ -51,7 +57,7 @@ ComponentGenerator.cs        C# 14 extension members per component / singleton: 
                              item.X per Query<T1..Tn> shape the code calls, TypeRegistry registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                              lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
 EasyEcsAnalyzer.cs           EECS002-006, EECS009-024, EECS035-036, EECS054, EECS056, EECS070 and EECS072-073 (the
-                             declaration and [ForEach] rules of the range EECS002-089 that are not performance rules;
+                             declaration and [ForEach] rules of the range EECS002-102 that are not performance rules;
                              generators never report diagnostics)
 EasyEcsAnalyzer.Systems.cs   EECS007-008, EECS074-077 and EECS090: systems as declarations (state in a static field, a
                              reach into another system; an [EcsSystem] that is no ref struct, an instance member, a hook
@@ -120,6 +126,8 @@ EasyEcsAnalyzer.Views.cs     EECS098-101: an invalid [View], a component reached
                              entity.AsX()); EECS053's check in view members
 EasyEcsAnalyzer.Records.cs   EECS092 (compilation end): an Emit<T> whose Emitted<T> no code of the compilation clears
                              (a public record type of a library is left to the assemblies using it)
+EasyEcsAnalyzer.Fusion.cs    EECS093-094: two passes over the same rows that almost share one walk (the reason
+                             Fusion.Problem gives), a FusionMode.Require method left apart (Error)
 Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)
 Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race;
                              the writes of code on several threads that reach shared memory (EECS060, EECS061)
