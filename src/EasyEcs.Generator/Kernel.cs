@@ -93,7 +93,13 @@ internal sealed partial class Kernel
     /// <param name="Body">Loads (one vector per component) and the method's statements for one field.</param>
     /// <param name="Stores">The stores of the components the method writes.</param>
     /// <param name="Fields">The fields of every component: lanes per row.</param>
-    internal sealed record FlatCode(string Setup, string Body, string Stores, int Fields);
+    /// <param name="MaskedBody">
+    /// <paramref name="Body"/> for the lanes of a word of rows of which some pass (<c>__pass</c>, each row's bit in its
+    /// <paramref name="Fields"/> lanes: <c>Interleaved.Lanes32(pass, row, fields)</c>), the loaded values of the columns the
+    /// method writes kept; null when <paramref name="Fields"/> is 3 (a vector's lanes then start inside a row).
+    /// </param>
+    /// <param name="MaskedStores">The stores of a masked body: the lanes <c>__pass</c> leaves out get the values loaded.</param>
+    internal sealed record FlatCode(string Setup, string Body, string Stores, int Fields, string? MaskedBody, string? MaskedStores);
 
     /// <summary>
     /// The vector type the loop names, as a token: <c>SystemGenerator.EmitVectorLoop</c> writes the Vector512 loop and the
@@ -700,7 +706,7 @@ internal sealed partial class Kernel
         foreach (var statement in statements)
         {
             int field = -1;
-            bool every = false; // position = new Position(position.Value + velocity.Value * dt): each lane alike
+            bool every = false, mixed = false; // position = new Position(position.Value + velocity.Value * dt): each lane alike
             foreach (var op in statement.DescendantsAndSelf())
             {
                 if (main.Covers(op) is > 0 and var covered)
@@ -710,10 +716,13 @@ internal sealed partial class Kernel
                     continue;
                 }
                 if (main.LaneOf(op) is not { } lane) continue;
-                if (field >= 0 && lane.Field != field) return null; // a statement that mixes fields
+                mixed |= field >= 0 && lane.Field != field;
                 field = lane.Field;
             }
-            if (every && field >= 0 || !every && field < 0) return null;
+            // A statement of one field goes to its group; one that writes every lane of a struct (position = new
+            // Position(position.X + velocity.X, position.Y + velocity.Y)) to every group, where each field's
+            // translation reads only that field (a read of another fails it: new Position(position.Y, position.X)).
+            if (!every && (field < 0 || mixed)) return null;
             if (every) foreach (var group in groups) group.Add(statement);
             else groups[field].Add(statement);
         }
@@ -744,12 +753,19 @@ internal sealed partial class Kernel
 
         var loads = new StringBuilder();
         var stores = new StringBuilder();
+        var kept = new StringBuilder();
+        var masked = new StringBuilder();
+        string column = Elem(type);
         foreach (var (index, _, _) in first!._components.Values.OrderBy(c => c.Index))
         {
             loads.Append($"var __c{index}_0 = {V}.LoadUnsafe(ref e{index}, (nuint)i);\n");
-            if (first._written.Contains(index)) stores.Append($"{V}.StoreUnsafe(__c{index}_0, ref e{index}, (nuint)i);\n");
+            if (!first._written.Contains(index)) continue;
+            stores.Append($"{V}.StoreUnsafe(__c{index}_0, ref e{index}, (nuint)i);\n");
+            kept.Append($"var __o{index} = __c{index}_0;\n");
+            masked.Append($"{V}.StoreUnsafe({V}.ConditionalSelect({As(main._mask, column, "__pass")}, __c{index}_0, __o{index}), ref e{index}, (nuint)i);\n");
         }
-        return new FlatCode(setup!, loads + body, stores.ToString(), fields);
+        bool words = fields != 3 && main._size >= 4; // narrow lanes have no lane masks of their own (their masked words run the method)
+        return new FlatCode(setup!, loads + body, stores.ToString(), fields, words ? loads.ToString() + kept + body : null, words ? masked.ToString() : null);
     }
 
     /// <summary>

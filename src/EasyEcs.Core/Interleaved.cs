@@ -77,6 +77,41 @@ public static class Interleaved
     }
 
     /// <summary>
+    /// <see cref="Lanes32(ulong, int)"/> for a loop over flat lanes, <paramref name="fields"/> (1, 2 or 4) lanes per row:
+    /// all bits set in lane j when row <c>first + j / fields</c> passes.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<int> Lanes32(ulong rows, int first, int fields)
+    {
+        var bits = fields == 2 ? Masks.Bits32By2 : fields == 4 ? Masks.Bits32By4 : Masks.Bits32;
+        return Vector.Equals(new Vector<int>((int)(rows >> first)) & bits, bits);
+    }
+
+    /// <summary><see cref="Lanes32(ulong, int, int)"/> for lanes of 8 bytes.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<long> Lanes64(ulong rows, int first, int fields)
+    {
+        var bits = fields == 2 ? Masks.Bits64By2 : fields == 4 ? Masks.Bits64By4 : Masks.Bits64;
+        return Vector.Equals(new Vector<long>((long)(rows >> first)) & bits, bits);
+    }
+
+    /// <summary><see cref="Lanes32(ulong, int, int)"/> for <c>Vector512&lt;int&gt;</c>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector512<int> Lanes32In512(ulong rows, int first, int fields)
+    {
+        var bits = fields == 2 ? Masks.Bits32x16By2 : fields == 4 ? Masks.Bits32x16By4 : Masks.Bits32x16;
+        return Vector512.Equals(Vector512.Create((int)(rows >> first)) & bits, bits);
+    }
+
+    /// <summary><see cref="Lanes32(ulong, int, int)"/> for <c>Vector512&lt;long&gt;</c>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector512<long> Lanes64In512(ulong rows, int first, int fields)
+    {
+        var bits = fields == 2 ? Masks.Bits64x8By2 : fields == 4 ? Masks.Bits64x8By4 : Masks.Bits64x8;
+        return Vector512.Equals(Vector512.Create((long)(rows >> first)) & bits, bits);
+    }
+
+    /// <summary>
     /// The last <paramref name="count"/> rows of a run (fewer than a vector's) copied from <paramref name="rows"/> into
     /// this thread's copy of 64 rows of <typeparamref name="T"/>, which a vector loop then reads whole: a loop whose rows
     /// must all take the vector form (it marks rows for a change after the pass) runs its last vector there, the lanes
@@ -99,25 +134,32 @@ public static class Interleaved
         [ThreadStatic] public static T[] Rows;
     }
 
-    /// <summary>Lane j holds bit j: the row of each lane in a word's bits.</summary>
+    /// <summary>
+    /// Lane j holds bit j: the row of each lane in a word's bits. <c>By2</c> / <c>By4</c>: lane j holds bit
+    /// <c>j / 2</c> / <c>j / 4</c>, the row of a lane of a flat loop over rows of 2 or 4 fields.
+    /// </summary>
     private static class Masks
     {
-        public static readonly Vector<int> Bits32 = Make32();
-        public static readonly Vector<long> Bits64 = Make64();
-        public static readonly Vector512<int> Bits32x16 = Vector512.Create(1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768);
-        public static readonly Vector512<long> Bits64x8 = Vector512.Create(1L, 2, 4, 8, 16, 32, 64, 128);
+        public static readonly Vector<int> Bits32 = Make32(1), Bits32By2 = Make32(2), Bits32By4 = Make32(4);
+        public static readonly Vector<long> Bits64 = Make64(1), Bits64By2 = Make64(2), Bits64By4 = Make64(4);
+        public static readonly Vector512<int> Bits32x16 = Vector512.Create(1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768),
+            Bits32x16By2 = Vector512.Create(1, 1, 2, 2, 4, 4, 8, 8, 16, 16, 32, 32, 64, 64, 128, 128),
+            Bits32x16By4 = Vector512.Create(1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 4, 4, 8, 8, 8, 8);
+        public static readonly Vector512<long> Bits64x8 = Vector512.Create(1L, 2, 4, 8, 16, 32, 64, 128),
+            Bits64x8By2 = Vector512.Create(1L, 1, 2, 2, 4, 4, 8, 8),
+            Bits64x8By4 = Vector512.Create(1L, 1, 1, 1, 2, 2, 2, 2);
 
-        private static Vector<int> Make32()
+        private static Vector<int> Make32(int fields)
         {
             Span<int> bits = stackalloc int[Vector<int>.Count];
-            for (int j = 0; j < bits.Length; j++) bits[j] = 1 << j;
+            for (int j = 0; j < bits.Length; j++) bits[j] = 1 << (j / fields);
             return new Vector<int>(bits);
         }
 
-        private static Vector<long> Make64()
+        private static Vector<long> Make64(int fields)
         {
             Span<long> bits = stackalloc long[Vector<long>.Count];
-            for (int j = 0; j < bits.Length; j++) bits[j] = 1L << j;
+            for (int j = 0; j < bits.Length; j++) bits[j] = 1L << (j / fields);
             return new Vector<long>(bits);
         }
     }
