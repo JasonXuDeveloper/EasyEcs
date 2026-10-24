@@ -56,7 +56,8 @@ The analyzer computes the fix as diagnostic properties; a `CodeFixTests` case co
 Behaviour; a regression test that fails before each bug fix; edge cases (stale and recycled ids, empty tables, structural changes mid-pass, retired entities,
 exceptions mid-pass); the allocation test (0 B in steady state); bit-identical results at 1 and 4 threads for
 parallel code; equivalence with the scalar method for vector loops; the AOT test when the feature reaches
-generics or reflection (`tests/EasyEcs.Aot`).
+generics or reflection (`tests/EasyEcs.Aot`); for each new or changed analyzer rule and code fix, its tests and edge
+cases (`audit-analyzer`, "Tests: every rule, every edge").
 
 ## 6. Benchmarks (`audit-perf` has the method)
 

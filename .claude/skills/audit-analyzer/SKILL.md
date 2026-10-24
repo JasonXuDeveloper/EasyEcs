@@ -67,9 +67,30 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
 - Patterns in `samples/`, `BattleServer.cs`, `WorldSimulation.cs`, templates and docs examples that a rule should flag
   but does not (exemplary code reports nothing).
 
+## Tests: every rule, every edge
+
+The analyzer is tested like the runtime: `dotnet test` runs its tests with the others, and a rule without them is not
+done. Each round checks coverage per rule, not in total:
+
+- **Count per id**: every `EECS0xx` descriptor appears in `tests/EasyEcs.UnitTest` in at least one test that expects
+  it and one that expects it not to fire; a rule with a code fix has a `CodeFixTests` case per form the fix rewrites.
+  A rule mentioned once is a finding (grep each id over the tests).
+- **Edge cases per rule**, each a test where it applies: generic components and systems; `ref readonly`, `in`, `ref`,
+  `Mut<T>` and `Maybe<T>` / `ReadOnlyMaybe<T>` parameters; lambdas and local functions; partial and nested types;
+  generated members against generic calls (`entity.Health` vs `Get<Health>()`); code in another assembly or
+  `[GeneratedCode]`; loops with `break` / `return` / `continue`; conditional and ternary paths; the code right after a
+  structural change; explicit and `var` types; `#if` / preprocessor; an empty body; attributes on the wrong target;
+  the rule's threshold just below and just above (sizes, counts, cadence).
+- **Pairs**: every pair of rules that can fire on one snippet is pinned in `GeneratorTests.OneMistakeIsReportedOnce`.
+- **Messages and fixes**: the message's placeholders filled (no `{0}` left), the fix's output compiles and reports
+  nothing, and running the fix twice changes nothing.
+- **Exemplary code reports nothing**: a test compiles `samples/`, `BattleServer.cs` and the docs fences (DocCheck)
+  with no EasyEcs warning.
+
 ## Done means
 
-- Tests: positive and negative cases per rule, false-positive guards, a code-fix test per fix, the overlap test.
+- Tests: positive and negative cases per rule, the edge cases above that apply, false-positive guards, a code-fix test
+  per fix, the overlap test.
 - Docs (to-dos for the docs pass): `analyzer.mdx` + `.zh` (section, table row, fix line), changelog, a decision for a
   new rule or a dropped idea, `skills/easyecs/SKILL.md` (the public skill), common-mistakes / troubleshooting if users meet it, the
   rule list and EECS range in `src/EasyEcs.Generator/AGENTS.md`.
