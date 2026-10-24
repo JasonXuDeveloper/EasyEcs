@@ -56,6 +56,8 @@ Interleaved.cs               the deinterleaving loads / interleaving stores of g
                              of 2 to 4 fields of one lane type, and the lane masks of the passing rows of a word;
                              LoadTail / StoreTail: the last rows of a run copied into a vector's worth (a loop that
                              marks rows runs them masked)
+LaneMath.cs                  lane functions of generated vector loops .NET has no vector form of: the quotient of
+                             int / uint lanes through doubles (exact), FloatMode.Fast's Log10 / Sinh / Cosh / Tanh of floats
 Lanes.cs                     Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress),
                              for batch methods and CollectIds; Lanes.Bits: a vector loop's lane mask as bits
 MarkedRows.cs                the rows a vector loop marked for one structural change (words of 64 rows per table,

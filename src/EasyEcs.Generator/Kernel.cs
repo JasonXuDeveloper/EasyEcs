@@ -20,9 +20,10 @@ namespace EasyEcs.Generator;
 /// <c>ConditionalSelect</c>, a <c>return</c> clears its lanes. The rows left after the last whole vector run the method
 /// itself, so the results are those of the scalar loop, bit for bit: every operation used is the same IEEE operation per
 /// lane (no reassociation, no fused multiply-add the method did not write), integer arithmetic wraps both ways, and
-/// conversions saturate like C#'s. A call that would throw for some lane (<c>Math.Clamp</c> with its min above its max)
-/// sends the rows of its vector to the method itself. Anything else (other calls, integer division, checked arithmetic,
-/// <c>Math.Abs</c> of an integer) leaves the method scalar, as written. Lanes of 1 and 2 bytes (byte, sbyte, short,
+/// conversions saturate like C#'s. An operation that would throw for some lane (<c>Math.Clamp</c> with its min above its
+/// max, an integer divided by 0, <c>Math.Abs(int.MinValue)</c>) sends the rows of its vector to the method itself.
+/// Anything else (other calls, checked arithmetic, the integer division of 8-byte lanes by what is not a power of two)
+/// leaves the method scalar, as written. Lanes of 1 and 2 bytes (byte, sbyte, short,
 /// ushort), whose arithmetic C# computes in int, are Kernel.Narrow.cs.
 /// </summary>
 internal sealed partial class Kernel
@@ -1633,9 +1634,9 @@ internal sealed partial class Kernel
             return WideCompare(kind, WideOf(leftOp), WideOf(right), leftOp, right);
         bool lanes = IsLane(leftType) && IsLane(right.Type) && SymbolEqualityComparer.Default.Equals(leftType, right.Type);
         bool masks = IsBool(leftType) && IsBool(right.Type);
-        if (masks && _optionals.Count > 0 && _half < 0 && kind is BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.ConditionalOr)
+        if (masks && (_optionals.Count > 0 || MayThrow(right)) && _half < 0 && kind is BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.ConditionalOr)
         {
-            // The right side reads under the lanes the left lets through (m.HasValue && m.Value.X > 0).
+            // The right side reads under the lanes the left lets through (m.HasValue && m.Value.X > 0, d != 0 && n / d > 1).
             string left = Hold(Expr(leftOp), leftType!);
             Prove(left, leftOp);
             string? active = _active;
@@ -1645,8 +1646,10 @@ internal sealed partial class Kernel
             return $"({left} {(kind == BinaryOperatorKind.ConditionalAnd ? "&" : "|")} {other})";
         }
         if (kind is BinaryOperatorKind.Divide or BinaryOperatorKind.Remainder && lanes && !IsFloat(type))
-            throw new Unsupported("integer division is not supported (it throws on 0)");
-        if (kind == BinaryOperatorKind.Remainder) throw new Unsupported("'%' is not supported (no vector remainder)");
+            return IntegerDivision(kind == BinaryOperatorKind.Remainder, leftOp, right, type!);
+        if (kind == BinaryOperatorKind.Remainder) throw new Unsupported("'%' of floats is not supported (no vector remainder)");
+        if (kind == BinaryOperatorKind.Divide && lanes && IsFloat(type) && Reciprocal(right, type!) is { } reciprocal)
+            return $"({Expr(leftOp)} * {reciprocal})";
         if (!lanes && !masks) throw new Unsupported($"operator {Operator(kind)} on {leftType?.ToDisplayString()} and {right.Type?.ToDisplayString()} is not supported");
         string l = Expr(leftOp), r = Expr(right);
         return kind switch
@@ -1668,6 +1671,94 @@ internal sealed partial class Kernel
             BinaryOperatorKind.GreaterThanOrEqual when lanes => Compare("GreaterThanOrEqual", l, r, leftType!),
             _ => throw new Unsupported($"operator {Operator(kind)} on {leftType?.ToDisplayString()} is not supported"),
         };
+    }
+
+    /// <summary>
+    /// x / y or x % y of integer lanes, as C# computes them: the quotient truncated toward zero, the remainder with the
+    /// sign of x. By a constant power of two, shifts: a negative x first adds 2^k - 1, so the shift rounds toward zero,
+    /// and the remainder is x less its rounded-down multiple of 2^k. By any other divisor, lanes of 4 bytes divide as
+    /// doubles, exactly (<c>EasyEcs.LaneMath</c>'s remarks); a lane that would throw (a divisor of 0, int.MinValue / -1)
+    /// sends its vector's rows to the method itself (which throws as written) and divides by 1 in the meantime.
+    /// </summary>
+    private string IntegerDivision(bool remainder, IOperation leftOp, IOperation right, ITypeSymbol type)
+    {
+        string what = remainder ? "'%'" : "integer division";
+        if (_half >= 0) throw new Unsupported($"{what} of lanes of two sizes is not supported");
+        int bits = SizeOf(type) * 8;
+        bool signed = IsSigned(type);
+        string zero = $"{VecOf(type)}.Zero";
+        string MinValue() => Broadcast(bits == 32 ? "int.MinValue" : "long.MinValue", type);
+        string Quotient(string x, string y) => $"global::EasyEcs.LaneMath.Quotient({x}, {y})";
+        string x = Hold(Expr(leftOp), type);
+        if (right.ConstantValue is { HasValue: true, Value: { } constant })
+        {
+            long d = signed ? System.Convert.ToInt64(constant, CultureInfo.InvariantCulture) : unchecked((long)System.Convert.ToUInt64(constant, CultureInfo.InvariantCulture));
+            ulong magnitude = signed && d < 0 ? unchecked((ulong)-(d + 1) + 1) : unchecked((ulong)d);
+            if ((magnitude & (magnitude - 1)) == 0)
+            {
+                int k = 0;
+                while (magnitude >> k != 1) k++;
+                if (k == 0 && d == 1) return remainder ? zero : x;
+                if (k == 0) // -1: int.MinValue / -1 throws, and so does int.MinValue % -1
+                {
+                    Bail(Compare("Equals", x, MinValue(), type));
+                    return remainder ? zero : $"({zero} - {x})";
+                }
+                if (!signed)
+                    return remainder ? $"({x} & {Broadcast(Literal(System.Convert.ChangeType(magnitude - 1, ClrType(type), CultureInfo.InvariantCulture), type), type)})"
+                        : $"{V}.ShiftRightLogical({x}, {k})";
+                // x + (2^k - 1) where x is negative: the sign spread over the low k bits
+                string rounded = Hold($"({x} + {V}.ShiftRightLogical({V}.ShiftRightArithmetic({x}, {bits - 1}), {bits - k}))", type);
+                if (remainder)
+                {
+                    object multiples = bits == 32 ? unchecked((int)-(1L << k)) : (object)unchecked(-(1L << k));
+                    return $"({x} - ({rounded} & {Broadcast(Literal(multiples, type), type)}))";
+                }
+                string quotient = $"{V}.ShiftRightArithmetic({rounded}, {k})";
+                return d < 0 ? $"({zero} - {quotient})" : quotient;
+            }
+            if (bits != 32) throw new Unsupported($"{what} of {type.ToDisplayString()} lanes by {Text(right)}, not a power of two, is not supported (no exact vector form for lanes of 8 bytes)");
+            string divisor = Expr(right);
+            string q = remainder ? Hold(Quotient(x, divisor), type) : Quotient(x, divisor);
+            return remainder ? $"({x} - ({q} * {divisor}))" : q;
+        }
+        if (bits != 32) throw new Unsupported($"{what} of {type.ToDisplayString()} lanes by a value that is not a constant power of two is not supported (no exact vector form for lanes of 8 bytes)");
+        string y = Hold(Expr(right), type);
+        string bad = Compare("Equals", y, zero, type);
+        if (signed) bad = $"({bad} | ({Compare("Equals", x, MinValue(), type)} & {Compare("Equals", y, Broadcast("-1", type), type)}))";
+        bad = Hold(bad, type);
+        Bail(bad);
+        string safe = Hold($"{V}.ConditionalSelect({MaskAs(bad, type)}, {VecOf(type)}.One, {y})", type);
+        if (!remainder) return Quotient(x, safe);
+        string quotientOfSafe = Hold(Quotient(x, safe), type);
+        return $"({x} - ({quotientOfSafe} * {safe}))";
+    }
+
+    /// <summary>The lanes of <paramref name="mask"/> that are evaluated (<see cref="_active"/>) send their vector's rows to the method itself.</summary>
+    private void Bail(string mask)
+    {
+        _bails = _live = true;
+        string lanes = _active == null ? "__live" : $"(__live & {_active})";
+        _body.Append($"__bail |= ({lanes} & {mask}) != {Vec(_mask)}.Zero;\n");
+    }
+
+    /// <summary>
+    /// The reciprocal of a constant float divisor, broadcast, where x * (1 / d) is x / d in every lane: d a power of two
+    /// whose reciprocal is a float (double) too, so both are the one rounding of the same real number. Under
+    /// FloatMode.Fast, any finite constant other than 0 (within an ulp). Otherwise null: the lanes divide.
+    /// </summary>
+    private string? Reciprocal(IOperation divisor, ITypeSymbol type)
+    {
+        if (divisor.ConstantValue is not { HasValue: true, Value: { } constant }) return null;
+        double d = System.Convert.ToDouble(constant, CultureInfo.InvariantCulture);
+        if (double.IsNaN(d) || double.IsInfinity(d) || d == 0) return null;
+        bool single = type.SpecialType == SpecialType.System_Single;
+        long bits = System.BitConverter.DoubleToInt64Bits(d);
+        double r = 1 / d;
+        bool power = (bits & 0xFFFFFFFFFFFFFL) == 0 && ((bits >> 52) & 0x7FF) != 0; // a normal double with no fraction bits
+        bool exact = power && !double.IsInfinity(r) && r != 0 && (!single || (double)(float)r == r);
+        if (!exact && !_fast) return null;
+        return Broadcast(Literal(single ? (float)r : (object)r, type), type);
     }
 
     /// <summary>
@@ -1733,8 +1824,46 @@ internal sealed partial class Kernel
         {
             case "Min" or "Max" when m.Parameters.Length == 2:     // IEEE 754:2019 like Math.Min / Max (NaN, -0)
                 return $"{V}.{m.Name}({Arg(0)}, {Arg(1)})";
-            case "Abs" when single && isFloat:                     // Math.Abs of int.MinValue throws: no integers
+            case "Abs" when single && isFloat:
                 return $"{V}.Abs({Arg(0)})";
+            case "Abs" when single && type.SpecialType is SpecialType.System_Int32 or SpecialType.System_Int64:
+            {
+                // Math.Abs(int.MinValue) throws: that lane sends its rows to the method
+                string x = Hold(Arg(0), type);
+                Bail(Compare("Equals", x, Broadcast(type.SpecialType == SpecialType.System_Int32 ? "int.MinValue" : "long.MinValue", type), type));
+                return $"{V}.Abs({x})";
+            }
+            case "CopySign" when m.Parameters.Length == 2 && type.SpecialType is SpecialType.System_Int32 or SpecialType.System_Int64:
+            {
+                // |value| with sign's sign; MinValue made positive throws (its own magnitude with a negative sign is itself)
+                string x = Hold(Arg(0), type), negative = Hold(Compare("LessThan", Arg(1), $"{VecOf(type)}.Zero", type), m.Parameters[0].Type);
+                Bail($"({Compare("Equals", x, Broadcast(type.SpecialType == SpecialType.System_Int32 ? "int.MinValue" : "long.MinValue", type), type)} & ~{negative})");
+                string magnitude = Hold($"{V}.Abs({x})", type);
+                return $"{V}.ConditionalSelect({MaskAs(negative, type)}, {VecOf(type)}.Zero - {magnitude}, {magnitude})";
+            }
+            case "Sign" when single && type.SpecialType == SpecialType.System_Int32 && m.Parameters[0].Type.SpecialType is SpecialType.System_Int32 or SpecialType.System_Single:
+            {
+                // -1, 0 or 1: the masks are all bits set (-1) where true, so (x < 0) - (x > 0) as integers; Sign(NaN) throws
+                var of = m.Parameters[0].Type;
+                string x = Hold(Arg(0), of), zero = $"{VecOf(of)}.Zero";
+                if (IsFloat(of)) Bail($"(~{Compare("Equals", x, x, of)})");
+                return $"({As(_mask, Elem(type), Compare("LessThan", x, zero, of))} - {As(_mask, Elem(type), Compare("GreaterThan", x, zero, of))})";
+            }
+            case "Pow" when m.Parameters.Length == 2 && isFloat:
+                return Pow(call, type);
+            case "Log10" when single && type.SpecialType == SpecialType.System_Single && _fast:
+                return $"global::EasyEcs.LaneMath.Log10({Arg(0)})"; // ln x * log10(e) in doubles: within an ulp
+            case "Log10" when single && isFloat && _fast:                // ln x * log10(e): within a few ulps
+                return $"({V}.Log({Arg(0)}) * {Broadcast("0.43429448190325182765d", type)})";
+            case "Tan" when single && isFloat && _fast:
+            {
+                string x = Hold(Arg(0), type);
+                return $"({V}.Sin({x}) / {V}.Cos({x}))";
+            }
+            case "Sinh" or "Cosh" or "Tanh" when single && type.SpecialType == SpecialType.System_Single && _fast:
+                return $"global::EasyEcs.LaneMath.{m.Name}({Arg(0)})"; // through double Exp
+            case "Tan" or "Log10" or "Sinh" or "Cosh" or "Tanh" when single && isFloat && !_fast && (m.Name is "Tan" or "Log10" || type.SpecialType == SpecialType.System_Single):
+                throw new Unsupported($"{m.ContainingType.Name}.{m.Name} is not bit-exact in vector form: set FloatMode = FloatMode.Fast");
             case "Sqrt" when single && isFloat:
                 return $"{SquareRoot}{Arg(0)})";
             case "Floor" or "Ceiling" or "Truncate" when single && isFloat:
@@ -1775,6 +1904,55 @@ internal sealed partial class Kernel
     }
 
     /// <summary>
+    /// Math.Pow by a constant exponent: Pow(x, 1) is x and Pow(x, 0) is 1 for every number (a NaN runs the method);
+    /// under FloatMode.Fast, 2, 3 and 4 are products, -1 and -2 a division, and 0.5 a square
+    /// root with pow's two exceptions (Pow(-0, 0.5) is +0, Pow(-Infinity, 0.5) is +Infinity).
+    /// </summary>
+    private string Pow(IInvocationOperation call, ITypeSymbol type)
+    {
+        var m = call.TargetMethod;
+        string X() => Expr(call.Arguments.First(a => a.Parameter?.Ordinal == 0).Value);
+        var exponent = call.Arguments.First(a => a.Parameter?.Ordinal == 1).Value;
+        double? e = exponent.ConstantValue is { HasValue: true, Value: { } c } ? System.Convert.ToDouble(c, CultureInfo.InvariantCulture) : null;
+        string one = $"{VecOf(type)}.One";
+        if (e is 0 or 1)
+        {
+            // pow(x, 1) is x and pow(x, 0) is 1 for every number; a NaN's result (its sign, its payload, a signaling
+            // NaN's) is the C library's, so a NaN lane sends its rows to the method
+            string x0 = Hold(X(), type);
+            Bail($"(~{Compare("Equals", x0, x0, type)})");
+            return e == 1 ? x0 : one;
+        }
+        if (!_fast)
+            throw new Unsupported(e is 2 or 3 or 4 or -1 or -2 or 0.5
+                ? $"{m.ContainingType.Name}.{m.Name} is not bit-exact in vector form except by 0 and 1: set FloatMode = FloatMode.Fast"
+                : $"{m.ContainingType.Name}.{m.Name} has no vector form in .NET 10 but by a constant 0, 1 (and under FloatMode.Fast 2, 3, 4, -1, -2 or 0.5)");
+        if (e is not (2 or 3 or 4 or -1 or -2 or 0.5))
+            throw new Unsupported($"{m.ContainingType.Name}.{m.Name} has no vector form in .NET 10 but by a constant 0, 1, 2, 3, 4, -1, -2 or 0.5");
+        string x = Hold(X(), type);
+        switch (e)
+        {
+            case 2: return $"({x} * {x})";
+            case 3: return $"(({x} * {x}) * {x})";
+            case 4:
+            {
+                string square = Hold($"({x} * {x})", type);
+                return $"({square} * {square})";
+            }
+            case -1: return $"({one} / {x})";
+            case -2:
+            {
+                // (1 / x)^2, not 1 / x^2: x^2 of a small x is subnormal (bits lost) where 1 / x is not
+                string reciprocal = Hold($"({one} / {x})", type);
+                return $"({reciprocal} * {reciprocal})";
+            }
+            default:
+                string infinity = Broadcast(type.SpecialType == SpecialType.System_Single ? "float.PositiveInfinity" : "double.PositiveInfinity", type);
+                return $"{V}.ConditionalSelect({MaskAs(Compare("Equals", x, $"(-{infinity})", type), type)}, {infinity}, {SquareRoot}{x} + {VecOf(type)}.Zero))";
+        }
+    }
+
+    /// <summary>
     /// Math.Clamp: the min when the value is below it, else the max when above it, else the value (NaN stays NaN). It
     /// throws when min is above max: bounds known to be in order need nothing, bounds that may not be make a lane where
     /// they are not send its vector's rows to the method itself (which throws as written).
@@ -1809,6 +1987,11 @@ internal sealed partial class Kernel
         return name;
     }
 
+    /// <summary>Whether <paramref name="op"/> holds an operation that throws for some lanes (they send their rows to the method).</summary>
+    private static bool MayThrow(IOperation op) => op.DescendantsAndSelf().Any(o =>
+        o is IBinaryOperation { OperatorKind: BinaryOperatorKind.Divide or BinaryOperatorKind.Remainder } b && !IsFloat(b.Type)
+        || o is IInvocationOperation { TargetMethod: { Name: "Clamp" or "Abs" or "CopySign" or "Sign" } m } && IsMath(m));
+
     private static bool IsMath(IMethodSymbol m) =>
         m.IsStatic && m.ContainingType is { ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true } } t
         && (t.Name is "Math" or "MathF" || IsLaneType(t));
@@ -1816,14 +1999,17 @@ internal sealed partial class Kernel
     // ---------------- uniform values ----------------
 
     /// <summary>
-    /// The same in every lane: it reads no component and no kernel local (constants, statics, singletons, context). A
-    /// Math.Clamp is not: it may throw, so it runs per lane, where a bad lane sends its rows to the method.
+    /// The same in every lane: it reads no component and no kernel local (constants, statics, singletons, context). What
+    /// may throw is not (Math.Clamp, integer division, Math.Abs / CopySign / Sign of an integer or a float's sign): it
+    /// runs per lane, where a bad lane sends its rows to the method, so a run without rows throws nothing.
     /// </summary>
     private bool IsUniform(IOperation op) => op switch
     {
         ILocalReferenceOperation or IInstanceReferenceOperation => false,
         IParameterReferenceOperation { Parameter: var p } => _uniformParams.ContainsKey(p),
         IInvocationOperation { TargetMethod.Name: "Clamp" } => false,
+        IBinaryOperation { OperatorKind: BinaryOperatorKind.Divide or BinaryOperatorKind.Remainder } b when !IsFloat(b.Type) => false,
+        IInvocationOperation { TargetMethod: { Name: "Abs" or "CopySign" or "Sign" } m } when !IsFloat(m.ReturnType) => false,
         _ => op.ChildOperations.All(IsUniform),
     };
 
@@ -1897,9 +2083,8 @@ internal sealed partial class Kernel
     /// <summary>The reason <paramref name="op"/> keeps the method scalar, named the way the method writes it.</summary>
     private Unsupported Not(IOperation op) => new(op switch
     {
-        IInvocationOperation { TargetMethod: var m } when IsMath(m) => m.Name is "Abs" or "CopySign" && !IsFloat(m.ReturnType)
-            ? $"{m.ContainingType.Name}.{m.Name} of an integer is not supported (it throws on MinValue)"
-            : IsFloat(m.ReturnType) && m.Name is "Tan" or "Asin" or "Acos" or "Atan" or "Atan2" or "Sinh" or "Cosh" or "Tanh" or "Log10" or "Pow" or "Cbrt"
+        IInvocationOperation { TargetMethod: var m } when IsMath(m) => IsFloat(m.ReturnType) && m.Name is "Asin" or "Acos" or "Atan" or "Atan2" or "Cbrt"
+            || m.ReturnType.SpecialType == SpecialType.System_Double && m.Name is "Sinh" or "Cosh" or "Tanh"
             ? $"{m.ContainingType.Name}.{m.Name} has no vector form in .NET 10"
             : $"{m.ContainingType.Name}.{m.Name}{(m.Parameters.Length > 0 && !m.Parameters.All(p => IsLane(p.Type)) ? $" of {string.Join(", ", m.Parameters.Select(p => p.Type.ToDisplayString()))}" : "")} is not supported",
         IInvocationOperation { TargetMethod: var m } when KnownVector(m.ContainingType) && m.Name is "Dot" or "Length" or "LengthSquared" or "Distance"
