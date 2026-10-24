@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Diagnostics;
@@ -11,8 +12,8 @@ namespace EasyEcs.Generator;
 /// EECS090: a component whose fields split into those its frequent passes touch and those they never touch, wide enough
 /// that the untouched ones cost the passes memory. A pass walks a component's column row by row, so it reads every
 /// byte of each row it visits, whichever fields its method names; moving the cold fields into a component of their
-/// own leaves the frequent passes a column of only the fields they use. The layout stays the user's (D90): the rule
-/// names the fields to move, it does not move them.
+/// own leaves the frequent passes a column of only the fields they use. The layout stays the user's (D90): nothing moves
+/// on its own, the code fix writes the split when the user applies it (the properties of <see cref="SplitFix"/>).
 /// </summary>
 public sealed partial class EasyEcsAnalyzer
 {
@@ -26,7 +27,8 @@ public sealed partial class EasyEcsAnalyzer
         "them walks. Reported at the end of the compilation, for a component of at least 32 bytes whose untouched fields " +
         "are at least half of it. A pass counts as frequent unless its system has [UpdateInterval] above 1, or the method " +
         "visits only changed rows ([Changed<T>], [Removed<T>]) or a slice of them (Slices); a pass that uses the component " +
-        "whole (a copy, a call, a ref local) touches every field. No code fix: the readers of the moved fields change too.",
+        "whole (a copy, a call, a ref local) touches every field. The code fix declares the new component and rewrites " +
+        "every use of the moved fields when it can do so without changing what the code does; otherwise move them by hand.",
         helpLinkUri: Help("EECS090"), customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     /// <summary>
@@ -88,7 +90,7 @@ public sealed partial class EasyEcsAnalyzer
         /// <c>m.Write().X</c>, <c>span[i].X</c>; an auto-property is its backing field), null for a use of the component
         /// whole, and Row false for a use that reads no row (<c>span.Length</c>, <c>maybe.HasValue</c>).
         /// </summary>
-        private static (bool Row, IFieldSymbol? Field) FieldOf(IOperation reference, IParameterSymbol p)
+        internal static (bool Row, IFieldSymbol? Field) FieldOf(IOperation reference, IParameterSymbol p)
         {
             IOperation at = reference;
             if (Symbols.Classify(p) != Symbols.ParamKind.Component)
@@ -147,10 +149,41 @@ public sealed partial class EasyEcsAnalyzer
                 var methods = frequent.Select(p => p.Method).Distinct<IMethodSymbol>(SymbolEqualityComparer.Default)
                     .Select(m => $"{m.ContainingType.Name}.{m.Name}").OrderBy(n => n, System.StringComparer.Ordinal).ToList();
                 string passes = methods.Count == 1 ? $"pass {methods[0]} touches" : $"passes {Names(methods)} touch";
-                context.ReportDiagnostic(Diagnostic.Create(ColdFields, component.Locations.First(l => l.IsInSource),
-                    component.Name, size, passes, Names(fields.Where(hot.Contains).Select(Name)), hotBytes,
+                context.ReportDiagnostic(Diagnostic.Create(ColdFields, component.Locations.First(l => l.IsInSource), null,
+                    SplitFix(component, cold), component.Name, size, passes, Names(fields.Where(hot.Contains).Select(Name)), hotBytes,
                     Names(cold.Select(Name)), size - hotBytes, methods.Count == 1 ? "the pass reads" : "those passes read"));
             }
+        }
+
+        /// <summary>
+        /// The fields <paramref name="method"/> touches of the component parameter <paramref name="p"/> takes (null when
+        /// it uses the component whole): what a split of that component moves for EECS055.
+        /// </summary>
+        internal static HashSet<IFieldSymbol>? FieldsUsed(IOperation body, IParameterSymbol p)
+        {
+            var used = new HashSet<IFieldSymbol>(SymbolEqualityComparer.Default);
+            foreach (var operation in body.Descendants())
+            {
+                if (operation is not IParameterReferenceOperation reference || !SymbolEqualityComparer.Default.Equals(reference.Parameter, p)) continue;
+                var (row, field) = FieldOf(reference, p);
+                if (!row) continue;
+                if (field == null) return null;
+                used.Add(field);
+            }
+            return used;
+        }
+
+        /// <summary>
+        /// The properties of the split code fix (EECS090, and EECS055 when it advises a split): <c>Fix=Split</c>, the
+        /// component's documentation id and the names of the fields to move; null when a moved field is the backing
+        /// field of a property (the fix moves declared fields only).
+        /// </summary>
+        internal static ImmutableDictionary<string, string?>? SplitFix(INamedTypeSymbol component, IEnumerable<IFieldSymbol> moved)
+        {
+            var fields = moved.ToList();
+            if (fields.Count == 0 || fields.Any(f => f.AssociatedSymbol != null || f.IsImplicitlyDeclared) || component.GetDocumentationCommentId() is not { } id) return null;
+            return ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Split").Add("Component", id)
+                .Add("Fields", string.Join(",", fields.Select(f => f.Name)));
         }
 
         private static string Name(IFieldSymbol field) => field.AssociatedSymbol?.Name ?? field.Name;

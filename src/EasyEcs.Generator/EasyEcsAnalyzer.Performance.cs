@@ -144,9 +144,11 @@ public sealed partial class EasyEcsAnalyzer
         "that have an exact vector counterpart (a call it cannot express under a condition runs the method for the rows " +
         "of the vectors that take it). This method takes components of plain values but misses one of those: the message " +
         "names the first. A warning when the method can be rewritten for the loop and the message says how (split the " +
-        "fields it uses out of a wide component, a bool field as a tag or a byte, a ref local, a local without a value, a " +
-        "ref value instead of a Reduce<T>); a suggestion when what stops the loop is what the method computes (a call, " +
-        "integer division, a conversion, a float sum in another order). Change it to get the vector loop, set " +
+        "fields it uses out of a wide component, which the code fix writes when it can rewrite every use of them; name " +
+        "the fields instead of a ref local; give a local its value where it is declared; declare the fields in one part; " +
+        "make a reduction's field a plain field; make the method static); a suggestion when what stops the loop is what " +
+        "the method computes (a call, integer division, a conversion, a float sum in another order, a bool field, a value " +
+        "taken by ref). Change it to get the vector loop, set " +
         "SimdMode = SimdMode.Off to keep the method scalar without this message, or SimdMode.Require to make it an error.",
         helpLinkUri: Help("EECS055"));
 
@@ -174,7 +176,34 @@ public sealed partial class EasyEcsAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(NoVectorLoop, method.Locations.FirstOrDefault(), method.Name, reason.Text));
         else
             context.ReportDiagnostic(Diagnostic.Create(ScalarLoop, method.Locations.FirstOrDefault(),
-                reason.IsFixable ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info, null, null, method.Name, reason.Text));
+                reason.IsFixable ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info, null,
+                reason.SplitComponent is { } split ? SplitFix(method, syntax, context.SemanticModel, split, context.CancellationToken) : null,
+                method.Name, reason.Text));
+    }
+
+    /// <summary>
+    /// The split code fix of an EECS055 that advises to move the fields <paramref name="method"/> uses out of the
+    /// component named <paramref name="component"/>: those fields, as <see cref="ColdFieldPasses.FieldsUsed"/> reads
+    /// them; null when no parameter takes that component or one uses it whole.
+    /// </summary>
+    private static ImmutableDictionary<string, string?>? SplitFix(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
+        string component, System.Threading.CancellationToken ct)
+    {
+        if (model.GetOperation((SyntaxNode?)syntax.Body ?? syntax.ExpressionBody!, ct) is not { } body) return null;
+        foreach (var p in method.Parameters)
+        {
+            var type = Symbols.Classify(p) switch
+            {
+                Symbols.ParamKind.Component => p.Type,
+                Symbols.ParamKind.ComponentSpan => Symbols.SpanElement(p.Type),
+                Symbols.ParamKind.Mutable => Symbols.MutElement(p.Type),
+                Symbols.ParamKind.Optional => Symbols.MaybeElement(p.Type),
+                _ => null,
+            };
+            if (type is INamedTypeSymbol named && named.ToDisplayString() == component)
+                return ColdFieldPasses.FieldsUsed(body, p) is { } used ? ColdFieldPasses.SplitFix(named, used) : null;
+        }
+        return null;
     }
 
     /// <summary>Property keys of the diagnostics' code fixes: what the analyzer decided, the fix only applies it.</summary>

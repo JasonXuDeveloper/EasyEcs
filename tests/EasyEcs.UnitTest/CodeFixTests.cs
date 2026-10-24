@@ -422,6 +422,87 @@ public class CodeFixTests
         Assert.That(await Analyze(document), Has.Some.Matches<Diagnostic>(d => d.Id == id), "the case reports " + id);
     }
 
+    // The split of a component (EECS090: the fields no frequent pass touches; EECS055: the few fields a method uses): the
+    // moved fields become a component declared after the old one, and every use follows them, so the program does what
+    // it did: a pass over moved fields only takes the new component, a pass over both gains it, creations and Set give
+    // both, Remove removes both, entity.C.X and entity.Get<C>().X read the new one.
+    private const string Body = "public struct Body : IComponent { public float X, VX; public string Name; public long Born; public long Kind; }\n"
+        + "[EcsSystem] public ref struct Movement { [ForEach] static void Move(ref Body b) => b.X += b.VX; }\n";
+
+    [TestCase("EECS090", "Move Name, Born and Kind into a new component BodyName",
+        Body + "[EcsSystem, UpdateInterval(10)] public ref struct Aging { [ForEach] static void Age(ref Body b) => b.Born++; }\n"
+             + "[EcsSystem, UpdateInterval(10)] public ref struct Report { [ForEach] static void Log(in Body b, ref P p) => p.V = (int)b.X + b.Name.Length; }\n"
+             + "public static class Spawner\n{\n"
+             + "    public static Entity Spawn(World w) => w.CreateEntity(new Body { X = 1, Name = \"a\" }, new P());\n"
+             + "    public static Prefab Ship() => new Prefab().Set(new Body { VX = 2 });\n"
+             + "    public static string NameOf(Entity e) => e.Body.Name;\n"
+             + "    public static float XOf(Entity e) => e.Body.X;\n"
+             + "    public static long BornOf(Entity e) => e.Get<Body>().Born;\n"
+             + "    public static void Drop(Entity e) => e.Remove<Body>();\n"
+             + "    public static bool Is(Entity e) => e.Has<Body>();\n}",
+        new[]
+        {
+            "public struct Body : IComponent { public float X, VX; }\npublic struct BodyName : IComponent { public string Name; public long Born; public long Kind; }\n",
+            "static void Age(ref BodyName b) => b.Born++;",
+            "static void Log(in Body b, in BodyName bName, ref P p) => p.V = (int)b.X + bName.Name.Length;",
+            "w.CreateEntity(new Body { X = 1 }, new BodyName { Name = \"a\" }, new P())",
+            "new Prefab().Set(new Body { VX = 2 }, new BodyName())",
+            "e.BodyName.Name", "e.Body.X", "e.Get<BodyName>().Born", "e.Remove<Body, BodyName>()", "e.Has<Body>()",
+        })]
+    [TestCase("EECS055", "Move A and B into a new component FiveA",
+        "public struct Five : IComponent\n{\n    public float A, B, C, D, E;\n}\n"
+        + "[EcsSystem] public ref struct S\n{\n    [ForEach] static void Mix(ref Five t) => t.A = t.B;\n    [ForEach] static void Both(ref Five t, ref P p) => p.V = (int)(t.A + t.C + t.D + t.E);\n}\n"
+        + "public static class Spawner { public static void Spawn(World w) => w.CreateEntity(new Five { A = 1, C = 2 }); }",
+        new[]
+        {
+            "public struct Five : IComponent\n{\n    public float C, D, E;\n}\n\npublic struct FiveA : IComponent\n{\n    public float A, B;\n}\n",
+            "static void Mix(ref FiveA t) => t.A = t.B;",
+            "static void Both(ref Five t, ref FiveA tA, ref P p) => p.V = (int)(tA.A + t.C + t.D + t.E);",
+            "w.CreateEntity(new Five { C = 2 }, new FiveA { A = 1 })",
+        })]
+    public async Task SplitsAComponent(string id, string title, string source, string[] expected)
+    {
+        var document = Document(Data + source, generate: true);
+        var diagnostic = (await Analyze(document)).First(d => d.Id == id && d.Properties.TryGetValue("Fix", out var fix) && fix == "Split");
+        var actions = new List<CodeAction>();
+        await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        Assert.That(actions.Select(a => a.Title), Is.EqualTo(new[] { title }));
+
+        var operation = (await actions[0].GetOperationsAsync(CancellationToken.None)).OfType<ApplyChangesOperation>().Single();
+        var fixedDocument = operation.ChangedSolution.GetDocument(document.Id)!;
+        var text = (await fixedDocument.GetTextAsync()).ToString();
+        foreach (var part in expected) Assert.That(text, Does.Contain(part));
+        var errors = (await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error);
+        Assert.That(errors, Is.Empty, text);
+        var message = diagnostic.GetMessage();
+        Assert.That((await Analyze(fixedDocument)).Where(d => d.Id == id && d.Location.SourceSpan.Start >= Data.Length).Select(d => d.GetMessage()),
+            Has.None.EqualTo(message), text);
+    }
+
+    // What the split cannot rewrite and keep exact: the component used whole (a copy, a helper's parameter, a ref local,
+    // a query), a member of the component reading a moved field, a tracked component (its Changed<T> would miss the
+    // moved fields), a constructor, a saved world (its format would change), a pass method called directly.
+    [TestCase("public static class U { public static int F(in Body b) => b.Name.Length; }")]
+    [TestCase("public static class U { public static void F(Entity e) { var b = new Body { Born = 1 }; e.Set(b); } }")]
+    [TestCase("public static class U { public static void F(Entity e) { ref var b = ref e.Body; b.Born = 2; } }")]
+    [TestCase("public static class U { public static long F(World w) { long n = 0; foreach (var item in w.Query<Body>()) n += item.Body.Born; return n; } }")]
+    [TestCase("public static class U { public static void F(World w, System.Buffers.ArrayBufferWriter<byte> output) => w.Save(output); }")]
+    [TestCase("public static class U { public static Body F() => default; }")]
+    [TestCase("public static class R { [ForEach] public static void Age(ref Body b) => b.Born++; public static void Call() { var b = default(Body); Age(ref b); } }")]
+    [TestCase("", "public struct Body : IComponent { public float X, VX; public string Name; public long Born; public long Kind; public readonly string Label => Name; }")]
+    [TestCase("", "public struct Body : IComponent, ITracked { public float X, VX; public string Name; public long Born; public long Kind; }")]
+    [TestCase("", "public struct Body : IComponent { public float X, VX; public string Name; public long Born; public long Kind; public Body(string name) { X = VX = 0; Name = name; Born = Kind = 0; } }")]
+    public async Task OffersNoSplitThatChangesTheProgram(string source, string declaration = null)
+    {
+        var text = Body + source;
+        if (declaration != null) text = text.Replace(Body.Substring(0, Body.IndexOf('\n')), declaration);
+        var document = Document(Data + text, generate: true);
+        var diagnostic = (await Analyze(document)).First(d => d.Id == "EECS090");
+        var actions = new List<CodeAction>();
+        await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        Assert.That(actions, Is.Empty, string.Join(", ", actions.Select(a => a.Title)));
+    }
+
     // The migration of a system of the old form (a class deriving from EcsSystem, which no longer exists: CS0246): the
     // members turn static, the hooks take the world and the handle they use, the members the base class gave become
     // the handle's, and the calls between the methods pass them on.
