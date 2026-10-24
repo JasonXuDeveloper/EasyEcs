@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 namespace EasyEcs;
@@ -7,6 +8,7 @@ namespace EasyEcs;
 /// What every <see cref="IUniqueIndexed{TKey}"/> is, so a component type is known to be unique without reflection (a
 /// type test the JIT folds). Implement <see cref="IUniqueIndexed{TKey}"/>, not this.
 /// </summary>
+[EditorBrowsable(EditorBrowsableState.Never)]
 public interface IUniqueIndexed : IIndexed;
 
 /// <summary>

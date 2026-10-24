@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -9,6 +10,7 @@ namespace EasyEcs;
 /// What every <see cref="IIndexed{TKey}"/> is, so a component type is known to be indexed without reflection (a type
 /// test the JIT folds). Implement <see cref="IIndexed{TKey}"/>, not this.
 /// </summary>
+[EditorBrowsable(EditorBrowsableState.Never)]
 public interface IIndexed;
 
 /// <summary>
