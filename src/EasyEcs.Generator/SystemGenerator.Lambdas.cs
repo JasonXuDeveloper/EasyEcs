@@ -71,6 +71,7 @@ public sealed partial class SystemGenerator
                     Symbols.ParamKind.Lookup => new ParamModel(Symbols.ParamKind.Lookup, Symbols.LookupElement(p.Type)!.ToDisplayString(Symbols.Fqn), "in", p.Name, declared,
                         Key: Symbols.LookupKey(p, lambda, null)?.ToDisplayString(Symbols.Fqn) ?? ""),
                     Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.In ? "in" : "", p.Name, declared),
+                    Symbols.ParamKind.View => ViewParameter(p, declared),
                     var kind => new ParamModel(kind, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.Ref ? "ref" : "in", p.Name, declared),
                 };
             }).ToArray();
@@ -95,6 +96,7 @@ public sealed partial class SystemGenerator
             }
 
             var query = parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.Mutable).Select(p => p.Type).ToList();
+            query.AddRange(parameters.Where(p => p.Kind == Symbols.ParamKind.View).SelectMany(p => p.Fields.Select(f => f.Type))); // as a method's
             // No component: the first [With<T>] (else [Changed<T>], which keeps filtering) is the queried one (LambdaPass.Problem: there is one).
             if (query.Count == 0 && with.Count == 0) query.Add(changed[0]);
             else if (query.Count == 0)

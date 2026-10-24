@@ -112,6 +112,11 @@ internal static class LambdaPass
                 case Symbols.ParamKind.Component or Symbols.ParamKind.Mutable:
                     components++;
                     break;
+                case Symbols.ParamKind.View when !Views.IsValid(p.Type):
+                    return $"parameter '{p.Name}' is a view the generators cannot use (EECS098)";
+                case Symbols.ParamKind.View:
+                    components += Views.Fields((INamedTypeSymbol)p.Type).Count;
+                    break;
             }
 
             if (Symbols.ContainsTypeParameter(p.Type)) return $"parameter '{p.Name}' is of a type parameter: the generated job names concrete types";
@@ -124,6 +129,7 @@ internal static class LambdaPass
         foreach (var attribute in lambda.GetAttributes())
             if (attribute.AttributeClass is { } type && !IsFilter(type))
                 return $"[{type.Name.Replace("Attribute", "")}] does not apply to a lambda pass: its attributes are the filters of a [ForEach] method";
+        if (Views.Overlap(lambda) is var (_, overlap)) return overlap;
         if (!Symbols.ComponentCountValid(lambda, components))
             return $"the lambda takes {components} components: a pass takes 1 to {Symbols.MaxComponents}, or none with a [With<T>] filter";
         if (call.Parallel)

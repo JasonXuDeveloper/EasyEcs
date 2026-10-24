@@ -25,7 +25,8 @@ public class GeneratorTests
         new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
 
     internal static GeneratorDriver Driver() => CSharpGeneratorDriver.Create(
-        [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()], parseOptions: Parse,
+        [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator(),
+            new ViewGenerator().AsSourceGenerator(), new PrefabGenerator().AsSourceGenerator()], parseOptions: Parse,
         driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
 
     /// <summary>
@@ -1084,6 +1085,10 @@ public class GeneratorTests
         "Parameter 'q' of [ForEntity] method 'A' (ref) is a write access, but the code only reads it: the system is scheduled as the component's writer, so no parallel stage runs it beside a reader; take it by 'in'")]
     [TestCase("public static class H { [ForEntity] static void A(ref T t, int v) { if (v > 0) t.V = v; } }", "EECS053",
         "Parameter 't' of [ForEntity] method 'A' takes T by 'ref', but some calls return without a write, and every call stamps the row as changed; take it as a Mut<T> and write through Write() or SetIfChanged")]
+    [TestCase("[View] public ref struct VT { public ref T T; } [EcsSystem] public ref struct S { [ForEach] static void A(VT v, in P p) { if (p.V > 0) v.T.V = p.V; } }", "EECS053",
+        "[ForEach] method 'A' writes T by 'ref' through field 'T' of view VT, but some rows pass through without a write, and every row it visits is stamped as changed; make the field a Mut<T> and write through Write() or SetIfChanged")]
+    [TestCase("[View] public ref struct VT { public ref T T; public void Up(int n) { if (n > 0) T.V += n; } }", "EECS053",
+        "View member 'Up' writes T by 'ref' through field 'T' of view VT, but some paths through it return without a write, and every row the view is built over is stamped as changed; make the field a Mut<T> and write through Write() or SetIfChanged")]
     [TestCase("public static class H { [ForEntity] static void A(Entity e, ref P p) => p.V = e.Read<Q>().V; }", "EECS027",
         "[ForEntity] method 'A' looks up 'Q' with 'e.Read<Q>()' beside the lookup its entry point makes; take it as a parameter ('in Q' or 'ref Q'), or a Maybe<Q> when some entities lack it")]
     [TestCase("public static class H { [ForEntity] static void A(ref P p) => p.V = new System.Collections.Generic.List<int>().Count; }", "EECS028",
@@ -1518,7 +1523,7 @@ public class GeneratorTests
     [
         "ForEachMethods", "Systems", "SystemUpdates", "ClosedSystems", "SystemSet", "Components", "ExtensionMembers", "BufferUses",
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
-        "GroupBy", "TargetPolicies", "NotSaved", "ForEntityMethods", "ForEntityTypes", "LambdaPasses", "LambdaFiles",
+        "GroupBy", "TargetPolicies", "NotSaved", "ForEntityMethods", "ForEntityTypes", "LambdaPasses", "LambdaFiles", "Views", "Prefabs",
     ];
 
     // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
@@ -1528,6 +1533,7 @@ public class GeneratorTests
     [TestCase("{ [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { }", "{ [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { p.V++; }")] // a [ForEach] body
     [TestCase("for (int i = 0; i < 2; i++) q.V += ++s.Value;", "for (int i = 0; i < 3; i++) q.V += ++s.Value;")] // a looping Scratch method's body
     [TestCase("static void U(World w) { _ = w.EntityCount; }", "static void U(World w) { _ = w.EntityCount + 1; }")] // a hook's body: the set stays
+    [TestCase("public P P = new() { V = 3 };", "public P P = new() { V = 3 }; ")] // a prefab declaration's trivia
     public void EditsThatChangeNoModelHitTheCache(string before, string after)
     {
         string code = "using EasyEcs;\n" + Components +
@@ -1538,7 +1544,10 @@ public class GeneratorTests
             "public partial struct Census : ISingletonComponent { [Sum] public int N; [Min] public float L; }" +
             "public partial record struct Zn([GroupBy] int Id) : IComponent; [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Tether(EntityId Target) : IRelation;" +
             "[NotSaved] public record struct Wire(object O) : IComponent;" +
-            "[UpdateInterval(3, Phase = 1)] [EcsSystem] public ref struct Sch { static void OnUpdate(World w) { _ = w.EntityCount; } } public static class FE { [ForEntity, Without<Q>] static void E(ref P p, int n) { } }";
+            "[UpdateInterval(3, Phase = 1)] [EcsSystem] public ref struct Sch { static void OnUpdate(World w) { _ = w.EntityCount; } } public static class FE { [ForEntity, Without<Q>] static void E(ref P p, int n) { } }" +
+            "[View] public ref struct Vw { public ref P P; public ref readonly Q Q; public void Add(int n) { P.V += Q.V + n; } }" +
+            "[EcsSystem] public ref struct VS { [ForEach] static void M(Vw v) => v.Add(1); }" +
+            "[Prefab] public partial struct Kind { public P P = new() { V = 3 }; public Q Q; }";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         // A lambda pass in a file of its own: its interceptor names the file's checksum, so an edit there is a new model.

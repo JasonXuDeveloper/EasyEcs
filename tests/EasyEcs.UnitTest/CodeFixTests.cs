@@ -375,6 +375,14 @@ public class CodeFixTests
     [TestCase("EECS096", "Make it internal, so the body is copied",
         "public static class U { static int Step() => 2; public static void F(World w) => w.ForEach(static (ref P p) => p.V += Step()); }",
         "internal static int Step() => 2;")]
+    [TestCase("EECS101", "Take 'PQ pQ' as a parameter",
+        "[View] public ref struct PQ { public ref P P; public ref readonly Q Q; public void Add() => P.V += Q.V; }\n"
+        + "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in T t, in Q q) { var v = new PQ { P = ref p, Q = ref q }; v.Add(); p.V += t.V + q.V; } }",
+        "static void A(PQ pQ, in T t) { var v = pQ; v.Add(); pQ.P.V += t.V + pQ.Q.V; }")]
+    [TestCase("EECS101", "Use e.AsPQ()",
+        "[View] public ref struct PQ { public ref P P; public ref readonly Q Q; public void Add() => P.V += Q.V; }\n"
+        + "public static class U { public static void F(Entity e) { var v = new PQ { P = ref e.Get<P>(), Q = ref e.Read<Q>() }; v.Add(); } }",
+        "var v = e.AsPQ();")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
@@ -653,7 +661,8 @@ public class CodeFixTests
         public override ImmutableArray<DiagnosticAnalyzer> GetAnalyzersForAllLanguages() => [];
         // The same instances every call: the workspace maps each generator back to its reference.
         private readonly ImmutableArray<ISourceGenerator> _generators =
-            [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()];
+            [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator(),
+                new ViewGenerator().AsSourceGenerator(), new PrefabGenerator().AsSourceGenerator()];
 
         public override ImmutableArray<ISourceGenerator> GetGenerators(string language) => _generators;
     }

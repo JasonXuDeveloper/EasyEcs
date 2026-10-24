@@ -116,3 +116,30 @@ public sealed class GroupByAttribute : Attribute;
 /// </summary>
 [AttributeUsage(AttributeTargets.Struct)]
 public sealed class NotSavedAttribute : Attribute;
+
+/// <summary>
+/// A view of one entity's components: a <c>ref struct</c> whose instance fields are <c>ref</c> (written),
+/// <c>ref readonly</c> (read) or <see cref="Mut{T}"/> (written, stamped only where written) fields of components, public
+/// or internal, with the business methods that use them:
+/// <c>[View] public ref struct Fighter { public ref Health Health; public ref readonly Armor Armor; public void TakeDamage(int n) =&gt; Health.Value -= Math.Max(0, n - Armor.Value); }</c>.
+/// A <c>[ForEach]</c> or <c>[ForEntity]</c> method takes it by value (<c>static void Hit(Fighter fighter, in Damage damage)</c>):
+/// the method visits the entities that have every component of the view, its fields read and write as its own
+/// <c>ref</c> / <c>in</c> parameters would (the schedule, the change ticks of tracked components and the vector loop alike),
+/// and the generated job builds the view over the row at no cost. The generator also writes <c>entity.AsFighter()</c>
+/// and <c>entity.TryGetFighter(out fighter)</c>. A view holds refs into the entity's row, so a structural change of that
+/// entity (or any change that moves rows) ends its use.
+/// </summary>
+[AttributeUsage(AttributeTargets.Struct)]
+public sealed class ViewAttribute : Attribute;
+
+/// <summary>
+/// A <see cref="EasyEcs.Prefab"/> declared as the components its entities start with: a partial struct with one field per
+/// component, each field's initializer its default value:
+/// <c>[Prefab] public partial struct Goblin { public Health Health = new(30); public Position Position; }</c>. The
+/// generator writes <c>Goblin.Prefab</c>, a static <see cref="EasyEcs.Prefab"/> built once from the defaults, and the
+/// parameterless constructor field initializers need. <c>world.Instantiate(Goblin.Prefab)</c> creates a goblin (values
+/// given to <c>Instantiate</c> replace the defaults, a span gets many), <c>new Prefab(Goblin.Prefab)</c> is a variant to
+/// change (a buffer, a member). The declaration names no kind a query could find: give it a tag component to filter on.
+/// </summary>
+[AttributeUsage(AttributeTargets.Struct)]
+public sealed class PrefabAttribute : Attribute;
