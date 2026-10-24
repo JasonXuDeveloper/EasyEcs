@@ -16,12 +16,13 @@ namespace EasyEcs.Benchmark;
 /// <c>Count</c> stream memory (one float multiply-add, one int increment per row). <c>Move2</c> / <c>Move3</c> /
 /// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity: each field alike, a flat loop over the columns' lanes;
 /// <c>Move2HandCast</c> is the same by hand, the columns cast to floats; <c>Push</c> is Move2 assigned whole, <c>Move2Gaps</c>
-/// Move2 over a table whose every third row lacks the velocity: masked words of flat lanes), <c>Seek</c> (3 floats: a direction, its length, a
+/// Move2 over a table whose every third row lacks the velocity: masked words, which split the fields), <c>Seek</c> (3 floats: a direction, its length, a
 /// division) and <c>Travel</c> (3 doubles) take components of several fields, which the vector loop splits into one
 /// vector per field (Interleaved), in a world of their own. <c>Clamp</c> (Math.Clamp by a singleton's bounds, checked
 /// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
 /// pattern) are the calls, conversions and masks a vector loop takes. <c>Tally</c> (an int count, sum, Min and Max) and
-/// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order.
+/// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order;
+/// <c>Cycle</c> writes heat on both branches and counts one, over whole vectors and over <c>_holes</c> (masked words).
 /// <c>Wealth</c> sums the int column into a long and <c>Accrue</c> adds it to a column of longs: lanes of two sizes, each
 /// long a pair of vectors per step (Kernel.Pairs.cs).
 /// <c>Optional</c> takes a <c>Maybe&lt;Mass&gt;</c> over <c>_holes</c> (a lane mask of the rows that have it).
@@ -320,6 +321,29 @@ public partial class KernelBenchmark
     [Benchmark]
     public void TallyGenerated() => Kernels.Tally(_world);
 
+    // Writes and a count under a condition, over whole vectors and over masked words (every third row lacks Mass).
+    [Benchmark]
+    public void CycleScalar()
+    {
+        var job = new CycleRows { Tally = new Reduce<Tally> { Value = Tally.Identity } };
+        _world.ForEachBatch<Heat, Mass, CycleRows>(ref job);
+        _world.GetOrAddSingleton<Tally>() = job.Tally.Value;
+    }
+
+    [Benchmark]
+    public void CycleGenerated() => Kernels.Cycle(_world);
+
+    [Benchmark]
+    public void CycleHolesScalar()
+    {
+        var job = new CycleRows { Tally = new Reduce<Tally> { Value = Tally.Identity } };
+        _holes.ForEachBatch<Heat, Mass, CycleRows>(ref job);
+        _holes.GetOrAddSingleton<Tally>() = job.Tally.Value;
+    }
+
+    [Benchmark]
+    public void CycleHolesGenerated() => Kernels.Cycle(_holes);
+
     [Benchmark]
     public void EnergyScalar()
     {
@@ -479,6 +503,20 @@ public partial class KernelBenchmark
     {
         public void Execute(ref Balance balance, ref Ticks ticks) => Kernels.Accrue(ref balance, in ticks);
         static int IForEach<Balance, Ticks>.WriteMask => 1;
+    }
+
+    private struct CycleRows : IForEachBatch<Heat, Mass>
+    {
+        public Reduce<Tally> Tally;
+
+        public void Execute(EntitySpan entities, Span<Heat> heat, Span<Mass> mass)
+        {
+            var tally = Tally;
+            for (int i = 0; i < heat.Length; i++) Kernels.Cycle(ref heat[i], in mass[i], ref tally);
+            Tally = tally;
+        }
+
+        static int IForEachBatch<Heat, Mass>.WriteMask => 1;
     }
 
     /// <summary>A float sum: vectorized only under FloatMode.Fast, since one sum per lane rounds in another order.</summary>
@@ -693,6 +731,18 @@ public partial class KernelBenchmark
 
         [ForEach]
         internal static void Count(ref Ticks ticks) => ticks.Value++;
+
+        // Each branch writes heat, and one counts: masked words select their passing lanes inside these writes.
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void Cycle(ref Heat heat, in Mass mass, ref Reduce<Tally> tally)
+        {
+            if (heat.Value > 50f)
+            {
+                heat.Value -= 100f + mass.Value;
+                tally.Value.Count++;
+            }
+            else heat.Value += 30f;
+        }
 
         [ForEach]
         internal static void Move2(ref P2 p, in V2 v)

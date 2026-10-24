@@ -614,8 +614,10 @@ public class GeneratorTests
             .And.Contain("for (int __j = 0; __j < global::System.Numerics.Vector<int>.Count; __j++)")
             .And.Contain("__v.N = __a1_0[__j];")
             .And.Contain("l1.Combine(__v);"), generated);
-        // In a masked word the lanes that do not pass keep what they held.
-        Assert.That(generated, Does.Contain("var __h1_0 = __a1_0;").And.Contain("__a1_0 = global::System.Numerics.Vector.ConditionalSelect(__pass, __a1_0, __h1_0);"), generated);
+        // In a masked word each write of an accumulator leaves the lanes that do not pass as they were: no select after.
+        Assert.That(generated, Does.Contain("__a1_0 = global::System.Numerics.Vector.ConditionalSelect((__m0 & __pass), (__a1_0 + __c1_0), __a1_0);")
+            .And.Contain("__a1_1 = global::System.Numerics.Vector.ConditionalSelect(__pass, global::System.Numerics.Vector.Min(__a1_1, __c1_0), __a1_1);")
+            .And.Not.Contain("var __h1_0 = __a1_0;"), generated);
     }
 
     // T.Combine is part of the loop: an edit of it in another file re-emits the method (here: no longer field by field).
