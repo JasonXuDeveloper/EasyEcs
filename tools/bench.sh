@@ -13,9 +13,11 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 art=$root/BenchmarkDotNet.Artifacts
-lock=${BENCH_LOCK:-/tmp/easyecs-bench.lock}
-# The whole run holds the lock; -o keeps its descriptor out of the commands, so nothing they leave behind holds it.
-[ -n "${EASYECS_BENCH_LOCKED:-}" ] || EASYECS_BENCH_LOCKED=1 exec flock -o "$lock" "$0" "$@"
+lock=${BENCH_LOCK:-/tmp/bench.lock}
+# The whole run holds the lock exclusively; -o keeps its descriptor out of the commands, so nothing they leave behind
+# holds it. The gate (held while waiting and running) stops new shared holders, so builds and tests of other sessions,
+# which pass the gate before taking the lock shared, cannot starve the run (audit-perf).
+[ -n "${EASYECS_BENCH_LOCKED:-}" ] || EASYECS_BENCH_LOCKED=1 exec flock -o "$lock.gate" flock -o "$lock" "$0" "$@"
 export MSBUILDDISABLENODEREUSE=1 DOTNET_CLI_USE_MSBUILD_SERVER=0 UseSharedCompilation=false
 
 sync=0 fresh=0 classes=()
