@@ -311,6 +311,7 @@ public partial class FusionTests
     [TestCase(1)]
     [TestCase(300)]
     [TestCase(5000)]
+    [TestCase(SystemCode.FusedRows + 300)] // above the cache: blocks of rows (below it, each pass on its own)
     public void VectorLoopsFusePerBlock(int count)
     {
         using var world = Populate(count, false, w => w.AddSystem<Motion>());
@@ -332,6 +333,7 @@ public partial class FusionTests
 
     [TestCase(500)]
     [TestCase(9000)]
+    [TestCase(SystemCode.FusedRows + 500)]
     public void ChangedRowsFusePerWord(int count)
     {
         using var world = Populate(count, false, w => w.AddSystem<Watch>());
@@ -416,6 +418,7 @@ public partial class FusionTests
 
     [TestCase(1)]
     [TestCase(5000)]
+    [TestCase(SystemCode.FusedRows + 77)]
     public void SystemsDeclaredOneAfterTheOtherShareOneWalk(int count)
     {
         using var world = Populate(count, false, w => { w.AddSystem<Stride>(); w.AddSystem<Tire>(); });
@@ -441,11 +444,12 @@ public partial class FusionTests
         Assert.That(fused.System<Stride>().RunCount, Is.EqualTo(6));
     }
 
-    [Test]
-    public void ADisabledSystemLeavesTheOtherItsOwnWalk()
+    [TestCase(3000)]
+    [TestCase(SystemCode.FusedRows + 3000)]
+    public void ADisabledSystemLeavesTheOtherItsOwnWalk(int count)
     {
-        using var fused = Populate(3000, false, w => { w.AddSystem<Stride>(); w.AddSystem<Tire>(); });
-        using var twin = Populate(3000, true, w => { w.AddSystem<StrideApart>(); w.AddSystem<TireApart>(); });
+        using var fused = Populate(count, false, w => { w.AddSystem<Stride>(); w.AddSystem<Tire>(); });
+        using var twin = Populate(count, true, w => { w.AddSystem<StrideApart>(); w.AddSystem<TireApart>(); });
         for (int i = 0; i < 6; i++)
         {
             bool off = i % 3 == 1, first = i % 2 == 0;
@@ -462,12 +466,14 @@ public partial class FusionTests
         Assert.That(fused.System<Stride>().RunCount, Is.EqualTo(twin.System<StrideApart>().RunCount));
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public void AnErrorDisablesTheSystemThatThrew(bool second)
+    [TestCase(false, 500)]
+    [TestCase(true, 500)]
+    [TestCase(false, SystemCode.FusedRows + 500)] // one walk: the exception names the system that threw
+    [TestCase(true, SystemCode.FusedRows + 500)]
+    public void AnErrorDisablesTheSystemThatThrew(bool second, int count)
     {
         var options = new WorldOptions { SystemErrors = SystemErrorPolicy.Disable };
-        using var world = Populate(500, false, w => { w.AddSystem<Stride>(); w.AddSystem<Tire>(); }, options);
+        using var world = Populate(count, false, w => { w.AddSystem<Stride>(); w.AddSystem<Tire>(); }, options);
         world.Update();
         int at = 0;
         foreach (var item in world.Read<Drift, Stamina>())
@@ -531,6 +537,7 @@ public partial class FusionTests
         Assert.That(code, Does.Contain("M_N_O_Fused0"), code);
         Assert.That(code, Does.Contain("one walk: M, then N, then O"), code);
         Assert.That(code, Does.Contain("one walk with N, O"), code);
+        Assert.That(code, Does.Contain("< global::EasyEcs.SystemCode.FusedRows)"), code); // blocks only above the cache
     }
 
     [Test]
