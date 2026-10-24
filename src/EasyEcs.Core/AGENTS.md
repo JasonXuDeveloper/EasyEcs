@@ -47,14 +47,20 @@ Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo
                              TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,
                              PaddedTile.Rows (TZCNT walk), TileCursor.Load128, ChangedEdges / Facing (sleeping tiles)
 Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), joined in
-                             chunk order into singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear)
+                             chunk order into singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear);
+                             AddIds / AddLanes: a vector loop's passing lanes appended compacted, in row order
 EntityRandom.cs              EntityRandom: deterministic random numbers, a pure function of (seed, entity, tick, stream)
                              (four SplitMix64 finalizer rounds); a singleton (Seed, and a Tick the world adds one to
                              at the start of every update: World.Run) and static members
 Interleaved.cs               the deinterleaving loads / interleaving stores of generated vector loops over components
-                             of 2 to 4 fields of one lane type, and the lane masks of the passing rows of a word
+                             of 2 to 4 fields of one lane type, and the lane masks of the passing rows of a word;
+                             LoadTail / StoreTail: the last rows of a run copied into a vector's worth (a loop that
+                             marks rows runs them masked)
 Lanes.cs                     Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress),
-                             for batch methods and CollectIds
+                             for batch methods and CollectIds; Lanes.Bits: a vector loop's lane mask as bits
+MarkedRows.cs                the rows a vector loop marked for one structural change (words of 64 rows per table,
+                             pooled per world), applied when the pass ends: SetAll / RemoveAll / DisableAll /
+                             EnableAll / DestroyAll (World.Bulk.cs: SetMarked ... DestroyMarked, WalkMarks)
 SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
 SystemOrder.cs               [UpdateBefore<T>] / [UpdateAfter<T>]
 SystemAccess.cs              a system's read/write sets (generated from [ForEach] parameters) and the conflict rule
@@ -72,7 +78,9 @@ World.DestroyLog.cs          WorldOptions.DestroyLogCapacity: the ring of (Entit
 World.Components.cs          AddBit/AddBits/RemoveBit/RemoveBits (shared core of every Set/GetOrAdd/Remove/Disable;
                              SetRow / EnableRow for one component), passes (BeginPass/EndPass, tombstones closed by
                              the last pass), CarryOver
-World.Bulk.cs                SetAll / RemoveAll / DisableAll / EnableAll (IRowOp structs, whole words of rows at once)
+World.Bulk.cs                SetAll / RemoveAll / DisableAll / EnableAll (IRowOp structs, whole words of rows at once);
+                             the same ops over MarkedRows, in the order the pass marked them (a row that moves leaves a
+                             tombstone inside a pass of their own, so tables keep the method's row order)
 World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache, CompactArchetypes,
                              the structural gate (Structural())
 StructuralGate.cs            owner flag (plain check-and-set, throws when reentered or while frozen: Freeze/Thaw around

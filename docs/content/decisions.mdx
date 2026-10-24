@@ -120,6 +120,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D118](#d118-fixable-reasons-and-cold-fields) | EECS055 warns when the method can be rewritten; EECS091 names the fields a frequent pass never touches |
 | [D119](#d119-no-oop-code-fix) | No code fix from object-oriented classes to components and systems: a migration guide |
 | [D120](#d120-feature-modules-and-data-events) | Not added: `[Feature]` modules and a generated reader of records; EECS092 reports records nothing clears |
+| [D122](#d122-marked-rows) | A structural change under a condition marks rows; the change is applied in bulk after the pass |
 | [D125](#d125-scheduler-tuning) | Passes that merge per chunk cut 16 chunks; the helpers' spin, the partitioner and the chunk size stay as they were |
 
 The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
@@ -2810,6 +2811,97 @@ or `RemoveAtSwapBack` of a `DynamicBuffer<T>`, no `RemoveSingleton<Emitted<T>>()
   a save group) would lose records, and the reader is the one that knows when they are applied.
 - **A reader system generated per record type:** one more system the schedule places by itself, where the user
   writes the order.
+
+## D122. A structural change under a condition marks rows; the change is applied in bulk after the pass [#d122-marked-rows]
+
+**Decision.** A `[ForEach]` method that changes its own entity under a condition gets a vector loop:
+
+```csharp
+public record struct Kill(EntityId Victim);
+
+[EcsSystem]
+public ref struct DyingSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp, Emit<Kill> kills)
+    {
+        if (hp.Value > 0) return;
+        unit.SetDead();
+        kills.Add(new Kill(unit.Id));
+    }
+}
+```
+
+- **The condition is a lane mask, and the change marks rows.** The loop computes the mask per vector and records the
+  rows that pass as bits of 64-row words (`MarkedRows`, pooled per world). When the pass ends, one call applies the
+  change to them: `SetAll`, `RemoveAll`, `DisableAll`, `EnableAll` or `DestroyAll`. A table whose rows change in place
+  (a column it has, a removal that keeps the column) takes a word at a time; the others go row by row.
+- **In the method's order.** The marked rows are visited from the first table to the last, rows ascending, inside a
+  pass of their own: a row that moves leaves a tombstone as it would during the method's pass, and the tombstones
+  close the same way. Every table ends with the rows the method would have left, in its order, so later passes visit
+  and emit in the scalar method's order, and ids are freed (and the destroy log written) in its order. A table whose
+  every row is destroyed is freed at once, its ids in row order.
+- **Records.** `Emit<T>.Add(new T(x))` appends the passing lanes' `x` (a lane of the method, or the entity's id),
+  compacted with `Lanes.Compact`, in row order.
+- **Every row takes the vector form.** The rows after the last whole vector are copied into a vector's worth of rows
+  (`Interleaved.LoadTail` / `StoreTail`) and run masked. Hardware without the loop's vectors runs the method's own
+  job one row at a time; the choice is a JIT-time constant (`Vectorizes`).
+- **Recognized by meaning.** `Symbols.StructuralChange` reads the generated members (`SetDead()`, `RemoveX()`,
+  `SetX(args)`), the generic forms (`Set<T>(...)`, `Set(new T())`, `Remove<T>()`, `Disable<T>()`, `Enable<T>()`) and
+  `Destroy()`, for the generator and the analyzer alike. `unit.Set<Dead>()` keeps its EECS033 warning.
+
+**What stays scalar.** These are the reasons EECS055 and EECS056 report. A fixable reason names the fix.
+- **The method takes the component it changes** (as a parameter, a `Maybe<T>` or a `Mut<T>`). The method would see
+  the change at once; the loop applies it after the pass. *Fixable:* change it in a method of its own.
+- **Two different changes, or a value that differs per row** (`SetH(hp.Value)`). The loop marks one change of one
+  value. *Fixable:* write one method per change, or set a tag here and the value in a method over the tag.
+- **Another use of the entity** (`entity.Has<T>()`, `entity.Id.Index`, `Clone()`). *Fixable:* read it as a
+  parameter or a filter.
+- **A branch the loop cannot express** (a call, `Console.WriteLine`) in a method that changes structure. Such a
+  branch would run the method during the pass, which is frozen. *Fixable:* move the branch into a method of its own.
+- **A destroy together with an `Emit<T>` or a `Reduce<T>`.** A destroy cascades to children the pass has not reached
+  yet. *Fixable:* emit or reduce in a method over a tag.
+- **A unique key** (`Set` or `Enable`). One value would be claimed by every row. Inherent.
+- **`[Consume]`, a `Maybe<T>`, lanes of 1 or 2 bytes, a wide component.** Their words of passing rows run the method
+  itself. Inherent.
+
+**Why.**
+- **The cost per row was the structural call, not the condition.** A scalar structural pass pays an entity handle, a
+  lookup and a row move or a bit flip for each row that passes, and its condition has no vector form. Marking moves
+  the condition into the vector loop and the change into the bulk walk that `SetAll` already uses.
+- **The same results, not only the same sets.** Applying the changes in the method's order inside a pass keeps each
+  table's row order, the order ids are freed in and the destroy log. `StructuralLoopTests` compares a vector world with
+  its scalar twin over random rows: 0 to 10,003 rows, every row passing, no row passing, a table emptied, and rows
+  moved by another method in the same tick. Every entity, every record in order, the index and the destroy log match.
+  Steady updates allocate 0 B.
+- **Measured** (`StructuralLoopBenchmark`, on an AVX-512 machine). A tag is set on the rows of one table that pass at
+  the given rate, then lifted from all of them by the same `RemoveAll` in every case. The tag's column stays in the
+  table, so a set flips presence bits: the case of a status that comes and goes. `CommandBuffer` records the ids and
+  sets each after the pass; `SetAll` is the bound of a bulk change whose rows are already tagged. Two rounds, first /
+  second; all four allocate 0 B.
+
+| Rows | Pass | Scalar | Vector | CommandBuffer | SetAll |
+| --- | --- | --- | --- | --- | --- |
+| 10,000 | 1% | 11.72 / 11.17 µs | 1.00 / 1.04 µs (0.09×) | 8.64 / 8.97 µs | 0.18 / 0.19 µs |
+| 10,000 | 10% | 44.23 / 42.40 µs | 1.43 / 1.52 µs (0.03×) | 18.54 / 19.33 µs | 0.40 / 0.39 µs |
+| 10,000 | 50% | 170.83 / 171.17 µs | 3.77 / 3.70 µs (0.02×) | 57.70 / 57.40 µs | 1.26 / 1.19 µs |
+| 100,000 | 1% | 120.83 / 147.81 µs | 10.11 / 9.87 µs (0.08×) | 87.02 / 89.49 µs | 0.36 / 0.36 µs |
+| 100,000 | 10% | 447.78 / 474.17 µs | 13.90 / 15.50 µs (0.03×) | 211.92 / 206.84 µs | 2.06 / 2.10 µs |
+| 100,000 | 50% | 1,702.29 / 1,775.61 µs | 34.41 / 36.01 µs (0.02×) | 619.05 / 621.87 µs | 9.73 / 9.95 µs |
+
+  The battle server's `Die` (a tag and the kill feed) takes the vector loop:
+  `BattleServerBenchmark` went from 4.075 / 4.208 ms to 3.876 / 3.771 ms per tick (100,000 units). `WorldSimulationBenchmark` stayed within its noise
+  (100,000 entities: 1,271.5 / 1,275.9 / 1,328.8 µs before, 1,247.9 / 1,364.7 / 1,307.8 µs after).
+
+**Considered.**
+- **Changing rows during the pass** (a call per row from the vector loop): the pass is frozen, and that call is the
+  cost to remove.
+- **Recording ids** (a command buffer) and changing them after the pass: a lookup per id, and a buffer that grows with
+  the rows; the `CommandBuffer` case measures it.
+- **Applying from the last row down** (the swap-remove order of the bulk calls, no pass of their own): the rows that
+  move land in their new tables in reverse, so later passes would emit in an order other than the scalar method's.
+- **Several changes per method:** each would move rows the other's marks name. One method per change is clearer and
+  costs one more walk over the marked rows.
 
 ## D125. Passes that merge per chunk cut 16 chunks; the helpers' spin, the partitioner and the chunk size stay as they were [#d125-scheduler-tuning]
 

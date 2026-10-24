@@ -18,7 +18,8 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                Roslyn), Group, Hierarchy, HotCold (a pass over wide rows against the cold fields split out: EECS091's threshold), Histogram (keyed reductions), Index (+ unique keys), Introspection (+ Schedule),
                                Lookup, LookupChase (random lookups across 1M entities), Maybe, Migration, OrderedIndex, Ordering, ParallelForEach, ParallelSystems (Measure),
                                Prefab, Relation, Runner, SingleEntity, Slices, Snapshot (+ SaveWithout / LoadKeeping),
-                               Sparse, SystemDispatch (what a system costs per update apart from its rows), Trim,
+                               Sparse, StructuralLoop (a tag set under a condition: vector loop + marked rows against the
+                               scalar method, a command buffer and SetAll), SystemDispatch (what a system costs per update apart from its rows), Trim,
                                Unload) + MicroBenchmarks.
                                Always measure with BenchmarkDotNet.
 benchmarks/EasyEcs.Benchmark.Plugin/  a collectible plugin (Scoring.cs) the Unload benchmark loads and unloads

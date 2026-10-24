@@ -23,10 +23,16 @@ or the reason), `Kernel.Narrow.cs`, `Kernel.Struct.cs`, `Kernel.Wide.cs`, the jo
   blend (`Vector.ConditionalSelect`) then a store; a tracked component stamped only where the mask is set.
 - **State and structural writes**: a tag or component added or removed, a destroy (`[Consume]`), recognized by
   meaning, not by name: the generated members (`SetDead()`, `RemoveX()`, `SetX(v)`) and the generic forms
-  (`Set<T>()`, `Set(new T())`, `Remove<T>()`, `Destroy()`) through the shared `Symbols` helpers. The condition runs as a
-  vector loop into a lane mask, the passing rows are compacted (`Lanes.Compact`), and the change is applied in bulk
-  after the pass (whole words, the `World.Bulk` row ops): no per-row structural call, no tombstones. The generic form
-  keeps its EECS033 Warning (a better generated member exists), never an Error.
+  (`Set<T>()`, `Set(new T())`, `Remove<T>()`, `Destroy()`) through `Symbols.StructuralChange` (`Kernel.Structural.cs`).
+  The condition runs as a vector loop into a lane mask, the passing rows are marked (`MarkedRows`), and the change is
+  applied after the pass by the `World.Bulk` row ops: whole words where a table changes in place, else row by row in
+  the order the pass marked them, inside a pass of their own, so every table keeps the method's row order (later
+  passes emit in the scalar method's order, ids are freed in its order: D122). `Emit<T>` records of a lane or the
+  entity's id are appended compacted (`Lanes.Compact`). Every row takes the vector form (the last rows through
+  `Interleaved.LoadTail`), and hardware without the loop's vectors runs the method's own job. One change of one
+  uniform value per method; the method must not take the component it changes; a method that changes structure has
+  no cold branch (its rows cannot run the method during the pass). The generic form keeps its EECS033 Warning (a
+  better generated member exists), never an Error.
 - **Wide and mixed rows** (`Kernel.Wide`): a component of more fields than the loop splits, or of mixed types, where
   the method uses a few fields of one lane size. Load several rows as whole vectors, pick each used field into one
   vector with permutes (two-source `vpermt2*` on AVX-512; single-source `vpermpd` / `vpermps` plus blends on AVX2),
