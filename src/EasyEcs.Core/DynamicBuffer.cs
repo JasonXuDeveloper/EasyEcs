@@ -392,8 +392,14 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
 
     private const int Batch = 32;
 
-    [ThreadStatic] private static BufferStore<T>[] t_free;
-    [ThreadStatic] private static int t_freeCount;
+    // This thread's stores and their count in one object: each thread-static of a generic type costs a lookup.
+    private sealed class Free
+    {
+        public readonly BufferStore<T>[] Stores = new BufferStore<T>[2 * Batch];
+        public int Count;
+    }
+
+    [ThreadStatic] private static Free t_free;
 
     private static readonly Lock s_gate = new();
     private static BufferStore<T>[] s_free = [];
@@ -402,11 +408,11 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     /// <summary>An empty store: a recycled one (this thread's, else the shared pool's), else a new one.</summary>
     public static BufferStore<T> Rent()
     {
-        if (t_freeCount == 0 && !Refill()) return new BufferStore<T>(0);
         var free = t_free;
-        int last = --t_freeCount;
-        var store = free[last];
-        free[last] = null;
+        if (free is not { Count: > 0 } && (free = Refill()) == null) return new BufferStore<T>(0);
+        int last = --free.Count;
+        var store = free.Stores[last];
+        free.Stores[last] = null;
         return store;
     }
 
@@ -414,10 +420,10 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     public static void Fill(int count)
     {
         if (MaxPooledLength == 0) return;
-        _ = t_free ?? Own(); // this thread's own list (and every helper thread's): a first refill allocates nothing
+        var free = t_free ?? Own(); // this thread's own list (and every helper thread's): a first refill allocates nothing
         lock (s_gate)
         {
-            int missing = count - s_freeCount - t_freeCount;
+            int missing = count - s_freeCount - free.Count;
             if (missing <= 0) return;
             if (s_freeCount + missing > s_free.Length) Array.Resize(ref s_free, Math.Max(s_freeCount + missing, s_free.Length * 2));
             for (int i = 0; i < missing; i++) s_free[s_freeCount++] = new BufferStore<T>(MaxPooledLength);
@@ -428,27 +434,27 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
 
     /// <summary>This thread's own list of stores, created (on every helper thread at once: <see cref="ThreadSetup"/>).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static BufferStore<T>[] Own()
+    private static Free Own()
     {
-        ThreadSetup.Add(ref _ownSetUp, static () => t_free ??= new BufferStore<T>[2 * Batch], typeof(BufferStore<T>));
-        return t_free ??= new BufferStore<T>[2 * Batch];
+        ThreadSetup.Add(ref _ownSetUp, static () => t_free ??= new Free(), typeof(BufferStore<T>));
+        return t_free ??= new Free();
     }
 
-    // This thread's stores ran out: take up to Batch from the shared pool.
+    // This thread's stores ran out: take up to Batch from the shared pool (null when it has none).
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static bool Refill()
+    private static Free Refill()
     {
-        if (Volatile.Read(ref s_freeCount) == 0) return false;
+        if (Volatile.Read(ref s_freeCount) == 0) return null;
         var free = t_free ?? Own();
         lock (s_gate)
         {
             int taken = Math.Min(Batch, s_freeCount);
             int from = s_freeCount - taken;
-            Array.Copy(s_free, from, free, 0, taken);
+            Array.Copy(s_free, from, free.Stores, 0, taken);
             Array.Clear(s_free, from, taken);
             s_freeCount = from;
-            t_freeCount = taken;
-            return taken != 0;
+            free.Count = taken;
+            return taken != 0 ? free : null;
         }
     }
 
@@ -463,24 +469,25 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         Empty();
         if (Items.Length > MaxPooledLength) return;
         var free = t_free ?? Own();
-        if (t_freeCount == free.Length) Spill(free);
-        free[t_freeCount++] = this;
+        if (free.Count == free.Stores.Length) Spill(free);
+        free.Stores[free.Count++] = this;
     }
 
     // This thread holds 2 × Batch stores: hand the oldest Batch to the shared pool.
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void Spill(BufferStore<T>[] free)
+    private static void Spill(Free free)
     {
+        var stores = free.Stores;
         lock (s_gate)
         {
             if (s_freeCount + Batch > s_free.Length) Array.Resize(ref s_free, Math.Max(2 * Batch, s_free.Length * 2));
-            Array.Copy(free, 0, s_free, s_freeCount, Batch);
+            Array.Copy(stores, 0, s_free, s_freeCount, Batch);
             s_freeCount += Batch;
         }
 
-        Array.Copy(free, Batch, free, 0, Batch);
-        Array.Clear(free, Batch, Batch);
-        t_freeCount = Batch;
+        Array.Copy(stores, Batch, stores, 0, Batch);
+        Array.Clear(stores, Batch, Batch);
+        free.Count = Batch;
     }
 
     public override void Empty()
@@ -539,7 +546,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     {
         var copy = Rent();
         if (copy.Items.Length < Count) copy.Resize(Count);
-        Array.Copy(Items, copy.Items, Count);
+        Items.AsSpan(0, Count).CopyTo(copy.Items); // a span copy: Array.Copy checks the element types first
         copy.Count = Count;
         return copy;
     }
