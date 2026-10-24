@@ -27,6 +27,15 @@ or the reason), `Kernel.Narrow.cs`, `Kernel.Struct.cs`, `Kernel.Wide.cs`, the jo
   vector loop into a lane mask, the passing rows are compacted (`Lanes.Compact`), and the change is applied in bulk
   after the pass (whole words, the `World.Bulk` row ops): no per-row structural call, no tombstones. The generic form
   keeps its EECS033 Warning (a better generated member exists), never an Error.
+- **Wide and mixed rows** (`Kernel.Wide`): a component of more fields than the loop splits, or of mixed types, where
+  the method uses a few fields of one lane size. Load several rows as whole vectors, pick each used field into one
+  vector with permutes (two-source `vpermt2*` on AVX-512; single-source `vpermpd` / `vpermps` plus blends on AVX2),
+  write back only the vectors holding written fields, the other bytes as loaded. One row per vector (one useful lane)
+  never pays. It pays only when the method's operations outweigh the permutes (`Gate`); otherwise EECS055 suggests
+  splitting the used fields into a component of their own, which is always the fastest form.
+- **Cells of a tile** (the shader form): a method that computes one cell from its neighbors by offset is a vector
+  loop over the cells of a row, the neighbor reads unaligned loads at offsets in the padded texture; the generator
+  writes the pad, the row walk and the loop, so users write no `Load128`.
 - **Per-chunk parameters**: `Reduce<T>` (lane partials combined in chunk order), `Emit<T>` (records of the passing
   rows compacted, in row order), `EntityRandom` (a pure function per lane).
 - **Conditions**: `if` / `else` chains, nested ifs, early `return` (a mask of rows still running), ternaries, `&&`,
