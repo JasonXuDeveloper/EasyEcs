@@ -77,6 +77,11 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/AGENTS.md` first.
   no page naming it except history pages.
 - **Inspiration is named where it helps** (OpenMP `threadprivate` for `Scratch<T>`, `reduction` for `Reduce<T>`,
   stencil halos for `Tile<,>`, Burst for vector loops): one clause in "what it is", the comparison in decisions.
+- **Readers do not know the other field** (WRITING.md, page anatomy): read each page as someone who knows C# and
+  games or servers only. Every borrowed term (OpenMP, MPI, stencil, halo exchange, ghost cells, fragment shader,
+  lanes, masks, warps, morsels, zone maps) is explained at its first use or linked to "Before you start" or the
+  glossary, which holds an entry for each; an advanced page (grids, vector loops, fusion, parallel data) has its
+  "Before you start" section with mermaid diagrams. A bare term is a finding.
 - **Docs come last**: while code still changes, agents collect docs to-dos instead of editing pages; one full pass
   at the end, with `tools/bench.sh --site --sync` on the final code (numbers come from `bench.json` only).
 

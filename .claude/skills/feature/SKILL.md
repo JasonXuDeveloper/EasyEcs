@@ -71,6 +71,8 @@ Per `docs/WRITING.md`, en and zh structurally identical:
   form first, with `You write` / `The generator writes` tabs (and in every headline example that uses the form:
   README `<details>`, docs home, getting started, the battle server walkthrough); a full example; how to use it fast; what it costs;
   pitfalls with their EECS rule; related Cards;
+- every term borrowed from another field (OpenMP, MPI, stencil, halo, shader, lanes) explained where first used or
+  in the page's "Before you start" section, with a glossary entry (WRITING.md);
 - complexity rows in `docs/content/api.mdx` + `.zh.mdx`; XML docs with zh entries in `tools/ApiDocs/zh`;
 - numbers only through `docs/src/data/bench.json` (BenchTable), never typed on a page (decision records may quote);
 - a decision record for every non-obvious choice and dropped idea; the roadmap;
