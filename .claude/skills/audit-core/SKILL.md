@@ -7,7 +7,7 @@ metadata:
 
 # Core audit
 
-CLAUDE.md's engineering principles and rules apply (performance first, zero allocation on hot paths, structural gate,
+AGENTS.md's engineering principles and rules apply (performance first, zero allocation on hot paths, structural gate,
 `StorageVersion`, `EntityMeta` only); a fix is done when the `feature` checklist is.
 
 ## Look for

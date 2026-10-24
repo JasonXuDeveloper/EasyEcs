@@ -37,7 +37,7 @@ what it left undone, which goes on the same list (nothing is dropped silently).
 
 - A new worktree may start on an old commit (`origin/master`), not on the work branch. The prompt must say:
   `git checkout -B <audit-branch> <work-branch>`, then check `git merge-base --is-ancestor <work-branch-tip> HEAD`.
-- Give each agent: its skill, its owned paths, the paths it must not touch, the commit command (CLAUDE.md: author =
+- Give each agent: its skill, its owned paths, the paths it must not touch, the commit command (AGENTS.md: author =
   owner, committer = signing identity, no session links), "commit on your branch, do not push or merge".
 - Decision numbers collide between parallel agents: give each a distinct range (e.g. next free D, next free D + 1).
 - Docs edits from code audits stay minimal: XML docs with their zh entries and the `api.mdx` complexity row; the
@@ -61,6 +61,6 @@ what it left undone, which goes on the same list (nothing is dropped silently).
    duplicated D and fix its anchors and links.
 4. After the code audits are merged, run `audit-docs` once over everything with the collected docs to-dos.
 5. Finish with `verify`, then fast-forward `master` (no PR unless asked) and push. The owner cuts the release.
-6. Update the skills with what the round taught, then cross-check them (CLAUDE.md, Workflows).
+6. Update the skills with what the round taught, then cross-check them (AGENTS.md, Workflows).
 7. Remove finished worktrees (`git worktree remove`, `git worktree prune`): a stale worktree makes BenchmarkDotNet
    find two matching projects.

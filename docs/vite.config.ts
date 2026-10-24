@@ -130,7 +130,7 @@ function afterBuild(): Plugin {
 
 /**
  * The release the docs describe: the newest "## X.Y.Z" section of the changelog, which is written for the coming
- * release before it is cut (docs/CLAUDE.md), shown as major.minor.
+ * release before it is cut (docs/AGENTS.md), shown as major.minor.
  */
 function docsVersion() {
   const changelog = readFileSync(

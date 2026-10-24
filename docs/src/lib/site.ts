@@ -45,7 +45,7 @@ export const ogLocale: Record<Locale, string> = {
 /**
  * Search engine verification codes, read at build time from Vite env
  * variables (set them on the Cloudflare Pages project). Empty ones are not
- * rendered. See docs/CLAUDE.md, "SEO and GEO".
+ * rendered. See docs/AGENTS.md, "SEO and GEO".
  */
 export const siteVerification = {
   google: import.meta.env.VITE_GOOGLE_SITE_VERIFICATION as string | undefined,

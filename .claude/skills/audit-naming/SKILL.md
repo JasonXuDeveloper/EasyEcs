@@ -21,7 +21,7 @@ A name is the first doc a reader sees. This audit covers every name, not only th
 | Skills | skill names and descriptions (agents choose a skill by them), the public skill's terms matching the API |
 | Chinese | one term per concept (`tools/ApiDocs/zh/README.md` glossary), the same term in pages, ApiDocs and the public skill |
 
-1. **Read what is settled**: CLAUDE.md, `docs/content/glossary.mdx`, `ecs-principles.mdx`, `decisions.mdx` (naming
+1. **Read what is settled**: AGENTS.md, `docs/content/glossary.mdx`, `ecs-principles.mdx`, `decisions.mdx` (naming
    records and "Not added" records) and the renames in `migration.mdx`. Never re-propose a settled name without a
    new, concrete reason.
 2. **See the generated names**: `dotnet build tests/EasyEcs.UnitTest -p:EmitCompilerGeneratedFiles=true`, then read
@@ -70,5 +70,5 @@ A name is the first doc a reader sees. This audit covers every name, not only th
   - `api.mdx`, and `tools/ApiDocs` zh entries;
   - a decision record;
   - analyzer and code-fix strings, samples, templates, the demo.
-- **Stale names**: `grep -rn "<old>" docs/content CLAUDE.md README.md samples templates demo` must show only the
+- **Stale names**: `grep -rn "<old>" docs/content AGENTS.md README.md samples templates demo` must show only the
   history pages (changelog, migration, decisions).

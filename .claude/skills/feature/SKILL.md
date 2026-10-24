@@ -42,7 +42,7 @@ part names the skill that audits it.
     member, an attribute, a parameter: users miss Info); Info only for hints the user may not be able to act on.
 - The message names the type or member and the fix; a scalar fallback's reason comes from `Kernel.Vectorize` and names the part to split when the user can fix it (`audit-vector-loops`).
 - Tests: positive cases, negative cases, false-positive guards, the overlap test (one diagnostic per mistake).
-- The rule list and range in CLAUDE.md, `docs/content/guide/analyzer.mdx` + `.zh.mdx`, `skills/easyecs/SKILL.md` (the public skill).
+- The rule list and range in AGENTS.md, `docs/content/guide/analyzer.mdx` + `.zh.mdx`, `skills/easyecs/SKILL.md` (the public skill).
 
 ## 4. Code fix (`audit-analyzer`)
 
@@ -73,7 +73,7 @@ Per `docs/WRITING.md`, en and zh structurally identical:
 - numbers only through `docs/src/data/bench.json` (BenchTable), never typed on a page (decision records may quote);
 - a decision record for every non-obvious choice and dropped idea; the roadmap;
 - changelog, README "What's new"; a migration entry for a breaking change;
-- `skills/easyecs/SKILL.md` (the public skill), the file map of each directory it touches (root CLAUDE.md layout, `src/*/CLAUDE.md`, `tests/` and `benchmarks/CLAUDE.md`);
+- `skills/easyecs/SKILL.md` (the public skill), the file map of each directory it touches (root AGENTS.md layout, `src/*/AGENTS.md`, `tests/` and `benchmarks/AGENTS.md`);
 - the battle server (`BattleServer.cs` regions + `example.mdx`) and the samples use the feature where it belongs.
 
 While code is still changing, collect these as docs to-dos; pages are written once at the end.
@@ -84,7 +84,7 @@ While code is still changing, collect these as docs to-dos; pages are written on
   identity; no session links.
 - Parallel work in worktrees on branches off the work branch (`audit`).
 - `verify` runs before anything reaches master.
-- What the change taught (a rule, a technique, a check) is written into the skill it belongs to (CLAUDE.md,
+- What the change taught (a rule, a technique, a check) is written into the skill it belongs to (AGENTS.md,
   Workflows).
 - Renames of released public API are reported first and applied after the owner's approval (`audit-naming`).
 - **Names**: every name the change adds (API, generated members, attributes, rule ids' titles, internal types,

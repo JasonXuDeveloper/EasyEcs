@@ -7,7 +7,7 @@ metadata:
 
 # Performance research and audit
 
-Performance is the first constraint (CLAUDE.md); GC is part of it. This skill finds the next win and proves it. It owns
+Performance is the first constraint (AGENTS.md); GC is part of it. This skill finds the next win and proves it. It owns
 no files: a finding is built by the skill that owns its files (`audit-core`, `audit-generator`, `audit-vector-loops`) or in
 its own worktree.
 

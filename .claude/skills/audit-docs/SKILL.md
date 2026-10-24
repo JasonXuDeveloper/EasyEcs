@@ -7,7 +7,7 @@ metadata:
 
 # Docs audit
 
-Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/CLAUDE.md` first.
+Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/AGENTS.md` first.
 
 ## Per page (en and zh)
 
@@ -65,7 +65,7 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/CLAUDE.md` first.
   `reference/` (ApiDocs, zh entries); `analyzer.mdx` for its rules; `skills/easyecs/SKILL.md` (the public skill); changelog, README
   "What's new", migration for a breaking change; a decision record for every non-obvious choice and dropped idea;
   the roadmap; the battle server (`BattleServer.cs` regions + `example.mdx` walkthrough) and the samples where it
-  belongs, as exemplary code; the file map of each directory it touches (root CLAUDE.md layout, `src/*/CLAUDE.md`, `tests/` and `benchmarks/CLAUDE.md`).
+  belongs, as exemplary code; the file map of each directory it touches (root AGENTS.md layout, `src/*/AGENTS.md`, `tests/` and `benchmarks/AGENTS.md`).
 - **Inspiration is named where it helps** (OpenMP `threadprivate` for `Scratch<T>`, `reduction` for `Reduce<T>`,
   stencil halos for `Tile<,>`, Burst for vector loops): one clause in "what it is", the comparison in decisions.
 - **Docs come last**: while code still changes, agents collect docs to-dos instead of editing pages; one full pass

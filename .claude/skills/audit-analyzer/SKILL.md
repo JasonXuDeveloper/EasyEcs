@@ -12,7 +12,7 @@ that works but costs), `.Usage.cs` (code that compiles but does not do what it s
 declarations), `.Parallel.cs` (code on several threads), `.Parts.cs` (generated parts), `.Forms.cs` (what the
 generator declares for code written by hand), `.Parameters.cs` ([ForEach] parameters done by hand),
 `UnusedSuppressor.cs`, `Symbols.cs` (shared with the generators), `Uses.cs`, `Threads.cs`; fixes in
-`src/EasyEcs.CodeFixes`. Rule list: `docs/content/guide/analyzer.mdx` and the range in CLAUDE.md (EECS002-089).
+`src/EasyEcs.CodeFixes`. Rule list: `docs/content/guide/analyzer.mdx` and the range in AGENTS.md (EECS002-089).
 
 ## Coverage (`feature`, part 3)
 
@@ -69,4 +69,4 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
 - Tests: positive and negative cases per rule, false-positive guards, a code-fix test per fix, the overlap test.
 - Docs (to-dos for the docs pass): `analyzer.mdx` + `.zh` (section, table row, fix line), changelog, a decision for a
   new rule or a dropped idea, `skills/easyecs/SKILL.md` (the public skill), common-mistakes / troubleshooting if users meet it, the
-  rule list and EECS range in `src/EasyEcs.Generator/CLAUDE.md`.
+  rule list and EECS range in `src/EasyEcs.Generator/AGENTS.md`.
