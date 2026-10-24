@@ -128,7 +128,8 @@ internal sealed partial class Kernel
     private readonly Dictionary<IParameterSymbol, Reduction> _reductions = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<ILocalSymbol, string> _locals = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<string, string> _broadcasts = new();
-    private readonly StringBuilder _setup = new(), _body = new();
+    private readonly StringBuilder _setup = new();
+    private readonly Body _body = new();
     private readonly HashSet<int> _written = new();
     /// <summary>
     /// The Maybe&lt;T&gt; / ReadOnlyMaybe&lt;T&gt; parameters: their position i (the job's column <c>m{i}</c>) and T's lane
@@ -157,6 +158,49 @@ internal sealed partial class Kernel
     {
         _size = _base = size;
         _mask = MaskOf(size);
+    }
+
+    /// <summary>
+    /// The loop's statements as two texts: for every row of a vector, and for a word of rows of which some pass
+    /// (<c>__pass</c>), where a write of what the loop stores (a component's lane, a reduction's accumulator, an optional's
+    /// lane) also leaves the lanes that do not pass as they are: <c>__pass</c> joins its mask, so no store or fold
+    /// selects them back afterwards (<see cref="Write"/>).
+    /// </summary>
+    private sealed class Body
+    {
+        private readonly StringBuilder _all = new(), _masked = new();
+
+        public Body Append(string text)
+        {
+            _all.Append(text);
+            _masked.Append(text);
+            return this;
+        }
+
+        /// <summary>A statement written one way for whole vectors, another for masked words.</summary>
+        public void Append(string all, string masked)
+        {
+            _all.Append(all);
+            _masked.Append(masked);
+        }
+
+        public void Insert(int at, string text)
+        {
+            _all.Insert(at, text);
+            _masked.Insert(at, text);
+        }
+
+        /// <summary>Both texts' lengths, to undo a branch (<see cref="Save"/>).</summary>
+        public (int All, int Masked) Length
+        {
+            get => (_all.Length, _masked.Length);
+            set => (_all.Length, _masked.Length) = value;
+        }
+
+        /// <summary>The text for masked words.</summary>
+        public string Masked => _masked.ToString();
+
+        public override string ToString() => _all.ToString();
     }
 
     /// <summary>The lane type of masks of lanes of <paramref name="size"/> bytes.</summary>
@@ -588,8 +632,10 @@ internal sealed partial class Kernel
             }
             foreach (var (h, row) in kernel.Rows(index, column))
             {
-                string Blend(int f) => $"{V}.ConditionalSelect({kernel.PassAs(h, Elem(fields[f].Type))}, __c{index}_{f}{h}, __o{index}_{f}{h})";
-                for (int f = 0; f < fields.Length; f++) kept.Append($"var __o{index}_{f}{h} = __c{index}_{f}{h};\n");
+                // A pair's halves are written in every lane: their passing lanes are selected here. The other columns'
+                // writes kept the lanes that do not pass (Kernel.Write).
+                string Blend(int f) => h.Length == 0 ? $"__c{index}_{f}" : $"{V}.ConditionalSelect({kernel.PassAs(h, Elem(fields[f].Type))}, __c{index}_{f}{h}, __o{index}_{f}{h})";
+                if (h.Length > 0) for (int f = 0; f < fields.Length; f++) kept.Append($"var __o{index}_{f}{h} = __c{index}_{f}{h};\n");
                 stores.Append(fields.Length == 1
                     ? $"{V}.StoreUnsafe(__c{index}_0{h}, ref e{index}, {row});\n"
                     : $"{Interleaved}.Store{fields.Length}({string.Join(", ", fields.Select((field, f) => As(Elem(field.Type), column, $"__c{index}_{f}{h}")))}, ref e{index}, {row});\n");
@@ -604,13 +650,11 @@ internal sealed partial class Kernel
         foreach (var (index, fields) in kernel._optionals.Values.Where(o => kernel._writtenOptionals.Contains(o.Index)).OrderBy(o => o.Index))
         {
             string column = Elem(fields[0].Type);
-            string Blend(int f) => $"{V}.ConditionalSelect({As(kernel._mask, Elem(fields[f].Type), "__pass")}, __q{index}_{f}, __k{index}_{f})";
-            for (int f = 0; f < fields.Length; f++) kept.Append($"var __k{index}_{f} = __q{index}_{f};\n");
             string Store(System.Func<int, string> value) => fields.Length == 1
                 ? $"if (__z{index} != 0) {V}.StoreUnsafe({value(0)}, ref __r{index}, (nuint)i);\n"
                 : $"if (__z{index} != 0) {Interleaved}.Store{fields.Length}({string.Join(", ", fields.Select((field, f) => As(Elem(field.Type), column, value(f))))}, ref __r{index}, (nuint)i);\n";
             stores.Append(Store(f => $"__q{index}_{f}"));
-            masked.Append(Store(Blend));
+            masked.Append(Store(f => $"__q{index}_{f}")); // its writes kept the lanes that do not pass
             kernel._setup.Append($"m{index}.StampPresent((int)rows, {Visited});\n");
         }
         // The reductions' lane accumulators: kept before the body (a bail sets them back, a masked word keeps the lanes
@@ -631,7 +675,7 @@ internal sealed partial class Kernel
                 {
                     held.Append($"var __h{r.Index}_{f}{h} = {acc}{h};\n");
                     restore.Append($"{acc}{h} = __h{r.Index}_{f}{h};\n");
-                    masked.Insert(0, $"{acc}{h} = {V}.ConditionalSelect({kernel.PassAs(h, type)}, {acc}{h}, __h{r.Index}_{f}{h});\n");
+                    if (h.Length > 0) masked.Insert(0, $"{acc}{h} = {V}.ConditionalSelect({kernel.PassAs(h, type)}, {acc}{h}, __h{r.Index}_{f}{h});\n");
                 }
                 // lane j of the loop's vectors: lane j of a pair's lower half, or lane j - Count of its upper one
                 fold.Append(pair
@@ -643,6 +687,8 @@ internal sealed partial class Kernel
         string prologue = kernel._bails ? "bool __bail = false;\n" : "";
         string live = kernel._live ? $"var __live = {Vec(kernel._mask)}.AllBitsSet;\n" : "", maskedLive = kernel._live ? "var __live = __pass;\n" : "";
         string hold = kernel._bails ? held.ToString() : "";
+        // A masked word holds the accumulators for a bail and for a pair's fold.
+        string maskedHold = kernel._bails || kernel._reductions.Values.Any(r => r.Fields.Any(f => kernel.IsDoubled(f.Type))) ? held.ToString() : "";
         if (kernel._wideOf.Count > 0) kernel.Gate();
         string uses = kernel._body.ToString() + stores + masked + kernel._setup;
         var read = new StringBuilder();
@@ -660,7 +706,7 @@ internal sealed partial class Kernel
         // The passing rows of a masked word as masks of a pair's halves, for the stores and the lanes of what it writes.
         if (kernel._halvesPass) kept.Insert(0, $"var __pw_0 = {V}.WidenLower(__pass);\nvar __pw_1 = {V}.WidenUpper(__pass);\n");
         return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
-            kernel._setup.ToString(), prologue + live + read + hold + kernel._body, stores.ToString(), prologue + maskedLive + read + kept + held + kernel._body, masked.ToString(),
+            kernel._setup.ToString(), prologue + live + read + hold + kernel._body, stores.ToString(), prologue + maskedLive + read + kept + maskedHold + kernel._body.Masked, masked.ToString(),
             restore.ToString(), fold.ToString(), kernel._size, kernel._mask, Elem(first), kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
             kernel._bails, flat, kernel._cold, kernel._wideOf.Count == 0 ? null : string.Join(" && ", kernel._components.Where(c => kernel._wideOf.ContainsKey(c.Key)).Select(c => $"__layout{c.Value.Index}")),
             kernel._statics.ToString())
@@ -960,7 +1006,7 @@ internal sealed partial class Kernel
     }
 
     /// <summary>What a translation changes, kept to undo a branch that turns out cold.</summary>
-    private sealed record State(int Body, int Setup, int Temps, Dictionary<ILocalSymbol, string> Locals, HashSet<ILocalSymbol> PairLocals, Dictionary<ILocalSymbol, Wide> Wides,
+    private sealed record State((int, int) Body, int Setup, int Temps, Dictionary<ILocalSymbol, string> Locals, HashSet<ILocalSymbol> PairLocals, Dictionary<ILocalSymbol, Wide> Wides,
         Dictionary<ILocalSymbol, string?[]> Structs, HashSet<int> Written, HashSet<int> WrittenOptionals, Dictionary<string, HashSet<int>> Implied,
         HashSet<string> Guarded, Dictionary<string, string> Broadcasts, Dictionary<string, (string, string)> MaskHalves, string? Alive, bool Bails, bool Live);
 
@@ -1065,14 +1111,27 @@ internal sealed partial class Kernel
         Write(name, value, target.Type!, mask);
     }
 
-    /// <summary><paramref name="name"/> = <paramref name="value"/> in the lanes of <paramref name="mask"/> that have not returned.</summary>
+    /// <summary>
+    /// <paramref name="name"/> = <paramref name="value"/> in the lanes of <paramref name="mask"/> that have not returned;
+    /// in a masked word, a value the loop stores (<see cref="Kept"/>) in the passing lanes only.
+    /// </summary>
     private void Write(string name, string value, ITypeSymbol type, string? mask)
     {
         string? active = And(mask, _alive);
         _maskHalves.Remove(name); // a bool local written: the halves it held are not its value any more
-        _body.Append(active == null ? $"{name} = {value};\n"
-            : $"{name} = {V}.ConditionalSelect({(_half < 0 ? MaskAs(active, type) : As(_mask, IsBool(type) ? _mask : Elem(type), WidenMask(active)))}, {value}, {name});\n");
+        string Select(string? lanes) => lanes == null ? $"{name} = {value};\n"
+            : $"{name} = {V}.ConditionalSelect({(_half < 0 ? MaskAs(lanes, type) : As(_mask, IsBool(type) ? _mask : Elem(type), WidenMask(lanes)))}, {value}, {name});\n";
+        _body.Append(Select(active), _half < 0 && Kept(name) ? Select(And(active, "__pass")) : Select(active));
     }
+
+    /// <summary>
+    /// A vector the loop stores or folds after the body: a component's lane (<c>__c1_0</c>), a reduction's accumulator
+    /// (<c>__a2_0</c>) or an optional's lane (<c>__q1_0</c>), not a pair's half (<c>__c1_0_1</c>). Its writes in a
+    /// masked word keep the lanes that do not pass, so it is stored or folded as it is.
+    /// </summary>
+    private static bool Kept(string name) =>
+        name.Length > 3 && name.StartsWith("__", System.StringComparison.Ordinal) && name[2] is 'c' or 'a' or 'q' && char.IsDigit(name[3])
+        && name.Count(c => c == '_') == 3;
 
     /// <summary>
     /// Refuses a write to a singleton or a value before its value is translated, so the reason names the write (a sum
