@@ -59,7 +59,10 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              Kernel.Wide.cs: components of up to 16 words on AVX-512 (fields gathered by a pruned
                              permute tree, where it pays);
                              Kernel.Pairs.cs: lanes of two sizes (int rows summed into a long, float into a double) as
-                             pairs of vectors (WidenLower / WidenUpper), every lane bit-exact; four times as wide stays scalar
+                             pairs of vectors (WidenLower / WidenUpper), every lane bit-exact; four times as wide stays scalar;
+                             Kernel.Structural.cs: a structural change of the row's entity under a condition (marked
+                             rows, applied in bulk after the pass: Code.StructuralChanges) and Emit<T> records of a
+                             lane or the entity's id (Code.VectorTail: every row takes the vector form)
 EasyEcsAnalyzer.Usage.cs     EECS037-038, EECS040-045 and EECS047-051: calls and declarations that compile but do not
                              do what they say (a job's WriteMask, a dropped copy, SetIfChanged that cannot compare, calls
                              a pass refuses, an index added to while walked, a record key that prints itself, a sliced

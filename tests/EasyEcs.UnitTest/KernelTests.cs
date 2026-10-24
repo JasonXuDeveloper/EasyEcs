@@ -1073,9 +1073,9 @@ public class KernelTests
         {
             "Move: vector (Vector512 or Vector<float>), flat, masked words vector",
             "Hurt: vector (Vector512 or Vector<float>), masked words vector, cold branch (it calls Console.WriteLine)",
-            "Mark: scalar (it takes the Entity)",
+            "Mark: scalar (it uses the Entity in 'entity.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>))",
         }));
-        Assert.That(world.DescribeSchedule().ToString(), Does.Contain("      loop Mark: scalar (it takes the Entity)\n"));
+        Assert.That(world.DescribeSchedule().ToString(), Does.Contain("      loop Mark: scalar (it uses the Entity in 'entity.Id.Index'"));
     }
 
     private delegate void NarrowRow<TO, TA, TB>(ref TO o, in TA a, in TB b);

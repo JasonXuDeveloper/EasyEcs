@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 
@@ -73,6 +74,29 @@ public static class Interleaved
     {
         var bits = Masks.Bits64x8;
         return Vector512.Equals(Vector512.Create((long)(rows >> first)) & bits, bits);
+    }
+
+    /// <summary>
+    /// The last <paramref name="count"/> rows of a run (fewer than a vector's) copied from <paramref name="rows"/> into
+    /// this thread's copy of 64 rows of <typeparamref name="T"/>, which a vector loop then reads whole: a loop whose rows
+    /// must all take the vector form (it marks rows for a change after the pass) runs its last vector there, the lanes
+    /// past <paramref name="count"/> masked off. <see cref="StoreTail{T}"/> writes the rows back. O(count).
+    /// </summary>
+    public static ref T LoadTail<T>(ref T rows, int count) where T : struct
+    {
+        var copy = Tail<T>.Rows ??= new T[64];
+        MemoryMarshal.CreateReadOnlySpan(ref rows, count).CopyTo(copy);
+        return ref MemoryMarshal.GetArrayDataReference(copy);
+    }
+
+    /// <summary>Write the <paramref name="count"/> rows of this thread's copy (<see cref="LoadTail{T}"/>) back to <paramref name="rows"/>. O(count).</summary>
+    public static void StoreTail<T>(ref T rows, int count) where T : struct =>
+        Tail<T>.Rows.AsSpan(0, count).CopyTo(MemoryMarshal.CreateSpan(ref rows, count));
+
+    // One copy per thread and type: a vector loop's columns are of distinct types, and it runs no other loop meanwhile.
+    private static class Tail<T>
+    {
+        [ThreadStatic] public static T[] Rows;
     }
 
     /// <summary>Lane j holds bit j: the row of each lane in a word's bits.</summary>

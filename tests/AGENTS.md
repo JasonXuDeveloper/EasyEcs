@@ -12,7 +12,7 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                ForEntity, Consume, Form (EECS080 / EECS084),
                                Changed (and Mut, ChangedAny), Removed (and the destroy log), Instantiate, DynamicBuffer,
                                Index (and unique keys), Tile, OrderedIndex, Relation, Hierarchy, TargetPolicy, Group, Cleanup,
-                               Disable, Bulk, Move, Part (generated parts, EECS062-069), Snapshot, Serialization (and restart saves), Unload, Introspection
+                               Disable, Bulk, Move, StructuralLoop (structural changes in vector loops against their scalar twins), Part (generated parts, EECS062-069), Snapshot, Serialization (and restart saves), Unload, Introspection
                                (and Trim, DescribeSchedule), Generic, Allocation (0 B budget), Emit (and EECS092), HotCold (EECS091), ForParallel, EntityRandom,
                                Generator (diagnostics + caching), CodeFix, BattleServer (the world of
                                docs/content/example.mdx as a whole, linked from EasyEcs.Benchmark); Fixtures.cs holds

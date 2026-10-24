@@ -171,6 +171,196 @@ public sealed partial class World
         StorageVersion++; // passes re-read presence bits
     }
 
+    // ---------------- marked rows (MarkedRows): the bulk change after a pass ----------------
+
+    // The world's pool of marks: a stack, owner thread only.
+    internal MarkedRows _freeMarks;
+
+    internal void SetMarked<T>(MarkedRows marks, in T value) where T : struct, IComponent
+    {
+        var op = new SetOp<T> { Value = value, Bit = ComponentType<T>.Bit };
+        bool pass = false;
+        using (Structural())
+        {
+            marks.CheckUnmoved();
+            if (ComponentType<T>.Unique)
+            {
+                var index = UniqueIndex(op.Bit);
+                index.BeginBatch();
+                var claim = new ClaimOp<T> { Index = Unsafe.As<IUniqueOf<T>>(index), Value = value, Bit = op.Bit };
+                WalkMarks(marks, ref claim, ref pass);
+            }
+
+            WalkMarks(marks, ref op, ref pass);
+        }
+
+        EndMarks(marks, pass);
+    }
+
+    internal void RemoveMarked<T>(MarkedRows marks) where T : struct, IComponent
+    {
+        var op = new RemoveMarkedOp { Remove = new RemoveOp { Bit = ComponentType<T>.Bit } };
+        bool pass = false;
+        using (Structural())
+        {
+            marks.CheckUnmoved();
+            WalkMarks(marks, ref op, ref pass);
+            if (_targetCount != 0) FollowLinks(); // a retired entity freed by losing its last cleanup component
+        }
+
+        EndMarks(marks, pass);
+    }
+
+    internal void DisableMarked<T>(MarkedRows marks) where T : struct, IComponent
+    {
+        Entity.ThrowIfNotDisableable<T>();
+        var op = new DisableOp { Bit = ComponentType<T>.Bit, Tag = DisabledType<T>.Bit };
+        bool pass = false;
+        using (Structural())
+        {
+            marks.CheckUnmoved();
+            WalkMarks(marks, ref op, ref pass);
+        }
+
+        EndMarks(marks, pass);
+    }
+
+    internal void EnableMarked<T>(MarkedRows marks) where T : struct, IComponent
+    {
+        var op = new EnableOp<T> { Bit = ComponentType<T>.Bit, Tag = DisabledType<T>.Bit };
+        bool pass = false;
+        using (Structural())
+        {
+            marks.CheckUnmoved();
+            if (ComponentType<T>.Unique)
+            {
+                var index = UniqueIndex(op.Bit);
+                index.BeginBatch();
+                var claim = new ClaimKeptOp<T> { Index = Unsafe.As<IUniqueOf<T>>(index), Bit = op.Bit, Tag = op.Tag };
+                WalkMarks(marks, ref claim, ref pass);
+            }
+
+            WalkMarks(marks, ref op, ref pass);
+        }
+
+        EndMarks(marks, pass);
+    }
+
+    internal void DestroyMarked(MarkedRows marks)
+    {
+        PrepareCascade();
+        bool pass = false;
+        using (Structural())
+        {
+            marks.CheckUnmoved();
+            // A table whose every row is marked is freed at once (no row moves, one clear), as DestroyAll frees one, its
+            // ids in row order; the others row by row. Tables in the order the pass marked them: the method's order.
+            var op = new DestroyOp();
+            for (int start = 0, end; start < marks.Count; start = end)
+            {
+                var table = marks.Table(start);
+                int marked = BitOperations.PopCount(marks.Bits(start));
+                for (end = start + 1; end < marks.Count && ReferenceEquals(marks.Table(end), table); end++) marked += BitOperations.PopCount(marks.Bits(end));
+                if (marked == table.Count && table.Count == table.AliveCount && !table.HasCleanup && Volatile.Read(ref PassDepth) == (pass ? 1 : 0))
+                    FreeTable(table, ascending: true); // no other pass runs (the walk's own leaves this table's rows alone)
+                else WalkTable(marks, start, end, ref op, ref pass);
+            }
+
+            StorageVersion++;
+            if (_targetCount != 0) FollowLinks();
+        }
+
+        EndMarks(marks, pass);
+    }
+
+    /// <summary>
+    /// Apply <paramref name="op"/> to the marked rows of <paramref name="marks"/>, inside the structural gate, in the
+    /// order the pass marked them (its tables in query order, rows ascending): the order the method itself would have
+    /// changed them in. A table without tombstones whose rows the op changes in place goes a word (64 rows) at a time.
+    /// The others go row by row inside a pass (<paramref name="pass"/>, opened once, ended by <see cref="EndMarks"/>), so
+    /// a row that moves away leaves a tombstone, as it would during the method's own pass: the rows land in their new
+    /// tables in the method's order, and the tombstones close as that pass's would, which keeps every table's row order
+    /// (the order later passes visit and emit in) the method's.
+    /// </summary>
+    private void WalkMarks<TOp>(MarkedRows marks, ref TOp op, ref bool pass) where TOp : struct, IRowOp
+    {
+        for (int start = 0, end; start < marks.Count; start = end)
+        {
+            var table = marks.Table(start);
+            for (end = start + 1; end < marks.Count && ReferenceEquals(marks.Table(end), table); end++) { }
+            WalkTable(marks, start, end, ref op, ref pass);
+        }
+
+        StorageVersion++; // passes re-read presence bits
+    }
+
+    /// <summary>The records <paramref name="start"/> to <paramref name="end"/> of <see cref="WalkMarks"/>: those of one table.</summary>
+    private void WalkTable<TOp>(MarkedRows marks, int start, int end, ref TOp op, ref bool pass) where TOp : struct, IRowOp
+    {
+        var table = marks.Table(start);
+        if (table.AliveCount == 0) return;
+        if (table.Count == table.AliveCount && op.Words(this, table))
+        {
+            for (int r = start; r < end; r++)
+                if ((marks.Bits(r) & RowFilter.RowMask(marks.Word(r), table.Count)) is var rows and not 0)
+                    op.ApplyWord(this, table, marks.Word(r), rows);
+            return;
+        }
+
+        if (!pass)
+        {
+            Interlocked.Increment(ref PassDepth); // the gate is held: no pass starts or ends meanwhile
+            pass = true;
+        }
+
+        for (int r = start; r < end; r++)
+        {
+            int w = marks.Word(r);
+            for (ulong bits = marks.Bits(r); bits != 0; bits &= bits - 1)
+            {
+                int slot = (w << 6) + BitOperations.TrailingZeroCount(bits);
+                if (slot >= table.Count) break; // past the rows of the table (bits ascend)
+                var entity = table.Slots[slot];
+                if (entity.Index >= 0) op.Apply(this, table, slot, entity); // a tombstone: a row destroyed by a cascade
+            }
+        }
+    }
+
+    /// <summary>After a walk: the pass it opened ended (its tombstones closed, outside the gate), the marks returned.</summary>
+    private void EndMarks(MarkedRows marks, bool pass)
+    {
+        if (pass) EndPass();
+        marks.Return();
+    }
+
+    // RemoveOp over marked rows: a row may hold T disabled (Remove drops it too), which only the row path handles.
+    private struct RemoveMarkedOp : IRowOp
+    {
+        public RemoveOp Remove;
+
+        public readonly bool Words(World world, Archetype table) => Remove.Words(world, table) && !table.HasDisabled;
+
+        public void ApplyWord(World world, Archetype table, int word, ulong rows) => Remove.ApplyWord(world, table, word, rows);
+
+        public void Apply(World world, Archetype table, int slot, EntityId entity) => Remove.Apply(world, table, slot, entity);
+    }
+
+    // The claims of an enable of unique T over marked rows: the kept values of the rows that hold T disabled.
+    private struct ClaimKeptOp<T> : IRowOp where T : struct, IComponent
+    {
+        public IUniqueOf<T> Index;
+        public ushort Bit, Tag;
+
+        public readonly bool Words(World world, Archetype table) => false;
+
+        public readonly void ApplyWord(World world, Archetype table, int word, ulong rows) { }
+
+        public readonly void Apply(World world, Archetype table, int slot, EntityId entity)
+        {
+            if (table.ColumnIndex(Tag) is var tag and >= 0 && table.Has(tag, slot)) Index.ClaimBatch(entity.Index, in table.Ref<T>(Bit, slot));
+        }
+    }
+
     /// <summary>The tick column of the tracked component of <paramref name="column"/> in <paramref name="table"/>, or -1.</summary>
     private static int TicksOf(Archetype table, int column) =>
         table.Tracked && table.Info(column).Companion is var ticks and >= 0 ? table.ColumnIndex(ticks) : -1;

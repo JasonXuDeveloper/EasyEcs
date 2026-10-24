@@ -245,7 +245,21 @@ public class GeneratorTests
     [TestCase("[ForEach(Parallel = true)] static void A(ref F f) => f.V++;", true)]                    // parallel: in each chunk
     [TestCase("[ForEach(Parallel = true)] static void A(ref Two t, in G g) => t.A -= t.B * g.Pull;", true)]
     [TestCase("[ForEach(Parallel = true)] static void A(in P p, ref Reduce<Count> c) => c.Value.N += p.V;", true)]
-    [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V++;", false)]
+    [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V++;", true)] // the Entity unused: the loop needs no handle
+    // A structural change of the row's entity under a condition: marked, applied in bulk after the pass.
+    [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V <= 0) e.Set(new H()); }", true)]
+    [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V <= 0) e.SetH(2); }", true)]          // generated: new H { V = 2 }
+    [TestCase("[ForEach] static void A(Entity e, ref F f) { if (f.V > 9) e.RemoveH(); else f.V++; }", true)]
+    [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V > 9 || f.V < -9) e.Remove<H>(); }", true)]
+    [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V < 0) return; e.Disable<H>(); }", true)]
+    [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V < 0) e.Destroy(); }", true)]
+    [TestCase("[ForEach] static void A(Entity e, in F f, Emit<Hit> h) { if (f.V < 0) { e.SetH(1); h.Add(new Hit(e.Id)); } } public record struct Hit(EntityId Who);", true)]
+    [TestCase("[ForEach] static void A(in F f, Emit<Score> s) { if (f.V > 1) s.Add(new Score(f.V * 2)); } public record struct Score(float V);", true)]
+    [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V <= 0) e.SetH(f.V); }", false)]      // a value per row
+    [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V < 0) e.Set(new H()); else e.Remove<D>(); }", false)] // two changes
+    [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V < 0) e.RemoveF(); }", false)]        // the component it takes
+    [TestCase("[ForEach] static void A(Entity e, in F f, Emit<Hit> h) { if (f.V < 0) { e.Destroy(); h.Add(new Hit(e.Id)); } } public record struct Hit(EntityId Who);", false)]
+    [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V < 0) e.SetH(1); if (f.V > 5) System.Console.WriteLine(); }", false)] // a cold branch
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Count> c) { c.Value.N++; c.Value.Low = System.Math.Min(c.Value.Low, p.V); }", true)] // reductions
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Count> c) => c.Combine(new Count { N = p.V, Low = p.V });", true)]
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;", true)]
@@ -271,8 +285,10 @@ public class GeneratorTests
         Assert.That(generated.Contains("for (nint last = rows - global::System.Numerics.Vector<"), Is.EqualTo(vectorized), generated);
         // Vector512 first where the hardware runs it, then Vector<T> for the rows left.
         Assert.That(generated.Contains("for (nint last = rows - global::System.Runtime.Intrinsics.Vector512<"), Is.EqualTo(vectorized), generated);
-        Assert.That(generated.IndexOf("Vector512.IsHardwareAccelerated", System.StringComparison.Ordinal)
-            < generated.IndexOf("global::System.Numerics.Vector.IsHardwareAccelerated", System.StringComparison.Ordinal), Is.EqualTo(vectorized), generated);
+        // (In the job's Execute: a job that marks rows also names Vector.IsHardwareAccelerated in its Vectorizes.)
+        int execute = System.Math.Max(0, generated.IndexOf("public void Execute(global::EasyEcs.EntitySpan", System.StringComparison.Ordinal));
+        Assert.That(generated.IndexOf("Vector512.IsHardwareAccelerated", execute, System.StringComparison.Ordinal)
+            < generated.IndexOf("global::System.Numerics.Vector.IsHardwareAccelerated", execute, System.StringComparison.Ordinal), Is.EqualTo(vectorized), generated);
         // A vector loop also takes words of rows of which some pass, as a lane mask (IForEachMasked); a parallel one
         // runs each chunk's runs of rows (ForEachBatchParallel).
         bool parallel = members.Contains("Parallel = true");
@@ -356,7 +372,12 @@ public class GeneratorTests
         Assert.That(ids, Has.None.EqualTo("EECS055"));
     }
 
-    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, ref F f) => f.V++;", "it takes the Entity")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, ref F f) => f.V = e.Id.Index;", "it uses the Entity in 'e.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>)")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V <= 0) e.SetH(f.V); }", "'e.SetH(f.V)' sets H to a value that differs per row: a vector loop gives the rows it marks one value; set the tag here and the value in a [ForEach] method over the tag")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.Set(new H()); else e.Remove<D>(); }", "it makes two structural changes ('e.Set(new H())' and 'e.Remove<D>()'): a vector loop applies one; split the method into one [ForEach] method per change")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.RemoveF(); }", "it changes F, which it also takes as 'f': the change would be seen at once by the method and after the pass by a vector loop; change it in a [ForEach] method of its own")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.Clone(); }", "it calls 'e.Clone()': a vector loop applies one Set, Remove, Disable, Enable or Destroy of one component to the rows it marks")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.SetH(1); if (f.V > 5) System.Console.WriteLine(); }", "it calls Console.WriteLine, in a branch of a method that changes structure: a vector loop sends such a branch's rows to the method, which cannot change structure during the pass; move that branch into a [ForEach] method of its own")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require, Parallel = true)] static void A(ref F f, in B8 b) => f.V++;", "lane types byte and float differ in size: a vector loop takes lanes of one size and of twice that size, not 4 times")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 1 field it uses takes 9 permutes per 16 rows, more than its 1 vector operation gains; it uses 1 of Five's 5 fields (A): move it into a component of its own (a component of one field gets a vector loop)")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, Scratch<int> s) => f.V += s.Value;", "it takes a Scratch<Int32>: working memory a row at a time, not one per lane")]
