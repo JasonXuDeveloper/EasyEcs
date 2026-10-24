@@ -164,6 +164,17 @@ internal sealed record FusionSide(string Name, EquatableArray<string> Query, Equ
                 case Symbols.ParamKind.Optional:
                     if (!Symbols.IsReadOnlyMaybe(p.Type)) writes.Add(Fqn(Symbols.MaybeElement(p.Type)!));
                     break;
+                case Symbols.ParamKind.View:
+                    // Its fields are queried components: ref (or Mut<T>) ones written, ref readonly ones read.
+                    if (!Views.IsValid(p.Type)) blocker ??= $"{method.Name} takes an invalid view";
+                    else
+                        foreach (var field in Views.Fields((INamedTypeSymbol)p.Type))
+                        {
+                            string component = Fqn(field.Component);
+                            query.Add(component);
+                            if (field.Writes) writes.Add(component);
+                        }
+                    break;
                 case Symbols.ParamKind.Singleton:
                     (p.RefKind == RefKind.Ref ? singletons : reads).Add(Fqn(p.Type));
                     break;

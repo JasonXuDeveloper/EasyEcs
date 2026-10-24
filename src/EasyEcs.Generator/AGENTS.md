@@ -57,7 +57,7 @@ ComponentGenerator.cs        C# 14 extension members per component / singleton: 
                              item.X per Query<T1..Tn> shape the code calls, TypeRegistry registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                              lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
 EasyEcsAnalyzer.cs           EECS002-006, EECS009-024, EECS035-036, EECS054, EECS056, EECS070 and EECS072-073 (the
-                             declaration and [ForEach] rules of the range EECS002-097 that are not performance rules;
+                             declaration and [ForEach] rules of the range EECS002-102 that are not performance rules;
                              generators never report diagnostics)
 EasyEcsAnalyzer.Systems.cs   EECS007-008, EECS074-077 and EECS090: systems as declarations (state in a static field, a
                              reach into another system; an [EcsSystem] that is no ref struct, an instance member, a hook
