@@ -1311,11 +1311,11 @@ public class KernelTests
     }
 
     /// <summary>
-    /// A flat loop's masked words (2 and 4 fields of 4 bytes, 2 of 8): each row's bit in its lanes, the rows that do not
-    /// pass stored back as loaded.
+    /// Methods with a flat loop (2 and 4 fields of 4 bytes, 2 of 8, written whole or field by field) in masked words,
+    /// which split their fields: the passing rows as the method computes them, the others as they were.
     /// </summary>
     [TestCaseSource(nameof(HoleCases))]
-    public void FlatLoopsTakeTheMaskedWords(string pattern, int count)
+    public void FlatMethodsKeepTheRowsAMaskedWordLeaves(string pattern, int count)
     {
         var hole = Holes.First(h => h.Name == pattern).Hole;
         CheckHoles(count, hole, (r, i) => new Locus2(NextFloat(r, i), NextFloat(r, i + 1)), (r, i) => new Shift2(NextFloat(r, i + 2), NextFloat(r, i + 3)),

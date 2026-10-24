@@ -442,9 +442,8 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated.Contains("lanes = rows * 2;"), Is.EqualTo(flat), generated);
-        Assert.That(generated.Contains(flat ? "for (nint end = lanes - (lanes - i) % (global::System.Numerics.Vector<" : "for (nint last = rows - global::System.Numerics.Vector<"), Is.True, generated);
-        // The masked Execute takes the flat lanes too, each row's bit in its two lanes.
-        if (flat) Assert.That(generated, Does.Contain("i /= 2;").And.Contain("Interleaved.Lanes32In512(pass, (int)(i >> 1), 2);").And.Not.Contain("Interleaved.Load2("), generated);
+        Assert.That(generated.Contains("for (nint last = rows - global::System.Numerics.Vector<"), Is.True, generated); // masked words, or the loop
+        if (flat) Assert.That(generated, Does.Contain("i /= 2;").And.Contain("Interleaved.Load2("), generated);   // the masked Execute deinterleaves
     }
 
     // A parallel method's vector loop runs in each chunk's batch job: its singletons are the job's SingletonRefs, its
@@ -527,7 +526,7 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated, Does.Contain("lanes = rows * 2;").And.Contain("var __t1 = (__c1_0 + (__c2_0 * __u0));")
-            .And.Contain("Interleaved.Lanes32(pass, (int)(i >> 1), 2);").And.Not.Contain("__c1_1"), generated); // the flat loop, masked words too
+            .And.Contain("var __t2 = (__c1_1 + (__c2_1 * __u0));"), generated); // the flat loop, then the masked one per lane
     }
 
     // A wide component (a float, a bool, a byte and an int a row): the float lane gathered from 3 words per row by
