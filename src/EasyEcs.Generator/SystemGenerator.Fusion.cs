@@ -75,6 +75,23 @@ public sealed partial class SystemGenerator
     private static bool FusedPerRow(UpdateModel model, int start, int count, int second = 0) =>
         second == 0 && Enumerable.Range(start, count).All(i => model.Methods[i].Loop is "ForEach" or "ForEachEntity");
 
+    /// <summary>
+    /// The walk runs in blocks only from <c>SystemCode.FusedRows</c> rows (a check at run time); fewer rows run each pass
+    /// on its own, as if not fused: their rows stay in the cache between the passes, and the blocks would only add their
+    /// bookkeeping (FusionBenchmark Movement: 1.04-1.07 at 10,000 rows). Fused at any size: a per-row walk (one call per
+    /// row instead of two), a parallel one (one parallel region instead of two), and one where two methods write the same
+    /// component (the second store of each row stays in L1: Vitals, 0.60-0.68 at 10,000 rows).
+    /// </summary>
+    private static bool Sized(UpdateModel model, int start, int count, int second = 0)
+    {
+        if (FusedPerRow(model, start, count, second) || model.Methods[start].Parallel) return false;
+        var written = new HashSet<string>();
+        for (int i = start; i < start + count; i++)
+            foreach (var type in model.Methods[i].Fusion!.Writes.Distinct())
+                if (!written.Add(type)) return false;
+        return true;
+    }
+
     /// <summary>The job interface of a fused walk (without its type arguments).</summary>
     private static string FusedInterface(UpdateModel model, int start, int count, int second = 0)
     {
@@ -273,9 +290,7 @@ public sealed partial class SystemGenerator
         var owner = model.Owner;
         var first = model.Methods[start];
         string forEach = "__ForEach" + owner.TypeParameters, name = FusedName(model, start, count), local = $"fused{start}";
-        // A walk in blocks of rows pays only above the cache (SystemCode.FusedRows): fewer rows run each pass on its own,
-        // as if not fused. Per-row and parallel walks are fused at any size.
-        bool sized = !FusedPerRow(model, start, count) && !first.Parallel;
+        bool sized = Sized(model, start, count);
         if (sized)
         {
             sb.Append($"        if (world.Count<{string.Join(", ", FusedQuery(model, start, count))}>(in {forEach}.{name}Filter) < global::EasyEcs.SystemCode.FusedRows) // in cache: each pass on its own\n        {{\n");
@@ -459,10 +474,11 @@ public sealed partial class SystemGenerator
         string name = FusedName(both, 0, both.Methods.Length);
         sb.Append("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
         sb.Append($"internal static class {pair.CodeName}\n{{\n");
-        sb.Append($"    /// <summary>{pair.First.Owner.FlatName}, then {pair.Second.Owner.FlatName}, as one walk: the second's writes stamped at <paramref name=\"tick\"/>; false (nothing run) below SystemCode.FusedRows rows.</summary>\n");
+        sb.Append($"    /// <summary>{pair.First.Owner.FlatName}, then {pair.Second.Owner.FlatName}, as one walk: the second's writes stamped at <paramref name=\"tick\"/>; false when it ran nothing (too few rows: SystemCode.FusedRows).</summary>\n");
         sb.Append($"    public static bool Update({world} world, {handle} first, {handle} second, ulong tick)\n    {{\n");
         string query = string.Join(", ", FusedQuery(both, 0, both.Methods.Length));
-        sb.Append($"        if (world.Count<{query}>(in __ForEach.{name}Filter) < global::EasyEcs.SystemCode.FusedRows) return false; // in cache: each pass on its own\n");
+        if (Sized(both, 0, both.Methods.Length, second))
+            sb.Append($"        if (world.Count<{query}>(in __ForEach.{name}Filter) < global::EasyEcs.SystemCode.FusedRows) return false; // in cache: each pass on its own\n");
         var members = Enumerable.Range(0, both.Methods.Length).Select(k => $"j{k} = new __ForEach.{both.Methods[k].Name}Job{k}{Fields(both.Methods[k], "world")}");
         sb.Append($"        var fused = new __ForEach.{name} {{ {string.Join(", ", members)}, Tick = tick }};\n");
         string loop = FusedInterface(both, 0, both.Methods.Length, second).Substring(1);
