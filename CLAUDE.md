@@ -392,11 +392,11 @@ person can follow them as checklists). Update a skill when a round teaches somet
 | `verify` | before merging to master: build, tests, DocCheck, ApiDocs, docs site, samples, templates, demo |
 | `audit` | a review round: parallel audits in worktrees on the work branch, triage, merge, docs pass, verify |
 | `audit-core` | redundancy, duplicated logic, coupling, lifecycle edges and hot-path cost in `EasyEcs.Core` |
-| `audit-generator` | generator speed, incremental best practices, caching tests, newer Roslyn features |
-| `audit-analyzer` | overlapping or missing EECS rules, false positives, code fixes, shared `Symbols` checks |
+| `audit-generator` | what users still write twice, plain forms the generator could emit fast (vector loops, parameters, schedule), generator speed, incremental best practices, caching tests |
+| `audit-analyzer` | missing EECS rules (wrong, costly, hand-written code), overlaps, false positives, code fixes to the generated forms, shared `Symbols` checks |
 | `audit-naming` | ambiguous or wrong names in the public API, generated members, analyzer descriptors, internals |
 | `audit-perf` | the next performance win: ideas from Burst, CUDA, stencil codes, OpenMP, MPI, OS schedulers and .NET 10, proven with BenchmarkDotNet |
-| `audit-docs` | stale names, exemplary examples, best practices, duplication, en/zh drift |
+| `audit-docs` | every part of a feature page (when, recommended form, fast form, costs, complexity, pitfalls), stale names, exemplary examples, duplication, en/zh drift |
 
 ## Engineering principles (apply to every change)
 
