@@ -2705,7 +2705,17 @@ property or `readonly`, a method that is not static. A new rule, EECS090 (warnin
 reports a component of 32 bytes or more whose untouched fields are at least half of it: the fields that no frequent
 `[ForEach]` pass touches, with the passes and the fields to move. A pass is frequent unless its system has
 `[UpdateInterval]` above 1, or the method visits changed rows only (`[Changed<T>]`, `[Removed<T>]`) or a slice
-(`Slices`). The rule moves nothing ([D90](#d90-vector-loops-reach)) and has no code fix.
+(`Slices`). A split is the form the project pushes, so both rules carry a code fix that writes it: the layout stays
+the user's ([D90](#d90-vector-loops-reach): nothing moves on its own), the fix writes it for them when they apply it.
+It declares the new component next to the old one (named after it and its first moved field, `BodyName`, for the user
+to rename), removes the moved fields from the old one and rewrites every use across the solution: a `[ForEach]`
+parameter that reads only moved fields takes the new component, one that reads both gains it with the same access
+(`in`, `ref`, `Mut<T>`, `Maybe<T>`, a span), creations and `Set` give both values, `Remove` removes both,
+`entity.Body.Name` and `entity.Get<Body>().Name` read the new component. It is offered only when the program does
+what it did after it: not for a component used whole (copied, passed to a helper, bound to a `ref` local, queried
+with `Query<T>`), read by its own members, tracked, given a constructor or a layout, saved by a world (the saved
+format would change without a migration), or taken by a `[ForEach]` method something calls directly; then the
+message says which fields to move, and the user moves them.
 
 **Why.**
 - **Users miss suggestions.** A method left scalar for a reason the user can fix in one line was reported as a
@@ -2738,7 +2748,10 @@ reports a component of 32 bytes or more whose untouched fields are at least half
 - **Reporting every component a pass leaves fields of:** a 12-byte component with a 4-byte field read once a minute
   costs nothing measurable; the threshold keeps the rule to rows where the cache lines show.
 - **Moving the fields automatically** (`[Hot]` / `[Layout(Soa)]`): dropped in [D90](#d90-vector-loops-reach); the
-  split changes every reader of the moved fields, which the user decides.
+  split changes every reader of the moved fields, which the user sees in the fix's diff before applying it.
+- **Leaving the split to the user, no fix:** the split is the faster form (a column of only the fields the pass reads,
+  and a component few enough fields for a vector loop), and the rewrite is mechanical once every use is one of the
+  forms above; a fix that refuses the rest keeps it exact.
 
 ## D119. No code fix from object-oriented classes to components and systems: a migration guide [#d119-no-oop-code-fix]
 
