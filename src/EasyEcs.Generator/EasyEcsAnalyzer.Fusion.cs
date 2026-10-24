@@ -39,7 +39,8 @@ public sealed partial class EasyEcsAnalyzer
     private static void AnalyzeFusion(SyntaxNodeAnalysisContext context)
     {
         var declaration = (StructDeclarationSyntax)context.Node;
-        if (!declaration.AttributeLists.Any() || context.SemanticModel.GetDeclaredSymbol(declaration, context.CancellationToken) is not { } type
+        // A system is a ref struct; its [EcsSystem] may sit on another part of a partial type.
+        if (!declaration.Modifiers.Any(SyntaxKind.RefKeyword) || context.SemanticModel.GetDeclaredSymbol(declaration, context.CancellationToken) is not { } type
             || !Symbols.GeneratesSystem(type)
             || type.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) != declaration) // a partial type: once
             return;

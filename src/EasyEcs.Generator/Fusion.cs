@@ -133,6 +133,8 @@ internal sealed record FusionSide(string Name, EquatableArray<string> Query, Equ
         var with = new SortedSet<string>(System.StringComparer.Ordinal);
         var without = new SortedSet<string>(System.StringComparer.Ordinal);
         var withAny = new SortedSet<string>(System.StringComparer.Ordinal);
+        // One set per [WithAny<..>] / [ChangedAny<..>] / [RemovedAny<..>] attribute: its types are one condition.
+        var anySets = new Dictionary<AttributeData, (Symbols.FilterKind Kind, SortedSet<string> Types)>();
         var filters = new SortedSet<string>(System.StringComparer.Ordinal);
         var since = new SortedSet<string>(System.StringComparer.Ordinal);
         var writes = new List<string>();
@@ -189,9 +191,17 @@ internal sealed record FusionSide(string Name, EquatableArray<string> Query, Equ
             }
         }
 
-        void Filter(Symbols.FilterKind kind, ITypeSymbol filtered)
+        void Filter(Symbols.FilterKind kind, ITypeSymbol filtered, AttributeData? attribute)
         {
             string type = Fqn(filtered);
+            if (kind is Symbols.FilterKind.WithAny or Symbols.FilterKind.ChangedAny or Symbols.FilterKind.RemovedAny && attribute != null)
+            {
+                if (!anySets.TryGetValue(attribute, out var set)) anySets[attribute] = set = (kind, new SortedSet<string>(System.StringComparer.Ordinal));
+                set.Types.Add(type);
+                if (kind != Symbols.FilterKind.WithAny) since.Add(type);
+                return;
+            }
+
             switch (kind)
             {
                 case Symbols.FilterKind.With:
@@ -212,10 +222,12 @@ internal sealed record FusionSide(string Name, EquatableArray<string> Query, Equ
             }
         }
 
-        foreach (var (kind, type, _) in Symbols.AttributeFilters(method)) Filter(kind, type);
+        foreach (var (kind, type, attribute) in Symbols.AttributeFilters(method)) Filter(kind, type, attribute);
         // No component parameter: the job queries the first [With<T>], else the [Changed<T>] type, as the generator does.
         if (query.Count == 0 && (firstWith ?? firstChanged) is { } queried) query.Add(queried);
-        foreach (var (kind, type, _, _) in Symbols.GroupFilters(method)) Filter(kind, type);
+        foreach (var (kind, type, attribute, _) in Symbols.GroupFilters(method)) Filter(kind, type, attribute);
+        foreach (var (kind, types) in anySets.Values)
+            (kind == Symbols.FilterKind.WithAny ? withAny : filters).Add((kind == Symbols.FilterKind.WithAny ? "" : kind + ":") + string.Join("|", types));
         with.UnionWith(query);
 
         return new FusionSide(method.Name, new(query.ToArray()), new(with.ToArray()), new(without.ToArray()), new(withAny.ToArray()),
