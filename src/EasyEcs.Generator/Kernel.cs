@@ -152,11 +152,26 @@ internal sealed partial class Kernel
     /// <param name="Partial">The run's partial result (a <c>Reduce&lt;T&gt;</c> local of the job).</param>
     private sealed record Reduction(int Index, INamedTypeSymbol Type, IFieldSymbol[] Fields, string[] Ops, string Partial);
 
-    /// <summary>Why the method runs one row at a time: the first construct the vector loop cannot express.</summary>
-    private sealed class Unsupported(string reason) : System.Exception(reason)
+    /// <summary>
+    /// Why the method runs one row at a time: the first construct the vector loop cannot express. <c>IsFixable</c> when
+    /// the user can rewrite it without changing what the method computes, and the reason then names the rewrite;
+    /// <c>SplitComponent</c> is the component whose used fields the reason advises to move into a component of their own.
+    /// </summary>
+    private sealed class Unsupported(string reason, bool isFixable = false, string? splitComponent = null) : System.Exception(reason)
     {
         public string Reason { get; } = reason;
+        public bool IsFixable { get; } = isFixable;
+        public string? SplitComponent { get; } = splitComponent;
     }
+
+    /// <summary>
+    /// Why <see cref="Vectorize(IMethodSymbol, MethodDeclarationSyntax, SemanticModel, System.Func{int, Symbols.ParamKind, string}, System.Threading.CancellationToken, out ScalarReason?)"/>
+    /// left a method scalar: <paramref name="Text"/>, what EECS055 and EECS056 report; <paramref name="IsFixable"/>,
+    /// whether the user can rewrite the method for a vector loop (the text then names the rewrite: EECS055 warns) or the
+    /// algorithm needs what stops it (EECS055 suggests); <paramref name="SplitComponent"/>, the fully qualified name of
+    /// the component whose used fields the text advises to split out (EECS090 leaves that component to EECS055).
+    /// </summary>
+    public sealed record ScalarReason(string Text, bool IsFixable, string? SplitComponent);
 
     /// <summary>
     /// The vector loop of a [ForEach] method, or null with the reason it runs one row at a time
@@ -168,19 +183,28 @@ internal sealed partial class Kernel
     public static Code? Vectorize(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
         System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct, out string? reason)
     {
-        reason = Symbols.Simd(method) == Symbols.SimdOff ? "SimdMode = SimdMode.Off"
-            : !method.IsStatic ? "it is not static"
-            : !Symbols.IsStable(method, syntax, model) ? "it can make structural changes"
+        var code = Vectorize(method, syntax, model, fieldOf, ct, out ScalarReason? why);
+        reason = why?.Text;
+        return code;
+    }
+
+    /// <summary>The same test, with the kind of its reason (<see cref="ScalarReason"/>), for the analyzer.</summary>
+    public static Code? Vectorize(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
+        System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct, out ScalarReason? reason)
+    {
+        reason = Symbols.Simd(method) == Symbols.SimdOff ? new ScalarReason("SimdMode = SimdMode.Off", false, null)
+            : !method.IsStatic ? new ScalarReason("it is not static: make it static", true, null)
+            : !Symbols.IsStable(method, syntax, model) ? new ScalarReason("it can make structural changes", false, null)
+            : Declined(method, syntax, model) is { } declined ? new ScalarReason(declined.Reason, declined.IsFixable, null)
             : null;
         if (reason != null) return null;
-        if ((reason = Declined(method, syntax, model)) != null) return null;
         try
         {
             return Translate(method, syntax, model, fieldOf, ct);
         }
         catch (Unsupported unsupported)
         {
-            reason = unsupported.Reason;
+            reason = new ScalarReason(unsupported.Reason, unsupported.IsFixable, unsupported.SplitComponent);
             return null;
         }
     }
@@ -243,23 +267,27 @@ internal sealed partial class Kernel
     /// and without an exception (a Mut, an Entity, a span: most scalar methods): its first parameter that rules a vector
     /// loop out, unless a component or optional parameter before it may give its own reason. Null to translate.
     /// </summary>
-    private static string? Declined(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model)
+    private static Unsupported? Declined(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model)
     {
-        if (!method.ReturnsVoid) return "it returns a value";
-        if (method.IsGenericMethod) return "it is generic";
+        if (!method.ReturnsVoid) return new Unsupported("it returns a value");
+        if (method.IsGenericMethod) return new Unsupported("it is generic");
         if (Symbols.WithBody(method, syntax, model).Item1 is { Body: null, ExpressionBody: null }) return null; // Translate: "it has no body"
         bool outside = Symbols.IsRunner(method);
         foreach (var p in method.Parameters)
         {
             var kind = Symbols.Classify(p, outside);
-            if (Refused(p, kind, method) is { } refused) return refused;
+            if (Refused(p, kind, method) is { } refused) return new Unsupported(refused);
             if (kind is Symbols.ParamKind.Component or Symbols.ParamKind.Optional) return null; // its lanes decide
         }
 
         return null;
     }
 
-    /// <summary>Why parameter <paramref name="p"/> of kind <paramref name="kind"/> rules a vector loop out whatever its type, or null.</summary>
+    /// <summary>
+    /// Why parameter <paramref name="p"/> of kind <paramref name="kind"/> rules a vector loop out whatever its type, or null.
+    /// None is fixable: each parameter does what the method needs (a value taken by ref may be a running index rather
+    /// than a sum, so a Reduce&lt;T&gt; is not always the same method).
+    /// </summary>
     private static string? Refused(IParameterSymbol p, Symbols.ParamKind kind, IMethodSymbol method) => kind switch
     {
         Symbols.ParamKind.Component or Symbols.ParamKind.Singleton or Symbols.ParamKind.Reduction => null,
@@ -293,12 +321,12 @@ internal sealed partial class Kernel
         // A component the loop does not split (more than MaxFields lanes, a field that is not a lane, lanes of two sizes)
         // still has a vector loop on AVX-512 when the method uses only 4-byte lanes of it (Kernel.Wide.cs); else the reason,
         // and the advice to split the lanes it uses into a component of their own when they are few.
-        WideLayout WideOr(IParameterSymbol p, string reason)
+        WideLayout WideOr(IParameterSymbol p, Unsupported reason)
         {
             whole ??= new HashSet<IParameterSymbol>(SymbolEqualityComparer.Default);
             touched ??= Touched(body, whole);
-            if (WideComponent(p, touched.TryGetValue(p, out var used) ? used : null, whole, model.Compilation) is { } wide) return wide with { Reason = reason };
-            throw new Unsupported(reason + (used != null && !whole.Contains(p) ? Split(p.Type, used.Select(u => u.Path).ToArray()) : ""));
+            if (WideComponent(p, touched.TryGetValue(p, out var used) ? used : null, whole, model.Compilation) is { } wide) return wide with { Reason = reason.Reason };
+            throw Advised(reason.Reason, p.Type, used != null && !whole.Contains(p) ? used.Select(u => u.Path).ToArray() : null, reason.IsFixable);
         }
         foreach (var p in method.Parameters)
         {
@@ -316,7 +344,7 @@ internal sealed partial class Kernel
                     }
                     catch (Unsupported unsupported)
                     {
-                        wide = WideOr(p, unsupported.Reason);
+                        wide = WideOr(p, unsupported);
                         fields = wide.Paths.Select(path => path[path.Length - 1]).ToArray();
                     }
                     components.Add(fields);
@@ -521,8 +549,8 @@ internal sealed partial class Kernel
         {
             whole ??= new HashSet<IParameterSymbol>(SymbolEqualityComparer.Default);
             touched ??= Touched(body, whole);
-            string split = !whole.Contains(narrow) && touched.TryGetValue(narrow, out var used) ? Split(narrow.Type, used.Select(u => u.Path).ToArray()) : "";
-            throw new Unsupported($"component {several[0].ContainingType.Name} has {several.Length} fields of {several[0].Type.ToDisplayString()}: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field{split}");
+            throw Advised($"component {several[0].ContainingType.Name} has {several.Length} fields of {several[0].Type.ToDisplayString()}: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field",
+                narrow.Type, !whole.Contains(narrow) && touched.TryGetValue(narrow, out var used) ? used.Select(u => u.Path).ToArray() : null, false);
         }
         // The passing rows of a masked word as masks of a pair's halves, for the stores and the lanes of what it writes.
         if (kernel._halvesPass) kept.Insert(0, $"var __pw_0 = {V}.WidenLower(__pass);\nvar __pw_1 = {V}.WidenUpper(__pass);\n");
@@ -639,7 +667,7 @@ internal sealed partial class Kernel
         if (type is not INamedTypeSymbol { TypeKind: TypeKind.Struct } named) throw new Unsupported($"{what} is not a struct");
         if (named.IsGenericType) throw new Unsupported($"{what} is generic");
         if (Symbols.FieldsInSeveralParts(named))
-            throw new Unsupported($"{what} declares fields in several parts, so the order of its fields is not defined");
+            throw new Unsupported($"{what} declares fields in several parts, so the order of its fields is not defined: declare them in one part", true);
         var fields = named.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray();
         if (fields.Length == 0) throw new Unsupported($"{what} has no fields");
         var paths = new List<IFieldSymbol[]>();
@@ -720,8 +748,8 @@ internal sealed partial class Kernel
                 {
                     var local = declarator.Symbol;
                     var init = declarator.GetVariableInitializer()?.Value ?? declaration.Initializer?.Value;
-                    if (local.IsRef) throw new Unsupported($"ref local '{local.Name}' is not supported");
-                    if (init == null) throw new Unsupported($"local '{local.Name}' has no initializer");
+                    if (local.IsRef) throw new Unsupported($"ref local '{local.Name}' is not supported: name the parameter's fields instead", true);
+                    if (init == null) throw new Unsupported($"local '{local.Name}' has no initializer: give it its value where it is declared", true);
                     if (PairLocal(local, init))
                     {
                         _active = And(mask, _alive);
@@ -973,8 +1001,8 @@ internal sealed partial class Kernel
         if (fields.Length == 0) throw new Unsupported($"reduction {name} has no fields");
         foreach (var field in fields)
         {
-            if (field.AssociatedSymbol != null) throw new Unsupported($"reduction {name} holds {field.AssociatedSymbol.Name} in a property: the lanes fold into fields");
-            if (field.IsReadOnly) throw new Unsupported($"field {name}.{field.Name} of the reduction is readonly");
+            if (field.AssociatedSymbol != null) throw new Unsupported($"reduction {name} holds {field.AssociatedSymbol.Name} in a property: the lanes fold into fields, so make it a field", true);
+            if (field.IsReadOnly) throw new Unsupported($"field {name}.{field.Name} of the reduction is readonly: remove readonly", true);
             if (!IsLane(field.Type) && !IsDoubled(field.Type)) throw new Unsupported($"field {name}.{field.Name} of the reduction is a {field.Type.ToDisplayString()}, not a lane type of {LaneSizes} bytes");
             if (IsDoubled(field.Type)) _pairs = true;
         }

@@ -135,7 +135,7 @@ public sealed partial class EasyEcsAnalyzer
 
     public static readonly DiagnosticDescriptor ScalarLoop = new("EECS055", "A [ForEach] method that runs one row at a time",
         "[ForEach] method '{0}' runs one row at a time, without a vector loop: {1}",
-        Category, DiagnosticSeverity.Info, true,
+        Category, DiagnosticSeverity.Warning, true,
         "The generator turns a [ForEach] method into a Vector<T> loop (several rows per instruction, the same results bit " +
         "for bit, except under FloatMode.Fast: reordered float sums, approximate Sin, Cos, Exp and Log) when it is static, " +
         "takes no Entity and makes no structural change, takes components of up to 4 lanes of one size (numbers of 1 to " +
@@ -143,17 +143,22 @@ public sealed partial class EasyEcsAnalyzer
         "that gather them pay), Maybe<T> of them, singletons, values and Reduce<T> results, and computes with operations " +
         "that have an exact vector counterpart (a call it cannot express under a condition runs the method for the rows " +
         "of the vectors that take it). This method takes components of plain values but misses one of those: the message " +
-        "names the first, and how to split a wide component when the method uses few of its fields. Change it to get the " +
-        "vector loop, set SimdMode = SimdMode.Off to keep the method scalar without this message, or SimdMode.Require to " +
-        "make it an error.", helpLinkUri: Help("EECS055"));
+        "names the first. A warning when the method can be rewritten for the loop and the message says how (split the " +
+        "fields it uses out of a wide component, a bool field as a tag or a byte, a ref local, a local without a value, a " +
+        "ref value instead of a Reduce<T>); a suggestion when what stops the loop is what the method computes (a call, " +
+        "integer division, a conversion, a float sum in another order). Change it to get the vector loop, set " +
+        "SimdMode = SimdMode.Off to keep the method scalar without this message, or SimdMode.Require to make it an error.",
+        helpLinkUri: Help("EECS055"));
 
     /// <summary>
     /// EECS055 and EECS056: a [ForEach] method the generator leaves without a vector loop, with the reason
-    /// <see cref="Kernel.Vectorize"/> gives, the same call the generator makes, so a method reported is exactly a
-    /// method left scalar. EECS055 only for a method that looks meant for one (<see cref="Kernel.LooksEligible"/>),
-    /// EECS056 for any method that requires one.
+    /// <see cref="Kernel.Vectorize(IMethodSymbol, MethodDeclarationSyntax, SemanticModel, System.Func{int, Symbols.ParamKind, string}, System.Threading.CancellationToken, out Kernel.ScalarReason?)"/> gives, the same call the generator makes, so a method reported is exactly a
+    /// method left scalar. EECS055 only for a method that looks meant for one (<see cref="Kernel.LooksEligible"/>):
+    /// a warning when the user can rewrite it (the reason names how), a suggestion when the algorithm needs what stops
+    /// the loop; EECS056 for any method that requires one. A component the reason advises to split goes to
+    /// <paramref name="layout"/>, so EECS090 does not report it too.
     /// </summary>
-    private static void AnalyzeVectorLoop(SyntaxNodeAnalysisContext context)
+    private static void AnalyzeVectorLoop(SyntaxNodeAnalysisContext context, ColdFieldPasses layout)
     {
         var syntax = (MethodDeclarationSyntax)context.Node;
         if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
@@ -161,11 +166,15 @@ public sealed partial class EasyEcsAnalyzer
             || Symbols.IsForEntity(method)) return; // one entity per call: no loop to vectorize (the generator asks for none)
         int mode = Symbols.Simd(method);
         if (mode == Symbols.SimdOff || mode == Symbols.SimdAuto && !Kernel.LooksEligible(method)) return;
-        if (Kernel.Vectorize(method, syntax, context.SemanticModel, static (i, _) => "", context.CancellationToken, out var reason) != null
+        if (Kernel.Vectorize(method, syntax, context.SemanticModel, static (i, _) => "", context.CancellationToken, out Kernel.ScalarReason? reason) != null
             || mode == Symbols.SimdAuto && AccumulatesByHand(method, syntax, context.SemanticModel, context.CancellationToken)) return; // EECS086's
 
-        context.ReportDiagnostic(Diagnostic.Create(mode == Symbols.SimdRequire ? NoVectorLoop : ScalarLoop,
-            method.Locations.FirstOrDefault(), method.Name, reason));
+        if (reason!.SplitComponent != null) layout.Advised.TryAdd(reason.SplitComponent, 0);
+        if (mode == Symbols.SimdRequire)
+            context.ReportDiagnostic(Diagnostic.Create(NoVectorLoop, method.Locations.FirstOrDefault(), method.Name, reason.Text));
+        else
+            context.ReportDiagnostic(Diagnostic.Create(ScalarLoop, method.Locations.FirstOrDefault(),
+                reason.IsFixable ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info, null, null, method.Name, reason.Text));
     }
 
     /// <summary>Property keys of the diagnostics' code fixes: what the analyzer decided, the fix only applies it.</summary>
@@ -206,7 +215,10 @@ public sealed partial class EasyEcsAnalyzer
             if (Core.Create(start.Compilation) is not { } core) return;
             var resets = new Resets();
             resets.Register(start);
-            start.RegisterOperationBlockAction(c => AnalyzeBody(c, core, resets));
+            var layout = new ColdFieldPasses();
+            start.RegisterSyntaxNodeAction(c => AnalyzeVectorLoop(c, layout), SyntaxKind.MethodDeclaration);
+            start.RegisterCompilationEndAction(layout.Report);
+            start.RegisterOperationBlockAction(c => AnalyzeBody(c, core, resets, layout));
             start.RegisterOperationAction(c => AnalyzeCall(c, core), OperationKind.Invocation);
             start.RegisterOperationAction(c => AnalyzeItem(c), OperationKind.PropertyReference);
             start.RegisterOperationAction(c => AnalyzeComparison(c, core), OperationKind.Binary);
@@ -217,7 +229,7 @@ public sealed partial class EasyEcsAnalyzer
 
     // ---------------- [ForEach] methods and OnUpdate: parameters, lookups, allocations ----------------
 
-    private static void AnalyzeBody(OperationBlockAnalysisContext context, Core core, Resets resets)
+    private static void AnalyzeBody(OperationBlockAnalysisContext context, Core core, Resets resets, ColdFieldPasses layout)
     {
         if (context.OwningSymbol is not IMethodSymbol method) return;
         var body = context.OperationBlocks.FirstOrDefault(b => b is IMethodBodyOperation or IBlockOperation);
@@ -225,6 +237,7 @@ public sealed partial class EasyEcsAnalyzer
         bool forEach = Symbols.IsGeneratedJob(method);
         if (forEach)
         {
+            layout.Collect(method, body);
             if (ForEachBulk(context, method, body, core)) return; // the method goes: what it costs per row is moot
             var uses = new Dictionary<IParameterSymbol, List<IOperation>>(SymbolEqualityComparer.Default);
             foreach (var operation in body.Descendants())

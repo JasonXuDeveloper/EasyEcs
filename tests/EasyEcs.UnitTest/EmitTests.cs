@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Nino.Core;
 using NUnit.Framework;
 
@@ -203,6 +204,8 @@ public class EmitTests
                 Assert.That(hits[2 * i].Target, Is.EqualTo(seen[i].Subject));
                 Assert.That((hits[2 * i].Amount, hits[2 * i + 1].Amount), Is.EqualTo((1, 2)));
             }
+            seen.Clear(); // the reader clears what it applied (EECS091)
+            hits.Clear();
         }
     }
 
@@ -299,5 +302,53 @@ public class EmitTests
         world.AddSystem<ApplyHits>();
         for (int i = 0; i < 30; i++) world.Update();
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }, () => strikes.Stats.TotalAllocated), Is.Zero);
+    }
+
+    // EECS091: records nothing clears. The test compilation is a library, so the record types are internal: a public
+    // one could be cleared by another assembly.
+    private const string Strikes = """
+        internal record struct Shot(EntityId Target, int Amount);
+        public record struct Gun(int Power) : IComponent;
+        public record struct Target(EntityId Id) : IComponent;
+        [EcsSystem] public ref struct Fire { [ForEach] static void Pull(in Gun gun, in Target target, Emit<Shot> shots) => shots.Add(new Shot(target.Id, gun.Power)); }
+        """;
+
+    private static string[] Uncleared(string reader) =>
+        GeneratorTests.Analyze([Strikes, reader]).Result.Where(d => d.Id == "EECS091").Select(d => d.GetMessage()).ToArray();
+
+    [Test]
+    public void RecordsNoCodeClearsAreReported()
+    {
+        var found = Uncleared("""
+            public static class Host
+            {
+                public static void Apply(World world)
+                {
+                    foreach (var shot in world.GetSingleton<Emitted<Shot>>().Items)
+                        if (world.TryGetEntity(shot.Target, out var target)) target.Destroy();
+                }
+            }
+            [EcsSystem] public ref struct Fire2 { [ForEach] static void Again(in Gun gun, in Target target, Emit<Shot> shots) => shots.Add(new Shot(target.Id, 1)); }
+            """);
+        Assert.That(found, Is.EqualTo(new[] { "[ForEach] method 'Pull' emits Shot records, but no code clears Emitted<Shot>: each update adds its "
+            + "records to all the earlier ones, so a reader applies them again and the list grows; clear "
+            + "world.GetSingleton<Emitted<Shot>>().Items in the system that applies them, once applied" })); // once per record type
+    }
+
+    [TestCase("ref var shots = ref world.GetSingleton<Emitted<Shot>>().Items; shots.Clear();")]          // through a ref local
+    [TestCase("world.GetSingleton<Emitted<Shot>>().Items.Clear();")]
+    [TestCase("ref var shots = ref world.GetSingleton<Emitted<Shot>>().Items; while (shots.Count > 0) shots.RemoveAtSwapBack(0);")]
+    [TestCase("world.RemoveSingleton<Emitted<Shot>>();")]
+    [TestCase("world.GetSingleton<Emitted<Shot>>() = default;")]
+    public void AClearAnywhereIsEnough(string clear)
+    {
+        Assert.That(Uncleared($"public static class Host {{ public static void Send(World world) {{ {clear} }} }}"), Is.Empty);
+    }
+
+    [Test]
+    public void APublicRecordOfALibraryIsLeftToItsUsers()
+    {
+        var found = GeneratorTests.Analyze([Strikes.Replace("internal record struct Shot", "public record struct Shot")]).Result.Where(d => d.Id == "EECS091");
+        Assert.That(found, Is.Empty);
     }
 }

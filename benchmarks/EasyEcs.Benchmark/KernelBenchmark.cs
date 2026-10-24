@@ -572,11 +572,13 @@ public partial class KernelBenchmark
         static int IForEach<Pos2D, Vel2D>.WriteMask => 1;
     }
 
+#pragma warning disable EECS090 // the wide row is what this case measures
     /// <summary>A wide component: 12 floats a row, of which Steer uses 3.</summary>
     public struct Craft : IComponent
     {
         public float X, Y, VX, VY, Fuel, Mass, Drag, Heat, Spin, Tilt, Yaw, Roll;
     }
+#pragma warning restore EECS090
 
     private struct SteerRows : IForEach<Craft>, INoStructuralChanges
     {

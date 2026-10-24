@@ -341,21 +341,19 @@ public partial class ReduceBenchmark
         [ForEach(Parallel = true)]
         public static void BoundsHandWritten(in Spot spot, ref Reduce<HandBounds> bounds)
         {
-            ref var b = ref bounds.Value;
-            b.MinX = MathF.Min(b.MinX, spot.X);
-            b.MinY = MathF.Min(b.MinY, spot.Y);
-            b.MaxX = MathF.Max(b.MaxX, spot.X);
-            b.MaxY = MathF.Max(b.MaxY, spot.Y);
+            bounds.Value.MinX = MathF.Min(bounds.Value.MinX, spot.X);
+            bounds.Value.MinY = MathF.Min(bounds.Value.MinY, spot.Y);
+            bounds.Value.MaxX = MathF.Max(bounds.Value.MaxX, spot.X);
+            bounds.Value.MaxY = MathF.Max(bounds.Value.MaxY, spot.Y);
         }
 
         [ForEach(Parallel = true)]
         public static void BoundsGenerated(in Spot spot, ref Reduce<Bounds> bounds)
         {
-            ref var b = ref bounds.Value;
-            b.MinX = MathF.Min(b.MinX, spot.X);
-            b.MinY = MathF.Min(b.MinY, spot.Y);
-            b.MaxX = MathF.Max(b.MaxX, spot.X);
-            b.MaxY = MathF.Max(b.MaxY, spot.Y);
+            bounds.Value.MinX = MathF.Min(bounds.Value.MinX, spot.X);
+            bounds.Value.MinY = MathF.Min(bounds.Value.MinY, spot.Y);
+            bounds.Value.MaxX = MathF.Max(bounds.Value.MaxX, spot.X);
+            bounds.Value.MaxY = MathF.Max(bounds.Value.MaxY, spot.Y);
         }
     }
 
