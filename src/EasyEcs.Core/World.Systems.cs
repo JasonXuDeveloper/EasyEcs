@@ -214,7 +214,7 @@ public sealed partial class World
             {
                 var run = runs[r];
                 run.Set.Run(this, serial.Systems.AsSpan(run.Start, run.Count), update, serial.Starts.AsSpan(run.Start, run.Count),
-                    serial.Fused.AsSpan(run.Start, run.Count));
+                    serial.Fuses ? serial.Fused.AsSpan(run.Start, run.Count) : default); // none: one failed compare per system
             }
         }
         else
@@ -481,6 +481,9 @@ public sealed partial class World
         /// each other in one run of the set, and the set declares the pair), or -1.
         /// </summary>
         public readonly short[] Fused = fused;
+
+        /// <summary>Whether any system shares a walk with the next one (<see cref="Fused"/>): runs without fusions take none.</summary>
+        public readonly bool Fuses = Array.Exists(fused, static f => f >= 0);
 
         /// <summary>The plan of <paramref name="stages"/>, whose systems are <paramref name="systems"/> in order, their codes <paramref name="codes"/>.</summary>
         public static SerialPlan Of(SystemStage[] stages, SystemSlot[] systems, SystemCode.Entry[] codes)
