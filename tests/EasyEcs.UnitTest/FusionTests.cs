@@ -543,6 +543,18 @@ public partial class FusionTests
         Assert.That(code, Does.Contain("< global::EasyEcs.SystemCode.FusedRows)"), code);
     }
 
+    // A view's fields are the method's components: its ref fields writes, so a change filter on them keeps the next apart.
+    [Test]
+    public void ViewsAreTheirFieldsComponents()
+    {
+        const string view = "[View] public ref struct AB { public ref A A; public ref readonly B B; } ";
+        string code = Generated(view + "[EcsSystem] public ref struct S { [ForEach] static void M(AB v) => v.A.V += v.B.V; [ForEach] static void N(in A a, ref B b) => b.V -= a.V; }", "S");
+        Assert.That(code, Does.Contain("M_N_Fused0"), code);
+        code = Generated(view + "public struct D : IComponent, ITracked { public int V; } [View] public ref struct AD { public ref readonly A A; public ref D D; } " +
+            "[EcsSystem] public ref struct S { [ForEach] static void M(AD v) => v.D.V++; [ForEach, Changed<D>] static void N(ref A a, in D d) => a.V += d.V; }", "S");
+        Assert.That(code, Does.Not.Contain("_Fused"), code);
+    }
+
     // Fused at any size: two methods writing one component (its second store stays in L1), and a parallel walk.
     [TestCase("[ForEach] static void M(ref A a, in B b) => a.V += b.V; [ForEach] static void N(ref A a, in B b) => a.V *= b.V;")]
     [TestCase("[ForEach(Parallel = true)] static void M(ref A a, in B b) => a.V += b.V; [ForEach(Parallel = true)] static void N(in A a, ref B b) => b.V -= a.V;")]
