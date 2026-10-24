@@ -94,6 +94,22 @@ record a dropped one.
 The vector loops (`Kernel*.cs`: what becomes SIMD, side effects, fixable reasons, proof) have their own skill:
 `audit-vector-loops`.
 
+## The generated text (read it every round)
+
+Build a sample with `-p:EmitCompilerGeneratedFiles=true` and read `obj/**/generated/EasyEcs.Generator/` as a reviewer
+would read hand-written code. It is what users open with Go To Definition and what the docs' "The generator writes"
+tabs show, and its size is build time. Judge speed by the Tier1 code (`audit-vector-loops`, "Read the loop the JIT
+wrote"), not by the text: a copy the JIT removes is a readability issue, a shuffle it keeps is a speed issue. Check:
+
+- **No line that does nothing**: identity copies (`var __c = __s;`), temporaries no aliasing needs, an empty
+  `Create` / `Destroy`, a select whose mask is already in the condition.
+- **Names a reader can follow**: fully qualified `global::` names are required for correctness, but a file-level
+  `using` alias (`using V512 = global::System.Runtime.Intrinsics.Vector512;`) in a generated file keeps a vector body
+  readable; locals named after what they hold (`position_x`, not `__c1_0`) where the name is not ambiguous.
+- **Repetition the generator could share**: the same body per vector width and per masked / unmasked form, the same
+  reduction fold after each loop. Text the JIT discards still costs every build and every docs reader; share it when
+  the shared form is proven as fast (BenchmarkDotNet + Tier1 code), else leave it and say why in the template.
+
 ## Speed: measure first
 
 `GeneratorBenchmark`: the four generators over the battle server plus 40 generated modules (components of every

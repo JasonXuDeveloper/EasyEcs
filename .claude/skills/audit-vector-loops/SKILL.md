@@ -113,3 +113,29 @@ form to support.
 - A change to `Kernel` leaves the code generated for `WorldSimulation.cs` and `BattleServer.cs` identical, or ships
   with their BenchmarkDotNet numbers.
 - The docs show `You write` / `The generator writes` from real output wherever the form appears (`audit-docs`).
+
+## Read the loop the JIT wrote, not only the text the generator wrote
+
+Every round reads the Tier1 code of the samples' loops (`tools/jitdisasm.sh samples/MultiWorld 'EasyEcs.World:Masked'`)
+next to the generated text, and asks per loop: how many instructions per vector, which of them move data instead of
+computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
+
+- **Copies in the text are free, shuffles are not**: `var __c = __s;` and `__t` temporaries for a whole-value
+  assignment vanish (the JIT copy-propagates them). What costs is deinterleaving: `Move` (`position += velocity`, two
+  floats each) spends 6 `vpermt2ps` and 4 permutation-table loads per 16 rows on 2 adds. A pass whose every write
+  field k depends only on field k of inputs with the same layout (element-wise: `+=`, `*= scalar`, `Lerp`) runs over
+  the flattened floats with no deinterleave; deinterleave only when fields mix (`x * x + y * y`).
+- **Constants the JIT does not hoist**: the permutation tables were reloaded inside some loop copies and hoisted in
+  others. A helper that takes its tables as arguments, loaded once before the loop, makes it certain.
+- **A mask the rows already have is the start of the active mask**: the masked form (`pass` bits of a sliced or
+  filtered table) ends with a `ConditionalSelect(pass, new, old)` per written column and accumulator; starting the
+  condition chain from `pass` instead of all-ones makes those selects redundant.
+- **The tail matters on fragmented worlds**: the rows after the last whole vector call the method itself (a call per
+  row, not inlined); with many small tables that is most rows. The masked vector tail (`Code.VectorTail`, from the
+  structural form) is the candidate, measured on a world of many small tables.
+- **The four copies of the body are text, not code**: two widths × masked/unmasked; the width the hardware lacks is
+  removed at JIT time (`IsHardwareAccelerated` is a constant). They cost generator output and build time, not speed.
+  One body for both widths needs a generic vector abstraction: `ISimdVector<TSelf, T>` is internal in .NET 10, so it
+  would be our own static-abstract wrapper, adopted only if BenchmarkDotNet and the Tier1 code show no loss.
+
+Each lesson becomes a form with its proof (above) or an entry in `docs/owner-review.md` with the measurement.
