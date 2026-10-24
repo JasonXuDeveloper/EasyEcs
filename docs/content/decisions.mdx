@@ -117,6 +117,9 @@ after the change on the machine of the time; they are history, not the current r
 | [D106](#d106-lock-or-cas) | The runtime synchronizes with a `Lock` or a compare-and-swap, never a locked object |
 | [D107](#d107-never-used-warnings) | `[ForEach]` and hook methods are not reported as unused |
 | [D108](#d108-aot-instruction-set) | Native AOT: the instruction set is the program's choice, `native` in the templates |
+| [D118](#d118-fixable-reasons-and-cold-fields) | EECS055 warns when the method can be rewritten; EECS091 names the fields a frequent pass never touches |
+| [D119](#d119-no-oop-code-fix) | No code fix from object-oriented classes to components and systems: a migration guide |
+| [D120](#d120-feature-modules-and-data-events) | Not added: `[Feature]` modules and a generated reader of records; EECS092 reports records nothing clears |
 
 The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
 reused.
@@ -2689,6 +2692,123 @@ such as `x86-64-v3` (AVX2) or `x86-64-v4` (AVX-512) for a fleet. The package set
 **Considered.**
 - **Leaving the default:** the AVX-512 loops never run under Native AOT.
 - **Setting it in the package's build files:** a library would choose the CPUs its users' programs run on.
+
+## D118. EECS055 warns when the method can be rewritten; EECS091 names the fields a frequent pass never touches [#d118-fixable-reasons-and-cold-fields]
+
+**Decision.** Each reason `Kernel.Vectorize` gives for a scalar method is marked where it is raised as fixable (the
+user can rewrite the method without changing what it computes, and the reason names the rewrite) or inherent (what
+the method computes stops the loop). EECS055 reports a fixable reason as a warning and an inherent one as a
+suggestion, through one descriptor whose severity is chosen per report; EECS056 (`SimdMode.Require`) stays an error
+for both. Fixable today: the few fields a method uses of a wide or mixed component (split them out), a `ref` local
+(name the parameter's fields), a local without a value, fields declared in several parts, a reduction field that is a
+property or `readonly`, a method that is not static. A new rule, EECS091 (warning, at the end of the compilation),
+reports a component of 32 bytes or more whose untouched fields are at least half of it: the fields that no frequent
+`[ForEach]` pass touches, with the passes and the fields to move. A pass is frequent unless its system has
+`[UpdateInterval]` above 1, or the method visits changed rows only (`[Changed<T>]`, `[Removed<T>]`) or a slice
+(`Slices`). A split is the form the project pushes, so both rules carry a code fix that writes it: the layout stays
+the user's ([D90](#d90-vector-loops-reach): nothing moves on its own), the fix writes it for them when they apply it.
+It declares the new component next to the old one (named after it and its first moved field, `BodyName`, for the user
+to rename), removes the moved fields from the old one and rewrites every use across the solution: a `[ForEach]`
+parameter that reads only moved fields takes the new component, one that reads both gains it with the same access
+(`in`, `ref`, `Mut<T>`, `Maybe<T>`, a span), creations and `Set` give both values, `Remove` removes both,
+`entity.Body.Name` and `entity.Get<Body>().Name` read the new component. It is offered only when the program does
+what it did after it: not for a component used whole (copied, passed to a helper, bound to a `ref` local, queried
+with `Query<T>`), read by its own members, tracked, given a constructor or a layout, saved by a world (the saved
+format would change without a migration), or taken by a `[ForEach]` method something calls directly; then the
+message says which fields to move, and the user moves them.
+
+**Why.**
+- **Users miss suggestions.** A method left scalar for a reason the user can fix in one line was reported as a
+  suggestion; the fixable reasons now fail a build that treats warnings as errors, and the message says how. A
+  suggestion is left for what the method needs: a call, integer division, a conversion, a float sum in another order,
+  a `Maybe<T>` in a parallel method.
+- **One place decides.** The flag sits on the reason where `Kernel` raises it, so the generator and the analyzer keep
+  reading one function: a method skipped by the generator is a method reported, as before, now with a severity.
+- **What was left inherent, and why.** A `bool` field: the fix is a byte or a tag, and a tag flipped every update is
+  a structural change per flip, worse than the scalar loop. A value taken by `ref` outside a system: in the samples it
+  is as often a running index (the demo's frame writer) as a sum, so a `Reduce<T>` is not the same method.
+- **A pass reads whole rows.** A `[ForEach]` pass walks the column of each component it takes; the fields its method
+  never names come into the cache with the ones it does. `HotColdBenchmark` (100,000 rows, a pass reading and writing
+  8 bytes of each row, both forms scalar so only the memory differs; 4 cores, AVX-512): a row of 16 bytes 56.8 µs
+  against 48.9 µs with the cold fields in a component of their own, 32 bytes 132.5 against 50.6 µs, 64 bytes 261.6
+  against 50.4 µs, 128 bytes 508.0 against 48.8 µs, 0 B each. The split pays from 32 bytes on, by 2.3 to 2.6 times there over two rounds (the second: 118.6 against 50.9 µs);
+  at 16 bytes the gain is within what a second component costs elsewhere, so the rule starts at 32 bytes and asks
+  for at least half the row to be cold.
+- **The rules cost no measurable build time.** EECS091 reads the [ForEach] bodies the performance rules already walk, and EECS092 the
+  operations of the compilation once. `GeneratorBenchmark` (the analyzer over the battle server and modules, its time
+  being `CompileAndAnalyze` less `Compile`): 0.93 s before and 1.02 s after in one namespace, 1.26 s and 1.12 s in
+  many, each within the error of 0.11 to 0.44 s.
+- **One mistake, one diagnostic** ([D60](#d60-one-diagnostic-per-mistake)). When EECS055 already advises to split
+  the fields a pass uses out of a component, EECS091 leaves that component to it; a method kept scalar with
+  `SimdMode.Off` gets no EECS055, so EECS091 reports its component.
+
+**Considered.**
+- **Two rule ids, a warning and a suggestion:** two ids for one reason list, and a reason moving between them would
+  change its id. One id, two severities, as EECS069 does.
+- **Reporting every component a pass leaves fields of:** a 12-byte component with a 4-byte field read once a minute
+  costs nothing measurable; the threshold keeps the rule to rows where the cache lines show.
+- **Moving the fields automatically** (`[Hot]` / `[Layout(Soa)]`): dropped in [D90](#d90-vector-loops-reach); the
+  split changes every reader of the moved fields, which the user sees in the fix's diff before applying it.
+- **Leaving the split to the user, no fix:** the split is the faster form (a column of only the fields the pass reads,
+  and a component few enough fields for a vector loop), and the rewrite is mechanical once every use is one of the
+  forms above; a fix that refuses the rest keeps it exact.
+
+## D119. No code fix from object-oriented classes to components and systems: a migration guide [#d119-no-oop-code-fix]
+
+**Decision.** There is no code fix and no analyzer hint that turns a class with fields and an `Update(float dt)`
+method into components and an `[EcsSystem]` with a `[ForEach]` method. The public skill that users' AI agents
+follow (`skills/easyecs/SKILL.md`) has a section that maps each object-oriented form to its ECS form: a class to components, an
+instance to an entity (a prefab), a method to a system, inheritance to composition and filters, a reference to an
+`EntityId` (a `Lookup<T>`, `ChildOf`, a relation or an index), an event to records (`Emit<T>`) or a tracked write, a
+manager singleton to a singleton component, and services to the host.
+
+**Why.**
+- **No shape is always correct.** The smallest case, a class of two floats and `Update(float dt)`, already needs a
+  singleton for `dt` that the host must set, turns a reference type into a value type (code that shares one instance
+  between two holders would copy it), and leaves the callers (`new`, the list the loop walks, `foreach … Update`) to
+  change by hand. Inheritance, virtual methods, references to other objects and events have several right answers each.
+- **A hint without a fix is noise.** A warning on every class with an `Update` method would fire on code that is not
+  game state (a UI widget, a network client) and say only "rewrite this".
+- **The judgment is what an assistant does well.** The guide gives it the mapping and the rules to check against
+  (EECS006, EECS007, EECS017, EECS091, EECS092), and the analyzer then checks the result.
+
+**Considered.**
+- **A fix limited to a class with only value fields and one `Update` method:** still changes reference semantics at
+  every use of the class, and the callers stay broken; not always correct, so not offered.
+
+## D120. Not added: `[Feature]` modules and a generated reader of records; EECS092 reports records nothing clears [#d120-feature-modules-and-data-events]
+
+**Decision.** Two generator ideas were weighed and left out. A third finding became a rule: EECS092 (warning, at the
+end of the compilation) reports an `Emit<T>` whose records no code of the compilation clears (no `Clear`, `RemoveAt`
+or `RemoveAtSwapBack` of a `DynamicBuffer<T>`, no `RemoveSingleton<Emitted<T>>()`, no assignment of `Emitted<T>` or its
+`Items`), once per record type, unless the record type is public in a library (another assembly may clear it).
+
+**Why.**
+- **`[Feature]` modules** (a feature's components, systems, groups and setup registered together, `world.AddFeature<Water>()`).
+  Registration order is the tick's order and builds the parallel stages from consecutive systems
+  ([D56](#d56-not-added), [D76](#d76-stages-not-a-dependency-graph)). The VoxelServer sample registers 37 systems
+  with features interleaved on purpose (the water's steps between the zombies', so systems with disjoint data share a
+  stage); a module per feature would either fix one order per feature, losing those stages, or need the order spelled
+  out again. The setup a feature has besides its systems is already declared on its types (`[GroupBy]`,
+  `[WhenTargetDestroyed]`, `[NotSaved]`, [D101](#d101-declaration-attributes)), so a module saves the `AddSystem`
+  lines only, and those are the schedule's documentation.
+- **A generated reader of records** (a hook parameter that hands the system `Emitted<T>` and clears it after the
+  hook). `Emit<T>` and `Emitted<T>` already give the buffer per event type and the emitting side
+  ([D78](#d78-emit)). What users write by hand around events is the reader: in the battle server, the VoxelServer
+  sample, the Actors sample and the threading guide, each reader is a `GetOrAddSingleton<Emitted<T>>().Items` line, a
+  loop and a `Clear()`. A parameter would save one or two lines per reader and add a hook parameter kind, its schedule
+  access and its docs; the readers differ in what they do (count, send, save through the host outside any system).
+  The line that matters is the `Clear()`: without it every update applies the earlier records again and the list
+  grows, a mistake the common-mistakes page documented with "no rule catches it".
+- **The compilation sees every clear.** One system emits and another clears, so no single method shows the mistake,
+  but at the end of the compilation the analyzer has every `Emit<T>` and every clear. A record type public in a
+  library is left alone: a plugin's host may apply and clear its records.
+
+**Considered.**
+- **Clearing in the runtime after each update:** a reader that runs at another cadence (a send every third update,
+  a save group) would lose records, and the reader is the one that knows when they are applied.
+- **A reader system generated per record type:** one more system the schedule places by itself, where the user
+  writes the order.
 
 ## Related [#related]
 

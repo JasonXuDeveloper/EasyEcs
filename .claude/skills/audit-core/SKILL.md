@@ -17,6 +17,9 @@ AGENTS.md's engineering principles and rules apply (performance first, zero allo
 - **Non-DRY code**: the same loop or bookkeeping in Bulk / Components / Migration / Serialization / Snapshots /
   Indexes / Relations / Hierarchy; a generic method with a body of its own per T; a T1..T9 family written by hand.
   Merge into one non-generic core with thin typed wrappers (arity families from `ArityGenerator` templates).
+- **Not uniform**: features whose APIs have different shapes for the same act (one takes `EntityId`, its sibling an
+  `Entity`; a `TryX` here and a nullable there; a bulk form for one operation and not its pair), or internals that
+  solve one problem two ways; make them one shape (the checklist is `audit-code`, "Not uniform").
 - **Coupling**: the core depending on an optional feature (indexes, relations, hierarchy, groups, serialization);
   features reaching into each other's internals instead of a hook.
 - **Names**: two names for one concept across APIs, comments and docs; a private helper sharing a public call's name

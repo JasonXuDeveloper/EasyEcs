@@ -92,9 +92,8 @@ public partial class ReduceTests
         [ForEach]
         static void Add(in Points points, ref Reduce<Scores> tally)
         {
-            ref var t = ref tally.Value;
-            t.Count++;
-            t.Sum += points.Value;
+            tally.Value.Count++;
+            tally.Value.Sum += points.Value;
         }
     }
 
@@ -111,11 +110,10 @@ public partial class ReduceTests
         [ForEach(Parallel = true, ChunkRows = 1024)]
         static void Grow(in Spot spot, ref Reduce<Bounds2> box)
         {
-            ref var b = ref box.Value;
-            b.MinX = MathF.Min(b.MinX, spot.X);
-            b.MinY = MathF.Min(b.MinY, spot.Y);
-            b.MaxX = MathF.Max(b.MaxX, spot.X);
-            b.MaxY = MathF.Max(b.MaxY, spot.Y);
+            box.Value.MinX = MathF.Min(box.Value.MinX, spot.X);
+            box.Value.MinY = MathF.Min(box.Value.MinY, spot.Y);
+            box.Value.MaxX = MathF.Max(box.Value.MaxX, spot.X);
+            box.Value.MaxY = MathF.Max(box.Value.MaxY, spot.Y);
         }
     }
 
@@ -149,9 +147,8 @@ public partial class ReduceTests
         [ForEach]
         static void Add(in Points points, ReadOnlyMaybe<Weight> bonus, ref Reduce<Scores> tally)
         {
-            ref var t = ref tally.Value;
-            t.Count++;
-            t.Sum += points.Value + (bonus.HasValue ? (long)bonus.Value.Value : 0);
+            tally.Value.Count++;
+            tally.Value.Sum += points.Value + (bonus.HasValue ? (long)bonus.Value.Value : 0);
         }
     }
 
@@ -167,9 +164,8 @@ public partial class ReduceTests
         [ForEach(Parallel = true)]
         public static void Score(in Points points, ref Reduce<Scores> tally)
         {
-            ref var t = ref tally.Value;
-            t.Count++;
-            t.Sum += points.Value;
+            tally.Value.Count++;
+            tally.Value.Sum += points.Value;
         }
     }
 

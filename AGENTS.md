@@ -57,7 +57,8 @@ src/EasyEcs.CodeFixes/         EasyEcsCodeFixes.cs: fixes for the analyzer's dia
                                compiler's CS0246) into an [EcsSystem] ref struct; EasyEcsCodeFixes.Declarations.cs:
                                the migrations of declarations that changed shape, from the compiler's error on the old
                                form (WithAny<T> merged, the hook attributes, [GroupBy] onto the member, EntityRandom's
-                               tick written by hand) and EECS090's rename
+                               tick written by hand) and EECS090's rename; EasyEcsCodeFixes.Split.cs: EECS055 /
+                               EECS091 (a component split, solution-wide, offered only when every use can follow it)
 tests/                         EasyEcs.UnitTest (NUnit, one file per feature) and EasyEcs.Aot (Native AOT check)
                                (file map: tests/AGENTS.md)
 benchmarks/                    EasyEcs.Benchmark (one class per feature + the headline worlds), EasyEcs.Comparison
@@ -141,6 +142,12 @@ owner has asked for once must be written where the next session will find it.
   truly the owner's to decide. A proposal you judge not worth doing (or not yet) goes into `docs/owner-review.md`
   with the reason and what would change the verdict, so the owner can review it later; settled choices still get
   their decision record.
+- **Put a rule where the work that needs it will load it, once.** A rule for every task (how agents work, commits,
+  what to ask) goes in this file, which every session loads. A rule for one kind of work (API design, generators,
+  docs, benchmarks) goes in the skill that owns that work, and other skills point to it. A directory's `AGENTS.md`
+  holds only its file map and rules local to its files. The public skill (`skills/easyecs/SKILL.md`) holds what
+  users' agents need to write EasyEcs code, refreshed in the docs pass. Before adding a rule, search for it: extend
+  the existing one instead of writing a second.
 - **Split, never shrink.** A skill that has grown past one concern is split by concern into a new skill (name,
   description, `metadata.internal: true`). Every line moves, nothing is summarized away, the old skill keeps a
   pointer, the `audit` scopes gain the new skill, and `tools/agents.sh` adds it to the index.

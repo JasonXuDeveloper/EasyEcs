@@ -46,6 +46,19 @@ Each feature page has these parts, in this order, with these headings (Chinese i
    in terms of a server (replication, saving, spawning), not of the API.
 2. **When to use it** [什么时候用]: a `<Callout type="idea" title="Use it for">` and a `<Callout type="warn"
    title="Skip it for">`. Say when *not* to use it as concretely as when to use it.
+   **Write for a reader who does not know the other field.** Most readers know C# and games or servers, not HPC or
+   graphics: OpenMP, MPI, stencil codes, halo exchange, ghost cells, fragment shaders, SIMD lanes and masks, warps,
+   morsels, zone maps, PagedAttention are new to them. On every page (guide, decisions, README, samples), a term from
+   another field is explained where it is first used, in one plain sentence (what it is and why it is here), or
+   linked to the page's "Before you start" section or to its `glossary.mdx` entry; never named bare as if known.
+   Comparisons to other fields come after the feature is understood, never instead of explaining it.
+
+   **Before you start** [前置知识], on an advanced page whose ideas come from another field (tiles and halos from
+   stencil codes, shaders, vector lanes and masks, reductions, pass fusion): a `##` section after "When to use it"
+   that teaches what the page assumes, for a reader who knows C# and the ECS basics and nothing else. One idea per
+   paragraph, in the order the page needs them, each with a mermaid diagram where a picture shows it better (a tile
+   and its halo as a grid, lanes of a vector as boxes, a mask selecting lanes), and the word the page will use next.
+   Link the page that owns an idea instead of teaching it twice.
 3. **How to use it** [怎么用]: `<Steps>` or `###` subsections, each with a complete example that compiles: the
    components, the system, the call that runs it. No `...` in the middle of code a reader will copy.
 4. **Full example** [完整例子], on the page of a feature a short program can show alone:

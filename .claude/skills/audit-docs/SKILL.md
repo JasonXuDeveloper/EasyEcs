@@ -20,6 +20,9 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/AGENTS.md` first.
 3. **Anatomy** (WRITING.md "Page anatomy"; a feature's guide page has every part, in this order):
    - **what it is**: the problem it solves, in two to four sentences;
    - **when to use it**: an `idea` Callout (use it for) and a `warn` Callout (do not use it for: what to use instead);
+   - **before you start** on an advanced page (grids, vector loops, fusion, parallel data; WRITING.md): the ideas it
+     borrows from another field (tile, halo, shader, lane, mask) taught first with mermaid diagrams, so a reader new
+     to them can follow;
    - **how to use it**: the recommended form first, the one the generator supports (an attribute, a `[ForEach]`
      parameter, a generated member: `entity.Health`, `SetX`, `[Sum]`, `Reduce<T>`), each step with a complete example
      that compiles; where the generator writes code, Tabs `You write` / `The generator writes` show both (real
@@ -31,7 +34,10 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/AGENTS.md` first.
      has no tabs) a `<details><summary>What the generator writes</summary>` block under the example. The generated
      side is real output from `obj/**/generated`, trimmed to what matters (the vector loop, the bulk call, the job),
      with a comment per step saying why it is faster (lanes per instruction, whole words, no per-row call), and it is
-     refreshed whenever the generator changes that form;
+     refreshed whenever the generator changes that form. An example that writes SIMD by hand (`Vector128`, `Load128`)
+     where a plain method the generator vectorizes would do the same is rewritten to the plain form, with the
+     generated vector loop in the second tab; hand-written SIMD stays only where the generator cannot write it yet,
+     and the page says why;
    - **full example**: a short program that runs (the "Full example" section, `doccheck=example` fences);
    - **how to use it fast**: the high-performance form with an example (vector loop eligible, `Parallel`, `ChunkRows`,
      `Read` over `Query`, bulk calls, `Mut<T>`, values at creation), each choice with its benchmark through
@@ -71,6 +77,11 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/AGENTS.md` first.
   no page naming it except history pages.
 - **Inspiration is named where it helps** (OpenMP `threadprivate` for `Scratch<T>`, `reduction` for `Reduce<T>`,
   stencil halos for `Tile<,>`, Burst for vector loops): one clause in "what it is", the comparison in decisions.
+- **Readers do not know the other field** (WRITING.md, page anatomy): read each page as someone who knows C# and
+  games or servers only. Every borrowed term (OpenMP, MPI, stencil, halo exchange, ghost cells, fragment shader,
+  lanes, masks, warps, morsels, zone maps) is explained at its first use or linked to "Before you start" or the
+  glossary, which holds an entry for each; an advanced page (grids, vector loops, fusion, parallel data) has its
+  "Before you start" section with mermaid diagrams. A bare term is a finding.
 - **Docs come last**: while code still changes, agents collect docs to-dos instead of editing pages; one full pass
   at the end, with `tools/bench.sh --site --sync` on the final code (numbers come from `bench.json` only).
 

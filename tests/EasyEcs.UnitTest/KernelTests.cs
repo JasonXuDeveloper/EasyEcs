@@ -726,6 +726,7 @@ public static class ColdKernels
 }
 
 // Wide components: more fields than a vector loop splits, or fields of other types beside the 4-byte lanes a method uses.
+#pragma warning disable EECS091 // the wide rows are what these tests check
 public record struct Craft12(float X, float Y, float VX, float VY, float Fuel, float Mass, float Drag, float Heat, float Spin, float Tilt, float Yaw, float Roll) : IComponent;
 public struct Mixed : IComponent
 {
@@ -737,6 +738,7 @@ public struct Mixed : IComponent
     public double Score;
     public float Armor;
 }
+#pragma warning restore EECS091
 
 /// <summary>
 /// Kernels over wide components: the lanes they use gathered by permutes (AVX-512), the rest of each row stored as

@@ -72,9 +72,13 @@ its own worktree.
    - A/B copies as git worktrees outside the repo tree (scratchpad); two rounds, interleaved;
    - every run under `flock /tmp/bench.lock`, nothing else running (agents' builds and samples included): parallel
      rows swing by 2x on a loaded machine; take the load average with the results;
-   - builds and tests take the lock shared (`flock -s`) and leave no server behind: `MSBUILDDISABLENODEREUSE=1
-     DOTNET_CLI_USE_MSBUILD_SERVER=0` and `-p:UseSharedCompilation=false` (a reused MSBuild node or VBCSCompiler
-     keeps the lock's descriptor open and starves every `flock -x` waiter; `dotnet build-server shutdown` frees it);
+   - one lock for the machine, `/tmp/bench.lock` (`tools/bench.sh` takes it too), always with `flock -o` so no build
+     server or test host it starts inherits the descriptor and holds the lock after the command ends. Benchmarks take it
+     exclusively behind a gate they hold while waiting and running, `flock -o /tmp/bench.lock.gate flock -o -x
+     /tmp/bench.lock <cmd>`; builds and tests pass the gate first, `flock -o /tmp/bench.lock.gate true && flock -o -s
+     /tmp/bench.lock <cmd>`, so a stream of agents testing cannot starve a waiting benchmark. Builds also set
+     `MSBUILDDISABLENODEREUSE=1 DOTNET_CLI_USE_MSBUILD_SERVER=0` and `-p:UseSharedCompilation=false` (no server left
+     running to load the machine; `dotnet build-server shutdown` stops one);
    - the feature's benchmark plus WorldSimulation, BattleServer, MultiWorld and the neighbors; 0 B in steady state;
    - a runtime change (threads, memory, intrinsics) also works on every platform (`audit-core`, Platforms): measure on
      x64, check arm64, AOT and the single-threaded WebAssembly demo still run;

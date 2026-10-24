@@ -56,7 +56,8 @@ The analyzer computes the fix as diagnostic properties; a `CodeFixTests` case co
 Behaviour; a regression test that fails before each bug fix; edge cases (stale and recycled ids, empty tables, structural changes mid-pass, retired entities,
 exceptions mid-pass); the allocation test (0 B in steady state); bit-identical results at 1 and 4 threads for
 parallel code; equivalence with the scalar method for vector loops; the AOT test when the feature reaches
-generics or reflection (`tests/EasyEcs.Aot`).
+generics or reflection (`tests/EasyEcs.Aot`); for each new or changed analyzer rule and code fix, its tests and edge
+cases (`audit-analyzer`, "Tests: every rule, every edge").
 
 ## 6. Benchmarks (`audit-perf` has the method)
 
@@ -71,6 +72,8 @@ Per `docs/WRITING.md`, en and zh structurally identical:
   form first, with `You write` / `The generator writes` tabs (and in every headline example that uses the form:
   README `<details>`, docs home, getting started, the battle server walkthrough); a full example; how to use it fast; what it costs;
   pitfalls with their EECS rule; related Cards;
+- every term borrowed from another field (OpenMP, MPI, stencil, halo, shader, lanes) explained where first used or
+  in the page's "Before you start" section, with a glossary entry (WRITING.md);
 - complexity rows in `docs/content/api.mdx` + `.zh.mdx`; XML docs with zh entries in `tools/ApiDocs/zh`;
 - numbers only through `docs/src/data/bench.json` (BenchTable), never typed on a page (decision records may quote);
 - a decision record for every non-obvious choice and dropped idea; the roadmap;

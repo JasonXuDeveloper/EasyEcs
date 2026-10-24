@@ -398,8 +398,19 @@ internal sealed partial class Kernel
                 ops++;
         if (_permutes < 8 * ops) return;
         var (p, wide) = (_wideOf.First().Key, _wideOf.First().Value);
-        throw new Unsupported($"{wide.Reason}, and gathering the {wide.Paths.Length} {(wide.Paths.Length == 1 ? "field" : "fields")} it uses takes "
-            + $"{_permutes} permutes per 16 rows, {(ops == 0 ? "for no vector operation" : ops == 1 ? "more than its 1 vector operation gains" : $"more than its {ops} vector operations gain")}{Split(p.Type, wide.Paths)}");
+        throw Advised($"{wide.Reason}, and gathering the {wide.Paths.Length} {(wide.Paths.Length == 1 ? "field" : "fields")} it uses takes "
+            + $"{_permutes} permutes per 16 rows, {(ops == 0 ? "for no vector operation" : ops == 1 ? "more than its 1 vector operation gains" : $"more than its {ops} vector operations gain")}",
+            p.Type, wide.Paths, false);
+    }
+
+    /// <summary>
+    /// <paramref name="reason"/> ended with the advice to split the fields the method uses (<see cref="Split"/>) when it
+    /// applies: then the user can fix it, and EECS091 leaves <paramref name="type"/> to EECS055.
+    /// </summary>
+    private static Unsupported Advised(string reason, ITypeSymbol type, IFieldSymbol[][]? used, bool isFixable)
+    {
+        string split = used != null ? Split(type, used) : "";
+        return split.Length == 0 ? new Unsupported(reason, isFixable) : new Unsupported(reason + split, true, type.ToDisplayString());
     }
 
     /// <summary>
