@@ -9,7 +9,7 @@ using Microsoft.CodeAnalysis.Operations;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// EECS090: a component whose fields split into those its frequent passes touch and those they never touch, wide enough
+/// EECS091: a component whose fields split into those its frequent passes touch and those they never touch, wide enough
 /// that the untouched ones cost the passes memory. A pass walks a component's column row by row, so it reads every
 /// byte of each row it visits, whichever fields its method names; moving the cold fields into a component of their
 /// own leaves the frequent passes a column of only the fields they use. The layout stays the user's (D90): nothing moves
@@ -17,7 +17,7 @@ namespace EasyEcs.Generator;
 /// </summary>
 public sealed partial class EasyEcsAnalyzer
 {
-    public static readonly DiagnosticDescriptor ColdFields = new("EECS090", "A component with fields its frequent passes never touch",
+    public static readonly DiagnosticDescriptor ColdFields = new("EECS091", "A component with fields its frequent passes never touch",
         "Component '{0}' is {1} bytes, and {2} only {3} ({4} bytes) of each row every update: move {5} ({6} bytes) into a component of their own, so {7} {4} bytes per row instead of {1}",
         Category, DiagnosticSeverity.Warning, true,
         "A [ForEach] pass walks the column of each component it takes, so it reads whole rows: the fields its method never " +
@@ -29,17 +29,17 @@ public sealed partial class EasyEcsAnalyzer
         "visits only changed rows ([Changed<T>], [Removed<T>]) or a slice of them (Slices); a pass that uses the component " +
         "whole (a copy, a call, a ref local) touches every field. The code fix declares the new component and rewrites " +
         "every use of the moved fields when it can do so without changing what the code does; otherwise move them by hand.",
-        helpLinkUri: Help("EECS090"), customTags: WellKnownDiagnosticTags.CompilationEnd);
+        helpLinkUri: Help("EECS091"), customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     /// <summary>
-    /// The smallest component EECS090 reports, in bytes, and the share of it the untouched fields must take (half).
+    /// The smallest component EECS091 reports, in bytes, and the share of it the untouched fields must take (half).
     /// HotColdBenchmark: a pass over 8 bytes of a row of 32 bytes or more takes measurably longer than over the same
     /// 8 bytes split out (D118).
     /// </summary>
     private const int ColdMinSize = 32;
 
     /// <summary>
-    /// What EECS090 needs from a compilation: per component, the fields each [ForEach] pass touches (from AnalyzeBody,
+    /// What EECS091 needs from a compilation: per component, the fields each [ForEach] pass touches (from AnalyzeBody,
     /// where the body is bound already) and the components EECS055 advises to split (it reports them).
     /// </summary>
     private sealed class ColdFieldPasses
@@ -50,7 +50,7 @@ public sealed partial class EasyEcsAnalyzer
         /// <summary>Components whose used fields EECS055 advises to split out: one mistake, one diagnostic.</summary>
         public readonly ConcurrentDictionary<string, byte> Advised = new();
 
-        /// <summary>The fields <paramref name="method"/> touches of each component it takes, when the component is one EECS090 may report.</summary>
+        /// <summary>The fields <paramref name="method"/> touches of each component it takes, when the component is one EECS091 may report.</summary>
         public void Collect(IMethodSymbol method, IOperation body)
         {
             if (!Symbols.IsForEach(method) || Symbols.IsForEntity(method)) return; // one entity per call walks no column
@@ -126,7 +126,7 @@ public sealed partial class EasyEcsAnalyzer
 
         private static IFieldSymbol[] InstanceFields(INamedTypeSymbol type) => type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray();
 
-        /// <summary>EECS090 for each component whose frequent passes all leave the same wide set of its fields untouched.</summary>
+        /// <summary>EECS091 for each component whose frequent passes all leave the same wide set of its fields untouched.</summary>
         public void Report(CompilationAnalysisContext context)
         {
             foreach (var group in _passes.GroupBy(p => p.Component, SymbolEqualityComparer.Default))
@@ -174,7 +174,7 @@ public sealed partial class EasyEcsAnalyzer
         }
 
         /// <summary>
-        /// The properties of the split code fix (EECS090, and EECS055 when it advises a split): <c>Fix=Split</c>, the
+        /// The properties of the split code fix (EECS091, and EECS055 when it advises a split): <c>Fix=Split</c>, the
         /// component's documentation id and the names of the fields to move; null when a moved field is the backing
         /// field of a property (the fix moves declared fields only).
         /// </summary>

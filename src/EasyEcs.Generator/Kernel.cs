@@ -169,7 +169,7 @@ internal sealed partial class Kernel
     /// left a method scalar: <paramref name="Text"/>, what EECS055 and EECS056 report; <paramref name="IsFixable"/>,
     /// whether the user can rewrite the method for a vector loop (the text then names the rewrite: EECS055 warns) or the
     /// algorithm needs what stops it (EECS055 suggests); <paramref name="SplitComponent"/>, the fully qualified name of
-    /// the component whose used fields the text advises to split out (EECS090 leaves that component to EECS055).
+    /// the component whose used fields the text advises to split out (EECS091 leaves that component to EECS055).
     /// </summary>
     public sealed record ScalarReason(string Text, bool IsFixable, string? SplitComponent);
 

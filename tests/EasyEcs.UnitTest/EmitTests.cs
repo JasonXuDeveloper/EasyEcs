@@ -204,7 +204,7 @@ public class EmitTests
                 Assert.That(hits[2 * i].Target, Is.EqualTo(seen[i].Subject));
                 Assert.That((hits[2 * i].Amount, hits[2 * i + 1].Amount), Is.EqualTo((1, 2)));
             }
-            seen.Clear(); // the reader clears what it applied (EECS091)
+            seen.Clear(); // the reader clears what it applied (EECS092)
             hits.Clear();
         }
     }
@@ -304,7 +304,7 @@ public class EmitTests
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }, () => strikes.Stats.TotalAllocated), Is.Zero);
     }
 
-    // EECS091: records nothing clears. The test compilation is a library, so the record types are internal: a public
+    // EECS092: records nothing clears. The test compilation is a library, so the record types are internal: a public
     // one could be cleared by another assembly.
     private const string Strikes = """
         internal record struct Shot(EntityId Target, int Amount);
@@ -314,7 +314,7 @@ public class EmitTests
         """;
 
     private static string[] Uncleared(string reader) =>
-        GeneratorTests.Analyze([Strikes, reader]).Result.Where(d => d.Id == "EECS091").Select(d => d.GetMessage()).ToArray();
+        GeneratorTests.Analyze([Strikes, reader]).Result.Where(d => d.Id == "EECS092").Select(d => d.GetMessage()).ToArray();
 
     [Test]
     public void RecordsNoCodeClearsAreReported()
@@ -348,7 +348,7 @@ public class EmitTests
     [Test]
     public void APublicRecordOfALibraryIsLeftToItsUsers()
     {
-        var found = GeneratorTests.Analyze([Strikes.Replace("internal record struct Shot", "public record struct Shot")]).Result.Where(d => d.Id == "EECS091");
+        var found = GeneratorTests.Analyze([Strikes.Replace("internal record struct Shot", "public record struct Shot")]).Result.Where(d => d.Id == "EECS092");
         Assert.That(found, Is.Empty);
     }
 }

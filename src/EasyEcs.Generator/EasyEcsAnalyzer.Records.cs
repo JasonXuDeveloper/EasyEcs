@@ -7,13 +7,13 @@ using Microsoft.CodeAnalysis.Operations;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// EECS091: the records of an <c>Emit&lt;T&gt;</c> parameter that no code of the compilation clears. Passes append to
+/// EECS092: the records of an <c>Emit&lt;T&gt;</c> parameter that no code of the compilation clears. Passes append to
 /// singleton <c>Emitted&lt;T&gt;</c> and never clear it, since only the system that applies the records knows when they
 /// are applied; that system's <c>Clear()</c> is the one line users write around a data event, and the one they forget.
 /// </summary>
 public sealed partial class EasyEcsAnalyzer
 {
-    public static readonly DiagnosticDescriptor UnclearedRecords = new("EECS091", "Emitted records that no code clears",
+    public static readonly DiagnosticDescriptor UnclearedRecords = new("EECS092", "Emitted records that no code clears",
         "{0} emits {1} records, but no code clears Emitted<{1}>: each update adds its records to all the earlier ones, so a reader applies them again and the list grows; clear world.GetSingleton<Emitted<{1}>>().Items in the system that applies them, once applied",
         Category, DiagnosticSeverity.Warning, true,
         "An Emit<T> parameter appends the records of each pass to singleton Emitted<T>, and passes never clear it: the " +
@@ -22,10 +22,10 @@ public sealed partial class EasyEcsAnalyzer
         "every update stay: a reader applies each of them again on every later update, and the list grows without " +
         "bound. Reported at the end of the compilation for a record type it declares, unless another assembly could " +
         "clear the records (a public record type of a library).",
-        helpLinkUri: Help("EECS091"), customTags: WellKnownDiagnosticTags.CompilationEnd);
+        helpLinkUri: Help("EECS092"), customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     /// <summary>
-    /// EECS091: the record types the compilation's [ForEach] methods emit (and the first parameter emitting each), the
+    /// EECS092: the record types the compilation's [ForEach] methods emit (and the first parameter emitting each), the
     /// ones its code clears, and at the end the emitted ones nothing clears.
     /// </summary>
     private static void AnalyzeRecords(CompilationStartAnalysisContext start)

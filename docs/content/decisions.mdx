@@ -117,9 +117,9 @@ after the change on the machine of the time; they are history, not the current r
 | [D106](#d106-lock-or-cas) | The runtime synchronizes with a `Lock` or a compare-and-swap, never a locked object |
 | [D107](#d107-never-used-warnings) | `[ForEach]` and hook methods are not reported as unused |
 | [D108](#d108-aot-instruction-set) | Native AOT: the instruction set is the program's choice, `native` in the templates |
-| [D118](#d118-fixable-reasons-and-cold-fields) | EECS055 warns when the method can be rewritten; EECS090 names the fields a frequent pass never touches |
+| [D118](#d118-fixable-reasons-and-cold-fields) | EECS055 warns when the method can be rewritten; EECS091 names the fields a frequent pass never touches |
 | [D119](#d119-no-oop-code-fix) | No code fix from object-oriented classes to components and systems: a migration guide |
-| [D120](#d120-feature-modules-and-data-events) | Not added: `[Feature]` modules and a generated reader of records; EECS091 reports records nothing clears |
+| [D120](#d120-feature-modules-and-data-events) | Not added: `[Feature]` modules and a generated reader of records; EECS092 reports records nothing clears |
 
 The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
 reused.
@@ -2693,7 +2693,7 @@ such as `x86-64-v3` (AVX2) or `x86-64-v4` (AVX-512) for a fleet. The package set
 - **Leaving the default:** the AVX-512 loops never run under Native AOT.
 - **Setting it in the package's build files:** a library would choose the CPUs its users' programs run on.
 
-## D118. EECS055 warns when the method can be rewritten; EECS090 names the fields a frequent pass never touches [#d118-fixable-reasons-and-cold-fields]
+## D118. EECS055 warns when the method can be rewritten; EECS091 names the fields a frequent pass never touches [#d118-fixable-reasons-and-cold-fields]
 
 **Decision.** Each reason `Kernel.Vectorize` gives for a scalar method is marked where it is raised as fixable (the
 user can rewrite the method without changing what it computes, and the reason names the rewrite) or inherent (what
@@ -2701,7 +2701,7 @@ the method computes stops the loop). EECS055 reports a fixable reason as a warni
 suggestion, through one descriptor whose severity is chosen per report; EECS056 (`SimdMode.Require`) stays an error
 for both. Fixable today: the few fields a method uses of a wide or mixed component (split them out), a `ref` local
 (name the parameter's fields), a local without a value, fields declared in several parts, a reduction field that is a
-property or `readonly`, a method that is not static. A new rule, EECS090 (warning, at the end of the compilation),
+property or `readonly`, a method that is not static. A new rule, EECS091 (warning, at the end of the compilation),
 reports a component of 32 bytes or more whose untouched fields are at least half of it: the fields that no frequent
 `[ForEach]` pass touches, with the passes and the fields to move. A pass is frequent unless its system has
 `[UpdateInterval]` above 1, or the method visits changed rows only (`[Changed<T>]`, `[Removed<T>]`) or a slice
@@ -2734,13 +2734,13 @@ message says which fields to move, and the user moves them.
   against 50.4 µs, 128 bytes 508.0 against 48.8 µs, 0 B each. The split pays from 32 bytes on, by 2.3 to 2.6 times there over two rounds (the second: 118.6 against 50.9 µs);
   at 16 bytes the gain is within what a second component costs elsewhere, so the rule starts at 32 bytes and asks
   for at least half the row to be cold.
-- **The rules cost no measurable build time.** EECS090 reads the [ForEach] bodies the performance rules already walk, and EECS091 the
+- **The rules cost no measurable build time.** EECS091 reads the [ForEach] bodies the performance rules already walk, and EECS092 the
   operations of the compilation once. `GeneratorBenchmark` (the analyzer over the battle server and modules, its time
   being `CompileAndAnalyze` less `Compile`): 0.93 s before and 1.02 s after in one namespace, 1.26 s and 1.12 s in
   many, each within the error of 0.11 to 0.44 s.
 - **One mistake, one diagnostic** ([D60](#d60-one-diagnostic-per-mistake)). When EECS055 already advises to split
-  the fields a pass uses out of a component, EECS090 leaves that component to it; a method kept scalar with
-  `SimdMode.Off` gets no EECS055, so EECS090 reports its component.
+  the fields a pass uses out of a component, EECS091 leaves that component to it; a method kept scalar with
+  `SimdMode.Off` gets no EECS055, so EECS091 reports its component.
 
 **Considered.**
 - **Two rule ids, a warning and a suggestion:** two ids for one reason list, and a reason moving between them would
@@ -2770,15 +2770,15 @@ manager singleton to a singleton component, and services to the host.
 - **A hint without a fix is noise.** A warning on every class with an `Update` method would fire on code that is not
   game state (a UI widget, a network client) and say only "rewrite this".
 - **The judgment is what an assistant does well.** The guide gives it the mapping and the rules to check against
-  (EECS006, EECS007, EECS017, EECS090, EECS091), and the analyzer then checks the result.
+  (EECS006, EECS007, EECS017, EECS091, EECS092), and the analyzer then checks the result.
 
 **Considered.**
 - **A fix limited to a class with only value fields and one `Update` method:** still changes reference semantics at
   every use of the class, and the callers stay broken; not always correct, so not offered.
 
-## D120. Not added: `[Feature]` modules and a generated reader of records; EECS091 reports records nothing clears [#d120-feature-modules-and-data-events]
+## D120. Not added: `[Feature]` modules and a generated reader of records; EECS092 reports records nothing clears [#d120-feature-modules-and-data-events]
 
-**Decision.** Two generator ideas were weighed and left out. A third finding became a rule: EECS091 (warning, at the
+**Decision.** Two generator ideas were weighed and left out. A third finding became a rule: EECS092 (warning, at the
 end of the compilation) reports an `Emit<T>` whose records no code of the compilation clears (no `Clear`, `RemoveAt`
 or `RemoveAtSwapBack` of a `DynamicBuffer<T>`, no `RemoveSingleton<Emitted<T>>()`, no assignment of `Emitted<T>` or its
 `Items`), once per record type, unless the record type is public in a library (another assembly may clear it).

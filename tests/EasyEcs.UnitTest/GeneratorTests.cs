@@ -2453,7 +2453,7 @@ public class GeneratorTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(in P p, ref Clock c) { c.Ticks += p.V; G.N++; } } public static class G { public static int N; }", "EECS010")] // not EECS060
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p) => p.V = new System.Random(p.V).Next(); }", "EECS071")]         // not EECS028
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Link l, World w) { if (w.TryGetEntity(l.Target, out var t)) p.V = t.Get<Q>().V; } }", "EECS087")] // not EECS033
-    [TestCase("public struct Ship : IComponent { public float X, VX, A, B, C, D, E, F; } [EcsSystem] public ref struct S { [ForEach] static void A(ref Ship s) => s.X += s.VX; }")] // EECS055's split (left out of All), not EECS090
+    [TestCase("public struct Ship : IComponent { public float X, VX, A, B, C, D, E, F; } [EcsSystem] public ref struct S { [ForEach] static void A(ref Ship s) => s.X += s.VX; }")] // EECS055's split (left out of All), not EECS091
     public async Task OneMistakeIsReportedOnce(string source, params string[] ids)
     {
         var all = await All(source);

@@ -5,7 +5,7 @@ using NUnit.Framework;
 namespace EasyEcs.UnitTest;
 
 /// <summary>
-/// EECS090: a component whose frequent passes all leave the same wide set of its fields untouched (the hot/cold split
+/// EECS091: a component whose frequent passes all leave the same wide set of its fields untouched (the hot/cold split
 /// of a row), and the cases it leaves alone.
 /// </summary>
 public class HotColdTests
@@ -15,7 +15,7 @@ public class HotColdTests
     private const string Body = "public struct Body : IComponent { public float X, VX; public string Name; public long Born; public int Kind; }";
 
     private static Diagnostic[] Report(params string[] sources) =>
-        GeneratorTests.Analyze(sources).Result.Where(d => d.Id is "EECS090" or "EECS055").ToArray();
+        GeneratorTests.Analyze(sources).Result.Where(d => d.Id is "EECS091" or "EECS055").ToArray();
 
     [Test]
     public void AFrequentPassThatSkipsHalfARowIsReported()
@@ -25,7 +25,7 @@ public class HotColdTests
             [EcsSystem, UpdateInterval(60)] public ref struct Census { [ForEach] static void Count(in Body b, ref Tally t) => t.N += b.Kind + b.Name.Length; }
             public struct Tally : ISingletonComponent { public long N; }
             """);
-        Assert.That(found.Select(d => d.Id), Is.EqualTo(new[] { "EECS090" }));
+        Assert.That(found.Select(d => d.Id), Is.EqualTo(new[] { "EECS091" }));
         Assert.That(found[0].Severity, Is.EqualTo(DiagnosticSeverity.Warning));
         Assert.That(found[0].GetMessage(), Is.EqualTo("Component 'Body' is 32 bytes, and pass Movement.Move touches only X and VX (8 bytes) of each "
             + "row every update: move Name, Born and Kind (24 bytes) into a component of their own, so the pass reads 8 bytes per row instead of 32"));
@@ -38,7 +38,7 @@ public class HotColdTests
     public void FieldsAreFoundThroughEveryParameterForm(string method)
     {
         var found = Report(Body, "public struct Speed : IComponent { public float V; }", $"[EcsSystem] public ref struct Movement {{ {method} }}");
-        Assert.That(found.Select(d => d.Id), Is.EqualTo(new[] { "EECS090" }), string.Join("\n", found.Select(d => d.GetMessage())));
+        Assert.That(found.Select(d => d.Id), Is.EqualTo(new[] { "EECS091" }), string.Join("\n", found.Select(d => d.GetMessage())));
     }
 
     [Test]
@@ -71,12 +71,12 @@ public class HotColdTests
         "[EcsSystem] public ref struct M { [ForEach] static void Move(ref Blob b) => b.X += b.VX; }")] // a layout of its own: size unknown
     public void ComponentsNotWorthSplittingAreNotReported(string component, string system)
     {
-        var found = Report(component, system).Where(d => d.Id == "EECS090");
+        var found = Report(component, system).Where(d => d.Id == "EECS091");
         Assert.That(found.Select(d => d.GetMessage()), Is.Empty);
     }
 
     // One mistake, one diagnostic: when EECS055 already advises to split the fields a pass uses out of the component,
-    // EECS090 leaves the component to it.
+    // EECS091 leaves the component to it.
     [Test]
     public void TheVectorLoopsAdviceToSplitWins()
     {
@@ -87,12 +87,12 @@ public class HotColdTests
         Assert.That(found[0].Severity, Is.EqualTo(DiagnosticSeverity.Warning));
     }
 
-    // With the method kept scalar on purpose (SimdMode.Off) EECS055 says nothing, so EECS090 reports the row.
+    // With the method kept scalar on purpose (SimdMode.Off) EECS055 says nothing, so EECS091 reports the row.
     [Test]
     public void AScalarMethodByChoiceStillGetsTheLayoutAdvice()
     {
         var found = Report("public struct Ship : IComponent { public float X, VX, A, B, C, D, E, F; }",
             "[EcsSystem] public ref struct M { [ForEach(SimdMode = SimdMode.Off)] static void Move(ref Ship s) => s.X += s.VX; }");
-        Assert.That(found.Select(d => d.Id), Is.EqualTo(new[] { "EECS090" }));
+        Assert.That(found.Select(d => d.Id), Is.EqualTo(new[] { "EECS091" }));
     }
 }

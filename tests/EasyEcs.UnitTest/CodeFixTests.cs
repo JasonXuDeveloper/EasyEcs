@@ -422,14 +422,14 @@ public class CodeFixTests
         Assert.That(await Analyze(document), Has.Some.Matches<Diagnostic>(d => d.Id == id), "the case reports " + id);
     }
 
-    // The split of a component (EECS090: the fields no frequent pass touches; EECS055: the few fields a method uses): the
+    // The split of a component (EECS091: the fields no frequent pass touches; EECS055: the few fields a method uses): the
     // moved fields become a component declared after the old one, and every use follows them, so the program does what
     // it did: a pass over moved fields only takes the new component, a pass over both gains it, creations and Set give
     // both, Remove removes both, entity.C.X and entity.Get<C>().X read the new one.
     private const string Body = "public struct Body : IComponent { public float X, VX; public string Name; public long Born; public long Kind; }\n"
         + "[EcsSystem] public ref struct Movement { [ForEach] static void Move(ref Body b) => b.X += b.VX; }\n";
 
-    [TestCase("EECS090", "Move Name, Born and Kind into a new component BodyName",
+    [TestCase("EECS091", "Move Name, Born and Kind into a new component BodyName",
         Body + "[EcsSystem, UpdateInterval(10)] public ref struct Aging { [ForEach] static void Age(ref Body b) => b.Born++; }\n"
              + "[EcsSystem, UpdateInterval(10)] public ref struct Report { [ForEach] static void Log(in Body b, ref P p) => p.V = (int)b.X + b.Name.Length; }\n"
              + "public static class Spawner\n{\n"
@@ -497,7 +497,7 @@ public class CodeFixTests
         var text = Body + source;
         if (declaration != null) text = text.Replace(Body.Substring(0, Body.IndexOf('\n')), declaration);
         var document = Document(Data + text, generate: true);
-        var diagnostic = (await Analyze(document)).First(d => d.Id == "EECS090");
+        var diagnostic = (await Analyze(document)).First(d => d.Id == "EECS091");
         var actions = new List<CodeAction>();
         await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
         Assert.That(actions, Is.Empty, string.Join(", ", actions.Select(a => a.Title)));

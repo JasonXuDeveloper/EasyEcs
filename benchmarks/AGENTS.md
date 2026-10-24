@@ -15,7 +15,7 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                ChangeTracking (+ ChangeTrackingWrite: Mut<T>, ChangeTrackingRead: Read, ChangeTrackingSomeRows: EECS053), Cleanup, Consume ([Consume] in bulk and per row against a hand-written Destroy), Count, DestroyLog, Emit, EntityRandom, ForEntity (against the hand-written job), ForParallel,
                                DynamicBuffer (+ ChunkChurn: MaxPooledLength), Generator (the generators per keystroke and the analyzer per
                                build, through
-                               Roslyn), Group, Hierarchy, HotCold (a pass over wide rows against the cold fields split out: EECS090's threshold), Histogram (keyed reductions), Index (+ unique keys), Introspection (+ Schedule),
+                               Roslyn), Group, Hierarchy, HotCold (a pass over wide rows against the cold fields split out: EECS091's threshold), Histogram (keyed reductions), Index (+ unique keys), Introspection (+ Schedule),
                                Maybe, Migration, OrderedIndex, Ordering, ParallelForEach, ParallelSystems (Measure),
                                Prefab, Relation, Runner, SingleEntity, Slices, Snapshot (+ SaveWithout / LoadKeeping),
                                Sparse, SystemDispatch (what a system costs per update apart from its rows), Trim,

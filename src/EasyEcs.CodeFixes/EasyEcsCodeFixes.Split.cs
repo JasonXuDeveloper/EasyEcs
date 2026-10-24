@@ -11,7 +11,7 @@ using Microsoft.CodeAnalysis.Editing;
 namespace EasyEcs.CodeFixes;
 
 /// <summary>
-/// The split of a component (EECS090: the fields its frequent passes never touch; EECS055: the few fields a method
+/// The split of a component (EECS091: the fields its frequent passes never touch; EECS055: the few fields a method
 /// uses of a wide component): the moved fields become a new component declared next to the old one, and every use of
 /// them across the solution is rewritten so the program does what it did. Offered only when every use of the
 /// component is a form the rewrite keeps exact; any other use (the component copied whole, a query over it, a call that
@@ -42,7 +42,7 @@ public sealed partial class EasyEcsCodeFixes
     }
 
     /// <summary>
-    /// EECS090 and EECS055: the solution with <c>Fields</c> of <c>Component</c> moved into a new component, or null when
+    /// EECS091 and EECS055: the solution with <c>Fields</c> of <c>Component</c> moved into a new component, or null when
     /// a use of the component is one the rewrite cannot keep exact (then no fix is offered).
     /// </summary>
     private static async Task<(string Title, Solution Solution)?> Split(Document document, Diagnostic diagnostic, CancellationToken token)

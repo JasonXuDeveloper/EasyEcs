@@ -81,10 +81,10 @@ EasyEcsAnalyzer.Parameters.cs  EECS086, EECS087, EECS089: a [ForEach] method doi
                              chunk (a singleton reset by system code and accumulated row by row: Reduce<T>, reported
                              at the end of the compilation; other entities read through the World: Lookup<T>; records
                              appended to a singleton's list: Emit<T>); no code fix (the reset, the readers move too)
-EasyEcsAnalyzer.Layout.cs    EECS090 (compilation end): a component of 32 bytes or more whose fields no frequent
+EasyEcsAnalyzer.Layout.cs    EECS091 (compilation end): a component of 32 bytes or more whose fields no frequent
                              [ForEach] pass touches are half of it (ColdFieldPasses: the fields each pass names,
                              collected from AnalyzeBody; components EECS055 already advises to split are left to it)
-EasyEcsAnalyzer.Records.cs   EECS091 (compilation end): an Emit<T> whose Emitted<T> no code of the compilation clears
+EasyEcsAnalyzer.Records.cs   EECS092 (compilation end): an Emit<T> whose Emitted<T> no code of the compilation clears
                              (a public record type of a library is left to the assemblies using it)
 Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)
 Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race;

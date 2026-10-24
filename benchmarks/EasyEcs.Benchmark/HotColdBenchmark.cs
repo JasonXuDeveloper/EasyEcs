@@ -3,7 +3,7 @@ using BenchmarkDotNet.Attributes;
 namespace EasyEcs.Benchmark;
 
 /// <summary>
-/// The cost of cold fields in a column a frequent pass walks (EECS090): a movement pass reads and writes 8 bytes of
+/// The cost of cold fields in a column a frequent pass walks (EECS091): a movement pass reads and writes 8 bytes of
 /// each row (X, VX). <c>Mixed</c> keeps those in one component with <see cref="Size"/> - 8 bytes of fields the pass
 /// never touches (spawn data, stats); <c>Split</c> moves the cold fields into a component of their own, which every
 /// entity still holds. Both loops run one row at a time (SimdMode.Off), so the difference is the memory the pass walks,
@@ -48,7 +48,7 @@ public class HotColdBenchmark
 
     public record struct Mover(float X, float VX) : IComponent;
 
-#pragma warning disable EECS090 // the cold fields are what this benchmark measures
+#pragma warning disable EECS091 // the cold fields are what this benchmark measures
     public struct Body16 : IComponent { public float X, VX; public long C0; }
     public struct Body32 : IComponent { public float X, VX; public long C0, C1, C2; }
     public struct Body64 : IComponent { public float X, VX; public long C0, C1, C2, C3, C4, C5, C6; }
@@ -57,7 +57,7 @@ public class HotColdBenchmark
         public float X, VX;
         public long C0, C1, C2, C3, C4, C5, C6, C7, C8, C9, C10, C11, C12, C13, C14;
     }
-#pragma warning restore EECS090
+#pragma warning restore EECS091
 
     public struct Cold8 : IComponent { public long C0; }
     public struct Cold24 : IComponent { public long C0, C1, C2; }

@@ -405,7 +405,7 @@ internal sealed partial class Kernel
 
     /// <summary>
     /// <paramref name="reason"/> ended with the advice to split the fields the method uses (<see cref="Split"/>) when it
-    /// applies: then the user can fix it, and EECS090 leaves <paramref name="type"/> to EECS055.
+    /// applies: then the user can fix it, and EECS091 leaves <paramref name="type"/> to EECS055.
     /// </summary>
     private static Unsupported Advised(string reason, ITypeSymbol type, IFieldSymbol[][]? used, bool isFixable)
     {

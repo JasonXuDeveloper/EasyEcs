@@ -158,7 +158,7 @@ public sealed partial class EasyEcsAnalyzer
     /// method left scalar. EECS055 only for a method that looks meant for one (<see cref="Kernel.LooksEligible"/>):
     /// a warning when the user can rewrite it (the reason names how), a suggestion when the algorithm needs what stops
     /// the loop; EECS056 for any method that requires one. A component the reason advises to split goes to
-    /// <paramref name="layout"/>, so EECS090 does not report it too.
+    /// <paramref name="layout"/>, so EECS091 does not report it too.
     /// </summary>
     private static void AnalyzeVectorLoop(SyntaxNodeAnalysisContext context, ColdFieldPasses layout)
     {
