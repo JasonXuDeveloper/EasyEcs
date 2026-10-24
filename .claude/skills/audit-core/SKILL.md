@@ -5,7 +5,7 @@ description: Audit src/EasyEcs.Core for redundant designs, duplicated logic, cou
 
 # Core audit
 
-Follow AGENTS.md (performance first, zero allocation on hot paths, structural gate, StorageVersion, EntityMeta only).
+Follow CLAUDE.md (performance first, zero allocation on hot paths, structural gate, StorageVersion, EntityMeta only).
 
 ## Look for
 
@@ -26,6 +26,10 @@ Follow AGENTS.md (performance first, zero allocation on hot paths, structural ga
   exceptions in the middle of a pass. Exception messages name the call that was refused.
 - **Hot paths**: allocations (allocation tests: 0 B), bounds checks, inlining, cache lines, a lookup done twice
   (`Has` then `Get`).
+- **Threads**: synchronization is `System.Threading.Lock` or CAS (`Interlocked`), never `lock (object)`; an atomic
+  instruction only where another thread can really race (a plain write when the owner is alone, as
+  `BlockTicks.Raise` does); per-thread state (`[ThreadStatic]`) must not allocate on a thread's first run after
+  warm-up; parallel results are bit-identical at 1 and 4 threads (chunks, `Reduce<T>`, `Emit<T>` combine in chunk order).
 - **Word loops** (any walk of a table by 64-row words: batch, masked, structural, bulk, query enumerators): a word
   without a passing row jumps with `RowFilter.NextPassing`, a run of whole words with `WholeEnd`, and a Changed
   filter's unwritten words with `NextWord`. A loop that tests every word costs a few rows in a large table as much as

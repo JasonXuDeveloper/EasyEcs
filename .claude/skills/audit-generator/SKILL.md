@@ -1,6 +1,6 @@
 ---
 name: audit-generator
-description: Audit the EasyEcs source generators (ArityGenerator, ComponentGenerator, SystemGenerator) for generator speed, incremental-generator best practices, caching, and use of newer Roslyn features such as interceptors. Use when changing a generator or reviewing IDE/build performance.
+description: Audit the EasyEcs source generators (ArityGenerator, ComponentGenerator, SystemGenerator, PartGenerator, and the vector loops of Kernel*.cs) for generator speed, incremental-generator best practices, caching, and use of newer Roslyn features such as interceptors. Use when changing a generator or reviewing IDE/build performance.
 ---
 
 # Generator audit
@@ -11,7 +11,8 @@ every keystroke of every user, so it is performance like the runtime's.
 ## Measure first
 
 `benchmarks/EasyEcs.Benchmark/GeneratorBenchmark.cs` (class `GeneratorBenchmark`): the three generators over the
-battle server plus 40 generated modules (components of every kind, buffers, systems, query loops).
+battle server plus 40 generated modules (components of every kind, buffers, systems, query loops), each case with
+`OneNamespace` false and true: the four generators.
 
 ```bash
 tools/bench.sh GeneratorBenchmark        # or: dotnet run ... -- --filter '*.GeneratorBenchmark.*' (with the namespace)
@@ -60,6 +61,15 @@ tools/bench.sh GeneratorBenchmark        # or: dotnet run ... -- --filter '*.Gen
   ship in EasyEcs.Core, so no `AddEmbeddedAttributeDefinition` / post-initialization output.
 - Analyzer side: `EnableConcurrentExecution`, `ConfigureGeneratedCodeAnalysis(None)`, symbols resolved once per
   compilation in `RegisterCompilationStartAction`, no per-node lists, `Symbols.Named` for type checks.
+
+## Vector loops (`Kernel*.cs`)
+
+- A `[ForEach]` method becomes a `Vector<T>` loop only through `Kernel.Vectorize`; the reason it returns otherwise is
+  exactly what EECS055 / EECS056 report (one function for the generator and the analyzer).
+- Each new form gets a test that the vector loop equals the scalar method (`KernelTests`), a `KernelBenchmark` case,
+  and a look at its Tier1 asm (`tools/jitdisasm.sh`): no call in the loop body, no unexpected range check.
+- A change to `Kernel` must leave the code generated for `WorldSimulation.cs` and `BattleServer.cs` identical, or
+  ship with their BenchmarkDotNet numbers.
 
 ## Newer features (verdicts: [D63](/en/docs/decisions#d63-roslyn-features))
 

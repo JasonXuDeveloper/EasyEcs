@@ -12,17 +12,19 @@ One round = parallel audits, each in its own worktree and branch, then triage an
 | Skill | Owns | Looks for |
 |---|---|---|
 | `audit-core` | `src/EasyEcs.Core`, its tests and benchmarks | redundancy, non-DRY code, coupling, bugs, hot-path cost |
-| `audit-generator` | `src/EasyEcs.Generator` (generators, Shapes, Code) | generator speed, incremental best practices, newer Roslyn features |
-| `audit-analyzer` | `EasyEcsAnalyzer*.cs`, `Symbols.cs`, `Uses.cs`, `Threads.cs`, `src/EasyEcs.CodeFixes` | overlapping rules, missing rules and fixes, false positives |
+| `audit-generator` | `src/EasyEcs.Generator` generators: Arity, Component, System, Part (+ `Parts.cs`), `Kernel*.cs`, `Code.cs`, `EquatableArray.cs` | generator speed, incremental best practices, newer Roslyn features |
+| `audit-analyzer` | `EasyEcsAnalyzer*.cs`, `UnusedSuppressor.cs`, `Symbols.cs`, `Uses.cs`, `Threads.cs`, `src/EasyEcs.CodeFixes` | overlapping rules, missing rules and fixes, false positives |
 | `audit-docs` | `docs/content`, README, `docs/public/easyecs-rules.md`, samples READMEs | stale names, examples, best practices, duplication, en/zh |
 
-`audit-generator` and `audit-analyzer` share `Symbols.cs`: run them in different rounds or give `Symbols.cs` to one.
+`audit-generator` and `audit-analyzer` share `Symbols.cs` (and the analyzer reads `Kernel.Vectorize` for EECS055 /
+EECS056): run them in different rounds or give the shared files to one. `audit-naming` reports only, so it runs beside
+any of them.
 
 ## Starting an agent
 
 - A new worktree may start on an old commit (`origin/master`), not on the work branch. The prompt must say:
   `git checkout -B <audit-branch> <work-branch>`, then check `git merge-base --is-ancestor <work-branch-tip> HEAD`.
-- Give each agent: its skill, its owned paths, the paths it must not touch, the commit command (AGENTS.md: author =
+- Give each agent: its skill, its owned paths, the paths it must not touch, the commit command (CLAUDE.md: author =
   owner, committer = signing identity, no session links), "commit on your branch, do not push or merge".
 - Decision numbers collide between parallel agents: give each a distinct range (e.g. next free D, next free D + 1).
 - Docs edits from code audits stay minimal (changelog, migration, decisions, the one guide section) so the
@@ -37,7 +39,10 @@ One round = parallel audits, each in its own worktree and branch, then triage an
 ## Triage and merge
 
 1. Read each report. Reject changes that widen the API without need or regress a benchmark.
-2. Merge one branch at a time onto the work branch; after each: `dotnet build -c Release` (0 warnings), `dotnet test`.
+2. Merge one branch at a time onto the work branch (rebase it onto the tip first, then fast-forward); after each:
+   `dotnet build -c Release` (0 warnings), `dotnet test`. A branch that changes a hot path is merged only after a
+   quiet A/B against the tip (two rounds, copies as worktrees outside the repo, under `flock /tmp/bench.lock`, nothing
+   else running): agents' own numbers taken beside other agents' builds are not proof.
 3. Conflicts are usually in `changelog`, `migration`, `decisions` (both sides appended): keep both, renumber a
    duplicated D and fix its anchors and links.
 4. After the code audits are merged, run `audit-docs` once more: code changes leave stale pages behind.

@@ -5,9 +5,12 @@ description: Audit the EasyEcs analyzer (EECS rules) and code fixes - overlaps, 
 
 # Analyzer audit
 
-Files: `src/EasyEcs.Generator/EasyEcsAnalyzer.cs` (declaration and [ForEach] rules), `.Performance.cs` (code that
-works but costs), `.Usage.cs` (code that compiles but does not do what it says), `Symbols.cs` (shared checks),
-`Uses.cs`, `Threads.cs`; fixes in `src/EasyEcs.CodeFixes`. Rule list: `docs/content/guide/analyzer.mdx`.
+Files in `src/EasyEcs.Generator`: `EasyEcsAnalyzer.cs` (declaration and [ForEach] rules), `.Performance.cs` (code that
+works but costs), `.Usage.cs` (code that compiles but does not do what it says), `.Systems.cs` (systems as
+declarations), `.Parallel.cs` (code on several threads), `.Parts.cs` (generated parts), `.Forms.cs` (what the
+generator declares for code written by hand), `.Parameters.cs` ([ForEach] parameters done by hand),
+`UnusedSuppressor.cs`, `Symbols.cs` (shared checks), `Uses.cs`, `Threads.cs`; fixes in `src/EasyEcs.CodeFixes`. Rule
+list: `docs/content/guide/analyzer.mdx` and the range in CLAUDE.md (EECS002-089).
 
 ## Principles
 
@@ -27,11 +30,13 @@ works but costs), `.Usage.cs` (code that compiles but does not do what it says),
 - Hand-rolled copies of a Symbols helper in a rule.
 - False positives on: `ref readonly`, lambdas, generated members (`[GeneratedCode("EasyEcs.Generator")]`), loops
   with break/return, explicit types, code after a structural change.
-- Mistakes users make that no rule catches (common-mistakes.mdx, troubleshooting.mdx are the source).
+- Mistakes users make that no rule catches (`docs/content/guide/common-mistakes.mdx` and `guide/troubleshooting.mdx`
+  are the source).
 - Messages that no longer match runtime behavior.
 
 ## Done means
 
 - Tests: one diagnostic test per rule case, a code-fix test per fix, the overlap test.
 - Docs: analyzer.mdx + .zh (section + table row + fix line), changelog, decisions for a new rule or a dropped idea,
-  `docs/public/easyecs-rules.md`, common-mistakes / troubleshooting if users meet it, the EECS range in AGENTS.md.
+  `docs/public/easyecs-rules.md`, common-mistakes / troubleshooting if users meet it, the rule list and EECS range in
+CLAUDE.md (layout and definition of done).
