@@ -1,6 +1,6 @@
 ---
 name: audit-generator
-description: "Audit the EasyEcs source generators (ArityGenerator, ComponentGenerator, SystemGenerator, PartGenerator; the vector loops are audit-vector-loops) on their three jobs - generate what users would write twice, turn the plain form users write into the fast one (vector loops, per-chunk parameters, schedule), and stay fast on every keystroke (incremental best practices, caching, newer Roslyn features). Use when changing a generator, adding a generated form, or reviewing IDE/build performance. Triggers: SystemGenerator, ComponentGenerator, ArityGenerator, PartGenerator, *.g.cs, slow IDE, boilerplate, interceptors, 源生成器, 生成代码, 样板代码, 少写代码."
+description: "Audit the EasyEcs source generators (ArityGenerator, ComponentGenerator, SystemGenerator, PartGenerator; the vector loops are audit-vector-loops) on their three jobs - generate what users would write twice, turn the plain form users write into the fast one (vector loops, per-chunk parameters, schedule), and stay fast on every keystroke (incremental best practices, caching, newer Roslyn features). Use when changing a generator, adding a generated form, or reviewing IDE/build performance. Triggers: SystemGenerator, ComponentGenerator, ArityGenerator, PartGenerator, *.g.cs, slow IDE, boilerplate, interceptors, attributes, too many attributes, overlapping declarations, 源生成器, 生成代码, 样板代码, 少写代码, 标签, 属性, 标签太多, 重复的标签."
 metadata:
   internal: true
 ---
@@ -27,6 +27,31 @@ shared with the analyzer (`audit-analyzer`).
    or to a serial pass, rank them by how often they appear (the EECS055 / EECS056 reasons over the samples and docs),
    and support the most frequent next. The research behind a new form belongs to `audit-perf`.
 3. **The generators are fast**: they run on every keystroke of every user (below).
+
+## The declaration surface (attributes, marker interfaces, parameters)
+
+Users pay twice for declarations: the code they write, and the choice between declarations that look alike. Both
+count. Each round lists every public attribute, marker interface (`IComponent`, `ITracked`, `IIndexed<K>`, ...),
+`[ForEach]` parameter type, attribute property and `WorldOptions` member (the in-flight branches' new ones too), and
+for each one answers:
+
+- **What code does it remove?** A before / after a user would write. A declaration that removes nothing is a
+  candidate to drop.
+- **Could the generator infer it** from code users already write (a method that destroys every row it visits is
+  `[Consume]`; a parameter's type already says read or write)? Prefer inference, then a parameter type, then an
+  attribute; an attribute the analyzer can suggest from the code is a sign it could be inferred.
+- **Does it overlap another?** Two ways to say one thing (an attribute and an interface, an attribute and an option,
+  a family that could be one attribute with a value, filters that compose into another) are merged into one: one way
+  per meaning.
+- **Is the family consistent?** Siblings share a shape (`With<T>` / `Without<T>` / `WithAny<T>`), names (`audit-naming`)
+  and the same placement (type, method, parameter).
+- **What is still written twice?** Boilerplate in samples, templates, `BattleServer.cs` and docs examples that a new
+  declaration (or inference) would remove (job 1 above).
+
+Report adds, merges, drops and inferences to the owner with the before / after and how many call sites in samples
+and docs change; a public change is a breaking change (migration entry, code fix, analyzer rule from the old form).
+The docs carry one "which declaration" table by task (`audit-docs`), and the analyzer suggests the right declaration
+when code uses a weaker one (`audit-analyzer`).
 
 ## ECS without the burden
 

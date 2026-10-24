@@ -28,6 +28,8 @@ part names the skill that audits it.
 - Whatever users would otherwise write twice is generated (an attribute, a `[ForEach]` parameter, a generated
   member); where users write the plain form, the generator emits the fast one (vector loop: `audit-vector-loops`; per-chunk parameter,
   schedule) when it can.
+- A new attribute, marker interface, parameter or option passes the declaration surface check (`audit-generator`):
+  it removes code users write, the generator could not infer it, and no existing declaration says the same thing.
 - Declarations users write once are read through one `Symbols` helper that the generator and the analyzer share, so
   "skipped by the generator" is exactly "reported by the analyzer".
 - Models are equatable and symbol-free, a tracking name per stage, a caching assertion and a generated-output test

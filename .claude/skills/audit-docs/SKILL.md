@@ -66,6 +66,9 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/AGENTS.md` first.
   "What's new", migration for a breaking change; a decision record for every non-obvious choice and dropped idea;
   the roadmap; the battle server (`BattleServer.cs` regions + `example.mdx` walkthrough) and the samples where it
   belongs, as exemplary code; the file map of each directory it touches (root AGENTS.md layout, `src/*/AGENTS.md`, `tests/` and `benchmarks/AGENTS.md`).
+- **Which declaration**: the cheat sheet has one table by task (what you want -> the attribute, interface or parameter
+  to write), every declaration in it once (`audit-generator`, declaration surface); a merged or dropped one leaves
+  no page naming it except history pages.
 - **Inspiration is named where it helps** (OpenMP `threadprivate` for `Scratch<T>`, `reduction` for `Reduce<T>`,
   stencil halos for `Tile<,>`, Burst for vector loops): one clause in "what it is", the comparison in decisions.
 - **Docs come last**: while code still changes, agents collect docs to-dos instead of editing pages; one full pass

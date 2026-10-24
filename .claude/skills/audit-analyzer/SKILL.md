@@ -33,6 +33,9 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
 
 ## Principles
 
+- **A weaker or redundant declaration** (`audit-generator`, declaration surface): an attribute that repeats what a
+  parameter type or another attribute already says, or a hand-written form where a declaration exists, is reported
+  with a code fix to the one form; a merged or dropped declaration gets a rule and fix from the old form.
 - **One mistake, one diagnostic** (D60): when two rules fire on the same code, the rule whose fix removes the other's
   case reports it. Pin each pair in `GeneratorTests.OneMistakeIsReportedOnce`.
 - **Detection lives in `Symbols.cs`** once (structural calls, [ForEach] context, `Symbols.Requirements`, query loops,
