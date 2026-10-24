@@ -16,7 +16,7 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                DynamicBuffer (+ ChunkChurn: MaxPooledLength), Generator (the generators per keystroke and the analyzer per
                                build, through
                                Roslyn), Group, Hierarchy, HotCold (a pass over wide rows against the cold fields split out: EECS091's threshold), Histogram (keyed reductions), Index (+ unique keys), Introspection (+ Schedule),
-                               Maybe, Migration, OrderedIndex, Ordering, ParallelForEach, ParallelSystems (Measure),
+                               Lookup, LookupChase (random lookups across 1M entities), Maybe, Migration, OrderedIndex, Ordering, ParallelForEach, ParallelSystems (Measure),
                                Prefab, Relation, Runner, SingleEntity, Slices, Snapshot (+ SaveWithout / LoadKeeping),
                                Sparse, SystemDispatch (what a system costs per update apart from its rows), Trim,
                                Unload) + MicroBenchmarks.
