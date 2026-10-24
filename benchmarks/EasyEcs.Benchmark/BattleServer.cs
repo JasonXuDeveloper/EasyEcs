@@ -71,14 +71,12 @@ public struct Replication : ISystemGroup;                                     //
 [EcsSystem]
 public ref struct PlanningSystem                                          // where each NPC heads next
 {
-    [OnCreate]
     static void OnCreate(World world)                                        // the system sets up the data it plans with
     {
         ref var waypoints = ref world.GetOrAddWaypoints();
         for (int i = 0; i < Waypoints.Count; i++) waypoints.Points[i] = new Position(512 + i * 400, 512 + i * 1777 % 3000);
     }
 
-    [OnDestroy]
     static void OnDestroy(World world) => world.RemoveWaypoints();
 
     // A plan need not be fresh every tick: each run plans a quarter of the NPCs, so each one every fourth tick
@@ -195,7 +193,6 @@ public ref struct StatusSystem
 [EcsSystem]
 public ref struct TallySystem                                             // registered after StatusSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref var battle = ref world.Battle;
@@ -366,7 +363,6 @@ public ref struct ReplicationSystem                                       // onl
 [EcsSystem, UpdateInGroup<Replication>]
 public ref struct KillFeedSystem                                          // the kills since the last send
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref var kills = ref world.GetOrAddSingleton<Emitted<Kill>>().Items;  // DeathSystem's records, in row order

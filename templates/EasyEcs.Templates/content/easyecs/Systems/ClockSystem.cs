@@ -7,7 +7,6 @@ namespace EasyEcsApp;
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         world.Clock.Tick++;

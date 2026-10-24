@@ -37,7 +37,6 @@ public ref struct LifetimeSystem
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         world.Simulation.Tick++;

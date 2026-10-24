@@ -22,7 +22,6 @@ public ref struct SendChunksSystem
 [EcsSystem, UpdateInGroup<Replication>]
 public ref struct ChunkSentSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.RemoveAll<Fresh>();
 }
 // #endregion chunks
@@ -54,7 +53,6 @@ public ref struct SendEntitiesSystem
 [EcsSystem, UpdateInGroup<Replication>]
 public ref struct SendPacketsSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref var outbox = ref world.GetOrAddSingleton<Emitted<EntityUpdate>>().Items;
@@ -75,7 +73,6 @@ public ref struct SendPacketsSystem
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct TallySystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref var stats = ref world.Stats;
@@ -92,7 +89,6 @@ public ref struct TallySystem
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct ClockSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         long tick = ++world.Clock.Tick;

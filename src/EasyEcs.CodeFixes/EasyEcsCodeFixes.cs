@@ -92,6 +92,15 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                                    && ToSystem(old, baseType) is { } system:
                     Register(context, diagnostic, "Make it an [EcsSystem] ref struct", root, old, system);
                     break;
+                case "CS0246" when node.FirstAncestorOrSelf<AttributeSyntax>() is { } attribute
+                                   && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false)
+                                   && FromHookAttribute(attribute) is { } unmarked:
+                    Register(context, diagnostic, unmarked.Title, root, unmarked.Old, unmarked.New);
+                    break;
+                case "EECS090" when kind == "Hook" && diagnostic.Properties.TryGetValue("Hook", out var hook) && hook != null
+                                    && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method:
+                    Register(context, diagnostic, $"Rename it to {hook}", root, method, RenamedHook(method, hook));
+                    break;
                 case "CS0305" when node.FirstAncestorOrSelf<GenericNameSyntax>() is { } any && IsSingleWithAny(any)
                                    && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false)
                                    && MergedWithAny(any) is { } merged:

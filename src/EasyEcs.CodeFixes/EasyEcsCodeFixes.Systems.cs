@@ -42,7 +42,7 @@ public sealed partial class EasyEcsCodeFixes
 
     /// <summary>
     /// CS0246 on <c>class X : EcsSystem</c>: <c>[EcsSystem] ref struct X</c> with every member static. OnCreate,
-    /// OnUpdate and OnDestroy overrides become [OnCreate] / [OnUpdate] / [OnDestroy] methods; the World property becomes a
+    /// OnUpdate and OnDestroy overrides become static hooks of the same name; the World property becomes a
     /// <c>World world</c> parameter and RunCount, LastRunTick, Enabled, Error and Stats are read through a
     /// <c>SystemHandle system</c> parameter, each added to the methods that use it (or call a method of the class that
     /// does). Null (no fix) for a class with constructor arguments, an abstract base, or a [ForEach] method that reads
@@ -229,14 +229,6 @@ public sealed partial class EasyEcsCodeFixes
         if (needsHandle) parameters.Add(SyntaxFactory.Parameter(SyntaxFactory.Identifier("system")).WithType(SyntaxFactory.ParseTypeName(prefix + "SystemHandle ")));
         if (parameters.Count > 0)
             result = result.WithParameterList(forEach ? Append(result.ParameterList, parameters) : Prepend(result.ParameterList, parameters));
-
-        if (hook)
-        {
-            // On the method's line, as hooks are written: [OnUpdate] static void OnUpdate(World world).
-            var attribute = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Attribute(
-                SyntaxFactory.ParseName(prefix + method.Identifier.ValueText))));
-            result = result.WithAttributeLists(result.AttributeLists.Insert(0, attribute.WithTrailingTrivia(SyntaxFactory.Space)));
-        }
 
         return result.WithLeadingTrivia(leading);
 

@@ -13,13 +13,13 @@ namespace EasyEcs;
 [EditorBrowsable(EditorBrowsableState.Never)]
 public interface ISystemCode
 {
-    /// <summary>Runs the system: its [OnUpdate] method, then its [ForEach] methods in declaration order.</summary>
+    /// <summary>Runs the system: its OnUpdate method, then its [ForEach] methods in declaration order.</summary>
     static abstract void Update(World world, SystemHandle system);
 
-    /// <summary>Runs its [OnCreate] method, if it has one.</summary>
+    /// <summary>Runs its OnCreate method, if it has one.</summary>
     static abstract void Create(World world, SystemHandle system);
 
-    /// <summary>Runs its [OnDestroy] method, if it has one.</summary>
+    /// <summary>Runs its OnDestroy method, if it has one.</summary>
     static abstract void Destroy(World world, SystemHandle system);
 
     /// <summary>Declares what the system reads and writes (parallel stages).</summary>
@@ -54,10 +54,10 @@ public interface ISystemSet
     /// <summary>Runs system <paramref name="system"/> of the set (<see cref="ISystemCode.Update"/>).</summary>
     static abstract void Update(World world, int system, SystemHandle handle);
 
-    /// <summary>Runs the [OnCreate] method of system <paramref name="system"/> of the set.</summary>
+    /// <summary>Runs the OnCreate method of system <paramref name="system"/> of the set.</summary>
     static abstract void Create(World world, int system, SystemHandle handle);
 
-    /// <summary>Runs the [OnDestroy] method of system <paramref name="system"/> of the set.</summary>
+    /// <summary>Runs the OnDestroy method of system <paramref name="system"/> of the set.</summary>
     static abstract void Destroy(World world, int system, SystemHandle handle);
 }
 

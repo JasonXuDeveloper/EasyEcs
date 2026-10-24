@@ -109,7 +109,6 @@ public static class Inventory
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct ItemExpirySystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref var stats = ref world.Stats;

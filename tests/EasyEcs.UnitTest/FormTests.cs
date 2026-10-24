@@ -85,7 +85,7 @@ public class FormTests
     private const string Reset = """
         [EcsSystem] public ref struct Reset
         {
-            [OnUpdate] static void OnUpdate(World world)
+            static void OnUpdate(World world)
             {
                 world.Census = default;
                 world.AddSingleton<Peak>();
@@ -120,14 +120,14 @@ public class FormTests
     }
 
     // Each way to reset the singleton, and the places a reset does not count.
-    [TestCase("[EcsSystem] public ref struct R { [OnUpdate] static void OnUpdate(World world) => world.Peak = default; }", true)]
-    [TestCase("[EcsSystem] public ref struct R { [OnUpdate] static void OnUpdate(World world) => world.Peak.High = 0; }", true)]
-    [TestCase("[EcsSystem] public ref struct R { [OnUpdate] static void OnUpdate(World world) => world.SetPeak(0); }", true)]
-    [TestCase("[EcsSystem] public ref struct R { [OnUpdate] static void OnUpdate(World world) => world.AddSingleton<Peak>(); }", true)]
+    [TestCase("[EcsSystem] public ref struct R { static void OnUpdate(World world) => world.Peak = default; }", true)]
+    [TestCase("[EcsSystem] public ref struct R { static void OnUpdate(World world) => world.Peak.High = 0; }", true)]
+    [TestCase("[EcsSystem] public ref struct R { static void OnUpdate(World world) => world.SetPeak(0); }", true)]
+    [TestCase("[EcsSystem] public ref struct R { static void OnUpdate(World world) => world.AddSingleton<Peak>(); }", true)]
     [TestCase("[EcsSystem] public ref struct R { [ForEach, With<Q>] static void B(ref Peak k) => k = default; }", true)]
     [TestCase("", false)]                                                                                                   // a running total
-    [TestCase("[EcsSystem] public ref struct R { [OnCreate] static void OnCreate(World world) => world.Peak = default; }", false)]       // set up once
-    [TestCase("[EcsSystem] public ref struct R { [OnUpdate] static void OnUpdate(World world) => world.Peak.High = world.Peak.High / 2; }", false)] // not a constant
+    [TestCase("[EcsSystem] public ref struct R { static void OnCreate(World world) => world.Peak = default; }", false)]       // set up once
+    [TestCase("[EcsSystem] public ref struct R { static void OnUpdate(World world) => world.Peak.High = world.Peak.High / 2; }", false)] // not a constant
     [TestCase("public static class Host { public static void Step(World w) { w.Peak = default; w.Update(); } }", false)]  // not system code
     public async Task OnlyASingletonResetEachPassIsReported(string reset, bool reported)
     {

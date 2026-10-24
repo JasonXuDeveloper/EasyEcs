@@ -163,7 +163,7 @@ public class GeneratorTests
         ".ChangedAny<global::T, global::S.T2>(0)", "access.Read<global::T>();", "access.Read<global::S.T2>();", "Since(system.LastRunTick + 1)")]
     [TestCase("[ForEach, RemovedAny<T, T>] static void A(ref P p) { }", ".RemovedAny<global::T, global::T>(0)", "access.Read<global::T>();", "Since(system.LastRunTick + 1)")]
     [TestCase("[ForEach] static void A(in P p, World world) { }", "access.RunAlone();")]                        // reaches the world
-    [TestCase("[ForEach] static void A(in P p) { } [OnUpdate] static void U() { }", "access.RunAlone();")]       // an [OnUpdate] method
+    [TestCase("[ForEach] static void A(in P p) { } static void OnUpdate() { }", "access.RunAlone();")]       // an OnUpdate method
     [TestCase("[ForEach] static void A(ref P p) { }", "internal static readonly global::EasyEcs.QueryFilter AFilter0 = default;",
         "world.Count<global::P>(in __ForEach.AFilter0)", "(ref job0, in __ForEach.AFilter0);")]                          // no filter: no zeroed temporary
     [TestCase("[ForEach(Slices = 3)] static void A(ref P p) { }", "access.Write<global::P>();", "(ref job0, __ForEach.AFilter0.Slice((int)(system.RunCount % 3), 3));")]
@@ -853,10 +853,10 @@ public class GeneratorTests
         + "[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(Entity e, ref P p) { var j = new J(); e.Run<P, J>(ref j); } }", "EECS010")]
     [TestCase("[EcsSystem] public ref struct S { static int _kills; static void K() => _kills++; }", "EECS007")]
     [TestCase("[EcsSystem] public ref struct S { public static int Kills { get; set; } }", "EECS007")]
-    [TestCase("[EcsSystem] public ref struct A { public static void Go() { } } [EcsSystem] public ref struct S { [OnUpdate] static void U() => A.Go(); }", "EECS008")]
+    [TestCase("[EcsSystem] public ref struct A { public static void Go() { } } [EcsSystem] public ref struct S { static void OnUpdate() => A.Go(); }", "EECS008")]
     [TestCase("[EcsSystem] public ref struct S { static int _kills; }", "EECS007")]
-    [TestCase("[EcsSystem] public ref struct A { } [EcsSystem] public ref struct S { [OnUpdate] static void U(World world) { if (world.TryGetSystem<A>(out var a)) a.Enabled = false; } }", "EECS008")]
-    [TestCase("[EcsSystem] public ref struct A { } [EcsSystem] public ref struct S { [OnUpdate] static void U(World world) => world.System<A>().Enabled = false; }", "EECS008")]
+    [TestCase("[EcsSystem] public ref struct A { } [EcsSystem] public ref struct S { static void OnUpdate(World world) { if (world.TryGetSystem<A>(out var a)) a.Enabled = false; } }", "EECS008")]
+    [TestCase("[EcsSystem] public ref struct A { } [EcsSystem] public ref struct S { static void OnUpdate(World world) => world.System<A>().Enabled = false; }", "EECS008")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in Handle l) => l.Target.Destroy(); }", "EECS013")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in Handle l) => l.Target.Clone(); }", "EECS013")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(ref P p, in Handle l) => l.Target.Set(new Q()); }", "EECS013")]
@@ -942,15 +942,17 @@ public class GeneratorTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] void A(ref P p) { } }", "EECS075")]
     [TestCase("[EcsSystem] public ref struct S { public int N { get; set; } }", "EECS075")]
     [TestCase("[EcsSystem] public ref struct S { public S(int n) { } }", "EECS075")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] void U() { } }", "EECS075")]       // an instance hook: static first
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static int U() => 0; }", "EECS076")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void U(int n) { } }", "EECS076")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void U(World a, World b) { } }", "EECS076")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void U(ref World w) { } }", "EECS076")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void U() { } [OnUpdate] static void V() { } }", "EECS076")]
-    [TestCase("[EcsSystem] public ref struct S { [OnCreate, OnDestroy] static void U() { } }", "EECS076")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void U<T>() { } }", "EECS076")]
-    [TestCase("public static class R { [OnUpdate] static void U() { } }", "EECS076")]
+    [TestCase("[EcsSystem] public ref struct S { void OnUpdate() { } }", "EECS075")]       // an instance hook: static first
+    [TestCase("[EcsSystem] public ref struct S { static int OnUpdate() => 0; }", "EECS076")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(int n) { } }", "EECS076")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World a, World b) { } }", "EECS076")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(ref World w) { } }", "EECS076")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate() { } static void OnUpdate(World w) { } }", "EECS076")]   // an overload
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate<T>() { } }", "EECS076")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpate(World world) { } }", "EECS090")]       // misspelled
+    [TestCase("[EcsSystem] public ref struct S { static void Update(World world) { } }", "EECS090")]        // another engine's name
+    [TestCase("[EcsSystem] public ref struct S { static void OnStart() { } }", "EECS090")]
+    [TestCase("[EcsSystem] public ref struct S { static void onDestroy(SystemHandle s) { } }", "EECS090")]
     [TestCase("public struct NotOne; public static class U { public static void F(World w) => w.AddSystem<NotOne>(); }", "EECS077")]
     [TestCase("public struct NotOne; public static class U { public static bool F(World w) => w.HasSystem<NotOne>(); }", "EECS077")]
     [TestCase("public struct NotOne; [UpdateAfter<NotOne>] [EcsSystem] public ref struct S { }", "EECS077")]
@@ -1036,6 +1038,11 @@ public class GeneratorTests
     [TestCase("public static class U { public static int F(Entity[] es, in EntityRandom r) { int n = 0; foreach (var e in es) n += r.Range(e.Id, 0, 0, 6); return n; } }")] // an entity per iteration
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Entity e, in Link l, in EntityRandom r) => p.V = r.Range(e.Id, 0, 0, 6) + r.Range(l.Target, 0, 0, 6); }")] // two entities
     [TestCase("public static class U { public static bool F(in EntityRandom r, EntityId id) => r.Bits(id, 3) == EntityRandom.Bits(r.Seed, id, r.Tick, 3) && r.Float(id, 3) == r.Float(id, 3); }")] // outside a pass: a check of the function
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World w) => Tick(w); static void Tick(World w) { } }")]   // called: a helper
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate() { } static void Update() { } }")]                 // the hook exists
+    [TestCase("[EcsSystem] public ref struct S { static int Update(World w) => 0; static void Run(int n) { } }")]          // no hook's signature
+    [TestCase("public static class U { static void OnUpate(World w) { } static void OnUpdate(int n) { } }")]             // not a system
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void Update(ref P p) => p.V++; }")]                    // a [ForEach] method
     public async Task ValidCodeIsNotReported(string source)
     {
         var errors = await Diagnose(Components, source);
@@ -1165,7 +1172,7 @@ public class GeneratorTests
     // EECS051: a world update during a pass (EECS034 from a system).
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Read<P>()) w.Update(); } }", "EECS051")]
     [TestCase("public static class R { [ForEach] static void A(World w, ref P p) { if (p.V < 0) w.Update(); } }", "EECS051")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void OnUpdate(World world) { foreach (var item in world.Read<P>()) world.Update(); } }", "EECS034")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) { foreach (var item in world.Read<P>()) world.Update(); } }", "EECS034")]
     // EECS036: a plain component with two keys.
     [TestCase("public struct Seat : IComponent, IIndexed<int>, IIndexed<string> { readonly int IIndexed<int>.Key => 0; readonly string IIndexed<string>.Key => \"\"; }", "EECS036")]
     // EECS014: continuations, method groups, timers, and TrimExcess.
@@ -1502,7 +1509,7 @@ public class GeneratorTests
             "public partial struct Census : ISingletonComponent { [Sum] public int N; [Min] public float L; }" +
             "[GroupBy] public partial record struct Zn([Group] int Id) : IComponent; [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Tether(EntityId Target) : IRelation;" +
             "[NotSaved] public record struct Wire(object O) : IComponent;" +
-            "[UpdateInterval(3, Phase = 1)] [EcsSystem] public ref struct Sch { [OnUpdate] static void U(World w) { _ = w.EntityCount; } } public static class FE { [ForEntity, Without<Q>] static void E(ref P p, int n) { } }";
+            "[UpdateInterval(3, Phase = 1)] [EcsSystem] public ref struct Sch { static void OnUpdate(World w) { _ = w.EntityCount; } } public static class FE { [ForEntity, Without<Q>] static void E(ref P p, int n) { } }";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         var edited = code.Contains(before) ? system : other;
@@ -1527,7 +1534,7 @@ public class GeneratorTests
     public void TheSetCallsEverySystemOfTheAssembly()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
-            [EcsSystem] public ref struct Zeta { [OnCreate] static void C(SystemHandle s, World w) { } }
+            [EcsSystem] public ref struct Zeta { static void OnCreate(SystemHandle s, World w) { } }
             namespace N { [EcsSystem] public ref struct Alpha { [ForEach] static void A(ref P p) => p.V++; } }
             [EcsSystem] public ref struct G<X> where X : struct, IComponent { [ForEach] static void B(ref X x) { } }
             public static class Use { public static void F(World w) => w.AddSystem<G<Q>>(); }
@@ -1542,7 +1549,7 @@ public class GeneratorTests
         Assert.That(set.IndexOf("Add<global::G<"), Is.LessThan(set.IndexOf("Add<global::N.Alpha")).And.LessThan(set.IndexOf("Add<global::Zeta")), set);
         Assert.That(set, Does.Contain("case 2: global::__Zeta_SystemCode.Create(world, handle); return;"), set);
         string zeta = output.SyntaxTrees.Single(t => t.FilePath.Contains("Zeta.") && t.FilePath.EndsWith(".System.g.cs")).ToString();
-        Assert.That(zeta, Does.Contain("__ForEach.C_Create(default, system, world);"), zeta);   // the hook takes its arguments in its own order
+        Assert.That(zeta, Does.Contain("__ForEach.OnCreate_Create(default, system, world);"), zeta);   // the hook takes its arguments in its own order
     }
 
     [Test]
@@ -1571,7 +1578,7 @@ public class GeneratorTests
                 [ForEach, Consume, Without<Q>] static void A(in P p) { }               // stable: in bulk after the pass
                 [ForEach, Consume] static void B(Entity e, ref P p) => e.Set(new Q()); // may change structure: per row
             }
-            [UpdateInterval(4, Phase = 3)] [EcsSystem] public ref struct Slow { [OnUpdate] static void OnUpdate() { } }
+            [UpdateInterval(4, Phase = 3)] [EcsSystem] public ref struct Slow { static void OnUpdate() { } }
             [UpdateInterval(2)] [EcsSystem] public ref struct G<X> where X : struct, IComponent { }
             public static class H { static void F(World w) => w.AddSystem<G<P>>(); }
             public static class O { [ForEntity, Changed<T>] static void C(Entity e, ref P p, in Clock c, int n) { } }
@@ -2259,7 +2266,7 @@ public class GeneratorTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Q q) => p.V = q.V.ToString().Length; }", "EECS028")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Q q) { object o = q.V; p.V = o.GetHashCode(); } }", "EECS028")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Q q) => p.V = System.Linq.Enumerable.Count(System.Linq.Enumerable.Range(0, q.V)); }", "EECS028")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void OnUpdate(World world) => world.Clock.Ticks += new System.Text.StringBuilder().Length; }", "EECS028")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) => world.Clock.Ticks += new System.Text.StringBuilder().Length; }", "EECS028")]
     // EECS030: a structural change entity by entity over a query.
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Destroy(); } }", "EECS030")]
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Set(new Q { V = 1 }); } }", "EECS030")]
@@ -2304,7 +2311,7 @@ public class GeneratorTests
     [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) n += item.Component1.V; return n; } }", "EECS033")]
     [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<DynamicBuffer<Loot>>().Add(new Loot()); static DynamicBuffer<Loot> named; }", "EECS033")]
     // EECS034: a world update from a system.
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void OnUpdate(World world) => world.Update(); }", "EECS034")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) => world.Update(); }", "EECS034")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, in P p) { if (p.V == 0) e.World.Update(); } }", "EECS034")]
     public async Task CostsAreReported(string source, params string[] ids)
     {
@@ -2360,7 +2367,7 @@ public class GeneratorTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Q q) { System.Diagnostics.Debug.Assert(q.V >= 0, $\"{q.V}\"); p.V = q.V; } }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, in Q q) => System.Console.WriteLine($\"{p.V} {q.V}\"); }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Q q) { System.Func<int, int> f = static x => x + 1; p.V = f(q.V); } }")]
-    [TestCase("[UpdateInterval(20)] [EcsSystem] public ref struct S { [OnUpdate] static void OnUpdate(World world) => world.Clock.Ticks += new int[4].Length; }")]
+    [TestCase("[UpdateInterval(20)] [EcsSystem] public ref struct S { static void OnUpdate(World world) => world.Clock.Ticks += new int[4].Length; }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, World world) => p.V = world.DefaultUpdateCount > 0 ? 1 : 0; }")]               // uses its system
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Set(new P { V = 1 }); } }")]   // overwrites
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Set(new Q { V = item.Entity.Id.Index }); } }")]
@@ -2369,7 +2376,7 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(World w, int n) { for (int i = 0; i < n; i++) if (w.Count<P>() < i) w.CreateEntity(new P { V = i }); } }")]   // now and then
     [TestCase("public static class U { public static void F(World w, int n) { for (int r = 0; r < n; r++) for (int i = 0; i < 8; i++) w.CreateEntity(new P { V = i }); } }")]   // the inner loop's
     [TestCase("public static class U { public static void F(World w, int n) { w.Reserve<P>(n); for (int i = 0; i < n; i++) w.CreateEntity(new P { V = i }); } }")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void OnUpdate(World world) { for (int i = 0; i < world.Clock.Ticks; i++) world.CreateEntity(new P()); } }")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) { for (int i = 0; i < world.Clock.Ticks; i++) world.CreateEntity(new P()); } }")]
     [TestCase("public static class U { public static bool F(World w) => w.Count<P>() > 2; }")]
     [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<DynamicBuffer<Loot>>().Add(new Loot()); }")]          // the only name of the buffer
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p) { } }")]
@@ -2389,11 +2396,11 @@ public class GeneratorTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Mut<T> t, ref P p) => p.V = t.Value.V; }", "EECS025")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Mut<P> p, in Q q) { if (q.V > 0) p.Write().V = q.V; } }", "EECS039")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Mut<P> p, in Q q) { if (q.V > p.Value.V) p.Write() = new P { V = q.V }; } }", "EECS039")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void OnUpdate(World world) => world.TrimExcess(); }", "EECS028")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void OnUpdate(World world) { if (world.DescribeTables().Length > 9) world.Clock.Ticks++; } }", "EECS028")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void OnUpdate(World world) { if (world.DescribeSchedule().Groups.Length > 9) world.Clock.Ticks++; } }", "EECS028")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void OnUpdate(World world) { if (world.Capture() == null) world.Clock.Ticks++; } }", "EECS028")]
-    [TestCase("[EcsSystem] public ref struct S { [OnUpdate] static void OnUpdate(World world) => world.Instantiate(new Prefab()); }", "EECS028")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) => world.TrimExcess(); }", "EECS028")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) { if (world.DescribeTables().Length > 9) world.Clock.Ticks++; } }", "EECS028")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) { if (world.DescribeSchedule().Groups.Length > 9) world.Clock.Ticks++; } }", "EECS028")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) { if (world.Capture() == null) world.Clock.Ticks++; } }", "EECS028")]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) => world.Instantiate(new Prefab()); }", "EECS028")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p) => p.V = e.Describe().Length; }", "EECS028")]
     [TestCase("public struct J : IForEachEntity<P> { public void Execute(Entity e, ref P p) => p.V = e.Read<Q>().V; }", "EECS027")] // EECS033 defers
     [TestCase("public struct J : IForEach<P> { public void Execute(ref P p) { var all = new System.Collections.Generic.List<int>(); p.V = all.Count; } }", "EECS028")]
@@ -2471,7 +2478,7 @@ public class GeneratorTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Mut<T> t, in P p) => t.SetIfChanged(new T { V = p.V }); }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Mut<P> p, in Q q) => p.SetIfChanged(new P { V = q.V }); }")]       // a comparison: not a plain ref
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Mut<T> t, in P p) { if (p.V > 0) Helpers.Inc(ref t.Write().V); } }")]
-    [TestCase("[UpdateInterval(1200)] [EcsSystem] public ref struct S { [OnUpdate] static void OnUpdate(World world) => world.TrimExcess(); }")] // its cadence
+    [TestCase("[UpdateInterval(1200)] [EcsSystem] public ref struct S { static void OnUpdate(World world) => world.TrimExcess(); }")] // its cadence
     [TestCase("public struct J : IForEach<P> { public void Execute(ref P p) => p.V++; }")]
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<T>()) item.T.V++; } }")]                      // a write
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<T, P>()) { ref var t = ref item.T; t.V = item.P.V; } } }")]

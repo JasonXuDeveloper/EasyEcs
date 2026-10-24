@@ -77,6 +77,53 @@ public sealed partial class EasyEcsCodeFixes
         static string Title(GenericNameSyntax name) => $"Write it as {name.Identifier.ValueText}<{name.TypeArgumentList.Arguments}>";
     }
 
+    /// <summary>
+    /// CS0246 on a removed hook attribute (<c>[OnCreate]</c>, <c>[OnUpdate]</c>, <c>[OnDestroy]</c>) of a method of a
+    /// system: the attribute goes (its list too when it was alone) and the method takes the hook's name, the name alone
+    /// making it the hook; the system's uses of the old name follow. Null outside an [EcsSystem] struct.
+    /// </summary>
+    private static (string Title, SyntaxNode Old, SyntaxNode New)? FromHookAttribute(AttributeSyntax attribute)
+    {
+        if (LastName(attribute.Name) is not IdentifierNameSyntax { Identifier.ValueText: var spelled }
+            || HookNames.FirstOrDefault(h => spelled == h || spelled == h + "Attribute") is not { } hook
+            || attribute.Parent is not AttributeListSyntax { Parent: MethodDeclarationSyntax method } list
+            || method.Parent is not StructDeclarationSyntax system
+            || !system.AttributeLists.SelectMany(l => l.Attributes).Any(a => LastName(a.Name)?.Identifier.ValueText is "EcsSystem" or "EcsSystemAttribute"))
+            return null;
+
+        string old = method.Identifier.ValueText;
+        var updated = system.ReplaceNodes(system.DescendantNodes().Where(n => n == list || n == method
+                || n is IdentifierNameSyntax id && id.Identifier.ValueText == old && old != hook),
+            (original, current) => original switch
+            {
+                AttributeListSyntax => current, // removed below, once the method is rewritten
+                MethodDeclarationSyntax m => Unmarked((MethodDeclarationSyntax)current, list, old == hook ? null : hook),
+                _ => SyntaxFactory.IdentifierName(hook).WithTriviaFrom(current),
+            });
+        return (old == hook ? $"Remove [{hook}]: the name makes it the hook" : $"Rename it to {hook}: the name makes it the hook", system, updated);
+
+        static MethodDeclarationSyntax Unmarked(MethodDeclarationSyntax method, AttributeListSyntax list, string? rename)
+        {
+            var current = method.AttributeLists.First(l => l.IsEquivalentTo(list));
+            var attribute = current.Attributes.First(a => LastName(a.Name)?.Identifier.ValueText is { } n && HookNames.Any(h => n == h || n == h + "Attribute"));
+            if (current.Attributes.Count > 1)
+                method = method.ReplaceNode(current, current.WithAttributes(current.Attributes.Remove(attribute)));
+            else
+            {
+                // The list's leading trivia (the method's indentation) moves to what now comes first.
+                var leading = current.GetLeadingTrivia();
+                method = method.RemoveNode(current, SyntaxRemoveOptions.KeepNoTrivia)!;
+                method = method.WithLeadingTrivia(leading);
+            }
+
+            return rename == null ? method : method.WithIdentifier(SyntaxFactory.Identifier(rename).WithTriviaFrom(method.Identifier));
+        }
+    }
+
+    /// <summary>EECS090: a method named almost like a hook takes the hook's name (the analyzer checked it has no caller).</summary>
+    private static MethodDeclarationSyntax RenamedHook(MethodDeclarationSyntax method, string hook) =>
+        method.WithIdentifier(SyntaxFactory.Identifier(hook).WithTriviaFrom(method.Identifier));
+
     /// <summary>The type arguments of the merged names in order, each once.</summary>
     private static List<TypeSyntax> Merged(IEnumerable<GenericNameSyntax> names)
     {

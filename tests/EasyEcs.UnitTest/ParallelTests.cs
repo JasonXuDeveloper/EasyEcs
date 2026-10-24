@@ -98,12 +98,11 @@ public class ParallelTests
 #pragma warning restore EECS027
     }
 
-    /// <summary>WriteRight's [ForEach] method with an [OnUpdate] method: it runs alone.</summary>
+    /// <summary>WriteRight's [ForEach] method with an OnUpdate method: it runs alone.</summary>
     [EcsSystem]
     public ref struct WriteRightWithUpdate
     {
-        [OnUpdate]
-        static void Tick() { } // could reach any data: the scheduler cannot know
+        static void OnUpdate() { } // could reach any data: the scheduler cannot know
 
         [ForEach]
         static void Meet(ref Right right, in Rendezvous rendezvous) =>

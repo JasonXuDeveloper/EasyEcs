@@ -7,10 +7,12 @@ namespace EasyEcs;
 /// Declares a system: a <c>ref struct</c> whose static methods are the logic that runs on a world. A system is never an
 /// object (a ref struct cannot be boxed, stored or captured); the world keeps its bookkeeping as data
 /// (<see cref="SystemHandle"/>), and the generator writes the code that runs it, called directly by the world.
-/// <para>Lifecycle: the <see cref="OnCreateAttribute">[OnCreate]</see> method when it is added
-/// (<see cref="World.AddSystem{T}"/>), then every update its <see cref="OnUpdateAttribute">[OnUpdate]</see> method followed
-/// by its <see cref="ForEachAttribute">[ForEach]</see> methods in declaration order, and its
-/// <see cref="OnDestroyAttribute">[OnDestroy]</see> method when it is removed or the world is disposed. Everything runs
+/// <para>Lifecycle: its hooks are the static methods named for them, no attribute needed: <c>OnCreate</c> when it is
+/// added (<see cref="World.AddSystem{T}"/>), then every update <c>OnUpdate</c> followed by its
+/// <see cref="ForEachAttribute">[ForEach]</see> methods in declaration order, and <c>OnDestroy</c> when it is removed or
+/// the world is disposed. A hook takes the <see cref="World"/>, the <see cref="SystemHandle"/>, both or neither and
+/// returns void (EECS076); <c>OnUpdate</c> may touch anything, so its system never shares a parallel stage
+/// (<see cref="SystemAccess.RunAlone"/>). Everything runs
 /// synchronously within <see cref="World.Update()"/> (or <see cref="World.Update{TGroup}"/> for systems in a
 /// <see cref="UpdateInGroupAttribute{TGroup}">group</see>): on the calling thread, or with
 /// <see cref="WorldOptions.ParallelSystems"/> on one of the process's helper threads next to systems whose
@@ -30,31 +32,6 @@ namespace EasyEcs;
 /// </summary>
 [AttributeUsage(AttributeTargets.Struct), MeansImplicitUse(ImplicitUseTargetFlags.WithMembers)]
 public sealed class EcsSystemAttribute : Attribute;
-
-/// <summary>
-/// The static method of an <see cref="EcsSystemAttribute">[EcsSystem]</see> called once when the system is added to a
-/// world. It takes the <see cref="World"/>, the <see cref="SystemHandle"/>, both or neither, and returns void; one per
-/// system (EECS076).
-/// </summary>
-[AttributeUsage(AttributeTargets.Method), MeansImplicitUse]
-public sealed class OnCreateAttribute : Attribute;
-
-/// <summary>
-/// The static method of an <see cref="EcsSystemAttribute">[EcsSystem]</see> called on every run of the system, before
-/// its [ForEach] methods. It takes the <see cref="World"/>, the <see cref="SystemHandle"/>, both or neither, and returns
-/// void; one per system (EECS076). It may touch anything, so the system never shares a parallel stage
-/// (<see cref="SystemAccess.RunAlone"/>).
-/// </summary>
-[AttributeUsage(AttributeTargets.Method), MeansImplicitUse]
-public sealed class OnUpdateAttribute : Attribute;
-
-/// <summary>
-/// The static method of an <see cref="EcsSystemAttribute">[EcsSystem]</see> called once when the system is removed or
-/// the world is disposed. It takes the <see cref="World"/>, the <see cref="SystemHandle"/>, both or neither, and
-/// returns void; one per system (EECS076).
-/// </summary>
-[AttributeUsage(AttributeTargets.Method), MeansImplicitUse]
-public sealed class OnDestroyAttribute : Attribute;
 
 /// <summary>
 /// Run the system on every <paramref name="interval"/>-th update of its group only: the updates whose count

@@ -54,7 +54,7 @@ public sealed partial class World
     /// <summary>
     /// Add system <typeparamref name="T"/> (an <see cref="EcsSystemAttribute">[EcsSystem]</see> ref struct) to its group
     /// (<see cref="UpdateInGroupAttribute{TGroup}"/>, default otherwise) and run its
-    /// <see cref="OnCreateAttribute">[OnCreate]</see> method. A system is added once per world: adding it again throws.
+    /// <c>OnCreate</c> method. A system is added once per world: adding it again throws.
     /// Cold: allocates its record and the group's new schedule, O(systems²) for the stages.
     /// </summary>
     /// <param name="changesFromNow">
@@ -109,7 +109,7 @@ public sealed partial class World
         return handle;
     }
 
-    /// <summary>Remove system <typeparamref name="T"/> (runs its <see cref="OnDestroyAttribute">[OnDestroy]</see> method): false when the world has none. Its handles turn stale.</summary>
+    /// <summary>Remove system <typeparamref name="T"/> (runs its <c>OnDestroy</c> method): false when the world has none. Its handles turn stale.</summary>
     public bool RemoveSystem<T>() where T : struct, allows ref struct
     {
         int index = Find(TypeIndex<SystemCode.Entry, T>.Value);
@@ -356,7 +356,7 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Destroy all systems ([OnDestroy] in reverse order), then release all storage. Every system's [OnDestroy] runs and
+    /// Destroy all systems (OnDestroy in reverse order), then release all storage. Every system's OnDestroy runs and
     /// the storage is released even when one throws; under <see cref="SystemErrorPolicy.Throw"/> the first exception is
     /// rethrown at the end. Afterwards every handle is stale and every structural change throws
     /// <see cref="ObjectDisposedException"/>.

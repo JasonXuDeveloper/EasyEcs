@@ -6,8 +6,8 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// Suppresses "private member is unused" (IDE0051, IDE0052) on [ForEach], [ForEntity] and hook ([OnCreate],
-/// [OnUpdate], [OnDestroy]) methods: the generated code calls them through UnsafeAccessor, by name, which the IDE's
+/// Suppresses "private member is unused" (IDE0051, IDE0052) on [ForEach], [ForEntity] and hook (a system's
+/// OnCreate, OnUpdate, OnDestroy) methods: the generated code calls them through UnsafeAccessor, by name, which the IDE's
 /// analyzers do not see as a use. Rider and ReSharper read the [MeansImplicitUse] those attributes carry instead.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]

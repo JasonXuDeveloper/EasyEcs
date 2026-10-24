@@ -183,7 +183,6 @@ public ref struct ShootingSystem
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref var stats = ref world.WorldStats;

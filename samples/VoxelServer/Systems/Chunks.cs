@@ -18,7 +18,6 @@ namespace VoxelServer;
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct ChunkReadSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         Span<EntityId> served = stackalloc EntityId[Rules.MaxRequests];
@@ -47,7 +46,6 @@ public ref struct ChunkReadSystem
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct ChunkGenerateSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         Span<EntityId> served = stackalloc EntityId[Rules.MaxRequests];
@@ -96,7 +94,6 @@ public ref struct ChunkUnloadSystem
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct ChunkSaveSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         if (!world.Any<Unloading>()) return;

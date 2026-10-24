@@ -9,7 +9,6 @@ public ref struct JoinScoringSystem
 {
     static readonly QueryFilter Unscored = QueryFilter.Create().With<Position>().Without<Score>();
 
-    [OnUpdate]
     static void OnUpdate(World world) => world.SetAll(new Score(0), Unscored);
 }
 

@@ -46,7 +46,6 @@ public class EmitTests
     [EcsSystem, UpdateAfter<ParallelStrikes>]
     public ref struct ApplyHits
     {
-        [OnUpdate]
         static void OnUpdate(World world)
         {
             ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;

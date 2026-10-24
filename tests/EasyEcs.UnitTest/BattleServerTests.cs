@@ -576,7 +576,6 @@ public class BattleServerTests
     [EcsSystem]
     internal ref struct FaultySystem
     {
-        [OnUpdate]
         static void OnUpdate(World world) => throw new InvalidOperationException("a bug in one system");
     }
 }

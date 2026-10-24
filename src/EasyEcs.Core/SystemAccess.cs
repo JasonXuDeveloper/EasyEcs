@@ -10,7 +10,7 @@ namespace EasyEcs;
 /// <para>
 /// The generator declares it for every system with <see cref="ForEachAttribute">[ForEach]</see> methods: a
 /// <c>ref</c> parameter is a write, an <c>in</c> parameter a read. A system runs alone when it can reach the world
-/// beyond its parameters: an <see cref="Entity"/> or <see cref="World"/> parameter, a <see cref="OnUpdateAttribute">[OnUpdate]</see> method, a <c>[Consume]</c> method, or no <c>[ForEach]</c> method at all.
+/// beyond its parameters: an <see cref="Entity"/> or <see cref="World"/> parameter, a <c>OnUpdate</c> method, a <c>[Consume]</c> method, or no <c>[ForEach]</c> method at all.
 /// </para>
 /// </summary>
 public struct SystemAccess

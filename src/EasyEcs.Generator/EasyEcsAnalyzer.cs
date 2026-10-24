@@ -246,7 +246,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, NotPartial, ReductionWrittenTwice, BadReductionField, HandWrittenReduction,
         WrongIdentity, HandWrittenKey, BadSetup, NoFormatter, BadEmit, SharedRandom,
         HandWrittenEntityJob, BadForEntity, BadUpdateInterval, HandWrittenConsume, BadConsume, BadTileShape, SharedTile,
-        HandWrittenReduce, HandWrittenLookup, SharedStream, HandWrittenEmit, BadSystemType, InstanceMember, BadHook, NotASystemType);
+        HandWrittenReduce, HandWrittenLookup, SharedStream, HandWrittenEmit, BadSystemType, InstanceMember, BadHook, NotASystemType, MisspelledHook);
 
     public override void Initialize(AnalysisContext context)
     {

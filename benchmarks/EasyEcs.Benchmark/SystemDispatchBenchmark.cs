@@ -4,7 +4,7 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// What a system costs per update apart from its rows: 16 systems whose [ForEach] method visits one entity, and the
-/// same 16 with an [OnUpdate] method that does nothing. The update calls each system's generated code and runs one
+/// same 16 with an OnUpdate method that does nothing. The update calls each system's generated code and runs one
 /// pass per system, so the numbers divided by 16 are the cost of a system on an update. <see cref="ParallelStage"/>: 16
 /// systems of disjoint components in a world with <see cref="WorldOptions.ParallelSystems"/>, one stage handed to the
 /// runner, whose work is too small for helpers: what a stage costs when it settles on running alone.
@@ -88,23 +88,23 @@ public class SystemDispatchBenchmark
     [EcsSystem] public ref struct S14 { [ForEach] static void Run(ref Counter c) => c.Value++; }
     [EcsSystem] public ref struct S15 { [ForEach] static void Run(ref Counter c) => c.Value++; }
 
-    // An [OnUpdate] method that does nothing: the system runs alone, and the runtime calls it before the pass.
-    [EcsSystem] public ref struct U0 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U1 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U2 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U3 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U4 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U5 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U6 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U7 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U8 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U9 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U10 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U11 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U12 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U13 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U14 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
-    [EcsSystem] public ref struct U15 { [OnUpdate] static void Tick() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    // An OnUpdate method that does nothing: the system runs alone, and the runtime calls it before the pass.
+    [EcsSystem] public ref struct U0 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U1 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U2 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U3 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U4 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U5 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U6 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U7 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U8 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U9 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U10 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U11 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U12 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U13 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U14 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
+    [EcsSystem] public ref struct U15 { static void OnUpdate() { } [ForEach] static void Run(ref Counter c) => c.Value++; }
 
     // One component each: no two conflict, so the 16 systems form one parallel stage.
     public record struct C0(int Value) : IComponent;

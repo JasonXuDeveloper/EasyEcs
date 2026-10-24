@@ -9,7 +9,7 @@ namespace EasyEcs;
 /// row. The record is data the world owns (enabled, error, ticks, counts, stats); no system object exists. Once the
 /// system is removed (or the world disposed) the handle is stale: <see cref="IsAlive"/> is false and its other members
 /// throw <see cref="InvalidOperationException"/>, even after the world reuses the record for another system.
-/// Hooks (<see cref="OnUpdateAttribute">[OnUpdate]</see> and the others) may take it to read their own system's record.
+/// Hooks (<c>OnUpdate</c> and the others) may take it to read their own system's record.
 /// </summary>
 public readonly struct SystemHandle : IEquatable<SystemHandle>
 {
@@ -101,7 +101,7 @@ public readonly struct SystemHandle : IEquatable<SystemHandle>
     /// How many times the system has run before the current run (0 during its first run; runs skipped by
     /// <see cref="UpdateIntervalAttribute">[UpdateInterval]</see> or while disabled do not count, a run that throws does). A
     /// <c>[ForEach(Slices = N)]</c> method visits slice <c>RunCount % N</c> of its rows, so an
-    /// <see cref="OnUpdateAttribute">[OnUpdate]</see> method can tell which slice this run visits.
+    /// <c>OnUpdate</c> method can tell which slice this run visits.
     /// </summary>
     public long RunCount => Row.RunCount;
 

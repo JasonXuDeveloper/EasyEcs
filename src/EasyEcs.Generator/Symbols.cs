@@ -25,9 +25,6 @@ internal static class Symbols
     public const string ChangedAttribute = "EasyEcs.ChangedAttribute<T>";
     public const string RemovedAttribute = "EasyEcs.RemovedAttribute<T>";
     public const string EcsSystemAttribute = "EasyEcs.EcsSystemAttribute";
-    public const string OnCreateAttribute = "EasyEcs.OnCreateAttribute";
-    public const string OnUpdateAttribute = "EasyEcs.OnUpdateAttribute";
-    public const string OnDestroyAttribute = "EasyEcs.OnDestroyAttribute";
     public const string SystemHandle = "EasyEcs.SystemHandle";
     public const string Component = "EasyEcs.IComponent";
     public const string Singleton = "EasyEcs.ISingletonComponent";
@@ -235,55 +232,70 @@ internal static class Symbols
     /// </summary>
     public static bool GeneratesSystem(INamedTypeSymbol? type) => IsValidSystem(type) && IsVisible(type!);
 
-    /// <summary>The kinds of hook a system method may be: [OnCreate], [OnUpdate], [OnDestroy].</summary>
+    /// <summary>The kinds of hook a system method may be: OnCreate, OnUpdate, OnDestroy.</summary>
     public enum HookKind { None, Create, Update, Destroy }
 
-    /// <summary>The hook attribute on <paramref name="method"/>, or <see cref="HookKind.None"/> (the first, when there are several).</summary>
-    public static HookKind Hook(IMethodSymbol method)
+    /// <summary>The hook a method's name makes it in a system, or <see cref="HookKind.None"/> for any other name.</summary>
+    public static HookKind HookOfName(string name) => name switch
     {
-        foreach (var attribute in method.GetAttributes())
-        {
-            if (Named(attribute.AttributeClass, OnCreateAttribute)) return HookKind.Create;
-            if (Named(attribute.AttributeClass, OnUpdateAttribute)) return HookKind.Update;
-            if (Named(attribute.AttributeClass, OnDestroyAttribute)) return HookKind.Destroy;
-        }
-
-        return HookKind.None;
-    }
+        "OnCreate" => HookKind.Create,
+        "OnUpdate" => HookKind.Update,
+        "OnDestroy" => HookKind.Destroy,
+        _ => HookKind.None,
+    };
 
     /// <summary>
-    /// Why hook method <paramref name="method"/> cannot be called (EECS076, or EECS075 for an instance hook), or null: it is outside an [EcsSystem], an
-    /// instance or generic method, does not return void, takes something but one World and one SystemHandle by value,
-    /// carries two hook attributes, or is the second method of its system for its hook.
+    /// The hook <paramref name="method"/> is: a method of an [EcsSystem] named <c>OnCreate</c>, <c>OnUpdate</c> or
+    /// <c>OnDestroy</c> (the name alone, no attribute), else <see cref="HookKind.None"/>.
+    /// </summary>
+    public static HookKind Hook(IMethodSymbol method) =>
+        method.MethodKind == MethodKind.Ordinary && HookOfName(method.Name) is var kind and not HookKind.None && IsSystem(method.ContainingType)
+            ? kind
+            : HookKind.None;
+
+    /// <summary>
+    /// Why hook method <paramref name="method"/> cannot be called (EECS076, or EECS075 for an instance hook), or null: it
+    /// is an instance or generic method, does not return void, takes something but one World and one SystemHandle by
+    /// value, or is the second method of its system with its name (an overload).
     /// </summary>
     public static string? HookProblem(IMethodSymbol method)
     {
         var kind = Hook(method);
         if (kind == HookKind.None) return null;
-        int marks = method.GetAttributes().Count(a => Named(a.AttributeClass, OnCreateAttribute) || Named(a.AttributeClass, OnUpdateAttribute) || Named(a.AttributeClass, OnDestroyAttribute));
-        if (!IsSystem(method.ContainingType)) return "is not in an [EcsSystem] ref struct, so no system runs it";
-        if (marks > 1) return "carries several hook attributes: one method per hook";
         if (!method.IsStatic) return "is an instance method: make it static (a system has no instance)";
         if (method.IsGenericMethod) return "is generic, and nothing gives it type arguments: make the system generic instead";
         if (!method.ReturnsVoid) return "must return void";
+        if (!HookParameters(method, out var parameter))
+            return $"takes '{parameter}': a hook takes the World, the SystemHandle, both (once each, by value) or neither";
+
+        foreach (var other in method.ContainingType.GetMembers(method.Name).OfType<IMethodSymbol>())
+        {
+            if (SymbolEqualityComparer.Default.Equals(other, method)) break; // the first one of a name is the hook
+            return $"is a second '{method.Name}' of '{method.ContainingType.Name}': one method per hook, so rename this overload";
+        }
+
+        return null;
+    }
+
+    /// <summary>Whether the method takes what a hook takes: the World, the SystemHandle, both or neither, by value; else the first other parameter.</summary>
+    public static bool HookParameters(IMethodSymbol method, out string? parameter)
+    {
         bool world = false, handle = false;
         foreach (var p in method.Parameters)
         {
             bool isWorld = Named(p.Type, World), isHandle = Named(p.Type, SystemHandle);
             if (p.RefKind != RefKind.None || !isWorld && !isHandle || isWorld && world || isHandle && handle)
-                return $"takes '{p.Name}': a hook takes the World, the SystemHandle, both (once each, by value) or neither";
+            {
+                parameter = p.Name;
+                return false;
+            }
+
             world |= isWorld;
             handle |= isHandle;
         }
 
-        foreach (var other in method.ContainingType.GetMembers().OfType<IMethodSymbol>())
-        {
-            if (SymbolEqualityComparer.Default.Equals(other, method)) break; // the first one of a kind is the hook
-            if (Hook(other) == kind)
-                return $"is a second [On{kind}] method of '{method.ContainingType.Name}' ('{other.Name}' is the first): one method per hook";
-        }
-
-        return null;
+        parameter = null;
+        return true;
     }
 
     /// <summary>The system whose code <paramref name="symbol"/> is (its type, or a type it is nested in), or null.</summary>

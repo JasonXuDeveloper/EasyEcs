@@ -341,7 +341,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
     /// <summary>
     /// The system's code struct (<c>ISystemCode</c>), static members only, called directly by the assembly's set:
-    /// Update runs the [OnUpdate] method, then the [ForEach] methods in declaration order; Create and Destroy run the
+    /// Update runs the OnUpdate method, then the [ForEach] methods in declaration order; Create and Destroy run the
     /// other hooks; Access declares what the methods read and write; Interval and Phase are its [UpdateInterval].
     /// </summary>
     private static void EmitSystemCode(StringBuilder sb, UpdateModel model)
@@ -400,7 +400,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// <summary>
     /// <c>ref</c> parameters are writes, <c>in</c> parameters reads. Anything that can reach the world beyond its
     /// parameters (EntitySpan / World parameters, an Entity parameter used for more than its identity, [Consume], an
-    /// [OnUpdate] method) runs alone.
+    /// OnUpdate method) runs alone.
     /// </summary>
     private static void EmitAccess(StringBuilder sb, UpdateModel model)
     {

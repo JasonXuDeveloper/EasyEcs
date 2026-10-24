@@ -145,7 +145,7 @@ public sealed record StageInfo(SystemInfo[] Systems);
 /// <param name="Writes">Components its [ForEach] methods write (<c>ref</c> parameters).</param>
 /// <param name="ReadsSingletons">Singletons it reads.</param>
 /// <param name="WritesSingletons">Singletons it writes.</param>
-/// <param name="RunsAlone">It may touch anything (an [OnUpdate] method, an Entity or World parameter...): it never
+/// <param name="RunsAlone">It may touch anything (an OnUpdate method, an Entity or World parameter...): it never
 /// shares a stage.</param>
 /// <param name="After">Why it is not in an earlier stage: the systems of the stage just before its own that it must
 /// follow (empty in the first stage).</param>

@@ -4,7 +4,7 @@ using System.Diagnostics;
 namespace EasyEcs;
 
 /// <summary>
-/// How often and how long a system ran (<see cref="WorldOptions.MeasureSystems"/>): its <see cref="OnUpdateAttribute">[OnUpdate]</see> method plus its
+/// How often and how long a system ran (<see cref="WorldOptions.MeasureSystems"/>): its <c>OnUpdate</c> method plus its
 /// <c>[ForEach]</c> methods, per run, with the bytes it allocated and the entities its <c>[ForEach]</c> methods visited.
 /// Read it between updates; with <see cref="WorldOptions.ParallelSystems"/> each system records its own runs.
 /// </summary>
@@ -49,7 +49,7 @@ public readonly struct SystemStats
     /// Entities the latest run's <c>[ForEach]</c> methods visited: the entities each method's query matched when its
     /// pass started (rows passing its filters and, for <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c>, written or
     /// removed since the system last ran), summed over the methods; a <c>[ForEach(Slices = N)]</c> method counts the
-    /// rows of the slice it visited. Queries made in its [OnUpdate] method are not counted.
+    /// rows of the slice it visited. Queries made in its OnUpdate method are not counted.
     /// </summary>
     public long LastEntities { get; }
 

@@ -7,7 +7,6 @@ namespace EasyEcsApp;
 [EcsSystem]
 public ref struct SpawnSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref readonly var spawner = ref world.Spawner;

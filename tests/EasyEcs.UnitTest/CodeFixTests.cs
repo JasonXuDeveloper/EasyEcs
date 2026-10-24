@@ -37,6 +37,9 @@ public class CodeFixTests
     [TestCase("EECS002", "Take it by 'ref' (write)",
         "[EcsSystem] public ref struct S { [ForEach] static void A(P p) => p.V++; }",
         "static void A(ref P p)")]
+    [TestCase("EECS090", "Rename it to OnUpdate",
+        "[EcsSystem] public ref struct S { static void OnUpate(World world) => world.GetSingleton<Clock>().Ticks++; }",
+        "{ static void OnUpdate(World world) =>")]
     [TestCase("EECS005", "Make it static",
         "public class Runner { [ForEach] void A(ref P p) => p.V++; }",
         "[ForEach] static void A(ref P p)")]
@@ -352,8 +355,8 @@ public class CodeFixTests
         "[EcsSystem] public ref struct S { [ForEach] void A(ref P p) => p.V++; }",
         "[ForEach] static void A(ref P p) => p.V++;")]
     [TestCase("EECS075", "Make it static",
-        "[EcsSystem] public ref struct S { [OnUpdate] void U(World world) => world.GetSingleton<Clock>().Ticks++; }",
-        "[OnUpdate] static void U(World world)")]
+        "[EcsSystem] public ref struct S { void OnUpdate(World world) => world.GetSingleton<Clock>().Ticks++; }",
+        "static void OnUpdate(World world)")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
@@ -428,11 +431,11 @@ public class CodeFixTests
     [TestCase("public class Move : EcsSystem { [ForEach] void A(ref P p) => p.V++; }",
         "[EcsSystem]\npublic ref struct Move { [ForEach] static void A(ref P p) => p.V++; }")]
     [TestCase("public sealed class Tick : EcsSystem\n{\n    protected override void OnUpdate() => World.GetSingleton<Clock>().Ticks++;\n}",
-        "[EcsSystem]\npublic ref struct Tick\n{\n    [OnUpdate] static void OnUpdate(World world) => world.GetSingleton<Clock>().Ticks++;\n}")]
+        "[EcsSystem]\npublic ref struct Tick\n{\n    static void OnUpdate(World world) => world.GetSingleton<Clock>().Ticks++;\n}")]
     [TestCase("public class Once : EcsSystem { protected override void OnUpdate() { if (RunCount > 2) Enabled = false; } }",
-        "[OnUpdate] static void OnUpdate(SystemHandle system) { if (system.RunCount > 2) system.Enabled = false; } }")]
+        "static void OnUpdate(SystemHandle system) { if (system.RunCount > 2) system.Enabled = false; } }")]
     [TestCase("public class Spawn : EcsSystem { protected override void OnCreate() => Make(); void Make() => World.CreateEntity(new P()); }",
-        "[OnCreate] static void OnCreate(World world) => Make(world); static void Make(World world) => world.CreateEntity(new P()); }")]
+        "static void OnCreate(World world) => Make(world); static void Make(World world) => world.CreateEntity(new P()); }")]
     [TestCase("[UpdateInterval(2)] internal class Pace : EcsSystem { private const int Step = 2; [ForEach] void A(ref P p) => p.V += Step; }",
         "[UpdateInterval(2), EcsSystem] internal ref struct Pace { private const int Step = 2; [ForEach] static void A(ref P p) => p.V += Step; }")]
     public async Task MigratesASystemOfTheOldForm(string source, string expected)
@@ -484,6 +487,12 @@ public class CodeFixTests
         "QueryFilter.Create().WithAny<P, Q>().Without<T>();", "Write it as WithAny<P, Q>")]
     [TestCase("CS0305", "public static class U { public static int N(World w) => w.Count<T>(QueryFilter.Create().WithAny<P>()); }",
         "QueryFilter.Create().With<P>()", "Write it as With<P>")]
+    [TestCase("CS0246", "[EcsSystem] public ref struct S { [OnUpdate] static void OnUpdate(World world) { } }",
+        "{ static void OnUpdate(World world) { } }", "Remove [OnUpdate]: the name makes it the hook")]
+    [TestCase("CS0246", "[EcsSystem]\npublic ref struct S\n{\n    /// <summary>Spawns.</summary>\n    [OnCreate]\n    static void Spawn(World world) => world.CreateEntity(new P());\n    static void Again(World w) => Spawn(w);\n}",
+        "    /// <summary>Spawns.</summary>\n    static void OnCreate(World world) => world.CreateEntity(new P());\n    static void Again(World w) => OnCreate(w);", "Rename it to OnCreate: the name makes it the hook")]
+    [TestCase("CS0246", "[EcsSystem] public ref struct S { [OnDestroy, System.Obsolete] static void Bye() { } }",
+        "{ [System.Obsolete] static void OnDestroy() { } }", "Rename it to OnDestroy: the name makes it the hook")]
     public async Task MigratesADeclarationOfTheOldForm(string id, string source, string expected, string title)
     {
         var document = Document(Data + source);

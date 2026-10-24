@@ -11,8 +11,7 @@ namespace GameLoop;
 [EcsSystem, UpdateInGroup<InputGroup>]
 public ref struct ReceiveInputSystem
 {
-    [OnUpdate]
-    static void Receive(World world)
+    static void OnUpdate(World world)
     {
         ref var stats = ref world.Stats;
         var inbox = world.Inbox.Messages;

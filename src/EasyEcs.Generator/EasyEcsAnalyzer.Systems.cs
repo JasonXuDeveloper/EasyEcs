@@ -9,9 +9,10 @@ using Microsoft.CodeAnalysis.Operations;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// The rules of systems as declarations (EECS007, EECS008, EECS074-EECS077): a system is an [EcsSystem] ref struct of
-/// static members (EECS074, EECS075) that keeps no state of its own (EECS007) and reaches no other system (EECS008);
-/// its hooks have one signature each (EECS076); and the API that takes a system type takes an [EcsSystem] (EECS077).
+/// The rules of systems as declarations (EECS007, EECS008, EECS074-EECS077, EECS090): a system is an [EcsSystem] ref
+/// struct of static members (EECS074, EECS075) that keeps no state of its own (EECS007) and reaches no other system
+/// (EECS008); its hooks, the methods named OnCreate / OnUpdate / OnDestroy, have one signature each (EECS076), and a
+/// method named almost like one is reported (EECS090); the API that takes a system type takes an [EcsSystem] (EECS077).
 /// </summary>
 public sealed partial class EasyEcsAnalyzer
 {
@@ -45,11 +46,19 @@ public sealed partial class EasyEcsAnalyzer
         helpLinkUri: Help("EECS075"));
 
     public static readonly DiagnosticDescriptor BadHook = new("EECS076", "An invalid system hook",
-        "[{0}] method '{1}' {2}",
+        "Hook '{0}' of system '{1}' {2}",
         Category, DiagnosticSeverity.Error, true,
-        "[OnCreate], [OnUpdate] and [OnDestroy] mark the static methods the world calls when a system is added, on each of " +
-        "its runs and when it is removed: one method per hook and system, returning void, taking the World, the " +
-        "SystemHandle, both (in either order) or neither. The generator calls no other.", helpLinkUri: Help("EECS076"));
+        "The static methods of an [EcsSystem] named OnCreate, OnUpdate and OnDestroy are the hooks the world calls when the " +
+        "system is added, on each of its runs and when it is removed: one method per hook and system, returning void, " +
+        "taking the World, the SystemHandle, both (in either order) or neither. The generator calls no other.",
+        helpLinkUri: Help("EECS076"));
+
+    public static readonly DiagnosticDescriptor MisspelledHook = new("EECS090", "A system method named almost like a hook",
+        "Method '{0}' of system '{1}' looks like hook {2}, but only a method named {2} is called: rename it",
+        Category, DiagnosticSeverity.Warning, true,
+        "A system's hooks are its static methods named OnCreate, OnUpdate and OnDestroy: the name alone makes a method a hook. " +
+        "A method with a hook's signature, a name close to a hook's (OnUpate, Update, OnStart, Init, Dispose) and no caller " +
+        "is never run. Rename it to the hook it was meant to be.", helpLinkUri: Help("EECS090"));
 
     public static readonly DiagnosticDescriptor NotASystemType = new("EECS077", "A type that is no system where a system is named",
         "'{0}' is no [EcsSystem]: {1} names a system (an [EcsSystem] ref struct)",
@@ -135,13 +144,82 @@ public sealed partial class EasyEcsAnalyzer
     private static bool UsesThis(IMethodSymbol method, System.Threading.CancellationToken token) =>
         method.DeclaringSyntaxReferences.Any(r => r.GetSyntax(token).DescendantNodes().Any(n => n is ThisExpressionSyntax or BaseExpressionSyntax));
 
-    /// <summary>EECS076: a hook method that cannot be called (an instance hook of a system is EECS075's: one report).</summary>
+    /// <summary>
+    /// EECS076: a hook method that cannot be called (an instance hook of a system is EECS075's: one report); EECS090: a
+    /// method named almost like a hook that would be one.
+    /// </summary>
     private static void AnalyzeHook(SymbolAnalysisContext context)
     {
         var method = (IMethodSymbol)context.Symbol;
-        if (!method.IsStatic && Symbols.IsSystem(method.ContainingType)) return;
-        if (Symbols.HookProblem(method) is { } problem)
-            context.ReportDiagnostic(Diagnostic.Create(BadHook, method.Locations.FirstOrDefault(), "On" + Symbols.Hook(method), method.Name, problem));
+        if (method.MethodKind != MethodKind.Ordinary || !method.IsStatic || !Symbols.IsSystem(method.ContainingType)) return;
+        if (Symbols.Hook(method) != Symbols.HookKind.None)
+        {
+            if (Symbols.HookProblem(method) is { } problem)
+                context.ReportDiagnostic(Diagnostic.Create(BadHook, method.Locations.FirstOrDefault(), method.Name, method.ContainingType.Name, problem));
+            return;
+        }
+
+        if (NearHook(method.Name) is not { } hook || !method.ReturnsVoid || method.IsGenericMethod || !Symbols.HookParameters(method, out _)
+            || method.ContainingType.GetMembers(hook).Length > 0 || Symbols.IsForEach(method) || Symbols.IsForEntity(method)
+            || Called(method, context.CancellationToken)) return;
+        context.ReportDiagnostic(Diagnostic.Create(MisspelledHook, method.Locations.FirstOrDefault(),
+            ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Hook").Add("Hook", hook), method.Name, method.ContainingType.Name, hook));
+    }
+
+    /// <summary>The names a hook is mistaken for: other engines' and frameworks' lifecycle methods.</summary>
+    private static readonly ImmutableDictionary<string, string> HookAliases = new System.Collections.Generic.Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase)
+    {
+        ["Update"] = "OnUpdate", ["Tick"] = "OnUpdate", ["OnTick"] = "OnUpdate", ["Execute"] = "OnUpdate", ["OnExecute"] = "OnUpdate",
+        ["Run"] = "OnUpdate", ["OnRun"] = "OnUpdate", ["Step"] = "OnUpdate", ["OnStep"] = "OnUpdate",
+        ["Create"] = "OnCreate", ["Start"] = "OnCreate", ["OnStart"] = "OnCreate", ["Init"] = "OnCreate", ["OnInit"] = "OnCreate",
+        ["Initialize"] = "OnCreate", ["OnInitialize"] = "OnCreate", ["Awake"] = "OnCreate", ["OnAwake"] = "OnCreate",
+        ["Setup"] = "OnCreate", ["OnSetup"] = "OnCreate", ["OnStartRunning"] = "OnCreate",
+        ["Destroy"] = "OnDestroy", ["Dispose"] = "OnDestroy", ["OnDispose"] = "OnDestroy", ["Stop"] = "OnDestroy", ["OnStop"] = "OnDestroy",
+        ["Cleanup"] = "OnDestroy", ["OnCleanup"] = "OnDestroy", ["Teardown"] = "OnDestroy", ["OnTeardown"] = "OnDestroy",
+        ["OnRemove"] = "OnDestroy", ["OnRemoved"] = "OnDestroy",
+    }.ToImmutableDictionary(System.StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The hook <paramref name="name"/> was likely meant to be: a known alias (Update, OnStart, Dispose), or a name at most
+    /// two edits from a hook's ignoring case (OnUpate, onUpdate, OnCreated); null for any other name.
+    /// </summary>
+    internal static string? NearHook(string name)
+    {
+        if (HookAliases.TryGetValue(name, out var alias)) return alias;
+        if (name.Length < 6 || name.Length > 11) return null; // no hook name is within two edits of a shorter or longer one
+        foreach (var hook in new[] { "OnCreate", "OnUpdate", "OnDestroy" })
+            if (EditDistance(name, hook) <= 2) return hook;
+        return null;
+    }
+
+    /// <summary>The edit distance of two names, ignoring case (Levenshtein, two rows).</summary>
+    private static int EditDistance(string a, string b)
+    {
+        var previous = new int[b.Length + 1];
+        var current = new int[b.Length + 1];
+        for (int j = 0; j <= b.Length; j++) previous[j] = j;
+        for (int i = 1; i <= a.Length; i++)
+        {
+            current[0] = i;
+            for (int j = 1; j <= b.Length; j++)
+            {
+                int same = char.ToUpperInvariant(a[i - 1]) == char.ToUpperInvariant(b[j - 1]) ? 0 : 1;
+                current[j] = System.Math.Min(System.Math.Min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + same);
+            }
+
+            (previous, current) = (current, previous);
+        }
+
+        return previous[b.Length];
+    }
+
+    /// <summary>Whether the system's code names the method anywhere but its declaration (a call, a delegate).</summary>
+    private static bool Called(IMethodSymbol method, System.Threading.CancellationToken token)
+    {
+        foreach (var reference in method.ContainingType.DeclaringSyntaxReferences)
+            foreach (var name in reference.GetSyntax(token).DescendantNodes().OfType<IdentifierNameSyntax>())
+                if (name.Identifier.ValueText == method.Name) return true;
+        return false;
     }
 
     /// <summary>EECS077: a World call that takes a system type with a type that is no system.</summary>

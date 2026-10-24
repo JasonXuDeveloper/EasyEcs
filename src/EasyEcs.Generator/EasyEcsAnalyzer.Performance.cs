@@ -51,7 +51,7 @@ public sealed partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor Allocation = new("EECS028", "An allocation in code that runs every update",
         "'{0}' allocates {3} in '{1}', which runs {2}{4}",
         Category, DiagnosticSeverity.Warning, true,
-        "A [ForEach] method runs for every entity it visits and an [OnUpdate] method once per update, so garbage there is garbage " +
+        "A [ForEach] method runs for every entity it visits and an OnUpdate method once per update, so garbage there is garbage " +
         "every tick, and the collections it causes pause the world. Objects, arrays, capturing lambdas, LINQ, strings " +
         "built at run time, boxing, enumerators of interfaces and the cold calls of tools (TrimExcess, Capture(), " +
         "Describe, DescribeTables, DescribeSchedule, new Prefab) allocate; code inside a throw, and calls the compiler " +
@@ -65,7 +65,7 @@ public sealed partial class EasyEcsAnalyzer
         "A structural change through each entity moves (or flips) one row per call, through the structural gate each " +
         "time. SetAll, RemoveAll, DisableAll, EnableAll and DestroyAll change every matching row of a table " +
         "together, whole words of rows at once. A [ForEach] method whose whole body is such a change is the same loop, " +
-        "written by the generator: make the bulk call in the system's [OnUpdate] method instead.",
+        "written by the generator: make the bulk call in the system's OnUpdate method instead.",
         helpLinkUri: Help("EECS030"));
 
     public static readonly DiagnosticDescriptor CreateInLoop = new("EECS031", "Entities created one by one in a counted loop",
@@ -247,7 +247,7 @@ public sealed partial class EasyEcsAnalyzer
             AnalyzeLookups(context, core, method, body);
             AnalyzeAllocations(context, method, body, "for every entity its loop visits", true);
         }
-        // An [OnUpdate] method of a system with [UpdateInterval(n)], n above 1, runs on the cadence its author chose: what
+        // An OnUpdate method of a system with [UpdateInterval(n)], n above 1, runs on the cadence its author chose: what
         // it allocates there is a choice, not garbage of every update.
         else if (Symbols.Hook(method) == Symbols.HookKind.Update && Symbols.IsSystem(method.ContainingType)
                  && Symbols.Schedule(method.ContainingType) is not { Interval: > 1 })

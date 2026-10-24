@@ -16,30 +16,29 @@ public class SystemTests
     [EcsSystem]
     internal ref struct Tick
     {
-        [OnCreate] static void Create(SystemHandle system) => Note(system, "create");
-        [OnUpdate] static void Update(SystemHandle system) => Note(system, "update");
-        [OnDestroy] static void Destroy(SystemHandle system) => Note(system, "destroy");
+        static void OnCreate(SystemHandle system) => Note(system, "create");
+        static void OnUpdate(SystemHandle system) => Note(system, "update");
+        static void OnDestroy(SystemHandle system) => Note(system, "destroy");
     }
 
-    [EcsSystem] internal ref struct X { [OnUpdate] static void Update(SystemHandle system) => Note(system, "update"); }
-    [EcsSystem] internal ref struct Y { [OnUpdate] static void Update(SystemHandle system) => Note(system, "update"); }
+    [EcsSystem] internal ref struct X { static void OnUpdate(SystemHandle system) => Note(system, "update"); }
+    [EcsSystem] internal ref struct Y { static void OnUpdate(SystemHandle system) => Note(system, "update"); }
 
     [EcsSystem, UpdateInterval(3)]
-    internal ref struct Every3 { [OnUpdate] static void Update(SystemHandle system) => Note(system, "update"); }
+    internal ref struct Every3 { static void OnUpdate(SystemHandle system) => Note(system, "update"); }
 
     [EcsSystem, UpdateInterval(3, Phase = 1)]
-    internal ref struct Every3Phase1 { [OnUpdate] static void Update(SystemHandle system) => Note(system, "update"); }
+    internal ref struct Every3Phase1 { static void OnUpdate(SystemHandle system) => Note(system, "update"); }
 
     [EcsSystem, UpdateInterval(3, Phase = 2)]
-    internal ref struct Every3Phase2 { [OnUpdate] static void Update(SystemHandle system) => Note(system, "update"); }
+    internal ref struct Every3Phase2 { static void OnUpdate(SystemHandle system) => Note(system, "update"); }
 
     // A run as short as Tick's can take less than a TimeSpan tick (100 ns), so its measured time may round to zero:
     // this one lasts at least a microsecond.
     [EcsSystem, UpdateInterval(2)]
     internal ref struct Slow
     {
-        [OnUpdate]
-        static void Update()
+        static void OnUpdate()
         {
             long start = Stopwatch.GetTimestamp();
             while (Stopwatch.GetElapsedTime(start) < TimeSpan.FromMicroseconds(1)) { }
@@ -102,33 +101,33 @@ public class SystemTests
     [EcsSystem, UpdateAfter<Mid>]
     internal ref struct Late
     {
-        [OnCreate] static void Create(SystemHandle system) => Note(system, "create");
-        [OnUpdate] static void Update(SystemHandle system) => Note(system, "update");
-        [OnDestroy] static void Destroy(SystemHandle system) => Note(system, "destroy");
+        static void OnCreate(SystemHandle system) => Note(system, "create");
+        static void OnUpdate(SystemHandle system) => Note(system, "update");
+        static void OnDestroy(SystemHandle system) => Note(system, "destroy");
     }
 
     [EcsSystem, UpdateBefore<Mid>]
     internal ref struct Early
     {
-        [OnCreate] static void Create(SystemHandle system) => Note(system, "create");
-        [OnUpdate] static void Update(SystemHandle system) => Note(system, "update");
-        [OnDestroy] static void Destroy(SystemHandle system) => Note(system, "destroy");
+        static void OnCreate(SystemHandle system) => Note(system, "create");
+        static void OnUpdate(SystemHandle system) => Note(system, "update");
+        static void OnDestroy(SystemHandle system) => Note(system, "destroy");
     }
 
     [EcsSystem]
     internal ref struct Mid
     {
-        [OnCreate] static void Create(SystemHandle system) => Note(system, "create");
-        [OnUpdate] static void Update(SystemHandle system) => Note(system, "update");
-        [OnDestroy] static void Destroy(SystemHandle system) => Note(system, "destroy");
+        static void OnCreate(SystemHandle system) => Note(system, "create");
+        static void OnUpdate(SystemHandle system) => Note(system, "update");
+        static void OnDestroy(SystemHandle system) => Note(system, "destroy");
     }
 
 #pragma warning disable EECS019 // the cycle under test
     [EcsSystem, UpdateBefore<CycleB>]
-    internal ref struct CycleA { [OnCreate] static void Create(SystemHandle system) => Note(system, "create"); }
+    internal ref struct CycleA { static void OnCreate(SystemHandle system) => Note(system, "create"); }
 
     [EcsSystem, UpdateBefore<CycleA>]
-    internal ref struct CycleB { [OnCreate] static void Create(SystemHandle system) => Note(system, "create"); }
+    internal ref struct CycleB { static void OnCreate(SystemHandle system) => Note(system, "create"); }
 #pragma warning restore EECS019
 
     [Test]
@@ -142,7 +141,7 @@ public class SystemTests
         Assert.That(world.TryGetSystem<CycleB>(out var found), Is.False);
         Assert.That(found, Is.EqualTo(default(SystemHandle)));
         Assert.That(world.Systems.Count, Is.EqualTo(1));
-        Assert.That(Log, Is.EqualTo(new[] { "CycleA.create" }));               // [OnCreate] only for the system that joined
+        Assert.That(Log, Is.EqualTo(new[] { "CycleA.create" }));               // OnCreate only for the system that joined
     }
 
     [Test]
@@ -243,9 +242,9 @@ public class SystemTests
     [EcsSystem]
     internal ref struct Parameters
     {
-        [OnCreate] static void Create() => Log.Add("create");
-        [OnUpdate] static void Update(SystemHandle system, World world) => Log.Add($"update {system.RunCount} {system.World == world}");
-        [OnDestroy] static void Destroy(World world, SystemHandle system) => Log.Add($"destroy {system.RunCount} {world.DefaultUpdateCount}");
+        static void OnCreate() => Log.Add("create");
+        static void OnUpdate(SystemHandle system, World world) => Log.Add($"update {system.RunCount} {system.World == world}");
+        static void OnDestroy(World world, SystemHandle system) => Log.Add($"destroy {system.RunCount} {world.DefaultUpdateCount}");
     }
 #pragma warning restore EECS028
 
@@ -263,7 +262,7 @@ public class SystemTests
     [EcsSystem]
     internal ref struct Throwing
     {
-        [OnUpdate] static void Update() => throw new InvalidOperationException("boom");
+        static void OnUpdate() => throw new InvalidOperationException("boom");
     }
 
     [Test]
@@ -288,7 +287,7 @@ public class SystemTests
     public struct InputGroup : ISystemGroup;
 
     [EcsSystem, UpdateInGroup<InputGroup>]
-    internal ref struct InInputGroup { [OnUpdate] static void Update(SystemHandle system) => Note(system, "update"); }
+    internal ref struct InInputGroup { static void OnUpdate(SystemHandle system) => Note(system, "update"); }
 
     [Test]
     public void GroupsUpdateIndependently()
@@ -326,8 +325,8 @@ public class SystemTests
     [EcsSystem]
     internal ref struct FailsEverywhere
     {
-        [OnUpdate] static void Update(SystemHandle system) => throw new InvalidOperationException(system.Name);
-        [OnDestroy] static void Destroy(SystemHandle system) => throw new InvalidOperationException(system.Name + ".destroy");
+        static void OnUpdate(SystemHandle system) => throw new InvalidOperationException(system.Name);
+        static void OnDestroy(SystemHandle system) => throw new InvalidOperationException(system.Name + ".destroy");
     }
 
     [Test]
@@ -339,7 +338,7 @@ public class SystemTests
         Assert.That(failing.Error.Message, Is.EqualTo("FailsEverywhere"));
         Assert.That(failing.LastRunTick, Is.Positive);                          // its changes are not delivered again
         Assert.That(failing.RunCount, Is.EqualTo(1));
-        Assert.DoesNotThrow(world.Dispose, "under Disable, an [OnDestroy] error does not escape Dispose");
+        Assert.DoesNotThrow(world.Dispose, "under Disable, an OnDestroy error does not escape Dispose");
     }
 
     [Test]

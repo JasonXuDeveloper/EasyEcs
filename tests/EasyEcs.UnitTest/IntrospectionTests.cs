@@ -266,7 +266,6 @@ public class IntrospectionTests
     [EcsSystem, UpdateInGroup<LateGroup>]
     internal ref struct Late
     {
-        [OnUpdate]
         static void OnUpdate(World world) { } // runs alone
     }
 

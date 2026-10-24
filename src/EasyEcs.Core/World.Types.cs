@@ -45,7 +45,7 @@ public sealed partial class World
         if (_disposed) throw new ObjectDisposedException(nameof(World));
         ThrowIfIterating(nameof(RemoveTypes));
 
-        // Systems first: their [OnDestroy] may still use the types (remove a singleton, destroy entities).
+        // Systems first: their OnDestroy may still use the types (remove a singleton, destroy entities).
         for (int i = 0; i < SystemRows.Length; i++)
             if (SystemRows[i].Code is { } code && doomed(code.Type))
                 RemoveSystem(i);
