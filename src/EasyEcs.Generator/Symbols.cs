@@ -1046,6 +1046,9 @@ internal static class Symbols
     /// <summary>[ForEach(ChunkRows = N)]: the rows a thread of a parallel pass takes at a time (0: chosen by the runtime).</summary>
     public static int ChunkRows(IMethodSymbol method) => ForEachArgument(method, "ChunkRows", 0);
 
+    /// <summary>[ForEach(FusionMode = FusionMode.X)]: 0 Auto, 1 Require, 2 Off (the values of EasyEcs.FusionMode).</summary>
+    public static int Fusion(IMethodSymbol method) => ForEachArgument(method, "FusionMode", 0);
+
     /// <summary>[ForEach(SimdMode = SimdMode.X)]: <see cref="SimdAuto"/>, <see cref="SimdRequire"/> or <see cref="SimdOff"/>.</summary>
     public static int Simd(IMethodSymbol method) => ForEachArgument(method, "SimdMode", SimdAuto);
 

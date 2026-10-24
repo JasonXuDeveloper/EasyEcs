@@ -248,7 +248,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         HandWrittenEntityJob, BadForEntity, BadUpdateInterval, HandWrittenConsume, BadConsume, BadTileShape, SharedTile,
         HandWrittenReduce, HandWrittenLookup, SharedStream, HandWrittenEmit, BadSystemType, InstanceMember, BadHook, NotASystemType, MisspelledHook,
         ColdFields, UnclearedRecords, BadLambdaPass, DelegateLambdaPass, ScalarLambdaPass,
-        BadView, ViewOverlap, ViewReachesOut, HandWrittenView, BadPrefab);
+        BadView, ViewOverlap, ViewReachesOut, HandWrittenView, BadPrefab, NearFusion, FusionRequired);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -278,6 +278,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         InitializeSystems(context);
         InitializeLambdas(context);
         InitializeViews(context);
+        InitializeFusion(context);
     }
 
     /// <summary>
