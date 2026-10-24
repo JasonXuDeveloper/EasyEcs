@@ -73,7 +73,7 @@ Per `docs/WRITING.md`, en and zh structurally identical:
 - numbers only through `docs/src/data/bench.json` (BenchTable), never typed on a page (decision records may quote);
 - a decision record for every non-obvious choice and dropped idea; the roadmap;
 - changelog, README "What's new"; a migration entry for a breaking change;
-- `skills/easyecs/SKILL.md` (the public skill), CLAUDE.md's layout;
+- `skills/easyecs/SKILL.md` (the public skill), the file map of each directory it touches (root CLAUDE.md layout, `src/*/CLAUDE.md`, `tests/` and `benchmarks/CLAUDE.md`);
 - the battle server (`BattleServer.cs` regions + `example.mdx`) and the samples use the feature where it belongs.
 
 While code is still changing, collect these as docs to-dos; pages are written once at the end.

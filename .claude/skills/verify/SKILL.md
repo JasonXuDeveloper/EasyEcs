@@ -18,6 +18,7 @@ dotnet run --project tools/ApiDocs               # reference pages + Chinese ent
 dotnet run --no-build -c Release --project samples/GameLoop -- --ticks 30
 dotnet run --no-build -c Release --project samples/MultiWorld -- --updates 50
 bash templates/smoke.sh                          # dotnet new templates pack, build, run, test
+tools/filemaps.sh                                # every source file is named in its directory's CLAUDE.md map
 npx -y skills add . --list                       # lists only `easyecs`: every development skill has metadata.internal: true
 dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -o <scratch>/aot && <scratch>/aot/EasyEcs.Aot   # no AOT warning, checks pass
 ```

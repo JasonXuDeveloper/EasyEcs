@@ -28,252 +28,19 @@ BenchmarkDotNet reports); pages never type a number.
 ## Layout
 
 ```
-src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written shared core only)
-  Contracts.cs                 IComponent, ITracked, ISingletonComponent, INoStructuralChanges and the other markers
-  Declarations.cs              attributes whose code the generators write: [Sum]/[Product]/[Min]/[Max]/[All]/[Any]
-                               (a reduction), [IndexKey]/[UniqueKey]/[Group] (an index key, a group), and world setup:
-                               [GroupBy], [WhenTargetDestroyed], [NotSaved]
-  Entity.cs                    the entity handle (id, version, world): Has/Get/Read/TryGet/GetOrAdd/SetIfChanged/
-                               Disable/Enable/Clone/Destroy
-  Entity.Relations.cs          entity.Link / Unlink / Links (IRelation buffers + their index)
-  EntityId.cs                  index + incarnation (8 bytes, unmanaged): how data refers to an entity
-  EntityMeta.cs                16-byte per-entity record (archetype, version, slot)
-  EntitySpan.cs                the entities of a batch job's run of rows (lazy handles over the run's EntitySlots; its
-                               table and first row, through which a Mut<T> of the run stamps its row)
-  EntityDebugView.cs           what a debugger shows for an entity (Entity.Describe)
-  EcsSystem.cs                 [EcsSystem] (a system: a ref struct of static members, never instantiated), the hooks
-                               [OnCreate] / [OnUpdate] / [OnDestroy] (static methods taking the World, the SystemHandle,
-                               both or neither), [UpdateInterval(n, Phase = p)] (the cadence, read from the generated code);
-                               SystemHandle.cs: what world.AddSystem<T>() / System<T>() / TryGetSystem<T>() / Systems
-                               hand out (Enabled, Error, RunCount: completed runs, the slice of a sliced method;
-                               LastRunTick, Stats, Type, World), a (world, slot, version) that throws once its system
-                               is removed; SystemCode.cs: ISystemCode (a system's generated Update / Create / Destroy,
-                               access and cadence) and ISystemSet (one generated __EasyEcsSystems per assembly: the
-                               switch over its systems' codes, registered by a module initializer, weakly held for
-                               collectible assemblies), the registry World.AddSystem<T> resolves a type through
-  ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkRows, SimdMode), [With<T>], [Without<T>], [WithAny<T>], [Changed<T>],
-                               [Removed<T>] ([ChangedAny<..>] / [RemovedAny<..>] are generated: Filters.g.cs),
-                               [Consume] (the visited rows destroyed after the pass), [ForEntity] (a static method run
-                               on one entity through a generated entry point)
-  Maybe.cs                     Maybe<T>: an optional component parameter of a [ForEach] method
-  Mut.cs                       Mut<T>: a [ForEach] parameter stamped only on the rows it writes (Write, SetIfChanged);
-                               Values.Same, the boxing-free equality of SetIfChanged
-  Reduce.cs                    IReduction<T> + Reduce<T> (taken by ref): a [ForEach] method's partial result per chunk,
-                               combined in chunk order into a singleton when the pass ends (OpenMP reduction)
-  Scratch.cs                   Scratch<T>: per-thread working memory of a [ForEach] method, never shared, never reset
-  Lookup.cs                    Lookup<T> + LookupExtensions: read-only lookups of any entity (and index keys) from a
-                               [ForEach] method, parallel ones included; the system reads T, so no writer shares its stage
-  Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
-                               Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbors found by generated code,
-                               TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,
-                               PaddedTile.Rows (TZCNT walk), TileCursor.Load128, ChangedEdges / Facing (sleeping tiles)
-  Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), joined in
-                               chunk order into singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear)
-  EntityRandom.cs              EntityRandom: deterministic random numbers, a pure function of (seed, entity, tick, stream)
-                               (four SplitMix64 finalizer rounds); a singleton (Seed, Tick) and static members
-  Interleaved.cs               the deinterleaving loads / interleaving stores of generated vector loops over components
-                               of 2 to 4 fields of one lane type, and the lane masks of the passing rows of a word
-  Lanes.cs                     Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress),
-                               for batch methods and CollectIds
-  SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
-  SystemOrder.cs               [UpdateBefore<T>] / [UpdateAfter<T>]
-  SystemAccess.cs              a system's read/write sets (generated from [ForEach] parameters) and the conflict rule
-  SystemStats.cs               per-system run counts, times, allocated bytes and visited entities
-                               (WorldOptions.MeasureSystems)
-  ScheduleInfo.cs              what World.DescribeSchedule returns (groups, stages, systems, waits, registration-only
-                               pairs) and its ToString / ToMermaid
-  World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration, Instantiate of a
-                               Prefab, with given components too, and Entity.Clone: one row copy, CloneRow)
-  World.Defaults.cs            TypeDefaults: the setup a type declares ([GroupBy], [WhenTargetDestroyed]), applied by
-                               every world from its first table holding the type (rules pending until a destroy or
-                               the index needs them); what a world set up itself is never overridden
-  World.DestroyLog.cs          WorldOptions.DestroyLogCapacity: the ring of (EntityId, tick) records of freed ids,
-                               DestroyedSince / DestroyLogOldestTick
-  World.Components.cs          AddBit/AddBits/RemoveBit/RemoveBits (shared core of every Set/GetOrAdd/Remove/Disable;
-                               SetRow / EnableRow for one component), passes (BeginPass/EndPass, tombstones closed by
-                               the last pass), CarryOver
-  World.Bulk.cs                SetAll / RemoveAll / DisableAll / EnableAll (IRowOp structs, whole words of rows at once)
-  World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache, CompactArchetypes,
-                               the structural gate (Structural())
-  StructuralGate.cs            owner flag (plain check-and-set, throws when reentered or while frozen: Freeze/Thaw around
-                               parallel regions, batch jobs and INoStructuralChanges passes) +
-                               shared CAS gate for the cold paths parallel stages reach; StructuralScope / SharedScope
-  World.Systems.cs             system groups, ordering, parallel stages (consecutive non-conflicting systems),
-                               synchronous Update / Update<TGroup>, Dispose
-  World.Parallel.cs            allocation-free runner (caller + reusable thread-pool work items, adaptive helper waking)
-                               for system stages and the row chunks of parallel [ForEach]; World.For.cs: ForParallel
-                               (IForRange over a range, IForSpan<T> over a buffer's elements) on the same runner
-  World.Singletons.cs          per-world singletons (ref returns)
-  World.Indexes.cs             world.Index<T, TKey>() (one ValueIndex per indexed component type) and its hooks
-  ValueIndex.cs                IIndexed<TKey> + ValueIndex: key -> one id array per key (IndexHead), built by the first
-                               lookup, kept by Set / CreateEntities / GetOrAdd / Remove / Destroy
-  UniqueIndex.cs               IUniqueIndexed<TKey> (one entity per key, an eager index that every write claims keys in
-                               before it changes anything) and index.Get / TryGet
-  OrderedIndex.cs              sorted walks and ranges of a value index with a comparable key
-  Relations.cs                 IRelation buffers + RelationIndex<T> (entities linking to a target)
-  Hierarchy.cs                 ChildOf (the hierarchy relation); World.Hierarchy.cs: Children, destroy cascades,
-                               TargetPolicyExtensions (what happens to links when their target is destroyed)
-  World.Groups.cs              GroupBy: tables split by the value of an IGroup component
-  Cleanup.cs                   ICleanupComponent + Retired tag (entities kept alive until their cleanup components go)
-  Disabled.cs                  Disabled<T> tag (the value kept, the component hidden from queries); its bit is a
-                               non-generic DisabledTag per component (ComponentInfo.DisablerOf)
-  DynamicBuffer.cs             DynamicBuffer<T> (a list per entity as a tracked component; writes are ref-this extensions)
-                               and its BufferStore
-  Prefab.cs                    a recipe of component values outside any world (one row of a private world)
-  World.Snapshots.cs           Capture / Restore (WorldSnapshot.cs holds the copies)
-  World.Serialization.cs       Save / Load of a whole world (SaveWithout(output, exclude) / LoadKeeping(input, keep) for a restart);
-                               TypeRegistry.cs: the types a save may name (generated)
-  ComponentSet.cs              a set of component bits and singleton slots: what SaveEntities writes, what Save leaves
-                               out, which singletons Load keeps
-  World.Migration.cs           SaveEntities / LoadEntities / MoveEntities: a group of entities to another world or process
-  World.Types.cs               RemoveTypes(assembly): unload a plugin's types from a world; Collectible.cs: forgetting
-                               the types of an unloaded AssemblyLoadContext process-wide
-  World.Introspection.cs       world.DescribeTables() (tables, columns, sizes), Entity.Describe() for tools and debuggers,
-                               world.DescribeSchedule()
-  World.Trim.cs                TrimExcess: drop empty tables, shrink the others, release side buffers, renumber live
-                               snapshots (tracked weakly)
-  WorldOptions.cs              configuration (ParallelSystems, MaxDegreeOfParallelism, MeasureSystems, DestroyLogCapacity,
-                               capacities)
-  Query.cs                     QueryFilter (With/Without/WithAny/Changed/Removed, the ChangedAny / RemovedAny sets,
-                               Since, the slice fields; partial: Filters.g.cs, generated by ArityGenerator, holds
-                               ChangedAny<T1..Tn> / RemovedAny<T1..Tn>), QueryKey, QueryMatch, RowPlan
-                               (cached per query and table), RowFilter (skip / all rows / test presence bits and change
-                               ticks, skipping unwritten blocks and words), Tombstones / NoTombstones (the two compiled
-                               forms of a structural loop), QueryWalk (the cold state of a walk, pooled per thread)
-  QuerySlice.cs                QueryFilter.Slice: the rows of a table one slice visits (64-row words, rotated per table)
-  FilterOverflow.cs            interned filter bits past 255, and FilterAnySets: the ChangedAny / RemovedAny sets
-                               interned whole (a QueryFilter holds ids, no object reference)
-  TypeIndex.cs                 dense per-type index families (ComponentType bit, SingletonType slot, SystemGroup
-                               index, ComponentSignature of multi-component calls) + SingletonBox; a tracked
-                               component's TicksBit: its hidden RowTick column (Query.cs), non-generic so Native
-                               AOT sees no generic recursion (IL3054)
-  Archetype.cs                 a table: mask, EntitySlot rows (version + id), one column per component (unmanaged
-                               columns pinned and 64-byte aligned), presence bits + absent counts per column,
-                               per-bit and per-signature add transitions (copy plans); swap-remove / tombstones,
-                               FillHoles; change-tick summaries (LastWrite per column, WordTicks per 64 rows, BlockTicks
-                               per 4,096 rows for writes and for removals), Stamp/StampRows/StampWord/SetTick,
-                               MarkPresent/MarkAbsent, CloneRow; Resize (growth and Trim, which shrinks a table to a
-                               power of two); TableCopy: the copy of a table's rows a snapshot or load holds, naming its
-                               table (reused for no other)
-  ComponentInfo.cs             per-type column operations (size, managed, create/grow/copy/clone/clear) indexed by bit;
-                               Pair links a tracked component with its change-tick column
-  BitMask.cs                   256-bit SIMD bitset with overflow (component masks, query sets)
-src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, required by Roslyn hosts)
-  ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove, World.CreateEntity/CreateEntities/
-                               DestroyAll, Instantiate with components, IForEach/IForEachEntity/IForEachBatch/
-                               IForEachMasked, ForEach/ForEachEntity/ForEachBatch/ForEachMasked/ForEachParallel/
-                               ForEachEntityParallel/ForEachBatchParallel with their row loops, CollectIds,
-                               Query/Count/Any, QueryItem/QueryEnumerator, Filters.g.cs: QueryFilter.ChangedAny /
-                               RemovedAny and their attributes), one template each
-  SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
-                               the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] /
-                               [Removed<T>] -> Since(LastRunTick + 1) and a read of T; Mut<T> -> a write stamped per
-                               write; Slices -> the slice of the run; ChunkRows -> the chunkRows argument; [Consume] -> DestroyAll of
-                               the filter after a pass without structural changes, a destroy per row otherwise;
-                               [ForEntity] -> the IForEachEntity job and an entry point Owner.Method(entity, values)
-                               over entity.Run; [EcsSystem] -> the code struct __X_SystemCode (hooks, then the
-                               methods in declaration order; [UpdateInterval] -> its Interval / Phase), and per
-                               assembly the set __EasyEcsSystems: one Add per system and per closed generic system any
-                               API names (AddSystem<G<P>>, [UpdateAfter<G<P>>], ...), a switch per hook; no system
-                               needs partial, its methods are reached through UnsafeAccessor)
-  ComponentGenerator.cs        C# 14 extension members per component / singleton: entity.X (ref T; ref readonly for
-                               tracked or indexed), HasX, TryGetX, GetOrAddX, SetX(ctor args), SetXIfChanged, RemoveX,
-                               tags IsX,
-                               world.XIndex, singletons world.X / HasX / GetOrAddX / SetX / RemoveX, query items
-                               item.X per Query<T1..Tn> shape the code calls, TypeRegistry registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
-                               lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
-  EasyEcsAnalyzer.cs           EECS002-006, EECS009-024, EECS035-036, EECS054, EECS056, EECS070 and EECS072-073 (the
-                               declaration and [ForEach] rules of the range EECS002-089 that are not performance rules;
-                               generators never report diagnostics)
-  EasyEcsAnalyzer.Systems.cs   EECS007-008 and EECS074-077: systems as declarations (state in a static field, a reach
-                               into another system; an [EcsSystem] that is no ref struct, an instance member, a hook
-                               no signature fits, a system API given a type that is no [EcsSystem])
-  UnusedSuppressor.cs          suppresses IDE0051 / IDE0052 on [ForEach], [ForEntity] and hook methods (called through
-                               UnsafeAccessor; Rider reads their [MeansImplicitUse])
-  EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the
-                               check of EECS056):
-                               code that works but costs (write access that
-                               only reads, unused or per-row lookups in [ForEach] methods and jobs, allocations per
-                               update, per-entity structural changes and counting over queries, creation loops, the
-                               generated member, Update in a system, a Mut<T> of an untracked component, a Query loop
-                               that only reads, a Set right after a creation, a tracked ref written on some rows only, a
-                               method left without a vector loop); each computes its fix as
-                               diagnostic properties for EasyEcs.CodeFixes
-  PartGenerator.cs             [Sum]..[Any], [IndexKey]/[UniqueKey], [Group] -> a part of the partial struct (IReduction<T>,
-                               IIndexed<K>.Key, IGroup.Group); Parts.cs: the models and Problems read once for the
-                               generator and the analyzer (other generators read keys and groups through Symbols)
-  Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (Kernel.Vectorize: the loop, or the
-                               reason EECS055 / EECS056 report); Kernel.Narrow.cs: byte / sbyte / short / ushort lanes
-                               (int values followed as low bits and an interval, saturating idioms); Kernel.Struct.cs:
-                               struct values (Vector2/3/4 fields, new T(...), with) as one vector per lane;
-                               Kernel.Wide.cs: components of up to 16 words on AVX-512 (fields gathered by a pruned
-                               permute tree, where it pays)
-  EasyEcsAnalyzer.Usage.cs     EECS037-038, EECS040-045 and EECS047-051: calls and declarations that compile but do not
-                               do what they say (a job's WriteMask, a dropped copy, SetIfChanged that cannot compare, calls
-                               a pass refuses, an index added to while walked, a record key that prints itself, a sliced
-                               filter where every row is needed, the world's own tags written by hand, a ref used after
-                               a structural change, Disable of a component that cannot be disabled, filters no entity
-                               passes, a second group in one filter, an update during a pass)
-  EasyEcsAnalyzer.Parallel.cs  EECS060-061: code on several threads (a parallel [ForEach] method, the Execute of a job
-                               run by ForEachParallel or ForParallel) that writes memory every thread shares, a parallel
-                               job's field read after the call; EECS071: System.Random in a [ForEach] method (fix:
-                               EntityRandom); EECS088: two EntityRandom draws of one stream for one entity in pass code
-                               (fix: the next free stream), or a draw in a loop that does not vary its stream
-  EasyEcsAnalyzer.Parts.cs     EECS062-069: generated parts (not partial, hand-written members, fields no attribute
-                               combines), hand-written reductions, keys and groups the attributes could declare, a wrong
-                               Identity, a setup attribute on a type it does not fit, a managed type without a Nino
-                               formatter (Warning when the code saves what holds it: entity saves write no singletons)
-  EasyEcsAnalyzer.Forms.cs     EECS080-085: what the generator declares for code written by hand (a one-entity job
-                               [ForEntity] writes, a [ForEach] method that destroys every entity it visits: [Consume])
-                               and those attributes (and [UpdateInterval]) where they cannot apply (EECS082 is retired)
-  EasyEcsAnalyzer.Parameters.cs  EECS086, EECS087, EECS089: a [ForEach] method doing by hand what a parameter does per
-                               chunk (a singleton reset by system code and accumulated row by row: Reduce<T>, reported
-                               at the end of the compilation; other entities read through the World: Lookup<T>; records
-                               appended to a singleton's list: Emit<T>); no code fix (the reset, the readers move too)
-  Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)
-  Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race;
-                               the writes of code on several threads that reach shared memory (EECS060, EECS061)
-  Symbols.cs                   symbol checks shared by generator and analyzer
-  Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
-  EquatableArray.cs            array with value equality (generator models cache between edits)
-  Polyfills.cs                 IsExternalInit for netstandard2.0 (records); do not delete
+src/EasyEcs.Core/              net10.0 library, namespace EasyEcs: entities, tables, queries, systems, parallel runner,
+                               indexes, relations, saves (file map: src/EasyEcs.Core/CLAUDE.md)
+src/EasyEcs.Generator/         generators, vector loops (Kernel) and the analyzer, netstandard2.0
+                               (file map: src/EasyEcs.Generator/CLAUDE.md)
 src/EasyEcs.CodeFixes/         EasyEcsCodeFixes.cs: fixes for the analyzer's diagnostics (bundled in the package);
                                EasyEcsCodeFixes.Forms.cs: EECS080 (a job and its calls to [ForEntity], solution-wide),
                                EECS084 ([Consume]); EasyEcsCodeFixes.Systems.cs: EECS074 (a ref struct), EECS075
                                (static), and the migration of a class deriving from the removed EcsSystem (the
                                compiler's CS0246) into an [EcsSystem] ref struct
-tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, Presence, Query, System (and stats),
-                               ForEachSystem (and Slices), Singleton, Concurrency, Parallel, Runner, Run (entity.Run),
-                               ForEntity, Consume, Form (EECS080 / EECS084),
-                               Changed (and Mut, ChangedAny), Removed (and the destroy log), Instantiate, DynamicBuffer,
-                               Index (and unique keys), Tile, OrderedIndex, Relation, Hierarchy, TargetPolicy, Group, Cleanup,
-                               Disable, Bulk, Move, Part (generated parts, EECS062-069), Snapshot, Serialization (and restart saves), Unload, Introspection
-                               (and Trim, DescribeSchedule), Generic, Allocation (0 B budget), Emit, ForParallel, EntityRandom,
-                               Generator (diagnostics + caching), CodeFix, BattleServer (the world of
-                               docs/content/example.mdx as a whole, linked from EasyEcs.Benchmark); Fixtures.cs holds
-                               the shared test components
-tests/EasyEcs.Aot/             the battle server (BattleServer.cs) published with Native AOT, warnings as errors, and
-                               run by CI: no AOT warning and the native binary passes its checks
-benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
-                               server tick; the world itself is WorldSimulation.cs), BattleServerBenchmark
-                               (BattleServer.cs, every feature; docs/content/example.mdx includes its regions), one
-                               benchmark per feature (Access: the analyzer's performance rules, Bulk, CallSite,
-                               ChangeTracking (+ ChangeTrackingWrite: Mut<T>, ChangeTrackingRead: Read, ChangeTrackingSomeRows: EECS053), Cleanup, Consume ([Consume] in bulk and per row against a hand-written Destroy), Count, DestroyLog, Emit, EntityRandom, ForEntity (against the hand-written job), ForParallel,
-                               DynamicBuffer (+ ChunkChurn: MaxPooledLength), Generator (the generators per keystroke and the analyzer per
-                               build, through
-                               Roslyn), Group, Hierarchy, Histogram (keyed reductions), Index (+ unique keys), Introspection (+ Schedule),
-                               Maybe, Migration, OrderedIndex, Ordering, ParallelForEach, ParallelSystems (Measure),
-                               Prefab, Relation, Runner, SingleEntity, Slices, Snapshot (+ SaveWithout / LoadKeeping),
-                               Sparse, SystemDispatch (what a system costs per update apart from its rows), Trim,
-                               Unload) + MicroBenchmarks.
-                               Always measure with BenchmarkDotNet.
-benchmarks/EasyEcs.Benchmark.Plugin/  a collectible plugin (Scoring.cs) the Unload benchmark loads and unloads
-benchmarks/EasyEcs.Comparison/ BenchmarkDotNet against Arch, Friflo.Engine.ECS and DefaultEcs, every result checked in
-                               setup: the headline world (WorldSimulation.cs, compiled unchanged, *Simulation.cs ports);
-                               OperationBenchmark (per operation); FeatureBenchmark (change tracking, removal detection,
-                               indexes); QueryComparisons (value queries, parallel queries, saves); StructureComparisons
-                               (hierarchy, relations, disable, structural changes); BulkComparisons (bulk changes,
-                               spawns); SystemComparisons (parallel systems)
+tests/                         EasyEcs.UnitTest (NUnit, one file per feature) and EasyEcs.Aot (Native AOT check)
+                               (file map: tests/CLAUDE.md)
+benchmarks/                    EasyEcs.Benchmark (one class per feature + the headline worlds), EasyEcs.Comparison
+                               (against Arch, Friflo, DefaultEcs), the Unload plugin (file map: benchmarks/CLAUDE.md)
 docs/content/                  the docs (source of https://ecs.xgamedev.net), each page <page>.mdx + <page>.zh.mdx:
                                index, learn pages (what-is-ecs, features, getting-started, ecs-principles, example: the
                                battle server through regions of BattleServer.cs, cheat-sheet, glossary), samples/ (one
@@ -309,6 +76,7 @@ skills/easyecs/                the public skill (`npx skills add JasonXuDevelope
                                lists only this one
 tools/bench.sh                 benchmark classes one BenchmarkDotNet process per class (resumable, under a shared lock),
                                merged into docs/src/data/bench.json (--sync); --site runs the classes the site shows
+tools/filemaps.sh              checks that every source file of src/ is named in its directory's file map (verify)
 tools/jitdisasm.sh             the Tier1 machine code of a [ForEach] method's job (DOTNET_JitDisasm), to check a vector
                                loop: no call in the loop body, no needless range check
 tools/DocCheck/                compiles the C# fences of the docs pages (`doccheck=` flags on a fence; `example`
