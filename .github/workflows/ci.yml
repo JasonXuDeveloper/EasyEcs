@@ -57,8 +57,8 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
-      - name: Every source file is in its directory's file map (tools/filemaps.sh)
-        run: tools/filemaps.sh
+      - name: Agent instructions are indexed and complete (tools/agents.sh)
+        run: tools/agents.sh --check
       - name: Compile the C# snippets of the docs (tools/DocCheck)
         run: dotnet run -c Release --project tools/DocCheck
 
