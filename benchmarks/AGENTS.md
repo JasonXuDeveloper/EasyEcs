@@ -13,7 +13,7 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                (BattleServer.cs, every feature; docs/content/example.mdx includes its regions), one
                                benchmark per feature (Access: the analyzer's performance rules, Bulk, CallSite,
                                ChangeTracking (+ ChangeTrackingWrite: Mut<T>, ChangeTrackingRead: Read, ChangeTrackingSomeRows: EECS053), Cleanup, Consume ([Consume] in bulk and per row against a hand-written Destroy), Count, DestroyLog, Emit, EntityRandom, ForEntity (against the hand-written job), ForParallel,
-                               DynamicBuffer (+ ChunkChurn: MaxPooledLength), Generator (the generators per keystroke and the analyzer per
+                               DynamicBuffer (+ ChunkChurn: MaxPooledLength), BufferSharing (+ BufferSnapshot: lists shared until written), Generator (the generators per keystroke and the analyzer per
                                build, through
                                Roslyn), Group, Hierarchy, HotCold (a pass over wide rows against the cold fields split out: EECS091's threshold), Histogram (keyed reductions), Index (+ unique keys), Introspection (+ Schedule),
                                Lookup, LookupChase (random lookups across 1M entities), Maybe, Migration, OrderedIndex, Ordering, ParallelForEach, ParallelSystems (Measure),

@@ -141,7 +141,7 @@ public struct Emitted<T> : ISingletonComponent, IBuffer where T : struct
 
     readonly BufferStore IBuffer.Read(ref Reader reader, BufferStore reuse) => Buffer.Read(ref reader, reuse);
 
-    readonly void IBuffer.Remap(BufferStore store, IdMap map) => Buffer.Remap(store, map);
+    readonly void IBuffer.Remap(ref BufferStore store, IdMap map) => Buffer.Remap(ref store, map);
 }
 
 /// <summary>

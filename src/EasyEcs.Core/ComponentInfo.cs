@@ -227,7 +227,8 @@ internal abstract class ComponentInfo
 
     /// <summary>
     /// Copy a managed element into another entity (<see cref="World.Instantiate(Prefab)"/>, <see cref="Entity.Clone"/>): like
-    /// <see cref="CopyManaged"/>, but a <see cref="DynamicBuffer{T}"/> gets a list of its own.
+    /// <see cref="CopyManaged"/>, but a <see cref="DynamicBuffer{T}"/> shares its list until one side writes it
+    /// (<see cref="BufferStore.Share"/>).
     /// </summary>
     public abstract void CloneManaged(Array source, int sourceSlot, Array target, int targetSlot);
 
@@ -242,7 +243,7 @@ internal abstract class ComponentInfo
 
     /// <summary>
     /// Copy rows [0, <paramref name="count"/>) of a managed column for a snapshot (capture or restore): values, and for
-    /// <see cref="DynamicBuffer{T}"/> columns copies of their lists, so the two sides never share one. With
+    /// <see cref="DynamicBuffer{T}"/> columns their lists, shared until either side writes (<see cref="BufferStore.Assign"/>). With
     /// <paramref name="swap"/> the lists change sides instead (a Load's private snapshot): the target's old lists go to
     /// the source, for the next Load to refill.
     /// </summary>
@@ -350,7 +351,7 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
         if (default(T) is IBuffer) // a JIT-time constant
         {
             var stores = Unsafe.As<T[]>(column);
-            for (int i = start; i < start + count; i++) Buffer.Remap(Unsafe.As<T, BufferStore>(ref stores[i]), map);
+            for (int i = start; i < start + count; i++) Buffer.Remap(ref Unsafe.As<T, BufferStore>(ref stores[i]), map);
             return;
         }
 
@@ -403,7 +404,7 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
         value = Unsafe.As<T[]>(source)[sourceSlot];
         if (default(T) is not IBuffer) return; // a JIT-time constant
         ref var store = ref Unsafe.As<T, BufferStore>(ref value); // a DynamicBuffer's single field (see CopyRows)
-        store = store?.Clone();
+        store = store?.Share();
     }
 
     public override void Clear(Array column, int start, int count) => Array.Clear(column, start, count);

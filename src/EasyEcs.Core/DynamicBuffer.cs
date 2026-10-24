@@ -13,8 +13,9 @@ namespace EasyEcs;
 /// <c>[Changed&lt;DynamicBuffer&lt;T&gt;&gt;]</c> selects the entities whose list changed. Through <c>in</c> or
 /// <see cref="Entity.Read{T}"/> the list is read-only: the mutating methods
 /// (<see cref="DynamicBufferExtensions"/>) take <c>ref this</c>, so a write through a read-only reference does not
-/// compile. Snapshots copy the elements (<see cref="World.Capture()"/>); a moved row keeps its list. Adding within the
-/// capacity allocates nothing.
+/// compile. Prefab instances, clones and snapshots (<see cref="World.Capture()"/>) share the list until one of them
+/// writes it, which first copies it (copy-on-write); a moved row keeps its list. Adding within the capacity allocates
+/// nothing.
 /// </summary>
 /// <remarks>
 /// A <c>new DynamicBuffer&lt;T&gt;()</c> holds no list: each entity's list is made by its first write (reserve room
@@ -72,9 +73,15 @@ public struct DynamicBuffer<T> : IComponent, ITracked, IBuffer
 
     readonly BufferStore IBuffer.Read(ref Reader reader, BufferStore reuse) => BufferStore<T>.Read(ref reader, reuse as BufferStore<T>);
 
-    readonly void IBuffer.Remap(BufferStore store, IdMap map)
+    readonly void IBuffer.Remap(ref BufferStore store, IdMap map)
     {
-        if (store is BufferStore<T> typed) map.Apply(typed.Items.AsSpan(0, typed.Count));
+        if (store is not BufferStore<T> typed) return;
+        bool ids = TypeRegistry.EntityIdOffsets<T>.Value.Length != 0;
+        // The arrived row's list is made its own when its ids are rewritten, and when a row of the world it came from
+        // (or a snapshot of that world) counts it: counted lists never cross worlds, whose owner threads would count
+        // them at once. A prefab's list is shared uncounted by every world: it stays shared.
+        if (typed.Shares > 0 || ids && typed.Shares != 0) store = typed = typed.Unshare();
+        if (ids) map.Apply(typed.Items.AsSpan(0, typed.Count));
     }
 
     /// <summary>The number of elements.</summary>
@@ -112,23 +119,48 @@ public struct DynamicBuffer<T> : IComponent, ITracked, IBuffer
 /// </summary>
 public static class DynamicBufferExtensions
 {
+    // Every write reaches the list through Own (the list, made this buffer's first when it is shared) or Take (Own, or a
+    // list from the pool for a buffer without one): one load and compare inlined, the copy out of line.
+
     /// <summary>The elements, writable.</summary>
     public static Span<T> AsSpan<T>(this ref DynamicBuffer<T> buffer) =>
-        buffer.Store is { } store ? new Span<T>(store.Items, 0, store.Count) : default;
+        Own(ref buffer) is { } store ? new Span<T>(store.Items, 0, store.Count) : default;
 
     /// <summary>Append <paramref name="item"/>. O(1) amortized; allocates only when the list grows.</summary>
     public static void Add<T>(this ref DynamicBuffer<T> buffer, in T item)
     {
-        var store = buffer.Store ??= BufferStore<T>.Rent();
+        var store = Take(ref buffer);
         if (store.Count == store.Items.Length) store.Grow(store.Count + 1);
         store.Items[store.Count++] = item;
+    }
+
+    /// <summary>
+    /// The list of <paramref name="buffer"/> to write (null when it has none): a list it shares (a prefab instance, a
+    /// clone, a snapshot) is replaced by a copy of its own first (<see cref="BufferStore{T}.Unshare"/>).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static BufferStore<T> Own<T>(ref DynamicBuffer<T> buffer)
+    {
+        var store = buffer.Store;
+        if (store != null && store.Shares != 0) store = buffer.Store = store.Unshare();
+        return store;
+    }
+
+    /// <summary><see cref="Own{T}"/>, with a list from the pool for a buffer that has none.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static BufferStore<T> Take<T>(ref DynamicBuffer<T> buffer)
+    {
+        var store = buffer.Store;
+        if (store == null) return buffer.Store = BufferStore<T>.Rent(); // a first write: one call, as before sharing
+        if (store.Shares != 0) store = buffer.Store = store.Unshare();
+        return store;
     }
 
     /// <summary>Append <paramref name="items"/> (a list: <c>CollectionsMarshal.AsSpan(list)</c>, no copy). O(items).</summary>
     public static void AddRange<T>(this ref DynamicBuffer<T> buffer, params ReadOnlySpan<T> items)
     {
         if (items.IsEmpty) return; // an empty buffer stays without a list: its first element takes one from the pool
-        var store = buffer.Store ??= BufferStore<T>.Rent();
+        var store = Take(ref buffer);
         if (store.Count + items.Length > store.Items.Length) store.Grow(store.Count + items.Length);
         items.CopyTo(store.Items.AsSpan(store.Count));
         store.Count += items.Length;
@@ -137,7 +169,7 @@ public static class DynamicBufferExtensions
     /// <summary>Insert <paramref name="item"/> at <paramref name="index"/>, keeping the order. O(count).</summary>
     public static void Insert<T>(this ref DynamicBuffer<T> buffer, int index, in T item)
     {
-        var store = buffer.Store ??= BufferStore<T>.Rent();
+        var store = Take(ref buffer);
         if ((uint)index > (uint)store.Count) DynamicBuffer<T>.ThrowIndex();
         if (store.Count == store.Items.Length) store.Grow(store.Count + 1);
         Array.Copy(store.Items, index, store.Items, index + 1, store.Count - index);
@@ -148,7 +180,7 @@ public static class DynamicBufferExtensions
     /// <summary>Remove the element at <paramref name="index"/>, keeping the order. O(count).</summary>
     public static void RemoveAt<T>(this ref DynamicBuffer<T> buffer, int index)
     {
-        var store = buffer.Store;
+        var store = Own(ref buffer);
         if (store == null || (uint)index >= (uint)store.Count) DynamicBuffer<T>.ThrowIndex();
         int count = --store.Count;
         Array.Copy(store.Items, index + 1, store.Items, index, count - index);
@@ -158,7 +190,7 @@ public static class DynamicBufferExtensions
     /// <summary>Remove the element at <paramref name="index"/> by moving the last one into its place. O(1).</summary>
     public static void RemoveAtSwapBack<T>(this ref DynamicBuffer<T> buffer, int index)
     {
-        var store = buffer.Store;
+        var store = Own(ref buffer);
         if (store == null || (uint)index >= (uint)store.Count) DynamicBuffer<T>.ThrowIndex();
         int count = --store.Count;
         store.Items[index] = store.Items[count];
@@ -169,6 +201,14 @@ public static class DynamicBufferExtensions
     public static void Clear<T>(this ref DynamicBuffer<T> buffer)
     {
         if (buffer.Store is not { } store) return;
+        if (store.Shares != 0)
+        {
+            // A shared list is left to its other owners, uncopied: the buffer holds none, as one never written.
+            buffer.Store = null;
+            store.Release();
+            return;
+        }
+
         if (RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(store.Items, 0, store.Count);
         store.Count = 0;
     }
@@ -187,6 +227,7 @@ public static class DynamicBufferExtensions
             buffer.Store = null;
             store.Recycle();
         }
+        else if (store.Shares != 0) buffer.Store = store.Unshare(); // the copy holds the count, no more
         else if (store.Count < store.Items.Length) store.Resize(store.Count);
     }
 
@@ -200,7 +241,7 @@ public static class DynamicBufferExtensions
     public static Span<T> SetCount<T>(this ref DynamicBuffer<T> buffer, int count)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
-        if (buffer.Store is not { } store)
+        if (Own(ref buffer) is not { } store)
         {
             if (count == 0) return default; // an empty buffer stays without a list
             store = buffer.Store = BufferStore<T>.Rent();
@@ -215,7 +256,7 @@ public static class DynamicBufferExtensions
     /// <summary>Make room for at least <paramref name="capacity"/> elements.</summary>
     public static void EnsureCapacity<T>(this ref DynamicBuffer<T> buffer, int capacity)
     {
-        var store = buffer.Store ??= BufferStore<T>.Rent();
+        var store = Take(ref buffer);
         if (capacity > store.Items.Length) store.Resize(capacity);
     }
 }
@@ -241,43 +282,97 @@ internal interface IBuffer
     /// </summary>
     BufferStore Read(ref Reader reader, BufferStore reuse);
 
-    /// <summary>Point the <see cref="EntityId"/> fields of the elements of <paramref name="store"/> at a migration's entities.</summary>
-    void Remap(BufferStore store, IdMap map);
+    /// <summary>
+    /// Point the <see cref="EntityId"/> fields of the elements of <paramref name="store"/> at a migration's entities,
+    /// first replacing a shared store by a copy of its own when it writes them or when the store is counted (see
+    /// <see cref="BufferStore.Shares"/>).
+    /// </summary>
+    void Remap(ref BufferStore store, IdMap map);
 }
 
-/// <summary>The list of a <see cref="DynamicBuffer{T}"/>, typed away so a column can be copied without its <c>T</c>.</summary>
+/// <summary>
+/// The list of a <see cref="DynamicBuffer{T}"/>, typed away so a column can be copied without its <c>T</c>. Buffers
+/// share one list until one of them writes (copy-on-write, vLLM's shared blocks): a prefab's instances, an entity's
+/// clones and a snapshot's rows hold the list of the row they copy, and the first write of each makes a copy of its
+/// own (<see cref="BufferStore{T}.Unshare"/>), so sharing is never seen.
+/// </summary>
 internal abstract class BufferStore
 {
-    /// <summary>A store with copies of the elements, taken from the pool; null for an empty one (a buffer with no list).</summary>
-    public abstract BufferStore Clone();
+    /// <summary>The value of <see cref="Shares"/> of a prefab's lists (<see cref="Prefab"/>): shared by its instances
+    /// in every world, on any thread, so never counted and never given back to the pool (the GC takes it).</summary>
+    public const int Uncounted = int.MinValue;
 
-    /// <summary>Empty the store and keep it for the next first write (its buffer died: nothing refers to it).</summary>
+    /// <summary>
+    /// How many buffers hold this list besides one: 0 when it is its buffer's own (written in place), more when it is
+    /// shared (the next write of each holder copies it), <see cref="Uncounted"/> (any negative value) for a prefab's.
+    /// Counted lists stay in one world (its rows and its snapshots: an arrival copies them, IBuffer.Remap): counted
+    /// up by structural changes on the owner thread, down by them and by first writes, plain on the owner thread and
+    /// atomic inside a parallel pass, whose chunks may each copy a list they share (<see cref="Release"/>).
+    /// </summary>
+    public int Shares;
+
+    /// <summary>
+    /// Parallel passes running now, in any world (World.RunChunks): while one runs, a first write counts its list down
+    /// atomically, since other chunks may count the same list down at once.
+    /// </summary>
+    public static int ParallelPasses;
+
+    /// <summary>This list, held by one more buffer (a clone, an instance, a snapshot's row); null for an empty one (a buffer with no list).</summary>
+    public abstract BufferStore Share();
+
+    /// <summary>A store with copies of the elements, taken from the pool, its own; null for an empty one.</summary>
+    public abstract BufferStore Copy();
+
+    /// <summary>
+    /// A buffer holding this list died or let it go: one holder fewer, and the last one's list is emptied and kept for
+    /// the next first write. A prefab's list is left to the GC.
+    /// </summary>
     public abstract void Recycle();
 
-    /// <summary>Remove the elements; the store stays its owner's, with its capacity.</summary>
+    /// <summary>A holder that copied this shared list or let it go: one holder fewer (never the last one).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Release()
+    {
+        if (Shares < 0) return; // a prefab's: uncounted
+        // Two chunks of a parallel pass that share a list may both copy it and count it down at once (it then reaches
+        // -1, held by nobody: a prefab's value, harmless): the decrement is atomic only while a pass runs.
+        if (Volatile.Read(ref ParallelPasses) == 0) Shares--;
+        else Interlocked.Decrement(ref Shares);
+    }
+
+    /// <summary>Remove the elements; the store stays its owner's, with its capacity (a singleton's: never shared).</summary>
     public abstract void Empty();
 
     /// <summary>
-    /// <paramref name="target"/> (a store its owner replaces, or null) made a copy of <paramref name="source"/>: the
-    /// elements are copied into it when both have some, a new store is taken from the pool when only the source has
-    /// some, and the target goes back to the pool when the source is empty. A restore or a capture into a reused copy
-    /// then keeps each row's list instead of leaving it to the GC.
+    /// <paramref name="target"/> (a store its owner replaces, or null) made a copy of <paramref name="source"/>: it shares
+    /// the source's list, and its old list loses a holder (back to the pool when it was the last). Capturing or
+    /// restoring twice without a write in between changes nothing.
     /// </summary>
     public static void Assign(ref BufferStore target, BufferStore source)
     {
-        if (target == null) target = source?.Clone();
-        else if (!target.CopyFrom(source))
-        {
-            target.Recycle();
-            target = null;
-        }
+        if (target == source) return;
+        target?.Recycle();
+        target = source?.Share();
     }
 
     /// <summary>
     /// Hold copies of the elements of <paramref name="source"/> (of the same element type, or null); false, the store
-    /// untouched, when it has none.
+    /// untouched, when it has none. For a store that is its owner's (a singleton's).
     /// </summary>
     public abstract bool CopyFrom(BufferStore source);
+
+    /// <summary>
+    /// Mark the lists of rows [0, <paramref name="count"/>) of a buffer column <see cref="Uncounted"/>: a prefab's, which
+    /// worlds on several threads share without counting (<see cref="Prefab"/>). Each row of a buffer column is a
+    /// DynamicBuffer, whose only field is its store: the column reads as an array of stores.
+    /// </summary>
+    public static void MarkUncounted(Array column, int count)
+    {
+        ref var first = ref Unsafe.As<byte, BufferStore>(ref MemoryMarshal.GetArrayDataReference(column));
+        for (int i = 0; i < count; i++)
+            if (Unsafe.Add(ref first, i) is { } store)
+                store.Shares = Uncounted;
+    }
 }
 
 internal sealed class BufferStore<T>(int capacity) : BufferStore
@@ -297,8 +392,14 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
 
     private const int Batch = 32;
 
-    [ThreadStatic] private static BufferStore<T>[] t_free;
-    [ThreadStatic] private static int t_freeCount;
+    // This thread's stores and their count in one object: each thread-static of a generic type costs a lookup.
+    private sealed class Free
+    {
+        public readonly BufferStore<T>[] Stores = new BufferStore<T>[2 * Batch];
+        public int Count;
+    }
+
+    [ThreadStatic] private static Free t_free;
 
     private static readonly Lock s_gate = new();
     private static BufferStore<T>[] s_free = [];
@@ -307,11 +408,11 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     /// <summary>An empty store: a recycled one (this thread's, else the shared pool's), else a new one.</summary>
     public static BufferStore<T> Rent()
     {
-        if (t_freeCount == 0 && !Refill()) return new BufferStore<T>(0);
         var free = t_free;
-        int last = --t_freeCount;
-        var store = free[last];
-        free[last] = null;
+        if (free is not { Count: > 0 } && (free = Refill()) == null) return new BufferStore<T>(0);
+        int last = --free.Count;
+        var store = free.Stores[last];
+        free.Stores[last] = null;
         return store;
     }
 
@@ -319,10 +420,10 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     public static void Fill(int count)
     {
         if (MaxPooledLength == 0) return;
-        _ = t_free ?? Own(); // this thread's own list (and every helper thread's): a first refill allocates nothing
+        var free = t_free ?? Own(); // this thread's own list (and every helper thread's): a first refill allocates nothing
         lock (s_gate)
         {
-            int missing = count - s_freeCount - t_freeCount;
+            int missing = count - s_freeCount - free.Count;
             if (missing <= 0) return;
             if (s_freeCount + missing > s_free.Length) Array.Resize(ref s_free, Math.Max(s_freeCount + missing, s_free.Length * 2));
             for (int i = 0; i < missing; i++) s_free[s_freeCount++] = new BufferStore<T>(MaxPooledLength);
@@ -333,53 +434,60 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
 
     /// <summary>This thread's own list of stores, created (on every helper thread at once: <see cref="ThreadSetup"/>).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static BufferStore<T>[] Own()
+    private static Free Own()
     {
-        ThreadSetup.Add(ref _ownSetUp, static () => t_free ??= new BufferStore<T>[2 * Batch], typeof(BufferStore<T>));
-        return t_free ??= new BufferStore<T>[2 * Batch];
+        ThreadSetup.Add(ref _ownSetUp, static () => t_free ??= new Free(), typeof(BufferStore<T>));
+        return t_free ??= new Free();
     }
 
-    // This thread's stores ran out: take up to Batch from the shared pool.
+    // This thread's stores ran out: take up to Batch from the shared pool (null when it has none).
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static bool Refill()
+    private static Free Refill()
     {
-        if (Volatile.Read(ref s_freeCount) == 0) return false;
+        if (Volatile.Read(ref s_freeCount) == 0) return null;
         var free = t_free ?? Own();
         lock (s_gate)
         {
             int taken = Math.Min(Batch, s_freeCount);
             int from = s_freeCount - taken;
-            Array.Copy(s_free, from, free, 0, taken);
+            Array.Copy(s_free, from, free.Stores, 0, taken);
             Array.Clear(s_free, from, taken);
             s_freeCount = from;
-            t_freeCount = taken;
-            return taken != 0;
+            free.Count = taken;
+            return taken != 0 ? free : null;
         }
     }
 
     public override void Recycle()
     {
+        if (Shares != 0)
+        {
+            Release(); // others hold it (or a prefab does): they keep it
+            return;
+        }
+
         Empty();
         if (Items.Length > MaxPooledLength) return;
         var free = t_free ?? Own();
-        if (t_freeCount == free.Length) Spill(free);
-        free[t_freeCount++] = this;
+        if (free.Count == free.Stores.Length) Spill(free);
+        free.Stores[free.Count++] = this;
     }
 
     // This thread holds 2 × Batch stores: hand the oldest Batch to the shared pool.
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void Spill(BufferStore<T>[] free)
+    private static void Spill(Free free)
     {
+        var stores = free.Stores;
         lock (s_gate)
         {
             if (s_freeCount + Batch > s_free.Length) Array.Resize(ref s_free, Math.Max(2 * Batch, s_free.Length * 2));
-            Array.Copy(free, 0, s_free, s_freeCount, Batch);
+            Array.Copy(stores, 0, s_free, s_freeCount, Batch);
             s_freeCount += Batch;
         }
 
-        Array.Copy(free, Batch, free, 0, Batch);
-        Array.Clear(free, Batch, Batch);
-        t_freeCount = Batch;
+        Array.Copy(stores, Batch, stores, 0, Batch);
+        Array.Clear(stores, Batch, Batch);
+        free.Count = Batch;
     }
 
     public override void Empty()
@@ -411,12 +519,34 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         return true;
     }
 
-    public override BufferStore Clone()
+    public override BufferStore Share()
     {
         if (Count == 0) return null;
+        if (Shares >= 0) Shares++; // structural changes, on the owner thread: a prefab's list is never counted
+        return this;
+    }
+
+    public override BufferStore Copy() => Count == 0 ? null : Copied();
+
+    /// <summary>
+    /// A copy of this shared list for the holder about to write it, which lets this one go (<see cref="BufferStore.Release"/>):
+    /// the copy first, so a holder that sees the count reach 0 and writes in place finds the elements copied.
+    /// O(count); a list from the pool.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public BufferStore<T> Unshare()
+    {
+        var copy = Copied();
+        Release();
+        return copy;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private BufferStore<T> Copied()
+    {
         var copy = Rent();
         if (copy.Items.Length < Count) copy.Resize(Count);
-        Array.Copy(Items, copy.Items, Count);
+        Items.AsSpan(0, Count).CopyTo(copy.Items); // a span copy: Array.Copy checks the element types first
         copy.Count = Count;
         return copy;
     }
@@ -444,6 +574,12 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     {
         int count = reader.ReadLength(Math.Max(1, TypeRegistry.RowSize<T>()));
         if (count < 0) throw new System.IO.InvalidDataException("A damaged save: a buffer longer than its bytes");
+        if (reuse is { Shares: not 0 })
+        {
+            reuse.Release(); // a list others hold (a snapshot's, a prefab's) is never refilled: theirs stays
+            reuse = null;
+        }
+
         if (reuse != null && RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(reuse.Items, 0, reuse.Count);
         if (count == 0)
         {

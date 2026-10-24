@@ -120,6 +120,17 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>
+    /// Mark the buffer lists of this world, a prefab's, uncounted (<see cref="BufferStore.Uncounted"/>): its instances
+    /// share them in worlds on several threads at once. A prefab's world is small: O(rows × buffer columns).
+    /// </summary>
+    internal void MarkBuffersUncounted()
+    {
+        foreach (var table in _allArchetypes)
+            for (int c = 0; c < table.Columns.Length; c++)
+                if (table.Info(c).IsBuffer) BufferStore.MarkUncounted(table.Columns[c], table.Count);
+    }
+
+    /// <summary>
     /// <see cref="Instantiate(Prefab)"/> for <c>entities.Length</c> copies of <paramref name="prefab"/>, whose handles
     /// are written to <paramref name="entities"/>: one pass through the structural gate and at most one table growth.
     /// O(count × components). Owner thread only.

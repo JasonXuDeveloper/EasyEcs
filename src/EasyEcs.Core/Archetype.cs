@@ -1113,8 +1113,13 @@ internal sealed class Archetype
             if (info.Size < 0)
             {
                 int old = into?.Count ?? 0;
-                if (column == null || column.Length < count) column = info.Create(count);
-                else if (old > count) info.Clear(column, count, old - count); // no stale references kept alive
+                // The copy's lists it no longer holds lose a holder (a buffer's list is shared with the row it copied).
+                if (column == null || column.Length < count)
+                {
+                    if (column != null) info.Discard(column, 0, old);
+                    column = info.Create(count);
+                }
+                else if (old > count) info.Discard(column, count, old - count); // no stale references kept alive
                 info.CopyRows(Columns[c], column, count);
             }
             else

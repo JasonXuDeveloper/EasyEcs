@@ -100,7 +100,8 @@ Cleanup.cs                   ICleanupComponent + Retired tag (entities kept aliv
 Disabled.cs                  Disabled<T> tag (the value kept, the component hidden from queries); its bit is a
                              non-generic DisabledTag per component (ComponentInfo.DisablerOf)
 DynamicBuffer.cs             DynamicBuffer<T> (a list per entity as a tracked component; writes are ref-this extensions)
-                             and its BufferStore
+                             and its BufferStore: shared by prefab instances, clones and snapshots until written
+                             (copy-on-write, Shares; a prefab's uncounted)
 Prefab.cs                    a recipe of component values outside any world (one row of a private world)
 World.Snapshots.cs           Capture / Restore (WorldSnapshot.cs holds the copies)
 World.Serialization.cs       Save / Load of a whole world (SaveWithout(output, exclude) / LoadKeeping(input, keep) for a restart);

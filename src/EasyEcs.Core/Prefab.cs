@@ -34,6 +34,7 @@ public sealed partial class Prefab
     {
         _store = new World(new WorldOptions { InitialEntityCapacity = basePrefab._store.EntityCount });
         Row = _store.Instantiate(basePrefab);
+        _store.MarkBuffersUncounted(); // the lists a member's ids made its own
     }
 
     private Prefab(World store)
@@ -68,12 +69,14 @@ public sealed partial class Prefab
 
     /// <summary>
     /// Gives the prefab a <see cref="DynamicBuffer{T}"/> of <paramref name="elements"/>, replacing the one it has: every
-    /// instance gets a list of its own with these elements. Returns the prefab. O(n).
+    /// instance shares this list until it writes its buffer, which first gives it a copy of its own. Returns the
+    /// prefab. O(n).
     /// </summary>
     public Prefab SetBuffer<T>(params System.ReadOnlySpan<T> elements) where T : struct
     {
         Row.Set(new DynamicBuffer<T>());
         Row.Get<DynamicBuffer<T>>().AddRange(elements);
+        _store.MarkBuffersUncounted();
         return this;
     }
 
