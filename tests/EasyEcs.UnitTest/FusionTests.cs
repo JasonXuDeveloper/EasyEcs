@@ -549,26 +549,68 @@ public partial class FusionTests
         Assert.That(output.SyntaxTrees.Count(t => t.FilePath.EndsWith(".Fusion.g.cs")), Is.EqualTo(1));
     }
 
+    private static async Task<Diagnostic[]> FusionRules(string source) =>
+        (await GeneratorTests.Analyze([Parts, source])).Where(d => d.Id is "EECS093" or "EECS094").OrderBy(d => d.Location.SourceSpan.Start).ToArray();
+
+    // EECS093 (Info) names the one thing that keeps two passes over (almost) the same rows apart; EECS094 (Error) a
+    // FusionMode.Require method left apart. Each case: the methods of one system, and the ids expected, in order.
+    [TestCase("[ForEach] static void M(ref A a) { } [ForEach, With<B>] static void N(ref A a) { }", "EECS093")]                        // one filter apart
+    [TestCase("[ForEach] static void M(ref A a) { } [ForEach, Without<B>] static void N(ref A a) { }", "EECS093")]
+    [TestCase("[ForEach] static void M(ref A a) { } [ForEach, WithAny<B, C>] static void N(ref A a) { }", "EECS093")]
+    [TestCase("[ForEach(Parallel = true)] static void M(ref A a) => a.V++; [ForEach] static void N(ref A a) => a.V++;", "EECS093")]     // same rows, other settings
+    [TestCase("[ForEach(Parallel = true, ChunkRows = 64)] static void M(ref A a) => a.V++; [ForEach(Parallel = true)] static void N(ref A a) => a.V++;", "EECS093")]
+    [TestCase("[ForEach] static void M(ref A a) { } [ForEach(Slices = 2)] static void N(ref A a) { }", "EECS093")]
+    [TestCase("[ForEach] static void M(ref A a) => a.V++; [ForEach] static void N(ref B b, in A a, Lookup<A> all) => b.V = a.V; [ForEach] static void O(ref A a, in B b) { }", "EECS093")] // a Lookup of A
+    [TestCase("[ForEach] static void M(in A a, ref Reduce<Sum> s) => s.Value.N++; [ForEach] static void N(ref A a, in Sum s) => a.V = s.N;", "EECS093")] // a pass's sum, read
+    [TestCase("[ForEach] static void M(ref C c) => c.V++; [ForEach, Changed<C>] static void N(in C c, ref A a) => a.V = c.V;", "")]  // other rows: C only, then C and A
+    [TestCase("[ForEach] static void M(ref C c, in A a) => c.V++; [ForEach, Changed<C>] static void N(ref A a, in C c) => a.V = c.V;", "")] // a change filter: other rows
+    [TestCase("[ForEach] static void M(ref A a) { } [ForEach, With<B>, With<C>] static void N(ref A a) { }", "")]                    // two filters apart: other rows
+    [TestCase("[ForEach] static void M(ref A a) { } [ForEach(FusionMode = FusionMode.Off), With<B>] static void N(ref A a) { }", "")]  // Off: silent
+    [TestCase("[ForEach] static void M(ref A a) { } [ForEach] static void N(ref A a, Entity e) { if (a.V < 0) e.Destroy(); }", "")]  // structure: never one walk
+    [TestCase("[ForEach] static void M(ref A a) { } [ForEach] static void N(ref A a) { }", "")]                                       // one walk
+    [TestCase("[ForEach] static void M(ref A a) { }", "")]                                                                             // alone
+    [TestCase("[ForEach] static void M(ref A a) { } [ForEach(FusionMode = FusionMode.Require)] static void N(ref A a) { }", "")]       // required and given
+    [TestCase("[ForEach(FusionMode = FusionMode.Require)] static void M(ref A a) { }", "EECS094")]                                    // nothing before it
+    [TestCase("[ForEach] static void M(ref A a) { } [ForEach(FusionMode = FusionMode.Require), With<B>, With<C>] static void N(ref A a) { }", "EECS094")]
+    [TestCase("[ForEach] static void M(ref A a) { } [ForEach(FusionMode = FusionMode.Require)] static void N(ref A a, Entity e) => e.Destroy();", "EECS094")]
+    [TestCase("[ForEach] static void M(ref A a) { } [ForEach] static void N(ref A a, Maybe<B> b) { if (b.HasValue) b.Value.V++; } [ForEach] static void O(ref A a, Lookup<B> l) { }", "EECS093")] // a Maybe writes
+    public async Task FusionRulesReportWhatKeepsPassesApart(string methods, string expected)
+    {
+        var found = await FusionRules("[EcsSystem] public ref struct S { " + methods + " }");
+        Assert.That(found.Select(d => d.Id), Is.EqualTo(expected.Length == 0 ? [] : expected.Split(' ')), string.Join("\n", found.Select(d => d.ToString())));
+        foreach (var d in found) Assert.That(d.GetMessage(), Does.Not.Contain("{"), d.ToString());
+    }
+
     [Test]
     public async Task NearMissesNameTheirReason()
     {
-        var diagnostics = (await GeneratorTests.Analyze([Parts, """
+        var found = await FusionRules("""
             [EcsSystem] public ref struct S
             {
                 [ForEach] static void M(ref A a) { }
                 [ForEach, With<B>] static void N(ref A a) { }
-                [ForEach, With<B>, With<C>, Without<Sum2>] static void O(ref A a) { }
             }
-            public struct Sum2 : IComponent;
             [EcsSystem] public ref struct R
             {
                 [ForEach] static void M(ref A a) { }
-                [ForEach(FusionMode = FusionMode.Require), Without<B>] static void N(ref A a) { }
+                [ForEach(FusionMode = FusionMode.Require), With<B>, With<C>] static void N(ref A a) { }
             }
-            """])).Where(d => d.Id is "EECS093" or "EECS094").OrderBy(d => d.Location.SourceSpan.Start).ToArray();
-        Assert.That(diagnostics.Select(d => d.Id), Is.EqualTo(new[] { "EECS093", "EECS094" }), string.Join("\n", diagnostics.Select(d => d.ToString())));
-        Assert.That(diagnostics[0].GetMessage(), Does.Contain("'N' walks the rows of 'M' again").And.Contain("B"));
-        Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Info));
-        Assert.That(diagnostics[1].Severity, Is.EqualTo(DiagnosticSeverity.Error));
+            """);
+        Assert.That(found.Select(d => d.Id), Is.EqualTo(new[] { "EECS093", "EECS094" }));
+        Assert.That(found[0].GetMessage(), Does.Contain("'N' walks the rows of 'M' again").And.Contain("B"));
+        Assert.That(found[0].Severity, Is.EqualTo(DiagnosticSeverity.Info));
+        Assert.That(found[1].GetMessage(), Does.Contain("'N' has FusionMode.Require but does not share the walk of 'M'"));
+        Assert.That(found[1].Severity, Is.EqualTo(DiagnosticSeverity.Error));
+    }
+
+    // Systems the analyzer reads like the generator: partial (once), nested, generic, in a group with filters.
+    [TestCase("public ref partial struct S { [ForEach] static void M(ref A a) { } } [EcsSystem] public ref partial struct S { [ForEach, With<B>] static void N(ref A a) { } }", "EECS093")] // partial: reported once
+    [TestCase("public static class Outer { [EcsSystem] public ref struct S { [ForEach] static void M(ref A a) { } [ForEach, With<B>] static void N(ref A a) { } } }", "EECS093")]
+    [TestCase("[EcsSystem] public ref struct S<T> where T : struct, IComponent { [ForEach] static void M(ref T t) { } [ForEach, With<B>] static void N(ref T t) { } }", "EECS093")]
+    [TestCase("[With<B>] public struct G : ISystemGroup; [UpdateInGroup<G>, EcsSystem] public ref struct S { [ForEach] static void M(ref A a) { } [ForEach, With<B>] static void N(ref A a) { } }", "")] // the group's B: one filter
+    public async Task FusionRulesReadEverySystemShape(string source, string expected)
+    {
+        var found = await FusionRules(source);
+        Assert.That(found.Select(d => d.Id), Is.EqualTo(expected.Length == 0 ? [] : expected.Split(' ')), string.Join("\n", found.Select(d => d.ToString())));
     }
 }
