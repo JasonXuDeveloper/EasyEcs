@@ -24,7 +24,7 @@ public sealed class PartGenerator : IIncrementalGenerator
     {
         // One provider per attribute; a type with several attributed fields is found by each, so the models are merged.
         IncrementalValueProvider<ImmutableArray<PartModel>>? found = null;
-        foreach (var attribute in Parts.Reductions.Append(Parts.Key).Append(Parts.UniqueKey).Append(Parts.Group))
+        foreach (var attribute in Parts.Reductions.Append(Parts.Key).Append(Parts.UniqueKey).Append(Parts.Group).Append(Parts.GroupBy))
         {
             var models = context.SyntaxProvider.ForAttributeWithMetadataName(attribute,
                     static (node, _) => node is VariableDeclaratorSyntax or PropertyDeclarationSyntax or ParameterSyntax or TypeDeclarationSyntax,

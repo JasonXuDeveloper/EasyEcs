@@ -24,8 +24,8 @@ public record struct Frozen(int Ticks) : IComponent;                          //
 public record struct Goal(int Waypoint) : IComponent, ITracked;              // where an NPC heads: replicated,
                                                                               // re-planned often, rarely different
 public record struct Lifetime(int Ticks) : IComponent;
-[GroupBy]                                                                     // every world: a table per zone,
-public partial record struct Zone([Group] int Id) : IComponent;              // its players contiguous
+public partial record struct Zone([GroupBy] int Id) : IComponent;            // every world: a table per zone,
+                                                                              // its players contiguous
 public partial record struct Kills([IndexKey] int Count) : IComponent;            // indexed, ordered: a leaderboard
 public partial record struct Account([UniqueKey] int Id) : IComponent;       // one hero per account
 public record struct Spawn(Position At) : ICleanupComponent;                  // outlives its NPC: where the next appears

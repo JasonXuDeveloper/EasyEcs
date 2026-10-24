@@ -8,9 +8,8 @@ public record struct Zone(int Id) : IComponent, IGroup   // entities of one zone
     public int Group => Id;
 }
 
-/// <summary>Every world groups its tables by the shard ([GroupBy] with [Group]): no GroupBy call to forget.</summary>
-[GroupBy]
-public partial record struct Shard([Group] int Id) : IComponent;
+/// <summary>Every world groups its tables by the shard ([GroupBy] on the member): no GroupBy call to forget.</summary>
+public partial record struct Shard([GroupBy] int Id) : IComponent;
 
 public class GroupTests
 {

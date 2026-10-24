@@ -1404,22 +1404,25 @@ public class GeneratorTests
     public void TheModuleRegistersTheWorldSetupItsTypesDeclare()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
-            [GroupBy] public partial record struct Zone([Group] int Id) : IComponent;
-            [GroupBy] public record struct Room(int Id) : IComponent, IGroup { public int Group => Id; }
+            public partial record struct Zone([GroupBy] int Id) : IComponent;
+            public record struct Room(int Id) : IComponent, IGroup { [GroupBy] public int Group => Id; }
+            public partial struct Hall : IComponent { [GroupBy] public int Floor; }
+            public partial record struct Match([Group] int Id) : IComponent;
             [WhenTargetDestroyed(TargetPolicy.Destroy)] public partial record struct Summon([IndexKey] EntityId Owner) : IComponent;
             [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Ally(EntityId Target) : IRelation;
             [NotSaved] public record struct Link2(object Socket) : IComponent;
             [NotSaved] public record struct Pool(object Handle) : ISingletonComponent;
             """), out var output, out _);
         var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.TypeRegistry.g.cs")).ToString();
-        foreach (var call in new[] { "GroupBy<global::Zone>()", "GroupBy<global::Room>()", "WhenTargetDestroyed<global::Summon>((global::EasyEcs.TargetPolicy)2)",
+        foreach (var call in new[] { "GroupBy<global::Zone>()", "GroupBy<global::Room>()", "GroupBy<global::Hall>()", "WhenTargetDestroyed<global::Summon>((global::EasyEcs.TargetPolicy)2)",
                      "RelationWhenTargetDestroyed<global::Ally>((global::EasyEcs.TargetPolicy)1)", "NotSaved<global::Link2>()", "NotSaved<global::Pool>()" })
             Assert.That(source, Does.Contain("global::EasyEcs.TypeRegistry." + call + ";"), call);
+        Assert.That(source, Does.Not.Contain("GroupBy<global::Match>"));                // [Group]: only worlds that call GroupBy
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
     }
 
-    [TestCase("[GroupBy] public record struct Z(int Id) : IComponent;")]                                                     // not grouped
-    [TestCase("[GroupBy] public partial record struct Z([Group] int Id) : ISingletonComponent;")]                             // not a component
+    [TestCase("public partial struct Z { [GroupBy] public int Id; }")]                                                               // not a component
+    [TestCase("public partial record struct Z([GroupBy] int Id) : ISingletonComponent;")]                                    // not a component
     [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public record struct W(int Id) : IComponent;")]                   // no link
     [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public partial record struct W([IndexKey] int Id) : IComponent;")]     // not an EntityId key
     [TestCase("[NotSaved] public record struct N(object O);")]                                                              // no component
@@ -1507,7 +1510,7 @@ public class GeneratorTests
             "[EcsSystem] public ref struct G<T> where T : struct, IComponent { [ForEach] static void B(ref T t) { } } public static class H { static void F(World w) => w.AddSystem<G<P>>(); }" +
             "public static class U { static void C(World w) { foreach (var i in w.Query<P>()) i.P.V++; } }" +
             "public partial struct Census : ISingletonComponent { [Sum] public int N; [Min] public float L; }" +
-            "[GroupBy] public partial record struct Zn([Group] int Id) : IComponent; [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Tether(EntityId Target) : IRelation;" +
+            "public partial record struct Zn([GroupBy] int Id) : IComponent; [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Tether(EntityId Target) : IRelation;" +
             "[NotSaved] public record struct Wire(object O) : IComponent;" +
             "[UpdateInterval(3, Phase = 1)] [EcsSystem] public ref struct Sch { static void OnUpdate(World w) { _ = w.EntityCount; } } public static class FE { [ForEntity, Without<Q>] static void E(ref P p, int n) { } }";
         var system = CSharpSyntaxTree.ParseText(code, Parse);

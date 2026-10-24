@@ -25,7 +25,8 @@ internal sealed class Parts
     /// <summary>How a reduction field combines: the attribute it carries.</summary>
     public enum Op { Sum, Product, Min, Max, All, Any }
 
-    public const string Key = "EasyEcs.IndexKeyAttribute", UniqueKey = "EasyEcs.UniqueKeyAttribute", Group = "EasyEcs.GroupAttribute";
+    public const string Key = "EasyEcs.IndexKeyAttribute", UniqueKey = "EasyEcs.UniqueKeyAttribute", Group = "EasyEcs.GroupAttribute",
+        GroupBy = "EasyEcs.GroupByAttribute";
 
     /// <summary>
     /// The rule a problem breaks: the analyzer's descriptor for it (EECS062, EECS063, EECS064; a key's and a group's are
@@ -231,10 +232,15 @@ internal sealed class Parts
         KeyOf = KeyOf with { Interface = face };
     }
 
-    /// <summary><c>[Group]</c> on one member, an <c>int</c> or an enum of <c>int</c>, with no <c>Group</c> written by hand (EECS036).</summary>
+    /// <summary>
+    /// <c>[Group]</c> (or <c>[GroupBy]</c>, which groups in every world too) on one member, an <c>int</c> or an enum of
+    /// <c>int</c>, with no <c>Group</c> written by hand (EECS036). <c>[GroupBy]</c> on the hand-written <c>Group</c> of an
+    /// <c>IGroup</c> declares no part: the type groups already.
+    /// </summary>
     private void ReadGroup(List<Member> members)
     {
-        var groups = members.Where(m => m.Attributes.Any(a => Symbols.Named(a.AttributeClass, Group))).ToList();
+        var groups = members.Where(m => m.Attributes.Any(a => Symbols.Named(a.AttributeClass, Group) || Symbols.Named(a.AttributeClass, GroupBy))
+                                        && !IsOwnGroup(m)).ToList();
         if (groups.Count == 0) return;
         var group = groups[0];
         bool enumOfInt = group.Type is INamedTypeSymbol { TypeKind: TypeKind.Enum, EnumUnderlyingType.SpecialType: SpecialType.System_Int32 };
@@ -246,6 +252,10 @@ internal sealed class Parts
         else if (Type.GetMembers().Any(m => m is IPropertySymbol p && (p.Name == "Group" || p.ExplicitInterfaceImplementations.Any(i => i.Name == "Group")) && !IsGeneratedPart(m)))
             Problems.Add(new Problem(group.Where, Rule.BadGroup, "writes Group itself and declares it with [Group]: remove one"));
     }
+
+    /// <summary>The hand-written <c>Group</c> of an <c>IGroup</c> (the member a <c>[GroupBy]</c> may mark without declaring a part).</summary>
+    private bool IsOwnGroup(Member member) =>
+        member is { Name: "Group", Data: false } && Symbols.Implements(Type, Symbols.Group) && !IsGeneratedPart(member.Where);
 
     /// <summary>
     /// A member that may carry a declaration: <paramref name="Where"/> it is declared (a record's positional parameter

@@ -101,6 +101,11 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                                     && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method:
                     Register(context, diagnostic, $"Rename it to {hook}", root, method, RenamedHook(method, hook));
                     break;
+                case "CS0592" when node.FirstAncestorOrSelf<AttributeSyntax>() is { } attribute
+                                   && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false)
+                                   && GroupByOnMember(attribute) is { } moved:
+                    Register(context, diagnostic, moved.Title, root, moved.Old, moved.New);
+                    break;
                 case "CS0305" when node.FirstAncestorOrSelf<GenericNameSyntax>() is { } any && IsSingleWithAny(any)
                                    && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false)
                                    && MergedWithAny(any) is { } merged:

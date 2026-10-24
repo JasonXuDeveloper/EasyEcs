@@ -71,7 +71,8 @@ public sealed partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor BadSetup = new("EECS068", "A world setup attribute on a type it does not fit",
         "[{0}] on '{1}': '{1}' {2}",
         Category, DiagnosticSeverity.Error, true,
-        "[GroupBy] makes every world group its tables by a grouped component (IGroup, or a member declared with [Group]); " +
+        "[GroupBy] on a member of a partial component makes every world group its tables by that member (an int or an enum " +
+        "of int, as [Group] declares it), or by the Group of a hand-written IGroup; " +
         "[WhenTargetDestroyed] sets what destroying an entity does to the links to it, so it goes on a relation " +
         "(IRelation) or a component indexed by an EntityId; [NotSaved] leaves a component or a singleton out of saves. " +
         "On any other type no world would apply it.",
@@ -236,15 +237,25 @@ public sealed partial class EasyEcsAnalyzer
         });
     }
 
-    /// <summary>EECS068: [GroupBy] / [WhenTargetDestroyed] on a type that cannot take it (<see cref="Symbols.SetupProblem"/>).</summary>
+    /// <summary>
+    /// EECS068: [WhenTargetDestroyed] / [NotSaved] on a type, or [GroupBy] on a member of a type, that cannot take it
+    /// (<see cref="Symbols.SetupProblem"/>).
+    /// </summary>
     private static void AnalyzeSetup(SymbolAnalysisContext context, INamedTypeSymbol type)
     {
-        foreach (var attribute in type.GetAttributes())
+        var members = Parts.Declares(type, Parts.GroupBy)
+            ? Parts.Members(type).SelectMany(m => m.Attributes)
+                .Concat(type.GetMembers().OfType<IPropertySymbol>().Where(p => p.ExplicitInterfaceImplementations.Length > 0).SelectMany(p => p.GetAttributes()))
+            : [];
+        foreach (var attribute in type.GetAttributes().Concat(members))
         {
             if (!Symbols.Named(attribute.AttributeClass, Symbols.GroupByAttribute) && !Symbols.Named(attribute.AttributeClass, Symbols.WhenTargetDestroyedAttribute)
                 && !Symbols.Named(attribute.AttributeClass, Symbols.NotSavedAttribute)
                 || Symbols.SetupProblem(type, attribute) is not { } problem)
                 continue;
+            // [GroupBy] on a member of a component: what keeps it from grouping (not partial, not an int, a second
+            // group) is the part's rule (EECS062, EECS064), one report per mistake.
+            if (Symbols.Named(attribute.AttributeClass, Symbols.GroupByAttribute) && Symbols.Implements(type, Symbols.Component)) continue;
             var location = attribute.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken).GetLocation() ?? type.Locations.FirstOrDefault();
             context.ReportDiagnostic(Diagnostic.Create(BadSetup, location, attribute.AttributeClass!.Name.Replace("Attribute", ""), type.Name, problem));
         }

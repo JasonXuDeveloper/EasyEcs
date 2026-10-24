@@ -76,7 +76,9 @@ public sealed class UniqueKeyAttribute : Attribute;
 
 /// <summary>
 /// The member a world groups the component's tables by (<see cref="IGroup"/>): an <c>int</c> or an enum of
-/// <c>int</c>. The generator adds <c>IGroup</c> to the partial struct with an explicit <c>Group</c> returning it.
+/// <c>int</c>. The generator adds <c>IGroup</c> to the partial struct with an explicit <c>Group</c> returning it. The
+/// tables are grouped in the worlds that call <see cref="World.GroupBy{T}"/>; <see cref="GroupByAttribute">[GroupBy]</see>
+/// on the member instead groups them in every world.
 /// </summary>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
 public sealed class GroupAttribute : Attribute;
@@ -96,11 +98,13 @@ public sealed class WhenTargetDestroyedAttribute(TargetPolicy policy) : Attribut
 }
 
 /// <summary>
-/// Every world groups its tables by this <see cref="IGroup"/> component (<see cref="World.GroupBy{T}"/>), from its first
-/// table holding it: a group filter (<see cref="QueryFilter.InGroup{T}"/>) then visits that group's tables only, in
-/// every world, with no setup call to forget.
+/// <see cref="GroupAttribute">[Group]</see>, and every world groups the component's tables by this member
+/// (<see cref="World.GroupBy{T}"/>) from its first table holding it: a group filter (<see cref="QueryFilter.InGroup{T}"/>)
+/// then visits that group's tables only, in every world, with no setup call to forget.
+/// <c>public partial record struct Zone([GroupBy] int Id) : IComponent;</c> On the <c>Group</c> property of a
+/// hand-written <see cref="IGroup"/>, it only makes every world group by it.
 /// </summary>
-[AttributeUsage(AttributeTargets.Struct)]
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
 public sealed class GroupByAttribute : Attribute;
 
 /// <summary>

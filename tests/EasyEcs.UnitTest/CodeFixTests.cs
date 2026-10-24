@@ -493,6 +493,12 @@ public class CodeFixTests
         "    /// <summary>Spawns.</summary>\n    static void OnCreate(World world) => world.CreateEntity(new P());\n    static void Again(World w) => OnCreate(w);", "Rename it to OnCreate: the name makes it the hook")]
     [TestCase("CS0246", "[EcsSystem] public ref struct S { [OnDestroy, System.Obsolete] static void Bye() { } }",
         "{ [System.Obsolete] static void OnDestroy() { } }", "Rename it to OnDestroy: the name makes it the hook")]
+    [TestCase("CS0592", "/// <summary>Zones.</summary>\n[GroupBy]\npublic partial record struct Zone([Group] int Id) : IComponent;",
+        "/// <summary>Zones.</summary>\npublic partial record struct Zone([GroupBy] int Id) : IComponent;", "Move [GroupBy] onto the [Group] member")]
+    [TestCase("CS0592", "[GroupBy, System.Serializable] public partial struct Hall : IComponent { [Group] public int Floor; }",
+        "[System.Serializable] public partial struct Hall : IComponent { [GroupBy] public int Floor; }", "Move [GroupBy] onto the [Group] member")]
+    [TestCase("CS0592", "[GroupBy] public record struct Room(int Id) : IComponent, IGroup { public int Group => Id; }",
+        "public record struct Room(int Id) : IComponent, IGroup { [GroupBy] public int Group => Id; }", "Move [GroupBy] onto the Group property")]
     public async Task MigratesADeclarationOfTheOldForm(string id, string source, string expected, string title)
     {
         var document = Document(Data + source);

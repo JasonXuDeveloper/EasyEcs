@@ -120,6 +120,55 @@ public sealed partial class EasyEcsCodeFixes
         }
     }
 
+    /// <summary>
+    /// CS0592 on <c>[GroupBy]</c> on a struct (it now goes on the grouped member): the member marked <c>[Group]</c> becomes
+    /// <c>[GroupBy]</c>, or, for a hand-written <c>IGroup</c>, its <c>Group</c> property takes <c>[GroupBy]</c>; the
+    /// struct's attribute goes. Null when the struct has neither.
+    /// </summary>
+    private static (string Title, SyntaxNode Old, SyntaxNode New)? GroupByOnMember(AttributeSyntax attribute)
+    {
+        if (LastName(attribute.Name) is not IdentifierNameSyntax { Identifier.ValueText: "GroupBy" or "GroupByAttribute" } name
+            || attribute.Parent is not AttributeListSyntax { Parent: TypeDeclarationSyntax type } list)
+            return null;
+
+        var marked = type.DescendantNodes().OfType<AttributeSyntax>().FirstOrDefault(a =>
+            a.Parent?.Parent is ParameterSyntax or PropertyDeclarationSyntax or FieldDeclarationSyntax
+            && a.Parent.Parent.Parent is ParameterListSyntax { Parent: TypeDeclarationSyntax } or TypeDeclarationSyntax
+            && a.FirstAncestorOrSelf<TypeDeclarationSyntax>() == type
+            && LastName(a.Name)?.Identifier.ValueText is "Group" or "GroupAttribute");
+        var own = type.Members.OfType<PropertyDeclarationSyntax>().FirstOrDefault(p => p.Identifier.ValueText == "Group");
+        if (marked == null && own == null) return null;
+
+        var tracked = type.TrackNodes(new SyntaxNode?[] { list, attribute, marked, own }.Where(n => n != null)!);
+        if (marked != null)
+        {
+            var current = tracked.GetCurrentNode(marked)!;
+            var markedName = LastName(current.Name)!;
+            tracked = tracked.ReplaceNode(markedName, SyntaxFactory.IdentifierName("GroupBy").WithTriviaFrom(markedName));
+        }
+        else
+        {
+            var property = tracked.GetCurrentNode(own!)!;
+            var mark = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Attribute(name.WithoutTrivia())))
+                .WithTrailingTrivia(SyntaxFactory.Space);
+            tracked = tracked.ReplaceNode(property, property.WithoutLeadingTrivia().WithAttributeLists(property.AttributeLists.Insert(0, mark))
+                .WithLeadingTrivia(property.GetLeadingTrivia()));
+        }
+
+        var currentList = tracked.GetCurrentNode(list)!;
+        if (currentList.Attributes.Count > 1)
+            tracked = tracked.ReplaceNode(currentList, currentList.WithAttributes(currentList.Attributes.Remove(tracked.GetCurrentNode(attribute)!)));
+        else
+        {
+            var leading = currentList.GetLeadingTrivia();
+            bool first = tracked.AttributeLists.IndexOf(currentList) == 0;
+            tracked = tracked.RemoveNode(currentList, SyntaxRemoveOptions.KeepNoTrivia)!;
+            if (first) tracked = tracked.WithLeadingTrivia(leading);
+        }
+
+        return (marked != null ? "Move [GroupBy] onto the [Group] member" : "Move [GroupBy] onto the Group property", type, tracked);
+    }
+
     /// <summary>EECS090: a method named almost like a hook takes the hook's name (the analyzer checked it has no caller).</summary>
     private static MethodDeclarationSyntax RenamedHook(MethodDeclarationSyntax method, string hook) =>
         method.WithIdentifier(SyntaxFactory.Identifier(hook).WithTriviaFrom(method.Identifier));

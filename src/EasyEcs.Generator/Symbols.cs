@@ -533,7 +533,8 @@ internal static class Symbols
     /// generator writes its <c>[Group]</c> (see <see cref="IndexKey"/>).
     /// </summary>
     public static bool IsGrouped(ITypeSymbol type) =>
-        Implements(type, Group) || type is INamedTypeSymbol named && Parts.Declares(named, Parts.Group) && Parts.Of(named) is { WritesGroup: true };
+        Implements(type, Group) || type is INamedTypeSymbol named && (Parts.Declares(named, Parts.Group) || Parts.Declares(named, Parts.GroupBy))
+        && Parts.Of(named) is { WritesGroup: true };
 
     /// <summary>
     /// Why <paramref name="type"/> cannot take the world setup <paramref name="attribute"/> declares, or null: [GroupBy]
@@ -547,7 +548,7 @@ internal static class Symbols
                 : "is neither a component nor a singleton: [NotSaved] leaves a component or a singleton out of saves";
         if (Named(attribute.AttributeClass, GroupByAttribute))
             return Implements(type, Component) && IsGrouped(type) ? null
-                : "is not a grouped component: [GroupBy] splits tables by IGroup.Group (implement IGroup, or declare the member with [Group])";
+                : "is not a grouped component: [GroupBy] splits tables by the member it marks (an int or an enum of int of a partial component) or by the Group of a hand-written IGroup";
         if (Implements(type, Relation)) return null;
         return Implements(type, Component) && IndexKey(type, out bool unique) is { } key && Named(key, EntityId) && !unique ? null
             : "is neither a relation (IRelation) nor a component indexed by an EntityId: [WhenTargetDestroyed] decides what happens to links to a destroyed entity";

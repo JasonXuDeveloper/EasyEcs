@@ -108,10 +108,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 }
                 : [new SavedType((m.Singleton ? "Singleton" : "Component") + "<" + m.Type + ">()", m.Type, m.EntityIds, m.Singleton ? "" : m.Layout)])
             .WithTrackingName("SavedComponents");
-        // The setup a type declares for every world ([GroupBy], [WhenTargetDestroyed]): registered with it.
+        // The setup a type declares for every world ([GroupBy] on its grouped member, [WhenTargetDestroyed]): registered with it.
         var groupBy = context.SyntaxProvider.ForAttributeWithMetadataName(Symbols.GroupByAttribute,
-                static (node, _) => node is TypeDeclarationSyntax,
-                static (ctx, _) => Setup(ctx.TargetSymbol, ctx.SemanticModel.Compilation, ctx.Attributes[0]))
+                static (node, _) => node is VariableDeclaratorSyntax or PropertyDeclarationSyntax or ParameterSyntax,
+                static (ctx, _) => Setup(ctx.TargetSymbol is IParameterSymbol p ? p.ContainingSymbol.ContainingType : ctx.TargetSymbol.ContainingType,
+                    ctx.SemanticModel.Compilation, ctx.Attributes[0]))
             .Where(static t => t is not null).Select(static (t, _) => t!).WithTrackingName("GroupBy");
         var targetPolicies = context.SyntaxProvider.ForAttributeWithMetadataName(Symbols.WhenTargetDestroyedAttribute,
                 static (node, _) => node is TypeDeclarationSyntax,
