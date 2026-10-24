@@ -9,7 +9,7 @@ metadata:
 
 High-performance code that nobody can change is not done. This audit reads every project for what makes code hard
 to change, and fixes it without making it slower. The specialist audits apply the same checklist to their own files
-(`audit-core`, `audit-generator`, `audit-analyzer`); this one owns everything else and the seams between projects.
+(`audit-core`, `audit-generator`, `audit-vector-loops`, `audit-analyzer`); this one owns everything else and the seams between projects.
 
 ## Owns
 
@@ -33,8 +33,9 @@ code duplicated across projects, a project reaching into another's internals.
   for the public API).
 - **Comments say why**: invariants, formulas, magic numbers, the reason for a non-obvious choice; no comment that
   restates the code; XML docs on public members.
-- **Examples are exemplary**: samples, templates, the demo and the battle server follow `ecs-principles.mdx` and build
-  with no analyzer warning (users copy them).
+- **Examples are exemplary**: samples, templates, the demo and the battle server follow `ecs-principles.mdx`, build
+  with no analyzer warning (no EECS055: their `[ForEach]` methods run as vector loops where the form allows) and use
+  names that model their domain (`audit-naming`); users copy them.
 - **Fast and simple together**: a simplification that costs speed is not one; a fast path that duplicates a slow one
   should share its core.
 

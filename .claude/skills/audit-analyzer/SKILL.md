@@ -57,6 +57,8 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
 - Mistakes no rule catches (`docs/content/guide/common-mistakes.mdx`, `guide/troubleshooting.mdx`).
 - Messages that no longer match runtime behavior; descriptor names, titles and code-fix titles that do not
   match the rule (`audit-naming`).
+- Methods that are almost vector loops: EECS055 names the blocking statement and the split when the user can fix it
+  (the reason and its fixable / inherent class come from `Kernel`, `audit-vector-loops`).
 - New features without their rules: each attribute, parameter or API the changelog adds, checked for the misuse it
   invites and the hand-written pattern it replaces.
 - Patterns in `samples/`, `BattleServer.cs`, `WorldSimulation.cs`, templates and docs examples that a rule should flag

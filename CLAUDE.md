@@ -330,14 +330,21 @@ fresh session working on a new request follows it.
 Repeatable procedures live in `.claude/skills/<name>/SKILL.md` (Claude Code loads them as skills; `.agents/skills` links
 to the same files for other agents; any person can follow them as checklists).
 
-Skills are the project's memory. When the owner or a round brings up a concept that a skill does not record yet and
-that later work must keep (a rule, a technique, a check, a form to support), write it into the skill whose job it
-belongs to, in the same session, and say so. A skill that grows past one concern is split by concern into a new
-skill (name, description and `metadata.internal: true`), with every line moved, not summarized away, and a pointer
-left in the old one; the table below and the `audit` scopes gain the new skill.
+Skills are the project's memory: a fresh session knows only what CLAUDE.md and the skills say, so anything the
+owner has asked for once must be written where the next session will find it.
 
-Agents see each skill's name and description and load it when a request matches; this table says when to reach for
-which, so a session picks the right one without reading them all.
+- **Record new concepts.** When the owner or a round brings up a rule, technique, check or form to support that later
+  work must keep and no skill records yet, write it into the skill whose job it belongs to, in the same session, and
+  tell the owner where.
+- **Keep the skills consistent with each other.** A rule is stated in full once, in the skill that owns it; every
+  other skill whose work it affects carries it as a check phrased for its own job, with a pointer to the owner. For
+  example, what becomes a vector loop is stated in `audit-vector-loops`; `audit-generator` and `feature` point to it,
+  and `audit-analyzer` checks that EECS055 reports the same reasons. So after changing a skill, read the skills it names and the ones that own neighboring
+  files (the `audit` scopes table), and add the check or pointer wherever it is missing. Every audit round ends with
+  this pass over all skills.
+- **Split, never shrink.** A skill that has grown past one concern is split by concern into a new skill (name,
+  description, `metadata.internal: true`). Every line moves, nothing is summarized away, the old skill keeps a
+  pointer, and this table and the `audit` scopes gain the new skill.
 
 | Use when | Skill |
 |---|---|

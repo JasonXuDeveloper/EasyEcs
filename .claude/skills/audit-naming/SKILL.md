@@ -18,6 +18,7 @@ A name is the first doc a reader sees. This audit covers every name, not only th
 | Tests and benchmarks | fixture components, test names (say what is checked), benchmark classes, methods, `[Params]` |
 | Examples | samples, templates, the demo, `BattleServer.cs`, `WorldSimulation.cs`, docs fences: components, systems, entities, locals read as the game or server they model, one name per concept across examples |
 | Docs | page titles, headings, anchors, file names, glossary terms, prose naming an API exactly as the code does |
+| Skills | skill names and descriptions (agents choose a skill by them), the public skill's terms matching the API |
 | Chinese | one term per concept (`tools/ApiDocs/zh/README.md` glossary), the same term in pages, ApiDocs and the public skill |
 
 1. **Read what is settled**: CLAUDE.md, `docs/content/glossary.mdx`, `ecs-principles.mdx`, `decisions.mdx` (naming

@@ -19,16 +19,16 @@ One round = parallel audits, each in its own worktree and branch, then triage an
 | `audit-analyzer` | `EasyEcsAnalyzer*.cs`, `UnusedSuppressor.cs`, `Symbols.cs`, `Uses.cs`, `Threads.cs`, `src/EasyEcs.CodeFixes` | missing rules (wrong, costly, hand-written code), code fixes, overlaps, false positives |
 | `audit-code` | `tools/`, `tests/` structure, `benchmarks/` harness, `samples/`, `templates/`, `demo/`, `.github/` and `docs/scripts/`, the seams between projects | coupling, non-DRY code, dead code, god files, layering, unclear names and comments |
 | `audit-docs` | `docs/content`, README, `skills/easyecs/SKILL.md` (the public skill), samples READMEs | every part of each feature page, stale names, examples, duplication, en/zh |
-| `audit-perf` | no files: research, prototypes in its own worktree | the next performance win (Burst, CUDA, stencil, OpenMP, MPI, OS, .NET 10), proven with BenchmarkDotNet |
+| `audit-perf` | no files: research, prototypes in its own worktree | the next performance win (Burst, CUDA, stencil, OpenMP, MPI, OS, databases, HPC runtimes, vLLM, .NET 10), proven with BenchmarkDotNet |
 | `audit-naming` | every name: a report; internal, test, example and docs renames applied in their own commit | ambiguous, wrong or inconsistent names in code, examples and docs; public renames wait for the owner |
 
-`audit-generator` and `audit-analyzer` share `Symbols.cs` (and the analyzer reads `Kernel.Vectorize` for EECS055 /
-EECS056): run them in different rounds or give the shared files to one. `audit-naming` reports only, so it runs beside
+`audit-generator`, `audit-vector-loops` and `audit-analyzer` share `Symbols.cs`, and the analyzer reports the reasons
+`Kernel.Vectorize` returns (EECS055 / EECS056): run them in different rounds or give the shared files to one. `audit-naming` reports only, so it runs beside
 any of them.
 
 ## Order
 
-Code first, docs last: the code audits (core, generator, analyzer, code, perf) run and merge; agents do not edit docs
+Code first, docs last: the code audits (core, generator, vector loops, analyzer, code, perf) run and merge; agents do not edit docs
 pages but report their docs to-dos (what each page must now say), which are collected in one list; `audit-docs`
 then runs once over everything, with `tools/bench.sh --site --sync` on the final code. Every agent also reports
 what it left undone, which goes on the same list (nothing is dropped silently).
@@ -61,5 +61,6 @@ what it left undone, which goes on the same list (nothing is dropped silently).
    duplicated D and fix its anchors and links.
 4. After the code audits are merged, run `audit-docs` once over everything with the collected docs to-dos.
 5. Finish with `verify`, then fast-forward `master` (no PR unless asked) and push. The owner cuts the release.
-6. Remove finished worktrees (`git worktree remove`, `git worktree prune`): a stale worktree makes BenchmarkDotNet
+6. Update the skills with what the round taught, then cross-check them (CLAUDE.md, Workflows).
+7. Remove finished worktrees (`git worktree remove`, `git worktree prune`): a stale worktree makes BenchmarkDotNet
    find two matching projects.

@@ -20,6 +20,8 @@ part names the skill that audits it.
 - Synchronization is `System.Threading.Lock` or CAS, never `lock (object)`.
 - The feature is general (servers, Godot games, simulations) and off unless used: what it costs is paid only by
   worlds that use it.
+- It works on every platform EasyEcs runs on: x64 and arm64, Native AOT, WebAssembly (the demo: Mono AOT, no
+  threads), Godot (desktop and mobile); threads, native memory and intrinsics have a fallback (`audit-core`).
 
 ## 2. Generator (`audit-generator`)
 
@@ -42,14 +44,14 @@ part names the skill that audits it.
 - Tests: positive cases, negative cases, false-positive guards, the overlap test (one diagnostic per mistake).
 - The rule list and range in CLAUDE.md, `docs/content/guide/analyzer.mdx` + `.zh.mdx`, `skills/easyecs/SKILL.md` (the public skill).
 
-## 4. Code fix
+## 4. Code fix (`audit-analyzer`)
 
 Every rule whose fix is mechanical, including converting hand-written patterns to the generated or attribute form.
 The analyzer computes the fix as diagnostic properties; a `CodeFixTests` case covers it.
 
 ## 5. Tests (`tests/EasyEcs.UnitTest`, one file per feature)
 
-Behaviour; edge cases (stale and recycled ids, empty tables, structural changes mid-pass, retired entities,
+Behaviour; a regression test that fails before each bug fix; edge cases (stale and recycled ids, empty tables, structural changes mid-pass, retired entities,
 exceptions mid-pass); the allocation test (0 B in steady state); bit-identical results at 1 and 4 threads for
 parallel code; equivalence with the scalar method for vector loops; the AOT test when the feature reaches
 generics or reflection (`tests/EasyEcs.Aot`).
@@ -64,7 +66,8 @@ regression in WorldSimulation, BattleServer and the feature's neighbors. A bench
 
 Per `docs/WRITING.md`, en and zh structurally identical:
 - the guide page's anatomy: what it is; when to use it (idea / warn Callouts); how to use it, recommended (generated)
-  form first, with `You write` / `The generator writes` tabs; a full example; how to use it fast; what it costs;
+  form first, with `You write` / `The generator writes` tabs (and in every headline example that uses the form:
+  README `<details>`, docs home, getting started, the battle server walkthrough); a full example; how to use it fast; what it costs;
   pitfalls with their EECS rule; related Cards;
 - complexity rows in `docs/content/api.mdx` + `.zh.mdx`; XML docs with zh entries in `tools/ApiDocs/zh`;
 - numbers only through `docs/src/data/bench.json` (BenchTable), never typed on a page (decision records may quote);
@@ -81,6 +84,8 @@ While code is still changing, collect these as docs to-dos; pages are written on
   identity; no session links.
 - Parallel work in worktrees on branches off the work branch (`audit`).
 - `verify` runs before anything reaches master.
+- What the change taught (a rule, a technique, a check) is written into the skill it belongs to (CLAUDE.md,
+  Workflows).
 - Renames of released public API are reported first and applied after the owner's approval (`audit-naming`).
 - **Names**: every name the change adds (API, generated members, attributes, rule ids' titles, internal types,
   files, tests, benchmarks, examples, headings, Chinese terms) passes `audit-naming`'s questions before it merges;

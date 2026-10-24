@@ -100,13 +100,13 @@ tools/bench.sh GeneratorBenchmark
 
 - Interceptors: not used (D18): a `static readonly` filter already gives what intercepting a filter chain would, and
   `Get` / `Has` / `Set` / `CreateEntity` / `Index` fold their type's bit as a static readonly field. Re-evaluate only
-  with a measured cost at a call site that the call's own arguments do not cause.
+  with a measured cost at a call site that the call's own arguments do not cause, or for boilerplate: scoped inline
+  queries become generated jobs ("ECS without the burden" above) when they run as fast as a `[ForEach]` method.
 - In use: C# 14 extension members, generic attributes (`[With<T>]`), FAWMN, implementation output.
 
 ## Done means (each new generated form, on top of `feature`)
 
 - Its generated names (members, types, hint names) pass `audit-naming`.
-
 - A generated-output test and a caching assertion in `GeneratorTests`.
 - The analyzer reports what the generator skips (same `Symbols` / `Kernel` function); a code fix moves hand-written
   code to the form.

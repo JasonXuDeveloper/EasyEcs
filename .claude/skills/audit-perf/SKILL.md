@@ -8,13 +8,15 @@ metadata:
 # Performance research and audit
 
 Performance is the first constraint (CLAUDE.md); GC is part of it. This skill finds the next win and proves it. It owns
-no files: a finding is built by the skill that owns its files (`audit-core`, `audit-generator`) or in its own worktree.
+no files: a finding is built by the skill that owns its files (`audit-core`, `audit-generator`, `audit-vector-loops`) or in
+its own worktree.
 
 ## Where wins come from
 
 1. **The user's code, rewritten by the generator (Burst's idea).** The user writes the plain form; the generator
    emits the fast one. Look at what users write by hand that a generated form would run faster:
-   - per-row scalar loops that `Kernel.Vectorize` could turn into `Vector<T>` loops: count the EECS055 / EECS056
+   - per-row scalar loops that `Kernel.Vectorize` could turn into `Vector<T>` loops (`audit-vector-loops` has what
+     qualifies, side effects and the proof): count the EECS055 / EECS056
      reasons over `samples/`, `BattleServer.cs`, `WorldSimulation.cs` and the docs examples; the most frequent reason
      is the next form to support (mixed lane widths, struct fields, masks, wide rows are done: D68, D90);
    - work a parameter does per chunk (`Reduce<T>`, `Emit<T>`, `Scratch<T>`, `Lookup<T>`, `Tile<,>`, `EntityRandom`):
@@ -71,6 +73,8 @@ no files: a finding is built by the skill that owns its files (`audit-core`, `au
    - every run under `flock /tmp/bench.lock`, nothing else running (agents' builds and samples included): parallel
      rows swing by 2x on a loaded machine; take the load average with the results;
    - the feature's benchmark plus WorldSimulation, BattleServer, MultiWorld and the neighbors; 0 B in steady state;
+   - a runtime change (threads, memory, intrinsics) also works on every platform (`audit-core`, Platforms): measure on
+     x64, check arm64, AOT and the single-threaded WebAssembly demo still run;
    - new hot loops: Tier1 asm with `tools/jitdisasm.sh` (no call in the loop body, no unexpected range check);
    - `tools/bench.sh <classes> --sync` runs classes one process each (resumable, under the lock) and merges them into
      the site's numbers, listing rows that moved 15 % or allocate differently; `--site` runs every class the site
