@@ -33,6 +33,8 @@ public sealed record ScheduleInfo(GroupInfo[] Groups)
                     Names(text, "writes singletons", system.WritesSingletons);
                     text.Append('\n');
                     foreach (var loop in system.Loops) text.Append("      loop ").Append(loop).Append('\n');
+                    if (system.FusedWith != null)
+                        text.Append("      one walk with the next system, ").Append(system.FusedWith).Append(", when both run\n");
                     foreach (var wait in system.After)
                     {
                         text.Append("      after ").Append(wait.System).Append(": ");
@@ -158,6 +160,13 @@ public sealed record SystemInfo(string Name, string[] Reads, string[] Writes, st
     /// generator decided (the reasons of EECS055).
     /// </summary>
     public string[] Loops { get; init; } = [];
+
+    /// <summary>
+    /// The system after it that it runs as one walk with (pass fusion: each row of their shared filter is loaded once
+    /// for both) whenever both are enabled and due, or null. Only one thread running the group and
+    /// <see cref="WorldOptions.MeasureSystems"/> off fuse systems.
+    /// </summary>
+    public string FusedWith { get; init; }
 }
 
 /// <summary>A system a later one waits for (<see cref="SystemInfo.After"/>).</summary>

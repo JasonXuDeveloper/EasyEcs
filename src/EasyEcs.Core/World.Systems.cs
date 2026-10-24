@@ -213,7 +213,8 @@ public sealed partial class World
             for (int r = 0; r < runs.Length; r++)
             {
                 var run = runs[r];
-                run.Set.Run(this, serial.Systems.AsSpan(run.Start, run.Count), update, serial.Starts.AsSpan(run.Start, run.Count));
+                run.Set.Run(this, serial.Systems.AsSpan(run.Start, run.Count), update, serial.Starts.AsSpan(run.Start, run.Count),
+                    serial.Fused.AsSpan(run.Start, run.Count));
             }
         }
         else
@@ -234,7 +235,7 @@ public sealed partial class World
                 for (int s = 0; s < segments.Length; s++)
                 {
                     var segment = segments[s];
-                    segment.Set.Run(this, stage.Systems.AsSpan(segment.Start, segment.Count), update, default);
+                    segment.Set.Run(this, stage.Systems.AsSpan(segment.Start, segment.Count), update, default, default);
                 }
             }
         }
@@ -249,8 +250,11 @@ public sealed partial class World
     /// of a parallel stage with a span of one. Bound once per set (<see cref="SystemCode.Register{TSet}"/>).
     /// <paramref name="starts"/>, when not empty, marks the systems that start a stage (a run of the serial plan, across
     /// stages): the change tick moves on before each, as it does before every stage, run or not.
+    /// <paramref name="fused"/>, when not empty, holds for each system the fusion of the set it shares one walk with the
+    /// next by (pass fusion, <see cref="ISystemSet.RunFused"/>), or -1: used when both run on this update.
     /// </summary>
-    internal static void RunSystems<TSet>(World world, ReadOnlySpan<SystemSlot> systems, long update, ReadOnlySpan<bool> starts) where TSet : struct, ISystemSet
+    internal static void RunSystems<TSet>(World world, ReadOnlySpan<SystemSlot> systems, long update, ReadOnlySpan<bool> starts,
+        ReadOnlySpan<short> fused) where TSet : struct, ISystemSet
     {
         for (int i = 0; i < systems.Length; i++)
         {
@@ -269,6 +273,14 @@ public sealed partial class World
                 continue;
             }
 
+            if ((uint)(i + 1) < (uint)fused.Length && fused[i] >= 0 && world.Runs(systems[i + 1], update) is { IsAlive: true } next)
+            {
+                // The next system shares this one's walk (it is due and enabled too): one pass for both.
+                world.RunFused<TSet>(fused[i], handle, next, (uint)(i + 1) < (uint)starts.Length && starts[i + 1]);
+                i++;
+                continue;
+            }
+
             try
             {
                 TSet.Update(world, id, handle);
@@ -281,6 +293,39 @@ public sealed partial class World
             {
                 world.Ran(handle);
             }
+        }
+    }
+
+    /// <summary>The handle of <paramref name="slot"/> when it runs on update <paramref name="update"/> (enabled and due), else a default one.</summary>
+    private SystemHandle Runs(SystemSlot slot, long update)
+    {
+        ref var row = ref SystemRows[slot.Index];
+        if (row.Version != slot.Version || !row.Enabled || row.Interval > 1 && update % row.Interval != row.Phase) return default;
+        return new SystemHandle(this, slot.Index, slot.Version);
+    }
+
+    /// <summary>
+    /// Two systems in one walk (fusion <paramref name="fusion"/> of set <typeparamref name="TSet"/>): the second one's
+    /// writes are stamped with the tick of its own stage (<paramref name="nextStage"/>: the tick moves on between them),
+    /// an exception disables the system whose method threw (the other keeps what it did on the rows walked so far), and
+    /// each counts a run.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void RunFused<TSet>(int fusion, SystemHandle first, SystemHandle second, bool nextStage) where TSet : struct, ISystemSet
+    {
+        try
+        {
+            TSet.RunFused(this, fusion, first, second, nextStage ? _changeTick + 1 : _changeTick);
+        }
+        catch (Exception e) when (_options.SystemErrors == SystemErrorPolicy.Disable)
+        {
+            Fail(SystemCode.Culprit(e) == 1 ? second : first, e);
+        }
+        finally
+        {
+            Ran(first);
+            if (nextStage) _changeTick++;
+            Ran(second);
         }
     }
 
@@ -423,16 +468,22 @@ public sealed partial class World
     /// consecutive systems of one set whatever the stages, and which systems start a stage. Sixteen systems of one
     /// assembly in sixteen stages are one call of their set, not sixteen; the change tick still moves on once per stage.
     /// </summary>
-    internal sealed class SerialPlan(SystemSlot[] systems, bool[] starts, Segment[] runs)
+    internal sealed class SerialPlan(SystemSlot[] systems, bool[] starts, Segment[] runs, short[] fused)
     {
-        public static readonly SerialPlan Empty = new([], [], []);
+        public static readonly SerialPlan Empty = new([], [], [], []);
 
         public readonly SystemSlot[] Systems = systems;
         public readonly bool[] Starts = starts;
         public readonly Segment[] Runs = runs;
 
-        /// <summary>The plan of <paramref name="stages"/>, whose systems are <paramref name="systems"/> in order.</summary>
-        public static SerialPlan Of(SystemStage[] stages, SystemSlot[] systems)
+        /// <summary>
+        /// Per system, the fusion of its set it shares one walk with the next system by (pass fusion: the two are next to
+        /// each other in one run of the set, and the set declares the pair), or -1.
+        /// </summary>
+        public readonly short[] Fused = fused;
+
+        /// <summary>The plan of <paramref name="stages"/>, whose systems are <paramref name="systems"/> in order, their codes <paramref name="codes"/>.</summary>
+        public static SerialPlan Of(SystemStage[] stages, SystemSlot[] systems, SystemCode.Entry[] codes)
         {
             var starts = new bool[systems.Length];
             var runs = new List<Segment>();
@@ -448,7 +499,10 @@ public sealed partial class World
                 at += stages[b].Systems.Length;
             }
 
-            return new SerialPlan(systems, starts, runs.ToArray());
+            var fused = new short[systems.Length];
+            for (int i = 0; i < fused.Length; i++)
+                fused[i] = (short)(i + 1 < codes.Length && codes[i].Set == codes[i + 1].Set ? codes[i].Set.FusionOf(codes[i].Id, codes[i + 1].Id) : -1);
+            return new SerialPlan(systems, starts, runs.ToArray(), fused);
         }
     }
 
@@ -501,6 +555,7 @@ public sealed partial class World
 
             var stages = new SystemStage[stageCount];
             var systems = new SystemSlot[order.Length];
+            var ordered = new SystemCode.Entry[order.Length]; // the codes of systems, in their order
             for (int level = 0, next = 0; level < stageCount; level++)
             {
                 int start = next;
@@ -516,6 +571,7 @@ public sealed partial class World
                     int at = next - start;
                     if (segments.Count > 0 && segments[^1].Set == set) segments[^1] = segments[^1] with { Count = segments[^1].Count + 1 };
                     else segments.Add(new Segment(set, at, 1));
+                    ordered[next] = codes[order[i]];
                     systems[next++] = registered[order[i]];
                 }
 
@@ -525,7 +581,7 @@ public sealed partial class World
             // An update reads only Stages, or only Serial: one reference, so it never mixes two versions of the list.
             _registered = registered;
             Systems = systems;
-            Serial = SerialPlan.Of(stages, systems);
+            Serial = SerialPlan.Of(stages, systems, ordered);
             Stages = stages;
         }
 

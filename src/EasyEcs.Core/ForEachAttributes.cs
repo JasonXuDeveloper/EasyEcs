@@ -72,6 +72,16 @@ public sealed class ForEachAttribute : Attribute
     /// either way. Default <see cref="FloatMode.Exact"/>: the same results on every machine (each lane an IEEE operation).
     /// </summary>
     public FloatMode FloatMode { get; init; }
+
+    /// <summary>
+    /// Whether the method shares one walk with the [ForEach] methods declared next to it in its system (pass fusion: each
+    /// row loaded into cache once, the methods run on it in declaration order). <see cref="FusionMode.Auto"/> fuses
+    /// consecutive methods when one walk gives the results of separate passes (the same filter and settings, no structural
+    /// change, no read of other entities or of a singleton another method writes) and reports a near miss (EECS093, a
+    /// message); <see cref="FusionMode.Require"/> makes a method that does not share the walk of the method before it an
+    /// error (EECS094); <see cref="FusionMode.Off"/> gives the method a walk of its own. Default <see cref="FusionMode.Auto"/>.
+    /// </summary>
+    public FusionMode FusionMode { get; init; }
 }
 
 /// <summary>
@@ -131,6 +141,22 @@ public enum SimdMode
     Require,
 
     /// <summary>One row at a time, as written.</summary>
+    Off,
+}
+
+/// <summary>
+/// Whether a <see cref="ForEachAttribute"/> method shares one walk with its neighbors in its system
+/// (<see cref="ForEachAttribute.FusionMode"/>). <see cref="SystemInfo.Loops"/> names the methods each method shares its walk with.
+/// </summary>
+public enum FusionMode
+{
+    /// <summary>One walk with the methods next to it when that gives the same results; EECS093 names a near miss.</summary>
+    Auto,
+
+    /// <summary>One walk with the method declared before it, or the build fails with the reason (EECS094).</summary>
+    Require,
+
+    /// <summary>A walk of its own.</summary>
     Off,
 }
 
