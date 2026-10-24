@@ -9,7 +9,8 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/CLAUDE.md` first.
 
 ## Per page (en and zh)
 
-1. **Names**: every API in prose and code exists now (grep the old names of every rename in the changelog's
+1. **Names**: examples model their domain and use one name per concept across pages; headings and terms match the
+   API and the glossary (en and zh; `audit-naming`). Every API in prose and code exists now (grep the old names of every rename in the changelog's
    "Changes that need code changes"). History pages (changelog, migration, decisions) keep old names on purpose.
 2. **Examples are exemplary** (`ecs-principles.mdx`): plain data components, one system per responsibility, stateless
    systems, generated members (`entity.Health`, `item.Health`, `SetX`) over generic calls, and no analyzer warning

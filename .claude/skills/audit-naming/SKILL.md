@@ -1,9 +1,22 @@
 ---
 name: audit-naming
-description: Audit EasyEcs names (public Core API, generated members, analyzer descriptors, internals) for ambiguity, wrong meaning, ECS convention and consistency. Report first; public renames need the owner's approval.
+description: Audit every name in EasyEcs - public API, generated members, attributes, analyzer descriptors, internal and private code (types, methods, fields, locals, files, projects), tests and benchmarks, samples, templates, the demo, docs prose, headings, anchors and examples' entities and components, and the Chinese terms - for ambiguity, wrong meaning, ECS convention and consistency. Use in every round, and on every new feature before it merges. Report first; public renames need the owner's approval.
 ---
 
 # Naming audit
+
+A name is the first doc a reader sees. This audit covers every name, not only the public API:
+
+| Layer | Where |
+|---|---|
+| Public API | `src/EasyEcs.Core` public types and members, attributes, options, exceptions' messages |
+| Generated | members and types the generators write (`entity.X`, `SetX`, jobs, `__X_SystemCode`, hint names) |
+| Analyzer | descriptor field names, ids' titles, messages, code-fix titles |
+| Internal code | internal and private types, methods, fields, locals, parameters, files and folders, projects |
+| Tests and benchmarks | fixture components, test names (say what is checked), benchmark classes, methods, `[Params]` |
+| Examples | samples, templates, the demo, `BattleServer.cs`, `WorldSimulation.cs`, docs fences: components, systems, entities, locals read as the game or server they model, one name per concept across examples |
+| Docs | page titles, headings, anchors, file names, glossary terms, prose naming an API exactly as the code does |
+| Chinese | one term per concept (`tools/ApiDocs/zh/README.md` glossary), the same term in pages, ApiDocs and the rules file |
 
 1. **Read what is settled**: CLAUDE.md, `docs/content/glossary.mdx`, `ecs-principles.mdx`, `decisions.mdx` (naming
    records and "Not added" records) and the renames in `migration.mdx`. Never re-propose a settled name without a
@@ -31,12 +44,19 @@ description: Audit EasyEcs names (public Core API, generated members, analyzer d
    options) gets the questions above first; it is cheapest to change before a release.
 8. **zh**: the Chinese term of each name follows the glossary in `tools/ApiDocs/zh/README.md` (one term per concept).
 9. **Internals**: private and internal names that reuse a public term for something else (Runner, Passes, Groups,
-   Forget, Rows, ChangeTick).
-10. **Output**: a table per layer (current | problem | proposed | breaking | confidence | call site before → after),
+   Forget, Rows, ChangeTick); abbreviations a reader must decode; a name that no longer matches what the code does
+   after a refactor; files whose name is not the type or concern inside.
+10. **Examples and docs**: an example's names model its domain (`Health`, `Damage`, not `Comp1`, `Foo`); the same
+   concept has the same name in every example and page; a heading names the feature as the API does; an anchor
+   survives a rename only through a redirect or a link fix.
+11. **Output**: a table per layer (current | problem | proposed | breaking | confidence | call site before → after),
    ranked by impact, split into clearly right vs owner's call, plus internal renames and a one-line
    "checked and fine" list.
 
 ## Applying renames
+
+- **Internal names, tests, benchmarks, examples and docs** are renamed without approval (they are not released API),
+  in their own commit; a benchmark rename keeps the site's numbers (`docs/src/data/bench.json` keys, `benchmarks.ts`).
 
 - **Owner's approval**: public renames need it first. Pre-1.0 there are no `[Obsolete]` aliases.
 - **Generated members**: some analyzer checks match them by name prefix, so update those first:

@@ -80,3 +80,6 @@ While code is still changing, collect these as docs to-dos; pages are written on
 - Parallel work in worktrees on branches off the work branch (`audit`).
 - `verify` runs before anything reaches master.
 - Renames of released public API are reported first and applied after the owner's approval (`audit-naming`).
+- **Names**: every name the change adds (API, generated members, attributes, rule ids' titles, internal types,
+  files, tests, benchmarks, examples, headings, Chinese terms) passes `audit-naming`'s questions before it merges;
+  it is cheapest to change before a release.

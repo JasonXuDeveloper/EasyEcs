@@ -17,7 +17,7 @@ One round = parallel audits, each in its own worktree and branch, then triage an
 | `audit-code` | `tools/`, `tests/` structure, `benchmarks/` harness, `samples/`, `templates/`, `demo/`, `.github/` and `docs/scripts/`, the seams between projects | coupling, non-DRY code, dead code, god files, layering, unclear names and comments |
 | `audit-docs` | `docs/content`, README, `docs/public/easyecs-rules.md`, samples READMEs | every part of each feature page, stale names, examples, duplication, en/zh |
 | `audit-perf` | no files: research, prototypes in its own worktree | the next performance win (Burst, CUDA, stencil, OpenMP, MPI, OS, .NET 10), proven with BenchmarkDotNet |
-| `audit-naming` | no files: a report | ambiguous or wrong names; public renames wait for the owner |
+| `audit-naming` | every name: a report; internal, test, example and docs renames applied in their own commit | ambiguous, wrong or inconsistent names in code, examples and docs; public renames wait for the owner |
 
 `audit-generator` and `audit-analyzer` share `Symbols.cs` (and the analyzer reads `Kernel.Vectorize` for EECS055 /
 EECS056): run them in different rounds or give the shared files to one. `audit-naming` reports only, so it runs beside

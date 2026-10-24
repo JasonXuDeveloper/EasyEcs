@@ -51,7 +51,8 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
 - False positives on `ref readonly`, lambdas, generated members (`[GeneratedCode("EasyEcs.Generator")]`), loops with
   break/return, explicit types, code after a structural change.
 - Mistakes no rule catches (`docs/content/guide/common-mistakes.mdx`, `guide/troubleshooting.mdx`).
-- Messages that no longer match runtime behavior.
+- Messages that no longer match runtime behavior; descriptor names, titles and code-fix titles that do not
+  match the rule (`audit-naming`).
 - New features without their rules: each attribute, parameter or API the changelog adds, checked for the misuse it
   invites and the hand-written pattern it replaces.
 - Patterns in `samples/`, `BattleServer.cs`, `WorldSimulation.cs`, templates and docs examples that a rule should flag

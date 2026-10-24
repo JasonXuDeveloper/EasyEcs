@@ -107,6 +107,8 @@ tools/bench.sh GeneratorBenchmark
 
 ## Done means (each new generated form, on top of `feature`)
 
+- Its generated names (members, types, hint names) pass `audit-naming`.
+
 - A generated-output test and a caching assertion in `GeneratorTests`.
 - The analyzer reports what the generator skips (same `Symbols` / `Kernel` function); a code fix moves hand-written
   code to the form.

@@ -339,7 +339,7 @@ which, so a session picks the right one without reading them all.
 | changing a generator, a new generated form, boilerplate users still write, IDE or build speed | `audit-generator` |
 | adding or reviewing EECS rules and code fixes | `audit-analyzer` |
 | "optimize further", researching an idea, a performance round | `audit-perf` |
-| a new or renamed public API, generated member or diagnostic | `audit-naming` (report; renames need the owner) |
+| any new name (API, generated member, rule, internal code, test, example, page) and in every round: all names | `audit-naming` (public renames need the owner) |
 | the docs pass, once the code is final | `audit-docs` |
 
 Order in a round: `feature` per change, then the code audits, then `audit-docs`, then `verify`.
