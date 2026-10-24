@@ -1,5 +1,7 @@
 # Tests: file map
 
+> Read when: adding or changing a test, or finding where a feature is tested.
+
 NUnit unit tests and the Native AOT check. Every bug fix adds a regression test (`feature`).
 
 When you add, rename or delete a file here, update its line (`verify` checks every file is listed).

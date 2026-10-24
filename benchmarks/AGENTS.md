@@ -1,5 +1,7 @@
 # Benchmarks: file map
 
+> Read when: adding, changing or running a benchmark.
+
 BenchmarkDotNet only; the method (A/B, lock, quiet machine) is `audit-perf`, the job is
 `EasyEcs.Benchmark/BenchmarkConfig.cs`.
 

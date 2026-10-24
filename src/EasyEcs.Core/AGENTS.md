@@ -1,5 +1,7 @@
 # EasyEcs.Core: file map
 
+> Read when: reading or changing anything in `src/EasyEcs.Core` (entities, tables, queries, systems, the parallel runner, indexes, saves).
+
 net10.0 library, namespace `EasyEcs`: the hand-written shared core (arity families are generated, see
 `src/EasyEcs.Generator/AGENTS.md`). The rules of the root AGENTS.md apply; `audit-core` audits this directory.
 

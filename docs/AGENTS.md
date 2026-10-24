@@ -1,5 +1,7 @@
 # EasyEcs docs site
 
+> Read when: changing the docs site or a page of `docs/content` (en or zh).
+
 The website at https://ecs.xgamedev.net: React Router 7 + Fumadocs, fully prerendered (`ssr: false`), Bun, Biome,
 deployed to Cloudflare Pages. English and Chinese. How to write a page: `WRITING.md`.
 

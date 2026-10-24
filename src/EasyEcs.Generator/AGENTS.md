@@ -1,5 +1,7 @@
 # EasyEcs.Generator: file map
 
+> Read when: reading or changing the generators, the vector loops (`Kernel*.cs`) or the analyzer.
+
 Roslyn generators + analyzer (netstandard2.0, loaded by every Roslyn host). `audit-generator`, `audit-vector-loops`
 and `audit-analyzer` audit this directory; code fixes live in `src/EasyEcs.CodeFixes` (root AGENTS.md).
 
