@@ -124,6 +124,14 @@ public partial class ReduceTests
         static void Add(in Weight weight, ref Reduce<WeightSum> mass) => mass.Value.Total += weight.Value;
     }
 
+    /// <summary>The same sum in chunks the runtime chooses: from the row count alone, never from the threads.</summary>
+    [EcsSystem]
+    public ref struct DefaultChunkMass
+    {
+        [ForEach(Parallel = true)]
+        static void Add(in Weight weight, ref Reduce<WeightSum> mass) => mass.Value.Total += weight.Value;
+    }
+
     [EcsSystem]
     public ref struct ParallelEnds
     {
@@ -380,17 +388,29 @@ public partial class ReduceTests
     }
 
     [Test]
-    public void AFloatReductionWithFixedChunksDoesNotDependOnTheThreads()
+    public void AFloatReductionWithFixedChunksDoesNotDependOnTheThreads() => SameMassOnAnyThreads<FixedChunkMass>(100_000);
+
+    /// <summary>
+    /// Without ChunkRows too: a pass that merges cuts its chunks from the row count alone, so a float sum is the same
+    /// bits at 1 to 8 threads, on every run, whether the runner wakes helpers or runs alone. Table sizes below, at and
+    /// above the cap of a chunk (16 chunks of 1,024 to 16,384 rows).
+    /// </summary>
+    [TestCase(5_000)]
+    [TestCase(100_000)]
+    [TestCase(400_000)]
+    public void AFloatReductionDoesNotDependOnTheThreads(int rows) => SameMassOnAnyThreads<DefaultChunkMass>(rows);
+
+    private static void SameMassOnAnyThreads<TSystem>(int rows) where TSystem : struct, allows ref struct
     {
         float? expected = null;
         foreach (int threads in new[] { 1, 2, 3, 4, 8 })
         {
             using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
             var random = new Random(11);
-            var entities = new Entity[100_000];
+            var entities = new Entity[rows];
             world.CreateEntities(entities, new Weight(0));
             foreach (var e in entities) e.Weight = new Weight(random.NextSingle() * 1000);
-            world.AddSystem<FixedChunkMass>();
+            world.AddSystem<TSystem>();
             for (int run = 0; run < 50; run++)
             {
                 world.Update();
