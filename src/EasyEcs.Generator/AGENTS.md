@@ -52,8 +52,8 @@ PartGenerator.cs             [Sum]..[Any], [IndexKey]/[UniqueKey], [Group] -> a 
                              IIndexed<K>.Key, IGroup.Group); Parts.cs: the models and Problems read once for the
                              generator and the analyzer (other generators read keys and groups through Symbols)
 Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (Kernel.Vectorize: the loop, or the
-                             reason EECS055 / EECS056 report); Kernel.Narrow.cs: byte / sbyte / short / ushort lanes
-                             (int values followed as low bits and an interval, saturating idioms); Kernel.Struct.cs:
+                             reason EECS055 / EECS056 report, as a ScalarReason: fixable or inherent);
+                             Kernel.Narrow.cs: byte / sbyte / short / ushort lanes (int values followed as low bits and an interval, saturating idioms); Kernel.Struct.cs:
                              struct values (Vector2/3/4 fields, new T(...), with) as one vector per lane;
                              Kernel.Wide.cs: components of up to 16 words on AVX-512 (fields gathered by a pruned
                              permute tree, where it pays);
@@ -81,6 +81,11 @@ EasyEcsAnalyzer.Parameters.cs  EECS086, EECS087, EECS089: a [ForEach] method doi
                              chunk (a singleton reset by system code and accumulated row by row: Reduce<T>, reported
                              at the end of the compilation; other entities read through the World: Lookup<T>; records
                              appended to a singleton's list: Emit<T>); no code fix (the reset, the readers move too)
+EasyEcsAnalyzer.Layout.cs    EECS090 (compilation end): a component of 32 bytes or more whose fields no frequent
+                             [ForEach] pass touches are half of it (ColdFieldPasses: the fields each pass names,
+                             collected from AnalyzeBody; components EECS055 already advises to split are left to it)
+EasyEcsAnalyzer.Records.cs   EECS091 (compilation end): an Emit<T> whose Emitted<T> no code of the compilation clears
+                             (a public record type of a library is left to the assemblies using it)
 Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)
 Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race;
                              the writes of code on several threads that reach shared memory (EECS060, EECS061)

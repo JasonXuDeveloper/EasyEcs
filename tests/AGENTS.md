@@ -13,7 +13,7 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                Changed (and Mut, ChangedAny), Removed (and the destroy log), Instantiate, DynamicBuffer,
                                Index (and unique keys), Tile, OrderedIndex, Relation, Hierarchy, TargetPolicy, Group, Cleanup,
                                Disable, Bulk, Move, Part (generated parts, EECS062-069), Snapshot, Serialization (and restart saves), Unload, Introspection
-                               (and Trim, DescribeSchedule), Generic, Allocation (0 B budget), Emit, ForParallel, EntityRandom,
+                               (and Trim, DescribeSchedule), Generic, Allocation (0 B budget), Emit (and EECS091), HotCold (EECS090), ForParallel, EntityRandom,
                                Generator (diagnostics + caching), CodeFix, BattleServer (the world of
                                docs/content/example.mdx as a whole, linked from EasyEcs.Benchmark); Fixtures.cs holds
                                the shared test components
