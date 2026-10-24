@@ -16,7 +16,7 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                DynamicBuffer (+ ChunkChurn: MaxPooledLength), BufferSharing (+ BufferSnapshot: lists shared until written), Generator (the generators per keystroke and the analyzer per
                                build, through
                                Roslyn), Group, Hierarchy, HotCold (a pass over wide rows against the cold fields split out: EECS091's threshold), Histogram (keyed reductions), Index (+ unique keys), Introspection (+ Schedule),
-                               Lookup, LookupChase (random lookups across 1M entities), Maybe, Migration, OrderedIndex, Ordering, ParallelForEach, ParallelSystems (Measure),
+                               LambdaPass (a lambda pass against the [ForEach] method and the hand-written job, scalar and vector bodies), Lookup, LookupChase (random lookups across 1M entities), Maybe, Migration, OrderedIndex, Ordering, ParallelForEach, ParallelSystems (Measure),
                                Prefab, Relation, Runner, SingleEntity, Slices, Snapshot (+ SaveWithout / LoadKeeping),
                                Sparse, StructuralLoop (a tag set under a condition: vector loop + marked rows against the
                                scalar method, a command buffer and SetAll), SystemDispatch (what a system costs per update apart from its rows), Trim,

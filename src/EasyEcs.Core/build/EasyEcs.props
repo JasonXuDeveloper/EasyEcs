@@ -1,0 +1,7 @@
+<Project>
+    <!-- world.ForEach(static (ref P p) => ...): the EasyEcs generator intercepts each call with the job of its lambda, in
+         namespace EasyEcs.Generated; the compiler takes interceptors only from the namespaces a project lists. -->
+    <PropertyGroup>
+        <InterceptorsNamespaces>$(InterceptorsNamespaces);EasyEcs.Generated</InterceptorsNamespaces>
+    </PropertyGroup>
+</Project>

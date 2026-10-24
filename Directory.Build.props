@@ -4,4 +4,8 @@
     <PropertyGroup>
         <Version>4.7.0</Version>
     </PropertyGroup>
+
+    <!-- What the package's build files set in the projects that reference it: the repository's projects reference
+         EasyEcs.Core directly. -->
+    <Import Project="$(MSBuildThisFileDirectory)src/EasyEcs.Core/build/EasyEcs.props"/>
 </Project>

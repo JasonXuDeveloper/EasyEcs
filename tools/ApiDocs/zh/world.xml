@@ -616,5 +616,64 @@
   <member name="M:EasyEcs.World.TryGetSystem``1(EasyEcs.SystemHandle@)" source="88f2d15d9a2f">
     <summary>查找系统 <typeparamref name="T" />：World 里没有时返回 false 和默认句柄。O(1)。</summary>
   </member>
+  <member name="M:EasyEcs.World.ForEach(System.Delegate)" source="b9c6473fb3ec">
+    <summary>
+      对每个拥有它所接收组件的实体执行 <paramref name="body" />（一个静态 lambda）：
+      <c>world.ForEach(static (ref Position p, in Velocity v) =&gt; p.Value += v.Value)</c>。
+      lambda 的参数就是 <see cref="T:EasyEcs.ForEachAttribute" /> 方法的参数（以 <c>ref</c> 或 <c>in</c> 传入的组件、单例、
+      <c>Reduce&lt;T&gt;</c>、<c>Mut&lt;T&gt;</c>、<c>Emit&lt;T&gt;</c>、<c>Scratch&lt;T&gt;</c>、<c>Lookup&lt;T&gt;</c>、<c>Entity</c>；
+      不支持 <c>Maybe&lt;T&gt;</c>、tile 和 span），再按顺序加上它前面传入的值；它的特性就是 [ForEach] 方法的过滤条件
+      （<c>[Without&lt;Dead&gt;]</c>）。变更过滤从最前面传入的 tick 回看：
+      <c>world.ForEach(since, [Changed&lt;Health&gt;] static (in Health h) =&gt; …)</c>。EasyEcs
+      生成器把每处调用编译成 [ForEach] 方法会得到的 job（方法体符合条件时是向量循环），所以调用零分配。只能在所有者线程上调用。
+    </summary>
+    <param name="body">写在调用处的静态 lambda。</param>
+    <exception cref="T:System.InvalidOperationException">生成器没有编译这处调用（EECS095 说明原因）。</exception>
+  </member>
+  <member name="M:EasyEcs.World.ForEach``1(``0,System.Delegate)" source="a7775fee10d5">
+    <summary>
+      对每个拥有它所接收组件的实体执行 <paramref name="body" />（一个静态 lambda）：
+      <c>world.ForEach(dt, static (ref Position p, in Velocity v, float dt) =&gt; p.Value += v.Value * dt)</c>。
+      lambda 的参数就是 <see cref="T:EasyEcs.ForEachAttribute" /> 方法的参数（以 <c>ref</c> 或 <c>in</c> 传入的组件、单例、
+      <c>Reduce&lt;T&gt;</c>、<c>Mut&lt;T&gt;</c>、<c>Emit&lt;T&gt;</c>、<c>Scratch&lt;T&gt;</c>、<c>Lookup&lt;T&gt;</c>、<c>Entity</c>；
+      不支持 <c>Maybe&lt;T&gt;</c>、tile 和 span），再按顺序加上它前面传入的值；它的特性就是 [ForEach] 方法的过滤条件
+      （<c>[Without&lt;Dead&gt;]</c>）。变更过滤从最前面传入的 tick 回看：
+      <c>world.ForEach(since, [Changed&lt;Health&gt;] static (in Health h) =&gt; …)</c>。EasyEcs
+      生成器把每处调用编译成 [ForEach] 方法会得到的 job（方法体符合条件时是向量循环），所以调用零分配。只能在所有者线程上调用。
+    </summary>
+    <typeparam name="TValue1"><paramref name="value1" /> 的类型。</typeparam>
+    <param name="value1">lambda 前面的第一个值，遍历期间存在 job 里：lambda 第一个不是组件、单例或 EasyEcs 参数的参数，按顺序对应；有变更过滤时，它是回看的起点 tick（一个 <c>ulong</c>，lambda 不接收它）。</param>
+    <param name="body">写在调用处的静态 lambda。</param>
+    <exception cref="T:System.InvalidOperationException">生成器没有编译这处调用（EECS095 说明原因）。</exception>
+  </member>
+  <member name="M:EasyEcs.World.ForEachParallel(System.Delegate)" source="60cf0f5dba32">
+    <summary>
+      对每个拥有它所接收组件的实体执行 <paramref name="body" />（一个静态 lambda），匹配的行切成块，由多个线程执行：
+      <c>world.ForEachParallel(static (ref Position p, in Velocity v) =&gt; p.Value += v.Value)</c>。
+      lambda 的参数就是 <see cref="T:EasyEcs.ForEachAttribute" /> 方法的参数（以 <c>ref</c> 或 <c>in</c> 传入的组件、单例、
+      <c>Reduce&lt;T&gt;</c>、<c>Mut&lt;T&gt;</c>、<c>Emit&lt;T&gt;</c>、<c>Scratch&lt;T&gt;</c>、<c>Lookup&lt;T&gt;</c>、<c>Entity</c>；
+      不支持 <c>Maybe&lt;T&gt;</c>、tile 和 span），再按顺序加上它前面传入的值；它的特性就是 [ForEach] 方法的过滤条件
+      （<c>[Without&lt;Dead&gt;]</c>）。变更过滤从最前面传入的 tick 回看：
+      <c>world.ForEach(since, [Changed&lt;Health&gt;] static (in Health h) =&gt; …)</c>。EasyEcs
+      生成器把每处调用编译成 [ForEach] 方法会得到的 job（方法体符合条件时是向量循环），所以调用零分配。只能在所有者线程上调用。
+    </summary>
+    <param name="body">写在调用处的静态 lambda。</param>
+    <exception cref="T:System.InvalidOperationException">生成器没有编译这处调用（EECS095 说明原因）。</exception>
+  </member>
+  <member name="M:EasyEcs.World.ForEachParallel``1(``0,System.Delegate)" source="409f9b5232e6">
+    <summary>
+      对每个拥有它所接收组件的实体执行 <paramref name="body" />（一个静态 lambda），匹配的行切成块，由多个线程执行：
+      <c>world.ForEachParallel(dt, static (ref Position p, in Velocity v, float dt) =&gt; p.Value += v.Value * dt)</c>。
+      lambda 的参数就是 <see cref="T:EasyEcs.ForEachAttribute" /> 方法的参数（以 <c>ref</c> 或 <c>in</c> 传入的组件、单例、
+      <c>Reduce&lt;T&gt;</c>、<c>Mut&lt;T&gt;</c>、<c>Emit&lt;T&gt;</c>、<c>Scratch&lt;T&gt;</c>、<c>Lookup&lt;T&gt;</c>、<c>Entity</c>；
+      不支持 <c>Maybe&lt;T&gt;</c>、tile 和 span），再按顺序加上它前面传入的值；它的特性就是 [ForEach] 方法的过滤条件
+      （<c>[Without&lt;Dead&gt;]</c>）。变更过滤从最前面传入的 tick 回看：
+      <c>world.ForEach(since, [Changed&lt;Health&gt;] static (in Health h) =&gt; …)</c>。EasyEcs
+      生成器把每处调用编译成 [ForEach] 方法会得到的 job（方法体符合条件时是向量循环），所以调用零分配。只能在所有者线程上调用。
+    </summary>
+    <typeparam name="TValue1"><paramref name="value1" /> 的类型。</typeparam>
+    <param name="value1">lambda 前面的第一个值，遍历期间存在 job 里：lambda 第一个不是组件、单例或 EasyEcs 参数的参数，按顺序对应；有变更过滤时，它是回看的起点 tick（一个 <c>ulong</c>，lambda 不接收它）。</param>
+    <param name="body">写在调用处的静态 lambda。</param>
+    <exception cref="T:System.InvalidOperationException">生成器没有编译这处调用（EECS095 说明原因）。</exception>
+  </member>
 </doc>
-

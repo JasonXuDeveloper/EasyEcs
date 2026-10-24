@@ -15,7 +15,9 @@ public class GeneratorTests
     /// <summary>A file of generated [ForEach] code: a system's (<c>.System.g.cs</c>) or another type's (<c>.ForEach.g.cs</c>).</summary>
     internal static bool IsCode(SyntaxTree tree) => tree.FilePath.EndsWith(".System.g.cs") || tree.FilePath.EndsWith(".ForEach.g.cs");
 
-    internal static readonly CSharpParseOptions Parse = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+    // The interceptors of lambda passes are taken from EasyEcs.Generated, as the package's build files set it (EasyEcs.props).
+    internal static readonly CSharpParseOptions Parse = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview)
+        .WithFeatures([new("InterceptorsNamespaces", "EasyEcs.Generated")]);
 
     internal static CSharpCompilation Compile(params string[] sources) => CSharpCompilation.Create("Test",
         sources.Select(s => CSharpSyntaxTree.ParseText("using EasyEcs;\n" + s, Parse)),
@@ -1516,7 +1518,7 @@ public class GeneratorTests
     [
         "ForEachMethods", "Systems", "SystemUpdates", "ClosedSystems", "SystemSet", "Components", "ExtensionMembers", "BufferUses",
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
-        "GroupBy", "TargetPolicies", "NotSaved", "ForEntityMethods", "ForEntityTypes",
+        "GroupBy", "TargetPolicies", "NotSaved", "ForEntityMethods", "ForEntityTypes", "LambdaPasses", "LambdaFiles",
     ];
 
     // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
@@ -1539,8 +1541,10 @@ public class GeneratorTests
             "[UpdateInterval(3, Phase = 1)] [EcsSystem] public ref struct Sch { static void OnUpdate(World w) { _ = w.EntityCount; } } public static class FE { [ForEntity, Without<Q>] static void E(ref P p, int n) { } }";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
+        // A lambda pass in a file of its own: its interceptor names the file's checksum, so an edit there is a new model.
+        var lambdas = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic static class Lp { static void F(World w, int n) => w.ForEach(n, static (ref P p, int n) => p.V += n); }", Parse);
         var edited = code.Contains(before) ? system : other;
-        var compilation = Compile().AddSyntaxTrees(system, other);
+        var compilation = Compile().AddSyntaxTrees(system, other, lambdas);
 
         var driver = Driver().RunGenerators(compilation);
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(edited,
@@ -1896,6 +1900,22 @@ public class GeneratorTests
         foreach (var name in new[] { "Systems", "SystemUpdates", "SystemSet" })
             Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                 Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
+    }
+
+    // An edit in a file of lambda passes changes its checksum, so its interceptors are written again; another file's stay.
+    [Test]
+    public void AnEditInALambdasFileLeavesTheOtherFilesCached()
+    {
+        var first = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic static class A { static void F(World w) => w.ForEach(static (ref P p) => p.V++); }", Parse, path: "A.cs");
+        var second = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic static class B { static void F(World w) => w.ForEach(static (ref Q q) => q.V++); }", Parse, path: "B.cs");
+        var compilation = Compile(Components).AddSyntaxTrees(first, second);
+        var driver = Driver().RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(first,
+            CSharpSyntaxTree.ParseText(first.ToString().Replace("p.V++", "p.V += 2"), Parse, path: "A.cs")));
+
+        var reasons = Steps(driver)["LambdaFiles"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1));
+        Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Modified or IncrementalStepRunReason.New), Is.EqualTo(1));
     }
 
     [Test]
@@ -2487,6 +2507,8 @@ public class GeneratorTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p) => p.V = new System.Random(p.V).Next(); }", "EECS071")]         // not EECS028
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Link l, World w) { if (w.TryGetEntity(l.Target, out var t)) p.V = t.Get<Q>().V; } }", "EECS087")] // not EECS033
     [TestCase("public struct Ship : IComponent { public float X, VX, A, B, C, D, E, F; } [EcsSystem] public ref struct S { [ForEach] static void A(ref Ship s) => s.X += s.VX; }")] // EECS055's split (left out of All), not EECS091
+    [TestCase("public static class U { static int Step = 2; public static void F(World w, int n) => w.ForEach((ref P p) => p.V += Step * n); }", "EECS095")] // not EECS096: the fix makes it static first
+    [TestCase("public static class U { static int Step = 2; public static void F(World w) => w.ForEach(static (ref P p) => p.V = System.Math.Clamp(p.V, 0, Step) % 7); }", "EECS096")] // not EECS097: no loop to translate
     public async Task OneMistakeIsReportedOnce(string source, params string[] ids)
     {
         var all = await All(source);

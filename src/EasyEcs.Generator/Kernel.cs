@@ -217,9 +217,44 @@ internal sealed partial class Kernel
             : Declined(method, syntax, model) is { } declined ? new ScalarReason(declined.Reason, declined.IsFixable, null)
             : null;
         if (reason != null) return null;
+        (syntax, model) = Symbols.WithBody(method, syntax, model); // Declined: it returns nothing and is not generic
+        if (model.GetOperation(syntax, ct) is not IMethodBodyOperation body)
+        {
+            reason = new ScalarReason("it has no body", false, null);
+            return null;
+        }
+        var lane = new Lane(method, Symbols.IsRunner(method), Symbols.IsParallel(method), Symbols.FastFloats(method), model,
+            Symbols.IsStable(method, syntax, model));
+        return Vectorize(lane, (IOperation?)body.BlockBody ?? body.ExpressionBody!, fieldOf, ct, out reason);
+    }
+
+    /// <summary>
+    /// The vector loop of a lambda pass (<c>world.ForEach(static (ref P p) =&gt; …)</c>, SystemGenerator.Lambdas.cs), or
+    /// null with the reason: the test of a [ForEach] method, on the lambda's parameters and body. <paramref name="stable"/>
+    /// says whether the body can make structural changes (<see cref="LambdaPass.IsStable"/>), as a method's
+    /// declaration would.
+    /// </summary>
+    public static Code? Vectorize(IMethodSymbol lambda, IAnonymousFunctionOperation function, bool parallel, bool stable,
+        SemanticModel model, System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct, out string? reason)
+    {
+        var lane = new Lane(lambda, true, parallel, false, model, stable);
+        if (Declined(lane) is { } declined)
+        {
+            reason = declined.Reason;
+            return null;
+        }
+        var code = Vectorize(lane, function.Body, fieldOf, ct, out ScalarReason? why);
+        reason = why?.Text;
+        return code;
+    }
+
+    private static Code? Vectorize(Lane lane, IOperation root, System.Func<int, Symbols.ParamKind, string> fieldOf,
+        System.Threading.CancellationToken ct, out ScalarReason? reason)
+    {
+        reason = null;
         try
         {
-            return Translate(method, syntax, model, fieldOf, ct);
+            return Translate(lane, root, fieldOf, ct);
         }
         catch (Unsupported unsupported)
         {
@@ -229,16 +264,26 @@ internal sealed partial class Kernel
     }
 
     /// <summary>
+    /// The code of one lane: a [ForEach] method or a lambda (its parameters), whether the values it takes are a
+    /// caller's (<paramref name="Outside"/> a system: <see cref="Symbols.Classify(IParameterSymbol, bool)"/>), whether
+    /// it runs in parallel, whether it allows .NET's vector approximations (FloatMode.Fast), the model of its body and
+    /// whether that body can make structural changes.
+    /// </summary>
+    private sealed record Lane(IMethodSymbol Method, bool Outside, bool Parallel, bool Fast, SemanticModel Model, bool Stable);
+
+    /// <summary>
     /// Whether a method <see cref="Vectorize"/> leaves scalar looks meant for a vector loop, so EECS055 names the reason:
     /// it is static, takes only components (by <c>ref</c> or <c>in</c>), Maybe&lt;T&gt; of them, singletons and values (no
     /// Entity, World, span or Mut), and each component is a struct of lane-type fields only (float, double, int, uint,
     /// long, ulong, byte, sbyte, short, ushort).
     /// The reason is then about its components or its body.
     /// </summary>
-    public static bool LooksEligible(IMethodSymbol method)
+    public static bool LooksEligible(IMethodSymbol method) => method.IsStatic && LooksEligible(method, Symbols.IsRunner(method));
+
+    /// <summary><see cref="LooksEligible(IMethodSymbol)"/> for a method or a lambda whose values are a caller's when <paramref name="outside"/>.</summary>
+    public static bool LooksEligible(IMethodSymbol method, bool outside)
     {
-        if (!method.IsStatic) return false;
-        bool outside = Symbols.IsRunner(method), any = false;
+        bool any = false;
         foreach (var p in method.Parameters)
             switch (Symbols.Classify(p, outside))
             {
@@ -290,12 +335,21 @@ internal sealed partial class Kernel
     {
         if (!method.ReturnsVoid) return new Unsupported("it returns a value");
         if (method.IsGenericMethod) return new Unsupported("it is generic");
-        if (Symbols.WithBody(method, syntax, model).Item1 is { Body: null, ExpressionBody: null }) return null; // Translate: "it has no body"
-        bool outside = Symbols.IsRunner(method);
+        if (Symbols.WithBody(method, syntax, model).Item1 is { Body: null, ExpressionBody: null }) return null; // Vectorize: "it has no body"
+        return Declined(method, Symbols.IsRunner(method), Symbols.IsParallel(method));
+    }
+
+    /// <summary><see cref="Declined(IMethodSymbol, MethodDeclarationSyntax, SemanticModel)"/> for a lambda.</summary>
+    private static Unsupported? Declined(Lane lane) =>
+        lane.Method.IsGenericMethod ? new Unsupported("it is generic") // a lambda's value is dropped: LambdaPass.Discards
+            : Declined(lane.Method, lane.Outside, lane.Parallel);
+
+    private static Unsupported? Declined(IMethodSymbol method, bool outside, bool parallel)
+    {
         foreach (var p in method.Parameters)
         {
             var kind = Symbols.Classify(p, outside);
-            if (Refused(p, kind, method) is { } refused) return new Unsupported(refused);
+            if (Refused(p, kind, parallel) is { } refused) return new Unsupported(refused);
             if (kind is Symbols.ParamKind.Component or Symbols.ParamKind.Optional) return null; // its lanes decide
         }
 
@@ -307,11 +361,11 @@ internal sealed partial class Kernel
     /// None is fixable: each parameter does what the method needs (a value taken by ref may be a running index rather
     /// than a sum, so a Reduce&lt;T&gt; is not always the same method).
     /// </summary>
-    private static string? Refused(IParameterSymbol p, Symbols.ParamKind kind, IMethodSymbol method) => kind switch
+    private static string? Refused(IParameterSymbol p, Symbols.ParamKind kind, bool parallel) => kind switch
     {
         Symbols.ParamKind.Component or Symbols.ParamKind.Singleton or Symbols.ParamKind.Reduction => null,
         Symbols.ParamKind.Context => p.RefKind == RefKind.Ref ? $"it takes '{p.Name}' by ref: a vector loop reduces only into a Reduce<T>" : null,
-        Symbols.ParamKind.Optional => Symbols.IsParallel(method)
+        Symbols.ParamKind.Optional => parallel
             ? $"it takes a Maybe<{Symbols.MaybeElement(p.Type)?.Name}> and runs in parallel: an optional column has a vector loop on one thread"
             : null,
         Symbols.ParamKind.Entity or Symbols.ParamKind.Emit => null, // its uses decide (Kernel.Structural.cs)
@@ -324,17 +378,16 @@ internal sealed partial class Kernel
         _ => $"parameter '{p.Name}' is not a component, a singleton, a Reduce<T> or a value",
     };
 
-    private static Code Translate(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
-        System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct)
+    private static Code Translate(Lane lane, IOperation body, System.Func<int, Symbols.ParamKind, string> fieldOf,
+        System.Threading.CancellationToken ct)
     {
-        (syntax, model) = Symbols.WithBody(method, syntax, model); // Declined: it returns nothing and is not generic
-        if (model.GetOperation(syntax, ct) is not IMethodBodyOperation body) throw new Unsupported("it has no body");
+        var (method, model) = (lane.Method, lane.Model);
         ITypeSymbol? first = null;
         var components = new List<IFieldSymbol[]>();
         var componentTypes = new List<ITypeSymbol>();
         var wides = new List<WideLayout?>();
         var optionals = new List<IFieldSymbol[]>();
-        bool outside = Symbols.IsRunner(method);
+        bool outside = lane.Outside;
         HashSet<IParameterSymbol>? whole = null;
         Dictionary<IParameterSymbol, List<(IFieldSymbol[] Path, ISymbol[] Access)>>? touched = null;
         // A component the loop does not split (more than MaxFields lanes, a field that is not a lane, lanes of two sizes)
@@ -370,11 +423,11 @@ internal sealed partial class Kernel
                     componentTypes.Add(p.Type);
                     wides.Add(wide);
                     break;
-                case Symbols.ParamKind.Optional when !Symbols.IsParallel(method):
+                case Symbols.ParamKind.Optional when !lane.Parallel:
                     optionals.Add(Lanes(Symbols.MaybeElement(p.Type)!));
                     break;
                 default:
-                    if (Refused(p, kind, method) is { } refused) throw new Unsupported(refused);
+                    if (Refused(p, kind, lane.Parallel) is { } refused) throw new Unsupported(refused);
                     break;
             }
         }
@@ -402,7 +455,7 @@ internal sealed partial class Kernel
         // The parameters of a kernel: the main one, and one per field of a flat loop (Flat) with the same setup.
         Kernel Make(bool reductions)
         {
-            var made = new Kernel(SizeOf(first)) { _fast = Symbols.FastFloats(method), _compilation = model.Compilation, _model = model, _stable = Symbols.IsStable(method, syntax, model) };
+            var made = new Kernel(SizeOf(first)) { _fast = lane.Fast, _compilation = model.Compilation, _model = model, _stable = lane.Stable };
             made._pairs = components.Any(f => SizeOf(f[0].Type) > SizeOf(first));
             for (int i = 0, k = 0, o = 0; i < method.Parameters.Length; i++)
             {
@@ -431,7 +484,7 @@ internal sealed partial class Kernel
                 }
                 if (kind == Symbols.ParamKind.Reduction)
                 {
-                    if (reductions) made._reductions[p] = made.Reduced(p, i, fieldOf(i, kind), Symbols.FastFloats(method), model.Compilation, ct);
+                    if (reductions) made._reductions[p] = made.Reduced(p, i, fieldOf(i, kind), lane.Fast, model.Compilation, ct);
                     continue;
                 }
                 if (kind == Symbols.ParamKind.Entity)
@@ -495,7 +548,7 @@ internal sealed partial class Kernel
             }
             columns.Add(([$"__q{index}_", $"__has{index}"], loads.ToString()));
         }
-        var root = (IOperation?)body.BlockBody ?? body.ExpressionBody!;
+        var root = body;
         kernel.Statement(root, null);
         kernel.FinishChanges(method);
         // A masked word keeps the values loaded of what the method writes, and stores them back in the lanes that do not
@@ -617,7 +670,7 @@ internal sealed partial class Kernel
         void Flatten(IOperation op)
         {
             if (op is IBlockOperation block) foreach (var inner in block.Operations) Flatten(inner);
-            else if (op is not IEmptyOperation) statements.Add(op);
+            else if (op is not (IEmptyOperation or IReturnOperation { IsImplicit: true, ReturnedValue: null })) statements.Add(op); // a lambda's own end
         }
         Flatten(root);
         var groups = new List<IOperation>[fields];
@@ -817,10 +870,13 @@ internal sealed partial class Kernel
                     Alias(name, value);
                 }
                 return true;
-            case IExpressionStatementOperation { Operation: var e }:
+            case IExpressionStatementOperation or IReturnOperation { IsImplicit: true, ReturnedValue: not null }: // an expression lambda's value, dropped (LambdaPass.Discards)
+            {
+                var e = op is IExpressionStatementOperation statement ? statement.Operation : ((IReturnOperation)op).ReturnedValue!;
                 _active = And(mask, _alive);
                 if (!Deferred(e)) Assignment(e, mask);
                 return true;
+            }
             case IConditionalOperation { WhenTrue: var whenTrue, WhenFalse: var whenFalse } branch when branch.Type == null:
             {
                 string condition = Temp("m");

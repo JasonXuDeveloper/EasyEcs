@@ -22,7 +22,7 @@ namespace EasyEcs.Generator;
 /// holds the systems' names only, so an edit inside a system's body never regenerates it.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
-public sealed class SystemGenerator : IIncrementalGenerator
+public sealed partial class SystemGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -80,6 +80,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
             .SelectMany(static (all, _) => UpdateModel.Group(all!, [], entryPoints: true).Select(m => m with { One = true }))
             .WithTrackingName("ForEntityTypes");
         context.RegisterSourceOutput(entityTypes, static (spc, model) => Add(spc, model));
+
+        // world.ForEach(static (ref P p) => ...): each call intercepted by the job of its lambda (SystemGenerator.Lambdas.cs).
+        InitializeLambdas(context);
     }
 
     private static void Add(SourceProductionContext context, UpdateModel model)

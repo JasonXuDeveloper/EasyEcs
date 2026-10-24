@@ -80,7 +80,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D60](#d60-one-diagnostic-per-mistake) | One diagnostic per mistake |
 | [D61](#d61-one-pass-guard) | One guard for the calls that wait for a pass; a group prefab is not one |
 | [D62](#d62-generators-bind-outside-bodies) | Generators bind type names outside member bodies and compare symbols without strings |
-| [D63](#d63-roslyn-features) | Newer Roslyn features: interceptors not used, the rest in use or not needed |
+| [D63](#d63-roslyn-features) | Newer Roslyn features: interceptors for lambda passes only, the rest in use or not needed |
 | [D64](#d64-names-of-4-7) | The names of 4.7: a name says what the thing is |
 | [D65](#d65-buffer-pool-capacity) | The buffer pool's limit is a setting of each element type |
 | [D66](#d66-a-ref-written-on-some-rows) | A tracked component written by `ref` on some rows is a warning |
@@ -117,6 +117,9 @@ after the change on the machine of the time; they are history, not the current r
 | [D106](#d106-lock-or-cas) | The runtime synchronizes with a `Lock` or a compare-and-swap, never a locked object |
 | [D107](#d107-never-used-warnings) | `[ForEach]` and hook methods are not reported as unused |
 | [D108](#d108-aot-instruction-set) | Native AOT: the instruction set is the program's choice, `native` in the templates |
+| [D112](#d112-lambda-passes) | A lambda pass is compiled at its call into the job of a `[ForEach]` method |
+| [D113](#d113-lambda-values-not-captures) | A lambda pass is static; the values it reads are passed before it |
+| [D114](#d114-lambda-body-copied) | The lambda's body is copied into the generated file; a body that cannot be runs through its delegate |
 | [D118](#d118-fixable-reasons-and-cold-fields) | EECS055 warns when the method can be rewritten; EECS091 names the fields a frequent pass never touches |
 | [D119](#d119-no-oop-code-fix) | No code fix from object-oriented classes to components and systems: a migration guide |
 | [D120](#d120-feature-modules-and-data-events) | Not added: `[Feature]` modules and a generated reader of records; EECS092 reports records nothing clears |
@@ -1496,14 +1499,15 @@ version check reads the parse options and the module initializer's check the ass
 - **A shared receiver check for `Query` calls** in a body: needs the call bound. A `Query` or `Read` of several structs
   that are all components is taken as a World's; a name-alike call adds an unused item file, nothing else.
 
-## D63. Newer Roslyn features: interceptors not used, the rest in use or not needed [#d63-roslyn-features]
+## D63. Newer Roslyn features: interceptors for lambda passes only, the rest in use or not needed [#d63-roslyn-features]
 
 **Decision.** The generators use `ForAttributeWithMetadataName` (`[ForEach]`), implementation output for what user code
-never names (system code, `TypeRegistry`), C# 14 extension members and generic attributes. They use no interceptors
-and no embedded attribute definitions.
+never names (system code, `TypeRegistry`), C# 14 extension members and generic attributes. Interceptors replace one
+call only, a lambda pass ([D112](#d112-lambda-passes)), where the call's argument is a body to compile and not a value
+to compute. No embedded attribute definitions.
 
 **Why.**
-- **Interceptors have nothing to remove.** `entity.Get<T>()`, `Has<T>()`, `Set<T>()`, `CreateEntity(new A(), new B())`
+- **Elsewhere interceptors have nothing to remove.** `entity.Get<T>()`, `Has<T>()`, `Set<T>()`, `CreateEntity(new A(), new B())`
   and `world.Index<T, TKey>()` read a static readonly field per type or signature (`ComponentType<T>.Bit`,
   `ComponentSignature<…>`), a constant once the JIT tiers up: an intercepted body would be the same code. Systems
   register through a module initializer, with no reflection to replace.
@@ -2694,6 +2698,93 @@ such as `x86-64-v3` (AVX2) or `x86-64-v4` (AVX-512) for a fleet. The package set
 **Considered.**
 - **Leaving the default:** the AVX-512 loops never run under Native AOT.
 - **Setting it in the package's build files:** a library would choose the CPUs its users' programs run on.
+
+## D112. A lambda pass is compiled at its call into the job of a `[ForEach]` method [#d112-lambda-passes]
+
+**Decision.** `world.ForEach(dt, static (ref Position p, in Velocity v, float dt) => p.Value += v.Value * dt)` and
+`world.ForEachParallel(…)` run a pass written inside a method. The core declares the calls with a `Delegate` last
+parameter and up to four values before it, and throws when it is reached. The generator intercepts every call it can
+compile (a C# interceptor, `[InterceptsLocation]`, written per file into the namespace `EasyEcs.Generated`, which the
+package's build file adds to `InterceptorsNamespaces`). The interceptor runs the struct job a `[ForEach]` method with
+the lambda's parameters and body gets, with the same filter, access, reductions and vector loop. The lambda's
+attributes are its filters (`[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`). A change
+filter looks back from a tick passed first, which the lambda does not take: `world.ForEach(since, [Changed<Health>]
+static (in Health h) => …)`, as a runner method takes `since`. A call the generator cannot compile is an error
+(EECS095), so the throw is never reached in code that builds clean.
+
+**Why.**
+- **A pass used once in one method does not need a name.** A `[ForEach]` method lives in a type of its own, away
+  from the code that runs it; a pass that belongs to one handler reads better where it runs.
+- **One job form, so one speed.** The lambda is compiled by the code that compiles `[ForEach]` methods, so it gets
+  the same job and the same vector loop (`Kernel` takes the lambda's body as it takes a method's). It is not a
+  second, slower way to iterate.
+- **Interceptors are source only.** The call stays plain C#; the generated file replaces it at compile time. No
+  reflection, nothing at run time, Native AOT unchanged.
+
+**Considered.**
+- **`foreach (var (p, v) in world.Query<P, V>())` compiled into a job:** a `foreach` is a statement, not a call, so no
+  interceptor can replace it; rewriting it would need the user's code to change, which generators cannot do.
+- **Unity's `Entities.ForEach`:** a lambda compiled by an IL post-processor, deprecated by Unity for its compile
+  times and its many special cases. Interceptors keep the compiler's own pipeline, and the rules here are those of
+  `[ForEach]` methods, nothing more.
+- **Change filters looking back from the system's last run:** a pass written in a method has no system, so no
+  `LastRunTick` of its own. The caller knows which tick it means (a system's `LastRunTick + 1`, a tick it saved), so
+  it passes that tick first; a filter without one is EECS095.
+- **`Maybe<T>`, tiles and spans:** refused (EECS095); they need the batch and masked job forms, which a lambda does
+  not take yet.
+
+## D113. A lambda pass is static; the values it reads are passed before it [#d113-lambda-values-not-captures]
+
+**Decision.** The lambda must be `static`. A value it needs from the method (`dt`, a rate) is passed before it and
+taken as a parameter after its components, in order: `world.ForEach(dt, static (ref P p, float dt) => …)`. The job
+holds the values as fields, as it holds a `[ForEach]` method's values. A capturing lambda is EECS095, with a fix that
+passes what it captures (locals and parameters it only reads, up to four values).
+
+**Why.**
+- **An interceptor cannot skip an argument.** The call's arguments are evaluated before the interceptor runs, so a
+  capturing lambda allocates its closure and its delegate on every call
+  ([D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references)): measured 88 B per call, the cost
+  `[ForEach]` exists to remove.
+- **A static lambda's delegate is cached by the compiler.** Passing it costs a static field read, nothing allocated.
+- **The values are the job's fields.** A value passed before the lambda is what a `[ForEach]` method's value
+  parameter is; the job reads it from a register, not through a closure object per row.
+
+**Considered.**
+- **Reading the captured variables out of the closure:** the closure is allocated before the interceptor sees it.
+- **Allowing captures with a Warning:** 88 B and a delegate call per row behind a call that looks free.
+
+## D114. The lambda's body is copied into the generated file; a body that cannot be runs through its delegate [#d114-lambda-body-copied]
+
+**Decision.** The generator copies the lambda's body into the method its job calls, with every type, namespace and
+static member qualified and constants written as their values (a private constant too). A body that names what code
+in another file cannot reach (a private or protected member of the type around the call, a file-local type, a type
+parameter) runs through its delegate instead: the job calls the static lambda, kept in a static field, once per row,
+with no vector loop. That case is a Warning (EECS096), with a fix that makes a private member declared in the same
+file internal. A copied body that stays scalar is reported with its reason (EECS097, Info), as EECS055 reports a
+method's.
+
+**Why.**
+- **A copied body is a `[ForEach]` method.** The JIT inlines it into the job's row loop and `Kernel` turns it into a
+  vector loop; a delegate call per row is neither.
+- **The fallback keeps the code working.** A private helper is common; the call still runs, the warning says what it
+  costs and how to remove the cost.
+
+**Considered.**
+- **An error for an unreachable body:** a correct call refused for its speed.
+- **`UnsafeAccessor` for private members:** fields and methods only, not types, and one accessor per name.
+
+**Numbers.** BenchmarkDotNet, two rounds (load 2.2 and 2.8 when they started), one pass over 1,000 / 100,000
+entities, the [ForEach] method, the lambda pass and the hand-written job, 0 B every way (`LambdaPassBenchmark`):
+- **Scalar body** (an integer division): method 2,155, 2,177 ns / 220.6, 209.2 µs; lambda 2,155, 2,139 ns / 219.1,
+  208.3 µs; hand-written job 2,094, 2,107 ns / 211.1, 210.2 µs. One speed, within the error.
+- **Vector body** (a multiply-add): method 68.4, 71.6 ns / 11.7, 11.5 µs; lambda 72.0, 69.9 ns / 11.7, 11.2 µs; the
+  hand-written job, one row at a time, 787, 759 ns / 74.7, 77.7 µs.
+- **The machine code** of the lambda's job at Tier1 (`tools/jitdisasm.sh`) is the method's: the same vector loop,
+  no call in it.
+- **The generator** (`GeneratorBenchmark`, base against this change, two rounds, interleaved): `EditMethodBody`
+  207.5, 211.3 -> 226.3, 224.3 ms and 195.7, 201.5 -> 241.9, 190.8 ms (one namespace), all within the error of
+  25 to 52 ms, 0.1 to 0.3 MB more per edit; `CompileAndAnalyze` within the error, 2 % more allocated with one
+  namespace (993 -> 1,012 MB).
 
 ## D118. EECS055 warns when the method can be rewritten; EECS091 names the fields a frequent pass never touches [#d118-fixable-reasons-and-cold-fields]
 

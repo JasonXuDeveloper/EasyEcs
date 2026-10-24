@@ -26,7 +26,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
             "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS055", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071",
-            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS088", "EECS090", "EECS091", "CS0246", "CS0305", "CS0592",
+            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "CS0246", "CS0305", "CS0592",
             "CS0200", "CS0272", "CS1501", "CS1729", "CS1739");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
@@ -242,6 +242,15 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     break;
                 case "EECS023" when node.FirstAncestorOrSelf<AttributeSyntax>() is { Parent: AttributeListSyntax list } attribute:
                     Register(context, diagnostic, "Remove the filter", root, list.Attributes.Count == 1 ? list : attribute, null);
+                    break;
+                case "EECS095" when diagnostic.Properties.TryGetValue("CapturedValues", out var captured) && captured != null:
+                    context.RegisterCodeFix(CodeAction.Create($"Pass {captured.Replace(",", ", ")} before a static lambda",
+                        token => PassCaptures(context.Document, diagnostic, captured, token), diagnostic.Id), diagnostic);
+                    break;
+                case "EECS096" when diagnostic.AdditionalLocations.FirstOrDefault() is { } declared
+                                    && root.FindNode(declared.SourceSpan, getInnermostNodeForTie: true).FirstAncestorOrSelf<MemberDeclarationSyntax>() is { } privateMember
+                                    && MakeInternal(root, declared) is { } internalMember:
+                    Register(context, diagnostic, "Make it internal, so the body is copied", root, privateMember, internalMember);
                     break;
             }
         }

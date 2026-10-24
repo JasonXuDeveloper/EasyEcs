@@ -13,7 +13,8 @@ ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove,
                              IForEachMasked, ForEach/ForEachEntity/ForEachBatch/ForEachMasked/ForEachParallel/
                              ForEachEntityParallel/ForEachBatchParallel with their row loops, CollectIds,
                              Query/Count/Any, QueryItem/QueryEnumerator, Filters.g.cs: QueryFilter.WithAny /
-                             ChangedAny / RemovedAny and their attributes), one template each
+                             ChangedAny / RemovedAny and their attributes), one template each; World.Lambdas.g.cs:
+                             World.ForEach / ForEachParallel(values..., Delegate), the calls lambda passes intercept
 SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                              the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] /
                              [Removed<T>] -> Since(LastRunTick + 1) and a read of T; Mut<T> -> a write stamped per
@@ -25,6 +26,15 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              assembly the set __EasyEcsSystems: one Add per system and per closed generic system any
                              API names (AddSystem<G<P>>, [UpdateAfter<G<P>>], ...), a switch per hook; no system
                              needs partial, its methods are reached through UnsafeAccessor)
+SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(values..., static (ref P p, ...) => ...)
+                             -> an interceptor per call ([InterceptsLocation], one file per source file in the namespace
+                             EasyEcs.Generated) running the job a [ForEach] method with the lambda's parameters and body
+                             gets (body copied with names qualified and constants inlined; the static delegate per
+                             row where it cannot be: EECS096)
+LambdaPass.cs                what a lambda pass call is, read once for the generator and the analyzer: Read (the call,
+                             its values, lambda, filters; a change filter's tick first), Problem (EECS095's reason and
+                             the captured values), Unreachable (EECS096's reason), IsStable, Discards (an expression
+                             lambda's dropped value)
 ComponentGenerator.cs        C# 14 extension members per component / singleton: entity.X (ref T; ref readonly for
                              tracked or indexed), HasX, TryGetX, GetOrAddX, SetX(ctor args), SetXIfChanged, RemoveX,
                              tags IsX,
@@ -53,7 +63,8 @@ PartGenerator.cs             [Sum]..[Any], [IndexKey]/[UniqueKey], [Group] -> a 
                              IIndexed<K>.Key, IGroup.Group); Parts.cs: the models and Problems read once for the
                              generator and the analyzer (other generators read keys and groups through Symbols)
 Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (Kernel.Vectorize: the loop, or the
-                             reason EECS055 / EECS056 report, as a ScalarReason: fixable or inherent);
+                             reason EECS055 / EECS056 report, as a ScalarReason: fixable or inherent; a lambda pass's
+                             body through the same Translate, with its Lane);
                              Kernel.Narrow.cs: byte / sbyte / short / ushort lanes (int values followed as low bits and an interval, saturating idioms); Kernel.Struct.cs:
                              struct values (Vector2/3/4 fields, new T(...), with) as one vector per lane;
                              Kernel.Wide.cs: components of up to 16 words on AVX-512 (fields gathered by a pruned
@@ -88,6 +99,9 @@ EasyEcsAnalyzer.Parameters.cs  EECS086, EECS087, EECS089: a [ForEach] method doi
 EasyEcsAnalyzer.Layout.cs    EECS091 (compilation end): a component of 32 bytes or more whose fields no frequent
                              [ForEach] pass touches are half of it (ColdFieldPasses: the fields each pass names,
                              collected from AnalyzeBody; components EECS055 already advises to split are left to it)
+EasyEcsAnalyzer.Lambdas.cs   EECS095-097: a lambda pass the generator cannot compile (Error, it would throw; the fix
+                             passes captured values before a static lambda), one run through its delegate (the fix
+                             makes the private member internal), one left without a vector loop (Info, Kernel's reason)
 EasyEcsAnalyzer.Records.cs   EECS092 (compilation end): an Emit<T> whose Emitted<T> no code of the compilation clears
                              (a public record type of a library is left to the assemblies using it)
 Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)

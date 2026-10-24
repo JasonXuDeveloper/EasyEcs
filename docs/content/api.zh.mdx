@@ -159,6 +159,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | API | 复杂度 | 说明 |
 | --- | --- | --- |
 | `[ForEach]` 方法 / `world.ForEach<T1..Tn, TJob>(ref job, filter)` | O(M + S) | 最快：结构体 job，没有委托 |
+| `world.ForEach(values…, static (ref P p, …) => …)` / `ForEachParallel(…)` | O(M + S) | lambda 遍历：生成器把每处调用编译成同参数、同方法体的 `[ForEach]` 方法会得到的 job（包括向量循环）；lambda 前最多 4 个值，成为 job 的字段（变更过滤的 tick 放在最前面）；0 B；调用没被编译时抛异常（EECS095） |
 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` | O(M + S) | job 还会拿到 `Entity` |
 | `entity.Run<T1..Tn, TJob>(ref job)` / `Run(ref job, filter)` | O(n)，过滤条件每个组件再加 O(1) | 单个实体；实体失效、缺组件或被过滤掉时返回 false；job 做结构变更后 ref 仍然有效 |
 | `entity.Run<T1..Tn, TJob>(ref job, in filter, since)` | O(n)，再加 O(过滤条件提到的组件数) | 同 `Run(ref job, filter)`，只是用 `since` 作过滤条件的 tick：和 `filter.Since(since)` 的检查一样，但不拷贝过滤条件（一个 `static readonly` 过滤条件，`[ForEntity, Changed<T>]` 的入口就这样传） |
