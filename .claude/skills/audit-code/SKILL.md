@@ -25,6 +25,10 @@ code duplicated across projects, a project reaching into another's internals.
 - **Non-DRY code**: the same logic in two places (two loops, two parsers, two setup blocks, two copies of a test
   fixture, two shell scripts doing one job). Merge into one shared helper with thin wrappers; generate what differs
   only by arity or type.
+- **Not uniform**: one problem solved two ways (two pooling schemes, two styles of throw helper, two ways to walk a
+  table, two setup idioms in tests or samples, two benchmark harness patterns). Pick the better one, move every site
+  to it, and say which in the owning skill so new code follows it. The public API side (call families, overload
+  sets, declarations) is `audit-core` and `audit-generator` (declaration surface).
 - **Dead code**: members, files, options, scripts and test helpers nothing uses; commented-out code; flags no caller
   sets. Delete them (pre-1.0: no `[Obsolete]`).
 - **God files and god methods**: a file that mixes responsibilities, a method that does several jobs. Split by
