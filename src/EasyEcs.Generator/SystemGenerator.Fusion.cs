@@ -273,6 +273,16 @@ public sealed partial class SystemGenerator
         var owner = model.Owner;
         var first = model.Methods[start];
         string forEach = "__ForEach" + owner.TypeParameters, name = FusedName(model, start, count), local = $"fused{start}";
+        // A walk in blocks of rows pays only above the cache (SystemCode.FusedRows): fewer rows run each pass on its own,
+        // as if not fused. Per-row and parallel walks are fused at any size.
+        bool sized = !FusedPerRow(model, start, count) && !first.Parallel;
+        if (sized)
+        {
+            sb.Append($"        if (world.Count<{string.Join(", ", FusedQuery(model, start, count))}>(in {forEach}.{name}Filter) < global::EasyEcs.SystemCode.FusedRows) // in cache: each pass on its own\n        {{\n");
+            for (int k = 0; k < count; k++) EmitMethodPass(sb, model, start + k);
+            sb.Append("        }\n        else\n        {\n");
+        }
+
         var members = Enumerable.Range(0, count).Select(k =>
             $"j{k} = new {forEach}.{model.Methods[start + k].Name}Job{start + k}{Fields(model.Methods[start + k], "world")}");
         sb.Append($"        var {local} = new {forEach}.{name} {{ {string.Join(", ", members)} }};\n");
@@ -292,6 +302,7 @@ public sealed partial class SystemGenerator
         string loop = FusedInterface(model, start, count).Substring(1) + (first.Parallel ? "Parallel" : "");
         sb.Append($"        world.{loop}<{string.Join(", ", FusedQuery(model, start, count))}, {forEach}.{name}>(ref {local}{filter}{first.Chunks}); // one walk: {string.Join(", then ", Enumerable.Range(start, count).Select(i => model.Methods[i].Name))} per {(FusedPerRow(model, start, count) ? "row" : "block of rows")}\n");
         for (int k = 0; k < count; k++) EmitReductions(sb, model.Methods[start + k], "world", $"{local}.j{k}", "        ");
+        if (sized) sb.Append("        }\n");
     }
 
     // ---------------- two systems in one walk ----------------
@@ -448,14 +459,16 @@ public sealed partial class SystemGenerator
         string name = FusedName(both, 0, both.Methods.Length);
         sb.Append("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
         sb.Append($"internal static class {pair.CodeName}\n{{\n");
-        sb.Append($"    /// <summary>{pair.First.Owner.FlatName}, then {pair.Second.Owner.FlatName}, as one walk: the second's writes stamped at <paramref name=\"tick\"/>.</summary>\n");
-        sb.Append($"    public static void Update({world} world, {handle} first, {handle} second, ulong tick)\n    {{\n");
+        sb.Append($"    /// <summary>{pair.First.Owner.FlatName}, then {pair.Second.Owner.FlatName}, as one walk: the second's writes stamped at <paramref name=\"tick\"/>; false (nothing run) below SystemCode.FusedRows rows.</summary>\n");
+        sb.Append($"    public static bool Update({world} world, {handle} first, {handle} second, ulong tick)\n    {{\n");
+        string query = string.Join(", ", FusedQuery(both, 0, both.Methods.Length));
+        sb.Append($"        if (world.Count<{query}>(in __ForEach.{name}Filter) < global::EasyEcs.SystemCode.FusedRows) return false; // in cache: each pass on its own\n");
         var members = Enumerable.Range(0, both.Methods.Length).Select(k => $"j{k} = new __ForEach.{both.Methods[k].Name}Job{k}{Fields(both.Methods[k], "world")}");
         sb.Append($"        var fused = new __ForEach.{name} {{ {string.Join(", ", members)}, Tick = tick }};\n");
         string loop = FusedInterface(both, 0, both.Methods.Length, second).Substring(1);
         sb.Append($"        world.{loop}<{string.Join(", ", FusedQuery(both, 0, both.Methods.Length))}, __ForEach.{name}>(ref fused, in __ForEach.{name}Filter);\n");
         for (int k = 0; k < both.Methods.Length; k++) EmitReductions(sb, both.Methods[k], "world", $"fused.j{k}", "        ");
-        sb.Append("    }\n}\n");
+        sb.Append("        return true;\n    }\n}\n");
         context.AddSource($"{pair.First.Owner.HintName}+{pair.Second.Owner.HintName}.Fusion.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
     }
 }

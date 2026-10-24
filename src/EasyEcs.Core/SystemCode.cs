@@ -63,9 +63,10 @@ public interface ISystemSet
     /// <summary>
     /// Runs the two systems of fusion <paramref name="fusion"/> (<see cref="SystemDeclarations.Fuse"/>) as one walk (pass
     /// fusion): <paramref name="first"/>'s [ForEach] methods, then <paramref name="second"/>'s, on each block of rows,
-    /// the second's writes stamped with <paramref name="secondTick"/>. Sets without fusions run none.
+    /// the second's writes stamped with <paramref name="secondTick"/>. False when it ran nothing: a walk of fewer rows
+    /// than <see cref="SystemCode.FusedRows"/> (each system then runs its own code), or a set without fusions.
     /// </summary>
-    static virtual void RunFused(World world, int fusion, SystemHandle first, SystemHandle second, ulong secondTick) { }
+    static virtual bool RunFused(World world, int fusion, SystemHandle first, SystemHandle second, ulong secondTick) => false;
 }
 
 /// <summary>The systems an <see cref="ISystemSet"/> declares (<see cref="ISystemSet.Declare"/>). Called by generated code only.</summary>
@@ -274,6 +275,14 @@ public static unsafe class SystemCode
     public static void Visit(SystemHandle system, int entities) => system.Row.Visited += entities;
 
     private const string Blamed = "EasyEcs.FusedSystem";
+
+    /// <summary>
+    /// The rows from which passes of vector or batch loops run as one walk (pass fusion, per block of 256 rows); a walk
+    /// of fewer rows runs each pass on its own. Below it the rows of both passes stay in the L2 cache between them, and
+    /// the blocks only add their bookkeeping (FusionBenchmark: 1.04-1.07 of the passes apart at 10,000 rows, 0.98-1.03 at
+    /// 100,000, 0.55-0.64 from 1,000,000). Per-row walks (scalar methods) and parallel walks fuse at any size.
+    /// </summary>
+    public const int FusedRows = 1 << 17;
 
     /// <summary>
     /// The exception filter of a walk that runs two systems (<see cref="ISystemSet.RunFused"/>): notes that system

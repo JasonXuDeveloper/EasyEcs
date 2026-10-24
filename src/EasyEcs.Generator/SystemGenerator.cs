@@ -164,10 +164,10 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         sb.Append("    }\n");
         if (known.Length > 0)
         {
-            sb.Append($"\n    public static void RunFused({world} world, int fusion, {handle} first, {handle} second, ulong secondTick)\n    {{\n        switch (fusion)\n        {{\n");
+            sb.Append($"\n    public static bool RunFused({world} world, int fusion, {handle} first, {handle} second, ulong secondTick)\n    {{\n        switch (fusion)\n        {{\n");
             for (int i = 0; i < known.Length; i++)
-                sb.Append($"            case {i}: {known[i].Code}.Update(world, first, second, secondTick); return;\n");
-            sb.Append("        }\n    }\n");
+                sb.Append($"            case {i}: return {known[i].Code}.Update(world, first, second, secondTick);\n");
+            sb.Append("        }\n\n        return false;\n    }\n");
         }
         foreach (var hook in new[] { "Update", "Create", "Destroy" })
         {
@@ -423,18 +423,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 continue;
             }
 
-            var method = model.Methods[i];
-            string job = $"{forEach}.{method.Name}Job{i}", filterName = $"{forEach}.{method.Name}Filter{i}";
-            // [Changed<T>] / [Removed<T>]: rows written (or that lost T) since this system last ran.
-            string filter = method.Since ? $", {filterName}.Since(system.LastRunTick + 1)" : $", in {filterName}";
-            string whole = filter;
-            if (method.Slices > 1) filter = method.Sliced(filterName, $"(int)(system.RunCount % {method.Slices})"); // this run's slice
-            // WorldOptions.MeasureSystems: the entities the pass matches as it starts (SystemStats.LastEntities); one
-            // field test per pass otherwise, nothing in the row loop. Count takes no slice: a sliced pass reports its share.
-            string count = $"world.Count<{method.ComponentTypes}>({(whole.Length == 0 ? "" : whole.Substring(2))})";
-            if (method.Slices > 1) count = $"{count} / {method.Slices}";
-            sb.Append($"        if (global::EasyEcs.SystemCode.Measuring(world)) global::EasyEcs.SystemCode.Visit(system, {count});\n");
-            EmitPass(sb, method, forEach, i, "world", $"job{i}", filter, whole, "        ");
+            EmitMethodPass(sb, model, i);
         }
 
         sb.Append("    }\n\n");
@@ -450,6 +439,26 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         sb.Append("    public static string[] Loops => __loops;\n\n");
         EmitAccess(sb, model);
         sb.Append("}\n");
+    }
+
+    /// <summary>The pass of method <paramref name="i"/> of the system's Update, on its own (no other method in its walk).</summary>
+    private static void EmitMethodPass(StringBuilder sb, UpdateModel model, int i)
+    {
+        string forEach = "__ForEach" + model.Owner.TypeParameters;
+        {
+            var method = model.Methods[i];
+            string job = $"{forEach}.{method.Name}Job{i}", filterName = $"{forEach}.{method.Name}Filter{i}";
+            // [Changed<T>] / [Removed<T>]: rows written (or that lost T) since this system last ran.
+            string filter = method.Since ? $", {filterName}.Since(system.LastRunTick + 1)" : $", in {filterName}";
+            string whole = filter;
+            if (method.Slices > 1) filter = method.Sliced(filterName, $"(int)(system.RunCount % {method.Slices})"); // this run's slice
+            // WorldOptions.MeasureSystems: the entities the pass matches as it starts (SystemStats.LastEntities); one
+            // field test per pass otherwise, nothing in the row loop. Count takes no slice: a sliced pass reports its share.
+            string count = $"world.Count<{method.ComponentTypes}>({(whole.Length == 0 ? "" : whole.Substring(2))})";
+            if (method.Slices > 1) count = $"{count} / {method.Slices}";
+            sb.Append($"        if (global::EasyEcs.SystemCode.Measuring(world)) global::EasyEcs.SystemCode.Visit(system, {count});\n");
+            EmitPass(sb, method, forEach, i, "world", $"job{i}", filter, whole, "        ");
+        }
     }
 
     /// <summary>The call of the system's <paramref name="kind"/> hook, if it has one: its parameters in its order.</summary>

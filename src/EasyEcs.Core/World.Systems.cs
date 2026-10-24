@@ -273,11 +273,10 @@ public sealed partial class World
                 continue;
             }
 
-            if ((uint)(i + 1) < (uint)fused.Length && fused[i] >= 0 && world.Runs(systems[i + 1], update) is { IsAlive: true } next)
+            if ((uint)(i + 1) < (uint)fused.Length && fused[i] >= 0 && world.Runs(systems[i + 1], update) is { IsAlive: true } next
+                && world.RunFused<TSet>(fused[i], handle, next, (uint)(i + 1) < (uint)starts.Length && starts[i + 1]))
             {
-                // The next system shares this one's walk (it is due and enabled too): one pass for both.
-                world.RunFused<TSet>(fused[i], handle, next, (uint)(i + 1) < (uint)starts.Length && starts[i + 1]);
-                i++;
+                i++; // the next system shared this one's walk (it is due and enabled too): one pass for both
                 continue;
             }
 
@@ -308,14 +307,16 @@ public sealed partial class World
     /// Two systems in one walk (fusion <paramref name="fusion"/> of set <typeparamref name="TSet"/>): the second one's
     /// writes are stamped with the tick of its own stage (<paramref name="nextStage"/>: the tick moves on between them),
     /// an exception disables the system whose method threw (the other keeps what it did on the rows walked so far), and
-    /// each counts a run.
+    /// each counts a run. False when the walk ran nothing (too few rows, <see cref="SystemCode.FusedRows"/>): each
+    /// system then runs its own code.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void RunFused<TSet>(int fusion, SystemHandle first, SystemHandle second, bool nextStage) where TSet : struct, ISystemSet
+    private bool RunFused<TSet>(int fusion, SystemHandle first, SystemHandle second, bool nextStage) where TSet : struct, ISystemSet
     {
+        bool ran = true;
         try
         {
-            TSet.RunFused(this, fusion, first, second, nextStage ? _changeTick + 1 : _changeTick);
+            ran = TSet.RunFused(this, fusion, first, second, nextStage ? _changeTick + 1 : _changeTick);
         }
         catch (Exception e) when (_options.SystemErrors == SystemErrorPolicy.Disable)
         {
@@ -323,10 +324,15 @@ public sealed partial class World
         }
         finally
         {
-            Ran(first);
-            if (nextStage) _changeTick++;
-            Ran(second);
+            if (ran)
+            {
+                Ran(first);
+                if (nextStage) _changeTick++;
+                Ran(second);
+            }
         }
+
+        return ran;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
