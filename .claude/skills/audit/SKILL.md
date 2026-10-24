@@ -1,6 +1,8 @@
 ---
 name: audit
 description: Run an audit round of EasyEcs (core, generators, analyzer, performance, naming, docs) with parallel agents in worktrees - code first, docs last - then triage, merge and verify. Use when asked to review the codebase for redundancy, design problems, missing generated forms or analyzer rules, performance or doc gaps, or to "do another round".
+metadata:
+  internal: true
 ---
 
 # Audit round
@@ -15,7 +17,7 @@ One round = parallel audits, each in its own worktree and branch, then triage an
 | `audit-generator` | `src/EasyEcs.Generator` generators: Arity, Component, System, Part (+ `Parts.cs`), `Kernel*.cs`, `Code.cs`, `EquatableArray.cs` | what users still write twice, plain forms to emit fast, generator speed |
 | `audit-analyzer` | `EasyEcsAnalyzer*.cs`, `UnusedSuppressor.cs`, `Symbols.cs`, `Uses.cs`, `Threads.cs`, `src/EasyEcs.CodeFixes` | missing rules (wrong, costly, hand-written code), code fixes, overlaps, false positives |
 | `audit-code` | `tools/`, `tests/` structure, `benchmarks/` harness, `samples/`, `templates/`, `demo/`, `.github/` and `docs/scripts/`, the seams between projects | coupling, non-DRY code, dead code, god files, layering, unclear names and comments |
-| `audit-docs` | `docs/content`, README, `docs/public/easyecs-rules.md`, samples READMEs | every part of each feature page, stale names, examples, duplication, en/zh |
+| `audit-docs` | `docs/content`, README, `skills/easyecs/SKILL.md` (the public skill; `bun run sync:rules` copies it to `docs/public/easyecs-rules.md`), samples READMEs | every part of each feature page, stale names, examples, duplication, en/zh |
 | `audit-perf` | no files: research, prototypes in its own worktree | the next performance win (Burst, CUDA, stencil, OpenMP, MPI, OS, .NET 10), proven with BenchmarkDotNet |
 | `audit-naming` | every name: a report; internal, test, example and docs renames applied in their own commit | ambiguous, wrong or inconsistent names in code, examples and docs; public renames wait for the owner |
 

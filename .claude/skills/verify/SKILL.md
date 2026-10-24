@@ -1,6 +1,8 @@
 ---
 name: verify
 description: The full EasyEcs gate before merging to master - build, tests, doc fences, API reference, docs site, samples, templates, AOT, live demo - then landing on master and how the owner cuts a release. Use before any merge or push to master, after merging audit branches, and before a release.
+metadata:
+  internal: true
 ---
 
 # Verify

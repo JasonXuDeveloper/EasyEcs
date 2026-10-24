@@ -1,6 +1,8 @@
 ---
 name: audit-docs
 description: Audit and write the EasyEcs docs (docs/content en+zh, README, rules file, samples) - every part of each feature page (when to use it, the recommended generated form, the fast form, costs and complexity, pitfalls, best practices), every place a feature must appear, stale names, exemplary examples, duplication, en/zh drift. Use once the code is final (the docs pass) and before merging to master.
+metadata:
+  internal: true
 ---
 
 # Docs audit
@@ -53,7 +55,7 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/CLAUDE.md` first.
 - The project's own docs never mention other products that use it.
 - **Every feature is everywhere it belongs** (`feature`, part 7): its guide page; `features.mdx` and
   the comparison tables when peers differ; `cheat-sheet`, `glossary`, `api.mdx` (complexity) and the generated
-  `reference/` (ApiDocs, zh entries); `analyzer.mdx` for its rules; `docs/public/easyecs-rules.md`; changelog, README
+  `reference/` (ApiDocs, zh entries); `analyzer.mdx` for its rules; `skills/easyecs/SKILL.md` (the public skill; `bun run sync:rules` copies it to `docs/public/easyecs-rules.md`); changelog, README
   "What's new", migration for a breaking change; a decision record for every non-obvious choice and dropped idea;
   the roadmap; the battle server (`BattleServer.cs` regions + `example.mdx` walkthrough) and the samples where it
   belongs, as exemplary code; CLAUDE.md's layout.

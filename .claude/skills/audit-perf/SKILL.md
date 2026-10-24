@@ -1,6 +1,8 @@
 ---
 name: audit-perf
 description: Look for the next performance win in EasyEcs - borrow from Burst, CUDA, stencil codes, OpenMP, MPI, OS schedulers, databases, HPC runtimes (Halide, Kokkos, TBB, Legion), LLM serving (vLLM) and newer .NET (10) features, find where the runtime or the generated code leaves speed on the table, and prove every change with BenchmarkDotNet. Use for a performance round, before a release, or when asked to "optimize further" or to research an idea.
+metadata:
+  internal: true
 ---
 
 # Performance research and audit

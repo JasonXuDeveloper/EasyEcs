@@ -1,6 +1,8 @@
 ---
 name: audit-generator
 description: Audit the EasyEcs source generators (ArityGenerator, ComponentGenerator, SystemGenerator, PartGenerator and the Kernel vector loops) on their three jobs - generate what users would write twice, turn the plain form users write into the fast one (vector loops, per-chunk parameters, schedule), and stay fast on every keystroke (incremental best practices, caching, newer Roslyn features). Use when changing a generator, adding a generated form, or reviewing IDE/build performance.
+metadata:
+  internal: true
 ---
 
 # Generator audit
@@ -46,7 +48,7 @@ record a dropped one.
   measurements instead of by hand (autotuning).
 - **Hot/cold layout split**: fields a pass never reads moved out of the column it walks (measured access).
 - **Migration**: a code fix from object-oriented code (a class with update methods) to components and systems, and an
-  AI migration guide (`docs/public/easyecs-rules.md`).
+  AI migration guide in the public skill (`skills/easyecs/SKILL.md`).
 
 ## Vector loops (`Kernel*.cs`)
 

@@ -1,6 +1,8 @@
 ---
 name: audit-core
 description: Audit src/EasyEcs.Core for redundant designs, duplicated logic, coupling, lifecycle bugs, thread-safety, unbounded memory and hot-path cost, and fix what is proven. Use for a core review round or before a release.
+metadata:
+  internal: true
 ---
 
 # Core audit

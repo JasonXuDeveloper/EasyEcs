@@ -1,6 +1,8 @@
 ---
 name: audit-naming
 description: Audit every name in EasyEcs - public API, generated members, attributes, analyzer descriptors, internal and private code (types, methods, fields, locals, files, projects), tests and benchmarks, samples, templates, the demo, docs prose, headings, anchors and examples' entities and components, and the Chinese terms - for ambiguity, wrong meaning, ECS convention and consistency. Use in every round, and on every new feature before it merges. Report first; public renames need the owner's approval.
+metadata:
+  internal: true
 ---
 
 # Naming audit
