@@ -23,6 +23,8 @@ namespace EasyEcs.Benchmark;
 /// pattern) are the calls, conversions and masks a vector loop takes. <c>Tally</c> (an int count, sum, Min and Max) and
 /// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order;
 /// <c>Cycle</c> writes heat on both branches and counts one, over whole vectors and over <c>_holes</c> (masked words).
+/// <c>Ratio</c> divides ints by constants (8: shifts, 7: doubles) and a float by 2 (a product), <c>Share</c> by a divisor
+/// per row (doubles), over <c>_ratios</c>.
 /// <c>Wealth</c> sums the int column into a long and <c>Accrue</c> adds it to a column of longs: lanes of two sizes, each
 /// long a pair of vectors per step (Kernel.Pairs.cs).
 /// <c>Optional</c> takes a <c>Maybe&lt;Mass&gt;</c> over <c>_holes</c> (a lane mask of the rows that have it).
@@ -40,7 +42,7 @@ public partial class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _fields, _gaps, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger;
+    private World _world, _ratios, _fields, _gaps, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger;
 
     [GlobalSetup]
     public void Setup()
@@ -59,6 +61,12 @@ public partial class KernelBenchmark
         _ledger.Reserve<Ticks, Balance>(Entities);
         for (int i = 0; i < Entities; i++)
             _ledger.CreateEntity(new Ticks { Value = random.Next(int.MinValue, int.MaxValue) }, new Balance { Value = random.NextInt64() });
+
+        _ratios = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _ratios.Reserve<Ticks, Den, Heat>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _ratios.CreateEntity(new Ticks { Value = random.Next(-1_000_000, 1_000_000) }, new Den { Value = random.Next(1, 100) * (random.Next(2) * 2 - 1) },
+                new Heat { Value = (float)random.NextDouble() * 200 - 50 });
 
         _holes = Holes(Entities, i => i % 3 == 0);
         _gaps = Gaps(Entities);
@@ -169,6 +177,27 @@ public partial class KernelBenchmark
 
     [Benchmark]
     public void StepGenerated() => Kernels.Step(_world);
+
+    // Integer division: by constants (shifts for 8, doubles for 7) and by a divisor per row (doubles, its 0 lanes guarded).
+    [Benchmark]
+    public void RatioScalar()
+    {
+        var job = new RatioRows();
+        _ratios.ForEach<Ticks, Den, Heat, RatioRows>(ref job);
+    }
+
+    [Benchmark]
+    public void RatioGenerated() => Kernels.Ratio(_ratios);
+
+    [Benchmark]
+    public void ShareScalar()
+    {
+        var job = new ShareRows();
+        _ratios.ForEach<Ticks, Den, ShareRows>(ref job);
+    }
+
+    [Benchmark]
+    public void ShareGenerated() => Kernels.Share(_ratios);
 
     [Benchmark]
     public void HolesScalar()
@@ -613,6 +642,7 @@ public partial class KernelBenchmark
 
     public struct Heat : IComponent { public float Value; }
     public struct Ticks : IComponent { public int Value; }
+    public struct Den : IComponent { public int Value; }
     public struct Speed : IComponent { public float Value; }
     public struct Mass : IComponent { public float Value; }
     public record struct Pull(float Value) : ISingletonComponent;
@@ -686,6 +716,18 @@ public partial class KernelBenchmark
         static int IForEach<Heat, Speed>.WriteMask => 1;
     }
 
+    private struct RatioRows : IForEach<Ticks, Den, Heat>, INoStructuralChanges
+    {
+        public void Execute(ref Ticks ticks, ref Den den, ref Heat heat) => Kernels.Ratio(ref ticks, in den, ref heat);
+        static int IForEach<Ticks, Den, Heat>.WriteMask => 5;
+    }
+
+    private struct ShareRows : IForEach<Ticks, Den>, INoStructuralChanges
+    {
+        public void Execute(ref Ticks ticks, ref Den den) => Kernels.Share(ref ticks, in den);
+        static int IForEach<Ticks, Den>.WriteMask => 1;
+    }
+
     private struct CountRows : IForEach<Ticks>, INoStructuralChanges
     {
         public void Execute(ref Ticks ticks) => Kernels.Count(ref ticks);
@@ -731,6 +773,18 @@ public partial class KernelBenchmark
 
         [ForEach]
         internal static void Count(ref Ticks ticks) => ticks.Value++;
+
+        // By constants: the quotient and remainder of 8 are shifts, of 7 a division of doubles; a float halved is a product.
+        [ForEach]
+        internal static void Ratio(ref Ticks ticks, in Den den, ref Heat heat)
+        {
+            ticks.Value = ticks.Value / 7 + ticks.Value % 8 + den.Value;
+            heat.Value = heat.Value / 2f + 1f;
+        }
+
+        // By a divisor per row (never 0 here; a 0 would send its vector's rows to the method).
+        [ForEach]
+        internal static void Share(ref Ticks ticks, in Den den) => ticks.Value = ticks.Value / den.Value + ticks.Value % den.Value * 1000 + 7919;
 
         // Each branch writes heat, and one counts: masked words select their passing lanes inside these writes.
         [ForEach(SimdMode = SimdMode.Require)]

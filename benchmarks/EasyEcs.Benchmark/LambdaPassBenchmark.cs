@@ -6,8 +6,8 @@ namespace EasyEcs.Benchmark;
 /// <summary>
 /// One pass over every unit, written three ways: a lambda pass (<c>world.ForEach(split, static (ref Health h, in Regen r,
 /// int split) =&gt; …)</c>, intercepted by the job the generator writes for it), the same body as a <c>[ForEach]</c>
-/// method of a static class, and the struct job a user writes by hand. The scalar body divides by a value (no vector
-/// loop for integer division); the vector body multiplies and adds (a vector loop for the lambda and the method, the
+/// method of a static class, and the struct job a user writes by hand. The scalar body divides as a long by a value (no
+/// vector loop for the integer division of 8-byte lanes); the vector body multiplies and adds (a vector loop for the lambda and the method, the
 /// hand-written job one row at a time). 0 bytes every way.
 /// </summary>
 [MemoryDiagnoser]
@@ -39,7 +39,7 @@ public class LambdaPassBenchmark
     public void ScalarMethod() => Healing.Divided(_world, _split);
 
     [Benchmark, BenchmarkCategory("Scalar")]
-    public void ScalarLambda() => _world.ForEach(_split, static (ref Health h, in Regen r, int split) => h.Value += r.Value / split);
+    public void ScalarLambda() => _world.ForEach(_split, static (ref Health h, in Regen r, int split) => h.Value += (int)((long)r.Value / split));
 
     [Benchmark, BenchmarkCategory("Scalar")]
     public void ScalarHandWritten()
@@ -67,7 +67,7 @@ public class LambdaPassBenchmark
     {
         public int Split;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Execute(ref Health h, ref Regen r) => h.Value += r.Value / Split;
+        public void Execute(ref Health h, ref Regen r) => h.Value += (int)((long)r.Value / Split);
         static int IForEach<Health, Regen>.WriteMask => 1;
     }
 
@@ -84,7 +84,7 @@ public class LambdaPassBenchmark
 public static class Healing
 {
     [ForEach]
-    static void Divided(ref LambdaPassBenchmark.Health h, in LambdaPassBenchmark.Regen r, int split) => h.Value += r.Value / split;
+    static void Divided(ref LambdaPassBenchmark.Health h, in LambdaPassBenchmark.Regen r, int split) => h.Value += (int)((long)r.Value / split);
 
     [ForEach]
     static void Scaled(ref LambdaPassBenchmark.Health h, in LambdaPassBenchmark.Regen r, int rate) => h.Value += r.Value * rate + 1;
