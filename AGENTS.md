@@ -133,6 +133,11 @@ owner has asked for once must be written where the next session will find it.
   does, `Use when ...`, and `Triggers: ...`: the paths and file names it owns, the symptoms (an EECS id, "why scalar"),
   and the words the owner uses for that work in English and Chinese (再来一轮, 优化, 合并). A skill that did not run
   when it should have gets the missing trigger added.
+- **Decide, then record what you did not do.** The owner has delegated judgment: do what clearly fits the
+  project's rules and goals without asking (public API changes included, with their migration); ask only for what is
+  truly the owner's to decide. A proposal you judge not worth doing (or not yet) goes into `docs/owner-review.md`
+  with the reason and what would change the verdict, so the owner can review it later; settled choices still get
+  their decision record.
 - **Split, never shrink.** A skill that has grown past one concern is split by concern into a new skill (name,
   description, `metadata.internal: true`). Every line moves, nothing is summarized away, the old skill keeps a
   pointer, the `audit` scopes gain the new skill, and `tools/agents.sh` adds it to the index.
