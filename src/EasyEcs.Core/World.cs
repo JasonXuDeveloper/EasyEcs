@@ -470,16 +470,19 @@ public sealed partial class World : IDisposable
 
     /// <summary>
     /// Destroy every entity of <paramref name="archetype"/>, which has no tombstones, while no pass runs: free them
-    /// (as <see cref="Free"/> does), then empty the table at once. Returns how many. Inside the structural gate.
+    /// (as <see cref="Free"/> does), then empty the table at once. Returns how many. Inside the structural gate. The ids
+    /// are freed from the last row down, the order <see cref="Free"/> pushes them in while no pass runs, or with
+    /// <paramref name="ascending"/> from the first row up, the order a pass that destroys each row frees them in.
     /// </summary>
-    private int FreeTable(Archetype archetype)
+    private int FreeTable(Archetype archetype, bool ascending = false)
     {
         int count = archetype.Count;
         if (_freeIds.Length < _freeIdCount + count)
             Array.Resize(ref _freeIds, (int)BitOperations.RoundUpToPowerOf2((uint)(_freeIdCount + count)));
         var rows = archetype.Slots.AsSpan(0, count);
-        for (int slot = count - 1; slot >= 0; slot--) // the order Free would push them in
+        for (int k = 0; k < count; k++)
         {
+            int slot = ascending ? k : count - 1 - k;
             int id = rows[slot].Index;
             Orphaned(rows[slot]);
             ReleaseRecord(ref MetaRef(id), id, archetype);

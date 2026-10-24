@@ -1443,6 +1443,69 @@ internal static class Symbols
             : IsGenerated(method) && IsGeneratedWriter(method);
     }
 
+    /// <summary>
+    /// A structural change of one entity by one call: what it does (<c>Set</c>, <c>Remove</c>, <c>Disable</c>,
+    /// <c>Enable</c>, <c>Destroy</c>, or <c>Other</c> for any other structural call: <c>SetIfChanged</c>, several
+    /// components, <c>GetOrAdd</c>, <c>Clone</c>, <c>Link</c>), the component it changes (null for <c>Destroy</c> and
+    /// <c>Other</c>), and the call's arguments in source order.
+    /// </summary>
+    public sealed record EntityChange(string Kind, ITypeSymbol? Component, IOperation[] Arguments, bool Generated);
+
+    /// <summary>
+    /// The structural change <paramref name="op"/> makes to <paramref name="entity"/> (a parameter), or null when it is no
+    /// call on it that changes structure. Decided by meaning, the same way in the analyzer and the generator: Entity's own
+    /// members by symbol (<c>Set&lt;T&gt;(value)</c>, <c>Remove&lt;T&gt;()</c>, <c>Destroy()</c>), the members
+    /// ComponentGenerator writes (<c>SetDead()</c>, <c>SetBurning(3)</c>, <c>RemoveX()</c>, <c>DisableX()</c>) by the
+    /// component their name ends in: the analyzer binds them (<see cref="IsGeneratedWriter"/>), the generator cannot
+    /// (another generator's output is not in its compilation), so both read the name.
+    /// </summary>
+    public static EntityChange? StructuralChange(IOperation op, IParameterSymbol entity, SemanticModel model)
+    {
+        if (op.Syntax is not InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax access } call) return null;
+        IOperation[] arguments;
+        switch (op)
+        {
+            case IInvocationOperation invocation when Receiver(invocation) is IParameterReferenceOperation { Parameter: var p }
+                                                      && SymbolEqualityComparer.Default.Equals(p, entity):
+                var m = invocation.TargetMethod;
+                arguments = invocation.Arguments.Where(a => !a.IsImplicit || a.ArgumentKind != ArgumentKind.DefaultValue)
+                    .OrderBy(a => a.Syntax.SpanStart).Select(a => a.Value).ToArray();
+                if (Named(m.ContainingType, Entity))
+                {
+                    if (!StructuralEntityMembers.Contains(m.Name)) return null;
+                    return m.Name switch
+                    {
+                        "Destroy" => new EntityChange("Destroy", null, arguments, false),
+                        "Set" when m.TypeArguments.Length == 1 && m.Parameters.Length == 1 => new EntityChange("Set", m.TypeArguments[0], arguments, false),
+                        "Remove" or "Disable" or "Enable" when m.TypeArguments.Length == 1 && m.Parameters.Length == 0
+                            => new EntityChange(m.Name, m.TypeArguments[0], arguments, false),
+                        _ => new EntityChange("Other", null, arguments, false),
+                    };
+                }
+
+                if (!IsGenerated(m) || !IsGeneratedWriter(m)) return null;
+                break;
+            case IInvalidOperation invalid when invalid.ChildOperations.FirstOrDefault() is IParameterReferenceOperation { Parameter: var p } receiver
+                                                && receiver.Syntax == access.Expression && SymbolEqualityComparer.Default.Equals(p, entity):
+                arguments = invalid.ChildOperations.Skip(1).Where(c => c.Syntax.Parent is ArgumentSyntax).OrderBy(c => c.Syntax.SpanStart).ToArray();
+                break;
+            default:
+                return null;
+        }
+
+        string name = access.Name.Identifier.ValueText;
+        foreach (var kind in new[] { "Set", "Remove", "Disable", "Enable" })
+        {
+            if (!name.StartsWith(kind, System.StringComparison.Ordinal) || name.Length == kind.Length) continue;
+            string type = name.Substring(kind.Length);
+            if (model.LookupNamespacesAndTypes(call.SpanStart, name: type).OfType<INamedTypeSymbol>()
+                    .FirstOrDefault(t => t.TypeKind == TypeKind.Struct && Implements(t, Component)) is { } component)
+                return new EntityChange(kind, component, arguments, true);
+        }
+
+        return new EntityChange("Other", null, arguments, true); // SetXIfChanged, GetOrAddX, LinkX...
+    }
+
     /// <summary>The handle or world a call works on: the instance, or the receiver of an extension member.</summary>
     public static IOperation? Receiver(IInvocationOperation call) =>
         call.Instance ?? (call.TargetMethod.IsExtensionMethod && call.Arguments.Length > 0 ? call.Arguments[0].Value : null);

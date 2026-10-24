@@ -65,7 +65,24 @@ internal sealed partial class Kernel
     /// <param name="Statics">The job's static members: the permutes' index vectors and the layout checks.</param>
     internal sealed record Code(EquatableArray<string> Columns, string Setup, string Body, string Stores, string MaskedBody,
         string MaskedStores, string Restore, string Fold, int Size, string Mask, string Lane, bool Interleaves, bool Bails, FlatCode? Flat, string? Cold = null,
-        string? Wide = null, string Statics = "");
+        string? Wide = null, string Statics = "")
+    {
+        /// <summary>
+        /// The structural change the loop marks rows for, applied after the pass ("Set global::Dead", "Destroy"; at
+        /// most one), with the job's fields <c>d0</c> (the marks) and <c>v0</c> (a Set's value): Kernel.Structural.cs.
+        /// </summary>
+        public EquatableArray<string> StructuralChanges { get; init; } = new([]);
+
+        /// <summary>
+        /// Every row must take the vector form (it marks rows or emits records, which the method itself would do at
+        /// once): the rows past the last whole vector run it through a copy, and hardware without the loop's vectors
+        /// runs the method's own job.
+        /// </summary>
+        public bool VectorTail { get; init; }
+
+        /// <summary>The job columns (1-based) the loop writes: a tail copies them back.</summary>
+        public EquatableArray<int> Written { get; init; } = new([]);
+    }
 
     /// <summary>
     /// A loop that reads the columns as flat arrays of lanes, <paramref name="Fields"/> lanes per row (a row's fields are
@@ -162,6 +179,9 @@ internal sealed partial class Kernel
         public string Reason { get; } = reason;
         public bool IsFixable { get; } = isFixable;
         public string? SplitComponent { get; } = splitComponent;
+
+        /// <summary>About the whole method (its structural change, its records), not one branch: no cold branch takes it.</summary>
+        public bool IsWholeMethod { get; init; }
     }
 
     /// <summary>
@@ -194,7 +214,6 @@ internal sealed partial class Kernel
     {
         reason = Symbols.Simd(method) == Symbols.SimdOff ? new ScalarReason("SimdMode = SimdMode.Off", false, null)
             : !method.IsStatic ? new ScalarReason("it is not static: make it static", true, null)
-            : !Symbols.IsStable(method, syntax, model) ? new ScalarReason("it can make structural changes", false, null)
             : Declined(method, syntax, model) is { } declined ? new ScalarReason(declined.Reason, declined.IsFixable, null)
             : null;
         if (reason != null) return null;
@@ -295,7 +314,7 @@ internal sealed partial class Kernel
         Symbols.ParamKind.Optional => Symbols.IsParallel(method)
             ? $"it takes a Maybe<{Symbols.MaybeElement(p.Type)?.Name}> and runs in parallel: an optional column has a vector loop on one thread"
             : null,
-        Symbols.ParamKind.Entity => "it takes the Entity",
+        Symbols.ParamKind.Entity or Symbols.ParamKind.Emit => null, // its uses decide (Kernel.Structural.cs)
         Symbols.ParamKind.Entities => "it takes the EntitySpan",
         Symbols.ParamKind.World => "it takes the World",
         Symbols.ParamKind.ComponentSpan => "it takes spans: a batch method writes its own loop",
@@ -383,7 +402,7 @@ internal sealed partial class Kernel
         // The parameters of a kernel: the main one, and one per field of a flat loop (Flat) with the same setup.
         Kernel Make(bool reductions)
         {
-            var made = new Kernel(SizeOf(first)) { _fast = Symbols.FastFloats(method), _compilation = model.Compilation };
+            var made = new Kernel(SizeOf(first)) { _fast = Symbols.FastFloats(method), _compilation = model.Compilation, _model = model, _stable = Symbols.IsStable(method, syntax, model) };
             made._pairs = components.Any(f => SizeOf(f[0].Type) > SizeOf(first));
             for (int i = 0, k = 0, o = 0; i < method.Parameters.Length; i++)
             {
@@ -413,6 +432,16 @@ internal sealed partial class Kernel
                 if (kind == Symbols.ParamKind.Reduction)
                 {
                     if (reductions) made._reductions[p] = made.Reduced(p, i, fieldOf(i, kind), Symbols.FastFloats(method), model.Compilation, ct);
+                    continue;
+                }
+                if (kind == Symbols.ParamKind.Entity)
+                {
+                    made._entity = p;
+                    continue;
+                }
+                if (kind == Symbols.ParamKind.Emit)
+                {
+                    made._emits[p] = (i, false);
                     continue;
                 }
                 string name = $"__p{i}";
@@ -468,6 +497,7 @@ internal sealed partial class Kernel
         }
         var root = (IOperation?)body.BlockBody ?? body.ExpressionBody!;
         kernel.Statement(root, null);
+        kernel.FinishChanges(method);
         // A masked word keeps the values loaded of what the method writes, and stores them back in the lanes that do not
         // pass: the rows are left as they were (their memory is the table's, whether a component is absent or not).
         var kept = new StringBuilder();
@@ -558,7 +588,12 @@ internal sealed partial class Kernel
             kernel._setup.ToString(), prologue + live + read + hold + kernel._body, stores.ToString(), prologue + maskedLive + read + kept + held + kernel._body, masked.ToString(),
             restore.ToString(), fold.ToString(), kernel._size, kernel._mask, Elem(first), kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
             kernel._bails, flat, kernel._cold, kernel._wideOf.Count == 0 ? null : string.Join(" && ", kernel._components.Where(c => kernel._wideOf.ContainsKey(c.Key)).Select(c => $"__layout{c.Value.Index}")),
-            kernel._statics.ToString());
+            kernel._statics.ToString())
+        {
+            StructuralChanges = kernel.StructuralChanges(),
+            VectorTail = kernel._change != null || kernel._emits.Values.Any(e => e.Added),
+            Written = new EquatableArray<int>(kernel._written.OrderBy(k => k).ToArray()),
+        };
     }
 
     /// <summary>
@@ -571,7 +606,7 @@ internal sealed partial class Kernel
     /// </summary>
     private static FlatCode? Flat(Kernel main, IOperation root, System.Func<Kernel> make)
     {
-        if (main._bails || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0 || main._wides.Count > 0 || main._structs.Count > 0 || main._optionals.Count > 0 || main._wideOf.Count > 0) return null;
+        if (main._change != null || main._emits.Count > 0 || main._bails || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0 || main._wides.Count > 0 || main._structs.Count > 0 || main._optionals.Count > 0 || main._wideOf.Count > 0) return null;
         var components = main._components.Values.ToArray();
         var type = components[0].Fields[0].Type;
         int fields = components[0].Fields.Length;
@@ -784,7 +819,7 @@ internal sealed partial class Kernel
                 return true;
             case IExpressionStatementOperation { Operation: var e }:
                 _active = And(mask, _alive);
-                Assignment(e, mask);
+                if (!Deferred(e)) Assignment(e, mask);
                 return true;
             case IConditionalOperation { WhenTrue: var whenTrue, WhenFalse: var whenFalse } branch when branch.Type == null:
             {
@@ -829,8 +864,12 @@ internal sealed partial class Kernel
         {
             Statement(op, mask);
         }
-        catch (Unsupported unsupported)
+        catch (Unsupported unsupported) when (!unsupported.IsWholeMethod)
         {
+            // A method that changes structure cannot run its own rows during the pass (it is frozen): no cold branch.
+            if (!_stable)
+                throw FixableReason($"{unsupported.Reason}, in a branch of a method that changes structure: a vector loop sends such a branch's rows to the method, "
+                    + "which cannot change structure during the pass; move that branch into a [ForEach] method of its own");
             Restore(saved);
             _cold ??= unsupported.Reason;
             _bails = _live = true;
@@ -1331,6 +1370,7 @@ internal sealed partial class Kernel
             return Broadcast(scalar, op.Type!);
         }
         if (PairExpr(op) is { } pair) return pair;
+        if (_entity != null && (IsEntity(Chain(op).Root ?? op) || op is IInvocationOperation { Instance: { } receiver } && IsEntity(receiver))) throw EntityUse(op);
 
         switch (op)
         {

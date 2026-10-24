@@ -235,14 +235,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
             // The world, for singletons, lookups and a World parameter: a default handle has none (Run returns false for it).
             if (perEntity && (method.NeedsWorld || method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Singleton)))
                 sb.Append($"            if ({Escape(entity)}.World is not {{ }} {world}) return false;\n");
-            sb.Append($"            var {local} = new {job}{Fields(method, world)};\n");
-            if (perEntity) sb.Append($"            return {Escape(entity)}.Run<{method.ComponentTypes}, {job}>(ref {local}{filter});\n");
-            else
+            if (perEntity)
             {
-                sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref {local}{filter}{method.Chunks});\n");
-                EmitReductions(sb, method, world, local, "            ");
-                EmitConsume(sb, method, world, filter, "            ");
+                sb.Append($"            var {local} = new {job}{Fields(method, world)};\n");
+                sb.Append($"            return {Escape(entity)}.Run<{method.ComponentTypes}, {job}>(ref {local}{filter});\n");
             }
+            else EmitPass(sb, method, forEach, m, world, local, filter, filter, "            ");
 
             sb.Append("        }\n\n");
 
@@ -254,6 +252,42 @@ public sealed class SystemGenerator : IIncrementalGenerator
         }
 
         sb.Append("    }\n}\n\n");
+    }
+
+    /// <summary>
+    /// One pass of method <paramref name="i"/>: its job made and run over the world, its reductions and [Consume]
+    /// after it. A vector loop that marks rows or emits records (<see cref="Kernel.Code.VectorTail"/>) runs only where its
+    /// vectors are hardware (the job's <c>Vectorizes</c>, a JIT-time constant), its marked rows changed when the pass
+    /// ends; elsewhere the method's own job (<c>Job{i}Rows</c>) runs it row by row.
+    /// </summary>
+    private static void EmitPass(StringBuilder sb, ForEachModel method, string forEach, int i, string world, string local, string filter, string whole, string indent)
+    {
+        string job = $"{forEach}.{method.Name}Job{i}{method.TypeParameters}";
+        void Pass(ForEachModel m, string name, string at)
+        {
+            sb.Append($"{at}var {local} = new {name}{Fields(m, world)};\n");
+            sb.Append($"{at}{world}.{m.ForEach}<{m.ComponentTypes}, {name}>(ref {local}{filter}{m.Chunks});\n");
+            EmitReductions(sb, m, world, local, at);
+            EmitConsume(sb, m, world, whole, at);
+        }
+
+        if (method.Simd is not { VectorTail: true } simd)
+        {
+            Pass(method, job, indent);
+            return;
+        }
+
+        sb.Append($"{indent}if ({job}.Vectorizes)\n{indent}{{\n");
+        Pass(method, job, indent + "    ");
+        foreach (var write in simd.StructuralChanges)
+        {
+            string kind = write.Split(' ')[0], type = write.Length > kind.Length ? write.Substring(kind.Length + 1) : "";
+            sb.Append($"{indent}    {local}.d0.{kind switch { "Set" => $"SetAll({local}.v0)", "Destroy" => "DestroyAll()", _ => $"{kind}All<{type}>()" }}; // the rows the pass marked\n");
+        }
+
+        sb.Append($"{indent}}}\n{indent}else\n{indent}{{\n");
+        Pass(method with { Simd = null }, $"{forEach}.{method.Name}Job{i}Rows{method.TypeParameters}", indent + "    ");
+        sb.Append($"{indent}}}\n");
     }
 
     /// <summary>
@@ -276,6 +310,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         if (method.NeedsWorld) fields.Add($"World = {world}");
         for (int i = 0; i < method.Parameters.Length; i++)
             if (JobField(method, i, world) is { Initializer: { } initializer }) fields.Add(initializer);
+        if (method.Simd is { StructuralChanges.Length: > 0 }) fields.Add($"d0 = global::EasyEcs.MarkedRows.Rent({world})");
         return fields.Count == 0 ? "()" : $" {{ {string.Join(", ", fields)} }}";
     }
 
@@ -363,15 +398,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
             string filter = method.Since ? $", {filterName}.Since(system.LastRunTick + 1)" : $", in {filterName}";
             string whole = filter;
             if (method.Slices > 1) filter = method.Sliced(filterName, $"(int)(system.RunCount % {method.Slices})"); // this run's slice
-            sb.Append($"        var job{i} = new {job}{Fields(method, "world")};\n");
             // WorldOptions.MeasureSystems: the entities the pass matches as it starts (SystemStats.LastEntities); one
             // field test per pass otherwise, nothing in the row loop. Count takes no slice: a sliced pass reports its share.
             string count = $"world.Count<{method.ComponentTypes}>({(whole.Length == 0 ? "" : whole.Substring(2))})";
             if (method.Slices > 1) count = $"{count} / {method.Slices}";
             sb.Append($"        if (global::EasyEcs.SystemCode.Measuring(world)) global::EasyEcs.SystemCode.Visit(system, {count});\n");
-            sb.Append($"        world.{method.ForEach}<{method.ComponentTypes}, {job}>(ref job{i}{filter}{method.Chunks});\n");
-            EmitReductions(sb, method, "world", $"job{i}", "        ");
-            EmitConsume(sb, method, "world", whole, "        ");
+            EmitPass(sb, method, forEach, i, "world", $"job{i}", filter, whole, "        ");
         }
 
         sb.Append("    }\n\n");
@@ -453,9 +485,11 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append("    }\n");
     }
 
-    private static void EmitJob(StringBuilder sb, OwnerModel owner, ForEachModel method, int number)
+    private static void EmitJob(StringBuilder sb, OwnerModel owner, ForEachModel method, int number, string suffix = "")
     {
-        string job = $"{method.Name}Job{number}{method.TypeParameters}";
+        // A vector loop that must take every row has the method's own job beside it, for hardware without its vectors.
+        if (suffix.Length == 0 && method.Simd is { VectorTail: true }) EmitJob(sb, owner, method with { Simd = null }, number, "Rows");
+        string job = $"{method.Name}Job{number}{suffix}{method.TypeParameters}";
         var components = method.Query.ToArray();
         int index = 0;
         bool runs = method.Runs || method.Simd != null; // per row of a run: components and handles at the row's offset
@@ -482,7 +516,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Scratch => $"new global::EasyEcs.Scratch<{p.Type}>(ref (t{i} ??= global::EasyEcs.Scratch<{p.Type}>.Of<{job}>()).Value)",
             Symbols.ParamKind.Lookup => $"new global::EasyEcs.Lookup<{p.Type}>(World, {(p.Key.Length > 0 ? $"k{i}" : "null")})",
             Symbols.ParamKind.Tile => $"new global::EasyEcs.Tile<{p.Cell}, {p.Grid}>({(runs ? "entities[(int)i]" : "entity")}, in n{method.GridOf(i)})",
-            Symbols.ParamKind.Emit => $"new global::EasyEcs.Emit<{p.Type}>(ref e{i})",
+            Symbols.ParamKind.Emit => $"new global::EasyEcs.Emit<{p.Type}>(ref this.e{i})", // this: a vector loop's column refs are e1, e2...
             Symbols.ParamKind.Context when local[i] => $"ref l{i}",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
             _ => "World",
@@ -504,7 +538,14 @@ public sealed class SystemGenerator : IIncrementalGenerator
         for (int i = 0; i < method.Parameters.Length; i++)
             if (JobField(method, i, "") is { } field)
                 foreach (var line in field.Declaration.Split('\n')) sb.Append("        ").Append(line).Append('\n');
+        if (method.Simd is { StructuralChanges.Length: > 0 } marking)
+        {
+            sb.Append("        public global::EasyEcs.MarkedRows d0; // the rows the change is applied to after the pass\n");
+            if (marking.StructuralChanges[0].StartsWith("Set ", System.StringComparison.Ordinal)) sb.Append($"        public {marking.StructuralChanges[0].Substring(4)} v0; // the value it sets\n");
+        }
         if (sb[sb.Length - 2] != '{') sb.Append('\n'); // a blank line after the fields, if any
+        if (method.Simd is { VectorTail: true } every)
+            sb.Append($"        internal static bool Vectorizes => global::System.Numerics.Vector.IsHardwareAccelerated{(every.Interleaves ? " && global::EasyEcs.Interleaved.IsAccelerated" : "")};\n\n");
         // A wide component's permute tables and layout check (Kernel.Wide.cs): statics, built once per job type.
         if (method.Simd is { Statics.Length: > 0 } statics)
         {
@@ -554,7 +595,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 // So do a wide component's (its write-back stores whole vectors of rows).
                 else if (method.Simd is { Size: < 4 } or { Wide: not null } && masked) sb.Append($"{indent}nint i = 0;\n");
                 else if (method.Simd is { } simd) EmitVectorLoop(sb, simd, components, indent, call, masked);
-                sb.Append(method.Simd == null
+                if (method.Simd is { VectorTail: true }) { } // the tail took the last rows
+                else sb.Append(method.Simd == null
                     ? $"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n"
                     : masked
                         ? $"{indent}for (; i < rows; i++) // the rows after the last whole vector that pass: the method itself\n{indent}    if (((pass >> (int)i) & 1) != 0) {call}\n"
@@ -610,6 +652,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
         sb.Append("    }\n\n");
 
+        if (suffix.Length > 0) return; // the filter is the vector job's
         if (!method.HasFilter)
         {
             // A pass without a filter takes this empty one by reference: the optional default argument would be a
@@ -673,10 +716,36 @@ public sealed class SystemGenerator : IIncrementalGenerator
         // Only the tokens are replaced: setup lines name user types (in Vector3 wind, in Vector<float> bias) as written.
         // Vector512 names the same operations alike, except the square root (Vector.SquareRoot, Vector512.Sqrt).
         var text = new StringBuilder(loop.ToString());
-        text.Replace(Kernel.Visited, masked ? "pass" : "ulong.MaxValue");
+        text.Replace(Kernel.Visited, masked ? "pass" : "ulong.MaxValue").Replace(Kernel.Row, "(int)i");
         sb.Append(text.ToString().Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512)
             .Replace(Accelerated, "IsAccelerated512").Replace(Kernel.LanesForm, "In512"));
         if (simd.Wide == null) sb.Append(text.Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(Kernel.LanesForm, ""));
+        if (simd.VectorTail) EmitTail(sb, simd, components, indent, masked);
+    }
+
+    /// <summary>
+    /// The rows of a run after the last whole vector, when every row must take the vector form (<see cref="Kernel.Code.VectorTail"/>):
+    /// copied into a vector's worth of rows (<c>Interleaved.LoadTail</c>), run as a masked vector whose passing lanes
+    /// are those rows (and, in a word of passing rows, those of them that pass), and the written columns copied back.
+    /// The job runs only where the Vector&lt;T&gt; loop is hardware (its <c>Vectorizes</c>), so the copy takes that form.
+    /// </summary>
+    private static void EmitTail(StringBuilder sb, Kernel.Code simd, string[] components, string indent, bool masked)
+    {
+        const string unsafeType = "global::System.Runtime.CompilerServices.Unsafe", interleaved = "global::EasyEcs.Interleaved";
+        var tail = new StringBuilder();
+        string inner = indent + "    ";
+        tail.Append($"{indent}if (i < rows) // the last rows, fewer than a vector: a copy of them runs as one, its other lanes masked off\n{indent}{{\n");
+        tail.Append($"{inner}nint __at = i;\n{inner}int __n = (int)(rows - i);\n");
+        for (int k = 1; k <= components.Length; k++)
+            tail.Append($"{inner}e{k} = ref {unsafeType}.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref {interleaved}.LoadTail(ref {unsafeType}.Add(ref r{k}, __at), __n));\n");
+        tail.Append($"{inner}i = 0;\n");
+        foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) tail.Append(inner).Append(line).Append('\n');
+        tail.Append($"{inner}var __pass = {interleaved}.Lanes{simd.Size * 8}({(masked ? "pass, (int)__at" : "ulong.MaxValue >> (64 - __n), 0")});\n");
+        foreach (var line in (simd.MaskedBody + simd.MaskedStores + simd.Fold).Split('\n')) if (line.Length > 0) tail.Append(inner).Append(line).Append('\n');
+        foreach (int k in simd.Written) tail.Append($"{inner}{interleaved}.StoreTail(ref {unsafeType}.Add(ref r{k}, __at), __n);\n");
+        tail.Append($"{inner}i = rows;\n{indent}}}\n");
+        sb.Append(tail.Replace(Kernel.Visited, masked ? "pass" : "ulong.MaxValue").Replace(Kernel.Row, "(int)__at").Replace(Kernel.V, Vector)
+            .Replace(Kernel.LanesForm, ""));
     }
 
     /// <summary>
@@ -875,6 +944,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
             if (Parallel) parts.Add("in parallel chunks");
             else parts.Add(simd.Size < 4 || simd.Wide != null ? "masked words scalar" : "masked words vector");
             if (simd.Cold != null) parts.Add($"cold branch ({simd.Cold})");
+            foreach (var write in simd.StructuralChanges) parts.Add($"{write.Replace("global::", "")} after the pass, on the rows it marks");
+            if (simd.VectorTail) parts.Add("last rows through a copy");
             return $"{Name}: {string.Join(", ", parts)}";
         }
 

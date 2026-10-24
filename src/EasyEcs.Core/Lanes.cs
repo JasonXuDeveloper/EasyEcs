@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -115,4 +116,33 @@ public static class Lanes
         throw new ArgumentException(destination < count
             ? $"The mask selects {count} elements; the destination holds {destination}"
             : $"The mask selects elements at or past the end of the source ({source} elements)");
+
+    /// <summary>
+    /// The lane mask of a vector loop's condition as bits, lane j in bit j (all bits set where true): the rows a
+    /// generated loop marks or emits for. Generated code uses this.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ulong Bits(Vector<int> mask) => Vector<byte>.Count switch
+    {
+        64 => mask.AsVector512().ExtractMostSignificantBits(),
+        32 => mask.AsVector256().ExtractMostSignificantBits(),
+        _ => mask.AsVector128().ExtractMostSignificantBits(),
+    };
+
+    /// <inheritdoc cref="Bits(Vector{int})"/>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ulong Bits(Vector<long> mask) => Vector<byte>.Count switch
+    {
+        64 => mask.AsVector512().ExtractMostSignificantBits(),
+        32 => mask.AsVector256().ExtractMostSignificantBits(),
+        _ => mask.AsVector128().ExtractMostSignificantBits(),
+    };
+
+    /// <inheritdoc cref="Bits(Vector{int})"/>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ulong Bits(Vector512<int> mask) => mask.ExtractMostSignificantBits();
+
+    /// <inheritdoc cref="Bits(Vector{int})"/>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ulong Bits(Vector512<long> mask) => mask.ExtractMostSignificantBits();
 }

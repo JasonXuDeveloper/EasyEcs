@@ -1,6 +1,9 @@
 using System;
 using System.ComponentModel;
+using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using System.Threading;
 using Nino.Core;
 
@@ -59,6 +62,50 @@ public readonly ref struct Emit<T> where T : struct
         records.CopyTo(store.Items.AsSpan(store.Count));
         store.Count += records.Length;
     }
+
+    /// <summary>
+    /// Append a record per set bit of <paramref name="lanes"/> (bit j: row <paramref name="row"/> + j of the run), the id
+    /// of its entity, in row order: the vector loop of a method that emits <c>new T(entity.Id)</c>, where
+    /// <typeparamref name="T"/> holds the id alone. O(selected rows). Generated code calls this.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddIds(in EntitySpan rows, int row, ulong lanes)
+    {
+        if (lanes != 0) AddSelected(rows.Slots.Slice(row), lanes);
+    }
+
+    /// <summary>
+    /// Append a record per set bit of <paramref name="lanes"/>, lane j of <paramref name="values"/>, in lane order: the
+    /// vector loop of a method that emits <c>new T(value)</c>, where <typeparamref name="T"/> holds that value alone.
+    /// O(selected lanes). Generated code calls this.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddLanes<TLane>(Vector512<TLane> values, ulong lanes) where TLane : unmanaged
+    {
+        if (lanes != 0) AddSelected(MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<Vector512<TLane>, TLane>(ref values), Vector512<TLane>.Count), lanes);
+    }
+
+    /// <inheritdoc cref="AddLanes{TLane}(Vector512{TLane}, ulong)"/>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddLanes<TLane>(Vector<TLane> values, ulong lanes) where TLane : unmanaged
+    {
+        if (lanes != 0) AddSelected(MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<Vector<TLane>, TLane>(ref values), Vector<TLane>.Count), lanes);
+    }
+
+    // The selected elements of source, side by side at the end of the list (Lanes.Compact): T is laid out as TLane.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void AddSelected<TLane>(ReadOnlySpan<TLane> source, ulong lanes) where TLane : unmanaged
+    {
+        if (Unsafe.SizeOf<T>() != Unsafe.SizeOf<TLane>()) ThrowLayout();
+        var store = _items.Store ?? Start(ref _items);
+        int count = BitOperations.PopCount(lanes);
+        if (store.Count + count > store.Items.Length) store.Grow(store.Count + count);
+        var into = MemoryMarshal.CreateSpan(ref Unsafe.As<T, TLane>(ref store.Items[store.Count]), store.Items.Length - store.Count);
+        store.Count += Lanes.Compact(source, lanes, into);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowLayout() => throw new ArgumentException($"{typeof(T).Name} is not laid out as one value of the lanes it is emitted from");
 
     // The pass's first record: a list from the pool (a chunk's, or the singleton's first one).
     [MethodImpl(MethodImplOptions.NoInlining)]
