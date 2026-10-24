@@ -42,27 +42,39 @@ public sealed partial class World
     /// and left a thread idle. A pass that <paramref name="stamps"/> a tracked component gets a multiple of 4,096 rows
     /// unless it sets its own: each block of 4,096 rows shares one change-tick summary per column
     /// (<see cref="Archetype.Blocks"/>), which chunks splitting a block share through <see cref="Archetype.OpenBlocks{T}"/>.
+    /// A pass that <paramref name="merges"/> partial results per chunk cuts <see cref="MergedChunks"/> chunks whatever the
+    /// threads, so its result does not depend on them.
     /// </summary>
-    internal int ChunkRows(Archetype[] tables, bool stamps, int slices = 0, int chunkRows = 0)
+    internal int ChunkRows(Archetype[] tables, bool stamps, bool merges, int slices = 0, int chunkRows = 0)
     {
         if (chunkRows > 0) return ChunkRows(0, chunkRows);
         long rows = 0;
         for (int i = 0; i < tables.Length; i++) rows += tables[i].Count;
         if (slices > 1) rows /= slices; // a sliced pass visits about 1 / slices of them
-        if (!stamps) return ChunkRows(rows, 0);
-        long share = rows / ((Helpers + 1) * 4L);
+        long chunks = merges ? MergedChunks : (Helpers + 1) * 4L;
+        if (!stamps) return ChunkRows(rows, 0, chunks);
+        long share = rows / chunks;
         return (int)Math.Clamp((share + 4095) & ~4095L, 4096, ParallelChunkRows);
     }
+
+    /// <summary>
+    /// The chunks a pass that merges per chunk (a <see cref="Reduce{T}"/>, an <see cref="Emit{T}"/>) cuts its rows into
+    /// when it does not set <c>ChunkRows</c>: a constant, so its chunk boundaries follow the row count alone and a
+    /// floating-point result is the same bits at any <see cref="WorldOptions.MaxDegreeOfParallelism"/> (the threads only
+    /// share the chunks out). Four per thread at four threads; tables of 262,144 rows or more get chunks of
+    /// <see cref="ParallelChunkRows"/> rows, more than enough for any thread count.
+    /// </summary>
+    private const int MergedChunks = 16;
 
     /// <summary>
     /// Items per chunk for <paramref name="items"/> items (rows of a pass, elements of <see cref="ForParallel{TJob}"/>):
     /// <paramref name="chunkRows"/> rounded up to 64 when given, else about four chunks per thread, a multiple of 64
     /// between 1,024 and <see cref="ParallelChunkRows"/>.
     /// </summary>
-    private int ChunkRows(long items, int chunkRows)
+    private int ChunkRows(long items, int chunkRows, long chunks = 0)
     {
         if (chunkRows > 0) return (int)Math.Min((chunkRows + 63L) & ~63L, int.MaxValue & ~63);
-        long share = items / ((Helpers + 1) * 4L);
+        long share = items / (chunks > 0 ? chunks : (Helpers + 1) * 4L);
         return (int)Math.Clamp((share + 63) & ~63L, 1024, ParallelChunkRows);
     }
 

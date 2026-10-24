@@ -1355,7 +1355,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
         return $$"""
                 /// <summary>
                 /// <see cref="{{name}}{{{tps}}, TJob}"/> on several threads: the matching rows are cut into chunks (about four per
-                /// thread, a multiple of 64 rows, at most <see cref="ParallelChunkRows"/>; or <paramref name="chunkRows"/> rounded
+                /// thread, a multiple of 64 rows, at most <see cref="ParallelChunkRows"/>; 16 for a job that merges, whatever
+                /// the threads, so its result does not depend on them; or <paramref name="chunkRows"/> rounded
                 /// up to 64, for few heavy rows: <c>[ForEach(Parallel = true, ChunkRows = n)]</c>) that the calling thread and up to
                 /// <see cref="WorldOptions.MaxDegreeOfParallelism"/> - 1 helper threads run at the same time, each with its own copy of <paramref name="job"/> (state
                 /// a job keeps in its fields is not merged back, unless the job merges: <c>Merges</c>, a <c>Reduce&lt;T&gt;</c>;
@@ -1408,7 +1409,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         var archetypes = match.Archetypes;
                         // A job writing a tracked component stamps change-tick summaries shared by 4,096 rows (a JIT-time constant).
                         bool stamps = {{List(n, i => $"(TJob.WriteMask & {1 << (i - 1)}) != 0 && default(T{i}) is ITracked", " || ")}} || TJob.OptionalWrites.HasComponents;
-                        int size = world.ChunkRows(archetypes, stamps, filter.SliceCount, chunkRows);
+                        int size = world.ChunkRows(archetypes, stamps, TJob.Merges, filter.SliceCount, chunkRows);
                         bool open = stamps && (size & 4095) != 0; // chunks split blocks: open them first (Archetype.OpenBlocks)
                         for (int a = 0; a < archetypes.Length; a++)
                         {
