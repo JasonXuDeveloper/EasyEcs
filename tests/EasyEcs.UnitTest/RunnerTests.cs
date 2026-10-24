@@ -176,7 +176,7 @@ public class RunnerTests
         int alive = 0;
         Reports.CountAlive(_world, ref alive);
         Reports.Heal(_world, 1);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 10; i++)
         {
             Reports.CountAlive(_world, ref alive);

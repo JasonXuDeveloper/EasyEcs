@@ -446,7 +446,7 @@ public class BattleServerTests
     public void ATickAllocatesNothing()
     {
         using var server = Run(1_200);                                        // tables grown to their peak populations
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) server.Tick();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }

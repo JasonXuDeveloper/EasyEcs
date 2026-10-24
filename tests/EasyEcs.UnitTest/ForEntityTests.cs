@@ -147,7 +147,7 @@ public class ForEntityTests
         Orders.Buy(shop, 1);
         Orders.Charge(shop, ref due);
         Orders.Count(shop, ref items);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 1000; i++)
         {
             Orders.Buy(shop, 1);

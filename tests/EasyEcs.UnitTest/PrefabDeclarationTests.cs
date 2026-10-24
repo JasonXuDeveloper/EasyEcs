@@ -99,7 +99,7 @@ public class PrefabDeclarationTests
         using var world = new World();
         world.Reserve<Bestiary.Health, Bestiary.Position, Bestiary.Speed, Bestiary.IsGoblin>(200);
         world.Instantiate(Bestiary.Goblin.Prefab, new Bestiary.Speed(0)); // the overload measured: its target table found once
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) world.Instantiate(Bestiary.Goblin.Prefab, new Bestiary.Speed(i));
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }

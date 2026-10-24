@@ -148,4 +148,37 @@ public class ConcurrencyTests
 
     private static Exception Flatten(Exception error) =>
         error is AggregateException aggregate ? aggregate.Flatten().InnerExceptions[0] : error;
+
+    private sealed class Held
+    {
+        public SpinGate Gate;
+        public volatile bool Entered, Released;
+    }
+
+    [Test]
+    public void AThreadThatWaitsOnAContendedGateAllocatesNothing()
+    {
+        // The helpers' queue and the pools a parallel pass rents from are entered by several threads at once. A Lock
+        // creates its wait event the first time a thread waits on it past its spin (56 B on that thread, any time after
+        // warm-up when a holder is preempted); the gate spins and yields instead, and still lets one thread in at a time.
+        var held = new Held();
+        Allocations.Baseline(); // no background collection runs into the measurement below
+        var holder = new Thread(() =>
+        {
+            using (new SpinScope(ref held.Gate))
+            {
+                held.Entered = true;
+                Thread.Sleep(50); // long enough for the waiter to stop spinning
+                held.Released = true;
+            }
+        });
+        holder.Start();
+        while (!held.Entered) Thread.Yield();
+        bool releasedFirst;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        using (new SpinScope(ref held.Gate)) releasedFirst = held.Released;
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        holder.Join();
+        Assert.That((allocated, releasedFirst), Is.EqualTo((0L, true)));
+    }
 }

@@ -185,7 +185,7 @@ public class ScratchTests
         }
 
         for (int i = 0; i < 10; i++) world.Update();
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) world.Update();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }

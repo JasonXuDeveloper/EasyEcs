@@ -68,7 +68,7 @@ public class HierarchyTests
         dead.Destroy();
         Assert.That(world.Descendants(dead).AddTo(ids, includeRoot: true), Is.Zero); // a stale root adds nothing
 
-        long before = System.GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++)
         {
             ids.Clear();

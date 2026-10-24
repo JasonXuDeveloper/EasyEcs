@@ -187,7 +187,7 @@ public class ComponentTests
         Assert.That(_world.Count<Wide.Bit<Wide.D0, Wide.D0, Wide.D0>>(QueryFilter.Create().WithAny<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>, Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>()), Is.Zero);
 
         // Queries on bits past 255 look the cache up without allocating their key.
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) _ = _world.Count<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
@@ -295,7 +295,7 @@ public class GetOrAddValueTests
         Assert.That(world.GetOrAddScore(1, 2), Is.EqualTo(new Score(1, 2)));
         Assert.That(world.GetOrAddSingleton(new Score(5, 5)), Is.EqualTo(new Score(1, 2)));
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) e.GetOrAdd(new Health(i)).Value++;
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }

@@ -399,7 +399,7 @@ public class RemovedTests
         }
 
         for (int i = 0; i < 10; i++) Frame(); // warm-up: tables, edges, JIT
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) Frame();
         Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, wrong), Is.EqualTo((0L, 0)));
     }

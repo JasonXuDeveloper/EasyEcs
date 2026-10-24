@@ -776,7 +776,7 @@ public class IndexTests
         }
 
         Churn();
-        long before = System.GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         int result = Churn();
         Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
         Assert.That(result, Is.EqualTo(players.Length));
@@ -952,7 +952,7 @@ public class IndexTests
         }
 
         Churn();
-        long before = System.GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         int result = Churn();
         Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
         Assert.That(result, Is.EqualTo(all.Length));

@@ -209,14 +209,14 @@ public class DynamicBufferTests
             Replay(true);
         }
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 50; i++) Replay(false);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
         // Restored rows share their lists with the snapshot, loaded rows have their own: the first loads after restores
         // take the lists that makes (once), Load's own copy one more.
         Replay(true);
         Replay(true);
-        before = GC.GetAllocatedBytesForCurrentThread();
+        before = Allocations.Baseline();
         for (int i = 0; i < 50; i++) Replay(true);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
         Assert.That(world.Count<DynamicBuffer<Rewind>>(), Is.EqualTo(1));
@@ -234,7 +234,7 @@ public class DynamicBufferTests
         world.AddSystem<Weigh>();
         for (int i = 0; i < 5; i++) world.Update();   // the lists reach their capacity
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) world.Update();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
@@ -264,7 +264,7 @@ public class DynamicBufferTests
         }
 
         for (int i = 0; i < 5; i++) Churn();
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) Churn();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
@@ -353,13 +353,13 @@ public class DynamicBufferTests
             DynamicBuffer<Voxel>.MaxPooledLength = chunk.Length;
             Cycle(world, chunk);
             Cycle(world, chunk);                                             // warm: the table, the pool
-            long before = GC.GetAllocatedBytesForCurrentThread();
+            long before = Allocations.Baseline();
             Cycle(world, chunk);
             Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);   // the list came back
 
             DynamicBuffer<Voxel>.MaxPooledLength = 4096;
             Cycle(world, chunk);                                             // takes the pooled list, keeps it not
-            before = GC.GetAllocatedBytesForCurrentThread();
+            before = Allocations.Baseline();
             Cycle(world, chunk);
             Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.GreaterThanOrEqualTo(chunk.Length));
         }
@@ -398,7 +398,7 @@ public class DynamicBufferTests
         using var world = new World();
         var actor = new Prefab().Set(new Seen()).SetBuffer<Loot>();
         for (int i = 0; i < 3; i++) Spawn(world, actor);                     // warm: the table, the pool
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         Spawn(world, actor);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);  // no list of its own, then a pooled one
 
@@ -452,7 +452,7 @@ public class DynamicBufferTests
             }
 
             for (int i = 0; i < 3; i++) Reload(world, bytes, ids, loaded);    // warm: the tables, the pool, the load world
-            long before = GC.GetAllocatedBytesForCurrentThread();
+            long before = Allocations.Baseline();
             Reload(world, bytes, ids, loaded);
             Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.LessThan(blocks.Length));   // no list copied
             Assert.That(loaded[0].Read<DynamicBuffer<Ore>>().Count, Is.EqualTo(blocks.Length));
@@ -801,7 +801,7 @@ public class DynamicBufferTests
         }
 
         for (int i = 0; i < 5; i++) Cycle();
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 50; i++) Cycle();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }

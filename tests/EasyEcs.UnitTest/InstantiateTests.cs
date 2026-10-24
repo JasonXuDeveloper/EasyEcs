@@ -106,7 +106,7 @@ public class InstantiateTests
         using (var warm = new World()) warm.Instantiate(orc).Destroy(); // JIT and caches
         using var world = new World(new WorldOptions { InitialEntityCapacity = 16 });
         world.Reserve(orc, 5000);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 5000; i++) world.Instantiate(orc);
         Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, world.EntityCount), Is.EqualTo((0L, 5000)));
     }
@@ -267,7 +267,7 @@ public class InstantiateTests
         var leaders = new Entity[10];
         world.Instantiate(elite, leaders);                              // warms the copy's buffers
         foreach (var leader in leaders) leader.Destroy();
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         world.Instantiate(elite, leaders);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
         Assert.That((world.EntityCount, world.Count<Armor>(), leaders[3].Read<Health>().Value), Is.EqualTo((20, 10, 9)));
@@ -387,7 +387,7 @@ public class InstantiateTests
         world.DestroyAll<Health>();
         world.Instantiate(minion, batch, new ChildOf(parent), new Position(1, 1));
         world.DestroyAll<Health>();
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) world.Instantiate(minion, new ChildOf(parent), new Position(i, 0));
         world.DestroyAll<Health>();
         world.Instantiate(minion, batch, new ChildOf(parent), new Position(1, 1));

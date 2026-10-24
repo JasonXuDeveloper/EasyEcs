@@ -42,7 +42,7 @@ public class AllocationTests
         var picked = new long[64];
         world.CollectIds<Health>(ids, awake);
         Lanes.Compact<long>(values, 0xF0F0_F0F0_F0F0_F0F0UL, picked);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         int collected = world.CollectIds<Health>(ids, awake);
         int compacted = Lanes.Compact<long>(values, 0xF0F0_F0F0_F0F0_F0F0UL, picked);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
@@ -104,7 +104,7 @@ public class AllocationTests
         }
 
         for (int i = 0; i < 10; i++) Frame(); // warm-up: query caches, edges, JIT
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) Frame();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
@@ -135,7 +135,7 @@ public class AllocationTests
         for (int i = 0; i < 10; i++) Frame();
         world.TrimExcess();
         for (int i = 0; i < 10; i++) Frame(); // the dropped tables and edges come back once
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) Frame();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
@@ -179,7 +179,7 @@ public class AllocationTests
         }
 
         for (int i = 0; i < 200; i++) Frame(); // warm-up: every kid replaced, query caches, JIT
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 500; i++) Frame();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
@@ -246,7 +246,7 @@ public class AllocationTests
         }
 
         for (int i = 0; i < 3000; i++) Frame(); // warm-up: keys sorted, buffers, links, stacks and tables grown, JIT
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 500; i++) Frame();
         Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, world.EntityCount), Is.EqualTo((0L, players.Length + walkers.Length)));
     }
@@ -286,7 +286,7 @@ public class AllocationTests
         }
 
         for (int i = 0; i < 50; i++) Frame(); // warm-up: query caches, JIT
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 300; i++) Frame();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
@@ -329,7 +329,7 @@ public class AllocationTests
         }
 
         for (int round = 0; round < 2000; round++) Cycle(round);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int round = 2000; round < 2500; round++) Cycle(round);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
@@ -354,7 +354,7 @@ public class AllocationTests
         }
 
         for (int round = 0; round < 100; round++) Cycle(round);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int round = 100; round < 2100; round++) Cycle(round);
         // 4,000 more ids: a growth or two of a few arrays of 8,000-16,000 ids (the worlds' own and the load's), where
         // growing by one id per load would copy them 2,000 times (hundreds of MB).
@@ -378,7 +378,7 @@ public class AllocationTests
         world.EnsureEntityCapacity(20_000);
         var entities = new Entity[20_000];
         for (int i = 0; i < entities.Length; i++) entities[i] = world.CreateEntity(new Health(i));
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         foreach (var entity in entities) entity.Destroy();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
@@ -394,7 +394,7 @@ public class AllocationTests
         using var world = new World();
         world.Reserve<Position, DynamicBuffer<Grain>>(500);
         var entities = new Entity[500];
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < entities.Length; i++)
         {
             entities[i] = world.CreateEntity(new Position(i, 0), new DynamicBuffer<Grain>());
@@ -420,7 +420,7 @@ public class AllocationTests
         first.Destroy();
         first.Remove<Lease>();
         world.Reserve(prefab, count);
-        long start = GC.GetAllocatedBytesForCurrentThread();
+        long start = Allocations.Baseline();
         for (int i = 0; i < count; i++) spawned[i] = world.Instantiate(prefab, new Rating(i), new Region(i));
         long created = GC.GetAllocatedBytesForCurrentThread();
         foreach (var entity in spawned) entity.Destroy();
@@ -469,7 +469,7 @@ public class AllocationTests
         }
 
         for (int round = 0; round < 50; round++) Cycle();
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int round = 0; round < 200; round++) Cycle();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
         Assert.That(ratings.Find(3).Count, Is.EqualTo(43));
