@@ -649,7 +649,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 for (int k = 1; k <= components.Length; k++)
                     sb.Append($"{indent}ref {components[k - 1]} r{k} = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{k});\n");
                 sb.Append($"{indent}nint rows = {(components.Length > 0 ? "c1.Length" : "entities.Length")};\n");
-                if (method.Simd is { Flat: { } flat } && (!masked || flat.MaskedBody != null)) EmitFlatLoop(sb, flat, method.Simd, components, indent, masked);
+                if (method.Simd is { Flat: { } flat } && !masked) EmitFlatLoop(sb, flat, method.Simd, components, indent);
                 // Narrow lanes have no lane masks of their own (a Vector512<byte> is a whole word): the passing rows of a
                 // masked word run the method.
                 // So do a wide component's (its write-back stores whole vectors of rows).
@@ -815,10 +815,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// <summary>
     /// The loop of a method that treats each field alike (<see cref="Kernel.FlatCode"/>): the columns as flat arrays of
     /// <c>rows * fields</c> lanes, no shuffles. The vector loops end at a multiple of <c>Count * fields</c> lanes, whole
-    /// rows, so <c>i</c> becomes a row again for the rows left, which run the method. A word of rows of which some pass
-    /// (<paramref name="masked"/>) gives each row's bit to its lanes (fields of 2 or 4: a vector's lanes start at a row).
+    /// rows, so <c>i</c> becomes a row again for the rows left, which run the method.
     /// </summary>
-    private static void EmitFlatLoop(StringBuilder sb, Kernel.FlatCode flat, Kernel.Code simd, string[] components, string indent, bool masked)
+    private static void EmitFlatLoop(StringBuilder sb, Kernel.FlatCode flat, Kernel.Code simd, string[] components, string indent)
     {
         for (int k = 1; k <= components.Length; k++)
             sb.Append($"{indent}ref {simd.Columns[k - 1]} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref r{k});\n");
@@ -830,17 +829,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         string inner = indent + "    ", body = inner + "    ";
         foreach (var line in flat.Setup.Split('\n')) if (line.Length > 0) loop.Append(inner).Append(line).Append('\n');
         loop.Append($"{inner}for (nint end = lanes - (lanes - i) % ({chunk}); i < end; i += {count})\n{inner}{{\n");
-        if (masked)
-        {
-            int shift = flat.Fields == 2 ? 1 : 2; // the row of lane i: i / fields
-            loop.Append($"{body}var __pass = global::EasyEcs.Interleaved.Lanes{simd.Size * 8}{Kernel.LanesForm}(pass, (int)(i >> {shift}), {flat.Fields});\n");
-            loop.Append($"{body}if (__pass == {Kernel.V}<{simd.Mask}>.Zero) continue;\n");
-        }
-        foreach (var line in (masked ? flat.MaskedBody + flat.MaskedStores : flat.Body + flat.Stores).Split('\n')) if (line.Length > 0) loop.Append(body).Append(line).Append('\n');
+        foreach (var line in (flat.Body + flat.Stores).Split('\n')) if (line.Length > 0) loop.Append(body).Append(line).Append('\n');
         loop.Append($"{inner}}}\n{indent}}}\n");
         var text = new StringBuilder(loop.ToString());
-        sb.Append(text.ToString().Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512).Replace(Kernel.LanesForm, "In512"));
-        sb.Append(text.Replace(Kernel.V, Vector).Replace(Kernel.LanesForm, ""));
+        sb.Append(text.ToString().Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512));
+        sb.Append(text.Replace(Kernel.V, Vector));
         sb.Append($"{indent}i /= {flat.Fields}; // whole rows: the row the rows left start at\n");
     }
 
