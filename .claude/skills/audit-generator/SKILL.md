@@ -45,6 +45,10 @@ for each one answers:
   per meaning.
 - **Is the family consistent?** Siblings share a shape (`With<T>` / `Without<T>` / `WithAny<T>`), names (`audit-naming`)
   and the same placement (type, method, parameter).
+- **Is access declared by the type?** A parameter's type says read or write and the generator never infers it from the
+  body: `in T` / `ref T`, `ReadOnlySpan<T>` / `Span<T>`, `ReadOnlyMaybe<T>` / `Maybe<T>`, `Mut<T>`, `in` / `ref`
+  singletons. The read-only type exists so the compiler stops a write and the schedule sees a reader; a write type that
+  only reads is EECS025 with a fix to the read-only one. Every new parameter kind comes as such a pair.
 - **What is still written twice?** Boilerplate in samples, templates, `BattleServer.cs` and docs examples that a new
   declaration (or inference) would remove (job 1 above).
 
