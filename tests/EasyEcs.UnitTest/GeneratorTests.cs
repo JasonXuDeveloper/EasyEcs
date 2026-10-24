@@ -654,9 +654,9 @@ public class GeneratorTests
         "public static void A<T>(global::EasyEcs.World world, ref int n) where T : struct, global::EasyEcs.IComponent",
         "internal ref struct AJob0<T> : global::EasyEcs.IForEachBatch<T> where T : struct, global::EasyEcs.IComponent",
         "internal static extern void A_0<T>([global::System.Runtime.CompilerServices.UnsafeAccessorType(\"R\")] object owner, in T t, ref int n) where T : struct, global::EasyEcs.IComponent;")]
-    [TestCase("[Without<Q>, WithAny<T>] public struct G : ISystemGroup; [UpdateInGroup<G>] [EcsSystem] public ref struct S { [ForEach, Without<Q>] static void A(ref P p) { } [ForEach, With<P>] static void B() { } }",
-        "AFilter0 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T>();", // once, though both name it
-        "BFilter1 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T>();", "world.ForEach<global::P, __ForEach.BJob1>")]
+    [TestCase("[Without<Q>, WithAny<T, P>] public struct G : ISystemGroup; [UpdateInGroup<G>] [EcsSystem] public ref struct S { [ForEach, Without<Q>] static void A(ref P p) { } [ForEach, With<P>] static void B() { } }",
+        "AFilter0 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T, global::P>();", // once, though both name it
+        "BFilter1 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T, global::P>();", "world.ForEach<global::P, __ForEach.BJob1>")]
     [TestCase("public record struct In<T>(int X) : IComponent; public interface IActor<TSelf> : ISystemGroupWith<In<TSelf>>, ISystemGroupWithout<Q> where TSelf : struct; "
         + "public struct Map : IActor<Map>; [UpdateInGroup<Map>] [EcsSystem] public ref struct S { [ForEach] static void A(ref P p) { } }",
         ".With<global::In<global::Map>>()", ".Without<global::Q>()")] // the group's filters through a generic interface

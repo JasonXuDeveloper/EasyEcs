@@ -76,11 +76,13 @@ public readonly partial struct QueryFilter
     /// <summary>Require <typeparamref name="T"/> to be absent.</summary>
     public QueryFilter Without<T>() where T : struct, IComponent => Adding(1, ComponentType<T>.Bit);
 
-    /// <summary>
-    /// Require at least one of the components named by <c>WithAny</c> calls: <c>WithAny&lt;Burning&gt;().WithAny&lt;Poisoned&gt;()</c>
-    /// matches entities with Burning, Poisoned or both.
-    /// </summary>
-    public QueryFilter WithAny<T>() where T : struct, IComponent => Adding(2, ComponentType<T>.Bit);
+    /// <summary>The shared core of the generated <c>WithAny&lt;T1..Tn&gt;</c>: each bit joins the filter's one "any of" set.</summary>
+    private readonly QueryFilter AddingWithAny(ReadOnlySpan<ushort> bits)
+    {
+        var filter = this;
+        foreach (var bit in bits) Add(ref filter, 2, bit);
+        return filter;
+    }
 
     /// <summary>
     /// Require <typeparamref name="T"/> and only rows whose <typeparamref name="T"/> was written at or after change tick

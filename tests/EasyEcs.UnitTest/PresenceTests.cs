@@ -231,7 +231,7 @@ public class PresenceTests
             default, QueryFilter.Create().With<Stun>(), QueryFilter.Create().Without<Stun>(),
             QueryFilter.Create().With<Stun>().With<Frozen>(), QueryFilter.Create().Without<Stun>().Without<Frozen>(),
             QueryFilter.Create().With<Stun>().Without<Frozen>(), QueryFilter.Create().Without<Frozen>().With<Health>(),
-            QueryFilter.Create().WithAny<Stun>().WithAny<Frozen>(),
+            QueryFilter.Create().WithAny<Stun, Frozen>(),
         ];
         foreach (var filter in filters)
         {

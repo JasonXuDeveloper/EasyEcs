@@ -32,12 +32,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
         });
     }
 
-    // ---------------- ChangedAny / RemovedAny ----------------
+    // ---------------- WithAny / ChangedAny / RemovedAny ----------------
 
     /// <summary>
-    /// The "any of these" change filters, 2..9 components: <c>QueryFilter.ChangedAny&lt;T1..Tn&gt;(since)</c> /
-    /// <c>RemovedAny</c> and the <c>[ChangedAny&lt;T1..Tn&gt;]</c> / <c>[RemovedAny&lt;T1..Tn&gt;]</c> attributes of
-    /// [ForEach] methods (one component is <c>Changed</c> / <c>Removed</c>).
+    /// The "any of these" filters, 2..9 components: <c>QueryFilter.WithAny&lt;T1..Tn&gt;()</c>,
+    /// <c>ChangedAny&lt;T1..Tn&gt;(since)</c> / <c>RemovedAny</c> and the <c>[WithAny&lt;T1..Tn&gt;]</c>,
+    /// <c>[ChangedAny&lt;T1..Tn&gt;]</c> / <c>[RemovedAny&lt;T1..Tn&gt;]</c> attributes of [ForEach] methods (one
+    /// component is <c>With</c> / <c>Changed</c> / <c>Removed</c>).
     /// </summary>
     private static string Filters()
     {
@@ -48,8 +49,18 @@ public sealed class ArityGenerator : IIncrementalGenerator
         {
             string tps = TypeParams(n);
             string cons = Lines(n, i => $"        where T{i} : struct, IComponent, ITracked");
+            string anyCons = Lines(n, i => $"        where T{i} : struct, IComponent");
             string bits = List(n, i => $"ComponentType<T{i}>.Bit");
             filter.Append($$"""
+                    /// <summary>
+                    /// Require at least one of <c>{{tps}}</c>: <c>WithAny&lt;Burning, Poisoned&gt;()</c> matches entities
+                    /// with Burning, Poisoned or both. Every <c>WithAny</c> call of a filter joins one set, combined with the
+                    /// other filters with AND (one component alone is <see cref="With{T}"/>).
+                    /// </summary>
+                    public QueryFilter WithAny<{{tps}}>()
+                {{anyCons}}
+                        => AddingWithAny([{{bits}}]);
+
                     /// <summary>
                     /// Only rows where at least one of <c>{{tps}}</c> was written at or after change tick
                     /// <paramref name="since"/>: <c>Changed&lt;T1&gt;(since)</c> OR ... OR <c>Changed&lt;T{{n}}&gt;(since)</c>
@@ -78,7 +89,19 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                 """);
             string attributeCons = Lines(n, i => $"    where T{i} : struct, IComponent, ITracked");
+            string anyAttributeCons = Lines(n, i => $"    where T{i} : struct, IComponent");
             attributes.Append($$"""
+                /// <summary>
+                /// The <see cref="ForEachAttribute"/> method requires at least one of <c>{{tps}}</c> (not passed in):
+                /// <c>[ForEach, WithAny&lt;Burning, Poisoned&gt;]</c>, <see cref="QueryFilter.WithAny{{{tps}}}()"/>. Several
+                /// attributes join one set; combined with the other filters with AND (one component alone is
+                /// <see cref="WithAttribute{T}"/>). On a system group (an <see cref="ISystemGroup"/> struct), every [ForEach]
+                /// method of the group's systems requires one of the group's.
+                /// </summary>
+                [AttributeUsage(AttributeTargets.Method | AttributeTargets.Struct, AllowMultiple = true)]
+                public sealed class WithAnyAttribute<{{tps}}> : Attribute
+                {{anyAttributeCons}};
+
                 /// <summary>
                 /// The <see cref="ForEachAttribute"/> method visits only entities where at least one of <c>{{tps}}</c> was
                 /// written since its system last ran (<see cref="SystemHandle.LastRunTick"/>; on the first run, every entity

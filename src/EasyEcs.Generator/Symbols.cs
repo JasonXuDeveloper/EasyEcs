@@ -22,7 +22,6 @@ internal static class Symbols
     public const string WithoutAttribute = "EasyEcs.WithoutAttribute<T>";
     public const string GroupWith = "EasyEcs.ISystemGroupWith<T>";
     public const string GroupWithout = "EasyEcs.ISystemGroupWithout<T>";
-    public const string WithAnyAttribute = "EasyEcs.WithAnyAttribute<T>";
     public const string ChangedAttribute = "EasyEcs.ChangedAttribute<T>";
     public const string RemovedAttribute = "EasyEcs.RemovedAttribute<T>";
     public const string EcsSystemAttribute = "EasyEcs.EcsSystemAttribute";
@@ -931,18 +930,26 @@ internal static class Symbols
     public static bool TracksSince(IMethodSymbol method) => AttributeFilters(method).Any(f =>
         f.Kind is FilterKind.Changed or FilterKind.Removed or FilterKind.ChangedAny or FilterKind.RemovedAny);
 
-    /// <summary>"ChangedAny" or "RemovedAny" for a <c>[ChangedAny&lt;T1..Tn&gt;]</c> / <c>[RemovedAny&lt;T1..Tn&gt;]</c> attribute class, else null.</summary>
-    public static string? AnyFilter(INamedTypeSymbol attribute) =>
-        attribute is { Arity: >= 2, Name: "ChangedAnyAttribute" or "RemovedAnyAttribute" } && Named(attribute.ContainingNamespace, "EasyEcs")
-            ? attribute.Name.Substring(0, attribute.Name.Length - "Attribute".Length)
-            : null;
+    /// <summary>
+    /// The kind of a generated "any of these" attribute class (<c>[WithAny&lt;T1..Tn&gt;]</c>, <c>[ChangedAny&lt;T1..Tn&gt;]</c>,
+    /// <c>[RemovedAny&lt;T1..Tn&gt;]</c>), else null.
+    /// </summary>
+    public static FilterKind? AnyFilter(INamedTypeSymbol attribute) =>
+        attribute.Arity < 2 || !Named(attribute.ContainingNamespace, "EasyEcs") ? null
+        : attribute.Name switch
+        {
+            "WithAnyAttribute" => FilterKind.WithAny,
+            "ChangedAnyAttribute" => FilterKind.ChangedAny,
+            "RemovedAnyAttribute" => FilterKind.RemovedAny,
+            _ => null,
+        };
 
     /// <summary>What a filter of a [ForEach] method (or of its system group) does with its component.</summary>
     public enum FilterKind { With, Without, WithAny, Changed, Removed, ChangedAny, RemovedAny }
 
     /// <summary>
     /// The filter attributes of <paramref name="symbol"/> (a [ForEach] method or a system group), one entry per filtered
-    /// type (<c>[ChangedAny&lt;A, B&gt;]</c> gives two), in declaration order: what the generator builds a query filter
+    /// type (<c>[WithAny&lt;A, B&gt;]</c> gives two), in declaration order: what the generator builds a query filter
     /// from and the analyzer checks, so both read the same list.
     /// </summary>
     public static IEnumerable<(FilterKind Kind, ITypeSymbol Type, AttributeData Attribute)> AttributeFilters(ISymbol symbol)
@@ -953,14 +960,13 @@ internal static class Symbols
             if (AnyFilter(cls) is { } any)
             {
                 foreach (var argument in cls.TypeArguments)
-                    yield return (any == "ChangedAny" ? FilterKind.ChangedAny : FilterKind.RemovedAny, argument, attribute);
+                    yield return (any, argument, attribute);
                 continue;
             }
 
             var from = cls.ConstructedFrom;
             FilterKind? kind = Named(from, WithAttribute) ? FilterKind.With
                 : Named(from, WithoutAttribute) ? FilterKind.Without
-                : Named(from, WithAnyAttribute) ? FilterKind.WithAny
                 : Named(from, ChangedAttribute) ? FilterKind.Changed
                 : Named(from, RemovedAttribute) ? FilterKind.Removed
                 : null;

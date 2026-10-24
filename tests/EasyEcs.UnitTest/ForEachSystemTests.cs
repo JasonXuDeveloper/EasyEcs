@@ -166,7 +166,7 @@ public struct DestroyDespitePromise : IForEachEntity<Health>, INoStructuralChang
 [EcsSystem]
 public ref struct CountHalted
 {
-    [ForEach, With<Position>, WithAny<Frozen>, WithAny<Dead>]
+    [ForEach, With<Position>, WithAny<Frozen, Dead>]
     static void Count(ref Score score) => score.Points++;
 }
 

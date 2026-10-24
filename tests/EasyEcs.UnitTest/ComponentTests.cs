@@ -184,7 +184,7 @@ public class ComponentTests
         Assert.That(_world.Count<Wide.Bit<Wide.D0, Wide.D0, Wide.D0>>(both), Is.Zero);
         Assert.That(_world.Count<Wide.Bit<Wide.D0, Wide.D0, Wide.D0>>(QueryFilter.Create().Without<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>()), Is.EqualTo(1));
         Assert.That(_world.Count<Wide.Bit<Wide.D2, Wide.D9, Wide.D8>>(QueryFilter.Create().With<Wide.Bit<Wide.D0, Wide.D0, Wide.D0>>()), Is.EqualTo(1));
-        Assert.That(_world.Count<Wide.Bit<Wide.D0, Wide.D0, Wide.D0>>(QueryFilter.Create().WithAny<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>()), Is.Zero);
+        Assert.That(_world.Count<Wide.Bit<Wide.D0, Wide.D0, Wide.D0>>(QueryFilter.Create().WithAny<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>, Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>()), Is.Zero);
 
         // Queries on bits past 255 look the cache up without allocating their key.
         long before = GC.GetAllocatedBytesForCurrentThread();

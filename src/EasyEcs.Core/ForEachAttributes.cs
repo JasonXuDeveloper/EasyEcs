@@ -4,8 +4,8 @@ namespace EasyEcs;
 
 /// <summary>
 /// Runs a static method of an <see cref="EcsSystemAttribute">[EcsSystem]</see> (or of any other type, through a generated entry point) for every entity matching its component parameters (and
-/// the <see cref="WithAttribute{T}"/> / <see cref="WithoutAttribute{T}"/> / <see cref="WithAnyAttribute{T}"/> filters), each update, after
-/// its <see cref="OnUpdateAttribute">[OnUpdate]</see> method, in declaration order.
+/// the <see cref="WithAttribute{T}"/> / <see cref="WithoutAttribute{T}"/> / <c>[WithAny&lt;T1, T2&gt;]</c> filters), each update, after
+/// its <c>OnUpdate</c> method, in declaration order.
 /// <para>Parameters: 1..9 components (<c>ref</c> to write, <c>in</c> to read, <see cref="Mut{T}"/> to write some rows; or <c>Span&lt;T&gt;</c> /
 /// <c>ReadOnlySpan&lt;T&gt;</c> for a batch method that receives runs of rows), singletons (<c>ref</c> / <c>in</c>), and
 /// optionally <see cref="Entity"/> and <see cref="World"/>.</para>
@@ -98,7 +98,7 @@ public sealed class ConsumeAttribute : Attribute;
 /// <see cref="ForEachAttribute"/> method outside a system takes for one entity: components (<c>ref</c> / <c>in</c>,
 /// <see cref="Mut{T}"/>, <see cref="Maybe{T}"/>), singletons, <see cref="Lookup{T}"/>, the <see cref="Entity"/>, the
 /// <see cref="World"/> and values of any other type, and filters (<see cref="WithAttribute{T}"/>,
-/// <see cref="WithoutAttribute{T}"/>, <see cref="WithAnyAttribute{T}"/>, <c>[Changed&lt;T&gt;]</c>, <c>[Removed&lt;T&gt;]</c>).
+/// <see cref="WithoutAttribute{T}"/>, <c>[WithAny&lt;T1, T2&gt;]</c>, <c>[Changed&lt;T&gt;]</c>, <c>[Removed&lt;T&gt;]</c>).
 /// It compiles to the job <c>entity.Run</c> runs (an <see cref="IForEachEntity{T1}"/> struct with its <c>WriteMask</c>,
 /// <see cref="INoStructuralChanges"/> when the method makes no structural change): one table lookup for all its
 /// components, no allocation.
@@ -162,14 +162,6 @@ public sealed class WithAttribute<T> : Attribute where T : struct, IComponent;
 /// </summary>
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Struct, AllowMultiple = true)]
 public sealed class WithoutAttribute<T> : Attribute where T : struct, IComponent;
-
-/// <summary>
-/// The <see cref="ForEachAttribute"/> method requires at least one of the components named by its
-/// <c>[WithAny&lt;T&gt;]</c> attributes (not passed in): <c>[ForEach, WithAny&lt;Burning&gt;, WithAny&lt;Poisoned&gt;]</c>.
-/// On a system group, every [ForEach] method of the group's systems requires one of the group's.
-/// </summary>
-[AttributeUsage(AttributeTargets.Method | AttributeTargets.Struct, AllowMultiple = true)]
-public sealed class WithAnyAttribute<T> : Attribute where T : struct, IComponent;
 
 /// <summary>
 /// The <see cref="ForEachAttribute"/> method visits only entities whose <typeparamref name="T"/> was written since its

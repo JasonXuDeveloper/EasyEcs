@@ -452,7 +452,7 @@ public sealed class BattleServer : IDisposable
     private static readonly QueryFilter Players = QueryFilter.Create().With<Player>();     // build filters once
     private static readonly QueryFilter AlivePlayers = Players.Without<Dead>();
     private static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>();
-    internal static readonly QueryFilter Afflicted = QueryFilter.Create().WithAny<Burning>().WithAny<Frozen>();
+    internal static readonly QueryFilter Afflicted = QueryFilter.Create().WithAny<Burning, Frozen>();
     private static readonly QueryFilter WrittenPlayers = Players.Changed<Health>(0);    // the tick is set per call
     internal static readonly QueryFilter[] Zones =                                        // one table each
         [Players.InZone(0), Players.InZone(1), Players.InZone(2), Players.InZone(3)];

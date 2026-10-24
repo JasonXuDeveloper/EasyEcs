@@ -149,16 +149,16 @@ public class QueryTests
     [Test]
     public void WithAnyNeedsOneOfTheComponents()
     {
-        var halted = QueryFilter.Create().WithAny<Frozen>().WithAny<Dead>();
+        var halted = QueryFilter.Create().WithAny<Frozen, Dead>();
         Assert.That(_world.Count<Position>(halted), Is.EqualTo(3));
-        Assert.That(_world.Count<Position>(QueryFilter.Create().WithAny<Health>()), Is.Zero);
+        Assert.That(_world.Count<Position>(QueryFilter.Create().WithAny<Health, Health>()), Is.Zero);
 
         // Removing the component keeps the row (a presence bit): the filter tests the bits.
         int removed = 0;
         foreach (var item in _world.Query<Position>(QueryFilter.Create().With<Frozen>()))
             if (removed++ == 0) item.Entity.Remove<Frozen>();
         Assert.That(_world.Count<Position>(halted), Is.EqualTo(2));
-        Assert.That(_world.Any<Position>(QueryFilter.Create().WithAny<Frozen>()), Is.True);
+        Assert.That(_world.Any<Position>(QueryFilter.Create().WithAny<Frozen, Health>()), Is.True);
 
         int visited = 0;
 #pragma warning disable EECS032 // the rows the query visits, counted one by one to check the filter's presence test

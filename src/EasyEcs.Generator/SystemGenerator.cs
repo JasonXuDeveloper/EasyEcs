@@ -619,8 +619,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
         }
 
         var chain = method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"))
-            .Concat(method.WithAny.Select(t => $".WithAny<{t}>()")).Concat(method.Changed.Select(t => $".Changed<{t}>(0)")).Concat(method.Removed.Select(t => $".Removed<{t}>(0)"))
-            .Concat(AnyCalls("ChangedAny", method.ChangedAny)).Concat(AnyCalls("RemovedAny", method.RemovedAny));
+            .Concat(AnyCalls("WithAny", method.WithAny, "()")).Concat(method.Changed.Select(t => $".Changed<{t}>(0)")).Concat(method.Removed.Select(t => $".Removed<{t}>(0)"))
+            .Concat(AnyCalls("ChangedAny", method.ChangedAny, "(0)")).Concat(AnyCalls("RemovedAny", method.RemovedAny, "(0)"));
         // Attribute type arguments cannot name type parameters (CS8968): the filter is one field, even for a generic method.
         sb.Append($"    internal static readonly global::EasyEcs.QueryFilter {method.Name}Filter{number} = global::EasyEcs.QueryFilter.Create(){string.Concat(chain)};\n\n");
     }
@@ -711,17 +711,17 @@ public sealed class SystemGenerator : IIncrementalGenerator
     private const string Vector = "global::System.Numerics.Vector", Vector512 = "global::System.Runtime.Intrinsics.Vector512";
 
     /// <summary>
-    /// A ChangedAny / RemovedAny set as calls of at most 9 components each (calls join one set): a set of one
+    /// A WithAny / ChangedAny / RemovedAny set as calls of at most 9 components each (calls join one set): a set of one
     /// (several attributes naming the same type) names it twice.
     /// </summary>
-    private static IEnumerable<string> AnyCalls(string kind, EquatableArray<string> types)
+    private static IEnumerable<string> AnyCalls(string kind, EquatableArray<string> types, string arguments)
     {
         const int max = 9;
         for (int at = 0; at < types.Length; at += max)
         {
             var call = types.Skip(at).Take(max).ToList();
             if (call.Count == 1) call.Add(call[0]);
-            yield return $".{kind}<{string.Join(", ", call)}>(0)";
+            yield return $".{kind}<{string.Join(", ", call)}>{arguments}";
         }
     }
 

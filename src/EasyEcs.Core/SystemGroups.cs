@@ -16,10 +16,10 @@ namespace EasyEcs;
 /// world.Update();                     // fixed tick: default group
 /// </code>
 /// A group may carry <see cref="WithAttribute{T}"/>, <see cref="WithoutAttribute{T}"/> and
-/// <see cref="WithAnyAttribute{T}"/> filters: the generator adds them to every [ForEach] method of its systems
+/// <c>[WithAny&lt;T1, T2&gt;]</c> filters: the generator adds them to every [ForEach] method of its systems
 /// (<c>[Without&lt;Inactive&gt;] public struct Gameplay : ISystemGroup;</c> keeps inactive entities out of the whole
 /// group), and so may the interfaces it implements: <see cref="ISystemGroupWith{T}"/>, <see cref="ISystemGroupWithout{T}"/>.
-/// Queries a system makes in its <see cref="OnUpdateAttribute">[OnUpdate]</see> method are its own.
+/// Queries a system makes in its <c>OnUpdate</c> method are its own.
 /// </summary>
 public interface ISystemGroup;
 

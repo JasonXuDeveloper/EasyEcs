@@ -471,6 +471,35 @@ public class CodeFixTests
         return actions;
     }
 
+    // Declarations whose old form no longer compiles, migrated from the compiler's error: single-type WithAny
+    // attributes and calls (CS0305) merged into one WithAny of several types (a lone one is With).
+    [TestCase("CS0305", "[EcsSystem] public ref struct S { [ForEach, WithAny<P>, WithAny<Q>] static void A(ref T t) => t.V++; }",
+        "[ForEach, WithAny<P, Q>] static void A", "Write it as WithAny<P, Q>")]
+    [TestCase("CS0305", "[EcsSystem] public ref struct S { [ForEach, With<T>]\n  [WithAny<P>]\n  [WithAny<Q>]\n  static void A(ref T t) => t.V++; }",
+        "[ForEach, With<T>]\n  [WithAny<P, Q>]\n  static void A", "Write it as WithAny<P, Q>")]
+    [TestCase("CS0305", "[EcsSystem] public ref struct S { [ForEach, WithAny<P>] static void A(ref T t) => t.V++; }",
+        "[ForEach, With<P>] static void A", "Write it as With<P>")]
+    [TestCase("CS0305", "[WithAny<P>, WithAny<Q>] public struct G : ISystemGroup;", "[WithAny<P, Q>] public struct G", "Write it as WithAny<P, Q>")]
+    [TestCase("CS0305", "public static class U { static readonly QueryFilter F = QueryFilter.Create().WithAny<P>().Without<T>().WithAny<Q>(); public static int N(World w) => w.Count<T>(F); }",
+        "QueryFilter.Create().WithAny<P, Q>().Without<T>();", "Write it as WithAny<P, Q>")]
+    [TestCase("CS0305", "public static class U { public static int N(World w) => w.Count<T>(QueryFilter.Create().WithAny<P>()); }",
+        "QueryFilter.Create().With<P>()", "Write it as With<P>")]
+    public async Task MigratesADeclarationOfTheOldForm(string id, string source, string expected, string title)
+    {
+        var document = Document(Data + source);
+        var actions = new List<CodeAction>();
+        var compiled = (await document.Project.GetCompilationAsync())!.GetDiagnostics();
+        foreach (var diagnostic in compiled.Where(d => d.Id == id).Take(1))
+            await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        Assert.That(actions.Select(a => a.Title), Is.EqualTo(new[] { title }), string.Join("\n", compiled));
+        var operation = (await actions[0].GetOperationsAsync(CancellationToken.None)).OfType<ApplyChangesOperation>().Single();
+        var fixedDocument = operation.ChangedSolution.GetDocument(document.Id)!;
+        var text = (await fixedDocument.GetTextAsync()).ToString();
+        Assert.That(text, Does.Contain(expected));
+        var errors = (await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error);
+        Assert.That(errors, Is.Empty, text);
+    }
+
     [Test]
     public async Task ByValueParameterOfOtherTypesHasNoFix()
     {

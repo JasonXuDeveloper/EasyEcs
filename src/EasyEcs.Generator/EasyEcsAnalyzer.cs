@@ -132,7 +132,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     public static readonly DiagnosticDescriptor FilterOutsideGroup = new("EECS023", "Filter on a struct that is no system group",
         "'{0}' carries [{1}], which filters only on [ForEach] methods and on system groups (ISystemGroup structs)",
         Category, DiagnosticSeverity.Error, true,
-        "[With<T>], [Without<T>] and [WithAny<T>] on an ISystemGroup struct join every [ForEach] method of the group's " +
+        "[With<T>], [Without<T>] and [WithAny<T1, T2>] on an ISystemGroup struct join every [ForEach] method of the group's " +
         "systems. On any other struct (a component) they do nothing.", helpLinkUri: Help("EECS023"));
 
     public static readonly DiagnosticDescriptor LocalForEach = new("EECS024", "[ForEach] on a local function",
@@ -576,10 +576,11 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (type.TypeKind == TypeKind.Struct && !Symbols.Implements(type, "EasyEcs.ISystemGroup"))
             foreach (var attribute in type.GetAttributes())
                 if (attribute.AttributeClass is { IsGenericType: true } cls
-                    && (Symbols.Named(cls.ConstructedFrom, Symbols.WithAttribute) || Symbols.Named(cls.ConstructedFrom, Symbols.WithoutAttribute) || Symbols.Named(cls.ConstructedFrom, Symbols.WithAnyAttribute)))
+                    && (Symbols.Named(cls.ConstructedFrom, Symbols.WithAttribute) || Symbols.Named(cls.ConstructedFrom, Symbols.WithoutAttribute)
+                        || Symbols.AnyFilter(cls) == Symbols.FilterKind.WithAny))
                     context.ReportDiagnostic(Diagnostic.Create(FilterOutsideGroup,
                         attribute.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken).GetLocation() ?? location,
-                        type.Name, cls.Name.Replace("Attribute", "") + "<" + cls.TypeArguments[0].Name + ">"));
+                        type.Name, cls.Name.Replace("Attribute", "") + "<" + string.Join(", ", cls.TypeArguments.Select(t => t.Name)) + ">"));
     }
 
     /// <summary>EECS036: a unique component with an EntityId key, or a component with a second index key.</summary>

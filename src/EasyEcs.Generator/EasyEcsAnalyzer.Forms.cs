@@ -377,8 +377,8 @@ public sealed partial class EasyEcsAnalyzer
         var attributes = new List<string>();
         while (value is InvocationExpressionSyntax { ArgumentList.Arguments.Count: 0, Expression: MemberAccessExpressionSyntax access })
         {
-            if (access.Name is GenericNameSyntax { Identifier.ValueText: "With" or "Without" or "WithAny", TypeArgumentList.Arguments.Count: 1 } filter)
-                attributes.Insert(0, $"{filter.Identifier.ValueText}<{filter.TypeArgumentList.Arguments[0]}>");
+            if (access.Name is GenericNameSyntax { Identifier.ValueText: "With" or "Without" or "WithAny" } filter)
+                attributes.Insert(0, $"{filter.Identifier.ValueText}<{string.Join(", ", filter.TypeArgumentList.Arguments)}>");
             else if (access is { Name.Identifier.ValueText: "Create", Expression: IdentifierNameSyntax { Identifier.ValueText: "QueryFilter" } or MemberAccessExpressionSyntax { Name.Identifier.ValueText: "QueryFilter" } })
                 return string.Join(", ", attributes);
             else return null;

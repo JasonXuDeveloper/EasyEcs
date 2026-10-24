@@ -1367,14 +1367,19 @@ public sealed partial class EasyEcsAnalyzer
             }
             else if (Symbols.Classify(p) is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Singleton)) return false;
 
+        var any = new List<string>();
         foreach (var (kind, type) in Symbols.AttributeFilters(method).Select(f => (f.Kind, f.Type))
                      .Concat(Symbols.GroupFilters(method).Select(f => (f.Kind, f.Type))))
             switch (kind)
             {
                 case Symbols.FilterKind.With: queried.Add(type); break;
-                case Symbols.FilterKind.Without or Symbols.FilterKind.WithAny: rest += $".{kind}<{type.ToMinimalDisplayString(model, at)}>()"; break;
+                case Symbols.FilterKind.Without: rest += $".Without<{type.ToMinimalDisplayString(model, at)}>()"; break;
+                case Symbols.FilterKind.WithAny: any.Add(type.ToMinimalDisplayString(model, at)); break;
                 default: return false; // Changed / Removed: the rows since the last run, which no bulk call selects
             }
+        // The method's and its group's WithAny attributes join one set, as one call (a set of one type is With).
+        if (any.Distinct().Count() is var distinct and > 0)
+            rest += distinct == 1 ? $".With<{any[0]}>()" : $".WithAny<{string.Join(", ", any.Distinct())}>()";
 
         if (queried.Count == 0 || queried.Any(t => t is ITypeParameterSymbol or { TypeKind: TypeKind.Error })) return false;
         string typeList = string.Join(", ", queried.Select(t => t.ToMinimalDisplayString(model, at)));

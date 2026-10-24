@@ -673,7 +673,7 @@ public class ChangedTests
         var frozen = world.CreateEntity(new Armor(1), new Frozen());
         var plain = world.CreateEntity(new Armor(1));
         world.Update();
-        var filter = QueryFilter.Create().Changed<Armor>(world.ChangeTick).WithAny<Stun>().WithAny<Frozen>();
+        var filter = QueryFilter.Create().Changed<Armor>(world.ChangeTick).WithAny<Stun, Frozen>();
         stunned.Get<Armor>().Value++;
         plain.Get<Armor>().Value++;
         Assert.That(world.Count<Armor>(filter), Is.EqualTo(1));

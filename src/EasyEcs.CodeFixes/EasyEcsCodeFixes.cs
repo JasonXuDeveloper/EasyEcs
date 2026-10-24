@@ -26,7 +26,8 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
             "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071",
-            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS088", "CS0246");
+            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS088", "EECS090", "CS0246", "CS0305", "CS0592",
+            "CS0200", "CS0272", "CS1501", "CS1729", "CS1739");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -90,6 +91,11 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                                    && IsOldSystemBase(baseType.Type) && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false)
                                    && ToSystem(old, baseType) is { } system:
                     Register(context, diagnostic, "Make it an [EcsSystem] ref struct", root, old, system);
+                    break;
+                case "CS0305" when node.FirstAncestorOrSelf<GenericNameSyntax>() is { } any && IsSingleWithAny(any)
+                                   && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false)
+                                   && MergedWithAny(any) is { } merged:
+                    Register(context, diagnostic, merged.Title, root, merged.Old, merged.New);
                     break;
                 case "EECS084" when kind == "Consume" && node.FirstAncestorOrSelf<ExpressionStatementSyntax>() is { Parent: BlockSyntax { Parent: MethodDeclarationSyntax method } } destroy:
                     diagnostic.Properties.TryGetValue("DropEntity", out var dropEntity);
