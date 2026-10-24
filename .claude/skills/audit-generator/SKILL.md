@@ -116,4 +116,6 @@ tools/bench.sh GeneratorBenchmark
   code to the form.
 - A benchmark of the generated form against the hand-written one (`ForEntityBenchmark`, `ConsumeBenchmark`,
   `KernelBenchmark`, `ReduceBenchmark` are the pattern), and GeneratorBenchmark for the per-keystroke cost.
-- The guide page's `You write` / `The generator writes` tabs from real output (a docs to-do).
+- `You write` / `The generator writes` from real output wherever the form appears in an example: guide page, README
+  (`<details>`), docs home, getting started, battle server walkthrough (a docs to-do; `audit-docs` part 3). A change
+  to a generated form lists every page showing its old output.

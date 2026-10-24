@@ -20,6 +20,8 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
 
 - **Wrong (Error) or likely wrong (Warning)**: a structural change in a pass, a ref used after a change, shared
   writes from parallel code, filters no entity passes.
+- **Generic calls where a generated member exists stay a Warning** (EECS033), never an Error: the generic API is
+  right in generic code and the core; the generator and the vector loops recognize both forms through `Symbols`.
 - **Costly or a better form exists (Warning: users miss Info)**: write access that only reads, per-row lookups, a `Query` loop that only
   reads (`Read`), per-entity structural changes (bulk calls), a method that could be a vector loop (EECS055 /
   EECS056, the exact reason from `Kernel.Vectorize`). Info is left for hints a user may not be able to act on

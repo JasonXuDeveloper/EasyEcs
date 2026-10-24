@@ -25,6 +25,13 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/CLAUDE.md` first.
      that compiles; where the generator writes code, Tabs `You write` / `The generator writes` show both (real
      generated output, checked against `obj/**/generated`); a hand-written alternative only when it is the right
      choice somewhere, saying where;
+   - **what the generator writes, everywhere it writes it**: not only guide pages. Every headline example whose code
+     the generator turns into something faster (README, the docs home, getting started, the battle server walkthrough,
+     samples pages, cheat sheet) shows it: on the site `You write` / `The generator writes` Tabs; in the README (GitHub
+     has no tabs) a `<details><summary>What the generator writes</summary>` block under the example. The generated
+     side is real output from `obj/**/generated`, trimmed to what matters (the vector loop, the bulk call, the job),
+     with a comment per step saying why it is faster (lanes per instruction, whole words, no per-row call), and it is
+     refreshed whenever the generator changes that form;
    - **full example**: a short program that runs (the "Full example" section, `doccheck=example` fences);
    - **how to use it fast**: the high-performance form with an example (vector loop eligible, `Parallel`, `ChunkRows`,
      `Read` over `Query`, bulk calls, `Mut<T>`, values at creation), each choice with its benchmark through
