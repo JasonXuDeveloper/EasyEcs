@@ -6,7 +6,9 @@
         <Nullable>disable</Nullable>
         <IsPackable>false</IsPackable>
         <!-- EECS069: fixtures hold references on purpose (SerializationTests asserts that a save of one throws). -->
-        <NoWarn>$(NoWarn);EECS069</NoWarn>
+        <!-- The tests exercise the generic API and hand-written parts the generated forms stand for (EECS033, EECS065,
+             EECS067); EECS069: test components that are never saved. -->
+        <NoWarn>$(NoWarn);EECS033;EECS065;EECS067;EECS069</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>

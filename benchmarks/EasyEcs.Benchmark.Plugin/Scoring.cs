@@ -5,10 +5,7 @@ namespace EasyEcs.Benchmark.Plugin;
 
 public record struct Score(int Value) : IComponent, ITracked;
 
-public record struct Badge(int Level) : IComponent, IIndexed<int>
-{
-    public int Key => Level;
-}
+public partial record struct Badge([IndexKey] int Level) : IComponent;
 
 public record struct Bonus(int Points) : ISingletonComponent;
 

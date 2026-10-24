@@ -93,9 +93,9 @@ public ref struct CombatSystem
         stats.Hits++;
         health.Value -= attack.Damage;
 
-        if (Rng.Chance(stats.Tick, entity.Id.Index, 1, 50) && !entity.Has<Burning>())
+        if (Rng.Chance(stats.Tick, entity.Id.Index, 1, 50) && !entity.HasBurning)
             entity.Set(new Burning { Ticks = 10, DamagePerTick = 3 });
-        else if (Rng.Chance(stats.Tick, entity.Id.Index, 2, 20) && !entity.Has<Stunned>())
+        else if (Rng.Chance(stats.Tick, entity.Id.Index, 2, 20) && !entity.HasStunned)
             entity.Set(new Stunned { Ticks = 5 });
     }
 }
@@ -109,14 +109,14 @@ public ref struct StatusSystem
     {
         health.Value -= burning.DamagePerTick;
         if (--burning.Ticks <= 0)
-            entity.Remove<Burning>();
+            entity.RemoveBurning();
     }
 
     [ForEach]
     private static void Recover(Entity entity, ref Stunned stunned)
     {
         if (--stunned.Ticks <= 0)
-            entity.Remove<Stunned>();
+            entity.RemoveStunned();
     }
 }
 
@@ -128,9 +128,9 @@ public ref struct DeathSystem
     private static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
     {
         if (health.Value > 0) return;
-        entity.Set(new Dead());
+        entity.SetDead();
         stats.Deaths++;
-        if (entity.Has<Npc>()) stats.NpcKills++;
+        if (entity.HasNpc) stats.NpcKills++;
     }
 }
 
@@ -161,7 +161,7 @@ public ref struct RespawnSystem
     private static void Respawn(Entity entity, ref Health health)
     {
         health.Value = health.Max;
-        entity.Remove<Dead>();
+        entity.RemoveDead();
     }
 }
 
@@ -186,8 +186,8 @@ public ref struct ClockSystem
     [OnUpdate]
     static void OnUpdate(World world)
     {
-        ref var stats = ref world.GetSingleton<WorldStats>();
-        stats.CellChanges += world.GetSingleton<AoiChanges>().Count;
+        ref var stats = ref world.WorldStats;
+        stats.CellChanges += world.AoiChanges.Count;
         stats.Tick++;
     }
 }
@@ -200,7 +200,7 @@ public static class Simulation
     /// </summary>
     public static void WarmUp(World world, int ticks = 200)
     {
-        ref var stats = ref world.GetSingleton<WorldStats>();
+        ref var stats = ref world.WorldStats;
         for (int i = 0; i < ticks; i++) world.Update();
         if (stats.Hits == 0 || stats.Deaths == 0 || stats.Spawns == 0 || stats.CellChanges == 0)
             throw new System.InvalidOperationException(

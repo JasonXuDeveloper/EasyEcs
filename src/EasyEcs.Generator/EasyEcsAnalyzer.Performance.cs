@@ -86,7 +86,7 @@ public sealed partial class EasyEcsAnalyzer
 
     public static readonly DiagnosticDescriptor GeneratedMember = new("EECS033", "A generated member says it shorter",
         "'{0}' can be written '{1}'",
-        Category, DiagnosticSeverity.Info, true,
+        Category, DiagnosticSeverity.Warning, true,
         "The generator writes named members for every component and singleton (entity.Health, HasHealth, SetHealth(…), " +
         "IsDead, world.Clock, world.ZoneIndex, item.Position) that call the generic API: the same call, without " +
         "repeating the type.",
@@ -102,7 +102,7 @@ public sealed partial class EasyEcsAnalyzer
 
     public static readonly DiagnosticDescriptor UntrackedMut = new("EECS039", "A Mut<T> of a component that is not tracked",
         "Parameter '{0}' of {1} is a Mut<{2}>, but {2} is not tracked (ITracked): nothing is stamped either way; take it by 'ref'",
-        Category, DiagnosticSeverity.Info, true,
+        Category, DiagnosticSeverity.Warning, true,
         "Mut<T> stamps the rows a method writes, one by one, so [Changed<T>] systems visit only those. A component that " +
         "is not tracked has no stamps: a Mut of it is a 'ref' parameter behind a wrapper, Value and Write() where the " +
         "ref would do.", helpLinkUri: Help("EECS039"));

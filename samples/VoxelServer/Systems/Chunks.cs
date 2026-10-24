@@ -84,7 +84,7 @@ public ref struct ChunkUnloadSystem
     [ForEach(Slices = Rules.TicksPerSecond), With<Chunk>, Without<Unloading>]
     static void Unload(Entity chunk, in Viewers viewers, in Clock clock)
     {
-        if (viewers.Count == 0 && clock.Tick - viewers.EmptySince > Rules.UnloadAfter) chunk.Set(new Unloading());
+        if (viewers.Count == 0 && clock.Tick - viewers.EmptySince > Rules.UnloadAfter) chunk.SetUnloading();
     }
 }
 

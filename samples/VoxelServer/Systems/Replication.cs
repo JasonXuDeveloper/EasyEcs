@@ -96,7 +96,7 @@ public ref struct ClockSystem
     static void OnUpdate(World world)
     {
         long tick = ++world.Clock.Tick;
-        world.GetSingleton<EntityRandom>().Tick = (ulong)tick;
+        world.EntityRandom.Tick = (ulong)tick;
     }
 }
 // #endregion clock

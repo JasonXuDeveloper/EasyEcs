@@ -55,7 +55,7 @@ using (var healing = new World())
     healing.AddSystem<EasyEcs.Aot.Library.Regen<Life>>();
     var patient = healing.CreateEntity(new Life { Value = 0 });
     for (int i = 0; i < 4; i++) healing.Update();
-    Check(patient.Read<Life>().Value == 2, "a library's generic system runs on every second update");
+    Check(patient.Life.Value == 2, "a library's generic system runs on every second update");
 }
 
 Console.WriteLine($"AOT battle: {battle.Tick} ticks, {battle.Hits} hits, {battle.Deaths} deaths, {server.World.EntityCount} entities");

@@ -23,7 +23,7 @@ public sealed partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor HandWrittenReduce = new("EECS086", "A singleton accumulated row by row",
         "Parameter '{0}' of {1} accumulates into singleton {2} row by row ({3}), so the method runs on one thread and without a vector loop; {4}: each chunk keeps a partial result, and the pass's result replaces {2}, so its reset in '{5}' goes",
-        Category, DiagnosticSeverity.Info, true,
+        Category, DiagnosticSeverity.Warning, true,
         "A 'ref' singleton parameter is one value every row writes: the method cannot run in parallel (each chunk would " +
         "race on it), and its vector loop has no lane to keep it in. A Reduce<T> parameter gives each chunk of rows its own " +
         "partial result, starting at T's Identity, and combines them in row order into T when the pass ends: the same " +
@@ -44,7 +44,7 @@ public sealed partial class EasyEcsAnalyzer
 
     public static readonly DiagnosticDescriptor HandWrittenEmit = new("EECS089", "Records appended to a singleton row by row",
         "Parameter '{0}' of {1} appends {2} records to '{3}' row by row, so the method runs on one thread; an 'Emit<{2}> {4}' parameter appends them per chunk, joined in row order into singleton Emitted<{2}> when the pass ends",
-        Category, DiagnosticSeverity.Info, true,
+        Category, DiagnosticSeverity.Warning, true,
         "A list a singleton holds, filled through a 'ref' parameter, is one list every row writes: the method cannot run in " +
         "parallel, and the list grows by doubling as the records come. An Emit<T> parameter gives each chunk of rows a " +
         "pooled list and appends the lists to Emitted<T> in chunk order when the pass ends: the same records in the same " +

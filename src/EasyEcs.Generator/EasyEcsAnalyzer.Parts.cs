@@ -45,7 +45,7 @@ public sealed partial class EasyEcsAnalyzer
 
     public static readonly DiagnosticDescriptor HandWrittenReduction = new("EECS065", "A reduction the field attributes can declare",
         "'{0}' combines field by field ({1}): declare it with attributes, and the generator writes Identity and Combine",
-        Category, DiagnosticSeverity.Info, true,
+        Category, DiagnosticSeverity.Warning, true,
         "A hand-written IReduction<T> whose Identity and Combine apply one of sum, product, minimum, maximum, and, or to " +
         "each field is what the reduction attributes declare: [Sum] public int Alive; [Min] public float Lowest; on a " +
         "partial struct. The generator then writes both members, with the right identity for each field.",
@@ -61,7 +61,7 @@ public sealed partial class EasyEcsAnalyzer
 
     public static readonly DiagnosticDescriptor HandWrittenKey = new("EECS067", "An index key or a group an attribute can declare",
         "'{0}.{1}' returns {2}: declare it with [{3}] on {4}, and the generator writes {1}",
-        Category, DiagnosticSeverity.Info, true,
+        Category, DiagnosticSeverity.Warning, true,
         "A Key that returns a field, a property or the value itself is what [IndexKey] (and [UniqueKey] for a unique index) " +
         "declares on that member, or on the type for the value itself, of a partial struct; a Group that returns an int " +
         "member, or an enum of int cast to int, is what [Group] declares on that member. The generator writes the " +

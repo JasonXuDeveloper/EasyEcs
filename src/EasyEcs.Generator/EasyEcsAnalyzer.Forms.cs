@@ -20,7 +20,7 @@ public sealed partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor HandWrittenEntityJob = new("EECS080", "A hand-written one-entity job",
         "'{0}' is a job written by hand and run only with entity.Run: [ForEntity] on a static method writes the job, its WriteMask and its entry point ({1})",
-        Category, DiagnosticSeverity.Info, true,
+        Category, DiagnosticSeverity.Warning, true,
         "A struct implementing IForEachEntity<T1..Tn>, created and handed to entity.Run, is what [ForEntity] generates " +
         "from a static method: the method's 'ref' parameters make the WriteMask, its filters the QueryFilter, and its other " +
         "parameters the values the entry point takes. The fix turns the struct into a static class with a [ForEntity] " +
@@ -44,7 +44,7 @@ public sealed partial class EasyEcsAnalyzer
 
     public static readonly DiagnosticDescriptor HandWrittenConsume = new("EECS084", "A [ForEach] method that destroys every entity it visits",
         "[ForEach] method '{0}' ends by destroying the entity it visits, on every path: [Consume] does it ({1})",
-        Category, DiagnosticSeverity.Info, true,
+        Category, DiagnosticSeverity.Warning, true,
         "A method that handles event or command entities and destroys each one is a consuming pass: [Consume] destroys " +
         "exactly the rows the pass visited. A method that makes no structural change has them destroyed at once when " +
         "the pass ends (one DestroyAll of its filter, an emptied table at a time), instead of a destroy and a hole per row.",

@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
+        <!-- Benchmarks measure the generic and hand-written forms against the generated ones; BattleServer.cs is kept clean by tests/EasyEcs.Aot (warnings as errors). -->
+        <NoWarn>$(NoWarn);EECS033;EECS065;EECS067;EECS084</NoWarn>
         <OutputType>Exe</OutputType>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>disable</ImplicitUsings>

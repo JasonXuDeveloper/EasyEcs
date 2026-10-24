@@ -2322,7 +2322,7 @@ public class GeneratorTests
     [TestCase("EECS030", DiagnosticSeverity.Warning)]
     [TestCase("EECS031", DiagnosticSeverity.Warning)]
     [TestCase("EECS032", DiagnosticSeverity.Warning)]
-    [TestCase("EECS033", DiagnosticSeverity.Info)]
+    [TestCase("EECS033", DiagnosticSeverity.Warning)]
     [TestCase("EECS034", DiagnosticSeverity.Error)]
     public void SeveritySaysWhatARuleCosts(string id, DiagnosticSeverity severity) =>
         Assert.That(new EasyEcsAnalyzer().SupportedDiagnostics.Single(d => d.Id == id).DefaultSeverity, Is.EqualTo(severity));
@@ -2493,7 +2493,7 @@ public class GeneratorTests
     [TestCase("EECS036", DiagnosticSeverity.Error)]
     [TestCase("EECS037", DiagnosticSeverity.Warning)]
     [TestCase("EECS038", DiagnosticSeverity.Warning)]
-    [TestCase("EECS039", DiagnosticSeverity.Info)]
+    [TestCase("EECS039", DiagnosticSeverity.Warning)]
     [TestCase("EECS046", DiagnosticSeverity.Warning)]
     [TestCase("EECS040", DiagnosticSeverity.Error)]
     [TestCase("EECS041", DiagnosticSeverity.Error)]
