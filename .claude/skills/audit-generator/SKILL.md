@@ -8,6 +8,23 @@ description: Audit the EasyEcs source generators (ArityGenerator, ComponentGener
 Files: `src/EasyEcs.Generator` (netstandard2.0, loaded by every Roslyn host). Generator time is IDE latency on
 every keystroke of every user, so it is performance like the runtime's.
 
+The generators have three jobs, and an audit checks all three, not only their speed:
+
+1. **Users write a thing once** (CLAUDE.md, definition of done 2): what they would otherwise write twice is
+   generated: members per component (`entity.X`, `SetX`, `TryGetX`, `world.XIndex`), arity families, system code and
+   the set per assembly, jobs and entry points (`[ForEntity]`), parts (`[Sum]`, `[IndexKey]`, `[Group]`), type
+   setup (`[GroupBy]`, `[WhenTargetDestroyed]`, `[NotSaved]`), the save registry. Look for boilerplate still left in
+   `samples/`, templates, `BattleServer.cs` and the docs examples (a hand-written job, a reset-then-accumulate
+   singleton, a registry call, a copy per arity): each is a candidate for an attribute, a parameter or a generated
+   member, with the analyzer rule and code fix that move users to it (`audit-analyzer`).
+2. **Users write the plain form, the generator emits the fast one** (Burst's idea, D68 / D90): a `[ForEach]` method
+   becomes a vector loop (`Kernel*.cs`); a parameter does per chunk what users would do by hand (`Reduce<T>`,
+   `Emit<T>`, `Scratch<T>`, `Lookup<T>`, `Tile<,>`); the schedule follows declarations (`Parallel`, `ChunkRows`,
+   `Slices`, `[UpdateInterval]`, `[Consume]`, stages from read/write sets). Look for forms users write that fall back
+   to scalar or to a serial pass, rank them by how often they appear (EECS055 / EECS056 reasons over the samples and
+   docs), and support the most frequent next. The research behind a new form belongs to `audit-perf`.
+3. **The generators are fast**, because they run on every keystroke (below).
+
 ## Measure first
 
 `benchmarks/EasyEcs.Benchmark/GeneratorBenchmark.cs` (class `GeneratorBenchmark`): the three generators over the
@@ -70,6 +87,17 @@ tools/bench.sh GeneratorBenchmark        # or: dotnet run ... -- --filter '*.Gen
   and a look at its Tier1 asm (`tools/jitdisasm.sh`): no call in the loop body, no unexpected range check.
 - A change to `Kernel` must leave the code generated for `WorldSimulation.cs` and `BattleServer.cs` identical, or
   ship with their BenchmarkDotNet numbers.
+
+## Done means (each new generated form)
+
+- A `GeneratorTests` generated-output test and a caching assertion (the stage in `TrackedStages`).
+- The analyzer reports what the generator skips (same `Symbols` / `Kernel` function) and a code fix moves
+  hand-written code to the form.
+- Behaviour tests in `tests/EasyEcs.UnitTest`; for vector loops, equivalence with the scalar method; for parallel
+  forms, bit-identical results at 1 and 4 threads; the 0 B allocation test.
+- A benchmark of the generated form against the hand-written one (`ForEntityBenchmark`, `ConsumeBenchmark`,
+  `KernelBenchmark`, `ReduceBenchmark` are the pattern), and GeneratorBenchmark for the per-keystroke cost.
+- Docs: the guide page's `You write` / `The generator writes` tabs from real output, `easyecs-rules.md`.
 
 ## Newer features (verdicts: [D63](/en/docs/decisions#d63-roslyn-features))
 

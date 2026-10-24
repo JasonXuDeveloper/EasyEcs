@@ -27,9 +27,12 @@ description: Audit EasyEcs names (public Core API, generated members, analyzer d
    - booleans: Is/Has/Can, and no mutator named like a predicate;
    - options: a capacity says Capacity.
 6. **Analyzer**: every DiagnosticDescriptor (field name, title, message) in `EasyEcsAnalyzer*.cs` matches its rule.
-7. **Internals**: private and internal names that reuse a public term for something else (Runner, Passes, Groups,
+7. **New since the last round**: every public name the changelog adds (attributes, parameters, generated members,
+   options) gets the questions above first; it is cheapest to change before a release.
+8. **zh**: the Chinese term of each name follows the glossary in `tools/ApiDocs/zh/README.md` (one term per concept).
+9. **Internals**: private and internal names that reuse a public term for something else (Runner, Passes, Groups,
    Forget, Rows, ChangeTick).
-8. **Output**: a table per layer (current | problem | proposed | breaking | confidence | call site before → after),
+10. **Output**: a table per layer (current | problem | proposed | breaking | confidence | call site before → after),
    ranked by impact, split into clearly right vs owner's call, plus internal renames and a one-line
    "checked and fine" list.
 

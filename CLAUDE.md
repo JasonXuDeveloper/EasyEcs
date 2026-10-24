@@ -395,6 +395,7 @@ person can follow them as checklists). Update a skill when a round teaches somet
 | `audit-generator` | generator speed, incremental best practices, caching tests, newer Roslyn features |
 | `audit-analyzer` | overlapping or missing EECS rules, false positives, code fixes, shared `Symbols` checks |
 | `audit-naming` | ambiguous or wrong names in the public API, generated members, analyzer descriptors, internals |
+| `audit-perf` | the next performance win: ideas from Burst, CUDA, stencil codes, OpenMP, MPI, OS schedulers and .NET 10, proven with BenchmarkDotNet |
 | `audit-docs` | stale names, exemplary examples, best practices, duplication, en/zh drift |
 
 ## Engineering principles (apply to every change)

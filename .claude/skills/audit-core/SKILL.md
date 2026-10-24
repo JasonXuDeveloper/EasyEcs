@@ -35,6 +35,14 @@ Follow CLAUDE.md (performance first, zero allocation on hot paths, structural ga
   filter's unwritten words with `NextWord`. A loop that tests every word costs a few rows in a large table as much as
   a scan (`SparseBenchmark.PassOverTheFew`).
 
+- **One shared core, thin typed wrappers**: a generic method with a body of its own per T, or a T1..T9 family
+  written by hand instead of an `ArityGenerator` template.
+- **Unbounded memory**: a list, pool or log that grows without a cap or a release (`TrimExcess`, pool limits, the
+  destroy log's capacity); per-entity state outside `EntityMeta`.
+- **Ideas from elsewhere** (`audit-perf`): a loop that a GPU, stencil, OpenMP or database technique would run
+  faster (whole words, zone maps, halos, chunk claiming, column loads); a .NET 10 API that does the job cheaper
+  (`Vector512`, `InlineArray`, `AlternateLookup`, `Lock`). Report them; build only with numbers.
+
 ## Rules for fixes
 
 - Every bug gets a regression test that fails before the fix (run it against the old code once).
@@ -42,3 +50,8 @@ Follow CLAUDE.md (performance first, zero allocation on hot paths, structural ga
   cases); revert it if anything regresses. Never stopwatches.
 - A non-obvious choice or a rejected idea gets a decision record (`docs/content/decisions.mdx` + `.zh.mdx`).
 - User-visible behavior: changelog (Fixes / Changes), migration entry when code must change, README "What's new".
+- Tests, one file per feature: behaviour; edge cases (stale ids, recycled ids, empty tables, structural changes
+  mid-pass, retired entities, exceptions mid-pass); the 0 B allocation test; bit-identical at 1 and 4 threads for
+  parallel code.
+- A public API's complexity row in `docs/content/api.mdx` / `.zh.mdx` and its XML doc with the zh entry
+  (`tools/ApiDocs/zh`, rerun ApiDocs); docs pages themselves wait for the final docs pass (collect the to-dos).

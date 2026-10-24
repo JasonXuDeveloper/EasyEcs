@@ -20,9 +20,26 @@ list: `docs/content/guide/analyzer.mdx` and the range in CLAUDE.md (EECS002-089)
   query loops, branch walks). The generators read the same helpers: what the generator skips is what the analyzer
   reports.
 - Rule ids are stable; a removed id is never reused.
-- Severity: Error only when the code cannot be right; Warning for cost and likely bugs.
-- A fix is offered only when it is always correct (e.g. "make it static" only if no instance member is used and
-  nothing calls the method); otherwise no fix, and the message says what to do.
+- **Coverage** (CLAUDE.md, definition of done 3): every misuse that compiles and every pattern that works but
+  costs gets a rule. Three kinds:
+  - wrong code (Error) and likely wrong code (Warning): a structural change in a pass, a ref used after a change,
+    shared writes from parallel code, filters no entity passes;
+  - code that costs (Info, a performance hint): write access that only reads, per-row lookups, a `Query` loop that
+    only reads (`Read`), per-entity structural changes (bulk calls), a method that could be a vector loop (EECS055 /
+    EECS056 with the exact reason from `Kernel.Vectorize`);
+  - code written by hand that the generator writes (EECS080-089): a hand-written job instead of `[ForEntity]`,
+    destroying every visited row instead of `[Consume]`, a singleton accumulated row by row instead of `Reduce<T>`,
+    other entities read through the World instead of `Lookup<T>`, records appended by hand instead of `Emit<T>`,
+    hand-written parts instead of `[Sum]` / `[IndexKey]` / `[Group]`.
+- Severity: Error when the code is wrong, Warning when it is likely wrong, Info for performance hints.
+- The message names the type or member and the fix (what to write instead).
+- **Code fix for every rule whose fix is mechanical**, converting hand-written patterns to the generated or attribute
+  form (solution-wide when the call sites change too); the analyzer computes the fix as diagnostic properties, and a
+  `CodeFixTests` case covers it. A fix is offered only when it is always correct (e.g. "make it static" only if no
+  instance member is used and nothing calls the method); otherwise no fix, and the message says what to do.
+- **Cost**: rules run on every build. `GeneratorBenchmark.CompileAndAnalyze` minus `Compile` is the analyzer's
+  cost; a new rule must not move it beyond the error (symbols resolved once per compilation, no body binding the
+  generator would not do, cheap syntax checks first).
 
 ## Look for
 
@@ -33,6 +50,10 @@ list: `docs/content/guide/analyzer.mdx` and the range in CLAUDE.md (EECS002-089)
 - Mistakes users make that no rule catches (`docs/content/guide/common-mistakes.mdx` and `guide/troubleshooting.mdx`
   are the source).
 - Messages that no longer match runtime behavior.
+- New features without their rules: each new attribute, parameter or API added since the last round (changelog) is
+  checked for the misuse it invites and for the hand-written pattern it replaces.
+- Patterns in `samples/`, `BattleServer.cs`, `WorldSimulation.cs`, templates and docs examples that a rule should
+  flag but does not (build them with the analyzer and read what it says: exemplary code reports nothing).
 
 ## Done means
 

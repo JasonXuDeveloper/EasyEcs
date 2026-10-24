@@ -14,7 +14,23 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/CLAUDE.md` first.
 2. **Examples are exemplary** (`ecs-principles.mdx`): plain data components, one system per responsibility, stateless
    systems, generated members (`entity.Health`, `item.Health`, `SetX`) over generic calls, and no analyzer warning
    (Read for read-only loops, values at creation instead of Set, ...). DocCheck compiles fences, not their quality.
-3. **Anatomy**: what / when / how / full example / fast / costs / pitfalls / best practices / related.
+3. **Anatomy** (WRITING.md "Page anatomy"; a feature's guide page has every part, in this order):
+   - **what it is**: the problem it solves, in two to four sentences;
+   - **when to use it**: an `idea` Callout (use it for) and a `warn` Callout (do not use it for: what to use instead);
+   - **how to use it**: the recommended form first, the one the generator supports (an attribute, a `[ForEach]`
+     parameter, a generated member: `entity.Health`, `SetX`, `[Sum]`, `Reduce<T>`), each step with a complete example
+     that compiles; where the generator writes code, Tabs `You write` / `The generator writes` show both (real
+     generated output, checked against `obj/**/generated`); a hand-written alternative only when it is the right
+     choice somewhere, saying where;
+   - **full example**: a short program that runs (the "Full example" section, `doccheck=example` fences);
+   - **how to use it fast**: the high-performance form with an example (vector loop eligible, `Parallel`, `ChunkRows`,
+     `Read` over `Query`, bulk calls, `Mut<T>`, values at creation), each choice with its benchmark through
+     BenchTable from `bench.json`;
+   - **what it costs**: memory per entity or row, time per operation, what is free when unused; the same complexity in
+     `docs/content/api.mdx` / `.zh.mdx` (O(...) per call, rerun ApiDocs);
+   - **pitfalls**: Mistake | What happens | Caught by (the EECS rule and its code fix);
+   - **best practices**: what the battle server and samples do and why;
+   - **related**: two to four Cards.
 4. **Behavior matches the code**: after a fix, pages that describe the old behavior (pitfalls, troubleshooting,
    analyzer messages) are rewritten. Verify a claim with a throwaway test when unsure.
 5. **Numbers**: no typed benchmark numbers outside `decisions.mdx` (the site reads `bench.json`).
@@ -34,5 +50,15 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/CLAUDE.md` first.
 - Copies that must exist (analyzer.mdx, common-mistakes, troubleshooting, cheat-sheet, easyecs-rules.md, api.mdx
   complexity) agree with each other and with the code.
 - The project's own docs never mention other products that use it.
+- **Every feature is everywhere it belongs** (CLAUDE.md, definition of done 7): its guide page; `features.mdx` and
+  the comparison tables when peers differ; `cheat-sheet`, `glossary`, `api.mdx` (complexity) and the generated
+  `reference/` (ApiDocs, zh entries); `analyzer.mdx` for its rules; `docs/public/easyecs-rules.md`; changelog, README
+  "What's new", migration for a breaking change; a decision record for every non-obvious choice and dropped idea;
+  the roadmap; the battle server (`BattleServer.cs` regions + `example.mdx` walkthrough) and the samples where it
+  belongs, as exemplary code; CLAUDE.md's layout.
+- **Inspiration is named where it helps** (OpenMP `threadprivate` for `Scratch<T>`, `reduction` for `Reduce<T>`,
+  stencil halos for `Tile<,>`, Burst for vector loops): one clause in "what it is", the comparison in decisions.
+- **Docs come last**: while code still changes, agents collect docs to-dos instead of editing pages; one full pass
+  at the end, with `tools/bench.sh --site --sync` on the final code (numbers come from `bench.json` only).
 
 Finish with DocCheck, ApiDocs and `bun run check`; `verify` runs `bun run build` (SEO, search expectations).
