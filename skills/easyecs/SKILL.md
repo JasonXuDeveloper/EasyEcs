@@ -1,6 +1,6 @@
 ---
 name: easyecs
-description: Write correct, fast EasyEcs code (the .NET 10 ECS on NuGet as EasyEcs) - components and singletons as data, stateless [EcsSystem] ref structs with [ForEach] methods, generated members, filters, change tracking, parallel passes, Reduce/Emit/Scratch/Lookup parameters, vector loops, saves - and avoid what the EECS analyzer reports. Use when writing, reviewing or migrating code that uses EasyEcs.
+description: "Write correct, fast EasyEcs code (the .NET 10 ECS on NuGet as EasyEcs) - components and singletons as data, stateless [EcsSystem] ref structs with [ForEach] methods, generated members, filters, change tracking, parallel passes, Reduce/Emit/Scratch/Lookup parameters, vector loops, saves - and avoid what the EECS analyzer reports. Use when writing, reviewing or migrating code that uses EasyEcs. Triggers: a .cs file or project referencing EasyEcs, [EcsSystem], [ForEach], IComponent, World, Entity, an EECS diagnostic, ECS architecture questions for .NET, 用 EasyEcs 写组件、系统、查询."
 ---
 
 # EasyEcs rules for AI assistants

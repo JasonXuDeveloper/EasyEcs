@@ -1,6 +1,6 @@
 ---
 name: audit-analyzer
-description: Audit the EasyEcs analyzer (EECS rules) and code fixes - missing rules for wrong, costly and hand-written code, overlaps, false positives, code fixes to the generated forms, shared detection logic, the analyzer's build cost. Use when reviewing or adding analyzer rules or code fixes.
+description: "Audit the EasyEcs analyzer (EECS rules) and code fixes - missing rules for wrong, costly and hand-written code, overlaps, false positives, code fixes to the generated forms, shared detection logic, the analyzer's build cost. Use when reviewing or adding analyzer rules or code fixes. Triggers: EasyEcsAnalyzer*.cs, EasyEcs.CodeFixes, an EECS id, false positive, Warning or Error, \"should this warn\", 分析器, 诊断, 误报, 代码修复."
 metadata:
   internal: true
 ---

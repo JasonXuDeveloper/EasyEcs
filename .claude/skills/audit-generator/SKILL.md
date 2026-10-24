@@ -1,6 +1,6 @@
 ---
 name: audit-generator
-description: Audit the EasyEcs source generators (ArityGenerator, ComponentGenerator, SystemGenerator, PartGenerator; the vector loops are audit-vector-loops) on their three jobs - generate what users would write twice, turn the plain form users write into the fast one (vector loops, per-chunk parameters, schedule), and stay fast on every keystroke (incremental best practices, caching, newer Roslyn features). Use when changing a generator, adding a generated form, or reviewing IDE/build performance.
+description: "Audit the EasyEcs source generators (ArityGenerator, ComponentGenerator, SystemGenerator, PartGenerator; the vector loops are audit-vector-loops) on their three jobs - generate what users would write twice, turn the plain form users write into the fast one (vector loops, per-chunk parameters, schedule), and stay fast on every keystroke (incremental best practices, caching, newer Roslyn features). Use when changing a generator, adding a generated form, or reviewing IDE/build performance. Triggers: SystemGenerator, ComponentGenerator, ArityGenerator, PartGenerator, *.g.cs, slow IDE, boilerplate, interceptors, 源生成器, 生成代码, 样板代码, 少写代码."
 metadata:
   internal: true
 ---

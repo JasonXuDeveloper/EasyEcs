@@ -1,6 +1,6 @@
 ---
 name: audit
-description: Run an audit round of EasyEcs (core, generators, analyzer, performance, naming, docs) with parallel agents in worktrees - code first, docs last - then triage, merge and verify. Use when asked to review the codebase for redundancy, design problems, missing generated forms or analyzer rules, performance or doc gaps, or to "do another round".
+description: "Run an audit round of EasyEcs (core, generators, analyzer, performance, naming, docs) with parallel agents in worktrees - code first, docs last - then triage, merge and verify. Use when asked to review the codebase for redundancy, design problems, missing generated forms or analyzer rules, performance or doc gaps, or to \"do another round\". Triggers: \"another round\", \"review everything\", \"audit\", 再来一轮, 全面审查, 审一遍, 检查整个项目."
 metadata:
   internal: true
 ---

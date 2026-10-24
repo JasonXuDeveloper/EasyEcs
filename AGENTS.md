@@ -117,6 +117,10 @@ owner has asked for once must be written where the next session will find it.
   and `audit-analyzer` checks that EECS055 reports the same reasons. So after changing a skill, read the skills it names and the ones that own neighboring
   files (the `audit` scopes table), and add the check or pointer wherever it is missing. Every audit round ends with
   this pass over all skills.
+- **Descriptions decide when a skill runs.** Agents pick a skill by its `description` alone, so it says what the skill
+  does, `Use when ...`, and `Triggers: ...`: the paths and file names it owns, the symptoms (an EECS id, "why scalar"),
+  and the words the owner uses for that work in English and Chinese (再来一轮, 优化, 合并). A skill that did not run
+  when it should have gets the missing trigger added.
 - **Split, never shrink.** A skill that has grown past one concern is split by concern into a new skill (name,
   description, `metadata.internal: true`). Every line moves, nothing is summarized away, the old skill keeps a
   pointer, and this table and the `audit` scopes gain the new skill.

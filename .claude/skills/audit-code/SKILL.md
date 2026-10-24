@@ -1,6 +1,6 @@
 ---
 name: audit-code
-description: Audit all EasyEcs code for maintainability and fix it - coupling, non-DRY code, dead code, layering, god files, unclear names and comments, code that is neither fast nor easy to change - in the core, generators, analyzer, code fixes, tools, tests, benchmarks, samples, templates and demo. Use for a cleanup round, after large merges, or when code was written in a hurry.
+description: "Audit all EasyEcs code for maintainability and fix it - coupling, non-DRY code, dead code, layering, god files, unclear names and comments, code that is neither fast nor easy to change - in the core, generators, analyzer, code fixes, tools, tests, benchmarks, samples, templates and demo. Use for a cleanup round, after large merges, or when code was written in a hurry. Triggers: tools/, tests/, benchmarks/, samples/, templates/, demo/, dead code, duplicated code, god file, \"clean up\", 清理, 重构, 可维护性, 重复代码."
 metadata:
   internal: true
 ---

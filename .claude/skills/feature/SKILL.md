@@ -1,6 +1,6 @@
 ---
 name: feature
-description: The definition of done for an EasyEcs feature, rule or behavior change - core, generator, analyzer, code fix, tests, benchmarks, docs, commits. Use when building or reviewing any change before it merges; a fresh session working on a new request follows it.
+description: "The definition of done for an EasyEcs feature, rule or behavior change - core, generator, analyzer, code fix, tests, benchmarks, docs, commits. Use when building or reviewing any change before it merges; a fresh session working on a new request follows it. Triggers: any edit under src/, a new attribute, parameter, API or EECS rule, a bug fix, \"add\", \"implement\", \"fix\", 加功能, 实现, 修复, 改一下."
 metadata:
   internal: true
 ---

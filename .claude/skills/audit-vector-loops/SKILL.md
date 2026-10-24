@@ -1,6 +1,6 @@
 ---
 name: audit-vector-loops
-description: Audit and extend the vector loops the EasyEcs generator writes from plain [ForEach] methods (Kernel*.cs, Burst's idea) - which reads, value writes, tag and structural writes, conditions and parameters become SIMD, side effects that keep a method scalar, the exact fixable reason EECS055 / EECS056 report (and the split it suggests), and the proof each form needs. Use when a method stays scalar, when adding a vectorized form, or when changing Kernel.
+description: "Audit and extend the vector loops the EasyEcs generator writes from plain [ForEach] methods (Kernel*.cs, Burst's idea) - which reads, value writes, tag and structural writes, conditions and parameters become SIMD, side effects that keep a method scalar, the exact fixable reason EECS055 / EECS056 report (and the split it suggests), and the proof each form needs. Use when a method stays scalar, when adding a vectorized form, or when changing Kernel. Triggers: Kernel*.cs, EECS055, EECS056, Vector<T>, SIMD, \"not vectorized\", \"why scalar\", if conditions, side effects, 向量化, SIMD, 没有 SIMD, 拆分条件."
 metadata:
   internal: true
 ---

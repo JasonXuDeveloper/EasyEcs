@@ -1,6 +1,6 @@
 ---
 name: audit-docs
-description: Audit and write the EasyEcs docs (docs/content en+zh, README, the public skill, samples) - every part of each feature page (when to use it, the recommended generated form, the fast form, costs and complexity, pitfalls, best practices), every place a feature must appear, stale names, exemplary examples, duplication, en/zh drift. Use once the code is final (the docs pass) and before merging to master.
+description: "Audit and write the EasyEcs docs (docs/content en+zh, README, the public skill, samples) - every part of each feature page (when to use it, the recommended generated form, the fast form, costs and complexity, pitfalls, best practices), every place a feature must appear, stale names, exemplary examples, duplication, en/zh drift. Use once the code is final (the docs pass) and before merging to master. Triggers: docs/content, *.mdx, README.md, the public skill, changelog, roadmap, decisions, en/zh pages, 文档, 网站, 中文文档, 例子."
 metadata:
   internal: true
 ---
