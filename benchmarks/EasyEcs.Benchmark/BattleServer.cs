@@ -1,7 +1,6 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
-using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -29,8 +28,9 @@ public record struct Lifetime(int Ticks) : IComponent;
 public partial record struct Zone([Group] int Id) : IComponent;              // its players contiguous
 public partial record struct Kills([IndexKey] int Count) : IComponent;            // indexed, ordered: a leaderboard
 public partial record struct Account([UniqueKey] int Id) : IComponent;       // one hero per account
-public record struct Spawn(Position At, int Seed) : ICleanupComponent;        // outlives its NPC: where the next appears
+public record struct Spawn(Position At) : ICleanupComponent;                  // outlives its NPC: where the next appears
 public record struct Loot(int Item);                                          // players carry a DynamicBuffer<Loot>
+public record struct Kill(EntityId Victim);                                   // a record, not a component: the kill feed
 [WhenTargetDestroyed(TargetPolicy.Remove)]                                    // a player who leaves leaves friend lists
 public record struct Friend(EntityId Target) : IRelation;                     // and a DynamicBuffer<Friend> of links
 public struct Player : IComponent;                                            // tags: empty components
@@ -39,7 +39,19 @@ public struct Dead : IComponent;
 // #endregion components
 
 // #region singletons
+// The battle's totals so far
 public record struct Battle(long Tick, int Hits, int Deaths, int Shots, int Replicated, int Afflicted) : ISingletonComponent;
+
+// The hits of one CombatSystem pass (a ref Reduce<T> parameter): each run of rows counts in a register, and the
+// combined count replaces the singleton when the pass ends, so TallySystem adds it to the total. [Sum] on a field: the
+// generator writes how two partial counts combine, and a vector loop folds its lanes into it
+public partial struct Strikes : ISingletonComponent { [Sum] public int Count; }
+
+// The streams of EntityRandom: one per draw of an entity in a tick, so no two draws share their numbers
+public static class Draws
+{
+    public const uint Setup = 0, Status = 1, Shot = 2, Spawn = 3, Hunter = 4, Loot = 5, Kind = 6, Respawn = 7, Scatter = 8;
+}
 
 public record struct Rules(int ShotCost, int BagSize, bool Ceasefire) : ISingletonComponent;   // the battle's rules: data
 
@@ -88,7 +100,9 @@ public ref struct PlanningSystem                                          // whe
 [EcsSystem]
 public ref struct SteeringSystem                                          // heavy per-entity math: on all cores
 {
-    [ForEach(Parallel = true), With<Npc>, Without<Dead>, Without<Frozen>]
+    // Row by row: the waypoint is read by index (a gather), which a vector loop does not take, and the generator would
+    // say so (EECS055); Off keeps the method scalar without the message
+    [ForEach(Parallel = true, SimdMode = SimdMode.Off), With<Npc>, Without<Dead>, Without<Frozen>]
     static void Steer(in Position p, in Goal goal, ref Velocity v, in Waypoints waypoints)
     {
         var target = waypoints.Points[goal.Waypoint];
@@ -100,18 +114,10 @@ public ref struct SteeringSystem                                          // hea
 [EcsSystem]
 public ref struct MovementSystem
 {
-    [ForEach, Without<Dead>]                                                  // whole runs of rows, vectorized
-    static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
-    {
-        // Two floats each, no padding: as Vector<float> spans, every lane is one coordinate (the JIT does not
-        // vectorize loops by itself)
-        var p = MemoryMarshal.Cast<Position, Vector<float>>(positions);
-        var v = MemoryMarshal.Cast<Velocity, Vector<float>>(velocities);
-        for (int i = 0; i < p.Length; i++) p[i] += v[i];
-        var pf = MemoryMarshal.Cast<Position, float>(positions);
-        var vf = MemoryMarshal.Cast<Velocity, float>(velocities);
-        for (int i = p.Length * Vector<float>.Count; i < pf.Length; i++) pf[i] += vf[i];  // the rows left over
-    }
+    // Written for one row, run as a vector loop: the generator writes a Vector<float> loop from the body (two floats
+    // in, two out). Require makes losing it a compile error (EECS056), so the hottest loop of the tick stays vectorized
+    [ForEach(SimdMode = SimdMode.Require), Without<Dead>]
+    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
 }
 
 [UpdateInterval(10, Phase = 5)]                                               // every 10th update, five updates after
@@ -141,27 +147,27 @@ public ref struct ZoneSystem                                              // a n
 public ref struct CombatSystem                                            // damage only: statuses are StatusSystem's
 {
     [ForEach, Without<Dead>]                                                  // a frozen unit's Attack is disabled
-    static void Fight(ref Attack attack, Mut<Health> hp, ref Battle battle)
+    static void Fight(ref Attack attack, Mut<Health> hp, ref Reduce<Strikes> strikes)
     {
         if (--attack.Cooldown > 0) return;
         attack.Cooldown = attack.Interval;
         // The fight is abstracted: a unit pays for the hits it trades from its own Health. A hit is a change of Health,
         // so only the units hit this tick are stamped.
         hp.Write().Value -= attack.Damage;
-        battle.Hits++;
-    }
+        strikes.Value.Count++;                                                // a count in a register, not a singleton
+    }                                                                         // written per row
 }
 
 [EcsSystem]
 public ref struct StatusSystem
 {
     [ForEach, Without<Dead>]                                                  // the units that attacked this tick
-    static void Afflict(Entity unit, in Attack attack, in Battle battle)
+    static void Afflict(Entity unit, in Attack attack, in EntityRandom random)
     {
         if (attack.Cooldown != attack.Interval) return;                      // CombatSystem just reset it
-        uint roll = Dice.Roll(battle.Tick, unit.Id.Index);
-        if (roll % 50 == 0) unit.GetOrAddBurning() = new Burning(10);         // applied at once; a new fire restarts it
-        else if (roll % 70 == 1)
+        float roll = random.Float(unit.Id, Draws.Status);                    // one draw: a fire or a frost, never both
+        if (roll < 1 / 50f) unit.GetOrAddBurning() = new Burning(10);         // applied at once; a new fire restarts it
+        else if (roll < 1 / 50f + 1 / 70f)
         {
             unit.SetFrozen(4);
             unit.DisableAttack();                                             // kept, but no query sees them: no attacks,
@@ -187,23 +193,26 @@ public ref struct StatusSystem
 }
 
 [EcsSystem]
-public ref struct AfflictionSystem                                 // registered after StatusSystem
+public ref struct TallySystem                                             // registered after StatusSystem
 {
-    // A count, not a loop: Count reads presence bits, 64 rows per load
     [OnUpdate]
-    static void OnUpdate(World world) =>
-        world.Battle.Afflicted += world.Count<Health>(BattleServer.Afflicted);
+    static void OnUpdate(World world)
+    {
+        ref var battle = ref world.Battle;
+        battle.Hits += world.Strikes.Count;                                   // CombatSystem's result: one add
+        battle.Afflicted += world.Count<Health>(BattleServer.Afflicted);      // a count, not a loop: Count reads
+    }                                                                         // presence bits, 64 rows per load
 }
 
 [EcsSystem]
 public ref struct DeathSystem
 {
     [ForEach, Without<Dead>]                                                  // a plain scan: most healths change often
-    static void Die(Entity unit, in Health hp, ref Battle battle)
+    static void Die(Entity unit, in Health hp, Emit<Kill> kills)
     {
         if (hp.Value > 0) return;
         unit.SetDead();                                                       // whoever cares queries Dead
-        battle.Deaths++;
+        kills.Add(new Kill(unit.Id));                                         // for the kill feed: KillFeedSystem sends it
     }
 }
 // #endregion combat
@@ -214,18 +223,17 @@ public ref struct RespawnSystem                                           // Dea
 {
     [ForEach, With<Player>, With<Dead>]
     static void Respawn(Entity player, ref Health hp, ref DynamicBuffer<Loot> bag, in DynamicBuffer<Friend> friends,
-        World world)
+        in EntityRandom random, Scratch<List<Position>> spots, World world)
     {
         foreach (var shot in world.Children(player)) shot.Destroy();          // recall its projectiles
         hp.Value = hp.Max;
         bag.Clear();                                                          // a death empties the bag
-        var at = new Position(2048, 2048);
-        foreach (var link in friends)                                         // next to a living friend, if any
+        var near = spots.Value ??= new List<Position>();                      // a list per thread, not one per row
+        near.Clear();                                                         // what the last row left in it
+        foreach (var link in friends)                                         // next to a living friend, one at random
             if (world.TryGetEntity(link.Target, out var friend) && !friend.IsDead)
-            {
-                at = friend.Position;
-                break;
-            }
+                near.Add(friend.Position);
+        var at = near.Count == 0 ? new Position(2048, 2048) : near[random.Range(player.Id, Draws.Respawn, 0, near.Count)];
 
         player.Set(at, new Mana(0, 100), new Kills(0));                       // several components, one call; a death
                                                                               // ends the kill streak
@@ -236,12 +244,13 @@ public ref struct RespawnSystem                                           // Dea
 
     // [Consume]: each NPC is destroyed after the method, which retires it (Spawn stays, with the Retired tag)
     [ForEach, Consume, With<Npc>, With<Dead>]
-    static void Despawn(Entity npc, in Position p, ref Spawn spawn, in Rules rules, World world)
+    static void Despawn(Entity npc, ref Spawn spawn, in Rules rules, in EntityRandom random, World world)
     {
-        spawn = new Spawn(new Position(p.Y, p.X), npc.Id.Index);              // where the next one appears
-        Entity hunter = default;
-        foreach (var item in world.Query<Position>(BattleServer.Zones[npc.Id.Index & 3]))  // a player of some zone:
-        {                                                                     // one table to look at
+        // Rolled per NPC and tick: the same hunter, spot and item on every run (EntityRandom is a pure function)
+        spawn.At = BattleServer.Spot(random.Bits(npc.Id, Draws.Spawn));       // where the next one appears: anywhere,
+        Entity hunter = default;                                              // or by the hunter
+        foreach (var item in world.Query<Position>(BattleServer.Zones[random.Range(npc.Id, Draws.Hunter, 0, 4)]))
+        {                                                                     // a player of some zone: one table
             hunter = item.Entity;
             spawn.At = item.Position;
             break;
@@ -251,15 +260,15 @@ public ref struct RespawnSystem                                           // Dea
         {
             ref var bag = ref hunter.WriteLoot();                             // the hunter gets the loot
             if (bag.Count == rules.BagSize) bag.RemoveAt(0);                  // a full bag drops its oldest item
-            bag.Add(new Loot(npc.Id.Index & 15));
+            bag.Add(new Loot(random.Range(npc.Id, Draws.Loot, 0, 16)));
             hunter.SetKills(hunter.Kills.Count + 1);                          // the leaderboard follows
         }
     }
 
     [ForEach, With<Retired>]                                                  // what retired NPCs left behind
-    static void Revive(Entity old, in Spawn spawn, World world)
+    static void Revive(Entity old, in Spawn spawn, in EntityRandom random, World world)
     {
-        BattleServer.SpawnNpc(world, spawn.At, spawn.Seed);
+        BattleServer.SpawnNpc(world, spawn.At, random.Bits(old.Id, Draws.Kind));
         old.RemoveSpawn();                                                    // its last cleanup component: freed
     }
 }
@@ -270,9 +279,10 @@ public ref struct RespawnSystem                                           // Dea
 public ref struct ProjectileSystem
 {
     [ForEach, With<Player>, Without<Dead>]                                    // a frozen player's Velocity is disabled
-    static void Shoot(Entity player, in Position p, in Velocity v, ref Mana mana, ref Battle battle, in Rules rules, World world)
+    static void Shoot(Entity player, in Position p, in Velocity v, ref Mana mana, ref Battle battle, in Rules rules,
+        in EntityRandom random, World world)
     {
-        if (rules.Ceasefire || mana.Value < rules.ShotCost || Dice.Roll(battle.Tick, player.Id.Index) % 20 != 0) return;
+        if (rules.Ceasefire || mana.Value < rules.ShotCost || !random.Chance(player.Id, Draws.Shot, 1 / 20f)) return;
         mana.Value -= rules.ShotCost;
         battle.Shots++;
         world.Instantiate(BattleServer.Shot, p, new Velocity(v.X * 4, v.Y * 4), new ChildOf(player));  // one row copy;
@@ -303,8 +313,13 @@ public ref struct ClockSystem
 {
     [OnCreate]
     static void OnCreate(World world) => world.GetOrAddBattle();
+
     [OnUpdate]
-    static void OnUpdate(World world) => world.Battle.Tick++;
+    static void OnUpdate(World world)
+    {
+        world.Battle.Tick++;
+        world.EntityRandom.Tick++;                                            // the next update draws new numbers
+    }
 }
 // #endregion projectiles
 
@@ -312,6 +327,8 @@ public ref struct ClockSystem
 [EcsSystem, UpdateInGroup<Replication>]
 public ref struct ReplicationSystem                                       // only what changed since the last send
 {
+    // The totals are written row by row here, not reduced: a send visits the rows written since the last one, a few
+    // scattered rows per run, where a Reduce<T>'s partial result per run of rows costs more than the add it saves
     [ForEach, Changed<Health>]
     static void Send(in Health hp, ref Replica replica, ref Battle battle)
     {
@@ -342,8 +359,22 @@ public ref struct ReplicationSystem                                       // onl
         battle.Replicated++;
     }
 
-    [ForEach, Changed<DynamicBuffer<Loot>>]                                          // bags changed by a ref write
+    [ForEach, Changed<DynamicBuffer<Loot>>]                                   // bags changed by a ref write
     static void SendBag(in DynamicBuffer<Loot> bag, ref Battle battle) => battle.Replicated += 1 + bag.Count;
+}
+
+[EcsSystem, UpdateInGroup<Replication>]
+public ref struct KillFeedSystem                                          // the kills since the last send
+{
+    [OnUpdate]
+    static void OnUpdate(World world)
+    {
+        ref var kills = ref world.GetOrAddSingleton<Emitted<Kill>>().Items;  // DeathSystem's records, in row order
+        ref var battle = ref world.Battle;
+        battle.Deaths += kills.Count;
+        battle.Replicated += kills.Count;
+        kills.Clear();                                                        // sent once
+    }
 }
 // #endregion replication
 
@@ -360,52 +391,48 @@ public static class Requests
 // #endregion requests
 
 // #region reports
-public static class Dice
+// The census's totals: reductions into singletons of their own, which the census reads after its passes. Int sums of
+// int fields: a lane per row, so the passes are vector loops (4M players of 500 health still fit)
+public partial struct Vitality : ISingletonComponent { [Sum] public int Health; }
+public partial struct ManaPool : ISingletonComponent { [Sum] public int Mana; }
+
+/// <summary>
+/// The weakest living player: two fields that combine together (the lower health keeps its id), so the reduction is
+/// written by hand. Combine keeps the left one on a tie: the earlier row, as on one thread.
+/// </summary>
+public record struct Weakest(EntityId Player, int Health) : ISingletonComponent, IReduction<Weakest>
 {
-    public static uint Roll(long tick, int id)
-    {
-        ulong x = (ulong)tick * 0x9E3779B97F4A7C15UL ^ (uint)id * 0xBF58476D1CE4E5B9UL;
-        x ^= x >> 31;
-        x *= 0x94D049BB133111EBUL;
-        return (uint)(x ^ (x >> 29));
-    }
+    public static Weakest Identity => new(EntityId.Null, int.MaxValue);
+    public static Weakest Combine(Weakest left, Weakest right) => right.Health < left.Health ? right : left;
 }
 
 /// <summary>
 /// [ForEach] methods outside systems: the generator writes the job and an entry point taking the world and the
-/// caller's values (<c>Reports.SumMana(world, ref total)</c>), for passes the host runs between ticks.
+/// caller's values (<c>Reports.Scatter(world, round)</c>), for passes the host runs between ticks. A reduction lands in the
+/// world it is called with.
 /// </summary>
 public static class Reports
 {
-    [ForEach, With<Player>, Without<Dead>]                                    // whole runs of rows, read-only
-    static void SumHealth(ReadOnlySpan<Health> hp, ref long total)
-    {
-        // Value, Max, Value, Max, ...: sum every lane, keep the even ones (an int lane holds 4M rows of 500)
-        var lanes = MemoryMarshal.Cast<Health, Vector<int>>(hp);
-        var sum = Vector<int>.Zero;
-        for (int i = 0; i < lanes.Length; i++) sum += lanes[i];
-        total += Vector.Sum(sum & Vector.Equals(Vector<int>.Indices & Vector<int>.One, Vector<int>.Zero));
-        for (int i = lanes.Length * Vector<int>.Count / 2; i < hp.Length; i++) total += hp[i].Value;  // left over
-    }
+    [ForEach(Parallel = true), With<Player>, Without<Dead>]                   // a vector loop per chunk of rows
+    static void SumHealth(in Health hp, ref Reduce<Vitality> total) => total.Value.Health += hp.Value;
 
-    [ForEach]
-    static void SumMana(in Mana mana, ref long total) => total += mana.Value;
+    [ForEach(Parallel = true)]
+    static void SumMana(in Mana mana, ref Reduce<ManaPool> total) => total.Value.Mana += mana.Value;
 
-    [ForEach, With<Player>, Without<Dead>]
-    static void FindWeakest(Entity player, in Health hp, ref EntityId weakest, ref int lowest)
+    [ForEach(Parallel = true), With<Player>, Without<Dead>]
+    static void FindWeakest(Entity player, in Health hp, ref Reduce<Weakest> weakest)
     {
-        if (hp.Value < lowest) (lowest, weakest) = (hp.Value, player);
+        if (hp.Value < weakest.Value.Health) weakest.Value = new Weakest(player.Id, hp.Value);
     }
 
     [ForEach(Parallel = true)]                                                // chunks on all cores: no shared state
     static void HealFully(ref Health hp) => hp.Value = hp.Max;
 
-    [ForEach(Parallel = true), With<Npc>]                                     // NPCs start the round anywhere
-    static void Scatter(Entity npc, ref Position p, long round)
-    {
-        uint r = Dice.Roll(round, npc.Id.Index);                              // per entity, the same on any thread
-        p = new Position(r % 4096, (r >> 12) % 4096);
-    }
+    // NPCs start the round anywhere: drawn for the round the caller names (EntityRandom's static form takes the seed
+    // and the tick), per entity, the same on any thread
+    [ForEach(Parallel = true), With<Npc>]
+    static void Scatter(Entity npc, ref Position p, ulong round) =>
+        p = BattleServer.Spot(EntityRandom.Bits(BattleServer.Seed, npc.Id, round, Draws.Scatter));
 }
 
 /// <summary>What the server reports: computed by the runners of <see cref="Reports"/>, outside the tick.</summary>
@@ -420,6 +447,7 @@ public sealed class BattleServer : IDisposable
     // #region prefabs
     public const int ShotCost = 30;
     public const int BagSize = 8;
+    public const ulong Seed = 1;
 
     private static readonly QueryFilter Players = QueryFilter.Create().With<Player>();     // build filters once
     private static readonly QueryFilter AlivePlayers = Players.Without<Dead>();
@@ -438,7 +466,7 @@ public sealed class BattleServer : IDisposable
         .SetZone(0).SetKills(0).SetPlayer().Set(new DynamicBuffer<Friend>())
         .SetLoot(new Loot(0));                                    // a starter item: each hero gets a bag of its own
     private static readonly Prefab Grunt = new Prefab().Set(new Position(), new Velocity())
-        .SetHealth(120, 120).SetReplica(120, false, 0).SetAttack(6, 8, 0).SetGoal(0).SetSpawn(default, 0).SetNpc();
+        .SetHealth(120, 120).SetReplica(120, false, 0).SetAttack(6, 8, 0).SetGoal(0).SetSpawn(default).SetNpc();
     private static readonly Prefab Brute = new Prefab(Grunt)                                    // a variant: a copy
         .SetHealth(200, 200).SetReplica(200, false, 0).SetAttack(9, 12, 0);
     internal static readonly Prefab Shot = new Prefab().SetLifetime(20);  // the rest is given per shot (Instantiate)
@@ -466,6 +494,7 @@ public sealed class BattleServer : IDisposable
             DestroyLogCapacity = units,                                       // the ids gone while a client lags (CatchUp)
         });
         World.SetRules(ShotCost, BagSize, false);
+        World.SetEntityRandom(Seed, 0);                                       // one seed: one battle, on every run
 
         World.AddSystem<ClockSystem>();                                       // OnCreate adds the Battle singleton
         World.AddSystem<PlanningSystem>();                                    // and this one the Waypoints
@@ -475,22 +504,24 @@ public sealed class BattleServer : IDisposable
         World.AddSystem<ZoneSystem>();
         World.AddSystem<CombatSystem>();
         World.AddSystem<StatusSystem>();
-        World.AddSystem<AfflictionSystem>();
+        World.AddSystem<TallySystem>();
         World.AddSystem<DeathSystem>();
         World.AddSystem<RespawnSystem>();
         World.AddSystem<ProjectileSystem>();
         World.AddSystem<RegenerationSystem>();
         World.AddSystem<ReplicationSystem>();
+        World.AddSystem<KillFeedSystem>();
         _battle = World.SingletonRef<Battle>();
 
+        var random = World.EntityRandom;
         var players = new Entity[units / 3];
         World.Instantiate(Hero, players);                                     // in bulk: one table growth
         for (int i = 0; i < players.Length; i++)
         {
-            uint r = Dice.Roll(0, i);
-            players[i].Position = new Position(r % 4096, (r >> 12) % 4096);
-            players[i].Velocity = new Velocity((int)(r % 5) - 2, (int)((r >> 8) % 5) - 2);
-            players[i].Attack.Cooldown = (int)(r % 6);
+            ulong r = random.Bits(players[i].Id, Draws.Setup);                // 64 bits: a field from each slice
+            players[i].Position = Spot(r);
+            players[i].Velocity = new Velocity((int)(r >> 24 & 0xFF) % 5 - 2, (int)(r >> 32 & 0xFF) % 5 - 2);
+            players[i].Attack.Cooldown = (int)(r >> 40 & 0xFF) % 6;
             players[i].WriteLoot().EnsureCapacity(BagSize);                   // room once: a full bag never grows
             players[i].LinkFriend(players[(i + 1) % players.Length]); // each player has two friends
             players[i].LinkFriend(players[(i + 7) % players.Length]);
@@ -501,20 +532,23 @@ public sealed class BattleServer : IDisposable
         World.Instantiate(Brute, npcs.AsSpan(npcs.Length / 2));
         for (int i = 0; i < npcs.Length; i++)
         {
-            uint r = Dice.Roll(0, players.Length + i);
-            npcs[i].Position = new Position(r % 4096, (r >> 12) % 4096);
-            npcs[i].Attack.Cooldown = (int)(r % 10);
+            ulong r = random.Bits(npcs[i].Id, Draws.Setup);
+            npcs[i].Position = Spot(r);
+            npcs[i].Attack.Cooldown = (int)(r >> 40 & 0xFF) % 10;
         }
 
         World.Reserve(Grunt, npcs.Length / 4);                         // respawn waves never grow the tables
         World.Reserve(Brute, npcs.Length / 4);
     }
 
-    public static void SpawnNpc(World world, Position at, int seed)
+    /// <summary>A spot on the 4096 × 4096 map from random bits: 12 bits per coordinate.</summary>
+    public static Position Spot(ulong bits) => new(bits & 4095, bits >> 12 & 4095);
+
+    /// <summary>An NPC at <paramref name="at"/>, a grunt or a brute: <paramref name="roll"/> picks it and its cooldown.</summary>
+    public static void SpawnNpc(World world, Position at, ulong roll)
     {
-        uint r = Dice.Roll(seed, seed);
-        var npc = world.Instantiate((r & 1) == 0 ? Grunt : Brute, at);        // a copy with its position: one row copy
-        npc.Attack.Cooldown = (int)(r % 10);                                  // then only what differs is written
+        var npc = world.Instantiate((roll & 1) == 0 ? Grunt : Brute, at);     // a copy with its position: one row copy
+        npc.Attack.Cooldown = (int)(roll >> 8 & 0xFF) % 10;                   // then only what differs is written
     }
     // #endregion setup
 
@@ -684,15 +718,12 @@ public sealed class BattleServer : IDisposable
 
     public Census Census()
     {
-        long health = 0, mana = 0;
-        Reports.SumHealth(World, ref health);
-        Reports.SumMana(World, ref mana);
-        EntityId weakest = default;
-        int lowest = int.MaxValue;
-        Reports.FindWeakest(World, ref weakest, ref lowest);
-        World.TryGetEntity(weakest, out var handle);                          // none when every player is dead
-        return new Census(World.Count<Player>(), World.Count<Player>(AlivePlayers), health, mana, handle,
-            World.Count<Attack>(Alive));                                      // a frozen unit's Attack is not counted
+        Reports.SumHealth(World);                                             // on all cores, each into its singleton
+        Reports.SumMana(World);
+        Reports.FindWeakest(World);
+        World.TryGetEntity(World.Weakest.Player, out var weakest);            // none when every player is dead
+        return new Census(World.Count<Player>(), World.Count<Player>(AlivePlayers), World.Vitality.Health,
+            World.ManaPool.Mana, weakest, World.Count<Attack>(Alive));        // a frozen unit's Attack is not counted
     }
     // #endregion census
 
@@ -706,7 +737,7 @@ public sealed class BattleServer : IDisposable
         World.EnableAll<Attack>();
         World.EnableAll<Velocity>();
         Reports.HealFully(World);                                             // on all cores
-        Reports.Scatter(World, Battle.Tick);
+        Reports.Scatter(World, (ulong)Battle.Tick);
         return cleared;
     }
     // #endregion new-round

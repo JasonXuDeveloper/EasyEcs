@@ -19,12 +19,18 @@ public struct Projectile : IComponent { public int OwnerId; }
 public struct Stunned : IComponent { public int Ticks; }
 public struct Dead : IComponent;
 
-public struct WorldStats : ISingletonComponent
+public struct WorldStats : ISingletonComponent              // totals since the start
 {
     public long Tick;
     public int CellChanges, Hits, Deaths, NpcKills, Spawns;
     public int Width;
     public float CellSize;
+}
+
+/// <summary>The AOI cell changes of one tick: a reduction (AoiSystem), added to <see cref="WorldStats"/> by the clock.</summary>
+public partial struct AoiChanges : ISingletonComponent
+{
+    [Sum] public int Count;
 }
 
 /// <summary>Deterministic per-entity pseudo random (no shared Random, no allocation).</summary>
@@ -58,17 +64,20 @@ public ref struct MovementSystem
     }
 }
 
-/// <summary>Area-of-interest grid: recompute the cell, count cell changes (would trigger enter/leave sync).</summary>
+/// <summary>
+/// Area-of-interest grid: recompute the cell, count cell changes (would trigger enter/leave sync). The count is a
+/// reduction, so the method runs as a vector loop with a count per lane.
+/// </summary>
 [EcsSystem]
 public ref struct AoiSystem
 {
     [ForEach, Without<Dead>]
-    private static void UpdateCell(in Position p, ref AoiCell aoi, ref WorldStats stats)
+    private static void UpdateCell(in Position p, ref AoiCell aoi, ref Reduce<AoiChanges> changes)
     {
         int cell = (int)(p.Y * (1f / 64f)) * 64 + (int)(p.X * (1f / 64f));
         if (cell == aoi.Cell) return;
         aoi.Cell = cell;
-        stats.CellChanges++;
+        changes.Value.Count++;
     }
 }
 
@@ -170,12 +179,17 @@ public ref struct ShootingSystem
     }
 }
 
-/// <summary>Ticks the world clock (last).</summary>
+/// <summary>Ticks the world clock (last), and adds the tick's AOI changes to the totals.</summary>
 [EcsSystem]
 public ref struct ClockSystem
 {
     [OnUpdate]
-    static void OnUpdate(World world) => world.GetSingleton<WorldStats>().Tick++;
+    static void OnUpdate(World world)
+    {
+        ref var stats = ref world.GetSingleton<WorldStats>();
+        stats.CellChanges += world.GetSingleton<AoiChanges>().Count;
+        stats.Tick++;
+    }
 }
 
 public static class Simulation
