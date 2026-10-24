@@ -44,7 +44,7 @@ public int InitialEntityCapacity { get; init; }
 public int MaxDegreeOfParallelism { get; init; }
 ```
 
-一次并行执行最多用多少个线程（默认：处理器数）。管的是 [`WorldOptions.ParallelSystems`](/zh/docs/reference/worldoptions#parallelsystems) 并行执行的系统，以及并行 `[ForEach]` 方法、`ForEachParallel` 和 `ForEachEntityParallel` 的行分块（不管 [`WorldOptions.ParallelSystems`](/zh/docs/reference/worldoptions#parallelsystems) 开没开，它们都分块执行）。
+一次并行执行最多用多少个线程（默认：处理器数）。管的是 [`WorldOptions.ParallelSystems`](/zh/docs/reference/worldoptions#parallelsystems) 并行执行的系统，以及并行 `[ForEach]` 方法、`ForEachParallel` 和 `ForEachEntityParallel` 的行分块（不管 [`WorldOptions.ParallelSystems`](/zh/docs/reference/worldoptions#parallelsystems) 开没开，它们都分块执行）。调用线程算一个；其余是进程的辅助线程，不是线程池的线程：一组固定的后台线程，个数是各个 World 要的最大值减一，在某个 World 第一次并行执行时启动，所有 World 共用。稳定状态不会启动线程，核心的每线程内存（tile 的纹理、`Scratch<T>`）只要有一个线程建好了自己的，所有辅助线程就都建好。
 
 ### `MeasureSystems` [#measuresystems]
 
@@ -60,7 +60,7 @@ public bool MeasureSystems { get; init; }
 public bool ParallelSystems { get; init; }
 ```
 
-彼此没有顺序约束、生成的读写声明也不冲突（[`SystemAccess`](/zh/docs/reference/systemaccess)）的系统同时运行（线程池）。默认 false：推荐的模型是每个 World 一个所有者线程。
+彼此没有顺序约束、生成的读写声明也不冲突（[`SystemAccess`](/zh/docs/reference/systemaccess)）的系统同时运行（在进程的辅助线程上）。默认 false：推荐的模型是每个 World 一个所有者线程。
 
 ### `SystemErrors` [#systemerrors]
 

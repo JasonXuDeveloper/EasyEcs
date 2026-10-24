@@ -120,6 +120,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D118](#d118-fixable-reasons-and-cold-fields) | EECS055 warns when the method can be rewritten; EECS091 names the fields a frequent pass never touches |
 | [D119](#d119-no-oop-code-fix) | No code fix from object-oriented classes to components and systems: a migration guide |
 | [D120](#d120-feature-modules-and-data-events) | Not added: `[Feature]` modules and a generated reader of records; EECS092 reports records nothing clears |
+| [D125](#d125-scheduler-tuning) | Passes that merge per chunk cut 16 chunks; the helpers' spin, the partitioner and the chunk size stay as they were |
 
 The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
 reused.
@@ -1703,8 +1704,8 @@ second write of `T` in the same pass.
 - **No lock and no atomic per row.** The partial result lives in the chunk's own copy of the job; nothing is shared
   until the end, when each copy is combined once. An `Interlocked` add per row makes every core write one cache line.
 - **Deterministic.** Combining in chunk order (not in the order chunks finish) makes integer results exact and a float
-  result the same on every run and any thread count for a fixed `ChunkRows`; `Combine` need not be commutative (a
-  first and last value, a concatenation of bits).
+  result the same on every run and any thread count (the chunks follow the row count, [D125](#d125-scheduler-tuning));
+  `Combine` need not be commutative (a first and last value, a concatenation of bits).
 - **One shape for both runners.** The same parameter works with `Parallel = false` (a local per run of rows) and in a
   `[ForEach]` method outside a system, so making a pass parallel changes one attribute, not the code.
 - **0 bytes.** The runner keeps an array of job copies per job type, grown once; steady passes allocate nothing.
@@ -2809,6 +2810,51 @@ or `RemoveAtSwapBack` of a `DynamicBuffer<T>`, no `RemoveSingleton<Emitted<T>>()
   a save group) would lose records, and the reader is the one that knows when they are applied.
 - **A reader system generated per record type:** one more system the schedule places by itself, where the user
   writes the order.
+
+## D125. Passes that merge per chunk cut 16 chunks; the helpers' spin, the partitioner and the chunk size stay as they were [#d125-scheduler-tuning]
+
+**Decision.** A parallel pass that merges per chunk (a `Reduce<T>`, an `Emit<T>`) and sets no `ChunkRows` cuts its
+rows into 16 chunks of 1,024 to 16,384 rows, from the row count alone; the threads only share them out. Other passes
+keep about four chunks per thread. Four scheduler changes were measured and left out: helpers that spin only while
+work is near, one spinning helper at a time, an affinity partitioner, and a tuner of the chunk size.
+
+**Why.**
+- **A float reduction gave different bits at different thread counts.** Each chunk's partial result is rounded on
+  its own and the chunks are combined in order ([D69](#d69-reductions)), so the result depends on where chunks begin,
+  and those followed `MaxDegreeOfParallelism`. A server whose tick sums a float (a mass, a center) got another total
+  on a 2-core and an 8-core machine. 16 is four per thread at four threads, what the old rule cut there; from 262,144
+  rows the chunks reach 16,384 rows and their count grows with the rows, enough for any thread count.
+  `AFloatReductionDoesNotDependOnTheThreads` checks the same bits at 1, 2, 3, 4 and 8 threads, 50 runs each, at
+  5,000, 100,000 and 400,000 rows. BDN, two rounds (base / 16 chunks, load 1.6 to 3.1 on 4 cores):
+  `ReduceBenchmark.MassParallelReduce` 100,000 rows 25.2, 27.1 / 27.0, 26.6 µs, 1,000,000 rows 227, 232 / 237,
+  232 µs; `SumParallelGenerated` 100,000 rows 5.9, 7.2 / 6.5, 6.3 µs; `EmitBenchmark.EmitParallel` 100,000 attackers
+  95.3, 113.1 / 102.6, 106.0 µs. Level, 0 B.
+- **Spinning only while work is near did not pay.** A helper that runs out of work spins up to 100 µs, then parks.
+  The variant spun only while a world was inside an update or a parallel pass, or between updates that came back to
+  back (a process-wide count of busy worlds and the last idle gap), and otherwise parked at once. Between the ticks
+  of a server the helpers already park 100 µs after the last pass, so all it could save is 3 x 100 µs per tick: a
+  60 Hz harness measured CPU per tick 2,986, 2,858 / 3,088, 2,767 µs (steering pass) and 5,345, 5,196 / 5,237,
+  5,416 µs (battle server), and 0.2 to 0.4 ms per idle second either way. BDN, two rounds, interleaved:
+  `ParallelSystemsBenchmark` parallel 54.8, 54.6 -> 73.8, 73.4 µs, `ParallelForEachBenchmark.Tick` parallel 553,
+  569 -> 647, 701 µs (a rerun at load 3.3: 69.0, 65.7 -> 70.0, 69.6 µs and 557, 625 -> 656, 617 µs).
+- **One spinning helper at a time (Go's scheduler)** saved CPU in the harness (9 to 16 % per tick) and lost the
+  back-to-back passes: `ParallelSystemsBenchmark` 61 -> 72 to 82 µs, `ParallelForEachBenchmark.Tick` 465, 525 ->
+  524, 663 µs, `HeavyForParallel` 100,000 records 299, 308 -> 337, 388 µs. Waking the rest from the first helper
+  instead of the owner was worse (`ParallelSystemsBenchmark` 61 -> 103 to 126 µs).
+- **A shorter spin** (35 µs, the .NET thread pool's `LowLevelLifoSemaphore`): `ParallelSystemsBenchmark` 69 to 84 ->
+  104 to 111 µs for about 3 % less CPU per tick. The spin stays 100 µs.
+
+**Considered.**
+- **TBB's affinity partitioner** (each thread starts on the chunks it ran last time, then steals): it kept a thread's
+  rows in its cache only when they fit (`LightForParallel` 10,000 records 9.3, 8.4 -> 7.0, 6.5 µs) and lost on the
+  passes of 100,000 rows (`ParallelForEachBenchmark.Tick` 527, 574 -> 635, 629 µs, `EntityJob` 589, 544 -> 762,
+  631 µs). The shared cursor balances better than fixed homes on a shared machine.
+- **A tuner of the chunk size** (Halide's autotuning, per job type: try 1, 2, 4, 8 and 16 chunks per thread, six
+  samples each, keep the least time per row, try again every 256 to 8,192 runs): no consistent win over four per
+  thread, and `RunnerBenchmark.HandWrittenJob` 48, 46 -> 55, 54 µs. It could not try chunks under 1,024 rows, the
+  floor of the default; a tuner that does would pick from rows (64 to 16,384) instead of chunks per thread, only for
+  passes that do not merge (their boundaries must not move), and a pass that stamps a tracked component below 4,096
+  rows opens its blocks first, as `ChunkRows` already does ([D67](#d67-chunk-rows)).
 
 ## Related [#related]
 

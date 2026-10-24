@@ -44,7 +44,7 @@ Pre-sized entity capacity (avoid growth reallocations at runtime).
 public int MaxDegreeOfParallelism { get; init; }
 ```
 
-Threads one parallel run uses at most (default: processor count): systems run by [`WorldOptions.ParallelSystems`](/en/docs/reference/worldoptions#parallelsystems), and the row chunks of parallel `[ForEach]` methods, `ForEachParallel` and `ForEachEntityParallel` (which run in chunks whether [`WorldOptions.ParallelSystems`](/en/docs/reference/worldoptions#parallelsystems) is on or not).
+Threads one parallel run uses at most (default: processor count): systems run by [`WorldOptions.ParallelSystems`](/en/docs/reference/worldoptions#parallelsystems), and the row chunks of parallel `[ForEach]` methods, `ForEachParallel` and `ForEachEntityParallel` (which run in chunks whether [`WorldOptions.ParallelSystems`](/en/docs/reference/worldoptions#parallelsystems) is on or not). The calling thread is one of them; the others are the process's helper threads, not the thread pool's: a fixed set of background threads, as many as the largest value a world asked for minus one, started when a world first runs work in parallel and shared by every world. No thread starts in steady state, and the per-thread memory of the core (a tile's texture, a `Scratch<T>`) is set up on all of them as soon as one thread sets up its own.
 
 ### `MeasureSystems` [#measuresystems]
 
@@ -60,7 +60,7 @@ Measure every system run into [`SystemHandle.Stats`](/en/docs/reference/systemha
 public bool ParallelSystems { get; init; }
 ```
 
-Run systems with no order between them at the same time (thread pool) when their generated access does not conflict ([`SystemAccess`](/en/docs/reference/systemaccess)). Default false: one owner thread per world is the recommended model.
+Run systems with no order between them at the same time (on the process's helper threads) when their generated access does not conflict ([`SystemAccess`](/en/docs/reference/systemaccess)). Default false: one owner thread per world is the recommended model.
 
 ### `SystemErrors` [#systemerrors]
 

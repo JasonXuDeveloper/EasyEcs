@@ -12,7 +12,7 @@ public sealed class EcsSystemAttribute : Attribute
 
 声明一个系统：一个 `ref struct`，它的静态方法就是在 World 上运行的逻辑。系统永远不是对象（ref struct 不能装箱、存储或捕获）；World 把它的簿记作为数据保存（[`SystemHandle`](/zh/docs/reference/systemhandle)），生成器写出运行它的代码，由 World 直接调用。
 
-生命周期：添加时（[`World.AddSystem`](/zh/docs/reference/world#addsystem)）调用 [[OnCreate]](/zh/docs/reference/oncreateattribute) 方法；之后每次更新先调用 [[OnUpdate]](/zh/docs/reference/onupdateattribute) 方法，再按声明顺序执行 [[ForEach]](/zh/docs/reference/foreachattribute) 方法；移除时或 World 释放时调用 [[OnDestroy]](/zh/docs/reference/ondestroyattribute) 方法。这些都在 [`World.Update`](/zh/docs/reference/world#update) 里同步执行（[分组](/zh/docs/reference/updateingroupattribute)里的系统是 [`World.Update`](/zh/docs/reference/world#update-2)）：在调用线程上执行；打开 [`WorldOptions.ParallelSystems`](/zh/docs/reference/worldoptions#parallelsystems) 后，也可能和 [读写](/zh/docs/reference/systemaccess)不冲突的系统一起，在线程池线程上执行。
+生命周期：添加时（[`World.AddSystem`](/zh/docs/reference/world#addsystem)）调用 [[OnCreate]](/zh/docs/reference/oncreateattribute) 方法；之后每次更新先调用 [[OnUpdate]](/zh/docs/reference/onupdateattribute) 方法，再按声明顺序执行 [[ForEach]](/zh/docs/reference/foreachattribute) 方法；移除时或 World 释放时调用 [[OnDestroy]](/zh/docs/reference/ondestroyattribute) 方法。这些都在 [`World.Update`](/zh/docs/reference/world#update) 里同步执行（[分组](/zh/docs/reference/updateingroupattribute)里的系统是 [`World.Update`](/zh/docs/reference/world#update-2)）：在调用线程上执行；打开 [`WorldOptions.ParallelSystems`](/zh/docs/reference/worldoptions#parallelsystems) 后，也可能和 [读写](/zh/docs/reference/systemaccess)不冲突的系统一起，在进程的辅助线程上执行。
 
 ```csharp
 [EcsSystem, UpdateAfter<Input>]
