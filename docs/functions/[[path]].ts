@@ -110,7 +110,6 @@ function shouldBypass(pathname: string) {
     pathname.startsWith('/demo/') ||
     pathname === '/robots.txt' ||
     pathname === '/sitemap.xml' ||
-    pathname === '/easyecs-rules.md' ||
     pathname === '/static.json' ||
     pathname === '/manifest.webmanifest'
   ) {

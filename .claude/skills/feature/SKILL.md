@@ -40,7 +40,7 @@ part names the skill that audits it.
     member, an attribute, a parameter: users miss Info); Info only for hints the user may not be able to act on.
 - The message names the type or member and the fix; a scalar fallback's reason comes from `Kernel.Vectorize`.
 - Tests: positive cases, negative cases, false-positive guards, the overlap test (one diagnostic per mistake).
-- The rule list and range in CLAUDE.md, `docs/content/guide/analyzer.mdx` + `.zh.mdx`, `skills/easyecs/SKILL.md` (the public skill; `bun run sync:rules` copies it to `docs/public/easyecs-rules.md`).
+- The rule list and range in CLAUDE.md, `docs/content/guide/analyzer.mdx` + `.zh.mdx`, `skills/easyecs/SKILL.md` (the public skill).
 
 ## 4. Code fix
 
@@ -70,7 +70,7 @@ Per `docs/WRITING.md`, en and zh structurally identical:
 - numbers only through `docs/src/data/bench.json` (BenchTable), never typed on a page (decision records may quote);
 - a decision record for every non-obvious choice and dropped idea; the roadmap;
 - changelog, README "What's new"; a migration entry for a breaking change;
-- `skills/easyecs/SKILL.md` (the public skill; `bun run sync:rules` copies it to `docs/public/easyecs-rules.md`), CLAUDE.md's layout;
+- `skills/easyecs/SKILL.md` (the public skill), CLAUDE.md's layout;
 - the battle server (`BattleServer.cs` regions + `example.mdx`) and the samples use the feature where it belongs.
 
 While code is still changing, collect these as docs to-dos; pages are written once at the end.

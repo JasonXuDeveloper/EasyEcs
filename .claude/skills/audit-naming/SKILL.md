@@ -18,7 +18,7 @@ A name is the first doc a reader sees. This audit covers every name, not only th
 | Tests and benchmarks | fixture components, test names (say what is checked), benchmark classes, methods, `[Params]` |
 | Examples | samples, templates, the demo, `BattleServer.cs`, `WorldSimulation.cs`, docs fences: components, systems, entities, locals read as the game or server they model, one name per concept across examples |
 | Docs | page titles, headings, anchors, file names, glossary terms, prose naming an API exactly as the code does |
-| Chinese | one term per concept (`tools/ApiDocs/zh/README.md` glossary), the same term in pages, ApiDocs and the rules file |
+| Chinese | one term per concept (`tools/ApiDocs/zh/README.md` glossary), the same term in pages, ApiDocs and the public skill |
 
 1. **Read what is settled**: CLAUDE.md, `docs/content/glossary.mdx`, `ecs-principles.mdx`, `decisions.mdx` (naming
    records and "Not added" records) and the renames in `migration.mdx`. Never re-propose a settled name without a

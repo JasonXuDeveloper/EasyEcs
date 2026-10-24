@@ -16,7 +16,6 @@ bun run lint:seo         # titles, descriptions, canonical, hreflang, cards, JSO
 bun run lint:terms       # the Chinese pages use the glossary's terms (tools/ApiDocs/zh/README.md)
 bun run lint:search      # each query of scripts/search-expectations.json finds its page in the built search index
 bun run sync:benchmarks  # src/data/bench.json from BenchmarkDotNet reports (see Benchmarks)
-bun run sync:rules       # public/easyecs-rules.md from ../skills/easyecs/SKILL.md (the one source; check and build fail when stale)
 bun run og:default       # redraw the default social card (public/og.png, the card of /en)
 bun run og:github        # redraw the repository's social preview (../.github/social-preview.png)
 bun run favicons         # favicons from public/icon.svg

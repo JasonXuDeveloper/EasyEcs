@@ -64,5 +64,5 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
 
 - Tests: positive and negative cases per rule, false-positive guards, a code-fix test per fix, the overlap test.
 - Docs (to-dos for the docs pass): `analyzer.mdx` + `.zh` (section, table row, fix line), changelog, a decision for a
-  new rule or a dropped idea, `skills/easyecs/SKILL.md` (the public skill; `bun run sync:rules` copies it to `docs/public/easyecs-rules.md`), common-mistakes / troubleshooting if users meet it, the
+  new rule or a dropped idea, `skills/easyecs/SKILL.md` (the public skill), common-mistakes / troubleshooting if users meet it, the
   rule list and EECS range in CLAUDE.md's layout.

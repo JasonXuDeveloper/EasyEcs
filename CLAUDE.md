@@ -286,9 +286,8 @@ docs/content/                  the docs (source of https://ecs.xgamedev.net), ea
                                diagrams in mermaid; meta.json files order the site's sidebar
 docs/                          the docs site: React Router 7 + Fumadocs, prerendered, Bun (docs/CLAUDE.md);
                                app/ routes, src/ components and libs, src/data/bench.json, scripts/, functions/
-                               (Cloudflare Pages Functions), WRITING.md (page anatomy, tone, numbers); public/
-                               easyecs-rules.md (the rules file for AI assistants, docs/content/ai.mdx; a copy of
-                               skills/easyecs/SKILL.md written by `bun run sync:rules`)
+                               (Cloudflare Pages Functions), WRITING.md (page anatomy, tone, numbers); public/ (static
+                               files: icons, _redirects, _headers, the demo's runtime)
 samples/                       runnable projects in learning order (README.md): HelloWorld, GameLoop, SaveLoad,
                                MultiWorld, HotReload (Contracts / Plugin / Host), Actors, VoxelServer (a Minecraft-style
                                server), Godot; built and run by CI
@@ -305,8 +304,8 @@ demo/EasyEcs.Demo/             the docs site's live demo (docs/content/demo.mdx)
                                includes its files. docs/scripts/build-demo.sh publishes it into docs/public/demo
                                (committed: Cloudflare has no .NET); rerun it after changing the demo or EasyEcs.Core
 skills/easyecs/                the public skill (`npx skills add JasonXuDeveloper/EasyEcs`): the rules users' AI agents
-                               follow when writing EasyEcs code; the one source of docs/public/easyecs-rules.md. The
-                               development skills in .claude/skills carry `metadata.internal: true`, so the skills CLI
+                               follow when writing EasyEcs code (docs/content/ai.mdx; /easyecs-rules.md redirects to it).
+                               The development skills in .claude/skills carry `metadata.internal: true`, so the skills CLI
                                lists only this one
 tools/bench.sh                 benchmark classes one BenchmarkDotNet process per class (resumable, under a shared lock),
                                merged into docs/src/data/bench.json (--sync); --site runs the classes the site shows
