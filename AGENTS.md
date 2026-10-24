@@ -54,7 +54,8 @@ src/EasyEcs.CodeFixes/         EasyEcsCodeFixes.cs: fixes for the analyzer's dia
                                EasyEcsCodeFixes.Forms.cs: EECS080 (a job and its calls to [ForEntity], solution-wide),
                                EECS084 ([Consume]); EasyEcsCodeFixes.Systems.cs: EECS074 (a ref struct), EECS075
                                (static), and the migration of a class deriving from the removed EcsSystem (the
-                               compiler's CS0246) into an [EcsSystem] ref struct
+                               compiler's CS0246) into an [EcsSystem] ref struct; EasyEcsCodeFixes.Split.cs: EECS055 /
+                               EECS090 (a component split, solution-wide, offered only when every use can follow it)
 tests/                         EasyEcs.UnitTest (NUnit, one file per feature) and EasyEcs.Aot (Native AOT check)
                                (file map: tests/AGENTS.md)
 benchmarks/                    EasyEcs.Benchmark (one class per feature + the headline worlds), EasyEcs.Comparison
