@@ -537,7 +537,20 @@ public partial class FusionTests
         Assert.That(code, Does.Contain("M_N_O_Fused0"), code);
         Assert.That(code, Does.Contain("one walk: M, then N, then O"), code);
         Assert.That(code, Does.Contain("one walk with N, O"), code);
-        Assert.That(code, Does.Contain("< global::EasyEcs.SystemCode.FusedRows)"), code); // blocks only above the cache
+        Assert.That(code, Does.Not.Contain("SystemCode.FusedRows"), code); // M and O write A: fused at any size
+        // Blocks only above the cache when no component is written twice.
+        code = Generated("[EcsSystem] public ref struct S { [ForEach] static void M(ref A a, in B b) => a.V += b.V; [ForEach] static void N(in A a, ref B b) => b.V -= a.V; }", "S");
+        Assert.That(code, Does.Contain("< global::EasyEcs.SystemCode.FusedRows)"), code);
+    }
+
+    // Fused at any size: two methods writing one component (its second store stays in L1), and a parallel walk.
+    [TestCase("[ForEach] static void M(ref A a, in B b) => a.V += b.V; [ForEach] static void N(ref A a, in B b) => a.V *= b.V;")]
+    [TestCase("[ForEach(Parallel = true)] static void M(ref A a, in B b) => a.V += b.V; [ForEach(Parallel = true)] static void N(in A a, ref B b) => b.V -= a.V;")]
+    public void SomeWalksFuseAtAnySize(string methods)
+    {
+        string code = Generated($"[EcsSystem] public ref struct S {{ {methods} }}", "S");
+        Assert.That(code, Does.Contain("M_N_Fused0"), code);
+        Assert.That(code, Does.Not.Contain("SystemCode.FusedRows"), code);
     }
 
     [Test]
