@@ -45,7 +45,7 @@
          The Nino package brings Nino.Serialization and, through buildTransitive, Nino.Generator to every project that
          references EasyEcs, so [NinoType] components get their formatters with no other package. -->
     <ItemGroup>
-        <PackageReference Include="Nino" Version="4.0.0-rc.6" />
+        <PackageReference Include="Nino" Version="4.0.0-rc.7" />
     </ItemGroup>
 
     <!-- EasyEcs.Generator: expands the T1..T9 API inside this assembly and ships to consumers for [ForEach] systems -->
