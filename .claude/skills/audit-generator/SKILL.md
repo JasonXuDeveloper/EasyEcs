@@ -46,6 +46,13 @@ record a dropped one.
 - **Data events**: an event type declared once; the generator writes the buffer, the emit call and the reader system.
 - **Schedule apart from the algorithm** (Halide): `ChunkRows`, `Parallel`, `Slices` chosen from `SystemStats`
   measurements instead of by hand (autotuning).
+- **Pass fusion** (FlashAttention, loop fusion in Halide / XLA): passes over the same rows run as one walk, so a row is
+  loaded into cache once. Fused automatically when it is provably the same result: the same filter, no structural
+  change, no read of another row the first pass writes (`Lookup<T>`), no per-pass result the second reads (`Reduce<T>`,
+  `Emit<T>`), no `[Changed<T>]` / `[Removed<T>]` on what the first writes, the same cadence and parallel settings;
+  within one system by declaration order, across systems when the schedule puts them next to each other. What stops a
+  fusion is reported as a fixable reason (`audit-analyzer`), and the docs teach merging by hand where it cannot be
+  proven. Proof: a benchmark of fused against separate passes in a world larger than L2.
 - **Hot/cold layout split**: fields a pass never reads moved out of the column it walks (measured access).
 - **Migration**: a code fix from object-oriented code (a class with update methods) to components and systems, and an
   AI migration guide in the public skill (`skills/easyecs/SKILL.md`).
