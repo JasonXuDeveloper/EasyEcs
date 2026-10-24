@@ -151,11 +151,10 @@ public static class DynamicBufferExtensions
     private static BufferStore<T> Take<T>(ref DynamicBuffer<T> buffer)
     {
         var store = buffer.Store;
-        return store != null && store.Shares == 0 ? store : Taken(ref buffer);
+        if (store == null) return buffer.Store = BufferStore<T>.Rent(); // a first write: one call, as before sharing
+        if (store.Shares != 0) store = buffer.Store = store.Unshare();
+        return store;
     }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static BufferStore<T> Taken<T>(ref DynamicBuffer<T> buffer) => buffer.Store = buffer.Store?.Unshare() ?? BufferStore<T>.Rent();
 
     /// <summary>Append <paramref name="items"/> (a list: <c>CollectionsMarshal.AsSpan(list)</c>, no copy). O(items).</summary>
     public static void AddRange<T>(this ref DynamicBuffer<T> buffer, params ReadOnlySpan<T> items)
@@ -331,6 +330,7 @@ internal abstract class BufferStore
     public abstract void Recycle();
 
     /// <summary>A holder that copied this shared list or let it go: one holder fewer (never the last one).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Release()
     {
         if (Shares < 0) return; // a prefab's: uncounted
@@ -534,6 +534,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         return copy;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private BufferStore<T> Copied()
     {
         var copy = Rent();
