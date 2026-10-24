@@ -9,7 +9,7 @@ When you add, rename or delete a file here, update its line (`verify` checks eve
 ```
 tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, Presence, Query, System (and stats),
                                ForEachSystem (and Slices), Singleton, Concurrency, Parallel, Runner, Run (entity.Run),
-                               ForEntity, Consume, Form (EECS080 / EECS084),
+                               ForEntity, Consume, Fusion (fused walks against FusionMode.Off twins, the exclusions), Form (EECS080 / EECS084),
                                Changed (and Mut, ChangedAny), Removed (and the destroy log), Instantiate, DynamicBuffer,
                                Index (and unique keys), Tile, OrderedIndex, Relation, Hierarchy, TargetPolicy, Group, Cleanup,
                                Disable, Bulk, Move, StructuralLoop (structural changes in vector loops against their scalar twins), Part (generated parts, EECS062-069), Snapshot, Serialization (and restart saves), Unload, Introspection

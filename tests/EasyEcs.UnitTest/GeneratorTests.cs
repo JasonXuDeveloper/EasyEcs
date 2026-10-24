@@ -34,10 +34,11 @@ public class GeneratorTests
     /// out: the cases here write the shortest code that shows a rule, which often also costs; <see cref="Costs"/> checks them.
     /// So are the suggestion to declare a hand-written key with [IndexKey] (EECS067, PartTests) and the formatter a managed type
     /// lacks (EECS069): the shared components write keys by hand and hold references. So are the suggestions to write
-    /// a hand-written one-entity job or consuming pass with attributes (EECS080, EECS084; FormTests).
+    /// a hand-written one-entity job or consuming pass with attributes (EECS080, EECS084; FormTests), and the passes
+    /// that almost share one walk (EECS093; FusionTests): the cases often write two methods over the same rows.
     /// </summary>
     private static async Task<string[]> Diagnose(params string[] sources) =>
-        (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id) && d.Id != "EECS055" && d.Id is not ("EECS067" or "EECS069" or "EECS080" or "EECS084"))
+        (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id) && d.Id != "EECS055" && d.Id is not ("EECS067" or "EECS069" or "EECS080" or "EECS084" or "EECS093"))
             .Select(d => d.Id).Distinct().OrderBy(x => x).ToArray();
 
     /// <summary>The diagnostics of the performance rules (EECS025-034, EECS039, EECS046, EECS052, EECS053), with their properties for the code fixes.</summary>
@@ -51,7 +52,7 @@ public class GeneratorTests
         || id is "EECS039" or "EECS046" or "EECS052" or "EECS053" or "EECS065" or "EECS086" or "EECS087" or "EECS089";
 
     /// <summary>Every EasyEcs diagnostic but EECS055 (the vector loop's message, asserted by <see cref="ScalarLoopsNameTheirReason"/>).</summary>
-    internal static async Task<Diagnostic[]> All(string source) => (await Analyze([Components, Extra, source])).Where(d => d.Id.StartsWith("EECS") && d.Id != "EECS055" && d.Id is not ("EECS067" or "EECS069") || d.Severity == DiagnosticSeverity.Error).OrderBy(d => d.Location.SourceSpan.Start).ToArray();
+    internal static async Task<Diagnostic[]> All(string source) => (await Analyze([Components, Extra, source])).Where(d => d.Id.StartsWith("EECS") && d.Id != "EECS055" && d.Id is not ("EECS067" or "EECS069" or "EECS093") || d.Severity == DiagnosticSeverity.Error).OrderBy(d => d.Location.SourceSpan.Start).ToArray();
 
     internal static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
     {
@@ -660,7 +661,9 @@ public class GeneratorTests
         var reasons = Steps(driver)["SystemUpdates"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
-        string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
+        // Not the walk of O and S (.Fusion.g.cs): two trees without a path read as one file, S declared after O.
+        string generated = driver.GetRunResult().GeneratedTrees.Where(t => !t.FilePath.EndsWith(".Fusion.g.cs"))
+            .Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
         Assert.That(generated, Does.Not.Contain("Vector.LoadUnsafe"));
     }
 
@@ -683,7 +686,8 @@ public class GeneratorTests
         "internal static extern void A_0<T>([global::System.Runtime.CompilerServices.UnsafeAccessorType(\"R\")] object owner, in T t, ref int n) where T : struct, global::EasyEcs.IComponent;")]
     [TestCase("[Without<Q>, WithAny<T, P>] public struct G : ISystemGroup; [UpdateInGroup<G>] [EcsSystem] public ref struct S { [ForEach, Without<Q>] static void A(ref P p) { } [ForEach, With<P>] static void B() { } }",
         "AFilter0 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T, global::P>();", // once, though both name it
-        "BFilter1 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T, global::P>();", "world.ForEach<global::P, __ForEach.BJob1>")]
+        "BFilter1 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T, global::P>();", 
+        "world.ForEachMasked<global::P, __ForEach.A_B_Fused0>(ref fused0, in __ForEach.A_B_Fused0Filter)")] // the same rows: one walk
     [TestCase("public record struct In<T>(int X) : IComponent; public interface IActor<TSelf> : ISystemGroupWith<In<TSelf>>, ISystemGroupWithout<Q> where TSelf : struct; "
         + "public struct Map : IActor<Map>; [UpdateInGroup<Map>] [EcsSystem] public ref struct S { [ForEach] static void A(ref P p) { } }",
         ".With<global::In<global::Map>>()", ".Without<global::Q>()")] // the group's filters through a generic interface
@@ -1524,6 +1528,7 @@ public class GeneratorTests
         "ForEachMethods", "Systems", "SystemUpdates", "ClosedSystems", "SystemSet", "Components", "ExtensionMembers", "BufferUses",
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
         "GroupBy", "TargetPolicies", "NotSaved", "ForEntityMethods", "ForEntityTypes", "LambdaPasses", "LambdaFiles", "Views", "Prefabs",
+        "SystemPlaces", "SystemFusions", "SetFusions",
     ];
 
     // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
@@ -1534,6 +1539,7 @@ public class GeneratorTests
     [TestCase("for (int i = 0; i < 2; i++) q.V += ++s.Value;", "for (int i = 0; i < 3; i++) q.V += ++s.Value;")] // a looping Scratch method's body
     [TestCase("static void U(World w) { _ = w.EntityCount; }", "static void U(World w) { _ = w.EntityCount + 1; }")] // a hook's body: the set stays
     [TestCase("public P P = new() { V = 3 };", "public P P = new() { V = 3 }; ")] // a prefab declaration's trivia
+    [TestCase("q.V += 2 + e.Id.Index;", "q.V += 3 + e.Id.Index;")]                       // a fused (scalar) method's body: its pair stays
     public void EditsThatChangeNoModelHitTheCache(string before, string after)
     {
         string code = "using EasyEcs;\n" + Components +
@@ -1547,7 +1553,8 @@ public class GeneratorTests
             "[UpdateInterval(3, Phase = 1)] [EcsSystem] public ref struct Sch { static void OnUpdate(World w) { _ = w.EntityCount; } } public static class FE { [ForEntity, Without<Q>] static void E(ref P p, int n) { } }" +
             "[View] public ref struct Vw { public ref P P; public ref readonly Q Q; public void Add(int n) { P.V += Q.V + n; } }" +
             "[EcsSystem] public ref struct VS { [ForEach] static void M(Vw v) => v.Add(1); }" +
-            "[Prefab] public partial struct Kind { public P P = new() { V = 3 }; public Q Q; }";
+            "[Prefab] public partial struct Kind { public P P = new() { V = 3 }; public Q Q; }" +
+            "[EcsSystem] public ref struct F1 { [ForEach] static void Fa(ref Q q, Entity e) => q.V += e.Id.Index; [ForEach] static void Fb(ref Q q, Entity e) => q.V += 2 + e.Id.Index; } [EcsSystem] public ref struct F2 { [ForEach] static void Fc(ref Q q) => q.V++; }";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         // A lambda pass in a file of its own: its interceptor names the file's checksum, so an edit there is a new model.
