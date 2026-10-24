@@ -78,6 +78,7 @@ public class FusionBenchmark
     {
         var world = new World(new WorldOptions { InitialEntityCapacity = Rows });
         world.AddSingleton<Rink>() = new Rink(1000);
+        world.Reserve<Coords, Thrust, Wellness, Toxin>(Rows);
         for (int i = 0; i < Rows; i++)
             world.CreateEntity(new Coords(i % 997, i % 991), new Thrust(i % 7 - 3, i % 5 - 2), new Wellness(i % 100, 100), new Toxin(i % 3));
         return world;
