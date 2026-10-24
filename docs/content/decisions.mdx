@@ -117,6 +117,9 @@ after the change on the machine of the time; they are history, not the current r
 | [D106](#d106-lock-or-cas) | The runtime synchronizes with a `Lock` or a compare-and-swap, never a locked object |
 | [D107](#d107-never-used-warnings) | `[ForEach]` and hook methods are not reported as unused |
 | [D108](#d108-aot-instruction-set) | Native AOT: the instruction set is the program's choice, `native` in the templates |
+| [D109](#d109-views) | A `[View]` is one entity's components with the methods that use them, taken as a parameter |
+| [D110](#d110-vector-loops-through-views) | A method calling a view's members gets the vector loop of the same code over parameters |
+| [D111](#d111-prefab-declarations) | A `[Prefab]` declares a prefab as the components it starts with |
 | [D112](#d112-lambda-passes) | A lambda pass is compiled at its call into the job of a `[ForEach]` method |
 | [D113](#d113-lambda-values-not-captures) | A lambda pass is static; the values it reads are passed before it |
 | [D114](#d114-lambda-body-copied) | The lambda's body is copied into the generated file; a body that cannot be runs through its delegate |
@@ -2698,6 +2701,149 @@ such as `x86-64-v3` (AVX2) or `x86-64-v4` (AVX-512) for a fleet. The package set
 **Considered.**
 - **Leaving the default:** the AVX-512 loops never run under Native AOT.
 - **Setting it in the package's build files:** a library would choose the CPUs its users' programs run on.
+
+## D109. A `[View]` is one entity's components with the methods that use them, taken as a parameter [#d109-views]
+
+**Decision.** A `ref struct` marked `[View]` declares a view of one entity: an instance field per component, `ref`
+for one it writes, `ref readonly` for one it reads and `Mut<T>` for a tracked one it writes on some rows, and the
+business methods over them.
+
+```csharp doccheck=skip
+[View]
+public ref struct Fighter
+{
+    public ref Health Health;
+    public ref readonly Armor Armor;
+
+    public readonly bool Dead => Health.Value <= 0;
+    public void TakeDamage(int damage) => Health.Value -= Math.Max(0, damage - Armor.Value);
+}
+
+[EcsSystem]
+public ref struct Poisoning
+{
+    [ForEach] static void Tick(Fighter fighter, in Poison poison) => fighter.TakeDamage(poison.PerTick);
+}
+```
+
+- **A parameter.** A `[ForEach]` or `[ForEntity]` method, or a lambda pass (`world.ForEach(static (Fighter f, in
+  Poison p) => f.TakeDamage(p.PerTick))`), takes the view by value. The method visits the entities that
+  have every component of the view. The generated job builds the view over the row (`new Fighter { Health = ref c1,
+  Armor = ref c2 }`, `Unsafe.Add` of the run's refs in a batch job). The view's fields count as the method's own
+  `ref` / `in` parameters would: the system writes `Health` and reads `Armor` for the schedule, and a tracked
+  component behind a `ref` field is stamped on every visited row, one behind a `Mut<T>` field only on the rows written
+  through `Write()` or a `SetIfChanged` that changed it (as a `Mut<T>` parameter, D66). EECS053 follows writes through
+  view members: a `ref` field of a tracked component that a method, or a view member, writes on some paths only is
+  reported, with `Mut<T>` as the fix.
+- **From an entity.** The generator writes `entity.AsFighter()` (throws when a component is missing, as `Get` does)
+  and `entity.TryGetFighter(out Fighter fighter)`.
+- **What a view may hold.** EECS098 rejects a view that is not a ref struct, is generic, holds a value or a ref of a
+  non-component, hides or makes `readonly` a field the generated code sets, writes an indexed component (the index
+  would miss the write: `ref readonly` reads it), covers a component twice, or covers none or more than nine.
+  EECS099 rejects a method that reaches a component through a view and through a parameter or another view: two
+  refs to one column, one perhaps read-only. EECS100 (Warning) reports a view member that takes or uses the `World`,
+  an `Entity`, an `EntityId`, a `Lookup` or another view, or keeps static state. EECS101 (Warning, with a code fix)
+  reports a view built by hand from a method's component parameters (fix: take the view as the parameter) or from
+  one entity's components (fix: `entity.AsX()`).
+
+**Why.**
+- **The same lines in every system.** A fighter's rules (the armor formula, what dead means) were written again in
+  each system that touches health and armor. In a view they are written once, and the systems stay one job each.
+- **It stays ECS.** The view holds no state (only refs into the row) and runs no logic of its own; systems decide
+  when its methods run, and the scheduler sees exactly what each system reads and writes. A view is how a method
+  names a group of its parameters, not an object.
+- **No cost.** The view is a ref struct of refs that the JIT keeps in registers: `ViewBenchmark` measures a pass
+  taking a view against the same pass taking the refs. Over 100,000 movers (AVX-512, two rounds at load 2-3): 24.7 / 24.0 μs
+  by the refs and 25.0 / 25.4 μs (±2.1 μs) through the view, within each other's error. With `SimdMode.Off`,
+  97.4 / 96.1 μs by the refs and 93.0 / 94.9 μs through the view (its scalar tail is inlined). One entity at a
+  time, 1,000 calls: `Get` / `Read` 8.2 / 8.2 μs, `AsMover()` 7.9 / 9.7 μs (±1.9 μs). 0 B everywhere. The Tier1 vector loop
+  bodies of the two passes are the same instructions.
+
+**Considered.**
+- **Names.** *View* is the database sense: a named projection of one row's columns that reads and writes through to
+  them. Unity's *Aspect* is the closest idea, and Unity deprecated it in Entities 1.3; Bevy's `#[derive(QueryData)]` struct and Flecs' and Arch's typed
+  queries declare the components of a query, not methods on one entity. EnTT and Friflo use *view* for the query
+  itself; here a query is a filter and a pass, so *view* is free for the row. *Facet* and *Role* were rejected: a
+  facet is a filter in search engines, and a role is a permission.
+- **`AsX()` beside `TryGetX(out x)`.** `TryGetX` is .NET's Try pattern and the name of a component's generated
+  `TryGetHealth`. The throwing form is `AsX`, not `GetX`: a view is not stored on the entity, it is built over the
+  entity's components, as `AsSpan()` builds a span over an array, and `GetX` would read as a component named `X`.
+- **A class or an interface on components.** Methods on a component see only that component; a class holding the
+  entity allocates and hides the schedule. Default interface methods box.
+- **Generating the view from a list of components** (`[View<Health, Armor>]`): the read/write choice and the field
+  names are the user's to write, and a ref field says both.
+
+## D110. A method calling a view's members gets the vector loop of the same code over parameters [#d110-vector-loops-through-views]
+
+**Decision.** A `[ForEach]` method that takes a view is vectorized as if its view's fields were parameters: before
+the vector loop is translated, the method is rewritten with one parameter per view field, a call of a void view
+method becomes its body (its parameters as locals), and a field, a single-expression getter or a value-returning
+single-expression method becomes the expression over those parameters. The rewritten method is bound in a copy of its
+syntax tree, and `Kernel` translates it as it translates any method. A view with a `Mut<T>` field keeps the scalar loop, as a `Mut<T>`
+parameter does, and so does a lambda pass taking a view (EECS097 says so): its body has no declaration to inline the
+members from, and a `[ForEach]` method taking the same view gets the loop. When a member cannot be inlined (a loop, a
+`return` in the middle, a lambda, a member of another type that is not static, recursion past eight levels), the
+method keeps the scalar loop and EECS055 / EECS056 name the reason.
+
+**Why.**
+- **A view must cost nothing, the vector loop included.** A method over components that qualified for a vector loop
+  would lose it the day its code moved into a view, which would make views a cost. Inlining gives `Kernel` the same
+  method it would see without the view. `ViewTests` checks that the view, the scalar method and the refs by hand
+  write bit-identical positions, and that 1 and 4 threads agree.
+- **One translator.** `Kernel` already knows every vector form; teaching it member calls would duplicate it.
+
+**Considered.**
+- **Vectorizing view members on their own** (a vector form per member): the member's lanes depend on the caller's
+  other parameters and filters, so each caller would need its own copy anyway.
+- **Scalar loops for view parameters:** simpler, but a hidden cost of a feature meant to be free.
+
+## D111. A `[Prefab]` declares a prefab as the components it starts with [#d111-prefab-declarations]
+
+**Decision.** A partial struct marked `[Prefab]` declares a `Prefab` at compile time: one field per component, each
+field's initializer its default. The generator writes `X.Prefab`, a `static readonly Prefab` built once from those
+defaults (one `Prefab.Set` per nine components), and the parameterless constructor field initializers need (unless
+the struct declares one). Creation is `Instantiate`, as for any prefab:
+
+```csharp doccheck=skip
+[Prefab]
+public partial struct Goblin
+{
+    public Health Health = new(30);
+    public Position Position;
+    public Speed Speed = new(2f);
+    public IsGoblin Tag;                                                  // what systems filter on
+}
+
+var goblin = world.Instantiate(Goblin.Prefab);                            // the defaults
+var fast = world.Instantiate(Goblin.Prefab, new Speed(9f));               // only what differs
+world.Instantiate(Goblin.Prefab, wave);                                   // a span, at once
+var boss = new Prefab(Goblin.Prefab).SetBuffer(new Drops(7));             // a variant
+```
+
+EECS102 rejects a declaration the generator cannot write (not partial, generic, a ref struct, a property, ref or
+non-component field, a `DynamicBuffer<T>` field, a component twice, none, or a member named `Prefab`).
+
+**Why.**
+- **A kind's components and defaults were repeated at every creation.** The goblin of a spawn system, a test and a
+  tool drifted apart; declared once, a creation states only what differs.
+- **One way to create from a recipe.** `Instantiate` already writes the prefab's values and the given ones into the
+  final table in one row copy, takes a span, and a prefab already has variants, buffers and members. A declaration
+  that only builds the prefab adds none of that again.
+- **No filter.** A declaration's components match entities of other kinds that happen to have them too. A kind that
+  systems must find declares a tag component, which every filter can name.
+
+**Considered.**
+- **`[Archetype]` with `world.CreateX()` / `CreateXs(span)` and `X.Filter`, dropped.** "Archetype" is the table of one
+  component combination (the glossary, `DescribeTables`), so the name would mean two things; the filter matched every
+  entity with those components, not that kind; and the creation calls duplicated `Instantiate` without its variants
+  or buffers. A Warning for a `CreateEntity` that lists a declaration's components was dropped with it: the
+  replacement is no faster, and the same components are often a different kind.
+- **Methods of a declaration as systems** (an object of a kind with an `Update`): logic would live on a kind of
+  entity instead of on the data it reads. Logic stays in systems; a `[View]` is how a system names the components it uses.
+- **A generated view over a declaration's components, dropped.** It would write every component, so every system
+  taking it would write all of them: tracked components stamped on every row, and systems that touch disjoint fields
+  serialized into separate stages. A user's `[View]` states what each system writes.
+- **Bevy's *Bundle*:** a set of components inserted together, without defaults; a prefab already is the recipe.
 
 ## D112. A lambda pass is compiled at its call into the job of a `[ForEach]` method [#d112-lambda-passes]
 

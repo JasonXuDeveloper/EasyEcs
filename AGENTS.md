@@ -57,7 +57,8 @@ src/EasyEcs.CodeFixes/         EasyEcsCodeFixes.cs: fixes for the analyzer's dia
                                compiler's CS0246) into an [EcsSystem] ref struct; EasyEcsCodeFixes.Declarations.cs:
                                the migrations of declarations that changed shape, from the compiler's error on the old
                                form (WithAny<T> merged, the hook attributes, [GroupBy] onto the member, EntityRandom's
-                               tick written by hand) and EECS090's rename; EasyEcsCodeFixes.Split.cs: EECS055 /
+                               tick written by hand) and EECS090's rename; EasyEcsCodeFixes.Views.cs: EECS101 (a hand-built view
+                               as the method's parameter); EasyEcsCodeFixes.Split.cs: EECS055 /
                                EECS091 (a component split, solution-wide, offered only when every use can follow it);
                                EasyEcsCodeFixes.Lambdas.cs: EECS095 (pass captured values before a static lambda),
                                EECS096 (make the private member a lambda's body names internal)

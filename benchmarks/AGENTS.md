@@ -20,7 +20,7 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                Prefab, Relation, Runner, SingleEntity, Slices, Snapshot (+ SaveWithout / LoadKeeping),
                                Sparse, StructuralLoop (a tag set under a condition: vector loop + marked rows against the
                                scalar method, a command buffer and SetAll), SystemDispatch (what a system costs per update apart from its rows), Trim,
-                               Unload) + MicroBenchmarks.
+                               Unload, View (a pass taking a [View] against the refs it stands for, vector and scalar, and AsX against Get / Read)) + MicroBenchmarks.
                                Always measure with BenchmarkDotNet.
 benchmarks/EasyEcs.Benchmark.Plugin/  a collectible plugin (Scoring.cs) the Unload benchmark loads and unloads
 benchmarks/EasyEcs.Comparison/ BenchmarkDotNet against Arch, Friflo.Engine.ECS and DefaultEcs, every result checked in

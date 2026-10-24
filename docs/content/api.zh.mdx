@@ -50,6 +50,8 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`ChunkRows = n`、`Slices = N`、`SimdMode = SimdMode.Auto` / `Require` / `Off`、`FloatMode = FloatMode.Exact` / `Fast`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`；`[Consume]`（遍历结束后销毁访问过的行）；`[ForEntity]`（通过生成的入口在单个实体上运行的静态方法）。 |
 | `Maybe<T>` | ref struct | `[ForEach]` 方法的可选组件参数：`HasValue`、`Value`。 |
 | `ReadOnlyMaybe<T>` | ref struct | 只读版本：`Value` 是 `ref readonly`，从不打 tick，带索引的组件也能用；`Maybe<T>` 可以转换成它。 |
+| `[View]` | 特性 | 标在由 `ref`（写）、`ref readonly`（读）和 `Mut<T>`（在部分行上写）组件字段加业务方法组成的 `ref struct` 上：一个实体的若干组件，`[ForEach]` 和 `[ForEntity]` 方法可以把它当参数，实体用 `entity.AsX()` / `TryGetX(out X)` 拿到它。 |
+| `[Prefab]` | 特性 | 标在每个组件一个字段、字段初始化器即默认值的 partial struct 上：生成器写出 `X.Prefab`，一个由这些默认值构成的 `static readonly Prefab`，用于 `world.Instantiate(X.Prefab)`。 |
 | `Mut<T>` | ref struct | `[ForEach]` 方法的组件参数，只有方法真正写了的行才算写入：`Value`、`Write()`、`SetIfChanged(value)`（[变更追踪](/zh/docs/guide/change-tracking)）。 |
 | `Reduce<T>`、`IReduction<T>` | 结构体、接口 | `[ForEach]` 参数（按 `ref` 传入），把一次遍历归约到单例 `T`，`T` 实现 `IReduction<T>`（`Identity`、`Combine`）：`Value`、`Combine(value)`。 |
 | `[Sum]`、`[Product]`、`[Min]`、`[Max]`、`[All]`、`[Any]` | 特性 | 标在 partial struct 的每个实例字段上：生成器写出它的 `IReduction<T>`（`Identity` 和逐字段的 `Combine`）。 |
@@ -128,6 +130,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `prefab.SetAbsent<T>()` | O(1) | 有 `T` 的列但没有这个组件：实例没有它，之后加上它只在所在的表里翻转存在位，不搬行 |
 | `prefab.AddMember()` | O(1) | 预制体组的一个成员：实例化任何一个都会创建全部；指向成员的 `EntityId` 字段在每个实例上改写 |
 | 生成的成员：`prefab.X`、`HasX`、`SetX(…)`、`RemoveX()`；标签 `IsX`、`SetX()`；缓冲 `SetLoot(items…)` | 同对应的泛型调用 | 写方法返回预制体；属性只读；不算任何 World 的结构变更 |
+| `[Prefab]` 结构体生成的 `X.Prefab` | 类型首次使用时 O(c)，只一次 | 由字段初始化器的值（没有初始化器的字段取 `default`）构成的预制体，所有 World 共用：实例化它，或者修改它的变体（`new Prefab(X.Prefab)`） |
 | `world.Instantiate(prefab)` | O(c) | 一次行复制；目标表每个预制体表只找一次并缓存；遍历期间也安全（新实体不会被这次遍历访问）；预制体组为 O(成员数 × c) |
 | `world.Instantiate(prefab, Span<Entity> entities)` | O(count × c) | 整波只过一次闸门，表最多扩容一次 |
 | `world.Instantiate(prefab, in T1 … in Tn)` | 均摊 O(c + n) | 预制体的值加上给定的值（覆盖预制体里的，或者新加；给定的组件若在预制体里被禁用则启用），一次行复制直接进最终的表，不经过中间表；给定的 `ChildOf` 会挂上层级，唯一键先检查；预制体组为 O(成员数 × c) 再加一次搬行，组件给传入的那个预制体对应的实体 |
@@ -164,6 +167,8 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `entity.Run<T1..Tn, TJob>(ref job)` / `Run(ref job, filter)` | O(n)，过滤条件每个组件再加 O(1) | 单个实体；实体失效、缺组件或被过滤掉时返回 false；job 做结构变更后 ref 仍然有效 |
 | `entity.Run<T1..Tn, TJob>(ref job, in filter, since)` | O(n)，再加 O(过滤条件提到的组件数) | 同 `Run(ref job, filter)`，只是用 `since` 作过滤条件的 tick：和 `filter.Since(since)` 的检查一样，但不拷贝过滤条件（一个 `static readonly` 过滤条件，`[ForEntity, Changed<T>]` 的入口就这样传） |
 | `[ForEntity]` 方法：生成的 `Owner.Method(entity, values…)` | 同 `entity.Run` | 用生成的 job 调 `entity.Run`（`ref` 参数构成 `WriteMask`，过滤特性构成一个 `static readonly` 过滤条件）；返回 false 的情况同 `Run`；带 `[Changed<T>]` 的方法第二个参数是 `since`；接收单例或 `World` 的方法，对不属于任何 World 的实体返回 false |
+| `[ForEach]` / `[ForEntity]` 方法或 lambda 遍历的 `[View]` 参数 | 同把这些组件直接当参数 | job 在行上构造视图（每个字段一个 ref，不拷贝）；`ref` 字段算系统的写（被追踪的组件每个访问过的行都打 tick），`Mut<T>` 字段算只在写过的行上打 tick 的写（没有向量循环），`ref readonly` 字段算读；调用视图成员的方法，和把同样代码写在参数上一样能得到向量循环（成员被内联）；接收视图的 lambda 遍历保留标量循环；同一组件被访问两次报 EECS099 |
+| `[View]` 生成的 `entity.AsX()` / `TryGetX(out X)` | O(字段数) | 每个字段一个 ref（`ref` 用 `Get`，`ref readonly` 和 `Mut<T>` 用 `Read`，`Mut<T>` 的写入会打 tick）；缺组件或实体不存活时 `AsX` 抛异常，`TryGetX` 返回 false；不是结构变更 |
 | `[ForEach, Consume]` | 遍历本身，之后 O(M + S)：一次 `DestroyAll`（整张表一起释放）或每行一次销毁 | 遍历结束时销毁访问过的行：方法不做结构变更时按它的过滤条件做一次 `DestroyAll`，否则在方法处理完每一行后销毁那一行；遍历期间才开始匹配的行保留；批量销毁的遍历抛异常时什么也不销毁；所在的系统独自运行；不能和 `Slices` 一起用（EECS085） |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数) | 连续行的 span；不能做结构变更 |
 | 带向量循环的 `[ForEach]` 方法（生成的，[向量循环](/zh/docs/guide/systems#vector-loops)） | O(M + S / L + 段数)，L = 每个向量的行数（先 `Vector512`，再 `Vector<T>`；按通道大小和 CPU，2 到 64） | 行、结果（`FloatMode.Fast` 之外）、变更 tick 和读写都和逐行运行的方法相同；每段先广播一次统一值，不足 L 行的尾部由方法自己跑；单线程时按 `ForEachMasked` 运行（只有部分行通过的字，每 L 行一个带掩码的向量），并行时按 `ForEachBatchParallel` 跑每块里连续的行；2 到 4 个字段的组件每个向量多一次解交错加载和一次交错存储（没有 AVX2 或 AVX-512 时每行都由方法跑）；`Reduce<T>` 每条通道每个字段一个累加器，每段合并一次；零分配 |
