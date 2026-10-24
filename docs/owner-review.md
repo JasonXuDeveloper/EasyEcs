@@ -24,3 +24,13 @@ leave this file; it is not published on the site.
 - **`ISystemGroupWithAny`.** Not done: no sample or user code needs a group condition beyond what exists.
 - **Infer `ChunkRows`.** Deferred: needs the scheduler's autotuner to also try chunks under 1,024 rows, with
   benchmarks showing the inferred size is never worse than the hand-set one.
+
+## Generated kernels (2026-10-24)
+
+- **A `Scan<T>` parameter (prefix sums per pass).** Not done: no sample, benchmark world or docs example computes a
+  running total over rows, and `Emit<T>` already compacts passing rows in order. Would change if a user workload needs
+  per-row offsets (packing variable-size records).
+- **A per-element parameter for buffers (`Element<T>`).** Not done: an inner loop over the buffer says the same thing
+  and becomes the same vector loop (inference first); two ways for one meaning.
+- **Vectorized reads of other entities (`Lookup<T>` gathers, parent transforms).** Not done: AVX2 gathers measured 0.8
+  to 1.18 of scalar (D90). Would change with a CPU whose gathers are fast or a sort of lookups by target table first.
