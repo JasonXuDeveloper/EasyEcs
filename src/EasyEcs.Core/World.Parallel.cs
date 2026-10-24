@@ -130,6 +130,7 @@ public sealed partial class World
         }
 
         Gate.FreezeParallel(); // the chunks may run on several threads: a structural change throws
+        Interlocked.Increment(ref BufferStore.ParallelPasses); // chunks sharing a buffer's list count it down atomically
         try
         {
             if (!TryRunChunks(work, chunks))
@@ -137,6 +138,7 @@ public sealed partial class World
         }
         finally
         {
+            Interlocked.Decrement(ref BufferStore.ParallelPasses);
             Gate.ThawParallel();
         }
     }

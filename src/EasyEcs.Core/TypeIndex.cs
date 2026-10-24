@@ -190,7 +190,7 @@ internal sealed class SingletonBox<T> : SingletonBox where T : struct, ISingleto
             // A world has one of each singleton: it keeps its list, emptied, when the copy has no elements (an
             // Emitted<T> restored to a capture taken after its records were cleared), so the next passes' records need
             // no new list. Rows give theirs back to the pool instead (BufferStore.Assign): a table's rows come and go.
-            if (Store == null) Store = from.Store?.Clone();
+            if (Store == null) Store = from.Store?.Copy(); // a copy, never shared: Emit writes the list without a test
             else if (!Store.CopyFrom(from.Store)) Store.Empty();
         }
         else Value = from.Value;

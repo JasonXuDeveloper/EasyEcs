@@ -11,6 +11,8 @@ public class DynamicBufferTests
     public enum Ore : byte { Air, Iron }      // and only the reload test sets this one's
     public record struct Mail(long Value);    // the pool of this element type serves only the tests below
     public record struct Rewind(long Value);  // and this one's only the restore test
+    public record struct Stock(int Value);    // the lists shared until written (copy-on-write), below
+    public record struct Spare(int Value);    // the pool of this one serves only the last-holder test
 
     /// <summary>Counts, per entity, the runs in which its bag had changed since the system's previous run.</summary>
     [EcsSystem]
@@ -47,6 +49,14 @@ public class DynamicBufferTests
             foreach (var loot in bag) total += loot.Count;
             weight = new Health(total);
         }
+    }
+
+    /// <summary>Each stock's first element becomes its entity's health: the first write of lists the rows share.</summary>
+    [EcsSystem]
+    public ref struct Restock
+    {
+        [ForEach(Parallel = true, ChunkRows = 64)]
+        private static void Apply(Mut<DynamicBuffer<Stock>> stock, in Health health) => stock.Write().AsSpan()[0] = new Stock(health.Value);
     }
 
     /// <summary>Refills every bag with one item, in place: no allocation once the capacity is reached.</summary>
@@ -202,6 +212,10 @@ public class DynamicBufferTests
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 50; i++) Replay(false);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        // Restored rows share their lists with the snapshot, loaded rows have their own: the first loads after restores
+        // take the lists that makes (once), Load's own copy one more.
+        Replay(true);
+        Replay(true);
         before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 50; i++) Replay(true);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
@@ -447,6 +461,349 @@ public class DynamicBufferTests
         {
             DynamicBuffer<Ore>.MaxPooledLength = 4096;
         }
+    }
+
+    private static BufferStore<Stock> StoreOf(Entity e) => e.Get<DynamicBuffer<Stock>>().Store;
+
+    private static int[] Values(Entity e)
+    {
+        var values = new System.Collections.Generic.List<int>();
+        foreach (var stock in e.Read<DynamicBuffer<Stock>>()) values.Add(stock.Value);
+        return values.ToArray();
+    }
+
+    private static Entity Stocked(World world, params ReadOnlySpan<Stock> items)
+    {
+        var e = world.CreateEntity(new DynamicBuffer<Stock>(), new Frozen());
+        e.Get<DynamicBuffer<Stock>>().AddRange(items);
+        return e;
+    }
+
+    [Test]
+    public void PrefabInstancesShareItsListUntilTheyWriteIt()
+    {
+        using var world = new World();
+        var crate = new Prefab().SetBuffer(new Stock(1), new Stock(2), new Stock(3));
+        var a = world.Instantiate(crate);
+        var b = world.Instantiate(crate);
+        var shared = StoreOf(a);
+        Assert.That(StoreOf(b), Is.SameAs(shared));
+        Assert.That(shared.Shares, Is.EqualTo(BufferStore.Uncounted));   // a prefab's list: never counted
+
+        a.Get<DynamicBuffer<Stock>>().AsSpan()[0] = new Stock(10);       // the first write copies
+        Assert.That(StoreOf(a), Is.Not.SameAs(shared));
+        Assert.That(StoreOf(a).Shares, Is.Zero);
+        Assert.That(Values(a), Is.EqualTo(new[] { 10, 2, 3 }));
+        Assert.That(Values(b), Is.EqualTo(new[] { 1, 2, 3 }));
+        b.Get<DynamicBuffer<Stock>>().Add(new Stock(4));
+        Assert.That(Values(b), Is.EqualTo(new[] { 1, 2, 3, 4 }));
+        Assert.That(Values(world.Instantiate(crate)), Is.EqualTo(new[] { 1, 2, 3 }));
+
+        world.DestroyAll<DynamicBuffer<Stock>>();                         // instances let the prefab's list go: not pooled
+        var rented = BufferStore<Stock>.Rent();
+        Assert.That(rented, Is.Not.SameAs(shared));
+        rented.Recycle();
+        Assert.That(crate.Read<DynamicBuffer<Stock>>().AsReadOnlySpan().ToArray(), Is.EqualTo(new[] { new Stock(1), new Stock(2), new Stock(3) }));
+    }
+
+    [Test]
+    public void EveryWriteCopiesASharedListFirst()
+    {
+        var crate = new Prefab().SetBuffer(new Stock(1), new Stock(2), new Stock(3));
+        var writes = new (string Name, Action<Entity> Write, int[] Expected)[]
+        {
+            ("AsSpan", e => e.Get<DynamicBuffer<Stock>>().AsSpan()[1] = new Stock(9), [1, 9, 3]),
+            ("Add", e => e.Get<DynamicBuffer<Stock>>().Add(new Stock(4)), [1, 2, 3, 4]),
+            ("AddRange", e => e.Get<DynamicBuffer<Stock>>().AddRange(new Stock(4), new Stock(5)), [1, 2, 3, 4, 5]),
+            ("Insert", e => e.Get<DynamicBuffer<Stock>>().Insert(0, new Stock(0)), [0, 1, 2, 3]),
+            ("RemoveAt", e => e.Get<DynamicBuffer<Stock>>().RemoveAt(0), [2, 3]),
+            ("RemoveAtSwapBack", e => e.Get<DynamicBuffer<Stock>>().RemoveAtSwapBack(0), [3, 2]),
+            ("Clear", e => e.Get<DynamicBuffer<Stock>>().Clear(), []),
+            ("TrimExcess", e => e.Get<DynamicBuffer<Stock>>().TrimExcess(), [1, 2, 3]),
+            ("SetCount", e => e.Get<DynamicBuffer<Stock>>().SetCount(2)[1] = new Stock(7), [1, 7]),
+            ("EnsureCapacity", e => e.Get<DynamicBuffer<Stock>>().EnsureCapacity(64), [1, 2, 3]),
+        };
+
+        foreach (var (name, write, expected) in writes)
+        {
+            using var world = new World();
+            var original = Stocked(world, new Stock(1), new Stock(2), new Stock(3));
+            var clone = original.Clone();
+            var instance = world.Instantiate(crate);
+            var snapshot = world.Capture();
+            write(clone);
+            write(instance);
+            Assert.That(Values(clone), Is.EqualTo(expected), name);
+            Assert.That(Values(instance), Is.EqualTo(expected), name);
+            Assert.That(Values(original), Is.EqualTo(new[] { 1, 2, 3 }), name);
+            Assert.That(crate.Read<DynamicBuffer<Stock>>().Count, Is.EqualTo(3), name);
+            write(original);
+            Assert.That(Values(original), Is.EqualTo(expected), name);
+            world.Restore(snapshot);
+            Assert.That(Values(original), Is.EqualTo(new[] { 1, 2, 3 }), name);
+            Assert.That(Values(clone), Is.EqualTo(new[] { 1, 2, 3 }), name);
+            Assert.That(Values(instance), Is.EqualTo(new[] { 1, 2, 3 }), name);
+        }
+    }
+
+    [Test]
+    public void ClonesShareTheListUntilEitherSideWrites()
+    {
+        using var world = new World();
+        var original = Stocked(world, new Stock(1), new Stock(2));
+        var list = StoreOf(original);
+        var clone = original.Clone();
+        Assert.That(StoreOf(clone), Is.SameAs(list));
+        Assert.That(list.Shares, Is.EqualTo(1));
+
+        original.Get<DynamicBuffer<Stock>>().Add(new Stock(3));          // the original writes: it copies, the clone keeps
+        Assert.That(StoreOf(clone), Is.SameAs(list));
+        Assert.That(list.Shares, Is.Zero);
+        clone.Get<DynamicBuffer<Stock>>().AsSpan()[0] = new Stock(5);    // the clone alone holds it now: in place
+        Assert.That(StoreOf(clone), Is.SameAs(list));
+        Assert.That(Values(original), Is.EqualTo(new[] { 1, 2, 3 }));
+        Assert.That(Values(clone), Is.EqualTo(new[] { 5, 2 }));
+
+        var second = clone.Clone();                                       // a destroyed holder counts down too
+        clone.Destroy();
+        Assert.That(StoreOf(second), Is.SameAs(list));
+        Assert.That(list.Shares, Is.Zero);
+        second.Remove<DynamicBuffer<Stock>>();                            // and so does a removed component
+        Assert.That(list.Count, Is.Zero);                                 // the last holder's: emptied for the pool
+    }
+
+    [Test]
+    public void OnlyTheLastHolderGivesTheListBackToThePool()
+    {
+        using var world = new World();
+        var original = world.CreateEntity(new DynamicBuffer<Spare>());
+        original.Get<DynamicBuffer<Spare>>().Add(new Spare(1));
+        var list = original.Get<DynamicBuffer<Spare>>().Store;
+        var clone = original.Clone();
+        var snapshot = world.Capture();                                   // its two rows hold the list too
+        Assert.That(list.Shares, Is.EqualTo(3));
+
+        clone.Destroy();
+        original.Destroy();
+        Assert.That(list.Shares, Is.EqualTo(1));                          // the snapshot's rows hold it
+        Assert.That(list.Count, Is.EqualTo(1));
+        var rented = BufferStore<Spare>.Rent();
+        Assert.That(rented, Is.Not.SameAs(list));
+        rented.Recycle();
+
+        world.Restore(snapshot);                                          // back in the world, then gone for good
+        Assert.That(list.Shares, Is.EqualTo(3));
+        world.DestroyAll<DynamicBuffer<Spare>>();
+        Assert.That(list.Shares, Is.EqualTo(1));
+        world.Capture(snapshot);                                          // the snapshot lets it go: the last holder
+        Assert.That(list.Count, Is.Zero);
+        Assert.That(BufferStore<Spare>.Rent(), Is.SameAs(list));
+    }
+
+    [Test]
+    public void SnapshotsRestoredTwiceKeepTheirElements()
+    {
+        using var world = new World();
+        var e = Stocked(world, new Stock(1), new Stock(2));
+        var snapshot = world.Capture();
+        Assert.That(StoreOf(e).Shares, Is.EqualTo(1));
+
+        world.Restore(snapshot);                                          // nothing written: still the one list
+        world.Restore(snapshot);
+        Assert.That(StoreOf(e).Shares, Is.EqualTo(1));
+        for (int i = 0; i < 3; i++)
+        {
+            e.Get<DynamicBuffer<Stock>>().AsSpan()[0] = new Stock(9 + i);
+            e.Get<DynamicBuffer<Stock>>().Add(new Stock(3));
+            world.Restore(snapshot);
+            Assert.That(Values(e), Is.EqualTo(new[] { 1, 2 }));
+            Assert.That(StoreOf(e).Shares, Is.EqualTo(1));                // the world's row and the snapshot's
+        }
+
+        world.Capture(snapshot);                                          // captured again into the same copy
+        world.Capture(snapshot);
+        Assert.That(StoreOf(e).Shares, Is.EqualTo(1));
+        var second = world.Capture();
+        Assert.That(StoreOf(e).Shares, Is.EqualTo(2));
+        e.Get<DynamicBuffer<Stock>>().Clear();                            // a shared list is let go, not emptied
+        Assert.That(e.Read<DynamicBuffer<Stock>>().Count, Is.Zero);
+        world.Restore(second);
+        Assert.That(Values(e), Is.EqualTo(new[] { 1, 2 }));
+    }
+
+    [Test]
+    public void LoadNeverRefillsAListASnapshotHolds()
+    {
+        using var world = new World();
+        var e = Stocked(world, new Stock(1), new Stock(2));
+        var save = new Nino.Core.NinoArrayBufferWriter();
+        world.Save(save);
+        e.Get<DynamicBuffer<Stock>>().AsSpan()[0] = new Stock(5);
+        var snapshot = world.Capture();                                   // holds [5, 2]
+
+        for (int i = 0; i < 3; i++)
+        {
+            world.Load(save.WrittenSpan);                                 // the world's old lists go to Load's own copy
+            Assert.That(Values(e), Is.EqualTo(new[] { 1, 2 }));
+            world.Load(save.WrittenSpan);
+            Assert.That(Values(e), Is.EqualTo(new[] { 1, 2 }));
+            world.Restore(snapshot);
+            Assert.That(Values(e), Is.EqualTo(new[] { 5, 2 }));
+        }
+    }
+
+    [Test]
+    public void AMovedEntityTakesNoCountedListToItsNewWorld()
+    {
+        using var from = new World();
+        using var to = new World();
+        var crate = new Prefab().SetBuffer(new Stock(7));
+        var e = Stocked(from, new Stock(1), new Stock(2));
+        var instance = from.Instantiate(crate);
+        var snapshot = from.Capture();
+        var moved = new Entity[2];
+        from.MoveEntities(to, [e.Id, instance.Id], moved);
+
+        Assert.That(StoreOf(moved[0]).Shares, Is.Zero);                   // its own list: the source world counts none of it
+        Assert.That(StoreOf(moved[1]), Is.SameAs(crate.Read<DynamicBuffer<Stock>>().Store));   // a prefab's stays shared
+        moved[0].Get<DynamicBuffer<Stock>>().AsSpan()[0] = new Stock(9);
+        moved[1].Get<DynamicBuffer<Stock>>().Add(new Stock(8));
+        from.Restore(snapshot);
+        Assert.That(Values(e), Is.EqualTo(new[] { 1, 2 }));
+        Assert.That(Values(instance), Is.EqualTo(new[] { 7 }));
+        Assert.That(Values(moved[0]), Is.EqualTo(new[] { 9, 2 }));
+        Assert.That(Values(moved[1]), Is.EqualTo(new[] { 7, 8 }));
+    }
+
+    [Test]
+    public void AVariantPrefabSharesItsBasesListUncounted()
+    {
+        using var world = new World();
+        var crate = new Prefab().SetBuffer(new Stock(1));
+        var variant = new Prefab(crate);
+        Assert.That(variant.Read<DynamicBuffer<Stock>>().Store, Is.SameAs(crate.Read<DynamicBuffer<Stock>>().Store));
+        var first = world.Instantiate(crate);
+        variant.SetBuffer(new Stock(2), new Stock(3));
+        Assert.That(Values(world.Instantiate(variant)), Is.EqualTo(new[] { 2, 3 }));
+        crate.SetBuffer(new Stock(4));                                   // the old list stays the instances'
+        Assert.That(Values(first), Is.EqualTo(new[] { 1 }));
+        Assert.That(Values(world.Instantiate(crate)), Is.EqualTo(new[] { 4 }));
+    }
+
+    [Test]
+    public void ParallelFirstWritesOfSharedListsGiveEachRowItsOwnCopy([Values(1, 4)] int threads)
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        world.AddSystem<Restock>();
+        var crate = new Prefab().SetBuffer(new Stock(-1), new Stock(-2));
+        var rows = new Entity[4096];
+        for (int round = 0; round < 3; round++)
+        {
+            // Half clones of one entity (a counted list), half prefab instances (uncounted), interleaved in one table.
+            var original = Stocked(world, new Stock(-1), new Stock(-2));
+            var shared = StoreOf(original);
+            for (int i = 0; i < rows.Length; i++)
+            {
+#pragma warning disable EECS031 // each row its own health
+                rows[i] = (i % 2 == 0 ? original.Clone() : world.Instantiate(crate)).Set(new Health(i));
+#pragma warning restore EECS031
+            }
+
+            Assert.That(shared.Shares, Is.EqualTo(rows.Length / 2));
+            world.Update();
+            for (int i = 0; i < rows.Length; i++) Assert.That(Values(rows[i]), Is.EqualTo(new[] { i, -2 }));
+            Assert.That(Values(original), Is.EqualTo(new[] { -1, -2 }));
+            Assert.That(Values(world.Instantiate(crate)), Is.EqualTo(new[] { -1, -2 }));
+            Assert.That(shared.Shares, Is.LessThanOrEqualTo(0));         // every clone let it go (two may count it at once)
+            world.DestroyAll<DynamicBuffer<Stock>>();
+        }
+    }
+
+    [Test]
+    public void APrefabServesWorldsOnSeveralThreadsAtOnce()
+    {
+        var crate = new Prefab().SetBuffer(new Stock(1), new Stock(2));
+        var list = crate.Read<DynamicBuffer<Stock>>().Store;
+        int failures = 0;
+        var threads = new System.Threading.Thread[4];
+        for (int t = 0; t < threads.Length; t++)
+        {
+            threads[t] = new System.Threading.Thread(() =>
+            {
+                using var world = new World();
+                var spawned = new Entity[256];
+                for (int round = 0; round < 50; round++)
+                {
+                    world.Instantiate(crate, spawned);
+                    for (int i = 0; i < spawned.Length; i += 2) spawned[i].Get<DynamicBuffer<Stock>>().AsSpan()[0] = new Stock(i);
+                    var clone = spawned[1].Clone();
+                    if (Values(clone)[0] != 1 || Values(spawned[2])[0] != 2) System.Threading.Interlocked.Increment(ref failures);
+                    world.DestroyAll<DynamicBuffer<Stock>>();
+                }
+            });
+            threads[t].Start();
+        }
+
+        foreach (var thread in threads) thread.Join();
+        Assert.That(failures, Is.Zero);
+        Assert.That(list.Shares, Is.EqualTo(BufferStore.Uncounted));
+        Assert.That(crate.Read<DynamicBuffer<Stock>>().AsReadOnlySpan().ToArray(), Is.EqualTo(new[] { new Stock(1), new Stock(2) }));
+    }
+
+    [Test]
+    public void ForParallelOverASharedBufferWritesItsOwnCopy()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        var original = Stocked(world);
+        original.Get<DynamicBuffer<Stock>>().SetCount(4096);
+        var clone = original.Clone();
+        var job = new Negate();
+        world.ForParallel(ref clone.Get<DynamicBuffer<Stock>>(), ref job, 256);
+        Assert.That(clone.Read<DynamicBuffer<Stock>>()[100], Is.EqualTo(new Stock(-1)));
+        Assert.That(original.Read<DynamicBuffer<Stock>>()[100], Is.EqualTo(new Stock(0)));
+    }
+
+    private struct Negate : IForSpan<Stock>
+    {
+        public void Execute(int start, Span<Stock> items)
+        {
+            for (int i = 0; i < items.Length; i++) items[i] = new Stock(-1);
+        }
+    }
+
+    [Test]
+    public void SharedListsWrittenAndLetGoDoNotAllocate()
+    {
+        using var world = new World();
+        var crate = new Prefab().SetBuffer(new Stock(1), new Stock(2), new Stock(3), new Stock(4));
+        var spawned = new Entity[64];
+        var snapshot = world.Capture();
+
+        void Cycle()
+        {
+            var original = Stocked(world, new Stock(1), new Stock(2));
+            world.Instantiate(crate, spawned);                                    // shared, then half written
+            for (int i = 0; i < spawned.Length; i += 2) spawned[i].Get<DynamicBuffer<Stock>>().Add(new Stock(i));
+            for (int i = 0; i < spawned.Length; i++)
+            {
+#pragma warning disable EECS031 // clones one by one, half of them written
+                var clone = original.Clone();
+#pragma warning restore EECS031
+                if (i % 2 == 0) clone.Get<DynamicBuffer<Stock>>().AsSpan()[0] = new Stock(i);
+            }
+
+            world.Capture(snapshot);                                              // a rollback ring's step
+            original.Get<DynamicBuffer<Stock>>().AsSpan()[1] = new Stock(9);
+            spawned[1].Get<DynamicBuffer<Stock>>().Add(new Stock(9));
+            world.Restore(snapshot);
+            world.Restore(snapshot);
+            world.DestroyAll<DynamicBuffer<Stock>>();
+        }
+
+        for (int i = 0; i < 5; i++) Cycle();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 50; i++) Cycle();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
 
     // Chunks unloaded to bytes and loaded back.

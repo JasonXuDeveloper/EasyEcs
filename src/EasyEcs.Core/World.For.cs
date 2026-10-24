@@ -54,7 +54,7 @@ public sealed partial class World
     /// </summary>
     public void ForParallel<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkRows = 0) where TJob : struct, IForSpan<T>
     {
-        if (items.Store is not { Count: > 0 } store) return;
+        if (DynamicBufferExtensions.Own(ref items) is not { Count: > 0 } store) return; // the chunks write it: its own
         var work = WorkOf<SpanChunks<T, TJob>>();
         work.Job = job;
         work.Store = store;
