@@ -64,6 +64,7 @@ The terms of the Chinese guide pages (`docs/content/glossary.zh.mdx`). Use these
 | removal | 移除 |
 | access (of a system) / runs alone | 读写 / 独占运行 |
 | prefab, member, instantiate | 预制体、成员、实例化 |
+| view (`[View]`); prefab declaration (`[Prefab]`) | 视图；预制体声明 |
 | dynamic buffer | 动态缓冲（缓冲） |
 | value index, key | 值索引、键 |
 | relation, link, target, source | 关系、链接、目标、来源实体 |

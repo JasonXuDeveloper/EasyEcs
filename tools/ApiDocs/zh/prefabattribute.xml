@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.PrefabAttribute" source="d0ec943deb00">
+    <summary>
+      把一个 <see cref="EasyEcs.Prefab"/> 声明为它的实体开始时拥有的组件：一个 partial struct，每个组件一个字段，字段初始化器就是默认值：
+      <c>[Prefab] public partial struct Goblin { public Health Health = new(30); public Position Position; }</c>。生成器写出
+      <c>Goblin.Prefab</c>，一个用这些默认值只构造一次的静态 <see cref="EasyEcs.Prefab"/>，以及字段初始化器需要的无参构造函数。
+      <c>world.Instantiate(Goblin.Prefab)</c> 创建一个哥布林（传给 <c>Instantiate</c> 的值覆盖默认值，传 span 一次创建一批），
+      <c>new Prefab(Goblin.Prefab)</c> 是可以修改的变体（缓冲、成员）。声明本身不是查询能找到的类型：要按类型过滤，就给它加一个标签组件。
+    </summary>
+  </member>
+</doc>

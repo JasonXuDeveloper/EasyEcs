@@ -11,7 +11,8 @@ using Microsoft.CodeAnalysis.Operations;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// The rules of declarations the generator writes parts for (EECS062-EECS067, and EECS036 for keys and groups): a type
+/// The rules of declarations the generator writes parts for (EECS062-EECS067, EECS102 for [Prefab], and EECS036 for keys
+/// and groups): a type
 /// that is not partial along its chain, a reduction declared by attributes that also writes its members or has a field
 /// the attributes cannot combine, a key or group the attributes cannot declare,
 /// and the hand-written reductions the attributes could declare (EECS065) or whose Identity is not the identity of
@@ -87,13 +88,26 @@ public sealed partial class EasyEcsAnalyzer
         "a singleton: Save, SaveWithout, since entity saves write no singletons), a suggestion otherwise.",
         helpLinkUri: Help("EECS069"), customTags: WellKnownDiagnosticTags.CompilationEnd);
 
+    public static readonly DiagnosticDescriptor BadPrefab = new("EECS102", "Invalid [Prefab]",
+        "[Prefab] '{0}' {1}",
+        Category, DiagnosticSeverity.Error, true,
+        "A prefab declaration is a partial struct (in partial types) with one field per component, each component once, its " +
+        "initializer the component's default, and no member named Prefab. The generator writes the static Prefab built " +
+        "from those defaults and the constructor into it; it skips a declaration that breaks this.",
+        helpLinkUri: Help("EECS102"));
+
     // EECS065 / EECS066's properties for their code fixes: the attribute of each field (name=Op;...), and the Identity
     // that fits the Combine.
     public const string ReductionOps = "Ops", FixedIdentity = "Identity";
 
-    /// <summary>What a declaration's attributes need that it lacks (EECS062-EECS064): <see cref="Parts.Problems"/>.</summary>
+    /// <summary>
+    /// What a declaration's attributes need that it lacks (EECS062-EECS064): <see cref="Parts.Problems"/>; and a
+    /// <c>[Prefab]</c> the generator cannot write (EECS102): <see cref="Prefabs.Problem"/>.
+    /// </summary>
     private static void AnalyzeParts(SymbolAnalysisContext context, INamedTypeSymbol type)
     {
+        if (Prefabs.IsPrefab(type) && Prefabs.Problem(type) is var (prefabWhere, prefabProblem))
+            context.ReportDiagnostic(Diagnostic.Create(BadPrefab, prefabWhere.Locations.FirstOrDefault(), type.Name, prefabProblem));
         if (Parts.Of(type) is not { } parts) return;
         var location = type.Locations.FirstOrDefault(l => l.IsInSource);
         foreach (var problem in parts.Problems)

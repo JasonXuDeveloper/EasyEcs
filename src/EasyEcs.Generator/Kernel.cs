@@ -217,6 +217,17 @@ internal sealed partial class Kernel
             : Declined(method, syntax, model) is { } declined ? new ScalarReason(declined.Reason, declined.IsFixable, null)
             : null;
         if (reason != null) return null;
+        // Views: the method as written without them (Kernel.Views.cs), whose loop is the view method's.
+        if (method.Parameters.Any(p => Symbols.Classify(p, Symbols.IsRunner(method)) == Symbols.ParamKind.View))
+        {
+            if (Desugar(method, syntax, model, ct, out var viewReason) is not var (desugared, desugaredSyntax, desugaredModel))
+            {
+                reason = new ScalarReason(viewReason ?? "a view member cannot be inlined", false, null);
+                return null;
+            }
+            (method, syntax, model) = (desugared, desugaredSyntax, desugaredModel);
+        }
+
         (syntax, model) = Symbols.WithBody(method, syntax, model); // Declined: it returns nothing and is not generic
         if (model.GetOperation(syntax, ct) is not IMethodBodyOperation body)
         {
@@ -237,6 +248,13 @@ internal sealed partial class Kernel
     public static Code? Vectorize(IMethodSymbol lambda, IAnonymousFunctionOperation function, bool parallel, bool stable,
         SemanticModel model, System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct, out string? reason)
     {
+        // A view's members are inlined from a method's declaration (Kernel.Views.cs), which a lambda has not.
+        if (lambda.Parameters.Any(p => Symbols.Classify(p, true) == Symbols.ParamKind.View))
+        {
+            reason = "it takes a view, whose members only a [ForEach] method inlines into its vector loop: write one";
+            return null;
+        }
+
         var lane = new Lane(lambda, true, parallel, false, model, stable);
         if (Declined(lane) is { } declined)
         {
@@ -294,6 +312,9 @@ internal sealed partial class Kernel
                 case Symbols.ParamKind.Optional when Symbols.MaybeElement(p.Type) is { } element && LaneFields(element):
                     break;
                 case Symbols.ParamKind.Singleton or Symbols.ParamKind.Context or Symbols.ParamKind.Reduction:
+                    break;
+                case Symbols.ParamKind.View when Views.IsValid(p.Type) && Views.Fields((INamedTypeSymbol)p.Type).All(f => !f.Mut && LaneFields(f.Component)):
+                    any = true;
                     break;
                 default:
                     return false;
@@ -363,7 +384,7 @@ internal sealed partial class Kernel
     /// </summary>
     private static string? Refused(IParameterSymbol p, Symbols.ParamKind kind, bool parallel) => kind switch
     {
-        Symbols.ParamKind.Component or Symbols.ParamKind.Singleton or Symbols.ParamKind.Reduction => null,
+        Symbols.ParamKind.Component or Symbols.ParamKind.Singleton or Symbols.ParamKind.Reduction or Symbols.ParamKind.View => null,
         Symbols.ParamKind.Context => p.RefKind == RefKind.Ref ? $"it takes '{p.Name}' by ref: a vector loop reduces only into a Reduce<T>" : null,
         Symbols.ParamKind.Optional => parallel
             ? $"it takes a Maybe<{Symbols.MaybeElement(p.Type)?.Name}> and runs in parallel: an optional column has a vector loop on one thread"
@@ -482,6 +503,7 @@ internal sealed partial class Kernel
                     made._setup.Append($"var __z{i} = m{i}.RowMask;\n");
                     continue;
                 }
+                if (kind == Symbols.ParamKind.View) continue; // desugared: its fields are the component parameters at the end
                 if (kind == Symbols.ParamKind.Reduction)
                 {
                     if (reductions) made._reductions[p] = made.Reduced(p, i, fieldOf(i, kind), lane.Fast, model.Compilation, ct);

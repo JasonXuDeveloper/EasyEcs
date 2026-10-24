@@ -454,7 +454,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         var lines = new List<string>();
         void Declare(string line) { if (!lines.Contains(line)) lines.Add(line); }
 
-        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch))
+        // A view's fields: writes and reads of its components.
+        foreach (var field in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind == Symbols.ParamKind.View).SelectMany(p => p.Fields))
+            Declare($"{(field.Access == "in" ? "Read" : "Write")}<{field.Type}>()");
+
+        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch or Symbols.ParamKind.View))
                      .Select(p => (p.Kind, p.Type, p.RefKind, p.Key, p.Grid)).Distinct())
         {
             if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // a read, and its index built before a parallel stage
@@ -501,6 +505,16 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         // would no longer inline, so a method that throws loses its changes of the run in progress.
         bool[] local = method.Parameters.Select(p => method.IsBatch && (p.Kind == Symbols.ParamKind.Context && p.RefKind == "ref" || p.Kind == Symbols.ParamKind.Reduction)).ToArray();
         string Field(int i) => method.Parameters[i].Kind == Symbols.ParamKind.Reduction ? $"a{i}" : $"x{i}";
+        // A view's fields take the columns after the component parameters' (ForEachModel.Query), in parameter order.
+        int viewed = method.Parameters.Count(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan or Symbols.ParamKind.Mutable);
+        // A Mut<T> field stamps the rows it writes: through the run's change-tick column (v{i}_{j}), or the entity.
+        string View(ParamModel p, int at) => $"new {p.Type} {{ {string.Join(", ", p.Fields.Select((f, j) => (f.Access, runs) switch
+        {
+            ("mut", true) => $"{f.Name} = new global::EasyEcs.Mut<{f.Type}>(ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++viewed}, i), in v{at}_{j}, (int)i)",
+            ("mut", false) => $"{f.Name} = new global::EasyEcs.Mut<{f.Type}>(ref c{++viewed}, entity)",
+            (_, true) => $"{f.Name} = ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++viewed}, i)",
+            _ => $"{f.Name} = ref c{++viewed}",
+        }))} }}";
         var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
         {
             Symbols.ParamKind.Component when runs => $"{p.RefKind} global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i)",
@@ -520,6 +534,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Lookup => $"new global::EasyEcs.Lookup<{p.Type}>(World, {(p.Key.Length > 0 ? $"k{i}" : "null")})",
             Symbols.ParamKind.Tile => $"new global::EasyEcs.Tile<{p.Cell}, {p.Grid}>({(runs ? "entities[(int)i]" : "entity")}, in n{method.GridOf(i)})",
             Symbols.ParamKind.Emit => $"new global::EasyEcs.Emit<{p.Type}>(ref this.e{i})", // this: a vector loop's column refs are e1, e2...
+            Symbols.ParamKind.View => View(p, i),
             Symbols.ParamKind.Context when local[i] => $"ref l{i}",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
             _ => "World",
@@ -585,6 +600,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             for (int i = 0; i < method.Parameters.Length; i++)
                 if (runs && method.Parameters[i] is { Kind: Symbols.ParamKind.Mutable } p)
                     sb.Append($"{indent}var u{i} = global::EasyEcs.MutColumn.Of<{p.Type}>(in entities);\n");
+            for (int i = 0; i < method.Parameters.Length; i++)
+                if (runs && method.Parameters[i] is { Kind: Symbols.ParamKind.View } view)
+                    for (int j = 0; j < view.Fields.Length; j++)
+                        if (view.Fields[j].Access == "mut")
+                            sb.Append($"{indent}var v{i}_{j} = global::EasyEcs.MutColumn.Of<{view.Fields[j].Type}>(in entities);\n");
             if (runs)
             {
                 // The columns' refs and the row count in locals: the spans are passed in memory, and a caller's value
@@ -620,8 +640,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         int writes = 0, own = 0;
         for (int k = 0; k < components.Length; k++)
         {
-            if (queried.Any(p => p.Type == components[k] && p.RefKind == "ref")) writes |= 1 << k;
-            if (queried.Any(p => p.Type == components[k] && p.Kind == Symbols.ParamKind.Mutable)) own |= 1 << k;
+            if (queried.Any(p => p.Type == components[k] && p.RefKind == "ref")
+                || method.Parameters.Any(p => p.Kind == Symbols.ParamKind.View && p.Fields.Any(f => f.Type == components[k] && f.Access != "in")))
+                writes |= 1 << k;
+            if (queried.Any(p => p.Type == components[k] && p.Kind == Symbols.ParamKind.Mutable)
+                || method.Parameters.Any(p => p.Kind == Symbols.ParamKind.View && p.Fields.Any(f => f.Type == components[k] && f.Access == "mut")))
+                own |= 1 << k;
         }
         string declaring = method.Simd != null ? "IForEachBatch" : iface; // IForEachMasked declares no masks of its own
         sb.Append($"\n        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.WriteMask => {writes};\n");
@@ -845,8 +869,19 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// <param name="Key">A Lookup's index key type when its index is built before the pass (<see cref="Symbols.LookupKey"/>), else "".</param>
     /// <param name="Cell">A Tile's cell type, else "".</param>
     /// <param name="Grid">A Tile's tile component (its key is <paramref name="Key"/>), else "".</param>
+    /// <param name="Fields">A view's component fields, in declaration order (empty for any other parameter).</param>
     private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name, string Declared, bool Tracked = false, string Key = "",
-        string Cell = "", string Grid = "");
+        string Cell = "", string Grid = "", EquatableArray<ViewFieldModel> Fields = default);
+
+    /// <summary>A view's component field: its name, its component, and "ref" (written) or "in" (read).</summary>
+    /// <summary>A view's field: its name, component, and how the job sets it: "ref", "in" (ref readonly) or "mut" (a Mut&lt;T&gt;).</summary>
+    private sealed record ViewFieldModel(string Name, string Type, string Access);
+
+    /// <summary>A view parameter (of a [ForEach] method or a lambda pass): its type and its fields as the job sets them.</summary>
+    private static ParamModel ViewParameter(IParameterSymbol p, string declared) =>
+        new(Symbols.ParamKind.View, p.Type.ToDisplayString(Symbols.Fqn), "", p.Name, declared,
+            Fields: new EquatableArray<ViewFieldModel>(Views.Fields((INamedTypeSymbol)p.Type)
+                .Select(f => new ViewFieldModel(Escape(f.Symbol.Name), f.Component.ToDisplayString(Symbols.Fqn), f.Mut ? "mut" : f.Writes ? "ref" : "in")).ToArray()));
 
     /// <param name="Stable">
     /// The method cannot make structural changes: it is static, takes no <c>World</c>, and uses its <c>Entity</c>
@@ -902,7 +937,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         public string ComponentTypes => string.Join(", ", Query);
 
         /// <summary>Runs per entity with its handle: it takes the Entity, a Maybe looked up through it, a Mut that stamps through it, or a Tile of it.</summary>
-        public bool TakesEntity => One || ConsumesEach || Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Tile);
+        public bool TakesEntity => One || ConsumesEach || Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Tile)
+            || Stamps;
+
+        /// <summary>A view parameter with a Mut&lt;T&gt; field: it stamps the rows it writes, as a Mut parameter does.</summary>
+        private bool Stamps => Parameters.Any(p => p.Kind == Symbols.ParamKind.View && p.Fields.Any(f => f.Access == "mut"));
 
         public bool TakesWorld => Parameters.Any(p => p.Kind == Symbols.ParamKind.World);
 
@@ -969,8 +1008,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// (ForEachBatchParallel): its partial results stay in registers instead of a load and a store per row.
         /// </summary>
         public bool Runs => !One && Stable && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) && (Parallel
-            ? Parameters.Any(p => p.Kind == Symbols.ParamKind.Reduction) && !Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable)
-            : Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Reduction || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" }));
+            ? Parameters.Any(p => p.Kind == Symbols.ParamKind.Reduction) && !Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable) && !Stamps
+            : Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Reduction || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" }) || Stamps);
 
         public static ForEachModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
         {
@@ -1002,6 +1041,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     Symbols.ParamKind.Lookup => new ParamModel(Symbols.ParamKind.Lookup, Symbols.LookupElement(p.Type)!.ToDisplayString(Symbols.Fqn), "in", p.Name, declared,
                         Key: Symbols.LookupKey(p, method, Symbols.WithBody(method, syntax, model).Item1)?.ToDisplayString(Symbols.Fqn) ?? ""),
                     Symbols.ParamKind.Tile => TileModel(p, declared),
+                    Symbols.ParamKind.View => ViewParameter(p, declared),
                     Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn),
                         p.RefKind switch { RefKind.Ref => "ref", RefKind.In => "in", _ => "" }, p.Name, declared),
                     var kind => new ParamModel(kind, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.Ref ? "ref" : "in", p.Name, declared),
@@ -1038,6 +1078,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
             var query = parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan or Symbols.ParamKind.Mutable)
                 .Select(p => p.Type).ToList();
+            // A view's components follow the component parameters' (the columns of its vector loop's desugared method, too).
+            query.AddRange(parameters.Where(p => p.Kind == Symbols.ParamKind.View).SelectMany(p => p.Fields.Select(f => f.Type)));
             // No component parameter: the first [With<T>] (else [Changed<T>]) becomes the queried component (passed to the
             // job, not the method).
             if (query.Count == 0)

@@ -37,6 +37,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`OnUpdateAttribute`](/zh/docs/reference/onupdateattribute) | [[EcsSystem]](/zh/docs/reference/ecssystemattribute) 的一个静态方法，系统每次运行时在它的 [ForEach] 方法之前调用。 |
 | [`OrderedIndexExtensions`](/zh/docs/reference/orderedindexextensions) | 键可比较（分数、截止时间、等级）的值索引的有序遍历：按区间或按顺序遍历，用于排行榜、计时器和匹配分段。 |
 | [`Prefab`](/zh/docs/reference/prefab) | 实体的配方：一组不属于任何 World 的组件值，所以任何查询都看不到它。 |
+| [`PrefabAttribute`](/zh/docs/reference/prefabattribute) | 把一个 Prefab 声明为它的实体开始时拥有的组件：一个 partial struct，每个组件一个字段，字段初始化器就是默认值：[Prefab] public partial struct Goblin \{ public Health Health = new(30); public Position Position; \}。 |
 | [`ProductAttribute`](/zh/docs/reference/productattribute) | 归约中按乘法合并的字段：Identity 是 1，Combine 是 left \* right。 |
 | [`RelationIndex<T>`](/zh/docs/reference/relationindex) | 一个 World 里关系 T 的链接，按目标组织（World.Relations）：哪些实体链接到某个实体，开始 O(1)，之后每条链接 O(1)。 |
 | [`RemovedAnyAttribute<T1..T9>`](/zh/docs/reference/removedanyattribute) | ForEachAttribute 方法只访问在系统上次运行之后失去 T1, T2 中至少一个、而且没有再拿回来的实体：即 QueryFilter.RemovedAny。 |
@@ -56,6 +57,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`UpdateInGroupAttribute<TGroup>`](/zh/docs/reference/updateingroupattribute) | 把系统放进分组 TGroup。 |
 | [`UpdateIntervalAttribute`](/zh/docs/reference/updateintervalattribute) | 系统只在所属分组每第 interval 次更新时运行：更新计数（World.DefaultUpdateCount、World.UpdateCount）对间隔取模等于 UpdateIntervalAttribute.Phase 的那几次。 |
 | [`ValueIndex<T, TKey>`](/zh/docs/reference/valueindex) | 一个 World 里组件 T 的值索引（World.Index）。 |
+| [`ViewAttribute`](/zh/docs/reference/viewattribute) | 一个实体若干组件的视图：一个 ref struct，实例字段是组件的 ref（写）、ref readonly（读）或 Mut\{T\}（写，只在写过的地方打 tick）字段，public 或 internal，再加上使用这些字段的业务方法：[View] public ref struct Fighter \{ public ref Health Health; public ref readonly Armor Armor; public void TakeDamage(int n) =&gt; Health.Value -= Math.Max(0, n - Armor.Value); \}。 |
 | [`WhenTargetDestroyedAttribute`](/zh/docs/reference/whentargetdestroyedattribute) | 在每个 World 里，销毁一个实体时指向它的链接怎么处理（TargetPolicy）：用在关系（IRelation）或以 EntityId 为键建索引的组件上。 |
 | [`WithAnyAttribute<T>`](/zh/docs/reference/withanyattribute) | ForEachAttribute 方法要求实体至少拥有它的 [WithAny&lt;T&gt;] 特性列出的组件之一（不传入方法）：[ForEach, WithAny&lt;Burning&gt;, WithAny&lt;Poisoned&gt;]。 |
 | [`WithAttribute<T>`](/zh/docs/reference/withattribute) | ForEachAttribute 方法还要求实体有组件 T（不传入方法）。 |

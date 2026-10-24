@@ -786,6 +786,11 @@ internal static class Symbols
         /// </summary>
         Emit,
         /// <summary>
+        /// A <c>[View]</c> ref struct, by value: its <c>ref</c> fields are written components of the pass, its
+        /// <c>ref readonly</c> fields read ones (<see cref="Views"/>); the job builds it over the row.
+        /// </summary>
+        View,
+        /// <summary>
         /// A value the caller passes to the entry point of a [ForEach] method outside a system (<c>ref int dead</c>, a
         /// configuration): any type but a component, a singleton or the framework's own, by value, <c>ref</c> or <c>in</c>.
         /// </summary>
@@ -1019,6 +1024,9 @@ internal static class Symbols
         foreach (var p in method.Parameters)
             if (Classify(p) is ParamKind.Component or ParamKind.ComponentSpan or ParamKind.Mutable && QueriedComponent(p) is { TypeKind: not TypeKind.Error } component)
                 all.Add(new Requirement(FilterKind.With, component, $"parameter '{p.Name}'", p.Locations.FirstOrDefault(), true));
+            else if (Classify(p) == ParamKind.View && Views.IsValid(p.Type))
+                foreach (var field in Views.Fields((INamedTypeSymbol)p.Type))
+                    all.Add(new Requirement(FilterKind.With, field.Component, $"field '{field.Symbol.Name}' of view '{p.Name}'", p.Locations.FirstOrDefault(), true));
         foreach (var (kind, type, attribute, group) in GroupFilters(method))
             if (kind is FilterKind.With or FilterKind.Changed or FilterKind.Without or FilterKind.Removed && type.TypeKind != TypeKind.Error)
                 all.Add(new Requirement(kind, type, FilterText(kind, type, attribute != null) + " on its group " + group.Name, null, false));
@@ -1108,6 +1116,10 @@ internal static class Symbols
             var written = kind == ParamKind.Optional ? MaybeElement(p.Type) : QueriedComponent(p);
             if (writes && SymbolEqualityComparer.Default.Equals(written, target))
                 return $"the method writes through parameter '{p.Name}'";
+            if (kind == ParamKind.View && Views.IsValid(p.Type))
+                foreach (var field in Views.Fields((INamedTypeSymbol)p.Type))
+                    if (field.Writes && SymbolEqualityComparer.Default.Equals(field.Component, target))
+                        return $"the method writes through field '{field.Symbol.Name}' of view '{p.Name}'";
         }
 
         return null;
@@ -1157,6 +1169,7 @@ internal static class Symbols
             return looked.IsValueType && IsA(looked, Component) ? ParamKind.Lookup : ParamKind.Invalid;
         if (TileElements(p.Type) is { } tile)
             return tile.Grid.IsValueType && TileKey(tile.Grid) != null ? ParamKind.Tile : ParamKind.Invalid;
+        if (Views.IsView(p.Type)) return ParamKind.View;
         return Named(p.Type, Entity) ? ParamKind.Entity
             : Named(p.Type, EntitySpan) ? ParamKind.Entities
             : Named(p.Type, World) ? ParamKind.World
@@ -1306,11 +1319,11 @@ internal static class Symbols
         foreach (var p in method.Parameters)
         {
             var kind = Classify(p, outside);
-            if (kind == ParamKind.Invalid) return false;
+            if (kind == ParamKind.Invalid || kind == ParamKind.View && !Views.IsValid(p.Type)) return false;
             if (kind is ParamKind.Component or ParamKind.ComponentSpan or ParamKind.Mutable) components++;
         }
 
-        return ComponentCountValid(method, components) && !MixesBatch(method);
+        return ComponentCountValid(method, components + Views.ComponentCount(method)) && !MixesBatch(method) && Views.Overlap(method) == null;
     }
 
     /// <summary>
@@ -1326,7 +1339,7 @@ internal static class Symbols
             var kind = Classify(p);
             spans |= kind == ParamKind.ComponentSpan;
             entities |= kind == ParamKind.Entities;
-            perEntity |= kind is ParamKind.Component or ParamKind.Entity or ParamKind.World or ParamKind.Optional or ParamKind.Mutable;
+            perEntity |= kind is ParamKind.Component or ParamKind.Entity or ParamKind.World or ParamKind.Optional or ParamKind.Mutable or ParamKind.View;
         }
 
         return spans ? perEntity : entities;

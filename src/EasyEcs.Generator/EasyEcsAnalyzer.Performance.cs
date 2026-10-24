@@ -125,13 +125,14 @@ public sealed partial class EasyEcsAnalyzer
         helpLinkUri: Help("EECS052"));
 
     public static readonly DiagnosticDescriptor SomeRowsWritten = new("EECS053", "A tracked component written by ref on only some rows",
-        "Parameter '{0}' of {1} takes {2} by 'ref', but {3}; take it as a Mut<{2}> and write through Write() or SetIfChanged",
+        "{0} {1} by 'ref'{2}, but {3}; {4} a Mut<{1}> and write through Write() or SetIfChanged",
         Category, DiagnosticSeverity.Warning, true,
         "A 'ref' parameter of a tracked component (ITracked, DynamicBuffer<T>) stamps every row the method visits, whether " +
         "the method writes it or returns first, so [Changed<T>] systems visit rows whose value never changed (and send, " +
         "save or recompute them again). A Mut<T> stamps only the rows the method writes, through Write() or a " +
         "SetIfChanged that changed the value; reading Value stamps nothing. Batch methods (spans) stamp whole runs and " +
-        "are left out.",
+        "are left out. A view's 'ref' field stamps the same way, so a method or a view member that writes it on some " +
+        "paths only is reported too; a Mut<T> field stamps only what it writes.",
         helpLinkUri: Help("EECS053"));
 
     public static readonly DiagnosticDescriptor ScalarLoop = new("EECS055", "A [ForEach] method that runs one row at a time",
@@ -390,6 +391,26 @@ public sealed partial class EasyEcsAnalyzer
                 continue;
             }
 
+            // EECS053 through a view: a 'ref' field of a tracked component the method writes on some rows only.
+            if (kind == Symbols.ParamKind.View && p.Type is INamedTypeSymbol view && Views.IsValid(view) && spans == 0 && !entitySpan)
+            {
+                foreach (var field in TrackedRefFields(view))
+                {
+                    var writes = new HashSet<SyntaxNode>();
+                    foreach (var reference in references)
+                        if (WritesField(reference, view, field))
+                            writes.Add(reference.Syntax);
+                    if (writes.Count == 0 || !Unwritten(context, body, writes)) continue;
+                    context.ReportDiagnostic(Diagnostic.Create(SomeRowsWritten, location,
+                        references.Where(r => writes.Contains(r.Syntax)).Select(r => r.Syntax.GetLocation()),
+                        $"{described} writes", field.Component.ToMinimalDisplayString(body.SemanticModel!, location?.SourceSpan.Start ?? 0),
+                        $" through field '{field.Symbol.Name}' of view {view.Name}", one ? "some calls return without a write, and every call stamps the row as changed"
+                            : "some rows pass through without a write, and every row it visits is stamped as changed", "make the field"));
+                }
+
+                continue;
+            }
+
             if (kind == Symbols.ParamKind.Optional)
             {
                 MaybeParameter(context, method, p, references);
@@ -447,30 +468,43 @@ public sealed partial class EasyEcsAnalyzer
                 mechanical = false;
         }
 
-        var graph = context.GetControlFlowGraph(body); // body is one of the context's operation blocks
-        var blocks = graph.Blocks;
+        if (!Unwritten(context, body, writes)) return;
+        var locations = references.Where(r => writes.Contains(r.Syntax)).Concat(reads).Select(r => r.Syntax.GetLocation());
+        var properties = mechanical
+            ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Mut").Add("Writes", writes.Count.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            : ImmutableDictionary<string, string?>.Empty;
+        context.ReportDiagnostic(Diagnostic.Create(SomeRowsWritten, p.Locations.FirstOrDefault(), locations, properties,
+            $"Parameter '{p.Name}' of {Symbols.Describe(method)} takes", component.ToMinimalDisplayString(body.SemanticModel!, p.Locations.FirstOrDefault()?.SourceSpan.Start ?? 0), "",
+            Symbols.IsForEntity(method) ? "some calls return without a write, and every call stamps the row as changed"
+                : "some rows pass through without a write, and every row it visits is stamped as changed", "take it as"));
+    }
+
+    /// <summary>
+    /// Whether some path through <paramref name="body"/> (one of the context's operation blocks) reaches its end or a
+    /// return without passing an operation whose syntax is one of <paramref name="writes"/>: a walk of the control flow
+    /// graph from the entry that stops at every block holding a write (a block runs whole) and reaches the exit; a constant
+    /// condition takes its one branch, a throw is not followed. False when a write lies in a finally (the walk does not
+    /// follow a finally on the way out, so it cannot tell).
+    /// </summary>
+    private static bool Unwritten(OperationBlockAnalysisContext context, IOperation body, HashSet<SyntaxNode> writes)
+    {
+        var blocks = context.GetControlFlowGraph(body).Blocks;
         var written = new bool[blocks.Length];
         for (int i = 0; i < blocks.Length; i++)
         {
             written[i] = Writes(blocks[i], writes);
             // A finally runs on the way out of every path through its try, which the walk does not follow: a write there is left out.
-            if (written[i] && InFinally(blocks[i].EnclosingRegion)) return;
+            if (written[i] && InFinally(blocks[i].EnclosingRegion)) return false;
         }
 
         var seen = new bool[blocks.Length];
         var pending = new Stack<BasicBlock>();
         pending.Push(blocks[0]);
         seen[0] = true;
-        bool unwritten = false;
         while (pending.Count > 0)
         {
             var block = pending.Pop();
-            if (block.Kind == BasicBlockKind.Exit)
-            {
-                unwritten = true;
-                break;
-            }
-
+            if (block.Kind == BasicBlockKind.Exit) return true;
             if (written[block.Ordinal]) continue;
             // A constant condition ('while (true)') takes one branch only.
             bool conditional = true, fallThrough = true;
@@ -484,15 +518,49 @@ public sealed partial class EasyEcsAnalyzer
             if (conditional) Follow(block.ConditionalSuccessor, seen, pending);
         }
 
-        if (!unwritten) return;
-        var locations = references.Where(r => writes.Contains(r.Syntax)).Concat(reads).Select(r => r.Syntax.GetLocation());
-        var properties = mechanical
-            ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Mut").Add("Writes", writes.Count.ToString(System.Globalization.CultureInfo.InvariantCulture))
-            : ImmutableDictionary<string, string?>.Empty;
-        context.ReportDiagnostic(Diagnostic.Create(SomeRowsWritten, p.Locations.FirstOrDefault(), locations, properties,
-            p.Name, Symbols.Describe(method), component.ToMinimalDisplayString(body.SemanticModel!, p.Locations.FirstOrDefault()?.SourceSpan.Start ?? 0),
-            Symbols.IsForEntity(method) ? "some calls return without a write, and every call stamps the row as changed"
-                : "some rows pass through without a write, and every row it visits is stamped as changed"));
+        return false;
+    }
+
+    /// <summary>
+    /// The 'ref' fields of <paramref name="view"/> (not Mut&lt;T&gt;) of a tracked component that is not indexed: the
+    /// fields EECS053 follows through views (a 'ref readonly' field stamps nothing, a Mut&lt;T&gt; stamps its writes).
+    /// </summary>
+    internal static IEnumerable<Views.Field> TrackedRefFields(INamedTypeSymbol view) =>
+        Views.Fields(view).Where(f => f is { Writes: true, Mut: false } && f.Component is not ITypeParameterSymbol
+                                      && !Symbols.IsIndexed(f.Component) && Symbols.Implements(f.Component, Symbols.TrackChanges));
+
+    /// <summary>
+    /// Whether <paramref name="use"/> of a value of <paramref name="view"/> may write <paramref name="field"/>: a use of
+    /// the field that may write it, a member of the view that may (<see cref="MayWriteField"/>), or the view handed on
+    /// where it may be written. Conservative like <see cref="Uses.MayWrite"/>: what it cannot prove a read counts as a
+    /// write, so EECS053 may miss a method, never report a wrong one.
+    /// </summary>
+    internal static bool WritesField(IOperation use, INamedTypeSymbol view, Views.Field field) => use.Parent switch
+    {
+        IFieldReferenceOperation reference when reference.Instance == use =>
+            SymbolEqualityComparer.Default.Equals(reference.Field, field.Symbol) && Uses.MayWrite(reference),
+        IInvocationOperation call when call.Instance == use => MayWriteField(call.TargetMethod, view, field),
+        IPropertyReferenceOperation property when property.Instance == use => MayWriteField(property.Property, view, field),
+        _ => Uses.MayWrite(use),
+    };
+
+    /// <summary>
+    /// Whether member <paramref name="member"/> of <paramref name="view"/> may write <paramref name="field"/>: its source
+    /// names the field or another instance member of the view (which may), or it has no source. A 'readonly' member
+    /// still writes through a ref field (readonly keeps the ref, not the value), so it is not ruled out.
+    /// </summary>
+    private static bool MayWriteField(ISymbol member, INamedTypeSymbol view, Views.Field field)
+    {
+        if (!SymbolEqualityComparer.Default.Equals(member.ContainingType, view) || member.DeclaringSyntaxReferences.Length == 0) return true;
+        foreach (var reference in member.DeclaringSyntaxReferences)
+        foreach (var name in reference.GetSyntax().DescendantNodes().OfType<IdentifierNameSyntax>())
+        {
+            string text = name.Identifier.ValueText;
+            if (text == field.Symbol.Name) return true;
+            if (text != member.Name && view.GetMembers(text).Any(m => m is IMethodSymbol { IsStatic: false } or IPropertySymbol { IsStatic: false })) return true;
+        }
+
+        return false;
     }
 
     /// <summary>Whether <paramref name="region"/> is a finally or lies inside one.</summary>
@@ -523,9 +591,9 @@ public sealed partial class EasyEcsAnalyzer
 
     private static bool Holds(IOperation root, HashSet<SyntaxNode> writes)
     {
-        if (root is IParameterReferenceOperation self && writes.Contains(self.Syntax)) return true;
+        if (writes.Contains(root.Syntax)) return true;
         foreach (var operation in root.Descendants())
-            if (operation is IParameterReferenceOperation reference && writes.Contains(reference.Syntax)) return true;
+            if (writes.Contains(operation.Syntax)) return true;
         return false;
     }
 

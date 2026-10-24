@@ -31,6 +31,15 @@ SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(valu
                              EasyEcs.Generated) running the job a [ForEach] method with the lambda's parameters and body
                              gets (body copied with names qualified and constants inlined; the static delegate per
                              row where it cannot be: EECS096)
+Views.cs                     what a [View] is, read once for the generators and the analyzer: Fields ('ref', 'ref
+                             readonly' and Mut<T> fields of components), Problem (EECS098's reason), Overlap (EECS099:
+                             a component reached twice through views and parameters)
+ViewGenerator.cs             [View] -> entity.AsX() / TryGetX(out x) (a view parameter is SystemGenerator's: the job
+                             builds the view over the row, a Mut<T> field over the run's change-tick column)
+Prefabs.cs                   what a [Prefab] declaration is (Fields, Problem: EECS102's reason), read once for the
+                             generator and the analyzer
+PrefabGenerator.cs           [Prefab] -> a part of the struct: static readonly Prefab Prefab built once from the field
+                             initializers (one Set per nine components) and the constructor they need
 LambdaPass.cs                what a lambda pass call is, read once for the generator and the analyzer: Read (the call,
                              its values, lambda, filters; a change filter's tick first), Problem (EECS095's reason and
                              the captured values), Unreachable (EECS096's reason), IsStable, Discards (an expression
@@ -56,7 +65,8 @@ EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-034, EECS039, EECS046, EECS
                              only reads, unused or per-row lookups in [ForEach] methods and jobs, allocations per
                              update, per-entity structural changes and counting over queries, creation loops, the
                              generated member, Update in a system, a Mut<T> of an untracked component, a Query loop
-                             that only reads, a Set right after a creation, a tracked ref written on some rows only, a
+                             that only reads, a Set right after a creation, a tracked ref written on some rows only
+                             (through a view's 'ref' field and in view members too), a
                              method left without a vector loop); each computes its fix as
                              diagnostic properties for EasyEcs.CodeFixes
 PartGenerator.cs             [Sum]..[Any], [IndexKey]/[UniqueKey], [Group] -> a part of the partial struct (IReduction<T>,
@@ -71,6 +81,9 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              permute tree, where it pays);
                              Kernel.Pairs.cs: lanes of two sizes (int rows summed into a long, float into a double) as
                              pairs of vectors (WidenLower / WidenUpper), every lane bit-exact; four times as wide stays scalar;
+                             Kernel.Views.cs: a method taking views desugared before translation (view fields as
+                             parameters, void members inlined with plain arguments in place, expression members as
+                             expressions; ViewInliner and its Rewriter), or the reason it stays scalar;
                              Kernel.Structural.cs: a structural change of the row's entity under a condition (marked
                              rows, applied in bulk after the pass: Code.StructuralChanges) and Emit<T> records of a
                              lane or the entity's id (Code.VectorTail: every row takes the vector form)
@@ -85,7 +98,7 @@ EasyEcsAnalyzer.Parallel.cs  EECS060-061: code on several threads (a parallel [F
                              job's field read after the call; EECS071: System.Random in a [ForEach] method (fix:
                              EntityRandom); EECS088: two EntityRandom draws of one stream for one entity in pass code
                              (fix: the next free stream), or a draw in a loop that does not vary its stream
-EasyEcsAnalyzer.Parts.cs     EECS062-069: generated parts (not partial, hand-written members, fields no attribute
+EasyEcsAnalyzer.Parts.cs     EECS062-069 and EECS102 (a [Prefab] the generator cannot write): generated parts (not partial, hand-written members, fields no attribute
                              combines), hand-written reductions, keys and groups the attributes could declare, a wrong
                              Identity, a setup attribute on a type it does not fit, a managed type without a Nino
                              formatter (Warning when the code saves what holds it: entity saves write no singletons)
@@ -102,6 +115,9 @@ EasyEcsAnalyzer.Layout.cs    EECS091 (compilation end): a component of 32 bytes 
 EasyEcsAnalyzer.Lambdas.cs   EECS095-097: a lambda pass the generator cannot compile (Error, it would throw; the fix
                              passes captured values before a static lambda), one run through its delegate (the fix
                              makes the private member internal), one left without a vector loop (Info, Kernel's reason)
+EasyEcsAnalyzer.Views.cs     EECS098-101: an invalid [View], a component reached twice through views, a view member
+                             that reaches beyond its entity, a view built by hand (fixes: the view as the parameter,
+                             entity.AsX()); EECS053's check in view members
 EasyEcsAnalyzer.Records.cs   EECS092 (compilation end): an Emit<T> whose Emitted<T> no code of the compilation clears
                              (a public record type of a library is left to the assemblies using it)
 Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)
