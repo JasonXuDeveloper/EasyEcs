@@ -164,6 +164,7 @@ A snapshot, a save or a clone of a buffer column copies the elements: O(elements
 | API | Complexity | Notes |
 | --- | --- | --- |
 | `[ForEach]` method / `world.ForEach<T1..Tn, TJob>(ref job, filter)` | O(M + S) | fastest: a struct job, no delegate |
+| `world.ForEach(values…, static (ref P p, …) => …)` / `ForEachParallel(…)` | O(M + S) | a lambda pass: the generator compiles each call into the job a `[ForEach]` method with its parameters and body gets (vector loop included); up to 4 values before the lambda become job fields (a change filter takes its tick first); 0 B; throws when the call was not compiled (EECS095) |
 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` | O(M + S) | the job also receives the `Entity` |
 | `entity.Run<T1..Tn, TJob>(ref job)` / `Run(ref job, filter)` | O(n), plus O(1) per filter component | one entity; false when stale, missing a component or rejected by the filter; refs survive the job's structural changes |
 | `entity.Run<T1..Tn, TJob>(ref job, in filter, since)` | O(n), plus O(components the filter names) | as `Run(ref job, filter)` with `since` as the filter's tick: the test of `filter.Since(since)` without copying the filter (a `static readonly` filter, as a `[ForEntity, Changed<T>]` entry point passes it) |

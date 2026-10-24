@@ -77,7 +77,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D60](#d60-one-diagnostic-per-mistake) | 一个错误一条诊断 |
 | [D61](#d61-one-pass-guard) | 要等遍历结束的调用共用一个检查；带成员的预制体不在其中 |
 | [D62](#d62-generators-bind-outside-bodies) | 生成器在成员体外绑定类型名，比较符号不拼字符串 |
-| [D63](#d63-roslyn-features) | 较新的 Roslyn 特性：不用拦截器，其余已在用或不需要 |
+| [D63](#d63-roslyn-features) | 较新的 Roslyn 特性：拦截器只用于 lambda 遍历，其余已在用或不需要 |
 | [D64](#d64-names-of-4-7) | 4.7 的命名：名字说明它是什么 |
 | [D65](#d65-buffer-pool-capacity) | 缓冲池的上限按元素类型设置 |
 | [D66](#d66-a-ref-written-on-some-rows) | 以 `ref` 传入、只在部分行上写入的追踪变化组件报警告 |
@@ -114,6 +114,9 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D106](#d106-lock-or-cas) | 运行时用 `Lock` 或比较并交换做同步，从不锁普通对象 |
 | [D107](#d107-never-used-warnings) | `[ForEach]` 和钩子方法不会被报成未使用 |
 | [D108](#d108-aot-instruction-set) | Native AOT：指令集由程序决定，模板里是 `native` |
+| [D112](#d112-lambda-passes) | lambda 遍历在调用处编译成 `[ForEach]` 方法的 job |
+| [D113](#d113-lambda-values-not-captures) | lambda 遍历是静态的，它读的值放在它前面传入 |
+| [D114](#d114-lambda-body-copied) | lambda 的方法体复制进生成的文件；复制不了的通过委托执行 |
 | [D118](#d118-fixable-reasons-and-cold-fields) | 方法能改写时 EECS055 报警告；EECS091 指出频繁遍历从不碰的字段 |
 | [D119](#d119-no-oop-code-fix) | 不提供从面向对象类到组件和系统的代码修复，只写迁移指南 |
 | [D120](#d120-feature-modules-and-data-events) | 未加入：`[Feature]` 模块和生成的记录读取者；EECS092 报告没有代码清空的记录 |
@@ -1219,13 +1222,14 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 - **分析器从生成类的类名直接找到生成成员的类型**，不遍历命名空间：523 ms / 34.6 MB 对 569 ms / 33.3 MB，在误差内。不做。
 - **成员体里的 `Query` 调用也检查接收者**：需要绑定整个调用。多个都是组件的结构体组成的 `Query` 或 `Read` 视为 World 的；同名的其他调用只多出一个用不到的项文件。
 
-## D63. 较新的 Roslyn 特性：不用拦截器，其余已在用或不需要 [#d63-roslyn-features]
+## D63. 较新的 Roslyn 特性：拦截器只用于 lambda 遍历，其余已在用或不需要 [#d63-roslyn-features]
 
 **决定。** 生成器使用 `ForAttributeWithMetadataName`（`[ForEach]`）、给用户代码从不引用的内容（系统代码、`TypeRegistry`）用实现输出（implementation output）、
-C# 14 扩展成员和泛型特性。不用拦截器，也不用嵌入式特性定义。
+C# 14 扩展成员和泛型特性。拦截器只替换一种调用：lambda 遍历（[D112](#d112-lambda-passes)），这里调用的参数是要编译的方法体，不是要算的值。
+不用嵌入式特性定义。
 
 **原因。**
-- **拦截器没有可去掉的东西。** `entity.Get<T>()`、`Has<T>()`、`Set<T>()`、`CreateEntity(new A(), new B())` 和 `world.Index<T, TKey>()`
+- **别处的拦截器没有可去掉的东西。** `entity.Get<T>()`、`Has<T>()`、`Set<T>()`、`CreateEntity(new A(), new B())` 和 `world.Index<T, TKey>()`
   读的是按类型或签名的静态只读字段（`ComponentType<T>.Bit`、`ComponentSignature<…>`），JIT 分层编译后就是常量：拦截后的方法体是同样的代码。
   系统通过模块初始化器注册，没有要替换的反射。
 - **查询调用**：拦截器跳不过调用的参数（[D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references)）。把常量过滤条件链上的每个调用都拦截、
@@ -2097,6 +2101,72 @@ EECS083 的描述符（`BadUpdateInterval`）。4.8 新增的 `Lookup<T>.TryFind
 **比较过。**
 - **保留默认值：** Native AOT 下 AVX-512 循环永远不会运行。
 - **在包的构建文件里设置：** 一个库就替用户的程序决定了它跑在什么 CPU 上。
+
+## D112. lambda 遍历在调用处编译成 `[ForEach]` 方法的 job [#d112-lambda-passes]
+
+**决定。** `world.ForEach(dt, static (ref Position p, in Velocity v, float dt) => p.Value += v.Value * dt)` 和
+`world.ForEachParallel(…)` 在方法里直接写一次遍历。核心库声明这两个调用：最后一个参数是 `Delegate`，前面最多四个值；真的执行到它就抛异常。
+生成器拦截每一处能编译的调用（C# 拦截器 `[InterceptsLocation]`，按文件写进命名空间 `EasyEcs.Generated`，包的构建文件把它加进
+`InterceptorsNamespaces`）。拦截器执行的结构体 job，就是参数和方法体与 lambda 相同的 `[ForEach]` 方法会得到的 job：同样的过滤条件、读写、
+归约和向量循环。lambda 的特性就是它的过滤条件（`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`）。变更过滤从第一个传入的 tick
+回看，lambda 不接收这个值：`world.ForEach(since, [Changed<Health>] static (in Health h) => …)`，和 runner 方法接收 `since` 一样。
+生成器编译不了的调用是错误（EECS095），所以没有诊断的代码永远走不到那个异常。
+
+**原因。**
+- **只在一个方法里用一次的遍历不需要名字。** `[ForEach]` 方法放在单独的类型里，离执行它的代码远；只属于一个处理函数的遍历，写在执行它的地方更好读。
+- **只有一种 job，所以只有一种速度。** lambda 由编译 `[ForEach]` 方法的同一段代码编译，得到同样的 job 和同样的向量循环（`Kernel`
+  处理 lambda 的方法体和处理方法体一样）。它不是第二种更慢的遍历写法。
+- **拦截器只在源码层面。** 调用还是普通 C#，生成的文件在编译时替换它。没有反射，运行时什么都不做，Native AOT 不受影响。
+
+**比较过。**
+- **把 `foreach (var (p, v) in world.Query<P, V>())` 编译成 job：** `foreach` 是语句，不是调用，拦截器替换不了；改写它要改用户的代码，生成器做不到。
+- **Unity 的 `Entities.ForEach`：** 由 IL 后处理器编译的 lambda，Unity 因为编译时间和大量特例弃用了它。拦截器走编译器自己的流程，规则就是
+  `[ForEach]` 方法的规则，没有别的。
+- **变更过滤从系统上次运行时回看：** 写在方法里的遍历没有系统，也就没有自己的 `LastRunTick`。调用方知道要用哪个 tick（系统的
+  `LastRunTick + 1`，或自己存下的 tick），所以把它放在最前面传入；没有 tick 的过滤是 EECS095。
+- **`Maybe<T>`、tile 和 span：** 拒绝（EECS095）；它们需要批处理和带掩码的 job 形式，lambda 暂时还不支持。
+
+## D113. lambda 遍历是静态的，它读的值放在它前面传入 [#d113-lambda-values-not-captures]
+
+**决定。** lambda 必须是 `static`。它要用到方法里的值（`dt`、倍率）时，把值放在 lambda 前面传入，lambda 在组件之后按顺序接收：
+`world.ForEach(dt, static (ref P p, float dt) => …)`。job 把这些值存成字段，和 `[ForEach]` 方法的值参数一样。捕获变量的 lambda 是
+EECS095，代码修复会把捕获的内容改成传入的值（只读的局部变量和参数，最多四个）。
+
+**原因。**
+- **拦截器跳不过参数。** 调用的参数在拦截器执行前就已经求值，所以捕获变量的 lambda 每次调用都会分配闭包和委托
+  （[D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references)）：实测每次调用 88 B，正是 `[ForEach]` 要去掉的开销。
+- **静态 lambda 的委托由编译器缓存。** 传它只是读一次静态字段，不分配。
+- **值就是 job 的字段。** lambda 前面传入的值就是 `[ForEach]` 方法的值参数；job 从寄存器读它，不是每行经过一个闭包对象。
+
+**比较过。**
+- **从闭包里读出捕获的变量：** 拦截器拿到闭包之前它已经分配了。
+- **允许捕获、只报警告：** 一个看上去零开销的调用背后，是 88 B 和每行一次委托调用。
+
+## D114. lambda 的方法体复制进生成的文件；复制不了的通过委托执行 [#d114-lambda-body-copied]
+
+**决定。** 生成器把 lambda 的方法体复制进 job 调用的方法：类型、命名空间和静态成员都写成完整名称，常量写成它的值（私有常量也一样）。
+方法体用到了别的文件里的代码访问不到的东西（调用所在类型的 private 或 protected 成员、file 局部类型、类型参数）时，改为通过委托执行：
+job 每行调用一次存在静态字段里的静态 lambda，没有向量循环。这种情况报警告（EECS096），代码修复会把同一文件里声明的 private 成员改成 internal。
+复制后仍然是标量的方法体会报出原因（EECS097，Info），和 EECS055 对方法的报告一样。
+
+**原因。**
+- **复制过来的方法体就是 `[ForEach]` 方法。** JIT 把它内联进 job 的行循环，`Kernel` 把它变成向量循环；每行一次委托调用两样都做不到。
+- **委托这条退路让代码照样能跑。** 私有辅助方法很常见；调用仍然执行，警告说明它的开销和怎么去掉。
+
+**比较过。**
+- **方法体访问不到时报错误：** 正确的调用因为速度被拒绝。
+- **用 `UnsafeAccessor` 访问私有成员：** 只支持字段和方法，不支持类型，而且每个名字一个访问器。
+
+**数据。** BenchmarkDotNet，两轮（开始时负载 2.2 和 2.8），对 1,000 / 100,000 个实体遍历一次，比较 [ForEach] 方法、
+lambda 遍历和手写 job，三种写法都是 0 B（`LambdaPassBenchmark`）：
+- **标量方法体**（整数除法）：方法 2,155、2,177 ns / 220.6、209.2 µs；lambda 2,155、2,139 ns / 219.1、208.3 µs；
+  手写 job 2,094、2,107 ns / 211.1、210.2 µs。速度相同，差异在误差内。
+- **向量方法体**（乘加）：方法 68.4、71.6 ns / 11.7、11.5 µs；lambda 72.0、69.9 ns / 11.7、11.2 µs；逐行执行的手写 job
+  787、759 ns / 74.7、77.7 µs。
+- **机器码**：lambda 的 job 在 Tier1 的机器码（`tools/jitdisasm.sh`）和方法的一样：同一个向量循环，循环里没有调用。
+- **生成器**（`GeneratorBenchmark`，基线对比本改动，两轮交替）：`EditMethodBody` 207.5、211.3 -> 226.3、224.3 ms，
+  单命名空间 195.7、201.5 -> 241.9、190.8 ms，都在 25 到 52 ms 的误差内，每次编辑多分配 0.1 到 0.3 MB；
+  `CompileAndAnalyze` 在误差内，单命名空间多分配 2 %（993 -> 1,012 MB）。
 
 ## D118. 方法能改写时 EECS055 报警告；EECS091 指出频繁遍历从不碰的字段 [#d118-fixable-reasons-and-cold-fields]
 
