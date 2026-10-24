@@ -23,6 +23,12 @@ The website (https://ecs.xgamedev.net) is built from `docs/content`: `docs/` is 
 numbers on the site come only from `docs/src/data/bench.json` (`docs/scripts/sync-benchmarks.ts` over the
 BenchmarkDotNet reports); pages never type a number.
 
+**Directory instructions.** These directories have their own `CLAUDE.md` (with an `AGENTS.md` link to it):
+`src/EasyEcs.Core`, `src/EasyEcs.Generator`, `tests`, `benchmarks`, `docs`. Before you read or change files in one
+of them, read its file in full: it holds the file map and the rules of that directory. Claude Code loads it when it
+reads a file there; Codex and other agents load only the files from the repository root to the directory they started
+in, so read it yourself.
+
 `global.json` requires the .NET 10 SDK (`rollForward: latestFeature`).
 
 ## Layout
