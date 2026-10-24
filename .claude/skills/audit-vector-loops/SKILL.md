@@ -66,6 +66,19 @@ changes nothing and cannot fail:
   method cannot observe it (it does not read the tag it sets, the filter does not depend on it in this pass).
 - **Floating point**: no reassociation or contraction unless fast math is on (`SimdMode`); results bit-identical to
   the scalar method otherwise, and at 1 and 4 threads.
+- **Math rewrites (strength reduction) are proven bit for bit, not by algebra**: a rewrite of a call or operator into
+  cheaper vector operations is exact only if it matches the scalar result for every input, checked exhaustively over
+  all 2^32 floats (and sampled doubles) against the runtime the user runs. The C runtime's `pow` is not correctly
+  rounded, so `MathF.Pow(x, 2)` differs from `x * x` by 1 ulp on about 1.5M floats (likewise `Pow(x, 0.5)` against
+  `Sqrt`, `Pow(x, -1)` against `1 / x`; `Pow(x, 0)` is NaN for signaling NaNs): Pow rewrites belong to fast math
+  only. Exact by default: `Pow(x, 1)`; a float division by a power-of-two constant as a multiply by its reciprocal;
+  integer division and `%` (by a constant: shifts or a multiply-high; by any divisor: through `double`, which is exact
+  for 32-bit ints since |x| < 2^53, with the lanes that would throw, 0 or MinValue / -1, sent to the method as
+  `Clamp` does); integer `Abs` / `CopySign` / `Math.Sign` with the throwing lanes guarded the same way. Fast math
+  only: `Pow` by a small integer or 0.5, division by any other constant, `Log10`, `Tan`, `Sinh` / `Cosh` / `Tanh`
+  through .NET's vector `Exp` / `Log` / `Sin` / `Cos`. Never: functions .NET has no vector form for written as our own
+  polynomials (`Atan2`, `Cbrt`, general `Pow`). Uniform arguments already need none of this: the scalar call runs
+  once per pass.
 
 ## Reasons users can fix
 
