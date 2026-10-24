@@ -1,6 +1,6 @@
 ---
 name: audit-generator
-description: Audit the EasyEcs source generators (ArityGenerator, ComponentGenerator, SystemGenerator, PartGenerator and the Kernel vector loops) on their three jobs - generate what users would write twice, turn the plain form users write into the fast one (vector loops, per-chunk parameters, schedule), and stay fast on every keystroke (incremental best practices, caching, newer Roslyn features). Use when changing a generator, adding a generated form, or reviewing IDE/build performance.
+description: Audit the EasyEcs source generators (ArityGenerator, ComponentGenerator, SystemGenerator, PartGenerator; the vector loops are audit-vector-loops) on their three jobs - generate what users would write twice, turn the plain form users write into the fast one (vector loops, per-chunk parameters, schedule), and stay fast on every keystroke (incremental best practices, caching, newer Roslyn features). Use when changing a generator, adding a generated form, or reviewing IDE/build performance.
 metadata:
   internal: true
 ---
@@ -8,7 +8,7 @@ metadata:
 # Generator audit
 
 Files: `src/EasyEcs.Generator` (netstandard2.0, loaded by every Roslyn host): `ArityGenerator`, `ComponentGenerator`,
-`SystemGenerator`, `PartGenerator` (+ `Parts.cs`), `Kernel*.cs`, `Code.cs`, `EquatableArray.cs`; `Symbols.cs` is
+`SystemGenerator`, `PartGenerator` (+ `Parts.cs`), `Code.cs`, `EquatableArray.cs`; `Symbols.cs` is
 shared with the analyzer (`audit-analyzer`).
 
 ## The three jobs
@@ -21,7 +21,7 @@ shared with the analyzer (`audit-analyzer`).
    is a candidate for an attribute, a parameter or a generated member, with the rule and code fix that move users to
    it.
 2. **Users write the plain form, the generator emits the fast one** (Burst's idea, D68 / D90). A `[ForEach]` method
-   becomes a vector loop (`Kernel*.cs`); a parameter does per chunk what users would do by hand (`Reduce<T>`,
+   becomes a vector loop (`audit-vector-loops`); a parameter does per chunk what users would do by hand (`Reduce<T>`,
    `Emit<T>`, `Scratch<T>`, `Lookup<T>`, `Tile<,>`); the schedule follows declarations (`Parallel`, `ChunkRows`,
    `Slices`, `[UpdateInterval]`, `[Consume]`, stages from read/write sets). Look for forms that fall back to scalar
    or to a serial pass, rank them by how often they appear (the EECS055 / EECS056 reasons over the samples and docs),
@@ -50,14 +50,10 @@ record a dropped one.
 - **Migration**: a code fix from object-oriented code (a class with update methods) to components and systems, and an
   AI migration guide in the public skill (`skills/easyecs/SKILL.md`).
 
-## Vector loops (`Kernel*.cs`)
+## Vector loops
 
-- A method becomes a `Vector<T>` loop only through `Kernel.Vectorize`; the reason it returns otherwise is exactly
-  what EECS055 / EECS056 report.
-- Each new form: a test that the vector loop equals the scalar method (`KernelTests`), a `KernelBenchmark` case, and
-  its Tier1 asm (`tools/jitdisasm.sh`): no call in the loop body, no unexpected range check.
-- A change to `Kernel` leaves the code generated for `WorldSimulation.cs` and `BattleServer.cs` identical, or ships
-  with their BenchmarkDotNet numbers.
+The vector loops (`Kernel*.cs`: what becomes SIMD, side effects, fixable reasons, proof) have their own skill:
+`audit-vector-loops`.
 
 ## Speed: measure first
 

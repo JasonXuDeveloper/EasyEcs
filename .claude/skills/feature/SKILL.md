@@ -24,7 +24,7 @@ part names the skill that audits it.
 ## 2. Generator (`audit-generator`)
 
 - Whatever users would otherwise write twice is generated (an attribute, a `[ForEach]` parameter, a generated
-  member); where users write the plain form, the generator emits the fast one (vector loop, per-chunk parameter,
+  member); where users write the plain form, the generator emits the fast one (vector loop: `audit-vector-loops`; per-chunk parameter,
   schedule) when it can.
 - Declarations users write once are read through one `Symbols` helper that the generator and the analyzer share, so
   "skipped by the generator" is exactly "reported by the analyzer".
@@ -38,7 +38,7 @@ part names the skill that audits it.
   code the generator would write.
 - Severity: Error when the code is wrong; Warning when it is likely wrong, costs, or has a better form (a generated
     member, an attribute, a parameter: users miss Info); Info only for hints the user may not be able to act on.
-- The message names the type or member and the fix; a scalar fallback's reason comes from `Kernel.Vectorize`.
+- The message names the type or member and the fix; a scalar fallback's reason comes from `Kernel.Vectorize` and names the part to split when the user can fix it (`audit-vector-loops`).
 - Tests: positive cases, negative cases, false-positive guards, the overlap test (one diagnostic per mistake).
 - The rule list and range in CLAUDE.md, `docs/content/guide/analyzer.mdx` + `.zh.mdx`, `skills/easyecs/SKILL.md` (the public skill).
 

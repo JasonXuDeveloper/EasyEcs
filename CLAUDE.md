@@ -328,7 +328,13 @@ fresh session working on a new request follows it.
 ## Workflows
 
 Repeatable procedures live in `.claude/skills/<name>/SKILL.md` (Claude Code loads them as skills; `.agents/skills` links
-to the same files for other agents; any person can follow them as checklists). Update a skill when a round teaches something new.
+to the same files for other agents; any person can follow them as checklists).
+
+Skills are the project's memory. When the owner or a round brings up a concept that a skill does not record yet and
+that later work must keep (a rule, a technique, a check, a form to support), write it into the skill whose job it
+belongs to, in the same session, and say so. A skill that grows past one concern is split by concern into a new
+skill (name, description and `metadata.internal: true`), with every line moved, not summarized away, and a pointer
+left in the old one; the table below and the `audit` scopes gain the new skill.
 
 Agents see each skill's name and description and load it when a request matches; this table says when to reach for
 which, so a session picks the right one without reading them all.
@@ -341,6 +347,7 @@ which, so a session picks the right one without reading them all.
 | the core: redundancy, duplicated logic, coupling, lifecycle edges, threads, hot-path cost | `audit-core` |
 | tools, tests, benchmarks, samples, templates, demo, scripts: coupling, non-DRY, dead code, god files | `audit-code` |
 | changing a generator, a new generated form, boilerplate users still write, IDE or build speed | `audit-generator` |
+| a `[ForEach]` method left scalar, a new SIMD form, conditions, side effects, changing `Kernel` | `audit-vector-loops` |
 | adding or reviewing EECS rules and code fixes | `audit-analyzer` |
 | "optimize further", researching an idea, a performance round | `audit-perf` |
 | any new name (API, generated member, rule, internal code, test, example, page) and in every round: all names | `audit-naming` (public renames need the owner) |
