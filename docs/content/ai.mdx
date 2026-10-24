@@ -1,7 +1,7 @@
 ---
 title: Using EasyEcs with AI assistants
 seoTitle: "EasyEcs with AI assistants: llms.txt, Markdown, rules file"
-description: "Give Claude, ChatGPT, Cursor or Copilot the EasyEcs docs: llms.txt, a Markdown copy of every page, and a rules file for AGENTS.md, CLAUDE.md or Cursor."
+description: "Give Claude, Cursor, Codex or Copilot the EasyEcs rules and docs: an agent skill (npx skills add), llms.txt, Markdown copies and a rules file."
 icon: Bot
 ---
 
@@ -9,7 +9,23 @@ import { BookOpen, CircleQuestionMark, Shapes } from 'lucide-react';
 
 EasyEcs is newer than most models' training data, and its rules (stateless systems, state changes as data, `in` and
 `ref` parameters, the owner thread) are what an assistant gets wrong first. This page shows the three ways to put the
-real docs in front of one: the `llms.txt` files, the Markdown copy of each page, and a rules file for your project.
+real docs in front of one: an agent skill your assistant loads when it touches EasyEcs code, the `llms.txt` files, the
+Markdown copy of each page, and a rules file for your project.
+
+## An agent skill [#agent-skill]
+
+The quickest way: install the EasyEcs skill into your project with the [skills CLI](https://github.com/vercel-labs/skills).
+It works with Claude Code, Cursor, Codex, GitHub Copilot, Gemini CLI and the other agents that read
+[Agent Skills](https://agentskills.io):
+
+```bash
+npx skills add JasonXuDeveloper/EasyEcs
+```
+
+The repository publishes one skill, `easyecs`; the CLI asks which agents to install it for (`-a claude-code` picks one,
+`-g` installs it for your user instead of the project). The agent sees the skill's description and loads the rules
+when a task writes, reviews or migrates EasyEcs code, so they cost nothing in other conversations. The skill holds
+the same text as the [rules file](#rules-file) below; `npx skills update` brings it up to date after a release.
 
 ## The docs as text [#docs-as-text]
 
@@ -72,22 +88,7 @@ Follow docs/easyecs-rules.md when writing code that uses EasyEcs.
 @docs/easyecs-rules.md
 ```
 
-Or make it a skill that loads only when the task touches EasyEcs. A skill is a folder with a `SKILL.md` whose
-frontmatter tells Claude when to use it:
-
-```text
-.claude/skills/easyecs/
-  SKILL.md            frontmatter (name, description) + the rules
-```
-
-```markdown title=".claude/skills/easyecs/SKILL.md"
----
-name: easyecs
-description: Rules for writing EasyEcs code (components, systems, [ForEach], queries). Use when editing code that uses EasyEcs.
----
-
-(paste the contents of easyecs-rules.md here)
-```
+Or install the [agent skill](#agent-skill), which loads only when the task touches EasyEcs.
 
 ### Cursor [#cursor]
 

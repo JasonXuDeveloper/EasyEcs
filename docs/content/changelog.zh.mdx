@@ -13,6 +13,8 @@ icon: RotateCcwClock
 
 ### 新功能 [#v4-8-0-new]
 
+- 智能体技能：`npx skills add JasonXuDeveloper/EasyEcs` 为 Claude Code、Cursor、Codex、GitHub Copilot 以及其他支持
+  Agent Skills 的智能体安装 EasyEcs 规则（[AI 助手](/zh/docs/ai#agent-skill)）。
 - 系统是只有静态方法的 `[EcsSystem]` ref struct：`[ForEach]` 方法，以及 `[OnCreate]`、`[OnUpdate]` 和 `[OnDestroy]` 钩子，钩子接收
   `World`、`SystemHandle`、两者或都不接收。World 保存每个系统的簿记，通过 `AddSystem<T>()`、`System<T>()`、`TryGetSystem<T>(out …)` 和
   `world.Systems` 发出 `SystemHandle`（`Enabled`、`Error`、`RunCount`、`LastRunTick`、`Stats`、`Name`、`Type`）；新增 `HasSystem<T>()`。

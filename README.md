@@ -300,8 +300,23 @@ The documentation lives at **[ecs.xgamedev.net](https://ecs.xgamedev.net)**; its
 
 The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading order.
 
+### With an AI assistant
+
+Install the EasyEcs skill, and Claude Code, Cursor, Codex, Copilot or any agent that reads
+[Agent Skills](https://agentskills.io) follows the EasyEcs rules when it writes your ECS code:
+
+```bash
+npx skills add JasonXuDeveloper/EasyEcs
+```
+
+[Using EasyEcs with AI assistants](https://ecs.xgamedev.net/en/docs/ai#agent-skill) covers the skill, `llms.txt`, the
+Markdown copy of every page and the rules file.
+
 ## What's new in 4.8
 
+- **An agent skill.** `npx skills add JasonXuDeveloper/EasyEcs` installs the EasyEcs rules for Claude Code, Cursor,
+  Codex, Copilot and other agents; it loads when a task touches EasyEcs code
+  ([AI assistants](https://ecs.xgamedev.net/en/docs/ai#agent-skill)).
 - **Systems are static code.** A system is an `[EcsSystem]` ref struct of static methods: `[ForEach]` methods and
   `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` hooks that take the `World` or the system's `SystemHandle` when they need
   them. No object per system, no virtual call: an assembly's systems run through one generated switch, and a generated
