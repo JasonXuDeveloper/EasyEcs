@@ -24,7 +24,7 @@ public class EntityRandomBenchmark
     {
         _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _world.CreateEntities(new Entity[Entities], new Roll(0));
-        _world.AddSingleton<EntityRandom>() = new EntityRandom(42, 7);
+        _world.AddSingleton<EntityRandom>() = new EntityRandom(42);
     }
 
     [GlobalCleanup]

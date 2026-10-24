@@ -11,7 +11,7 @@ When you add, rename or delete a file here, update its line (`verify` checks eve
 Contracts.cs                 IComponent, ITracked, ISingletonComponent, INoStructuralChanges and the other markers
 Declarations.cs              attributes whose code the generators write: [Sum]/[Product]/[Min]/[Max]/[All]/[Any]
                              (a reduction), [IndexKey]/[UniqueKey]/[Group] (an index key, a group), and world setup:
-                             [GroupBy], [WhenTargetDestroyed], [NotSaved]
+                             [GroupBy] (on the member: a group every world splits by), [WhenTargetDestroyed], [NotSaved]
 Entity.cs                    the entity handle (id, version, world): Has/Get/Read/TryGet/GetOrAdd/SetIfChanged/
                              Disable/Enable/Clone/Destroy
 Entity.Relations.cs          entity.Link / Unlink / Links (IRelation buffers + their index)
@@ -21,7 +21,7 @@ EntitySpan.cs                the entities of a batch job's run of rows (lazy han
                              table and first row, through which a Mut<T> of the run stamps its row)
 EntityDebugView.cs           what a debugger shows for an entity (Entity.Describe)
 EcsSystem.cs                 [EcsSystem] (a system: a ref struct of static members, never instantiated), the hooks
-                             [OnCreate] / [OnUpdate] / [OnDestroy] (static methods taking the World, the SystemHandle,
+                             (static methods named OnCreate / OnUpdate / OnDestroy, taking the World, the SystemHandle,
                              both or neither), [UpdateInterval(n, Phase = p)] (the cadence, read from the generated code);
                              SystemHandle.cs: what world.AddSystem<T>() / System<T>() / TryGetSystem<T>() / Systems
                              hand out (Enabled, Error, RunCount: completed runs, the slice of a sliced method;
@@ -30,8 +30,8 @@ EcsSystem.cs                 [EcsSystem] (a system: a ref struct of static membe
                              access and cadence) and ISystemSet (one generated __EasyEcsSystems per assembly: the
                              switch over its systems' codes, registered by a module initializer, weakly held for
                              collectible assemblies), the registry World.AddSystem<T> resolves a type through
-ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkRows, SimdMode), [With<T>], [Without<T>], [WithAny<T>], [Changed<T>],
-                             [Removed<T>] ([ChangedAny<..>] / [RemovedAny<..>] are generated: Filters.g.cs),
+ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkRows, SimdMode), [With<T>], [Without<T>], [Changed<T>],
+                             [Removed<T>] ([WithAny<..>] / [ChangedAny<..>] / [RemovedAny<..>] are generated: Filters.g.cs),
                              [Consume] (the visited rows destroyed after the pass), [ForEntity] (a static method run
                              on one entity through a generated entry point)
 Maybe.cs                     Maybe<T>: an optional component parameter of a [ForEach] method
@@ -49,7 +49,8 @@ Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo
 Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), joined in
                              chunk order into singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear)
 EntityRandom.cs              EntityRandom: deterministic random numbers, a pure function of (seed, entity, tick, stream)
-                             (four SplitMix64 finalizer rounds); a singleton (Seed, Tick) and static members
+                             (four SplitMix64 finalizer rounds); a singleton (Seed, and a Tick the world adds one to
+                             at the start of every update: World.Run) and static members
 Interleaved.cs               the deinterleaving loads / interleaving stores of generated vector loops over components
                              of 2 to 4 fields of one lane type, and the lane masks of the passing rows of a word
 Lanes.cs                     Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress),

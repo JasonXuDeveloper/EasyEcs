@@ -29,8 +29,8 @@ public static partial class Demo
         _world?.Dispose();
         _world = new World(new WorldOptions { InitialEntityCapacity = count + Units.Emitters });
         _world.SetArena(width, height);
-        _world.SetClock(0, 0);
-        _world.SetEntityRandom(Seed: 1, Tick: 0);
+        _world.SetClock(0);
+        _world.SetEntityRandom(Seed: 1); // each Update() draws new numbers
         _world.SetPopulation(count);
         _world.SetPointer(0, 0, false);
 
@@ -87,14 +87,11 @@ public static partial class Demo
     public static int Step(float dt)
     {
         var world = World;
-        ref var clock = ref world.Clock;
-        clock.Dt = dt;
-        clock.Tick++;
-        world.EntityRandom.Tick++; // new random numbers for the new step
+        world.Clock.Dt = dt;
 
         // The two motion groups take turns, one per step. They do the same work, so the picture
         // does not change, and each is timed on the same sparks
-        bool batched = (clock.Tick & 1) == 0;
+        bool batched = (world.DefaultUpdateCount & 1) != 0;
         long start = Stopwatch.GetTimestamp();
         if (batched)
         {

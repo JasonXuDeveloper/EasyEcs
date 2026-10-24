@@ -74,7 +74,7 @@ public static class Startup
         // #endregion options
 
         world.SetClock(Tick: 0, DayLength: Rules.DayLength);
-        world.AddSingleton<EntityRandom>() = new EntityRandom(Rules.Seed, Tick: 0);
+        world.AddSingleton<EntityRandom>() = new EntityRandom(Rules.Seed);  // each Update() draws new numbers
         world.AddSingleton<Stats>();
         world.SetRegions(regions);
         SetPrefabs(world);

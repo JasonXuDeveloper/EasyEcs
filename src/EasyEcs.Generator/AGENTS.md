@@ -12,8 +12,8 @@ ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove,
                              DestroyAll, Instantiate with components, IForEach/IForEachEntity/IForEachBatch/
                              IForEachMasked, ForEach/ForEachEntity/ForEachBatch/ForEachMasked/ForEachParallel/
                              ForEachEntityParallel/ForEachBatchParallel with their row loops, CollectIds,
-                             Query/Count/Any, QueryItem/QueryEnumerator, Filters.g.cs: QueryFilter.ChangedAny /
-                             RemovedAny and their attributes), one template each
+                             Query/Count/Any, QueryItem/QueryEnumerator, Filters.g.cs: QueryFilter.WithAny /
+                             ChangedAny / RemovedAny and their attributes), one template each
 SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                              the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] /
                              [Removed<T>] -> Since(LastRunTick + 1) and a read of T; Mut<T> -> a write stamped per
@@ -34,9 +34,10 @@ ComponentGenerator.cs        C# 14 extension members per component / singleton: 
 EasyEcsAnalyzer.cs           EECS002-006, EECS009-024, EECS035-036, EECS054, EECS056, EECS070 and EECS072-073 (the
                              declaration and [ForEach] rules of the range EECS002-089 that are not performance rules;
                              generators never report diagnostics)
-EasyEcsAnalyzer.Systems.cs   EECS007-008 and EECS074-077: systems as declarations (state in a static field, a reach
-                             into another system; an [EcsSystem] that is no ref struct, an instance member, a hook
-                             no signature fits, a system API given a type that is no [EcsSystem])
+EasyEcsAnalyzer.Systems.cs   EECS007-008, EECS074-077 and EECS090: systems as declarations (state in a static field, a
+                             reach into another system; an [EcsSystem] that is no ref struct, an instance member, a hook
+                             no signature fits, a system API given a type that is no [EcsSystem], a method named almost
+                             like a hook)
 UnusedSuppressor.cs          suppresses IDE0051 / IDE0052 on [ForEach], [ForEntity] and hook methods (called through
                              UnsafeAccessor; Rider reads their [MeansImplicitUse])
 EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the

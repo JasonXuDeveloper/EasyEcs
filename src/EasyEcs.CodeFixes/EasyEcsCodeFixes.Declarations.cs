@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -172,6 +174,60 @@ public sealed partial class EasyEcsCodeFixes
     /// <summary>EECS090: a method named almost like a hook takes the hook's name (the analyzer checked it has no caller).</summary>
     private static MethodDeclarationSyntax RenamedHook(MethodDeclarationSyntax method, string hook) =>
         method.WithIdentifier(SyntaxFactory.Identifier(hook).WithTriviaFrom(method.Identifier));
+
+    /// <summary>Whether the statement writes a <c>.Tick</c> (<c>++</c>, <c>--</c>, an assignment).</summary>
+    private static bool IsTickWrite(ExpressionSyntax expression) => expression switch
+    {
+        PostfixUnaryExpressionSyntax { Operand: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Tick" } } => true,
+        PrefixUnaryExpressionSyntax { Operand: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Tick" } } => true,
+        AssignmentExpressionSyntax { Left: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Tick" } } => true,
+        _ => false,
+    };
+
+    /// <summary>Whether the <c>.Tick</c> the statement writes is <c>EasyEcs.EntityRandom.Tick</c> (CS0200 / CS0272 bind it).</summary>
+    private static async Task<bool> IsEntityRandomTick(Document document, ExpressionStatementSyntax statement, CancellationToken token)
+    {
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        var access = statement.DescendantNodes().OfType<MemberAccessExpressionSyntax>().First(m => m.Name.Identifier.ValueText == "Tick");
+        return model?.GetSymbolInfo(access, token) is { } info
+               && (info.Symbol ?? info.CandidateSymbols.FirstOrDefault()) is IPropertySymbol
+               {
+                   ContainingType: { Name: "EntityRandom", ContainingNamespace: { Name: "EasyEcs", ContainingNamespace.IsGlobalNamespace: true } }
+               };
+    }
+
+    /// <summary>The argument list an error on a call or a creation points into (its name, its type or an argument).</summary>
+    private static ArgumentListSyntax? ArgumentsAt(SyntaxNode node)
+    {
+        foreach (var at in node.AncestorsAndSelf())
+            switch (at)
+            {
+                case ArgumentListSyntax list: return list;
+                case BaseObjectCreationExpressionSyntax creation: return creation.ArgumentList;
+                case InvocationExpressionSyntax call: return call.ArgumentList;
+            }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The tick of <c>new EntityRandom(seed, tick)</c> or <c>world.SetEntityRandom(seed, tick)</c> (the second argument,
+    /// or the one named <c>Tick:</c>), the form whose tick the world now moves; null for any other argument list.
+    /// </summary>
+    private static ArgumentSyntax? TickArgument(ArgumentListSyntax arguments)
+    {
+        bool random = arguments.Parent switch
+        {
+            ObjectCreationExpressionSyntax { Type: var type } => type is NameSyntax name && LastName(name) is { Identifier.ValueText: "EntityRandom" },
+            InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "SetEntityRandom" } } => true,
+            InvocationExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.ValueText: "SetEntityRandom" } } => true,
+            _ => false,
+        };
+        if (!random || arguments.Arguments.Count != 2) return null;
+        foreach (var argument in arguments.Arguments)
+            if (argument.NameColon?.Name.Identifier.ValueText == "Tick") return argument;
+        return arguments.Arguments.Any(a => a.NameColon != null) ? null : arguments.Arguments[1];
+    }
 
     /// <summary>The type arguments of the merged names in order, each once.</summary>
     private static List<TypeSyntax> Merged(IEnumerable<GenericNameSyntax> names)

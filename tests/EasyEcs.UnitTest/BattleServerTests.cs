@@ -193,7 +193,6 @@ public class BattleServerTests
             if (Array.Exists(stage.Systems, system => system.Name == nameof(ManaSystem)))
                 beside = Array.ConvertAll(stage.Systems, system => system.Name);
         Assert.That(beside, Is.EqualTo(new[] { nameof(PlanningSystem), nameof(ManaSystem) }));  // disjoint data
-        Assert.That(schedule.Groups[0].Stages[^1].Systems[0].Name, Is.EqualTo(nameof(ClockSystem)));  // [UpdateAfter]
         Assert.That(schedule.ToString(), Does.Contain(nameof(ReplicationSystem)));
     }
 

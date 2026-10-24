@@ -22,9 +22,9 @@ public record struct Emitter(float Phase, float Cooldown) : IComponent;
 // The walls, resized by the page with the canvas.
 public record struct Arena(float Width, float Height) : ISingletonComponent;
 
-// The step the page asked for and the number of steps so far, written by the host before each
+// The step the page asked for, written by the host before each update.
 // update.
-public record struct Clock(float Dt, long Tick) : ISingletonComponent;
+public record struct Clock(float Dt) : ISingletonComponent;
 
 // How many sparks the world keeps alive: the emitters replace the ones LifetimeSystem destroys.
 public record struct Population(int Target) : ISingletonComponent;

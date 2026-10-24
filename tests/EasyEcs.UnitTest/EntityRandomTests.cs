@@ -31,7 +31,7 @@ public class EntityRandomTests
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
         var entities = new Entity[20_000];
         world.CreateEntities(entities, new Roll());
-        world.AddSingleton<EntityRandom>() = new EntityRandom(seed, tick);
+        world.AddSingleton<EntityRandom>() = new EntityRandom(seed) { Tick = tick - 1 };  // the update adds one
         world.AddSystem<TSystem>();
         world.Update();
         return entities.Select(e => e.Roll).ToArray();
@@ -48,13 +48,72 @@ public class EntityRandomTests
         Assert.That(Rolls<SerialRolls>(1, 42, 8), Is.Not.EqualTo(serial), "another tick");
     }
 
+    public struct Other : ISystemGroup;
+
+    [EcsSystem, UpdateInGroup<Other>]
+    public ref struct OtherRolls
+    {
+        [ForEach]
+        static void Roll(ref Roll roll, Entity entity, in EntityRandom random) => roll = new Roll(random.Range(entity.Id, 0, 1, 1000), 0);
+    }
+
+    [Test]
+    public void EveryUpdateDrawsNewNumbers()
+    {
+        using var world = new World();
+        world.SetEntityRandom(Seed: 5);
+        world.AddSystem<SerialRolls>();
+        world.AddSystem<OtherRolls>();
+        Assert.That(world.EntityRandom.Tick, Is.Zero, "no update yet");
+        world.Update();
+        Assert.That(world.EntityRandom.Tick, Is.EqualTo(1), "the update's systems draw for tick 1");
+        world.Update<Other>();
+        world.Update<Other>();
+        Assert.That(world.EntityRandom.Tick, Is.EqualTo(1), "a group's update draws with the last Update()'s tick");
+        world.Update();
+        Assert.That(world.EntityRandom.Tick, Is.EqualTo(2));
+
+        var entity = world.CreateEntity(new Roll());
+        world.Update<Other>();
+        Assert.That(entity.Roll.Value, Is.EqualTo(EntityRandom.Range(5, entity.Id, 2, 0, 1, 1000)));
+        var seen = new System.Collections.Generic.HashSet<int>();
+        for (int i = 0; i < 20; i++)
+        {
+            world.Update();
+            world.Update<Other>();
+            seen.Add(entity.Roll.Value);
+        }
+
+        Assert.That(seen.Count, Is.GreaterThan(10), "each Update() draws new numbers");
+    }
+
+    [Test]
+    public void TheTickIsSavedAndRestoredWithTheSingleton()
+    {
+        using var world = new World();
+        world.SetEntityRandom(Seed: 5);
+        for (int i = 0; i < 3; i++) world.Update();
+        var snapshot = world.Capture();
+        world.Update();
+        world.Restore(snapshot);
+        Assert.That(world.EntityRandom, Is.EqualTo(new EntityRandom(5) { Tick = 3 }));
+
+        var save = new System.Buffers.ArrayBufferWriter<byte>();
+        world.Save(save);
+        using var copy = new World();
+        copy.Load(save.WrittenSpan);
+        Assert.That(copy.EntityRandom.Tick, Is.EqualTo(3));
+        copy.Update();
+        Assert.That(copy.EntityRandom.Tick, Is.EqualTo(4), "the loaded world continues the sequence");
+    }
+
     [Test]
     public void TheBitsAreAStableFunction()
     {
         // Pinned values: a change to the hash would change every saved replay, so it must be deliberate.
         Assert.That(EntityRandom.Bits(0, new EntityId(0, 1), 0, 0), Is.EqualTo(0x8B39DB00F83BAEE6UL));
         Assert.That(EntityRandom.Bits(1234, new EntityId(5, 2), 99, 3), Is.EqualTo(0x5BCD4D16E1C83828UL));
-        var random = new EntityRandom(1234, 99);
+        var random = new EntityRandom(1234) { Tick = 99 };
         Assert.That(random.Bits(new EntityId(5, 2), 3), Is.EqualTo(EntityRandom.Bits(1234, new EntityId(5, 2), 99, 3)));
         Assert.That(random.Float(new EntityId(5, 2), 3), Is.EqualTo(EntityRandom.Float(1234, new EntityId(5, 2), 99, 3)));
     }
@@ -122,7 +181,7 @@ public class EntityRandomTests
     {
         long before = GC.GetAllocatedBytesForCurrentThread();
         float sum = 0;
-        var random = new EntityRandom(1, 2);
+        var random = new EntityRandom(1) { Tick = 2 };
         for (int i = 0; i < 1000; i++) sum += random.Float(new EntityId(i, 1), 0) + random.Range(new EntityId(i, 1), 1, 0, 10);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
         Assert.That(sum, Is.GreaterThan(0));

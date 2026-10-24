@@ -112,6 +112,14 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                                    && GroupByOnMember(attribute) is { } moved:
                     Register(context, diagnostic, moved.Title, root, moved.Old, moved.New);
                     break;
+                case "CS0272" or "CS0200" when node.FirstAncestorOrSelf<ExpressionStatementSyntax>() is { } statement && IsTickWrite(statement.Expression)
+                                   && await IsEntityRandomTick(context.Document, statement, context.CancellationToken).ConfigureAwait(false):
+                    Register(context, diagnostic, "Remove it: the world advances EntityRandom's tick on every update", root, statement, null);
+                    break;
+                case "CS1501" or "CS1729" or "CS1739" when ArgumentsAt(node) is { } tickArguments && TickArgument(tickArguments) is { } tick
+                                                         && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false):
+                    Register(context, diagnostic, "Drop the tick: the world advances it on every update", root, tickArguments, tickArguments.WithArguments(tickArguments.Arguments.Remove(tick)));
+                    break;
                 case "CS0305" when node.FirstAncestorOrSelf<GenericNameSyntax>() is { } any && IsSingleWithAny(any)
                                    && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false)
                                    && MergedWithAny(any) is { } merged:

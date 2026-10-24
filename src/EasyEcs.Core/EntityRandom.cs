@@ -6,10 +6,11 @@ namespace EasyEcs;
 /// <summary>
 /// Deterministic random numbers for <c>[ForEach]</c> methods, parallel ones included (cuRAND's Philox, a counter-based
 /// generator): each number is a pure function of a seed, an entity, a tick and a stream, with no state to advance, so
-/// it is the same on every run, for any thread count and any order the rows run in. A singleton holding the seed and
-/// the tick: <c>static void Wander(ref Velocity v, Entity entity, in EntityRandom random) =&gt; v.X = random.Range(entity.Id, 0,
-/// -1f, 1f);</c>, where the system that advances the simulation's clock advances <see cref="Tick"/> too. The static
-/// members take the four inputs explicitly (a seed of your own, the tick of your clock).
+/// it is the same on every run, for any thread count and any order the rows run in. A singleton holding the seed (and
+/// the tick, which the world advances): <c>world.SetEntityRandom(Seed: 42)</c>, then
+/// <c>static void Wander(ref Velocity v, Entity entity, in EntityRandom random) =&gt; v.X = random.Range(entity.Id, 0,
+/// -1f, 1f);</c> draws new numbers on every update. The static members take the four inputs explicitly (a seed of your
+/// own, the tick of your clock).
 /// <para>
 /// The <c>stream</c> tells apart the draws of one entity in one tick: give each call site of a method its own (0, 1,
 /// 2, ...). The same four inputs give the same number, so two call sites with one stream draw the same number.
@@ -20,9 +21,20 @@ namespace EasyEcs;
 /// </para>
 /// </summary>
 /// <param name="Seed">The world's seed: a different seed, a different sequence for every entity.</param>
-/// <param name="Tick">The step of the simulation the numbers are drawn for: advance it once per step.</param>
-public record struct EntityRandom(ulong Seed, ulong Tick) : ISingletonComponent
+public record struct EntityRandom(ulong Seed) : ISingletonComponent
 {
+    /// <summary>
+    /// The step the numbers are drawn for: the number of <see cref="World.Update()"/> calls since the singleton was
+    /// added. The world adds one at the start of every <see cref="World.Update()"/>, before any system runs, so each
+    /// update draws new numbers with no code of yours. <see cref="World.Update{TGroup}"/> leaves it: a group's systems
+    /// draw with the tick of the last <see cref="World.Update()"/>, so a group run between two updates (replication
+    /// every third tick) draws what the update drew, and a world updated only by groups calls
+    /// <see cref="World.Update()"/> once per tick (its default group may hold no system) or draws through the static
+    /// members with a tick of its own. It is saved, captured and restored with the singleton, so a loaded or restored
+    /// world continues its sequence.
+    /// </summary>
+    public ulong Tick { readonly get; internal set; }
+
     /// <summary>64 random bits for <paramref name="entity"/> in this tick, stream <paramref name="stream"/>. O(1), pure.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public readonly ulong Bits(EntityId entity, uint stream) => Bits(Seed, entity, Tick, stream);

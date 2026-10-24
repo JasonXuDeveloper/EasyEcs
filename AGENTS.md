@@ -54,7 +54,10 @@ src/EasyEcs.CodeFixes/         EasyEcsCodeFixes.cs: fixes for the analyzer's dia
                                EasyEcsCodeFixes.Forms.cs: EECS080 (a job and its calls to [ForEntity], solution-wide),
                                EECS084 ([Consume]); EasyEcsCodeFixes.Systems.cs: EECS074 (a ref struct), EECS075
                                (static), and the migration of a class deriving from the removed EcsSystem (the
-                               compiler's CS0246) into an [EcsSystem] ref struct
+                               compiler's CS0246) into an [EcsSystem] ref struct; EasyEcsCodeFixes.Declarations.cs:
+                               the migrations of declarations that changed shape, from the compiler's error on the old
+                               form (WithAny<T> merged, the hook attributes, [GroupBy] onto the member, EntityRandom's
+                               tick written by hand) and EECS090's rename
 tests/                         EasyEcs.UnitTest (NUnit, one file per feature) and EasyEcs.Aot (Native AOT check)
                                (file map: tests/AGENTS.md)
 benchmarks/                    EasyEcs.Benchmark (one class per feature + the headline worlds), EasyEcs.Comparison

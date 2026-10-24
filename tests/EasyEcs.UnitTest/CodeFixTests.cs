@@ -505,6 +505,14 @@ public class CodeFixTests
         "[System.Serializable] public partial struct Hall : IComponent { [GroupBy] public int Floor; }", "Move [GroupBy] onto the [Group] member")]
     [TestCase("CS0592", "[GroupBy] public record struct Room(int Id) : IComponent, IGroup { public int Group => Id; }",
         "public record struct Room(int Id) : IComponent, IGroup { [GroupBy] public int Group => Id; }", "Move [GroupBy] onto the Group property")]
+    [TestCase("CS0200", "public static class C { public static void Step(World w) { w.GetSingleton<EntityRandom>().Tick++; w.Update(); } }",
+        "Step(World w) { w.Update(); }", "Remove it: the world advances EntityRandom's tick on every update")]
+    [TestCase("CS0200", "public static class C { public static void Step(World w) { w.GetSingleton<EntityRandom>().Tick = 3; } }",
+        "Step(World w) { }", "Remove it: the world advances EntityRandom's tick on every update")]
+    [TestCase("CS1729", "public static class C { public static EntityRandom R() => new EntityRandom(1, 2); }",
+        "=> new EntityRandom(1);", "Drop the tick: the world advances it on every update")]
+    [TestCase("CS1739", "public static class C { public static EntityRandom R() => new EntityRandom(Seed: 1, Tick: 2); }",
+        "=> new EntityRandom(Seed: 1);", "Drop the tick: the world advances it on every update")]
     public async Task MigratesADeclarationOfTheOldForm(string id, string source, string expected, string title)
     {
         var document = Document(Data + source);

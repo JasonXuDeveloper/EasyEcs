@@ -303,21 +303,6 @@ public ref struct RegenerationSystem
         if (value < max) hp.Write().Value = Math.Min(max, value + (burning.HasValue ? 5 : 20));
     }
 }
-
-[UpdateAfter<RegenerationSystem>]                                             // registered first, runs last
-[EcsSystem]
-public ref struct ClockSystem
-{
-    [OnCreate]
-    static void OnCreate(World world) => world.GetOrAddBattle();
-
-    [OnUpdate]
-    static void OnUpdate(World world)
-    {
-        world.Battle.Tick++;
-        world.EntityRandom.Tick++;                                            // the next update draws new numbers
-    }
-}
 // #endregion projectiles
 
 // #region replication
@@ -490,10 +475,10 @@ public sealed class BattleServer : IDisposable
             DestroyLogCapacity = units,                                       // the ids gone while a client lags (CatchUp)
         });
         World.SetRules(ShotCost, BagSize, false);
-        World.SetEntityRandom(Seed, 0);                                       // one seed: one battle, on every run
+        World.SetEntityRandom(Seed);                                          // one seed: one battle, on every run
+        World.GetOrAddBattle();                                               // the totals start at zero
 
-        World.AddSystem<ClockSystem>();                                       // OnCreate adds the Battle singleton
-        World.AddSystem<PlanningSystem>();                                    // and this one the Waypoints
+        World.AddSystem<PlanningSystem>();                                    // OnCreate adds the Waypoints
         World.AddSystem<SteeringSystem>();
         World.AddSystem<MovementSystem>();
         World.AddSystem<ManaSystem>();
@@ -565,8 +550,8 @@ public sealed class BattleServer : IDisposable
     /// <summary>One server tick: the simulation every tick, replication every third.</summary>
     public void Tick()
     {
-        World.Update();
-        if (Battle.Tick % 3 == 0) World.Update<Replication>();
+        World.Update();                                                       // EntityRandom draws new numbers:
+        if (++Battle.Tick % 3 == 0) World.Update<Replication>();              // a group's update draws the same ones
     }
 
     /// <summary>Whether players hold fire: a rule of the battle is data, so shots in flight still expire.</summary>
