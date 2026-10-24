@@ -14,11 +14,8 @@ tools/bench.sh BulkBenchmark Features.RemovalComparison --sync   # classes, resu
 tools/bench.sh --site --sync                                   # every class the site shows (before a release)
 ```
 
-A full run of both projects takes hours. Run what a change touches (its benchmark and the neighbors the definition of
-done names) and merge it with `--sync`; `--site` refreshes the site's numbers; `--all` adds the classes that serve
-A/B comparisons only.
-
-Both benchmark projects use the job in `benchmarks/EasyEcs.Benchmark/BenchmarkConfig.cs` (no `--job` needed).
+A full run takes hours: run what a change touches (`audit-perf` has the method: A/B, lock, quiet machine) and merge
+it with `--sync`. Both benchmark projects use the job in `benchmarks/EasyEcs.Benchmark/BenchmarkConfig.cs`.
 
 The website (https://ecs.xgamedev.net) is built from `docs/content`: `docs/` is its project (`bun run check`,
 `bun run build`; `docs/CLAUDE.md`), and `docs/WRITING.md` is how a page is written. Each page is
@@ -320,76 +317,19 @@ tools/ApiDocs/                 writes docs/content/reference/ from the XML docs 
 
 ## Definition of done for a feature
 
-A feature, rule or change ships only with every part below that applies to it. Check them off before merging; a
-fresh session working on a new request follows this list.
-
-1. **Core**: one shared non-generic core with thin typed wrappers. T1..T9 variants come from `ArityGenerator`
-   templates. Hot paths allocate nothing and run no LINQ, closures or boxing. Each invariant that skips a bounds
-   check is documented next to the code. Structural changes go through the gate, and `StorageVersion` is bumped
-   where a pass must notice.
-2. **Generator**: whatever users would otherwise write twice is generated.
-   - Declarations users write once, such as an attribute on a field or type, are read through one `Symbols` helper.
-     Both the generator and the analyzer use it, so "skipped by the generator" is exactly "reported by the analyzer".
-   - Models are equatable and symbol-free, with a tracking name per stage and a caching assertion in
-     `GeneratorTests`, plus a generated-output test.
-   - Generators report no diagnostics.
-   - Partial types and nested types are handled; the declaring chain is partial or reported.
-3. **Analyzer**: every misuse that compiles and every pattern that works but costs gets an EECS rule.
-   - Severity: Error when the code is wrong, Warning when it is likely wrong, Info for performance hints.
-   - The descriptor message names the type or member and the fix.
-   - For a fallback to scalar, the reason comes from the same function the generator uses (`Kernel.Vectorize`), so
-     EECS055 or EECS056 names exactly why.
-   - Tests cover the positive cases, the negative cases and false-positive guards.
-   - Update the rule list and range in this file, in `docs/content/guide/analyzer.mdx` and `.zh.mdx`, and in
-     `docs/public/easyecs-rules.md`.
-4. **Code fix** (`EasyEcs.CodeFixes`) for every rule whose fix is mechanical, including converting hand-written
-   patterns to the generated or attribute form. The analyzer computes the fix as diagnostic properties, and a
-   `CodeFixTests` case covers it.
-5. **Tests** in `tests/EasyEcs.UnitTest`, one file per feature:
-   - behaviour;
-   - edge cases (stale ids, empty tables, structural changes mid-pass);
-   - the allocation test (0 B in steady state);
-   - for parallel code, bit-identical results at 1 and 4 threads;
-   - for vector loops, equivalence with the scalar method.
-6. **Benchmarks** with BenchmarkDotNet only.
-   - Measure before and after, two rounds each, with the A/B copy outside the repo tree (duplicate project names
-     break BDN).
-   - When several agents share a machine, run one benchmark at a time behind a shared lock file (`flock`).
-   - Check the Tier1 asm of new hot loops (JitDisasm): no calls in the loop body, no unexpected range checks.
-   - A change ships only if it is a net win at 0 B with no regression in WorldSimulation, BattleServer and the
-     feature's neighbors.
-   - Add a benchmark for anything not covered yet.
-7. **Docs**, written per `docs/WRITING.md`, en and zh structurally identical:
-   - the feature's guide page follows the page anatomy (what it is, when to use it as idea/warn Callouts, how to use
-     it with compiling examples, a full example, how to use it fast, what it costs, pitfalls with their EECS rule,
-     related Cards);
-   - components fit their content: Tabs for alternatives (`You write` / `The generator writes`, `Reported` /
-     `Fixed`), Steps for sequences, TypeTable for options, Accordions for multi-file examples, Files for trees;
-   - numbers appear only through `docs/src/data/bench.json` (BenchTable and the related components), never typed on
-     a page (decision records may quote numbers);
-   - complexity rows go in `docs/content/api.mdx` and `.zh.mdx`;
-   - XML docs need Chinese entries in `tools/ApiDocs/zh` (`dotnet run --project tools/ApiDocs`);
-   - add a decision record (`decisions.mdx` + `.zh.mdx`) for every non-obvious choice and every dropped idea, and
-     update the roadmap;
-   - add a changelog entry and a README "What's new" entry;
-   - a breaking change also needs a migration entry;
-   - update the rules file for AI assistants (`docs/public/easyecs-rules.md`) and this file's layout;
-   - the battle server (`BattleServer.cs` regions and `example.mdx`) and the samples use the feature where it
-     belongs, as exemplary code.
-8. **Commits and merge**:
-   - logic, docs and CI go in separate commits;
-   - parallel work happens in worktrees on branches off the work branch;
-   - `verify` runs before anything reaches master;
-   - renames of released public API are reported first and applied after the owner's approval (`audit-naming`).
+A feature, rule or change ships with every part that applies: core, generator, analyzer, code fix, tests,
+benchmarks, docs, separate commits. The checklist is the `feature` skill (`.claude/skills/feature/SKILL.md`); a
+fresh session working on a new request follows it.
 
 ## Workflows
 
-Repeatable procedures live in `.claude/skills/<name>/SKILL.md` (Claude Code loads them as skills; any agent or
-person can follow them as checklists). Update a skill when a round teaches something new.
+Repeatable procedures live in `.claude/skills/<name>/SKILL.md` (Claude Code loads them as skills; `.agents/skills` links
+to the same files for other agents; any person can follow them as checklists). Update a skill when a round teaches something new.
 
 | Skill | When |
 |---|---|
-| `verify` | before merging to master: build, tests, DocCheck, ApiDocs, docs site, samples, templates, demo |
+| `feature` | building or reviewing any change: the definition of done (core, generator, analyzer, code fix, tests, benchmarks, docs, commits) |
+| `verify` | before merging to master: build, tests, DocCheck, ApiDocs, docs site, samples, templates, AOT, demo; landing and releases |
 | `audit` | a review round: parallel audits in worktrees on the work branch, triage, merge, docs pass, verify |
 | `audit-core` | redundancy, duplicated logic, coupling, lifecycle edges and hot-path cost in `EasyEcs.Core` |
 | `audit-generator` | what users still write twice, plain forms the generator could emit fast (vector loops, parameters, schedule), generator speed, incremental best practices, caching tests |
@@ -425,17 +365,15 @@ person can follow them as checklists). Update a skill when a round teaches somet
   Examples are what users copy, so they must be exemplary. The battle server example
   (`docs/content/example.mdx`) includes the `// #region` blocks of `benchmarks/EasyEcs.Benchmark/BattleServer.cs`:
   keep the regions when changing the file, update the page's walkthrough with it, and give a new feature a place in it.
-- **Performance changes must be measured.** Run the relevant `EasyEcs.Benchmark` cases before and after; a change
-  ships only if it is a net improvement (time and allocations) with no regression elsewhere. Add a benchmark
-  when you optimize something not covered yet.
+- **Performance changes must be measured** with BenchmarkDotNet, before and after (`audit-perf`): a net win at 0 B
+  with no regression elsewhere ships; anything else is reverted and recorded.
 - **Zero allocation on hot paths**: queries, iteration, component access, add/remove after warm-up. No LINQ, no
   closures, no boxing, no `params object[]`. Use `Unsafe`/`MemoryMarshal` only where an invariant guarantees bounds
   (document the invariant next to the code).
 - **Never hand-write arity variants**: T1..T9 APIs come from `ArityGenerator` templates. Change the template, not
   generated output (see `obj/**/EasyEcs.Generator/*.g.cs` to inspect it).
-- **Generators follow the incremental rules**: `ForAttributeWithMetadataName` or syntax-only predicates first,
-  equatable symbol-free models, no diagnostics from generators (add them to `EasyEcsAnalyzer` using `Symbols`), a
-  tracking name per stage and a caching assertion in `GeneratorTests`.
+- **Generators follow the incremental rules** (`audit-generator`): no diagnostics from generators (the analyzer
+  reports through the same `Symbols` checks), equatable symbol-free models, a caching assertion per stage.
 - **Structural changes go through the gate** (`using (Structural())`: owner thread, not reentrant; `Shared()` only for the cold paths a parallel stage's threads
   reach on their own: query cache misses, a missing singleton added by `GetOrAddSingleton`, closing tombstones) and through `AddBit(s)` /
   `RemoveBit(s)` / `MoveTo` / `RemoveRow` (and `Archetype.FillHoles`, which rewrites rows and slots); never mutate
@@ -449,18 +387,12 @@ person can follow them as checklists). Update a skill when a round teaches somet
 - **Decisions**: every non-obvious choice, and every feature dropped after weighing it, gets a record in
   `docs/content/decisions.mdx` + `.zh.mdx` (decision, why, what was considered, numbers); `docs/content/roadmap.mdx` lists
   what is planned and what was dropped.
-- **Docs**: diagrams are mermaid; `docs/content/api.mdx` lists the complexity of every public API (rerun
-  `dotnet run --project tools/ApiDocs` after changing it); a new or changed XML doc comment of a public API needs its
-  Chinese entry in `tools/ApiDocs/zh/` (the tool reports it); README is the landing page.
+- **Docs** (`audit-docs`, `docs/WRITING.md`): diagrams are mermaid; `api.mdx` lists the complexity of every public
+  API; a public XML doc comment needs its Chinese entry in `tools/ApiDocs/zh/`; README is the landing page.
 - **Entity ids are recycled**: any id-keyed API must also validate the version (`World.Live`, `Entity.ThrowStale`).
-- Behavioral/breaking changes need an entry in the migration guide (`docs/content/migration.mdx` + `.zh.mdx`,
-  https://ecs.xgamedev.net/en/docs/migration) and a README "What's new" entry.
+- Behavioral/breaking changes need a migration entry (`docs/content/migration.mdx` + `.zh.mdx`) and a README
+  "What's new" entry.
 - Commits: logic, docs and CI in separate commits. The author is the repository owner; the committer is the
   environment's signing identity so the signature shows as Verified. No session links in commit messages.
 - The version lives only in `Directory.Build.props` (package, EasyEcs.Core and the bundled generator carry it).
-- Releases are cut manually by the owner: GitHub Actions -> Release -> Run workflow on `master` with a version. Job
-  `tag` bumps `Directory.Build.props`, builds and tests, commits `Bump to vX.Y.Z` and tags it; job `publish` packs that
-  tag, pushes to NuGet through Trusted Publishing (OIDC, no API key secret; policy on nuget.org: repository EasyEcs,
-  workflow `release.yml`) and creates the GitHub release with GitHub's generated notes (What's Changed from merged
-  pull requests; New Contributors; Full Changelog), so changes land through pull requests with meaningful titles. A
-  failed publish is retried with "Re-run failed jobs". Do not trigger releases unless asked.
+- Releases are cut manually by the owner (the workflow is in `verify`). Do not trigger releases unless asked.

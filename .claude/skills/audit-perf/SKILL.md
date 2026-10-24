@@ -44,12 +44,15 @@ no files: a finding is built by the skill that owns its files (`audit-core`, `au
    which benchmark shows it. Read the decisions and the roadmap's "Dropped" list: a dropped idea comes back only
    with a new, measured reason.
 2. **Prototype in a worktree**; keep the public API unless the owner approves a change.
-3. **Measure with BenchmarkDotNet only** (CLAUDE.md, definition of done 6):
+3. **Measure with BenchmarkDotNet only** (`feature`, part 6):
    - A/B copies as git worktrees outside the repo tree (scratchpad); two rounds, interleaved;
    - every run under `flock /tmp/bench.lock`, nothing else running (agents' builds and samples included): parallel
      rows swing by 2x on a loaded machine; take the load average with the results;
    - the feature's benchmark plus WorldSimulation, BattleServer, MultiWorld and the neighbors; 0 B in steady state;
-   - new hot loops: Tier1 asm with `tools/jitdisasm.sh` (no call in the loop body, no unexpected range check).
+   - new hot loops: Tier1 asm with `tools/jitdisasm.sh` (no call in the loop body, no unexpected range check);
+   - `tools/bench.sh <classes> --sync` runs classes one process each (resumable, under the lock) and merges them into
+     the site's numbers, listing rows that moved 15 % or allocate differently; `--site` runs every class the site
+     shows, `--all` adds the A/B-only classes. A full run takes hours: run what the change touches.
 4. **Ship only a net win** (time and allocations, no regression elsewhere). A loss or a wash is reverted and gets a
    decision record (what was tried, the numbers, why not); the roadmap's "Dropped" list names it.
 5. A kept change gets: tests (behaviour, 0 B allocation test, bit-identical at 1 and 4 threads, vector equals scalar),

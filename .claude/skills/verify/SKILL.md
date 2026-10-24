@@ -1,6 +1,6 @@
 ---
 name: verify
-description: The full EasyEcs gate before merging to master - build, tests, doc fences, API reference, docs site, samples, templates, live demo. Use before any merge or push to master, and after merging audit branches.
+description: The full EasyEcs gate before merging to master - build, tests, doc fences, API reference, docs site, samples, templates, AOT, live demo - then landing on master and how the owner cuts a release. Use before any merge or push to master, after merging audit branches, and before a release.
 ---
 
 # Verify
@@ -41,3 +41,12 @@ dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -o <scratch>/aot && <sc
 - Commits: logic, docs and CI separate (CLAUDE.md). Merge `origin/master` first if it moved (owner PRs), then
   `git checkout master && git merge --ff-only <work-branch> && git push origin master`.
 - Never trigger a release.
+
+## Releases (the owner's)
+
+- The version lives only in `Directory.Build.props` (the package, EasyEcs.Core and the bundled generator carry it).
+- The owner runs GitHub Actions -> Release -> Run workflow on `master` with a version. Job `tag` bumps
+  `Directory.Build.props`, builds and tests, commits `Bump to vX.Y.Z` and tags it; job `publish` packs the tag, pushes
+  to NuGet through Trusted Publishing (OIDC, no API key; nuget.org policy: repository EasyEcs, workflow
+  `release.yml`) and creates the GitHub release with generated notes (merged pull requests), so changes land
+  through pull requests with meaningful titles. A failed publish is retried with "Re-run failed jobs".

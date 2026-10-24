@@ -1,0 +1,81 @@
+---
+name: feature
+description: The definition of done for an EasyEcs feature, rule or behavior change - core, generator, analyzer, code fix, tests, benchmarks, docs, commits. Use when building or reviewing any change before it merges; a fresh session working on a new request follows it.
+---
+
+# Shipping a feature
+
+A feature, rule or change ships only with every part below that applies to it. Check them off before merging. Each
+part names the skill that audits it.
+
+## 1. Core (`audit-core`)
+
+- One shared non-generic core with thin typed wrappers; T1..T9 variants come from `ArityGenerator` templates.
+- Hot paths allocate nothing and run no LINQ, closures, boxing, `params object[]`, string formatting or iterators.
+- Each invariant that skips a bounds check is documented next to the code.
+- Structural changes go through the gate; `StorageVersion` is bumped where a pass must notice; per-entity state is
+  `EntityMeta` only; id-keyed APIs validate the version.
+- Synchronization is `System.Threading.Lock` or CAS, never `lock (object)`.
+- The feature is general (servers, Godot games, simulations) and off unless used: what it costs is paid only by
+  worlds that use it.
+
+## 2. Generator (`audit-generator`)
+
+- Whatever users would otherwise write twice is generated (an attribute, a `[ForEach]` parameter, a generated
+  member); where users write the plain form, the generator emits the fast one (vector loop, per-chunk parameter,
+  schedule) when it can.
+- Declarations users write once are read through one `Symbols` helper that the generator and the analyzer share, so
+  "skipped by the generator" is exactly "reported by the analyzer".
+- Models are equatable and symbol-free, a tracking name per stage, a caching assertion and a generated-output test
+  in `GeneratorTests`; generators report no diagnostics; partial and nested types are handled (the declaring chain
+  is partial or reported).
+
+## 3. Analyzer (`audit-analyzer`)
+
+- Every misuse that compiles and every pattern that works but costs gets an EECS rule, and so does hand-written
+  code the generator would write.
+- Severity: Error when the code is wrong, Warning when it is likely wrong, Info for performance hints.
+- The message names the type or member and the fix; a scalar fallback's reason comes from `Kernel.Vectorize`.
+- Tests: positive cases, negative cases, false-positive guards, the overlap test (one diagnostic per mistake).
+- The rule list and range in CLAUDE.md, `docs/content/guide/analyzer.mdx` + `.zh.mdx`, `docs/public/easyecs-rules.md`.
+
+## 4. Code fix
+
+Every rule whose fix is mechanical, including converting hand-written patterns to the generated or attribute form.
+The analyzer computes the fix as diagnostic properties; a `CodeFixTests` case covers it.
+
+## 5. Tests (`tests/EasyEcs.UnitTest`, one file per feature)
+
+Behaviour; edge cases (stale and recycled ids, empty tables, structural changes mid-pass, retired entities,
+exceptions mid-pass); the allocation test (0 B in steady state); bit-identical results at 1 and 4 threads for
+parallel code; equivalence with the scalar method for vector loops; the AOT test when the feature reaches
+generics or reflection (`tests/EasyEcs.Aot`).
+
+## 6. Benchmarks (`audit-perf` has the method)
+
+BenchmarkDotNet only: before and after, two rounds, A/B copies outside the repo tree, under `flock /tmp/bench.lock`
+on a quiet machine; Tier1 asm of new hot loops (`tools/jitdisasm.sh`). Ships only as a net win at 0 B with no
+regression in WorldSimulation, BattleServer and the feature's neighbors. A benchmark for anything not covered yet.
+
+## 7. Docs (`audit-docs`; written in the final docs pass)
+
+Per `docs/WRITING.md`, en and zh structurally identical:
+- the guide page's anatomy: what it is; when to use it (idea / warn Callouts); how to use it, recommended (generated)
+  form first, with `You write` / `The generator writes` tabs; a full example; how to use it fast; what it costs;
+  pitfalls with their EECS rule; related Cards;
+- complexity rows in `docs/content/api.mdx` + `.zh.mdx`; XML docs with zh entries in `tools/ApiDocs/zh`;
+- numbers only through `docs/src/data/bench.json` (BenchTable), never typed on a page (decision records may quote);
+- a decision record for every non-obvious choice and dropped idea; the roadmap;
+- changelog, README "What's new"; a migration entry for a breaking change;
+- `docs/public/easyecs-rules.md`, CLAUDE.md's layout;
+- the battle server (`BattleServer.cs` regions + `example.mdx`) and the samples use the feature where it belongs.
+
+While code is still changing, collect these as docs to-dos; pages are written once at the end.
+
+## 8. Commits and merge (`verify`)
+
+- Logic, docs and CI in separate commits; author = repository owner, committer = the environment's signing
+  identity; no session links.
+- Parallel work in worktrees on branches off the work branch (`audit`).
+- `verify` runs before anything reaches master.
+- Renames of released public API are reported first and applied after the owner's approval (`audit-naming`).

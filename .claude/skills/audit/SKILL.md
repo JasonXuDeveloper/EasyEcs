@@ -1,6 +1,6 @@
 ---
 name: audit
-description: Run an audit round of EasyEcs (core, generators, analyzer, docs) with parallel agents in worktrees, then triage, merge and verify. Use when asked to review the codebase for redundancy, design problems, missing analyzers or doc gaps, or to "do another round".
+description: Run an audit round of EasyEcs (core, generators, analyzer, performance, naming, docs) with parallel agents in worktrees - code first, docs last - then triage, merge and verify. Use when asked to review the codebase for redundancy, design problems, missing generated forms or analyzer rules, performance or doc gaps, or to "do another round".
 ---
 
 # Audit round
@@ -12,9 +12,9 @@ One round = parallel audits, each in its own worktree and branch, then triage an
 | Skill | Owns | Looks for |
 |---|---|---|
 | `audit-core` | `src/EasyEcs.Core`, its tests and benchmarks | redundancy, non-DRY code, coupling, bugs, hot-path cost |
-| `audit-generator` | `src/EasyEcs.Generator` generators: Arity, Component, System, Part (+ `Parts.cs`), `Kernel*.cs`, `Code.cs`, `EquatableArray.cs` | generator speed, incremental best practices, newer Roslyn features |
-| `audit-analyzer` | `EasyEcsAnalyzer*.cs`, `UnusedSuppressor.cs`, `Symbols.cs`, `Uses.cs`, `Threads.cs`, `src/EasyEcs.CodeFixes` | overlapping rules, missing rules and fixes, false positives |
-| `audit-docs` | `docs/content`, README, `docs/public/easyecs-rules.md`, samples READMEs | stale names, examples, best practices, duplication, en/zh |
+| `audit-generator` | `src/EasyEcs.Generator` generators: Arity, Component, System, Part (+ `Parts.cs`), `Kernel*.cs`, `Code.cs`, `EquatableArray.cs` | what users still write twice, plain forms to emit fast, generator speed |
+| `audit-analyzer` | `EasyEcsAnalyzer*.cs`, `UnusedSuppressor.cs`, `Symbols.cs`, `Uses.cs`, `Threads.cs`, `src/EasyEcs.CodeFixes` | missing rules (wrong, costly, hand-written code), code fixes, overlaps, false positives |
+| `audit-docs` | `docs/content`, README, `docs/public/easyecs-rules.md`, samples READMEs | every part of each feature page, stale names, examples, duplication, en/zh |
 | `audit-perf` | no files: research, prototypes in its own worktree | the next performance win (Burst, CUDA, stencil, OpenMP, MPI, OS, .NET 10), proven with BenchmarkDotNet |
 | `audit-naming` | no files: a report | ambiguous or wrong names; public renames wait for the owner |
 
@@ -38,8 +38,7 @@ what it left undone, which goes on the same list (nothing is dropped silently).
 - Decision numbers collide between parallel agents: give each a distinct range (e.g. next free D, next free D + 1).
 - Docs edits from code audits stay minimal: XML docs with their zh entries and the `api.mdx` complexity row; the
   pages wait for the docs pass (the agent lists what they must say).
-- Each agent's definition of done is CLAUDE.md's: core, generator, analyzer, code fix, tests, benchmarks, docs
-  to-dos, separate commits.
+- Each agent's definition of done is the `feature` skill (docs as to-dos until the docs pass).
 
 ## While they run
 
@@ -56,7 +55,7 @@ what it left undone, which goes on the same list (nothing is dropped silently).
    else running): agents' own numbers taken beside other agents' builds are not proof.
 3. Conflicts are usually in `changelog`, `migration`, `decisions` (both sides appended): keep both, renumber a
    duplicated D and fix its anchors and links.
-4. After the code audits are merged, run `audit-docs` once more: code changes leave stale pages behind.
+4. After the code audits are merged, run `audit-docs` once over everything with the collected docs to-dos.
 5. Finish with `verify`, then fast-forward `master` (no PR unless asked) and push. The owner cuts the release.
 6. Remove finished worktrees (`git worktree remove`, `git worktree prune`): a stale worktree makes BenchmarkDotNet
    find two matching projects.
