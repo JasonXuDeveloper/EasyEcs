@@ -148,7 +148,7 @@ public static class LoweredKernels
 
 /// <summary>
 /// The lowerings against the scalar operations: every 32-bit input of the one-input forms (Exhaustive, explicit: about
-/// a minute on 4 cores) or a sample of them with every edge (by default), random operands and edges for two inputs,
+/// 8 minutes in Release on 4 cores) or a sample of them with every edge (by default), random operands and edges for two inputs,
 /// the rows of a lane that throws, parallel runs, allocations.
 /// </summary>
 public class LaneMathTests
@@ -257,7 +257,7 @@ public class LaneMathTests
 
     private static readonly object[] Strides =
     [
-        new TestCaseData(1u).SetCategory("Exhaustive").Explicit("every 32-bit input: about ten seconds per method on 4 cores"),
+        new TestCaseData(1u).SetCategory("Exhaustive").Explicit("every 32-bit input: about 8 minutes for the four sweeps in Release on 4 cores (0.5 to 4 each), far longer in Debug"),
         new TestCaseData(4099u),
     ];
 
@@ -470,7 +470,9 @@ public class LaneMathTests
     {
         if (float.IsNaN(a) || float.IsNaN(b)) return float.IsNaN(a) && float.IsNaN(b) ? 0 : long.MaxValue;
         if (a == b) return 0;
-        if (float.IsInfinity(a) || float.IsInfinity(b) || Math.Sign(a) != Math.Sign(b) && a != 0 && b != 0) return long.MaxValue;
+        // Bits count ulps across the whole line of one sign, infinity included: float.MaxValue is 1 ulp from it, where a
+        // product of three overflows that the scalar Pow still rounds down.
+        if (Math.Sign(a) != Math.Sign(b) && a != 0 && b != 0) return long.MaxValue;
         return Math.Abs(BitConverter.SingleToInt32Bits(a) - (long)BitConverter.SingleToInt32Bits(b));
     }
 
