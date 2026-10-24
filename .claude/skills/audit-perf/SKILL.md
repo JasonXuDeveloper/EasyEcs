@@ -1,6 +1,6 @@
 ---
 name: audit-perf
-description: Look for the next performance win in EasyEcs - borrow from Burst, CUDA, stencil codes, OpenMP, MPI, OS schedulers and newer .NET (10) features, find where the runtime or the generated code leaves speed on the table, and prove every change with BenchmarkDotNet. Use for a performance round, before a release, or when asked to "optimize further" or to research an idea.
+description: Look for the next performance win in EasyEcs - borrow from Burst, CUDA, stencil codes, OpenMP, MPI, OS schedulers, databases, HPC runtimes (Halide, Kokkos, TBB, Legion), LLM serving (vLLM) and newer .NET (10) features, find where the runtime or the generated code leaves speed on the table, and prove every change with BenchmarkDotNet. Use for a performance round, before a release, or when asked to "optimize further" or to research an idea.
 ---
 
 # Performance research and audit
@@ -29,7 +29,27 @@ no files: a finding is built by the skill that owns its files (`audit-core`, `au
    - **OS schedulers and runtimes**: spin-then-park, few spinning threads (Go's scheduler), LIFO wake (warm caches),
      work stealing, futex-style waits, per-core state, false sharing (padding to 64 bytes);
    - **databases**: column stores, zone maps (`WordTicks` / `BlockTicks`: skip unwritten words and blocks), bulk ops
-     by whole words (`SetAll`).
+     by whole words (`SetAll`); vectorized execution (MonetDB/X100, DuckDB: batches of rows per call), morsel-driven
+     parallelism (HyPer: small chunks claimed by threads, NUMA-aware), compiled queries (HyPer: the generator's job),
+     radix-partitioned joins (sort lookups by target table before chasing them);
+   - **LLM serving (vLLM and friends)**: paged memory (PagedAttention: fixed-size blocks and a block table, so
+     variable-length data per entity, `DynamicBuffer<T>`, grows without fragmentation and blocks are shared
+     copy-on-write by clones and prefabs), prefix sharing (one copy of identical values: shared or flyweight
+     components), continuous batching (schedule per iteration: work that arrives mid-tick joins the next pass instead
+     of waiting for the next tick), CUDA graphs (record a schedule once, replay it: the system set's switch, a cached
+     stage plan), preemption and swapping (cold entities saved out and loaded back: `SaveEntities` for idle regions),
+     FlashAttention (tiling and fusing passes that touch the same data: fuse systems over one table into one walk);
+   - **HPC runtimes and compilers**: Halide / TVM (the algorithm apart from its schedule; autotuning the schedule:
+     `ChunkRows`, `Parallel`, `Slices` chosen from measurements), Triton (block-level programs with autotuned block
+     sizes), Kokkos / RAJA (layout and execution policy as parameters: one method, several layouts), Legion / Regent
+     (tasks declare privileges on regions and the runtime finds the parallelism: our read/write sets), Charm++
+     (over-decomposition and migratable objects for load balance: entities moved between worlds), TBB (work stealing,
+     the affinity partitioner: the same chunk to the same thread each tick for warm caches), polyhedral loop
+     optimizers (fusion and tiling of nested loops), GotoBLAS (cache blocking per level), ISPC (SPMD over SIMD lanes:
+     the vector loops' model), NUMA first-touch placement, software prefetch for index chasing (`Lookup<T>`);
+   - **low-latency systems**: LMAX Disruptor (ring buffers, one writer per sequence, mechanical sympathy), Seastar
+     (shard-per-core, share nothing: a world per core), DPDK / io_uring (batching, busy polling), RCU (readers never
+     wait: the copy-on-write archetype lists), mimalloc / jemalloc arenas (per-thread pools).
 3. **.NET 10**: `Vector128/256/512` and `Avx512*` (compress, permute), `TensorPrimitives`, `InlineArray`,
    `UnsafeAccessor` (keeps PGO: checked), `AlternateLookup`, `FrozenDictionary`, `System.Threading.Lock`, `ref struct`
    generics (`allows ref struct`), C# 14 extension members, Native AOT (`IlcInstructionSet`, D108), dynamic PGO and

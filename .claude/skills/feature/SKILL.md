@@ -34,7 +34,8 @@ part names the skill that audits it.
 
 - Every misuse that compiles and every pattern that works but costs gets an EECS rule, and so does hand-written
   code the generator would write.
-- Severity: Error when the code is wrong, Warning when it is likely wrong, Info for performance hints.
+- Severity: Error when the code is wrong; Warning when it is likely wrong, costs, or has a better form (a generated
+    member, an attribute, a parameter: users miss Info); Info only for hints the user may not be able to act on.
 - The message names the type or member and the fix; a scalar fallback's reason comes from `Kernel.Vectorize`.
 - Tests: positive cases, negative cases, false-positive guards, the overlap test (one diagnostic per mistake).
 - The rule list and range in CLAUDE.md, `docs/content/guide/analyzer.mdx` + `.zh.mdx`, `docs/public/easyecs-rules.md`.

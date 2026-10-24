@@ -326,17 +326,23 @@ fresh session working on a new request follows it.
 Repeatable procedures live in `.claude/skills/<name>/SKILL.md` (Claude Code loads them as skills; `.agents/skills` links
 to the same files for other agents; any person can follow them as checklists). Update a skill when a round teaches something new.
 
-| Skill | When |
+Agents see each skill's name and description and load it when a request matches; this table says when to reach for
+which, so a session picks the right one without reading them all.
+
+| Use when | Skill |
 |---|---|
-| `feature` | building or reviewing any change: the definition of done (core, generator, analyzer, code fix, tests, benchmarks, docs, commits) |
-| `verify` | before merging to master: build, tests, DocCheck, ApiDocs, docs site, samples, templates, AOT, demo; landing and releases |
-| `audit` | a review round: parallel audits in worktrees on the work branch, triage, merge, docs pass, verify |
-| `audit-core` | redundancy, duplicated logic, coupling, lifecycle edges and hot-path cost in `EasyEcs.Core` |
-| `audit-generator` | what users still write twice, plain forms the generator could emit fast (vector loops, parameters, schedule), generator speed, incremental best practices, caching tests |
-| `audit-analyzer` | missing EECS rules (wrong, costly, hand-written code), overlaps, false positives, code fixes to the generated forms, shared `Symbols` checks |
-| `audit-naming` | ambiguous or wrong names in the public API, generated members, analyzer descriptors, internals |
-| `audit-perf` | the next performance win: ideas from Burst, CUDA, stencil codes, OpenMP, MPI, OS schedulers and .NET 10, proven with BenchmarkDotNet |
-| `audit-docs` | every part of a feature page (when, recommended form, fast form, costs, complexity, pitfalls), stale names, exemplary examples, duplication, en/zh drift |
+| building, fixing or reviewing any change (feature, rule, behavior) | `feature`: the definition of done |
+| about to merge or push to master, after merging branches, before a release | `verify` |
+| asked for a review round, "another round", or after a release | `audit`: runs the audits below in parallel |
+| the core: redundancy, duplicated logic, coupling, lifecycle edges, threads, hot-path cost | `audit-core` |
+| tools, tests, benchmarks, samples, templates, demo, scripts: coupling, non-DRY, dead code, god files | `audit-code` |
+| changing a generator, a new generated form, boilerplate users still write, IDE or build speed | `audit-generator` |
+| adding or reviewing EECS rules and code fixes | `audit-analyzer` |
+| "optimize further", researching an idea, a performance round | `audit-perf` |
+| a new or renamed public API, generated member or diagnostic | `audit-naming` (report; renames need the owner) |
+| the docs pass, once the code is final | `audit-docs` |
+
+Order in a round: `feature` per change, then the code audits, then `audit-docs`, then `verify`.
 
 ## Engineering principles (apply to every change)
 

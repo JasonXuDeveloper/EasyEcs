@@ -14,6 +14,7 @@ One round = parallel audits, each in its own worktree and branch, then triage an
 | `audit-core` | `src/EasyEcs.Core`, its tests and benchmarks | redundancy, non-DRY code, coupling, bugs, hot-path cost |
 | `audit-generator` | `src/EasyEcs.Generator` generators: Arity, Component, System, Part (+ `Parts.cs`), `Kernel*.cs`, `Code.cs`, `EquatableArray.cs` | what users still write twice, plain forms to emit fast, generator speed |
 | `audit-analyzer` | `EasyEcsAnalyzer*.cs`, `UnusedSuppressor.cs`, `Symbols.cs`, `Uses.cs`, `Threads.cs`, `src/EasyEcs.CodeFixes` | missing rules (wrong, costly, hand-written code), code fixes, overlaps, false positives |
+| `audit-code` | `tools/`, `tests/` structure, `benchmarks/` harness, `samples/`, `templates/`, `demo/`, `.github/` and `docs/scripts/`, the seams between projects | coupling, non-DRY code, dead code, god files, layering, unclear names and comments |
 | `audit-docs` | `docs/content`, README, `docs/public/easyecs-rules.md`, samples READMEs | every part of each feature page, stale names, examples, duplication, en/zh |
 | `audit-perf` | no files: research, prototypes in its own worktree | the next performance win (Burst, CUDA, stencil, OpenMP, MPI, OS, .NET 10), proven with BenchmarkDotNet |
 | `audit-naming` | no files: a report | ambiguous or wrong names; public renames wait for the owner |
@@ -24,7 +25,7 @@ any of them.
 
 ## Order
 
-Code first, docs last: the code audits (core, generator, analyzer, perf) run and merge; agents do not edit docs
+Code first, docs last: the code audits (core, generator, analyzer, code, perf) run and merge; agents do not edit docs
 pages but report their docs to-dos (what each page must now say), which are collected in one list; `audit-docs`
 then runs once over everything, with `tools/bench.sh --site --sync` on the final code. Every agent also reports
 what it left undone, which goes on the same list (nothing is dropped silently).

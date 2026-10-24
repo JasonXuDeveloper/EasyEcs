@@ -26,6 +26,28 @@ shared with the analyzer (`audit-analyzer`).
    and support the most frequent next. The research behind a new form belongs to `audit-perf`.
 3. **The generators are fast**: they run on every keystroke of every user (below).
 
+## ECS without the burden
+
+ECS's usual costs are business logic scattered across components and systems, boilerplate, and repeated code. The
+goal is that users write ordinary code and get the ECS form and its speed without writing it. Each approach below is
+a candidate; weigh it against the decisions (D18 interceptors, D63 Roslyn features), build it with numbers, and
+record a dropped one.
+
+- **Scoped inline queries** (C# interceptors): a lambda or `foreach` over a query inside a method becomes a generated
+  job, its captured locals the job's fields, eligible for vector loops and `Parallel`. D18 dropped interceptors for
+  speed; this reason is boilerplate, so it reopens only with that reason and a benchmark showing the job is as fast.
+- **Views / aspects** (`[View]` structs, Unity `IAspect`): several components of one entity grouped with business
+  methods (`player.TakeDamage(n)`), generated accessors over the row; logic stays in one place.
+- **Archetype as a class** (`[Entity]`): a type lists its components; the generator writes the prefab, the creation
+  call, the query filter and the systems from its methods.
+- **Feature modules** (`[Feature]`): components, systems, groups and setup of one feature registered together.
+- **Data events**: an event type declared once; the generator writes the buffer, the emit call and the reader system.
+- **Schedule apart from the algorithm** (Halide): `ChunkRows`, `Parallel`, `Slices` chosen from `SystemStats`
+  measurements instead of by hand (autotuning).
+- **Hot/cold layout split**: fields a pass never reads moved out of the column it walks (measured access).
+- **Migration**: a code fix from object-oriented code (a class with update methods) to components and systems, and an
+  AI migration guide (`docs/public/easyecs-rules.md`).
+
 ## Vector loops (`Kernel*.cs`)
 
 - A method becomes a `Vector<T>` loop only through `Kernel.Vectorize`; the reason it returns otherwise is exactly
