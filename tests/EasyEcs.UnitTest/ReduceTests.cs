@@ -444,6 +444,6 @@ public partial class ReduceTests
         using var world = Pointed(World.ParallelChunkRows * 4);
         world.AddSystem<ParallelScores>();
         for (int i = 0; i < 10; i++) world.Update();
-        Assert.That(Allocations.Least(() => { for (int i = 0; i < 300; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 300; i++) world.Update(); }), Is.Zero);
     }
 }

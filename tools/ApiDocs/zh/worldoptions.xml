@@ -7,11 +7,13 @@
   <member name="P:EasyEcs.WorldOptions.InitialEntityCapacity" source="b4c4d768e4f9">
     <summary>预先分配的实体容量（避免运行时扩容重新分配）。</summary>
   </member>
-  <member name="P:EasyEcs.WorldOptions.MaxDegreeOfParallelism" source="7ff09c34aa30">
+  <member name="P:EasyEcs.WorldOptions.MaxDegreeOfParallelism" source="85bf6d739a4a">
     <summary>
       一次并行执行最多用多少个线程（默认：处理器数）。管的是 <see cref="P:EasyEcs.WorldOptions.ParallelSystems" /> 并行执行的系统，
       以及并行 <c>[ForEach]</c> 方法、<c>ForEachParallel</c> 和 <c>ForEachEntityParallel</c> 的行分块（不管
-      <see cref="P:EasyEcs.WorldOptions.ParallelSystems" /> 开没开，它们都分块执行）。
+      <see cref="P:EasyEcs.WorldOptions.ParallelSystems" /> 开没开，它们都分块执行）。调用线程算一个；其余是进程的辅助线程，不是线程池的线程：
+      一组固定的后台线程，个数是各个 World 要的最大值减一，在某个 World 第一次并行执行时启动，所有 World 共用。稳定状态不会启动线程，
+      核心的每线程内存（tile 的纹理、<c>Scratch&lt;T&gt;</c>）只要有一个线程建好了自己的，所有辅助线程就都建好。
     </summary>
   </member>
   <member name="P:EasyEcs.WorldOptions.MeasureSystems" source="6e2355d9c11a">
@@ -20,9 +22,9 @@
       并行 <c>[ForEach]</c> 的每个辅助块也一样），以及它的 <c>[ForEach]</c> 方法访问过的实体数（每次遍历开始时数一次）。默认 false。
     </summary>
   </member>
-  <member name="P:EasyEcs.WorldOptions.ParallelSystems" source="d03b24860bca">
+  <member name="P:EasyEcs.WorldOptions.ParallelSystems" source="4554ab8c6ddd">
     <summary>
-      彼此没有顺序约束、生成的读写声明也不冲突（<see cref="T:EasyEcs.SystemAccess" />）的系统同时运行（线程池）。默认 false：
+      彼此没有顺序约束、生成的读写声明也不冲突（<see cref="T:EasyEcs.SystemAccess" />）的系统同时运行（在进程的辅助线程上）。默认 false：
       推荐的模型是每个 World 一个所有者线程。
     </summary>
   </member>

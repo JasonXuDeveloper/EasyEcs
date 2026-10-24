@@ -53,23 +53,16 @@ public record struct Score(int Deaths, int Points) : ISingletonComponent;
 public static class Allocations
 {
     /// <summary>
-    /// The fewest bytes one of three runs of <paramref name="run"/> allocated (<paramref name="bytes"/>: this thread's
-    /// allocated bytes, or another counter such as a system's stats). Waking helpers queues thread pool work, and the
-    /// pool may start a worker thread from the queuing thread (its Thread object counts here) when an idle one retired:
-    /// an allocation of the runtime, not of the world, which a run without it leaves out. An allocation per call shows
-    /// in every run.
+    /// The bytes one run of <paramref name="run"/> allocated (<paramref name="bytes"/>: this thread's allocated bytes, or
+    /// another counter such as a system's stats). One run: helpers are the process's fixed threads (no thread pool
+    /// thread starts while it runs) and their state is set up on all of them at once, so a run allocates nothing whichever
+    /// thread runs which chunk.
     /// </summary>
-    public static long Least(System.Action run, System.Func<long> bytes = null)
+    public static long Of(System.Action run, System.Func<long> bytes = null)
     {
         bytes ??= System.GC.GetAllocatedBytesForCurrentThread;
-        long least = long.MaxValue;
-        for (int window = 0; window < 3 && least != 0; window++)
-        {
-            long before = bytes();
-            run();
-            least = System.Math.Min(least, bytes() - before);
-        }
-
-        return least;
+        long before = bytes();
+        run();
+        return bytes() - before;
     }
 }

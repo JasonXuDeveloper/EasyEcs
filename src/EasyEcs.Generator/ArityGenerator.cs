@@ -1334,7 +1334,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// <see cref="{{name}}{{{tps}}, TJob}"/> on several threads: the matching rows are cut into chunks (about four per
                 /// thread, a multiple of 64 rows, at most <see cref="ParallelChunkRows"/>; or <paramref name="chunkRows"/> rounded
                 /// up to 64, for few heavy rows: <c>[ForEach(Parallel = true, ChunkRows = n)]</c>) that the calling thread and up to
-                /// <see cref="WorldOptions.MaxDegreeOfParallelism"/> - 1 thread-pool threads run at the same time, each with its own copy of <paramref name="job"/> (state
+                /// <see cref="WorldOptions.MaxDegreeOfParallelism"/> - 1 helper threads run at the same time, each with its own copy of <paramref name="job"/> (state
                 /// a job keeps in its fields is not merged back, unless the job merges: <c>Merges</c>, a <c>Reduce&lt;T&gt;</c>;
                 /// its copies, one per chunk, the size of the job's fields, are then kept in an array reused by every call and
                 /// combined in chunk order). The job must not change structure or write anything

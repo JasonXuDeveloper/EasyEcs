@@ -332,7 +332,7 @@ public class ParallelTests
 
         // Warm-up: helpers, JIT tiers, and the thread pool's own worker threads (started from the queuing thread).
         for (int i = 0; i < 500; i++) world.Update();
-        Assert.That(Allocations.Least(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
     }
 
     private struct StampId : IForEach<Counter>, INoStructuralChanges
@@ -522,7 +522,7 @@ public class ParallelTests
 
         Assert.That(alone, Is.True, "tiny items run alone");
         Assert.That(work.Runs, Is.All.EqualTo(runs), "every item once per run, alone or with helpers");
-        Assert.That(Allocations.Least(() => { for (int i = 0; i < 100; i++) world.RunChunks(work, 8); }), Is.Zero);
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.RunChunks(work, 8); }), Is.Zero);
     }
 
     [Test]

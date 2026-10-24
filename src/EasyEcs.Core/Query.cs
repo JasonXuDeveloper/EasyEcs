@@ -280,6 +280,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
 
     // Lookup keys of queries on component bits >= 256 keep their overflow here instead of allocating it per query.
     [ThreadStatic] private static Vector256<long>[] _scratch;
+    private static int _scratchSetUp; // the ThreadSetup step that gives every helper thread its scratch (1,280 bits)
 
     /// <summary>Whether the query names component <paramref name="bit"/> (in any of its sets, or as its group's component).</summary>
     public bool Mentions(int bit) => _all.HasBit(bit) || _none.HasBit(bit) || _any.HasBit(bit) || _changed.HasBit(bit)
@@ -355,6 +356,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     {
         int maxBit = 0;
         for (int i = 0; i < bits.Length; i++) maxBit = Math.Max(maxBit, bits[i]);
+        if (_scratch == null) ThreadSetup.Add(ref _scratchSetUp, static () => _scratch ??= new Vector256<long>[4], typeof(QueryKey));
         var all = filter.All.CopyWithScratch(maxBit, ref _scratch);
         for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
         return all;
@@ -1292,7 +1294,48 @@ internal sealed class QueryWalk
     private World _world;
     private QueryMatch _match;
     private ulong _since; // the filter's change tick
-    private int[] _counts = new int[8]; // row counts of the matching tables at the start of the walk
+    private int[] _counts = new int[Volatile.Read(ref _widest)]; // row counts of the matching tables at the start of the walk
+
+    // The most tables a walk counted: what a walk is created with, and what ThreadSetup has every helper thread's
+    // first free walk grow to (a thread walking a query for the first time finds room for its tables).
+    private static int _widest = 8;
+    private static int _setUp;
+
+    /// <summary>A new walk (when this thread has none free): the first one has every helper thread make one too.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static QueryWalk Create()
+    {
+        ThreadSetup.Add(ref _setUp, Prepare, typeof(QueryWalk));
+        return new QueryWalk();
+    }
+
+    /// <summary>This thread's first free walk, created or grown to <see cref="_widest"/> (a <see cref="ThreadSetup"/> step).</summary>
+    private static readonly Action Prepare = static () =>
+    {
+        var walk = _free ??= new QueryWalk();
+        int widest = Volatile.Read(ref _widest);
+        if (walk._counts.Length < widest) walk._counts = new int[widest];
+    };
+
+    /// <summary>Room for <paramref name="tables"/> counts; a new widest has every helper thread's free walk grow too.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Widen(int tables)
+    {
+        int width = Math.Max(tables, _counts.Length * 2);
+        _counts = new int[width];
+        int widest = Volatile.Read(ref _widest);
+        while (width > widest)
+        {
+            int seen = Interlocked.CompareExchange(ref _widest, width, widest);
+            if (seen == widest)
+            {
+                ThreadSetup.Add(Prepare, typeof(QueryWalk));
+                break;
+            }
+
+            widest = seen;
+        }
+    }
     private bool _alone; // the walk began its pass with the owner's plain count (World.BeginPassAlone)
     private int _archetype;
     private RowFilter _filter;
@@ -1340,7 +1383,7 @@ internal sealed class QueryWalk
 
     private static QueryWalk Rent(World world, QueryMatch match, ulong since)
     {
-        var walk = _free ?? new QueryWalk();
+        var walk = _free ?? Create();
         _free = walk._next;
         walk._next = null;
         walk._uses = (walk._uses + 1) & int.MaxValue;
@@ -1351,7 +1394,7 @@ internal sealed class QueryWalk
         walk._since = since;
         walk._archetype = -1;
         var archetypes = match.Archetypes;
-        if (walk._counts.Length < archetypes.Length) walk._counts = new int[Math.Max(archetypes.Length, walk._counts.Length * 2)];
+        if (walk._counts.Length < archetypes.Length) walk.Widen(archetypes.Length);
         for (int i = 0; i < archetypes.Length; i++) walk._counts[i] = archetypes[i].Count;
         walk._alone = world.BeginPassAlone(); // a plain count on the owner thread while nothing holds the gate
         return walk;

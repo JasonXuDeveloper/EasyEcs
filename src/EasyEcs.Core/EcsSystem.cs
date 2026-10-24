@@ -13,7 +13,7 @@ namespace EasyEcs;
 /// <see cref="OnDestroyAttribute">[OnDestroy]</see> method when it is removed or the world is disposed. Everything runs
 /// synchronously within <see cref="World.Update()"/> (or <see cref="World.Update{TGroup}"/> for systems in a
 /// <see cref="UpdateInGroupAttribute{TGroup}">group</see>): on the calling thread, or with
-/// <see cref="WorldOptions.ParallelSystems"/> on a thread-pool thread next to systems whose
+/// <see cref="WorldOptions.ParallelSystems"/> on one of the process's helper threads next to systems whose
 /// <see cref="SystemAccess">access</see> does not conflict.</para>
 /// <code>
 /// [EcsSystem, UpdateAfter&lt;Input&gt;]

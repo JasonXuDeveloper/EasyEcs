@@ -139,6 +139,6 @@ public class ForParallelTests
         }
 
         Calls(20);
-        Assert.That(Allocations.Least(() => Calls(200)), Is.Zero);
+        Assert.That(Allocations.Of(() => Calls(200)), Is.Zero);
     }
 }

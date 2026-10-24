@@ -254,7 +254,7 @@ public class EmitTests
             }
 
             Replay();
-            Assert.That(Allocations.Least(Replay), Is.Zero);
+            Assert.That(Allocations.Of(Replay), Is.Zero);
         }
     }
 
@@ -284,7 +284,7 @@ public class EmitTests
             world.AddSystem<ParallelStrikes>();
             world.AddSystem<ApplyHits>();
             for (int i = 0; i < 30; i++) world.Update();
-            Assert.That(Allocations.Least(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
+            Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
         }
     }
 
@@ -298,6 +298,6 @@ public class EmitTests
         var strikes = world.AddSystem<ParallelStrikes>();
         world.AddSystem<ApplyHits>();
         for (int i = 0; i < 30; i++) world.Update();
-        Assert.That(Allocations.Least(() => { for (int i = 0; i < 100; i++) world.Update(); }, () => strikes.Stats.TotalAllocated), Is.Zero);
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }, () => strikes.Stats.TotalAllocated), Is.Zero);
     }
 }

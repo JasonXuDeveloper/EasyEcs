@@ -7,12 +7,12 @@ namespace VoxelServer;
 // allocates the room for it, once, so a tick is in steady state when the world has been through it before. The check
 // makes such ticks: it captures the world (a snapshot) and copies its region files, runs Ticks ticks, a rehearsal that
 // reaches every peak of those ticks, then puts the world and the files back and runs the same ticks again, counting
-// the bytes every thread allocated. A restore keeps the lists, tables and indexes the rehearsal grew, and every pool
-// keeps what it was given back, so the replay allocates nothing; a byte that does fails the run. One thing besides the
-// world allocates once: a thread of the pool that runs a parallel pass for the first time (the pool adds threads under
-// load) sets up its own scratch, such as a tile's texture. That happens in one replay, not in every one, so the check
-// takes the least of up to three replays, as the core's allocation tests do; what a tick itself allocates, it allocates
-// in each.
+// the bytes the threads that run the world allocated: this one, and the helper threads that run systems beside it and
+// the chunks of parallel passes (the world measures its systems on whichever thread runs them). A restore keeps the
+// lists, tables and indexes the rehearsal grew, and every pool keeps what it was given back, so the replay allocates
+// nothing; a byte that does fails the run. The helper threads are a fixed set, and what one sets up for a method (a
+// tile's texture) they all have, so it does not matter which of them runs what. Not counted: the runtime's own threads
+// (the JIT compiles a method that turned hot on a thread of its own, and may allocate doing so).
 public static class Steady
 {
     public const int Ticks = 5 * Rules.TicksPerSecond;
@@ -22,19 +22,27 @@ public static class Steady
         var snapshot = world.Capture();
         using var files = new RegionFiles(capacity.Chunks * 4);
         regions.CopyTo(files);
-        long allocated = long.MaxValue;
-        for (int round = 0; round < 4 && allocated != 0; round++)        // the rehearsal, then the replays
+        long allocated = 0;
+        for (int round = 0; round < 2; round++)        // the rehearsal, then the replay
         {
             files.CopyTo(regions);
             world.Restore(snapshot);
-            long before = GC.GetTotalAllocatedBytes(precise: true);
+            long systems = SystemBytes(world), mine = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < Ticks; i++) Server.Tick(world);
-            long bytes = GC.GetTotalAllocatedBytes(precise: true) - before;
-            if (round > 0) allocated = Math.Min(allocated, bytes);
+            // The systems run here count in both: the sum is 0 only when nothing allocated.
+            allocated = GC.GetAllocatedBytesForCurrentThread() - mine + SystemBytes(world) - systems;
         }
         Console.Error.WriteLine($"steady state: {allocated} bytes allocated in {Ticks} ticks replayed");
         if (allocated == 0) return;
         Console.Error.WriteLine("error: a tick in steady state allocated");
         Environment.ExitCode = 1;
+    }
+
+    // What the systems allocated so far, on every thread that ran them or the chunks of their passes.
+    static long SystemBytes(World world)
+    {
+        long bytes = 0;
+        foreach (var system in world.Systems) bytes += system.Stats.TotalAllocated;
+        return bytes;
     }
 }

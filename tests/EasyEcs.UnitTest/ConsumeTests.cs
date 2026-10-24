@@ -217,7 +217,7 @@ public class ConsumeTests
             world.Update();
         }
 
-        Assert.That(Allocations.Least(() =>
+        Assert.That(Allocations.Of(() =>
         {
             for (int i = 0; i < 50; i++)
             {

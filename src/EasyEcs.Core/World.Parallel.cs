@@ -8,7 +8,8 @@ namespace EasyEcs;
 
 // Parallel work: the systems of one stage (ParallelSystems; non-conflicting SystemAccess) and the row chunks of a
 // parallel [ForEach] (ForEachParallel). Allocation-free, unlike Parallel.For (closure + state per call): the calling
-// thread works through the items together with up to MaxDegreeOfParallelism - 1 reusable thread-pool work items.
+// thread works through the items together with up to MaxDegreeOfParallelism - 1 reusable helpers, run by the process's
+// helper threads (Workers: a fixed set, not the thread pool, so steady state starts no thread).
 public sealed partial class World
 {
     private Runner _systemRunner;
@@ -19,7 +20,7 @@ public sealed partial class World
     /// <see cref="WorldOptions.MeasureSystems"/>): a measured run adds what grew during it to its system's
     /// <see cref="SystemStats.LastAllocated"/>. Per thread: two systems of a stage may run passes at once.
     /// </summary>
-    [ThreadStatic] private static long HelperAllocated;
+    [ThreadStatic] internal static long HelperAllocated;
 
     // Chunked jobs, one cached instance per job type (TypeIndex<ParallelWork, TWork>): allocated on first use only.
     private ParallelWork[] _parallelWork = [];
@@ -65,7 +66,7 @@ public sealed partial class World
         return (int)Math.Clamp((share + 63) & ~63L, 1024, ParallelChunkRows);
     }
 
-    /// <summary>Thread-pool work items a runner keeps: the calling thread is the other one.</summary>
+    /// <summary>Helpers a runner keeps (each run by one of the process's <see cref="Workers"/>): the calling thread is the other one.</summary>
     private int Helpers => Math.Max(1, _options.MaxDegreeOfParallelism) - 1;
 
     private unsafe void RunStage(SystemStage stage, long update)
@@ -194,7 +195,7 @@ public sealed partial class World
 
         /// <summary>
         /// Whether the next run wakes helpers, and whether its time counts (<see cref="Took"/>). Helpers pay only when
-        /// the work outlasts their start: a parked pool thread takes from a few to a few hundred microseconds to start
+        /// the work outlasts their start: a parked helper thread takes from a few to a few hundred microseconds to start
         /// (bare metal vs. a small VM) and burns about as much CPU on the way, so a small pass between server ticks is as
         /// fast on the caller alone, while back-to-back passes find the threads awake. Measured time decides: a run with
         /// helpers yields both its time and its items' summed thread time, so helpers are kept while they make a run at
@@ -289,7 +290,7 @@ public sealed partial class World
     /// Runs one piece of work at a time; items are claimed through <c>Claims.Cursor</c>: the run's epoch in the high
     /// 32 bits, the next item index in the low 32. A helper that starts late (after its run finished) sees another
     /// epoch and leaves without touching the next run's state. The caller always takes part, so a run completes even
-    /// when the thread pool is busy and no helper starts.
+    /// when the helper threads are busy and no helper starts.
     /// </summary>
     private sealed class Runner
     {
@@ -317,6 +318,7 @@ public sealed partial class World
         public Runner(int helpers, bool measure)
         {
             _measure = measure;
+            Workers.Ensure(helpers);
             _helpers = new Helper[helpers];
             for (int i = 0; i < helpers; i++) _helpers[i] = new Helper(this);
         }
@@ -330,6 +332,7 @@ public sealed partial class World
         {
             allocated = 0;
             if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return false;
+            ThreadSetup.CatchUp(); // the caller's per-thread state too, before it runs an item
             try
             {
                 allocated = Run(work, count);
@@ -366,15 +369,21 @@ public sealed partial class World
             Interlocked.Exchange(ref claims.Cursor, (long)epoch << 32);
 
             long start = Stopwatch.GetTimestamp();
-            int wanted = Math.Min(_helpers.Length, count - 1);
-            for (int i = 0; i < _helpers.Length && wanted > 0; i++)
+            int wanted = Math.Min(_helpers.Length, count - 1), queued = 0;
+            Helper first = null, last = null;
+            for (int i = 0; i < _helpers.Length && queued < wanted; i++)
             {
                 // A helper still queued from an earlier run is skipped (it will exit on its stale epoch).
-                if (Interlocked.CompareExchange(ref _helpers[i].Queued, 1, 0) != 0) continue;
-                _helpers[i].Epoch = epoch;
-                ThreadPool.UnsafeQueueUserWorkItem(_helpers[i], preferLocal: false);
-                wanted--;
+                var helper = _helpers[i];
+                if (Interlocked.CompareExchange(ref helper.Queued, 1, 0) != 0) continue;
+                helper.Epoch = epoch;
+                if (last == null) first = helper;
+                else last.Next = helper;
+                last = helper;
+                queued++;
             }
+
+            if (queued != 0) Workers.Post(first, last, queued);
 
             Work(epoch, false);
             // Every item is claimed: at most one item per helper is still running. Spin and yield (never sleep, never
@@ -449,12 +458,12 @@ public sealed partial class World
             Interlocked.Add(ref claims.Remaining, -done);
         }
 
-        private sealed class Helper(Runner runner) : IThreadPoolWorkItem
+        private sealed class Helper(Runner runner) : Workers.Item
         {
             public int Queued;
             public int Epoch;
 
-            public void Execute()
+            public override void Execute()
             {
                 int epoch = Epoch;
                 Volatile.Write(ref Queued, 0);

@@ -1275,7 +1275,7 @@ public class TileTests
         foreach (var world in new[] { heat, life })
         {
             for (int i = 0; i < 30; i++) world.Update(); // every thread gets its texture
-            Assert.That(Allocations.Least(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
+            Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
         }
     }
 }

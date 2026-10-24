@@ -198,6 +198,7 @@ public sealed partial class World
     private unsafe void Run(SystemSchedule group)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(World));
+        ThreadSetup.CatchUp(); // per-thread state another thread set up (a system may run here what ran on a helper)
         // No pass can run across an update: one still counted was interrupted by an exception. Close its tombstones.
         if (Volatile.Read(ref PassDepth) != 0) CompactArchetypes();
 

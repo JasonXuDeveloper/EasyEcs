@@ -323,6 +323,6 @@ public class LookupTests
         world.AddSystem<FindLogin>();
         world.AddSystem<CountFollowers>();
         for (int i = 0; i < 10; i++) world.Update();
-        Assert.That(Allocations.Least(() => { for (int i = 0; i < 200; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 200; i++) world.Update(); }), Is.Zero);
     }
 }

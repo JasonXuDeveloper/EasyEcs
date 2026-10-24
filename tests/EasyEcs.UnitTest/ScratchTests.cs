@@ -166,7 +166,7 @@ public class ScratchTests
         using var world = Numbered(World.ParallelChunkRows * 4);
         world.AddSystem<SumDigits>();
         for (int i = 0; i < 20; i++) world.Update(); // every helper thread has created its list
-        Assert.That(Allocations.Least(() => { for (int i = 0; i < 200; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 200; i++) world.Update(); }), Is.Zero);
     }
 
     [Test]

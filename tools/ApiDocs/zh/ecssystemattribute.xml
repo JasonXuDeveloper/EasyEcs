@@ -1,5 +1,5 @@
 <doc>
-  <member name="T:EasyEcs.EcsSystemAttribute" source="cf7b7d36323c">
+  <member name="T:EasyEcs.EcsSystemAttribute" source="0c02ef5bd521">
     <summary>
       声明一个系统：一个 <c>ref struct</c>，它的静态方法就是在 World 上运行的逻辑。系统永远不是对象（ref struct 不能装箱、存储或捕获）；
       World 把它的簿记作为数据保存（<see cref="T:EasyEcs.SystemHandle" />），生成器写出运行它的代码，由 World 直接调用。
@@ -8,7 +8,7 @@
       <see cref="T:EasyEcs.ForEachAttribute">[ForEach]</see> 方法；移除时或 World 释放时调用 <see cref="T:EasyEcs.OnDestroyAttribute">[OnDestroy]</see>
       方法。这些都在 <see cref="M:EasyEcs.World.Update" /> 里同步执行（<see cref="T:EasyEcs.UpdateInGroupAttribute`1">分组</see>里的系统是
       <see cref="M:EasyEcs.World.Update``1" />）：在调用线程上执行；打开 <see cref="P:EasyEcs.WorldOptions.ParallelSystems" /> 后，也可能和
-      <see cref="T:EasyEcs.SystemAccess">读写</see>不冲突的系统一起，在线程池线程上执行。</para>
+      <see cref="T:EasyEcs.SystemAccess">读写</see>不冲突的系统一起，在进程的辅助线程上执行。</para>
       <code>
       [EcsSystem, UpdateAfter&lt;Input&gt;]
       ref struct Movement

@@ -11,7 +11,7 @@ public class AllocationTests
     public void ParallelReductionsScratchAndLookupsDoNotAllocate()
     {
         // Several tables of chunks, several threads: the job copies kept per chunk, the thread's scratch, an index built
-        // before the stage. Warm-up lets every helper thread meet every method once.
+        // before the stage. Warm-up runs every method; what one thread sets up, every helper thread has.
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4, ParallelSystems = true });
         world.CreateEntities(new Entity[World.ParallelChunkRows * 3], new ReduceTests.Points(3));
         world.CreateEntities(new Entity[World.ParallelChunkRows], new ReduceTests.Points(1), new ReduceTests.Spot(1, 2));
@@ -25,7 +25,7 @@ public class AllocationTests
         world.AddSystem<ScratchTests.SumDigits>();
         world.AddSystem<LookupTests.SumFollowers>();
         for (int i = 0; i < 30; i++) world.Update();
-        Assert.That(Allocations.Least(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
         Assert.That(leader.Found.Followers, Is.EqualTo(World.ParallelChunkRows));
     }
 
@@ -483,7 +483,7 @@ public class AllocationTests
         world.CreateEntities(new Entity[World.ParallelChunkRows * 4], new ParallelTests.Counter(0), new ParallelTests.Seen(1));
         world.AddSystem<ParallelTests.ChunkedIncrement>();
         for (int i = 0; i < 10; i++) world.Update();
-        Assert.That(Allocations.Least(() => { for (int i = 0; i < 500; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 500; i++) world.Update(); }), Is.Zero);
     }
 
     [Test]
@@ -496,7 +496,7 @@ public class AllocationTests
         world.AddSystem<ParallelTests.ChunkedIncrement>();
         var moves = world.AddSystem<SystemTests.Moves>();
         for (int i = 0; i < 10; i++) world.Update();
-        Assert.That(Allocations.Least(() => { for (int i = 0; i < 500; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 500; i++) world.Update(); }), Is.Zero);
         Assert.That(moves.Stats.LastEntities, Is.EqualTo(100));
     }
 

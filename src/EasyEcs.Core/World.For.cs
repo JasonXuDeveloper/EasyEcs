@@ -31,7 +31,7 @@ public sealed partial class World
     /// Run <paramref name="job"/> over indexes 0 to <paramref name="count"/> - 1 on several threads: the range is cut
     /// into chunks (about four per thread, a multiple of 64 indexes between 1,024 and <see cref="ParallelChunkRows"/>; or
     /// <paramref name="chunkRows"/> rounded up to 64, for few heavy items) that the calling thread and up to
-    /// <see cref="WorldOptions.MaxDegreeOfParallelism"/> - 1 thread-pool threads claim one at a time, each running a copy
+    /// <see cref="WorldOptions.MaxDegreeOfParallelism"/> - 1 helper threads claim one at a time, each running a copy
     /// of the job (what Execute writes into its fields is not merged back). The same runner as the parallel
     /// <c>[ForEach]</c> passes: helpers are woken only while they pay, and fewer than two chunks, or a runner already
     /// busy, run on the calling thread. The job must not change the world's structure (a structural change throws) nor

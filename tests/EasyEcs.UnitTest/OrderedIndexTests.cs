@@ -121,6 +121,6 @@ public class OrderedIndexTests
         }
 
         Assert.That(Replay(), Is.EqualTo(100));
-        Assert.That(Allocations.Least(() => Replay()), Is.Zero);
+        Assert.That(Allocations.Of(() => Replay()), Is.Zero);
     }
 }

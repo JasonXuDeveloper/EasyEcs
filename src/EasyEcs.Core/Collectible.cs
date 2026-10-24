@@ -30,6 +30,7 @@ internal static class Collectible
         bool From(Type type) => Uses(type, assembly => AssemblyLoadContext.GetLoadContext(assembly) == context);
         TypeRegistry.Forget(From);
         ComponentInfo.Release(From);
+        ThreadSetup.Forget(From);
     }
 
     /// <summary>Whether <paramref name="type"/>, or a type it is built from (generic arguments, elements), is in an assembly <paramref name="of"/> matches.</summary>

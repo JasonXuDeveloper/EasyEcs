@@ -958,7 +958,10 @@ internal struct Masked;
 /// <summary>...and one that does not (a tile only sampled).</summary>
 internal struct Unmasked;
 
-/// <summary>A thread's texture and masks for a tile type: allocated on its first load for all the layers, then reused.</summary>
+/// <summary>
+/// A thread's texture and masks for a tile type: allocated on its first load for all the layers, then reused; the
+/// first thread to allocate them has every helper thread allocate its own (<see cref="ThreadSetup"/>).
+/// </summary>
 internal static class TileMemory<TCell, TTile> where TCell : unmanaged where TTile : struct, IComponent, ITileShape
 {
     [ThreadStatic] private static TCell[] t_texels;
@@ -992,14 +995,23 @@ internal static class TileMemory<TCell, TTile> where TCell : unmanaged where TTi
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static TCell[] Refill(TCell fill)
     {
-        var blank = t_blank ??= new TCell[TileLayout.Cells<TTile>()];
+        var blank = t_blank ?? CreateBlank();
         blank.AsSpan().Fill(fill);
         return blank;
+    }
+
+    private static int _blankSetUp, _texelsSetUp; // ThreadSetup steps added
+
+    private static TCell[] CreateBlank()
+    {
+        ThreadSetup.Add(ref _blankSetUp, static () => t_blank ??= new TCell[TileLayout.Cells<TTile>()], typeof(TileMemory<TCell, TTile>));
+        return t_blank ??= new TCell[TileLayout.Cells<TTile>()];
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static TCell[] Create(ref TCell[] texels, ref TileMask[] masks)
     {
+        ThreadSetup.Add(ref _texelsSetUp, static () => Texels(), typeof(TileMemory<TCell, TTile>));
         int layers = TileLayout.Layers<TTile>();
         masks = new TileMask[layers];
         return texels = GC.AllocateUninitializedArray<TCell>(layers * TileLayout.Layer<TTile>());
