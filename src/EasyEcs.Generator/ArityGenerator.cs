@@ -29,7 +29,62 @@ public sealed class ArityGenerator : IIncrementalGenerator
             spc.AddSource("World.Queries.g.cs", SourceText.From(Queries(), Encoding.UTF8));
             spc.AddSource("QueryItems.g.cs", SourceText.From(QueryItems(), Encoding.UTF8));
             spc.AddSource("Filters.g.cs", SourceText.From(Filters(), Encoding.UTF8));
+            spc.AddSource("World.Lambdas.g.cs", SourceText.From(Lambdas(), Encoding.UTF8));
         });
+    }
+
+    /// <summary>The most values a lambda pass takes from its caller (<c>world.ForEach(a, b, c, d, static (...) =&gt; ...)</c>).</summary>
+    internal const int MaxLambdaValues = 4;
+
+    // ---------------- World.ForEach(lambda) ----------------
+
+    /// <summary>
+    /// <c>World.ForEach</c> / <c>ForEachParallel</c> over a static lambda, with 0..<see cref="MaxLambdaValues"/> values of
+    /// the caller before it: the call sites the generator compiles into jobs (SystemGenerator.Lambdas.cs). The bodies
+    /// here run only where the generator did not, which the analyzer reports (EECS095).
+    /// </summary>
+    private static string Lambdas()
+    {
+        var sb = new StringBuilder(Header).Append("using System;\n\nnamespace EasyEcs;\n\npublic sealed partial class World\n{\n");
+        foreach (bool parallel in new[] { false, true })
+            for (int n = 0; n <= MaxLambdaValues; n++)
+            {
+                string name = parallel ? "ForEachParallel" : "ForEach";
+                string tps = n == 0 ? "" : $"<{List(n, i => $"TValue{i}")}>";
+                string values = string.Concat(Enumerable.Range(1, n).Select(i => $"TValue{i} value{i}, "));
+                string valueDocs = n == 0 ? ""
+                    : $"\n    /// {List(n, i => $"<typeparam name=\"TValue{i}\">The type of <paramref name=\"value{i}\"/>.</typeparam>", "\n    /// ")}\n    /// "
+                      + List(n, i => $"<param name=\"value{i}\">The {Ordinal(i)} value before the lambda, held by its job for the pass: a parameter of the lambda that is no component, singleton or parameter of EasyEcs, in order{(i == 1 ? "; with a change filter, the tick it looks back from (a <c>ulong</c>, which the lambda does not take)" : "")}.</param>", "\n    /// ");
+                sb.Append($$"""
+                        /// <summary>
+                        /// Runs <paramref name="body"/>, a static lambda, for every entity that has the components it takes{{(parallel ? ", its rows split into chunks run on several threads" : "")}}:
+                        /// <c>world.{{name}}({{(n == 0 ? "" : "dt, ")}}static (ref Position p, in Velocity v{{(n == 0 ? "" : ", float dt")}}) =&gt; p.Value += v.Value{{(n == 0 ? "" : " * dt")}})</c>.
+                        /// The lambda's parameters are those of a <see cref="ForEachAttribute"/> method (components by <c>ref</c> or
+                        /// <c>in</c>, singletons, <c>Reduce&lt;T&gt;</c>, <c>Mut&lt;T&gt;</c>, <c>Emit&lt;T&gt;</c>, <c>Scratch&lt;T&gt;</c>,
+                        /// <c>Lookup&lt;T&gt;</c>, the <c>Entity</c>; not <c>Maybe&lt;T&gt;</c>, tiles or spans) and the values before it,
+                        /// in order; its attributes are a [ForEach] method's filters (<c>[Without&lt;Dead&gt;]</c>). A change filter
+                        /// looks back from the tick passed first: <c>world.ForEach(since, [Changed&lt;Health&gt;] static (in Health h) =&gt; …)</c>.
+                        /// The EasyEcs generator compiles each call into the
+                        /// job a [ForEach] method gets (a vector loop where the body qualifies), so the call allocates nothing.
+                        /// Owner thread only.
+                        /// </summary>{{valueDocs}}
+                        /// <param name="body">A static lambda written at the call.</param>
+                        /// <exception cref="InvalidOperationException">The generator did not compile this call (EECS095 says why).</exception>
+                        public void {{name}}{{tps}}({{values}}Delegate body) => throw NotCompiled();
+
+
+                    """);
+            }
+
+        sb.Append("""
+                private static InvalidOperationException NotCompiled() => new(
+                    "World.ForEach / ForEachParallel(lambda) runs the job the EasyEcs generator writes at each call: this call has none (EECS095 says why).");
+            }
+
+            """);
+        return sb.ToString();
+
+        static string Ordinal(int i) => i switch { 1 => "first", 2 => "second", 3 => "third", _ => "fourth" };
     }
 
     // ---------------- WithAny / ChangedAny / RemovedAny ----------------
@@ -1354,7 +1409,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
         string ushorts = List(n, i => $"ushort b{i}");
         return $$"""
                 /// <summary>
-                /// <see cref="{{name}}{{{tps}}, TJob}"/> on several threads: the matching rows are cut into chunks (about four per
+                /// <see cref="{{name}}{{{tps}}, TJob}(ref TJob, in QueryFilter)"/> on several threads: the matching rows are cut into chunks (about four per
                 /// thread, a multiple of 64 rows, at most <see cref="ParallelChunkRows"/>; 16 for a job that merges, whatever
                 /// the threads, so its result does not depend on them; or <paramref name="chunkRows"/> rounded
                 /// up to 64, for few heavy rows: <c>[ForEach(Parallel = true, ChunkRows = n)]</c>) that the calling thread and up to
@@ -1384,7 +1439,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
                 }
 
-                /// <summary>The chunks of one <see cref="{{name}}Parallel{{{tps}}, TJob}"/> call: (table, first row) pairs.</summary>
+                /// <summary>The chunks of one <see cref="{{name}}Parallel{{{tps}}, TJob}(ref TJob, in QueryFilter, int)"/> call: (table, first row) pairs.</summary>
                 private sealed class {{name}}Chunks<{{tps}}, TJob> : ParallelWork
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>

@@ -363,6 +363,18 @@ public class CodeFixTests
     [TestCase("EECS075", "Make it static",
         "[EcsSystem] public ref struct S { void OnUpdate(World world) => world.GetSingleton<Clock>().Ticks++; }",
         "static void OnUpdate(World world)")]
+    [TestCase("EECS095", "Pass dt, n before a static lambda",
+        "public static class U { public static void F(World w, float dt) { int n = 2; w.ForEach((ref P p, in Q q) => p.V += (int)(q.V * dt) + n); } }",
+        "w.ForEach(dt, n, static (ref P p, in Q q, float dt, int n) => p.V += (int)(q.V * dt) + n);")]
+    [TestCase("EECS095", "Pass n before a static lambda",
+        "public static class U { public static void F(World w, int n) => w.ForEach([Without<Q>] (ref P p) => p.V += n); }",
+        "w.ForEach(n, [Without<Q>] static (ref P p, int n) => p.V += n);")]
+    [TestCase("EECS096", "Make it internal, so the body is copied",
+        "public static class U { private static int Step = 2; public static void F(World w) => w.ForEach(static (ref P p) => p.V += Step); }",
+        "internal static int Step = 2;")]
+    [TestCase("EECS096", "Make it internal, so the body is copied",
+        "public static class U { static int Step() => 2; public static void F(World w) => w.ForEach(static (ref P p) => p.V += Step()); }",
+        "internal static int Step() => 2;")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
@@ -626,7 +638,7 @@ public class CodeFixTests
         var workspace = new AdhocWorkspace();
         var project = workspace.AddProject(ProjectInfo.Create(ProjectId.CreateNewId(), VersionStamp.Default, "Test", "Test", LanguageNames.CSharp,
             compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
-            parseOptions: CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview),
+            parseOptions: GeneratorTests.Parse, // the interceptors of lambda passes too
             metadataReferences: GeneratorTests.Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
             analyzerReferences: generate ? [new Generators()] : []));
         return workspace.AddDocument(project.Id, "Test.cs", SourceText.From(source));
