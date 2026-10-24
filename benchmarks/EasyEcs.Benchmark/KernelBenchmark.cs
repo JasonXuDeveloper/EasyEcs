@@ -15,7 +15,8 @@ namespace EasyEcs.Benchmark;
 /// method (<c>Generated</c>, Kernel.cs). <c>Step</c> computes (a clamp, a branch on random data); <c>Integrate</c> and
 /// <c>Count</c> stream memory (one float multiply-add, one int increment per row). <c>Move2</c> / <c>Move3</c> /
 /// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity: each field alike, a flat loop over the columns' lanes;
-/// <c>Move2HandCast</c> is the same by hand, the columns cast to floats), <c>Seek</c> (3 floats: a direction, its length, a
+/// <c>Move2HandCast</c> is the same by hand, the columns cast to floats; <c>Push</c> is Move2 assigned whole, <c>Move2Gaps</c>
+/// Move2 over a table whose every third row lacks the velocity: masked words of flat lanes), <c>Seek</c> (3 floats: a direction, its length, a
 /// division) and <c>Travel</c> (3 doubles) take components of several fields, which the vector loop splits into one
 /// vector per field (Interleaved), in a world of their own. <c>Clamp</c> (Math.Clamp by a singleton's bounds, checked
 /// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
@@ -38,7 +39,7 @@ public partial class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _fields, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger;
+    private World _world, _fields, _gaps, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger;
 
     [GlobalSetup]
     public void Setup()
@@ -59,6 +60,7 @@ public partial class KernelBenchmark
             _ledger.CreateEntity(new Ticks { Value = random.Next(int.MinValue, int.MaxValue) }, new Balance { Value = random.NextInt64() });
 
         _holes = Holes(Entities, i => i % 3 == 0);
+        _gaps = Gaps(Entities);
         _halves = Holes(Entities, i => random.Next(2) == 0);
 
         _pixels = new World(new WorldOptions { InitialEntityCapacity = Entities });
@@ -89,6 +91,22 @@ public partial class KernelBenchmark
             _fields.CreateEntity(new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() }, new P3 { X = F(), Y = F(), Z = F() },
                 new V3 { X = F(), Y = F(), Z = F() }, new P4 { X = F(), Y = F(), Z = F(), W = F() }, new V4 { X = F(), Y = F(), Z = F(), W = F() },
                 new D3 { X = F(), Y = F(), Z = F() });
+    }
+
+    /// <summary>A world of P2 and V2 whose every third row lacks V2 (in place: a presence bit), so every word of rows is masked.</summary>
+    private static World Gaps(int entities)
+    {
+        var world = new World(new WorldOptions { InitialEntityCapacity = entities });
+        world.Reserve<P2, V2>(entities);
+        var random = new Random(4);
+        float F() => (float)random.NextDouble() * 10 - 5;
+        for (int i = 0; i < entities; i++)
+        {
+            var entity = world.CreateEntity(new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() });
+            if (i % 3 == 0) entity.Remove<V2>();
+        }
+
+        return world;
     }
 
     /// <summary>Healths that take no damage, a share <paramref name="rate"/> of them at 0: those take the cold branch every pass.</summary>
@@ -124,6 +142,7 @@ public partial class KernelBenchmark
     {
         _world.Dispose();
         _fields.Dispose();
+        _gaps.Dispose();
         _holes.Dispose();
         _halves.Dispose();
         _pixels.Dispose();
@@ -205,6 +224,20 @@ public partial class KernelBenchmark
 
     [Benchmark]
     public void Move2HandCast() => Kernels.Move2Cast(_fields);
+
+    // Move2 written as a whole assignment (new P2 { X = ..., Y = ... }), and over a table whose words are masked.
+    [Benchmark]
+    public void PushGenerated() => Kernels.Push(_fields);
+
+    [Benchmark]
+    public void Move2GapsScalar()
+    {
+        var job = new Move2Rows();
+        _gaps.ForEach<P2, V2, Move2Rows>(ref job);
+    }
+
+    [Benchmark]
+    public void Move2GapsGenerated() => Kernels.Move2(_gaps);
 
     [Benchmark]
     public void Move3Scalar()
@@ -667,6 +700,9 @@ public partial class KernelBenchmark
             p.X += v.X * Dt;
             p.Y += v.Y * Dt;
         }
+
+        [ForEach]
+        internal static void Push(ref P2 p, in V2 v) => p = new P2 { X = p.X + v.X * Dt, Y = p.Y + v.Y * Dt };
 
         [ForEach]
         internal static void Move3(ref P3 p, in V3 v)

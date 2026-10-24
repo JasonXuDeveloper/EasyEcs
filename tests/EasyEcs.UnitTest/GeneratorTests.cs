@@ -197,6 +197,7 @@ public class GeneratorTests
         public struct F : IComponent { public float V; }
         public struct H : IComponent { public float V; }
         public struct Two : IComponent { public float A, B; }
+        public record struct Duo(float A, float B) : IComponent;
         public struct Five : IComponent { public float A, B, C, D, E; }
         public struct Mixed : IComponent { public float A; public int B; }
         public struct D : IComponent { public double V; }
@@ -429,6 +430,11 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Two t, in Two u) { float d = u.A; t.A += d; t.B += u.B; }", false)] // a local
     [TestCase("[ForEach] static void A(ref Two t, in F f) { t.A += f.V; t.B += f.V; }", false)]            // one field and two
     [TestCase("[ForEach] static void A(ref Mixed m) { m.A += 1; m.B += 1; }", false)]                       // float and int
+    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t = new Two { A = t.A + u.A, B = t.B + u.B };", true)] // whole, field by field
+    [TestCase("[ForEach] static void A(ref Duo t, in Duo u) => t = new Duo(t.A + u.A, t.B + u.B);", true)]               // a record's constructor
+    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t = new Two { A = t.B + u.A, B = t.A + u.B };", false)] // whole, fields swapped
+    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t = new Two { A = t.A + u.A, B = t.B * u.B };", false)] // whole, other operations
+    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t = new Two { A = t.A + u.B, B = t.B + u.B };", false)] // whole, one field twice
     public void ComponentsWhoseFieldsMatchAreFlatLanes(string members, bool flat)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"[EcsSystem] public ref struct S {{ {members} }}"),
@@ -436,8 +442,9 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated.Contains("lanes = rows * 2;"), Is.EqualTo(flat), generated);
-        Assert.That(generated.Contains("for (nint last = rows - global::System.Numerics.Vector<"), Is.True, generated); // masked words, or the loop
-        if (flat) Assert.That(generated, Does.Contain("i /= 2;").And.Contain("Interleaved.Load2("), generated);   // the masked Execute deinterleaves
+        Assert.That(generated.Contains(flat ? "for (nint end = lanes - (lanes - i) % (global::System.Numerics.Vector<" : "for (nint last = rows - global::System.Numerics.Vector<"), Is.True, generated);
+        // The masked Execute takes the flat lanes too, each row's bit in its two lanes.
+        if (flat) Assert.That(generated, Does.Contain("i /= 2;").And.Contain("Interleaved.Lanes32In512(pass, (int)(i >> 1), 2);").And.Not.Contain("Interleaved.Load2("), generated);
     }
 
     // A parallel method's vector loop runs in each chunk's batch job: its singletons are the job's SingletonRefs, its
@@ -520,7 +527,7 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated, Does.Contain("lanes = rows * 2;").And.Contain("var __t1 = (__c1_0 + (__c2_0 * __u0));")
-            .And.Contain("var __t2 = (__c1_1 + (__c2_1 * __u0));"), generated); // the flat loop, then the masked one per lane
+            .And.Contain("Interleaved.Lanes32(pass, (int)(i >> 1), 2);").And.Not.Contain("__c1_1"), generated); // the flat loop, masked words too
     }
 
     // A wide component (a float, a bool, a byte and an int a row): the float lane gathered from 3 words per row by
