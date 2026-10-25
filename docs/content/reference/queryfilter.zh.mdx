@@ -147,10 +147,17 @@ public QueryFilter With<T>() where T : struct, IComponent;
 ### `WithAny` [#withany]
 
 ```csharp
-public QueryFilter WithAny<T>() where T : struct, IComponent;
+public QueryFilter WithAny<T1, T2>() where T1 : struct, IComponent where T2 : struct, IComponent;
+public QueryFilter WithAny<T1, T2, T3>() where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
+public QueryFilter WithAny<T1, T2, T3, T4>() where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
+public QueryFilter WithAny<T1, T2, T3, T4, T5>() where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
+public QueryFilter WithAny<T1, T2, T3, T4, T5, T6>() where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
+public QueryFilter WithAny<T1, T2, T3, T4, T5, T6, T7>() where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
+public QueryFilter WithAny<T1, T2, T3, T4, T5, T6, T7, T8>() where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
+public QueryFilter WithAny<T1, T2, T3, T4, T5, T6, T7, T8, T9>() where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
 ```
 
-要求至少拥有各个 `WithAny` 调用列出的组件之一：`WithAny<Burning>().WithAny<Poisoned>()` 匹配带 Burning、带 Poisoned 或两个都带的实体。
+Require at least one of `T1, T2`: `WithAny<Burning, Poisoned>()` matches entities with Burning, Poisoned or both. Every `WithAny` call of a filter joins one set, combined with the other filters with AND (one component alone is [`QueryFilter.With`](/zh/docs/reference/queryfilter#with)).
 
 ### `Without` [#without]
 

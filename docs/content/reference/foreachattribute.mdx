@@ -10,7 +10,7 @@ description: "Runs a static method of an [[EcsSystem]](/en/docs/reference/ecssys
 public sealed class ForEachAttribute : Attribute
 ```
 
-Runs a static method of an [[EcsSystem]](/en/docs/reference/ecssystemattribute) (or of any other type, through a generated entry point) for every entity matching its component parameters (and the [`WithAttribute`](/en/docs/reference/withattribute) / [`WithoutAttribute`](/en/docs/reference/withoutattribute) / [`WithAnyAttribute`](/en/docs/reference/withanyattribute) filters), each update, after its [[OnUpdate]](/en/docs/reference/onupdateattribute) method, in declaration order.
+Runs a static method of an [[EcsSystem]](/en/docs/reference/ecssystemattribute) (or of any other type, through a generated entry point) for every entity matching its component parameters (and the [`WithAttribute`](/en/docs/reference/withattribute) / [`WithoutAttribute`](/en/docs/reference/withoutattribute) / `[WithAny<T1, T2>]` filters), each update, after its `OnUpdate` method, in declaration order.
 
 Parameters: 1..9 components (`ref` to write, `in` to read, [`Mut`](/en/docs/reference/mut) to write some rows; or `Span<T>` / `ReadOnlySpan<T>` for a batch method that receives runs of rows), singletons (`ref` / `in`), and optionally [`Entity`](/en/docs/reference/entity) and [`World`](/en/docs/reference/world).
 
@@ -41,7 +41,7 @@ public ForEachAttribute();
 public int ChunkRows { get; init; }
 ```
 
-With [`ForEachAttribute.Parallel`](/en/docs/reference/foreachattribute#parallel): the rows a thread takes at a time, rounded up to a multiple of 64 (OpenMP's `schedule(dynamic, n)`). By default a chunk holds about a quarter of each thread's share of the rows, and at least 1,024 (4,096 when the method writes a tracked component), so a pass over a few hundred heavy rows (a chunk of terrain each, a path search each) runs on one thread; set the rows one thread should take at a time when one row costs microseconds. Smaller chunks cost a claim each, and chunks that share a 4,096-row block of change ticks share its summary (atomically). Default 0: chosen from the row count. Not without [`ForEachAttribute.Parallel`](/en/docs/reference/foreachattribute#parallel) and not below 0 (EECS054).
+With [`ForEachAttribute.Parallel`](/en/docs/reference/foreachattribute#parallel): the rows a thread takes at a time, rounded up to a multiple of 64 (OpenMP's `schedule(dynamic, n)`). By default the runtime chooses from the rows' cost, which each pass measures: about four chunks per thread, chunks of about 25 µs when rows are heavy (a few hundred rows of a chunk of terrain or a path search each spread over every thread), fewer chunks for a short pass; before the first pass, and for a method that merges per chunk ([`Reduce`](/en/docs/reference/reduce), [`Emit`](/en/docs/reference/emit): 16 chunks, so its result does not depend on timing), the row count decides. Set it only to override that. Smaller chunks cost a claim each, and chunks that share a 4,096-row block of change ticks share its summary (atomically). Default 0: chosen by the runtime. Not without [`ForEachAttribute.Parallel`](/en/docs/reference/foreachattribute#parallel) and not below 0 (EECS054).
 
 ### `FloatMode` [#floatmode]
 
@@ -50,6 +50,14 @@ public FloatMode FloatMode { get; init; }
 ```
 
 What a vector loop may change in floating-point results. [`FloatMode.Exact`](/en/docs/reference/floatmode#exact) keeps every result the method's bit for bit, so a float sum into a [`Reduce`](/en/docs/reference/reduce) stays one row at a time (EECS055 says so): the lanes of a vector loop each add their own rows, in another order. [`FloatMode.Fast`](/en/docs/reference/floatmode#fast) accepts that order: the sum of the same rows, rounded differently (not bit for bit the method's, and not the same across vector widths), and the vector approximations of `Sin`, `Cos`, `Exp`, `Log`, `Log2` and `Hypot` (within 1 or 2 ulp of the scalar functions). Integer sums and the Min / Max of any lane type are exact either way. Default [`FloatMode.Exact`](/en/docs/reference/floatmode#exact): the same results on every machine (each lane an IEEE operation).
+
+### `FusionMode` [#fusionmode]
+
+```csharp
+public FusionMode FusionMode { get; init; }
+```
+
+Whether the method shares one walk with the [ForEach] methods declared next to it in its system (pass fusion: each row loaded into cache once, the methods run on it in declaration order). [`FusionMode.Auto`](/en/docs/reference/fusionmode#auto) fuses consecutive methods when one walk gives the results of separate passes (the same filter and settings, no structural change, no read of other entities or of a singleton another method writes) and reports a near miss (EECS093, a message); [`FusionMode.Require`](/en/docs/reference/fusionmode#require) makes a method that does not share the walk of the method before it an error (EECS094); [`FusionMode.Off`](/en/docs/reference/fusionmode#off) gives the method a walk of its own. Default [`FusionMode.Auto`](/en/docs/reference/fusionmode#auto).
 
 ### `Parallel` [#parallel]
 

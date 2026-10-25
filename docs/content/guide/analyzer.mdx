@@ -1736,8 +1736,8 @@ cheaper write: suppress the warning there.
 writes it again.
 
 `ChunkRows` is the rows a thread of a [parallel method](/en/docs/guide/threading#chunk-rows) takes at a time: 0 lets
-the runtime choose from the row count, more sets it (rounded up to 64). A method without `Parallel = true` runs on one
-thread and has no chunks, and a negative count means nothing.
+the runtime choose from the rows' measured cost, more sets it (rounded up to 64). A method without `Parallel = true`
+runs on one thread and has no chunks, and a negative count means nothing.
 
 ```csharp tab="Reported" doccheck=expect-EECS054
 [EcsSystem]

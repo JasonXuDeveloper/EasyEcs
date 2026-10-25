@@ -1,5 +1,5 @@
 <doc>
-  <member name="T:EasyEcs.LookupKeyAttribute" source="0c79ae42cf20">
+  <member name="T:EasyEcs.LookupKeyAttribute" source="0d97919e2f2d">
     <summary>
       按它查找实体的键：World 用它给组件建索引（<see cref="T:EasyEcs.IIndexed`1" />），一个键可以对应多个实体（只对应一个时用
       <see cref="T:EasyEcs.UniqueKeyAttribute" />）。标在字段、属性或 record 的位置参数上，键就是这个成员
