@@ -1,11 +1,11 @@
 <doc>
-  <member name="T:EasyEcs.SystemHandle" source="a72f43eccfa6">
+  <member name="T:EasyEcs.SystemHandle" source="c20b30f71d9d">
     <summary>
       加进 World 的一个系统（<see cref="M:EasyEcs.World.AddSystem``1(System.Boolean)" />、<see cref="M:EasyEcs.World.System``1" />、
       <see cref="P:EasyEcs.World.Systems" />）：指向 World 里这个系统记录的小句柄，就像 <see cref="T:EasyEcs.Entity" /> 指向它的行。
       记录是 World 拥有的数据（启用、错误、tick、计数、统计）；不存在系统对象。系统被移除（或 World 释放）之后，句柄就失效了：
       <see cref="P:EasyEcs.SystemHandle.IsAlive" /> 为 false，其他成员抛出 <see cref="T:System.InvalidOperationException" />，即使 World
-      把这条记录复用给了另一个系统也一样。钩子（<see cref="T:EasyEcs.OnUpdateAttribute">[OnUpdate]</see> 等）可以接收它，读自己系统的记录。
+      把这条记录复用给了另一个系统也一样。钩子（<c>OnUpdate</c> 等）可以接收它，读自己系统的记录。
     </summary>
   </member>
   <member name="P:EasyEcs.SystemHandle.Enabled" source="59bb9d4493b4">
@@ -31,11 +31,11 @@
   <member name="P:EasyEcs.SystemHandle.Name" source="24bc0442c157">
     <summary>报告里显示的系统类型名（<c>Regen&lt;Health&gt;</c>）。</summary>
   </member>
-  <member name="P:EasyEcs.SystemHandle.RunCount" source="43cf2eea9ace">
+  <member name="P:EasyEcs.SystemHandle.RunCount" source="9e38d42810ed">
     <summary>
       系统在本次运行之前已经运行的次数（第一次运行时为 0；被 <see cref="T:EasyEcs.UpdateIntervalAttribute">[UpdateInterval]</see>
       跳过或禁用期间的运行不算，抛异常的那次算）。<c>[ForEach(Slices = N)]</c> 方法访问它的行的第 <c>RunCount % N</c> 片，所以
-      <see cref="T:EasyEcs.OnUpdateAttribute">[OnUpdate]</see> 方法能知道这次运行访问的是哪一片。
+      <c>OnUpdate</c> 方法能知道这次运行访问的是哪一片。
     </summary>
   </member>
   <member name="P:EasyEcs.SystemHandle.Stats" source="99c56f432239">

@@ -41,10 +41,10 @@
   <member name="M:EasyEcs.Prefab.Set``2(``0@,``1@)" source="39d45587aa6d">
     <summary>给配方添加 2 个组件，或替换它们的值。返回这个预制体（可以链式调用）。O(2)。</summary>
   </member>
-  <member name="M:EasyEcs.Prefab.SetBuffer``1(System.ReadOnlySpan{``0})" source="23d20e076855">
+  <member name="M:EasyEcs.Prefab.SetBuffer``1(System.ReadOnlySpan{``0})" source="d4c559cbafa8">
     <summary>
-      给预制体一个装着 <paramref name="elements" /> 的 <see cref="T:EasyEcs.DynamicBuffer`1" />，替换原来那个：每个实例都拿到自己的一份列表，
-      里面就是这些元素。返回预制体。O(n)。
+      给预制体一个装着 <paramref name="elements" /> 的 <see cref="T:EasyEcs.DynamicBuffer`1" />，替换原来那个：每个实例共享这个列表，
+      直到它写自己的缓冲，写入前先拿到自己的一份副本。返回预制体。O(n)。
     </summary>
   </member>
 

@@ -1,13 +1,13 @@
 
 <doc>
-  <member name="T:EasyEcs.SystemInfo" source="bd089dac9105">
+  <member name="T:EasyEcs.SystemInfo" source="6463354f9b4a">
     <summary>调度里的一个系统，以及它声明的数据（<see cref="T:EasyEcs.SystemAccess" />）。</summary>
     <param name="Name">系统类型的名字。</param>
     <param name="Reads">它的 [ForEach] 方法读的组件（<c>in</c> 参数、[Changed&lt;T&gt;] 的过滤条件）。</param>
     <param name="Writes">它的 [ForEach] 方法写的组件（<c>ref</c> 参数）。</param>
     <param name="ReadsSingletons">它读的单例。</param>
     <param name="WritesSingletons">它写的单例。</param>
-    <param name="RunsAlone">它可能碰任何数据（有 [OnUpdate] 方法、有 Entity 或 World 参数……）：永远不和别的系统共用一个阶段。</param>
+    <param name="RunsAlone">它可能碰任何数据（有 OnUpdate 方法、有 Entity 或 World 参数……）：永远不和别的系统共用一个阶段。</param>
     <param name="After">它为什么不在更早的阶段：紧挨在它前面的那个阶段里它必须排在后面的系统（第一个阶段为空）。</param>
   </member>
   <member name="P:EasyEcs.SystemInfo.After" source="d9abdbd0a7c3">
@@ -22,8 +22,8 @@
   <member name="P:EasyEcs.SystemInfo.ReadsSingletons" source="1e8d740925ec">
     <summary>它读的单例。</summary>
   </member>
-  <member name="P:EasyEcs.SystemInfo.RunsAlone" source="a948b55186e7">
-    <summary>它可能碰任何数据（有 [OnUpdate] 方法、有 Entity 或 World 参数……）：永远不和别的系统共用一个阶段。</summary>
+  <member name="P:EasyEcs.SystemInfo.RunsAlone" source="1d569e344dbe">
+    <summary>它可能碰任何数据（有 OnUpdate 方法、有 Entity 或 World 参数……）：永远不和别的系统共用一个阶段。</summary>
   </member>
   <member name="P:EasyEcs.SystemInfo.Writes" source="5241a1ada99f">
     <summary>它的 [ForEach] 方法写的组件（<c>ref</c> 参数）。</summary>
@@ -37,15 +37,20 @@
       或一次一行及其原因（"Spawn: scalar (it takes the Entity)"），即生成器的决定（EECS055 的原因）。
     </summary>
   </member>
-  <member name="M:EasyEcs.SystemInfo.#ctor(System.String,System.String[],System.String[],System.String[],System.String[],System.Boolean,EasyEcs.StageWait[])" source="bd089dac9105">
+  <member name="M:EasyEcs.SystemInfo.#ctor(System.String,System.String[],System.String[],System.String[],System.String[],System.Boolean,EasyEcs.StageWait[])" source="6463354f9b4a">
     <summary>调度里的一个系统，以及它声明的数据（<see cref="T:EasyEcs.SystemAccess" />）。</summary>
     <param name="Name">系统类型的名字。</param>
     <param name="Reads">它的 [ForEach] 方法读的组件（<c>in</c> 参数、[Changed&lt;T&gt;] 的过滤条件）。</param>
     <param name="Writes">它的 [ForEach] 方法写的组件（<c>ref</c> 参数）。</param>
     <param name="ReadsSingletons">它读的单例。</param>
     <param name="WritesSingletons">它写的单例。</param>
-    <param name="RunsAlone">它可能碰任何数据（有 [OnUpdate] 方法、有 Entity 或 World 参数……）：永远不和别的系统共用一个阶段。</param>
+    <param name="RunsAlone">它可能碰任何数据（有 OnUpdate 方法、有 Entity 或 World 参数……）：永远不和别的系统共用一个阶段。</param>
     <param name="After">它为什么不在更早的阶段：紧挨在它前面的那个阶段里它必须排在后面的系统（第一个阶段为空）。</param>
   </member>
+  <member name="P:EasyEcs.SystemInfo.FusedWith" source="26d2abcdb7a2">
+    <summary>
+      排在它后面、和它合成一次遍历的系统（遍历融合：两者共同过滤条件下的每行只为两者载入一次），两者都启用且到期时才合并；没有则为 null。
+      只有一个线程运行这个分组、并且 <see cref="P:EasyEcs.WorldOptions.MeasureSystems" /> 关闭时，系统才会融合。
+    </summary>
+  </member>
 </doc>
-

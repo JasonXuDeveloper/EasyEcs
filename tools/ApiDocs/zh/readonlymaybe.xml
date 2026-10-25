@@ -1,7 +1,7 @@
 <doc>
-  <member name="T:EasyEcs.ReadOnlyMaybe`1" source="ab9ddd914876">
+  <member name="T:EasyEcs.ReadOnlyMaybe`1" source="fc6a72371369">
     <summary>
-      <c>[ForEach]</c> 方法访问的实体上一个可选、只读的组件：<see cref="P:EasyEcs.ReadOnlyMaybe`1.Value" /> 是
+      <c>[ForEach]</c> 方法访问的实体上一个可选、只读的组件（就像 <c>ref</c> 旁边的 <c>in</c>）：<see cref="P:EasyEcs.ReadOnlyMaybe`1.Value" /> 是
       <c>ref readonly</c>，所以方法按 <typeparamref name="T" /> 的读者调度，被追踪的组件永远不打 tick；带索引的组件
       （<see cref="T:EasyEcs.IIndexed`1" />）也能这样接收，<see cref="T:EasyEcs.Maybe`1" /> 不行（EECS015：它的 ref
       可能背着索引改掉键）。查找方式和 <see cref="T:EasyEcs.Maybe`1" /> 一样：不做结构变更的方法每段行查一次列，否则通过实体查找。

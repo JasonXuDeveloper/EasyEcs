@@ -1,12 +1,11 @@
 
 
 <doc>
-  <member name="T:EasyEcs.ForEachAttribute" source="65ed01cf5b39">
+  <member name="T:EasyEcs.ForEachAttribute" source="b2ae308781df">
     <summary>
       对每个匹配组件参数（以及 <see cref="T:EasyEcs.WithAttribute`1" /> / <see cref="T:EasyEcs.WithoutAttribute`1" /> /
-      <see cref="T:EasyEcs.WithAnyAttribute`1" /> 过滤条件）的实体，执行 <see cref="T:EasyEcs.EcsSystemAttribute">[EcsSystem]</see> 的一个静态方法
-      （或者通过生成的入口点，执行任何其他类型的静态方法）。每次更新执行一次，在它的 <see cref="T:EasyEcs.OnUpdateAttribute">[OnUpdate]</see>
-      方法之后，按声明顺序。
+      <c>[WithAny&lt;T1, T2&gt;]</c> 过滤条件）的实体，执行 <see cref="T:EasyEcs.EcsSystemAttribute">[EcsSystem]</see> 的一个静态方法
+      （或者通过生成的入口点，执行任何其他类型的静态方法）。每次更新执行一次，在它的 <c>OnUpdate</c> 方法之后，按声明顺序。
       <para>参数：1 到 9 个组件（<c>ref</c> 表示写，<c>in</c> 表示读，<see cref="T:EasyEcs.Mut`1" /> 表示只写其中一部分行；
       按段接收行的批处理方法用 <c>Span&lt;T&gt;</c> / <c>ReadOnlySpan&lt;T&gt;</c>）、单例（<c>ref</c> / <c>in</c>），还可以加上
       <see cref="T:EasyEcs.Entity" /> 和 <see cref="T:EasyEcs.World" />。</para>
@@ -67,6 +66,14 @@
       <see cref="F:EasyEcs.FloatMode.Fast" /> 接受这种顺序：同样那些行的和，只是舍入不同（与方法本身不逐位相同，不同向量宽度之间也不相同），
       并接受 <c>Sin</c>、<c>Cos</c>、<c>Exp</c>、<c>Log</c>、<c>Log2</c> 和 <c>Hypot</c> 的向量近似（与标量函数相差 1 到 2 ulp 以内）。
       整数求和以及任何通道类型的 Min / Max 两种模式下都精确。默认 <see cref="F:EasyEcs.FloatMode.Exact" />：每台机器上结果都相同（每个通道都是一次 IEEE 运算）。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.ForEachAttribute.FusionMode" source="35d371cf624f">
+    <summary>
+      方法是否和系统里与它相邻声明的 [ForEach] 方法共用一次遍历（遍历融合：每行只载入缓存一次，几个方法按声明顺序在这一行上运行）。
+      <see cref="F:EasyEcs.FusionMode.Auto" />：一次遍历和分开遍历结果相同时（过滤条件和设置相同、没有结构变更、不读别的实体，也不读另一个方法写的单例），
+      融合相邻的方法，差一点就能融合时报告原因（EECS093，一条消息）；<see cref="F:EasyEcs.FusionMode.Require" />：方法没有和前一个方法共用遍历就报错
+      （EECS094）；<see cref="F:EasyEcs.FusionMode.Off" />：方法单独遍历。默认 <see cref="F:EasyEcs.FusionMode.Auto" />。
     </summary>
   </member>
 </doc>

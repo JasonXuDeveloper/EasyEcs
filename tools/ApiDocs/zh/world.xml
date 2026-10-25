@@ -49,11 +49,11 @@
       <c>GetOrAddX()</c>。
     </exception>
   </member>
-  <member name="M:EasyEcs.World.AddSystem``1(System.Boolean)" source="7f4e2a61acf7">
+  <member name="M:EasyEcs.World.AddSystem``1(System.Boolean)" source="74fa282b6a11">
     <summary>
       把系统 <typeparamref name="T" />（一个 <see cref="T:EasyEcs.EcsSystemAttribute">[EcsSystem]</see> ref struct）加到它的分组
       （<see cref="T:EasyEcs.UpdateInGroupAttribute`1" /> 指定的分组，没有就是默认分组），然后运行它的
-      <see cref="T:EasyEcs.OnCreateAttribute">[OnCreate]</see> 方法。一个系统在每个 World 里只能加一次：再加会抛异常。冷路径：
+      <c>OnCreate</c> 方法。一个系统在每个 World 里只能加一次：再加会抛异常。冷路径：
       分配它的记录和分组的新调度，划分阶段 O(系统数²)。
     </summary>
     <param name="changesFromNow">
@@ -130,9 +130,9 @@
       O(匹配的表数 + 行数)；一张表的行只搬一次，搬到带这个标签的表。只能在所有者线程调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.Dispose" source="0344323eac81">
+  <member name="M:EasyEcs.World.Dispose" source="aa55ff549cb8">
     <summary>
-      销毁所有系统（按相反顺序调用 [OnDestroy]），然后释放全部存储。即使某个系统的 [OnDestroy] 抛出异常，其余系统的 [OnDestroy]
+      销毁所有系统（按相反顺序调用 OnDestroy），然后释放全部存储。即使某个系统的 OnDestroy 抛出异常，其余系统的 OnDestroy
       也都会执行，存储也照样释放；在 <see cref="F:EasyEcs.SystemErrorPolicy.Throw" /> 下，最后重新抛出第一个异常。之后每个句柄都失效，
       每个结构变更都会抛出 <see cref="T:System.ObjectDisposedException" />。
     </summary>
@@ -300,9 +300,9 @@
   <member name="M:EasyEcs.World.RemoveSingleton``1" source="89c98c21f4b6">
     <summary>移除单例 <typeparamref name="T" />；没有添加过时返回 false。O(1)。</summary>
   </member>
-  <member name="M:EasyEcs.World.RemoveSystem``1" source="8b81ff4b4e2d">
+  <member name="M:EasyEcs.World.RemoveSystem``1" source="4c5fe337dc45">
     <summary>
-      移除系统 <typeparamref name="T" />（会运行它的 <see cref="T:EasyEcs.OnDestroyAttribute">[OnDestroy]</see> 方法）：World 里没有时返回 false。
+      移除系统 <typeparamref name="T" />（会运行它的 <c>OnDestroy</c> 方法）：World 里没有时返回 false。
       它的句柄随之失效。
     </summary>
   </member>

@@ -1,11 +1,12 @@
-<?xml version="1.0" encoding="utf-8"?>
+
 <doc>
-  <member name="T:EasyEcs.EntityRandom" source="19c5e29c54b2">
+  <member name="T:EasyEcs.EntityRandom" source="f5a02586ba32">
     <summary>
       <c>[ForEach]</c> 方法（包括并行方法）用的确定性随机数（cuRAND 的 Philox，一种基于计数器的生成器）：每个数都是种子、实体、tick
-      和流的纯函数，没有要推进的状态，所以每次运行、任何线程数、行以任何顺序运行，结果都一样。它是存放种子和 tick 的单例：
+      和流的纯函数，没有要推进的状态，所以每次运行、任何线程数、行以任何顺序运行，结果都一样。它是存放种子（和 tick，由 World 推进）的单例：
+      <c>world.SetEntityRandom(Seed: 42)</c>，之后
       <c>static void Wander(ref Velocity v, Entity entity, in EntityRandom random) =&gt; v.X = random.Range(entity.Id, 0,
-      -1f, 1f);</c>，推进模拟时钟的系统同时推进 <see cref="P:EasyEcs.EntityRandom.Tick" />。静态成员显式接收这四个输入（自己的种子、自己时钟的 tick）。
+      -1f, 1f);</c> 每次更新都抽到新的数。静态成员显式接收这四个输入（自己的种子、自己时钟的 tick）。
       <para>
       <c>stream</c> 区分同一个实体在同一个 tick 里的多次抽取：方法里每个调用点用自己的流（0、1、2……）。同样的四个输入得到同样的数，
       所以两个调用点用同一个流会抽到同一个数。
@@ -16,13 +17,19 @@
       </para>
     </summary>
     <param name="Seed">World 的种子：换一个种子，每个实体的序列都不同。</param>
-    <param name="Tick">这些数所属的模拟步：每一步推进一次。</param>
   </member>
   <member name="P:EasyEcs.EntityRandom.Seed" source="29983aa0217d">
     <summary>World 的种子：换一个种子，每个实体的序列都不同。</summary>
   </member>
-  <member name="P:EasyEcs.EntityRandom.Tick" source="fa3f8a8a5110">
-    <summary>这些数所属的模拟步：每一步推进一次。</summary>
+  <member name="P:EasyEcs.EntityRandom.Tick" source="2f1cebdeae3d">
+    <summary>
+      这些数所属的步：从添加这个单例起 <see cref="M:EasyEcs.World.Update" /> 调用的次数。World 在每次
+      <see cref="M:EasyEcs.World.Update" /> 开始、任何系统运行之前加一，所以每次更新都抽到新的数，不用自己写代码。
+      <see cref="M:EasyEcs.World.Update``1" /> 不动它：分组里的系统用上一次 <see cref="M:EasyEcs.World.Update" /> 的 tick 抽取，
+      所以两次更新之间运行的分组（每三个 tick 一次的同步）抽到的和那次更新一样；只用分组更新的 World，要么每个 tick 调用一次
+      <see cref="M:EasyEcs.World.Update" />（它的默认分组可以没有系统），要么用静态成员、传入自己的 tick 抽取。它和单例一起存档、
+      拍快照和恢复，所以加载或恢复后的 World 接着原来的序列抽。
+    </summary>
   </member>
   <member name="M:EasyEcs.EntityRandom.Bits(EasyEcs.EntityId,System.UInt32)" source="6d790572f301">
     <summary><paramref name="entity" /> 在这个 tick、流 <paramref name="stream" /> 上的 64 个随机位。O(1)，纯函数。</summary>

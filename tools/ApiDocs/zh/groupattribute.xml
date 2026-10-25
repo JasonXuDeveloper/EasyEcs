@@ -1,8 +1,10 @@
 <doc>
-  <member name="T:EasyEcs.GroupAttribute" source="abee7c537174">
+  <member name="T:EasyEcs.GroupAttribute" source="5784f8495bf1">
     <summary>
       World 按哪个成员把组件的表分组（<see cref="T:EasyEcs.IGroup" />）：<c>int</c>，或底层类型为 <c>int</c> 的枚举。
       生成器给这个 partial struct 加上 <c>IGroup</c>，并显式实现返回它的 <c>Group</c>。
+      只有调用了 <see cref="M:EasyEcs.World.GroupBy``1" /> 的 World 才按它给表分组；在成员上改用
+      <see cref="T:EasyEcs.GroupByAttribute">[GroupBy]</see>，每个 World 都会分组。
     </summary>
   </member>
 </doc>
