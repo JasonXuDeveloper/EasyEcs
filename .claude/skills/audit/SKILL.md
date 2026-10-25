@@ -46,6 +46,13 @@ what it left undone, which goes on the same list (nothing is dropped silently).
 - Docs edits from code audits stay minimal: XML docs with their zh entries and the `api.mdx` complexity row; the
   pages wait for the docs pass (the agent lists what they must say).
 - Each agent's definition of done is the `feature` skill (docs as to-dos until the docs pass).
+- At most three code agents at once (the owner's limit). Benchmarks run one at a time under the machine's lock
+  (`audit-perf`), and every build and test waits while one runs, so pair an agent that measures with agents that need
+  no BenchmarkDotNet (tests, analyzer, naming) instead of starting three that queue on the lock.
+- Tell each agent: never end its turn while its own background command (a test run, an A/B) still runs; wait for it
+  with Monitor or an until-loop. An agent that ends its turn early stalls until it is messaged again.
+- Two agents whose files overlap (a file both edit, such as `GeneratorTests.cs` or `Kernel.cs`) do not run at once;
+  a purely mechanical change to a shared file (a split, a rename) waits until the other branches merged.
 
 ## While they run
 
@@ -55,7 +62,9 @@ what it left undone, which goes on the same list (nothing is dropped silently).
 
 ## Triage and merge
 
-1. Read each report. Reject changes that widen the API without need or regress a benchmark.
+1. Read each report. Reject changes that widen the API without need or regress a benchmark. Read the diff of every
+   test an agent changed to make a flaky test pass: every assertion and every measured section must stay as it was;
+   only the measurement's setup may change, and the report must say why that removes only noise (D128 is the model).
 2. Merge one branch at a time onto the work branch (rebase it onto the tip first, then fast-forward); after each:
    `dotnet build -c Release` (0 warnings), `dotnet test`. A branch that changes a hot path is merged only after a
    quiet A/B against the tip (two rounds, copies as worktrees outside the repo, under `flock /tmp/bench.lock`, nothing

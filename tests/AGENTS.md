@@ -6,6 +6,10 @@ NUnit unit tests and the Native AOT check. Every bug fix adds a regression test 
 
 When you add, rename or delete a file here, update its line (`verify` checks every file is listed).
 
+An allocation check measures through `Allocations.Of(...)` or starts from `Allocations.Baseline()` (Fixtures.cs), never
+from a raw `GC.GetAllocatedBytesForCurrentThread()`: a background collection ending in the window adds the unused
+rest of the thread's allocation context to the count although nothing was allocated (D128).
+
 ```
 tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, Presence, Query, System (and stats),
                                ForEachSystem (and Slices), Singleton, Concurrency, Parallel, Runner, Run (entity.Run),

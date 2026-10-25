@@ -79,6 +79,8 @@ its own worktree.
      /tmp/bench.lock <cmd>`, so a stream of agents testing cannot starve a waiting benchmark. Builds also set
      `MSBUILDDISABLENODEREUSE=1 DOTNET_CLI_USE_MSBUILD_SERVER=0` and `-p:UseSharedCompilation=false` (no server left
      running to load the machine; `dotnet build-server shutdown` stops one);
+   - quote BenchmarkDotNet filters (`--filter '*Iterate*'`): an unquoted pattern expands into file names in the shell
+     and the run measures nothing;
    - the feature's benchmark plus WorldSimulation, BattleServer, MultiWorld and the neighbors; 0 B in steady state;
    - a runtime change (threads, memory, intrinsics) also works on every platform (`audit-core`, Platforms): measure on
      x64, check arm64, AOT and the single-threaded WebAssembly demo still run;

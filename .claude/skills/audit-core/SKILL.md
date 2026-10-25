@@ -35,7 +35,10 @@ AGENTS.md's engineering principles and rules apply (performance first, zero allo
   without a passing row jumps with `RowFilter.NextPassing`, a run of whole words with `WholeEnd`, a Changed filter's
   unwritten words with `NextWord`. A loop that tests every word costs a few rows in a large table as much as a scan
   (`SparseBenchmark.PassOverTheFew`).
-- **Threads**: synchronization is `System.Threading.Lock` or CAS, never `lock (object)` (D106); an atomic
+- **Threads**: synchronization is CAS, `SpinGate` or `System.Threading.Lock`, never `lock (object)` (D106). A section
+  a parallel pass's threads enter (the helpers' queue, pools they rent from) takes a `SpinGate`: a `Lock` allocates
+  its wait event on the thread that first waits past its spin, any time after warm-up (D128); `Lock` stays for the
+  rarely used registries. An atomic
   instruction only where another thread can really race (a plain write when the owner is alone, as
   `BlockTicks.Raise` does); per-thread state (`[ThreadStatic]`) does not allocate on a thread's first run after
   warm-up; parallel results are bit-identical at 1 and 4 threads (chunks, `Reduce<T>`, `Emit<T>` combine in chunk
