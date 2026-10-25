@@ -27,6 +27,14 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
       (implementation output, bound once) - after lookup gathers merge. G6 (C# 14 extension containers slow every
       bind) research only.
 
+- [ ] **Loads write each field into its name** (branch `research-copy-asm`: 1e21668 Kernel.cs, 0ff81cc 32-local test,
+      71f03f1 Move3Gaps benchmark). Root cause of D126's "copy changed the asm": the JIT inlines no method with more
+      than 32 IL locals; the copy took Move3's masked Execute to 36. Move3Gaps 100k -5.5 %, Move4 1k -8 %, others level;
+      WorldSimulation 100k and BattleServer means +2-4 % inside base's spread on a loaded machine. Gate: rerun those two
+      on a quiet machine (after the generator A/B), then merge with D126 rewritten (text in the branch report:
+      the root cause, the vmovaps cost, the numbers) and `generated-text.md` section 3 corrected. Nine jobs still over
+      32 locals (StepJob0 masked 34, CycleJob9 masked 33, GateJob26 / SeekJob14 40-42): WP0b.
+
 ## Next
 
 - [ ] **Analyzer and incremental generators by the official .NET guidance** (owner, 2026-10-25; phase 2 above is
