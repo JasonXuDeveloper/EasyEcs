@@ -16,7 +16,7 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                ForEntity, Consume, Fusion (fused walks against FusionMode.Off twins, the exclusions), Form (EECS080 / EECS084),
                                Changed (and Mut, ChangedAny), Removed (and the destroy log), Instantiate, DynamicBuffer,
                                Index (and unique keys), Tile, OrderedIndex, Relation, Hierarchy, TargetPolicy, Group, Cleanup,
-                               Disable, Bulk, Move, StructuralLoop (structural changes in vector loops against their scalar twins), Part (generated parts, EECS062-069), Snapshot, Serialization (and restart saves), Unload, Introspection
+                               Disable, Bulk, Move, StructuralLoop (structural changes in vector loops against their scalar twins), KernelLookup (vector loops reading other entities through Lookup<T> against their twins row by row), Part (generated parts, EECS062-069), Snapshot, Serialization (and restart saves), Unload, Introspection
                                (and Trim, DescribeSchedule), Generic, Allocation (0 B budget), Emit (and EECS092), HotCold (EECS091), LambdaPass (lambda passes, EECS095-097), View ([View] parameters, Mut fields, AsX, EECS053 through views, EECS098-101), PrefabDeclaration ([Prefab], EECS102), ForParallel, EntityRandom,
                                LaneMath (the math a vector loop lowers: integer division, a float divided by a power of two, Pow, the throwing
                                Abs / CopySign / Sign, FloatMode.Fast's forms; every 32-bit input under the explicit category Exhaustive),
