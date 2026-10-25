@@ -239,7 +239,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
         MixedBatch, NotParallel, WriteThroughReadOnly, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
         RemovedRequired, EntityInData, OrderCycle, OrderAcrossGroups, EntryPointCollision, Unnameable, FilterOutsideGroup, LocalForEach,
-        WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, PerEntityChange, CreateInLoop, QueryByHand,
+        WriteAccessOnlyReads, ViewFieldOnlyReads, UnusedParameter, RowLookup, Allocation, PerEntityChange, CreateInLoop, QueryByHand,
         GeneratedMember, UpdateInSystem, BadSlices, BadIndexedKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
         UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, ReductionOverwritten, ScalarLoop, NoVectorLoop,

@@ -99,7 +99,7 @@ public sealed partial class EasyEcsAnalyzer
                     var declaration = field.Symbol.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken).Parent as VariableDeclarationSyntax;
                     var fix = declaration is { Variables.Count: 1 } ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "RefReadOnly") : null;
                     string component = field.Component.Name;
-                    context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, field.Symbol.Locations.FirstOrDefault(), fix,
+                    context.ReportDiagnostic(Diagnostic.Create(ViewFieldOnlyReads, field.Symbol.Locations.FirstOrDefault(), fix,
                         $"Field '{field.Symbol.Name}' of view {view.Name} (ref {component})",
                         Symbols.Implements(field.Component, Symbols.TrackChanges)
                             ? $"every row a pass builds the view over is stamped as changed, so [Changed<{component}>] systems visit rows nobody changed"
