@@ -7,7 +7,7 @@ namespace EasyEcs.Demo;
 [EcsSystem]
 public ref struct BounceSystem
 {
-    [ForEach]
+    [ForEach(SimdMode = SimdMode.Off)]
     static void Bounce(Entity spark, ref Position p, ref Velocity v, in Arena arena)
     {
         bool hit = false;

@@ -89,7 +89,7 @@ public ref struct PhysicsSystem
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct GridSystem
 {
-    [ForEach, With<InChunk>, Changed<Position>]
+    [ForEach(SimdMode = SimdMode.Off), With<InChunk>, Changed<Position>]
     static void Track(Entity entity, in Position position)
     {
         entity.SetInChunkIfChanged(Terrain.ChunkOf(position.Value));

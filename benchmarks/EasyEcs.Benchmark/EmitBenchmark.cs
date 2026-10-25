@@ -103,13 +103,13 @@ public class EmitBenchmark
 
     public static class Strikes
     {
-        [ForEach(Parallel = true)]
+        [ForEach(Parallel = true, SimdMode = SimdMode.Off)]
         public static void Emitting(in Attack attack, in Aim aim, Emit<Hit> hits)
         {
             if (attack.Range < 25) hits.Add(new Hit(aim.Target, attack.Power));
         }
 
-        [ForEach]
+        [ForEach(SimdMode = SimdMode.Off)]
         public static void EmittingSerial(in Attack attack, in Aim aim, Emit<Hit> hits)
         {
             if (attack.Range < 25) hits.Add(new Hit(aim.Target, attack.Power));
