@@ -15,12 +15,16 @@ namespace EasyEcs.Benchmark;
 /// method (<c>Generated</c>, Kernel.cs). <c>Step</c> computes (a clamp, a branch on random data); <c>Integrate</c> and
 /// <c>Count</c> stream memory (one float multiply-add, one int increment per row). <c>Move2</c> / <c>Move3</c> /
 /// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity: each field alike, a flat loop over the columns' lanes;
-/// <c>Move2HandCast</c> is the same by hand, the columns cast to floats), <c>Seek</c> (3 floats: a direction, its length, a
+/// <c>Move2HandCast</c> is the same by hand, the columns cast to floats; <c>Push</c> is Move2 assigned whole, <c>Move2Gaps</c>
+/// Move2 over a table whose every third row lacks the velocity: masked words, which split the fields), <c>Seek</c> (3 floats: a direction, its length, a
 /// division) and <c>Travel</c> (3 doubles) take components of several fields, which the vector loop splits into one
 /// vector per field (Interleaved), in a world of their own. <c>Clamp</c> (Math.Clamp by a singleton's bounds, checked
 /// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
 /// pattern) are the calls, conversions and masks a vector loop takes. <c>Tally</c> (an int count, sum, Min and Max) and
-/// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order.
+/// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order;
+/// <c>Cycle</c> writes heat on both branches and counts one, over whole vectors and over <c>_holes</c> (masked words).
+/// <c>Ratio</c> divides ints by constants (8: shifts, 7: doubles) and a float by 2 (a product), <c>Share</c> by a divisor
+/// per row (doubles), over <c>_ratios</c>.
 /// <c>Wealth</c> sums the int column into a long and <c>Accrue</c> adds it to a column of longs: lanes of two sizes, each
 /// long a pair of vectors per step (Kernel.Pairs.cs).
 /// <c>Optional</c> takes a <c>Maybe&lt;Mass&gt;</c> over <c>_holes</c> (a lane mask of the rows that have it).
@@ -38,7 +42,7 @@ public partial class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _fields, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger;
+    private World _world, _ratios, _fields, _fragments, _gaps, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger;
 
     [GlobalSetup]
     public void Setup()
@@ -58,7 +62,15 @@ public partial class KernelBenchmark
         for (int i = 0; i < Entities; i++)
             _ledger.CreateEntity(new Ticks { Value = random.Next(int.MinValue, int.MaxValue) }, new Balance { Value = random.NextInt64() });
 
+        _ratios = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _ratios.Reserve<Ticks, Den, Heat>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _ratios.CreateEntity(new Ticks { Value = random.Next(-1_000_000, 1_000_000) }, new Den { Value = random.Next(1, 100) * (random.Next(2) * 2 - 1) },
+                new Heat { Value = (float)random.NextDouble() * 200 - 50 });
+
         _holes = Holes(Entities, i => i % 3 == 0);
+        _fragments = Fragments();
+        _gaps = Gaps(Entities);
         _halves = Holes(Entities, i => random.Next(2) == 0);
 
         _pixels = new World(new WorldOptions { InitialEntityCapacity = Entities });
@@ -89,6 +101,65 @@ public partial class KernelBenchmark
             _fields.CreateEntity(new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() }, new P3 { X = F(), Y = F(), Z = F() },
                 new V3 { X = F(), Y = F(), Z = F() }, new P4 { X = F(), Y = F(), Z = F(), W = F() }, new V4 { X = F(), Y = F(), Z = F(), W = F() },
                 new D3 { X = F(), Y = F(), Z = F() });
+    }
+
+    /// <summary>
+    /// A fragmented world: 1,000 tables of 5 to 20 rows (Heat, Speed, P2, V2, P3, V3 and the tags of the table's number),
+    /// so most rows are a run's last rows, after its last whole vector.
+    /// </summary>
+    private static World Fragments()
+    {
+        var world = new World();
+        var random = new Random(5);
+        float F() => (float)random.NextDouble() * 10 - 5;
+        for (int table = 0; table < 1000; table++)
+        {
+            world.Reserve<Heat, Speed, P2, V2, P3, V3>(5 + table % 16);
+            for (int row = 0; row < 5 + table % 16; row++)
+            {
+                var e = world.CreateEntity(new Heat { Value = F() }, new Speed { Value = F() }, new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() },
+                    new P3 { X = F(), Y = F(), Z = F() }, new V3 { X = F(), Y = F(), Z = F() });
+                if ((table & 1) != 0) e.Set(new Tag0());
+                if ((table & 2) != 0) e.Set(new Tag1());
+                if ((table & 4) != 0) e.Set(new Tag2());
+                if ((table & 8) != 0) e.Set(new Tag3());
+                if ((table & 16) != 0) e.Set(new Tag4());
+                if ((table & 32) != 0) e.Set(new Tag5());
+                if ((table & 64) != 0) e.Set(new Tag6());
+                if ((table & 128) != 0) e.Set(new Tag7());
+                if ((table & 256) != 0) e.Set(new Tag8());
+                if ((table & 512) != 0) e.Set(new Tag9());
+            }
+        }
+
+        return world;
+    }
+
+    public struct Tag0 : IComponent;
+    public struct Tag1 : IComponent;
+    public struct Tag2 : IComponent;
+    public struct Tag3 : IComponent;
+    public struct Tag4 : IComponent;
+    public struct Tag5 : IComponent;
+    public struct Tag6 : IComponent;
+    public struct Tag7 : IComponent;
+    public struct Tag8 : IComponent;
+    public struct Tag9 : IComponent;
+
+    /// <summary>A world of P2 and V2 whose every third row lacks V2 (in place: a presence bit), so every word of rows is masked.</summary>
+    private static World Gaps(int entities)
+    {
+        var world = new World(new WorldOptions { InitialEntityCapacity = entities });
+        world.Reserve<P2, V2>(entities);
+        var random = new Random(4);
+        float F() => (float)random.NextDouble() * 10 - 5;
+        for (int i = 0; i < entities; i++)
+        {
+            var entity = world.CreateEntity(new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() });
+            if (i % 3 == 0) entity.Remove<V2>();
+        }
+
+        return world;
     }
 
     /// <summary>Healths that take no damage, a share <paramref name="rate"/> of them at 0: those take the cold branch every pass.</summary>
@@ -124,6 +195,7 @@ public partial class KernelBenchmark
     {
         _world.Dispose();
         _fields.Dispose();
+        _gaps.Dispose();
         _holes.Dispose();
         _halves.Dispose();
         _pixels.Dispose();
@@ -149,6 +221,27 @@ public partial class KernelBenchmark
 
     [Benchmark]
     public void StepGenerated() => Kernels.Step(_world);
+
+    // Integer division: by constants (shifts for 8, doubles for 7) and by a divisor per row (doubles, its 0 lanes guarded).
+    [Benchmark]
+    public void RatioScalar()
+    {
+        var job = new RatioRows();
+        _ratios.ForEach<Ticks, Den, Heat, RatioRows>(ref job);
+    }
+
+    [Benchmark]
+    public void RatioGenerated() => Kernels.Ratio(_ratios);
+
+    [Benchmark]
+    public void ShareScalar()
+    {
+        var job = new ShareRows();
+        _ratios.ForEach<Ticks, Den, ShareRows>(ref job);
+    }
+
+    [Benchmark]
+    public void ShareGenerated() => Kernels.Share(_ratios);
 
     [Benchmark]
     public void HolesScalar()
@@ -206,6 +299,20 @@ public partial class KernelBenchmark
     [Benchmark]
     public void Move2HandCast() => Kernels.Move2Cast(_fields);
 
+    // Move2 written as a whole assignment (new P2 { X = ..., Y = ... }), and over a table whose words are masked.
+    [Benchmark]
+    public void PushGenerated() => Kernels.Push(_fields);
+
+    [Benchmark]
+    public void Move2GapsScalar()
+    {
+        var job = new Move2Rows();
+        _gaps.ForEach<P2, V2, Move2Rows>(ref job);
+    }
+
+    [Benchmark]
+    public void Move2GapsGenerated() => Kernels.Move2(_gaps);
+
     [Benchmark]
     public void Move3Scalar()
     {
@@ -215,6 +322,23 @@ public partial class KernelBenchmark
 
     [Benchmark]
     public void Move3Generated() => Kernels.Move3(_fields);
+
+    // The fragmented world (its own size, whatever Entities says): one float, three floats split, two floats flat.
+    [Benchmark]
+    public void FragmentsIntegrateScalar()
+    {
+        var job = new IntegrateRows();
+        _fragments.ForEach<Heat, Speed, IntegrateRows>(ref job);
+    }
+
+    [Benchmark]
+    public void FragmentsIntegrateGenerated() => Kernels.Integrate(_fragments);
+
+    [Benchmark]
+    public void FragmentsMove3Generated() => Kernels.Move3(_fragments);
+
+    [Benchmark]
+    public void FragmentsMove2Generated() => Kernels.Move2(_fragments);
 
     [Benchmark]
     public void Move4Scalar()
@@ -286,6 +410,29 @@ public partial class KernelBenchmark
 
     [Benchmark]
     public void TallyGenerated() => Kernels.Tally(_world);
+
+    // Writes and a count under a condition, over whole vectors and over masked words (every third row lacks Mass).
+    [Benchmark]
+    public void CycleScalar()
+    {
+        var job = new CycleRows { Tally = new Reduce<Tally> { Value = Tally.Identity } };
+        _world.ForEachBatch<Heat, Mass, CycleRows>(ref job);
+        _world.GetOrAddSingleton<Tally>() = job.Tally.Value;
+    }
+
+    [Benchmark]
+    public void CycleGenerated() => Kernels.Cycle(_world);
+
+    [Benchmark]
+    public void CycleHolesScalar()
+    {
+        var job = new CycleRows { Tally = new Reduce<Tally> { Value = Tally.Identity } };
+        _holes.ForEachBatch<Heat, Mass, CycleRows>(ref job);
+        _holes.GetOrAddSingleton<Tally>() = job.Tally.Value;
+    }
+
+    [Benchmark]
+    public void CycleHolesGenerated() => Kernels.Cycle(_holes);
 
     [Benchmark]
     public void EnergyScalar()
@@ -448,6 +595,20 @@ public partial class KernelBenchmark
         static int IForEach<Balance, Ticks>.WriteMask => 1;
     }
 
+    private struct CycleRows : IForEachBatch<Heat, Mass>
+    {
+        public Reduce<Tally> Tally;
+
+        public void Execute(EntitySpan entities, Span<Heat> heat, Span<Mass> mass)
+        {
+            var tally = Tally;
+            for (int i = 0; i < heat.Length; i++) Kernels.Cycle(ref heat[i], in mass[i], ref tally);
+            Tally = tally;
+        }
+
+        static int IForEachBatch<Heat, Mass>.WriteMask => 1;
+    }
+
     /// <summary>A float sum: vectorized only under FloatMode.Fast, since one sum per lane rounds in another order.</summary>
     public partial struct Energy : ISingletonComponent
     {
@@ -542,6 +703,7 @@ public partial class KernelBenchmark
 
     public struct Heat : IComponent { public float Value; }
     public struct Ticks : IComponent { public int Value; }
+    public struct Den : IComponent { public int Value; }
     public struct Speed : IComponent { public float Value; }
     public struct Mass : IComponent { public float Value; }
     public record struct Pull(float Value) : ISingletonComponent;
@@ -615,6 +777,18 @@ public partial class KernelBenchmark
         static int IForEach<Heat, Speed>.WriteMask => 1;
     }
 
+    private struct RatioRows : IForEach<Ticks, Den, Heat>, INoStructuralChanges
+    {
+        public void Execute(ref Ticks ticks, ref Den den, ref Heat heat) => Kernels.Ratio(ref ticks, in den, ref heat);
+        static int IForEach<Ticks, Den, Heat>.WriteMask => 5;
+    }
+
+    private struct ShareRows : IForEach<Ticks, Den>, INoStructuralChanges
+    {
+        public void Execute(ref Ticks ticks, ref Den den) => Kernels.Share(ref ticks, in den);
+        static int IForEach<Ticks, Den>.WriteMask => 1;
+    }
+
     private struct CountRows : IForEach<Ticks>, INoStructuralChanges
     {
         public void Execute(ref Ticks ticks) => Kernels.Count(ref ticks);
@@ -661,12 +835,39 @@ public partial class KernelBenchmark
         [ForEach]
         internal static void Count(ref Ticks ticks) => ticks.Value++;
 
+        // By constants: the quotient and remainder of 8 are shifts, of 7 a division of doubles; a float halved is a product.
+        [ForEach]
+        internal static void Ratio(ref Ticks ticks, in Den den, ref Heat heat)
+        {
+            ticks.Value = ticks.Value / 7 + ticks.Value % 8 + den.Value;
+            heat.Value = heat.Value / 2f + 1f;
+        }
+
+        // By a divisor per row (never 0 here; a 0 would send its vector's rows to the method).
+        [ForEach]
+        internal static void Share(ref Ticks ticks, in Den den) => ticks.Value = ticks.Value / den.Value + ticks.Value % den.Value * 1000 + 7919;
+
+        // Each branch writes heat, and one counts: masked words select their passing lanes inside these writes.
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void Cycle(ref Heat heat, in Mass mass, ref Reduce<Tally> tally)
+        {
+            if (heat.Value > 50f)
+            {
+                heat.Value -= 100f + mass.Value;
+                tally.Value.Count++;
+            }
+            else heat.Value += 30f;
+        }
+
         [ForEach]
         internal static void Move2(ref P2 p, in V2 v)
         {
             p.X += v.X * Dt;
             p.Y += v.Y * Dt;
         }
+
+        [ForEach]
+        internal static void Push(ref P2 p, in V2 v) => p = new P2 { X = p.X + v.X * Dt, Y = p.Y + v.Y * Dt };
 
         [ForEach]
         internal static void Move3(ref P3 p, in V3 v)

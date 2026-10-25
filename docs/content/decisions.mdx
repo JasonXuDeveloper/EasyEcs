@@ -128,6 +128,8 @@ after the change on the machine of the time; they are history, not the current r
 | [D120](#d120-feature-modules-and-data-events) | Not added: `[Feature]` modules and a generated reader of records; EECS092 reports records nothing clears |
 | [D122](#d122-marked-rows) | A structural change under a condition marks rows; the change is applied in bulk after the pass |
 | [D125](#d125-scheduler-tuning) | Passes that merge per chunk cut 16 chunks; the helpers' spin, the partitioner and the chunk size stay as they were |
+| [D126](#d126-loop-shape) | Vector loops: flat lanes for element-wise passes, the masked form starts from the rows that pass |
+| [D127](#d127-math-lowerings) | Vector loops lower integer division and the math .NET has vectors for, exactly unless `FloatMode.Fast` |
 | [D128](#d128-spin-gates-and-settled-measurements) | Parallel work's queue and pools take a spin gate; allocation tests measure once no background collection runs |
 
 The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
@@ -3186,6 +3188,116 @@ work is near, one spinning helper at a time, an affinity partitioner, and a tune
   floor of the default; a tuner that does would pick from rows (64 to 16,384) instead of chunks per thread, only for
   passes that do not merge (their boundaries must not move), and a pass that stamps a tracked component below 4,096
   rows opens its blocks first, as `ChunkRows` already does ([D67](#d67-chunk-rows)).
+
+## D126. Vector loops: flat lanes for element-wise passes, the masked form starts from the rows that pass [#d126-loop-shape]
+
+**Decision.** Two changes to the loops the generator writes from a `[ForEach]` method ([D90](#d90-vector-loops-reach)), and
+three measured and left out:
+
+- **Element-wise passes run over flat lanes.** A method whose every written field k depends only on field k of
+  inputs of the same layout (`p += v`, `p = new(p.X + v.X, p.Y + v.Y)`, `c *= s`) loads and stores the columns as
+  plain floats, `rows * fields` lanes, with no deinterleave. Masked words (a table with rows that lack a component)
+  still take the deinterleaving loop.
+- **The masked form starts its active mask from `pass`.** The rows of a masked word that pass are the first mask of
+  every condition chain, so each write is one `ConditionalSelect` against them instead of a select per condition and
+  one more per written column and accumulator at the end.
+- **Not changed: the permutation tables.** They stay `static readonly` vectors the JIT turns into constants.
+- **Not changed: the last rows of a run.** The rows after the last whole vector still call the method one by one.
+- **Not changed: the text of the loads.** A deinterleaving load still writes each field into a temporary
+  (`__s1_0`) copied into the field's name (`__c1_0`).
+
+**Why.**
+- **Flat lanes.** Two-float `Move` spent 6 `vpermt2ps` and 4 table loads per 16 rows on 2 adds. BDN, two rounds
+  (base / flat, ns): `KernelBenchmark.PushGenerated` 1,000 rows 174.4, 172.4 / 94.1, 98.6; 100,000 rows level
+  (memory-bound: 0.85, 0.96 and 1.01, 0.98 in the first runs).
+- **Masked words stay with the deinterleaving loop.** Splitting a masked word's flat lanes into per-field masks
+  (a lane mask widened per field) lost: `Move2GapsGenerated` 1.06, 1.19 at 1,000 rows and 1.09, 1.07 at 100,000.
+- **The active mask from `pass`.** The Tier1 code of `Cycle` (`Without<Dead>`, a masked word per table with dead
+  rows) lost 7 instructions and 6 of its 44 `vpternlogd` per vector. BDN, two rounds (base / new):
+  `CycleHolesGenerated` 1,000 rows 3,739.6, 3,673.9 / 2,718.3, 2,958.4 ns, 100,000 rows 377,475, 374,377 / 296,799,
+  269,758 ns; `WorldSimulationBenchmark` 100,000 entities 1,320.1, 1,419.2 / 1,243.3, 1,250.4 µs;
+  `MultiWorldBenchmark` 709.0, 675.9 / 629.6, 602.7 µs; `BattleServerBenchmark` 3,976, 4,130 / 3,911, 3,947 µs.
+  `Holes`, `Halves`, `Optional` and `Move2Gaps` level; 0 B.
+- **The tables are already loaded once per use, and must be.** In the Tier1 code each `vpermt2ps` / `vpermi2ps`
+  takes its table as `vmovups zmm, [rip+const]` inside the loop. Every two-source permute overwrites one of its
+  operands, so a table hoisted into a register would still be copied before each permute: the copy costs what the
+  load costs (an L1 hit, off the critical path). Passing the tables into the helpers as arguments loaded before the
+  loop changes nothing the JIT emits per vector.
+- **Naming the loads directly changed the machine code.** Writing a field into its name (`out Vector512<float>
+  __c1_0`, no copy) was meant to change only the text, and a cleanup ships only if the Tier1 code stays the same. It
+  did not: with PGO off (`DOTNET_TieredPGO=0`: with it on, Tier1 follows the profile each run collected) the runner of
+  `Move3` went from 934 to 1,095 instructions and 36 to 54 permutes, the job's masked form now inlined into it, while
+  `Cycle`, `Divide` and `Seven` were identical. Speed was level (`Move3Generated` 1,000 rows 152.1, 135.1 / 139.8,
+  130.2 ns, 100,000 rows 66.8, 66.3 / 68.7, 65.8 µs; `GeneratorBenchmark.EditMethodBody` 217.5, 219.4 / 208.0, 224.0
+  ms and 209.5, 208.3 / 212.4, 224.2 ms, within its ±25 to 35 ms error), so the text stays as it was.
+- **A masked vector for the last rows lost.** On AVX-512 the rows after the last whole `Vector512` ran as one vector
+  whose loads and stores were masked to them (`Avx512F.MaskLoad` / `MaskStore` under `Interleaved.Load` / `Load2..4`
+  with a row count). It won where the body is small and most rows are last rows: on a world of 1,000 tables of 5 to 20
+  rows (`KernelBenchmark.Fragments*`, four runs, base / tail, µs) one float 41.6, 42.4, 32.2, 43.0 / 27.5, 23.5, 21.5,
+  21.2. It lost where the body is large: `CycleGenerated` 1,000 rows 380, 385 / 567, 1,071 ns, `CycleHolesGenerated`
+  1,000 rows 2,713, 2,663 / 10,004, 4,479 ns and 100,000 rows 276, 258 / 423, 412 µs, three floats deinterleaved on
+  the fragmented world 54.2, 73.4, 61.5, 56.7 / 68.8, 71.4, 61.0, 70.7 µs, `PushGenerated` 1,000 rows 94.0, 91.4 /
+  105.6, 100.7 ns. The Tier1 code says why: the job's `Execute` grew past the inliner's budget, so the runner
+  (`World.Masked`) calls it per run, and per 64-row word in a masked table, instead of inlining it (`Cycle`'s runner went
+  from 199 vector instructions to 6 and 4 calls of `Execute`). A tail kept out of line would cost the call it saves;
+  the scalar rows stay.
+
+**Considered.**
+- **A tail only for bodies the runner still inlines**: the generator would need the JIT's inlining budget; the rows
+  it would save are a run's last few.
+- **A file-level alias** for `global::System.Runtime.Intrinsics.Vector512` and `Vector<T>`: the generic types need
+  one alias per closed type, and the loops name both widths; it would shorten the text, not the code.
+- **One body for both widths** (`Vector<T>` and `Vector512<T>` from one text): needs a generic vector abstraction
+  .NET 10 keeps internal (`ISimdVector`); the width the hardware lacks is removed at JIT time, so the copies cost
+  build output and IL, not instructions per vector.
+
+## D127. Vector loops lower integer division and the math .NET has vectors for, exactly unless `FloatMode.Fast` [#d127-math-lowerings]
+
+**Decision.** A `[ForEach]` method that divides integers, or calls math the vector loop lacked, gets a vector loop
+whose results are the scalar method's, bit for bit:
+
+- **Integer `/` and `%` by a constant.** A power of two is a shift (signed: rounded toward zero by adding the sign's
+  low bits first, as the C# operator does); 1 and -1 are the value or its negation. Any other constant, and a
+  divisor that varies per row, divide 32-bit lanes through `double` (`LaneMath.Quotient`): an int32 quotient computed
+  in double precision and truncated is exact (both operands are exact in 53 bits and the rounding error,
+  below 2^-21 / |y|, cannot cross an integer). 64-bit lanes take powers of two only.
+- **Lanes that would throw run the method.** A divisor of 0, `int.MinValue / -1`, `Math.Abs(int.MinValue)`,
+  `int.CopySign(int.MinValue, positive)`, `Math.Sign(NaN)` in a vector send that vector's rows to the method, which
+  throws as written; the rows before them keep the vector's results. A division behind `y != 0 &&` divides by 1 in
+  the lanes the guard leaves out.
+- **Floats.** A division by a power-of-two constant whose reciprocal is a float is a multiply (exact: both round the
+  same real number); `Pow(x, 1)` is `x` and `Pow(x, 0)` is 1 (NaN lanes run the method: the C runtime's `pow` returns
+  1 or NaN for NaN depending on the platform).
+- **`FloatMode.Fast` only** (results within 2 ulps, `Tan` within 4 or 1e-7): `Pow` by 2, 3, 4, -1, -2 and 0.5 as
+  products, a reciprocal and a square root; a division by any other constant as a multiply by its reciprocal;
+  `Log10`, `Tan`, `Sinh`, `Cosh` and `Tanh` of floats through .NET's vector `Log`, `Sin`, `Cos` and `Exp` in double
+  precision (`LaneMath`). Without it each is reported with its fix: "set FloatMode = FloatMode.Fast".
+- **Not lowered**: `Asin`, `Acos`, `Atan`, `Atan2`, `Cbrt`, `Pow` by other exponents, the hyperbolic functions of
+  doubles. .NET 10 has no vector form for them, and the generator writes no polynomial of its own: the reason says
+  so.
+
+**Why.**
+- **Exact by proof, then by test.** Each exact rewrite is checked against the scalar operation over every 32-bit input
+  (`LaneMathTests`, category `Exhaustive`, explicit: about 8 minutes in Release on 4 cores) and over a stride of
+  them with every edge by default. The exhaustive run found one Fast-mode difference: `x * x * x` overflows to
+  infinity where `MathF.Pow(x, 3)` rounds to `float.MaxValue`, 1 ulp apart.
+- **`pow` is not correctly rounded**, so `Pow(x, 2)` differs from `x * x` by 1 ulp on about 1.5 million floats, and
+  `Pow(x, 0.5)` from `Sqrt(x)` likewise: those belong to fast math. `Pow(x, -2)` is `(1 / x)^2`, not `1 / x^2`, which
+  broke the 2-ulp bound where `x^2` is subnormal; `Log10` of a float through `Log2(x) * c` was up to 3.4 ulps off,
+  through the double `Log` it is within the bound.
+- **BDN, two rounds** (base, where the methods run scalar / lowered, ns): `KernelBenchmark.RatioGenerated` (`/ 7`,
+  `% 8`, a float `/ 2f`) 1,000 rows 1,729, 1,764 / 746, 741, 100,000 rows 169,590, 170,118 / 72,353, 72,645;
+  `ShareGenerated` (a divisor per row) 1,000 rows 4,406, 4,293 / 2,497, 2,503, 100,000 rows 436,433, 436,991 /
+  257,962, 248,375. `BattleServerBenchmark` 4,115, 3,693 / 3,890, 3,757 µs; `LambdaPassBenchmark` and
+  `GeneratorBenchmark` level (`EditMethodBody` 248, 212 / 216, 213 ms and 213, 204 / 223, 185 ms); 0 B.
+
+**Considered.**
+- **A multiply-high by a magic number** for constants other than powers of two (what compilers emit for scalars):
+  AVX-512 has no 32 x 32 -> high 32 multiply of vectors, so it costs two `vpmuludq` and shuffles per vector against
+  one conversion pair and a `vdivpd`, for the same exact result. Not tried; the division already runs at 0.43 of
+  the scalar time.
+- **Polynomials for `Atan2`, `Cbrt` or general `Pow`**: our own approximations would be one more thing to prove on
+  every platform; the loop waits for .NET to ship them.
 
 ## D128. Parallel work's queue and pools take a spin gate; allocation tests measure once no background collection runs [#d128-spin-gates-and-settled-measurements]
 

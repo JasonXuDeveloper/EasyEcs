@@ -337,7 +337,7 @@ public class LambdaPassTests
     [Test]
     public async System.Threading.Tasks.Task AScalarBodyNamesItsReason()
     {
-        var diagnostics = await Rules("world.ForEach(static (ref P p) => p.V = System.Math.Clamp(p.V, 0, 9) % 7)");
+        var diagnostics = await Rules("world.ForEach(static (ref P p) => p.V = (int)System.MathF.Atan(p.V))");
         Assert.That(diagnostics.Select(d => d.Id), Is.EqualTo(new[] { "EECS097" }), Show(diagnostics));
         Assert.That(diagnostics[0].Severity, Is.EqualTo(Microsoft.CodeAnalysis.DiagnosticSeverity.Info));
     }

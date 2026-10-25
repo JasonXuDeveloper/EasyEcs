@@ -24,6 +24,10 @@ public record struct Far3 : IComponent { public double X, Y, Z; }
 public record struct Pace : IComponent { public double Value; }
 public record struct Cell2 : IComponent { public long X, Y; }
 public record struct Hash4 : IComponent { public uint A, B, C, D; }
+public record struct Locus2(float X, float Y) : IComponent;
+public record struct Shift2(float X, float Y) : IComponent;
+public record struct Hue4(float R, float G, float B, float A) : IComponent;
+public record struct Step2 : IComponent { public long X, Y; }
 
 /// <summary>Kernels written for one row; the generator runs them as Vector&lt;T&gt; loops (Kernel.cs).</summary>
 public static class Kernels
@@ -423,6 +427,23 @@ public static class PairKernels
 public static class FieldKernels
 {
     public const float Dt = 1f / 30;
+
+    // A component assigned whole, each field from the same field of the others: a flat loop, masked words included.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Push(ref Locus2 p, in Shift2 v) => p = new Locus2(p.X + v.X, p.Y + v.Y);
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Tint(ref Color4 c, in Hue4 h)
+    {
+        c = new Color4(MathF.Min(c.R + h.R * 0.5f, 1), MathF.Min(c.G + h.G * 0.5f, 1), MathF.Min(c.B + h.B * 0.5f, 1), MathF.Min(c.A + h.A * 0.5f, 1));
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Walk(ref Cell2 c, in Step2 s)
+    {
+        if (s.X > 0) c.X += s.X * 3; // wraps
+        if (s.Y > 0) c.Y += s.Y * 3;
+    }
 
     [ForEach]
     internal static void Drift(ref Spot2 p, in Drift2 v)
@@ -1287,6 +1308,55 @@ public class KernelTests
         CheckHoles(count, hole, (r, i) => new Spot3 { X = NextFloat(r, i), Y = NextFloat(r, i + 1), Z = NextFloat(r, i + 2) },
             (r, i) => new Drift3 { X = NextFloat(r, i + 3), Y = NextFloat(r, i + 4), Z = NextFloat(r, i + 5) },
             w => FieldKernels.Bounce(w, 0.25f), (ref Spot3 p, ref Drift3 v) => FieldKernels.Bounce(ref p, ref v, 0.25f));
+    }
+
+    /// <summary>
+    /// Methods with a flat loop (2 and 4 fields of 4 bytes, 2 of 8, written whole or field by field) in masked words,
+    /// which split their fields: the passing rows as the method computes them, the others as they were.
+    /// </summary>
+    [TestCaseSource(nameof(HoleCases))]
+    public void FlatMethodsKeepTheRowsAMaskedWordLeaves(string pattern, int count)
+    {
+        var hole = Holes.First(h => h.Name == pattern).Hole;
+        CheckHoles(count, hole, (r, i) => new Locus2(NextFloat(r, i), NextFloat(r, i + 1)), (r, i) => new Shift2(NextFloat(r, i + 2), NextFloat(r, i + 3)),
+            FieldKernels.Push, (ref Locus2 p, ref Shift2 v) => FieldKernels.Push(ref p, in v));
+        CheckHoles(count, hole, (r, i) => new Color4(NextFloat(r, i), NextFloat(r, i + 1), NextFloat(r, i + 2), NextFloat(r, i + 3)),
+            (r, i) => new Hue4(NextFloat(r, i + 4), NextFloat(r, i + 1), NextFloat(r, i + 2), NextFloat(r, i + 3)),
+            FieldKernels.Tint, (ref Color4 c, ref Hue4 h) => FieldKernels.Tint(ref c, in h));
+        CheckHoles(count, hole, (r, i) => new Cell2 { X = r.NextInt64(), Y = r.NextInt64() }, (r, i) => new Step2 { X = r.NextInt64() - long.MaxValue / 2, Y = r.NextInt64() - long.MaxValue / 2 },
+            FieldKernels.Walk, (ref Cell2 c, ref Step2 s) => FieldKernels.Walk(ref c, in s));
+    }
+
+    private static System.Collections.Generic.IEnumerable<TestCaseData> TailCases() =>
+        from count in Enumerable.Range(1, 40) from hole in new[] { "none", "every third" } select new TestCaseData(count, hole);
+
+    /// <summary>
+    /// The last rows of a run, every length from 1 to 40 (each count of rows after the last whole vector, at both
+    /// widths, run by the method after the vector loops): interleaved fields of 4 and 8 bytes, flat ones, pairs of 8-byte
+    /// lanes, masks and clamps, reductions, in tables whole and with rows that lack a component; every row as the method
+    /// leaves it.
+    /// </summary>
+    [TestCaseSource(nameof(TailCases))]
+    public void TheLastRowsOfEveryLengthAreTheMethodsRows(int count, string pattern)
+    {
+        Func<int, bool> hole = pattern == "none" ? _ => false : i => i % 3 == 0;
+        CheckHoles(count, hole, (r, i) => new Spot3 { X = NextFloat(r, i), Y = NextFloat(r, i + 1), Z = NextFloat(r, i + 2) },
+            (r, i) => new Drift3 { X = NextFloat(r, i + 3), Y = NextFloat(r, i + 4), Z = NextFloat(r, i + 5) },
+            w => FieldKernels.Seek(w, 4f), (ref Spot3 p, ref Drift3 v) => FieldKernels.Seek(ref p, ref v, 4f));
+        CheckHoles(count, hole, NextLevel, NextTally, MoreKernels.Masks, (ref Level l, ref Rank t) => MoreKernels.Masks(ref l, ref t));
+        var bounds = new Bounds(-5, 5);
+        CheckHoles(count, hole, NextLevel, NextTally, w => { w.SetBounds(bounds.Min, bounds.Max); MoreKernels.Clamp(w); },
+            (ref Level l, ref Rank t) => MoreKernels.Clamp(ref l, in t, in bounds));
+        CheckHoles(count, hole, (r, i) => new Far3 { X = NextDouble(r, i), Y = NextDouble(r, i + 1), Z = NextDouble(r, i + 2) },
+            (r, i) => new Pace { Value = NextDouble(r, i + 3) }, FieldKernels.Travel, (ref Far3 p, ref Pace v) => FieldKernels.Travel(ref p, in v));
+        CheckHoles(count, hole, (r, i) => new Locus2(NextFloat(r, i), NextFloat(r, i + 1)), (r, i) => new Shift2(NextFloat(r, i + 2), NextFloat(r, i + 3)),
+            FieldKernels.Push, (ref Locus2 p, ref Shift2 v) => FieldKernels.Push(ref p, in v));
+        CheckHoles(count, hole, (r, i) => new Color4(NextFloat(r, i), NextFloat(r, i + 1), NextFloat(r, i + 2), NextFloat(r, i + 3)),
+            (r, i) => new Hue4(NextFloat(r, i + 4), NextFloat(r, i + 1), NextFloat(r, i + 2), NextFloat(r, i + 3)),
+            FieldKernels.Tint, (ref Color4 c, ref Hue4 h) => FieldKernels.Tint(ref c, in h));
+        CheckHoles(count, hole, (r, i) => new Cell2 { X = r.NextInt64(), Y = r.NextInt64() }, (r, i) => new Step2 { X = r.NextInt64() - long.MaxValue / 2, Y = r.NextInt64() - long.MaxValue / 2 },
+            FieldKernels.Walk, (ref Cell2 c, ref Step2 s) => FieldKernels.Walk(ref c, in s));
+        if (pattern == "none") ReductionsMatchTheMethodBitForBit(count);
     }
 
     /// <summary>A Math.Clamp that throws in a masked word throws for the row that has it, after the passing rows before it.</summary>

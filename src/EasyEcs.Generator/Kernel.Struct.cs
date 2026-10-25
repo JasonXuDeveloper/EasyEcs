@@ -142,7 +142,7 @@ internal sealed partial class Kernel
             }
             var assigned = Assigns(ctor);
             for (int i = 0; i < ctor.Parameters.Length; i++)
-                if (assigned[i] is { } member) Set(lanes, paths, [member], ValueOf(Arg(i)), creation);
+                if (assigned[i] is { } member && Reaches(paths, [member])) Set(lanes, paths, [member], ValueOf(Arg(i)), creation);
         }
         if (creation.Initializer != null) Initialize(lanes, paths, creation.Initializer);
         return lanes;
@@ -155,9 +155,16 @@ internal sealed partial class Kernel
         {
             if (init is not ISimpleAssignmentOperation { Target: var target, Value: var value } || Chain(target) is not (IInstanceReferenceOperation, { Length: > 0 } members))
                 throw Not(init);
-            Set(lanes, paths, members, ValueOf(value), init);
+            if (Reaches(paths, members)) Set(lanes, paths, members, ValueOf(value), init);
         }
     }
+
+    /// <summary>
+    /// Whether the members <paramref name="members"/> hold the lane a flat loop's field translates (every lane outside
+    /// one): an argument or initializer of another field is left out, not translated (it reads that field).
+    /// </summary>
+    private bool Reaches(IFieldSymbol[][] paths, ISymbol[] members) =>
+        _flat < 0 || paths[_flat].Length >= members.Length && Enumerable.Range(0, members.Length).All(k => Is(members[k], paths[_flat][k]));
 
     /// <summary>Lanes under the members <paramref name="members"/> set to <paramref name="value"/>.</summary>
     private void Set(string?[] lanes, IFieldSymbol[][] paths, ISymbol[] members, string?[] value, IOperation op)

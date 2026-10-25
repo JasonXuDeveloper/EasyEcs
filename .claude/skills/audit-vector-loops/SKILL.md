@@ -76,15 +76,19 @@ changes nothing and cannot fail:
   cheaper vector operations is exact only if it matches the scalar result for every input, checked exhaustively over
   all 2^32 floats (and sampled doubles) against the runtime the user runs. The C runtime's `pow` is not correctly
   rounded, so `MathF.Pow(x, 2)` differs from `x * x` by 1 ulp on about 1.5M floats (likewise `Pow(x, 0.5)` against
-  `Sqrt`, `Pow(x, -1)` against `1 / x`; `Pow(x, 0)` is NaN for signaling NaNs): Pow rewrites belong to fast math
-  only. Exact by default: `Pow(x, 1)`; a float division by a power-of-two constant as a multiply by its reciprocal;
-  integer division and `%` (by a constant: shifts or a multiply-high; by any divisor: through `double`, which is exact
-  for 32-bit ints since |x| < 2^53, with the lanes that would throw, 0 or MinValue / -1, sent to the method as
-  `Clamp` does); integer `Abs` / `CopySign` / `Math.Sign` with the throwing lanes guarded the same way. Fast math
-  only: `Pow` by a small integer or 0.5, division by any other constant, `Log10`, `Tan`, `Sinh` / `Cosh` / `Tanh`
-  through .NET's vector `Exp` / `Log` / `Sin` / `Cos`. Never: functions .NET has no vector form for written as our own
-  polynomials (`Atan2`, `Cbrt`, general `Pow`). Uniform arguments already need none of this: the scalar call runs
-  once per pass.
+  `Sqrt`, `Pow(x, -1)` against `1 / x`; `Pow(x, 0)` is NaN for signaling NaNs): Pow rewrites belong to fast math only.
+  `Pow(x, 1)` / `Pow(x, 0)` send NaN lanes to the method (the C runtime's `pow` of NaN differs between platforms).
+  Exact by default: `Pow(x, 1)`; a float division by a power-of-two constant as a multiply by its reciprocal; integer
+  division and `%` (by a power of two: shifts, any lane size; by another constant or any divisor: through `double` on
+  32-bit lanes, `LaneMath.Quotient`, exact since both operands fit 53 bits; 64-bit lanes stay scalar; the lanes that
+  would throw, 0 or MinValue / -1, are sent to the method as `Clamp` does); integer `Abs` / `CopySign` / `Math.Sign`
+  with the throwing lanes guarded the same way. Fast math only: `Pow` by a small integer or 0.5, division by any other
+  constant, `Log10`, `Tan`, `Sinh` / `Cosh` / `Tanh` through .NET's vector `Exp` / `Log` / `Sin` / `Cos` in double
+  precision (`LaneMath`; `Log2(x) * c` was 3.4 ulps off, `Pow(x, -2)` is `(1 / x)^2`: `1 / (x * x)` broke the bound
+  where `x * x` is subnormal). The exhaustive sweeps (`LaneMathTests`, category `Exhaustive`) take about 8 minutes in
+  Release on 4 cores and far longer in Debug: run them with `-c Release` after any change to a lowering (D127). Never:
+  functions .NET has no vector form for, written as our own polynomials (`Atan2`, `Cbrt`, general `Pow`). Uniform
+  arguments already need none of this: the scalar call runs once per pass.
 
 ## Reasons users can fix
 
@@ -121,20 +125,29 @@ next to the generated text, and asks per loop: how many instructions per vector,
 computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
 
 - **Copies in the text are free, shuffles are not**: `var __c = __s;` and `__t` temporaries for a whole-value
-  assignment vanish (the JIT copy-propagates them). What costs is deinterleaving: `Move` (`position += velocity`, two
-  floats each) spends 6 `vpermt2ps` and 4 permutation-table loads per 16 rows on 2 adds. A pass whose every write
-  field k depends only on field k of inputs with the same layout (element-wise: `+=`, `*= scalar`, `Lerp`) runs over
-  the flattened floats with no deinterleave; deinterleave only when fields mix (`x * x + y * y`).
-- **Constants the JIT does not hoist**: the permutation tables were reloaded inside some loop copies and hoisted in
-  others. A helper that takes its tables as arguments, loaded once before the loop, makes it certain.
-- **A mask the rows already have is the start of the active mask**: the masked form (`pass` bits of a sliced or
-  filtered table) ends with a `ConditionalSelect(pass, new, old)` per written column and accumulator; starting the
-  condition chain from `pass` instead of all-ones makes those selects redundant.
-- **The tail matters on fragmented worlds**: the rows after the last whole vector call the method itself (a call per
-  row, not inlined); with many small tables that is most rows. The masked vector tail (`Code.VectorTail`, from the
-  structural form) is the candidate, measured on a world of many small tables.
+  assignment vanish (the JIT copy-propagates them). Removing them is not neutral either: it changed which forms the
+  JIT inlined into `Move3`'s runner (D126), so a text cleanup ships only with identical Tier1 listings. Compare
+  listings with `DOTNET_TieredPGO=0`: with PGO on, Tier1 follows the profile the run collected. What costs is
+  deinterleaving: `Move` (`position += velocity`, two floats each) spends 6 `vpermt2ps` and 4 permutation-table loads
+  per 16 rows on 2 adds. A pass whose every write field k depends only on field k of inputs with the same layout
+  (element-wise: `+=`, `*= scalar`, `Lerp`) runs over the flattened floats with no deinterleave; deinterleave only
+  when fields mix (`x * x + y * y`).
+- **Permutation tables are loaded per permute, and that is right** (D126): every `vpermt2ps` / `vpermi2ps` overwrites
+  one operand, so a table kept in a register is copied before each permute anyway; the `[rip+const]` load costs the
+  same. Hoisting tables into arguments changes nothing per vector.
+- **A mask the rows already have is the start of the active mask** (D126, done): the masked form starts its condition
+  chain from `pass`, one `ConditionalSelect` per write, no trailing selects per column and accumulator.
+- **Element-wise passes take flat lanes** (D126, done), whole vectors only: splitting a masked word's flat lanes
+  into per-field masks lost to the deinterleaving loop, so masked words leave the flat loop.
+- **The job must stay inlined into the runner**: `World.Masked` / the run loop inline the job's `Execute`; text that
+  grows the body past the JIT's inlining budget turns it into a call per run (per 64-row word in a masked table) and
+  costs far more than it saves. A masked AVX-512 tail for the last rows (D126) won 0.5-0.66x on a world of 1,000 tiny
+  tables for a one-float body and lost up to 3.7x on `CycleHoles` for this reason: check the Tier1 listing of the
+  runner (`tools/jitdisasm.sh`, `EasyEcs.World:Masked`) for `call ...Execute` after any change that adds text to the
+  body. A tail only for bodies that stay inlined needs the inliner's budget in the generator: not done.
 - **The four copies of the body are text, not code**: two widths × masked/unmasked; the width the hardware lacks is
-  removed at JIT time (`IsHardwareAccelerated` is a constant). They cost generator output and build time, not speed.
+  removed at JIT time (`IsHardwareAccelerated` is a constant). They cost generator output and build time, and IL the
+  inliner may count before it removes the dead width (the lesson above): measure any copy added.
   One body for both widths needs a generic vector abstraction: `ISimdVector<TSelf, T>` is internal in .NET 10, so it
   would be our own static-abstract wrapper, adopted only if BenchmarkDotNet and the Tier1 code show no loss.
 

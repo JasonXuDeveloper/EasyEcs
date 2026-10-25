@@ -197,6 +197,7 @@ public class GeneratorTests
         public struct F : IComponent { public float V; }
         public struct H : IComponent { public float V; }
         public struct Two : IComponent { public float A, B; }
+        public record struct Duo(float A, float B) : IComponent;
         public struct Five : IComponent { public float A, B, C, D, E; }
         public struct Mixed : IComponent { public float A; public int B; }
         public struct D : IComponent { public double V; }
@@ -240,8 +241,13 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.Math.Clamp(f.V, 2, 1);", false)]       // throws
     [TestCase("[ForEach] static void A(ref F f, in H h) => f.V = float.Lerp(f.V, h.V, 0.5f);", true)]
     [TestCase("[ForEach] static void A(ref F f, ref P p) { if (f.V is > 0 and < 1 || !(p.V == 3)) p.V = (int)f.V; }", true)]
-    [TestCase("[ForEach] static void A(ref P p) => p.V = System.Math.Abs(p.V);", false)]               // Math.Abs(int.MinValue) throws
-    [TestCase("[ForEach] static void A(ref P p) => p.V /= 3;", false)]                                 // integer division
+    [TestCase("[ForEach] static void A(ref P p) => p.V = System.Math.Abs(p.V);", true)]                // Math.Abs(int.MinValue) runs the method
+    [TestCase("[ForEach] static void A(ref P p) => p.V /= 3;", true)]                                  // integer division through doubles
+    [TestCase("[ForEach] static void A(ref P p) => p.V = p.V / 8 + p.V % -16;", true)]                 // by powers of two: shifts
+    [TestCase("[ForEach] static void A(ref Mixed m) => m.B = m.B / m.B + (m.B != 0 && m.B % 3 > 1 ? 1 : 0);", true)] // a divisor per row
+    [TestCase("[ForEach] static void A(ref L64 l) => l.V = l.V / 8 + l.V % 4;", true)]                 // long lanes by powers of two
+    [TestCase("[ForEach] static void A(ref L64 l) => l.V /= 3;", false)]                               // long lanes by 3
+    [TestCase("[ForEach] static void A(ref F f) => f.V = f.V / 4 + System.MathF.Pow(f.V, 1);", true)]  // a product, the value
     [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x;", false)] // a call
     [TestCase("[ForEach] static void A(ref Two t) => t.A = t.B;", true)]                               // two fields: Interleaved
     [TestCase("[ForEach] static void A(ref Five t) => t.A = t.B;", false)]                             // five fields
@@ -311,14 +317,13 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f, in L64 l) => f.V = l.V;", "the conversion of 'l.V' from long to float is not supported")]
     [TestCase("[ForEach] static void A(ref P p, in D d) => p.V = (int)d.V;", "the conversion of 'd.V' from double to int is not supported")]
     [TestCase("[ForEach] static void A(ref L64 l, in F f) => l.V = (long)f.V;", "the conversion of 'f.V' from float to long is not supported")]
-    [TestCase("[ForEach] static void A(ref F f, in D d) => f.V = (float)System.Math.Floor(d.V / 3) + (float)(d.V % 2);", "'%' is not supported (no vector remainder)")] // the reason of a half
-    [TestCase("[ForEach] static void A(ref P p, in L64 l) => p.V = (int)(l.V / 3);", "integer division is not supported (it throws on 0)")]
+    [TestCase("[ForEach] static void A(ref F f, in D d) => f.V = (float)System.Math.Floor(d.V / 3) + (float)(d.V % 2);", "'%' of floats is not supported (no vector remainder)")] // the reason of a half
+    [TestCase("[ForEach] static void A(ref P p, in L64 l) => p.V = (int)(l.V / 3);", "integer division of lanes of two sizes is not supported")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.Math.Clamp(f.V, 2, 1);", "Math.Clamp's min is above its max, so the call throws")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Round(f.V, 2);", "MathF.Round is not supported")]
-    [TestCase("[ForEach] static void A(ref F f) => f.V %= 2;", "'%' is not supported (no vector remainder)")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V %= 2;", "'%' of floats is not supported (no vector remainder)")]
     [TestCase("[ForEach] static void A(ref Split s) => s.A++;", "component Split declares fields in several parts, so the order of its fields is not defined: declare them in one part", true)]
-    [TestCase("[ForEach] static void A(ref P p) => p.V = System.Math.Abs(p.V);", "Math.Abs of an integer is not supported (it throws on MinValue)")]
-    [TestCase("[ForEach] static void A(ref P p) => p.V /= 3;", "integer division is not supported (it throws on 0)")]
+    [TestCase("[ForEach] static void A(ref L64 l) => l.V %= 10;", "'%' of long lanes by 10, not a power of two, is not supported (no exact vector form for lanes of 8 bytes)")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x;", "it calls S.M")]
     [TestCase("[ForEach] static void A(ref F f) { for (int i = 0; i < 2; i++) f.V++; }", "'for (int i = 0; i < 2; i++) f.V++;' is not supported")]
     [TestCase("[ForEach] static void A(ref F f, in H h) => h.V.ToString();", "it calls Single.ToString")]
@@ -336,7 +341,10 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Sin(f.V);", "MathF.Sin is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
     [TestCase("[ForEach] static void A(ref D d) => d.V = double.Hypot(d.V, 1);", "Double.Hypot is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Atan2(f.V, 1);", "MathF.Atan2 has no vector form in .NET 10")]
-    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Pow(f.V, 2);", "MathF.Pow has no vector form in .NET 10")]
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Pow(f.V, 5);", "MathF.Pow has no vector form in .NET 10 but by a constant 0, 1, 2, 3, 4, -1, -2 or 0.5")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Pow(f.V, 2);", "MathF.Pow is not bit-exact in vector form except by 0 and 1: set FloatMode = FloatMode.Fast")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Tanh(f.V);", "MathF.Tanh is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref D d) => d.V = System.Math.Tanh(d.V);", "Math.Tanh has no vector form in .NET 10")]
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)System.Math.Min(b.V - c.V, 10);", "'(byte)System.Math.Min(b.V - c.V, 10)' keeps the low bits of an int the vector loop cannot compute in 8-bit lanes (it may leave [0, 255] and [-128, 127])")]
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)((b.V * c.V) >> 8);", "the shift '(b.V * c.V) >> 8' needs bits of an int that 8-bit lanes do not hold")]
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)(b.V << c.V);", "the shift 'b.V << c.V' is by a count that is not a constant")]
@@ -429,6 +437,11 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Two t, in Two u) { float d = u.A; t.A += d; t.B += u.B; }", false)] // a local
     [TestCase("[ForEach] static void A(ref Two t, in F f) { t.A += f.V; t.B += f.V; }", false)]            // one field and two
     [TestCase("[ForEach] static void A(ref Mixed m) { m.A += 1; m.B += 1; }", false)]                       // float and int
+    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t = new Two { A = t.A + u.A, B = t.B + u.B };", true)] // whole, field by field
+    [TestCase("[ForEach] static void A(ref Duo t, in Duo u) => t = new Duo(t.A + u.A, t.B + u.B);", true)]               // a record's constructor
+    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t = new Two { A = t.B + u.A, B = t.A + u.B };", false)] // whole, fields swapped
+    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t = new Two { A = t.A + u.A, B = t.B * u.B };", false)] // whole, other operations
+    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t = new Two { A = t.A + u.B, B = t.B + u.B };", false)] // whole, one field twice
     public void ComponentsWhoseFieldsMatchAreFlatLanes(string members, bool flat)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"[EcsSystem] public ref struct S {{ {members} }}"),
@@ -608,8 +621,10 @@ public class GeneratorTests
             .And.Contain("for (int __j = 0; __j < global::System.Numerics.Vector<int>.Count; __j++)")
             .And.Contain("__v.N = __a1_0[__j];")
             .And.Contain("l1.Combine(__v);"), generated);
-        // In a masked word the lanes that do not pass keep what they held.
-        Assert.That(generated, Does.Contain("var __h1_0 = __a1_0;").And.Contain("__a1_0 = global::System.Numerics.Vector.ConditionalSelect(__pass, __a1_0, __h1_0);"), generated);
+        // In a masked word each write of an accumulator leaves the lanes that do not pass as they were: no select after.
+        Assert.That(generated, Does.Contain("__a1_0 = global::System.Numerics.Vector.ConditionalSelect((__m0 & __pass), (__a1_0 + __c1_0), __a1_0);")
+            .And.Contain("__a1_1 = global::System.Numerics.Vector.ConditionalSelect(__pass, global::System.Numerics.Vector.Min(__a1_1, __c1_0), __a1_1);")
+            .And.Not.Contain("var __h1_0 = __a1_0;"), generated);
     }
 
     // T.Combine is part of the loop: an edit of it in another file re-emits the method (here: no longer field by field).
