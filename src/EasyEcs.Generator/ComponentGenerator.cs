@@ -750,31 +750,45 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         }
 
         /// <summary>
-        /// The components of <c>world.Query&lt;…&gt;()</c> / <c>world.Read&lt;…&gt;()</c>, or null for another call. In a
-        /// member body the type arguments are bound alone (<see cref="Symbols.TypeNamed"/>): binding the call would bind
-        /// the body around it and run its nullable analysis, on every edit. Unbound, the receiver is not known: a call
-        /// named so with struct components only is a World's (an item's members for a shape no loop uses are harmless),
-        /// except <c>entity.Read&lt;T&gt;()</c>, so a <c>Read</c> of one component takes the call's binding unless a
-        /// <c>foreach</c> walks it.
+        /// The components of <c>world.Query&lt;…&gt;()</c> / <c>world.Read&lt;…&gt;()</c>, or null for another call. Only
+        /// the syntax and the type arguments are read, each type bound alone (<see cref="Symbols.TypeNamed"/>): binding
+        /// the call would bind the body around it and run its nullable analysis, for every call of every file on every
+        /// edit. Unbound, the receiver is not known: a call named so on a receiver (<c>x.Query&lt;…&gt;()</c>,
+        /// <c>x?.Read&lt;…&gt;()</c>) with struct components only is taken for a World's (an item's members for a shape no
+        /// loop uses are harmless), except a <c>Read</c> of one component whose result is used as a value of it (a member
+        /// read after it, taken by <c>ref</c>): <c>entity.Read&lt;T&gt;()</c>.
         /// </summary>
         private static ITypeSymbol[]? Arguments(SemanticModel model, GenericNameSyntax name, CancellationToken token)
         {
             var arguments = name.TypeArgumentList.Arguments;
-            if (name.Parent is MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax call } access && access.Name == name
-                && Symbols.Outside(name) >= 0
-                && (name.Identifier.ValueText == "Query" || arguments.Count > 1 || call.Parent is ForEachStatementSyntax walk && walk.Expression == call))
+            if (name.Parent is not (MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax } or MemberBindingExpressionSyntax { Parent: InvocationExpressionSyntax })
+                || name.Parent is MemberAccessExpressionSyntax access && access.Name != name
+                || name.Identifier.ValueText == "Read" && arguments.Count == 1 && ReadsAValue((InvocationExpressionSyntax)name.Parent.Parent!))
+                return null;
+            var types = new ITypeSymbol[arguments.Count];
+            for (int i = 0; i < types.Length; i++)
             {
-                var types = new ITypeSymbol[arguments.Count];
-                for (int i = 0; i < types.Length; i++)
-                    // World.Query's constraints: a struct component each.
-                    if (Symbols.TypeNamed(model, arguments[i]) is not { IsValueType: true } type || !Symbols.Implements(type, Symbols.Component))
-                        return null;
-                    else types[i] = type;
-                return types;
+                token.ThrowIfCancellationRequested();
+                // World.Query's constraints: a struct component each.
+                if (Symbols.TypeNamed(model, arguments[i]) is not { IsValueType: true } type || !Symbols.Implements(type, Symbols.Component))
+                    return null;
+                types[i] = type;
             }
 
-            return model.GetSymbolInfo(name, token).Symbol is IMethodSymbol { ContainingType: { } world } query && Symbols.Named(world, Symbols.World)
-                ? query.TypeArguments.ToArray() : null;
+            return types;
+        }
+
+        /// <summary>
+        /// Whether the result of a call is used as a component's value: a member read after it (<c>e.Read&lt;P&gt;().V</c>,
+        /// but not <c>GetEnumerator</c>), or taken by <c>ref</c>. A World's <c>Read</c> is walked, kept or passed instead.
+        /// </summary>
+        private static bool ReadsAValue(InvocationExpressionSyntax call)
+        {
+            SyntaxNode use = call;
+            while (use.Parent is ParenthesizedExpressionSyntax) use = use.Parent;
+            return use.Parent is MemberAccessExpressionSyntax member && member.Expression == use && member.Name.Identifier.ValueText != "GetEnumerator"
+                || use.Parent is RefExpressionSyntax
+                || use.Parent is ConditionalAccessExpressionSyntax conditional && conditional.Expression == use;
         }
 
         /// <summary>The name of the class holding a shape's members.</summary>

@@ -107,11 +107,6 @@ internal static class Symbols
     }
 
     /// <summary>
-    /// A position inside the braces of the type whose member body (or initializer) holds <paramref name="node"/>, where
-    /// a type name binds without the member; -1 outside a member body (a declaration's own types bind alone already)
-    /// or in top-level statements.
-    /// </summary>
-    /// <summary>
     /// Whether the instance fields of <paramref name="type"/> come from more than one of its parts, so their order in
     /// memory is not defined. A part without fields (a generated [LookupKey] or [Sum] part, a part of methods) does not
     /// count: the generator sees the type without the generated parts and the analyzer with them, and both must agree.
@@ -141,6 +136,12 @@ internal static class Symbols
         return false;
     }
 
+    /// <summary>
+    /// A position where a type name of <paramref name="node"/>'s member body (or initializer) binds without the member:
+    /// inside the braces of the type holding it, or for top-level statements the end of the file (its usings and the
+    /// global namespace, not the Main the statements make); -1 outside a member body (a declaration's own types bind
+    /// alone already).
+    /// </summary>
     public static int Outside(SyntaxNode node)
     {
         bool body = false;
@@ -152,8 +153,9 @@ internal static class Symbols
                     break;
                 case BaseTypeDeclarationSyntax type:
                     return body && !type.OpenBraceToken.IsMissing ? type.OpenBraceToken.Span.End : -1;
-                case GlobalStatementSyntax:
-                    return -1;
+                case GlobalStatementSyntax { Parent: CompilationUnitSyntax unit }:
+                    return unit.EndOfFileToken.SpanStart; // after every member: the file's usings, not the Main body
+
             }
 
         return -1;
