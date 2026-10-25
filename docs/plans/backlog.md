@@ -17,15 +17,11 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
 - [x] **zh reference fix** (merged af585ed): Chinese restored, ApiDocs keeps a page it would write in English and
       exits 1; leftovers in `docs-todos.md`.
 - [x] **Generated text survey** (`generated-text.md`); rules in `audit-generator` "The generated text" and `feature`.
-- [ ] **Generator / analyzer cost, phase 2** (diagnosis done; per keystroke 300-350 ms generators on the unit tests,
-      analyzer ~7-9 s single-threaded): A1 EECS014 walks the containing type per structural call (36 %); A2 EECS033
-      scans every tree per DynamicBuffer call + speculative binds (40 %); A3 TypesNamed per prefix; A4 a shared
-      per-compilation body-facts cache (IsStable computed 4 times); A5 GetSymbolsWithName over every type; G2
-      QueryShapes binds whole bodies for `Read<T>()` (30 % of a keystroke); G5 a cache test that sees reruns
-      (`Unchanged` hides them) + an IDE-mode GeneratorBenchmark case; A7 one DiagnosticAnalyzer per area (NoWarn
-      cannot skip a rule today). Then G1: ForEachModel split into a declaration model (source output) and body facts
-      (implementation output, bound once) - after lookup gathers merge. G6 (C# 14 extension containers slow every
-      bind) research only.
+- [x] **Generator / analyzer cost, phase 2** (merged after 5f412b6): A1-A5, G2, G5, A7 (one analyzer per area),
+      PartGenerator without Collect, EquatableArray loops; CompileAndAnalyze -8 % / -2-3 %, edits within noise (the
+      benchmark corpus reaches few of the slow paths phase 1 found in the unit tests). Left: **G1** (ForEachModel
+      split into a declaration model and implementation-only body facts; SystemUpdates without Collect; SetFusions
+      reruns; Systems / SystemPlaces share one FAWMN; Kernel's GetSemanticModel calls) after WP0b merges; G6 research.
 
 - [ ] **Loads write each field into its name** (branch `research-copy-asm`: 1e21668 Kernel.cs, 0ff81cc 32-local test,
       71f03f1 Move3Gaps benchmark). Root cause of D126's "copy changed the asm": the JIT inlines no method with more
@@ -37,7 +33,7 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
       Now carried by WP0b (branch `feat-wp0b` starts on it; WP0b's A/B covers the copy fix against the tip).
       The remote branch `research-copy-asm` could not be deleted from the session (proxy); the owner deletes it.
 
-- [ ] **Layout instead of gathers** (owner: redesign the layers under the vector loops after GROMACS's cluster pairs
+- [ ] **Layout instead of gathers** (phase 0 running, branch `research-locality`, with borrowed-ideas item 2; owner: redesign the layers under the vector loops after GROMACS's cluster pairs
       and Polychroniou SIGMOD 2015; `locality.md`): phase 0 hand-written benchmarks first (pairs, nearest, ordered
       lookups, compress / batch probes), each with its bar; starts after gather-always reports and WP0b merges.
 - [ ] **Borrowed ideas** (`borrowed-ideas.md`): prefetching chases (AMAC) after gather-always, a timer wheel for
