@@ -52,6 +52,30 @@ public class ParallelTests
         }
     }
 
+    /// <summary>Few heavy rows without ChunkRows: once a run has measured their cost, chunks small enough to spread them.</summary>
+    [EcsSystem]
+    public ref struct HeavyRowsMeasured
+    {
+        [ForEach(Parallel = true)]
+        static void Work(ref Counter counter)
+        {
+            counter.N = Environment.CurrentManagedThreadId;
+            Thread.SpinWait(20_000); // microseconds per row
+        }
+    }
+
+    /// <summary>Writes tracked Armor on every row, slowly: chunks cut by the measured cost split blocks of change ticks.</summary>
+    [EcsSystem]
+    public ref struct SlowArmor
+    {
+        [ForEach(Parallel = true)]
+        static void Write(ref Armor armor)
+        {
+            armor.Value++;
+            Thread.SpinWait(300);
+        }
+    }
+
     public record struct Step(int Every, int Phase) : ISingletonComponent;
 
     // Each system waits at the rendezvous: it reports Met only if another system arrived while it was running.
@@ -403,6 +427,65 @@ public class ParallelTests
         }
 
         Assert.That(threads, Has.Count.GreaterThan(1));
+    }
+
+    [Test]
+    public void MeasuredCostSpreadsAFewHeavyRowsOverThreadsWithoutChunkRows()
+    {
+        if (Environment.ProcessorCount < 2) Assert.Ignore("one processor: nothing to spread over");
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        world.CreateEntities(new Entity[300], new Counter(0)); // one chunk of the default 1,024-row floor before measuring
+        world.AddSystem<HeavyRowsMeasured>();
+        var threads = new System.Collections.Generic.HashSet<int>();
+        for (int i = 0; i < 100 && threads.Count < 2; i++) // the first pass measures; helpers may start late (see above)
+        {
+            world.Update();
+            foreach (var item in world.Query<Counter>()) threads.Add(item.Component1.N);
+        }
+
+        Assert.That(threads, Has.Count.GreaterThan(1));
+    }
+
+    [Test]
+    public void ChunkSizeFollowsTheMeasuredCost()
+    {
+        long second = System.Diagnostics.Stopwatch.Frequency;
+        var heavy = new CountingWork(1);
+        Assert.That(heavy.Rows(100_000, 4), Is.Zero, "nothing measured yet: the count decides");
+        heavy.Items = 100_000;
+        heavy.Cost(second / 10); // 1 µs per row: 100 ms would make 4,000 chunks of 25 µs; 64 per thread at most
+        Assert.That(heavy.Rows(100_000, 4), Is.EqualTo(448));
+        Assert.That(heavy.Rows(2_000, 4), Is.EqualTo(64), "2 ms: chunks of 25 µs, the 64-row least");
+
+        var light = new CountingWork(1) { Items = 1_000_000 };
+        light.Cost(second / 1_000); // 1 ns per row
+        Assert.That(light.Rows(1_000_000, 4), Is.EqualTo(25_024), "1 ms: 40 chunks of 25 µs, not 16 of 62 µs");
+        Assert.That(light.Rows(100_000, 4), Is.EqualTo(6_272), "100 µs: four chunks per thread");
+        Assert.That(light.Rows(12_000, 4), Is.EqualTo(5_056), "12 µs: chunks of 5 µs at least");
+        Assert.That(light.Rows(2_000, 4), Is.EqualTo(2_048), "2 µs: one chunk, on the caller");
+
+        var merging = new CountingWork(1);
+        merging.Cost(second); // a pass cut by count (Items 0) learns nothing
+        Assert.That(merging.Measured, Is.False);
+    }
+
+    [Test]
+    public void ChunksCutByMeasuredCostKeepChangeTicksExact()
+    {
+        // Heavy rows writing a tracked component: once measured, chunks of a few dozen rows split every 4,096-row block
+        // of change ticks (opened first), and a Changed query still finds every row each pass.
+        const int rows = 10_000;
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        world.CreateEntities(new Entity[rows], new Armor(0));
+        world.AddSystem<SlowArmor>();
+        for (int i = 0; i < 40; i++)
+        {
+            ulong mark = world.ChangeTick;
+            world.Update();
+            Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(mark)), Is.EqualTo(rows), $"pass {i}");
+        }
+
+        foreach (var item in world.Read<Armor>()) Assert.That(item.Component1.Value, Is.EqualTo(40));
     }
 
     [Test]
