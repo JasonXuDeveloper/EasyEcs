@@ -55,6 +55,11 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/AGENTS.md` first.
 6. **Changelog**: user-facing items only, no numbers.
 7. **zh**: says the same as en; glossary in `tools/ApiDocs/zh/README.md` (stamp = 打 tick, filter = 过滤条件,
    tracking = 追踪, parent = 父实体, World stays World); `bun run check` runs `lint:terms`.
+   **A `.zh.mdx` page never holds English prose.** The generated reference (`docs/content/reference/*.zh.mdx`) once
+   lost about 130 Chinese lines on 34 pages: an agent regenerated it while ApiDocs reported stale zh entries and
+   committed the English it wrote in their place (96a50ba). So a regenerated reference is committed only when ApiDocs
+   reports 0 problems, after the stale entries were rewritten (`tools/ApiDocs/zh/README.md`), and the `.zh.mdx` diff is
+   read before the commit: a removed Chinese line must come back as Chinese.
 8. **One meaning per word**: "group" is a system group (`ISystemGroup`) or a table group (`IGroup` / `GroupBy`); the
    `ChangedAny` / `RemovedAny` OR is a set (zh 集合), and what `SaveEntities` writes is "a save of entities" (zh
    实体存档; never "group save" / 分组存档, which reads as an `IGroup`). "Destroyed" means freed; an entity kept for its

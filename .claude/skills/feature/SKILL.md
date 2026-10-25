@@ -75,7 +75,8 @@ Per `docs/WRITING.md`, en and zh structurally identical:
   pitfalls with their EECS rule; related Cards;
 - every term borrowed from another field (OpenMP, MPI, stencil, halo, shader, lanes) explained where first used or
   in the page's "Before you start" section, with a glossary entry (WRITING.md);
-- complexity rows in `docs/content/api.mdx` + `.zh.mdx`; XML docs with zh entries in `tools/ApiDocs/zh`;
+- complexity rows in `docs/content/api.mdx` + `.zh.mdx`; XML docs with zh entries in `tools/ApiDocs/zh`, the
+  reference regenerated only at 0 ApiDocs problems and its zh diff read (no English in a `.zh.mdx`; `audit-docs`);
 - numbers only through `docs/src/data/bench.json` (BenchTable), never typed on a page (decision records may quote);
 - a decision record for every non-obvious choice and dropped idea; the roadmap;
 - changelog, README "What's new"; a migration entry for a breaking change;

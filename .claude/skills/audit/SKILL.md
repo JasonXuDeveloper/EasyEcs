@@ -65,6 +65,9 @@ what it left undone, which goes on the same list (nothing is dropped silently).
 1. Read each report. Reject changes that widen the API without need or regress a benchmark. Read the diff of every
    test an agent changed to make a flaky test pass: every assertion and every measured section must stay as it was;
    only the measurement's setup may change, and the report must say why that removes only noise (D128 is the model).
+   Check what the agent's report does not: the Release build's warnings (0, even when the tests pass), and the docs a
+   branch regenerated (`git diff <tip> <branch> -- 'docs/content/**/*.zh.mdx'`: no Chinese line replaced by English).
+   Both slipped through once: an RS1037 warning, and 34 reference pages turned English (`audit-docs`, zh).
 2. Merge one branch at a time onto the work branch (rebase it onto the tip first, then fast-forward); after each:
    `dotnet build -c Release` (0 warnings), `dotnet test`. A branch that changes a hot path is merged only after a
    quiet A/B against the tip (two rounds, copies as worktrees outside the repo, under `flock /tmp/bench.lock`, nothing

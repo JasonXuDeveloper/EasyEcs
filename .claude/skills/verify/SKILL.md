@@ -29,6 +29,9 @@ dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -o <scratch>/aot && <sc
 - Changed `src/EasyEcs.Core`, the generator or `demo/`? Rebuild the live demo: `bash docs/scripts/build-demo.sh`
   and commit `docs/public/demo` (Cloudflare has no .NET).
 - Changed a public XML doc comment? ApiDocs reports the stale Chinese entry in `tools/ApiDocs/zh/`; fix its text and hash.
+  Never commit the reference while ApiDocs reports problems: a stale entry once turned 34 Chinese pages English
+  (`audit-docs`, zh). Before a merge, `git diff <base> -- 'docs/content/**/*.zh.mdx'` shows no Chinese line replaced by
+  English.
 - Renamed a heading anchor? `bun run build` runs `lint:search`: update `docs/scripts/search-expectations.json`.
 - Changed a hot path? `tools/bench.sh <classes> --sync` (its classes and WorldSimulation, BattleServer, the
   neighbors): `--sync` lists the rows that moved 15 % or allocate differently. Each slower row or new allocation is
