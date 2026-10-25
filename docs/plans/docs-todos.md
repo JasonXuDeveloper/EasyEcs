@@ -219,3 +219,10 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 ## audit-analyzer-tests step 2 (merged)
 - analyzer guide (en/zh) EECS025: the unwritten view-field case is reported at compilation end (after a full analysis
   or build, not while typing); the other EECS025 cases stay live.
+
+## feat-eecs103 (D134, merged)
+- analyzer.mdx + zh: EECS103 section, table row, code-fix line ("Write the method for one row"); EECS range in the
+  guide (EECS002-089 today) and root AGENTS.md to EECS002-103.
+- changelog, roadmap, public skill (do not hand-write the vector loop of a batch method; write the method for one row).
+- demo.mdx includes MovementBatchSystem.cs with a #pragma now; the exemplar pass (WP7) rewrites demo Move and
+  VoxelServer FireDamageSystem.Hurt as one-row methods and drops both pragmas; rebuild docs/public/demo after.
