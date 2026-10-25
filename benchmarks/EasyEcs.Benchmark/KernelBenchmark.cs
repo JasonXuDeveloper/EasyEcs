@@ -42,7 +42,7 @@ public partial class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _ratios, _fields, _gaps, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger;
+    private World _world, _ratios, _fields, _fragments, _gaps, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger;
 
     [GlobalSetup]
     public void Setup()
@@ -69,6 +69,7 @@ public partial class KernelBenchmark
                 new Heat { Value = (float)random.NextDouble() * 200 - 50 });
 
         _holes = Holes(Entities, i => i % 3 == 0);
+        _fragments = Fragments();
         _gaps = Gaps(Entities);
         _halves = Holes(Entities, i => random.Next(2) == 0);
 
@@ -101,6 +102,46 @@ public partial class KernelBenchmark
                 new V3 { X = F(), Y = F(), Z = F() }, new P4 { X = F(), Y = F(), Z = F(), W = F() }, new V4 { X = F(), Y = F(), Z = F(), W = F() },
                 new D3 { X = F(), Y = F(), Z = F() });
     }
+
+    /// <summary>
+    /// A fragmented world: 1,000 tables of 5 to 20 rows (Heat, Speed, P2, V2, P3, V3 and the tags of the table's number),
+    /// so most rows are a run's last rows, after its last whole vector.
+    /// </summary>
+    private static World Fragments()
+    {
+        var world = new World();
+        var random = new Random(5);
+        float F() => (float)random.NextDouble() * 10 - 5;
+        for (int table = 0; table < 1000; table++)
+            for (int row = 0; row < 5 + table % 16; row++)
+            {
+                var e = world.CreateEntity(new Heat { Value = F() }, new Speed { Value = F() }, new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() },
+                    new P3 { X = F(), Y = F(), Z = F() }, new V3 { X = F(), Y = F(), Z = F() });
+                if ((table & 1) != 0) e.Set(new Tag0());
+                if ((table & 2) != 0) e.Set(new Tag1());
+                if ((table & 4) != 0) e.Set(new Tag2());
+                if ((table & 8) != 0) e.Set(new Tag3());
+                if ((table & 16) != 0) e.Set(new Tag4());
+                if ((table & 32) != 0) e.Set(new Tag5());
+                if ((table & 64) != 0) e.Set(new Tag6());
+                if ((table & 128) != 0) e.Set(new Tag7());
+                if ((table & 256) != 0) e.Set(new Tag8());
+                if ((table & 512) != 0) e.Set(new Tag9());
+            }
+
+        return world;
+    }
+
+    public struct Tag0 : IComponent;
+    public struct Tag1 : IComponent;
+    public struct Tag2 : IComponent;
+    public struct Tag3 : IComponent;
+    public struct Tag4 : IComponent;
+    public struct Tag5 : IComponent;
+    public struct Tag6 : IComponent;
+    public struct Tag7 : IComponent;
+    public struct Tag8 : IComponent;
+    public struct Tag9 : IComponent;
 
     /// <summary>A world of P2 and V2 whose every third row lacks V2 (in place: a presence bit), so every word of rows is masked.</summary>
     private static World Gaps(int entities)
@@ -278,6 +319,23 @@ public partial class KernelBenchmark
 
     [Benchmark]
     public void Move3Generated() => Kernels.Move3(_fields);
+
+    // The fragmented world (its own size, whatever Entities says): one float, three floats split, two floats flat.
+    [Benchmark]
+    public void FragmentsIntegrateScalar()
+    {
+        var job = new IntegrateRows();
+        _fragments.ForEach<Heat, Speed, IntegrateRows>(ref job);
+    }
+
+    [Benchmark]
+    public void FragmentsIntegrateGenerated() => Kernels.Integrate(_fragments);
+
+    [Benchmark]
+    public void FragmentsMove3Generated() => Kernels.Move3(_fragments);
+
+    [Benchmark]
+    public void FragmentsMove2Generated() => Kernels.Move2(_fragments);
 
     [Benchmark]
     public void Move4Scalar()

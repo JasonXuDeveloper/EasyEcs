@@ -1327,6 +1327,38 @@ public class KernelTests
             FieldKernels.Walk, (ref Cell2 c, ref Step2 s) => FieldKernels.Walk(ref c, in s));
     }
 
+    private static System.Collections.Generic.IEnumerable<TestCaseData> TailCases() =>
+        from count in Enumerable.Range(1, 40) from hole in new[] { "none", "every third" } select new TestCaseData(count, hole);
+
+    /// <summary>
+    /// The last rows of a run, every length from 1 to 40 (each count of rows after the last whole vector, at both
+    /// widths, run by the method after the vector loops): interleaved fields of 4 and 8 bytes, flat ones, pairs of 8-byte
+    /// lanes, masks and clamps, reductions, in tables whole and with rows that lack a component; every row as the method
+    /// leaves it.
+    /// </summary>
+    [TestCaseSource(nameof(TailCases))]
+    public void TheLastRowsOfEveryLengthAreTheMethodsRows(int count, string pattern)
+    {
+        Func<int, bool> hole = pattern == "none" ? _ => false : i => i % 3 == 0;
+        CheckHoles(count, hole, (r, i) => new Spot3 { X = NextFloat(r, i), Y = NextFloat(r, i + 1), Z = NextFloat(r, i + 2) },
+            (r, i) => new Drift3 { X = NextFloat(r, i + 3), Y = NextFloat(r, i + 4), Z = NextFloat(r, i + 5) },
+            w => FieldKernels.Seek(w, 4f), (ref Spot3 p, ref Drift3 v) => FieldKernels.Seek(ref p, ref v, 4f));
+        CheckHoles(count, hole, NextLevel, NextTally, MoreKernels.Masks, (ref Level l, ref Rank t) => MoreKernels.Masks(ref l, ref t));
+        var bounds = new Bounds(-5, 5);
+        CheckHoles(count, hole, NextLevel, NextTally, w => { w.SetBounds(bounds.Min, bounds.Max); MoreKernels.Clamp(w); },
+            (ref Level l, ref Rank t) => MoreKernels.Clamp(ref l, in t, in bounds));
+        CheckHoles(count, hole, (r, i) => new Far3 { X = NextDouble(r, i), Y = NextDouble(r, i + 1), Z = NextDouble(r, i + 2) },
+            (r, i) => new Pace { Value = NextDouble(r, i + 3) }, FieldKernels.Travel, (ref Far3 p, ref Pace v) => FieldKernels.Travel(ref p, in v));
+        CheckHoles(count, hole, (r, i) => new Locus2(NextFloat(r, i), NextFloat(r, i + 1)), (r, i) => new Shift2(NextFloat(r, i + 2), NextFloat(r, i + 3)),
+            FieldKernels.Push, (ref Locus2 p, ref Shift2 v) => FieldKernels.Push(ref p, in v));
+        CheckHoles(count, hole, (r, i) => new Color4(NextFloat(r, i), NextFloat(r, i + 1), NextFloat(r, i + 2), NextFloat(r, i + 3)),
+            (r, i) => new Hue4(NextFloat(r, i + 4), NextFloat(r, i + 1), NextFloat(r, i + 2), NextFloat(r, i + 3)),
+            FieldKernels.Tint, (ref Color4 c, ref Hue4 h) => FieldKernels.Tint(ref c, in h));
+        CheckHoles(count, hole, (r, i) => new Cell2 { X = r.NextInt64(), Y = r.NextInt64() }, (r, i) => new Step2 { X = r.NextInt64() - long.MaxValue / 2, Y = r.NextInt64() - long.MaxValue / 2 },
+            FieldKernels.Walk, (ref Cell2 c, ref Step2 s) => FieldKernels.Walk(ref c, in s));
+        if (pattern == "none") ReductionsMatchTheMethodBitForBit(count);
+    }
+
     /// <summary>A Math.Clamp that throws in a masked word throws for the row that has it, after the passing rows before it.</summary>
     [Test]
     public void AClampThatThrowsInAMaskedWordLeavesTheRowsTheMethodLeaves()

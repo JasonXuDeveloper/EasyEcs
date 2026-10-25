@@ -370,6 +370,26 @@ public class LaneMathTests
         Assert.Throws<ArithmeticException>(() => LoweredKernels.Sign(signs));
     }
 
+    /// <summary>
+    /// A lane that throws among a run's last rows (every length from 1 to 40, the throwing row last): the method runs
+    /// those rows and throws as written, and every row before it is the method's.
+    /// </summary>
+    [Test]
+    public void ALaneThatThrowsInTheLastRowsRunsTheMethod([Range(1, 40)] int count)
+    {
+        using var world = new World();
+        var entities = new Entity[count];
+        for (int i = 0; i < count; i++) entities[i] = world.CreateEntity(new Whole4(), new Whole { Value = i == count - 1 ? int.MinValue : i * 7919 - 100_000 });
+        Assert.Throws<OverflowException>(() => LoweredKernels.Throwing(world));
+        for (int i = 0; i < count - 1; i++)
+        {
+            var want = new Whole4();
+            LoweredKernels.Throwing(ref want, new Whole { Value = i * 7919 - 100_000 });
+            Assert.That(entities[i].Get<Whole4>(), Is.EqualTo(want), $"row {i} of {count}");
+        }
+        Assert.That(entities[count - 1].Get<Whole4>(), Is.EqualTo(new Whole4()), "the row that throws");
+    }
+
     /// <summary>long lanes: division by powers of two and Math.Abs, the scalar results for random values and edges.</summary>
     [Test]
     public void LongsAreTheScalarResults()
