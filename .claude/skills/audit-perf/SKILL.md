@@ -69,7 +69,11 @@ its own worktree.
    with a new, measured reason.
 2. **Prototype in a worktree**; keep the public API unless the owner approves a change.
 3. **Measure with BenchmarkDotNet only** (`feature`, part 6):
-   - A/B copies as git worktrees outside the repo tree (scratchpad); two rounds, interleaved;
+   - A/B copies as git worktrees or `git archive` snapshots outside the repo tree (scratchpad), frozen while they run:
+     BenchmarkDotNet rebuilds from source, so a tree someone edits changes under the run; two rounds, interleaved; a
+     run past about 2 h is split into one background job per round;
+   - GeneratorBenchmark's corpus holds gameplay code (structural calls, generated writers, buffers), or the
+     analyzer's slow paths never run in it;
    - every run under `flock /tmp/bench.lock`, nothing else running (agents' builds and samples included): parallel
      rows swing by 2x on a loaded machine; take the load average with the results;
    - one lock for the machine, `/tmp/bench.lock` (`tools/bench.sh` takes it too), always with `flock -o` so no build

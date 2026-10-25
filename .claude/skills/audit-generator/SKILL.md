@@ -178,13 +178,17 @@ tools/bench.sh GeneratorBenchmark
   `IOperation` tree. An entry point users call never depends on a body fact. (Phase 1 measured 300-350 ms per
   keystroke on the unit tests, any edit anywhere, from this.)
 - **No body binding in transforms**: `GetSymbolInfo` / `GetTypeInfo` inside a member body binds the whole body on
-  every edit. Bind a type name alone with `Symbols.TypeNamed` (at the type's open brace, `Symbols.Outside`).
+  every edit. Bind a type name alone with `Symbols.TypeNamed` (at the type's open brace, `Symbols.Outside`; the end of
+  the file for top-level statements). With nullable off a bind costs the enclosing statement only, with nullable on it
+  runs nullable analysis of the whole member: a test that guards against body binding enables nullable
+  (`AnEditElsewhereBindsNoBody` passed falsely without it).
 - **No display strings**: `Symbols.Named(symbol, "Ns.Type<T>")`, never `ToDisplayString() ==`.
 - Models are equatable and symbol-free (`EquatableArray`, records of strings and ints).
 - No `CompilationProvider` in a per-item pipeline, and no `Combine` with a whole-compilation value: `Select` the
   narrow fact first (`CompilationProvider.Select((c, _) => c.AssemblyName)`, `ParseOptionsProvider`), which is cached
-  by value. `Collect()` only small models, and only into an output that needs all of them (the system set); everything
-  else is one output per item.
+  by value. `Collect()` only small models, and only into an output that needs all of them (the system set) or to drop
+  duplicates of small models; everything else is one output per item. Several attribute providers that feed one model
+  per type key the model on the type's first attribute (PartGenerator) instead of a Collect/Combine regrouping.
 - **Strings**: no `SyntaxNode.ToString()` / `ToFullString()` / `NormalizeWhitespace()` in transforms (identifier
   text and symbol names only); emit through one `StringBuilder` per output, `SourceText.From(text, Encoding.UTF8)`,
   one file per model (no file that grows with the whole compilation).

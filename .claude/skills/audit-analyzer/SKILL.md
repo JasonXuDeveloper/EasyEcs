@@ -52,7 +52,10 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
     (`RegisterCompilationStartAction`); `Symbols.Named` / `SymbolEqualityComparer.Default`, never display strings.
   - **One `DiagnosticAnalyzer` per area file**: Roslyn skips an analyzer only when every diagnostic it supports is
     suppressed, so one class for every rule makes a user's `NoWarn` save nothing (the unit tests' `NoWarn` EECS033
-    still paid 40 % of the analyzer's time).
+    still paid 40 % of the analyzer's time). Each area's `SupportedDiagnostics` lists every descriptor its actions
+    report, shared ones included (otherwise the report surfaces as AD0001); `EveryRuleBelongsToAnAreaAnalyzer` checks
+    that each descriptor is in some area. `EasyEcsAnalyzer.All` is a property, not a field: static initializers of
+    partial files run in an order the compiler picks.
   - **No walk that grows with the compilation or the type per callback**: a rule that needs "who else names this"
     builds a lazy per-compilation index once (in CompilationStart, a `ConcurrentDictionary` or `Lazy<>`), or turns
     the search around (react to the rare side: the method-group argument, not every structural call). EECS014 walked
