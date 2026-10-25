@@ -122,7 +122,7 @@ public ref struct SaveSystem
 [`ReadOnlyMaybe<T>`](/zh/docs/guide/systems#read-only-maybe)：
 
 ```csharp
-public partial record struct Guild([IndexKey] int Id) : IComponent;
+public partial record struct Guild([LookupKey] int Id) : IComponent;
 public record struct Morale(int Value) : IComponent;
 ```
 
