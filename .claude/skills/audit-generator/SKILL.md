@@ -168,14 +168,31 @@ tools/bench.sh GeneratorBenchmark
 
 - `ForAttributeWithMetadataName` or a syntax-only predicate first; no `SemanticModel` in predicates. Components are
   found by interface, so they use `CreateSyntaxProvider`.
+- **A transform reruns on every compilation change for every match** (FAWMN and `CreateSyntaxProvider` both hand it
+  the new compilation), and a rerun that returns an equal model still costs its work; only the steps after it are
+  `Cached`. So a transform reads declarations only (signature, attributes, parameter kinds, owner); facts that need a
+  method body (vector loop, stability, parallel problems) are computed in a pipeline that feeds
+  `RegisterImplementationSourceOutput` only, bound once per body, with every fact derived from that one
+  `IOperation` tree. An entry point users call never depends on a body fact. (Phase 1 measured 300-350 ms per
+  keystroke on the unit tests, any edit anywhere, from this.)
 - **No body binding in transforms**: `GetSymbolInfo` / `GetTypeInfo` inside a member body binds the whole body on
   every edit. Bind a type name alone with `Symbols.TypeNamed` (at the type's open brace, `Symbols.Outside`).
 - **No display strings**: `Symbols.Named(symbol, "Ns.Type<T>")`, never `ToDisplayString() ==`.
 - Models are equatable and symbol-free (`EquatableArray`, records of strings and ints).
-- No `CompilationProvider` in a per-item pipeline; compilation-wide facts from the cheapest source
-  (`ParseOptionsProvider`, `AssemblyName`).
+- No `CompilationProvider` in a per-item pipeline, and no `Combine` with a whole-compilation value: `Select` the
+  narrow fact first (`CompilationProvider.Select((c, _) => c.AssemblyName)`, `ParseOptionsProvider`), which is cached
+  by value. `Collect()` only small models, and only into an output that needs all of them (the system set); everything
+  else is one output per item.
+- **Strings**: no `SyntaxNode.ToString()` / `ToFullString()` / `NormalizeWhitespace()` in transforms (identifier
+  text and symbol names only); emit through one `StringBuilder` per output, `SourceText.From(text, Encoding.UTF8)`,
+  one file per model (no file that grows with the whole compilation).
+- `cancellationToken.ThrowIfCancellationRequested()` in loops of transforms and emitters that walk members, bodies or
+  rows of templates.
 - `WithTrackingName` on every stage; `GeneratorTests.EditsThatChangeNoModelHitTheCache` lists them (`TrackedStages`)
-  and asserts `Cached` / `Unchanged` after edits elsewhere, in a method body and in a `[ForEach]` body.
+  and asserts the cache after edits elsewhere, in a method body and in a `[ForEach]` body. `Unchanged` is not a cache
+  hit: it is what a transform that reran and returned an equal model reports, so the test counts reruns (the step's
+  input reasons, or a test-only counter) and runs once more with `IncrementalGeneratorOutputKind.Implementation`
+  disabled (what VS does while typing). GeneratorBenchmark has the same IDE-mode case next to `EditMethodBody`.
 - Implementation output for what user code never names (system code, `TypeRegistry`); source output for members it
   calls.
 - No diagnostics from generators: the analyzer reports through the same `Symbols` checks.

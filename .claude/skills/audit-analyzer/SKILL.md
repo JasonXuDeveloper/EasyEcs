@@ -46,10 +46,28 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
   or attribute form (solution-wide when call sites change). The analyzer computes the fix as diagnostic properties;
   a `CodeFixTests` case covers it. A fix is offered only when it is always correct; otherwise the message says what
   to do.
-- **Cost**: rules run on every build (`CompileAndAnalyze` minus `Compile` in `GeneratorBenchmark`); a new rule must
-  not move it beyond the error. `EnableConcurrentExecution`, `ConfigureGeneratedCodeAnalysis(None)`, symbols resolved
-  once per compilation (`RegisterCompilationStartAction`), cheap syntax checks first, no per-node lists,
-  `Symbols.Named` for type checks.
+- **Cost**: rules run on every build and, in the IDE, on every keystroke of the open file (`CompileAndAnalyze` minus
+  `Compile` in `GeneratorBenchmark`); a new rule must not move it beyond the error. The rules for writing one:
+  - `EnableConcurrentExecution`, `ConfigureGeneratedCodeAnalysis(None)`; symbols resolved once per compilation
+    (`RegisterCompilationStartAction`); `Symbols.Named` / `SymbolEqualityComparer.Default`, never display strings.
+  - **One `DiagnosticAnalyzer` per area file**: Roslyn skips an analyzer only when every diagnostic it supports is
+    suppressed, so one class for every rule makes a user's `NoWarn` save nothing (the unit tests' `NoWarn` EECS033
+    still paid 40 % of the analyzer's time).
+  - **No walk that grows with the compilation or the type per callback**: a rule that needs "who else names this"
+    builds a lazy per-compilation index once (in CompilationStart, a `ConcurrentDictionary` or `Lazy<>`), or turns
+    the search around (react to the rare side: the method-group argument, not every structural call). EECS014 walked
+    the containing type per structural call (36 % of the analyzer), EECS033 every syntax tree per buffer call (40 %).
+  - **Facts several rules need are computed once**: a per-compilation cache keyed by the method symbol
+    (`IsStable`, what a body writes) shared by every rule, not recomputed in each.
+  - **Cheapest rejection first**: node kind, identifier text and attribute names before any semantic call;
+    `GetSymbolInfo` / `GetOperation` only on nodes that passed; speculative binding only as the last fallback.
+  - The narrowest action: `RegisterOperationAction` on the exact `OperationKind`, `RegisterSymbolStartAction` with
+    its end action for facts per type; compilation-end actions only when a rule truly needs the whole compilation,
+    with its descriptor tagged `CompilationEnd` (RS1037) and its own descriptor when other cases of the same id
+    report live.
+  - No LINQ, closures over loop state or per-node lists in callbacks; pass the cancellation token on.
+  - Find the cost per action, not per analyzer: ReportAnalyzer sums thread time under concurrent execution, so time
+    each registered action alone (phase 1's harness method: `docs/plans/backlog.md`).
 
 ## Look for
 
