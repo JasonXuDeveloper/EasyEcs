@@ -34,6 +34,8 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
       on a quiet machine (after the generator A/B), then merge with D126 rewritten (text in the branch report:
       the root cause, the vmovaps cost, the numbers) and `generated-text.md` section 3 corrected. Nine jobs still over
       32 locals (StepJob0 masked 34, CycleJob9 masked 33, GateJob26 / SeekJob14 40-42): WP0b.
+      Now carried by WP0b (branch `feat-wp0b` starts on it; WP0b's A/B covers the copy fix against the tip).
+      The remote branch `research-copy-asm` could not be deleted from the session (proxy); the owner deletes it.
 
 ## Next
 
@@ -43,7 +45,8 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
       analyzer: RegisterSymbolStartAction / operation actions over syntax walks where cheaper, no per-node semantic
       model work, compilation-end rules only where needed, `EnableConcurrentExecution`, generated code skipped).
       Measured before and after (GeneratorBenchmark, ReportAnalyzer: UnitTest analyzer 40 s, generators 4 s).
-- [ ] **Inner loops** (`inner-loops.md`), in this order: WP0b (generated bodies split to the inliner's budget,
+- [ ] **Inner loops** (`inner-loops.md`), in this order: WP0b (running, branch `feat-wp0b`: every inlined method <= 32 IL
+      locals, the split forms, IL-changing cleanups, masked tail retried) (generated bodies split to the inliner's budget,
       runners pinned free of `call ...Execute`), WP0 (Binding / BodyCopy), WP2 element loops, WP3 offsets,
       WP5 `Cell<TCell,TTile>` (bar: hand-written speed), WP5b (per-tile results, several inputs/outputs, VoxelServer
       `Flow.cs`), WP1 InlineArray, WP4 ForParallel lambda, WP6b/c EECS103 v2/v3, WP8 fixable-reason audit (plain code
