@@ -204,7 +204,7 @@ public partial class IndexBenchmark
         public static int Slot((int X, int Z) key) => (key.Z & 63) * 64 + (key.X & 63);
     }
 
-    public partial record struct Session([IndexKey] long Token) : IComponent;
+    public partial record struct Session([LookupKey] long Token) : IComponent;
 
     public partial record struct UniqueSession([UniqueKey] long Token) : IComponent;
 
@@ -222,7 +222,7 @@ public partial class IndexBenchmark
         return total;
     }
 
-    public partial record struct ItemOf([IndexKey] EntityId Owner) : IComponent;
+    public partial record struct ItemOf([LookupKey] EntityId Owner) : IComponent;
 
     public record struct Gold(int Amount) : IComponent;
 }

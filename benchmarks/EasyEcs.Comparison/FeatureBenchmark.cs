@@ -39,7 +39,7 @@ public ref struct ReplicateScan
 }
 
 /// <summary>EasyEcs relation: an item points at its owner, indexed by the owner.</summary>
-public partial record struct ItemOf([IndexKey] EasyEcs.EntityId Owner) : EasyEcs.IComponent;
+public partial record struct ItemOf([LookupKey] EasyEcs.EntityId Owner) : EasyEcs.IComponent;
 
 public struct FHp : F.IComponent { public int Value; }
 public struct FReplica : F.IComponent { public int Value; }

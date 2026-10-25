@@ -15,11 +15,11 @@ namespace EcsComparison.Features;
 // library's result before anything is measured.
 
 /// <summary>EasyEcs: a player's rating (an ordered index) and zone (a group, or a value index).</summary>
-public partial record struct Rating([IndexKey] int Value) : EasyEcs.IComponent;
+public partial record struct Rating([LookupKey] int Value) : EasyEcs.IComponent;
 
 public partial record struct Region([Group] int Value) : EasyEcs.IComponent;
 
-public partial record struct RegionKey([IndexKey] int Value) : EasyEcs.IComponent;
+public partial record struct RegionKey([LookupKey] int Value) : EasyEcs.IComponent;
 
 public record struct Gold(int Value) : EasyEcs.IComponent;
 

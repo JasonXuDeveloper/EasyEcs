@@ -333,15 +333,15 @@ public class CodeFixTests
     [TestCase("EECS066", "Declare it with attributes",
         "public struct C : ISingletonComponent, IReduction<C> { public int Lo; public static C Identity => default; public static C Combine(C a, C b) => new C { Lo = System.Math.Min(a.Lo, b.Lo) }; }",
         "public partial struct C : ISingletonComponent { [Min] public int Lo; }")]
-    [TestCase("EECS067", "Declare it with [IndexKey]",
+    [TestCase("EECS067", "Declare it with [LookupKey]",
         "public struct M : IComponent, IIndexed<int> { public int BlocksDug; public int Key => BlocksDug; }",
-        "public partial struct M : IComponent { [IndexKey] public int BlocksDug; }")]
+        "public partial struct M : IComponent { [LookupKey] public int BlocksDug; }")]
     [TestCase("EECS067", "Declare it with [UniqueKey]",
         "public record struct A(int Id) : IComponent, IUniqueIndexed<int> { readonly int IIndexed<int>.Key => Id; }",
         "public partial record struct A([UniqueKey] int Id) : IComponent { }")]
-    [TestCase("EECS067", "Declare it with [IndexKey]",
+    [TestCase("EECS067", "Declare it with [LookupKey]",
         "namespace N\n{\n    public readonly struct Tile : IComponent, IIndexed<Tile>, System.IEquatable<Tile>\n    {\n        public readonly int X;\n        Tile IIndexed<Tile>.Key => this;\n        public bool Equals(Tile o) => X == o.X;\n    }\n}",
-        "namespace N\n{\n    [IndexKey]\n    public readonly partial struct Tile : IComponent, System.IEquatable<Tile>\n    {\n        public readonly int X;\n        public bool Equals(Tile o) => X == o.X;\n    }\n}")]
+        "namespace N\n{\n    [LookupKey]\n    public readonly partial struct Tile : IComponent, System.IEquatable<Tile>\n    {\n        public readonly int X;\n        public bool Equals(Tile o) => X == o.X;\n    }\n}")]
     [TestCase("EECS067", "Declare it with [UniqueKey]",
         "public struct D : IComponent, IDirectIndexed<int> { public int Cell; public int Key { get => Cell; } public static int Slots => 8; public static int SlotOf(int key) => key; }",
         "public partial struct D : IComponent, IDirectIndexed<int> { [UniqueKey] public int Cell; public static int Slots")]  // IDirectIndexed stays
@@ -351,9 +351,9 @@ public class CodeFixTests
     [TestCase("EECS067", "Declare it with [Group]",
         "public enum E { A, B }\npublic record struct Z(E Biome, int Hp) : IComponent, EasyEcs.IGroup { readonly int IGroup.Group => (int)this.Biome; }",
         "public partial record struct Z([Group] E Biome, int Hp) : IComponent { }")]
-    [TestCase("EECS043", "Declare it with [IndexKey]",
+    [TestCase("EECS043", "Declare it with [LookupKey]",
         "public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; }",
-        "[IndexKey]\npublic readonly partial record struct Shop(long Id) : IComponent { }")]
+        "[LookupKey]\npublic readonly partial record struct Shop(long Id) : IComponent { }")]
     [TestCase("EECS069", "Mark it [NinoType]",
         "namespace Nino.Core { public sealed class NinoTypeAttribute : System.Attribute; }\npublic struct Name : IComponent { public string Text; }", // Nino's attribute, as its package declares it
         "[Nino.Core.NinoType]\npublic partial struct Name : IComponent { public string Text; }")]
@@ -671,6 +671,12 @@ public class CodeFixTests
         "    /// <summary>Spawns.</summary>\n    static void OnCreate(World world) => world.CreateEntity(new P());\n    static void Again(World w) => OnCreate(w);", "Rename it to OnCreate: the name makes it the hook")]
     [TestCase("CS0246", "[EcsSystem] public ref struct S { [OnDestroy, System.Obsolete] static void Bye() { } }",
         "{ [System.Obsolete] static void OnDestroy() { } }", "Rename it to OnDestroy: the name makes it the hook")]
+    [TestCase("CS0246", "public partial record struct Owner([IndexKey] EntityId Of) : IComponent;",
+        "public partial record struct Owner([LookupKey] EntityId Of) : IComponent;", "Rename it to [LookupKey]")]
+    [TestCase("CS0246", "[IndexKeyAttribute, System.Serializable] public readonly partial struct K : IComponent, System.IEquatable<K> { public readonly int X; public bool Equals(K o) => X == o.X; }",
+        "[LookupKeyAttribute, System.Serializable] public readonly partial struct K", "Rename it to [LookupKey]")]
+    [TestCase("CS0234", "public partial struct Seat : IComponent { [EasyEcs.IndexKey] public int Row; }",
+        "{ [EasyEcs.LookupKey] public int Row; }", "Rename it to [LookupKey]")]
     [TestCase("CS0592", "/// <summary>Zones.</summary>\n[GroupBy]\npublic partial record struct Zone([Group] int Id) : IComponent;",
         "/// <summary>Zones.</summary>\npublic partial record struct Zone([GroupBy] int Id) : IComponent;", "Move [GroupBy] onto the [Group] member")]
     [TestCase("CS0592", "[GroupBy, System.Serializable] public partial struct Hall : IComponent { [Group] public int Floor; }",
@@ -737,6 +743,16 @@ public class CodeFixTests
         var text = (await document.GetTextAsync()).ToString();
         Assert.That(text, Does.Contain("[Nino.Core.NinoType]\npublic partial struct Name").And.Contain("[Nino.Core.NinoType]\npublic partial struct Tag"));
         Assert.That((await Analyze(document)).Where(d => d.Id == "EECS069" && d.Location.SourceSpan.Start >= Data.Length), Is.Empty, text);
+    }
+
+    [Test]
+    public async Task AnUnknownAttributeIsNoRenamedOne()
+    {
+        var document = Document(Data + "public partial struct Seat : IComponent { [Indexed] public int Row; }");
+        var diagnostic = (await document.Project.GetCompilationAsync())!.GetDiagnostics().First(d => d.Id == "CS0246");
+        var actions = new List<CodeAction>();
+        await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        Assert.That(actions, Is.Empty, "only the names RenamedAttributes lists are migrated");
     }
 
     [Test]

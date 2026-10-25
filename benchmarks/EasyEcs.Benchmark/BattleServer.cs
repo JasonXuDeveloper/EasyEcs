@@ -26,7 +26,7 @@ public record struct Goal(int Waypoint) : IComponent, ITracked;              // 
 public record struct Lifetime(int Ticks) : IComponent;
 public partial record struct Zone([GroupBy] int Id) : IComponent;            // every world: a table per zone,
                                                                               // its players contiguous
-public partial record struct Kills([IndexKey] int Count) : IComponent;            // indexed, ordered: a leaderboard
+public partial record struct Kills([LookupKey] int Count) : IComponent;            // indexed, ordered: a leaderboard
 public partial record struct Account([UniqueKey] int Id) : IComponent;       // one hero per account
 public record struct Spawn(Position At) : ICleanupComponent;                  // outlives its NPC: where the next appears
 public record struct Loot(int Item);                                          // players carry a DynamicBuffer<Loot>

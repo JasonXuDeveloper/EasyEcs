@@ -32,7 +32,7 @@ public class GeneratorTests
     /// <summary>
     /// Errors and the diagnostics of the correctness rules (EECS002-024). The performance rules (EECS025-033) are left
     /// out: the cases here write the shortest code that shows a rule, which often also costs; <see cref="Costs"/> checks them.
-    /// So are the suggestion to declare a hand-written key with [IndexKey] (EECS067, PartTests) and the formatter a managed type
+    /// So are the suggestion to declare a hand-written key with [LookupKey] (EECS067, PartTests) and the formatter a managed type
     /// lacks (EECS069): the shared components write keys by hand and hold references. So are the suggestions to write
     /// a hand-written one-entity job or consuming pass with attributes (EECS080, EECS084; FormTests), and the passes
     /// that almost share one walk (EECS093; FusionTests): the cases often write two methods over the same rows.
@@ -1458,7 +1458,7 @@ public class GeneratorTests
             public record struct Room(int Id) : IComponent, IGroup { [GroupBy] public int Group => Id; }
             public partial struct Hall : IComponent { [GroupBy] public int Floor; }
             public partial record struct Match([Group] int Id) : IComponent;
-            [WhenTargetDestroyed(TargetPolicy.Destroy)] public partial record struct Summon([IndexKey] EntityId Owner) : IComponent;
+            [WhenTargetDestroyed(TargetPolicy.Destroy)] public partial record struct Summon([LookupKey] EntityId Owner) : IComponent;
             [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Ally(EntityId Target) : IRelation;
             [NotSaved] public record struct Link2(object Socket) : IComponent;
             [NotSaved] public record struct Pool(object Handle) : ISingletonComponent;
@@ -1474,7 +1474,7 @@ public class GeneratorTests
     [TestCase("public partial struct Z { [GroupBy] public int Id; }")]                                                               // not a component
     [TestCase("public partial record struct Z([GroupBy] int Id) : ISingletonComponent;")]                                    // not a component
     [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public record struct W(int Id) : IComponent;")]                   // no link
-    [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public partial record struct W([IndexKey] int Id) : IComponent;")]     // not an EntityId key
+    [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public partial record struct W([LookupKey] int Id) : IComponent;")]     // not an EntityId key
     [TestCase("[NotSaved] public record struct N(object O);")]                                                              // no component
     public async Task AWorldSetupOnATypeItDoesNotFitIsReported(string source)
     {

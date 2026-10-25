@@ -102,6 +102,6 @@ public partial class GroupBenchmark
 
     public record struct Vitality(int Value) : IComponent;
     public partial record struct GroupedZone([Group] int Id) : IComponent;
-    public partial record struct IndexedZone([IndexKey] int Id) : IComponent;
+    public partial record struct IndexedZone([LookupKey] int Id) : IComponent;
     public record struct PlainZone(int Id) : IComponent;
 }

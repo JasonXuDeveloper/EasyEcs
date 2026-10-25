@@ -34,7 +34,7 @@ public record struct Seed(byte Alive);
 public record struct NextSeed(byte Alive);
 
 /// <summary>A plate of the 9-point blur: every neighbor, edges and corners.</summary>
-public partial record struct BlurPlot([IndexKey] Plot Pos) : IComponent, ITile<Plot>
+public partial record struct BlurPlot([LookupKey] Plot Pos) : IComponent, ITile<Plot>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
@@ -54,7 +54,7 @@ public partial record struct DirectPlot([UniqueKey] Plot Pos) : IComponent, ITil
 }
 
 /// <summary>A plate of the fourth-order Laplacian: five points along each axis, a halo of 2, faces only.</summary>
-public partial record struct WavePlot([IndexKey] Plot Pos) : IComponent, ITile<Plot>
+public partial record struct WavePlot([LookupKey] Plot Pos) : IComponent, ITile<Plot>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
@@ -63,7 +63,7 @@ public partial record struct WavePlot([IndexKey] Plot Pos) : IComponent, ITile<P
 }
 
 /// <summary>A plate of the Game of Life.</summary>
-public partial record struct LifePlot([IndexKey] Plot Pos) : IComponent, ITile<Plot>
+public partial record struct LifePlot([LookupKey] Plot Pos) : IComponent, ITile<Plot>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;

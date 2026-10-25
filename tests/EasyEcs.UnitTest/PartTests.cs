@@ -6,17 +6,17 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
-/// <summary>A miner indexed by the blocks it dug ([IndexKey] on a field).</summary>
+/// <summary>A miner indexed by the blocks it dug ([LookupKey] on a field).</summary>
 public partial struct Miner : IComponent
 {
-    [IndexKey] public int BlocksDug;
+    [LookupKey] public int BlocksDug;
 }
 
 /// <summary>A subscriber, one entity per id ([UniqueKey] on a record parameter).</summary>
 public partial record struct Subscriber([UniqueKey] int Id) : IComponent;
 
-/// <summary>A plot indexed by its whole value ([IndexKey] on the type).</summary>
-[IndexKey]
+/// <summary>A plot indexed by its whole value ([LookupKey] on the type).</summary>
+[LookupKey]
 public readonly partial record struct Plot(int X, int Y) : IComponent;
 
 public enum Biome { Plains, Desert, Snow }
@@ -138,21 +138,21 @@ public class PartTests
     public async Task OtherReductionsAreLeftAlone(string source, string only = null) =>
         Assert.That(await Ids(source), only == null ? Is.Empty : Is.EqualTo(new[] { only }));
 
-    [TestCase("public partial struct M : IComponent { [IndexKey] public int N; }",
+    [TestCase("public partial struct M : IComponent { [LookupKey] public int N; }",
         "public partial struct M : global::EasyEcs.IIndexed<int>", "readonly int global::EasyEcs.IIndexed<int>.Key => N;")]
     [TestCase("public partial record struct A([UniqueKey] string Name) : IComponent;",
         "public partial record struct A : global::EasyEcs.IUniqueIndexed<string>", "string global::EasyEcs.IIndexed<string>.Key => Name;")]
-    [TestCase("[IndexKey] public readonly partial record struct T(int X, int Y) : IComponent;",
+    [TestCase("[LookupKey] public readonly partial record struct T(int X, int Y) : IComponent;",
         "public readonly partial record struct T : global::EasyEcs.IIndexed<T>", "T global::EasyEcs.IIndexed<T>.Key => this;")]
-    [TestCase("public partial struct M : IComponent { [IndexKey] public int N { get; set; } public int Computed => N * 2; }",
+    [TestCase("public partial struct M : IComponent { [LookupKey] public int N { get; set; } public int Computed => N * 2; }",
         "public partial struct M : global::EasyEcs.IIndexed<int>", "int global::EasyEcs.IIndexed<int>.Key => N;")]
-    [TestCase("public partial struct M : IComponent { int n; [IndexKey] public int Doubled => n * 2; }",
+    [TestCase("public partial struct M : IComponent { int n; [LookupKey] public int Doubled => n * 2; }",
         "public partial struct M : global::EasyEcs.IIndexed<int>", "int global::EasyEcs.IIndexed<int>.Key => Doubled;")]  // a computed member, named
-    [TestCase("public partial struct R : IComponent, IIndexed<EntityId> { [IndexKey] public EntityId Target; }",
+    [TestCase("public partial struct R : IComponent, IIndexed<EntityId> { [LookupKey] public EntityId Target; }",
         "public partial struct R\n", "EntityId global::EasyEcs.IIndexed<global::EasyEcs.EntityId>.Key")]                        // the user's interface brings it
     [TestCase("public partial struct U : IComponent, IIndexed<int> { [UniqueKey] public int N; }",
         "public partial struct U : global::EasyEcs.IUniqueIndexed<int>", "IIndexed<int>.Key => N;")]                              // the part makes it unique
-    [TestCase("public partial struct D : IComponent, IDirectIndexed<int> { [IndexKey] public int Cell; public static int Slots => 8; public static int SlotOf(int key) => key; }",
+    [TestCase("public partial struct D : IComponent, IDirectIndexed<int> { [LookupKey] public int Cell; public static int Slots => 8; public static int SlotOf(int key) => key; }",
         "public partial struct D\n", "IIndexed<int>.Key => Cell;")]                                                               // IDirectIndexed keeps Slots and SlotOf
     [TestCase("public partial record struct Z([Group] int Zone) : IComponent;",
         "public partial record struct Z : global::EasyEcs.IGroup", "int global::EasyEcs.IGroup.Group => Zone;")]
@@ -160,7 +160,7 @@ public class PartTests
         "public partial struct Z : global::EasyEcs.IGroup", "int global::EasyEcs.IGroup.Group => (int)Biome;")]
     [TestCase("public partial struct Z : IComponent, IGroup { [Group] public int Zone; }",
         "public partial struct Z\n", "int global::EasyEcs.IGroup.Group => Zone;")]
-    [TestCase("public partial struct Z : IComponent { [IndexKey] public int Player; [Group] public int Zone; }",
+    [TestCase("public partial struct Z : IComponent { [LookupKey] public int Player; [Group] public int Zone; }",
         "public partial struct Z : global::EasyEcs.IIndexed<int>, global::EasyEcs.IGroup", "IGroup.Group => Zone;")]             // both
     public void KeysAndGroupsAreExplicitImplementations(string source, string head, string member)
     {
@@ -169,12 +169,12 @@ public class PartTests
         Assert.That(Errors(output), Is.Empty, parts);
     }
 
-    [TestCase("public partial struct M : IComponent { [IndexKey] public int A; [IndexKey] public int B; }")]                         // two keys
-    [TestCase("[IndexKey] public partial struct M : IComponent { [UniqueKey] public int A; }")]                                 // the type and a member
-    [TestCase("public partial struct M : IComponent { [IndexKey] public object A; }")]                                         // not IEquatable
+    [TestCase("public partial struct M : IComponent { [LookupKey] public int A; [LookupKey] public int B; }")]                         // two keys
+    [TestCase("[LookupKey] public partial struct M : IComponent { [UniqueKey] public int A; }")]                                 // the type and a member
+    [TestCase("public partial struct M : IComponent { [LookupKey] public object A; }")]                                         // not IEquatable
     [TestCase("public partial struct M : IComponent { [UniqueKey] public EntityId Target; }")]                            // a unique relation
-    [TestCase("public partial struct M : IComponent, IIndexed<long> { [IndexKey] public int A; long IIndexed<long>.Key => A; }")] // disagrees with the interface
-    [TestCase("public partial struct M : IComponent, IIndexed<int> { [IndexKey] public int A; public int Key => A; }")]        // Key written by hand
+    [TestCase("public partial struct M : IComponent, IIndexed<long> { [LookupKey] public int A; long IIndexed<long>.Key => A; }")] // disagrees with the interface
+    [TestCase("public partial struct M : IComponent, IIndexed<int> { [LookupKey] public int A; public int Key => A; }")]        // Key written by hand
     [TestCase("public partial struct Z : IComponent { [Group] public int A; [Group] public int B; }")]                     // two groups
     [TestCase("public partial struct Z : IComponent { [Group] public long A; }")]                                         // not an int
     [TestCase("public enum E : byte { A } public partial struct Z : IComponent { [Group] public E A; }")]                 // an enum of byte
@@ -249,7 +249,7 @@ public class PartTests
     public struct Dug : IComponent { public int Total; }
 
     /// <summary>
-    /// A vector loop over a component with an [IndexKey] part: the generated part declares no field, so the field order is
+    /// A vector loop over a component with an [LookupKey] part: the generated part declares no field, so the field order is
     /// defined (with SimdMode.Require, a method left scalar would not compile: EECS056).
     /// </summary>
     [EcsSystem]
