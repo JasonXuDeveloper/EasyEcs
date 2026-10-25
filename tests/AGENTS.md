@@ -20,7 +20,10 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                (and Trim, DescribeSchedule), Generic, Allocation (0 B budget), Emit (and EECS092), HotCold (EECS091), LambdaPass (lambda passes, EECS095-097), View ([View] parameters, Mut fields, AsX, EECS053 through views, EECS098-101), PrefabDeclaration ([Prefab], EECS102), ForParallel, EntityRandom,
                                LaneMath (the math a vector loop lowers: integer division, a float divided by a power of two, Pow, the throwing
                                Abs / CopySign / Sign, FloatMode.Fast's forms; every 32-bit input under the explicit category Exhaustive),
-                               Generator (diagnostics + caching), CodeFix, BattleServer (the world of
+                               Generator (diagnostics + caching), Analyzer (one file per analyzer file: .Systems,
+                               .Declarations, .Parallel, .Usage, .Forms, the edges each rule branches on and the code
+                               it leaves alone; AnalyzerTests.cs: AssertReports / AssertClean / Count), CodeFix (each
+                               fix compiles, adds no diagnostic and is not offered again), BattleServer (the world of
                                docs/content/example.mdx as a whole, linked from EasyEcs.Benchmark); Fixtures.cs holds
                                the shared test components
 tests/EasyEcs.Aot/             the battle server (BattleServer.cs) published with Native AOT, warnings as errors, and
