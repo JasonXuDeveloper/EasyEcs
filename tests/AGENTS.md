@@ -20,10 +20,12 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                (and Trim, DescribeSchedule), Generic, Allocation (0 B budget), Emit (and EECS092), HotCold (EECS091), LambdaPass (lambda passes, EECS095-097), View ([View] parameters, Mut fields, AsX, EECS053 through views, EECS098-101), PrefabDeclaration ([Prefab], EECS102), ForParallel, EntityRandom,
                                LaneMath (the math a vector loop lowers: integer division, a float divided by a power of two, Pow, the throwing
                                Abs / CopySign / Sign, FloatMode.Fast's forms; every 32-bit input under the explicit category Exhaustive),
-                               Generator (diagnostics + caching), Analyzer (one file per analyzer file: .Systems,
-                               .Declarations, .Parallel, .Usage, .Forms, .Performance (lambda passes and view fields), the
-                               edges each rule branches on and the code
-                               it leaves alone; AnalyzerTests.cs: AssertReports / AssertClean / Count), CodeFix (each
+                               Generator (generated code, the vector loops and EECS055 / EECS056's reasons, caching; the
+                               harness: Compile, Driver, Analyze, Components), Analyzer (the rules, one file per analyzer
+                               file: .Declarations, .Systems, .Usage, .Parallel, .Parts, .Forms, .Performance (costs,
+                               lambda passes, view fields); what each rule reports, the edges it branches on and the code
+                               it leaves alone; AnalyzerTests.cs: Diagnose / Costs / All, Extra, AssertReports /
+                               AssertClean / Count), CodeFix (each
                                fix compiles, adds no diagnostic and is not offered again), BattleServer (the world of
                                docs/content/example.mdx as a whole, linked from EasyEcs.Benchmark); Fixtures.cs holds
                                the shared test components
