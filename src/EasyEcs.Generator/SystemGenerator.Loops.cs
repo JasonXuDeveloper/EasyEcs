@@ -237,11 +237,22 @@ public sealed partial class SystemGenerator
     /// <summary>
     /// The IL locals the C# compiler declares for <paramref name="text"/> (statements the generator wrote), counted
     /// from above: every declared name (<c>var</c>, a typed or <c>ref</c> local, an <c>out</c> variable, a loop's
-    /// variable) is one, although the compiler shares the slot of two locals of one type whose scopes do not overlap
-    /// (a width's <c>last</c> and the other's), and a <c>default</c> argument (the method's owner) is the one
-    /// temporary it adds, shared by every statement. Measured exact or above on every job of the benchmarks.
+    /// variable) is one, except that a declaration written twice with its type (each width's <c>nint last</c>, its
+    /// <c>ref readonly</c> singleton) is one: in scopes that do not overlap the compiler gives locals of one type one
+    /// slot (it does for other names too, which is why this is from above). A <c>default</c> argument (the method's
+    /// owner) is the one temporary it adds, shared by every statement. Measured exact or above on every job of the
+    /// benchmarks and tests.
     /// </summary>
-    internal static int Locals(string text) => Declarations.Matches(text).Count + (Defaults.IsMatch(text) ? 1 : 0);
+    internal static int Locals(string text)
+    {
+        int count = Defaults.IsMatch(text) ? 1 : 0;
+        var typed = new HashSet<string>();
+        foreach (Match declaration in Declarations.Matches(text))
+            if (Untyped.IsMatch(declaration.Value) || typed.Add(Spaces.Replace(declaration.Value, " "))) count++;
+        return count;
+    }
+
+    private static readonly Regex Spaces = new(@"\s+"), Untyped = new(@"^(?:out\s+)?var\b");
 
     private static readonly Regex Defaults = new(@"\bdefault\b(?!\s*\()");
 

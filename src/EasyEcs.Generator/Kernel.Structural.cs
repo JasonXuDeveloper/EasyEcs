@@ -97,9 +97,7 @@ internal sealed partial class Kernel
         if (_change == null) _change = marked;
         else if (_change with { Text = "" } != marked with { Text = "" })
             throw FixableReason($"it makes two structural changes ('{_change.Text}' and '{Text(op)}'): a vector loop applies one; split the method into one [ForEach] method per change");
-        _live = true;
-        string lanes = _active == null ? "__live" : $"(__live & {_active})";
-        _body.Append($"__d0 |= {lanes};\n");
+        Live(_active, $"__d0 |= {LiveLanes};\n");
     }
 
     /// <summary>The one value a Set gives every row it marks, as C# over the job's fields (computed once per run).</summary>
@@ -168,18 +166,18 @@ internal sealed partial class Kernel
         }
         else throw FixableReason($"it emits '{Text(record)}': {Shape()}, written new {type.Name}(value)");
         string t = type.ToDisplayString(Symbols.Fqn);
-        _live = true;
-        string lanes = $"global::EasyEcs.Lanes.Bits({(_active == null ? "__live" : $"(__live & {_active})")})";
+        string lanes = $"global::EasyEcs.Lanes.Bits({LiveLanes})";
         string emit = $"new global::EasyEcs.Emit<{t}>(ref this.e{index})";
         if (EntityId(value))
         {
-            _body.Append($"{emit}.AddIds(in entities, {Row}, {lanes});\n");
+            Live(_active, $"{emit}.AddIds(in entities, {Row}, {lanes});\n");
             return;
         }
 
         if (!IsLane(fields[0].Type) || !SymbolEqualityComparer.Default.Equals(fields[0].Type, value.Type))
             throw FixableReason($"it emits '{Text(record)}': {Shape()}, and {(fields[0].AssociatedSymbol ?? fields[0]).Name} is a {fields[0].Type.ToDisplayString()}, not a lane of {LaneSizes} bytes");
-        _body.Append($"{emit}.AddLanes({Expr(value)}, {lanes});\n");
+        string added = Expr(value);
+        Live(_active, $"{emit}.AddLanes({added}, {lanes});\n");
     }
 
     /// <summary>The entity's id: <c>unit.Id</c>, or the handle converted to an EntityId.</summary>
