@@ -189,7 +189,7 @@ public sealed partial class EasyEcsAnalyzer
         if (context.OwningSymbol is not IMethodSymbol method || !Symbols.IsForEach(method) || !Symbols.IsParallel(method)) return;
         var body = context.OperationBlocks.FirstOrDefault(b => b is IMethodBodyOperation or IBlockOperation);
         var syntax = body?.Syntax as MethodDeclarationSyntax ?? body?.Syntax.Parent as MethodDeclarationSyntax;
-        if (body == null || syntax == null || Symbols.ParallelProblem(method, syntax, body.SemanticModel!) != null) return;
+        if (body == null || syntax == null || BodyFacts.ParallelProblem(method, syntax, body.SemanticModel!) != null) return;
         foreach (var write in Threads.Writes(body, job: false))
             if (Races(write))
                 context.ReportDiagnostic(Diagnostic.Create(SharedWrite, write.Operation.Syntax.GetLocation(),

@@ -1417,9 +1417,9 @@ internal static class Symbols
     /// Why a [ForEach(Parallel = true)] method cannot run on several threads, or null: it must be stable (no structural
     /// change), per entity (not a batch) and write no singleton (each row's run would race on it).
     /// </summary>
-    public static string? ParallelProblem(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model)
+    public static string? ParallelProblem(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, bool? stable = null)
     {
-        if (!IsStable(method, syntax, model)) return "it can change structure (make it static, without World, and use its Entity only to read)";
+        if (!(stable ?? IsStable(method, syntax, model))) return "it can change structure (make it static, without World, and use its Entity only to read)";
         if (IsBatch(method)) return "batch methods run on one thread";
         if (method.Parameters.FirstOrDefault(p => Classify(p) == ParamKind.Singleton && p.RefKind == RefKind.Ref) is { } singleton)
             return $"'ref {singleton.Type.Name} {singleton.Name}' writes a singleton, which every chunk would race on: take it as 'in' to read it; "

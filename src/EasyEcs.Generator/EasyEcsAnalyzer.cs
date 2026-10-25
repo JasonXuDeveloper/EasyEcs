@@ -473,7 +473,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (Symbols.IsBatch(method))
             context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), Symbols.Describe(method), name,
                 "it is a batch method, whose spans point into the tables; record the change as data for a method that runs per entity"));
-        else if (Symbols.IsStable(method, context.Operation.SemanticModel!))
+        else if (BodyFacts.IsStable(method, context.Operation.SemanticModel!))
             context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), Symbols.Describe(method), name,
                 "takes no Entity or World to make it with; take the Entity as a parameter, or record the change as data"));
     }
@@ -880,7 +880,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
             || !Symbols.IsForEach(method) || !Symbols.IsParallel(method)
             || method.PartialDefinitionPart != null) return; // a partial method: reported once, on its definition
-        if (Symbols.ParallelProblem(method, syntax, context.SemanticModel) is not { } problem) return;
+        if (BodyFacts.ParallelProblem(method, syntax, context.SemanticModel) is not { } problem) return;
         // An instance method that 'static' alone makes stable: the fix offers 'static'.
         bool makeStatic = !method.IsStatic && !Symbols.SharesSignature(method) && method.PartialImplementationPart == null
                           && Symbols.StableIfStatic(method, syntax, context.SemanticModel);

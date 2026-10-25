@@ -53,9 +53,9 @@ public sealed partial class EasyEcsAnalyzer
                 || method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is not MethodDeclarationSyntax syntax)
                 continue;
             var model = Symbols.ModelOf(syntax.SyntaxTree, context.SemanticModel);
-            bool stable = Symbols.IsStable(method, syntax, model);
-            var side = FusionSide.Of(method, stable, Symbols.OnlyIdentifies(method, syntax, model),
-                Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model) == null);
+            bool stable = BodyFacts.IsStable(method, syntax, model);
+            var side = FusionSide.Of(method, stable, BodyFacts.OnlyIdentifies(method, syntax, model),
+                Symbols.IsParallel(method) && BodyFacts.ParallelProblem(method, syntax, model) == null);
             var problem = group.Count == 0 ? "it is the first [ForEach] method of its system" : Fusion.Problem(group, side);
             if (problem == null)
             {

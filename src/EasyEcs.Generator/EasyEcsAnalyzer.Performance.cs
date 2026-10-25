@@ -1230,7 +1230,7 @@ public sealed partial class EasyEcsAnalyzer
 
         // In a stable [ForEach] method EECS013 already reports it (Update is a structural call).
         if (core.Is(owner, core.World) && method.Name == "Update" && Symbols.SystemOf(context.ContainingSymbol) is { } system
-            && !(context.ContainingSymbol is IMethodSymbol caller && Symbols.IsGeneratedJob(caller) && Symbols.IsStable(caller, call.SemanticModel!)))
+            && !(context.ContainingSymbol is IMethodSymbol caller && Symbols.IsGeneratedJob(caller) && BodyFacts.IsStable(caller, call.SemanticModel!)))
         {
             context.ReportDiagnostic(Diagnostic.Create(UpdateInSystem, call.Syntax.GetLocation(), system.Name,
                 "World.Update" + (method.TypeArguments.Length == 1 ? "<" + method.TypeArguments[0].Name + ">" : "")));
