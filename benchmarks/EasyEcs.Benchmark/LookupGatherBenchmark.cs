@@ -6,7 +6,7 @@ namespace EasyEcs.Benchmark;
 /// <summary>
 /// A pass reading other entities' components through a <see cref="Lookup{T}"/>: seekers take the bearing to their
 /// target's spot. The method as written, row by row (<see cref="SimdMode.Off"/>), against the vector loop the generator
-/// writes (AVX2 gathers of the targets' records and fields, D131), on one thread and in parallel. Where the targets live
+/// writes when the method asks for it (SimdMode.Require: AVX2 gathers of the targets' records and fields, D131), on one thread and in parallel. Where the targets live
 /// decides what the gathers can do: random targets of one table, runs of 256 seekers aiming into one of 4 tables, and
 /// every seeker a random target of 64 tables (a vector of 8 lanes then almost never shares a table, and runs the method).
 /// </summary>
@@ -94,7 +94,7 @@ public partial class LookupGatherBenchmark
         [ForEach]
         public static void Clear(ref Bearing bearing) => bearing = default;
 
-        [ForEach]
+        [ForEach(SimdMode = SimdMode.Require)]
         public static void Steer(in Spot spot, in Seeker seeker, ref Bearing bearing, Lookup<Spot> spots)
         {
             var target = spots[seeker.Target];
@@ -108,7 +108,7 @@ public partial class LookupGatherBenchmark
             bearing = target.HasValue ? new Bearing(target.Value.X - spot.X, target.Value.Y - spot.Y) : default;
         }
 
-        [ForEach(Parallel = true)]
+        [ForEach(Parallel = true, SimdMode = SimdMode.Require)]
         public static void ParallelSteer(in Spot spot, in Seeker seeker, ref Bearing bearing, Lookup<Spot> spots)
         {
             var target = spots[seeker.Target];
