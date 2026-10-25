@@ -4,8 +4,8 @@
 > sessions. When a work package ships, its reasons go into its decision record (D132-D134), the guide pages describe
 > it, and its section here is deleted; the file is deleted with the last package.
 >
-> Status: WP6a (EECS103 v1) in progress. WP0-WP5 wait for the Lookup-gather work (D131) to merge, since they change
-> `Kernel.cs`; WP6b/c follow WP5/WP2.
+> Status: WP6a (EECS103 v1) shipped: D134, `HandSimd.cs`. WP0-WP5 wait for the Lookup-gather work (D131) to merge,
+> since they change `Kernel.cs`; WP6b/c follow WP5/WP2.
 
 
 ## 1. What exists today
@@ -360,43 +360,18 @@ the rewrite, and gets a code fix where the rewrite is mechanical (as the split o
 the right class; a scalar method that a small change vectorizes and that gets no Warning is a bug of WP8.
 
 ### EECS103: SIMD written by hand that the generator writes from the plain form
-- **Id:** EECS103 (highest today is EECS102, in `EasyEcsAnalyzer.Parts.cs:91`).
-- **Placement:** `EasyEcsAnalyzer.Forms.cs` (the "generated form for hand code" family, EECS080–085). Detection is read once in the new `HandSimd.cs`, shared with the code fix (as `Views.cs`/`Prefabs.cs` are). The code fix goes in `src/EasyEcs.CodeFixes/EasyEcsCodeFixes.Forms.cs`.
-- **Severity:** Warning (a better generated form exists).
-- **Title:** "Vector code written by hand that the generator writes from the method for one row".
-
-**Detection (v1, batch `[ForEach]` methods and lambda passes):**
-1. Syntactic prefilter: the body names `Vector`, `Vector64/128/256/512` or `MemoryMarshal.Cast`. Only these methods are bound further.
-2. The body has this shape:
-   - a uniform prelude: locals whose initializers are constants, singleton/value parameters, pure Math, or broadcasts (`VectorN.Create(u)`, `new Vector<T>(u)`, `VectorN<T>.One/Zero`);
-   - streams from component spans, through `Cast<C, VectorN<T>>`, `Cast<C,T>` then `Cast<T,VectorN<T>>`, `new Vector<T>(s.Slice(i))` / `VectorN.Create(s.Slice(i, n))` / `LoadUnsafe(ref r, i)` loads, and `CopyTo(s.Slice(i))` / `StoreUnsafe` stores;
-   - one loop from 0 stepping 1 over the cast length, or stepping `Count` over the span length;
-   - an optional tail touching only the same spans.
-3. Every operation in the loop is lane-wise and maps 1:1 to scalar: `+ - * /`, `& | ^ ~ << >>`, unary `-`, `Min/Max/Abs/Sqrt/Floor/Ceiling/FusedMultiplyAdd`, `ConditionalSelect(cmp, a, b)` → `cmp ? a : b`, `Equals/LessThan/GreaterThan(OrEqual)` → comparisons, `AndNot`, the `ConvertTo*` casts.
-4. **Flat-lane check:** every stream's component has the same field count F, F divides Count, and all fields of a stream share one type. A vector statement becomes one statement per field.
-5. The devectorized per-row method is synthesized (parameters: `Span<C>` → `ref C c`, `ReadOnlySpan<C>` → `in C c`, named from the component type in camelCase; other parameters unchanged). It is bound in a copy of the compilation (the `Kernel.Views` technique) and **`Kernel.Vectorize` must return a loop** under the method's own FloatMode. Then report, with the synthesized text in the message.
-
-**False-positive guards (no report):**
-- `SimdMode.Off`; `[GeneratedCode]`; not a `[ForEach]` method or lambda pass.
-- Shuffles or horizontal ops (`Shuffle`, `Sum`, `Dot`, `GetElement`, `WithElement`, `ExtractMostSignificantBits`, `Narrow`/`Widen`, gathers), `System.Runtime.Intrinsics.X86/Arm` classes, non-broadcast vector constants.
-- Loads at `i ± k` (a stencil), `EntitySpan` used, a user call in the prelude (the plain form would call it per row; e.g. demo `DragBatchSystem`'s `Units.Keep`).
-- Accumulators across vectors (float reassociation; v1 reports integer accumulators only).
-- Mixed field types in a cast stream; a loop step that is neither 1 nor `Count`.
-
-**Code fix:**
-- Replace the method declaration with the synthesized per-row method (attributes, modifiers and name kept; the prelude kept as locals; the tail and the casts dropped).
-- Examples:
-  - `FireDamageSystem.Hurt` → `static void Hurt(ref Health health) => health.Value -= 1;`
-  - `Kernels.StepBatch` → `Step`'s body with `heat.Value = heat.Value > 100f ? 100f : heat.Value + speed.Value * 0.125f;`
-- Properties are computed by the analyzer (convention).
+v1 (batch `[ForEach]` methods, their casts, loads and stores) shipped: what qualifies, the guards, the code fix and
+where this plan was wrong (no lambda passes: they take no spans; no accumulators; a span only read becomes `in`) are
+D134, the detection `src/EasyEcs.Generator/HandSimd.cs`. v2 and v3 extend `HandSimd` and keep its rule: report only a
+rewrite bound in a copy of the compilation that gets the generator's loop.
 
 **v2 (after WP5):** a Tile method whose body is `Pad()` (whole tile), a `Rows(reads)` loop, an `x += Count` loop of `Load128/256/LoadVector` at constant offsets, and `.CopyTo(into.Slice(row.Index + x))` into `Mut<DynamicBuffer<TOut>>`. Report it with the Cell form (`TileBenchmark` Blur/Wave/Life fire; VoxelServer `Flow` does not: `Pad(from,to)` and summaries).
 
 **v3:** element loops written with `VectorN.Create(span.Slice(i, n))` (HeightMap) → the plain `for`.
 
-**Suppressions:**
-- `benchmarks/EasyEcs.Benchmark/EasyEcs.Benchmark.csproj` `NoWarn` gets EECS103 (the hand baselines).
-- The demo `Batched` group: `#pragma` with a reason, or a rewrite. This is the owner's call.
+**Suppressions (v1):** `EasyEcs.Benchmark.csproj` `NoWarn` (KernelBenchmark's hand baselines); `#pragma` with a
+reason on VoxelServer `FireDamageSystem.Hurt` and the demo's `MovementBatchSystem.Move` until WP7 rewrites them (the
+demo's rewrite or keeping the batch form under its pragma is the owner's call).
 
 ## 5. Work packages in build order
 Agents per the `audit` skill (at most three; pair the one that measures with ones that do not). WP6a touches only analyzer files and can run beside WP1. Kernel work should not run beside the AVX2 wide-rows work, since it touches the same files.
@@ -492,7 +467,7 @@ Agents per the `audit` skill (at most three; pair the one that measures with one
 - Tests: summaries against the scalar method per tile, 1 vs 4 threads, 0 B; the water's output unchanged.
 
 **WP6: EECS103 and its code fix.**
-- WP6a (v1, batch casts) can start now.
+- WP6a (v1, batch casts): shipped (D134).
 - WP6b (Tile → Cell) after WP5; WP6c (element loops → plain) after WP2.
 - Tests:
   - `AnalyzerTests.Forms.cs`: positives (FireDamage, StepBatch, StepBatch512, Movement demo shapes; each load/store idiom); every guard as a negative; the overlap test (no EECS055/EECS033 on the same method).

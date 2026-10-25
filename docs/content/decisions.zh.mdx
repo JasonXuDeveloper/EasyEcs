@@ -130,6 +130,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D128](#d128-spin-gates-and-settled-measurements) | 并行工作的队列和池用自旋门；分配测试在没有后台回收运行时测量 |
 | [D129](#d129-lookup-key) | `[IndexKey]` 改名为 `[LookupKey]` |
 | [D130](#d130-measured-chunks) | 并行遍历按测得的每行开销切块；`ChunkRows` 只用来覆盖它 |
+| [D134](#d134-eecs103) | EECS103：批处理方法里手写的向量循环，报告并给出单行方法 |
 
 D85 到 D89、D91 到 D93 和 D96 这几个编号没有用过：编号事先分给进行中的工作，用不上也不再复用。
 
@@ -2654,6 +2655,49 @@ public ref struct DyingSystem
   第一次运行又保留了按行数的规则，所以它们只能影响第一次遍历。
 - **去掉 `ChunkRows`：** 它留给比一次运行的平均值知道得更多的遍历（每帧开销变化的行）。EECS054 仍然报告不合法的设置
   （负数，或用在非并行方法上）；它的说明改为 0 表示由运行时按测得的开销决定。
+
+## D134. EECS103：批处理方法里手写的向量循环，报告并给出单行方法 [#d134-eecs103]
+
+**决定。** 批处理 `[ForEach]` 方法的方法体若是手写的向量循环，而生成器能从单行方法写出同样的循环，就报告 EECS103（Warning），
+并附上那个单行方法，代码修复会写出它。改写只读一次（`HandSimd.cs`），分析器和修复共用：每个 span 变成 `ref`（被写）或 `in`
+组件，每条向量语句按组件的字段拆成每字段一条语句，每个广播变成一个标量局部变量，类型转换、索引和标量尾部都去掉。只有改写精确、
+并且能拿到生成器的循环时才报告：单行方法在编译的副本中替换批处理方法（`Kernel.Views` 的做法），必须能编译通过，而且
+`Kernel.Vectorize` 在方法自己的 `SimdMode` 和 `FloatMode` 下必须为它返回循环。
+
+**什么形式符合。** 参数是 span、单例和值；前导部分只有局部变量声明（经 `MemoryMarshal.Cast<C, T>`、`Cast<C, VectorN<T>>`、
+`Cast<T, VectorN<T>>` 或 `ref T r = ref Unsafe.As<C, T>(ref MemoryMarshal.GetReference(span))` 得到的流；索引和它的上界；
+统一值：常量、单例、值、static readonly 字段、`Math` / `MathF`、广播），也可以在 `if (VectorN.IsHardwareAccelerated)` 里面；
+一个循环，从 0 开始按 1 遍历向量流（`p[i]`），或按 `VectorN<T>.Count` 走到各 lane 的长度（加载 `new Vector<T>(s.Slice(i))`、
+`VectorN.Create(s.Slice(i[, Count]))`、`VectorN.LoadUnsafe(ref r, (nuint)i)`；存储 `v.CopyTo(s.Slice(i))`、
+`v.StoreUnsafe(ref r, (nuint)i)`）；循环里只有逐 lane、有标量对应的运算（浮点的 `+ - * /`，整数的 `& | ^ ~ << >> >>>`，
+`Min`、`Max`，浮点的 `Abs`、`Sqrt`、`Floor`、`Ceiling`、`FusedMultiplyAdd`，比较经与、或、非组合后的 `ConditionalSelect`，
+`AndNot`，同大小 lane 之间的转换）；循环之后的尾部只写 span 的元素和它自己的局部变量。流读取的每个组件都有相同的 F 个字段，
+全是 lane 类型，F 是 2 的幂且不超过最窄向量的 lane 数（平铺 lane 检查：第 j 个 lane 是某一行的第 j % F 个字段）。
+lane 类型是 float、double、int、uint、long、ulong（byte 和 short 的运算 C# 按 int 算，按字段拆开的语句照写不能编译）。
+
+**不报告。** `SimdMode.Off`、`[GeneratedCode]`、不是 `[ForEach]` 的方法；洗牌和水平运算（`Shuffle`、`Sum`、`Dot`、
+`GetElement`、`ExtractMostSignificantBits`、`Narrow`、`Widen`），某一指令集的类（`X86`、`Arm`），不是广播的向量常量；
+其他偏移处的加载（模板计算）；`EntitySpan`；前导部分调用用户代码（单行方法会每行调用一次：演示里的 `DragBatchSystem`）；
+循环里写统一值（跨向量的累加器）；整数除法和整数 `Abs`（单行方法里会抛异常的 lane，在向量里不会）；字段类型混合的组件、
+向量装不下整数行的字段数、步长既不是 1 也不是 `Count`；循环不读的 span。
+
+**计划哪里不对，以及原因。**
+- **没有 lambda pass。** lambda pass 不接受 span（EECS095："写一个 [ForEach] 方法"），所以 lambda 的方法体里不会有手写的
+  向量循环；v1 只覆盖批处理方法。
+- **不报告累加器，整数的也不报告。** 跨向量求和的循环，其单行方法需要一个 `Reduce<T>` 参数和一个合并进去的单例，修复无法机械地写出；
+  逐行累加单例的写法 EECS086 已经指向 `Reduce<T>`。
+- **循环只读的 span 变成 `in`**，而不是 `ref`：从不写的 `ref` 会用 EECS025 换掉 EECS103。
+
+**数据。** `GeneratorBenchmark`，基线和本改动，两轮（基准的代码里没有向量代码，所以分析器只付预过滤的开销）。
+`CompileAndAnalyze`，单命名空间关：3,143 / 2,625 ms 与 2,752 / 2,870 ms；开：3,256 / 3,206 ms 与 3,604 / 3,785 ms。
+两轮的方向相反，都在误差（±130-490 ms）之内；分配持平（531.8 / 530.3 MB，994.7 / 993.4 MB）。没有分析器的行
+（`Cold`、`Edit*`、`Compile`）不跑这条规则。只有带特性、方法体里提到向量类型的方法才会绑定改写。
+
+**考虑过的方案。**
+- **批处理方法里一出现向量类型就报告**：示例里多数手写 SIMD（VoxelServer 的水、瓦片模板、byte lane）还没有生成器能向量化的
+  普通写法；没有可用修复的消息只是噪音。瓦片模板等 `Cell<,>` 形式（v2），buffer 上的元素循环等内层循环形式（v3）。
+- **把尾部和单行方法比较**：尾部被去掉，并不证明它和向量体相等；尾部算法不同，本来就是批处理方法的 bug（最后一个向量之后的行
+  得到了另一个结果）。
 
 ## 相关页面 [#related]
 

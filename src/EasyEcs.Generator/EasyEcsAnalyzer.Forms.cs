@@ -14,7 +14,8 @@ namespace EasyEcs.Generator;
 /// The rules of the declarations the generator turns into code for one entity, a schedule and a consuming pass
 /// (EECS080-EECS085): a hand-written one-entity job [ForEntity] would write (EECS080), a [ForEntity] method that cannot
 /// be one (EECS081), an [UpdateInterval] that cannot apply (EECS083), a [ForEach] method that destroys every entity it visits by hand (EECS084), a [Consume] that
-/// cannot apply (EECS085). Each computes its code fix as diagnostic properties.
+/// cannot apply (EECS085); and a batch method's vector loop written by hand that the generator writes from the method
+/// for one row (EECS103, <see cref="HandSimd"/>). Each computes its code fix as diagnostic properties.
 /// </summary>
 public sealed partial class EasyEcsAnalyzer
 {
@@ -56,6 +57,22 @@ public sealed partial class EasyEcsAnalyzer
         "[Consume] destroys the rows a [ForEach] pass visited, when it ends. A method without [ForEach] has no pass, and a " +
         "sliced one would move the rows of the other slices with every destroy.", helpLinkUri: Help("EECS085"));
 
+    public static readonly DiagnosticDescriptor HandWrittenVectorLoop = new("EECS103", "Vector code written by hand that the generator writes from the method for one row",
+        "[ForEach] method '{0}' writes by hand the vector loop the generator writes from the method for one row: {1}",
+        Category, DiagnosticSeverity.Warning, true,
+        "A batch method that loads its spans into Vector<T> or Vector128/256/512<T> values, combines them lane by lane " +
+        "and stores them back, with a scalar loop for the rows left over, computes the method for one row on every lane. " +
+        "The generator writes that loop from the method for one row: at the widest vectors the hardware has (Vector512 " +
+        "and Vector<T>), with the last rows and masked words handled, and the same results bit for bit. The method for " +
+        "one row is shorter, runs on hardware without vectors, and is checked by the analyzer like any [ForEach] method. " +
+        "The fix writes it: each span a 'ref' (written) or 'in' component, each vector statement one statement per field, " +
+        "each broadcast a scalar local; it is offered only when the generator gives that method its vector loop. Shuffles, " +
+        "horizontal operations, loads at other offsets, accumulators across vectors and calls into user code are left alone.",
+        helpLinkUri: Help("EECS103"));
+
+    /// <summary>EECS103's properties: the method for one row's parameter list and its statements (one per line).</summary>
+    public const string PerRowParameters = "PerRowParameters", PerRowBody = "PerRowBody";
+
     /// <summary>EECS080's properties: field=parameter pairs, the components' modifiers, the filter attributes, the calls' replacements; EECS084's entity parameter to drop.</summary>
     public const string JobParameters = "Parameters", JobModifiers = "Modifiers", JobFilter = "Filter", JobCall = "Call", DropEntity = "DropEntity";
 
@@ -63,6 +80,7 @@ public sealed partial class EasyEcsAnalyzer
     {
         context.RegisterSymbolAction(AnalyzeScheduleAttribute, SymbolKind.NamedType);
         context.RegisterSyntaxNodeAction(AnalyzeHandWrittenConsume, SyntaxKind.MethodDeclaration);
+        context.RegisterSyntaxNodeAction(AnalyzeHandWrittenVectorLoop, SyntaxKind.MethodDeclaration);
         context.RegisterSymbolAction(AnalyzeConsume, SymbolKind.Method);
         context.RegisterCompilationStartAction(AnalyzeEntityJobs);
     }
@@ -119,6 +137,24 @@ public sealed partial class EasyEcsAnalyzer
         context.ReportDiagnostic(Diagnostic.Create(HandWrittenConsume, destroy.GetLocation(), properties, method.Name,
             bulk ? $"without '{entity.Name}', the method changes no structure, and its rows go at once when the pass ends"
                 : "each entity goes after its row"));
+    }
+
+    // ---------------- EECS103: a vector loop written by hand ----------------
+
+    /// <summary>
+    /// EECS103: a batch [ForEach] method whose body is a vector loop written by hand that the generator writes from the
+    /// method for one row (<see cref="HandSimd"/>: the syntactic prefilter first, then the rewrite bound in a copy of the
+    /// compilation, which must get the generator's loop).
+    /// </summary>
+    private static void AnalyzeHandWrittenVectorLoop(SyntaxNodeAnalysisContext context)
+    {
+        var syntax = (MethodDeclarationSyntax)context.Node;
+        if (!HandSimd.MayBe(syntax) || context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
+            || HandSimd.Of(method, syntax, context.SemanticModel, context.CancellationToken) is not { } perRow) return;
+        var properties = ImmutableDictionary<string, string?>.Empty.Add(FixKind, "PerRow")
+            .Add(PerRowParameters, perRow.Parameters).Add(PerRowBody, string.Join("\n", perRow.Statements));
+        context.ReportDiagnostic(Diagnostic.Create(HandWrittenVectorLoop, syntax.Identifier.GetLocation(), properties, method.Name,
+            perRow.Summary(method.Name)));
     }
 
     // ---------------- EECS080: hand-written one-entity jobs ----------------

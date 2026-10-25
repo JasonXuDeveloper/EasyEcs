@@ -248,7 +248,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         HandWrittenEntityJob, BadForEntity, BadUpdateInterval, HandWrittenConsume, BadConsume, BadTileShape, SharedTile,
         HandWrittenReduce, HandWrittenLookup, SharedStream, HandWrittenEmit, BadSystemType, InstanceMember, BadHook, NotASystemType, MisspelledHook,
         ColdFields, UnclearedRecords, BadLambdaPass, DelegateLambdaPass, ScalarLambdaPass,
-        BadView, ViewOverlap, ViewReachesOut, HandWrittenView, BadPrefab, NearFusion, FusionRequired);
+        BadView, ViewOverlap, ViewReachesOut, HandWrittenView, BadPrefab, NearFusion, FusionRequired, HandWrittenVectorLoop);
 
     public override void Initialize(AnalysisContext context)
     {

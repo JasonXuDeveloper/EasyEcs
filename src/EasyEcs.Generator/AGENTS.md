@@ -57,7 +57,7 @@ ComponentGenerator.cs        C# 14 extension members per component / singleton: 
                              item.X per Query<T1..Tn> shape the code calls, TypeRegistry registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                              lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
 EasyEcsAnalyzer.cs           EECS002-006, EECS009-024, EECS035-036, EECS054, EECS056, EECS070 and EECS072-073 (the
-                             declaration and [ForEach] rules of the range EECS002-102 that are not performance rules;
+                             declaration and [ForEach] rules of the range EECS002-103 that are not performance rules;
                              generators never report diagnostics)
 EasyEcsAnalyzer.Systems.cs   EECS007-008, EECS074-077 and EECS090: systems as declarations (state in a static field, a
                              reach into another system; an [EcsSystem] that is no ref struct, an instance member, a hook
@@ -109,9 +109,14 @@ EasyEcsAnalyzer.Parts.cs     EECS062-069 and EECS102 (a [Prefab] the generator c
                              combines), hand-written reductions, keys and groups the attributes could declare, a wrong
                              Identity, a setup attribute on a type it does not fit, a managed type without a Nino
                              formatter (Warning when the code saves what holds it: entity saves write no singletons)
-EasyEcsAnalyzer.Forms.cs     EECS080-085: what the generator declares for code written by hand (a one-entity job
-                             [ForEntity] writes, a [ForEach] method that destroys every entity it visits: [Consume])
+EasyEcsAnalyzer.Forms.cs     EECS080-085 and EECS103: what the generator declares for code written by hand (a one-entity
+                             job [ForEntity] writes, a [ForEach] method that destroys every entity it visits: [Consume],
+                             a batch method's vector loop written by hand that the method for one row gets generated)
                              and those attributes (and [UpdateInterval]) where they cannot apply (EECS082 is retired)
+HandSimd.cs                  EECS103's detection, read once for the analyzer and its code fix: a batch [ForEach]
+                             method whose body is a hand-written vector loop (prelude of streams and broadcasts, one
+                             loop by 1 or by Count, lane-wise operations, a scalar tail) rewritten as the method for one
+                             row (PerRow), which must bind in a copy of the compilation and get Kernel.Vectorize's loop
 EasyEcsAnalyzer.Parameters.cs  EECS086, EECS087, EECS089: a [ForEach] method doing by hand what a parameter does per
                              chunk (a singleton reset by system code and accumulated row by row: Reduce<T>, reported
                              at the end of the compilation; other entities read through the World: Lookup<T>; records

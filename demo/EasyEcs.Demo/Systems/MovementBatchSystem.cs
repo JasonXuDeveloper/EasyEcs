@@ -9,6 +9,9 @@ namespace EasyEcs.Demo;
 [EcsSystem, UpdateInGroup<Batched>]
 public ref struct MovementBatchSystem
 {
+    // EECS103: the generator writes this loop from MovementSystem's method for one row; the demo keeps the batch form
+    // to show it until its rewrite (docs/plans/inner-loops.md, WP7).
+#pragma warning disable EECS103
     [ForEach]
     static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities, in Clock clock)
     {
@@ -29,4 +32,5 @@ public ref struct MovementBatchSystem
             last.Y += velocities[^1].Y * clock.Dt;
         }
     }
+#pragma warning restore EECS103
 }
