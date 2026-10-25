@@ -369,7 +369,7 @@ public class GeneratorTests
     [TestCase("[ForEach(SimdMode = SimdMode.Require, Parallel = true)] static void A(ref F f, in B8 b) => f.V++;", "lane types byte and float differ in size: a vector loop takes lanes of one size and of twice that size, not 4 times")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 1 field it uses takes 9 permutes per 16 rows, more than its 1 vector operation gains; it uses 1 of Five's 5 fields (A): move it into a component of its own (a component of one field gets a vector loop)")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, Scratch<int> s) => f.V += s.Value;", "it takes a Scratch<Int32>: working memory a row at a time, not one per lane")]
-    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, Lookup<H> h) => f.V++;", "it takes a Lookup<H>: a lookup of another entity per row has no vector form")]
+    [TestCase("public struct Aim : IComponent { public EntityId Target; } [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, in Aim a, Lookup<D> d) { if (d.Has(a.Target)) f.V = 1; }", "it reads Lookup<D>, whose fields are not all lanes of 4 bytes (float, int, uint): a vector loop gathers only those")]
     public void ARequiredVectorLoopThatDoesNotQualifyIsAnError(string members, string reason)
     {
         var diagnostics = Analyze([Components, Lanes, $"[EcsSystem] public ref struct S {{ {members} }}"]).Result.Where(d => d.Id.StartsWith("EECS05")).ToArray();

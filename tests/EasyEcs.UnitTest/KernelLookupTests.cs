@@ -69,8 +69,35 @@ public static class LookupKernels
     public static void Clear(ref Course course) => course = default;
 }
 
+/// <summary>The same read with the gathers asked for and without (SimdMode.Auto keeps it row by row).</summary>
+[EcsSystem]
+public ref struct AimingSystem
+{
+    [ForEach(SimdMode = SimdMode.Require)]
+    static void Gathered(in Beacon beacon, in Tracker tracker, ref Course course, Lookup<Beacon> beacons) =>
+        course = beacons.Has(tracker.Target) ? new Course(beacons.Read(tracker.Target).X - beacon.X, 0) : default;
+
+    [ForEach]
+    static void Plain(in Beacon beacon, in Tracker tracker, ref Course course, Lookup<Beacon> beacons) =>
+        course = beacons.Has(tracker.Target) ? new Course(beacons.Read(tracker.Target).X - beacon.X, 0) : default;
+}
+
 public class KernelLookupTests
 {
+    /// <summary>
+    /// A vector loop reads other entities only where the method asks for it: the gathers lose a little where targets
+    /// spread over many tables, which only the data knows (D131); without SimdMode.Require the schedule says why.
+    /// </summary>
+    [Test]
+    public void AVectorLoopGathersOnlyWhereTheMethodAsks()
+    {
+        using var world = new World();
+        world.AddSystem<AimingSystem>();
+        var loops = world.DescribeSchedule().Groups[0].Stages[0].Systems[0].Loops;
+        Assert.That(loops[0], Does.StartWith("Gathered: vector"));
+        Assert.That(loops[1], Does.StartWith("Plain: scalar (it reads other entities through a Lookup<T>: a vector loop gathers them, faster where a vector's targets share a table and up to 1.1 times as slow where they spread over many; SimdMode = SimdMode.Require asks for it)"));
+    }
+
     /// <summary>
     /// Trackers aiming at beacons in <paramref name="tables"/> tables (runs of <paramref name="run"/> trackers into one
     /// table, or each a random one when 0); with <paramref name="odd"/>, also targets that are destroyed (their ids
