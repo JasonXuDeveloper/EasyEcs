@@ -178,13 +178,14 @@ public class LaneMathTests
         where TIn : struct, IComponent where TOut : struct, IComponent
     {
         long chunks = (count + Rows - 1) / Rows, wrong = 0;
-        string? first = null;
+        string first = null;
         int workers = Math.Min(Environment.ProcessorCount, 4);
         Parallel.For(0, workers, w =>
         {
             using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 1 });
             var inputs = new TIn[Rows];
             var entities = new Entity[Rows];
+            world.Reserve<TIn, TOut>(Rows);
             for (int i = 0; i < Rows; i++) entities[i] = world.CreateEntity(default(TIn), default(TOut));
             for (long chunk = w; chunk < chunks; chunk += workers)
             {
@@ -324,6 +325,7 @@ public class LaneMathTests
         var xs = new Whole[count];
         var ys = new Divisor[count];
         var entities = new Entity[count];
+        world.Reserve<Whole4, Whole, Divisor>(count);
         for (int i = 0; i < count; i++)
         {
             xs[i] = new Whole { Value = NextInt(random) };
@@ -379,6 +381,7 @@ public class LaneMathTests
     {
         using var world = new World();
         var entities = new Entity[count];
+        world.Reserve<Whole4, Whole>(count);
         for (int i = 0; i < count; i++) entities[i] = world.CreateEntity(new Whole4(), new Whole { Value = i == count - 1 ? int.MinValue : i * 7919 - 100_000 });
         Assert.Throws<OverflowException>(() => LoweredKernels.Throwing(world));
         for (int i = 0; i < count - 1; i++)
@@ -400,6 +403,7 @@ public class LaneMathTests
         var xs = new Long1[count];
         var entities = new Entity[count];
         long[] specials = [0, 1, -1, 7, -7, 8, -8, 9, -9, long.MinValue + 1, long.MaxValue, long.MaxValue - 7, 1L << 62, -(1L << 62)];
+        world.Reserve<Long4, Long1>(count);
         for (int i = 0; i < count; i++)
         {
             xs[i] = new Long1 { Value = random.Next(3) == 0 ? specials[random.Next(specials.Length)] : random.NextInt64(long.MinValue, long.MaxValue) };
@@ -426,6 +430,7 @@ public class LaneMathTests
         var entities = new Entity[count];
         ulong[] specials = [0, 0x8000000000000000, 1, 0x7FF0000000000000, 0xFFF0000000000000, 0x7FF8000000000000, 0x7FF0000000000001,
             0xFFF8000000000001, 0x000FFFFFFFFFFFFF, 0x0010000000000000, 0x7FEFFFFFFFFFFFFF, 0x3FF0000000000000];
+        world.Reserve<Real8x4, Real8>(count);
         for (int i = 0; i < count; i++)
         {
             ulong bits = random.Next(4) == 0 ? specials[random.Next(specials.Length)] : (ulong)random.NextInt64() ^ ((ulong)random.Next(2) << 63);
@@ -454,6 +459,7 @@ public class LaneMathTests
         var ys = new Divisor[count];
         var outs = new Whole4[count];
         var entities = new Entity[count];
+        world.Reserve<Whole4, Whole, Divisor>(count);
         for (int i = 0; i < count; i++)
         {
             xs[i] = new Whole { Value = NextInt(random) | 1 };

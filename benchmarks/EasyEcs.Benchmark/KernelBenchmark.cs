@@ -113,6 +113,8 @@ public partial class KernelBenchmark
         var random = new Random(5);
         float F() => (float)random.NextDouble() * 10 - 5;
         for (int table = 0; table < 1000; table++)
+        {
+            world.Reserve<Heat, Speed, P2, V2, P3, V3>(5 + table % 16);
             for (int row = 0; row < 5 + table % 16; row++)
             {
                 var e = world.CreateEntity(new Heat { Value = F() }, new Speed { Value = F() }, new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() },
@@ -128,6 +130,7 @@ public partial class KernelBenchmark
                 if ((table & 256) != 0) e.Set(new Tag8());
                 if ((table & 512) != 0) e.Set(new Tag9());
             }
+        }
 
         return world;
     }
