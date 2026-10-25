@@ -405,6 +405,7 @@ public class ViewRuleTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(PQ v, ref P p) => v.Add(); }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(PQ v, Maybe<Q> q) => v.Add(); }")]
     [TestCase("[View] public ref struct OnlyQ { public ref readonly Q Q; } [EcsSystem] public ref struct S { [ForEach] static void A(PQ v, OnlyQ w) => v.Add(); }")]
+    [TestCase("public static class R { [ForEntity] static void A(PQ v, in Q q) => v.Add(); }")]                                // [ForEntity]
     public async Task AComponentReachedTwiceIsAnError(string source) =>
         Assert.That(await Ids(source), Is.EqualTo(new[] { "EECS099" }));
 
@@ -429,6 +430,8 @@ public class ViewRuleTests
     [TestCase("[View] public ref struct V { public ref P P; public readonly int Twice() => this.P.V * 2; }")]                         // its own fields
     [TestCase("public static class U { public static void F(Entity a, Entity b) { var v = new PQ { P = ref a.Get<P>(), Q = ref b.Read<Q>() }; v.Add(); } }")]  // two entities
     [TestCase("public static class U { public static void F(ref P p, in Q q) { var v = new PQ { P = ref p, Q = ref q }; v.Add(); } }")]  // no pass
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p) { var v = new PQ { P = ref p }; v.P.V++; } }")]           // not every field
+    [TestCase("[View] public ref struct V { public ref P P; public void A(int n, in Q q) => P.V += n + q.V; }")]                          // plain values
     public async Task OtherViewCodeIsNotReported(string source) =>
         Assert.That(await Ids(source), Is.Empty);
 

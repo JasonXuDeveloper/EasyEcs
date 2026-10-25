@@ -37,7 +37,7 @@ public class GeneratorTests
     /// a hand-written one-entity job or consuming pass with attributes (EECS080, EECS084; FormTests), and the passes
     /// that almost share one walk (EECS093; FusionTests): the cases often write two methods over the same rows.
     /// </summary>
-    private static async Task<string[]> Diagnose(params string[] sources) =>
+    internal static async Task<string[]> Diagnose(params string[] sources) =>
         (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id) && d.Id != "EECS055" && d.Id is not ("EECS067" or "EECS069" or "EECS080" or "EECS084" or "EECS093"))
             .Select(d => d.Id).Distinct().OrderBy(x => x).ToArray();
 
@@ -1311,7 +1311,7 @@ public class GeneratorTests
         Assert.That(errors, Is.Empty);
     }
 
-    private const string Shared = """
+    internal const string Shared = """
         public static class Counters
         {
             public static int Hits; public static bool Any; public static int Max { get; set; }
@@ -2302,7 +2302,7 @@ public class GeneratorTests
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.New), Is.EqualTo(1));
     }
 
-    private const string Extra = """
+    internal const string Extra = """
         public struct Counter : IComponent { public int V; public void Bump() => V++; public readonly int Peek() => V; }
         public struct Boss : IComponent;
         public struct Loot { public int Item; }

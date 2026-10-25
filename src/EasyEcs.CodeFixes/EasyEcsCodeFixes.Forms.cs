@@ -135,13 +135,17 @@ public sealed partial class EasyEcsCodeFixes
         if (!props.ContainsKey("DropEntity") || props["DropEntity"] == null)
             parameters.Add($"{executeParameters[0].Type} {executeParameters[0].Identifier.ValueText}");
         var kinds = (modifiers ?? "").Split(',');
+        var required = new List<string>(); // components the body never names: [With<T>]
         for (int k = 1; k < executeParameters.Count; k++)
-            parameters.Add($"{kinds[k - 1]} {executeParameters[k].Type} {executeParameters[k].Identifier.ValueText}");
+            if (kinds[k - 1] == "with") required.Add($"With<{executeParameters[k].Type}>");
+            else parameters.Add($"{kinds[k - 1]} {executeParameters[k].Type} {executeParameters[k].Identifier.ValueText}");
         foreach (var field in job.Members.OfType<FieldDeclarationSyntax>())
             foreach (var variable in field.Declaration.Variables)
                 parameters.Add($"{field.Declaration.Type} {names[variable.Identifier.ValueText]}");
 
         props.TryGetValue("Filter", out var filter);
+        if (!string.IsNullOrEmpty(filter)) required.Add(filter!);
+        filter = string.Join(", ", required);
         string eol = EndOfLine(job.SyntaxTree.GetRoot()).ToFullString();
         var leading = job.GetLeadingTrivia();
         string indent = leading.Count > 0 && leading.Last().IsKind(SyntaxKind.WhitespaceTrivia) ? leading.Last().ToFullString() : "";

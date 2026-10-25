@@ -255,6 +255,7 @@ public sealed partial class EasyEcsAnalyzer
             string? writable = accessor.Writable ? value.Syntax.ToString() : accessor.Writer;
             if (writable != null)
             {
+                writable = GeneratedWriter(value.SemanticModel!, value.Syntax, writable) ?? writable;
                 string text = $"ref {type} {declarator.Symbol.Name} = ref {writable};";
                 advice = $"keep the ref: '{text}'";
                 if (Binds(value.SemanticModel!, value.Syntax, writable, out _))
@@ -267,6 +268,26 @@ public sealed partial class EasyEcsAnalyzer
 
         context.ReportDiagnostic(Diagnostic.Create(DroppedCopy, declarator.Syntax.GetLocation(), declarator.Symbol.Name, accessor.Name,
             accessor.Writer != null || accessor.Writable ? advice : accessor.Advice));
+    }
+
+    /// <summary>
+    /// The generated member that writes what <paramref name="get"/> (<c>e.Get&lt;X&gt;()</c>) does: <c>e.X</c>, or
+    /// <c>e.WriteX()</c> for a tracked X, when it binds at <paramref name="at"/>; null otherwise. EECS038's fix keeps
+    /// the ref through it, so EECS033 has nothing to ask for next.
+    /// </summary>
+    private static string? GeneratedWriter(SemanticModel model, SyntaxNode at, string get)
+    {
+        if (Microsoft.CodeAnalysis.CSharp.SyntaxFactory.ParseExpression(get) is not InvocationExpressionSyntax
+            {
+                ArgumentList.Arguments.Count: 0,
+                Expression: MemberAccessExpressionSyntax { Name: GenericNameSyntax { Identifier.ValueText: "Get", TypeArgumentList.Arguments: { Count: 1 } arguments } } access,
+            } || arguments[0] is not IdentifierNameSyntax component) return null;
+        string name = component.Identifier.ValueText;
+        foreach (var candidate in new[] { access.Expression + "." + name, access.Expression + ".Write" + name + "()" })
+            if (Binds(model, at, candidate, out var symbol) && Symbols.IsGenerated(symbol!)
+                && symbol is IPropertySymbol { ReturnsByRef: true } or IMethodSymbol { ReturnsByRef: true })
+                return candidate;
+        return null;
     }
 
     /// <summary>

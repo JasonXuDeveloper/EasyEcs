@@ -250,7 +250,7 @@ public sealed partial class EasyEcsAnalyzer
 
         var body = (SyntaxNode?)execute.Body ?? execute.ExpressionBody;
         if (body == null || model.GetOperation(body, token) is not { } operation) return null;
-        int written = 0;
+        int written = 0, used = 0;
         bool usesEntity = false;
         foreach (var o in operation.DescendantsAndSelf())
         {
@@ -264,7 +264,11 @@ public sealed partial class EasyEcsAnalyzer
                     return null; // 'this' itself: the job as a value
                 case IParameterReferenceOperation { Parameter: var p } when SymbolEqualityComparer.Default.Equals(p.ContainingSymbol, run):
                     if (p.Ordinal == 0) usesEntity = true;
-                    else if (Uses.MayWrite(o)) written |= 1 << (p.Ordinal - 1);
+                    else
+                    {
+                        used |= 1 << (p.Ordinal - 1);
+                        if (Uses.MayWrite(o)) written |= 1 << (p.Ordinal - 1);
+                    }
                     break;
             }
         }
@@ -274,7 +278,8 @@ public sealed partial class EasyEcsAnalyzer
         {
             bool inMask = (declared & (1 << k)) != 0;
             if (!inMask && (written & (1 << k)) != 0) return null; // the WriteMask leaves out a write: EECS037's
-            modifiers.Add(inMask ? "ref" : "in");
+            // A component the body never names only filters the entity: [With<T>], not an unused parameter (EECS026).
+            modifiers.Add(inMask ? "ref" : (used & (1 << k)) != 0 ? "in" : "with");
         }
 
         // Each field becomes a parameter, named in camelCase unless that name is taken.

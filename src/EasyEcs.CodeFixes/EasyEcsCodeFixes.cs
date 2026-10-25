@@ -211,8 +211,9 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                                     && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
                                     && !await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false):
                     diagnostic.Properties.TryGetValue("Parameter", out var taken);
+                    diagnostic.Properties.TryGetValue("Drop", out var through);
                     Register(context, diagnostic, taken == null ? $"Use parameter '{name}'" : $"Take it as a parameter ('{taken}')", root, method,
-                        Lookups(root, method, diagnostic.AdditionalLocations, name, taken));
+                        Lookups(root, method, diagnostic.AdditionalLocations, name, taken, through));
                     break;
                 case "EECS054" when kind == "ChunkRows" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
                                     && Named(method, "ChunkRows") is { Parent: AttributeArgumentListSyntax list } chunks:
@@ -736,13 +737,16 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
 
     /// <summary>
     /// EECS027: the lookups the analyzer found (<paramref name="uses"/>) become <paramref name="name"/>, and
-    /// <paramref name="parameter"/> (when the method does not take the type yet) is added after the others.
+    /// <paramref name="parameter"/> (when the method does not take the type yet) is added after the others; the Entity
+    /// or World parameter <paramref name="through"/>, which only the lookups used, goes.
     /// </summary>
     private static MethodDeclarationSyntax Lookups(SyntaxNode root, MethodDeclarationSyntax method, System.Collections.Generic.IEnumerable<Location> uses,
-        string name, string? parameter)
+        string name, string? parameter, string? through)
     {
         var nodes = uses.Select(l => root.FindNode(l.SourceSpan, getInnermostNodeForTie: true)).Where(n => method.Span.Contains(n.Span)).ToList();
         var replaced = method.ReplaceNodes(nodes, (original, _) => SyntaxFactory.IdentifierName(name).WithTriviaFrom(original));
+        if (replaced.ParameterList.Parameters.FirstOrDefault(p => p.Identifier.ValueText == through) is { } unused)
+            replaced = replaced.WithParameterList(replaced.ParameterList.WithParameters(replaced.ParameterList.Parameters.Remove(unused)));
         if (parameter == null) return replaced;
         var added = SyntaxFactory.ParseParameterList("(" + parameter + ")").Parameters[0];
         var list = replaced.ParameterList.Parameters;
@@ -894,8 +898,9 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
 
         if (onType != null) rewritten = WithAttribute(rewritten, imported ? onType : "EasyEcs." + onType, root);
 
-        var marked = root.ReplaceNode(type, rewritten.WithAdditionalAnnotations(Marker));
-        return Partial(marked, marked.GetAnnotatedNodes(Marker).OfType<TypeDeclarationSyntax>().Single());
+        var marker = new SyntaxAnnotation();
+        var marked = root.ReplaceNode(type, rewritten.WithAdditionalAnnotations(marker));
+        return Partial(marked, marked.GetAnnotatedNodes(marker).OfType<TypeDeclarationSyntax>().Single());
     }
 
     /// <summary>
@@ -925,11 +930,10 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         bool imported = model.LookupNamespacesAndTypes(type.SpanStart, name: name + "Attribute").Any(s => s.ToDisplayString() == ns + "." + name + "Attribute");
         var marked = WithAttribute(type, imported ? name : ns + "." + name, root);
         if (!nino) return root.ReplaceNode(type, marked);
-        var withMark = root.ReplaceNode(type, marked.WithAdditionalAnnotations(Marker));
-        return Partial(withMark, withMark.GetAnnotatedNodes(Marker).OfType<TypeDeclarationSyntax>().Single());
+        var marker = new SyntaxAnnotation();
+        var withMark = root.ReplaceNode(type, marked.WithAdditionalAnnotations(marker));
+        return Partial(withMark, withMark.GetAnnotatedNodes(marker).OfType<TypeDeclarationSyntax>().Single());
     }
-
-    private static readonly SyntaxAnnotation Marker = new("EasyEcs.Part");
 
     private static SyntaxTrivia EndOfLine(SyntaxNode root) =>
         root.DescendantTrivia().FirstOrDefault(t => t.IsKind(SyntaxKind.EndOfLineTrivia)) is { RawKind: (int)SyntaxKind.EndOfLineTrivia } eol ? eol : SyntaxFactory.LineFeed;
