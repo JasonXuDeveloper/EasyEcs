@@ -130,8 +130,10 @@ next to the generated text, and asks per loop: how many instructions per vector,
 computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
 
 - **Copies in the text are free, shuffles are not**: `var __c = __s;` and `__t` temporaries for a whole-value
-  assignment vanish (the JIT copy-propagates them). Removing them is not neutral either: it changed which forms the
-  JIT inlined into `Move3`'s runner (D126), so a text cleanup ships only with identical Tier1 listings. The rules for the text, and which change needs which proof, are
+  assignment vanish (the JIT copy-propagates them) once the method is compiled, but each one is an IL local, and
+  locals decide whether the method is inlined at all (32 at most, below). That is why removing the loads' copies
+  changed Move3's runner (D126): its masked `Execute` fell from 36 to 24 locals and was inlined instead of called
+  per word, so a text cleanup ships only with Tier1 listings and the runtime's inlining events compared. The rules for the text, and which change needs which proof, are
   `audit-generator`'s ("The generated text"). Compare
   listings with `DOTNET_TieredPGO=0`: with PGO on, Tier1 follows the profile the run collected. What costs is
   deinterleaving: `Move` (`position += velocity`, two floats each) spends 6 `vpermt2ps` and 4 permutation-table loads
@@ -154,6 +156,17 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
   loop stays inlined (cold parts in `NoInlining` helpers called once per run, each width in its own method, or a
   generated entry that runs the word loop itself), and a test pins `call ...Execute`-free runners. The plan and its
   measurements: `docs/plans/inner-loops.md`, WP0b.
+- **The JIT never inlines a method that declares more than 32 IL locals**, `AggressiveInlining` or not (RyuJIT's
+  `MAX_INL_LCLS`, observation `CALLEE_TOO_MANY_LOCALS`, reported "too many locals"; the callee is then marked
+  noinline for every later call site, "noinline per IL/cached result"). It is exact on every job measured: 32 locals
+  inline, 33 do not (Move3's masked `Execute`: 36 with the loads' copies, 24 without). So every generated method a
+  runner must inline (`Execute` of each form, a per-width method of WP0b) keeps **at most 32 IL locals**; count them in
+  the IL, not in the C# (`ilspycmd --ilcode`, `.locals` of the method): Roslyn folds a copy only when the copied-to
+  local is never written again, and every `out` argument, `var`, pattern and compiler temporary is one. The generator
+  counts the locals it declares per method and splits (WP0b) before 32; a test pins the count for each form's corpus.
+  Read why an inline failed from the runtime's own events, not by guessing: an in-process `EventListener` on
+  `Microsoft-Windows-DotNETRuntime` with the JitTracing keyword (0x1000) gets `MethodJitInliningSucceeded` /
+  `MethodJitInliningFailed` with the reason (`DOTNET_JitPrintInlinedMethods` needs a checked runtime).
 - **The four copies of the body are text, not code**: two widths × masked/unmasked; the width the hardware lacks is
   removed at JIT time (`IsHardwareAccelerated` is a constant). They cost generator output and build time, and IL the
   inliner may count before it removes the dead width (the lesson above): measure any copy added.

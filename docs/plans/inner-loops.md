@@ -387,6 +387,10 @@ Agents per the `audit` skill (at most three; pair the one that measures with one
   even a forced inline fails, and the job becomes a call per run, per 64-row word in a masked table: D126's masked
   tail lost up to 3.7x that way. Every larger form of this plan (unrolled inline arrays, element loops, Cell
   kernels) makes bodies bigger, so the generator must shape its output to stay inlined, not hope it does.
+- **The limit that bites first is 32 IL locals** (measured, `audit-vector-loops`): the JIT refuses to inline a method
+  that declares more, even with `AggressiveInlining`. Move3's masked `Execute` had 36 (24 without the loads'
+  `__s` -> `__c` copies) and was called per word; CycleJob9's masked form has 33 either way. Each form's methods are
+  sized by their IL local count first, IL bytes second; the generator counts and a test pins it.
 - Find the limit, do not guess: read why an inline failed (`DOTNET_JitStdOutFile` with the inliner's report where
   the release runtime prints it; else the Tier1 listing of the runner, `tools/jitdisasm.sh`, for `call ...Execute`),
   with `DOTNET_TieredPGO=0` for comparable listings.

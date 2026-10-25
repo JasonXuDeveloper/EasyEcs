@@ -111,8 +111,10 @@ Write it like hand-written code:
   no local nobody reads (deinterleaved fields, broadcasts, pair masks, accumulator holds a body never uses), no empty
   method (an empty `Create` / `Destroy` hook: interface defaults instead), no `x = default` the constructor already
   gives, no `(object __owner)` parameter nobody reads.
-  The one kept copy: the loads' `out __s` -> `__c` copy changed Move3's Tier1 code when removed (D126); it stays
-  until the loads return their values, and the template says so in a comment.
+  A copy is not free in IL: each local counts toward the JIT's limit of 32 per inlined method (`audit-vector-loops`,
+  "The JIT never inlines a method that declares more than 32 IL locals"); the loads' `out __s` -> `__c` copy alone
+  took Move3's masked `Execute` from 24 to 36 locals and out of the runner. Every generated method a runner inlines
+  stays at 32 IL locals or fewer: the generator counts what it declares and splits before the limit (WP0b).
 - **Say a value once**: a constant is `.Zero` / `.One` / a literal in place, not a local made per width
   (`var __u1 = Create<int>((0))`); setup that does not depend on the width (singleton refs, `Identity`,
   `this.v0 = default`) is written once above the width blocks; a mark written once is assigned, not zeroed then OR-ed
