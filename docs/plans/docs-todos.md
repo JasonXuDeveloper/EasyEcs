@@ -215,3 +215,7 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 - src XML docs: World `ForEachParallel(Delegate)` example shows `world.ForEach(since, ...)` (should it be ForEachParallel?);
   ForEachAttributes.cs / SystemGroups.cs write `<c>[WithAny<T1, T2>]</c>` where a `<see cref="WithAnyAttribute{T1,T2}"/>`
   would link again (then refresh the zh entries).
+
+## audit-analyzer-tests step 2 (merged)
+- analyzer guide (en/zh) EECS025: the unwritten view-field case is reported at compilation end (after a full analysis
+  or build, not while typing); the other EECS025 cases stay live.
