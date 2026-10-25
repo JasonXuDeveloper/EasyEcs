@@ -37,6 +37,9 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
       Now carried by WP0b (branch `feat-wp0b` starts on it; WP0b's A/B covers the copy fix against the tip).
       The remote branch `research-copy-asm` could not be deleted from the session (proxy); the owner deletes it.
 
+- [ ] **Layout instead of gathers** (owner: redesign the layers under the vector loops after GROMACS's cluster pairs
+      and Polychroniou SIGMOD 2015; `locality.md`): phase 0 hand-written benchmarks first (pairs, nearest, ordered
+      lookups, compress / batch probes), each with its bar; starts after gather-always reports and WP0b merges.
 - [ ] **Lookup gathers always on** (owner: they should win everywhere, then no option; branch `feat-gather-always`):
       diagnose the 64-table loss; lead: unmanaged columns are pinned (POH), so a per-table column-address table could
       let one vector gather across tables GC-safely; widen LookupGatherBenchmark (1/4/64/1,000 tables, dead lanes,
