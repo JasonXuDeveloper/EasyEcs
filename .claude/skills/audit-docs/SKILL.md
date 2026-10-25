@@ -17,6 +17,8 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/AGENTS.md` first.
 2. **Examples are exemplary** (`ecs-principles.mdx`): plain data components, one system per responsibility, stateless
    systems, generated members (`entity.Health`, `item.Health`, `SetX`) over generic calls, and no analyzer warning
    (Read for read-only loops, values at creation instead of Set, ...). DocCheck compiles fences, not their quality.
+   The samples, demo, templates and benchmark worlds the pages include were rewritten in the newest forms by the
+   exemplar pass (`audit-code`) before this pass; a fence still in an older form is rewritten here the same way.
 3. **Anatomy** (WRITING.md "Page anatomy"; a feature's guide page has every part, in this order):
    - **what it is**: the problem it solves, in two to four sentences;
    - **when to use it**: an `idea` Callout (use it for) and a `warn` Callout (do not use it for: what to use instead);

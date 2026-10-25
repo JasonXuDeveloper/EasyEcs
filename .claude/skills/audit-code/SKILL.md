@@ -43,6 +43,30 @@ code duplicated across projects, a project reaching into another's internals.
 - **Fast and simple together**: a simplification that costs speed is not one; a fast path that duplicates a slow one
   should share its core.
 
+## Exemplar pass (before every docs pass)
+
+Users copy what they read, so once a round's features have merged, every piece of code users read is rewritten in the
+newest recommended form, the one the docs will teach (the owner's rule: the docs pass starts from code that already
+shows the newest forms).
+
+- **Scope**: `samples/` (every sample, VoxelServer included), `templates/`, `demo/EasyEcs.Demo`, the headline
+  benchmark worlds (`BattleServer.cs`, `WorldSimulation.cs`, the recommended variant of each feature benchmark), the
+  tests that model usage (scenario and BattleServer tests, fixtures), and every C# fence of `docs/content` (with the
+  docs pass when the page itself changes).
+- **What changes**: each place uses the form the round made the recommended one (generated members and
+  declarations, `[ForEach]` / lambda passes, views and prefabs, vector-loop-eligible methods, fusion-friendly passes,
+  structural changes in passes, `[LookupKey]`, ...): read the changelog's entries of the round and the feature
+  guide pages' "how to use it" for the list, and make the analyzer clean (no EECS055: methods run as vector loops
+  where the form allows).
+- **What stays**: a benchmark or test whose job is a specific form (hand-written vs generated, old vs new, a
+  low-level API's own tests, the comparison projects' forms per library) keeps it; say so in a comment if a reader
+  could take it for an old form.
+- **Proof**: samples' outputs still match their README (`check-sample.sh`), the templates' smoke test, the demo
+  builds and runs, `dotnet test`; a rewritten benchmark world is A/B-measured against the old one (it must not be
+  slower; a slower recommended form is a finding for the generator or the docs, not a reason to keep the old form
+  silently) before the site's numbers are synced.
+- Commits: samples, templates/demo, benchmarks and tests apart; their README/page text with the docs pass.
+
 ## Fixing
 
 - One concern per commit (logic, docs and CI apart); behavior unchanged unless a bug is found (then a regression
