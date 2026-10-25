@@ -73,7 +73,8 @@ EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-034, EECS039, EECS046, EECS
                              generated member, Update in a system, a Mut<T> of an untracked component, a Query loop
                              that only reads, a Set right after a creation, a tracked ref written on some rows only
                              (through a view's 'ref' field and in view members too), a
-                             method left without a vector loop); each computes its fix as
+                             method left without a vector loop; EECS025 and EECS053 for the parameters of lambda passes
+                             too); each computes its fix as
                              diagnostic properties for EasyEcs.CodeFixes
 PartGenerator.cs             [Sum]..[Any], [IndexKey]/[UniqueKey], [Group] -> a part of the partial struct (IReduction<T>,
                              IIndexed<K>.Key, IGroup.Group); Parts.cs: the models and Problems read once for the
@@ -120,10 +121,12 @@ EasyEcsAnalyzer.Layout.cs    EECS091 (compilation end): a component of 32 bytes 
                              collected from AnalyzeBody; components EECS055 already advises to split are left to it)
 EasyEcsAnalyzer.Lambdas.cs   EECS095-097: a lambda pass the generator cannot compile (Error, it would throw; the fix
                              passes captured values before a static lambda), one run through its delegate (the fix
-                             makes the private member internal), one left without a vector loop (Info, Kernel's reason)
+                             makes the private member internal), one left without a vector loop (Info, Kernel's reason); EECS049 for a
+                             lambda pass whose own filters no entity passes
 EasyEcsAnalyzer.Views.cs     EECS098-101: an invalid [View], a component reached twice through views, a view member
                              that reaches beyond its entity, a view built by hand (fixes: the view as the parameter,
-                             entity.AsX()); EECS053's check in view members
+                             entity.AsX()); EECS053's check in view members; EECS025 (compilation end) for a view's
+                             'ref' field no code writes through (fix: 'ref readonly')
 EasyEcsAnalyzer.Records.cs   EECS092 (compilation end): an Emit<T> whose Emitted<T> no code of the compilation clears
                              (a public record type of a library is left to the assemblies using it)
 EasyEcsAnalyzer.Fusion.cs    EECS093-094: two passes over the same rows that almost share one walk (the reason

@@ -21,7 +21,8 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                LaneMath (the math a vector loop lowers: integer division, a float divided by a power of two, Pow, the throwing
                                Abs / CopySign / Sign, FloatMode.Fast's forms; every 32-bit input under the explicit category Exhaustive),
                                Generator (diagnostics + caching), Analyzer (one file per analyzer file: .Systems,
-                               .Declarations, .Parallel, .Usage, .Forms, the edges each rule branches on and the code
+                               .Declarations, .Parallel, .Usage, .Forms, .Performance (lambda passes and view fields), the
+                               edges each rule branches on and the code
                                it leaves alone; AnalyzerTests.cs: AssertReports / AssertClean / Count), CodeFix (each
                                fix compiles, adds no diagnostic and is not offered again), BattleServer (the world of
                                docs/content/example.mdx as a whole, linked from EasyEcs.Benchmark); Fixtures.cs holds
