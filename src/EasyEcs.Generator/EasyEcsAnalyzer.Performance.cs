@@ -989,45 +989,45 @@ public sealed partial class EasyEcsAnalyzer
     }
 
     /// <summary>
-    /// The component, singleton or buffer a generated member is for: the type named by the member's name without its
-    /// prefix (Has, Is, TryGet, Write, GetOrAdd, Set, Remove, Disable, Enable, Link, Unlink, Links, In), in the generated class's namespace.
+    /// The component, singleton or buffer a generated member is for: the type the generated class is named after (its
+    /// flat name Outer__Inner plus EcsExtensions or EcsBufferExtensions), when the member's name is that type's name
+    /// after a prefix (Has, Is, TryGet, Write, GetOrAdd, Set, Remove, Disable, Enable, Link, Unlink, Links, In).
     /// </summary>
     private static ITypeSymbol? Named(ISymbol member, Core core)
     {
         var holder = member.ContainingType;
         while (holder?.ContainingType != null) holder = holder.ContainingType;
         if (holder?.ContainingNamespace is not { } ns) return null;
-        string name = member.Name;
+        bool buffer = holder.Name.EndsWith(ComponentGenerator.Classes.Buffer, System.StringComparison.Ordinal);
+        string suffix = buffer ? ComponentGenerator.Classes.Buffer : ComponentGenerator.Classes.Members;
+        if (!holder.Name.EndsWith(suffix, System.StringComparison.Ordinal) || holder.Name.Length == suffix.Length) return null;
+        // Walk the flat name's levels down from the namespace: one lookup per level, no scan of the namespace.
+        INamespaceOrTypeSymbol scope = ns;
+        INamedTypeSymbol? type = null;
+        foreach (var level in holder.Name.Substring(0, holder.Name.Length - suffix.Length).Split(new[] { "__" }, System.StringSplitOptions.None))
+        {
+            type = null;
+            foreach (var candidate in scope.GetTypeMembers())
+                if ((candidate.Arity == 0 ? candidate.Name : candidate.Name + "_" + candidate.Arity) == level) { type = candidate; break; }
+            if (type == null) return null;
+            scope = type;
+        }
+        if (type is not { TypeKind: TypeKind.Struct } || !NamesType(member.Name, type.Name)) return null;
+        return buffer ? core.Entity.ContainingNamespace.GetTypeMembers("DynamicBuffer", 1).FirstOrDefault()?.Construct(type) : type;
+    }
+
+    /// <summary>Whether a generated member's name is <paramref name="type"/> after one of the generated prefixes.</summary>
+    private static bool NamesType(string name, string type)
+    {
         if (name.StartsWith("Is") && name.EndsWith("Disabled") && name.Length > "IsDisabled".Length) name = name.Substring(2, name.Length - 10);
         if (name.StartsWith("Set") && name.EndsWith("IfChanged") && name.Length > "SetIfChanged".Length) name = name.Substring(0, name.Length - 9);
-        foreach (var prefix in new[] { "", "Has", "Is", "TryGet", "Write", "GetOrAdd", "Set", "Remove", "Disable", "Enable", "Link", "Unlink", "Links", "In" })
-        {
-            if (!name.StartsWith(prefix) || name.Length == prefix.Length) continue;
-            string type = name.Substring(prefix.Length);
-            // The class is named after the type's flat name (Outer__Inner): its type is the one whose flat name it carries.
-            foreach (var candidate in TypesNamed(ns, type))
-            {
-                bool buffer = holder.Name == Symbols.FlatName(candidate) + ComponentGenerator.Classes.Buffer;
-                if (!buffer && holder.Name != Symbols.FlatName(candidate) + ComponentGenerator.Classes.Members) continue;
-                if (buffer)
-                    return core.Entity.ContainingNamespace.GetTypeMembers("DynamicBuffer", 1).FirstOrDefault()?.Construct(candidate);
-                return candidate;
-            }
-        }
-
-        return null;
+        foreach (var prefix in GeneratedPrefixes)
+            if (name.Length == prefix.Length + type.Length && name.StartsWith(prefix, System.StringComparison.Ordinal) && name.EndsWith(type, System.StringComparison.Ordinal))
+                return true;
+        return false;
     }
 
-    private static IEnumerable<INamedTypeSymbol> TypesNamed(INamespaceSymbol ns, string name)
-    {
-        var pending = new Stack<INamedTypeSymbol>(ns.GetTypeMembers());
-        while (pending.Count > 0)
-        {
-            var type = pending.Pop();
-            if (type.Name == name && type.TypeKind == TypeKind.Struct) yield return type;
-            foreach (var nested in type.GetTypeMembers()) pending.Push(nested);
-        }
-    }
+    private static readonly string[] GeneratedPrefixes = { "", "Has", "Is", "TryGet", "Write", "GetOrAdd", "Set", "Remove", "Disable", "Enable", "Link", "Unlink", "Links", "In" };
 
     // ---------------- EECS028: allocations ----------------
 
