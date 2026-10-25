@@ -39,6 +39,9 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
 - [ ] **Borrowed ideas** (`borrowed-ideas.md`): prefetching chases (AMAC) after gather-always, a timer wheel for
       waiting entities, ghost rows between worlds as an example first, streaming stores, roofline in `audit-perf`;
       NUMA / hybrid cores wait in `owner-review.md` for a machine that has them.
+- [ ] **Generated code tuned for the machine** (owner: users never think about pipeline, caches, branches;
+      `microarch.md`): M0 llvm-mca over every kernel shape after WP0b merges, then M1 accumulators / unrolling /
+      hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3 prefetch / streaming stores.
 - [ ] **Lookup gathers always on** (owner: they should win everywhere, then no option; branch `feat-gather-always`):
       diagnose the 64-table loss; lead: unmanaged columns are pinned (POH), so a per-table column-address table could
       let one vector gather across tables GC-safely; widen LookupGatherBenchmark (1/4/64/1,000 tables, dead lanes,

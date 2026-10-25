@@ -36,6 +36,8 @@ part names the skill that audits it.
   no line that does nothing, a value said once, names after the fields, a form that refers to code another file
   generates instead of copying it; the change's sources join `GeneratedTextTests`' corpus; a text-only change is
   proven by identical IL, anything else by Tier1 listings.
+- Generated code is tuned for the machine so users need not be (`audit-generator`, "Tuned for the machine"):
+  no loop-carried chain, branch per row or second load of a row the generator could have avoided.
 - Models are equatable and symbol-free, a tracking name per stage, a caching assertion and a generated-output test
   in `GeneratorTests`; generators report no diagnostics; partial and nested types are handled (the declaring chain
   is partial or reported).

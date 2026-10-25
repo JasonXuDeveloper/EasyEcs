@@ -94,6 +94,25 @@ record a dropped one.
 The vector loops (`Kernel*.cs`: what becomes SIMD, side effects, fixable reasons, proof) have their own skill:
 `audit-vector-loops`.
 
+## Tuned for the machine (the owner's rule)
+
+Users write plain methods and never think about the pipeline, the caches or the branch predictor; the code the
+generators write does. Every generated form is checked for:
+
+- **Chains**: a loop-carried dependency (one accumulator, a running value) is the bound when its latency exceeds the
+  loop's work; independent accumulators or two vectors per iteration break it, within the 32-IL-locals budget
+  (`audit-vector-loops`) and the exactness rules.
+- **Branches**: conditions become masks or selects; what is rare goes out of line (`NoInlining`); a test before a
+  masked block stays only where its outcome is predictable; conditions that pick rows belong in data (tags), and the
+  analyzer says so.
+- **Caches**: each row loaded once (fusion), columns walked in order, chunks on 64-row multiples, chases prefetched,
+  write-only streams past the cache not read for ownership.
+- **Front end**: cold code out of line, bodies within the inliner's budget.
+
+How to see the bound without hardware counters (the VM has none): `llvm-mca` on the Tier1 loop
+(`tools/jitdisasm.sh`), then BenchmarkDotNet with controlled data (sorted against shuffled, 1k / 100k / 1M rows).
+The open work is `docs/plans/microarch.md`.
+
 ## The generated text (rules for every template; read it every round)
 
 Generated code is code users read: Go To Definition opens it, the docs' "The generator writes" tabs show it, and its

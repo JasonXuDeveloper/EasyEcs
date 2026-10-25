@@ -132,6 +132,10 @@ form to support.
 
 ## Read the loop the JIT wrote, not only the text the generator wrote
 
+Every loop is also checked against `audit-generator`, "Tuned for the machine" (chains, branches, caches, front end):
+run `llvm-mca -mcpu=icelake-server` (and `znver4`) on the Tier1 loop body to see whether it is bound by a dependency
+chain, by ports or by memory before choosing a change.
+
 Every round reads the Tier1 code of the samples' loops (`tools/jitdisasm.sh samples/MultiWorld 'EasyEcs.World:Masked'`)
 next to the generated text, and asks per loop: how many instructions per vector, which of them move data instead of
 computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
