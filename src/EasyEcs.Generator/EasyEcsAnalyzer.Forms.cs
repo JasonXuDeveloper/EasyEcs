@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -173,9 +174,12 @@ public sealed partial class EasyEcsAnalyzer
         if (compilation.GetTypeByMetadataName(Symbols.Entity) is not { } entityType) return;
         var shapes = new ConcurrentDictionary<INamedTypeSymbol, JobShape>(SymbolEqualityComparer.Default);
         var uses = new ConcurrentBag<JobUse>();
-        // The names of the struct types that implement IForEachEntity: only identifiers with one of them are bound.
-        var names = new HashSet<string>(compilation.GetSymbolsWithName(_ => true, SymbolFilter.Type).OfType<INamedTypeSymbol>()
-            .Where(t => t.TypeKind == TypeKind.Struct && EntityJobInterface(t) != null).Select(t => t.Name));
+        // The names of the structs whose base list names IForEachEntity: only identifiers with one of them are bound.
+        // Read from syntax, once per tree (an edit rereads its own tree only), instead of every type symbol of the
+        // compilation at each compilation start; EntityJobInterface still decides from the symbol.
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var tree in compilation.SyntaxTrees)
+            foreach (var name in EntityJobNames(tree, start.CancellationToken)) names.Add(name);
         if (names.Count == 0) return;
 
         start.RegisterSyntaxNodeAction(context =>
@@ -224,6 +228,29 @@ public sealed partial class EasyEcsAnalyzer
             }
         });
     }
+
+    /// <summary>The names of the structs of <paramref name="tree"/> whose base list names IForEachEntity, cached per tree.</summary>
+    private static string[] EntityJobNames(SyntaxTree tree, System.Threading.CancellationToken token) =>
+        EntityJobNamesOf.GetValue(tree, t =>
+        {
+            var found = new List<string>();
+            // Declarations only: member bodies hold no struct declarations.
+            foreach (var node in t.GetRoot(token).DescendantNodes(n => n is CompilationUnitSyntax or BaseNamespaceDeclarationSyntax or TypeDeclarationSyntax))
+                if (node is StructDeclarationSyntax { BaseList: { } bases } declaration
+                    && bases.Types.Any(b => RightmostName(b.Type) == "IForEachEntity"))
+                    found.Add(declaration.Identifier.ValueText);
+            return found.ToArray();
+        });
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<SyntaxTree, string[]> EntityJobNamesOf = new();
+
+    private static string? RightmostName(TypeSyntax type) => type switch
+    {
+        SimpleNameSyntax simple => simple.Identifier.ValueText,
+        QualifiedNameSyntax qualified => qualified.Right.Identifier.ValueText,
+        AliasQualifiedNameSyntax alias => alias.Name.Identifier.ValueText,
+        _ => null,
+    };
 
     /// <summary>The one IForEachEntity&lt;T1..Tn&gt; a struct implements (directly), else null.</summary>
     private static INamedTypeSymbol? EntityJobInterface(INamedTypeSymbol type)
