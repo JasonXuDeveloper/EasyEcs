@@ -100,7 +100,7 @@ internal sealed partial class Kernel
     internal sealed record FlatCode(string Setup, string Body, string Stores, int Fields);
 
     /// <summary>
-    /// The vector type the loop names, as a token: <c>SystemGenerator.EmitVectorLoop</c> writes the Vector512 loop and the
+    /// The vector type the loop names, as a token: <c>SystemGenerator.VectorLoops</c> writes the Vector512 loop and the
     /// Vector&lt;T&gt; loop from one text by replacing this token alone (and <see cref="SquareRoot"/>), never text that
     /// names user types (a setup line holds <c>ref readonly global::System.Numerics.Vector3 __p1</c> as written). The
     /// prefix U+0001 occurs in no C# token outside a literal, and the loop's literals are formatted here.

@@ -24,7 +24,7 @@ internal sealed partial class Kernel
 {
     /// <summary>
     /// The token of the row a vector starts at, in the run: <c>(int)i</c> in the loops, the first row copied in the last
-    /// vector of a run (<c>SystemGenerator.EmitTail</c>).
+    /// vector of a run (<c>SystemGenerator.TailLoop</c>).
     /// </summary>
     internal const string Row = "\u0001Row";
 
