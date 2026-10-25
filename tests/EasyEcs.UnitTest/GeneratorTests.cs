@@ -2412,7 +2412,7 @@ public class GeneratorTests
     [TestCase("EECS033", DiagnosticSeverity.Warning)]
     [TestCase("EECS034", DiagnosticSeverity.Error)]
     public void SeveritySaysWhatARuleCosts(string id, DiagnosticSeverity severity) =>
-        Assert.That(new EasyEcsAnalyzer().SupportedDiagnostics.Single(d => d.Id == id).DefaultSeverity, Is.EqualTo(severity));
+        Assert.That(new EasyEcsAnalyzer().SupportedDiagnostics.Where(d => d.Id == id).Select(d => d.DefaultSeverity), Is.Not.Empty.And.All.EqualTo(severity)); // every descriptor of the id (EECS025 has a compilation-end one)
 
     // The tricky "written" cases: every form of a write keeps the write access.
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p) => p.V = 1; }")]
@@ -2599,7 +2599,7 @@ public class GeneratorTests
     [TestCase("EECS052", DiagnosticSeverity.Warning)]
     [TestCase("EECS053", DiagnosticSeverity.Warning)]
     public void UsageRulesHaveTheirSeverity(string id, DiagnosticSeverity severity) =>
-        Assert.That(new EasyEcsAnalyzer().SupportedDiagnostics.Single(d => d.Id == id).DefaultSeverity, Is.EqualTo(severity));
+        Assert.That(new EasyEcsAnalyzer().SupportedDiagnostics.Where(d => d.Id == id).Select(d => d.DefaultSeverity), Is.Not.Empty.And.All.EqualTo(severity)); // every descriptor of the id (EECS025 has a compilation-end one)
 
     /// <summary>Framework references of the running test host (enough for the generated code to compile).</summary>
     internal static class Basic

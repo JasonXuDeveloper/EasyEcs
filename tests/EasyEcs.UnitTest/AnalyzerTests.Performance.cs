@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis.Diagnostics;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -63,6 +64,25 @@ public partial class AnalyzerTests
         Assert.That(found, Has.Length.EqualTo(1));                                     // once, on the field
         Assert.That(found[0].GetMessage(), Does.StartWith(message));
         Assert.That(found[0].Properties["Fix"], Is.EqualTo("RefReadOnly"));
+    }
+
+    // A host reports a document's diagnostics live (its semantic analysis) and compilation-end ones on a full analysis:
+    // the view field is known only at the end (its descriptor says so), every other EECS025 stays live.
+    [Test]
+    public async Task AViewFieldIsReportedAtTheEndAndTheOtherCasesLive()
+    {
+        const string source = "[View] internal ref struct V { public ref P P; } [EcsSystem] public ref struct S { [ForEach] static void A(V v, ref Q q, ref T t) => q.V = v.P.V + t.V; }";
+        GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile(GeneratorTests.Components, source), out var output, out _);
+        var analyzers = output.WithAnalyzers([new EasyEcs.Generator.EasyEcsAnalyzer()]);
+        var tree = output.SyntaxTrees.Single(t => t.ToString().Contains("ref struct V"));
+        var live = (await analyzers.GetAnalyzerSemanticDiagnosticsAsync(output.GetSemanticModel(tree), null, default)).Where(d => d.Id == "EECS025").ToArray();
+        var all = (await analyzers.GetAnalyzerDiagnosticsAsync()).Where(d => d.Id == "EECS025").ToArray();
+
+        Assert.That(live.Select(d => d.GetMessage()), Has.One.StartsWith("Parameter 't'").And.None.StartsWith("Field"));
+        Assert.That(all.Select(d => d.GetMessage()), Has.One.StartsWith("Parameter 't'").And.One.StartsWith("Field 'P' of view V"));
+        foreach (var d in all)
+            Assert.That(d.Descriptor.CustomTags, d.GetMessage().StartsWith("Field") ? Has.Member(Microsoft.CodeAnalysis.WellKnownDiagnosticTags.CompilationEnd)
+                : Has.No.Member(Microsoft.CodeAnalysis.WellKnownDiagnosticTags.CompilationEnd));
     }
 
     [TestCase("[View] internal ref struct V { public ref P P; } [EcsSystem] public ref struct S { [ForEach] static void A(V v) => v.P.V++; }")]                            // written
