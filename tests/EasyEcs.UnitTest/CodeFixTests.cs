@@ -404,6 +404,12 @@ public class CodeFixTests
         "[View] public ref struct PQ { public ref P P; public ref readonly Q Q; public void Add() => P.V += Q.V; }\n"
         + "public static class U { public static void F(Entity e) { var v = new PQ { P = ref e.Get<P>(), Q = ref e.Read<Q>() }; v.Add(); } }",
         "var v = e.AsPQ();")]
+    [TestCase("EECS025", "Make it 'ref readonly'",                                                                           // a view's field nothing writes
+        "[View] internal ref struct V { public ref P P; } [EcsSystem] public ref struct S { [ForEach] static void A(V v, ref Q q) => q.V = v.P.V; }",
+        "[View] internal ref struct V { public ref readonly P P; }")]
+    [TestCase("EECS025", "Take it by 'in'",                                                                                  // a lambda pass's parameter
+        "public static class Run { public static void F(World world) => world.ForEach(static (ref P p, ref Q q) => q.V = p.V); }",
+        "world.ForEach(static (in P p, ref Q q) => q.V = p.V);")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
@@ -501,6 +507,7 @@ public class CodeFixTests
     [TestCase("EECS081", "public class R { int x = 1; [ForEntity] void A(ref P p) => p.V += x; }")]                              // uses its instance
     [TestCase("EECS053", "public static class R { [ForEach] public static void A(ref T t, in P p) { if (p.V > 0) t.V = p.V; }\n"
                          + "  public static void Call() { T t = default; A(ref t, default); } }")]                                     // a caller passes 'ref'
+    [TestCase("EECS053", "public static class Run { public static void F(World world) => world.ForEach(static (ref T t, in Q q) => { if (q.V > 0) t.V = q.V; }); }")] // a lambda: the Mut fix rewrites methods
     [TestCase("EECS071", "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p) => p.V = (int)System.Random.Shared.NextInt64(9); }")] // no EntityRandom twin
     [TestCase("EECS071", "[EcsSystem] public ref struct S { [ForEach] static void A(System.Span<P> p) => p[0].V = System.Random.Shared.Next(); }")] // a batch method: no Entity
     public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)

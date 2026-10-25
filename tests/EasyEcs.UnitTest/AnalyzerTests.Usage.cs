@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Threading.Tasks;
 using NUnit.Framework;
 
@@ -26,4 +27,40 @@ public partial class AnalyzerTests
     [TestCase("public static class U { public static void F(Entity e) { ref var p = ref e.Get<P>(); p.V = 1; e.Destroy(); } }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach, WithAny<Q, T>, Without<Q>] static void A(ref P p) => p.V++; }")]                                    // T still passes
     public Task UsageRulesLeaveAlone(string source) => AssertClean(GeneratorTests.Components, GeneratorTests.Extra, source);
+
+    private const string Pq = "[View] internal ref struct PQ { public ref P P; public ref readonly Q Q; }\n";
+
+    // EECS049 beyond a component both required and excluded: a [WithAny<...>] whose every component is excluded (the
+    // method's, its group's), a lambda pass's own filters, a view built over the visited entity.
+    [TestCase("[EcsSystem] public ref struct S { [ForEach, WithAny<Q, T>, Without<Q>, Without<T>] static void A(ref P p) => p.V++; }",
+        "[ForEach] method 'A' requires one of Q, T ([WithAny<Q, T>]) and excludes each of them ([Without<Q>], [Without<T>]): no entity passes both, so the method never runs")]
+    [TestCase("[WithAny<Q, T>] public struct G : ISystemGroup; [UpdateInGroup<G>] [EcsSystem] public ref struct S { [ForEach, Without<Q>, Without<T>] static void A(ref P p) => p.V++; }",
+        "requires one of Q, T ([WithAny<Q, T>] on its group G)")]
+    [TestCase("public struct G : ISystemGroup, ISystemGroupWithout<T>; [UpdateInGroup<G>] [EcsSystem] public ref struct S { [ForEach, WithAny<Q, T>, Without<Q>] static void A(ref P p) => p.V++; }",
+        "excludes each of them ([Without<Q>], ISystemGroupWithout<T> on its group G)")]
+    [TestCase("public static class Run { public static void F(World world) => world.ForEach([Without<P>] static (ref P p) => p.V++); }",
+        "The lambda of world.ForEach(…) requires 'P' (parameter 'p') and excludes it ([Without<P>]): no entity passes both, so the pass visits no entity")]
+    [TestCase("public static class Run { public static void F(World world) => world.ForEach([WithAny<Q, T>, Without<Q>, Without<T>] static (ref P p) => p.V++); }",
+        "The lambda of world.ForEach(…) requires one of Q, T")]
+    [TestCase(Pq + "public static class Run { public static void F(World world) => world.ForEach([Without<Q>] static (PQ v) => v.P.V++); }",
+        "requires 'Q' (field 'Q' of view 'v')")]                                                                                              // a lambda's view
+    [TestCase(Pq + "[EcsSystem] public ref struct S { [ForEach, Without<Q>] static void A(Entity e, ref T t) => t.V = e.AsPQ().P.V; }",
+        "[ForEach] method 'A' requires 'Q' (e.AsPQ() builds view PQ over its entity) and excludes it ([Without<Q>]): no entity it visits has it, so e.AsPQ() throws on every one")]
+    [TestCase(Pq + "public struct G : ISystemGroup, ISystemGroupWithout<P>; [UpdateInGroup<G>] [EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref T t) { if (e.TryGetPQ(out var v)) t.V = v.Q.V; } }",
+        "excludes it (ISystemGroupWithout<P> on its group G): no entity it visits has it, so e.TryGetPQ(out var v) finds none")]
+    [TestCase(Pq + "public static class R { [ForEntity, Without<P>] static void A(Entity e, ref T t) => t.V = e.AsPQ().Q.V; }",
+        "[ForEntity] method 'A' requires 'P'")]
+    public async Task FiltersNoEntityPassesAreReported(string source, string message)
+    {
+        await AssertReports("EECS049", GeneratorTests.Components, source);
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, source])).Single(d => d.Id == "EECS049");
+        Assert.That(found.GetMessage(), Does.Contain(message));
+    }
+
+    [TestCase("[EcsSystem] public ref struct S { [ForEach, WithAny<Q, T>, Without<Q>, Without<Settings>] static void A(ref P p) => p.V++; }")]    // T passes
+    [TestCase("[WithAny<Q, T>] public struct G : ISystemGroup; [UpdateInGroup<G>] [EcsSystem] public ref struct S { [ForEach, Without<Q>] static void A(ref P p) => p.V++; }")]
+    [TestCase("public static class Run { public static void F(World world) => world.ForEach([Without<Q>] static (ref P p) => p.V++); }")]
+    [TestCase("public struct G : ISystemGroup, ISystemGroupWithout<P>; [UpdateInGroup<G>] [EcsSystem] public ref struct S { static void OnUpdate(World world) => world.ForEach(static (ref P p) => p.V++); }")] // a lambda takes no group's filters
+    [TestCase(Pq + "[EcsSystem] public ref struct S { [ForEach, Without<Settings>] static void A(Entity e, ref T t) => t.V = e.AsPQ().P.V; }")]   // nothing of PQ excluded
+    public Task FiltersSomeEntityPassesAreLeftAlone(string source) => AssertClean(GeneratorTests.Components, source);
 }
