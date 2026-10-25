@@ -22,17 +22,29 @@ namespace EasyEcs.Generator;
 /// </summary>
 public sealed partial class EasyEcsAnalyzer
 {
-    public static readonly DiagnosticDescriptor WriteAccessOnlyReads = new("EECS025", "A write access that only reads",
-        "{0} is a write access, but the code only reads it: {1}; {2}",
-        Category, DiagnosticSeverity.Warning, true,
+    // EECS025's text, shared by its two descriptors (the analyzer rules want each descriptor built from constants).
+    private const string OnlyReadsId = "EECS025", OnlyReadsTitle = "A write access that only reads",
+        OnlyReadsFormat = "{0} is a write access, but the code only reads it: {1}; {2}",
+        OnlyReadsDescription =
         "A 'ref' component or singleton parameter (a Span<T> in a batch method) puts the type in the system's write set, " +
         "so no parallel stage runs it beside a system that reads the type, and every row it visits of a tracked " +
         "component (ITracked) is stamped as changed, so [Changed<T>] systems visit rows nobody changed. " +
         "Entity.Get<T>() of a tracked component stamps the row too, and so does a Maybe<T> on every row that has the component. " +
         "A lambda pass's parameters count as a [ForEach] method's, and a view's 'ref' field as a 'ref' parameter of every " +
         "pass taking the view (reported once on the field when no code of the compilation writes through it). " +
-        "Read with 'in', ReadOnlySpan<T>, ReadOnlyMaybe<T>, Read<T>() or a 'ref readonly' field.",
-        helpLinkUri: Help("EECS025"));
+        "Read with 'in', ReadOnlySpan<T>, ReadOnlyMaybe<T>, Read<T>() or a 'ref readonly' field.";
+
+    public static readonly DiagnosticDescriptor WriteAccessOnlyReads = new(OnlyReadsId, OnlyReadsTitle, OnlyReadsFormat,
+        Category, DiagnosticSeverity.Warning, true, OnlyReadsDescription, helpLinkUri: Help(OnlyReadsId));
+
+    /// <summary>
+    /// EECS025 for a view's 'ref' field no code writes through: the same rule as <see cref="WriteAccessOnlyReads"/>, known
+    /// only at the end of the compilation (every use of the view seen), so its descriptor carries the CompilationEnd tag;
+    /// the other cases stay on the untagged one, which hosts report live.
+    /// </summary>
+    public static readonly DiagnosticDescriptor ViewFieldOnlyReads = new(OnlyReadsId, OnlyReadsTitle, OnlyReadsFormat,
+        Category, DiagnosticSeverity.Warning, true, OnlyReadsDescription, helpLinkUri: Help(OnlyReadsId),
+        customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     public static readonly DiagnosticDescriptor UnusedParameter = new("EECS026", "A [ForEach] or [ForEntity] parameter the method does not use",
         "{0} does not use parameter '{1}': {2}",
