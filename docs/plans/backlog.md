@@ -14,8 +14,10 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
 - [ ] **EECS103** (WP6a, D134): hand-written SIMD the generator would write from a plain method, with a code fix.
       Worktree `.claude/worktrees/feat-eecs103`.
 - [ ] **Analyzer tests split**: GeneratorTests.cs -> AnalyzerTests.* files (mechanical).
-- [ ] **zh reference fix**: restore the Chinese lost in 96a50ba (34 `reference/*.zh.mdx` pages), make ApiDocs fail
-      instead of writing English, ApiDocs at 0 problems, `lint:terms` clean; English pages checked the same way.
+- [x] **zh reference fix** (merged af585ed): Chinese restored, ApiDocs keeps a page it would write in English and
+      exits 1; leftovers in `docs-todos.md`.
+- [ ] **Generated text survey**: every redundancy kind in all generators' output, template locations, guards;
+      then the rules into `audit-generator` (write-time) and `feature`.
 - [ ] **Generator / analyzer cost, phase 1** (diagnosis only): step tracking on realistic edits, per-rule analyzer
       time, comparison with Roslyn's guidance.
 
