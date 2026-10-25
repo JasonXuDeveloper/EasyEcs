@@ -239,6 +239,9 @@ public sealed partial class EasyEcsAnalyzer
     {
         public INamedTypeSymbol Entity = null!, World = null!, EntitySpan = null!, Track = null!, Prefab = null!;
 
+        /// <summary>The compilation's hand-written <c>DynamicBuffer&lt;E&gt;</c> names (<see cref="BufferNamesOf"/>), built once.</summary>
+        public System.Lazy<System.Collections.Generic.Dictionary<string, List<(SyntaxTree Tree, Microsoft.CodeAnalysis.Text.TextSpan Span)>>> BufferNames = null!;
+
         public static Core? Create(Compilation compilation)
         {
             var entity = compilation.GetTypeByMetadataName(Symbols.Entity);
@@ -247,7 +250,8 @@ public sealed partial class EasyEcsAnalyzer
             var track = compilation.GetTypeByMetadataName(Symbols.TrackChanges);
             var prefab = compilation.GetTypeByMetadataName("EasyEcs.Prefab");
             return entity == null || world == null || span == null || track == null || prefab == null ? null
-                : new Core { Entity = entity, World = world, EntitySpan = span, Track = track, Prefab = prefab };
+                : new Core { Entity = entity, World = world, EntitySpan = span, Track = track, Prefab = prefab,
+                    BufferNames = new(() => BufferNamesOf(compilation)) };
         }
 
         public bool Is(ITypeSymbol? type, INamedTypeSymbol core) => SymbolEqualityComparer.Default.Equals(type, core);
@@ -1290,8 +1294,12 @@ public sealed partial class EasyEcsAnalyzer
     private static ImmutableDictionary<string, string?> Fix(string replacement, string title) =>
         ImmutableDictionary<string, string?>.Empty.Add(Replace, replacement).Add(FixTitle, title);
 
-    /// <summary>Whether <paramref name="text"/>, in place of <paramref name="node"/>, binds; <paramref name="symbol"/> is what it names.</summary>
-    private static bool Binds(SemanticModel model, SyntaxNode node, string text, out ISymbol? symbol)
+    /// <summary>
+    /// Whether <paramref name="text"/>, in place of <paramref name="node"/>, binds; <paramref name="symbol"/> is what it
+    /// names. <paramref name="receiverType"/>: the type of the text's receiver when the caller knows it (the receiver of
+    /// the call it replaces), which saves binding the receiver a second time.
+    /// </summary>
+    private static bool Binds(SemanticModel model, SyntaxNode node, string text, out ISymbol? symbol, ITypeSymbol? receiverType = null)
     {
         var expression = SyntaxFactory.ParseExpression(text);
         var info = model.GetSpeculativeSymbolInfo(node.SpanStart, expression, SpeculativeBindingOption.BindAsExpression);
@@ -1300,7 +1308,7 @@ public sealed partial class EasyEcsAnalyzer
         // block's type (entity.ChildOf finds the member of QueryItem<P, ChildOf>): the receiver must convert to it.
         if (symbol?.ContainingType is { IsExtension: true, ExtensionParameter: { } extended }
             && (expression is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax called } ? called : expression as MemberAccessExpressionSyntax) is { } access
-            && model.GetSpeculativeTypeInfo(node.SpanStart, access.Expression, SpeculativeBindingOption.BindAsExpression).Type is { } receiver
+            && (receiverType ?? model.GetSpeculativeTypeInfo(node.SpanStart, access.Expression, SpeculativeBindingOption.BindAsExpression).Type) is { } receiver
             && !model.Compilation.ClassifyConversion(receiver, extended.Type).IsImplicit)
             symbol = null;
         return symbol != null;
@@ -1351,19 +1359,23 @@ public sealed partial class EasyEcsAnalyzer
             (candidate, property) = (method.TypeArguments[0].Name + "Index", true);
         if (candidate == null) return;
 
+        // Cheap tests first, speculative binding last: no generated class for the type, or a buffer no other code names,
+        // has no member to suggest.
+        if (method.TypeArguments.Length == 1 && method.TypeArguments[0] is INamedTypeSymbol argument && !HasGeneratedMembers(model.Compilation, argument)) return;
+        // A buffer's members exist while some code names DynamicBuffer<E>: the call must not be the only name.
+        if (method.TypeArguments.Length == 1 && Symbols.BufferElement(method.TypeArguments[0]) is { } buffered
+            && !BufferNamedElsewhere(core, buffered.Name, syntax)) return;
+
+        var receiverType = call.Instance?.Syntax == access.Expression ? call.Instance.Type : null;
         string replacement = receiver + "." + candidate + (property ? "" : args);
-        if (!Binds(model, syntax, replacement, out var bound) || !Symbols.IsGenerated(bound!)) return;
+        if (!Binds(model, syntax, replacement, out var bound, receiverType) || !Symbols.IsGenerated(bound!)) return;
         // The same access: Get<T>() is a 'ref' (a watched component's property is 'ref readonly'; its writer is WriteX()).
         if (method.Name == "Get" && bound is IPropertySymbol { RefKind: not RefKind.Ref })
         {
             replacement = receiver + ".Write" + candidate + "()";
-            if (!Binds(model, syntax, replacement, out bound) || !Symbols.IsGenerated(bound!)) return;
+            if (!Binds(model, syntax, replacement, out bound, receiverType) || !Symbols.IsGenerated(bound!)) return;
             candidate = "Write" + candidate + "()";
         }
-
-        // A buffer's members exist while some code names DynamicBuffer<E>: the call must not be the only name.
-        if (method.TypeArguments.Length == 1 && Symbols.BufferElement(method.TypeArguments[0]) is { } buffered
-            && !BufferNamedElsewhere(model.Compilation, buffered.Name, syntax, context.CancellationToken)) return;
 
         context.ReportDiagnostic(Diagnostic.Create(GeneratedMember, syntax.GetLocation(), Fix(replacement, "Use ." + candidate.Split('(')[0]),
             Shorten(syntax), replacement));
@@ -1444,20 +1456,36 @@ public sealed partial class EasyEcsAnalyzer
     /// (ComponentGenerator), so replacing the only name with a member would remove the member with it. Syntax only:
     /// the name's last identifier is compared.
     /// </summary>
-    private static bool BufferNamedElsewhere(Compilation compilation, string element, SyntaxNode replaced, System.Threading.CancellationToken token)
+    private static bool BufferNamedElsewhere(Core core, string element, SyntaxNode replaced)
     {
+        if (!core.BufferNames.Value.TryGetValue(element, out var names)) return false;
+        foreach (var (tree, span) in names)
+            if (!(tree == replaced.SyntaxTree && replaced.Span.Contains(span))) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Every <c>DynamicBuffer&lt;E&gt;</c> name of the compilation's hand-written files, by the last identifier of
+    /// <c>E</c>: one walk of the compilation, made the first time EECS033 asks (it asked once per call before, which walked
+    /// every file for every buffer call). Generated files (the buffer's own members among them) name it because the
+    /// members exist: not a reason.
+    /// </summary>
+    private static System.Collections.Generic.Dictionary<string, List<(SyntaxTree Tree, Microsoft.CodeAnalysis.Text.TextSpan Span)>> BufferNamesOf(Compilation compilation)
+    {
+        var names = new System.Collections.Generic.Dictionary<string, List<(SyntaxTree, Microsoft.CodeAnalysis.Text.TextSpan)>>(System.StringComparer.Ordinal);
         foreach (var tree in compilation.SyntaxTrees)
         {
-            // Generated files (the buffer's own members among them) name it because the members exist: not a reason.
             if (tree.FilePath.EndsWith(".g.cs", System.StringComparison.OrdinalIgnoreCase)) continue;
-            foreach (var node in tree.GetRoot(token).DescendantNodes())
+            foreach (var node in tree.GetRoot().DescendantNodes())
                 if (node is GenericNameSyntax { Identifier.ValueText: "DynamicBuffer", TypeArgumentList.Arguments.Count: 1 } name
-                    && Last(name.TypeArgumentList.Arguments[0]) == element
-                    && !(tree == replaced.SyntaxTree && replaced.Span.Contains(name.Span)))
-                    return true;
+                    && Last(name.TypeArgumentList.Arguments[0]) is { } element)
+                {
+                    if (!names.TryGetValue(element, out var list)) names[element] = list = [];
+                    list.Add((tree, name.Span));
+                }
         }
 
-        return false;
+        return names;
 
         static string? Last(TypeSyntax type) => type switch
         {
@@ -1466,6 +1494,19 @@ public sealed partial class EasyEcsAnalyzer
             SimpleNameSyntax n => n.Identifier.ValueText,
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Whether the generator wrote members for <paramref name="type"/> (a component, singleton or buffer): its class
+    /// (<c>{FlatName}EcsExtensions</c>, a buffer element's <c>{FlatName}EcsBufferExtensions</c>) sits in the type's
+    /// namespace (in this compilation or the type's assembly), so one lookup by name answers before any binding.
+    /// </summary>
+    private static bool HasGeneratedMembers(Compilation compilation, INamedTypeSymbol type)
+    {
+        var element = Symbols.BufferElement(type) as INamedTypeSymbol;
+        var owner = element ?? type;
+        return owner.ContainingNamespace is { } declared && compilation.GetCompilationNamespace(declared) is { } ns && ns.GetTypeMembers(Symbols.FlatName(owner)
+            + (element != null ? ComponentGenerator.Classes.Buffer : ComponentGenerator.Classes.Members)).Length > 0;
     }
 
     /// <summary>Set(new T(args)) as SetT(args), Set(new T()) / Set(default(T)) of a tag as SetT(); else null.</summary>
