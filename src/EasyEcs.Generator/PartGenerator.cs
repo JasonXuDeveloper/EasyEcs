@@ -22,21 +22,52 @@ public sealed class PartGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        // One provider per attribute; a type with several attributed fields is found by each, so the models are merged.
-        IncrementalValueProvider<ImmutableArray<PartModel>>? found = null;
-        foreach (var attribute in Parts.Reductions.Append(Parts.Key).Append(Parts.UniqueKey).Append(Parts.Group).Append(Parts.GroupBy))
+        // One provider per attribute. A type with several attributed declarations is found by each, and only its first
+        // attribute (FirstAttribute: of the type, else of its first attributed member) builds the model: one model and
+        // one file per type, without collecting every part of the compilation into one array that any change regroups.
+        foreach (var attribute in Attributes)
         {
-            var models = context.SyntaxProvider.ForAttributeWithMetadataName(attribute,
+            var parts = context.SyntaxProvider.ForAttributeWithMetadataName(attribute,
                     static (node, _) => node is VariableDeclaratorSyntax or PropertyDeclarationSyntax or ParameterSyntax or TypeDeclarationSyntax,
-                    static (ctx, _) => (ctx.TargetSymbol as INamedTypeSymbol ?? ctx.TargetSymbol.ContainingType) is { } type ? PartModel.Create(type) : null)
+                    static (ctx, _) => (ctx.TargetSymbol as INamedTypeSymbol ?? ctx.TargetSymbol.ContainingType) is { } type
+                                    && FirstAttribute(type) is ({ } first, { } attribute)
+                                    && SymbolEqualityComparer.Default.Equals(first, ctx.TargetSymbol)
+                                    && SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, ctx.Attributes[0].AttributeClass)
+                        ? PartModel.Create(type) : null)
                 .Where(static m => m is not null)
-                .Select(static (m, _) => m!)
-                .Collect();
-            found = found == null ? models : found.Value.Combine(models).Select(static (pair, _) => pair.Left.AddRange(pair.Right));
+                .WithTrackingName("Parts");
+            context.RegisterSourceOutput(parts, static (spc, m) => spc.AddSource($"{m!.HintName}.Part.g.cs", SourceText.From(Emit(m), Encoding.UTF8)));
+        }
+    }
+
+    private static readonly string[] Attributes = [.. Parts.Reductions, Parts.Key, Parts.UniqueKey, Parts.Group, Parts.GroupBy];
+
+    /// <summary>
+    /// The first attribute a part is written for on <paramref name="type"/>'s declarations, and what carries it: the type
+    /// itself, else its members in declaration order (a constructor's parameters at the constructor), nested types
+    /// excluded; (null, null) when there is none.
+    /// </summary>
+    private static (ISymbol?, AttributeData?) FirstAttribute(INamedTypeSymbol type)
+    {
+        if (PartAttribute(type) is { } own) return (type, own);
+        foreach (var member in type.GetMembers())
+        {
+            if (member is INamedTypeSymbol) continue;
+            if (PartAttribute(member) is { } found) return (member, found);
+            if (member is IMethodSymbol { MethodKind: MethodKind.Constructor } constructor)
+                foreach (var parameter in constructor.Parameters)
+                    if (PartAttribute(parameter) is { } onParameter) return (parameter, onParameter);
         }
 
-        var parts = found!.Value.SelectMany(static (all, _) => all.Distinct()).WithTrackingName("Parts");
-        context.RegisterSourceOutput(parts, static (spc, m) => spc.AddSource($"{m.HintName}.Part.g.cs", SourceText.From(Emit(m), Encoding.UTF8)));
+        return (null, null);
+    }
+
+    private static AttributeData? PartAttribute(ISymbol symbol)
+    {
+        foreach (var attribute in symbol.GetAttributes())
+            foreach (var name in Attributes)
+                if (Symbols.Named(attribute.AttributeClass, name)) return attribute;
+        return null;
     }
 
     /// <summary>
