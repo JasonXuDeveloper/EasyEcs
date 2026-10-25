@@ -133,6 +133,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D128](#d128-spin-gates-and-settled-measurements) | Parallel work's queue and pools take a spin gate; allocation tests measure once no background collection runs |
 | [D129](#d129-lookup-key) | `[IndexKey]` is `[LookupKey]` |
 | [D130](#d130-measured-chunks) | Parallel passes cut chunks by the rows' measured cost; `ChunkRows` only overrides it |
+| [D134](#d134-eecs103) | EECS103: a batch method's hand-written vector loop is reported with the method for one row |
 
 The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
 reused.
@@ -3422,6 +3423,59 @@ stamping pass whose measured chunks are under 4,096 rows opens its blocks, as `C
 - **Dropping `ChunkRows`:** it stays for a pass that knows better than one run's average (rows whose cost changes
   from tick to tick). EECS054 still reports an invalid one (negative, or on a method that is not parallel); its
   description says 0 lets the runtime choose from the measured cost.
+
+## D134. EECS103: a batch method's hand-written vector loop is reported with the method for one row [#d134-eecs103]
+
+**Decision.** A batch `[ForEach]` method whose body is a vector loop written by hand, which the generator would write
+from the method for one row, is reported (EECS103, Warning) with that method, and the code fix writes it. The
+rewrite is read once (`HandSimd.cs`) for the analyzer and the fix: each span a `ref` (written) or `in` component,
+each vector statement one statement per field of the components, each broadcast a scalar local, the casts, the
+index and the scalar tail dropped. It is reported only when it is exact and gets the generator's loop: the method
+for one row replaces the batch method in a copy of the compilation (the technique of `Kernel.Views`), must compile
+there, and `Kernel.Vectorize` must return a loop for it under the method's own `SimdMode` and `FloatMode`.
+
+**What qualifies.** Spans, singletons and values as parameters; a prelude of local declarations (streams through
+`MemoryMarshal.Cast<C, T>`, `Cast<C, VectorN<T>>`, `Cast<T, VectorN<T>>` or `ref T r = ref Unsafe.As<C, T>(ref
+MemoryMarshal.GetReference(span))`; the index and its bound; uniform values: constants, singletons, values, static
+readonly fields, `Math` / `MathF`, broadcasts), also inside `if (VectorN.IsHardwareAccelerated)`; one loop, from 0 by
+1 over a vector stream (`p[i]`) or by `VectorN<T>.Count` up to the lanes' length (loads `new Vector<T>(s.Slice(i))`,
+`VectorN.Create(s.Slice(i[, Count]))`, `VectorN.LoadUnsafe(ref r, (nuint)i)`; stores `v.CopyTo(s.Slice(i))`,
+`v.StoreUnsafe(ref r, (nuint)i)`); in it only lane-wise operations with a scalar twin (`+ - * /` of floats, `& | ^ ~
+<< >> >>>` of integers, `Min`, `Max`, float `Abs`, `Sqrt`, `Floor`, `Ceiling`, `FusedMultiplyAdd`, `ConditionalSelect`
+of comparisons joined by and, or and not, `AndNot`, conversions between lanes of one size); after it, a tail that
+writes only elements of the spans and its own locals. Every component a stream reads has the same F fields, all of
+the lane type, F a power of two no larger than the narrowest vector's lanes (the flat-lane check: lane j is field
+j % F of a row). Lanes are float, double, int, uint, long and ulong (byte and short arithmetic is computed in int by
+C#, so a statement per field would not compile as written).
+
+**Left alone.** `SimdMode.Off`, `[GeneratedCode]`, a method that is no `[ForEach]` pass; shuffles and horizontal
+operations (`Shuffle`, `Sum`, `Dot`, `GetElement`, `ExtractMostSignificantBits`, `Narrow`, `Widen`), the classes of
+one instruction set (`X86`, `Arm`), vector constants that are not broadcasts; loads at other offsets (a stencil); the
+`EntitySpan`; a call into user code in the prelude (the method for one row would call it per row: the demo's
+`DragBatchSystem`); a uniform written in the loop (an accumulator across vectors); integer division and integer
+`Abs` (a lane that throws in the method for one row does not in the vector); components of mixed field types, a field
+count the vectors do not hold whole, a step neither 1 nor `Count`; a span the loop does not read.
+
+**Where the plan was wrong, and why.**
+- **No lambda passes.** A lambda pass takes no spans (EECS095: "write a [ForEach] method"), so no lambda body can hold
+  a hand-written vector loop; v1 covers batch methods only.
+- **No accumulators, integer ones included.** The method for one row of a loop that sums across vectors needs a
+  `Reduce<T>` parameter and a singleton to combine into, which the fix cannot write mechanically; EECS086 already
+  points a singleton accumulated row by row to `Reduce<T>`.
+- **A span the loop only reads becomes `in`**, not `ref`: a `ref` it never writes would trade EECS103 for EECS025.
+
+**Numbers.** `GeneratorBenchmark`, base and this change, two rounds (the benchmark's code has no vector code, so the
+analyzer pays only the prefilter). `CompileAndAnalyze`, one namespace off: 3,143 / 2,625 ms and 2,752 / 2,870 ms; on:
+3,256 / 3,206 ms and 3,604 / 3,785 ms. The direction flips between rounds inside the error (±130-490 ms); allocation is
+level (531.8 / 530.3 MB, 994.7 / 993.4 MB). The rows without analyzers (`Cold`, `Edit*`, `Compile`) do not run the rule.
+The rewrite is bound only for attributed methods whose bodies name a vector type.
+
+**Considered.**
+- **Reporting every vector type in a batch method**: most hand-written SIMD in the samples (VoxelServer water,
+  tile stencils, byte lanes) has no plain form the generator vectorizes yet; a message without a fix that works is
+  noise. Tile stencils wait for the `Cell<,>` form (v2), element loops over buffers for the inner-loop form (v3).
+- **Comparing the tail with the method for one row**: the tail is dropped, not proven equal to the vector body; a
+  tail that differs was a bug of the batch method already (its rows past the last vector got another result).
 
 ## Related [#related]
 

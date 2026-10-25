@@ -22,7 +22,7 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                Abs / CopySign / Sign, FloatMode.Fast's forms; every 32-bit input under the explicit category Exhaustive),
                                Generator (generated code, the vector loops and EECS055 / EECS056's reasons, caching; the
                                harness: Compile, Driver, Analyze, Components), Analyzer (the rules, one file per analyzer
-                               file: .Declarations, .Systems, .Usage, .Parallel, .Parts, .Forms, .Performance (costs,
+                               file: .Declarations, .Systems, .Usage, .Parallel, .Parts, .Forms (and EECS103's idioms and guards), .Performance (costs,
                                lambda passes, view fields); what each rule reports, the edges it branches on and the code
                                it leaves alone; AnalyzerTests.cs: Diagnose / Costs / All, Extra, AssertReports /
                                AssertClean / Count), CodeFix (each
