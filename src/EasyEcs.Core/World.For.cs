@@ -63,7 +63,7 @@ public sealed partial class World
 
     private void RunRange(RangeWork work, int count, int chunkRows)
     {
-        int size = ChunkRows(count, chunkRows);
+        int size = ChunkRows(work, count, chunkRows);
         work.Count = count;
         work.Size = size;
         int chunks = (int)((count + (long)size - 1) / size);

@@ -1464,7 +1464,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         var archetypes = match.Archetypes;
                         // A job writing a tracked component stamps change-tick summaries shared by 4,096 rows (a JIT-time constant).
                         bool stamps = {{List(n, i => $"(TJob.WriteMask & {1 << (i - 1)}) != 0 && default(T{i}) is ITracked", " || ")}} || TJob.OptionalWrites.HasComponents;
-                        int size = world.ChunkRows(archetypes, stamps, TJob.Merges, filter.SliceCount, chunkRows);
+                        int size = world.ChunkRows(this, archetypes, stamps, TJob.Merges, filter.SliceCount, chunkRows);
                         bool open = stamps && (size & 4095) != 0; // chunks split blocks: open them first (Archetype.OpenBlocks)
                         for (int a = 0; a < archetypes.Length; a++)
                         {
@@ -1485,7 +1485,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 stop = Math.Min(start - start % size + size, end);
                                 if (chunks == _starts.Length)
                                 {
-                                    int grown = Math.Max(8, chunks * 2);
+                                    int grown = Math.Max(TJob.Merges ? 8 : world.ChunkCapacity, chunks * 2); // room for the most chunks a cost can ask for
                                     Array.Resize(ref _tables, grown);
                                     Array.Resize(ref _filters, grown);
                                     Array.Resize(ref _starts, grown);

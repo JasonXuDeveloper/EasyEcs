@@ -300,7 +300,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     /// <summary>
     /// Stamp tracked component <typeparamref name="T"/> of <paramref name="entity"/> where it is now (a write through a
     /// <see cref="Mut{T}"/>): nothing when the entity is gone or lacks the component. Rows of one table are stamped by
-    /// one thread at a time (parallel chunks own whole blocks of rows, <see cref="World.ChunkRows(Archetype[], bool, bool, int, int)"/>).
+    /// one thread at a time (parallel chunks own whole blocks of rows, <see cref="World.ChunkRows(World.ParallelWork, Archetype[], bool, bool, int, int)"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)] // per write, not per row: keeps the row loops lean
     internal static void Stamp<T>(Entity entity) where T : struct, IComponent
