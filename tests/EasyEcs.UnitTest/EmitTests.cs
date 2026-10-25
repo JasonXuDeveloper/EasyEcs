@@ -24,7 +24,7 @@ public class EmitTests
     [EcsSystem]
     public ref struct ParallelStrikes
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkRows = 64, SimdMode = SimdMode.Off)]
         static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits)
         {
             if (attack.Power % 3 != 0) hits.Add(new Hit(aim.Target, attack.Power)); // some rows emit nothing
@@ -35,7 +35,7 @@ public class EmitTests
     [EcsSystem]
     public ref struct SerialStrikes
     {
-        [ForEach]
+        [ForEach(SimdMode = SimdMode.Off)]
         static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits)
         {
             if (attack.Power % 3 != 0) hits.Add(new Hit(aim.Target, attack.Power));
@@ -65,10 +65,10 @@ public class EmitTests
 
     public static class Runners
     {
-        [ForEach(Parallel = true)]
+        [ForEach(Parallel = true, SimdMode = SimdMode.Off)]
         public static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits) => hits.Add(new Hit(aim.Target, attack.Power));
 
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkRows = 64, SimdMode = SimdMode.Off)]
         public static void Look(Entity viewer, in Aim aim, Emit<Seen> seen, Emit<Hit> hits)
         {
             seen.Add(new Seen(viewer.Id, aim.Target));

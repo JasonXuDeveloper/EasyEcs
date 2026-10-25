@@ -131,7 +131,7 @@ public ref struct ManaSystem                                              // Reg
 [EcsSystem]
 public ref struct ZoneSystem                                              // a new zone moves the row to its table
 {
-    [ForEach]
+    [ForEach(SimdMode = SimdMode.Off)]
     static void Enter(Entity player, in Position p, in Zone zone)              // `in`: reading is not a change
     {
         int id = Math.Clamp((int)(p.X / 1024), 0, 3);
@@ -400,7 +400,7 @@ public static class Reports
     [ForEach(Parallel = true)]
     static void SumMana(in Mana mana, ref Reduce<ManaPool> total) => total.Value.Mana += mana.Value;
 
-    [ForEach(Parallel = true), With<Player>, Without<Dead>]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Off), With<Player>, Without<Dead>]
     static void FindWeakest(Entity player, in Health hp, ref Reduce<Weakest> weakest)
     {
         if (hp.Value < weakest.Value.Health) weakest.Value = new Weakest(player.Id, hp.Value);

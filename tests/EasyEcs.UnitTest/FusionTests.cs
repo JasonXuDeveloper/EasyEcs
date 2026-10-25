@@ -68,7 +68,7 @@ public partial class FusionTests
     [EcsSystem]
     public ref struct Vitals
     {
-        [ForEach, With<Venom>]
+        [ForEach(SimdMode = SimdMode.Off), With<Venom>]
         static void Decay(ref Stamina stamina, Entity unit) => stamina = stamina with { Value = stamina.Value - (int)(unit.Id.Index % 3) };
 
         [ForEach, With<Venom>]
@@ -81,7 +81,7 @@ public partial class FusionTests
     [EcsSystem]
     public ref struct VitalsApart
     {
-        [ForEach, With<Venom>]
+        [ForEach(SimdMode = SimdMode.Off), With<Venom>]
         static void Decay(ref Stamina stamina, Entity unit) => stamina = stamina with { Value = stamina.Value - (int)(unit.Id.Index % 3) };
 
         [ForEach(FusionMode = FusionMode.Off), With<Venom>]
@@ -130,7 +130,7 @@ public partial class FusionTests
         [ForEach(Parallel = true, ChunkRows = 64)]
         static void Sum(in Stamina stamina, ref Reduce<StaminaSum> sum) => sum.Value = new StaminaSum { Total = sum.Value.Total + stamina.Value, Rows = sum.Value.Rows + 1 };
 
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkRows = 64, SimdMode = SimdMode.Off)]
         static void Report(Entity unit, in Stamina stamina, Emit<Faint> low) { if (stamina.Value < 10) low.Add(new Faint(unit.Id, stamina.Value)); }
     }
 
@@ -143,7 +143,7 @@ public partial class FusionTests
         [ForEach(Parallel = true, ChunkRows = 64, FusionMode = FusionMode.Off)]
         static void Sum(in Stamina stamina, ref Reduce<StaminaSum> sum) => sum.Value = new StaminaSum { Total = sum.Value.Total + stamina.Value, Rows = sum.Value.Rows + 1 };
 
-        [ForEach(Parallel = true, ChunkRows = 64, FusionMode = FusionMode.Off)]
+        [ForEach(Parallel = true, ChunkRows = 64, FusionMode = FusionMode.Off, SimdMode = SimdMode.Off)]
         static void Report(Entity unit, in Stamina stamina, Emit<Faint> low) { if (stamina.Value < 10) low.Add(new Faint(unit.Id, stamina.Value)); }
     }
 

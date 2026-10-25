@@ -337,6 +337,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Odd o) => o = new Odd(o.Y, o.X);", "Odd's constructor does more than set fields from its parameters ('Y = x + y;')")]
     [TestCase("[ForEach] static void A(ref F f, in H h) { ref var v = ref f.V; v += h.V; }", "ref local 'v' is not supported: name the parameter's fields instead", true)]
     [TestCase("[ForEach] static void A(ref F f, in H h) { float v; v = h.V; f.V = v; }", "local 'v' has no initializer: give it its value where it is declared", true)]
+    [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V = e.Id.Index;", "it uses the Entity in 'e.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>)", true)]
     public void ScalarLoopsNameTheirReason(string members, string reason, bool fixable = false)
     {
         var diagnostics = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Where(d => d.Id == "EECS055").ToArray();
@@ -348,7 +349,6 @@ public class GeneratorTests
     // Not meant for a vector loop (or vectorized, or opted out): no EECS055.
     [TestCase("[ForEach] static void A(ref F f, in H h) => f.V += h.V;")]                              // vectorized
     [TestCase("[ForEach(SimdMode = SimdMode.Off)] static void A(ref Five t) => t.A = t.B;")]              // opted out
-    [TestCase("[ForEach] static void A(Entity e, ref Five t) => t.A = t.B;")]
     [TestCase("[ForEach] static void A(ref Holder h) { }")]                                             // not numeric fields
     [TestCase("[ForEach] static void A(System.Span<F> f) { }")]                                          // a batch method
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;")] // vectorized
