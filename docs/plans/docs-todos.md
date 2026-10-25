@@ -207,3 +207,11 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 - threading guide #chunk-rows + line 24 (stop telling users to set ChunkRows for heavy rows); analyzer guide EECS054 "when to set it"; api.mdx complexity; performance / why-fast chunking; public skill ChunkRows line; roadmap.
 - bun run lint:terms on D130 zh.
 - DocCheck had 296 pre-existing problems: 108 fences use removed [OnUpdate]/[OnCreate]/[OnDestroy]; new EECS025/EECS067 hits; EECS068/GroupBy errors in analyzer.mdx. ApiDocs 46 pre-existing problems. All for the docs pass (verify gate).
+
+## fix-zh-reference (merged af585ed)
+- `migrate-from-arch.zh.mdx:58`: English "`entity.IsDead` for a tag" -> Chinese.
+- `lint:terms` fails on decisions.zh.mdx: lines ~2305, 2337, 2578 跟踪 -> 追踪 (D118); ~2570 结构门 -> 结构闸门 (D128).
+- `api.zh.mdx` complexity rows keep English words (e.g. "O(count × c)"): Chinese names per tools/ApiDocs/zh/README.md.
+- src XML docs: World `ForEachParallel(Delegate)` example shows `world.ForEach(since, ...)` (should it be ForEachParallel?);
+  ForEachAttributes.cs / SystemGroups.cs write `<c>[WithAny<T1, T2>]</c>` where a `<see cref="WithAnyAttribute{T1,T2}"/>`
+  would link again (then refresh the zh entries).
