@@ -361,7 +361,7 @@ internal sealed partial class Kernel
                     break;
                 case Symbols.ParamKind.Lookup when Symbols.LookupElement(p.Type) is { } read && LaneFields(read): // gathered (Kernel.Lookups.cs)
                     break;
-                case Symbols.ParamKind.Singleton or Symbols.ParamKind.Context or Symbols.ParamKind.Reduction:
+                case Symbols.ParamKind.Singleton or Symbols.ParamKind.Context or Symbols.ParamKind.Reduction or Symbols.ParamKind.Entity or Symbols.ParamKind.Emit: // their uses decide (Kernel.Structural.cs)
                     break;
                 case Symbols.ParamKind.View when Views.IsValid(p.Type) && Views.Fields((INamedTypeSymbol)p.Type).All(f => !f.Mut && LaneFields(f.Component)):
                     any = true;
