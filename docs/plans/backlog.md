@@ -35,7 +35,12 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
 - [ ] **Generated code simplification**: continues inside WP0 / WP0b. Done: flat lanes, the pass mask as the start of
       the active mask, research lessons recorded. Reverted: loads into their own names (Tier1 asm grew, Move3 runner
       934 -> 1095 instructions). Not done: file-level `using` aliases per closed generic. Gate: identical or better
-      Tier1 asm (`tools/jitdisasm.sh`) and BenchmarkDotNet.
+      Tier1 asm (`tools/jitdisasm.sh`) and BenchmarkDotNet. Targets seen in a generated job (Showcase DeathSystem):
+      the same body written once per width (Vector512 block, then Vector<T> block): one body per width method or one
+      emitter call per width with the width as a parameter; `global::` everywhere: file-level `using` aliases;
+      identity copies (`var __c1_0 = __s1_0`); per-width constants re-created (`__u1`, `this.v0 = default`);
+      `__d0 = Zero; __d0 |= x` where `__d0 = x` would do. Users read this code (docs "The generator writes" tabs), so
+      readability counts once the asm is equal.
 - [ ] Follow-ups: lambda passes do not fuse; lambda + structural change and lambda + view stay scalar.
 - [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 NativeMemory 2 MiB columns (research
       first); #157 the #138 recommendations; #159 remaining research.
