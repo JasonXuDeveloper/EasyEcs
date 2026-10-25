@@ -16,8 +16,7 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
 - [ ] **Analyzer tests split**: GeneratorTests.cs -> AnalyzerTests.* files (mechanical).
 - [x] **zh reference fix** (merged af585ed): Chinese restored, ApiDocs keeps a page it would write in English and
       exits 1; leftovers in `docs-todos.md`.
-- [ ] **Generated text survey**: every redundancy kind in all generators' output, template locations, guards;
-      then the rules into `audit-generator` (write-time) and `feature`.
+- [x] **Generated text survey** (`generated-text.md`); rules in `audit-generator` "The generated text" and `feature`.
 - [ ] **Generator / analyzer cost, phase 1** (diagnosis only): step tracking on realistic edits, per-rule analyzer
       time, comparison with Roslyn's guidance.
 
@@ -34,6 +33,12 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
       WP5 `Cell<TCell,TTile>` (bar: hand-written speed), WP5b (per-tile results, several inputs/outputs, VoxelServer
       `Flow.cs`), WP1 InlineArray, WP4 ForParallel lambda, WP6b/c EECS103 v2/v3, WP8 fixable-reason audit (plain code
       a small rewrite would vectorize warns).
+- [ ] **Generated text cleanup** (`generated-text.md`, ranked; one agent, SystemGenerator owner, after lookup gathers):
+      1 `GeneratedTextTests` guard first (fails on today's output, allow-list shrinks as each step lands);
+      2 alias block (-20 % text, IL identical); 3 fusion files run the systems' jobs (-76 % fusion output);
+      4 printer fixes and names (IL identical); 5 empty hooks as `ISystemCode` defaults; 6 one Tier1-gated round of
+      the IL-changing cleanups (`__d0`, constants, hoisted setup, `__t`, dead temps, duplicate tables);
+      7 GeneratorBenchmark prints output bytes. Leave the D126 `__s -> __c` copy (comment it).
 - [ ] **Generated code simplification**: continues inside WP0 / WP0b. Done: flat lanes, the pass mask as the start of
       the active mask, research lessons recorded. Reverted: loads into their own names (Tier1 asm grew, Move3 runner
       934 -> 1095 instructions). Not done: file-level `using` aliases per closed generic. Gate: identical or better

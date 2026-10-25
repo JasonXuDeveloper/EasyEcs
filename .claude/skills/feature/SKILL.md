@@ -32,6 +32,10 @@ part names the skill that audits it.
   it removes code users write, the generator could not infer it, and no existing declaration says the same thing.
 - Declarations users write once are read through one `Symbols` helper that the generator and the analyzer share, so
   "skipped by the generator" is exactly "reported by the analyzer".
+- The generated text follows `audit-generator`, "The generated text": aliases instead of `global::` in bodies,
+  no line that does nothing, a value said once, names after the fields, a form that refers to code another file
+  generates instead of copying it; the change's sources join `GeneratedTextTests`' corpus; a text-only change is
+  proven by identical IL, anything else by Tier1 listings.
 - Models are equatable and symbol-free, a tracking name per stage, a caching assertion and a generated-output test
   in `GeneratorTests`; generators report no diagnostics; partial and nested types are handled (the declaring chain
   is partial or reported).

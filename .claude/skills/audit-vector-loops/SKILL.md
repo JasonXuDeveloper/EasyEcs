@@ -131,7 +131,8 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
 
 - **Copies in the text are free, shuffles are not**: `var __c = __s;` and `__t` temporaries for a whole-value
   assignment vanish (the JIT copy-propagates them). Removing them is not neutral either: it changed which forms the
-  JIT inlined into `Move3`'s runner (D126), so a text cleanup ships only with identical Tier1 listings. Compare
+  JIT inlined into `Move3`'s runner (D126), so a text cleanup ships only with identical Tier1 listings. The rules for the text, and which change needs which proof, are
+  `audit-generator`'s ("The generated text"). Compare
   listings with `DOTNET_TieredPGO=0`: with PGO on, Tier1 follows the profile the run collected. What costs is
   deinterleaving: `Move` (`position += velocity`, two floats each) spends 6 `vpermt2ps` and 4 permutation-table loads
   per 16 rows on 2 adds. A pass whose every write field k depends only on field k of inputs with the same layout

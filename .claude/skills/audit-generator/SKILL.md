@@ -94,21 +94,54 @@ record a dropped one.
 The vector loops (`Kernel*.cs`: what becomes SIMD, side effects, fixable reasons, proof) have their own skill:
 `audit-vector-loops`.
 
-## The generated text (read it every round)
+## The generated text (rules for every template; read it every round)
 
-Build a sample with `-p:EmitCompilerGeneratedFiles=true` and read `obj/**/generated/EasyEcs.Generator/` as a reviewer
-would read hand-written code. It is what users open with Go To Definition and what the docs' "The generator writes"
-tabs show, and its size is build time. Judge speed by the Tier1 code (`audit-vector-loops`, "Read the loop the JIT
-wrote"), not by the text: a copy the JIT removes is a readability issue, a shuffle it keeps is a speed issue. Check:
+Generated code is code users read: Go To Definition opens it, the docs' "The generator writes" tabs show it, and its
+size is build time. These rules hold when a template is **written** (a new form, a new parameter, a fix), not only
+when it is audited; `feature` part 2 points here. The survey that found each kind, with counts and template
+locations: `docs/plans/generated-text.md`.
 
-- **No line that does nothing**: identity copies (`var __c = __s;`), temporaries no aliasing needs, an empty
-  `Create` / `Destroy`, a select whose mask is already in the condition.
-- **Names a reader can follow**: fully qualified `global::` names are required for correctness, but a file-level
-  `using` alias (`using V512 = global::System.Runtime.Intrinsics.Vector512;`) in a generated file keeps a vector body
-  readable; locals named after what they hold (`position_x`, not `__c1_0`) where the name is not ambiguous.
-- **Repetition the generator could share**: the same body per vector width and per masked / unmasked form, the same
-  reduction fold after each loop. Text the JIT discards still costs every build and every docs reader; share it when
-  the shared form is proven as fast (BenchmarkDotNet + Tier1 code), else leave it and say why in the template.
+Write it like hand-written code:
+
+- **Short names through one alias block.** Every type the body names more than once goes through a file-level
+  `using` alias with a reserved `__` name (`using __V512i = global::System.Runtime.Intrinsics.Vector512<int>;`), one
+  per closed type the file uses; the body never spells `global::System...` (about half of SystemGenerator's text
+  was qualified names). Never a plain `using System.Numerics;`: a user type named `Vector` would win.
+- **No line that does nothing**: no identity copy (`var __c = __s;`), no temporary that no aliasing needs (`__t`),
+  no local nobody reads (deinterleaved fields, broadcasts, pair masks, accumulator holds a body never uses), no empty
+  method (an empty `Create` / `Destroy` hook: interface defaults instead), no `x = default` the constructor already
+  gives, no `(object __owner)` parameter nobody reads.
+  The one kept copy: the loads' `out __s` -> `__c` copy changed Move3's Tier1 code when removed (D126); it stays
+  until the loads return their values, and the template says so in a comment.
+- **Say a value once**: a constant is `.Zero` / `.One` / a literal in place, not a local made per width
+  (`var __u1 = Create<int>((0))`); setup that does not depend on the width (singleton refs, `Identity`,
+  `this.v0 = default`) is written once above the width blocks; a mark written once is assigned, not zeroed then OR-ed
+  (`__d0 = Zero; __d0 |= x` -> `var __d0 = x`); a table or broadcast with the same value is declared once per type.
+- **Parentheses only where precedence needs them**: no `((0))`, no parentheses around a whole right-hand side or
+  argument (the printer adds them where an operator binds weaker).
+- **Names a reader can follow**: locals after the parameter and field they hold (`__hp_Value`, not `__c1_0`; `hp`,
+  not `r1`/`e1`); the PDB is the only place local names live, so this costs nothing.
+- **Generate once, refer to it**: a form that needs code another file already generates names that code (a fused
+  pair runs the systems' own jobs; it does not copy them: fusion files were 76 % copies). The same body per vector
+  width is emitted from one template (`Kernel.V` token); the output copies stay while .NET has no public
+  `ISimdVector` (a wrapper of our own turns `a + b * c` into calls); per-width methods are WP0b's answer to the
+  inliner (`audit-vector-loops`), not to the text.
+- **Layout**: indentation and line breaks as a formatter would leave them (ArityGenerator output had 270 lines off).
+
+Prove a text change by what it changes:
+
+- **Text only** (names, aliases, parentheses, layout): method-body IL identical between base and head (build both,
+  diff the IL of the benchmark assembly); no benchmark needed.
+- **IL changes** (a copy, a local's order, a hoisted value, anything near the inliner's budget): Tier1 listings with
+  `DOTNET_TieredPGO=0` of the Move3, Cycle, CycleHoles, WorldSimulation, BattleServer and MultiWorld runners
+  identical (`tools/jitdisasm.sh`, `audit-vector-loops`), else BenchmarkDotNet decides; no `call ...Execute` appears.
+- `GeneratedTextTests` (to build first, `docs/plans/backlog.md`) runs the generators over the Kernel, Fusion and LambdaPass corpora and fails on unused locals
+  and identity copies (Roslyn data flow; D126's copy allow-listed), constant broadcasts, a Zero OR-ed once, doubled
+  or redundant parentheses, duplicate tables, empty methods and `global::` outside the alias block. A new form adds
+  its sources to that corpus. GeneratorBenchmark reports output bytes next to time.
+
+Reading the output: build with `-p:EmitCompilerGeneratedFiles=true`, and read only files the build just wrote:
+`obj/**/generated` keeps files of forms the generator no longer writes (filter by time, or delete the folder first).
 
 ## Speed: measure first
 
