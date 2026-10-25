@@ -480,10 +480,11 @@ public class GeneratorTests
             .And.Contain("var __has1 = global::EasyEcs.Interleaved.Lanes32(m1.Present(i), 0);")
             .And.Contain("var __has1 = global::EasyEcs.Interleaved.Lanes32In512(m1.Present(i), 0);")
             .And.Contain("var __q1_0 = global::System.Numerics.Vector.LoadUnsafe(ref __r1, (nuint)i & __z1);")
-            .And.Contain("var __live = global::System.Numerics.Vector<int>.AllBitsSet;").And.Contain("var __live = __pass;"), generated);
+            .And.Not.Contain("__live"), generated);
         // One check, for the read outside the branch; none for the one under h.HasValue.
-        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__live & ~__has1\) != global::System.Numerics.Vector<int>.Zero;").Count, Is.EqualTo(2), generated); // unmasked + masked
-        Assert.That(generated, Does.Not.Contain("__bail |= (__live & __m"), generated);
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(global::System.Numerics.Vector<int>.AllBitsSet & ~__has1\) != global::System.Numerics.Vector<int>.Zero;").Count, Is.EqualTo(1), generated);
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__pass & ~__has1\) != global::System.Numerics.Vector<int>.Zero;").Count, Is.EqualTo(1), generated);
+        Assert.That(generated, Does.Not.Contain("__bail |= (__pass & __m"), generated);
     }
 
     // A call under an if the loop computes: a cold branch, whose lanes send the vector's rows to the method.
@@ -495,8 +496,9 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("__bail |= (__live & __m1) != global::System.Numerics.Vector<int>.Zero; // a cold branch: the method runs these rows")
-            .And.Contain("var __live = __pass;").And.Not.Contain("Log("), generated);
+        Assert.That(generated, Does.Contain("__bail |= __m0 != global::System.Numerics.Vector<int>.Zero; // a cold branch: the method runs these rows")
+            .And.Contain("__bail |= (__pass & __m0) != global::System.Numerics.Vector<int>.Zero; // a cold branch: the method runs these rows")
+            .And.Not.Contain("Log("), generated);
     }
 
     // A component of a Vector2 assigned whole: one statement per lane, and as each lane is computed alike, the flat loop.
@@ -1676,23 +1678,78 @@ public class GeneratorTests
             .ToImmutableArray();
     }
 
-    // The JIT inlines no method of more than 32 IL locals (MAX_INL_LCLS), AggressiveInlining or not: a job's Execute
-    // past it is called by the runner per run, and per 64-row word in a masked table, instead of being part of its loop
-    // (D126). The deinterleaved loads name each field once: a copy per field put Move3's masked job at 36 locals.
+    // The JIT inlines no method of more than 32 IL locals (MAX_INL_LCLS, "too many locals"), AggressiveInlining or not:
+    // a job's Execute past it is called by the runner per run, and per 64-row word in a masked table, instead of being
+    // part of its loop. The generator moves the loops of an Execute past it into methods of the job, one per width
+    // (SystemGenerator.Loops.cs); the deinterleaved loads name each field once (a copy per field put Move3's masked job
+    // at 36 locals).
     [Test]
-    public void DeinterleavedJobsStayWithinTheInlinersLocals()
+    public void LargeJobsStayWithinTheInlinersLocals()
     {
         var compilation = Compile("""
             public struct P3 : IComponent { public float X, Y, Z; }
             public struct V3 : IComponent { public float X, Y, Z; }
             public struct P4 : IComponent { public float X, Y, Z, W; }
             public struct V4 : IComponent { public float X, Y, Z, W; }
+            public struct Q4 : IComponent { public float X, Y, Z, W; }
+            public struct R4 : IComponent { public float X, Y, Z, W; }
             public struct Mixed : IComponent { public int Count; public float Weight; }
+            public struct Heat : IComponent { public float Value; }
+            public struct Speed : IComponent { public float Value; }
+            public struct Mass : IComponent { public float Value; }
+            public struct Pull : IComponent { public float Value; }
+            public struct Ticks : IComponent { public int Value; }
+            public struct Den : IComponent { public int Value; }
+            public struct Dead : IComponent { }
+            public partial struct Tally : ISingletonComponent { [Sum] public int Count; [Sum] public int Sum; [Min] public int Low; [Max] public int High; }
             [EcsSystem] public ref struct Moves
             {
                 [ForEach] static void Move3(ref P3 p, in V3 v) => p = new P3 { X = p.X + v.X, Y = p.Y + v.Y, Z = p.Z + v.Z };
                 [ForEach] static void Move4(ref P4 p, in V4 v) { p.X += v.X; p.Y += v.Y; p.Z += v.Z; p.W += v.W; }
                 [ForEach] static void Weigh(ref Mixed m) => m.Weight += m.Count;
+                [ForEach] static void Blend(ref P4 p, ref V4 v, in Q4 q, in R4 r) // 16 fields per width: past 32 locals
+                {
+                    p.X += v.Y * q.Z - r.W; p.Y += v.Z * q.W - r.X; p.Z += v.W * q.X - r.Y; p.W += v.X * q.Y - r.Z;
+                    v.X = p.W; v.Y = p.Z; v.Z = p.Y; v.W = p.X;
+                }
+                [ForEach] static void Seek(ref P3 p, ref V3 v)
+                {
+                    float dx = 1 - p.X, dy = 2 - p.Y, dz = 3 - p.Z;
+                    float scale = 4 / System.MathF.Max(System.MathF.Sqrt(dx * dx + dy * dy + dz * dz), 1e-6f);
+                    v.X = dx * scale; v.Y = dy * scale; v.Z = dz * scale;
+                    p.X += v.X; p.Y += v.Y; p.Z += v.Z;
+                }
+            }
+            [EcsSystem] public ref struct Heats
+            {
+                [ForEach] static void Step(ref Heat heat, ref Speed speed, in Mass mass, in Pull pull)
+                {
+                    float force = heat.Value * 0.5f - mass.Value * pull.Value;
+                    speed.Value = System.MathF.Max(System.MathF.Min(speed.Value + force - 0.1f, 4f), -4f);
+                    if (heat.Value > 100f) heat.Value = 100f;
+                    else heat.Value += speed.Value * 0.125f;
+                }
+                [ForEach] static void Cycle(ref Heat heat, in Mass mass, ref Reduce<Tally> tally)
+                {
+                    if (heat.Value > 50f) { heat.Value -= 100f + mass.Value; tally.Value.Count++; }
+                    else heat.Value += 30f;
+                }
+                [ForEach] static void Gate(ref Heat heat, in Speed speed, in Mass mass)
+                {
+                    bool fast = speed.Value > 2 || speed.Value < -2;
+                    bool heavy = mass.Value > 2.5f;
+                    if (fast && !heavy) heat.Value = System.Math.Clamp(heat.Value, -5f, 5f);
+                    else if (!fast || heat.Value is > 50 and < 100) heat.Value = System.MathF.Max(heat.Value - 1, -50);
+                }
+                [ForEach] static void Share(ref Ticks ticks, in Den den) => ticks.Value = ticks.Value / den.Value + ticks.Value % den.Value * 1000 + 7919;
+                [ForEach, Without<Dead>] static void Die(Entity entity, in Heat heat) { if (heat.Value > 1000f) entity.Set(new Dead()); }
+                [ForEach(Parallel = true)] static void StepParallel(ref Heat heat, ref Speed speed, in Mass mass, in Pull pull)
+                {
+                    float force = heat.Value * 0.5f - mass.Value * pull.Value;
+                    speed.Value = System.MathF.Max(System.MathF.Min(speed.Value + force - 0.1f, 4f), -4f);
+                    if (heat.Value > 100f) heat.Value = 100f;
+                    else heat.Value += speed.Value * 0.125f;
+                }
             }
             """).WithOptions(new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true,
                 optimizationLevel: OptimizationLevel.Release));
@@ -1700,20 +1757,44 @@ public class GeneratorTests
         using var image = new System.IO.MemoryStream();
         var emitted = output.Emit(image);
         Assert.That(emitted.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
-
         image.Position = 0;
         using var pe = new System.Reflection.PortableExecutable.PEReader(image);
+        var locals = InlinedLocals(pe);
+        // each method's whole and masked forms (Blend: also its loops, split out of Execute)
+        Assert.That(locals.Count(l => l.Method.StartsWith("Move") && l.Method.Contains("::Execute")), Is.EqualTo(4));
+        Assert.That(locals.Any(l => l.Method.StartsWith("Blend") && l.Method.Contains("::__MaskedLoop512")), "Blend's masked Execute is split");
+        Assert.That(locals.Where(l => l.Locals > 32), Is.Empty);
+    }
+
+    // The same over every job this assembly's generators wrote: the corpora of KernelTests, KernelLookupTests,
+    // FusionTests, LambdaPassTests, StructuralLoopTests, ReduceTests, ViewTests and the battle server.
+    [Test]
+    public void GeneratedJobsOfTheTestsStayWithinTheInlinersLocals()
+    {
+        using var file = System.IO.File.OpenRead(typeof(GeneratorTests).Assembly.Location);
+        using var pe = new System.Reflection.PortableExecutable.PEReader(file);
+        var locals = InlinedLocals(pe);
+        Assert.That(locals.Count, Is.GreaterThan(500));
+        Assert.That(locals.Where(l => l.Locals > 32), Is.Empty);
+    }
+
+    /// <summary>
+    /// The IL locals of every AggressiveInlining method of the generated jobs in <paramref name="pe"/> (the types of
+    /// the generated <c>__ForEach</c> classes): what a runner inlines.
+    /// </summary>
+    private static System.Collections.Generic.List<(string Method, int Locals)> InlinedLocals(System.Reflection.PortableExecutable.PEReader pe)
+    {
         var metadata = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
-        var locals = new System.Collections.Generic.List<(string Job, int Locals)>();
+        var locals = new System.Collections.Generic.List<(string Method, int Locals)>();
         foreach (var handle in metadata.TypeDefinitions)
         {
             var type = metadata.GetTypeDefinition(handle);
-            string name = metadata.GetString(type.Name);
-            if (!name.Contains("Job")) continue;
+            var owner = type.GetDeclaringType();
+            if (owner.IsNil || !metadata.GetString(metadata.GetTypeDefinition(owner).Name).EndsWith("__ForEach")) continue;
             foreach (var m in type.GetMethods())
             {
                 var method = metadata.GetMethodDefinition(m);
-                if (metadata.GetString(method.Name) != "Execute") continue;
+                if ((method.ImplAttributes & System.Reflection.MethodImplAttributes.AggressiveInlining) == 0 || method.RelativeVirtualAddress == 0) continue;
                 var body = System.Reflection.Metadata.PEReaderExtensions.GetMethodBody(pe, method.RelativeVirtualAddress);
                 int count = 0;
                 if (!body.LocalSignature.IsNil)
@@ -1722,10 +1803,9 @@ public class GeneratorTests
                     signature.ReadSignatureHeader();
                     count = signature.ReadCompressedInteger();
                 }
-                locals.Add((name, count));
+                locals.Add(($"{metadata.GetString(type.Name)}::{metadata.GetString(method.Name)}", count));
             }
         }
-        Assert.That(locals.Count(l => l.Job.StartsWith("Move")), Is.EqualTo(4)); // each method's whole and masked forms
-        Assert.That(locals.Where(l => l.Locals > 32), Is.Empty);
+        return locals;
     }
 }
