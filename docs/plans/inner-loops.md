@@ -240,6 +240,31 @@ file struct LambdaJob3 : IForSpan<Hit>
 - **Index lists (gathers, MD-style `foreach (var j in near) sum += pos[j]`):** not vectorized (§6).
 
 ### 2.5 `Cell<TCell,TTile>`: the shader form (on 2.1 and 2.4)
+
+**Goal (the owner's).** A general, high-performance stencil form: users write what one cell computes, and the
+generator writes the real kernel. It is a goal, not an experiment that may be dropped: where the generated kernel is
+slower than the hand-written `Load128`/`Load256` tile version of the same stencil, that is a generator task to fix,
+not a reason to keep hand-written SIMD. D77 is rewritten when this ships (its objections are answered below).
+
+General means:
+- **Cells:** any unmanaged `TCell`, a single field or a struct of fields of one or several lane types (flat lanes,
+  `Interleaved`, narrow and wide lanes from the existing core), `Vector2/3/4` fields;
+- **Grids:** 2D and 3D shapes, any `Halo` width, every `TileBoundary`;
+- **Several inputs and outputs:** more than one `Cell<,>` input (different grids or cell types of one grid), more
+  than one `out` cell, plus the usual uniforms (singletons, values, constants) and component parameters of the tile's
+  entity;
+- **Control flow:** conditions as masks, cold branches, `FloatMode.Fast` math, as in per-row vector loops;
+- **Per-tile results** (summaries such as counts, first/last layer, changed edges) through reductions in the same
+  pass, so the VoxelServer water (`Flow.cs`) is written as cells too (WP5b).
+
+The kernel the generator writes is held to the hand-written one:
+- every width the hardware has (512/256/128), constant-folded for the tile's row width;
+- each neighbor offset one unaligned load, identical loads shared (common subexpressions) across the terms of a
+  stencil; rows in a sliding window where it measures faster;
+- no `call` and no range check in the row loop (Tier1 checked with `tools/jitdisasm.sh`), the routine its own JIT
+  root;
+- quiet rows skipped as the hand version skips them, with the exact f0 fill below.
+
 New core type in `Tile.cs`:
 ```csharp
 public readonly ref struct Cell<TCell, TTile> where TCell : unmanaged where TTile : struct, IComponent, ITileShape
@@ -294,7 +319,8 @@ static void Step_0_Cells(Entity entity, in TileNeighbors n0, ref DynamicBuffer<N
 How D77's three objections are answered:
 1. **Byte promotion** is handled by `Kernel.Narrow` (intervals).
 2. **Width:** element loops emit the widths 512/256/128 chosen from `Width * sizeof(TCell)` (from TTile's constant expression bodies when readable, else all three guarded). This needs a `Vector128`/`Vector256` replacement for the `Kernel.V` token and its `SquareRoot`/`AddSaturate` forms; check that each Narrow helper exists at 128/256.
-3. **Per-row summaries** are deferred to Cell v2 (§6). v1 covers pure shaders.
+3. **Per-row summaries** are per-tile results through reductions in the same pass (WP5b), so a stencil with
+   summaries, like the voxel water, is written as cells too.
 
 Quiet rows:
 - Rows are skipped only when every Cell input is padded with masks and the method does not read X/Y/Z.
@@ -317,7 +343,23 @@ Proof per form (`audit-vector-loops`):
 - Byte forms over every pair of operands (Life: all 3^9 neighborhoods).
 - `LaneMathTests` exhaustive only if a new lowering is added (none planned).
 
-## 4. EECS103: SIMD written by hand that the generator writes from the plain form
+## 4. The analyzer: code that could run as a vector loop
+
+Two rules point users to the vector form (the owner's rule: both cases warn):
+- **Plain code that a small change would vectorize: EECS055** (exists, Warning when the reason is fixable, naming the
+  statement and the change). Every form of this plan reports it where it stays scalar: element loops at the loop
+  keyword, inline-array loops, Cell methods, lambda passes (EECS097), methods with Entity or Emit parameters (the
+  `LooksEligible` gap, fixed with the Lookup-gather work). WP8 audits the reasons themselves.
+- **Hand-written SIMD that the plain form would generate: EECS103** (below).
+
+**WP8 (with each package): the fixable reasons.** List every reason `Kernel` returns; a reason a user can remove
+by rewriting the method (a call that has a vector form under another name, a local written in one branch, a
+`Math` overload, a field of mixed types that a split fixes, an early `return` that is a condition) is fixable, names
+the rewrite, and gets a code fix where the rewrite is mechanical (as the split of EECS055 has). Scan `samples/`,
+`benchmarks/`, `templates/`, `demo/` and the docs fences for methods left scalar and check each is reported with
+the right class; a scalar method that a small change vectorizes and that gets no Warning is a bug of WP8.
+
+### EECS103: SIMD written by hand that the generator writes from the plain form
 - **Id:** EECS103 (highest today is EECS102, in `EasyEcsAnalyzer.Parts.cs:91`).
 - **Placement:** `EasyEcsAnalyzer.Forms.cs` (the "generated form for hand code" family, EECS080–085). Detection is read once in the new `HandSimd.cs`, shared with the code fix (as `Views.cs`/`Prefabs.cs` are). The code fix goes in `src/EasyEcs.CodeFixes/EasyEcsCodeFixes.Forms.cs`.
 - **Severity:** Warning (a better generated form exists).
@@ -364,6 +406,30 @@ Agents per the `audit` skill (at most three; pair the one that measures with one
 - Benchmarks: `GeneratorBenchmark.EditMethodBody`, level.
 - Risk: drift in the text the JIT sees (D126 lesson: even a text cleanup changed inlining). Gate: identical generated text, or identical Tier1 for `World:Masked` runners (`tools/jitdisasm.sh`, `DOTNET_TieredPGO=0`).
 
+**WP0b: generated bodies sized for the JIT inliner (the owner's rule; before WP1, WP2 and WP5).**
+- Why: the runners (`World.Masked`, the run loop of `ForEachBatch`) rely on inlining the job's `Execute`
+  (`AggressiveInlining`). Past the JIT's hard limits (the root method's inline budget, too many locals or blocks)
+  even a forced inline fails, and the job becomes a call per run, per 64-row word in a masked table: D126's masked
+  tail lost up to 3.7x that way. Every larger form of this plan (unrolled inline arrays, element loops, Cell
+  kernels) makes bodies bigger, so the generator must shape its output to stay inlined, not hope it does.
+- Find the limit, do not guess: read why an inline failed (`DOTNET_JitStdOutFile` with the inliner's report where
+  the release runtime prints it; else the Tier1 listing of the runner, `tools/jitdisasm.sh`, for `call ...Execute`),
+  with `DOTNET_TieredPGO=0` for comparable listings.
+- Forms to measure against each other:
+  1. **Split by temperature:** only the hot vector loop stays in `Execute`; per-run setup, the scalar rows after the
+     last whole vector, masked partial words, bails and the wide rows' table checks move into `NoInlining` helpers
+     called at most once per run.
+  2. **Split by width:** each width's loop in its own method, `Execute` dispatching on
+     `Vector512.IsHardwareAccelerated`, so the width the machine lacks no longer counts in the inlinee's IL.
+  3. **Move the boundary:** a generated entry that takes a table's (or chunk's) runs and words and runs the word loop
+     itself, its own JIT root (as Tile methods are), so nothing large needs inlining: one call per table or chunk.
+- The generator estimates the size of what it writes and picks the form; a test pins that the runners of
+  WorldSimulation, BattleServer, `CycleHoles` and `Move3` have no `call ...Execute` in Tier1.
+- Then retry D126's masked AVX-512 tail on the split form (it was dropped only for the inlining loss).
+- Benchmarks: `KernelBenchmark` (Cycle, CycleHoles, Push, Move3, the fragmented worlds), WorldSimulation,
+  BattleServer, MultiWorld, `GeneratorBenchmark`; two rounds, Tier1 listings with the numbers. Decision record with
+  the measured limit and the chosen form.
+
 **WP1: `[InlineArray]` lanes and constant-trip unrolling in the per-row loop.**
 - Tests: `KernelTests.InlineArrayElementsMatchTheMethodBitForBit` (Lengths; 4/8/16 elements; flat, interleaved, wide); `UnrolledLoopsKeepLoopCarriedLocals` (argmin, running sum); uniform inline arrays (Waypoints); a regression test for the single-lane `Paths` bug; EECS055 reasons (N > 16, variable bound); 0 B.
 - Benchmarks: `KernelBenchmark` new `SpectrumScalar/Generated/HandWritten` (component of 8 floats, 1k/100k) and `NearestScalar/Generated` (8 waypoints, argmin).
@@ -398,7 +464,9 @@ Agents per the `audit` skill (at most three; pair the one that measures with one
 - Benchmark: `ForParallelBenchmark` gains `LightLambda` and `HeavyLambda` against `LightForParallel`/`HeavyForParallel` (hand jobs, scalar) and `*Serial`.
 - Risk: low; the lambda infrastructure and the IForSpan runner exist.
 
-**WP5: `Cell<TCell,TTile>` v1 (built on WP2/WP3).**
+**WP5: `Cell<TCell,TTile>` (built on WP2/WP3): the headline package.**
+- Bar: every Cell case at or below its hand-written `Load128`/`Load256` twin, at 0 B; a case above it is a finding
+  for the generator, fixed before the package merges.
 - Core: `Cell<,>`, `PaddedTile` row access for generated code, the 128/256 width tokens.
 - Generator: `ParamKind.Cell`/`CellOut`, `Kernel.Cells.cs`, emission in `SystemGenerator.cs` (or a new `SystemGenerator.Cells.cs`).
 - Analyzer: EECS059 for `out` of an input's cell type; EECS073 for two Cell inputs of one type; reasons (offset beyond `Halo`, non-constant offset).
@@ -415,6 +483,14 @@ Agents per the `audit` skill (at most three; pair the one that measures with one
   - Whole-tile `Pad()` vs a partial range.
   - The new public `EditorBrowsable(Never)` surface needs `audit-naming`.
 
+**WP5b: per-tile results and several inputs/outputs, then the voxel water as cells.**
+- Generator: reductions from a Cell method into the tile entity's components (the `Reduce<T>` machinery per tile),
+  several `Cell<,>` inputs and `out` cells; partial row ranges (`Pad(from, to)`) derived from the offsets and the
+  rows the method reads.
+- Port `samples/VoxelServer/Systems/Water/Flow.cs` to Cell methods; its output and `TickBenchmark` must match or beat
+  the hand-written version.
+- Tests: summaries against the scalar method per tile, 1 vs 4 threads, 0 B; the water's output unchanged.
+
 **WP6: EECS103 and its code fix.**
 - WP6a (v1, batch casts) can start now.
 - WP6b (Tile → Cell) after WP5; WP6c (element loops → plain) after WP2.
@@ -430,11 +506,11 @@ Agents per the `audit` skill (at most three; pair the one that measures with one
   - `FireDamageSystem` → per-row (the EECS103 fix);
   - `TileBenchmark`'s Cell cases;
   - demo pragma or rewrite;
-  - VoxelServer `Flow.cs` stays hand-written until Cell v2.
+  - VoxelServer `Flow.cs` becomes Cell methods (WP5b).
 - Docs: `systems.mdx` vector loops (inner loops), `dynamic-buffers.mdx`, `grids.mdx` (Cell form with "You write / The generator writes", Load128 examples rewritten), the ForParallel section, `analyzer.mdx` EECS103 (en+zh), the public skill, glossary (shader, stencil, halo, lane), `api.mdx` complexity rows, changelog, roadmap.
 - Decision records:
   - D132: element loops share the core; the body is copied (considered: compilation-copy synthesis, intercepting IForSpan jobs, `Element<T>`, which the owner declined).
-  - D133: `Cell<,>` answers D77.
+  - D133: `Cell<,>`, the general stencil form; D77 rewritten to the decision that is true then.
   - D134: EECS103.
 - Update `audit-vector-loops` SKILL: a ForParallel job's Execute is compiled only in lambda form.
 
@@ -445,11 +521,11 @@ Agents per the `audit` skill (at most three; pair the one that measures with one
 - **Early-exit loops (searches, `break`):** short, exactness of the first match plus side effects; not worth it.
 - **Prefix sums / recurrences:** need reassociation or log-step shuffles; the owner declined `Scan<T>`.
 - **Argmin with index across elements in element loops:** a lane-order fold breaks ties differently (the ±0 example). The per-row unrolled form (WP1) already covers the BattleServer shape.
-- **Cell v2: per-tile summaries** (wet count, first/last layer, filled, edges into an `IReduction` component; needed for VoxelServer water): deferred until v1 is measured. A `Pad(from,to)` / custom row selection form would be a lambda on `PaddedTile`, which needs a decision first.
 - **Hook bodies (`OnUpdate`) with element loops:** run once per update; not hot.
 - **Masked AVX-512 tails for element loops:** only worth retrying inside the NoInlining copies, where D126's inlining objection does not apply. Measure later.
 - **Pow strength reduction:** already settled by D127. Pow rewrites are not exact, so they are Fast-only, and that is done.
-- **Temporal blocking, separable kernels, sliding windows, the double-buffered cell component:** D77 dropped these, or they are separate research items.
+- **Temporal blocking, separable kernels, the double-buffered cell component:** D77 dropped these; they come back
+  only with a measured case where the Cell kernel cannot reach the hand-written one without them.
 - **One body for both widths (`ISimdVector`), our own polynomials:** stay out (D126/D127).
 
 ### Critical Files for Implementation

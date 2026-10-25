@@ -100,8 +100,13 @@ left scalar is exactly a method reported. Each reason is classified once, in Ker
   `[ForEach]` method: a vector pass sets a tag, a second pass over the tagged rows does the scalar part"), too many
   branches for one loop (split by tag or by group), a per-row lookup (`Lookup<T>` hoisted or a component copied in), a
   component of too many fields (split the component), a mixed type the loop cannot widen;
-- **inherent** (not reported, or Info): the algorithm needs scalar work (a loop over a buffer per row, a call into
-  user code whose result decides the row).
+- **inherent** (not reported, or Info): the algorithm needs scalar work (a call into user code whose result decides
+  the row; a loop over a buffer per row until element loops land, `docs/plans/inner-loops.md`).
+
+The owner's rule: plain code that a small rewrite would turn into a vector loop must warn. When in doubt, a reason
+is fixable; a reason stays inherent only when no rewrite of the method keeps its meaning and vectorizes. A fixable
+reason whose rewrite is mechanical gets a code fix (`audit-analyzer`). Hand-written SIMD the plain form would
+generate warns too (EECS103).
 
 Reason strings are stable and specific; tests pin them. Rank the reasons by how often they appear over `samples/`,
 `BattleServer.cs`, `WorldSimulation.cs`, templates and the docs examples: the most frequent fixable reason is the next
@@ -144,7 +149,10 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
   costs far more than it saves. A masked AVX-512 tail for the last rows (D126) won 0.5-0.66x on a world of 1,000 tiny
   tables for a one-float body and lost up to 3.7x on `CycleHoles` for this reason: check the Tier1 listing of the
   runner (`tools/jitdisasm.sh`, `EasyEcs.World:Masked`) for `call ...Execute` after any change that adds text to the
-  body. A tail only for bodies that stay inlined needs the inliner's budget in the generator: not done.
+  body. The answer is in the generator, not in less code (the owner's rule): it shapes what it writes so the hot
+  loop stays inlined (cold parts in `NoInlining` helpers called once per run, each width in its own method, or a
+  generated entry that runs the word loop itself), and a test pins `call ...Execute`-free runners. The plan and its
+  measurements: `docs/plans/inner-loops.md`, WP0b.
 - **The four copies of the body are text, not code**: two widths × masked/unmasked; the width the hardware lacks is
   removed at JIT time (`IsHardwareAccelerated` is a constant). They cost generator output and build time, and IL the
   inliner may count before it removes the dead width (the lesson above): measure any copy added.
