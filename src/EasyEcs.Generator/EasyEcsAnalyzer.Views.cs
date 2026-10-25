@@ -59,6 +59,55 @@ public sealed partial class EasyEcsAnalyzer
         context.RegisterSymbolAction(AnalyzeViewOverlap, SymbolKind.Method);
         context.RegisterOperationAction(AnalyzeHandWrittenView, OperationKind.ObjectCreation);
         context.RegisterOperationBlockAction(AnalyzeViewMemberBody);
+        context.RegisterCompilationStartAction(AnalyzeUnwrittenViewFields);
+    }
+
+    // ---------------- EECS025 through views: a 'ref' field nothing writes ----------------
+
+    /// <summary>
+    /// EECS025 for a valid view's 'ref' field that no code of the compilation writes through (<see cref="Uses.MayWrite"/>
+    /// of a reference to it; binding the ref is no write): every pass taking the view is scheduled as the component's
+    /// writer and, for a tracked component, stamps every row. The field's modifier is the view's, shared by every method
+    /// and lambda taking it, so the rule looks at all of them at the end of the compilation (a method alone that does not
+    /// write it could only take another view). Fix: 'ref readonly'. A public view of a library is left to the
+    /// assemblies using it.
+    /// </summary>
+    private static void AnalyzeUnwrittenViewFields(CompilationStartAnalysisContext start)
+    {
+        var views = new System.Collections.Concurrent.ConcurrentQueue<INamedTypeSymbol>();
+        var written = new System.Collections.Concurrent.ConcurrentDictionary<IFieldSymbol, byte>(SymbolEqualityComparer.Default);
+        start.RegisterSymbolAction(context =>
+        {
+            if (context.Symbol is INamedTypeSymbol type && Views.IsValid(type)) views.Enqueue(type);
+        }, SymbolKind.NamedType);
+        start.RegisterOperationAction(context =>
+        {
+            var reference = (IFieldReferenceOperation)context.Operation;
+            if (reference.Field.RefKind != RefKind.Ref || !Views.IsView(reference.Field.ContainingType)
+                || reference.Parent is ISimpleAssignmentOperation { IsRef: true } bind && bind.Target == reference) return;
+            if (Uses.MayWrite(reference)) written.TryAdd(reference.Field.OriginalDefinition, 0);
+        }, OperationKind.FieldReference);
+        start.RegisterCompilationEndAction(context =>
+        {
+            bool library = context.Compilation.Options.OutputKind == OutputKind.DynamicallyLinkedLibrary;
+            foreach (var view in views)
+            {
+                if (library && Symbols.IsPublic(view)) continue;
+                foreach (var field in Views.Fields(view))
+                {
+                    if (field is not { Writes: true, Mut: false } || written.ContainsKey(field.Symbol)) continue;
+                    var declaration = field.Symbol.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken).Parent as VariableDeclarationSyntax;
+                    var fix = declaration is { Variables.Count: 1 } ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "RefReadOnly") : null;
+                    string component = field.Component.Name;
+                    context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, field.Symbol.Locations.FirstOrDefault(), fix,
+                        $"Field '{field.Symbol.Name}' of view {view.Name} (ref {component})",
+                        Symbols.Implements(field.Component, Symbols.TrackChanges)
+                            ? $"every row a pass builds the view over is stamped as changed, so [Changed<{component}>] systems visit rows nobody changed"
+                            : "every pass taking the view is scheduled as the component's writer, so no parallel stage runs it beside a reader",
+                        "no code writes through it; make it 'ref readonly'"));
+                }
+            }
+        });
     }
 
     // ---------------- EECS098, EECS100: the declarations ----------------
@@ -136,7 +185,7 @@ public sealed partial class EasyEcsAnalyzer
                 if (operation is IInstanceReferenceOperation { ReferenceKind: InstanceReferenceKind.ContainingTypeInstance }
                     && WritesField(operation, view, field) && writes.Add(operation.Syntax))
                     located.Add((operation.Parent ?? operation).Syntax.GetLocation());
-            if (writes.Count == 0 || !Unwritten(context, block, writes)) continue;
+            if (writes.Count == 0 || !Unwritten(context.GetControlFlowGraph(block), writes)) continue;
             context.ReportDiagnostic(Diagnostic.Create(SomeRowsWritten, located[0], located.Skip(1),
                 $"View member '{member}' writes", field.Component.Name, $" through field '{field.Symbol.Name}' of view {view.Name}",
                 "some paths through it return without a write, and every row the view is built over is stamped as changed", "make the field"));

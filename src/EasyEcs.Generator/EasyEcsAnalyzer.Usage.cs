@@ -107,12 +107,15 @@ public sealed partial class EasyEcsAnalyzer
         "for them.", helpLinkUri: Help("EECS048"));
 
     public static readonly DiagnosticDescriptor NeverMatches = new("EECS049", "Filters no entity passes",
-        "[ForEach] method '{0}' requires '{1}' ({2}) and excludes it ({3}): no entity passes both, so the method never runs",
+        "{0} requires {1} and excludes {2}: {3}",
         Category, DiagnosticSeverity.Error, true,
         "A [ForEach] method visits the entities that pass all of its filters and those of its group: its components, " +
-        "[With<T>], [Changed<T>], the group's [With<T>] and ISystemGroupWith<T> require a component, [Without<T>] and " +
-        "ISystemGroupWithout<T> exclude it. A component both required and excluded leaves no entity to visit. Drop one of " +
-        "them, or move the system to another group.", helpLinkUri: Help("EECS049"));
+        "[With<T>], [Changed<T>], the group's [With<T>] and ISystemGroupWith<T> require a component, [WithAny<...>] one " +
+        "of its components, [Without<T>] and ISystemGroupWithout<T> exclude it; a lambda pass, its parameters and its own " +
+        "filters. A component both required and excluded, or a [WithAny<...>] whose every component is excluded, leaves no " +
+        "entity to visit. A view the method builds over the entity it visits (entity.AsX(), entity.TryGetX) needs the " +
+        "view's components too: one the filters exclude is never there, so AsX throws and TryGetX finds nothing. Drop one " +
+        "of them, or move the system to another group.", helpLinkUri: Help("EECS049"));
 
     public static readonly DiagnosticDescriptor SecondGroup = new("EECS050", "A second group in one filter",
         "'{0}' names a second group in a filter that already has '{1}': InGroup throws ArgumentException; a filter names one group",
@@ -167,6 +170,7 @@ public sealed partial class EasyEcsAnalyzer
             start.RegisterOperationAction(c => AnalyzeCopy(c), OperationKind.VariableDeclarator);
             start.RegisterSymbolAction(AnalyzeRecordKey, SymbolKind.NamedType);
             start.RegisterSymbolAction(AnalyzeFilters, SymbolKind.Method);
+            start.RegisterOperationAction(AnalyzeViewOfVisited, OperationKind.Invocation);
             start.RegisterOperationAction(c => AnalyzeRefAcrossChange(c, core), OperationKind.VariableDeclarator);
             start.RegisterOperationAction(c => AnalyzeItemAcrossChange(c, core), OperationKind.Loop);
         });
@@ -741,13 +745,94 @@ public sealed partial class EasyEcsAnalyzer
             if (with.Has && all.Any(r => r.Kind == Symbols.FilterKind.Removed && SymbolEqualityComparer.Default.Equals(r.Type, with.Type)))
                 context.ReportDiagnostic(Diagnostic.Create(RemovedRequired, with.Parameter ? with.Where : location, method.Name, with.Type.Name,
                     with.Why + " requires it"));
+        NeverPassed(context.ReportDiagnostic, Symbols.Describe(method), all, AnyOf(method, true, context.CancellationToken), location, "the method never runs");
+    }
+
+    /// <summary>
+    /// EECS049 over the requirements <paramref name="all"/> of a pass (<paramref name="described"/>): each component both
+    /// required and excluded, and each [WithAny&lt;...&gt;] (<paramref name="anyOf"/>) whose every component is excluded.
+    /// Whether it reported one: the rules about what the pass does per row defer to it (one mistake, one diagnostic).
+    /// </summary>
+    internal static bool NeverPassed(System.Action<Diagnostic> report, string described, List<Symbols.Requirement> all,
+        List<(string Text, Location? Where, ITypeSymbol[] Types)> anyOf, Location? location, string never)
+    {
+        bool reported = false;
         foreach (var without in all)
         {
             if (without.Kind != Symbols.FilterKind.Without
                 || all.FirstOrDefault(r => r.Has && SymbolEqualityComparer.Default.Equals(r.Type, without.Type)) is not { } with) continue;
-            context.ReportDiagnostic(Diagnostic.Create(NeverMatches, without.Where ?? with.Where ?? location,
-                method.Name, with.Type.Name, with.Why, without.Why));
+            report(Diagnostic.Create(NeverMatches, without.Where ?? with.Where ?? location, described,
+                $"'{with.Type.Name}' ({with.Why})", $"it ({without.Why})", "no entity passes both, so " + never));
+            reported = true;
         }
+
+        foreach (var (text, where, types) in anyOf)
+        {
+            var excluded = new List<string>();
+            foreach (var type in types)
+                if (all.FirstOrDefault(r => r.Kind == Symbols.FilterKind.Without && SymbolEqualityComparer.Default.Equals(r.Type, type)) is { } without)
+                    excluded.Add(without.Why);
+            if (excluded.Count < types.Length) continue;
+            report(Diagnostic.Create(NeverMatches, where ?? location, described,
+                $"one of {string.Join(", ", types.Select(t => t.Name))} ({text})", $"each of them ({string.Join(", ", excluded.Distinct())})",
+                "no entity passes both, so " + never));
+            reported = true;
+        }
+
+        return reported;
+    }
+
+    /// <summary>
+    /// The [WithAny&lt;...&gt;] filters of <paramref name="method"/> (and of its group's with <paramref name="group"/>): how
+    /// each reads, where it is declared (null for a group's) and its components.
+    /// </summary>
+    internal static List<(string Text, Location? Where, ITypeSymbol[] Types)> AnyOf(IMethodSymbol method, bool group, System.Threading.CancellationToken token)
+    {
+        var any = new List<(string, Location?, ITypeSymbol[])>();
+        void Add(IEnumerable<(Symbols.FilterKind Kind, ITypeSymbol Type, AttributeData? Attribute)> filters, string? groupName)
+        {
+            foreach (var attribute in filters.Where(f => f.Kind == Symbols.FilterKind.WithAny && f.Attribute != null).GroupBy(f => f.Attribute!))
+            {
+                var types = attribute.Select(f => f.Type).Where(t => t.TypeKind != TypeKind.Error).ToArray();
+                if (types.Length == 0) continue;
+                string text = $"[WithAny<{string.Join(", ", types.Select(t => t.Name))}>]" + (groupName == null ? "" : " on its group " + groupName);
+                any.Add((text, groupName == null ? attribute.Key.ApplicationSyntaxReference?.GetSyntax(token).GetLocation() : null, types));
+            }
+        }
+
+        Add(Symbols.AttributeFilters(method).Select(f => (f.Kind, f.Type, (AttributeData?)f.Attribute)), null);
+        if (group)
+            foreach (var byGroup in Symbols.GroupFilters(method).GroupBy(f => f.Group, SymbolEqualityComparer.Default))
+                Add(byGroup.Select(f => (f.Kind, f.Type, f.Attribute)), byGroup.Key!.Name);
+        return any;
+    }
+
+    /// <summary>
+    /// EECS049 for a view a [ForEach] / [ForEntity] method builds over the entity it visits (<c>e.AsX()</c>,
+    /// <c>e.TryGetX(out x)</c> on its Entity parameter) that covers a component the method's filters exclude: the
+    /// entity never has it, so AsX throws on every one and TryGetX finds none.
+    /// </summary>
+    private static void AnalyzeViewOfVisited(OperationAnalysisContext context)
+    {
+        var call = (IInvocationOperation)context.Operation;
+        var target = call.TargetMethod;
+        if (context.ContainingSymbol is not IMethodSymbol method || !Symbols.IsGeneratedJob(method) || !Symbols.IsGenerated(target)) return;
+        bool @as = target.Name.StartsWith("As", System.StringComparison.Ordinal) && target.Parameters.Length <= 1;
+        var type = @as ? target.ReturnType
+            : target.Name.StartsWith("TryGet", System.StringComparison.Ordinal) ? target.Parameters.LastOrDefault(p => p.RefKind == RefKind.Out)?.Type : null;
+        if (type is not INamedTypeSymbol view || !Views.IsValid(view)
+            || Symbols.Unwrap(call.Instance ?? call.Arguments.FirstOrDefault()?.Value) is not IParameterReferenceOperation { Parameter: var entity }
+            || !SymbolEqualityComparer.Default.Equals(entity.ContainingSymbol, method) || Symbols.Classify(entity) != Symbols.ParamKind.Entity) return;
+        var all = Symbols.Requirements(method, context.CancellationToken);
+        foreach (var field in Views.Fields(view))
+            if (all.FirstOrDefault(r => r.Kind == Symbols.FilterKind.Without && SymbolEqualityComparer.Default.Equals(r.Type, field.Component)) is { } without)
+            {
+                string text = call.Syntax.ToString();
+                context.ReportDiagnostic(Diagnostic.Create(NeverMatches, call.Syntax.GetLocation(), Symbols.Describe(method),
+                    $"'{field.Component.Name}' ({text} builds view {view.Name} over its entity)", $"it ({without.Why})",
+                    @as ? $"no entity it visits has it, so {text} throws on every one" : $"no entity it visits has it, so {text} finds none"));
+                return;
+            }
     }
 
     // ---------------- EECS047: a ref used after a structural change ----------------

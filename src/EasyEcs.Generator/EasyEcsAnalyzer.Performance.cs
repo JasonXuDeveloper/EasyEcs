@@ -29,7 +29,9 @@ public sealed partial class EasyEcsAnalyzer
         "so no parallel stage runs it beside a system that reads the type, and every row it visits of a tracked " +
         "component (ITracked) is stamped as changed, so [Changed<T>] systems visit rows nobody changed. " +
         "Entity.Get<T>() of a tracked component stamps the row too, and so does a Maybe<T> on every row that has the component. " +
-        "Read with 'in', ReadOnlySpan<T>, ReadOnlyMaybe<T> or Read<T>().",
+        "A lambda pass's parameters count as a [ForEach] method's, and a view's 'ref' field as a 'ref' parameter of every " +
+        "pass taking the view (reported once on the field when no code of the compilation writes through it). " +
+        "Read with 'in', ReadOnlySpan<T>, ReadOnlyMaybe<T>, Read<T>() or a 'ref readonly' field.",
         helpLinkUri: Help("EECS025"));
 
     public static readonly DiagnosticDescriptor UnusedParameter = new("EECS026", "A [ForEach] or [ForEntity] parameter the method does not use",
@@ -131,8 +133,9 @@ public sealed partial class EasyEcsAnalyzer
         "the method writes it or returns first, so [Changed<T>] systems visit rows whose value never changed (and send, " +
         "save or recompute them again). A Mut<T> stamps only the rows the method writes, through Write() or a " +
         "SetIfChanged that changed the value; reading Value stamps nothing. Batch methods (spans) stamp whole runs and " +
-        "are left out. A view's 'ref' field stamps the same way, so a method or a view member that writes it on some " +
-        "paths only is reported too; a Mut<T> field stamps only what it writes.",
+        "are left out. A lambda pass's parameters stamp as a method's. A view's 'ref' field stamps the same way, so a " +
+        "method, a lambda pass or a view member that writes it on some paths only is reported too; a Mut<T> field stamps " +
+        "only what it writes.",
         helpLinkUri: Help("EECS053"));
 
     public static readonly DiagnosticDescriptor ScalarLoop = new("EECS055", "A [ForEach] method that runs one row at a time",
@@ -265,6 +268,7 @@ public sealed partial class EasyEcsAnalyzer
         if (context.OwningSymbol is not IMethodSymbol method) return;
         var body = context.OperationBlocks.FirstOrDefault(b => b is IMethodBodyOperation or IBlockOperation);
         if (body == null) return;
+        AnalyzeLambdaPasses(context, body);
         bool forEach = Symbols.IsGeneratedJob(method);
         if (forEach)
         {
@@ -394,20 +398,7 @@ public sealed partial class EasyEcsAnalyzer
             // EECS053 through a view: a 'ref' field of a tracked component the method writes on some rows only.
             if (kind == Symbols.ParamKind.View && p.Type is INamedTypeSymbol view && Views.IsValid(view) && spans == 0 && !entitySpan)
             {
-                foreach (var field in TrackedRefFields(view))
-                {
-                    var writes = new HashSet<SyntaxNode>();
-                    foreach (var reference in references)
-                        if (WritesField(reference, view, field))
-                            writes.Add(reference.Syntax);
-                    if (writes.Count == 0 || !Unwritten(context, body, writes)) continue;
-                    context.ReportDiagnostic(Diagnostic.Create(SomeRowsWritten, location,
-                        references.Where(r => writes.Contains(r.Syntax)).Select(r => r.Syntax.GetLocation()),
-                        $"{described} writes", field.Component.ToMinimalDisplayString(body.SemanticModel!, location?.SourceSpan.Start ?? 0),
-                        $" through field '{field.Symbol.Name}' of view {view.Name}", one ? "some calls return without a write, and every call stamps the row as changed"
-                            : "some rows pass through without a write, and every row it visits is stamped as changed", "make the field"));
-                }
-
+                ViewWrittenOnSomeRows(context.ReportDiagnostic, context.GetControlFlowGraph(body), p, view, references, described, one, body.SemanticModel!);
                 continue;
             }
 
@@ -425,7 +416,8 @@ public sealed partial class EasyEcsAnalyzer
                 // EECS053: a tracked component a per-entity method writes on some rows only.
                 if (byRef && kind == Symbols.ParamKind.Component && spans == 0 && !entitySpan && type is not ITypeParameterSymbol
                     && Symbols.Implements(type, Symbols.TrackChanges))
-                    WrittenOnSomeRows(context, method, body, p, type, references);
+                    WrittenOnSomeRows(context.ReportDiagnostic, context.GetControlFlowGraph(body), p, type, references, described, one, body.SemanticModel!,
+                        !Symbols.SharesSignature(method) && method.PartialDefinitionPart == null && method.PartialImplementationPart == null);
                 continue;
             }
             // A 'ref' singleton of a parallel method is EECS010's ("it writes a singleton ... take it as 'in'").
@@ -443,6 +435,83 @@ public sealed partial class EasyEcsAnalyzer
     }
 
     /// <summary>
+    /// EECS025 and EECS053 for the lambdas of the lambda passes in <paramref name="body"/>: the job the generator writes
+    /// for one (LambdaPass) declares and stamps what a [ForEach] method with its parameters would, so a 'ref' component or
+    /// singleton the body only reads (fix: 'in'), a tracked one written on some rows only, and a view's tracked 'ref'
+    /// field written on some rows only are reported as for a method. The Mut&lt;T&gt; fix rewrites methods only. A call
+    /// the generator cannot compile is EECS095's.
+    /// </summary>
+    private static void AnalyzeLambdaPasses(OperationBlockAnalysisContext context, IOperation body)
+    {
+        ControlFlowGraph? root = null;
+        foreach (var operation in body.Descendants())
+        {
+            if (operation is not IInvocationOperation invocation || LambdaPass.Read(invocation) is not { Function: { } function, Lambda: { } lambda } call
+                || invocation.SemanticModel is not { } model || LambdaPass.Problem(call, model, context.CancellationToken, out _) != null) continue;
+            var uses = new Dictionary<IParameterSymbol, List<IOperation>>(SymbolEqualityComparer.Default);
+            foreach (var reference in function.Body.Descendants().OfType<IParameterReferenceOperation>())
+            {
+                if (!uses.TryGetValue(reference.Parameter, out var list)) uses[reference.Parameter] = list = [];
+                list.Add(reference);
+            }
+
+            string described = $"the lambda of world.{invocation.TargetMethod.Name}(…)";
+            ControlFlowGraph? graph = null;
+            foreach (var p in lambda.Parameters)
+            {
+                if (!uses.TryGetValue(p, out var references)) continue; // EECS026 is a method's: a lambda's parameters are its query
+                var kind = Symbols.Classify(p, true);
+                var location = p.Locations.FirstOrDefault();
+                if (kind == Symbols.ParamKind.View && p.Type is INamedTypeSymbol view && Views.IsValid(view))
+                {
+                    if ((graph ??= LambdaGraph(root ??= context.GetControlFlowGraph(body), lambda, context.CancellationToken)) is { } viewGraph)
+                        ViewWrittenOnSomeRows(context.ReportDiagnostic, viewGraph, p, view, references, described, false, model);
+                    continue;
+                }
+
+                if (kind is not (Symbols.ParamKind.Component or Symbols.ParamKind.Singleton) || p.RefKind != RefKind.Ref
+                    || p.Type is ITypeParameterSymbol || Symbols.IsIndexed(p.Type)) continue;
+                if (references.Any(Uses.MayWrite))
+                {
+                    if (kind == Symbols.ParamKind.Component && Symbols.Implements(p.Type, Symbols.TrackChanges)
+                        && (graph ??= LambdaGraph(root ??= context.GetControlFlowGraph(body), lambda, context.CancellationToken)) is { } writeGraph)
+                        WrittenOnSomeRows(context.ReportDiagnostic, writeGraph, p, p.Type, references, described, false, model, false);
+                    continue;
+                }
+
+                if (kind == Symbols.ParamKind.Singleton && call.Parallel) continue; // EECS010's, as for a method
+                context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, location, ImmutableDictionary<string, string?>.Empty.Add(FixKind, "In"),
+                    $"Parameter '{p.Name}' of {described} (ref)",
+                    kind == Symbols.ParamKind.Singleton ? "the pass is scheduled as the singleton's writer"
+                    : Symbols.Implements(p.Type, Symbols.TrackChanges) ? "every row it visits is stamped as changed, so [Changed<" + p.Type.Name + ">] systems visit rows nobody changed"
+                    : "the pass is scheduled as the component's writer",
+                    "take it by 'in'"));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The control flow graph of <paramref name="lambda"/>, found in <paramref name="graph"/> (the method's) or in the
+    /// graphs of the lambdas and local functions it holds; null when it is not there.
+    /// </summary>
+    private static ControlFlowGraph? LambdaGraph(ControlFlowGraph graph, IMethodSymbol lambda, System.Threading.CancellationToken token)
+    {
+        foreach (var block in graph.Blocks)
+        foreach (var operation in block.BranchValue is { } branch ? block.Operations.Add(branch) : block.Operations)
+        foreach (var flow in operation.DescendantsAndSelf().OfType<IFlowAnonymousFunctionOperation>())
+        {
+            var inner = graph.GetAnonymousFunctionControlFlowGraph(flow, token);
+            if (SymbolEqualityComparer.Default.Equals(flow.Symbol, lambda)) return inner;
+            if (LambdaGraph(inner, lambda, token) is { } found) return found;
+        }
+
+        foreach (var local in graph.LocalFunctions)
+            if (LambdaGraph(graph.GetLocalFunctionControlFlowGraph(local, token), lambda, token) is { } found)
+                return found;
+        return null;
+    }
+
+    /// <summary>
     /// EECS053: a 'ref' parameter of a tracked component that some path through the method leaves unwritten (it reaches
     /// the end or a return without a write; a path that throws does not count). Found on the method's control flow graph:
     /// a walk from the entry that stops at every block holding a write of the parameter (a block runs whole, so a path
@@ -452,12 +521,11 @@ public sealed partial class EasyEcsAnalyzer
     /// a write, so a missed report is possible, a wrong one is not. The fix (to <c>Mut&lt;T&gt;</c>) is offered when every
     /// use maps to <c>.Write()</c> or <c>.Value</c>: the writes come first in the additional locations, then the reads.
     /// </summary>
-    private static void WrittenOnSomeRows(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body, IParameterSymbol p,
-        ITypeSymbol component, List<IOperation> references)
+    private static void WrittenOnSomeRows(System.Action<Diagnostic> report, ControlFlowGraph graph, IParameterSymbol p, ITypeSymbol component,
+        List<IOperation> references, string described, bool one, SemanticModel model, bool mechanical)
     {
         var writes = new HashSet<SyntaxNode>();
         var reads = new List<IOperation>();
-        bool mechanical = !Symbols.SharesSignature(method) && method.PartialDefinitionPart == null && method.PartialImplementationPart == null;
         foreach (var reference in references)
         {
             if (Uses.MayWrite(reference)) writes.Add(reference.Syntax);
@@ -468,27 +536,50 @@ public sealed partial class EasyEcsAnalyzer
                 mechanical = false;
         }
 
-        if (!Unwritten(context, body, writes)) return;
+        if (!Unwritten(graph, writes)) return;
         var locations = references.Where(r => writes.Contains(r.Syntax)).Concat(reads).Select(r => r.Syntax.GetLocation());
         var properties = mechanical
             ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Mut").Add("Writes", writes.Count.ToString(System.Globalization.CultureInfo.InvariantCulture))
             : ImmutableDictionary<string, string?>.Empty;
-        context.ReportDiagnostic(Diagnostic.Create(SomeRowsWritten, p.Locations.FirstOrDefault(), locations, properties,
-            $"Parameter '{p.Name}' of {Symbols.Describe(method)} takes", component.ToMinimalDisplayString(body.SemanticModel!, p.Locations.FirstOrDefault()?.SourceSpan.Start ?? 0), "",
-            Symbols.IsForEntity(method) ? "some calls return without a write, and every call stamps the row as changed"
+        report(Diagnostic.Create(SomeRowsWritten, p.Locations.FirstOrDefault(), locations, properties,
+            $"Parameter '{p.Name}' of {described} takes", component.ToMinimalDisplayString(model, p.Locations.FirstOrDefault()?.SourceSpan.Start ?? 0), "",
+            one ? "some calls return without a write, and every call stamps the row as changed"
                 : "some rows pass through without a write, and every row it visits is stamped as changed", "take it as"));
     }
 
     /// <summary>
-    /// Whether some path through <paramref name="body"/> (one of the context's operation blocks) reaches its end or a
-    /// return without passing an operation whose syntax is one of <paramref name="writes"/>: a walk of the control flow
+    /// EECS053 through view parameter <paramref name="p"/>: a 'ref' field of a tracked component (<see cref="TrackedRefFields"/>)
+    /// that some path through the code (<paramref name="graph"/>) leaves unwritten. Writes are the uses of the view that
+    /// may write the field (<see cref="WritesField"/>); no fix (the field is the view's, shared by its other users).
+    /// </summary>
+    private static void ViewWrittenOnSomeRows(System.Action<Diagnostic> report, ControlFlowGraph graph, IParameterSymbol p, INamedTypeSymbol view,
+        List<IOperation> references, string described, bool one, SemanticModel model)
+    {
+        var location = p.Locations.FirstOrDefault();
+        foreach (var field in TrackedRefFields(view))
+        {
+            var writes = new HashSet<SyntaxNode>();
+            foreach (var reference in references)
+                if (WritesField(reference, view, field))
+                    writes.Add(reference.Syntax);
+            if (writes.Count == 0 || !Unwritten(graph, writes)) continue;
+            report(Diagnostic.Create(SomeRowsWritten, location,
+                references.Where(r => writes.Contains(r.Syntax)).Select(r => r.Syntax.GetLocation()),
+                char.ToUpperInvariant(described[0]) + described.Substring(1) + " writes", field.Component.ToMinimalDisplayString(model, location?.SourceSpan.Start ?? 0),
+                $" through field '{field.Symbol.Name}' of view {view.Name}", one ? "some calls return without a write, and every call stamps the row as changed"
+                    : "some rows pass through without a write, and every row it visits is stamped as changed", "make the field"));
+        }
+    }
+
+    /// <summary>
+    /// Whether some path through the code of <paramref name="graph"/> reaches its end or a return without passing an operation whose syntax is one of <paramref name="writes"/>: a walk of the control flow
     /// graph from the entry that stops at every block holding a write (a block runs whole) and reaches the exit; a constant
     /// condition takes its one branch, a throw is not followed. False when a write lies in a finally (the walk does not
     /// follow a finally on the way out, so it cannot tell).
     /// </summary>
-    private static bool Unwritten(OperationBlockAnalysisContext context, IOperation body, HashSet<SyntaxNode> writes)
+    private static bool Unwritten(ControlFlowGraph graph, HashSet<SyntaxNode> writes)
     {
-        var blocks = context.GetControlFlowGraph(body).Blocks;
+        var blocks = graph.Blocks;
         var written = new bool[blocks.Length];
         for (int i = 0; i < blocks.Length; i++)
         {

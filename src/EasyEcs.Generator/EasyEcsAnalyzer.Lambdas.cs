@@ -10,7 +10,8 @@ namespace EasyEcs.Generator;
 /// The rules of lambda passes (<see cref="LambdaPass"/>, EECS095-EECS097): a call the generator cannot compile, which
 /// would throw (EECS095; a capturing lambda's fix passes what it captures as values); a body that runs through its
 /// delegate because it names what generated code cannot reach (EECS096; the fix makes the private member internal); a body
-/// left without a vector loop, with <see cref="Kernel.Vectorize"/>'s reason (EECS097).
+/// left without a vector loop, with <see cref="Kernel.Vectorize"/>'s reason (EECS097); and EECS049 for one whose own filters
+/// and parameters no entity passes (a lambda pass takes no group's filters).
 /// </summary>
 public sealed partial class EasyEcsAnalyzer
 {
@@ -68,6 +69,12 @@ public sealed partial class EasyEcsAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(BadLambdaPass, location, properties, name, problem));
             return;
         }
+
+        // EECS049: the lambda's parameters and its own filters (a lambda pass takes no group's); a pass that visits
+        // nothing has no delegate or loop worth a word.
+        if (NeverPassed(context.ReportDiagnostic, $"The lambda of world.{name}(…)", Symbols.Requirements(call.Lambda!, context.CancellationToken, groups: false),
+                AnyOf(call.Lambda!, false, context.CancellationToken), location, "the pass visits no entity"))
+            return;
 
         if (LambdaPass.Unreachable(call, model, context.CancellationToken, out var blocking) is { } unreachable)
         {
