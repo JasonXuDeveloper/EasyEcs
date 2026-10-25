@@ -625,9 +625,14 @@ internal sealed partial class Kernel
                     if (fields.Length == 1) loads.Append($"var __c{index}_0{h} = {V}.LoadUnsafe(ref e{index}, {row});\n");
                     else
                     {
-                        loads.Append($"{Interleaved}.Load{fields.Length}(ref e{index}, {row}, {string.Join(", ", fields.Select((_, f) => $"out {Vec(column)} __s{index}_{f}{h}"))});\n");
+                        // Each field is loaded into its name; a field of another type of the lane size is loaded as the
+                        // column's lanes and reinterpreted. No copy of the loaded value: the JIT inlines no method of more
+                        // than 32 IL locals (MAX_INL_LCLS, even AggressiveInlining), and a copy per field is what pushed
+                        // masked jobs (Move3, Move4) past it, so the runner called them per 64-row word (D126).
+                        loads.Append($"{Interleaved}.Load{fields.Length}(ref e{index}, {row}, {string.Join(", ", fields.Select((fd, f) => $"out {Vec(column)} {(Elem(fd.Type) == column ? "__c" : "__s")}{index}_{f}{h}"))});\n");
                         for (int f = 0; f < fields.Length; f++)
-                            loads.Append($"var __c{index}_{f}{h} = {As(column, Elem(fields[f].Type), $"__s{index}_{f}{h}")};\n");
+                            if (Elem(fields[f].Type) != column)
+                                loads.Append($"var __c{index}_{f}{h} = {As(column, Elem(fields[f].Type), $"__s{index}_{f}{h}")};\n");
                     }
                 }
             columns[columns.Count - 1] = (columns[columns.Count - 1].Names, loads.ToString());
@@ -640,9 +645,10 @@ internal sealed partial class Kernel
             if (fields.Length == 1) loads.Append($"var __q{index}_0 = {V}.LoadUnsafe(ref __r{index}, {row});\n");
             else
             {
-                loads.Append($"{Interleaved}.Load{fields.Length}(ref __r{index}, {row}, {string.Join(", ", fields.Select((_, f) => $"out {Vec(column)} __t{index}_{f}"))});\n");
+                loads.Append($"{Interleaved}.Load{fields.Length}(ref __r{index}, {row}, {string.Join(", ", fields.Select((fd, f) => $"out {Vec(column)} {(Elem(fd.Type) == column ? "__q" : "__t")}{index}_{f}"))});\n");
                 for (int f = 0; f < fields.Length; f++)
-                    loads.Append($"var __q{index}_{f} = {As(column, Elem(fields[f].Type), $"__t{index}_{f}")};\n");
+                    if (Elem(fields[f].Type) != column)
+                        loads.Append($"var __q{index}_{f} = {As(column, Elem(fields[f].Type), $"__t{index}_{f}")};\n");
             }
             columns.Add(([$"__q{index}_", $"__has{index}"], loads.ToString()));
         }
