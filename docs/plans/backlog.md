@@ -17,13 +17,20 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
 - [x] **zh reference fix** (merged af585ed): Chinese restored, ApiDocs keeps a page it would write in English and
       exits 1; leftovers in `docs-todos.md`.
 - [x] **Generated text survey** (`generated-text.md`); rules in `audit-generator` "The generated text" and `feature`.
-- [ ] **Generator / analyzer cost, phase 1** (diagnosis only): step tracking on realistic edits, per-rule analyzer
-      time, comparison with Roslyn's guidance.
+- [ ] **Generator / analyzer cost, phase 2** (diagnosis done; per keystroke 300-350 ms generators on the unit tests,
+      analyzer ~7-9 s single-threaded): A1 EECS014 walks the containing type per structural call (36 %); A2 EECS033
+      scans every tree per DynamicBuffer call + speculative binds (40 %); A3 TypesNamed per prefix; A4 a shared
+      per-compilation body-facts cache (IsStable computed 4 times); A5 GetSymbolsWithName over every type; G2
+      QueryShapes binds whole bodies for `Read<T>()` (30 % of a keystroke); G5 a cache test that sees reruns
+      (`Unchanged` hides them) + an IDE-mode GeneratorBenchmark case; A7 one DiagnosticAnalyzer per area (NoWarn
+      cannot skip a rule today). Then G1: ForEachModel split into a declaration model (source output) and body facts
+      (implementation output, bound once) - after lookup gathers merge. G6 (C# 14 extension containers slow every
+      bind) research only.
 
 ## Next
 
-- [ ] **Analyzer and incremental generators by the official .NET guidance** (owner, 2026-10-25): after phase 1,
-      refactor what does not follow it (incremental pipeline: ForAttributeWithMetadataName, equatable symbol-free
+- [ ] **Analyzer and incremental generators by the official .NET guidance** (owner, 2026-10-25; phase 2 above is
+      its first part): refactor what does not follow it (incremental pipeline: ForAttributeWithMetadataName, equatable symbol-free
       models, no CompilationProvider in a pipeline that runs per edit, cached steps proven by tracking names;
       analyzer: RegisterSymbolStartAction / operation actions over syntax walks where cheaper, no per-node semantic
       model work, compilation-end rules only where needed, `EnableConcurrentExecution`, generated code skipped).
