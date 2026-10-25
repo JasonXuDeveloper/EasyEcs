@@ -453,11 +453,14 @@ public class ParallelTests
         var heavy = new CountingWork(1);
         Assert.That(heavy.Rows(100_000, 4), Is.Zero, "nothing measured yet: the count decides");
         heavy.Items = 100_000;
+        heavy.Cost(second);
+        Assert.That(heavy.Measured, Is.False, "the first run is cold: dropped");
         heavy.Cost(second / 10); // 1 µs per row: 100 ms would make 4,000 chunks of 25 µs; 64 per thread at most
         Assert.That(heavy.Rows(100_000, 4), Is.EqualTo(448));
         Assert.That(heavy.Rows(2_000, 4), Is.EqualTo(64), "2 ms: chunks of 25 µs, the 64-row least");
 
         var light = new CountingWork(1) { Items = 1_000_000 };
+        light.Cost(second);
         light.Cost(second / 1_000); // 1 ns per row
         Assert.That(light.Rows(1_000_000, 4), Is.EqualTo(25_024), "1 ms: 40 chunks of 25 µs, not 16 of 62 µs");
         Assert.That(light.Rows(100_000, 4), Is.EqualTo(6_272), "100 µs: four chunks per thread");
@@ -466,6 +469,7 @@ public class ParallelTests
 
         var merging = new CountingWork(1);
         merging.Cost(second); // a pass cut by count (Items 0) learns nothing
+        merging.Cost(second);
         Assert.That(merging.Measured, Is.False);
     }
 
