@@ -9,6 +9,8 @@
         <!-- The tests exercise the generic API and hand-written parts the generated forms stand for (EECS033, EECS065,
              EECS067); EECS069: test components that are never saved. -->
         <NoWarn>$(NoWarn);EECS033;EECS065;EECS067;EECS069</NoWarn>
+        <!-- the gathers and compressing stores of the linked locality prototypes take pointers -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
     <ItemGroup>
@@ -31,6 +33,8 @@
         <ProjectReference Include="..\EasyEcs.Aot.Library\EasyEcs.Aot.Library.csproj"/>
         <!-- the README's battle server, compiled unchanged (BattleServerTests) -->
         <Compile Include="..\..\benchmarks\EasyEcs.Benchmark\BattleServer.cs" Link="BattleServer.cs"/>
+        <!-- the phase 0 prototypes of docs/plans/locality.md, checked against their plain forms (LocalityTests) -->
+        <Compile Include="..\..\benchmarks\EasyEcs.Benchmark\Locality\*.cs" LinkBase="Locality"/>
     </ItemGroup>
 
 </Project>
