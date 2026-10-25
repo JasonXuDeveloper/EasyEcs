@@ -234,10 +234,11 @@ flowchart LR
 | `SystemGenerator` | 把 `[ForEach]` 方法变成结构体 job（逐实体，或对 span 参数按连续行段），放在单独的 file 类里，通过 `[UnsafeAccessor]` 调用用户方法（[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。每个 `[EcsSystem]` 得到一个代码结构体（`__X_SystemCode : ISystemCode`：钩子、job、访问集和节奏），每个程序集得到一个系统集合（`__EasyEcsSystems`），由模块初始化器注册；系统之外的静态方法得到一个入口。生成的 job 声明 `OneQuery`（它的过滤条件是常量），遍历直接读 World 按 job 类型保存的查询（[D104](/zh/docs/decisions#d104-one-query-per-job-type)）。`[Changed<T>]` / `[Removed<T>]` 变成 `Since(LastRunTick + 1)` 加一次对 `T` 的读声明；`Parallel = true` 把 job 分块执行。不可能做结构变更的 job 会加上 `INoStructuralChanges`。处理数值的逐实体方法会按方法体生成向量循环（`Kernel`：分支用掩码，支持窄通道、结构体值、宽行；[D68](/zh/docs/decisions#d68-vector-loops-without-opting-in)），否则给出逐行运行的原因；`[ForEntity]`、`[Consume]` 和 `[UpdateInterval]` 也在这里编译。 |
 | `ComponentGenerator` | 为每个组件和单例生成 C# 14 扩展成员：`entity.Health`、`HasHealth`、`SetHealth(…)`、`IsDead`、`world.Clock`、`world.KillsIndex`、每种查询形状的 `item.Position`、缓冲和预制体的写方法，以及存档可以引用的类型和类型声明的设置（`[GroupBy]`、`[WhenTargetDestroyed]`、`[NotSaved]`）的注册。 |
 | `PartGenerator` | 把 partial 结构体用特性声明的内容写进它的另一个部分：由 `[Sum]` .. `[Any]` 生成 `IReduction<T>`，由 `[LookupKey]` / `[UniqueKey]` 生成显式的 `Key`，由 `[Group]` 生成 `Group`（[D101](/zh/docs/decisions#d101-declaration-attributes)）。 |
-| `EasyEcsAnalyzer` | 报告 EECS002–EECS089：生成器跳过的无效输入，以及违反 [ECS 设计原则](/zh/docs/ecs-principles)的代码，以及能用但有开销的代码。生成器从不报诊断，两者共用同一套检查。机械性的修复由 [EasyEcs.CodeFixes](/zh/docs/guide/analyzer) 提供。 |
+| `EasyEcsAnalyzer` | 报告 EECS002–EECS103：生成器跳过的无效输入，以及违反 [ECS 设计原则](/zh/docs/ecs-principles)的代码，以及能用但有开销的代码。每个领域一个分析器（声明、系统、性能、用法、线程、生成部分、生成形式、lambda 遍历、视图、记录、遍历融合；`EasyEcsAnalyzer.All`），所以 `NoWarn` 掉一个领域的规则就省下它的开销。生成器从不报诊断，两者共用同一套检查。机械性的修复由 [EasyEcs.CodeFixes](/zh/docs/guide/analyzer) 提供。 |
 
 生成器遵循增量生成的规则：先用 `ForAttributeWithMetadataName` 或纯语法谓词过滤；模型是由字符串组成、可比较相等的 record
-（任何符号、语法节点或位置都不会留到变换之后）；每个阶段都有追踪名；还有一个测试（`GeneratorTests`）保证无关的编辑不会让这些阶段失效。
+（任何符号、语法节点或位置都不会留到变换之后）；每个阶段都有追踪名；还有测试（`GeneratorTests`）保证一次编辑只重跑它改变的阶段，
+在构建中和 IDE 打字时（跳过实现输出）都是如此，并且没有变换会绑定成员体：每次编译都会对每个匹配的节点重跑变换，所以变换只读声明和类型名。
 
 ## 类型下标 [#type-indices]
 
