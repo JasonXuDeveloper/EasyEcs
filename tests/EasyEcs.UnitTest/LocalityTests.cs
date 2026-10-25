@@ -28,6 +28,15 @@ public class LocalityTests
         Crowd.Interact(world);
         Assert.That(Crowd.FirstMismatch(Crowd.Pushes(world), expected), Is.EqualTo(-1), "neighbor lists");
         Crowd.Sort(world);
+        var blocks = world.GetSingleton<Crowd.Clusters>().Rows.Blocks;
+        for (int s = 1; s < blocks.Count; s++)
+            Assert.That(blocks.Keys[s], Is.GreaterThanOrEqualTo(blocks.Keys[s - 1]), "rows in Morton order");
+        float widest = 0;
+        for (int b = 0; b < blocks.BlockCount; b++)
+            widest += blocks.MaxX[0][b] - blocks.MinX[0][b] + blocks.MaxY[0][b] - blocks.MinY[0][b];
+        // Blocks of 8 consecutive rows on the curve are small: on average about the side of the square 8 rows cover.
+        float rowsPerUnit2 = blocks.Count / (world.GetSingleton<Crowd.Map>().Extent * world.GetSingleton<Crowd.Map>().Extent);
+        Assert.That(widest / blocks.BlockCount / 2, Is.LessThan(4 * MathF.Sqrt(8 / rowsPerUnit2)), "block boxes");
         world.GetSingleton<Crowd.Clusters>().Rows.Interact();
         Crowd.WriteBack(world);
         Assert.That(Crowd.FirstMismatch(Crowd.Pushes(world), expected), Is.EqualTo(-1), "cluster kernel");

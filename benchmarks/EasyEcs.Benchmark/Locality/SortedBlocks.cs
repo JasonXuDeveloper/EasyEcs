@@ -85,8 +85,8 @@ public sealed class SortedBlocks
         // Keys and the 4 byte histograms in one pass.
         var histogram = _histogram.AsSpan();
         histogram.Clear();
-        var keys = _keys2;                                   // unsorted keys go to the scratch array first
-        var order = _order2;
+        var keys = Keys;                                     // 4 passes ping-pong Keys -> scratch -> Keys -> scratch -> Keys
+        var order = Order;
         for (int i = 0; i < n; i++)
         {
             uint key = KeyOf(x[i], y[i]);
@@ -98,9 +98,9 @@ public sealed class SortedBlocks
             histogram[768 + (int)(key >> 24)]++;
         }
 
-        // LSD radix: 4 stable scatters, ping-ponging between the scratch and the result arrays (4 passes end in Keys).
-        uint[] fromKeys = keys, toKeys = Keys;
-        int[] fromOrder = order, toOrder = Order;
+        // LSD radix: 4 stable scatters, ping-ponging between the result and the scratch arrays (an even count ends in Keys).
+        uint[] fromKeys = keys, toKeys = _keys2;
+        int[] fromOrder = order, toOrder = _order2;
         for (int pass = 0; pass < 4; pass++)
         {
             var counts = histogram.Slice(pass * 256, 256);
