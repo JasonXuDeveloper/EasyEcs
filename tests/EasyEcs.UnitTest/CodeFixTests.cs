@@ -112,9 +112,12 @@ public class CodeFixTests
     [TestCase("EECS025", "Take it as a ReadOnlySpan",
         "[EcsSystem] public ref struct S { [ForEach] static void A(System.Span<P> p, ref Clock c) { for (int i = 0; i < p.Length; i++) c.Ticks += p[i].V; } }",
         "static void A(System.ReadOnlySpan<P> p, ref Clock c)")]
-    [TestCase("EECS025", "Read it with Read<T>()",
+    [TestCase("EECS025", "Read it with .T",
         "public static class U { public static int F(Entity e) => e.Get<T>().V; }",
-        "=> e.Read<T>().V;")]
+        "=> e.T.V;")]                                                                                    // the generated member, not Read<T>() (EECS033)
+    [TestCase("EECS025", "Read it with Read<T>()",
+        "public struct Tr<X> : IComponent, ITracked { public int V; } public static class U { public static int F(Entity e) => e.Get<Tr<int>>().V; }",
+        "=> e.Read<Tr<int>>().V;")]                                                                      // no generated member
     [TestCase("EECS025", "Read it with .T",
         "public static class U { public static int F(Entity e) => e.WriteT().V; }",
         "=> e.T.V;")]
@@ -192,10 +195,13 @@ public class CodeFixTests
         "    public static int WriteMask => 0b1;\n}")]
     [TestCase("EECS038", "Keep the ref",
         "public static class U { public static void F(Entity e) { var p = e.Get<P>(); p.V = 1; } }",
-        "{ ref var p = ref e.Get<P>(); p.V = 1; }")]
+        "{ ref var p = ref e.P; p.V = 1; }")]                                                         // the generated member (EECS033)
+    [TestCase("EECS038", "Keep the ref",
+        "public struct Gc<X> : IComponent { public int V; } public static class U { public static void F(Entity e) { var g = e.Get<Gc<int>>(); g.V = 1; } }",
+        "{ ref var g = ref e.Get<Gc<int>>(); g.V = 1; }")]                                            // none generated
     [TestCase("EECS038", "Keep the ref",
         "public static class U { public static void F(Entity e) { T t = e.Read<T>(); t.V = 1; } }",
-        "{ ref T t = ref e.Get<T>(); t.V = 1; }")]
+        "{ ref T t = ref e.WriteT(); t.V = 1; }")]
     [TestCase("EECS038", "Keep the ref",
         "public static class U { public static void F(Entity e) { var t = e.T; t.V++; } }",
         "{ ref var t = ref e.WriteT(); t.V++; }")]
@@ -229,7 +235,7 @@ public class CodeFixTests
     [TestCase("EECS080", "Write it as a [ForEntity] method",
         "public struct Closed : IComponent;\npublic struct Buy : IForEachEntity<P, Q>\n{\n    public int Quantity;\n    public static int WriteMask => 0b01;\n\n    // Sells and closes the shop when it runs out.\n    public void Execute(Entity shop, ref P p, ref Q q)\n    {\n        p.V -= Quantity;\n        if (p.V == 0) shop.Set(new Closed());\n    }\n}\n"
         + "public static class Mailman\n{\n    private static readonly QueryFilter Open = QueryFilter.Create().Without<Closed>();\n\n    public static bool Send(Entity shop, int quantity)\n    {\n        var buy = new Buy { Quantity = quantity };\n        return shop.Run<P, Q, Buy>(ref buy, Open);\n    }\n}",
-        "public static class Buy\n{\n    // Sells and closes the shop when it runs out.\n    [ForEntity, Without<Closed>]\n    static void Run(Entity shop, ref P p, in Q q, int quantity)\n    {\n        p.V -= quantity;\n        if (p.V == 0) shop.Set(new Closed());\n    }\n}\npublic static class Mailman\n{\n    public static bool Send(Entity shop, int quantity)\n    {\n        return Buy.Run(shop, quantity);\n    }\n}")]
+        "public static class Buy\n{\n    // Sells and closes the shop when it runs out.\n    [ForEntity, With<Q>, Without<Closed>]\n    static void Run(Entity shop, ref P p, int quantity)\n    {\n        p.V -= quantity;\n        if (p.V == 0) shop.Set(new Closed());\n    }\n}\npublic static class Mailman\n{\n    public static bool Send(Entity shop, int quantity)\n    {\n        return Buy.Run(shop, quantity);\n    }\n}")]
     [TestCase("EECS080", "Write it as a [ForEntity] method",
         "public struct Read : IForEachEntity<P> { public int Scale; public static int WriteMask => 0; public void Execute(Entity e, ref P p) => System.Console.WriteLine(p.V * Scale); }\n"
         + "public static class U { public static void F(Entity a, Entity b) { var r = new Read { Scale = 2 }; a.Run<P, Read>(ref r); var s = new Read(); b.Run<P, Read>(ref s); } }",
@@ -260,22 +266,25 @@ public class CodeFixTests
         "{ Entity e = w.Instantiate(p, new Q()); return e; }")]
     [TestCase("EECS027", "Take it as a parameter ('in Q q')",
         "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p) => p.V = e.Get<Q>().V; }",
-        "static void A(Entity e, ref P p, in Q q) => p.V = q.V; }")]
+        "static void A(ref P p, in Q q) => p.V = q.V; }")]                                  // the Entity only looked up: it goes
     [TestCase("EECS027", "Take it as a parameter ('in Q q')",
         "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p) { p.V = e.Q.V; if (p.V > 0) p.V += e.Read<Q>().V; } }",
-        "static void A(Entity e, ref P p, in Q q) { p.V = q.V; if (p.V > 0) p.V += q.V; } }")]                 // every lookup of the type
+        "static void A(ref P p, in Q q) { p.V = q.V; if (p.V > 0) p.V += q.V; } }")]                 // every lookup of the type
     [TestCase("EECS027", "Take it as a parameter ('ref Q q')",
         "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, in P p) => e.Get<Q>().V = p.V; }",
-        "static void A(Entity e, in P p, ref Q q) => q.V = p.V; }")]
+        "static void A(in P p, ref Q q) => q.V = p.V; }")]
     [TestCase("EECS027", "Take it as a parameter ('in Clock clock')",
         "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, World w) => p.V = w.Clock.Ticks; }",
-        "static void A(ref P p, World w, in Clock clock) => p.V = clock.Ticks; }")]
+        "static void A(ref P p, in Clock clock) => p.V = clock.Ticks; }")]
     [TestCase("EECS027", "Take it as a parameter ('in Clock clock')",
         "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, World world) => p.V = world.GetSingleton<Clock>().Ticks; }",
-        "static void A(ref P p, World world, in Clock clock) => p.V = clock.Ticks; }")]
+        "static void A(ref P p, in Clock clock) => p.V = clock.Ticks; }")]
+    [TestCase("EECS027", "Take it as a parameter ('in Q q')",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p) { p.V = e.Get<Q>().V; if (p.V < 0) e.Destroy(); } }",
+        "static void A(Entity e, ref P p, in Q q) { p.V = q.V; if (p.V < 0) e.Destroy(); } }")]                       // the Entity used otherwise: it stays
     [TestCase("EECS027", "Use parameter 'q'",
         "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p, in Q q) => p.V = e.Read<Q>().V + q.V; }",
-        "static void A(Entity e, ref P p, in Q q) => p.V = q.V + q.V; }")]
+        "static void A(ref P p, in Q q) => p.V = q.V + q.V; }")]
     [TestCase("EECS054", "Remove ChunkRows",
         "[EcsSystem] public ref struct S { [ForEach(ChunkRows = 64)] static void A(ref P p) => p.V++; }",
         "[ForEach] static void A(ref P p)")]
@@ -375,6 +384,18 @@ public class CodeFixTests
     [TestCase("EECS096", "Make it internal, so the body is copied",
         "public static class U { static int Step() => 2; public static void F(World w) => w.ForEach(static (ref P p) => p.V += Step()); }",
         "internal static int Step() => 2;")]
+    [TestCase("EECS053", "Take it as a Mut<T>",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(ref T t, in P p) { if (p.V > 0) t.V = p.V; } }",
+        "static void A(Mut<T> t, in P p) { if (p.V > 0) t.Write().V = p.V; } }")]
+    [TestCase("EECS053", "Take it as a Mut<T>",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(ref T t, in P p) { if (p.V > t.V) t.V = p.V; } }",
+        "static void A(Mut<T> t, in P p) { if (p.V > t.Value.V) t.Write().V = p.V; } }")]                              // a read: Value
+    [TestCase("EECS053", "Take it as a Mut<T>",
+        "public static class H { [ForEntity] static void A(ref T t, int v) { if (v > 0) t.V = v; } }",
+        "static void A(Mut<T> t, int v) { if (v > 0) t.Write().V = v; } }")]                                            // [ForEntity]
+    [TestCase("EECS053", "Take it as a Mut<T>",
+        "public static class Inc { public static void By(ref int v) => v++; } [EcsSystem] public ref struct S { [ForEach] static void A(ref T t, in P p) { if (p.V > 0) Inc.By(ref t.V); } }",
+        "static void A(Mut<T> t, in P p) { if (p.V > 0) Inc.By(ref t.Write().V); } }")]                                // passed by ref
     [TestCase("EECS101", "Take 'PQ pQ' as a parameter",
         "[View] public ref struct PQ { public ref P P; public ref readonly Q Q; public void Add() => P.V += Q.V; }\n"
         + "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in T t, in Q q) { var v = new PQ { P = ref p, Q = ref q }; v.Add(); p.V += t.V + q.V; } }",
@@ -401,6 +422,45 @@ public class CodeFixTests
         Assert.That((await Analyze(fixedDocument)).Where(d => d.Id == id && d.Location.SourceSpan.Start >= Data.Length), Is.Empty, text);
         var errors = (await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error);
         Assert.That(errors, Is.Empty, text);
+        await AssertNoNewDiagnostic(document, fixedDocument, text, id);
+        Assert.That(await Offered(fixedDocument, id), Has.None.EqualTo(title), "the fix again: " + text); // idempotent
+    }
+
+    /// <summary>The case's own EasyEcs diagnostics (not Data's), counted per id.</summary>
+    private static async Task<Dictionary<string, int>> Counts(Document document) =>
+        (await Analyze(document)).Where(d => d.Location.SourceSpan.Start >= Data.Length).GroupBy(d => d.Id).ToDictionary(g => g.Key, g => g.Count());
+
+    /// <summary>
+    /// The diagnostics a rule defers to (one mistake, one diagnostic: D60), which its fix lets through: an instance
+    /// method made static can be judged for its vector loop (EECS055), a key written by hand is then a key [IndexKey]
+    /// could declare (EECS067), a lambda reaching the private member it names can be judged for its loop (EECS097).
+    /// </summary>
+    private static readonly Dictionary<string, string[]> Deferred = new()
+    {
+        ["EECS005"] = ["EECS055"], ["EECS043"] = ["EECS067"], ["EECS096"] = ["EECS097"],
+    };
+
+    /// <summary>
+    /// A fix trades its diagnostic for nothing: no id is reported more often after it than before, but the ones the
+    /// fixed rule <paramref name="id"/> defers to (<see cref="Deferred"/>). With <paramref name="kinds"/>, only an id
+    /// not reported before counts (a split gives the new parameter the old one's modifier, and with it its diagnostic).
+    /// </summary>
+    private static async Task AssertNoNewDiagnostic(Document before, Document after, string text, string id, bool kinds = false)
+    {
+        var was = await Counts(before);
+        var deferred = Deferred.GetValueOrDefault(id) ?? [];
+        foreach (var (other, count) in await Counts(after))
+            if (System.Array.IndexOf(deferred, other) < 0)
+                Assert.That(count, Is.LessThanOrEqualTo(kinds && was.ContainsKey(other) ? int.MaxValue : was.GetValueOrDefault(other)), $"the fix adds {other}:\n{text}");
+    }
+
+    /// <summary>The titles of the fixes offered for the case's own <paramref name="id"/> diagnostics (not Data's).</summary>
+    private static async Task<string[]> Offered(Document document, string id)
+    {
+        var actions = new List<CodeAction>();
+        foreach (var diagnostic in (await Analyze(document)).Where(d => d.Id == id && d.Location.SourceSpan.Start >= Data.Length))
+            await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        return actions.Select(a => a.Title).ToArray();
     }
 
     [TestCase("EECS005", "public class Runner { int x = 1; [ForEach] void A(ref P p) => p.V += x; }")]
@@ -439,6 +499,8 @@ public class CodeFixTests
     [TestCase("EECS061", "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
                          + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, default, 64); return s.Total; } }")] // its chunk size: chosen for threads
     [TestCase("EECS081", "public class R { int x = 1; [ForEntity] void A(ref P p) => p.V += x; }")]                              // uses its instance
+    [TestCase("EECS053", "public static class R { [ForEach] public static void A(ref T t, in P p) { if (p.V > 0) t.V = p.V; }\n"
+                         + "  public static void Call() { T t = default; A(ref t, default); } }")]                                     // a caller passes 'ref'
     [TestCase("EECS071", "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p) => p.V = (int)System.Random.Shared.NextInt64(9); }")] // no EntityRandom twin
     [TestCase("EECS071", "[EcsSystem] public ref struct S { [ForEach] static void A(System.Span<P> p) => p[0].V = System.Random.Shared.Next(); }")] // a batch method: no Entity
     public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)
@@ -506,6 +568,8 @@ public class CodeFixTests
         var message = diagnostic.GetMessage();
         Assert.That((await Analyze(fixedDocument)).Where(d => d.Id == id && d.Location.SourceSpan.Start >= Data.Length).Select(d => d.GetMessage()),
             Has.None.EqualTo(message), text);
+        await AssertNoNewDiagnostic(document, fixedDocument, text, id, kinds: true);
+        Assert.That(await Offered(fixedDocument, id), Has.None.EqualTo(title), "the split again: " + text); // idempotent
     }
 
     // What the split cannot rewrite and keep exact: the component used whole (a copy, a helper's parameter, a ref local,
@@ -627,7 +691,45 @@ public class CodeFixTests
         var text = (await fixedDocument.GetTextAsync()).ToString();
         Assert.That(text, Does.Contain(expected));
         var errors = (await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error);
-        Assert.That(errors, Is.Empty, text);
+        Assert.That(errors, Is.Empty, text); // the error the fix was offered for is gone: it is not offered again
+        Assert.That((await Analyze(fixedDocument)).Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, text);
+    }
+
+    // The generated SetEntityRandom(seed) given the old tick too (CS1501, with the generators: the member is generated).
+    [Test]
+    public async Task MigratesAGeneratedSetterGivenATick()
+    {
+        var document = Document(Data + "public static class C { public static void Seed(World w) => w.SetEntityRandom(1, 2); }", generate: true);
+        var compiled = (await document.Project.GetCompilationAsync())!.GetDiagnostics();
+        var actions = new List<CodeAction>();
+        foreach (var diagnostic in compiled.Where(d => d.Id == "CS1501"))
+            await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        Assert.That(actions.Select(a => a.Title), Is.EqualTo(new[] { "Drop the tick: the world advances it on every update" }), string.Join("\n", compiled));
+        var operation = (await actions[0].GetOperationsAsync(CancellationToken.None)).OfType<ApplyChangesOperation>().Single();
+        var fixedDocument = operation.ChangedSolution.GetDocument(document.Id)!;
+        var text = (await fixedDocument.GetTextAsync()).ToString();
+        Assert.That(text, Does.Contain("w.SetEntityRandom(1);"));
+        Assert.That((await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, text);
+    }
+
+    // Two fixes of one kind in a row: the second runs on the tree the first rewrote (a marker the first left there
+    // must not be found again by the second).
+    [Test]
+    public async Task TwoFixesOfOneKindApplyInARow()
+    {
+        var document = Document(Data + "namespace Nino.Core { public sealed class NinoTypeAttribute : System.Attribute; }\n"
+                                     + "public struct Name : IComponent { public string Text; }\npublic struct Tag : IComponent { public string Text; }", generate: true);
+        for (int round = 0; round < 2; round++)
+        {
+            var diagnostic = (await Analyze(document)).First(d => d.Id == "EECS069" && d.Location.SourceSpan.Start >= Data.Length);
+            var actions = new List<CodeAction>();
+            await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+            var operation = (await actions.Single(a => a.Title == "Mark it [NinoType]").GetOperationsAsync(CancellationToken.None)).OfType<ApplyChangesOperation>().Single();
+            document = operation.ChangedSolution.GetDocument(document.Id)!;
+        }
+        var text = (await document.GetTextAsync()).ToString();
+        Assert.That(text, Does.Contain("[Nino.Core.NinoType]\npublic partial struct Name").And.Contain("[Nino.Core.NinoType]\npublic partial struct Tag"));
+        Assert.That((await Analyze(document)).Where(d => d.Id == "EECS069" && d.Location.SourceSpan.Start >= Data.Length), Is.Empty, text);
     }
 
     [Test]
