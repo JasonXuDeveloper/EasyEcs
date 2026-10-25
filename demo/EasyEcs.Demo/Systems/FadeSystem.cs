@@ -6,7 +6,7 @@ namespace EasyEcs.Demo;
 [EcsSystem]
 public ref struct FadeSystem
 {
-    [ForEach]
+    [ForEach(SimdMode = SimdMode.Off)]
     static void Fade(Entity spark, ref Flash flash, in Clock clock)
     {
         flash.Left -= clock.Dt;

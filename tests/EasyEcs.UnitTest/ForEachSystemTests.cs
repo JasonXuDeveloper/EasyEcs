@@ -69,7 +69,7 @@ public ref struct LoginBonus
         if (login.HasValue) health = health with { Value = health.Value + login.Value.Id };
     }
 
-    [ForEach]
+    [ForEach(SimdMode = SimdMode.Off)]
     private static void Mark(Entity entity, ref Health health, ReadOnlyMaybe<Login> login) // per entity: a lookup
     {
         if (login.HasValue && entity.Id.Index >= 0) health = health with { Value = health.Value + 100 };
@@ -95,7 +95,7 @@ public ref struct MovementWithGravity
 [EcsSystem]
 public ref struct BurnThenHeal
 {
-    [ForEach, Without<Dead>]
+    [ForEach(SimdMode = SimdMode.Off), Without<Dead>]
     private static void Tick(Entity entity, ref Health health, in Position position)
     {
         health = health with { Value = health.Value - 1 };
@@ -109,7 +109,7 @@ public ref struct BurnThenHeal
 [EcsSystem]
 public ref struct Promote
 {
-    [ForEach]
+    [ForEach(SimdMode = SimdMode.Off)]
     private static void Visit(Entity entity, ref Health health)
     {
         health = health with { Value = health.Value + 1 };

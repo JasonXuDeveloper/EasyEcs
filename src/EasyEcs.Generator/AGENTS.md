@@ -91,6 +91,9 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              Kernel.Views.cs: a method taking views desugared before translation (view fields as
                              parameters, void members inlined with plain arguments in place, expression members as
                              expressions; ViewInliner and its Rewriter), or the reason it stays scalar;
+                             Kernel.Lookups.cs: reads of other entities through Lookup<T> (lookup[id], Read, Has, at an
+                             EntityId of the lanes) gathered per vector from the one table they live in, the vector's
+                             rows sent to the method when they live in several, with a backoff; only for SimdMode.Require (D131);
                              Kernel.Structural.cs: a structural change of the row's entity under a condition (marked
                              rows, applied in bulk after the pass: Code.StructuralChanges) and Emit<T> records of a
                              lane or the entity's id (Code.VectorTail: every row takes the vector form)

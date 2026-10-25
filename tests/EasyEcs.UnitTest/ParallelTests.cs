@@ -14,7 +14,7 @@ public class ParallelTests
     [EcsSystem]
     public ref struct ChunkedIncrement
     {
-        [ForEach(Parallel = true), Without<Dead>]
+        [ForEach(Parallel = true, SimdMode = SimdMode.Off), Without<Dead>]
         static void Add(ref Counter counter, in Seen step, Entity entity) => counter.N += step.N + (entity.Id.Index & 0);
     }
 

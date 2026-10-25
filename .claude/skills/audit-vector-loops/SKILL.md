@@ -18,7 +18,14 @@ or the reason), `Kernel.Narrow.cs`, `Kernel.Struct.cs`, `Kernel.Wide.cs`, the jo
 
 - **Reads**: `in` / `ref` component parameters (one column load per lane group, interleaved fields deinterleaved),
   `Maybe<T>` (presence as a lane mask), singletons (broadcast once per pass), constants and job fields. Reads of other
-  entities (`Lookup<T>`, an index) are gathers: vectorize only where measured faster.
+  entities through `Lookup<T>` (`lookup[id]`, `Read`, `Has` at an `EntityId` lane) are AVX2 gathers from the one table
+  a vector's targets live in (Kernel.Lookups.cs, D131), written only for `SimdMode.Require`: measured 0.64-0.85 of the
+  method row by row with targets in 1 or 4 tables, 0.97-1.13 with targets random over 64 tables (where targets live is
+  the data's, so Auto keeps the rows one by one and EECS055 says why, Info). A vector it cannot resolve leaves before
+  its gathers and backs off (3, 15, 63 vectors run the method in one out-of-line call per span); a change there is
+  measured with `LookupGatherBenchmark` (all three spreads, 1k to 1M) and the tests in `KernelLookupTests` (every form
+  against its `SimdMode.Off` twin, bit for bit, 1 and 4 threads, 0 B). Sorting the reads by target table was measured
+  and dropped (1.37-9.0 times the row-by-row time); an index lookup stays scalar.
 - **Value writes**: assignments, compound assignments, several fields, `Mut<T>.Write`; under a condition a masked
   blend (`Vector.ConditionalSelect`) then a store; a tracked component stamped only where the mask is set.
 - **State and structural writes**: a tag or component added or removed, a destroy (`[Consume]`), recognized by
@@ -47,8 +54,8 @@ or the reason), `Kernel.Narrow.cs`, `Kernel.Struct.cs`, `Kernel.Wide.cs`, the jo
 - **Cells of a tile** (the shader form, built on the inner loop): a method that computes one cell from its neighbors
   by offset; the generator writes the pad, the row walk and the element loop, the neighbor reads unaligned loads at
   offsets in the padded texture, so users write no `Load128`.
-- **Not kernels** (measured or overlapping, D90): reads of other entities (`Lookup<T>`, parent transforms) stay
-  scalar, gathers ran at 0.8-1.18 of scalar; a per-element parameter for buffers would say what an inner loop says.
+- **Not kernels** (measured or overlapping, D90): parent transforms stay scalar, and so do `Lookup<T>` reads in
+  `SimdMode.Auto` (above, D131); a per-element parameter for buffers would say what an inner loop says.
 - **Hand-written SIMD where the plain form vectorizes** is reported (`audit-analyzer`, written by hand where the
   generator writes it): `Vector128` / `Vector<T>` code in a batch or tile method whose plain form becomes the same loop.
 - **Per-chunk parameters**: `Reduce<T>` (lane partials combined in chunk order), `Emit<T>` (records of the passing

@@ -310,7 +310,7 @@ public class QueryTests
     [EcsSystem]
     internal ref struct FreezeHalf
     {
-        [ForEach]
+        [ForEach(SimdMode = SimdMode.Off)]
         private static void Toggle(Entity entity, in Health health)
         {
             if (health.Value % 2 != 0) return;

@@ -42,6 +42,9 @@ Reduce.cs                    IReduction<T> + Reduce<T> (taken by ref): a [ForEac
 Scratch.cs                   Scratch<T>: per-thread working memory of a [ForEach] method, never shared, never reset
 Lookup.cs                    Lookup<T> + LookupExtensions: read-only lookups of any entity (and index keys) from a
                              [ForEach] method, parallel ones included; the system reads T, so no writer shares its stage
+LookupLanes.cs               the reads of other entities in generated vector loops (D131): Lookup<T>.Resolve gathers the
+                             lanes' records (AVX2) into a presence mask and the one table their entities live in (false:
+                             the vector's rows run the method), Gather the fields from that table's column
 Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
                              Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbors found by generated code,
                              TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,

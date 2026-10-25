@@ -83,6 +83,9 @@ internal sealed partial class Kernel
 
         /// <summary>The job columns (1-based) the loop writes: a tail copies them back.</summary>
         public EquatableArray<int> Written { get; init; } = new([]);
+
+        /// <summary>The loop gathers other entities' fields (Kernel.Lookups.cs): it runs where <c>LookupLanes.IsAccelerated</c>.</summary>
+        public bool Gathers { get; init; }
     }
 
     /// <summary>
@@ -112,6 +115,15 @@ internal sealed partial class Kernel
     /// (<c>ulong.MaxValue</c>), or a masked word's <c>pass</c>.
     /// </summary>
     internal const string Visited = "\u0001Visited";
+
+    /// <summary>
+    /// The token of the statements that run the rows up to <c>__end</c> through the method and go on to the vector after
+    /// them: a lookup whose entities live in several tables takes it before the gathers it would waste (Kernel.Lookups.cs).
+    /// </summary>
+    internal const string RunRows = "\u0001RunRows";
+
+    /// <summary>The reason a method reading other entities keeps its rows one by one unless it asks for the gathers.</summary>
+    internal const string GathersOnRequest = "it reads other entities through a Lookup<T>: a vector loop gathers them, faster where a vector's targets share a table and up to 1.1 times as slow where they spread over many; SimdMode = SimdMode.Require asks for it";
 
     /// <summary>The token of the square root: Vector.SquareRoot, Vector512.Sqrt.</summary>
     internal const string SquareRoot = V + ".SquareRoot(";
@@ -281,7 +293,15 @@ internal sealed partial class Kernel
         }
         var lane = new Lane(method, Symbols.IsRunner(method), Symbols.IsParallel(method), Symbols.FastFloats(method), model,
             Symbols.IsStable(method, syntax, model));
-        return Vectorize(lane, (IOperation?)body.BlockBody ?? body.ExpressionBody!, fieldOf, ct, out reason);
+        var code = Vectorize(lane, (IOperation?)body.BlockBody ?? body.ExpressionBody!, fieldOf, ct, out reason);
+        // Gathers win where a vector's targets share a table and lose a little where they spread over many (D131): where
+        // they live is the data's, not the code's, so the loop that gathers is the method's to ask for.
+        if (code is { Gathers: true } && Symbols.Simd(method) != Symbols.SimdRequire)
+        {
+            reason = new ScalarReason(GathersOnRequest, false, null);
+            return null;
+        }
+        return code;
     }
 
     /// <summary>
@@ -356,7 +376,9 @@ internal sealed partial class Kernel
                     break;
                 case Symbols.ParamKind.Optional when Symbols.MaybeElement(p.Type) is { } element && LaneFields(element):
                     break;
-                case Symbols.ParamKind.Singleton or Symbols.ParamKind.Context or Symbols.ParamKind.Reduction:
+                case Symbols.ParamKind.Lookup when Symbols.LookupElement(p.Type) is { } read && LaneFields(read): // gathered (Kernel.Lookups.cs)
+                    break;
+                case Symbols.ParamKind.Singleton or Symbols.ParamKind.Context or Symbols.ParamKind.Reduction or Symbols.ParamKind.Entity or Symbols.ParamKind.Emit: // their uses decide (Kernel.Structural.cs)
                     break;
                 case Symbols.ParamKind.View when Views.IsValid(p.Type) && Views.Fields((INamedTypeSymbol)p.Type).All(f => !f.Mut && LaneFields(f.Component)):
                     any = true;
@@ -440,7 +462,7 @@ internal sealed partial class Kernel
         Symbols.ParamKind.ComponentSpan => "it takes spans: a batch method writes its own loop",
         Symbols.ParamKind.Mutable => $"it takes a Mut<{Symbols.MutElement(p.Type)?.Name}>",
         Symbols.ParamKind.Scratch => $"it takes a Scratch<{Element(p.Type)}>: working memory a row at a time, not one per lane",
-        Symbols.ParamKind.Lookup => $"it takes a Lookup<{Element(p.Type)}>: a lookup of another entity per row has no vector form",
+        Symbols.ParamKind.Lookup => null, // its reads decide (Kernel.Lookups.cs)
         _ => $"parameter '{p.Name}' is not a component, a singleton, a Reduce<T> or a value",
     };
 
@@ -565,6 +587,15 @@ internal sealed partial class Kernel
                     continue;
                 }
                 string name = $"__p{i}";
+                if (kind == Symbols.ParamKind.Lookup)
+                {
+                    // The loop's own Lookup<T> over the job's World (Kernel.Lookups.cs); its index is the method's.
+                    var element = Symbols.LookupElement(p.Type)!;
+                    made._uniformParams[p] = name;
+                    made._lookupParams[p] = (name, element);
+                    made._setup.Append($"var {name} = new global::EasyEcs.Lookup<{element.ToDisplayString(Symbols.Fqn)}>(World, null);\n");
+                    continue;
+                }
                 made._uniformParams[p] = name;
                 string source = fieldOf(i, kind);
                 made._setup.Append(p.RefKind == RefKind.None
@@ -687,9 +718,9 @@ internal sealed partial class Kernel
         }
         string prologue = kernel._bails ? "bool __bail = false;\n" : "";
         string live = kernel._live ? $"var __live = {Vec(kernel._mask)}.AllBitsSet;\n" : "", maskedLive = kernel._live ? "var __live = __pass;\n" : "";
-        string hold = kernel._bails ? held.ToString() : "";
+        string hold = kernel._bails || kernel._lookups.Count > 0 ? held.ToString() : ""; // a lookup sends unresolved vectors to the method too (Kernel.RunRows)
         // A masked word holds the accumulators for a bail and for a pair's fold.
-        string maskedHold = kernel._bails || kernel._reductions.Values.Any(r => r.Fields.Any(f => kernel.IsDoubled(f.Type))) ? held.ToString() : "";
+        string maskedHold = kernel._bails || kernel._lookups.Count > 0 || kernel._reductions.Values.Any(r => r.Fields.Any(f => kernel.IsDoubled(f.Type))) ? held.ToString() : "";
         if (kernel._wideOf.Count > 0) kernel.Gate();
         string uses = kernel._body.ToString() + stores + masked + kernel._setup;
         var read = new StringBuilder();
@@ -706,6 +737,8 @@ internal sealed partial class Kernel
         }
         // The passing rows of a masked word as masks of a pair's halves, for the stores and the lanes of what it writes.
         if (kernel._halvesPass) kept.Insert(0, $"var __pw_0 = {V}.WidenLower(__pass);\nvar __pw_1 = {V}.WidenUpper(__pass);\n");
+        // Each lookup's backoff (Lookup.Resolve): after a miss, the vectors of the run to send to the method without trying.
+        for (int g = 0; g < kernel._lookups.Count; g++) kernel._setup.Append($"int __b{g} = 0;\n");
         return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
             kernel._setup.ToString(), prologue + live + read + hold + kernel._body, stores.ToString(), prologue + maskedLive + read + kept + maskedHold + kernel._body.Masked, masked.ToString(),
             restore.ToString(), fold.ToString(), kernel._size, kernel._mask, Elem(first), kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
@@ -715,6 +748,7 @@ internal sealed partial class Kernel
             StructuralChanges = kernel.StructuralChanges(),
             VectorTail = kernel._change != null || kernel._emits.Values.Any(e => e.Added),
             Written = new EquatableArray<int>(kernel._written.OrderBy(k => k).ToArray()),
+            Gathers = kernel._lookups.Count > 0,
         };
     }
 
@@ -728,7 +762,7 @@ internal sealed partial class Kernel
     /// </summary>
     private static FlatCode? Flat(Kernel main, IOperation root, System.Func<Kernel> make)
     {
-        if (main._change != null || main._emits.Count > 0 || main._bails || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0 || main._wides.Count > 0 || main._structs.Count > 0 || main._optionals.Count > 0 || main._wideOf.Count > 0) return null;
+        if (main._change != null || main._emits.Count > 0 || main._bails || main._lookups.Count > 0 || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0 || main._wides.Count > 0 || main._structs.Count > 0 || main._optionals.Count > 0 || main._wideOf.Count > 0) return null;
         var components = main._components.Values.ToArray();
         var type = components[0].Fields[0].Type;
         int fields = components[0].Fields.Length;
@@ -910,6 +944,7 @@ internal sealed partial class Kernel
                     var init = declarator.GetVariableInitializer()?.Value ?? declaration.Initializer?.Value;
                     if (local.IsRef) throw new Unsupported($"ref local '{local.Name}' is not supported: name the parameter's fields instead", true);
                     if (init == null) throw new Unsupported($"local '{local.Name}' has no initializer: give it its value where it is declared", true);
+                    if (DeclareLookup(local, init)) continue; // var at = lookup[id]: names the lookup's value
                     if (PairLocal(local, init))
                     {
                         _active = And(mask, _alive);
@@ -1009,12 +1044,14 @@ internal sealed partial class Kernel
     /// <summary>What a translation changes, kept to undo a branch that turns out cold.</summary>
     private sealed record State((int, int) Body, int Setup, int Temps, Dictionary<ILocalSymbol, string> Locals, HashSet<ILocalSymbol> PairLocals, Dictionary<ILocalSymbol, Wide> Wides,
         Dictionary<ILocalSymbol, string?[]> Structs, HashSet<int> Written, HashSet<int> WrittenOptionals, Dictionary<string, HashSet<int>> Implied,
-        HashSet<string> Guarded, Dictionary<string, string> Broadcasts, Dictionary<string, (string, string)> MaskHalves, string? Alive, bool Bails, bool Live);
+        HashSet<string> Guarded, Dictionary<string, string> Broadcasts, Dictionary<string, (string, string)> MaskHalves, string? Alive, bool Bails, bool Live,
+        Dictionary<string, int> Resolved, Dictionary<ILocalSymbol, int> LookupLocals, Dictionary<string, string> Gathered, int Lookups);
 
     private State Save() => new(_body.Length, _setup.Length, _temps, new(_locals, SymbolEqualityComparer.Default),
         new(_pairLocals, SymbolEqualityComparer.Default), new(_wides, SymbolEqualityComparer.Default),
         new(_structs, SymbolEqualityComparer.Default), [.. _written], [.. _writtenOptionals],
-        _implied.ToDictionary(e => e.Key, e => new HashSet<int>(e.Value)), [.. _guarded], new(_broadcasts), new(_maskHalves), _alive, _bails, _live);
+        _implied.ToDictionary(e => e.Key, e => new HashSet<int>(e.Value)), [.. _guarded], new(_broadcasts), new(_maskHalves), _alive, _bails, _live,
+        new(_resolved), new(_lookupLocals, SymbolEqualityComparer.Default), new(_gathered), _lookups.Count);
 
     private void Restore(State state)
     {
@@ -1041,6 +1078,10 @@ internal sealed partial class Kernel
         _guarded.Clear();
         _guarded.UnionWith(state.Guarded);
         (_alive, _bails, _live) = (state.Alive, state.Bails, state.Live);
+        Reset(_resolved, state.Resolved);
+        Reset(_lookupLocals, state.LookupLocals);
+        Reset(_gathered, state.Gathered);
+        _lookups.RemoveRange(state.Lookups, _lookups.Count - state.Lookups);
     }
 
     private void Assignment(IOperation op, string? mask)
@@ -1443,7 +1484,7 @@ internal sealed partial class Kernel
     /// <summary>Record what mask <paramref name="name"/>, the value of <paramref name="condition"/>, and its negation prove.</summary>
     private void Prove(string name, IOperation condition)
     {
-        if (_optionals.Count == 0 || !name.StartsWith("__", System.StringComparison.Ordinal) || _implied.ContainsKey(name)) return;
+        if (!TracksPresence || !name.StartsWith("__", System.StringComparison.Ordinal) || _implied.ContainsKey(name)) return;
         _implied[name] = Has(condition, true);
         _implied["~" + name] = Has(condition, false);
     }
@@ -1456,6 +1497,8 @@ internal sealed partial class Kernel
         {
             case IPropertyReferenceOperation { Property.Name: "HasValue", Instance: IParameterReferenceOperation { Parameter: var p } } when holds && _optionals.TryGetValue(p, out var o):
                 return [o.Index];
+            case IPropertyReferenceOperation or IInvocationOperation when holds && LookupHas(condition, false) is { } has: // resolved by the condition itself
+                return [int.Parse(has.Substring("__has".Length), System.Globalization.CultureInfo.InvariantCulture)];
             case IUnaryOperation { OperatorKind: UnaryOperatorKind.Not, Operand: var operand }:
                 return Has(operand, !holds);
             case IBinaryOperation { OperatorKind: BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.And or BinaryOperatorKind.ConditionalOr or BinaryOperatorKind.Or } b
@@ -1528,6 +1571,10 @@ internal sealed partial class Kernel
             case IFieldReferenceOperation or IPropertyReferenceOperation when OptionalLane(op) is { } q:
                 Guard(q.Index);
                 return $"__q{q.Index}_{q.Field}";
+            case IPropertyReferenceOperation or IInvocationOperation when LookupHas(op) is { } has: // x.HasValue, lookup.Has(id)
+                return has;
+            case IFieldReferenceOperation or IPropertyReferenceOperation when LookupLane(op) is { } gathered: // x.Value.F, lookup.Read(id).F
+                return gathered;
             case IFieldReferenceOperation or IPropertyReferenceOperation when IsLane(op.Type) && ((IMemberReferenceOperation)op).Instance is { } instance
                 && StructPaths(instance.Type) != null && Accumulator(op) == null:
                 return Member((IMemberReferenceOperation)op) is { Length: 1 } one && one[0] is { } lane ? lane : throw new Unsupported("a statement mixes fields"); // p.X of a struct value
@@ -1550,7 +1597,7 @@ internal sealed partial class Kernel
             case IConditionalOperation { IsRef: false, WhenFalse: { } whenFalse } t when IsLane(t.Type) || IsBool(t.Type):
             {
                 string condition = Expr(t.Condition);
-                if (_optionals.Count == 0 || _half >= 0) // a half's masks are not the lanes' (an optional's reads are, Narrowed)
+                if (!TracksPresence || _half >= 0) // a half's masks are not the lanes' (an optional's reads are, Narrowed)
                     return $"{V}.ConditionalSelect({MaskAs(condition, t.Type!)}, {Expr(t.WhenTrue)}, {Expr(whenFalse)})";
                 // Each arm reads under its lanes (m.HasValue ? m.Value.X : 0 reads only rows that have it).
                 condition = Hold(condition, t.Condition.Type!);
@@ -1634,7 +1681,7 @@ internal sealed partial class Kernel
             return WideCompare(kind, WideOf(leftOp), WideOf(right), leftOp, right);
         bool lanes = IsLane(leftType) && IsLane(right.Type) && SymbolEqualityComparer.Default.Equals(leftType, right.Type);
         bool masks = IsBool(leftType) && IsBool(right.Type);
-        if (masks && (_optionals.Count > 0 || MayThrow(right)) && _half < 0 && kind is BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.ConditionalOr)
+        if (masks && (TracksPresence || MayThrow(right)) && _half < 0 && kind is BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.ConditionalOr)
         {
             // The right side reads under the lanes the left lets through (m.HasValue && m.Value.X > 0, d != 0 && n / d > 1).
             string left = Hold(Expr(leftOp), leftType!);

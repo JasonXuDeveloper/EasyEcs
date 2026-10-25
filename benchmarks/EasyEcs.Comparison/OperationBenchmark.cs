@@ -157,7 +157,7 @@ public ref struct StunToggle
 [EcsSystem, UpdateInGroup<Toggle>]
 public ref struct StunRecover
 {
-    [ForEach]
+    [ForEach(SimdMode = SimdMode.Off)]
     private static void Recover(Entity entity, ref Stunned stunned) => entity.Remove<Stunned>();
 }
 #pragma warning restore EECS026, EECS030

@@ -133,6 +133,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D128](#d128-spin-gates-and-settled-measurements) | Parallel work's queue and pools take a spin gate; allocation tests measure once no background collection runs |
 | [D129](#d129-lookup-key) | `[IndexKey]` is `[LookupKey]` |
 | [D130](#d130-measured-chunks) | Parallel passes cut chunks by the rows' measured cost; `ChunkRows` only overrides it |
+| [D131](#d131-lookup-gathers) | Vector loops gather other entities' fields when the method asks for it (`SimdMode.Require`) |
 | [D134](#d134-eecs103) | EECS103: a batch method's hand-written vector loop is reported with the method for one row |
 
 The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
@@ -2324,7 +2325,7 @@ write, and each method's loop is listed:
 - **A full transpose of 8 or 16 words a row** (butterflies, every word moved): 1.07 to 2.05 times the scalar time (8
   words at 1,000 rows 983 against 531 ns, 16 words 2,666 against 1,301 ns). The pruned tree moves only the used words.
 - **Gathers.** .NET 10 has no AVX-512 gather API; AVX2 gathers of 8 rows ran in 0.8 to 1.18 of the scalar time, below
-  the tree wherever the tree paid.
+  the tree wherever the tree paid. Reads of other entities through a `Lookup<T>` gather on request ([D131](#d131-lookup-gathers)).
 - **Strided loads** (one insert per lane): 1.0 to 2.9 times the scalar time.
 - **`[Lane]` / `[Hot]` field markings, `[Layout(Soa)]` storage.** The method already says which fields it uses, so
   marking them adds nothing the generator lacks. A struct-of-arrays table was the fastest form (3 of 12 fields: 97 ns
@@ -3423,6 +3424,73 @@ stamping pass whose measured chunks are under 4,096 rows opens its blocks, as `C
 - **Dropping `ChunkRows`:** it stays for a pass that knows better than one run's average (rows whose cost changes
   from tick to tick). EECS054 still reports an invalid one (negative, or on a method that is not parallel); its
   description says 0 lets the runtime choose from the measured cost.
+
+## D131. Vector loops gather other entities' fields when the method asks for it (`SimdMode.Require`) [#d131-lookup-gathers]
+
+**Decision.** A `[ForEach]` method that reads other entities through a `Lookup<T>` (`lookup[id]`, `Read`, `Has`, at
+an `EntityId` its lanes hold) gets a vector loop only with `SimdMode = SimdMode.Require`; with `SimdMode.Auto` its rows
+run one by one, and EECS055 says why (Info). The loop resolves the ids of each vector with AVX2 gathers of their
+records (`Lookup<T>.Resolve`: versions, rows, and the one table every live lane's entity lives in, read as managed
+references, never gathered as addresses), then gathers each field the method reads from that table's pinned column
+(`LookupLanes.Gather`; a 512-bit vector is two 256-bit gathers, .NET 10 has no AVX-512 gather). A vector whose
+entities live in several tables, or in a table that holds `T` for some rows only (presence bits), is not resolved:
+its rows run the method, before any gather, and so do the next 3, then 15, then 63 vectors without trying (a backoff
+per lookup and run, reset by a vector that resolves), in one call of a row loop out of the vector loop (`__Rows`) per
+span. Fields are lanes of 4 bytes (float, int, uint); the loop gathers only in loops of 4-byte lanes, and needs AVX2
+(`LookupLanes.IsAccelerated`), without which every row runs the method.
+
+**Why on request.** The gathers win where a vector's targets share a table and lose a little where they spread over
+many, and where targets live is the data's, which the generator cannot see. `SimdMode.Require` already means "this
+method is a vector loop"; for a lookup it is also the author's word that targets cluster.
+
+**Numbers.** `LookupGatherBenchmark` (seekers take the bearing to a target's spot; targets of one table, runs of 256
+seekers into one of 4 tables, or random over 64 tables; 1k / 100k / 1M rows). Ratios are the vector method against the
+same method row by row (`SimdMode.Off`) in the same run; A is the base, where the method stays scalar (0.95 to 1.08
+everywhere). The shipped form, two rounds:
+
+| Rows | Targets | Vector | Parallel vector against parallel row by row |
+|---|---|---|---|
+| 1k | one table | 0.82 / 0.83 | 2.80 / 2.63 µs against 3.29 / 3.33 |
+| 1k | 4 tables | 0.79 / 0.85 | 2.83 / 2.86 µs against 3.36 / 3.49 |
+| 1k | 64 tables | 1.13 / 1.05 | 4.07 / 3.98 µs against 3.56 / 3.64 |
+| 100k | one table | 0.70 / 0.75 | 150 / 144 µs against 192 / 214 |
+| 100k | 4 tables | 0.72 / 0.77 | 132 / 129 µs against 181 / 178 |
+| 100k | 64 tables | 0.97 / 1.00 | 236 / 195 µs against 247 / 197 |
+| 1M | one table | 0.64 / 0.75 | 2.75 / 3.24 ms against 4.72 / 3.83 |
+| 1M | 4 tables | 0.72 / 0.75 | 2.50 / 2.79 ms against 3.93 / 4.13 |
+| 1M | 64 tables | 1.05 / 1.04 | 4.60 / 5.06 ms against 4.73 / 4.19 |
+
+The neighbors, A against B, two rounds: `WorldSimulationBenchmark.Tick(100000)` 3.97 / 4.11 against 3.93 / 4.02 ms,
+`BattleServerBenchmark.Tick` 106.9 / 112.4 against 109.3 / 107.3 µs (10k) and 1,261 / 1,276 against 1,249 / 1,278 µs
+(100k), `MultiWorldBenchmark.TickAllWorlds` 595 / 646 against 664 / 662 µs (error ±57-121 µs): none reads a lookup.
+Every form allocates 0 B; the tests check every form against the method row by row bit for bit (one table, runs,
+64 tables, dead, recycled, null and foreign ids, a negative index, a table without the component, presence bits), the
+same exception for a read of a missing target, 1 and 4 threads, and 0 B per frame.
+
+**How the many-tables case was brought down** (vector against row by row at 1k / 100k / 1M, 64 tables, two rounds):
+- every vector tried, the bail after the body: 1.54 / 1.57, 1.28 / 1.31, 1.15 / 1.28;
+- an unresolved vector leaves before its gathers: 1.43 / 1.44, 1.14 / 1.14, 1.28 / 1.25;
+- then the next 1, 3, 7 ... 63 vectors run without trying, one by one: 1.24 / 1.22, 1.14 / 1.22, 1.12 / 1.17;
+- without the dead bail block a lookup's loop kept: 1.19, 1.17, 1.04 (one round);
+- each vector's rows through the out-of-line row loop: 1.18 / 1.10, 1.26 / 1.02, 1.18 / 1.03;
+- the skipped vectors as one span per call, waits doubling: 1.11 / 1.08, 1.11 / 1.02, 1.01 / 1.01;
+- waits of 3, 15, 63 (shipped): 1.13 / 1.05, 0.97 / 1.00, 1.05 / 1.04.
+
+The user's method is called, not inlined, in the row loop of both forms (the JIT's code for the job row by row calls
+it too), so the rest of the gap at 1k is the vector loop's own cost per run. It is why the form is not the default.
+
+**Considered.**
+- **Gathers in `SimdMode.Auto`**: the table above; a pass over targets spread over many tables would run up to 1.13
+  times as slow at 1k, which the project's rule (a net win, no regression) refuses.
+- **Sorting or grouping the reads by target table** (a counting sort of each run's rows by table, then gathers per
+  group; hand-written prototype, bit-identical): 1.37 to 2.2 times the row-by-row time with targets in 1 or 4 tables,
+  4.97 to 9.0 times over 64.
+- **The table check by a gather of the records' table references as addresses** (8 lanes compared in one instruction):
+  about 5% faster than reading them as references in the prototype, but an address read outside a managed reference
+  can be stale once a collection moves the table.
+- **A hand-written prototype of the loop** (scalar fallback per vector, no backoff): 0.50 to 0.62 of the row-by-row
+  time with targets in 1 or 4 tables, 0.95 to 0.97 over 64 tables at 100k and 1M, 1.47 to 1.6 at 1k, where its scalar
+  fallback alone ran at 1.68.
 
 ## D134. EECS103: a batch method's hand-written vector loop is reported with the method for one row [#d134-eecs103]
 

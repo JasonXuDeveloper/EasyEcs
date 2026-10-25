@@ -203,6 +203,8 @@ internal sealed partial class Kernel
     {
         if (_change == null && !_emits.Values.Any(e => e.Added)) return;
         string what = _change != null ? $"'{_change.Text}'" : "its records";
+        if (_lookups.Count > 0)
+            throw FixableReason($"it reads other entities through a Lookup<T> and applies {what} after the pass: a vector whose entities live in several tables runs the method, and every row must take the vector loop; emit in a [ForEach] method of its own");
         if (_bails) throw FixableReason($"it has a branch the loop cannot express ({_cold ?? "a bound that may throw"}) and applies {what} after the pass: every row must take the vector loop; move that branch into a [ForEach] method of its own");
         if (_optionals.Count > 0) throw new Unsupported($"it takes a Maybe<T> and applies {what} after the pass: the last rows of a run take the vector loop through a copy, which an optional column has not");
         if (_wideOf.Count > 0 || _size < 4) throw new Unsupported($"it applies {what} after the pass with {(_size < 4 ? $"lanes of {_size} byte{(_size == 1 ? "" : "s")}" : "a wide component")}, whose words of passing rows run the method itself");

@@ -799,8 +799,11 @@ public ref struct LoopsSystem
         health.Value -= damage.Value;
     }
 
+    // Scalar with a reason on purpose: the schedule names it (TheScheduleNamesEachMethodsLoop), and so does EECS055.
+#pragma warning disable EECS055
     [ForEach]
     static void Mark(Entity entity, ref Heat health) => health.Value = entity.Id.Index;
+#pragma warning restore EECS055
 }
 
 // Narrow lanes: C# computes on bytes and shorts in int; the vector loop follows the int's low bits and its range.

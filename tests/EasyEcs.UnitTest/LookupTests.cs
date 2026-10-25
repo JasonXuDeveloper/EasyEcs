@@ -215,7 +215,7 @@ public class LookupTests
     [EcsSystem]
     public ref struct Refollow
     {
-        [ForEach]
+        [ForEach(SimdMode = SimdMode.Off)]
         static void Turn(Entity entity, in Follows follows) => entity.Set(follows);
     }
 

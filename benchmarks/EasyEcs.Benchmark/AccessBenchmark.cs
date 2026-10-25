@@ -72,7 +72,7 @@ public class AccessBenchmark
     [EcsSystem]
     public ref struct EntityHas
     {
-        [ForEach] static void Run(Entity e, ref Speed speed) { if (e.Has<Boss>()) speed.V++; }
+        [ForEach(SimdMode = SimdMode.Off)] static void Run(Entity e, ref Speed speed) { if (e.Has<Boss>()) speed.V++; }
     }
 
     [EcsSystem]
