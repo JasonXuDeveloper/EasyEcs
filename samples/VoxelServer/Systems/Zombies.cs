@@ -173,6 +173,9 @@ public ref struct SunlightSystem
 [EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
 public ref struct FireDamageSystem
 {
+    // EECS103: this hand-written loop is what the generator writes from `health.Value--`; the sample keeps it until its
+    // rewrite to the method for one row (docs/plans/inner-loops.md, WP7).
+#pragma warning disable EECS103
     [ForEach, With<Burning>]
     static void Hurt(Span<Health> health)
     {
@@ -181,6 +184,7 @@ public ref struct FireDamageSystem
         for (int i = 0; i < lanes.Length; i++) lanes[i] -= Vector<int>.One;
         for (int i = lanes.Length * Vector<int>.Count; i < points.Length; i++) points[i]--;   // the rows left over
     }
+#pragma warning restore EECS103
 }
 
 // Puts out the fires that burned down, and those of the zombies that walked into water (their Exposure): it visits only

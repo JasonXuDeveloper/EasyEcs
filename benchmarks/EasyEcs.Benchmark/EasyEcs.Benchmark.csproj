@@ -1,8 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <!-- Benchmarks measure the generic and hand-written forms against the generated ones; BattleServer.cs is kept clean by tests/EasyEcs.Aot (warnings as errors). -->
-        <NoWarn>$(NoWarn);EECS033;EECS065;EECS067;EECS084</NoWarn>
+        <!-- Benchmarks measure the generic and hand-written forms against the generated ones (EECS103: the hand-written
+             vector loops of KernelBenchmark, StepBatch / StepBatch512 / Move2Cast / IntegrateBatch, are the baselines
+             the generated loops are measured against); BattleServer.cs is kept clean by tests/EasyEcs.Aot (warnings as errors). -->
+        <NoWarn>$(NoWarn);EECS033;EECS065;EECS067;EECS084;EECS103</NoWarn>
         <OutputType>Exe</OutputType>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>disable</ImplicitUsings>

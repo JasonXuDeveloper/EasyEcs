@@ -792,6 +792,42 @@ public class CodeFixTests
         public override ImmutableArray<ISourceGenerator> GetGenerators(string language) => _generators;
     }
 
+    /// <summary>
+    /// EECS103: each hand-written vector loop of <see cref="AnalyzerTests.HandWrittenLoops"/> becomes the method for one
+    /// row, which compiles, gets the generator's loop (no EECS055), adds no diagnostic and is not offered the fix again.
+    /// </summary>
+    [TestCase(0, new[] { "[ForEach, With<Burning>]\n    static void Hurt(ref Health health) => health.Value -= 1;\n}" })]
+    [TestCase(1, new[] { "    static void Move(ref Position position, in Velocity velocity, in Clock clock)\n    {\n        float dt = clock.Dt;\n"
+                         + "        position.X += velocity.X * dt;\n        position.Y += velocity.Y * dt;\n    }\n}" })]
+    [TestCase(2, new[] { "    static void StepBatch(ref Heat heat, ref Speed speed, in Mass mass, in Pull pull)\n    {\n        float half = 0.5f;\n"
+                         + "        float p = pull.Value;\n        float drag = Drag;\n        float limit = Limit;\n        float hot = 100f;\n        float eighth = 0.125f;\n"
+                         + "        float vh = heat.Value;\n        float vs = speed.Value;\n        float vm = mass.Value;\n        float force = vh * half - vm * p;\n"
+                         + "        vs = MathF.Max(MathF.Min(vs + force - drag, limit), -limit);\n        vh = vh > hot ? hot : vh + vs * eighth;\n"
+                         + "        heat.Value = vh;\n        speed.Value = vs;\n    }" })]
+    [TestCase(3, new[] { "    static void StepBatch512(ref Heat heat, ref Speed speed, in Mass mass, in Pull pull)\n    {\n        float half = 0.5f;\n",
+                         "        vh = vh > hot ? hot : vh + vs * eighth;\n        heat.Value = vh;\n        speed.Value = vs;\n    }\n}" })]
+    [TestCase(4, new[] { "    static void Move(ref Position position, in Velocity velocity, in Clock clock)\n    {\n        float dt = clock.Dt;\n"
+                         + "        position.X = position.X + velocity.X * dt;\n        position.Y = position.Y + velocity.Y * dt;\n    }" })]
+    public async Task RewritesAHandWrittenVectorLoop(int index, string[] expected)
+    {
+        var document = Document("using EasyEcs;\n" + AnalyzerTests.Usings + AnalyzerTests.Lanes + "\n" + AnalyzerTests.HandWrittenLoops[index].Replace("\r\n", "\n"), generate: true);
+        var before = await Analyze(document);
+        var diagnostic = before.Single(d => d.Id == "EECS103");
+        var actions = new List<CodeAction>();
+        await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        var action = actions.Single(a => a.Title == "Write the method for one row");
+        var operation = (await action.GetOperationsAsync(CancellationToken.None)).OfType<ApplyChangesOperation>().Single();
+        var fixedDocument = operation.ChangedSolution.GetDocument(document.Id)!;
+        var text = (await fixedDocument.GetTextAsync()).ToString();
+        foreach (var part in expected) Assert.That(text, Does.Contain(part));
+        var errors = (await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error);
+        Assert.That(errors, Is.Empty, text);
+        var after = await Analyze(fixedDocument);
+        Assert.That(after.Where(d => d.Id is "EECS103" or "EECS055"), Is.Empty, text); // the generator's loop: no scalar-loop message
+        foreach (var group in after.GroupBy(d => d.Id))
+            Assert.That(group.Count(), Is.LessThanOrEqualTo(before.Count(d => d.Id == group.Key)), $"the fix adds {group.Key}:\n{text}");
+    }
+
     private static async Task<Diagnostic[]> Analyze(Document document)
     {
         var compilation = (await document.Project.GetCompilationAsync())!;
