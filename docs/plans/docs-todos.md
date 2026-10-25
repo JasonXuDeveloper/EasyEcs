@@ -226,3 +226,13 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 - changelog, roadmap, public skill (do not hand-write the vector loop of a batch method; write the method for one row).
 - demo.mdx includes MovementBatchSystem.cs with a #pragma now; the exemplar pass (WP7) rewrites demo Move and
   VoxelServer FireDamageSystem.Hurt as one-row methods and drops both pragmas; rebuild docs/public/demo after.
+
+## feat-lookup-gather (D131, merged)
+- guide/high-performance.mdx:59 (+zh): a lookup "has no vector form" is stale: it gathers on `SimdMode.Require`.
+- Lookup<T> guide page and SimdMode docs (en/zh): Require opts into gathers, the backoff (3/15/63 vectors after a
+  miss), when it pays (targets sharing a table; spread over many tables it does not).
+- analyzer guide EECS055: Info reason for Lookup methods under Auto; new reasons for methods taking Entity / Emit<T>.
+- changelog, README What's new, migration: methods taking Entity or Emit<T> can now get EECS055 Warnings (split the
+  method or mark it SimdMode.Off); Lookup gathers on Require.
+- api.mdx: Lookup.Resolve only if listed (EditorBrowsable Never).
+- rebuild docs/public/demo (BounceSystem / FadeSystem got SimdMode.Off).
