@@ -1,0 +1,52 @@
+# Backlog: what is left before 4.8 (internal, not published)
+
+The single list of open work, kept in the repository so a new session finds it (AGENTS.md, "Plans that span sessions
+are committed"). Update it when an item starts, merges or is dropped. Designs live next to it (`inner-loops.md`);
+docs to-dos collected while code still changes live in `docs-todos.md`.
+
+Order: code -> exemplar pass (`audit-code`) -> docs pass (`audit-docs`) -> bench sync -> `verify` -> master.
+At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
+
+## Running (branches of their own; merge with the `audit` triage checks)
+
+- [ ] **Lookup gathers** (#162 part 3, D131): vectorized reads of other entities, sorted by target table; EECS055
+      LooksEligible also lets Entity / Emit parameters through. Branch `feat-lookup-gather`.
+- [ ] **EECS103** (WP6a, D134): hand-written SIMD the generator would write from a plain method, with a code fix.
+      Worktree `.claude/worktrees/feat-eecs103`.
+- [ ] **Analyzer tests split**: GeneratorTests.cs -> AnalyzerTests.* files (mechanical).
+- [ ] **zh reference fix**: restore the Chinese lost in 96a50ba (34 `reference/*.zh.mdx` pages), make ApiDocs fail
+      instead of writing English, ApiDocs at 0 problems, `lint:terms` clean; English pages checked the same way.
+- [ ] **Generator / analyzer cost, phase 1** (diagnosis only): step tracking on realistic edits, per-rule analyzer
+      time, comparison with Roslyn's guidance.
+
+## Next
+
+- [ ] **Analyzer and incremental generators by the official .NET guidance** (owner, 2026-10-25): after phase 1,
+      refactor what does not follow it (incremental pipeline: ForAttributeWithMetadataName, equatable symbol-free
+      models, no CompilationProvider in a pipeline that runs per edit, cached steps proven by tracking names;
+      analyzer: RegisterSymbolStartAction / operation actions over syntax walks where cheaper, no per-node semantic
+      model work, compilation-end rules only where needed, `EnableConcurrentExecution`, generated code skipped).
+      Measured before and after (GeneratorBenchmark, ReportAnalyzer: UnitTest analyzer 40 s, generators 4 s).
+- [ ] **Inner loops** (`inner-loops.md`), in this order: WP0b (generated bodies split to the inliner's budget,
+      runners pinned free of `call ...Execute`), WP0 (Binding / BodyCopy), WP2 element loops, WP3 offsets,
+      WP5 `Cell<TCell,TTile>` (bar: hand-written speed), WP5b (per-tile results, several inputs/outputs, VoxelServer
+      `Flow.cs`), WP1 InlineArray, WP4 ForParallel lambda, WP6b/c EECS103 v2/v3, WP8 fixable-reason audit (plain code
+      a small rewrite would vectorize warns).
+- [ ] **Generated code simplification**: continues inside WP0 / WP0b. Done: flat lanes, the pass mask as the start of
+      the active mask, research lessons recorded. Reverted: loads into their own names (Tier1 asm grew, Move3 runner
+      934 -> 1095 instructions). Not done: file-level `using` aliases per closed generic. Gate: identical or better
+      Tier1 asm (`tools/jitdisasm.sh`) and BenchmarkDotNet.
+- [ ] Follow-ups: lambda passes do not fuse; lambda + structural change and lambda + view stay scalar.
+- [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 NativeMemory 2 MiB columns (research
+      first); #157 the #138 recommendations; #159 remaining research.
+- [ ] #153 benchmark job tuning (Warmup 6 -> 3, IterationTime 250 -> 150 ms) and a lighter job for GeneratorBenchmark.
+- [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
+
+## Finish
+
+- [ ] **Exemplar pass** (#169, `audit-code`): VoxelServer / samples + templates + demo / benchmark worlds + usage
+      tests rewritten in the newest recommended forms, A/B on rewritten benchmark worlds.
+- [ ] **Folder restructure** of Core and Generator (`git mv` only), if still wanted (`docs-todos.md`).
+- [ ] **Docs pass** (#141): everything in `docs-todos.md`; DocCheck (296 problems) and ApiDocs (46) to 0; decision
+      record for the 8 declined declarations; roadmap item for inner loops; analyzer range EECS002-103.
+- [ ] `tools/bench.sh --site --sync`, README numbers, `verify`, master. The owner cuts the release.

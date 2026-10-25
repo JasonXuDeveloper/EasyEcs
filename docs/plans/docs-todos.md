@@ -1,0 +1,209 @@
+# Docs to-dos collected while the code changes (for the docs pass, #141)
+
+Order agreed with the owner: code first, docs checked and updated in full once at the end.
+
+## Code (running)
+
+- [x] #151 (merged 290b3d4) BattleServer.cs (Reduce, EntityRandom, Emit, Scratch, a SimdMode.Require method; MovementSystem.Move as a
+      generated vector loop, A/B vs hand-written; WorldSimulation AoiSystem stats.CellChanges -> Reduce if not slower)
+      and the samples / templates / demo / Godot (Vector2) in 4.8 forms. Agent in a worktree; it reports docs to-dos.
+- [x] #142 / #137 (merged c642c0a) VoxelServer refactor per voxel-refactor.md, zero steady-state allocation. Agent in a worktree; it
+      reports what the TODO(water overlap) / TODO(mapping) markers and the voxel-server page must say.
+
+## Performance checks
+
+- [x] ab7 (two rounds; the last nofree round cut by the 2 h limit): Group.Index -4 %, EntityBatch +1 % (the full run's
+      -46 % / -43 % were noise), ColdCreate -7..-15 % time but +0.38 MB per reserved world (the free id list, by design:
+      say so in docs); dc2785c reverted (36abe0b: without it Reserved 2.22 vs 2.32/2.35 ms, PerEntity 4.70 vs 5.30/5.65).
+      Iterate1 -51 %, Iterate2 -75 %, Iterate3 -28 %, With -53 %, BattleServer -10 %.
+- [ ] Recheck on a quiet machine (final run): GroupBenchmark.Scan (+12 %, round 2 bimodal), OperationBenchmark Toggle (+7 %).
+- [ ] Real regressions: root cause, fix, BDN proof.
+- [ ] #153 job tuning A/B (Warmup 6 -> 3, IterationTime 250 -> 150 ms) on WorldSimulation, BattleServer, one micro;
+      GeneratorBenchmark gets a lighter job of its own (its GlobalSetup generates and analyzes everything per launch,
+      each op is ~0.5 s).
+
+## Final pass (after everything above)
+
+- [ ] Full docs audit (audit-docs): every page en/zh against the final code; the agents' docs to-do lists; BenchTables
+      for Consume / ForEntity / SystemDispatch; search-expectations.json (ForEntity, Consume, entity.Run);
+      high-performance "What it costs" section; grids "generator writes" tabs against real output; VoxelServer TODOs;
+      example.mdx walkthrough vs BattleServer.cs regions; changelog / README What's new / migration complete.
+- [ ] `tools/bench.sh --site --sync` on the final code (classes missing from bench.json: Consume, ForEntity,
+      SystemDispatch, Access, Kernel, ChangeTrackingWrite, DestroyLog, Slices, Trim); check the moved list.
+- [ ] README numbers: headline (1.72 ms -> about 1.5 ms), the 4-row table, the comparison table; tell the owner to
+      update the GitHub description.
+- [ ] verify skill; `git fetch origin master && git merge-base --is-ancestor origin/master HEAD`; push master.
+- [ ] Owner cuts 4.8.0 (Actions -> Release on master). Never triggered by us.
+
+## Also in 4.8 (owner, 2026-10-23)
+
+- [ ] #138 research (SpanAction-style span runs, stencil SIMD gaps, tick time): agent; report in
+      scratchpad/research138.md, builds only proven wins.
+- [ ] Vector loops over mixed lane widths (int rows into a long total, widen/narrow): agent, with EECS061 below.
+- [ ] EECS061: an explicit `Merges => false` is reported (constant value read).
+
+## Done this round (for the record)
+
+Systems as [EcsSystem] ref structs (sets, switch dispatch, SystemHandle, EECS074-077, code fixes, suppressor,
+generic systems across assemblies for AOT), OneQuery (dispatch -34%), owner-thread gate, runner padding, Lock/CAS,
+filter-less passes, Mut column, ForEntity filter, tile neighbors, attribute reductions vectorize, column loads,
+EECS089 / EECS060-061, BlockTicks atomic OR only when shared (QueryTick -18%), RS1030, IlcInstructionSet native,
+UnsafeAccessor + PGO checked (inlined with guarded devirtualization; the C4 wrapper reverted).
+Generator A/B: EditMethodBody 421 -> 227 ms, 39 -> 28 MB; EECS086-089 no measurable cost.
+ab5 tip vs master: ParallelSystems -61..-75 %, ChangeTracking.Tick -45..-69 %, Sparse.PassOverTheRest -66 %,
+WorldSimulation -14 %, MultiWorld -6 %, BattleServer level, all 0 B.
+
+## #138 merge gate (2026-10-24)
+- ab8 + ab9 (t138tip e221fee vs c642c0a; loaded machine, #156 agent outside the lock): BattleServer -3 %, MultiWorld -1 %,
+  ParallelSystems(Parallel) -12 %, dispatch Plain -11..-22 %, WorldSim level. ParallelForEach Parallel=true +17..+26 %
+  on best runs (705 vs 821 us): the runner's wide path is unchanged, so suspect noise. Rerun ParallelForEach +
+  ParallelSystems alone once #156 finishes, before merging e221fee.
+
+## Merge notes (agents started before e7a47e6)
+- The rules file's source is now skills/easyecs/SKILL.md. An agent branch that edits docs/public/easyecs-rules.md
+  (the analyzer agent: AI migration guide) -> port its edit into SKILL.md, then `bun run sync:rules`.
+- Agents' new rules/features -> add to SKILL.md in the docs pass.
+
+## Folder restructure (after every agent branch is merged, before the docs pass)
+Core (71 flat files) -> Entities/ Storage/ Queries/ Systems/ Parallel/ Indexes/ Relations/ Persistence/ (namespace stays EasyEcs).
+Generator (28) -> Generators/ Kernel/ Analyzer/ Shared/. git mv only, one commit, no code change; update the
+nested CLAUDE.md maps into sections per folder, tools/filemaps.sh to recurse, csproj globs unchanged.
+Agents' CLAUDE.md layout edits: port into src/*/CLAUDE.md maps (the root no longer lists files).
+- Agents' branches edit CLAUDE.md (now the one line @AGENTS.md): on merge take ours for CLAUDE.md files and port their
+  edits into AGENTS.md / the directory AGENTS.md file maps; run tools/filemaps.sh.
+
+## Declaration surface (declarations.md) — mine at merge, no approval needed
+- P7: renumber EECS090+ across feat-analyzer / feat-inline / feat-views in merge order.
+- P10: [EditorBrowsable(Never)] on non-generic IIndexed / IUniqueIndexed.
+- P11: cheat sheet `class S<T> : EcsSystem` (stale since D102); D12 Considered text vs D101.
+- Placeholders LAMBDA_NUMBERS / NUMBERS_D109 must be real numbers before merge.
+- P8 (inline lambda passes refuse [Changed<T>]) + one cheat-sheet rule for the four ways to write a pass outside a system.
+- P9 ChunkRows inference: only after feat-sched autotuner tries < 1024 rows, with benchmarks.
+- Owner decisions pending: P1 WithAny<A,B>, P2 hooks by name, P3 ReadOnlyMaybe param, P4 [GroupBy] on member, P6 [Archetype] name/Prefab, EntityRandom.Tick advanced by Update.
+
+## Renumbering at merge (naming audit, sent to agents)
+Merge order: declarations, analyzer, hugepages, cow-buffers, sched, structural-simd, fusion, inline, views.
+EECS: declarations 090; analyzer 091-092; fusion 093-094; inline 095-097; views 098-102 (range EECS002-102).
+D: views 109-111; inline 112-114; declarations 115-117; analyzer 118-120; fusion 121; structural-simd 122; hugepages 123; cow-buffers 124; sched 125.
+ScalarReason(Text, IsFixable, SplitComponent) owned by feat-analyzer; structural-simd adopts it at merge.
+feat-analyzer rules text -> skills/easyecs/SKILL.md (docs to-do).
+Kept names (decided): AsX/TryGetX (D109), FusionMode (mirrors SimdMode).
+
+## Owner request 2026-10-24 (after restart)
+- Fewer concurrent subagents (3 at a time). Resumed: declarations, analyzer, hugepages. Next wave: cow-buffers, sched, structural-simd; then fusion, inline, views.
+- Wide rows, mixed types, one field written (int,int,long,long,long; write a long): Kernel.Wide does it today for 4-byte lanes on AVX-512 only (D90).
+  Gaps: 8-byte (and 2/1-byte) lanes in wide rows; AVX2 path (vpermpd/vpermps single-source + blend, not two-source); rows > 64 bytes.
+  Prototype: scratchpad/widelanes (Scalar / RowPerVector (the literal idea: 1 useful lane) / Avx2Transpose / Avx2Gather / Avx512Permute / Split). Build after structural-simd merges (Kernel owner), gated by Gate's cost model.
+- Cell kernels (shader form for Tile<,>): user writes a per-cell method (reads neighbors by offset, writes its cell); the generator writes Pad, the Rows walk and the vector loop over the row's cells (neighbor reads = unaligned loads at offsets). Replaces hand-written Load128 in grids.mdx examples. Design + build after Kernel branches merge; docs: grids page You write / The generator writes tab.
+- Docs to-dos: grids.mdx (+zh) "Before you start": tile, halo, ghost cells, shader, lanes, masks with mermaid; every hand-written SIMD example rewritten to the plain form where the generator vectorizes it; README <details> "What the generator writes" under each headline example (rule exists in audit-docs; README lacks it today).
+- Scheduling (owner, again): at most 2 agents writing code at once; benchmarks serialize on the lock. Now: declarations, analyzer (+ hugepages finishing its benchmark run). Queue in merge order: cow-buffers, sched, structural-simd, fusion, inline, views; then wide rows (#160) and cell kernels, then docs pass (#141).
+- Removed 9 merged worktrees (+ local branches) and scratch abmaster/genbase; kept fullrun (213 BDN results).
+
+## Owner review decided (2026-10-24), removed from docs/owner-review.md
+- Declined -> one decision record in the docs pass (decisions.mdx + zh, "Declarations not added" with each reason):
+  infer ITracked; infer Mut<T>; infer [Consume]; [With<A,B>]/[Without<A,B>] arity; auto Phase; ISystemGroupWithAny;
+  Scan<T>; Element<T> for buffers. (Texts were in owner-review.md at d56a82d.)
+- Do: infer ChunkRows after feat-sched merges, if BDN shows inferred >= hand-set (task).
+- Do: rename [IndexKey] -> [LookupKey] (one key, many entities); [UniqueKey] stays. After feat-declarations merges. Public rename: migration, changelog, code fix/analyzer from old name, api.mdx, ApiDocs zh, samples, docs, D record.
+- Do: retry vectorized reads of other entities: sort lookups by target table first, and AVX-512 (measure; D90 numbers 0.8-1.18 AVX2).
+- widelanes round 2 confirms round 1 (ratio to scalar, 1024 light/heavy, 100k light/heavy): Split 0.17/0.19/0.15/0.21;
+  Avx512Permute 0.62/0.34/0.99/0.57; Avx2Transpose 1.13/0.60/1.00/0.76; RowPerVector 1.20/1.28/1.16/1.18;
+  Avx2Gather 1.51/2.19/0.99/2.17. Numbers for D118 (split first) and #160's AVX2 gate (heavy math only).
+
+## Merged feat-analyzer (16989bb, 2026-10-24): EECS055 Warning/Info split, EECS091 cold fields + split code fix, EECS092 uncleared Emitted records, ScalarReason; D118-120. No Core change, so no runtime A/B; tests 2015/2015.
+Docs to-dos: skills/easyecs/SKILL.md text in docs-todo-analyzer-rules.diff (renumbered; incl. "Migrating object-oriented code" section D119 cites); analyzer.mdx en/zh (EECS091/092, EECS055 severity, split fix; range to EECS002-102 at the end); high-performance "split first, the fix writes it"; common-mistakes "Leaving Emitted<T> full" now EECS092; troubleshooting, changelog, roadmap; HotColdBenchmark into bench.json; rerun ReduceBenchmark Bounds*; zh glossary 热字段/冷字段, 遍历; 36 EECS033 hits in docs fences (base).
+Watch: ParallelEmitsDoNotAllocateAfterWarmUp flaked once (56 B) under load.
+GeneratorBenchmark analyzer cost: one round only (within error) -> rerun in #153.
+
+## feat-hugepages (WP1) DROPPED (2026-10-24): gain 0-12% at 1M (bar 20%), noise +-10%. Code kept on feat-hugepages-dropped (7e8906c, 184a39b). feat-hugepages = 630baac: LookupChaseBenchmark only -> merge after declarations (WP4 prefetch's acceptance benchmark).
+Docs to-dos: D123 dropped record (text in agent report: idea, prototype 0.73/0.56, measured 0.92/0.92/1.00 TryGetEntity, 0.93/1.00/0.89 serial, 1.02/0.96/0.98 parallel, outward rounding 0.88-1.02; why not; would change: >=16M entities or WP3 2 MiB native blocks); roadmap Dropped; high-performance note (random lookups in millions are latency-bound, THP always is the user's system choice); hosting page THP madvise/always + defrag; LookupChaseBenchmark + LookupBenchmark into bench.json when shown.
+WP3 (NativeMemory columns): its huge-page motive is weak now; only build if it pays on its own (bounds/stale-ref safety gated) -> research first, low priority.
+Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSBUILDDISABLENODEREUSE=1.
+- TODO when the machine is quiet: build benchmarks/EasyEcs.Benchmark on the work tip (LookupChaseBenchmark merged unbuilt at 9ad7be1; reviewed: no changed APIs).
+
+## #161 add-on (from the constant-fold question)
+- Kernel: lower Math/MathF.Pow(x, c) with a constant small integer c (2, 3, 4; 0.5 -> Sqrt; -1 -> 1/x) to multiplies
+  instead of keeping the method scalar (EECS055 "Pow has no vector form"). Same family as the uniform hoisting in
+  Scalar(); tests: each exponent, non-constant exponent stays scalar with its reason; BDN against the scalar loop.
+
+## feat-sched merged (b3ce794) — docs to-dos
+- D22 "No spinning, no dedicated threads" is stale (Workers spin 100 µs): rewrite.
+- Changelog / README What's new / migration: float Reduce<T> without ChunkRows on a world whose MaxDegreeOfParallelism != 4 now gets different (thread-independent) bits.
+- guide threading/reductions: determinism without ChunkRows (16 chunks for merging passes).
+- ApiDocs: 38 problems from the declarations merge (oncreate/ondestroy/onupdate attrs, QueryFilter.WithAny<T> entries to delete); rerun tools/ApiDocs and regenerate docs/content/reference.
+- Flaky allocation tests (ScratchTests.AParallelPassWithScratchDoesNotAllocateAfterWarmUp, ParallelEmits*): more frequent with the 400k-row Reduce test in the same run; investigate the measurement race (task #166).
+
+## feat-cow-buffers merged — docs to-dos (D124)
+- D124 copy-on-write DynamicBuffer lists (vLLM shared blocks): text in the agent's first report (later.md has it via this note):
+  share count on the list (plain on owner thread, atomic in parallel passes; RunChunks counts passes), prefab lists
+  uncounted (shared across worlds/threads, never pooled), counted lists copied when moved across worlds, singleton
+  (Emitted<T>) lists own copies. Numbers 10k x 16: Instantiate unwritten 0.47-0.54x, Clone unwritten 0.56-0.66x;
+  written Instantiate 0.97-1.02x after the Unshare fix (one thread-local lookup per pooled store, span copy), written
+  Clone 1.00-1.08x; Capture reused 0.17x, Restore 0.41-0.44x, rollback 0.50x; churn within noise, 0 B.
+  Rejected: paged blocks (AsSpan contiguous), atomic count everywhere (2.23x written clones), copy at instantiate
+  across threads, shared component values (D14).
+- guide/dynamic-buffers (shared until written, first write one copy, Clear drops without copy), guide/prefabs
+  (SetBuffer list shared by every instance, later prefab changes don't affect instances), guide/snapshots, api.mdx
+  complexity (Instantiate/Clone O(components); Capture/Restore buffers O(1)/row; first write O(count)), changelog line.
+- bench.json: BufferSharingBenchmark, BufferSnapshotBenchmark new classes to sync.
+
+## feat-structural-simd merged (cb9e156) — docs to-dos (D122 already written by the agent)
+- Guide page (vector loops / structural changes): "You write / The generator writes" tabs for BattleServer's Die.
+- README example + What's new + migration note: entity-taking methods now vectorize; EECS055/056 reason texts changed.
+- Analyzer follow-up: EECS055 LooksEligible still excludes methods with Entity or Emit params (Info not shown) -> fix in #163.
+- BattleServer.cs Die comment "a plain scan" -> mention the vector loop.
+- Numbers: Vector 0.02-0.09x of Scalar (10k/100k, 1-50% pass), BattleServer Tick 100k 4.08/4.21 -> 3.88/3.77 ms.
+- changelog (coming version): Nino 4.0.0-rc.7 (save/load level, crafted data rejected with Nino's exceptions).
+
+## feat-inline merged — docs to-dos (D112-D114 written by the agent)
+- Guide page "lambda passes" (world.ForEach(values..., static (ref P p, ...) => ...), ForEachParallel, change filters with a tick first); You write / The generator writes tabs.
+- analyzer.mdx + zh: EECS095 (Error, cannot compile), EECS096 (Warning, runs through its delegate), EECS097 (Info, scalar); fix the stated EECS range.
+- cheat-sheet, features, glossary (lambda pass / lambda 遍历), changelog, README What's new, roadmap, public skill.
+- Regenerate docs/content/reference (40 stale zh entries from other merges).
+- Follow-ups: lambda bodies with structural changes stay scalar (stable-only gate) -> enable Kernel.Structural for lambdas; benchmark row for the EECS096 delegate fallback.
+- Numbers: lambda = method within error (vector 1k ~70 ns, 100k ~11.5 us; hand-written scalar job 6-11x slower); GeneratorBenchmark EditMethodBody within error, CompileAndAnalyze +2% alloc.
+
+## feat-views merged — docs to-dos (D109-D111 written)
+- Guide page views + prefab declarations ([View] partial ref struct; entity.AsX()/TryGetX(); [Prefab] partial struct -> X.Prefab; world.Instantiate(X.Prefab)); You write / The generator writes.
+- analyzer.mdx: EECS098-102, range EECS002-102 (with fusion 093-094, lambdas 095-097).
+- roadmap, changelog, migration ([Archetype] -> [Prefab] if it was ever public — check), README What's new, public skill, cheat sheet, glossary (view / prefab declaration), example.mdx/BattleServer.
+- ApiDocs: one base fix commit for ~40 stale zh entries (OnUpdate/WithAny/hooks pages, DynamicBuffer + Prefab.SetBuffer copy-on-write text) before the gate passes.
+- Follow-ups: lambda + view stays scalar; EECS053 through views in lambdas; EECS025 for never-written view ref fields; EECS049 for view locals.
+
+## feat-fusion merged — docs to-dos (D121 text in the agent's final report: FusedRows 131,072 threshold, exceptions per-row/parallel/same-written-component)
+- Guide "Pass fusion" (what fuses, FusedRows + 3 exceptions, FusionMode Auto/Require/Off, DescribeSchedule "one walk", SystemInfo.FusedWith, views, error semantics of a fused pair).
+- D121 into decisions.mdx/.zh.mdx (agent did NOT write it).
+- analyzer.mdx: EECS093 (Info), EECS094 (Error); range EECS002-102.
+- glossary "pass fusion"; api.mdx FusionMode, SystemCode.FusedRows, SystemInfo.FusedWith, RunFused bool, EntitySpan.Slice; ApiDocs zh entries; changelog; migration (ISystemSet.RunFused returns bool, generated only); README; public skill; bench.json FusionBenchmark.
+- Follow-up: lambda passes don't fuse.
+
+## Scheduling (owner, 2026-10-25): up to 3 code agents at once (was 2).
+
+## fix-parallel-alloc (D128, merged)
+- guide/diagnostics (+zh): SystemStats.LastAllocated can include the unused rest of a thread's allocation context voided by a background GC; settle (blocking full GC) before measuring 0 B yourself; pointer to D128.
+- Testing guidance (if a page shows asserting 0 B): take the starting count after a blocking full collection.
+- Changelog Fixes: parallel passes no longer allocate the first time a helper waits on the queue.
+- audit-core candidate: Interleaved.LoadTail lazily creates Tail<T>.Rows outside ThreadSetup.
+- AGENTS.md layout: docs/content guide 'analyzer lists EECS002-089' -> current range after the docs pass.
+
+## feat-loop-shape (D126, D127, merged)
+- guide/systems vector-loop section: flat lanes, integer division and math lowerings, FloatMode.Fast forms, new reason texts.
+- guide/analyzer: EECS055/056 reasons (Fast-mode suggestions, % of floats, long % by non-power-of-two, no vector form in .NET 10).
+- api.mdx: decide on LaneMath rows (EditorBrowsable(Never)) — likely not listed, say so in D127.
+- Note: scalar integer-division lambda body is now (int)((long)r.Value / split).
+- Changelog + README What's new: flat lanes, masked-word speedup, integer division and math in vector loops.
+- owner-review.md: masked tail only for bodies the runner still inlines (needs inliner budget in the generator).
+
+## audit-analyzer-tests step 1 (merged)
+- analyzer.mdx + zh: new fix outputs (EECS027 drops the Entity/World parameter that only fed lookups; EECS025 reads e.T; EECS038 keeps the ref via e.X / e.WriteX(); EECS080 writes [With<T>] for unnamed components).
+- Changelog Fixes: code fixes leave no follow-up diagnostic; applying a fix twice no longer crashes.
+- Follow-up (analyzer): EECS049 could also report a [WithAny<Q,T>] whose every type is in [Without<>] (matches nothing). New detection; do with the analyzer follow-ups.
+- analyzer.mdx + zh: EECS025/053 cover lambda passes; EECS025 unwritten view ref fields (compilation end, 'ref readonly' fix, public library views excluded); EECS049 new cases (WithAny all excluded, lambdas, AsX/TryGetX on visited entity), new message; EECS049 on a lambda suppresses EECS095-097. Changelog.
+- Decision record (small): EECS025 for view fields is compilation-wide, reported on the field (a per-method report would break methods that write it).
+- roadmap.mdx + zh: one Planned item for docs/plans/inner-loops.md's goal (plain loops over buffers / inline arrays / ForParallel lambdas become vector loops; Cell<TCell,TTile> shaders; EECS103), linking D77/D90. Rewrite the stale "Vector loops: the forms left for later" item (Pow and kin partly done by D127; masked tail D126).
+
+## feat-lookupkey-chunkrows (D129, D130, merged)
+- Changelog / migration / README What's new: [IndexKey] -> [LookupKey] (code fix), measured chunk sizes (ChunkRows only overrides).
+- threading guide #chunk-rows + line 24 (stop telling users to set ChunkRows for heavy rows); analyzer guide EECS054 "when to set it"; api.mdx complexity; performance / why-fast chunking; public skill ChunkRows line; roadmap.
+- bun run lint:terms on D130 zh.
+- DocCheck had 296 pre-existing problems: 108 fences use removed [OnUpdate]/[OnCreate]/[OnDestroy]; new EECS025/EECS067 hits; EECS068/GroupBy errors in analyzer.mdx. ApiDocs 46 pre-existing problems. All for the docs pass (verify gate).
