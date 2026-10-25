@@ -406,7 +406,7 @@ instead is a lookup per row ([EECS027](/en/docs/guide/analyzer#eecs027)).
 | runs in the hottest loop, over many rows | two methods, `[With<T>]` and `[Without<T>]`: no test per row |
 
 ```csharp
-public partial record struct Guild([IndexKey] int Id, int Level) : IComponent;
+public partial record struct Guild([LookupKey] int Id, int Level) : IComponent;
 public record struct Morale(int Value) : IComponent;
 ```
 
@@ -988,9 +988,9 @@ public struct In<TActor> : IComponent;             // the tag of one kind of act
 public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;   // IIndexed requires IEquatable
 
-// Key component, index key and system group in one type: [IndexKey] on the type makes the whole value
+// Key component, index key and system group in one type: [LookupKey] on the type makes the whole value
 // the key, and the generator writes Key explicitly, so the record's ToString() never prints it.
-[IndexKey]
+[LookupKey]
 public readonly partial record struct Shop(long Id) : IActor<Shop>;
 
 public record struct Stock(int Items) : IComponent;
@@ -1334,7 +1334,7 @@ needed, and a method that writes a singleton:
 | A group's `[With<T>]` or `ISystemGroupWith<T>` with a method's `[Removed<T>]` | Asks for rows that have and lack `T`: the method never runs | [EECS016](/en/docs/guide/analyzer#eecs016) |
 | A group's `[With<X>]` with a method's `[Without<X>]` | No entity matches: the method never runs | [EECS049](/en/docs/guide/analyzer#eecs049) |
 | A group's `[WithAny<A>]` with a method's `[WithAny<B>]`, read as "A and B" | The sets merge: entities with `A` or `B` | Code review |
-| A public `Key => this` on a record struct actor key | `ToString()` prints `Key` forever: stack overflow | [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix): `[IndexKey]` on the type, which implements `IIndexed<T>.Key` explicitly |
+| A public `Key => this` on a record struct actor key | `ToString()` prints `Key` forever: stack overflow | [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix): `[LookupKey]` on the type, which implements `IIndexed<T>.Key` explicitly |
 | `ref` on a component the method only reads | Stamps a tracked component, keeps the system out of shared stages | [EECS025](/en/docs/guide/analyzer#eecs025) |
 | An `Entity` or `World` parameter the method never uses | The job keeps its structural bookkeeping | [EECS026](/en/docs/guide/analyzer#eecs026) |
 | An allocation in an `[OnUpdate]` or `[ForEach]` method | Garbage every update | [EECS028](/en/docs/guide/analyzer#eecs028) |

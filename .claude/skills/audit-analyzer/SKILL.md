@@ -29,7 +29,7 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
 - **Written by hand where the generator writes it** (EECS080-089): a hand-written job instead of `[ForEntity]`,
   destroying every visited row instead of `[Consume]`, a singleton accumulated row by row instead of `Reduce<T>`,
   other entities read through the World instead of `Lookup<T>`, records appended by hand instead of `Emit<T>`,
-  hand-written parts instead of `[Sum]` / `[IndexKey]` / `[Group]`.
+  hand-written parts instead of `[Sum]` / `[LookupKey]` / `[Group]`.
 
 ## Principles
 

@@ -1,13 +1,13 @@
 ---
 title: Indexes and relations
 seoTitle: "Value indexes and entity relations in a C# ECS"
-description: "Find entities by a value (a name, a zone, a score range) or by the entity they point at, with [IndexKey], [UniqueKey] and IRelation indexes kept current."
+description: "Find entities by a value (a name, a zone, a score range) or by the entity they point at, with [LookupKey], [UniqueKey] and IRelation indexes kept current."
 icon: Network
 ---
 
 Queries find entities by the components they have. A server also needs them by value: the player named "alice", the
 units in zone 3, the top ten scores, the items a player owns, the members of a party. Mark a component's key with
-`[IndexKey]` and the world keeps an index of it: every `Set` re-indexes the entity at once, so a lookup never catches up
+`[LookupKey]` and the world keeps an index of it: every `Set` re-indexes the entity at once, so a lookup never catches up
 and never scans. Relations are indexes too: a component holding an `EntityId` answers "who points at this entity", and
 an `IRelation` buffer links one entity to many.
 
@@ -28,7 +28,7 @@ an `IRelation` buffer links one entity to many.
 
 ### Value indexes [#value-indexes]
 
-Mark the member the entity is found by with `[IndexKey]` (on a positional parameter, a field or a property of a
+Mark the member the entity is found by with `[LookupKey]` (on a positional parameter, a field or a property of a
 `partial` struct): the generator adds `IIndexed<TKey>` with an explicit `Key` returning it. `world.Index<T, TKey>()`
 creates the index on first use; the generated `world.XIndex` property returns the same one. A key computed from several
 members is written by hand: implement `IIndexed<TKey>` and its `Key` ([below](#direct-index) a cell's `(X, Y)`).
@@ -37,8 +37,8 @@ members is written by hand: implement `IIndexed<TKey>` and its `Key` ([below](#d
 <Tab value="You write">
 
 ```csharp
-public partial record struct Callsign([IndexKey] string Value) : IComponent;
-public partial record struct Zone([IndexKey] int Id) : IComponent;
+public partial record struct Callsign([LookupKey] string Value) : IComponent;
+public partial record struct Zone([LookupKey] int Id) : IComponent;
 ```
 
 </Tab>
@@ -91,14 +91,14 @@ occupied), kept as entities come and go; a relation index has `TargetCount`, the
 
 ### A component as its own key [#self-key]
 
-A key can be the whole component: a shop found by its id, an actor found by its address. Put `[IndexKey]` (or
+A key can be the whole component: a shop found by its id, an actor found by its address. Put `[LookupKey]` (or
 `[UniqueKey]`) on the struct itself, and the generator makes the component `IIndexed` of itself:
 
 <Tabs items={['You write', 'The generator writes']}>
 <Tab value="You write">
 
 ```csharp
-[IndexKey] public readonly partial record struct Shop(long Id) : IComponent;
+[LookupKey] public readonly partial record struct Shop(long Id) : IComponent;
 ```
 
 </Tab>
@@ -137,7 +137,7 @@ When the key compares (`IComparable<TKey>`: a score, a level, a deadline), the s
 | `Ascending()` / `Descending()` | every indexed entity in key order |
 
 ```csharp
-public partial record struct Score([IndexKey] int Points) : IComponent;
+public partial record struct Score([LookupKey] int Points) : IComponent;
 ```
 
 ```csharp
@@ -160,7 +160,7 @@ arrows an owner has. Store the `EntityId`, not the `Entity` handle ([EECS017](/e
 is 8 bytes, unmanaged and saved with the world, and a handle converts to it implicitly.
 
 ```csharp
-public partial record struct OwnedBy([IndexKey] EntityId Owner) : IComponent;
+public partial record struct OwnedBy([LookupKey] EntityId Owner) : IComponent;
 public struct Arrow : IComponent;
 ```
 
@@ -179,7 +179,7 @@ The parent-child link is built in: see [Hierarchy](/en/docs/guide/hierarchy).
 ### Unique keys: one entity per key [#unique-keys]
 
 Some keys name one entity and must never name two: an account id, a session token, the occupant of a grid cell.
-Mark the key `[UniqueKey]` instead of `[IndexKey]` (the generator adds `IUniqueIndexed<TKey>`), and the world refuses
+Mark the key `[UniqueKey]` instead of `[LookupKey]` (the generator adds `IUniqueIndexed<TKey>`), and the world refuses
 every write that would give a key to a second entity. `Get(key)` returns the one entity of a key (and throws when none has it), `TryGet(key, out
 entity)` says whether one has it; `Find`, `Count`, `TryFind` and the ordered walks work as on any index.
 
@@ -388,7 +388,7 @@ world's own `WhenTargetDestroyed` call replaces it.
 
 ```csharp
 [WhenTargetDestroyed(TargetPolicy.Destroy)]                         // a summon dies with its summoner, in every world
-public partial record struct SummonedBy([IndexKey] EntityId Summoner) : IComponent;
+public partial record struct SummonedBy([LookupKey] EntityId Summoner) : IComponent;
 
 [WhenTargetDestroyed(TargetPolicy.Remove)]                          // a closed guild leaves no links
 public record struct InGuild(EntityId Target) : IRelation;
@@ -482,17 +482,17 @@ Put the files in a console project that references EasyEcs (`dotnet add package 
 using EasyEcs;
 
 // Value indexes: Key is the value an entity is found by.
-public partial record struct Team([IndexKey] int Id) : IComponent;
+public partial record struct Team([LookupKey] int Id) : IComponent;
 
 // A unique key: no two players have one name.
 public partial record struct PlayerName([UniqueKey] string Value) : IComponent;
 
 // An int key compares, so this index can also walk a range of levels in order.
-public partial record struct Level([IndexKey] int Value) : IComponent;
+public partial record struct Level([LookupKey] int Value) : IComponent;
 
 // A link: each arrow has one owner, and the index lists the arrows of an owner.
 [WhenTargetDestroyed(TargetPolicy.Destroy)]                       // destroying the archer destroys its arrows
-public partial record struct OwnedBy([IndexKey] EntityId Owner) : IComponent;
+public partial record struct OwnedBy([LookupKey] EntityId Owner) : IComponent;
 
 public struct Arrow : IComponent;
 
@@ -651,9 +651,9 @@ follow, then the followers of 100 players counted and walked (`RelationBenchmark
 | Writing an indexed component through `ref`, `Get<T>()` or a query item | The index keeps the old key | [EECS015](/en/docs/guide/analyzer#eecs015) |
 | Storing an `Entity` handle in a component | A managed column, write barriers, not saved | [EECS017](/en/docs/guide/analyzer#eecs017) |
 | Giving entities the indexed component or a new key inside a `Find` loop over it | The walk can read another key's entities (removing the component and destroying entities are fine) | [EECS042](/en/docs/guide/analyzer#eecs042): collect first, then change |
-| A public `Key => this` on a record struct | `ToString()` prints `Key` forever: a stack overflow | [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix): `[IndexKey]` on the struct, or `Shop IIndexed<Shop>.Key => this;` |
-| `[IndexKey]` or `[UniqueKey]` on a struct (or in a type) that is not `partial` | Compile error: the generator cannot add the key | [EECS062](/en/docs/guide/analyzer#eecs062) (with a code fix) |
-| A hand-written `Key` that returns one member | Works, but a public `Key` joins the record's `ToString()` and equality members | [EECS067](/en/docs/guide/analyzer#eecs067) (with a code fix): `[IndexKey]` on the member |
+| A public `Key => this` on a record struct | `ToString()` prints `Key` forever: a stack overflow | [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix): `[LookupKey]` on the struct, or `Shop IIndexed<Shop>.Key => this;` |
+| `[LookupKey]` or `[UniqueKey]` on a struct (or in a type) that is not `partial` | Compile error: the generator cannot add the key | [EECS062](/en/docs/guide/analyzer#eecs062) (with a code fix) |
+| A hand-written `Key` that returns one member | Works, but a public `Key` joins the record's `ToString()` and equality members | [EECS067](/en/docs/guide/analyzer#eecs067) (with a code fix): `[LookupKey]` on the member |
 | `[WhenTargetDestroyed]` on a type that links to no entity | Compile error: no target to watch | [EECS068](/en/docs/guide/analyzer#eecs068) |
 | Using an index from another thread | Indexes belong to the owner thread | [Threading](/en/docs/guide/threading#what-the-world-synchronizes) |
 | Indexing one component by two key types | `InvalidOperationException`: one index per component | At run time |

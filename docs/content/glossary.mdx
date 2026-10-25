@@ -29,7 +29,7 @@ no behaviour and no references to systems or services. See [ECS principles](/en/
 
 ## Generated part [#generated-part]
 
-The members the generator adds to a `partial` struct from attributes on its declaration: `[IndexKey]` or
+The members the generator adds to a `partial` struct from attributes on its declaration: `[LookupKey]` or
 `[UniqueKey]` writes the explicit `Key` of `IIndexed<TKey>`, `[Group]` the `Group` of `IGroup`, and `[Sum]`,
 `[Min]`, `[Max]` and their kin the `Identity` and `Combine` of a reduction. Setup attributes on the type
 (`[GroupBy]`, `[WhenTargetDestroyed]`, `[NotSaved]`) are registered for every world instead. See
@@ -352,7 +352,7 @@ list may have to go back, and `DynamicBuffer<T>.FillPool(n)` fills it at start-u
 
 ## Value index [#value-index]
 
-A lookup from a key to the entities whose component has that key: `[IndexKey]` on the member that is the key (the
+A lookup from a key to the entities whose component has that key: `[LookupKey]` on the member that is the key (the
 generator writes `IIndexed<TKey>`), `world.XIndex` or `world.Index<T, TKey>()` to query it. The index follows every `Set`; a comparable key also gives sorted ranges. A
 unique index (`[UniqueKey]`, `IUniqueIndexed<TKey>`) holds one entity per key, found with `Get`, and refuses a write that would
 duplicate a key. See [Indexes and relations](/en/docs/guide/indexes-and-relations).

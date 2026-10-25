@@ -95,6 +95,6 @@ public partial class OrderedIndexBenchmark
 
     private int NewScore(int i) => (int)((uint)(_next * 31 + i * 17) % 5_000);
 
-    public partial record struct RankedScore([IndexKey] int Value) : IComponent;
+    public partial record struct RankedScore([LookupKey] int Value) : IComponent;
     public record struct PlainScore(int Value) : IComponent;
 }

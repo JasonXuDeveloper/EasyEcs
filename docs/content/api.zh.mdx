@@ -55,7 +55,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `Mut<T>` | ref struct | `[ForEach]` 方法的组件参数，只有方法真正写了的行才算写入：`Value`、`Write()`、`SetIfChanged(value)`（[变更追踪](/zh/docs/guide/change-tracking)）。 |
 | `Reduce<T>`、`IReduction<T>` | 结构体、接口 | `[ForEach]` 参数（按 `ref` 传入），把一次遍历归约到单例 `T`，`T` 实现 `IReduction<T>`（`Identity`、`Combine`）：`Value`、`Combine(value)`。 |
 | `[Sum]`、`[Product]`、`[Min]`、`[Max]`、`[All]`、`[Any]` | 特性 | 标在 partial struct 的每个实例字段上：生成器写出它的 `IReduction<T>`（`Identity` 和逐字段的 `Combine`）。 |
-| `[IndexKey]`、`[UniqueKey]`、`[Group]` | 特性 | 标在 partial 组件的成员上（`[IndexKey]` 标在类型上：键是整个值）：生成器显式实现 `IIndexed<TKey>.Key`（`IUniqueIndexed<TKey>`）或 `IGroup.Group`。 |
+| `[LookupKey]`、`[UniqueKey]`、`[Group]` | 特性 | 标在 partial 组件的成员上（`[LookupKey]` 标在类型上：键是整个值）：生成器显式实现 `IIndexed<TKey>.Key`（`IUniqueIndexed<TKey>`）或 `IGroup.Group`。 |
 | `[GroupBy]`、`[WhenTargetDestroyed(policy)]`、`[NotSaved]` | 特性 | 每个 World 从第一张含这个类型的表开始应用的设置：分组、目标被销毁时链接的策略；`[NotSaved]`：任何存档都不写这个类型，读档保留 World 自己的单例。 |
 | `Scratch<T>` | ref struct | `[ForEach]` 参数：方法在当前线程上的工作内存，在行、遍历和 World 之间保留：`Value`。 |
 | `Emit<T>`、`Emitted<T>` | ref struct、结构体 | `[ForEach]` 参数（按值传入），追加记录（`Add`、`AddRange`），遍历结束时按块的顺序并入单例 `Emitted<T>`（`Items`，一个 `DynamicBuffer<T>`）。 |

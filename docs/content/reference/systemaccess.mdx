@@ -12,7 +12,7 @@ public struct SystemAccess
 
 The data a system reads and writes, declared once when the system is added. With [`WorldOptions.ParallelSystems`](/en/docs/reference/worldoptions#parallelsystems), systems with no order between them whose access does not conflict run at once: two systems conflict when one writes a component or singleton the other reads or writes, or when either [runs alone](/en/docs/reference/systemaccess#runalone).
 
-The generator declares it for every system with [[ForEach]](/en/docs/reference/foreachattribute) methods: a `ref` parameter is a write, an `in` parameter a read. A system runs alone when it can reach the world beyond its parameters: an [`Entity`](/en/docs/reference/entity) or [`World`](/en/docs/reference/world) parameter, a [[OnUpdate]](/en/docs/reference/onupdateattribute) method, a `[Consume]` method, or no `[ForEach]` method at all.
+The generator declares it for every system with [[ForEach]](/en/docs/reference/foreachattribute) methods: a `ref` parameter is a write, an `in` parameter a read. A system runs alone when it can reach the world beyond its parameters: an [`Entity`](/en/docs/reference/entity) or [`World`](/en/docs/reference/world) parameter, a `OnUpdate` method, a `[Consume]` method, or no `[ForEach]` method at all.
 
 ## Methods
 

@@ -10,7 +10,7 @@ description: "A system added to a world (World.AddSystem, World.System, World.Sy
 public readonly struct SystemHandle : IEquatable<SystemHandle>
 ```
 
-A system added to a world ([`World.AddSystem`](/en/docs/reference/world#addsystem), [`World.System`](/en/docs/reference/world#system), [`World.Systems`](/en/docs/reference/world#systems)): a small handle over the world's record of it, as an [`Entity`](/en/docs/reference/entity) is over its row. The record is data the world owns (enabled, error, ticks, counts, stats); no system object exists. Once the system is removed (or the world disposed) the handle is stale: [`SystemHandle.IsAlive`](/en/docs/reference/systemhandle#isalive) is false and its other members throw `InvalidOperationException`, even after the world reuses the record for another system. Hooks ([[OnUpdate]](/en/docs/reference/onupdateattribute) and the others) may take it to read their own system's record.
+A system added to a world ([`World.AddSystem`](/en/docs/reference/world#addsystem), [`World.System`](/en/docs/reference/world#system), [`World.Systems`](/en/docs/reference/world#systems)): a small handle over the world's record of it, as an [`Entity`](/en/docs/reference/entity) is over its row. The record is data the world owns (enabled, error, ticks, counts, stats); no system object exists. Once the system is removed (or the world disposed) the handle is stale: [`SystemHandle.IsAlive`](/en/docs/reference/systemhandle#isalive) is false and its other members throw `InvalidOperationException`, even after the world reuses the record for another system. Hooks (`OnUpdate` and the others) may take it to read their own system's record.
 
 ## Properties
 
@@ -70,7 +70,7 @@ The system type's name as reports show it (`Regen<Health>`).
 public long RunCount { get; }
 ```
 
-How many times the system has run before the current run (0 during its first run; runs skipped by [[UpdateInterval]](/en/docs/reference/updateintervalattribute) or while disabled do not count, a run that throws does). A `[ForEach(Slices = N)]` method visits slice `RunCount % N` of its rows, so an [[OnUpdate]](/en/docs/reference/onupdateattribute) method can tell which slice this run visits.
+How many times the system has run before the current run (0 during its first run; runs skipped by [[UpdateInterval]](/en/docs/reference/updateintervalattribute) or while disabled do not count, a run that throws does). A `[ForEach(Slices = N)]` method visits slice `RunCount % N` of its rows, so an `OnUpdate` method can tell which slice this run visits.
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 

@@ -57,17 +57,18 @@ public sealed class AllAttribute : Attribute;
 public sealed class AnyAttribute : Attribute;
 
 /// <summary>
-/// The key a world indexes the component by (<see cref="IIndexed{TKey}"/>): on a field, a property or a record's
-/// positional parameter, the key is that member (<c>public partial struct Owner : IComponent { [IndexKey] public EntityId Of; }</c>);
+/// The key entities are looked up by: a world indexes the component by it (<see cref="IIndexed{TKey}"/>), several
+/// entities per key (<see cref="UniqueKeyAttribute"/> for one). On a field, a property or a record's
+/// positional parameter, the key is that member (<c>public partial struct Owner : IComponent { [LookupKey] public EntityId Of; }</c>);
 /// on the struct itself, the key is the whole value. The generator adds <c>IIndexed&lt;TKey&gt;</c> to the partial
 /// struct (unless an interface the struct declares brings it) with an explicit <c>Key</c> returning the member. One key
 /// per component; a key computed from several members is written by hand (<c>public (int, int) Key => (X, Y);</c>).
 /// </summary>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter | AttributeTargets.Struct)]
-public sealed class IndexKeyAttribute : Attribute;
+public sealed class LookupKeyAttribute : Attribute;
 
 /// <summary>
-/// <see cref="IndexKeyAttribute"/> for a key that names one entity (<see cref="IUniqueIndexed{TKey}"/>): the generator adds
+/// <see cref="LookupKeyAttribute"/> for a key that names one entity (<see cref="IUniqueIndexed{TKey}"/>): the generator adds
 /// <c>IUniqueIndexed&lt;TKey&gt;</c> with the explicit <c>Key</c>. A struct that declares
 /// <see cref="IDirectIndexed{TKey}"/> keeps its own <c>Slots</c> and <c>SlotOf</c>; only <c>Key</c> is generated.
 /// </summary>

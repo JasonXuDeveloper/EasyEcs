@@ -26,7 +26,7 @@ EasyEcs 文档里的术语，每个用几句话讲清，并链接到详细讲解
 
 ## 生成的部分（Generated part） [#generated-part]
 
-生成器根据声明上的特性往 `partial` 结构体里加的成员：`[IndexKey]` 或 `[UniqueKey]` 写出 `IIndexed<TKey>` 的显式 `Key`，`[Group]`
+生成器根据声明上的特性往 `partial` 结构体里加的成员：`[LookupKey]` 或 `[UniqueKey]` 写出 `IIndexed<TKey>` 的显式 `Key`，`[Group]`
 写出 `IGroup` 的 `Group`，`[Sum]`、`[Min]`、`[Max]` 等写出归约的 `Identity` 和 `Combine`。类型上的初始化特性（`[GroupBy]`、
 `[WhenTargetDestroyed]`、`[NotSaved]`）则登记给每个 World。见[实体与组件](/zh/docs/guide/entities-and-components#declared-parts)。
 
@@ -289,7 +289,7 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 
 ## 值索引（Value index） [#value-index]
 
-从键到实体的查找表：在作为键的成员上标 `[IndexKey]`（生成器写出 `IIndexed<TKey>`），用 `world.XIndex` 或 `world.Index<T, TKey>()` 查询。每次 `Set` 索引都会跟着更新；
+从键到实体的查找表：在作为键的成员上标 `[LookupKey]`（生成器写出 `IIndexed<TKey>`），用 `world.XIndex` 或 `world.Index<T, TKey>()` 查询。每次 `Set` 索引都会跟着更新；
 键可比较时还能按区间有序遍历。唯一索引（`[UniqueKey]`、`IUniqueIndexed<TKey>`）一个键只对应一个实体，用 `Get` 查找，并拒绝会让键重复的写入。
 见[索引与关系](/zh/docs/guide/indexes-and-relations)。
 

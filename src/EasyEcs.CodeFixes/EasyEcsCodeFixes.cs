@@ -26,7 +26,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
             "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS055", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071",
-            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "CS0246", "CS0305", "CS0592",
+            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "CS0234", "CS0246", "CS0305", "CS0592",
             "CS0200", "CS0272", "CS1501", "CS1729", "CS1739");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
@@ -103,6 +103,11 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                                    && FromHookAttribute(attribute) is { } unmarked:
                     Register(context, diagnostic, unmarked.Title, root, unmarked.Old, unmarked.New);
                     break;
+                case "CS0246" or "CS0234" when node.FirstAncestorOrSelf<AttributeSyntax>() is { } attribute
+                                   && RenamedAttribute(attribute) is { } renamed
+                                   && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false):
+                    Register(context, diagnostic, renamed.Title, root, renamed.Old, renamed.New);
+                    break;
                 case "EECS090" when kind == "Hook" && diagnostic.Properties.TryGetValue("Hook", out var hook) && hook != null
                                     && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method:
                     Register(context, diagnostic, $"Rename it to {hook}", root, method, RenamedHook(method, hook));
@@ -154,7 +159,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                 case "EECS043" or "EECS067" when node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { } key:
                     if (diagnostic.Id == "EECS043" && await ExplicitKey(context.Document, key, context.CancellationToken).ConfigureAwait(false) is { } explicitKey)
                         Register(context, diagnostic, "Implement it explicitly", root, key, explicitKey);
-                    if (await IndexKeyAttribute(context.Document, root, key, diagnostic.Properties.TryGetValue("Member", out var member) ? member : "this",
+                    if (await KeyAttribute(context.Document, root, key, diagnostic.Properties.TryGetValue("Member", out var member) ? member : "this",
                             context.CancellationToken).ConfigureAwait(false) is { } keyed)
                         context.RegisterCodeFix(CodeAction.Create($"Declare it with [{keyed.Attribute}]", _ => Task.FromResult(context.Document.WithSyntaxRoot(keyed.Root)),
                             diagnostic.Id + "attribute"), diagnostic);
@@ -810,12 +815,12 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
 
     /// <summary>
     /// EECS067 (and EECS043's second fix): a hand-written Key returning <paramref name="member"/> (<c>this</c>: the value)
-    /// declared with <c>[IndexKey]</c> (<c>[UniqueKey]</c> for a unique index) on that member or the type; the Key and the
+    /// declared with <c>[LookupKey]</c> (<c>[UniqueKey]</c> for a unique index) on that member or the type; the Key and the
     /// IIndexed / IUniqueIndexed of the base list go (an IDirectIndexed stays: its Slots and SlotOf are the user's), the
     /// type becomes partial along its chain. A hand-written Group (EECS067) gets <c>[Group]</c> on its member the same
     /// way, its IGroup going. Null when code reads the member through the type.
     /// </summary>
-    private static async Task<(SyntaxNode Root, string Attribute)?> IndexKeyAttribute(Document document, SyntaxNode root, PropertyDeclarationSyntax key,
+    private static async Task<(SyntaxNode Root, string Attribute)?> KeyAttribute(Document document, SyntaxNode root, PropertyDeclarationSyntax key,
         string? member, CancellationToken token)
     {
         var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
@@ -824,7 +829,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
             return null;
         bool group = key.Identifier.ValueText == "Group";
         string attribute = group ? "Group"
-            : property.ContainingType.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == "EasyEcs.IUniqueIndexed<TKey>") ? "UniqueKey" : "IndexKey";
+            : property.ContainingType.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == "EasyEcs.IUniqueIndexed<TKey>") ? "UniqueKey" : "LookupKey";
         var byName = new System.Collections.Generic.Dictionary<string, string>();
         if (member != "this") byName[member] = attribute;
         var rewritten = group

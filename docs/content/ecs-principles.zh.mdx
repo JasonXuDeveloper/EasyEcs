@@ -291,7 +291,7 @@ public partial struct Quests : IComponent, ITracked                     // 随�
     public Dictionary<int, int> Progress;
 }
 
-public partial record struct ItemOf([IndexKey] EntityId Owner) : IComponent;  // 背包：物品指向玩家
+public partial record struct ItemOf([LookupKey] EntityId Owner) : IComponent;  // 背包：物品指向玩家
 
 public static class PlayerRules
 {

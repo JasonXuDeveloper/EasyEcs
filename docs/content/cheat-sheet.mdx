@@ -15,10 +15,10 @@ public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
 public record struct Health(int Value) : IComponent, ITracked;          // tracked: writes are recorded
 public record struct Mana(int Value) : IComponent, ITracked;
-public partial record struct Team([IndexKey] int Id) : IComponent;
+public partial record struct Team([LookupKey] int Id) : IComponent;
 public partial record struct Account([UniqueKey] int Id) : IComponent;   // one entity per key
 [GroupBy] public partial record struct Zone([Group] int Id) : IComponent;   // grouped in every world
-public partial record struct OwnedBy([IndexKey] EntityId Owner) : IComponent;
+public partial record struct OwnedBy([LookupKey] EntityId Owner) : IComponent;
 public record struct MemberOf(EntityId Target) : IRelation;                   // many links per entity
 public record struct Loot(int Item);                                          // a DynamicBuffer element
 public record struct Seat(int Number) : ICleanupComponent;                    // released after destroy
@@ -36,10 +36,10 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 | `struct X : IComponent` with no fields | A tag: a yes-or-no state used in filters | [Entities and components](/en/docs/guide/entities-and-components) |
 | `struct X : ISingletonComponent` | One value per world | [Singletons](/en/docs/guide/singletons) |
 | `: ITracked` | Rows record the tick of their last write and removal | [Change tracking](/en/docs/guide/change-tracking) |
-| `[IndexKey]` on a member (or on the struct: the whole value) of a `partial` struct | Found by value through `world.Index<T, TKey>()`; the generator writes `IIndexed<TKey>` and its `Key` (a key of several members: `IIndexed<TKey>` by hand) | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
+| `[LookupKey]` on a member (or on the struct: the whole value) of a `partial` struct | Found by value through `world.Index<T, TKey>()`; the generator writes `IIndexed<TKey>` and its `Key` (a key of several members: `IIndexed<TKey>` by hand) | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `[UniqueKey]` on a member (or the struct) | A key that names one entity (`IUniqueIndexed<TKey>`): `index.Get(key)`; a write that would give a second entity the key throws | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `: IDirectIndexed<TKey>` with `Key`, `static Slots`, `static SlotOf(key)` | A unique key that maps onto bounded slots (grid cells): `Get` / `TryGet` read one array entry | [Direct-mapped keys](/en/docs/guide/indexes-and-relations#direct-index) |
-| `[IndexKey] EntityId` | A link to one entity, found from the target | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
+| `[LookupKey] EntityId` | A link to one entity, found from the target | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `: IRelation` with `Target` | Many links per entity, kept in a buffer | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `[Group]` on an `int` (or `int` enum) member; `[GroupBy]` on the struct | Splits tables by value (`IGroup`): in every world with `[GroupBy]`, else after `world.GroupBy<T>()` | [Groups](/en/docs/guide/groups) |
 | `[WhenTargetDestroyed(policy)]` on a relation or an `EntityId`-keyed component | What destroying a target does to the links to it, in every world | [Target policies](/en/docs/guide/indexes-and-relations#target-policies) |

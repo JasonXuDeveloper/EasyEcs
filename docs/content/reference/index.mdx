@@ -21,20 +21,17 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`DynamicBufferExtensions`](/en/docs/reference/dynamicbufferextensions) | The writes of a DynamicBuffer. |
 | [`EcsSystemAttribute`](/en/docs/reference/ecssystemattribute) | Declares a system: a ref struct whose static methods are the logic that runs on a world. |
 | [`EntityRandomEcsExtensions`](/en/docs/reference/entityrandomecsextensions) | The named members of EntityRandom (generated). |
-| [`ForEachAttribute`](/en/docs/reference/foreachattribute) | Runs a static method of an [[EcsSystem]](/en/docs/reference/ecssystemattribute) (or of any other type, through a generated entry point) for every entity matching its component parameters (and the WithAttribute / WithoutAttribute / WithAnyAttribute filters), each update, after its [[OnUpdate]](/en/docs/reference/onupdateattribute) method, in declaration order. |
+| [`ForEachAttribute`](/en/docs/reference/foreachattribute) | Runs a static method of an [[EcsSystem]](/en/docs/reference/ecssystemattribute) (or of any other type, through a generated entry point) for every entity matching its component parameters (and the WithAttribute / WithoutAttribute / [WithAny&lt;T1, T2&gt;] filters), each update, after its OnUpdate method, in declaration order. |
 | [`ForEntityAttribute`](/en/docs/reference/forentityattribute) | A static method that runs on one entity: the generator writes an entry point, a static member of the method's type named like the method, which takes the entity (then the tick with [Changed&lt;T&gt;] / [Removed&lt;T&gt;], then the method's other values) and returns whether the method ran. |
 | [`GroupAttribute`](/en/docs/reference/groupattribute) | The member a world groups the component's tables by (IGroup): an int or an enum of int. |
-| [`GroupByAttribute`](/en/docs/reference/groupbyattribute) | Every world groups its tables by this IGroup component (World.GroupBy), from its first table holding it: a group filter (QueryFilter.InGroup) then visits that group's tables only, in every world, with no setup call to forget. |
+| [`GroupByAttribute`](/en/docs/reference/groupbyattribute) | [[Group]](/en/docs/reference/groupattribute), and every world groups the component's tables by this member (World.GroupBy) from its first table holding it: a group filter (QueryFilter.InGroup) then visits that group's tables only, in every world, with no setup call to forget. |
 | [`GroupInfo`](/en/docs/reference/groupinfo) | The systems of one group in stages (ScheduleInfo). |
-| [`IndexKeyAttribute`](/en/docs/reference/indexkeyattribute) | The key a world indexes the component by (IIndexed): on a field, a property or a record's positional parameter, the key is that member (public partial struct Owner : IComponent \{ [IndexKey] public EntityId Of; \}); on the struct itself, the key is the whole value. |
 | [`Lanes`](/en/docs/reference/lanes) | Stream compaction for batch methods, a GPU's ballot and compaction on a CPU: a vector compare decides a lane mask (Vector256.LessThan(hp, limit).ExtractMostSignificantBits(): CUDA's __ballot_sync; its __popc is PopCount), and Lanes.Compact writes the selected elements side by side: the ids of the rows a batch method picked (entities.Ids), their values, their indexes. |
 | [`LookupExtensions`](/en/docs/reference/lookupextensions) | Key lookups of an indexed component (IIndexed) through a Lookup. |
+| [`LookupKeyAttribute`](/en/docs/reference/lookupkeyattribute) | The key entities are looked up by: a world indexes the component by it (IIndexed), several entities per key (UniqueKeyAttribute for one). |
 | [`MaxAttribute`](/en/docs/reference/maxattribute) | A field of a reduction that keeps the larger value: Identity the type's MinValue (-∞ for float and double), Combine Math.Max(left, right). |
 | [`MinAttribute`](/en/docs/reference/minattribute) | A field of a reduction that keeps the smaller value: Identity the type's MaxValue (+∞ for float and double), Combine Math.Min(left, right). |
 | [`NotSavedAttribute`](/en/docs/reference/notsavedattribute) | A component or singleton no save holds: runtime state (a connection, a cache, a handle to a service) that a restart rebuilds. |
-| [`OnCreateAttribute`](/en/docs/reference/oncreateattribute) | The static method of an [[EcsSystem]](/en/docs/reference/ecssystemattribute) called once when the system is added to a world. |
-| [`OnDestroyAttribute`](/en/docs/reference/ondestroyattribute) | The static method of an [[EcsSystem]](/en/docs/reference/ecssystemattribute) called once when the system is removed or the world is disposed. |
-| [`OnUpdateAttribute`](/en/docs/reference/onupdateattribute) | The static method of an [[EcsSystem]](/en/docs/reference/ecssystemattribute) called on every run of the system, before its [ForEach] methods. |
 | [`OrderedIndexExtensions`](/en/docs/reference/orderedindexextensions) | Ordered walks of a value index whose key is comparable (a score, a deadline, a level): ranges and sorted iteration for leaderboards, timers and matchmaking brackets. |
 | [`Prefab`](/en/docs/reference/prefab) | A recipe for entities: a set of component values that belongs to no world, so no query ever sees it. |
 | [`PrefabAttribute`](/en/docs/reference/prefabattribute) | A Prefab declared as the components its entities start with: a partial struct with one field per component, each field's initializer its default value: [Prefab] public partial struct Goblin \{ public Health Health = new(30); public Position Position; \}. |
@@ -51,7 +48,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`SystemPair`](/en/docs/reference/systempair) | Two conflicting systems in execution order, ordered only by registration (GroupInfo.RegistrationOrdered). |
 | [`TargetPolicyExtensions`](/en/docs/reference/targetpolicyextensions) | Target policies of components that point at an entity (IIndexed of EntityId). |
 | [`UniqueIndexExtensions`](/en/docs/reference/uniqueindexextensions) | Lookups of a unique index (IUniqueIndexed): the one entity of a key. |
-| [`UniqueKeyAttribute`](/en/docs/reference/uniquekeyattribute) | IndexKeyAttribute for a key that names one entity (IUniqueIndexed): the generator adds IUniqueIndexed&lt;TKey&gt; with the explicit Key. |
+| [`UniqueKeyAttribute`](/en/docs/reference/uniquekeyattribute) | LookupKeyAttribute for a key that names one entity (IUniqueIndexed): the generator adds IUniqueIndexed&lt;TKey&gt; with the explicit Key. |
 | [`UpdateAfterAttribute<TSystem>`](/en/docs/reference/updateafterattribute) | Run this system after system TSystem of the same group: see UpdateBeforeAttribute. |
 | [`UpdateBeforeAttribute<TSystem>`](/en/docs/reference/updatebeforeattribute) | Run this system before system TSystem (an [[EcsSystem]](/en/docs/reference/ecssystemattribute), EECS077) of the same group, whatever their registration order. |
 | [`UpdateInGroupAttribute<TGroup>`](/en/docs/reference/updateingroupattribute) | Puts the system into group TGroup. |
@@ -59,7 +56,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`ValueIndex<T, TKey>`](/en/docs/reference/valueindex) | The value index of component T in one world (World.Index). |
 | [`ViewAttribute`](/en/docs/reference/viewattribute) | A view of one entity's components: a ref struct whose instance fields are ref (written), ref readonly (read) or Mut (written, stamped only where written) fields of components, public or internal, with the business methods that use them: [View] public ref struct Fighter \{ public ref Health Health; public ref readonly Armor Armor; public void TakeDamage(int n) =&gt; Health.Value -= Math.Max(0, n - Armor.Value); \}. |
 | [`WhenTargetDestroyedAttribute`](/en/docs/reference/whentargetdestroyedattribute) | What destroying an entity does to the links to it, in every world (TargetPolicy): on a relation (IRelation) or a component indexed by an EntityId. |
-| [`WithAnyAttribute<T>`](/en/docs/reference/withanyattribute) | The ForEachAttribute method requires at least one of the components named by its [WithAny&lt;T&gt;] attributes (not passed in): [ForEach, WithAny&lt;Burning&gt;, WithAny&lt;Poisoned&gt;]. |
+| [`WithAnyAttribute<T1..T9>`](/en/docs/reference/withanyattribute) | The ForEachAttribute method requires at least one of T1, T2 (not passed in): [ForEach, WithAny&lt;Burning, Poisoned&gt;], QueryFilter.WithAny. |
 | [`WithAttribute<T>`](/en/docs/reference/withattribute) | The ForEachAttribute method also requires component T (not passed in). |
 | [`WithoutAttribute<T>`](/en/docs/reference/withoutattribute) | The ForEachAttribute method skips entities having component T. |
 | [`World`](/en/docs/reference/world) | An ECS world: entities, their components, singletons and the systems that update them. |
@@ -91,7 +88,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`QueryItem<T1..T9>`](/en/docs/reference/queryitem) | One query result: the entity and refs into its row. |
 | [`ReadEnumerator<T1..T9>`](/en/docs/reference/readenumerator) | Allocation-free read-only query enumerator; safe under structural changes during iteration (same visiting rules as ForEach). |
 | [`ReadItem<T1..T9>`](/en/docs/reference/readitem) | One read-only query result: the entity and read-only refs into its row (nothing is stamped). |
-| [`ReadOnlyMaybe<T>`](/en/docs/reference/readonlymaybe) | An optional component of the entity a [ForEach] method visits, read-only: ReadOnlyMaybe.Value is a ref readonly, so the method is scheduled as a reader of T, a tracked component is never stamped, and an indexed one (IIndexed) may be taken, which a Maybe may not (EECS015: its ref could change the key behind the index's back). |
+| [`ReadOnlyMaybe<T>`](/en/docs/reference/readonlymaybe) | An optional component of the entity a [ForEach] method visits, read-only (as in beside ref): ReadOnlyMaybe.Value is a ref readonly, so the method is scheduled as a reader of T, a tracked component is never stamped, and an indexed one (IIndexed) may be taken, which a Maybe may not (EECS015: its ref could change the key behind the index's back). |
 | [`Reduce<T>`](/en/docs/reference/reduce) | A reduction of a [ForEach] pass into singleton T (OpenMP's reduction, MPI's Allreduce), taken by ref: static void Count(in Health h, ref Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;. |
 | [`RelationIndex<T>.Sources`](/en/docs/reference/relationindex-sources) | Enumerates the entities linking to one target (foreach), once per link. |
 | [`Retired`](/en/docs/reference/retired) | Tag of a retired entity: Destroy found ICleanupComponents on it, so it took the other components away and kept the entity alive until its last cleanup component is removed (then the entity is freed: destroyed). |
@@ -101,7 +98,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`SystemHandle`](/en/docs/reference/systemhandle) | A system added to a world (World.AddSystem, World.System, World.Systems): a small handle over the world's record of it, as an Entity is over its row. |
 | [`SystemList`](/en/docs/reference/systemlist) | The systems of a world, every group in execution order (default group first): foreach it, or read SystemList.Count. |
 | [`SystemList.Enumerator`](/en/docs/reference/systemlist-enumerator) | Walks the groups and their systems. |
-| [`SystemStats`](/en/docs/reference/systemstats) | How often and how long a system ran (WorldOptions.MeasureSystems): its [[OnUpdate]](/en/docs/reference/onupdateattribute) method plus its [ForEach] methods, per run, with the bytes it allocated and the entities its [ForEach] methods visited. |
+| [`SystemStats`](/en/docs/reference/systemstats) | How often and how long a system ran (WorldOptions.MeasureSystems): its OnUpdate method plus its [ForEach] methods, per run, with the bytes it allocated and the entities its [ForEach] methods visited. |
 | [`TableInfo`](/en/docs/reference/tableinfo) | A table: the entities with one set of component columns (World.DescribeTables). |
 | [`Tile<TCell, TTile>`](/en/docs/reference/tile) | The cells of a tile (an entity whose TTile makes it one, ITile) with those of its neighbors: a [ForEach] parameter, as a CUDA block's tile and its apron, or an MPI rank's subdomain and its ghost cells. |
 | [`TileCursor<TCell, TTile>`](/en/docs/reference/tilecursor) | A padded tile at the first cell of a row (PaddedTile.At): the cells around it, one or a vector at a time. |
@@ -128,7 +125,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`IForRange`](/en/docs/reference/iforrange) | A job over a range of indexes, run in chunks by World.ForParallel (Kokkos' RangePolicy, Unity's IJobParallelForBatch): each call gets one chunk. |
 | [`IForSpan<T>`](/en/docs/reference/iforspan) | A job over the elements of a list, run in chunks by World.ForParallel: each call gets one chunk's elements, writable. |
 | [`IGroup`](/en/docs/reference/igroup) | Marks a component whose value splits tables: in a world that called World.GroupBy, entities with different IGroup.Groups live in different tables, so a query of one group (QueryFilter.InGroup) walks only its own rows, contiguous in memory (a zone, a map, a match, a team). |
-| [`IIndexed, IIndexed<TKey>`](/en/docs/reference/iindexed) | What every IIndexed is, so a component type is known to be indexed without reflection (a type test the JIT folds). |
+| [`IIndexed<TKey>`](/en/docs/reference/iindexed) | A component whose IIndexed.Key the world indexes: world.Index&lt;T, TKey&gt;().Find(key) enumerates the entities whose TKey equals a value (an item's owner, a player's name, a cell of a grid). |
 | [`INoStructuralChanges`](/en/docs/reference/inostructuralchanges) | Marks a ForEach job that makes no structural change (no create/destroy/add/remove/set on any entity of the world it iterates). |
 | [`IReduction<T>`](/en/docs/reference/ireduction) | How values of T combine: an associative IReduction.Combine and its IReduction.Identity, which changes nothing it is combined with (0 for a sum, float.MaxValue for a minimum). |
 | [`IRelation`](/en/docs/reference/irelation) | An element of a DynamicBuffer that links its entity to IRelation.Target: an entity holds any number of links of one kind (the members of a party, the items a merchant offers, the units a buff applies to), and World.Relations finds the entities linking to a target. |
@@ -139,13 +136,14 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`ITile<TKey>`](/en/docs/reference/itile) | A component that makes its entity a tile of a grid, found by its key (an indexed component, IIndexed): record struct Chunk(ChunkPos Pos) : IComponent, ITile&lt;ChunkPos&gt; with its shape (ITileShape) and the key of each neighbor (ITile.Beside). |
 | [`ITileShape`](/en/docs/reference/itileshape) | The shape of a tile, on the component that makes an entity a tile of a grid (ITile): the entity's cells, ITileShape.Width × ITileShape.Depth × ITileShape.Height of them, are in its DynamicBuffer&lt;TCell&gt; in rows of ITileShape.Width (x), ITileShape.Depth rows (z) per layer and ITileShape.Height layers (y): cell (x, y, z) at (y \* Depth + z) \* Width + x. |
 | [`ITracked`](/en/docs/reference/itracked) | Marks a component whose changes are tracked: every row records the world's World.ChangeTick of its last write, and [Changed&lt;T&gt;] / QueryFilter.Changed&lt;T&gt;(since) select the rows written since a system last ran. |
-| [`IUniqueIndexed, IUniqueIndexed<TKey>`](/en/docs/reference/iuniqueindexed) | What every IUniqueIndexed is, so a component type is known to be unique without reflection (a type test the JIT folds). |
+| [`IUniqueIndexed<TKey>`](/en/docs/reference/iuniqueindexed) | An IIndexed component whose key names one entity: a player's account id, a session token, the occupant of a grid cell. |
 
 ## Enums
 
 | Type | Summary |
 |---|---|
 | [`FloatMode`](/en/docs/reference/floatmode) | What a vector loop of a ForEachAttribute method may change in floating-point results. |
+| [`FusionMode`](/en/docs/reference/fusionmode) | Whether a ForEachAttribute method shares one walk with its neighbors in its system (ForEachAttribute.FusionMode). |
 | [`SimdMode`](/en/docs/reference/simdmode) | Whether a ForEachAttribute method runs as a vector loop (ForEachAttribute.SimdMode). |
 | [`SystemErrorPolicy`](/en/docs/reference/systemerrorpolicy) | What an exception thrown by a system does (WorldOptions.SystemErrors). |
 | [`TargetPolicy`](/en/docs/reference/targetpolicy) | What happens to the links to an entity when it is destroyed (TargetPolicyExtensions.WhenTargetDestroyed, RelationIndex.WhenTargetDestroyed). |

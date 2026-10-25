@@ -9,7 +9,7 @@ public struct Felled : IComponent;
 public struct Shoved : IComponent;
 public record struct Daze(int Ticks) : IComponent;
 public record struct Aegis(int Layers) : IComponent;
-public partial record struct Banner([IndexKey] int Team) : IComponent;
+public partial record struct Banner([LookupKey] int Team) : IComponent;
 public partial record struct Crest([UniqueKey] int Id) : IComponent;
 public record struct Remains(int Slot) : ICleanupComponent;
 public record struct Fallen(EntityId Who);

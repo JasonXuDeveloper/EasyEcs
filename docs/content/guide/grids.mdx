@@ -35,14 +35,14 @@ in parallel, and quiet tiles can sleep.
 ### Declare the tile: its shape and its key [#declare]
 
 A tile is a component that implements `ITile<TKey>`: its shape as static members (`ITileShape`), its key (the tile's
-position, indexed so neighbors are found), and `Beside`, the key of the tile across a face. `[IndexKey]` on the
+position, indexed so neighbors are found), and `Beside`, the key of the tile across a face. `[LookupKey]` on the
 position writes the key; the shape is constants, so the JIT folds every size and stride.
 
 ```csharp
 public record struct PlatePos(int X, int Z);
 
 // A plate of 16 x 16 temperatures, found by its position; its neighbors are the plates beside it.
-public partial record struct HeatPlate([IndexKey] PlatePos Pos) : IComponent, ITile<PlatePos>
+public partial record struct HeatPlate([LookupKey] PlatePos Pos) : IComponent, ITile<PlatePos>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
@@ -267,7 +267,7 @@ public record struct CubePos(int X, int Y, int Z);
 
 // A cube of 16 x 16 x 16 gas cells, with a neighbor on each of its six faces.
 // Mirror: no gas flows through the edge of the world.
-public partial record struct GasCube([IndexKey] CubePos Pos) : IComponent, ITile<CubePos>
+public partial record struct GasCube([LookupKey] CubePos Pos) : IComponent, ITile<CubePos>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
@@ -348,7 +348,7 @@ sizes:
 
 ```csharp
 // The Game of Life on plates of 16 x 16 byte cells: nine points, so the corners too.
-public partial record struct LifePlate([IndexKey] PlatePos Pos) : IComponent, ITile<PlatePos>
+public partial record struct LifePlate([LookupKey] PlatePos Pos) : IComponent, ITile<PlatePos>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
@@ -528,7 +528,7 @@ public record struct PlatePos(int X, int Z);
 
 // A plate of 16 x 16 cells: the tile's shape, its key, and the key beside it across each face.
 // The Game of Life counts the eight cells around, so the plates across the corners are read too.
-public partial record struct Plate([IndexKey] PlatePos Pos) : IComponent, ITile<PlatePos>
+public partial record struct Plate([LookupKey] PlatePos Pos) : IComponent, ITile<PlatePos>
 {
     public const int Size = 16;
 

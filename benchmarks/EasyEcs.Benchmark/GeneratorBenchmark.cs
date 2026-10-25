@@ -119,7 +119,7 @@ public class GeneratorBenchmark
             sb.Append(c switch
             {
                 0 => $"public struct Tag{m}_{c} : IComponent;\n",
-                1 => $"public partial record struct Score{m}_{c}([IndexKey] int Value) : IComponent;\n",
+                1 => $"public partial record struct Score{m}_{c}([LookupKey] int Value) : IComponent;\n",
                 2 or 3 => $"public record struct Tracked{m}_{c}(int V, float W) : IComponent, ITracked;\n",
                 _ => $"public struct Data{m}_{c} : IComponent {{ public int V; public float X, Y; }}\n",
             });

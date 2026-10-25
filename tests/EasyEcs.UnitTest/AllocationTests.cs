@@ -406,7 +406,7 @@ public class AllocationTests
     }
 
     [Test]
-    public void ReservingAPrefabCoversItsIndexKeysAndItsRetiredTable()
+    public void ReservingAPrefabCoversItsIndexedKeysAndItsRetiredTable()
     {
         // Each instance takes a key of its own in a value index and a unique index, and holds a cleanup component, so
         // its destruction moves it to the retired table: the reservation covers all of it, and the free ids.

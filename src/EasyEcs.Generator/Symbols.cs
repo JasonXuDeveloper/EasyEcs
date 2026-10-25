@@ -113,7 +113,7 @@ internal static class Symbols
     /// </summary>
     /// <summary>
     /// Whether the instance fields of <paramref name="type"/> come from more than one of its parts, so their order in
-    /// memory is not defined. A part without fields (a generated [IndexKey] or [Sum] part, a part of methods) does not
+    /// memory is not defined. A part without fields (a generated [LookupKey] or [Sum] part, a part of methods) does not
     /// count: the generator sees the type without the generated parts and the analyzer with them, and both must agree.
     /// </summary>
     public static bool FieldsInSeveralParts(INamedTypeSymbol type)
@@ -489,18 +489,18 @@ internal static class Symbols
     /// groups by (<c>IGroup</c>): written only with Set (and Link / Unlink), so its index or table follows.
     /// </summary>
     public static bool IsIndexed(ITypeSymbol type) =>
-        IndexKey(type, out _) != null || IsGrouped(type)
+        IndexedKey(type, out _) != null || IsGrouped(type)
         || type is INamedTypeSymbol { IsGenericType: true } buffer && Named(buffer.OriginalDefinition, "EasyEcs.DynamicBuffer<T>")
         && Implements(buffer.TypeArguments[0], "EasyEcs.IRelation");
 
     /// <summary>
     /// The key type of indexed component <paramref name="type"/>, or null: by the interfaces it implements
-    /// (<c>IUniqueIndexed&lt;TKey&gt;</c> first, then <c>IIndexed&lt;TKey&gt;</c>), else by its <c>[IndexKey]</c> /
+    /// (<c>IUniqueIndexed&lt;TKey&gt;</c> first, then <c>IIndexed&lt;TKey&gt;</c>), else by its <c>[LookupKey]</c> /
     /// <c>[UniqueKey]</c> when the generator writes that key (<see cref="Parts"/>). Every generator asks this, never the
     /// interfaces alone: the interface a generated part adds is not in another generator's compilation.
     /// <paramref name="unique"/>: the key is unique.
     /// </summary>
-    public static ITypeSymbol? IndexKey(ITypeSymbol type, out bool unique)
+    public static ITypeSymbol? IndexedKey(ITypeSymbol type, out bool unique)
     {
         if (InterfaceKey(type, out unique) is { } declared) return declared;
         if (type is not INamedTypeSymbol named || !Parts.Declares(named, Parts.Key) && !Parts.Declares(named, Parts.UniqueKey)) return null;
@@ -530,7 +530,7 @@ internal static class Symbols
 
     /// <summary>
     /// Whether the world groups tables by component <paramref name="type"/>: it implements <c>IGroup</c>, or the
-    /// generator writes its <c>[Group]</c> (see <see cref="IndexKey"/>).
+    /// generator writes its <c>[Group]</c> (see <see cref="IndexedKey"/>).
     /// </summary>
     public static bool IsGrouped(ITypeSymbol type) =>
         Implements(type, Group) || type is INamedTypeSymbol named && (Parts.Declares(named, Parts.Group) || Parts.Declares(named, Parts.GroupBy))
@@ -539,7 +539,7 @@ internal static class Symbols
     /// <summary>
     /// Why <paramref name="type"/> cannot take the world setup <paramref name="attribute"/> declares, or null: [GroupBy]
     /// on a grouped component (<see cref="IsGrouped"/>), [WhenTargetDestroyed] on a relation or a component indexed by
-    /// an <c>EntityId</c> (<see cref="IndexKey"/>), [NotSaved] on a component or a singleton. The generator registers only what this accepts; EECS068 reports the rest.
+    /// an <c>EntityId</c> (<see cref="IndexedKey"/>), [NotSaved] on a component or a singleton. The generator registers only what this accepts; EECS068 reports the rest.
     /// </summary>
     public static string? SetupProblem(INamedTypeSymbol type, AttributeData attribute)
     {
@@ -550,7 +550,7 @@ internal static class Symbols
             return Implements(type, Component) && IsGrouped(type) ? null
                 : "is not a grouped component: [GroupBy] splits tables by the member it marks (an int or an enum of int of a partial component) or by the Group of a hand-written IGroup";
         if (Implements(type, Relation)) return null;
-        return Implements(type, Component) && IndexKey(type, out bool unique) is { } key && Named(key, EntityId) && !unique ? null
+        return Implements(type, Component) && IndexedKey(type, out bool unique) is { } key && Named(key, EntityId) && !unique ? null
             : "is neither a relation (IRelation) nor a component indexed by an EntityId: [WhenTargetDestroyed] decides what happens to links to a destroyed entity";
     }
 
@@ -1292,7 +1292,7 @@ internal static class Symbols
     /// </summary>
     public static ITypeSymbol? LookupKey(IParameterSymbol lookup, IMethodSymbol method, MethodDeclarationSyntax? syntax)
     {
-        if (LookupElement(lookup.Type) is not INamedTypeSymbol component || IndexKey(component, out bool unique) is not { } key) return null;
+        if (LookupElement(lookup.Type) is not INamedTypeSymbol component || IndexedKey(component, out bool unique) is not { } key) return null;
         if (unique) return key;
         var body = (SyntaxNode?)syntax?.Body ?? syntax?.ExpressionBody;
         bool byKey = body != null && body.DescendantNodes().OfType<InvocationExpressionSyntax>().Any(call =>

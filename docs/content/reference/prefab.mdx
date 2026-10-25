@@ -130,6 +130,6 @@ Give the recipe a column for `T` without the component: instances lack it, but t
 public Prefab SetBuffer<T>(params ReadOnlySpan<T> elements) where T : struct;
 ```
 
-Gives the prefab a [`DynamicBuffer`](/en/docs/reference/dynamicbuffer) of `elements`, replacing the one it has: every instance gets a list of its own with these elements. Returns the prefab. O(n).
+Gives the prefab a [`DynamicBuffer`](/en/docs/reference/dynamicbuffer) of `elements`, replacing the one it has: every instance shares this list until it writes its buffer, which first gives it a copy of its own. Returns the prefab. O(n).
 
 **Complexity** ([API table](/en/docs/api)): O(n)

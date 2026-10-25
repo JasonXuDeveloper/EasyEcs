@@ -23,7 +23,7 @@ public sealed partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor NotPartial = new("EECS062", "A type with generated members is not partial",
         "'{0}' has members the generator writes ({1}), so it and every type containing it must be partial: {2}",
         Category, DiagnosticSeverity.Error, true,
-        "An attribute such as [Sum], [IndexKey] or [Group] declares what the generator writes into the type itself: the " +
+        "An attribute such as [Sum], [LookupKey] or [Group] declares what the generator writes into the type itself: the " +
         "members of IReduction<T>, IIndexed<TKey> or IGroup, in a part of the type. A part can only be added to a partial " +
         "type, nested in partial types; a file type (file struct) cannot get one, since the part lives in another file.",
         helpLinkUri: Help("EECS062"));
@@ -63,7 +63,7 @@ public sealed partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor HandWrittenKey = new("EECS067", "An index key or a group an attribute can declare",
         "'{0}.{1}' returns {2}: declare it with [{3}] on {4}, and the generator writes {1}",
         Category, DiagnosticSeverity.Warning, true,
-        "A Key that returns a field, a property or the value itself is what [IndexKey] (and [UniqueKey] for a unique index) " +
+        "A Key that returns a field, a property or the value itself is what [LookupKey] (and [UniqueKey] for a unique index) " +
         "declares on that member, or on the type for the value itself, of a partial struct; a Group that returns an int " +
         "member, or an enum of int cast to int, is what [Group] declares on that member. The generator writes the " +
         "interface and its explicit member, which no ToString() prints and no caller reaches by mistake. A computed key " +
@@ -129,7 +129,7 @@ public sealed partial class EasyEcsAnalyzer
                     context.ReportDiagnostic(Diagnostic.Create(BadReductionField, where, problem.Where.Name, type.Name, problem.Text));
                     break;
                 case Parts.Rule.BadKey or Parts.Rule.BadGroup:
-                    context.ReportDiagnostic(Diagnostic.Create(BadIndexKey, where, type.Name, problem.Text));
+                    context.ReportDiagnostic(Diagnostic.Create(BadIndexedKey, where, type.Name, problem.Text));
                     break;
             }
         }
@@ -141,7 +141,7 @@ public sealed partial class EasyEcsAnalyzer
     /// <summary>
     /// EECS067: a struct indexed by one key whose hand-written Key returns one of its own members or <c>this</c>, of
     /// exactly the key's type, or a grouped struct whose hand-written Group returns an <c>int</c> member or an enum of
-    /// <c>int</c> cast to <c>int</c>: what <see cref="Parts"/> accepts for <c>[IndexKey]</c> / <c>[UniqueKey]</c> and
+    /// <c>int</c> cast to <c>int</c>: what <see cref="Parts"/> accepts for <c>[LookupKey]</c> / <c>[UniqueKey]</c> and
     /// <c>[Group]</c>. Not for a file type (no part can be added), nor the public self key of a record EECS043 reports.
     /// </summary>
     private static void AnalyzeHandWrittenKey(SymbolAnalysisContext context, INamedTypeSymbol type)
@@ -158,7 +158,7 @@ public sealed partial class EasyEcsAnalyzer
             if (member == "this" ? SymbolEqualityComparer.Default.Equals(key, type)
                 : Parts.Members(type).FirstOrDefault(m => m.Name == member) is { } target
                   && SymbolEqualityComparer.Default.Equals(target.Type, key) && !SymbolEqualityComparer.Default.Equals(target.Where, property))
-                Report(unique ? "UniqueKey" : "IndexKey", "Key", syntax, member);
+                Report(unique ? "UniqueKey" : "LookupKey", "Key", syntax, member);
         }
 
         if (!Parts.Declares(type, Parts.Group)
@@ -279,7 +279,7 @@ public sealed partial class EasyEcsAnalyzer
     private static string What(Parts parts) => string.Join(", ", new[]
     {
         parts.Fields.Count > 0 || parts.Reduces ? "IReduction<T> from its field attributes" : null,
-        parts.KeyOf != null ? $"the Key of [{(parts.KeyOf.Unique ? "UniqueKey" : "IndexKey")}]" : null,
+        parts.KeyOf != null ? $"the Key of [{(parts.KeyOf.Unique ? "UniqueKey" : "LookupKey")}]" : null,
         parts.GroupOf != null ? "the Group of [Group]" : null,
     }.Where(w => w != null));
 

@@ -271,7 +271,7 @@ foreach (var item in world.Query<Position, Velocity>())
 
 不必。生成器把每个系统的 job 写进单独的 `file` 类，通过 `[UnsafeAccessor]` 调用你的 `[ForEach]` 方法和钩子（私有的也行），编译出来就是直接调用
 （[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。系统就是普通的 `[EcsSystem] ref struct`，生成的成员也不会和你的成员冲突。
-写了 `partial` 照样能编译。用特性声明成员的组件或单例（`[Sum]`、`[IndexKey]`、`[Group]`）连同外层类型都要是 `partial`：生成器把这些成员写进类型本身
+写了 `partial` 照样能编译。用特性声明成员的组件或单例（`[Sum]`、`[LookupKey]`、`[Group]`）连同外层类型都要是 `partial`：生成器把这些成员写进类型本身
 （[EECS062](/zh/docs/guide/analyzer#eecs062)）。
 
 ## 为什么 IDE 说 `[ForEach]` 方法从没被使用？ [#never-used]

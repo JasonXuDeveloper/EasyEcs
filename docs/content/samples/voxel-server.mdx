@@ -400,7 +400,7 @@ positions are `Vector3`s, three floats next to each other, not three columns.
 
 ## A scoreboard that stays sorted [#leaderboard]
 
-`Score` is the blocks a player dug, with an `[IndexKey]`, so `world.ScoreIndex` is an
+`Score` is the blocks a player dug, with an `[LookupKey]`, so `world.ScoreIndex` is an
 [ordered index](/en/docs/guide/indexes-and-relations#ordered-index) of the players by score. Its key is comparable, so
 the index walks in order: `Descending()` starts at the best digger. The index is kept sorted as `DigSystem` writes
 the scores, so the top of the board is a walk of three entries, never a sort of every player.

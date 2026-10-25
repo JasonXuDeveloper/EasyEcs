@@ -46,5 +46,5 @@ public partial class HierarchyBenchmark
         return destroyed + _world.DestroyAll<Energy>();
     }
 
-    public partial record struct Leader([IndexKey] EntityId Target) : IComponent;
+    public partial record struct Leader([LookupKey] EntityId Target) : IComponent;
 }

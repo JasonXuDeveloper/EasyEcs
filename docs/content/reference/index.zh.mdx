@@ -19,22 +19,19 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`ChildOfEcsPrefabExtensions`](/zh/docs/reference/childofecsprefabextensions) | ChildOf 在 Prefab 上的具名成员（生成）。 |
 | [`ConsumeAttribute`](/zh/docs/reference/consumeattribute) | ForEachAttribute 方法消费它访问的行：遍历结束时，销毁访问过的实体，用于只处理一次的事件和命令实体。 |
 | [`DynamicBufferExtensions`](/zh/docs/reference/dynamicbufferextensions) | DynamicBuffer 的写入方法。 |
-| [`EcsSystemAttribute`](/zh/docs/reference/ecssystemattribute) | 声明一个系统：一个 ref struct，它的静态方法就是在 World 上运行的逻辑。 |
+| [`EcsSystemAttribute`](/zh/docs/reference/ecssystemattribute) | Declares a system: a ref struct whose static methods are the logic that runs on a world. |
 | [`EntityRandomEcsExtensions`](/zh/docs/reference/entityrandomecsextensions) | EntityRandom 的具名成员（生成）。 |
-| [`ForEachAttribute`](/zh/docs/reference/foreachattribute) | 对每个匹配组件参数（以及 WithAttribute / WithoutAttribute / WithAnyAttribute 过滤条件）的实体，执行 [[EcsSystem]](/zh/docs/reference/ecssystemattribute) 的一个静态方法（或者通过生成的入口点，执行任何其他类型的静态方法）。 |
-| [`ForEntityAttribute`](/zh/docs/reference/forentityattribute) | 在单个实体上运行的静态方法：生成器写一个入口，它是方法所在类型的静态成员，和方法同名，接收实体（带 [Changed&lt;T&gt;] / [Removed&lt;T&gt;] 时接着是 tick，然后是方法的其他值），返回方法有没有运行。 |
-| [`GroupAttribute`](/zh/docs/reference/groupattribute) | World 按哪个成员把组件的表分组（IGroup）：int，或底层类型为 int 的枚举。 |
-| [`GroupByAttribute`](/zh/docs/reference/groupbyattribute) | 每个 World 都按这个 IGroup 组件给表分组（World.GroupBy），从它第一张含这个组件的表开始：分组过滤条件（QueryFilter.InGroup）在每个 World 里都只访问这一组的表，不用记着调用设置方法。 |
+| [`ForEachAttribute`](/zh/docs/reference/foreachattribute) | Runs a static method of an [[EcsSystem]](/zh/docs/reference/ecssystemattribute) (or of any other type, through a generated entry point) for every entity matching its component parameters (and the WithAttribute / WithoutAttribute / [WithAny&lt;T1, T2&gt;] filters), each update, after its OnUpdate method, in declaration order. |
+| [`ForEntityAttribute`](/zh/docs/reference/forentityattribute) | A static method that runs on one entity: the generator writes an entry point, a static member of the method's type named like the method, which takes the entity (then the tick with [Changed&lt;T&gt;] / [Removed&lt;T&gt;], then the method's other values) and returns whether the method ran. |
+| [`GroupAttribute`](/zh/docs/reference/groupattribute) | The member a world groups the component's tables by (IGroup): an int or an enum of int. |
+| [`GroupByAttribute`](/zh/docs/reference/groupbyattribute) | [[Group]](/zh/docs/reference/groupattribute), and every world groups the component's tables by this member (World.GroupBy) from its first table holding it: a group filter (QueryFilter.InGroup) then visits that group's tables only, in every world, with no setup call to forget. |
 | [`GroupInfo`](/zh/docs/reference/groupinfo) | 一个分组的系统，按阶段排列（ScheduleInfo）。 |
-| [`IndexKeyAttribute`](/zh/docs/reference/indexkeyattribute) | World 为组件建索引用的键（IIndexed）：标在字段、属性或 record 的位置参数上，键就是这个成员（public partial struct Owner : IComponent \{ [IndexKey] public EntityId Of; \}）；标在 struct 本身上，键是整个值。 |
 | [`Lanes`](/zh/docs/reference/lanes) | 批处理方法的流压缩，在 CPU 上做 GPU 的 ballot 和压缩：一次向量比较得出通道掩码（Vector256.LessThan(hp, limit).ExtractMostSignificantBits()：CUDA 的 __ballot_sync；它的 __popc 是 PopCount），Lanes.Compact 把选中的元素紧挨着写出：批处理方法选中的行的 id（entities.Ids）、它们的值、它们的下标。 |
 | [`LookupExtensions`](/zh/docs/reference/lookupextensions) | 通过 Lookup 按键查找带索引的组件（IIndexed）。 |
+| [`LookupKeyAttribute`](/zh/docs/reference/lookupkeyattribute) | 按它查找实体的键：World 用它给组件建索引（IIndexed），一个键可以对应多个实体（只对应一个时用 UniqueKeyAttribute）。 |
 | [`MaxAttribute`](/zh/docs/reference/maxattribute) | 归约中保留较大值的字段：Identity 是类型的 MinValue（float 和 double 是 -∞），Combine 是 Math.Max(left, right)。 |
 | [`MinAttribute`](/zh/docs/reference/minattribute) | 归约中保留较小值的字段：Identity 是类型的 MaxValue（float 和 double 是 +∞），Combine 是 Math.Min(left, right)。 |
 | [`NotSavedAttribute`](/zh/docs/reference/notsavedattribute) | 不进任何存档的组件或单例：重启时会重建的运行时状态（连接、缓存、服务句柄）。 |
-| [`OnCreateAttribute`](/zh/docs/reference/oncreateattribute) | [[EcsSystem]](/zh/docs/reference/ecssystemattribute) 的一个静态方法，系统加进 World 时调用一次。 |
-| [`OnDestroyAttribute`](/zh/docs/reference/ondestroyattribute) | [[EcsSystem]](/zh/docs/reference/ecssystemattribute) 的一个静态方法，系统被移除或 World 释放时调用一次。 |
-| [`OnUpdateAttribute`](/zh/docs/reference/onupdateattribute) | [[EcsSystem]](/zh/docs/reference/ecssystemattribute) 的一个静态方法，系统每次运行时在它的 [ForEach] 方法之前调用。 |
 | [`OrderedIndexExtensions`](/zh/docs/reference/orderedindexextensions) | 键可比较（分数、截止时间、等级）的值索引的有序遍历：按区间或按顺序遍历，用于排行榜、计时器和匹配分段。 |
 | [`Prefab`](/zh/docs/reference/prefab) | 实体的配方：一组不属于任何 World 的组件值，所以任何查询都看不到它。 |
 | [`PrefabAttribute`](/zh/docs/reference/prefabattribute) | 把一个 Prefab 声明为它的实体开始时拥有的组件：一个 partial struct，每个组件一个字段，字段初始化器就是默认值：[Prefab] public partial struct Goblin \{ public Health Health = new(30); public Position Position; \}。 |
@@ -47,19 +44,19 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`StageInfo`](/zh/docs/reference/stageinfo) | 分组里的一个阶段：彼此之间没有先后约束、也没有冲突的系统。 |
 | [`StageWait`](/zh/docs/reference/stagewait) | 后面的系统要等待的一个系统（SystemInfo.After）。 |
 | [`SumAttribute`](/zh/docs/reference/sumattribute) | 归约（IReduction）中按加法合并的字段：Identity 是 0，Combine 是 left + right。 |
-| [`SystemInfo`](/zh/docs/reference/systeminfo) | 调度里的一个系统，以及它声明的数据（SystemAccess）。 |
+| [`SystemInfo`](/zh/docs/reference/systeminfo) | A system of a schedule and the data it declares (SystemAccess). |
 | [`SystemPair`](/zh/docs/reference/systempair) | 两个冲突的系统，按执行顺序排列，只靠注册顺序排先后（GroupInfo.RegistrationOrdered）。 |
 | [`TargetPolicyExtensions`](/zh/docs/reference/targetpolicyextensions) | 指向实体的组件（键是 EntityId 的 IIndexed）的目标策略。 |
 | [`UniqueIndexExtensions`](/zh/docs/reference/uniqueindexextensions) | 唯一索引（IUniqueIndexed）的查找：一个键对应的那一个实体。 |
-| [`UniqueKeyAttribute`](/zh/docs/reference/uniquekeyattribute) | 一个键只对应一个实体时用的 IndexKeyAttribute（IUniqueIndexed）：生成器加上 IUniqueIndexed&lt;TKey&gt; 和显式的 Key。 |
+| [`UniqueKeyAttribute`](/zh/docs/reference/uniquekeyattribute) | 一个键只对应一个实体时用的 LookupKeyAttribute（IUniqueIndexed）：生成器加上 IUniqueIndexed&lt;TKey&gt; 和显式的 Key。 |
 | [`UpdateAfterAttribute<TSystem>`](/zh/docs/reference/updateafterattribute) | 让这个系统排在同一分组里的 TSystem 之后运行：见 UpdateBeforeAttribute。 |
 | [`UpdateBeforeAttribute<TSystem>`](/zh/docs/reference/updatebeforeattribute) | 让这个系统排在同一分组里的 TSystem（一个 [[EcsSystem]](/zh/docs/reference/ecssystemattribute)，EECS077）之前运行，不管它们的注册顺序。 |
 | [`UpdateInGroupAttribute<TGroup>`](/zh/docs/reference/updateingroupattribute) | 把系统放进分组 TGroup。 |
 | [`UpdateIntervalAttribute`](/zh/docs/reference/updateintervalattribute) | 系统只在所属分组每第 interval 次更新时运行：更新计数（World.DefaultUpdateCount、World.UpdateCount）对间隔取模等于 UpdateIntervalAttribute.Phase 的那几次。 |
-| [`ValueIndex<T, TKey>`](/zh/docs/reference/valueindex) | 一个 World 里组件 T 的值索引（World.Index）。 |
+| [`ValueIndex<T, TKey>`](/zh/docs/reference/valueindex) | The value index of component T in one world (World.Index). |
 | [`ViewAttribute`](/zh/docs/reference/viewattribute) | 一个实体若干组件的视图：一个 ref struct，实例字段是组件的 ref（写）、ref readonly（读）或 Mut\{T\}（写，只在写过的地方打 tick）字段，public 或 internal，再加上使用这些字段的业务方法：[View] public ref struct Fighter \{ public ref Health Health; public ref readonly Armor Armor; public void TakeDamage(int n) =&gt; Health.Value -= Math.Max(0, n - Armor.Value); \}。 |
 | [`WhenTargetDestroyedAttribute`](/zh/docs/reference/whentargetdestroyedattribute) | 在每个 World 里，销毁一个实体时指向它的链接怎么处理（TargetPolicy）：用在关系（IRelation）或以 EntityId 为键建索引的组件上。 |
-| [`WithAnyAttribute<T>`](/zh/docs/reference/withanyattribute) | ForEachAttribute 方法要求实体至少拥有它的 [WithAny&lt;T&gt;] 特性列出的组件之一（不传入方法）：[ForEach, WithAny&lt;Burning&gt;, WithAny&lt;Poisoned&gt;]。 |
+| [`WithAnyAttribute<T1..T9>`](/zh/docs/reference/withanyattribute) | The ForEachAttribute method requires at least one of T1, T2 (not passed in): [ForEach, WithAny&lt;Burning, Poisoned&gt;], QueryFilter.WithAny. |
 | [`WithAttribute<T>`](/zh/docs/reference/withattribute) | ForEachAttribute 方法还要求实体有组件 T（不传入方法）。 |
 | [`WithoutAttribute<T>`](/zh/docs/reference/withoutattribute) | ForEachAttribute 方法跳过拥有组件 T 的实体。 |
 | [`World`](/zh/docs/reference/world) | 一个 ECS World：装着实体、实体的组件、单例，以及更新它们的系统。 |
@@ -75,15 +72,15 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`ComponentSet`](/zh/docs/reference/componentset) | 一组组件和单例类型，建一次就一直留着（放在 static readonly 字段里）：存档要写的组件（World.SaveEntitiesWith），也就是只记录需要持久化的数据、不带周围运行时状态的那份记录；或者在重启时，整个 World 的存档要排除的类型（World.SaveWithout）和加载时要保留的单例（World.LoadKeeping）。 |
 | [`ComponentValue`](/zh/docs/reference/componentvalue) | 实体的一个组件，即 Entity.Describe 读到的结果：它的值的装箱副本。 |
 | [`Disabled<T>`](/zh/docs/reference/disabled) | T 处于禁用状态（Entity.Disable）的实体带的标签：实体保留 T 的值，但在 Entity.Enable 还回来之前，查询、Has 和 Get 都当它不存在。 |
-| [`DynamicBuffer<T>`](/zh/docs/reference/dynamicbuffer) | 每个实体一个 T 列表，作为组件存放：背包、路径、这个 tick 的命中记录。 |
+| [`DynamicBuffer<T>`](/zh/docs/reference/dynamicbuffer) | A list of T per entity, held as a component: an inventory, a path, the hits of this tick. |
 | [`Emit<T>`](/zh/docs/reference/emit) | 一次 [ForEach] 遍历追加记录的目标（Unity 的 NativeStream，GPU 的流压缩），按值传入：static void Strike(in Attack attack, in Target target, Emit&lt;Hit&gt; hits) =&gt; hits.Add(new Hit(target.Id, attack.Power));。 |
 | [`Emitted<T>`](/zh/docs/reference/emitted) | 带 Emit 参数的遍历追加的记录，每次遍历内按行的顺序，遍历之间按运行的顺序：一个单例，由第一次产出记录的遍历添加。 |
 | [`Entity`](/zh/docs/reference/entity) | 实体的句柄：id + 版本号 + World（16 字节）。 |
 | [`EntityId`](/zh/docs/reference/entityid) | 实体的身份：下标，加上这个下标的版本号（8 字节，非托管）。 |
-| [`EntityRandom`](/zh/docs/reference/entityrandom) | [ForEach] 方法（包括并行方法）用的确定性随机数（cuRAND 的 Philox，一种基于计数器的生成器）：每个数都是种子、实体、tick 和流的纯函数，没有要推进的状态，所以每次运行、任何线程数、行以任何顺序运行，结果都一样。 |
+| [`EntityRandom`](/zh/docs/reference/entityrandom) | Deterministic random numbers for [ForEach] methods, parallel ones included (cuRAND's Philox, a counter-based generator): each number is a pure function of a seed, an entity, a tick and a stream, with no state to advance, so it is the same on every run, for any thread count and any order the rows run in. |
 | [`EntitySpan`](/zh/docs/reference/entityspan) | 批处理 job 里一段行对应的实体：第 i 个元素，就是这段行各个 span 第 i 个元素所属的实体。 |
 | [`Lookup<T>`](/zh/docs/reference/lookup) | 从 [ForEach] 方法只读访问任意实体的组件 T（MPI 的单边 Get，Unity 的 ComponentLookup）：static void Chase(ref Velocity v, in Target target, Lookup&lt;Position&gt; positions) 用 positions[target.Id] 读目标的位置。 |
-| [`Maybe<T>`](/zh/docs/reference/maybe) | [ForEach] 方法所访问实体的一个可选组件：static void Regen(ref Health h, Maybe&lt;Buff&gt; buff) 访问所有带 Health 的实体，Maybe.HasValue 告诉你当前这个实体有没有 Buff。 |
+| [`Maybe<T>`](/zh/docs/reference/maybe) | An optional component of the entity a [ForEach] method visits: static void Regen(ref Health h, Maybe&lt;Buff&gt; buff) visits every entity with Health, and Maybe.HasValue tells whether this one also has a Buff. |
 | [`Mut<T>`](/zh/docs/reference/mut) | [ForEach] 方法所访问实体的一个组件，只有方法真的写了它才算写入：static void Aim(Mut&lt;Target&gt; target, in Position p) =&gt; target.SetIfChanged(new Target(Nearest(p)))。 |
 | [`PaddedTile<TCell, TTile>`](/zh/docs/reference/paddedtile) | 带着 halo 拷入的分块各层（Tile.Pad）：模板采样的纹理。 |
 | [`QueryEnumerator<T1..T9>`](/zh/docs/reference/queryenumerator) | 零分配的查询枚举器；遍历途中做结构变更也安全（访问规则和 ForEach 相同）。 |
@@ -91,17 +88,17 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`QueryItem<T1..T9>`](/zh/docs/reference/queryitem) | 一条查询结果：实体，以及指向它所在行的 ref。 |
 | [`ReadEnumerator<T1..T9>`](/zh/docs/reference/readenumerator) | 零分配的只读查询枚举器；遍历途中做结构变更也安全（访问规则和 ForEach 相同）。 |
 | [`ReadItem<T1..T9>`](/zh/docs/reference/readitem) | 一条只读的查询结果：实体，以及指向它所在行的只读引用（不打 tick）。 |
-| [`ReadOnlyMaybe<T>`](/zh/docs/reference/readonlymaybe) | [ForEach] 方法访问的实体上一个可选、只读的组件：ReadOnlyMaybe.Value 是 ref readonly，所以方法按 T 的读者调度，被追踪的组件永远不打 tick；带索引的组件（IIndexed）也能这样接收，Maybe 不行（EECS015：它的 ref 可能背着索引改掉键）。 |
+| [`ReadOnlyMaybe<T>`](/zh/docs/reference/readonlymaybe) | An optional component of the entity a [ForEach] method visits, read-only (as in beside ref): ReadOnlyMaybe.Value is a ref readonly, so the method is scheduled as a reader of T, a tracked component is never stamped, and an indexed one (IIndexed) may be taken, which a Maybe may not (EECS015: its ref could change the key behind the index's back). |
 | [`Reduce<T>`](/zh/docs/reference/reduce) | 把一次 [ForEach] 遍历归约到单例 T（OpenMP 的 reduction，MPI 的 Allreduce），按 ref 传入：static void Count(in Health h, ref Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;。 |
 | [`RelationIndex<T>.Sources`](/zh/docs/reference/relationindex-sources) | 枚举链接到某个目标的实体（foreach），每条链接一次。 |
 | [`Retired`](/zh/docs/reference/retired) | 退休实体的标签：Destroy 发现实体上有 ICleanupComponent，于是去掉其他组件，让实体继续存活，直到最后一个清理组件被移除（那时实体被释放，才算销毁）。 |
 | [`Scratch<T>`](/zh/docs/reference/scratch) | [ForEach] 方法在运行它的线程上的工作内存（OpenMP 的 threadprivate）：邻居列表、寻路的开放集、要填充的缓冲区。 |
 | [`SingletonRef<T>`](/zh/docs/reference/singletonref) | 某个 World 的单例 T 的句柄。 |
-| [`SystemAccess`](/zh/docs/reference/systemaccess) | 系统读写的数据，添加系统时声明一次。 |
-| [`SystemHandle`](/zh/docs/reference/systemhandle) | 加进 World 的一个系统（World.AddSystem、World.System、World.Systems）：指向 World 里这个系统记录的小句柄，就像 Entity 指向它的行。 |
+| [`SystemAccess`](/zh/docs/reference/systemaccess) | The data a system reads and writes, declared once when the system is added. |
+| [`SystemHandle`](/zh/docs/reference/systemhandle) | A system added to a world (World.AddSystem, World.System, World.Systems): a small handle over the world's record of it, as an Entity is over its row. |
 | [`SystemList`](/zh/docs/reference/systemlist) | World 的系统，所有分组按执行顺序排列（默认分组在前）：用 foreach 遍历，或者读 SystemList.Count。 |
 | [`SystemList.Enumerator`](/zh/docs/reference/systemlist-enumerator) | 依次遍历各个分组，以及每个分组里的系统。 |
-| [`SystemStats`](/zh/docs/reference/systemstats) | 系统运行了多少次、花了多长时间（WorldOptions.MeasureSystems）：每次运行包括 [[OnUpdate]](/zh/docs/reference/onupdateattribute) 方法和它的 [ForEach] 方法，并记下分配的字节数和 [ForEach] 方法访问的实体数。 |
+| [`SystemStats`](/zh/docs/reference/systemstats) | How often and how long a system ran (WorldOptions.MeasureSystems): its OnUpdate method plus its [ForEach] methods, per run, with the bytes it allocated and the entities its [ForEach] methods visited. |
 | [`TableInfo`](/zh/docs/reference/tableinfo) | 一张表：拥有同一组组件列的实体（World.DescribeTables）。 |
 | [`Tile<TCell, TTile>`](/zh/docs/reference/tile) | 一个分块（由 TTile 变成分块的实体，ITile）的格子，连同邻居的格子：一个 [ForEach] 参数，就像 CUDA 线程块的分块和它的 apron，或 MPI 进程的子区域和它的 ghost 格子。 |
 | [`TileCursor<TCell, TTile>`](/zh/docs/reference/tilecursor) | 带边分块在一行第一个格子处的位置（PaddedTile.At）：它周围的格子，一次一个或一个向量。 |
@@ -128,24 +125,25 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`IForRange`](/zh/docs/reference/iforrange) | 一段下标上的 job，由 World.ForParallel 分块运行（Kokkos 的 RangePolicy，Unity 的 IJobParallelForBatch）：每次调用拿到一个块。 |
 | [`IForSpan<T>`](/zh/docs/reference/iforspan) | 一个列表的元素上的 job，由 World.ForParallel 分块运行：每次调用拿到一个块的元素，可写。 |
 | [`IGroup`](/zh/docs/reference/igroup) | 标记一个按值拆分表的组件：在调用过 World.GroupBy 的 World 里，IGroup.Group 不同的实体放在不同的表，所以只查询一组（QueryFilter.InGroup）时只遍历这一组的行，这些行在内存里是连续的（一个区域、一张地图、一场对局、一支队伍）。 |
-| [`IIndexed, IIndexed<TKey>`](/zh/docs/reference/iindexed) | 所有 IIndexed 共同实现的接口：不用反射，就能知道一个组件类型建了索引（JIT 会把这个类型检测折叠掉）。 |
+| [`IIndexed<TKey>`](/zh/docs/reference/iindexed) | A component whose IIndexed.Key the world indexes: world.Index&lt;T, TKey&gt;().Find(key) enumerates the entities whose TKey equals a value (an item's owner, a player's name, a cell of a grid). |
 | [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) | 标记一个不做结构变更的 ForEach job：不在它遍历的 World 里创建或销毁实体，也不增删、设置任何组件。 |
 | [`IReduction<T>`](/zh/docs/reference/ireduction) | T 的值怎样合并：满足结合律的 IReduction.Combine，以及它的 IReduction.Identity，和任何值合并都不改变那个值（求和是 0，求最小值是 float.MaxValue）。 |
 | [`IRelation`](/zh/docs/reference/irelation) | DynamicBuffer 的元素，把所在实体链接到 IRelation.Target：一个实体可以有任意多条同一种链接（队伍的成员、商人卖的物品、一个 buff 作用的单位），World.Relations 能找出链接到某个目标的实体。 |
 | [`ISingletonComponent`](/zh/docs/reference/isingletoncomponent) | 把结构体标记为 World 单例：每个 World 恰好有一个值（时钟、配置、共享状态）。 |
-| [`ISystemGroup`](/zh/docs/reference/isystemgroup) | 系统分组的标记：标了 UpdateInGroupAttribute 的系统在调用 World.Update 时一起运行，和 World.Update 运行的默认分组互不相干。 |
+| [`ISystemGroup`](/zh/docs/reference/isystemgroup) | Marker of a system group: systems marked UpdateInGroupAttribute run together when World.Update is called, independently of the default group run by World.Update. |
 | [`ISystemGroupWith<T>`](/zh/docs/reference/isystemgroupwith) | 系统分组：其中的 [ForEach] 方法只访问有 T 的实体，效果和在分组上写 WithAttribute 一样。 |
 | [`ISystemGroupWithout<T>`](/zh/docs/reference/isystemgroupwithout) | 系统分组：其中的 [ForEach] 方法跳过有 T 的实体，效果和在分组上写 WithoutAttribute 一样（见 ISystemGroupWith）。 |
 | [`ITile<TKey>`](/zh/docs/reference/itile) | 让实体成为网格中一个分块的组件，按键查找（带索引的组件，IIndexed）：record struct Chunk(ChunkPos Pos) : IComponent, ITile&lt;ChunkPos&gt;，带着形状（ITileShape）和每个邻居的键（ITile.Beside）。 |
 | [`ITileShape`](/zh/docs/reference/itileshape) | 分块的形状，写在让实体成为网格分块的组件上（ITile）：实体的格子共 ITileShape.Width × ITileShape.Depth × ITileShape.Height 个，存在它的 DynamicBuffer&lt;TCell&gt; 里：每行 ITileShape.Width 个（x），每层 ITileShape.Depth 行（z），共 ITileShape.Height 层（y）：格子 (x, y, z) 在 (y \* Depth + z) \* Width + x。 |
 | [`ITracked`](/zh/docs/reference/itracked) | 标记一个追踪变更的组件：每一行都记下最后一次写入时 World 的 World.ChangeTick，[Changed&lt;T&gt;] / QueryFilter.Changed&lt;T&gt;(since) 选出系统上次运行以来写过的行。 |
-| [`IUniqueIndexed, IUniqueIndexed<TKey>`](/zh/docs/reference/iuniqueindexed) | 所有 IUniqueIndexed 共同的标记，不用反射就能知道一个组件类型是唯一的（JIT 会折叠掉的类型测试）。 |
+| [`IUniqueIndexed<TKey>`](/zh/docs/reference/iuniqueindexed) | An IIndexed component whose key names one entity: a player's account id, a session token, the occupant of a grid cell. |
 
 ## 枚举 [#enums]
 
 | 类型 | 说明 |
 |---|---|
 | [`FloatMode`](/zh/docs/reference/floatmode) | ForEachAttribute 方法的向量循环可以改变哪些浮点结果。 |
+| [`FusionMode`](/zh/docs/reference/fusionmode) | Whether a ForEachAttribute method shares one walk with its neighbors in its system (ForEachAttribute.FusionMode). |
 | [`SimdMode`](/zh/docs/reference/simdmode) | ForEachAttribute 方法是否以向量循环运行（ForEachAttribute.SimdMode）。 |
 | [`SystemErrorPolicy`](/zh/docs/reference/systemerrorpolicy) | 系统抛出异常时怎么处理（WorldOptions.SystemErrors）。 |
 | [`TargetPolicy`](/zh/docs/reference/targetpolicy) | 实体销毁时，指向它的链接怎么处理（TargetPolicyExtensions.WhenTargetDestroyed、RelationIndex.WhenTargetDestroyed）。 |

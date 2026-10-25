@@ -10,8 +10,8 @@ description: "Deterministic random numbers for [ForEach] methods, parallel ones 
 public struct EntityRandom : ISingletonComponent, IEquatable<EntityRandom>
 ```
 
-Deterministic random numbers for `[ForEach]` methods, parallel ones included (cuRAND's Philox, a counter-based generator): each number is a pure function of a seed, an entity, a tick and a stream, with no state to advance, so it is the same on every run, for any thread count and any order the rows run in. A singleton holding the seed and the tick: `static void Wander(ref Velocity v, Entity entity, in EntityRandom random) => v.X = random.Range(entity.Id, 0,
--1f, 1f);`, where the system that advances the simulation's clock advances [`EntityRandom.Tick`](/en/docs/reference/entityrandom#tick) too. The static members take the four inputs explicitly (a seed of your own, the tick of your clock).
+Deterministic random numbers for `[ForEach]` methods, parallel ones included (cuRAND's Philox, a counter-based generator): each number is a pure function of a seed, an entity, a tick and a stream, with no state to advance, so it is the same on every run, for any thread count and any order the rows run in. A singleton holding the seed (and the tick, which the world advances): `world.SetEntityRandom(Seed: 42)`, then `static void Wander(ref Velocity v, Entity entity, in EntityRandom random) => v.X = random.Range(entity.Id, 0,
+-1f, 1f);` draws new numbers on every update. The static members take the four inputs explicitly (a seed of your own, the tick of your clock).
 
 The `stream` tells apart the draws of one entity in one tick: give each call site of a method its own (0, 1, 2, ...). The same four inputs give the same number, so two call sites with one stream draw the same number.
 
@@ -20,18 +20,17 @@ The bits are four rounds of SplitMix64's finalizer, one per input: a bijection o
 #### Parameters
 
 - `Seed`: The world's seed: a different seed, a different sequence for every entity.
-- `Tick`: The step of the simulation the numbers are drawn for: advance it once per step.
 
 ## Constructors
 
 ### `EntityRandom` [#ctor]
 
 ```csharp
-public EntityRandom(ulong Seed, ulong Tick);
+public EntityRandom(ulong Seed);
 ```
 
-Deterministic random numbers for `[ForEach]` methods, parallel ones included (cuRAND's Philox, a counter-based generator): each number is a pure function of a seed, an entity, a tick and a stream, with no state to advance, so it is the same on every run, for any thread count and any order the rows run in. A singleton holding the seed and the tick: `static void Wander(ref Velocity v, Entity entity, in EntityRandom random) => v.X = random.Range(entity.Id, 0,
--1f, 1f);`, where the system that advances the simulation's clock advances [`EntityRandom.Tick`](/en/docs/reference/entityrandom#tick) too. The static members take the four inputs explicitly (a seed of your own, the tick of your clock).
+Deterministic random numbers for `[ForEach]` methods, parallel ones included (cuRAND's Philox, a counter-based generator): each number is a pure function of a seed, an entity, a tick and a stream, with no state to advance, so it is the same on every run, for any thread count and any order the rows run in. A singleton holding the seed (and the tick, which the world advances): `world.SetEntityRandom(Seed: 42)`, then `static void Wander(ref Velocity v, Entity entity, in EntityRandom random) => v.X = random.Range(entity.Id, 0,
+-1f, 1f);` draws new numbers on every update. The static members take the four inputs explicitly (a seed of your own, the tick of your clock).
 
 The `stream` tells apart the draws of one entity in one tick: give each call site of a method its own (0, 1, 2, ...). The same four inputs give the same number, so two call sites with one stream draw the same number.
 
@@ -40,7 +39,6 @@ The bits are four rounds of SplitMix64's finalizer, one per input: a bijection o
 **Parameters**
 
 - `Seed`: The world's seed: a different seed, a different sequence for every entity.
-- `Tick`: The step of the simulation the numbers are drawn for: advance it once per step.
 
 ## Properties
 
@@ -55,10 +53,10 @@ The world's seed: a different seed, a different sequence for every entity.
 ### `Tick` [#tick]
 
 ```csharp
-public ulong Tick { readonly get; set; }
+public readonly ulong Tick { get; }
 ```
 
-The step of the simulation the numbers are drawn for: advance it once per step.
+The step the numbers are drawn for: the number of [`World.Update`](/en/docs/reference/world#update) calls since the singleton was added. The world adds one at the start of every [`World.Update`](/en/docs/reference/world#update), before any system runs, so each update draws new numbers with no code of yours. [`World.Update`](/en/docs/reference/world#update-2) leaves it: a group's systems draw with the tick of the last [`World.Update`](/en/docs/reference/world#update), so a group run between two updates (replication every third tick) draws what the update drew, and a world updated only by groups calls [`World.Update`](/en/docs/reference/world#update) once per tick (its default group may hold no system) or draws through the static members with a tick of its own. It is saved, captured and restored with the singleton, so a loaded or restored world continues its sequence.
 
 ## Methods
 
@@ -97,7 +95,7 @@ True with probability `probability`: `Float < probability`. O(1), pure.
 ### `Deconstruct` [#deconstruct]
 
 ```csharp
-public readonly void Deconstruct(out ulong Seed, out ulong Tick);
+public readonly void Deconstruct(out ulong Seed);
 ```
 
 ### `Equals` [#equals]

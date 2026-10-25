@@ -376,7 +376,7 @@ public ref struct Regeneration
 | 在最热的循环里、跑很多行 | 拆成 `[With<T>]` 和 `[Without<T>]` 两个方法：每行不用判断 |
 
 ```csharp
-public partial record struct Guild([IndexKey] int Id, int Level) : IComponent;
+public partial record struct Guild([LookupKey] int Id, int Level) : IComponent;
 public record struct Morale(int Value) : IComponent;
 ```
 
@@ -909,9 +909,9 @@ public struct In<TActor> : IComponent;             // 某一种 actor 的标签
 public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;   // IIndexed 要求 IEquatable
 
-// 键组件、索引键、系统分组都是这一个类型：类型上的 [IndexKey] 让整个值作为键，
+// 键组件、索引键、系统分组都是这一个类型：类型上的 [LookupKey] 让整个值作为键，
 // 生成器显式实现 Key，所以 record 的 ToString() 不会打印它。
-[IndexKey]
+[LookupKey]
 public readonly partial record struct Shop(long Id) : IActor<Shop>;
 
 public record struct Stock(int Items) : IComponent;
@@ -1234,7 +1234,7 @@ run order: MoveSystem
 | 分组的 `[With<T>]` 或 `ISystemGroupWith<T>` 碰上方法的 `[Removed<T>]` | 要求一行既有 `T` 又没有 `T`：方法永远不会运行 | [EECS016](/zh/docs/guide/analyzer#eecs016) |
 | 分组的 `[With<X>]` 碰上方法的 `[Without<X>]` | 没有实体能满足：方法永远不会运行 | [EECS049](/zh/docs/guide/analyzer#eecs049) |
 | 分组的 `[WithAny<A>]` 加方法的 `[WithAny<B>]`，当成“A 且 B” | 两个集合合并：选出有 `A` 或有 `B` 的实体 | 代码审查 |
-| record struct 的 actor 键上写公开的 `Key => this` | `ToString()` 无限打印 `Key`：栈溢出 | [EECS043](/zh/docs/guide/analyzer#eecs043)（有代码修复）：类型上标 `[IndexKey]`，由它显式实现 `IIndexed<T>.Key` |
+| record struct 的 actor 键上写公开的 `Key => this` | `ToString()` 无限打印 `Key`：栈溢出 | [EECS043](/zh/docs/guide/analyzer#eecs043)（有代码修复）：类型上标 `[LookupKey]`，由它显式实现 `IIndexed<T>.Key` |
 | 只读的组件写成 `ref` | 被追踪的组件被打 tick，系统也没法共享阶段 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
 | 方法从不使用的 `Entity` 或 `World` 参数 | job 保留结构变更簿记 | [EECS026](/zh/docs/guide/analyzer#eecs026) |
 | `[OnUpdate]` 或 `[ForEach]` 方法里分配内存 | 每次更新都产生垃圾 | [EECS028](/zh/docs/guide/analyzer#eecs028) |

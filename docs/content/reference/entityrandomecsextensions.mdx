@@ -33,7 +33,7 @@ The world's [`EntityRandom`](/en/docs/reference/entityrandom) by `ref`, added (d
 ### `GetOrAddEntityRandom` [#getoraddentityrandom-2]
 
 ```csharp
-extension(World @this) public ref EntityRandom GetOrAddEntityRandom(ulong Seed, ulong Tick);
+extension(World @this) public ref EntityRandom GetOrAddEntityRandom(ulong Seed);
 ```
 
 The world's [`EntityRandom`](/en/docs/reference/entityrandom) by `ref`, added with this value first if missing (`GetOrAddSingleton`); a world that has it keeps its own.
@@ -57,7 +57,7 @@ Removes the world's [`EntityRandom`](/en/docs/reference/entityrandom) (`RemoveSi
 ### `SetEntityRandom` [#setentityrandom]
 
 ```csharp
-extension(World @this) public void SetEntityRandom(ulong Seed, ulong Tick);
+extension(World @this) public void SetEntityRandom(ulong Seed);
 ```
 
 Sets the world's [`EntityRandom`](/en/docs/reference/entityrandom), adding it if missing.

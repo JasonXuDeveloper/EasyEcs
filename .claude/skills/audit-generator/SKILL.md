@@ -15,7 +15,7 @@ shared with the analyzer (`audit-analyzer`).
 
 1. **Users write a thing once** (`feature`, part 2). Generated today: members per component (`entity.X`, `SetX`,
    `TryGetX`, `world.XIndex`), arity families, system code and the set per assembly, jobs and entry points
-   (`[ForEntity]`), parts (`[Sum]`, `[IndexKey]`, `[Group]`), type setup (`[GroupBy]`, `[WhenTargetDestroyed]`,
+   (`[ForEntity]`), parts (`[Sum]`, `[LookupKey]`, `[Group]`), type setup (`[GroupBy]`, `[WhenTargetDestroyed]`,
    `[NotSaved]`), the save registry. Look for boilerplate still left in `samples/`, templates, `BattleServer.cs` and
    the docs examples (a hand-written job, a reset-then-accumulate singleton, a registry call, a copy per arity): each
    is a candidate for an attribute, a parameter or a generated member, with the rule and code fix that move users to

@@ -138,10 +138,10 @@ public readonly record struct Market(long Id) : IComponent, IIndexed<Market>
 
 A record struct prints its public properties in `ToString()`. `Key` returns the record itself, which prints its `Key`,
 which prints its `Key`: the first log line or debugger view of the value overflows the stack. Declare the key with
-`[IndexKey]` on the type: the generator implements `Key` explicitly, so it belongs to the interface only:
+`[LookupKey]` on the type: the generator implements `Key` explicitly, so it belongs to the interface only:
 
 ```csharp
-[IndexKey] public readonly partial record struct Market(long Id) : IComponent;
+[LookupKey] public readonly partial record struct Market(long Id) : IComponent;
 ```
 
 Caught by [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix). The [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) shows
@@ -520,8 +520,8 @@ public struct In<TActor> : IComponent;
 public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;
 
-[IndexKey] public readonly partial record struct Shop(long Id) : IActor<Shop>;
-[IndexKey] public readonly partial record struct Guild(long Id) : IActor<Guild>;
+[LookupKey] public readonly partial record struct Shop(long Id) : IActor<Shop>;
+[LookupKey] public readonly partial record struct Guild(long Id) : IActor<Guild>;
 ```
 
 No rule catches it. More in [group filters](/en/docs/guide/systems#group-filters).
@@ -568,7 +568,7 @@ Caught by the C# compiler. More in [ref and await](/en/docs/guide/refs-and-await
 ### Writing an indexed key through a `ref` [#indexed-by-ref]
 
 ```csharp
-public partial record struct Zone([IndexKey] int Id) : IComponent;
+public partial record struct Zone([LookupKey] int Id) : IComponent;
 ```
 
 ```csharp doccheck=expect-EECS015

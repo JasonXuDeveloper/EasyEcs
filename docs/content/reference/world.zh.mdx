@@ -32,7 +32,7 @@ public World(WorldOptions options = null);
 public const int ParallelChunkRows = 16384;
 ```
 
-没有自己指定块大小（`chunkRows`）的并行 [ForEach] 每块最多的行数。每块大约是每个线程分到的匹配行的四分之一（至少 1,024 行）：块一样大，就会同时跑完；每个线程分四块，行与行开销不均时也能摊平。
+没有自己指定块大小（`chunkRows`）的并行 [ForEach] 在测得行开销之前每块最多的行数。每块大约是每个线程分到的匹配行的四分之一（至少 1,024 行）：块一样大，就会同时跑完；每个线程分四块，行与行开销不均时也能摊平。一次运行测得行开销之后，块按开销来切：每个线程四块，除非这样每块会超过约 25 µs（行很重：块更多、更小）或短于 5 µs（遍历很短：块更少）。
 
 ## 属性 [#properties]
 
@@ -118,17 +118,17 @@ public ref T AddSingleton<T>() where T : struct, ISingletonComponent;
 public SystemHandle AddSystem<T>(bool changesFromNow = false) where T : struct, allows ref struct;
 ```
 
-把系统 `T`（一个 [[EcsSystem]](/zh/docs/reference/ecssystemattribute) ref struct）加到它的分组（[`UpdateInGroupAttribute`](/zh/docs/reference/updateingroupattribute) 指定的分组，没有就是默认分组），然后运行它的 [[OnCreate]](/zh/docs/reference/oncreateattribute) 方法。一个系统在每个 World 里只能加一次：再加会抛异常。冷路径：分配它的记录和分组的新调度，划分阶段 O(系统数²)。
+Add system `T` (an [[EcsSystem]](/zh/docs/reference/ecssystemattribute) ref struct) to its group ([`UpdateInGroupAttribute`](/zh/docs/reference/updateingroupattribute), default otherwise) and run its `OnCreate` method. A system is added once per world: adding it again throws. Cold: allocates its record and the group's new schedule, O(systems²) for the stages.
 
 **参数**
 
-- `changesFromNow`：为 false（默认）时，它的 `[Changed<T>]` 和 `[Removed<T>]` 方法第一次运行会访问 World 创建以来写过或移除过的每一行。为 true 时只看这次调用之后的写入和移除，就像这个系统刚刚运行过一样（[`SystemHandle.LastRunTick`](/zh/docs/reference/systemhandle#lastruntick)）；适合加到已经有状态的 World 上的系统（[`World.Load`](/zh/docs/reference/world#load) 之后的重启、之后才打开的系统）。
+- `changesFromNow`：False (the default): the first run of its `[Changed<T>]` and `[Removed<T>]` methods visits every row written or removed since the world began. True: only what is written or removed after this call, as if the system had run just now ([`SystemHandle.LastRunTick`](/zh/docs/reference/systemhandle#lastruntick)); for a system added to a world that already holds its state (a restart after [`World.Load`](/zh/docs/reference/world#load), a system switched on later).
 
-**返回值**：系统的句柄。
+**返回值**：The system's handle.
 
 **异常**
 
-- `NotSupportedException`：没有程序集为 `T` 注册代码：它不是 [EcsSystem]，或者是没有任何程序集用到的封闭泛型系统（用反射造出来的）。
+- `NotSupportedException`：No assembly registers code for `T`: it is no [EcsSystem], or a closed generic system no assembly names (made by reflection).
 
 **复杂度**（[API 表](/zh/docs/api)）：O(s²)，s 为所在分组的系统数
 
@@ -385,7 +385,7 @@ public int DisableAll<T>(in QueryFilter filter = default) where T : struct, ICom
 public void Dispose();
 ```
 
-销毁所有系统（按相反顺序调用 [OnDestroy]），然后释放全部存储。即使某个系统的 [OnDestroy] 抛出异常，其余系统的 [OnDestroy] 也都会执行，存储也照样释放；在 [`SystemErrorPolicy.Throw`](/zh/docs/reference/systemerrorpolicy#throw) 下，最后重新抛出第一个异常。之后每个句柄都失效，每个结构变更都会抛出 `ObjectDisposedException`。
+Destroy all systems (OnDestroy in reverse order), then release all storage. Every system's OnDestroy runs and the storage is released even when one throws; under [`SystemErrorPolicy.Throw`](/zh/docs/reference/systemerrorpolicy#throw) the first exception is rethrown at the end. Afterwards every handle is stale and every structural change throws `ObjectDisposedException`.
 
 **复杂度**（[API 表](/zh/docs/api)）：O(系统数 + 实体数 + 表数)
 
@@ -412,6 +412,56 @@ public void EnsureEntityCapacity(int capacity);
 ### `ForEach` [#foreach]
 
 ```csharp
+public void ForEach(Delegate body);
+```
+
+对每个拥有它所接收组件的实体执行 `body`（一个静态 lambda）：`world.ForEach(static (ref Position p, in Velocity v) => p.Value += v.Value)`。lambda 的参数就是 [`ForEachAttribute`](/zh/docs/reference/foreachattribute) 方法的参数（以 `ref` 或 `in` 传入的组件、单例、`Reduce<T>`、`Mut<T>`、`Emit<T>`、`Scratch<T>`、`Lookup<T>`、`Entity`；不支持 `Maybe<T>`、tile 和 span），再按顺序加上它前面传入的值；它的特性就是 [ForEach] 方法的过滤条件（`[Without<Dead>]`）。变更过滤从最前面传入的 tick 回看：`world.ForEach(since, [Changed<Health>] static (in Health h) => …)`。EasyEcs 生成器把每处调用编译成 [ForEach] 方法会得到的 job（方法体符合条件时是向量循环），所以调用零分配。只能在所有者线程上调用。
+
+**参数**
+
+- `body`：写在调用处的静态 lambda。
+
+**异常**
+
+- `InvalidOperationException`：生成器没有编译这处调用（EECS095 说明原因）。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.ForEach<T1..Tn, TJob>(ref job, filter)`：O(M + S)
+- `world.ForEach(values…, static (ref P p, …) => …)`：O(M + S)
+
+### `ForEach` [#foreach-2]
+
+```csharp
+public void ForEach<TValue1>(TValue1 value1, Delegate body);
+public void ForEach<TValue1, TValue2>(TValue1 value1, TValue2 value2, Delegate body);
+public void ForEach<TValue1, TValue2, TValue3>(TValue1 value1, TValue2 value2, TValue3 value3, Delegate body);
+public void ForEach<TValue1, TValue2, TValue3, TValue4>(TValue1 value1, TValue2 value2, TValue3 value3, TValue4 value4, Delegate body);
+```
+
+对每个拥有它所接收组件的实体执行 `body`（一个静态 lambda）：`world.ForEach(dt, static (ref Position p, in Velocity v, float dt) => p.Value += v.Value * dt)`。lambda 的参数就是 [`ForEachAttribute`](/zh/docs/reference/foreachattribute) 方法的参数（以 `ref` 或 `in` 传入的组件、单例、`Reduce<T>`、`Mut<T>`、`Emit<T>`、`Scratch<T>`、`Lookup<T>`、`Entity`；不支持 `Maybe<T>`、tile 和 span），再按顺序加上它前面传入的值；它的特性就是 [ForEach] 方法的过滤条件（`[Without<Dead>]`）。变更过滤从最前面传入的 tick 回看：`world.ForEach(since, [Changed<Health>] static (in Health h) => …)`。EasyEcs 生成器把每处调用编译成 [ForEach] 方法会得到的 job（方法体符合条件时是向量循环），所以调用零分配。只能在所有者线程上调用。
+
+**类型参数**
+
+- `TValue1`：`value1` 的类型。
+
+**参数**
+
+- `value1`：lambda 前面的第一个值，遍历期间存在 job 里：lambda 第一个不是组件、单例或 EasyEcs 参数的参数，按顺序对应；有变更过滤时，它是回看的起点 tick（一个 `ulong`，lambda 不接收它）。
+- `body`：写在调用处的静态 lambda。
+
+**异常**
+
+- `InvalidOperationException`：生成器没有编译这处调用（EECS095 说明原因）。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.ForEach<T1..Tn, TJob>(ref job, filter)`：O(M + S)
+- `world.ForEach(values…, static (ref P p, …) => …)`：O(M + S)
+
+### `ForEach` [#foreach-3]
+
+```csharp
 public void ForEach<T1, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where TJob : struct, IForEach<T1>, allows ref struct;
 public void ForEach<T1, T2, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where TJob : struct, IForEach<T1, T2>, allows ref struct;
 public void ForEach<T1, T2, T3, TJob>(ref TJob job, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where TJob : struct, IForEach<T1, T2, T3>, allows ref struct;
@@ -427,7 +477,10 @@ public void ForEach<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job, in Q
 
 对每个同时拥有 `T1, T2`（并匹配 `filter`）的实体，把它的组件交给 `job` 执行。这是最快的遍历：按列从头到尾扫每个匹配的原型，O(匹配的原型数 + 行数)，零分配。job 里可以做结构变更，而且立即生效：每个实体最多访问一次（遍历途中新进入匹配原型的实体不访问，轮到之前就离开的实体跳过）；job 改变了当前实体的原型时，它通过 ref 写的值会带到实体的新行（`IForEach.WriteMask`）。实现了 [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) 的 job 省掉这些簿记。
 
-**复杂度**（[API 表](/zh/docs/api)）：O(M + S)
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.ForEach<T1..Tn, TJob>(ref job, filter)`：O(M + S)
+- `world.ForEach(values…, static (ref P p, …) => …)`：O(M + S)
 
 ### `ForEachBatch` [#foreachbatch]
 
@@ -465,7 +518,7 @@ public void ForEachBatchParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref T
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-多线程版的 [`World.ForEachBatch`](/zh/docs/reference/world#foreachbatch)：匹配的行切成块（每个线程大约四块，行数是 64 的倍数，最多 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 行；会合并结果的任务固定切 16 块，与线程数无关，结果因此不随线程变化；或者把 `chunkRows` 向上取整到 64，用于行少而重的情况：`[ForEach(Parallel = true, ChunkRows = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
+多线程版的 [`World.ForEachBatch`](/zh/docs/reference/world#foreachbatch)：匹配的行切成块（行数是 64 的倍数：在一次调用测得行开销之前，每个线程大约四块，最多 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 行；之后行很重时每块约 25 µs，遍历很短时块更少；会合并结果的任务固定切 16 块，与线程数和开销无关，结果因此不随线程变化；或者把 `chunkRows` 向上取整到 64：`[ForEach(Parallel = true, ChunkRows = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
 
@@ -505,7 +558,7 @@ public void ForEachEntityParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref 
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-多线程版的 [`World.ForEachEntity`](/zh/docs/reference/world#foreachentity)：匹配的行切成块（每个线程大约四块，行数是 64 的倍数，最多 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 行；会合并结果的任务固定切 16 块，与线程数无关，结果因此不随线程变化；或者把 `chunkRows` 向上取整到 64，用于行少而重的情况：`[ForEach(Parallel = true, ChunkRows = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
+多线程版的 [`World.ForEachEntity`](/zh/docs/reference/world#foreachentity)：匹配的行切成块（行数是 64 的倍数：在一次调用测得行开销之前，每个线程大约四块，最多 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 行；之后行很重时每块约 25 µs，遍历很短时块更少；会合并结果的任务固定切 16 块，与线程数和开销无关，结果因此不随线程变化；或者把 `chunkRows` 向上取整到 64：`[ForEach(Parallel = true, ChunkRows = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
 
@@ -532,6 +585,56 @@ public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job
 ### `ForEachParallel` [#foreachparallel]
 
 ```csharp
+public void ForEachParallel(Delegate body);
+```
+
+对每个拥有它所接收组件的实体执行 `body`（一个静态 lambda），匹配的行切成块，由多个线程执行：`world.ForEachParallel(static (ref Position p, in Velocity v) => p.Value += v.Value)`。lambda 的参数就是 [`ForEachAttribute`](/zh/docs/reference/foreachattribute) 方法的参数（以 `ref` 或 `in` 传入的组件、单例、`Reduce<T>`、`Mut<T>`、`Emit<T>`、`Scratch<T>`、`Lookup<T>`、`Entity`；不支持 `Maybe<T>`、tile 和 span），再按顺序加上它前面传入的值；它的特性就是 [ForEach] 方法的过滤条件（`[Without<Dead>]`）。变更过滤从最前面传入的 tick 回看：`world.ForEach(since, [Changed<Health>] static (in Health h) => …)`。EasyEcs 生成器把每处调用编译成 [ForEach] 方法会得到的 job（方法体符合条件时是向量循环），所以调用零分配。只能在所有者线程上调用。
+
+**参数**
+
+- `body`：写在调用处的静态 lambda。
+
+**异常**
+
+- `InvalidOperationException`：生成器没有编译这处调用（EECS095 说明原因）。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `ForEachParallel(…)`：O(M + S)
+- `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)`：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+
+### `ForEachParallel` [#foreachparallel-2]
+
+```csharp
+public void ForEachParallel<TValue1>(TValue1 value1, Delegate body);
+public void ForEachParallel<TValue1, TValue2>(TValue1 value1, TValue2 value2, Delegate body);
+public void ForEachParallel<TValue1, TValue2, TValue3>(TValue1 value1, TValue2 value2, TValue3 value3, Delegate body);
+public void ForEachParallel<TValue1, TValue2, TValue3, TValue4>(TValue1 value1, TValue2 value2, TValue3 value3, TValue4 value4, Delegate body);
+```
+
+对每个拥有它所接收组件的实体执行 `body`（一个静态 lambda），匹配的行切成块，由多个线程执行：`world.ForEachParallel(dt, static (ref Position p, in Velocity v, float dt) => p.Value += v.Value * dt)`。lambda 的参数就是 [`ForEachAttribute`](/zh/docs/reference/foreachattribute) 方法的参数（以 `ref` 或 `in` 传入的组件、单例、`Reduce<T>`、`Mut<T>`、`Emit<T>`、`Scratch<T>`、`Lookup<T>`、`Entity`；不支持 `Maybe<T>`、tile 和 span），再按顺序加上它前面传入的值；它的特性就是 [ForEach] 方法的过滤条件（`[Without<Dead>]`）。变更过滤从最前面传入的 tick 回看：`world.ForEach(since, [Changed<Health>] static (in Health h) => …)`。EasyEcs 生成器把每处调用编译成 [ForEach] 方法会得到的 job（方法体符合条件时是向量循环），所以调用零分配。只能在所有者线程上调用。
+
+**类型参数**
+
+- `TValue1`：`value1` 的类型。
+
+**参数**
+
+- `value1`：lambda 前面的第一个值，遍历期间存在 job 里：lambda 第一个不是组件、单例或 EasyEcs 参数的参数，按顺序对应；有变更过滤时，它是回看的起点 tick（一个 `ulong`，lambda 不接收它）。
+- `body`：写在调用处的静态 lambda。
+
+**异常**
+
+- `InvalidOperationException`：生成器没有编译这处调用（EECS095 说明原因）。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `ForEachParallel(…)`：O(M + S)
+- `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)`：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+
+### `ForEachParallel` [#foreachparallel-3]
+
+```csharp
 public void ForEachParallel<T1, TJob>(ref TJob job, in QueryFilter filter = default, int chunkRows = 0) where T1 : struct, IComponent where TJob : struct, IForEach<T1>, INoStructuralChanges;
 public void ForEachParallel<T1, T2, TJob>(ref TJob job, in QueryFilter filter = default, int chunkRows = 0) where T1 : struct, IComponent where T2 : struct, IComponent where TJob : struct, IForEach<T1, T2>, INoStructuralChanges;
 public void ForEachParallel<T1, T2, T3, TJob>(ref TJob job, in QueryFilter filter = default, int chunkRows = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where TJob : struct, IForEach<T1, T2, T3>, INoStructuralChanges;
@@ -545,9 +648,12 @@ public void ForEachParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob j
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-多线程版的 [`World.ForEach`](/zh/docs/reference/world#foreach)：匹配的行切成块（每个线程大约四块，行数是 64 的倍数，最多 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 行；会合并结果的任务固定切 16 块，与线程数无关，结果因此不随线程变化；或者把 `chunkRows` 向上取整到 64，用于行少而重的情况：`[ForEach(Parallel = true, ChunkRows = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
+多线程版的 [`World.ForEach`](/zh/docs/reference/world#foreach-3)：匹配的行切成块（行数是 64 的倍数：在一次调用测得行开销之前，每个线程大约四块，最多 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 行；之后行很重时每块约 25 µs，遍历很短时块更少；会合并结果的任务固定切 16 块，与线程数和开销无关，结果因此不随线程变化；或者把 `chunkRows` 向上取整到 64：`[ForEach(Parallel = true, ChunkRows = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
 
-**复杂度**（[API 表](/zh/docs/api)）：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `ForEachParallel(…)`：O(M + S)
+- `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)`：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
 
 ### `ForParallel` [#forparallel]
 
@@ -555,7 +661,7 @@ public void ForEachParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob j
 public void ForParallel<TJob>(int count, ref TJob job, int chunkRows = 0) where TJob : struct, IForRange;
 ```
 
-在多个线程上对下标 0 到 `count` - 1 运行 `job`：区间切成块（每个线程约四块，64 个下标的整数倍，介于 1,024 和 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 之间；少量重的元素时用 `chunkRows` 向上取整到 64），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程一次认领一块，每块运行 job 的一份副本（Execute 写进它字段的内容不会合并回来）。和并行 `[ForEach]` 遍历是同一个运行器：只有帮手线程划算时才唤醒它们，少于两块或运行器已经在忙时在调用线程上运行。job 不能改变 World 的结构（结构变更会抛异常），也不能写另一个块读的数据。所有者线程。每种 job 类型第一次调用之后零分配。
+在多个线程上对下标 0 到 `count` - 1 运行 `job`：区间切成块（64 个下标的整数倍：在一次调用测得元素开销之前，每个线程约四块，介于 1,024 和 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 之间；之后元素很重时每块约 25 µs，循环很短时块更少；或者用 `chunkRows` 向上取整到 64），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程一次认领一块，每块运行 job 的一份副本（Execute 写进它字段的内容不会合并回来）。和并行 `[ForEach]` 遍历是同一个运行器：只有帮手线程划算时才唤醒它们，少于两块或运行器已经在忙时在调用线程上运行。job 不能改变 World 的结构（结构变更会抛异常），也不能写另一个块读的数据。所有者线程。每种 job 类型第一次调用之后零分配。
 
 **异常**
 
@@ -910,7 +1016,7 @@ public bool RemoveSingleton<T>() where T : struct, ISingletonComponent;
 public bool RemoveSystem<T>() where T : struct, allows ref struct;
 ```
 
-移除系统 `T`（会运行它的 [[OnDestroy]](/zh/docs/reference/ondestroyattribute) 方法）：World 里没有时返回 false。它的句柄随之失效。
+Remove system `T` (runs its `OnDestroy` method): false when the world has none. Its handles turn stale.
 
 **复杂度**（[API 表](/zh/docs/api)）：O(s²)
 

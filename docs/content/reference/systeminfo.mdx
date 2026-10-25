@@ -19,7 +19,7 @@ A system of a schedule and the data it declares ([`SystemAccess`](/en/docs/refer
 - `Writes`: Components its [ForEach] methods write (`ref` parameters).
 - `ReadsSingletons`: Singletons it reads.
 - `WritesSingletons`: Singletons it writes.
-- `RunsAlone`: It may touch anything (an [OnUpdate] method, an Entity or World parameter...): it never shares a stage.
+- `RunsAlone`: It may touch anything (an OnUpdate method, an Entity or World parameter...): it never shares a stage.
 - `After`: Why it is not in an earlier stage: the systems of the stage just before its own that it must follow (empty in the first stage).
 
 ## Constructors
@@ -39,7 +39,7 @@ A system of a schedule and the data it declares ([`SystemAccess`](/en/docs/refer
 - `Writes`: Components its [ForEach] methods write (`ref` parameters).
 - `ReadsSingletons`: Singletons it reads.
 - `WritesSingletons`: Singletons it writes.
-- `RunsAlone`: It may touch anything (an [OnUpdate] method, an Entity or World parameter...): it never shares a stage.
+- `RunsAlone`: It may touch anything (an OnUpdate method, an Entity or World parameter...): it never shares a stage.
 - `After`: Why it is not in an earlier stage: the systems of the stage just before its own that it must follow (empty in the first stage).
 
 ## Properties
@@ -51,6 +51,14 @@ public StageWait[] After { get; init; }
 ```
 
 Why it is not in an earlier stage: the systems of the stage just before its own that it must follow (empty in the first stage).
+
+### `FusedWith` [#fusedwith]
+
+```csharp
+public string FusedWith { get; init; }
+```
+
+The system after it that it runs as one walk with (pass fusion: each row of their shared filter is loaded once for both) whenever both are enabled and due, or null. Only one thread running the group and [`WorldOptions.MeasureSystems`](/en/docs/reference/worldoptions#measuresystems) off fuse systems.
 
 ### `Loops` [#loops]
 
@@ -90,7 +98,7 @@ Singletons it reads.
 public bool RunsAlone { get; init; }
 ```
 
-It may touch anything (an [OnUpdate] method, an Entity or World parameter...): it never shares a stage.
+It may touch anything (an OnUpdate method, an Entity or World parameter...): it never shares a stage.
 
 ### `Writes` [#writes]
 

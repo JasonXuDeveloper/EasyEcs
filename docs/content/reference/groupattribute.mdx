@@ -10,7 +10,7 @@ description: "The member a world groups the component's tables by (IGroup): an i
 public sealed class GroupAttribute : Attribute
 ```
 
-The member a world groups the component's tables by ([`IGroup`](/en/docs/reference/igroup)): an `int` or an enum of `int`. The generator adds `IGroup` to the partial struct with an explicit `Group` returning it.
+The member a world groups the component's tables by ([`IGroup`](/en/docs/reference/igroup)): an `int` or an enum of `int`. The generator adds `IGroup` to the partial struct with an explicit `Group` returning it. The tables are grouped in the worlds that call [`World.GroupBy`](/en/docs/reference/world#groupby); [[GroupBy]](/en/docs/reference/groupbyattribute) on the member instead groups them in every world.
 
 ## Constructors
 

@@ -35,4 +35,4 @@ public record struct Item(Block Kind, int Count) : IComponent;
 // The tick an item was dropped: it can be picked up Rules.PickupDelay ticks later and is gone Rules.ItemLifetime ticks
 // later. An ordered index of the items by it (world.DroppedIndex.Range) finds the items that expire without visiting
 // the others: the oldest come first.
-public partial record struct Dropped([IndexKey] long Tick) : IComponent;
+public partial record struct Dropped([LookupKey] long Tick) : IComponent;

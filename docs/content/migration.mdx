@@ -132,7 +132,7 @@ An interval that was computed at run time has no attribute form: fix the cadence
 [`ReadOnlyMaybe<T>`](/en/docs/guide/systems#read-only-maybe) when some entities lack it:
 
 ```csharp
-public partial record struct Guild([IndexKey] int Id) : IComponent;
+public partial record struct Guild([LookupKey] int Id) : IComponent;
 public record struct Morale(int Value) : IComponent;
 ```
 

@@ -44,12 +44,13 @@ public sealed class ForEachAttribute : Attribute
 
     /// <summary>
     /// With <see cref="Parallel"/>: the rows a thread takes at a time, rounded up to a multiple of 64 (OpenMP's
-    /// <c>schedule(dynamic, n)</c>). By default a chunk holds about a quarter of each thread's share of the rows, and at
-    /// least 1,024 (4,096 when the method writes a tracked component), so a pass over a few hundred heavy rows (a chunk
-    /// of terrain each, a path search each) runs on one thread; set the rows one thread should take at a time when one
-    /// row costs microseconds. Smaller chunks cost a claim each, and chunks that share a 4,096-row block of change
-    /// ticks share its summary (atomically). Default 0: chosen from the row count. Not without <see cref="Parallel"/>
-    /// and not below 0 (EECS054).
+    /// <c>schedule(dynamic, n)</c>). By default the runtime chooses from the rows' cost, which each pass measures: about
+    /// four chunks per thread, chunks of about 25 µs when rows are heavy (a few hundred rows of a chunk of terrain or a
+    /// path search each spread over every thread), fewer chunks for a short pass; before the first pass, and for a
+    /// method that merges per chunk (<see cref="Reduce{T}"/>, <see cref="Emit{T}"/>: 16 chunks, so its result does not
+    /// depend on timing), the row count decides. Set it only to override that. Smaller chunks cost a claim each, and
+    /// chunks that share a 4,096-row block of change ticks share its summary (atomically). Default 0: chosen by the
+    /// runtime. Not without <see cref="Parallel"/> and not below 0 (EECS054).
     /// </summary>
     public int ChunkRows { get; init; }
 

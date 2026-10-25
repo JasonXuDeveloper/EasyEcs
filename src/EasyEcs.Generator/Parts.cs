@@ -9,7 +9,7 @@ namespace EasyEcs.Generator;
 /// <summary>
 /// What a struct's attributes declare that the generator writes into a part of the struct (PartGenerator): a
 /// reduction's <c>Identity</c> and <c>Combine</c> from <c>[Sum]</c> / <c>[Min]</c> / ... fields, an index's <c>Key</c>
-/// from <c>[IndexKey]</c> / <c>[UniqueKey]</c>, a group's <c>Group</c> from <c>[Group]</c>. Read once from the
+/// from <c>[LookupKey]</c> / <c>[UniqueKey]</c>, a group's <c>Group</c> from <c>[Group]</c>. Read once from the
 /// symbols for the generator and the analyzer alike, so what the generator skips is what the analyzer reports
 /// (<see cref="Problems"/>). The generators of a compilation do not see each other's output, so other generators read a
 /// declaration from its attributes through these helpers, never through the interface the part adds.
@@ -25,7 +25,7 @@ internal sealed class Parts
     /// <summary>How a reduction field combines: the attribute it carries.</summary>
     public enum Op { Sum, Product, Min, Max, All, Any }
 
-    public const string Key = "EasyEcs.IndexKeyAttribute", UniqueKey = "EasyEcs.UniqueKeyAttribute", Group = "EasyEcs.GroupAttribute",
+    public const string Key = "EasyEcs.LookupKeyAttribute", UniqueKey = "EasyEcs.UniqueKeyAttribute", Group = "EasyEcs.GroupAttribute",
         GroupBy = "EasyEcs.GroupByAttribute";
 
     /// <summary>
@@ -41,7 +41,7 @@ internal sealed class Parts
     public readonly record struct Field(string Name, string Type, Op Op);
 
     /// <summary>
-    /// A key declared by <c>[IndexKey]</c> / <c>[UniqueKey]</c>: the member returned (<c>this</c> on the type), its type
+    /// A key declared by <c>[LookupKey]</c> / <c>[UniqueKey]</c>: the member returned (<c>this</c> on the type), its type
     /// (<paramref name="Type"/> as the part writes it: the type's own name inside it for <c>this</c>), whether it is unique, the interface the part adds ("" when one the
     /// struct declares brings it) and whether the member may be read from a <c>readonly</c> member without a copy.
     /// </summary>
@@ -172,7 +172,7 @@ internal sealed class Parts
     }
 
     /// <summary>
-    /// <c>[IndexKey]</c> / <c>[UniqueKey]</c> on a member or the type: one key, of a type that is <c>IEquatable</c> of itself,
+    /// <c>[LookupKey]</c> / <c>[UniqueKey]</c> on a member or the type: one key, of a type that is <c>IEquatable</c> of itself,
     /// agreeing with the key of an interface the struct declares, no <c>Key</c> written by hand, and no unique
     /// <c>EntityId</c> key (EECS036).
     /// </summary>
@@ -190,7 +190,7 @@ internal sealed class Parts
         var key = keys[0];
         string Name(ITypeSymbol t) => t.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
         string Of((ISymbol Where, string Member, ITypeSymbol Type, bool Unique, bool ReadOnly) k) =>
-            $"[{(k.Unique ? "UniqueKey" : "IndexKey")}] on {(k.Member == "this" ? "the type" : $"'{k.Where.Name}'")}";
+            $"[{(k.Unique ? "UniqueKey" : "LookupKey")}] on {(k.Member == "this" ? "the type" : $"'{k.Where.Name}'")}";
         KeyOf = new KeyPart(key.Member, key.Member == "this" ? SelfName(Type) : key.Type.ToDisplayString(Symbols.Fqn), key.Unique, "", key.ReadOnly);
         KeyType = key.Type;
         if (keys.Count > 1)
@@ -207,7 +207,7 @@ internal sealed class Parts
 
         if (key.Unique && Symbols.Named(key.Type, Symbols.EntityId))
         {
-            Problems.Add(new Problem(key.Where, Rule.BadKey, "has a unique EntityId key ([UniqueKey]), but an EntityId key cannot be unique: index the relation with [IndexKey]"));
+            Problems.Add(new Problem(key.Where, Rule.BadKey, "has a unique EntityId key ([UniqueKey]), but an EntityId key cannot be unique: index the relation with [LookupKey]"));
             return;
         }
 

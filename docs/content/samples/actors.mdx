@@ -27,7 +27,7 @@ An actor kind is one type that does three jobs through one interface: `Shop` and
 so are at once the actor's key component ([value index](/en/docs/guide/indexes-and-relations#value-indexes)), the
 [system group](/en/docs/guide/systems#system-groups) of the kind and that group's
 [filter](/en/docs/guide/systems#group-filters) (`ISystemGroupWith<In<Shop>>`): an attribute cannot name a type
-parameter, so the interface declares the filter once for every kind. The key is the actor itself: `[IndexKey]` on the
+parameter, so the interface declares the filter once for every kind. The key is the actor itself: `[LookupKey]` on the
 type, and the generator writes an explicit `Key`, which the record's `ToString()` does not print (a public
 `Key => this` property would print `Key` forever, EECS043). `Stock` and `Balance` persist and are `ITracked` ([change tracking](/en/docs/guide/change-tracking)); `Sales` and
 `Closed` live only in memory.

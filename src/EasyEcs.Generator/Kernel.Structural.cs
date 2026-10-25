@@ -88,7 +88,7 @@ internal sealed partial class Kernel
             foreach (var p in _components.Keys.Concat(_optionals.Keys))
                 if (SymbolEqualityComparer.Default.Equals(p.Type, component) || Symbols.MaybeElement(p.Type) is { } element && SymbolEqualityComparer.Default.Equals(element, component))
                     throw FixableReason($"it changes {component.Name}, which it also takes as '{p.Name}': the change would be seen at once by the method and after the pass by a vector loop; change it in a [ForEach] method of its own");
-            if (change.Kind is "Set" or "Enable" && Symbols.IndexKey(component, out bool unique) != null && unique)
+            if (change.Kind is "Set" or "Enable" && Symbols.IndexedKey(component, out bool unique) != null && unique)
                 throw new Unsupported($"it gives {component.Name}, a unique key, to the rows it marks: one value would be claimed by every row") { IsWholeMethod = true };
         }
 

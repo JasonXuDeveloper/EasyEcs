@@ -33,7 +33,7 @@ World 的 [`EntityRandom`](/zh/docs/reference/entityrandom)，按 `ref` 返回�
 ### `GetOrAddEntityRandom` [#getoraddentityrandom-2]
 
 ```csharp
-extension(World @this) public ref EntityRandom GetOrAddEntityRandom(ulong Seed, ulong Tick);
+extension(World @this) public ref EntityRandom GetOrAddEntityRandom(ulong Seed);
 ```
 
 World 的 [`EntityRandom`](/zh/docs/reference/entityrandom)，按 `ref` 返回，没有时先以这个值添加（`GetOrAddSingleton`）；已有它的 World 保留自己的值。
@@ -57,7 +57,7 @@ extension(World @this) public bool RemoveEntityRandom();
 ### `SetEntityRandom` [#setentityrandom]
 
 ```csharp
-extension(World @this) public void SetEntityRandom(ulong Seed, ulong Tick);
+extension(World @this) public void SetEntityRandom(ulong Seed);
 ```
 
 设置 World 的 [`EntityRandom`](/zh/docs/reference/entityrandom)，没有时先添加。

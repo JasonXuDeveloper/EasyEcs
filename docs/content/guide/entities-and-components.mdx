@@ -232,7 +232,7 @@ the same.
 | --- | --- | --- |
 | `record struct Position(float X, float Y) : IComponent` | `e.Position` (`ref`), `e.HasPosition`, `e.TryGetPosition(out p)`, `e.GetOrAddPosition()`, `e.GetOrAddPosition(x, y)`, `e.SetPosition(x, y)`, `e.RemovePosition()` | `Get`, `Has`, `TryGet`, `GetOrAdd`, `GetOrAdd(new Position(x, y))`, `Set(new Position(x, y))`, `Remove` |
 | a tracked component (`Armor : ITracked`) | `e.Armor` is `ref readonly`; `e.WriteArmor()` returns the `ref`; `e.SetArmorIfChanged(v)` | `Read`; `Get` (stamped as written); `SetIfChanged(new Armor(v))` |
-| an indexed component (`[IndexKey]`, `Zone : IIndexed<int>`) | `e.Zone` is `ref readonly`, no `GetOrAddZone` or `WriteZone`; `e.SetZoneIfChanged(id)`; `world.ZoneIndex` | `Read`; `SetIfChanged(new Zone(id))`; `world.Index<Zone, int>()` |
+| an indexed component (`[LookupKey]`, `Zone : IIndexed<int>`) | `e.Zone` is `ref readonly`, no `GetOrAddZone` or `WriteZone`; `e.SetZoneIfChanged(id)`; `world.ZoneIndex` | `Read`; `SetIfChanged(new Zone(id))`; `world.Index<Zone, int>()` |
 | a unique component (`[UniqueKey]`, `Account : IUniqueIndexed<long>`) | as an indexed one; `world.AccountIndex.Get(key)`, `world.AccountIndex.TryGet(key, out e)` | the [one entity of a key](#unique-key) |
 | a grouped component (`[Group]`, `Team : IGroup`) | `e.Team` is `ref readonly`, no `GetOrAddTeam` or `WriteTeam`; `e.SetTeamIfChanged(…)`; `filter.InTeam(group)` | `Read`; `SetIfChanged`; `filter.InGroup<Team>(group)` ([groups](/en/docs/guide/groups)) |
 | a tag (`struct Dead : IComponent`) | `e.IsDead`, `e.SetDead()`, `e.RemoveDead()` | `Has`, `Set(new Dead())`, `Remove` |
@@ -281,7 +281,7 @@ once, and every world follows them from its first table holding the type.
 
 | Attribute | On | What it gives | Page |
 | --- | --- | --- | --- |
-| `[IndexKey]` | a field, a property or a positional parameter; or the struct (the whole value is the key) | `IIndexed<TKey>` and its `Key`: a value index, `world.XIndex` | [Value indexes](/en/docs/guide/indexes-and-relations#value-indexes) |
+| `[LookupKey]` | a field, a property or a positional parameter; or the struct (the whole value is the key) | `IIndexed<TKey>` and its `Key`: a value index, `world.XIndex` | [Value indexes](/en/docs/guide/indexes-and-relations#value-indexes) |
 | `[UniqueKey]` | the same | `IUniqueIndexed<TKey>`: one entity per key | [Unique keys](/en/docs/guide/indexes-and-relations#unique-keys) |
 | `[Group]` | an `int` or enum member | `IGroup` and its `Group`: tables split by the value | [Groups](/en/docs/guide/groups#mark-the-component) |
 | `[GroupBy]` | an `IGroup` struct | every world groups by it, with no `GroupBy<T>()` call | [Groups](/en/docs/guide/groups#group-by) |
@@ -290,7 +290,7 @@ once, and every world follows them from its first table holding the type.
 | `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]`, `[Any]` | every field of a singleton | `IReduction<T>`: `Identity` and `Combine`, field by field | [Reductions](/en/docs/guide/threading#reductions) |
 
 ```csharp tab="You write"
-public partial record struct Owner([IndexKey] EntityId Of) : IComponent;
+public partial record struct Owner([LookupKey] EntityId Of) : IComponent;
 ```
 
 ```csharp tab="The generator writes" doccheck=skip

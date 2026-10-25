@@ -4,7 +4,7 @@ namespace EasyEcs.UnitTest;
 
 /// <summary>A summon dies with its summoner in every world: the policy is declared on the type.</summary>
 [WhenTargetDestroyed(TargetPolicy.Destroy)]
-public partial record struct SummonedBy([IndexKey] EntityId Summoner) : IComponent;
+public partial record struct SummonedBy([LookupKey] EntityId Summoner) : IComponent;
 
 /// <summary>A pact's links go when its target is destroyed, in every world.</summary>
 [WhenTargetDestroyed(TargetPolicy.Remove)]

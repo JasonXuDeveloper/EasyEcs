@@ -30,8 +30,8 @@ available as Markdown: add `.md` to its URL.
   it up with `world.XIndex.Get(key)` / `TryGet(key, out e)`, never with a hand-kept dictionary. A write that would give
   a second entity a taken key throws `InvalidOperationException`; to move a key, change the old holder first. Not for
   `EntityId` keys (EECS036). A component has one index key: never two `IIndexed<TKey>` (EECS036). A key that is a
-  member is declared, not written: `[IndexKey]` (or `[UniqueKey]`) on the field or positional parameter of a partial
-  struct (`public partial record struct Account([UniqueKey] int Id) : IComponent;`; `[IndexKey]` on the type when the
+  member is declared, not written: `[LookupKey]` (or `[UniqueKey]`) on the field or positional parameter of a partial
+  struct (`public partial record struct Account([UniqueKey] int Id) : IComponent;`; `[LookupKey]` on the type when the
   value itself is the key), and the generator writes the interface and an explicit `Key` (EECS067). `[Group]` on an
   `int` or enum member declares a table group the same way (a hand-written `Group` returning one: EECS067), and `[GroupBy]` on the type makes every world group by it
   (no `world.GroupBy<T>()` per world). A key computed from several members stays a hand-written `Key`. When the keys a
@@ -233,7 +233,7 @@ available as Markdown: add `.md` to its URL.
 - It has no actor type. An actor is a pattern: one type per kind of actor that is its key component
   (`IIndexed<TSelf>`), its system group and the group's filter (`ISystemGroupWith<In<TSelf>>`), declared once through a
   generic interface (`interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>`).
-  Declare the key with `[IndexKey]` on the type (`[IndexKey] public readonly partial record struct Shop(long Id) :
+  Declare the key with `[LookupKey]` on the type (`[LookupKey] public readonly partial record struct Shop(long Id) :
   IActor<Shop>;`): the generated `Key` is explicit, while a public `Key => this` makes the record's `ToString()` recurse
   until the stack overflows (EECS043).
   https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors

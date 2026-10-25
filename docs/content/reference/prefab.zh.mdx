@@ -130,6 +130,6 @@ public Prefab SetAbsent<T>() where T : struct, IComponent;
 public Prefab SetBuffer<T>(params ReadOnlySpan<T> elements) where T : struct;
 ```
 
-给预制体一个装着 `elements` 的 [`DynamicBuffer`](/zh/docs/reference/dynamicbuffer)，替换原来那个：每个实例都拿到自己的一份列表，里面就是这些元素。返回预制体。O(n)。
+Gives the prefab a [`DynamicBuffer`](/zh/docs/reference/dynamicbuffer) of `elements`, replacing the one it has: every instance shares this list until it writes its buffer, which first gives it a copy of its own. Returns the prefab. O(n).
 
 **复杂度**（[API 表](/zh/docs/api)）：O(n)

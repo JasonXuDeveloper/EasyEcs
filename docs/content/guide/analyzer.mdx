@@ -19,7 +19,7 @@ rules say why a method runs one row at a time (EECS055, a suggestion) and fail t
 vectorize does not (EECS056); EECS057 keeps a [reduction](/en/docs/guide/threading#reductions) the only write of its
 singleton, EECS058 keeps a `Scratch<T>`'s memory out of the world, and EECS059 keeps a `Lookup<T>` (or a tile) off
 what its pass writes; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses; the part
-rules (EECS062 to EECS069) check the types whose members the generator writes from attributes (`[Sum]`, `[IndexKey]`,
+rules (EECS062 to EECS069) check the types whose members the generator writes from attributes (`[Sum]`, `[LookupKey]`,
 `[Group]`) and the setup attributes, and suggest the attributes for a reduction or a key written by hand; EECS070 keeps the records of an `Emit<T>` in row order, and EECS071 finds random numbers a run cannot repeat; the tile rules (EECS072, EECS073) reject a grid tile whose halo does not fit and two tiles that would share a texture. The system rules (EECS074 to EECS077) keep a system a `ref struct` of static members with valid hooks, and reject a type that is no system where a system is named. The declaration rules (EECS080 to EECS085) suggest the attribute
 that writes what code does by hand (a one-entity job, a pass that destroys what it visits) and reject one that cannot
 apply. The parameter rules (EECS086 to EECS089) point code that keeps a method on one thread to the parameter that does
@@ -91,7 +91,7 @@ EECS049, not also a cost of its parameters; an instance hook of a system is EECS
 | [EECS040](#eecs040) | Error | `SetIfChanged` can compare its type | |
 | [EECS041](#eecs041) | Error | A pass does not run the calls it refuses | |
 | [EECS042](#eecs042) | Error | An indexed component is not changed while its index is walked | |
-| [EECS043](#eecs043) | Error | A record struct key does not print itself | `[IndexKey]` on the type, or `Key` implemented explicitly |
+| [EECS043](#eecs043) | Error | A record struct key does not print itself | `[LookupKey]` on the type, or `Key` implemented explicitly |
 | [EECS044](#eecs044) | Error | A sliced filter goes to passes only | |
 | [EECS045](#eecs045) | Error | `Retired` and `Disabled<T>` are the world's to write | |
 | [EECS046](#eecs046) | Warning | A loop that only reads tracked components uses `Read` | `Read<T1..Tn>` |
@@ -115,7 +115,7 @@ EECS049, not also a cost of its parameters; an instance hook of a system is EECS
 | [EECS064](#eecs064) | Error | The reduction attributes combine every field | |
 | [EECS065](#eecs065) | Info | A field-wise reduction is declared by attributes | Declare it with attributes |
 | [EECS066](#eecs066) | Warning | A reduction's `Identity` is the identity of its `Combine` | The right `Identity`, or the attributes |
-| [EECS067](#eecs067) | Info | A key or group that returns a member is declared by `[IndexKey]` / `[Group]` | `[IndexKey]` / `[UniqueKey]` / `[Group]` |
+| [EECS067](#eecs067) | Info | A key or group that returns a member is declared by `[LookupKey]` / `[Group]` | `[LookupKey]` / `[UniqueKey]` / `[Group]` |
 | [EECS068](#eecs068) | Error | A setup attribute goes on a type it fits | |
 | [EECS069](#eecs069) | Warning / Info | A saved managed type has a Nino formatter | `[NinoType]` / `[NotSaved]` |
 | [EECS070](#eecs070) | Error | A pass neither reads its own records nor emits one kind twice | |
@@ -627,7 +627,7 @@ A [value index](/en/docs/guide/indexes-and-relations#value-indexes) follows `Set
   `Maybe<T>` hands out a `ref`; take a `ReadOnlyMaybe<T>` to read it).
 
 ```csharp
-public partial record struct Zone([IndexKey] int Id) : IComponent;
+public partial record struct Zone([LookupKey] int Id) : IComponent;
 public record struct Portal(int To) : IComponent;
 ```
 
@@ -1227,7 +1227,7 @@ unique one against that index. The rule reports declarations that cannot work:
   first, so a relation key cannot be unique.
 - **A second key.** A component is indexed once: a second `IIndexed<TKey>` or `IUniqueIndexed<TKey>` on it, unique or
   not, could never be indexed, and `world.Index` throws for it.
-- **A key or a group the attributes cannot declare.** An `[IndexKey]` / `[UniqueKey]` member whose type is not
+- **A key or a group the attributes cannot declare.** An `[LookupKey]` / `[UniqueKey]` member whose type is not
   `IEquatable` of itself, of another type than an index interface the struct declares, beside a second one or beside a
   `Key` written by hand; a `[Group]` member that is not an `int` or an enum of `int`, or a second one.
 
@@ -1235,10 +1235,10 @@ unique one against that index. The rule reports declarations that cannot work:
 public partial record struct Mount([UniqueKey] EntityId Rider) : IComponent;
 ```
 
-Index a relation with `[IndexKey]` (`IIndexed<EntityId>`), and give a second key a component of its own:
+Index a relation with `[LookupKey]` (`IIndexed<EntityId>`), and give a second key a component of its own:
 
 ```csharp doccheck=alone
-public partial record struct Mount([IndexKey] EntityId Rider) : IComponent;
+public partial record struct Mount([LookupKey] EntityId Rider) : IComponent;
 ```
 
 [Unique keys](/en/docs/guide/indexes-and-relations#unique-keys) explains what a unique index checks.
@@ -1408,7 +1408,7 @@ destroying entities leave holes the walk steps past, and a change followed by a 
 walk before it reads another list: neither is reported.
 
 ```csharp
-public partial record struct Team([IndexKey] int Id) : IComponent;
+public partial record struct Team([LookupKey] int Id) : IComponent;
 ```
 
 ```csharp doccheck=expect-EECS042
@@ -1426,7 +1426,7 @@ foreach (var member in moving) member.SetTeam(2);
 
 ## EECS043 [#eecs043]
 
-**A record struct key that prints itself.** Error. Code fixes: declare the key with `[IndexKey]` on the type, or
+**A record struct key that prints itself.** Error. Code fixes: declare the key with `[LookupKey]` on the type, or
 implement `Key` explicitly.
 
 A component that is its own key (`IIndexed<TSelf>` or `IUniqueIndexed<TSelf>` with `Key => this`) works, but on a
@@ -1437,12 +1437,12 @@ its `Key`, which prints its `Key`: the first log line or debugger view overflows
 public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { public Market Key => this; }
 ```
 
-Declare the key with `[IndexKey]` on the type: the generator writes `Key` explicitly, so it belongs to the interface
+Declare the key with `[LookupKey]` on the type: the generator writes `Key` explicitly, so it belongs to the interface
 only and `ToString()` does not print it. The other fix implements `Key` explicitly by hand (and rewrites `.Key`
 reads):
 
-```csharp tab="[IndexKey]" doccheck=alone
-[IndexKey]
+```csharp tab="[LookupKey]" doccheck=alone
+[LookupKey]
 public readonly partial record struct Market(long Id) : IComponent;
 ```
 
@@ -1736,8 +1736,8 @@ cheaper write: suppress the warning there.
 writes it again.
 
 `ChunkRows` is the rows a thread of a [parallel method](/en/docs/guide/threading#chunk-rows) takes at a time: 0 lets
-the runtime choose from the row count, more sets it (rounded up to 64). A method without `Parallel = true` runs on one
-thread and has no chunks, and a negative count means nothing.
+the runtime choose from the rows' measured cost, more sets it (rounded up to 64). A method without `Parallel = true`
+runs on one thread and has no chunks, and a negative count means nothing.
 
 ```csharp tab="Reported" doccheck=expect-EECS054
 [EcsSystem]
@@ -2114,7 +2114,7 @@ combines them.
 **A type with generated members that is not partial.** Error. Code fix: makes it partial, with every type that
 contains it.
 
-`[Sum]`, `[IndexKey]` and `[Group]` declare members that the generator writes into the type itself: the members of
+`[Sum]`, `[LookupKey]` and `[Group]` declare members that the generator writes into the type itself: the members of
 `IReduction<T>`, `IIndexed<TKey>` or `IGroup`, in a second part of the type. A part can only be added to a partial type
 nested in partial types. A `file` type cannot get one, because its part would live in another file.
 
@@ -2241,10 +2241,10 @@ public partial struct Weakest : ISingletonComponent
 
 ## EECS067 [#eecs067]
 
-**An index key or a group that an attribute can declare.** Suggestion (Info). Code fix: declares it with `[IndexKey]`
+**An index key or a group that an attribute can declare.** Suggestion (Info). Code fix: declares it with `[LookupKey]`
 (or `[UniqueKey]` for a unique index) or `[Group]` on the member, partial along its chain.
 
-A `Key` that returns a field, a property or the value itself is what `[IndexKey]` declares on that member (or on the type,
+A `Key` that returns a field, a property or the value itself is what `[LookupKey]` declares on that member (or on the type,
 for the value itself). A `Group` that returns an `int` member, or an enum of `int` cast to `int`, is what `[Group]`
 declares on that member. The generator writes the interface and an explicit `Key` or `Group`, which no `ToString()`
 prints and no caller reaches by mistake. A key or group computed from several members stays hand-written.
@@ -2261,7 +2261,7 @@ public struct Owner : IComponent, IIndexed<EntityId>
 ```csharp tab="Fixed"
 public partial struct Owner : IComponent
 {
-    [IndexKey] public EntityId Id;
+    [LookupKey] public EntityId Id;
 }
 ```
 
@@ -2425,7 +2425,7 @@ shape's constant members; `Tile.Pad` throws for a shape it could not check.
 ```csharp tab="Reported" doccheck=alone,expect-EECS072
 // A strip of 16 cells for a fourth-order stencil along x: its default faces include north and south,
 // and a halo of 2 rows is deeper than its one row.
-public partial record struct Strip([IndexKey] int Index) : IComponent, ITile<int>
+public partial record struct Strip([LookupKey] int Index) : IComponent, ITile<int>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 1;
@@ -2436,7 +2436,7 @@ public partial record struct Strip([IndexKey] int Index) : IComponent, ITile<int
 
 ```csharp tab="Fixed"
 // A 1D tile: neighbors to the west and east only.
-public partial record struct Strip([IndexKey] int Index) : IComponent, ITile<int>
+public partial record struct Strip([LookupKey] int Index) : IComponent, ITile<int>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 1;

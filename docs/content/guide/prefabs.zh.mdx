@@ -312,7 +312,7 @@ world.Reserve<Position, Health>(10_000);             // 正好用这两个组件
 </Steps>
 
 省下了什么由一个分配测试证明，不是基准测试
-（[`ReservingAPrefabCoversItsIndexKeysAndItsRetiredTable`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/tests/EasyEcs.UnitTest/AllocationTests.cs)）：
+（[`ReservingAPrefabCoversItsLookupKeysAndItsRetiredTable`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/tests/EasyEcs.UnitTest/AllocationTests.cs)）：
 一个带值索引、唯一键和清理组件的预制体，预留后的 2,000 个实例生成、退休、销毁，每一步都是 0 字节分配。
 
 ### 副本里有什么 [#what-a-copy-gets]
