@@ -30,7 +30,8 @@ public sealed partial class World
     /// The most rows per chunk of a parallel [ForEach] that does not set its own (<c>chunkRows</c>) before its rows' cost
     /// is measured. Chunks hold about a quarter of each thread's share of the matching rows (at least 1,024): equal
     /// chunks finish together, and four per thread even out uneven rows. Once a run has measured the rows' cost, chunks
-    /// are cut by time instead (<see cref="ParallelWork.Rows"/>).
+    /// follow it instead: four per thread, unless that makes them longer than about 25 µs (heavy rows: more, smaller
+    /// chunks) or shorter than 5 µs (a short pass: fewer chunks).
     /// </summary>
     public const int ParallelChunkRows = 16384;
 
@@ -144,11 +145,15 @@ public sealed partial class World
             bool froze = Gate.FreezeAlone();
             try
             {
-                if (chunks == 1)
+                if (chunks == 1 && work.Samples())
                 {
                     long start = Stopwatch.GetTimestamp();
                     work.Run(0);
                     work.Cost(Stopwatch.GetTimestamp() - start); // a pass cut into one chunk keeps learning its cost
+                }
+                else if (chunks == 1)
+                {
+                    work.Run(0);
                 }
             }
             finally
@@ -259,6 +264,7 @@ public sealed partial class World
             double perItem = _perItem;
             if (perItem <= 0 || items <= 0) return 0;
             double total = items * perItem;
+            if (total < FloorTicks) return (int)Math.Min((items + 63) & ~63L, int.MaxValue & ~63); // one chunk, on the caller
             double chunks = threads * 4.0;
             if (total > chunks * TargetTicks) chunks = Math.Min(total / TargetTicks, threads * (double)MostChunksPerThread);
             else if (total < chunks * FloorTicks) chunks = Math.Max(1, total / FloorTicks);
@@ -266,11 +272,39 @@ public sealed partial class World
             return (int)Math.Min(((long)size + 63) & ~63L, int.MaxValue & ~63);
         }
 
-        /// <summary>Record the thread time <paramref name="ticks"/> the run's <see cref="Items"/> took (at most 1.5 times the average counts).</summary>
+        // Runs on the caller alone since the last one timed (Samples).
+        private int _untimed;
+
+        /// <summary>
+        /// Whether to time this run on the caller alone: until the cost is measured, then one run in 16. A short pass
+        /// (a few hundred light rows, a fraction of a microsecond) would otherwise pay two clock reads every time.
+        /// </summary>
+        internal bool Samples()
+        {
+            if (Items <= 0) return false;
+            if (_perItem > 0 && ++_untimed < 16) return false;
+            _untimed = 0;
+            return true;
+        }
+
+        // Whether a run has been timed and dropped: the first one runs cold (JIT tiers, cache misses, helpers starting).
+        private bool _warm;
+
+        /// <summary>
+        /// Record the thread time <paramref name="ticks"/> the run's <see cref="Items"/> took (at most 1.5 times the
+        /// average counts). The first run is dropped: cold, it would cut a light pass into chunks it does not need (and
+        /// wake helpers for the first time after the first call, which allocates).
+        /// </summary>
         internal void Cost(long ticks)
         {
             long items = Items;
             if (items <= 0 || ticks <= 0) return;
+            if (!_warm)
+            {
+                _warm = true;
+                return;
+            }
+
             double perItem = (double)ticks / items, average = _perItem;
             _perItem = average == 0 ? perItem : (average * 3 + Math.Min(perItem, average * 1.5)) / 4;
         }

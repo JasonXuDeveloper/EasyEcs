@@ -1409,10 +1409,11 @@ public sealed class ArityGenerator : IIncrementalGenerator
         string ushorts = List(n, i => $"ushort b{i}");
         return $$"""
                 /// <summary>
-                /// <see cref="{{name}}{{{tps}}, TJob}(ref TJob, in QueryFilter)"/> on several threads: the matching rows are cut into chunks (about four per
-                /// thread, a multiple of 64 rows, at most <see cref="ParallelChunkRows"/>; 16 for a job that merges, whatever
-                /// the threads, so its result does not depend on them; or <paramref name="chunkRows"/> rounded
-                /// up to 64, for few heavy rows: <c>[ForEach(Parallel = true, ChunkRows = n)]</c>) that the calling thread and up to
+                /// <see cref="{{name}}{{{tps}}, TJob}(ref TJob, in QueryFilter)"/> on several threads: the matching rows are cut into chunks (a multiple of
+                /// 64 rows: about four per thread, at most <see cref="ParallelChunkRows"/>, until a call has measured the rows' cost,
+                /// then chunks of about 25 µs for heavy rows and fewer for a short pass; 16 for a job that merges, whatever
+                /// the threads and the cost, so its result does not depend on them; or <paramref name="chunkRows"/> rounded
+                /// up to 64: <c>[ForEach(Parallel = true, ChunkRows = n)]</c>) that the calling thread and up to
                 /// <see cref="WorldOptions.MaxDegreeOfParallelism"/> - 1 helper threads run at the same time, each with its own copy of <paramref name="job"/> (state
                 /// a job keeps in its fields is not merged back, unless the job merges: <c>Merges</c>, a <c>Reduce&lt;T&gt;</c>;
                 /// its copies, one per chunk, the size of the job's fields, are then kept in an array reused by every call and
@@ -1452,6 +1453,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     private Archetype[] _tables = [];
                     private RowFilter[] _filters = [];
                     private int[] _starts = [], _ends = [];
+                    private int _cut; // chunks of the last Cut: Release clears those, not the whole reserve
             {{Lines(n, i => $"            private ushort _b{i};")}}
 
                     /// <summary>Cut the matching rows into chunks; returns how many.</summary>
@@ -1500,6 +1502,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             }
                         }
 
+                        _cut = chunks;
                         return chunks;
                     }
 
@@ -1536,8 +1539,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// <summary>Drop the references of the last call (tables, filters, the job's own) until the next one.</summary>
                     public void Release()
                     {
-                        Array.Clear(_tables);
-                        Array.Clear(_filters);
+                        Array.Clear(_tables, 0, _cut);
+                        Array.Clear(_filters, 0, _cut);
                         if (TJob.Merges && RuntimeHelpers.IsReferenceOrContainsReferences<TJob>()) // the copies hold the job's references
                             for (int i = 0; i < _parts.Length; i++) _parts[i].Job = default;
                         Job = default;

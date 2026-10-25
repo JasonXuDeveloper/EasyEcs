@@ -151,7 +151,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     public static readonly DiagnosticDescriptor BadChunkRows = new("EECS054", "Invalid [ForEach(ChunkRows = N)]",
         "[ForEach] method '{0}' cannot set ChunkRows: {1}",
         Category, DiagnosticSeverity.Error, true,
-        "ChunkRows is the rows a thread of a parallel pass takes at a time: 0 lets the runtime choose from the row count, " +
+        "ChunkRows is the rows a thread of a parallel pass takes at a time: 0 lets the runtime choose from the rows' measured cost, " +
         "more sets it (rounded up to 64). A method without Parallel = true runs on one thread and has no chunks: set " +
         "Parallel = true or drop ChunkRows.", helpLinkUri: Help("EECS054"));
 
