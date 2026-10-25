@@ -692,7 +692,8 @@ public sealed partial class EasyEcsAnalyzer
     /// generated properties). None when a lookup of the type is a TryGet, a presence test or passes through a batch
     /// method's entities, when the method takes the type otherwise (Maybe, Mut, a span) or excludes it, when a write
     /// would need a 'ref' that cannot be (an indexed component, a singleton of a parallel method), when the method
-    /// already takes 9 components, or when the parameter's name is taken.
+    /// already takes 9 components, or when the parameter's name is taken. The Entity or World parameter the lookups go
+    /// through is dropped (<c>Drop</c>) when they are its only uses.
     /// </summary>
     private static (ImmutableDictionary<string, string?> Properties, Location[] Uses)? ParameterFix(IMethodSymbol method, IOperation body,
         ITypeSymbol type, bool singleton, List<(IOperation Operation, ITypeSymbol Type, bool Singleton, bool Presence)> all,
@@ -742,6 +743,21 @@ public sealed partial class EasyEcsAnalyzer
 
         var properties = ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Parameter").Add("Name", name);
         if (parameter != null) properties = properties.Add("Parameter", parameter);
+        // The Entity or World the lookups go through, used for nothing else: it goes too (EECS026 would report it next).
+        foreach (var p in method.Parameters)
+        {
+            if (Symbols.Classify(p) is not (Symbols.ParamKind.Entity or Symbols.ParamKind.World)) continue;
+            bool used = false, elsewhere = false;
+            foreach (var reference in body.Descendants().OfType<IParameterReferenceOperation>())
+            {
+                if (!SymbolEqualityComparer.Default.Equals(reference.Parameter, p)) continue;
+                used = true;
+                elsewhere |= !uses.Any(u => u.Syntax.Span.Contains(reference.Syntax.Span));
+            }
+
+            if (used && !elsewhere) properties = properties.Add("Drop", p.Name);
+        }
+
         return (properties, uses.Select(u => u.Syntax.GetLocation()).ToArray());
     }
 
@@ -1122,10 +1138,14 @@ public sealed partial class EasyEcsAnalyzer
             && !Symbols.IsIndexed(method.TypeArguments[0]) && call.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax access }
             && !Uses.MayWrite(call))
         {
-            string read = access.Expression + "." + access.Name.ToString().Replace("Get", "Read") + "()";
-            context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, call.Syntax.GetLocation(), Fix(read, "Read it with Read<T>()"),
-                $"Get<{method.TypeArguments[0].Name}>()", "it stamps the row as changed, so [Changed<" + method.TypeArguments[0].Name + ">] systems visit it",
-                "read it with Read<" + method.TypeArguments[0].Name + ">()"));
+            // The generated member when it binds (Read<T>() would be EECS033's next), else Read<T>().
+            string component = method.TypeArguments[0].Name, member = access.Expression + "." + component;
+            bool named = Binds(model, call.Syntax, member, out var property) && Symbols.IsGenerated(property!);
+            string read = named ? member : access.Expression + "." + access.Name.ToString().Replace("Get", "Read") + "()";
+            context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, call.Syntax.GetLocation(),
+                Fix(read, named ? "Read it with ." + component : "Read it with Read<T>()"),
+                $"Get<{component}>()", "it stamps the row as changed, so [Changed<" + component + ">] systems visit it",
+                named ? "read it with ." + component : "read it with Read<" + component + ">()"));
             return;
         }
 
