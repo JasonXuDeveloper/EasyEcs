@@ -116,6 +116,15 @@ internal sealed partial class Kernel
     /// </summary>
     internal const string Visited = "\u0001Visited";
 
+    /// <summary>
+    /// The token of the statements that run the rows up to <c>__end</c> through the method and go on to the vector after
+    /// them: a lookup whose entities live in several tables takes it before the gathers it would waste (Kernel.Lookups.cs).
+    /// </summary>
+    internal const string RunRows = "\u0001RunRows";
+
+    /// <summary>The reason a method reading other entities keeps its rows one by one unless it asks for the gathers.</summary>
+    internal const string GathersOnRequest = "it reads other entities through a Lookup<T>: a vector loop gathers them, faster where a vector's targets share a table and up to 1.1 times as slow where they spread over many; SimdMode = SimdMode.Require asks for it";
+
     /// <summary>The token of the square root: Vector.SquareRoot, Vector512.Sqrt.</summary>
     internal const string SquareRoot = V + ".SquareRoot(";
     private const string Interleaved = "global::EasyEcs.Interleaved";
@@ -284,7 +293,15 @@ internal sealed partial class Kernel
         }
         var lane = new Lane(method, Symbols.IsRunner(method), Symbols.IsParallel(method), Symbols.FastFloats(method), model,
             Symbols.IsStable(method, syntax, model));
-        return Vectorize(lane, (IOperation?)body.BlockBody ?? body.ExpressionBody!, fieldOf, ct, out reason);
+        var code = Vectorize(lane, (IOperation?)body.BlockBody ?? body.ExpressionBody!, fieldOf, ct, out reason);
+        // Gathers win where a vector's targets share a table and lose a little where they spread over many (D131): where
+        // they live is the data's, not the code's, so the loop that gathers is the method's to ask for.
+        if (code is { Gathers: true } && Symbols.Simd(method) != Symbols.SimdRequire)
+        {
+            reason = new ScalarReason(GathersOnRequest, false, null);
+            return null;
+        }
+        return code;
     }
 
     /// <summary>
@@ -701,9 +718,9 @@ internal sealed partial class Kernel
         }
         string prologue = kernel._bails ? "bool __bail = false;\n" : "";
         string live = kernel._live ? $"var __live = {Vec(kernel._mask)}.AllBitsSet;\n" : "", maskedLive = kernel._live ? "var __live = __pass;\n" : "";
-        string hold = kernel._bails ? held.ToString() : "";
+        string hold = kernel._bails || kernel._lookups.Count > 0 ? held.ToString() : ""; // a lookup sends unresolved vectors to the method too (Kernel.RunRows)
         // A masked word holds the accumulators for a bail and for a pair's fold.
-        string maskedHold = kernel._bails || kernel._reductions.Values.Any(r => r.Fields.Any(f => kernel.IsDoubled(f.Type))) ? held.ToString() : "";
+        string maskedHold = kernel._bails || kernel._lookups.Count > 0 || kernel._reductions.Values.Any(r => r.Fields.Any(f => kernel.IsDoubled(f.Type))) ? held.ToString() : "";
         if (kernel._wideOf.Count > 0) kernel.Gate();
         string uses = kernel._body.ToString() + stores + masked + kernel._setup;
         var read = new StringBuilder();
@@ -720,6 +737,8 @@ internal sealed partial class Kernel
         }
         // The passing rows of a masked word as masks of a pair's halves, for the stores and the lanes of what it writes.
         if (kernel._halvesPass) kept.Insert(0, $"var __pw_0 = {V}.WidenLower(__pass);\nvar __pw_1 = {V}.WidenUpper(__pass);\n");
+        // Each lookup's backoff (Lookup.Resolve): after a miss, the vectors of the run to send to the method without trying.
+        for (int g = 0; g < kernel._lookups.Count; g++) kernel._setup.Append($"int __b{g} = 0;\n");
         return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
             kernel._setup.ToString(), prologue + live + read + hold + kernel._body, stores.ToString(), prologue + maskedLive + read + kept + maskedHold + kernel._body.Masked, masked.ToString(),
             restore.ToString(), fold.ToString(), kernel._size, kernel._mask, Elem(first), kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
@@ -743,7 +762,7 @@ internal sealed partial class Kernel
     /// </summary>
     private static FlatCode? Flat(Kernel main, IOperation root, System.Func<Kernel> make)
     {
-        if (main._change != null || main._emits.Count > 0 || main._bails || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0 || main._wides.Count > 0 || main._structs.Count > 0 || main._optionals.Count > 0 || main._wideOf.Count > 0) return null;
+        if (main._change != null || main._emits.Count > 0 || main._bails || main._lookups.Count > 0 || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0 || main._wides.Count > 0 || main._structs.Count > 0 || main._optionals.Count > 0 || main._wideOf.Count > 0) return null;
         var components = main._components.Values.ToArray();
         var type = components[0].Fields[0].Type;
         int fields = components[0].Fields.Length;

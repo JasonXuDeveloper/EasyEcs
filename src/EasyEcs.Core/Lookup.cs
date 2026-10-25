@@ -75,10 +75,11 @@ public readonly ref struct Lookup<T> where T : struct, IComponent
     /// <paramref name="index"/>): <paramref name="has"/>, the lanes whose entity is alive and has it (all bits set);
     /// <paramref name="rows"/>, their rows' byte offsets in <paramref name="column"/> (<see cref="LookupLanes.Gather{TLane}(nint, Vector256{int}, Vector256{int}, int)"/>).
     /// False when those entities live in several tables, or their table holds <typeparamref name="T"/> for some rows only:
-    /// the vector's rows then run the method. Generated code calls this.
+    /// the vector's rows then run the method, and so do those of the next <paramref name="backoff"/> vectors (a count the
+    /// loop keeps per lookup, 0 at its start, which grows to 63 with misses in a row). Generated code calls this.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Resolve(Vector256<int> version, Vector256<int> index, out Vector256<int> has, out Vector256<int> rows, out nint column)
+    public bool Resolve(Vector256<int> version, Vector256<int> index, ref int backoff, out Vector256<int> has, out Vector256<int> rows, out nint column)
     {
         Archetype table = null;
         bool none = false;
@@ -86,17 +87,19 @@ public readonly ref struct Lookup<T> where T : struct, IComponent
         {
             if (none) has = default;
             rows = slots * Unsafe.SizeOf<T>();
+            backoff = 0;
             return true;
         }
 
+        LookupLanes.Missed(ref backoff);
         has = rows = default;
         column = 0;
         return false;
     }
 
-    /// <inheritdoc cref="Resolve(Vector256{int}, Vector256{int}, out Vector256{int}, out Vector256{int}, out nint)"/>
+    /// <inheritdoc cref="Resolve(Vector256{int}, Vector256{int}, ref int, out Vector256{int}, out Vector256{int}, out nint)"/>
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Resolve(Vector512<int> version, Vector512<int> index, out Vector512<int> has, out Vector512<int> rows, out nint column)
+    public bool Resolve(Vector512<int> version, Vector512<int> index, ref int backoff, out Vector512<int> has, out Vector512<int> rows, out nint column)
     {
         Archetype table = null; // both halves' entities in one table
         bool none = false;
@@ -106,28 +109,30 @@ public readonly ref struct Lookup<T> where T : struct, IComponent
         {
             has = none ? default : Vector512.Create(lower, upper);
             rows = Vector512.Create(low, high) * Unsafe.SizeOf<T>();
+            backoff = 0;
             return true;
         }
 
+        LookupLanes.Missed(ref backoff);
         has = rows = default;
         column = 0;
         return false;
     }
 
-    /// <inheritdoc cref="Resolve(Vector256{int}, Vector256{int}, out Vector256{int}, out Vector256{int}, out nint)"/>
+    /// <inheritdoc cref="Resolve(Vector256{int}, Vector256{int}, ref int, out Vector256{int}, out Vector256{int}, out nint)"/>
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Resolve(Vector<int> version, Vector<int> index, out Vector<int> has, out Vector<int> rows, out nint column)
+    public bool Resolve(Vector<int> version, Vector<int> index, ref int backoff, out Vector<int> has, out Vector<int> rows, out nint column)
     {
         bool resolved;
         // Vector<T> is 256 bits on AVX2 hardware, 512 with DOTNET_PreferredVectorBitWidth=512 (IsAccelerated gates the loop).
         if (Vector<int>.Count == 16)
         {
-            resolved = Resolve(version.AsVector512(), index.AsVector512(), out var wide, out var at, out column);
+            resolved = Resolve(version.AsVector512(), index.AsVector512(), ref backoff, out var wide, out var at, out column);
             (has, rows) = (wide.AsVector(), at.AsVector());
         }
         else
         {
-            resolved = Resolve(version.AsVector256(), index.AsVector256(), out var narrow, out var at, out column);
+            resolved = Resolve(version.AsVector256(), index.AsVector256(), ref backoff, out var narrow, out var at, out column);
             (has, rows) = (narrow.AsVector(), at.AsVector());
         }
 

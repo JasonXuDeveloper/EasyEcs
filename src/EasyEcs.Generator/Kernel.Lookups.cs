@@ -86,9 +86,10 @@ internal sealed partial class Kernel
         g = _lookups.Count;
         _lookups.Add((element, paths));
         int n = Presence(g);
-        _bails = true;
         _implied[$"__has{n}"] = [n];
-        _body.Append($"__bail |= !{lookup}.Resolve({version}, {index}, out var __has{n}, out var __gr{g}, out var __gc{g}); // entities of several tables: the method runs these rows\n");
+        // Entities of several tables: the method runs this vector's rows, and those of the vectors its backoff skips.
+        _body.Append($"if (!{lookup}.Resolve({version}, {index}, ref __b{g}, out var __has{n}, out var __gr{g}, out var __gc{g}))\n{{\n");
+        _body.Append($"    nint __end = global::System.Math.Min(i + (1 + __b{g}) * {Vec(_mask)}.Count, rows);\n    {RunRows}\n}}\n");
         if (Unchanging(version) && Unchanging(index)) _resolved[key] = g;
         return g;
     }

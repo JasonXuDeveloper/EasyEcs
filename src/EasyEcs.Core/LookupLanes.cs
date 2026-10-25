@@ -10,7 +10,7 @@ namespace EasyEcs;
 
 /// <summary>
 /// Reads of other entities in a generated vector loop (a <c>[ForEach]</c> method taking a <see cref="Lookup{T}"/>): the
-/// lanes' ids resolved by AVX2 gathers of their records (<see cref="Lookup{T}.Resolve(Vector256{int}, Vector256{int}, out Vector256{int}, out Vector256{int}, out nint)"/>),
+/// lanes' ids resolved by AVX2 gathers of their records (<see cref="Lookup{T}.Resolve(Vector256{int}, Vector256{int}, ref int, out Vector256{int}, out Vector256{int}, out nint)"/>),
 /// then each field the method reads gathered from the one table every lane's entity lives in (<see cref="Gather{TLane}(nint, Vector256{int}, Vector256{int}, int)"/>).
 /// Lanes whose entities live in several tables are not resolved: the loop sends that vector's rows to the method, which
 /// reads them one by one. Generated code calls this.
@@ -65,6 +65,15 @@ public static unsafe class LookupLanes
         if (Vector<int>.Count == 16) return Gather<TLane>(column, rows.AsVector512(), has.AsVector512(), offset).AsVector();
         return Gather<TLane>(column, rows.AsVector256(), has.AsVector256(), offset).AsVector();
     }
+
+    /// <summary>
+    /// After a vector that was not resolved, the vectors that follow it to send to the method without trying:
+    /// 3, 15, then 63 after misses in a row, none once one resolves. A vector whose entities live in several tables costs
+    /// its gathers before its rows run one at a time; where most do (targets spread over many tables), trying each made
+    /// the pass up to 1.5 times as slow as the method row by row (D131).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void Missed(ref int backoff) => backoff = Math.Min(backoff * 4 + 3, 63);
 
     /// <summary>
     /// The records of the ids in lanes (<paramref name="version"/>, <paramref name="index"/>): <paramref name="has"/>, the
