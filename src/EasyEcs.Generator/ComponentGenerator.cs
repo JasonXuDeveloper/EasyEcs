@@ -104,7 +104,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 ? new[]
                 {
                     new SavedType("Component<" + m.Type + ">()", m.Type, m.EntityIds, m.Layout),
-                    new SavedType((m.Direct ? "DirectIndex<" : "UniqueIndex<") + m.Type + ", " + m.IndexKey + ">()", m.Type, new EquatableArray<string>([]), ""),
+                    new SavedType((m.Direct ? "DirectIndex<" : "UniqueIndex<") + m.Type + ", " + m.IndexedKey + ">()", m.Type, new EquatableArray<string>([]), ""),
                 }
                 : [new SavedType((m.Singleton ? "Singleton" : "Component") + "<" + m.Type + ">()", m.Type, m.EntityIds, m.Singleton ? "" : m.Layout)])
             .WithTrackingName("SavedComponents");
@@ -369,7 +369,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         {
             Extension(sb, World);
             Property(sb, $"The world's index of <see cref=\"{t}\"/> (<c>Index&lt;{n}, …&gt;()</c>); keep it in a local or field in loops.",
-                $"global::EasyEcs.ValueIndex<{t}, {m.IndexKey}> {n}Index", $"@this.Index<{t}, {m.IndexKey}>()");
+                $"global::EasyEcs.ValueIndex<{t}, {m.IndexedKey}> {n}Index", $"@this.Index<{t}, {m.IndexedKey}>()");
             sb.Append("    }\n");
         }
 
@@ -493,7 +493,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 return new Shape(Symbols.Implements(type, "EasyEcs.IRelation") ? Kind.Relation : Kind.Element,
                     false, false, false, false, false, false, true, false);
             bool tag = Symbols.IsTag(type);
-            bool indexed = Symbols.IndexKey(type, out _) != null, grouped = Symbols.IsGrouped(type);
+            bool indexed = Symbols.IndexedKey(type, out _) != null, grouped = Symbols.IsGrouped(type);
             bool tracked = Symbols.Implements(type, Symbols.TrackChanges);
             bool own = SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, core);
             return new Shape(singleton ? Kind.Singleton : Kind.Component, tag, tracked || indexed || grouped,
@@ -806,7 +806,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     /// members it gets (<see cref="Shape.Members"/>).
     /// </summary>
     private sealed record ComponentModel(
-        string Namespace, string Type, string Name, string Path, string HintName, bool IsPublic, Shape Shape, string IndexKey,
+        string Namespace, string Type, string Name, string Path, string HintName, bool IsPublic, Shape Shape, string IndexedKey,
         bool Unique, bool Direct, EquatableArray<Setter> Setters, EquatableArray<string> Members, EquatableArray<string> EntityIds, string Layout)
     {
         private static readonly SymbolDisplayFormat TypeName = Symbols.Fqn
@@ -835,7 +835,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
 
             string fqn = type.ToDisplayString(Symbols.Fqn);
             var setters = SettersOf(type, fqn, type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray());
-            var key = Symbols.IndexKey(type, out bool unique);
+            var key = Symbols.IndexedKey(type, out bool unique);
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
             return new ComponentModel(ns, fqn, type.Name, Symbols.FlatName(type), Symbols.HintName(type), isPublic, shape,
                 key?.ToDisplayString(Symbols.Fqn) ?? "",

@@ -218,14 +218,14 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "Take one tile per field: one cell type (one struct, one buffer) per field the stencil reads, each its own " +
         "Tile<TCell, TTile>.", helpLinkUri: Help("EECS073"));
 
-    public static readonly DiagnosticDescriptor BadIndexKey = new("EECS036", "A component that cannot be indexed by its key",
+    public static readonly DiagnosticDescriptor BadIndexedKey = new("EECS036", "A component that cannot be indexed by its key",
         "'{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
         "A world indexes a component once, by one key: World.Index throws for a second key (another IIndexed<TKey> or " +
         "IUniqueIndexed<TKey>), so that key can never be indexed. A unique component is indexed by its unique key from " +
         "its first table, and every write is checked against that index. An EntityId key cannot be unique: loads and " +
         "moves rewrite such keys after they copy the rows, too late to check them first; index the relation with " +
-        "IIndexed<EntityId> (or [IndexKey]). A key declared with [IndexKey] / [UniqueKey] is IEquatable of itself, the only key of " +
+        "IIndexed<EntityId> (or [LookupKey]). A key declared with [LookupKey] / [UniqueKey] is IEquatable of itself, the only key of " +
         "its component, of the type of any index interface the struct declares, and not written by hand as well; a " +
         "[Group] member is an int or an enum of int, the only one.", helpLinkUri: Help("EECS036"));
 
@@ -240,7 +240,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         MixedBatch, NotParallel, WriteThroughReadOnly, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
         RemovedRequired, EntityInData, OrderCycle, OrderAcrossGroups, EntryPointCollision, Unnameable, FilterOutsideGroup, LocalForEach,
         WriteAccessOnlyReads, UnusedParameter, RowLookup, Allocation, PerEntityChange, CreateInLoop, QueryByHand,
-        GeneratedMember, UpdateInSystem, BadSlices, BadIndexKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
+        GeneratedMember, UpdateInSystem, BadSlices, BadIndexedKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
         IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
         UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, ReductionOverwritten, ScalarLoop, NoVectorLoop,
         SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, NotPartial, ReductionWrittenTwice, BadReductionField, HandWrittenReduction,
@@ -599,7 +599,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             var keys = type.AllInterfaces.Where(i => Symbols.Named(i.OriginalDefinition, Symbols.Indexed))
                 .Select(i => i.TypeArguments[0]).Distinct<ITypeSymbol>(SymbolEqualityComparer.Default).ToArray();
             if (keys.Length > 1)
-                context.ReportDiagnostic(Diagnostic.Create(BadIndexKey, location, type.Name,
+                context.ReportDiagnostic(Diagnostic.Create(BadIndexedKey, location, type.Name,
                     $"is indexed by {string.Join(" and ", keys.Select(k => $"IIndexed<{Name(k)}>"))}, but a component has one index: World.Index throws for every key but the first it is asked for"));
             return;
         }
@@ -607,12 +607,12 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         var key = unique.TypeArguments[0];
         string keyName = Name(key);
         if (Symbols.Named(key, Symbols.EntityId))
-            context.ReportDiagnostic(Diagnostic.Create(BadIndexKey, location, type.Name,
+            context.ReportDiagnostic(Diagnostic.Create(BadIndexedKey, location, type.Name,
                 $"is IUniqueIndexed<{keyName}>, but an EntityId key cannot be unique: index the relation with IIndexed<EntityId>"));
         foreach (var other in type.AllInterfaces)
             if ((Symbols.Named(other.OriginalDefinition, Symbols.Indexed) || Symbols.Named(other.OriginalDefinition, Symbols.UniqueIndexed))
                 && !SymbolEqualityComparer.Default.Equals(other.TypeArguments[0], key))
-                context.ReportDiagnostic(Diagnostic.Create(BadIndexKey, location, type.Name,
+                context.ReportDiagnostic(Diagnostic.Create(BadIndexedKey, location, type.Name,
                     $"is IUniqueIndexed<{keyName}>, so its key {Name(other.TypeArguments[0])} can never be indexed: one index per component"));
     }
 

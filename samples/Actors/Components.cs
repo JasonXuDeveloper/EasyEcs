@@ -16,11 +16,11 @@ public struct In<TActor> : IComponent;
 public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;
 
-// The key is the actor itself: [IndexKey] on the type, and the generator writes the explicit Key.
-[IndexKey]
+// The key is the actor itself: [LookupKey] on the type, and the generator writes the explicit Key.
+[LookupKey]
 public readonly partial record struct Shop(long Id) : IActor<Shop>;
 
-[IndexKey]
+[LookupKey]
 public readonly partial record struct Bank(long Id) : IActor<Bank>;
 
 // State that persists: tracked, so the host saves only the actors whose state changed.

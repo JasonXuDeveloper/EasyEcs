@@ -16,7 +16,9 @@ namespace EasyEcs.CodeFixes;
 /// the name makes a method a hook), <c>[GroupBy]</c> on a struct (CS0592: it goes on the grouped member), and
 /// <c>EntityRandom</c>'s tick written by hand (CS0200, or CS0272 in source, on <c>Tick++</c> or <c>Tick = ...</c>:
 /// the statement goes; CS1729, CS1501, CS1739 on <c>new EntityRandom(seed, tick)</c> or
-/// <c>SetEntityRandom(seed, tick)</c>: the tick goes; the world advances it on every update). EECS090's rename of a method named almost like a hook lives here too.
+/// <c>SetEntityRandom(seed, tick)</c>: the tick goes; the world advances it on every update), and renamed attributes
+/// (CS0246, or CS0234 when qualified: <c>[IndexKey]</c> is <c>[LookupKey]</c>). EECS090's rename of a method named
+/// almost like a hook lives here too.
 /// </summary>
 public sealed partial class EasyEcsCodeFixes
 {
@@ -169,6 +171,27 @@ public sealed partial class EasyEcsCodeFixes
         }
 
         return (marked != null ? "Move [GroupBy] onto the [Group] member" : "Move [GroupBy] onto the Group property", type, tracked);
+    }
+
+    /// <summary>The attributes renamed before 1.0, old name to new: the old name no longer binds.</summary>
+    private static readonly (string Old, string New)[] RenamedAttributes = [("IndexKey", "LookupKey")];
+
+    /// <summary>
+    /// CS0246 / CS0234 on an attribute of a renamed name (<see cref="RenamedAttributes"/>, spelled with or without the
+    /// <c>Attribute</c> suffix, qualified or not): the name takes the new one, its arguments and qualification kept.
+    /// Null for any other name.
+    /// </summary>
+    private static (string Title, SyntaxNode Old, SyntaxNode New)? RenamedAttribute(AttributeSyntax attribute)
+    {
+        if (LastName(attribute.Name) is not IdentifierNameSyntax { Identifier.ValueText: var spelled } name) return null;
+        foreach (var (old, renamed) in RenamedAttributes)
+        {
+            if (spelled != old && spelled != old + "Attribute") continue;
+            string now = spelled == old ? renamed : renamed + "Attribute";
+            return ($"Rename it to [{renamed}]", name, SyntaxFactory.IdentifierName(now).WithTriviaFrom(name));
+        }
+
+        return null;
     }
 
     /// <summary>EECS090: a method named almost like a hook takes the hook's name (the analyzer checked it has no caller).</summary>

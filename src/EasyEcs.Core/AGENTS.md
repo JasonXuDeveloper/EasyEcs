@@ -10,7 +10,7 @@ When you add, rename or delete a file here, update its line (`verify` checks eve
 ```
 Contracts.cs                 IComponent, ITracked, ISingletonComponent, INoStructuralChanges and the other markers
 Declarations.cs              attributes whose code the generators write: [Sum]/[Product]/[Min]/[Max]/[All]/[Any]
-                             (a reduction), [IndexKey]/[UniqueKey]/[Group] (an index key, a group), and world setup:
+                             (a reduction), [LookupKey]/[UniqueKey]/[Group] (an index key, a group), and world setup:
                              [GroupBy] (on the member: a group every world splits by), [WhenTargetDestroyed], [NotSaved]
 Entity.cs                    the entity handle (id, version, world): Has/Get/Read/TryGet/GetOrAdd/SetIfChanged/
                              Disable/Enable/Clone/Destroy

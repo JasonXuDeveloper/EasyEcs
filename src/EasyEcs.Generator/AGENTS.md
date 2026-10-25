@@ -76,7 +76,7 @@ EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-034, EECS039, EECS046, EECS
                              method left without a vector loop; EECS025 and EECS053 for the parameters of lambda passes
                              too); each computes its fix as
                              diagnostic properties for EasyEcs.CodeFixes
-PartGenerator.cs             [Sum]..[Any], [IndexKey]/[UniqueKey], [Group] -> a part of the partial struct (IReduction<T>,
+PartGenerator.cs             [Sum]..[Any], [LookupKey]/[UniqueKey], [Group] -> a part of the partial struct (IReduction<T>,
                              IIndexed<K>.Key, IGroup.Group); Parts.cs: the models and Problems read once for the
                              generator and the analyzer (other generators read keys and groups through Symbols)
 Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (Kernel.Vectorize: the loop, or the

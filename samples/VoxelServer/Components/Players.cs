@@ -13,11 +13,11 @@ public record struct Input(Vector2 Walk, bool Dig) : IComponent;
 // chunk, after sending what the step brings into view and forgetting what it takes out. An index of the players by it
 // (world.ViewCenterIndex) counts the players of a chunk in O(1): who sees a chunk, who a zombie can hunt, who picks up
 // an item. A cleanup component: a player who leaves keeps it, Retired, until AoiViewSystem has released its view.
-public partial record struct ViewCenter([IndexKey] ChunkPos Chunk) : ICleanupComponent;
+public partial record struct ViewCenter([LookupKey] ChunkPos Chunk) : ICleanupComponent;
 
 // The blocks a player dug: the scoreboard. An ordered index (world.ScoreIndex.Descending()) walks the players from
 // the best digger down, kept sorted as the scores change, so the top of the board is never a sort.
-public partial record struct Score([IndexKey] int BlocksDug) : IComponent;
+public partial record struct Score([LookupKey] int BlocksDug) : IComponent;
 
 // One slot of a player's inventory: a DynamicBuffer<ItemStack> on the player.
 public record struct ItemStack(Block Kind, int Count);

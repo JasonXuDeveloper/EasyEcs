@@ -624,7 +624,7 @@ public sealed partial class EasyEcsAnalyzer
     /// element of a <c>DynamicBuffer</c> of relations; else null.
     /// </summary>
     private static ITypeSymbol? Indexing(ITypeSymbol type) =>
-        Symbols.IndexKey(type, out _) != null ? type
+        Symbols.IndexedKey(type, out _) != null ? type
         : Symbols.BufferElement(type) is { } element && Symbols.Implements(element, "EasyEcs.IRelation") ? element
         : null;
 
