@@ -171,7 +171,8 @@ public sealed partial class Mdx(Func<string, string?> link)
     [GeneratedRegex(@"\n{3,}")]
     private static partial Regex Breaks();
 
-    [GeneratedRegex(@"\[([^\]]*)\]\([^)]*\)")]
+    // A Markdown link; its label may itself be bracketed (a labelled cref such as [[EcsSystem]](...)).
+    [GeneratedRegex(@"\[(\[[^\]]*\]|[^\]]*)\]\([^)]*\)")]
     private static partial Regex Links();
 
     [GeneratedRegex(@"`+\d+")]

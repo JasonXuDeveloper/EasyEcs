@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.FusionMode" source="b443cf406b59">
+    <summary>
+      <see cref="T:EasyEcs.ForEachAttribute" /> 方法是否和系统里相邻的方法共用一次遍历（<see cref="P:EasyEcs.ForEachAttribute.FusionMode" />）。
+      <see cref="P:EasyEcs.SystemInfo.Loops" /> 列出每个方法和哪些方法共用遍历。
+    </summary>
+  </member>
+  <member name="F:EasyEcs.FusionMode.Auto" source="85e0e80e8b3d">
+    <summary>结果相同时和相邻的方法共用一次遍历；差一点就能融合时，EECS093 说明原因。</summary>
+  </member>
+  <member name="F:EasyEcs.FusionMode.Off" source="50f1571af515">
+    <summary>单独遍历。</summary>
+  </member>
+  <member name="F:EasyEcs.FusionMode.Require" source="6d34b9bf7e71">
+    <summary>和前一个声明的方法共用一次遍历，否则构建失败并给出原因（EECS094）。</summary>
+  </member>
+</doc>

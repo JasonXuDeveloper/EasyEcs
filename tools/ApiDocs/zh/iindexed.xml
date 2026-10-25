@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.IIndexed" source="bd13cae07572">
+  <member name="T:EasyEcs.IIndexed`1" source="024a84c378d6">
     <summary>
-      所有 <see cref="T:EasyEcs.IIndexed`1" /> 共同实现的接口：不用反射，就能知道一个组件类型建了索引（JIT 会把这个类型检测折叠掉）。
-      要实现的是 <see cref="T:EasyEcs.IIndexed`1" />，不是这个接口。
+      World 按 <see cref="P:EasyEcs.IIndexed`1.Key" /> 建索引的组件：<c>world.Index&lt;T, TKey&gt;().Find(key)</c> 枚举
+      <typeparamref name="TKey" /> 等于某个值的实体（物品的主人、玩家的名字、网格的一个格子）。键是 <see cref="T:EasyEcs.EntityId" />
+      时，这个组件就是关系：按父实体建索引的 <c>ChildOf(EntityId Parent)</c> 能找到一个实体的子实体。索引在用 <c>Set</c> 和
+      <c>CreateEntity</c> 写入值的同时跟着更新，所以带索引的组件从不通过 <c>ref</c> 写入（<c>Get</c>、<c>ref</c> 参数、查询的元素）：
+      分析器会报告这种写入（EECS015）。
     </summary>
+  </member>
+  <member name="P:EasyEcs.IIndexed`1.Key" source="4bc3898eff9c">
+    <summary>用来查找实体的值。</summary>
   </member>
 </doc>

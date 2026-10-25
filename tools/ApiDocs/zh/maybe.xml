@@ -1,13 +1,13 @@
 
 <doc>
-  <member name="T:EasyEcs.Maybe`1" source="f5dd430b2497">
+  <member name="T:EasyEcs.Maybe`1" source="9fdbb006796e">
     <summary>
       <c>[ForEach]</c> 方法所访问实体的一个可选组件：<c>static void Regen(ref Health h, Maybe&lt;Buff&gt; buff)</c>
       访问所有带 Health 的实体，<see cref="P:EasyEcs.Maybe`1.HasValue" /> 告诉你当前这个实体有没有 Buff。可选的部分不大时，
       一个方法就够了，不用写 With 和 Without 两个版本。不做结构变更的方法，每段行查一次列，每行测一个存在位；做结构变更的方法，
       则要通过每个实体查找这个组件。在最热的循环里，用 <c>[With&lt;T&gt;]</c> / <c>[Without&lt;T&gt;]</c> 把方法拆成两个
-      （每行不用测试）。只读 <see cref="P:EasyEcs.Maybe`1.Value" /> 的方法算读 <typeparamref name="T" />；通过它写入
-      （赋值、自增、按 <c>ref</c> 传出、调用它的方法）的方法算写 <typeparamref name="T" />，被追踪组件存在时会打 tick。
+      （每行不用测试）。类型就声明了读写，和 <c>ref</c> 一样：方法算写 <typeparamref name="T" />，系统按它的写者调度，
+      被追踪的组件在每个带它的行上都打 tick；只读的方法接收 <see cref="T:EasyEcs.ReadOnlyMaybe`1" />（EECS025）。
       只在传入它的那次调用里有效（ref struct）。
     </summary>
   </member>

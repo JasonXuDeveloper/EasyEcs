@@ -1,9 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.IUniqueIndexed" source="74a0bd21fbd8">
+  <member name="T:EasyEcs.IUniqueIndexed`1" source="7e03a07a64bb">
     <summary>
-      所有 <see cref="T:EasyEcs.IUniqueIndexed`1" /> 共同的标记，不用反射就能知道一个组件类型是唯一的（JIT 会折叠掉的类型测试）。
-      实现 <see cref="T:EasyEcs.IUniqueIndexed`1" />，不要实现这个接口。
+      键只对应一个实体的 <see cref="T:EasyEcs.IIndexed`1" /> 组件：玩家的账号 id、会话令牌、网格格子里的占用者。一次写入如果会让第二个实体
+      拿到另一个实体已有的键，就在改动任何东西之前抛出 <see cref="T:System.InvalidOperationException" />（Set、CreateEntity / CreateEntities、
+      GetOrAdd、Instantiate、Clone、SetAll、Enable / EnableAll、LoadEntities / LoadEntitiesInto、MoveEntities）；
+      <see cref="M:EasyEcs.World.Load(System.ReadOnlySpan{System.Byte},System.Boolean)" /> 一个同一个键出现两次的存档时抛出
+      <see cref="T:System.IO.InvalidDataException" />。之后 World 保持原样。给实体重新写入它自己的键没问题；要把一个键从一个实体挪到另一个实体，
+      先改第一个，再改第二个。null 键（引用类型键的默认值）不算键：任意多个实体都可以有，查找也找不到它们。<see cref="T:EasyEcs.EntityId" />
+      键（关系）不能唯一。
+      <br />
+      唯一组件的索引是立即建立的：每个 World 在第一张含这个组件的表出现时就建立它，所以从第一次写入起每次写入都会检查
+      （<see cref="T:EasyEcs.IIndexed`1" /> 的索引在第一次查找时才建立）。用 <c>world.Index&lt;T, TKey&gt;().Get(key)</c> / <c>TryGet</c>
+      （生成的 <c>world.XIndex</c>）查找实体；<c>Find</c>、<c>Count</c> 和有序遍历和其他索引一样。
     </summary>
   </member>
 </doc>

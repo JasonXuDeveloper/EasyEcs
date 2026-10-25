@@ -68,7 +68,7 @@ what it left undone, which goes on the same list (nothing is dropped silently).
    Check what the agent's report does not: the Release build's warnings (0, even when the tests pass), and the docs a
    branch changed or regenerated (`git diff <tip> <branch> -- docs/content`, English and Chinese: nothing lost, no
    Chinese line replaced by English, no Chinese in an English page, en and zh saying the same).
-   Both slipped through once: an RS1037 warning, and 34 reference pages turned English (`audit-docs`, zh).
+   Both slipped through once: an RS1037 warning, and 23 reference pages turned English (`audit-docs`, zh).
 2. Merge one branch at a time onto the work branch (rebase it onto the tip first, then fast-forward); after each:
    `dotnet build -c Release` (0 warnings), `dotnet test`. A branch that changes a hot path is merged only after a
    quiet A/B against the tip (two rounds, copies as worktrees outside the repo, under `flock /tmp/bench.lock`, nothing

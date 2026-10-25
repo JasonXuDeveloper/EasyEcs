@@ -1,13 +1,13 @@
 
 <doc>
-  <member name="T:EasyEcs.DynamicBuffer`1" source="c363e662dde6">
+  <member name="T:EasyEcs.DynamicBuffer`1" source="f03a188a6a23">
     <summary>
       每个实体一个 <typeparamref name="T" /> 列表，作为组件存放：背包、路径、这个 tick 的命中记录。写入要通过组件的 <c>ref</c>
       （<c>[ForEach]</c> 方法和 job 的 <c>ref</c> 参数、<see cref="M:EasyEcs.Entity.Get``1" />），所以它和
       <see cref="T:EasyEcs.ITracked" /> 组件的任何写入一样会记录下来，<c>[Changed&lt;DynamicBuffer&lt;T&gt;&gt;]</c>
       能选出列表变过的实体。通过 <c>in</c> 或 <see cref="M:EasyEcs.Entity.Read``1" /> 拿到的列表是只读的：修改方法
-      （<see cref="T:EasyEcs.DynamicBufferExtensions" />）接收 <c>ref this</c>，所以通过只读引用写入根本编译不过。快照会复制元素
-      （<see cref="M:EasyEcs.World.Capture" />）；搬行时列表跟着走。在容量以内添加元素不分配内存。
+      （<see cref="T:EasyEcs.DynamicBufferExtensions" />）接收 <c>ref this</c>，所以通过只读引用写入根本编译不过。预制体的实例、克隆和快照
+      （<see cref="M:EasyEcs.World.Capture" />）共享同一个列表，直到其中一个写入：写入前先复制一份（写时复制）；搬行时列表跟着走。在容量以内添加元素不分配内存。
     </summary>
     <remarks>
       <c>new DynamicBuffer&lt;T&gt;()</c> 不持有列表：每个实体的列表在第一次写入时才创建（用

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+
 
 <doc>
   <member name="T:EasyEcs.QueryFilter" source="3dab23def4fb">
@@ -46,12 +46,6 @@
   <member name="M:EasyEcs.QueryFilter.With``1" source="89d1b7efddd4">
     <summary>要求 <typeparamref name="T" /> 存在（不传给查询回调）。</summary>
   </member>
-  <member name="M:EasyEcs.QueryFilter.WithAny``1" source="f28d8f285aa3">
-    <summary>
-      要求至少拥有各个 <c>WithAny</c> 调用列出的组件之一：<c>WithAny&lt;Burning&gt;().WithAny&lt;Poisoned&gt;()</c>
-      匹配带 Burning、带 Poisoned 或两个都带的实体。
-    </summary>
-  </member>
   <member name="M:EasyEcs.QueryFilter.Without``1" source="7c4a52182b9c">
     <summary>要求 <typeparamref name="T" /> 不存在。</summary>
   </member>
@@ -89,5 +83,11 @@
     <exception cref="T:System.ArgumentOutOfRangeException">
       <paramref name="of" /> 小于 1，或者 <paramref name="index" /> 不在 [0, <paramref name="of" />) 内。
     </exception>
+  </member>
+  <member name="M:EasyEcs.QueryFilter.WithAny``2" source="3df26f5e1546">
+    <summary>
+      要求至少拥有 <c>T1, T2</c> 之一：<c>WithAny&lt;Burning, Poisoned&gt;()</c> 匹配带 Burning、带 Poisoned 或两个都带的实体。
+      一个过滤条件的所有 <c>WithAny</c> 调用合成一个集合，再和其他过滤条件取“与”（只有一个组件时就是 <see cref="M:EasyEcs.QueryFilter.With``1" />）。
+    </summary>
   </member>
 </doc>

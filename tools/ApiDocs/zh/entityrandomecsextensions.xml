@@ -15,11 +15,10 @@
   <member name="M:EasyEcs.EntityRandomEcsExtensions.&lt;G&gt;$7193E572F30FD7E005904781AEF6260C.RemoveEntityRandom" source="a9786b18e460">
     <summary>移除 World 的 <see cref="T:EasyEcs.EntityRandom" />（<c>RemoveSingleton</c>）；没有添加时返回 false。</summary>
   </member>
-  <member name="M:EasyEcs.EntityRandomEcsExtensions.&lt;G&gt;$7193E572F30FD7E005904781AEF6260C.SetEntityRandom(System.UInt64,System.UInt64)" source="c3cfeb727c45">
+  <member name="M:EasyEcs.EntityRandomEcsExtensions.&lt;G&gt;$7193E572F30FD7E005904781AEF6260C.SetEntityRandom(System.UInt64)" source="c3cfeb727c45">
     <summary>设置 World 的 <see cref="T:EasyEcs.EntityRandom" />，没有时先添加。</summary>
   </member>
-
-  <member name="M:EasyEcs.EntityRandomEcsExtensions.&lt;G&gt;$7193E572F30FD7E005904781AEF6260C.GetOrAddEntityRandom(System.UInt64,System.UInt64)" source="f50a30e0c656">
+  <member name="M:EasyEcs.EntityRandomEcsExtensions.&lt;G&gt;$7193E572F30FD7E005904781AEF6260C.GetOrAddEntityRandom(System.UInt64)" source="f50a30e0c656">
     <summary>World 的 <see cref="T:EasyEcs.EntityRandom" />，按 <c>ref</c> 返回，没有时先以这个值添加（<c>GetOrAddSingleton</c>）；已有它的 World 保留自己的值。</summary>
   </member>
 </doc>

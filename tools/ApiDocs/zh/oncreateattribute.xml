@@ -1,8 +1,0 @@
-<doc>
-  <member name="T:EasyEcs.OnCreateAttribute" source="b9bb75cc949b">
-    <summary>
-      <see cref="T:EasyEcs.EcsSystemAttribute">[EcsSystem]</see> 的一个静态方法，系统加进 World 时调用一次。它接收
-      <see cref="T:EasyEcs.World" />、<see cref="T:EasyEcs.SystemHandle" />、两者或都不接收，返回 void；每个系统一个（EECS076）。
-    </summary>
-  </member>
-</doc>
