@@ -1,6 +1,8 @@
 using System;
 using System.ComponentModel;
+using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 
 namespace EasyEcs;
 
@@ -67,6 +69,70 @@ public readonly ref struct Lookup<T> where T : struct, IComponent
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private Entity Of(EntityId id) => (uint)id.Index < (uint)_world.Meta.Length ? new Entity(_world, id) : default;
+
+    /// <summary>
+    /// The lanes of a vector loop reading <typeparamref name="T"/> of the entities in lanes (<paramref name="version"/>,
+    /// <paramref name="index"/>): <paramref name="has"/>, the lanes whose entity is alive and has it (all bits set);
+    /// <paramref name="rows"/>, their rows' byte offsets in <paramref name="column"/> (<see cref="LookupLanes.Gather{TLane}(nint, Vector256{int}, Vector256{int}, int)"/>).
+    /// False when those entities live in several tables, or their table holds <typeparamref name="T"/> for some rows only:
+    /// the vector's rows then run the method. Generated code calls this.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Resolve(Vector256<int> version, Vector256<int> index, out Vector256<int> has, out Vector256<int> rows, out nint column)
+    {
+        Archetype table = null;
+        bool none = false;
+        if (LookupLanes.Records(_world, version, index, ref table, out has, out var slots) && LookupLanes.Column(table, ComponentType<T>.Bit, out column, ref none))
+        {
+            if (none) has = default;
+            rows = slots * Unsafe.SizeOf<T>();
+            return true;
+        }
+
+        has = rows = default;
+        column = 0;
+        return false;
+    }
+
+    /// <inheritdoc cref="Resolve(Vector256{int}, Vector256{int}, out Vector256{int}, out Vector256{int}, out nint)"/>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Resolve(Vector512<int> version, Vector512<int> index, out Vector512<int> has, out Vector512<int> rows, out nint column)
+    {
+        Archetype table = null; // both halves' entities in one table
+        bool none = false;
+        if (LookupLanes.Records(_world, version.GetLower(), index.GetLower(), ref table, out var lower, out var low)
+            && LookupLanes.Records(_world, version.GetUpper(), index.GetUpper(), ref table, out var upper, out var high)
+            && LookupLanes.Column(table, ComponentType<T>.Bit, out column, ref none))
+        {
+            has = none ? default : Vector512.Create(lower, upper);
+            rows = Vector512.Create(low, high) * Unsafe.SizeOf<T>();
+            return true;
+        }
+
+        has = rows = default;
+        column = 0;
+        return false;
+    }
+
+    /// <inheritdoc cref="Resolve(Vector256{int}, Vector256{int}, out Vector256{int}, out Vector256{int}, out nint)"/>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Resolve(Vector<int> version, Vector<int> index, out Vector<int> has, out Vector<int> rows, out nint column)
+    {
+        bool resolved;
+        // Vector<T> is 256 bits on AVX2 hardware, 512 with DOTNET_PreferredVectorBitWidth=512 (IsAccelerated gates the loop).
+        if (Vector<int>.Count == 16)
+        {
+            resolved = Resolve(version.AsVector512(), index.AsVector512(), out var wide, out var at, out column);
+            (has, rows) = (wide.AsVector(), at.AsVector());
+        }
+        else
+        {
+            resolved = Resolve(version.AsVector256(), index.AsVector256(), out var narrow, out var at, out column);
+            (has, rows) = (narrow.AsVector(), at.AsVector());
+        }
+
+        return resolved;
+    }
 
     /// <summary>T's index, which the generated code resolved and built before the pass, or null.</summary>
     internal object Index => _index;

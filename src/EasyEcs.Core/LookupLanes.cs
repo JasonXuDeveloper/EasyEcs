@@ -1,0 +1,132 @@
+using System;
+using System.ComponentModel;
+using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+
+namespace EasyEcs;
+
+/// <summary>
+/// Reads of other entities in a generated vector loop (a <c>[ForEach]</c> method taking a <see cref="Lookup{T}"/>): the
+/// lanes' ids resolved by AVX2 gathers of their records (<see cref="Lookup{T}.Resolve(Vector256{int}, Vector256{int}, out Vector256{int}, out Vector256{int}, out nint)"/>),
+/// then each field the method reads gathered from the one table every lane's entity lives in (<see cref="Gather{TLane}(nint, Vector256{int}, Vector256{int}, int)"/>).
+/// Lanes whose entities live in several tables are not resolved: the loop sends that vector's rows to the method, which
+/// reads them one by one. Generated code calls this.
+/// </summary>
+[EditorBrowsable(EditorBrowsableState.Never)]
+public static unsafe class LookupLanes
+{
+    /// <summary>
+    /// Whether the gathers run in hardware (AVX2, 16-byte records): a vector loop reading other entities runs only then;
+    /// otherwise every row runs the method.
+    /// </summary>
+    public static bool IsAccelerated
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Avx2.IsSupported && Unsafe.SizeOf<EntityMeta>() == 16;
+    }
+
+    // Where a record keeps its version and its row (the runtime lays out the reference first): read once, constants at Tier1.
+    private static readonly int VersionAt = Offset(true), SlotAt = Offset(false);
+
+    private static int Offset(bool version)
+    {
+        EntityMeta meta = default;
+        ref byte start = ref Unsafe.As<EntityMeta, byte>(ref meta);
+        return (int)Unsafe.ByteOffset(ref start, ref Unsafe.As<int, byte>(ref version ? ref meta.Version : ref meta.Slot));
+    }
+
+    /// <summary>
+    /// Field <paramref name="offset"/> (bytes into the component) of the rows of <paramref name="has"/>'s lanes, at byte
+    /// <paramref name="rows"/> past <paramref name="column"/>; 0 in the other lanes, which read no memory.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector256<TLane> Gather<TLane>(nint column, Vector256<int> rows, Vector256<int> has, int offset) where TLane : unmanaged
+    {
+        // A JIT-time constant: the vector loop gathers 4-byte lanes (float, int, uint).
+        if (typeof(TLane) == typeof(float))
+            return Avx2.GatherMaskVector256(Vector256<float>.Zero, (float*)(column + offset), rows, has.AsSingle(), 1).As<float, TLane>();
+        return Avx2.GatherMaskVector256(Vector256<int>.Zero, (int*)(column + offset), rows, has, 1).As<int, TLane>();
+    }
+
+    /// <inheritdoc cref="Gather{TLane}(nint, Vector256{int}, Vector256{int}, int)"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector512<TLane> Gather<TLane>(nint column, Vector512<int> rows, Vector512<int> has, int offset) where TLane : unmanaged =>
+        // .NET 10 has no AVX-512 gather: two AVX2 gathers of 8 lanes.
+        Vector512.Create(Gather<TLane>(column, rows.GetLower(), has.GetLower(), offset), Gather<TLane>(column, rows.GetUpper(), has.GetUpper(), offset));
+
+    /// <inheritdoc cref="Gather{TLane}(nint, Vector256{int}, Vector256{int}, int)"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<TLane> Gather<TLane>(nint column, Vector<int> rows, Vector<int> has, int offset) where TLane : unmanaged
+    {
+        // Vector<T> is 256 bits on AVX2 hardware, 512 with DOTNET_PreferredVectorBitWidth=512 (IsAccelerated gates the loop).
+        if (Vector<int>.Count == 16) return Gather<TLane>(column, rows.AsVector512(), has.AsVector512(), offset).AsVector();
+        return Gather<TLane>(column, rows.AsVector256(), has.AsVector256(), offset).AsVector();
+    }
+
+    /// <summary>
+    /// The records of the ids in lanes (<paramref name="version"/>, <paramref name="index"/>): <paramref name="has"/>, the
+    /// lanes of live entities (all bits set), <paramref name="slots"/> their rows (0 elsewhere), and <paramref name="table"/>
+    /// the table they live in (left as it is when no lane is live). False when the live lanes' entities live in several
+    /// tables, or in another table than <paramref name="table"/> was: the vector's rows read one at a time.
+    /// </summary>
+    internal static bool Records(World world, Vector256<int> version, Vector256<int> index, ref Archetype table, out Vector256<int> has, out Vector256<int> slots)
+    {
+        var meta = world.Meta;
+        // Record r at byte 16 r = 8 * (2 r): 2 r fits an int for 2^30 records (16 GB of them; a world past that reads
+        // row by row), and a lane past them reads record 0, which every world has, then fails its version test.
+        if (meta.Length > 1 << 30)
+        {
+            has = slots = default;
+            return false;
+        }
+
+        var inRange = Vector256.LessThan(index.AsUInt32(), Vector256.Create((uint)meta.Length)).AsInt32();
+        var twice = (index & inRange) << 1;
+        ref var first = ref MemoryMarshal.GetArrayDataReference(meta);
+        fixed (byte* records = &Unsafe.As<EntityMeta, byte>(ref first))
+        {
+            has = Vector256.Equals(Avx2.GatherVector256((int*)(records + VersionAt), twice, 8), version) & inRange;
+            slots = Avx2.GatherMaskVector256(Vector256<int>.Zero, (int*)(records + SlotAt), twice, has, 8);
+        }
+
+        // Matching versions mean live entities, which have a table (Entity.LocateArchetype). The references are read
+        // as references, never gathered as addresses a collection could move between two reads.
+        uint live = has.ExtractMostSignificantBits();
+        while (live != 0)
+        {
+            var at = Unsafe.Add(ref first, index.GetElement(BitOperations.TrailingZeroCount(live))).Archetype;
+            if (table == null) table = at;
+            else if (at != table) return false;
+            live &= live - 1;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The column of component <paramref name="bit"/> in <paramref name="table"/> (row 0's address); <paramref name="none"/>
+    /// set when the table lacks it (no lane has it). False when the column cannot be gathered from (some
+    /// rows lack the component: presence bits; a managed column): the vector's rows read one at a time.
+    /// </summary>
+    internal static bool Column(Archetype table, uint bit, out nint column, ref bool none)
+    {
+        column = 0;
+        if (table == null) return true; // no lane is live: nothing is gathered
+        var map = table.ByBit;
+        if (bit >= (uint)map.Length || map[bit].Column == null)
+        {
+            none = true; // the table lacks the component: no lane has it
+            return true;
+        }
+
+        ref var lookup = ref map[bit];
+        // An unmanaged column is pinned (Lookup.Rows): its row 0 stays where it is while the column is the table's,
+        // and a row's byte offset (slot * size) is below the column's length, an int.
+        if (lookup.Bits != null || lookup.Rows == 0) return false;
+        column = lookup.Rows;
+        return true;
+    }
+}

@@ -56,6 +56,10 @@ internal sealed partial class Kernel
         {
             case IConversionOperation { Conversion.IsIdentity: true } c:
                 return StructOf(c.Operand);
+            case IConversionOperation { Operand: IDefaultValueOperation } c when SymbolEqualityComparer.Default.Equals(c.Type, c.Operand.Type) || c.Operand.Type == null:
+                return Zeros(paths); // 'c ? new T(...) : default': the default literal, typed by the other arm
+            case IPropertyReferenceOperation or IInvocationOperation when LookupValue(op) is { } gathered: // x.Value, lookup.Read(id): Kernel.Lookups.cs
+                return gathered;
             case IParameterReferenceOperation { Parameter: var p } when _components.TryGetValue(p, out var c):
                 return Enumerable.Range(0, paths.Length).Select(f => ComponentLane(c.Index, f)).ToArray();
             case ILocalReferenceOperation { Local: var local } when _structs.TryGetValue(local, out var names):
@@ -96,7 +100,20 @@ internal sealed partial class Kernel
             case IConditionalOperation { IsRef: false, WhenFalse: { } whenFalse } t:
             {
                 string condition = Hold(Expr(t.Condition), t.Condition.Type!);
-                var (a, b) = (StructOf(t.WhenTrue), StructOf(whenFalse));
+                string?[] a, b;
+                if (!TracksPresence || _half >= 0) (a, b) = (StructOf(t.WhenTrue), StructOf(whenFalse));
+                else
+                {
+                    // Each arm reads under its lanes, as Expr's ternary: m.HasValue ? new T(m.Value.X) : default reads
+                    // only rows that have it.
+                    Prove(condition, t.Condition);
+                    string? active = _active;
+                    _active = And(active, condition);
+                    a = StructOf(t.WhenTrue);
+                    _active = And(active, $"~{condition}");
+                    b = StructOf(whenFalse);
+                    _active = active;
+                }
                 return Each(paths.Length, f => $"{V}.ConditionalSelect({As(_mask, Elem(paths[f][paths[f].Length - 1].Type), condition)}, {a[f]}, {b[f]})");
             }
             default:

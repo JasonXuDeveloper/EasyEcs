@@ -751,6 +751,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         string interleaved = simd.Interleaves ? $" && global::EasyEcs.Interleaved.{Accelerated}" : "";
         // A wide component's permutes are AVX-512's, and its layout the generator's (checked once per job type).
         if (simd.Wide != null) interleaved += $" && global::System.Runtime.Intrinsics.X86.Avx512F.IsSupported && {simd.Wide}";
+        // Other entities' fields are AVX2 gathers (Kernel.Lookups.cs): without them, every row runs the method.
+        if (simd.Gathers) interleaved += " && global::EasyEcs.LookupLanes.IsAccelerated";
         loop.Append($"{indent}if ({Kernel.V}.IsHardwareAccelerated{interleaved} && rows - i >= {vector}.Count)\n{indent}{{\n");
         string inner = indent + "    ", body = inner + "    ";
         foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) loop.Append(inner).Append(line).Append('\n');
