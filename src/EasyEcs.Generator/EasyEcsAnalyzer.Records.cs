@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Collections.Concurrent;
 using System.Linq;
 using Microsoft.CodeAnalysis;
@@ -11,7 +12,7 @@ namespace EasyEcs.Generator;
 /// singleton <c>Emitted&lt;T&gt;</c> and never clear it, since only the system that applies the records knows when they
 /// are applied; that system's <c>Clear()</c> is the one line users write around a data event, and the one they forget.
 /// </summary>
-public sealed partial class EasyEcsAnalyzer
+public static partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor UnclearedRecords = new("EECS092", "Emitted records that no code clears",
         "{0} emits {1} records, but no code clears Emitted<{1}>: each update adds its records to all the earlier ones, so a reader applies them again and the list grows; clear world.GetSingleton<Emitted<{1}>>().Items in the system that applies them, once applied",
@@ -28,6 +29,8 @@ public sealed partial class EasyEcsAnalyzer
     /// EECS092: the record types the compilation's [ForEach] methods emit (and the first parameter emitting each), the
     /// ones its code clears, and at the end the emitted ones nothing clears.
     /// </summary>
+    internal static void InitializeRecords(AnalysisContext context) => context.RegisterCompilationStartAction(AnalyzeRecords);
+
     private static void AnalyzeRecords(CompilationStartAnalysisContext start)
     {
         var emitted = new ConcurrentQueue<(ITypeSymbol Record, IParameterSymbol Parameter, IMethodSymbol Method)>();
@@ -75,4 +78,15 @@ public sealed partial class EasyEcsAnalyzer
             }
         });
     }
+}
+
+/// <summary>The rule of Emit<T> records no code clears (EasyEcsAnalyzer.Records.cs), as one analyzer: Roslyn skips an analyzer only when every rule it reports is suppressed, so a
+/// NoWarn of these rules saves their cost.</summary>
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public sealed class RecordAnalyzer : EasyEcsAnalyzer.Area
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
+        EasyEcsAnalyzer.UnclearedRecords);
+
+    protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeRecords(context);
 }

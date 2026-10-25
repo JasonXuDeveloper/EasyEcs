@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
@@ -13,7 +14,7 @@ namespace EasyEcs.Generator;
 /// <see cref="Fusion.Problem(IReadOnlyList{FusionSide}, FusionSide)"/> finds nothing, so what it leaves apart is what
 /// these rules report: a near miss as a message (EECS093), a method that requires the walk as an error (EECS094).
 /// </summary>
-public sealed partial class EasyEcsAnalyzer
+public static partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor NearFusion = new("EECS093", "Two passes over the same rows that do not share one walk",
         "'{0}' walks the rows of '{1}' again: they would share one walk (each row loaded once), but {2}",
@@ -32,7 +33,7 @@ public sealed partial class EasyEcsAnalyzer
         "before it in its system. The generator fuses them only when one walk gives the results of separate passes; the " +
         "message names what keeps them apart.", helpLinkUri: Help("EECS094"));
 
-    private static void InitializeFusion(AnalysisContext context) =>
+    internal static void InitializeFusion(AnalysisContext context) =>
         context.RegisterSyntaxNodeAction(AnalyzeFusion, SyntaxKind.StructDeclaration);
 
     /// <summary>EECS093 and EECS094 over the [ForEach] methods of a system, in the groups the generator fuses them into.</summary>
@@ -91,4 +92,15 @@ public sealed partial class EasyEcsAnalyzer
             _ => false,
         };
     }
+}
+
+/// <summary>The rules of pass fusion (EasyEcsAnalyzer.Fusion.cs), as one analyzer: Roslyn skips an analyzer only when every rule it reports is suppressed, so a
+/// NoWarn of these rules saves their cost.</summary>
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public sealed class FusionAnalyzer : EasyEcsAnalyzer.Area
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
+        EasyEcsAnalyzer.FusionRequired, EasyEcsAnalyzer.NearFusion);
+
+    protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeFusion(context);
 }

@@ -58,7 +58,12 @@ ComponentGenerator.cs        C# 14 extension members per component / singleton: 
                              lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
 EasyEcsAnalyzer.cs           EECS002-006, EECS009-024, EECS035-036, EECS054, EECS056, EECS070 and EECS072-073 (the
                              declaration and [ForEach] rules of the range EECS002-103 that are not performance rules;
-                             generators never report diagnostics)
+                             generators never report diagnostics): DeclarationAnalyzer. Every EasyEcsAnalyzer*.cs
+                             file ends with its area's analyzer (DeclarationAnalyzer, SystemAnalyzer, ...: a
+                             DiagnosticAnalyzer deriving from EasyEcsAnalyzer.Area with the rules it reports), since
+                             Roslyn skips an analyzer only when all its rules are suppressed; Parameters.cs and
+                             Layout.cs feed PerformanceAnalyzer. EasyEcsAnalyzer (static, partial over the files)
+                             holds the descriptors, the checks and All, every area's analyzer (tests, DocCheck)
 EasyEcsAnalyzer.Systems.cs   EECS007-008, EECS074-077 and EECS090: systems as declarations (state in a static field, a
                              reach into another system; an [EcsSystem] that is no ref struct, an instance member, a hook
                              no signature fits, a system API given a type that is no [EcsSystem], a method named almost

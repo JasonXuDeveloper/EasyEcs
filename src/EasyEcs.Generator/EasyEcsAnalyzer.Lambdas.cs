@@ -13,7 +13,7 @@ namespace EasyEcs.Generator;
 /// left without a vector loop, with <see cref="Kernel.Vectorize"/>'s reason (EECS097); and EECS049 for one whose own filters
 /// and parameters no entity passes (a lambda pass takes no group's filters).
 /// </summary>
-public sealed partial class EasyEcsAnalyzer
+public static partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor BadLambdaPass = new("EECS095", "A lambda pass the generator cannot compile",
         "world.{0}(…) gets no job and throws: {1}",
@@ -45,7 +45,7 @@ public sealed partial class EasyEcsAnalyzer
     /// <summary>EECS095's property: the values a capturing lambda reads, passed before it by the fix (names, comma-separated).</summary>
     public const string CapturedValues = "CapturedValues";
 
-    private static void InitializeLambdas(AnalysisContext context) =>
+    internal static void InitializeLambdas(AnalysisContext context) =>
         context.RegisterOperationAction(AnalyzeLambdaPass, OperationKind.Invocation);
 
     private static void AnalyzeLambdaPass(OperationAnalysisContext context)
@@ -100,4 +100,16 @@ public sealed partial class EasyEcsAnalyzer
             IParameterReferenceOperation parameter => captured.Contains(parameter.Parameter, SymbolEqualityComparer.Default) && Uses.MayWrite(parameter),
             _ => false,
         });
+}
+
+/// <summary>The rules of lambda passes (EasyEcsAnalyzer.Lambdas.cs), as one analyzer: Roslyn skips an analyzer only when every rule it reports is suppressed, so a
+/// NoWarn of these rules saves their cost.</summary>
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public sealed class LambdaPassAnalyzer : EasyEcsAnalyzer.Area
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
+        EasyEcsAnalyzer.BadLambdaPass, EasyEcsAnalyzer.DelegateLambdaPass, EasyEcsAnalyzer.ScalarLambdaPass,
+        EasyEcsAnalyzer.NeverMatches);
+
+    protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeLambdas(context);
 }

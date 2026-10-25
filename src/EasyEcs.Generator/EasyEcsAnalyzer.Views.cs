@@ -14,7 +14,7 @@ namespace EasyEcs.Generator;
 /// view built by hand where the job or the entity builds it (EECS101), and a view member that writes a tracked component
 /// through a 'ref' field on some paths only (EECS053). Each computes its code fix as diagnostic properties.
 /// </summary>
-public sealed partial class EasyEcsAnalyzer
+public static partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor BadView = new("EECS098", "Invalid [View]",
         "[View] '{0}' {1}",
@@ -53,7 +53,7 @@ public sealed partial class EasyEcsAnalyzer
     /// <summary>EECS101's view parameter fix: the parameters the view replaces (<c>name=Field;...</c>), the new parameter's name and type.</summary>
     public const string ViewFields = "ViewFields", ViewName = "ViewName", ViewType = "ViewType";
 
-    private static void InitializeViews(AnalysisContext context)
+    internal static void InitializeViews(AnalysisContext context)
     {
         context.RegisterSymbolAction(AnalyzeViewDeclarations, SymbolKind.NamedType);
         context.RegisterSymbolAction(AnalyzeViewOverlap, SymbolKind.Method);
@@ -293,4 +293,16 @@ public sealed partial class EasyEcsAnalyzer
             _ => null,
         };
     }
+}
+
+/// <summary>The rules of [View] declarations and their uses (EasyEcsAnalyzer.Views.cs), as one analyzer: Roslyn skips an analyzer only when every rule it reports is suppressed, so a
+/// NoWarn of these rules saves their cost.</summary>
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public sealed class ViewAnalyzer : EasyEcsAnalyzer.Area
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
+        EasyEcsAnalyzer.BadView, EasyEcsAnalyzer.HandWrittenView, EasyEcsAnalyzer.SomeRowsWritten,
+        EasyEcsAnalyzer.ViewFieldOnlyReads, EasyEcsAnalyzer.ViewOverlap, EasyEcsAnalyzer.ViewReachesOut);
+
+    protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeViews(context);
 }

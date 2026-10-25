@@ -15,7 +15,7 @@ namespace EasyEcs.Generator;
 /// own leaves the frequent passes a column of only the fields they use. The layout stays the user's (D90): nothing moves
 /// on its own, the code fix writes the split when the user applies it (the properties of <see cref="SplitFix"/>).
 /// </summary>
-public sealed partial class EasyEcsAnalyzer
+public static partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor ColdFields = new("EECS091", "A component with fields its frequent passes never touch",
         "Component '{0}' is {1} bytes, and {2} only {3} ({4} bytes) of each row every update: move {5} ({6} bytes) into a component of their own, so {7} {4} bytes per row instead of {1}",

@@ -18,7 +18,7 @@ namespace EasyEcs.Generator;
 /// filters no entity passes, a second group in one filter and an update during a pass. Each is a call or a declaration
 /// the runtime throws for, or a write it loses.
 /// </summary>
-public sealed partial class EasyEcsAnalyzer
+public static partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor JobWrites = new("EECS037", "A job's WriteMask does not match what Execute writes",
         "Job '{0}' {1}; declare 'public static int WriteMask => {2};'",
@@ -161,7 +161,7 @@ public sealed partial class EasyEcsAnalyzer
     /// <summary>The World calls that add entities to an index's keys.</summary>
     private static readonly HashSet<string> WorldIndexChangers = ["SetAll", "EnableAll", "CreateEntity", "CreateEntities", "Instantiate"];
 
-    private static void InitializeUsage(AnalysisContext context) =>
+    internal static void InitializeUsage(AnalysisContext context) =>
         context.RegisterCompilationStartAction(start =>
         {
             if (Core.Create(start.Compilation) is not { } core) return;
@@ -970,4 +970,19 @@ public sealed partial class EasyEcsAnalyzer
 
         return null;
     }
+}
+
+/// <summary>The rules of calls and declarations that do not do what they say (EasyEcsAnalyzer.Usage.cs), as one analyzer: Roslyn skips an analyzer only when every rule it reports is suppressed, so a
+/// NoWarn of these rules saves their cost.</summary>
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public sealed class UsageAnalyzer : EasyEcsAnalyzer.Area
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
+        EasyEcsAnalyzer.DroppedCopy, EasyEcsAnalyzer.IndexChangedInWalk, EasyEcsAnalyzer.InternalTag,
+        EasyEcsAnalyzer.JobWrites, EasyEcsAnalyzer.KeyPrintsItself, EasyEcsAnalyzer.NeverMatches,
+        EasyEcsAnalyzer.NotComparable, EasyEcsAnalyzer.NotDisableable, EasyEcsAnalyzer.RefAcrossChange,
+        EasyEcsAnalyzer.RefusedInPass, EasyEcsAnalyzer.RemovedRequired, EasyEcsAnalyzer.SecondGroup,
+        EasyEcsAnalyzer.SlicedFilter, EasyEcsAnalyzer.UpdateInPass);
+
+    protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeUsage(context);
 }

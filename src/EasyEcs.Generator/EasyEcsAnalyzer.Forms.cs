@@ -18,7 +18,7 @@ namespace EasyEcs.Generator;
 /// cannot apply (EECS085); and a batch method's vector loop written by hand that the generator writes from the method
 /// for one row (EECS103, <see cref="HandSimd"/>). Each computes its code fix as diagnostic properties.
 /// </summary>
-public sealed partial class EasyEcsAnalyzer
+public static partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor HandWrittenEntityJob = new("EECS080", "A hand-written one-entity job",
         "'{0}' is a job written by hand and run only with entity.Run: [ForEntity] on a static method writes the job, its WriteMask and its entry point ({1})",
@@ -77,7 +77,7 @@ public sealed partial class EasyEcsAnalyzer
     /// <summary>EECS080's properties: field=parameter pairs, the components' modifiers, the filter attributes, the calls' replacements; EECS084's entity parameter to drop.</summary>
     public const string JobParameters = "Parameters", JobModifiers = "Modifiers", JobFilter = "Filter", JobCall = "Call", DropEntity = "DropEntity";
 
-    private static void InitializeForms(AnalysisContext context)
+    internal static void InitializeForms(AnalysisContext context)
     {
         context.RegisterSymbolAction(AnalyzeScheduleAttribute, SymbolKind.NamedType);
         context.RegisterSyntaxNodeAction(AnalyzeHandWrittenConsume, SyntaxKind.MethodDeclaration);
@@ -455,4 +455,16 @@ public sealed partial class EasyEcsAnalyzer
 
         return null;
     }
+}
+
+/// <summary>The rules of what the generator declares for code written by hand (EasyEcsAnalyzer.Forms.cs), as one analyzer: Roslyn skips an analyzer only when every rule it reports is suppressed, so a
+/// NoWarn of these rules saves their cost.</summary>
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public sealed class FormAnalyzer : EasyEcsAnalyzer.Area
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
+        EasyEcsAnalyzer.BadConsume, EasyEcsAnalyzer.BadUpdateInterval, EasyEcsAnalyzer.HandWrittenConsume,
+        EasyEcsAnalyzer.HandWrittenEntityJob, EasyEcsAnalyzer.HandWrittenVectorLoop);
+
+    protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeForms(context);
 }

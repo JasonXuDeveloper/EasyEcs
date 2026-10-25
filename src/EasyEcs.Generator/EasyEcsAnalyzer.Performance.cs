@@ -20,7 +20,7 @@ namespace EasyEcs.Generator;
 /// same thing; the code fixes (EasyEcs.CodeFixes) apply the replacement the analyzer computed, so the analyzer stays
 /// the only place that decides.
 /// </summary>
-public sealed partial class EasyEcsAnalyzer
+public static partial class EasyEcsAnalyzer
 {
     // EECS025's text, shared by its two descriptors (the analyzer rules want each descriptor built from constants).
     private const string OnlyReadsId = "EECS025", OnlyReadsTitle = "A write access that only reads",
@@ -259,7 +259,7 @@ public sealed partial class EasyEcsAnalyzer
         public bool Tracked(ITypeSymbol type) => type.AllInterfaces.Contains(Track, SymbolEqualityComparer.Default);
     }
 
-    private static void InitializePerformance(AnalysisContext context) =>
+    internal static void InitializePerformance(AnalysisContext context) =>
         context.RegisterCompilationStartAction(start =>
         {
             if (Core.Create(start.Compilation) is not { } core) return;
@@ -2090,4 +2090,21 @@ public sealed partial class EasyEcsAnalyzer
         }
         return false;
     }
+}
+
+/// <summary>The performance rules (EasyEcsAnalyzer.Performance.cs, with .Parameters.cs and .Layout.cs, which its body analysis feeds), as one analyzer: Roslyn skips an analyzer only when every rule it reports is suppressed, so a
+/// NoWarn of these rules saves their cost.</summary>
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public sealed class PerformanceAnalyzer : EasyEcsAnalyzer.Area
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
+        EasyEcsAnalyzer.Allocation, EasyEcsAnalyzer.CreateInLoop, EasyEcsAnalyzer.CreateThenSet,
+        EasyEcsAnalyzer.GeneratedMember, EasyEcsAnalyzer.IndexedByRef, EasyEcsAnalyzer.NoVectorLoop,
+        EasyEcsAnalyzer.PerEntityChange, EasyEcsAnalyzer.QueryByHand, EasyEcsAnalyzer.ReadOnlyQuery,
+        EasyEcsAnalyzer.RowLookup, EasyEcsAnalyzer.ScalarLoop, EasyEcsAnalyzer.ScratchEscape,
+        EasyEcsAnalyzer.SomeRowsWritten, EasyEcsAnalyzer.UntrackedMut, EasyEcsAnalyzer.UnusedParameter,
+        EasyEcsAnalyzer.UpdateInSystem, EasyEcsAnalyzer.WriteAccessOnlyReads, EasyEcsAnalyzer.HandWrittenEmit,
+        EasyEcsAnalyzer.HandWrittenLookup, EasyEcsAnalyzer.HandWrittenReduce, EasyEcsAnalyzer.ColdFields);
+
+    protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializePerformance(context);
 }

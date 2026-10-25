@@ -14,7 +14,7 @@ namespace EasyEcs.Generator;
 /// (EECS008); its hooks, the methods named OnCreate / OnUpdate / OnDestroy, have one signature each (EECS076), and a
 /// method named almost like one is reported (EECS090); the API that takes a system type takes an [EcsSystem] (EECS077).
 /// </summary>
-public sealed partial class EasyEcsAnalyzer
+public static partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor StatefulSystem = new("EECS007", "A system keeps state in a static field",
         "System '{0}' keeps mutable state in static '{1}'; store it in a component (per entity) or a singleton (per world)",
@@ -67,7 +67,7 @@ public sealed partial class EasyEcsAnalyzer
         "take a system type. Any other struct compiles, but no generated code runs it: AddSystem throws and the others " +
         "never find it.", helpLinkUri: Help("EECS077"));
 
-    private static void InitializeSystems(AnalysisContext context)
+    internal static void InitializeSystems(AnalysisContext context)
     {
         context.RegisterSymbolAction(AnalyzeSystem, SymbolKind.NamedType);
         context.RegisterSymbolAction(AnalyzeHook, SymbolKind.Method);
@@ -262,4 +262,17 @@ public sealed partial class EasyEcsAnalyzer
         context.ReportDiagnostic(Diagnostic.Create(SystemReference, context.Operation.Syntax.GetLocation(), system.Name, other.Name,
             other.Name + "." + member!.Name));
     }
+}
+
+/// <summary>The rules of systems as declarations (EasyEcsAnalyzer.Systems.cs), as one analyzer: Roslyn skips an analyzer only when every rule it reports is suppressed, so a
+/// NoWarn of these rules saves their cost.</summary>
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public sealed class SystemAnalyzer : EasyEcsAnalyzer.Area
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
+        EasyEcsAnalyzer.BadHook, EasyEcsAnalyzer.BadSystemType, EasyEcsAnalyzer.InstanceMember,
+        EasyEcsAnalyzer.MisspelledHook, EasyEcsAnalyzer.NotASystemType, EasyEcsAnalyzer.StatefulSystem,
+        EasyEcsAnalyzer.SystemReference, EasyEcsAnalyzer.Unnameable);
+
+    protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeSystems(context);
 }
