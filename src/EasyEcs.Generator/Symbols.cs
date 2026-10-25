@@ -1275,11 +1275,12 @@ internal static class Symbols
     /// The components a parameter reads of other entities than its own: a <c>Lookup&lt;T&gt;</c>'s T, a
     /// <c>Tile&lt;TCell, TTile&gt;</c>'s <c>DynamicBuffer&lt;TCell&gt;</c> and TTile; else none.
     /// </summary>
-    public static IEnumerable<ITypeSymbol> LookedUp(IParameterSymbol p, Compilation compilation)
+    public static IEnumerable<ITypeSymbol> LookedUp(IParameterSymbol p)
     {
         if (LookupElement(p.Type) is { } looked) yield return looked;
         if (TileElements(p.Type) is not { } tile) yield break;
-        if (compilation.GetTypeByMetadataName("EasyEcs.DynamicBuffer`1") is { } buffer) yield return buffer.Construct(tile.Cell);
+        // DynamicBuffer is declared next to Tile: a lookup by name there, not a search of every assembly.
+        if (p.Type.ContainingNamespace.GetTypeMembers("DynamicBuffer", 1).FirstOrDefault() is { } buffer) yield return buffer.Construct(tile.Cell);
         yield return tile.Grid;
     }
 

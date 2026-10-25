@@ -641,7 +641,7 @@ public sealed partial class EasyEcsAnalyzer
         {
             "Matches" or "Ordered" when Symbols.Named(definition, "EasyEcs.ValueIndex<T, TKey>") => owner.TypeArguments[0],
             "Sources" when Symbols.Named(definition, "EasyEcs.RelationIndex<T>") => owner.TypeArguments[0],
-            "Subtree" when Symbols.Named(definition, Symbols.World) => call.SemanticModel?.Compilation.GetTypeByMetadataName("EasyEcs.ChildOf"),
+            "Subtree" when Symbols.Named(definition, Symbols.World) => definition.ContainingNamespace.GetTypeMembers("ChildOf", 0).FirstOrDefault(), // next to World
             _ => null,
         };
     }

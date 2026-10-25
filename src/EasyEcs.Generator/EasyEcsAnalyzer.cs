@@ -803,7 +803,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                 context.ReportDiagnostic(Diagnostic.Create(SharedTile, p.Locations.FirstOrDefault(), method.Name, first.Name, p.Name,
                     string.Join(", ", ((INamedTypeSymbol)p.Type).TypeArguments.Select(t => t.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)))));
             else if (kind is Symbols.ParamKind.Lookup or Symbols.ParamKind.Tile
-                     && Symbols.LookedUp(p, context.Compilation).Select(t => (t, Symbols.LookupProblem(method, p, t))).FirstOrDefault(c => c.Item2 != null) is ({ } read, { } written))
+                     && Symbols.LookedUp(p).Select(t => (t, Symbols.LookupProblem(method, p, t))).FirstOrDefault(c => c.Item2 != null) is ({ } read, { } written))
                 context.ReportDiagnostic(Diagnostic.Create(LookupOfWritten, p.Locations.FirstOrDefault(), p.Name, Symbols.Describe(method),
                     read.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), written));
             else if (kind == Symbols.ParamKind.Emit && Symbols.EmitProblem(method, p) is { } emit)

@@ -1001,19 +1001,26 @@ public sealed partial class EasyEcsAnalyzer
         bool buffer = holder.Name.EndsWith(ComponentGenerator.Classes.Buffer, System.StringComparison.Ordinal);
         string suffix = buffer ? ComponentGenerator.Classes.Buffer : ComponentGenerator.Classes.Members;
         if (!holder.Name.EndsWith(suffix, System.StringComparison.Ordinal) || holder.Name.Length == suffix.Length) return null;
-        // Walk the flat name's levels down from the namespace: one lookup per level, no scan of the namespace.
+        // Walk the flat name's levels down from the namespace: one lookup by name per level, no scan of the namespace.
         INamespaceOrTypeSymbol scope = ns;
         INamedTypeSymbol? type = null;
         foreach (var level in holder.Name.Substring(0, holder.Name.Length - suffix.Length).Split(new[] { "__" }, System.StringSplitOptions.None))
         {
-            type = null;
-            foreach (var candidate in scope.GetTypeMembers())
-                if ((candidate.Arity == 0 ? candidate.Name : candidate.Name + "_" + candidate.Arity) == level) { type = candidate; break; }
-            if (type == null) return null;
+            if ((type = Level(scope, level)) == null) return null;
             scope = type;
         }
         if (type is not { TypeKind: TypeKind.Struct } || !NamesType(member.Name, type.Name)) return null;
         return buffer ? core.Entity.ContainingNamespace.GetTypeMembers("DynamicBuffer", 1).FirstOrDefault()?.Construct(type) : type;
+    }
+
+    /// <summary>The type of <paramref name="scope"/> one level of a flat name names: <c>Name</c>, or <c>Name_2</c> for arity 2.</summary>
+    private static INamedTypeSymbol? Level(INamespaceOrTypeSymbol scope, string level)
+    {
+        int bar = level.LastIndexOf('_');
+        if (bar > 0 && int.TryParse(level.Substring(bar + 1), out int arity) && arity > 0
+            && scope.GetTypeMembers(level.Substring(0, bar), arity).FirstOrDefault() is { } generic)
+            return generic;
+        return scope.GetTypeMembers(level, 0).FirstOrDefault();
     }
 
     /// <summary>Whether a generated member's name is <paramref name="type"/> after one of the generated prefixes.</summary>
