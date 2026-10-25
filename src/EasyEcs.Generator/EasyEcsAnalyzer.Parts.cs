@@ -18,7 +18,7 @@ namespace EasyEcs.Generator;
 /// and the hand-written reductions the attributes could declare (EECS065) or whose Identity is not the identity of
 /// their Combine (EECS066). <see cref="Parts"/> decides what the generator writes; these rules report what keeps it.
 /// </summary>
-public sealed partial class EasyEcsAnalyzer
+public static partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor NotPartial = new("EECS062", "A type with generated members is not partial",
         "'{0}' has members the generator writes ({1}), so it and every type containing it must be partial: {2}",
@@ -104,6 +104,19 @@ public sealed partial class EasyEcsAnalyzer
     /// What a declaration's attributes need that it lacks (EECS062-EECS064): <see cref="Parts.Problems"/>; and a
     /// <c>[Prefab]</c> the generator cannot write (EECS102): <see cref="Prefabs.Problem"/>.
     /// </summary>
+    internal static void InitializeParts(AnalysisContext context)
+    {
+        context.RegisterSymbolAction(static c =>
+        {
+            if (c.Symbol is not INamedTypeSymbol { TypeKind: TypeKind.Struct } type) return;
+            AnalyzeParts(c, type);
+            AnalyzeHandWrittenKey(c, type);
+            AnalyzeSetup(c, type);
+        }, SymbolKind.NamedType);
+        context.RegisterSyntaxNodeAction(AnalyzeReduction, SyntaxKind.StructDeclaration, SyntaxKind.RecordStructDeclaration);
+        context.RegisterCompilationStartAction(AnalyzeFormatters);
+    }
+
     private static void AnalyzeParts(SymbolAnalysisContext context, INamedTypeSymbol type)
     {
         if (Prefabs.IsPrefab(type) && Prefabs.Problem(type) is var (prefabWhere, prefabProblem))
@@ -566,4 +579,18 @@ public sealed partial class EasyEcsAnalyzer
                 return null;
         }
     }
+}
+
+/// <summary>The rules of generated parts, keys, setups and formatters (EasyEcsAnalyzer.Parts.cs), as one analyzer: Roslyn skips an analyzer only when every rule it reports is suppressed, so a
+/// NoWarn of these rules saves their cost.</summary>
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public sealed class PartAnalyzer : EasyEcsAnalyzer.Area
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
+        EasyEcsAnalyzer.BadIndexedKey, EasyEcsAnalyzer.BadPrefab, EasyEcsAnalyzer.BadReductionField,
+        EasyEcsAnalyzer.BadSetup, EasyEcsAnalyzer.HandWrittenKey, EasyEcsAnalyzer.HandWrittenReduction,
+        EasyEcsAnalyzer.NoFormatter, EasyEcsAnalyzer.NotPartial, EasyEcsAnalyzer.ReductionWrittenTwice,
+        EasyEcsAnalyzer.WrongIdentity);
+
+    protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeParts(context);
 }

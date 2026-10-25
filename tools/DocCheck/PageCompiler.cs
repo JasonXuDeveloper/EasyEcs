@@ -119,7 +119,7 @@ public sealed class PageCompiler
         CSharpGeneratorDriver.Create([new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()],
                 parseOptions: Regular)
             .RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
-        var diagnostics = await output.WithAnalyzers([new EasyEcsAnalyzer()]).GetAllDiagnosticsAsync();
+        var diagnostics = await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync();
         return (output, diagnostics);
     }
 

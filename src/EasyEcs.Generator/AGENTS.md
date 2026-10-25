@@ -58,7 +58,12 @@ ComponentGenerator.cs        C# 14 extension members per component / singleton: 
                              lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
 EasyEcsAnalyzer.cs           EECS002-006, EECS009-024, EECS035-036, EECS054, EECS056, EECS070 and EECS072-073 (the
                              declaration and [ForEach] rules of the range EECS002-103 that are not performance rules;
-                             generators never report diagnostics)
+                             generators never report diagnostics): DeclarationAnalyzer. Every EasyEcsAnalyzer*.cs
+                             file ends with its area's analyzer (DeclarationAnalyzer, SystemAnalyzer, ...: a
+                             DiagnosticAnalyzer deriving from EasyEcsAnalyzer.Area with the rules it reports), since
+                             Roslyn skips an analyzer only when all its rules are suppressed; Parameters.cs and
+                             Layout.cs feed PerformanceAnalyzer. EasyEcsAnalyzer (static, partial over the files)
+                             holds the descriptors, the checks and All, every area's analyzer (tests, DocCheck)
 EasyEcsAnalyzer.Systems.cs   EECS007-008, EECS074-077 and EECS090: systems as declarations (state in a static field, a
                              reach into another system; an [EcsSystem] that is no ref struct, an instance member, a hook
                              no signature fits, a system API given a type that is no [EcsSystem], a method named almost
@@ -142,6 +147,8 @@ EasyEcsAnalyzer.Fusion.cs    EECS093-094: two passes over the same rows that alm
 Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)
 Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race;
                              the writes of code on several threads that reach shared memory (EECS060, EECS061)
+BodyFacts.cs                 the analyzer's per-compilation cache of what a [ForEach] method's body allows (IsStable,
+                             OnlyIdentifies, ParallelProblem), read by several rules per method
 Symbols.cs                   symbol checks shared by generator and analyzer
 Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
 EquatableArray.cs            array with value equality (generator models cache between edits)

@@ -19,7 +19,7 @@ namespace EasyEcs.Generator;
 /// reads are not the World's calls one for one, and emitted records land in another singleton, which their readers
 /// must read.
 /// </summary>
-public sealed partial class EasyEcsAnalyzer
+public static partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor HandWrittenReduce = new("EECS086", "A singleton accumulated row by row",
         "Parameter '{0}' of {1} accumulates into singleton {2} row by row ({3}), so the method runs on one thread and without a vector loop; {4}: each chunk keeps a partial result, and the pass's result replaces {2}, so its reset in '{5}' goes",

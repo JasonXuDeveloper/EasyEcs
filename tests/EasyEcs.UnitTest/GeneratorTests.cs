@@ -33,7 +33,7 @@ public class GeneratorTests
     internal static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(sources), out var output, out _);
-        return await output.WithAnalyzers([new EasyEcsAnalyzer()]).GetAllDiagnosticsAsync();
+        return await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync();
     }
 
     internal const string Components = """
@@ -972,6 +972,98 @@ public class GeneratorTests
         foreach (var name in TrackedStages.Append("SourceOutput").Append("ImplementationSourceOutput")) // and nothing is emitted again
             Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                 Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
+    }
+
+    // Realistic keystrokes, in a build (every output) and as the IDE runs the generators while typing (implementation
+    // outputs skipped: the steps only they read never run). A tracked step either takes every output from the cache
+    // or is one the edit really changes. Unchanged is not a cache hit: the step ran again and returned an equal value,
+    // so a step the edit does not change must not report it. Allowed: in a step the edit changes, the other outputs of a
+    // Collect it regroups; IsEasyEcsCore, a narrow Select of the compilation, which reruns per compilation by design (a
+    // string compare) so that its consumers stay cached; SetFusions, which regroups on every compilation
+    // (SystemGenerator.Fusion.cs, the declaration/body split's to fix).
+    private const string IncrementalComponents = "using EasyEcs;\npublic struct P : IComponent { public int V; }\npublic struct Q : IComponent { public int V; }\n" +
+        "public struct L;\npublic struct Clock : ISingletonComponent { public int Ticks; }\n";
+    private const string IncrementalSystems = "using EasyEcs;\n" +
+        "[EcsSystem] public ref struct Move { [ForEach] static void A(ref P p, in Q q) { p.V += q.V; } }\n" +
+        "[EcsSystem] public ref struct Turn { [ForEach] static void C(ref Q q) { q.V--; } }\n" +
+        "public static class Free { [ForEach] static void B(ref Q q) { q.V++; } }\n" +
+        "public static class Report { public static int Sum(World w) { int s = 0; foreach (var i in w.Read<P, Q>()) s += i.P.V; return s; } static int N(DynamicBuffer<L> b) => b.Count; }\n";
+
+    private static readonly string[] ImplementationOnlyStages =
+    [
+        "LambdaPasses", "LambdaFiles", "ClosedSystems", "SystemSet", "SystemPlaces", "SystemFusions", "SetFusions",
+        "SavedComponents", "SavedBuffers", "GroupBy", "TargetPolicies", "NotSaved", "ModuleInitializers",
+    ];
+
+    [TestCase("a [ForEach] body", "p.V += q.V;", "p.V += 2 * q.V;", "ForEachMethods SystemUpdates")]
+    [TestCase("an unrelated file", "public class Unrelated { }", "public class Unrelated { int x; }", "")]
+    [TestCase("whitespace", "\npublic static class Free", "\n\npublic static class Free", "")]
+    [TestCase("a new component field", "P : IComponent { public int V; }", "P : IComponent { public int V; public int W; }",
+        "Components SavedComponents ForEachMethods SystemUpdates LambdaPasses LambdaFiles")]
+    [TestCase("a new query shape", "return s;", "foreach (var i in w.Query<Q>()) i.Q.V++; return s;", "QueryShapes")]
+    public void AnEditRerunsOnlyTheStepsItChanges(string edit, string before, string after, string changes)
+    {
+        var components = CSharpSyntaxTree.ParseText(IncrementalComponents, Parse, path: "Components.cs");
+        var systems = CSharpSyntaxTree.ParseText(IncrementalSystems, Parse, path: "Systems.cs");
+        var lambdas = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic static class Lp { static void F(World w, int n) => w.ForEach(n, static (ref P p, int n) => p.V += n); }", Parse, path: "Lambdas.cs");
+        var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse, path: "Unrelated.cs");
+        var compilation = Compile().AddSyntaxTrees(components, systems, lambdas, other);
+        var edited = new[] { components, systems, other }.Single(t => t.ToString().Contains(before));
+        var next = compilation.ReplaceSyntaxTree(edited, CSharpSyntaxTree.ParseText(edited.ToString().Replace(before, after), Parse, path: edited.FilePath));
+        var changed = changes.Split(' ', System.StringSplitOptions.RemoveEmptyEntries);
+        string[] tolerated = ["IsEasyEcsCore", "SetFusions"];
+
+        foreach (bool ide in new[] { false, true })
+        {
+            var driver = CSharpGeneratorDriver.Create(
+                [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator(),
+                    new ViewGenerator().AsSourceGenerator(), new PrefabGenerator().AsSourceGenerator(), new ArityGenerator().AsSourceGenerator()],
+                parseOptions: Parse, driverOptions: new GeneratorDriverOptions(
+                    ide ? IncrementalGeneratorOutputKind.Implementation : IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true))
+                .RunGenerators(compilation).RunGenerators(next);
+            var steps = Steps(driver);
+            string mode = ide ? " (IDE)" : " (build)";
+            foreach (var (name, runs) in steps)
+            {
+                if (name.Contains('_') || name is "Compilation" or "CompilationOptions" or "ParseOptions") continue; // Roslyn's own
+                bool output = name is "SourceOutput" or "ImplementationSourceOutput";
+                if (changed.Contains(name) || output && changed.Length > 0 || tolerated.Contains(name)) continue; // asserted below
+                Assert.That(runs.SelectMany(s => s.Outputs).Select(o => o.Reason), Is.All.EqualTo(IncrementalStepRunReason.Cached),
+                    $"{name} after {edit}{mode}");
+            }
+            foreach (var name in changed.Where(n => !ide || !ImplementationOnlyStages.Contains(n)))
+                Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
+                    Has.Some.AnyOf(IncrementalStepRunReason.New, IncrementalStepRunReason.Modified), $"{edit} changes {name}{mode}");
+            if (ide) // implementation outputs skipped: the steps only they read do not run at all
+                Assert.That(steps.Keys.Intersect(ImplementationOnlyStages), Is.Empty, edit);
+        }
+    }
+
+    // While typing, a generator transform runs again on every compilation for every node it matches, in every file.
+    // One that binds a member body to read a call (GetSymbolInfo on a node inside it) binds the whole body and runs its
+    // nullable analysis on every keystroke anywhere. The body here takes seconds to bind (nested lambdas, each bound
+    // for both overloads of M): an edit elsewhere must not pay for it. Its Read of one component is the call
+    // QueryShapes once bound to tell an entity's from a World's.
+    [Test]
+    public void AnEditElsewhereBindsNoBody()
+    {
+        string nested = "x17.GetHashCode()";
+        for (int i = 17; i >= 0; i--) nested = $"M(x{i} => {nested})";
+        var slow = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic static class Slow { static int M(System.Func<int, int> f) => 0; static int M(System.Func<string, int> f) => 0; " +
+            "static int F(Entity e) { int v = e.Read<P>().V; return v + " + nested + "; } }", Parse, path: "Slow.cs");
+        var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse, path: "Unrelated.cs");
+        // Nullable on, as projects set it: a node's binding then runs the nullable analysis of its whole member.
+        var compilation = Compile(Components).AddSyntaxTrees(slow, other);
+        compilation = compilation.WithOptions(compilation.Options.WithNullableContextOptions(NullableContextOptions.Enable));
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator(),
+                new ViewGenerator().AsSourceGenerator(), new PrefabGenerator().AsSourceGenerator()],
+            parseOptions: Parse, driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.Implementation));
+        driver = driver.RunGenerators(compilation);
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        driver.RunGenerators(compilation.ReplaceSyntaxTree(other, CSharpSyntaxTree.ParseText("public class Unrelated { int x; }", Parse, path: "Unrelated.cs")));
+        Assert.That(watch.Elapsed.TotalSeconds, Is.LessThan(3), "binding the body takes over 10 s; the generators alone take milliseconds");
     }
 
     // The assembly's set: one Add per system (generic ones per closed type), a switch per hook over the systems'

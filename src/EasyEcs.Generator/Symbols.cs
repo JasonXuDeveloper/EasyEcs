@@ -107,11 +107,6 @@ internal static class Symbols
     }
 
     /// <summary>
-    /// A position inside the braces of the type whose member body (or initializer) holds <paramref name="node"/>, where
-    /// a type name binds without the member; -1 outside a member body (a declaration's own types bind alone already)
-    /// or in top-level statements.
-    /// </summary>
-    /// <summary>
     /// Whether the instance fields of <paramref name="type"/> come from more than one of its parts, so their order in
     /// memory is not defined. A part without fields (a generated [LookupKey] or [Sum] part, a part of methods) does not
     /// count: the generator sees the type without the generated parts and the analyzer with them, and both must agree.
@@ -141,6 +136,12 @@ internal static class Symbols
         return false;
     }
 
+    /// <summary>
+    /// A position where a type name of <paramref name="node"/>'s member body (or initializer) binds without the member:
+    /// inside the braces of the type holding it, or for top-level statements the end of the file (its usings and the
+    /// global namespace, not the Main the statements make); -1 outside a member body (a declaration's own types bind
+    /// alone already).
+    /// </summary>
     public static int Outside(SyntaxNode node)
     {
         bool body = false;
@@ -152,8 +153,9 @@ internal static class Symbols
                     break;
                 case BaseTypeDeclarationSyntax type:
                     return body && !type.OpenBraceToken.IsMissing ? type.OpenBraceToken.Span.End : -1;
-                case GlobalStatementSyntax:
-                    return -1;
+                case GlobalStatementSyntax { Parent: CompilationUnitSyntax unit }:
+                    return unit.EndOfFileToken.SpanStart; // after every member: the file's usings, not the Main body
+
             }
 
         return -1;
@@ -1275,11 +1277,12 @@ internal static class Symbols
     /// The components a parameter reads of other entities than its own: a <c>Lookup&lt;T&gt;</c>'s T, a
     /// <c>Tile&lt;TCell, TTile&gt;</c>'s <c>DynamicBuffer&lt;TCell&gt;</c> and TTile; else none.
     /// </summary>
-    public static IEnumerable<ITypeSymbol> LookedUp(IParameterSymbol p, Compilation compilation)
+    public static IEnumerable<ITypeSymbol> LookedUp(IParameterSymbol p)
     {
         if (LookupElement(p.Type) is { } looked) yield return looked;
         if (TileElements(p.Type) is not { } tile) yield break;
-        if (compilation.GetTypeByMetadataName("EasyEcs.DynamicBuffer`1") is { } buffer) yield return buffer.Construct(tile.Cell);
+        // DynamicBuffer is declared next to Tile: a lookup by name there, not a search of every assembly.
+        if (p.Type.ContainingNamespace.GetTypeMembers("DynamicBuffer", 1).FirstOrDefault() is { } buffer) yield return buffer.Construct(tile.Cell);
         yield return tile.Grid;
     }
 
@@ -1417,9 +1420,9 @@ internal static class Symbols
     /// Why a [ForEach(Parallel = true)] method cannot run on several threads, or null: it must be stable (no structural
     /// change), per entity (not a batch) and write no singleton (each row's run would race on it).
     /// </summary>
-    public static string? ParallelProblem(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model)
+    public static string? ParallelProblem(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, bool? stable = null)
     {
-        if (!IsStable(method, syntax, model)) return "it can change structure (make it static, without World, and use its Entity only to read)";
+        if (!(stable ?? IsStable(method, syntax, model))) return "it can change structure (make it static, without World, and use its Entity only to read)";
         if (IsBatch(method)) return "batch methods run on one thread";
         if (method.Parameters.FirstOrDefault(p => Classify(p) == ParamKind.Singleton && p.RefKind == RefKind.Ref) is { } singleton)
             return $"'ref {singleton.Type.Name} {singleton.Name}' writes a singleton, which every chunk would race on: take it as 'in' to read it; "

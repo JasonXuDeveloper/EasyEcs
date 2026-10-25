@@ -15,7 +15,7 @@ namespace EasyEcs.Generator;
 /// thread shares, and a parallel job whose fields the caller reads after the call (each chunk ran a copy). Both find
 /// the writes with <see cref="Threads.Writes"/>.
 /// </summary>
-public sealed partial class EasyEcsAnalyzer
+public static partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor SharedWrite = new("EECS060", "Code running on several threads writes shared memory",
         "{0} writes {1}, which every thread running its chunks shares: the writes race{2}",
@@ -69,7 +69,7 @@ public sealed partial class EasyEcsAnalyzer
     /// <summary>EECS071's properties for its code fix: the draw, and the parameters to add (null: the method has them).</summary>
     public const string RandomText = "Text", RandomSingleton = "Random", RandomEntity = "Entity";
 
-    private static void InitializeParallel(AnalysisContext context)
+    internal static void InitializeParallel(AnalysisContext context)
     {
         context.RegisterOperationBlockAction(AnalyzeParallelWrites);
         context.RegisterOperationBlockAction(AnalyzeRandom);
@@ -189,7 +189,7 @@ public sealed partial class EasyEcsAnalyzer
         if (context.OwningSymbol is not IMethodSymbol method || !Symbols.IsForEach(method) || !Symbols.IsParallel(method)) return;
         var body = context.OperationBlocks.FirstOrDefault(b => b is IMethodBodyOperation or IBlockOperation);
         var syntax = body?.Syntax as MethodDeclarationSyntax ?? body?.Syntax.Parent as MethodDeclarationSyntax;
-        if (body == null || syntax == null || Symbols.ParallelProblem(method, syntax, body.SemanticModel!) != null) return;
+        if (body == null || syntax == null || BodyFacts.ParallelProblem(method, syntax, body.SemanticModel!) != null) return;
         foreach (var write in Threads.Writes(body, job: false))
             if (Races(write))
                 context.ReportDiagnostic(Diagnostic.Create(SharedWrite, write.Operation.Syntax.GetLocation(),
@@ -391,4 +391,16 @@ public sealed partial class EasyEcsAnalyzer
             ? constant
             : null;
     }
+}
+
+/// <summary>The rules of code on several threads and of random streams (EasyEcsAnalyzer.Parallel.cs), as one analyzer: Roslyn skips an analyzer only when every rule it reports is suppressed, so a
+/// NoWarn of these rules saves their cost.</summary>
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public sealed class ParallelAnalyzer : EasyEcsAnalyzer.Area
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
+        EasyEcsAnalyzer.LostJobWrite, EasyEcsAnalyzer.SharedRandom, EasyEcsAnalyzer.SharedStream,
+        EasyEcsAnalyzer.SharedWrite);
+
+    protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeParallel(context);
 }

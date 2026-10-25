@@ -78,7 +78,7 @@ public partial class AnalyzerTests
     {
         const string source = "[View] internal ref struct V { public ref P P; } [EcsSystem] public ref struct S { [ForEach] static void A(V v, ref Q q, ref T t) => q.V = v.P.V + t.V; }";
         GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile(GeneratorTests.Components, source), out var output, out _);
-        var analyzers = output.WithAnalyzers([new EasyEcs.Generator.EasyEcsAnalyzer()]);
+        var analyzers = output.WithAnalyzers(EasyEcs.Generator.EasyEcsAnalyzer.All);
         var tree = output.SyntaxTrees.Single(t => t.ToString().Contains("ref struct V"));
         var live = (await analyzers.GetAnalyzerSemanticDiagnosticsAsync(output.GetSemanticModel(tree), null, default)).Where(d => d.Id == "EECS025").ToArray();
         var all = (await analyzers.GetAnalyzerDiagnosticsAsync()).Where(d => d.Id == "EECS025").ToArray();
@@ -199,7 +199,7 @@ public partial class AnalyzerTests
     [TestCase("EECS033", DiagnosticSeverity.Warning)]
     [TestCase("EECS034", DiagnosticSeverity.Error)]
     public void SeveritySaysWhatARuleCosts(string id, DiagnosticSeverity severity) =>
-        Assert.That(new EasyEcsAnalyzer().SupportedDiagnostics.Where(d => d.Id == id).Select(d => d.DefaultSeverity), Is.Not.Empty.And.All.EqualTo(severity)); // every descriptor of the id (EECS025 has a compilation-end one)
+        Assert.That(EasyEcsAnalyzer.All.SelectMany(a => a.SupportedDiagnostics).Where(d => d.Id == id).Select(d => d.DefaultSeverity), Is.Not.Empty.And.All.EqualTo(severity)); // every descriptor of the id (EECS025 has a compilation-end one)
 
     // The tricky "written" cases: every form of a write keeps the write access.
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p) => p.V = 1; }")]

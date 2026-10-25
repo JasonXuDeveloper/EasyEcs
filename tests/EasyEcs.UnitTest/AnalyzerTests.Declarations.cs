@@ -362,7 +362,7 @@ public partial class AnalyzerTests
                 Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)).Append(reference),
                 new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
             Driver().RunGeneratorsAndUpdateCompilation(user, out var output, out _);
-            return (await output.WithAnalyzers([new EasyEcsAnalyzer()]).GetAnalyzerDiagnosticsAsync()).Select(d => d.Id).Distinct().ToArray();
+            return (await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAnalyzerDiagnosticsAsync()).Select(d => d.Id).Distinct().ToArray();
         }
 
         Assert.That(await Ids("public struct Holds : IComponent { public Library.Pair P; }"), Does.Contain("EECS017"));
@@ -408,5 +408,19 @@ public partial class AnalyzerTests
     {
         var diagnostics = Diagnose(Components, "public static class R { [ForEach] static void A(ref P p) { } [ForEach] static void A(ref Q q) { } }").Result;
         Assert.That(diagnostics, Does.Contain("EECS021"));
+    }
+
+    // One analyzer per area file: Roslyn skips an analyzer only when every rule it supports is suppressed, so a single
+    // class for all rules made a NoWarn save nothing. Every rule is supported by an area (Roslyn rejects a diagnostic
+    // its analyzer does not declare), and the areas are several.
+    [Test]
+    public void EveryRuleBelongsToAnAreaAnalyzer()
+    {
+        var declared = typeof(EasyEcsAnalyzer).GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(f => f.FieldType == typeof(DiagnosticDescriptor)).Select(f => (DiagnosticDescriptor)f.GetValue(null)!).ToArray();
+        var supported = EasyEcsAnalyzer.All.SelectMany(a => a.SupportedDiagnostics).ToHashSet();
+        Assert.That(declared, Is.Not.Empty);
+        Assert.That(declared.Where(d => !supported.Contains(d)).Select(d => d.Id), Is.Empty);
+        Assert.That(EasyEcsAnalyzer.All.Select(a => a.GetType()).Distinct().Count(), Is.EqualTo(EasyEcsAnalyzer.All.Length).And.GreaterThan(1));
     }
 }

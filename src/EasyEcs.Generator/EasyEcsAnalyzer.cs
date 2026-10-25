@@ -10,11 +10,29 @@ namespace EasyEcs.Generator;
 
 /// <summary>
 /// Reports misuse of EasyEcs at compile time. Diagnostics live here rather than in the generators (the recommended
-/// split: generators stay pure and cacheable, analyzers run on the symbols they need).
+/// split: generators stay pure and cacheable, analyzers run on the symbols they need). The rules are reported by one
+/// analyzer per area file (<see cref="All"/>); this class holds their descriptors and their code.
 /// </summary>
-[DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
+public static partial class EasyEcsAnalyzer
 {
+    /// <summary>A new instance of every analyzer of EasyEcs, one per area (what a host loading the package runs).</summary>
+    public static ImmutableArray<DiagnosticAnalyzer> All => ImmutableArray.Create<DiagnosticAnalyzer>(
+        new DeclarationAnalyzer(), new SystemAnalyzer(), new PerformanceAnalyzer(), new UsageAnalyzer(), new ParallelAnalyzer(),
+        new PartAnalyzer(), new FormAnalyzer(), new LambdaPassAnalyzer(), new ViewAnalyzer(), new RecordAnalyzer(), new FusionAnalyzer());
+
+    /// <summary>The analyzer of one area: the settings every area shares, then its own registrations.</summary>
+    public abstract class Area : DiagnosticAnalyzer
+    {
+        public sealed override void Initialize(AnalysisContext context)
+        {
+            context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+            context.EnableConcurrentExecution();
+            Register(context);
+        }
+
+        protected abstract void Register(AnalysisContext context);
+    }
+
     private const string Category = "EasyEcs";
 
     public static readonly DiagnosticDescriptor BadParameter = new("EECS002", "Invalid [ForEach] parameter",
@@ -235,32 +253,15 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     // EECS012's property for its code fix: the parameter's method shares its signature (override, interface).
     public const string SharedSignature = "SharedSignature";
 
-    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
-        BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
-        MixedBatch, NotParallel, WriteThroughReadOnly, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
-        RemovedRequired, EntityInData, OrderCycle, OrderAcrossGroups, EntryPointCollision, Unnameable, FilterOutsideGroup, LocalForEach,
-        WriteAccessOnlyReads, ViewFieldOnlyReads, UnusedParameter, RowLookup, Allocation, PerEntityChange, CreateInLoop, QueryByHand,
-        GeneratedMember, UpdateInSystem, BadSlices, BadIndexedKey, JobWrites, DroppedCopy, UntrackedMut, ReadOnlyQuery, NotComparable, RefusedInPass,
-        IndexChangedInWalk, KeyPrintsItself, SlicedFilter, InternalTag, RefAcrossChange, NotDisableable, NeverMatches, SecondGroup,
-        UpdateInPass, CreateThenSet, SomeRowsWritten, BadChunkRows, ReductionOverwritten, ScalarLoop, NoVectorLoop,
-        SharedWrite, LostJobWrite, ScratchEscape, LookupOfWritten, NotPartial, ReductionWrittenTwice, BadReductionField, HandWrittenReduction,
-        WrongIdentity, HandWrittenKey, BadSetup, NoFormatter, BadEmit, SharedRandom,
-        HandWrittenEntityJob, BadForEntity, BadUpdateInterval, HandWrittenConsume, BadConsume, BadTileShape, SharedTile,
-        HandWrittenReduce, HandWrittenLookup, SharedStream, HandWrittenEmit, BadSystemType, InstanceMember, BadHook, NotASystemType, MisspelledHook,
-        ColdFields, UnclearedRecords, BadLambdaPass, DelegateLambdaPass, ScalarLambdaPass,
-        BadView, ViewOverlap, ViewReachesOut, HandWrittenView, BadPrefab, NearFusion, FusionRequired, HandWrittenVectorLoop);
 
-    public override void Initialize(AnalysisContext context)
+    internal static void InitializeDeclarations(AnalysisContext context)
     {
-        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
-        context.EnableConcurrentExecution();
         context.RegisterSymbolAction(AnalyzeType, SymbolKind.NamedType);
         context.RegisterSyntaxNodeAction(AnalyzeTileShape, SyntaxKind.StructDeclaration, SyntaxKind.RecordStructDeclaration);
         context.RegisterSymbolAction(AnalyzeMethod, SymbolKind.Method);
         context.RegisterSyntaxNodeAction(AnalyzeParallel, SyntaxKind.MethodDeclaration);
         context.RegisterSyntaxNodeAction(AnalyzeLocalFunction, SyntaxKind.LocalFunctionStatement);
         context.RegisterSyntaxNodeAction(AnalyzeBufferOfEntities, SyntaxKind.GenericName);
-        context.RegisterSyntaxNodeAction(AnalyzeReduction, SyntaxKind.StructDeclaration, SyntaxKind.RecordStructDeclaration);
         context.RegisterSymbolAction(AnalyzeBufferHolder, SymbolKind.Field, SymbolKind.Property, SymbolKind.Method);
         context.RegisterOperationAction(AnalyzeBufferCopy, OperationKind.VariableDeclarator, OperationKind.SimpleAssignment,
             OperationKind.Argument);
@@ -269,16 +270,6 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterOperationAction(AnalyzeStructuralCall, OperationKind.Invocation);
         context.RegisterOperationAction(AnalyzeIndexedRef, OperationKind.Invocation, OperationKind.VariableDeclarator);
         context.RegisterCompilationStartAction(AnalyzeOrderings);
-        context.RegisterCompilationStartAction(AnalyzeFormatters);
-        context.RegisterCompilationStartAction(AnalyzeRecords);
-        InitializePerformance(context);
-        InitializeUsage(context);
-        InitializeParallel(context);
-        InitializeForms(context);
-        InitializeSystems(context);
-        InitializeLambdas(context);
-        InitializeViews(context);
-        InitializeFusion(context);
     }
 
     /// <summary>
@@ -453,11 +444,11 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         // this file: one level, the method's own calls.
         if (!inFunction && context.ContainingSymbol is IMethodSymbol { MethodKind: MethodKind.Ordinary } worker
             && worker.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is MethodDeclarationSyntax declaration
-            && declaration.SyntaxTree == call.Syntax.SyntaxTree && declaration.Parent is TypeDeclarationSyntax owner)
+            && declaration.SyntaxTree == call.Syntax.SyntaxTree && declaration.Parent is TypeDeclarationSyntax owner
+            && ArgumentNames(owner).Contains(worker.Name)) // one walk of the type per analysis, not one per structural call
             foreach (var group in owner.DescendantNodes().OfType<ArgumentSyntax>())
             {
-                var expression = group.Expression;
-                if ((expression is IdentifierNameSyntax id ? id.Identifier : expression is MemberAccessExpressionSyntax access ? access.Name.Identifier : default).ValueText != worker.Name
+                if (ArgumentName(group.Expression) != worker.Name
                     || call.SemanticModel!.GetOperation(group, context.CancellationToken) is not IArgumentOperation
                     {
                         Value: IDelegateCreationOperation { Target: IMethodReferenceOperation reference }, Parent: { } handoff,
@@ -473,10 +464,31 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (Symbols.IsBatch(method))
             context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), Symbols.Describe(method), name,
                 "it is a batch method, whose spans point into the tables; record the change as data for a method that runs per entity"));
-        else if (Symbols.IsStable(method, context.Operation.SemanticModel!))
+        else if (BodyFacts.IsStable(method, context.Operation.SemanticModel!))
             context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), Symbols.Describe(method), name,
                 "takes no Entity or World to make it with; take the Entity as a parameter, or record the change as data"));
     }
+
+    /// <summary>
+    /// The names the arguments of <paramref name="type"/>'s code pass as plain or member-access names (the method groups
+    /// it may hand to another thread), computed once per declaration: EECS014's method-group check asks it for every
+    /// structural call of the type, and a walk of the type per call made it the costliest rule of large files.
+    /// </summary>
+    private static System.Collections.Generic.HashSet<string> ArgumentNames(TypeDeclarationSyntax type) =>
+        ArgumentNamesOf.GetValue(type, static type =>
+        {
+            var names = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
+            foreach (var node in type.DescendantNodes())
+                if (node is ArgumentSyntax argument && ArgumentName(argument.Expression) is { Length: > 0 } name) names.Add(name);
+            return names;
+        });
+
+    // Keyed by the declaration (immutable syntax): an unchanged file keeps its entry across compilations, an edited one
+    // gets new nodes, and the table holds no node alive.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TypeDeclarationSyntax, System.Collections.Generic.HashSet<string>> ArgumentNamesOf = new();
+
+    private static string? ArgumentName(ExpressionSyntax expression) =>
+        expression is IdentifierNameSyntax id ? id.Identifier.ValueText : expression is MemberAccessExpressionSyntax access ? access.Name.Identifier.ValueText : null;
 
     /// <summary>EECS011: a write or a mutating call that reaches a read-only [ForEach] parameter's reference.</summary>
     private static void AnalyzeWrite(OperationAnalysisContext context)
@@ -574,9 +586,6 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (type.TypeKind == TypeKind.Struct && (Symbols.Implements(type, Symbols.Component) || Symbols.Implements(type, Symbols.Singleton)))
             AnalyzeDataFields(context, type);
         if (type.TypeKind == TypeKind.Struct) AnalyzeUniqueKey(context, type, location);
-        if (type.TypeKind == TypeKind.Struct) AnalyzeParts(context, type);
-        if (type.TypeKind == TypeKind.Struct) AnalyzeHandWrittenKey(context, type);
-        if (type.TypeKind == TypeKind.Struct) AnalyzeSetup(context, type);
 
         if (type.TypeKind == TypeKind.Struct && !Symbols.Implements(type, "EasyEcs.ISystemGroup"))
             foreach (var attribute in type.GetAttributes())
@@ -782,7 +791,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                 context.ReportDiagnostic(Diagnostic.Create(SharedTile, p.Locations.FirstOrDefault(), method.Name, first.Name, p.Name,
                     string.Join(", ", ((INamedTypeSymbol)p.Type).TypeArguments.Select(t => t.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)))));
             else if (kind is Symbols.ParamKind.Lookup or Symbols.ParamKind.Tile
-                     && Symbols.LookedUp(p, context.Compilation).Select(t => (t, Symbols.LookupProblem(method, p, t))).FirstOrDefault(c => c.Item2 != null) is ({ } read, { } written))
+                     && Symbols.LookedUp(p).Select(t => (t, Symbols.LookupProblem(method, p, t))).FirstOrDefault(c => c.Item2 != null) is ({ } read, { } written))
                 context.ReportDiagnostic(Diagnostic.Create(LookupOfWritten, p.Locations.FirstOrDefault(), p.Name, Symbols.Describe(method),
                     read.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), written));
             else if (kind == Symbols.ParamKind.Emit && Symbols.EmitProblem(method, p) is { } emit)
@@ -859,7 +868,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
             || !Symbols.IsForEach(method) || !Symbols.IsParallel(method)
             || method.PartialDefinitionPart != null) return; // a partial method: reported once, on its definition
-        if (Symbols.ParallelProblem(method, syntax, context.SemanticModel) is not { } problem) return;
+        if (BodyFacts.ParallelProblem(method, syntax, context.SemanticModel) is not { } problem) return;
         // An instance method that 'static' alone makes stable: the fix offers 'static'.
         bool makeStatic = !method.IsStatic && !Symbols.SharesSignature(method) && method.PartialImplementationPart == null
                           && Symbols.StableIfStatic(method, syntax, context.SemanticModel);
@@ -877,4 +886,20 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         _ => null,
     };
 
+}
+
+/// <summary>The declaration and [ForEach] rules that are not performance rules (EasyEcsAnalyzer.cs), as one analyzer: Roslyn skips an analyzer only when every rule it reports is suppressed, so a
+/// NoWarn of these rules saves their cost.</summary>
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public sealed class DeclarationAnalyzer : EasyEcsAnalyzer.Area
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
+        EasyEcsAnalyzer.BadParameter, EasyEcsAnalyzer.ComponentCount, EasyEcsAnalyzer.Generic, EasyEcsAnalyzer.NotASystem, EasyEcsAnalyzer.NotStruct, EasyEcsAnalyzer.MixedBatch,
+        EasyEcsAnalyzer.NotParallel, EasyEcsAnalyzer.WriteThroughReadOnly, EasyEcsAnalyzer.BufferCopy, EasyEcsAnalyzer.HiddenStructuralChange, EasyEcsAnalyzer.OffThreadStructuralChange, EasyEcsAnalyzer.EntityInData,
+        EasyEcsAnalyzer.OrderCycle, EasyEcsAnalyzer.OrderAcrossGroups, EasyEcsAnalyzer.EntryPointCollision, EasyEcsAnalyzer.FilterOutsideGroup, EasyEcsAnalyzer.LocalForEach, EasyEcsAnalyzer.BadSlices,
+        EasyEcsAnalyzer.BadChunkRows, EasyEcsAnalyzer.ReductionOverwritten, EasyEcsAnalyzer.LookupOfWritten, EasyEcsAnalyzer.BadEmit, EasyEcsAnalyzer.BadForEntity, EasyEcsAnalyzer.BadTileShape,
+        EasyEcsAnalyzer.IndexedByRef, EasyEcsAnalyzer.BadIndexedKey, EasyEcsAnalyzer.Unnameable,
+        EasyEcsAnalyzer.SharedTile);
+
+    protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeDeclarations(context);
 }

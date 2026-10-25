@@ -15,10 +15,12 @@ namespace EasyEcs.Benchmark;
 /// <summary>
 /// What the generators and the analyzer cost the IDE and the build, on a game server's worth of code: the battle server
 /// (BattleServer.cs) and <see cref="Modules"/> more files, each with 10 components (plain, tracked, indexed, a tag), a
-/// buffer element, 5 systems of 2 [ForEach] methods and a query loop. <c>Cold</c>: a first run (a build, or the IDE
-/// opening the project) on a new compilation. <c>EditMethodBody</c>: an IDE keystroke, one line changed in a [ForEach]
-/// method's body, the driver kept from the previous run; <c>EditUnrelatedFile</c>: the same in a file with no EasyEcs
-/// code. <c>Compile</c> and <c>CompileAndAnalyze</c>: a build's diagnostics without and with the analyzer.
+/// buffer element, 5 systems of 3 [ForEach] methods, a query loop and gameplay code that changes entities through the
+/// generated members. <c>Cold</c>: a first run (a build, or the IDE opening the project) on a new compilation.
+/// <c>EditMethodBody</c>: a keystroke, one line changed in a [ForEach] method's body, the driver kept from the previous
+/// run, every output produced (a build's driver); <c>EditMethodBodyIde</c>: the same as an IDE runs the generators while
+/// typing, implementation outputs skipped (the steps only they read never run); <c>EditUnrelatedFile</c>: a keystroke in
+/// a file with no EasyEcs code. <c>Compile</c> and <c>CompileAndAnalyze</c>: a build's diagnostics without and with the analyzer.
 /// <see cref="OneNamespace"/>: every module in one namespace (a game's <c>Game</c>), as many projects lay out their
 /// components, instead of one namespace per module.
 /// </summary>
@@ -34,12 +36,12 @@ public class GeneratorBenchmark
     private ImmutableArray<MetadataReference> _references;
     private SyntaxTree[] _system, _unrelated; // the edited tree's two versions
     private int _systemIndex, _unrelatedIndex, _edits;
-    private CSharpCompilation _compilation, _generated;
-    private GeneratorDriver _driver;
+    private CSharpCompilation _compilation, _ideCompilation, _generated;
+    private GeneratorDriver _driver, _ideDriver;
 
-    private GeneratorDriver NewDriver() => CSharpGeneratorDriver.Create(
+    private static GeneratorDriver NewDriver(IncrementalGeneratorOutputKind disabled = IncrementalGeneratorOutputKind.None) => CSharpGeneratorDriver.Create(
         [new ArityGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new SystemGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()], parseOptions: Parse,
-        driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None));
+        driverOptions: new GeneratorDriverOptions(disabled));
 
     [GlobalSetup]
     public void Setup()
@@ -57,7 +59,8 @@ public class GeneratorBenchmark
             .Append(typeof(World).Assembly.Location)
             .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p))];
 
-        _compilation = NewCompilation();
+        _compilation = _ideCompilation = NewCompilation();
+        _ideDriver = NewDriver(IncrementalGeneratorOutputKind.Implementation).RunGenerators(_ideCompilation);
         _driver = NewDriver().RunGeneratorsAndUpdateCompilation(_compilation, out var generated, out _);
         _generated = (CSharpCompilation)generated;
         var errors = generated.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToArray();
@@ -78,17 +81,21 @@ public class GeneratorBenchmark
 
     /// <summary>A keystroke in a [ForEach] method's body: the IDE's next compilation, the previous run's driver.</summary>
     [Benchmark]
-    public GeneratorDriver EditMethodBody() => Edit(_systemIndex, _system);
+    public GeneratorDriver EditMethodBody() => _driver = Edit(ref _compilation, _driver, _systemIndex, _system);
+
+    /// <summary><see cref="EditMethodBody"/> as an IDE runs it while typing: implementation outputs skipped.</summary>
+    [Benchmark]
+    public GeneratorDriver EditMethodBodyIde() => _ideDriver = Edit(ref _ideCompilation, _ideDriver, _systemIndex, _system);
 
     /// <summary>A keystroke in a file with no EasyEcs code.</summary>
     [Benchmark]
-    public GeneratorDriver EditUnrelatedFile() => Edit(_unrelatedIndex, _unrelated);
+    public GeneratorDriver EditUnrelatedFile() => _driver = Edit(ref _compilation, _driver, _unrelatedIndex, _unrelated);
 
-    private GeneratorDriver Edit(int index, SyntaxTree[] versions)
+    private GeneratorDriver Edit(ref CSharpCompilation compilation, GeneratorDriver driver, int index, SyntaxTree[] versions)
     {
-        var current = _compilation.SyntaxTrees[index];
-        _compilation = _compilation.ReplaceSyntaxTree(current, versions[++_edits & 1]);
-        return _driver = _driver.RunGenerators(_compilation);
+        var current = compilation.SyntaxTrees[index];
+        compilation = compilation.ReplaceSyntaxTree(current, versions[++_edits & 1]);
+        return driver.RunGenerators(compilation);
     }
 
     /// <summary>The compiler's own diagnostics of the generated compilation (a new one: nothing bound yet).</summary>
@@ -100,7 +107,7 @@ public class GeneratorBenchmark
     /// </summary>
     [Benchmark]
     public async Task<int> CompileAndAnalyze() =>
-        (await Fresh().WithAnalyzers([new EasyEcsAnalyzer()]).GetAllDiagnosticsAsync()).Length;
+        (await Fresh().WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync()).Length;
 
     private Compilation Fresh() => _generated.RemoveAllSyntaxTrees().AddSyntaxTrees(_generated.SyntaxTrees);
 
@@ -108,7 +115,7 @@ public class GeneratorBenchmark
     /// The analyzer's diagnostics of the benchmark's code (none: it is written as users should write it), but EECS055:
     /// the methods over components of several fields stay scalar, and the message says so.
     /// </summary>
-    private Diagnostic[] Analyzed() => Fresh().WithAnalyzers([new EasyEcsAnalyzer()]).GetAnalyzerDiagnosticsAsync().Result
+    private Diagnostic[] Analyzed() => Fresh().WithAnalyzers(EasyEcsAnalyzer.All).GetAnalyzerDiagnosticsAsync().Result
         .Where(d => d.Severity >= DiagnosticSeverity.Info && d.Id != "EECS055").ToArray();
 
     /// <summary>One module of a game: components, a buffer element, systems with [ForEach] methods and a query loop.</summary>
@@ -150,6 +157,12 @@ public class GeneratorBenchmark
                     {
                         if (q.V > 100 && items.Value.Count < 8) items.Write().Add(new Item{{m}}(q.V));
                     }
+
+                    [ForEach]
+                    static void Expire(Entity e, in {{a}} p)
+                    {
+                        if (p.V > 1000) e.Destroy();
+                    }
                 }
 
 
@@ -170,6 +183,20 @@ public class GeneratorBenchmark
                 {
                     foreach (var item in world.Query<Data{{m}}_5, Data{{m}}_6>()) item.Data{{m}}_5.V = item.Data{{m}}_6.V;
                 }
+            }
+
+            public static class Gameplay{{m}}
+            {
+                public static Entity Spawn(World world, int v) => world.CreateEntity(new Data{{m}}_4 { V = v }, new Tracked{{m}}_2(v, 0f));
+
+                public static void Hit(Entity e, int damage)
+                {
+                    e.Data{{m}}_4.V -= damage;
+                    if (e.Data{{m}}_4.V <= 0) e.Destroy();
+                    else if (e.HasData{{m}}_7) e.RemoveData{{m}}_7();
+                }
+
+                public static void Heal(Entity e, int amount) => e.SetTracked{{m}}_2(e.Tracked{{m}}_2.V + amount, e.Tracked{{m}}_2.W);
             }
 
             """);

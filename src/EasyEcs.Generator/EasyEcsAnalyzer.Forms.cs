@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -17,7 +18,7 @@ namespace EasyEcs.Generator;
 /// cannot apply (EECS085); and a batch method's vector loop written by hand that the generator writes from the method
 /// for one row (EECS103, <see cref="HandSimd"/>). Each computes its code fix as diagnostic properties.
 /// </summary>
-public sealed partial class EasyEcsAnalyzer
+public static partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor HandWrittenEntityJob = new("EECS080", "A hand-written one-entity job",
         "'{0}' is a job written by hand and run only with entity.Run: [ForEntity] on a static method writes the job, its WriteMask and its entry point ({1})",
@@ -76,7 +77,7 @@ public sealed partial class EasyEcsAnalyzer
     /// <summary>EECS080's properties: field=parameter pairs, the components' modifiers, the filter attributes, the calls' replacements; EECS084's entity parameter to drop.</summary>
     public const string JobParameters = "Parameters", JobModifiers = "Modifiers", JobFilter = "Filter", JobCall = "Call", DropEntity = "DropEntity";
 
-    private static void InitializeForms(AnalysisContext context)
+    internal static void InitializeForms(AnalysisContext context)
     {
         context.RegisterSymbolAction(AnalyzeScheduleAttribute, SymbolKind.NamedType);
         context.RegisterSyntaxNodeAction(AnalyzeHandWrittenConsume, SyntaxKind.MethodDeclaration);
@@ -173,9 +174,12 @@ public sealed partial class EasyEcsAnalyzer
         if (compilation.GetTypeByMetadataName(Symbols.Entity) is not { } entityType) return;
         var shapes = new ConcurrentDictionary<INamedTypeSymbol, JobShape>(SymbolEqualityComparer.Default);
         var uses = new ConcurrentBag<JobUse>();
-        // The names of the struct types that implement IForEachEntity: only identifiers with one of them are bound.
-        var names = new HashSet<string>(compilation.GetSymbolsWithName(_ => true, SymbolFilter.Type).OfType<INamedTypeSymbol>()
-            .Where(t => t.TypeKind == TypeKind.Struct && EntityJobInterface(t) != null).Select(t => t.Name));
+        // The names of the structs whose base list names IForEachEntity: only identifiers with one of them are bound.
+        // Read from syntax, once per tree (an edit rereads its own tree only), instead of every type symbol of the
+        // compilation at each compilation start; EntityJobInterface still decides from the symbol.
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var tree in compilation.SyntaxTrees)
+            foreach (var name in EntityJobNames(tree, start.CancellationToken)) names.Add(name);
         if (names.Count == 0) return;
 
         start.RegisterSyntaxNodeAction(context =>
@@ -224,6 +228,29 @@ public sealed partial class EasyEcsAnalyzer
             }
         });
     }
+
+    /// <summary>The names of the structs of <paramref name="tree"/> whose base list names IForEachEntity, cached per tree.</summary>
+    private static string[] EntityJobNames(SyntaxTree tree, System.Threading.CancellationToken token) =>
+        EntityJobNamesOf.GetValue(tree, t =>
+        {
+            var found = new List<string>();
+            // Declarations only: member bodies hold no struct declarations.
+            foreach (var node in t.GetRoot(token).DescendantNodes(n => n is CompilationUnitSyntax or BaseNamespaceDeclarationSyntax or TypeDeclarationSyntax))
+                if (node is StructDeclarationSyntax { BaseList: { } bases } declaration
+                    && bases.Types.Any(b => RightmostName(b.Type) == "IForEachEntity"))
+                    found.Add(declaration.Identifier.ValueText);
+            return found.ToArray();
+        });
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<SyntaxTree, string[]> EntityJobNamesOf = new();
+
+    private static string? RightmostName(TypeSyntax type) => type switch
+    {
+        SimpleNameSyntax simple => simple.Identifier.ValueText,
+        QualifiedNameSyntax qualified => qualified.Right.Identifier.ValueText,
+        AliasQualifiedNameSyntax alias => alias.Name.Identifier.ValueText,
+        _ => null,
+    };
 
     /// <summary>The one IForEachEntity&lt;T1..Tn&gt; a struct implements (directly), else null.</summary>
     private static INamedTypeSymbol? EntityJobInterface(INamedTypeSymbol type)
@@ -428,4 +455,16 @@ public sealed partial class EasyEcsAnalyzer
 
         return null;
     }
+}
+
+/// <summary>The rules of what the generator declares for code written by hand (EasyEcsAnalyzer.Forms.cs), as one analyzer: Roslyn skips an analyzer only when every rule it reports is suppressed, so a
+/// NoWarn of these rules saves their cost.</summary>
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public sealed class FormAnalyzer : EasyEcsAnalyzer.Area
+{
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
+        EasyEcsAnalyzer.BadConsume, EasyEcsAnalyzer.BadUpdateInterval, EasyEcsAnalyzer.HandWrittenConsume,
+        EasyEcsAnalyzer.HandWrittenEntityJob, EasyEcsAnalyzer.HandWrittenVectorLoop);
+
+    protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeForms(context);
 }
