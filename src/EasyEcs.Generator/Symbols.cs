@@ -1013,9 +1013,10 @@ internal static class Symbols
     /// [With&lt;T&gt;] and ISystemGroupWith&lt;T&gt;) and must lack ([Without&lt;T&gt;], [Removed&lt;T&gt;], its group's
     /// [Without&lt;T&gt;] and ISystemGroupWithout&lt;T&gt;), each with how its source reads (<c>parameter 'p'</c>,
     /// <c>[With&lt;P&gt;] on its group G</c>) and where it is declared (a parameter or the method's own attribute; null
-    /// for a group's). EECS016, EECS026 and EECS049 read it.
+    /// for a group's; none with <paramref name="groups"/> false: a lambda pass takes no group's filters). EECS016, EECS026 and
+    /// EECS049 read it.
     /// </summary>
-    public static List<Requirement> Requirements(IMethodSymbol method, System.Threading.CancellationToken token)
+    public static List<Requirement> Requirements(IMethodSymbol method, System.Threading.CancellationToken token, bool groups = true)
     {
         var all = new List<Requirement>();
         foreach (var (kind, type, attribute) in AttributeFilters(method))
@@ -1027,9 +1028,10 @@ internal static class Symbols
             else if (Classify(p) == ParamKind.View && Views.IsValid(p.Type))
                 foreach (var field in Views.Fields((INamedTypeSymbol)p.Type))
                     all.Add(new Requirement(FilterKind.With, field.Component, $"field '{field.Symbol.Name}' of view '{p.Name}'", p.Locations.FirstOrDefault(), true));
-        foreach (var (kind, type, attribute, group) in GroupFilters(method))
-            if (kind is FilterKind.With or FilterKind.Changed or FilterKind.Without or FilterKind.Removed && type.TypeKind != TypeKind.Error)
-                all.Add(new Requirement(kind, type, FilterText(kind, type, attribute != null) + " on its group " + group.Name, null, false));
+        if (groups)
+            foreach (var (kind, type, attribute, group) in GroupFilters(method))
+                if (kind is FilterKind.With or FilterKind.Changed or FilterKind.Without or FilterKind.Removed && type.TypeKind != TypeKind.Error)
+                    all.Add(new Requirement(kind, type, FilterText(kind, type, attribute != null) + " on its group " + group.Name, null, false));
         return all;
     }
 

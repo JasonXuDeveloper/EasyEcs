@@ -74,8 +74,8 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     Register(context, diagnostic, $"Take it as a ReadOnlyMaybe<{maybe.TypeArgumentList.Arguments[0]}>", root, maybe,
                         maybe.WithIdentifier(SyntaxFactory.Identifier("ReadOnlyMaybe").WithTriviaFrom(maybe.Identifier)));
                     break;
-                case "EECS015" when kind == "RefReadOnly" && node.FirstAncestorOrSelf<VariableDeclarationSyntax>() is { Type: RefTypeSyntax { ReadOnlyKeyword.RawKind: 0 } type }:
-                    Register(context, diagnostic, "Bind it 'ref readonly'", root, type,
+                case "EECS015" or "EECS025" when kind == "RefReadOnly" && node.FirstAncestorOrSelf<VariableDeclarationSyntax>() is { Type: RefTypeSyntax { ReadOnlyKeyword.RawKind: 0 } type }:
+                    Register(context, diagnostic, diagnostic.Id == "EECS015" ? "Bind it 'ref readonly'" : "Make it 'ref readonly'", root, type,
                         type.WithReadOnlyKeyword(SyntaxFactory.Token(SyntaxKind.ReadOnlyKeyword).WithTrailingTrivia(SyntaxFactory.Space)));
                     break;
                 case "EECS007" when kind == "Readonly" && node.FirstAncestorOrSelf<FieldDeclarationSyntax>() is { } field:
@@ -510,6 +510,8 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
     /// </summary>
     private static async Task<bool> HasCallers(Document document, ParameterSyntax? parameter, CancellationToken token, MethodDeclarationSyntax? declaration = null)
     {
+        // A lambda pass's lambda: the job calls it, no code of the user's (the analyzer reported it as one).
+        if (declaration == null && parameter?.Parent?.Parent is ParenthesizedLambdaExpressionSyntax) return false;
         var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
         var syntax = declaration ?? parameter?.FirstAncestorOrSelf<MethodDeclarationSyntax>();
         if (model == null || syntax == null || model.GetDeclaredSymbol(syntax, token) is not IMethodSymbol method) return true;
