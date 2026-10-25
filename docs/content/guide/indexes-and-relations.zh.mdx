@@ -1,12 +1,12 @@
 ---
 title: 索引与关系
 seoTitle: "C# ECS 的值索引、有序范围查询和实体关系"
-description: 按值（名字、区域、分数区间）或按指向的实体查找实体，索引由 World 自动维护。涵盖 [IndexKey]、[UniqueKey]、IRelation 和目标销毁策略。
+description: 按值（名字、区域、分数区间）或按指向的实体查找实体，索引由 World 自动维护。涵盖 [LookupKey]、[UniqueKey]、IRelation 和目标销毁策略。
 icon: Network
 ---
 
 查询按“有哪些组件”找实体。服务器还经常要按值找：名叫 “alice” 的玩家、3 号区域里的单位、分数前十、某个玩家拥有的物品、
-某支队伍的成员。用 `[IndexKey]` 标出组件的键，World 就会为它维护一份索引：每次 `Set` 都立即更新索引，查找时既不用追赶
+某支队伍的成员。用 `[LookupKey]` 标出组件的键，World 就会为它维护一份索引：每次 `Set` 都立即更新索引，查找时既不用追赶
 变化，也不用扫描。关系同样是索引：持有 `EntityId` 的组件能回答“谁指向这个实体”，`IRelation` 缓冲则让一个实体链接多个实体。
 
 ## 什么时候用 [#when-to-use-it]
@@ -25,7 +25,7 @@ icon: Network
 
 ### 值索引 [#value-indexes]
 
-用 `[IndexKey]` 标出查找实体用的成员（`partial` 结构体的位置参数、字段或属性）：生成器给它加上 `IIndexed<TKey>`，
+用 `[LookupKey]` 标出查找实体用的成员（`partial` 结构体的位置参数、字段或属性）：生成器给它加上 `IIndexed<TKey>`，
 并显式实现返回该成员的 `Key`。`world.Index<T, TKey>()` 第一次调用时创建索引；生成的 `world.XIndex` 属性返回的是同一个。
 由多个成员算出的键要手写：实现 `IIndexed<TKey>` 和它的 `Key`（例如[下文](#direct-index)格子的 `(X, Y)`）。
 
@@ -33,8 +33,8 @@ icon: Network
 <Tab value="你写的">
 
 ```csharp
-public partial record struct Callsign([IndexKey] string Value) : IComponent;
-public partial record struct Zone([IndexKey] int Id) : IComponent;
+public partial record struct Callsign([LookupKey] string Value) : IComponent;
+public partial record struct Zone([LookupKey] int Id) : IComponent;
 ```
 
 </Tab>
@@ -84,14 +84,14 @@ int inTwo = zones.Count(2);                         // 1
 
 ### 组件本身就是键 [#self-key]
 
-键可以是整个组件：按 id 找商店，按地址找 actor。把 `[IndexKey]`（或 `[UniqueKey]`）标在结构体本身上，生成器就让组件以自己为键
+键可以是整个组件：按 id 找商店，按地址找 actor。把 `[LookupKey]`（或 `[UniqueKey]`）标在结构体本身上，生成器就让组件以自己为键
 实现 `IIndexed`：
 
 <Tabs items={['你写的', '生成器写的']}>
 <Tab value="你写的">
 
 ```csharp
-[IndexKey] public readonly partial record struct Shop(long Id) : IComponent;
+[LookupKey] public readonly partial record struct Shop(long Id) : IComponent;
 ```
 
 </Tab>
@@ -128,7 +128,7 @@ record struct 上如果写公开的 `Key => this`，生成的 `ToString()` 会�
 | `Ascending()` / `Descending()` | 所有被索引的实体，按键排序 |
 
 ```csharp
-public partial record struct Score([IndexKey] int Points) : IComponent;
+public partial record struct Score([LookupKey] int Points) : IComponent;
 ```
 
 ```csharp
@@ -150,7 +150,7 @@ foreach (var rival in world.ScoreIndex.Range(400, 500)) { /* 一个匹配分段 
 句柄（[EECS017](/zh/docs/guide/analyzer#eecs017)）：id 只有 8 字节，非托管，能随 World 存盘，而且句柄可以隐式转换成它。
 
 ```csharp
-public partial record struct OwnedBy([IndexKey] EntityId Owner) : IComponent;
+public partial record struct OwnedBy([LookupKey] EntityId Owner) : IComponent;
 public struct Arrow : IComponent;
 ```
 
@@ -167,7 +167,7 @@ foreach (var arrow in world.OwnedByIndex.Find(archer)) { /* 弓手的每一支�
 
 ### 唯一键：一个键只对应一个实体 [#unique-keys]
 
-有些键只能指向一个实体，绝不能指向两个：账号 id、会话令牌、格子上的占位者。把 `[IndexKey]` 换成 `[UniqueKey]`（生成器加上
+有些键只能指向一个实体，绝不能指向两个：账号 id、会话令牌、格子上的占位者。把 `[LookupKey]` 换成 `[UniqueKey]`（生成器加上
 `IUniqueIndexed<TKey>`），World 就会拒绝任何让第二个实体拿到同一个键的写入。`Get(key)` 返回这个键唯一的实体（没有实体持有时抛异常），
 `TryGet(key, out entity)` 告诉你有没有；`Find`、`Count`、`TryFind` 和有序遍历照常可用。
 
@@ -359,7 +359,7 @@ World 自己调用 `WhenTargetDestroyed` 会覆盖它。
 
 ```csharp
 [WhenTargetDestroyed(TargetPolicy.Destroy)]                         // 召唤者死了，召唤物也消失，每个 World 都是
-public partial record struct SummonedBy([IndexKey] EntityId Summoner) : IComponent;
+public partial record struct SummonedBy([LookupKey] EntityId Summoner) : IComponent;
 
 [WhenTargetDestroyed(TargetPolicy.Remove)]                          // 公会解散，不留链接
 public record struct InGuild(EntityId Target) : IRelation;
@@ -448,17 +448,17 @@ public ref struct BurnZones
 using EasyEcs;
 
 // 值索引：Key 是用来查找实体的值。
-public partial record struct Team([IndexKey] int Id) : IComponent;
+public partial record struct Team([LookupKey] int Id) : IComponent;
 
 // 唯一键：两个玩家不能同名。
 public partial record struct PlayerName([UniqueKey] string Value) : IComponent;
 
 // int 键可以比较大小，所以这个索引还能按顺序遍历一段等级。
-public partial record struct Level([IndexKey] int Value) : IComponent;
+public partial record struct Level([LookupKey] int Value) : IComponent;
 
 // 链接：每支箭有一个主人，索引列出某个主人的所有箭。
 [WhenTargetDestroyed(TargetPolicy.Destroy)]                       // 弓箭手被销毁时，它的箭也一起销毁
-public partial record struct OwnedBy([IndexKey] EntityId Owner) : IComponent;
+public partial record struct OwnedBy([LookupKey] EntityId Owner) : IComponent;
 
 public struct Arrow : IComponent;
 
@@ -606,9 +606,9 @@ arrows left after the archer died: 0
 | 通过 `ref`、`Get<T>()` 或查询元素写入被索引的组件 | 索引还停在旧键上 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
 | 组件里存 `Entity` 句柄 | 变成托管列，有写屏障，存不了盘 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
 | 在 `Find` 循环里给实体加上同一索引的组件或换新键 | 遍历可能读到别的键的实体（移除组件、销毁实体没问题） | [EECS042](/zh/docs/guide/analyzer#eecs042)：先收集，再修改 |
-| record struct 上写公开的 `Key => this` | `ToString()` 无限打印 `Key`，栈溢出 | [EECS043](/zh/docs/guide/analyzer#eecs043)（有代码修复）：结构体上标 `[IndexKey]`，或写 `Shop IIndexed<Shop>.Key => this;` |
-| 在不是 `partial` 的结构体上（或类型里）标 `[IndexKey]`、`[UniqueKey]` | 编译错误：生成器加不了键 | [EECS062](/zh/docs/guide/analyzer#eecs062)（有代码修复） |
-| 手写只返回一个成员的 `Key` | 能用，但公开的 `Key` 会进 record 的 `ToString()` 和相等比较成员 | [EECS067](/zh/docs/guide/analyzer#eecs067)（有代码修复）：成员上标 `[IndexKey]` |
+| record struct 上写公开的 `Key => this` | `ToString()` 无限打印 `Key`，栈溢出 | [EECS043](/zh/docs/guide/analyzer#eecs043)（有代码修复）：结构体上标 `[LookupKey]`，或写 `Shop IIndexed<Shop>.Key => this;` |
+| 在不是 `partial` 的结构体上（或类型里）标 `[LookupKey]`、`[UniqueKey]` | 编译错误：生成器加不了键 | [EECS062](/zh/docs/guide/analyzer#eecs062)（有代码修复） |
+| 手写只返回一个成员的 `Key` | 能用，但公开的 `Key` 会进 record 的 `ToString()` 和相等比较成员 | [EECS067](/zh/docs/guide/analyzer#eecs067)（有代码修复）：成员上标 `[LookupKey]` |
 | 在不链接任何实体的类型上标 `[WhenTargetDestroyed]` | 编译错误：没有目标可看 | [EECS068](/zh/docs/guide/analyzer#eecs068) |
 | 在其他线程使用索引 | 索引属于所有者线程 | [多线程与并行](/zh/docs/guide/threading#what-the-world-synchronizes) |
 | 同一个组件用两种键类型建索引 | 抛 `InvalidOperationException`：每个组件一个索引 | 运行时 |

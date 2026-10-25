@@ -131,6 +131,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D126](#d126-loop-shape) | Vector loops: flat lanes for element-wise passes, the masked form starts from the rows that pass |
 | [D127](#d127-math-lowerings) | Vector loops lower integer division and the math .NET has vectors for, exactly unless `FloatMode.Fast` |
 | [D128](#d128-spin-gates-and-settled-measurements) | Parallel work's queue and pools take a spin gate; allocation tests measure once no background collection runs |
+| [D129](#d129-lookup-key) | `[IndexKey]` is `[LookupKey]` |
 
 The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
 reused.
@@ -2476,7 +2477,7 @@ call changes.
   read like a query; it sets a column without the component, as `Set` does with one.
 - **A name says what it holds.** `PoolCapacity` was a length of each pooled list, not a number of lists;
   `ReservePool` fills the pool with lists. `Sides` of `TileReads` named two rows, not the four sides of `TileFaces.Sides`.
-  `[Key]` alone read like any key; `[IndexKey]` says the index, next to `[UniqueKey]`.
+  `[Key]` alone read like any key; `[IndexKey]` says the index, next to `[UniqueKey]` ([D129](#d129-lookup-key) renamed it `[LookupKey]`).
 - **The property names its type.** `Simd = SimdMode.Off` repeated the word in two forms; `SimdMode = SimdMode.Off`
   reads like `FloatMode`.
 - **Cadence, not schedule.** `World.DescribeSchedule` is the order and the stages of systems; how often one runs is its
@@ -2500,7 +2501,7 @@ call changes.
 - **A reduction** ([D69](#d69-reductions)): `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]` or `[Any]` on every
   instance field of a partial struct. The generator writes `IReduction<T>`: `Identity` (0, 1, `MaxValue` or +∞,
   `MinValue` or -∞, `true`, `false`) and `Combine`, field by field.
-- **A key or a group:** `[IndexKey]` or `[UniqueKey]` on a member (`[IndexKey]` on the type for the value itself), and
+- **A key or a group:** `[LookupKey]` or `[UniqueKey]` on a member (`[LookupKey]` on the type for the value itself), and
   `[Group]` on an `int` or enum member. The generator adds `IIndexed<TKey>`, `IUniqueIndexed<TKey>` or `IGroup` with an
   explicit `Key` or `Group`, unless an interface the struct declares brings it (`IDirectIndexed<TKey>` keeps its
   `Slots` and `SlotOf`).
@@ -3345,6 +3346,27 @@ collection, which waits for a background one that is still running.
 - **Settling inside `SystemStats`** (a measured run that discounts a background collection): the runtime does not
   say that a collection voided a context, so a run that overlaps one shows the rest of its context in
   `LastAllocated`.
+## D129. `[IndexKey]` is `[LookupKey]` [#d129-lookup-key]
+
+**Decision.** The attribute that declares the key a world indexes a component by is `[LookupKey]` (it was
+`[IndexKey]`); `[UniqueKey]` keeps its name. No alias is kept: `[IndexKey]` no longer compiles (CS0246, CS0234 when
+qualified), and a code fix renames it to `[LookupKey]`, the `Attribute` suffix and the qualification kept. The
+generated members (`world.XIndex`, `IIndexed<TKey>.Key`) and the index types do not change.
+
+**Why.**
+- **The two names were too alike.** `[IndexKey]` and `[UniqueKey]` differ in one word that does not say what
+  differs: both declare an index's key. Readers took `[IndexKey]` for "the key of any index", the unique one
+  included, and asked which to use.
+- **The name says what the key is for.** A lookup key finds the entities that hold a value (several per key:
+  `index.Find(key)`, `Lookup<T>.Find` in a pass); a unique key finds the one entity that holds it. "Lookup" is also
+  what the pass parameter that reads it is called (`Lookup<T>`).
+
+**Considered.**
+- **`[Key]` back** (D100 renamed it to `[IndexKey]`): read like any key, a record's primary key included.
+- **`[MultiKey]` / `[GroupKey]`:** "multi" names how many entities share a key, not what the key does; "group" is
+  taken by `[Group]` and `GroupBy` (tables split by a value).
+- **An `[Obsolete]` alias:** pre-1.0, as in D54, D64 and D100: the compiler finds every use and the code fix
+  rewrites it.
 
 ## Related [#related]
 

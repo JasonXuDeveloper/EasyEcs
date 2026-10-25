@@ -31,13 +31,13 @@ icon: Grid3x3
 ### 声明瓦片：形状和键 [#declare]
 
 瓦片是一个实现 `ITile<TKey>` 的组件：静态成员是它的形状（`ITileShape`），键是瓦片的位置（建了索引才能找到邻居），`Beside`
-给出某个面对面那块瓦片的键。位置上的 `[IndexKey]` 生成键；形状都是常量，JIT 会折叠所有尺寸和步长。
+给出某个面对面那块瓦片的键。位置上的 `[LookupKey]` 生成键；形状都是常量，JIT 会折叠所有尺寸和步长。
 
 ```csharp
 public record struct PlatePos(int X, int Z);
 
 // 16 x 16 个温度的一块板，按位置查找；它的邻居是旁边的板。
-public partial record struct HeatPlate([IndexKey] PlatePos Pos) : IComponent, ITile<PlatePos>
+public partial record struct HeatPlate([LookupKey] PlatePos Pos) : IComponent, ITile<PlatePos>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
@@ -249,7 +249,7 @@ public record struct CubePos(int X, int Y, int Z);
 
 // 16 x 16 x 16 个气体格子的立方体，六个面各有一个邻居。
 // Mirror：气体不会穿过世界的边缘流走。
-public partial record struct GasCube([IndexKey] CubePos Pos) : IComponent, ITile<CubePos>
+public partial record struct GasCube([LookupKey] CubePos Pos) : IComponent, ITile<CubePos>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
@@ -321,7 +321,7 @@ public ref struct SpreadGasSystem
 
 ```csharp
 // 16 x 16 字节格子的板上的生命游戏：九点模板，所以角也要。
-public partial record struct LifePlate([IndexKey] PlatePos Pos) : IComponent, ITile<PlatePos>
+public partial record struct LifePlate([LookupKey] PlatePos Pos) : IComponent, ITile<PlatePos>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
@@ -490,7 +490,7 @@ public record struct PlatePos(int X, int Z);
 
 // 16 x 16 个格子的一块板：瓦片的形状、它的键，以及每个面对面那块板的键。
 // 生命游戏数周围八个格子，所以也要读对角上的板。
-public partial record struct Plate([IndexKey] PlatePos Pos) : IComponent, ITile<PlatePos>
+public partial record struct Plate([LookupKey] PlatePos Pos) : IComponent, ITile<PlatePos>
 {
     public const int Size = 16;
 

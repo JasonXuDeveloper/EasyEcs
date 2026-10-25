@@ -340,7 +340,7 @@ Markdown copy of every page.
   stencil reads), and quiet tiles sleep until an edge beside them changes; `IDirectIndexed<TKey>` finds a tile by one
   array read ([grids](https://ecs.xgamedev.net/en/docs/guide/grids)).
 - **Declare it, the generator writes it.** `[Sum]`, `[Min]`, `[Max]` and the others on a singleton's fields declare a
-  reduction; `[IndexKey]`, `[UniqueKey]` and `[Group]` on a member declare an index key or a group; `[GroupBy]`,
+  reduction; `[LookupKey]`, `[UniqueKey]` and `[Group]` on a member declare an index key or a group; `[GroupBy]`,
   `[WhenTargetDestroyed]` and `[NotSaved]` on a type declare every world's setup for it
   ([declared parts](https://ecs.xgamedev.net/en/docs/guide/entities-and-components#declared-parts)).
   `[UpdateInterval(n, Phase = p)]` on a system declares its cadence; `[ForEntity]` writes the job and the entry point that

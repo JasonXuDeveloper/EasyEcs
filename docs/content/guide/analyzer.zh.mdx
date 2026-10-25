@@ -9,7 +9,7 @@ EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/doc
 EECS035、EECS036）除了两条警告都是错误；这两条针对的是能跑、但有代价的写法（EECS017、EECS020）。生成器会跳过无效输入，由分析器报出来，
 所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046、EECS052、EECS053）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
-（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入，EECS058 不让 `Scratch<T>` 的内存存进 World，EECS059 不让 `Lookup<T>`（或瓦片）读本次遍历要写的组件；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入；部件规则（EECS062 到 EECS069）检查生成器按特性（`[Sum]`、`[IndexKey]`、`[Group]`）写入成员的类型和设置特性，并为手写的归约或键建议对应的特性；EECS070 让 `Emit<T>` 的记录保持行的顺序，EECS071 找出一次运行无法重现的随机数；瓦片规则（EECS072、EECS073）拒绝光环装不下的网格瓦片，以及会共用一张纹理的两个瓦片。系统规则（EECS074 到 EECS077）让系统保持为只有静态成员、钩子有效的 `ref struct`，并拒绝在需要系统的地方给出的非系统类型。声明规则（EECS080 到 EECS085）为手写的代码（单实体 job、销毁所访问实体的遍历）建议能生成它的特性，并拒绝无法生效的特性。参数规则（EECS086 到 EECS089）把让方法只能单线程运行的代码指向按块做同样工作的参数：逐行累加的单例改用 `Reduce<T>`，通过 `World` 读取其他实体改用 `Lookup<T>`，追加到单例列表的记录改用 `Emit<T>`，抽了两次的随机流各用一个自己的流。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入，EECS058 不让 `Scratch<T>` 的内存存进 World，EECS059 不让 `Lookup<T>`（或瓦片）读本次遍历要写的组件；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入；部件规则（EECS062 到 EECS069）检查生成器按特性（`[Sum]`、`[LookupKey]`、`[Group]`）写入成员的类型和设置特性，并为手写的归约或键建议对应的特性；EECS070 让 `Emit<T>` 的记录保持行的顺序，EECS071 找出一次运行无法重现的随机数；瓦片规则（EECS072、EECS073）拒绝光环装不下的网格瓦片，以及会共用一张纹理的两个瓦片。系统规则（EECS074 到 EECS077）让系统保持为只有静态成员、钩子有效的 `ref struct`，并拒绝在需要系统的地方给出的非系统类型。声明规则（EECS080 到 EECS085）为手写的代码（单实体 job、销毁所访问实体的遍历）建议能生成它的特性，并拒绝无法生效的特性。参数规则（EECS086 到 EECS089）把让方法只能单线程运行的代码指向按块做同样工作的参数：逐行累加的单例改用 `Reduce<T>`，通过 `World` 读取其他实体改用 `Lookup<T>`，追加到单例列表的记录改用 `Emit<T>`，抽了两次的随机流各用一个自己的流。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -71,7 +71,7 @@ EECS076（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS040](#eecs040) | 错误 | `SetIfChanged` 能比较它的类型 | |
 | [EECS041](#eecs041) | 错误 | 遍历期间不调用它会拒绝的方法 | |
 | [EECS042](#eecs042) | 错误 | 遍历索引时不修改被索引的组件 | |
-| [EECS043](#eecs043) | 错误 | record struct 键不打印自身 | 类型上标 `[IndexKey]`，或显式实现 `Key` |
+| [EECS043](#eecs043) | 错误 | record struct 键不打印自身 | 类型上标 `[LookupKey]`，或显式实现 `Key` |
 | [EECS044](#eecs044) | 错误 | 切片过滤条件只交给遍历 | |
 | [EECS045](#eecs045) | 错误 | `Retired` 和 `Disabled<T>` 由 World 来写 | |
 | [EECS046](#eecs046) | 警告 | 只读追踪变化组件的循环用 `Read` | `Read<T1..Tn>` |
@@ -95,7 +95,7 @@ EECS076（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS064](#eecs064) | 错误 | 归约特性合并每一个字段 | |
 | [EECS065](#eecs065) | 信息 | 逐字段的归约用特性声明 | 用特性声明 |
 | [EECS066](#eecs066) | 警告 | 归约的 `Identity` 是其 `Combine` 的单位元 | 正确的 `Identity`，或改用特性 |
-| [EECS067](#eecs067) | 信息 | 返回某个成员的键或分组用 `[IndexKey]` / `[Group]` 声明 | `[IndexKey]` / `[UniqueKey]` / `[Group]` |
+| [EECS067](#eecs067) | 信息 | 返回某个成员的键或分组用 `[LookupKey]` / `[Group]` 声明 | `[LookupKey]` / `[UniqueKey]` / `[Group]` |
 | [EECS068](#eecs068) | 错误 | 设置特性放在适用的类型上 | |
 | [EECS069](#eecs069) | 警告 / 信息 | 会被保存的托管类型有 Nino 格式化器 | `[NinoType]` / `[NotSaved]` |
 | [EECS070](#eecs070) | 错误 | 遍历不读自己产出的记录，同一种记录不产出两次 | |
@@ -574,7 +574,7 @@ public static class WorldThreads
   `ReadOnlyMaybe<T>`）。
 
 ```csharp
-public partial record struct Zone([IndexKey] int Id) : IComponent;
+public partial record struct Zone([LookupKey] int Id) : IComponent;
 public record struct Portal(int To) : IComponent;
 ```
 
@@ -1140,17 +1140,17 @@ World 按键给 `IIndexed<TKey>` 或 `IUniqueIndexed<TKey>` 组件建索引，�
 - **`EntityId` 键。** 加载和迁移会在拷完行之后才改写 `EntityId` 的值，来不及先检查，所以关系键不能是唯一的。
 - **第二个键。** 一个组件只建一个索引：它身上的第二个 `IIndexed<TKey>` 或 `IUniqueIndexed<TKey>`，无论唯一与否，永远建不了索引，
   `world.Index` 会为它抛异常。
-- **特性声明不了的键或分组。** `[IndexKey]` / `[UniqueKey]` 成员的类型不是自身的 `IEquatable`、和结构体声明的索引接口类型不同、旁边还有第二个键，
+- **特性声明不了的键或分组。** `[LookupKey]` / `[UniqueKey]` 成员的类型不是自身的 `IEquatable`、和结构体声明的索引接口类型不同、旁边还有第二个键，
   或旁边又手写了 `Key`；`[Group]` 成员不是 `int` 或基于 `int` 的枚举，或者有第二个。
 
 ```csharp doccheck=alone,expect-EECS036
 public partial record struct Mount([UniqueKey] EntityId Rider) : IComponent;
 ```
 
-关系用 `[IndexKey]`（`IIndexed<EntityId>`）建索引；第二个键放到单独的组件里：
+关系用 `[LookupKey]`（`IIndexed<EntityId>`）建索引；第二个键放到单独的组件里：
 
 ```csharp doccheck=alone
-public partial record struct Mount([IndexKey] EntityId Rider) : IComponent;
+public partial record struct Mount([LookupKey] EntityId Rider) : IComponent;
 ```
 
 唯一索引检查什么，见[唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)。
@@ -1311,7 +1311,7 @@ if (trim) world.TrimExcess();
 销毁实体只会留下遍历会跳过的空洞；修改之后紧跟 `break`、`return` 或 `throw` 时，遍历在读下一个列表之前就结束了：这两种都不报。
 
 ```csharp
-public partial record struct Team([IndexKey] int Id) : IComponent;
+public partial record struct Team([LookupKey] int Id) : IComponent;
 ```
 
 ```csharp doccheck=expect-EECS042
@@ -1329,7 +1329,7 @@ foreach (var member in moving) member.SetTeam(2);
 
 ## EECS043 [#eecs043]
 
-**打印自身的 record struct 键。** 错误。代码修复：在类型上用 `[IndexKey]` 声明键，或显式实现 `Key`。
+**打印自身的 record struct 键。** 错误。代码修复：在类型上用 `[LookupKey]` 声明键，或显式实现 `Key`。
 
 以自身为键的组件（`IIndexed<TSelf>` 或 `IUniqueIndexed<TSelf>`，`Key => this`）可以工作，但在 `record struct` 上，公开的 `Key` 是
 `ToString()` 会打印的属性之一。`Key` 返回这个 record，它又打印自己的 `Key`，`Key` 再打印 `Key`：第一行日志或调试器视图就会栈溢出。
@@ -1338,11 +1338,11 @@ foreach (var member in moving) member.SetTeam(2);
 public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { public Market Key => this; }
 ```
 
-在类型上用 `[IndexKey]` 声明键：生成器显式实现 `Key`，它只属于接口，`ToString()` 不会打印它。另一个修复是手写显式实现的 `Key`
+在类型上用 `[LookupKey]` 声明键：生成器显式实现 `Key`，它只属于接口，`ToString()` 不会打印它。另一个修复是手写显式实现的 `Key`
 （同时改写读取 `.Key` 的地方）：
 
-```csharp tab="[IndexKey]" doccheck=alone
-[IndexKey]
+```csharp tab="[LookupKey]" doccheck=alone
+[LookupKey]
 public readonly partial record struct Market(long Id) : IComponent;
 ```
 
@@ -1970,7 +1970,7 @@ public static class Reports
 
 **有生成成员、却不是 partial 的类型。** 错误。代码修复：把它和包含它的每一层类型都改成 partial。
 
-`[Sum]`、`[IndexKey]`、`[Group]` 声明的是生成器要写进这个类型本身的成员：`IReduction<T>`、`IIndexed<TKey>` 或 `IGroup` 的成员，
+`[Sum]`、`[LookupKey]`、`[Group]` 声明的是生成器要写进这个类型本身的成员：`IReduction<T>`、`IIndexed<TKey>` 或 `IGroup` 的成员，
 写在这个类型的另一个部分里。只有 partial 类型、并且外层也都是 partial，才能加上这个部分。`file` 类型加不了，因为它的部分会在另一个文件里。
 
 ```csharp tab="报告" doccheck=alone,expect-EECS062
@@ -2087,9 +2087,9 @@ public partial struct Weakest : ISingletonComponent
 
 ## EECS067 [#eecs067]
 
-**可以用特性声明的索引键或分组。** 建议（信息级别）。代码修复：在那个成员上声明 `[IndexKey]`（唯一索引用 `[UniqueKey]`）或 `[Group]`，外层一并改成 partial。
+**可以用特性声明的索引键或分组。** 建议（信息级别）。代码修复：在那个成员上声明 `[LookupKey]`（唯一索引用 `[UniqueKey]`）或 `[Group]`，外层一并改成 partial。
 
-返回某个字段、属性或值本身的 `Key`，就是在那个成员上（值本身则在类型上）声明 `[IndexKey]` 的效果。返回一个 `int` 成员、或把 `int`
+返回某个字段、属性或值本身的 `Key`，就是在那个成员上（值本身则在类型上）声明 `[LookupKey]` 的效果。返回一个 `int` 成员、或把 `int`
 枚举转成 `int` 的 `Group`，就是在那个成员上声明 `[Group]` 的效果。生成器会写出接口和显式实现的 `Key` 或 `Group`，
 `ToString()` 不会把它打印出来，调用方也不会误用它。由多个成员算出来的键或分组仍然手写。
 
@@ -2105,7 +2105,7 @@ public struct Owner : IComponent, IIndexed<EntityId>
 ```csharp tab="修正"
 public partial struct Owner : IComponent
 {
-    [IndexKey] public EntityId Id;
+    [LookupKey] public EntityId Id;
 }
 ```
 
@@ -2256,7 +2256,7 @@ World 里需要这个单例（`world.SetEntityRandom(seed, 0)`），推进模拟
 ```csharp tab="报告" doccheck=alone,expect-EECS072
 // 沿 x 做四阶模板的一条 16 格的带：默认的面包括北和南，
 // 宽 2 行的光环比它唯一的一行还深。
-public partial record struct Strip([IndexKey] int Index) : IComponent, ITile<int>
+public partial record struct Strip([LookupKey] int Index) : IComponent, ITile<int>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 1;
@@ -2267,7 +2267,7 @@ public partial record struct Strip([IndexKey] int Index) : IComponent, ITile<int
 
 ```csharp tab="修正"
 // 一维瓦片：只有西边和东边有邻居。
-public partial record struct Strip([IndexKey] int Index) : IComponent, ITile<int>
+public partial record struct Strip([LookupKey] int Index) : IComponent, ITile<int>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 1;

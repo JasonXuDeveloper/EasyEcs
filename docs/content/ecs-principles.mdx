@@ -311,7 +311,7 @@ public partial struct Quests : IComponent, ITracked                     // saved
     public Dictionary<int, int> Progress;
 }
 
-public partial record struct ItemOf([IndexKey] EntityId Owner) : IComponent;  // an inventory: items point at players
+public partial record struct ItemOf([LookupKey] EntityId Owner) : IComponent;  // an inventory: items point at players
 
 public static class PlayerRules
 {

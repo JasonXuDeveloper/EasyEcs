@@ -15,10 +15,10 @@ public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
 public record struct Health(int Value) : IComponent, ITracked;          // 被追踪：写入会被记录
 public record struct Mana(int Value) : IComponent, ITracked;
-public partial record struct Team([IndexKey] int Id) : IComponent;
+public partial record struct Team([LookupKey] int Id) : IComponent;
 public partial record struct Account([UniqueKey] int Id) : IComponent;   // 一个键一个实体
 [GroupBy] public partial record struct Zone([Group] int Id) : IComponent;   // 每个 World 都按它分组
-public partial record struct OwnedBy([IndexKey] EntityId Owner) : IComponent;
+public partial record struct OwnedBy([LookupKey] EntityId Owner) : IComponent;
 public record struct MemberOf(EntityId Target) : IRelation;                   // 每个实体可以有多条
 public record struct Loot(int Item);                                          // DynamicBuffer 的元素
 public record struct Seat(int Number) : ICleanupComponent;                    // 销毁后再释放
@@ -36,10 +36,10 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 | 没有字段的 `struct X : IComponent` | 标签：用于过滤的“是或否”状态 | [实体与组件](/zh/docs/guide/entities-and-components) |
 | `struct X : ISingletonComponent` | 每个 World 一份 | [单例](/zh/docs/guide/singletons) |
 | `: ITracked` | 每行记录最后一次写入和移除的 tick | [变更追踪](/zh/docs/guide/change-tracking) |
-| `partial` 结构体的成员（或结构体本身：整个值）标 `[IndexKey]` | 通过 `world.Index<T, TKey>()` 按值查找；生成器写出 `IIndexed<TKey>` 和它的 `Key`（由多个成员组成的键手写 `IIndexed<TKey>`） | [索引与关系](/zh/docs/guide/indexes-and-relations) |
+| `partial` 结构体的成员（或结构体本身：整个值）标 `[LookupKey]` | 通过 `world.Index<T, TKey>()` 按值查找；生成器写出 `IIndexed<TKey>` 和它的 `Key`（由多个成员组成的键手写 `IIndexed<TKey>`） | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | 成员（或结构体）标 `[UniqueKey]` | 一个键只对应一个实体（`IUniqueIndexed<TKey>`）：`index.Get(key)`；会让第二个实体拿到这个键的写入直接抛异常 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | `: IDirectIndexed<TKey>` 加 `Key`、`static Slots`、`static SlotOf(key)` | 能映射到有界槽位（网格格子）的唯一键：`Get` / `TryGet` 读一个数组元素 | [直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index) |
-| `[IndexKey] EntityId` | 指向一个实体的链接，可以从目标反查 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
+| `[LookupKey] EntityId` | 指向一个实体的链接，可以从目标反查 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | `: IRelation` 加 `Target` | 每个实体多条链接，存放在缓冲里 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | `int`（或 `int` 枚举）成员标 `[Group]`；结构体标 `[GroupBy]` | 按值拆表（`IGroup`）：有 `[GroupBy]` 时每个 World 都拆，否则在 `world.GroupBy<T>()` 之后 | [分组](/zh/docs/guide/groups) |
 | 关系或以 `EntityId` 为键的组件标 `[WhenTargetDestroyed(policy)]` | 目标被销毁时指向它的链接怎么处理，每个 World 都一样 | [目标销毁策略](/zh/docs/guide/indexes-and-relations#target-policies) |

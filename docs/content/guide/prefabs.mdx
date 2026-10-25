@@ -339,7 +339,7 @@ world.Reserve<Position, Health>(10_000);             // projectiles created with
 </Steps>
 
 What it saves is proven by an allocation test, not a benchmark
-([`ReservingAPrefabCoversItsIndexKeysAndItsRetiredTable`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/tests/EasyEcs.UnitTest/AllocationTests.cs)):
+([`ReservingAPrefabCoversItsLookupKeysAndItsRetiredTable`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/tests/EasyEcs.UnitTest/AllocationTests.cs)):
 2,000 reserved instances of a prefab with a value index, a unique key and a cleanup component are spawned, retired and
 freed with 0 bytes allocated in each step.
 

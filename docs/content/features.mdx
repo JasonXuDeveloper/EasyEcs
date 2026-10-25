@@ -96,14 +96,14 @@ a read is never a write.
 ### Generated parts [#generated-parts]
 
 Attributes declare what a component or singleton would otherwise implement by hand, and the generator writes it into
-the `partial` type: `[IndexKey]` / `[UniqueKey]` on a member (or on the struct) write `IIndexed<TKey>` /
+the `partial` type: `[LookupKey]` / `[UniqueKey]` on a member (or on the struct) write `IIndexed<TKey>` /
 `IUniqueIndexed<TKey>` and their `Key`, `[Group]` writes `IGroup`, and `[Sum]`, `[Product]`, `[Min]`, `[Max]`,
 `[All]`, `[Any]` on a singleton's fields write a reduction's `Identity` and `Combine`. Setup every world shares is
 declared on the type too: `[GroupBy]` groups the tables, `[WhenTargetDestroyed(policy)]` sets a link's target policy,
 `[NotSaved]` keeps runtime state out of every save.
 
 ```csharp
-public partial record struct Faction([IndexKey] int Id) : IComponent;
+public partial record struct Faction([LookupKey] int Id) : IComponent;
 public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Max] public int Oldest; }
 ```
 
@@ -385,7 +385,7 @@ back. The entity carries the tag `Disabled<T>` meanwhile, so the paused entities
 Lookups by value without a dictionary kept in sync by hand.
 
 ```csharp
-public partial record struct Team([IndexKey] int Id) : IComponent;
+public partial record struct Team([LookupKey] int Id) : IComponent;
 [GroupBy] public partial record struct Zone([Group] int Id) : IComponent;   // grouped in every world
 public partial record struct Account([UniqueKey] int Id) : IComponent;
 ```
@@ -401,7 +401,7 @@ Entity owner = world.AccountIndex.Get(7);                       // the one entit
 
 ### Value indexes [#value-indexes]
 
-A component whose key is marked `[IndexKey]` (the generator implements `IIndexed<TKey>`) is found by its `Key`: `world.Index<T, TKey>()` (or `world.TeamIndex`)
+A component whose key is marked `[LookupKey]` (the generator implements `IIndexed<TKey>`) is found by its `Key`: `world.Index<T, TKey>()` (or `world.TeamIndex`)
 with `Find`, `TryFind` and `Count`. Every `Set`, create and destroy keeps the index current; writes through a `ref`,
 which the index could not see, fail the build ([EECS015](/en/docs/guide/analyzer#eecs015)).
 
@@ -421,7 +421,7 @@ holds (`Set`, create, `Instantiate`, `Clone`, `SetAll`, `Enable`, loads and move
 - **Use it for:** an account id, a player name, a session token, the occupant of a grid cell: keys that must never
   name two entities.
 - **Skip it for:** `EntityId` keys ([EECS036](/en/docs/guide/analyzer#eecs036)); keys several entities share (a plain
-  `[IndexKey]`).
+  `[LookupKey]`).
 - **Cost:** the index exists from the first table holding the component, so every write is checked: one hash probe
   per changed key, an extra pass over the rows for the bulk calls and loads. `Get` and `TryGet` are a hash probe
   that reads the key's record alone: a unique key holds its entity inline, with no array per key. A key that maps
@@ -455,7 +455,7 @@ moves the entity to its group's tables.
 Links between entities, lists inside entities, and kinds of entities to spawn from.
 
 ```csharp
-public partial record struct OwnedBy([IndexKey] EntityId Owner) : IComponent;
+public partial record struct OwnedBy([LookupKey] EntityId Owner) : IComponent;
 public record struct Loot(int Item);
 ```
 

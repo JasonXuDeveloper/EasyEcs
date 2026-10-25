@@ -331,7 +331,7 @@ flowchart LR
 
 ## 自动排好序的排行榜 [#leaderboard]
 
-`Score` 是玩家挖的方块数，标了 `[IndexKey]`，所以 `world.ScoreIndex` 是按分数索引玩家的[有序索引](/zh/docs/guide/indexes-and-relations#ordered-index)。键可比较，
+`Score` 是玩家挖的方块数，标了 `[LookupKey]`，所以 `world.ScoreIndex` 是按分数索引玩家的[有序索引](/zh/docs/guide/indexes-and-relations#ordered-index)。键可比较，
 所以索引能按顺序遍历：`Descending()` 从挖得最多的人开始。`DigSystem` 写分数时索引就保持有序，所以榜首只是走三项，从不对所有玩家排序。
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#leaderboard</include>

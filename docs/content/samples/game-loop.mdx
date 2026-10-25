@@ -24,7 +24,7 @@ dotnet run --project samples/GameLoop -- --ticks 30     # 1 second
 
 Requests are the input, one component per kind; then the simulation state, the singletons and the two
 [system groups](/en/docs/guide/systems#system-groups). `Client` is a
-[value index](/en/docs/guide/indexes-and-relations#value-indexes) (`[IndexKey]` on its id), so `world.ClientIndex` finds a
+[value index](/en/docs/guide/indexes-and-relations#value-indexes) (`[LookupKey]` on its id), so `world.ClientIndex` finds a
 player by client id; `Position` is `ITracked`, so replication can visit only what moved; the `Prefabs` singleton
 holds the [prefabs](/en/docs/guide/prefabs) of a player and a bullet.
 

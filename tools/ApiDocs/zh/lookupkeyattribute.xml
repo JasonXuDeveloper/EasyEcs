@@ -1,8 +1,9 @@
 <doc>
-  <member name="T:EasyEcs.IndexKeyAttribute" source="0c79ae42cf20">
+  <member name="T:EasyEcs.LookupKeyAttribute" source="0c79ae42cf20">
     <summary>
-      World 为组件建索引用的键（<see cref="T:EasyEcs.IIndexed`1" />）：标在字段、属性或 record 的位置参数上，键就是这个成员
-      （<c>public partial struct Owner : IComponent { [IndexKey] public EntityId Of; }</c>）；标在 struct 本身上，键是整个值。
+      按它查找实体的键：World 用它给组件建索引（<see cref="T:EasyEcs.IIndexed`1" />），一个键可以对应多个实体（只对应一个时用
+      <see cref="T:EasyEcs.UniqueKeyAttribute" />）。标在字段、属性或 record 的位置参数上，键就是这个成员
+      （<c>public partial struct Owner : IComponent { [LookupKey] public EntityId Of; }</c>）；标在 struct 本身上，键是整个值。
       生成器给这个 partial struct 加上 <c>IIndexed&lt;TKey&gt;</c>（struct 声明的接口已经带上时不加），并显式实现返回这个成员的
       <c>Key</c>。一个组件只有一个键；由多个成员算出的键仍然手写（<c>public (int, int) Key =&gt; (X, Y);</c>）。
     </summary>

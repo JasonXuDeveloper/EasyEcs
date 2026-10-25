@@ -334,7 +334,7 @@ JetBrains' `[MeansImplicitUse]`, which Rider and ReSharper read
 ([D107](/en/docs/decisions#d107-never-used-warnings)). If the hint still shows, the project references
 EasyEcs without its analyzers (`ExcludeAssets="analyzers"` on the package, or a reference to the sources without
 the generator as an `Analyzer`), and then no code is generated either. A component or singleton that
-declares members with attributes (`[Sum]`, `[IndexKey]`, `[Group]`) is partial, with the types around it: the
+declares members with attributes (`[Sum]`, `[LookupKey]`, `[Group]`) is partial, with the types around it: the
 generator writes those members into the type itself ([EECS062](/en/docs/guide/analyzer#eecs062)).
 
 ## Related [#related]

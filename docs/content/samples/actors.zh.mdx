@@ -24,7 +24,7 @@ dotnet run --project samples/Actors
 一类 Actor 就是一个类型，靠一个接口同时承担三件事：`Shop` 和 `Bank` 实现 `IActor<TSelf>`，于是同时是 Actor 的键组件
 （[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)）、这一类的[系统分组](/zh/docs/guide/systems#system-groups)，
 以及这个分组的[过滤条件](/zh/docs/guide/systems#group-filters)（`ISystemGroupWith<In<Shop>>`）：特性写不出类型参数，接口替每一类
-声明一次过滤条件。键就是 Actor 本身：类型上标 `[IndexKey]`，生成器写出显式的 `Key`，record 的 `ToString()` 不会打印它
+声明一次过滤条件。键就是 Actor 本身：类型上标 `[LookupKey]`，生成器写出显式的 `Key`，record 的 `ToString()` 不会打印它
 （公开的 `Key => this` 属性会让 `ToString()` 无限打印 `Key`，EECS043）。`Stock` 和 `Balance` 要持久化，都是 `ITracked`（[变更追踪](/zh/docs/guide/change-tracking)）；`Sales` 和 `Closed` 只在内存里。
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/Actors/Components.cs</include>

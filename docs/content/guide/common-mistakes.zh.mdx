@@ -129,10 +129,10 @@ public readonly record struct Market(long Id) : IComponent, IIndexed<Market>
 ```
 
 record struct 的 `ToString()` 会打印所有公开属性。`Key` 返回 record 自己，打印它又要打印它的 `Key`，再打印 `Key`……
-第一次写日志或在调试器里查看这个值，栈就溢出了。在类型上用 `[IndexKey]` 声明键：生成器显式实现 `Key`，让它只属于接口：
+第一次写日志或在调试器里查看这个值，栈就溢出了。在类型上用 `[LookupKey]` 声明键：生成器显式实现 `Key`，让它只属于接口：
 
 ```csharp
-[IndexKey] public readonly partial record struct Market(long Id) : IComponent;
+[LookupKey] public readonly partial record struct Market(long Id) : IComponent;
 ```
 
 由 [EECS043](/zh/docs/guide/analyzer#eecs043) 发现（带代码修复）。完整的写法见 [Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)。
@@ -493,8 +493,8 @@ public struct In<TActor> : IComponent;
 public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;
 
-[IndexKey] public readonly partial record struct Shop(long Id) : IActor<Shop>;
-[IndexKey] public readonly partial record struct Guild(long Id) : IActor<Guild>;
+[LookupKey] public readonly partial record struct Shop(long Id) : IActor<Shop>;
+[LookupKey] public readonly partial record struct Guild(long Id) : IActor<Guild>;
 ```
 
 没有规则能发现。详见[分组过滤](/zh/docs/guide/systems#group-filters)。
@@ -538,7 +538,7 @@ if (hero.HasHealth) hero.Health.Value -= 10;
 ### 通过 `ref` 写被索引的键 [#indexed-by-ref]
 
 ```csharp
-public partial record struct Zone([IndexKey] int Id) : IComponent;
+public partial record struct Zone([LookupKey] int Id) : IComponent;
 ```
 
 ```csharp doccheck=expect-EECS015

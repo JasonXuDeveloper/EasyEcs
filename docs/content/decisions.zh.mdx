@@ -128,6 +128,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D126](#d126-loop-shape) | 向量循环：逐字段的遍历走扁平通道，掩码形式从通过的行开始 |
 | [D127](#d127-math-lowerings) | 向量循环精确地改写整数除法和 .NET 有向量版本的数学函数，`FloatMode.Fast` 下才允许近似 |
 | [D128](#d128-spin-gates-and-settled-measurements) | 并行工作的队列和池用自旋门；分配测试在没有后台回收运行时测量 |
+| [D129](#d129-lookup-key) | `[IndexKey]` 改名为 `[LookupKey]` |
 
 D85 到 D89、D91 到 D93 和 D96 这几个编号没有用过：编号事先分给进行中的工作，用不上也不再复用。
 
@@ -1941,7 +1942,7 @@ EECS083 的描述符（`BadUpdateInterval`）。4.8 新增的 `Lookup<T>.TryFind
 - **动词说明做了什么。** `Load` 读起来像读存档（`World.Load`），这个调用其实是把瓦片连同光环填进纹理。`Changes` 读起来像一个集合，
   它其实是比较并返回边缘变了的面。`Absent<T>` 读起来像查询，它其实是设置一列但不带组件，和 `Set` 设置一列相对。
 - **名字说明它装的是什么。** `PoolCapacity` 是每个池化列表的长度，不是列表的个数；`ReservePool` 是往池里填列表。`TileReads` 的
-  `Sides` 指的是两行，不是 `TileFaces.Sides` 的四个面。单独的 `[Key]` 读起来像任何一种键；`[IndexKey]` 点明是索引的键，和 `[UniqueKey]` 并列。
+  `Sides` 指的是两行，不是 `TileFaces.Sides` 的四个面。单独的 `[Key]` 读起来像任何一种键；`[IndexKey]` 点明是索引的键，和 `[UniqueKey]` 并列（[D129](#d129-lookup-key) 又把它改名为 `[LookupKey]`）。
 - **属性名就是它的类型。** `Simd = SimdMode.Off` 把同一个词用两种形式写了两遍；`SimdMode = SimdMode.Off` 和 `FloatMode` 的写法一致。
 - **节奏，不是调度。** `World.DescribeSchedule` 讲的是系统的顺序和阶段；一个系统多久跑一次是它的节奏（`[UpdateInterval]`），规则和消息都这么说。
 - **一个键的实体只有一种 out 类型。** `Lookup<T>.TryFind` 给 id，`ValueIndex.TryFind` 给句柄，代码在遍历和所有者线程之间挪动就要换类型。
@@ -1960,7 +1961,7 @@ EECS083 的描述符（`BadUpdateInterval`）。4.8 新增的 `Lookup<T>.TryFind
 - **归约**（[D69](#d69-reductions)）：partial 结构体的每个实例字段标 `[Sum]`、`[Product]`、`[Min]`、`[Max]`、`[All]` 或
   `[Any]`。生成器写出 `IReduction<T>`：逐字段的 `Identity`（0、1、`MaxValue` 或 +∞、`MinValue` 或 -∞、`true`、`false`）和
   `Combine`。
-- **键和分组：** 成员上标 `[IndexKey]` 或 `[UniqueKey]`（值本身就是键时，`[IndexKey]` 标在类型上），`int` 或枚举成员上标
+- **键和分组：** 成员上标 `[LookupKey]` 或 `[UniqueKey]`（值本身就是键时，`[LookupKey]` 标在类型上），`int` 或枚举成员上标
   `[Group]`。生成器加上 `IIndexed<TKey>`、`IUniqueIndexed<TKey>` 或 `IGroup`，并写出显式的 `Key` 或 `Group`；结构体自己声明的接口
   已经带上它时就不再加（`IDirectIndexed<TKey>` 保留自己的 `Slots` 和 `SlotOf`）。
 - **World 设置：** `[GroupBy]`、`[WhenTargetDestroyed(policy)]` 和 `[NotSaved]` 在模块加载时登记。每个 World 从第一张含这个类型的表开始应用它们。
@@ -2593,6 +2594,22 @@ public ref struct DyingSystem
 - **在测试里重试或容忍一些字节：** 会把同样大小的真实分配也藏起来。
 - **在 `SystemStats` 里扣除**（被测的一次运行扣掉后台回收的影响）：运行时不会告诉我们某次回收作废了上下文，所以和后台回收重叠的运行会在
   `LastAllocated` 里显示上下文剩下的部分。
+## D129. `[IndexKey]` 改名为 `[LookupKey]` [#d129-lookup-key]
+
+**决定。** 声明 World 按哪个键给组件建索引的特性叫 `[LookupKey]`（原来叫 `[IndexKey]`）；`[UniqueKey]` 不改名。不保留别名：
+`[IndexKey]` 不再能编译（CS0246，写全名时是 CS0234），代码修复把它改成 `[LookupKey]`，保留 `Attribute` 后缀和命名空间限定。
+生成的成员（`world.XIndex`、`IIndexed<TKey>.Key`）和索引类型都不变。
+
+**原因。**
+- **两个名字太像。** `[IndexKey]` 和 `[UniqueKey]` 只差一个词，这个词又说不出区别在哪：两者声明的都是索引的键。读者把 `[IndexKey]`
+  当成“任何索引的键”，包括唯一索引，于是不知道该用哪个。
+- **名字说明键的用途。** 查找键用来找出持有某个值的实体（一个键可以对应多个实体：`index.Find(key)`，遍历里用 `Lookup<T>.Find`）；
+  唯一键找出持有它的那一个实体。读取它的遍历参数也叫 `Lookup<T>`。
+
+**考虑过的方案。**
+- **改回 `[Key]`**（D100 把它改成了 `[IndexKey]`）：读起来像任何一种键，包括 record 的主键。
+- **`[MultiKey]` / `[GroupKey]`：** “multi” 说的是多少个实体共用一个键，不是键做什么；“group” 已经被 `[Group]` 和 `GroupBy`（按值拆分表）占用。
+- **`[Obsolete]` 别名：** 1.0 之前不保留，和 D54、D64、D100 一样：编译器会找出每一处用法，代码修复负责改写。
 
 ## 相关页面 [#related]
 

@@ -80,7 +80,7 @@ flowchart LR
 ### 组件 [#components]
 
 所有组件都是普通的 `record struct`。有四种声明会改变组件的存储方式：`ITracked` 会给组件加一列隐藏的变更 tick
-（`Health`、`Burning` 和 `Goal` 需要同步）；`[Group]` 按一个字段的值拆分表（每个 `Zone` 一组表）；`[IndexKey]` 为它维护一个值索引
+（`Health`、`Burning` 和 `Goal` 需要同步）；`[Group]` 按一个字段的值拆分表（每个 `Zone` 一组表）；`[LookupKey]` 为它维护一个值索引
 （击杀榜 `Kills`）；`[UniqueKey]` 让一个键只对应一个实体（`Account`：一个账号只有一个英雄）。这些 `partial` 结构体的
 `IGroup` / `IIndexed<TKey>` / `IUniqueIndexed<TKey>` 部分由生成器写出。另有两个声明把 World 的设置写在类型上，每个 World 都照此运行：
 `[GroupBy]` 按 `Zone` 分组建表，`[WhenTargetDestroyed]` 在玩家被销毁时把它从指向它的 `Friend` 链接里删掉。`Spawn` 是清理组件，`Loot` 和 `Friend` 是动态缓冲的元素，空结构体就是标签。

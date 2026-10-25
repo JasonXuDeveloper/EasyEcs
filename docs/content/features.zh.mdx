@@ -83,13 +83,13 @@ public ref struct MovementSystem
 
 ### 生成的部分 [#generated-parts]
 
-组件或单例原本要手写实现的东西，用特性声明，生成器把它写进 `partial` 类型：成员（或结构体本身）上的 `[IndexKey]` / `[UniqueKey]`
+组件或单例原本要手写实现的东西，用特性声明，生成器把它写进 `partial` 类型：成员（或结构体本身）上的 `[LookupKey]` / `[UniqueKey]`
 写出 `IIndexed<TKey>` / `IUniqueIndexed<TKey>` 和它们的 `Key`，`[Group]` 写出 `IGroup`，单例字段上的 `[Sum]`、`[Product]`、`[Min]`、
 `[Max]`、`[All]`、`[Any]` 写出归约的 `Identity` 和 `Combine`。每个 World 共用的设置也声明在类型上：`[GroupBy]` 拆表，
 `[WhenTargetDestroyed(policy)]` 设置链接的目标销毁策略，`[NotSaved]` 让运行时状态不进任何存档。
 
 ```csharp
-public partial record struct Faction([IndexKey] int Id) : IComponent;
+public partial record struct Faction([LookupKey] int Id) : IComponent;
 public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Max] public int Oldest; }
 ```
 
@@ -321,7 +321,7 @@ public ref struct ReplicationSystem
 按值查找，不用手工维护一个同步的字典。
 
 ```csharp
-public partial record struct Team([IndexKey] int Id) : IComponent;
+public partial record struct Team([LookupKey] int Id) : IComponent;
 [GroupBy] public partial record struct Zone([Group] int Id) : IComponent;   // 每个 World 都按它分组
 public partial record struct Account([UniqueKey] int Id) : IComponent;
 ```
@@ -337,7 +337,7 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 
 ### 值索引 [#value-indexes]
 
-键标了 `[IndexKey]` 的组件（生成器实现 `IIndexed<TKey>`）可以按 `Key` 查找：`world.Index<T, TKey>()`（或 `world.TeamIndex`）的 `Find`、`TryFind` 和 `Count`。
+键标了 `[LookupKey]` 的组件（生成器实现 `IIndexed<TKey>`）可以按 `Key` 查找：`world.Index<T, TKey>()`（或 `world.TeamIndex`）的 `Find`、`TryFind` 和 `Count`。
 每次 `Set`、创建和销毁都会更新索引；经 `ref` 写入时索引看不到，所以编译期直接报错（[EECS015](/zh/docs/guide/analyzer#eecs015)）。
 
 - **适合：** 按名字找玩家、找公会里的单位、找某个网格格子里的实体。
@@ -352,7 +352,7 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 `InvalidOperationException`。引用类型键为 null 时视为没有键。
 
 - **适合：** 账号 id、玩家名、会话令牌、格子的占用者：绝不能对应两个实体的键。
-- **别用于：** `EntityId` 键（[EECS036](/zh/docs/guide/analyzer#eecs036)）；几个实体共用的键（用普通的 `[IndexKey]`）。
+- **别用于：** `EntityId` 键（[EECS036](/zh/docs/guide/analyzer#eecs036)）；几个实体共用的键（用普通的 `[LookupKey]`）。
 - **开销：** 第一张含该组件的表出现时索引就建好了，所以每次写入都会检查：每个变了的键一次哈希查找，批量调用和读档多遍历一遍行。
   `Get` 和 `TryGet` 是一次哈希查找，只读这个键自己的记录：唯一键直接存它的实体，每个键没有数组。能映射到有界槽位的键
   （`IDirectIndexed<TKey>`：网格格子、小 id）改为读一个数组元素（[直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index)）。
@@ -381,7 +381,7 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 实体之间的链接、实体内部的列表，以及用来刷出实体的配方。
 
 ```csharp
-public partial record struct OwnedBy([IndexKey] EntityId Owner) : IComponent;
+public partial record struct OwnedBy([LookupKey] EntityId Owner) : IComponent;
 public record struct Loot(int Item);
 ```
 
