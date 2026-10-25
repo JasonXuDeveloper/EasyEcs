@@ -13,8 +13,9 @@ namespace EasyEcs.CodeFixes;
 /// <summary>
 /// The fixes that turn hand-written forms into the declarations the generator reads: a [ForEach] method's final destroy
 /// into [Consume] (EECS084), and
-/// a one-entity job with its calls into a [ForEntity] method and its entry point's calls (EECS080). The analyzer decided
-/// each (its properties); these only rewrite.
+/// a one-entity job with its calls into a [ForEntity] method and its entry point's calls (EECS080), and a batch method's
+/// hand-written vector loop into the method for one row the generator vectorizes (EECS103). The analyzer decided each
+/// (its properties); these only rewrite.
 /// </summary>
 public sealed partial class EasyEcsCodeFixes
 {
@@ -164,5 +165,38 @@ public sealed partial class EasyEcsCodeFixes
         text.Append(indent).Append('}');
         var converted = SyntaxFactory.ParseMemberDeclaration(text.ToString());
         return converted?.WithLeadingTrivia(job.GetLeadingTrivia()).WithTrailingTrivia(job.GetTrailingTrivia());
+    }
+
+    /// <summary>
+    /// EECS103: the method with the parameters and statements of the method for one row the analyzer wrote (attributes,
+    /// modifiers, name and comments kept): one statement as an expression body, several as a block; null when the
+    /// properties do not parse.
+    /// </summary>
+    private static MethodDeclarationSyntax? PerRow(SyntaxNode root, MethodDeclarationSyntax method, System.Collections.Immutable.ImmutableDictionary<string, string?> props)
+    {
+        if (!props.TryGetValue("PerRowParameters", out var parameters) || parameters == null
+            || !props.TryGetValue("PerRowBody", out var body) || body == null) return null;
+        var list = SyntaxFactory.ParseParameterList("(" + parameters + ")");
+        var statements = body.Split('\n').Select(s => SyntaxFactory.ParseStatement(s)).ToList();
+        if (list.ContainsDiagnostics || statements.Any(s => s.ContainsDiagnostics)) return null;
+        var updated = method.WithParameterList(list.WithTriviaFrom(method.ParameterList));
+        var eol = EndOfLine(root);
+        if (statements.Count == 1 && statements[0] is ExpressionStatementSyntax only)
+            return updated.WithBody(null).WithExpressionBody(SyntaxFactory.ArrowExpressionClause(only.Expression.WithLeadingTrivia(SyntaxFactory.Space))
+                    .WithLeadingTrivia(SyntaxFactory.Space))
+                .WithParameterList(updated.ParameterList.WithTrailingTrivia())
+                .WithSemicolonToken(SyntaxFactory.Token(SyntaxKind.SemicolonToken).WithTrailingTrivia(method.GetTrailingTrivia()));
+
+        // The block indented as the method's own lines are.
+        var leading = method.GetLeadingTrivia();
+        string indent = leading.Count > 0 && leading.Last().IsKind(SyntaxKind.WhitespaceTrivia) ? leading.Last().ToFullString() : "";
+        var text = new StringBuilder();
+        text.Append(indent).Append('{').Append(eol.ToFullString());
+        foreach (var statement in statements) text.Append(indent).Append("    ").Append(statement.ToFullString().Trim()).Append(eol.ToFullString());
+        text.Append(indent).Append('}');
+        var block = (BlockSyntax)SyntaxFactory.ParseStatement(text.ToString());
+        return updated.WithExpressionBody(null).WithSemicolonToken(default)
+            .WithParameterList(updated.ParameterList.WithTrailingTrivia(eol))
+            .WithBody(block.WithLeadingTrivia(SyntaxFactory.Whitespace(indent)).WithTrailingTrivia(method.GetTrailingTrivia()));
     }
 }
