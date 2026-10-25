@@ -28,7 +28,7 @@ internal struct StructuralGate
     private const int Closed = int.MinValue;
 
     [FieldOffset(Archetype.CacheLine)] private int _held;
-    [FieldOffset(Archetype.CacheLine + sizeof(int))] private int _shared;
+    [FieldOffset(Archetype.CacheLine + sizeof(int))] private SpinGate _shared;
     [FieldOffset(Archetype.CacheLine + 2 * sizeof(int))] private int _parallel; // parallel regions running (stages, parallel passes)
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -107,22 +107,10 @@ internal struct StructuralGate
     public void ThawAlone() => _held = 0;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void EnterShared()
-    {
-        if (Interlocked.CompareExchange(ref _shared, 1, 0) != 0) WaitShared();
-    }
+    public void EnterShared() => _shared.Enter();
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void ExitShared() => Volatile.Write(ref _shared, 0);
-
-    // Contended: spin on a plain read (no cache-line ping-pong), then back off to yields and sleeps.
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private void WaitShared()
-    {
-        var spin = new SpinWait();
-        do spin.SpinOnce();
-        while (Volatile.Read(ref _shared) != 0 || Interlocked.CompareExchange(ref _shared, 1, 0) != 0);
-    }
+    public void ExitShared() => _shared.Exit();
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowBusy(int held)

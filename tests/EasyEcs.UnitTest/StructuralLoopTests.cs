@@ -274,7 +274,7 @@ public class StructuralLoopTests
             world.GetSingleton<Emitted<Peak>>().Items.Clear();
         }
         for (int i = 0; i < 40; i++) Round(); // warm-up: tables, query caches, marks, JIT
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 8; i++) Round();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }

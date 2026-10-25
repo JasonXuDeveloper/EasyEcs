@@ -240,7 +240,7 @@ public class EntityTests
         var kept = _world.CreateEntity(new Position(1, 2), new Velocity(3, 4));
         _world.Reserve<Position, Velocity>(5000);
         Assert.That(kept.Read<Position>(), Is.EqualTo(new Position(1, 2)));     // its row moved to the grown columns
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 5000; i++) _world.CreateEntity(new Position(i, 0), new Velocity());
         Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, _world.EntityCount), Is.EqualTo((0L, 5001)));
         var table = Array.Find(_world.DescribeTables(), t => t.Entities == 5001);

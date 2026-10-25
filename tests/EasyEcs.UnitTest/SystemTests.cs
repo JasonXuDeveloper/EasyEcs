@@ -74,7 +74,7 @@ public class SystemTests
         Assert.That(names, Is.EqualTo(new[] { nameof(Tick), nameof(InInputGroup) }));   // default group first
         Assert.That(world.Systems.Count, Is.EqualTo(2));
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         int count = 0;
         for (int i = 0; i < 100; i++)
             foreach (var _ in world.Systems) count++;

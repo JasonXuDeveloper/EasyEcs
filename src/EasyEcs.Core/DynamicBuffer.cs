@@ -401,7 +401,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
 
     [ThreadStatic] private static Free t_free;
 
-    private static readonly Lock s_gate = new();
+    private static SpinGate s_gate; // parallel passes refill and spill from several threads (D128)
     private static BufferStore<T>[] s_free = [];
     private static int s_freeCount; // written under s_gate; read without it only to skip an empty pool
 
@@ -421,7 +421,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     {
         if (MaxPooledLength == 0) return;
         var free = t_free ?? Own(); // this thread's own list (and every helper thread's): a first refill allocates nothing
-        lock (s_gate)
+        using (new SpinScope(ref s_gate))
         {
             int missing = count - s_freeCount - free.Count;
             if (missing <= 0) return;
@@ -446,7 +446,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     {
         if (Volatile.Read(ref s_freeCount) == 0) return null;
         var free = t_free ?? Own();
-        lock (s_gate)
+        using (new SpinScope(ref s_gate))
         {
             int taken = Math.Min(Batch, s_freeCount);
             int from = s_freeCount - taken;
@@ -478,7 +478,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     private static void Spill(Free free)
     {
         var stores = free.Stores;
-        lock (s_gate)
+        using (new SpinScope(ref s_gate))
         {
             if (s_freeCount + Batch > s_free.Length) Array.Resize(ref s_free, Math.Max(2 * Batch, s_free.Length * 2));
             Array.Copy(stores, 0, s_free, s_freeCount, Batch);

@@ -179,7 +179,7 @@ public class EntityRandomTests
     [Test]
     public void DrawingDoesNotAllocate()
     {
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         float sum = 0;
         var random = new EntityRandom(1) { Tick = 2 };
         for (int i = 0; i < 1000; i++) sum += random.Float(new EntityId(i, 1), 0) + random.Range(new EntityId(i, 1), 1, 0, 10);

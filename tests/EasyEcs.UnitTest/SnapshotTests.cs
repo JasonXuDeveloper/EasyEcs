@@ -103,7 +103,7 @@ public class SnapshotTests
         for (int round = 0; round < 3; round++)                                // warm-up
             Assert.That(world.Capture(snapshot), Is.SameAs(snapshot));
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int round = 0; round < 50; round++)
         {
             entities[round].Get<Health>().Value = round + 10;

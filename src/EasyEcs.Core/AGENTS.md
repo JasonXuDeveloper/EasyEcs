@@ -86,6 +86,9 @@ World.Archetypes.cs          archetype registry, transition edges, copy-on-write
 StructuralGate.cs            owner flag (plain check-and-set, throws when reentered or while frozen: Freeze/Thaw around
                              parallel regions, batch jobs and INoStructuralChanges passes) +
                              shared CAS gate for the cold paths parallel stages reach; StructuralScope / SharedScope
+SpinGate.cs                  SpinGate + SpinScope: the CAS lock (spin, then yield, never block) of the few instructions
+                             several threads of parallel work enter at once (the helpers' queue, EmitPool, the buffer
+                             pool, the shared structural gate); a Lock allocates its wait event when first waited on (D128)
 World.Systems.cs             system groups, ordering, parallel stages (consecutive non-conflicting systems),
                              synchronous Update / Update<TGroup>, Dispose
 World.Parallel.cs            allocation-free runner (the caller + the helper threads of Workers.cs, adaptive waking)

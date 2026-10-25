@@ -174,7 +174,7 @@ public class SerializationTests
         world.Save(output);
 
         output.ResetWrittenCount();
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         world.Save(output);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
@@ -246,7 +246,7 @@ public class SerializationTests
         loaded.Load(full);
         loaded.Load(full);                                                // warm: first calls compile and cache
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         loaded.Load(full);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);  // types are looked up by id
         int sum = 0;
@@ -420,7 +420,7 @@ public class SerializationTests
         }
 
         output.ResetWrittenCount();
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         world.SaveEntitiesWith(output, [actor.Id], in stored);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
@@ -629,7 +629,7 @@ public class SerializationTests
         }
 
         output.ResetWrittenCount();
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         world.SaveWithout(output, in Runtime);
         world.LoadKeeping(output.WrittenSpan, in NewConfig);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);

@@ -128,6 +128,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D120](#d120-feature-modules-and-data-events) | Not added: `[Feature]` modules and a generated reader of records; EECS092 reports records nothing clears |
 | [D122](#d122-marked-rows) | A structural change under a condition marks rows; the change is applied in bulk after the pass |
 | [D125](#d125-scheduler-tuning) | Passes that merge per chunk cut 16 chunks; the helpers' spin, the partitioner and the chunk size stay as they were |
+| [D128](#d128-spin-gates-and-settled-measurements) | Parallel work's queue and pools take a spin gate; allocation tests measure once no background collection runs |
 
 The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
 reused.
@@ -2645,8 +2646,9 @@ sits alone on a cache line, and each participant adds its sums once when it leav
 ## D106. The runtime synchronizes with a `Lock` or a compare-and-swap, never a locked object [#d106-lock-or-cas]
 
 **Decision.** Where the runtime synchronizes, it takes a `System.Threading.Lock` (cold, process-wide registries:
-component types, systems, interned filters, the buffer and record pools) or swaps an immutable array by
-compare-and-swap (the query cache, the query memo and the queries kept per job type). The memo's writer reads the
+component types, systems, interned filters), a compare-and-swap gate where the threads of parallel work enter at
+once (the helpers' queue, the buffer and record pools: [D128](#d128-spin-gates-and-settled-measurements)), or swaps an
+immutable array by compare-and-swap (the query cache, the query memo and the queries kept per job type). The memo's writer reads the
 array, looks up its cache entry after that read, and publishes its copy with `Interlocked.CompareExchange` against
 the array it read, retrying from the start when another writer or a reset got there first. A reset drops the stale
 cache entries first, then swaps in an empty array with `Interlocked.Exchange`. Nothing locks a plain object.
@@ -3184,6 +3186,53 @@ work is near, one spinning helper at a time, an affinity partitioner, and a tune
   floor of the default; a tuner that does would pick from rows (64 to 16,384) instead of chunks per thread, only for
   passes that do not merge (their boundaries must not move), and a pass that stamps a tracked component below 4,096
   rows opens its blocks first, as `ChunkRows` already does ([D67](#d67-chunk-rows)).
+
+## D128. Parallel work's queue and pools take a spin gate; allocation tests measure once no background collection runs [#d128-spin-gates-and-settled-measurements]
+
+**Decision.** The helper threads' queue (`Workers`), `EmitPool<T>` and the buffer pool's shared list
+(`BufferStore<T>`) are entered through `SpinGate`: one compare-and-swap to enter, a plain write to leave, and a
+contended thread spins on a plain read, then yields, and never blocks (the structural gate's shared flag is the same
+gate). The tests' allocation measurements (`Allocations.Of`, `Allocations.Baseline`) start after a blocking full
+collection, which waits for a background one that is still running.
+
+**Why.**
+- **Two things counted bytes on a thread that allocated nothing it measured.** The 0 B tests around parallel runs
+  failed now and then (2,616 to 8,096 B, 56 B, 120 B, 280 B), more often on a loaded machine. A harness ran their
+  worlds next to six busy threads on four cores and read the caller's allocated bytes per update and at points of
+  the runner: on the base, ParallelForEachDoesNotAllocateAfterItsFirstCall and its neighbors failed 4 times in 60
+  runs, and an update allocated 3,304 B at a different point each time (inside an item, between two timestamps,
+  between two updates of the harness), with `MaxDegreeOfParallelism = 1` and the JIT's tiering off too.
+- **A background collection voids every allocation context.** An EventPipe trace marked each update: every update
+  that counted bytes overlapped the end of a background gen2 collection (reason AllocLarge, started by the large
+  tables the tests create, slow to finish when its thread shares the cores). At the end of its mark phase it sets each
+  thread's `alloc_ptr` and `alloc_limit` to 0 (gc.cpp, `repair_allocation_contexts(FALSE)`) and leaves `alloc_bytes`,
+  so `GC.GetAllocatedBytesForCurrentThread` grows by the unused rest of the thread's context: 3,304 B in that world,
+  any amount up to a few KB in another. A blocking full collection first waits for a running background one
+  (`background_gc_wait`), and the measured code allocates nothing, so none starts during the measurement: the same
+  harness, 120 runs, no failure.
+- **A `Lock` allocates the first time a thread waits on it.** Past its spin, `Lock` blocks on an `AutoResetEvent` it
+  creates then, on the waiting thread: 56 B, once per lock (280 B for the first wait of the process). The helpers'
+  queue and the pools are entered by the threads of a pass at once; whenever a holder is preempted (a loaded machine)
+  for the first time, the next thread to wait allocates in steady state. The sections are a few instructions, so a
+  thread that finds the gate held is better off spinning and yielding than blocking.
+
+**Numbers.** BenchmarkDotNet, the base (`Lock`) and the spin gate interleaved on the same machine, all 0 B:
+- `ParallelForEachBenchmark.Tick` (100k, parallel), 8 rounds: 537 µs on the base, 531 µs with the gate (one base
+  round reported 1 B per operation, a `Lock`'s wait event spread over its iterations).
+- `ParallelSystemsBenchmark.Tick` (100k, parallel), 3 rounds: 55.1 µs on the base, 52.8 µs with the gate.
+- `SystemDispatchBenchmark.ParallelStage`, 3 rounds: 710 ns on the base, 753 ns with the gate, both ±50 to 180 ns.
+- Spinning that sleeps a millisecond after twenty spins (`SpinWait`'s default) measured the same within the noise;
+  the gate never sleeps, since a holder leaves after a few instructions.
+
+**Considered.**
+- **Running a lock's first wait at start** (a thread holding each lock while another waits on it): one thread per
+  lock to work around the runtime's laziness, and every new `Lock` would need it.
+- **A lock-free stack for the pools** (Treiber): an ABA guard per pool for sections that hold the gate a few
+  nanoseconds.
+- **Retrying or tolerating bytes in the tests:** they would hide a real allocation of the same size.
+- **Settling inside `SystemStats`** (a measured run that discounts a background collection): the runtime does not
+  say that a collection voided a context, so a run that overlaps one shows the rest of its context in
+  `LastAllocated`.
 
 ## Related [#related]
 

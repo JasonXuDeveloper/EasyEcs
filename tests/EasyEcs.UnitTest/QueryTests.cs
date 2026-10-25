@@ -140,7 +140,7 @@ public class QueryTests
         var into = new EntityId[100];
         world.CollectIds<Health>(into, filter);
         world.CollectIds<Health>(into);                                       // each query's match is cached by its first call
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         int count = world.CollectIds<Health>(into, filter) + world.CollectIds<Health>(into);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
         Assert.That(count, Is.EqualTo(200));

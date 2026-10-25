@@ -256,7 +256,7 @@ public class ViewTests
         world.AddSystem<Suffering>();
         for (int i = 0; i < 1000; i++) world.CreateEntity(new Arena.Health(100), new Arena.Poison(i & 1));
         world.Update();
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 10; i++) world.Update();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
@@ -352,10 +352,10 @@ public class ViewTests
         world.Update();
         var e = world.CreateEntity(new Arena.Health(5), new Arena.Armor(0));
         e.AsFighter().TakeDamage(0);
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 10; i++) world.Update();
         long passes = GC.GetAllocatedBytesForCurrentThread() - before;
-        before = GC.GetAllocatedBytesForCurrentThread();
+        before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) e.AsFighter().TakeDamage(0);
         Assert.That((passes, GC.GetAllocatedBytesForCurrentThread() - before), Is.EqualTo((0L, 0L)));
     }

@@ -200,13 +200,13 @@ public struct Emitted<T> : ISingletonComponent, IBuffer where T : struct
 /// </summary>
 internal static class EmitPool<T>
 {
-    private static readonly Lock Gate = new();
+    private static SpinGate Gate; // chunks on several threads rent and return at once (D128)
     private static BufferStore<T>[] _free = [];
     private static int _count;
 
     public static BufferStore<T> Rent()
     {
-        lock (Gate)
+        using (new SpinScope(ref Gate))
         {
             if (_count == 0) return new BufferStore<T>(16);
             var store = _free[--_count];
@@ -219,7 +219,7 @@ internal static class EmitPool<T>
     {
         if (RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(store.Items, 0, store.Count);
         store.Count = 0;
-        lock (Gate)
+        using (new SpinScope(ref Gate))
         {
             if (_count == _free.Length) Array.Resize(ref _free, Math.Max(8, _count * 2));
             _free[_count++] = store;

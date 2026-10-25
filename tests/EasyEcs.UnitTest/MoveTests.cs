@@ -64,7 +64,7 @@ public class MoveTests
         }
 
         for (int i = 0; i < 10; i++) Round(); // warm-up: tables, edges, buffers, JIT
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) Round();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
         Assert.That(arrived, Is.EqualTo(110 * 4));
@@ -241,7 +241,7 @@ public class MoveTests
         }
 
         for (int i = 0; i < 5; i++) Arrive();
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) Arrive();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
