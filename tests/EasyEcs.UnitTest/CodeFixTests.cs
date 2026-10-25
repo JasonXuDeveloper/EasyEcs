@@ -438,7 +438,7 @@ public class CodeFixTests
 
     /// <summary>
     /// The diagnostics a rule defers to (one mistake, one diagnostic: D60), which its fix lets through: an instance
-    /// method made static can be judged for its vector loop (EECS055), a key written by hand is then a key [IndexKey]
+    /// method made static can be judged for its vector loop (EECS055), a key written by hand is then a key [LookupKey]
     /// could declare (EECS067), a lambda reaching the private member it names can be judged for its loop (EECS097).
     /// </summary>
     private static readonly Dictionary<string, string[]> Deferred = new()
