@@ -453,11 +453,11 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         // this file: one level, the method's own calls.
         if (!inFunction && context.ContainingSymbol is IMethodSymbol { MethodKind: MethodKind.Ordinary } worker
             && worker.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is MethodDeclarationSyntax declaration
-            && declaration.SyntaxTree == call.Syntax.SyntaxTree && declaration.Parent is TypeDeclarationSyntax owner)
+            && declaration.SyntaxTree == call.Syntax.SyntaxTree && declaration.Parent is TypeDeclarationSyntax owner
+            && ArgumentNames(owner).Contains(worker.Name)) // one walk of the type per analysis, not one per structural call
             foreach (var group in owner.DescendantNodes().OfType<ArgumentSyntax>())
             {
-                var expression = group.Expression;
-                if ((expression is IdentifierNameSyntax id ? id.Identifier : expression is MemberAccessExpressionSyntax access ? access.Name.Identifier : default).ValueText != worker.Name
+                if (ArgumentName(group.Expression) != worker.Name
                     || call.SemanticModel!.GetOperation(group, context.CancellationToken) is not IArgumentOperation
                     {
                         Value: IDelegateCreationOperation { Target: IMethodReferenceOperation reference }, Parent: { } handoff,
@@ -477,6 +477,27 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), Symbols.Describe(method), name,
                 "takes no Entity or World to make it with; take the Entity as a parameter, or record the change as data"));
     }
+
+    /// <summary>
+    /// The names the arguments of <paramref name="type"/>'s code pass as plain or member-access names (the method groups
+    /// it may hand to another thread), computed once per declaration: EECS014's method-group check asks it for every
+    /// structural call of the type, and a walk of the type per call made it the costliest rule of large files.
+    /// </summary>
+    private static System.Collections.Generic.HashSet<string> ArgumentNames(TypeDeclarationSyntax type) =>
+        ArgumentNamesOf.GetValue(type, static type =>
+        {
+            var names = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
+            foreach (var node in type.DescendantNodes())
+                if (node is ArgumentSyntax argument && ArgumentName(argument.Expression) is { Length: > 0 } name) names.Add(name);
+            return names;
+        });
+
+    // Keyed by the declaration (immutable syntax): an unchanged file keeps its entry across compilations, an edited one
+    // gets new nodes, and the table holds no node alive.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TypeDeclarationSyntax, System.Collections.Generic.HashSet<string>> ArgumentNamesOf = new();
+
+    private static string? ArgumentName(ExpressionSyntax expression) =>
+        expression is IdentifierNameSyntax id ? id.Identifier.ValueText : expression is MemberAccessExpressionSyntax access ? access.Name.Identifier.ValueText : null;
 
     /// <summary>EECS011: a write or a mutating call that reaches a read-only [ForEach] parameter's reference.</summary>
     private static void AnalyzeWrite(OperationAnalysisContext context)
