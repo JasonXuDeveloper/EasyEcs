@@ -9,7 +9,8 @@ using Microsoft.CodeAnalysis.CSharp;
 // with an index and meta.json, from the built assembly and its XML documentation, in English (<page>.mdx) and in
 // Chinese (<page>.zh.mdx, from the translations in tools/ApiDocs/zh/). Complexity comes from the API tables
 // (docs/content/api.mdx, api.zh.mdx). Deterministic: CI regenerates the pages and fails if they differ from the
-// commit; the tool exits with 1 when a translation is missing, stale or orphaned.
+// commit; the tool exits with 1 when a translation is missing, stale or orphaned, and never writes a Chinese page
+// that would show English text for want of one.
 var root = Root();
 bool scaffold = args.Contains("--zh-scaffold");
 var paths = args.Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList();
@@ -29,10 +30,14 @@ var zh = new Translations(Path.Combine(root, "tools", "ApiDocs", "zh"));
 var pages = new Reference(compilation, assembly, Language.English, Complexity.Load(root, "api.mdx", "Complexity", "en"), null).Pages();
 var costs = Complexity.Load(root, "api.zh.mdx", "复杂度", "zh");
 if (costs.Count == 0) costs = Complexity.Load(root, "api.mdx", "Complexity", "zh"); // no Chinese API page: the English table
+// A Chinese page with a member that has no usable translation would show its English text: it is not written, the
+// committed page stays as it was (or stays missing), and the run fails with the problems below.
+var kept = new List<string>();
 foreach (var (file, text) in new Reference(compilation, assembly, Language.Chinese, costs, zh).Pages())
-    pages.Add(file, text);
+    if (file.EndsWith(".zh.mdx", StringComparison.Ordinal) && zh.ShowsEnglish(file[..^".zh.mdx".Length])) kept.Add(file);
+    else pages.Add(file, text);
 Directory.CreateDirectory(output);
-foreach (var stale in Directory.EnumerateFiles(output).Where(f => !pages.ContainsKey(Path.GetFileName(f))))
+foreach (var stale in Directory.EnumerateFiles(output).Where(f => !pages.ContainsKey(Path.GetFileName(f)) && !kept.Contains(Path.GetFileName(f))))
     File.Delete(stale);
 foreach (var (file, text) in pages)
 {
@@ -41,6 +46,8 @@ foreach (var (file, text) in pages)
 }
 
 Console.WriteLine($"{pages.Count} files in {Path.GetRelativePath(root, output)}");
+foreach (var file in kept)
+    Console.Error.WriteLine($"{file}: not written, a member on it has no usable Chinese entry (the page keeps its previous text)");
 if (scaffold) Console.WriteLine($"{zh.Scaffold()} members added to tools/ApiDocs/zh/ to translate");
 var problems = zh.Problems();
 foreach (var problem in problems) Console.Error.WriteLine(problem);

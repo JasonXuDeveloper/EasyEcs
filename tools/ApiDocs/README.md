@@ -33,7 +33,10 @@ The tool reports every problem and exits with 1, which fails CI:
 - an entry whose elements differ from the English ones (a parameter added, renamed or removed);
 - an entry for a member that is no longer documented or shown (delete it).
 
-Until it is fixed, a member without a usable translation shows its English text on the Chinese page.
+A Chinese page never shows English text: a page with a member that has no usable translation (missing, stale,
+untranslated, or with other elements) is not written, so the committed page keeps its previous Chinese (a new page
+stays missing, and the site serves the English one with its notice), and the tool names it. Commit the regenerated
+reference only when the tool reports 0 problems.
 
 The output is deterministic, and the pages are committed: CI regenerates them and fails if they differ. After changing
 a public API or its doc comment, update its Chinese entry, run the tool and commit the pages with the change. Do not

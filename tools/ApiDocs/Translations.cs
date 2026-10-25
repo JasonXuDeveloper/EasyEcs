@@ -18,6 +18,8 @@ public sealed partial class Translations
     private readonly List<string> _problems = [];
     // documentation id to (hash of the English text, the English member, the page it is shown on), in page order
     private readonly Dictionary<string, (string Hash, XElement English, string Page)> _shown = [];
+    // pages that would show an English text: they are not written (Program keeps the committed page)
+    private readonly HashSet<string> _english = new(StringComparer.Ordinal);
 
     public Translations(string directory)
     {
@@ -36,19 +38,24 @@ public sealed partial class Translations
     public string Page { get; set; } = "";
 
     /// <summary>
-    /// The Chinese documentation of a member whose English documentation is <paramref name="english"/>; the English
-    /// one when there is no usable translation (reported by <see cref="Problems"/>).
+    /// The Chinese documentation of a member whose English documentation is <paramref name="english"/>. Without a
+    /// usable translation it returns the English one and marks <see cref="Page"/> as showing English
+    /// (<see cref="ShowsEnglish"/>): such a page is never written, and <see cref="Problems"/> reports why.
     /// </summary>
     public XElement Lookup(string id, XElement english)
     {
         string hash = Hash(english);
         _shown.TryAdd(id, (hash, english, Page));
-        XElement member;
+        XElement? member = null;
         if (_members.TryGetValue(id, out var entry)) member = entry.Member;
         else if (Same(id, hash) is { } same) member = _members[same].Member;
-        else return english;
-        return Usable(member, english, hash) ? member : english;
+        if (member != null && Usable(member, english, hash)) return member;
+        _english.Add(Page);
+        return english;
     }
+
+    /// <summary>Whether <paramref name="page"/> (a slug, or <c>index</c>) holds a member without a usable translation.</summary>
+    public bool ShowsEnglish(string page) => _english.Contains(page);
 
     // Another translated member with the same English text (a positional record's constructor and its type): the
     // same English is the same Chinese, so it is translated once.
