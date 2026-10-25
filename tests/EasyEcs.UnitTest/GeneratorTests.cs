@@ -33,7 +33,7 @@ public class GeneratorTests
     internal static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(sources), out var output, out _);
-        return await output.WithAnalyzers([new EasyEcsAnalyzer()]).GetAllDiagnosticsAsync();
+        return await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync();
     }
 
     internal const string Components = """
@@ -1052,7 +1052,9 @@ public class GeneratorTests
         var slow = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic static class Slow { static int M(System.Func<int, int> f) => 0; static int M(System.Func<string, int> f) => 0; " +
             "static int F(Entity e) { int v = e.Read<P>().V; return v + " + nested + "; } }", Parse, path: "Slow.cs");
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse, path: "Unrelated.cs");
+        // Nullable on, as projects set it: a node's binding then runs the nullable analysis of its whole member.
         var compilation = Compile(Components).AddSyntaxTrees(slow, other);
+        compilation = compilation.WithOptions(compilation.Options.WithNullableContextOptions(NullableContextOptions.Enable));
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
             [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator(),
                 new ViewGenerator().AsSourceGenerator(), new PrefabGenerator().AsSourceGenerator()],

@@ -349,5 +349,5 @@ public partial class AnalyzerTests
     [TestCase("EECS052", DiagnosticSeverity.Warning)]
     [TestCase("EECS053", DiagnosticSeverity.Warning)]
     public void UsageRulesHaveTheirSeverity(string id, DiagnosticSeverity severity) =>
-        Assert.That(new EasyEcsAnalyzer().SupportedDiagnostics.Where(d => d.Id == id).Select(d => d.DefaultSeverity), Is.Not.Empty.And.All.EqualTo(severity)); // every descriptor of the id (EECS025 has a compilation-end one)
+        Assert.That(EasyEcsAnalyzer.All.SelectMany(a => a.SupportedDiagnostics).Where(d => d.Id == id).Select(d => d.DefaultSeverity), Is.Not.Empty.And.All.EqualTo(severity)); // every descriptor of the id (EECS025 has a compilation-end one)
 }

@@ -831,7 +831,7 @@ public class CodeFixTests
     private static async Task<Diagnostic[]> Analyze(Document document)
     {
         var compilation = (await document.Project.GetCompilationAsync())!;
-        var all = await compilation.WithAnalyzers([new EasyEcsAnalyzer()]).GetAnalyzerDiagnosticsAsync();
+        var all = await compilation.WithAnalyzers(EasyEcsAnalyzer.All).GetAnalyzerDiagnosticsAsync();
         return all.Where(d => d.Id.StartsWith("EECS")).ToArray();
     }
 }
