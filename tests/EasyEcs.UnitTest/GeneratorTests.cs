@@ -1675,4 +1675,57 @@ public class GeneratorTests
             .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p))
             .ToImmutableArray();
     }
+
+    // The JIT inlines no method of more than 32 IL locals (MAX_INL_LCLS), AggressiveInlining or not: a job's Execute
+    // past it is called by the runner per run, and per 64-row word in a masked table, instead of being part of its loop
+    // (D126). The deinterleaved loads name each field once: a copy per field put Move3's masked job at 36 locals.
+    [Test]
+    public void DeinterleavedJobsStayWithinTheInlinersLocals()
+    {
+        var compilation = Compile("""
+            public struct P3 : IComponent { public float X, Y, Z; }
+            public struct V3 : IComponent { public float X, Y, Z; }
+            public struct P4 : IComponent { public float X, Y, Z, W; }
+            public struct V4 : IComponent { public float X, Y, Z, W; }
+            public struct Mixed : IComponent { public int Count; public float Weight; }
+            [EcsSystem] public ref struct Moves
+            {
+                [ForEach] static void Move3(ref P3 p, in V3 v) => p = new P3 { X = p.X + v.X, Y = p.Y + v.Y, Z = p.Z + v.Z };
+                [ForEach] static void Move4(ref P4 p, in V4 v) { p.X += v.X; p.Y += v.Y; p.Z += v.Z; p.W += v.W; }
+                [ForEach] static void Weigh(ref Mixed m) => m.Weight += m.Count;
+            }
+            """).WithOptions(new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true,
+                optimizationLevel: OptimizationLevel.Release));
+        Driver().RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
+        using var image = new System.IO.MemoryStream();
+        var emitted = output.Emit(image);
+        Assert.That(emitted.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+
+        image.Position = 0;
+        using var pe = new System.Reflection.PortableExecutable.PEReader(image);
+        var metadata = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
+        var locals = new System.Collections.Generic.List<(string Job, int Locals)>();
+        foreach (var handle in metadata.TypeDefinitions)
+        {
+            var type = metadata.GetTypeDefinition(handle);
+            string name = metadata.GetString(type.Name);
+            if (!name.Contains("Job")) continue;
+            foreach (var m in type.GetMethods())
+            {
+                var method = metadata.GetMethodDefinition(m);
+                if (metadata.GetString(method.Name) != "Execute") continue;
+                var body = System.Reflection.Metadata.PEReaderExtensions.GetMethodBody(pe, method.RelativeVirtualAddress);
+                int count = 0;
+                if (!body.LocalSignature.IsNil)
+                {
+                    var signature = metadata.GetBlobReader(metadata.GetStandaloneSignature(body.LocalSignature).Signature);
+                    signature.ReadSignatureHeader();
+                    count = signature.ReadCompressedInteger();
+                }
+                locals.Add((name, count));
+            }
+        }
+        Assert.That(locals.Count(l => l.Job.StartsWith("Move")), Is.EqualTo(4)); // each method's whole and masked forms
+        Assert.That(locals.Where(l => l.Locals > 32), Is.Empty);
+    }
 }
