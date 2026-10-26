@@ -1914,9 +1914,15 @@ public class GeneratorTests
 
     // The same over every job this assembly's generators wrote: the corpora of KernelTests, KernelLookupTests,
     // FusionTests, LambdaPassTests, StructuralLoopTests, HelperLoopTests, ReduceTests, ViewTests and the battle server.
+    // Only an optimized build counts: a Debug build keeps a local per temporary (WakeJob0 38, HealJob0 44) and tells
+    // the JIT to optimize nothing, so it inlines no method of it at any count. LargeJobsStayWithinTheInlinersLocals
+    // compiles its corpus optimized and checks in every configuration.
     [Test]
     public void GeneratedJobsOfTheTestsStayWithinTheInlinersLocals()
     {
+        if (typeof(GeneratorTests).Assembly.GetCustomAttributes(typeof(System.Diagnostics.DebuggableAttribute), false)
+            is [System.Diagnostics.DebuggableAttribute { IsJITOptimizerDisabled: true }])
+            Assert.Ignore("a Debug build: the JIT inlines none of its methods; run the Release configuration (CI does)");
         using var file = System.IO.File.OpenRead(typeof(GeneratorTests).Assembly.Location);
         using var pe = new System.Reflection.PortableExecutable.PEReader(file);
         var locals = InlinedLocals(pe);
