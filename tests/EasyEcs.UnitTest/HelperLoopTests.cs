@@ -164,11 +164,21 @@ public ref struct HelperRulesByRow
     }
 }
 
+/// <summary>A helper inlined into a parallel vector loop, and its twin row by row.</summary>
+public static class HelperPasses
+{
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require)]
+    public static void HitParallel(ref Mettle v, in Guard g) => v.Value -= Combat.Damage(Combat.Mitigated(30, g.Value), 5);
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    public static void HitRows(ref Mettle v, in Guard g) => v.Value -= Combat.Damage(Combat.Mitigated(30, g.Value), 5);
+}
+
 public class HelperLoopTests
 {
-    private static World Make<TSystem>(int count, int seed, Entity[] entities) where TSystem : struct, allows ref struct
+    private static World Make<TSystem>(int count, int seed, Entity[] entities, int threads = 1) where TSystem : struct, allows ref struct
     {
-        var world = new World();
+        var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
         world.Reserve<Mettle, Guard, Scars>(count);
         var random = new Random(seed);
         for (int i = 0; i < count; i++)
@@ -224,5 +234,39 @@ public class HelperLoopTests
                 Assert.That(a[i].Has<Downed>(), Is.EqualTo(b[i].Has<Downed>()), at);
             }
         }
+    }
+
+    [TestCase(1)]
+    [TestCase(4)]
+    public void AParallelVectorLoopThroughAHelperIsBitForBitOnOneAndFourThreads(int threads)
+    {
+        const int count = 20_000;
+        var a = new Entity[count];
+        var b = new Entity[count];
+        using var vector = Make<HelperRules>(count, 9, a, threads);
+        using var rows = Make<HelperRules>(count, 9, b);
+        for (int round = 0; round < 3; round++)
+        {
+            HelperPasses.HitParallel(vector);
+            HelperPasses.HitRows(rows);
+        }
+
+        for (int i = 0; i < count; i++)
+            Assert.That(BitConverter.SingleToInt32Bits(a[i].Read<Mettle>().Value), Is.EqualTo(BitConverter.SingleToInt32Bits(b[i].Read<Mettle>().Value)), $"entity {i}");
+    }
+
+    [Test]
+    public void HelpersInlinedAllocateNothing()
+    {
+        var entities = new Entity[4096 + 5];
+        using var world = Make<HelperRules>(entities.Length, 11, entities, 4);
+        void Frame()
+        {
+            world.Update();
+            HelperPasses.HitParallel(world);
+        }
+
+        for (int i = 0; i < 50; i++) Frame(); // warm-up: every table the rules reach exists (Downed), the JIT tiers
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) Frame(); }), Is.Zero);
     }
 }
