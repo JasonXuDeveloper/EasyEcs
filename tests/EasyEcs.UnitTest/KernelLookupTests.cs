@@ -58,6 +58,34 @@ public static class LookupKernels
         course = new Course(at.X + at.Y, beacons.Read(tracker.Target).Y);
     }
 
+    // One field read, one written.
+    [ForEach(SimdMode = SimdMode.Require)]
+    public static void Glance(in Tracker tracker, ref Course course, Lookup<Beacon> beacons) =>
+        course.X = beacons[tracker.Target].HasValue ? beacons[tracker.Target].Value.X : 0;
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    public static void GlanceRows(in Tracker tracker, ref Course course, Lookup<Beacon> beacons) =>
+        course.X = beacons[tracker.Target].HasValue ? beacons[tracker.Target].Value.X : 0;
+
+    // A heavier body: a normalized, rotated bearing (a square root, divisions).
+    [ForEach(SimdMode = SimdMode.Require)]
+    public static void Orient(in Beacon beacon, in Tracker tracker, ref Course course, Lookup<Beacon> beacons)
+    {
+        var target = beacons[tracker.Target];
+        float dx = target.HasValue ? target.Value.X - beacon.X : 0, dy = target.HasValue ? target.Value.Y - beacon.Y : 0;
+        float d = MathF.Sqrt(dx * dx + dy * dy) + 1;
+        course = new Course(dx / d * 3 + dy / d, dy / d * 3 - dx / d);
+    }
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    public static void OrientRows(in Beacon beacon, in Tracker tracker, ref Course course, Lookup<Beacon> beacons)
+    {
+        var target = beacons[tracker.Target];
+        float dx = target.HasValue ? target.Value.X - beacon.X : 0, dy = target.HasValue ? target.Value.Y - beacon.Y : 0;
+        float d = MathF.Sqrt(dx * dx + dy * dy) + 1;
+        course = new Course(dx / d * 3 + dy / d, dy / d * 3 - dx / d);
+    }
+
     [ForEach(Parallel = true, SimdMode = SimdMode.Require)]
     public static void SteerParallel(in Beacon beacon, in Tracker tracker, ref Course course, Lookup<Beacon> beacons)
     {
@@ -184,14 +212,33 @@ public class KernelLookupTests
     [TestCase(1_003, 4, 256, false)] // runs of 256 into one of 4 tables
     [TestCase(1_003, 4, 3, false)]  // runs shorter than a vector: vectors of two tables run the method
     [TestCase(1_003, 64, 0, false)] // every lane a random table
+    [TestCase(3_001, 1_000, 0, false)] // a thousand tables
     [TestCase(2_000, 1, 0, true)]   // dead, recycled, null, foreign ids, a table without Beacon, presence bits
     [TestCase(2_000, 3, 512, true)]
+    [TestCase(2_000, 64, 0, true)]   // the odd targets among lanes of many tables
+    [TestCase(3_001, 1_000, 0, true)]
     public void VectorLoopsReadOtherEntitiesAsTheMethodDoes(int trackers, int tables, int run, bool odd)
     {
         using var world = Build(trackers, tables, run, odd);
         Compare(world, w => LookupKernels.Steer(w), w => LookupKernels.SteerRows(w), "Steer");
         Compare(world, w => LookupKernels.Probe(w), w => LookupKernels.ProbeRows(w), "Probe");
+        Compare(world, w => LookupKernels.Glance(w), w => LookupKernels.GlanceRows(w), "Glance");
+        Compare(world, w => LookupKernels.Orient(w), w => LookupKernels.OrientRows(w), "Orient");
         if (!odd) Compare(world, w => LookupKernels.Follow(w), w => LookupKernels.FollowRows(w), "Follow");
+    }
+
+    /// <summary>
+    /// The gathers read a column through its address (pinned): after the targets' tables grow (new columns, the old ones
+    /// dropped), the next pass reads the new columns.
+    /// </summary>
+    [Test]
+    public void AfterTheTargetsTablesGrowTheGathersReadTheirNewColumns()
+    {
+        using var world = Build(1_003, 64, 0, false);
+        Compare(world, w => LookupKernels.Steer(w), w => LookupKernels.SteerRows(w), "before");
+        for (int t = 0; t < 64; t++) world.CreateEntities(new Entity[300], new Beacon(1, 2), new Band(t)); // every table grows
+        foreach (var item in world.Query<Beacon>()) item.Beacon = new Beacon(item.Beacon.Y, item.Beacon.X + 1);
+        Compare(world, w => LookupKernels.Steer(w), w => LookupKernels.SteerRows(w), "after the tables grew");
     }
 
     [Test]
@@ -209,6 +256,7 @@ public class KernelLookupTests
     [TestCase(1, 0, false)]
     [TestCase(4, 256, false)]
     [TestCase(64, 0, true)]
+    [TestCase(1_000, 0, true)]
     public void AParallelVectorLoopReadsOtherEntitiesBitForBitOnOneAndFourThreads(int tables, int run, bool odd)
     {
         using var one = Build(20_000, tables, run, odd, threads: 1);
