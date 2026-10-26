@@ -115,6 +115,16 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        `[ForEach]`-key index probes (`TryFind(key.F)`), the probe form scalar group prefetching won at 16M keys.
        Proof: LookupChaseBenchmark 1k / 1M / 16M not slower anywhere, faster past the cache; the owner re-measures on
        a 32 MiB-LLC machine and the M4. Generator files: after the ARM parity agent merges (SystemGenerator, Kernel.Lookups).
+   ARM64 (owner, 2026-10-26: "is there another instruction or the TLB instead?"): .NET 10 exposes no PRFM (only
+   SVE's PRFB/PRFD, and the M4 has no non-streaming SVE), so the candidate is a plain load issued ahead (record of row
+   i + k loaded into a small ring and used k rows later; the row touched from it k / 2 rows later): unlike PRFM it
+   holds retirement until it arrives, so it pays only if the M4's out-of-order window does not already overlap the
+   misses. A benchmark pair (`LookupChase` touch-ahead vs today) for the owner's M4; ships only if faster there and
+   not slower in cache. Not taken: a native PRFM stub (a native binary per RID in a managed package; a call per
+   prefetch), Apple's data-memory-dependent prefetcher (keys on pointer-like 64-bit values, which an `EntityId` is
+   not). TLB: macOS arm64 keeps 16 KiB pages with no user superpages; Linux arm64 and x86 get huge pages through
+   #164 (NativeMemory 2 MiB + madvise). The layout answer works everywhere: L1's readers ordered by target halved
+   the 1M chase without any prefetch.
 7. [ ] **Borrowed ideas** (`borrowed-ideas.md`): ghost rows between
        worlds as an example first, streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
        owner: records in the docs pass). Vertical batch probes dropped after the 16M re-measure (record in the docs
