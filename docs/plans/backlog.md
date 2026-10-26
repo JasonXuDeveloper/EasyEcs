@@ -19,8 +19,8 @@ last (`docs-todos.md` collects them meanwhile).
       `feat-locality-core`): a declared key orders a table's rows, re-sorted on a cadence (radix sort, one permutation
       of every column under the gate, `StorageVersion`), a box per block of 8 rows and a read path (`RowBlocks`) for
       the generated pair form; compress (AVX-512 CompressStore / AVX2 table / ARM64 TBL) replaces `Lanes.Compact` in
-      the core's callers; the prototypes get Vector128 / NEON paths so the owner can run `PairsBenchmark` and
-      `CompressBenchmark` on ARM64. New EECS id for an invalid key; decision records; naming candidates to the owner.
+      the core's callers; the prototypes' Vector128 / NEON paths are merged (eedfeb0, pushed). L1 gives systems an order they request at
+      setup (3.4), not only `[OrderBy]`; L3's compress is one core helper the generated loops call too. New EECS id for an invalid key; decision records; naming candidates to the owner.
 - [ ] **WP0b** (`inner-loops.md`; worktree `wp0b`, branch `feat-wp0b`): every generated job within the JIT inliner's
       32 IL locals (loads into their names, constants in place, oversized Execute split per loop), D126 rewritten,
       `tools/inlining.sh`; gate: WorldSimulation / BattleServer not slower. Blocks L2, G1, the call inliner, M0.
@@ -30,7 +30,7 @@ last (`docs-todos.md` collects them meanwhile).
 
 ## Next, in this order
 
-1. [ ] **L2: the generated pair form** (`locality.md` 3.2): the user writes what one pair does; the generator writes
+1. [ ] **L2: the generated pair form** (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
        the 8x8 (x86) / 4x4 (ARM64) cluster-pair kernel over L1's blocks with cutoff and self masks, and a nearest form
        (`NearestPlayer`, zombie targeting). Right after WP0b merges. Then L4: examples rewritten in it.
        The owner's call on the spread map (nearest 1.06-1.31x, bar 1.5x): re-measure once L1 sorts on its cadence,

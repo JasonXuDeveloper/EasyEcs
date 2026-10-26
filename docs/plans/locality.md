@@ -35,7 +35,7 @@ rows inside a table**, **blocks with bounds**, a **pair form** that uses them, a
 ### 3.1 Ordered rows and blocks (core)
 - A table can keep its rows in the order of a key the user declares on a component (a spatial cell key: Morton /
   Hilbert of a quantized position; any `IComparable` key for non-spatial uses). Provisional name `[OrderBy]` on the
-  key member; naming audit before it ships.
+  key member; naming audit before it ships. Usually inferred from a pair method instead (3.4).
 - The order is restored on a cadence, not on every write (GROMACS's nstlist): a pass that re-sorts a table whose
   rows drifted, by an LSD radix partition of (key, row) pairs (Polychroniou), then one permutation applied to every
   column under the structural gate (`Archetype.FillHoles` already rewrites rows and slots; the re-sort is the same
@@ -56,6 +56,35 @@ rows inside a table**, **blocks with bounds**, a **pair form** that uses them, a
 - Writes go to i only; writing j (Newton's third law, half the pairs) is a later step with its own proof.
 - Parallel: i-blocks split across threads; j is read-only.
 - The pair list itself is cached between re-sorts, as GROMACS's list is (rebuilt with the boxes).
+
+### 3.4 Automatic: the user's plain code adapts (the owner's rule, 2026-10-26)
+
+Users do not learn cluster pairs or compress. They write the code they would write anyway; the generator and the core
+pick the layout and the kernel.
+
+- **The order is inferred, not declared.** When a pair method (below) compares the distance of two rows' positions
+  against a cutoff, the generator registers an order for the tables it walks: the Morton key of that position
+  component, quantized by the cutoff, and a re-sort cadence from the cutoff and the margin. `[OrderBy]` stays only as
+  an override (another key, a non-spatial order); without a pair method a table keeps today's order and pays nothing.
+  The core therefore needs an order a system can request at setup (internal API the generated setup calls), not only
+  an attribute.
+- **The pair form is the code users already write.** Recognized shapes, each turned into the blocked kernel when
+  the body passes the vector-loop rules, else kept as written with the EECS055 reason:
+  1. a `[ForEach]` method with a second row (`in Position other`, the "other" side of the pair) and a distance test
+     against a cutoff (constant, singleton field, parameter): the interaction form;
+  2. the same with a running best (`if (d < best) { best = d; target = other; }`): the nearest form (tie order of
+     the row loop kept);
+  3. a nested walk the user wrote by hand inside a `[ForEach]`: `foreach` over a query or view of the same
+     components with that distance test. Same set of pairs, so the generator rewrites it automatically;
+  4. a hand-written grid search (cell keys into `ValueIndex` / `Lookup` + distance test): not provably the same set,
+     so an analyzer rule with a code fix to shape 1 or 2.
+  Self pairs are skipped when the body says `other != self` or the distance test excludes zero; otherwise the
+  generator keeps them, as the row loop does.
+- **Compress has no API.** Every place a vector mask becomes rows uses it: the generated loops (marked rows,
+  structural writes after the pass, tag writes, `Emit`, `[Consume]`, value conditions) and the core (`Lanes.Compact`
+  callers, query filters). The generated code calls one core helper, so it picks AVX-512 CompressStore / AVX2 table /
+  ARM64 TBL at run time and no generated text changes per ISA.
+- Docs say what is recognized and what keeps a method on the row loop, like the vector-loop list.
 
 ### 3.3 Database operators in the core
 - Selective store: a vector mask to a list of rows with `Avx512F.Compress` where present, a permutation table on
