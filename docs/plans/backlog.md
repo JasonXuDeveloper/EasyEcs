@@ -158,8 +158,12 @@ CI runs the unit tests on ARM64 (b1dbdb0).
       (`inline.h`, release/10.0 and main), the same for x64, ARM64, ReadyToRun and Native AOT, and it counts IL
       locals, which no vector width changes; per-width register pressure is M1's (`microarch.md`). Left to do:
       `tools/inlining.sh` in CI on the x64 and arm64 jobs (fails when a runner stops inlining a job, so a runtime
-      that changes the limit is seen at once); Mono (the WebAssembly demo) has its own inliner, not checked yet:
-      read its limits (`mini/method-to-ir.c`) and look at the demo's AOT output once. Decision record with D135.
+      that changes the limit is seen at once). Mono (the WebAssembly demo; `mini/method-to-ir.c`,
+      `mono_method_check_inlining`, release/10.0) read: no limit on locals at all ("also consider num_locals?"), an IL
+      size limit of 20 bytes (30 LLVM AOT, 100 LLVM JIT) that `AggressiveInlining` lifts, an inline depth of 10, no
+      inlining in gsharedvt code or of methods with exception clauses: the 32-locals split costs Mono nothing, and
+      every helper a loop inlines must keep `AggressiveInlining` (the demo's runners inline only through it).
+      Decision record with D135 in the docs pass.
 - [ ] Follow-ups: lambda passes do not fuse; lambda + structural change and lambda + view stay scalar.
 - [ ] **From the published roadmap** (`docs/content/roadmap.mdx` "Planned", checked against this file 2026-10-26):
       push halos for grid neighbors (a chunk hands its edges to its neighbors' halos when they change, D73; with
