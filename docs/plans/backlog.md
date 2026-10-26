@@ -71,12 +71,20 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 5. [ ] **Generated code tuned for the machine** (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
        accumulators / unrolling / hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3
        prefetch / streaming stores.
-6. [ ] **Borrowed ideas** (`borrowed-ideas.md`): prefetching chases (AMAC: measured, bar not met, owner's call on a size gate), ghost rows between
+6. [ ] **Prefetched lookup chases with a size gate** (decided by the owner's rule "a faster case ships, a slower one
+       never": 1.29-1.36x at 16M, slower in cache): the generated row and vector forms prefetch `k` rows ahead
+       (record, then row; k = 8 rows / 16 for vectors, from the screen) only when the target table's records and
+       column are past the last-level cache, read once per pass from the machine (Linux `/sys/.../cache/index3/size`,
+       macOS `hw.l3cachesize` or the SLC / `hw.perflevel0.l2cachesize` on Apple), so a world in cache runs today's code.
+       ARM64: no prefetch intrinsic in .NET 10 (SVE only): the gate is off there. Then relation targets and
+       `[ForEach]`-key index probes (`TryFind(key.F)`), the probe form scalar group prefetching won at 16M keys.
+       Proof: LookupChaseBenchmark 1k / 1M / 16M not slower anywhere, faster past the cache; the owner re-measures on
+       a 32 MiB-LLC machine and the M4. Generator files: after the ARM parity agent merges (SystemGenerator, Kernel.Lookups).
+7. [ ] **Borrowed ideas** (`borrowed-ideas.md`): ghost rows between
        worlds as an example first, streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
-       owner: records in the docs pass). The owner's call on batch probes of ValueIndex / UniqueIndex (1.3-3.4x slower
-       at 1k / 100k keys): keep, re-measure after AMAC with tables far past the last-level cache (16M keys), against
-       scalar group prefetching.
-7. [ ] The rest of "Later" below.
+       owner: records in the docs pass). Vertical batch probes dropped after the 16M re-measure (record in the docs
+       pass); scalar group prefetching of probes moves into item 6.
+8. [ ] The rest of "Later" below.
 
 ## Done this round (for the record)
 

@@ -86,6 +86,16 @@ its own worktree.
      analyzer's slow paths never run in it;
    - every run under `flock /tmp/bench.lock`, nothing else running (agents' builds and samples included): parallel
      rows swing by 2x on a loaded machine; take the load average at the start and the end of each class;
+   - a size meant to miss the cache is checked against this machine's last-level cache (`lscpu`: 260 MiB here, so
+     1M rows sit in it; record the LLC with the numbers), and the queries rotate through a set larger than it (the
+     same 4,096 keys every invoke stay in L2 after the first);
+   - no `[IterationSetup]` on nanosecond benchmarks (one invocation per iteration: 12 ns read where the truth is
+     1.5 ns); `[Arguments]` on a method leaves the Ratio column empty: separate methods when the ratio matters;
+   - the A/B baseline is the generated job, not a hand-written copy of it (5-15 % apart in the chase study);
+   - in `namespace EasyEcs.Benchmark` a top-level type (`Position`) wins over `using static` and aliases: qualify a
+     nested benchmark type named like one, and check every form's result in setup;
+   - worktree agents: commands with shell variables, `awk` or a quoted filter under `setsid` are refused; write a
+     launcher script with literal paths and run `setsid nohup ./script.sh`;
    - data a branch predictor can learn flatters branchy baselines: include a size past what it learns (262k rows
      against 4,096 repeated);
    - a prototype of a sort or a space structure is checked for its structure (keys sorted, boxes small), not only for

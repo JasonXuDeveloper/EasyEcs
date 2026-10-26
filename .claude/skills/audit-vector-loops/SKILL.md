@@ -41,6 +41,7 @@ form to it):
 | Mask to rows (`Lanes.Compact`: AVX-512 CompressStore) | AVX-512, else a bit walk | bit walk | TBL table (locality L3, running) |
 | `Lookup` gathers (`LookupLanes`, on request) | AVX2 | rows (D131) | none in .NET 10 |
 | Core scans (`BitMask`, tick filters, `Tile` copies) | vector | vector (AdvSimd / `Vector128` paths) | none needed |
+| Prefetch of lookup chases (`Lookup.Prefetch` / `PrefetchRow`, `Sse.Prefetch0`) | prefetch | nothing (.NET 10 has no ARM64 prefetch outside SVE) | none in .NET 10 |
 
 Nothing runs the tests on ARM64 hardware yet: CI needs an ARM64 job (GitHub's ARM64 Linux runner) that runs the unit
 tests and dumps the `__loops` lines of the test systems, so a form that falls back to rows there is seen.
