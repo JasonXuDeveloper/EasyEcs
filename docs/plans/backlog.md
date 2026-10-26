@@ -34,6 +34,9 @@ last (`docs-todos.md` collects them meanwhile).
 
 - [ ] **Vector loops through the user's own calls** (worktree agent, branch `feat-call-inliner`; "Next" item 3).
 
+- [ ] **Prefetch with a cache-size gate + the 16-word locals bug** (worktree agent, branch `feat-prefetch-gate`;
+      "Next" item 6).
+
 The owner's order (2026-10-26): every code change before any docs (generator cost and ARM64 parity included).
 CI runs the unit tests on ARM64 (b1dbdb0).
 
