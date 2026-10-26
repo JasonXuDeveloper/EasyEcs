@@ -17,8 +17,8 @@ namespace EasyEcs;
 /// indexes. With AVX-512 a lane of 4 or 8 bytes moves 16 or 8 at a time (<c>VPCOMPRESSD</c> / <c>VPCOMPRESSQ</c>);
 /// with AVX2 8 or 4 at a time through a permutation table (Polychroniou, Raghavan and Ross's selective store: one
 /// shuffle per vector, chosen by the vector's bits of the mask); with 128-bit vectors (NEON's <c>TBL</c> on ARM64,
-/// SSSE3's <c>PSHUFB</c>) 4 or 2 at a time through a byte shuffle table; otherwise, and for other sizes, one at a time
-/// without a branch per element.
+/// SSSE3's <c>PSHUFB</c>) a lane of 4 bytes moves 4 at a time through a byte shuffle table; otherwise, and for other
+/// sizes, one at a time without a branch per element.
 /// </summary>
 public static class Lanes
 {
@@ -32,9 +32,9 @@ public static class Lanes
     /// <summary>
     /// Write the elements of <paramref name="source"/> whose bit is set in <paramref name="mask"/> (bit <c>i</c> selects
     /// <c>source[i]</c>, so at most 64 elements) to the start of <paramref name="destination"/>, in order, and return
-    /// how many: <c>PopCount(mask)</c>. Only selected elements are read and only that many are written. O(64 / lanes
-    /// per vector) for elements of 4 or 8 bytes with AVX-512, AVX2, SSSE3 or ARM64's NEON, else O(selected);
-    /// allocation-free.
+    /// how many: <c>PopCount(mask)</c>. Nothing past the end of <paramref name="source"/> is read and only that many
+    /// elements are written. O(64 / lanes per vector) for elements of 4 or 8 bytes with AVX-512 or AVX2 and of 4 bytes
+    /// with SSSE3 or ARM64's NEON, else O(selected); allocation-free.
     /// </summary>
     /// <param name="source">The elements to choose from: a run of a batch method's span or of its <c>EntitySpan.Ids</c>.</param>
     /// <param name="mask">The selected elements; no bit at or past <c>source.Length</c> may be set.</param>
@@ -56,7 +56,6 @@ public static class Lanes
         else if (Unsafe.SizeOf<T>() == 8 && Avx2.IsSupported) Permute8(ref Unsafe.As<T, long>(ref from), source.Length, mask, ref Unsafe.As<T, long>(ref into), count);
         else if (Unsafe.SizeOf<T>() == 4 && Avx2.IsSupported) Permute4(ref Unsafe.As<T, int>(ref from), source.Length, mask, ref Unsafe.As<T, int>(ref into), count);
         else if (Unsafe.SizeOf<T>() == 4 && Shuffles) Shuffle4(ref Unsafe.As<T, int>(ref from), source.Length, mask, ref Unsafe.As<T, int>(ref into), count);
-        else if (Unsafe.SizeOf<T>() == 8 && Shuffles) Shuffle8(ref Unsafe.As<T, long>(ref from), source.Length, mask, ref Unsafe.As<T, long>(ref into), count);
         else Advance(ref from, mask, ref into);
         return count;
     }
@@ -225,24 +224,6 @@ public static class Lanes
         }
     }
 
-    // 128-bit vectors, 2 lanes of 8 bytes per step, 2 bits of the mask each, as Shuffle4 (Bytes2).
-    private static void Shuffle8(ref long from, int length, ulong mask, ref long into, int count)
-    {
-        ref byte table = ref MemoryMarshal.GetArrayDataReference(Bytes2);
-        int to = 0;
-        for (int at = 0; mask != 0; at += 2, mask >>= 2)
-        {
-            int m = (int)(mask & 0x3);
-            var values = at + 2 <= length ? Vector128.LoadUnsafe(ref Unsafe.As<long, byte>(ref Unsafe.Add(ref from, at))) : Tail(ref Unsafe.As<long, byte>(ref Unsafe.Add(ref from, at)), 8);
-            var packed = Shuffle(values, Vector128.LoadUnsafe(ref table, (nuint)(m * 16)));
-            int n = BitOperations.PopCount((uint)m);
-            ref byte place = ref Unsafe.As<long, byte>(ref Unsafe.Add(ref into, to));
-            if (count - to >= 2) packed.StoreUnsafe(ref place);
-            else Store(packed, ref place, n * 8);
-            to += n;
-        }
-    }
-
     // The first bytes of a vector at the source's end (the rest 0): nothing past the source is read.
     private static Vector128<byte> Tail(ref byte from, int bytes)
     {
@@ -255,11 +236,10 @@ public static class Lanes
     private static void Store(Vector128<byte> values, ref byte into, int bytes) =>
         Unsafe.CopyBlockUnaligned(ref into, ref Unsafe.As<Vector128<byte>, byte>(ref values), (uint)bytes);
 
-    // Per nibble of a mask, the bytes of the 32-bit lanes it selects first (the rest 0x80: zero). 256 bytes.
+    // Per nibble of a mask, the bytes of the 32-bit lanes it selects first (the rest 0x80: zero). 256 bytes. Lanes of 8
+    // bytes have no 128-bit form: 2 per step (32 steps a word) lost to the scalar walk (CompactBenchmark without AVX2,
+    // 1M ids at 50 %: 1.19 ms against 1.00 ms).
     private static readonly byte[] Bytes4 = ByteTable(4, 4);
-
-    // Per 2 bits of a mask, the bytes of the 64-bit lanes it selects first. 64 bytes.
-    private static readonly byte[] Bytes2 = ByteTable(2, 8);
 
     private static byte[] ByteTable(int lanes, int width)
     {
