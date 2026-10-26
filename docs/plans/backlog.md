@@ -28,6 +28,12 @@ last (`docs-todos.md` collects them meanwhile).
       vector's targets spread over many tables (walk, 64-bit pinned addresses, micro-adaptive choice all measured,
       D131 rewritten with the widened table and ARM64: rows there).
 
+- [ ] **AMAC prefetch for lookup chases, then batch probes re-measured at 16M keys** (`borrowed-ideas.md` item 1;
+      worktree agent, branch `feat-amac`): core only, generator changes listed for after WP0b.
+
+The owner's order (2026-10-26): every code change before any docs (generator cost and ARM64 parity included).
+CI runs the unit tests on ARM64 (b1dbdb0).
+
 ## Next, in this order
 
 1. [ ] **L2: the generated pair form** (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
