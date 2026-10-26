@@ -47,7 +47,7 @@ LookupLanes.cs               the reads of other entities in generated vector loo
                              the vector's rows run the method), Gather the fields from that table's column;
                              PrefetchRecord / PrefetchRow (Lookup<T>.Prefetch / PrefetchRow: the two stages of a
                              prefetched chase, x86 only; borrowed-ideas.md item 1), PrefetchAhead (a vector loop's
-                             prefetches of the rows ahead), Prefetches (the gate a generated job reads once per pass:
+                             prefetches of the rows ahead), Prefetches (the gate a generated pass or vector loop reads once per pass:
                              the records and rows past the last-level cache)
 LastLevelCache.cs            the last-level cache size, read once per process from the OS as the GC does (Windows
                              GetLogicalProcessorInformationEx, Linux sysfs then sysconf, macOS sysctl), x86 only; 0 is

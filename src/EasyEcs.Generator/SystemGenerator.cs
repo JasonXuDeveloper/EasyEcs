@@ -294,6 +294,18 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             EmitConsume(sb, m, world, whole, at);
         }
 
+        if (method.ChasesRows)
+        {
+            // Past the last-level cache (any of its lookups' tables), the twin prefetching the chases; else today's job.
+            var gates = method.Chases.Select(c => c.Lookup).Distinct().Select(l => $"global::EasyEcs.Lookup<{method.Parameters[l].Type}>.Prefetches({world})");
+            sb.Append($"{indent}if ({string.Join(" || ", gates)})\n{indent}{{\n");
+            Pass(method with { PrefetchesRows = true }, $"{forEach}.{method.Name}Job{i}Chases{method.TypeParameters}", indent + "    ");
+            sb.Append($"{indent}}}\n{indent}else\n{indent}{{\n");
+            Pass(method, job, indent + "    ");
+            sb.Append($"{indent}}}\n");
+            return;
+        }
+
         if (method.Simd is not { VectorTail: true } simd)
         {
             Pass(method, job, indent);
@@ -536,19 +548,16 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// The row loop of a run for a method that chases other entities (<see cref="ForEachModel.Chases"/>), group
-    /// prefetching (AMAC): when the pass is past the last-level cache (the job's <c>f{i}</c>), the records of the first
-    /// 2k rows' targets, then per row the record of row i + 2k's target and the row of row i + k's (k =
-    /// <see cref="ForEachModel.ChaseDistance"/>; a row needs its record in cache, so the record goes first); the last 2k
-    /// rows, and every row of a run of 2k or fewer or of a pass in cache, run as before. A prefetch never faults and
+    /// The row loop of the twin job of a method that chases other entities (<see cref="ForEachModel.Chases"/>), run only
+    /// past the last-level cache (its pass's call site decides), group prefetching (AMAC): the records of the first 2k
+    /// rows' targets, then per row the record of row i + 2k's target and the row of row i + k's (k =
+    /// <see cref="ForEachModel.ChaseDistance"/>; a row's address is known once its record is in cache, so the record
+    /// goes first); the last 2k rows, and every row of a run of 2k or fewer, run as before. A prefetch never faults and
     /// changes nothing: a dead or recycled target only wastes it.
     /// </summary>
     private static void EmitChases(StringBuilder sb, ForEachModel method, string indent, string call)
     {
         const int k = ForEachModel.ChaseDistance;
-        var lookups = method.Chases.Select(c => c.Lookup).Distinct().ToArray();
-        // Each lookup's gate, and per line when lookups of several types decide apart.
-        string Gate(int lookup) => lookups.Length > 1 ? $"if (f{lookup}) " : "";
         string Id(Chase c, string row)
         {
             int column = 1 + method.Parameters.Take(c.Component).Count(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.Mutable);
@@ -556,15 +565,15 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         }
         string Lookup(Chase c) => $"new global::EasyEcs.Lookup<{method.Parameters[c.Lookup].Type}>(World, null)";
         sb.Append($"{indent}nint i = 0;\n");
-        sb.Append($"{indent}if (({string.Join(" | ", lookups.Select(l => $"f{l}"))}) && rows > {2 * k}) // past the last-level cache: the chases {k} and {2 * k} rows ahead\n{indent}{{\n");
+        sb.Append($"{indent}if (rows > {2 * k}) // the chases {k} and {2 * k} rows ahead\n{indent}{{\n");
         sb.Append($"{indent}    for (nint j = 0; j < {2 * k}; j++)\n{indent}    {{\n");
-        foreach (var c in method.Chases) sb.Append($"{indent}        {Gate(c.Lookup)}{Lookup(c)}.Prefetch({Id(c, "j")});\n");
+        foreach (var c in method.Chases) sb.Append($"{indent}        {Lookup(c)}.Prefetch({Id(c, "j")});\n");
         sb.Append($"{indent}    }}\n");
         sb.Append($"{indent}    for (nint last = rows - {2 * k}; i < last; i++)\n{indent}    {{\n");
         foreach (var c in method.Chases)
         {
-            sb.Append($"{indent}        {Gate(c.Lookup)}{Lookup(c)}.Prefetch({Id(c, $"i + {2 * k}")});\n");
-            if (c.Row) sb.Append($"{indent}        {Gate(c.Lookup)}{Lookup(c)}.PrefetchRow({Id(c, $"i + {k}")});\n");
+            sb.Append($"{indent}        {Lookup(c)}.Prefetch({Id(c, $"i + {2 * k}")});\n");
+            if (c.Row) sb.Append($"{indent}        {Lookup(c)}.PrefetchRow({Id(c, $"i + {k}")});\n");
         }
         sb.Append($"{indent}        {call}\n{indent}    }}\n{indent}}}\n");
         sb.Append($"{indent}for (; i < rows; i++)\n{indent}    {call}\n");
@@ -574,6 +583,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     {
         // A vector loop that must take every row has the method's own job beside it, for hardware without its vectors.
         if (suffix.Length == 0 && method.Simd is { VectorTail: true }) EmitJob(sb, owner, method with { Simd = null }, number, "Rows");
+        // A method chasing other entities has a twin prefetching them, for the passes past the last-level cache.
+        if (suffix.Length == 0 && method.ChasesRows) EmitJob(sb, owner, method with { PrefetchesRows = true }, number, "Chases");
         string job = $"{method.Name}Job{number}{suffix}{method.TypeParameters}";
         var components = method.Query.ToArray();
         int index = 0;
@@ -721,7 +732,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 if (method.Simd is { Size: < 4 } or { Wide: not null } && masked) sb.Append($"{indent}nint i = 0;\n");
                 else if (method.Simd is { } simd) EmitLoops(sb, loops, simd, components, indent, call, masked, rows, scope, start);
                 if (method.Simd is { VectorTail: true }) { } // the tail took the last rows
-                else if (method.Simd == null && method.Chases.Length > 0) EmitChases(sb, method, indent, call);
+                else if (method.PrefetchesRows) EmitChases(sb, method, indent, call);
                 else sb.Append(method.Simd == null
                     ? $"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n"
                     : masked
@@ -978,11 +989,20 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         public string Scalar { get; init; } = "";
 
         /// <summary>
-        /// Its reads of other entities at ids its rows hold (<see cref="Generator.Chases"/>): without a vector loop, its job
-        /// walks runs of rows and prefetches them <see cref="ChaseDistance"/> rows ahead when the pass is past the
-        /// last-level cache (<see cref="Prefetches"/>).
+        /// Its reads of other entities at ids its rows hold (<see cref="Generator.Chases"/>; none in parallel). Without a
+        /// vector loop, a pass past the last-level cache runs its twin job (<see cref="PrefetchesRows"/>), which walks
+        /// runs of rows and prefetches them <see cref="ChaseDistance"/> rows ahead; any other pass runs today's job.
         /// </summary>
         public EquatableArray<Chase> Chases { get; init; } = new([]);
+
+        /// <summary>Has a twin job prefetching its chases: no vector loop and some chase (<see cref="Chases"/>).</summary>
+        public bool ChasesRows => Simd == null && !One && Chases.Length > 0;
+
+        /// <summary>
+        /// This is the twin (<c>Job{i}Chases</c>): a job over runs of rows prefetching the chases, run only by a pass
+        /// whose call site found it past the last-level cache (<c>Lookup&lt;T&gt;.Prefetches</c>, once per pass).
+        /// </summary>
+        public bool PrefetchesRows { get; init; }
 
         /// <summary>
         /// How many rows ahead of the row it runs the row form prefetches a chase's row (its record twice as far: the
@@ -992,11 +1012,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         public const int ChaseDistance = 8;
 
         /// <summary>
-        /// Lookup parameter <paramref name="i"/> prefetches: the job's field <c>f{i}</c> says, once per pass, whether the
-        /// pass is past the last-level cache (<c>Lookup&lt;T&gt;.Prefetches</c>). The vector loop's prefetches
-        /// (<see cref="Kernel.Code.Prefetched"/>) or, without one, the row form's (<see cref="Chases"/>).
+        /// The vector loop prefetches for Lookup parameter <paramref name="i"/> (<see cref="Kernel.Code.Prefetched"/>): the
+        /// job's field <c>f{i}</c> says, once per pass, whether the pass is past the last-level cache
+        /// (<c>Lookup&lt;T&gt;.Prefetches</c>).
         /// </summary>
-        public bool Prefetches(int i) => Simd is { } simd ? simd.Prefetched.Contains(i) : Chases.Any(c => c.Lookup == i);
+        public bool Prefetches(int i) => Simd is { } simd && simd.Prefetched.Contains(i);
 
         /// <summary>
         /// One line on the loop the method got (SystemInfo.Loops): "vector" with its forms (flat, interleaved fields,
@@ -1004,7 +1024,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// </summary>
         public string Describe()
         {
-            if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")}){(Chases.Length > 0 ? ", lookups prefetched past the last-level cache" : "")}";
+            if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")}){(ChasesRows ? ", lookups prefetched past the last-level cache" : "")}";
             var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Lane}>)" };
             if (simd.Flat != null) parts.Add("flat");
             else if (simd.Interleaves) parts.Add("interleaved fields");
@@ -1043,9 +1063,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// (ForEachBatchParallel): its partial results stay in registers instead of a load and a store per row.
         /// </summary>
         public bool Runs => !One && Stable && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) && (Parallel
-            ? (Parameters.Any(p => p.Kind == Symbols.ParamKind.Reduction) || Chases.Length > 0) && !Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable) && !Stamps
+            ? Parameters.Any(p => p.Kind == Symbols.ParamKind.Reduction) && !Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable) && !Stamps
             : Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Reduction || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" }) || Stamps
-                || Chases.Length > 0); // the rows ahead of the row it runs: their chases prefetched
+                || PrefetchesRows); // the rows ahead of the row it runs: their chases prefetched
 
         public static ForEachModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
         {
@@ -1168,7 +1188,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     }, ct, out scalar),
                     Scalar = scalar ?? "",
                     // Reads of other entities at the row's ids, by EntityId (a keyed lookup finds through its index).
-                    Chases = Symbols.IsForEntity(method) ? new([])
+                    Chases = Symbols.IsForEntity(method) || parallel ? new([])
                         : new(Generator.Chases.Of(method, syntax, model, ct).Where(c => parameters[c.Lookup].Key.Length == 0).ToArray()),
                     OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LoopsOrCalls(syntax),
                     Fusion = outside ? null : FusionSide.Of(method, stable, identifies, parallel),

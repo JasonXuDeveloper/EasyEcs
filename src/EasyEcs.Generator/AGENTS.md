@@ -18,7 +18,7 @@ ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove,
 SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                              the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] /
                              [Removed<T>] -> Since(LastRunTick + 1) and a read of T; Mut<T> -> a write stamped per
-                             write; Slices -> the slice of the run; ChunkRows -> the chunkRows argument; Lookup reads at an id of an in component (Chases) -> a job over runs of rows prefetching the records 2k and the rows k ahead when the pass is past the last-level cache (EmitChases); [Consume] -> DestroyAll of
+                             write; Slices -> the slice of the run; ChunkRows -> the chunkRows argument; Lookup reads at an id of an in component (Chases), no vector loop, one thread -> a twin job (Job{i}Chases) over runs of rows prefetching the records 2k and the rows k ahead, which the pass runs past the last-level cache (EmitChases, EmitPass); [Consume] -> DestroyAll of
                              the filter after a pass without structural changes, a destroy per row otherwise;
                              [ForEntity] -> the IForEachEntity job and an entry point Owner.Method(entity, values)
                              over entity.Run; [EcsSystem] -> the code struct __X_SystemCode (hooks, then the
