@@ -1636,18 +1636,12 @@ internal sealed partial class Kernel
         }
     }
 
-    /// <summary>A literal, or a named constant of a lane type (<c>int.MinValue</c>, <c>float.Pi</c>).</summary>
-    private static readonly System.Text.RegularExpressions.Regex Literals = new(@"^(?:\(?-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fdmuUlL]*\)?|(?:int|long|uint|ulong|float|double)\.\w+)$");
-
     /// <summary>A uniform scalar of <paramref name="type"/>, broadcast once per run (before the loop).</summary>
     private string Broadcast(string scalar, ITypeSymbol type) => Broadcast(scalar, Elem(type));
 
     /// <summary>A uniform scalar broadcast to lanes of <paramref name="element"/> (a fully qualified C# type).</summary>
     private string Broadcast(string scalar, string element)
     {
-        // A constant is written where it is used: the JIT makes it a vector constant either way, and a local for it
-        // would count towards the 32 a runner inlines (SystemGenerator.InlinedLocals).
-        if (Literals.IsMatch(scalar)) return $"{V}.Create<{element}>({scalar})";
         string key = element + " " + scalar;
         if (!_broadcasts.TryGetValue(key, out var name))
         {

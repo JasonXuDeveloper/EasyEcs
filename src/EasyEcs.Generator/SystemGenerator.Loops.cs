@@ -158,6 +158,7 @@ public sealed partial class SystemGenerator
         foreach (var line in (masked ? simd.MaskedStores : simd.Stores).Split('\n')) if (line.Length > 0) loop.Append(body).Append(line).Append('\n');
         loop.Append("}\n");
         foreach (var line in simd.Fold.Split('\n')) if (line.Length > 0) loop.Append(line).Append('\n');
+        if (!masked && !simd.Gathers) Constants(loop);
         // Only the tokens are replaced: setup lines name user types (in Vector3 wind, in Vector<float> bias) as written.
         // Vector512 names the same operations alike, except the square root (Vector.SquareRoot, Vector512.Sqrt).
         string text = loop.Replace(Kernel.Visited, masked ? "pass" : "ulong.MaxValue").Replace(Kernel.Row, "(int)i").ToString();
@@ -169,6 +170,28 @@ public sealed partial class SystemGenerator
         if (simd.VectorTail) loops.Add(TailLoop(simd, components, masked, split));
         return loops;
     }
+
+    /// <summary>
+    /// The constants of a loop over whole vectors (<c>var __u1 = V.Create&lt;float&gt;(2f);</c>, the setup's broadcasts
+    /// of a literal) written where they are used instead: one IL local fewer each (a runner inlines no job of more than
+    /// <see cref="InlinedLocals"/>), and the JIT, which hoists them all the same, sees their values (<c>Max(x, -50f)</c>
+    /// is one <c>vmaxps</c>, a variable one needs the IEEE sequence of <c>vrangeps</c> and <c>vfixupimmps</c>). Not in a
+    /// masked word's loop nor one that gathers: their bodies run under a <c>continue</c>, the JIT hoists nothing out of a
+    /// block not every iteration runs, and the constants would be broadcast again per vector.
+    /// </summary>
+    private static void Constants(StringBuilder loop)
+    {
+        string text = loop.ToString();
+        foreach (Match constant in Constant.Matches(text))
+        {
+            text = text.Replace(constant.Value, "");
+            text = Regex.Replace(text, $@"\b{constant.Groups[1].Value}\b", constant.Groups[2].Value.Replace("$", "$$"));
+        }
+        loop.Clear().Append(text);
+    }
+
+    /// <summary>A setup line broadcasting a literal, or a named constant of a lane type (<c>int.MinValue</c>, <c>float.Pi</c>).</summary>
+    private static readonly Regex Constant = new(@"(?m)^var (__u\d+) = (" + Regex.Escape(Kernel.V) + @"\.Create<[\w.:]+>\((?:\(?-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fdmuUlL]*\)?|(?:int|long|uint|ulong|float|double)\.\w+)\));\n");
 
     /// <summary>
     /// The rows of a run after the last whole vector, when every row must take the vector form (<see cref="Kernel.Code.VectorTail"/>):
@@ -209,6 +232,7 @@ public sealed partial class SystemGenerator
         loop.Append($"for (nint end = lanes - (lanes - i) % ({chunk}); i < end; i += {count})\n{{\n");
         foreach (var line in (flat.Body + flat.Stores).Split('\n')) if (line.Length > 0) loop.Append("    ").Append(line).Append('\n');
         loop.Append("}\n");
+        Constants(loop);
         string text = loop.ToString();
         return
         [
@@ -237,22 +261,12 @@ public sealed partial class SystemGenerator
     /// <summary>
     /// The IL locals the C# compiler declares for <paramref name="text"/> (statements the generator wrote), counted
     /// from above: every declared name (<c>var</c>, a typed or <c>ref</c> local, an <c>out</c> variable, a loop's
-    /// variable) is one, except that a declaration written twice with its type (each width's <c>nint last</c>, its
-    /// <c>ref readonly</c> singleton) is one: in scopes that do not overlap the compiler gives locals of one type one
-    /// slot (it does for other names too, which is why this is from above). A <c>default</c> argument (the method's
-    /// owner) is the one temporary it adds, shared by every statement. Measured exact or above on every job of the
-    /// benchmarks and tests.
+    /// variable) is one, and a <c>default</c> argument (the method's owner) is the one temporary it adds, shared by every
+    /// statement. The compiler keeps a slot per declared local (two of one type in scopes that do not overlap are two)
+    /// and drops one only when its value is used once, right where it is set; so the count is exact or above, measured
+    /// on every job of the benchmarks and tests.
     /// </summary>
-    internal static int Locals(string text)
-    {
-        int count = Defaults.IsMatch(text) ? 1 : 0;
-        var typed = new HashSet<string>();
-        foreach (Match declaration in Declarations.Matches(text))
-            if (Untyped.IsMatch(declaration.Value) || typed.Add(Spaces.Replace(declaration.Value, " "))) count++;
-        return count;
-    }
-
-    private static readonly Regex Spaces = new(@"\s+"), Untyped = new(@"^(?:out\s+)?var\b");
+    internal static int Locals(string text) => Declarations.Matches(text).Count + (Defaults.IsMatch(text) ? 1 : 0);
 
     private static readonly Regex Defaults = new(@"\bdefault\b(?!\s*\()");
 
