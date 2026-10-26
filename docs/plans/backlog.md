@@ -26,8 +26,7 @@ last (`docs-todos.md` collects them meanwhile).
       `tools/inlining.sh`; gate: WorldSimulation / BattleServer not slower. Blocks L2, G1, the call inliner, M0.
 - [x] **Lookup gathers always on: not possible, stay on request** (merged after 932913f): no form beats rows when a
       vector's targets spread over many tables (walk, 64-bit pinned addresses, micro-adaptive choice all measured,
-      D131 rewritten with the widened table and ARM64: rows there). Owner-review entry: a per-entity table id.
-      Revisit after L1 (ordered rows put a vector's targets in one table) and WP0b (lookup jobs are 52-56 IL locals).
+      D131 rewritten with the widened table and ARM64: rows there).
 
 ## Next, in this order
 
@@ -36,6 +35,9 @@ last (`docs-todos.md` collects them meanwhile).
        (`NearestPlayer`, zombie targeting). Right after WP0b merges. Then L4: examples rewritten in it.
        The owner's call on the spread map (nearest 1.06-1.31x, bar 1.5x): re-measure once L1 sorts on its cadence,
        with a flat grid of blocks searched in rings instead of the prototype's box tree; the nearest form stays in L2.
+       The owner's call on Lookup gathers under `SimdMode.Auto` (2026-10-26): once L1 and WP0b have merged, re-measure
+       the micro-adaptive choice (walk vs rows, D131 Considered) with L1's ordered rows and the lookup job under 32
+       IL locals; on by default only if no case is slower. No per-entity table id.
 2. [ ] **Vector loops through the user's own calls** (owner: users should not have to avoid helpers): today a call
        into user code keeps the method scalar (EECS055 "it calls X.Y"); only Math, the generated members (SetX / IsX
        ...), Emit.Add, Lookup reads and view members (Kernel.Views.cs, inlined from source, depth 8) are translated.
