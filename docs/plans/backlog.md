@@ -154,6 +154,12 @@ CI runs the unit tests on ARM64 (b1dbdb0).
       `__d0 = Zero; __d0 |= x` where `__d0 = x` would do. Users read this code (docs "The generator writes" tabs), so
       readability counts once the asm is equal.
 - [ ] Follow-ups: lambda passes do not fuse; lambda + structural change and lambda + view stay scalar.
+- [ ] **From the published roadmap** (`docs/content/roadmap.mdx` "Planned", checked against this file 2026-10-26):
+      push halos for grid neighbors (a chunk hands its edges to its neighbors' halos when they change, D73; with
+      WP5 / WP5b, `feature` + `audit-vector-loops`); the vector-loop forms left for later (masked words in parallel
+      methods, `Maybe<T>` in parallel methods and with narrow lanes, masked words of narrow lanes and wide rows,
+      `Atan2` / `Asin` / `Pow` lowerings; each ships only where it measures faster, `audit-vector-loops`). Not
+      actionable here: Unity support waits for a Unity release on .NET 10; the toolchain item is a standing rule.
 - [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 NativeMemory 2 MiB columns (research
       first); #157 the #138 recommendations; #159 remaining research.
 - [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
@@ -167,6 +173,8 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 - [ ] **Exemplar pass** (#169, `audit-code`): VoxelServer / samples + templates + demo / benchmark worlds + usage
       tests rewritten in the newest recommended forms, A/B on rewritten benchmark worlds.
 - [ ] **Folder restructure** of Core and Generator (`git mv` only), if still wanted (`docs-todos.md`).
+- [ ] **Generated-members scan before the release** (roadmap "Less code through the generator", D26,
+      `audit-generator`): the API, the battle server and the guides scanned for lines users write twice.
 - [ ] **Docs pass** (#141): everything in `docs-todos.md`; DocCheck (296 problems) and ApiDocs (46) to 0; decision
       record for the 8 declined declarations; roadmap item for inner loops; analyzer range EECS002-103.
 - [ ] `tools/bench.sh --site --sync`, README numbers, `verify`, master. The owner cuts the release.
