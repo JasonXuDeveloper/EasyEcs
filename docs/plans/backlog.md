@@ -218,7 +218,11 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 
 - [ ] **Exemplar pass** (#169, `audit-code`): VoxelServer / samples + templates + demo / benchmark worlds + usage
       tests rewritten in the newest recommended forms, A/B on rewritten benchmark worlds.
-- [ ] **Folder restructure** of Core and Generator (`git mv` only), if still wanted (`docs-todos.md`).
+- [ ] **Directory restructure of the whole repository** (owner, 2026-10-26: "调整整个项目的目录结构"): `git mv` only,
+  after feat-prefetch-all and feat-locality-pairs merge; the layout plan (old → new per file, every path reference)
+  goes to the owner first.
+- [ ] **VoxelServer rewritten with every high-performance feature, the least user code** (owner, 2026-10-26): after
+  L2 and the prefetch work merge; per-system plan first (features unused, lines saved, generator gaps it exposes).
 - [ ] **Generated-members scan before the release** (roadmap "Less code through the generator", D26,
       `audit-generator`): the API, the battle server and the guides scanned for lines users write twice.
 - [ ] **Docs pass** (#141): everything in `docs-todos.md`; DocCheck (296 problems) and ApiDocs (46) to 0; decision
