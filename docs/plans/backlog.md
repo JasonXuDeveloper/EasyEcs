@@ -28,6 +28,9 @@ last (`docs-todos.md` collects them meanwhile).
 - [ ] **AMAC prefetch for lookup chases, then batch probes re-measured at 16M keys** (`borrowed-ideas.md` item 1;
       worktree agent, branch `feat-amac`): core only, generator changes listed for after WP0b.
 
+- [ ] **ARM64 parity** (worktree agent, branch `feat-arm-parity`): wide components through NEON TBL, a repo-wide audit
+      for x86-only paths, the ARM64 CI job asserting which forms run as vectors. (Interleaved LD2-4 / ST2-4: a296ecb.)
+
 The owner's order (2026-10-26): every code change before any docs (generator cost and ARM64 parity included).
 CI runs the unit tests on ARM64 (b1dbdb0).
 
@@ -44,7 +47,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        ARM64 (owner's M4 run, `locality.md` 6.1a): crowded maps 2-8x, sparse maps only 1.1-2.1x while neighbor lists
        reach 2.5-3.4x: L2 ships clusters there too (faster is kept, owner) and optimizes: 4-row blocks and the
        neighbor-list form on ARM64, picked by density; never a slower case (no re-sort every tick on sparse maps).
-2. [ ] **ARM64 parity of the generated forms** (owner, 2026-10-26: every generated SIMD path runs on ARM64; table in
+2. [ ] **ARM64 parity of the generated forms** (running, see above) (owner, 2026-10-26: every generated SIMD path runs on ARM64; table in
        `audit-vector-loops`, "Every vector form runs on ARM64 too"): an ARM64 CI job first (unit tests on GitHub's
        ARM64 Linux runner, `__loops` lines printed), then multi-field / `Vector2/3/4` components through LD2-4 / ST2-4,
        then wide components through TBL. Touches SystemGenerator / Kernel: after WP0b, beside L2. Proof: tests with
