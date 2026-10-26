@@ -1,23 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.Lanes" source="94a24f3a96a8">
+  <member name="T:EasyEcs.Lanes" source="2a02f9025062">
     <summary>
       批处理方法的流压缩，在 CPU 上做 GPU 的 ballot 和压缩：一次向量比较得出通道掩码
       （<c>Vector256.LessThan(hp, limit).ExtractMostSignificantBits()</c>：CUDA 的 <c>__ballot_sync</c>；它的
       <c>__popc</c> 是 <see cref="M:System.Numerics.BitOperations.PopCount(System.UInt64)" />），<see cref="M:EasyEcs.Lanes.Compact``1(System.ReadOnlySpan{``0},System.UInt64,System.Span{``0})" />
       把选中的元素紧挨着写出：批处理方法选中的行的 id（<c>entities.Ids</c>）、它们的值、它们的下标。有 AVX-512 时，4 字节或 8 字节的通道一次移动
-      16 个或 8 个（<c>VPCOMPRESSD</c> / <c>VPCOMPRESSQ</c>）；否则，以及其他大小的元素，一次一个，每个元素没有分支。
+      16 个或 8 个（<c>VPCOMPRESSD</c> / <c>VPCOMPRESSQ</c>）；有 AVX2 时一次 8 个或 4 个，查置换表（Polychroniou、Raghavan 和 Ross
+      的选择性存储：每个向量一次重排，由掩码里这个向量的那几位选出）；有 128 位向量时（ARM64 上 NEON 的 <c>TBL</c>、SSSE3 的
+      <c>PSHUFB</c>），4 字节的通道一次 4 个，查字节重排表；否则，以及其他大小的元素，一次一个，每个元素没有分支。
     </summary>
   </member>
-  <member name="M:EasyEcs.Lanes.Compact``1(System.ReadOnlySpan{``0},System.UInt64,System.Span{``0})" source="29595bf34163">
+  <member name="M:EasyEcs.Lanes.Compact``1(System.ReadOnlySpan{``0},System.UInt64,System.Span{``0})" source="686c3d99bde8">
     <summary>
       把 <paramref name="source" /> 中在 <paramref name="mask" /> 里置位的元素（第 <c>i</c> 位选中 <c>source[i]</c>，所以最多 64 个）
-      按顺序写到 <paramref name="destination" /> 开头，返回写了几个：<c>PopCount(mask)</c>。只读选中的元素，只写这么多个。有 AVX-512 时
-      4 字节或 8 字节的元素为 O(64 / 每个向量的通道数)，否则 O(选中数)；不分配。
+      按顺序写到 <paramref name="destination" /> 开头，返回写了几个：<c>PopCount(mask)</c>。不读 <paramref name="source" />
+      末尾之后的内容，只写这么多个元素。有 AVX-512 或 AVX2 时 4 字节或 8 字节的元素、有 SSSE3 或 ARM64 的 NEON 时 4 字节的元素为
+      O(64 / 每个向量的通道数)，否则 O(选中数)；零分配。
     </summary>
     <param name="source">从中挑选的元素：批处理方法某个 span 或它的 <c>EntitySpan.Ids</c> 的一段。</param>
     <param name="mask">选中的元素；<c>source.Length</c> 及之后的位不能置位。</param>
     <param name="destination">选中元素写入的位置；长度至少 <c>PopCount(mask)</c>。</param>
     <returns>写入的元素个数。</returns>
     <exception cref="T:System.ArgumentException"><paramref name="mask" /> 的某一位没有对应 <paramref name="source" /> 的元素，或 <paramref name="destination" /> 太短。</exception>
+  </member>
+  <member name="M:EasyEcs.Lanes.Rows(System.UInt64,System.Int32,System.Span{System.Int32})" source="a75d56dada04">
+    <summary>
+      把 <paramref name="mask" /> 选中的行号（<paramref name="first" /> 加上每个置位的下标）按顺序写到 <paramref name="destination" />
+      开头，返回写了几个：向量条件通过的一个字的行变成行列表，生成的循环和核心不管在什么机器上都用这一次调用写出它
+      （对 0 到 63 这些数做 <see cref="M:EasyEcs.Lanes.Compact``1(System.ReadOnlySpan{``0},System.UInt64,System.Span{``0})" />，再按向量加上 <paramref name="first" />）。
+      O(64 / 每个向量的通道数)；零分配。
+    </summary>
+    <param name="mask">这个字里选中的行：第 <c>i</c> 位是第 <paramref name="first" /> + i 行。</param>
+    <param name="first">这个字的第一行。</param>
+    <param name="destination">行号写到这里；长度至少 <c>PopCount(mask)</c>。</param>
+    <returns>写入的行数。</returns>
+    <exception cref="T:System.ArgumentException"><paramref name="destination" /> 太短。</exception>
   </member>
 </doc>

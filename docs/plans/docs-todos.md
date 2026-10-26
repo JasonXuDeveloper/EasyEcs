@@ -236,3 +236,20 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
   method or mark it SimdMode.Off); Lookup gathers on Require.
 - api.mdx: Lookup.Resolve only if listed (EditorBrowsable Never).
 - rebuild docs/public/demo (BounceSystem / FadeSystem got SimdMode.Off).
+
+## feat-locality-core (L1 + L3 of locality.md: D135, D136)
+- New guide page (or a section of high-performance.mdx + zh): ordered tables. That the order is inferred for pair
+  methods (no attribute), `[OrderBy]` as the override (non-spatial keys), `Interval` / `Margin` (GROMACS's nstlist and
+  buffer), `SortRows<T>`, what a sort costs (RowOrderBenchmark: BenchTable), `world.Blocks<T>()` / `entities.Blocks` /
+  `RowBlocks.Pairs` for hand-written searches until the pair form ships, refs and handles ending at a sort (like any
+  structural change), saves keeping the row order and redrawing the boxes at the next update.
+- refs-and-await.mdx + zh: a sort is a structural change at the start of an update (re-acquire refs after it).
+- saves.mdx + zh, snapshots.mdx + zh: the row order is kept, boxes redrawn (D135).
+- analyzer.mdx + zh: EECS104 (section, table row; EECS range) and EECS041's list (SortRows, OrderRows).
+- high-performance.mdx + zh: Lookup targets ordered by their target read near rows (LookupOrderBenchmark: Chase 2x,
+  64-table gathers 4.6x at 1M); `Lanes.Rows` for a row list from a mask; Compact on every ISA (NEON, SSSE3).
+- architecture.mdx + zh: RowOrder in the table diagram (Archetype.Order, Permute), the block side array.
+- glossary + zh: ordered table (有序表), block (块, not the parallel chunk), box (包围盒), margin (余量), cadence (节奏);
+  tools/ApiDocs/zh/README.md glossary gets the same rows.
+- changelog / README What's new: ordered tables (the read path), Lanes.Rows, Compact on ARM64.
+- Benchmarks into bench.json: RowOrder, LookupOrder, Pairs (Core*), Compress (CoreCompact) after the reference run.

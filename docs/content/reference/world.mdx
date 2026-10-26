@@ -152,6 +152,16 @@ Whether any alive entity has all of `T1, T2`. O(matching archetypes), plus O(row
 
 **Complexity** ([API table](/en/docs/api)): O(M + S / 64) worst
 
+### `Blocks` [#blocks]
+
+```csharp
+public World.OrderedTables Blocks<T>() where T : struct, IComponent;
+```
+
+The blocks of every table ordered by `T` (an inferred order or [[OrderBy]](/en/docs/reference/orderbyattribute)), one [`RowBlocks`](/en/docs/reference/rowblocks) per table: `foreach (var blocks in world.Blocks<Position>())`. None for a component no table is ordered by. A search over the boxes finds the rows near a point or a box without visiting the others. O(1) to start, O(tables) to walk; allocation-free.
+
+**Complexity** ([API table](/en/docs/api)): O(1), O(tables) to walk
+
 ### `Capture` [#capture]
 
 ```csharp
@@ -1171,6 +1181,16 @@ public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent;
 Stable handle to singleton `T`; throws if it was not added: resolve it once, then read and write [`SingletonRef.Value`](/en/docs/reference/singletonref#value) without a lookup. Generated `[ForEach]` jobs resolve singleton parameters through it once per pass, so a system whose singleton was never set fails on its first run. O(1).
 
 **Complexity** ([API table](/en/docs/api)): O(1)
+
+### `SortRows` [#sortrows]
+
+```csharp
+public void SortRows<T>() where T : struct, IComponent;
+```
+
+Sort every table holding `T` by its key now, whatever their cadence: the rows in key order, the boxes of their blocks drawn again (an order inferred for a pair method, `World.OrderRows`, or [[OrderBy]](/en/docs/reference/orderbyattribute)). The next sort of each table comes its interval after this one. For a component no table is ordered by it does nothing. Rows move, so refs into the tables, handles' cached rows and marked rows end here, as at any structural change. Owner thread only, between passes (throws during one). O(rows × (key bytes + columns)) of the tables that were out of order, O(rows) for the others; allocation-free in steady state.
+
+**Complexity** ([API table](/en/docs/api)): O(N × (K + C)) when rows move, O(N) when they are in order already
 
 ### `System` [#system]
 

@@ -32,6 +32,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`MaxAttribute`](/en/docs/reference/maxattribute) | A field of a reduction that keeps the larger value: Identity the type's MinValue (-∞ for float and double), Combine Math.Max(left, right). |
 | [`MinAttribute`](/en/docs/reference/minattribute) | A field of a reduction that keeps the smaller value: Identity the type's MaxValue (+∞ for float and double), Combine Math.Min(left, right). |
 | [`NotSavedAttribute`](/en/docs/reference/notsavedattribute) | A component or singleton no save holds: runtime state (a connection, a cache, a handle to a service) that a restart rebuilds. |
+| [`OrderByAttribute`](/en/docs/reference/orderbyattribute) | The key every world keeps the component's tables ordered by, and the point the boxes of their blocks cover. |
 | [`OrderedIndexExtensions`](/en/docs/reference/orderedindexextensions) | Ordered walks of a value index whose key is comparable (a score, a deadline, a level): ranges and sorted iteration for leaderboards, timers and matchmaking brackets. |
 | [`Prefab`](/en/docs/reference/prefab) | A recipe for entities: a set of component values that belongs to no world, so no query ever sees it. |
 | [`PrefabAttribute`](/en/docs/reference/prefabattribute) | A Prefab declared as the components its entities start with: a partial struct with one field per component, each field's initializer its default value: [Prefab] public partial struct Goblin \{ public Health Health = new(30); public Position Position; \}. |
@@ -67,6 +68,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 
 | Type | Summary |
 |---|---|
+| [`BlockPair`](/en/docs/reference/blockpair) | Two blocks whose boxes are near (RowBlocks.Pairs): the rows of BlockPair.First against the rows of BlockPair.Second, which may be the same block. |
 | [`ChildOf`](/en/docs/reference/childof) | The hierarchy relation: the entity is a child of ChildOf.Parent. |
 | [`ColumnInfo`](/en/docs/reference/columninfo) | A column of a table (TableInfo). |
 | [`ComponentSet`](/en/docs/reference/componentset) | A set of component and singleton types, built once and kept (a static readonly field): the components a save writes (World.SaveEntitiesWith), the record of what persists without the runtime state around it; or, for a restart, the types a whole-world save leaves out (World.SaveWithout) and the singletons a load keeps (World.LoadKeeping). |
@@ -92,6 +94,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`Reduce<T>`](/en/docs/reference/reduce) | A reduction of a [ForEach] pass into singleton T (OpenMP's reduction, MPI's Allreduce), taken by ref: static void Count(in Health h, ref Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;. |
 | [`RelationIndex<T>.Sources`](/en/docs/reference/relationindex-sources) | Enumerates the entities linking to one target (foreach), once per link. |
 | [`Retired`](/en/docs/reference/retired) | Tag of a retired entity: Destroy found ICleanupComponents on it, so it took the other components away and kept the entity alive until its last cleanup component is removed (then the entity is freed: destroyed). |
+| [`RowBlocks`](/en/docs/reference/rowblocks) | The blocks of one ordered table (an order inferred for a pair method, or [OrderBy]): its rows in key order, cut into blocks of RowBlocks.Size rows, each with an axis-aligned box over the declared point of its rows, widened by the margin. |
 | [`Scratch<T>`](/en/docs/reference/scratch) | A [ForEach] method's working memory on the thread running it (OpenMP's threadprivate): a list of neighbors, the open set of a path search, a buffer to fill. |
 | [`SingletonRef<T>`](/en/docs/reference/singletonref) | Handle to one world's singleton T. |
 | [`SystemAccess`](/en/docs/reference/systemaccess) | The data a system reads and writes, declared once when the system is added. |
@@ -109,6 +112,8 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`ValueIndex<T, TKey>.Ordered`](/en/docs/reference/valueindex-ordered) | Enumerates entities in key order (foreach): every entity of a key, then the next key. |
 | [`World.DescendantWalk`](/en/docs/reference/world-descendantwalk) | A depth-first walk of World.Descendants: a stack of the child lists still being read, given back to the world by World.DescendantWalk.Dispose (foreach calls it). |
 | [`World.EntityEnumerator`](/en/docs/reference/world-entityenumerator) | Enumerates alive entities in id order; ids beyond the capacity captured at start are not visited. |
+| [`World.OrderedTables`](/en/docs/reference/world-orderedtables) | The tables ordered by one component (World.Blocks), each as its RowBlocks. |
+| [`World.OrderedTables.Enumerator`](/en/docs/reference/world-orderedtables-enumerator) | Walks the tables ordered by the component. |
 | [`World.Subtree`](/en/docs/reference/world-subtree) | The descendants of an entity (World.Descendants): each foreach walks them anew. |
 
 ## Interfaces
@@ -127,6 +132,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`IGroup`](/en/docs/reference/igroup) | Marks a component whose value splits tables: in a world that called World.GroupBy, entities with different IGroup.Groups live in different tables, so a query of one group (QueryFilter.InGroup) walks only its own rows, contiguous in memory (a zone, a map, a match, a team). |
 | [`IIndexed<TKey>`](/en/docs/reference/iindexed) | A component whose IIndexed.Key the world indexes: world.Index&lt;T, TKey&gt;().Find(key) enumerates the entities whose TKey equals a value (an item's owner, a player's name, a cell of a grid). |
 | [`INoStructuralChanges`](/en/docs/reference/inostructuralchanges) | Marks a ForEach job that makes no structural change (no create/destroy/add/remove/set on any entity of the world it iterates). |
+| [`IOrderKey<TKey>`](/en/docs/reference/iorderkey) | A component whose tables keep their rows in the order of IOrderKey.OrderKey, with a box per block of rows (8, or 4 on ARM64) over IOrderKey.BoxPoint (RowBlocks). |
 | [`IReduction<T>`](/en/docs/reference/ireduction) | How values of T combine: an associative IReduction.Combine and its IReduction.Identity, which changes nothing it is combined with (0 for a sum, float.MaxValue for a minimum). |
 | [`IRelation`](/en/docs/reference/irelation) | An element of a DynamicBuffer that links its entity to IRelation.Target: an entity holds any number of links of one kind (the members of a party, the items a merchant offers, the units a buff applies to), and World.Relations finds the entities linking to a target. |
 | [`ISingletonComponent`](/en/docs/reference/isingletoncomponent) | Marks a struct as a world singleton: exactly one value per world (clock, configuration, shared state). |

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.World.OrderedTables" source="c63a08fa7153">
+    <summary>
+      按某个组件排序的表（<see cref="M:EasyEcs.World.Blocks``1" />），每张表给出它的 <see cref="T:EasyEcs.RowBlocks" />。
+      用 <c>foreach</c> 遍历；到下一次结构变更前有效。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.OrderedTables.GetEnumerator" source="bc81fbe65270">
+    <summary>遍历这些表的枚举器。</summary>
+  </member>
+</doc>

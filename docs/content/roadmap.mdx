@@ -44,6 +44,15 @@ edges of each flowing chunk's neighbors into its tile on every step (`Tile<TCell
 edges to its neighbors' halos when they change, so a step reads only its own components and a chunk whose
 neighbors are still holds nothing to copy ([D73](/en/docs/decisions#d73-survey-items-not-added)).
 
+### Pairs and nearest searches from plain code [#pair-form]
+
+A `[ForEach]` method that compares a row's position with another row's within a cutoff (a separation push, a
+target in range, the nearest one) runs over 8 x 8 rows at a time (4 x 4 on ARM64) without the user writing anything
+else: the generator infers the order of the tables from the distance test, and the core keeps their rows sorted along
+a Morton curve with a box per block of 8 rows (4 on ARM64; [D135](/en/docs/decisions#d135-ordered-rows), shipped), the pairs of
+blocks that can meet found from the boxes. Next: the generated pair form itself, the nearest form, and the samples'
+searches rewritten in it.
+
 ### Vector loops: the forms left for later [#vector-loops-left]
 
 A `[ForEach]` method gets a vector loop on one thread and in parallel, with narrow lanes, struct values, `Maybe<T>`

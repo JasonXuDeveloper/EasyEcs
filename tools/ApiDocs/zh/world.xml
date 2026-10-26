@@ -677,4 +677,20 @@
     <param name="body">写在调用处的静态 lambda。</param>
     <exception cref="T:System.InvalidOperationException">生成器没有编译这处调用（EECS095 说明原因）。</exception>
   </member>
+  <member name="M:EasyEcs.World.Blocks``1" source="a2da7f764630">
+    <summary>
+      按 <typeparamref name="T" /> 排序的每张表的块（推断出的顺序或 <see cref="T:EasyEcs.OrderByAttribute">[OrderBy]</see>），
+      每张表一个 <see cref="T:EasyEcs.RowBlocks" />：<c>foreach (var blocks in world.Blocks&lt;Position&gt;())</c>。没有表按这个组件排序时一个也没有。
+      在包围盒上搜索，不用访问其他行就能找到某个点或某个盒子附近的行。开始 O(1)，遍历 O(表数)；零分配。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.SortRows``1" source="b75e0df0738a">
+    <summary>
+      不管节奏，现在就按键排序含 <typeparamref name="T" /> 的每张表：行按键的顺序排好，重新画出各块的包围盒（成对方法推断出的顺序
+      <see cref="M:EasyEcs.World.OrderRows``2(System.Int32,System.Single,System.Int32,System.Single,System.Int32)" />，或
+      <see cref="T:EasyEcs.OrderByAttribute">[OrderBy]</see>）。每张表的下一次排序从这次起再过它的间隔。没有表按这个组件排序时什么也不做。
+      行会移动，所以指向这些表的引用、句柄缓存的行和标记的行到这里失效，和任何结构变更一样。只能在所有者线程、两次遍历之间调用
+      （遍历中调用抛出异常）。原本无序的表 O(行数 × (键字节数 + 列数))，其余 O(行数)；稳定状态零分配。
+    </summary>
+  </member>
 </doc>

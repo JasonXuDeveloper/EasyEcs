@@ -10,7 +10,7 @@ description: "批处理方法的流压缩，在 CPU 上做 GPU 的 ballot 和压
 public static class Lanes
 ```
 
-批处理方法的流压缩，在 CPU 上做 GPU 的 ballot 和压缩：一次向量比较得出通道掩码（`Vector256.LessThan(hp, limit).ExtractMostSignificantBits()`：CUDA 的 `__ballot_sync`；它的 `__popc` 是 `PopCount`），[`Lanes.Compact`](/zh/docs/reference/lanes#compact) 把选中的元素紧挨着写出：批处理方法选中的行的 id（`entities.Ids`）、它们的值、它们的下标。有 AVX-512 时，4 字节或 8 字节的通道一次移动 16 个或 8 个（`VPCOMPRESSD` / `VPCOMPRESSQ`）；否则，以及其他大小的元素，一次一个，每个元素没有分支。
+批处理方法的流压缩，在 CPU 上做 GPU 的 ballot 和压缩：一次向量比较得出通道掩码（`Vector256.LessThan(hp, limit).ExtractMostSignificantBits()`：CUDA 的 `__ballot_sync`；它的 `__popc` 是 `PopCount`），[`Lanes.Compact`](/zh/docs/reference/lanes#compact) 把选中的元素紧挨着写出：批处理方法选中的行的 id（`entities.Ids`）、它们的值、它们的下标。有 AVX-512 时，4 字节或 8 字节的通道一次移动 16 个或 8 个（`VPCOMPRESSD` / `VPCOMPRESSQ`）；有 AVX2 时一次 8 个或 4 个，查置换表（Polychroniou、Raghavan 和 Ross 的选择性存储：每个向量一次重排，由掩码里这个向量的那几位选出）；有 128 位向量时（ARM64 上 NEON 的 `TBL`、SSSE3 的 `PSHUFB`），4 字节的通道一次 4 个，查字节重排表；否则，以及其他大小的元素，一次一个，每个元素没有分支。
 
 ## 方法 [#methods]
 
@@ -20,7 +20,7 @@ public static class Lanes
 public static int Compact<T>(ReadOnlySpan<T> source, ulong mask, Span<T> destination) where T : unmanaged;
 ```
 
-把 `source` 中在 `mask` 里置位的元素（第 `i` 位选中 `source[i]`，所以最多 64 个）按顺序写到 `destination` 开头，返回写了几个：`PopCount(mask)`。只读选中的元素，只写这么多个。有 AVX-512 时 4 字节或 8 字节的元素为 O(64 / 每个向量的通道数)，否则 O(选中数)；不分配。
+把 `source` 中在 `mask` 里置位的元素（第 `i` 位选中 `source[i]`，所以最多 64 个）按顺序写到 `destination` 开头，返回写了几个：`PopCount(mask)`。不读 `source` 末尾之后的内容，只写这么多个元素。有 AVX-512 或 AVX2 时 4 字节或 8 字节的元素、有 SSSE3 或 ARM64 的 NEON 时 4 字节的元素为 O(64 / 每个向量的通道数)，否则 O(选中数)；零分配。
 
 **参数**
 
@@ -34,4 +34,26 @@ public static int Compact<T>(ReadOnlySpan<T> source, ulong mask, Span<T> destina
 
 - `ArgumentException`：`mask` 的某一位没有对应 `source` 的元素，或 `destination` 太短。
 
-**复杂度**（[API 表](/zh/docs/api)）：O(1)：最多 64 个元素；有 AVX-512 时，8 字节或 4 字节的元素为 8 步或 4 步向量操作；否则每个选中元素一步，选中超过 12 个时每个元素一步，直到最后一个选中的元素
+**复杂度**（[API 表](/zh/docs/api)）：O(1)：最多 64 个元素；8 字节或 4 字节的元素，AVX-512 为 8 步或 4 步向量操作，没有选中元素的步跳过；没有 AVX-512 时，选中不超过 12 个就每个选中元素一步，否则 AVX2 为 16 步或 8 步，128 位向量（ARM64 的 NEON、SSSE3）对 4 字节元素为 16 步，其余情况每个元素一步，直到最后一个选中的元素
+
+### `Rows` [#rows]
+
+```csharp
+public static int Rows(ulong mask, int first, Span<int> destination);
+```
+
+把 `mask` 选中的行号（`first` 加上每个置位的下标）按顺序写到 `destination` 开头，返回写了几个：向量条件通过的一个字的行变成行列表，生成的循环和核心不管在什么机器上都用这一次调用写出它（对 0 到 63 这些数做 [`Lanes.Compact`](/zh/docs/reference/lanes#compact)，再按向量加上 `first`）。O(64 / 每个向量的通道数)；零分配。
+
+**参数**
+
+- `mask`：这个字里选中的行：第 `i` 位是第 `first` + i 行。
+- `first`：这个字的第一行。
+- `destination`：行号写到这里；长度至少 `PopCount(mask)`。
+
+**返回值**：写入的行数。
+
+**异常**
+
+- `ArgumentException`：`destination` 太短。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(1)：对 0 到 63 这些数做 `Compact`，再按向量加上 `first`

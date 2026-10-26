@@ -84,11 +84,10 @@ Each result goes into section 6 with its numbers; the failed ones go to `docs/ow
 
 ## 5. Work packages after phase 0 (only those whose bar was met)
 
-- **L1** ordered rows + blocks (core, `StorageVersion`, saves keep or drop the order, the analyzer's rule for a key
-  that is not a plain value), tests: order after churn, refs across a re-sort, parallel passes, recycled ids.
+- **L1** ordered rows + blocks: built (branch `feat-locality-core`, D135; what L2 reads is in 6.5).
 - **L2** pair form (generator + Kernel, EECS055 reasons for bodies it cannot take, a code fix from a hand-written
   grid search where one is recognizable), tests bit for bit against the row loop.
-- **L3** operators (core), each one where its benchmark said.
+- **L3** compress: built (branch `feat-locality-core`, D136). Batch probes are not built (6.3).
 - **L4** examples: `ZombieTargetSystem`, `NearestPlayer`, the AOI rewritten in the new forms (exemplar pass), the
   battle server page.
 - Decision records: one per package (ordered rows, the pair form, the operators), with what phase 0 dropped.
@@ -334,6 +333,22 @@ measured against scalar group prefetching (`borrowed-ideas.md` item 1) rather th
 - **L3 (compress only):** `CompressStore` where AVX-512VL is present and the permutation table on AVX2 where the core
   turns a mask into rows (marked rows, structural changes from a vector mask, Emit), replacing the per-64
   `Lanes.Compact` walk. Batch probes are not built.
+
+### 6.5 What L2 builds on (L1 and L3 as built)
+
+- **The order.** The pair form's setup calls `World.OrderRows<T, TOrder>(axes, cell, interval, margin)` (internal)
+  for the component it reads positions from: `TOrder : IRowOrder<T>` returns `RowKeys.Morton` of the position
+  quantized by the cutoff and the point the boxes cover. The generator writes that struct; `[OrderBy]` only overrides.
+- **Blocks.** `RowBlocks.Size` rows (8 with `Vector256` hardware, 4 otherwise), so the kernel is one register per
+  axis on every machine: L2 writes the kernel over `Size`, never a fixed 8. `world.Blocks<T>()` / `EntitySpan.Blocks`
+  give the boxes, a block's rows, the columns, ids and presence; `SortedRows` bounds the blocks, and rows past it
+  (created since the sort) need the row loop.
+- **Block pairs.** `RowBlocks.Pairs(reach, into)` / `Pairs(other, reach, into)` (a sweep over the boxes) rebuilt on
+  the sort's cadence; the margin keeps them valid between sorts.
+- **The kernel.** `benchmarks/EasyEcs.Benchmark/Locality/CoreClusters.cs` is the body L2 generates: the 8 x 8 step
+  over the table's own columns in sorted order, within 0-15 % of the prototype over copied side arrays, and 11-14x
+  (crowd) / 5-6x (sparse) faster than phase 0's grid through lookups with the sort and the pairs every 10 ticks.
+- **Row lists.** `Lanes.Rows(mask, first, destination)` for any row list the generated code needs.
 
 ## 7. Order against the work already running
 
