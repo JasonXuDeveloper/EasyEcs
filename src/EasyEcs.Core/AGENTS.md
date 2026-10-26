@@ -44,7 +44,9 @@ Lookup.cs                    Lookup<T> + LookupExtensions: read-only lookups of 
                              [ForEach] method, parallel ones included; the system reads T, so no writer shares its stage
 LookupLanes.cs               the reads of other entities in generated vector loops (D131): Lookup<T>.Resolve gathers the
                              lanes' records (AVX2) into a presence mask and the one table their entities live in (false:
-                             the vector's rows run the method), Gather the fields from that table's column
+                             the vector's rows run the method), Gather the fields from that table's column;
+                             PrefetchRecord / PrefetchRow (Lookup<T>.Prefetch / PrefetchRow: the two stages of a
+                             prefetched chase, x86 only; borrowed-ideas.md item 1)
 Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
                              Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbors found by generated code,
                              TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,

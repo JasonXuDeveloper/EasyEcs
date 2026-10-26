@@ -67,6 +67,55 @@ public static unsafe class LookupLanes
     }
 
     /// <summary>
+    /// Whether <see cref="Lookup{T}.Prefetch(EntityId)"/> and <see cref="Lookup{T}.PrefetchRow(EntityId)"/> issue
+    /// anything: x86's <c>PREFETCHT0</c>. .NET 10 has no prefetch on ARM64 but SVE's (not used), so there they do
+    /// nothing and the reads that follow stall as they do without them.
+    /// </summary>
+    public static bool CanPrefetch
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Sse.IsSupported;
+    }
+
+    /// <summary>
+    /// Stage 1 of a chase (group prefetching, AMAC): the record of entity <paramref name="index"/> into the cache, so the
+    /// lookup or <see cref="PrefetchRow"/> that reaches it a few rows later finds it there. An index past the records
+    /// prefetches nothing. A prefetch never faults: the address of an element of a managed array a collection moves
+    /// later only wastes the prefetch.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void PrefetchRecord(World world, int index)
+    {
+        if (!Sse.IsSupported) return;
+        var meta = world.Meta;
+        if ((uint)index < (uint)meta.Length)
+            Sse.Prefetch0(Unsafe.AsPointer(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(meta), index)));
+    }
+
+    /// <summary>
+    /// Stage 2 of a chase: the row of entity <paramref name="index"/> in its table's column of component
+    /// <paramref name="bit"/> (<paramref name="size"/> bytes a row) into the cache, from its record (in cache once stage 1
+    /// ran for it). Nothing for a free record, a table without the column, or a managed column. The version is not
+    /// checked: a stale id prefetches a row of the entity that took its record, which only wastes the prefetch.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void PrefetchRow(World world, int index, uint bit, int size)
+    {
+        if (!Sse.IsSupported) return;
+        var meta = world.Meta;
+        if ((uint)index >= (uint)meta.Length) return;
+        ref var record = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(meta), index);
+        var table = record.Archetype;
+        if (table == null) return;
+        var map = table.ByBit;
+        if (bit >= (uint)map.Length) return;
+        // An unmanaged column's row 0 (pinned, Archetype.Lookup.Rows), 0 for a managed or missing one; a record's slot
+        // is a row of its table, below the column's length.
+        nint rows = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(map), bit).Rows;
+        if (rows != 0) Sse.Prefetch0((void*)(rows + (nint)record.Slot * size));
+    }
+
+    /// <summary>
     /// After a vector that was not resolved, the vectors that follow it to send to the method without trying:
     /// 3, 15, then 63 after misses in a row, none once one resolves. A vector whose entities live in several tables costs
     /// its gathers before its rows run one at a time; where most do (targets spread over many tables), trying each made
