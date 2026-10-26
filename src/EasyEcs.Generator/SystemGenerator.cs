@@ -48,7 +48,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             .WithTrackingName("SystemUpdates");
         // A system's code is reached only through the set's module initializer: implementation output, which IDEs skip
         // while typing. Entry points of other types are API the user's code calls.
-        context.RegisterImplementationSourceOutput(updates.Where(static m => m.Owner.IsSystem), static (spc, model) => Add(spc, model));
+        // Its vector loops too: they read the methods' bodies and their helpers' (SystemGenerator.Kernels.cs).
+        var systemUpdates = WithLoops(context, updates.Where(static m => m.Owner.IsSystem));
+        context.RegisterImplementationSourceOutput(systemUpdates, static (spc, model) => Add(spc, model));
         context.RegisterSourceOutput(updates.Where(static m => !m.Owner.IsSystem), static (spc, model) => Add(spc, model));
 
         // The assembly's system set: its non-generic systems and the closed generic systems it names (its own generic
@@ -65,7 +67,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 .OrderBy(e => e!.System, System.StringComparer.Ordinal).ToArray()!))
             .WithTrackingName("SystemSet");
         // Pairs of systems that may share one walk (SystemGenerator.Fusion.cs): their code, and the set's declarations.
-        var fusions = FusionPairs(context, updates);
+        var fusions = FusionPairs(context, systemUpdates);
         context.RegisterImplementationSourceOutput(fusions, static (spc, pair) => AddFusion(spc, pair));
         var declared = fusions.Select(static (p, _) => new SetFusion(p.First.Owner.FullName, p.Second.Owner.FullName, p.FullCodeName))
             .Collect().WithTrackingName("SetFusions");
@@ -1186,18 +1188,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     Slices = Symbols.Slices(method), ChunkRows = Symbols.ChunkRows(method), Identifies = identifies,
                     One = Symbols.IsForEntity(method), Consume = Symbols.IsConsume(method),
                     // Kernel.Vectorize decides alone (static, stable, its body; in parallel too): the analyzer reports its reasons.
-                    // One entity has no run of rows to vectorize.
-                    Simd = Symbols.IsForEntity(method) ? null : Kernel.Vectorize(method, syntax, model, parallel ? static (i, kind) => kind switch
-                    {
-                        Symbols.ParamKind.Singleton => $"s{i}.Value", // a parallel job's SingletonRef
-                        Symbols.ParamKind.Reduction => $"l{i}",
-                        _ => $"x{i}",
-                    } : static (i, kind) => kind switch
-                    {
-                        Symbols.ParamKind.Singleton => $"s{i}",
-                        Symbols.ParamKind.Reduction => $"l{i}", // the run's partial result, a local of the batch job
-                        _ => $"x{i}",
-                    }, ct, out scalar),
+                    // One entity has no run of rows to vectorize; a system's loop is its implementation's (SystemLoops).
+                    Simd = Symbols.IsForEntity(method) || !outside ? null : VectorLoop(method, syntax, model, parallel, ct, out scalar),
                     Scalar = scalar ?? "",
                     // Reads of other entities at the row's ids, by EntityId (a keyed lookup finds through its index).
                     Chases = Symbols.IsForEntity(method) || parallel ? new([])
@@ -1206,6 +1198,24 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     Fusion = outside ? null : FusionSide.Of(method, stable, identifies, parallel),
                 };
         }
+
+        /// <summary>
+        /// The vector loop of a [ForEach] method (Kernel.Vectorize, its helpers inlined), with the job fields its uniform
+        /// values are read from, or null with the reason it runs one row at a time.
+        /// </summary>
+        public static Kernel.Code? VectorLoop(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, bool parallel,
+            System.Threading.CancellationToken ct, out string? scalar) =>
+            Kernel.Vectorize(method, syntax, model, parallel ? static (i, kind) => kind switch
+            {
+                Symbols.ParamKind.Singleton => $"s{i}.Value", // a parallel job's SingletonRef
+                Symbols.ParamKind.Reduction => $"l{i}",
+                _ => $"x{i}",
+            } : static (i, kind) => kind switch
+            {
+                Symbols.ParamKind.Singleton => $"s{i}",
+                Symbols.ParamKind.Reduction => $"l{i}", // the run's partial result, a local of the batch job
+                _ => $"x{i}",
+            }, ct, out scalar);
 
         /// <summary>The body has a loop or a call (syntax only: a call's target is not resolved).</summary>
         private static bool LoopsOrCalls(MethodDeclarationSyntax syntax) =>

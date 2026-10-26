@@ -12,7 +12,8 @@ namespace EasyEcs.Benchmark;
 /// job the generator wrote before it vectorized such methods: RyuJIT does not vectorize loops itself), as a batch method
 /// written by hand with <c>Vector&lt;float&gt;</c> (<c>HandWritten</c>) and with <c>Vector512&lt;float&gt;</c>
 /// (<c>HandWritten512</c>, the widest the hardware may have), and as the generator's vector loop of the same per-row
-/// method (<c>Generated</c>, Kernel.cs). <c>Step</c> computes (a clamp, a branch on random data); <c>Integrate</c> and
+/// method (<c>Generated</c>, Kernel.cs). <c>Step</c> computes (a clamp, a branch on random data; <c>StepHelpers</c> is the
+/// same method written through helpers it calls, inlined into its vector loop: Kernel.Inlining.cs); <c>Integrate</c> and
 /// <c>Count</c> stream memory (one float multiply-add, one int increment per row). <c>Move2</c> / <c>Move3</c> /
 /// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity: each field alike, a flat loop over the columns' lanes;
 /// <c>Move2HandCast</c> is the same by hand, the columns cast to floats; <c>Push</c> is Move2 assigned whole, <c>Move2Gaps</c>
@@ -229,6 +230,10 @@ public partial class KernelBenchmark
 
     [Benchmark]
     public void StepGenerated() => Kernels.Step(_world);
+
+    // Step written through the user's own helpers: inlined into the vector loop, it must cost what StepGenerated does.
+    [Benchmark]
+    public void StepHelpers() => Kernels.StepHelpers(_world);
 
     // Integer division: by constants (shifts for 8, doubles for 7) and by a divisor per row (doubles, its 0 lanes guarded).
     [Benchmark]
@@ -852,6 +857,29 @@ public partial class KernelBenchmark
             speed.Value = MathF.Max(MathF.Min(speed.Value + force - Drag, Limit), -Limit);
             if (heat.Value > 100f) heat.Value = 100f;
             else heat.Value += speed.Value * 0.125f;
+        }
+
+        // Step as a user splits it into helpers (Kernel.Inlining.cs): a value, a clamp, a ref parameter, an early return.
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void StepHelpers(ref Heat heat, ref Speed speed, in Mass mass, in Pull pull)
+        {
+            speed.Value = Clamped(speed.Value + Force(heat, mass, pull) - Drag, Limit);
+            Warm(ref heat, speed.Value);
+        }
+
+        private static float Force(in Heat heat, in Mass mass, in Pull pull) => heat.Value * 0.5f - mass.Value * pull.Value;
+
+        private static float Clamped(float value, float limit) => MathF.Max(MathF.Min(value, limit), -limit);
+
+        private static void Warm(ref Heat heat, float speed)
+        {
+            if (heat.Value > 100f)
+            {
+                heat.Value = 100f;
+                return;
+            }
+
+            heat.Value += speed * 0.125f;
         }
 
         [ForEach]

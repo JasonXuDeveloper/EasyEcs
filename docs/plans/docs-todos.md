@@ -362,3 +362,29 @@ Docs to-dos (docs pass):
 - public skill (skills/easyecs/SKILL.md): "a chase through `Lookup<T>` at an `in` component's id is prefetched when the
   world outgrows the cache: keep ids in `in` components".
 - `api.mdx`: nothing (`Lookup<T>.Prefetches` / `PrefetchAhead`, `LookupLanes.Prefetches` are hidden, for generated code).
+
+## feat-call-inliner: vector loops inline the user's own calls
+
+- systems.mdx and the guide's "what vectorizes" list: helpers are inlined. Say "write helpers freely", then list the
+  callees that are inlined (static, extension and C# 14 extension members, struct and component instance members
+  including ones writing `this`, local functions, up to 8 deep, ref/out arguments, early returns, a structural change
+  through a generated member) and the limits (virtual, interface or delegate targets, another assembly, recursion,
+  deeper than 8, a body with a loop / lambda / try / switch / fixed / stackalloc, a writing helper inside a larger
+  expression, a body naming a private or file-local member: make it internal). Lambda passes do not inline.
+- guide/analyzer.mdx: EECS055's new reasons and their Warning (fixable: "call it in a statement of its own", "make it
+  internal") / Info split; EECS055 applies only to [ForEach] methods.
+- Views page: views are inlined through the same path; drop any mention of a compilation copy.
+- performance / why-fast: KernelBenchmark.StepHelpers (equal to StepGenerated) and the Slices' Think (4.5-4.8x
+  faster) through bench.json (`tools/bench.sh KernelBenchmark Slices --sync`); the generator's IDE keystroke about
+  half (GeneratorBenchmark EditMethodBodyIde 417 → 214 ms, 57 → 28 MB; build-mode keystroke +18%).
+- changelog + README "What's new": helpers inlined into vector loops; IDE keystroke cost halved.
+- the public skill: helpers are fine in [ForEach] methods; keep the members they name internal, not private; no
+  virtual, interface or delegate calls in pass code.
+- decisions.mdx + .zh.mdx, next free D: "Vector loops inline the user's own calls". Decision: Kernel inlines calls
+  whose source is in the compilation before translation; each callee read once per compilation, refused on syntax
+  first, bound in a speculative model of the method body; system loops computed only for implementation output;
+  views desugared as a static local function in the same speculative body. Why: users should not avoid their own
+  helpers (StepHelpers = StepGenerated; Slices 4.5-4.8x). Considered: a compilation copy per method (+80 ms, +19 MB
+  per keystroke for 40 view methods); inlining in the declaration transform (reruns per keystroke); a code fix for
+  "call it in a statement of its own" (not semantics-preserving: `x = a.V + Take(ref a)`). Limits: depth 8; no
+  recursion, virtual, interface, delegate or cross-assembly callees; private members stay calls.
