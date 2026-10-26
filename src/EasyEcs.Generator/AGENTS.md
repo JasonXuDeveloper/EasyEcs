@@ -30,9 +30,6 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              walk (one fused job per group: per row, per block of FusedBlock rows, per word of a
                              masked walk) and pairs of systems declared or ordered one after the other as one job
                              (__A__B_Fusion, run by the set's RunFused switch when both are adjacent, enabled and due);
-                             SystemGenerator.Kernels.cs: a system method's vector loop in a stage of its own that only
-                             implementation output reads (SystemLoops, put back into the system's model by SystemCode),
-                             so an IDE typing never binds the bodies of the method and its helpers;
                              SystemGenerator.Loops.cs: the loops of a job's Execute Kernel translated (each width's
                              vector loop, the flat loops, the vector tail), in Execute while it declares at most 32 IL
                              locals (Locals counts them), else each in an AggressiveInlining method of the job (D135)
@@ -102,16 +99,8 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              Kernel.Pairs.cs: lanes of two sizes (int rows summed into a long, float into a double) as
                              pairs of vectors (WidenLower / WidenUpper), every lane bit-exact; four times as wide stays scalar;
                              Kernel.Views.cs: a method taking views desugared before translation (view fields as
-                             parameters, view members inlined by Kernel.Inlining's Inliner) as a static local function
-                             bound in a speculative model of the body, or the reason it stays scalar;
-                             Kernel.Inlining.cs: the user's own calls inlined before translation (static and extension
-                             methods, C# 14 extension members, struct methods and properties, local functions, whose
-                             source is in the compilation: Callees reads each callee once per compilation, syntax
-                             refusals first; Inliner / Rewriter: parameters bound to the caller's variables or locals,
-                             early returns as a flag, a value as one expression or a local assigned before the
-                             statement), bound in a speculative model of the method body; a call left gets its reason
-                             (ReasonForCall: virtual, an interface's, a delegate, another assembly, recursive, what its body
-                             holds) for EECS055 / EECS056;
+                             parameters, void members inlined with plain arguments in place, expression members as
+                             expressions; ViewInliner and its Rewriter), or the reason it stays scalar;
                              Kernel.Lookups.cs: reads of other entities through Lookup<T> (lookup[id], Read, Has, at an
                              EntityId of the lanes) gathered per vector from the one table they live in, the vector's
                              rows sent to the method when they live in several, with a backoff; only for SimdMode.Require (D131);

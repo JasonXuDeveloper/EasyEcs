@@ -42,6 +42,9 @@ what it left undone, which goes on the same list (nothing is dropped silently).
   `git checkout -B <audit-branch> <work-branch>`, then check `git merge-base --is-ancestor <work-branch-tip> HEAD`.
 - Give each agent: its skill, its owned paths, the paths it must not touch, the commit command (AGENTS.md: author =
   owner, committer = signing identity, no session links), "commit on your branch, do not push or merge".
+- Agents share the session's scratchpad: every script or output an agent writes there gets a name unique to it
+  (its branch name as a prefix). Two agents writing `t.sh` once ran one agent's tests on the other's worktree,
+  silently.
 - Decision numbers collide between parallel agents: give each a distinct range (e.g. next free D, next free D + 1).
 - Docs edits from code audits stay minimal: XML docs with their zh entries and the `api.mdx` complexity row; the
   pages wait for the docs pass (the agent lists what they must say).
