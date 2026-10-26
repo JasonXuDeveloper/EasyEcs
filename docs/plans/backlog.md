@@ -153,6 +153,10 @@ CI runs the unit tests on ARM64 (b1dbdb0).
       identity copies (`var __c1_0 = __s1_0`); per-width constants re-created (`__u1`, `this.v0 = default`);
       `__d0 = Zero; __d0 |= x` where `__d0 = x` would do. Users read this code (docs "The generator writes" tabs), so
       readability counts once the asm is equal.
+- [ ] **Flaky: `ParallelReductionsScratchAndLookupsDoNotAllocate`** fails about once per full Release run (seen on
+  45feeeb), passes 5 of 5 alone on the tip and on the base before the call inliner. The parallel allocation
+  checks' measurement race (#166's fix) has another path when the whole suite runs: find it and fix the cause or
+  the measurement, never loosen the 0 B check.
 - [ ] **Native AOT: no class-initialization check per iteration for a loop's tables** (owner's find, 2026-10-26):
       under Native AOT a loop reading a `static readonly` vector built by code (`Interleaved.Tables*`, `Masks`, the
       generated `__permN`) tests the class's initialization every iteration and spills around the helper call. The
