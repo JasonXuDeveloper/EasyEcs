@@ -2,7 +2,6 @@ using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 
 namespace EasyEcs;
@@ -224,18 +223,10 @@ internal struct BitMask : IEquatable<BitMask>
             return Avx.TestZ(vec, vec);
         }
 
-        // ARM NEON: Vector256 is emulated on ARM, so work with 128-bit halves (~2 cycles)
-        if (AdvSimd.Arm64.IsSupported)
-        {
-            // Split into two 128-bit vectors and OR them together
-            var lower = vec.GetLower();
-            var upper = vec.GetUpper();
-            var combined = AdvSimd.Or(lower, upper);
-
-            // OR both lanes using direct memory access (faster than GetElement)
-            ref long combinedRef = ref Unsafe.As<Vector128<long>, long>(ref combined);
-            return (combinedRef | Unsafe.Add(ref combinedRef, 1)) == 0;
-        }
+        // ARM64 NEON (Vector256 is software there, its halves live in two registers): ORR the halves, then compare to
+        // zero in the register (UMAXP + UMOV), no spill to the stack to read the lanes back
+        if (Vector128.IsHardwareAccelerated)
+            return (vec.GetLower() | vec.GetUpper()) == Vector128<long>.Zero;
 
         // Fallback: OR all elements and check if zero (~4 cycles)
         ref long longRef = ref Unsafe.As<Vector256<long>, long>(ref vec);
@@ -259,9 +250,9 @@ internal struct BitMask : IEquatable<BitMask>
         var upper = _bits.GetUpper();
         var combined = Vector128.Xor(lower, upper);
 
-        // Extract both longs using Unsafe (faster than GetElement)
-        ref long combinedRef = ref Unsafe.As<Vector128<long>, long>(ref combined);
-        long hash = combinedRef ^ Unsafe.Add(ref combinedRef, 1);
+        // Both lanes read from the register (MOVQ / PEXTRQ on x86, UMOV on ARM64): reading them through a ref would
+        // spill the vector to the stack first
+        long hash = combined.ToScalar() ^ combined.GetElement(1);
 
         // Include overflow in hash (rare case - >256 components)
         if (_overflow != null)
@@ -271,8 +262,7 @@ internal struct BitMask : IEquatable<BitMask>
                 lower = _overflow[i].GetLower();
                 upper = _overflow[i].GetUpper();
                 combined = Vector128.Xor(lower, upper);
-                combinedRef = ref Unsafe.As<Vector128<long>, long>(ref combined);
-                hash ^= combinedRef ^ Unsafe.Add(ref combinedRef, 1);
+                hash ^= combined.ToScalar() ^ combined.GetElement(1);
             }
         }
 

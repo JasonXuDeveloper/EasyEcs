@@ -299,3 +299,24 @@ Decision records for the docs pass (en + zh, "Not added" unless the owner's re-m
   batch probe to put it in (keys known ahead exist only in generated code). Numbers: locality.md 6.3.
 - `api.mdx`: nothing (the helpers are hidden, for generated code only).
 
+
+## feat-arm-parity: wide components on ARM64, the arm64 job's loop lines
+
+- guide page of vector loops (systems.mdx "Vector loop" / the wide-component section): a wide component (up to 16
+  words a row) now has two forms, AVX-512 permutes and ARM64's 128-bit NEON table lookups (one TBL per field over the
+  up to 4 registers holding its 4 rows' words, one TBX per written vector); each is emitted only where its own cost
+  gate pays, and EECS055 reports the reason only when neither does. Say what this means for the user: a wide
+  component can be vector on one ISA and rows on the other; DescribeSchedule's line says which
+  ("vector (Vector512 or Vector<float> of 128 bits)", "(Vector512 only)", "(Vector<float> of 128 bits only)") and
+  adds "; rows on this hardware" when the running machine has none of the emitted widths.
+- introspection page (DescribeSchedule / `__loops`): the new parts "wide component (permutes, table lookups)",
+  "gathers (Lookup<T>)" and the runtime suffix "; rows on this hardware" (en + zh).
+- performance page: the ARM64 numbers of `KernelBenchmark.Steer*` / `Glide*` once the owner's M4 run is in
+  (bench.json through `tools/bench.sh KernelBenchmark --sync` on that machine is a separate machine: keep it out of the
+  reference numbers unless the site gains an ARM64 column).
+- decisions.mdx + .zh.mdx: the decision record of the TBL form (draft in the branch's hand-off: D136 or the next free
+  number at merge), and update D131's ARM64 note if it lists wide components among the rows-only forms.
+- the public skill (skills/easyecs/SKILL.md): "a wide component vectorizes on AVX-512 and ARM64 where the gate pays;
+  check DescribeSchedule on the target machine" in the SIMD section.
+- tests/AGENTS.md's Kernel line could name the wide forms' bit-for-bit test and the ARM64 loop-line test (file map,
+  not docs/content: do it with the next tests change).

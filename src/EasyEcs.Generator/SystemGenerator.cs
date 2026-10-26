@@ -434,8 +434,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             sb.Append("    }\n\n");
         }
 
-        // How each method runs (SystemInfo.Loops): one array for the type, made once.
-        sb.Append($"    private static readonly string[] __loops = [{string.Join(", ", model.Methods.Select((m, i) => Code.Literal(m.Describe() + FusionNote(model, groups, i))))}];\n\n");
+        // How each method runs (SystemInfo.Loops): one array for the type, made once. A vector loop the hardware lacks
+        // (AVX-512's permutes, ARM64's table lookups, AVX2's gathers) says so on the machine that runs it.
+        static string Line(ForEachModel m, string note) => RunsVector(m.Simd) is { } runs
+            ? $"{Code.Literal(m.Describe())} + ({runs} ? \"\" : \"; rows on this hardware\"){(note.Length > 0 ? " + " + Code.Literal(note) : "")}"
+            : Code.Literal(m.Describe() + note);
+        sb.Append($"    private static readonly string[] __loops = [{string.Join(", ", model.Methods.Select((m, i) => Line(m, FusionNote(model, groups, i))))}];\n\n");
         sb.Append("    public static string[] Loops => __loops;\n\n");
         EmitAccess(sb, model);
         sb.Append("}\n");
@@ -945,8 +949,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Lane}>)" };
             if (simd.Flat != null) parts.Add("flat");
             else if (simd.Interleaves) parts.Add("interleaved fields");
-            if (simd.Wide != null) parts[0] = "vector (Vector512 only)";
-            if (simd.Wide != null) parts.Add("wide component (permutes)");
+            if (simd.Wide != null)
+            {
+                parts[0] = simd.Wide512 && simd.Wide128 ? $"vector (Vector512 or Vector<{simd.Lane}> of 128 bits)" : simd.Wide512 ? "vector (Vector512 only)" : $"vector (Vector<{simd.Lane}> of 128 bits only)";
+                parts.Add(simd.Wide512 && simd.Wide128 ? "wide component (permutes, table lookups)" : simd.Wide512 ? "wide component (permutes)" : "wide component (table lookups)");
+            }
+            if (simd.Gathers) parts.Add("gathers (Lookup<T>)");
             if (Parallel) parts.Add("in parallel chunks");
             else parts.Add(simd.Size < 4 || simd.Wide != null ? "masked words scalar" : "masked words vector");
             if (simd.Cold != null) parts.Add($"cold branch ({simd.Cold})");

@@ -32,8 +32,11 @@ last (`docs-todos.md` collects them meanwhile).
       probes: vertical forms dropped again (1.25-1.63x slower at 16M); scalar group prefetching 1.33x at 16M keys,
       1.3-1.6x slower in cache, no batch probe API to put it in.
 
-- [ ] **ARM64 parity** (worktree agent, branch `feat-arm-parity`): wide components through NEON TBL, a repo-wide audit
-      for x86-only paths, the ARM64 CI job asserting which forms run as vectors. (Interleaved LD2-4 / ST2-4: a296ecb.)
+- [ ] **ARM64 parity** (worktree agent, branch `feat-arm-parity`, ready to merge): wide components through NEON TBL /
+      TBX (Interleaved.Pick / PickInto, a gate per form), BitMask's zero test in registers on ARM64, the ARM64 CI job
+      printing and asserting which forms run as vectors (EveryVectorFormRunsAsAVectorLoopOnARM64). Left: the owner's
+      M4 run of `KernelBenchmark.Steer*` / `Glide*` (the ARM gate's cost model is unmeasured until then), the decision
+      record and the docs (docs-todos.md). (Interleaved LD2-4 / ST2-4: a296ecb.)
 
 - [ ] **Vector loops through the user's own calls** (worktree agent, branch `feat-call-inliner`; "Next" item 3).
 
