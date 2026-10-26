@@ -50,14 +50,13 @@ internal sealed partial class Kernel
 
     private readonly Dictionary<IParameterSymbol, WideLayout> _wideOf = new(SymbolEqualityComparer.Default);
     private readonly StringBuilder _statics = new();
-    private readonly StringBuilder _tables512 = new(), _tables128 = new();
-    private int _tables, _permutes, _lookups128;
+    private int _permutes;
     // The 128-bit form's cost per 4 rows: the registers its table lookups read, its whole-vector loads and stores.
     private int _registers, _moves128, _usedLanes, _writtenLanes;
     private bool _wide512, _wide128; // the forms that pay (Gate)
 
-    /// <summary>The job's statics: the layout checks, and the tables of the forms that pay.</summary>
-    private string WideStatics() => _statics.ToString() + (_wide512 ? _tables512.ToString() : "") + (_wide128 ? _tables128.ToString() : "");
+    /// <summary>The job's statics: the layout checks.</summary>
+    private string WideStatics() => _statics.ToString();
 
     /// <summary>
     /// The lanes a method uses of each parameter: the members it reads or writes (<c>body.X</c>, <c>body.P.Y</c>), each a
@@ -206,13 +205,15 @@ internal sealed partial class Kernel
     private const string Permute2 = "global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar16x32x2";
     private const string Permute1 = "global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar16x32";
 
-    /// <summary>A permute's index vector: a static of the job, built once.</summary>
+    /// <summary>
+    /// A permute's index vector, written as a vector of literals in place: a constant of the compiled loop. A static
+    /// readonly field would need its class initialized, which Native AOT checks on every iteration (and spills the
+    /// loop's vectors around the check); a local would count against the inliner's 32 IL locals.
+    /// </summary>
     private string Table(int[] values)
     {
-        string name = $"__x{_tables++}";
-        _tables512.Append($"private static readonly global::System.Runtime.Intrinsics.Vector512<int> {name} = global::System.Runtime.Intrinsics.Vector512.Create({string.Join(", ", values)});\n");
         _permutes++;
-        return name;
+        return $"global::System.Runtime.Intrinsics.Vector512.Create({string.Join(", ", values)})";
     }
 
     /// <summary>A vector of the tree: its expression and the lane where each word it holds (lane of the kernel, row) sits.</summary>
@@ -303,15 +304,13 @@ internal sealed partial class Kernel
     }
 
     /// <summary>
-    /// A table lookup's byte indexes (255: the byte kept, TBX): a static of the job, built once; its cost, the
-    /// <paramref name="registers"/> of the table it reads, counted for the gate.
+    /// A table lookup's byte indexes (255: the byte kept, TBX), a vector of literals in place as <see cref="Table"/>;
+    /// its cost, the <paramref name="registers"/> of the table it reads, counted for the gate.
     /// </summary>
     private string Table128(int[] bytes, int registers)
     {
-        string name = $"__y{_lookups128++}";
-        _tables128.Append($"private static readonly global::System.Runtime.Intrinsics.Vector128<byte> {name} = global::System.Runtime.Intrinsics.Vector128.Create((byte){string.Join(", ", bytes)});\n");
         _registers += registers;
-        return name;
+        return $"global::System.Runtime.Intrinsics.Vector128.Create((byte){string.Join(", ", bytes)})";
     }
 
     /// <summary>The vectors after up to <paramref name="levels"/> levels of pairwise merges, written to <paramref name="code"/> (planned when null).</summary>
