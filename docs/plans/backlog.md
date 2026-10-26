@@ -7,63 +7,60 @@ docs to-dos collected while code still changes live in `docs-todos.md`.
 Order: code -> exemplar pass (`audit-code`) -> docs pass (`audit-docs`) -> bench sync -> `verify` -> master.
 At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
 
-## Running (branches of their own; merge with the `audit` triage checks)
+## Order (set by the owner, 2026-10-26)
 
-- [ ] **Lookup gathers** (#162 part 3, D131): vectorized reads of other entities, sorted by target table; EECS055
-      LooksEligible also lets Entity / Emit parameters through. Branch `feat-lookup-gather`.
-- [ ] **EECS103** (WP6a, D134): hand-written SIMD the generator would write from a plain method, with a code fix.
-      Worktree `.claude/worktrees/feat-eecs103`.
-- [ ] **Analyzer tests split**: GeneratorTests.cs -> AnalyzerTests.* files (mechanical).
-- [x] **zh reference fix** (merged af585ed): Chinese restored, ApiDocs keeps a page it would write in English and
-      exits 1; leftovers in `docs-todos.md`.
-- [x] **Generated text survey** (`generated-text.md`); rules in `audit-generator` "The generated text" and `feature`.
-- [x] **Generator / analyzer cost, phase 2** (merged after 5f412b6): A1-A5, G2, G5, A7 (one analyzer per area),
-      PartGenerator without Collect, EquatableArray loops; CompileAndAnalyze -8 % / -2-3 %, edits within noise (the
-      benchmark corpus reaches few of the slow paths phase 1 found in the unit tests). Left: **G1** (ForEachModel
-      split into a declaration model and implementation-only body facts; SystemUpdates without Collect; SetFusions
-      reruns; Systems / SystemPlaces share one FAWMN; Kernel's GetSemanticModel calls) after WP0b merges; G6 research.
+Cluster pairs and compress first, then the rest in the order of "Next"; every SIMD path covers ARM64
+(`audit-vector-loops`, "Every vector form runs on ARM64 too"); generators stay fast while they read more source; docs
+last (`docs-todos.md` collects them meanwhile).
 
-- [ ] **Loads write each field into its name** (branch `research-copy-asm`: 1e21668 Kernel.cs, 0ff81cc 32-local test,
-      71f03f1 Move3Gaps benchmark). Root cause of D126's "copy changed the asm": the JIT inlines no method with more
-      than 32 IL locals; the copy took Move3's masked Execute to 36. Move3Gaps 100k -5.5 %, Move4 1k -8 %, others level;
-      WorldSimulation 100k and BattleServer means +2-4 % inside base's spread on a loaded machine. Gate: rerun those two
-      on a quiet machine (after the generator A/B), then merge with D126 rewritten (text in the branch report:
-      the root cause, the vmovaps cost, the numbers) and `generated-text.md` section 3 corrected. Nine jobs still over
-      32 locals (StepJob0 masked 34, CycleJob9 masked 33, GateJob26 / SeekJob14 40-42): WP0b.
-      Now carried by WP0b (branch `feat-wp0b` starts on it; WP0b's A/B covers the copy fix against the tip).
-      The remote branch `research-copy-asm` could not be deleted from the session (proxy); the owner deletes it.
+## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **Layout instead of gathers** (phase 0 merged 0e206d8: pairs 3-16x, compress 5-42x, nearest packed only; batch probes, timer wheel dropped to owner-review; L1 ordered rows + L3 compress running on `feat-locality-core`; L2 pair form after WP0b; owner: redesign the layers under the vector loops after GROMACS's cluster pairs
-      and Polychroniou SIGMOD 2015; `locality.md`): phase 0 hand-written benchmarks first (pairs, nearest, ordered
-      lookups, compress / batch probes), each with its bar; starts after gather-always reports and WP0b merges.
-- [ ] **Borrowed ideas** (`borrowed-ideas.md`): prefetching chases (AMAC) after gather-always, a timer wheel for
-      waiting entities, ghost rows between worlds as an example first, streaming stores, roofline in `audit-perf`;
-      NUMA / hybrid cores wait in `owner-review.md` for a machine that has them.
-- [ ] **Generated code tuned for the machine** (owner: users never think about pipeline, caches, branches;
-      `microarch.md`): M0 llvm-mca over every kernel shape after WP0b merges, then M1 accumulators / unrolling /
-      hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3 prefetch / streaming stores.
-- **Order set by the owner (2026-10-26):** cluster pairs and compress first (L1 + L3 running, then L2 right after
-  WP0b), then the rest in the order of this list; every SIMD path covers ARM64 (`audit-vector-loops`); docs last.
-- [ ] **Vector loops through the user's own calls** (owner: users should not have to avoid helpers): today a call into
-      user code keeps the method scalar (EECS055 "it calls X.Y"); only Math, the generated members (SetX / IsX ...),
-      Emit.Add, Lookup reads and view members (Kernel.Views.cs, inlined from source, depth 8) are translated. Extend the
-      view inliner to any callee whose source is in the compilation: static helpers, extension methods, component
-      instance methods and properties with bodies (same limits: no recursion, no ref out of the row, no lambdas; an
-      early return becomes a mask). Calls into other assemblies, virtual / interface calls stay scalar with that reason.
-      After WP0b (Kernel). Docs: list what is inlined and what is not. Generator cost (the owner's condition): callee
-      bodies are read only in the implementation-output pipeline, once per callee per compilation (a cache keyed by
-      the method symbol, shared by every caller), syntax-first rejection before any bind, no copy of the compilation
-      per caller (Kernel.Views copies it today: measure that first with GeneratorBenchmark's IDE and build cases).
-- [ ] **ARM runs of the locality prototypes** (owner wants to run them on an ARM device): the prototypes are
-      Vector256 / AVX2 / AVX-512 only, so on ARM64 they measure the software fallback of Vector256 (not accelerated
-      there); add Vector128 / AdvSimd paths (TBL permutation for compress, a 4-wide or Vector<T> pair kernel) and an
-      ISA column in the results.
-- [ ] **Lookup gathers always on** (owner: they should win everywhere, then no option; branch `feat-gather-always`):
-      diagnose the 64-table loss; lead: unmanaged columns are pinned (POH), so a per-table column-address table could
-      let one vector gather across tables GC-safely; widen LookupGatherBenchmark (1/4/64/1,000 tables, dead lanes,
-      presence bits, light/heavy body); default under Auto only if every case wins, D131 rewritten.
+- [ ] **L1 ordered rows + blocks, L3 compress** (`locality.md` section 5; worktree `agent-aef3c58e0c81ecff5`, branch
+      `feat-locality-core`): a declared key orders a table's rows, re-sorted on a cadence (radix sort, one permutation
+      of every column under the gate, `StorageVersion`), a box per block of 8 rows and a read path (`RowBlocks`) for
+      the generated pair form; compress (AVX-512 CompressStore / AVX2 table / ARM64 TBL) replaces `Lanes.Compact` in
+      the core's callers; the prototypes get Vector128 / NEON paths so the owner can run `PairsBenchmark` and
+      `CompressBenchmark` on ARM64. New EECS id for an invalid key; decision records; naming candidates to the owner.
+- [ ] **WP0b** (`inner-loops.md`; worktree `wp0b`, branch `feat-wp0b`): every generated job within the JIT inliner's
+      32 IL locals (loads into their names, constants in place, oversized Execute split per loop), D126 rewritten,
+      `tools/inlining.sh`; gate: WorldSimulation / BattleServer not slower. Blocks L2, G1, the call inliner, M0.
+- [ ] **Lookup gathers always on** (worktree `gather-always`, branch `feat-gather-always`): the 64-table loss
+      diagnosed, per-lane column-address gathers on pinned columns, widened `LookupGatherBenchmark`; default under Auto
+      only if every case wins (per ISA: ARM64 has no gather), D131 rewritten.
 
-## Next
+## Next, in this order
+
+1. [ ] **L2: the generated pair form** (`locality.md` 3.2): the user writes what one pair does; the generator writes
+       the 8x8 (x86) / 4x4 (ARM64) cluster-pair kernel over L1's blocks with cutoff and self masks, and a nearest form
+       (`NearestPlayer`, zombie targeting). Right after WP0b merges. Then L4: examples rewritten in it.
+2. [ ] **Vector loops through the user's own calls** (owner: users should not have to avoid helpers): today a call
+       into user code keeps the method scalar (EECS055 "it calls X.Y"); only Math, the generated members (SetX / IsX
+       ...), Emit.Add, Lookup reads and view members (Kernel.Views.cs, inlined from source, depth 8) are translated.
+       Extend the view inliner to any callee whose source is in the compilation: static helpers, extension methods,
+       component instance methods and properties with bodies (no recursion, no ref out of the row, no lambdas; an
+       early return becomes a mask). Calls into other assemblies, virtual / interface calls stay scalar with that
+       reason. Generator cost (the owner's condition): callee bodies read only in the implementation-output pipeline,
+       once per callee per compilation (cache keyed by the method symbol), syntax-first rejection before any bind, no
+       compilation copy per caller (Kernel.Views copies it today: measure first, IDE and build cases).
+3. [ ] **G1** (generator cost, the part phase 2 left): ForEachModel split into a declaration model and
+       implementation-only body facts; SystemUpdates without Collect; SetFusions reruns; Systems / SystemPlaces share
+       one FAWMN; Kernel's GetSemanticModel calls. G6 (C# 14 extension lookup cost) research only.
+4. [ ] **Generated code tuned for the machine** (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
+       accumulators / unrolling / hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3
+       prefetch / streaming stores.
+5. [ ] **Borrowed ideas** (`borrowed-ideas.md`): prefetching chases (AMAC) after gather-always, ghost rows between
+       worlds as an example first, streaming stores, roofline in `audit-perf` (timer wheel dropped: owner-review).
+6. [ ] The rest of "Later" below.
+
+## Done this round (for the record)
+
+- [x] Lookup gathers on request (D131, merged f1767ef), EECS103 (D134), analyzer tests split, zh reference fix
+      (af585ed), generated text survey (`generated-text.md`), generator / analyzer cost phase 2 (merged before
+      c10af12: one analyzer per area, body facts once, syntax-only shapes), locality phase 0 (0e206d8: pairs 3-16x,
+      compress 5-42x, nearest packed only; batch probes and timer wheel in owner-review), the copy fix (carried by
+      WP0b). The remote branch `research-copy-asm` could not be deleted from the session (proxy): the owner deletes it.
+
+## Later
 
 - [ ] **Analyzer and incremental generators by the official .NET guidance** (owner, 2026-10-25; phase 2 above is
       its first part): refactor what does not follow it (incremental pipeline: ForAttributeWithMetadataName, equatable symbol-free

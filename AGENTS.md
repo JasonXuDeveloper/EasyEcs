@@ -146,6 +146,9 @@ owner has asked for once must be written where the next session will find it.
   truly the owner's to decide. A proposal you judge not worth doing (or not yet) goes into `docs/owner-review.md`
   with the reason and what would change the verdict, so the owner can review it later; settled choices still get
   their decision record.
+- **The open work is `docs/plans/backlog.md`**: what is running (and in which worktree), what comes next in the
+  owner's order, what is left before a release. A session starts by reading it and keeps it current on every start,
+  merge or drop.
 - **Plans that span sessions are committed.** A design built over more than one session (work packages, file
   names, the proof each step needs) goes into `docs/plans/<name>.md`, which the site does not publish; the scratchpad
   does not outlive the session. A package that ships moves its reasons into its decision record and its use into the
