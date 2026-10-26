@@ -286,34 +286,39 @@ internal sealed partial class Kernel
             : Declined(method, syntax, model) is { } declined ? new ScalarReason(declined.Reason, declined.IsFixable, null)
             : null;
         if (reason != null) return null;
+        // Whether the job may change structure is the method's as written (the generator's job follows it), helpers or not.
+        var declaration = method;
+        (syntax, model) = Symbols.WithBody(method, syntax, model); // Declined: it returns nothing and is not generic
+        bool stable = Symbols.IsStable(method, syntax, model);
+        IOperation root;
         // Views: the method as written without them (Kernel.Views.cs), whose loop is the view method's.
         if (method.Parameters.Any(p => Symbols.Classify(p, Symbols.IsRunner(method)) == Symbols.ParamKind.View))
         {
-            if (Desugar(method, syntax, model, ct, out var viewReason) is not var (desugared, desugaredSyntax, desugaredModel))
+            if (Desugar(method, syntax, model, ct, out var viewReason) is not var (desugared, desugaredBody, desugaredModel))
             {
                 reason = new ScalarReason(viewReason ?? "a view member cannot be inlined", false, null);
                 return null;
             }
-            (method, syntax, model) = (desugared, desugaredSyntax, desugaredModel);
+            (method, root, model) = (desugared, desugaredBody, desugaredModel);
+        }
+        else
+        {
+            if (model.GetOperation(syntax, ct) is not IMethodBodyOperation body)
+            {
+                reason = new ScalarReason("it has no body", false, null);
+                return null;
+            }
+            root = (IOperation?)body.BlockBody ?? body.ExpressionBody!;
+            // The user's own calls inlined (Kernel.Inlining.cs): the loop of the body a hand would write without them.
+            if (InlineCalls(method, syntax, model, root, ct) is var (inlined, speculative) && speculative.GetOperation(inlined, ct) is { } inlinedBody)
+                (root, model) = (inlinedBody, speculative);
         }
 
-        (syntax, model) = Symbols.WithBody(method, syntax, model); // Declined: it returns nothing and is not generic
-        if (model.GetOperation(syntax, ct) is not IMethodBodyOperation body)
-        {
-            reason = new ScalarReason("it has no body", false, null);
-            return null;
-        }
-        // Whether the job may change structure is the method's as written (the generator's job follows it), helpers or not.
-        bool stable = Symbols.IsStable(method, syntax, model);
-        IOperation root = (IOperation?)body.BlockBody ?? body.ExpressionBody!;
-        // The user's own calls inlined (Kernel.Inlining.cs): the loop of the body a hand would write without them.
-        if (InlineCalls(method, syntax, model, root, ct) is var (inlined, speculative) && speculative.GetOperation(inlined, ct) is { } inlinedBody)
-            (root, model) = (inlinedBody, speculative);
-        var lane = new Lane(method, Symbols.IsRunner(method), Symbols.IsParallel(method), Symbols.FastFloats(method), model, stable);
+        var lane = new Lane(method, Symbols.IsRunner(declaration), Symbols.IsParallel(declaration), Symbols.FastFloats(declaration), model, stable, declaration);
         var code = Vectorize(lane, root, fieldOf, ct, out reason);
         // Gathers win where a vector's targets share a table and lose a little where they spread over many (D131): where
         // they live is the data's, not the code's, so the loop that gathers is the method's to ask for.
-        if (code is { Gathers: true } && Symbols.Simd(method) != Symbols.SimdRequire)
+        if (code is { Gathers: true } && Symbols.Simd(declaration) != Symbols.SimdRequire)
         {
             reason = new ScalarReason(GathersOnRequest, false, null);
             return null;
@@ -369,7 +374,9 @@ internal sealed partial class Kernel
     /// it runs in parallel, whether it allows .NET's vector approximations (FloatMode.Fast), the model of its body and
     /// whether that body can make structural changes.
     /// </summary>
-    private sealed record Lane(IMethodSymbol Method, bool Outside, bool Parallel, bool Fast, SemanticModel Model, bool Stable);
+    /// <param name="Declaration">The method as declared, whose attributes the lane follows: <paramref name="Method"/> itself,
+    /// or the method a view's desugared local function stands for (Kernel.Views.cs).</param>
+    private sealed record Lane(IMethodSymbol Method, bool Outside, bool Parallel, bool Fast, SemanticModel Model, bool Stable, IMethodSymbol? Declaration = null);
 
     /// <summary>
     /// Whether a method <see cref="Vectorize"/> leaves scalar looks meant for a vector loop, so EECS055 names the reason:
@@ -672,7 +679,7 @@ internal sealed partial class Kernel
         }
         var root = body;
         kernel.Statement(root, null);
-        kernel.FinishChanges(method);
+        kernel.FinishChanges(lane.Declaration ?? method);
         // A masked word keeps the values loaded of what the method writes, and stores them back in the lanes that do not
         // pass: the rows are left as they were (their memory is the table's, whether a component is absent or not).
         var kept = new StringBuilder();

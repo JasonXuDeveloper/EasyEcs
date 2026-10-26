@@ -3,6 +3,7 @@ using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
 namespace EasyEcs.Generator;
@@ -12,18 +13,19 @@ namespace EasyEcs.Generator;
 /// without them: each view field becomes a component parameter (<c>ref Health __fighter_Health</c>, appended after the
 /// method's own parameters, so the others keep their positions and job fields), each use of a field that parameter,
 /// and each call of a view method or read of a view property is inlined as any other call is (Kernel.Inlining.cs: the
-/// view is <c>this</c>, its fields the parameters). The desugared method replaces the original in a copy of its syntax
-/// tree, bound in a copy of the compilation (its parameters change, which a speculative model of the body cannot
-/// take), and the vector loop is that method's: a view costs what the refs written by hand cost, and the reason a
-/// method stays scalar is the reason its desugared form would.
+/// view is <c>this</c>, its fields the parameters). The desugared method is a static local function, the one statement
+/// of the method's body in a speculative model (the parameters change, which a speculative body alone cannot take; a
+/// copy of the compilation per method would rebind its tree), and the vector loop is that function's: a view costs
+/// what the refs written by hand cost, and the reason a method stays scalar is the reason its desugared form would.
 /// </summary>
 internal sealed partial class Kernel
 {
     /// <summary>
-    /// The desugared form of <paramref name="method"/> (<see cref="Kernel"/> remarks), or null with the reason a view
-    /// keeps it scalar (a view used as a value, a view method that returns early or takes a ref).
+    /// The desugared form of <paramref name="method"/> (<see cref="Kernel"/> remarks): the local function, its body's
+    /// operation and the speculative model they are bound in; or null with the reason a view keeps it scalar (a view
+    /// used as a value, a view member the vector loop cannot follow).
     /// </summary>
-    private static (IMethodSymbol Method, MethodDeclarationSyntax Syntax, SemanticModel Model)? Desugar(IMethodSymbol method,
+    private static (IMethodSymbol Method, IOperation Body, SemanticModel Model)? Desugar(IMethodSymbol method,
         MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct, out string? reason)
     {
         reason = null;
@@ -66,19 +68,22 @@ internal sealed partial class Kernel
 
         body = Inliner.WithoutInlinedLocalFunctions(body);
 
-        var annotation = new SyntaxAnnotation("EasyEcs.Desugared");
-        var desugared = syntax.WithParameterList(syntax.ParameterList.AddParameters(added.ToArray()))
-            .WithExpressionBody(null).WithSemicolonToken(default).WithBody(body).WithAdditionalAnnotations(annotation);
-        var tree = syntax.SyntaxTree;
-        var copy = tree.WithRootAndOptions(tree.GetRoot(ct).ReplaceNode(syntax, desugared), tree.Options);
-        var copyModel = model.Compilation.ReplaceSyntaxTree(tree, copy).GetSemanticModel(copy);
-        var copySyntax = copy.GetRoot(ct).GetAnnotatedNodes(annotation).OfType<MethodDeclarationSyntax>().First();
-        if (copyModel.GetDeclaredSymbol(copySyntax, ct) is not { } copyMethod)
+        // The method's parameters as written (their types bind where they did) and the view fields after them.
+        var function = LocalFunctionStatement(PredefinedType(Token(SyntaxKind.VoidKeyword)), Identifier(inliner.Fresh("__Desugared")))
+            .WithModifiers(TokenList(Token(SyntaxKind.StaticKeyword)))
+            .WithParameterList(syntax.ParameterList.AddParameters(added.ToArray()))
+            .WithBody(body);
+        var replaced = syntax.WithExpressionBody(null).WithSemicolonToken(default).WithBody(Block(function));
+        int position = syntax.Body?.SpanStart ?? syntax.ExpressionBody!.SpanStart;
+        if (!model.TryGetSpeculativeSemanticModelForMethodBody(position, replaced, out var speculative) || speculative == null
+            || replaced.Body!.Statements[0] is not LocalFunctionStatementSyntax declared
+            || speculative.GetDeclaredSymbol(declared, ct) is not IMethodSymbol desugared
+            || speculative.GetOperation(declared, ct) is not ILocalFunctionOperation { Body: { } operation })
         {
             reason = "its views could not be desugared";
             return null;
         }
 
-        return (copyMethod, copySyntax, copyModel);
+        return (desugared, operation, speculative);
     }
 }
