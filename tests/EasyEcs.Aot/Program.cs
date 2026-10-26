@@ -58,6 +58,22 @@ using (var healing = new World())
     Check(patient.Life.Value == 2, "a library's generic system runs on every second update");
 }
 
+// An ordered table: the sort instantiated for the key type the generated part declares, its blocks and block pairs.
+using (var crowd = new World())
+{
+    for (int i = 0; i < 100; i++) crowd.CreateEntity(new Spot((i * 37) % 10, i % 10));
+    crowd.SortRows<Spot>();
+    int blocks = 0, pairs = 0;
+    Span<BlockPair> found = stackalloc BlockPair[1024];
+    foreach (var table in crowd.Blocks<Spot>())
+    {
+        blocks += table.Count;
+        pairs += table.Pairs(1, found);
+    }
+
+    Check(blocks > 0 && pairs >= blocks, "an ordered table's blocks and block pairs");
+}
+
 Console.WriteLine($"AOT battle: {battle.Tick} ticks, {battle.Hits} hits, {battle.Deaths} deaths, {server.World.EntityCount} entities");
 return 0;
 
@@ -66,6 +82,12 @@ static void Check(bool ok, string what)
     if (ok) return;
     Console.Error.WriteLine("failed: " + what);
     Environment.Exit(1);
+}
+
+partial record struct Spot(float X, float Y) : IComponent
+{
+    [OrderBy(nameof(X), nameof(Y))]
+    public readonly uint Cell => (uint)X << 16 | (uint)Y;
 }
 
 struct Life : EasyEcs.Aot.Library.ILife
