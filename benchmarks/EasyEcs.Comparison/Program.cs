@@ -19,7 +19,8 @@ public static class Program
         if (args.Length > 0 && args[0] == "--features") return CheckFeatures() ? 0 : 1;
         if (args.Length == 0 || args[0] != "--check")
         {
-            BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, EasyEcs.Benchmark.BenchmarkConfig.Create());
+            var config = EasyEcs.Benchmark.BenchmarkConfig.Create(ref args);
+            BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, config);
             return 0;
         }
 
