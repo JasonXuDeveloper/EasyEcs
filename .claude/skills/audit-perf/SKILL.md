@@ -80,7 +80,11 @@ its own worktree.
      against 4,096 repeated);
    - a prototype of a sort or a space structure is checked for its structure (keys sorted, boxes small), not only for
      equal values: a sort that ended in its scratch arrays kept every value right and made the kernel 500x slower;
-   - long runs are scripts that resume (a done marker per class) and run one class per process;
+   - long runs are scripts that resume (a done marker per class) and run one class per process, started with
+     `setsid nohup` (tool background calls die at 2 h); a cut-off BDN log is read from its per-case "Mean =" lines;
+   - a runtime choice between two flavors (micro-adaptivity) never trusts the first timed run (Tier0 code): it times
+     several runs of each flavor, keeps the minimum, and re-measures when the winner's cost halves or doubles; one
+     exploratory run after a long stretch of the other flavor is biased against it;
    - one lock for the machine, `/tmp/bench.lock` (`tools/bench.sh` takes it too), always with `flock -o` so no build
      server or test host it starts inherits the descriptor and holds the lock after the command ends. Benchmarks take it
      exclusively behind a gate they hold while waiting and running, `flock -o /tmp/bench.lock.gate flock -o -x

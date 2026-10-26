@@ -23,6 +23,9 @@ it cannot is recorded and the form falls back to rows there:
   (`AdvSimd.Arm64.VectorTableLookup` for permutes and compress, 4-wide blocks for 8-wide ones).
 - On ARM64 `Vector256.IsHardwareAccelerated` is false and Vector256 runs as software: pick the width from
   `IsHardwareAccelerated`, never from `IsSupported` of an x86 class alone.
+- A gather pays only when each lane's address is one gather away: resolving a lane's table through a chain of
+  loads (record, table, column, presence) costs what the row-by-row lookup costs (D131's walk). Layout that puts a
+  vector's targets in one table (`GroupBy`, ordered rows) is what makes gathers win.
 - No gather on ARM64 in .NET 10: a gather form says what ARM64 does (rows, or scalar lane fills if measured).
 - Proof on this x86 machine: the tests run once more with `DOTNET_EnableAVX=0` (128-bit paths); benchmark classes
   guard every intrinsic so they run on ARM64, and result tables carry an ISA column. The owner runs ARM64 numbers.

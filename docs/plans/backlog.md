@@ -24,9 +24,10 @@ last (`docs-todos.md` collects them meanwhile).
 - [ ] **WP0b** (`inner-loops.md`; worktree `wp0b`, branch `feat-wp0b`): every generated job within the JIT inliner's
       32 IL locals (loads into their names, constants in place, oversized Execute split per loop), D126 rewritten,
       `tools/inlining.sh`; gate: WorldSimulation / BattleServer not slower. Blocks L2, G1, the call inliner, M0.
-- [ ] **Lookup gathers always on** (worktree `gather-always`, branch `feat-gather-always`): the 64-table loss
-      diagnosed, per-lane column-address gathers on pinned columns, widened `LookupGatherBenchmark`; default under Auto
-      only if every case wins (per ISA: ARM64 has no gather), D131 rewritten.
+- [x] **Lookup gathers always on: not possible, stay on request** (merged after 932913f): no form beats rows when a
+      vector's targets spread over many tables (walk, 64-bit pinned addresses, micro-adaptive choice all measured,
+      D131 rewritten with the widened table and ARM64: rows there). Owner-review entry: a per-entity table id.
+      Revisit after L1 (ordered rows put a vector's targets in one table) and WP0b (lookup jobs are 52-56 IL locals).
 
 ## Next, in this order
 
@@ -99,6 +100,8 @@ last (`docs-todos.md` collects them meanwhile).
       first); #157 the #138 recommendations; #159 remaining research.
 - [ ] #153 benchmark job tuning (Warmup 6 -> 3, IterationTime 250 -> 150 ms) and a lighter job for GeneratorBenchmark.
 - [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
+- [ ] Flaky under full-suite load with `DOTNET_EnableAVX2=0`: `AllocationTests.ParallelReductionsScratchAndLookupsDoNotAllocate`
+      (1 failure in 2 runs, passes alone): find the measurement race (#166's kind).
 
 ## Finish
 
