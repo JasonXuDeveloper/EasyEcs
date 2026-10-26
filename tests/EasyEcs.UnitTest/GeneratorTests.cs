@@ -224,7 +224,19 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref L64 l) => l.V = l.V / 8 + l.V % 4;", true)]                 // long lanes by powers of two
     [TestCase("[ForEach] static void A(ref L64 l) => l.V /= 3;", false)]                               // long lanes by 3
     [TestCase("[ForEach] static void A(ref F f) => f.V = f.V / 4 + System.MathF.Pow(f.V, 1);", true)]  // a product, the value
-    [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x;", false)] // a call
+    // The user's own calls, inlined (Kernel.Inlining.cs): the loop of the method written without them.
+    [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x;", true)]           // a static helper
+    [TestCase("[ForEach] static void A(Entity e, ref P p, in Q q) { Hurt(ref p.V, q.V); if (IsDead(p.V)) e.SetH(1); } static bool IsDead(int hp) => hp <= 0; static void Hurt(ref int hp, int dmg) { if (dmg <= 0) return; hp -= dmg; }", true)]
+    [TestCase("[ForEach] static void A(ref P p, in Q q) => p.V -= Damage(p.V, q.V); static int Damage(int a, int d) { int x = a - d; if (x < 1) return 1; return x; }", true)] // a value through statements
+    [TestCase("[ForEach] static void A(ref P p, in Q q) => p.V = Pick(p.V, q.V); static int Pick(int a, int b) { if (a > b) return a - b; else if (a == b) return 0; return b; }", true)] // returns as ?:
+    [TestCase("[ForEach] static void A(ref P p) { if (TryHalf(p.V, out var h)) p.V = h; } static bool TryHalf(int v, out int half) { half = v >> 1; return v > 0; }", true)] // an out parameter
+    [TestCase("[ForEach] static void A(ref F f) { f.V = Twice(f.V); static float Twice(float x) => x + x; }", true)] // a local function
+    [TestCase("[ForEach] static void A(ref F f, in H h) => f.V = Outer(f.V, h.V); static float Outer(float a, float b) => Inner(a) * b; static float Inner(float a) => a + 1;", true)] // nested
+    [TestCase("[ForEach] static void A(ref P p) => p.V = p.Doubled(); } public static class Ext { public static int Doubled(this in P p) => p.V * 2;", true)] // an extension method
+    [TestCase("[ForEach] static void A(ref P p) { if (p.Low) p.Bump(2); } } public static class Ext { extension(ref P p) { public bool Low => p.V < 3; public void Bump(int n) { p.V += n; } }", true)] // C# 14 extension members
+    [TestCase("[ForEach] static void A(ref Hits h) { h.Hit(2); if (h.Dead) h.V = 0; } } public struct Hits : IComponent { public int V; public void Hit(int n) { if (n < 0) return; V -= n; } public bool Dead => V <= 0; ", true)] // a component's own members
+    [TestCase("[ForEach] static void A(ref F f) => f.V = R(f.V); static float R(float x) => x <= 0 ? 0 : R(x - 1);", false)] // recursive
+    [TestCase("[ForEach] static void A(ref F f) => f.V = L(f.V); static float L(float x) { for (int i = 0; i < 2; i++) x += i; return x; }", false)] // a loop
     [TestCase("[ForEach] static void A(ref Two t) => t.A = t.B;", true)]                               // two fields: Interleaved
     [TestCase("[ForEach] static void A(ref Five t) => t.A = t.B;", false)]                             // five fields
     [TestCase("[ForEach] static void A(ref Mixed m) => m.A += m.B;", true)]                             // float and int fields
@@ -300,9 +312,16 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f) => f.V %= 2;", "'%' of floats is not supported (no vector remainder)")]
     [TestCase("[ForEach] static void A(ref Split s) => s.A++;", "component Split declares fields in several parts, so the order of its fields is not defined: declare them in one part", true)]
     [TestCase("[ForEach] static void A(ref L64 l) => l.V %= 10;", "'%' of long lanes by 10, not a power of two, is not supported (no exact vector form for lanes of 8 bytes)")]
-    [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x;", "it calls S.M")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x > 0 ? M(x - 1) : x;", "it calls S.M, which is recursive")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) { for (int i = 0; i < 2; i++) x++; return x; }", "it calls S.M, which has a loop")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = M0(f.V); static float M0(float x) => M1(x); static float M1(float x) => M2(x); static float M2(float x) => M3(x); static float M3(float x) => M4(x); static float M4(float x) => M5(x); static float M5(float x) => M6(x); static float M6(float x) => M7(x); static float M7(float x) => M8(x); static float M8(float x) => x;", "it calls S.M8, more than 8 helpers deep")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = Fn(f.V); static readonly System.Func<float, float> Fn = static x => x;", "it calls Func.Invoke, a delegate, whose target the vector loop cannot see")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = B.K(f.V); static readonly Base B = new Base(); } public class Base { public virtual float K(float x) => x;", "it calls Base.K, which is virtual: the vector loop cannot see which override runs")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = Take(ref f) + 1; static float Take(ref F f) { f.V++; return f.V; }", "it calls S.Take, which changes its arguments or its entity, inside an expression: call it in a statement of its own (var r = ...;)", true)] // and none for Take: EECS055 is for [ForEach] methods only
+    [TestCase("[ForEach] static void A(ref F f) => f.V = R.Scaled(f.V); } public static class R { static readonly float Scale = 2; public static float Scaled(float x) => x * Scale;", "it calls R.Scaled, whose body names private field 'float R.Scale' of R, which code outside its type (or file) cannot reach: make it internal", true)]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = Log(f.V) * 2; static float Log(float x) { System.Console.WriteLine(x); return x; }", "it calls S.Log, which calls Console.WriteLine")]
     [TestCase("[ForEach] static void A(ref F f) { for (int i = 0; i < 2; i++) f.V++; }", "'for (int i = 0; i < 2; i++) f.V++;' is not supported")]
-    [TestCase("[ForEach] static void A(ref F f, in H h) => h.V.ToString();", "it calls Single.ToString")]
+    [TestCase("[ForEach] static void A(ref F f, in H h) => h.V.ToString();", "it calls Single.ToString, which is defined in another assembly")]
     [TestCase("[ForEach] static void A(in B8 b, ref C8 c) { float d = b.V; c.V = (byte)d; }", "local 'd' is a float, not a lane type of 1 or 2 bytes")]
     [TestCase("[ForEach] static void A(in P p, ref Purse u) => u.Sum = p.V + 1L;", "it writes 'u.Sum', which is neither a local nor the lane of a component taken by ref")] // the write, not the conversion of its value
     [TestCase("[ForEach] static void A(ref F f, ref int n) => n++;", "it takes 'n' by ref: a vector loop reduces only into a Reduce<T>")]
@@ -365,7 +384,7 @@ public class GeneratorTests
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.Set(new H()); else e.Remove<D>(); }", "it makes two structural changes ('e.Set(new H())' and 'e.Remove<D>()'): a vector loop applies one; split the method into one [ForEach] method per change")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.RemoveF(); }", "it changes F, which it also takes as 'f': the change would be seen at once by the method and after the pass by a vector loop; change it in a [ForEach] method of its own")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.Clone(); }", "it calls 'e.Clone()': a vector loop applies one Set, Remove, Disable, Enable or Destroy of one component to the rows it marks")]
-    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.SetH(1); if (f.V > 5) System.Console.WriteLine(); }", "it calls Console.WriteLine, in a branch of a method that changes structure: a vector loop sends such a branch's rows to the method, which cannot change structure during the pass; move that branch into a [ForEach] method of its own")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.SetH(1); if (f.V > 5) System.Console.WriteLine(); }", "it calls Console.WriteLine, which is defined in another assembly, in a branch of a method that changes structure: a vector loop sends such a branch's rows to the method, which cannot change structure during the pass; move that branch into a [ForEach] method of its own")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require, Parallel = true)] static void A(ref F f, in B8 b) => f.V++;", "lane types byte and float differ in size: a vector loop takes lanes of one size and of twice that size, not 4 times")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 1 field it uses takes 9 permutes per 16 rows, more than its 1 vector operation gains; it uses 1 of Five's 5 fields (A): move it into a component of its own (a component of one field gets a vector loop)")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, Scratch<int> s) => f.V += s.Value;", "it takes a Scratch<Int32>: working memory a row at a time, not one per lane")]
@@ -458,7 +477,7 @@ public class GeneratorTests
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(tree, CSharpSyntaxTree.ParseText(
             tree.ToString().Replace("[ForEach] static void A", "[ForEach(Parallel = true)] static void A"), Parse)));
 
-        var reasons = Steps(driver)["SystemUpdates"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
         string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
@@ -487,12 +506,28 @@ public class GeneratorTests
         Assert.That(generated, Does.Not.Contain("__bail |= (__pass & __m"), generated);
     }
 
+    // A static readonly field a helper reads is a uniform value of the loop: read once per run, in the setup before the
+    // loop, never per vector (Native AOT checks the class's initialization at each read).
+    [Test]
+    public void AStaticReadonlyFieldAHelperReadsIsReadOncePerRun()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f) => f.V = Rates.Scaled(f.V); } " +
+            "public static class Rates { internal static readonly float Scale = 2.5f; public static float Scaled(float x) => x * Scale; }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        var reads = generated.Split('\n').Where(l => l.Contains("Rates.Scale")).ToArray();
+        Assert.That(reads, Is.Not.Empty, generated);
+        Assert.That(reads, Has.All.Match(@"^\s*var __\w+ = "), generated); // setup locals only
+    }
+
     // A call under an if the loop computes: a cold branch, whose lanes send the vector's rows to the method.
     [Test]
     public void ACallUnderAConditionIsAColdBranch()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "[EcsSystem] public ref struct S { static void Log(float v) { } [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f) { f.V -= 1; if (f.V < 0) { Log(f.V); f.V = 0; } } }"),
+            "[EcsSystem] public ref struct S { static void Log(float v) => System.Console.WriteLine(v); [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f) { f.V -= 1; if (f.V < 0) { Log(f.V); f.V = 0; } } }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
@@ -637,7 +672,7 @@ public class GeneratorTests
         Assert.That(Generated(), Does.Contain("l1.Combine(__v);"));
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(reduction, CSharpSyntaxTree.ParseText(
             reduction.ToString().Replace("N = a.N + b.N", "N = a.N"), Parse)));
-        Assert.That(Steps(driver)["SystemUpdates"].SelectMany(s => s.Outputs).Select(o => o.Reason), Has.Some.EqualTo(IncrementalStepRunReason.Modified));
+        Assert.That(Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason), Has.Some.EqualTo(IncrementalStepRunReason.Modified));
         Assert.That(Generated(), Does.Not.Contain("l1.Combine(__v);").And.Not.Contain("Vector.IsHardwareAccelerated"));
     }
 
@@ -653,7 +688,7 @@ public class GeneratorTests
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(components, CSharpSyntaxTree.ParseText(
             components.ToString().Replace("public float X, Y;", "public float X, Y, Z;"), Parse)));
 
-        var reasons = Steps(driver)["SystemUpdates"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
         string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
@@ -670,7 +705,7 @@ public class GeneratorTests
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(tree, CSharpSyntaxTree.ParseText(
             tree.ToString().Replace("[ForEach] static void A", "[ForEach(SimdMode = SimdMode.Off)] static void A"), Parse)));
 
-        var reasons = Steps(driver)["SystemUpdates"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
         // Not the walk of O and S (.Fusion.g.cs): two trees without a path read as one file, S declared after O.
@@ -948,7 +983,7 @@ public class GeneratorTests
         "ForEachMethods", "Systems", "SystemUpdates", "ClosedSystems", "SystemSet", "Components", "ExtensionMembers", "BufferUses",
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
         "GroupBy", "TargetPolicies", "NotSaved", "ForEntityMethods", "ForEntityTypes", "LambdaPasses", "LambdaFiles", "Views", "Prefabs",
-        "SystemPlaces", "SystemFusions", "SetFusions",
+        "SystemPlaces", "SystemFusions", "SetFusions", "SystemLoops", "SystemCode",
     ];
 
     // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
@@ -1013,14 +1048,14 @@ public class GeneratorTests
     private static readonly string[] ImplementationOnlyStages =
     [
         "LambdaPasses", "LambdaFiles", "ClosedSystems", "SystemSet", "SystemPlaces", "SystemFusions", "SetFusions",
-        "SavedComponents", "SavedBuffers", "GroupBy", "TargetPolicies", "NotSaved", "ModuleInitializers",
+        "SavedComponents", "SavedBuffers", "GroupBy", "TargetPolicies", "NotSaved", "ModuleInitializers", "SystemLoops", "SystemCode",
     ];
 
-    [TestCase("a [ForEach] body", "p.V += q.V;", "p.V += 2 * q.V;", "ForEachMethods SystemUpdates")]
+    [TestCase("a [ForEach] body", "p.V += q.V;", "p.V += 2 * q.V;", "SystemLoops SystemCode")]
     [TestCase("an unrelated file", "public class Unrelated { }", "public class Unrelated { int x; }", "")]
     [TestCase("whitespace", "\npublic static class Free", "\n\npublic static class Free", "")]
     [TestCase("a new component field", "P : IComponent { public int V; }", "P : IComponent { public int V; public int W; }",
-        "Components SavedComponents ForEachMethods SystemUpdates LambdaPasses LambdaFiles")]
+        "Components SavedComponents SystemLoops SystemCode LambdaPasses LambdaFiles")]
     [TestCase("a new query shape", "return s;", "foreach (var i in w.Query<Q>()) i.Q.V++; return s;", "QueryShapes")]
     public void AnEditRerunsOnlyTheStepsItChanges(string edit, string before, string after, string changes)
     {
@@ -1120,7 +1155,7 @@ public class GeneratorTests
         var driver = Driver().RunGenerators(compilation);
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(tree, CSharpSyntaxTree.ParseText(tree.ToString().Replace("UpdateInterval(3)", "UpdateInterval(5, Phase = 2)"), Parse)));
 
-        var reasons = Steps(driver)["SystemUpdates"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
         Assert.That(Steps(driver)["ForEntityTypes"].SelectMany(s => s.Outputs).Select(o => o.Reason),
@@ -1350,7 +1385,7 @@ public class GeneratorTests
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(sliced, CSharpSyntaxTree.ParseText(
             "using EasyEcs;\n" + Components + "[EcsSystem] public ref struct S { [ForEach(Slices = 3)] static void A(ref P p) { } }", Parse)));
 
-        var reasons = Steps(driver)["SystemUpdates"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
         string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
@@ -1387,7 +1422,7 @@ public class GeneratorTests
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(tree, CSharpSyntaxTree.ParseText(
             tree.ToString().Replace("=> p.V = ++s.Value;", "{ for (int i = 0; i < 2; i++) p.V += ++s.Value; }"), Parse)));
 
-        var reasons = Steps(driver)["SystemUpdates"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
         string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
@@ -1878,10 +1913,16 @@ public class GeneratorTests
     }
 
     // The same over every job this assembly's generators wrote: the corpora of KernelTests, KernelLookupTests,
-    // FusionTests, LambdaPassTests, StructuralLoopTests, ReduceTests, ViewTests and the battle server.
+    // FusionTests, LambdaPassTests, StructuralLoopTests, HelperLoopTests, ReduceTests, ViewTests and the battle server.
+    // Only an optimized build counts: a Debug build keeps a local per temporary (WakeJob0 38, HealJob0 44) and tells
+    // the JIT to optimize nothing, so it inlines no method of it at any count. LargeJobsStayWithinTheInlinersLocals
+    // compiles its corpus optimized and checks in every configuration.
     [Test]
     public void GeneratedJobsOfTheTestsStayWithinTheInlinersLocals()
     {
+        if (typeof(GeneratorTests).Assembly.GetCustomAttributes(typeof(System.Diagnostics.DebuggableAttribute), false)
+            is [System.Diagnostics.DebuggableAttribute { IsJITOptimizerDisabled: true }])
+            Assert.Ignore("a Debug build: the JIT inlines none of its methods; run the Release configuration (CI does)");
         using var file = System.IO.File.OpenRead(typeof(GeneratorTests).Assembly.Location);
         using var pe = new System.Reflection.PortableExecutable.PEReader(file);
         var locals = InlinedLocals(pe);
