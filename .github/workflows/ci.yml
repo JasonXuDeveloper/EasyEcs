@@ -62,6 +62,8 @@ jobs:
         run: dotnet build tests/EasyEcs.UnitTest --configuration Release
       - name: Test
         run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release
+      - name: The loop each [ForEach] method of the tests runs on ARM64 (a form left to rows says "rows on this hardware")
+        run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release --filter "Name=EveryVectorFormRunsAsAVectorLoopOnARM64" --logger "console;verbosity=detailed"
 
   doc-snippets:
     runs-on: ubuntu-26.04
