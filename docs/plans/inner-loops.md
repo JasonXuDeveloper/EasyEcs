@@ -4,7 +4,8 @@
 > sessions. When a work package ships, its reasons go into its decision record (D132-D134), the guide pages describe
 > it, and its section here is deleted; the file is deleted with the last package.
 >
-> Status: WP6a (EECS103 v1) shipped: D134, `HandSimd.cs`. WP0-WP5 wait for the Lookup-gather work (D131) to merge,
+> Status: WP6a (EECS103 v1) shipped: D134, `HandSimd.cs`. WP0b (jobs within the inliner's 32 IL locals) shipped:
+> D135, `SystemGenerator.Loops.cs`. WP0-WP5 wait for the Lookup-gather work (D131) to merge,
 > since they change `Kernel.cs`; WP6b/c follow WP5/WP2.
 
 
@@ -381,39 +382,16 @@ Agents per the `audit` skill (at most three; pair the one that measures with one
 - Benchmarks: `GeneratorBenchmark.EditMethodBody`, level.
 - Risk: drift in the text the JIT sees (D126 lesson: even a text cleanup changed inlining). Gate: identical generated text, or identical Tier1 for `World:Masked` runners (`tools/jitdisasm.sh`, `DOTNET_TieredPGO=0`).
 
-**WP0b: generated bodies sized for the JIT inliner (the owner's rule; before WP1, WP2 and WP5).**
-- Why: the runners (`World.Masked`, the run loop of `ForEachBatch`) rely on inlining the job's `Execute`
-  (`AggressiveInlining`). Past the JIT's hard limits (the root method's inline budget, too many locals or blocks)
-  even a forced inline fails, and the job becomes a call per run, per 64-row word in a masked table: D126's masked
-  tail lost up to 3.7x that way. Every larger form of this plan (unrolled inline arrays, element loops, Cell
-  kernels) makes bodies bigger, so the generator must shape its output to stay inlined, not hope it does.
-- **The limit that bites first is 32 IL locals** (measured, `audit-vector-loops`): the JIT refuses to inline a method
-  that declares more, even with `AggressiveInlining`. Move3's masked `Execute` had 36 (24 without the loads'
-  `__s` -> `__c` copies) and was called per word; CycleJob9's masked form has 33 either way. Each form's methods are
-  sized by their IL local count first, IL bytes second; the generator counts and a test pins it.
-- Find the limit, do not guess: read why an inline failed (`DOTNET_JitStdOutFile` with the inliner's report where
-  the release runtime prints it; else the Tier1 listing of the runner, `tools/jitdisasm.sh`, for `call ...Execute`),
-  with `DOTNET_TieredPGO=0` for comparable listings.
-- Forms to measure against each other:
-  1. **Split by temperature:** only the hot vector loop stays in `Execute`; per-run setup, the scalar rows after the
-     last whole vector, masked partial words, bails and the wide rows' table checks move into `NoInlining` helpers
-     called at most once per run.
-  2. **Split by width:** each width's loop in its own method, `Execute` dispatching on
-     `Vector512.IsHardwareAccelerated`, so the width the machine lacks no longer counts in the inlinee's IL.
-  3. **Move the boundary:** a generated entry that takes a table's (or chunk's) runs and words and runs the word loop
-     itself, its own JIT root (as Tile methods are), so nothing large needs inlining: one call per table or chunk.
-- The generator estimates the size of what it writes and picks the form; a test pins that the runners of
-  WorldSimulation, BattleServer, `CycleHoles` and `Move3` have no `call ...Execute` in Tier1.
-- Then retry D126's masked AVX-512 tail on the split form (it was dropped only for the inlining loss).
-- Benchmarks: `KernelBenchmark` (Cycle, CycleHoles, Push, Move3, the fragmented worlds), WorldSimulation,
-  BattleServer, MultiWorld, `GeneratorBenchmark`; two rounds, Tier1 listings with the numbers. Decision record with
-  the measured limit and the chosen form.
+**WP0b: generated bodies sized for the JIT inliner: shipped (D135).** Every later form keeps to it: a job's methods
+the runner inlines declare at most 32 IL locals (`SystemGenerator.InlinedLocals`, counted by `SystemGenerator.Locals`;
+`GeneratorTests.*StayWithinTheInlinersLocals`, `tools/inlining.sh` for the runners). A larger form adds its loops
+through `EmitLoops`, which splits them into methods when the count says so.
 
 **WP1: `[InlineArray]` lanes and constant-trip unrolling in the per-row loop.**
 - Tests: `KernelTests.InlineArrayElementsMatchTheMethodBitForBit` (Lengths; 4/8/16 elements; flat, interleaved, wide); `UnrolledLoopsKeepLoopCarriedLocals` (argmin, running sum); uniform inline arrays (Waypoints); a regression test for the single-lane `Paths` bug; EECS055 reasons (N > 16, variable bound); 0 B.
 - Benchmarks: `KernelBenchmark` new `SpectrumScalar/Generated/HandWritten` (component of 8 floats, 1k/100k) and `NearestScalar/Generated` (8 waypoints, argmin).
 - Regression: `CycleHolesGenerated`, `WorldSimulationBenchmark`, `BattleServerBenchmark`.
-- Risk: **inlining budget** (D126): an unrolled body ×8 can push the job's `Execute` past the inliner, so `World.Masked` calls it per run or per 64-row word. Gate on the size of the translated body. Check the Tier1 runner for `call …Execute`. Cap N and fall back with a reason rather than lose.
+- Risk: **inlining budget** (D135): an unrolled body ×8 declares locals per element; past 32 IL locals `EmitLoops` moves each width's loop into a method, and a single loop past 32 is not split further, so `World.Masked` would call it per run or per 64-row word. Count the translated body's locals (`SystemGenerator.Locals`), cap N and fall back with a reason rather than lose; `tools/inlining.sh` checks the runners.
 
 **WP2: element loops in `[ForEach]` methods (per-row with buffers, batch-method loops, lambda passes), through the body copy.**
 - Tests:
@@ -501,7 +479,7 @@ Agents per the `audit` skill (at most three; pair the one that measures with one
 - **Prefix sums / recurrences:** need reassociation or log-step shuffles; the owner declined `Scan<T>`.
 - **Argmin with index across elements in element loops:** a lane-order fold breaks ties differently (the ±0 example). The per-row unrolled form (WP1) already covers the BattleServer shape.
 - **Hook bodies (`OnUpdate`) with element loops:** run once per update; not hot.
-- **Masked AVX-512 tails for element loops:** only worth retrying inside the NoInlining copies, where D126's inlining objection does not apply. Measure later.
+- **Masked AVX-512 tails for element loops:** retried with every job inlined (D126, D135), the tail still lost to its copy in and out of a 64-row buffer; only worth trying again where a run is mostly tail (tables of a few rows) or the copy goes away. Measure later.
 - **Pow strength reduction:** already settled by D127. Pow rewrites are not exact, so they are Fast-only, and that is done.
 - **Temporal blocking, separable kernels, the double-buffered cell component:** D77 dropped these; they come back
   only with a measured case where the Cell kernel cannot reach the hand-written one without them.
