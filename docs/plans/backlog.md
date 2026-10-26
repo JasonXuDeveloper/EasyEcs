@@ -55,8 +55,10 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        neighbor-list form on ARM64, picked by density; never a slower case (no re-sort every tick on sparse maps).
 2. [x] **ARM64 parity of the generated forms** (merged 186c84d): LD2-4 / ST2-4 for multi-field components, NEON TBL /
        TBX for wide components (a gate per form), BitMask in registers, the `arm64` CI job asserting loop lines.
-       Left: the owner's M4 run of `KernelBenchmark.Steer*` / `Glide*` (the ARM gate's cost model is a model until
-       then); gathers stay rows (D131); compress comes with L3. Bug found: a 16-word wide component whose 512 form
+       Owner's M4 run (default job, one round): SteerGenerated 2.07x faster than SteerScalar at 1k, 1.55x at 100k;
+       GlideGenerated 1.87x / 1.63x; 0 B: the ARM gate admits only forms that pay. Not yet known whether it is too
+       strict: a rejected shape (the test's `Brake`, 8 words, 3 fields) gets a benchmark pair with the gate forced
+       open, and the gate loosens if that form wins on the M4. Gathers stay rows (D131); compress comes with L3. Bug found: a 16-word wide component whose 512 form
        gathers 3 fields writes a `__Loop512` of 34 IL locals (over WP0b's 32): fix with the prefetch item (cut the
        512 loop or reject such rows in the gate).
 3. [ ] **Vector loops through the user's own calls** (running, see above) (owner: users should not have to avoid helpers): today a call
