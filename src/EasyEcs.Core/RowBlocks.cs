@@ -148,19 +148,21 @@ public readonly ref struct RowBlocks
     }
 
     // The pairs of blocks of a and b (the same table when self) whose boxes overlap once widened by reach: the blocks'
-    // low sides on axis 0 sorted (a's blocks as their index, b's as its complement), then for each block every block
-    // after it in that order whose low side is within its high side plus reach, tested on the other axes.
+    // low sides on axis 0 sorted (a's blocks as their index, b's as its complement), the other sides gathered into
+    // that order (high sides widened by reach once), then for each block every block after it in that order whose
+    // low side is within its high side plus reach, tested on the other axes. The inner loop reads five arrays in
+    // order: no table lookup, no copy of a table's sides per candidate.
     private static int Find(RowBlocks a, RowBlocks b, bool self, float reach, Span<BlockPair> into)
     {
         if (!(reach >= 0) || float.IsPositiveInfinity(reach)) ThrowReach(reach);
         int axes = a.Axes;
         if (axes == 0 || b.Axes != axes) ThrowAxes(axes, b.Axes);
         var sa = new Sides(a);
-        var sb = self ? sa : new Sides(b);
         int na = a.Count, nb = self ? 0 : b.Count;
         if (na + nb == 0) return 0;
-        var keys = ArrayPool<float>.Shared.Rent(na + nb);
-        var ids = ArrayPool<int>.Shared.Rent(na + nb);
+        int n = na + nb;
+        var keys = ArrayPool<float>.Shared.Rent(n);
+        var ids = ArrayPool<int>.Shared.Rent(n);
         int m = 0;
         for (int i = 0; i < na; i++)
             if (sa.Min0[i] <= sa.Max0[i]) // an inverted box holds no row
@@ -169,38 +171,62 @@ public readonly ref struct RowBlocks
                 ids[m++] = i;
             }
 
-        for (int i = 0; i < nb; i++)
-            if (sb.Min0[i] <= sb.Max0[i])
-            {
-                keys[m] = sb.Min0[i];
-                ids[m++] = ~i;
-            }
+        if (!self)
+        {
+            var sb = new Sides(b);
+            for (int i = 0; i < nb; i++)
+                if (sb.Min0[i] <= sb.Max0[i])
+                {
+                    keys[m] = sb.Min0[i];
+                    ids[m++] = ~i;
+                }
+        }
 
         Array.Sort(keys, ids, 0, m);
+        // The sides in the sorted order: high0 + reach, then low and high + reach of axes 1 and 2 (0 where unused).
+        var sides = ArrayPool<float>.Shared.Rent(5 * m);
+        Span<float> high0 = sides.AsSpan(0, m), low1 = sides.AsSpan(m, m), high1 = sides.AsSpan(2 * m, m),
+            low2 = sides.AsSpan(3 * m, m), high2 = sides.AsSpan(4 * m, m);
+        Gather(new Sides(a), self ? new Sides(a) : new Sides(b), ids.AsSpan(0, m), axes, reach, high0, low1, high1, low2, high2);
         int found = 0;
         for (int i = 0; i < m; i++)
         {
-            int p = ids[i], pi = p >= 0 ? p : ~p;
-            var sp = p >= 0 ? sa : sb;
-            if (self) Add(into, ref found, pi, pi);
-            float high = sp.Max0[pi] + reach;
+            int p = ids[i];
+            if (self) Add(into, ref found, p, p);
+            float high = high0[i], l1 = low1[i], h1 = high1[i], l2 = low2[i], h2 = high2[i];
             for (int j = i + 1; j < m && keys[j] <= high; j++)
             {
+                if (low1[j] > h1 || l1 > high1[j] || low2[j] > h2 || l2 > high2[j]) continue;
                 int q = ids[j];
-                if (!self && (q >= 0) == (p >= 0)) continue; // two blocks of one table
-                int qi = q >= 0 ? q : ~q;
-                var sq = q >= 0 ? sa : sb;
-                if (axes > 1 && (sp.Min1[pi] > sq.Max1[qi] + reach || sq.Min1[qi] > sp.Max1[pi] + reach)) continue;
-                if (axes > 2 && (sp.Min2[pi] > sq.Max2[qi] + reach || sq.Min2[qi] > sp.Max2[pi] + reach)) continue;
-                if (self) Add(into, ref found, Math.Min(pi, qi), Math.Max(pi, qi));
-                else if (p >= 0) Add(into, ref found, pi, qi);
-                else Add(into, ref found, qi, pi);
+                if (self) Add(into, ref found, Math.Min(p, q), Math.Max(p, q));
+                else if ((q >= 0) == (p >= 0)) continue; // two blocks of one table
+                else if (p >= 0) Add(into, ref found, p, ~q);
+                else Add(into, ref found, q, ~p);
             }
         }
 
+        ArrayPool<float>.Shared.Return(sides);
         ArrayPool<float>.Shared.Return(keys);
         ArrayPool<int>.Shared.Return(ids);
         return found;
+    }
+
+    // The sides of the blocks ids name (a's as their index, b's as its complement) in that order; the high sides plus
+    // reach. Axes a table's boxes do not cover are 0 on both sides, so their test always passes.
+    private static void Gather(Sides a, Sides b, ReadOnlySpan<int> ids, int axes, float reach, Span<float> high0,
+        Span<float> low1, Span<float> high1, Span<float> low2, Span<float> high2)
+    {
+        for (int k = 0; k < ids.Length; k++)
+        {
+            int id = ids[k];
+            var s = id >= 0 ? a : b;
+            int i = id >= 0 ? id : ~id;
+            high0[k] = s.Max0[i] + reach;
+            low1[k] = axes > 1 ? s.Min1[i] : 0;
+            high1[k] = axes > 1 ? s.Max1[i] + reach : reach;
+            low2[k] = axes > 2 ? s.Min2[i] : 0;
+            high2[k] = axes > 2 ? s.Max2[i] + reach : reach;
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
