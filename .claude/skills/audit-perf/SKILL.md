@@ -82,6 +82,8 @@ its own worktree.
    - `--dev` screens of parallel benchmarks on this VM put cases 1.1-1.5x apart in both rounds on byte-identical code:
      before calling a parallel regression, read the screen against a class whose code did not change;
    - check `df` before a long run: a full disk crashes a publish or a round with IOException (exit 134);
+   - never wrap a script that takes the bench lock itself (`tools/bench.sh`) in another `flock`: it deadlocks against
+     another agent's exclusive request;
    - A/B copies as git worktrees or `git archive` snapshots outside the repo tree (scratchpad), frozen while they run:
      BenchmarkDotNet rebuilds from source, so a tree someone edits changes under the run; two rounds, interleaved; a
      run past about 2 h is split into one background job per round;

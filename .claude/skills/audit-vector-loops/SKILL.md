@@ -29,6 +29,12 @@ it cannot is recorded and the form falls back to rows there:
 - No gather on ARM64 in .NET 10: a gather form says what ARM64 does (rows, or scalar lane fills if measured).
 - Proof on this x86 machine: the tests run once more with `DOTNET_EnableAVX=0` (128-bit paths); benchmark classes
   guard every intrinsic so they run on ARM64, and result tables carry an ISA column. The owner runs ARM64 numbers.
+  The .NET 10 knobs are `DOTNET_EnableAVX512=0`, `DOTNET_EnableAVX2=0`, `DOTNET_EnableAVX=0`; `DOTNET_EnableAVX512F=0`
+  is silently ignored, so read the ISA column of every result before trusting it.
+- **Compaction-shaped loops** (a mask to a list of rows or values): store whole vectors while the destination has
+  room for one, then the last selected elements one write per set bit. A step that branches on its part of the mask,
+  or a variable-length partial store per step, kills the 128-bit and AVX2 forms. Sparse words (12 or fewer set bits)
+  take one write per bit. Tables are `ReadOnlySpan<byte>` literals (assembly data), never `static readonly`.
 
 Where each form stands on ARM64 (2026-10-26; update this table when a form gains its ARM64 path, and add every new
 form to it):
@@ -38,7 +44,7 @@ form to it):
 | Plain vector loop (`Vector<T>`, Vector512 block where AVX-512), masked tail, narrow and mixed lanes, math lowerings (`LaneMath`), `Lanes.Bits`, `Emit.AddLanes` | vector | vector (`Vector<T>` is 128-bit) | none needed |
 | Components of several fields, `Vector2/3/4` (`Interleaved`: AVX2 / AVX-512 shuffles, NEON LD2-4 / ST2-4) | vector | vector | none needed |
 | Wide components (`Kernel.Wide`: AVX-512 two-source permutes; ARM64 NEON TBL / TBX, `Interleaved.Pick` / `PickInto`) | vector on AVX-512 | vector where its own gate pays ("(Vector512 only)" otherwise) | M4 numbers to check the gate's cost model |
-| Mask to rows (`Lanes.Compact`: AVX-512 CompressStore) | AVX-512, else a bit walk | bit walk | TBL table (locality L3, running) |
+| Mask to rows (`Lanes.Compact`: AVX-512 CompressStore; AVX2 table + VPMOVZXBD; 128-bit PSHUFB / TBL table) | every ISA (8-byte lanes: AVX-512 or the bit walk) | TBL table | owner's M4 rerun of `CompressBenchmark` |
 | `Lookup` gathers (`LookupLanes`, on request) | AVX2 | rows (D131) | none in .NET 10 |
 | Core scans (`BitMask`, tick filters, `Tile` copies) | vector | vector (AdvSimd / `Vector128` paths) | none needed |
 | Prefetch of lookup chases (`Lookup.Prefetch` / `PrefetchRow`, `Sse.Prefetch0`) | prefetch | nothing (.NET 10 has no ARM64 prefetch outside SVE) | none in .NET 10 |

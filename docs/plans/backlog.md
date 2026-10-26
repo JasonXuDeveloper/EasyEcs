@@ -162,6 +162,10 @@ CI runs the unit tests on ARM64 (b1dbdb0).
       identity copies (`var __c1_0 = __s1_0`); per-width constants re-created (`__u1`, `this.v0 = default`);
       `__d0 = Zero; __d0 |= x` where `__d0 = x` would do. Users read this code (docs "The generator writes" tabs), so
       readability counts once the asm is equal.
+- [ ] **A `using` alias to a system does not bind its generated entry point**: `using Alias = Hunters;` then
+  `Alias.Hunt(world)` fails with CS7036 (found by feat-locality-core). Find whether the generator or the interceptor
+  matches the call by the written name; fix it (an alias is ordinary C#), with a generator test, or have the
+  analyzer say so if it cannot be fixed.
 - [ ] **Flaky: `ParallelReductionsScratchAndLookupsDoNotAllocate`** fails about once per full Release run (seen on
   45feeeb), passes 5 of 5 alone on the tip and on the base before the call inliner. The parallel allocation
   checks' measurement race (#166's fix) has another path when the whole suite runs: find it and fix the cause or
