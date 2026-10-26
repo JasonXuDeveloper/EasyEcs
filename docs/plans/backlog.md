@@ -28,8 +28,11 @@ last (`docs-todos.md` collects them meanwhile).
 - [ ] **AMAC prefetch for lookup chases, then batch probes re-measured at 16M keys** (`borrowed-ideas.md` item 1;
       worktree agent, branch `feat-amac`): core only, generator changes listed for after WP0b.
 
-- [ ] **ARM64 parity** (worktree agent, branch `feat-arm-parity`): wide components through NEON TBL, a repo-wide audit
-      for x86-only paths, the ARM64 CI job asserting which forms run as vectors. (Interleaved LD2-4 / ST2-4: a296ecb.)
+- [ ] **ARM64 parity** (worktree agent, branch `feat-arm-parity`, ready to merge): wide components through NEON TBL /
+      TBX (Interleaved.Pick / PickInto, a gate per form), BitMask's zero test in registers on ARM64, the ARM64 CI job
+      printing and asserting which forms run as vectors (EveryVectorFormRunsAsAVectorLoopOnARM64). Left: the owner's
+      M4 run of `KernelBenchmark.Steer*` / `Glide*` (the ARM gate's cost model is unmeasured until then), the decision
+      record and the docs (docs-todos.md). (Interleaved LD2-4 / ST2-4: a296ecb.)
 
 The owner's order (2026-10-26): every code change before any docs (generator cost and ARM64 parity included).
 CI runs the unit tests on ARM64 (b1dbdb0).
