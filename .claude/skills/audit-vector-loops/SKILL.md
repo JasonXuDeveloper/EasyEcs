@@ -36,15 +36,25 @@ form to it):
 | Form | x86 | ARM64 today | ARM64 path to add |
 |---|---|---|---|
 | Plain vector loop (`Vector<T>`, Vector512 block where AVX-512), masked tail, narrow and mixed lanes, math lowerings (`LaneMath`), `Lanes.Bits`, `Emit.AddLanes` | vector | vector (`Vector<T>` is 128-bit) | none needed |
-| Components of several fields, `Vector2/3/4` (`Interleaved`: AVX2 / AVX-512 shuffles) | vector | rows (`Interleaved.IsAccelerated` false at 128 bits) | `AdvSimd.Arm64.Load2/3/4xVector128AndUnzip` and `StoreVectorAndZip` (LD2-4 / ST2-4): de-interleave is one instruction on NEON |
-| Wide components (`Kernel.Wide`: AVX-512 two-source permutes) | vector on AVX-512 only | rows | TBL over up to four 128-bit registers (`VectorTableLookup` with a tuple), behind the same cost gate |
+| Components of several fields, `Vector2/3/4` (`Interleaved`: AVX2 / AVX-512 shuffles, NEON LD2-4 / ST2-4) | vector | vector | none needed |
+| Wide components (`Kernel.Wide`: AVX-512 two-source permutes; ARM64 NEON TBL / TBX, `Interleaved.Pick` / `PickInto`) | vector on AVX-512 | vector where its own gate pays ("(Vector512 only)" otherwise) | M4 numbers to check the gate's cost model |
 | Mask to rows (`Lanes.Compact`: AVX-512 CompressStore) | AVX-512, else a bit walk | bit walk | TBL table (locality L3, running) |
 | `Lookup` gathers (`LookupLanes`, on request) | AVX2 | rows (D131) | none in .NET 10 |
 | Core scans (`BitMask`, tick filters, `Tile` copies) | vector | vector (AdvSimd / `Vector128` paths) | none needed |
 | Prefetch of lookup chases (`Lookup.Prefetch` / `PrefetchRow`, `Sse.Prefetch0`) | prefetch | nothing (.NET 10 has no ARM64 prefetch outside SVE) | none in .NET 10 |
 
-Nothing runs the tests on ARM64 hardware yet: CI needs an ARM64 job (GitHub's ARM64 Linux runner) that runs the unit
-tests and dumps the `__loops` lines of the test systems, so a form that falls back to rows there is seen.
+The `arm64` CI job runs the unit tests on ARM64 hardware, and `EveryVectorFormRunsAsAVectorLoopOnARM64` prints every
+vector method's loop line there and fails on "; rows on this hardware" except gathers and "(Vector512 only)" forms.
+- **A gate per form**: a form with several widths gates each width on its own cost model and emits only the widths
+  that pay; EECS055 reports the reason only when none pays. Lines for one width carry a marker (`Kernel.Mark512` /
+  `Mark128`) that `SystemGenerator` keeps or drops per loop, so one kernel text serves both widths. `__loops` lines end
+  with "; rows on this hardware" when the running machine has none of the emitted widths: a vector claim is about this
+  machine.
+- **ARM64 on this x86 machine** (qemu-user): `qemu-user-static libc6-arm64-cross libstdc++6-arm64-cross
+  libgcc-s1-arm64-cross`, `QEMU_LD_PREFIX=/usr/aarch64-linux-gnu QEMU_CPU=neoverse-n1 DOTNET_EnableWriteXorExecute=0`
+  (qemu 8.2's default "max" CPU crashes optimized .NET code), a self-contained linux-arm64 publish with a small
+  reflection test runner (NUnitLite's dispatcher crashed), ARM64 Tier1 code through `DOTNET_TieredCompilation=0
+  DOTNET_JitDisasm=... DOTNET_JitStdOutFile=...`. Correctness and machine code only: timings come from real hardware.
 
 ## What becomes a vector loop
 
