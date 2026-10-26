@@ -67,7 +67,7 @@ Both go to `docs/owner-review.md` until such a machine is available.
 
 ## 5. Results
 
-### Item 1: prefetching lookup chases (bar met at 16M only: not built; owner's call)
+### Item 1: prefetching lookup chases (built behind a last-level cache gate, feat-prefetch-gate)
 
 The prototype (`benchmarks/EasyEcs.Benchmark/Locality/Chase.cs`, checked by `LocalityTests.ChaseVersionsAgree`: bit
 for bit against the plain method, dead and recycled targets, runs shorter than the distance, 0 B) is what the
@@ -125,6 +125,69 @@ lookup.Prefetch(col[i + 2k].F); if (i + k < n) lookup.PrefetchRow(col[i + k].F);
 (16 for the vector loop, which prefetches the 8 rows of the vector 2k and k ahead before its `Resolve`); (2) the
 same for relation targets (a `DynamicBuffer` of links is a second chase, not measured). Measured again with the gate
 on `LookupChaseBenchmark` (1k, 1M, 16M) on two machines.
+
+#### Built with the size gate (feat-prefetch-gate, 2026-10-26)
+
+The owner's rule (a faster case ships, a slower one never) with a gate that keeps a world in the cache on today's code:
+
+- **The gate**: `LastLevelCache.Bytes` (src/EasyEcs.Core/LastLevelCache.cs), read once per process as the GC reads it for
+  its gen0 budget: Windows `GetLogicalProcessorInformationEx(RelationCache)` (the largest cache record), Linux the largest
+  `/sys/devices/system/cpu/cpu0/cache/index*/size`, then `sysconf(_SC_LEVEL3_CACHE_SIZE)`, macOS `hw.l3cachesize`, else
+  `hw.perflevel0.l2cachesize`. Only where `Sse.IsSupported` (ARM64 and WebAssembly never read it); any failure or 0 is
+  unknown, which never prefetches. This machine reads 272,629,760 bytes (sysfs 266240K; sysconf agrees). A pass asks
+  `Lookup<T>.Prefetches(world)`: live entities x (16-byte record + size of T) past that size.
+- **Row form** (no vector loop, one thread): the method keeps today's job; a twin `Job{i}Chases` (a run job: records of
+  rows i + 16, rows of T of rows i + 8, the first 16 records before the loop, runs of 16 rows or fewer unprefetched) runs
+  when the pass's call site finds the gate open. A first version replaced the job for every pass: LookupGather's parallel
+  heavy rows took 3x as long at 1k rows (ForEachBatchParallel instead of ForEachParallel) and the serial form a few
+  percent more, so the job is chosen per pass. Parallel row methods keep the per-row form (no prefetch); a method that
+  shares a fused walk gets no twin.
+- **Vector form** (Kernel.Lookups.cs, `SimdMode.Require`): before each Resolve, `if (f{i}) lookup.PrefetchAhead(...)`: the
+  records of the vector's rows 32 past it and the rows of T 16 past it; `f{i}` is set once per pass by the job's
+  initializer. Only ids of an `in` component's lanes (not a wide component).
+- What a chase is: `lookup[x.F]`, `Read(x.F)`, `Has(x.F)` (records only) at an EntityId reached through fields or
+  auto-properties of an `in` component (src/EasyEcs.Generator/Chases.cs); a keyed lookup is not one.
+
+Proof (frozen snapshots: base = claude/relaxed-ramanujan-j4j9k4 at 8fc246f, head = feat-prefetch-gate at e080b98; default
+job, two rounds in alternating order; ms, 1k in us; the generated code ignores Distance, so each value is the mean of
+the two Distance rows; all 0 B):
+
+| LookupChaseBenchmark | base r1 / r2 | head r1 / r2 | head speed-up |
+|---|---|---|---|
+| ChaseSerial 1k | 3.35 / 3.20 us | 3.14 / 3.25 us | 1.07 / 0.98 (gate off) |
+| ChaseGathered 1k | 2.78 / 2.83 us | 2.92 (one Distance row bimodal: 11.0 +- 8.7) / 2.94 us | in-class: LookupChaseGate Auto 2.77 / 2.69 against Off 3.32 / 2.70 |
+| ChaseSerial 1M | 18.61 / 17.66 | 18.02 / 19.00 | 1.03 / 0.93 (gate off: the same job, errors +-1-2 ms) |
+| ChaseGathered 1M | 16.02 / 15.72 | 15.69 / 15.27 | 1.02 / 1.03 (gate off) |
+| ChaseSerial 16M | 945.2 / 962.5 | 695.9 / 672.8 | **1.36 / 1.43** |
+| ChaseGathered 16M | 840.4 / 857.4 | 660.3 / 638.7 | **1.27 / 1.34** |
+| ChaseParallel 16M | 288.3 / 314.0 | 298.0 / 308.4 | 0.97 / 1.02 (no prefetch in parallel) |
+
+LookupBenchmark (10k / 100k, in the cache): ChaseSerial 32.9 / 334.4 us (base r1) against 32.8 / 334.8 (head r1) and
+32.8 / 336.5 (base r2) against 33.0 / 331.4 (head r2). KernelBenchmark Steer / Glide (the 16-word locals fix in the same
+branch): equal within noise (Steer 1k 928 / 960 ns base, 924 / 955 head).
+
+LookupChaseGateBenchmark (head only, two rounds; Auto is the machine's gate, Off today's loop, On forced):
+
+| | 1k Off / On | 1M Off / On | 16M Off / Auto |
+|---|---|---|---|
+| Hunting (rows) | 3.17-3.24 / 4.66-5.18 us | 17.65-17.76 / 14.10-14.18 | 931-967 / 683-686 |
+| HuntingGathered | 2.70-3.32 / 5.12-5.20 us | 14.95-15.17 / 14.73-15.28 | 797-804 / 663-666 |
+
+So in the cache a prefetch costs 1.4-1.9x (1k), which the gate avoids; at 1M (24 MiB, inside this machine's 260 MiB
+L3) forcing it on pays 1.25x for rows and nothing for the vector loop: a machine whose last-level cache is smaller than
+the world (the owner's 32 MiB x86, Apple M4: no prefetch on ARM64 in .NET 10) is where the gate decides differently.
+For the owner (any x86 machine; on ARM64 the gate is off and only Off-equal numbers come out):
+
+    dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*LookupChaseGateBenchmark*'
+
+(it prints the cache size it read: `// last-level cache: N bytes`; Auto equal to Off below it and to On past it is the
+gate working).
+
+Not done here, with the reason (same gate, another form): **index probes** (`TryFind(key.F)`): the prefetch address
+depends on the index's representation (key slots, the head table, the relation map by target), so it needs a probe
+helper per representation in ValueIndex, not the chase form; scalar group prefetching measured 1.33x at 16M keys
+(locality.md 6.3). **Relation targets** (a DynamicBuffer of links): a chase per element of a buffer, not per row, so the
+row form's lookahead does not apply as is. Both stay in backlog item 6.
 
 ### Item 2: timer wheel (bar not met: dropped)
 
