@@ -80,15 +80,15 @@ public static class Lanes
         return n;
     }
 
-    // 0 to 63: the rows of a word Rows compacts.
-    private static readonly int[] Numbers = CreateNumbers();
-
-    private static int[] CreateNumbers()
-    {
-        var numbers = new int[64];
-        for (int i = 0; i < 64; i++) numbers[i] = i;
-        return numbers;
-    }
+    // 0 to 63: the rows of a word Rows compacts. Literal data in the assembly (RVA), so no static to initialize: under
+    // Native AOT a static readonly array would cost a class-initialization check per call.
+    private static ReadOnlySpan<int> Numbers =>
+    [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+        16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+        48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+    ];
 
     // rows[i] += first, a vector at a time (Vector<int>: 16, 8 or 4 lanes), the rest one by one.
     private static void Offset(Span<int> rows, int first)
@@ -145,28 +145,30 @@ public static class Lanes
 
     // AVX2, 4 lanes of 8 bytes per step, a nibble of the mask each: the step's lanes are loaded whole when the source
     // holds them (masked past its end, so nothing beyond it is read), moved to the front by one permutation of 32-bit
-    // pairs (Pairs8), and stored whole while the destination has room for 4 more, else masked (only the selected
-    // lanes reach the destination's last places). No branch depends on the mask's bits: a step whose nibble is 0
-    // stores nothing it keeps (the next step writes the same places), so a mask of mixed bits mispredicts nothing.
+    // pairs (Pairs8) and stored whole, while the destination has room for 4 more; the last selected elements (3 or
+    // fewer) are then written one per set bit, so nothing past the selected count is written. No branch in the vector
+    // steps depends on the mask's bits: a step whose nibble is 0 stores nothing it keeps (the next step writes the same
+    // places), so a mask of mixed bits mispredicts nothing. The source and destination are pinned once per call (they
+    // may move; the loop takes no pin).
     private static unsafe void Permute8(ref long from, int length, ulong mask, ref long into, int count)
     {
         var lanes = Vector256.Create(1L, 2, 4, 8);
+        byte* table = (byte*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(Pairs8)); // assembly data: never moves
         fixed (long* source = &from, destination = &into)
-        fixed (int* table = Pairs8)
         {
-            long* to = destination, end = destination + count;
-            for (int at = 0; mask != 0; at += 4, mask >>= 4)
+            long* to = destination, last = destination + count - 4;
+            int at = 0;
+            for (; mask != 0 && to <= last; at += 4, mask >>= 4)
             {
                 int m = (int)(mask & 0xF);
                 var values = at + 4 <= length
                     ? Avx.LoadVector256(source + at)
                     : Avx2.MaskLoad(source + at, Vector256.Equals(Vector256.Create((long)m) & lanes, lanes));
-                var packed = Avx2.PermuteVar8x32(values.AsInt32(), Avx.LoadVector256(table + m * 8)).AsInt64();
-                int n = BitOperations.PopCount((uint)m);
-                if (end - to >= 4) Avx.Store(to, packed);
-                else Avx2.MaskStore(to, Vector256.LessThan(Vector256.Create(0L, 1, 2, 3), Vector256.Create((long)n)), packed);
-                to += n;
+                Avx.Store(to, Avx2.PermuteVar8x32(values.AsInt32(), Avx2.ConvertToVector256Int32(table + m * 8)).AsInt64());
+                to += BitOperations.PopCount((uint)m);
             }
+
+            if (mask != 0) Visit(ref Unsafe.Add(ref from, at), mask, ref Unsafe.AsRef<long>(to));
         }
     }
 
@@ -174,22 +176,22 @@ public static class Lanes
     private static unsafe void Permute4(ref int from, int length, ulong mask, ref int into, int count)
     {
         var lanes = Vector256.Create(1, 2, 4, 8, 16, 32, 64, 128);
+        byte* table = (byte*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(Lanes8)); // assembly data: never moves
         fixed (int* source = &from, destination = &into)
-        fixed (int* table = Lanes8)
         {
-            int* to = destination, end = destination + count;
-            for (int at = 0; mask != 0; at += 8, mask >>= 8)
+            int* to = destination, last = destination + count - 8;
+            int at = 0;
+            for (; mask != 0 && to <= last; at += 8, mask >>= 8)
             {
                 int m = (int)(mask & 0xFF);
                 var values = at + 8 <= length
                     ? Avx.LoadVector256(source + at)
                     : Avx2.MaskLoad(source + at, Vector256.Equals(Vector256.Create(m) & lanes, lanes));
-                var packed = Avx2.PermuteVar8x32(values, Avx.LoadVector256(table + m * 8));
-                int n = BitOperations.PopCount((uint)m);
-                if (end - to >= 8) Avx.Store(to, packed);
-                else Avx2.MaskStore(to, Vector256.LessThan(Vector256.Create(0, 1, 2, 3, 4, 5, 6, 7), Vector256.Create(n)), packed);
-                to += n;
+                Avx.Store(to, Avx2.PermuteVar8x32(values, Avx2.ConvertToVector256Int32(table + m * 8)));
+                to += BitOperations.PopCount((uint)m);
             }
+
+            if (mask != 0) Visit(ref Unsafe.Add(ref from, at), mask, ref Unsafe.AsRef<int>(to));
         }
     }
 
@@ -204,24 +206,24 @@ public static class Lanes
 
     // 128-bit vectors, 4 lanes of 4 bytes per step, a nibble of the mask each: the step's lanes loaded whole when the
     // source holds them (else only the elements before its end, so nothing beyond it is read), moved to the front by
-    // one byte shuffle (Bytes4), stored whole while the destination has room for 4 more, else only the selected ones.
-    // Branch-free per step as Permute8: at 50 % of the rows selected, a skip of empty nibbles or of the identity
-    // shuffle mispredicted enough to make the loop slower than the scalar walk.
+    // one byte shuffle (Bytes4) and stored whole while the destination has room for 4 more, then the last selected
+    // ones (3 or fewer) one per set bit, as Permute8. A partial store per step at the destination's end (a copy of a
+    // variable length) made the steps after the first selected few cost a call each at low density. Branch-free per
+    // step: at 50 % of the rows selected, a skip of empty nibbles or of the identity shuffle mispredicted enough to
+    // make the loop slower than the scalar walk.
     private static void Shuffle4(ref int from, int length, ulong mask, ref int into, int count)
     {
-        ref byte table = ref MemoryMarshal.GetArrayDataReference(Bytes4);
-        int to = 0;
-        for (int at = 0; mask != 0; at += 4, mask >>= 4)
+        ref byte table = ref MemoryMarshal.GetReference(Bytes4);
+        int to = 0, at = 0;
+        for (; mask != 0 && to <= count - 4; at += 4, mask >>= 4)
         {
             int m = (int)(mask & 0xF);
             var values = at + 4 <= length ? Vector128.LoadUnsafe(ref Unsafe.As<int, byte>(ref Unsafe.Add(ref from, at))) : Tail(ref Unsafe.As<int, byte>(ref Unsafe.Add(ref from, at)), (length - at) * 4);
-            var packed = Shuffle(values, Vector128.LoadUnsafe(ref table, (nuint)(m * 16)));
-            int n = BitOperations.PopCount((uint)m);
-            ref byte place = ref Unsafe.As<int, byte>(ref Unsafe.Add(ref into, to));
-            if (count - to >= 4) packed.StoreUnsafe(ref place);
-            else Store(packed, ref place, n * 4);
-            to += n;
+            Shuffle(values, Vector128.LoadUnsafe(ref table, (nuint)(m * 16))).StoreUnsafe(ref Unsafe.As<int, byte>(ref Unsafe.Add(ref into, to)));
+            to += BitOperations.PopCount((uint)m);
         }
+
+        if (mask != 0) Visit(ref Unsafe.Add(ref from, at), mask, ref Unsafe.Add(ref into, to));
     }
 
     // The first bytes of a vector at the source's end (the rest 0): nothing past the source is read.
@@ -232,49 +234,114 @@ public static class Lanes
         return values;
     }
 
-    // The first bytes of a vector at the destination's end: nothing past the selected elements is written.
-    private static void Store(Vector128<byte> values, ref byte into, int bytes) =>
-        Unsafe.CopyBlockUnaligned(ref into, ref Unsafe.As<Vector128<byte>, byte>(ref values), (uint)bytes);
+    // The tables are literal data in the assembly (RVA): nothing to initialize, nothing that moves, so under Native AOT
+    // a loop reading them checks no class initialization (a static readonly array would).
 
     // Per nibble of a mask, the bytes of the 32-bit lanes it selects first (the rest 0x80: zero). 256 bytes. Lanes of 8
     // bytes have no 128-bit form: 2 per step (32 steps a word) lost to the scalar walk (CompactBenchmark without AVX2,
     // 1M ids at 50 %: 1.19 ms against 1.00 ms).
-    private static readonly byte[] Bytes4 = ByteTable(4, 4);
+    private static ReadOnlySpan<byte> Bytes4 =>
+    [
+        128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,
+        0, 1, 2, 3, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,
+        4, 5, 6, 7, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,
+        0, 1, 2, 3, 4, 5, 6, 7, 128, 128, 128, 128, 128, 128, 128, 128,
+        8, 9, 10, 11, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,
+        0, 1, 2, 3, 8, 9, 10, 11, 128, 128, 128, 128, 128, 128, 128, 128,
+        4, 5, 6, 7, 8, 9, 10, 11, 128, 128, 128, 128, 128, 128, 128, 128,
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 128, 128, 128, 128,
+        12, 13, 14, 15, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,
+        0, 1, 2, 3, 12, 13, 14, 15, 128, 128, 128, 128, 128, 128, 128, 128,
+        4, 5, 6, 7, 12, 13, 14, 15, 128, 128, 128, 128, 128, 128, 128, 128,
+        0, 1, 2, 3, 4, 5, 6, 7, 12, 13, 14, 15, 128, 128, 128, 128,
+        8, 9, 10, 11, 12, 13, 14, 15, 128, 128, 128, 128, 128, 128, 128, 128,
+        0, 1, 2, 3, 8, 9, 10, 11, 12, 13, 14, 15, 128, 128, 128, 128,
+        4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 128, 128, 128, 128,
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    ];
 
-    private static byte[] ByteTable(int lanes, int width)
-    {
-        var table = new byte[(1 << lanes) * 16];
-        table.AsSpan().Fill(0x80);
-        for (int mask = 0; mask < 1 << lanes; mask++)
-            for (int lane = 0, n = 0; lane < lanes; lane++)
-                if ((mask >> lane & 1) != 0)
-                {
-                    for (int part = 0; part < width; part++) table[mask * 16 + n * width + part] = (byte)(lane * width + part);
-                    n++;
-                }
+    // Per byte of a mask, the 32-bit lanes it selects first, in order (the rest 0), a byte each: PermuteVar8x32's
+    // indices once widened (VPMOVZXBD loads and widens in one instruction). 2 KiB.
+    private static ReadOnlySpan<byte> Lanes8 =>
+    [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+        2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0,
+        3, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 1, 3, 0, 0, 0, 0, 0, 0, 0, 1, 3, 0, 0, 0, 0, 0,
+        2, 3, 0, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 0, 0, 0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 1, 2, 3, 0, 0, 0, 0,
+        4, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 1, 4, 0, 0, 0, 0, 0, 0, 0, 1, 4, 0, 0, 0, 0, 0,
+        2, 4, 0, 0, 0, 0, 0, 0, 0, 2, 4, 0, 0, 0, 0, 0, 1, 2, 4, 0, 0, 0, 0, 0, 0, 1, 2, 4, 0, 0, 0, 0,
+        3, 4, 0, 0, 0, 0, 0, 0, 0, 3, 4, 0, 0, 0, 0, 0, 1, 3, 4, 0, 0, 0, 0, 0, 0, 1, 3, 4, 0, 0, 0, 0,
+        2, 3, 4, 0, 0, 0, 0, 0, 0, 2, 3, 4, 0, 0, 0, 0, 1, 2, 3, 4, 0, 0, 0, 0, 0, 1, 2, 3, 4, 0, 0, 0,
+        5, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 1, 5, 0, 0, 0, 0, 0, 0, 0, 1, 5, 0, 0, 0, 0, 0,
+        2, 5, 0, 0, 0, 0, 0, 0, 0, 2, 5, 0, 0, 0, 0, 0, 1, 2, 5, 0, 0, 0, 0, 0, 0, 1, 2, 5, 0, 0, 0, 0,
+        3, 5, 0, 0, 0, 0, 0, 0, 0, 3, 5, 0, 0, 0, 0, 0, 1, 3, 5, 0, 0, 0, 0, 0, 0, 1, 3, 5, 0, 0, 0, 0,
+        2, 3, 5, 0, 0, 0, 0, 0, 0, 2, 3, 5, 0, 0, 0, 0, 1, 2, 3, 5, 0, 0, 0, 0, 0, 1, 2, 3, 5, 0, 0, 0,
+        4, 5, 0, 0, 0, 0, 0, 0, 0, 4, 5, 0, 0, 0, 0, 0, 1, 4, 5, 0, 0, 0, 0, 0, 0, 1, 4, 5, 0, 0, 0, 0,
+        2, 4, 5, 0, 0, 0, 0, 0, 0, 2, 4, 5, 0, 0, 0, 0, 1, 2, 4, 5, 0, 0, 0, 0, 0, 1, 2, 4, 5, 0, 0, 0,
+        3, 4, 5, 0, 0, 0, 0, 0, 0, 3, 4, 5, 0, 0, 0, 0, 1, 3, 4, 5, 0, 0, 0, 0, 0, 1, 3, 4, 5, 0, 0, 0,
+        2, 3, 4, 5, 0, 0, 0, 0, 0, 2, 3, 4, 5, 0, 0, 0, 1, 2, 3, 4, 5, 0, 0, 0, 0, 1, 2, 3, 4, 5, 0, 0,
+        6, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 1, 6, 0, 0, 0, 0, 0, 0, 0, 1, 6, 0, 0, 0, 0, 0,
+        2, 6, 0, 0, 0, 0, 0, 0, 0, 2, 6, 0, 0, 0, 0, 0, 1, 2, 6, 0, 0, 0, 0, 0, 0, 1, 2, 6, 0, 0, 0, 0,
+        3, 6, 0, 0, 0, 0, 0, 0, 0, 3, 6, 0, 0, 0, 0, 0, 1, 3, 6, 0, 0, 0, 0, 0, 0, 1, 3, 6, 0, 0, 0, 0,
+        2, 3, 6, 0, 0, 0, 0, 0, 0, 2, 3, 6, 0, 0, 0, 0, 1, 2, 3, 6, 0, 0, 0, 0, 0, 1, 2, 3, 6, 0, 0, 0,
+        4, 6, 0, 0, 0, 0, 0, 0, 0, 4, 6, 0, 0, 0, 0, 0, 1, 4, 6, 0, 0, 0, 0, 0, 0, 1, 4, 6, 0, 0, 0, 0,
+        2, 4, 6, 0, 0, 0, 0, 0, 0, 2, 4, 6, 0, 0, 0, 0, 1, 2, 4, 6, 0, 0, 0, 0, 0, 1, 2, 4, 6, 0, 0, 0,
+        3, 4, 6, 0, 0, 0, 0, 0, 0, 3, 4, 6, 0, 0, 0, 0, 1, 3, 4, 6, 0, 0, 0, 0, 0, 1, 3, 4, 6, 0, 0, 0,
+        2, 3, 4, 6, 0, 0, 0, 0, 0, 2, 3, 4, 6, 0, 0, 0, 1, 2, 3, 4, 6, 0, 0, 0, 0, 1, 2, 3, 4, 6, 0, 0,
+        5, 6, 0, 0, 0, 0, 0, 0, 0, 5, 6, 0, 0, 0, 0, 0, 1, 5, 6, 0, 0, 0, 0, 0, 0, 1, 5, 6, 0, 0, 0, 0,
+        2, 5, 6, 0, 0, 0, 0, 0, 0, 2, 5, 6, 0, 0, 0, 0, 1, 2, 5, 6, 0, 0, 0, 0, 0, 1, 2, 5, 6, 0, 0, 0,
+        3, 5, 6, 0, 0, 0, 0, 0, 0, 3, 5, 6, 0, 0, 0, 0, 1, 3, 5, 6, 0, 0, 0, 0, 0, 1, 3, 5, 6, 0, 0, 0,
+        2, 3, 5, 6, 0, 0, 0, 0, 0, 2, 3, 5, 6, 0, 0, 0, 1, 2, 3, 5, 6, 0, 0, 0, 0, 1, 2, 3, 5, 6, 0, 0,
+        4, 5, 6, 0, 0, 0, 0, 0, 0, 4, 5, 6, 0, 0, 0, 0, 1, 4, 5, 6, 0, 0, 0, 0, 0, 1, 4, 5, 6, 0, 0, 0,
+        2, 4, 5, 6, 0, 0, 0, 0, 0, 2, 4, 5, 6, 0, 0, 0, 1, 2, 4, 5, 6, 0, 0, 0, 0, 1, 2, 4, 5, 6, 0, 0,
+        3, 4, 5, 6, 0, 0, 0, 0, 0, 3, 4, 5, 6, 0, 0, 0, 1, 3, 4, 5, 6, 0, 0, 0, 0, 1, 3, 4, 5, 6, 0, 0,
+        2, 3, 4, 5, 6, 0, 0, 0, 0, 2, 3, 4, 5, 6, 0, 0, 1, 2, 3, 4, 5, 6, 0, 0, 0, 1, 2, 3, 4, 5, 6, 0,
+        7, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 1, 7, 0, 0, 0, 0, 0, 0, 0, 1, 7, 0, 0, 0, 0, 0,
+        2, 7, 0, 0, 0, 0, 0, 0, 0, 2, 7, 0, 0, 0, 0, 0, 1, 2, 7, 0, 0, 0, 0, 0, 0, 1, 2, 7, 0, 0, 0, 0,
+        3, 7, 0, 0, 0, 0, 0, 0, 0, 3, 7, 0, 0, 0, 0, 0, 1, 3, 7, 0, 0, 0, 0, 0, 0, 1, 3, 7, 0, 0, 0, 0,
+        2, 3, 7, 0, 0, 0, 0, 0, 0, 2, 3, 7, 0, 0, 0, 0, 1, 2, 3, 7, 0, 0, 0, 0, 0, 1, 2, 3, 7, 0, 0, 0,
+        4, 7, 0, 0, 0, 0, 0, 0, 0, 4, 7, 0, 0, 0, 0, 0, 1, 4, 7, 0, 0, 0, 0, 0, 0, 1, 4, 7, 0, 0, 0, 0,
+        2, 4, 7, 0, 0, 0, 0, 0, 0, 2, 4, 7, 0, 0, 0, 0, 1, 2, 4, 7, 0, 0, 0, 0, 0, 1, 2, 4, 7, 0, 0, 0,
+        3, 4, 7, 0, 0, 0, 0, 0, 0, 3, 4, 7, 0, 0, 0, 0, 1, 3, 4, 7, 0, 0, 0, 0, 0, 1, 3, 4, 7, 0, 0, 0,
+        2, 3, 4, 7, 0, 0, 0, 0, 0, 2, 3, 4, 7, 0, 0, 0, 1, 2, 3, 4, 7, 0, 0, 0, 0, 1, 2, 3, 4, 7, 0, 0,
+        5, 7, 0, 0, 0, 0, 0, 0, 0, 5, 7, 0, 0, 0, 0, 0, 1, 5, 7, 0, 0, 0, 0, 0, 0, 1, 5, 7, 0, 0, 0, 0,
+        2, 5, 7, 0, 0, 0, 0, 0, 0, 2, 5, 7, 0, 0, 0, 0, 1, 2, 5, 7, 0, 0, 0, 0, 0, 1, 2, 5, 7, 0, 0, 0,
+        3, 5, 7, 0, 0, 0, 0, 0, 0, 3, 5, 7, 0, 0, 0, 0, 1, 3, 5, 7, 0, 0, 0, 0, 0, 1, 3, 5, 7, 0, 0, 0,
+        2, 3, 5, 7, 0, 0, 0, 0, 0, 2, 3, 5, 7, 0, 0, 0, 1, 2, 3, 5, 7, 0, 0, 0, 0, 1, 2, 3, 5, 7, 0, 0,
+        4, 5, 7, 0, 0, 0, 0, 0, 0, 4, 5, 7, 0, 0, 0, 0, 1, 4, 5, 7, 0, 0, 0, 0, 0, 1, 4, 5, 7, 0, 0, 0,
+        2, 4, 5, 7, 0, 0, 0, 0, 0, 2, 4, 5, 7, 0, 0, 0, 1, 2, 4, 5, 7, 0, 0, 0, 0, 1, 2, 4, 5, 7, 0, 0,
+        3, 4, 5, 7, 0, 0, 0, 0, 0, 3, 4, 5, 7, 0, 0, 0, 1, 3, 4, 5, 7, 0, 0, 0, 0, 1, 3, 4, 5, 7, 0, 0,
+        2, 3, 4, 5, 7, 0, 0, 0, 0, 2, 3, 4, 5, 7, 0, 0, 1, 2, 3, 4, 5, 7, 0, 0, 0, 1, 2, 3, 4, 5, 7, 0,
+        6, 7, 0, 0, 0, 0, 0, 0, 0, 6, 7, 0, 0, 0, 0, 0, 1, 6, 7, 0, 0, 0, 0, 0, 0, 1, 6, 7, 0, 0, 0, 0,
+        2, 6, 7, 0, 0, 0, 0, 0, 0, 2, 6, 7, 0, 0, 0, 0, 1, 2, 6, 7, 0, 0, 0, 0, 0, 1, 2, 6, 7, 0, 0, 0,
+        3, 6, 7, 0, 0, 0, 0, 0, 0, 3, 6, 7, 0, 0, 0, 0, 1, 3, 6, 7, 0, 0, 0, 0, 0, 1, 3, 6, 7, 0, 0, 0,
+        2, 3, 6, 7, 0, 0, 0, 0, 0, 2, 3, 6, 7, 0, 0, 0, 1, 2, 3, 6, 7, 0, 0, 0, 0, 1, 2, 3, 6, 7, 0, 0,
+        4, 6, 7, 0, 0, 0, 0, 0, 0, 4, 6, 7, 0, 0, 0, 0, 1, 4, 6, 7, 0, 0, 0, 0, 0, 1, 4, 6, 7, 0, 0, 0,
+        2, 4, 6, 7, 0, 0, 0, 0, 0, 2, 4, 6, 7, 0, 0, 0, 1, 2, 4, 6, 7, 0, 0, 0, 0, 1, 2, 4, 6, 7, 0, 0,
+        3, 4, 6, 7, 0, 0, 0, 0, 0, 3, 4, 6, 7, 0, 0, 0, 1, 3, 4, 6, 7, 0, 0, 0, 0, 1, 3, 4, 6, 7, 0, 0,
+        2, 3, 4, 6, 7, 0, 0, 0, 0, 2, 3, 4, 6, 7, 0, 0, 1, 2, 3, 4, 6, 7, 0, 0, 0, 1, 2, 3, 4, 6, 7, 0,
+        5, 6, 7, 0, 0, 0, 0, 0, 0, 5, 6, 7, 0, 0, 0, 0, 1, 5, 6, 7, 0, 0, 0, 0, 0, 1, 5, 6, 7, 0, 0, 0,
+        2, 5, 6, 7, 0, 0, 0, 0, 0, 2, 5, 6, 7, 0, 0, 0, 1, 2, 5, 6, 7, 0, 0, 0, 0, 1, 2, 5, 6, 7, 0, 0,
+        3, 5, 6, 7, 0, 0, 0, 0, 0, 3, 5, 6, 7, 0, 0, 0, 1, 3, 5, 6, 7, 0, 0, 0, 0, 1, 3, 5, 6, 7, 0, 0,
+        2, 3, 5, 6, 7, 0, 0, 0, 0, 2, 3, 5, 6, 7, 0, 0, 1, 2, 3, 5, 6, 7, 0, 0, 0, 1, 2, 3, 5, 6, 7, 0,
+        4, 5, 6, 7, 0, 0, 0, 0, 0, 4, 5, 6, 7, 0, 0, 0, 1, 4, 5, 6, 7, 0, 0, 0, 0, 1, 4, 5, 6, 7, 0, 0,
+        2, 4, 5, 6, 7, 0, 0, 0, 0, 2, 4, 5, 6, 7, 0, 0, 1, 2, 4, 5, 6, 7, 0, 0, 0, 1, 2, 4, 5, 6, 7, 0,
+        3, 4, 5, 6, 7, 0, 0, 0, 0, 3, 4, 5, 6, 7, 0, 0, 1, 3, 4, 5, 6, 7, 0, 0, 0, 1, 3, 4, 5, 6, 7, 0,
+        2, 3, 4, 5, 6, 7, 0, 0, 0, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 0, 1, 2, 3, 4, 5, 6, 7,
+    ];
 
-        return table;
-    }
-
-    // Per byte of a mask, the 32-bit lanes it selects first, in order (the rest 0): PermuteVar8x32's indices. 8 KiB.
-    private static readonly int[] Lanes8 = Table(8, 1);
-
-    // Per nibble of a mask, the 64-bit lanes it selects first as pairs of 32-bit lanes. 512 bytes.
-    private static readonly int[] Pairs8 = Table(4, 2);
-
-    private static int[] Table(int lanes, int width)
-    {
-        var table = new int[(1 << lanes) * 8];
-        for (int mask = 0; mask < 1 << lanes; mask++)
-            for (int lane = 0, n = 0; lane < lanes; lane++)
-                if ((mask >> lane & 1) != 0)
-                {
-                    for (int part = 0; part < width; part++) table[mask * 8 + n * width + part] = lane * width + part;
-                    n++;
-                }
-
-        return table;
-    }
+    // Per nibble of a mask, the 64-bit lanes it selects first as pairs of 32-bit lanes, a byte each. 128 bytes.
+    private static ReadOnlySpan<byte> Pairs8 =>
+    [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+        2, 3, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 0, 0, 0, 0,
+        4, 5, 0, 0, 0, 0, 0, 0, 0, 1, 4, 5, 0, 0, 0, 0,
+        2, 3, 4, 5, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 0, 0,
+        6, 7, 0, 0, 0, 0, 0, 0, 0, 1, 6, 7, 0, 0, 0, 0,
+        2, 3, 6, 7, 0, 0, 0, 0, 0, 1, 2, 3, 6, 7, 0, 0,
+        4, 5, 6, 7, 0, 0, 0, 0, 0, 1, 4, 5, 6, 7, 0, 0,
+        2, 3, 4, 5, 6, 7, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7,
+    ];
 
     // Few selected: one step per set bit.
     private static void Visit<T>(ref T from, ulong mask, ref T into)
