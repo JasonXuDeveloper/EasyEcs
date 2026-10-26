@@ -139,6 +139,7 @@ public class LocalityTests
                  {
                      into => Selection.Branchless(values, limit, into),
                      into => Selection.PermutationTable(values, limit, into),
+                     into => Selection.ShuffleTable(values, limit, into),
                      into => Selection.Compress512(values, limit, into),
                      into => Selection.CoreCompact(values, limit, numbers, into),
                  })

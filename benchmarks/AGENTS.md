@@ -28,9 +28,13 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                Locality/Crowd.cs), NearestZombie / NearestPlayer (the samples' nearest searches against a
                                search of sorted blocks; Locality/Nearest.cs, Locality/SortedBlocks.cs: the Morton sort,
                                blocks of 8 with boxes, the box tree), Compress (a mask to a row list: branch, branchless,
-                               AVX2 permutation table, AVX-512 compress, Lanes.Compact) and BatchProbe (one key at a time
+                               AVX2 permutation table, 128-bit shuffle table (NEON TBL / PSHUFB), AVX-512 compress,
+                               Lanes.Compact) and BatchProbe (one key at a time
                                against vertical probes with and without refill; Locality/Operators.cs), TimerWheel
                                (borrowed-ideas.md item 2: scans of wake ticks against a timer wheel; Locality/Timers.cs).
+                               Every kernel picks 8 lanes when Vector256.IsHardwareAccelerated, else 4 (ARM64's NEON),
+                               and guards each intrinsic; Locality/Isa.cs names the ISA (printed by setup), IsaColumn.cs
+                               shows it as a column ([IsaColumn]).
                                Always measure with BenchmarkDotNet.
 benchmarks/EasyEcs.Benchmark.Plugin/  a collectible plugin (Scoring.cs) the Unload benchmark loads and unloads
 benchmarks/EasyEcs.Comparison/ BenchmarkDotNet against Arch, Friflo.Engine.ECS and DefaultEcs, every result checked in

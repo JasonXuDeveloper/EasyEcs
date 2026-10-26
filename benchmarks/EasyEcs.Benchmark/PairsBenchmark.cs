@@ -9,11 +9,12 @@ namespace EasyEcs.Benchmark;
 /// ways: the row loop over a hand-written grid reading neighbors through lookups (what users write today, the
 /// baseline), the grid with copies of the positions and velocities, per-entity neighbor lists rebuilt every 10 ticks,
 /// and a hand-written cluster-pair kernel over Morton-sorted rows in blocks of 8 (kernel only, the side arrays standing
-/// for the sorted columns; with the sort every 1, 10 and 20 ticks; and with the copies a user would add today). Each
+/// for the sorted columns, 8 lanes with hardware 256-bit vectors, else 4: ARM64's NEON; with the sort every 1, 10 and
+/// 20 ticks; and with the copies a user would add today). Each
 /// invocation runs 20 ticks (OperationsPerInvoke), so a sort every k ticks is amortized exactly. One thread. Setup checks
 /// every version against a double-precision reference.
 /// </summary>
-[MemoryDiagnoser]
+[MemoryDiagnoser, IsaColumn]
 public class PairsBenchmark
 {
     private const int Ticks = 20;
@@ -26,6 +27,7 @@ public class PairsBenchmark
     [GlobalSetup]
     public void Setup()
     {
+        Isa.Print();
         _world = Crowd.Create(Entities, Density);
         var expected = Crowd.Reference(_world);
         Check(expected, nameof(GridLookups), () => Crowd.GridTick(_world));

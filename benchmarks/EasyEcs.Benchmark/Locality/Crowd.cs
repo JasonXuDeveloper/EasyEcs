@@ -470,9 +470,16 @@ public sealed class ClusterRows
     /// <summary>
     /// The kernel: for each block of 8 rows (i in the lanes), its own block with the self pairs masked, then each block
     /// of its list with every j broadcast: 64 pairs per block pair, the cutoff a mask, the sums kept in the i lanes and
-    /// stored once per block.
+    /// stored once per block. 8 lanes where 256-bit vectors are hardware (x86 with AVX), else 4 lanes per half block
+    /// (ARM64's NEON, x86 without AVX): the same sums in the same order per lane, so both write the same pushes.
     /// </summary>
     public void Interact()
+    {
+        if (Vector256.IsHardwareAccelerated) Interact8();
+        else Interact4();
+    }
+
+    private void Interact8()
     {
         var b = Blocks;
         ref float x = ref MemoryMarshal.GetArrayDataReference(b.X);
@@ -512,6 +519,69 @@ public sealed class ClusterRows
             ax.StoreUnsafe(ref outX, i0);
             ay.StoreUnsafe(ref outY, i0);
         }
+    }
+
+    // The 4-wide kernel: each block as two halves of 4 i lanes, each against the 8 rows of its own block (self masked)
+    // and of every block of its list.
+    private void Interact4()
+    {
+        var b = Blocks;
+        ref float x = ref MemoryMarshal.GetArrayDataReference(b.X);
+        ref float y = ref MemoryMarshal.GetArrayDataReference(b.Y);
+        ref float vx = ref MemoryMarshal.GetArrayDataReference(VX);
+        ref float vy = ref MemoryMarshal.GetArrayDataReference(VY);
+        ref float outX = ref MemoryMarshal.GetArrayDataReference(PX);
+        ref float outY = ref MemoryMarshal.GetArrayDataReference(PY);
+        var start = PairStart;
+        var pairs = Pairs;
+        var all = Vector128<float>.AllBitsSet;
+        for (int block = 0; block < b.BlockCount; block++)
+        {
+            nuint b0 = (nuint)(block * SortedBlocks.Lanes);
+            for (int half = 0; half < SortedBlocks.Lanes; half += 4)
+            {
+                nuint i0 = b0 + (nuint)half;
+                var lane = Vector128.Create(half, half + 1, half + 2, half + 3);
+                var xi = Vector128.LoadUnsafe(ref x, i0);
+                var yi = Vector128.LoadUnsafe(ref y, i0);
+                var vxi = Vector128.LoadUnsafe(ref vx, i0);
+                var vyi = Vector128.LoadUnsafe(ref vy, i0);
+                Vector128<float> ax = default, ay = default;
+                for (int j = 0; j < SortedBlocks.Lanes; j++)
+                {
+                    var other = ~Vector128.Equals(lane, Vector128.Create(j)).AsSingle();      // not the row itself
+                    nuint at = b0 + (nuint)j;
+                    Pair(xi, yi, vxi, vyi, Unsafe.Add(ref x, at), Unsafe.Add(ref y, at), Unsafe.Add(ref vx, at),
+                        Unsafe.Add(ref vy, at), other, ref ax, ref ay);
+                }
+
+                for (int p = start[block], end = start[block + 1]; p < end; p++)
+                {
+                    nuint j0 = (nuint)(pairs[p] * SortedBlocks.Lanes);
+                    for (nuint j = j0; j < j0 + SortedBlocks.Lanes; j++)
+                        Pair(xi, yi, vxi, vyi, Unsafe.Add(ref x, j), Unsafe.Add(ref y, j), Unsafe.Add(ref vx, j),
+                            Unsafe.Add(ref vy, j), all, ref ax, ref ay);
+                }
+
+                ax.StoreUnsafe(ref outX, i0);
+                ay.StoreUnsafe(ref outY, i0);
+            }
+        }
+    }
+
+    // One j against the 4 i lanes, as the 8-lane Pair.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Pair(Vector128<float> xi, Vector128<float> yi, Vector128<float> vxi, Vector128<float> vyi,
+        float xj, float yj, float vxj, float vyj, Vector128<float> keep, ref Vector128<float> ax, ref Vector128<float> ay)
+    {
+        var dx = xi - Vector128.Create(xj);
+        var dy = yi - Vector128.Create(yj);
+        var d2 = dx * dx + dy * dy;
+        var r2 = Vector128.Create(Crowd.Range2);
+        var w = (r2 - d2) & Vector128.LessThan(d2, r2) & keep;
+        var drag = Vector128.Create(Crowd.Drag);
+        ax += w * (dx + drag * (Vector128.Create(vxj) - vxi));
+        ay += w * (dy + drag * (Vector128.Create(vyj) - vyi));
     }
 
     // One j against the 8 i lanes: the term of Crowd.Separate, lane by lane, zero where out of range or masked.

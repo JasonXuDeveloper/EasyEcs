@@ -330,15 +330,37 @@ public sealed class SortedBlocks
         return bestSlot;
     }
 
-    // The 8 squared distances of a block in one vector; the lanes at or below the best go through the exact rule.
+    // The 8 squared distances of a block in one vector (two 128-bit halves where 256-bit vectors are not hardware:
+    // ARM64's NEON); the lanes at or below the best go through the exact rule.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void Leaf(int block, float px, float py, int[] tieKeys, ref float best, ref int bestSlot, ref int bestKey)
     {
         int first = block * Lanes;
-        var dx = Vector256.LoadUnsafe(ref MemoryMarshal.GetArrayDataReference(X), (nuint)first) - Vector256.Create(px);
-        var dy = Vector256.LoadUnsafe(ref MemoryMarshal.GetArrayDataReference(Y), (nuint)first) - Vector256.Create(py);
-        var d2 = dx * dx + dy * dy;
-        uint hits = Vector256.LessThanOrEqual(d2, Vector256.Create(best)).ExtractMostSignificantBits();
+        ref float x = ref MemoryMarshal.GetArrayDataReference(X);
+        ref float y = ref MemoryMarshal.GetArrayDataReference(Y);
+        Vector256<float> d2;
+        uint hits;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var dx = Vector256.LoadUnsafe(ref x, (nuint)first) - Vector256.Create(px);
+            var dy = Vector256.LoadUnsafe(ref y, (nuint)first) - Vector256.Create(py);
+            d2 = dx * dx + dy * dy;
+            hits = Vector256.LessThanOrEqual(d2, Vector256.Create(best)).ExtractMostSignificantBits();
+        }
+        else
+        {
+            var bound = Vector128.Create(best);
+            var dx0 = Vector128.LoadUnsafe(ref x, (nuint)first) - Vector128.Create(px);
+            var dy0 = Vector128.LoadUnsafe(ref y, (nuint)first) - Vector128.Create(py);
+            var dx1 = Vector128.LoadUnsafe(ref x, (nuint)first + 4) - Vector128.Create(px);
+            var dy1 = Vector128.LoadUnsafe(ref y, (nuint)first + 4) - Vector128.Create(py);
+            var low = dx0 * dx0 + dy0 * dy0;
+            var high = dx1 * dx1 + dy1 * dy1;
+            d2 = Vector256.Create(low, high);
+            hits = Vector128.LessThanOrEqual(low, bound).ExtractMostSignificantBits()
+                | Vector128.LessThanOrEqual(high, bound).ExtractMostSignificantBits() << 4;
+        }
+
         for (; hits != 0; hits &= hits - 1)
         {
             int lane = BitOperations.TrailingZeroCount(hits), slot = first + lane;
