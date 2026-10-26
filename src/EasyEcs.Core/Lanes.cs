@@ -25,8 +25,8 @@ public static class Lanes
     // Up to this many selected elements, one step per set bit beats the vector steps up to the last one.
     private const int Few = 4;
 
-    // Below this many selected elements of 64, the scalar form visits the set bits (TZCNT); above, it stores every
-    // element up to the last selected one and advances by its bit, which no misprediction slows.
+    // Below this many selected elements of 64, a step per set bit (TZCNT) beats the AVX2 and 128-bit steps (8 to 32 per
+    // word) and the scalar form that stores every element up to the last selected one and advances by its bit.
     private const int Sparse = 12;
 
     /// <summary>
@@ -52,11 +52,11 @@ public static class Lanes
         if (count <= Few) Visit(ref from, mask, ref into);
         else if (Unsafe.SizeOf<T>() == 8 && Avx512F.IsSupported) Compress8(ref Unsafe.As<T, long>(ref from), mask, ref Unsafe.As<T, long>(ref into));
         else if (Unsafe.SizeOf<T>() == 4 && Avx512F.IsSupported) Compress4(ref Unsafe.As<T, int>(ref from), mask, ref Unsafe.As<T, int>(ref into));
+        else if (count <= Sparse) Visit(ref from, mask, ref into);
         else if (Unsafe.SizeOf<T>() == 8 && Avx2.IsSupported) Permute8(ref Unsafe.As<T, long>(ref from), source.Length, mask, ref Unsafe.As<T, long>(ref into), count);
         else if (Unsafe.SizeOf<T>() == 4 && Avx2.IsSupported) Permute4(ref Unsafe.As<T, int>(ref from), source.Length, mask, ref Unsafe.As<T, int>(ref into), count);
         else if (Unsafe.SizeOf<T>() == 4 && Shuffles) Shuffle4(ref Unsafe.As<T, int>(ref from), source.Length, mask, ref Unsafe.As<T, int>(ref into), count);
         else if (Unsafe.SizeOf<T>() == 8 && Shuffles) Shuffle8(ref Unsafe.As<T, long>(ref from), source.Length, mask, ref Unsafe.As<T, long>(ref into), count);
-        else if (count <= Sparse) Visit(ref from, mask, ref into);
         else Advance(ref from, mask, ref into);
         return count;
     }
