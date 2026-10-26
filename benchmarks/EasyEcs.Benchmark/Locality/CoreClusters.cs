@@ -40,7 +40,7 @@ public sealed class CoreClusters
 
     private long _version = -1;
     private BlockPair[] _pairs = new BlockPair[256];
-    private int[] _start = new int[2], _list = new int[256];
+    private int[] _start = new int[2], _list = new int[256], _cursor = [];
     private int _blocks;
 
     // The 16-row form: lists over pairs of blocks.
@@ -111,7 +111,8 @@ public sealed class CoreClusters
 
         for (int b = 0; b < _blocks; b++) _start[b + 1] += _start[b];
         if (_list.Length < links) _list = new int[links * 2];
-        Span<int> cursor = _blocks <= 4096 ? stackalloc int[_blocks] : new int[_blocks];
+        if (_cursor.Length < _blocks) _cursor = new int[_blocks * 2]; // warm-up only
+        Span<int> cursor = _cursor.AsSpan(0, _blocks);
         _start.AsSpan(0, _blocks).CopyTo(cursor);
         for (int p = 0; p < n; p++)
         {
