@@ -2161,7 +2161,7 @@ internal sealed partial class Kernel
         if (op is IInvocationOperation { TargetMethod: var target } && !IsMath(target) && !KnownVector(target.ContainingType)
             || op is IPropertyReferenceOperation { Property.GetMethod: not null } && op.Syntax.GetAnnotations(CallReason).Any())
         {
-            var (text, fixable) = CallWhy(op, op is IInvocationOperation invocation ? invocation.TargetMethod : ((IPropertyReferenceOperation)op).Property.GetMethod!);
+            var (text, fixable) = ReasonForCall(op, op is IInvocationOperation invocation ? invocation.TargetMethod : ((IPropertyReferenceOperation)op).Property.GetMethod!);
             return new Unsupported(text, fixable);
         }
 

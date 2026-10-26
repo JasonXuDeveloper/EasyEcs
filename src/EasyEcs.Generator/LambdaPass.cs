@@ -229,7 +229,7 @@ internal static class LambdaPass
     }
 
     /// <summary>The symbol of <paramref name="symbol"/>'s chain (itself or a containing type) that another file cannot reach, or null.</summary>
-    private static ISymbol? Blocking(ISymbol symbol)
+    internal static ISymbol? Blocking(ISymbol symbol)
     {
         if (symbol is IMethodSymbol { ReducedFrom: { } extension }) symbol = extension;
         if (symbol is IMethodSymbol { IsGenericMethod: true } generic) symbol = generic.ConstructedFrom;
@@ -245,7 +245,7 @@ internal static class LambdaPass
         return null;
     }
 
-    private static string Describe(ISymbol symbol) =>
+    internal static string Describe(ISymbol symbol) =>
         $"{(symbol.DeclaredAccessibility == Accessibility.Private ? "private " : symbol is INamedTypeSymbol { IsFileLocal: true } ? "file-local " : "protected ")}"
         + $"{symbol.Kind.ToString().ToLowerInvariant().Replace("namedtype", "type")} '{symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}'"
         + (symbol.ContainingType is { } type ? $" of {type.Name}" : "")

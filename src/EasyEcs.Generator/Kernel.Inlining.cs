@@ -63,7 +63,7 @@ internal sealed partial class Kernel
     /// reason for a call it left, else the callee's own (virtual, an interface's, a delegate, in another assembly, what
     /// its body holds).
     /// </summary>
-    private (string Text, bool IsFixable) CallWhy(IOperation op, IMethodSymbol method)
+    private (string Text, bool IsFixable) ReasonForCall(IOperation op, IMethodSymbol method)
     {
         if (op.Syntax.GetAnnotations(CallReason).FirstOrDefault()?.Data is { Length: > 1 } data) return (data.Substring(1), data[0] == 'F');
         string call = $"it calls {(method.ContainingType.IsExtension ? method.ContainingType.ContainingType : method.ContainingType).Name}.{Callees.NameOf(method)}";
@@ -245,7 +245,7 @@ internal sealed partial class Kernel
             {
                 var written = new HashSet<IParameterSymbol>(SymbolEqualityComparer.Default);
                 bool writesThis = false, pure = true;
-                string? outside = null;
+                string? opaque = null;
                 var root = Model.GetOperation((SyntaxNode?)Block ?? Expression!, ct);
                 foreach (var op in root?.DescendantsAndSelf() ?? [])
                 {
@@ -280,9 +280,9 @@ internal sealed partial class Kernel
                         }
                     }
 
-                    if (outside == null && op is IInvocationOperation other && !IsMath(other.TargetMethod) && !KnownVector(other.TargetMethod.ContainingType)
+                    if (opaque == null && op is IInvocationOperation other && !IsMath(other.TargetMethod) && !KnownVector(other.TargetMethod.ContainingType)
                         && _callees.Candidate(other.TargetMethod) == null && !Symbols.IsGenerated(other.TargetMethod))
-                        outside = $"{other.TargetMethod.ContainingType.Name}.{other.TargetMethod.Name}";
+                        opaque = $"{other.TargetMethod.ContainingType.Name}.{other.TargetMethod.Name}";
 
                     switch (op)
                     {
@@ -297,7 +297,7 @@ internal sealed partial class Kernel
                 }
 
                 bool recursive = _cycled?.Remove(this) == true;
-                return _effects = new Effects(written, writesThis, pure && !recursive, outside, recursive);
+                return _effects = new Effects(written, writesThis, pure && !recursive, opaque, recursive);
             }
             finally
             {
@@ -312,9 +312,9 @@ internal sealed partial class Kernel
     /// <param name="Written">The parameters the body writes.</param>
     /// <param name="WritesThis">It writes the struct it is a member of.</param>
     /// <param name="Pure">It changes nothing its caller sees (<see cref="Callee.Facts"/>).</param>
-    /// <param name="Outside">The first method it calls that no loop inlines (not math, not a helper of this compilation, not generated), or null.</param>
+    /// <param name="Opaque">The first method it calls that no loop inlines (not math, not a helper of this compilation, not generated), or null.</param>
     /// <param name="Recursive">It reaches itself through the helpers it calls.</param>
-    private sealed record Effects(HashSet<IParameterSymbol> Written, bool WritesThis, bool Pure, string? Outside, bool Recursive);
+    private sealed record Effects(HashSet<IParameterSymbol> Written, bool WritesThis, bool Pure, string? Opaque, bool Recursive);
 
     /// <summary>The variable a write reaches through fields: <c>a.b.c</c> is <c>a</c>.</summary>
     private static IOperation Root(IOperation op)
@@ -628,6 +628,9 @@ internal sealed partial class Kernel
         /// </summary>
         private SyntaxNode? Name(SimpleNameSyntax node)
         {
+            // The body moves into the generated job, outside the callee's type and file: what only they reach cannot go.
+            if (Inlined && Hidden(node) is { } hidden)
+                throw new NotInlined($"whose body names {LambdaPass.Describe(hidden)}: make it internal", true);
             if (node.Parent is MemberAccessExpressionSyntax access && access.Name == node || node.Parent is QualifiedNameSyntax qualified && qualified.Right == node)
                 return null; // the member of something: its receiver decides
             var symbol = Bound(node);
@@ -673,6 +676,21 @@ internal sealed partial class Kernel
 
             throw new NotInlined($"its body uses '{node.Identifier.ValueText}', which the vector loop cannot follow");
         }
+
+        /// <summary>
+        /// The private, protected or file-local symbol (or containing type) a name of an inlined body reaches, which the
+        /// generated job cannot name; null for what stays in the body (locals, parameters, constants folded) or is inlined
+        /// itself (a helper's own helpers).
+        /// </summary>
+        private ISymbol? Hidden(SimpleNameSyntax node) => Bound(node) switch
+        {
+            null or ILocalSymbol or IParameterSymbol or ITypeParameterSymbol or INamespaceSymbol or IRangeVariableSymbol or IDiscardSymbol => null,
+            IMethodSymbol { MethodKind: MethodKind.LocalFunction } => null,
+            IFieldSymbol { IsConst: true } => null,
+            IMethodSymbol method when owner.Callees.Candidate(method) != null => null,
+            IPropertySymbol property when owner.Callees.Candidate(property.GetMethod) != null && owner.Callees.Candidate(property.SetMethod ?? property.GetMethod) != null => null,
+            var symbol => LambdaPass.Blocking(symbol),
+        };
 
         private static bool Of(ISymbol symbol, IMethodSymbol method)
         {
@@ -879,8 +897,8 @@ internal sealed partial class Kernel
             var facts = owner.Callees.Get(site.Method, owner.Token).Facts(owner.Token);
             if (facts.Recursive) throw new NotInlined("which is recursive", false);
             // A body that calls code no loop takes stays scalar wherever the call stands: say so, not how to move it.
-            if (!facts.Pure && facts.Outside != null && !WholeOfStatement(node))
-                throw new NotInlined($"which calls {facts.Outside}", false);
+            if (!facts.Pure && facts.Opaque != null && !WholeOfStatement(node))
+                throw new NotInlined($"which calls {facts.Opaque}", false);
             if (!facts.Pure && !WholeOfStatement(node))
                 throw new NotInlined("which changes its arguments or its entity, inside an expression: call it in a statement of its own (var r = ...;)", true);
             if (_statement != null && _statement.DescendantNodes().OfType<SingleVariableDesignationSyntax>().Any(d => d.SpanStart < node.SpanStart && d.Parent is not DeclarationExpressionSyntax))
@@ -973,7 +991,7 @@ internal sealed partial class Kernel
                 }
                 else
                 {
-                    self = Caller(site.Receiver);
+                    self = InCaller(site.Receiver);
                     thisWritable = Writable(site.Receiver);
                 }
 
@@ -1002,7 +1020,7 @@ internal sealed partial class Kernel
             int offset = site.ReceiverIsArgument ? 1 : 0;
             if (site.ReceiverIsArgument)
             {
-                var value = Caller(site.Receiver!);
+                var value = InCaller(site.Receiver!);
                 names[parameters[0]] = Value(parameters[0], site.Receiver, value, facts, locals, receiverWritable: Writable(site.Receiver!));
             }
 
@@ -1046,7 +1064,7 @@ internal sealed partial class Kernel
                     continue;
                 }
 
-                var rewritten = Caller(argument.Expression);
+                var rewritten = InCaller(argument.Expression);
                 names[parameter] = Value(parameter, argument.Expression, rewritten, facts, locals, receiverWritable: true);
             }
 
@@ -1057,7 +1075,7 @@ internal sealed partial class Kernel
         /// A receiver or an argument rewritten in the caller's place: the callee being bound is not yet entered, so a call
         /// of it there (<c>Grow(Grow(x))</c>) is a call after it, not a recursive one.
         /// </summary>
-        private ExpressionSyntax Caller(ExpressionSyntax expression)
+        private ExpressionSyntax InCaller(ExpressionSyntax expression)
         {
             var stack = owner.Stack;
             if (stack.Count == 0) return (ExpressionSyntax)Visit(expression)!;
