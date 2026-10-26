@@ -106,6 +106,9 @@ tools/agents.sh                writes the AGENTS.md indexes (directories, skills
                                is not @AGENTS.md and a source file of src/ missing from its file map (CI, verify)
 tools/jitdisasm.sh             the Tier1 machine code of a [ForEach] method's job (DOTNET_JitDisasm), to check a vector
                                loop: no call in the loop body, no needless range check
+tools/inlining.sh              every generated job a runner of the benchmark worlds does not inline, with the JIT's
+                               reason (tools/Inlining: each benchmark method run once without tiering while an
+                               EventListener reads the inliner's events); exit code 1 if there is one
 tools/DocCheck/                compiles the C# fences of the docs pages (`doccheck=` flags on a fence; `example`
                                fences of a page compile together as its full example)
 tools/ApiDocs/                 writes docs/content/reference/ from the XML docs and the complexity tables of api.mdx /
