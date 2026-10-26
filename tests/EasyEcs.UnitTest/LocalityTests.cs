@@ -124,6 +124,24 @@ public class LocalityTests
         }
     }
 
+    [TestCase(Density.Crowd)]
+    [TestCase(Density.Sparse)]
+    public void ClustersOnTheCoreOrderMatchTheReference(Density density)
+    {
+        using var world = Crowd.Create(3_000, density);
+        CoreClusters.Order(world, int.MaxValue);
+        var expected = Crowd.Reference(world);
+        var clusters = new CoreClusters();
+        foreach (var tick in new Action[] { () => clusters.Interact(world), () => clusters.Interact16(world) })
+        {
+            tick();
+            Assert.That(Crowd.FirstMismatch(Crowd.Pushes(world), expected), Is.EqualTo(-1));
+        }
+
+        clusters.Interact(world);
+        Assert.That(Allocations.Of(() => clusters.Interact(world)), Is.Zero);
+    }
+
     [TestCase(10)]
     [TestCase(50)]
     [TestCase(90)]

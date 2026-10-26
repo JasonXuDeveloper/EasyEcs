@@ -56,6 +56,24 @@ public class LanesTests
     }
 
     [Test]
+    public void RowsWritesTheNumbersOfTheSelectedRows([Values(0, 64, 1_000_000)] int first)
+    {
+        var random = new Random(11);
+        for (int round = 0; round < 400; round++)
+        {
+            ulong mask = round switch { 0 => 0, 1 => ulong.MaxValue, 2 => 1UL << 63, _ => (ulong)random.NextInt64() & (round % 2 == 0 ? (ulong)random.NextInt64() : ulong.MaxValue) };
+            var expected = new List<int>();
+            for (int i = 0; i < 64; i++)
+                if ((mask >> i & 1) != 0) expected.Add(first + i);
+            var destination = new int[expected.Count + 2];
+            destination.AsSpan().Fill(-1);
+            Assert.That(Lanes.Rows(mask, first, destination.AsSpan(0, expected.Count)), Is.EqualTo(expected.Count));
+            Assert.That(destination[..expected.Count], Is.EqualTo(expected.ToArray()), $"mask {mask:X}");
+            Assert.That(destination[expected.Count..], Is.All.EqualTo(-1));
+        }
+    }
+
+    [Test]
     public void CompactRefusesABitPastTheSourceOrTooShortADestination()
     {
         var source = new int[10];
