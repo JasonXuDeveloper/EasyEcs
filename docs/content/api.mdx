@@ -244,7 +244,7 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | API | Complexity | Notes |
 | --- | --- | --- |
 | `Lanes.Compact<T>(source, mask, destination)` | O(1): at most 64 elements; for elements of 8 or 4 bytes 8 or 4 vector steps with AVX-512, skipping steps that select nothing; without AVX-512, one step per selected element when 12 or fewer are, else 16 or 8 steps with AVX2, 16 steps for 4-byte elements with 128-bit vectors (ARM64's NEON, SSSE3), otherwise one step per element up to the last selected one | writes `source[i]` for each set bit `i` of `mask`, in order, to the start of `destination` and returns `PopCount(mask)`; reads nothing past `source` and writes only that many elements; throws `ArgumentException` when a bit lies at or past `source.Length` or `destination` is shorter than `PopCount(mask)`; allocation-free |
-| `Lanes.Rows(mask, first, destination)` | O(1): `Compact` over the numbers 0 to 63, then `first` added a vector at a time | writes `first + i` for each set bit `i` of `mask`, in order, and returns `PopCount(mask)`: a word of rows a condition passed as a row list; throws `ArgumentException` when `destination` is too short; allocation-free |
+| `Lanes.RowNumbers(mask, first, destination)` | O(1): `Compact` over the numbers 0 to 63, then `first` added a vector at a time | writes `first + i` for each set bit `i` of `mask`, in order, and returns `PopCount(mask)`: a word of rows a condition passed as a row list; throws `ArgumentException` when `destination` is too short; allocation-free |
 
 `Tile<TCell, TTile>`, the `[ForEach]` parameter of a stencil over a grid of tiles, and the padded layers it loads:
 

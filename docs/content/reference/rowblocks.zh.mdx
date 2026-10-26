@@ -12,7 +12,7 @@ public readonly ref struct RowBlocks
 
 一张有序表的块（成对方法推断出的顺序，或 [[OrderBy]](/zh/docs/reference/orderbyattribute)）：表的行按键排序，每 [`RowBlocks.Size`](/zh/docs/reference/rowblocks#size) 行一块，每块一个轴对齐的包围盒，盒子罩住块里各行声明的点，再向外扩大余量。空间搜索读的就是它：离查询远的盒子整块跳过，近的盒子从表的列里逐行读（或一个向量读一块，[`RowBlocks.Read`](/zh/docs/reference/rowblocks#read)）。从 [`World.Blocks`](/zh/docs/reference/world#blocks)（按某个组件排序的每张表）或 [`EntitySpan.Blocks`](/zh/docs/reference/entityspan#blocks)（批处理方法这段行所在的表，第 0 个元素是 [`EntitySpan.FirstRow`](/zh/docs/reference/entityspan#firstrow) 行）得到。
 
-包围盒由排序画出，只要没有行移动超过余量，就一直有效到下一次排序：[0, [`RowBlocks.SortedRows`](/zh/docs/reference/rowblocks#sortedrows)) 的行在块里；[[`RowBlocks.SortedRows`](/zh/docs/reference/rowblocks#sortedrows), [`RowBlocks.Rows`](/zh/docs/reference/rowblocks#rows)) 的行是之后加入的，不在任何块里（搜索逐行读它们，或等下一次排序）。排序后移进某块的行会扩大那块的包围盒。遍历中被这次遍历销毁或移走的行是墓碑：它的 id 下标为负（[`RowBlocks.Ids`](/zh/docs/reference/rowblocks#ids)）。块里的行可能在排序后失去了这个组件（[`RowBlocks.Has`](/zh/docs/reference/rowblocks#has)）。到 World 下一次结构变更前有效（指向表数组的 ref struct）。
+包围盒由排序画出，只要没有行移动超过余量，就一直有效到下一次排序：[0, [`RowBlocks.SortedRows`](/zh/docs/reference/rowblocks#sortedrows)) 的行在块里；[[`RowBlocks.SortedRows`](/zh/docs/reference/rowblocks#sortedrows), [`RowBlocks.RowCount`](/zh/docs/reference/rowblocks#rowcount)) 的行是之后加入的，不在任何块里（搜索逐行读它们，或等下一次排序）。排序后移进某块的行会扩大那块的包围盒。遍历中被这次遍历销毁或移走的行是墓碑：它的 id 下标为负（[`RowBlocks.Ids`](/zh/docs/reference/rowblocks#ids)）。块里的行可能在排序后失去了这个组件（[`RowBlocks.Has`](/zh/docs/reference/rowblocks#has)）。到 World 下一次结构变更前有效（指向表数组的 ref struct）。
 
 ## 属性 [#properties]
 
@@ -46,7 +46,7 @@ public int Count { get; }
 public ReadOnlySpan<EntityId> Ids { get; }
 ```
 
-表里各行的 id（[`RowBlocks.Rows`](/zh/docs/reference/rowblocks#rows)）；遍历中的墓碑下标为负。O(1)。
+表里各行的 id（[`RowBlocks.RowCount`](/zh/docs/reference/rowblocks#rowcount)）；遍历中的墓碑下标为负。O(1)。
 
 ### `Margin` [#margin]
 
@@ -56,10 +56,10 @@ public float Margin { get; }
 
 每个包围盒每一侧扩大的距离（声明的余量）。O(1)。
 
-### `Rows` [#rows]
+### `RowCount` [#rowcount]
 
 ```csharp
-public int Rows { get; }
+public int RowCount { get; }
 ```
 
 表的行数，包括遍历中的墓碑：从 [`RowBlocks.SortedRows`](/zh/docs/reference/rowblocks#sortedrows) 起的行不在任何块里。O(1)。
@@ -96,7 +96,7 @@ public long Version { get; }
 public Entity this[int row] { get; }
 ```
 
-第 `row` 行的实体（小于 [`RowBlocks.Rows`](/zh/docs/reference/rowblocks#rows)、不是墓碑的行）。O(1)。
+第 `row` 行的实体（小于 [`RowBlocks.RowCount`](/zh/docs/reference/rowblocks#rowcount)、不是墓碑的行）。O(1)。
 
 ## 方法 [#methods]
 
@@ -167,7 +167,7 @@ public int Pairs(float reach, Span<BlockPair> destination);
 public ReadOnlySpan<T> Read<T>() where T : struct, IComponent;
 ```
 
-表里 `T` 的列，全部行（[`RowBlocks.Rows`](/zh/docs/reference/rowblocks#rows)），只读：块里的第 `r` 行就是第 `r` 个元素。读它的系统像读别的组件一样声明这次读取（组件参数或 [`Lookup`](/zh/docs/reference/lookup)），所以写它的系统不会和它同一阶段。O(1)。
+表里 `T` 的列，全部行（[`RowBlocks.RowCount`](/zh/docs/reference/rowblocks#rowcount)），只读：块里的第 `r` 行就是第 `r` 个元素。读它的系统像读别的组件一样声明这次读取（组件参数或 [`Lookup`](/zh/docs/reference/lookup)），所以写它的系统不会和它同一阶段。O(1)。
 
 **异常**
 

@@ -12,7 +12,7 @@ public readonly ref struct RowBlocks
 
 The blocks of one ordered table (an order inferred for a pair method, or [[OrderBy]](/en/docs/reference/orderbyattribute)): its rows in key order, cut into blocks of [`RowBlocks.Size`](/en/docs/reference/rowblocks#size) rows, each with an axis-aligned box over the declared point of its rows, widened by the margin. What a search over space reads: a box far from the query skips its rows at once, a near one is read row by row (or a block per vector) from the table's columns ([`RowBlocks.Read`](/en/docs/reference/rowblocks#read)). From [`World.Blocks`](/en/docs/reference/world#blocks) (every table ordered by a component) or [`EntitySpan.Blocks`](/en/docs/reference/entityspan#blocks) (the table of a batch method's run of rows, whose row 0 is [`EntitySpan.FirstRow`](/en/docs/reference/entityspan#firstrow)).
 
-The boxes are drawn by the sort and hold until the next one as long as no row moved farther than the margin: rows [0, [`RowBlocks.SortedRows`](/en/docs/reference/rowblocks#sortedrows)) are in blocks; rows [[`RowBlocks.SortedRows`](/en/docs/reference/rowblocks#sortedrows), [`RowBlocks.Rows`](/en/docs/reference/rowblocks#rows)) joined the table since and are in none (a search reads them one by one, or waits for the next sort). A row that moved into a block's row since the sort widened that block's box. Inside a pass a row destroyed or moved away by the pass is a tombstone: its id's index is negative ([`RowBlocks.Ids`](/en/docs/reference/rowblocks#ids)). A row of a block may lack the component since the sort ([`RowBlocks.Has`](/en/docs/reference/rowblocks#has)). Valid until the next structural change of the world (a ref struct over the table's arrays).
+The boxes are drawn by the sort and hold until the next one as long as no row moved farther than the margin: rows [0, [`RowBlocks.SortedRows`](/en/docs/reference/rowblocks#sortedrows)) are in blocks; rows [[`RowBlocks.SortedRows`](/en/docs/reference/rowblocks#sortedrows), [`RowBlocks.RowCount`](/en/docs/reference/rowblocks#rowcount)) joined the table since and are in none (a search reads them one by one, or waits for the next sort). A row that moved into a block's row since the sort widened that block's box. Inside a pass a row destroyed or moved away by the pass is a tombstone: its id's index is negative ([`RowBlocks.Ids`](/en/docs/reference/rowblocks#ids)). A row of a block may lack the component since the sort ([`RowBlocks.Has`](/en/docs/reference/rowblocks#has)). Valid until the next structural change of the world (a ref struct over the table's arrays).
 
 ## Properties
 
@@ -46,7 +46,7 @@ Blocks: `ceil(SortedRows / Size)`; 0 for a table without an order. O(1).
 public ReadOnlySpan<EntityId> Ids { get; }
 ```
 
-The ids of the table's rows ([`RowBlocks.Rows`](/en/docs/reference/rowblocks#rows)); a tombstone of a pass has a negative index. O(1).
+The ids of the table's rows ([`RowBlocks.RowCount`](/en/docs/reference/rowblocks#rowcount)); a tombstone of a pass has a negative index. O(1).
 
 ### `Margin` [#margin]
 
@@ -56,10 +56,10 @@ public float Margin { get; }
 
 What every box was widened by on each side (the declaration's margin). O(1).
 
-### `Rows` [#rows]
+### `RowCount` [#rowcount]
 
 ```csharp
-public int Rows { get; }
+public int RowCount { get; }
 ```
 
 Rows of the table, tombstones of a pass included: those from [`RowBlocks.SortedRows`](/en/docs/reference/rowblocks#sortedrows) on are in no block. O(1).
@@ -96,7 +96,7 @@ Changes whenever the blocks do (a sort, a widened box, fewer rows) and differs b
 public Entity this[int row] { get; }
 ```
 
-The entity of row `row` (a row below [`RowBlocks.Rows`](/en/docs/reference/rowblocks#rows) that is no tombstone). O(1).
+The entity of row `row` (a row below [`RowBlocks.RowCount`](/en/docs/reference/rowblocks#rowcount) that is no tombstone). O(1).
 
 ## Methods
 
@@ -167,7 +167,7 @@ The pairs of this table's blocks whose boxes come within `reach` of each other o
 public ReadOnlySpan<T> Read<T>() where T : struct, IComponent;
 ```
 
-The table's column of `T`, every row ([`RowBlocks.Rows`](/en/docs/reference/rowblocks#rows)), read-only: row `r` of a block is element `r`. A system that reads it declares the read like any other (a parameter of the component or a [`Lookup`](/en/docs/reference/lookup)), so no writer of it shares its stage. O(1).
+The table's column of `T`, every row ([`RowBlocks.RowCount`](/en/docs/reference/rowblocks#rowcount)), read-only: row `r` of a block is element `r`. A system that reads it declares the read like any other (a parameter of the component or a [`Lookup`](/en/docs/reference/lookup)), so no writer of it shares its stage. O(1).
 
 **Exceptions**
 

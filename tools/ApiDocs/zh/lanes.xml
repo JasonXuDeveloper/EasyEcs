@@ -24,7 +24,7 @@
     <returns>写入的元素个数。</returns>
     <exception cref="T:System.ArgumentException"><paramref name="mask" /> 的某一位没有对应 <paramref name="source" /> 的元素，或 <paramref name="destination" /> 太短。</exception>
   </member>
-  <member name="M:EasyEcs.Lanes.Rows(System.UInt64,System.Int32,System.Span{System.Int32})" source="a75d56dada04">
+  <member name="M:EasyEcs.Lanes.RowNumbers(System.UInt64,System.Int32,System.Span{System.Int32})" source="a75d56dada04">
     <summary>
       把 <paramref name="mask" /> 选中的行号（<paramref name="first" /> 加上每个置位的下标）按顺序写到 <paramref name="destination" />
       开头，返回写了几个：向量条件通过的一个字的行变成行列表，生成的循环和核心不管在什么机器上都用这一次调用写出它

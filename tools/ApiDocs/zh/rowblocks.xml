@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.RowBlocks" source="39670e664dd1">
+  <member name="T:EasyEcs.RowBlocks" source="37aa2dc1b4fd">
     <summary>
       一张有序表的块（成对方法推断出的顺序，或 <see cref="T:EasyEcs.OrderByAttribute">[OrderBy]</see>）：表的行按键排序，
       每 <see cref="P:EasyEcs.RowBlocks.Size" /> 行一块，每块一个轴对齐的包围盒，盒子罩住块里各行声明的点，再向外扩大余量。
@@ -9,7 +9,7 @@
       （批处理方法这段行所在的表，第 0 个元素是 <see cref="P:EasyEcs.EntitySpan.FirstRow" /> 行）得到。
       <para>
         包围盒由排序画出，只要没有行移动超过余量，就一直有效到下一次排序：[0, <see cref="P:EasyEcs.RowBlocks.SortedRows" />)
-        的行在块里；[<see cref="P:EasyEcs.RowBlocks.SortedRows" />, <see cref="P:EasyEcs.RowBlocks.Rows" />) 的行是之后加入的，
+        的行在块里；[<see cref="P:EasyEcs.RowBlocks.SortedRows" />, <see cref="P:EasyEcs.RowBlocks.RowCount" />) 的行是之后加入的，
         不在任何块里（搜索逐行读它们，或等下一次排序）。排序后移进某块的行会扩大那块的包围盒。遍历中被这次遍历销毁或移走的行是墓碑：
         它的 id 下标为负（<see cref="P:EasyEcs.RowBlocks.Ids" />）。块里的行可能在排序后失去了这个组件
         （<see cref="M:EasyEcs.RowBlocks.Has(System.Int32)" />）。到 World 下一次结构变更前有效（指向表数组的 ref struct）。
@@ -25,13 +25,13 @@
   <member name="P:EasyEcs.RowBlocks.Count" source="5fc48567eb85">
     <summary>块数：<c>ceil(SortedRows / Size)</c>；没有顺序的表为 0。O(1)。</summary>
   </member>
-  <member name="P:EasyEcs.RowBlocks.Ids" source="fb1edb980209">
-    <summary>表里各行的 id（<see cref="P:EasyEcs.RowBlocks.Rows" />）；遍历中的墓碑下标为负。O(1)。</summary>
+  <member name="P:EasyEcs.RowBlocks.Ids" source="77743485fdee">
+    <summary>表里各行的 id（<see cref="P:EasyEcs.RowBlocks.RowCount" />）；遍历中的墓碑下标为负。O(1)。</summary>
   </member>
   <member name="P:EasyEcs.RowBlocks.Margin" source="daf1a5565086">
     <summary>每个包围盒每一侧扩大的距离（声明的余量）。O(1)。</summary>
   </member>
-  <member name="P:EasyEcs.RowBlocks.Rows" source="f10a0f078ff5">
+  <member name="P:EasyEcs.RowBlocks.RowCount" source="f10a0f078ff5">
     <summary>表的行数，包括遍历中的墓碑：从 <see cref="P:EasyEcs.RowBlocks.SortedRows" /> 起的行不在任何块里。O(1)。</summary>
   </member>
   <member name="P:EasyEcs.RowBlocks.Size" source="d8cc1620c9e3">
@@ -48,8 +48,8 @@
       块变了就变（一次排序、扩大的包围盒、行变少），不同的表也不同：由块建出的缓存（块对的列表）在它不变时有效。O(1)。
     </summary>
   </member>
-  <member name="P:EasyEcs.RowBlocks.Item(System.Int32)" source="9589860a65d3">
-    <summary>第 <paramref name="row" /> 行的实体（小于 <see cref="P:EasyEcs.RowBlocks.Rows" />、不是墓碑的行）。O(1)。</summary>
+  <member name="P:EasyEcs.RowBlocks.Item(System.Int32)" source="be4deb24eb86">
+    <summary>第 <paramref name="row" /> 行的实体（小于 <see cref="P:EasyEcs.RowBlocks.RowCount" />、不是墓碑的行）。O(1)。</summary>
   </member>
   <member name="M:EasyEcs.RowBlocks.End(System.Int32)" source="ec25444af58a">
     <summary>块 <paramref name="block" /> 最后一行的下一行：最多为 <see cref="P:EasyEcs.RowBlocks.SortedRows" />。O(1)。</summary>
@@ -81,9 +81,9 @@
     <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="reach" /> 为负数、无穷大或 NaN。</exception>
     <exception cref="T:System.InvalidOperationException">包围盒不覆盖任何轴。</exception>
   </member>
-  <member name="M:EasyEcs.RowBlocks.Read``1" source="5fccc4a02a26">
+  <member name="M:EasyEcs.RowBlocks.Read``1" source="f71d764c5b80">
     <summary>
-      表里 <typeparamref name="T" /> 的列，全部行（<see cref="P:EasyEcs.RowBlocks.Rows" />），只读：块里的第 <c>r</c> 行就是第 <c>r</c> 个元素。
+      表里 <typeparamref name="T" /> 的列，全部行（<see cref="P:EasyEcs.RowBlocks.RowCount" />），只读：块里的第 <c>r</c> 行就是第 <c>r</c> 个元素。
       读它的系统像读别的组件一样声明这次读取（组件参数或 <see cref="T:EasyEcs.Lookup`1" />），所以写它的系统不会和它同一阶段。O(1)。
     </summary>
     <exception cref="T:System.InvalidOperationException">表里没有 <typeparamref name="T" /> 的列。</exception>

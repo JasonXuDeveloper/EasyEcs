@@ -36,10 +36,10 @@ Write the elements of `source` whose bit is set in `mask` (bit `i` selects `sour
 
 **Complexity** ([API table](/en/docs/api)): O(1): at most 64 elements; for elements of 8 or 4 bytes 8 or 4 vector steps with AVX-512, skipping steps that select nothing; without AVX-512, one step per selected element when 12 or fewer are, else 16 or 8 steps with AVX2, 16 steps for 4-byte elements with 128-bit vectors (ARM64's NEON, SSSE3), otherwise one step per element up to the last selected one
 
-### `Rows` [#rows]
+### `RowNumbers` [#rownumbers]
 
 ```csharp
-public static int Rows(ulong mask, int first, Span<int> destination);
+public static int RowNumbers(ulong mask, int first, Span<int> destination);
 ```
 
 Write the numbers of the rows `mask` selects, `first` + the index of each set bit, to the start of `destination` in order, and return how many: the row list of a word of rows a vector condition passed, which generated loops and the core write with this one call whatever the machine ([`Lanes.Compact`](/en/docs/reference/lanes#compact) over the numbers 0 to 63, then `first` added in vectors). O(64 / lanes per vector); allocation-free.
