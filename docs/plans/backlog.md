@@ -49,8 +49,11 @@ names the skill:
 
 - [ ] **Vector loops through the user's own calls** (worktree agent, branch `feat-call-inliner`; "Next" item 3).
 
-- [ ] **Prefetch with a cache-size gate + the 16-word locals bug** (worktree agent, branch `feat-prefetch-gate`;
-      "Next" item 6).
+- [x] **Prefetch with a cache-size gate + the 16-word locals bug** (branch `feat-prefetch-gate`, ready to merge; "Next"
+      item 6): the 16-word row's `__Loop512` within 32 locals (or the reason, `Kernel.FitLocals`); lookup chases
+      prefetched past the last-level cache (`LastLevelCache`, the row form's twin job `Job{i}Chases`, the vector loop's
+      `PrefetchAhead` behind `f{i}`): 16M rows 1.36-1.43x, gathers 1.27-1.34x, nothing slower in the cache
+      (`borrowed-ideas.md` 5, item 1). Docs to-dos and the decision draft in `docs-todos.md`.
 
 The owner's order (2026-10-26): every code change before any docs (generator cost and ARM64 parity included).
 CI runs the unit tests on ARM64 (b1dbdb0).
@@ -73,9 +76,8 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        Owner's M4 run (default job, one round): SteerGenerated 2.07x faster than SteerScalar at 1k, 1.55x at 100k;
        GlideGenerated 1.87x / 1.63x; 0 B: the ARM gate admits only forms that pay. Not yet known whether it is too
        strict: a rejected shape (the test's `Brake`, 8 words, 3 fields) gets a benchmark pair with the gate forced
-       open, and the gate loosens if that form wins on the M4. Gathers stay rows (D131); compress comes with L3. Bug found: a 16-word wide component whose 512 form
-       gathers 3 fields writes a `__Loop512` of 34 IL locals (over WP0b's 32): fix with the prefetch item (cut the
-       512 loop or reject such rows in the gate).
+       open, and the gate loosens if that form wins on the M4. Gathers stay rows (D131); compress comes with L3. The 16-word locals bug (a 3-field gather's
+       `__Loop512` of 34 IL locals) is fixed on `feat-prefetch-gate` (the loop cut to 32; past it the 512 form is dropped).
 3. [ ] **Vector loops through the user's own calls** (running, see above) (owner: users should not have to avoid helpers): today a call
        into user code keeps the method scalar (EECS055 "it calls X.Y"); only Math, the generated members (SetX / IsX
        ...), Emit.Add, Lookup reads and view members (Kernel.Views.cs, inlined from source, depth 8) are translated.
@@ -91,7 +93,11 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 5. [ ] **Generated code tuned for the machine** (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
        accumulators / unrolling / hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3
        prefetch / streaming stores.
-6. [ ] **Prefetched lookup chases with a size gate** (decided by the owner's rule "a faster case ships, a slower one
+6. [ ] **Prefetched lookup chases with a size gate** (built on `feat-prefetch-gate`: row and vector forms; left: the
+       owner's runs of `LookupChaseGateBenchmark` on a 32 MiB-LLC x86 box and the M4, then index probes `TryFind(key.F)`
+       (a prefetch helper per ValueIndex representation) and relation targets (a chase per buffer element), the
+       parallel row form (a twin that keeps ForEachParallel's per-row chunks), lambda passes and fused walks; see
+       `borrowed-ideas.md` 5) (decided by the owner's rule "a faster case ships, a slower one
        never": 1.29-1.36x at 16M, slower in cache): the generated row and vector forms prefetch `k` rows ahead
        (record, then row; k = 8 rows / 16 for vectors, from the screen) only when the target table's records and
        column are past the last-level cache, so a world in cache runs today's code. .NET has no public API for the

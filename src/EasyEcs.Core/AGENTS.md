@@ -46,7 +46,12 @@ LookupLanes.cs               the reads of other entities in generated vector loo
                              lanes' records (AVX2) into a presence mask and the one table their entities live in (false:
                              the vector's rows run the method), Gather the fields from that table's column;
                              PrefetchRecord / PrefetchRow (Lookup<T>.Prefetch / PrefetchRow: the two stages of a
-                             prefetched chase, x86 only; borrowed-ideas.md item 1)
+                             prefetched chase, x86 only; borrowed-ideas.md item 1), PrefetchAhead (a vector loop's
+                             prefetches of the rows ahead), Prefetches (the gate a generated pass or vector loop reads once per pass:
+                             the records and rows past the last-level cache)
+LastLevelCache.cs            the last-level cache size, read once per process from the OS as the GC does (Windows
+                             GetLogicalProcessorInformationEx, Linux sysfs then sysconf, macOS sysctl), x86 only; 0 is
+                             unknown, which never prefetches
 Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
                              Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbors found by generated code,
                              TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,

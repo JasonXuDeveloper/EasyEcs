@@ -348,6 +348,10 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) { if (b.V + c.V > 255) b.V = 0; }", "'b.V + c.V > 255' compares ints that 8-bit lanes do not hold")]
     [TestCase("[ForEach] static void A(ref B8 b, Maybe<C8> c) { if (c.HasValue) b.V++; }", "it takes a Maybe<C8> of byte lanes: optional columns have vector loops of 4- and 8-byte lanes")]
     [TestCase("[ForEach] static void A(ref Sixteen r, in G g) { r.F0 += r.F2 * g.Pull; r.F1 += r.F3 * g.Pull; }", "component Sixteen has 16 fields (a vector loop splits up to 4), and gathering the 4 fields it uses takes 42 permutes per 16 rows, more than its 4 vector operations gain; it uses 4 of Sixteen's 16 fields (F0, F1, F2, F3): split them into a component of their own (a component of 4 fields gets a vector loop)", true)]
+    // Three or five fields of a 16-word row: AVX-512's permutes pay, but its loop would keep 16 loaded vectors and a level
+    // of merges, past the IL locals a runner inlines (D135), and ARM64's table lookups do not pay.
+    [TestCase("[ForEach] static void A(ref Sixteen r, in G g) { r.F0 = r.F0 - r.F7 * g.Pull; r.F15 = System.MathF.Min(r.F15 + r.F0, 10) * 0.5f + g.Pull * g.Pull; }", "component Sixteen has 16 fields (a vector loop splits up to 4), and gathering the 3 fields it uses declares 33 locals per 16 rows, past the 32 a job's loop may declare to be inlined; it uses 3 of Sixteen's 16 fields (F0, F7, F15): split them into a component of their own (a component of 3 fields gets a vector loop)", true)]
+    [TestCase("[ForEach] static void A(ref Sixteen r, in G g) => r.F0 = r.F0 * g.Pull + r.F3 * r.F6 - r.F9 * r.F12 + r.F3 * g.Pull - r.F6 * r.F9 + r.F12;", "component Sixteen has 16 fields (a vector loop splits up to 4), and gathering the 5 fields it uses declares 33 locals per 16 rows, past the 32 a job's loop may declare to be inlined", false)]
     [TestCase("[ForEach] static void A(ref Unit u) { if (u.Alive) u.Hp--; }", "field Unit.Alive is a bool, not a lane type (float, double, int, uint, long, ulong, byte, sbyte, short or ushort)")]
     [TestCase("[ForEach] static void A(ref Px p, in B8 b) => p.R = (byte)(p.R + b.V);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field; it uses 1 of Px's 2 fields (R): move it into a component of its own (a component of one field gets a vector loop)", true)]
     [TestCase("[ForEach] static void A(ref Px p) => p.R = (byte)(p.R + p.G);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field")]
@@ -573,12 +577,13 @@ public class GeneratorTests
     }
 
     // A form that does not pay is not written: 16 words a row put each field of a 128-bit vector's 4 rows in 4 vectors,
-    // and the table lookups cost more than the method's operations gain at 4 lanes, while AVX-512's permutes pay.
+    // and the table lookups cost more than the method's operations gain at 4 lanes, while AVX-512's permutes pay (two
+    // fields: a third would take its loop past the locals a runner inlines, ScalarLoopsNameTheirReason).
     [Test]
     public void AWideFormThatDoesNotPayIsLeftOut()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref Sixteen r, in G g) { r.F0 = r.F0 - r.F7 * g.Pull; r.F15 = System.MathF.Min(r.F15 + r.F0, 10) * 0.5f + g.Pull * g.Pull; } }"),
+            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref Sixteen r, in G g) { r.F0 = r.F0 - r.F15 * g.Pull; r.F15 = System.MathF.Min(r.F15 + r.F0, 10) * 0.5f + g.Pull * g.Pull; } }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
@@ -1847,6 +1852,7 @@ public class GeneratorTests
             public struct Ticks : IComponent { public int Value; }
             public struct Den : IComponent { public int Value; }
             public struct Dead : IComponent { }
+            public struct Rig16 : IComponent { public float X, A1, A2, A3, A4, P, A6, A7, A8, A9, A10, A11, A12, A13, A14, Q; }
             public partial struct Tally : ISingletonComponent { [Sum] public int Count; [Sum] public int Sum; [Min] public int Low; [Max] public int High; }
             [EcsSystem] public ref struct Moves
             {
@@ -1857,6 +1863,11 @@ public class GeneratorTests
                 {
                     p.X += v.Y * q.Z - r.W; p.Y += v.Z * q.W - r.X; p.Z += v.W * q.X - r.Y; p.W += v.X * q.Y - r.Z;
                     v.X = p.W; v.Y = p.Z; v.Z = p.Y; v.W = p.X;
+                }
+                [ForEach] static void Haul(ref Rig16 r, in Heat h) // 16 words a row, 3 used: 16 loads and a permute tree per 16 rows
+                {
+                    r.X = r.X - r.P * h.Value + System.MathF.Sqrt(System.MathF.Abs(r.Q));
+                    r.Q = System.MathF.Min(r.Q + r.X * r.P, 10) * 0.5f - System.MathF.Max(r.P - h.Value, 0) * h.Value + h.Value * h.Value;
                 }
                 [ForEach] static void Seek(ref P3 p, ref V3 v)
                 {
@@ -1909,6 +1920,7 @@ public class GeneratorTests
         // each method's whole and masked forms (Blend: also its loops, split out of Execute)
         Assert.That(locals.Count(l => l.Method.StartsWith("Move") && l.Method.Contains("::Execute")), Is.EqualTo(4));
         Assert.That(locals.Any(l => l.Method.StartsWith("Blend") && l.Method.Contains("::__MaskedLoop512")), "Blend's masked Execute is split");
+        Assert.That(locals.Any(l => l.Method.StartsWith("Haul") && l.Method.Contains("Loop512")), "Haul gets its AVX-512 form");
         Assert.That(locals.Where(l => l.Locals > 32), Is.Empty);
     }
 

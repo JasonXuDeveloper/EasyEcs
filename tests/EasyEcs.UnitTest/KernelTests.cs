@@ -776,6 +776,12 @@ public struct Slim : IComponent
 }
 /// <summary>Eight words a row, three of them used: each field of 4 rows lies in 4 vectors (a 4-register table lookup).</summary>
 public record struct Rig8(float X, float A1, float A2, float P, float A4, float A5, float A6, float Q) : IComponent;
+/// <summary>
+/// Sixteen words a row, three of them used: each row is one Vector512, so the AVX-512 form loads 16 vectors per 16 rows
+/// and merges them in a tree before picking the fields (the most IL locals a wide loop declares).
+/// </summary>
+public record struct Rig16(float X, float A1, float A2, float A3, float A4, float P, float A6, float A7,
+    float A8, float A9, float A10, float A11, float A12, float A13, float A14, float Q) : IComponent;
 #pragma warning restore EECS091
 
 /// <summary>A system with a wide component's method: its schedule line says whether the vector loop runs on this hardware.</summary>
@@ -827,6 +833,13 @@ public static class WideKernels
     {
         r.X = r.X - r.P * l.Value;
         r.Q = MathF.Min(r.Q + r.X, 10) * 0.5f + l.Value * l.Value;
+    }
+
+    [ForEach]
+    internal static void Haul(ref Rig16 r, in Level l)
+    {
+        r.X = r.X - r.P * l.Value + MathF.Sqrt(MathF.Abs(r.Q));
+        r.Q = MathF.Min(r.Q + r.X * r.P, 10) * 0.5f - MathF.Max(r.P - l.Value, 0) * l.Value + l.Value * l.Value;
     }
 }
 
@@ -1097,6 +1110,10 @@ public class KernelTests
             WideKernels.Coast, (ref Slim s, ref Level l) => WideKernels.Coast(ref s, in l));
         Check(count, (r, i) => new Rig8(NextFloat(r, i), 1, 2, NextFloat(r, i + 1), 4, 5, 6, NextFloat(r, i + 2)), NextLevel,
             WideKernels.Brake, (ref Rig8 g, ref Level l) => WideKernels.Brake(ref g, in l));
+        Check(count, (r, i) => new Rig16(NextFloat(r, i), 1, 2, 3, 4, NextFloat(r, i + 1), 6, 7, 8, 9, 10, 11, 12, 13, 14, NextFloat(r, i + 2)), NextLevel,
+            WideKernels.Haul, (ref Rig16 g, ref Level l) => WideKernels.Haul(ref g, in l));
+        CheckHoles(count, i => i % 5 == 3, (r, i) => new Rig16(NextFloat(r, i), 1, 2, 3, 4, NextFloat(r, i + 1), 6, 7, 8, 9, 10, 11, 12, 13, 14, NextFloat(r, i + 2)), NextLevel,
+            WideKernels.Haul, (ref Rig16 g, ref Level l) => WideKernels.Haul(ref g, in l));
     }
 
     /// <summary>

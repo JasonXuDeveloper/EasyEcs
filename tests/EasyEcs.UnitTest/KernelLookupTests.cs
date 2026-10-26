@@ -132,7 +132,7 @@ public class KernelLookupTests
     /// recycled), null, of another world (past this one's records), in a table without Beacon, or with Beacon removed
     /// (its table then holds it for some rows only).
     /// </summary>
-    private static World Build(int trackers, int tables, int run, bool odd, int threads = 1)
+    internal static World Build(int trackers, int tables, int run, bool odd, int threads = 1)
     {
         var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
         world.GroupBy<Band>();
@@ -179,7 +179,7 @@ public class KernelLookupTests
         return world;
     }
 
-    private static Course[] Courses(World world)
+    internal static Course[] Courses(World world)
     {
         var courses = new Course[world.EntityCount];
         int n = 0;
@@ -187,7 +187,7 @@ public class KernelLookupTests
         return courses.AsSpan(0, n).ToArray();
     }
 
-    private static void AssertSame(Course[] expected, Course[] actual, string form)
+    internal static void AssertSame(Course[] expected, Course[] actual, string form)
     {
         Assert.That(actual.Length, Is.EqualTo(expected.Length));
         for (int i = 0; i < expected.Length; i++)

@@ -79,6 +79,24 @@ public readonly ref struct Lookup<T> where T : struct, IComponent
     public void PrefetchRow(EntityId id) => LookupLanes.PrefetchRow(_world, id.Index, ComponentType<T>.Bit, Unsafe.SizeOf<T>());
 
     /// <summary>
+    /// Whether a pass reading <typeparamref name="T"/> of other entities of <paramref name="world"/> prefetches its
+    /// chases (<see cref="LookupLanes.Prefetches"/>: x86, and the records and rows past the last-level cache). Generated
+    /// code reads it once per pass.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static bool Prefetches(World world) => LookupLanes.Prefetches(world, Unsafe.SizeOf<T>());
+
+    /// <summary>
+    /// A vector loop's prefetches for the vector of <paramref name="count"/> rows at row <paramref name="i"/> of a run of
+    /// <paramref name="rows"/>: the records of the rows 2 <paramref name="distance"/> past it and the rows of
+    /// <typeparamref name="T"/> of the rows <paramref name="distance"/> past it; each row's entity index is lane
+    /// <paramref name="index"/> of its <paramref name="stride"/> lanes in <paramref name="column"/>. Generated code calls this.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void PrefetchAhead<TLane>(ref TLane column, int stride, int index, nint i, nint rows, int distance, int count) where TLane : unmanaged =>
+        LookupLanes.PrefetchAhead(_world, ComponentType<T>.Bit, Unsafe.SizeOf<T>(), ref column, stride, index, i, rows, distance, count);
+
+    /// <summary>
     /// The handle of <paramref name="id"/>, or a default handle (which finds nothing) when its index is past this world's
     /// records: the id comes from data (another world, a message, a save), not from one of this world's handles, so
     /// <see cref="Entity.LocateArchetype"/>'s unchecked record read needs the bound first.

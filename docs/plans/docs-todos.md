@@ -324,6 +324,45 @@ Decision records for the docs pass (en + zh, "Not added" unless the owner's re-m
 - tests/AGENTS.md's Kernel line could name the wide forms' bit-for-bit test and the ARM64 loop-line test (file map,
   not docs/content: do it with the next tests change).
 
+## feat-prefetch-gate: the 16-word locals fix, lookup chases prefetched past the last-level cache
+
+Decision record drafts (en + zh, next free numbers at merge):
+- **Prefetching lookup chases, behind a last-level cache gate** (rewrites the feat-amac "not built" record above).
+  A `[ForEach]` method reading another entity at an id of a component it takes by `in` (`lookup[x.F]`, `Read`, `Has`)
+  prefetches the targets of later rows in two stages (group prefetching, Chen et al. 2004; AMAC, Kocberber et al. VLDB
+  2015): the record of row i + 2k, then the row of T of row i + k, whose address is known once its record is in cache.
+  Row form: k = 8 rows, in a twin job (`Job{i}Chases`) the pass's call site picks; vector loop: the 8 rows 32 and 16
+  past each vector, behind a flag its job reads once per pass. Only when the live entities' records and rows of T are
+  past the last-level cache, read once per process as the GC reads it (Windows `GetLogicalProcessorInformationEx`,
+  Linux sysfs then `sysconf`, macOS `sysctl hw.l3cachesize` / `hw.perflevel0.l2cachesize`), x86 only (.NET 10 has no
+  prefetch on ARM64 but SVE's); unknown means off. Why: 1.36-1.43x (rows) and 1.27-1.34x (gathers) at 16M entities,
+  while in the cache a prefetch costs 1.4-1.9x with nothing to hide (1k); the gate keeps today's code there (measured
+  equal). Considered: prefetching always (slower in cache), a fixed record count (machine-dependent), the GC's
+  `GCGen0MaxBudget` (configurable, not a contract), a run job for every pass (3x slower parallel heavy rows at 1k, a
+  few percent on serial rows: hence the twin per pass), parallel row methods (keep the per-row form: not built),
+  distances 2-64 (8 rows / 16 for vectors best). Numbers: borrowed-ideas.md section 5, item 1.
+- **D135 addendum: wide components count their loop's locals** (`Kernel.FitLocals`): a 16-word row gathering 3 fields
+  wrote a `__Loop512` of 34 IL locals; the extract reuses the field's name, merges of merges reuse their input's local,
+  the packed stores share one temp (32 now), and a loop past 32 drops its AVX-512 form (the 128-bit form stays) or, with
+  none, reports "gathering the N fields it uses declares M locals per 16 rows, past the 32 a job's loop may declare to
+  be inlined" (EECS055, fixable when a split helps).
+
+Docs to-dos (docs pass):
+- guide page of `Lookup<T>` (and lookups in vector loops, D131): "reads of other entities past the last-level cache are
+  prefetched rows ahead; nothing to write; x86 only; in the cache nothing changes"; which forms qualify (an `in`
+  component's id; not keyed lookups, parallel row methods, lambda passes or fused walks) and the cost model in one
+  sentence; en + zh.
+- introspection page: DescribeSchedule's new part "lookups prefetched past the last-level cache" (scalar and vector
+  lines); en + zh.
+- performance / why-fast pages: the 16M chase numbers through bench.json (`tools/bench.sh LookupChaseGateBenchmark
+  --sync`, a BenchTable: Off / Auto / On), and the owner's runs on other machines if the site shows them.
+- vector loops guide (EECS055 reasons list): the new wide-component reason "declares M locals per 16 rows, past the 32
+  a job's loop may declare to be inlined".
+- architecture page (generated code): the twin job beside a method's own job (as `Job{i}Rows` for vector tails).
+- public skill (skills/easyecs/SKILL.md): "a chase through `Lookup<T>` at an `in` component's id is prefetched when the
+  world outgrows the cache: keep ids in `in` components".
+- `api.mdx`: nothing (`Lookup<T>.Prefetches` / `PrefetchAhead`, `LookupLanes.Prefetches` are hidden, for generated code).
+
 ## feat-call-inliner: vector loops inline the user's own calls
 
 - systems.mdx and the guide's "what vectorizes" list: helpers are inlined. Say "write helpers freely", then list the

@@ -20,6 +20,18 @@ internal sealed partial class Kernel
     /// <summary>The Lookup&lt;T&gt; parameters: the uniform holding each (<c>__p{i}</c>) and T.</summary>
     private readonly Dictionary<IParameterSymbol, (string Name, ITypeSymbol Element)> _lookupParams = new(SymbolEqualityComparer.Default);
 
+    /// <summary>Each Lookup parameter's index: its job field <c>f{i}</c> says whether the pass prefetches (<see cref="Prefetch"/>).</summary>
+    private readonly Dictionary<IParameterSymbol, int> _lookupOrdinals = new(SymbolEqualityComparer.Default);
+
+    /// <summary>The Lookup parameters the loop prefetches for (<see cref="Code.Prefetched"/>).</summary>
+    private readonly HashSet<int> _prefetched = new();
+
+    /// <summary>
+    /// How many rows ahead of a vector the loop prefetches its chases' rows (their records twice as far): 16, the best
+    /// distance of the screen (LookupChaseDistanceBenchmark, 2-4 vectors of 8 at 1M and 16M entities).
+    /// </summary>
+    private const int PrefetchDistance = 16;
+
     /// <summary>The lookups resolved so far: their number g by parameter and id lanes, when the lanes cannot change.</summary>
     private readonly Dictionary<string, int> _resolved = new();
 
@@ -87,11 +99,30 @@ internal sealed partial class Kernel
         _lookups.Add((element, paths));
         int n = Presence(g);
         _implied[$"__has{n}"] = [n];
+        Prefetch(p, lookup, index);
         // Entities of several tables: the method runs this vector's rows, and those of the vectors its backoff skips.
         _body.Append($"if (!{lookup}.Resolve({version}, {index}, ref __b{g}, out var __has{n}, out var __gr{g}, out var __gc{g}))\n{{\n");
         _body.Append($"    nint __end = global::System.Math.Min(i + (1 + __b{g}) * {Vec(_mask)}.Count, rows);\n    {RunRows}\n}}\n");
         if (Unchanging(version) && Unchanging(index)) _resolved[key] = g;
         return g;
+    }
+
+    /// <summary>
+    /// Before a vector resolves its lookup, the chases of the vectors after it (group prefetching, AMAC): the records of
+    /// the rows 2 <see cref="PrefetchDistance"/> past it and the rows of T of the rows <see cref="PrefetchDistance"/> past
+    /// it (<c>Lookup&lt;T&gt;.PrefetchAhead</c>), when the pass is past the last-level cache (the job's <c>f{i}</c>, read
+    /// once per pass: <c>Lookup&lt;T&gt;.Prefetches</c>). Only for ids of a component the method takes by <c>in</c>
+    /// (rows ahead hold the ids their own vectors will read) and not wide: <paramref name="index"/> names its column and lane.
+    /// </summary>
+    private void Prefetch(IParameterSymbol p, string lookup, string index)
+    {
+        if (!Unchanging(index) || ComponentLaneName.Match(index) is not { Success: true } m) return;
+        int column = int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        int lane = int.Parse(index.Substring(index.LastIndexOf('_') + 1), System.Globalization.CultureInfo.InvariantCulture);
+        if (_components.FirstOrDefault(c => c.Value.Index == column) is not { Key: { } component, Value.Fields: { } fields } || _wideOf.ContainsKey(component)) return;
+        int field = _lookupOrdinals[p];
+        _prefetched.Add(field);
+        _body.Append($"if (f{field}) {lookup}.PrefetchAhead(ref e{column}, {fields.Length}, {lane}, i, rows, {PrefetchDistance}, {Vec(_mask)}.Count);\n");
     }
 
     /// <summary>A lane of a component taken by <c>in</c>: the method cannot write it, so it is the same wherever it is read.</summary>
