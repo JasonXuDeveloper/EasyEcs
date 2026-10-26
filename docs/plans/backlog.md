@@ -36,6 +36,9 @@ names the skill:
       the generated pair form; compress (AVX-512 CompressStore / AVX2 table / ARM64 TBL) replaces `Lanes.Compact` in
       the core's callers (M4: today's `Lanes.Compact` is 2-2.5x slower than the TBL table at >=50 %, `locality.md` 6.3; the helper must win every cell); the prototypes' Vector128 / NEON paths are merged (eedfeb0, pushed). L1 gives systems an order they request at
       setup (3.4), not only `[OrderBy]`; L3's compress is one core helper the generated loops call too. New EECS id for an invalid key; decision records; naming candidates to the owner.
+      Status: built and handed back (merged the work branch at a69a7d6; full suite 2825 passed, the ISA subsets and the
+      AOT check pass); decision records D137 / D138 drafted in docs-todos.md; the M4 rerun of CompressBenchmark is the
+      owner's.
 - [x] **Lookup gathers always on: not possible, stay on request** (merged after 932913f): no form beats rows when a
       vector's targets spread over many tables (walk, 64-bit pinned addresses, micro-adaptive choice all measured,
       D131 rewritten with the widened table and ARM64: rows there).
