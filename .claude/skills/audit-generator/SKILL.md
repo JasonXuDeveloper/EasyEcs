@@ -133,7 +133,8 @@ Write it like hand-written code:
   A copy is not free in IL: each local counts toward the JIT's limit of 32 per inlined method (`audit-vector-loops`,
   "The JIT never inlines a method that declares more than 32 IL locals"); the loads' `out __s` -> `__c` copy alone
   took Move3's masked `Execute` from 24 to 36 locals and out of the runner. Every generated method a runner inlines
-  stays at 32 IL locals or fewer: the generator counts what it declares and splits before the limit (WP0b).
+  stays at 32 IL locals or fewer: the generator counts what it declares and splits before the limit, one method per
+  width (`__Loop512`, `__Loop`, `__MaskedLoop512`, ...; D135); `tools/inlining.sh` proves it on the benchmarks.
 - **Say a value once**: a constant is `.Zero` / `.One` / a literal in place, not a local made per width
   (`var __u1 = Create<int>((0))`); setup that does not depend on the width (singleton refs, `Identity`,
   `this.v0 = default`) is written once above the width blocks; a mark written once is assigned, not zeroed then OR-ed

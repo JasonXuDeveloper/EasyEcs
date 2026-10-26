@@ -21,9 +21,6 @@ last (`docs-todos.md` collects them meanwhile).
       the generated pair form; compress (AVX-512 CompressStore / AVX2 table / ARM64 TBL) replaces `Lanes.Compact` in
       the core's callers; the prototypes' Vector128 / NEON paths are merged (eedfeb0, pushed). L1 gives systems an order they request at
       setup (3.4), not only `[OrderBy]`; L3's compress is one core helper the generated loops call too. New EECS id for an invalid key; decision records; naming candidates to the owner.
-- [ ] **WP0b** (`inner-loops.md`; worktree `wp0b`, branch `feat-wp0b`): every generated job within the JIT inliner's
-      32 IL locals (loads into their names, constants in place, oversized Execute split per loop), D126 rewritten,
-      `tools/inlining.sh`; gate: WorldSimulation / BattleServer not slower. Blocks L2, G1, the call inliner, M0.
 - [x] **Lookup gathers always on: not possible, stay on request** (merged after 932913f): no form beats rows when a
       vector's targets spread over many tables (walk, 64-bit pinned addresses, micro-adaptive choice all measured,
       D131 rewritten with the widened table and ARM64: rows there).
@@ -76,6 +73,12 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 
 ## Done this round (for the record)
 
+- [x] **WP0b** (merged, D126 rewritten, D135): every generated job within the inliner's 32 IL locals (split per width,
+      constants and kept lanes in place, the loads' copy gone), `tools/inlining.sh`; WorldSimulation / BattleServer
+      level, Step / Share / Gate / Seek 6-22 % faster; masked AVX-512 tail retried and dropped (slower). Open
+      follow-ups: GeneratorBenchmark A/B, a locals check over the samples, `.Zero` / `.One` text, one `__d0` mark,
+      discards for unused fields, aliases (with "Generated text cleanup").
+
 - [x] Lookup gathers on request (D131, merged f1767ef), EECS103 (D134), analyzer tests split, zh reference fix
       (af585ed), generated text survey (`generated-text.md`), generator / analyzer cost phase 2 (merged before
       c10af12: one analyzer per area, body facts once, syntax-only shapes), locality phase 0 (0e206d8: pairs 3-16x,
@@ -90,9 +93,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
       analyzer: RegisterSymbolStartAction / operation actions over syntax walks where cheaper, no per-node semantic
       model work, compilation-end rules only where needed, `EnableConcurrentExecution`, generated code skipped).
       Measured before and after (GeneratorBenchmark, ReportAnalyzer: UnitTest analyzer 40 s, generators 4 s).
-- [ ] **Inner loops** (`inner-loops.md`), in this order: WP0b (running, branch `feat-wp0b`: every inlined method <= 32 IL
-      locals, the split forms, IL-changing cleanups, masked tail retried) (generated bodies split to the inliner's budget,
-      runners pinned free of `call ...Execute`), WP0 (Binding / BodyCopy), WP2 element loops, WP3 offsets,
+- [ ] **Inner loops** (`inner-loops.md`), in this order (WP0b done): WP0 (Binding / BodyCopy), WP2 element loops, WP3 offsets,
       WP5 `Cell<TCell,TTile>` (bar: hand-written speed), WP5b (per-tile results, several inputs/outputs, VoxelServer
       `Flow.cs`), WP1 InlineArray, WP4 ForParallel lambda, WP6b/c EECS103 v2/v3, WP8 fixable-reason audit (plain code
       a small rewrite would vectorize warns).

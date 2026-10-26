@@ -69,6 +69,10 @@ its own worktree.
    with a new, measured reason.
 2. **Prototype in a worktree**; keep the public API unless the owner approves a change.
 3. **Measure with BenchmarkDotNet only** (`feature`, part 6):
+   - the machine's speed moves about 13 % between sessions: compare variants only within one BenchmarkDotNet round,
+     interleaved, never a number against one from another session;
+   - `DOTNET_JitStdOutFile` listings of concurrent processes interleave: one listing file per process; after deleting
+     the generated-files folder an incremental build does not write it again (touch a source file);
    - two jobs (`BenchmarkConfig.cs`): `--dev` (1 process, 3 x 150 ms warmups, 5 iterations, about a fifth of the
      time) while trying ideas and screening, holding the lock for minutes instead of hours; the default job
      (2 processes, two rounds) for every keep / revert decision and every number recorded. Both keep tiering and

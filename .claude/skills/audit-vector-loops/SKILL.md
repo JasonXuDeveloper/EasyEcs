@@ -206,6 +206,11 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
   the IL, not in the C# (`ilspycmd --ilcode`, `.locals` of the method): Roslyn folds a copy only when the copied-to
   local is never written again, and every `out` argument, `var`, pattern and compiler temporary is one. The generator
   counts the locals it declares per method and splits (WP0b) before 32; a test pins the count for each form's corpus.
+  Count declarations, not live ranges: release Roslyn gives every declared local its own slot, even in disjoint
+  scopes; a `default` struct argument adds a temp and so does every `out _`. Check a change with `tools/inlining.sh`
+  (it lists every generated job a runner does not inline).
+- **The JIT does not hoist a constant out of a block that a `continue` skips**: in masked and gather loops keep the
+  broadcast in a setup local; a literal in place pays only in loops over whole vectors (D135).
   Read why an inline failed from the runtime's own events, not by guessing: an in-process `EventListener` on
   `Microsoft-Windows-DotNETRuntime` with the JitTracing keyword (0x1000) gets `MethodJitInliningSucceeded` /
   `MethodJitInliningFailed` with the reason (`DOTNET_JitPrintInlinedMethods` needs a checked runtime).
