@@ -496,8 +496,8 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("__bail |= __m0 != global::System.Numerics.Vector<int>.Zero; // a cold branch: the method runs these rows")
-            .And.Contain("__bail |= (__pass & __m0) != global::System.Numerics.Vector<int>.Zero; // a cold branch: the method runs these rows")
+        Assert.That(generated, Does.Contain("__bail |= __m1 != global::System.Numerics.Vector<int>.Zero; // a cold branch: the method runs these rows")
+            .And.Contain("__bail |= (__pass & __m1) != global::System.Numerics.Vector<int>.Zero; // a cold branch: the method runs these rows")
             .And.Not.Contain("Log("), generated);
     }
 
