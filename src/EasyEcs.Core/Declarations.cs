@@ -137,7 +137,7 @@ public sealed class OrderByAttribute(params string[] box) : Attribute
 
     /// <summary>
     /// <see cref="World.Update()"/> calls between sorts (default 10, at least 1): GROMACS rebuilds its pair lists every
-    /// 10 steps, and a sort's cost spread over 10 updates is a small share of a tick (decision D135).
+    /// 10 steps, and a sort's cost spread over 10 updates is a small share of a tick (decision D137).
     /// </summary>
     public int Interval { get; set; } = 10;
 

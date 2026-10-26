@@ -137,7 +137,7 @@ internal abstract class RowOrder
     /// <summary>
     /// Rows per block unless an order asks for another size: a vector of floats, so a kernel holds a block's
     /// coordinates in one register per axis: 8 where 256-bit vectors are hardware (8 x 8 pairs of blocks), else 4
-    /// (ARM64's NEON: 4 x 4). Decision D135 has the measurement against 16.
+    /// (ARM64's NEON: 4 x 4). Decision D137 has the measurement against 16.
     /// </summary>
     public static int DefaultBlockRows => Vector256.IsHardwareAccelerated ? 8 : 4;
 
