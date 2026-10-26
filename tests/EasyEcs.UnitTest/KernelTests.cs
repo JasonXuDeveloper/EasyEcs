@@ -1613,7 +1613,7 @@ public class KernelTests
     [Test]
     public void InterleavedLoadsAndStoresMoveExactlyTheRowsOfOneVector()
     {
-        Assume.That(Interleaved.IsAccelerated, "no AVX2 or AVX-512");
+        Assume.That(Interleaved.IsAccelerated, "no NEON, AVX2 or AVX-512");
         RoundTrip<float>(); RoundTrip<int>(); RoundTrip<uint>();
         RoundTrip<double>(); RoundTrip<long>(); RoundTrip<ulong>();
     }
