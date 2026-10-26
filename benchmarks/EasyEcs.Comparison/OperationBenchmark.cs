@@ -143,7 +143,7 @@ public ref struct Cells
 
 /// <summary>Stun 5% of the fighters, then recover all of them: 2 structural changes per stunned entity.</summary>
 // The ports to the other libraries query the same components, so every library does the same work per row.
-#pragma warning disable EECS026, EECS030, EECS055 // and remove one entity at a time as they do (RemoveAll is the bulk benchmarks'), row by row as they do
+#pragma warning disable EECS026, EECS030 // and remove one entity at a time as they do (RemoveAll is the bulk benchmarks')
 [EcsSystem, UpdateInGroup<Toggle>]
 public ref struct StunToggle
 {
@@ -160,7 +160,7 @@ public ref struct StunRecover
     [ForEach(SimdMode = SimdMode.Off)]
     private static void Recover(Entity entity, ref Stunned stunned) => entity.Remove<Stunned>();
 }
-#pragma warning restore EECS026, EECS030, EECS055
+#pragma warning restore EECS026, EECS030
 
 [MemoryDiagnoser]
 public class OperationBenchmark

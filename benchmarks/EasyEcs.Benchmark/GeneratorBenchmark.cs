@@ -15,8 +15,8 @@ namespace EasyEcs.Benchmark;
 /// <summary>
 /// What the generators and the analyzer cost the IDE and the build, on a game server's worth of code: the battle server
 /// (BattleServer.cs) and <see cref="Modules"/> more files, each with 10 components (plain, tracked, indexed, a tag), a
-/// buffer element, 5 systems of 5 [ForEach] methods (one calls helpers), a system whose method takes a [View] (helpers and view members
-/// inlined into the vector loops), a query loop and gameplay code that changes entities through the generated members. <c>Cold</c>: a first run (a build, or the IDE opening the project) on a new compilation.
+/// buffer element, 5 systems of 3 [ForEach] methods, a query loop and gameplay code that changes entities through the
+/// generated members. <c>Cold</c>: a first run (a build, or the IDE opening the project) on a new compilation.
 /// <c>EditMethodBody</c>: a keystroke, one line changed in a [ForEach] method's body, the driver kept from the previous
 /// run, every output produced (a build's driver); <c>EditMethodBodyIde</c>: the same as an IDE runs the generators while
 /// typing, implementation outputs skipped (the steps only they read never run); <c>EditUnrelatedFile</c>: a keystroke in
@@ -40,8 +40,7 @@ public class GeneratorBenchmark
     private GeneratorDriver _driver, _ideDriver;
 
     private static GeneratorDriver NewDriver(IncrementalGeneratorOutputKind disabled = IncrementalGeneratorOutputKind.None) => CSharpGeneratorDriver.Create(
-        [new ArityGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new SystemGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator(),
-            new ViewGenerator().AsSourceGenerator()], parseOptions: Parse,
+        [new ArityGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new SystemGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()], parseOptions: Parse,
         driverOptions: new GeneratorDriverOptions(disabled));
 
     [GlobalSetup]
@@ -164,13 +163,6 @@ public class GeneratorBenchmark
                     {
                         if (p.V > 1000) e.Destroy();
                     }
-
-                    [ForEach]
-                    static void Tune(ref {{b}} q)
-                    {
-                        q.X = Rules{{m}}.Scaled(q.X, q.V);
-                        if (Rules{{m}}.Over(q.Y)) Rules{{m}}.Settle(ref q.Y);
-                    }
                 }
 
 
@@ -191,35 +183,6 @@ public class GeneratorBenchmark
                 {
                     foreach (var item in world.Query<Data{{m}}_5, Data{{m}}_6>()) item.Data{{m}}_5.V = item.Data{{m}}_6.V;
                 }
-            }
-
-            public static class Rules{{m}}
-            {
-                public static float Scaled(float x, int v)
-                {
-                    if (v < 0) return x;
-                    return x * 0.5f + v;
-                }
-
-                public static bool Over(float y) => y > 100;
-
-                public static void Settle(ref float y) => y = 100;
-            }
-
-            [View]
-            public ref struct Body{{m}}
-            {
-                public ref Data{{m}}_6 P;
-                public ref readonly Data{{m}}_7 Q;
-
-                public void Step(float by) => P.Y += Q.Y * by;
-            }
-
-            [EcsSystem]
-            public ref struct Bodies{{m}}
-            {
-                [ForEach]
-                static void Walk(Body{{m}} body) => body.Step(2);
             }
 
             public static class Gameplay{{m}}
