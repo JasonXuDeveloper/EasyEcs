@@ -147,7 +147,8 @@ public static class Lanes
     // AVX2, 4 lanes of 8 bytes per step, a nibble of the mask each: the step's lanes are loaded whole when the source
     // holds them (masked past its end, so nothing beyond it is read), moved to the front by one permutation of 32-bit
     // pairs (Pairs8), and stored whole while the destination has room for 4 more, else masked (only the selected
-    // lanes reach the destination's last places). Steps whose nibble is 0 are skipped.
+    // lanes reach the destination's last places). No branch depends on the mask's bits: a step whose nibble is 0
+    // stores nothing it keeps (the next step writes the same places), so a mask of mixed bits mispredicts nothing.
     private static unsafe void Permute8(ref long from, int length, ulong mask, ref long into, int count)
     {
         var lanes = Vector256.Create(1L, 2, 4, 8);
@@ -158,7 +159,6 @@ public static class Lanes
             for (int at = 0; mask != 0; at += 4, mask >>= 4)
             {
                 int m = (int)(mask & 0xF);
-                if (m == 0) continue;
                 var values = at + 4 <= length
                     ? Avx.LoadVector256(source + at)
                     : Avx2.MaskLoad(source + at, Vector256.Equals(Vector256.Create((long)m) & lanes, lanes));
@@ -182,7 +182,6 @@ public static class Lanes
             for (int at = 0; mask != 0; at += 8, mask >>= 8)
             {
                 int m = (int)(mask & 0xFF);
-                if (m == 0) continue;
                 var values = at + 8 <= length
                     ? Avx.LoadVector256(source + at)
                     : Avx2.MaskLoad(source + at, Vector256.Equals(Vector256.Create(m) & lanes, lanes));
@@ -207,6 +206,8 @@ public static class Lanes
     // 128-bit vectors, 4 lanes of 4 bytes per step, a nibble of the mask each: the step's lanes loaded whole when the
     // source holds them (else only the elements before its end, so nothing beyond it is read), moved to the front by
     // one byte shuffle (Bytes4), stored whole while the destination has room for 4 more, else only the selected ones.
+    // Branch-free per step as Permute8: at 50 % of the rows selected, a skip of empty nibbles or of the identity
+    // shuffle mispredicted enough to make the loop slower than the scalar walk.
     private static void Shuffle4(ref int from, int length, ulong mask, ref int into, int count)
     {
         ref byte table = ref MemoryMarshal.GetArrayDataReference(Bytes4);
@@ -214,7 +215,6 @@ public static class Lanes
         for (int at = 0; mask != 0; at += 4, mask >>= 4)
         {
             int m = (int)(mask & 0xF);
-            if (m == 0) continue;
             var values = at + 4 <= length ? Vector128.LoadUnsafe(ref Unsafe.As<int, byte>(ref Unsafe.Add(ref from, at))) : Tail(ref Unsafe.As<int, byte>(ref Unsafe.Add(ref from, at)), (length - at) * 4);
             var packed = Shuffle(values, Vector128.LoadUnsafe(ref table, (nuint)(m * 16)));
             int n = BitOperations.PopCount((uint)m);
@@ -233,9 +233,8 @@ public static class Lanes
         for (int at = 0; mask != 0; at += 2, mask >>= 2)
         {
             int m = (int)(mask & 0x3);
-            if (m == 0) continue;
             var values = at + 2 <= length ? Vector128.LoadUnsafe(ref Unsafe.As<long, byte>(ref Unsafe.Add(ref from, at))) : Tail(ref Unsafe.As<long, byte>(ref Unsafe.Add(ref from, at)), 8);
-            var packed = m == 1 ? values : Shuffle(values, Vector128.LoadUnsafe(ref table, (nuint)(m * 16)));
+            var packed = Shuffle(values, Vector128.LoadUnsafe(ref table, (nuint)(m * 16)));
             int n = BitOperations.PopCount((uint)m);
             ref byte place = ref Unsafe.As<long, byte>(ref Unsafe.Add(ref into, to));
             if (count - to >= 2) packed.StoreUnsafe(ref place);
