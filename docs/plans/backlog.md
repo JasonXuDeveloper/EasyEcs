@@ -13,13 +13,28 @@ Cluster pairs and compress first, then the rest in the order of "Next"; every SI
 (`audit-vector-loops`, "Every vector form runs on ARM64 too"); generators stay fast while they read more source; docs
 last (`docs-todos.md` collects them meanwhile).
 
+The owner (2026-10-26): every open item of this file is done, in this order, nothing left over: Running, Next,
+Later, then Finish (docs included). Each item runs through the skill that owns its work, and its agent's prompt
+names the skill:
+
+| Item | Skills |
+|---|---|
+| any change before it merges | `feature` (definition of done), `audit-naming` on every new name |
+| L1 / L3, L2 / L4, call inliner, inner loops, follow-ups, #160 | `feature`, `audit-vector-loops`, `audit-generator`; `audit-analyzer` for a rule or code fix |
+| G1, analyzer and generators by the official guidance, generated text cleanup, simplification | `audit-generator`, `audit-analyzer` |
+| prefetch gate, microarch M0-M3, borrowed ideas, #164, #157, #159, #153, quiet rechecks | `audit-perf` (+ `audit-vector-loops` for generated loops) |
+| flaky allocation test, exemplar pass, folder restructure | `audit-code` (+ `audit-core` for core code) |
+| merging an agent's branch | `audit` (triage and merge checks) |
+| docs pass | `audit-docs` |
+| bench sync, master | `verify` |
+
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
 - [ ] **L1 ordered rows + blocks, L3 compress** (`locality.md` section 5; worktree `agent-aef3c58e0c81ecff5`, branch
       `feat-locality-core`): a declared key orders a table's rows, re-sorted on a cadence (radix sort, one permutation
       of every column under the gate, `StorageVersion`), a box per block of 8 rows and a read path (`RowBlocks`) for
       the generated pair form; compress (AVX-512 CompressStore / AVX2 table / ARM64 TBL) replaces `Lanes.Compact` in
-      the core's callers; the prototypes' Vector128 / NEON paths are merged (eedfeb0, pushed). L1 gives systems an order they request at
+      the core's callers (M4: today's `Lanes.Compact` is 2-2.5x slower than the TBL table at >=50 %, `locality.md` 6.3; the helper must win every cell); the prototypes' Vector128 / NEON paths are merged (eedfeb0, pushed). L1 gives systems an order they request at
       setup (3.4), not only `[OrderBy]`; L3's compress is one core helper the generated loops call too. New EECS id for an invalid key; decision records; naming candidates to the owner.
 - [x] **Lookup gathers always on: not possible, stay on request** (merged after 932913f): no form beats rows when a
       vector's targets spread over many tables (walk, 64-bit pinned addresses, micro-adaptive choice all measured,
@@ -32,10 +47,10 @@ last (`docs-todos.md` collects them meanwhile).
       probes: vertical forms dropped again (1.25-1.63x slower at 16M); scalar group prefetching 1.33x at 16M keys,
       1.3-1.6x slower in cache, no batch probe API to put it in.
 
-- [ ] **ARM64 parity** (worktree agent, branch `feat-arm-parity`): wide components through NEON TBL, a repo-wide audit
-      for x86-only paths, the ARM64 CI job asserting which forms run as vectors. (Interleaved LD2-4 / ST2-4: a296ecb.)
-
 - [ ] **Vector loops through the user's own calls** (worktree agent, branch `feat-call-inliner`; "Next" item 3).
+
+- [ ] **Prefetch with a cache-size gate + the 16-word locals bug** (worktree agent, branch `feat-prefetch-gate`;
+      "Next" item 6).
 
 The owner's order (2026-10-26): every code change before any docs (generator cost and ARM64 parity included).
 CI runs the unit tests on ARM64 (b1dbdb0).
@@ -53,11 +68,14 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        ARM64 (owner's M4 run, `locality.md` 6.1a): crowded maps 2-8x, sparse maps only 1.1-2.1x while neighbor lists
        reach 2.5-3.4x: L2 ships clusters there too (faster is kept, owner) and optimizes: 4-row blocks and the
        neighbor-list form on ARM64, picked by density; never a slower case (no re-sort every tick on sparse maps).
-2. [ ] **ARM64 parity of the generated forms** (running, see above) (owner, 2026-10-26: every generated SIMD path runs on ARM64; table in
-       `audit-vector-loops`, "Every vector form runs on ARM64 too"): an ARM64 CI job first (unit tests on GitHub's
-       ARM64 Linux runner, `__loops` lines printed), then multi-field / `Vector2/3/4` components through LD2-4 / ST2-4,
-       then wide components through TBL. Touches SystemGenerator / Kernel: after WP0b, beside L2. Proof: tests with
-       `DOTNET_EnableAVX=0` here, the ARM64 job, the owner's ARM64 BenchmarkDotNet numbers.
+2. [x] **ARM64 parity of the generated forms** (merged 186c84d): LD2-4 / ST2-4 for multi-field components, NEON TBL /
+       TBX for wide components (a gate per form), BitMask in registers, the `arm64` CI job asserting loop lines.
+       Owner's M4 run (default job, one round): SteerGenerated 2.07x faster than SteerScalar at 1k, 1.55x at 100k;
+       GlideGenerated 1.87x / 1.63x; 0 B: the ARM gate admits only forms that pay. Not yet known whether it is too
+       strict: a rejected shape (the test's `Brake`, 8 words, 3 fields) gets a benchmark pair with the gate forced
+       open, and the gate loosens if that form wins on the M4. Gathers stay rows (D131); compress comes with L3. Bug found: a 16-word wide component whose 512 form
+       gathers 3 fields writes a `__Loop512` of 34 IL locals (over WP0b's 32): fix with the prefetch item (cut the
+       512 loop or reject such rows in the gate).
 3. [ ] **Vector loops through the user's own calls** (running, see above) (owner: users should not have to avoid helpers): today a call
        into user code keeps the method scalar (EECS055 "it calls X.Y"); only Math, the generated members (SetX / IsX
        ...), Emit.Add, Lookup reads and view members (Kernel.Views.cs, inlined from source, depth 8) are translated.
@@ -76,9 +94,15 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 6. [ ] **Prefetched lookup chases with a size gate** (decided by the owner's rule "a faster case ships, a slower one
        never": 1.29-1.36x at 16M, slower in cache): the generated row and vector forms prefetch `k` rows ahead
        (record, then row; k = 8 rows / 16 for vectors, from the screen) only when the target table's records and
-       column are past the last-level cache, read once per pass from the machine (Linux `/sys/.../cache/index3/size`,
-       macOS `hw.l3cachesize` or the SLC / `hw.perflevel0.l2cachesize` on Apple), so a world in cache runs today's code.
-       ARM64: no prefetch intrinsic in .NET 10 (SVE only): the gate is off there. Then relation targets and
+       column are past the last-level cache, so a world in cache runs today's code. .NET has no public API for the
+       cache size; read it once per process the way the runtime's own GC does for its gen0 budget
+       (`gcenv.windows.cpp` / `gcenv.unix.cpp`, GetLogicalProcessorCacheSizeFromOS): Windows
+       `GetLogicalProcessorInformationEx(RelationCache)`, Linux `/sys/devices/system/cpu/cpu0/cache/index*/size`
+       (then `sysconf(_SC_LEVEL3_CACHE_SIZE)`), macOS `sysctl hw.l3cachesize`, else `hw.perflevel0.l2cachesize`.
+       Anything unknown (WebAssembly, an OS not listed, a read that fails or returns 0) means off: today's code.
+       Prefetch runs only where `Sse.IsSupported` (x86); ARM64 has no prefetch intrinsic in .NET 10 (SVE only), so
+       the gate is off there and the read is never made. Not `GC.GetConfigurationVariables()["GCGen0MaxBudget"]`:
+       derived from the cache, but configurable and not a contract. Then relation targets and
        `[ForEach]`-key index probes (`TryFind(key.F)`), the probe form scalar group prefetching won at 16M keys.
        Proof: LookupChaseBenchmark 1k / 1M / 16M not slower anywhere, faster past the cache; the owner re-measures on
        a 32 MiB-LLC machine and the M4. Generator files: after the ARM parity agent merges (SystemGenerator, Kernel.Lookups).
@@ -129,7 +153,24 @@ CI runs the unit tests on ARM64 (b1dbdb0).
       identity copies (`var __c1_0 = __s1_0`); per-width constants re-created (`__u1`, `this.v0 = default`);
       `__d0 = Zero; __d0 |= x` where `__d0 = x` would do. Users read this code (docs "The generator writes" tabs), so
       readability counts once the asm is equal.
+- [ ] **The inliner's limit, checked instead of assumed** (owner, 2026-10-26: "is a fixed JIT budget right when SIMD
+      width differs?"). Answer: `MAX_INL_LCLS = 32` is RyuJIT's implementation constant with no target condition
+      (`inline.h`, release/10.0 and main), the same for x64, ARM64, ReadyToRun and Native AOT, and it counts IL
+      locals, which no vector width changes; per-width register pressure is M1's (`microarch.md`). Left to do:
+      `tools/inlining.sh` in CI on the x64 and arm64 jobs (fails when a runner stops inlining a job, so a runtime
+      that changes the limit is seen at once). Mono (the WebAssembly demo; `mini/method-to-ir.c`,
+      `mono_method_check_inlining`, release/10.0) read: no limit on locals at all ("also consider num_locals?"), an IL
+      size limit of 20 bytes (30 LLVM AOT, 100 LLVM JIT) that `AggressiveInlining` lifts, an inline depth of 10, no
+      inlining in gsharedvt code or of methods with exception clauses: the 32-locals split costs Mono nothing, and
+      every helper a loop inlines must keep `AggressiveInlining` (the demo's runners inline only through it).
+      Decision record with D135 in the docs pass.
 - [ ] Follow-ups: lambda passes do not fuse; lambda + structural change and lambda + view stay scalar.
+- [ ] **From the published roadmap** (`docs/content/roadmap.mdx` "Planned", checked against this file 2026-10-26):
+      push halos for grid neighbors (a chunk hands its edges to its neighbors' halos when they change, D73; with
+      WP5 / WP5b, `feature` + `audit-vector-loops`); the vector-loop forms left for later (masked words in parallel
+      methods, `Maybe<T>` in parallel methods and with narrow lanes, masked words of narrow lanes and wide rows,
+      `Atan2` / `Asin` / `Pow` lowerings; each ships only where it measures faster, `audit-vector-loops`). Not
+      actionable here: Unity support waits for a Unity release on .NET 10; the toolchain item is a standing rule.
 - [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 NativeMemory 2 MiB columns (research
       first); #157 the #138 recommendations; #159 remaining research.
 - [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
@@ -143,6 +184,10 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 - [ ] **Exemplar pass** (#169, `audit-code`): VoxelServer / samples + templates + demo / benchmark worlds + usage
       tests rewritten in the newest recommended forms, A/B on rewritten benchmark worlds.
 - [ ] **Folder restructure** of Core and Generator (`git mv` only), if still wanted (`docs-todos.md`).
+- [ ] **Generated-members scan before the release** (roadmap "Less code through the generator", D26,
+      `audit-generator`): the API, the battle server and the guides scanned for lines users write twice.
 - [ ] **Docs pass** (#141): everything in `docs-todos.md`; DocCheck (296 problems) and ApiDocs (46) to 0; decision
       record for the 8 declined declarations; roadmap item for inner loops; analyzer range EECS002-103.
+- [ ] The `arm64` CI job (`ci.yml`, `runs-on: ubuntu-24.04-arm`, added b1dbdb0) has never run: it runs on the next
+      push to master or a manual dispatch; if the label is wrong the job fails at once and the label is fixed then.
 - [ ] `tools/bench.sh --site --sync`, README numbers, `verify`, master. The owner cuts the release.

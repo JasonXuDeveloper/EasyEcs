@@ -44,7 +44,8 @@ AGENTS.md's engineering principles and rules apply (performance first, zero allo
   warm-up; parallel results are bit-identical at 1 and 4 threads (chunks, `Reduce<T>`, `Emit<T>` combine in chunk
   order).
 - **Platforms**: x64 and arm64 intrinsics with a scalar fallback (`IsSupported` checks), Native AOT (no reflection or
-  generic recursion it cannot see, `tests/EasyEcs.Aot`), WebAssembly (the demo: Mono AOT, single-threaded, so the
+  generic recursion it cannot see, `tests/EasyEcs.Aot`; no `static readonly` vector built by code read in a loop, and
+  no `fixed` in a helper a loop inlines: both stated in `audit-vector-loops`, "Read the loop the JIT wrote"), WebAssembly (the demo: Mono AOT, single-threaded, so the
   runner and `Workers` must run everything on the caller), Godot desktop and mobile; native memory freed on every
   path (World dispose, snapshots, collectible unload).
 - **Unbounded memory**: a list, pool or log that grows without a cap or a release (`TrimExcess`, pool limits, the

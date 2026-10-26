@@ -12,7 +12,11 @@ public sealed partial class SystemGenerator
     /// <summary>
     /// The most IL locals a method the runner inlines may declare: the JIT inlines no method that declares more
     /// (<c>MAX_INL_LCLS</c>, "too many locals"), <c>AggressiveInlining</c> or not, and then calls it for every row of
-    /// runs and every 64-row word of a masked table.
+    /// runs and every 64-row word of a masked table. One number for every target: it is RyuJIT's implementation limit
+    /// (<c>inline.h</c>, no target condition, the same in .NET 10 and main), and RyuJIT compiles x64 and ARM64, the
+    /// JIT, ReadyToRun and Native AOT alike. It counts IL locals, which no SIMD width changes (a width's dead branch
+    /// still declares its locals, so each width's loop is a method of its own). What the width changes is register
+    /// pressure (16 ymm on AVX2, 32 zmm on AVX-512, 32 NEON registers): tuned per form, not here.
     /// </summary>
     internal const int InlinedLocals = 32;
 
@@ -123,13 +127,7 @@ public sealed partial class SystemGenerator
         var loop = new StringBuilder();
         // Kernel.V stands for the vector type in both loops' text, and the tokens below for what their forms name apart.
         string vector = $"{Kernel.V}<{simd.Lane}>"; // the narrowest lanes: a column of lanes twice as wide takes two vectors
-        // Components of several fields need the shuffles of Interleaved; without them, every row runs the method.
-        string interleaved = simd.Interleaves ? $" && global::EasyEcs.Interleaved.{Accelerated}" : "";
-        // A wide component's permutes are AVX-512's, and its layout the generator's (checked once per job type).
-        if (simd.Wide != null) interleaved += $" && global::System.Runtime.Intrinsics.X86.Avx512F.IsSupported && {simd.Wide}";
-        // Other entities' fields are AVX2 gathers (Kernel.Lookups.cs): without them, every row runs the method.
-        if (simd.Gathers) interleaved += " && global::EasyEcs.LookupLanes.IsAccelerated";
-        string guard = $"{Kernel.V}.IsHardwareAccelerated{interleaved} && rows - i >= {vector}.Count";
+        string guard = $"{Hardware(simd)} && rows - i >= {vector}.Count";
         const string body = "    ";
         foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) loop.Append(line).Append('\n');
         loop.Append($"for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{{\n");
@@ -162,14 +160,65 @@ public sealed partial class SystemGenerator
         // Only the tokens are replaced: setup lines name user types (in Vector3 wind, in Vector<float> bias) as written.
         // Vector512 names the same operations alike, except the square root (Vector.SquareRoot, Vector512.Sqrt).
         string text = loop.Replace(Kernel.Visited, masked ? "pass" : "ulong.MaxValue").Replace(Kernel.Row, "(int)i").ToString();
-        string Wide(string s) => s.Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512)
-            .Replace(Accelerated, "IsAccelerated512").Replace(Kernel.LanesForm, "In512");
-        string Narrow(string s) => s.Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(Kernel.LanesForm, "");
-        var loops = new List<Loop> { new("Loop512", Wide(guard), Wide(text)) };
-        if (simd.Wide == null) loops.Add(new("Loop", Narrow(guard), Narrow(text)));
+        var loops = new List<Loop>();
+        if (simd.Wide == null || simd.Wide512) loops.Add(new("Loop512", Wide(guard, simd.Wide), Wide(text, simd.Wide)));
+        if (simd.Wide == null || simd.Wide128) loops.Add(new("Loop", Narrow(guard, simd.Wide), Narrow(text, simd.Wide)));
         if (simd.VectorTail) loops.Add(TailLoop(simd, components, masked, split));
         return loops;
     }
+
+    /// <summary>
+    /// The hardware a vector loop of <paramref name="simd"/> needs, as one text for both widths (<see cref="Wide"/> and
+    /// <see cref="Narrow"/> make each width's).
+    /// </summary>
+    private static string Hardware(Kernel.Code simd)
+    {
+        // Components of several fields need the shuffles of Interleaved; without them, every row runs the method.
+        string needs = simd.Interleaves ? $" && global::EasyEcs.Interleaved.{Accelerated}" : "";
+        // A wide component needs AVX-512's permutes or NEON's table lookups, and its layout the generator's (checked once
+        // per job type).
+        if (simd.Wide != null) needs += WideGuard;
+        // Other entities' fields are AVX2 gathers (Kernel.Lookups.cs): without them, every row runs the method.
+        if (simd.Gathers) needs += " && global::EasyEcs.LookupLanes.IsAccelerated";
+        return $"{Kernel.V}.IsHardwareAccelerated{needs}";
+    }
+
+    /// <summary>
+    /// The Vector512 loop's text: its vector type, square root and lane masks, a wide component's AVX-512 lines
+    /// (<see cref="Kernel.Mark512"/>) and permutes behind <paramref name="layout"/> (null: no wide component; "": the
+    /// hardware alone, for the schedule's line).
+    /// </summary>
+    private static string Wide(string s, string? layout) => Lines(s, Kernel.Mark512, Kernel.Mark128)
+        .Replace(WideGuard, layout == null ? "" : " && global::System.Runtime.Intrinsics.X86.Avx512F.IsSupported" + (layout.Length > 0 ? " && " + layout : ""))
+        .Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512).Replace(Accelerated, "IsAccelerated512").Replace(Kernel.LanesForm, "In512");
+
+    /// <summary>The Vector&lt;T&gt; loop's text: <see cref="Wide"/>'s counterpart, a wide component's 128-bit lines and table lookups.</summary>
+    private static string Narrow(string s, string? layout) => Lines(s, Kernel.Mark128, Kernel.Mark512)
+        .Replace(WideGuard, layout == null ? "" : " && global::EasyEcs.Interleaved.IsWideAccelerated" + (layout.Length > 0 ? " && " + layout : ""))
+        .Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(Kernel.LanesForm, "");
+
+    /// <summary>
+    /// The condition under which a method's vector loop runs on this hardware, for its schedule line (or null: it has
+    /// none): a width's loop it has and that width's hardware, the job's layout checks aside (a constant the generator's
+    /// layout already matched).
+    /// </summary>
+    internal static string? RunsVector(Kernel.Code? simd)
+    {
+        if (simd == null) return null;
+        var widths = new List<string>();
+        if (simd.Flat != null) widths.Add($"{Vector}.IsHardwareAccelerated");
+        if (simd.Wide == null || simd.Wide512) widths.Add(Wide(Hardware(simd), simd.Wide == null ? null : ""));
+        if (simd.Wide == null || simd.Wide128) widths.Add(Narrow(Hardware(simd), simd.Wide == null ? null : ""));
+        return string.Join(" || ", widths.Distinct().Select(w => w.Contains(" && ") && widths.Count > 1 ? $"({w})" : w));
+    }
+
+    /// <summary><paramref name="text"/> without the lines marked <paramref name="drop"/>, and without the mark <paramref name="keep"/>.</summary>
+    private static string Lines(string text, string keep, string drop) => (text.IndexOf(drop, System.StringComparison.Ordinal) < 0
+        ? text
+        : Regex.Replace(text, "(?m)^[ \\t]*" + Regex.Escape(drop) + "[^\\n]*\\n", "")).Replace(keep, "");
+
+    // A token of Hardware's text: what a wide component needs of each width (Wide, Narrow).
+    private const string WideGuard = "\u0001WideGuard";
 
     /// <summary>
     /// The constants of a loop over whole vectors (<c>var __u1 = V.Create&lt;float&gt;(2f);</c>, the setup's broadcasts

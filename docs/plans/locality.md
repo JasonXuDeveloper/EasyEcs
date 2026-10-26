@@ -270,8 +270,7 @@ The owner's call (2026-10-26): sparse maps on ARM64 are still faster than the gr
 there too and get optimized; the 2x bar decides whether a design is built, not whether a faster case is kept. What
 must never ship is a slower case: re-sorting every tick on a sparse map (ClustersSort1: 1.06-1.55x slower) is avoided
 by the cadence the generator picks (from the cutoff, the margin and the measured drift), and each kernel choice is
-measured against the row loop it replaces. Compress
-on ARM64: the owner's CompressBenchmark table is still to be recorded here.
+measured against the row loop it replaces. Compress on ARM64: section 6.3.
 
 ### 6.2 Nearest (4.2): met for the packed start and NearestPlayer, not met on a spread map
 
@@ -360,6 +359,23 @@ at 262,144; the AVX2 permutation table 3.0x to 5.3x and 9.3x to 28x. The core's 
 slower than a direct `CompressStore` loop. The branchy loop looks good at 4096 rows only because the benchmark repeats
 the same 4096-row pattern and the branch predictor learns it (Branchless, which spills the condition through the
 stack, loses there); at 262,144 rows the predictor cannot learn it and the branchy loop shows its mispredictions.
+
+ARM64 (owner's Apple M4, NEON, default job, 2026-10-26; PermutationTable and Compress512 fall back to the 128-bit
+shuffle table there, so the three rows are one form):
+
+| Method | Rows | % | Mean | Ratio |
+|---|---|---|---|---|
+| Branchless | 4096 | 10 / 50 / 90 | 1,037 / 1,040 / 1,142 ns | 0.76 / 0.38 / 0.48 |
+| ShuffleTable (TBL) | 4096 | 10 / 50 / 90 | 798 / 803 / 971 ns | 0.58 / 0.29 / 0.41 |
+| CoreCompact | 4096 | 10 / 50 / 90 | 764 / 2,006 / 2,128 ns | 0.56 / 0.74 / 0.90 |
+| Branchless | 262144 | 10 / 50 / 90 | 85.2 / 86.7 / 89.3 us | 0.52 / 0.10 / 0.48 |
+| ShuffleTable (TBL) | 262144 | 10 / 50 / 90 | 66.8 / 69.8 / ~68 us | 0.41 / 0.08 / ~0.37 |
+| CoreCompact | 262144 | 10 / 50 / 90 | 79.6 / 158.2 / ~146 us | 0.48 / 0.19 / ~0.8 |
+
+The TBL table meets the bar on ARM64 (1.7x to 12x over branchy, 1.25-1.3x over branchless). The core's
+`Lanes.Compact` does not: off AVX-512, a mask of more than `Sparse` bits goes to `Advance` (one scalar store per
+element), 2-2.5x slower than the table at 50 / 90 % and slower than branchless. L3's core helper takes the table
+forms on every ISA (NEON TBL, AVX2 permutation, AVX-512 compress) and must not lose any cell, the 10 % one included.
 
 `BatchProbeBenchmark`: an open-addressing int -> int table (linear probing, capacity the power of two above 2x the
 keys, 90 % of the queries hit), 4096 lookups per invoke, mean per lookup. Vertical: 8 keys per `Vector256`, AVX2

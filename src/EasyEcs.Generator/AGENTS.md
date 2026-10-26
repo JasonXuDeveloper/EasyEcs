@@ -95,8 +95,10 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              body through the same Translate, with its Lane);
                              Kernel.Narrow.cs: byte / sbyte / short / ushort lanes (int values followed as low bits and an interval, saturating idioms); Kernel.Struct.cs:
                              struct values (Vector2/3/4 fields, new T(...), with) as one vector per lane;
-                             Kernel.Wide.cs: components of up to 16 words on AVX-512 (fields gathered by a pruned
-                             permute tree, where it pays);
+                             Kernel.Wide.cs: components of up to 16 words, two forms each emitted where it pays (its
+                             own gate): AVX-512 (fields gathered by a pruned permute tree) and ARM64's 128 bits (4 rows
+                             per vector, one NEON TBL per field over up to 4 registers, a TBX per written vector:
+                             Interleaved.Pick / PickInto); lines marked per width, kept or dropped by SystemGenerator;
                              Kernel.Pairs.cs: lanes of two sizes (int rows summed into a long, float into a double) as
                              pairs of vectors (WidenLower / WidenUpper), every lane bit-exact; four times as wide stays scalar;
                              Kernel.Views.cs: a method taking views desugared before translation (view fields as

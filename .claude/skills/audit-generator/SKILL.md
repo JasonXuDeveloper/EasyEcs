@@ -122,6 +122,10 @@ locations: `docs/plans/generated-text.md`.
 
 Write it like hand-written code:
 
+- **Constants are literals in place, never a `static readonly` the loop reads** (permute and lookup tables, masks):
+  Native AOT checks a static's class initialization on every iteration (`audit-vector-loops`, "Read the loop the JIT
+  wrote"); no `fixed` either in what a loop inlines (same section).
+
 - **Short names through one alias block.** Every type the body names more than once goes through a file-level
   `using` alias with a reserved `__` name (`using __V512i = global::System.Runtime.Intrinsics.Vector512<int>;`), one
   per closed type the file uses; the body never spells `global::System...` (about half of SystemGenerator's text

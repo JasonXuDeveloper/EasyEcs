@@ -23,6 +23,8 @@ jobs:
         run: dotnet build --no-restore --configuration Release
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
+      - name: Every generated job is inlined by its runner (tools/inlining.sh; the JIT inlines no method of more than 32 IL locals)
+        run: tools/inlining.sh
       - name: Pack (verify the package builds)
         run: dotnet pack src/EasyEcs.Core/EasyEcs.Core.csproj --no-build --configuration Release --output artifacts
       - name: Run the samples (the deterministic ones must print their README's expected output)
@@ -62,6 +64,10 @@ jobs:
         run: dotnet build tests/EasyEcs.UnitTest --configuration Release
       - name: Test
         run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release
+      - name: The loop each [ForEach] method of the tests runs on ARM64 (a form left to rows says "rows on this hardware")
+        run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release --filter "Name=EveryVectorFormRunsAsAVectorLoopOnARM64" --logger "console;verbosity=detailed"
+      - name: Every generated job is inlined by its runner on ARM64 (tools/inlining.sh)
+        run: tools/inlining.sh
 
   doc-snippets:
     runs-on: ubuntu-26.04

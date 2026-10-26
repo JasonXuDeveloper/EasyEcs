@@ -759,7 +759,32 @@ public struct Mixed : IComponent
     public double Score;
     public float Armor;
 }
+/// <summary>Five words of three lane types, every one used and written: a 128-bit vector of 4 rows takes all 4 words of each it stores.</summary>
+public struct Five : IComponent
+{
+    public float A;
+    public int B;
+    public float C;
+    public uint D;
+    public float E;
+}
+/// <summary>Two words a row, a float beside two shorts: the 4 rows' floats lie in 2 vectors, and each store keeps the shorts.</summary>
+public struct Slim : IComponent
+{
+    public float Speed;
+    public short Lo, Hi;
+}
+/// <summary>Eight words a row, three of them used: each field of 4 rows lies in 4 vectors (a 4-register table lookup).</summary>
+public record struct Rig8(float X, float A1, float A2, float P, float A4, float A5, float A6, float Q) : IComponent;
 #pragma warning restore EECS091
+
+/// <summary>A system with a wide component's method: its schedule line says whether the vector loop runs on this hardware.</summary>
+[EcsSystem]
+public ref struct WideFormsSystem
+{
+    [ForEach]
+    static void Glide(ref Slim s, in Level drag) => s.Speed = MathF.Max(s.Speed * 0.75f - drag.Value, 0) + drag.Value * drag.Value;
+}
 
 /// <summary>
 /// Kernels over wide components: the lanes they use gathered by permutes (AVX-512), the rest of each row stored as
@@ -782,6 +807,26 @@ public static class WideKernels
         if (m.Speed > 1) m.Hp -= 1;
         m.Armor = MathF.Max(m.Armor - m.Speed * damage.Value, 0) * 0.5f + damage.Value * damage.Value;
         m.Speed = m.Speed * 0.75f - m.Armor / 8;
+    }
+
+    [ForEach]
+    internal static void Shift(ref Five f, in Level l)
+    {
+        f.A = f.A * l.Value + f.C;
+        f.B += 3;
+        f.C = MathF.Max(f.C, f.E) - l.Value;
+        f.D ^= 0x55u;
+        f.E = f.E * 0.5f + f.A * f.A - MathF.Min(f.C, l.Value) * 0.25f;
+    }
+
+    [ForEach]
+    internal static void Coast(ref Slim s, in Level drag) => s.Speed = MathF.Max(s.Speed * 0.75f - drag.Value, 0) + drag.Value * drag.Value;
+
+    [ForEach]
+    internal static void Brake(ref Rig8 r, in Level l)
+    {
+        r.X = r.X - r.P * l.Value;
+        r.Q = MathF.Min(r.Q + r.X, 10) * 0.5f + l.Value * l.Value;
     }
 }
 
@@ -1034,6 +1079,46 @@ public class KernelTests
             Check(count, NextCraft, (r, i) => new Heat(), w => { w.SetDt2(dt); WideKernels.Steer(w); }, (ref Craft12 c, ref Heat _) => WideKernels.Steer(ref c, new Dt2(dt)));
         Check(count, NextMixed, NextLevel, WideKernels.Wear, (ref Mixed m, ref Level l) => WideKernels.Wear(ref m, in l));
         CheckHoles(count, i => i % 3 == 1, NextMixed, NextLevel, WideKernels.Wear, (ref Mixed m, ref Level l) => WideKernels.Wear(ref m, in l));
+    }
+
+    /// <summary>
+    /// Wide components of every shape the 128-bit form (ARM64's table lookups) meets: every word written (each stored
+    /// vector taken whole), a float beside shorts (its 4 rows in 2 vectors, the shorts kept), 16 words a row (each field of
+    /// 4 rows in 4 vectors); results the method's bit for bit wherever a form runs, and the method's own elsewhere.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void WideComponentsOfEveryShapeMatchTheMethodBitForBit(int count)
+    {
+        Check(count, (r, i) => new Five { A = NextFloat(r, i), B = r.Next(), C = NextFloat(r, i + 1), D = (uint)r.Next(), E = NextFloat(r, i + 2) }, NextLevel,
+            WideKernels.Shift, (ref Five f, ref Level l) => WideKernels.Shift(ref f, in l));
+        Check(count, (r, i) => new Slim { Speed = NextFloat(r, i), Lo = (short)i, Hi = (short)-i }, NextLevel,
+            WideKernels.Coast, (ref Slim s, ref Level l) => WideKernels.Coast(ref s, in l));
+        CheckHoles(count, i => i % 4 == 2, (r, i) => new Slim { Speed = NextFloat(r, i), Lo = (short)i, Hi = (short)-i }, NextLevel,
+            WideKernels.Coast, (ref Slim s, ref Level l) => WideKernels.Coast(ref s, in l));
+        Check(count, (r, i) => new Rig8(NextFloat(r, i), 1, 2, NextFloat(r, i + 1), 4, 5, 6, NextFloat(r, i + 2)), NextLevel,
+            WideKernels.Brake, (ref Rig8 g, ref Level l) => WideKernels.Brake(ref g, in l));
+    }
+
+    /// <summary>
+    /// Every vector loop of this assembly's systems runs as one on this hardware, as the skill's table of ARM64 forms says
+    /// (audit-vector-loops): each schedule line is printed (the ARM64 CI job shows them), and on ARM64 none says "rows on
+    /// this hardware" except the gathers of other entities (no gather on ARM64 in .NET 10: D131) and a wide component
+    /// whose table lookups do not pay (the gate left it "Vector512 only").
+    /// </summary>
+    [Test]
+    public void EveryVectorFormRunsAsAVectorLoopOnARM64()
+    {
+        var lines = typeof(KernelTests).Assembly.GetTypes()
+            .Where(t => !t.ContainsGenericParameters && t.GetInterfaces().Any(i => i.Name == nameof(ISystemCode)))
+            .SelectMany(t => (string[])t.GetProperty(nameof(ISystemCode.Loops))!.GetValue(null)!)
+            .Where(l => l.Contains(": vector", StringComparison.Ordinal)).Order(StringComparer.Ordinal).ToList();
+        foreach (var line in lines) TestContext.Out.WriteLine(line);
+        Assert.That(lines.Single(l => l.StartsWith("Glide:", StringComparison.Ordinal)), Does.Contain("wide component"));
+        if (!System.Runtime.Intrinsics.Arm.AdvSimd.Arm64.IsSupported) Assert.Ignore("ARM64 only: the lines above are this hardware's");
+        var rows = lines.Where(l => l.Contains("rows on this hardware", StringComparison.Ordinal)
+            && !l.Contains("gathers", StringComparison.Ordinal) && !l.Contains("(Vector512 only)", StringComparison.Ordinal));
+        Assert.That(rows, Is.Empty);
+        Assert.That(lines.Single(l => l.StartsWith("Glide:", StringComparison.Ordinal)), Does.Not.Contain("rows on this hardware"));
     }
 
     /// <summary>

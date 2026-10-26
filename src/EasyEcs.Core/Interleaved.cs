@@ -23,7 +23,7 @@ namespace EasyEcs;
 /// Shuffles only move bits, so a lane of 4 bytes is moved as a float and one of 8 bytes as a double, whatever its type.
 /// </remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public static class Interleaved
+public static partial class Interleaved
 {
     /// <summary>
     /// Whether the loads and stores of <c>Vector&lt;T&gt;</c> run as shuffles on this hardware (NEON's LD2-4 / ST2-4
@@ -92,7 +92,7 @@ public static class Interleaved
     /// </summary>
     public static ref T LoadTail<T>(ref T rows, int count) where T : struct
     {
-        var copy = Tail<T>.Rows ??= new T[64];
+        var copy = Tail<T>.Rows ??= PinnedRows<T>(64);
         MemoryMarshal.CreateReadOnlySpan(ref rows, count).CopyTo(copy);
         return ref MemoryMarshal.GetArrayDataReference(copy);
     }
@@ -101,32 +101,57 @@ public static class Interleaved
     public static void StoreTail<T>(ref T rows, int count) where T : struct =>
         Tail<T>.Rows.AsSpan(0, count).CopyTo(MemoryMarshal.CreateSpan(ref rows, count));
 
+    /// <summary>
+    /// An array of <paramref name="length"/> rows on the pinned object heap when <typeparamref name="T"/> holds no
+    /// references: memory the 128-bit forms may take as a pointer without <c>fixed</c>.
+    /// </summary>
+    internal static T[] PinnedRows<T>(int length) =>
+        RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? new T[length] : GC.AllocateArray<T>(length, pinned: true);
+
     // One copy per thread and type: a vector loop's columns are of distinct types, and it runs no other loop meanwhile.
     private static class Tail<T>
     {
         [ThreadStatic] public static T[] Rows;
     }
 
-    /// <summary>Lane j holds bit j: the row of each lane in a word's bits.</summary>
+    /// <summary>
+    /// Lane j holds bit j: the row of each lane in a word's bits. Vectors of literals (constants of the compiled code,
+    /// no static to initialize under Native AOT; see the permute tables at the end of the file).
+    /// </summary>
     private static class Masks
     {
-        public static readonly Vector<int> Bits32 = Make32();
-        public static readonly Vector<long> Bits64 = Make64();
-        public static readonly Vector512<int> Bits32x16 = Vector512.Create(1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768);
-        public static readonly Vector512<long> Bits64x8 = Vector512.Create(1L, 2, 4, 8, 16, 32, 64, 128);
-
-        private static Vector<int> Make32()
+        public static Vector<int> Bits32
         {
-            Span<int> bits = stackalloc int[Vector<int>.Count];
-            for (int j = 0; j < bits.Length; j++) bits[j] = 1 << j;
-            return new Vector<int>(bits);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Vector<byte>.Count switch
+            {
+                64 => Bits32x16.AsVector(),
+                32 => Vector256.Create(1, 2, 4, 8, 16, 32, 64, 128).AsVector(),
+                _ => Vector128.Create(1, 2, 4, 8).AsVector(),
+            };
         }
 
-        private static Vector<long> Make64()
+        public static Vector<long> Bits64
         {
-            Span<long> bits = stackalloc long[Vector<long>.Count];
-            for (int j = 0; j < bits.Length; j++) bits[j] = 1L << j;
-            return new Vector<long>(bits);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Vector<byte>.Count switch
+            {
+                64 => Bits64x8.AsVector(),
+                32 => Vector256.Create(1L, 2, 4, 8).AsVector(),
+                _ => Vector128.Create(1L, 2).AsVector(),
+            };
+        }
+
+        public static Vector512<int> Bits32x16
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Vector512.Create(1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768);
+        }
+
+        public static Vector512<long> Bits64x8
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Vector512.Create(1L, 2, 4, 8, 16, 32, 64, 128);
         }
     }
 
@@ -222,27 +247,30 @@ public static class Interleaved
     // ---------------- 128 bits (ARM64 NEON) ----------------
 
     // The 128-bit forms run only behind IsAccelerated (AdvSimd.Arm64): LD2 / LD3 / LD4 load and de-interleave in one
-    // instruction, ST2 / ST3 / ST4 interleave and store. The column is pinned for the call (a tail copy may live in a
-    // managed array that is not); lanes move as float or double, whatever their type, as the shuffles do.
+    // instruction, ST2 / ST3 / ST4 interleave and store; lanes move as float or double, whatever their type, as the
+    // shuffles do. The intrinsics take pointers, and the column is taken as one without `fixed` (a `fixed` inside the
+    // loop pins and unpins a stack slot on every vector: two stores per call). The invariant: every column a vector
+    // loop passes never moves. Unmanaged component columns live on the pinned object heap (ComponentInfo.Create), and
+    // so do the other memory the loops read through these forms, the tail copy (LoadTail) and Maybe<T>'s zero rows.
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static unsafe float* Floats<T>(ref T column) => (float*)Unsafe.AsPointer(ref column);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static unsafe double* Doubles<T>(ref T column) => (double*)Unsafe.AsPointer(ref column);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static unsafe void Load2<T>(ref T column, nuint row, out Vector128<T> f0, out Vector128<T> f1)
     {
         if (Unsafe.SizeOf<T>() == 4)
         {
-            fixed (float* s = &Unsafe.As<T, float>(ref column))
-            {
-                var (a, b) = AdvSimd.Arm64.Load2xVector128AndUnzip(s + row * 2);
-                (f0, f1) = (a.As<float, T>(), b.As<float, T>());
-            }
+            var (a, b) = AdvSimd.Arm64.Load2xVector128AndUnzip(Floats(ref column) + row * 2);
+            (f0, f1) = (a.As<float, T>(), b.As<float, T>());
         }
         else
         {
-            fixed (double* s = &Unsafe.As<T, double>(ref column))
-            {
-                var (a, b) = AdvSimd.Arm64.Load2xVector128AndUnzip(s + row * 2);
-                (f0, f1) = (a.As<double, T>(), b.As<double, T>());
-            }
+            var (a, b) = AdvSimd.Arm64.Load2xVector128AndUnzip(Doubles(ref column) + row * 2);
+            (f0, f1) = (a.As<double, T>(), b.As<double, T>());
         }
     }
 
@@ -251,19 +279,13 @@ public static class Interleaved
     {
         if (Unsafe.SizeOf<T>() == 4)
         {
-            fixed (float* s = &Unsafe.As<T, float>(ref column))
-            {
-                var (a, b, c) = AdvSimd.Arm64.Load3xVector128AndUnzip(s + row * 3);
-                (f0, f1, f2) = (a.As<float, T>(), b.As<float, T>(), c.As<float, T>());
-            }
+            var (a, b, c) = AdvSimd.Arm64.Load3xVector128AndUnzip(Floats(ref column) + row * 3);
+            (f0, f1, f2) = (a.As<float, T>(), b.As<float, T>(), c.As<float, T>());
         }
         else
         {
-            fixed (double* s = &Unsafe.As<T, double>(ref column))
-            {
-                var (a, b, c) = AdvSimd.Arm64.Load3xVector128AndUnzip(s + row * 3);
-                (f0, f1, f2) = (a.As<double, T>(), b.As<double, T>(), c.As<double, T>());
-            }
+            var (a, b, c) = AdvSimd.Arm64.Load3xVector128AndUnzip(Doubles(ref column) + row * 3);
+            (f0, f1, f2) = (a.As<double, T>(), b.As<double, T>(), c.As<double, T>());
         }
     }
 
@@ -272,53 +294,35 @@ public static class Interleaved
     {
         if (Unsafe.SizeOf<T>() == 4)
         {
-            fixed (float* s = &Unsafe.As<T, float>(ref column))
-            {
-                var (a, b, c, d) = AdvSimd.Arm64.Load4xVector128AndUnzip(s + row * 4);
-                (f0, f1, f2, f3) = (a.As<float, T>(), b.As<float, T>(), c.As<float, T>(), d.As<float, T>());
-            }
+            var (a, b, c, d) = AdvSimd.Arm64.Load4xVector128AndUnzip(Floats(ref column) + row * 4);
+            (f0, f1, f2, f3) = (a.As<float, T>(), b.As<float, T>(), c.As<float, T>(), d.As<float, T>());
         }
         else
         {
-            fixed (double* s = &Unsafe.As<T, double>(ref column))
-            {
-                var (a, b, c, d) = AdvSimd.Arm64.Load4xVector128AndUnzip(s + row * 4);
-                (f0, f1, f2, f3) = (a.As<double, T>(), b.As<double, T>(), c.As<double, T>(), d.As<double, T>());
-            }
+            var (a, b, c, d) = AdvSimd.Arm64.Load4xVector128AndUnzip(Doubles(ref column) + row * 4);
+            (f0, f1, f2, f3) = (a.As<double, T>(), b.As<double, T>(), c.As<double, T>(), d.As<double, T>());
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static unsafe void Store2<T>(Vector128<T> f0, Vector128<T> f1, ref T column, nuint row)
     {
-        if (Unsafe.SizeOf<T>() == 4)
-            fixed (float* d = &Unsafe.As<T, float>(ref column))
-                AdvSimd.Arm64.StoreVectorAndZip(d + row * 2, (f0.AsSingle(), f1.AsSingle()));
-        else
-            fixed (double* d = &Unsafe.As<T, double>(ref column))
-                AdvSimd.Arm64.StoreVectorAndZip(d + row * 2, (f0.AsDouble(), f1.AsDouble()));
+        if (Unsafe.SizeOf<T>() == 4) AdvSimd.Arm64.StoreVectorAndZip(Floats(ref column) + row * 2, (f0.AsSingle(), f1.AsSingle()));
+        else AdvSimd.Arm64.StoreVectorAndZip(Doubles(ref column) + row * 2, (f0.AsDouble(), f1.AsDouble()));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static unsafe void Store3<T>(Vector128<T> f0, Vector128<T> f1, Vector128<T> f2, ref T column, nuint row)
     {
-        if (Unsafe.SizeOf<T>() == 4)
-            fixed (float* d = &Unsafe.As<T, float>(ref column))
-                AdvSimd.Arm64.StoreVectorAndZip(d + row * 3, (f0.AsSingle(), f1.AsSingle(), f2.AsSingle()));
-        else
-            fixed (double* d = &Unsafe.As<T, double>(ref column))
-                AdvSimd.Arm64.StoreVectorAndZip(d + row * 3, (f0.AsDouble(), f1.AsDouble(), f2.AsDouble()));
+        if (Unsafe.SizeOf<T>() == 4) AdvSimd.Arm64.StoreVectorAndZip(Floats(ref column) + row * 3, (f0.AsSingle(), f1.AsSingle(), f2.AsSingle()));
+        else AdvSimd.Arm64.StoreVectorAndZip(Doubles(ref column) + row * 3, (f0.AsDouble(), f1.AsDouble(), f2.AsDouble()));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static unsafe void Store4<T>(Vector128<T> f0, Vector128<T> f1, Vector128<T> f2, Vector128<T> f3, ref T column, nuint row)
     {
-        if (Unsafe.SizeOf<T>() == 4)
-            fixed (float* d = &Unsafe.As<T, float>(ref column))
-                AdvSimd.Arm64.StoreVectorAndZip(d + row * 4, (f0.AsSingle(), f1.AsSingle(), f2.AsSingle(), f3.AsSingle()));
-        else
-            fixed (double* d = &Unsafe.As<T, double>(ref column))
-                AdvSimd.Arm64.StoreVectorAndZip(d + row * 4, (f0.AsDouble(), f1.AsDouble(), f2.AsDouble(), f3.AsDouble()));
+        if (Unsafe.SizeOf<T>() == 4) AdvSimd.Arm64.StoreVectorAndZip(Floats(ref column) + row * 4, (f0.AsSingle(), f1.AsSingle(), f2.AsSingle(), f3.AsSingle()));
+        else AdvSimd.Arm64.StoreVectorAndZip(Doubles(ref column) + row * 4, (f0.AsDouble(), f1.AsDouble(), f2.AsDouble(), f3.AsDouble()));
     }
 
     // ---------------- 256 bits (AVX2) ----------------
@@ -421,10 +425,10 @@ public static class Interleaved
         }
     }
 
-    private static readonly Vector256<int> Permute3X = Vector256.Create(0, 3, 6, 1, 4, 7, 2, 5); // its own inverse
-    private static readonly Vector256<int> Permute3Y = Vector256.Create(1, 4, 7, 2, 5, 0, 3, 6);
-    private static readonly Vector256<int> Unpermute3Y = Vector256.Create(5, 0, 3, 6, 1, 4, 7, 2);
-    private static readonly Vector256<int> Permute3Z = Vector256.Create(2, 5, 0, 3, 6, 1, 4, 7); // its own inverse
+    private static Vector256<int> Permute3X { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(0, 3, 6, 1, 4, 7, 2, 5); } // its own inverse
+    private static Vector256<int> Permute3Y { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(1, 4, 7, 2, 5, 0, 3, 6); }
+    private static Vector256<int> Unpermute3Y { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(5, 0, 3, 6, 1, 4, 7, 2); }
+    private static Vector256<int> Permute3Z { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(2, 5, 0, 3, 6, 1, 4, 7); } // its own inverse
 
     // Four fields: a 4 x 4 transpose (per 128-bit half for 4-byte lanes).
 
@@ -503,7 +507,7 @@ public static class Interleaved
     }
 
     // ---------------- 512 bits (AVX-512F): two-source permutes (vpermt2ps / vpermt2pd) ----------------
-    // Index tables are static readonly vectors (constants once the JIT optimizes the loop), one set per lane size.
+    // Index tables are vectors of literals (Tables32 / Tables64 at the end of the file), one set per lane size.
 
     /// <summary>The two fields of <c>Vector512&lt;T&gt;.Count</c> rows from <paramref name="row"/> of a column of 2-field structs.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -666,137 +670,68 @@ public static class Interleaved
         }
     }
 
-    /// <summary>
-    /// The permute indices of the 512-bit forms for vectors of <c>lanes</c> lanes (16 of 4 bytes, 8 of 8). In
-    /// a two-source permute, index i &lt; lanes takes lane i of the first vector, lanes + i lane i of the second.
-    /// </summary>
-    private static class Tables
-    {
-        /// <summary>Load2: field f of row j is element 2j + f of the two vectors.</summary>
-        public static int[][] Load2(int lanes) => [Fill(lanes, j => 2 * j), Fill(lanes, j => 2 * j + 1)];
-
-        /// <summary>Store2: element q of the two output vectors is field q % 2 of row q / 2.</summary>
-        public static int[][] Store2(int lanes) =>
-            [Fill(lanes, q => (q % 2) * lanes + q / 2), Fill(lanes, q => (q % 2) * lanes + (lanes + q) / 2)];
-
-        /// <summary>
-        /// Load3, per field f: element 3j + f of the three vectors; the first permute takes those of the first two
-        /// (any lane for the others), the second keeps them and takes those of the third.
-        /// </summary>
-        public static int[][] Load3(int lanes)
-        {
-            var t = new int[6][];
-            for (int f = 0; f < 3; f++)
-            {
-                t[2 * f] = Fill(lanes, j => 3 * j + f < 2 * lanes ? 3 * j + f : 0);
-                t[2 * f + 1] = Fill(lanes, j => 3 * j + f < 2 * lanes ? j : lanes + 3 * j + f - 2 * lanes);
-            }
-            return t;
-        }
-
-        /// <summary>
-        /// Store3, per output vector k: element q (of all three, 16k + q overall) is field q % 3 of row q / 3; the first
-        /// permute takes those of fields 0 and 1, the second keeps them and takes those of field 2.
-        /// </summary>
-        public static int[][] Store3(int lanes)
-        {
-            var t = new int[6][];
-            for (int k = 0; k < 3; k++)
-            {
-                t[2 * k] = Fill(lanes, j => ((k * lanes + j) % 3) switch { 0 => (k * lanes + j) / 3, 1 => lanes + (k * lanes + j) / 3, _ => 0 });
-                t[2 * k + 1] = Fill(lanes, j => (k * lanes + j) % 3 == 2 ? lanes + (k * lanes + j) / 3 : j);
-            }
-            return t;
-        }
-
-        /// <summary>
-        /// Load4: the first round splits two vectors (rows 0 to lanes / 4 * 2 - 1) into the x and y fields of their rows
-        /// (one half each) and the z and w fields; the second joins the halves of two such vectors per field.
-        /// </summary>
-        public static int[][] Load4(int lanes)
-        {
-            int half = lanes / 2; // rows of two vectors
-            return [Fill(lanes, j => j < half ? 4 * j : 4 * (j - half) + 1), Fill(lanes, j => j < half ? 4 * j + 2 : 4 * (j - half) + 3),
-                Fill(lanes, j => j < half ? j : lanes + j - half), Fill(lanes, j => j < half ? half + j : lanes + j)];
-        }
-
-        /// <summary>Store4: interleave fields pairwise (x with y, z with w), then pairs of pairs into rows.</summary>
-        public static int[][] Store4(int lanes)
-        {
-            int half = lanes / 2;
-            return [Fill(lanes, q => (q % 2) * lanes + q / 2), Fill(lanes, q => (q % 2) * lanes + half + q / 2),
-                Fill(lanes, q => (q / 2 % 2) * lanes + (q / 4) * 2 + q % 2), Fill(lanes, q => (q / 2 % 2) * lanes + half + (q / 4) * 2 + q % 2)];
-        }
-
-        private static int[] Fill(int lanes, System.Func<int, int> index)
-        {
-            var values = new int[lanes];
-            for (int i = 0; i < lanes; i++) values[i] = index(i);
-            return values;
-        }
-    }
-
-    // One static readonly vector per permute: constants once the JIT optimizes the loop (no array, no bounds check).
+    // The permute indices of the 512-bit forms (16 lanes of 4 bytes, 8 of 8). In a two-source permute, index i < lanes
+    // takes lane i of the first vector, lanes + i lane i of the second. Load2: field f of row j is element 2j + f.
+    // Store2: element q is field q % 2 of row q / 2. Load3, per field f: the first permute takes the elements 3j + f of
+    // the first two vectors, the second keeps them and takes those of the third; Store3, per output vector k, the
+    // reverse (fields 0 and 1 first, then field 2). Load4: split two vectors into x / y and z / w halves, then join the
+    // halves of two such vectors per field; Store4: interleave x with y and z with w, then the pairs into rows.
+    // Each table is a vector of literals, a constant of the compiled code: no static to initialize, which a static
+    // readonly vector built at run time would need under Native AOT (a class-initialization check on every iteration
+    // of the loop, and the loop's vectors spilled around it).
     private static class Tables32
     {
-        public static readonly Vector512<int> Load2A = Vector512.Create(Tables.Load2(16)[0]),
-            Load2B = Vector512.Create(Tables.Load2(16)[1]);
-        public static readonly Vector512<int> Store2A = Vector512.Create(Tables.Store2(16)[0]),
-            Store2B = Vector512.Create(Tables.Store2(16)[1]);
-        public static readonly Vector512<int> Load3A = Vector512.Create(Tables.Load3(16)[0]),
-            Load3B = Vector512.Create(Tables.Load3(16)[1]),
-            Load3C = Vector512.Create(Tables.Load3(16)[2]),
-            Load3D = Vector512.Create(Tables.Load3(16)[3]),
-            Load3E = Vector512.Create(Tables.Load3(16)[4]),
-            Load3F = Vector512.Create(Tables.Load3(16)[5]);
-        public static readonly Vector512<int> Store3A = Vector512.Create(Tables.Store3(16)[0]),
-            Store3B = Vector512.Create(Tables.Store3(16)[1]),
-            Store3C = Vector512.Create(Tables.Store3(16)[2]),
-            Store3D = Vector512.Create(Tables.Store3(16)[3]),
-            Store3E = Vector512.Create(Tables.Store3(16)[4]),
-            Store3F = Vector512.Create(Tables.Store3(16)[5]);
-        public static readonly Vector512<int> Load4A = Vector512.Create(Tables.Load4(16)[0]),
-            Load4B = Vector512.Create(Tables.Load4(16)[1]),
-            Load4C = Vector512.Create(Tables.Load4(16)[2]),
-            Load4D = Vector512.Create(Tables.Load4(16)[3]);
-        public static readonly Vector512<int> Store4A = Vector512.Create(Tables.Store4(16)[0]),
-            Store4B = Vector512.Create(Tables.Store4(16)[1]),
-            Store4C = Vector512.Create(Tables.Store4(16)[2]),
-            Store4D = Vector512.Create(Tables.Store4(16)[3]);
+        public static Vector512<int> Load2A { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30); }
+        public static Vector512<int> Load2B { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31); }
+        public static Vector512<int> Store2A { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23); }
+        public static Vector512<int> Store2B { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(8, 24, 9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30, 15, 31); }
+        public static Vector512<int> Load3A { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 0, 0, 0, 0, 0); }
+        public static Vector512<int> Load3B { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 17, 20, 23, 26, 29); }
+        public static Vector512<int> Load3C { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 0, 0, 0, 0, 0); }
+        public static Vector512<int> Load3D { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 18, 21, 24, 27, 30); }
+        public static Vector512<int> Load3E { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 0, 0, 0, 0, 0, 0); }
+        public static Vector512<int> Load3F { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 19, 22, 25, 28, 31); }
+        public static Vector512<int> Store3A { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 16, 0, 1, 17, 0, 2, 18, 0, 3, 19, 0, 4, 20, 0, 5); }
+        public static Vector512<int> Store3B { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 1, 16, 3, 4, 17, 6, 7, 18, 9, 10, 19, 12, 13, 20, 15); }
+        public static Vector512<int> Store3C { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(21, 0, 6, 22, 0, 7, 23, 0, 8, 24, 0, 9, 25, 0, 10, 26); }
+        public static Vector512<int> Store3D { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 21, 2, 3, 22, 5, 6, 23, 8, 9, 24, 11, 12, 25, 14, 15); }
+        public static Vector512<int> Store3E { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 11, 27, 0, 12, 28, 0, 13, 29, 0, 14, 30, 0, 15, 31, 0); }
+        public static Vector512<int> Store3F { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(26, 1, 2, 27, 4, 5, 28, 7, 8, 29, 10, 11, 30, 13, 14, 31); }
+        public static Vector512<int> Load4A { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 4, 8, 12, 16, 20, 24, 28, 1, 5, 9, 13, 17, 21, 25, 29); }
+        public static Vector512<int> Load4B { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(2, 6, 10, 14, 18, 22, 26, 30, 3, 7, 11, 15, 19, 23, 27, 31); }
+        public static Vector512<int> Load4C { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23); }
+        public static Vector512<int> Load4D { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31); }
+        public static Vector512<int> Store4A { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23); }
+        public static Vector512<int> Store4B { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(8, 24, 9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30, 15, 31); }
+        public static Vector512<int> Store4C { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 1, 16, 17, 2, 3, 18, 19, 4, 5, 20, 21, 6, 7, 22, 23); }
+        public static Vector512<int> Store4D { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(8, 9, 24, 25, 10, 11, 26, 27, 12, 13, 28, 29, 14, 15, 30, 31); }
     }
 
     private static class Tables64
     {
-        public static readonly Vector512<long> Load2A = Wide(Tables.Load2(8)[0]),
-            Load2B = Wide(Tables.Load2(8)[1]);
-        public static readonly Vector512<long> Store2A = Wide(Tables.Store2(8)[0]),
-            Store2B = Wide(Tables.Store2(8)[1]);
-        public static readonly Vector512<long> Load3A = Wide(Tables.Load3(8)[0]),
-            Load3B = Wide(Tables.Load3(8)[1]),
-            Load3C = Wide(Tables.Load3(8)[2]),
-            Load3D = Wide(Tables.Load3(8)[3]),
-            Load3E = Wide(Tables.Load3(8)[4]),
-            Load3F = Wide(Tables.Load3(8)[5]);
-        public static readonly Vector512<long> Store3A = Wide(Tables.Store3(8)[0]),
-            Store3B = Wide(Tables.Store3(8)[1]),
-            Store3C = Wide(Tables.Store3(8)[2]),
-            Store3D = Wide(Tables.Store3(8)[3]),
-            Store3E = Wide(Tables.Store3(8)[4]),
-            Store3F = Wide(Tables.Store3(8)[5]);
-        public static readonly Vector512<long> Load4A = Wide(Tables.Load4(8)[0]),
-            Load4B = Wide(Tables.Load4(8)[1]),
-            Load4C = Wide(Tables.Load4(8)[2]),
-            Load4D = Wide(Tables.Load4(8)[3]);
-        public static readonly Vector512<long> Store4A = Wide(Tables.Store4(8)[0]),
-            Store4B = Wide(Tables.Store4(8)[1]),
-            Store4C = Wide(Tables.Store4(8)[2]),
-            Store4D = Wide(Tables.Store4(8)[3]);
-
-        private static Vector512<long> Wide(int[] table)
-        {
-            var wide = new long[table.Length];
-            for (int j = 0; j < wide.Length; j++) wide[j] = table[j];
-            return Vector512.Create(wide);
-        }
+        public static Vector512<long> Load2A { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 2, 4, 6, 8, 10, 12, 14); }
+        public static Vector512<long> Load2B { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(1L, 3, 5, 7, 9, 11, 13, 15); }
+        public static Vector512<long> Store2A { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 8, 1, 9, 2, 10, 3, 11); }
+        public static Vector512<long> Store2B { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(4L, 12, 5, 13, 6, 14, 7, 15); }
+        public static Vector512<long> Load3A { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 3, 6, 9, 12, 15, 0, 0); }
+        public static Vector512<long> Load3B { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 1, 2, 3, 4, 5, 10, 13); }
+        public static Vector512<long> Load3C { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(1L, 4, 7, 10, 13, 0, 0, 0); }
+        public static Vector512<long> Load3D { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 1, 2, 3, 4, 8, 11, 14); }
+        public static Vector512<long> Load3E { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(2L, 5, 8, 11, 14, 0, 0, 0); }
+        public static Vector512<long> Load3F { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 1, 2, 3, 4, 9, 12, 15); }
+        public static Vector512<long> Store3A { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 8, 0, 1, 9, 0, 2, 10); }
+        public static Vector512<long> Store3B { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 1, 8, 3, 4, 9, 6, 7); }
+        public static Vector512<long> Store3C { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 3, 11, 0, 4, 12, 0, 5); }
+        public static Vector512<long> Store3D { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(10L, 1, 2, 11, 4, 5, 12, 7); }
+        public static Vector512<long> Store3E { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(13L, 0, 6, 14, 0, 7, 15, 0); }
+        public static Vector512<long> Store3F { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 13, 2, 3, 14, 5, 6, 15); }
+        public static Vector512<long> Load4A { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 4, 8, 12, 1, 5, 9, 13); }
+        public static Vector512<long> Load4B { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(2L, 6, 10, 14, 3, 7, 11, 15); }
+        public static Vector512<long> Load4C { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 1, 2, 3, 8, 9, 10, 11); }
+        public static Vector512<long> Load4D { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(4L, 5, 6, 7, 12, 13, 14, 15); }
+        public static Vector512<long> Store4A { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 8, 1, 9, 2, 10, 3, 11); }
+        public static Vector512<long> Store4B { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(4L, 12, 5, 13, 6, 14, 7, 15); }
+        public static Vector512<long> Store4C { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0L, 1, 8, 9, 2, 3, 10, 11); }
+        public static Vector512<long> Store4D { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(4L, 5, 12, 13, 6, 7, 14, 15); }
     }
 }

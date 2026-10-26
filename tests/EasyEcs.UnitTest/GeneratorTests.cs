@@ -550,9 +550,10 @@ public class GeneratorTests
     }
 
     // A wide component (a float, a bool, a byte and an int a row): the float lane gathered from 3 words per row by
-    // permutes, on AVX-512 alone, behind the job's check of the layout; the masked words run the method.
+    // permutes on AVX-512 and by table lookups on ARM64 (4 rows of 3 words: 3 vectors), each behind its hardware and the
+    // job's check of the layout; the masked words run the method.
     [Test]
-    public void AWideComponentsLanesAreGatheredByPermutes()
+    public void AWideComponentsLanesAreGatheredByPermutesAndTableLookups()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
             "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref Unit u) => u.Speed = System.MathF.Max(u.Speed * 0.5f - 1, 0); }"),
@@ -564,8 +565,27 @@ public class GeneratorTests
             .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.IsSupported && __layout1 && rows - i >=")
             .And.Contain("global::System.Runtime.Intrinsics.Vector512.LoadUnsafe(ref e1, (nuint)i * 3 + 32);")
             .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar16x32x2(")
+            .And.Contain("global::System.Numerics.Vector.IsHardwareAccelerated && global::EasyEcs.Interleaved.IsWideAccelerated && __layout1 && rows - i >=")
+            .And.Contain("var __c1_0 = global::EasyEcs.Interleaved.Pick(__v1_0, __v1_1, __v1_2, global::System.Runtime.Intrinsics.Vector128.Create((byte)")
+            .And.Contain("__v1_1 = global::EasyEcs.Interleaved.PickInto(__v1_1, __c1_0, global::System.Runtime.Intrinsics.Vector128.Create((byte)")
+            .And.Contain("global::System.Runtime.Intrinsics.Vector128.Create((byte)0, 1, 2, 3, 12, 13, 14, 15, 24, 25, 26, 27, 36, 37, 38, 39))")
+            .And.Not.Contain("private static readonly global::System.Runtime.Intrinsics")
+            .And.Contain("A: vector (Vector512 or Vector<float> of 128 bits), wide component (permutes, table lookups), masked words scalar"), generated);
+    }
+
+    // A form that does not pay is not written: 16 words a row put each field of a 128-bit vector's 4 rows in 4 vectors,
+    // and the table lookups cost more than the method's operations gain at 4 lanes, while AVX-512's permutes pay.
+    [Test]
+    public void AWideFormThatDoesNotPayIsLeftOut()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref Sixteen r, in G g) { r.F0 = r.F0 - r.F7 * g.Pull; r.F15 = System.MathF.Min(r.F15 + r.F0, 10) * 0.5f + g.Pull * g.Pull; } }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar16x32x2(")
             .And.Contain("A: vector (Vector512 only), wide component (permutes), masked words scalar")
-            .And.Not.Contain("global::System.Numerics.Vector<float>"), generated);
+            .And.Not.Contain("Interleaved.Pick").And.Not.Contain("Vector128<byte>").And.Not.Contain("IsWideAccelerated"), generated);
     }
 
     // Narrow lanes: a byte sum brought back into range by Math.Min is AddSaturate, a difference raised to 0 by Math.Max is
