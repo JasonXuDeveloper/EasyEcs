@@ -22,6 +22,7 @@ part names the skill that audits it.
   worlds that use it.
 - It works on every platform EasyEcs runs on: x64 and arm64, Native AOT, WebAssembly (the demo: Mono AOT, no
   threads), Godot (desktop and mobile); threads, native memory and intrinsics have a fallback (`audit-core`).
+  Every SIMD path has an ARM64 path (`audit-vector-loops`, "Every vector form runs on ARM64 too").
 
 ## 2. Generator (`audit-generator`)
 

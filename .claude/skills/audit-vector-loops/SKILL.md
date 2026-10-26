@@ -14,6 +14,19 @@ or the reason), `Kernel.Narrow.cs`, `Kernel.Struct.cs`, `Kernel.Wide.cs`, the jo
 `Interleaved.cs` / `Lanes.cs` / `World.Bulk.cs` in the core. `audit-generator` owns the rest of the generators;
 `audit-analyzer` owns the EECS055 / EECS056 descriptors.
 
+## Every vector form runs on ARM64 too (the owner's rule)
+
+A form is done only when ARM64 (NEON / AdvSimd, 128-bit; SVE is not used) runs it as a vector loop, or the reason
+it cannot is recorded and the form falls back to rows there:
+- Write with the cross-platform `Vector128` / `Vector256` / `Vector<T>` APIs first; an x86 intrinsic (AVX2 permutes,
+  AVX-512 `CompressStore`, gathers) is one path behind `IsSupported`, next to an AdvSimd or `Vector128` path
+  (`AdvSimd.Arm64.VectorTableLookup` for permutes and compress, 4-wide blocks for 8-wide ones).
+- On ARM64 `Vector256.IsHardwareAccelerated` is false and Vector256 runs as software: pick the width from
+  `IsHardwareAccelerated`, never from `IsSupported` of an x86 class alone.
+- No gather on ARM64 in .NET 10: a gather form says what ARM64 does (rows, or scalar lane fills if measured).
+- Proof on this x86 machine: the tests run once more with `DOTNET_EnableAVX=0` (128-bit paths); benchmark classes
+  guard every intrinsic so they run on ARM64, and result tables carry an ISA column. The owner runs ARM64 numbers.
+
 ## What becomes a vector loop
 
 - **Reads**: `in` / `ref` component parameters (one column load per lane group, interleaved fields deinterleaved),
