@@ -23,7 +23,7 @@ namespace EasyEcs;
 /// Shuffles only move bits, so a lane of 4 bytes is moved as a float and one of 8 bytes as a double, whatever its type.
 /// </remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public static class Interleaved
+public static partial class Interleaved
 {
     /// <summary>
     /// Whether the loads and stores of <c>Vector&lt;T&gt;</c> run as shuffles on this hardware (NEON's LD2-4 / ST2-4

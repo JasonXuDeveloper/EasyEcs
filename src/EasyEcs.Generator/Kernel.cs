@@ -61,9 +61,9 @@ internal sealed partial class Kernel
     /// a vector with a lane that takes it runs the method), or null.</param>
     /// <param name="Wide">
     /// A component is wide (Kernel.Wide.cs): the job's layout checks the loop also needs (<c>__layout1 &amp;&amp; ...</c>),
-    /// on AVX-512 alone (no Vector&lt;T&gt; loop, masked words run the method); else null.
+    /// in the forms that pay (<see cref="Code.Wide512"/>, <see cref="Code.Wide128"/>; masked words run the method); else null.
     /// </param>
-    /// <param name="Statics">The job's static members: the permutes' index vectors and the layout checks.</param>
+    /// <param name="Statics">The job's static members: the permutes' and table lookups' indexes and the layout checks.</param>
     internal sealed record Code(EquatableArray<string> Columns, string Setup, string Body, string Stores, string MaskedBody,
         string MaskedStores, string Restore, string Fold, int Size, string Mask, string Lane, bool Interleaves, bool Bails, FlatCode? Flat, string? Cold = null,
         string? Wide = null, string Statics = "")
@@ -86,6 +86,18 @@ internal sealed partial class Kernel
 
         /// <summary>The loop gathers other entities' fields (Kernel.Lookups.cs): it runs where <c>LookupLanes.IsAccelerated</c>.</summary>
         public bool Gathers { get; init; }
+
+        /// <summary>
+        /// A wide component's AVX-512 form pays (its lines start with <see cref="Mark512"/>): the Vector512 loop runs it
+        /// where <c>Avx512F.IsSupported</c>.
+        /// </summary>
+        public bool Wide512 { get; init; }
+
+        /// <summary>
+        /// A wide component's 128-bit form pays (its lines start with <see cref="Mark128"/>): the Vector&lt;T&gt; loop
+        /// runs it where <c>Interleaved.IsWideAccelerated</c> (ARM64).
+        /// </summary>
+        public bool Wide128 { get; init; }
     }
 
     /// <summary>
@@ -760,8 +772,10 @@ internal sealed partial class Kernel
             kernel._setup.ToString(), prologue + read + hold + kernel._body, stores.ToString(), prologue + read + kept + maskedHold + kernel._body.Masked, masked.ToString(),
             restore.ToString(), fold.ToString(), kernel._size, kernel._mask, Elem(first), kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
             kernel._bails, flat, kernel._cold, kernel._wideOf.Count == 0 ? null : string.Join(" && ", kernel._components.Where(c => kernel._wideOf.ContainsKey(c.Key)).Select(c => $"__layout{c.Value.Index}")),
-            kernel._statics.ToString())
+            kernel.WideStatics())
         {
+            Wide512 = kernel._wide512,
+            Wide128 = kernel._wide128,
             StructuralChanges = kernel.StructuralChanges(),
             VectorTail = kernel._change != null || kernel._emits.Values.Any(e => e.Added),
             Written = new EquatableArray<int>(kernel._written.OrderBy(k => k).ToArray()),

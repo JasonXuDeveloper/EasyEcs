@@ -58,7 +58,9 @@ EntityRandom.cs              EntityRandom: deterministic random numbers, a pure 
 Interleaved.cs               the deinterleaving loads / interleaving stores of generated vector loops over components
                              of 2 to 4 fields of one lane type, and the lane masks of the passing rows of a word;
                              LoadTail / StoreTail: the last rows of a run copied into a vector's worth (a loop that
-                             marks rows runs them masked)
+                             marks rows runs them masked); Interleaved.Wide.cs: Pick / PickInto, the NEON table
+                             lookups (TBL / TBX over 1 to 4 registers) of a wide component's 128-bit form, and
+                             IsWideAccelerated (ARM64 with 128-bit Vector<T>)
 LaneMath.cs                  lane functions of generated vector loops .NET has no vector form of: the quotient of
                              int / uint lanes through doubles (exact), FloatMode.Fast's Log10 / Sinh / Cosh / Tanh of floats
 Lanes.cs                     Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress),
