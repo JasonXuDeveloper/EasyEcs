@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 
 namespace EasyEcs.Benchmark.Locality;
@@ -10,8 +11,10 @@ namespace EasyEcs.Benchmark.Locality;
 /// <summary>
 /// The selective store of docs/plans/locality.md 3.3 / 4.4 (Polychroniou, Raghavan and Ross, SIGMOD 2015): the rows of
 /// a column whose value passes a condition, written side by side as a row list. A branch per row; a store per row with
-/// the count advanced by the condition (no branch); 8 rows per AVX2 compare with a permutation table (256 entries of
-/// 8 lanes, one per mask byte); 16 rows per AVX-512 compare with a compressing store; and the core's
+/// the count advanced by the condition (no branch); a permutation table: 8 rows per AVX2 compare (256 entries of 8
+/// lanes, one per mask byte), or without AVX2 4 rows per 128-bit compare and one byte shuffle (16 entries of 16
+/// bytes, one per mask nibble: NEON's TBL on ARM64, SSSE3's PSHUFB on x86); 16 rows per AVX-512 compare with a
+/// compressing store; and the core's
 /// <see cref="Lanes.Compact{T}"/> over masks of 64 rows. The column is a plain array standing for a component column
 /// (the operator does not depend on the world).
 /// </summary>
@@ -31,6 +34,29 @@ public static class Selection
                 if ((mask >> lane & 1) != 0) lanes[n++] = lane;
             for (; n < 8; n++) lanes[n] = 0;
             table[mask] = Vector256.Create<int>(lanes);
+        }
+
+        return table;
+    }
+
+    // For each mask of 4 lanes, the bytes of the 32-bit lanes it selects first (the rest 0x80, which both shuffles zero).
+    private static readonly Vector128<byte>[] Shuffles = BuildShuffles();
+
+    private static Vector128<byte>[] BuildShuffles()
+    {
+        var table = new Vector128<byte>[16];
+        Span<byte> bytes = stackalloc byte[16];
+        for (int mask = 0; mask < 16; mask++)
+        {
+            bytes.Fill(0x80);
+            for (int lane = 0, n = 0; lane < 4; lane++)
+                if ((mask >> lane & 1) != 0)
+                {
+                    for (int b = 0; b < 4; b++) bytes[n * 4 + b] = (byte)(lane * 4 + b);
+                    n++;
+                }
+
+            table[mask] = Vector128.Create<byte>(bytes);
         }
 
         return table;
@@ -72,6 +98,7 @@ public static class Selection
 
     public static int PermutationTable(float[] values, float limit, int[] into)
     {
+        if (!Avx2.IsSupported) return ShuffleTable(values, limit, into);
         int n = 0, i = 0;
         ref float from = ref MemoryMarshal.GetArrayDataReference(values);
         ref int to = ref MemoryMarshal.GetArrayDataReference(into);
@@ -82,9 +109,7 @@ public static class Selection
         for (; i <= values.Length - 8; i += 8, rows += step)
         {
             uint mask = Vector256.LessThan(Vector256.LoadUnsafe(ref from, (nuint)i), bound).ExtractMostSignificantBits();
-            var packed = Avx2.IsSupported
-                ? Avx2.PermuteVar8x32(rows, Unsafe.Add(ref table, (int)mask))
-                : Vector256.Shuffle(rows, Unsafe.Add(ref table, (int)mask));
+            var packed = Avx2.PermuteVar8x32(rows, Unsafe.Add(ref table, (int)mask));
             packed.StoreUnsafe(ref to, (nuint)n);
             n += BitOperations.PopCount(mask);
         }
@@ -93,6 +118,35 @@ public static class Selection
             if (values[i] < limit) into[n++] = i;
         return n;
     }
+
+    /// <summary>The permutation table with 128-bit vectors: 4 rows per compare, one byte shuffle per 4 rows.</summary>
+    public static int ShuffleTable(float[] values, float limit, int[] into)
+    {
+        int n = 0, i = 0;
+        ref float from = ref MemoryMarshal.GetArrayDataReference(values);
+        ref int to = ref MemoryMarshal.GetArrayDataReference(into);
+        ref var table = ref MemoryMarshal.GetArrayDataReference(Shuffles);
+        var bound = Vector128.Create(limit);
+        var rows = Vector128.Create(0, 1, 2, 3);
+        var step = Vector128.Create(4);
+        for (; i <= values.Length - 4; i += 4, rows += step)
+        {
+            uint mask = Vector128.LessThan(Vector128.LoadUnsafe(ref from, (nuint)i), bound).ExtractMostSignificantBits();
+            Shuffle(rows.AsByte(), Unsafe.Add(ref table, (int)mask)).AsInt32().StoreUnsafe(ref to, (nuint)n);
+            n += BitOperations.PopCount(mask);
+        }
+
+        for (; i < values.Length; i++)
+            if (values[i] < limit) into[n++] = i;
+        return n;
+    }
+
+    // A byte shuffle with indices from memory in one instruction where there is one; 0x80 indices give 0 in every form.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<byte> Shuffle(Vector128<byte> values, Vector128<byte> indices) =>
+        AdvSimd.Arm64.IsSupported ? AdvSimd.Arm64.VectorTableLookup(values, indices)
+        : Ssse3.IsSupported ? Ssse3.Shuffle(values, indices)
+        : Vector128.Shuffle(values, indices);
 
     public static unsafe int Compress512(float[] values, float limit, int[] into)
     {
@@ -123,12 +177,19 @@ public static class Selection
         int n = 0, i = 0;
         ref float from = ref MemoryMarshal.GetArrayDataReference(values);
         var bound = Vector256.Create(limit);
+        var bound4 = Vector128.Create(limit);
+        bool wide = Vector256.IsHardwareAccelerated;
         for (; i <= values.Length - 64; i += 64)
         {
             ulong mask = 0;
-            for (int part = 0; part < 8; part++)
-                mask |= (ulong)Vector256.LessThan(Vector256.LoadUnsafe(ref from, (nuint)(i + part * 8)), bound)
-                    .ExtractMostSignificantBits() << (part * 8);
+            if (wide)
+                for (int part = 0; part < 8; part++)
+                    mask |= (ulong)Vector256.LessThan(Vector256.LoadUnsafe(ref from, (nuint)(i + part * 8)), bound)
+                        .ExtractMostSignificantBits() << (part * 8);
+            else
+                for (int part = 0; part < 16; part++)
+                    mask |= (ulong)Vector128.LessThan(Vector128.LoadUnsafe(ref from, (nuint)(i + part * 4)), bound4)
+                        .ExtractMostSignificantBits() << (part * 4);
             n += Lanes.Compact(new ReadOnlySpan<int>(rowNumbers, i, 64), mask, into.AsSpan(n));
         }
 
