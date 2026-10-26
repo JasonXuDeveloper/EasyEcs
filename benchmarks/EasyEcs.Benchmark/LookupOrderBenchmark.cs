@@ -2,17 +2,19 @@ using System;
 using System.Numerics;
 using BenchmarkDotNet.Attributes;
 using EasyEcs.Benchmark.Locality;
+using Hunters = EasyEcs.Benchmark.Locality.Chase;
+using Seeking = EasyEcs.Benchmark.LookupGatherBenchmark.Seeking;
 
 namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// Lookups whose targets are in random order against the same rows ordered by their target (L1's side effect,
 /// docs/plans/locality.md 3.1): the readers' table sorted once by the target's id (<see cref="World.OrderRows{T, TOrder}"/>
-/// with the id as the key). <c>Chase</c> is <see cref="LookupChaseBenchmark"/>'s pass (every hunter reads a random
-/// hunter: ordered, the records are read in order but the rows they point to are not, since the sort moved the targets
-/// too). <c>Gather</c> / <c>GatherPerRow</c> are <see cref="LookupGatherBenchmark"/>'s pass with targets in 64 tables
-/// (the case D131's gathers lose: a vector of 8 lanes almost never shares a table; ordered, runs of seekers aim into
-/// one table and near rows).
+/// with the id as the key). <c>Chase</c> is <see cref="LookupChaseBenchmark"/>'s plain method (<c>Chase.Hunt</c>: every
+/// hunter reads a random hunter; ordered, the records are read in order but the rows they point to are not, since the
+/// sort moved the targets too). <c>Gather</c> / <c>GatherPerRow</c> are <see cref="LookupGatherBenchmark"/>'s bearing
+/// body with targets in 64 tables, as the vector loop and row by row (the case D131's gathers lose: a vector of 8 lanes
+/// almost never shares a table; ordered, runs of seekers aim into one table and near rows).
 /// </summary>
 [MemoryDiagnoser, IsaColumn]
 public partial class LookupOrderBenchmark
@@ -24,11 +26,11 @@ public partial class LookupOrderBenchmark
     private World _seekers;
 
     /// <summary>A hunter's rows in the order of its prey's id.</summary>
-    public readonly struct ByPrey : IRowOrder<LookupChaseBenchmark.Prey>
+    public readonly struct ByPrey : IRowOrder<Hunters.Prey>
     {
         public static int KeyBytes => 4;
-        public static ulong Key(in LookupChaseBenchmark.Prey row, float cell) => (uint)row.Target.Index;
-        public static Vector3 Point(in LookupChaseBenchmark.Prey row) => default;
+        public static ulong Key(in Hunters.Prey row, float cell) => (uint)row.Target.Index;
+        public static Vector3 Point(in Hunters.Prey row) => default;
     }
 
     /// <summary>A seeker's rows in the order of its target's id.</summary>
@@ -45,12 +47,7 @@ public partial class LookupOrderBenchmark
         Isa.Print();
         var random = new Random(42);
 
-        _hunters = new World(new WorldOptions { InitialEntityCapacity = Rows });
-        var hunters = new Entity[Rows];
-        _hunters.CreateEntities(hunters, new LookupChaseBenchmark.Position(1, 2), new LookupChaseBenchmark.Prey(),
-            new LookupChaseBenchmark.Heading());
-        for (int i = 0; i < hunters.Length; i++)
-            hunters[i].Get<LookupChaseBenchmark.Prey>() = new LookupChaseBenchmark.Prey(hunters[random.Next(hunters.Length)].Id);
+        _hunters = Hunters.Create(Rows);
 
         const int tables = 64;
         int targetCount = Math.Max(1_000, Rows / 4);
@@ -77,8 +74,8 @@ public partial class LookupOrderBenchmark
 
         if (Ordered)
         {
-            _hunters.OrderRows<LookupChaseBenchmark.Prey, ByPrey>(1, 1, int.MaxValue, 0);
-            _hunters.SortRows<LookupChaseBenchmark.Prey>();
+            _hunters.OrderRows<Hunters.Prey, ByPrey>(1, 1, int.MaxValue, 0);
+            _hunters.SortRows<Hunters.Prey>();
             _seekers.OrderRows<LookupGatherBenchmark.Seeker, ByTarget>(1, 1, int.MaxValue, 0);
             _seekers.SortRows<LookupGatherBenchmark.Seeker>();
             int last = -1;
@@ -102,11 +99,11 @@ public partial class LookupOrderBenchmark
     }
 
     [Benchmark]
-    public void Chase() => LookupChaseBenchmark.Hunting.ByLookup(_hunters);
+    public void Chase() => EasyEcs.Benchmark.Locality.Chase.Hunt(_hunters); // the generated entry point binds through the type name, not an alias
 
     [Benchmark]
-    public void Gather() => LookupGatherBenchmark.Seeking.Steer(_seekers);
+    public void Gather() => Seeking.Bearing(_seekers);
 
     [Benchmark]
-    public void GatherPerRow() => LookupGatherBenchmark.Seeking.PerRow(_seekers);
+    public void GatherPerRow() => Seeking.BearingRows(_seekers);
 }
