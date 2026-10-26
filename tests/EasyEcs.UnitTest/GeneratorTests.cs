@@ -937,10 +937,13 @@ public class GeneratorTests
             [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Ally(EntityId Target) : IRelation;
             [NotSaved] public record struct Link2(object Socket) : IComponent;
             [NotSaved] public record struct Pool(object Handle) : ISingletonComponent;
+            public partial record struct Spot(float X, float Y) : IComponent { [OrderBy(nameof(X), nameof(Y), Interval = 4, Margin = 0.5f)] public readonly uint Cell => (uint)X; }
+            public partial record struct Rank([OrderBy] long Score) : IComponent;
             """), out var output, out _);
         var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.TypeRegistry.g.cs")).ToString();
         foreach (var call in new[] { "GroupBy<global::Zone>()", "GroupBy<global::Room>()", "GroupBy<global::Hall>()", "WhenTargetDestroyed<global::Summon>((global::EasyEcs.TargetPolicy)2)",
-                     "RelationWhenTargetDestroyed<global::Ally>((global::EasyEcs.TargetPolicy)1)", "NotSaved<global::Link2>()", "NotSaved<global::Pool>()" })
+                     "RelationWhenTargetDestroyed<global::Ally>((global::EasyEcs.TargetPolicy)1)", "NotSaved<global::Link2>()", "NotSaved<global::Pool>()",
+                     "OrderBy<global::Spot, uint>(2, 4, 0.5f)", "OrderBy<global::Rank, long>(0, 10, 0f)" })
             Assert.That(source, Does.Contain("global::EasyEcs.TypeRegistry." + call + ";"), call);
         Assert.That(source, Does.Not.Contain("GroupBy<global::Match>"));                // [Group]: only worlds that call GroupBy
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);

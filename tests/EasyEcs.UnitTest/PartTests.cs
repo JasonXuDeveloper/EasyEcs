@@ -169,6 +169,40 @@ public class PartTests
         Assert.That(Errors(output), Is.Empty, parts);
     }
 
+    [TestCase("public partial record struct W(float X, float Y) : IComponent { [OrderBy(nameof(X), nameof(Y))] public readonly uint Cell => (uint)X; }",
+        "public partial record struct W : global::EasyEcs.IOrderKey<uint>",
+        "readonly global::System.Numerics.Vector3 global::EasyEcs.IOrderKey<uint>.BoxPoint => new global::System.Numerics.Vector3(X, Y, 0f);")]
+    [TestCase("public partial struct S : IComponent { public System.Numerics.Vector3 At; [OrderBy(nameof(At))] public readonly ulong Cell => 0; }",
+        "public partial struct S : global::EasyEcs.IOrderKey<ulong>", "global::System.Numerics.Vector3 global::EasyEcs.IOrderKey<ulong>.BoxPoint => At;")]
+    [TestCase("public partial struct S : IComponent { public System.Numerics.Vector2 At; [OrderBy(nameof(At))] public int Key; }",
+        "IOrderKey<int>.OrderKey => Key;", "BoxPoint => new global::System.Numerics.Vector3(At, 0f);")]               // a Vector2; a field key: not readonly
+    [TestCase("public enum T : short { A } public partial record struct R([OrderBy] T Tier) : IComponent;",
+        "public partial record struct R : global::EasyEcs.IOrderKey<global::T>", "IOrderKey<global::T>.BoxPoint => default;")]  // no box
+    public void AnOrderIsAnExplicitImplementation(string source, string head, string member)
+    {
+        var (parts, output) = Generate(source);
+        Assert.That(parts.Replace("\r", ""), Does.Contain(head).And.Contain(member));
+        Assert.That(Errors(output), Is.Empty, parts);
+    }
+
+    [TestCase("public partial struct O : IComponent { [OrderBy] public int A; [OrderBy] public int B; }")]                                  // two keys
+    [TestCase("public partial struct O : ISingletonComponent { [OrderBy] public int A; }")]                                               // a singleton
+    [TestCase("public partial struct O : IComponent { [OrderBy] public string A; }")]                                                    // not a radix key
+    [TestCase("public partial struct O : IComponent { [OrderBy] public decimal A; }")]                                                   // decimal: no bits that order
+    [TestCase("public partial struct O : IComponent { public int X; [OrderBy(nameof(X))] public int A; }")]                               // an int box member
+    [TestCase("public partial struct O : IComponent { [OrderBy(\"Nope\")] public int A; }")]                                             // no such member
+    [TestCase("public partial struct O : IComponent { public float X; public System.Numerics.Vector2 V; [OrderBy(nameof(X), nameof(V))] public int A; }")]  // a vector beside others
+    [TestCase("public partial struct O : IComponent { public float X, Y, Z, W; [OrderBy(nameof(X), nameof(Y), nameof(Z), nameof(W))] public int A; }")] // 4 axes
+    [TestCase("public partial struct O : IComponent { [OrderBy(Interval = 0)] public int A; }")]                                         // interval
+    [TestCase("public partial struct O : IComponent { [OrderBy(Margin = -1)] public int A; }")]                                          // margin
+    [TestCase("public partial struct O : IComponent { [OrderBy(Margin = float.PositiveInfinity)] public int A; }")]
+    [TestCase("public partial struct O : IComponent, IOrderKey<int> { [OrderBy] public int A; readonly int IOrderKey<int>.OrderKey => A; readonly System.Numerics.Vector3 IOrderKey<int>.BoxPoint => default; }")] // written by hand
+    public async Task OrdersThePartCannotKeepAreReported(string source)
+    {
+        Assert.That(await Ids(source), Is.EqualTo(new[] { "EECS104" }), "one diagnostic, and no error of the generated code");
+        Assert.That(Generate(source).Parts, Is.Empty, "the generator skips what the analyzer reports");
+    }
+
     [TestCase("public partial struct M : IComponent { [LookupKey] public int A; [LookupKey] public int B; }")]                         // two keys
     [TestCase("[LookupKey] public partial struct M : IComponent { [UniqueKey] public int A; }")]                                 // the type and a member
     [TestCase("public partial struct M : IComponent { [LookupKey] public object A; }")]                                         // not IEquatable

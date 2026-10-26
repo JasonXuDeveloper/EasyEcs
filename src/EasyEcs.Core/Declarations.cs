@@ -109,6 +109,47 @@ public sealed class WhenTargetDestroyedAttribute(TargetPolicy policy) : Attribut
 public sealed class GroupByAttribute : Attribute;
 
 /// <summary>
+/// The key every world keeps the component's tables ordered by, and the point the boxes of their blocks cover. A table
+/// needs no declaration to be ordered for a pair method: the generator infers the order from the method's distance
+/// test (the Morton code of the position by the cutoff, <see cref="World.OrderRows{T, TOrder}"/>). <c>[OrderBy]</c>
+/// overrides that order for every world: another key, a non-spatial order. On a member of a partial component (a field, a property or a record's positional parameter) whose type is an integer,
+/// <c>char</c>, <c>bool</c>, <c>float</c>, <c>double</c> or an enum. A spatial order is a Morton code of a quantized
+/// position the component computes, and the box axes name its coordinates:
+/// <c>public partial record struct Position(float X, float Y) : IComponent { [OrderBy(nameof(X), nameof(Y))] public readonly uint Cell => Map.Morton(X, Y); }</c>
+/// (<c>Map.Morton</c> standing for the game's own quantization).
+/// The generator adds <see cref="IOrderKey{TKey}"/> with an explicit <c>OrderKey</c> returning the member and
+/// <c>BoxPoint</c> returning the axes, and registers the order: every world re-sorts each table holding the component
+/// every <see cref="Interval"/> updates (from the first update after the table appears), keeping the rows of the
+/// table in key order and a box per block of rows (8, or 4 on ARM64) over the axes (<see cref="RowBlocks"/>). Rows that join between
+/// sorts wait at the end of their table; a row that moves into a block widens its box. A table that holds two ordered
+/// components is ordered by the one with the lower bit.
+/// </summary>
+/// <param name="box">
+/// The members the blocks' boxes cover, up to three: <c>float</c> fields or properties of the component, or one
+/// <see cref="System.Numerics.Vector2"/> or <see cref="System.Numerics.Vector3"/>. None: rows are ordered, the blocks
+/// have no box.
+/// </param>
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
+public sealed class OrderByAttribute(params string[] box) : Attribute
+{
+    /// <summary>The members the blocks' boxes cover.</summary>
+    public string[] Box { get; } = box;
+
+    /// <summary>
+    /// <see cref="World.Update()"/> calls between sorts (default 10, at least 1): GROMACS rebuilds its pair lists every
+    /// 10 steps, and a sort's cost spread over 10 updates is a small share of a tick (decision D137).
+    /// </summary>
+    public int Interval { get; set; } = 10;
+
+    /// <summary>
+    /// How far a row may move between sorts and stay inside its block's box: every box is widened by it on each side
+    /// (the buffer of GROMACS's pair lists). 0 by default: a search that must find every row within a range adds the
+    /// distance rows move per update times <see cref="Interval"/>.
+    /// </summary>
+    public float Margin { get; set; }
+}
+
+/// <summary>
 /// A component or singleton no save holds: runtime state (a connection, a cache, a handle to a service) that a
 /// restart rebuilds. Every save leaves it out (<see cref="World.Save(System.Buffers.IBufferWriter{byte})"/>,
 /// <see cref="World.SaveWithout"/>, the saves of entities, even a set that names it), so it needs no Nino formatter,

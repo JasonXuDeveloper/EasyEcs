@@ -388,3 +388,259 @@ Docs to-dos (docs pass):
   per keystroke for 40 view methods); inlining in the declaration transform (reruns per keystroke); a code fix for
   "call it in a statement of its own" (not semantics-preserving: `x = a.V + Take(ref a)`). Limits: depth 8; no
   recursion, virtual, interface, delegate or cross-assembly callees; private members stay calls.
+
+## feat-locality-core (L1 + L3 of locality.md: D137, D138; D135 went to WP0b, D136 may go to feat-arm-parity)
+- New guide page (or a section of high-performance.mdx + zh): ordered tables. That the order is inferred for pair
+  methods (no attribute), `[OrderBy]` as the override (non-spatial keys), `Interval` / `Margin` (GROMACS's nstlist and
+  buffer), `SortRows<T>`, what a sort costs (RowOrderBenchmark: BenchTable), `world.Blocks<T>()` / `entities.Blocks` /
+  `RowBlocks.Pairs` for hand-written searches until the pair form ships, refs and handles ending at a sort (like any
+  structural change), saves keeping the row order and redrawing the boxes at the next update.
+- refs-and-await.mdx + zh: a sort is a structural change at the start of an update (re-acquire refs after it).
+- saves.mdx + zh, snapshots.mdx + zh: the row order is kept, boxes redrawn (D137).
+- analyzer.mdx + zh: EECS104 (section, table row; EECS range) and EECS041's list (SortRows, OrderRows).
+- high-performance.mdx + zh: Lookup targets ordered by their target read near rows (LookupOrderBenchmark: Chase 2x,
+  64-table gathers 4.6x at 1M); `Lanes.Rows` for a row list from a mask; Compact on every ISA (NEON, SSSE3).
+- architecture.mdx + zh: RowOrder in the table diagram (Archetype.Order, Permute), the block side array.
+- glossary + zh: ordered table (有序表), block (块, not the parallel chunk), box (包围盒), margin (余量), cadence (节奏);
+  tools/ApiDocs/zh/README.md glossary gets the same rows.
+- changelog / README What's new: ordered tables (the read path), Lanes.Rows, Compact on ARM64.
+- Benchmarks into bench.json: RowOrder, LookupOrder, Pairs (Core*), Compress (CoreCompact) after the reference run.
+- skills/easyecs/SKILL.md (public skill): ordered tables (the order is inferred; `[OrderBy]` only for orders no pair
+  method implies; refs end at a sort), `Blocks` / `Pairs` for hand-written neighbor searches, `Lanes.Rows`.
+- The Native AOT listing of `Lanes.Compact`'s loops on the owner's AOT check (the tables are RVA data now; no class-init
+  check expected) and the M4 rerun of `CompressBenchmark` (the 128-bit TBL form against the prototypes' ShuffleTable).
+
+### Decision record drafts (D137, D138)
+
+The records for decisions.mdx / .zh.mdx, written in the docs pass (index rows after the last record; renumber if
+D137 / D138 are taken by then, and fix the numbers in `Declarations.cs`, `RowOrder.cs`, `tools/ApiDocs/zh/orderbyattribute.xml`,
+roadmap). The zh drafts carry the decision and what was considered; their **数据** sections are still to translate
+from the English. Raw reports: BenchmarkDotNet's markdown, quoted below; the snapshots were frozen copies of the
+branch (A = 0e206d8 + the NEON prototypes, B/F = this branch).
+
+<details><summary>D137 (en)</summary>
+
+## D137. Tables keep their rows in the order of a key, with a box per block of rows [#d137-ordered-rows]
+
+**Decision.** A table can keep its rows sorted by a key and draw an axis-aligned box over each block of rows: the
+layout a pair kernel reads (a block of rows against a block, the pairs of blocks found from the boxes), and a side
+effect for every pass that reads other entities: readers sorted by their targets read near records and rows.
+
+- **Who asks.** The order is normally inferred: the setup of a generated method that compares positions within a
+  cutoff calls `World.OrderRows<T, TOrder>(axes, cell, interval, margin)` for the component it reads positions from.
+  `TOrder` is a struct implementing `IRowOrder<T>` with static `Key` and `Point` (no delegate, one sort per key type
+  compiled for it); the key is `RowKeys.Morton` of the position quantized by the cutoff (63, 32 or 21 bits per axis,
+  clamped in integers). The request covers the tables there now and those to come; the first request for a component
+  stands. `[OrderBy]` on a member (its generated `IOrderKey<TKey>`) overrides it for every world: a non-spatial key, or
+  another cell. A table nobody asked an order for pays one null check where a row moves or the rows shrink.
+- **The sort.** An LSD radix sort of (key, row) pairs over pooled buffers, 32-bit keys when they fit, the bytes every
+  key shares skipped, nothing moved when the rows are already in order; then one permutation (`Archetype.Permute`)
+  of every column, presence bit, change tick (the word and block summaries rebuilt from the ticks) and slot, under
+  the structural gate, bumping `StorageVersion`. Rows lacking the component sort last. It runs at the start of the
+  default group's update every `interval` updates (GROMACS's `nstlist`), or at once with `SortRows<T>()`; both throw
+  during a pass (EECS041 lists them). Refs, handles' cached rows and marked rows end at a sort as at any row move.
+- **Blocks.** 8 rows where `Vector256` is hardware, 4 otherwise (ARM64's NEON is 128 bits wide), or the power of two
+  up to 64 a request asks for, so a kernel's block is one register of floats per axis. The sort draws each block's box
+  over `axes` axes of `Point`, widened by the margin; a row that moves into a block between sorts widens that block's
+  box; rows created after the sort wait past `SortedRows` until the next one. The boxes live in a side array of the
+  order (bounded by the table's blocks, released by `TrimExcess`), never in a hot struct. `world.Blocks<T>()` and
+  `EntitySpan.Blocks` hand out `RowBlocks`: the boxes, a block's rows, read-only columns, ids, presence, and
+  `Pairs(reach, into)` / `Pairs(other, reach, into)`, the block pairs whose boxes come within reach (a sweep over the
+  boxes sorted by their low side on the first axis, the other sides gathered into that order).
+- **Saves.** A restore or a load keeps the physical row order it finds (a save writes rows in table order) and drops
+  the boxes; the next update sorts (rows already in order cost the keys and the boxes) and draws them. Writing the
+  boxes into a save would tie the format to the cadence for nothing the first update does not rebuild.
+- **EECS104** reports an `[OrderBy]` the generated part cannot keep: a key that is not a plain value (a struct, a
+  string), box members that are not floats or one `Vector2` / `Vector3`, a bad interval or margin, two keys, a
+  singleton, or `OrderKey` / `BoxPoint` written by hand as well.
+
+**Numbers.** Xeon 2.10 GHz VM (4 cores, AVX-512), .NET 10, BenchmarkDotNet's default job, two rounds over frozen
+snapshots; other agents shared the machine (load average 1.1 to 11 at the start of a class), so differences under
+about 10 % between A and B are noise. Every row allocates 0 B.
+
+- **The sort** (`RowOrderBenchmark`, one call, round 1 / round 2). Narrow table (the ordered component alone), all
+  rows reversed: 1k 13.8 / 15.9 µs, 10k 178 / 195 µs, 100k 2.33 / 2.38 ms, 1M 32.7 / 38.1 ms. Wide table (six more components, one tracked, one
+  managed): 23.7 / 25.0 µs, 351 / 312 µs, 3.51 / 3.78 ms, 71.8 / 81.1 ms. A churn of 1 % of the keys costs as much as a reversal (every row between
+  a moved key's old and new place shifts). Rows already in order: 0.66 / 0.67 ms at 100k, 6.5 / 7.0 ms at 1M (the keys and the
+  boxes, about 6.5 ns per row).
+- **The pair kernel on the core's layout** (`PairsBenchmark`, per tick, round 1 / round 2): the cluster kernel reading
+  the table's own columns in their sorted order against the phase-0 prototype reading sorted side arrays
+  (`Clusters`): crowd 1k 60.4 / 60.5 against 52.6 / 53.9 µs, 10k 747 / 697 against 597 / 647 µs, 100k 7.59 / 7.41
+  against 6.70 / 6.91 ms; sparse 1k 30.0 / 29.5 against 28.2 / 28.0 µs, 10k 452 / 324 against 328 / 323 µs, 100k
+  3.50 / 3.61 against 3.40 / 3.50 ms: within 0-15 % of the copies, without the per-tick copies a live world would need
+  (the prototype's `ClustersWithCopies10`). With the core's sort and the pair lists rebuilt every 10 ticks
+  (`CoreClustersSort10`), against phase 0's grid read through lookups (its baseline, section 6.1 of the plan): crowd 10k 0.82 / 0.81 ms against 9.95 ms, 100k 9.9 / 10.3 ms against 153 ms (12-15 times); sparse 10k 0.43 / 0.42 ms against 2.15 ms, 100k 5.1 / 5.1 ms against 34.7 ms (5-7 times).
+  The block-pair search was the largest part of a rebuild: gathering the other sides into the sorted order once (instead of copying a table's sides per candidate) took the 100k rebuild from 11.0 / 11.3 to 9.9 / 10.3 ms in a crowd and from 5.77 / 5.75 to 5.08 / 5.14 ms sparse.
+- **Blocks of 16** (`CoreClusters16`, two 8-row blocks per 512-bit kernel step): within 5 % of 8 at 1k and 10k in a
+  crowd, 22-25 % slower at 1k sparse and at 100k. 8 (4 on ARM64) stays the size; a request can ask for another.
+- **Readers ordered by their targets** (`LookupOrderBenchmark`, round 1 / round 2, measured before the merge of the reworked LookupChase / LookupGather (the same passes, `Steer` then), one table of readers sorted once by
+  the target's id): `Lookup` chases across 1M entities 15.7 / 17.8 ms → 7.60 / 7.34 ms; across 100k 890 / 819 →
+  421 / 384 µs. D131's gathers with targets in 64 tables at 1M 11.5 / 13.3 ms → 2.48 / 2.58 ms, and the method row by
+  row 11.6 / 11.1 → 3.09 / 3.05 ms: once ordered, the gathers beat the method row by row in the case they lost.
+- **A table without an order** (A/B against the snapshot before this change): `WorldSimulation` at 100k 1.18 → 1.16 ms in
+  round 1, 1.27 → 1.33 ms in round 2 (10k 98 → 97 µs, 101 → 109 µs); `BattleServer` 3.45 → 3.82 ms in round 1 (B started at load 7.4), 3.88 → 3.87 ms in round 2; `OperationBenchmark` (EasyEcs rows) within -10 % / +1 %; `StructuralLoopBenchmark`
+  within ±5 %; `BulkBenchmark` within -5 % / +9 % (StunAndLift 22.9 → 25.0 µs in round 1, 24.5 → 25.3 µs in round 2; DisableAndEnable 20.8 → 23.0, 23.4 → 22.2 µs).
+
+**Considered.**
+- **A user-facing attribute as the main entry point**: users would name the key and the cell for every component a
+  pair method reads; the generator sees the distance test and the cutoff already. `[OrderBy]` stays for orders no
+  method implies.
+- **Hilbert keys**: better locality per block than Morton, more instructions per key; the boxes absorb Morton's jumps
+  and the sort's cost is the permutation, not the keys.
+- **Sorting on every write, or a tree of rows**: GROMACS re-sorts on a cadence; the margin keeps the boxes valid
+  between sorts, and a sort of rows already in order costs the keys and the boxes only.
+- **Blocks of 16 rows**: see the numbers.
+- **Moving only the rows out of order**: a random 1 % churn already moves most rows, so the sort moves every row once.
+- **A box tree for the block pairs** (the prototype's): one walk per block; the sweep over sorted low sides is
+  simpler, needs no tree to keep, and is parallel-safe (it reads the boxes only).
+- **Saving the order and the boxes**: see Saves.
+
+</details>
+
+<details><summary>D138 (en)</summary>
+
+## D138. Compaction picks its instructions at run time on every machine; `Lanes.Rows` is the one row-list helper [#d138-compaction-everywhere]
+
+**Decision.** `Lanes.Compact` (the stream compaction behind `Emit.AddIds` / `AddLanes`, `CollectIds` and batch
+methods) walks a word of 64 selected bits in the first form that fits:
+
+1. **4 selected or fewer**: one write per bit (TZCNT), on every machine.
+2. **AVX-512**: `CompressStore`, 16 lanes of 4 bytes or 8 of 8 bytes per instruction.
+3. **12 selected or fewer**: one write per bit again (below that, the narrower vector steps cost more than the bits).
+4. **AVX2**: a permutation table (`PermuteVar8x32`, one entry per byte of the mask for 8 lanes of 4 bytes, one per
+   nibble for 4 lanes of 8 bytes; Polychroniou, Raghavan and Ross's selective store).
+5. **128-bit, 4-byte lanes**: a byte shuffle per nibble (16 entries of 16 bytes) through
+   `AdvSimd.Arm64.VectorTableLookup` (NEON `TBL`) on ARM64 and `Ssse3.Shuffle` (`PSHUFB`) on x86.
+6. **Otherwise** (8-byte lanes without AVX2, other sizes): the scalar walk.
+
+The vector steps (4 and 5) are branch-free: each stores a whole vector and advances by its count while the
+destination has room for a whole vector; the last selected elements (fewer than a vector) are then written one per
+set bit. So every form reads nothing past the end of the source and writes only the selected count, with no partial
+store. Every intrinsic sits behind its `IsSupported`, so one build runs everywhere and the JIT drops the branches a
+machine cannot take. The tables are literal data in the assembly (`ReadOnlySpan<byte>` over constants): nothing to
+initialize, so under Native AOT a loop reading one checks no class initialization; the AVX2 permutations are a byte
+per lane widened by the load (`VPMOVZXBD`), 2 KiB. `Lanes.Rows(mask, first, destination)` writes the row numbers a
+mask selects (`Compact` over 0..63, then `first` added a vector at a time): the one call a generated loop or the core
+makes for a row list, so generated text never names an instruction set.
+
+**Where compaction is not used.** The TZCNT walks of generated loops (`ArityGenerator`'s masked walks,
+`SystemGenerator.Fusion`) call the method once per row or per run of rows; a row list first would add a pass without
+removing a call. `MarkedRows` keeps bit words (applying them is a structural change per row, which dominates), and
+`World.Bulk`'s walks likewise. `Kernel.Structural`'s emitted `Emit.AddIds` / `AddLanes` already go through
+`Compact`.
+
+**Numbers.** Xeon 2.10 GHz VM (AVX-512), .NET 10, BenchmarkDotNet's default job, two rounds, base (A) against this
+change, the instruction sets turned off with `DOTNET_EnableAVX512=0` / `DOTNET_EnableAVX2=0` (the ISA column of each
+report confirms the knob; `DOTNET_EnableAVX512F` is ignored by .NET 10). `CompressBenchmark.CoreCompact` (4-byte row
+numbers from a float condition, 10 / 50 / 90 % selected), round 1 / round 2:
+
+| ISA | Rows | 10 % | 50 % | 90 % |
+|---|---|---|---|---|
+| AVX-512 | 4,096 | 1.07 / 0.98 → 0.87 / 0.93 µs | 1.08 / 1.15 → 1.03 / 1.02 µs | 1.15 / 1.11 → 1.06 / 1.04 µs |
+| AVX-512 | 262,144 | 88 / 80 → 87 / 88 µs | 82 / 83 → 89 / 85 µs | 89 / 91 → 92 / 90 µs |
+| AVX2 | 4,096 | 0.93 / 0.90 → 0.89 / 0.83 µs | 4.17 / 3.76 → 1.52 / 1.54 µs | 3.82 / 3.81 → 1.60 / 1.51 µs |
+| AVX2 | 262,144 | 125 / 108 → 130 / 111 µs | 268 / 269 → 168 / 156 µs | 233 / 237 → 145 / 149 µs |
+| SSE4.1 (128-bit) | 4,096 | 1.54 / 1.63 → 1.44 / 1.45 µs | 4.65 / 4.71 → 3.02 / 3.06 µs | 4.33 / 4.32 → 3.25 / 3.22 µs |
+| SSE4.1 (128-bit) | 262,144 | 136 / 144 → 153 / 144 µs | 321 / 312 → 251 / 228 µs | 302 / 285 → 212 / 213 µs |
+
+AVX-512 is unchanged (its form was already there); 10 % is within the rounds' spread everywhere (the worst pair,
+SSE4.1 at 262,144, is 136 → 153 in one round and 144 → 144 in the other). `CompactBenchmark` (1M rows, 8-byte ids)
+without AVX-512: `Compact` 1.08 ms → 0.78 ms and `CollectIds` 0.87 → 0.64 ms at 50 %; without AVX2 equal (8-byte
+lanes keep the scalar walk). All 0 B. ARM64 (NEON `TBL`) runs the 128-bit form; the owner's M4 measures it.
+
+**Considered.**
+- **A public compaction API per instruction set**: users would write the dispatch the core already does;
+  `Lanes.Compact` and `Lanes.Rows` stay the only entry points.
+- **A partial store per step at the destination's end** (a masked store with AVX2, a copy of a variable length on
+  128-bit vectors): every step after the first few selected ones paid for it at low density; a whole-vector loop and
+  the last elements one per bit cut the 128-bit form at 50 % from 1.67 to 1.36 µs (4,096 rows, screening).
+- **The base's branch-free scalar walk for 5 to 12 selected** instead of a write per bit: 2.7 µs against 0.85 at
+  4,096 rows and 10 % without AVX-512 (screening); dropped.
+- **No sparse rule** (the vector steps from 5 selected): 10 % lost (0.90 against 0.81 µs, 122 against 104 µs).
+- **A 128-bit form for 8-byte lanes** (two lanes per step, a 4-entry table per 2 bits): 32 steps a word lost to the
+  scalar walk, `CompactBenchmark` without AVX2 at 1M ids and 50 % selected 1.19 ms against 1.00 ms; dropped.
+- **Steps that skip an empty part of the mask**: a branch per step mispredicts on mixed masks; the 128-bit path with
+  those branches ran 3 times slower than the scalar walk at 50 % selected.
+- **Static readonly tables built by code**: Native AOT checks the class's initialization on every read in a loop
+  (`audit-vector-loops`, "Read the loop the JIT wrote"); literal data costs nothing to initialize.
+- **A table per 16 bits** (AVX-512's width without `VPCOMPRESS`): 2 MB against the 2 KiB and 256 B tables that stay
+  in L1 next to the loop that reads them.
+
+</details>
+
+<details><summary>D137 (zh)</summary>
+
+## D137. 表按键的顺序保存行，每块行一个包围盒 [#d137-ordered-rows]
+
+**决定。** 一张表可以让它的行按某个键排好，并在每块行上画一个轴对齐包围盒：这是成对内核读取的布局（一块行对一块行，
+块对由包围盒找出），也让每个读取其他实体的遍历顺带受益：按目标排好的读取方读到的记录和行彼此相近。
+
+- **谁来要求。** 顺序通常是推断出来的：生成的方法若在一个截断距离内比较位置，它的初始化就为读取位置的组件调用
+  `World.OrderRows<T, TOrder>(axes, cell, interval, margin)`。`TOrder` 是实现 `IRowOrder<T>` 的结构体，带静态的
+  `Key` 和 `Point`（没有委托，每种键类型编译出一份排序）；键是按截断距离量化后位置的 `RowKeys.Morton`（每轴 63、32 或
+  21 位，用整数钳位）。这个要求覆盖现在和以后的表；一个组件以第一次要求为准。成员上的 `[OrderBy]`（生成它的
+  `IOrderKey<TKey>`）对所有世界覆盖推断：非空间的键，或另一个格子大小。没人要求顺序的表，只在行移动或行数收缩处多一次判空。
+- **排序。** 对 (键, 行) 对做 LSD 基数排序，缓冲区来自池，键放得下时用 32 位，所有键共有的字节跳过，行已经有序时什么也不搬；
+  然后在结构门下对每一列、存在位、变更 tick（字和块的摘要由 tick 重建）和槽做一次置换（`Archetype.Permute`），并增加
+  `StorageVersion`。没有这个组件的行排在最后。它每隔 `interval` 次更新在默认组更新开始时运行（GROMACS 的 `nstlist`），
+  或用 `SortRows<T>()` 立即运行；两者在遍历中都会抛出（EECS041 列出它们）。ref、句柄缓存的行和标记的行在排序时失效，和任何行移动一样。
+- **块。** `Vector256` 有硬件支持时 8 行，否则 4 行（ARM64 的 NEON 宽 128 位），或要求指定的不超过 64 的 2 的幂，
+  这样内核的一块正好是每个轴一个浮点寄存器。排序在 `Point` 的 `axes` 个轴上画出每块的包围盒，再加上余量；两次排序之间
+  移进某块的行会扩大那块的包围盒；排序之后新建的行排在 `SortedRows` 之后，等下一次排序。包围盒放在顺序的旁路数组里
+  （以表的块数为界，`TrimExcess` 释放），从不进热结构。`world.Blocks<T>()` 和 `EntitySpan.Blocks` 给出 `RowBlocks`：
+  包围盒、一块的行、只读列、id、存在位，以及 `Pairs(reach, into)` / `Pairs(other, reach, into)`：包围盒相距在 reach
+  之内的块对（按第一轴低边排序后扫描，其他边按这个顺序收集）。
+- **存档。** 恢复或读档保留它读到的物理行序（存档按表内顺序写行），丢掉包围盒；下一次更新会排序（已经有序的行只花键和包围盒的开销）
+  并重画它们。把包围盒写进存档会把格式和节奏绑在一起，而第一次更新本来就会重建它们。
+- **EECS104** 报告生成的部分无法维护的 `[OrderBy]`：键不是普通值（结构体、字符串）、包围盒成员不是 float 或一个
+  `Vector2` / `Vector3`、interval 或 margin 不合法、两个键、单例，或者同时手写了 `OrderKey` / `BoxPoint`。
+
+**数据。** NUMBERS
+
+**考虑过的方案。**
+- **以面向用户的特性为主入口**：用户要为成对方法读取的每个组件写出键和格子；而生成器已经看到距离判断和截断距离。
+  `[OrderBy]` 留给没有方法暗示的顺序。
+- **Hilbert 键**：每块的局部性比 Morton 好，但每个键的指令更多；包围盒吸收了 Morton 的跳跃，排序的开销在置换，不在键。
+- **每次写入都排序，或行的树**：GROMACS 按节奏重排；余量让包围盒在两次排序之间保持有效，已经有序的行排序只花键和包围盒的开销。
+- **16 行的块**：见数据。
+- **只搬不在位置上的行**：随机 1 % 的变动已经搬动大多数行，所以排序把每行搬一次。
+- **块对用包围盒树**（原型的做法）：每块走一遍树；按低边排序后扫描更简单，没有树要维护，也可以并行（只读包围盒）。
+- **把顺序和包围盒存进存档**：见存档。
+
+</details>
+
+<details><summary>D138 (zh)</summary>
+
+## D138. 压缩在每台机器上运行时选择指令；`Lanes.Rows` 是唯一的行列表辅助 [#d138-compaction-everywhere]
+
+**决定。** `Lanes.Compact`（`Emit.AddIds` / `AddLanes`、`CollectIds` 和批处理方法背后的流压缩）对 64 位选择字使用
+第一个适用的形式：
+
+1. **选中不超过 4 个**：每位写一次（TZCNT），所有机器都一样。
+2. **AVX-512**：`CompressStore`，每条指令 16 个 4 字节通道或 8 个 8 字节通道。
+3. **选中不超过 12 个**：再次每位写一次（低于这个数，更窄的向量步骤比逐位更慢）。
+4. **AVX2**：置换表（`PermuteVar8x32`，8 个 4 字节通道时掩码每个字节一项，4 个 8 字节通道时每 4 位一项；Polychroniou、
+   Raghavan 和 Ross 的选择性存储），每一步整体写出、游标按这一步的个数前进，所以没有一步按它的位做分支。
+5. **128 位、4 字节通道**：每 4 位一次字节重排（16 项，每项 16 字节），ARM64 上走 `AdvSimd.Arm64.VectorTableLookup`
+   （NEON `TBL`），x86 上走 `Ssse3.Shuffle`（`PSHUFB`），同样没有分支。
+6. **其他情况**（没有 AVX2 时的 8 字节通道、其他大小）：标量遍历。
+
+每个 intrinsic 都在它的 `IsSupported` 之后，所以一份构建到处能跑，JIT 会去掉这台机器走不到的分支。每种形式都不读源末尾之后的内容，
+只写选中的个数（向量步骤留出一整步的空间，或在边上退回标量遍历）。`Lanes.Rows(mask, first, destination)` 写出掩码选中的行号
+（对 0..63 做 `Compact`，再按向量加上 `first`）：生成的循环或核心要行列表时只调这一个，所以生成的代码从不写出指令集的名字。
+
+**不用压缩的地方。** 生成循环里的 TZCNT 遍历（`ArityGenerator` 的掩码遍历、`SystemGenerator.Fusion`）每行或每段行调一次方法；
+先做行列表只多一遍，不少一次调用。`MarkedRows` 保留位字（应用它们是每行一次结构变更，那才是大头），`World.Bulk` 的遍历也一样。
+`Kernel.Structural` 生成的 `Emit.AddIds` / `AddLanes` 已经走 `Compact`。
+
+**数据。** NUMBERS
+
+**考虑过的方案。**
+- **每个指令集一个公开的压缩 API**：用户要自己写核心已经做好的分派；`Lanes.Compact` 和 `Lanes.Rows` 仍是仅有的入口。
+- **8 字节通道的 128 位形式**（每步两个通道，每 2 位一项的 4 项表）：每个字 32 步，输给标量遍历，没有 AVX2 时
+  `CompactBenchmark` 在 1M 个 id、选中 50 % 时 1.19 ms 对 1.00 ms；放弃。
+- **跳过掩码空的部分的步骤**：每步一个分支，在混合掩码上预测失败；带这些分支的 128 位路径在选中 50 % 时比标量遍历慢 3 倍。
+- **每 16 位一张表**（没有 `VPCOMPRESS` 时 AVX-512 的宽度）：2 MB，而 8 KB 和 256 B 的表和读它的循环一起留在 L1。
+- **没有 AVX-512 时用标量遍历**：核心以前的做法；NUMBERS_SCALAR。
+
+</details>

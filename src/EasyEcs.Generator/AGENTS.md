@@ -60,7 +60,8 @@ ComponentGenerator.cs        C# 14 extension members per component / singleton: 
                              tracked or indexed), HasX, TryGetX, GetOrAddX, SetX(ctor args), SetXIfChanged, RemoveX,
                              tags IsX,
                              world.XIndex, singletons world.X / HasX / GetOrAddX / SetX / RemoveX, query items
-                             item.X per Query<T1..Tn> shape the code calls, TypeRegistry registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
+                             item.X per Query<T1..Tn> shape the code calls, TypeRegistry registration (OrderBy<T, K>
+                             for [OrderBy]); classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                              lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
 EasyEcsAnalyzer.cs           EECS002-006, EECS009-024, EECS035-036, EECS054, EECS056, EECS070 and EECS072-073 (the
                              declaration and [ForEach] rules of the range EECS002-103 that are not performance rules;
@@ -87,8 +88,8 @@ EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-034, EECS039, EECS046, EECS
                              method left without a vector loop; EECS025 and EECS053 for the parameters of lambda passes
                              too); each computes its fix as
                              diagnostic properties for EasyEcs.CodeFixes
-PartGenerator.cs             [Sum]..[Any], [LookupKey]/[UniqueKey], [Group] -> a part of the partial struct (IReduction<T>,
-                             IIndexed<K>.Key, IGroup.Group); Parts.cs: the models and Problems read once for the
+PartGenerator.cs             [Sum]..[Any], [LookupKey]/[UniqueKey], [Group], [OrderBy] -> a part of the partial struct
+                             (IReduction<T>, IIndexed<K>.Key, IGroup.Group, IOrderKey<K>.OrderKey / BoxPoint); Parts.cs: the models and Problems read once for the
                              generator and the analyzer (other generators read keys and groups through Symbols)
 Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (Kernel.Vectorize: the loop, or the
                              reason EECS055 / EECS056 report, as a ScalarReason: fixable or inherent; a lambda pass's
@@ -130,7 +131,8 @@ EasyEcsAnalyzer.Parallel.cs  EECS060-061: code on several threads (a parallel [F
                              job's field read after the call; EECS071: System.Random in a [ForEach] method (fix:
                              EntityRandom); EECS088: two EntityRandom draws of one stream for one entity in pass code
                              (fix: the next free stream), or a draw in a loop that does not vary its stream
-EasyEcsAnalyzer.Parts.cs     EECS062-069 and EECS102 (a [Prefab] the generator cannot write): generated parts (not partial, hand-written members, fields no attribute
+EasyEcsAnalyzer.Parts.cs     EECS062-069, EECS102 (a [Prefab] the generator cannot write) and EECS104 (an [OrderBy] it
+                             cannot keep: a key no radix sort orders, box members, interval, margin): generated parts (not partial, hand-written members, fields no attribute
                              combines), hand-written reductions, keys and groups the attributes could declare, a wrong
                              Identity, a setup attribute on a type it does not fit, a managed type without a Nino
                              formatter (Warning when the code saves what holds it: entity saves write no singletons)

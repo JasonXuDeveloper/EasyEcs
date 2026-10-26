@@ -11,8 +11,8 @@ using Microsoft.CodeAnalysis.Operations;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// The rules of declarations the generator writes parts for (EECS062-EECS067, EECS102 for [Prefab], and EECS036 for keys
-/// and groups): a type
+/// The rules of declarations the generator writes parts for (EECS062-EECS067, EECS102 for [Prefab], EECS104 for
+/// [OrderBy], and EECS036 for keys and groups): a type
 /// that is not partial along its chain, a reduction declared by attributes that also writes its members or has a field
 /// the attributes cannot combine, a key or group the attributes cannot declare,
 /// and the hand-written reductions the attributes could declare (EECS065) or whose Identity is not the identity of
@@ -96,6 +96,18 @@ public static partial class EasyEcsAnalyzer
         "from those defaults and the constructor into it; it skips a declaration that breaks this.",
         helpLinkUri: Help("EECS102"));
 
+    public static readonly DiagnosticDescriptor BadOrder = new("EECS104", "An order [OrderBy] cannot keep",
+        "'{0}' {1}",
+        Category, DiagnosticSeverity.Error, true,
+        "[OrderBy] on a member of a partial component makes every world keep the component's tables in the order of " +
+        "that member, re-sorted on a cadence by a radix sort of its bits, with a box per block of rows over the members " +
+        "it names. So the key is an integer, char, bool, float, double or an enum (a struct or a string has no bits a radix " +
+        "sort orders); the box members are up to three float members or one Vector2 or Vector3 of the component; the " +
+        "interval is 1 or more and the margin a finite distance of 0 or more; one member of the component is the key; " +
+        "the type is a component, not a singleton; and OrderKey and BoxPoint are not written by hand as well. The " +
+        "generator writes nothing for a declaration that breaks this, so no world would order the tables.",
+        helpLinkUri: Help("EECS104"));
+
     // EECS065 / EECS066's properties for their code fixes: the attribute of each field (name=Op;...), and the Identity
     // that fits the Combine.
     public const string ReductionOps = "Ops", FixedIdentity = "Identity";
@@ -143,6 +155,9 @@ public static partial class EasyEcsAnalyzer
                     break;
                 case Parts.Rule.BadKey or Parts.Rule.BadGroup:
                     context.ReportDiagnostic(Diagnostic.Create(BadIndexedKey, where, type.Name, problem.Text));
+                    break;
+                case Parts.Rule.BadOrder:
+                    context.ReportDiagnostic(Diagnostic.Create(BadOrder, where, type.Name, problem.Text));
                     break;
             }
         }
@@ -294,6 +309,7 @@ public static partial class EasyEcsAnalyzer
         parts.Fields.Count > 0 || parts.Reduces ? "IReduction<T> from its field attributes" : null,
         parts.KeyOf != null ? $"the Key of [{(parts.KeyOf.Unique ? "UniqueKey" : "LookupKey")}]" : null,
         parts.GroupOf != null ? "the Group of [Group]" : null,
+        parts.OrderOf != null ? "the OrderKey and BoxPoint of [OrderBy]" : null,
     }.Where(w => w != null));
 
     // ---------------- EECS065, EECS066: hand-written reductions ----------------
@@ -587,7 +603,7 @@ public static partial class EasyEcsAnalyzer
 public sealed class PartAnalyzer : EasyEcsAnalyzer.Area
 {
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
-        EasyEcsAnalyzer.BadIndexedKey, EasyEcsAnalyzer.BadPrefab, EasyEcsAnalyzer.BadReductionField,
+        EasyEcsAnalyzer.BadIndexedKey, EasyEcsAnalyzer.BadOrder, EasyEcsAnalyzer.BadPrefab, EasyEcsAnalyzer.BadReductionField,
         EasyEcsAnalyzer.BadSetup, EasyEcsAnalyzer.HandWrittenKey, EasyEcsAnalyzer.HandWrittenReduction,
         EasyEcsAnalyzer.NoFormatter, EasyEcsAnalyzer.NotPartial, EasyEcsAnalyzer.ReductionWrittenTwice,
         EasyEcsAnalyzer.WrongIdentity);

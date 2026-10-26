@@ -205,6 +205,7 @@ public sealed partial class World
         long update = ++group.Updates;
         // EntityRandom's tick counts the Update() calls: new numbers each update, none for an Update<TGroup>().
         if (ReferenceEquals(group, _groups[0]) && Box<EntityRandom>() is { } random) random.Value.Tick++;
+        if (_ordered && ReferenceEquals(group, _groups[0])) SortDue(update); // ordered tables re-sort on their cadence
         if (!_options.ParallelSystems)
         {
             // One thread: the whole group in runs of one set across stages, the tick moved on where a stage starts.

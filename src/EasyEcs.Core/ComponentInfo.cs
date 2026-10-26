@@ -249,6 +249,13 @@ internal abstract class ComponentInfo
     /// </summary>
     public abstract void CopyRows(Array source, Array target, int count, bool swap = false);
 
+    /// <summary>
+    /// Rows [0, order.Length) of managed column <paramref name="column"/> in a new order: row <c>i</c> takes the value of
+    /// row <c>order[i]</c> (a permutation). Values move, nothing is copied or shared (a buffer's list goes with its row).
+    /// Through a buffer of the shared array pool: allocation-free in steady state.
+    /// </summary>
+    public abstract void Permute(Array column, ReadOnlySpan<int> order);
+
     /// <summary>A boxed copy of row <paramref name="slot"/> of <paramref name="column"/> (the debugger view; cold, allocates).</summary>
     public abstract object Box(Array column, int slot);
 
@@ -405,6 +412,15 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
         if (default(T) is not IBuffer) return; // a JIT-time constant
         ref var store = ref Unsafe.As<T, BufferStore>(ref value); // a DynamicBuffer's single field (see CopyRows)
         store = store?.Share();
+    }
+
+    public override void Permute(Array column, ReadOnlySpan<int> order)
+    {
+        var rows = Unsafe.As<T[]>(column);
+        var moved = System.Buffers.ArrayPool<T>.Shared.Rent(order.Length);
+        for (int i = 0; i < order.Length; i++) moved[i] = rows[order[i]];
+        moved.AsSpan(0, order.Length).CopyTo(rows);
+        System.Buffers.ArrayPool<T>.Shared.Return(moved, clearArray: true); // the pool keeps no reference alive
     }
 
     public override void Clear(Array column, int start, int count) => Array.Clear(column, start, count);

@@ -152,6 +152,16 @@ public bool Any<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in QueryFilter filter = defa
 
 **复杂度**（[API 表](/zh/docs/api)）：最坏 O(M + S / 64)
 
+### `Blocks` [#blocks]
+
+```csharp
+public World.OrderedTables Blocks<T>() where T : struct, IComponent;
+```
+
+按 `T` 排序的每张表的块（推断出的顺序或 [[OrderBy]](/zh/docs/reference/orderbyattribute)），每张表一个 [`RowBlocks`](/zh/docs/reference/rowblocks)：`foreach (var blocks in world.Blocks<Position>())`。没有表按这个组件排序时一个也没有。在包围盒上搜索，不用访问其他行就能找到某个点或某个盒子附近的行。开始 O(1)，遍历 O(表数)；零分配。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(1)，遍历 O(表数)
+
 ### `Capture` [#capture]
 
 ```csharp
@@ -1171,6 +1181,16 @@ public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent;
 单例 `T` 的稳定句柄，单例没添加时抛异常：解析一次，之后直接读写 [`SingletonRef.Value`](/zh/docs/reference/singletonref#value)，不用再查找。生成的 `[ForEach]` job 每次遍历通过它把单例参数解析一次，所以单例一直没设置的系统，第一次运行就会报错。O(1)。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
+
+### `SortRows` [#sortrows]
+
+```csharp
+public void SortRows<T>() where T : struct, IComponent;
+```
+
+不管节奏，现在就按键排序含 `T` 的每张表：行按键的顺序排好，重新画出各块的包围盒（成对方法推断出的顺序 `World.OrderRows`，或 [[OrderBy]](/zh/docs/reference/orderbyattribute)）。每张表的下一次排序从这次起再过它的间隔。没有表按这个组件排序时什么也不做。行会移动，所以指向这些表的引用、句柄缓存的行和标记的行到这里失效，和任何结构变更一样。只能在所有者线程、两次遍历之间调用（遍历中调用抛出异常）。原本无序的表 O(行数 × (键字节数 + 列数))，其余 O(行数)；稳定状态零分配。
+
+**复杂度**（[API 表](/zh/docs/api)）：行要移动时 O(N × (K + C))，已经有序时 O(N)
 
 ### `System` [#system]
 

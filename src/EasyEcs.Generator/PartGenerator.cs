@@ -40,7 +40,7 @@ public sealed class PartGenerator : IIncrementalGenerator
         }
     }
 
-    private static readonly string[] Attributes = [.. Parts.Reductions, Parts.Key, Parts.UniqueKey, Parts.Group, Parts.GroupBy];
+    private static readonly string[] Attributes = [.. Parts.Reductions, Parts.Key, Parts.UniqueKey, Parts.Group, Parts.GroupBy, Parts.OrderBy];
 
     /// <summary>
     /// The first attribute a part is written for on <paramref name="type"/>'s declarations, and what carries it: the type
@@ -75,7 +75,7 @@ public sealed class PartGenerator : IIncrementalGenerator
     /// <see cref="Parts.Heads"/>), its name inside the part, and the reduction's fields.
     /// </summary>
     private sealed record PartModel(string Namespace, EquatableArray<string> Heads, string HintName, string Self,
-        EquatableArray<Parts.Field> Fields, Parts.KeyPart? Key, Parts.GroupPart? Group)
+        EquatableArray<Parts.Field> Fields, Parts.KeyPart? Key, Parts.GroupPart? Group, Parts.OrderPart? Order)
     {
         public static PartModel? Create(INamedTypeSymbol type)
         {
@@ -83,7 +83,7 @@ public sealed class PartGenerator : IIncrementalGenerator
             return new PartModel(type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString(),
                 new EquatableArray<string>(Parts.Heads(type)), Symbols.HintName(type), Parts.SelfName(type),
                 new EquatableArray<Parts.Field>(parts.WritesReduction ? parts.Fields.ToArray() : []),
-                parts.WritesKey ? parts.KeyOf : null, parts.WritesGroup ? parts.GroupOf : null);
+                parts.WritesKey ? parts.KeyOf : null, parts.WritesGroup ? parts.GroupOf : null, parts.WritesOrder ? parts.OrderOf : null);
         }
     }
 
@@ -116,6 +116,16 @@ public sealed class PartGenerator : IIncrementalGenerator
             if (group.Declares) bases.Add("global::EasyEcs.IGroup");
             body.Append($"/// <summary>The group the world keeps the entity's rows in: {group.Value} (from [Group]).</summary>\n");
             body.Append($"{code}\n{(group.ReadOnly ? "readonly " : "")}int global::EasyEcs.IGroup.Group => {group.Value};\n");
+        }
+
+        if (m.Order is { } order)
+        {
+            string face = $"global::EasyEcs.IOrderKey<{order.Type}>", modifier = order.ReadOnly ? "readonly " : "";
+            bases.Add(face);
+            body.Append($"/// <summary>The key the world keeps the entity's table ordered by: {order.Member} (from [OrderBy]).</summary>\n");
+            body.Append($"{code}\n{modifier}{order.Type} {face}.OrderKey => {order.Member};\n");
+            body.Append($"/// <summary>The point the boxes of the table's blocks cover ({order.Axes} axes, from [OrderBy]).</summary>\n");
+            body.Append($"{code}\n{modifier}global::System.Numerics.Vector3 {face}.BoxPoint => {order.Point};\n");
         }
 
         return Code.Part(m.Namespace, m.Heads, string.Join(", ", bases), body.ToString());

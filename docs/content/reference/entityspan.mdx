@@ -14,6 +14,22 @@ The entities of one run of rows in a batch job: element `i` is the entity whose 
 
 ## Properties
 
+### `Blocks` [#blocks]
+
+```csharp
+public RowBlocks Blocks { get; }
+```
+
+The blocks of the run's table when it is ordered (an inferred order or [[OrderBy]](/en/docs/reference/orderbyattribute)), else none ([`RowBlocks.Count`](/en/docs/reference/rowblocks#count) 0): a batch method finds the rows near its own through their boxes. O(1).
+
+### `FirstRow` [#firstrow]
+
+```csharp
+public int FirstRow { get; }
+```
+
+The row of the run's table that element 0 of the run is: element `i` is row `FirstRow + i` of [`EntitySpan.Blocks`](/en/docs/reference/entityspan#blocks). O(1).
+
 ### `Ids` [#ids]
 
 ```csharp

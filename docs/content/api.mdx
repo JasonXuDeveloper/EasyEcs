@@ -60,12 +60,15 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]`, `[Any]` | attributes | On every instance field of a partial struct: the generator writes its `IReduction<T>` (`Identity` and a field-wise `Combine`). |
 | `[LookupKey]`, `[UniqueKey]`, `[Group]` | attributes | On a member of a partial component (`[LookupKey]` on the type: the value itself): the generator writes the explicit `IIndexed<TKey>.Key` (`IUniqueIndexed<TKey>`) or `IGroup.Group`. |
 | `[GroupBy]`, `[WhenTargetDestroyed(policy)]`, `[NotSaved]` | attributes | Setup every world applies from its first table holding the type: its grouping, the policy of links to a destroyed target; `[NotSaved]`: no save writes the type, a load keeps the world's own singleton. |
+| `[OrderBy(box...)]`, `IOrderKey<TKey>` | attribute, interface | On a member of a partial component: every world keeps the tables holding it in the order of that key (`Interval`, `Margin`), overriding an order a pair method's setup requested; the generator writes the explicit `OrderKey` and `BoxPoint`. |
+| `RowBlocks`, `BlockPair` | ref struct, record struct | One ordered table's rows in blocks of `Size` rows (8, or 4 on ARM64) with a box each (`world.Blocks<T>()`, `entities.Blocks`): `Count`, `SortedRows`, `Start`, `End`, `Min(axis)`, `Max(axis)`, `Read<T>()`, `Ids`, `Has(row)`, `Pairs(reach, into)`. |
+| `IRowOrder<T>`, `RowKeys` | interface, static class | For generated code: how an order reads a row (`Key`, `Point`, static), the Morton code of a point by a cell (`RowKeys.Morton`). |
 | `Scratch<T>` | ref struct | A `[ForEach]` parameter: working memory of the method on the running thread, kept between rows, passes and worlds: `Value`. |
 | `Emit<T>`, `Emitted<T>` | ref struct, struct | A `[ForEach]` parameter, taken by value, appending records (`Add`, `AddRange`) joined in chunk order into singleton `Emitted<T>` (`Items`, a `DynamicBuffer<T>`) when the pass ends. |
 | `EntityRandom` | record struct | A singleton (`Seed`, `Tick`) and pure static functions: deterministic random numbers per (seed, entity, tick, stream): `Bits`, `Float`, `Range`, `Chance`. |
 | `IForRange`, `IForSpan<T>` | interfaces | Jobs of `world.ForParallel`: `Execute(start, end)` over a range of indexes, `Execute(start, span)` over the elements of a list. |
 | `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out entity)`, `Find(key)`, `Count(key)`. |
-| `Lanes` | static class | Stream compaction for batch methods: `Compact(source, mask, destination)` writes the elements a lane mask selects side by side. |
+| `Lanes` | static class | Stream compaction for batch methods: `Compact(source, mask, destination)` writes the elements a lane mask selects side by side; `Rows(mask, first, destination)` the numbers of the rows it selects. |
 | `Tile<TCell, TTile>`, `ITile<TKey>`, `ITileShape`, `TileFaces`, `TileNeighborhood`, `TileBoundary`, `TileIds` | ref structs, interfaces, enums | A `[ForEach]` parameter: the entity's `DynamicBuffer<TCell>` with its neighbors' in the grid of `TTile` (an indexed component with a static shape, halo, neighborhood and boundary, and the key of each neighbor), scheduled as a read of both: `Pad(from, to, fill, mask)`, `Beside(face)`, `Beside(dx, dy, dz)`, `Cells`, `ChangedEdges(next, out changed)`, `Facing(edges)`. |
 | `PaddedTile<TCell, TTile>`, `TileRows<TTile>`, `TileRow<TTile>`, `TileCursor<TCell, TTile>`, `TileReads` | ref structs, struct, enum | The layers a stencil samples, padded with a halo of `Halo` cells: `Rows(reads)` walks the active rows, `At(row)` samples around one (`Load128`, `Load256`, `LoadVector`, `this[dx, dy, dz]`), `this[x, y, z]`. |
 | `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]`, `[UpdateInterval(n, Phase = p)]` | interfaces, attributes | System groups (with filters through interfaces), ordering and cadence. |
@@ -240,7 +243,8 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 
 | API | Complexity | Notes |
 | --- | --- | --- |
-| `Lanes.Compact<T>(source, mask, destination)` | O(1): at most 64 elements; with AVX-512, 8 or 4 vector steps for elements of 8 or 4 bytes; otherwise one step per selected element, or per element up to the last selected one when more than 12 are | writes `source[i]` for each set bit `i` of `mask`, in order, to the start of `destination` and returns `PopCount(mask)`; reads only the selected elements and writes only that many; throws `ArgumentException` when a bit lies at or past `source.Length` or `destination` is shorter than `PopCount(mask)`; allocation-free |
+| `Lanes.Compact<T>(source, mask, destination)` | O(1): at most 64 elements; for elements of 8 or 4 bytes 8 or 4 vector steps with AVX-512, skipping steps that select nothing; without AVX-512, one step per selected element when 12 or fewer are, else 16 or 8 steps with AVX2, 16 steps for 4-byte elements with 128-bit vectors (ARM64's NEON, SSSE3), otherwise one step per element up to the last selected one | writes `source[i]` for each set bit `i` of `mask`, in order, to the start of `destination` and returns `PopCount(mask)`; reads nothing past `source` and writes only that many elements; throws `ArgumentException` when a bit lies at or past `source.Length` or `destination` is shorter than `PopCount(mask)`; allocation-free |
+| `Lanes.Rows(mask, first, destination)` | O(1): `Compact` over the numbers 0 to 63, then `first` added a vector at a time | writes `first + i` for each set bit `i` of `mask`, in order, and returns `PopCount(mask)`: a word of rows a condition passed as a row list; throws `ArgumentException` when `destination` is too short; allocation-free |
 
 `Tile<TCell, TTile>`, the `[ForEach]` parameter of a stencil over a grid of tiles, and the padded layers it loads:
 
@@ -307,6 +311,22 @@ columns); `Load` O(rows). A taken key throws `InvalidOperationException` (a save
 | API | Complexity | Notes |
 | --- | --- | --- |
 | `world.GroupBy<T>()` | O(entities with `T`), once | splits tables by `T.Group`; setting a new value moves the entity to its group's tables (one row copy); call it at setup, or declare `[GroupBy]` on the type for every world |
+
+## Ordered tables [#ordered-tables]
+
+A table ordered by a component keeps its rows in key order (a Morton code of a position for a pair method's distance
+test, or the key `[OrderBy]` declares), re-sorted on a cadence, with a box per block of `Size` rows (8, or 4 on ARM64). N = rows of the table,
+C = its columns, K = the key's bytes that differ, B = blocks.
+
+| API | Complexity | Notes |
+| --- | --- | --- |
+| `world.OrderRows<T, TOrder>(axes, cell, interval, margin)` | O(tables), once | for generated setup: orders the tables holding `T` now and later by `TOrder`'s key, the first sort at the next update, then every `interval` updates; the first request for a component stands, `[OrderBy]` overrides it; throws during a pass |
+| sort (an update on the cadence, `world.SortRows<T>()`) | O(N × (K + C)) when rows move, O(N) when they are in order already | an LSD radix sort of (key, row) skipping bytes every row shares, one permutation of every column, presence bit, change tick and slot under the structural gate (refs and handles' rows end, as at any structural change); rows lacking `T` sort last; boxes drawn again; 0 B in steady state (pooled buffers); `SortRows` throws during a pass |
+| a table no order covers | 0 | no sort, no box, one null check where rows move |
+| `world.Blocks<T>()` | O(1), O(tables) to walk | the `RowBlocks` of each table ordered by `T`; none for an unordered component |
+| `blocks.Min(axis)` / `Max(axis)` / `Start(b)` / `End(b)` / `Read<T>()` / `Ids` / `Has(row)` | O(1) | the box sides of every block, a block's rows (`[b * Size, min((b + 1) * Size, SortedRows))`), the table's columns read-only; rows past `SortedRows` joined since the sort and are in no block; a row moved into a block widened its box |
+| `blocks.Pairs(reach, into)` / `Pairs(other, reach, into)` | O(B log B + pairs) | the block pairs whose boxes come within `reach` on every axis (each block with itself, the others once), as far as `into` holds; returns how many there are; 0 B in steady state |
+| `entities.Blocks`, `entities.FirstRow` | O(1) | the blocks of a batch method's table, and the row its run starts at |
 
 ## Snapshots, saves and moves [#saves]
 

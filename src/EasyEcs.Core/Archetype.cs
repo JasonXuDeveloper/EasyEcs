@@ -126,6 +126,13 @@ internal sealed class Archetype
     /// <summary>Has tombstones that the world closes when the last pass ends (registered once, see World.Remove).</summary>
     public bool Dirty;
 
+    /// <summary>
+    /// The order the rows are kept in and their blocks (<see cref="RowOrder"/>), for a table holding a component declared
+    /// with <see cref="OrderByAttribute">[OrderBy]</see>; null for every other table, which pays one null check where a
+    /// row moves (<see cref="MoveRow"/>) or the rows shrink.
+    /// </summary>
+    public RowOrder Order;
+
     // The rows made tombstones since the table was last dense, so FillHoles visits only them instead of scanning every
     // row for holes. Reused (it grows to the most tombstones a table held at once, at most its rows).
     private int[] _holes = [];
@@ -891,6 +898,7 @@ internal sealed class Archetype
         Count = 0;
         AliveCount = 0;
         if (HasAbsent) Absent.AsSpan().Clear();
+        Order?.Shrink(0);
     }
 
     /// <summary>Append an entity and return its row (a pass that started earlier does not visit it).</summary>
@@ -958,6 +966,7 @@ internal sealed class Archetype
     public bool Trim()
     {
         if (_holeCount == 0) _holes = [];
+        Order?.Trim();
         long capacity = Math.Max(InitialCapacity, (long)BitOperations.RoundUpToPowerOf2((ulong)Count));
         if (capacity >= Slots.Length) return false;
         Resize((int)capacity);
@@ -1017,6 +1026,7 @@ internal sealed class Archetype
         if (slot != last) MoveRow(last, slot, meta);
         Unsafe.Add(ref rows, last) = new EntityId(Tombstone, Unsafe.Add(ref rows, last).Version);
         if (_hasManaged) ReleaseRows(last, 1);
+        if (Order != null) Order.Shrink(last);
         return false;
     }
 
@@ -1034,6 +1044,7 @@ internal sealed class Archetype
         var entity = Unsafe.Add(ref rows, from);
         Unsafe.Add(ref rows, to) = entity;
         Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(meta), entity.Index).Slot = to;
+        if (Order != null) Order.Moved(this, to); // a row from elsewhere in the table joins the block of its new row
     }
 
     /// <summary>
@@ -1187,6 +1198,7 @@ internal sealed class Archetype
         Count = AliveCount = count;
         _holeCount = 0;
         Dirty = false;
+        Order?.Reset(); // the rows come back in the order they were saved in; the blocks are drawn again by the next update
     }
 
     /// <summary>
@@ -1215,6 +1227,172 @@ internal sealed class Archetype
         Count = alive;
         _holeCount = 0;
         Dirty = false;
+        Order?.Shrink(alive);
+    }
+
+    /// <summary>
+    /// Move every row to its place in a new order: row <c>i</c> takes the entity that was in row
+    /// <paramref name="order"/>[i] (a permutation of [0, <see cref="Count"/>)), with its values in every column, its
+    /// presence bits, its change ticks (the word and block summaries rebuilt exactly from them) and its id, and the
+    /// moved entities' slots rewritten. The re-sort of an ordered table (<see cref="RowOrder"/>); the other sanctioned
+    /// way, beside <see cref="FillHoles"/>, to rewrite rows and slots. Absent counts and <see cref="LastWrite"/> stay
+    /// (a permutation changes neither). Inside the structural gate, outside passes, on a dense table. O(rows × columns),
+    /// allocation-free in steady state (the gathers go through buffers of the shared array pools).
+    /// </summary>
+    public void Permute(ReadOnlySpan<int> order, EntityMeta[] meta)
+    {
+        int n = Count;
+        if (order.Length != n || AliveCount != n) throw new InvalidOperationException("A permutation covers every row of a dense table");
+        for (int c = 0; c < Columns.Length; c++)
+        {
+            var info = _infos[c];
+            if (info.Managed) info.Permute(Columns[c], order);
+            else PermuteBytes(ref Aligned(Columns[c]), info.Size, order);
+        }
+
+        foreach (short c in _bitColumns) PermuteBits(Present[c], order);
+        if (_tracked)
+            for (int c = 0; c < Words.Length; c++)
+                if (Words[c] != null) RebuildTicks(c, order);
+
+        var slots = System.Buffers.ArrayPool<EntityId>.Shared.Rent(n);
+        Gather(ref Unsafe.As<EntityId, long>(ref MemoryMarshal.GetArrayDataReference(Slots)), ref Unsafe.As<EntityId, long>(ref slots[0]), order);
+        slots.AsSpan(0, n).CopyTo(Slots);
+        System.Buffers.ArrayPool<EntityId>.Shared.Return(slots);
+        // Rows of a dense table hold live entities, whose ids are valid meta indices.
+        ref var records = ref MemoryMarshal.GetArrayDataReference(meta);
+        for (int i = 0; i < n; i++) Unsafe.Add(ref records, Slots[i].Index).Slot = i;
+    }
+
+    /// <summary>Rows [0, order.Length) of an unmanaged column of <paramref name="size"/>-byte rows in the new order.</summary>
+    private static void PermuteBytes(ref byte rows, int size, ReadOnlySpan<int> order)
+    {
+        int bytes = order.Length * size;
+        var scratch = System.Buffers.ArrayPool<byte>.Shared.Rent(bytes);
+        ref byte into = ref MemoryMarshal.GetArrayDataReference(scratch);
+        switch (size) // one loop per common size: a load and a store per row, no copy call
+        {
+            case 1: Gather(ref rows, ref into, order); break;
+            case 2: Gather(ref Unsafe.As<byte, short>(ref rows), ref Unsafe.As<byte, short>(ref into), order); break;
+            case 4: Gather(ref Unsafe.As<byte, int>(ref rows), ref Unsafe.As<byte, int>(ref into), order); break;
+            case 8: Gather(ref Unsafe.As<byte, long>(ref rows), ref Unsafe.As<byte, long>(ref into), order); break;
+            case 16: Gather(ref Unsafe.As<byte, Vector128<byte>>(ref rows), ref Unsafe.As<byte, Vector128<byte>>(ref into), order); break;
+            default:
+                for (int i = 0; i < order.Length; i++)
+                    CopyBytes(ref Unsafe.Add(ref rows, (nint)order[i] * size), ref Unsafe.Add(ref into, (nint)i * size), size);
+                break;
+        }
+
+        Unsafe.CopyBlockUnaligned(ref rows, ref into, (uint)bytes);
+        System.Buffers.ArrayPool<byte>.Shared.Return(scratch);
+    }
+
+    /// <summary>
+    /// into[i] = from[order[i]]. No bounds checks: <paramref name="order"/> holds rows of the source (a permutation of
+    /// [0, order.Length)), and <paramref name="into"/> has order.Length elements.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Gather<TRow>(ref TRow from, ref TRow into, ReadOnlySpan<int> order) where TRow : unmanaged
+    {
+        ref int at = ref MemoryMarshal.GetReference(order);
+        for (int i = 0; i < order.Length; i++) Unsafe.Add(ref into, i) = Unsafe.Add(ref from, Unsafe.Add(ref at, i));
+    }
+
+    /// <summary>The presence bits of rows [0, order.Length) in the new order; the bits past them stay.</summary>
+    private static void PermuteBits(ulong[] bits, ReadOnlySpan<int> order)
+    {
+        int words = (order.Length + 63) >> 6;
+        var scratch = System.Buffers.ArrayPool<ulong>.Shared.Rent(words);
+        for (int w = 0; w < words; w++)
+        {
+            int first = w << 6, end = Math.Min(first + 64, order.Length);
+            ulong word = w == words - 1 && end - first < 64 ? bits[w] & ~((1UL << (end - first)) - 1) : 0; // rows past the count keep theirs
+            for (int i = first; i < end; i++)
+            {
+                int from = order[i];
+                word |= (bits[from >> 6] >> from & 1) << i; // shift is mod 64
+            }
+
+            scratch[w] = word;
+        }
+
+        scratch.AsSpan(0, words).CopyTo(bits);
+        System.Buffers.ArrayPool<ulong>.Shared.Return(scratch);
+    }
+
+    /// <summary>
+    /// The change-tick summaries of change-tick column <paramref name="column"/> after its rows (already gathered)
+    /// moved by <paramref name="order"/>: each word's <see cref="WordTicks.Write"/>, <see cref="WordTicks.Rows"/> and
+    /// <see cref="WordTicks.Rest"/> exactly from its rows' ticks (every row of the word below the capacity, as the
+    /// summaries cover them), its <see cref="WordTicks.Removed"/> the largest bound of the words its rows came from, and
+    /// the blocks (writes and removals) from the words. A pass after the sort finds every row written or removed since
+    /// its tick, in its new place.
+    /// </summary>
+    private void RebuildTicks(int column, ReadOnlySpan<int> order)
+    {
+        var words = Words[column];
+        int count = (order.Length + 63) >> 6;
+        var removed = System.Buffers.ArrayPool<ulong>.Shared.Rent(count);
+        for (int w = 0; w < count; w++)
+        {
+            ulong bound = 0;
+            for (int i = w << 6, end = Math.Min(i + 64, order.Length); i < end; i++) bound = Math.Max(bound, words[order[i] >> 6].Removed);
+            if (w == count - 1 && (order.Length & 63) != 0) bound = Math.Max(bound, words[w].Removed); // rows past the count stay
+            removed[w] = bound;
+        }
+
+        ref ulong ticks = ref Unsafe.As<RowTick, ulong>(ref Data<RowTick>(column));
+        int capacity = Slots.Length;
+        for (int w = 0; w < count; w++)
+        {
+            ulong write = 0, rest = 0, rows = 0;
+            for (int i = w << 6, end = Math.Min(i + 64, capacity), bit = 0; i < end; i++, bit++)
+            {
+                ulong tick = Unsafe.Add(ref ticks, i);
+                if (tick > write)
+                {
+                    rest = Math.Max(rest, write);
+                    write = tick;
+                    rows = 1UL << bit;
+                }
+                else if (tick == write) rows |= 1UL << bit;
+                else rest = Math.Max(rest, tick);
+            }
+
+            words[w] = new WordTicks { Write = write, Rest = rest, Rows = rows, Removed = removed[w] };
+        }
+
+        System.Buffers.ArrayPool<ulong>.Shared.Return(removed);
+        RebuildBlocks(Blocks[column], words, count, static (in WordTicks word) => word.Write);
+        RebuildBlocks(Removals[column], words, count, static (in WordTicks word) => word.Removed);
+    }
+
+    private delegate ulong WordTick(in WordTicks word);
+
+    /// <summary>The blocks over words [0, <paramref name="count"/>) from each word's tick (<paramref name="tick"/>); the blocks past them stay.</summary>
+    private static void RebuildBlocks(BlockTicks[] blocks, WordTicks[] words, int count, WordTick tick)
+    {
+        for (int b = 0; b <= (count - 1) >> 6; b++)
+        {
+            ulong latest = 0, rest = 0, set = 0;
+            for (int w = b << 6, end = Math.Min(w + 64, words.Length), bit = 0; w < end; w++, bit++)
+            {
+                ulong t = tick(in words[w]);
+                if (t > latest)
+                {
+                    rest = Math.Max(rest, latest);
+                    latest = t;
+                    set = 1UL << bit;
+                }
+                else if (t == latest) set |= 1UL << bit;
+                else rest = Math.Max(rest, t);
+            }
+
+            ref var block = ref blocks[b];
+            block.Latest = latest;
+            block.Words = set;
+            block.Rest = rest;
+        }
     }
 
     /// <summary>

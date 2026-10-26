@@ -75,6 +75,19 @@ public static class TypeRegistry
     public static void GroupBy<T>() where T : struct, IComponent, IGroup => World.DefaultGroupBy<T>();
 
     /// <summary>
+    /// [OrderBy] on <typeparamref name="T"/>: every world keeps each table holding it in the order of its key, re-sorted
+    /// every <paramref name="interval"/> updates, with boxes over <paramref name="axes"/> axes of its point widened by
+    /// <paramref name="margin"/> (<see cref="OrderByAttribute"/>). It overrides any order a world requests for the type
+    /// (<see cref="World.OrderRows{T, TOrder}"/>).
+    /// </summary>
+    public static void OrderBy<T, TKey>(int axes, int interval, float margin) where T : struct, IOrderKey<TKey> where TKey : unmanaged
+    {
+        if (!OrderBits<TKey>.Supported) throw new ArgumentException($"{typeof(TKey).Name} cannot order rows: a key is an integer, char, bool, float, double or an enum");
+        RowOrder.Check(axes, 1, interval, margin, 0);
+        TypeDefaults<T>.GetOrAdd().Order ??= () => new RowOrder<T, DeclaredOrder<T, TKey>>(axes, 1, interval, margin, 0);
+    }
+
+    /// <summary>
     /// [WhenTargetDestroyed] on component <typeparamref name="T"/> (indexed by an <see cref="EntityId"/>): every world
     /// starts with <paramref name="policy"/> for it, as <see cref="TargetPolicyExtensions.WhenTargetDestroyed{T}"/>
     /// sets it, unless the world set its own first.

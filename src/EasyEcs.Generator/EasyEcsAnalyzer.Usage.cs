@@ -48,8 +48,8 @@ public static partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor RefusedInPass = new("EECS041", "A call a pass refuses",
         "'{0}' throws while {1} iterates its world: {2}",
         Category, DiagnosticSeverity.Error, true,
-        "TrimExcess, Capture, Restore, RemoveTypes, GroupBy, Save, Load, SaveEntities, LoadEntities, LoadEntitiesInto and " +
-        "MoveEntities rewrite or copy whole tables, so a world refuses them while a pass walks its rows (a foreach over " +
+        "TrimExcess, Capture, Restore, RemoveTypes, GroupBy, SortRows, OrderRows, Save, Load, SaveEntities, LoadEntities, LoadEntitiesInto and " +
+        "MoveEntities rewrite, reorder or copy whole tables, so a world refuses them while a pass walks its rows (a foreach over " +
         "Query, a [ForEach] method, a job's Execute): they throw InvalidOperationException. Record what to do as data " +
         "and make the call after the pass.", helpLinkUri: Help("EECS041"));
 
@@ -138,7 +138,7 @@ public static partial class EasyEcsAnalyzer
     /// <summary>The World members a pass refuses (they throw while one iterates the world).</summary>
     private static readonly HashSet<string> PassRefused =
     [
-        "TrimExcess", "Capture", "Restore", "RemoveTypes", "GroupBy", "Save", "SaveWithout", "Load", "LoadKeeping",
+        "TrimExcess", "Capture", "Restore", "RemoveTypes", "GroupBy", "SortRows", "OrderRows", "Save", "SaveWithout", "Load", "LoadKeeping",
         "SaveEntities", "SaveEntitiesWith", "SaveEntitiesWithout", "LoadEntities", "LoadEntitiesInto", "MoveEntities",
     ];
 

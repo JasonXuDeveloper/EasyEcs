@@ -10,7 +10,8 @@ namespace EasyEcs.Benchmark;
 /// baseline), the grid with copies of the positions and velocities, per-entity neighbor lists rebuilt every 10 ticks,
 /// and a hand-written cluster-pair kernel over Morton-sorted rows in blocks of 8 (kernel only, the side arrays standing
 /// for the sorted columns, 8 lanes with hardware 256-bit vectors, else 4: ARM64's NEON; with the sort every 1, 10 and
-/// 20 ticks; and with the copies a user would add today). Each
+/// 20 ticks; and with the copies a user would add today), and that kernel on the core's order (L1: the table's own
+/// columns kept sorted, blocks of 8 or 16, the core's sort every 10 ticks). Each
 /// invocation runs 20 ticks (OperationsPerInvoke), so a sort every k ticks is amortized exactly. One thread. Setup checks
 /// every version against a double-precision reference.
 /// </summary>
@@ -23,6 +24,10 @@ public class PairsBenchmark
     [Params(Density.Crowd, Density.Sparse)] public Density Density;
 
     private World _world;
+
+    // (c) on the core's order: a world of the same crowd whose Position table the core keeps sorted (L1).
+    private World _core;
+    private readonly CoreClusters _clusters = new();
 
     [GlobalSetup]
     public void Setup()
@@ -48,6 +53,20 @@ public class PairsBenchmark
             _world.GetSingleton<Crowd.Clusters>().Rows.Interact();
             Crowd.WriteBack(_world);
         });
+
+        _core = Crowd.Create(Entities, Density);
+        Locality.CoreClusters.Order(_core, int.MaxValue); // sorted now; the benchmark sorts on its own cadence
+        var sorted = Crowd.Reference(_core);
+        CheckCore(sorted, nameof(CoreClusters), () => _clusters.Interact(_core));
+        CheckCore(sorted, nameof(CoreClusters16), () => _clusters.Interact16(_core));
+    }
+
+    private void CheckCore((double, double, double)[] expected, string name, Action tick)
+    {
+        tick();
+        tick();
+        int at = Crowd.FirstMismatch(Crowd.Pushes(_core), expected);
+        if (at >= 0) throw new InvalidOperationException($"{name} differs from the reference at row {at}");
     }
 
     private void Check((double, double, double)[] expected, string name, Action tick)
@@ -59,7 +78,11 @@ public class PairsBenchmark
     }
 
     [GlobalCleanup]
-    public void Cleanup() => _world.Dispose();
+    public void Cleanup()
+    {
+        _world.Dispose();
+        _core.Dispose();
+    }
 
     [Benchmark(Baseline = true, OperationsPerInvoke = Ticks)]
     public void GridLookups()
@@ -108,6 +131,31 @@ public class PairsBenchmark
         {
             if (t % 10 == 0) Crowd.Sort(_world);
             Crowd.ClusterTickWithCopies(_world);
+        }
+    }
+
+    /// <summary>The kernel on the core's order: the table's own columns, sorted in setup; the pair lists cached.</summary>
+    [Benchmark(OperationsPerInvoke = Ticks)]
+    public void CoreClusters()
+    {
+        for (int t = 0; t < Ticks; t++) _clusters.Interact(_core);
+    }
+
+    /// <summary>The same in blocks of 16 (512-bit vectors; the 8-wide kernel where they are not hardware).</summary>
+    [Benchmark(OperationsPerInvoke = Ticks)]
+    public void CoreClusters16()
+    {
+        for (int t = 0; t < Ticks; t++) _clusters.Interact16(_core);
+    }
+
+    /// <summary>The core's sort every 10 ticks (keys, the sortedness check, boxes) and the pair lists drawn again.</summary>
+    [Benchmark(OperationsPerInvoke = Ticks)]
+    public void CoreClustersSort10()
+    {
+        for (int t = 0; t < Ticks; t++)
+        {
+            if (t % 10 == 0) _core.SortRows<Crowd.Position>();
+            _clusters.Interact(_core);
         }
     }
 
