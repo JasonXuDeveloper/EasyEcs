@@ -108,7 +108,7 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              refusals first; Inliner / Rewriter: parameters bound to the caller's variables or locals,
                              early returns as a flag, a value as one expression or a local assigned before the
                              statement), bound in a speculative model of the method body; a call left gets its reason
-                             (CallWhy: virtual, an interface's, a delegate, another assembly, recursive, what its body
+                             (ReasonForCall: virtual, an interface's, a delegate, another assembly, recursive, what its body
                              holds) for EECS055 / EECS056;
                              Kernel.Lookups.cs: reads of other entities through Lookup<T> (lookup[id], Read, Has, at an
                              EntityId of the lanes) gathered per vector from the one table they live in, the vector's
