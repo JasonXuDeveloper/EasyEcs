@@ -177,4 +177,6 @@ CI runs the unit tests on ARM64 (b1dbdb0).
       `audit-generator`): the API, the battle server and the guides scanned for lines users write twice.
 - [ ] **Docs pass** (#141): everything in `docs-todos.md`; DocCheck (296 problems) and ApiDocs (46) to 0; decision
       record for the 8 declined declarations; roadmap item for inner loops; analyzer range EECS002-103.
+- [ ] The `arm64` CI job (`ci.yml`, `runs-on: ubuntu-24.04-arm`, added b1dbdb0) has never run: it runs on the next
+      push to master or a manual dispatch; if the label is wrong the job fails at once and the label is fixed then.
 - [ ] `tools/bench.sh --site --sync`, README numbers, `verify`, master. The owner cuts the release.
