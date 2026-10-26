@@ -45,7 +45,9 @@ Lookup.cs                    Lookup<T> + LookupExtensions: read-only lookups of 
                              [ForEach] method, parallel ones included; the system reads T, so no writer shares its stage
 LookupLanes.cs               the reads of other entities in generated vector loops (D131): Lookup<T>.Resolve gathers the
                              lanes' records (AVX2) into a presence mask and the one table their entities live in (false:
-                             the vector's rows run the method), Gather the fields from that table's column
+                             the vector's rows run the method), Gather the fields from that table's column;
+                             PrefetchRecord / PrefetchRow (Lookup<T>.Prefetch / PrefetchRow: the two stages of a
+                             prefetched chase, x86 only; borrowed-ideas.md item 1)
 Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
                              Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbors found by generated code,
                              TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,
@@ -59,7 +61,9 @@ EntityRandom.cs              EntityRandom: deterministic random numbers, a pure 
 Interleaved.cs               the deinterleaving loads / interleaving stores of generated vector loops over components
                              of 2 to 4 fields of one lane type, and the lane masks of the passing rows of a word;
                              LoadTail / StoreTail: the last rows of a run copied into a vector's worth (a loop that
-                             marks rows runs them masked)
+                             marks rows runs them masked); Interleaved.Wide.cs: Pick / PickInto, the NEON table
+                             lookups (TBL / TBX over 1 to 4 registers) of a wide component's 128-bit form, and
+                             IsWideAccelerated (ARM64 with 128-bit Vector<T>)
 LaneMath.cs                  lane functions of generated vector loops .NET has no vector form of: the quotient of
                              int / uint lanes through doubles (exact), FloatMode.Fast's Log10 / Sinh / Cosh / Tanh of floats
 Lanes.cs                     Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress,

@@ -326,18 +326,27 @@ internal sealed partial class Kernel
             .Where(f => paths[f].Length > members.Length && Enumerable.Range(0, members.Length).All(k => Is(members[k], paths[f][k]))).ToArray();
         if (under.Length != value.Length) throw Not(target);
         var held = new string?[value.Length];
+        var written = new HashSet<string>(under.Select(f => destinations[f]).OfType<string>());
         for (int k = 0; k < value.Length; k++)
         {
             if (value[k] is not { } v) continue;
+            // A lane no write of this statement changes is read where it is (v.Y in v = new(-v.X, v.Y)): a local
+            // would be one more of the 32 a runner inlines (SystemGenerator.InlinedLocals).
+            if (IsName(v) && (v == destinations[under[k]] || !written.Contains(v))) { held[k] = v; continue; }
             held[k] = Temp("t");
             _body.Append($"var {held[k]} = {v};\n"); // read before any lane is written
         }
         for (int k = 0; k < under.Length; k++)
         {
             if (destinations[under[k]] is not { } name) continue;
-            Write(name, held[k] ?? throw new Unsupported("a statement mixes fields"), paths[under[k]][paths[under[k]].Length - 1].Type, mask);
+            string lane = held[k] ?? throw new Unsupported("a statement mixes fields");
+            if (lane == name) continue; // the lane keeps its value
+            Write(name, lane, paths[under[k]][paths[under[k]].Length - 1].Type, mask);
         }
     }
+
+    /// <summary>Whether <paramref name="text"/> is one name (a lane, a local), not an expression.</summary>
+    private static bool IsName(string text) => text.Length > 0 && (char.IsLetter(text[0]) || text[0] == '_') && text.All(c => char.IsLetterOrDigit(c) || c == '_');
 
     /// <summary>The lane local a write of a struct local's lane field goes to (<c>v.X = -v.X</c>), or null.</summary>
     private string? StructLocalLane(IOperation target)

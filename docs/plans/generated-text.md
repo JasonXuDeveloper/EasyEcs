@@ -31,8 +31,8 @@ ArityGenerator (EasyEcs.Core): World.Queries.g.cs 1,121,139 B, Entity.Structural
 66 KB of SystemGenerator text, 9.5 KB of it for the four-line `Move`.
 
 Classes used below: **(a)** text only, the JIT certainly removes it (IL may still differ); **(b)** may change Tier1
-(IL size / local shape near the inliner's budget, D126: removing the `__s -> __c` copies grew Move3's runner from 934
-to 1,095 instructions); **(c)** runtime cost.
+(a job's IL locals: the JIT inlines no method of more than 32, D126/D135: removing the `__s -> __c` copies brought
+Move3's masked `Execute` from 36 to 24 locals and into its runner, 934 to 1,095 instructions); **(c)** runtime cost.
 
 Proof tiers:
 - **P1, IL identical**: a change that touches only names, parentheses, aliases, whitespace or comments leaves the IL
@@ -52,8 +52,8 @@ Proof tiers:
 | Count | 328 `if (Vector512.IsHardwareAccelerated...` blocks, 327 `if (Vector.IsHardwareAccelerated...` blocks, 6 VectorTail copies. Bytes inside the Vector512 blocks 418,709, inside the Vector<T> blocks 362,708: **38 % of SystemGenerator output is width blocks, 18 % is the second copy**. A VectorTail job (DeathSystem) carries the body 6 times: {512, Vector<T>, tail} x {unmasked, masked}. |
 | Example | `Showcase.DeathSystem...System.g.cs`, `DieJob0.Execute`: lines 37-54 (512) and 55-72 (Vector<T>) differ only in `global::System.Runtime.Intrinsics.Vector512` vs `global::System.Numerics.Vector`; lines 73-95 (tail) repeat the body a third time; the masked `Execute` repeats all three. |
 | Template | `SystemGenerator.cs:742-788` `EmitVectorLoop` (one text, `Kernel.V` token replaced twice at 784-786); `EmitFlatLoop` 820-838 (same trick at 835-836); `EmitTail` 796-813 (the body a third time with `Kernel.V` -> Vector); the pass loop over masked/unmasked at `SystemGenerator.cs:619-664`. The template is already single-source: the duplication exists only in the output. |
-| Class | (a) for the width the machine lacks (constant `IsHardwareAccelerated`, removed at import). But note: on AVX-512 **both** blocks run (Vector512 for whole 16-lane vectors, then Vector<T> (256-bit) for 8..15 leftover rows), so the second block is live code there, not dead text. (b) for the IL: the inliner's budget counts the IL of both blocks before it folds the dead one (the D126 / WP0b lesson). |
-| Fix | Not removable by text tricks. Options in "Source-level options" below: per-width methods (WP0b form 2) moves the copy out of the inlinee; a generic width wrapper is the only form with one body. |
+| Class | (a) for the width the machine lacks (constant `IsHardwareAccelerated`, removed at import). But note: on AVX-512 **both** blocks run (Vector512 for whole 16-lane vectors, then Vector<T> (256-bit) for 8..15 leftover rows), so the second block is live code there, not dead text. (b) for the IL: the locals of both blocks count towards the 32 a runner inlines before the JIT folds the dead one (D135). |
+| Fix | Not removable by text tricks. Per-width methods (D135) are written when an `Execute` would pass 32 locals: each width's loop is its own method, so the dead width's locals no longer count; a generic width wrapper is the only form with one body. |
 | Proof | P2 + BDN (WP0b's set). |
 
 ## 2. Fully qualified names everywhere (no file-level aliases)
@@ -69,12 +69,15 @@ Proof tiers:
 
 ## 3. Identity copies
 
+The copies that cost IL locals (each one counts towards the 32 a runner inlines) are gone (D126, D135); the rows
+below that are not marked done are text, still to clean.
+
 | Kind | Count | Example | Template | Class | Fix |
 |---|---|---|---|---|---|
-| deinterleave out-temp copied into the field's name `var __c1_0 = __s1_0;` | 608 (600 in loops + 8 tails); tests 1,086; MultiWorld 40 | DeathSystem: `Load2(..., out ... __s1_0, out ... __s1_1); var __c1_0 = __s1_0; var __c1_1 = __s1_1;` | `Kernel.cs:597-599` (`As(column, elem, name)` returns `name` unchanged when the types match, `Kernel.cs:882`) | **(b), measured**: D126 tried `out ... __c1_0` directly; Move3's runner went 934 -> 1,095 instructions, 36 -> 54 permutes (the masked form inlined), speed level, so the text stayed. Probably because the `out` local is address-exposed: the copy gives the loop a non-exposed name. | Keep the copy but make it explain itself, or remove the exposure instead of the copy: an `Interleaved.Load2In512(ref e, row)` returning a small struct of vectors read field by field (`var __l1 = ...; var __c1_0 = __l1.F0;`) has no address-taken local. Needs P2 on Move3/Cycle. Do not simply delete the line. |
-| whole-value struct write held in `__t`: `var __t1 = __c1_0; __c2_0 = ConditionalSelect(__m0, __t1, __c2_0);` | 88 | `ChangeTrackingBenchmark+ReplicateAll...System.g.cs:29` | `Kernel.Struct.cs:312-317` (`WriteStruct` holds every field value, even a plain lane name, "read before any lane is written") | (a) when the value is a lane name not written by this statement (copy-propagated); (b) by IL size | Hold only values that are expressions or that read a destination written earlier in the same statement (aliasing is the only reason); a plain `__c`/`__u` name that no destination overwrites is used as is. P2. |
+| deinterleave out-temp copied into the field's name `var __c1_0 = __s1_0;` | **done** (D126): each field is loaded into its name; the copy was two IL locals per field and put Move3's and Move4's masked jobs past the 32 locals a runner inlines | - | `Kernel.cs` loads | - | - |
+| whole-value struct write held in `__t`: `var __t1 = __c1_0; __c2_0 = ConditionalSelect(__m0, __t1, __c2_0);` | **done** (D135): a lane name no write of the statement overwrites is used as is, and a lane written with its own value is not written; a value that is an expression, or a lane the statement overwrites (a swap), is still held | `ChangeTrackingBenchmark+ReplicateAll...System.g.cs:29` | `Kernel.Struct.cs` `WriteStruct` | - | - |
 | `var __t0 = (__c1_0 + __c2_0); __c1_0 = __t0;` | (inside the 580 parenthesized RHS; same template) | `FusionBenchmark+Integrate...Fusion.g.cs:27-28` | same `WriteStruct` hold | (a)/(b) | as above |
-| `var __live = __pass;` (masked forms) | 18 | DeathSystem masked Execute | `Kernel.cs:689` (`maskedLive`) | (a) | name the pass mask `__live` directly when no early return reassigns it, or reference `__pass`. P2. |
+| `var __live = __pass;` (masked forms), `var __live = AllBitsSet;` | **done** (D135): the guard's lanes are written in place (`Kernel.Live`): `AllBitsSet` or the active mask over whole vectors, `__pass` (and it) in a masked word | - | `Kernel.cs` `Live` | - | - |
 | `var __c1_0 = __g8;` after a wide gather tree | in every wide job (KernelBenchmark Craft) | `KernelBenchmark+Kernels...:2526` region | `Kernel.Wide.cs:229-256` | (a)/(b) | gather straight into `__c1_0`. P2. |
 | `var __w4 = AddSaturate(...); __c1_0 = __w4;` | narrow saturating idioms | `KernelBenchmark+Kernels...` Brighten | `Kernel.Narrow.cs:82, 380` | (a) | assign the idiom to the target. P2. |
 | struct local copied lane by lane, then held again, then assigned: `var v = velocity.Value;` gives `var __l2 = __c2_0; var __l3 = __c2_1; var __l4 = __c2_2;` (`__l2`, `__l4` never read), then `var __t7 = __l3; ... __c2_1 = __t7;` - three names for one value | VoxelServer `PlayerMoveSystem` (`Walk`, samples/VoxelServer/Systems/Movement.cs:15-19), every struct local | `VoxelServer.PlayerMoveSystem...System.g.cs:57-66` | `Kernel.Struct.cs:271-282` (`DeclareStruct`: one `var __lN = lane` per lane, used or not) + the `WriteStruct` hold above | (a) | a struct local's lane is an alias of the lane value until either is written (map the local to the existing name, as `Alias` does for `Hold`), copy only on a write that would break the alias; never declare a lane nothing reads. P2. |
@@ -83,7 +86,7 @@ Proof tiers:
 
 | Kind | Count | Example | Template | Class | Fix |
 |---|---|---|---|---|---|
-| broadcast of a literal re-created per width and per tail | 266 `Create<int>((N))`; 119 `Create(0)`/`Create<float>(0f)`; 78 `Create(1)`/`(1f)` | `var __u1 = global::System.Runtime.Intrinsics.Vector512.Create<int>((0));` then `var __u1 = global::System.Numerics.Vector.Create<int>((0));` then again in the tail | `Kernel.cs:1581-1590` (`Broadcast` appends to `_setup`, the setup is emitted inside each width block by `EmitVectorLoop` (`SystemGenerator.cs:756`), again by `EmitTail` (806)) | (a): a constant broadcast is a JIT constant; the typed vector cannot leave its width block anyway | Constants are not hoistable (the vector type differs per width), but 0 and 1 need no local: `Vector512<int>.Zero` / `.One` at the use, and any literal broadcast can be written inline (`Vector512.Create(3)`) since the JIT makes it a constant either way. Only non-constant uniforms (`__p2.Size`) keep a per-run local. P2 (IL changes: a `get_Zero` call instead of `Create`). |
+| broadcast of a literal re-created per width and per tail | **done for loops over whole vectors** (D135, `SystemGenerator.Constants`): the literal is written at its use; the JIT hoists it the same and sees the value (`Max(x, -50f)` became one `vmaxps`). Kept as a setup local in a masked word's loop, a gathering loop and the tail: their bodies run under a `continue`, the JIT hoists nothing from a block not every iteration runs, and the inlined literal was broadcast again per vector (Gate's masked loop 49 to 52 instructions) | `var __u1 = ...Vector512.Create<int>((0));` | `SystemGenerator.Loops.cs` `Constants` | - | `.Zero` / `.One` for 0 and 1 is text only (P2) |
 | scalar setup repeated per width (`ref readonly Rink __p2 = ref s2;`, `var __id1 = ScoreTotal.Identity;`) | 71 `ref readonly ... __pN = ref sN;` lines, 36 `__id` lines | FusionBenchmark Bounce, ReduceBenchmark Totals | `Kernel.cs:570-572` (uniform parameter setup), `Kernel.cs:1199` (reduction identity) | (a) | Split `Setup` into a scalar part (emitted once before the width blocks: refs, identities, scalar values) and a vector part (broadcasts). Scalars are width-independent. P2 (local order changes). |
 | `this.v0 = default(Dead);` in each width block and tail | 6 (DeathSystem: 3 per Execute x 2) plus 6 non-default `this.v0 = value` | DeathSystem lines 40, 58, 80 | `Kernel.Structural.cs:216` (`_setup.Append($"this.v0 = {_change.Value};")`) | (a) for `default` (the field is already default in `new DieJob0 {...}`), (a)/(b) otherwise | A `default(T)` value needs no line at all (and the `SetAll(job0.v0)` call can pass `default`); a non-default value is computed once in the system's Update where the job is built (it is uniform: only job fields) or once at the top of Execute, not per width. P2. |
 | duplicate pair broadcasts `var __a1_0_0 = Create<long>(__id1.Value); var __a1_0_1 = Create<long>(__id1.Value);` | 2 per pair reduction per width | ReduceBenchmark SumSerialJob1 | `Kernel.cs:1199` | (a) (CSE) | one broadcast, both halves start from it. P2. |
@@ -172,11 +175,10 @@ Class (a), IL identical (local names live in the PDB only; job field renames cha
    **Promising, do first.**
 3. **Hoisting width-independent setup above the width blocks** - scalars (singleton refs, `Identity`, `this.v0`)
    once per Execute; vector broadcasts cannot be hoisted (their type is per width) but literal 0/1 become `.Zero`/`.One`
-   and other literals can be inlined. Needs P2 (local order changed, D126's warning applies). **Promising, small.**
-4. **Per-width methods (WP0b form 2)** - `Execute` calls `Loop512(...)` / `LoopVec(...)` / `Tail(...)`; the text is
-   still per width, but each copy is its own JIT unit, so the dead width no longer counts in the inlinee's IL and the
-   tail can grow (D126's masked tail) without pushing `Execute` past the budget. It is the plan's answer to the
-   inliner, not to readability. **Promising for speed (already planned), neutral for text.**
+   and other literals are inlined in the loops over whole vectors (D135; not in masked loops, see section 4).
+   Scalars once per Execute: **promising, small.**
+4. **Per-width methods** - shipped (D135) for an `Execute` past 32 locals: `Execute` calls `__Loop512(...)` /
+   `__Loop(...)`; the text is still per width. Neutral for text.
 5. **A generic static-abstract width wrapper** (`interface IWidth<TSelf> { static abstract ... }`, `struct W512 :
    IWidth`, body written once as `Loop<W>(...)`): one body in the output. Costs: every vector op the kernel emits
    (arithmetic, compares, ConditionalSelect, Load/Store, Interleaved.LoadN, Widen, Sqrt, permutes...) needs a
@@ -200,7 +202,7 @@ already uses) and assert over the text and the semantic model:
 | Guard | How | Reliable | Cost |
 |---|---|---|---|
 | Unused locals | Roslyn data flow, not warnings: for each method body of a generated tree, `SemanticModel.AnalyzeDataFlow(body)`; a local in `VariablesDeclared` that is not in `ReadInside` fails (allow-list the `out` discards). CS0168/CS0219 do not catch it (CS0219 fires only for constant initializers; IDE0059 is an IDE analyzer not in the test references). | yes, no false positives | low (one data-flow pass per method of the corpus) |
-| Identity copies | syntax: `var A = B;` where B is a local and neither A nor B is assigned afterwards in the scope (data flow `WrittenInside` of the rest of the block). Allow-list `__c = __s` (the D126 copy) by pattern with a comment pointing to D126. | yes | low |
+| Identity copies | syntax: `var A = B;` where B is a local and neither A nor B is assigned afterwards in the scope (data flow `WrittenInside` of the rest of the block). The loads no longer copy (D126), so nothing needs an allow-list. | yes | low |
 | `((literal))` and whole-RHS parentheses | syntax: `ParenthesizedExpressionSyntax` whose parent is a `ParenthesizedExpressionSyntax`, an `EqualsValueClause`, an `ArgumentSyntax` or an assignment's right side (Roslyn knows exactly when parentheses are needed: `SyntaxFacts`/simplifier rules; a simple version flags parenthesized literals and identifiers and parens directly under `=`) | yes for these shapes | trivial |
 | Constant created inside a width block | syntax: `Create<T>(literal)` / `Create<T>((0))` anywhere, and any `var __x = ...Create(...)` whose argument is a compile-time constant (`SemanticModel.GetConstantValue`) | yes | trivial |
 | `= ...Zero;` then a single `|=` | data flow: a local initialized to `.Zero` and written exactly once more, by a compound `|=` | yes | low |
@@ -226,15 +228,15 @@ caveat.
 3. **Pure printer fixes, IL identical (P1)**: literal parentheses (266), outer RHS parentheses (580), names after
    parameters and fields (kind 7), Arity indentation. Ship together with the alias block; prove by IL diff.
 4. **Empty hooks** (342 methods, 2/3 of the set's switches): `static virtual` defaults in `ISystemCode`.
-5. **Small IL-changing cleanups, one P2 round together**: `__d0` single mark, `.Zero`/`.One`/inline literals, scalar
-   setup and `this.v0` hoisted once, `__t` holds only where aliasing needs them (88), held pass mask, deduplicated
+5. **Small IL-changing cleanups, one P2 round together**: `__d0` single mark, `.Zero`/`.One`, scalar
+   setup and `this.v0` hoisted once, deduplicated
    wide tables and pair broadcasts, struct locals as aliases (VoxelServer `Walk`), dead narrow temps, unused
    broadcasts, unused pair masks and holds, the Arity `ids, 0` step. Gate: Tier1
    listings of Move3, Cycle, CycleHoles, WorldSimulation, BattleServer, MultiWorld runners identical (PGO off), else
    BDN; D126 shows a "free" text change can move the inliner.
-6. **Leave the `__s -> __c` copy** (608) until the loads stop using `out` (a struct-returning Load); it is measured
-   load-bearing (D126). Comment it in the template so the next reader does not "fix" it.
-7. **Per-width methods** stay with WP0b (speed, not text). **A generic width wrapper** is not worth it in .NET 10.
+6. The `__s -> __c` copy, the `__t` holds of plain names, `__live` and the literal broadcasts of loops over whole
+   vectors are gone (D126, D135).
+7. **A generic width wrapper** is not worth it in .NET 10.
 8. Guards: one `GeneratedTextTests` class (data-flow unused locals and identity copies, syntax checks), output bytes in
    GeneratorBenchmark.
 

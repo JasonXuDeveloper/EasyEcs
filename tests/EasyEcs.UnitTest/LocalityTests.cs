@@ -181,5 +181,76 @@ public class LocalityTests
         Array.Clear(got);
         table.VerticalRefill(queries, got, new int[queries.Length + 8], new int[queries.Length + 8]);
         Assert.That(got, Is.EqualTo(expected));
+        foreach (int distance in new[] { 1, 16, 2_000 })
+        {
+            Array.Clear(got);
+            table.Prefetched(queries, got, distance);
+            Assert.That(got, Is.EqualTo(expected), $"prefetched {distance} ahead");
+        }
+    }
+
+    // borrowed-ideas.md item 1: the chase jobs, with and without prefetches, write what the plain method writes, bit
+    // for bit (runs shorter than the distance, an odd tail of rows, dead and recycled targets), and allocate nothing.
+    [TestCase(1)]
+    [TestCase(13)]
+    [TestCase(1_000)]
+    [TestCase(20_011)]
+    public void ChaseVersionsAgree(int entities)
+    {
+        using var world = Chase.Create(entities);
+        // Dead targets (a version that no longer matches) and a recycled id whose new entity lacks Position.
+        if (entities > 10)
+        {
+            Entity hunter = default;
+            foreach (var e in world.Entities)
+                if (e.Index == 3) hunter = e;
+            world.GetEntity(hunter.Read<Chase.Prey>().Target).Destroy();
+            world.CreateEntity(new Chase.Heading());
+        }
+
+        Chase.Hunt(world);
+        var expected = Chase.Headings(world);
+        foreach (var (name, run) in new (string, Action<World>)[]
+                 {
+                     ("rows", w => Chase.Rows(w, 0)), ("prefetched 1", w => Chase.Rows(w, 1)),
+                     ("prefetched 16", w => Chase.Rows(w, 16)), ("records only", w => Chase.Rows(w, 16, rows: false)),
+                     ("generated gathers", Chase.HuntGathered), ("gathers", w => Chase.Gathered(w, 0)),
+                     ("gathers prefetched", w => Chase.Gathered(w, 4)),
+                 })
+        {
+            Clear(world);
+            run(world);
+            Assert.That(Chase.Headings(world), Is.EqualTo(expected), name);
+            Assert.That(Allocations.Of(() => run(world)), Is.Zero, name);
+        }
+
+        static void Clear(World world)
+        {
+            var job = new ClearHeadings();
+            world.ForEachBatch<Chase.Heading, ClearHeadings>(ref job);
+        }
+    }
+
+    private struct ClearHeadings : IForEachBatch<Chase.Heading>
+    {
+        public void Execute(EntitySpan entities, Span<Chase.Heading> heading) => heading.Clear();
+    }
+
+    [Test]
+    public void PrefetchesOfAnyIdAreHarmless()
+    {
+        using var world = Chase.Create(10);
+        var lookup = new Lookup<Chase.Position>(world, null);
+        var dead = world.CreateEntity(new Chase.Position(1, 1));
+        var id = dead.Id;
+        dead.Destroy();
+        var tagOnly = world.CreateEntity(new Chase.Heading()).Id;
+        foreach (var target in new[] { EntityId.Null, id, tagOnly, new EntityId(int.MaxValue, 1), new EntityId(-1, 1) })
+        {
+            lookup.Prefetch(target);
+            lookup.PrefetchRow(target);
+        }
+
+        Assert.That(LookupLanes.CanPrefetch, Is.EqualTo(System.Runtime.Intrinsics.X86.Sse.IsSupported));
     }
 }

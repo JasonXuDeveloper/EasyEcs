@@ -29,7 +29,10 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              SystemGenerator.Fusion.cs: pass fusion, consecutive [ForEach] methods of a system as one
                              walk (one fused job per group: per row, per block of FusedBlock rows, per word of a
                              masked walk) and pairs of systems declared or ordered one after the other as one job
-                             (__A__B_Fusion, run by the set's RunFused switch when both are adjacent, enabled and due)
+                             (__A__B_Fusion, run by the set's RunFused switch when both are adjacent, enabled and due);
+                             SystemGenerator.Loops.cs: the loops of a job's Execute Kernel translated (each width's
+                             vector loop, the flat loops, the vector tail), in Execute while it declares at most 32 IL
+                             locals (Locals counts them), else each in an AggressiveInlining method of the job (D135)
 Fusion.cs                    the fusion rule read once for the generator and the analyzer (FusionSide: what a method
                              reads, writes, filters and blocks it; Fusion.Problem: why two passes cannot share a walk)
 SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(values..., static (ref P p, ...) => ...)
@@ -90,8 +93,10 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              body through the same Translate, with its Lane);
                              Kernel.Narrow.cs: byte / sbyte / short / ushort lanes (int values followed as low bits and an interval, saturating idioms); Kernel.Struct.cs:
                              struct values (Vector2/3/4 fields, new T(...), with) as one vector per lane;
-                             Kernel.Wide.cs: components of up to 16 words on AVX-512 (fields gathered by a pruned
-                             permute tree, where it pays);
+                             Kernel.Wide.cs: components of up to 16 words, two forms each emitted where it pays (its
+                             own gate): AVX-512 (fields gathered by a pruned permute tree) and ARM64's 128 bits (4 rows
+                             per vector, one NEON TBL per field over up to 4 registers, a TBX per written vector:
+                             Interleaved.Pick / PickInto); lines marked per width, kept or dropped by SystemGenerator;
                              Kernel.Pairs.cs: lanes of two sizes (int rows summed into a long, float into a double) as
                              pairs of vectors (WidenLower / WidenUpper), every lane bit-exact; four times as wide stays scalar;
                              Kernel.Views.cs: a method taking views desugared before translation (view fields as

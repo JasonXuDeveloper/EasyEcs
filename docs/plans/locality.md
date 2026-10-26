@@ -35,7 +35,7 @@ rows inside a table**, **blocks with bounds**, a **pair form** that uses them, a
 ### 3.1 Ordered rows and blocks (core)
 - A table can keep its rows in the order of a key the user declares on a component (a spatial cell key: Morton /
   Hilbert of a quantized position; any `IComparable` key for non-spatial uses). Provisional name `[OrderBy]` on the
-  key member; naming audit before it ships.
+  key member; naming audit before it ships. Usually inferred from a pair method instead (3.4).
 - The order is restored on a cadence, not on every write (GROMACS's nstlist): a pass that re-sorts a table whose
   rows drifted, by an LSD radix partition of (key, row) pairs (Polychroniou), then one permutation applied to every
   column under the structural gate (`Archetype.FillHoles` already rewrites rows and slots; the re-sort is the same
@@ -56,6 +56,35 @@ rows inside a table**, **blocks with bounds**, a **pair form** that uses them, a
 - Writes go to i only; writing j (Newton's third law, half the pairs) is a later step with its own proof.
 - Parallel: i-blocks split across threads; j is read-only.
 - The pair list itself is cached between re-sorts, as GROMACS's list is (rebuilt with the boxes).
+
+### 3.4 Automatic: the user's plain code adapts (the owner's rule, 2026-10-26)
+
+Users do not learn cluster pairs or compress. They write the code they would write anyway; the generator and the core
+pick the layout and the kernel.
+
+- **The order is inferred, not declared.** When a pair method (below) compares the distance of two rows' positions
+  against a cutoff, the generator registers an order for the tables it walks: the Morton key of that position
+  component, quantized by the cutoff, and a re-sort cadence from the cutoff and the margin. `[OrderBy]` stays only as
+  an override (another key, a non-spatial order); without a pair method a table keeps today's order and pays nothing.
+  The core therefore needs an order a system can request at setup (internal API the generated setup calls), not only
+  an attribute.
+- **The pair form is the code users already write.** Recognized shapes, each turned into the blocked kernel when
+  the body passes the vector-loop rules, else kept as written with the EECS055 reason:
+  1. a `[ForEach]` method with a second row (`in Position other`, the "other" side of the pair) and a distance test
+     against a cutoff (constant, singleton field, parameter): the interaction form;
+  2. the same with a running best (`if (d < best) { best = d; target = other; }`): the nearest form (tie order of
+     the row loop kept);
+  3. a nested walk the user wrote by hand inside a `[ForEach]`: `foreach` over a query or view of the same
+     components with that distance test. Same set of pairs, so the generator rewrites it automatically;
+  4. a hand-written grid search (cell keys into `ValueIndex` / `Lookup` + distance test): not provably the same set,
+     so an analyzer rule with a code fix to shape 1 or 2.
+  Self pairs are skipped when the body says `other != self` or the distance test excludes zero; otherwise the
+  generator keeps them, as the row loop does.
+- **Compress has no API.** Every place a vector mask becomes rows uses it: the generated loops (marked rows,
+  structural writes after the pass, tag writes, `Emit`, `[Consume]`, value conditions) and the core (`Lanes.Compact`
+  callers, query filters). The generated code calls one core helper, so it picks AVX-512 CompressStore / AVX2 table /
+  ARM64 TBL at run time and no generated text changes per ISA.
+- Docs say what is recognized and what keeps a method on the row loop, like the vector-loop list.
 
 ### 3.3 Database operators in the core
 - Selective store: a vector mask to a list of rows with `Avx512F.Compress` where present, a permutation table on
@@ -213,6 +242,35 @@ Notes:
 - Per-entity neighbor lists beat the lookup grid (2x to 3.7x) but stay far behind the cluster kernel: each j is still
   a scattered read.
 
+### 6.1a Pairs on ARM64 (owner's run, Apple M4, NEON, .NET 10.0.0, default job, one round)
+
+Ratio against `GridLookups` (lower is faster), 4-wide `Vector128` kernel (eedfeb0):
+
+| Entities / density | GridCopies | NeighborLists10 | Clusters | ClustersSort1 | ClustersSort10 | ClustersSort20 | ClustersWithCopies10 |
+|---|---|---|---|---|---|---|---|
+| 1k crowd | 0.67 | 0.84 | 0.37 | 0.52 | 0.49 | 0.47 | 0.42 |
+| 1k sparse | 0.86 | **0.30** | 0.78 | 1.55 | 0.91 | 0.78 | 0.90 |
+| 10k crowd | 0.57 | 0.48 | 0.13 | 0.27 | 0.15 | 0.14 | 0.16 |
+| 10k sparse | 0.85 | **0.29** | 0.42 | 1.06 | 0.50 | 0.48 | 0.61 |
+| 100k crowd | 0.52 | 0.46 | 0.15 | 0.32 | 0.14 | 0.12 | 0.13 |
+| 100k sparse | 0.83 | **0.40** | 0.31 | 1.40 | 0.48 | 0.40 | 0.60 |
+
+The NEON kernel measured here is a direct port (the 8-row block run as two 4-lane halves, the x86 layout and order
+kept), not a kernel tuned for NEON: the gap on sparse maps is first an optimization still to do, not a limit of
+ARM64. L2 tunes it as it tunes the x86 one (4-row blocks, FMA, the j-loop order for 128-bit registers, llvm-mca on
+the Tier1 loop).
+
+Reading: crowded maps meet the 2x bar on ARM64 too (sort on a cadence: 2-8x). Sparse maps do not with the 8-row
+blocks: ClustersSort10 is 1.1-2.1x and per-row neighbor lists win (2.5-3.4x), because a 128-bit vector covers half a
+block and a sparse block's box admits many empty pairs. What L2 must check on ARM64 before it picks the kernel:
+blocks of 4 rows (GROMACS's 4x4 NEON kernel: boxes tighter, one vector per block) against the 8-row block run as two
+halves, and the neighbor-list form for sparse maps (the choice by measured density, as D130 chooses chunks).
+The owner's call (2026-10-26): sparse maps on ARM64 are still faster than the grid (1.1-2.1x), so cluster pairs ship
+there too and get optimized; the 2x bar decides whether a design is built, not whether a faster case is kept. What
+must never ship is a slower case: re-sorting every tick on a sparse map (ClustersSort1: 1.06-1.55x slower) is avoided
+by the cadence the generator picks (from the cutoff, the margin and the measured drift), and each kernel choice is
+measured against the row loop it replaces. Compress on ARM64: section 6.3.
+
 ### 6.2 Nearest (4.2): met for the packed start and NearestPlayer, not met on a spread map
 
 `Nearest.cs`, `NearestZombieBenchmark`: the shape of `ZombieTargetSystem.Pick` (VoxelServer): 3 zombies per player,
@@ -301,6 +359,23 @@ slower than a direct `CompressStore` loop. The branchy loop looks good at 4096 r
 the same 4096-row pattern and the branch predictor learns it (Branchless, which spills the condition through the
 stack, loses there); at 262,144 rows the predictor cannot learn it and the branchy loop shows its mispredictions.
 
+ARM64 (owner's Apple M4, NEON, default job, 2026-10-26; PermutationTable and Compress512 fall back to the 128-bit
+shuffle table there, so the three rows are one form):
+
+| Method | Rows | % | Mean | Ratio |
+|---|---|---|---|---|
+| Branchless | 4096 | 10 / 50 / 90 | 1,037 / 1,040 / 1,142 ns | 0.76 / 0.38 / 0.48 |
+| ShuffleTable (TBL) | 4096 | 10 / 50 / 90 | 798 / 803 / 971 ns | 0.58 / 0.29 / 0.41 |
+| CoreCompact | 4096 | 10 / 50 / 90 | 764 / 2,006 / 2,128 ns | 0.56 / 0.74 / 0.90 |
+| Branchless | 262144 | 10 / 50 / 90 | 85.2 / 86.7 / 89.3 us | 0.52 / 0.10 / 0.48 |
+| ShuffleTable (TBL) | 262144 | 10 / 50 / 90 | 66.8 / 69.8 / ~68 us | 0.41 / 0.08 / ~0.37 |
+| CoreCompact | 262144 | 10 / 50 / 90 | 79.6 / 158.2 / ~146 us | 0.48 / 0.19 / ~0.8 |
+
+The TBL table meets the bar on ARM64 (1.7x to 12x over branchy, 1.25-1.3x over branchless). The core's
+`Lanes.Compact` does not: off AVX-512, a mask of more than `Sparse` bits goes to `Advance` (one scalar store per
+element), 2-2.5x slower than the table at 50 / 90 % and slower than branchless. L3's core helper takes the table
+forms on every ISA (NEON TBL, AVX2 permutation, AVX-512 compress) and must not lose any cell, the 10 % one included.
+
 `BatchProbeBenchmark`: an open-addressing int -> int table (linear probing, capacity the power of two above 2x the
 keys, 90 % of the queries hit), 4096 lookups per invoke, mean per lookup. Vertical: 8 keys per `Vector256`, AVX2
 gathers of keys and values, the vector waits for its slowest lane; VerticalRefill: lanes that finish take the next
@@ -320,6 +395,47 @@ probes are independent, so the out-of-order core already overlaps several; the g
 scalar loads they replace; and the 100k-key table (2 MB of slots) stays in the last-level cache, so there is no miss
 latency for a batch to hide. What would change it: tables far past the cache (16M keys) where misses dominate,
 measured against scalar group prefetching (`borrowed-ideas.md` item 1) rather than gathers.
+
+**Re-measured at 16M keys (owner's call, 2026-10-26): vertical probes dropped again.** The table of 16M keys holds 32M
+slots (128 MiB of keys, 128 MiB of values, past the 260 MiB last-level cache with the rest of the process); each
+invoke takes the next 4,096 of 4M queries, so the lines an invoke touches are not left in cache by the invokes
+before. Added: `Prefetched8/16/32`, one key at a time with the key and value slots of the query k ahead prefetched
+(`Sse.Prefetch0`; nothing on ARM64, which has no prefetch in .NET 10 but SVE's). Default job, two rounds, same frozen
+tree; load average 3.79 / 4.53 / 3.84 at the start of round 1 (another agent's run had just ended), 1.08 / 1.37 / 2.05
+at round 2's.
+
+| Method | Keys | Mean r1 | Ratio r1 | Mean r2 | Ratio r2 | Allocated |
+|---|---|---|---|---|---|---|
+| OneAtATime | 1000 | 1.518 ns | 1.00 | 1.513 ns | 1.00 | 0 B |
+| Prefetched8 | 1000 | 2.105 ns | 1.39 | 2.098 ns | 1.39 | 0 B |
+| Prefetched16 | 1000 | 1.941 ns | 1.28 | 2.103 ns | 1.39 | 0 B |
+| Prefetched32 | 1000 | 2.370 ns | 1.57 | 2.146 ns | 1.42 | 0 B |
+| Vertical | 1000 | 2.258 ns | 1.49 | 2.352 ns | 1.56 | 0 B |
+| VerticalRefill | 1000 | 4.893 ns | 3.23 | 4.683 ns | 3.10 | 0 B |
+| OneAtATime | 100000 | 1.626 ns | 1.00 | 1.638 ns | 1.00 | 0 B |
+| Prefetched8 | 100000 | 2.328 ns | 1.43 | 2.215 ns | 1.35 | 0 B |
+| Prefetched16 | 100000 | 2.192 ns | 1.35 | 2.346 ns | 1.44 | 0 B |
+| Prefetched32 | 100000 | 2.225 ns | 1.37 | 2.285 ns | 1.40 | 0 B |
+| Vertical | 100000 | 4.980 ns | 3.07 | 4.912 ns | 3.00 | 0 B |
+| VerticalRefill | 100000 | 5.543 ns | 3.41 | 5.821 ns | 3.56 | 0 B |
+| OneAtATime | 16000000 | 41.949 ns | 1.00 | 39.637 ns | 1.00 | 0 B |
+| Prefetched8 | 16000000 | 33.660 ns | 0.80 | 33.272 ns | 0.84 | 0 B |
+| Prefetched16 | 16000000 | 31.272 ns | 0.75 | 29.597 ns | 0.75 | 0 B |
+| Prefetched32 | 16000000 | 32.896 ns | 0.79 | 31.458 ns | 0.79 | 0 B |
+| Vertical | 16000000 | 52.224 ns | 1.25 | 52.067 ns | 1.32 | 0 B |
+| VerticalRefill | 16000000 | 61.332 ns | 1.47 | 64.341 ns | 1.63 | 0 B |
+
+Verdict: the vertical forms lose at every size, by more where misses dominate (1.25-1.63x slower at 16M): a gather
+waits for its slowest lane and issues its eight loads no sooner than the out-of-order core issues eight scalar probes,
+and refill adds its compress / expand work per step. Scalar group prefetching is the form that pays at 16M (1.33x at
+k = 16, both rounds: bar met there) and costs 1.3-1.6x where the table is in cache (1k, 100k: the prefetch's hash and
+two instructions per key with nothing to hide). Neither is built: `ValueIndex` / `UniqueIndex` have no batch probe
+(each `TryFind` / `Find` / `Get` is one key whose successor the index cannot see), so a prefetching probe needs keys
+known ahead, which only generated code has (a `[ForEach]` method calling `lookup.TryFind(key.Field)` with the key in
+a component: the generator would prefetch the probe slot of row i + 16, as for lookups in `borrowed-ideas.md` item 1),
+and it must be gated by the table's size (slots past the last-level cache) or it slows every small index. What would
+change the verdict: an index probed by keys of a component in a pass over millions of rows (a join), measured with the
+gate; the vertical forms stay dropped.
 
 ### 6.4 What the met bars need beyond the prototypes
 

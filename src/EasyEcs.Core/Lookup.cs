@@ -63,6 +63,22 @@ public readonly ref struct Lookup<T> where T : struct, IComponent
     public bool Has(EntityId id) => Of(id).Has<T>();
 
     /// <summary>
+    /// Stage 1 of a chase: the record of entity <paramref name="id"/> into the cache, some rows before its lookup (group
+    /// prefetching, AMAC: several misses in flight instead of one per row). Nothing on hardware without a prefetch
+    /// (<see cref="LookupLanes.CanPrefetch"/>) or for an id past the records. Generated code calls this.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Prefetch(EntityId id) => LookupLanes.PrefetchRecord(_world, id.Index);
+
+    /// <summary>
+    /// Stage 2 of a chase: the row of <typeparamref name="T"/> of entity <paramref name="id"/> into the cache, read from
+    /// its record (which <see cref="Prefetch(EntityId)"/> brought in some rows before). Nothing when the record is free,
+    /// its table lacks <typeparamref name="T"/> or the column is managed. Generated code calls this.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void PrefetchRow(EntityId id) => LookupLanes.PrefetchRow(_world, id.Index, ComponentType<T>.Bit, Unsafe.SizeOf<T>());
+
+    /// <summary>
     /// The handle of <paramref name="id"/>, or a default handle (which finds nothing) when its index is past this world's
     /// records: the id comes from data (another world, a message, a save), not from one of this world's handles, so
     /// <see cref="Entity.LocateArchetype"/>'s unchecked record read needs the bound first.

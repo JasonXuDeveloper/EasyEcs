@@ -30,8 +30,8 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                AssertClean / Count), CodeFix (each
                                fix compiles, adds no diagnostic and is not offered again), BattleServer (the world of
                                docs/content/example.mdx as a whole, linked from EasyEcs.Benchmark), Locality (the phase 0
-                               prototypes of docs/plans/locality.md, benchmarks/EasyEcs.Benchmark/Locality linked: each
-                               against its plain form, 0 B per tick); Fixtures.cs holds
+                               prototypes of docs/plans/locality.md and borrowed-ideas.md, benchmarks/EasyEcs.Benchmark/Locality
+                               linked: each against its plain form, 0 B per tick); Fixtures.cs holds
                                the shared test components
 tests/EasyEcs.Aot/             the battle server (BattleServer.cs) and an ordered table published with Native AOT, warnings as errors, and
                                run by CI: no AOT warning and the native binary passes its checks

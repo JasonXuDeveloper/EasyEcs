@@ -16,7 +16,8 @@ namespace EasyEcs.Benchmark;
 /// <c>Count</c> stream memory (one float multiply-add, one int increment per row). <c>Move2</c> / <c>Move3</c> /
 /// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity: each field alike, a flat loop over the columns' lanes;
 /// <c>Move2HandCast</c> is the same by hand, the columns cast to floats; <c>Push</c> is Move2 assigned whole, <c>Move2Gaps</c>
-/// Move2 over a table whose every third row lacks the velocity: masked words, which split the fields), <c>Seek</c> (3 floats: a direction, its length, a
+/// Move2 over a table whose every third row lacks the velocity: masked words, which split the fields; <c>Move3Gaps</c> the
+/// same for Move3, the masked job the runner inlines only below the JIT's 32 IL locals), <c>Seek</c> (3 floats: a direction, its length, a
 /// division) and <c>Travel</c> (3 doubles) take components of several fields, which the vector loop splits into one
 /// vector per field (Interleaved), in a world of their own. <c>Clamp</c> (Math.Clamp by a singleton's bounds, checked
 /// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
@@ -31,13 +32,14 @@ namespace EasyEcs.Benchmark;
 /// <c>Hurt</c> / <c>HurtHot</c> have a
 /// cold branch (a call when a health reaches 0) that no row / one row in a hundred takes. <c>MoveVector</c> is the Godot sample's move (a
 /// component of one Vector2 assigned whole: a flat loop). <c>Steer</c> uses 3 of the 12 fields of a wide component (permutes
-/// gather them into lanes and back on AVX-512, the other 9 kept as loaded). <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
+/// gather them into lanes and back on AVX-512, NEON table lookups on ARM64, the other 9 kept as loaded); <c>Glide</c> the
+/// float of a component of mixed types (3 words a row). <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
 /// <c>Wave</c> calls Sin and Exp per row (FloatMode.Fast: .NET's vector forms). <c>StepParallel</c> / <c>SeekParallel</c> run
 /// <c>Step</c> / <c>Seek</c> on several threads, the per-row parallel job against the vector loop in each chunk. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
 /// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
 /// leaves out (a lane mask per word of 64 rows). 0 bytes either way.
 /// </summary>
-[MemoryDiagnoser]
+[MemoryDiagnoser, IsaColumn]
 public partial class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
@@ -93,6 +95,9 @@ public partial class KernelBenchmark
         _craft.Reserve<Craft>(Entities);
         for (int i = 0; i < Entities; i++)
             _craft.CreateEntity(new Craft { X = (float)random.NextDouble(), VX = (float)random.NextDouble() - 0.5f, VY = (float)random.NextDouble() - 0.5f, Fuel = i });
+        _craft.Reserve<Walker>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _craft.CreateEntity(new Walker { Speed = (float)random.NextDouble() * 4, Alive = true, Team = (byte)i, Rank = (short)i, Hp = i });
 
         _fields = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _fields.Reserve<P2, V2, P3, V3, P4, V4, D3>(Entities);
@@ -151,12 +156,15 @@ public partial class KernelBenchmark
     {
         var world = new World(new WorldOptions { InitialEntityCapacity = entities });
         world.Reserve<P2, V2>(entities);
+        world.Reserve<P3, V3>(entities);
         var random = new Random(4);
         float F() => (float)random.NextDouble() * 10 - 5;
         for (int i = 0; i < entities; i++)
         {
             var entity = world.CreateEntity(new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() });
             if (i % 3 == 0) entity.Remove<V2>();
+            var moved = world.CreateEntity(new P3 { X = F(), Y = F(), Z = F() }, new V3 { X = F(), Y = F(), Z = F() });
+            if (i % 3 == 0) moved.Remove<V3>();
         }
 
         return world;
@@ -312,6 +320,16 @@ public partial class KernelBenchmark
 
     [Benchmark]
     public void Move2GapsGenerated() => Kernels.Move2(_gaps);
+
+    [Benchmark]
+    public void Move3GapsScalar()
+    {
+        var job = new Move3Rows();
+        _gaps.ForEach<P3, V3, Move3Rows>(ref job);
+    }
+
+    [Benchmark]
+    public void Move3GapsGenerated() => Kernels.Move3(_gaps);
 
     [Benchmark]
     public void Move3Scalar()
@@ -527,6 +545,16 @@ public partial class KernelBenchmark
     public void SteerGenerated() => Kernels.Steer(_craft);
 
     [Benchmark]
+    public void GlideScalar()
+    {
+        var job = new GlideRows { Pull = _craft.Pull };
+        _craft.ForEach<Walker, GlideRows>(ref job);
+    }
+
+    [Benchmark]
+    public void GlideGenerated() => Kernels.Glide(_craft);
+
+    [Benchmark]
     public void BrightenScalar()
     {
         var job = new BrightenRows();
@@ -740,6 +768,16 @@ public partial class KernelBenchmark
     {
         public float X, Y, VX, VY, Fuel, Mass, Drag, Heat, Spin, Tilt, Yaw, Roll;
     }
+
+    /// <summary>A wide component of mixed types: 3 words a row (a float, a bool, a byte, a short, an int), of which Glide uses the float.</summary>
+    public struct Walker : IComponent
+    {
+        public float Speed;
+        public bool Alive;
+        public byte Team;
+        public short Rank;
+        public int Hp;
+    }
 #pragma warning restore EECS091
 
     private struct SteerRows : IForEach<Craft>, INoStructuralChanges
@@ -747,6 +785,13 @@ public partial class KernelBenchmark
         public Pull Pull;
         public void Execute(ref Craft craft) => Kernels.Steer(ref craft, in Pull);
         static int IForEach<Craft>.WriteMask => 1;
+    }
+
+    private struct GlideRows : IForEach<Walker>, INoStructuralChanges
+    {
+        public Pull Pull;
+        public void Execute(ref Walker walker) => Kernels.Glide(ref walker, in Pull);
+        static int IForEach<Walker>.WriteMask => 1;
     }
 
     public struct Lum : IComponent { public byte V; }
@@ -939,6 +984,11 @@ public partial class KernelBenchmark
             craft.X = MathF.Max(craft.X + s * pull.Value, 0f);
             craft.VX = craft.VX * craft.VY - s;
         }
+
+        // 1 of a mixed component's 5 fields (3 words a row): a vector of 4 rows takes 3 vectors on ARM64, 16 rows 3 on AVX-512.
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void Glide(ref Walker walker, in Pull pull) =>
+            walker.Speed = MathF.Max(walker.Speed * 0.75f - pull.Value, 0) + pull.Value * pull.Value;
 
         // Narrow lanes: a saturating byte sum (AddSaturate), then a wrapping one past a threshold: 64 rows per Vector512.
         [ForEach(SimdMode = SimdMode.Require)]

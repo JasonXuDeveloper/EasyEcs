@@ -14,6 +14,48 @@ or the reason), `Kernel.Narrow.cs`, `Kernel.Struct.cs`, `Kernel.Wide.cs`, the jo
 `Interleaved.cs` / `Lanes.cs` / `World.Bulk.cs` in the core. `audit-generator` owns the rest of the generators;
 `audit-analyzer` owns the EECS055 / EECS056 descriptors.
 
+## Every vector form runs on ARM64 too (the owner's rule)
+
+A form is done only when ARM64 (NEON / AdvSimd, 128-bit; SVE is not used) runs it as a vector loop, or the reason
+it cannot is recorded and the form falls back to rows there:
+- Write with the cross-platform `Vector128` / `Vector256` / `Vector<T>` APIs first; an x86 intrinsic (AVX2 permutes,
+  AVX-512 `CompressStore`, gathers) is one path behind `IsSupported`, next to an AdvSimd or `Vector128` path
+  (`AdvSimd.Arm64.VectorTableLookup` for permutes and compress, 4-wide blocks for 8-wide ones).
+- On ARM64 `Vector256.IsHardwareAccelerated` is false and Vector256 runs as software: pick the width from
+  `IsHardwareAccelerated`, never from `IsSupported` of an x86 class alone.
+- A gather pays only when each lane's address is one gather away: resolving a lane's table through a chain of
+  loads (record, table, column, presence) costs what the row-by-row lookup costs (D131's walk). Layout that puts a
+  vector's targets in one table (`GroupBy`, ordered rows) is what makes gathers win.
+- No gather on ARM64 in .NET 10: a gather form says what ARM64 does (rows, or scalar lane fills if measured).
+- Proof on this x86 machine: the tests run once more with `DOTNET_EnableAVX=0` (128-bit paths); benchmark classes
+  guard every intrinsic so they run on ARM64, and result tables carry an ISA column. The owner runs ARM64 numbers.
+
+Where each form stands on ARM64 (2026-10-26; update this table when a form gains its ARM64 path, and add every new
+form to it):
+
+| Form | x86 | ARM64 today | ARM64 path to add |
+|---|---|---|---|
+| Plain vector loop (`Vector<T>`, Vector512 block where AVX-512), masked tail, narrow and mixed lanes, math lowerings (`LaneMath`), `Lanes.Bits`, `Emit.AddLanes` | vector | vector (`Vector<T>` is 128-bit) | none needed |
+| Components of several fields, `Vector2/3/4` (`Interleaved`: AVX2 / AVX-512 shuffles, NEON LD2-4 / ST2-4) | vector | vector | none needed |
+| Wide components (`Kernel.Wide`: AVX-512 two-source permutes; ARM64 NEON TBL / TBX, `Interleaved.Pick` / `PickInto`) | vector on AVX-512 | vector where its own gate pays ("(Vector512 only)" otherwise) | M4 numbers to check the gate's cost model |
+| Mask to rows (`Lanes.Compact`: AVX-512 CompressStore) | AVX-512, else a bit walk | bit walk | TBL table (locality L3, running) |
+| `Lookup` gathers (`LookupLanes`, on request) | AVX2 | rows (D131) | none in .NET 10 |
+| Core scans (`BitMask`, tick filters, `Tile` copies) | vector | vector (AdvSimd / `Vector128` paths) | none needed |
+| Prefetch of lookup chases (`Lookup.Prefetch` / `PrefetchRow`, `Sse.Prefetch0`) | prefetch | nothing (.NET 10 has no ARM64 prefetch outside SVE) | none in .NET 10 |
+
+The `arm64` CI job runs the unit tests on ARM64 hardware, and `EveryVectorFormRunsAsAVectorLoopOnARM64` prints every
+vector method's loop line there and fails on "; rows on this hardware" except gathers and "(Vector512 only)" forms.
+- **A gate per form**: a form with several widths gates each width on its own cost model and emits only the widths
+  that pay; EECS055 reports the reason only when none pays. Lines for one width carry a marker (`Kernel.Mark512` /
+  `Mark128`) that `SystemGenerator` keeps or drops per loop, so one kernel text serves both widths. `__loops` lines end
+  with "; rows on this hardware" when the running machine has none of the emitted widths: a vector claim is about this
+  machine.
+- **ARM64 on this x86 machine** (qemu-user): `qemu-user-static libc6-arm64-cross libstdc++6-arm64-cross
+  libgcc-s1-arm64-cross`, `QEMU_LD_PREFIX=/usr/aarch64-linux-gnu QEMU_CPU=neoverse-n1 DOTNET_EnableWriteXorExecute=0`
+  (qemu 8.2's default "max" CPU crashes optimized .NET code), a self-contained linux-arm64 publish with a small
+  reflection test runner (NUnitLite's dispatcher crashed), ARM64 Tier1 code through `DOTNET_TieredCompilation=0
+  DOTNET_JitDisasm=... DOTNET_JitStdOutFile=...`. Correctness and machine code only: timings come from real hardware.
+
 ## What becomes a vector loop
 
 - **Reads**: `in` / `ref` component parameters (one column load per lane group, interleaved fields deinterleaved),
@@ -167,6 +209,27 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
   loop stays inlined (cold parts in `NoInlining` helpers called once per run, each width in its own method, or a
   generated entry that runs the word loop itself), and a test pins `call ...Execute`-free runners. The plan and its
   measurements: `docs/plans/inner-loops.md`, WP0b.
+- **No `fixed` in a helper a loop inlines** (the owner's find on the M4, fixed in cf43ac4): NEON's
+  `Load2/3/4xVector128AndUnzip` and `StoreVectorAndZip` take pointers, and a `fixed` inside `Interleaved.LoadN` /
+  `StoreN` pinned and unpinned a stack slot on every vector once inlined (`str x0, [fp, #..]` before the `ld2`,
+  `str xzr, [fp, #..]` after: 4 memory accesses per 4 rows). Every memory a vector loop reads must not move instead,
+  and the pointer is taken with `Unsafe.AsPointer`: unmanaged columns are on the pinned object heap
+  (`ComponentInfo.Create`), and every other buffer a loop is handed (`Interleaved.LoadTail`'s copy, `Maybe<T>`'s
+  zero rows) is allocated with `Interleaved.PinnedRows`. A new buffer a loop reads through a pointer form is
+  allocated the same way, or the pointer form is not used for it. `fixed` stays where it runs once per call outside
+  the loop on memory that can move (`Lanes.Compact`'s spans, `LookupLanes.Records` over small `Meta` arrays). Check:
+  grep the Tier1 ARM64 loop (qemu recipe above) for stack stores around `ld2` / `ld3` / `ld4` / `st2`-`st4`.
+- **No `static readonly` vector read inside a loop; a constant is a vector of literals** (the owner's find under
+  Native AOT, fixed in 2206090): the JIT folds a static readonly field into a constant at Tier1 (its class is
+  initialized by then), so JIT listings and benchmarks never show it. Native AOT cannot preinitialize a vector built
+  by code (`Vector512.Create(Tables.Load2(16)[0])`, a `Make32()`), so the loop tested the class's initialization on
+  every iteration (`cmp qword ptr [r10-0x08], 0`, a call to `CORINFO_HELP_READYTORUN_NONGCSTATIC_BASE`) and spilled
+  its zmm registers around that call. Tables, masks and permutes are written as literals: an `AggressiveInlining`
+  property returning `Vector512.Create(0, 2, 4, ...)` in the core (`Interleaved.Tables32` / `Tables64` / `Masks`),
+  the literal in place in generated code (`Kernel.Wide`'s `Table` / `Table128`; a local would count against the 32
+  below). A static read once before the loop (the `__layoutN` guard) is fine. Check: no `static readonly` vector
+  that a loop body names (`grep -n "static readonly.*Vector" src/EasyEcs.Core` and the generated jobs), and the
+  Native AOT listing of a changed loop when the owner's AOT check is at hand.
 - **The JIT never inlines a method that declares more than 32 IL locals**, `AggressiveInlining` or not (RyuJIT's
   `MAX_INL_LCLS`, observation `CALLEE_TOO_MANY_LOCALS`, reported "too many locals"; the callee is then marked
   noinline for every later call site, "noinline per IL/cached result"). It is exact on every job measured: 32 locals
@@ -175,6 +238,11 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
   the IL, not in the C# (`ilspycmd --ilcode`, `.locals` of the method): Roslyn folds a copy only when the copied-to
   local is never written again, and every `out` argument, `var`, pattern and compiler temporary is one. The generator
   counts the locals it declares per method and splits (WP0b) before 32; a test pins the count for each form's corpus.
+  Count declarations, not live ranges: release Roslyn gives every declared local its own slot, even in disjoint
+  scopes; a `default` struct argument adds a temp and so does every `out _`. Check a change with `tools/inlining.sh`
+  (it lists every generated job a runner does not inline).
+- **The JIT does not hoist a constant out of a block that a `continue` skips**: in masked and gather loops keep the
+  broadcast in a setup local; a literal in place pays only in loops over whole vectors (D135).
   Read why an inline failed from the runtime's own events, not by guessing: an in-process `EventListener` on
   `Microsoft-Windows-DotNETRuntime` with the JitTracing keyword (0x1000) gets `MethodJitInliningSucceeded` /
   `MethodJitInliningFailed` with the reason (`DOTNET_JitPrintInlinedMethods` needs a checked runtime).

@@ -69,13 +69,42 @@ its own worktree.
    with a new, measured reason.
 2. **Prototype in a worktree**; keep the public API unless the owner approves a change.
 3. **Measure with BenchmarkDotNet only** (`feature`, part 6):
+   - the machine's speed moves about 13 % between sessions: compare variants only within one BenchmarkDotNet round,
+     interleaved, never a number against one from another session;
+   - `DOTNET_JitStdOutFile` listings of concurrent processes interleave: one listing file per process; after deleting
+     the generated-files folder an incremental build does not write it again (touch a source file);
+   - two jobs (`BenchmarkConfig.cs`): `--dev` (1 process, 3 x 150 ms warmups, 5 iterations, about a fifth of the
+     time) while trying ideas and screening, holding the lock for minutes instead of hours; the default job
+     (2 processes, two rounds) for every keep / revert decision and every number recorded. Both keep tiering and
+     dynamic PGO on and start call counting at once, so the warmups reach Tier1 code; never shorten past that with
+     `ShortRun`, `--runOncePerIteration`, `InProcess` toolchains or `TieredCompilation=0`, which measure other code.
+     Filter to the cases a change touches; a full class is for the decision run;
    - A/B copies as git worktrees or `git archive` snapshots outside the repo tree (scratchpad), frozen while they run:
      BenchmarkDotNet rebuilds from source, so a tree someone edits changes under the run; two rounds, interleaved; a
      run past about 2 h is split into one background job per round;
    - GeneratorBenchmark's corpus holds gameplay code (structural calls, generated writers, buffers), or the
      analyzer's slow paths never run in it;
    - every run under `flock /tmp/bench.lock`, nothing else running (agents' builds and samples included): parallel
-     rows swing by 2x on a loaded machine; take the load average with the results;
+     rows swing by 2x on a loaded machine; take the load average at the start and the end of each class;
+   - a size meant to miss the cache is checked against this machine's last-level cache (`lscpu`: 260 MiB here, so
+     1M rows sit in it; record the LLC with the numbers), and the queries rotate through a set larger than it (the
+     same 4,096 keys every invoke stay in L2 after the first);
+   - no `[IterationSetup]` on nanosecond benchmarks (one invocation per iteration: 12 ns read where the truth is
+     1.5 ns); `[Arguments]` on a method leaves the Ratio column empty: separate methods when the ratio matters;
+   - the A/B baseline is the generated job, not a hand-written copy of it (5-15 % apart in the chase study);
+   - in `namespace EasyEcs.Benchmark` a top-level type (`Position`) wins over `using static` and aliases: qualify a
+     nested benchmark type named like one, and check every form's result in setup;
+   - worktree agents: commands with shell variables, `awk` or a quoted filter under `setsid` are refused; write a
+     launcher script with literal paths and run `setsid nohup ./script.sh`;
+   - data a branch predictor can learn flatters branchy baselines: include a size past what it learns (262k rows
+     against 4,096 repeated);
+   - a prototype of a sort or a space structure is checked for its structure (keys sorted, boxes small), not only for
+     equal values: a sort that ended in its scratch arrays kept every value right and made the kernel 500x slower;
+   - long runs are scripts that resume (a done marker per class) and run one class per process, started with
+     `setsid nohup` (tool background calls die at 2 h); a cut-off BDN log is read from its per-case "Mean =" lines;
+   - a runtime choice between two flavors (micro-adaptivity) never trusts the first timed run (Tier0 code): it times
+     several runs of each flavor, keeps the minimum, and re-measures when the winner's cost halves or doubles; one
+     exploratory run after a long stretch of the other flavor is biased against it;
    - one lock for the machine, `/tmp/bench.lock` (`tools/bench.sh` takes it too), always with `flock -o` so no build
      server or test host it starts inherits the descriptor and holds the lock after the command ends. Benchmarks take it
      exclusively behind a gate they hold while waiting and running, `flock -o /tmp/bench.lock.gate flock -o -x

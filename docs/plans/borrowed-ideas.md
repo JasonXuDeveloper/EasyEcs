@@ -67,6 +67,65 @@ Both go to `docs/owner-review.md` until such a machine is available.
 
 ## 5. Results
 
+### Item 1: prefetching lookup chases (bar met at 16M only: not built; owner's call)
+
+The prototype (`benchmarks/EasyEcs.Benchmark/Locality/Chase.cs`, checked by `LocalityTests.ChaseVersionsAgree`: bit
+for bit against the plain method, dead and recycled targets, runs shorter than the distance, 0 B) is what the
+generator would write for the plain method `Hunt(in Position, in Prey, ref Heading, Lookup<Position>)` with every
+hunter chasing a random hunter: a batch job over each run of rows calling the method row by row, which at row i
+prefetches the record of row i + 2k (`Lookup<T>.Prefetch`, stage 1) and the row of T of row i + k
+(`Lookup<T>.PrefetchRow`: reads the record stage 1 brought in, then prefetches `column + slot * size`; stage 2, as
+AMAC: the row's address is known only once the record is in cache); and D131's vector loop by hand (Resolve, two
+gathers) prefetching the 8 rows 2k and k past its vector the same way. The helpers are in the core
+(`LookupLanes.PrefetchRecord` / `PrefetchRow`, behind `Sse.IsSupported`: `PREFETCHT0`). **ARM64:** .NET 10 has no
+prefetch intrinsic for it but SVE's (`Sve.Prefetch8Bit` ... and `GatherPrefetch*`, which the project does not use);
+`ArmBase` and `AdvSimd` have none (checked in the 10.0.13 reference assembly). There the helpers compile to nothing
+and the loops run as without them (a plain load as a "touch" would retire only when the miss returns; not measurable
+here, left to the owner's ARM64 numbers).
+
+Distance screen (`LookupChaseDistanceBenchmark`, one process, 3 warmups + 5 iterations of 150 ms; the vector loop's
+distance then counted vectors of 8): the row job at k = 2 ... 64 rows, 1M / 16M entities, ratio to the job without
+prefetch: 1.08 / 0.97 (k 2), 0.90 / 0.79 (4), 0.74 / 0.72 (8), 0.85 / 0.64 (16), 0.83 / 0.62 (32), 0.91 / 0.71
+(64); records only (stage 1 alone) 0.85-0.94 / 0.81-0.87, so stage 2 is worth about as much again; the vector loop
+best at 2-4 vectors (16-32 rows). k = 8 and 16 went to the bar check.
+
+Bar check (`LookupChaseBenchmark`, default job, two rounds, one frozen snapshot holding both forms; load average at
+the start / end: r1 1.39 2.28 2.20 / 1.20 1.20 1.45, r2 1.75 3.10 2.39 / 1.17 1.26 1.52). Means in ms (1k in us);
+"gen" is the generated job of the plain method (`ChaseSerial` row by row, `ChaseGathered` with `SimdMode.Require`),
+"hand" the same job written by hand without prefetch, "pf" with prefetch. All 0 B.
+
+| Entities | k | gen rows r1 / r2 | hand rows | pf rows | gen gathers | hand gathers | pf gathers |
+|---|---|---|---|---|---|---|---|
+| 1k | 8 | 3.104 / 3.028 us | 3.180 / 3.144 | 5.778 / 5.648 | 2.455 / 2.435 | 2.912 / 3.034 | 5.739 / 5.657 |
+| 1k | 16 | 2.956 / 3.075 us | 3.074 / 3.150 | 5.992 / 5.697 | 2.653 / 2.393 | 2.981 / 2.928 | 5.651 / 5.627 |
+| 1M | 8 | 15.16 / 16.51 | 17.89 / 17.67 | 14.54 / 15.20 | 14.14 / 14.06 | 15.46 / 15.07 | 11.84 / 11.54 |
+| 1M | 16 | 17.21 / 16.19 | 16.99 / 17.40 | 14.84 / 15.56 | 14.48 / 14.07 | 14.61 / 15.89 | 13.47 / 11.87 |
+| 16M | 8 | 908.8 / 875.0 | 1003.4 / 1032.4 | 674.2 / 680.9 | 789.1 / 770.3 | 782.5 / 775.1 | 603.2 / 568.3 |
+| 16M | 16 | 891.6 / 880.9 | 964.1 / 972.5 | 672.6 / 681.8 | 781.3 / 750.8 | 801.1 / 771.0 | 593.5 / 562.2 |
+
+Speed-up of the prefetching form over the generated one (r1 / r2), k = 8: rows 1.04 / 1.09 at 1M, 1.35 / 1.29 at 16M;
+gathers 1.19 / 1.22 at 1M, 1.31 / 1.36 at 16M. Over the same job by hand: rows 1.23 / 1.16 and 1.49 / 1.52, gathers
+1.31 / 1.31 and 1.30 / 1.36. At 1k the prefetching forms take 1.86x (rows) and 2.3x (gathers) the generated time:
+two prefetches per row (the bound tests, the record and table reads of stage 2) with nothing to hide.
+
+Verdict: the bar (1.3x at 1M and 16M, nothing slower at 1k) is **not met**: met at 16M (the vector loop 1.31-1.36x,
+rows 1.29-1.35x), short at 1M (1.04-1.22x against the generated jobs), and 1.9-2.3x slower at 1k. On this machine
+the 1M world (16 MiB of records, 8 MiB per column) sits in the 260 MiB last-level cache, so its misses are L3 hits
+with less latency to hide than at 16M; the generated row-by-row job is also 5-15 % faster than the hand-written batch
+job it would become, which eats part of the gain. Nothing reaches the generated code; the core helpers
+(`Lookup<T>.Prefetch` / `PrefetchRow`, hidden, documented as generated-code helpers) stay with the prototype so the
+measurement can be repeated on the owner's machines (a 32 MiB last-level cache puts the 1M world past it).
+
+What would change the verdict, and the generator change it would need (after WP0b; Kernel.Lookups.cs and
+SystemGenerator.cs): a size gate read once per pass (prefetch only when the world's records are past the last-level
+cache, e.g. `Meta.Length >= 4M` records, or the target table's column past it), so 1k and 1M cost nothing and 16M
+gains 1.3x; then (1) a method reading `lookup[x.F]` / `Read` / `Has` where `x` is an `in` component (the id lanes
+cannot change during the row) gets a run job instead of the per-row job: `for (i)`: `if (i + 2k < n)
+lookup.Prefetch(col[i + 2k].F); if (i + k < n) lookup.PrefetchRow(col[i + k].F);` then the method, with k = 8 rows
+(16 for the vector loop, which prefetches the 8 rows of the vector 2k and k ahead before its `Resolve`); (2) the
+same for relation targets (a `DynamicBuffer` of links is a second chase, not measured). Measured again with the gate
+on `LookupChaseBenchmark` (1k, 1M, 16M) on two machines.
+
 ### Item 2: timer wheel (bar not met: dropped)
 
 `TimerWheelBenchmark` (`benchmarks/EasyEcs.Benchmark/Locality/Timers.cs`, checked in setup and in `LocalityTests`:

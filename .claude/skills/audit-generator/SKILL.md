@@ -122,6 +122,10 @@ locations: `docs/plans/generated-text.md`.
 
 Write it like hand-written code:
 
+- **Constants are literals in place, never a `static readonly` the loop reads** (permute and lookup tables, masks):
+  Native AOT checks a static's class initialization on every iteration (`audit-vector-loops`, "Read the loop the JIT
+  wrote"); no `fixed` either in what a loop inlines (same section).
+
 - **Short names through one alias block.** Every type the body names more than once goes through a file-level
   `using` alias with a reserved `__` name (`using __V512i = global::System.Runtime.Intrinsics.Vector512<int>;`), one
   per closed type the file uses; the body never spells `global::System...` (about half of SystemGenerator's text
@@ -133,7 +137,8 @@ Write it like hand-written code:
   A copy is not free in IL: each local counts toward the JIT's limit of 32 per inlined method (`audit-vector-loops`,
   "The JIT never inlines a method that declares more than 32 IL locals"); the loads' `out __s` -> `__c` copy alone
   took Move3's masked `Execute` from 24 to 36 locals and out of the runner. Every generated method a runner inlines
-  stays at 32 IL locals or fewer: the generator counts what it declares and splits before the limit (WP0b).
+  stays at 32 IL locals or fewer: the generator counts what it declares and splits before the limit, one method per
+  width (`__Loop512`, `__Loop`, `__MaskedLoop512`, ...; D135); `tools/inlining.sh` proves it on the benchmarks.
 - **Say a value once**: a constant is `.Zero` / `.One` / a literal in place, not a local made per width
   (`var __u1 = Create<int>((0))`); setup that does not depend on the width (singleton refs, `Identity`,
   `this.v0 = default`) is written once above the width blocks; a mark written once is assigned, not zeroed then OR-ed

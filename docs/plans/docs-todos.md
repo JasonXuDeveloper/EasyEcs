@@ -227,6 +227,15 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 - demo.mdx includes MovementBatchSystem.cs with a #pragma now; the exemplar pass (WP7) rewrites demo Move and
   VoxelServer FireDamageSystem.Hurt as one-row methods and drops both pragmas; rebuild docs/public/demo after.
 
+## feat-gather-always (D131 measured again, gathers stay on request)
+- Lookup<T> guide page and SimdMode docs (en/zh): when `SimdMode.Require` pays, from D131's widened table (one
+  table or runs into a few: 0.41-0.99; spread over 64 / 1,000 tables, dead targets, presence bits: up to 1.21), and
+  the layout advice: a lookup is cheapest when the entities it reads share components and group value (`[Group]`,
+  `GroupBy`), so a vector's targets share a table.
+- guide/high-performance.mdx (+zh): the same advice next to the gather line.
+- benchmark pages that show LookupGather numbers: resync bench.json after a `tools/bench.sh LookupGatherBenchmark --sync`
+  run (the benchmark gained 1,000 tables, dead and removed targets and three bodies).
+
 ## feat-lookup-gather (D131, merged)
 - guide/high-performance.mdx:59 (+zh): a lookup "has no vector form" is stale: it gathers on `SimdMode.Require`.
 - Lookup<T> guide page and SimdMode docs (en/zh): Require opts into gathers, the backoff (3/15/63 vectors after a
@@ -236,6 +245,84 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
   method or mark it SimdMode.Off); Lookup gathers on Require.
 - api.mdx: Lookup.Resolve only if listed (EditorBrowsable Never).
 - rebuild docs/public/demo (BounceSystem / FadeSystem got SimdMode.Off).
+
+## Locality phase 0 merged (0e206d8): pitfalls users hit (docs or analyzer)
+
+- `Lookup.Find` on a `[LookupKey]` index is prepared only when called in the `[ForEach]` body itself; called from a
+  helper it throws "index not prepared" at run time. Document it on the indexes page, and check whether the analyzer
+  can report the call from a helper (`audit-analyzer`).
+- Calling a `[ForEach]` method from inside its declaring type needs the qualified name (`Crowd.Separate(world)`): the
+  bare name binds to the user's method (CS7036). Say so where the generated entry points are documented.
+- A `[LookupKey]` member named `Key` gives EECS036 / CS0315 (the generated explicit `Key` collides): the message or
+  the docs should name the fix.
+- When L1 / L2 ship, the prototypes under `benchmarks/EasyEcs.Benchmark/Locality/` and their link into the unit tests
+  go (nothing stale); their benchmarks keep only the plain baselines against the shipped forms.
+
+## Calls in vector loops (owner question 2026-10-26)
+
+- systems.mdx "Vector loop" conditions: say which calls the loop takes (Math / MathF with vector forms, the generated
+  members, Emit.Add, Lookup reads on Require, view members inlined from source) and that any other call (a helper of
+  your own, an extension method, a property with a body, a call into another assembly) keeps the method scalar today,
+  with EECS055's "it calls X.Y"; update when the inliner item of the backlog ships. The list there is also stale: it
+  still says no `Entity`, `Lookup<T>`, `Emit<T>` parameter (structural changes of the row's entity, Emit records and
+  Lookup gathers are vector forms now).
+
+## Owner decisions on owner-review (2026-10-26): decision records to write in the docs pass
+
+(Written then, not now: three running branches also edit decisions.mdx.)
+- **Timer wheel: dropped** ("Not added" record, en + zh). TimerWheelBenchmark, 100k waiting, 1 % waking, two rounds:
+  the wheel 1.18-1.26x slower than the generated vector scan (21 us per tick, 0.2 ns a row against about 25 ns per
+  woken entity), with a tag 3.6-3.9x slower; it beats only the scan row by row (3x). Would change it: waits the
+  vector loop cannot take, or far fewer wakes per waiting entity (1M waiting, 0.1 %), against the vector scan.
+- **NUMA placement and hybrid cores: dropped** ("Not added" record). First-touch columns, a world per node, helpers
+  kept on their node (OpenMP proc_bind, HyPer morsels), P / E and SMT checks: node placement needs dedicated threads,
+  which D22 declined for the thread pool, and D130's measured chunks already give slower threads fewer chunks. Would
+  change it: a two-socket or hybrid-core machine showing a loss in ParallelForEach / BattleServer that placement
+  removes.
+- Batch probes and nearest on a spread map are not decided yet: they moved to the backlog (re-measure later).
+
+## feat-amac (borrowed-ideas.md item 1, locality.md 6.3; nothing user-visible)
+
+Decision records for the docs pass (en + zh, "Not added" unless the owner's re-measure with a size gate builds it):
+- **Prefetching lookup chases (group prefetching, Chen et al. 2004; AMAC, Kocberber et al. VLDB 2015): not built.**
+  The generated job would prefetch the record of row i + 2k and the T row of row i + k (two stages: a row's address is
+  known only once its record is in cache), k = 8 rows (the vector loop the 8 rows 2k and k past its vector).
+  LookupChaseBenchmark, random targets, two rounds, 0 B: against the generated jobs 1.29-1.35x (rows) and 1.31-1.36x
+  (gathers) at 16M entities, 1.04-1.22x at 1M (inside this machine's 260 MiB last-level cache), and 1.9x (rows) /
+  2.3x (gathers) slower at 1k, where there is no miss to hide. Bar 1.3x at 1M and 16M, nothing slower at 1k: not met.
+  Considered: records only (stage 1: about half the gain), distances 2-64 rows (8-32 best), the vector loop's gathers
+  prefetched like rows. ARM64: .NET 10 has no prefetch but SVE's (not used), so the form does nothing there. Would
+  change it: a size gate (records past the last-level cache) and numbers from a machine with a common-size LLC.
+- **Batch probes of an index (Polychroniou's vertical probes, with and without refill): not added**, re-measured at
+  16M keys: 1.25-1.63x slower than one key at a time (a gather waits for its slowest lane). Scalar group prefetching
+  is the form that pays there (1.33x at 16M keys, 1.3-1.6x slower when the table is in cache), and an index has no
+  batch probe to put it in (keys known ahead exist only in generated code). Numbers: locality.md 6.3.
+- `api.mdx`: nothing (the helpers are hidden, for generated code only).
+
+
+## feat-arm-parity: wide components on ARM64, the arm64 job's loop lines
+
+- guide page of vector loops (systems.mdx "Vector loop" / the wide-component section): a wide component (up to 16
+  words a row) now has two forms, AVX-512 permutes and ARM64's 128-bit NEON table lookups (one TBL per field over the
+  up to 4 registers holding its 4 rows' words, one TBX per written vector); each is emitted only where its own cost
+  gate pays, and EECS055 reports the reason only when neither does. Say what this means for the user: a wide
+  component can be vector on one ISA and rows on the other; DescribeSchedule's line says which
+  ("vector (Vector512 or Vector<float> of 128 bits)", "(Vector512 only)", "(Vector<float> of 128 bits only)") and
+  adds "; rows on this hardware" when the running machine has none of the emitted widths.
+- introspection page (DescribeSchedule / `__loops`): the new parts "wide component (permutes, table lookups)",
+  "gathers (Lookup<T>)" and the runtime suffix "; rows on this hardware" (en + zh).
+- performance page: the ARM64 numbers of `KernelBenchmark.Steer*` / `Glide*` (owner's M4, 2026-10-26: Steer 2.07x /
+  1.55x, Glide 1.87x / 1.63x faster than rows at 1k / 100k, 0 B) once the site can show them
+  (bench.json through `tools/bench.sh KernelBenchmark --sync` on that machine is a separate machine: keep it out of the
+  reference numbers unless the site gains an ARM64 column).
+- performance / why-fast pages: compress on ARM64 (owner's M4 CompressBenchmark, `locality.md` 6.3: the NEON TBL
+  table 1.7-12x over branchy) once L3's core helper is measured there; the same separate-machine caveat.
+- decisions.mdx + .zh.mdx: the decision record of the TBL form (draft in the branch's hand-off: D136 or the next free
+  number at merge), and update D131's ARM64 note if it lists wide components among the rows-only forms.
+- the public skill (skills/easyecs/SKILL.md): "a wide component vectorizes on AVX-512 and ARM64 where the gate pays;
+  check DescribeSchedule on the target machine" in the SIMD section.
+- tests/AGENTS.md's Kernel line could name the wide forms' bit-for-bit test and the ARM64 loop-line test (file map,
+  not docs/content: do it with the next tests change).
 
 ## feat-locality-core (L1 + L3 of locality.md: D135, D136)
 - New guide page (or a section of high-performance.mdx + zh): ordered tables. That the order is inferred for pair
