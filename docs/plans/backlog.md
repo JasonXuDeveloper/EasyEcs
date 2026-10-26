@@ -42,6 +42,17 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
 - [ ] **Generated code tuned for the machine** (owner: users never think about pipeline, caches, branches;
       `microarch.md`): M0 llvm-mca over every kernel shape after WP0b merges, then M1 accumulators / unrolling /
       hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3 prefetch / streaming stores.
+- [ ] **Vector loops through the user's own calls** (owner: users should not have to avoid helpers): today a call into
+      user code keeps the method scalar (EECS055 "it calls X.Y"); only Math, the generated members (SetX / IsX ...),
+      Emit.Add, Lookup reads and view members (Kernel.Views.cs, inlined from source, depth 8) are translated. Extend the
+      view inliner to any callee whose source is in the compilation: static helpers, extension methods, component
+      instance methods and properties with bodies (same limits: no recursion, no ref out of the row, no lambdas; an
+      early return becomes a mask). Calls into other assemblies, virtual / interface calls stay scalar with that reason.
+      After WP0b (Kernel). Docs: list what is inlined and what is not.
+- [ ] **ARM runs of the locality prototypes** (owner wants to run them on an ARM device): the prototypes are
+      Vector256 / AVX2 / AVX-512 only, so on ARM64 they measure the software fallback of Vector256 (not accelerated
+      there); add Vector128 / AdvSimd paths (TBL permutation for compress, a 4-wide or Vector<T> pair kernel) and an
+      ISA column in the results.
 - [ ] **Lookup gathers always on** (owner: they should win everywhere, then no option; branch `feat-gather-always`):
       diagnose the 64-table loss; lead: unmanaged columns are pinned (POH), so a per-table column-address table could
       let one vector gather across tables GC-safely; widen LookupGatherBenchmark (1/4/64/1,000 tables, dead lanes,

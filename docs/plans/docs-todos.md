@@ -249,3 +249,12 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 - When L1 / L2 ship, the prototypes under `benchmarks/EasyEcs.Benchmark/Locality/` and their link into the unit tests
   go (nothing stale); their benchmarks keep only the plain baselines against the shipped forms.
 
+## Calls in vector loops (owner question 2026-10-26)
+
+- systems.mdx "Vector loop" conditions: say which calls the loop takes (Math / MathF with vector forms, the generated
+  members, Emit.Add, Lookup reads on Require, view members inlined from source) and that any other call (a helper of
+  your own, an extension method, a property with a body, a call into another assembly) keeps the method scalar today,
+  with EECS055's "it calls X.Y"; update when the inliner item of the backlog ships. The list there is also stale: it
+  still says no `Entity`, `Lookup<T>`, `Emit<T>` parameter (structural changes of the row's entity, Emit records and
+  Lookup gathers are vector forms now).
+
