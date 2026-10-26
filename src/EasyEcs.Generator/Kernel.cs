@@ -623,7 +623,7 @@ internal sealed partial class Kernel
                     var element = Symbols.LookupElement(p.Type)!;
                     made._uniformParams[p] = name;
                     made._lookupParams[p] = (name, element);
-                    made._lookupFields[p] = i;
+                    made._lookupOrdinals[p] = i;
                     made._setup.Append($"var {name} = new global::EasyEcs.Lookup<{element.ToDisplayString(Symbols.Fqn)}>(World, null);\n");
                     continue;
                 }

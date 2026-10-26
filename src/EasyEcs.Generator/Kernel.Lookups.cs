@@ -21,7 +21,7 @@ internal sealed partial class Kernel
     private readonly Dictionary<IParameterSymbol, (string Name, ITypeSymbol Element)> _lookupParams = new(SymbolEqualityComparer.Default);
 
     /// <summary>Each Lookup parameter's index: its job field <c>f{i}</c> says whether the pass prefetches (<see cref="Prefetch"/>).</summary>
-    private readonly Dictionary<IParameterSymbol, int> _lookupFields = new(SymbolEqualityComparer.Default);
+    private readonly Dictionary<IParameterSymbol, int> _lookupOrdinals = new(SymbolEqualityComparer.Default);
 
     /// <summary>The Lookup parameters the loop prefetches for (<see cref="Code.Prefetched"/>).</summary>
     private readonly HashSet<int> _prefetched = new();
@@ -120,7 +120,7 @@ internal sealed partial class Kernel
         int column = int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
         int lane = int.Parse(index.Substring(index.LastIndexOf('_') + 1), System.Globalization.CultureInfo.InvariantCulture);
         if (_components.FirstOrDefault(c => c.Value.Index == column) is not { Key: { } component, Value.Fields: { } fields } || _wideOf.ContainsKey(component)) return;
-        int field = _lookupFields[p];
+        int field = _lookupOrdinals[p];
         _prefetched.Add(field);
         _body.Append($"if (f{field}) {lookup}.PrefetchAhead(ref e{column}, {fields.Length}, {lane}, i, rows, {PrefetchDistance}, {Vec(_mask)}.Count);\n");
     }
