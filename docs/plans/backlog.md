@@ -19,7 +19,7 @@ last (`docs-todos.md` collects them meanwhile).
       `feat-locality-core`): a declared key orders a table's rows, re-sorted on a cadence (radix sort, one permutation
       of every column under the gate, `StorageVersion`), a box per block of 8 rows and a read path (`RowBlocks`) for
       the generated pair form; compress (AVX-512 CompressStore / AVX2 table / ARM64 TBL) replaces `Lanes.Compact` in
-      the core's callers; the prototypes' Vector128 / NEON paths are merged (eedfeb0, pushed). L1 gives systems an order they request at
+      the core's callers (M4: today's `Lanes.Compact` is 2-2.5x slower than the TBL table at >=50 %, `locality.md` 6.3; the helper must win every cell); the prototypes' Vector128 / NEON paths are merged (eedfeb0, pushed). L1 gives systems an order they request at
       setup (3.4), not only `[OrderBy]`; L3's compress is one core helper the generated loops call too. New EECS id for an invalid key; decision records; naming candidates to the owner.
 - [x] **Lookup gathers always on: not possible, stay on request** (merged after 932913f): no form beats rows when a
       vector's targets spread over many tables (walk, 64-bit pinned addresses, micro-adaptive choice all measured,

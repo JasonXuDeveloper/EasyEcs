@@ -315,6 +315,8 @@ Decision records for the docs pass (en + zh, "Not added" unless the owner's re-m
   1.55x, Glide 1.87x / 1.63x faster than rows at 1k / 100k, 0 B) once the site can show them
   (bench.json through `tools/bench.sh KernelBenchmark --sync` on that machine is a separate machine: keep it out of the
   reference numbers unless the site gains an ARM64 column).
+- performance / why-fast pages: compress on ARM64 (owner's M4 CompressBenchmark, `locality.md` 6.3: the NEON TBL
+  table 1.7-12x over branchy) once L3's core helper is measured there; the same separate-machine caveat.
 - decisions.mdx + .zh.mdx: the decision record of the TBL form (draft in the branch's hand-off: D136 or the next free
   number at merge), and update D131's ARM64 note if it lists wide components among the rows-only forms.
 - the public skill (skills/easyecs/SKILL.md): "a wide component vectorizes on AVX-512 and ARM64 where the gate pays;
