@@ -281,3 +281,21 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
   removes.
 - Batch probes and nearest on a spread map are not decided yet: they moved to the backlog (re-measure later).
 
+## feat-amac (borrowed-ideas.md item 1, locality.md 6.3; nothing user-visible)
+
+Decision records for the docs pass (en + zh, "Not added" unless the owner's re-measure with a size gate builds it):
+- **Prefetching lookup chases (group prefetching, Chen et al. 2004; AMAC, Kocberber et al. VLDB 2015): not built.**
+  The generated job would prefetch the record of row i + 2k and the T row of row i + k (two stages: a row's address is
+  known only once its record is in cache), k = 8 rows (the vector loop the 8 rows 2k and k past its vector).
+  LookupChaseBenchmark, random targets, two rounds, 0 B: against the generated jobs 1.29-1.35x (rows) and 1.31-1.36x
+  (gathers) at 16M entities, 1.04-1.22x at 1M (inside this machine's 260 MiB last-level cache), and 1.9x (rows) /
+  2.3x (gathers) slower at 1k, where there is no miss to hide. Bar 1.3x at 1M and 16M, nothing slower at 1k: not met.
+  Considered: records only (stage 1: about half the gain), distances 2-64 rows (8-32 best), the vector loop's gathers
+  prefetched like rows. ARM64: .NET 10 has no prefetch but SVE's (not used), so the form does nothing there. Would
+  change it: a size gate (records past the last-level cache) and numbers from a machine with a common-size LLC.
+- **Batch probes of an index (Polychroniou's vertical probes, with and without refill): not added**, re-measured at
+  16M keys: 1.25-1.63x slower than one key at a time (a gather waits for its slowest lane). Scalar group prefetching
+  is the form that pays there (1.33x at 16M keys, 1.3-1.6x slower when the table is in cache), and an index has no
+  batch probe to put it in (keys known ahead exist only in generated code). Numbers: locality.md 6.3.
+- `api.mdx`: nothing (the helpers are hidden, for generated code only).
+
