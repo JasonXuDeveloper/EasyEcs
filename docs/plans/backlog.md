@@ -13,6 +13,21 @@ Cluster pairs and compress first, then the rest in the order of "Next"; every SI
 (`audit-vector-loops`, "Every vector form runs on ARM64 too"); generators stay fast while they read more source; docs
 last (`docs-todos.md` collects them meanwhile).
 
+The owner (2026-10-26): every open item of this file is done, in this order, nothing left over: Running, Next,
+Later, then Finish (docs included). Each item runs through the skill that owns its work, and its agent's prompt
+names the skill:
+
+| Item | Skills |
+|---|---|
+| any change before it merges | `feature` (definition of done), `audit-naming` on every new name |
+| L1 / L3, L2 / L4, call inliner, inner loops, follow-ups, #160 | `feature`, `audit-vector-loops`, `audit-generator`; `audit-analyzer` for a rule or code fix |
+| G1, analyzer and generators by the official guidance, generated text cleanup, simplification | `audit-generator`, `audit-analyzer` |
+| prefetch gate, microarch M0-M3, borrowed ideas, #164, #157, #159, #153, quiet rechecks | `audit-perf` (+ `audit-vector-loops` for generated loops) |
+| flaky allocation test, exemplar pass, folder restructure | `audit-code` (+ `audit-core` for core code) |
+| merging an agent's branch | `audit` (triage and merge checks) |
+| docs pass | `audit-docs` |
+| bench sync, master | `verify` |
+
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
 - [ ] **L1 ordered rows + blocks, L3 compress** (`locality.md` section 5; worktree `agent-aef3c58e0c81ecff5`, branch
