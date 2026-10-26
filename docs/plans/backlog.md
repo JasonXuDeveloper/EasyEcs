@@ -153,6 +153,14 @@ CI runs the unit tests on ARM64 (b1dbdb0).
       identity copies (`var __c1_0 = __s1_0`); per-width constants re-created (`__u1`, `this.v0 = default`);
       `__d0 = Zero; __d0 |= x` where `__d0 = x` would do. Users read this code (docs "The generator writes" tabs), so
       readability counts once the asm is equal.
+- [ ] **Native AOT: no class-initialization check per iteration for a loop's tables** (owner's find, 2026-10-26):
+      under Native AOT a loop reading a `static readonly` vector built by code (`Interleaved.Tables*`, `Masks`, the
+      generated `__permN`) tests the class's initialization every iteration and spills around the helper call. The
+      first fix (vectors of literals, 2206090) was reverted with the NEON `fixed` removal (cf43ac4) because the M4
+      measured every multi-field loop 25-58% slower (`audit-vector-loops`, "Read the loop the JIT wrote"). Next:
+      bisect the two on the M4 (owner runs `KernelBenchmark` `*Generated` at cf43ac4 vs its parent), then try the
+      fix per path (literals only where AOT pays; or the table read into a local before the loop) and land it only
+      with JIT x64, JIT ARM64 (M4) and Native AOT numbers.
 - [ ] **The inliner's limit, checked instead of assumed** (owner, 2026-10-26: "is a fixed JIT budget right when SIMD
       width differs?"). Answer: `MAX_INL_LCLS = 32` is RyuJIT's implementation constant with no target condition
       (`inline.h`, release/10.0 and main), the same for x64, ARM64, ReadyToRun and Native AOT, and it counts IL

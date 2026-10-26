@@ -182,6 +182,16 @@ Every round reads the Tier1 code of the samples' loops (`tools/jitdisasm.sh samp
 next to the generated text, and asks per loop: how many instructions per vector, which of them move data instead of
 computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
 
+- **Fewer instructions is a hypothesis, the M4 is the proof**: replacing the `fixed` blocks of the NEON
+  `Interleaved.LoadN` / `StoreN` with `Unsafe.AsPointer` over pinned columns, and the `static readonly` index tables
+  with vectors of literals, removed 32-58 instructions and 18-33 stack accesses per job in the Tier1 ARM64 code
+  under qemu, and made every multi-field `KernelBenchmark` loop 25-58% slower on an Apple M4 (Move2 142 -> 179 ns,
+  Glide 166 -> 263 ns at 1,000 entities); both were reverted. A change to a NEON path or to how a loop reaches its
+  constants ships only after a BenchmarkDotNet A/B on real ARM64 hardware (the owner's M4: before and after
+  worktrees, `KernelBenchmark` `*Generated` filters); qemu proves correctness, never speed. The Native AOT cost of a
+  `static readonly` vector read in a loop (a class-initialization check per iteration) is real and still open: a fix
+  must be measured under JIT on x64 and ARM64 and under Native AOT before it lands.
+
 - **Copies in the text are free, shuffles are not**: `var __c = __s;` and `__t` temporaries for a whole-value
   assignment vanish (the JIT copy-propagates them) once the method is compiled, but each one is an IL local, and
   locals decide whether the method is inlined at all (32 at most, below). That is why removing the loads' copies
@@ -209,27 +219,6 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
   loop stays inlined (cold parts in `NoInlining` helpers called once per run, each width in its own method, or a
   generated entry that runs the word loop itself), and a test pins `call ...Execute`-free runners. The plan and its
   measurements: `docs/plans/inner-loops.md`, WP0b.
-- **No `fixed` in a helper a loop inlines** (the owner's find on the M4, fixed in cf43ac4): NEON's
-  `Load2/3/4xVector128AndUnzip` and `StoreVectorAndZip` take pointers, and a `fixed` inside `Interleaved.LoadN` /
-  `StoreN` pinned and unpinned a stack slot on every vector once inlined (`str x0, [fp, #..]` before the `ld2`,
-  `str xzr, [fp, #..]` after: 4 memory accesses per 4 rows). Every memory a vector loop reads must not move instead,
-  and the pointer is taken with `Unsafe.AsPointer`: unmanaged columns are on the pinned object heap
-  (`ComponentInfo.Create`), and every other buffer a loop is handed (`Interleaved.LoadTail`'s copy, `Maybe<T>`'s
-  zero rows) is allocated with `Interleaved.PinnedRows`. A new buffer a loop reads through a pointer form is
-  allocated the same way, or the pointer form is not used for it. `fixed` stays where it runs once per call outside
-  the loop on memory that can move (`Lanes.Compact`'s spans, `LookupLanes.Records` over small `Meta` arrays). Check:
-  grep the Tier1 ARM64 loop (qemu recipe above) for stack stores around `ld2` / `ld3` / `ld4` / `st2`-`st4`.
-- **No `static readonly` vector read inside a loop; a constant is a vector of literals** (the owner's find under
-  Native AOT, fixed in 2206090): the JIT folds a static readonly field into a constant at Tier1 (its class is
-  initialized by then), so JIT listings and benchmarks never show it. Native AOT cannot preinitialize a vector built
-  by code (`Vector512.Create(Tables.Load2(16)[0])`, a `Make32()`), so the loop tested the class's initialization on
-  every iteration (`cmp qword ptr [r10-0x08], 0`, a call to `CORINFO_HELP_READYTORUN_NONGCSTATIC_BASE`) and spilled
-  its zmm registers around that call. Tables, masks and permutes are written as literals: an `AggressiveInlining`
-  property returning `Vector512.Create(0, 2, 4, ...)` in the core (`Interleaved.Tables32` / `Tables64` / `Masks`),
-  the literal in place in generated code (`Kernel.Wide`'s `Table` / `Table128`; a local would count against the 32
-  below). A static read once before the loop (the `__layoutN` guard) is fine. Check: no `static readonly` vector
-  that a loop body names (`grep -n "static readonly.*Vector" src/EasyEcs.Core` and the generated jobs), and the
-  Native AOT listing of a changed loop when the owner's AOT check is at hand.
 - **The JIT never inlines a method that declares more than 32 IL locals**, `AggressiveInlining` or not (RyuJIT's
   `MAX_INL_LCLS`, observation `CALLEE_TOO_MANY_LOCALS`, reported "too many locals"; the callee is then marked
   noinline for every later call site, "noinline per IL/cached result"). It is exact on every job measured: 32 locals
