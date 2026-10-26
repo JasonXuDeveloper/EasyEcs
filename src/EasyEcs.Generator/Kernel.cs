@@ -88,6 +88,12 @@ internal sealed partial class Kernel
         public bool Gathers { get; init; }
 
         /// <summary>
+        /// The Lookup parameters whose chases the loop prefetches ahead of each vector (Kernel.Lookups.cs) when the job's
+        /// <c>f{i}</c> says the pass is past the last-level cache (<c>Lookup&lt;T&gt;.Prefetches</c>, set once per pass).
+        /// </summary>
+        public EquatableArray<int> Prefetched { get; init; } = new([]);
+
+        /// <summary>
         /// A wide component's AVX-512 form pays (its lines start with <see cref="Mark512"/>): the Vector512 loop runs it
         /// where <c>Avx512F.IsSupported</c>.
         /// </summary>
@@ -617,6 +623,7 @@ internal sealed partial class Kernel
                     var element = Symbols.LookupElement(p.Type)!;
                     made._uniformParams[p] = name;
                     made._lookupParams[p] = (name, element);
+                    made._lookupFields[p] = i;
                     made._setup.Append($"var {name} = new global::EasyEcs.Lookup<{element.ToDisplayString(Symbols.Fqn)}>(World, null);\n");
                     continue;
                 }
@@ -781,6 +788,7 @@ internal sealed partial class Kernel
             VectorTail = kernel._change != null || kernel._emits.Values.Any(e => e.Added),
             Written = new EquatableArray<int>(kernel._written.OrderBy(k => k).ToArray()),
             Gathers = kernel._lookups.Count > 0,
+            Prefetched = new EquatableArray<int>(kernel._prefetched.OrderBy(i => i).ToArray()),
         };
     }
 

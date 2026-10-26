@@ -78,6 +78,40 @@ public static unsafe class LookupLanes
     }
 
     /// <summary>
+    /// Whether a pass reading rows of <paramref name="rowSize"/> bytes of other entities of <paramref name="world"/>
+    /// prefetches them (<see cref="Lookup{T}.Prefetches"/>): only where a prefetch exists (<see cref="CanPrefetch"/>) and
+    /// when the records and rows a chase lands on, those of every live entity, are past the last-level cache
+    /// (<see cref="LastLevelCache"/>; unknown: never). In the cache, a prefetch has no miss to hide and costs up to twice
+    /// the chase's time (LookupChaseBenchmark at 1,000 entities); past it, it hides most of two misses per row. Read
+    /// once per pass, by the job's initializer.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static bool Prefetches(World world, int rowSize) =>
+        CanPrefetch && PastCache((long)world.EntityCount * (Unsafe.SizeOf<EntityMeta>() + rowSize), LastLevelCache.Bytes);
+
+    /// <summary>Whether <paramref name="bytes"/> are past a last-level cache of <paramref name="cache"/> bytes (0: unknown, never).</summary>
+    internal static bool PastCache(long bytes, long cache) => cache > 0 && bytes > cache;
+
+    /// <summary>
+    /// The prefetches of a vector loop's chase, per vector of <paramref name="count"/> rows from row
+    /// <paramref name="i"/>: the records of the rows <paramref name="distance"/> * 2 past it (stage 1) and the rows of
+    /// the rows <paramref name="distance"/> past it (stage 2), those below <paramref name="rows"/>. Row r's entity
+    /// index is lane <paramref name="index"/> of the <paramref name="stride"/> lanes of row r in
+    /// <paramref name="column"/> (the component's lanes, 4 bytes each: an EntityId's Index).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void PrefetchAhead<TLane>(World world, uint bit, int size, ref TLane column, int stride, int index, nint i, nint rows, int distance, int count)
+        where TLane : unmanaged
+    {
+        if (!Sse.IsSupported) return;
+        ref int lanes = ref Unsafe.As<TLane, int>(ref column);
+        for (nint r = i + 2 * distance, end = Math.Min(r + count, rows); r < end; r++)
+            PrefetchRecord(world, Unsafe.Add(ref lanes, r * stride + index));
+        for (nint r = i + distance, end = Math.Min(r + count, rows); r < end; r++)
+            PrefetchRow(world, Unsafe.Add(ref lanes, r * stride + index), bit, size);
+    }
+
+    /// <summary>
     /// Stage 1 of a chase (group prefetching, AMAC): the record of entity <paramref name="index"/> into the cache, so the
     /// lookup or <see cref="PrefetchRow"/> that reaches it a few rows later finds it there. An index past the records
     /// prefetches nothing. A prefetch never faults: the address of an element of a managed array a collection moves

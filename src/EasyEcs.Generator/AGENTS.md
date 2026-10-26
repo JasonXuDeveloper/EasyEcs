@@ -18,7 +18,7 @@ ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove,
 SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                              the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] /
                              [Removed<T>] -> Since(LastRunTick + 1) and a read of T; Mut<T> -> a write stamped per
-                             write; Slices -> the slice of the run; ChunkRows -> the chunkRows argument; [Consume] -> DestroyAll of
+                             write; Slices -> the slice of the run; ChunkRows -> the chunkRows argument; Lookup reads at an id of an in component (Chases) -> a job over runs of rows prefetching the records 2k and the rows k ahead when the pass is past the last-level cache (EmitChases); [Consume] -> DestroyAll of
                              the filter after a pass without structural changes, a destroy per row otherwise;
                              [ForEntity] -> the IForEachEntity job and an entry point Owner.Method(entity, values)
                              over entity.Run; [EcsSystem] -> the code struct __X_SystemCode (hooks, then the
@@ -104,6 +104,7 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              Kernel.Lookups.cs: reads of other entities through Lookup<T> (lookup[id], Read, Has, at an
                              EntityId of the lanes) gathered per vector from the one table they live in, the vector's
                              rows sent to the method when they live in several, with a backoff; only for SimdMode.Require (D131);
+                             the chases of the rows ahead prefetched behind the job's gate (Code.Prefetched);
                              Kernel.Structural.cs: a structural change of the row's entity under a condition (marked
                              rows, applied in bulk after the pass: Code.StructuralChanges) and Emit<T> records of a
                              lane or the entity's id (Code.VectorTail: every row takes the vector form)
@@ -154,6 +155,8 @@ Threads.cs                   EECS014's check: does a structural call in a delega
                              the writes of code on several threads that reach shared memory (EECS060, EECS061)
 BodyFacts.cs                 the analyzer's per-compilation cache of what a [ForEach] method's body allows (IsStable,
                              OnlyIdentifies, ParallelProblem), read by several rules per method
+Chases.cs                    a [ForEach] method's reads of other entities at an id of a component it takes by in
+                             (lookup[x.F], Read, Has), read once for the row form's prefetches (SystemGenerator.EmitChases)
 Symbols.cs                   symbol checks shared by generator and analyzer
 Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
 EquatableArray.cs            array with value equality (generator models cache between edits)
