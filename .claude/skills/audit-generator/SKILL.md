@@ -108,6 +108,12 @@ generators write does. Every generated form is checked for:
 - **Caches**: each row loaded once (fusion), columns walked in order, chunks on 64-row multiples, chases prefetched,
   write-only streams past the cache not read for ownership.
 - **Front end**: cold code out of line, bodies within the inliner's budget.
+- **A form that pays only past a size is a twin, chosen per pass**: never replace the job for every pass. Emit a
+  second job and let the call site pick it from a gate read once per pass (the VectorTail `Rows` twin, the
+  prefetching `Job{i}Chases` behind the last-level cache gate). The in-cache case then runs byte-identical code, and
+  its A/B only has to show the gate check costs nothing. Replacing the job made parallel heavy rows 3x slower at 1k.
+- **An extra job per method skips methods in a fusion group**: they never run alone, so the twin is never built
+  (CS0649 on its fields) and the method's schedule line would claim a form it does not run.
 
 How to see the bound without hardware counters (the VM has none): `llvm-mca` on the Tier1 loop
 (`tools/jitdisasm.sh`), then BenchmarkDotNet with controlled data (sorted against shuffled, 1k / 100k / 1M rows).

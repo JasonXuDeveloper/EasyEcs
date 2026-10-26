@@ -88,6 +88,10 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   write back only the vectors holding written fields, the other bytes as loaded. One row per vector (one useful lane)
   never pays. It pays only when the method's operations outweigh the permutes (`Gate`); otherwise EECS055 suggests
   splitting the used fields into a component of their own, which is always the fastest form.
+  The 32 IL locals are checked by counting the emitted loop (`Kernel.FitLocals`, constant broadcasts that
+  `SystemGenerator.Constant` removes left out), not by a cost model: past 32 the AVX-512 form is dropped, the 128-bit
+  form stays, and with neither the method is scalar with the reason (fixable when a split helps). Fewer locals come
+  from extracting a field into its own name, reusing a merge's first input and one temporary for the packed stores.
 - **Inner loops** (Burst's loop vectorizer): a scalar `for` / `foreach` over a span inside a method the generator
   already compiles (a `[ForEach]` method, a `ForParallel` job's `Execute`) is a vector loop over its elements: a
   `DynamicBuffer<T>`'s elements, an `[InlineArray]` or fixed buffer field, an `IForSpan<T>` / `IForRange` body, a
