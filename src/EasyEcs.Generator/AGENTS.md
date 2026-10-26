@@ -100,8 +100,8 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              Kernel.Pairs.cs: lanes of two sizes (int rows summed into a long, float into a double) as
                              pairs of vectors (WidenLower / WidenUpper), every lane bit-exact; four times as wide stays scalar;
                              Kernel.Views.cs: a method taking views desugared before translation (view fields as
-                             parameters, view members inlined by Kernel.Inlining's Inliner), bound in a copy of the
-                             compilation, or the reason it stays scalar;
+                             parameters, view members inlined by Kernel.Inlining's Inliner) as a static local function
+                             bound in a speculative model of the body, or the reason it stays scalar;
                              Kernel.Inlining.cs: the user's own calls inlined before translation (static and extension
                              methods, C# 14 extension members, struct methods and properties, local functions, whose
                              source is in the compilation: Callees reads each callee once per compilation, syntax
