@@ -755,6 +755,7 @@ internal sealed partial class Kernel
         var read = new StringBuilder();
         foreach (var (names, text) in columns)
             if (names.Any(n => n.Length == 0 || uses.Contains(n))) read.Append(text);
+        if (kernel._wideOf.Count > 0) kernel.FitLocals(kernel._setup.ToString() + prologue + read + hold + kernel._body + stores);
         var flat = Flat(kernel, root, () => Make(false));
         // Narrow lanes have no shuffles: a component of several fields takes the flat loop or none.
         if (kernel._narrow && flat == null && kernel._components.FirstOrDefault(c => c.Value.Fields.Length > 1 && !kernel._doubled.Contains(c.Value.Index)) is { Key: { } narrow, Value.Fields: { } several })

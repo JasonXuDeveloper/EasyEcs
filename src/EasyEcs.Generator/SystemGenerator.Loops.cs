@@ -236,7 +236,7 @@ public sealed partial class SystemGenerator
     }
 
     /// <summary>A setup line broadcasting a literal, or a named constant of a lane type (<c>int.MinValue</c>, <c>float.Pi</c>).</summary>
-    private static readonly Regex Constant = new(@"(?m)^var (__u\d+) = (" + Regex.Escape(Kernel.V) + @"\.Create<[\w.:]+>\((?:\(?-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fdmuUlL]*\)?|(?:int|long|uint|ulong|float|double)\.\w+)\));\n");
+    internal static readonly Regex Constant = new(@"(?m)^var (__u\d+) = (" + Regex.Escape(Kernel.V) + @"\.Create<[\w.:]+>\((?:\(?-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fdmuUlL]*\)?|(?:int|long|uint|ulong|float|double)\.\w+)\));\n");
 
     /// <summary>
     /// The rows of a run after the last whole vector, when every row must take the vector form (<see cref="Kernel.Code.VectorTail"/>):

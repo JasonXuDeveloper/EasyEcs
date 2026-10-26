@@ -270,9 +270,12 @@ internal sealed partial class Kernel
         var nodes = Merge(inputs, best, loads, out _);
         for (int f = 0; f < wide.Paths.Length; f++)
         {
-            string value = Temp("g");
+            // Picked into the field's own name when it has the column's lane type: no IL local for a copy (a 16-word row
+            // loads 16 vectors, and the loop's method must stay within the locals a runner inlines: FitLocals).
+            string type = Elem(wide.Paths[f][wide.Paths[f].Length - 1].Type);
+            string value = type == column ? $"__c{index}_{f}" : Temp("g");
             Extract(nodes, f, value, loads);
-            loads.Append($"var __c{index}_{f} = {As(column, Elem(wide.Paths[f][wide.Paths[f].Length - 1].Type), value)};\n");
+            if (type != column) loads.Append($"var __c{index}_{f} = {As(column, type, value)};\n");
         }
     }
 
@@ -335,8 +338,11 @@ internal sealed partial class Kernel
                 int lane = 0;
                 foreach (var e in a.Slots) { slots[e.Key] = lane; values[lane++] = e.Value; }
                 foreach (var e in b.Slots) { slots[e.Key] = lane; values[lane++] = Words + e.Value; }
-                string name = code == null ? "" : Temp("n");
-                code?.Append($"var {name} = {Permute2}({a.Expr}, {Table(values)}, {b.Expr});\n");
+                // A merge of merges takes its first input's local, which nothing reads after it: an IL local per node of
+                // the tree's first level only (the loaded vectors keep theirs: the stores take them back).
+                bool reuse = level > 0 && a.Expr.StartsWith("__n", System.StringComparison.Ordinal);
+                string name = code == null ? "" : reuse ? a.Expr : Temp("n");
+                code?.Append($"{(reuse ? "" : "var ")}{name} = {Permute2}({a.Expr}, {Table(values)}, {b.Expr});\n");
                 next.Add(new Node(name, slots));
                 merges++;
             }
@@ -473,6 +479,7 @@ internal sealed partial class Kernel
             }
             return;
         }
+        string? pack = null; // one local for every group's pack: a group's is read only by its own stores
         foreach (var (vectors, union) in groups)
         {
             var lanes = union.Select(w => w.Lane).Distinct().OrderBy(f => f).ToArray();
@@ -487,11 +494,12 @@ internal sealed partial class Kernel
             {
                 var order = union.OrderBy(w => w).ToList();
                 for (int q = 0; q < order.Count; q++) slot[order[q]] = q;
-                source = Temp("w");
+                bool declared = pack != null;
+                source = pack ??= Temp("w");
                 var values = new int[Words];
                 for (int q = 0; q < order.Count; q++)
                     values[q] = order[q].Lane == lanes[0] ? order[q].Row : order[q].Lane == lanes[1] ? Words + order[q].Row : 0;
-                stores.Append($"var {source} = {Permute2}({Lane(lanes[0])}, {Table(values)}, {Lane(lanes[1])});\n");
+                stores.Append($"{(declared ? "" : "var ")}{source} = {Permute2}({Lane(lanes[0])}, {Table(values)}, {Lane(lanes[1])});\n");
                 foreach (int c in lanes.Skip(2))
                 {
                     values = new int[Words];
@@ -539,10 +547,34 @@ internal sealed partial class Kernel
         int saved = 3 * ops + 4 * (_usedLanes + _writtenLanes) - _moves128;
         _wide128 = 3 * _registers < 2 * saved;
         if (_wide512 || _wide128) return;
+        throw Rejected($"takes {_permutes} permutes per 16 rows, {(ops == 0 ? "for no vector operation" : ops == 1 ? "more than its 1 vector operation gains" : $"more than its {ops} vector operations gain")}");
+    }
+
+    /// <summary>
+    /// The AVX-512 form only while its loop, <paramref name="loop"/> (setup, loads, body and stores of both forms), stays
+    /// within the IL locals a runner inlines (<see cref="SystemGenerator.InlinedLocals"/>, D135): the loop's method
+    /// declares its lines' (<see cref="SystemGenerator.Locals"/>), the column refs and the loop's bound. A row of up to 16 words loads that many vectors per
+    /// 16 rows and keeps them for its stores; past the budget the runner would call the job per run instead of inlining
+    /// it, so the form is dropped (and the reason reported when the 128-bit form does not pay either).
+    /// </summary>
+    private void FitLocals(string loop)
+    {
+        if (!_wide512) return;
+        string lines = string.Join("\n", loop.Split('\n').Where(l => !l.Contains(Mark128))) + "\n";
+        // A loop over whole vectors takes its constant broadcasts in place (SystemGenerator.Constants): no locals. A
+        // loop that gathers keeps them (its body runs under a continue).
+        if (_lookups.Count == 0) lines = SystemGenerator.Constant.Replace(lines, "");
+        int locals = SystemGenerator.Locals(lines) + _components.Count + 1;
+        if (locals <= SystemGenerator.InlinedLocals) return;
+        _wide512 = false;
+        if (!_wide128) throw Rejected($"declares {locals} locals per 16 rows, past the {SystemGenerator.InlinedLocals} a job's loop may declare to be inlined");
+    }
+
+    /// <summary>Why neither form of a wide component pays: <paramref name="cost"/>, what gathering its fields costs.</summary>
+    private Unsupported Rejected(string cost)
+    {
         var (p, wide) = (_wideOf.First().Key, _wideOf.First().Value);
-        throw Advised($"{wide.Reason}, and gathering the {wide.Paths.Length} {(wide.Paths.Length == 1 ? "field" : "fields")} it uses takes "
-            + $"{_permutes} permutes per 16 rows, {(ops == 0 ? "for no vector operation" : ops == 1 ? "more than its 1 vector operation gains" : $"more than its {ops} vector operations gain")}",
-            p.Type, wide.Paths, false);
+        return Advised($"{wide.Reason}, and gathering the {wide.Paths.Length} {(wide.Paths.Length == 1 ? "field" : "fields")} it uses {cost}", p.Type, wide.Paths, false);
     }
 
     /// <summary>
