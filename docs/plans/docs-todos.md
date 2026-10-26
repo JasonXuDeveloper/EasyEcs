@@ -324,14 +324,14 @@ Decision records for the docs pass (en + zh, "Not added" unless the owner's re-m
 - tests/AGENTS.md's Kernel line could name the wide forms' bit-for-bit test and the ARM64 loop-line test (file map,
   not docs/content: do it with the next tests change).
 
-## feat-locality-core (L1 + L3 of locality.md: D135, D136)
+## feat-locality-core (L1 + L3 of locality.md: D137, D138; D135 went to WP0b, D136 may go to feat-arm-parity)
 - New guide page (or a section of high-performance.mdx + zh): ordered tables. That the order is inferred for pair
   methods (no attribute), `[OrderBy]` as the override (non-spatial keys), `Interval` / `Margin` (GROMACS's nstlist and
   buffer), `SortRows<T>`, what a sort costs (RowOrderBenchmark: BenchTable), `world.Blocks<T>()` / `entities.Blocks` /
   `RowBlocks.Pairs` for hand-written searches until the pair form ships, refs and handles ending at a sort (like any
   structural change), saves keeping the row order and redrawing the boxes at the next update.
 - refs-and-await.mdx + zh: a sort is a structural change at the start of an update (re-acquire refs after it).
-- saves.mdx + zh, snapshots.mdx + zh: the row order is kept, boxes redrawn (D135).
+- saves.mdx + zh, snapshots.mdx + zh: the row order is kept, boxes redrawn (D137).
 - analyzer.mdx + zh: EECS104 (section, table row; EECS range) and EECS041's list (SortRows, OrderRows).
 - high-performance.mdx + zh: Lookup targets ordered by their target read near rows (LookupOrderBenchmark: Chase 2x,
   64-table gathers 4.6x at 1M); `Lanes.Rows` for a row list from a mask; Compact on every ISA (NEON, SSSE3).

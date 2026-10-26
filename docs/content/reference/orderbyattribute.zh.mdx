@@ -46,7 +46,7 @@ public string[] Box { get; }
 public int Interval { get; set; }
 ```
 
-两次排序之间 [`World.Update`](/zh/docs/reference/world#update) 的调用次数（默认 10，至少 1）：GROMACS 每 10 步重建一次成对列表，一次排序的开销分摊到 10 次更新上，只占一个 tick 的一小部分（决策 D135）。
+两次排序之间 [`World.Update`](/zh/docs/reference/world#update) 的调用次数（默认 10，至少 1）：GROMACS 每 10 步重建一次成对列表，一次排序的开销分摊到 10 次更新上，只占一个 tick 的一小部分（决策 D137）。
 
 ### `Margin` [#margin]
 

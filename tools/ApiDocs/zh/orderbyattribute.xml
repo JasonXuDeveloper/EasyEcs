@@ -41,10 +41,10 @@
   <member name="P:EasyEcs.OrderByAttribute.Box" source="888b822efc35">
     <summary>块的包围盒罩住的成员。</summary>
   </member>
-  <member name="P:EasyEcs.OrderByAttribute.Interval" source="445c0cd94581">
+  <member name="P:EasyEcs.OrderByAttribute.Interval" source="7b7711b1419d">
     <summary>
       两次排序之间 <see cref="M:EasyEcs.World.Update" /> 的调用次数（默认 10，至少 1）：GROMACS 每 10 步重建一次成对列表，
-      一次排序的开销分摊到 10 次更新上，只占一个 tick 的一小部分（决策 D135）。
+      一次排序的开销分摊到 10 次更新上，只占一个 tick 的一小部分（决策 D137）。
     </summary>
   </member>
   <member name="P:EasyEcs.OrderByAttribute.Margin" source="b81b47673ffc">

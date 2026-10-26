@@ -113,10 +113,10 @@ Each result goes into section 6 with its numbers; the failed ones go to `docs/ow
 
 ## 5. Work packages after phase 0 (only those whose bar was met)
 
-- **L1** ordered rows + blocks: built (branch `feat-locality-core`, D135; what L2 reads is in 6.5).
+- **L1** ordered rows + blocks: built (branch `feat-locality-core`, D137; what L2 reads is in 6.5).
 - **L2** pair form (generator + Kernel, EECS055 reasons for bodies it cannot take, a code fix from a hand-written
   grid search where one is recognizable), tests bit for bit against the row loop.
-- **L3** compress: built (branch `feat-locality-core`, D136). Batch probes are not built (6.3).
+- **L3** compress: built (branch `feat-locality-core`, D138). Batch probes are not built (6.3).
 - **L4** examples: `ZombieTargetSystem`, `NearestPlayer`, the AOI rewritten in the new forms (exemplar pass), the
   battle server page.
 - Decision records: one per package (ordered rows, the pair form, the operators), with what phase 0 dropped.
