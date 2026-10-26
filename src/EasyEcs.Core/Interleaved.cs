@@ -92,7 +92,7 @@ public static partial class Interleaved
     /// </summary>
     public static ref T LoadTail<T>(ref T rows, int count) where T : struct
     {
-        var copy = Tail<T>.Rows ??= new T[64];
+        var copy = Tail<T>.Rows ??= PinnedRows<T>(64);
         MemoryMarshal.CreateReadOnlySpan(ref rows, count).CopyTo(copy);
         return ref MemoryMarshal.GetArrayDataReference(copy);
     }
@@ -100,6 +100,13 @@ public static partial class Interleaved
     /// <summary>Write the <paramref name="count"/> rows of this thread's copy (<see cref="LoadTail{T}"/>) back to <paramref name="rows"/>. O(count).</summary>
     public static void StoreTail<T>(ref T rows, int count) where T : struct =>
         Tail<T>.Rows.AsSpan(0, count).CopyTo(MemoryMarshal.CreateSpan(ref rows, count));
+
+    /// <summary>
+    /// An array of <paramref name="length"/> rows on the pinned object heap when <typeparamref name="T"/> holds no
+    /// references: memory the 128-bit forms may take as a pointer without <c>fixed</c>.
+    /// </summary>
+    internal static T[] PinnedRows<T>(int length) =>
+        RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? new T[length] : GC.AllocateArray<T>(length, pinned: true);
 
     // One copy per thread and type: a vector loop's columns are of distinct types, and it runs no other loop meanwhile.
     private static class Tail<T>
@@ -222,27 +229,30 @@ public static partial class Interleaved
     // ---------------- 128 bits (ARM64 NEON) ----------------
 
     // The 128-bit forms run only behind IsAccelerated (AdvSimd.Arm64): LD2 / LD3 / LD4 load and de-interleave in one
-    // instruction, ST2 / ST3 / ST4 interleave and store. The column is pinned for the call (a tail copy may live in a
-    // managed array that is not); lanes move as float or double, whatever their type, as the shuffles do.
+    // instruction, ST2 / ST3 / ST4 interleave and store; lanes move as float or double, whatever their type, as the
+    // shuffles do. The intrinsics take pointers, and the column is taken as one without `fixed` (a `fixed` inside the
+    // loop pins and unpins a stack slot on every vector: two stores per call). The invariant: every column a vector
+    // loop passes never moves. Unmanaged component columns live on the pinned object heap (ComponentInfo.Create), and
+    // so do the other memory the loops read through these forms, the tail copy (LoadTail) and Maybe<T>'s zero rows.
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static unsafe float* Floats<T>(ref T column) => (float*)Unsafe.AsPointer(ref column);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static unsafe double* Doubles<T>(ref T column) => (double*)Unsafe.AsPointer(ref column);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static unsafe void Load2<T>(ref T column, nuint row, out Vector128<T> f0, out Vector128<T> f1)
     {
         if (Unsafe.SizeOf<T>() == 4)
         {
-            fixed (float* s = &Unsafe.As<T, float>(ref column))
-            {
-                var (a, b) = AdvSimd.Arm64.Load2xVector128AndUnzip(s + row * 2);
-                (f0, f1) = (a.As<float, T>(), b.As<float, T>());
-            }
+            var (a, b) = AdvSimd.Arm64.Load2xVector128AndUnzip(Floats(ref column) + row * 2);
+            (f0, f1) = (a.As<float, T>(), b.As<float, T>());
         }
         else
         {
-            fixed (double* s = &Unsafe.As<T, double>(ref column))
-            {
-                var (a, b) = AdvSimd.Arm64.Load2xVector128AndUnzip(s + row * 2);
-                (f0, f1) = (a.As<double, T>(), b.As<double, T>());
-            }
+            var (a, b) = AdvSimd.Arm64.Load2xVector128AndUnzip(Doubles(ref column) + row * 2);
+            (f0, f1) = (a.As<double, T>(), b.As<double, T>());
         }
     }
 
@@ -251,19 +261,13 @@ public static partial class Interleaved
     {
         if (Unsafe.SizeOf<T>() == 4)
         {
-            fixed (float* s = &Unsafe.As<T, float>(ref column))
-            {
-                var (a, b, c) = AdvSimd.Arm64.Load3xVector128AndUnzip(s + row * 3);
-                (f0, f1, f2) = (a.As<float, T>(), b.As<float, T>(), c.As<float, T>());
-            }
+            var (a, b, c) = AdvSimd.Arm64.Load3xVector128AndUnzip(Floats(ref column) + row * 3);
+            (f0, f1, f2) = (a.As<float, T>(), b.As<float, T>(), c.As<float, T>());
         }
         else
         {
-            fixed (double* s = &Unsafe.As<T, double>(ref column))
-            {
-                var (a, b, c) = AdvSimd.Arm64.Load3xVector128AndUnzip(s + row * 3);
-                (f0, f1, f2) = (a.As<double, T>(), b.As<double, T>(), c.As<double, T>());
-            }
+            var (a, b, c) = AdvSimd.Arm64.Load3xVector128AndUnzip(Doubles(ref column) + row * 3);
+            (f0, f1, f2) = (a.As<double, T>(), b.As<double, T>(), c.As<double, T>());
         }
     }
 
@@ -272,53 +276,35 @@ public static partial class Interleaved
     {
         if (Unsafe.SizeOf<T>() == 4)
         {
-            fixed (float* s = &Unsafe.As<T, float>(ref column))
-            {
-                var (a, b, c, d) = AdvSimd.Arm64.Load4xVector128AndUnzip(s + row * 4);
-                (f0, f1, f2, f3) = (a.As<float, T>(), b.As<float, T>(), c.As<float, T>(), d.As<float, T>());
-            }
+            var (a, b, c, d) = AdvSimd.Arm64.Load4xVector128AndUnzip(Floats(ref column) + row * 4);
+            (f0, f1, f2, f3) = (a.As<float, T>(), b.As<float, T>(), c.As<float, T>(), d.As<float, T>());
         }
         else
         {
-            fixed (double* s = &Unsafe.As<T, double>(ref column))
-            {
-                var (a, b, c, d) = AdvSimd.Arm64.Load4xVector128AndUnzip(s + row * 4);
-                (f0, f1, f2, f3) = (a.As<double, T>(), b.As<double, T>(), c.As<double, T>(), d.As<double, T>());
-            }
+            var (a, b, c, d) = AdvSimd.Arm64.Load4xVector128AndUnzip(Doubles(ref column) + row * 4);
+            (f0, f1, f2, f3) = (a.As<double, T>(), b.As<double, T>(), c.As<double, T>(), d.As<double, T>());
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static unsafe void Store2<T>(Vector128<T> f0, Vector128<T> f1, ref T column, nuint row)
     {
-        if (Unsafe.SizeOf<T>() == 4)
-            fixed (float* d = &Unsafe.As<T, float>(ref column))
-                AdvSimd.Arm64.StoreVectorAndZip(d + row * 2, (f0.AsSingle(), f1.AsSingle()));
-        else
-            fixed (double* d = &Unsafe.As<T, double>(ref column))
-                AdvSimd.Arm64.StoreVectorAndZip(d + row * 2, (f0.AsDouble(), f1.AsDouble()));
+        if (Unsafe.SizeOf<T>() == 4) AdvSimd.Arm64.StoreVectorAndZip(Floats(ref column) + row * 2, (f0.AsSingle(), f1.AsSingle()));
+        else AdvSimd.Arm64.StoreVectorAndZip(Doubles(ref column) + row * 2, (f0.AsDouble(), f1.AsDouble()));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static unsafe void Store3<T>(Vector128<T> f0, Vector128<T> f1, Vector128<T> f2, ref T column, nuint row)
     {
-        if (Unsafe.SizeOf<T>() == 4)
-            fixed (float* d = &Unsafe.As<T, float>(ref column))
-                AdvSimd.Arm64.StoreVectorAndZip(d + row * 3, (f0.AsSingle(), f1.AsSingle(), f2.AsSingle()));
-        else
-            fixed (double* d = &Unsafe.As<T, double>(ref column))
-                AdvSimd.Arm64.StoreVectorAndZip(d + row * 3, (f0.AsDouble(), f1.AsDouble(), f2.AsDouble()));
+        if (Unsafe.SizeOf<T>() == 4) AdvSimd.Arm64.StoreVectorAndZip(Floats(ref column) + row * 3, (f0.AsSingle(), f1.AsSingle(), f2.AsSingle()));
+        else AdvSimd.Arm64.StoreVectorAndZip(Doubles(ref column) + row * 3, (f0.AsDouble(), f1.AsDouble(), f2.AsDouble()));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static unsafe void Store4<T>(Vector128<T> f0, Vector128<T> f1, Vector128<T> f2, Vector128<T> f3, ref T column, nuint row)
     {
-        if (Unsafe.SizeOf<T>() == 4)
-            fixed (float* d = &Unsafe.As<T, float>(ref column))
-                AdvSimd.Arm64.StoreVectorAndZip(d + row * 4, (f0.AsSingle(), f1.AsSingle(), f2.AsSingle(), f3.AsSingle()));
-        else
-            fixed (double* d = &Unsafe.As<T, double>(ref column))
-                AdvSimd.Arm64.StoreVectorAndZip(d + row * 4, (f0.AsDouble(), f1.AsDouble(), f2.AsDouble(), f3.AsDouble()));
+        if (Unsafe.SizeOf<T>() == 4) AdvSimd.Arm64.StoreVectorAndZip(Floats(ref column) + row * 4, (f0.AsSingle(), f1.AsSingle(), f2.AsSingle(), f3.AsSingle()));
+        else AdvSimd.Arm64.StoreVectorAndZip(Doubles(ref column) + row * 4, (f0.AsDouble(), f1.AsDouble(), f2.AsDouble(), f3.AsDouble()));
     }
 
     // ---------------- 256 bits (AVX2) ----------------
