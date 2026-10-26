@@ -76,9 +76,15 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 6. [ ] **Prefetched lookup chases with a size gate** (decided by the owner's rule "a faster case ships, a slower one
        never": 1.29-1.36x at 16M, slower in cache): the generated row and vector forms prefetch `k` rows ahead
        (record, then row; k = 8 rows / 16 for vectors, from the screen) only when the target table's records and
-       column are past the last-level cache, read once per pass from the machine (Linux `/sys/.../cache/index3/size`,
-       macOS `hw.l3cachesize` or the SLC / `hw.perflevel0.l2cachesize` on Apple), so a world in cache runs today's code.
-       ARM64: no prefetch intrinsic in .NET 10 (SVE only): the gate is off there. Then relation targets and
+       column are past the last-level cache, so a world in cache runs today's code. .NET has no public API for the
+       cache size; read it once per process the way the runtime's own GC does for its gen0 budget
+       (`gcenv.windows.cpp` / `gcenv.unix.cpp`, GetLogicalProcessorCacheSizeFromOS): Windows
+       `GetLogicalProcessorInformationEx(RelationCache)`, Linux `/sys/devices/system/cpu/cpu0/cache/index*/size`
+       (then `sysconf(_SC_LEVEL3_CACHE_SIZE)`), macOS `sysctl hw.l3cachesize`, else `hw.perflevel0.l2cachesize`.
+       Anything unknown (WebAssembly, an OS not listed, a read that fails or returns 0) means off: today's code.
+       Prefetch runs only where `Sse.IsSupported` (x86); ARM64 has no prefetch intrinsic in .NET 10 (SVE only), so
+       the gate is off there and the read is never made. Not `GC.GetConfigurationVariables()["GCGen0MaxBudget"]`:
+       derived from the cache, but configurable and not a contract. Then relation targets and
        `[ForEach]`-key index probes (`TryFind(key.F)`), the probe form scalar group prefetching won at 16M keys.
        Proof: LookupChaseBenchmark 1k / 1M / 16M not slower anywhere, faster past the cache; the owner re-measures on
        a 32 MiB-LLC machine and the M4. Generator files: after the ARM parity agent merges (SystemGenerator, Kernel.Lookups).
