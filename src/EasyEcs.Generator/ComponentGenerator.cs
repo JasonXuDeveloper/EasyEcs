@@ -122,6 +122,12 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 static (node, _) => node is TypeDeclarationSyntax,
                 static (ctx, _) => Setup(ctx.TargetSymbol, ctx.SemanticModel.Compilation, ctx.Attributes[0]))
             .Where(static t => t is not null).Select(static (t, _) => t!).WithTrackingName("NotSaved");
+        // [OrderBy] on a member: the order every world keeps the type's tables in (read through Parts, as the part is).
+        var orders = context.SyntaxProvider.ForAttributeWithMetadataName(Parts.OrderBy,
+                static (node, _) => node is VariableDeclaratorSyntax or PropertyDeclarationSyntax or ParameterSyntax,
+                static (ctx, _) => Order(ctx.TargetSymbol is IParameterSymbol p ? p.ContainingSymbol.ContainingType : ctx.TargetSymbol.ContainingType,
+                    ctx.SemanticModel.Compilation))
+            .Where(static t => t is not null).Select(static (t, _) => t!).WithTrackingName("OrderBy");
         var buffers = bufferUses
             .Where(static b => b.Saved is not null)
             .Select(static (b, _) => b.Saved!)
@@ -136,7 +142,8 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             .WithTrackingName("ModuleInitializers");
         // Only the module initializer reaches it: implementation output.
         var setups = groupBy.Collect().Combine(targetPolicies.Collect()).Select(static (pair, _) => pair.Left.AddRange(pair.Right))
-            .Combine(notSaved.Collect()).Select(static (pair, _) => pair.Left.AddRange(pair.Right));
+            .Combine(notSaved.Collect()).Select(static (pair, _) => pair.Left.AddRange(pair.Right))
+            .Combine(orders.Collect()).Select(static (pair, _) => pair.Left.AddRange(pair.Right));
         context.RegisterImplementationSourceOutput(saved.Collect().Combine(buffers.Collect()).Combine(setups).Combine(initializers), static (spc, pair) =>
         {
             var types = pair.Left.Left.Left.Concat(pair.Left.Left.Right).Concat(pair.Left.Right).Distinct().OrderBy(static t => t.Call, System.StringComparer.Ordinal).ToArray();
@@ -192,6 +199,22 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         string policy = $"(global::EasyEcs.TargetPolicy){attribute.ConstructorArguments[0].Value}";
         return new SavedType($"{(Symbols.Implements(type, Symbols.Relation) ? "RelationWhenTargetDestroyed" : "WhenTargetDestroyed")}<{name}>({policy})",
             name, new EquatableArray<string>([]), "");
+    }
+
+    /// <summary>
+    /// The registration of the order <c>[OrderBy]</c> declares on <paramref name="type"/>
+    /// (<c>OrderBy&lt;T, TKey&gt;(axes, interval, margin)</c>), or null when the part is not written (EECS104 reports
+    /// why) or the module initializer cannot name the type.
+    /// </summary>
+    private static SavedType? Order(INamedTypeSymbol? type, Compilation compilation)
+    {
+        if (type is not { TypeKind: TypeKind.Struct } || Symbols.ContainsTypeParameter(type)
+            || !compilation.IsSymbolAccessibleWithin(type, compilation.Assembly) || !Symbols.IsNameable(type)
+            || Parts.Of(type) is not { WritesOrder: true, OrderOf: { } order })
+            return null;
+        string name = type.ToDisplayString(Symbols.Fqn);
+        string margin = order.Margin.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "f";
+        return new SavedType($"OrderBy<{name}, {order.Type}>({order.Axes}, {order.Interval}, {margin})", name, new EquatableArray<string>([]), "");
     }
 
     /// <summary>

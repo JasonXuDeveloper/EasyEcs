@@ -143,7 +143,7 @@ public sealed partial class World
         var componentMask = mask.Clone();
         archetype = new Archetype(in componentMask, groups);
         if (archetype.Unique) IndexUnique(archetype); // before the table is registered: throws when no index can be made
-        if (TypeDefaults.Any) ApplyDefaults(archetype);
+        if (TypeDefaults.Any || _orderRequests != null) ApplyDefaults(archetype);
         if (groups == null) _archetypes[componentMask] = archetype;
         else _groupedTables[new GroupedTable(componentMask, groupsKey)] = archetype;
 

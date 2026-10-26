@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 namespace EasyEcs;
 
 /// <summary>
-/// The setup every world gives one component type, declared on the type ([WhenTargetDestroyed]) or its grouped member ([GroupBy]) and
+/// The setup every world gives one component type, declared on the type ([WhenTargetDestroyed]) or its grouped or key member ([GroupBy], [OrderBy]) and
 /// registered when its module loads (<see cref="TypeRegistry.GroupBy{T}"/>, <see cref="TypeRegistry.WhenTargetDestroyed{T}"/>):
 /// a world applies it with its first table holding the type, unless the world was set up for the type by hand first.
 /// </summary>
@@ -18,6 +18,9 @@ internal sealed class TypeDefaults
 
     /// <summary>The target rule a world starts with: applied outside the structural gate, before a destroy needs it. Null for none.</summary>
     public Action<World> Rule;
+
+    /// <summary>The order every table holding the type keeps ([OrderBy]): a new one per table. Null for none.</summary>
+    public Func<RowOrder> Order;
 }
 
 /// <summary>The defaults of <typeparamref name="T"/> (a component, or the <see cref="DynamicBuffer{T}"/> of a relation), or null.</summary>
@@ -61,7 +64,15 @@ public sealed partial class World
     {
         foreach (var bit in table.Components)
         {
-            if (ComponentInfo.Of(bit).Defaults is not { } defaults || bit < _setUp.Length && _setUp[bit]) continue;
+            var defaults = ComponentInfo.Of(bit).Defaults;
+            // The lowest ordered bit orders the table: [OrderBy] first, else a world's request (OrderRows).
+            if (table.Order == null && (defaults?.Order ?? RequestedOrder(bit)) is { } order)
+            {
+                table.Order = order();
+                _ordered = true;
+            }
+
+            if (defaults == null || bit < _setUp.Length && _setUp[bit]) continue;
             if (defaults.Group != null)
             {
                 SetUp(bit);

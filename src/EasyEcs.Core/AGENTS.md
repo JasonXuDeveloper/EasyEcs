@@ -11,7 +11,8 @@ When you add, rename or delete a file here, update its line (`verify` checks eve
 Contracts.cs                 IComponent, ITracked, ISingletonComponent, INoStructuralChanges and the other markers
 Declarations.cs              attributes whose code the generators write: [Sum]/[Product]/[Min]/[Max]/[All]/[Any]
                              (a reduction), [LookupKey]/[UniqueKey]/[Group] (an index key, a group), and world setup:
-                             [GroupBy] (on the member: a group every world splits by), [WhenTargetDestroyed], [NotSaved]
+                             [GroupBy] (on the member: a group every world splits by), [OrderBy] (the order of the
+                             tables, overriding an inferred one), [WhenTargetDestroyed], [NotSaved]
 Entity.cs                    the entity handle (id, version, world): Has/Get/Read/TryGet/GetOrAdd/SetIfChanged/
                              Disable/Enable/Clone/Destroy
 Entity.Relations.cs          entity.Link / Unlink / Links (IRelation buffers + their index)
@@ -61,8 +62,10 @@ Interleaved.cs               the deinterleaving loads / interleaving stores of g
                              marks rows runs them masked)
 LaneMath.cs                  lane functions of generated vector loops .NET has no vector form of: the quotient of
                              int / uint lanes through doubles (exact), FloatMode.Fast's Log10 / Sinh / Cosh / Tanh of floats
-Lanes.cs                     Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress),
-                             for batch methods and CollectIds; Lanes.Bits: a vector loop's lane mask as bits
+Lanes.cs                     Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress,
+                             AVX2 permutation table, 128-bit byte shuffle: NEON TBL / PSHUFB, picked at run time), for
+                             batch methods, Emit and CollectIds; Lanes.Rows: a mask to row numbers over it (the one
+                             helper generated loops call); Lanes.Bits: a vector loop's lane mask as bits
 MarkedRows.cs                the rows a vector loop marked for one structural change (words of 64 rows per table,
                              pooled per world), applied when the pass ends: SetAll / RemoveAll / DisableAll /
                              EnableAll / DestroyAll (World.Bulk.cs: SetMarked ... DestroyMarked, WalkMarks)
@@ -112,6 +115,14 @@ Relations.cs                 IRelation buffers + RelationIndex<T> (entities link
 Hierarchy.cs                 ChildOf (the hierarchy relation); World.Hierarchy.cs: Children, destroy cascades,
                              TargetPolicyExtensions (what happens to links when their target is destroyed)
 World.Groups.cs              GroupBy: tables split by the value of an IGroup component
+RowOrder.cs                  ordered tables: IRowOrder<T> (a key and a box point, static members; written by the
+                             generator), RowKeys (Morton codes by a cell, key bits), IOrderKey<TKey> + DeclaredOrder
+                             ([OrderBy]'s part), RowOrder (Archetype.Order: the LSD radix sort of (key, row), the boxes
+                             per block of 8, widened where a row moves in, reset by a restore)
+RowBlocks.cs                 RowBlocks: the read path of one ordered table (blocks, boxes per axis, columns, ids,
+                             Pairs: the block pairs within a reach, a sweep) and BlockPair
+World.Order.cs               OrderRows<T, TOrder> (the request generated setup makes), the cadence (SortDue from
+                             World.Run), SortRows<T>, Blocks<T> (OrderedTables)
 Cleanup.cs                   ICleanupComponent + Retired tag (entities kept alive until their cleanup components go)
 Disabled.cs                  Disabled<T> tag (the value kept, the component hidden from queries); its bit is a
                              non-generic DisabledTag per component (ComponentInfo.DisablerOf)
@@ -149,7 +160,8 @@ TypeIndex.cs                 dense per-type index families (ComponentType bit, S
 Archetype.cs                 a table: mask, EntitySlot rows (version + id), one column per component (unmanaged
                              columns pinned and 64-byte aligned), presence bits + absent counts per column,
                              per-bit and per-signature add transitions (copy plans); swap-remove / tombstones,
-                             FillHoles; change-tick summaries (LastWrite per column, WordTicks per 64 rows, BlockTicks
+                             FillHoles, Permute (a re-sort: every column, presence bit, change tick and slot);
+                             change-tick summaries (LastWrite per column, WordTicks per 64 rows, BlockTicks
                              per 4,096 rows for writes and for removals), Stamp/StampRows/StampWord/SetTick,
                              MarkPresent/MarkAbsent, CloneRow; Resize (growth and Trim, which shrinks a table to a
                              power of two); TableCopy: the copy of a table's rows a snapshot or load holds, naming its

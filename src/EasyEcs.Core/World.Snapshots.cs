@@ -150,7 +150,7 @@ public sealed partial class World
 
     /// <summary>
     /// Throws when a pass iterates this world: <paramref name="call"/> (named in the message) rewrites or drops whole
-    /// tables, or reads them dense (Capture, Restore, the saves and loads, MoveEntities, GroupBy, RemoveTypes, TrimExcess).
+    /// tables, or reads them dense (Capture, Restore, the saves and loads, MoveEntities, GroupBy, SortRows, RemoveTypes, TrimExcess).
     /// </summary>
     private void ThrowIfIterating(string call)
     {

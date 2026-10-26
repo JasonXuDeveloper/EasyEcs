@@ -26,13 +26,13 @@ internal sealed class Parts
     public enum Op { Sum, Product, Min, Max, All, Any }
 
     public const string Key = "EasyEcs.LookupKeyAttribute", UniqueKey = "EasyEcs.UniqueKeyAttribute", Group = "EasyEcs.GroupAttribute",
-        GroupBy = "EasyEcs.GroupByAttribute";
+        GroupBy = "EasyEcs.GroupByAttribute", OrderBy = "EasyEcs.OrderByAttribute";
 
     /// <summary>
     /// The rule a problem breaks: the analyzer's descriptor for it (EECS062, EECS063, EECS064; a key's and a group's are
     /// EECS036's).
     /// </summary>
-    public enum Rule { NotPartial, HandWritten, BadField, BadKey, BadGroup }
+    public enum Rule { NotPartial, HandWritten, BadField, BadKey, BadGroup, BadOrder }
 
     /// <summary>One thing the generator cannot write: where, which rule, and the message's text.</summary>
     public readonly record struct Problem(ISymbol Where, Rule Rule, string Text);
@@ -50,6 +50,13 @@ internal sealed class Parts
     /// <summary>A group declared by <c>[Group]</c>: the expression returned (<c>(int)Zone</c> for an enum), whether the part adds IGroup.</summary>
     public sealed record GroupPart(string Value, bool Declares, bool ReadOnly);
 
+    /// <summary>
+    /// An order declared by <c>[OrderBy]</c>: the key member and its type (as the part writes it), the expression of the
+    /// box point (a <c>Vector3</c>) and its axes, the cadence and margin the registration passes, and whether both
+    /// members may be <c>readonly</c>.
+    /// </summary>
+    public sealed record OrderPart(string Member, string Type, string Point, int Axes, int Interval, float Margin, bool ReadOnly);
+
     public INamedTypeSymbol Type { get; }
 
     /// <summary>The reduction's fields, in declaration order (empty when it declares none).</summary>
@@ -63,6 +70,9 @@ internal sealed class Parts
 
     /// <summary>The declared group, or null.</summary>
     public GroupPart? GroupOf { get; private set; }
+
+    /// <summary>The declared order, or null.</summary>
+    public OrderPart? OrderOf { get; private set; }
 
     /// <summary>What keeps the generator from writing the part (each reported by the analyzer).</summary>
     public List<Problem> Problems { get; } = [];
@@ -83,8 +93,11 @@ internal sealed class Parts
     /// <summary>Whether the generator writes the group.</summary>
     public bool WritesGroup => GroupOf != null && !Blocked(Rule.BadGroup);
 
+    /// <summary>Whether the generator writes the order's members (and its registration: ComponentGenerator).</summary>
+    public bool WritesOrder => OrderOf != null && !Blocked(Rule.BadOrder);
+
     /// <summary>Whether the generator writes anything into the type.</summary>
-    public bool Writes => WritesReduction || WritesKey || WritesGroup;
+    public bool Writes => WritesReduction || WritesKey || WritesGroup || WritesOrder;
 
     /// <summary>
     /// Whether <paramref name="type"/> or one of its members carries <paramref name="attribute"/>: the cheap test the
@@ -126,7 +139,8 @@ internal sealed class Parts
         parts.ReadReduction(members);
         parts.ReadKey(members);
         parts.ReadGroup(members);
-        if (parts.Fields.Count == 0 && parts.KeyOf == null && parts.GroupOf == null && parts.Problems.Count == 0) return null;
+        parts.ReadOrder(members);
+        if (parts.Fields.Count == 0 && parts.KeyOf == null && parts.GroupOf == null && parts.OrderOf == null && parts.Problems.Count == 0) return null;
         if (NotPartial(type) is { } level)
             parts.Problems.Add(new Problem(level, Rule.NotPartial, level.Name));
         return parts;
@@ -252,6 +266,85 @@ internal sealed class Parts
         else if (Type.GetMembers().Any(m => m is IPropertySymbol p && (p.Name == "Group" || p.ExplicitInterfaceImplementations.Any(i => i.Name == "Group")) && !IsGeneratedPart(m)))
             Problems.Add(new Problem(group.Where, Rule.BadGroup, "writes Group itself and declares it with [Group]: remove one"));
     }
+
+    /// <summary>
+    /// <c>[OrderBy]</c> on one member of a component, whose type a radix sort orders (an integer, <c>char</c>,
+    /// <c>bool</c>, <c>float</c>, <c>double</c> or an enum); the box members it names (up to three <c>float</c> members,
+    /// or one <c>Vector2</c> / <c>Vector3</c>), an interval of 1 or more, a finite margin of 0 or more, and no
+    /// <c>OrderKey</c> or <c>BoxPoint</c> written by hand (EECS104).
+    /// </summary>
+    private void ReadOrder(List<Member> members)
+    {
+        var orders = new List<(Member Member, AttributeData Attribute)>();
+        foreach (var member in members)
+            foreach (var a in member.Attributes)
+                if (Symbols.Named(a.AttributeClass, OrderBy)) orders.Add((member, a));
+        if (orders.Count == 0) return;
+        var (key, attribute) = orders[0];
+        string Name(ITypeSymbol t) => t.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+        void Bad(ISymbol where, string text) => Problems.Add(new Problem(where, Rule.BadOrder, text));
+
+        int interval = 10;
+        float margin = 0;
+        foreach (var named in attribute.NamedArguments)
+        {
+            if (named.Key == "Interval" && named.Value.Value is int i) interval = i;
+            if (named.Key == "Margin" && named.Value.Value is float f) margin = f;
+        }
+
+        // The box members: the names the attribute gives, each an instance float, or one Vector2 / Vector3.
+        var names = attribute.ConstructorArguments.Length == 1 && attribute.ConstructorArguments[0].Kind == TypedConstantKind.Array
+            ? attribute.ConstructorArguments[0].Values.Select(v => v.Value as string ?? "").ToList()
+            : new List<string>();
+        var axes = new List<string>();
+        int count = 0;
+        bool readOnly = key.ReadOnly;
+        string? boxProblem = null;
+        foreach (var name in names)
+        {
+            var axis = members.FirstOrDefault(m => m.Name == name);
+            if (axis == null)
+            {
+                boxProblem ??= $"names '{name}' for its box, which is no field or property of '{Type.Name}'";
+                continue;
+            }
+
+            readOnly &= axis.ReadOnly;
+            int width = axis.Type.SpecialType == SpecialType.System_Single ? 1
+                : Symbols.Named(axis.Type, "System.Numerics.Vector2") ? 2
+                : Symbols.Named(axis.Type, "System.Numerics.Vector3") ? 3 : 0;
+            if (width == 0) boxProblem ??= $"names '{name}', a {Name(axis.Type)}, for its box: a box covers float members, or one Vector2 or Vector3";
+            else if (width > 1 && names.Count > 1) boxProblem ??= $"names '{name}', a {Name(axis.Type)}, beside other members: a Vector2 or Vector3 is the box's only member";
+            count += width;
+            axes.Add(width == 2 ? $"new global::System.Numerics.Vector3({Code.Escape(name)}, 0f)" : Code.Escape(name));
+        }
+
+        string point = count == 0 || boxProblem != null || count > 3 ? "default"
+            : names.Count == 1 && count > 1 ? axes[0]
+            : $"new global::System.Numerics.Vector3({string.Join(", ", axes.Concat(Enumerable.Repeat("0f", 3 - count)))})";
+        OrderOf = new OrderPart(Code.Escape(key.Name), key.Type.ToDisplayString(Symbols.Fqn), point, count, interval, margin, readOnly);
+
+        string Of(Member m) => $"'{m.Where.Name}'";
+        if (orders.Count > 1) Bad(orders[1].Member.Where, $"has two order keys ([OrderBy] on {Of(key)} and {Of(orders[1].Member)}), but a table keeps one order");
+        else if (!Symbols.Implements(Type, Symbols.Component) || Symbols.Implements(Type, Symbols.Singleton))
+            Bad(key.Where, "declares [OrderBy], but only a component's tables have rows to order");
+        else if (!Orderable(key.Type))
+            Bad(key.Where, $"is ordered by {Name(key.Type)} ([OrderBy] on {Of(key)}), which a radix sort cannot order: a key is an integer, char, bool, float, double or an enum");
+        else if (boxProblem != null) Bad(key.Where, boxProblem);
+        else if (count > 3) Bad(key.Where, $"names {count} axes for its box, but a box covers up to 3");
+        else if (interval < 1) Bad(key.Where, $"is sorted every {interval} updates: the interval is 1 or more");
+        else if (!(margin >= 0) || float.IsInfinity(margin)) Bad(key.Where, $"widens its boxes by {margin}: the margin is a finite distance, 0 or more");
+        else if (Type.GetMembers().FirstOrDefault(m => m is IPropertySymbol p && (p.Name is "OrderKey" or "BoxPoint"
+                     || p.ExplicitInterfaceImplementations.Any(i => i.Name is "OrderKey" or "BoxPoint")) && !IsGeneratedPart(m)) is { } own)
+            Bad(own, $"writes {own.Name.Substring(own.Name.LastIndexOf('.') + 1)} itself and declares it with [OrderBy]: remove one");
+    }
+
+    /// <summary>Whether a radix sort orders <paramref name="type"/>: an integer, char, bool, float, double or an enum of an integer.</summary>
+    public static bool Orderable(ITypeSymbol type) =>
+        (type is INamedTypeSymbol { TypeKind: TypeKind.Enum, EnumUnderlyingType: { } underlying } ? underlying : type).SpecialType
+            is SpecialType.System_Boolean or SpecialType.System_Char or SpecialType.System_SByte or SpecialType.System_Byte
+            or SpecialType.System_Int16 or SpecialType.System_UInt16 or SpecialType.System_Int32 or SpecialType.System_UInt32
+            or SpecialType.System_Int64 or SpecialType.System_UInt64 or SpecialType.System_Single or SpecialType.System_Double;
 
     /// <summary>The hand-written <c>Group</c> of an <c>IGroup</c> (the member a <c>[GroupBy]</c> may mark without declaring a part).</summary>
     private bool IsOwnGroup(Member member) =>
