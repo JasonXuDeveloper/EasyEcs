@@ -202,6 +202,13 @@ tools/bench.sh GeneratorBenchmark
   the file for top-level statements). With nullable off a bind costs the enclosing statement only, with nullable on it
   runs nullable analysis of the whole member: a test that guards against body binding enables nullable
   (`AnEditElsewhereBindsNoBody` passed falsely without it).
+- **Speculative models, never compilation copies**: to bind code the user did not write (an inlined callee, a
+  desugared view), host it in a speculative model of the method body (a new local function can change the method's
+  parameters). A copy of the compilation per method cost +80 ms and +19 MB per keystroke for 40 view methods.
+- **Body facts belong in implementation-only stages** (`SystemLoops`, merged back by `SystemCode`): what a method
+  body vectorizes to is never computed in the declaration transform, which reruns on every IDE keystroke.
+- **Measure the analyzer too**: when more methods vectorize, report CompileAndAnalyze − Compile next to the
+  generator numbers; a full translation costs more than an early bail.
 - **No display strings**: `Symbols.Named(symbol, "Ns.Type<T>")`, never `ToDisplayString() ==`.
 - Models are equatable and symbol-free (`EquatableArray`, records of strings and ints).
 - No `CompilationProvider` in a per-item pipeline, and no `Combine` with a whole-compilation value: `Select` the

@@ -90,6 +90,10 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
 - Patterns in `samples/`, `BattleServer.cs`, `WorldSimulation.cs`, templates and docs examples that a rule should flag
   but does not (exemplary code reports nothing).
 
+- **Report only what the generator would build**: EECS055 / EECS056 check `Symbols.IsForEach` (`IsValidForEach`
+  alone also accepts methods without `[ForEach]`). Generated extension members resolve in the analyzer but not in
+  the generator, so effect analysis treats them alike (a by-value receiver), or the two disagree.
+
 ## Tests: every rule, every edge
 
 The analyzer is tested like the runtime: `dotnet test` runs its tests with the others, and a rule without them is not

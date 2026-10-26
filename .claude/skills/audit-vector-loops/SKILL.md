@@ -113,8 +113,16 @@ changes nothing and cannot fail:
 
 - **Short-circuit guards**: `b != 0 && a / b > k` must not divide by zero in a masked-off lane: a safe divisor under
   the mask, or scalar. Integer division, checked arithmetic, array indexing and casts that throw are the usual cases.
-- **Calls**: a call into user code or the runtime that may write state, allocate or throw keeps the method scalar; a
-  known pure call (math) is translated.
+- **Calls**: a call to user code with source in the compilation is inlined before translation (`Kernel.Inlining.cs`:
+  static, extension and C# 14 extension members, struct instance members including ones writing `this`, local
+  functions, up to 8 deep; ref/out bound to the caller's variables). A known pure runtime call (math) is translated.
+  What stays a call keeps the method scalar, with its reason from `ReasonForCall` (shared by the generator and the
+  analyzer): virtual, interface or delegate targets, another assembly, recursion, deeper than 8, a body refused on
+  syntax before any binding (a loop, lambda, try/throw, switch, `fixed`/unsafe, stackalloc, ...), a writing helper
+  inside a larger expression (fixable: "call it in a statement of its own"), and a body naming a private, protected
+  or file-local member: the inlined body moves into the generated job, which cannot reach it (fixable: "make it
+  internal", EECS096's wording). A `static readonly` field a helper reads becomes a setup uniform, read once per run
+  (never per vector: the Native AOT class-init rule). Lambda passes do not inline.
 - **Shared state**: writes to statics, captured fields or another entity; the order of anything observable (records,
   logs) beyond what `Emit<T>` keeps.
 - **A method reading its own write**: a structural write deferred to the end of the pass is correct only when the
