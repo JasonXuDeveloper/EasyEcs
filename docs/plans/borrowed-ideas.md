@@ -64,3 +64,31 @@ Both go to `docs/owner-review.md` until such a machine is available.
 ## 4. Order
 
 1 after gather-always; 2 and 4 any time an agent is free (benchmark first); 3 with `locality.md` L1; 5 and 6 low.
+
+## 5. Results
+
+### Item 2: timer wheel (bar not met: dropped)
+
+`TimerWheelBenchmark` (`benchmarks/EasyEcs.Benchmark/Locality/Timers.cs`, checked in setup and in `LocalityTests`:
+every version does the same work on the same ticks over 400 ticks). 100,000 entities, periods of 50 to 150 ticks
+(1 % wake per tick), per tick, one thread. BenchmarkDotNet default job (2 launches x 8 iterations), two rounds;
+Xeon 2.10 GHz VM, 4 cores, AVX-512, .NET 10.0.13.
+
+| Version | Mean r1 | Ratio r1 | Mean r2 | Ratio r2 | Allocated |
+|---|---|---|---|---|---|
+| Scan: `[ForEach]` comparing `Until` with the clock (the generator's vector loop; baseline) | 21.50 us | 1.00 | 20.90 us | 1.00 | 0 B |
+| The same method row by row (`SimdMode.Off`) | 73.94 us | 3.45 | 62.32 us | 2.98 | 0 B |
+| Countdown: `[ForEach]` decrementing every row (vector loop) | 21.33 us | 0.99 | 21.25 us | 1.02 | 0 B |
+| Wheel: 256 buckets of ids, the woken read and rescheduled through `GetEntity` / `Get` | 25.31 us | 1.18 | 26.37 us | 1.26 | 0 B |
+| Wheel + tag: the woken tagged (a presence flip), a `[ForEach]` over the tag, `RemoveAll` | 77.43 us | 3.61 | 80.38 us | 3.85 | 0 B |
+
+Load average (1 / 5 / 15 min) at the start of each run: r1 2.09 / 1.82 / 1.72, r2 3.62 / 2.51 / 1.99.
+
+Verdict: the bar (3x against the scan) is not met; the wheel is 1.2x **slower**. The scan the generator writes reads
+two ints per row in vectors of 8: 100,000 rows cost 21 us, 0.2 ns a row, while the wheel pays about 25 ns per woken
+entity (three record lookups by id, a scattered row, the insert into the next bucket), so at 1,000 woken per tick the
+two meet. The wheel wins only against the scalar scan (2.9x to 3.5x) or with far fewer wakes per tick (break-even near
+0.8 % at this cost per woken entity, so it pays only for waits much longer than 100 ticks, or rows wider than the
+vector loop can take). The tag form is worse than both: the presence flips and the pass over the tag's words cost more
+than the scan. What would change the verdict: a wait the vector loop cannot take (EECS055 reasons in the waiting
+check), or many more waiting entities per wake (1M waiting, 0.1 % waking), measured against the vector scan.

@@ -21,6 +21,16 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                Sparse, StructuralLoop (a tag set under a condition: vector loop + marked rows against the
                                scalar method, a command buffer and SetAll), SystemDispatch (what a system costs per update apart from its rows), Trim,
                                Unload, View (a pass taking a [View] against the refs it stands for, vector and scalar, and AsX against Get / Read)) + MicroBenchmarks.
+                               Phase 0 of docs/plans/locality.md (hand-written prototypes that decide what gets built;
+                               their code in Locality/, linked into the unit tests by LocalityTests): Pairs (sums over
+                               neighbors within a cutoff: a grid read through lookups, a grid of copies, neighbor lists,
+                               the cluster-pair kernel over Morton-sorted blocks with its sort every 1 / 10 / 20 ticks;
+                               Locality/Crowd.cs), NearestZombie / NearestPlayer (the samples' nearest searches against a
+                               search of sorted blocks; Locality/Nearest.cs, Locality/SortedBlocks.cs: the Morton sort,
+                               blocks of 8 with boxes, the box tree), Compress (a mask to a row list: branch, branchless,
+                               AVX2 permutation table, AVX-512 compress, Lanes.Compact) and BatchProbe (one key at a time
+                               against vertical probes with and without refill; Locality/Operators.cs), TimerWheel
+                               (borrowed-ideas.md item 2: scans of wake ticks against a timer wheel; Locality/Timers.cs).
                                Always measure with BenchmarkDotNet.
 benchmarks/EasyEcs.Benchmark.Plugin/  a collectible plugin (Scoring.cs) the Unload benchmark loads and unloads
 benchmarks/EasyEcs.Comparison/ BenchmarkDotNet against Arch, Friflo.Engine.ECS and DefaultEcs, every result checked in
