@@ -318,6 +318,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f) => f.V = Fn(f.V); static readonly System.Func<float, float> Fn = static x => x;", "it calls Func.Invoke, a delegate, whose target the vector loop cannot see")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = B.K(f.V); static readonly Base B = new Base(); } public class Base { public virtual float K(float x) => x;", "it calls Base.K, which is virtual: the vector loop cannot see which override runs")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = Take(ref f) + 1; static float Take(ref F f) { f.V++; return f.V; }", "it calls S.Take, which changes its arguments or its entity, inside an expression: call it in a statement of its own (var r = ...;)", true)] // and none for Take: EECS055 is for [ForEach] methods only
+    [TestCase("[ForEach] static void A(ref F f) => f.V = R.Scaled(f.V); } public static class R { static readonly float Scale = 2; public static float Scaled(float x) => x * Scale;", "it calls R.Scaled, whose body names private field 'float R.Scale' of R, which code outside its type (or file) cannot reach: make it internal", true)]
     [TestCase("[ForEach] static void A(ref F f) => f.V = Log(f.V) * 2; static float Log(float x) { System.Console.WriteLine(x); return x; }", "it calls S.Log, which calls Console.WriteLine")]
     [TestCase("[ForEach] static void A(ref F f) { for (int i = 0; i < 2; i++) f.V++; }", "'for (int i = 0; i < 2; i++) f.V++;' is not supported")]
     [TestCase("[ForEach] static void A(ref F f, in H h) => h.V.ToString();", "it calls Single.ToString, which is defined in another assembly")]
@@ -503,6 +504,22 @@ public class GeneratorTests
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(global::System.Numerics.Vector<int>.AllBitsSet & ~__has1\) != global::System.Numerics.Vector<int>.Zero;").Count, Is.EqualTo(1), generated);
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__pass & ~__has1\) != global::System.Numerics.Vector<int>.Zero;").Count, Is.EqualTo(1), generated);
         Assert.That(generated, Does.Not.Contain("__bail |= (__pass & __m"), generated);
+    }
+
+    // A static readonly field a helper reads is a uniform value of the loop: read once per run, in the setup before the
+    // loop, never per vector (Native AOT checks the class's initialization at each read).
+    [Test]
+    public void AStaticReadonlyFieldAHelperReadsIsReadOncePerRun()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f) => f.V = Rates.Scaled(f.V); } " +
+            "public static class Rates { internal static readonly float Scale = 2.5f; public static float Scaled(float x) => x * Scale; }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        var reads = generated.Split('\n').Where(l => l.Contains("Rates.Scale")).ToArray();
+        Assert.That(reads, Is.Not.Empty, generated);
+        Assert.That(reads, Has.All.Match(@"^\s*var __\w+ = "), generated); // setup locals only
     }
 
     // A call under an if the loop computes: a cold branch, whose lanes send the vector's rows to the method.
