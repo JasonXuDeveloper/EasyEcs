@@ -256,6 +256,11 @@ Ratio against `GridLookups` (lower is faster), 4-wide `Vector128` kernel (eedfeb
 | 100k crowd | 0.52 | 0.46 | 0.15 | 0.32 | 0.14 | 0.12 | 0.13 |
 | 100k sparse | 0.83 | **0.40** | 0.31 | 1.40 | 0.48 | 0.40 | 0.60 |
 
+The NEON kernel measured here is a direct port (the 8-row block run as two 4-lane halves, the x86 layout and order
+kept), not a kernel tuned for NEON: the gap on sparse maps is first an optimization still to do, not a limit of
+ARM64. L2 tunes it as it tunes the x86 one (4-row blocks, FMA, the j-loop order for 128-bit registers, llvm-mca on
+the Tier1 loop).
+
 Reading: crowded maps meet the 2x bar on ARM64 too (sort on a cadence: 2-8x). Sparse maps do not with the 8-row
 blocks: ClustersSort10 is 1.1-2.1x and per-row neighbor lists win (2.5-3.4x), because a 128-bit vector covers half a
 block and a sparse block's box admits many empty pairs. What L2 must check on ARM64 before it picks the kernel:
