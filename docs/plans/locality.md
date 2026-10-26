@@ -260,7 +260,12 @@ Reading: crowded maps meet the 2x bar on ARM64 too (sort on a cadence: 2-8x). Sp
 blocks: ClustersSort10 is 1.1-2.1x and per-row neighbor lists win (2.5-3.4x), because a 128-bit vector covers half a
 block and a sparse block's box admits many empty pairs. What L2 must check on ARM64 before it picks the kernel:
 blocks of 4 rows (GROMACS's 4x4 NEON kernel: boxes tighter, one vector per block) against the 8-row block run as two
-halves, and the neighbor-list form for sparse maps (the choice by measured density, as D130 chooses chunks). Compress
+halves, and the neighbor-list form for sparse maps (the choice by measured density, as D130 chooses chunks).
+The owner's call (2026-10-26): sparse maps on ARM64 are still faster than the grid (1.1-2.1x), so cluster pairs ship
+there too and get optimized; the 2x bar decides whether a design is built, not whether a faster case is kept. What
+must never ship is a slower case: re-sorting every tick on a sparse map (ClustersSort1: 1.06-1.55x slower) is avoided
+by the cadence the generator picks (from the cutoff, the margin and the measured drift), and each kernel choice is
+measured against the row loop it replaces. Compress
 on ARM64: the owner's CompressBenchmark table is still to be recorded here.
 
 ### 6.2 Nearest (4.2): met for the packed start and NearestPlayer, not met on a spread map
