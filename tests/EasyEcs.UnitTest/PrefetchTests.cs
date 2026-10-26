@@ -10,7 +10,7 @@ namespace EasyEcs.UnitTest;
 /// <summary>Methods chasing other entities (Lookup reads at an id the row holds) whose row form prefetches.</summary>
 public static class ChaseKernels
 {
-    // The row form: a job over runs of rows prefetching the records 16 rows ahead and the rows 8 ahead.
+    // The row form: past the cache, a twin job over runs of rows prefetching the records 16 rows ahead and the rows 8 ahead.
     [ForEach]
     public static void Chase(in Beacon beacon, in Tracker tracker, ref Course course, Lookup<Beacon> beacons)
     {
@@ -23,6 +23,7 @@ public static class ChaseKernels
     public static void Check(in Tracker tracker, ref Course course, Lookup<Beacon> beacons) =>
         course = beacons.Has(tracker.Target) ? new Course(beacons.Read(tracker.Target).X, 1) : new Course(-1, 0);
 
+    // In parallel the row form keeps today's job (ForEachParallel); only a parallel vector loop prefetches.
     [ForEach(Parallel = true)]
     public static void ChaseParallel(in Beacon beacon, in Tracker tracker, ref Course course, Lookup<Beacon> beacons)
     {
@@ -133,8 +134,9 @@ public class PrefetchTests
     }
 
     /// <summary>
-    /// What the generator writes: the gate read once per pass in the job's initializer, the row form's prefetches (the
-    /// row stage only for a read, not for Has), the vector loop's per vector, and none for an id the method may write.
+    /// What the generator writes: the row form's twin job prefetching its chases (the row stage only for a read, not for
+    /// Has), picked by the pass past the cache; the vector loop's prefetches per vector behind the gate its job reads once
+    /// per pass; none for an id the method may write.
     /// </summary>
     [Test]
     public void TheJobsPrefetchTheirChasesBehindTheGate()
@@ -155,15 +157,21 @@ public class PrefetchTests
         GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string text = string.Concat(output.SyntaxTrees.Where(GeneratorTests.IsCode).Select(t => t.ToString()));
-        string Job(string name) => text.Split("internal ref struct ").Single(j => j.StartsWith(name + "Job"));
+        string Job(string name) => text.Split("internal ref struct ").Single(j => j.StartsWith(name + " "));
         const string add = "global::System.Runtime.CompilerServices.Unsafe.Add";
 
-        Assert.That(text, Does.Contain("new __ForEach.RowJob0 { World = world, f3 = global::EasyEcs.Lookup<global::Game.Spot>.Prefetches(world) }"));
-        Assert.That(Job("Row"), Does.Contain($".Prefetch({add}(ref r2, i + 16).Target);").And.Contain($".PrefetchRow({add}(ref r2, i + 8).Target);")
-            .And.Contain("if ((f3) && rows > 16)"));
-        Assert.That(Job("Seen"), Does.Contain($".Prefetch({add}(ref r1, i + 16).Target);").And.Not.Contain(".PrefetchRow("));
-        Assert.That(Job("Vector"), Does.Contain("if (f3) __p3.PrefetchAhead(ref e2, 2, 1, i, rows, 16, "));
-        Assert.That(Job("Written"), Does.Not.Contain("Prefetch").And.Not.Contain("public bool f"));
+        // The row form: the call site picks the twin past the cache, today's job otherwise.
+        Assert.That(text, Does.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.Prefetches(world))")
+            .And.Contain("new __ForEach.RowJob0Chases { World = world }").And.Contain("new __ForEach.RowJob0 { World = world }"));
+        Assert.That(Job("RowJob0Chases"), Does.Contain($".Prefetch({add}(ref r2, i + 16).Target);").And.Contain($".PrefetchRow({add}(ref r2, i + 8).Target);")
+            .And.Contain("if (rows > 16)"));
+        Assert.That(Job("RowJob0"), Does.Not.Contain("Prefetch"));
+        Assert.That(Job("SeenJob1Chases"), Does.Contain($".Prefetch({add}(ref r1, i + 16).Target);").And.Not.Contain(".PrefetchRow("));
+        // The vector loop: per vector, behind the gate the job's initializer reads once per pass.
+        Assert.That(text, Does.Contain("f3 = global::EasyEcs.Lookup<global::Game.Spot>.Prefetches(world)"));
+        Assert.That(Job("VectorJob2"), Does.Contain("if (f3) __p3.PrefetchAhead(ref e2, 2, 1, i, rows, 16, "));
+        Assert.That(text, Does.Not.Contain("WrittenJob3Chases"));
+        Assert.That(Job("WrittenJob3"), Does.Not.Contain("Prefetch").And.Not.Contain("public bool f"));
     }
 
     /// <summary>The readers of the cache size on this machine's operating system, and their parsing.</summary>
