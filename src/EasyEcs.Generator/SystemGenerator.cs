@@ -113,6 +113,18 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     private static string Emit(UpdateModel model)
     {
         var owner = model.Owner;
+        if (owner.IsSystem && !model.One)
+        {
+            // A method that shares a walk with others (fusion) runs its own job row by row in it: no twin prefetching
+            // its chases, and its line says nothing of them.
+            var groups = FusionGroups(model);
+            var methods = model.Methods.ToArray();
+            for (int i = 0; i < methods.Length; i++)
+                if (groups[i] > 1)
+                    for (int k = i; k < i + groups[i]; k++)
+                        methods[k] = methods[k] with { Chases = new([]) };
+            model = model with { Methods = new(methods) };
+        }
         var sb = new StringBuilder(Header).Append('\n');
         if (owner.Namespace.Length > 0) sb.Append("namespace ").Append(owner.Namespace).Append(";\n\n");
         if (model.One || !owner.IsSystem) EmitEntryPoints(sb, model, model.One);
