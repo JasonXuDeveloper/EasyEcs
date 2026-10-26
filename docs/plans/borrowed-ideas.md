@@ -166,6 +166,11 @@ LookupBenchmark (10k / 100k, in the cache): ChaseSerial 32.9 / 334.4 us (base r1
 32.8 / 336.5 (base r2) against 33.0 / 331.4 (head r2). KernelBenchmark Steer / Glide (the 16-word locals fix in the same
 branch): equal within noise (Steer 1k 928 / 960 ns base, 924 / 955 head).
 
+LookupGatherBenchmark (216 cases, `--dev`, two rounds in alternating order, head / base): geomean PerRow 0.996, Vector
+0.993, ParallelVector 1.007, ParallelPerRow 1.024; ParallelPerRow is byte-identical code (parallel row methods get no
+prefetch), so its few cases 1.1-1.5x slower in both rounds are the noise floor of this VM, and the same holds for the
+handful of ParallelVector / Vector cases at 1M. The 5-272 B at 1M rows appear in base and head alike.
+
 LookupChaseGateBenchmark (head only, two rounds; Auto is the machine's gate, Off today's loop, On forced):
 
 | | 1k Off / On | 1M Off / On | 16M Off / Auto |
