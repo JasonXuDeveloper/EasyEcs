@@ -35,6 +35,8 @@ last (`docs-todos.md` collects them meanwhile).
 - [ ] **ARM64 parity** (worktree agent, branch `feat-arm-parity`): wide components through NEON TBL, a repo-wide audit
       for x86-only paths, the ARM64 CI job asserting which forms run as vectors. (Interleaved LD2-4 / ST2-4: a296ecb.)
 
+- [ ] **Vector loops through the user's own calls** (worktree agent, branch `feat-call-inliner`; "Next" item 3).
+
 The owner's order (2026-10-26): every code change before any docs (generator cost and ARM64 parity included).
 CI runs the unit tests on ARM64 (b1dbdb0).
 
@@ -56,7 +58,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        ARM64 Linux runner, `__loops` lines printed), then multi-field / `Vector2/3/4` components through LD2-4 / ST2-4,
        then wide components through TBL. Touches SystemGenerator / Kernel: after WP0b, beside L2. Proof: tests with
        `DOTNET_EnableAVX=0` here, the ARM64 job, the owner's ARM64 BenchmarkDotNet numbers.
-3. [ ] **Vector loops through the user's own calls** (owner: users should not have to avoid helpers): today a call
+3. [ ] **Vector loops through the user's own calls** (running, see above) (owner: users should not have to avoid helpers): today a call
        into user code keeps the method scalar (EECS055 "it calls X.Y"); only Math, the generated members (SetX / IsX
        ...), Emit.Add, Lookup reads and view members (Kernel.Views.cs, inlined from source, depth 8) are translated.
        Extend the view inliner to any callee whose source is in the compilation: static helpers, extension methods,
