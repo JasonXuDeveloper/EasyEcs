@@ -29,7 +29,10 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              SystemGenerator.Fusion.cs: pass fusion, consecutive [ForEach] methods of a system as one
                              walk (one fused job per group: per row, per block of FusedBlock rows, per word of a
                              masked walk) and pairs of systems declared or ordered one after the other as one job
-                             (__A__B_Fusion, run by the set's RunFused switch when both are adjacent, enabled and due)
+                             (__A__B_Fusion, run by the set's RunFused switch when both are adjacent, enabled and due);
+                             SystemGenerator.Loops.cs: the loops of a job's Execute Kernel translated (each width's
+                             vector loop, the flat loops, the vector tail), in Execute while it declares at most 32 IL
+                             locals (Locals counts them), else each in an AggressiveInlining method of the job (D135)
 Fusion.cs                    the fusion rule read once for the generator and the analyzer (FusionSide: what a method
                              reads, writes, filters and blocks it; Fusion.Problem: why two passes cannot share a walk)
 SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(values..., static (ref P p, ...) => ...)

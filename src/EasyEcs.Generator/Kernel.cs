@@ -100,7 +100,7 @@ internal sealed partial class Kernel
     internal sealed record FlatCode(string Setup, string Body, string Stores, int Fields);
 
     /// <summary>
-    /// The vector type the loop names, as a token: <c>SystemGenerator.EmitVectorLoop</c> writes the Vector512 loop and the
+    /// The vector type the loop names, as a token: <c>SystemGenerator.VectorLoops</c> writes the Vector512 loop and the
     /// Vector&lt;T&gt; loop from one text by replacing this token alone (and <see cref="SquareRoot"/>), never text that
     /// names user types (a setup line holds <c>ref readonly global::System.Numerics.Vector3 __p1</c> as written). The
     /// prefix U+0001 occurs in no C# token outside a literal, and the loop's literals are formatted here.
@@ -159,7 +159,6 @@ internal sealed partial class Kernel
     private readonly Dictionary<string, HashSet<int>> _implied = new();
     private readonly HashSet<string> _guarded = new();
     private string? _active;  // the lanes the expression being translated is evaluated for (null: every lane)
-    private bool _live;       // a guard reads __live: the lanes of the vector the loop computes for
     private string? _alive; // lanes that have not returned yet, once a return under a condition cleared some
     private bool _bails;
     private string? _cold; // the reason of the first cold branch: what its rows run the method for
@@ -215,6 +214,19 @@ internal sealed partial class Kernel
 
         public override string ToString() => _all.ToString();
     }
+
+    /// <summary>The text <see cref="Live"/> replaces with the lanes a statement is computed for.</summary>
+    private const string LiveLanes = "__lanes";
+
+    /// <summary>
+    /// A statement over the lanes it is computed for (<see cref="LiveLanes"/> in <paramref name="statement"/>): the lanes
+    /// <paramref name="active"/> holds (null: every lane) of a whole vector, and of them the rows that pass
+    /// (<c>__pass</c>) in a masked word. Written in place rather than kept in a local, since every local counts towards
+    /// the 32 a runner inlines (<see cref="SystemGenerator.InlinedLocals"/>).
+    /// </summary>
+    private void Live(string? active, string statement) => _body.Append(
+        statement.Replace(LiveLanes, active ?? $"{Vec(_mask)}.AllBitsSet"),
+        statement.Replace(LiveLanes, active == null ? "__pass" : $"(__pass & {active})"));
 
     /// <summary>The lane type of masks of lanes of <paramref name="size"/> bytes.</summary>
     private static string MaskOf(int size) => size switch { 1 => "sbyte", 2 => "short", 4 => "int", _ => "long" };
@@ -625,9 +637,14 @@ internal sealed partial class Kernel
                     if (fields.Length == 1) loads.Append($"var __c{index}_0{h} = {V}.LoadUnsafe(ref e{index}, {row});\n");
                     else
                     {
-                        loads.Append($"{Interleaved}.Load{fields.Length}(ref e{index}, {row}, {string.Join(", ", fields.Select((_, f) => $"out {Vec(column)} __s{index}_{f}{h}"))});\n");
+                        // Each field is loaded into its name; a field of another type of the lane size is loaded as the
+                        // column's lanes and reinterpreted. No copy of the loaded value: the JIT inlines no method of more
+                        // than 32 IL locals (MAX_INL_LCLS, even AggressiveInlining), and a copy per field is what pushed
+                        // masked jobs (Move3, Move4) past it, so the runner called them per 64-row word (D126).
+                        loads.Append($"{Interleaved}.Load{fields.Length}(ref e{index}, {row}, {string.Join(", ", fields.Select((fd, f) => $"out {Vec(column)} {(Elem(fd.Type) == column ? "__c" : "__s")}{index}_{f}{h}"))});\n");
                         for (int f = 0; f < fields.Length; f++)
-                            loads.Append($"var __c{index}_{f}{h} = {As(column, Elem(fields[f].Type), $"__s{index}_{f}{h}")};\n");
+                            if (Elem(fields[f].Type) != column)
+                                loads.Append($"var __c{index}_{f}{h} = {As(column, Elem(fields[f].Type), $"__s{index}_{f}{h}")};\n");
                     }
                 }
             columns[columns.Count - 1] = (columns[columns.Count - 1].Names, loads.ToString());
@@ -640,9 +657,10 @@ internal sealed partial class Kernel
             if (fields.Length == 1) loads.Append($"var __q{index}_0 = {V}.LoadUnsafe(ref __r{index}, {row});\n");
             else
             {
-                loads.Append($"{Interleaved}.Load{fields.Length}(ref __r{index}, {row}, {string.Join(", ", fields.Select((_, f) => $"out {Vec(column)} __t{index}_{f}"))});\n");
+                loads.Append($"{Interleaved}.Load{fields.Length}(ref __r{index}, {row}, {string.Join(", ", fields.Select((fd, f) => $"out {Vec(column)} {(Elem(fd.Type) == column ? "__q" : "__t")}{index}_{f}"))});\n");
                 for (int f = 0; f < fields.Length; f++)
-                    loads.Append($"var __q{index}_{f} = {As(column, Elem(fields[f].Type), $"__t{index}_{f}")};\n");
+                    if (Elem(fields[f].Type) != column)
+                        loads.Append($"var __q{index}_{f} = {As(column, Elem(fields[f].Type), $"__t{index}_{f}")};\n");
             }
             columns.Add(([$"__q{index}_", $"__has{index}"], loads.ToString()));
         }
@@ -717,7 +735,6 @@ internal sealed partial class Kernel
             fold.Append($"    {r.Partial}.Combine(__v);\n}}\n");
         }
         string prologue = kernel._bails ? "bool __bail = false;\n" : "";
-        string live = kernel._live ? $"var __live = {Vec(kernel._mask)}.AllBitsSet;\n" : "", maskedLive = kernel._live ? "var __live = __pass;\n" : "";
         string hold = kernel._bails || kernel._lookups.Count > 0 ? held.ToString() : ""; // a lookup sends unresolved vectors to the method too (Kernel.RunRows)
         // A masked word holds the accumulators for a bail and for a pair's fold.
         string maskedHold = kernel._bails || kernel._lookups.Count > 0 || kernel._reductions.Values.Any(r => r.Fields.Any(f => kernel.IsDoubled(f.Type))) ? held.ToString() : "";
@@ -740,7 +757,7 @@ internal sealed partial class Kernel
         // Each lookup's backoff (Lookup.Resolve): after a miss, the vectors of the run to send to the method without trying.
         for (int g = 0; g < kernel._lookups.Count; g++) kernel._setup.Append($"int __b{g} = 0;\n");
         return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
-            kernel._setup.ToString(), prologue + live + read + hold + kernel._body, stores.ToString(), prologue + maskedLive + read + kept + maskedHold + kernel._body.Masked, masked.ToString(),
+            kernel._setup.ToString(), prologue + read + hold + kernel._body, stores.ToString(), prologue + read + kept + maskedHold + kernel._body.Masked, masked.ToString(),
             restore.ToString(), fold.ToString(), kernel._size, kernel._mask, Elem(first), kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
             kernel._bails, flat, kernel._cold, kernel._wideOf.Count == 0 ? null : string.Join(" && ", kernel._components.Where(c => kernel._wideOf.ContainsKey(c.Key)).Select(c => $"__layout{c.Value.Index}")),
             kernel._statics.ToString())
@@ -1035,22 +1052,21 @@ internal sealed partial class Kernel
                     + "which cannot change structure during the pass; move that branch into a [ForEach] method of its own");
             Restore(saved);
             _cold ??= unsupported.Reason;
-            _bails = _live = true;
-            string lanes = And(mask, _alive)!;
-            _body.Append($"__bail |= (__live & {lanes}) != {Vec(_mask)}.Zero; // a cold branch: the method runs these rows\n");
+            _bails = true;
+            Live(And(mask, _alive), $"__bail |= {LiveLanes} != {Vec(_mask)}.Zero; // a cold branch: the method runs these rows\n");
         }
     }
 
     /// <summary>What a translation changes, kept to undo a branch that turns out cold.</summary>
     private sealed record State((int, int) Body, int Setup, int Temps, Dictionary<ILocalSymbol, string> Locals, HashSet<ILocalSymbol> PairLocals, Dictionary<ILocalSymbol, Wide> Wides,
         Dictionary<ILocalSymbol, string?[]> Structs, HashSet<int> Written, HashSet<int> WrittenOptionals, Dictionary<string, HashSet<int>> Implied,
-        HashSet<string> Guarded, Dictionary<string, string> Broadcasts, Dictionary<string, (string, string)> MaskHalves, string? Alive, bool Bails, bool Live,
+        HashSet<string> Guarded, Dictionary<string, string> Broadcasts, Dictionary<string, (string, string)> MaskHalves, string? Alive, bool Bails,
         Dictionary<string, int> Resolved, Dictionary<ILocalSymbol, int> LookupLocals, Dictionary<string, string> Gathered, int Lookups);
 
     private State Save() => new(_body.Length, _setup.Length, _temps, new(_locals, SymbolEqualityComparer.Default),
         new(_pairLocals, SymbolEqualityComparer.Default), new(_wides, SymbolEqualityComparer.Default),
         new(_structs, SymbolEqualityComparer.Default), [.. _written], [.. _writtenOptionals],
-        _implied.ToDictionary(e => e.Key, e => new HashSet<int>(e.Value)), [.. _guarded], new(_broadcasts), new(_maskHalves), _alive, _bails, _live,
+        _implied.ToDictionary(e => e.Key, e => new HashSet<int>(e.Value)), [.. _guarded], new(_broadcasts), new(_maskHalves), _alive, _bails,
         new(_resolved), new(_lookupLocals, SymbolEqualityComparer.Default), new(_gathered), _lookups.Count);
 
     private void Restore(State state)
@@ -1077,7 +1093,7 @@ internal sealed partial class Kernel
         _writtenOptionals.UnionWith(state.WrittenOptionals);
         _guarded.Clear();
         _guarded.UnionWith(state.Guarded);
-        (_alive, _bails, _live) = (state.Alive, state.Bails, state.Live);
+        (_alive, _bails) = (state.Alive, state.Bails);
         Reset(_resolved, state.Resolved);
         Reset(_lookupLocals, state.LookupLocals);
         Reset(_gathered, state.Gathered);
@@ -1476,9 +1492,8 @@ internal sealed partial class Kernel
     private void Guard(int index)
     {
         if (Implied(_active).Contains(index) || !_guarded.Add($"{index} {_active}")) return;
-        _bails = _live = true;
-        string lanes = _active == null ? "__live" : $"(__live & {_active})";
-        _body.Append($"__bail |= ({lanes} & ~__has{index}) != {Vec(_mask)}.Zero;\n");
+        _bails = true;
+        Live(_active, $"__bail |= ({LiveLanes} & ~__has{index}) != {Vec(_mask)}.Zero;\n");
     }
 
     /// <summary>Record what mask <paramref name="name"/>, the value of <paramref name="condition"/>, and its negation prove.</summary>
@@ -1784,9 +1799,8 @@ internal sealed partial class Kernel
     /// <summary>The lanes of <paramref name="mask"/> that are evaluated (<see cref="_active"/>) send their vector's rows to the method itself.</summary>
     private void Bail(string mask)
     {
-        _bails = _live = true;
-        string lanes = _active == null ? "__live" : $"(__live & {_active})";
-        _body.Append($"__bail |= ({lanes} & {mask}) != {Vec(_mask)}.Zero;\n");
+        _bails = true;
+        Live(_active, $"__bail |= ({LiveLanes} & {mask}) != {Vec(_mask)}.Zero;\n");
     }
 
     /// <summary>

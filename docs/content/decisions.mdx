@@ -135,6 +135,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D130](#d130-measured-chunks) | Parallel passes cut chunks by the rows' measured cost; `ChunkRows` only overrides it |
 | [D131](#d131-lookup-gathers) | Vector loops gather other entities' fields when the method asks for it (`SimdMode.Require`) |
 | [D134](#d134-eecs103) | EECS103: a batch method's hand-written vector loop is reported with the method for one row |
+| [D135](#d135-inlined-locals) | Generated jobs stay within the inliner's 32 IL locals; loops past it run as methods per width |
 
 The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
 reused.
@@ -3208,8 +3209,9 @@ three measured and left out:
   one more per written column and accumulator at the end.
 - **Not changed: the permutation tables.** They stay `static readonly` vectors the JIT turns into constants.
 - **Not changed: the last rows of a run.** The rows after the last whole vector still call the method one by one.
-- **Not changed: the text of the loads.** A deinterleaving load still writes each field into a temporary
-  (`__s1_0`) copied into the field's name (`__c1_0`).
+- **The loads name each field once.** A deinterleaving load writes each field straight into its name
+  (`out Vector512<float> __c1_0`); only a field of another type of the lane size keeps a temporary and its
+  reinterpretation (`As<int, float>`).
 
 **Why.**
 - **Flat lanes.** Two-float `Move` spent 6 `vpermt2ps` and 4 table loads per 16 rows on 2 adds. BDN, two rounds
@@ -3228,13 +3230,23 @@ three measured and left out:
   operands, so a table hoisted into a register would still be copied before each permute: the copy costs what the
   load costs (an L1 hit, off the critical path). Passing the tables into the helpers as arguments loaded before the
   loop changes nothing the JIT emits per vector.
-- **Naming the loads directly changed the machine code.** Writing a field into its name (`out Vector512<float>
-  __c1_0`, no copy) was meant to change only the text, and a cleanup ships only if the Tier1 code stays the same. It
-  did not: with PGO off (`DOTNET_TieredPGO=0`: with it on, Tier1 follows the profile each run collected) the runner of
-  `Move3` went from 934 to 1,095 instructions and 36 to 54 permutes, the job's masked form now inlined into it, while
-  `Cycle`, `Divide` and `Seven` were identical. Speed was level (`Move3Generated` 1,000 rows 152.1, 135.1 / 139.8,
-  130.2 ns, 100,000 rows 66.8, 66.3 / 68.7, 65.8 µs; `GeneratorBenchmark.EditMethodBody` 217.5, 219.4 / 208.0, 224.0
-  ms and 209.5, 208.3 / 212.4, 224.2 ms, within its ±25 to 35 ms error), so the text stays as it was.
+- **A copy per field kept masked jobs out of their runner.** The JIT inlines no method that declares more than 32
+  IL locals (`MAX_INL_LCLS`, reported as "too many locals"), `AggressiveInlining` or not, and then marks it noinline
+  for every caller. Loading into a temporary and copying it into the field's name (`out __s1_0; var __c1_0 =
+  __s1_0;`) declares two locals per field, which Roslyn keeps when the field is written later: `Move3`'s masked
+  `Execute` had 36, `Move4`'s 44, so `World.Masked` called them once per 64-row word. Without the copy they have 24
+  and 28 and are inlined; that is the 934 to 1,095 instructions and 36 to 54 permutes seen in `Move3`'s runner,
+  whose benchmark never runs a masked word (its speed was level). In the benchmark assembly 16 jobs fall under
+  the limit (25 over, 9 over after). With PGO off the masked loops already inlined gain one register move
+  (`vmovaps`) per written two-field component per vector: the register allocator gives a local one register for
+  both its definitions, the load and the select, so the last destructive `vpermt2ps` needs a copy; every other
+  listing of `Cycle`, `CycleHoles`, `BattleServer` and `WorldSimulation` is identical. Neither the `out` (no
+  stack slot in any loop) nor the IL size (590 / 638 bytes, the reason given is the locals) was the cause.
+  BDN, two rounds (base / head): `Move3GapsGenerated` (Move3 over a table whose every third row lacks the velocity)
+  100,000 rows 85.1, 86.0 / 80.5, 81.2 µs, 1,000 rows 695, 721 / 681, 713 ns; `Move4Generated` 1,000 rows 186.9,
+  185.4 / 170.2, 172.8 ns; `Move3`, `Move2Gaps`, `Push` level; `WorldSimulationBenchmark` and
+  `BattleServerBenchmark` within run-to-run spread (BattleServer six rounds each, 3.65 to 4.39 ms / 3.79 to
+  4.20 ms); 0 B. The 9 jobs still over the limit run their loops in methods ([D135](#d135-inlined-locals)).
 - **A masked vector for the last rows lost.** On AVX-512 the rows after the last whole `Vector512` ran as one vector
   whose loads and stores were masked to them (`Avx512F.MaskLoad` / `MaskStore` under `Interleaved.Load` / `Load2..4`
   with a row count). It won where the body is small and most rows are last rows: on a world of 1,000 tables of 5 to 20
@@ -3242,14 +3254,25 @@ three measured and left out:
   21.2. It lost where the body is large: `CycleGenerated` 1,000 rows 380, 385 / 567, 1,071 ns, `CycleHolesGenerated`
   1,000 rows 2,713, 2,663 / 10,004, 4,479 ns and 100,000 rows 276, 258 / 423, 412 µs, three floats deinterleaved on
   the fragmented world 54.2, 73.4, 61.5, 56.7 / 68.8, 71.4, 61.0, 70.7 µs, `PushGenerated` 1,000 rows 94.0, 91.4 /
-  105.6, 100.7 ns. The Tier1 code says why: the job's `Execute` grew past the inliner's budget, so the runner
-  (`World.Masked`) calls it per run, and per 64-row word in a masked table, instead of inlining it (`Cycle`'s runner went
-  from 199 vector instructions to 6 and 4 calls of `Execute`). A tail kept out of line would cost the call it saves;
-  the scalar rows stay.
+  105.6, 100.7 ns. The Tier1 code said why: `Cycle`'s masked `Execute` declared 33 IL locals, one past the 32 the JIT
+  inlines (`MAX_INL_LCLS`, "too many locals"), so the runner (`World.Masked`) called it per run, and per 64-row word in a
+  masked table, instead of inlining it (`Cycle`'s runner went from 199 vector instructions to 6 and 4 calls of
+  `Execute`). Retried once every job fits ([D135](#d135-inlined-locals)), with the tail a `NoInlining` method called
+  once per run (a `Vector512` over a copy of the rows left, `Interleaved.LoadTail` / `StoreTail`, as the vector tail of
+  a structural change), it still lost: two rounds (without / with the tail) `CycleHolesGenerated` 1,000 rows 2,736,
+  2,861 / 4,437, 4,504 ns and 100,000 rows 287, 260 / 430, 431 µs, `CycleGenerated` 1,000 rows 381, 372 / 610, 604 ns,
+  `HolesGenerated` 406, 393 / 614, 620 ns, `HalvesGenerated` 475, 485 / 748, 751 ns, `Move2GapsGenerated` 100,000 rows
+  43.3, 41.1 / 58.1, 56.6 µs, `BattleServerBenchmark` 100,000 3,766, 3,803 / 4,155, 3,975 µs; it won only
+  `FragmentsMove3Generated` 100,000 (76.6, 57.0 / 51.9, 51.4 µs). The copy in and out costs more than the up to 15 rows
+  it saves; the scalar rows stay.
 
 **Considered.**
-- **A tail only for bodies the runner still inlines**: the generator would need the JIT's inlining budget; the rows
-  it would save are a run's last few.
+- **The loads returning a value tuple or a struct of vectors** (`var (__c1_0, __c1_1) = Interleaved.Load2Of512(...)`):
+  as many locals as naming the outs (Roslyn deconstructs with `dup`), more IL, six new methods (a return type cannot
+  overload), and a 128- to 256-byte return through a hidden buffer. Reading a struct's fields in place would declare
+  one local per load, but every write becomes a field store and the whole loop text changes.
+- **A tail only for bodies the runner still inlines**: the generator counts the locals now (D135), and the retry above
+  lost with every job inlined.
 - **A file-level alias** for `global::System.Runtime.Intrinsics.Vector512` and `Vector<T>`: the generic types need
   one alias per closed type, and the loops name both widths; it would shorten the text, not the code.
 - **One body for both widths** (`Vector<T>` and `Vector512<T>` from one text): needs a generic vector abstraction
@@ -3597,6 +3620,64 @@ The rewrite is bound only for attributed methods whose bodies name a vector type
   noise. Tile stencils wait for the `Cell<,>` form (v2), element loops over buffers for the inner-loop form (v3).
 - **Comparing the tail with the method for one row**: the tail is dropped, not proven equal to the vector body; a
   tail that differs was a bug of the batch method already (its rows past the last vector got another result).
+
+## D135. Generated jobs stay within the inliner's 32 IL locals; loops past it run as methods per width [#d135-inlined-locals]
+
+**Decision.** Every generated `Execute`, and every method a runner inlines, keeps at most 32 IL locals: RyuJIT
+inlines no method with more (`MAX_INL_LCLS`, "too many locals"), `AggressiveInlining` included, and a job its runner
+calls instead of inlining pays a call per run and loses the runner's hoisted state. The generator does two things:
+- **It writes fewer locals.** Constants, guard lanes and kept lanes are written in place instead of in locals (one
+  `__lanes` text, written twice: `AllBitsSet` in loops over whole vectors, `__pass` or `__pass & mask` in the masked
+  loop); a lane no write of the statement overwrites, or equal to its own destination, needs no `__t` temp, and a lane
+  equal to its destination is not stored.
+- **It counts them, and splits before the limit.** `Locals` counts the declarations of the job's text (plus one
+  temp for a `default` struct argument). When the inline form would pass 32, each width's loop becomes an
+  `AggressiveInlining` method (`__Loop512`, `__Loop`, `__MaskedLoop512`, ...) with its own locals, and `Execute`
+  keeps only the dispatch.
+
+The count is an estimate from above: release Roslyn keeps a slot per declared local (same-typed locals of disjoint
+scopes do not share one) and drops some locals used once, so the real count is equal or lower. `tools/inlining.sh`
+reads the JIT's inlining events of the benchmarks and reports every generated job a runner does not inline.
+
+**Locals, before and after** (`Execute`, copy fix only → this change). Steer 40/44, Gate 40/42, Seek 40/42,
+SeekParallel 40, ParallelSteer 40, Share 34/36, Step 32/34, Cycle 31/33 → every `Execute` at 30 or fewer; the split
+methods hold 13 to 21 (the masked loops of Gate, Seek, Share, Step, Cycle and UpdateCell, Steer's loops), the widest
+27 (SteerJob18's `__Loop512`). `tools/inlining.sh`: every generated job inlined, in the benchmarks, samples and test
+corpora; the generator test `LargeJobsStayWithinTheInlinersLocals` asserts it and the split of a 16-field job.
+
+**Machine code** (Tier1, `DOTNET_JitDisasm`, PGO off; instructions of the runner and calls to the job). Gate masked
+765 with 3 `Execute` calls → 990 with none; Cycle masked 1,024 with 1 call → 1,217 with none; Seek and Share masked
+inline as well (728 → 1,313, 725 → 1,440). In Gate's loop over whole vectors a literal in place is seen by the JIT:
+`Max(x, -50f)` is one `vmaxps` (28 instructions, no moves) instead of `vrangeps`, two `vfixupimmps` and a broadcast.
+
+**Numbers** (BenchmarkDotNet, default job, two rounds per pair, compared only within a round: the machine's speed
+moved about 13% between sessions). Base is the commit before the copy fix ([D126](#d126-loop-shape)).
+- WorldSimulation 100k: 1,091.7 / 1,183.5 µs → 1,102.1 / 1,110.7 µs; 10k: 91.8 / 92.5 → 95.5 / 96.4 µs (inside the
+  error, ±5-6 µs; a short interleaved screen read 98.6 / 101.9 / 94.9 → 93.4 / 100.9 / 91.5 µs).
+- BattleServer 100k: 3,239 / 3,245 → 3,114 / 3,220 µs.
+- Kernel jobs at 100k: Step 21.8 / 23.4 → 18.1 / 18.9 µs, Share 220.9 / 233.4 → 191.4 / 203.6 µs, Gate 26.3 / 28.4 →
+  23.3 / 22.2 µs, Seek 85.5 / 88.9 → 80.5 / 82.7 µs; at 1k Step 0.225 / 0.221 → 0.175 / 0.173 µs. The rest level inside the error.
+- 0 B everywhere (single-byte or 93 B rows of the parallel and multi-world benchmarks appear on either side in one
+  round: thread-pool noise).
+
+**Considered.**
+- **Splitting by temperature** (the cold branch in its own method): the width split alone brings every job under the
+  limit; not needed.
+- **Moving the boundary** (the runner's per-run work into the job): left to the inner-loop work that changes the
+  runners; not needed to fit.
+- **Literals in place in the masked and gather loops**: the JIT does not hoist out of a block a `continue` skips, so
+  every vector re-broadcast them (Gate's masked loop 49 → 52 instructions, 9 broadcasts in the loop); they stay
+  locals there.
+- **Counting same-typed locals once**: underestimated (33 IL locals where the estimate said 31); Roslyn keeps the slots.
+- **`out _` discards**: Roslyn gives each a temp; no locals saved.
+- **Sharing the permutation tables in big runners**: the JIT reloads a vector constant at each use and the
+  destructive permutes need a copy anyway; nothing to win.
+- **The masked AVX-512 tail** (retried here once every job fits): slower, see [D126](#d126-loop-shape).
+
+**ARM64.** The split is per width, so the `Vector128` / `Vector<T>` loop ARM64 runs is split and checked the same way
+(the tests run with `DOTNET_EnableAVX=0` too). The forms that need x86 permutes still run scalar there: components of
+several fields stored interleaved (`Interleaved.IsAccelerated` needs AVX2 or AVX-512), `Lookup<T>` gathers (AVX2), and
+the AVX-512 permutes of wide loops.
 
 ## Related [#related]
 
