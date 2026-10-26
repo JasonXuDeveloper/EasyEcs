@@ -58,6 +58,14 @@ using (var healing = new World())
     Check(patient.Life.Value == 2, "a library's generic system runs on every second update");
 }
 
+// The prefetch gate reads the last-level cache from the operating system once per process (sysfs or sysconf,
+// sysctl, GetLogicalProcessorInformationEx): in native code too. A world of 2 entities is in any cache.
+using (var small = new World())
+{
+    small.CreateEntities(new Entity[2], new Life { Value = 1 });
+    Check(!Lookup<Life>.Prefetches(small), "a world in the cache does not prefetch");
+}
+
 Console.WriteLine($"AOT battle: {battle.Tick} ticks, {battle.Hits} hits, {battle.Deaths} deaths, {server.World.EntityCount} entities");
 return 0;
 
