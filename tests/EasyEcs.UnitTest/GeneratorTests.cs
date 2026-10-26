@@ -531,10 +531,9 @@ public class GeneratorTests
             .And.Contain("global::System.Runtime.Intrinsics.Vector512.LoadUnsafe(ref e1, (nuint)i * 3 + 32);")
             .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar16x32x2(")
             .And.Contain("global::System.Numerics.Vector.IsHardwareAccelerated && global::EasyEcs.Interleaved.IsWideAccelerated && __layout1 && rows - i >=")
-            .And.Contain("var __c1_0 = global::EasyEcs.Interleaved.Pick(__v1_0, __v1_1, __v1_2, global::System.Runtime.Intrinsics.Vector128.Create((byte)")
-            .And.Contain("__v1_1 = global::EasyEcs.Interleaved.PickInto(__v1_1, __c1_0, global::System.Runtime.Intrinsics.Vector128.Create((byte)")
-            .And.Contain("global::System.Runtime.Intrinsics.Vector128.Create((byte)0, 1, 2, 3, 12, 13, 14, 15, 24, 25, 26, 27, 36, 37, 38, 39))")
-            .And.Not.Contain("private static readonly global::System.Runtime.Intrinsics")
+            .And.Contain("var __c1_0 = global::EasyEcs.Interleaved.Pick(__v1_0, __v1_1, __v1_2, __y0);")
+            .And.Contain("__v1_1 = global::EasyEcs.Interleaved.PickInto(__v1_1, __c1_0, __y2);")
+            .And.Contain("global::System.Runtime.Intrinsics.Vector128.Create((byte)0, 1, 2, 3, 12, 13, 14, 15, 24, 25, 26, 27, 36, 37, 38, 39);")
             .And.Contain("A: vector (Vector512 or Vector<float> of 128 bits), wide component (permutes, table lookups), masked words scalar"), generated);
     }
 
