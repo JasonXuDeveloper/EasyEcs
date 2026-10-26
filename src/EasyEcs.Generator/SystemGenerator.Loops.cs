@@ -12,7 +12,11 @@ public sealed partial class SystemGenerator
     /// <summary>
     /// The most IL locals a method the runner inlines may declare: the JIT inlines no method that declares more
     /// (<c>MAX_INL_LCLS</c>, "too many locals"), <c>AggressiveInlining</c> or not, and then calls it for every row of
-    /// runs and every 64-row word of a masked table.
+    /// runs and every 64-row word of a masked table. One number for every target: it is RyuJIT's implementation limit
+    /// (<c>inline.h</c>, no target condition, the same in .NET 10 and main), and RyuJIT compiles x64 and ARM64, the
+    /// JIT, ReadyToRun and Native AOT alike. It counts IL locals, which no SIMD width changes (a width's dead branch
+    /// still declares its locals, so each width's loop is a method of its own). What the width changes is register
+    /// pressure (16 ymm on AVX2, 32 zmm on AVX-512, 32 NEON registers): tuned per form, not here.
     /// </summary>
     internal const int InlinedLocals = 32;
 

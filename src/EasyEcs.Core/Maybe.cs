@@ -113,7 +113,7 @@ public readonly ref struct MaybeColumn<T> where T : struct, IComponent
     /// 64 rows of zeros: the lanes a vector loop loads where the table has no such column (<see cref="RowMask"/> keeps
     /// it at row 0). Never written: the loop stores nothing for such a column.
     /// </summary>
-    private static readonly T[] Zeros = new T[64];
+    private static readonly T[] Zeros = Interleaved.PinnedRows<T>(64);
 
     /// <summary>The column of <paramref name="entities"/>' table (found through the run's first entity, one lookup per run); <paramref name="write"/> stamps a tracked component per row reached.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
