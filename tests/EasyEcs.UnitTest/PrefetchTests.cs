@@ -136,7 +136,7 @@ public class PrefetchTests
     /// <summary>
     /// What the generator writes: the row form's twin job prefetching its chases (the row stage only for a read, not for
     /// Has), picked by the pass past the cache; the vector loop's prefetches per vector behind the gate its job reads once
-    /// per pass; none for an id the method may write.
+    /// per pass; none for an id the method may write, nor for a method sharing a walk (no unused twin: CS0649).
     /// </summary>
     [Test]
     public void TheJobsPrefetchTheirChasesBehindTheGate()
@@ -153,9 +153,14 @@ public class PrefetchTests
                 [ForEach(SimdMode = SimdMode.Require)] public static void Vector(in Spot s, in Aim a, ref Way w, Lookup<Spot> spots) => w.X = spots[a.Target].HasValue ? spots[a.Target].Value.X - s.X : 0;
                 [ForEach] public static void Written(ref Aim a, ref Way w, Lookup<Spot> spots) { w.X = spots.Has(a.Target) ? 1 : 0; a.Target = default; }
             }
+            [EcsSystem] public ref struct Walk
+            {
+                [ForEach(SimdMode = SimdMode.Require)] static void Gathered(in Spot s, in Aim a, ref Way w, Lookup<Spot> spots) => w.X = spots.Has(a.Target) ? spots.Read(a.Target).X - s.X : 0;
+                [ForEach] static void Plain(in Spot s, in Aim a, ref Way w, Lookup<Spot> spots) => w.X = spots.Has(a.Target) ? spots.Read(a.Target).X - s.X : 0;
+            }
             """);
         GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
-        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error || d.Id == "CS0649"), Is.Empty);
         string text = string.Concat(output.SyntaxTrees.Where(GeneratorTests.IsCode).Select(t => t.ToString()));
         string Job(string name) => text.Split("internal ref struct ").Single(j => j.StartsWith(name + " "));
         const string add = "global::System.Runtime.CompilerServices.Unsafe.Add";
@@ -172,6 +177,8 @@ public class PrefetchTests
         Assert.That(Job("VectorJob2"), Does.Contain("if (f3) __p3.PrefetchAhead(ref e2, 2, 1, i, rows, 16, "));
         Assert.That(text, Does.Not.Contain("WrittenJob3Chases"));
         Assert.That(Job("WrittenJob3"), Does.Not.Contain("Prefetch").And.Not.Contain("public bool f"));
+        // A method sharing a walk with others (fusion) runs its own job in it: no twin.
+        Assert.That(text, Does.Contain("PlainJob1 ").And.Not.Contain("PlainJob1Chases"));
     }
 
     /// <summary>The readers of the cache size on this machine's operating system, and their parsing.</summary>
