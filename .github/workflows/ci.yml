@@ -50,6 +50,19 @@ jobs:
             exit 1
           fi
 
+  arm64:
+    # Every vector form must run on ARM64 (NEON); the 128-bit paths are tested here on real AdvSimd hardware.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Build
+        run: dotnet build tests/EasyEcs.UnitTest --configuration Release
+      - name: Test
+        run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release
+
   doc-snippets:
     runs-on: ubuntu-26.04
     steps:
