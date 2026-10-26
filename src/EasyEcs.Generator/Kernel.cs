@@ -303,9 +303,14 @@ internal sealed partial class Kernel
             reason = new ScalarReason("it has no body", false, null);
             return null;
         }
-        var lane = new Lane(method, Symbols.IsRunner(method), Symbols.IsParallel(method), Symbols.FastFloats(method), model,
-            Symbols.IsStable(method, syntax, model));
-        var code = Vectorize(lane, (IOperation?)body.BlockBody ?? body.ExpressionBody!, fieldOf, ct, out reason);
+        // Whether the job may change structure is the method's as written (the generator's job follows it), helpers or not.
+        bool stable = Symbols.IsStable(method, syntax, model);
+        IOperation root = (IOperation?)body.BlockBody ?? body.ExpressionBody!;
+        // The user's own calls inlined (Kernel.Inlining.cs): the loop of the body a hand would write without them.
+        if (InlineCalls(method, syntax, model, root, ct) is var (inlined, speculative) && speculative.GetOperation(inlined, ct) is { } inlinedBody)
+            (root, model) = (inlinedBody, speculative);
+        var lane = new Lane(method, Symbols.IsRunner(method), Symbols.IsParallel(method), Symbols.FastFloats(method), model, stable);
+        var code = Vectorize(lane, root, fieldOf, ct, out reason);
         // Gathers win where a vector's targets share a table and lose a little where they spread over many (D131): where
         // they live is the data's, not the code's, so the loop that gathers is the method's to ask for.
         if (code is { Gathers: true } && Symbols.Simd(method) != Symbols.SimdRequire)
@@ -555,7 +560,8 @@ internal sealed partial class Kernel
         // The parameters of a kernel: the main one, and one per field of a flat loop (Flat) with the same setup.
         Kernel Make(bool reductions)
         {
-            var made = new Kernel(SizeOf(first)) { _fast = lane.Fast, _compilation = model.Compilation, _model = model, _stable = lane.Stable };
+            var made = new Kernel(SizeOf(first)) { _fast = lane.Fast, _compilation = model.Compilation, _model = model, _stable = lane.Stable,
+                _lambda = lane.Method.MethodKind == MethodKind.AnonymousFunction };
             made._pairs = components.Any(f => SizeOf(f[0].Type) > SizeOf(first));
             for (int i = 0, k = 0, o = 0; i < method.Parameters.Length; i++)
             {
@@ -2142,7 +2148,20 @@ internal sealed partial class Kernel
     // ---------------- reasons ----------------
 
     /// <summary>The reason <paramref name="op"/> keeps the method scalar, named the way the method writes it.</summary>
-    private Unsupported Not(IOperation op) => new(op switch
+    private Unsupported Not(IOperation op)
+    {
+        // A call of the user's own code the inliner left (Kernel.Inlining.cs), or one it cannot see into.
+        if (op is IInvocationOperation { TargetMethod: var target } && !IsMath(target) && !KnownVector(target.ContainingType)
+            || op is IPropertyReferenceOperation { Property.GetMethod: not null } && op.Syntax.GetAnnotations(CallReason).Any())
+        {
+            var (text, fixable) = CallWhy(op, op is IInvocationOperation invocation ? invocation.TargetMethod : ((IPropertyReferenceOperation)op).Property.GetMethod!);
+            return new Unsupported(text, fixable);
+        }
+
+        return NotSupported(op);
+    }
+
+    private Unsupported NotSupported(IOperation op) => new(op switch
     {
         IInvocationOperation { TargetMethod: var m } when IsMath(m) => IsFloat(m.ReturnType) && m.Name is "Asin" or "Acos" or "Atan" or "Atan2" or "Cbrt"
             || m.ReturnType.SpecialType == SpecialType.System_Double && m.Name is "Sinh" or "Cosh" or "Tanh"
