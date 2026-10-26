@@ -76,6 +76,10 @@ what it left undone, which goes on the same list (nothing is dropped silently).
    `dotnet build -c Release` (0 warnings), `dotnet test`. A branch that changes a hot path is merged only after a
    quiet A/B against the tip (two rounds, copies as worktrees outside the repo, under `flock /tmp/bench.lock`, nothing
    else running): agents' own numbers taken beside other agents' builds are not proof.
+   A test that fails after a merge is the branch's only once it passes on the base in the same configuration: run
+   the failing test on the tip before the merge first. Tests run in Release (`dotnet test -c Release`, as CI does);
+   checks of what the JIT does (IL locals, inlining) mean nothing in a Debug build, where the compiler keeps a local
+   per temporary and the JIT inlines nothing.
 3. Conflicts are usually in `changelog`, `migration`, `decisions` (both sides appended): keep both, renumber a
    duplicated D and fix its anchors and links.
 4. After the code audits are merged, run `audit-docs` once over everything with the collected docs to-dos.
