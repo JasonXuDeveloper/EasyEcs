@@ -33,6 +33,8 @@ last (`docs-todos.md` collects them meanwhile).
 1. [ ] **L2: the generated pair form** (`locality.md` 3.2): the user writes what one pair does; the generator writes
        the 8x8 (x86) / 4x4 (ARM64) cluster-pair kernel over L1's blocks with cutoff and self masks, and a nearest form
        (`NearestPlayer`, zombie targeting). Right after WP0b merges. Then L4: examples rewritten in it.
+       The owner's call on the spread map (nearest 1.06-1.31x, bar 1.5x): re-measure once L1 sorts on its cadence,
+       with a flat grid of blocks searched in rings instead of the prototype's box tree; the nearest form stays in L2.
 2. [ ] **Vector loops through the user's own calls** (owner: users should not have to avoid helpers): today a call
        into user code keeps the method scalar (EECS055 "it calls X.Y"); only Math, the generated members (SetX / IsX
        ...), Emit.Add, Lookup reads and view members (Kernel.Views.cs, inlined from source, depth 8) are translated.
@@ -49,7 +51,10 @@ last (`docs-todos.md` collects them meanwhile).
        accumulators / unrolling / hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3
        prefetch / streaming stores.
 5. [ ] **Borrowed ideas** (`borrowed-ideas.md`): prefetching chases (AMAC) after gather-always, ghost rows between
-       worlds as an example first, streaming stores, roofline in `audit-perf` (timer wheel dropped: owner-review).
+       worlds as an example first, streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
+       owner: records in the docs pass). The owner's call on batch probes of ValueIndex / UniqueIndex (1.3-3.4x slower
+       at 1k / 100k keys): keep, re-measure after AMAC with tables far past the last-level cache (16M keys), against
+       scalar group prefetching.
 6. [ ] The rest of "Later" below.
 
 ## Done this round (for the record)

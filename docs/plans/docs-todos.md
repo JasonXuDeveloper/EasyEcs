@@ -258,3 +258,17 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
   still says no `Entity`, `Lookup<T>`, `Emit<T>` parameter (structural changes of the row's entity, Emit records and
   Lookup gathers are vector forms now).
 
+## Owner decisions on owner-review (2026-10-26): decision records to write in the docs pass
+
+(Written then, not now: three running branches also edit decisions.mdx.)
+- **Timer wheel: dropped** ("Not added" record, en + zh). TimerWheelBenchmark, 100k waiting, 1 % waking, two rounds:
+  the wheel 1.18-1.26x slower than the generated vector scan (21 us per tick, 0.2 ns a row against about 25 ns per
+  woken entity), with a tag 3.6-3.9x slower; it beats only the scan row by row (3x). Would change it: waits the
+  vector loop cannot take, or far fewer wakes per waiting entity (1M waiting, 0.1 %), against the vector scan.
+- **NUMA placement and hybrid cores: dropped** ("Not added" record). First-touch columns, a world per node, helpers
+  kept on their node (OpenMP proc_bind, HyPer morsels), P / E and SMT checks: node placement needs dedicated threads,
+  which D22 declined for the thread pool, and D130's measured chunks already give slower threads fewer chunks. Would
+  change it: a two-socket or hybrid-core machine showing a loss in ParallelForEach / BattleServer that placement
+  removes.
+- Batch probes and nearest on a spread map are not decided yet: they moved to the backlog (re-measure later).
+
