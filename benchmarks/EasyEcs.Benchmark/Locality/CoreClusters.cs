@@ -174,8 +174,8 @@ public sealed class CoreClusters
     {
         var p = blocks.Read<Crowd.Position>();
         var v = blocks.Read<Crowd.Velocity>();
-        var push = MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(blocks.Read<Crowd.Push>()), blocks.Rows);
-        int rows = blocks.Rows;
+        var push = MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(blocks.Read<Crowd.Push>()), blocks.RowCount);
+        int rows = blocks.RowCount;
         var lane = Vector256.Create(0, 1, 2, 3, 4, 5, 6, 7);
         var all = Vector256<float>.AllBitsSet;
         for (int a = 0; a < _blocks; a++)
@@ -214,7 +214,7 @@ public sealed class CoreClusters
     {
         var p = blocks.Read<Crowd.Position>();
         var v = blocks.Read<Crowd.Velocity>();
-        var push = MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(blocks.Read<Crowd.Push>()), blocks.Rows);
+        var push = MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(blocks.Read<Crowd.Push>()), blocks.RowCount);
         var all = Vector128<float>.AllBitsSet;
         for (int a = 0; a < _blocks; a++)
         {
@@ -257,7 +257,7 @@ public sealed class CoreClusters
     {
         var p = blocks.Read<Crowd.Position>();
         var v = blocks.Read<Crowd.Velocity>();
-        var push = MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(blocks.Read<Crowd.Push>()), blocks.Rows);
+        var push = MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(blocks.Read<Crowd.Push>()), blocks.RowCount);
         int sorted = blocks.SortedRows;
         var lane = Vector512.Create(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
         var all = Vector512<float>.AllBitsSet;

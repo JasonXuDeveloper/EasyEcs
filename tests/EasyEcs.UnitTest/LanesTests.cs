@@ -67,7 +67,7 @@ public class LanesTests
                 if ((mask >> i & 1) != 0) expected.Add(first + i);
             var destination = new int[expected.Count + 2];
             destination.AsSpan().Fill(-1);
-            Assert.That(Lanes.Rows(mask, first, destination.AsSpan(0, expected.Count)), Is.EqualTo(expected.Count));
+            Assert.That(Lanes.RowNumbers(mask, first, destination.AsSpan(0, expected.Count)), Is.EqualTo(expected.Count));
             Assert.That(destination[..expected.Count], Is.EqualTo(expected.ToArray()), $"mask {mask:X}");
             Assert.That(destination[expected.Count..], Is.All.EqualTo(-1));
         }

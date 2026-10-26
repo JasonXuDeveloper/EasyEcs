@@ -15,7 +15,7 @@ namespace EasyEcs;
 /// batch method's run of rows, whose row 0 is <see cref="EntitySpan.FirstRow"/>).
 /// <para>
 /// The boxes are drawn by the sort and hold until the next one as long as no row moved farther than the margin: rows
-/// [0, <see cref="SortedRows"/>) are in blocks; rows [<see cref="SortedRows"/>, <see cref="Rows"/>) joined the table
+/// [0, <see cref="SortedRows"/>) are in blocks; rows [<see cref="SortedRows"/>, <see cref="RowCount"/>) joined the table
 /// since and are in none (a search reads them one by one, or waits for the next sort). A row that moved into a block's
 /// row since the sort widened that block's box. Inside a pass a row destroyed or moved away by the pass is a
 /// tombstone: its id's index is negative (<see cref="Ids"/>). A row of a block may lack the component since the sort
@@ -48,7 +48,7 @@ public readonly ref struct RowBlocks
     public int SortedRows => _order?.SortedRows ?? 0;
 
     /// <summary>Rows of the table, tombstones of a pass included: those from <see cref="SortedRows"/> on are in no block. O(1).</summary>
-    public int Rows => _table?.Count ?? 0;
+    public int RowCount => _table?.Count ?? 0;
 
     /// <summary>Axes the boxes cover (0 to 3: the members the declaration names). O(1).</summary>
     public int Axes => _order?.Axes ?? 0;
@@ -85,7 +85,7 @@ public readonly ref struct RowBlocks
     }
 
     /// <summary>
-    /// The table's column of <typeparamref name="T"/>, every row (<see cref="Rows"/>), read-only: row <c>r</c> of a
+    /// The table's column of <typeparamref name="T"/>, every row (<see cref="RowCount"/>), read-only: row <c>r</c> of a
     /// block is element <c>r</c>. A system that reads it declares the read like any other (a parameter of the component
     /// or a <see cref="Lookup{T}"/>), so no writer of it shares its stage. O(1).
     /// </summary>
@@ -97,10 +97,10 @@ public readonly ref struct RowBlocks
         return MemoryMarshal.CreateReadOnlySpan(ref _table.Data<T>(column), _table.Count);
     }
 
-    /// <summary>The ids of the table's rows (<see cref="Rows"/>); a tombstone of a pass has a negative index. O(1).</summary>
+    /// <summary>The ids of the table's rows (<see cref="RowCount"/>); a tombstone of a pass has a negative index. O(1).</summary>
     public ReadOnlySpan<EntityId> Ids => _table == null ? default : _table.Slots.AsSpan(0, _table.Count);
 
-    /// <summary>The entity of row <paramref name="row"/> (a row below <see cref="Rows"/> that is no tombstone). O(1).</summary>
+    /// <summary>The entity of row <paramref name="row"/> (a row below <see cref="RowCount"/> that is no tombstone). O(1).</summary>
     public Entity this[int row] => new(_world, _table.Slots[row]);
 
     /// <summary>

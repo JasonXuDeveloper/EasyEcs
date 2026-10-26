@@ -73,7 +73,7 @@ LaneMath.cs                  lane functions of generated vector loops .NET has n
                              int / uint lanes through doubles (exact), FloatMode.Fast's Log10 / Sinh / Cosh / Tanh of floats
 Lanes.cs                     Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress,
                              AVX2 permutation table, 128-bit byte shuffle: NEON TBL / PSHUFB, picked at run time), for
-                             batch methods, Emit and CollectIds; Lanes.Rows: a mask to row numbers over it (the one
+                             batch methods, Emit and CollectIds; Lanes.RowNumbers: a mask to row numbers over it (the one
                              helper generated loops call); Lanes.Bits: a vector loop's lane mask as bits
 MarkedRows.cs                the rows a vector loop marked for one structural change (words of 64 rows per table,
                              pooled per world), applied when the pass ends: SetAll / RemoveAll / DisableAll /

@@ -118,7 +118,7 @@ public class OrderTests
         {
             tables++;
             var walkers = blocks.Read<Walker>();
-            Assert.That(blocks.SortedRows, Is.LessThanOrEqualTo(blocks.Rows));
+            Assert.That(blocks.SortedRows, Is.LessThanOrEqualTo(blocks.RowCount));
             for (int r = 1; r < blocks.SortedRows; r++)
                 if (blocks.Has(r) && blocks.Has(r - 1))
                     Assert.That(walkers[r].Cell, Is.GreaterThanOrEqualTo(walkers[r - 1].Cell), $"row {r}");
@@ -172,7 +172,7 @@ public class OrderTests
             Assert.That(blocks.Margin, Is.EqualTo(0.25f));
             Assert.That(blocks.Axes, Is.EqualTo(2));
             var ids = blocks.Ids;
-            for (int r = 0; r < blocks.Rows; r++) Assert.That(blocks[r].Id, Is.EqualTo(ids[r]));
+            for (int r = 0; r < blocks.RowCount; r++) Assert.That(blocks[r].Id, Is.EqualTo(ids[r]));
         }
     }
 
@@ -187,7 +187,7 @@ public class OrderTests
             foreach (var blocks in world.Blocks<Walker>())
             {
                 var walkers = blocks.Read<Walker>();
-                for (int r = 1; r < blocks.Rows; r++)
+                for (int r = 1; r < blocks.RowCount; r++)
                     if (walkers[r].Cell < walkers[r - 1].Cell) return false;
             }
 
@@ -540,7 +540,7 @@ public class OrderTests
         int size = 0;
         foreach (var blocks in world.Blocks<Walker>())
         {
-            if (blocks.Rows == 0) continue; // a table of the group no entity is in
+            if (blocks.RowCount == 0) continue; // a table of the group no entity is in
             var pairs = new BlockPair[4];
             int n = blocks.Pairs(reach, pairs);
             if (n > pairs.Length)
@@ -569,9 +569,9 @@ public class OrderTests
 
         // Across the two tables: every near pair of rows has its blocks' pair, the first table's block first.
         var e = world.Blocks<Walker>().GetEnumerator();
-        while (e.MoveNext() && e.Current.Rows == 0) { }
+        while (e.MoveNext() && e.Current.RowCount == 0) { }
         var first = e.Current;
-        while (e.MoveNext() && e.Current.Rows == 0) { }
+        while (e.MoveNext() && e.Current.RowCount == 0) { }
         var second = e.Current;
         var cross = new BlockPair[first.Count * second.Count];
         int found = first.Pairs(second, reach, cross);
@@ -631,8 +631,8 @@ public class OrderTests
         {
             tables++;
             var movers = blocks.Read<Mover>();
-            Assert.That(blocks.SortedRows, Is.EqualTo(blocks.Rows));
-            for (int r = 1; r < blocks.Rows; r++)
+            Assert.That(blocks.SortedRows, Is.EqualTo(blocks.RowCount));
+            for (int r = 1; r < blocks.RowCount; r++)
                 Assert.That(MoverOrder.Key(movers[r], 1.5f), Is.GreaterThanOrEqualTo(MoverOrder.Key(movers[r - 1], 1.5f)));
             for (int b = 0; b < blocks.Count; b++)
                 for (int r = blocks.Start(b); r < blocks.End(b); r++)
@@ -658,7 +658,7 @@ public class OrderTests
         {
             Assert.That(blocks.Axes, Is.EqualTo(2), "the declared order");
             var walkers = blocks.Read<Walker>();
-            for (int r = 1; r < blocks.Rows; r++) Assert.That(walkers[r].Cell, Is.GreaterThanOrEqualTo(walkers[r - 1].Cell));
+            for (int r = 1; r < blocks.RowCount; r++) Assert.That(walkers[r].Cell, Is.GreaterThanOrEqualTo(walkers[r - 1].Cell));
         }
     }
 

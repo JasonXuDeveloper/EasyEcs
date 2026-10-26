@@ -73,14 +73,14 @@ public static class Lanes
     /// <returns>The number of rows written.</returns>
     /// <exception cref="ArgumentException"><paramref name="destination"/> is too short.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static int Rows(ulong mask, int first, Span<int> destination)
+    public static int RowNumbers(ulong mask, int first, Span<int> destination)
     {
         int n = Compact<int>(Numbers, mask, destination);
         if (first != 0 && n != 0) Offset(destination.Slice(0, n), first);
         return n;
     }
 
-    // 0 to 63: the rows of a word Rows compacts. Literal data in the assembly (RVA), so no static to initialize: under
+    // 0 to 63: the rows of a word RowNumbers compacts. Literal data in the assembly (RVA), so no static to initialize: under
     // Native AOT a static readonly array would cost a class-initialization check per call.
     private static ReadOnlySpan<int> Numbers =>
     [
