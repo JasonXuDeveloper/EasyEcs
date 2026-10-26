@@ -381,6 +381,47 @@ scalar loads they replace; and the 100k-key table (2 MB of slots) stays in the l
 latency for a batch to hide. What would change it: tables far past the cache (16M keys) where misses dominate,
 measured against scalar group prefetching (`borrowed-ideas.md` item 1) rather than gathers.
 
+**Re-measured at 16M keys (owner's call, 2026-10-26): vertical probes dropped again.** The table of 16M keys holds 32M
+slots (128 MiB of keys, 128 MiB of values, past the 260 MiB last-level cache with the rest of the process); each
+invoke takes the next 4,096 of 4M queries, so the lines an invoke touches are not left in cache by the invokes
+before. Added: `Prefetched8/16/32`, one key at a time with the key and value slots of the query k ahead prefetched
+(`Sse.Prefetch0`; nothing on ARM64, which has no prefetch in .NET 10 but SVE's). Default job, two rounds, same frozen
+tree; load average 3.79 / 4.53 / 3.84 at the start of round 1 (another agent's run had just ended), 1.08 / 1.37 / 2.05
+at round 2's.
+
+| Method | Keys | Mean r1 | Ratio r1 | Mean r2 | Ratio r2 | Allocated |
+|---|---|---|---|---|---|---|
+| OneAtATime | 1000 | 1.518 ns | 1.00 | 1.513 ns | 1.00 | 0 B |
+| Prefetched8 | 1000 | 2.105 ns | 1.39 | 2.098 ns | 1.39 | 0 B |
+| Prefetched16 | 1000 | 1.941 ns | 1.28 | 2.103 ns | 1.39 | 0 B |
+| Prefetched32 | 1000 | 2.370 ns | 1.57 | 2.146 ns | 1.42 | 0 B |
+| Vertical | 1000 | 2.258 ns | 1.49 | 2.352 ns | 1.56 | 0 B |
+| VerticalRefill | 1000 | 4.893 ns | 3.23 | 4.683 ns | 3.10 | 0 B |
+| OneAtATime | 100000 | 1.626 ns | 1.00 | 1.638 ns | 1.00 | 0 B |
+| Prefetched8 | 100000 | 2.328 ns | 1.43 | 2.215 ns | 1.35 | 0 B |
+| Prefetched16 | 100000 | 2.192 ns | 1.35 | 2.346 ns | 1.44 | 0 B |
+| Prefetched32 | 100000 | 2.225 ns | 1.37 | 2.285 ns | 1.40 | 0 B |
+| Vertical | 100000 | 4.980 ns | 3.07 | 4.912 ns | 3.00 | 0 B |
+| VerticalRefill | 100000 | 5.543 ns | 3.41 | 5.821 ns | 3.56 | 0 B |
+| OneAtATime | 16000000 | 41.949 ns | 1.00 | 39.637 ns | 1.00 | 0 B |
+| Prefetched8 | 16000000 | 33.660 ns | 0.80 | 33.272 ns | 0.84 | 0 B |
+| Prefetched16 | 16000000 | 31.272 ns | 0.75 | 29.597 ns | 0.75 | 0 B |
+| Prefetched32 | 16000000 | 32.896 ns | 0.79 | 31.458 ns | 0.79 | 0 B |
+| Vertical | 16000000 | 52.224 ns | 1.25 | 52.067 ns | 1.32 | 0 B |
+| VerticalRefill | 16000000 | 61.332 ns | 1.47 | 64.341 ns | 1.63 | 0 B |
+
+Verdict: the vertical forms lose at every size, by more where misses dominate (1.25-1.63x slower at 16M): a gather
+waits for its slowest lane and issues its eight loads no sooner than the out-of-order core issues eight scalar probes,
+and refill adds its compress / expand work per step. Scalar group prefetching is the form that pays at 16M (1.33x at
+k = 16, both rounds: bar met there) and costs 1.3-1.6x where the table is in cache (1k, 100k: the prefetch's hash and
+two instructions per key with nothing to hide). Neither is built: `ValueIndex` / `UniqueIndex` have no batch probe
+(each `TryFind` / `Find` / `Get` is one key whose successor the index cannot see), so a prefetching probe needs keys
+known ahead, which only generated code has (a `[ForEach]` method calling `lookup.TryFind(key.Field)` with the key in
+a component: the generator would prefetch the probe slot of row i + 16, as for lookups in `borrowed-ideas.md` item 1),
+and it must be gated by the table's size (slots past the last-level cache) or it slows every small index. What would
+change the verdict: an index probed by keys of a component in a pass over millions of rows (a join), measured with the
+gate; the vertical forms stay dropped.
+
 ### 6.4 What the met bars need beyond the prototypes
 
 - **L1 (ordered rows + blocks):** the permutation of every column and the entity slots under the structural gate with

@@ -25,8 +25,12 @@ last (`docs-todos.md` collects them meanwhile).
       vector's targets spread over many tables (walk, 64-bit pinned addresses, micro-adaptive choice all measured,
       D131 rewritten with the widened table and ARM64: rows there).
 
-- [ ] **AMAC prefetch for lookup chases, then batch probes re-measured at 16M keys** (`borrowed-ideas.md` item 1;
-      worktree agent, branch `feat-amac`): core only, generator changes listed for after WP0b.
+- [x] **AMAC prefetch for lookup chases, then batch probes re-measured at 16M keys** (`borrowed-ideas.md` item 1,
+      `locality.md` 6.3; branch `feat-amac`): bar met at 16M only (1.29-1.36x), short at 1M (1.04-1.22x, the 1M world
+      sits in this machine's 260 MiB L3), 1.9-2.3x slower at 1k: not built into the generated code. Prototype and the
+      two hidden core helpers kept for a re-measure with a size gate on the owner's machines (owner's call). Batch
+      probes: vertical forms dropped again (1.25-1.63x slower at 16M); scalar group prefetching 1.33x at 16M keys,
+      1.3-1.6x slower in cache, no batch probe API to put it in.
 
 - [ ] **ARM64 parity** (worktree agent, branch `feat-arm-parity`): wide components through NEON TBL, a repo-wide audit
       for x86-only paths, the ARM64 CI job asserting which forms run as vectors. (Interleaved LD2-4 / ST2-4: a296ecb.)
@@ -67,7 +71,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 5. [ ] **Generated code tuned for the machine** (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
        accumulators / unrolling / hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3
        prefetch / streaming stores.
-6. [ ] **Borrowed ideas** (`borrowed-ideas.md`): prefetching chases (AMAC) after gather-always, ghost rows between
+6. [ ] **Borrowed ideas** (`borrowed-ideas.md`): prefetching chases (AMAC: measured, bar not met, owner's call on a size gate), ghost rows between
        worlds as an example first, streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
        owner: records in the docs pass). The owner's call on batch probes of ValueIndex / UniqueIndex (1.3-3.4x slower
        at 1k / 100k keys): keep, re-measure after AMAC with tables far past the last-level cache (16M keys), against
