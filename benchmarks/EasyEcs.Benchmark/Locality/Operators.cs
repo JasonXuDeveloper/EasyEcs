@@ -264,7 +264,7 @@ public sealed class ProbeTable
         return (table, batch);
     }
 
-    public void OneAtATime(int[] queries, int[] results)
+    public void OneAtATime(ReadOnlySpan<int> queries, Span<int> results)
     {
         int[] keys = Keys, values = Values;
         for (int q = 0; q < queries.Length; q++)
@@ -287,9 +287,47 @@ public sealed class ProbeTable
         }
     }
 
+    /// <summary>
+    /// One key at a time with group prefetching (borrowed-ideas.md item 1): the key and value slots of query
+    /// q + <paramref name="distance"/> prefetched before query q is probed, so several misses are in flight. Without a
+    /// prefetch instruction (ARM64 in .NET 10) the same as <see cref="OneAtATime"/>.
+    /// </summary>
+    public unsafe void Prefetched(ReadOnlySpan<int> queries, Span<int> results, int distance)
+    {
+        int[] keys = Keys, values = Values;
+        fixed (int* k0 = keys, v0 = values)
+        {
+            for (int q = 0; q < queries.Length; q++)
+            {
+                if (Sse.IsSupported && q + distance < queries.Length)
+                {
+                    int ahead = Slot(queries[q + distance]);
+                    Sse.Prefetch0(k0 + ahead);
+                    Sse.Prefetch0(v0 + ahead);
+                }
+
+                int key = queries[q], h = Slot(key), found = -1;
+                while (true)
+                {
+                    int k = keys[h];
+                    if (k == key)
+                    {
+                        found = values[h];
+                        break;
+                    }
+
+                    if (k == 0) break;
+                    h = h + 1 & _mask;
+                }
+
+                results[q] = found;
+            }
+        }
+    }
+
     /// <summary>8 keys per vector; the vector loops until every lane met its key or an empty slot (lanes that finished
     /// early idle). Falls back to <see cref="OneAtATime"/> without AVX2.</summary>
-    public unsafe void Vertical(int[] queries, int[] results)
+    public unsafe void Vertical(ReadOnlySpan<int> queries, Span<int> results)
     {
         if (!Avx2.IsSupported)
         {
@@ -332,7 +370,7 @@ public sealed class ProbeTable
     /// next keys expand into them (AVX-512VL); at the end the pairs are placed by query. Falls back to
     /// <see cref="Vertical"/> without AVX-512VL.
     /// </summary>
-    public unsafe void VerticalRefill(int[] queries, int[] results, int[] pairQuery, int[] pairValue)
+    public unsafe void VerticalRefill(ReadOnlySpan<int> queries, Span<int> results, Span<int> pairQuery, Span<int> pairValue)
     {
         if (!Avx512F.VL.IsSupported || !Avx2.IsSupported)
         {
