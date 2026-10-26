@@ -118,7 +118,8 @@ World.Groups.cs              GroupBy: tables split by the value of an IGroup com
 RowOrder.cs                  ordered tables: IRowOrder<T> (a key and a box point, static members; written by the
                              generator), RowKeys (Morton codes by a cell, key bits), IOrderKey<TKey> + DeclaredOrder
                              ([OrderBy]'s part), RowOrder (Archetype.Order: the LSD radix sort of (key, row), the boxes
-                             per block of 8, widened where a row moves in, reset by a restore)
+                             per block (8 rows with 256-bit vectors, 4 on ARM64, or the size a request asks), widened
+                             where a row moves in, reset by a restore)
 RowBlocks.cs                 RowBlocks: the read path of one ordered table (blocks, boxes per axis, columns, ids,
                              Pairs: the block pairs within a reach, a sweep) and BlockPair
 World.Order.cs               OrderRows<T, TOrder> (the request generated setup makes), the cadence (SortDue from

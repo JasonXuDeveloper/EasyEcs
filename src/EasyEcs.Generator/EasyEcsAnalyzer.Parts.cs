@@ -100,7 +100,7 @@ public static partial class EasyEcsAnalyzer
         "'{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
         "[OrderBy] on a member of a partial component makes every world keep the component's tables in the order of " +
-        "that member, re-sorted on a cadence by a radix sort of its bits, with a box per block of 8 rows over the members " +
+        "that member, re-sorted on a cadence by a radix sort of its bits, with a box per block of rows over the members " +
         "it names. So the key is an integer, char, bool, float, double or an enum (a struct or a string has no bits a radix " +
         "sort orders); the box members are up to three float members or one Vector2 or Vector3 of the component; the " +
         "interval is 1 or more and the margin a finite distance of 0 or more; one member of the component is the key; " +

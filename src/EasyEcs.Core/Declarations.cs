@@ -120,7 +120,7 @@ public sealed class GroupByAttribute : Attribute;
 /// The generator adds <see cref="IOrderKey{TKey}"/> with an explicit <c>OrderKey</c> returning the member and
 /// <c>BoxPoint</c> returning the axes, and registers the order: every world re-sorts each table holding the component
 /// every <see cref="Interval"/> updates (from the first update after the table appears), keeping the rows of the
-/// table in key order and a box per block of 8 rows over the axes (<see cref="RowBlocks"/>). Rows that join between
+/// table in key order and a box per block of rows (8, or 4 on ARM64) over the axes (<see cref="RowBlocks"/>). Rows that join between
 /// sorts wait at the end of their table; a row that moves into a block widens its box. A table that holds two ordered
 /// components is ordered by the one with the lower bit.
 /// </summary>

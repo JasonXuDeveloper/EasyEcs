@@ -72,7 +72,8 @@ public readonly ref struct EntitySpan
     }
 
     /// <summary>
-    /// The blocks of the run's table when it is ordered (<see cref="OrderByAttribute">[OrderBy]</see>), else none
+    /// The blocks of the run's table when it is ordered (an inferred order or
+    /// <see cref="OrderByAttribute">[OrderBy]</see>), else none
     /// (<see cref="RowBlocks.Count"/> 0): a batch method finds the rows near its own through their boxes. O(1).
     /// </summary>
     public RowBlocks Blocks => new(_world, _table);

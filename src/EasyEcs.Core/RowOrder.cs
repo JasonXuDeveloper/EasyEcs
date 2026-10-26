@@ -10,10 +10,10 @@ using System.Threading;
 namespace EasyEcs;
 
 /// <summary>
-/// A component whose tables keep their rows in the order of <see cref="OrderKey"/>, with a box per block of 8 rows over
-/// <see cref="BoxPoint"/> (<see cref="RowBlocks"/>). Declared with <see cref="OrderByAttribute">[OrderBy]</see> on the
-/// key member, which makes the generator write both members explicitly and register the order for every world: the
-/// interface alone orders nothing.
+/// A component whose tables keep their rows in the order of <see cref="OrderKey"/>, with a box per block of rows (8, or 4
+/// on ARM64) over <see cref="BoxPoint"/> (<see cref="RowBlocks"/>). Declared with
+/// <see cref="OrderByAttribute">[OrderBy]</see> on the key member, which makes the generator write both members
+/// explicitly and register the order for every world: the interface alone orders nothing.
 /// </summary>
 /// <typeparam name="TKey">
 /// The key: an integer type, <c>char</c>, <c>bool</c>, <c>float</c>, <c>double</c> or an enum (a radix sort orders its

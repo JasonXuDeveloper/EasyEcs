@@ -6,7 +6,8 @@ using System.Runtime.InteropServices;
 namespace EasyEcs;
 
 /// <summary>
-/// The blocks of one ordered table (<see cref="OrderByAttribute">[OrderBy]</see>): its rows in key order, cut into
+/// The blocks of one ordered table (an order inferred for a pair method, or <see cref="OrderByAttribute">[OrderBy]</see>):
+/// its rows in key order, cut into
 /// blocks of <see cref="Size"/> rows, each with an axis-aligned box over the declared point of its rows, widened by
 /// the margin. What a search over space reads: a box far from the query skips its rows at once, a near one is read
 /// row by row (or a block per vector) from the table's columns (<see cref="Read{T}"/>). From
@@ -114,8 +115,9 @@ public readonly ref struct RowBlocks
     /// <summary>
     /// The pairs of this table's blocks whose boxes come within <paramref name="reach"/> of each other on every axis:
     /// the candidates of a search for the rows within <paramref name="reach"/> of each other, which a kernel then reads
-    /// 8 × 8 rows per pair (every other pair of rows is farther apart). Each block is paired with itself (a block whose
-    /// rows all lack the component with none), and each other pair is written once, smaller block first. Written to
+    /// <see cref="Size"/> × <see cref="Size"/> rows per pair (every other pair of rows is farther apart). Each block is
+    /// paired with itself (a block whose rows all lack the component with none), and each other pair is written once,
+    /// smaller block first. Written to
     /// <paramref name="destination"/> as far as it holds; returns how many there are, so a caller whose buffer was
     /// short grows it and calls again. A sweep over the blocks sorted by their low side on axis 0: O(blocks × log blocks
     /// + candidates). The sort's buffers come from the shared array pools: allocation-free in steady state, and safe on

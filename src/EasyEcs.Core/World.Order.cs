@@ -102,8 +102,9 @@ public sealed partial class World
 
     /// <summary>
     /// Sort every table holding <typeparamref name="T"/> by its key now, whatever their cadence: the rows in key order,
-    /// the boxes of their blocks drawn again (<see cref="OrderByAttribute">[OrderBy]</see>). The next sort of each table
-    /// comes its interval after this one. For a component without <c>[OrderBy]</c> it does nothing. Rows move, so refs
+    /// the boxes of their blocks drawn again (an order inferred for a pair method, <see cref="OrderRows{T, TOrder}"/>, or
+    /// <see cref="OrderByAttribute">[OrderBy]</see>). The next sort of each table comes its interval after this one. For a
+    /// component no table is ordered by it does nothing. Rows move, so refs
     /// into the tables, handles' cached rows and marked rows end here, as at any structural change. Owner thread only,
     /// between passes (throws during one). O(rows × (key bytes + columns)) of the tables that were out of order, O(rows)
     /// for the others; allocation-free in steady state.
@@ -120,9 +121,10 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// The blocks of every table ordered by <typeparamref name="T"/> (<see cref="OrderByAttribute">[OrderBy]</see>),
-    /// one <see cref="RowBlocks"/> per table: <c>foreach (var blocks in world.Blocks&lt;Position&gt;())</c>. None for a
-    /// component without <c>[OrderBy]</c>. A search over the boxes finds the rows near a point or a box without visiting
+    /// The blocks of every table ordered by <typeparamref name="T"/> (an inferred order or
+    /// <see cref="OrderByAttribute">[OrderBy]</see>), one <see cref="RowBlocks"/> per table:
+    /// <c>foreach (var blocks in world.Blocks&lt;Position&gt;())</c>. None for a component no table is ordered by. A
+    /// search over the boxes finds the rows near a point or a box without visiting
     /// the others. O(1) to start, O(tables) to walk; allocation-free.
     /// </summary>
     public OrderedTables Blocks<T>() where T : struct, IComponent =>
