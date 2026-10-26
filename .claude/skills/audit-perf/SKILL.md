@@ -69,6 +69,12 @@ its own worktree.
    with a new, measured reason.
 2. **Prototype in a worktree**; keep the public API unless the owner approves a change.
 3. **Measure with BenchmarkDotNet only** (`feature`, part 6):
+   - two jobs (`BenchmarkConfig.cs`): `--dev` (1 process, 3 x 150 ms warmups, 5 iterations, about a fifth of the
+     time) while trying ideas and screening, holding the lock for minutes instead of hours; the default job
+     (2 processes, two rounds) for every keep / revert decision and every number recorded. Both keep tiering and
+     dynamic PGO on and start call counting at once, so the warmups reach Tier1 code; never shorten past that with
+     `ShortRun`, `--runOncePerIteration`, `InProcess` toolchains or `TieredCompilation=0`, which measure other code.
+     Filter to the cases a change touches; a full class is for the decision run;
    - A/B copies as git worktrees or `git archive` snapshots outside the repo tree (scratchpad), frozen while they run:
      BenchmarkDotNet rebuilds from source, so a tree someone edits changes under the run; two rounds, interleaved; a
      run past about 2 h is split into one background job per round;

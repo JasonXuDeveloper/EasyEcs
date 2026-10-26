@@ -44,6 +44,8 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        The owner's call on Lookup gathers under `SimdMode.Auto` (2026-10-26): once L1 and WP0b have merged, re-measure
        the micro-adaptive choice (walk vs rows, D131 Considered) with L1's ordered rows and the lookup job under 32
        IL locals; on by default only if no case is slower. No per-entity table id.
+       ARM64 (owner's M4 run, `locality.md` 6.1a): crowded maps 2-8x, sparse maps only 1.1-2.1x while neighbor lists
+       reach 2.5-3.4x: L2 measures 4-row blocks and the neighbor-list form on ARM64 and picks by density.
 2. [ ] **ARM64 parity of the generated forms** (owner, 2026-10-26: every generated SIMD path runs on ARM64; table in
        `audit-vector-loops`, "Every vector form runs on ARM64 too"): an ARM64 CI job first (unit tests on GitHub's
        ARM64 Linux runner, `__loops` lines printed), then multi-field / `Vector2/3/4` components through LD2-4 / ST2-4,
@@ -111,7 +113,8 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 - [ ] Follow-ups: lambda passes do not fuse; lambda + structural change and lambda + view stay scalar.
 - [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 NativeMemory 2 MiB columns (research
       first); #157 the #138 recommendations; #159 remaining research.
-- [ ] #153 benchmark job tuning (Warmup 6 -> 3, IterationTime 250 -> 150 ms) and a lighter job for GeneratorBenchmark.
+- [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
+      the same results (two rounds of a few classes at both settings), and a lighter job for GeneratorBenchmark.
 - [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
 - [ ] Flaky under full-suite load with `DOTNET_EnableAVX2=0`: `AllocationTests.ParallelReductionsScratchAndLookupsDoNotAllocate`
       (1 failure in 2 runs, passes alone): find the measurement race (#166's kind).

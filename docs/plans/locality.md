@@ -243,6 +243,26 @@ Notes:
 - Per-entity neighbor lists beat the lookup grid (2x to 3.7x) but stay far behind the cluster kernel: each j is still
   a scattered read.
 
+### 6.1a Pairs on ARM64 (owner's run, Apple M4, NEON, .NET 10.0.0, default job, one round)
+
+Ratio against `GridLookups` (lower is faster), 4-wide `Vector128` kernel (eedfeb0):
+
+| Entities / density | GridCopies | NeighborLists10 | Clusters | ClustersSort1 | ClustersSort10 | ClustersSort20 | ClustersWithCopies10 |
+|---|---|---|---|---|---|---|---|
+| 1k crowd | 0.67 | 0.84 | 0.37 | 0.52 | 0.49 | 0.47 | 0.42 |
+| 1k sparse | 0.86 | **0.30** | 0.78 | 1.55 | 0.91 | 0.78 | 0.90 |
+| 10k crowd | 0.57 | 0.48 | 0.13 | 0.27 | 0.15 | 0.14 | 0.16 |
+| 10k sparse | 0.85 | **0.29** | 0.42 | 1.06 | 0.50 | 0.48 | 0.61 |
+| 100k crowd | 0.52 | 0.46 | 0.15 | 0.32 | 0.14 | 0.12 | 0.13 |
+| 100k sparse | 0.83 | **0.40** | 0.31 | 1.40 | 0.48 | 0.40 | 0.60 |
+
+Reading: crowded maps meet the 2x bar on ARM64 too (sort on a cadence: 2-8x). Sparse maps do not with the 8-row
+blocks: ClustersSort10 is 1.1-2.1x and per-row neighbor lists win (2.5-3.4x), because a 128-bit vector covers half a
+block and a sparse block's box admits many empty pairs. What L2 must check on ARM64 before it picks the kernel:
+blocks of 4 rows (GROMACS's 4x4 NEON kernel: boxes tighter, one vector per block) against the 8-row block run as two
+halves, and the neighbor-list form for sparse maps (the choice by measured density, as D130 chooses chunks). Compress
+on ARM64: the owner's CompressBenchmark table is still to be recorded here.
+
 ### 6.2 Nearest (4.2): met for the packed start and NearestPlayer, not met on a spread map
 
 `Nearest.cs`, `NearestZombieBenchmark`: the shape of `ZombieTargetSystem.Pick` (VoxelServer): 3 zombies per player,

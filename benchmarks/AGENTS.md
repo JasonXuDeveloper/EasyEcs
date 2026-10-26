@@ -2,8 +2,8 @@
 
 > Read when: adding, changing or running a benchmark.
 
-BenchmarkDotNet only; the method (A/B, lock, quiet machine) is `audit-perf`, the job is
-`EasyEcs.Benchmark/BenchmarkConfig.cs`.
+BenchmarkDotNet only; the method (A/B, lock, quiet machine) is `audit-perf`, the jobs are
+`EasyEcs.Benchmark/BenchmarkConfig.cs` (default for decisions and the site; `--dev` while developing).
 
 When you add, rename or delete a file here, update its line (`verify` checks every file is listed).
 
