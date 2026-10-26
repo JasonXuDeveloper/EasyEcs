@@ -38,7 +38,12 @@ last (`docs-todos.md` collects them meanwhile).
        The owner's call on Lookup gathers under `SimdMode.Auto` (2026-10-26): once L1 and WP0b have merged, re-measure
        the micro-adaptive choice (walk vs rows, D131 Considered) with L1's ordered rows and the lookup job under 32
        IL locals; on by default only if no case is slower. No per-entity table id.
-2. [ ] **Vector loops through the user's own calls** (owner: users should not have to avoid helpers): today a call
+2. [ ] **ARM64 parity of the generated forms** (owner, 2026-10-26: every generated SIMD path runs on ARM64; table in
+       `audit-vector-loops`, "Every vector form runs on ARM64 too"): an ARM64 CI job first (unit tests on GitHub's
+       ARM64 Linux runner, `__loops` lines printed), then multi-field / `Vector2/3/4` components through LD2-4 / ST2-4,
+       then wide components through TBL. Touches SystemGenerator / Kernel: after WP0b, beside L2. Proof: tests with
+       `DOTNET_EnableAVX=0` here, the ARM64 job, the owner's ARM64 BenchmarkDotNet numbers.
+3. [ ] **Vector loops through the user's own calls** (owner: users should not have to avoid helpers): today a call
        into user code keeps the method scalar (EECS055 "it calls X.Y"); only Math, the generated members (SetX / IsX
        ...), Emit.Add, Lookup reads and view members (Kernel.Views.cs, inlined from source, depth 8) are translated.
        Extend the view inliner to any callee whose source is in the compilation: static helpers, extension methods,
@@ -47,18 +52,18 @@ last (`docs-todos.md` collects them meanwhile).
        reason. Generator cost (the owner's condition): callee bodies read only in the implementation-output pipeline,
        once per callee per compilation (cache keyed by the method symbol), syntax-first rejection before any bind, no
        compilation copy per caller (Kernel.Views copies it today: measure first, IDE and build cases).
-3. [ ] **G1** (generator cost, the part phase 2 left): ForEachModel split into a declaration model and
+4. [ ] **G1** (generator cost, the part phase 2 left): ForEachModel split into a declaration model and
        implementation-only body facts; SystemUpdates without Collect; SetFusions reruns; Systems / SystemPlaces share
        one FAWMN; Kernel's GetSemanticModel calls. G6 (C# 14 extension lookup cost) research only.
-4. [ ] **Generated code tuned for the machine** (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
+5. [ ] **Generated code tuned for the machine** (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
        accumulators / unrolling / hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3
        prefetch / streaming stores.
-5. [ ] **Borrowed ideas** (`borrowed-ideas.md`): prefetching chases (AMAC) after gather-always, ghost rows between
+6. [ ] **Borrowed ideas** (`borrowed-ideas.md`): prefetching chases (AMAC) after gather-always, ghost rows between
        worlds as an example first, streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
        owner: records in the docs pass). The owner's call on batch probes of ValueIndex / UniqueIndex (1.3-3.4x slower
        at 1k / 100k keys): keep, re-measure after AMAC with tables far past the last-level cache (16M keys), against
        scalar group prefetching.
-6. [ ] The rest of "Later" below.
+7. [ ] The rest of "Later" below.
 
 ## Done this round (for the record)
 

@@ -30,6 +30,21 @@ it cannot is recorded and the form falls back to rows there:
 - Proof on this x86 machine: the tests run once more with `DOTNET_EnableAVX=0` (128-bit paths); benchmark classes
   guard every intrinsic so they run on ARM64, and result tables carry an ISA column. The owner runs ARM64 numbers.
 
+Where each form stands on ARM64 (2026-10-26; update this table when a form gains its ARM64 path, and add every new
+form to it):
+
+| Form | x86 | ARM64 today | ARM64 path to add |
+|---|---|---|---|
+| Plain vector loop (`Vector<T>`, Vector512 block where AVX-512), masked tail, narrow and mixed lanes, math lowerings (`LaneMath`), `Lanes.Bits`, `Emit.AddLanes` | vector | vector (`Vector<T>` is 128-bit) | none needed |
+| Components of several fields, `Vector2/3/4` (`Interleaved`: AVX2 / AVX-512 shuffles) | vector | rows (`Interleaved.IsAccelerated` false at 128 bits) | `AdvSimd.Arm64.Load2/3/4xVector128AndUnzip` and `StoreVectorAndZip` (LD2-4 / ST2-4): de-interleave is one instruction on NEON |
+| Wide components (`Kernel.Wide`: AVX-512 two-source permutes) | vector on AVX-512 only | rows | TBL over up to four 128-bit registers (`VectorTableLookup` with a tuple), behind the same cost gate |
+| Mask to rows (`Lanes.Compact`: AVX-512 CompressStore) | AVX-512, else a bit walk | bit walk | TBL table (locality L3, running) |
+| `Lookup` gathers (`LookupLanes`, on request) | AVX2 | rows (D131) | none in .NET 10 |
+| Core scans (`BitMask`, tick filters, `Tile` copies) | vector | vector (AdvSimd / `Vector128` paths) | none needed |
+
+Nothing runs the tests on ARM64 hardware yet: CI needs an ARM64 job (GitHub's ARM64 Linux runner) that runs the unit
+tests and dumps the `__loops` lines of the test systems, so a form that falls back to rows there is seen.
+
 ## What becomes a vector loop
 
 - **Reads**: `in` / `ref` component parameters (one column load per lane group, interleaved fields deinterleaved),
