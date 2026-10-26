@@ -96,7 +96,8 @@ public partial class LookupChaseBenchmark
 
 /// <summary>
 /// The size gate of the generated jobs' prefetches (borrowed-ideas.md item 1): the plain method's job row by row
-/// (<see cref="Chase.Hunt"/>), in parallel, and as D131's vector loop (<see cref="Chase.HuntGathered"/>), with the gate as
+/// (<see cref="Chase.Hunt"/>; past the cache its twin job prefetching), in parallel (the per-row form, which prefetches
+/// nothing: the gate's cost there), and as D131's vector loop (<see cref="Chase.HuntGathered"/>), with the gate as
 /// this machine's last-level cache decides it (<see cref="Gate.Auto"/>), forced off (today's loop) and forced on (a world
 /// in the cache prefetching all the same: what the gate saves). The owner runs it on machines with other caches.
 /// </summary>
