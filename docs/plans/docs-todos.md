@@ -227,6 +227,15 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 - demo.mdx includes MovementBatchSystem.cs with a #pragma now; the exemplar pass (WP7) rewrites demo Move and
   VoxelServer FireDamageSystem.Hurt as one-row methods and drops both pragmas; rebuild docs/public/demo after.
 
+## feat-gather-always (D131 measured again, gathers stay on request)
+- Lookup<T> guide page and SimdMode docs (en/zh): when `SimdMode.Require` pays, from D131's widened table (one
+  table or runs into a few: 0.41-0.99; spread over 64 / 1,000 tables, dead targets, presence bits: up to 1.21), and
+  the layout advice: a lookup is cheapest when the entities it reads share components and group value (`[Group]`,
+  `GroupBy`), so a vector's targets share a table.
+- guide/high-performance.mdx (+zh): the same advice next to the gather line.
+- benchmark pages that show LookupGather numbers: resync bench.json after a `tools/bench.sh LookupGatherBenchmark --sync`
+  run (the benchmark gained 1,000 tables, dead and removed targets and three bodies).
+
 ## feat-lookup-gather (D131, merged)
 - guide/high-performance.mdx:59 (+zh): a lookup "has no vector form" is stale: it gathers on `SimdMode.Require`.
 - Lookup<T> guide page and SimdMode docs (en/zh): Require opts into gathers, the backoff (3/15/63 vectors after a
