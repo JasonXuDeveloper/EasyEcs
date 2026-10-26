@@ -75,7 +75,12 @@ its own worktree.
    - GeneratorBenchmark's corpus holds gameplay code (structural calls, generated writers, buffers), or the
      analyzer's slow paths never run in it;
    - every run under `flock /tmp/bench.lock`, nothing else running (agents' builds and samples included): parallel
-     rows swing by 2x on a loaded machine; take the load average with the results;
+     rows swing by 2x on a loaded machine; take the load average at the start and the end of each class;
+   - data a branch predictor can learn flatters branchy baselines: include a size past what it learns (262k rows
+     against 4,096 repeated);
+   - a prototype of a sort or a space structure is checked for its structure (keys sorted, boxes small), not only for
+     equal values: a sort that ended in its scratch arrays kept every value right and made the kernel 500x slower;
+   - long runs are scripts that resume (a done marker per class) and run one class per process;
    - one lock for the machine, `/tmp/bench.lock` (`tools/bench.sh` takes it too), always with `flock -o` so no build
      server or test host it starts inherits the descriptor and holds the lock after the command ends. Benchmarks take it
      exclusively behind a gate they hold while waiting and running, `flock -o /tmp/bench.lock.gate flock -o -x

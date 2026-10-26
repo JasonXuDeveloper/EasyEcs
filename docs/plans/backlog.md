@@ -33,7 +33,7 @@ At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
       Now carried by WP0b (branch `feat-wp0b` starts on it; WP0b's A/B covers the copy fix against the tip).
       The remote branch `research-copy-asm` could not be deleted from the session (proxy); the owner deletes it.
 
-- [ ] **Layout instead of gathers** (phase 0 running, branch `research-locality`, with borrowed-ideas item 2; owner: redesign the layers under the vector loops after GROMACS's cluster pairs
+- [ ] **Layout instead of gathers** (phase 0 merged 0e206d8: pairs 3-16x, compress 5-42x, nearest packed only; batch probes, timer wheel dropped to owner-review; L1 ordered rows + L3 compress running on `feat-locality-core`; L2 pair form after WP0b; owner: redesign the layers under the vector loops after GROMACS's cluster pairs
       and Polychroniou SIGMOD 2015; `locality.md`): phase 0 hand-written benchmarks first (pairs, nearest, ordered
       lookups, compress / batch probes), each with its bar; starts after gather-always reports and WP0b merges.
 - [ ] **Borrowed ideas** (`borrowed-ideas.md`): prefetching chases (AMAC) after gather-always, a timer wheel for

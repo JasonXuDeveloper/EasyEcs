@@ -236,3 +236,16 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
   method or mark it SimdMode.Off); Lookup gathers on Require.
 - api.mdx: Lookup.Resolve only if listed (EditorBrowsable Never).
 - rebuild docs/public/demo (BounceSystem / FadeSystem got SimdMode.Off).
+
+## Locality phase 0 merged (0e206d8): pitfalls users hit (docs or analyzer)
+
+- `Lookup.Find` on a `[LookupKey]` index is prepared only when called in the `[ForEach]` body itself; called from a
+  helper it throws "index not prepared" at run time. Document it on the indexes page, and check whether the analyzer
+  can report the call from a helper (`audit-analyzer`).
+- Calling a `[ForEach]` method from inside its declaring type needs the qualified name (`Crowd.Separate(world)`): the
+  bare name binds to the user's method (CS7036). Say so where the generated entry points are documented.
+- A `[LookupKey]` member named `Key` gives EECS036 / CS0315 (the generated explicit `Key` collides): the message or
+  the docs should name the fix.
+- When L1 / L2 ship, the prototypes under `benchmarks/EasyEcs.Benchmark/Locality/` and their link into the unit tests
+  go (nothing stale); their benchmarks keep only the plain baselines against the shipped forms.
+
