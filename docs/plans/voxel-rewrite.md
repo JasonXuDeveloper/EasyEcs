@@ -1,247 +1,328 @@
-# Plan: VoxelServer with every high-performance feature and the least user code
+# Plan: VoxelServer rewritten with every feature EasyEcs has and the least user code
 
-Scope: `samples/VoxelServer` (base: master `2515638`). Request: rewrite the sample to use every performance feature
-the library has, with as little user code as possible, while it stays an exemplary lesson (ecs-principles.mdx).
-This plan is read-only. Nothing here has been built or measured; each step below names the proof it needs.
+Base: the tip `ba6da74` (refreshed 2026-10-27; the first plan was made on `2515638`, before L1 / L2, the call
+inliner, the generator gaps, the prefetch gates and the distance field). Read-only: nothing here is built. The rewrite
+is step 2a of Finish (backlog): after every feature is built, before docs and the benchmark sync, and after item 11
+(+ 12a / 12b), so every tile system is written once in the ping-pong form (owner: "你得等你的 uv 交换先修好"). Pair
+concepts follow feat-pairs-2's renames (block → cluster, reach → cutoff, window → cluster).
+
+Evidence: a Release build of a copy (the generated `__loops` reasons), `--schedule`, one run at 50 and one at 2,000
+players with `MeasureSystems` (single runs on a shared VM: a ranking, not numbers to quote).
 
 ## 0. Summary
 
-- **Size today**: 2,164 lines of `.cs` (excluding `Benchmark/`), 1,444 of them code. 35 systems, plus FakeClients.
-- **The sample already uses most features.** These are in place: `[ForEach]` row methods, parallel runs, `Lookup`,
-  `Mut`, `Maybe`, `Emit`, `Reduce`, `Scratch`, `EntityRandom`, `[Prefab]`, `[Consume]`, ordered indexes, tiles, groups
-  with `UpdateInterval`, snapshots and region saves. Only one method compiles to a vector loop today
-  (`PlayerMove.Walk`); the others stay scalar for the reasons in section 2.
-- **Cuts possible now** (F1-F7): about 35 lines. One of them, F3, may change the output and needs checking.
-- **Cuts that need generator work** (G0-G11): about 120 lines more. The largest are:
-  - G1: per-tile results from `Cell`, which would simplify Water Flow.
-  - G5: reductions that add to a total instead of replacing it.
-  - G8: the L2 nearest form for ZombieTarget.
-- **Total**: about 150-160 lines saved, about 7%. The sample is already close to the least code it can have. Most of
-  what remains is the lesson itself (section 4).
-- **Output**: G8 (L2) changes the deterministic output, and F3 may. Everything else must leave the output identical.
+- **Today**: 2,620 lines of `.cs`, 1,736 of them code (Benchmark/ excluded); 41 systems (the two generic scent
+  systems counted per color) in 34 files. In Simulation, 33 stages hold 35 systems: only stage 4 (HeightMap,
+  PlayerMove, ZombieTarget) and stage 6 (WaterFlow, ZombieChase) hold more than one; every other system runs alone
+  (it takes the `World` or makes structural changes). One method is a vector loop: `PlayerMove.Walk`.
+- **Hot systems at 2,000 players** (ms per tick, ranking only): WaterFlow 0.60, Float 0.55, ZombieChase 0.55,
+  Physics 0.48, Pickup 0.39, SendEntities 0.27, ScentStep Black 0.26 / Red 0.26, ZombieTarget 0.25. At 50 players:
+  Flow 0.19, Physics 0.17, Float 0.11, ScentStep 0.10 + 0.08. A tick is 4.9 ms of the 50 ms budget at 2,000 players;
+  steady state 0 B.
+- **The restructure**:
+  1. Totals become one `[Accumulate, Sum] Stats`; Carried, Filled and TallySystem go.
+  2. The outbox becomes a `[ForEachRecord]` method.
+  3. The zombies' target becomes the nearest form of the cluster-pair method; `ChunkRing` goes.
+  4. Pickup becomes a pair method that writes the neighbor (`[Neighbor] ref Item`).
+  5. The bodies' tables take the space order those pairs infer, so the chunk-buffer reads of Physics, Float, Chase
+     and Exposure come in row order (buffers about 17 MB at 2,000 players, past the 8 MB L2).
+  6. Four bools get components of their own; five fire and death methods become vector loops with marked structural
+     changes.
+  7. The fire systems merge into one system.
+  8. The AOI spawn and despawn passes drop the `World` for `Lookup`s.
+  9. **After item 11**: water and scent written once in the ping-pong form (NextFluid, NextScent, the commit and
+     settle systems, Red / Black and the generic systems go), then Cell methods (WP5 / WP5b).
+  10. **After item 9**: the chunk lifecycle in the generated deferred load and save.
+- **Expected**: about 380-450 lines fewer (about 15%), 41 → about 30 systems. About 120 lines are possible with what
+  is merged today; the rest waits for items 9, 11, 8c, WP2, WP5 and WP5b.
+- **Output**: identical for the reshapes, `[Accumulate]` / `[ForEachRecord]`, AOI, water and the fire merge. It
+  changes for the pairs (ties by the lower `EntityId.Index`; every zombie looks every tick instead of in Slices), the
+  inferred row order (spawn and pickup order), possibly the scent with `[GaussSeidel]`, and the chunk budget (item 9).
+- **Prefetch never fires here**: at 2,000 players the world has about 8k entities (about 0.25 MB against the 8 MB
+  L2). The memory that misses is the chunk buffers read at computed indexes, which no chase form sees: the lever is
+  ordering rows by space, not prefetch.
 
-## 1. Per file and per system
+## 1. Feature inventory
 
-Notation: "Lines" means the system's line range today. "Unused" means features it could use but does not.
-Exemplary means it still follows ecs-principles after the change.
+"Used" = used by the sample today. Gain: lines (L), speed (S), lesson (Le). "Blocked" names a running item, a backlog
+item or a gap (section 4).
 
-### 1.1 Chunks.cs (132 lines)
+### 1a. Forms users write
 
-| System | Lines | What it does | Unused | Before → after | Saved | Exemplary |
-|---|---|---|---|---|---|---|
-| ChunkRead | 18-42 | gathers the ids of chunks to read from region files (`CollectIds`), then loads them outside the pass | none usable: `LoadEntities` is refused in a pass (EECS041) | stays | 0 | yes, it is the lesson "load outside the pass" |
-| ChunkGenerate | 46-73 | instantiates the chunk prefab per `LoadRequest` without a save, capped at 256 per tick | `[Consume]` allows `Instantiate` in the pass (F3) | hand loop → `[ForEach, Without<Saved>, Consume] static void Generate(in LoadRequest request, in Prefabs prefabs, ref Stats stats, World world)` | ~10 | yes |
-| ChunkUnload | 79-87 | tags chunks no player sees | vector loop: blocked by "lane types int and long differ" | widen one field, or keep (G0 notes) | 0 | yes |
-| ChunkSave | 94-131 | saves unloading chunks to region files on stop or unload | none (I/O at the edge is the lesson) | stays | 0 | yes |
+| Feature | Used today (where) | Should use (where, why, gain) | Blocked by |
+|---|---|---|---|
+| `[ForEach]` per-row methods | everywhere | — | — |
+| Vector loops from plain methods | `PlayerMove.Walk` (Movement.cs:14) | FireDamage (F1), ZombieDeath, Sunlight.Expose, Extinguish.Out, ChunkUnload, SendChunks, water Sleep / settle (S, Le) | bool splits, `[Accumulate]`; Sleep after item 11 |
+| Enum lanes (G0) | automatic | Pickup's `Item.Kind` (becomes a pair anyway); FluidStep.Result | FluidStep has 6 fields (reshape after item 11) |
+| Single-bool component lanes (G0) | none | `Body` → `OnGround` + `Blocked`; `Exposure` → `Sunlit` + `Wet`; `Input.Dig` → `Dig`; `Visible.Placed` → presence (S; Finish 2b) | none |
+| Vector loops through the user's calls | automatic | `Rules.IsNight`, `Terrain.Cell` stay; the inherent reasons are lookups, `Mut` and the `World` | — |
+| Narrow / wide / interleaved / paired-width lanes | Walk | SendChunks `long += int` widens | — |
+| Marked-row structural changes in vector loops | none | Expose `SetBurning`, Out `RemoveBurning`, Die `Destroy`, Unload `SetUnloading`, Sleep `RemoveFlowing` (S) | bool splits, `[Accumulate]` |
+| `Parallel = true`, `ChunkSize` | Walk, Physics, Float, Target, Chase, Exposure.Look, SendEntities, Flow, Commit, Footing, ScentStep | keep; pair passes gain `Parallel` (feat-pairs-2) except Pickup (writes the neighbor) | feat-pairs-2 |
+| `Slices` | Unload (20), Pickup (2), Target (`LookEvery`) | Unload keeps them; Pickup and Target lose them as pair methods | GA8 / Q1 |
+| `[UpdateInterval]`, groups | Spawn, fire, Flow, scent | keep (Le) | — |
+| `Mut<T>` / `SetIfChanged` | Physics, Respawn, Flow, HeightMap, Footing, Commit, Settle, Step | keep in Physics and Respawn (the lesson); the tile step buffers go after item 11 | item 11 |
+| `Maybe` / `ReadOnlyMaybe` | AoiView, Chase, SendEntities | keep | — |
+| `Lookup<T>` | Physics, Float, Target, Chase, Exposure, Spawn, SendEntities, ScentStep | AoiSpawn, AoiDespawn, AoiChunk instead of the `World` (Le; S: shared stages) | none |
+| `Reduce<T>` + `[Sum]` | Carried, Filled | folded into `Stats` | — |
+| `[Accumulate]` | none | `[Accumulate, Sum] Stats` as `ref Reduce<Stats>` in every pass; Carried, Filled, Tally go (L ~-25; S: Die and SendChunks vectorize) | GA1, GA2 |
+| `Emit<T>` | SendEntities | keep | — |
+| `[ForEachRecord]` | none (Replication.cs:53-67 by hand) | `[ForEachRecord] static void Send(in EntityUpdate u, ref Stats s)` (L -8) | none |
+| `EntityRandom` | Spawn, FakeClients | keep | — |
+| `Scratch<T>` | none | none fits (small per-row stackallocs; tile scratch is the generator's after item 11) | — |
+| `[Consume]` | none | the chunk requests through item 9's deferred form with a per-tick budget | item 9 |
+| `[ForEntity]`, lambda passes | none (lambda in Host only) | none fits | — |
+| `[View]` | none | no fit: `Nearby` is a bundle of lookups | GA5 |
+| `[Prefab]` declarations | none (fluent, Program.cs:190-209) | stays fluent (G3 declined) | — |
+| `SetAbsent<T>` | none | Program.cs:195 `.Set(...).RemoveUnloading()` → `.SetAbsent<Unloading>()`; :206 → `.SetAbsent<Burning>()`; `Visible` absent until placed (L -2, Le) | none |
+| `Reserve`, `World.ReserveBuffers` | `Reserve` (Program.cs:160-182); 9 `FillPool` lines | `ReserveBuffers(prefabs.Chunk, ...)` + `(prefabs.Player, ...)` (L -7); the `2 *` of field buffers stays until 8c | 8c |
+| `MaxPooledLength` | Program.cs:65-69 | stays until GA3 | GA3 |
+| Value / unique / ordered indexes, `IDirectMapped` | InChunk, ViewCenter, Footprint, Score / Dropped, Chunk / Ground / LoadRequest | keep (Le); `Ground` goes after 8c | 8c |
+| Relations / hierarchy | none | none fits (an inventory is a buffer, cheaper; say why on the page) | — |
+| GroupBy, `Disabled<T>` | none | none fits | — |
+| Cleanup components | ViewCenter, Visible | keep; `Visible` loses `Placed` | — |
+| Snapshots | Host/Steady.cs | keep (12d helps for free) | — |
+| Save / Load, `SaveEntities` / `LoadEntities` | Program, ChunkRead / ChunkSave | keep (the lesson), through item 9's form | item 9 |
+| `MoveEntities` | none | Q7 (item 7's ghost rows?) | item 7 |
+| Tiles (`ITile`, `Tile<,>`, `Pad`, `Rows`, `ChangedEdges` / `Facing`) | Flow, Wake, Step, Settle, ScentWake | ping-pong, then `Cell<,>` (WP5 / 5b), `[GaussSeidel]` for the scent | 11, 12a, 12b, 8c, WP5 / 5b |
+| `[GaussSeidel]` | none (red-black by hand: Red / Black, `ScentStepSystem<TColor>`, `ScentSettleSystem<TColor>`) | the scent (L ~-60, Le) | item 11 |
+| Ping-pong (u / v, zero rows) | none (commit copies: Water/Commit.cs, Scent/Settle.cs) | water and scent (L ~-40; S) | 11, 12a, 12b |
+| Element loops (WP2) | none (hand `Vector128`, HeightMap.cs:15-38) | HeightMap, Footing (L -8) | WP2 |
+| `Cell<TCell,TTile>`, per-tile results | none (hand `Vector128`, Flow.cs:104-123, Step.cs) | Flow; the scent if as fast (L ~-60 / -80) | WP5, WP5b |
+| Cluster pairs `[Neighbor]` (cutoff per row or one, two kinds, self masks, keep hint, nearest, `[Neighbor] ref`, parallel) | none | ZombieTarget (nearest), Pickup (writes j), optionally Attack (section 3) | feat-pairs-2, GA1, GA8 |
+| `[OrderBy]` / ordered rows (L1) | none | inferred from the pair methods on `Position` (no `[OrderBy]`) (S) | pairs |
+| Deferred load / save (G10) | none (Chunks.cs:19-84, 105-142 by hand) | item 9's form | item 9 |
+| `DescribeSchedule`, `MeasureSystems` | Program.cs:15, Server.cs | keep | — |
+| `FloatMode` | none | no float reduction or float loop beyond Walk | — |
 
-Comment at Chunks.cs:16 is stale. It says `Instantiate` may not run in a pass, but only `LoadEntities` /
-`SaveEntities` are refused. Fix it with F3.
+### 1b. Automatic features: does the sample trigger them?
 
-F3 caveats:
-- The cap of 256 per tick goes away. The fake-client start then generates every chunk in one tick.
-- Chunk ids are no longer recycled in the order of the requests.
-- The deterministic output may change. Run `check-sample.sh` before accepting.
-- Alternative: keep the cap with a `Reduce`/budget singleton. That costs back about 4 lines.
+| Feature | Fires today? | Shape data for it? | Proof |
+|---|---|---|---|
+| Prefetch gates (row chases past L2; probes and vector chases past LLC; `DestroyEntities` ids) | **No**: gate `EntityCount × (16 + rowSize)` (LookupLanes.cs:89-90), ~8k entities ≈ 0.25 MB; twins exist (`Job0Chases` in Float, Chase) at one check per pass; `DestroyEntities` lists ≤ 256 ids | No: what misses is the chunk buffers (~17 MB) read through `Nearby`; the answer is rows ordered by space | MeasureSystems at 2,000 before / after the order; no 300k-entity case (Q9) |
+| Ordered rows (L1) | No | Yes, inferred from the pairs: bodies in Morton order, re-sorted every 10 updates | TickBenchmark 50 / 2,000 A/B + Physics, Float, Chase times; kept anyway (the pairs need it) |
+| Cluster-pair j prefetch | n/a | Position ~96 KB: never past a gate | — |
+| Fusion | none fused | the merged Fire system: Hurt and Out share `With<Burning>` and may fuse as vector loops (check EECS093) | `--schedule`, TickBenchmark |
+| Paired accumulators | no float Min / Max / Fast sums | none | — |
+| `Lanes.Compact` / `Selection` / `Ballot` | via `CollectIds`, `Emit` | automatic for the new marked-row loops | — |
+| `LookupLanes` gathers | none | none (every Lookup user also reads buffers through `Nearby`) | — |
+| Tombstones | Pickup `Destroy`, ItemExpiry | keep | — |
+| Change-tick skipping | `Changed<Position>`, `<Health>`, `<FluidStep>`, `ChangedAny<buffers>` | keep (a `ref` of a tracked component stamps every row, so Respawn keeps `Mut`) | — |
+| Parallel stages | 2 shared of 33 | more systems without the `World` (AOI) and fewer structural changes; marked-row loops still run alone, `Reduce<Stats>` users conflict | GA2 |
+| Copy-on-write buffers, incremental snapshots (12d), Emitted segments (12e) | automatic | nothing to write | — |
 
-### 1.2 Movement.cs (98 lines)
+## 2. Per file and per system
 
-| System | Lines | What it does | Unused | Before → after | Saved | Exemplary |
-|---|---|---|---|---|---|---|
-| PlayerMove | 11-20 | applies input to velocity | already a vector loop (`Walk`) | stays | 0 | yes |
-| Physics | 31-82 | gravity, collision with the voxel grid, `OnGround` | vector loop blocked by `Mut<Position>` and a bool field | stays scalar (collision reads blocks); G0 lets the bool lane through but `Mut` and block reads keep it scalar | 0 | yes |
-| Grid | 89-97 | updates the tile cell of moved bodies (`SetInChunkIfChanged`) | F7: check whether `SimdMode.Off` is still needed | drop the attribute if the generator no longer tries | 1 | yes |
+L = lines saved (approximate). Output: same unless said.
 
-### 1.3 Aoi.cs (144 lines)
+### 2.1 Components
 
-| System | Lines | What it does | Unused | Before → after | Saved | Exemplary |
-|---|---|---|---|---|---|---|
-| AoiView | 27-74 | per player, the chunk square in view; sends enter and leave | L2 pairs could replace the square walk, but the view is chunk-keyed, not distance-keyed | stays | 0 | yes, AOI is the lesson |
-| AoiChunk | 77-89 | marks chunks seen | vector blocked by int/long lanes | stays | 0 | yes |
-| AoiSpawn / AoiDespawn | 94-109 / 112-121 | entity enter and leave per viewer | none | stays | 0 | yes |
-| Aoi helper | 124-143 | shared chunk-square math | none | stays | 0 | yes |
-
-### 1.4 Zombies.cs (201 lines)
-
-| System | Lines | What it does | Unused | Before → after | Saved | Exemplary |
-|---|---|---|---|---|---|---|
-| NightSpawn | 14-39 | spawns zombies at night near players | none | stays | 0 | yes |
-| ZombieTarget | 51-80 | nearest player within vision, through `Terrain.ChunkRing` | L2 nearest form (G8) | ring walk → `[ForEach] static void Target(ref Target target, in Position p, Nearest<Player> nearest)` style form, exact shape per locality.md 3.4 | ~30 incl. `ChunkRing` (Terrain.cs:371-385) | yes, if the cutoff is per row |
-| Chase | 87-110 | moves toward the target through a `Lookup<Position>` | F5: try `SimdMode.Require` for the gather | an attribute; if it compiles to a vector loop, measure | 0 | yes |
-| Attack | 116-131 | hits a player in reach | takes the `World`, which keeps it scalar | stays | 0 | yes |
-| Exposure / Sunlight | 141-153 / 155-163 | sunlit test, sets burning | bool lane (G0) | stays, vectorizes with G0 | 0 | yes |
-| FireDamage | 173-188 | hand-written span loop under `#pragma warning disable EECS103` | the generated form EECS103 asks for (F1) | → `[ForEach, With<Burning>] static void Hurt(ref Health health) => health.Value--;` | ~10, and the pragma goes | yes, and better: a hand loop the analyzer warns about is not something users should copy |
-| Extinguish | 192-200 | clears burning by day | none | stays | 0 | yes |
-
-### 1.5 Items.cs (122 lines)
-
-| System | Lines | What it does | Unused | Before → after | Saved | Exemplary |
-|---|---|---|---|---|---|---|
-| Dig | 11-34 | removes the block, spawns an item | bool `Input.Dig` (G0) | stays | 0 | yes, lesson |
-| Pickup | 43-69 | player picks items in reach | L2 writes to j (G9) | later: pairs form | ~10 (G9) | yes |
-| Inventory | 72-103 | tallies carried items | accumulating `Reduce` (G5) | part of G5 | see G5 | yes |
-| ItemExpiry | 109-121 | expires items through the ordered index | none | stays (ordered index is the lesson) | 0 | yes |
-
-### 1.6 Health.cs (47 lines)
-
-| System | Lines | Unused | Change | Saved |
-|---|---|---|---|---|
-| ZombieDeath | 6-16 | `stats.X++` on a ref singleton keeps it scalar | accumulating Reduce (G5) | ~2 |
-| PlayerRespawn | 22-47 | `Mut<Health>` | stays (lesson: Mut) | 0 |
-
-### 1.7 Replication.cs (97 lines)
-
-| System | Lines | Unused | Change | Saved |
-|---|---|---|---|---|
-| SendChunks | 12-18 | `stats.X++` | G5 | ~1 |
-| ChunkSent | 22-26 | none | stays | 0 |
-| SendEntities | 37-49 | `Maybe` in a parallel run keeps it scalar | stays | 0 |
-| SendPackets | 53-67 | gets, loops and clears `Emitted<T>` by hand | generated consumer (G6) | ~6 |
-| Tally | 73-82 | sums counts into stats by hand | G5 | ~8 |
-| Clock | 89-96 | none | stays | 0 |
-
-### 1.8 Water/ (Commit 22, Float 39, Flow 124, HeightMap 38, Sleep 22, Wake 38)
-
-- **Flow (34-124)**:
-  - Hand-written `Vector128` `Shade`/`Gives` plus per-row summaries.
-  - G1 (WP5/5b `Cell<,>` with per-tile results) would turn this into a tile method with one result per tile, saving
-    about 50 lines.
-  - Vector loops are blocked today by "lanes int and byte".
-  - The output must be identical, so prove it with check-sample.sh and the Flow tests.
-- **HeightMap (15-38)**:
-  - Hand-written `Vector128` over a generic `DynamicBuffer`.
-  - G2 (WP2 element loops) saves about 6 lines.
-- **Float**: uses a Lookup, so it stays scalar. No change.
-- **Commit, Sleep, Wake**: no change.
-
-### 1.9 Terrain.cs (210), Program.cs (192), Rules.cs (79), Components (253), Groups (16), Host (290)
-
-- **Terrain.Generate (225-247)**:
-  - Hand-written `Vector128` noise on a cold path (chunk generation).
-  - F4 writes it scalar and saves about 11 lines. This is the owner's call: it is the sample's one hand-SIMD lesson.
-- **Terrain.ChunkRing (371-385)**: goes away with G8. `Nearby` (283-348), `ChunkStrip` and `ChunkSquare` stay.
-- **Program.cs prefabs (174-190)**:
-  - `.Set(new Fresh(), new Flowing(), new Unloading()).RemoveUnloading()` (179) and `.SetBurning(0).RemoveBurning()` (187).
-  - F2 replaces these with `.SetAbsent<Unloading>()` / `.SetAbsent<Burning>()`. This saves about 2 lines and states
-    the intent.
-- **Program.cs capacity (151-166, 65-69)**:
-  - Five `MaxPooledLength` settings and five `FillPool` calls.
-  - G4: `Reserve(prefab)` filling the buffer pools saves about 8 lines.
-- **[Prefab] declarations**: G3 would need buffer fields (EECS102 today) and absent fields. It adds about 15 lines
-  instead of saving any, so it is not part of this plan.
-- **Host/**: FakeClients 24, RegionFiles 96, Server 111, Steady 48, Support 11. This is plumbing and stays. G11 (a
-  steady-state check helper) is probably declined.
-
-## 2. Why methods stay scalar today (from the generated reasons, obj/Release)
-
-| Reason | Methods | Fix |
+| File | Change | L |
 |---|---|---|
-| a `bool` field | Visible.Placed, Input.Dig, Exposure.Sunlit, Body.OnGround | G0 |
-| an enum field | FluidStep.Result (StepResult), Item.Kind (Block) | G0 |
-| lane types differ (int/long, int/byte) | ChunkUnload, AoiChunk, Flow | widen in user code, or mixed-width lanes |
-| a `Lookup` | Float, NightSpawn, Chase, Target | F5 tries the gather form for Chase |
-| `Mut<T>` | Physics, Respawn | none (lesson) |
-| `stats.X++` on a ref singleton | SendChunks, ZombieDeath | G5 |
-| spans | FireDamage | F1 |
-| generic `DynamicBuffer` | HeightMap | G2 |
-| `SetInChunkIfChanged` | Grid | stays |
-| `Maybe` in a parallel run | SendEntities | stays |
-| takes the `World` | Aoi, Attack | stays |
+| Bodies.cs:15 `Body(bool OnGround, bool Blocked)` | → `OnGround(bool On)`, `Blocked(bool On)` | +2 |
+| Bodies.cs:27 `Visible(ChunkPos, bool Placed)` | → `Visible(ChunkPos)`, absent in every prefab; AoiSpawn sets it on first sight; AoiDespawn needs no `Placed` test | 0 |
+| Mobs.cs:30 `Exposure(bool Sunlit, bool InWater)` | → `Sunlit(bool On)` + `Wet(bool On)` | +2 |
+| Mobs.cs:16 `Target(EntityId Player)` | → `Target(EntityId Player, float Distance)`: the nearest form's hint (-1 = keep) | 0 |
+| Players.cs:9 `Input(Vector2 Walk, bool Dig)` | → `Input(Vector2 Walk)` + `Dig(bool On)` | +2 |
+| Chunks.cs:59 `Viewers(int Count, long EmptySince)` | `Count` → `long`: Unload becomes a vector loop with a marked `SetUnloading` | 0 |
+| Singletons.cs:18-38 `Stats` | → `[Accumulate, Sum] partial record struct Stats(...)`; Carried (45-48), Filled (51-54), comment 40-42 deleted | -14 |
+| Water.cs:21 `NextFluid` | deleted **after item 11** | -5 |
+| Water.cs:40 `FluidStep` (6 fields) | **after 11 / 12b**: `FluidStep(StepResult Result, TileFaces Edges)` + count in `FluidCount`; filled blocks to `Reduce<Stats>` | -3 |
+| Scent.cs:18 `NextScent`, 87-89 `Red` / `Black`, 58-72 `Ground` | **after 11 / 8c**: all go | -35 |
+| Scent.cs:35-52 `Footing.CanStep` | stays (a precomputed mask) unless WP5 reads it per cell | 0 |
 
-G0 is the cheapest generator gap. `Kernel.cs:929` rejects bool and enum fields as lanes. `Kernel.Wide.cs:149-154`
-already maps enums and bools to their sizes. Letting them through as byte or underlying-type lanes unblocks four
-systems' reasons. Those systems still need their other blockers removed before they vectorize.
+### 2.2 Chunks.cs (143)
 
-## 3. Hand-written code the generator should write
+| System | Lines | After | L |
+|---|---|---|---|
+| ChunkRead | 19-43 | **after item 9**: the plain `[ForEach]` request; the budget `Rules.MaxRequests` kept | ~-12 |
+| ChunkGenerate | 47-84 | **after 9 + 11 / 8c**: `RemoveRed` / `RemoveBlack` (67-68) and the four `SetCount`s (75-78) go (GA10) | ~-18 |
+| ChunkUnload | 90-98 | `Viewers.Count` long: vector loop, marked `SetUnloading` | 0 |
+| ChunkSave | 105-142 | **after item 9**; the `keep` rule stays as data | ~-10 |
+| comment 17-18 | | stale (only Load / Save are refused in a pass, EECS041): rewrite with item 9 | |
 
-| # | Where | What users write by hand | Generated form | Saved |
+### 2.3 Movement.cs (98), Aoi.cs (144)
+
+| System | Lines | After | L |
+|---|---|---|---|
+| PlayerMove.Walk | Movement.cs:11-20 | unchanged (vector loop) | 0 |
+| Physics.Move | 31-82 | writes `OnGround` / `Blocked`; rows in space order; `Mut<Position>` stays (the lesson) | 0 |
+| Grid.Track | 89-97 | drop `SimdMode = SimdMode.Off` (F7); check the reason stays Info | -1 |
+| AoiView.Look / Left | Aoi.cs:27-74 | stats → `ref Reduce<Stats>`; the `World` stays (the lesson) | 0 |
+| AoiChunk.Loaded | 77-89 | `Lookup<ViewCenter>` + `Lookup<InChunk>` (`Count`) + `Reduce<Stats>`: no longer alone | 0 |
+| AoiSpawn.Moved | 94-109 | `Without<Visible>` `Appeared(...)` sets `Visible` on its own row; `Moved(in InChunk, ref Visible, ...)` handles crossings; `Aoi.ViewersOf` / `Watching` take lookups | +3 |
+| AoiDespawn.Gone | 112-121 | lookups, no `Placed` test | -1 |
+| `Aoi` helper | 124-143 | takes four lookups (a small ref struct like `Nearby`) | +2 |
+
+**AOI as pairs: no.** Views are chunk squares (Chebyshev in chunks) counted in O(1) per chunk through the view-center
+index; a pair method needs a Euclidean cutoff and would visit millions of pairs per tick in a crowd of 2,000 against
+about 25 index counts per crossing. The page says why (count, do not search). GA6 declined.
+
+### 2.4 Zombies.cs (216)
+
+| System | Lines | After | L | Output |
 |---|---|---|---|---|
-| G0 | Kernel.cs:929 | nothing, but bool and enum fields block vector loops | bool/enum lanes | 0 (speed) |
-| G1 | Water/Flow.cs 34-124 | `Vector128` shading plus per-row summaries | `Cell<,>` with per-tile results (inner-loops WP5/5b) | ~50 |
-| G2 | Water/HeightMap.cs 15-38 | `Vector128` over a buffer | element loops (WP2) | ~6 |
-| G4 | Program.cs 65-69, 151-166 | pool sizes and fills per buffer | `Reserve(prefab)` fills pools | ~8 |
-| G5 | Tally, Inventory (Carried, Filled), ZombieDeath, SendChunks | sums into singletons by hand (Reduce replaces, it does not add) | accumulating reductions | ~25 |
-| G6 | Replication.cs:58; also BattleServer.cs:353, samples/Actors/Host/Storage.cs:30 | get `Emitted<T>`, loop, clear | generated consumer of emitted records | ~6 (here) |
-| G7 | Pickup / Chase | a second Lookup of another component of the found entity | keyed read of the found entity | ~3 |
-| G8 | Zombies.cs:51-80 + Terrain.cs:371-385 | nearest player through a ring of chunks | L2 nearest form (locality.md 3.4) | ~30 |
-| G9 | Items.cs:43-69 | pairs with a write to j | L2 writes to j (after G8) | ~10 |
-| G10 | ChunkRead/ChunkSave | load/save outside the pass | deferred consume | probably decline (it is the lesson) |
-| G11 | Host/Steady.cs | steady-state allocation check | helper | probably decline |
+| NightSpawn.Spawn | 14-39 | `Reduce<Stats>`; `World` stays (`Instantiate`) | 0 | changes with the player order (zombie ids) |
+| ZombieTarget.Pick | 51-80 + Terrain.cs:191-205 | **nearest form, two methods**: `Keep` (Lookup<Position>, Lookup<Player>; target kept within Vision: `Distance = -1`, else +∞) and `Acquire` (`(in Position p, in Vision v, ref Target t, [Neighbor] in Position q, [Neighbor] in Player _, [Neighbor] Entity other)`, ties by the lower index); `ChunkRing` and the ViewCenter walk go | ~-24 | changes (ties, every tick: Q1) |
+| ZombieChase.Chase | 92-125 | unchanged; rows in space order | 0 | same |
+| ZombieAttack.Attack | 131-146 | A: keep (`World`), recommended. B: a pair writing `[Neighbor] ref Health` (cutoff 1.2 on X / Z), needs GA1; only if faster | 0 | same |
+| Exposure.Look, Sunlight.Expose, FireDamage.Hurt, Extinguish.Out | 156-215 | **one `FireSystem`**, `[UpdateInterval(BurnEvery)]`: `Look` (parallel, writes `Sunlit` / `Wet`), `Expose`, `Hurt` (`[With<Burning>] (ref Health h) => h.Value--;`: F1, the pragma and the hand `Vector<int>` loop go), `Out`; Hurt / Out may fuse (EECS093) | ~-20 | same |
+| ZombieDeath (Health.cs:6-16) | | `ref Reduce<Stats>`: `Destroy` on marked rows, a vector loop | 0 | same |
 
-G3 (`[Prefab]` with buffer and absent fields) adds lines here, so this plan leaves it out.
+### 2.5 Items.cs (122), Health.cs (47)
 
-## 4. What must stay because it is the lesson
-
-These stay:
-- AOI (view square, enter and leave).
-- The chunk lifecycle: read, generate, unload, save.
-- `CollectIds` and load outside the pass (ChunkRead).
-- `Mut` (Physics, Respawn).
-- Dig.
-- The ordered index (item expiry, leaderboard).
-- Save on stop.
-- Groups with `UpdateInterval`.
-- The region files.
-
-Terrain's hand SIMD is the only lesson that is in question (F4).
-
-## 5. Deterministic outputs
-
-- `.github/scripts/check-sample.sh` compares the program's output with the README's expected block and with
-  `docs/content/samples/voxel-server.mdx` / `.zh.mdx`.
-- F1, F2, F4, F5, F7, G0, G1, G2, G4, G5 and G6 must keep the output byte-identical. That is their proof.
-- F3 may change the output, through the generation order and the cap.
-- G8 changes the output: tie order, and which player a zombie targets.
-- When the output changes, update together:
-  - `samples/VoxelServer/README.md` (output block);
-  - `voxel-server.mdx` and `.zh.mdx` (output blocks, and the walkthrough of ZombieTarget);
-  - the stale "not used: parallel physics and the hunt" text, which is wrong today (both run in parallel). Fix it in
-    the next docs pass regardless.
-
-## 6. Totals and order of work
-
-| Step | Content | Depends on | Saved | Output |
+| System | Lines | After | L | Output |
 |---|---|---|---|---|
-| 1 | F1 FireDamage, F2 SetAbsent, F7, Chunks.cs:16 comment | nothing | ~13 | same |
-| 2 | F3 ChunkGenerate with `[Consume]` | nothing | ~10 | check |
-| 3 | F5 Chase gather, measured | prefetch work merged (the prefetch is automatic for row and vector forms on x86; remeasure only) | 0 | same |
-| 4 | F4 Terrain scalar | owner's call | ~11 | same |
-| 5 | G0 bool/enum lanes | generator change (feature skill) | 0 | same |
-| 6 | G5 accumulating Reduce, G6 emitted consumer, G4 Reserve | generator/core features | ~39 | same |
-| 7 | G2 element loops, G1 Cell results | inner-loops WP2, WP5/5b | ~56 | same |
-| 8 | G8 nearest, then G9 | L2 cluster pairs (feat-locality-pairs) | ~40 | changes |
+| Dig | Items.cs:11-34 | reads `in Dig dig`; `Reduce<Stats>`; `World` stays (the lesson) | 0 | same |
+| Pickup | 43-69 | **pair, after feat-pairs-2**: players × items, `(in Position p, Mut<DynamicBuffer<ItemStack>> inventory, [Neighbor] in Position q, [Neighbor] ref Item item, [Neighbor] in Dropped dropped, in Clock clock)`; a vector loop destroys items at 0; the `ViewCenterIndex` walk goes. Needs `Mut<>` as a row parameter of a pair method (unverified) and GA1 | ~-8 | changes |
+| Inventory | 72-103 | unchanged (WP2 may vectorize HasRoom) | 0 | same |
+| ItemExpiry | 109-121 | OnUpdate writes the world's `Stats` value | 0 | same |
+| Respawn | Health.cs:22-47 | `Reduce<Stats>`; `Mut` stays | 0 | same |
+| Item merging | — | not built: a pair writing the neighbor's `Item` while reading its own is refused | — | GA4 / Q3 |
 
-Total: about 150-160 of 2,164 lines (about 7%).
-- The steps that need nothing else (1-4) save about 35 lines.
-- The prefetch work needs no code here. The sample's working set fits in cache, so the effect may be zero. Measure it.
+### 2.6 Replication.cs (97)
 
-Proof for every step:
-- TickBenchmark A/B (`samples/VoxelServer/Benchmark`) with BenchmarkDotNet: no regression, 0 B steady state.
-- `check-sample.sh`.
-- The VoxelServer steady-state check in `Host/Steady.cs`.
+| System | Lines | After | L |
+|---|---|---|---|
+| SendChunks | 12-18 | `ref Reduce<Stats>`: a vector loop (widening sum) | 0 |
+| ChunkSent | 22-26 | unchanged | 0 |
+| SendEntities | 37-49 | unchanged (`Maybe` in parallel: inherent) | 0 |
+| SendPackets | 53-67 | `[ForEachRecord] static void Send(in EntityUpdate u, ref Stats stats)` | -8 |
+| Tally | 73-82 | deleted (`[Accumulate]`) | -12 |
+| Clock | 89-96 | unchanged | 0 |
 
-## 7. Open questions for the owner
+### 2.7 Water/ (283 lines; all **after item 11 + 12a + 12b**, the Cell form after WP5 / WP5b)
 
-1. **F3**: accept losing the cap of 256 generated chunks per tick (and maybe a changed output), or keep a budget?
-2. **F4**: keep Terrain's hand `Vector128` as the sample's one hand-SIMD lesson, or write it scalar?
-3. **G8 (L2 nearest)**:
-   - Must the form support a per-row cutoff (Vision)?
-   - Must it support pairs across two tables (zombies × players)?
-   - Must it support "keep the target while it is in reach"?
-   - Accept the new tie order in the output?
-4. Which generator gaps to build:
-   - G0, G5 and G6 are general and small. G6 repeats in three places.
-   - G4 is optional.
-   - G10, G11 and G3 are proposed as declined. Record them in owner-review.md.
-5. Is about 7% worth a rewrite? The alternative is to take steps 1-2 now and let the rest land with the features that
-   enable them.
+| System | Lines | After | L |
+|---|---|---|---|
+| HeightMap | HeightMap.cs:15-38 | **after WP2**: plain element loops | -8 |
+| Wake | Wake.cs:16-38 | `EnsureCapacity` (36) goes; Dug and Spread stay or go with GA12 | -3 (-15 with GA12) |
+| Flow | Flow.cs:34-124 | ping-pong (the generator swaps and zeroes skipped rows, item 11; edges from the step, 12b); then WP5b: `Shade` / `Gives` as one Cell method with `out Fluid`, FluidCount, filled and edges as per-tile results; filled → `Reduce<Stats>` | -60 |
+| Sleep + Commit | Sleep.cs, Commit.cs | **merge** into `WaterSettleSystem` (no copy, no TrimExcess); a vector loop if FluidStep ≤ 4 fields | -25 |
+| Float | Float.cs:13-39 | `Reduce<Stats>`; rows in space order | 0 |
 
-## 8. Coordinator's decisions (2026-10-26)
+Output identical (proof: check-sample and the water tests).
 
-- Every rewrite step waits for the finish phase (owner: "先把代码全改完"); the generator gaps are built now as code
-  items (backlog Later): G0, G4, G5, G6, G7.
-- G8 / G9 requirements were given to L2 (feat-locality-pairs): a cutoff per row, pairs across two tables, keep the
-  target while in reach (read from a component), writes to j; ties by the lower EntityId. The output may change.
-- F3: keep a budget per tick if `[Consume]` can carry one (a cap is a lesson of the sample); otherwise keep today's
-  form and fix the stale comment. F4: write Terrain scalar if the generator vectorizes it (EECS103's rule: no hand
-  SIMD the plain form would generate); keep it only if it stays faster, and say why in the code.
-- G3, G10, G11: declined, recorded in `docs/owner-review.md`.
+### 2.8 Scent/ (291 lines; **after item 11 (`[GaussSeidel]`) + 8c**, the Cell form after WP5)
+
+| System | Lines | After | L |
+|---|---|---|---|
+| Step<TColor> + Settle<TColor> | Step.cs:30-167, Settle.cs:12-28 | one `[ForEach, GaussSeidel]` step: no colors, no generic system, no NextScent, no settle copy, settled tiles sleep; seeds become a cell buffer `Seed` written by Footprint; Trail a second out (WP5b); the hand doubling scan (Step.cs:111-120) only if the Cell form is slower (Q6) | -60 to -110 |
+| Footing | Footing.cs:10-34 | **after WP2**: plain loop | -5 |
+| Hunt | Hunt.cs:10-22 | `With<Ground>` → `With<Chunk>` (8c) | 0 |
+| ScentWake, Footprint | Wake.cs:8-40 | Footprint writes `Seed` cells (changed buffer = wake); the Facing wake goes with GA12 | -10 |
+| AddSystems | Program.cs:115-118 | four lines → one | -3 |
+
+Output may change (multicolor order while the field settles).
+
+### 2.9 Terrain.cs (222), Program.cs (211), Rules.cs, Host
+
+- **Terrain.Generate** (33-55), hand `Vector128`: scalar if the generator vectorizes it (not a `[ForEach]` today);
+  after WP5 a Cell method with `out Block`; otherwise kept with a comment (cold path). Q5.
+- **Nearby** (91-168) stays (GA5 would fold its constructor). **ChunkStrip** (173-187) and **ChunkSquare** (208-222)
+  stay for the AOI; **ChunkRing** (191-205) goes with the pair target.
+- **Program.cs**: `ReserveBuffers` replaces 170-181 (-7); `SetAbsent` at 195, 206 (-2); `MaxPooledLength` (65-69)
+  until GA3; the systems list loses about 10 lines.
+- **Rules.cs**: `LookEvery` stays if `[UpdateInterval]` replaces the Slices.
+- **Host/**: FakeClients reads `OnGround` / `Blocked` (Play may become a vector loop; the static `Directions[...]`
+  read may keep it scalar). Steady, Server, RegionFiles, Support unchanged.
+
+## 3. Cluster pairs: every place entities meet entities
+
+| Meeting | Pair? | Rows × neighbors | Order key | Cutoff | Output | L |
+|---|---|---|---|---|---|---|
+| Zombie target | **yes**, nearest with the keep hint | zombies × players | inferred Morton of `Position` | per row `vision.Range²` | changes | -24 |
+| Chase | no (the scent gives the direction) | — | — | — | — | 0 |
+| Pickup | **yes**, writes j | players × items | same | `PickupRange²` | changes | -8 |
+| Attack | optional (B) | zombies × players, writes `Health` | same | 1.2² on X / Z | same | 0 |
+| Item merging | no (GA4) | items × items | — | — | — | — |
+| AOI | no (counted squares) | — | — | — | — | — |
+
+Proof: TickBenchmark 50 / 2,000 A/B; Target (0.25 ms), Pickup (0.39 ms), Attack (0.14 ms) per system; parallel pairs
+after feat-pairs-2. Order effects: player, zombie and item tables re-sorted every 10 updates; Physics, Float, Chase
+and Exposure read chunk buffers in row order (the expected gain at 2,000 players); NightSpawn, Dig and Pickup order
+changes, so the output changes deterministically; the j-cluster prefetch never fires.
+
+## 4. Gaps: lines users would still write twice
+
+| # | Gap | Saves / unlocks | Recommendation |
+|---|---|---|---|
+| GA1 | `Reduce<T>` / `[Accumulate]` in pair methods (PairForm refuses `ref` context parameters) | Pickup and Attack count into Stats without a second pass or EECS086 | build (small, after feat-pairs-2) |
+| GA2 | Systems that only accumulate into one `[Accumulate]` singleton do not conflict (combined in registration order at the stage end) | Stats users share stages | build if `--schedule` shows a stage lost after step 2; else record |
+| GA3 | `MaxPooledLength` inferred for a tile's cell buffers from `ITileShape` (or `ReserveBuffers(prefab, count, length)`) | Program.cs:65-69 | build with item 11 / 12a |
+| GA4 | A symmetric pair (each unordered pair once, both sides written) | item merging, collisions | Q3; else decline and record |
+| GA5 | A bundle of `Lookup<T>` as one parameter | `Nearby` built 5 times (-5) | propose to decline (Q8) |
+| GA6 | Chebyshev / box cutoffs for pairs | AOI as pairs | decline (Q8) |
+| GA7 | EECS055 reason text: Chase prints `local 'cell' is a ??` (type name missing); Float says `LookupExtensions.TryFind, defined in another assembly` where a key probe has no vector form | correct reasons | **fix (a bug)** |
+| GA8 | `Slices` on pair methods (rows sliced, neighbors whole) | the target's look spread over ticks | Q1 |
+| GA9 | item 9's form carries a per-tick budget (`Rules.MaxRequests`) | the chunk cap kept | a requirement of item 9 |
+| GA10 | A tile's cell buffers sized at instantiation from its shape (owner thread) | ChunkGenerate:75-78, Water Wake:36 (-6) | build with item 11 |
+| GA12 | Tile sleep and wake owned by the tile pass (from the step's edges and `Changed<cell buffer>`), not `foreach (id in tile.Facing(e)) world.GetEntity(id).SetX()` | written 4 times (WaterWake.Dug / Spread, ScentWake, ScentSettle; Footprint.Wake): ~-20, and those systems stop running alone | build with item 11 (extend `[GaussSeidel]`'s sleep to Jacobi) |
+
+## 5. What stays because it is the lesson
+
+AOI (squares, strips, counts, ViewCenter as a cleanup component); the chunk lifecycle as data (requests, Fresh,
+Unloading), also in item 9's form; `Mut` in Physics and Respawn; Dig and NightSpawn with the `World`; the ordered
+indexes (expiry, leaderboard); save on stop and the region files; groups and `UpdateInterval`; `Emit` in
+SendEntities; the two-step fire (the costly look in parallel, the presence flip after); `Footing.CanStep` as a
+precomputed mask; Terrain's hand SIMD only per Q5.
+
+## 6. Deterministic output
+
+- Identical: bool splits, `SetAbsent`, FireDamage per row, the Fire merge, `[Accumulate]`, `[ForEachRecord]`,
+  `ReserveBuffers`, AOI lookups, Viewers long, water ping-pong and Cell, HeightMap / Footing loops, Terrain scalar.
+- Changes: the pair target (ties, cadence), the inferred order (spawn and item ids, pickup order), the pair pickup,
+  possibly the `[GaussSeidel]` scent, the item 9 budget if it differs.
+- When it changes, update together: the README output block, `docs/content/samples/voxel-server.mdx` + `.zh.mdx`
+  (`## Output`, check-sample.sh), the walkthroughs of target, pickup, water and scent. Keep the `#region` names;
+  delete `tally` and its include; add `fire` if burn and sunlight merge.
+
+## 7. Rewrite steps
+
+Each its own commit. Proof every step: TickBenchmark A/B at 50 and 2,000 (2 rounds, 0 B), `check-sample.sh`,
+Host/Steady.cs 0 B, VoxelServerTests, `--schedule` diff, no EECS055-bool / EECS086 / EECS109 left (Finish 2b).
+
+1. **Reshape, output identical**: bool splits (Body, Exposure, Input, Visible), Viewers long, `SetAbsent`,
+   FireDamage per row + the Fire merge, F7, the Chunks.cs:17 comment.
+2. **Totals, output identical**: `[Accumulate, Sum] Stats` (Carried, Filled, Tally deleted), SendPackets →
+   `[ForEachRecord]`, `ReserveBuffers`; check stages (GA2).
+3. **AOI without the `World`**, output identical.
+4. **Pairs** (after feat-pairs-2, GA1): Keep + Acquire (`ChunkRing` deleted), Pickup with `[Neighbor] ref Item`, the
+   order inferred; output blocks updated once at the end; Target, Pickup, Physics, Float, Chase measured per system.
+5. **Water, after item 11 + 12a + 12b**: ping-pong, Commit and NextFluid deleted, Sleep + Commit merged (GA10,
+   GA12); the Cell form after WP5b. Output identical.
+6. **Scent, after item 11 + 8c**: one `[GaussSeidel]` step, Seed cells; Ground / Red / Black / NextScent / Settle
+   deleted; Cell form after WP5 if not slower (Q6).
+7. **Chunk lifecycle, after item 9**: Read, Generate, Save in the deferred form with the budget (GA9).
+8. **Element loops after WP2**: HeightMap, Footing; Terrain per Q5.
+9. Line count and `--schedule` before and after, recorded here; then the docs pass rewrites the page.
+
+## 8. The first plan's items: status
+
+| Old item | Status |
+|---|---|
+| F1, F2, F7, the comment | open (step 1 above) |
+| F3 `[Consume]` | superseded by item 9 (G10, with a budget) |
+| F5 Chase gather | obsolete (Chase reads the Trail through `Nearby`; the prefetch twin never fires at this scale) |
+| F4 Terrain | open, Q5 |
+| G0 | built; applied with the bool splits |
+| G5, G6, G4 | built (`[Accumulate]`, `[ForEachRecord]`, `ReserveBuffers`); applied in step 2 |
+| G2, G1 | open: WP2 / WP5 / WP5b in Later |
+| G8, G9 | G8 built (nearest with hint, cutoff per row, two kinds); G9 (writes to j), parallel pairs and the cluster renames on feat-pairs-2 |
+| "G10 declined" | contradicted: approved as backlog item 9 |
+| G3, G11 declined, G7 not built | still true |
+
+## 9. Open questions for the owner
+
+1. Slices on the pair target: every zombie every tick, `[UpdateInterval(LookEvery)]`, or build GA8?
+2. Accept the output changes from pairs and ordered rows (and possibly the scent), blocks rewritten once at the end?
+3. Item merging (Minecraft merges dropped stacks) to show a pair that writes the neighbor (GA4), or not?
+4. Keep `Target` at all? Zombies could attack any player in reach while the scent leads them (~-30 lines; changes
+   the game).
+5. Terrain generation: hand `Vector128` with a comment, scalar, or a Cell method with `out Block` after WP5?
+6. The scent's doubling scan: if the plain `[GaussSeidel]` Cell form is slower, keep the hand scan with a comment,
+   or accept the slower form?
+7. VoxelServer as item 7's ghost-rows example (two region worlds, `MoveEntities` at the border), or another sample?
+8. GA5 (a bundle of lookups) and GA6 (box cutoffs): decline and record in owner-review.md?
+9. Prefetch never fires at this scale (~8k entities): leave the sample as is, or add a much larger benchmark
+   parameter?

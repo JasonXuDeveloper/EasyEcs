@@ -159,11 +159,15 @@ Read-only beside them (no slot): the VoxelServer plan refreshed (Finish step 2a)
        in a tile copies it into a stackalloc by hand; no halo-row or lane-shift helper; 12a's padded storage may
        answer it); `FillPool` ignores the up to 64 lists each thread parks (a likely cause of the in-place form's
        allocation; with 12d).
+8d. [ ] **Bug: EECS055 reason text** (`voxel-rewrite.md` GA7): VoxelServer's Chase reports `local 'cell' is a ??`
+       (the type name missing); Float reports `LookupExtensions.TryFind, defined in another assembly` where the reason is
+       that a key probe has no vector form. Fix the text, a test per case.
 9. [ ] **G10: deferred consume for chunk load / save** (owner, 2026-10-27; `voxel-rewrite.md` G10): VoxelServer's
        ChunkRead / ChunkSave load and save outside the pass by hand; the generator turns the plain form (a
        `[ForEach]` that requests a load or a save) into the deferred one, so users write neither the queue nor the
        drain. Analyzer rule and code fix for the hand-written form; proof: VoxelServer lines before / after, tests,
-       0 B steady state.
+       0 B steady state. The form carries a per-tick budget (`voxel-rewrite.md` GA9: VoxelServer caps requests per
+       tick, `Rules.MaxRequests`; the owner wants the cap kept).
 10. [ ] **Streaming stores in generated loops, gated** (owner, 2026-10-27; `microarch.md` M3, prototype
        `Locality/Streams.cs`): non-temporal stores for a column the method writes without reading, only when the
        column's bytes are past `CacheSizes.LastLevel`. Measured in a real world with the next pass reading that column
@@ -191,6 +195,11 @@ Read-only beside them (no slot): the VoxelServer plan refreshed (Finish step 2a)
        one pass means, which only the user knows, so the choice is declared. An Info rule suggests `[GaussSeidel]` for a
        relaxation shape (`d = Min(neighbor + cost)`) whose per-pass value nothing else reads. The docs explain "Jacobi"
        "Gauss-Seidel", "red-black" and "multicolor" in one plain sentence each where first used (WRITING.md).
+    **With it, the tile gaps the VoxelServer plan found** (`voxel-rewrite.md` section 4): GA10 a tile's cell
+       buffers sized at instantiation from its shape (the hand `SetCount`s of ChunkGenerate, `EnsureCapacity` of
+       Water Wake); GA3 `MaxPooledLength` inferred for those buffers; GA12 tile sleep and wake owned by the tile pass
+       (from the step's edges and `Changed<cell buffer>`) instead of `foreach (id in tile.Facing(e))
+       world.GetEntity(id).SetX()`, written four times in the sample, for Jacobi as `[GaussSeidel]` already does.
 12. [ ] **Fewer memory copies** (owner, 2026-10-27: "看看还有什么类似的能做的减少内存拷贝的做法"; a-e approved: "这些都可以做"). Each one measured
        (two rounds, 0 B, nothing slower) and done by the generator or the core where users would otherwise copy:
        a. **Tiles stored padded, halos exchanged** (MPI's ghost cells; the grids page's TODO(water overlap)): today
@@ -295,6 +304,9 @@ Read-only beside them (no slot): the VoxelServer plan refreshed (Finish step 2a)
       inlining in gsharedvt code or of methods with exception clauses: the 32-locals split costs Mono nothing, and
       every helper a loop inlines must keep `AggressiveInlining` (the demo's runners inline only through it).
       Decision record with D135 in the docs pass.
+- [ ] **`[Accumulate]` users that do not conflict** (`voxel-rewrite.md` GA2): systems that only add into one
+      `[Accumulate]` singleton share a stage, combined in registration order at the stage end. Built only if the
+      VoxelServer rewrite's `--schedule` shows stages lost to its `Stats` (step 2 of that plan); otherwise a record.
 - [ ] Follow-ups: lambda passes do not fuse; lambda + structural change and lambda + view stay scalar.
 - [ ] **From the published roadmap** (`docs/content/roadmap.mdx` "Planned", checked against this file 2026-10-26):
       push halos for grid neighbors (a chunk hands its edges to its neighbors' halos when they change, D73; with
