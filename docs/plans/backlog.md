@@ -225,8 +225,9 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 - [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
       the same results (two rounds of a few classes at both settings), and a lighter job for GeneratorBenchmark.
 - [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
-- [ ] Flaky under full-suite load with `DOTNET_EnableAVX2=0`: `AllocationTests.ParallelReductionsScratchAndLookupsDoNotAllocate`
-      (1 failure in 2 runs, passes alone): find the measurement race (#166's kind).
+- [ ] Flaky under full-suite load: `AllocationTests.ParallelReductionsScratchAndLookupsDoNotAllocate`
+      (1 failure in 2 runs with `DOTNET_EnableAVX2=0`; again in the normal run of the 216e29a merge gate; passes
+      alone, 5 of 5): find the measurement race (#166's kind).
 
 ## Finish
 
