@@ -6,17 +6,13 @@ using System.Runtime.InteropServices;
 
 namespace EasyEcs;
 
-/// <summary>
-/// Prefetched index probes (borrowed-ideas.md item 1, the probe form of scalar group prefetching, locality.md 6.3): a
-/// generated <c>[ForEach]</c> job finding entities by a key its rows hold (<c>lookup.TryFind(x.Key, ...)</c>,
-/// <c>Find</c>, <c>Count</c>) asks for the lines of later rows' keys stage by stage, so several probes miss at once
-/// instead of one per row. The stages follow the index's representation, each one's address known only once the line
-/// of the stage before is in the cache: a direct-indexed key's slot (one stage); a relation key's slot by the target's
-/// index, then its list of ids; a hashed key's bucket, then its entry (holding a unique key's entity, or a shared key's
-/// count and list). A third stage for a shared key's list of ids was measured and dropped: finding its head is a second
-/// lookup per row (ProbePrefetchBenchmark.CountClan at 16M keys: 2.4 times as slow). Past the last-level cache only
-/// (<see cref="Probes"/>).
-/// </summary>
+// Prefetched index probes: a generated [ForEach] job finding entities by a key its rows hold (lookup.TryFind(x.Key, ...),
+// Find, Count) asks for the lines of later rows' keys stage by stage, so several probes miss at once instead of one per
+// row. The stages follow the index's representation, each one's address known only once the line of the stage before
+// is in the cache: a direct-indexed key's slot (one stage); a relation key's slot by the target's index, then its list
+// of ids; a hashed key's bucket, then its entry (holding a unique key's entity, or a shared key's count and list). A
+// third stage for a shared key's list of ids was measured and dropped: finding its head is a second lookup per row
+// (ProbePrefetchBenchmark.CountClan at 16M keys: 2.4 times as slow). Past the last-level cache only (Probes).
 public sealed partial class ValueIndex<T, TKey>
 {
     // The hash's arrays as the gate found them, for the passes that prefetch (read once per pass by Probes, on the owner
@@ -48,7 +44,7 @@ public sealed partial class ValueIndex<T, TKey>
 
     /// <summary>
     /// Stage <paramref name="stage"/> (1 or 2) of a probe of <paramref name="key"/>: its first line, then the line the
-    /// first locates (see the type's remarks); a stage the key's representation does not have does nothing. Reads
+    /// first locates (the comment on this file's partial); a stage the key's representation does not have does nothing. Reads
     /// nothing a miss would stall on: stage 2 reads only what stage 1 brought in. Never faults, never changes the index:
     /// a key no entity has only wastes it.
     /// </summary>
