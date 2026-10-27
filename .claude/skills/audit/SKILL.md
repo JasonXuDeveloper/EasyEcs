@@ -40,6 +40,8 @@ what it left undone, which goes on the same list (nothing is dropped silently).
 
 - A new worktree may start on an old commit (`origin/master`), not on the work branch. The prompt must say:
   `git checkout -B <audit-branch> <work-branch>`, then check `git merge-base --is-ancestor <work-branch-tip> HEAD`.
+  When merging the work branch into an audit branch, resolve conflicts hunk by hunk (`git checkout --merge <file>`);
+  `git checkout --theirs` takes the whole file and silently drops the branch's own hunks in it.
 - Give each agent: its skill, its owned paths, the paths it must not touch, the commit command (AGENTS.md: author =
   owner, committer = signing identity, no session links), "commit on your branch, do not push or merge".
 - Agents share the session's scratchpad: every script or output an agent writes there gets a name unique to it

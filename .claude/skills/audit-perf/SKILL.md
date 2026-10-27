@@ -134,6 +134,12 @@ its own worktree.
      class's defaults;
    - a multi-stage prefetch is measured one stage at a time: a stage whose address needs a second lookup (a shared
      key's list of ids) cost 2.4x at 16M keys;
+   - a gap of about 5 % can be the assembly's layout, not a code path: before blaming a change, diff the generated
+     sources of the slower method and A/B a build whose code for it is identical to base (WorldSimulation at 100k
+     moved 1.05-1.06x with identical generated sources, from other jobs' text in the same assembly);
+   - `--filter` takes several patterns after the flag; a background wait dies at its timeout (2 h at most), so each
+     side of an A/B is its own resumable step; read `*-report.csv` (a harness guard refuses shell lines naming the
+     `github.md` report);
    - a pruning step that cuts work per item (a pair window skipped by its box) can lose to the tighter loop it
      replaces: measure it, and when it loses, revert it with its numbers in the commit message;
    - a benchmark whose first tick reorders the data (a pair pass sorts the table) takes its reference result after
@@ -151,6 +157,9 @@ its own worktree.
      shows, `--all` adds the A/B-only classes. A full run takes hours: run what the change touches.
 4. **Ship only a net win** (time and allocations, no regression elsewhere). A loss or a wash is reverted and gets a
    decision record (what was tried, the numbers, why not); the roadmap's "Dropped" list names it.
+   A plan's bar (1.2x, 1.5x, 20 %) decides what to build and try first, not whether a measured change ships (owner,
+   2026-10-27: "门槛不用严格卡，有收益就行"): faster beyond the job's noise in both rounds, 0 B, nothing slower ships
+   even under its bar. A gain inside the noise is a wash, not a win.
 5. A kept change gets: tests (behaviour, 0 B allocation test, bit-identical at 1 and 4 threads, vector equals scalar),
    a benchmark for what was not covered, a decision record, changelog, and the docs' "How to use it fast" / "What it
    costs" sections and `api.mdx` complexity rows when they change.

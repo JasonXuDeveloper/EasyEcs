@@ -32,14 +32,16 @@ names the skill:
 
 - [ ] **CI fixes** (worktree `/workspace/wt-cifix`, branch `fix-ci`): DocCheck 318 -> 0 done (7cb13db); the VoxelServer
       steady-state allocation (bisected to the feat-views merge 63130a2) and the EECS033 findings remain.
-- [ ] **Generated code tuned for the machine** ("Next" item 5, branch `feat-microarch`): M1 paired float accumulators,
-      M2 masked skip, the Tier1 class-init fix and a streaming-store prototype committed; A/B round 2 running.
+- [ ] **VoxelServer: zombies follow a distance field** ("Next" item 8, branch `feat-zombie-field`).
 - [ ] **L2 leftovers** ("Next" item 1, branch `feat-pairs-2`): the open list of item 1.
 
 Merged since the last update: L1 ordered rows + L3 compress (`feat-locality-core`), the pair form
 (`feat-locality-pairs`), vector loops through the user's own calls (`feat-call-inliner`), the prefetch gate per form
 (`feat-prefetch-gate`, 216e29a: row chases, fused walks, buffer chases and `DestroyEntities` past the L2; probes and
-vector loops past the last-level cache).
+vector loops past the last-level cache); generated code tuned for the machine (`feat-microarch`, 9161797: paired
+accumulators for float Min / Max / Fast sums, Energy 1.43-1.47x and Spread 1.89x; the tables initialized at module
+load, LateHoles 2.7-4.5x; masked skip, unrolling, hoisting and branchless rows measured and dropped; streaming stores
+a prototype, `owner-review.md`).
 
 The owner's order (2026-10-26): every code change before any docs (generator cost and ARM64 parity included).
 CI runs the unit tests on ARM64 (b1dbdb0).
@@ -49,7 +51,8 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 1. [ ] **L2: the generated pair form** (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
        the 8x8 (x86) / 4x4 (ARM64) cluster-pair kernel over L1's blocks with cutoff and self masks, and a nearest form
        (`NearestPlayer`, zombie targeting). Right after WP0b merges. Then L4: examples rewritten in it.
-       The owner's call on the spread map (nearest 1.06-1.31x, bar 1.5x): re-measure once L1 sorts on its cadence,
+       The spread map (nearest 1.06-1.31x, bar 1.5x; owner 2026-10-27: a bar is not a ship gate, a gain beyond the noise
+       with nothing slower ships): re-measure once L1 sorts on its cadence,
        with a flat grid of blocks searched in rings instead of the prototype's box tree; the nearest form stays in L2.
        The owner's call on Lookup gathers under `SimdMode.Auto` (2026-10-26): once L1 and WP0b have merged, re-measure
        the micro-adaptive choice (walk vs rows, D131 Considered) with L1's ordered rows and the lookup job under 32
@@ -87,7 +90,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 4. [ ] **G1** (generator cost, the part phase 2 left): ForEachModel split into a declaration model and
        implementation-only body facts; SystemUpdates without Collect; SetFusions reruns; Systems / SystemPlaces share
        one FAWMN; Kernel's GetSemanticModel calls. G6 (C# 14 extension lookup cost) research only.
-5. [ ] **Generated code tuned for the machine** (running: worktree agent, branch `feat-microarch`) (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
+5. [x] **Generated code tuned for the machine** (merged 9161797, branch `feat-microarch`) (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
        accumulators / unrolling / hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3
        prefetch / streaming stores.
 6. [x] **Prefetched lookup chases with a size gate** (`feat-prefetch-gate`: row and vector forms; `feat-prefetch-all`,
@@ -129,8 +132,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        worlds as an example first, streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
        owner: records in the docs pass). Vertical batch probes dropped after the 16M re-measure (record in the docs
        pass); scalar group prefetching of probes is built in item 6 (index probes).
-8. [ ] **VoxelServer: zombies follow a distance field** (owner's question, 2026-10-27; proposal, ask before
-       building). Today a zombie walks the straight line to its target and sticks at walls and the bots' pits. One
+8. [ ] **VoxelServer: zombies follow a distance field** (approved by the owner, 2026-10-27: "可以做，排进去"). Today a zombie walks the straight line to its target and sticks at walls and the bots' pits. One
        field per chunk (`DynamicBuffer<PathCost>`, 16 x 16 over the surface height map, a step up of one block
        walkable) seeded by the players' cells, relaxed as a tile shader: each step sweeps its own tile to settle
        inside it, red-black tiles so the front crosses two chunks a tick, `ChangedEdges` sleep where no player
@@ -225,8 +227,9 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 - [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
       the same results (two rounds of a few classes at both settings), and a lighter job for GeneratorBenchmark.
 - [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
-- [ ] Flaky under full-suite load with `DOTNET_EnableAVX2=0`: `AllocationTests.ParallelReductionsScratchAndLookupsDoNotAllocate`
-      (1 failure in 2 runs, passes alone): find the measurement race (#166's kind).
+- [ ] Flaky under full-suite load: `AllocationTests.ParallelReductionsScratchAndLookupsDoNotAllocate`
+      (1 failure in 2 runs with `DOTNET_EnableAVX2=0`; again in the normal run of the 216e29a merge gate; passes
+      alone, 5 of 5): find the measurement race (#166's kind).
 
 ## Finish
 

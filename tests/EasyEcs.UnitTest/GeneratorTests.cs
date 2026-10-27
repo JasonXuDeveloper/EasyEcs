@@ -672,6 +672,32 @@ public class GeneratorTests
             .And.Not.Contain("var __h1_0 = __a1_0;"), generated);
     }
 
+    // A floating-point Min, Max or Fast sum is a chain of 3-4 cycles per vector: the loop over whole vectors runs two
+    // vectors per iteration into two sets of those accumulators, folded after it; the loop after it takes the vector
+    // left. Integer accumulators (a 1-cycle chain) and masked words keep one set.
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;", "__a1_0 = __a1_0 + __a1_0b;", true)]
+    [TestCase("[ForEach] static void A(in F f, ref Reduce<Low> l) => l.Value.V = System.MathF.Min(l.Value.V, f.V);", "__a1_0 = global::System.Numerics.Vector.Min(__a1_0, __a1_0b);", true)]
+    [TestCase("[ForEach] static void A(in P p, ref Reduce<Count> c) { c.Value.N++; c.Value.Low = System.Math.Min(c.Value.Low, p.V); }", null, false)]
+    public void AFloatReductionRunsTwoVectorsPerIteration(string method, string fold, bool paired)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public struct Low : ISingletonComponent, IReduction<Low> { public float V; public static Low Identity => new() { V = float.PositiveInfinity }; public static Low Combine(Low a, Low b) => new() { V = System.MathF.Min(a.V, b.V) }; }",
+            $"[EcsSystem] public ref struct S {{ {method} }}"), out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        if (!paired)
+        {
+            Assert.That(generated, Does.Not.Contain("2 * global::"), generated);
+            return;
+        }
+        Assert.That(generated, Does.Contain("var __a1_0b = __a1_0;")
+            .And.Contain("for (nint last = rows - 2 * global::System.Numerics.Vector<float>.Count; i <= last; i += global::System.Numerics.Vector<float>.Count)")
+            .And.Contain("for (nint last = rows - 2 * global::System.Runtime.Intrinsics.Vector512<float>.Count;")
+            .And.Contain(fold), generated);
+        // the masked words' loop keeps one set
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "var __a1_0b").Count, Is.EqualTo(2), generated);
+    }
+
     // T.Combine is part of the loop: an edit of it in another file re-emits the method (here: no longer field by field).
     [Test]
     public void AnEditOfCombineReemitsTheLoopsThatFoldWithIt()
