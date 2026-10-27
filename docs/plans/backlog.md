@@ -159,6 +159,11 @@ Read-only beside them (no slot): the VoxelServer plan refreshed (Finish step 2a)
        in a tile copies it into a stackalloc by hand; no halo-row or lane-shift helper; 12a's padded storage may
        answer it); `FillPool` ignores the up to 64 lists each thread parks (a likely cause of the in-place form's
        allocation; with 12d).
+8e. [ ] **Symmetric pair methods** (`voxel-rewrite.md` GA4; owner, 2026-10-27: "加，做 GA4"): each unordered pair
+       visited once and both sides written (Newton's third law in MD codes: half neighbor lists), for item merging in
+       VoxelServer and collisions; today a pair writing the neighbor's component it also reads of its row is refused.
+       With or after item 1 (the pair agent), `feature` + `audit-vector-loops`: bit for bit against the per-pair walk,
+       deterministic order, parallel only where the halves cannot race, 0 B, analyzer reasons and naming (`audit-naming`).
 8d. [ ] **Bug: EECS055 reason text** (`voxel-rewrite.md` GA7): VoxelServer's Chase reports `local 'cell' is a ??`
        (the type name missing); Float reports `LookupExtensions.TryFind, defined in another assembly` where the reason is
        that a key probe has no vector form. Fix the text, a test per case.

@@ -235,7 +235,7 @@ Output may change (multicolor order while the field settles).
 | Chase | no (the scent gives the direction) | — | — | — | — | 0 |
 | Pickup | **yes**, writes j | players × items | same | `PickupRange²` | changes | -8 |
 | Attack | optional (B) | zombies × players, writes `Health` | same | 1.2² on X / Z | same | 0 |
-| Item merging | no (GA4) | items × items | — | — | — | — |
+| Item merging | **yes** (GA4, owner Q3): symmetric, both sides written | items × items | same | merge range | changes | + |
 | AOI | no (counted squares) | — | — | — | — | — |
 
 Proof: TickBenchmark 50 / 2,000 A/B; Target (0.25 ms), Pickup (0.39 ms), Attack (0.14 ms) per system; parallel pairs
@@ -250,11 +250,11 @@ changes, so the output changes deterministically; the j-cluster prefetch never f
 | GA1 | `Reduce<T>` / `[Accumulate]` in pair methods (PairForm refuses `ref` context parameters) | Pickup and Attack count into Stats without a second pass or EECS086 | build (small, after feat-pairs-2) |
 | GA2 | Systems that only accumulate into one `[Accumulate]` singleton do not conflict (combined in registration order at the stage end) | Stats users share stages | build if `--schedule` shows a stage lost after step 2; else record |
 | GA3 | `MaxPooledLength` inferred for a tile's cell buffers from `ITileShape` (or `ReserveBuffers(prefab, count, length)`) | Program.cs:65-69 | build with item 11 / 12a |
-| GA4 | A symmetric pair (each unordered pair once, both sides written) | item merging, collisions | Q3; else decline and record |
+| GA4 | A symmetric pair (each unordered pair once, both sides written) | item merging, collisions | **build** (owner, Q3) |
 | GA5 | A bundle of `Lookup<T>` as one parameter | `Nearby` built 5 times (-5) | propose to decline (Q8) |
 | GA6 | Chebyshev / box cutoffs for pairs | AOI as pairs | decline (Q8) |
 | GA7 | EECS055 reason text: Chase prints `local 'cell' is a ??` (type name missing); Float says `LookupExtensions.TryFind, defined in another assembly` where a key probe has no vector form | correct reasons | **fix (a bug)** |
-| GA8 | `Slices` on pair methods (rows sliced, neighbors whole) | the target's look spread over ticks | Q1 |
+| GA8 | `Slices` on pair methods (rows sliced, neighbors whole) | the target's look spread over ticks | not built (owner, Q1: every tick) |
 | GA9 | item 9's form carries a per-tick budget (`Rules.MaxRequests`) | the chunk cap kept | a requirement of item 9 |
 | GA10 | A tile's cell buffers sized at instantiation from its shape (owner thread) | ChunkGenerate:75-78, Water Wake:36 (-6) | build with item 11 |
 | GA12 | Tile sleep and wake owned by the tile pass (from the step's edges and `Changed<cell buffer>`), not `foreach (id in tile.Facing(e)) world.GetEntity(id).SetX()` | written 4 times (WaterWake.Dug / Spread, ScentWake, ScentSettle; Footprint.Wake): ~-20, and those systems stop running alone | build with item 11 (extend `[GaussSeidel]`'s sleep to Jacobi) |
@@ -312,7 +312,14 @@ Host/Steady.cs 0 B, VoxelServerTests, `--schedule` diff, no EECS055-bool / EECS0
 | "G10 declined" | contradicted: approved as backlog item 9 |
 | G3, G11 declined, G7 not built | still true |
 
-## 9. Open questions for the owner
+## 9. Owner answers (2026-10-27)
+
+- Q1: every zombie looks every tick (no Slices on the pair target, no GA8).
+- Q2: the output changes are accepted; the README and page output blocks are rewritten once at the end.
+- Q3: item merging is added, as the symmetric pair that writes both sides: GA4 is built (backlog, with item 1).
+- Q4: `Target` stays (the nearest pair with the keep hint is the lesson).
+
+## 10. Open questions for the owner (still open: 5-9)
 
 1. Slices on the pair target: every zombie every tick, `[UpdateInterval(LookEvery)]`, or build GA8?
 2. Accept the output changes from pairs and ordered rows (and possibly the scent), blocks rewritten once at the end?
