@@ -466,6 +466,29 @@ gate; the vertical forms stay dropped.
   (crowd) / 5-6x (sparse) faster than phase 0's grid through lookups with the sort and the pairs every 10 ticks.
 - **Row lists.** `Lanes.RowNumbers(mask, first, destination)` for any row list the generated code needs.
 
+### 6.6 L2 as built (branch `feat-locality-pairs`)
+
+- **The form.** `[Neighbor] in` parameters (and the neighbor's `Entity`); the method's first statement after its
+  locals is the cutoff test (`if (d2 >= r2) return;`, or the rest under `if (d2 < r2)`). `PairForm.Read` takes sums of
+  1-3 squared differences of the same float field path, `Vector2/3.DistanceSquared`, `(a - b).LengthSquared()`;
+  cutoffs of constants, statics, singletons, values or the row's `in` components (a cutoff per row: each window's
+  reach is the largest of its passing rows'). Two kinds of entity: the rows' filter is the method's, the neighbors'
+  the `[Neighbor]` components (a tag as `[Neighbor] in Quarry _`).
+- **Not L1's blocks.** The pass keeps its own windows of `Vector<float>.Count` rows over each table's rows in order
+  (8 with AVX2, 4 on ARM64: "4-row blocks" on ARM64 come with the width), draws their boxes every pass (O(n), cheap
+  next to the pairs) and redraws the lists only when a window left its kept box widened by an adaptive margin (x1.5 on
+  an early escape, x0.9 when a re-sort came first). L1's order (requested on the first pass, cell = the reach, margin
+  0.1 cell, re-sorted every 10 updates) only keeps the windows tight; the pairs are right in any order.
+- **Bit for bit.** Each lane meets the neighbors' tables in query order and their rows in order, the same order as the
+  method per pair (`Rows`), so the vector loop and the scalar loop agree to the bit, and pruned pairs (outside every
+  box) are pairs the test would turn away. Every pair runs, self included.
+- **Nearest.** No separate nearest form: a pair method keeping the nearest (ties to the lower `EntityId.Index`) is the
+  nearest within a range; "keep the current target" is a pass before it leaving a hint in the target component
+  (NeighborTests). The spread-map re-measure (6.2) is not done on this branch (open).
+- **Not built:** writes to the neighbor (`[Neighbor] ref`, EECS002 today; `PairRun.Others<T>` already returns a ref),
+  parallel pair passes (the system runs alone), the neighbor-list form picked by density on ARM64, the EECS107 code fix
+  (Info only), nested-walk rewrites.
+
 ## 7. Order against the work already running
 
 - Starts after **gather-always** reports (it changes `Lookup`/`LookupLanes`, and 3.1 changes what it measures) and

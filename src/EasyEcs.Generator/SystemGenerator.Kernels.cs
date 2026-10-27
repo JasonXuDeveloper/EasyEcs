@@ -16,14 +16,18 @@ namespace EasyEcs.Generator;
 public sealed partial class SystemGenerator
 {
     /// <summary>A system method's vector loop: its owner (<see cref="OwnerModel.FullName"/>), its declaration order, the loop or the reason.</summary>
-    private sealed record LoopModel(string Owner, int Order, Kernel.Code? Simd, string Scalar)
+    private sealed record LoopModel(string Owner, int Order, Kernel.Code? Simd, string Scalar, PairModel? Pair)
     {
         public static LoopModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
         {
             if (Symbols.IsRunner(method) || !Symbols.GeneratesSystem(method.ContainingType)) return null;
+            string owner = OwnerModel.From(method.ContainingType).FullName;
+            int order = method.ContainingType.GetMembers().IndexOf(method);
+            // A pair method's loop is its pair job's (SystemGenerator.Pairs.cs).
+            if (PairForm.IsPairMethod(method)) return new LoopModel(owner, order, null, "", PairModel.Create(method, syntax, model, ct));
             bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model) == null;
             var simd = ForEachModel.VectorLoop(method, syntax, model, parallel, ct, out string? scalar);
-            return new LoopModel(OwnerModel.From(method.ContainingType).FullName, method.ContainingType.GetMembers().IndexOf(method), simd, scalar ?? "");
+            return new LoopModel(owner, order, simd, scalar ?? "", null);
         }
     }
 
@@ -48,7 +52,7 @@ public sealed partial class SystemGenerator
         {
             var method = system.Methods[i];
             var loop = loops.FirstOrDefault(l => l.Order == method.Order && l.Owner == method.Owner.FullName);
-            methods[i] = loop == null ? method : method with { Simd = loop.Simd, Scalar = loop.Scalar };
+            methods[i] = loop == null ? method : method with { Simd = loop.Simd, Scalar = loop.Scalar, Pair = loop.Pair };
         }
 
         return system with { Methods = new EquatableArray<ForEachModel>(methods) };
