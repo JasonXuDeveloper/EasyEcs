@@ -38,16 +38,28 @@ static bool Has(MemberInfo member, string attribute) => member.GetCustomAttribut
 static IEnumerable<List<(MemberInfo Member, object? Value)>> Combinations(Type type)
 {
     IEnumerable<List<(MemberInfo, object?)>> all = [[]];
-    foreach (var member in type.GetMembers().Where(m => Has(m, "ParamsAttribute")))
+    foreach (var member in type.GetMembers().Where(m => Has(m, "ParamsAttribute") || Has(m, "ParamsSourceAttribute")))
     {
-        var attribute = member.GetCustomAttributes().First(a => a.GetType().Name == "ParamsAttribute");
-        var values = (object?[])attribute.GetType().GetProperty("Values")!.GetValue(attribute)!;
+        var attribute = member.GetCustomAttributes().First(a => a.GetType().Name is "ParamsAttribute" or "ParamsSourceAttribute");
+        var values = attribute.GetType().Name == "ParamsAttribute"
+            ? (object?[])attribute.GetType().GetProperty("Values")!.GetValue(attribute)!
+            : Source(type, attribute);
         object?[] chosen = values.All(v => v is IConvertible and not string and not Enum and not bool)
             ? [values.MinBy(v => Convert.ToDouble(v))]
             : values;
         all = all.SelectMany(list => chosen.Select(v => new List<(MemberInfo, object?)>(list) { (member, v) })).ToList();
     }
     return all;
+}
+
+// A [ParamsSource]'s values: the static property or method it names, on its own type or the benchmark's.
+static object?[] Source(Type benchmark, Attribute attribute)
+{
+    var owner = (Type?)attribute.GetType().GetProperty("Type")?.GetValue(attribute) ?? benchmark;
+    var name = (string)attribute.GetType().GetProperty("Name")!.GetValue(attribute)!;
+    const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+    object? values = owner.GetProperty(name, all)?.GetValue(null) ?? owner.GetMethod(name, all, Type.EmptyTypes)?.Invoke(null, null);
+    return ((System.Collections.IEnumerable)values!).Cast<object?>().ToArray();
 }
 
 static void Set(object instance, MemberInfo member, object? value)

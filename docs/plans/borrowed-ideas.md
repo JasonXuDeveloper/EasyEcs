@@ -140,8 +140,8 @@ The owner's rule (a faster case ships, a slower one never) with a gate that keep
   rows i + 16, rows of T of rows i + 8, the first 16 records before the loop, runs of 16 rows or fewer unprefetched) runs
   when the pass's call site finds the gate open. A first version replaced the job for every pass: LookupGather's parallel
   heavy rows took 3x as long at 1k rows (ForEachBatchParallel instead of ForEachParallel) and the serial form a few
-  percent more, so the job is chosen per pass. Parallel row methods keep the per-row form (no prefetch); a method that
-  shares a fused walk gets no twin.
+  percent more, so the job is chosen per pass. Parallel row methods and fused walks got their twins on feat-prefetch-all
+  (below).
 - **Vector form** (Kernel.Lookups.cs, `SimdMode.Require`): before each Resolve, `if (f{i}) lookup.PrefetchAhead(...)`: the
   records of the vector's rows 32 past it and the rows of T 16 past it; `f{i}` is set once per pass by the job's
   initializer. Only ids of an `in` component's lanes (not a wide component).
@@ -192,7 +192,66 @@ Not done here, with the reason (same gate, another form): **index probes** (`Try
 depends on the index's representation (key slots, the head table, the relation map by target), so it needs a probe
 helper per representation in ValueIndex, not the chase form; scalar group prefetching measured 1.33x at 16M keys
 (locality.md 6.3). **Relation targets** (a DynamicBuffer of links): a chase per element of a buffer, not per row, so the
-row form's lookahead does not apply as is. Both stay in backlog item 6.
+row form's lookahead does not apply as is. Both are built on feat-prefetch-all (below).
+
+#### Every form that can prefetch (feat-prefetch-all, 2026-10-27)
+
+The same gate and the same rule, extended to every chase the generated code and the core can see ahead (backlog item
+6). What is built:
+
+- **Index probes** (`lookup.TryFind(x.F, ...)`, `Find`, `Count` at a key of an `in` component): the row form's twin
+  prefetches the index's own lines, 16 rows ahead and 8 rows ahead (`ValueIndex.Prefetch(key, stage)`,
+  src/EasyEcs.Core/IndexPrefetch.cs): a direct key's slot (stage 1); an `EntityId` key's slot, then its id list; a
+  hashed key's bucket (stage 1), then the entry the bucket points at (stage 2; `Dictionary`'s `_buckets` /
+  `_comparer` through `UnsafeAccessor`, `_entries` through a `FieldInfo` cached per thread against the buckets array).
+  The gate (`LookupExtensions.Probes<T, TKey>`) is the index's own memory past the cache: slots, the target map, the
+  heads at the entry's stride and, for a shared key, the list nodes.
+- **Relation targets** (`foreach (ref readonly var link in links.AsReadOnlySpan()) lookup[link.Target]` over an `in`
+  buffer): each element's record 16 rows ahead, its row 8 ahead.
+- **Parallel row methods**: the twin is a batch job (`ForEachBatchParallel`, the same chunks `ForEachParallel` cuts);
+  methods with `Maybe`, `Mut` or change stamps keep the per-row form, unprefetched (one row per call: nothing ahead).
+- **Fused walks** (within a system and the pair of two systems) and **lambda passes**: a twin walk of the members'
+  twins / the interceptor's twin, picked by the same gate before the size check.
+- **The core's id lists**: `World.DestroyEntities(ReadOnlySpan<Entity>)` prefetches the record 16 ids ahead past the
+  cache (`LookupLanes.PrefetchesIds`: live entities x (record + a row line) past the last-level cache).
+- **ARM64**: `Prefetching.Line` issues SVE's `PRFB` (`Sve.Prefetch8Bit`, one-lane predicate, SYSLIB5003 suppressed at
+  that one call) where SVE is hardware; elsewhere on ARM64 nothing is issued and the cache size is never read.
+
+Proof (frozen snapshots: base = claude/relaxed-ramanujan-j4j9k4 at 63771f4, head = feat-prefetch-all before commit;
+default job, two rounds; ms; Auto is the machine's gate (272,629,760 bytes); all 0 B unless noted):
+
+| Benchmark | 16M base / head r1 | 16M base / head r2 | 1M base / head r1, r2 | 1k |
+|---|---|---|---|---|
+| ChaseForms Party (buffer chase) | 2090 / 1460 (**1.43x**) | 2095 / 1443 (**1.45x**) | 44.3 / 47.2, 44.3 / 48.7 | equal |
+| ChaseForms Walk (fused) | 1071 / 606 (**1.77x**) | 1041 / 594 (**1.75x**) | 18.2 / 19.0, 18.2 / 19.6 | equal |
+| LookupChaseGate HuntingParallel | 285 / 174 (**1.64x**) | 260 / 174 (**1.49x**) | 5.07 / 4.62, 5.12 / 4.50 | equal |
+| ProbePrefetch FindLogin (unique key) | 979 / 700 (**1.40x**) | 1020 / 688 (**1.48x**) | 19.1 / 19.5, 21.8 / 20.3 | 3 us both |
+| ProbePrefetch FindLoginLambda | 960 / 705 (**1.36x**) | 988 / 719 (**1.37x**) | 20.4 / 19.0, 19.7 / 21.1 | 3 us both |
+| ProbePrefetch FindLoginParallel | 287 / 206 (**1.39x**) | 287 / 215 (**1.33x**) | 5.66 / 5.42, 5.63 / 5.67 | 3 us both |
+| ProbePrefetch CountClan (shared key) | 592 / 570 (1.04x) | 665 / 561 (1.19x) | 12.6 / 12.8, 13.5 / 12.5 | 3 us both |
+| IdListPrefetch DestroyAndCreate | 211 / 157 (**1.34x**) | 208 / 162 (**1.28x**) | 3.80 / 3.86, 3.95 / 4.04 | - |
+
+The 1M worlds sit inside this machine's 260 MiB L3, so Auto runs today's code there; the gaps at 1M are the spread of
+setup placement between processes, not the code: within one binary, Auto against Off at 1M: Party 42.1 / 41.6, Walk 18.4 / 18.1, FindLogin 20.8 / 20.1,
+FindLoginLambda 22.9 / 22.8, FindLoginParallel 5.17 / 5.54, CountClan 12.7 / 12.4, DestroyAndCreate 4.11 / 3.96 (the
+same code; 16M Auto against Off: Party 1392 / 2038, Walk 602 / 999, FindLogin 716 / 1012, CountClan 570 / 655,
+DestroyAndCreate 158 / 206).
+
+Forced on (head, Off / On): in the cache a prefetch costs 2-3x at 1k (Party 7 / 14 us, FindLogin 4 / 8 us, CountClan
+3 / 7 us, FindLoginParallel 3 / 9 us), which the gate avoids. At 1M inside the L3, forcing it on still pays for the fused
+walk (18.1 / 11.5 ms), DestroyEntities (3.96 / 3.02), the parallel probe (5.54 / 4.92) and a little for the buffer chase
+(41.6 / 39.3), and costs for a probe (FindLogin 20.1 / 23.0, CountClan 12.4 / 14.4): a gate per form on the L2 would
+open earlier for walks and id lists, a candidate for the owner's machines (`owner-review.md`).
+
+Dropped, with numbers:
+
+- **A third probe stage** for a key many entities share (the head's list of ids): finding the head is a second hash
+  lookup per row; CountClan at 16M 1619 / 1528 ms against base 665 / 664 (2.4x slower) and forced on at 1M 35.7 against
+  12.6 ms. Two stages (bucket, entry) keep CountClan 1.04-1.19x faster.
+- **Loads issued ahead instead of a prefetch** (the ARM64 candidate without SVE; LookupChaseLoadAheadBenchmark,
+  Locality/Chase.cs `LoadAhead`): on this x86 at 16M 1600-1643 ms against the plain rows' 930-984 and the prefetch's
+  667-777 (672 B at Distance 4 in one run), at 1M 31-33 against 17.0-17.6, at 1k 13-15 us against 3: a load that misses
+  holds retirement. Not emitted; the owner's M4 run decides (command in the handback and backlog item 6).
 
 ### Item 2: timer wheel (bar not met: dropped)
 

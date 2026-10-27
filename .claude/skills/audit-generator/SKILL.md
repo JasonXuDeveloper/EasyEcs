@@ -171,6 +171,11 @@ Prove a text change by what it changes:
 Reading the output: build with `-p:EmitCompilerGeneratedFiles=true`, and read only files the build just wrote:
 `obj/**/generated` keeps files of forms the generator no longer writes (filter by time, or delete the folder first).
 
+- **Reading a method's body for calls**: a C# 14 extension-member call reports the extension block as its
+  `ContainingType`, so match it by the block's outer type (`Chases.IsKeyLookup`); and any body analysis that looks
+  for key, lookup or member calls reads the lambdas inside the body too (missing them made a lambda pass that found a
+  non-unique key throw "holds no index").
+
 ## Speed: measure first
 
 `GeneratorBenchmark`: the four generators over the battle server plus 40 generated modules (components of every

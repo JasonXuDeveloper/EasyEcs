@@ -184,3 +184,39 @@ public class LookupChaseDistanceBenchmark
     [Benchmark]
     public void Gathered() => Chase.Gathered(_world, Distance);
 }
+
+/// <summary>
+/// Loads issued ahead against prefetches (borrowed-ideas.md item 1 on ARM64 without a prefetch intrinsic): the
+/// method's job over each run of rows plain, prefetching the records 2k and the rows k ahead (nothing where no prefetch
+/// exists: Apple silicon), and loading the record of row i + k and touching the row of row i + k / 2 into rings row i
+/// consumes (Locality/Chase.cs, LoadAhead). The generated code ships the load-ahead form only where this pair proves it.
+/// </summary>
+[MemoryDiagnoser]
+public class LookupChaseLoadAheadBenchmark
+{
+    [Params(1_000, 1_000_000, 16_000_000)] public int Entities;
+
+    [Params(4, 8, 16)] public int Distance;
+
+    private World _world;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        Isa.Print();
+        _world = Chase.Create(Entities);
+        for (int i = 0; i < 3; i++) Chase.LoadAhead(_world, Distance);
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _world.Dispose();
+
+    [Benchmark(Baseline = true)]
+    public void Rows() => Chase.Rows(_world, 0);
+
+    [Benchmark]
+    public void Prefetched() => Chase.Rows(_world, Distance);
+
+    [Benchmark]
+    public int LoadAhead() => Chase.LoadAhead(_world, Distance);
+}

@@ -61,6 +61,9 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   (qemu 8.2's default "max" CPU crashes optimized .NET code), a self-contained linux-arm64 publish with a small
   reflection test runner (NUnitLite's dispatcher crashed), ARM64 Tier1 code through `DOTNET_TieredCompilation=0
   DOTNET_JitDisasm=... DOTNET_JitStdOutFile=...`. Correctness and machine code only: timings come from real hardware.
+  CoreCLR under qemu is not reliable past that: with SVE (neoverse-n2) the runner crashed in its first test, with SVE
+  off it overflowed the stack, and the aarch64 sysroot has no libssl; so an SVE path (the PRFB prefetch) is proven only
+  by the arm64 CI job or real hardware, and its report says so.
 
 ## What becomes a vector loop
 

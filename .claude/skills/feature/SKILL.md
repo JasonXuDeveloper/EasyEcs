@@ -67,6 +67,10 @@ parallel code; equivalence with the scalar method for vector loops; the AOT test
 generics or reflection (`tests/EasyEcs.Aot`); for each new or changed analyzer rule and code fix, its tests and edge
 cases (`audit-analyzer`, "Tests: every rule, every edge").
 
+- **The AOT check** (`tests/EasyEcs.Aot`) treats the analyzer's warnings as errors (EECS067 / 069 / 052 / 033): a new
+  check there declares its keys (`[UniqueKey]` / `[LookupKey]`), marks unsaved data `[NotSaved]`, sets buffers in
+  `CreateEntity`, and writes through the generated `Write*` methods.
+
 ## 6. Benchmarks (`audit-perf` has the method)
 
 BenchmarkDotNet only: before and after, two rounds, A/B copies outside the repo tree, under `flock /tmp/bench.lock`

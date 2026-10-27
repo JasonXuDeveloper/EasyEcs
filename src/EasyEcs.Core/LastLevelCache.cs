@@ -10,7 +10,7 @@ namespace EasyEcs;
 /// runtime's GC sizes its gen0 budget (dotnet/runtime <c>gcenv.windows.cpp</c> / <c>gcenv.unix.cpp</c>,
 /// GetLogicalProcessorCacheSizeFromOS); .NET has no public API for it. Generated code reads it through
 /// <see cref="LookupLanes.Prefetches"/>: a chase of other entities prefetches only past this size (borrowed-ideas.md
-/// item 1). Read only where a prefetch exists (x86, <see cref="Sse.IsSupported"/>): ARM64 and WebAssembly never
+/// item 1). Read only where a prefetch exists (<see cref="Prefetching.IsSupported"/>: x86, ARM64 with SVE): other ARM64 and WebAssembly never
 /// read it. 0 means unknown, and unknown means no prefetch: an operating system not listed, a read that fails or
 /// returns nothing.
 /// </summary>
@@ -20,7 +20,7 @@ internal static partial class LastLevelCache
     /// The last-level cache in bytes, 0 when unknown. Settable by tests, which inject a size to check the gate's
     /// decision; nothing else writes it.
     /// </summary>
-    internal static long Bytes = Sse.IsSupported ? Read() : 0;
+    internal static long Bytes = Prefetching.IsSupported ? Read() : 0;
 
     /// <summary>The operating system's answer, 0 when it gives none (every failure included).</summary>
     internal static long Read()
@@ -85,7 +85,11 @@ internal static partial class LastLevelCache
 
     /// <summary>
     /// macOS: <c>hw.l3cachesize</c>, else <c>hw.perflevel0.l2cachesize</c> (Apple silicon has no L3; its performance
-    /// cores' shared L2 is the last level).
+    /// cluster's shared L2 is the last level the system names). Only Intel Macs read it today: Apple silicon has no
+    /// prefetch .NET can issue (<see cref="Prefetching.IsSupported"/> is false: no SSE, and its SVE runs in streaming
+    /// mode only), so its gates are off without a read. Were a form ever gated on it there, the cluster's L2 (16 MB on
+    /// an M4's performance cores) understates what the cores share, since the system level cache behind it is not
+    /// exposed: such a gate would turn on early, for worlds that still fit that cache, never late.
     /// </summary>
     internal static unsafe long FromSysctl()
     {

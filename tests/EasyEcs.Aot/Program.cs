@@ -66,6 +66,41 @@ using (var small = new World())
     Check(!Lookup<Life>.Prefetches(small), "a world in the cache does not prefetch");
 }
 
+// The prefetching twins with the gate forced on (a last-level cache of 1 byte, as the unit tests set it): index probes
+// (the dictionary's arrays read through UnsafeAccessor and reflection), a buffer's chases, a parallel probe; each
+// against the same pass with the gate off.
+var cache = Type.GetType("EasyEcs.LastLevelCache, EasyEcs.Core")!.GetField("Bytes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+long machine = (long)cache.GetValue(null)!;
+using (var keyed = new World())
+{
+    var badges = new Entity[300];
+    for (int i = 0; i < badges.Length; i++) badges[i] = keyed.CreateEntity(new Badge(i * 3), new Crew("c" + i % 7), new Life { Value = i });
+    for (int i = 0; i < 500; i++)
+    {
+        var seeker = keyed.CreateEntity(new Want(i * 5 % 1000, "c" + i % 9), new Got(), new DynamicBuffer<Mate>());
+        ref var mates = ref seeker.WriteMate();
+        mates.Add(new Mate(badges[i % badges.Length].Id));
+        mates.Add(new Mate(badges[i * 7 % badges.Length].Id));
+    }
+
+    int[] Run()
+    {
+        AotChases.Probe(keyed);
+        AotChases.Mates(keyed);
+        AotChases.ProbeParallel(keyed);
+        var got = new List<int>();
+        foreach (var item in keyed.Read<Got>()) got.Add(item.Got.A * 31 + item.Got.B * 7 + item.Got.C);
+        return got.ToArray();
+    }
+
+    cache.SetValue(null, 0L);
+    var off = Run();
+    cache.SetValue(null, 1L);
+    var on = Run();
+    cache.SetValue(null, machine);
+    Check(off.AsSpan().SequenceEqual(on) && off.Any(v => v != 0), "prefetched probes and buffer chases find what today's passes do");
+}
+
 // An ordered table: the sort instantiated for the key type the generated part declares, its blocks and block pairs.
 using (var crowd = new World())
 {
@@ -128,6 +163,35 @@ static class Flock
         if (d2 >= 1.5f * 1.5f || d2 == 0) return;
         near.Value++;
     }
+}
+
+partial record struct Badge([UniqueKey] int Id) : IComponent;
+
+[NotSaved]
+partial record struct Crew([LookupKey] string Name) : IComponent;
+
+[NotSaved]
+record struct Want(int Badge, string Crew) : IComponent;
+record struct Got(int A, int B, int C) : IComponent;
+record struct Mate(EntityId Target);
+
+static class AotChases
+{
+    [ForEach]
+    public static void Probe(in Want want, ref Got got, Lookup<Badge> badges, Lookup<Crew> crews) =>
+        got = got with { A = badges.TryFind(want.Badge, out var found) ? found.Id.Index : -1, B = crews.Count(want.Crew) };
+
+    [ForEach]
+    public static void Mates(in DynamicBuffer<Mate> mates, ref Got got, Lookup<Life> lives)
+    {
+        int sum = 0;
+        foreach (var mate in mates) sum += lives.Has(mate.Target) ? lives.Read(mate.Target).Value : -1;
+        got.C = sum;
+    }
+
+    [ForEach(Parallel = true)]
+    public static void ProbeParallel(in Want want, ref Got got, Lookup<Badge> badges) =>
+        got.A += badges.TryFind(want.Badge, out var found) ? found.Badge.Id : 0;
 }
 
 struct Life : EasyEcs.Aot.Library.ILife
