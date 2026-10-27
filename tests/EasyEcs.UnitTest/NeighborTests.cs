@@ -16,6 +16,8 @@ public partial record struct PairSpot3(System.Numerics.Vector3 At) : IComponent;
 public partial record struct PairCount(int Value) : IComponent;
 public partial record struct PairReach(float Value) : ISingletonComponent;
 public partial record struct PairTarget(EntityId Id, float Distance, bool Held) : IComponent;
+public partial record struct PairLoot(bool Taken, int By, int Order) : IComponent, ITracked;
+public partial record struct PairBag(int Count) : IComponent;
 
 /// <summary>Pair methods ([Neighbor]): what the tests run against the pairs a loop over both sides would visit.</summary>
 public static class Neighbors
@@ -119,6 +121,26 @@ public static class Neighbors
         if (d2 >= sight.Range * sight.Range || d2 > target.Distance || d2 == target.Distance && other.Id.Index >= target.Id.Index) return;
         target = new PairTarget(other.Id, d2, true);
     }
+
+    /// <summary>
+    /// A pickup: each collector takes the loot within range nobody took before it, a write of the neighbor
+    /// (<c>[Neighbor] ref</c>), so the pairs run one at a time in the order of the tables' rows.
+    /// </summary>
+    [ForEach]
+    [With<PairHunter>]
+    public static void Pick(Entity self, in PairSpot p, ref PairBag bag, [Neighbor] in PairSpot q, [Neighbor] ref PairLoot loot)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= Range * Range || loot.Taken) return;
+        loot = new PairLoot(true, self.Id.Index, bag.Count);
+        bag.Count++;
+    }
+
+    [ForEach]
+    public static void ResetLoot(ref PairLoot loot) => loot = default;
+
+    [ForEach]
+    public static void ResetBag(ref PairBag bag) => bag = default;
 
     [ForEach]
     public static void Reset(ref PairShove push) => push = default;
@@ -432,6 +454,124 @@ public class NeighborTests
             {
                 Neighbors.Reset(world);
                 Neighbors.Separate(world);
+                world.Update();
+            }
+        }), Is.EqualTo(0));
+    }
+
+    private static World Pickup(int collectors, int loot, float extent, int seed, bool tables)
+    {
+        var world = new World();
+        var random = new Random(seed);
+        world.Reserve<PairSpot, PairBag, PairHunter>(collectors);
+        world.Reserve<PairSpot, PairLoot>(loot);
+        for (int i = 0; i < collectors; i++)
+            world.CreateEntity(new PairSpot((float)random.NextDouble() * extent, (float)random.NextDouble() * extent), new PairBag(), new PairHunter());
+        for (int i = 0; i < loot; i++)
+        {
+            var e = world.CreateEntity(new PairSpot((float)random.NextDouble() * extent, (float)random.NextDouble() * extent), new PairLoot());
+            if (tables && i % 3 == 0) e.Set(new PairCount(i)); // a second table of loot
+        }
+
+        return world;
+    }
+
+    private static void ResetPickup(World world)
+    {
+        Neighbors.ResetLoot(world);
+        Neighbors.ResetBag(world);
+    }
+
+    [TestCase(1, 1, 1f)]
+    [TestCase(300, 900, 20f)]
+    [TestCase(500, 500, 4f)]
+    public void WritesOfTheNeighborRunInTheOrderOfALoopOverBothTables(int collectors, int loot, float extent)
+    {
+        using var world = Pickup(collectors, loot, extent, collectors + loot, false);
+        Neighbors.Pick(world); // sorts the rows: the reference walks them in that order
+        ResetPickup(world);
+
+        var rows = new List<(Entity E, PairSpot P)>();
+        foreach (var item in world.Query<PairSpot, PairBag>()) rows.Add((item.Entity, item.Component1));
+        var items = new List<(Entity E, PairSpot P)>();
+        foreach (var item in world.Read<PairSpot, PairLoot>()) items.Add((item.Entity, item.Component1));
+        var expected = new Dictionary<EntityId, PairLoot>();
+        foreach (var (e, _) in items) expected[e.Id] = default;
+        var bags = new Dictionary<EntityId, PairBag>();
+        foreach (var (e, p) in rows)
+        {
+            var bag = new PairBag();
+            foreach (var (o, q) in items)
+            {
+                var l = expected[o.Id];
+                Neighbors.Pick(e, in p, ref bag, in q, ref l);
+                expected[o.Id] = l;
+            }
+            bags[e.Id] = bag;
+        }
+
+        world.Update();
+        ulong mark = world.ChangeTick;
+        var since = QueryFilter.Create().Changed<PairLoot>(mark);
+        Assert.That(world.Count<PairLoot>(since), Is.Zero);
+        Neighbors.Pick(world);
+        foreach (var (e, _) in items) Assert.That(e.Read<PairLoot>(), Is.EqualTo(expected[e.Id]), $"loot {e.Id}");
+        foreach (var (e, _) in rows) Assert.That(e.Get<PairBag>(), Is.EqualTo(bags[e.Id]), $"collector {e.Id}");
+        // The loot written is stamped: a reader of the changes sees every taken one.
+        var changed = new HashSet<EntityId>();
+        foreach (var item in world.Read<PairLoot>(since)) changed.Add(item.Entity.Id);
+        foreach (var (e, _) in items)
+            if (e.Read<PairLoot>().Taken) Assert.That(changed, Does.Contain(e.Id));
+    }
+
+    [Test]
+    public void WritesOfTheNeighborAcrossTablesTakeEachLootOnce()
+    {
+        using var world = Pickup(400, 1200, 25f, 3, true);
+        for (int pass = 0; pass < 3; pass++)
+        {
+            ResetPickup(world);
+            Neighbors.Pick(world);
+            var collectors = new List<(Entity E, PairSpot P)>();
+            foreach (var item in world.Query<PairSpot, PairBag>()) collectors.Add((item.Entity, item.Component1));
+            int taken = 0;
+            var orders = new HashSet<(int, int)>();
+            foreach (var item in world.Read<PairSpot, PairLoot>())
+            {
+                var (q, l) = (item.Component1, item.Component2);
+                bool near = collectors.Any(c => (c.P.X - q.X) * (c.P.X - q.X) + (c.P.Y - q.Y) * (c.P.Y - q.Y) < Neighbors.Range * Neighbors.Range);
+                Assert.That(l.Taken, Is.EqualTo(near), "loot within a collector's range is taken, other loot is not");
+                if (!l.Taken) continue;
+                taken++;
+                var by = collectors.Single(c => c.E.Id.Index == l.By);
+                Assert.That((by.P.X - q.X) * (by.P.X - q.X) + (by.P.Y - q.Y) * (by.P.Y - q.Y), Is.LessThan(Neighbors.Range * Neighbors.Range));
+                Assert.That(orders.Add((l.By, l.Order)), Is.True, "each collector numbers its loot once");
+            }
+            Assert.That(collectors.Sum(c => c.E.Get<PairBag>().Count), Is.EqualTo(taken));
+            // The world moves on.
+            foreach (var item in world.Query<PairSpot>())
+                item.Component1 = new PairSpot(item.Component1.X + 0.3f, item.Component1.Y - 0.2f);
+            world.Update();
+        }
+    }
+
+    [Test]
+    public void AWritingPassAllocatesNothingOnceWarm()
+    {
+        using var world = Pickup(1000, 3000, 40f, 6, true);
+        for (int i = 0; i < 12; i++)
+        {
+            ResetPickup(world);
+            Neighbors.Pick(world);
+            world.Update();
+        }
+
+        Assert.That(Allocations.Of(() =>
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                ResetPickup(world);
+                Neighbors.Pick(world);
                 world.Update();
             }
         }), Is.EqualTo(0));

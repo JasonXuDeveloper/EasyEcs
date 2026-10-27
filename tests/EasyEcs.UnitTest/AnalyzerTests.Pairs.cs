@@ -29,18 +29,33 @@ public partial class AnalyzerTests
     [TestCase("[ForEach] static void A(ref Spot p, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; p.X += 1; }")]                        // writes what the neighbor reads
     [TestCase("[ForEach, Consume] static void A(in Spot p, ref Near n, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; n.Value++; }")]
     [TestCase("[ForEach, Changed<Seen>] static void A(in Spot p, in Seen s, ref Near n, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; n.Value++; }")]
+    [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] ref Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; q.X += 1; }")]   // writes of the neighbor what the row reads
+    [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; }")] // the row's Near
+    [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] in Drift d, [Neighbor] ref Drift e) { float dx = p.X - q.X; if (dx * dx >= 1) return; e.X = d.X; }")] // twice
+    [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Drift d) { float dx = p.X - q.X; if (dx * dx >= 1) return; d.X++; }")]
     public Task BadPairMethodsReport(string method) => AssertReports("EECS105", GeneratorTests.Components, PairParts, InSystem(method));
 
-    // A neighbor's component by ref (a write to the neighbor, not built yet) is no parameter a [ForEach] method takes.
+    // A neighbor's Entity by ref is no parameter a [ForEach] method takes.
     [Test]
-    public Task ANeighborByRefIsNoParameter() => AssertReports("EECS002", GeneratorTests.Components, PairParts,
-        InSystem("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] ref Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; n.Value++; }"));
+    public Task ANeighborEntityByRefIsNoParameter() => AssertReports("EECS002", GeneratorTests.Components, PairParts,
+        InSystem("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Entity o) { float dx = p.X - q.X; if (dx * dx >= 1) return; n.Value++; }"));
+
+    // A neighbor's component by ref that is only read keeps the pairs one at a time: EECS025, fixed to 'in'.
+    [TestCase("n.Value += (int)d.X;", true)]
+    [TestCase("d.X = 1; n.Value++;", false)]
+    public async Task ANeighborByRefOnlyReadReports(string rest, bool reports)
+    {
+        var costs = await Costs(GeneratorTests.Components, PairParts,
+            InSystem("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Drift d) { float dx = p.X - q.X; if (dx * dx >= 1) return; " + rest + " }"));
+        Assert.That(costs.Count(d => d.Id == "EECS025" && d.GetMessage().Contains("'d'")), Is.EqualTo(reports ? 1 : 0), string.Join("; ", costs.Select(d => d.GetMessage())));
+    }
 
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q) { float dx = p.X - q.X, dy = p.Y - q.Y; if (dx * dx + dy * dy >= 1) return; n.Value++; }")]
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, in Reach r) { float dx = q.X - p.X; float dy = q.Y - p.Y; if (dx * dx + dy * dy < r.Value * r.Value) n.Value++; }")] // the rest under the test, a singleton cutoff
     [TestCase("[ForEach, With<Quarry>] static void A(in Spot p, in Sight s, ref Near n, [Neighbor] in Spot q, [Neighbor] in Quarry _, [Neighbor] Entity o) { float dx = p.X - q.X, dy = p.Y - q.Y; if (dx * dx + dy * dy >= s.Range * s.Range || o.Id.Index < 0) return; n.Value++; }")] // a cutoff per row, the neighbor's entity
     [TestCase("[ForEach] static void A(in At3 p, ref Near n, [Neighbor] in At3 q) { if (System.Numerics.Vector3.DistanceSquared(p.V, q.V) >= 4f) return; n.Value++; }")]
     [TestCase("[ForEach] static void A(in At3 p, ref Near n, [Neighbor] in At3 q) { if ((p.V - q.V).LengthSquared() < 4f) { n.Value++; } }")]
+    [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Drift d) { float dx = p.X - q.X; if (dx * dx >= 1 || d.X > 0) return; d.X = 1; n.Value++; }")] // a write of the neighbor (a pickup)
     [TestCase("[ForEach] static void A(in Spot p, ref Near n) { n.Value = (int)p.X; }")]                                                                         // no [Neighbor]: no pair rule
     public Task PairMethodsLeaveAlone(string method) => AssertClean(GeneratorTests.Components, PairParts, InSystem(method));
 

@@ -103,6 +103,9 @@ public class CodeFixTests
     [TestCase("EECS025", "Take it by 'in'",
         "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, ref Clock c) => c.Ticks += p.V; }",
         "static void A(in P p, ref Clock c)")]
+    [TestCase("EECS025", "Take it by 'in'",                                                                               // a neighbor's component only read
+        AnalyzerTests.PairParts + "\n[EcsSystem] public ref struct S { [ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Drift d) { float dx = p.X - q.X; if (dx * dx >= 1) return; n.Value += (int)d.X; } }",
+        "static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] in Drift d)")]
     [TestCase("EECS025", "Take it as a ReadOnlyMaybe<Q>",
         "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; } }",
         "static void A(ref P p, ReadOnlyMaybe<Q> q)")]
