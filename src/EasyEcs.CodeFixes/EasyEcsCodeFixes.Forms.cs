@@ -297,4 +297,27 @@ public sealed partial class EasyEcsCodeFixes
             .WithParameterList(updated.ParameterList.WithTrailingTrivia(eol))
             .WithBody(block.WithLeadingTrivia(SyntaxFactory.Whitespace(indent)).WithTrailingTrivia(method.GetTrailingTrivia()));
     }
+
+    /// <summary>
+    /// EECS107: the method as a pair method, with the parameters and statements the analyzer wrote (PairRewrite: the
+    /// lookups the search read at the candidate as [Neighbor] parameters, the candidate's statements as the body);
+    /// attributes, modifiers, name and comments kept; null when the properties do not parse.
+    /// </summary>
+    private static MethodDeclarationSyntax? PairMethod(SyntaxNode root, MethodDeclarationSyntax method, System.Collections.Immutable.ImmutableDictionary<string, string?> props)
+    {
+        if (method.Body == null || !props.TryGetValue("PairParameters", out var parameters) || parameters == null
+            || !props.TryGetValue("PairBody", out var body) || body == null) return null;
+        var list = SyntaxFactory.ParseParameterList("(" + parameters + ")");
+        if (list.ContainsDiagnostics) return null;
+        var leading = method.GetLeadingTrivia();
+        string indent = leading.Count > 0 && leading.Last().IsKind(SyntaxKind.WhitespaceTrivia) ? leading.Last().ToFullString() : "";
+        string eol = EndOfLine(root).ToFullString();
+        var text = new StringBuilder();
+        text.Append(indent).Append('{').Append(eol);
+        foreach (var line in body.Split('\n')) text.Append(line.Length == 0 ? "" : indent + "    " + line).Append(eol);
+        text.Append(indent).Append('}');
+        if (SyntaxFactory.ParseStatement(text.ToString()) is not BlockSyntax block || block.ContainsDiagnostics) return null;
+        return method.WithParameterList(list.WithTriviaFrom(method.ParameterList))
+            .WithBody(block.WithLeadingTrivia(method.Body.GetLeadingTrivia()).WithTrailingTrivia(method.Body.GetTrailingTrivia()));
+    }
 }

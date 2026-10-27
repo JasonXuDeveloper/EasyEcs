@@ -47,6 +47,10 @@ PairForm.cs                  what a pair method is, read once for the generator 
                              cutoff: values, singletons, the row's in components; EECS106's reason), HandWritten
                              (EECS107: a loop over other entities read through a Lookup<T> of the row's component
                              testing their squared distance)
+PairRewrite.cs               EECS107's fix, read once for the analyzer and its code fix: a search over candidate ids
+                             read through Lookup<T> rewritten as the pair method ([Neighbor] parameters, the cutoff
+                             test returning), only when mechanical (the search is the whole body, the pair reads
+                             nothing of it, the generator reads its test)
 Fusion.cs                    the fusion rule read once for the generator and the analyzer (FusionSide: what a method
                              reads, writes, filters and blocks it; Fusion.Problem: why two passes cannot share a walk)
 SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(values..., static (ref P p, ...) => ...)
@@ -180,8 +184,8 @@ EasyEcsAnalyzer.Views.cs     EECS098-101: an invalid [View], a component reached
 EasyEcsAnalyzer.Records.cs   EECS092 (compilation end): an Emit<T> whose Emitted<T> no code of the compilation clears
                              (a public record type of a library is left to the assemblies using it)
 EasyEcsAnalyzer.Pairs.cs     EECS105-107: a pair method that cannot run per pair (Error), one whose cutoff test the
-                             generator cannot read (every pair runs), a neighbor search written by hand (Info, no code
-                             fix: the grid's upkeep goes with it)
+                             generator cannot read (every pair runs), a neighbor search written by hand (a Warning
+                             with PairRewrite's fix when mechanical, else Info: the grid's upkeep goes with it)
 EasyEcsAnalyzer.Fusion.cs    EECS093-094: two passes over the same rows that almost share one walk (the reason
                              Fusion.Problem gives), a FusionMode.Require method left apart (Error)
 Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)

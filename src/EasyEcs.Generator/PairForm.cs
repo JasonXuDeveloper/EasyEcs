@@ -136,6 +136,19 @@ internal static class PairForm
             : null;
     }
 
+    /// <summary>
+    /// Whether <paramref name="condition"/>, a test of a neighbor search by hand that skips the candidate when true
+    /// (<c>if (d2 &gt;= r2) continue;</c>), holds a cutoff the generator reads, the candidate's side read through a
+    /// Lookup&lt;T&gt; of the row's component (EECS107's fix: the test becomes the pair method's).
+    /// </summary>
+    public static bool HandCutoff(IMethodSymbol method, IOperation body, IOperation condition)
+    {
+        var reader = new Reader(method, body, hand: true);
+        foreach (var term in Terms(condition, BinaryOperatorKind.ConditionalOr))
+            if (reader.Cutoff(term, far: true) != null) return true;
+        return false;
+    }
+
     /// <summary>The operands of a chain of <paramref name="kind"/> (|| or &amp;&amp;), left to right.</summary>
     private static IEnumerable<IOperation> Terms(IOperation condition, BinaryOperatorKind kind)
     {
@@ -291,10 +304,14 @@ internal static class PairForm
 
         /// <summary>The neighbor's side: a [Neighbor] parameter, or (by hand) a read of another entity's component of the row's type.</summary>
         private bool Other(IOperation root, IParameterSymbol row) => hand
-            ? root is IInvocationOperation { TargetMethod.Name: "Read", Instance: IParameterReferenceOperation { Parameter: var lookup } }
+            ? LookupRead(root) is { } lookup
               && Symbols.Classify(lookup, _outside) == Symbols.ParamKind.Lookup
               && SymbolEqualityComparer.Default.Equals(Symbols.LookupElement(lookup.Type), row.Type)
             : root is IParameterReferenceOperation { Parameter: var p } && Symbols.Classify(p, _outside) == Symbols.ParamKind.Neighbor;
+
+        /// <summary>The parameter <paramref name="op"/> reads another entity's component through (<c>lookup.Read(id)</c>), or null.</summary>
+        private static IParameterSymbol? LookupRead(IOperation op) =>
+            op is IInvocationOperation { TargetMethod.Name: "Read", Instance: IParameterReferenceOperation { Parameter: var p } } ? p : null;
 
         /// <summary>A chain of field reads (<c>p.At.X</c>): what it starts from (a parameter, a call) and the path ("At.X").</summary>
         private (IOperation Root, string Path)? Path(IOperation op)
