@@ -28,7 +28,7 @@ icon: ListOrdered
 
 ### 声明元素类型 [#declare-the-element]
 
-元素是普通结构体或枚举（比如区块的方块 `DynamicBuffer<Block>`），不实现 `IComponent`；`DynamicBuffer<Loot>` 才是组件。
+元素是普通结构体或枚举（比如地形的方块 `DynamicBuffer<Block>`），不实现 `IComponent`；`DynamicBuffer<Loot>` 才是组件。
 
 ```csharp
 public record struct Loot(int Item);
@@ -36,7 +36,7 @@ public record struct Sent(int Items) : IComponent;
 public struct Player : IComponent;
 ```
 
-枚举元素和结构体元素生成同样的成员（`chunk.Block`、`WriteBlock()`，见下文）；一字节的枚举每个元素只占一个字节，正好装体素区块的方块：
+枚举元素和结构体元素生成同样的成员（`chunk.Block`、`WriteBlock()`，见下文）；一字节的枚举每个元素只占一个字节，正好装体素地形的方块：
 
 ```csharp
 public enum Block : byte { Air, Stone, Water }
@@ -169,7 +169,7 @@ ref var stash = ref hero.GetOrAddLoot();                       // 英雄没有�
 ### 原地写整个缓冲：`SetCount` [#set-count]
 
 `SetCount(n)` 设置元素个数，并返回要写的 span：超过 `n` 的元素去掉，新增的元素是 `default`。一次算出整个列表的代码（一条路径、
-一个生成的区块）直接写进缓冲，不用先填一个 span，也不用复制：
+一个生成的地形）直接写进缓冲，不用先填一个 span，也不用复制：
 
 ```csharp
 public record struct Waypoint(float X, float Y);
@@ -259,7 +259,7 @@ var opened = world.Instantiate(chest);                        // 自己的列表
 ### 反复出现又消失的缓冲：缓冲池、`MaxPooledLength` 和 `FillPool` [#pool]
 
 缓冲销毁时（实体被销毁、组件被移除、空缓冲调用 `TrimExcess`），它的列表清空后进入这个元素类型的池；同类型的下一个缓冲写入第一个元素时
-（`Add`、`SetCount`、`EnsureCapacity`），直接从池里取，不再分配，不论在哪个线程。Actor 加载又卸载、单位生成又被击杀、玩家周围的区块
+（`Add`、`SetCount`、`EnsureCapacity`），直接从池里取，不再分配，不论在哪个线程。Actor 加载又卸载、单位生成又被击杀、玩家周围的地形
 加载又卸载：预热之后，这些缓冲都不分配。每个元素类型有两个静态设置决定池的行为：
 
 <TypeTable
@@ -278,7 +278,7 @@ var opened = world.Instantiate(chest);                        // 自己的列表
 />
 
 <Callout type="idea" title="适合">
-  `MaxPooledLength`：超过 4 KB、成批出现又消失的缓冲（区块的方块、大信箱）。保持默认的话，每个销毁的列表都交给 GC，每个新缓冲都重新分配。
+  `MaxPooledLength`：超过 4 KB、成批出现又消失的缓冲（地形的方块、大信箱）。保持默认的话，每个销毁的列表都交给 GC，每个新缓冲都重新分配。
   `FillPool`：知道自己峰值的服务器，连第一次涨到峰值也不想分配。
 </Callout>
 
@@ -287,13 +287,13 @@ var opened = world.Instantiate(chest);                        // 自己的列表
 </Callout>
 
 两者都对整个进程生效，所有 World、所有线程共用：启动时、在 World 用到这个类型之前设一次。先设容量，因为 `FillPool`
-按调用时的容量分配列表。一个体素服务器，每个区块 8,192 个方块，玩家周围最多同时加载 512 个区块：
+按调用时的容量分配列表。一个体素服务器，每片地形 8,192 个方块，玩家周围最多同时加载 512 片地形：
 
 ```csharp
 const int ChunkBlocks = 16 * 16 * 32;
 const int PeakChunks = 512;
 
-DynamicBuffer<Block>.MaxPooledLength = ChunkBlocks;           // 整个区块的列表都能还回池里
+DynamicBuffer<Block>.MaxPooledLength = ChunkBlocks;           // 整个地形的列表都能还回池里
 DynamicBuffer<Block>.FillPool(PeakChunks);                    // 峰值在第一个 tick 之前就分配好
 
 using var server = new World();
@@ -432,7 +432,7 @@ bags synced: 7
 | 只写一遍的整个缓冲，先在栈上填好一个 span 再 `AddRange` | 直接写 `SetCount(n)` 返回的 span | 元素只过一遍，也不用在栈上开一个缓冲那么大的空间 |
 | 在缓冲的 span 上反复读改写很多遍 | 在 `stackalloc` 的 span 上算完，再复制一次进 `SetCount(n)` 返回的 span | 每一遍都在方法自己的内存上跑，缓冲只写一次 |
 | `Add` 之后还用之前的 span | 可能扩容的调用之后重新取 span | `Add`、`AddRange`、`Insert`、`SetCount`、`EnsureCapacity`、`TrimExcess` 都可能换数组 |
-| 超过 4 KB、反复出现又消失的缓冲（区块、大信箱） | 启动时把 [`MaxPooledLength`](#pool) 调到它们的长度 | 新缓冲重用销毁缓冲的列表，不再分配 |
+| 超过 4 KB、反复出现又消失的缓冲（地形、大信箱） | 启动时把 [`MaxPooledLength`](#pool) 调到它们的长度 | 新缓冲重用销毁缓冲的列表，不再分配 |
 | World 涨到已知峰值的途中不断分配列表 | 启动时、设好 `MaxPooledLength` 之后调用 [`FillPool(peak)`](#pool) | 列表在第一个 tick 之前就付清 |
 | 只在部分行写入的 `ref` 缓冲 | 改成 [`Mut<DynamicBuffer<T>>`](/zh/docs/guide/change-tracking#set-if-changed)（`x.Write().Add(…)`） | 只给写过的行打 tick（[EECS053](/zh/docs/guide/analyzer#eecs053)） |
 

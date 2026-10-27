@@ -34,8 +34,8 @@
   </member>
   <member name="P:EasyEcs.IForEachBatch`1.OptionalWrites" source="a4bc5c8d6be1">
     <summary>
-      job 在自身组件之外写入的被追踪的组件（通过 <see cref="T:EasyEcs.Maybe`1" />；默认没有）：并行遍历打开它们的变更 tick 区块时，
-      与 <see cref="P:EasyEcs.IForEachBatch`1.WriteMask" /> 的组件一起打开，让切开同一区块的块共用它。生成的并行 job 标出它们通过
+      job 在自身组件之外写入的被追踪的组件（通过 <see cref="T:EasyEcs.Maybe`1" />；默认没有）：并行遍历打开它们的变更 tick 区段时，
+      与 <see cref="P:EasyEcs.IForEachBatch`1.WriteMask" /> 的组件一起打开，让切开同一区段的块共用它。生成的并行 job 标出它们通过
       <see cref="T:EasyEcs.Maybe`1" /> 的写入。
     </summary>
   </member>

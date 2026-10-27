@@ -34,7 +34,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`MaxAttribute`](/zh/docs/reference/maxattribute) | 归约中保留较大值的字段：Identity 是类型的 MinValue（float 和 double 是 -∞），Combine 是 Math.Max(left, right)。 |
 | [`MinAttribute`](/zh/docs/reference/minattribute) | 归约中保留较小值的字段：Identity 是类型的 MaxValue（float 和 double 是 +∞），Combine 是 Math.Min(left, right)。 |
 | [`NotSavedAttribute`](/zh/docs/reference/notsavedattribute) | 不进任何存档的组件或单例：重启时会重建的运行时状态（连接、缓存、服务句柄）。 |
-| [`OrderByAttribute`](/zh/docs/reference/orderbyattribute) | 每个 World 让这个组件的表按它排序的键，以及块的包围盒要罩住的点。 |
+| [`OrderByAttribute`](/zh/docs/reference/orderbyattribute) | 每个 World 让这个组件的表按它排序的键，以及簇的包围盒要罩住的点。 |
 | [`OrderedIndexExtensions`](/zh/docs/reference/orderedindexextensions) | 键可比较（分数、截止时间、等级）的值索引的有序遍历：按区间或按顺序遍历，用于排行榜、计时器和匹配分段。 |
 | [`Prefab`](/zh/docs/reference/prefab) | 实体的配方：一组不属于任何 World 的组件值，所以任何查询都看不到它。 |
 | [`PrefabAttribute`](/zh/docs/reference/prefabattribute) | 把一个 Prefab 声明为它的实体开始时拥有的组件：一个 partial struct，每个组件一个字段，字段初始化器就是默认值：[Prefab] public partial struct Goblin \{ public Health Health = new(30); public Position Position; \}。 |
@@ -70,7 +70,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 
 | 类型 | 说明 |
 |---|---|
-| [`BlockPair`](/zh/docs/reference/blockpair) | 包围盒挨得近的两块（RowBlocks.Pairs）：BlockPair.First 的行对 BlockPair.Second 的行，两者可以是同一块。 |
+| [`BlockPair`](/zh/docs/reference/blockpair) | 包围盒挨得近的两簇（RowBlocks.Pairs）：BlockPair.First 的行对 BlockPair.Second 的行，两者可以是同一簇。 |
 | [`ChildOf`](/zh/docs/reference/childof) | 层级关系：实体是 ChildOf.Parent 的子实体。 |
 | [`ColumnInfo`](/zh/docs/reference/columninfo) | 表的一列（TableInfo）。 |
 | [`ComponentSet`](/zh/docs/reference/componentset) | 一组组件和单例类型，建一次就一直留着（放在 static readonly 字段里）：存档要写的组件（World.SaveEntitiesWith），也就是只记录需要持久化的数据、不带周围运行时状态的那份记录；或者在重启时，整个 World 的存档要排除的类型（World.SaveWithout）和加载时要保留的单例（World.LoadKeeping）。 |
@@ -96,7 +96,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`Reduce<T>`](/zh/docs/reference/reduce) | 把一次 [ForEach] 遍历归约到单例 T（OpenMP 的 reduction，MPI 的 Allreduce），按 ref 传入：static void Count(in Health h, ref Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;。 |
 | [`RelationIndex<T>.Sources`](/zh/docs/reference/relationindex-sources) | 枚举链接到某个目标的实体（foreach），每条链接一次。 |
 | [`Retired`](/zh/docs/reference/retired) | 退休实体的标签：Destroy 发现实体上有 ICleanupComponent，于是去掉其他组件，让实体继续存活，直到最后一个清理组件被移除（那时实体被释放，才算销毁）。 |
-| [`RowBlocks`](/zh/docs/reference/rowblocks) | 一张有序表的块（成对方法推断出的顺序，或 [OrderBy]）：表的行按键排序，每 RowBlocks.Size 行一块，每块一个轴对齐的包围盒，盒子罩住块里各行声明的点，再向外扩大余量。 |
+| [`RowBlocks`](/zh/docs/reference/rowblocks) | 一张有序表的簇（成对方法推断出的顺序，或 [OrderBy]）：表的行按键排序，每 RowBlocks.Size 行一簇，每簇一个轴对齐的包围盒，盒子罩住簇里各行声明的点，再向外扩大余量。 |
 | [`Scratch<T>`](/zh/docs/reference/scratch) | [ForEach] 方法在运行它的线程上的工作内存（OpenMP 的 threadprivate）：邻居列表、寻路的开放集、要填充的缓冲区。 |
 | [`SingletonRef<T>`](/zh/docs/reference/singletonref) | 某个 World 的单例 T 的句柄。 |
 | [`SystemAccess`](/zh/docs/reference/systemaccess) | 系统读写的数据，添加系统时声明一次。 |
@@ -135,7 +135,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`IGroup`](/zh/docs/reference/igroup) | 标记一个按值拆分表的组件：在调用过 World.GroupBy 的 World 里，IGroup.Group 不同的实体放在不同的表，所以只查询一组（QueryFilter.InGroup）时只遍历这一组的行，这些行在内存里是连续的（一个区域、一张地图、一场对局、一支队伍）。 |
 | [`IIndexed<TKey>`](/zh/docs/reference/iindexed) | World 按 IIndexed.Key 建索引的组件：world.Index&lt;T, TKey&gt;().Find(key) 枚举 TKey 等于某个值的实体（物品的主人、玩家的名字、网格的一个格子）。 |
 | [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) | 标记一个不做结构变更的 ForEach job：不在它遍历的 World 里创建或销毁实体，也不增删、设置任何组件。 |
-| [`IOrderKey<TKey>`](/zh/docs/reference/iorderkey) | 一个组件，含它的表让行按 IOrderKey.OrderKey 排序，每块行（8 行，ARM64 上 4 行）一个包围盒，罩住 IOrderKey.BoxPoint（RowBlocks）。 |
+| [`IOrderKey<TKey>`](/zh/docs/reference/iorderkey) | 一个组件，含它的表让行按 IOrderKey.OrderKey 排序，每簇（8 行，ARM64 上 4 行）一个包围盒，罩住 IOrderKey.BoxPoint（RowBlocks）。 |
 | [`IReduction<T>`](/zh/docs/reference/ireduction) | T 的值怎样合并：满足结合律的 IReduction.Combine，以及它的 IReduction.Identity，和任何值合并都不改变那个值（求和是 0，求最小值是 float.MaxValue）。 |
 | [`IRelation`](/zh/docs/reference/irelation) | DynamicBuffer 的元素，把所在实体链接到 IRelation.Target：一个实体可以有任意多条同一种链接（队伍的成员、商人卖的物品、一个 buff 作用的单位），World.Relations 能找出链接到某个目标的实体。 |
 | [`ISingletonComponent`](/zh/docs/reference/isingletoncomponent) | 把结构体标记为 World 单例：每个 World 恰好有一个值（时钟、配置、共享状态）。 |

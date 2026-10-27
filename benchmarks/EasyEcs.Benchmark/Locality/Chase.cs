@@ -66,6 +66,54 @@ public static partial class Chase
         world.ForEachBatch<Position, Prey, Heading, GatherJob>(ref job);
     }
 
+    /// <summary>
+    /// The method's job over each run of rows with loads issued ahead instead of prefetches (ARM64 without PRFM's
+    /// intrinsic, Apple silicon among them): the record of row i + k is loaded (Has) into a ring of k slots, the row of
+    /// row i + k / 2 is touched (a read through the record, in the cache by then) into a second ring, and both slots are
+    /// consumed by row i, k rows later, so the loads are real and their misses overlap inside the out-of-order window
+    /// while the rows between run. <paramref name="distance"/> is a power of two from 2 to 64.
+    /// </summary>
+    public static int LoadAhead(World world, int distance)
+    {
+        var job = new LoadAheadJob { Positions = new Lookup<Position>(world, null), Distance = distance };
+        world.ForEachBatch<Position, Prey, Heading, LoadAheadJob>(ref job);
+        return job.Sink;
+    }
+
+    public ref struct LoadAheadJob : IForEachBatch<Position, Prey, Heading>
+    {
+        public Lookup<Position> Positions;
+        public int Distance;
+        public int Sink;
+
+        public void Execute(EntitySpan entities, Span<Position> position, Span<Prey> prey, Span<Heading> heading)
+        {
+            int n = prey.Length, k = Distance, half = k / 2, mask = k - 1, sink = Sink;
+            // The rings: a slot per row in flight (k at most 64: two stack lines of ints each).
+            Span<int> records = stackalloc int[64], rows = stackalloc int[64];
+            records.Clear();
+            rows.Clear();
+            for (int j = 0, ahead = Math.Min(k, n); j < ahead; j++) records[j & mask] = Positions.Has(prey[j].Target) ? 1 : 0;
+            for (int j = 0, ahead = Math.Min(half, n); j < ahead; j++) rows[j & mask] = Touch(prey[j].Target);
+            for (int i = 0; i < n; i++)
+            {
+                // Row i's slots, loaded k and k / 2 rows ago: consumed here, then refilled for the rows ahead.
+                sink += records[i & mask] + rows[i & mask];
+                records[i & mask] = i + k < n && Positions.Has(prey[i + k].Target) ? 1 : 0;
+                rows[(i + half) & mask] = i + half < n ? Touch(prey[i + half].Target) : 0;
+                Hunt(in position[i], in prey[i], ref heading[i], Positions);
+            }
+
+            Sink = sink;
+        }
+
+        private readonly int Touch(EntityId id)
+        {
+            var at = Positions[id];
+            return at.HasValue ? BitConverter.SingleToInt32Bits(at.Value.X) & 1 : 0;
+        }
+    }
+
     public ref struct RowsJob : IForEachBatch<Position, Prey, Heading>
     {
         public Lookup<Position> Positions;

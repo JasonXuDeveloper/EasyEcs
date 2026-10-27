@@ -123,18 +123,6 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     private static string Emit(UpdateModel model)
     {
         var owner = model.Owner;
-        if (owner.IsSystem && !model.One)
-        {
-            // A method that shares a walk with others (fusion) runs its own job row by row in it: no twin prefetching
-            // its chases, and its line says nothing of them.
-            var groups = FusionGroups(model);
-            var methods = model.Methods.ToArray();
-            for (int i = 0; i < methods.Length; i++)
-                if (groups[i] > 1)
-                    for (int k = i; k < i + groups[i]; k++)
-                        methods[k] = methods[k] with { Chases = new([]) };
-            model = model with { Methods = new(methods) };
-        }
         var sb = new StringBuilder(Header).Append('\n');
         if (owner.Namespace.Length > 0) sb.Append("namespace ").Append(owner.Namespace).Append(";\n\n");
         if (model.One || !owner.IsSystem) EmitEntryPoints(sb, model, model.One);
@@ -328,8 +316,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         if (method.HasChaseTwin)
         {
             // Past the last-level cache (any of its lookups' tables), the twin prefetching the chases; else today's job.
-            var gates = method.Chases.Select(c => c.Lookup).Distinct().Select(l => $"global::EasyEcs.Lookup<{method.Parameters[l].Type}>.Prefetches({world})");
-            sb.Append($"{indent}if ({string.Join(" || ", gates)})\n{indent}{{\n");
+            sb.Append($"{indent}if ({ChaseGate([method], world)})\n{indent}{{\n");
             Pass(method with { IsChaseTwin = true }, $"{forEach}.{method.Name}Job{i}Chases{method.TypeParameters}", indent + "    ");
             sb.Append($"{indent}}}\n{indent}else\n{indent}{{\n");
             Pass(method, job, indent + "    ");
@@ -599,32 +586,42 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
     /// <summary>
     /// The row loop of the twin job of a method that chases other entities (<see cref="ForEachModel.Chases"/>), run only
-    /// past the last-level cache (its pass's call site decides), group prefetching (AMAC): the records of the first 2k
-    /// rows' targets, then per row the record of row i + 2k's target and the row of row i + k's (k =
-    /// <see cref="ForEachModel.ChaseDistance"/>; a row's address is known once its record is in cache, so the record
-    /// goes first); the last 2k rows, and every row of a run of 2k or fewer, run as before. A prefetch never faults and
-    /// changes nothing: a dead or recycled target only wastes it.
+    /// past the last-level cache (its pass's call site decides), group prefetching (AMAC): each chase's dependent loads
+    /// one stage per k rows (k = <see cref="ForEachModel.ChaseDistance"/>), the first stage furthest ahead, since each
+    /// address is known only once the stage before brought its line in: an entity's record 2k rows ahead, then its row k
+    /// ahead (for each element of a buffer of links too); an index probe's slot or bucket, then its entry. First the
+    /// first stage of the first rows; the last rows, and every row of a
+    /// run too short to prefetch, run as before. A prefetch never faults and changes nothing: a dead or recycled target, or
+    /// a key no entity has, only wastes it.
     /// </summary>
     private static void EmitChases(StringBuilder sb, ForEachModel method, string indent, string call)
     {
         const int k = ForEachModel.ChaseDistance;
-        string Id(Chase c, string row)
+        const int span = 2 * k;
+        string At(Chase c, string row)
         {
             int column = 1 + method.Parameters.Take(c.Component).Count(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.Mutable);
-            return $"global::System.Runtime.CompilerServices.Unsafe.Add(ref r{column}, {row}){c.Id}";
+            return $"global::System.Runtime.CompilerServices.Unsafe.Add(ref r{column}, {row})";
         }
         string Lookup(Chase c) => $"new global::EasyEcs.Lookup<{method.Parameters[c.Lookup].Type}>(World, null)";
-        sb.Append($"{indent}nint i = 0;\n");
-        sb.Append($"{indent}if (rows > {2 * k}) // the chases {k} and {2 * k} rows ahead\n{indent}{{\n");
-        sb.Append($"{indent}    for (nint j = 0; j < {2 * k}; j++)\n{indent}    {{\n");
-        foreach (var c in method.Chases) sb.Append($"{indent}        {Lookup(c)}.Prefetch({Id(c, "j")});\n");
-        sb.Append($"{indent}    }}\n");
-        sb.Append($"{indent}    for (nint last = rows - {2 * k}; i < last; i++)\n{indent}    {{\n");
-        foreach (var c in method.Chases)
+        // Stage s (1-based) of chase c at row `row`, or null when the chase has no such stage.
+        string? Stage(Chase c, int s, string row) => c.Kind switch
         {
-            sb.Append($"{indent}        {Lookup(c)}.Prefetch({Id(c, $"i + {2 * k}")});\n");
-            if (c.Row) sb.Append($"{indent}        {Lookup(c)}.PrefetchRow({Id(c, $"i + {k}")});\n");
-        }
+            ChaseKind.Probe => $"global::EasyEcs.LookupExtensions.PrefetchKey<{method.Parameters[c.Lookup].Type}, {method.Parameters[c.Lookup].Key}>(k{c.Lookup}, {At(c, row)}{c.Id}, {s});",
+            _ when s == 2 && !c.Row => null, // Has: the record alone
+            ChaseKind.Buffer => $"foreach (ref readonly var __link in {At(c, row)}.AsReadOnlySpan()) {Lookup(c)}.{(s == 1 ? "Prefetch" : "PrefetchRow")}(__link{c.Id});",
+            _ => $"{Lookup(c)}.{(s == 1 ? "Prefetch" : "PrefetchRow")}({At(c, row)}{c.Id});",
+        };
+        sb.Append($"{indent}nint i = 0;\n");
+        sb.Append($"{indent}if (rows > {span}) // the chases {k} and {span} rows ahead\n{indent}{{\n");
+        sb.Append($"{indent}    for (nint j = 0; j < {span}; j++)\n{indent}    {{\n");
+        foreach (var c in method.Chases) sb.Append($"{indent}        {Stage(c, 1, "j")}\n");
+        sb.Append($"{indent}    }}\n");
+        sb.Append($"{indent}    for (nint last = rows - {span}; i < last; i++)\n{indent}    {{\n");
+        foreach (var c in method.Chases)
+            for (int s = 1; s <= 2; s++)
+                if (Stage(c, s, $"i + {(3 - s) * k}") is { } line)
+                    sb.Append($"{indent}        {line}\n");
         sb.Append($"{indent}        {call}\n{indent}    }}\n{indent}}}\n");
         sb.Append($"{indent}for (; i < rows; i++)\n{indent}    {call}\n");
     }
@@ -675,7 +672,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Optional => $"global::EasyEcs.Maybe<{p.Type}>.{(p.RefKind == "ref" ? "ForWrite" : "ForRead")}(entity)",
             Symbols.ParamKind.Reduction => $"ref {(local[i] ? "l" : "a")}{i}", // a run's local: registers (Reduce<T> holds no ref)
             // This thread's box, resolved once per chunk (per pass on one thread): the job's copy keeps it.
-            Symbols.ParamKind.Scratch => $"new global::EasyEcs.Scratch<{p.Type}>(ref (t{i} ??= global::EasyEcs.Scratch<{p.Type}>.Of<{job}>()).Value)",
+            // Keyed by the method's own job, so its twins (Rows, Chases) find the same box: the gate never changes what the method sees.
+            Symbols.ParamKind.Scratch => $"new global::EasyEcs.Scratch<{p.Type}>(ref (t{i} ??= global::EasyEcs.Scratch<{p.Type}>.Of<{method.Name}Job{number}{method.TypeParameters}>()).Value)",
             Symbols.ParamKind.Lookup => $"new global::EasyEcs.Lookup<{p.Type}>(World, {(p.Key.Length > 0 ? $"k{i}" : "null")})",
             Symbols.ParamKind.Tile => $"new global::EasyEcs.Tile<{p.Cell}, {p.Grid}>({(runs ? "entities[(int)i]" : "entity")}, in n{method.GridOf(i)})",
             Symbols.ParamKind.Emit => $"new global::EasyEcs.Emit<{p.Type}>(ref this.e{i})", // this: a vector loop's column refs are e1, e2...
@@ -1077,14 +1075,21 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         public string Scalar { get; init; } = "";
 
         /// <summary>
-        /// Its reads of other entities at ids its rows hold (<see cref="Generator.Chases"/>; none in parallel). Without a
+        /// Its reads of other entities at ids its rows hold (<see cref="Generator.Chases"/>). Without a
         /// vector loop, a pass past the last-level cache runs its twin job (<see cref="IsChaseTwin"/>), which walks
         /// runs of rows and prefetches them <see cref="ChaseDistance"/> rows ahead; any other pass runs today's job.
         /// </summary>
         public EquatableArray<Chase> Chases { get; init; } = new([]);
 
-        /// <summary>Has a twin job prefetching its chases: no vector loop and some chase (<see cref="Chases"/>).</summary>
-        public bool HasChaseTwin => Simd == null && !One && Chases.Length > 0;
+        /// <summary>
+        /// Has a twin job prefetching its chases: no vector loop and some chase (<see cref="Chases"/>). In parallel the twin
+        /// is a batch job over each chunk's runs of rows (ForEachBatchParallel, the same chunks as ForEachParallel's), so
+        /// only a method a parallel batch job can run (no Maybe, Mut or view Mut, as <see cref="Runs"/>).
+        /// </summary>
+        public bool HasChaseTwin => Simd == null && !One && Chases.Length > 0 && (!Parallel || ParallelRuns);
+
+        /// <summary>A parallel job can run it over runs of rows: it takes no Maybe, Mut or view Mut (stamped through the entity).</summary>
+        private bool ParallelRuns => !Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable) && !Stamps;
 
         /// <summary>
         /// This is the twin (<c>Job{i}Chases</c>): a job over runs of rows prefetching the chases, run only by a pass
@@ -1152,7 +1157,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// (ForEachBatchParallel): its partial results stay in registers instead of a load and a store per row.
         /// </summary>
         public bool Runs => !One && Stable && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) && (Parallel
-            ? Parameters.Any(p => p.Kind == Symbols.ParamKind.Reduction) && !Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable) && !Stamps
+            ? (Parameters.Any(p => p.Kind == Symbols.ParamKind.Reduction) || IsChaseTwin) && ParallelRuns
             : Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Reduction || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" }) || Stamps
                 || IsChaseTwin); // the rows ahead of the row it runs: their chases prefetched
 
@@ -1186,7 +1191,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     Symbols.ParamKind.Emit => new ParamModel(Symbols.ParamKind.Emit, // a write of Emitted<T>, once per pass
                         Symbols.EmitElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared),
                     Symbols.ParamKind.Lookup => new ParamModel(Symbols.ParamKind.Lookup, Symbols.LookupElement(p.Type)!.ToDisplayString(Symbols.Fqn), "in", p.Name, declared,
-                        Key: Symbols.LookupKey(p, method, Symbols.WithBody(method, syntax, model).Item1)?.ToDisplayString(Symbols.Fqn) ?? ""),
+                        Key: Symbols.LookupKey(p, Symbols.WithBody(method, syntax, model).Item1 is { } declaration ? (SyntaxNode?)declaration.Body ?? declaration.ExpressionBody : null)?.ToDisplayString(Symbols.Fqn) ?? ""),
                     Symbols.ParamKind.Tile => TileModel(p, declared),
                     Symbols.ParamKind.View => ViewParameter(p, declared),
                     Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn),
@@ -1269,12 +1274,18 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     Simd = Symbols.IsForEntity(method) || !outside || record.Length > 0 ? null : VectorLoop(method, syntax, model, parallel, ct, out scalar),
                     Scalar = scalar ?? "",
                     // Reads of other entities at the row's ids, by EntityId (a keyed lookup finds through its index).
-                    Chases = Symbols.IsForEntity(method) || parallel || record.Length > 0 ? new([])
-                        : new(Generator.Chases.Of(method, syntax, model, ct).Where(c => parameters[c.Lookup].Key.Length == 0).ToArray()),
+                    Chases = Symbols.IsForEntity(method) || record.Length > 0 ? new([]) : Usable(Generator.Chases.Of(method, syntax, model, ct), parameters),
                     OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LoopsOrCalls(syntax),
                     Fusion = outside || record.Length > 0 ? null : FusionSide.Of(method, stable, identifies, parallel),
                 };
         }
+
+        /// <summary>
+        /// The chases a twin job can prefetch: a probe's index must be the one the job holds (its Lookup is keyed, so the
+        /// index is built before the pass).
+        /// </summary>
+        public static EquatableArray<Chase> Usable(EquatableArray<Chase> chases, ParamModel[] parameters) =>
+            new(chases.Where(c => c.Kind != ChaseKind.Probe || parameters[c.Lookup].Key.Length > 0).ToArray());
 
         /// <summary>
         /// The vector loop of a [ForEach] method (Kernel.Vectorize, its helpers inlined), with the job fields its uniform

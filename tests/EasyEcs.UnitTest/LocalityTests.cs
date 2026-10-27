@@ -216,6 +216,8 @@ public class LocalityTests
                      ("prefetched 16", w => Chase.Rows(w, 16)), ("records only", w => Chase.Rows(w, 16, rows: false)),
                      ("generated gathers", Chase.HuntGathered), ("gathers", w => Chase.Gathered(w, 0)),
                      ("gathers prefetched", w => Chase.Gathered(w, 4)),
+                     ("loads ahead 2", w => Chase.LoadAhead(w, 2)), ("loads ahead 8", w => Chase.LoadAhead(w, 8)),
+                     ("loads ahead 64", w => Chase.LoadAhead(w, 64)),
                  })
         {
             Clear(world);

@@ -570,10 +570,10 @@ lanes keep the scalar walk). All 0 B. ARM64 (NEON `TBL`) runs the 128-bit form; 
 
 <details><summary>D137 (zh)</summary>
 
-## D137. 表按键的顺序保存行，每块行一个包围盒 [#d137-ordered-rows]
+## D137. 表按键的顺序保存行，每簇一个包围盒 [#d137-ordered-rows]
 
-**决定。** 一张表可以让它的行按某个键排好，并在每块行上画一个轴对齐包围盒：这是成对内核读取的布局（一块行对一块行，
-块对由包围盒找出），也让每个读取其他实体的遍历顺带受益：按目标排好的读取方读到的记录和行彼此相近。
+**决定。** 一张表可以让它的行按某个键排好，并在每簇上画一个轴对齐包围盒：这是成对内核读取的布局（一簇行对一簇行，
+簇对由包围盒找出），也让每个读取其他实体的遍历顺带受益：按目标排好的读取方读到的记录和行彼此相近。
 
 - **谁来要求。** 顺序通常是推断出来的：生成的方法若在一个截断距离内比较位置，它的初始化就为读取位置的组件调用
   `World.OrderRows<T, TOrder>(axes, cell, interval, margin)`。`TOrder` 是实现 `IRowOrder<T>` 的结构体，带静态的
@@ -581,15 +581,15 @@ lanes keep the scalar walk). All 0 B. ARM64 (NEON `TBL`) runs the 128-bit form; 
   21 位，用整数钳位）。这个要求覆盖现在和以后的表；一个组件以第一次要求为准。成员上的 `[OrderBy]`（生成它的
   `IOrderKey<TKey>`）对所有世界覆盖推断：非空间的键，或另一个格子大小。没人要求顺序的表，只在行移动或行数收缩处多一次判空。
 - **排序。** 对 (键, 行) 对做 LSD 基数排序，缓冲区来自池，键放得下时用 32 位，所有键共有的字节跳过，行已经有序时什么也不搬；
-  然后在结构门下对每一列、存在位、变更 tick（字和块的摘要由 tick 重建）和槽做一次置换（`Archetype.Permute`），并增加
+  然后在结构门下对每一列、存在位、变更 tick（字和簇的摘要由 tick 重建）和槽做一次置换（`Archetype.Permute`），并增加
   `StorageVersion`。没有这个组件的行排在最后。它每隔 `interval` 次更新在默认组更新开始时运行（GROMACS 的 `nstlist`），
   或用 `SortRows<T>()` 立即运行；两者在遍历中都会抛出（EECS041 列出它们）。ref、句柄缓存的行和标记的行在排序时失效，和任何行移动一样。
-- **块。** `Vector256` 有硬件支持时 8 行，否则 4 行（ARM64 的 NEON 宽 128 位），或要求指定的不超过 64 的 2 的幂，
-  这样内核的一块正好是每个轴一个浮点寄存器。排序在 `Point` 的 `axes` 个轴上画出每块的包围盒，再加上余量；两次排序之间
-  移进某块的行会扩大那块的包围盒；排序之后新建的行排在 `SortedRows` 之后，等下一次排序。包围盒放在顺序的旁路数组里
-  （以表的块数为界，`TrimExcess` 释放），从不进热结构。`world.Blocks<T>()` 和 `EntitySpan.Blocks` 给出 `RowBlocks`：
-  包围盒、一块的行、只读列、id、存在位，以及 `Pairs(reach, into)` / `Pairs(other, reach, into)`：包围盒相距在 reach
-  之内的块对（按第一轴低边排序后扫描，其他边按这个顺序收集）。
+- **簇。** `Vector256` 有硬件支持时 8 行，否则 4 行（ARM64 的 NEON 宽 128 位），或要求指定的不超过 64 的 2 的幂，
+  这样内核的一簇正好是每个轴一个浮点寄存器。排序在 `Point` 的 `axes` 个轴上画出每簇的包围盒，再加上余量；两次排序之间
+  移进某簇的行会扩大那簇的包围盒；排序之后新建的行排在 `SortedRows` 之后，等下一次排序。包围盒放在顺序的旁路数组里
+  （以表的簇数为界，`TrimExcess` 释放），从不进热结构。`world.Blocks<T>()` 和 `EntitySpan.Blocks` 给出 `RowBlocks`：
+  包围盒、一簇的行、只读列、id、存在位，以及 `Pairs(reach, into)` / `Pairs(other, reach, into)`：包围盒相距在 reach
+  之内的簇对（按第一轴低边排序后扫描，其他边按这个顺序收集）。
 - **存档。** 恢复或读档保留它读到的物理行序（存档按表内顺序写行），丢掉包围盒；下一次更新会排序（已经有序的行只花键和包围盒的开销）
   并重画它们。把包围盒写进存档会把格式和节奏绑在一起，而第一次更新本来就会重建它们。
 - **EECS104** 报告生成的部分无法维护的 `[OrderBy]`：键不是普通值（结构体、字符串）、包围盒成员不是 float 或一个
@@ -600,11 +600,11 @@ lanes keep the scalar walk). All 0 B. ARM64 (NEON `TBL`) runs the 128-bit form; 
 **考虑过的方案。**
 - **以面向用户的特性为主入口**：用户要为成对方法读取的每个组件写出键和格子；而生成器已经看到距离判断和截断距离。
   `[OrderBy]` 留给没有方法暗示的顺序。
-- **Hilbert 键**：每块的局部性比 Morton 好，但每个键的指令更多；包围盒吸收了 Morton 的跳跃，排序的开销在置换，不在键。
+- **Hilbert 键**：每簇的局部性比 Morton 好，但每个键的指令更多；包围盒吸收了 Morton 的跳跃，排序的开销在置换，不在键。
 - **每次写入都排序，或行的树**：GROMACS 按节奏重排；余量让包围盒在两次排序之间保持有效，已经有序的行排序只花键和包围盒的开销。
-- **16 行的块**：见数据。
+- **16 行的簇**：见数据。
 - **只搬不在位置上的行**：随机 1 % 的变动已经搬动大多数行，所以排序把每行搬一次。
-- **块对用包围盒树**（原型的做法）：每块走一遍树；按低边排序后扫描更简单，没有树要维护，也可以并行（只读包围盒）。
+- **簇对用包围盒树**（原型的做法）：每簇走一遍树；按低边排序后扫描更简单，没有树要维护，也可以并行（只读包围盒）。
 - **把顺序和包围盒存进存档**：见存档。
 
 </details>
@@ -644,3 +644,78 @@ lanes keep the scalar walk). All 0 B. ARM64 (NEON `TBL`) runs the 128-bit form; 
 - **没有 AVX-512 时用标量遍历**：核心以前的做法；NUMBERS_SCALAR。
 
 </details>
+
+
+## feat-prefetch-all: every chase the generated code can prefetch, SVE's prefetch on ARM64, the core's id lists
+
+Numbers: `borrowed-ideas.md` 5, item 1, "feat-prefetch-all" (BenchmarkDotNet default job, base 63771f4 against the
+branch as frozen snapshots, two rounds; this machine's last-level cache is 260 MiB, so only the 16M worlds are past
+it; all 0 B).
+
+Decision record drafts (en + zh, the next free D numbers at merge: D139 onward if D137 / D138 keep theirs):
+- **Every chase is prefetched past the last-level cache** (extends the feat-prefetch-gate record). The twin job of a
+  method's row form now also covers: index probes at a key of an `in` component (`lookup.TryFind(x.F, ...)`,
+  `Find`, `Count`; the index's slot, or the hash's bucket 16 rows ahead and its entry 8 ahead, a relation key's slot
+  then its list), reads at the ids of an `in` buffer's elements (`foreach (var link in links) lookup[link.Target]`,
+  the indexer: each element's record 16 ahead, its row 8 ahead), parallel row methods (the twin is a batch job per
+  chunk through `ForEachBatchParallel`, which cuts the same chunks as `ForEachParallel`; methods with `Maybe` /
+  `Mut` keep the per-row form, unprefetched), walks two methods share (fusion within a system and the pair of two
+  systems: a twin walk of the members' twins, picked before the size check) and lambda passes (the interceptor picks
+  the twin as a method's pass does). The gate of a probe is the index's own memory (slots, buckets, entries, lists)
+  past the cache (`LookupExtensions.Probes`), read once per pass with the dictionary's arrays. Numbers at 16M (base
+  / head): probes FindLogin 979 / 700 and 1020 / 688 ms (1.40x, 1.48x), the lambda 960 / 705 and 988 / 719 ms (1.36x, 1.37x), the parallel probe 287 / 206 and 287 / 215 ms (1.39x, 1.33x), a shared key's
+  Count 592 / 570 and 665 / 561 ms (1.04x, 1.19x); buffer chases 2090 / 1460 ms and 2095 / 1443 ms (1.43x, 1.45x); a fused walk 1071 / 606 and
+  1041 / 594 ms (1.77x, 1.75x); a parallel chase 285 / 174 and 260 / 174 ms (1.64x, 1.49x). In the cache (1k, 1M:
+  gate off) equal within the run-to-run spread (head Auto against head Off at 1M: within 1-7 %, the same code).
+  Considered: a third probe stage for a key many entities share (its list of ids: finding its head is a second
+  lookup per row, 2.4x slower at 16M, dropped); the parallel per-row form prefetching (ForEachParallel hands one row
+  per call: no rows ahead to read); a twin per fused method run inside today's walk (a walk interleaves methods per
+  row or per block of 256: the twin walk is one job, so prefetches stay a fixed distance ahead).
+- **ARM64: SVE's prefetch** (`Prefetching.Line`): `Sve.Prefetch8Bit` with a one-element predicate
+  (`CreateTrueMaskByte(VectorCount1)`) where `Sve.IsSupported` (Graviton 3/4, Azure Cobalt 100, Neoverse V1/N2/V2;
+  GitHub's ubuntu-24.04-arm runners). The API is `[Experimental("SYSLIB5003")]` in .NET 10: one call, behind the
+  JIT-time `IsSupported`, the diagnostic suppressed there only; x86 keeps `PREFETCHT0`, other ARM64 (Apple silicon:
+  SVE in streaming mode only) issues nothing and never reads the cache size. Linux ARM64 reads sysfs (the largest
+  `index*/size`; glibc's sysconf has no L3 there). Tests: the CI arm64 job (PrefetchTests on SVE
+  hardware, its `ThePrefetchIsTheMachines` line). NOT YET PROVEN: under qemu here the SVE run (neoverse-n2) crashed
+  with SIGSEGV in the first PrefetchTests test, and the non-SVE runs could not finish (a stack overflow with SVE off on
+  n2, no libssl in the aarch64 sysroot on n1, which passed the first three tests), so the arm64 job is the first real
+  test of the PRFB path; record its result before this ships. Considered: a native PRFM stub (a binary per RID, a call
+  per prefetch), waiting for a PRFM intrinsic (none in .NET 10).
+- **ARM64 without SVE: loads issued ahead, not emitted** (LookupChaseLoadAheadBenchmark, Locality/Chase.cs
+  `LoadAhead`): the record of row i + k loaded (Has) into a ring, the row of row i + k / 2 touched through it, both
+  consumed by row i. On this x86 machine 1.70-1.75x slower than the plain rows at 16M (1600-1643 ms against 930-984;
+  prefetching 667-777) and 4-5x at 1k: a load that misses holds retirement, and the public API makes each stage a
+  whole lookup. The generator emits it only if the owner's M4 shows it faster past the cache and not slower in it.
+- **macOS**: Apple silicon has no prefetch .NET issues, so its gates are off without a read; were one gated there,
+  `hw.perflevel0.l2cachesize` (the performance cluster's L2, 16 MB on an M4) understates the cache the cores share
+  (the system level cache is not exposed): a gate would open early, never late. Intel Macs read `hw.l3cachesize`.
+- **The core's id lists are prefetched past the cache**: `World.DestroyEntities(ReadOnlySpan<Entity>)` prefetches the
+  record 16 ids ahead when the world's records and a row line each are past the last-level cache
+  (`LookupLanes.PrefetchesIds`). DestroyAndCreate (a sixteenth of the world) at 16M 211 / 157 and 208 / 162 ms (1.34x,
+  1.28x), at 1M (gate off) 3.80 / 3.86 and 3.95 / 4.04 ms; forced on at 1M 3.02 against 3.96 (`owner-review.md`, a gate
+  on the L2).
+- **Fix: a lambda pass finding a non-unique indexed component by key threw** ("This Lookup<T> holds no index"): the
+  generator looked for the key calls in a method's body only, so a lambda's `Lookup<T>` got no index built before
+  the pass. `Symbols.LookupKey` now reads the lambda's body too (LambdaPassTests.ALambdaFindsByAKeyOfANonUniqueIndex).
+
+Docs to-dos (docs pass):
+- guide page of `Lookup<T>` and the index page: "past the last-level cache, a pass prefetches the targets of the
+  rows ahead: ids in an `in` component or an `in` buffer's elements, keys of an `in` component (TryFind / Find /
+  Count), parallel or not, fused or not, lambda passes too; nothing to write; x86 and ARM64 with SVE"; replace the
+  feat-prefetch-gate to-do's list of forms that do not qualify (keyed lookups, parallel row methods, lambda passes,
+  fused walks all qualify now; methods with `Maybe` / `Mut` in parallel and vector loops' probes do not); en + zh.
+- relations page: links' targets read in a pass are prefetched past the cache (the buffer form); en + zh.
+- parallel page and fusion page: one sentence each (the parallel twin keeps the chunks; a fused walk's twin);
+  en + zh.
+- introspection page: DescribeSchedule's "lookups prefetched past the last-level cache" now appears on probing,
+  buffer-chasing, parallel and fused methods; en + zh.
+- performance / why-fast pages: the 16M numbers through bench.json (`tools/bench.sh ProbePrefetchBenchmark
+  ChaseFormsPrefetchBenchmark LookupChaseGateBenchmark --sync`), a BenchTable of Auto / Off / On per form.
+- ARM64 notes (performance, faq): SVE machines prefetch, Apple silicon does not (loads ahead pending the M4).
+- public skill: "keys and ids a pass reads other entities by belong in `in` components or `in` buffers: they are
+  prefetched when the world outgrows the cache".
+- changelog + README "What's new": Performance (prefetched probes, buffer chases, parallel, fused, lambda; SVE);
+  Fixes (the lambda key lookup).
+- `api.mdx`: nothing; the new members are hidden for generated code (`LookupExtensions.Probes`,
+  `LookupExtensions.PrefetchKey`: names for the owner to approve).

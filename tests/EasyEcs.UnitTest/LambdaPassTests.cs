@@ -76,6 +76,19 @@ public class LambdaPassTests
             Assert.That(item.Tally.Value, Is.EqualTo(item.Entity.Has<Dead>() ? -1 : 7));
     }
 
+    // A lambda finding a component of a non-unique index by key gets the index built before the pass, as a method does
+    // (regression: its Lookup held none, and TryFind threw).
+    [Test]
+    public void ALambdaFindsByAKeyOfANonUniqueIndex()
+    {
+        using var world = new World();
+        world.CreateEntity(new Callsign("bravo"));
+        world.CreateEntity(new Callsign("bravo"));
+        var seeker = world.CreateEntity(new Tally(0));
+        world.ForEach(static (ref Tally t, Lookup<Callsign> signs) => t.Value = signs.Count("bravo") * 10 + (signs.TryFind("alpha", out _) ? 1 : 0));
+        Assert.That(seeker.Get<Tally>().Value, Is.EqualTo(20));
+    }
+
     [Test]
     public void AReductionLandsInItsSingleton()
     {

@@ -80,7 +80,7 @@ public readonly ref struct Lookup<T> where T : struct, IComponent
 
     /// <summary>
     /// Whether a pass reading <typeparamref name="T"/> of other entities of <paramref name="world"/> prefetches its
-    /// chases (<see cref="LookupLanes.Prefetches"/>: x86, and the records and rows past the last-level cache). Generated
+    /// chases (<see cref="LookupLanes.Prefetches"/>: a prefetch on this machine, and the records and rows past the last-level cache). Generated
     /// code reads it once per pass.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
@@ -205,6 +205,26 @@ public static class LookupExtensions
     private static ValueIndex<T, TKey> Unprepared<T, TKey>() where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey> =>
         throw new InvalidOperationException($"This Lookup<{typeof(T).Name}> holds no index by {typeof(TKey).Name}: a [ForEach] " +
             "method gets one when it calls TryFind, Find or Count on the parameter itself (the index is then built before the pass)");
+
+    /// <summary>
+    /// Whether a pass of <paramref name="world"/> finding <typeparamref name="T"/> by key prefetches its probes: a
+    /// prefetch exists on this machine and the index's memory a probe lands on is past the last-level cache. Creates and
+    /// builds the index as <see cref="Prepared{T, TKey}"/> does. Generated code reads it once per pass, before the pass.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static bool Probes<T, TKey>(World world) where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey> =>
+        LookupLanes.CanPrefetch && Unsafe.As<ValueIndex<T, TKey>>(Prepared<T, TKey>(world)).Probes();
+
+    /// <summary>
+    /// Stage <paramref name="stage"/> (1 to 3) of a probe of <paramref name="key"/> in <paramref name="index"/> (what
+    /// <see cref="Prepared{T, TKey}"/> returned): the lines a later row's <c>TryFind</c> / <c>Find</c> / <c>Count</c>
+    /// will read, one dependent line per stage, so a pass past the cache keeps several probes' misses in flight. Never
+    /// faults or changes anything. Generated code calls this, a stage per row, only in a pass <see cref="Probes{T, TKey}"/>
+    /// let prefetch.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void PrefetchKey<T, TKey>(object index, TKey key, int stage) where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey> =>
+        Unsafe.As<ValueIndex<T, TKey>>(index).Prefetch(key, stage); // the job's index field, set by Prepared: always this type
 
     /// <summary>
     /// <paramref name="world"/>'s index of <typeparamref name="T"/>, created and built: what a <see cref="Lookup{T}"/>

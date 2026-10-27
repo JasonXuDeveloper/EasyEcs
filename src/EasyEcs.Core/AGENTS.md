@@ -49,12 +49,20 @@ LookupLanes.cs               the reads of other entities in generated vector loo
                              lanes' records (AVX2) into a presence mask and the one table their entities live in (false:
                              the vector's rows run the method), Gather the fields from that table's column;
                              PrefetchRecord / PrefetchRow (Lookup<T>.Prefetch / PrefetchRow: the two stages of a
-                             prefetched chase, x86 only; borrowed-ideas.md item 1), PrefetchAhead (a vector loop's
+                             prefetched chase; borrowed-ideas.md item 1), PrefetchAhead (a vector loop's
                              prefetches of the rows ahead), Prefetches (the gate a generated pass or vector loop reads once per pass:
-                             the records and rows past the last-level cache)
+                             the records and rows past the last-level cache), PrefetchesIds (the gate of the core's
+                             loops over lists of ids: DestroyEntities)
+Prefetching.cs               the one software prefetch (Line): x86 PREFETCHT0, ARM64 with SVE a PRFB of one element
+                             (the experimental SVE API, SYSLIB5003 suppressed at that call), nothing elsewhere (IsSupported)
+IndexPrefetch.cs             ValueIndex's probe prefetches (generated [ForEach] jobs finding by a key a row holds:
+                             LookupExtensions.Probes / PrefetchKey): the stages by representation (a direct slot; a
+                             relation's slot, then its ids; a hashed key's bucket, entry, then its ids), the gate (the
+                             index's memory past the last-level cache); HashSlots: a Dictionary's buckets and entries
+                             (UnsafeAccessor, reflection once per resize)
 LastLevelCache.cs            the last-level cache size, read once per process from the OS as the GC does (Windows
-                             GetLogicalProcessorInformationEx, Linux sysfs then sysconf, macOS sysctl), x86 only; 0 is
-                             unknown, which never prefetches
+                             GetLogicalProcessorInformationEx, Linux sysfs then sysconf, macOS sysctl), where a
+                             prefetch exists (Prefetching.IsSupported); 0 is unknown, which never prefetches
 Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
                              Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbors found by generated code,
                              TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,

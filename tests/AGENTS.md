@@ -17,7 +17,7 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                Changed (and Mut, ChangedAny), Removed (and the destroy log), Instantiate, DynamicBuffer,
                                Index (and unique keys), Tile, OrderedIndex, Order (ordered tables: [OrderBy] and OrderRows,
                                the sort, blocks, pairs, churn, saves, parallel passes), Relation, Hierarchy, TargetPolicy, Group, Cleanup,
-                               Disable, Bulk, Move, StructuralLoop (structural changes in vector loops against their scalar twins), KernelLookup (vector loops reading other entities through Lookup<T> against their twins row by row), HelperLoop (methods calling their own helpers, inlined into vector loops, against their twins row by row), Prefetch (chases prefetched past the last-level cache: bit for bit with the gate on and off, 0 B, the gate, the generated text, the OS readers), Part (generated parts, EECS062-069), Snapshot, Serialization (and restart saves), Unload, Introspection
+                               Disable, Bulk, Move, StructuralLoop (structural changes in vector loops against their scalar twins), KernelLookup (vector loops reading other entities through Lookup<T> against their twins row by row), HelperLoop (methods calling their own helpers, inlined into vector loops, against their twins row by row), Prefetch (chases prefetched past the last-level cache: entity chases, index probes of every representation, buffer chases, parallel twins, fused walks and pairs, lambda passes, bit for bit with the gate on and off, 0 B, the gates, the generated text, the OS readers), Part (generated parts, EECS062-069), Snapshot, Serialization (and restart saves), Unload, Introspection
                                (and Trim, DescribeSchedule), Generic, Allocation (0 B budget), Emit (and EECS092), Record ([ForEachRecord] passes over Emitted<T> against the hand-written walk, EECS105-106), HotCold (EECS091), LambdaPass (lambda passes, EECS095-097), View ([View] parameters, Mut fields, AsX, EECS053 through views, EECS098-101), PrefabDeclaration ([Prefab], EECS102), ForParallel, EntityRandom,
                                Lanes (Lanes.Compact and Lanes.RowNumbers against a plain walk, every mask shape and length),
                                LaneMath (the math a vector loop lowers: integer division, a float divided by a power of two, Pow, the throwing
@@ -33,6 +33,8 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                prototypes of docs/plans/locality.md and borrowed-ideas.md, benchmarks/EasyEcs.Benchmark/Locality
                                linked: each against its plain form, 0 B per tick); Fixtures.cs holds
                                the shared test components
-tests/EasyEcs.Aot/             the battle server (BattleServer.cs), an ordered table and the generated forms of an [Accumulate] total, a [ForEachRecord] pass and enum / bool lanes published with Native AOT, warnings as errors, and
+tests/EasyEcs.Aot/             the battle server (BattleServer.cs), an ordered table, the prefetching twins (probes, buffer
+                               chases, a parallel probe; the gate forced on against off) and the generated forms of an
+                               [Accumulate] total, a [ForEachRecord] pass and enum / bool lanes published with Native AOT, warnings as errors, and
                                run by CI: no AOT warning and the native binary passes its checks
 ```

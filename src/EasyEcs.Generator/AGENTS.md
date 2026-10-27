@@ -18,7 +18,7 @@ ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove,
 SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                              the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] /
                              [Removed<T>] -> Since(LastRunTick + 1) and a read of T; Mut<T> -> a write stamped per
-                             write; Slices -> the slice of the run; ChunkRows -> the chunkRows argument; Lookup reads at an id of an in component (Chases), no vector loop, one thread -> a twin job (Job{i}Chases) over runs of rows prefetching the records 2k and the rows k ahead, which the pass runs past the last-level cache (EmitChases, EmitPass); [Consume] -> DestroyAll of
+                             write; Slices -> the slice of the run; ChunkRows -> the chunkRows argument; Lookup reads at an id of an in component, key probes (TryFind / Find / Count at an in component's key) and reads at the ids of an in buffer's elements (Chases), no vector loop -> a twin job (Job{i}Chases) over runs of rows prefetching each chase's stages k rows apart (records 2k and rows k ahead; probes by the index's representation), which the pass runs past the last-level cache (EmitChases, EmitPass; parallel: the twin is a batch job per chunk, ForEachBatchParallel); [Consume] -> DestroyAll of
                              the filter after a pass without structural changes, a destroy per row otherwise;
                              [ForEntity] -> the IForEachEntity job and an entry point Owner.Method(entity, values)
                              over entity.Run; [ForEachRecord] -> an IForEachRecord<T> job run by
@@ -30,7 +30,8 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              SystemGenerator.Fusion.cs: pass fusion, consecutive [ForEach] methods of a system as one
                              walk (one fused job per group: per row, per block of FusedBlock rows, per word of a
                              masked walk) and pairs of systems declared or ordered one after the other as one job
-                             (__A__B_Fusion, run by the set's RunFused switch when both are adjacent, enabled and due);
+                             (__A__B_Fusion, run by the set's RunFused switch when both are adjacent, enabled and due); a walk with a chasing
+                             method gets a twin walk (..._FusedNChases) of its methods' twins, picked past the cache;
                              SystemGenerator.Kernels.cs: a system method's vector loop in a stage of its own that only
                              implementation output reads (SystemLoops, put back into the system's model by SystemCode),
                              so an IDE typing never binds the bodies of the method and its helpers;
@@ -173,8 +174,10 @@ Threads.cs                   EECS014's check: does a structural call in a delega
                              the writes of code on several threads that reach shared memory (EECS060, EECS061)
 BodyFacts.cs                 the analyzer's per-compilation cache of what a [ForEach] method's body allows (IsStable,
                              OnlyIdentifies, ParallelProblem), read by several rules per method
-Chases.cs                    a [ForEach] method's reads of other entities at an id of a component it takes by in
-                             (lookup[x.F], Read, Has), read once for the row form's prefetches (SystemGenerator.EmitChases)
+Chases.cs                    a [ForEach] method's or lambda pass's chases, read once for the row form's prefetches
+                             (SystemGenerator.EmitChases): reads of other entities at an id of an in component
+                             (lookup[x.F], Read, Has), key probes (TryFind / Find / Count) and reads at the ids of an in
+                             buffer's elements (foreach, the indexer), with the stages each one prefetches
 Symbols.cs                   symbol checks shared by generator and analyzer
 Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
 EquatableArray.cs            array with value equality (generator models cache between edits)

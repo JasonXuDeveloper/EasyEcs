@@ -241,7 +241,7 @@ access.Write<DynamicBuffer<NextTemperature>>();
 
 ### 高瓦片：多层、`Height` 和 `Pad(from, to)` [#layers]
 
-多于一层（`Height` 大于 1）的瓦片是一箱格子：体素世界的一个区块，3D 场的一个立方体。`Faces` 说明哪些面有邻居：立方体网格用
+多于一层（`Height` 大于 1）的瓦片是一箱格子：体素世界的一片地形，3D 场的一个立方体。`Faces` 说明哪些面有邻居：立方体网格用
 `TileFaces.All`，从世界底部一直到顶部的柱子用默认的 `Sides`。`Pad()` 加载每一层，上下各加 `Halo` 层；游标用 `dy` 采样上一层或下一层：
 
 ```csharp
@@ -298,7 +298,7 @@ public ref struct SpreadGasSystem
 }
 ```
 
-- **只加载一部分层。** `tile.Pad(from, to)` 只加载第 `from` 到 `to` 层（连同它们的光环层），适合知道活在哪里的模板：区块里水到得了的层、
+- **只加载一部分层。** `tile.Pad(from, to)` 只加载第 `from` 到 `to` 层（连同它们的光环层），适合知道活在哪里的模板：地形里水到得了的层、
   波前经过的那一段。`Rows` 只遍历这些层，`row.Y` / `row.Z` 是行的位置；`row.Index` 是它在任何同布局缓冲里的第一个格子。
 - **自定义填充值。** `TileBoundary.Fill` 下，`Pad(from, to, fill)` 设置没有邻居时光环里的值：地图外的温度、洞穴四周的岩石。
 - **只采样的字段。** `Pad(from, to, fill, mask: false)` 不再逐格检查活跃行。方法遍历第一个字段的行、同时采样第二个字段时用它：
@@ -419,7 +419,7 @@ public ref struct WakeSystem
 
 ### 一次数组读取找到邻居：直接映射的键 [#direct-index]
 
-生成器在键的索引里找瓦片的邻居，每个一次哈希探测（每块瓦片每遍 4 到 26 个）。键能映射到有界的槽位范围时（固定地图上的板、玩家周围加载的区块，
+生成器在键的索引里找瓦片的邻居，每个一次哈希探测（每块瓦片每遍 4 到 26 个）。键能映射到有界的槽位范围时（固定地图上的板、玩家周围加载的地形，
 彼此不会相隔 64），瓦片再实现 [`IDirectIndexed<TKey>`](/zh/docs/guide/indexes-and-relations#direct-index) 并用 `[UniqueKey]`，
 每次查找就是一次数组读取：
 
@@ -457,7 +457,7 @@ public partial record struct MapPlate([UniqueKey] PlatePos Pos)
   `Tile`（`Tile<Fluid, Chunk> water, Tile<Block, Chunk> blocks`）：每个字段各自填充，用同样的偏移采样。同一格子类型和网格的两个瓦片会共用线程的纹理
   （[EECS073](/zh/docs/guide/analyzer#eecs073)）。
 
-{/* TODO(water overlap): MPI 式的内部/外圈重叠（区块内部先着色，外圈等光环）以及只交换变化过的边的光环交换。各在这里写一条，
+{/* TODO(water overlap): MPI 式的内部/外圈重叠（地形内部先着色，外圈等光环）以及只交换变化过的边的光环交换。各在这里写一条，
 链接 samples/voxel-server 的小节。 */}
 
 ### 来自 CUDA 和 MPI 的名字 [#names]
@@ -735,6 +735,6 @@ tick 3  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
     找到瓦片用的键，以及直接映射的键。
   </Card>
   <Card title="VoxelServer" href="/zh/docs/samples/voxel-server">
-    水：16 x 16 x 32 方块的区块作为瓦片，一个着色器、一张模板掩码和休眠的区块。
+    水：16 x 16 x 32 方块的地形作为瓦片，一个着色器、一张模板掩码和休眠的地形。
   </Card>
 </Cards>

@@ -171,7 +171,7 @@ public ref struct RegenerateAll
 并行系统和并行方法可以叠加：在并行阶段里，如果调度器正忙着跑另一个系统的方法，这个并行方法就在自己的线程上运行，不会干等。
 
 并行方法可以通过 `ref` 或 [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 参数写被追踪组件：每块只给自己的行
-打 tick，而且默认情况下这类方法按 4,096 行的倍数切块（每块至少 4,096 行），正好对齐共用一份变更 tick 摘要的区块，不会有
+打 tick，而且默认情况下这类方法按 4,096 行的倍数切块（每块至少 4,096 行），正好对齐共用一份变更 tick 摘要的区段，不会有
 两个线程更新同一份摘要。在块里调 `Mut<T>.Write()` 和 `SetIfChanged`，和用 `ref` 一样安全。这样一来，不超过 4,096 行的表只有一块。
 
 #### 块大小：行少而重时用 `ChunkRows` [#chunk-rows]
@@ -184,7 +184,7 @@ public ref struct RegenerateAll
 `ChunkRows = n` 就是 `schedule(dynamic, n)` 里的 `n`：一个线程每次领多少行。
 
 <Callout type="idea" title="适合">
-  只有几百到几千行、每行几微秒的并行方法：地形区块、寻路、人群格子、模拟岛。
+  只有几百到几千行、每行几微秒的并行方法：地形、寻路、人群格子、模拟岛。
 </Callout>
 
 <Callout type="warn" title="不适合">
@@ -247,7 +247,7 @@ public ref struct CrowdPressure
   （[查询](/zh/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel)）。
 
 默认为什么仍按行数决定、被切开的块怎么保持变更 tick 准确、还考虑过什么（guided 调度、每线程一份摘要）：见
-[D67](/zh/docs/decisions#d67-chunk-rows)。[VoxelServer](/zh/docs/samples/voxel-server) 的水流就用 `ChunkRows = 64` 跑那几百个有水流动的区块。
+[D67](/zh/docs/decisions#d67-chunk-rows)。[VoxelServer](/zh/docs/samples/voxel-server) 的水流就用 `ChunkRows = 64` 跑那几百个有水流动的地形。
 
 开启 `WorldOptions.MeasureSystems` 后，`system.Stats` 会把帮忙的线程也算进去：`LastAllocated` 和 `TotalAllocated` 是
 运行这个系统的线程，加上跑过它并行方法分块的每个线程上分配的字节数之和；时间是整次运行的耗时。开启 `ParallelSystems`
@@ -678,7 +678,7 @@ world.AddSystem<TickRandomSystem>();
 
 | 什么时候 | 同步 |
 | --- | --- |
-| 每行 | 没有。唯一的例外是设了 [`ChunkRows`](#chunk-rows)、又写被追踪组件的方法：把一个 4,096 行区块拆开的几块用原子 OR 置它的变更 tick 摘要，每写 64 行一次（[D67](/zh/docs/decisions#d67-chunk-rows)）。 |
+| 每行 | 没有。唯一的例外是设了 [`ChunkRows`](#chunk-rows)、又写被追踪组件的方法：把一个 4,096 行区段拆开的几块用原子 OR 置它的变更 tick 摘要，每写 64 行一次（[D67](/zh/docs/decisions#d67-chunk-rows)）。 |
 | 每块 | 在这次运行的游标上做一次比较并交换来领取它（游标带着这次运行的纪元，所以晚启动的助手线程永远领不到下一次运行的块）；做完时，对剩余块数做一次 `Interlocked.Decrement`，对用时做一次 `Interlocked.Add`。 |
 | 每次运行 | 游标上两次 `Interlocked.Exchange`（打开和关闭），每唤醒一个助手线程再加一次比较并交换和一个排队的线程池工作项。 |
 | 运行结束 | 调用线程自旋，用 `Volatile.Read` 读剩余块数，直到读到 0。每块 `Decrement` 的完整内存屏障让它的写入（它的行、它的 job 副本和部分结果）排在调用线程的合并和遍历之后的代码之前。 |
