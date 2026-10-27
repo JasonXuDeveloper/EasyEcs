@@ -33,6 +33,8 @@
         <ProjectReference Include="..\EasyEcs.Aot.Library\EasyEcs.Aot.Library.csproj"/>
         <!-- the README's battle server, compiled unchanged (BattleServerTests) -->
         <Compile Include="..\..\benchmarks\EasyEcs.Benchmark\BattleServer.cs" Link="BattleServer.cs"/>
+        <!-- the VoxelServer sample's world, its zombies and their scent (VoxelServerTests) -->
+        <ProjectReference Include="..\..\samples\VoxelServer\VoxelServer.csproj"/>
         <!-- the phase 0 prototypes of docs/plans/locality.md, checked against their plain forms (LocalityTests) -->
         <Compile Include="..\..\benchmarks\EasyEcs.Benchmark\Locality\*.cs" LinkBase="Locality"/>
     </ItemGroup>
