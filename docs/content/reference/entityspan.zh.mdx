@@ -14,13 +14,13 @@ public readonly ref struct EntitySpan
 
 ## 属性 [#properties]
 
-### `Blocks` [#blocks]
+### `Clusters` [#clusters]
 
 ```csharp
-public RowBlocks Blocks { get; }
+public RowClusters Clusters { get; }
 ```
 
-这段行所在的表有序时（推断出的顺序或 [[OrderBy]](/zh/docs/reference/orderbyattribute)）是它的块，否则没有块（[`RowBlocks.Count`](/zh/docs/reference/rowblocks#count) 为 0）：批处理方法通过包围盒找到自己这些行附近的行。O(1)。
+这段行所在的表有序时（推断出的顺序或 [[OrderBy]](/zh/docs/reference/orderbyattribute)）是它的簇，否则没有簇（[`RowClusters.Count`](/zh/docs/reference/rowclusters#count) 为 0）：批处理方法通过包围盒找到自己这些行附近的行。O(1)。
 
 ### `FirstRow` [#firstrow]
 
@@ -28,7 +28,7 @@ public RowBlocks Blocks { get; }
 public int FirstRow { get; }
 ```
 
-这段行的第 0 个元素在表里是哪一行：第 `i` 个元素是 [`EntitySpan.Blocks`](/zh/docs/reference/entityspan#blocks) 的第 `FirstRow + i` 行。O(1)。
+这段行的第 0 个元素在表里是哪一行：第 `i` 个元素是 [`EntitySpan.Clusters`](/zh/docs/reference/entityspan#clusters) 的第 `FirstRow + i` 行。O(1)。
 
 ### `Ids` [#ids]
 

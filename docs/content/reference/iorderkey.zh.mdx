@@ -10,7 +10,7 @@ description: "一个组件，含它的表让行按 IOrderKey.OrderKey 排序，�
 public interface IOrderKey<TKey> : IComponent where TKey : unmanaged
 ```
 
-一个组件，含它的表让行按 [`IOrderKey.OrderKey`](/zh/docs/reference/iorderkey#orderkey) 排序，每簇（8 行，ARM64 上 4 行）一个包围盒，罩住 [`IOrderKey.BoxPoint`](/zh/docs/reference/iorderkey#boxpoint)（[`RowBlocks`](/zh/docs/reference/rowblocks)）。在键成员上写 [[OrderBy]](/zh/docs/reference/orderbyattribute) 来声明，生成器会显式写出这两个成员，并为每个 World 注册这个顺序：只实现接口不会让任何表排序。
+一个组件，含它的表让行按 [`IOrderKey.OrderKey`](/zh/docs/reference/iorderkey#orderkey) 排序，每簇（8 行，ARM64 上 4 行）一个包围盒，罩住 [`IOrderKey.BoxPoint`](/zh/docs/reference/iorderkey#boxpoint)（[`RowClusters`](/zh/docs/reference/rowclusters)）。在键成员上写 [[OrderBy]](/zh/docs/reference/orderbyattribute) 来声明，生成器会显式写出这两个成员，并为每个 World 注册这个顺序：只实现接口不会让任何表排序。
 
 #### 类型参数 [#type-parameters]
 

@@ -63,7 +63,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `[GroupBy]`, `[WhenTargetDestroyed(policy)]`, `[NotSaved]` | attributes | Setup every world applies from its first table holding the type: its grouping, the policy of links to a destroyed target; `[NotSaved]`: no save writes the type, a load keeps the world's own singleton. |
 | `[OrderBy(box...)]`, `IOrderKey<TKey>` | attribute, interface | On a member of a partial component: every world keeps the tables holding it in the order of that key (`Interval`, `Margin`), overriding an order a pair method's setup requested; the generator writes the explicit `OrderKey` and `BoxPoint`. |
 | `[Neighbor]` | attribute | On a parameter of a `[ForEach]` method: a component of the other entity of a pair taken by `in`, or its `Entity`; the method runs for every pair within the cutoff its first test names (a pair method). |
-| `RowBlocks`, `BlockPair` | ref struct, record struct | One ordered table's rows in blocks of `Size` rows (8, or 4 on ARM64) with a box each (`world.Blocks<T>()`, `entities.Blocks`): `Count`, `SortedRows`, `Start`, `End`, `Min(axis)`, `Max(axis)`, `Read<T>()`, `Ids`, `Has(row)`, `Pairs(reach, into)`. |
+| `RowClusters`, `ClusterPair` | ref struct, record struct | One ordered table's rows in clusters of `Size` rows (8, or 4 on ARM64) with a box each (`world.Clusters<T>()`, `entities.Clusters`): `Count`, `SortedRows`, `Start`, `End`, `Min(axis)`, `Max(axis)`, `Read<T>()`, `Ids`, `Has(row)`, `Pairs(reach, into)`. |
 | `IRowOrder<T>`, `RowKeys` | interface, static class | For generated code: how an order reads a row (`Key`, `Point`, static), the Morton code of a point by a cell (`RowKeys.Morton`). |
 | `Scratch<T>` | ref struct | A `[ForEach]` parameter: working memory of the method on the running thread, kept between rows, passes and worlds: `Value`. |
 | `Emit<T>`, `Emitted<T>` | ref struct, struct | A `[ForEach]` parameter, taken by value, appending records (`Add`, `AddRange`) joined in chunk order into singleton `Emitted<T>` (`Items`, a `DynamicBuffer<T>`) when the pass ends. |
@@ -321,18 +321,18 @@ columns); `Load` O(rows). A taken key throws `InvalidOperationException` (a save
 ## Ordered tables [#ordered-tables]
 
 A table ordered by a component keeps its rows in key order (a Morton code of a position for a pair method's distance
-test, or the key `[OrderBy]` declares), re-sorted on a cadence, with a box per block of `Size` rows (8, or 4 on ARM64). N = rows of the table,
-C = its columns, K = the key's bytes that differ, B = blocks.
+test, or the key `[OrderBy]` declares), re-sorted on a cadence, with a box per cluster of `Size` rows (8, or 4 on ARM64). N = rows of the table,
+C = its columns, K = the key's bytes that differ, B = clusters.
 
 | API | Complexity | Notes |
 | --- | --- | --- |
 | `world.OrderRows<T, TOrder>(axes, cell, interval, margin)` | O(tables), once | for generated setup: orders the tables holding `T` now and later by `TOrder`'s key, the first sort at the next update, then every `interval` updates; the first request for a component stands, `[OrderBy]` overrides it; throws during a pass |
 | sort (an update on the cadence, `world.SortRows<T>()`) | O(N × (K + C)) when rows move, O(N) when they are in order already | an LSD radix sort of (key, row) skipping bytes every row shares, one permutation of every column, presence bit, change tick and slot under the structural gate (refs and handles' rows end, as at any structural change); rows lacking `T` sort last; boxes drawn again; 0 B in steady state (pooled buffers); `SortRows` throws during a pass |
 | a table no order covers | 0 | no sort, no box, one null check where rows move |
-| `world.Blocks<T>()` | O(1), O(tables) to walk | the `RowBlocks` of each table ordered by `T`; none for an unordered component |
-| `blocks.Min(axis)` / `Max(axis)` / `Start(b)` / `End(b)` / `Read<T>()` / `Ids` / `Has(row)` | O(1) | the box sides of every block, a block's rows (`[b * Size, min((b + 1) * Size, SortedRows))`), the table's columns read-only; rows past `SortedRows` joined since the sort and are in no block; a row moved into a block widened its box |
-| `blocks.Pairs(reach, into)` / `Pairs(other, reach, into)` | O(B log B + pairs) | the block pairs whose boxes come within `reach` on every axis (each block with itself, the others once), as far as `into` holds; returns how many there are; 0 B in steady state |
-| `entities.Blocks`, `entities.FirstRow` | O(1) | the blocks of a batch method's table, and the row its run starts at |
+| `world.Clusters<T>()` | O(1), O(tables) to walk | the `RowClusters` of each table ordered by `T`; none for an unordered component |
+| `clusters.Min(axis)` / `Max(axis)` / `Start(b)` / `End(b)` / `Read<T>()` / `Ids` / `Has(row)` | O(1) | the box sides of every cluster, a cluster's rows (`[b * Size, min((b + 1) * Size, SortedRows))`), the table's columns read-only; rows past `SortedRows` joined since the sort and are in no cluster; a row moved into a cluster widened its box |
+| `clusters.Pairs(cutoff, into)` / `Pairs(other, cutoff, into)` | O(B log B + pairs) | the cluster pairs whose boxes come within `cutoff` on every axis (each cluster with itself, the others once), as far as `into` holds; returns how many there are; 0 B in steady state |
+| `entities.Clusters`, `entities.FirstRow` | O(1) | the clusters of a batch method's table, and the row its run starts at |
 
 ## Snapshots, saves and moves [#saves]
 
