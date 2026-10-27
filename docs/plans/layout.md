@@ -63,7 +63,7 @@ Placement calls a reader could argue (each could go either way; the table picks 
 `World.Groups.cs` (Storage: groups split tables), `ForEachAttributes.cs` (Systems: the method attributes),
 `EntitySpan.cs` (Queries: the run a batch job gets), `Declarations.cs` (Components: the attributes whose code the
 generators write), `TypeRegistry.cs` / `ComponentSet.cs` (Saves: they exist for saves), `Prefab.cs` (Entities: a
-recipe of an entity), `LastLevelCache.cs` (Lookups: the gate of the prefetched chases).
+recipe of an entity), `CacheSizes.cs` (Lookups: the caches the prefetch gates compare with, a gate per form).
 
 ### 2.2 `src/EasyEcs.Generator` (47 files in 6 folders)
 
@@ -117,7 +117,7 @@ code). Benchmark class names do not change, so `docs/src/data/bench.json` keys, 
 | `.claude/skills/audit/SKILL.md:16-20` | scopes by file name (`EasyEcsAnalyzer*.cs`, `Code.cs`, ...) | add the folders: `audit-core` `src/EasyEcs.Core/**`; `audit-generator` `Generator/{Arity,Declarations,Systems,Shared}`; `audit-vector-loops` `Generator/Kernel/`, `Core/VectorLoops/`, `Core/Lookups/`; `audit-analyzer` `Generator/Analyzer/` |
 | `.claude/skills/audit-analyzer/SKILL.md:10` | "Files in `src/EasyEcs.Generator`: `EasyEcsAnalyzer.cs` ..." | "Files in `src/EasyEcs.Generator/Analyzer`: ..." |
 | `.claude/skills/audit-generator/SKILL.md:10` | "Files: `src/EasyEcs.Generator` ... `ArityGenerator`, ..." | name the folders |
-| `docs/plans/borrowed-ideas.md:133, 149` | `src/EasyEcs.Core/LastLevelCache.cs`, `src/EasyEcs.Generator/Chases.cs` | `.../Lookups/LastLevelCache.cs`, `.../Systems/Chases.cs` (internal plans, "nothing stale") |
+| `docs/plans/borrowed-ideas.md:133, 149` | `src/EasyEcs.Core/CacheSizes.cs`, `src/EasyEcs.Generator/Chases.cs` | `.../Lookups/CacheSizes.cs`, `.../Systems/Chases.cs` (internal plans, "nothing stale") |
 | `docs/plans/inner-loops.md:366, 489-493` | `src/EasyEcs.Generator/HandSimd.cs`, `Kernel.cs`, `SystemGenerator.cs`, `LambdaPass.cs`, `SystemGenerator.Lambdas.cs`, `src/EasyEcs.Core/Tile.cs`, `World.For.cs`, `EasyEcsAnalyzer.Forms.cs` | the new paths |
 | `docs/plans/docs-todos.md:67-73` | the old sketch, `tools/filemaps.sh` (never existed: it is `tools/agents.sh`) | replace by a pointer to this plan once done, then drop |
 
@@ -282,7 +282,7 @@ none extra). Lines are today's line counts. Files marked "stays" keep their path
 | `UniqueIndex.cs` | `Indexes/UniqueIndex.cs` | 118 |
 | `ValueIndex.cs` | `Indexes/ValueIndex.cs` | 957 |
 | `World.Indexes.cs` | `Indexes/World.Indexes.cs` | 352 |
-| `LastLevelCache.cs` | `Lookups/LastLevelCache.cs` | 141 |
+| `CacheSizes.cs` | `Lookups/CacheSizes.cs` | 182 |
 | `Lookup.cs` | `Lookups/Lookup.cs` | 221 |
 | `LookupLanes.cs` | `Lookups/LookupLanes.cs` | 224 |
 | `RowBlocks.cs` | `OrderedTables/RowBlocks.cs` | 261 |

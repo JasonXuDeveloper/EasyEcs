@@ -754,10 +754,10 @@ Decision record drafts (en + zh, the next free D numbers at merge: D139 onward i
   `hw.perflevel0.l2cachesize` (the performance cluster's L2, 16 MB on an M4) understates the cache the cores share
   (the system level cache is not exposed): a gate would open early, never late. Intel Macs read `hw.l3cachesize`.
 - **The core's id lists are prefetched past the cache**: `World.DestroyEntities(ReadOnlySpan<Entity>)` prefetches the
-  record 16 ids ahead when the world's records and a row line each are past the last-level cache
+  record 16 ids ahead when the world's records and a row line each are past the cache (the L2 since a gate per form)
   (`LookupLanes.PrefetchesIds`). DestroyAndCreate (a sixteenth of the world) at 16M 211 / 157 and 208 / 162 ms (1.34x,
-  1.28x), at 1M (gate off) 3.80 / 3.86 and 3.95 / 4.04 ms; forced on at 1M 3.02 against 3.96 (`owner-review.md`, a gate
-  on the L2).
+  1.28x), at 1M (gate off) 3.80 / 3.86 and 3.95 / 4.04 ms; forced on at 1M 3.02 against 3.96: past the L2 since
+  ("feat-prefetch-gate: a gate per form").
 - **Fix: a lambda pass finding a non-unique indexed component by key threw** ("This Lookup<T> holds no index"): the
   generator looked for the key calls in a method's body only, so a lambda's `Lookup<T>` got no index built before
   the pass. `Symbols.LookupKey` now reads the lambda's body too (LambdaPassTests.ALambdaFindsByAKeyOfANonUniqueIndex).
@@ -782,6 +782,32 @@ Docs to-dos (docs pass):
   Fixes (the lambda key lookup).
 - `api.mdx`: nothing; the new members are hidden for generated code (`LookupExtensions.Probes`,
   `LookupExtensions.PrefetchKey`: names for the owner to approve).
+
+## feat-prefetch-gate: a gate per form
+
+Decision record draft (decisions.mdx + .zh.mdx, next to the prefetch gate's record): **A prefetch gate per form.**
+Decision: each prefetching form reads the cache it pays past. The row form's chases of other entities (one thread,
+parallel, fused walks, a buffer's elements, lambda passes) and `World.DestroyEntities`' id list prefetch once their
+memory leaves one core's L2; index probes (on one thread and in parallel) and the vector loops' chases only past the
+last-level cache. The L2 is read like the last-level cache (Linux sysfs level-2 index then sysconf, Windows
+`GetLogicalProcessorInformationEx` level 2, macOS `hw.perflevel0.l2cachesize` / `hw.l2cachesize`), only where a prefetch
+exists; an unknown L2 uses the last-level gate. Why: between the L2 and the LLC (262,144 and 1M entities on a 2 MiB L2
+/ 260 MiB L3 x86) the row chases run 1.20-1.36x faster, the fused walk 1.44-2.0x, DestroyEntities 1.22-1.35x, the
+buffer chase 1.04-1.26x; inside the L2 the gate keeps today's code (forced on costs 1.12-1.6x). Considered: one gate on
+the L2 for every form (probes 1.13-1.6x slower forced on at 262,144, the vector loop 1.04-2.1x); parallel probes on the
+L2 (the owner's first list: a wash at 262,144, 1.16x slower at 524,288, faster only at 1M: kept on the last level); a
+multiple of the L2 (no form needed one: each that pays, pays from the first size past it). Numbers:
+`borrowed-ideas.md` item 1, "A gate per form".
+
+Docs to-dos (docs pass, en + zh):
+- guide page of `Lookup<T>` (the prefetch section written for feat-prefetch-all): "past the L2 for chases of other
+  entities, past the last-level cache for keyed lookups and vector loops"; the "What it costs" line of each.
+- performance / why-fast: the per-form BenchTable gains the 262,144 size (`tools/bench.sh ProbePrefetchBenchmark
+  ChaseFormsPrefetchBenchmark IdListPrefetchBenchmark LookupChaseGateBenchmark --sync`; the classes' default sizes are
+  now 1k / 262,144 / 1M / 16M).
+- introspection page: DescribeSchedule's scalar line reads "lookups prefetched past the cache" (the form decides which).
+- faq (ARM64 / other machines): the gate reads the L2 too; unknown L2 = the last-level gate.
+- `api.mdx`: nothing (the new `Lookup<T>.PrefetchesPastL2` is hidden for generated code, a name for the owner to see).
 
 ## feat-generator-gaps (G0, G4, G5, G6; G7 not built)
 

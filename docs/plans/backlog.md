@@ -54,7 +54,7 @@ names the skill:
 
 - [x] **Prefetch with a cache-size gate + the 16-word locals bug** (branch `feat-prefetch-gate`, ready to merge; "Next"
       item 6): the 16-word row's `__Loop512` within 32 locals (or the reason, `Kernel.FitLocals`); lookup chases
-      prefetched past the last-level cache (`LastLevelCache`, the row form's twin job `Job{i}Chases`, the vector loop's
+      prefetched past the last-level cache (`CacheSizes`, the row form's twin job `Job{i}Chases`, the vector loop's
       `PrefetchAhead` behind `f{i}`): 16M rows 1.36-1.43x, gathers 1.27-1.34x, nothing slower in the cache
       (`borrowed-ideas.md` 5, item 1). Docs to-dos and the decision draft in `docs-todos.md`.
 
@@ -79,8 +79,9 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        re-measure, the ARM64 neighbor-list form by density, writes to j (Pickup), parallel pair passes, the EECS107 fix,
        nested-walk rewrites, Lookup gathers under Auto. L4 (examples) moved to the finish phase (docs-todos).
        Follow-up after L2 merges (owner, 2026-10-27: "cluster pairs + prefetch, faster?"): prefetch the j block of the
-       pair `k` pairs ahead (its rows' lines of every column the pair method reads) behind the same `LastLevelCache`
-       gate as item 6; i blocks are sequential and need none. Expected to pay only when the ordered table is past the
+       pair `k` pairs ahead (its rows' lines of every column the pair method reads) behind a `CacheSizes`
+       gate as item 6 (which one, L2 or last level, measured per form as item 6's gate per form was); i blocks are
+       sequential and need none. Expected to pay only when the ordered table is past the
        last-level cache (this machine's L3 is 260 MiB: PairsBenchmark at 4M-16M rows, plus a forced-on column just
        under the cache); ships only if faster there and never slower in the cache (`audit-perf`, two rounds, 0 B).
 2. [x] **ARM64 parity of the generated forms** (merged 186c84d): LD2-4 / ST2-4 for multi-field components, NEON TBL /
@@ -111,19 +112,24 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        to-dos in `docs-todos.md`, "feat-prefetch-all"). The owner's rule "a faster case ships, a slower one never":
        16M 1.28-1.77x across the forms (a shared key's Count 1.04-1.19x), in the cache today's code. A pass prefetches
        `k` rows ahead (record, then row; a probe's slot or bucket, then entry; k = 8 rows / 16 for vectors) only when
-       the memory it reads is past the last-level cache (`LastLevelCache`, read once per process as the GC reads it:
-       Windows `GetLogicalProcessorInformationEx(RelationCache)`, Linux the largest sysfs `index*/size` then
+       the memory it reads is past the last-level cache (`CacheSizes.LastLevel`; some forms past the L2 since, below;
+       read once per process as the GC reads it: Windows `GetLogicalProcessorInformationEx(RelationCache)`, Linux the largest sysfs `index*/size` then
        `sysconf(_SC_LEVEL3_CACHE_SIZE)`, macOS `hw.l3cachesize` else `hw.perflevel0.l2cachesize`; unknown means off).
        It reads and prefetches only where a prefetch exists (`Prefetching.IsSupported`: x86 SSE, ARM64 SVE).
        Left, the owner's: `LookupChaseGateBenchmark` and the prefetch classes on a 32 MiB-LLC x86 box; approve the hidden names `LookupExtensions.Probes`
        and `LookupExtensions.PrefetchKey`; a gate per form on the L2 (`owner-review.md`).
    The owner's answers (2026-10-27): the hidden names `LookupExtensions.Probes` / `PrefetchKey` stay; SVE's PRFB stays
    and the owner runs the CI workflow by hand on the work branch (its arm64 job is the proof; if it fails,
-   `Prefetching.IsSupported` keeps x86 only); **a gate per form now** (next code item, `audit-perf`): fused walks,
-   `DestroyEntities`' id list, parallel probes and buffer chases open past the L2 (forced on at 1M here: 18.1 -> 11.5,
-   3.96 -> 3.02, 5.54 -> 4.92, 41.6 -> 39.3 ms), plain probes keep the last-level gate (20.1 -> 23.0 ms forced on);
-   the L2 size read like the LLC (sysfs index2, `GetLogicalProcessorInformationEx`, `hw.perflevel0.l2cachesize`);
-   proven per form at the size between the L2 and the LLC, nothing slower in the L2.
+   `Prefetching.IsSupported` keeps x86 only).
+   - [x] **A gate per form** (branch `feat-prefetch-gate` at 850a6b1, worktree `/workspace/wt-gate`, ready to merge;
+     `borrowed-ideas.md` item 1, "A gate per form"; decision draft and docs to-dos in `docs-todos.md`,
+     "feat-prefetch-gate: a gate per form"): `CacheSizes` (was `LastLevelCache`) reads one core's L2 like the LLC
+     (sysfs level-2 index then sysconf, `GetLogicalProcessorInformationEx` level 2, `hw.perflevel0.l2cachesize` /
+     `hw.l2cachesize`; unknown: the LLC gate). Past the L2: the row form's chases (one thread, parallel, fused walks,
+     buffer elements, lambdas; `Lookup<T>.PrefetchesPastL2`) and `DestroyEntities`' id list: 1.08-2.0x at 262,144 and
+     1.2-1.57x at 1M, Auto equal to Off inside the L2. On the last level: probes (parallel ones too: the owner's list
+     had them on the L2, measured a wash or 1.16x slower at 262k-524k, reverted) and vector loops' chases. The owner's
+     machines: `EASYECS_BENCH_ENTITIES=<sizes between L2 and LLC>` over the prefetch classes.
    ARM64 without SVE (the M4; owner, 2026-10-26: "is there another instruction or the TLB instead?"): .NET 10 exposes
    no PRFM (only SVE's PRFB/PRFD, and the M4 has SVE in streaming mode only), so the candidate is a plain load issued
    ahead (`Locality/Chase.cs` `LoadAhead`: the record of row i + k loaded into a ring, the row touched from it k / 2

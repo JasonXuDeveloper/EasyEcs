@@ -130,10 +130,10 @@ on `LookupChaseBenchmark` (1k, 1M, 16M) on two machines.
 
 The owner's rule (a faster case ships, a slower one never) with a gate that keeps a world in the cache on today's code:
 
-- **The gate**: `LastLevelCache.Bytes` (src/EasyEcs.Core/LastLevelCache.cs), read once per process as the GC reads it for
+- **The gate**: `CacheSizes.LastLevel` (src/EasyEcs.Core/CacheSizes.cs; a gate per form since, below), read once per process as the GC reads it for
   its gen0 budget: Windows `GetLogicalProcessorInformationEx(RelationCache)` (the largest cache record), Linux the largest
   `/sys/devices/system/cpu/cpu0/cache/index*/size`, then `sysconf(_SC_LEVEL3_CACHE_SIZE)`, macOS `hw.l3cachesize`, else
-  `hw.perflevel0.l2cachesize`. Only where `Sse.IsSupported` (ARM64 and WebAssembly never read it); any failure or 0 is
+  `hw.perflevel0.l2cachesize`. Only where `Prefetching.IsSupported` (x86, ARM64 with SVE); any failure or 0 is
   unknown, which never prefetches. This machine reads 272,629,760 bytes (sysfs 266240K; sysconf agrees). A pass asks
   `Lookup<T>.Prefetches(world)`: live entities x (16-byte record + size of T) past that size.
 - **Row form** (no vector loop, one thread): the method keeps today's job; a twin `Job{i}Chases` (a run job: records of
@@ -240,8 +240,8 @@ DestroyAndCreate 158 / 206).
 Forced on (head, Off / On): in the cache a prefetch costs 2-3x at 1k (Party 7 / 14 us, FindLogin 4 / 8 us, CountClan
 3 / 7 us, FindLoginParallel 3 / 9 us), which the gate avoids. At 1M inside the L3, forcing it on still pays for the fused
 walk (18.1 / 11.5 ms), DestroyEntities (3.96 / 3.02), the parallel probe (5.54 / 4.92) and a little for the buffer chase
-(41.6 / 39.3), and costs for a probe (FindLogin 20.1 / 23.0, CountClan 12.4 / 14.4): a gate per form on the L2 would
-open earlier for walks and id lists, a candidate for the owner's machines (`owner-review.md`).
+(41.6 / 39.3), and costs for a probe (FindLogin 20.1 / 23.0, CountClan 12.4 / 14.4): hence a gate per form,
+built next ("A gate per form" below).
 
 Dropped, with numbers:
 
@@ -257,6 +257,57 @@ Dropped, with numbers:
   stages alone: 1.4-1.7x at 1k, 1.1-1.4x at 16M; LookupChaseGate Auto equals Off there (1k 1.297 / 1.295 us, 16M
   339 / 357 ms, within the noise), forced On costs 1.32x (Hunting) to 1.59x (Gathered) at 1k. The gate's "unknown or
   no prefetch: off" is right on Apple silicon.
+
+#### A gate per form (feat-prefetch-gate, 2026-10-27)
+
+The owner's item 6 follow-up: forced on at 1M, inside this machine's 260 MiB L3, some forms already paid. Each form now
+reads the cache it pays past (`CacheSizes`): the last-level cache as before, and one core's L2, read the same way
+(Linux: the cpu0 `index*` whose `level` is 2 and `type` is not Instruction, then `sysconf(_SC_LEVEL2_CACHE_SIZE)`;
+Windows: the largest level-2 data or unified record of `GetLogicalProcessorInformationEx(RelationCache)`; macOS
+`hw.perflevel0.l2cachesize`, else `hw.l2cachesize`). An unknown L2 falls back to the last-level gate
+(`CacheSizes.L2OrLastLevel`), so no machine is more eager than before unless its L2 is known; Apple silicon reads
+neither (no prefetch). This machine: L2 2,097,152 bytes per core, LLC 272,629,760.
+
+| Form | Gate | Generated / core call |
+|---|---|---|
+| Row form's entity chases: one thread, parallel (batch twin), fused walks, a buffer's elements, lambda passes | **L2** | `Lookup<T>.PrefetchesPastL2` |
+| `World.DestroyEntities`' id list | **L2** | `LookupLanes.PrefetchesIds` |
+| Index probes (one thread, parallel, lambda) | last level | `LookupExtensions.Probes` |
+| Vector loops' chases (`f{i}`, D131 gathers) | last level | `Lookup<T>.Prefetches` |
+
+Proof: `LookupChaseGateBenchmark`, `ChaseFormsPrefetchBenchmark`, `IdListPrefetchBenchmark`, `ProbePrefetchBenchmark`
+(Auto / Off / On in one binary, `EASYECS_BENCH_ENTITIES=32768,262144,1000000`; IdList adds 8,192, Probe 524,288 in
+round 2), default job, two rounds on frozen snapshots (r1: the first version, row chases and the vector loop on the
+last level, parallel probes on the L2; r2: d9a6450, row chases on the L2). 32,768 entities are inside the L2 by every
+form's estimate except DestroyEntities' (records + a 64-byte row line each: 2.6 MB), so Auto runs Off's code there.
+Means; Auto / Off / On; 0 B everywhere.
+
+| Benchmark (form, gate) | 32,768 r1; r2 | 262,144 r1; r2 | 1M r1; r2 |
+|---|---|---|---|
+| Hunting (row chase, L2) | 159 / 148 / 167; 163 / 155 / 181 us | 3.04 / 3.11 / 2.44 (Auto on the old gate); **2.28** / 2.89 / 2.31 ms | 17.2 / 18.6 / 13.8; **14.6** / 19.9 / 13.6 ms |
+| HuntingParallel (parallel row chase, L2) | 73 / 66 / 74; 68 / 73 / 82 us | 1.30 / 1.30 / 0.90 (old gate); **0.84** / 1.05 / 0.98 ms | 6.51 / 6.65 / 3.98; **4.47** / 5.36 / 4.30 ms |
+| Walk (fused walk, L2) | 172 / 188 / 178; 183 / 188 / 181 us | **1.77** / 3.52 / 1.90; **1.93** / 3.66 / 1.98 ms | **13.1** / 20.5 / 14.1; **14.3** / 20.6 / 13.7 ms |
+| Party (buffer chase, L2) | 428 / 412 / 605; 455 / 473 / 606 us | **7.08** / 7.77 / 7.38; **6.77** / 7.28 / 7.11 ms | **48.1** / 49.8 / 42.3; **42.1** / 52.9 / 47.6 ms |
+| DestroyAndCreate (id list, L2) | **59.7** / 66.7 / 64.0; **58.4** / 66.1 / 63.1 us (8,192: 16.7 / 15.9 / 16.5; 16.1 / 15.9 / 14.7) | **699** / 855 / 634; **656** / 836 / 660 us | **3.41** / 4.48 / 3.42; **3.33** / 4.49 / 3.33 ms |
+| HuntingGathered (vector loop, last level) | 107 / 112 / 173; 111 / 115 / 183 us | 2.14 / 1.87 / 3.96; 1.92 / 1.84 / 2.00 ms | 15.8 / 23.1 / 14.1; 15.5 / 15.5 / 15.3 ms |
+| FindLogin (probe, last level) | 206 / 200 / 329; 199 / 195 / 334 us | 3.67 / 3.90 / 4.72; 3.69 / 3.61 / 4.24 ms | 30.6 / 36.9 / 31.8; 23.0 / 27.4 / 37.8 ms |
+| CountClan (shared-key probe, last level) | 137 / 145 / 284; 144 / 134 / 286 us | 2.12 / 2.33 / 3.75; 2.28 / 2.33 / 3.22 ms | 15.0 / 15.0 / 18.2; 14.4 / 14.3 / 18.5 ms |
+| FindLoginLambda (probe, last level) | 215 / 223 / 347; 197 / 215 / 318 us | 3.75 / 3.64 / 4.32; 3.79 / 3.62 / 4.69 ms | 32.0 / 30.1 / 31.7; 28.8 / 40.1 / 30.3 ms |
+| FindLoginParallel (parallel probe; Auto on the L2 in both rounds) | 81 / 89 / 130; 73 / 91 / 127 us | 1.49 / 1.54 / 1.71; 1.47 / 1.41 / 1.45 ms (524,288: 3.27 / 2.81 / 3.06) | 9.60 / 10.87 / 7.37; 6.93 / 8.25 / 8.19 ms |
+
+Verdicts. **Shipped on the L2**: the row form's chases on one thread (1.27x at 262,144, 1.36x at 1M, r2) and in
+parallel (1.26x, 1.20x), the fused walk (1.9-2.0x, 1.44-1.57x), the buffer chase (1.08-1.10x, 1.04-1.26x: Party is
+the noisiest class, StdDev 5-7 ms at 1M), DestroyEntities (1.22-1.27x, 1.31-1.35x; 1.13x already at 32,768, the first
+size its estimate puts past the L2). Inside the L2 Auto runs Off's code (equal within the noise), and forcing it on
+costs (Hunting 1.12-1.17x, Party 1.28-1.47x, the vector loop 1.5-1.6x at 32,768). **Kept on the last level**: plain
+probes and lambda probes (forced on 1.13-1.31x slower at 262,144, CountClan 1.38-1.61x), the vector loop (forced on
+no faster at 262,144, 1.04-2.1x slower), and **parallel probes, reverted** after r2 (the owner had listed them for the
+L2 from 5.54 / 4.92 at 1M): a wash at 262,144 (1.04x slower in r2), slower at 524,288 (Auto 1.16x, On 1.09x), faster
+only at 1M (1.13-1.19x Auto, On 1.0-1.48x): a slower case never ships. Parallel rows on this VM move 1.1-1.5x on
+identical code (`audit-perf`), so the owner's machines may say otherwise; the benchmark prints both sizes it read.
+
+For the owner's machines (x86; any L2): `EASYECS_BENCH_ENTITIES=<sizes between the L2 and the LLC> dotnet run -c
+Release --project benchmarks/EasyEcs.Benchmark -- --filter '*PrefetchBenchmark*' '*LookupChaseGateBenchmark*'`.
 
 ### Item 2: timer wheel (bar not met: dropped)
 
