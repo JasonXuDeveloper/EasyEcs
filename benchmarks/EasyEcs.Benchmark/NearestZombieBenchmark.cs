@@ -27,10 +27,17 @@ public class NearestZombieBenchmark
         ZombieHunt.Pick(_world);
         var expected = ZombieHunt.Targets(_world);
         ClustersSortOnce();
+        Check(expected, "the clusters");
+        RingsSortOnce();
+        Check(expected, "the grid of clusters");
+    }
+
+    private void Check((EntityId Target, float Distance)[] expected, string name)
+    {
         var got = ZombieHunt.Targets(_world);
         for (int i = 0; i < got.Length; i++)
             if (got[i].Distance != expected[i].Distance)
-                throw new InvalidOperationException($"zombie {i}: the clusters find {got[i].Distance}, the ring walk {expected[i].Distance}");
+                throw new InvalidOperationException($"zombie {i}: {name} find {got[i].Distance}, the ring walk {expected[i].Distance}");
     }
 
     [GlobalCleanup]
@@ -51,5 +58,20 @@ public class NearestZombieBenchmark
     {
         for (int t = 0; t < 10; t++) ZombieHunt.SortPlayers(_world);
         ZombieHunt.PickInClusters(_world);
+    }
+
+    /// <summary>The clusters through a flat grid searched in rings (locality.md 6.2): sorted once per look, as L1's cadence.</summary>
+    [Benchmark]
+    public void RingsSortOnce()
+    {
+        ZombieHunt.SortPlayers(_world, grid: true);
+        ZombieHunt.PickInRings(_world);
+    }
+
+    [Benchmark]
+    public void RingsSortPerTick()
+    {
+        for (int t = 0; t < 10; t++) ZombieHunt.SortPlayers(_world, grid: true);
+        ZombieHunt.PickInRings(_world);
     }
 }

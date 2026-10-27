@@ -44,6 +44,14 @@ public sealed class SortedClusters
     private readonly int[] _histogram = new int[4 * 256];
     private float _scale;
 
+    // The flat grid of clusters (BuildGrid): GridSide x GridSide cells of GridCell over the map, each listing the clusters
+    // whose box overlaps it (CSR: CellStart, CellClusters); _seen stamps the clusters a search tested (_search).
+    public int GridSide;
+    public float GridCell;
+    public int[] CellStart = [], CellClusters = [];
+    private int[] _cursor = [], _seen = [];
+    private int _search;
+
     /// <summary>Size every array for up to <paramref name="capacity"/> rows.</summary>
     public void Reserve(int capacity)
     {
@@ -55,6 +63,11 @@ public sealed class SortedClusters
         Keys = new uint[capacity];
         _keys2 = new uint[capacity];
         _order2 = new int[capacity];
+        int side = GridSideOf(clusters);
+        CellStart = new int[side * side + 1];
+        _cursor = new int[side * side];
+        CellClusters = new int[clusters * 4];
+        _seen = new int[Math.Max(clusters, 1)];
         int levels = 1;
         for (int n = clusters; n > FanOut; n = (n + FanOut - 1) / FanOut) levels++;
         MinX = new float[levels][];
@@ -278,6 +291,106 @@ public sealed class SortedClusters
         }
 
         return at;
+    }
+
+    // About one cluster per cell: a side of sqrt(clusters), at most 1,024.
+    private static int GridSideOf(int clusters) => Math.Clamp((int)MathF.Sqrt(clusters), 1, 1024);
+
+    /// <summary>
+    /// The flat grid of clusters over a square map [0, <paramref name="extent"/>): about one cluster per cell, each cell
+    /// listing the clusters whose box overlaps it (a cluster that straddles cells is in each). After <see cref="Sort"/>.
+    /// O(clusters + cells).
+    /// </summary>
+    public void BuildGrid(float extent)
+    {
+        int side = GridSideOf(ClusterCount), cells = side * side;
+        GridSide = side;
+        GridCell = extent / side;
+        float inv = side / extent;
+        var start = CellStart.AsSpan(0, cells + 1);
+        start.Clear();
+        var minX = MinX[0];
+        var minY = MinY[0];
+        var maxX = MaxX[0];
+        var maxY = MaxY[0];
+        for (int b = 0; b < ClusterCount; b++)
+        {
+            Cells(minX[b], minY[b], maxX[b], maxY[b], inv, side, out int x0, out int y0, out int x1, out int y1);
+            for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++)
+                start[y * side + x + 1]++;
+        }
+
+        for (int c = 0; c < cells; c++) start[c + 1] += start[c];
+        if (CellClusters.Length < start[cells]) CellClusters = new int[start[cells] * 2]; // warm-up only: wide boxes
+        var cursor = _cursor.AsSpan(0, cells);
+        start[..cells].CopyTo(cursor);
+        for (int b = 0; b < ClusterCount; b++)
+        {
+            Cells(minX[b], minY[b], maxX[b], maxY[b], inv, side, out int x0, out int y0, out int x1, out int y1);
+            for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++)
+                CellClusters[cursor[y * side + x]++] = b;
+        }
+    }
+
+    // The cells [x0, x1] x [y0, y1] a box overlaps, clamped to the grid.
+    private static void Cells(float minX, float minY, float maxX, float maxY, float inv, int side, out int x0, out int y0, out int x1, out int y1)
+    {
+        x0 = Math.Clamp((int)(minX * inv), 0, side - 1);
+        y0 = Math.Clamp((int)(minY * inv), 0, side - 1);
+        x1 = Math.Clamp((int)(maxX * inv), 0, side - 1);
+        y1 = Math.Clamp((int)(maxY * inv), 0, side - 1);
+    }
+
+    /// <summary>
+    /// <see cref="Nearest"/> through the flat grid (<see cref="BuildGrid"/>): the cells in rings around the point's own,
+    /// ring r skipped and the search ended once (r - 1) cells of distance pass the best so far; each cluster of a cell
+    /// tested once per search (box first, then its 8 distances), the same tie rule.
+    /// </summary>
+    public int NearestInRings(float px, float py, float limit, int[] tieKeys)
+    {
+        if (Count == 0) return -1;
+        float best = limit;
+        int bestSlot = -1, bestKey = int.MaxValue;
+        if (++_search == int.MaxValue)
+        {
+            Array.Clear(_seen);
+            _search = 1;
+        }
+
+        int side = GridSide;
+        float cell = GridCell, inv = 1 / cell;
+        int cx = Math.Clamp((int)(px * inv), 0, side - 1), cy = Math.Clamp((int)(py * inv), 0, side - 1);
+        var minX = MinX[0];
+        var minY = MinY[0];
+        var maxX = MaxX[0];
+        var maxY = MaxY[0];
+        for (int ring = 0; ring < side; ring++)
+        {
+            float gap = Math.Max(ring - 1, 0) * cell; // the point is somewhere in its cell: ring r is (r - 1) cells away at least
+            if (gap * gap > best) break;
+            int x0 = cx - ring, x1 = cx + ring, y0 = cy - ring, y1 = cy + ring;
+            for (int y = Math.Max(y0, 0); y <= Math.Min(y1, side - 1); y++)
+            {
+                bool edge = y == y0 || y == y1;
+                for (int x = Math.Max(x0, 0); x <= Math.Min(x1, side - 1); x += edge || x == x1 ? 1 : x1 - x)
+                {
+                    int c = y * side + x;
+                    for (int k = CellStart[c], end = CellStart[c + 1]; k < end; k++)
+                    {
+                        int b = CellClusters[k];
+                        if (_seen[b] == _search) continue;
+                        _seen[b] = _search;
+                        float d = BoxDistance(minX[b], minY[b], maxX[b], maxY[b], px, py);
+                        if (d > best || bestSlot < 0 && d >= best) continue;
+                        Leaf(b, px, py, tieKeys, ref best, ref bestSlot, ref bestKey);
+                    }
+                }
+            }
+        }
+
+        return bestSlot;
     }
 
     /// <summary>

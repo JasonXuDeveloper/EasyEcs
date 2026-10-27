@@ -34,9 +34,11 @@ public sealed class PlayerRows
         SourceIds = new EntityId[capacity];
     }
 
-    public void Sort(int count, float extent)
+    /// <summary>Sort the first <paramref name="count"/> source rows into clusters (and their flat grid when <paramref name="grid"/>).</summary>
+    public void Sort(int count, float extent, bool grid = false)
     {
         Clusters.Sort(SourceX.AsSpan(0, count), SourceY.AsSpan(0, count), extent);
+        if (grid) Clusters.BuildGrid(extent);
         for (int s = 0; s < count; s++)
         {
             Ids[s] = SourceIds[Clusters.Order[s]];
@@ -169,7 +171,7 @@ public static partial class ZombieHunt
 
     // #region clusters
     /// <summary>The players copied out of the table and sorted into clusters.</summary>
-    public static void SortPlayers(World world)
+    public static void SortPlayers(World world, bool grid = false)
     {
         var rows = world.GetSingleton<Players>().Rows;
         int k = 0;
@@ -180,7 +182,7 @@ public static partial class ZombieHunt
             rows.SourceIds[k++] = item.Entity.Id;
         }
 
-        rows.Sort(k, world.GetSingleton<Map>().Extent);
+        rows.Sort(k, world.GetSingleton<Map>().Extent, grid);
     }
 
     [ForEach(SimdMode = SimdMode.Off), With<Zombie>]
@@ -188,6 +190,15 @@ public static partial class ZombieHunt
     {
         var rows = players.Rows;
         int slot = rows.Clusters.Nearest(position.X, position.Z, sight.Range * sight.Range, rows.TieKeys);
+        target = new Target(slot < 0 ? default : rows.Ids[slot]);
+    }
+
+    /// <summary><see cref="PickInClusters"/> through the flat grid of clusters searched in rings (SortPlayers with the grid).</summary>
+    [ForEach(SimdMode = SimdMode.Off), With<Zombie>]
+    public static void PickInRings(in Position position, in Sight sight, ref Target target, in Players players)
+    {
+        var rows = players.Rows;
+        int slot = rows.Clusters.NearestInRings(position.X, position.Z, sight.Range * sight.Range, rows.TieKeys);
         target = new Target(slot < 0 ? default : rows.Ids[slot]);
     }
     // #endregion clusters
