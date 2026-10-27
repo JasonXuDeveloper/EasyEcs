@@ -40,6 +40,7 @@ public class LateHolesBenchmark
         var random = new Random(1);
         float F() => (float)random.NextDouble() * 10 - 5;
         var entities = new Entity[Entities];
+        _world.Reserve<P2, V2, P3, V3, Heat, Speed, Mass>(Entities);
         for (int i = 0; i < Entities; i++)
             entities[i] = _world.CreateEntity(new P2 { X = F(), Y = F() }, new V2 { X = F(), Y = F() }, new P3 { X = F(), Y = F(), Z = F() },
                 new V3 { X = F(), Y = F(), Z = F() }, new Heat { Value = F() * 20 }, new Speed { Value = F() }, new Mass { Value = F() + 5 });
