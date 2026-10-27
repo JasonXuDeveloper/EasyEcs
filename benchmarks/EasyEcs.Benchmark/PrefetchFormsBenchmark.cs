@@ -8,8 +8,8 @@ namespace EasyEcs.Benchmark;
 /// The prefetching forms beyond the row form's entity chase (borrowed-ideas.md item 1): index probes
 /// (<c>TryFind</c> / <c>Count</c> at a key a row holds, a hashed unique key and a key many entities share), chases per
 /// element of a buffer of ids, a parallel probe, a lambda pass, and a walk two methods share (fusion). Each plain method
-/// runs the generated code: past its form's cache (the last level for a probe on one thread, the L2 for a parallel
-/// one) the pass picks the twin job that prefetches; Off and On force the gate (Off is today's job).
+/// runs the generated code: past its form's cache (the last level for a probe, the L2 for the row form's chases) the
+/// pass picks the twin job that prefetches; Off and On force the gate (Off is today's job).
 /// <see cref="PrefetchGate.Gates"/> narrows the gates to Auto for a base / head comparison (EASYECS_BENCH_GATES=auto).
 /// </summary>
 [MemoryDiagnoser]
