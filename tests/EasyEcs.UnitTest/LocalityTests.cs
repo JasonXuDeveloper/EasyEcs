@@ -64,18 +64,22 @@ public class LocalityTests
         Assert.That(Allocations.Of(tick), Is.Zero);
     }
 
-    // The cluster search finds a player at the same distance as the ring walk (the ids differ only on ties).
-    [TestCase(50, Layout.Packed)]
-    [TestCase(50, Layout.Spread)]
-    [TestCase(400, Layout.Packed)]
-    [TestCase(400, Layout.Spread)]
-    public void ZombieSearchesAgree(int players, Layout layout)
+    // The cluster search (the box tree, or the flat grid searched in rings) finds a player at the same distance as the
+    // ring walk (the ids differ only on ties).
+    [TestCase(50, Layout.Packed, false)]
+    [TestCase(50, Layout.Spread, false)]
+    [TestCase(400, Layout.Packed, false)]
+    [TestCase(400, Layout.Spread, false)]
+    [TestCase(50, Layout.Packed, true)]
+    [TestCase(50, Layout.Spread, true)]
+    [TestCase(400, Layout.Packed, true)]
+    [TestCase(400, Layout.Spread, true)]
+    public void ZombieSearchesAgree(int players, Layout layout, bool rings)
     {
         using var world = ZombieHunt.Create(players, layout);
         ZombieHunt.Pick(world);
         var expected = ZombieHunt.Targets(world);
-        ZombieHunt.SortPlayers(world);
-        ZombieHunt.PickInClusters(world);
+        Search(world, rings);
         var got = ZombieHunt.Targets(world);
         int found = 0;
         for (int i = 0; i < got.Length; i++)
@@ -88,9 +92,15 @@ public class LocalityTests
         Assert.That(Allocations.Of(() =>
         {
             ZombieHunt.Pick(world);
-            ZombieHunt.SortPlayers(world);
-            ZombieHunt.PickInClusters(world);
+            Search(world, rings);
         }), Is.Zero);
+    }
+
+    private static void Search(World world, bool rings)
+    {
+        ZombieHunt.SortPlayers(world, rings);
+        if (rings) ZombieHunt.PickInRings(world);
+        else ZombieHunt.PickInClusters(world);
     }
 
     [Test]
