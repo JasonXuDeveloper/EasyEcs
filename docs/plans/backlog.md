@@ -33,12 +33,12 @@ names the skill:
 
 - [ ] **Fewer copies c + d** ("Next" items 12c and 12d, branch `feat-fewer-copies`): Permute swaps columns with a spare,
       incremental Capture / Restore, and fix-ci's restore cost won back.
-- [ ] **Generator crash on components from another assembly** ("Next" items 8b + 8d, branch `fix-kernel-foreign`).
 - [ ] **Tiles: ping-pong, padded halos, edges while stepping** ("Next" items 11 + 12a + 12b with 8c's tile gaps and
       `voxel-rewrite.md` GA3 / GA10 / GA12, branch `feat-tiles-pingpong`). 8c's FillPool item went to the fewer-copies
       branch (12d).
 
-Merged since the last update: the L2 leftovers (`feat-pairs-2`: parallel pairs, `[Neighbor] ref`, nested-walk
+Merged since the last update: the generator crash and reason texts (`fix-kernel-foreign`: metadata backing
+fields read as their properties, a translation exception becomes the method's reason), the L2 leftovers (`feat-pairs-2`: parallel pairs, `[Neighbor] ref`, nested-walk
 rewrites, neighbor lists by cost, `Reduce<T>` / `Mut<T>` in pair methods, the cluster renames; the owner's M4 run of
 PairListsBenchmark is open), the zombies' distance field (`feat-zombie-field`, 9c73602), CI fixes (`fix-ci`, ae9d525: Restore gives rows written since the capture their own
 copy on the owner thread, VoxelServer 0 B again; DocCheck 0), L1 ordered rows + L3 compress (`feat-locality-core`), the pair form
@@ -55,7 +55,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 ## Next, in this order
 
 Agent slots as they free (at most 3): 8b + 8d, 12c + 12d and 11 + 12a + 12b (running, the last as one tile branch:
-padded storage, ping-pong, zero rows, edges found while stepping), then 8e, 12e, 9, 10, 4, 7, Later, then Finish.
+padded storage, ping-pong, zero rows, edges found while stepping), then 8e, 8f, 12e, 9, 10, 4, 7, Later, then Finish.
 The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a).
 
 1. [x] **L2: the generated pair form** (merged e9c3db8, `feat-pairs-2`; open: the owner's M4 run of PairListsBenchmark) (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
@@ -154,7 +154,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        moved. All zombies read the gradient of one shared field (nearest player for free; ZombieTargetSystem keeps
        the target for the attack). Proof: TickBenchmark before/after at 50 and 2,000 players, zombies stuck
        before and not after, grids page and VoxelServer page sections.
-8b. [ ] **Bug: a vector loop over components from another assembly crashes the generator** (found by feat-zombie-field,
+8b. [x] **Bug: a vector loop over components from another assembly crashes the generator** (found by feat-zombie-field,
        2026-10-27): `Kernel` throws `IndexOutOfRangeException` in `StructLocalLane` (`Kernel.Struct.cs`) or `Resolve`
        (`Kernel.Lookups.cs`), which drops every generated file of the project (hundreds of unrelated CS7036 / CS0122;
        CS8785 in the log). Repro: VoxelServer's old straight chase in a test project that references the sample
@@ -172,9 +172,13 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        VoxelServer and collisions; today a pair writing the neighbor's component it also reads of its row is refused.
        With or after item 1 (the pair agent), `feature` + `audit-vector-loops`: bit for bit against the per-pair walk,
        deterministic order, parallel only where the halves cannot race, 0 B, analyzer reasons and naming (`audit-naming`).
-8d. [ ] **Bug: EECS055 reason text** (`voxel-rewrite.md` GA7): VoxelServer's Chase reports `local 'cell' is a ??`
+8d. [x] **Bug: EECS055 reason text** (`voxel-rewrite.md` GA7): VoxelServer's Chase reports `local 'cell' is a ??`
        (the type name missing); Float reports `LookupExtensions.TryFind, defined in another assembly` where the reason is
        that a key probe has no vector form. Fix the text, a test per case.
+8f. [ ] **The other body stages catch their exceptions** (fix-kernel-foreign's report): `Chases.Of`, `PairModel.Create`
+       and `FusionSide.Of` still drop the project's output when they throw; each needs a safe fallback model (the
+       method's plain job) and a reason, like Kernel. Also a clearer EECS055 reason for a switch expression over a
+       struct call (VoxelServer's Chase reads "'new Nearby(...).Trail(cell.X, cell.Z) s...' is not supported").
 9. [ ] **G10: deferred consume for chunk load / save** (owner, 2026-10-27; `voxel-rewrite.md` G10): VoxelServer's
        ChunkRead / ChunkSave load and save outside the pass by hand; the generator turns the plain form (a
        `[ForEach]` that requests a load or a save) into the deferred one, so users write neither the queue nor the

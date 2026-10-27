@@ -1134,3 +1134,16 @@ chunk lookup per zombie).
   (GA6: the only user, an AOI of chunk squares, counts viewers per chunk in O(1) through an index; a pair method would
   visit every pair within the view). Both declined by the owner.
 - The VoxelServer page says why its AOI counts instead of searching, and why an inventory is a buffer, not relations.
+
+## fix-kernel-foreign (8b, 8d)
+
+- guide/analyzer.mdx + zh: EECS055's new reasons: a constructor of another assembly (set the fields by name: `new
+  Velocity { Value = ... }` or `with`), a key probe has no vector form, "the generator failed to translate it"
+  (report as a bug).
+- decisions.mdx + zh, next free D: "Components of another assembly are read as in source": Roslyn does not link a
+  metadata field to its auto-property, so `Symbols.Associated` maps `<Name>k__BackingField` to its property and every
+  field-to-property check goes through it. A constructor of another assembly has no body and no positional mark, so a
+  method calling one stays scalar with a fixable EECS055; dropped: parameters named after properties taken as
+  positional (a guess: a body may compute the field), reading IL (Roslyn exposes none). Any exception translating one
+  method becomes its reason, since a throwing generator loses all its output. An inlined target-typed value carries
+  the callee's return type (`new T(...)`, `default(T)`); a cast binds as a conversion Kernel does not take.

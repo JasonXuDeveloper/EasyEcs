@@ -165,7 +165,10 @@ changes nothing and cannot fail:
 ## Reasons users can fix
 
 `Kernel.Vectorize` returns the loop or one reason; the analyzer reports that reason (EECS055 / EECS056), so a method
-left scalar is exactly a method reported. Each reason is classified once, in Kernel, as:
+left scalar is exactly a method reported. EasyEcs's own scalar APIs get a reason saying what they are (a key probe
+has no vector form), never "defined in another assembly"; an inlined helper keeps its value's type where the caller
+gives none (`var x = Helper()` over a target-typed `new(...)` / `default`), or the local prints as `??`. Each reason
+is classified once, in Kernel, as:
 
 - **fixable** (EECS055 Warning, the fix in the message): the reason names the exact statement or sub-expression that
   blocks the loop and what to write instead. Typical: a condition with a call or a lookup ("split it into its own

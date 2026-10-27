@@ -263,7 +263,13 @@ tools/bench.sh GeneratorBenchmark
 ## Done means (each new generated form, on top of `feature`)
 
 - Its generated names (members, types, hint names) pass `audit-naming`.
-- A generated-output test and a caching assertion in `GeneratorTests`.
+- A generated-output test and a caching assertion in `GeneratorTests`; a form over components also compiles them
+  from a referenced assembly (`ForeignLibrary()`) and generates the same text as from source.
+- Field-to-property checks go through `Symbols.Associated` / `MemberName` / `BackingField`, never
+  `IFieldSymbol.AssociatedSymbol` directly: Roslyn leaves it null on metadata (`<Name>k__BackingField`), so a
+  component of another assembly loses its lanes.
+- A stage that reads method bodies catches its own exceptions and turns them into that method's reason (Kernel
+  does): one exception escaping a stage drops every generated file of the project (CS8785, then hundreds of CS7036).
 - The analyzer reports what the generator skips (same `Symbols` / `Kernel` function); a code fix moves hand-written
   code to the form.
 - A benchmark of the generated form against the hand-written one (`ForEntityBenchmark`, `ConsumeBenchmark`,
