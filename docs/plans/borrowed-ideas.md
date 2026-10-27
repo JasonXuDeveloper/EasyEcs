@@ -251,7 +251,12 @@ Dropped, with numbers:
 - **Loads issued ahead instead of a prefetch** (the ARM64 candidate without SVE; LookupChaseLoadAheadBenchmark,
   Locality/Chase.cs `LoadAhead`): on this x86 at 16M 1600-1643 ms against the plain rows' 930-984 and the prefetch's
   667-777 (672 B at Distance 4 in one run), at 1M 31-33 against 17.0-17.6, at 1k 13-15 us against 3: a load that misses
-  holds retirement. Not emitted; the owner's M4 run decides (command in the handback and backlog item 6).
+  holds retirement. The owner's M4 (2026-10-27, Apple M4, macOS) settles it, slower at every size and distance: 16M
+  783-966 ms against Rows 451-504 (1.7-1.9x), 1M 31-36 against 12.6-16.5 ms (2.3-3.0x), 1k 8.9-13.6 against 1.9-2.2 us
+  (4.4-7.2x). On the M4 `Prefetched` issues no instruction (no PRFM in .NET, SVE streaming-only), so it measures the
+  stages alone: 1.4-1.7x at 1k, 1.1-1.4x at 16M; LookupChaseGate Auto equals Off there (1k 1.297 / 1.295 us, 16M
+  339 / 357 ms, within the noise), forced On costs 1.32x (Hunting) to 1.59x (Gathered) at 1k. The gate's "unknown or
+  no prefetch: off" is right on Apple silicon.
 
 ### Item 2: timer wheel (bar not met: dropped)
 

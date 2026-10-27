@@ -115,8 +115,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        Windows `GetLogicalProcessorInformationEx(RelationCache)`, Linux the largest sysfs `index*/size` then
        `sysconf(_SC_LEVEL3_CACHE_SIZE)`, macOS `hw.l3cachesize` else `hw.perflevel0.l2cachesize`; unknown means off).
        It reads and prefetches only where a prefetch exists (`Prefetching.IsSupported`: x86 SSE, ARM64 SVE).
-       Left, the owner's: `LookupChaseGateBenchmark` and the prefetch classes on a 32 MiB-LLC x86 box; the M4's
-       loads-ahead pair (`LookupChaseLoadAheadBenchmark`, below); approve the hidden names `LookupExtensions.Probes`
+       Left, the owner's: `LookupChaseGateBenchmark` and the prefetch classes on a 32 MiB-LLC x86 box; approve the hidden names `LookupExtensions.Probes`
        and `LookupExtensions.PrefetchKey`; a gate per form on the L2 (`owner-review.md`).
    The owner's answers (2026-10-27): the hidden names `LookupExtensions.Probes` / `PrefetchKey` stay; SVE's PRFB stays
    and the owner runs the CI workflow by hand on the work branch (its arm64 job is the proof; if it fails,
@@ -128,10 +127,9 @@ CI runs the unit tests on ARM64 (b1dbdb0).
    ARM64 without SVE (the M4; owner, 2026-10-26: "is there another instruction or the TLB instead?"): .NET 10 exposes
    no PRFM (only SVE's PRFB/PRFD, and the M4 has SVE in streaming mode only), so the candidate is a plain load issued
    ahead (`Locality/Chase.cs` `LoadAhead`: the record of row i + k loaded into a ring, the row touched from it k / 2
-   rows later). On x86 it is 1.7x slower than the plain rows at 16M (a load that misses holds retirement), so it is not
-   emitted; it ships only if the M4 shows it faster past the cache and not slower in it. The owner's run (zsh, the
-   filters an array):
-   `filters=('*LookupChaseLoadAheadBenchmark*' '*LookupChaseGateBenchmark*'); dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter "${filters[@]}"`.
+   rows later). Dropped: 1.7x slower than the plain rows on x86 at 16M, and the owner's M4 run (2026-10-27) is slower at
+   every size (1.7-1.9x at 16M, 2.3-3.0x at 1M, 4.4-7.2x at 1k; numbers in `borrowed-ideas.md`); its decision record
+   goes in with the docs pass. On the M4 the gate's Auto equals Off, as it should with no prefetch to issue.
    Not taken: a native PRFM stub (a native binary per RID in a managed package; a call per prefetch), Apple's
    data-memory-dependent prefetcher (keys on pointer-like 64-bit values, which an `EntityId` is not). TLB: macOS
    arm64 keeps 16 KiB pages with no user superpages; Linux arm64 and x86 get huge pages through #164 (NativeMemory

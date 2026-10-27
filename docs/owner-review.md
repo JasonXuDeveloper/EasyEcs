@@ -26,9 +26,3 @@ leave this file; it is not published on the site.
 - **EECS055's "a bool among N fields" is inherent (Info)**, though the split it names would give a vector loop
   (feat-generator-gaps): fixable, it is a Warning in VoxelServer (Body.OnGround, Exposure.Sunlit). Would change: the
   rewrite splitting those bools out; then pass `true` (fixable) in Kernel.cs.
-
-## Prefetch gates (2026-10-27, feat-prefetch-all, `docs/plans/borrowed-ideas.md` 5, item 1)
-
-- **Loads issued ahead on ARM64 without SVE** (the M4): not emitted: 1.7x slower than plain rows on x86 at 16M.
-  Would change: the owner's M4 run of `LookupChaseLoadAheadBenchmark` showing LoadAhead faster than Rows at 16M and
-  not slower at 1k (command in `backlog.md` item 6).

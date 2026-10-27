@@ -743,11 +743,13 @@ Decision record drafts (en + zh, the next free D numbers at merge: D139 onward i
   n2, no libssl in the aarch64 sysroot on n1, which passed the first three tests), so the arm64 job is the first real
   test of the PRFB path; record its result before this ships. Considered: a native PRFM stub (a binary per RID, a call
   per prefetch), waiting for a PRFM intrinsic (none in .NET 10).
-- **ARM64 without SVE: loads issued ahead, not emitted** (LookupChaseLoadAheadBenchmark, Locality/Chase.cs
+- **ARM64 without SVE: loads issued ahead, dropped** (LookupChaseLoadAheadBenchmark, Locality/Chase.cs
   `LoadAhead`): the record of row i + k loaded (Has) into a ring, the row of row i + k / 2 touched through it, both
   consumed by row i. On this x86 machine 1.70-1.75x slower than the plain rows at 16M (1600-1643 ms against 930-984;
   prefetching 667-777) and 4-5x at 1k: a load that misses holds retirement, and the public API makes each stage a
-  whole lookup. The generator emits it only if the owner's M4 shows it faster past the cache and not slower in it.
+  whole lookup. The owner's M4 (2026-10-27) settles it: slower at every size, 1.7-1.9x at 16M (783-966 ms against
+  451-504), 2.3-3.0x at 1M (31-36 against 12.6-16.5 ms), 4.4-7.2x at 1k (8.9-13.6 against 1.9-2.2 us). Decision record
+  in the docs pass.
 - **macOS**: Apple silicon has no prefetch .NET issues, so its gates are off without a read; were one gated there,
   `hw.perflevel0.l2cachesize` (the performance cluster's L2, 16 MB on an M4) understates the cache the cores share
   (the system level cache is not exposed): a gate would open early, never late. Intel Macs read `hw.l3cachesize`.
