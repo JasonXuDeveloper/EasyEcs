@@ -68,13 +68,13 @@ public static unsafe class LookupLanes
 
     /// <summary>
     /// Whether <see cref="Lookup{T}.Prefetch(EntityId)"/> and <see cref="Lookup{T}.PrefetchRow(EntityId)"/> issue
-    /// anything: x86's <c>PREFETCHT0</c>. .NET 10 has no prefetch on ARM64 but SVE's (not used), so there they do
-    /// nothing and the reads that follow stall as they do without them.
+    /// anything (<see cref="Prefetching"/>): x86's <c>PREFETCHT0</c>, or SVE's <c>PRFB</c> on ARM64 with SVE. Elsewhere
+    /// (ARM64 without SVE, Apple silicon among them) they do nothing and the reads that follow stall as they do without them.
     /// </summary>
     public static bool CanPrefetch
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Sse.IsSupported;
+        get => Prefetching.IsSupported;
     }
 
     /// <summary>
@@ -88,6 +88,19 @@ public static unsafe class LookupLanes
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static bool Prefetches(World world, int rowSize) =>
         CanPrefetch && PastCache((long)world.EntityCount * (Unsafe.SizeOf<EntityMeta>() + rowSize), LastLevelCache.Bytes);
+
+    /// <summary>How many ids ahead a core loop over a list of ids prefetches records (<see cref="PrefetchesIds"/>).</summary>
+    internal const int IdsAhead = 16;
+
+    /// <summary>
+    /// Whether a core loop over <paramref name="count"/> ids of <paramref name="world"/> (DestroyEntities, a save or a
+    /// move of entities) prefetches the record of the id <see cref="IdsAhead"/> ahead of the one it handles: where a
+    /// prefetch exists, for a list longer than the distance, and when every live entity's record and a line of its row
+    /// are past the last-level cache. Read once per call.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool PrefetchesIds(World world, int count) =>
+        CanPrefetch && count > IdsAhead && PastCache((long)world.EntityCount * (Unsafe.SizeOf<EntityMeta>() + 64), LastLevelCache.Bytes);
 
     /// <summary>Whether <paramref name="bytes"/> are past a last-level cache of <paramref name="cache"/> bytes (0: unknown, never).</summary>
     internal static bool PastCache(long bytes, long cache) => cache > 0 && bytes > cache;
@@ -103,7 +116,7 @@ public static unsafe class LookupLanes
     internal static void PrefetchAhead<TLane>(World world, uint bit, int size, ref TLane column, int stride, int index, nint i, nint rows, int distance, int count)
         where TLane : unmanaged
     {
-        if (!Sse.IsSupported) return;
+        if (!Prefetching.IsSupported) return;
         ref int lanes = ref Unsafe.As<TLane, int>(ref column);
         for (nint r = i + 2 * distance, end = Math.Min(r + count, rows); r < end; r++)
             PrefetchRecord(world, Unsafe.Add(ref lanes, r * stride + index));
@@ -120,10 +133,10 @@ public static unsafe class LookupLanes
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void PrefetchRecord(World world, int index)
     {
-        if (!Sse.IsSupported) return;
+        if (!Prefetching.IsSupported) return;
         var meta = world.Meta;
         if ((uint)index < (uint)meta.Length)
-            Sse.Prefetch0(Unsafe.AsPointer(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(meta), index)));
+            Prefetching.Line(Unsafe.AsPointer(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(meta), index)));
     }
 
     /// <summary>
@@ -135,7 +148,7 @@ public static unsafe class LookupLanes
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void PrefetchRow(World world, int index, uint bit, int size)
     {
-        if (!Sse.IsSupported) return;
+        if (!Prefetching.IsSupported) return;
         var meta = world.Meta;
         if ((uint)index >= (uint)meta.Length) return;
         ref var record = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(meta), index);
@@ -146,7 +159,7 @@ public static unsafe class LookupLanes
         // An unmanaged column's row 0 (pinned, Archetype.Lookup.Rows), 0 for a managed or missing one; a record's slot
         // is a row of its table, below the column's length.
         nint rows = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(map), bit).Rows;
-        if (rows != 0) Sse.Prefetch0((void*)(rows + (nint)record.Slot * size));
+        if (rows != 0) Prefetching.Line((void*)(rows + (nint)record.Slot * size));
     }
 
     /// <summary>

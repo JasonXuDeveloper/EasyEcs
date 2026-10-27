@@ -72,8 +72,27 @@ public sealed partial class SystemGenerator
 
     /// <summary>The walk runs the methods per row (every method a per-row job), else per block of rows.</summary>
     /// A walk of two systems (<paramref name="second"/> &gt; 0) runs per block: its blocks are where it notes which system runs.
-    private static bool FusedPerRow(UpdateModel model, int start, int count, int second = 0) =>
-        second == 0 && Enumerable.Range(start, count).All(i => model.Methods[i].Loop is "ForEach" or "ForEachEntity");
+    /// So does the twin of a walk whose methods chase other entities (<paramref name="chases"/>): its chasing methods
+    /// run their twin jobs (batch jobs, <c>Job{i}Chases</c>) over each block, prefetching the rows ahead within it.
+    private static bool FusedPerRow(UpdateModel model, int start, int count, int second = 0, bool chases = false) =>
+        second == 0 && !chases && Enumerable.Range(start, count).All(i => model.Methods[i].Loop is "ForEach" or "ForEachEntity");
+
+    /// <summary>
+    /// Some method of the walk chases other entities (<see cref="ForEachModel.HasChaseTwin"/>): the walk has a twin
+    /// (<c>{name}Chases</c>) running their twin jobs, which the call site picks past the last-level cache.
+    /// </summary>
+    private static bool FusedChases(UpdateModel model, int start, int count) =>
+        Enumerable.Range(start, count).Any(i => model.Methods[i].HasChaseTwin);
+
+    /// <summary>
+    /// The call site's gate of a pass (or a walk) chasing other entities: true past the last-level cache for any of the
+    /// lookups its chases read (<c>Lookup&lt;T&gt;.Prefetches</c>, once per pass).
+    /// </summary>
+    private static string ChaseGate(IEnumerable<ForEachModel> methods, string world) =>
+        string.Join(" || ", methods.SelectMany(m => m.Chases.Select(c => c.Kind == ChaseKind.Probe
+                // a probe: past the cache when its index is (the index sized by its representation)
+                ? $"global::EasyEcs.LookupExtensions.Probes<{m.Parameters[c.Lookup].Type}, {m.Parameters[c.Lookup].Key}>({world})"
+                : $"global::EasyEcs.Lookup<{m.Parameters[c.Lookup].Type}>.Prefetches({world})")).Distinct());
 
     /// <summary>
     /// The walk runs in blocks only from <c>SystemCode.FusedRows</c> rows (a check at run time); fewer rows run each pass
@@ -93,10 +112,10 @@ public sealed partial class SystemGenerator
     }
 
     /// <summary>The job interface of a fused walk (without its type arguments).</summary>
-    private static string FusedInterface(UpdateModel model, int start, int count, int second = 0)
+    private static string FusedInterface(UpdateModel model, int start, int count, int second = 0, bool chases = false)
     {
         var methods = Enumerable.Range(start, count).Select(i => model.Methods[i]).ToArray();
-        if (FusedPerRow(model, start, count, second)) return methods.Any(m => m.Loop == "ForEachEntity") ? "IForEachEntity" : "IForEach";
+        if (FusedPerRow(model, start, count, second, chases)) return methods.Any(m => m.Loop == "ForEachEntity") ? "IForEachEntity" : "IForEach";
         return !methods[0].Parallel && methods.Any(m => m.Loop == "ForEachMasked") ? "IForEachMasked" : "IForEachBatch";
     }
 
@@ -109,7 +128,10 @@ public sealed partial class SystemGenerator
         var groups = FusionGroups(model);
         for (int start = 0; start < groups.Length; start++)
             if (groups[start] > 1)
+            {
                 EmitFusedJob(sb, model, start, groups[start]);
+                if (FusedChases(model, start, groups[start])) EmitFusedJob(sb, model, start, groups[start], chases: true);
+            }
     }
 
     /// <summary>
@@ -117,24 +139,27 @@ public sealed partial class SystemGenerator
     /// <paramref name="model"/>. A walk of two systems (<paramref name="second"/>: the index of the second system's first
     /// method, 0 for one system) runs per block, notes in an exception filter which system's method threw
     /// (<c>SystemCode.Blame</c>), and stamps the second system's writes itself with its stage's tick (<c>Tick</c>).
+    /// The twin of a walk that chases other entities (<paramref name="chases"/>, <c>{name}Chases</c>, with the walk's
+    /// filter) holds the twin jobs of its chasing methods and runs per block.
     /// </summary>
-    private static void EmitFusedJob(StringBuilder sb, UpdateModel model, int start, int count, int second = 0)
+    private static void EmitFusedJob(StringBuilder sb, UpdateModel model, int start, int count, int second = 0, bool chases = false)
     {
         const string unsafeType = "global::System.Runtime.CompilerServices.Unsafe", marshal = "global::System.Runtime.InteropServices.MemoryMarshal";
         var owner = model.Owner;
-        var methods = Enumerable.Range(start, count).Select(i => model.Methods[i]).ToArray();
+        var methods = Enumerable.Range(start, count).Select(i => chases && model.Methods[i].HasChaseTwin ? model.Methods[i] with { IsChaseTwin = true } : model.Methods[i]).ToArray();
         var first = methods[0];
         string name = FusedName(model, start, count), forEach = "__ForEach" + owner.TypeParameters;
+        string walk = chases ? name + "Chases" : name;
         var query = FusedQuery(model, start, count);
         string types = string.Join(", ", query);
-        string iface = FusedInterface(model, start, count, second);
+        string iface = FusedInterface(model, start, count, second, chases);
         // The second system's writes: stamped by the job with the tick of the second system's stage.
         var later = second == 0 ? [] : methods.Skip(second - start).SelectMany(m => m.Parameters)
             .Where(p => p.RefKind == "ref" && p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan).Select(p => p.Type).Distinct().ToArray();
         bool perRow = iface is "IForEach" or "IForEachEntity", masked = iface == "IForEachMasked", parallel = first.Parallel;
         string marker = perRow || parallel ? ", global::EasyEcs.INoStructuralChanges" : "";
-        sb.Append($"    internal {(parallel ? "struct" : "ref struct")} {name} : global::EasyEcs.{iface}<{types}>{marker}\n    {{\n");
-        for (int k = 0; k < count; k++) sb.Append($"        public {methods[k].Name}Job{start + k} j{k};\n");
+        sb.Append($"    internal {(parallel ? "struct" : "ref struct")} {walk} : global::EasyEcs.{iface}<{types}>{marker}\n    {{\n");
+        for (int k = 0; k < count; k++) sb.Append($"        public {methods[k].Name}Job{start + k}{(methods[k].IsChaseTwin ? "Chases" : "")} j{k};\n");
         if (second > 0) sb.Append("        public ulong Tick; // the second system's stage's\n");
         sb.Append('\n');
 
@@ -254,12 +279,13 @@ public sealed partial class SystemGenerator
         {
             sb.Append($"        static bool global::EasyEcs.{iface}<{types}>.Merges => true;\n\n");
             sb.Append($"        static void global::EasyEcs.{iface}<{types}>.Merge<TSelf>(ref TSelf job, in TSelf chunk)\n        {{\n");
-            sb.Append($"            ref var into = ref {unsafeType}.As<TSelf, {name}>(ref job);\n");
-            sb.Append($"            ref var part = ref {unsafeType}.As<TSelf, {name}>(ref {unsafeType}.AsRef(in chunk));\n");
+            sb.Append($"            ref var into = ref {unsafeType}.As<TSelf, {walk}>(ref job);\n");
+            sb.Append($"            ref var part = ref {unsafeType}.As<TSelf, {walk}>(ref {unsafeType}.AsRef(in chunk));\n");
             sb.Append(merges).Append("        }\n");
         }
 
         sb.Append("    }\n\n");
+        if (chases) return; // the twin walks with the walk's filter
 
         // The walk's filter: the first method's (every method's), its required components that the walk does not query
         // as [With<T>].
@@ -287,10 +313,37 @@ public sealed partial class SystemGenerator
     /// </summary>
     private static void EmitFusedCall(StringBuilder sb, UpdateModel model, int start, int count)
     {
+        if (!FusedChases(model, start, count))
+        {
+            EmitFusedWalk(sb, model, start, count, chases: false);
+            return;
+        }
+
+        // Past the last-level cache (for any lookup its chases read), the twin walk, whose chasing methods prefetch.
+        var twin = new StringBuilder();
+        var today = new StringBuilder();
+        EmitFusedWalk(twin, model, start, count, chases: true);
+        EmitFusedWalk(today, model, start, count, chases: false);
+        sb.Append($"        if ({ChaseGate(Enumerable.Range(start, count).Select(i => model.Methods[i]), "world")})\n        {{\n");
+        sb.Append(Indented(twin)).Append("        }\n        else\n        {\n").Append(Indented(today)).Append("        }\n");
+    }
+
+    /// <summary>Lines of a block one level deeper (4 spaces).</summary>
+    private static string Indented(StringBuilder block) =>
+        string.Concat(block.ToString().Split('\n').Select(line => line.Length > 0 ? "    " + line + "\n" : ""));
+
+    /// <summary>
+    /// One walk of <see cref="EmitFusedCall"/>: today's (where a walk too small to pay for its blocks runs each pass on
+    /// its own), or its twin over the chasing methods' twin jobs (<paramref name="chases"/>), which runs only past the
+    /// last-level cache, where any walk is large enough for blocks.
+    /// </summary>
+    private static void EmitFusedWalk(StringBuilder sb, UpdateModel model, int start, int count, bool chases)
+    {
         var owner = model.Owner;
         var first = model.Methods[start];
         string forEach = "__ForEach" + owner.TypeParameters, name = FusedName(model, start, count), local = $"fused{start}";
-        bool sized = Sized(model, start, count);
+        string walk = chases ? name + "Chases" : name;
+        bool sized = !chases && Sized(model, start, count);
         if (sized)
         {
             sb.Append($"        if (world.Count<{string.Join(", ", FusedQuery(model, start, count))}>(in {forEach}.{name}Filter) < global::EasyEcs.SystemCode.FusedRows) // in cache: each pass on its own\n        {{\n");
@@ -299,8 +352,8 @@ public sealed partial class SystemGenerator
         }
 
         var members = Enumerable.Range(0, count).Select(k =>
-            $"j{k} = new {forEach}.{model.Methods[start + k].Name}Job{start + k}{Fields(model.Methods[start + k], "world")}");
-        sb.Append($"        var {local} = new {forEach}.{name} {{ {string.Join(", ", members)} }};\n");
+            $"j{k} = new {forEach}.{model.Methods[start + k].Name}Job{start + k}{(chases && model.Methods[start + k].HasChaseTwin ? "Chases" : "")}{Fields(model.Methods[start + k], "world")}");
+        sb.Append($"        var {local} = new {forEach}.{walk} {{ {string.Join(", ", members)} }};\n");
         for (int k = 0; k < count; k++)
         {
             var method = model.Methods[start + k];
@@ -314,8 +367,8 @@ public sealed partial class SystemGenerator
         string fusedFilter = $"{forEach}.{name}Filter";
         string filter = first.Since ? $", {fusedFilter}.Since(system.LastRunTick + 1)" : $", in {fusedFilter}";
         if (first.Slices > 1) filter = first.Sliced(fusedFilter, $"(int)(system.RunCount % {first.Slices})");
-        string loop = FusedInterface(model, start, count).Substring(1) + (first.Parallel ? "Parallel" : "");
-        sb.Append($"        world.{loop}<{string.Join(", ", FusedQuery(model, start, count))}, {forEach}.{name}>(ref {local}{filter}{first.Chunks}); // one walk: {string.Join(", then ", Enumerable.Range(start, count).Select(i => model.Methods[i].Name))} per {(FusedPerRow(model, start, count) ? "row" : "block of rows")}\n");
+        string loop = FusedInterface(model, start, count, chases: chases).Substring(1) + (first.Parallel ? "Parallel" : "");
+        sb.Append($"        world.{loop}<{string.Join(", ", FusedQuery(model, start, count))}, {forEach}.{walk}>(ref {local}{filter}{first.Chunks}); // one walk: {string.Join(", then ", Enumerable.Range(start, count).Select(i => model.Methods[i].Name))} per {(FusedPerRow(model, start, count, chases: chases) ? "row" : "block of rows")}\n");
         for (int k = 0; k < count; k++) EmitReductions(sb, model.Methods[start + k], "world", $"{local}.j{k}", "        ");
         if (sized) sb.Append("        }\n");
     }
@@ -468,6 +521,8 @@ public sealed partial class SystemGenerator
 
         int second = pair.First.Methods.Length;
         EmitFusedJob(sb, both, 0, both.Methods.Length, second);
+        bool chases = FusedChases(both, 0, both.Methods.Length);
+        if (chases) EmitFusedJob(sb, both, 0, both.Methods.Length, second, chases: true);
         sb.Append("}\n\n");
 
         const string world = "global::EasyEcs.World", handle = "global::EasyEcs.SystemHandle";
@@ -477,14 +532,30 @@ public sealed partial class SystemGenerator
         sb.Append($"    /// <summary>{pair.First.Owner.FlatName}, then {pair.Second.Owner.FlatName}, as one walk: the second's writes stamped at <paramref name=\"tick\"/>; false when it ran nothing (too few rows: SystemCode.FusedRows).</summary>\n");
         sb.Append($"    public static bool Update({world} world, {handle} first, {handle} second, ulong tick)\n    {{\n");
         string query = string.Join(", ", FusedQuery(both, 0, both.Methods.Length));
+        void Walk(bool twin, string indent)
+        {
+            string walk = twin ? name + "Chases" : name, local = twin ? "chases" : "fused"; // one name per scope (CS0136)
+            var members = Enumerable.Range(0, both.Methods.Length).Select(k =>
+                $"j{k} = new __ForEach.{both.Methods[k].Name}Job{k}{(twin && both.Methods[k].HasChaseTwin ? "Chases" : "")}{Fields(both.Methods[k], "world")}");
+            sb.Append($"{indent}var {local} = new __ForEach.{walk} {{ {string.Join(", ", members)}, Tick = tick }};\n");
+            string loop = FusedInterface(both, 0, both.Methods.Length, second).Substring(1);
+            sb.Append($"{indent}world.{loop}<{query}, __ForEach.{walk}>(ref {local}, in __ForEach.{name}Filter);\n");
+            for (int k = 0; k < both.Methods.Length; k++) EmitReductions(sb, both.Methods[k], "world", $"{local}.j{k}", indent);
+            sb.Append($"{indent}return true;\n");
+        }
+
+        if (chases)
+        {
+            // Past the last-level cache (for any lookup the chases read), the twin walk: its chasing methods prefetch.
+            sb.Append($"        if ({ChaseGate(both.Methods, "world")})\n        {{\n");
+            Walk(true, "            ");
+            sb.Append("        }\n\n");
+        }
+
         if (Sized(both, 0, both.Methods.Length, second))
             sb.Append($"        if (world.Count<{query}>(in __ForEach.{name}Filter) < global::EasyEcs.SystemCode.FusedRows) return false; // in cache: each pass on its own\n");
-        var members = Enumerable.Range(0, both.Methods.Length).Select(k => $"j{k} = new __ForEach.{both.Methods[k].Name}Job{k}{Fields(both.Methods[k], "world")}");
-        sb.Append($"        var fused = new __ForEach.{name} {{ {string.Join(", ", members)}, Tick = tick }};\n");
-        string loop = FusedInterface(both, 0, both.Methods.Length, second).Substring(1);
-        sb.Append($"        world.{loop}<{string.Join(", ", FusedQuery(both, 0, both.Methods.Length))}, __ForEach.{name}>(ref fused, in __ForEach.{name}Filter);\n");
-        for (int k = 0; k < both.Methods.Length; k++) EmitReductions(sb, both.Methods[k], "world", $"fused.j{k}", "        ");
-        sb.Append("        return true;\n    }\n}\n");
+        Walk(false, "        ");
+        sb.Append("    }\n}\n");
         context.AddSource($"{pair.First.Owner.HintName}+{pair.Second.Owner.HintName}.Fusion.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
     }
 }

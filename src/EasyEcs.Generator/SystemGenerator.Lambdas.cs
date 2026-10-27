@@ -69,7 +69,7 @@ public sealed partial class SystemGenerator
                     Symbols.ParamKind.Scratch => new ParamModel(Symbols.ParamKind.Scratch, Symbols.ScratchElement(p.Type)!.ToDisplayString(Symbols.Fqn), "", p.Name, declared),
                     Symbols.ParamKind.Emit => new ParamModel(Symbols.ParamKind.Emit, Symbols.EmitElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared),
                     Symbols.ParamKind.Lookup => new ParamModel(Symbols.ParamKind.Lookup, Symbols.LookupElement(p.Type)!.ToDisplayString(Symbols.Fqn), "in", p.Name, declared,
-                        Key: Symbols.LookupKey(p, lambda, null)?.ToDisplayString(Symbols.Fqn) ?? ""),
+                        Key: Symbols.LookupKey(p, function.Syntax)?.ToDisplayString(Symbols.Fqn) ?? ""),
                     Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.In ? "in" : "", p.Name, declared),
                     Symbols.ParamKind.View => ViewParameter(p, declared),
                     var kind => new ParamModel(kind, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.Ref ? "ref" : "in", p.Name, declared),
@@ -125,6 +125,8 @@ public sealed partial class SystemGenerator
             {
                 Simd = simd,
                 Scalar = scalar ?? (body == null ? "it runs through its delegate" : ""),
+                // Reads of other entities at the row's ids (and probes, buffers of links), as a [ForEach] method's.
+                Chases = ForEachModel.Usable(Generator.Chases.Of(function), parameters),
                 OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LambdaPass.LoopsOrCalls(call.Syntax!),
             };
             return new LambdaModel(invocation.SyntaxTree.FilePath, invocation.SpanStart, location.Version, location.Data,
@@ -160,10 +162,14 @@ public sealed partial class SystemGenerator
             string tick = method.Since ? $", ulong {since}" : "";
             type.Append($"    internal static void {method.Name}{k}(this global::EasyEcs.World {world}{tick}{string.Concat(values.Select(v => ", " + v))}, global::System.Delegate {body})\n    {{\n");
             if (call.Body == null) type.Append($"        {method.Name}{k}Delegate = global::System.Runtime.CompilerServices.Unsafe.As<{method.Name}{k}Body>({body});\n");
-            type.Append($"        var job = new {job}{Fields(method, world)};\n");
             string filter = method.Since ? $"{method.Name}Filter{k}.Since({since})" : $"in {method.Name}Filter{k}";
-            type.Append($"        {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref job, {filter}{method.Chunks});\n");
-            EmitReductions(type, method, world, "job", "        ");
+            if (method.HasChaseTwin) EmitPass(type, method, "__ForEach", k, world, "job", ", " + filter, "", "        "); // the twin past the cache
+            else
+            {
+                type.Append($"        var job = new {job}{Fields(method, world)};\n");
+                type.Append($"        {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref job, {filter}{method.Chunks});\n");
+                EmitReductions(type, method, world, "job", "        ");
+            }
             type.Append("    }\n\n");
 
             // What the job calls per row: the lambda's body (inlined like a [ForEach] method), or its delegate.

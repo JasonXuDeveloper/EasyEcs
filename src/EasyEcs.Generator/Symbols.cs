@@ -1289,15 +1289,14 @@ internal static class Symbols
     /// <summary>
     /// The key type of indexed component <paramref name="type"/> (<c>IIndexed&lt;TKey&gt;</c>) when a
     /// <c>Lookup&lt;T&gt;</c> parameter of it must have its index built before the pass, else null: always for a unique
-    /// index (it exists already: free), and for another when <paramref name="method"/> finds it by key itself
-    /// (<c>lookup.TryFind</c> / <c>Find</c> / <c>Count</c> on the parameter), since building it costs memory and upkeep on every
-    /// write from then on.
+    /// index (it exists already: free), and for another when <paramref name="body"/> (a method's or a lambda pass's) finds
+    /// it by key itself (<c>lookup.TryFind</c> / <c>Find</c> / <c>Count</c> on the parameter), since building it costs memory
+    /// and upkeep on every write from then on.
     /// </summary>
-    public static ITypeSymbol? LookupKey(IParameterSymbol lookup, IMethodSymbol method, MethodDeclarationSyntax? syntax)
+    public static ITypeSymbol? LookupKey(IParameterSymbol lookup, SyntaxNode? body)
     {
         if (LookupElement(lookup.Type) is not INamedTypeSymbol component || IndexedKey(component, out bool unique) is not { } key) return null;
         if (unique) return key;
-        var body = (SyntaxNode?)syntax?.Body ?? syntax?.ExpressionBody;
         bool byKey = body != null && body.DescendantNodes().OfType<InvocationExpressionSyntax>().Any(call =>
             call.Expression is MemberAccessExpressionSyntax { Name.Identifier.ValueText: "TryFind" or "Count" or "Find", Expression: IdentifierNameSyntax target }
             && target.Identifier.ValueText == lookup.Name);

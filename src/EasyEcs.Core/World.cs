@@ -331,8 +331,13 @@ public sealed partial class World : IDisposable
         PrepareCascade();
         using (Structural())
         {
+            // Past the cache, the records of the ids ahead (a list in random order misses on each one).
+            bool ahead = LookupLanes.PrefetchesIds(this, entities.Length);
+            if (ahead)
+                for (int i = 0; i < LookupLanes.IdsAhead; i++) LookupLanes.PrefetchRecord(this, entities[i].Index);
             for (int i = 0; i < entities.Length; i++)
             {
+                if (ahead && i + LookupLanes.IdsAhead < entities.Length) LookupLanes.PrefetchRecord(this, entities[i + LookupLanes.IdsAhead].Index);
                 var id = entities[i];
                 if ((uint)id.Index >= (uint)Meta.Length) continue; // an id of a larger world: not one of these
                 ref var meta = ref MetaRef(id.Index);

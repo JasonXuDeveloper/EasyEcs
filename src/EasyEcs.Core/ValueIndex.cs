@@ -243,6 +243,24 @@ internal struct TargetSlots
         return ref head;
     }
 
+    /// <summary>The slots, one per entity index some target had (the memory a probe of the index lands on).</summary>
+    public readonly int Length => _slots?.Length ?? 0;
+
+    /// <summary>
+    /// The line stage <paramref name="stage"/> of a prefetched probe of <paramref name="target"/>'s list reads: its slot
+    /// (1), then its array of ids, read from the slot stage 1 brought in (2); null for a target past the slots, an empty
+    /// list or another stage.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public readonly unsafe void* Address(EntityId target, int stage)
+    {
+        var slots = _slots;
+        if (slots == null || (uint)target.Index >= (uint)slots.Length) return null;
+        ref var head = ref slots[target.Index];
+        if (stage == 1) return Unsafe.AsPointer(ref head);
+        return stage == 2 && head.Ids is { Length: > 0 } ids ? Unsafe.AsPointer(ref MemoryMarshal.GetArrayDataReference(ids)) : null;
+    }
+
     /// <summary>Forget every list, giving their arrays to <paramref name="spares"/> for the lists that grow next.</summary>
     public readonly void Clear(SpareIds spares)
     {
@@ -263,7 +281,7 @@ internal struct TargetSlots
 /// been seen; the index belongs to the world's owner thread, like component values (a system that looks up from an
 /// <c>OnUpdate</c> hook or a <c>[ForEach]</c> method taking the <c>World</c> runs alone).
 /// </summary>
-public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, World.IUniqueOf<T>, World.IUniqueIndex
+public sealed partial class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, World.IUniqueOf<T>, World.IUniqueIndex
     where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
 {
     // A unique component (IUniqueIndexed<TKey>): its world creates the index with its first table holding T, so the
