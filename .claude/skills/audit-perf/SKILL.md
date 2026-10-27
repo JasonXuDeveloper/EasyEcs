@@ -117,6 +117,16 @@ its own worktree.
      /tmp/bench.lock <cmd>`, so a stream of agents testing cannot starve a waiting benchmark. Builds also set
      `MSBUILDDISABLENODEREUSE=1 DOTNET_CLI_USE_MSBUILD_SERVER=0` and `-p:UseSharedCompilation=false` (no server left
      running to load the machine; `dotnet build-server shutdown` stops one);
+   - the lock is shared by every agent, so a queue is planned, not filled: benchmarks run in small batches (a class or
+     a few methods), never hours queued at once; a branch whose code is done and only waits for its final checks goes
+     first (the coordinator pauses the other queues' scripts with SIGSTOP and kills only their flock waiters that have
+     not started measuring, then tells their agents to requeue), so finished work is never stuck behind measurements;
+   - at a size where a gate is off, base and head run the same code: compare the gated form against `Off` inside one
+     head binary (Auto vs Off), because base against head across processes moves 5-10% with where the setup lands in
+     memory; and run one column with the gate forced on at the size just under the last-level cache, which shows
+     which forms would pay there (a per-form gate) and which would not;
+   - a multi-stage prefetch is measured one stage at a time: a stage whose address needs a second lookup (a shared
+     key's list of ids) cost 2.4x at 16M keys;
    - quote BenchmarkDotNet filters (`--filter '*Iterate*'`): an unquoted pattern expands into file names in the shell
      and the run measures nothing;
    - the feature's benchmark plus WorldSimulation, BattleServer, MultiWorld and the neighbors; 0 B in steady state;

@@ -93,11 +93,11 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 4. [ ] **G1** (generator cost, the part phase 2 left): ForEachModel split into a declaration model and
        implementation-only body facts; SystemUpdates without Collect; SetFusions reruns; Systems / SystemPlaces share
        one FAWMN; Kernel's GetSemanticModel calls. G6 (C# 14 extension lookup cost) research only.
-5. [ ] **Generated code tuned for the machine** (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
+5. [ ] **Generated code tuned for the machine** (running: worktree agent, branch `feat-microarch`) (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
        accumulators / unrolling / hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3
        prefetch / streaming stores.
-6. [ ] **Prefetched lookup chases with a size gate** (`feat-prefetch-gate`: row and vector forms; `feat-prefetch-all`,
-       ready to merge: index probes, relation targets, parallel row methods, fused walks and pairs, lambda passes,
+6. [x] **Prefetched lookup chases with a size gate** (`feat-prefetch-gate`: row and vector forms; `feat-prefetch-all`,
+       merged at bbd5c8a; its SVE path is first proven by the arm64 CI job, qemu could not: index probes, relation targets, parallel row methods, fused walks and pairs, lambda passes,
        `World.DestroyEntities`' id list, SVE's PRFB on ARM64; `borrowed-ideas.md` 5, item 1; decision drafts and docs
        to-dos in `docs-todos.md`, "feat-prefetch-all"). The owner's rule "a faster case ships, a slower one never":
        16M 1.28-1.77x across the forms (a shared key's Count 1.04-1.19x), in the cache today's code. A pass prefetches
