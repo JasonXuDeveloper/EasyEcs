@@ -225,8 +225,8 @@ public class PrefetchTests
     }
 
     /// <summary>
-    /// A gate per form: probes on one thread and vector loops' chases past the last-level cache, the forms that pay past
-    /// the L2 (the row form's chases, a parallel pass's probes, DestroyEntities' id list) past one core's L2; an unknown L2
+    /// A gate per form: index probes (parallel ones too) and vector loops' chases past the last-level cache, the forms
+    /// that pay past the L2 (the row form's chases, DestroyEntities' id list) past one core's L2; an unknown L2
     /// falls back to the last-level gate (never more eager than it), an unknown last level with it keeps every form off.
     /// </summary>
     [Test]
@@ -243,7 +243,6 @@ public class PrefetchTests
             Assert.That(Lookup<Beacon>.Prefetches(world), Is.False, "a vector loop's chase in the last level");
             Assert.That(Lookup<Beacon>.PrefetchesPastL2(world), Is.EqualTo(can), "a row form's chase past the L2");
             Assert.That(LookupExtensions.Probes<Login, int>(keys), Is.False, "a probe in the last level");
-            Assert.That(LookupExtensions.ProbesPastL2<Login, int>(keys), Is.EqualTo(can), "a parallel probe past the L2");
             Assert.That(LookupLanes.PrefetchesIds(world, 100), Is.EqualTo(can), "an id list past the L2");
             Assert.That(LookupLanes.PrefetchesIds(world, LookupLanes.IdsAhead), Is.False, "a list no longer than the distance");
         }, l2: 1);
@@ -254,14 +253,13 @@ public class PrefetchTests
         WithCache(1L << 40, () =>
         {
             Assert.That(Lookup<Beacon>.PrefetchesPastL2(world), Is.False, "an unknown L2 in the last level");
-            Assert.That(LookupExtensions.ProbesPastL2<Login, int>(keys), Is.False);
             Assert.That(LookupLanes.PrefetchesIds(world, 100), Is.False);
         }, l2: 0);
         WithCache(1, () => Assert.That(Lookup<Beacon>.PrefetchesPastL2(world), Is.EqualTo(can), "an unknown L2 past the last level"), l2: 0);
         WithCache(0, () =>
         {
             Assert.That(Lookup<Beacon>.PrefetchesPastL2(world), Is.False, "both unknown");
-            Assert.That(LookupExtensions.ProbesPastL2<Login, int>(keys), Is.False);
+            Assert.That(LookupLanes.PrefetchesIds(world, 100), Is.False);
         }, l2: 0);
         Assert.That(LookupLanes.PastCache(16L << 20, 32L << 20), Is.False);
     }
@@ -442,7 +440,7 @@ public class PrefetchTests
             Assert.That(HashSlots<TKey, IndexHead>.Works, Is.True, "the dictionary's fields are where they are read");
             int stride = HashSlots<TKey, IndexHead>.Stride(heads, out var buckets, out var entries, out _);
             Assert.That(stride, Is.GreaterThanOrEqualTo(System.Runtime.CompilerServices.Unsafe.SizeOf<IndexHead>()));
-            WithCache(1, () => index.Probes(1)); // reads the arrays the stages use
+            WithCache(1, () => index.Probes()); // reads the arrays the stages use
             var all = new TKey[count];
             for (int i = 0; i < count; i++) all[i] = key(i);
             int headed = 0, wrong = 0;
@@ -592,10 +590,10 @@ public class PrefetchTests
         Assert.That(text, Does.Contain("WideJob3Chases").And.Contain("ForEachBatchParallel"));
         // The fused walk's twin, picked past the cache before today's walk.
         Assert.That(text, Does.Contain("First_Second_Fused0Chases").And.Contain("FirstJob0Chases"));
-        // A gate per form: a probe on one thread and a vector loop's chases past the last level; the row form's chases
-        // (a buffer's, in parallel, in a fused walk) and a parallel probe past the L2.
-        Assert.That(text, Does.Contain("if (global::EasyEcs.LookupExtensions.Probes<global::Game.Code, int>(world))"));
-        Assert.That(text, Does.Contain("if (global::EasyEcs.LookupExtensions.ProbesPastL2<global::Game.Code, int>(world))"));
+        // A gate per form: probes (in parallel too) and a vector loop's chases past the last level; the row form's chases
+        // (a buffer's, in parallel, in a fused walk) past the L2.
+        Assert.That(text, Does.Contain("if (global::EasyEcs.LookupExtensions.Probes<global::Game.Code, int>(world))")
+            .And.Contain("UniqueParallelJob4Chases"));
         Assert.That(text, Does.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastL2(world))"), "the row form's chases");
         Assert.That(text, Does.Not.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.Prefetches(world))"), "no row form on the last level's gate");
         // Lambda passes: the vector loop's gate in its job, the row form's twin picked at the interceptor.
