@@ -136,6 +136,11 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        moved. All zombies read the gradient of one shared field (nearest player for free; ZombieTargetSystem keeps
        the target for the attack). Proof: TickBenchmark before/after at 50 and 2,000 players, zombies stuck
        before and not after, grids page and VoxelServer page sections.
+       **Built on feat-zombie-field** (sample + README + VoxelServerTests; not merged): step + commit form shipped,
+       the in-place form measured and dropped (an intermittent allocation at 2,000 players), numbers and the page
+       sections in docs-todos.md "feat-zombie-field"; the voxel-server.mdx output blocks must follow the README at
+       merge (check-sample.sh). Left: the docs pass sections; a generator crash found on the way (Kernel on components
+       from another assembly: IndexOutOfRangeException drops every generated file, repro in the report).
 9. [ ] The rest of "Later" below.
 
 ## Done this round (for the record)
