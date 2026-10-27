@@ -17,7 +17,8 @@ namespace EasyEcs.CodeFixes;
 /// <c>EntityRandom</c>'s tick written by hand (CS0200, or CS0272 in source, on <c>Tick++</c> or <c>Tick = ...</c>:
 /// the statement goes; CS1729, CS1501, CS1739 on <c>new EntityRandom(seed, tick)</c> or
 /// <c>SetEntityRandom(seed, tick)</c>: the tick goes; the world advances it on every update), and renamed attributes
-/// (CS0246, or CS0234 when qualified: <c>[IndexKey]</c> is <c>[LookupKey]</c>). EECS090's rename of a method named
+/// (CS0246, or CS0234 when qualified: <c>[IndexKey]</c> is <c>[LookupKey]</c>) and renamed named arguments (CS0246
+/// or CS1739: <c>ChunkRows</c> is <c>ChunkSize</c>). EECS090's rename of a method named
 /// almost like a hook lives here too.
 /// </summary>
 public sealed partial class EasyEcsCodeFixes
@@ -191,6 +192,27 @@ public sealed partial class EasyEcsCodeFixes
             return ($"Rename it to [{renamed}]", name, SyntaxFactory.IdentifierName(now).WithTriviaFrom(name));
         }
 
+        return null;
+    }
+
+    /// <summary>
+    /// The named arguments renamed before 1.0, old name to new: <c>[ForEach(ChunkRows = n)]</c> and the parallel calls'
+    /// <c>chunkRows:</c> took OpenMP's chunk size.
+    /// </summary>
+    private static readonly (string Old, string New)[] RenamedArguments = [("ChunkRows", "ChunkSize"), ("chunkRows", "chunkSize")];
+
+    /// <summary>
+    /// CS0246 on an attribute's named argument (<c>ChunkRows = n</c>) or CS1739 on a call's (<c>chunkRows: n</c>) of a
+    /// renamed name (<see cref="RenamedArguments"/>): the name takes the new one, its value kept. Null for any other name.
+    /// </summary>
+    private static (string Title, SyntaxNode Old, SyntaxNode New)? RenamedArgument(SyntaxNode node)
+    {
+        var name = node.FirstAncestorOrSelf<AttributeArgumentSyntax>() is { NameEquals.Name: { } equals } ? equals
+            : node.FirstAncestorOrSelf<ArgumentSyntax>() is { NameColon.Name: { } colon } ? colon : null;
+        if (name == null) return null;
+        foreach (var (old, renamed) in RenamedArguments)
+            if (name.Identifier.ValueText == old)
+                return ($"Rename it to {renamed}", name, SyntaxFactory.IdentifierName(renamed).WithTriviaFrom(name));
         return null;
     }
 

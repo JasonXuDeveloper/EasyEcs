@@ -61,8 +61,8 @@ public static class Lanes
     }
 
     /// <summary>
-    /// Write the numbers of the rows <paramref name="mask"/> selects, <paramref name="first"/> + the index of each set
-    /// bit, to the start of <paramref name="destination"/> in order, and return how many: the row list of a word of
+    /// Write the selection vector of <paramref name="mask"/> (DuckDB's and Vectorwise's: the numbers of the rows it selects, <paramref name="first"/> + the index of each set
+    /// bit), to the start of <paramref name="destination"/> in order, and return how many: the row list of a word of
     /// rows a vector condition passed, which generated loops and the core write with this one call whatever the
     /// machine (<see cref="Compact{T}"/> over the numbers 0 to 63, then <paramref name="first"/> added in vectors).
     /// O(64 / lanes per vector); allocation-free.
@@ -73,14 +73,14 @@ public static class Lanes
     /// <returns>The number of rows written.</returns>
     /// <exception cref="ArgumentException"><paramref name="destination"/> is too short.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static int RowNumbers(ulong mask, int first, Span<int> destination)
+    public static int Selection(ulong mask, int first, Span<int> destination)
     {
         int n = Compact<int>(Numbers, mask, destination);
         if (first != 0 && n != 0) Offset(destination.Slice(0, n), first);
         return n;
     }
 
-    // 0 to 63: the rows of a word RowNumbers compacts. Literal data in the assembly (RVA), so no static to initialize: under
+    // 0 to 63: the rows of a word Selection compacts. Literal data in the assembly (RVA), so no static to initialize: under
     // Native AOT a static readonly array would cost a class-initialization check per call.
     private static ReadOnlySpan<int> Numbers =>
     [

@@ -52,7 +52,7 @@ public sealed class ForEachAttribute : Attribute
     /// chunks that share a 4,096-row block of change ticks share its summary (atomically). Default 0: chosen by the
     /// runtime. Not without <see cref="Parallel"/> and not below 0 (EECS054).
     /// </summary>
-    public int ChunkRows { get; init; }
+    public int ChunkSize { get; init; }
 
     /// <summary>
     /// Whether the generator turns the method into a <c>System.Numerics.Vector&lt;T&gt;</c> loop over its runs of rows

@@ -38,15 +38,15 @@ public interface IUniqueIndexed<TKey> : IIndexed<TKey>, IUniqueIndexed where TKe
 /// modulo the side of the loaded area); its array costs <see cref="Slots"/> times the key and 12 bytes, allocated with
 /// the index.
 /// <code>
-/// public record struct Cell(int X, int Y) : IComponent, IDirectIndexed&lt;(int, int)&gt;
+/// public record struct Cell(int X, int Y) : IComponent, IDirectMapped&lt;(int, int)&gt;
 /// {
 ///     public (int, int) Key => (X, Y);
-///     static int IDirectIndexed&lt;(int, int)&gt;.Slots => 64 * 64;
-///     static int IDirectIndexed&lt;(int, int)&gt;.SlotOf((int, int) key) => (key.Item2 &amp; 63) * 64 + (key.Item1 &amp; 63);
+///     static int IDirectMapped&lt;(int, int)&gt;.Slots => 64 * 64;
+///     static int IDirectMapped&lt;(int, int)&gt;.SlotOf((int, int) key) => (key.Item2 &amp; 63) * 64 + (key.Item1 &amp; 63);
 /// }
 /// </code>
 /// </summary>
-public interface IDirectIndexed<TKey> : IUniqueIndexed<TKey> where TKey : IEquatable<TKey>
+public interface IDirectMapped<TKey> : IUniqueIndexed<TKey> where TKey : IEquatable<TKey>
 {
     /// <summary>The length of the slot array (cold: read once, when a world creates the index).</summary>
     static abstract int Slots { get; }
@@ -93,7 +93,7 @@ internal static class UniqueIndexOf<T> where T : struct, IComponent
 }
 
 /// <summary>
-/// The slot function of a direct-indexed component (<see cref="IDirectIndexed{TKey}"/>) for an index that knows only
+/// The slot function of a direct-indexed component (<see cref="IDirectMapped{TKey}"/>) for an index that knows only
 /// its key type: one sealed subclass per component, set when its module loads (<see cref="TypeRegistry.DirectIndex{T,TKey}"/>,
 /// generated). Without it, the index of such a component is a plain unique index.
 /// </summary>
@@ -104,7 +104,7 @@ internal abstract class KeySlots<TKey>
     public abstract int SlotOf(TKey key);
 }
 
-internal sealed class KeySlots<T, TKey> : KeySlots<TKey> where T : IDirectIndexed<TKey> where TKey : IEquatable<TKey>
+internal sealed class KeySlots<T, TKey> : KeySlots<TKey> where T : IDirectMapped<TKey> where TKey : IEquatable<TKey>
 {
     public override int Length => T.Slots;
 

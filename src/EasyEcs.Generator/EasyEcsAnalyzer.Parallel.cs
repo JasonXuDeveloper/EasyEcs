@@ -322,7 +322,7 @@ public static partial class EasyEcsAnalyzer
             if (!own.Contains(field)) continue;
             var fix = method.Name != "ForParallel" // no serial twin: the caller calls Execute itself
                       && call.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name: var name } }
-                      && call.Arguments.All(a => a.Parameter?.Name != "chunkRows" || a.IsImplicit)
+                      && call.Arguments.All(a => a.Parameter?.Name != "chunkSize" || a.IsImplicit)
                 ? Fix(call.Syntax.ReplaceToken(name.Identifier, SyntaxFactory.Identifier(method.Name.Substring(0, method.Name.Length - "Parallel".Length))).ToString(),
                     "Run it on one thread")
                 : null;

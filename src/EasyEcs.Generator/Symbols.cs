@@ -38,7 +38,7 @@ internal static class Symbols
     public const string TrackChanges = "EasyEcs.ITracked";
     public const string Indexed = "EasyEcs.IIndexed<TKey>";
     public const string UniqueIndexed = "EasyEcs.IUniqueIndexed<TKey>";
-    public const string DirectIndexed = "EasyEcs.IDirectIndexed<TKey>";
+    public const string DirectMapped = "EasyEcs.IDirectMapped<TKey>";
     public const string Group = "EasyEcs.IGroup";
     public const string Relation = "EasyEcs.IRelation";
     public const string GroupByAttribute = "EasyEcs.GroupByAttribute";
@@ -1121,8 +1121,8 @@ internal static class Symbols
     /// <summary>The N of [ForEach(Slices = N)] (1 without it).</summary>
     public static int Slices(IMethodSymbol method) => ForEachArgument(method, "Slices", 1);
 
-    /// <summary>[ForEach(ChunkRows = N)]: the rows a thread of a parallel pass takes at a time (0: chosen by the runtime).</summary>
-    public static int ChunkRows(IMethodSymbol method) => ForEachArgument(method, "ChunkRows", 0);
+    /// <summary>[ForEach(ChunkSize = N)]: the rows a thread of a parallel pass takes at a time (0: chosen by the runtime).</summary>
+    public static int ChunkSize(IMethodSymbol method) => ForEachArgument(method, "ChunkSize", 0);
 
     /// <summary>[ForEach(FusionMode = FusionMode.X)]: 0 Auto, 1 Require, 2 Off (the values of EasyEcs.FusionMode).</summary>
     public static int Fusion(IMethodSymbol method) => ForEachArgument(method, "FusionMode", 0);
@@ -1206,11 +1206,11 @@ internal static class Symbols
         return null;
     }
 
-    /// <summary>Why a method's [ForEach(ChunkRows = N)] is invalid (EECS054), or null: N below 0, or set on a method that does not run in parallel.</summary>
-    public static string? ChunkRowsProblem(IMethodSymbol method)
+    /// <summary>Why a method's [ForEach(ChunkSize = N)] is invalid (EECS054), or null: N below 0, or set on a method that does not run in parallel.</summary>
+    public static string? ChunkSizeProblem(IMethodSymbol method)
     {
-        int rows = ChunkRows(method);
-        if (rows < 0) return $"ChunkRows = {rows} must be 0 (chosen by the runtime) or more";
+        int rows = ChunkSize(method);
+        if (rows < 0) return $"ChunkSize = {rows} must be 0 (chosen by the runtime) or more";
         if (rows > 0 && !IsParallel(method)) return "the method does not run in parallel (Parallel = true), so it has no chunks";
         return null;
     }
@@ -1426,7 +1426,7 @@ internal static class Symbols
         if (!method.IsStatic || outside && EntryPointCollides(method)) return false;
         if (!outside && !IsValidSystem(type)) return false; // EECS074: no system code
         if (method.IsGenericMethod && !outside || Unnameable(method) != null) return false; // a system's method gets no type arguments
-        if (SlicesProblem(method) != null || ChunkRowsProblem(method) != null) return false;
+        if (SlicesProblem(method) != null || ChunkSizeProblem(method) != null) return false;
         int components = 0;
         foreach (var p in method.Parameters)
         {

@@ -85,7 +85,7 @@ public sealed class LookupKeyAttribute : Attribute;
 /// <summary>
 /// <see cref="LookupKeyAttribute"/> for a key that names one entity (<see cref="IUniqueIndexed{TKey}"/>): the generator adds
 /// <c>IUniqueIndexed&lt;TKey&gt;</c> with the explicit <c>Key</c>. A struct that declares
-/// <see cref="IDirectIndexed{TKey}"/> keeps its own <c>Slots</c> and <c>SlotOf</c>; only <c>Key</c> is generated.
+/// <see cref="IDirectMapped{TKey}"/> keeps its own <c>Slots</c> and <c>SlotOf</c>; only <c>Key</c> is generated.
 /// </summary>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter | AttributeTargets.Struct)]
 public sealed class UniqueKeyAttribute : Attribute;

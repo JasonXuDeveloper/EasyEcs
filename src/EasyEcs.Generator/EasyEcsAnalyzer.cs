@@ -166,12 +166,12 @@ public static partial class EasyEcsAnalyzer
         "that tick: the rows of the slices not visited would lose their changes. Drop Slices, or read the changes " +
         "every run and spread the work they cause.", helpLinkUri: Help("EECS035"));
 
-    public static readonly DiagnosticDescriptor BadChunkRows = new("EECS054", "Invalid [ForEach(ChunkRows = N)]",
-        "[ForEach] method '{0}' cannot set ChunkRows: {1}",
+    public static readonly DiagnosticDescriptor BadChunkSize = new("EECS054", "Invalid [ForEach(ChunkSize = N)]",
+        "[ForEach] method '{0}' cannot set ChunkSize: {1}",
         Category, DiagnosticSeverity.Error, true,
-        "ChunkRows is the rows a thread of a parallel pass takes at a time: 0 lets the runtime choose from the rows' measured cost, " +
+        "ChunkSize is the rows a thread of a parallel pass takes at a time: 0 lets the runtime choose from the rows' measured cost, " +
         "more sets it (rounded up to 64). A method without Parallel = true runs on one thread and has no chunks: set " +
-        "Parallel = true or drop ChunkRows.", helpLinkUri: Help("EECS054"));
+        "Parallel = true or drop ChunkSize.", helpLinkUri: Help("EECS054"));
 
     public static readonly DiagnosticDescriptor ReductionOverwritten = new("EECS057", "A reduction whose result another write replaces",
         "Parameter '{0}' of [ForEach] method '{1}' reduces into {2}, but {3}",
@@ -766,9 +766,9 @@ public static partial class EasyEcsAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));
         if (Symbols.SlicesProblem(method) is { } slices)
             context.ReportDiagnostic(Diagnostic.Create(BadSlices, location, method.Name, slices));
-        if (Symbols.ChunkRowsProblem(method) is { } chunks)
-            context.ReportDiagnostic(Diagnostic.Create(BadChunkRows, location, // dropped, the method runs as without it
-                ImmutableDictionary<string, string?>.Empty.Add(FixKind, "ChunkRows"), method.Name, chunks));
+        if (Symbols.ChunkSizeProblem(method) is { } chunks)
+            context.ReportDiagnostic(Diagnostic.Create(BadChunkSize, location, // dropped, the method runs as without it
+                ImmutableDictionary<string, string?>.Empty.Add(FixKind, "ChunkSize"), method.Name, chunks));
         if (Symbols.Unnameable(method) is { } unnameable)
             context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, // the type its code fix makes internal, with its containers
                 Symbols.Hidden(unnameable)?.Locations.Where(l => l.IsInSource) ?? [],
@@ -897,7 +897,7 @@ public sealed class DeclarationAnalyzer : EasyEcsAnalyzer.Area
         EasyEcsAnalyzer.BadParameter, EasyEcsAnalyzer.ComponentCount, EasyEcsAnalyzer.Generic, EasyEcsAnalyzer.NotASystem, EasyEcsAnalyzer.NotStruct, EasyEcsAnalyzer.MixedBatch,
         EasyEcsAnalyzer.NotParallel, EasyEcsAnalyzer.WriteThroughReadOnly, EasyEcsAnalyzer.BufferCopy, EasyEcsAnalyzer.HiddenStructuralChange, EasyEcsAnalyzer.OffThreadStructuralChange, EasyEcsAnalyzer.EntityInData,
         EasyEcsAnalyzer.OrderCycle, EasyEcsAnalyzer.OrderAcrossGroups, EasyEcsAnalyzer.EntryPointCollision, EasyEcsAnalyzer.FilterOutsideGroup, EasyEcsAnalyzer.LocalForEach, EasyEcsAnalyzer.BadSlices,
-        EasyEcsAnalyzer.BadChunkRows, EasyEcsAnalyzer.ReductionOverwritten, EasyEcsAnalyzer.LookupOfWritten, EasyEcsAnalyzer.BadEmit, EasyEcsAnalyzer.BadForEntity, EasyEcsAnalyzer.BadTileShape,
+        EasyEcsAnalyzer.BadChunkSize, EasyEcsAnalyzer.ReductionOverwritten, EasyEcsAnalyzer.LookupOfWritten, EasyEcsAnalyzer.BadEmit, EasyEcsAnalyzer.BadForEntity, EasyEcsAnalyzer.BadTileShape,
         EasyEcsAnalyzer.IndexedByRef, EasyEcsAnalyzer.BadIndexedKey, EasyEcsAnalyzer.Unnameable,
         EasyEcsAnalyzer.SharedTile);
 

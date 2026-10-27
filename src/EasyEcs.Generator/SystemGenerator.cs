@@ -1023,11 +1023,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// <summary>[ForEach(Slices = N)]: visits one of N slices of its rows per run (1: all of them).</summary>
         public int Slices { get; init; } = 1;
 
-        /// <summary>[ForEach(Parallel = true, ChunkRows = N)]: the rows a thread takes at a time (0: chosen by the runtime).</summary>
-        public int ChunkRows { get; init; }
+        /// <summary>[ForEach(Parallel = true, ChunkSize = N)]: the rows a thread takes at a time (0: chosen by the runtime).</summary>
+        public int ChunkSize { get; init; }
 
-        /// <summary>The chunkRows argument of a parallel call that sets it, else nothing.</summary>
-        public string Chunks => Parallel && ChunkRows > 0 ? $", chunkRows: {ChunkRows}" : "";
+        /// <summary>The chunkSize argument of a parallel call that sets it, else nothing.</summary>
+        public string Chunks => Parallel && ChunkSize > 0 ? $", chunkSize: {ChunkSize}" : "";
 
         /// <summary>Uses its Entity parameters (if any) only as identities (<see cref="Symbols.OnlyIdentifies"/>).</summary>
         public bool Identifies { get; init; }
@@ -1293,7 +1293,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 // A public entry point names only public types: its context parameters' and its constraints'.
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
                     && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
-                    Slices = Symbols.Slices(method), ChunkRows = Symbols.ChunkRows(method), Identifies = identifies,
+                    Slices = Symbols.Slices(method), ChunkSize = Symbols.ChunkSize(method), Identifies = identifies,
                     One = Symbols.IsForEntity(method), Consume = Symbols.IsConsume(method), Record = record,
                     // Kernel.Vectorize decides alone (static, stable, its body; in parallel too): the analyzer reports its reasons.
                     // One entity has no run of rows to vectorize; a system's loop is its implementation's (SystemLoops).

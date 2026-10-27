@@ -22,7 +22,7 @@ public static partial class EasyEcsAnalyzer
         "Consecutive [ForEach] methods of a system that visit the same rows run as one walk: each row is loaded into cache " +
         "once and every method runs on it in turn (pass fusion). The generator fuses them when one walk gives the results of " +
         "separate passes. This message names what keeps two methods apart when they almost qualify: filters that differ by " +
-        "one component, different Parallel / ChunkRows / Slices, a Lookup<T> of a component the other writes, a singleton " +
+        "one component, different Parallel / ChunkSize / Slices, a Lookup<T> of a component the other writes, a singleton " +
         "or change filter one reads and the other writes. Change it if the difference is not needed; a pass that must see " +
         "the whole result of the other stays apart, and FusionMode.Off silences the message.", helpLinkUri: Help("EECS093"));
 

@@ -27,7 +27,7 @@ public sealed partial class World
     private readonly Lock _parallelWorkLock = new();
 
     /// <summary>
-    /// The most rows per chunk of a parallel [ForEach] that does not set its own (<c>chunkRows</c>) before its rows' cost
+    /// The most rows per chunk of a parallel [ForEach] that does not set its own (<c>chunkSize</c>) before its rows' cost
     /// is measured. Chunks hold about a quarter of each thread's share of the matching rows (at least 1,024): equal
     /// chunks finish together, and four per thread even out uneven rows. Once a run has measured the rows' cost, chunks
     /// follow it instead: four per thread, unless that makes them longer than about 25 µs (heavy rows: more, smaller
@@ -37,7 +37,7 @@ public sealed partial class World
 
     /// <summary>
     /// Rows per chunk for <paramref name="work"/>'s pass over <paramref name="tables"/> (over one of
-    /// <paramref name="slices"/> slices of each, <see cref="QueryFilter.Slice"/>): <paramref name="chunkRows"/> rounded up
+    /// <paramref name="slices"/> slices of each, <see cref="QueryFilter.Slice"/>): <paramref name="chunkSize"/> rounded up
     /// to 64 when given (the caller knows better, OpenMP's <c>schedule(dynamic, n)</c>); else what the rows' measured cost
     /// gives (<see cref="ParallelWork.Rows"/>), or before any run about four chunks per thread, between 1,024 and
     /// <see cref="MaxChunkRows"/>. Always a multiple of 64: presence-bit words and change-tick words never straddle
@@ -47,9 +47,9 @@ public sealed partial class World
     /// <paramref name="merges"/> partial results per chunk cuts <see cref="MergedChunks"/> chunks whatever the threads and
     /// the cost, so its result does not depend on them.
     /// </summary>
-    internal int ChunkRows(ParallelWork work, Archetype[] tables, bool stamps, bool merges, int slices = 0, int chunkRows = 0)
+    internal int ChunkRows(ParallelWork work, Archetype[] tables, bool stamps, bool merges, int slices = 0, int chunkSize = 0)
     {
-        if (chunkRows > 0) return ChunkRows(work, 0, chunkRows);
+        if (chunkSize > 0) return ChunkRows(work, 0, chunkSize);
         long rows = 0;
         for (int i = 0; i < tables.Length; i++) rows += tables[i].Count;
         if (slices > 1) rows /= slices; // a sliced pass visits about 1 / slices of them
@@ -71,7 +71,7 @@ public sealed partial class World
 
     /// <summary>
     /// The chunks a pass that merges per chunk (a <see cref="Reduce{T}"/>, an <see cref="Emit{T}"/>) cuts its rows into
-    /// when it does not set <c>ChunkRows</c>: a constant, so its chunk boundaries follow the row count alone and a
+    /// when it does not set <c>ChunkSize</c>: a constant, so its chunk boundaries follow the row count alone and a
     /// floating-point result is the same bits at any <see cref="WorldOptions.MaxDegreeOfParallelism"/> (the threads only
     /// share the chunks out). Four per thread at four threads; tables of 262,144 rows or more get chunks of
     /// <see cref="MaxChunkRows"/> rows, more than enough for any thread count.
@@ -80,14 +80,14 @@ public sealed partial class World
 
     /// <summary>
     /// Items per chunk for <paramref name="items"/> items of <paramref name="work"/> (rows of a pass, elements of
-    /// <see cref="ForParallel{TJob}"/>): <paramref name="chunkRows"/> rounded up to 64 when given, else by the items'
+    /// <see cref="ForParallel{TJob}"/>): <paramref name="chunkSize"/> rounded up to 64 when given, else by the items'
     /// measured cost (<see cref="ParallelWork.Rows"/>), else about four chunks per thread, a multiple of 64 between
     /// 1,024 and <see cref="MaxChunkRows"/>.
     /// </summary>
-    private int ChunkRows(ParallelWork work, long items, int chunkRows)
+    private int ChunkRows(ParallelWork work, long items, int chunkSize)
     {
-        work.Items = chunkRows > 0 ? 0 : items;
-        if (chunkRows > 0) return (int)Math.Min((chunkRows + 63L) & ~63L, int.MaxValue & ~63);
+        work.Items = chunkSize > 0 ? 0 : items;
+        if (chunkSize > 0) return (int)Math.Min((chunkSize + 63L) & ~63L, int.MaxValue & ~63);
         int threads = Helpers + 1;
         if (work.Rows(items, threads) is var size and > 0) return size;
         long share = items / (threads * 4L);

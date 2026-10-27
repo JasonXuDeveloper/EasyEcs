@@ -1412,8 +1412,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// <see cref="{{name}}{{{tps}}, TJob}(ref TJob, in QueryFilter)"/> on several threads: the matching rows are cut into chunks (a multiple of
                 /// 64 rows: about four per thread, at most <see cref="MaxChunkRows"/>, until a call has measured the rows' cost,
                 /// then chunks of about 25 µs for heavy rows and fewer for a short pass; 16 for a job that merges, whatever
-                /// the threads and the cost, so its result does not depend on them; or <paramref name="chunkRows"/> rounded
-                /// up to 64: <c>[ForEach(Parallel = true, ChunkRows = n)]</c>) that the calling thread and up to
+                /// the threads and the cost, so its result does not depend on them; or <paramref name="chunkSize"/> rounded
+                /// up to 64: <c>[ForEach(Parallel = true, ChunkSize = n)]</c>) that the calling thread and up to
                 /// <see cref="WorldOptions.MaxDegreeOfParallelism"/> - 1 helper threads run at the same time, each with its own copy of <paramref name="job"/> (state
                 /// a job keeps in its fields is not merged back, unless the job merges: <c>Merges</c>, a <c>Reduce&lt;T&gt;</c>;
                 /// its copies, one per chunk, the size of the job's fields, are then kept in an array reused by every call and
@@ -1422,13 +1422,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// during the call. Fewer than two chunks of rows, or a runner already busy, run on the calling thread.
                 /// Allocation-free after the first call per job type.
                 /// </summary>
-                public void {{name}}Parallel<{{tps}}, TJob>(ref TJob job, in QueryFilter filter = default, int chunkRows = 0)
+                public void {{name}}Parallel<{{tps}}, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0)
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, INoStructuralChanges
                 {
                     var match = Match<{{tps}}, TJob>(TJob.OneQuery, in filter, {{List(n, i => $"out var b{i}")}});
                     var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
-                    int chunks = work.Cut(this, match, in filter, chunkRows, ref job, {{bits}});
+                    int chunks = work.Cut(this, match, in filter, chunkSize, ref job, {{bits}});
                     try
                     {
                         RunChunks(work, chunks);
@@ -1457,7 +1457,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{Lines(n, i => $"            private ushort _b{i};")}}
 
                     /// <summary>Cut the matching rows into chunks; returns how many.</summary>
-                    public int Cut(World world, QueryMatch match, in QueryFilter filter, int chunkRows, ref TJob job, {{ushorts}})
+                    public int Cut(World world, QueryMatch match, in QueryFilter filter, int chunkSize, ref TJob job, {{ushorts}})
                     {
                         _world = world;
                         Job = job;
@@ -1466,7 +1466,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         var archetypes = match.Archetypes;
                         // A job writing a tracked component stamps change-tick summaries shared by 4,096 rows (a JIT-time constant).
                         bool stamps = {{List(n, i => $"(TJob.WriteMask & {1 << (i - 1)}) != 0 && default(T{i}) is ITracked", " || ")}} || TJob.OptionalWrites.HasComponents;
-                        int size = world.ChunkRows(this, archetypes, stamps, TJob.Merges, filter.SliceCount, chunkRows);
+                        int size = world.ChunkRows(this, archetypes, stamps, TJob.Merges, filter.SliceCount, chunkSize);
                         bool open = stamps && (size & 4095) != 0; // chunks split blocks: open them first (Archetype.OpenBlocks)
                         for (int a = 0; a < archetypes.Length; a++)
                         {

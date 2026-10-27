@@ -107,10 +107,10 @@ public static class TypeRegistry
     }
 
     /// <summary>
-    /// <see cref="UniqueIndex{T,TKey}"/> for a direct-indexed component (<see cref="IDirectIndexed{TKey}"/>): its worlds'
+    /// <see cref="UniqueIndex{T,TKey}"/> for a direct-indexed component (<see cref="IDirectMapped{TKey}"/>): its worlds'
     /// indexes also keep the slot array.
     /// </summary>
-    public static void DirectIndex<T, TKey>() where T : struct, IComponent, IDirectIndexed<TKey> where TKey : IEquatable<TKey>
+    public static void DirectIndex<T, TKey>() where T : struct, IComponent, IDirectMapped<TKey> where TKey : IEquatable<TKey>
     {
         if (typeof(TKey) == typeof(EntityId)) return;
         KeySlotsOf<T>.Map ??= new KeySlots<T, TKey>();

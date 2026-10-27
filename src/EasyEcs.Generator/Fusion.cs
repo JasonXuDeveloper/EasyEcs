@@ -39,7 +39,7 @@ internal static class Fusion
         if (second.Blocker != null) return second.Blocker;
         if (first.Parallel != second.Parallel)
             return first.Parallel ? $"{first.Name} runs in parallel and {second.Name} does not" : $"{second.Name} runs in parallel and {first.Name} does not";
-        if (first.ChunkRows != second.ChunkRows) return $"their ChunkRows differ ({first.ChunkRows} and {second.ChunkRows})";
+        if (first.ChunkSize != second.ChunkSize) return $"their ChunkSize values differ ({first.ChunkSize} and {second.ChunkSize})";
         if (first.Slices != second.Slices) return $"their Slices differ ({first.Slices} and {second.Slices})";
         if (FilterDifference(first, second) is { } filter) return filter;
         if (Shared(first.Writes, second.Since) is { } changed)
@@ -119,7 +119,7 @@ internal static class Fusion
 internal sealed record FusionSide(string Name, EquatableArray<string> Query, EquatableArray<string> With,
     EquatableArray<string> Without, EquatableArray<string> WithAny, EquatableArray<string> Filters, EquatableArray<string> Writes,
     EquatableArray<string> Since, EquatableArray<string> Remote, EquatableArray<string> SingletonReads,
-    EquatableArray<string> SingletonWrites, EquatableArray<string> Scratches, bool Parallel, int ChunkRows, int Slices, string? Blocker)
+    EquatableArray<string> SingletonWrites, EquatableArray<string> Scratches, bool Parallel, int ChunkSize, int Slices, string? Blocker)
 {
     /// <summary>
     /// The side of a [ForEach] method of a system (<paramref name="stable"/>: it makes no structural change;
@@ -244,6 +244,6 @@ internal sealed record FusionSide(string Name, EquatableArray<string> Query, Equ
         return new FusionSide(method.Name, new(query.ToArray()), new(with.ToArray()), new(without.ToArray()), new(withAny.ToArray()),
             new(filters.ToArray()), new(writes.Distinct().ToArray()), new(since.ToArray()), new(remote.Distinct().ToArray()),
             new(reads.Distinct().ToArray()), new(singletons.Distinct().ToArray()), new(scratches.Distinct().ToArray()),
-            parallel, parallel ? Symbols.ChunkRows(method) : 0, Symbols.Slices(method), blocker);
+            parallel, parallel ? Symbols.ChunkSize(method) : 0, Symbols.Slices(method), blocker);
     }
 }

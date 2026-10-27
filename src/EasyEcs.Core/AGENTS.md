@@ -32,7 +32,7 @@ EcsSystem.cs                 [EcsSystem] (a system: a ref struct of static membe
                              access and cadence) and ISystemSet (one generated __EasyEcsSystems per assembly: the
                              switch over its systems' codes, registered by a module initializer, weakly held for
                              collectible assemblies), the registry World.AddSystem<T> resolves a type through
-ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkRows, SimdMode), [With<T>], [Without<T>], [Changed<T>],
+ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkSize, SimdMode), [With<T>], [Without<T>], [Changed<T>],
                              [Removed<T>] ([WithAny<..>] / [ChangedAny<..>] / [RemovedAny<..>] are generated: Filters.g.cs),
                              [Consume] (the visited rows destroyed after the pass), [ForEntity] (a static method run
                              on one entity through a generated entry point), [ForEachRecord] (a static method run on
@@ -87,7 +87,7 @@ LaneMath.cs                  lane functions of generated vector loops .NET has n
                              int / uint lanes through doubles (exact), FloatMode.Fast's Log10 / Sinh / Cosh / Tanh of floats
 Lanes.cs                     Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress,
                              AVX2 permutation table, 128-bit byte shuffle: NEON TBL / PSHUFB, picked at run time), for
-                             batch methods, Emit and CollectIds; Lanes.RowNumbers: a mask to row numbers over it (the one
+                             batch methods, Emit and CollectIds; Lanes.Selection: a mask to row numbers over it (the one
                              helper generated loops call); Lanes.Ballot: a vector loop's lane mask as bits (CUDA's ballot)
 MarkedRows.cs                the rows a vector loop marked for one structural change (words of 64 rows per table,
                              pooled per world), applied when the pass ends: SetAll / RemoveAll / DisableAll /

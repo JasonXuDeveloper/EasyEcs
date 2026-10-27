@@ -30,7 +30,7 @@ public interface IReduction<T> where T : struct
 /// <para>
 /// Integer results are exact and do not depend on the threads. A floating-point result depends on where chunks
 /// begin, since each chunk's sum is rounded on its own. Chunks of a pass that reduces begin where the row count alone
-/// says (16 chunks of 1,024 to 16,384 rows, or <see cref="ForEachAttribute.ChunkRows"/> when set), so the result is the
+/// says (16 chunks of 1,024 to 16,384 rows, or <see cref="ForEachAttribute.ChunkSize"/> when set), so the result is the
 /// same on every run and for any thread count, but not bit for bit the result of the same method with
 /// <c>Parallel = false</c> (one partial result).
 /// </para>

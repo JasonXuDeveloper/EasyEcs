@@ -877,7 +877,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             return new ComponentModel(ns, fqn, type.Name, Symbols.FlatName(type), Symbols.HintName(type), isPublic, shape,
                 key?.ToDisplayString(Symbols.Fqn) ?? "",
                 unique && key != null && !Symbols.Named(key, Symbols.EntityId) && key is not ITypeParameterSymbol,
-                type.AllInterfaces.Any(i => Symbols.Named(i.OriginalDefinition, Symbols.DirectIndexed)),
+                type.AllInterfaces.Any(i => Symbols.Named(i.OriginalDefinition, Symbols.DirectMapped)),
                 new EquatableArray<Setter>(setters), new EquatableArray<string>(shape.Members(type, easyEcs, compilation)),
                 new EquatableArray<string>(shape.Kind == Kind.Singleton ? [] : Symbols.EntityIdPaths(type, compilation)),
                 Symbols.LayoutHash(type) ?? "");

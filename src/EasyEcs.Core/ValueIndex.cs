@@ -321,7 +321,7 @@ public sealed partial class ValueIndex<T, TKey> : World.IValueIndex, World.IInde
         public bool Linked;
     }
 
-    // A direct-indexed component (IDirectIndexed<TKey>): the slot of each key, holding the key and its entity, or
+    // A direct-indexed component (IDirectMapped<TKey>): the slot of each key, holding the key and its entity, or
     // counting the keys of the slot only the hash holds (Spilled: a collision). Kept by Link and Unlink, cleared with the
     // index, so it always agrees with the hash. Null for any other index.
     private readonly KeySlots<TKey> _keySlots;

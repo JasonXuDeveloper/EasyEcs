@@ -108,6 +108,10 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                                    && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false):
                     Register(context, diagnostic, renamed.Title, root, renamed.Old, renamed.New);
                     break;
+                case "CS0246" or "CS1739" when RenamedArgument(node) is { } renamedArgument
+                                               && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false):
+                    Register(context, diagnostic, renamedArgument.Title, root, renamedArgument.Old, renamedArgument.New);
+                    break;
                 case "EECS090" when kind == "Hook" && diagnostic.Properties.TryGetValue("Hook", out var hook) && hook != null
                                     && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method:
                     Register(context, diagnostic, $"Rename it to {hook}", root, method, RenamedHook(method, hook));
@@ -234,9 +238,9 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     Register(context, diagnostic, taken == null ? $"Use parameter '{name}'" : $"Take it as a parameter ('{taken}')", root, method,
                         Lookups(root, method, diagnostic.AdditionalLocations, name, taken, through));
                     break;
-                case "EECS054" when kind == "ChunkRows" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
-                                    && Named(method, "ChunkRows") is { Parent: AttributeArgumentListSyntax list } chunks:
-                    Register(context, diagnostic, "Remove ChunkRows", root, list,
+                case "EECS054" when kind == "ChunkSize" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
+                                    && Named(method, "ChunkSize") is { Parent: AttributeArgumentListSyntax list } chunks:
+                    Register(context, diagnostic, "Remove ChunkSize", root, list,
                         list.Arguments.Count == 1 ? null : list.RemoveNode(chunks, SyntaxRemoveOptions.KeepNoTrivia));
                     break;
                 case "EECS071" when kind == "Random" && diagnostic.Properties.TryGetValue("Text", out var draw) && draw != null
@@ -777,7 +781,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                 .Add(SyntaxFactory.Token(SyntaxKind.CommaToken).WithTrailingTrivia(SyntaxFactory.Space)).Add(added))));
     }
 
-    /// <summary>The named argument <paramref name="name"/> of the method's [ForEach] attribute (EECS010: <c>Parallel = true</c>, EECS054: <c>ChunkRows = 64</c>).</summary>
+    /// <summary>The named argument <paramref name="name"/> of the method's [ForEach] attribute (EECS010: <c>Parallel = true</c>, EECS054: <c>ChunkSize = 64</c>).</summary>
     private static AttributeArgumentSyntax? Named(MethodDeclarationSyntax method, string name) =>
         method.AttributeLists.SelectMany(l => l.Attributes).Where(IsForEach)
             .SelectMany(a => a.ArgumentList?.Arguments ?? default)
@@ -830,7 +834,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
     /// <summary>
     /// EECS067 (and EECS043's second fix): a hand-written Key returning <paramref name="member"/> (<c>this</c>: the value)
     /// declared with <c>[LookupKey]</c> (<c>[UniqueKey]</c> for a unique index) on that member or the type; the Key and the
-    /// IIndexed / IUniqueIndexed of the base list go (an IDirectIndexed stays: its Slots and SlotOf are the user's), the
+    /// IIndexed / IUniqueIndexed of the base list go (an IDirectMapped stays: its Slots and SlotOf are the user's), the
     /// type becomes partial along its chain. A hand-written Group (EECS067) gets <c>[Group]</c> on its member the same
     /// way, its IGroup going. Null when code reads the member through the type.
     /// </summary>
