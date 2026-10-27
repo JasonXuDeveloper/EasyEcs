@@ -39,7 +39,7 @@
             <summary>
             <typeparamref name="T" /> 的缓冲被销毁或移除时，最长多少个元素的列表会还给回收池，留给下一个缓冲第一次写入时重用，免得再分配，不论在哪个线程：
             拥有者线程收回的列表，也能给并行 <c>[ForEach]</c> 的第一次写入用（默认是 4,096 字节能放下的元素个数，<c>byte</c> 或单字节枚举就是 4,096）。更长的列表交给 GC。同样大小、大量反复出现又消失的缓冲可以调高它，
-            比如玩家周围加载又卸载的区块里的方块；设为 0 则什么都不回收。池里最多保留“没人取用期间销毁的列表”那么多个，所以它占用的内存是这个峰值乘以这个容量。
+            比如玩家周围加载又卸载的地形里的方块；设为 0 则什么都不回收。池里最多保留“没人取用期间销毁的列表”那么多个，所以它占用的内存是这个峰值乘以这个容量。
             对整个进程、所有 World 和线程生效：在启动时、World 用到这个类型之前设置。
             </summary>
             <exception cref="T:System.ArgumentOutOfRangeException">值为负数。</exception>
@@ -48,7 +48,7 @@
   <member name="M:EasyEcs.DynamicBuffer`1.FillPool(System.Int32)" source="ec1573b0386c">
             <summary>
             往池里补列表，直到池里有 <paramref name="lists" /> 个，每个能放 <see cref="P:EasyEcs.DynamicBuffer`1.MaxPooledLength" /> 个元素，
-            这么多个缓冲第一次写入时就从池里取列表，不用分配：知道自己峰值时要保留多少个 <typeparamref name="T" /> 缓冲（玩家周围的区块）的服务器，
+            这么多个缓冲第一次写入时就从池里取列表，不用分配：知道自己峰值时要保留多少个 <typeparamref name="T" /> 缓冲（玩家周围的地形）的服务器，
             在启动时一次付清，世界增长到峰值的过程中 tick 也不分配。和回收池一样对整个进程生效；池里已有的列表也算数。
             一次 O(<paramref name="lists" />) 次分配；池里已经够了就什么都不做。
             </summary>

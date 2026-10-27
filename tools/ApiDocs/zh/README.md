@@ -48,6 +48,11 @@ The terms of the Chinese guide pages (`docs/content/glossary.zh.mdx`). Use these
 | presence bit | 存在位 |
 | run of rows | 一段连续的行 |
 | chunk (parallel) | 块 |
+| ordered table; block of an ordered table (GROMACS's cluster), block pair; box; margin | 有序表；簇，簇对；包围盒；余量 |
+| change-tick block (4,096 rows: `BlockTicks`), word (64 rows) | 区段、位字 |
+
+A sample's domain words never reuse a framework term: VoxelServer's terrain chunk is 地形 (measure word 片: 一片地形,
+每片地形), never 块 or 区块, which name the parallel chunk and nothing else.
 | hole / tombstone | 空洞 / 墓碑 |
 | query, filter; any-set (`ChangedAny` / `RemovedAny`) | 查询、过滤条件；集合 |
 | pass (an iteration in progress) | 遍历（遍历进行中） |

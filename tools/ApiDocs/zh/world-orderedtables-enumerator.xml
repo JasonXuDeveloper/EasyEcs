@@ -4,7 +4,7 @@
     <summary>逐张遍历按这个组件排序的表。</summary>
   </member>
   <member name="P:EasyEcs.World.OrderedTables.Enumerator.Current" source="36c963a30517">
-    <summary>当前这张表的块。</summary>
+    <summary>当前这张表的簇。</summary>
   </member>
   <member name="M:EasyEcs.World.OrderedTables.Enumerator.MoveNext" source="514f091ebbab">
     <summary>移到下一张按这个组件排序的表。</summary>

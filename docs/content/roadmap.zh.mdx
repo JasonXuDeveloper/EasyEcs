@@ -34,14 +34,14 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
 
 ### 给网格邻居推送光环 [#push-halo]
 
-按区块划分的网格模拟（[体素服务器](/zh/docs/samples/voxel-server#water)里的水）每一步都要把每个流动区块的邻居的边载入它的瓦片（`Tile<TCell, TTile>.Pad`）。计划中的设计反过来：
-区块的边变了时推进邻居的光环，这样一步只读自己的组件，邻居都静止的区块也没有东西要拷（[D73](/zh/docs/decisions#d73-survey-items-not-added)）。
+按地形划分的网格模拟（[体素服务器](/zh/docs/samples/voxel-server#water)里的水）每一步都要把每个流动的地形的邻居的边载入它的瓦片（`Tile<TCell, TTile>.Pad`）。计划中的设计反过来：
+地形的边变了时推进邻居的光环，这样一步只读自己的组件，邻居都静止的地形也没有东西要拷（[D73](/zh/docs/decisions#d73-survey-items-not-added)）。
 
 ### 用普通代码写成对计算和最近搜索 [#pair-form]
 
 `[ForEach]` 方法拿一行的位置和截断距离内另一行的位置比较（分离推力、范围内的目标、最近的一个）时，一次处理 8 × 8 行
 （ARM64 上 4 × 4），用户不用多写任何代码：生成器从距离判断推断出表的顺序，核心让表的行沿 Morton 曲线保持有序，
-每 8 行（ARM64 上 4 行）一块、每块一个包围盒（D137，已发布），再由包围盒找出可能相遇的块对。
+每 8 行（ARM64 上 4 行）一块、每块一个包围盒（D137，已发布），再由包围盒找出可能相遇的簇对。
 下一步：生成的成对形式本身、最近搜索的形式，以及用它重写示例里的搜索。
 
 ### 向量循环：留待以后的形式 [#vector-loops-left]
@@ -82,7 +82,7 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
 - 内置 `Meter`：数据都在 `SystemStats` 里，发布出去是文档里给出的宿主写法，EasyEcs 不必依赖指标库
   （[D51](/zh/docs/decisions#d51-not-added)）。
 - World 校验和：对 `world.Save` 的输出做哈希，用户代码里就能做，不必给所有人定死一种算法（[D51](/zh/docs/decisions#d51-not-added)）。
-- 唯一索引旁边的区块网格、只在变化时才写 `InChunk`、按位字拷贝存在位、只拷贝变化过的边的光环：测过，没有净收益，或者被 `IDirectIndexed<TKey>`
+- 唯一索引旁边的地形网格、只在变化时才写 `InChunk`、按位字拷贝存在位、只拷贝变化过的边的光环：测过，没有净收益，或者被 `IDirectIndexed<TKey>`
   和推送光环的设计取代（[D73](/zh/docs/decisions#d73-survey-items-not-added)）。
 - 网格瓦片的生成式逐格内核：字节运算会提升成 `int`，模板又按行归约；瓦片负责加载光环，规则留在方法里（[D77](/zh/docs/decisions#d77-tiles)）。
 - 网格模板一次加载走多步（时间分块）、沿 y 的滑动窗口、缓存瓦片的邻居：测过，在装得进缓存的网格上更慢，或不值得为它加每实体状态

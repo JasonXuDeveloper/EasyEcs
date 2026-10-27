@@ -538,7 +538,7 @@ restarted.Load(bytes.WrittenSpan);
 （[EECS010](/zh/docs/guide/analyzer#eecs010)）：结构变更、批量方法、以 `ref` 接收单例。`world.ForEachParallel` 和
 `ForEachEntityParallel` 对结构体 job 做同样的事。
 
-- **适合：** 几万个实体以上、每个实体计算量大的工作：转向、寻路跟随、AI 打分；配上 `ChunkRows = n`，也适合只有几百行、每行几微秒的活（地形区块、寻路）。
+- **适合：** 几万个实体以上、每个实体计算量大的工作：转向、寻路跟随、AI 打分；配上 `ChunkRows = n`，也适合只有几百行、每行几微秒的活（地形、寻路）。
 - **别用于：** 几千个实体的轻量行：交接的开销比活本身还大。
 - **开销：** 线程做完一块就领下一块，也就是 OpenMP 的 `schedule(dynamic, n)`。默认每块 1,024 到 16,384 行，大约每个线程四块，零分配；
   写被追踪组件的方法按 4,096 行的整数倍切块（变更摘要一段的行数），所以表要更大才会被拆开。`ChunkRows = n` 指定每块的行数
