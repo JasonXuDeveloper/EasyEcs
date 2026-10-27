@@ -174,7 +174,10 @@ def loops(listing, register):
             if shape in seen:
                 continue
             seen.add(shape)
-            masked = any(c.startswith("kortest") for c in body) and any(c.startswith(("shrx", "shr ")) for c in body)
+            # a masked word's loop shifts the word's bits to the vector's rows: then tests them as a vector (kortest) or,
+            # since the skip moved ahead of the lane mask, shifts them back up and tests them as an integer
+            shifts = any(c.startswith(("shrx", "shr ")) for c in body)
+            masked = shifts and any(c.startswith(("kortest", "shlx", "shl ")) for c in body)
             yield job(header), "masked" if masked else "whole", body, calls
 
 
