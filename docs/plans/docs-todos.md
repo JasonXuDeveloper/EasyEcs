@@ -676,8 +676,11 @@ Decision record drafts (en + zh, the next free D numbers at merge: D139 onward i
   GitHub's ubuntu-24.04-arm runners). The API is `[Experimental("SYSLIB5003")]` in .NET 10: one call, behind the
   JIT-time `IsSupported`, the diagnostic suppressed there only; x86 keeps `PREFETCHT0`, other ARM64 (Apple silicon:
   SVE in streaming mode only) issues nothing and never reads the cache size. Linux ARM64 reads sysfs (the largest
-  `index*/size`; glibc's sysconf has no L3 there). Tests: bit for bit under qemu neoverse-n2 / v1 (SVE) and n1 (none),
-  and the CI arm64 job's `ThePrefetchIsTheMachines` line. Considered: a native PRFM stub (a binary per RID, a call
+  `index*/size`; glibc's sysconf has no L3 there). Tests: the CI arm64 job (PrefetchTests on SVE
+  hardware, its `ThePrefetchIsTheMachines` line). NOT YET PROVEN: under qemu here the SVE run (neoverse-n2) crashed
+  with SIGSEGV in the first PrefetchTests test, and the non-SVE runs could not finish (a stack overflow with SVE off on
+  n2, no libssl in the aarch64 sysroot on n1, which passed the first three tests), so the arm64 job is the first real
+  test of the PRFB path; record its result before this ships. Considered: a native PRFM stub (a binary per RID, a call
   per prefetch), waiting for a PRFM intrinsic (none in .NET 10).
 - **ARM64 without SVE: loads issued ahead, not emitted** (LookupChaseLoadAheadBenchmark, Locality/Chase.cs
   `LoadAhead`): the record of row i + k loaded (Has) into a ring, the row of row i + k / 2 touched through it, both
