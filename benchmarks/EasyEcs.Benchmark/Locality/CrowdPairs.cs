@@ -30,6 +30,28 @@ public static class CrowdPairs
         CrowdPairs.SeparateParallel(world);
     }
 
+    /// <summary>
+    /// How far a row moves per tick at full speed, as a share of the cutoff: a crowd walking (GROMACS's steps move
+    /// about as far against its cutoff), so lists of neighbors hold a few ticks.
+    /// </summary>
+    public const float Step = 0.02f * Crowd.Range;
+
+    /// <summary>One tick of a moving crowd: the rows step along their velocity (back when <paramref name="back"/>, so the
+    /// crowd stays where it is over a benchmark's ticks), then the vector loop or one pair at a time.</summary>
+    public static void TickMoving(World world, bool back, bool rows)
+    {
+        if (back) CrowdPairs.StepBack(world);
+        else CrowdPairs.StepForward(world);
+        if (rows) TickRows(world);
+        else Tick(world);
+    }
+
+    [ForEach]
+    public static void StepForward(ref Crowd.Position p, in Crowd.Velocity v) => p = new Crowd.Position(p.X + v.X * Step, p.Y + v.Y * Step);
+
+    [ForEach]
+    public static void StepBack(ref Crowd.Position p, in Crowd.Velocity v) => p = new Crowd.Position(p.X - v.X * Step, p.Y - v.Y * Step);
+
     [ForEach]
     public static void Reset(ref Crowd.Push push) => push = default;
 
