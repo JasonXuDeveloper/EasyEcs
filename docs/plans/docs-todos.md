@@ -644,3 +644,65 @@ lanes keep the scalar walk). All 0 B. ARM64 (NEON `TBL`) runs the 128-bit form; 
 - **没有 AVX-512 时用标量遍历**：核心以前的做法；NUMBERS_SCALAR。
 
 </details>
+
+## feat-locality-pairs (L2: the generated pair form)
+
+What shipped (code): `[Neighbor]` parameters (`src/EasyEcs.Core/Pairs.cs`), the pair pass (`World.ForPairs`, hidden;
+`IPairJob` / `PairRun`, hidden), the generated order, job and vector loop (`SystemGenerator.Pairs.cs`, `PairForm.cs`,
+`Kernel.Neighbors.cs`), EECS105-107 (`EasyEcsAnalyzer.Pairs.cs`). Numbers: the final report of the branch (PairsBenchmark
+`Generated` / `GeneratedRows` against `GridLookups` and `CoreClusters`).
+
+Docs pass:
+- **New guide page `guide/pairs.mdx` + `.zh.mdx`** (or a section of the locality page if one exists by then): when to
+  use a pair method (sums over neighbors within a cutoff, the nearest within a range, counts), the form (row
+  components, `[Neighbor] in` components, the test first: `if (d2 >= r2) return;` or the rest under `if (d2 < r2)`),
+  the distance forms the generator reads (sums of `dx * dx`, `Vector2/3.DistanceSquared`, `(a - b).LengthSquared()`),
+  cutoffs (constants, statics, singletons, values, the row's `in` components: a cutoff per row), two kinds of entity
+  (`[Neighbor] in Quarry _` as the neighbors' filter, `[With<Hunter>]` on the rows), self included (exclude with
+  `d2 == 0` or the entity), ties broken by the entity (lower index wins), the vector loop and when it stays one pair at
+  a time (the neighbor's `Entity`, lookups, reductions, structural changes: Kernel's reasons), costs (O(n) boxes per
+  pass, a sweep of the windows when one left its box, the pairs within reach), pitfalls (no Parallel / Slices / change
+  filters / [Consume]; the row's write must not be a component the neighbor reads), the "keep the current target"
+  pattern (a [ForEach] with a Lookup before the pair method leaves a hint in the target component).
+- **Analyzer list**: EECS105 (Error), EECS106 (Warning), EECS107 (Info, no code fix and why) on the analyzer page,
+  en + zh.
+- **api.mdx complexity rows**: `[Neighbor]` (a pass: O(rows + neighbors) to draw boxes, O(w log w) sweep when a
+  window left its box, O(pairs within reach + window pairs) per pass). `IPairJob`, `PairRun`, `World.ForPairs` are
+  EditorBrowsable(Never), so ApiDocs skips them (generated code calls them).
+- **example.mdx / BattleServer** (L4, finish phase): the battle server gains a pair method where it searches
+  neighbors (the AOI or separation); keep its regions.
+- **Migration / README "What's new"**: a new attribute, no breaking change; README "What's new" entry.
+- **The public skill** (`skills/easyecs/SKILL.md`): "a neighbor search is a pair method, not a grid": the form and the
+  test-first rule.
+
+L4 (moved to the finish phase by the owner, 2026-10-26): what it needs from L2.
+- **VoxelServer `ZombieTargetSystem`** (`samples/VoxelServer`, Zombies.cs:51-80, Terrain.cs:371-385 with `ChunkRing`):
+  a `Keep` [ForEach] with `Lookup<Position>` / `Lookup<Player>` (the current target kept while within Vision: the
+  hint `Distance = -1`), then a pair method over zombies x players, the cutoff `z.Vision * z.Vision` (per row), ties to
+  the lower `EntityId.Index` (NeighborTests.TheCurrentTargetIsKeptWhileInSightThroughAHint is that system). The chunk
+  ring goes, so does `ChunkRing`'s upkeep where nothing else reads it.
+- **VoxelServer `Pickup`** (Items.cs:43-69): a pair with a write to j (the item picked up). Not built: needs
+  `[Neighbor] ref` and a pass that runs the pairs of one neighbor in one place (the owner of j). The API fits:
+  `PairRun.Others<T>()` returns a ref; EECS105 refuses `[Neighbor] ref` today with its reason. Until then Pickup stays
+  as it is, or the pickup is an Emit<T> record (row, item) resolved by a second pass.
+- **NearestPlayer** (the samples' nearest): the pair method with a cutoff and a `Nearest` component reset before the
+  pass; a query without a range (nearest of everything) is not a pair method (no cutoff: EECS106).
+- **Templates / demo**: a pair method in the demo's boids (the separation) if the demo gains one.
+
+Decision record drafts (next free D: D139):
+- **D139 The pair form.** Decision: a `[ForEach]` method with `[Neighbor] in` parameters runs per pair within the
+  cutoff its first test names; the generator reads the test (distance forms above, cutoff values) and writes the
+  order (Morton keys over the axes the test names, cell = the largest reach), the pair lists (windows of
+  `Vector<float>.Count` rows, boxes drawn every pass against the kept boxes widened by an adaptive margin, a sweep of
+  the A boxes widened by their windows' reach against raw B boxes when one left) and the vector loop (a window's rows
+  in lanes, each neighbor broadcast, the body masked: GROMACS's cluster pair with i in lanes). Why: users write what
+  one pair does, as the owner's rule (locality.md 3.4) asks; every pair order per lane is the scalar order (B tables
+  in query order, rows in order), so the vector loop and the method per pair are bit for bit equal and the pruning is
+  invisible. Considered: lists per entity (Verlet lists; the 4 B per neighbor per entity, and no vector form), the
+  8 x 8 kernel over L1's blocks (CoreClusters: needs the blocks sorted every pass and lists cached by the caller; the
+  windows here are the table's own rows in order and need no sort to stay right), a grid of cells (the baseline), a
+  code fix from hand-written grids (EECS107 is Info without a fix: the grid's upkeep and its readers go with it, which
+  a fix cannot see). Numbers: PairsBenchmark Generated / GeneratedRows vs GridLookups / CoreClusters (final report).
+- **D140 Ties and the nearest form.** The pair order is the tables' rows (not entities); a nearest search breaks ties
+  by `EntityId.Index` so its result does not depend on the order; "keep the current target" is a hint in the
+  component written by a pass before the pair method, never state in the system.

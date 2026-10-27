@@ -74,6 +74,10 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        ARM64 (owner's M4 run, `locality.md` 6.1a): crowded maps 2-8x, sparse maps only 1.1-2.1x while neighbor lists
        reach 2.5-3.4x: L2 ships clusters there too (faster is kept, owner) and optimizes: 4-row blocks and the
        neighbor-list form on ARM64, picked by density; never a slower case (no re-sort every tick on sparse maps).
+       **Built on `feat-locality-pairs`** (`locality.md` 6.6): `[Neighbor]`, the pass, the generated order / job / vector
+       loop, EECS105-107, cutoff per row, two kinds of entity, ties and the keep-target hint. Open: the spread-map nearest
+       re-measure, the ARM64 neighbor-list form by density, writes to j (Pickup), parallel pair passes, the EECS107 fix,
+       nested-walk rewrites, Lookup gathers under Auto. L4 (examples) moved to the finish phase (docs-todos).
 2. [x] **ARM64 parity of the generated forms** (merged 186c84d): LD2-4 / ST2-4 for multi-field components, NEON TBL /
        TBX for wide components (a gate per form), BitMask in registers, the `arm64` CI job asserting loop lines.
        Owner's M4 run (default job, one round): SteerGenerated 2.07x faster than SteerScalar at 1k, 1.55x at 100k;
