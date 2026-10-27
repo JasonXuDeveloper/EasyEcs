@@ -24,10 +24,14 @@ foreach (var setup in type.GetMethods().Where(m => Has(m, "GlobalSetupAttribute"
 foreach (var method in type.GetMethods().Where(m => Has(m, "BenchmarkAttribute") && m.GetParameters().Length == 0 && (names.Length == 0 || names.Contains(m.Name))))
 {
     var run = method.CreateDelegate<Action>(instance);
-    for (int i = 0; i < calls; i++)
+    for (int round = 0; round < 2; round++) // the tiering thread compiles in the background: give it time, then run Tier1
     {
-        run();
-        if (i % 50 == 49) Thread.Sleep(20); // the tiering thread compiles in the background
+        for (int i = 0; i < calls; i++)
+        {
+            run();
+            if (i % 50 == 49) Thread.Sleep(20);
+        }
+        Thread.Sleep(500);
     }
     Console.WriteLine($"ran {method.Name}");
 }
