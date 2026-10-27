@@ -33,6 +33,7 @@ names the skill:
 
 - [ ] **Fewer copies c + d** ("Next" items 12c and 12d, branch `feat-fewer-copies`): Permute swaps columns with a spare,
       incremental Capture / Restore, and fix-ci's restore cost won back.
+- [ ] **Symmetric pair methods** ("Next" item 8e, branch `feat-symmetric-pairs`).
 - [ ] **Tiles: ping-pong, padded halos, edges while stepping** ("Next" items 11 + 12a + 12b with 8c's tile gaps and
       `voxel-rewrite.md` GA3 / GA10 / GA12, branch `feat-tiles-pingpong`). 8c's FillPool item went to the fewer-copies
       branch (12d).
@@ -54,8 +55,8 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 
 ## Next, in this order
 
-Agent slots as they free (at most 3): 8b + 8d, 12c + 12d and 11 + 12a + 12b (running, the last as one tile branch:
-padded storage, ping-pong, zero rows, edges found while stepping), then 8e, 8f, 12e, 9, 10, 4, 7, Later, then Finish.
+Agent slots as they free (at most 3): 12c + 12d, 11 + 12a + 12b (one tile branch: padded storage, ping-pong, zero
+rows, edges found while stepping) and 8e (running), then 8f, 12e, 9, 10, 4, 7, Later, then Finish.
 The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a).
 
 1. [x] **L2: the generated pair form** (merged e9c3db8, `feat-pairs-2`; open: the owner's M4 run of PairListsBenchmark) (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
