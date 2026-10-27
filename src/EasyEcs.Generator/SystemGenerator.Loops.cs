@@ -134,12 +134,10 @@ public sealed partial class SystemGenerator
         loop.Append($"for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{{\n");
         if (masked)
         {
-            // A vector none of whose rows pass is skipped, tested on the word's bits for its rows (i < 64, and the lanes
-            // shifted out at the top) before their lane mask is built: two integer operations instead of a vector test
-            // after the mask (4.4 -> 4.1 cycles per vector on Ice Lake, 4.0 -> 3.2 on Zen 4, llvm-mca). Then the rows
-            // that pass, one lane each.
-            loop.Append($"{body}if (pass >> (int)i << (64 - {Kernel.V}<{simd.Mask}>.Count) == 0) continue;\n");
+            // The rows of this vector that pass, one lane each: a vector with none is skipped. (Testing the word's bits
+            // before the mask instead saves uops by llvm-mca but measured 4-11 % slower on BattleServer, microarch.md.)
             loop.Append($"{body}var __pass = global::EasyEcs.Interleaved.Lanes{simd.Size * 8}{Kernel.LanesForm}(pass, (int)i);\n");
+            loop.Append($"{body}if (__pass == {Kernel.V}<{simd.Mask}>.Zero) continue;\n");
         }
         // A lane would throw (Math.Clamp with min above max): nothing is stored yet, so the method itself runs the
         // rows of this vector (that pass), and throws as written. i walks them, and is set back for the loop's own step.
