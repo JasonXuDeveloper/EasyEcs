@@ -325,7 +325,11 @@ Starts only when every code item of Next and Later is done (owner, 2026-10-26: "
          of hand loops). Its per-system plan is made now, read-only, not at Finish (per system: the features it does not use yet,
          the lines saved, the generator or feature gaps it exposes); the gaps (lines users would write twice) go into
          Later as code items, so the rewrite itself only uses what already exists. Bools split (Body.OnGround,
-         Exposure.Sunlit).
+         Exposure.Sunlit). The plan covers every feature, not only tiles (owner, 2026-10-27: "全部现在的功能都看看",
+         prefetch, cluster pairs, ...): a matrix of every feature, used today or not, where it belongs, and for the
+         automatic ones (prefetch gates, ordered rows, fusion) whether the sample's data and scale trigger them.
+         The rewrite waits for item 11 (+ 12a / 12b): the tile systems are written once, in the ping-pong form
+         (owner: "你得等你的 uv 交换先修好").
       b. The other samples, `templates/`, the live demo (`demo/`, its page includes the files).
       c. Benchmark worlds (`BattleServer.cs`: the Battle singleton moves to `[Accumulate]`, then GeneratorBenchmark's
          EECS086 filter exception is deleted: EECS086's total case reports Shoot, SendFire and SendFireOut, and a
