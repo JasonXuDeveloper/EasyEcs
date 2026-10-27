@@ -60,7 +60,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `[GroupBy]`、`[WhenTargetDestroyed(policy)]`、`[NotSaved]` | 特性 | 每个 World 从第一张含这个类型的表开始应用的设置：分组、目标被销毁时链接的策略；`[NotSaved]`：任何存档都不写这个类型，读档保留 World 自己的单例。 |
 | `[OrderBy(box...)]`、`IOrderKey<TKey>` | 特性、接口 | 写在 partial 组件的成员上：每个 World 让含这个组件的表按这个键排序（`Interval`、`Margin`），覆盖成对方法初始化时请求的顺序；生成器写出显式的 `OrderKey` 和 `BoxPoint`。 |
 | `[Neighbor]` | 特性 | 写在 `[ForEach]` 方法的参数上：成对中另一个实体的组件（按 `in` 取）或它的 `Entity`；方法对第一个判断给出的截断距离以内的每一对运行一次（成对方法）。 |
-| `RowBlocks`、`BlockPair` | ref struct、record struct | 一张有序表的行，每 `Size` 行一簇（8 行，ARM64 上 4 行），每簇一个包围盒（`world.Blocks<T>()`、`entities.Blocks`）：`Count`、`SortedRows`、`Start`、`End`、`Min(axis)`、`Max(axis)`、`Read<T>()`、`Ids`、`Has(row)`、`Pairs(reach, into)`。 |
+| `RowClusters`、`ClusterPair` | ref struct、record struct | 一张有序表的行，每 `Size` 行一簇（8 行，ARM64 上 4 行），每簇一个包围盒（`world.Clusters<T>()`、`entities.Clusters`）：`Count`、`SortedRows`、`Start`、`End`、`Min(axis)`、`Max(axis)`、`Read<T>()`、`Ids`、`Has(row)`、`Pairs(reach, into)`。 |
 | `IRowOrder<T>`、`RowKeys` | 接口、静态类 | 给生成代码用：顺序怎样读一行（`Key`、`Point`，静态成员），一个点按格子大小算出的 Morton 码（`RowKeys.Morton`）。 |
 | `Scratch<T>` | ref struct | `[ForEach]` 参数：方法在当前线程上的工作内存，在行、遍历和 World 之间保留：`Value`。 |
 | `Emit<T>`、`Emitted<T>` | ref struct、结构体 | `[ForEach]` 参数（按值传入），追加记录（`Add`、`AddRange`），遍历结束时按块的顺序并入单例 `Emitted<T>`（`Items`，一个 `DynamicBuffer<T>`）。 |
@@ -321,10 +321,10 @@ World 保持原样。
 | `world.OrderRows<T, TOrder>(axes, cell, interval, margin)` | O(表数)，只做一次 | 给生成的初始化代码用：现在和以后含 `T` 的表都按 `TOrder` 的键排序，下一次更新第一次排序，之后每 `interval` 次更新一次；一个组件以第一次请求为准，`[OrderBy]` 覆盖它；遍历中调用抛出异常 |
 | 排序（按节奏的更新、`world.SortRows<T>()`） | 行要移动时 O(N × (K + C))，已经有序时 O(N) | 对 (键, 行) 做 LSD 基数排序，所有行相同的字节跳过；在结构闸门内对每一列、存在位、变更 tick 和槽位做一次置换（引用和句柄缓存的行失效，和任何结构变更一样）；没有 `T` 的行排在最后；重新画包围盒；稳定状态 0 B（池化缓冲）；`SortRows` 在遍历中调用抛出异常 |
 | 没有任何顺序的表 | 0 | 不排序，没有包围盒，行移动处只多一次 null 判断 |
-| `world.Blocks<T>()` | O(1)，遍历 O(表数) | 每张按 `T` 排序的表的 `RowBlocks`；组件没有顺序时一个也没有 |
-| `blocks.Min(axis)` / `Max(axis)` / `Start(b)` / `End(b)` / `Read<T>()` / `Ids` / `Has(row)` | O(1) | 每簇包围盒的边、一簇的行（`[b * Size, min((b + 1) * Size, SortedRows))`）、表的只读列；`SortedRows` 之后的行是排序后加入的，不在任何簇里；移进某簇的行会扩大那簇的包围盒 |
-| `blocks.Pairs(reach, into)` / `Pairs(other, reach, into)` | O(B log B + 对数) | 每个轴上包围盒相距不超过 `reach` 的簇对（每簇和自己一对，其余每对一次），写到 `into` 写满为止；返回总数；稳定状态 0 B |
-| `entities.Blocks`、`entities.FirstRow` | O(1) | 批处理方法所在表的簇，以及这段行开始的行号 |
+| `world.Clusters<T>()` | O(1)，遍历 O(表数) | 每张按 `T` 排序的表的 `RowClusters`；组件没有顺序时一个也没有 |
+| `clusters.Min(axis)` / `Max(axis)` / `Start(b)` / `End(b)` / `Read<T>()` / `Ids` / `Has(row)` | O(1) | 每簇包围盒的边、一簇的行（`[b * Size, min((b + 1) * Size, SortedRows))`）、表的只读列；`SortedRows` 之后的行是排序后加入的，不在任何簇里；移进某簇的行会扩大那簇的包围盒 |
+| `clusters.Pairs(cutoff, into)` / `Pairs(other, cutoff, into)` | O(B log B + 对数) | 每个轴上包围盒相距不超过 `cutoff` 的簇对（每簇和自己一对，其余每对一次），写到 `into` 写满为止；返回总数；稳定状态 0 B |
+| `entities.Clusters`、`entities.FirstRow` | O(1) | 批处理方法所在表的簇，以及这段行开始的行号 |
 
 ## 快照、存档与迁移 [#saves]
 

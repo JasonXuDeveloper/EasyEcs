@@ -13,7 +13,8 @@ namespace EasyEcs.Generator;
 /// The rules of pair methods (<c>[Neighbor]</c> parameters, <see cref="PairForm"/>): a declaration that cannot run per
 /// pair (EECS105), a body whose cutoff test the generator cannot read, so every pair runs (EECS106), and a neighbor
 /// search written by hand that the pair form writes (EECS107: a [ForEach] method that loops over other entities of its
-/// own component, read through a Lookup&lt;T&gt;, and tests their squared distance).
+/// own component, read through a Lookup&lt;T&gt; or walked as a query, and tests their squared distance; a Warning with its fix where
+/// <see cref="PairRewrite"/> rewrites it, else a suggestion).
 /// </summary>
 public static partial class EasyEcsAnalyzer
 {
@@ -21,10 +22,13 @@ public static partial class EasyEcsAnalyzer
         "Pair method '{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
         "A [ForEach] method with [Neighbor] parameters runs for every pair of its row and a neighbor within the cutoff its " +
-        "body tests. The pass runs on one thread over every row: no Parallel, Slices, change filters or [Consume]. It takes " +
-        "components of its row, [Neighbor] components by 'in' (they say which entities are neighbors) and the neighbor's " +
-        "Entity, singletons and values; it writes no component it reads of the neighbor, so what a neighbor sees does not " +
-        "depend on the order of the pairs.",
+        "body tests. The pass runs over every row, on several threads (Parallel) only when it writes no neighbor: no " +
+        "Slices, change filters or [Consume]. It takes " +
+        "components of its row (by 'in', 'ref', or Mut<T> on one thread: only the rows it writes are stamped), [Neighbor] " +
+        "components (they say which entities are neighbors) by 'in', or by 'ref' to write them, each once, the " +
+        "neighbor's Entity, singletons, values and Reduce<T> results (each chunk's combined in chunk order); it writes no component it reads of the " +
+        "neighbor and no component of the neighbor it reads of its row, so what either side sees does not depend on the " +
+        "order of the pairs.",
         helpLinkUri: Help("EECS105"));
 
     public static readonly DiagnosticDescriptor NoPairCutoff = new("EECS106", "A pair method without a cutoff test the generator reads",
@@ -39,13 +43,17 @@ public static partial class EasyEcsAnalyzer
 
     public static readonly DiagnosticDescriptor HandWrittenNeighbors = new("EECS107", "A neighbor search written by hand",
         "[ForEach] method '{0}' searches the neighbors of its row by hand ({1}): a pair method ([Neighbor] parameters) does it",
-        Category, DiagnosticSeverity.Info, true,
+        Category, DiagnosticSeverity.Warning, true,
         "A method that loops over other entities of its own component (a grid of cells, an index of chunks, a list of " +
-        "ids), reads each through a Lookup<T> and tests its squared distance to the row's is a neighbor search. A pair " +
+        "ids, each read through a Lookup<T>, or a walk of world.Read / Query) and tests their squared distance to the " +
+        "row's is a neighbor search. A pair " +
         "method takes the neighbor's components as [Neighbor] parameters and tests the distance once: the pass keeps the " +
-        "tables in space order and visits windows of rows against the rows within the cutoff, a vector of rows per " +
-        "instruction where the body qualifies, with no grid to build or keep. The grid's upkeep goes with it, so no code " +
-        "fix rewrites the method.",
+        "tables in space order and visits clusters of rows against the rows within the cutoff, a vector of rows per " +
+        "instruction where the body qualifies, with no grid to build or keep. The code fix rewrites the method when the " +
+        "search is its whole body and each candidate's statements read nothing of the search but the candidate: the loop " +
+        "over candidates becomes [Neighbor] parameters (a 'continue' a 'return', the self skip a term of the cutoff test), " +
+        "and the code that builds the grid can then go. Other searches (a sum kept in locals and written after the loop, " +
+        "statements after it) are reported as a suggestion, to rewrite by hand.",
         helpLinkUri: Help("EECS107"));
 
     internal static void InitializePairs(AnalysisContext context)
@@ -74,8 +82,13 @@ public static partial class EasyEcsAnalyzer
             return;
         }
 
-        if (PairForm.HandWritten(method, syntax, context.SemanticModel, context.CancellationToken) is { } how)
-            context.ReportDiagnostic(Diagnostic.Create(HandWrittenNeighbors, syntax.Identifier.GetLocation(), method.Name, how));
+        if (PairForm.HandWritten(method, syntax, context.SemanticModel, context.CancellationToken) is not { } how) return;
+        // A Warning with its fix when the rewrite is mechanical (PairRewrite), a suggestion otherwise.
+        var rewrite = PairRewrite.Of(method, syntax, context.SemanticModel, context.CancellationToken);
+        var properties = rewrite == null ? null : ImmutableDictionary<string, string?>.Empty
+            .Add("Fix", "Pairs").Add("PairParameters", rewrite.Parameters).Add("PairBody", rewrite.Body);
+        context.ReportDiagnostic(Diagnostic.Create(HandWrittenNeighbors, syntax.Identifier.GetLocation(),
+            rewrite != null ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info, null, properties, method.Name, how));
     }
 }
 

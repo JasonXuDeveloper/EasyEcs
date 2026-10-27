@@ -334,12 +334,24 @@ public static partial class EasyEcsAnalyzer
         {
             var kind = Symbols.Classify(p, outside);
             // A [Neighbor] component the body never names says which entities are neighbors: it is their filter.
-            if (kind is Symbols.ParamKind.Invalid or Symbols.ParamKind.Context or Symbols.ParamKind.Neighbor) continue;
+            // One by 'ref' that only reads is EECS025's: it keeps the pairs one at a time.
+            if (kind is Symbols.ParamKind.Invalid or Symbols.ParamKind.Context) continue;
             var location = p.Locations.FirstOrDefault();
+            uses.TryGetValue(p, out var used);
+            if (kind == Symbols.ParamKind.Neighbor)
+            {
+                if (p.RefKind == RefKind.Ref && !empty && (used == null || !used.Any(Uses.MayWrite)))
+                    context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, location, ImmutableDictionary<string, string?>.Empty.Add(FixKind, "In"),
+                        $"Parameter '{p.Name}' of {described} ([Neighbor] ref)",
+                        "its pairs run one at a time (a vector loop writes no neighbor)" + (Symbols.Implements(p.Type, Symbols.TrackChanges)
+                            ? " and every neighbor it meets is stamped as changed" : ""),
+                        "take it by 'in'"));
+                continue;
+            }
+
             var component = Symbols.QueriedComponent(p);
             // Excluded by the method's filters too: EECS016 or EECS049 says the method never runs, the cost is moot.
             if (component != null && excluded.Contains(component)) continue;
-            uses.TryGetValue(p, out var used);
             bool span = kind == Symbols.ParamKind.ComponentSpan && Symbols.Named(p.Type.OriginalDefinition, "System.Span<T>");
             bool byRef = kind is Symbols.ParamKind.Component or Symbols.ParamKind.Singleton && p.RefKind == RefKind.Ref;
 

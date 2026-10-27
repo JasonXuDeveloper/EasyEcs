@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.World.OrderedTables" source="c63a08fa7153">
+  <member name="T:EasyEcs.World.OrderedTables" source="e1d08b380a24">
     <summary>
-      按某个组件排序的表（<see cref="M:EasyEcs.World.Blocks``1" />），每张表给出它的 <see cref="T:EasyEcs.RowBlocks" />。
+      按某个组件排序的表（<see cref="M:EasyEcs.World.Clusters``1" />），每张表给出它的 <see cref="T:EasyEcs.RowClusters" />。
       用 <c>foreach</c> 遍历；到下一次结构变更前有效。
     </summary>
   </member>

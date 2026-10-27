@@ -28,15 +28,15 @@ public class LocalityTests
         Crowd.Interact(world);
         Assert.That(Crowd.FirstMismatch(Crowd.Pushes(world), expected), Is.EqualTo(-1), "neighbor lists");
         Crowd.Sort(world);
-        var blocks = world.GetSingleton<Crowd.Clusters>().Rows.Blocks;
-        for (int s = 1; s < blocks.Count; s++)
-            Assert.That(blocks.Keys[s], Is.GreaterThanOrEqualTo(blocks.Keys[s - 1]), "rows in Morton order");
+        var clusters = world.GetSingleton<Crowd.Clusters>().Rows.Clusters;
+        for (int s = 1; s < clusters.Count; s++)
+            Assert.That(clusters.Keys[s], Is.GreaterThanOrEqualTo(clusters.Keys[s - 1]), "rows in Morton order");
         float widest = 0;
-        for (int b = 0; b < blocks.BlockCount; b++)
-            widest += blocks.MaxX[0][b] - blocks.MinX[0][b] + blocks.MaxY[0][b] - blocks.MinY[0][b];
-        // Blocks of 8 consecutive rows on the curve are small: on average about the side of the square 8 rows cover.
-        float rowsPerUnit2 = blocks.Count / (world.GetSingleton<Crowd.Map>().Extent * world.GetSingleton<Crowd.Map>().Extent);
-        Assert.That(widest / blocks.BlockCount / 2, Is.LessThan(4 * MathF.Sqrt(8 / rowsPerUnit2)), "block boxes");
+        for (int b = 0; b < clusters.ClusterCount; b++)
+            widest += clusters.MaxX[0][b] - clusters.MinX[0][b] + clusters.MaxY[0][b] - clusters.MinY[0][b];
+        // Clusters of 8 consecutive rows on the curve are small: on average about the side of the square 8 rows cover.
+        float rowsPerUnit2 = clusters.Count / (world.GetSingleton<Crowd.Map>().Extent * world.GetSingleton<Crowd.Map>().Extent);
+        Assert.That(widest / clusters.ClusterCount / 2, Is.LessThan(4 * MathF.Sqrt(8 / rowsPerUnit2)), "cluster boxes");
         world.GetSingleton<Crowd.Clusters>().Rows.Interact();
         Crowd.WriteBack(world);
         Assert.That(Crowd.FirstMismatch(Crowd.Pushes(world), expected), Is.EqualTo(-1), "cluster kernel");
@@ -64,18 +64,22 @@ public class LocalityTests
         Assert.That(Allocations.Of(tick), Is.Zero);
     }
 
-    // The block search finds a player at the same distance as the ring walk (the ids differ only on ties).
-    [TestCase(50, Layout.Packed)]
-    [TestCase(50, Layout.Spread)]
-    [TestCase(400, Layout.Packed)]
-    [TestCase(400, Layout.Spread)]
-    public void ZombieSearchesAgree(int players, Layout layout)
+    // The cluster search (the box tree, or the flat grid searched in rings) finds a player at the same distance as the
+    // ring walk (the ids differ only on ties).
+    [TestCase(50, Layout.Packed, false)]
+    [TestCase(50, Layout.Spread, false)]
+    [TestCase(400, Layout.Packed, false)]
+    [TestCase(400, Layout.Spread, false)]
+    [TestCase(50, Layout.Packed, true)]
+    [TestCase(50, Layout.Spread, true)]
+    [TestCase(400, Layout.Packed, true)]
+    [TestCase(400, Layout.Spread, true)]
+    public void ZombieSearchesAgree(int players, Layout layout, bool rings)
     {
         using var world = ZombieHunt.Create(players, layout);
         ZombieHunt.Pick(world);
         var expected = ZombieHunt.Targets(world);
-        ZombieHunt.SortPlayers(world);
-        ZombieHunt.PickInBlocks(world);
+        Search(world, rings);
         var got = ZombieHunt.Targets(world);
         int found = 0;
         for (int i = 0; i < got.Length; i++)
@@ -88,9 +92,15 @@ public class LocalityTests
         Assert.That(Allocations.Of(() =>
         {
             ZombieHunt.Pick(world);
-            ZombieHunt.SortPlayers(world);
-            ZombieHunt.PickInBlocks(world);
+            Search(world, rings);
         }), Is.Zero);
+    }
+
+    private static void Search(World world, bool rings)
+    {
+        ZombieHunt.SortPlayers(world, rings);
+        if (rings) ZombieHunt.PickInRings(world);
+        else ZombieHunt.PickInClusters(world);
     }
 
     [Test]

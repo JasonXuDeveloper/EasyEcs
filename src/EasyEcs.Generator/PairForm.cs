@@ -27,9 +27,13 @@ internal static class PairForm
 
     /// <summary>
     /// Why the declaration of pair method <paramref name="method"/> cannot run per pair (EECS105), or null. A pair
-    /// pass runs on one thread over every row (no Parallel, Slices, change filters or [Consume]), takes components of
-    /// the row and of the neighbor, singletons and values, and writes no component the neighbor reads (a row's write
-    /// would reach the neighbors after it in one order and not in another).
+    /// pass runs over every row, on several threads only when it writes no neighbor (no Slices, change filters or [Consume]), takes components of
+    /// the row (by <c>in</c>, <c>ref</c> or <c>Mut&lt;T&gt;</c>, a Mut&lt;T&gt; on one thread only: its stamps per write
+    /// are the row's) and of the neighbor, singletons, values and <c>Reduce&lt;T&gt;</c> results (each chunk's combined
+    /// in chunk order), and writes no component the other side of a pair reads: a
+    /// row's write would reach the neighbors after it in one order and not in another, and a write of the neighbor's
+    /// (<c>[Neighbor] ref T</c>) would reach the rows after it, or the row itself when it is its own neighbor. Each
+    /// component of the neighbor is taken once.
     /// </summary>
     public static string? Problem(IMethodSymbol method)
     {
@@ -38,23 +42,38 @@ internal static class PairForm
         if (Symbols.IsForEntity(method)) return "is a [ForEntity] method: a pair runs over the world";
         if (!method.IsStatic) return "is an instance method: make it static";
         if (method.IsGenericMethod || method.ContainingType.IsGenericType) return "is generic: a pair method's order names its component";
-        if (Symbols.IsParallel(method)) return "runs in parallel: a pair pass runs on one thread for now";
+        if (Symbols.IsParallel(method) && method.Parameters.FirstOrDefault(p => p.RefKind == RefKind.Ref && Symbols.IsNeighbor(p)) is { } shared)
+            return $"runs in parallel and writes the neighbor's {shared.Type.Name} ('{shared.Name}'): rows of two threads would write one neighbor; drop Parallel";
+        if (Symbols.IsParallel(method) && method.Parameters.FirstOrDefault(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Mutable) is { } mutable)
+            return $"runs in parallel and takes '{mutable.Name}' as a Mut<T>: its stamps per write would share the change ticks of the chunks' rows; take it by 'ref' (every row the pass runs for is stamped) or drop Parallel";
         if (Symbols.Slices(method) > 1) return "visits slices of its rows: a pair pass visits every row";
         if (Symbols.IsConsume(method)) return "has [Consume]: a pair pass destroys nothing";
         if (Symbols.AttributeFilters(method).Any(f => f.Item1 is Symbols.FilterKind.Changed or Symbols.FilterKind.Removed
                 or Symbols.FilterKind.ChangedAny or Symbols.FilterKind.RemovedAny))
             return "filters by change: a pair pass visits every row";
         var written = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
+        var rows = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
+        var neighbors = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
         bool row = false, neighbor = false;
         foreach (var p in method.Parameters)
             switch (Symbols.Classify(p, outside))
             {
                 case Symbols.ParamKind.Component:
                     row = true;
+                    rows.Add(p.Type);
                     if (p.RefKind == RefKind.Ref) written.Add(p.Type);
                     break;
+                case Symbols.ParamKind.Mutable: // a component of the row written where the method writes it
+                    row = true;
+                    rows.Add(Symbols.MutElement(p.Type)!);
+                    written.Add(Symbols.MutElement(p.Type)!);
+                    break;
+                case Symbols.ParamKind.Reduction: // a partial result of the pass (of each chunk in parallel), combined when it ends
+                    break;
                 case Symbols.ParamKind.Neighbor:
-                    neighbor |= !Symbols.Named(p.Type, Symbols.Entity);
+                    if (Symbols.Named(p.Type, Symbols.Entity)) break;
+                    neighbor = true;
+                    if (!neighbors.Add(p.Type)) return $"takes {p.Type.Name} of the neighbor twice ('{p.Name}'): take it once, by 'ref' to write it";
                     break;
                 case Symbols.ParamKind.Entity or Symbols.ParamKind.Singleton:
                     break;
@@ -63,15 +82,24 @@ internal static class PairForm
                 case Symbols.ParamKind.Invalid: // EECS002 reports it (a [Neighbor] one too)
                     break;
                 default:
-                    return $"takes '{p.Name}': a pair method takes components of its row, [Neighbor] components (by 'in') and the neighbor's Entity, singletons and values";
+                    return $"takes '{p.Name}': a pair method takes components of its row (by 'in', 'ref' or Mut<T>), [Neighbor] components (by 'in', or 'ref' to write them) and the neighbor's Entity, singletons, values and Reduce<T>";
             }
         if (!row) return "takes no component of its row";
         if (!neighbor) return "takes no [Neighbor] component: the neighbors are the entities holding them";
         foreach (var p in method.Parameters)
-            if (Symbols.Classify(p, outside) == Symbols.ParamKind.Neighbor && written.Contains(p.Type))
+        {
+            if (Symbols.Classify(p, outside) != Symbols.ParamKind.Neighbor) continue;
+            if (written.Contains(p.Type))
                 return $"writes {p.Type.Name}, which it reads of the neighbor ('{p.Name}'): what a neighbor sees would depend on the order of the pairs";
+            if (p.RefKind == RefKind.Ref && rows.Contains(p.Type))
+                return $"writes the neighbor's {p.Type.Name} ('{p.Name}'), which it reads of its row: what a row sees would depend on the order of the pairs";
+        }
         return null;
     }
+
+    /// <summary>The method writes a component of the neighbor (<c>[Neighbor] ref T</c>): its pairs run one at a time.</summary>
+    public static bool WritesNeighbor(IMethodSymbol method) =>
+        method.Parameters.Any(p => p.RefKind == RefKind.Ref && Symbols.Classify(p, Symbols.IsRunner(method)) == Symbols.ParamKind.Neighbor);
 
     /// <summary>
     /// The cutoff test of a pair method's body, or null with the reason none was found (EECS106: the pass then runs
@@ -122,18 +150,33 @@ internal static class PairForm
     /// <summary>
     /// How a [ForEach] method that is no pair method searches its row's neighbors by hand (EECS107), or null: in a loop,
     /// it tests the squared distance between a component of its row and the same component of another entity read
-    /// through a Lookup&lt;T&gt;.
+    /// through a Lookup&lt;T&gt;, or of an item of a query it walks (<c>foreach (var o in world.Read&lt;Position&gt;())</c>).
     /// </summary>
     public static string? HandWritten(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
     {
-        if (IsPairMethod(method) || !method.Parameters.Any(p => Symbols.Classify(p, Symbols.IsRunner(method)) == Symbols.ParamKind.Lookup)) return null;
+        bool outside = Symbols.IsRunner(method);
+        if (IsPairMethod(method) || !method.Parameters.Any(p => Symbols.Classify(p, outside) is Symbols.ParamKind.Lookup or Symbols.ParamKind.World)) return null;
         (syntax, model) = Symbols.WithBody(method, syntax, model);
         if (((SyntaxNode?)syntax.Body ?? syntax.ExpressionBody) is not { } node ||!node.DescendantNodes().Any(n => n is ForStatementSyntax
                 or ForEachStatementSyntax or WhileStatementSyntax or DoStatementSyntax) || model.GetOperation(node, ct) is not { } body)
             return null;
-        return new Reader(method, body, hand: true).TestsInLoop()
-            ? "a loop over other entities, read through a Lookup<T>, tests their squared distance to the row's"
+        return new Reader(method, body, hand: true).TestsInLoop() is { } walk
+            ? walk ? "a walk of a query of other entities tests their squared distance to the row's"
+                : "a loop over other entities, read through a Lookup<T>, tests their squared distance to the row's"
             : null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="condition"/>, a test of a neighbor search by hand that skips the candidate when true
+    /// (<c>if (d2 &gt;= r2) continue;</c>), holds a cutoff the generator reads, the candidate's side read through a
+    /// Lookup&lt;T&gt; of the row's component (EECS107's fix: the test becomes the pair method's).
+    /// </summary>
+    public static bool HandCutoff(IMethodSymbol method, IOperation body, IOperation condition)
+    {
+        var reader = new Reader(method, body, hand: true);
+        foreach (var term in Terms(condition, BinaryOperatorKind.ConditionalOr))
+            if (reader.Cutoff(term, far: true) != null) return true;
+        return false;
     }
 
     /// <summary>The operands of a chain of <paramref name="kind"/> (|| or &amp;&amp;), left to right.</summary>
@@ -156,16 +199,22 @@ internal static class PairForm
     {
         private readonly bool _outside = Symbols.IsRunner(method);
 
-        /// <summary>The first squared distance a relational test inside a loop compares (EECS107), or null.</summary>
-        public bool TestsInLoop()
+        /// <summary>
+        /// Whether a relational test inside a loop compares a squared distance (EECS107): null if none, else whether the
+        /// neighbor's side is an item of a query walk (else a read through a Lookup&lt;T&gt;).
+        /// </summary>
+        public bool? TestsInLoop()
         {
             foreach (var op in body.Descendants())
                 if (op is IBinaryOperation { OperatorKind: BinaryOperatorKind.GreaterThanOrEqual or BinaryOperatorKind.GreaterThan
                         or BinaryOperatorKind.LessThan or BinaryOperatorKind.LessThanOrEqual } test
-                    && InLoop(test) && (Distance(test.LeftOperand) != null || Distance(test.RightOperand) != null))
-                    return true;
-            return false;
+                    && InLoop(test) && (Distance(test.LeftOperand) ?? Distance(test.RightOperand)) != null)
+                    return _walked;
+            return null;
         }
+
+        // The last Other check of the hand mode took an item of a query walk.
+        private bool _walked;
 
         private bool InLoop(IOperation op)
         {
@@ -290,11 +339,29 @@ internal static class PairForm
             && Symbols.Classify(p, _outside) == Symbols.ParamKind.Component && p.RefKind == RefKind.In ? p : null;
 
         /// <summary>The neighbor's side: a [Neighbor] parameter, or (by hand) a read of another entity's component of the row's type.</summary>
-        private bool Other(IOperation root, IParameterSymbol row) => hand
-            ? root is IInvocationOperation { TargetMethod.Name: "Read", Instance: IParameterReferenceOperation { Parameter: var lookup } }
-              && Symbols.Classify(lookup, _outside) == Symbols.ParamKind.Lookup
-              && SymbolEqualityComparer.Default.Equals(Symbols.LookupElement(lookup.Type), row.Type)
-            : root is IParameterReferenceOperation { Parameter: var p } && Symbols.Classify(p, _outside) == Symbols.ParamKind.Neighbor;
+        private bool Other(IOperation root, IParameterSymbol row)
+        {
+            if (!hand) return root is IParameterReferenceOperation { Parameter: var p } && Symbols.Classify(p, _outside) == Symbols.ParamKind.Neighbor;
+            if (LookupRead(root) is { } lookup)
+            {
+                _walked = false;
+                return Symbols.Classify(lookup, _outside) == Symbols.ParamKind.Lookup
+                       && SymbolEqualityComparer.Default.Equals(Symbols.LookupElement(lookup.Type), row.Type);
+            }
+
+            // A query walk's item (o.Component1, the generated o.Position) of the row's component.
+            _walked = true;
+            return root is IPropertyReferenceOperation { Instance: ILocalReferenceOperation { Local: var item } } property
+                   && SymbolEqualityComparer.Default.Equals(property.Type, row.Type) && IsQueryItem(item.Type);
+        }
+
+        /// <summary>A QueryItem or ReadItem of EasyEcs (the iteration variable of a query walk).</summary>
+        private static bool IsQueryItem(ITypeSymbol type) =>
+            type is INamedTypeSymbol { Name: "QueryItem" or "ReadItem", ContainingNamespace: { Name: "EasyEcs", ContainingNamespace.IsGlobalNamespace: true } };
+
+        /// <summary>The parameter <paramref name="op"/> reads another entity's component through (<c>lookup.Read(id)</c>), or null.</summary>
+        private static IParameterSymbol? LookupRead(IOperation op) =>
+            op is IInvocationOperation { TargetMethod.Name: "Read", Instance: IParameterReferenceOperation { Parameter: var p } } ? p : null;
 
         /// <summary>A chain of field reads (<c>p.At.X</c>): what it starts from (a parameter, a call) and the path ("At.X").</summary>
         private (IOperation Root, string Path)? Path(IOperation op)

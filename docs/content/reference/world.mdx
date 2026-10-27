@@ -152,16 +152,6 @@ Whether any alive entity has all of `T1, T2`. O(matching archetypes), plus O(row
 
 **Complexity** ([API table](/en/docs/api)): O(M + S / 64) worst
 
-### `Blocks` [#blocks]
-
-```csharp
-public World.OrderedTables Blocks<T>() where T : struct, IComponent;
-```
-
-The blocks of every table ordered by `T` (an inferred order or [[OrderBy]](/en/docs/reference/orderbyattribute)), one [`RowBlocks`](/en/docs/reference/rowblocks) per table: `foreach (var blocks in world.Blocks<Position>())`. None for a component no table is ordered by. A search over the boxes finds the rows near a point or a box without visiting the others. O(1) to start, O(tables) to walk; allocation-free.
-
-**Complexity** ([API table](/en/docs/api)): O(1), O(tables) to walk
-
 ### `Capture` [#capture]
 
 ```csharp
@@ -200,6 +190,16 @@ The children of `parent`: the entities whose [`ChildOf`](/en/docs/reference/chil
 
 - `world.Children(parent).Count`: O(1)
 - `world.Children(parent)`: O(1), then O(1) per child
+
+### `Clusters` [#clusters]
+
+```csharp
+public World.OrderedTables Clusters<T>() where T : struct, IComponent;
+```
+
+The clusters of every table ordered by `T` (an inferred order or [[OrderBy]](/en/docs/reference/orderbyattribute)), one [`RowClusters`](/en/docs/reference/rowclusters) per table: `foreach (var clusters in world.Clusters<Position>())`. None for a component no table is ordered by. A search over the boxes finds the rows near a point or a box without visiting the others. O(1) to start, O(tables) to walk; allocation-free.
+
+**Complexity** ([API table](/en/docs/api)): O(1), O(tables) to walk
 
 ### `CollectIds` [#collectids]
 
@@ -1198,7 +1198,7 @@ Stable handle to singleton `T`; throws if it was not added: resolve it once, the
 public void SortRows<T>() where T : struct, IComponent;
 ```
 
-Sort every table holding `T` by its key now, whatever their cadence: the rows in key order, the boxes of their blocks drawn again (an order inferred for a pair method, `World.OrderRows`, or [[OrderBy]](/en/docs/reference/orderbyattribute)). The next sort of each table comes its interval after this one. For a component no table is ordered by it does nothing. Rows move, so refs into the tables, handles' cached rows and marked rows end here, as at any structural change. Owner thread only, between passes (throws during one). O(rows × (key bytes + columns)) of the tables that were out of order, O(rows) for the others; allocation-free in steady state.
+Sort every table holding `T` by its key now, whatever their cadence: the rows in key order, the boxes of their clusters drawn again (an order inferred for a pair method, `World.OrderRows`, or [[OrderBy]](/en/docs/reference/orderbyattribute)). The next sort of each table comes its interval after this one. For a component no table is ordered by it does nothing. Rows move, so refs into the tables, handles' cached rows and marked rows end here, as at any structural change. Owner thread only, between passes (throws during one). O(rows × (key bytes + columns)) of the tables that were out of order, O(rows) for the others; allocation-free in steady state.
 
 **Complexity** ([API table](/en/docs/api)): O(N × (K + C)) when rows move, O(N) when they are in order already
 

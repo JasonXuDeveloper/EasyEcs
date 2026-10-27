@@ -40,7 +40,7 @@ public readonly ref struct Mut<T> where T : struct, IComponent
 
     /// <summary>
     /// Wraps <paramref name="value"/>, the component of row <paramref name="index"/> of a run of rows of a pass that
-    /// changes no structure, whose change-tick column <paramref name="run"/> holds (<see cref="MutColumn.Of{T}"/>, made
+    /// changes no structure, whose change-tick column <paramref name="run"/> holds (<see cref="MutColumn.Of{T}(in EntitySpan)"/>, made
     /// once per run): a write stamps the row without looking the entity or the column up. Generated code calls this.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -129,6 +129,17 @@ public readonly unsafe struct MutColumn
         var table = entities.Table;
         int column = table.TicksOf<T>(out var words, out var ticks);
         return new MutColumn(table, words, ticks, column, entities.First, entities.World.ChangeTick);
+    }
+
+    /// <summary>
+    /// The change-tick column of <typeparamref name="T"/> in <paramref name="table"/> from its row 0 (a pair pass's
+    /// run: index r is row r), default for a component that does not track changes.
+    /// </summary>
+    internal static MutColumn Of<T>(Archetype table, World world) where T : struct, IComponent
+    {
+        if (default(T) is not ITracked) return default; // a JIT-time constant
+        int column = table.TicksOf<T>(out var words, out var ticks);
+        return new MutColumn(table, words, ticks, column, 0, world.ChangeTick);
     }
 
     /// <summary>Stamps row <paramref name="index"/> of the run as written at the pass's tick.</summary>

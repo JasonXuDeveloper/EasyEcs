@@ -10,8 +10,8 @@ using System.Threading;
 namespace EasyEcs;
 
 /// <summary>
-/// A component whose tables keep their rows in the order of <see cref="OrderKey"/>, with a box per block of rows (8, or 4
-/// on ARM64) over <see cref="BoxPoint"/> (<see cref="RowBlocks"/>). Declared with
+/// A component whose tables keep their rows in the order of <see cref="OrderKey"/>, with a box per cluster of rows (8, or 4
+/// on ARM64) over <see cref="BoxPoint"/> (<see cref="RowClusters"/>). Declared with
 /// <see cref="OrderByAttribute">[OrderBy]</see> on the key member, which makes the generator write both members
 /// explicitly and register the order for every world: the interface alone orders nothing.
 /// </summary>
@@ -24,13 +24,13 @@ public interface IOrderKey<TKey> : IComponent where TKey : unmanaged
     /// <summary>The key rows are ordered by, ascending (rows with equal keys keep their order).</summary>
     TKey OrderKey { get; }
 
-    /// <summary>The point the box of a block covers: up to three axes (the declaration's), the others 0.</summary>
+    /// <summary>The point the box of a cluster covers: up to three axes (the declaration's), the others 0.</summary>
     Vector3 BoxPoint { get; }
 }
 
 /// <summary>
 /// How an order reads a row of <typeparamref name="T"/>: its key (rows ascending by it) and the point the boxes of
-/// blocks cover. Written by the generator: for a pair method's distance test (the Morton code of the position,
+/// clusters cover. Written by the generator: for a pair method's distance test (the Morton code of the position,
 /// <see cref="RowKeys.Morton"/>, quantized by the cutoff) and for <see cref="OrderByAttribute">[OrderBy]</see>; the
 /// world asks for the order with <see cref="World.OrderRows{T, TOrder}"/>. Static members, so the sort calls them
 /// without a delegate.
@@ -44,7 +44,7 @@ public interface IRowOrder<T> where T : struct, IComponent
     /// <summary>The row's key as an unsigned integer that orders like it (<see cref="RowKeys"/>), given the order's cell.</summary>
     static abstract ulong Key(in T row, float cell);
 
-    /// <summary>The point the box of the row's block covers (up to three axes, the others 0).</summary>
+    /// <summary>The point the box of the row's cluster covers (up to three axes, the others 0).</summary>
     static abstract Vector3 Point(in T row);
 }
 
@@ -55,7 +55,7 @@ public static class RowKeys
     /// <summary>
     /// The Morton code (Z-order) of <paramref name="point"/>'s first <paramref name="axes"/> axes (1 to 3), each
     /// quantized to cells of <paramref name="cell"/>: rows near each other in space get near keys, so a sorted table's
-    /// blocks of 8 rows are compact boxes. 63, 32 or 21 bits per axis (clamped past them; NaN is cell 0). O(1).
+    /// clusters of 8 rows are compact boxes. 63, 32 or 21 bits per axis (clamped past them; NaN is cell 0). O(1).
     /// </summary>
     public static ulong Morton(Vector3 point, int axes, float cell)
     {
@@ -120,29 +120,29 @@ internal readonly struct DeclaredOrder<T, TKey> : IRowOrder<T> where T : struct,
 }
 
 /// <summary>
-/// The order of one table's rows and the boxes of its blocks (Archetype.Order): created with a table that holds a
+/// The order of one table's rows and the boxes of its clusters (Archetype.Order): created with a table that holds a
 /// component its world orders (<see cref="World.OrderRows{T, TOrder}"/>, which a generated pair method's setup calls,
 /// or <see cref="OrderByAttribute">[OrderBy]</see> for every world), re-sorted by its world on the cadence (<see cref="World.SortRows{T}"/>
-/// for one now). Between sorts the rows drift: a row that moves into a block's row (a swap-remove, closed tombstones)
-/// widens that block's box to hold it, rows that join the table wait past <see cref="SortedRows"/>, and a row's own
-/// point may move up to the margin before its block's box stops covering it.
+/// for one now). Between sorts the rows drift: a row that moves into a cluster's row (a swap-remove, closed tombstones)
+/// widens that cluster's box to hold it, rows that join the table wait past <see cref="SortedRows"/>, and a row's own
+/// point may move up to the margin before its cluster's box stops covering it.
 /// <br/>
 /// Owner thread only, under the structural gate: sorts, widenings and shrinks happen where rows move, never during a
-/// parallel pass, so readers (<see cref="RowBlocks"/>) on a pass's threads see boxes that do not change under them.
-/// Memory: the boxes, 2 floats per axis per block, kept with the table and trimmed with it
+/// parallel pass, so readers (<see cref="RowClusters"/>) on a pass's threads see boxes that do not change under them.
+/// Memory: the boxes, 2 floats per axis per cluster, kept with the table and trimmed with it
 /// (<see cref="World.TrimExcess"/>); the sort's keys and gathers are buffers of the shared array pools.
 /// </summary>
 internal abstract class RowOrder
 {
     /// <summary>
-    /// Rows per block unless an order asks for another size: a vector of floats, so a kernel holds a block's
-    /// coordinates in one register per axis: 8 where 256-bit vectors are hardware (8 x 8 pairs of blocks), else 4
+    /// Rows per cluster unless an order asks for another size: a vector of floats, so a kernel holds a cluster's
+    /// coordinates in one register per axis: 8 where 256-bit vectors are hardware (8 x 8 pairs of clusters), else 4
     /// (ARM64's NEON: 4 x 4). Decision D137 has the measurement against 16.
     /// </summary>
-    public static int DefaultBlockRows => Vector256.IsHardwareAccelerated ? 8 : 4;
+    public static int DefaultClusterSize => Vector256.IsHardwareAccelerated ? 8 : 4;
 
-    /// <summary>Rows per block of this order: a power of two from 1 to 64.</summary>
-    public readonly int BlockRows;
+    /// <summary>Rows per cluster of this order: a power of two from 1 to 64.</summary>
+    public readonly int ClusterSize;
 
     private static int _instances;
 
@@ -164,7 +164,7 @@ internal abstract class RowOrder
     private readonly int _id = Interlocked.Increment(ref _instances);
     private int _changes;
 
-    /// <summary>Rows in blocks: [0, SortedRows), at most the table's count. The rows past them joined since the sort.</summary>
+    /// <summary>Rows in clusters: [0, SortedRows), at most the table's count. The rows past them joined since the sort.</summary>
     public int SortedRows;
 
     /// <summary>The update of the last sort (<see cref="World.DefaultUpdateCount"/>).</summary>
@@ -173,14 +173,14 @@ internal abstract class RowOrder
     /// <summary>Sort at the next update whatever the cadence: a new table, or rows restored from a snapshot or a save.</summary>
     public bool Stale = true;
 
-    /// <summary>The boxes: the minimum of axis a in [a * BoxCapacity, +blocks), its maximum in [(Axes + a) * BoxCapacity, +blocks).</summary>
+    /// <summary>The boxes: the minimum of axis a in [a * BoxCapacity, +clusters), its maximum in [(Axes + a) * BoxCapacity, +clusters).</summary>
     public float[] Boxes = [];
 
     public int BoxCapacity;
 
-    protected RowOrder(ushort bit, int axes, float cell, int interval, float margin, int blockRows)
+    protected RowOrder(ushort bit, int axes, float cell, int interval, float margin, int clusterSize)
     {
-        BlockRows = blockRows == 0 ? DefaultBlockRows : blockRows;
+        ClusterSize = clusterSize == 0 ? DefaultClusterSize : clusterSize;
         Bit = bit;
         Axes = axes;
         Cell = cell;
@@ -189,20 +189,20 @@ internal abstract class RowOrder
     }
 
     /// <summary>Throws for an order no table can keep (cold: a request or a registration).</summary>
-    public static void Check(int axes, float cell, int interval, float margin, int blockRows)
+    public static void Check(int axes, float cell, int interval, float margin, int clusterSize)
     {
-        if (blockRows != 0 && (blockRows > 64 || !BitOperations.IsPow2(blockRows)))
-            throw new ArgumentOutOfRangeException(nameof(blockRows), blockRows, "A block holds a power of two of rows up to 64, or 0 for the machine's");
+        if (clusterSize != 0 && (clusterSize > 64 || !BitOperations.IsPow2(clusterSize)))
+            throw new ArgumentOutOfRangeException(nameof(clusterSize), clusterSize, "A cluster holds a power of two of rows up to 64, or 0 for the machine's");
         if ((uint)axes > 3) throw new ArgumentOutOfRangeException(nameof(axes), axes, "A box covers up to 3 axes");
         if (!(cell > 0) || float.IsInfinity(cell)) throw new ArgumentOutOfRangeException(nameof(cell), cell, "A cell is a finite size above 0");
         if (interval < 1) throw new ArgumentOutOfRangeException(nameof(interval), interval, "Rows are sorted every 1 update or more");
         if (!(margin >= 0) || float.IsInfinity(margin)) throw new ArgumentOutOfRangeException(nameof(margin), margin, "A margin is a finite distance, 0 or more");
     }
 
-    /// <summary>Blocks over the sorted rows (the last one may hold fewer than <see cref="BlockRows"/>).</summary>
-    public int BlockCount => (SortedRows + BlockRows - 1) / BlockRows;
+    /// <summary>Clusters over the sorted rows (the last one may hold fewer than <see cref="ClusterSize"/>).</summary>
+    public int ClusterCount => (SortedRows + ClusterSize - 1) / ClusterSize;
 
-    /// <summary>Changes whenever the blocks do (a sort, a widened box, fewer sorted rows), unique across tables.</summary>
+    /// <summary>Changes whenever the clusters do (a sort, a widened box, fewer sorted rows), unique across tables.</summary>
     public long Version => (long)_id << 32 | (uint)_changes;
 
     /// <summary>
@@ -213,10 +213,10 @@ internal abstract class RowOrder
     /// </summary>
     public abstract bool Sort(Archetype table, EntityMeta[] meta);
 
-    /// <summary>Widen the box of the block of row <paramref name="row"/> (in the table's column) to hold the row.</summary>
+    /// <summary>Widen the box of the cluster of row <paramref name="row"/> (in the table's column) to hold the row.</summary>
     protected abstract void Widen(Archetype table, int row);
 
-    /// <summary>A row of the table moved into row <paramref name="row"/>: its block's box grows to hold it.</summary>
+    /// <summary>A row of the table moved into row <paramref name="row"/>: its cluster's box grows to hold it.</summary>
     public void Moved(Archetype table, int row)
     {
         if (row >= SortedRows) return;
@@ -224,7 +224,7 @@ internal abstract class RowOrder
         _changes++;
     }
 
-    /// <summary>The table has <paramref name="count"/> rows now: the blocks end there.</summary>
+    /// <summary>The table has <paramref name="count"/> rows now: the clusters end there.</summary>
     public void Shrink(int count)
     {
         if (count >= SortedRows) return;
@@ -232,7 +232,7 @@ internal abstract class RowOrder
         _changes++;
     }
 
-    /// <summary>The rows were replaced (a restore, a load): no block until the next update sorts them.</summary>
+    /// <summary>The rows were replaced (a restore, a load): no cluster until the next update sorts them.</summary>
     public void Reset()
     {
         SortedRows = 0;
@@ -240,25 +240,25 @@ internal abstract class RowOrder
         _changes++;
     }
 
-    /// <summary>Give back the box room past the current blocks (<see cref="World.TrimExcess"/>).</summary>
+    /// <summary>Give back the box room past the current clusters (<see cref="World.TrimExcess"/>).</summary>
     public void Trim()
     {
-        int blocks = BlockCount;
-        if (blocks >= BoxCapacity) return;
-        var boxes = blocks == 0 ? [] : new float[2 * Axes * blocks];
-        for (int a = 0; a < 2 * Axes; a++) Array.Copy(Boxes, a * BoxCapacity, boxes, a * blocks, blocks);
+        int clusters = ClusterCount;
+        if (clusters >= BoxCapacity) return;
+        var boxes = clusters == 0 ? [] : new float[2 * Axes * clusters];
+        for (int a = 0; a < 2 * Axes; a++) Array.Copy(Boxes, a * BoxCapacity, boxes, a * clusters, clusters);
         Boxes = boxes;
-        BoxCapacity = blocks;
+        BoxCapacity = clusters;
     }
 
-    /// <summary>The minima (<paramref name="max"/> false) or maxima of axis <paramref name="axis"/>, one per block.</summary>
-    public Span<float> Side(int axis, bool max) => Boxes.AsSpan((max ? Axes + axis : axis) * BoxCapacity, BlockCount);
+    /// <summary>The minima (<paramref name="max"/> false) or maxima of axis <paramref name="axis"/>, one per cluster.</summary>
+    public Span<float> Side(int axis, bool max) => Boxes.AsSpan((max ? Axes + axis : axis) * BoxCapacity, ClusterCount);
 
-    /// <summary>Room for <paramref name="blocks"/> boxes (cold: only when the table grew past the last sort's blocks).</summary>
-    protected void Reserve(int blocks)
+    /// <summary>Room for <paramref name="clusters"/> boxes (cold: only when the table grew past the last sort's clusters).</summary>
+    protected void Reserve(int clusters)
     {
-        if (blocks <= BoxCapacity) return;
-        int capacity = Math.Max(blocks, BoxCapacity * 2);
+        if (clusters <= BoxCapacity) return;
+        int capacity = Math.Max(clusters, BoxCapacity * 2);
         Boxes = new float[2 * Axes * capacity];
         BoxCapacity = capacity;
     }
@@ -272,8 +272,8 @@ internal abstract class RowOrder
 }
 
 /// <summary>The order of a table by <typeparamref name="T"/>, its key and point read by <typeparamref name="TOrder"/>.</summary>
-internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, float margin, int blockRows)
-    : RowOrder(ComponentType<T>.Bit, axes, cell, interval, margin, blockRows) where T : struct, IComponent where TOrder : struct, IRowOrder<T>
+internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, float margin, int clusterSize)
+    : RowOrder(ComponentType<T>.Bit, axes, cell, interval, margin, clusterSize) where T : struct, IComponent where TOrder : struct, IRowOrder<T>
 {
     public override bool Sort(Archetype table, EntityMeta[] meta)
     {
@@ -359,21 +359,21 @@ internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, fl
         return true;
     }
 
-    /// <summary>The box of every block over the points of its rows that have the component, widened by the margin.</summary>
+    /// <summary>The box of every cluster over the points of its rows that have the component, widened by the margin.</summary>
     private void Draw(Archetype table, int column)
     {
-        int n = table.Count, blocks = (n + BlockRows - 1) / BlockRows;
-        Reserve(blocks);
+        int n = table.Count, clusters = (n + ClusterSize - 1) / ClusterSize;
+        Reserve(clusters);
         if (Axes == 0) return;
         ref T row0 = ref table.Data<T>(column);
         var present = table.Bits(column);
         int capacity = BoxCapacity;
         ref float boxes = ref MemoryMarshal.GetArrayDataReference(Boxes);
-        for (int b = 0; b < blocks; b++)
+        for (int b = 0; b < clusters; b++)
         {
             var low = new Vector3(float.PositiveInfinity);
             var high = new Vector3(float.NegativeInfinity);
-            for (int row = b * BlockRows, end = Math.Min(row + BlockRows, n); row < end; row++)
+            for (int row = b * ClusterSize, end = Math.Min(row + ClusterSize, n); row < end; row++)
             {
                 if (present != null && (present[row >> 6] >> row & 1) == 0) continue;
                 var point = TOrder.Point(in Unsafe.Add(ref row0, row));
@@ -381,7 +381,7 @@ internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, fl
                 high = Vector3.Max(high, point);
             }
 
-            // An empty block (every row lacks the component) keeps an inverted box, which no search overlaps.
+            // An empty cluster (every row lacks the component) keeps an inverted box, which no search overlaps.
             var margin = new Vector3(Margin);
             low -= margin;
             high += margin;
@@ -398,11 +398,11 @@ internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, fl
         int column = table.ColumnIndex(Bit);
         if (Axes == 0 || !table.Has(column, row)) return;
         var p = TOrder.Point(in Unsafe.Add(ref table.Data<T>(column), row));
-        int block = row / BlockRows;
+        int cluster = row / ClusterSize;
         for (int a = 0; a < Axes; a++)
         {
-            ref float low = ref Boxes[a * BoxCapacity + block];
-            ref float high = ref Boxes[(Axes + a) * BoxCapacity + block];
+            ref float low = ref Boxes[a * BoxCapacity + cluster];
+            ref float high = ref Boxes[(Axes + a) * BoxCapacity + cluster];
             low = MathF.Min(low, p[a] - Margin);
             high = MathF.Max(high, p[a] + Margin);
         }

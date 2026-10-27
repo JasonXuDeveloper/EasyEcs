@@ -23,9 +23,9 @@ public sealed partial class SystemGenerator
             if (Symbols.IsRunner(method) || !Symbols.GeneratesSystem(method.ContainingType)) return null;
             string owner = OwnerModel.From(method.ContainingType).FullName;
             int order = method.ContainingType.GetMembers().IndexOf(method);
-            // A pair method's loop is its pair job's (SystemGenerator.Pairs.cs).
-            if (PairForm.IsPairMethod(method)) return new LoopModel(owner, order, null, "", PairModel.Create(method, syntax, model, ct));
             bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model) == null;
+            // A pair method's loop is its pair job's (SystemGenerator.Pairs.cs).
+            if (PairForm.IsPairMethod(method)) return new LoopModel(owner, order, null, "", PairModel.Create(method, syntax, model, parallel, ct));
             var simd = ForEachModel.VectorLoop(method, syntax, model, parallel, ct, out string? scalar);
             return new LoopModel(owner, order, simd, scalar ?? "", null);
         }

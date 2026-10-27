@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.OrderByAttribute" source="307ebcfe28ec">
+  <member name="T:EasyEcs.OrderByAttribute" source="5ca71c871eb6">
     <summary>
       每个 World 让这个组件的表按它排序的键，以及簇的包围盒要罩住的点。成对方法用到的表不需要声明就会排序：生成器从方法的距离判断推断出顺序
       （位置按截断距离量化后的 Morton 码，<see cref="M:EasyEcs.World.OrderRows``2(System.Int32,System.Single,System.Int32,System.Single,System.Int32)" />）。
@@ -11,7 +11,7 @@
       （<c>Map.Morton</c> 代表游戏自己的量化方式）。
       生成器加上 <see cref="T:EasyEcs.IOrderKey`1" />，显式的 <c>OrderKey</c> 返回这个成员，<c>BoxPoint</c> 返回这些轴，并注册这个顺序：
       每个 World 每 <see cref="P:EasyEcs.OrderByAttribute.Interval" /> 次更新重新排序一次含这个组件的每张表（从表出现后的第一次更新开始），
-      让表的行保持键的顺序，每簇（8 行，ARM64 上 4 行）一个罩住这些轴的包围盒（<see cref="T:EasyEcs.RowBlocks" />）。
+      让表的行保持键的顺序，每簇（8 行，ARM64 上 4 行）一个罩住这些轴的包围盒（<see cref="T:EasyEcs.RowClusters" />）。
       两次排序之间加入的行排在表的末尾等待；移进某簇的行会扩大那簇的包围盒。一张表含两个有序组件时，按位号小的那个排序。
     </summary>
     <param name="box">
@@ -19,7 +19,7 @@
       <see cref="T:System.Numerics.Vector3" />。不写：行照样排序，簇没有包围盒。
     </param>
   </member>
-  <member name="M:EasyEcs.OrderByAttribute.#ctor(System.String[])" source="307ebcfe28ec">
+  <member name="M:EasyEcs.OrderByAttribute.#ctor(System.String[])" source="5ca71c871eb6">
     <summary>
       每个 World 让这个组件的表按它排序的键，以及簇的包围盒要罩住的点。成对方法用到的表不需要声明就会排序：生成器从方法的距离判断推断出顺序
       （位置按截断距离量化后的 Morton 码，<see cref="M:EasyEcs.World.OrderRows``2(System.Int32,System.Single,System.Int32,System.Single,System.Int32)" />）。
@@ -30,7 +30,7 @@
       （<c>Map.Morton</c> 代表游戏自己的量化方式）。
       生成器加上 <see cref="T:EasyEcs.IOrderKey`1" />，显式的 <c>OrderKey</c> 返回这个成员，<c>BoxPoint</c> 返回这些轴，并注册这个顺序：
       每个 World 每 <see cref="P:EasyEcs.OrderByAttribute.Interval" /> 次更新重新排序一次含这个组件的每张表（从表出现后的第一次更新开始），
-      让表的行保持键的顺序，每簇（8 行，ARM64 上 4 行）一个罩住这些轴的包围盒（<see cref="T:EasyEcs.RowBlocks" />）。
+      让表的行保持键的顺序，每簇（8 行，ARM64 上 4 行）一个罩住这些轴的包围盒（<see cref="T:EasyEcs.RowClusters" />）。
       两次排序之间加入的行排在表的末尾等待；移进某簇的行会扩大那簇的包围盒。一张表含两个有序组件时，按位号小的那个排序。
     </summary>
     <param name="box">
@@ -38,7 +38,7 @@
       <see cref="T:System.Numerics.Vector3" />。不写：行照样排序，簇没有包围盒。
     </param>
   </member>
-  <member name="P:EasyEcs.OrderByAttribute.Box" source="888b822efc35">
+  <member name="P:EasyEcs.OrderByAttribute.Box" source="f163607f0aa1">
     <summary>簇的包围盒罩住的成员。</summary>
   </member>
   <member name="P:EasyEcs.OrderByAttribute.Interval" source="7b7711b1419d">
@@ -47,7 +47,7 @@
       一次排序的开销分摊到 10 次更新上，只占一个 tick 的一小部分（决策 D137）。
     </summary>
   </member>
-  <member name="P:EasyEcs.OrderByAttribute.Margin" source="b81b47673ffc">
+  <member name="P:EasyEcs.OrderByAttribute.Margin" source="3b3b6b7197de">
     <summary>
       两次排序之间一行能移动多远而仍在它那簇的包围盒里：每个包围盒每一侧都扩大这么多（GROMACS 成对列表的缓冲区）。默认 0：
       一定要找到某个范围内每一行的搜索，加上每次更新行移动的距离乘以 <see cref="P:EasyEcs.OrderByAttribute.Interval" />。

@@ -124,7 +124,7 @@ public sealed class WhenTargetDestroyedAttribute(TargetPolicy policy) : Attribut
 public sealed class GroupByAttribute : Attribute;
 
 /// <summary>
-/// The key every world keeps the component's tables ordered by, and the point the boxes of their blocks cover. A table
+/// The key every world keeps the component's tables ordered by, and the point the boxes of their clusters cover. A table
 /// needs no declaration to be ordered for a pair method: the generator infers the order from the method's distance
 /// test (the Morton code of the position by the cutoff, <see cref="World.OrderRows{T, TOrder}"/>). <c>[OrderBy]</c>
 /// overrides that order for every world: another key, a non-spatial order. On a member of a partial component (a field, a property or a record's positional parameter) whose type is an integer,
@@ -135,19 +135,19 @@ public sealed class GroupByAttribute : Attribute;
 /// The generator adds <see cref="IOrderKey{TKey}"/> with an explicit <c>OrderKey</c> returning the member and
 /// <c>BoxPoint</c> returning the axes, and registers the order: every world re-sorts each table holding the component
 /// every <see cref="Interval"/> updates (from the first update after the table appears), keeping the rows of the
-/// table in key order and a box per block of rows (8, or 4 on ARM64) over the axes (<see cref="RowBlocks"/>). Rows that join between
-/// sorts wait at the end of their table; a row that moves into a block widens its box. A table that holds two ordered
+/// table in key order and a box per cluster of rows (8, or 4 on ARM64) over the axes (<see cref="RowClusters"/>). Rows that join between
+/// sorts wait at the end of their table; a row that moves into a cluster widens its box. A table that holds two ordered
 /// components is ordered by the one with the lower bit.
 /// </summary>
 /// <param name="box">
-/// The members the blocks' boxes cover, up to three: <c>float</c> fields or properties of the component, or one
-/// <see cref="System.Numerics.Vector2"/> or <see cref="System.Numerics.Vector3"/>. None: rows are ordered, the blocks
+/// The members the clusters' boxes cover, up to three: <c>float</c> fields or properties of the component, or one
+/// <see cref="System.Numerics.Vector2"/> or <see cref="System.Numerics.Vector3"/>. None: rows are ordered, the clusters
 /// have no box.
 /// </param>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
 public sealed class OrderByAttribute(params string[] box) : Attribute
 {
-    /// <summary>The members the blocks' boxes cover.</summary>
+    /// <summary>The members the clusters' boxes cover.</summary>
     public string[] Box { get; } = box;
 
     /// <summary>
@@ -157,7 +157,7 @@ public sealed class OrderByAttribute(params string[] box) : Attribute
     public int Interval { get; set; } = 10;
 
     /// <summary>
-    /// How far a row may move between sorts and stay inside its block's box: every box is widened by it on each side
+    /// How far a row may move between sorts and stay inside its cluster's box: every box is widened by it on each side
     /// (the buffer of GROMACS's pair lists). 0 by default: a search that must find every row within a range adds the
     /// distance rows move per update times <see cref="Interval"/>.
     /// </summary>

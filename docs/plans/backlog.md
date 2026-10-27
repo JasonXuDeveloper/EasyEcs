@@ -33,10 +33,11 @@ names the skill:
 
 - [ ] **Fewer copies c + d** ("Next" items 12c and 12d, branch `feat-fewer-copies`): Permute swaps columns with a spare,
       incremental Capture / Restore, and fix-ci's restore cost won back.
-- [ ] **Generator crash on components from another assembly** ("Next" item 8b, branch `fix-kernel-foreign`).
-- [ ] **L2 leftovers** ("Next" item 1, branch `feat-pairs-2`): the open list of item 1.
+- [ ] **Generator crash on components from another assembly** ("Next" items 8b + 8d, branch `fix-kernel-foreign`).
 
-Merged since the last update: the zombies' distance field (`feat-zombie-field`, 9c73602), CI fixes (`fix-ci`, ae9d525: Restore gives rows written since the capture their own
+Merged since the last update: the L2 leftovers (`feat-pairs-2`: parallel pairs, `[Neighbor] ref`, nested-walk
+rewrites, neighbor lists by cost, `Reduce<T>` / `Mut<T>` in pair methods, the cluster renames; the owner's M4 run of
+PairListsBenchmark is open), the zombies' distance field (`feat-zombie-field`, 9c73602), CI fixes (`fix-ci`, ae9d525: Restore gives rows written since the capture their own
 copy on the owner thread, VoxelServer 0 B again; DocCheck 0), L1 ordered rows + L3 compress (`feat-locality-core`), the pair form
 (`feat-locality-pairs`), vector loops through the user's own calls (`feat-call-inliner`), the prefetch gate per form
 (`feat-prefetch-gate`, 216e29a: row chases, fused walks, buffer chases and `DestroyEntities` past the L2; probes and
@@ -68,15 +69,18 @@ Read-only beside them (no slot): the VoxelServer plan refreshed (Finish step 2a)
        neighbor-list form on ARM64, picked by density; never a slower case (no re-sort every tick on sparse maps).
        **Built on `feat-locality-pairs`** (`locality.md` 6.6): `[Neighbor]`, the pass, the generated order / job / vector
        loop, EECS105-107, cutoff per row, two kinds of entity, ties and the keep-target hint (merged; `[Neighbor]` approved
-       by the owner, 2026-10-27). Open: the spread-map nearest
-       re-measure, the ARM64 neighbor-list form by density, writes to j (Pickup), parallel pair passes, the EECS107 fix,
-       nested-walk rewrites, Lookup gathers under Auto. L4 (examples) moved to the finish phase (docs-todos).
+       by the owner, 2026-10-27). **`feat-pairs-2`:** writes to j (`[Neighbor] ref`), parallel pair passes, the EECS107
+       fix and nested-walk rewrites, lists of neighbors picked by cost (Auto never slower; the M4 run of PairListsBenchmark
+       open), `Reduce<T>` / `Mut<T>` in pair methods (GA1); measured and dropped: Lookup gathers under Auto (slower with
+       many target tables), the spread-map grid of clusters (faster spread, slower packed), the cluster prefetch below
+       (slower at every size). L4 (examples) moved to the finish phase (docs-todos).
        Follow-up after L2 merges (owner, 2026-10-27: "cluster pairs + prefetch, faster?"): prefetch the j block of the
        pair `k` pairs ahead (its rows' lines of every column the pair method reads) behind a `CacheSizes`
        gate as item 6 (which one, L2 or last level, measured per form as item 6's gate per form was); i blocks are
        sequential and need none. Expected to pay only when the ordered table is past the
        last-level cache (this machine's L3 is 260 MiB: PairsBenchmark at 4M-16M rows, plus a forced-on column just
        under the cache); ships only if faster there and never slower in the cache (`audit-perf`, two rounds, 0 B).
+       Measured on `feat-pairs-2` (a scratch PairPrefetchBenchmark, 100k-16M rows): slower everywhere, 16M included; dropped.
 2. [x] **ARM64 parity of the generated forms** (merged 186c84d): LD2-4 / ST2-4 for multi-field components, NEON TBL /
        TBX for wide components (a gate per form), BitMask in registers, the `arm64` CI job asserting loop lines.
        Owner's M4 run (default job, one round): SteerGenerated 2.07x faster than SteerScalar at 1k, 1.55x at 100k;

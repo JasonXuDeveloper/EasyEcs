@@ -102,7 +102,7 @@ Hand-written kernels in `benchmarks/` first; no core or generator change until a
    lists, a hand-written cluster-pair kernel over Morton-sorted rows (8 x 8, boxes), and the same with the sort's
    cost included at 1, 10 and 20 ticks per sort. Bar: the cluster kernel with its sort amortized at 10 ticks is
    >= 2x the grid row loop at 10k and 100k, 0 B per tick.
-2. **Nearest:** `ZombieTargetSystem.Pick`'s shape and `NearestPlayer`, hand-written against a block-box search.
+2. **Nearest:** `ZombieTargetSystem.Pick`'s shape and `NearestPlayer`, hand-written against a cluster-box search.
    Bar: >= 1.5x at the sample's sizes.
 3. **Lookup locality:** `LookupGatherBenchmark` with targets ordered by key against random, scalar and D131's
    gathers. Bar: the 64-table case beats row by row once ordered (it is the case D131 loses).
@@ -284,27 +284,27 @@ test compares distances (`ZombieSearchesAgree`, 50 / 400 players, both layouts).
 | Method | Players | Layout | Mean r1 | Ratio r1 | Mean r2 | Ratio r2 | Allocated |
 |---|---|---|---|---|---|---|---|
 | RingWalk | 50 | Packed | 51.43 us | 1.00 | 49.42 us | 1.00 | 0 B |
-| BlocksSortOnce | 50 | Packed | 13.80 us | 0.27 | 13.35 us | 0.27 | 0 B |
-| BlocksSortPerTick | 50 | Packed | 31.22 us | 0.61 | 30.15 us | 0.61 | 0 B |
+| ClustersSortOnce | 50 | Packed | 13.80 us | 0.27 | 13.35 us | 0.27 | 0 B |
+| ClustersSortPerTick | 50 | Packed | 31.22 us | 0.61 | 30.15 us | 0.61 | 0 B |
 | RingWalk | 50 | Spread | 36.34 us | 1.00 | 34.48 us | 1.00 | 0 B |
-| BlocksSortOnce | 50 | Spread | 12.23 us | 0.34 | 11.74 us | 0.34 | 0 B |
-| BlocksSortPerTick | 50 | Spread | 27.80 us | 0.77 | 27.22 us | 0.79 | 0 B |
+| ClustersSortOnce | 50 | Spread | 12.23 us | 0.34 | 11.74 us | 0.34 | 0 B |
+| ClustersSortPerTick | 50 | Spread | 27.80 us | 0.77 | 27.22 us | 0.79 | 0 B |
 | RingWalk | 2000 | Packed | 4,528.92 us | 1.00 | 4,377.27 us | 1.00 | 0 B |
-| BlocksSortOnce | 2000 | Packed | 2,307.37 us | 0.51 | 2,283.92 us | 0.52 | 0 B |
-| BlocksSortPerTick | 2000 | Packed | 2,891.08 us | 0.64 | 2,851.79 us | 0.65 | 0 B |
+| ClustersSortOnce | 2000 | Packed | 2,307.37 us | 0.51 | 2,283.92 us | 0.52 | 0 B |
+| ClustersSortPerTick | 2000 | Packed | 2,891.08 us | 0.64 | 2,851.79 us | 0.65 | 0 B |
 | RingWalk | 2000 | Spread | 3,917.35 us | 1.01 | 3,475.94 us | 1.00 | 0 B |
-| BlocksSortOnce | 2000 | Spread | 2,851.72 us | 0.73 | 2,771.53 us | 0.80 | 0 B |
-| BlocksSortPerTick | 2000 | Spread | 3,351.69 us | 0.86 | 3,277.70 us | 0.94 | 0 B |
+| ClustersSortOnce | 2000 | Spread | 2,851.72 us | 0.73 | 2,771.53 us | 0.80 | 0 B |
+| ClustersSortPerTick | 2000 | Spread | 3,351.69 us | 0.86 | 3,277.70 us | 0.94 | 0 B |
 
 `NearestPlayerBenchmark`: BattleServer's `NearestPlayer` (a scan over every player), 100,000 units of which a third
-are players on a 4096 map, 64 queries per invoke, mean per query. Blocks: the block search on a sort done once;
-BlocksWithSort: one sort per 64 queries included (`NearestPlayerSearchesAgree`).
+are players on a 4096 map, 64 queries per invoke, mean per query. Clusters: the cluster search on a sort done once;
+ClustersWithSort: one sort per 64 queries included (`NearestPlayerSearchesAgree`).
 
 | Method | Mean r1 | Ratio r1 | Mean r2 | Ratio r2 | Allocated |
 |---|---|---|---|---|---|
 | Scan | 73,423.9 ns | 1.000 | 75,483.8 ns | 1.000 | 0 B |
-| Blocks | 378.9 ns | 0.005 | 390.9 ns | 0.005 | 0 B |
-| BlocksWithSort | 17,612.8 ns | 0.240 | 17,786.5 ns | 0.236 | 0 B |
+| Clusters | 378.9 ns | 0.005 | 390.9 ns | 0.005 | 0 B |
+| ClustersWithSort | 17,612.8 ns | 0.240 | 17,786.5 ns | 0.236 | 0 B |
 
 Bar (>= 1.5x at the sample's sizes): **met** for the packed start with the sort paid every tick (1.65x / 1.64x at 50
 players, 1.57x / 1.53x at 2000) and for NearestPlayer (194x on a sorted world, 4.2x with a sort per 64 queries);
@@ -312,6 +312,22 @@ players, 1.57x / 1.53x at 2000) and for NearestPlayer (194x on a sorted world, 4
 amortized (SortOnce) every case is 1.25x to 3.7x. Where the time goes: about 30 box tests per search in a fan-out-8
 tree of jagged arrays, descending without nearest-first order. A flat grid of blocks searched in rings would test
 fewer boxes, and the nearest form would re-sort on L1's cadence instead of every tick.
+
+**Re-measured on `feat-pairs-2` with the flat grid** (`SortedClusters.BuildGrid` / `NearestInRings`: about one cluster
+per cell, the cells listing the clusters whose box overlaps them, searched ring by ring with the best distance as the
+bound; `RingsSortOnce` / `RingsSortPerTick`, checked in setup and by `ZombieSearchesAgree`), two rounds, us:
+
+| Players | Layout | RingWalk | ClustersSortOnce | RingsSortOnce | ClustersSortPerTick | RingsSortPerTick |
+|---|---|---|---|---|---|---|
+| 50 | Packed | 50.7 / 50.4 | 13.0 / 13.9 | 14.6 / 14.8 | 32.4 / 32.0 | 33.2 / 34.9 |
+| 50 | Spread | 34.3 / 33.7 | 11.5 / 11.7 | 11.5 / 11.7 | 26.9 / 28.7 | 29.8 / 30.3 |
+| 2000 | Packed | 4,252 / 4,362 | 2,269 / 2,223 | 2,661 / 2,427 | 2,648 / 2,794 | 3,033 / 3,275 |
+| 2000 | Spread | 3,604 / 3,391 | 2,726 / 2,777 | 1,877 / 1,859 | 3,086 / 3,348 | 2,599 / 2,415 |
+
+The grid wins the case the tree missed (spread at 2000: 1.45-1.49x the tree sorted once, 1.19-1.39x per tick, 1.39x /
+1.40x the ring walk per tick) and loses packed (1.07-1.17x slower at 2000) and per tick at 50 (1.06-1.11x): it does
+not replace the tree, and no layout pick is worth building for a prototype. The sample's nearest is the pair method
+(6.6, D140), whose clusters come from the pass, not from either search.
 
 ### 6.3 Operators (4.4): compress met, batch probe not met
 
@@ -455,11 +471,11 @@ gate; the vertical forms stay dropped.
 - **The order.** The pair form's setup calls `World.OrderRows<T, TOrder>(axes, cell, interval, margin)` (internal)
   for the component it reads positions from: `TOrder : IRowOrder<T>` returns `RowKeys.Morton` of the position
   quantized by the cutoff and the point the boxes cover. The generator writes that struct; `[OrderBy]` only overrides.
-- **Blocks.** `RowBlocks.Size` rows (8 with `Vector256` hardware, 4 otherwise), so the kernel is one register per
-  axis on every machine: L2 writes the kernel over `Size`, never a fixed 8. `world.Blocks<T>()` / `EntitySpan.Blocks`
-  give the boxes, a block's rows, the columns, ids and presence; `SortedRows` bounds the blocks, and rows past it
+- **Clusters.** `RowClusters.Size` rows (8 with `Vector256` hardware, 4 otherwise), so the kernel is one register per
+  axis on every machine: L2 writes the kernel over `Size`, never a fixed 8. `world.Clusters<T>()` / `EntitySpan.Clusters`
+  give the boxes, a cluster's rows, the columns, ids and presence; `SortedRows` bounds the clusters, and rows past it
   (created since the sort) need the row loop.
-- **Block pairs.** `RowBlocks.Pairs(reach, into)` / `Pairs(other, reach, into)` (a sweep over the boxes) rebuilt on
+- **Cluster pairs.** `RowClusters.Pairs(cutoff, into)` / `Pairs(other, cutoff, into)` (a sweep over the boxes) rebuilt on
   the sort's cadence; the margin keeps them valid between sorts.
 - **The kernel.** `benchmarks/EasyEcs.Benchmark/Locality/CoreClusters.cs` is the body L2 generates: the 8 x 8 step
   over the table's own columns in sorted order, within 0-15 % of the prototype over copied side arrays, and 11-14x
@@ -471,23 +487,58 @@ gate; the vertical forms stay dropped.
 - **The form.** `[Neighbor] in` parameters (and the neighbor's `Entity`); the method's first statement after its
   locals is the cutoff test (`if (d2 >= r2) return;`, or the rest under `if (d2 < r2)`). `PairForm.Read` takes sums of
   1-3 squared differences of the same float field path, `Vector2/3.DistanceSquared`, `(a - b).LengthSquared()`;
-  cutoffs of constants, statics, singletons, values or the row's `in` components (a cutoff per row: each window's
-  reach is the largest of its passing rows'). Two kinds of entity: the rows' filter is the method's, the neighbors'
+  cutoffs of constants, statics, singletons, values or the row's `in` components (a cutoff per row: each cluster's
+  cutoff is the largest of its passing rows'). Two kinds of entity: the rows' filter is the method's, the neighbors'
   the `[Neighbor]` components (a tag as `[Neighbor] in Quarry _`).
-- **Not L1's blocks.** The pass keeps its own windows of `Vector<float>.Count` rows over each table's rows in order
-  (8 with AVX2, 4 on ARM64: "4-row blocks" on ARM64 come with the width), draws their boxes every pass (O(n), cheap
-  next to the pairs) and redraws the lists only when a window left its kept box widened by an adaptive margin (x1.5 on
-  an early escape, x0.9 when a re-sort came first). L1's order (requested on the first pass, cell = the reach, margin
-  0.1 cell, re-sorted every 10 updates) only keeps the windows tight; the pairs are right in any order.
+- **The pass's own cluster boxes.** The pass keeps clusters of `Vector<float>.Count` rows over each table's rows in
+  order (8 with AVX2, 4 on ARM64: the cluster size comes with the width), draws their boxes every pass (O(n), cheap
+  next to the pairs) and redraws the lists only when a cluster left its kept box widened by an adaptive margin (x1.5 on
+  an early escape, x0.9 when a re-sort came first), not L1's boxes drawn by the sort. L1's order (requested on the
+  first pass, cell = the reach, margin 0.1 cell, re-sorted every 10 updates) only keeps the clusters tight; the pairs
+  are right in any order.
 - **Bit for bit.** Each lane meets the neighbors' tables in query order and their rows in order, the same order as the
   method per pair (`Rows`), so the vector loop and the scalar loop agree to the bit, and pruned pairs (outside every
   box) are pairs the test would turn away. Every pair runs, self included.
 - **Nearest.** No separate nearest form: a pair method keeping the nearest (ties to the lower `EntityId.Index`) is the
   nearest within a range; "keep the current target" is a pass before it leaving a hint in the target component
-  (NeighborTests). The spread-map re-measure (6.2) is not done on this branch (open).
-- **Not built:** writes to the neighbor (`[Neighbor] ref`, EECS002 today; `PairRun.Others<T>` already returns a ref),
-  parallel pair passes (the system runs alone), the neighbor-list form picked by density on ARM64, the EECS107 code fix
-  (Info only), nested-walk rewrites.
+  (NeighborTests). The spread-map re-measure is in 6.2.
+- **Built on `feat-pairs-2`:** writes to the neighbor (`[Neighbor] ref`: the pairs one at a time in the tables' rows'
+  order, the written neighbors stamped); parallel pair passes (chunks of whole words of clusters, bit for bit the
+  serial pass; PairsBenchmark `GeneratedParallel` 1.7-2.6x the serial pass at 1k-100k, 0 B); EECS107's fix (a search
+  over `Lookup<T>` ids or a walk of a query of other entities rewritten as the pair method when mechanical); lists of
+  each row's neighbors picked by cost (below); `Reduce<T>` (and `[Accumulate]` totals) in pair methods, parallel
+  chunks combined in chunk order, and `Mut<T>` of the row next to `[Neighbor] ref` (VoxelServer GA1: a pickup into
+  `Mut<DynamicBuffer<ItemStack>>`), stamping only the rows written.
+- **Lists of neighbors (the ARM64 form by density).** A run may carry each row's list (the rows of its cluster's
+  ranges within the kept cutoff plus the skin, ascending: the same pairs in the same order, bit for bit) instead of
+  the ranges; `PairState.Lists` (internal) picks by cost: the lists' entries (2 steps each), their build spread over
+  the passes the last one held and the move check against the ranges' candidates divided by the method's width,
+  needing a 20 % saving, the share of entries sampled on 64 clusters every 16th draw. PairListsBenchmark, ms, Auto /
+  Off / On, two rounds:
+
+  | Form | Rows | Density | x86 8 lanes r1 | r2 | width 1 (AVX=0) r1 | r2 |
+  |---|---|---|---|---|---|---|
+  | Generated | 10k | Crowd | 1.27 / 1.31 / 6.45 | 1.30 / 1.22 / 6.10 | 6.73 / 6.57 / 6.10 | 6.63 / 6.95 / 6.51 |
+  | Generated | 10k | Sparse | 0.716 / 0.708 / 2.12 | 0.694 / 0.634 / 2.06 | 1.80 / 2.03 / 1.87 | 1.90 / 2.18 / 1.99 |
+  | Generated | 100k | Crowd | 18.9 / 18.3 / 70.3 | 18.0 / 17.5 / 69.0 | 88.5 / 86.5 / 84.7 | 89.7 / 87.8 / 84.5 |
+  | Generated | 100k | Sparse | 9.76 / 10.6 / 25.7 | 9.50 / 10.2 / 27.9 | 29.0 / 31.1 / 30.1 | 28.7 / 30.3 / 28.6 |
+  | GeneratedRows | 10k | Crowd | 6.67 / 7.19 / 6.69 | 6.37 / 6.59 / 6.32 | 7.18 / 6.52 / 6.09 | 7.22 / 7.67 / 6.43 |
+  | GeneratedRows | 100k | Crowd | 73.8 / 77.0 / 68.9 | 72.3 / 76.0 / 74.2 | 86.1 / 86.9 / 87.8 | 93.0 / 92.6 / 86.4 |
+  | GeneratedRows | 100k | Sparse | 27.6 / 26.4 / 27.5 | 25.4 / 27.3 / 28.4 | 29.8 / 29.1 / 31.2 | 29.8 / 31.5 / 29.8 |
+
+  Auto is never slower than Off beyond the job's noise and gains 5-13 % at width 1 on sparse maps; lists forced on
+  are 3-5x slower than the 8-lane loop. The width-1 run is only a proxy for ARM64: under `DOTNET_EnableAVX=0` the
+  generated loop runs one pair at a time, while NEON runs a 4-lane loop, for which the pick keeps the ranges unless
+  the lists' entries are a fifth of the candidates. The owner's M4 run of PairListsBenchmark decides.
+- **Measured and dropped on `feat-pairs-2`:** Lookup gathers under `SimdMode.Auto` (6.1's LookupGather with L1's
+  order: 1.19-1.53x slower with 64 or 1,000 target tables, 1.26-1.32x with presence bits at 1M: they stay on request,
+  D131); the run's end hoisted into a local of the generated loops (a wash in two rounds: Generated 100k sparse 4.32 /
+  4.18 ms without, 4.09 / 4.31 ms with); the prefetch of the neighbors' clusters 4 ahead behind a `CacheSizes` gate
+  (PairPrefetchBenchmark, a scratch benchmark not committed, Off against On, ms: 1M crowd 105 / 96.5 against 125 / 122, 4M crowd 406 / 393 against 480 /
+  490, 16M crowd 1,620 against 1,947, sparse alike; the hardware prefetchers already stream the sorted neighbors).
+- **Next (owner-approved follow-up, backlog 8e):** symmetric pair methods, each unordered pair once with both sides
+  written (Newton's third law): half lists of clusters, the neighbor's write reduced across the lanes, and a schedule
+  for parallel passes; not on this branch.
 
 ## 7. Order against the work already running
 

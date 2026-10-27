@@ -63,7 +63,7 @@ public readonly ref struct EntitySpan
 
     /// <summary>
     /// The row of the run's table that element 0 of the run is: element <c>i</c> is row <c>FirstRow + i</c> of
-    /// <see cref="Blocks"/>. O(1).
+    /// <see cref="Clusters"/>. O(1).
     /// </summary>
     public int FirstRow
     {
@@ -72,11 +72,11 @@ public readonly ref struct EntitySpan
     }
 
     /// <summary>
-    /// The blocks of the run's table when it is ordered (an inferred order or
+    /// The clusters of the run's table when it is ordered (an inferred order or
     /// <see cref="OrderByAttribute">[OrderBy]</see>), else none
-    /// (<see cref="RowBlocks.Count"/> 0): a batch method finds the rows near its own through their boxes. O(1).
+    /// (<see cref="RowClusters.Count"/> 0): a batch method finds the rows near its own through their boxes. O(1).
     /// </summary>
-    public RowBlocks Blocks => new(_world, _table);
+    public RowClusters Clusters => new(_world, _table);
 
     /// <summary>The ids of the run's entities, read straight from the table (no copy): to store or send them.</summary>
     public ReadOnlySpan<EntityId> Ids

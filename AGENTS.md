@@ -52,7 +52,7 @@ src/EasyEcs.Generator/         generators, vector loops (Kernel) and the analyze
                                (file map: src/EasyEcs.Generator/AGENTS.md)
 src/EasyEcs.CodeFixes/         EasyEcsCodeFixes.cs: fixes for the analyzer's diagnostics (bundled in the package);
                                EasyEcsCodeFixes.Forms.cs: EECS080 (a job and its calls to [ForEntity], solution-wide),
-                               EECS084 ([Consume]), EECS103 (a hand-written vector loop as the method for one row); EasyEcsCodeFixes.Systems.cs: EECS074 (a ref struct), EECS075
+                               EECS084 ([Consume]), EECS103 (a hand-written vector loop as the method for one row), EECS107 (a hand-written neighbor search as the pair method); EasyEcsCodeFixes.Systems.cs: EECS074 (a ref struct), EECS075
                                (static), and the migration of a class deriving from the removed EcsSystem (the
                                compiler's CS0246) into an [EcsSystem] ref struct; EasyEcsCodeFixes.Declarations.cs:
                                the migrations of declarations that changed shape, from the compiler's error on the old

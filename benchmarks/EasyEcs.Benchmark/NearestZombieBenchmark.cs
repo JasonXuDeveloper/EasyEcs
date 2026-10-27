@@ -7,7 +7,7 @@ namespace EasyEcs.Benchmark;
 /// <summary>
 /// docs/plans/locality.md 4.2, phase 0: samples/VoxelServer's ZombieTargetSystem.Pick (<see cref="ZombieHunt"/>), every
 /// zombie once (a full look: the sample spreads it over 10 ticks with Slices). The ring walk through the players' chunk
-/// index and position lookups (the sample's form, the baseline) against a search of the players' sorted blocks, with the
+/// index and position lookups (the sample's form, the baseline) against a search of the players' sorted clusters, with the
 /// sort once per look and with it 10 times per look (the players move every tick and the sample looks every tick).
 /// 3 zombies per player, at the sample's sizes (50 players; 2,000 for its crowd run), on its spawn grid or spread out.
 /// Setup checks that every zombie finds a player at the same distance.
@@ -26,11 +26,18 @@ public class NearestZombieBenchmark
         _world = ZombieHunt.Create(Players, Layout);
         ZombieHunt.Pick(_world);
         var expected = ZombieHunt.Targets(_world);
-        BlocksSortOnce();
+        ClustersSortOnce();
+        Check(expected, "the clusters");
+        RingsSortOnce();
+        Check(expected, "the grid of clusters");
+    }
+
+    private void Check((EntityId Target, float Distance)[] expected, string name)
+    {
         var got = ZombieHunt.Targets(_world);
         for (int i = 0; i < got.Length; i++)
             if (got[i].Distance != expected[i].Distance)
-                throw new InvalidOperationException($"zombie {i}: the blocks find {got[i].Distance}, the ring walk {expected[i].Distance}");
+                throw new InvalidOperationException($"zombie {i}: {name} find {got[i].Distance}, the ring walk {expected[i].Distance}");
     }
 
     [GlobalCleanup]
@@ -40,16 +47,31 @@ public class NearestZombieBenchmark
     public void RingWalk() => ZombieHunt.Pick(_world);
 
     [Benchmark]
-    public void BlocksSortOnce()
+    public void ClustersSortOnce()
     {
         ZombieHunt.SortPlayers(_world);
-        ZombieHunt.PickInBlocks(_world);
+        ZombieHunt.PickInClusters(_world);
     }
 
     [Benchmark]
-    public void BlocksSortPerTick()
+    public void ClustersSortPerTick()
     {
         for (int t = 0; t < 10; t++) ZombieHunt.SortPlayers(_world);
-        ZombieHunt.PickInBlocks(_world);
+        ZombieHunt.PickInClusters(_world);
+    }
+
+    /// <summary>The clusters through a flat grid searched in rings (locality.md 6.2): sorted once per look, as L1's cadence.</summary>
+    [Benchmark]
+    public void RingsSortOnce()
+    {
+        ZombieHunt.SortPlayers(_world, grid: true);
+        ZombieHunt.PickInRings(_world);
+    }
+
+    [Benchmark]
+    public void RingsSortPerTick()
+    {
+        for (int t = 0; t < 10; t++) ZombieHunt.SortPlayers(_world, grid: true);
+        ZombieHunt.PickInRings(_world);
     }
 }

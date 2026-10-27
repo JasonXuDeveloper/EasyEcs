@@ -285,7 +285,7 @@ none extra). Lines are today's line counts. Files marked "stays" keep their path
 | `CacheSizes.cs` | `Lookups/CacheSizes.cs` | 182 |
 | `Lookup.cs` | `Lookups/Lookup.cs` | 221 |
 | `LookupLanes.cs` | `Lookups/LookupLanes.cs` | 224 |
-| `RowBlocks.cs` | `OrderedTables/RowBlocks.cs` | 261 |
+| `RowClusters.cs` | `OrderedTables/RowClusters.cs` | 261 |
 | `RowOrder.cs` | `OrderedTables/RowOrder.cs` | 449 |
 | `World.Order.cs` | `OrderedTables/World.Order.cs` | 181 |
 | `SpinGate.cs` | `Parallel/SpinGate.cs` | 53 |

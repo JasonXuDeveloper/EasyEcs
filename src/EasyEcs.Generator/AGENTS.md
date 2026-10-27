@@ -40,13 +40,19 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              locals (Locals counts them), else each in an AggressiveInlining method of the job (D135)
 SystemGenerator.Pairs.cs     a pair method ([Neighbor] parameters, PairModel): the pass (world.ForPairs), the order
                              struct (Morton key of the compared component over the axes the test names), the job
-                             (the cutoff from the test, per row or one; Rows: the method per pair; Vectors: a window's
-                             lanes against each neighbor through Kernel's pair mode, under its gate)
+                             (the cutoff from the test, per row or one; Width; Rows: the method per pair, over the row's
+                             list of neighbors when the run carries one, a Mut<T> over the run's change-tick column;
+                             Vectors: a cluster's lanes against each neighbor through Kernel's pair mode, under its
+                             gate; Reduce<T> results after the pass, a parallel job's Merges / Merge of its chunks)
 PairForm.cs                  what a pair method is, read once for the generator and the analyzer: Problem (EECS105's
                              reason), Read (the distance test: dx * dx sums, DistanceSquared, LengthSquared, and the
                              cutoff: values, singletons, the row's in components; EECS106's reason), HandWritten
-                             (EECS107: a loop over other entities read through a Lookup<T> of the row's component
+                             (EECS107: a loop over other entities, read through a Lookup<T> of the row's component or walked as a query of the World,
                              testing their squared distance)
+PairRewrite.cs               EECS107's fix, read once for the analyzer and its code fix: a search over candidate ids
+                             read through Lookup<T> or a walk of world.Read / Query rewritten as the pair method ([Neighbor] parameters, the cutoff
+                             test returning), only when mechanical (the search is the whole body, the pair reads
+                             nothing of it, the generator reads its test)
 Fusion.cs                    the fusion rule read once for the generator and the analyzer (FusionSide: what a method
                              reads, writes, filters and blocks it; Fusion.Problem: why two passes cannot share a walk)
 SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(values..., static (ref P p, ...) => ...)
@@ -130,7 +136,7 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              rows sent to the method when they live in several, with a backoff; only for SimdMode.Require (D131);
                              the chases of the rows ahead prefetched behind the job's gate (Code.Prefetched);
                              Kernel.Neighbors.cs: a pair method's pair mode (a [Neighbor] component as uniform values
-                             broadcast per neighbor, the body masked by the window's passing lanes) and the cutoff's
+                             broadcast per neighbor, the body masked by the cluster's passing lanes) and the cutoff's
                              text (ScalarOf);
                              Kernel.Structural.cs: a structural change of the row's entity under a condition (marked
                              rows, applied in bulk after the pass: Code.StructuralChanges) and Emit<T> records of a
@@ -180,8 +186,8 @@ EasyEcsAnalyzer.Views.cs     EECS098-101: an invalid [View], a component reached
 EasyEcsAnalyzer.Records.cs   EECS092 (compilation end): an Emit<T> whose Emitted<T> no code of the compilation clears
                              (a public record type of a library is left to the assemblies using it)
 EasyEcsAnalyzer.Pairs.cs     EECS105-107: a pair method that cannot run per pair (Error), one whose cutoff test the
-                             generator cannot read (every pair runs), a neighbor search written by hand (Info, no code
-                             fix: the grid's upkeep goes with it)
+                             generator cannot read (every pair runs), a neighbor search written by hand (a Warning
+                             with PairRewrite's fix when mechanical, else Info: the grid's upkeep goes with it)
 EasyEcsAnalyzer.Fusion.cs    EECS093-094: two passes over the same rows that almost share one walk (the reason
                              Fusion.Problem gives), a FusionMode.Require method left apart (Error)
 Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)

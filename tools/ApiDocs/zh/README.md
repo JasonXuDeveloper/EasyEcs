@@ -53,7 +53,7 @@ The terms of the Chinese guide pages (`docs/content/glossary.zh.mdx`). Use these
 | tile / halo / ghost cells / stencil | 瓦片 / 光环 / 幽灵格子 / 模板 |
 | lane / vector loop / shader / fusion | 通道 / 向量循环 / 着色器 / 融合 |
 | cutoff / neighbor list / Morton (Z-order) / ping-pong buffer | 截断半径 / 邻居列表 / Morton 码（Z 序） / 乒乓缓冲 |
-| ordered table; block of an ordered table (GROMACS's cluster), block pair; box; margin | 有序表；簇，簇对；包围盒；余量 |
+| ordered table; cluster of an ordered table, cluster pair; box; margin | 有序表；簇，簇对；包围盒；余量 |
 | change-tick block (4,096 rows: `BlockTicks`), word (64 rows) | 区段、位字 |
 
 A sample's domain words never reuse a framework term: VoxelServer's terrain chunk is 地形 (measure word 片: 一片地形,

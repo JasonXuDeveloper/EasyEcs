@@ -6,11 +6,11 @@ using Microsoft.CodeAnalysis;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// A pair method's vector loop (<c>[Neighbor]</c> parameters, PairForm.cs): a window of rows in the lanes against one
+/// A pair method's vector loop (<c>[Neighbor]</c> parameters, PairForm.cs): a cluster of rows in the lanes against one
 /// neighbor at a time (GROMACS's cluster pair, i in lanes, j broadcast). The method's own components are the lanes, as
 /// in any vector loop; a neighbor's components are values of the j loop, read once per neighbor and broadcast
 /// (<see cref="Neighbor"/>), so the method's body translates as it does for a row (its cutoff test a mask). The
-/// window's writes are kept in registers across its neighbors and stored once, blended with the window's rows
+/// cluster's writes are kept in registers across its neighbors and stored once, blended with the cluster's rows
 /// (<c>__pass</c>): per lane the pairs run in the order the scalar loop runs them, so the results are its bit for bit.
 /// What the loop cannot hold across neighbors (a reduction, a lookup, an optional column, a structural change, a lane
 /// that would throw) leaves the pairs scalar.
@@ -23,9 +23,13 @@ internal sealed partial class Kernel
     /// <summary>The name the j loop gives neighbor parameter <paramref name="i"/> (a <c>ref readonly</c> to its row).</summary>
     internal static string Neighbor(int i) => NeighborPrefix + i;
 
-    /// <summary>Why a [Neighbor] parameter rules a vector loop out, or null: a component is a value per neighbor.</summary>
-    private static string? NeighborRefused(IParameterSymbol p) => Symbols.Named(p.Type, Symbols.Entity)
-        ? $"it takes the neighbor's Entity '{p.Name}': its pairs run one at a time"
+    /// <summary>
+    /// Why a [Neighbor] parameter rules a vector loop out, or null: a component read is a value per neighbor. A write of
+    /// the neighbor's is one row written by every lane of the cluster (a scatter whose lanes collide), so it runs per pair.
+    /// </summary>
+    private static string? NeighborRefused(IParameterSymbol p) =>
+        Symbols.Named(p.Type, Symbols.Entity) ? $"it takes the neighbor's Entity '{p.Name}': its pairs run one at a time"
+        : p.RefKind == RefKind.Ref ? $"it writes the neighbor's {p.Type.Name} ('{p.Name}', [Neighbor] ref): its pairs run one at a time"
         : null;
 
     /// <summary>
@@ -50,8 +54,8 @@ internal sealed partial class Kernel
     }
 
     /// <summary>
-    /// The loop of a pair method from its translation: <paramref name="loads"/> (the window's rows), the translated body
-    /// with its per-neighbor broadcasts first, <paramref name="stores"/> (the window's writes, blended), the setup
+    /// The loop of a pair method from its translation: <paramref name="loads"/> (the cluster's rows), the translated body
+    /// with its per-neighbor broadcasts first, <paramref name="stores"/> (the cluster's writes, blended), the setup
     /// without those broadcasts.
     /// </summary>
     private Code ForPairs(string loads, string stores, string lane)
@@ -62,7 +66,7 @@ internal sealed partial class Kernel
             : _change != null || _emits.Count > 0 ? "it changes structure or emits records"
             : _bails || _cold != null ? "an operation of its body may throw for some lane, or a branch is cold"
             : _wideOf.Count > 0 ? "a component is wide"
-            : _pairs || _size != 4 ? "its lanes are not of 4 bytes (a window is a vector of floats)"
+            : _pairs || _size != 4 ? "its lanes are not of 4 bytes (a cluster is a vector of floats)"
             : null;
         if (why != null) throw new Unsupported(why);
 

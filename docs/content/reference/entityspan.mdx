@@ -14,13 +14,13 @@ The entities of one run of rows in a batch job: element `i` is the entity whose 
 
 ## Properties
 
-### `Blocks` [#blocks]
+### `Clusters` [#clusters]
 
 ```csharp
-public RowBlocks Blocks { get; }
+public RowClusters Clusters { get; }
 ```
 
-The blocks of the run's table when it is ordered (an inferred order or [[OrderBy]](/en/docs/reference/orderbyattribute)), else none ([`RowBlocks.Count`](/en/docs/reference/rowblocks#count) 0): a batch method finds the rows near its own through their boxes. O(1).
+The clusters of the run's table when it is ordered (an inferred order or [[OrderBy]](/en/docs/reference/orderbyattribute)), else none ([`RowClusters.Count`](/en/docs/reference/rowclusters#count) 0): a batch method finds the rows near its own through their boxes. O(1).
 
 ### `FirstRow` [#firstrow]
 
@@ -28,7 +28,7 @@ The blocks of the run's table when it is ordered (an inferred order or [[OrderBy
 public int FirstRow { get; }
 ```
 
-The row of the run's table that element 0 of the run is: element `i` is row `FirstRow + i` of [`EntitySpan.Blocks`](/en/docs/reference/entityspan#blocks). O(1).
+The row of the run's table that element 0 of the run is: element `i` is row `FirstRow + i` of [`EntitySpan.Clusters`](/en/docs/reference/entityspan#clusters). O(1).
 
 ### `Ids` [#ids]
 

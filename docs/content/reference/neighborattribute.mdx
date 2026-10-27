@@ -10,7 +10,7 @@ description: "Marks a parameter of a [ForEach] method as the other entity of a p
 public sealed class NeighborAttribute : Attribute
 ```
 
-Marks a parameter of a [[ForEach]](/en/docs/reference/foreachattribute) method as the other entity of a pair: the method then runs for every pair of its entities and the entities holding the `[Neighbor]` components (the row's own entity included when it holds them, as a loop over both would), and the generator writes the search that skips the pairs the method's distance test turns away. A `[Neighbor]` parameter is a component taken by `in`, or the neighbor's [`Entity`](/en/docs/reference/entity).
+Marks a parameter of a [[ForEach]](/en/docs/reference/foreachattribute) method as the other entity of a pair: the method then runs for every pair of its entities and the entities holding the `[Neighbor]` components (the row's own entity included when it holds them, as a loop over both would), and the generator writes the search that skips the pairs the method's distance test turns away. A `[Neighbor]` parameter is a component taken by `in`, one taken by `ref` to write it (a pickup marking its item taken; its pairs then run one at a time, in the order a loop over both tables would visit them, and no component of the row's is one it writes), or the neighbor's [`Entity`](/en/docs/reference/entity).
 
 ```csharp
 [ForEach]
@@ -23,7 +23,7 @@ static void Separate(in Position p, ref Push push, [Neighbor] in Position other)
 }
 ```
 
-The cutoff may be a value of the row (`if (d2 >= z.Vision * z.Vision) return;`), and the neighbors may be other entities than the method's (the `[Neighbor]` components say which). The tables holding the compared component keep their rows in space order (inferred from the test: `World.OrderRows`), and the pass reads a window of rows against the rows within the cutoff only, a vector of rows per instruction where the method qualifies. The pairs of a row run in the order of the tables' rows (not of the entities): a method that keeps the nearest neighbor breaks ties by the entity (the lower [`EntityId.Index`](/en/docs/reference/entityid#index)), so its result is the same whatever the order.
+The cutoff may be a value of the row (`if (d2 >= z.Vision * z.Vision) return;`), and the neighbors may be other entities than the method's (the `[Neighbor]` components say which). The tables holding the compared component keep their rows in space order (inferred from the test: `World.OrderRows`), and the pass reads a cluster of rows against the rows within the cutoff only, a vector of rows per instruction where the method qualifies. The pairs of a row run in the order of the tables' rows (not of the entities): a method that keeps the nearest neighbor breaks ties by the entity (the lower [`EntityId.Index`](/en/docs/reference/entityid#index)), so its result is the same whatever the order.
 
 ## Constructors
 

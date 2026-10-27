@@ -20,10 +20,10 @@ public enum Density
 /// <see cref="Range"/> (separation plus a share of the velocity difference, as boids and crowd steering do). The same
 /// sum four ways: (a) the row loop over a hand-written uniform grid (ids per cell, neighbors read through lookups), (a2)
 /// the same grid holding copies of the positions and velocities, (b) per-entity neighbor lists rebuilt on a cadence, and
-/// (c) a cluster-pair kernel over Morton-sorted rows in blocks of 8 (<see cref="SortedBlocks"/>).
+/// (c) a cluster-pair kernel over Morton-sorted rows in clusters of 8 (<see cref="SortedClusters"/>).
 /// <para>
 /// Every version computes each pair's term with the same float operations, so the set of pairs and each term are bit
-/// for bit the same; only the order of the sum differs (cell order, list order, block order). Results agree with a
+/// for bit the same; only the order of the sum differs (cell order, list order, cluster order). Results agree with a
 /// double-precision sum within 1e-5 * (1 + the sum of the terms' magnitudes) (<see cref="Reference"/>).
 /// </para>
 /// </summary>
@@ -34,7 +34,7 @@ public static partial class Crowd
 
     public const float Range2 = Range * Range;
 
-    /// <summary>The list range (GROMACS's rlist) over the cutoff: lists and block pairs stay valid while no row moves
+    /// <summary>The list range (GROMACS's rlist) over the cutoff: lists and cluster pairs stay valid while no row moves
     /// half the margin. Nothing moves in the benchmark, so the margin only adds candidate pairs, as it would.</summary>
     public const float Margin = 1.1f;
 
@@ -67,7 +67,7 @@ public static partial class Crowd
         public int Count;
     }
 
-    /// <summary>(c): the sorted rows, their blocks and the block pairs.</summary>
+    /// <summary>(c): the sorted rows, their clusters and the cluster pairs.</summary>
     [NotSaved]
     public struct Clusters : ISingletonComponent
     {
@@ -286,7 +286,7 @@ public static partial class Crowd
 
     // #region clusters
     /// <summary>(c) The sort: the table's positions and velocities copied out (the prototype's side arrays), ordered
-    /// along the Morton curve, blocks and boxes, then the block pairs within the list range (cached until the next sort).</summary>
+    /// along the Morton curve, clusters and boxes, then the cluster pairs within the list range (cached until the next sort).</summary>
     public static void Sort(World world)
     {
         var rows = world.GetSingleton<Clusters>().Rows;
@@ -308,7 +308,7 @@ public static partial class Crowd
     public static void ClusterTickWithCopies(World world)
     {
         var rows = world.GetSingleton<Clusters>().Rows;
-        var b = rows.Blocks;
+        var b = rows.Clusters;
         int k = 0;
         foreach (var item in world.Query<Position, Velocity>())
         {
@@ -327,7 +327,7 @@ public static partial class Crowd
     public static void WriteBack(World world)
     {
         var rows = world.GetSingleton<Clusters>().Rows;
-        var slot = rows.Blocks.Slot;
+        var slot = rows.Clusters.Slot;
         int k = 0;
         foreach (var item in world.Query<Push>())
         {
@@ -382,7 +382,7 @@ public static partial class Crowd
                 {
                     if (j == i) continue;
                     float dx = x[i] - x[j], dy = y[i] - y[j], d2 = dx * dx + dy * dy;
-                    if (d2 >= Range2) continue;
+                    if (d2 >= Range2 || d2 == 0) continue; // two rows at one point (16M random floats repeat one): the methods skip them as themselves
                     float w = Range2 - d2, tx = w * (dx + Drag * (vx[j] - vx[i])), ty = w * (dy + Drag * (vy[j] - vy[i]));
                     px += tx;
                     py += ty;
@@ -410,19 +410,19 @@ public static partial class Crowd
 }
 
 /// <summary>
-/// (c) The rows of the cluster-pair kernel: positions in <see cref="Blocks"/> (sorted, padded), velocities and pushes
-/// in the same order, and for each block the blocks within the list range (a CSR list, GROMACS's cluster-pair list).
+/// (c) The rows of the cluster-pair kernel: positions in <see cref="Clusters"/> (sorted, padded), velocities and pushes
+/// in the same order, and for each cluster the clusters within the list range (a CSR list, GROMACS's cluster-pair list).
 /// <para>
 /// What the prototype copies that the core version would not: the positions and velocities into these sorted side
 /// arrays (the core permutes the table's columns in place at a re-sort and the kernel reads the columns), the pushes
-/// out of <see cref="PX"/> / <see cref="PY"/> into the table (the core writes the column), and <see cref="SortedBlocks.Order"/> /
-/// <see cref="SortedBlocks.Slot"/> (the core moves rows, so a row is its slot). The core would permute every column of
+/// out of <see cref="PX"/> / <see cref="PY"/> into the table (the core writes the column), and <see cref="SortedClusters.Order"/> /
+/// <see cref="SortedClusters.Slot"/> (the core moves rows, so a row is its slot). The core would permute every column of
 /// the table and the entity slots; the prototype moves only the two columns the kernel reads.
 /// </para>
 /// </summary>
 public sealed class ClusterRows
 {
-    public readonly SortedBlocks Blocks = new();
+    public readonly SortedClusters Clusters = new();
     public float[] VX, VY, PX, PY;
     public float[] SourceX, SourceY, SourceVX, SourceVY;
     public int[] PairStart;
@@ -430,8 +430,8 @@ public sealed class ClusterRows
 
     public void Reserve(int capacity)
     {
-        Blocks.Reserve(capacity);
-        int padded = Blocks.X.Length;
+        Clusters.Reserve(capacity);
+        int padded = Clusters.X.Length;
         VX = new float[padded];
         VY = new float[padded];
         PX = new float[padded];
@@ -440,14 +440,14 @@ public sealed class ClusterRows
         SourceY = new float[capacity];
         SourceVX = new float[capacity];
         SourceVY = new float[capacity];
-        PairStart = new int[padded / SortedBlocks.Lanes + 1];
+        PairStart = new int[padded / SortedClusters.Lanes + 1];
         Pairs = new int[Math.Max(64, padded)];
     }
 
-    /// <summary>Sort the <paramref name="count"/> source rows and list the block pairs. O(n log n) for the pair search.</summary>
+    /// <summary>Sort the <paramref name="count"/> source rows and list the cluster pairs. O(n log n) for the pair search.</summary>
     public void Sort(int count, float extent)
     {
-        var b = Blocks;
+        var b = Clusters;
         b.Sort(SourceX.AsSpan(0, count), SourceY.AsSpan(0, count), extent);
         for (int s = 0; s < count; s++)
         {
@@ -455,22 +455,22 @@ public sealed class ClusterRows
             VY[s] = SourceVY[b.Order[s]];
         }
 
-        for (int s = count; s < b.BlockCount * SortedBlocks.Lanes; s++) VX[s] = VY[s] = 0;
+        for (int s = count; s < b.ClusterCount * SortedClusters.Lanes; s++) VX[s] = VY[s] = 0;
         int at = 0;
-        for (int block = 0; block < b.BlockCount; block++)
+        for (int cluster = 0; cluster < b.ClusterCount; cluster++)
         {
-            PairStart[block] = at;
-            if (Pairs.Length - at < b.BlockCount) Array.Resize(ref Pairs, Math.Max(Pairs.Length * 2, at + b.BlockCount)); // warm-up only
-            at = b.BlocksNear(block, Crowd.Range * Crowd.Margin, Pairs, at);
+            PairStart[cluster] = at;
+            if (Pairs.Length - at < b.ClusterCount) Array.Resize(ref Pairs, Math.Max(Pairs.Length * 2, at + b.ClusterCount)); // warm-up only
+            at = b.ClustersNear(cluster, Crowd.Range * Crowd.Margin, Pairs, at);
         }
 
-        PairStart[b.BlockCount] = at;
+        PairStart[b.ClusterCount] = at;
     }
 
     /// <summary>
-    /// The kernel: for each block of 8 rows (i in the lanes), its own block with the self pairs masked, then each block
-    /// of its list with every j broadcast: 64 pairs per block pair, the cutoff a mask, the sums kept in the i lanes and
-    /// stored once per block. 8 lanes where 256-bit vectors are hardware (x86 with AVX), else 4 lanes per half block
+    /// The kernel: for each cluster of 8 rows (i in the lanes), its own cluster with the self pairs masked, then each cluster
+    /// of its list with every j broadcast: 64 pairs per cluster pair, the cutoff a mask, the sums kept in the i lanes and
+    /// stored once per cluster. 8 lanes where 256-bit vectors are hardware (x86 with AVX), else 4 lanes per half cluster
     /// (ARM64's NEON, x86 without AVX): the same sums in the same order per lane, so both write the same pushes.
     /// </summary>
     public void Interact()
@@ -481,7 +481,7 @@ public sealed class ClusterRows
 
     private void Interact8()
     {
-        var b = Blocks;
+        var b = Clusters;
         ref float x = ref MemoryMarshal.GetArrayDataReference(b.X);
         ref float y = ref MemoryMarshal.GetArrayDataReference(b.Y);
         ref float vx = ref MemoryMarshal.GetArrayDataReference(VX);
@@ -492,15 +492,15 @@ public sealed class ClusterRows
         var pairs = Pairs;
         var lane = Vector256.Create(0, 1, 2, 3, 4, 5, 6, 7);
         var all = Vector256<float>.AllBitsSet;
-        for (int block = 0; block < b.BlockCount; block++)
+        for (int cluster = 0; cluster < b.ClusterCount; cluster++)
         {
-            nuint i0 = (nuint)(block * SortedBlocks.Lanes);
+            nuint i0 = (nuint)(cluster * SortedClusters.Lanes);
             var xi = Vector256.LoadUnsafe(ref x, i0);
             var yi = Vector256.LoadUnsafe(ref y, i0);
             var vxi = Vector256.LoadUnsafe(ref vx, i0);
             var vyi = Vector256.LoadUnsafe(ref vy, i0);
             Vector256<float> ax = default, ay = default;
-            for (int j = 0; j < SortedBlocks.Lanes; j++)
+            for (int j = 0; j < SortedClusters.Lanes; j++)
             {
                 var other = ~Vector256.Equals(lane, Vector256.Create(j)).AsSingle();      // not the row itself
                 nuint at = i0 + (nuint)j;
@@ -508,10 +508,10 @@ public sealed class ClusterRows
                     Unsafe.Add(ref vy, at), other, ref ax, ref ay);
             }
 
-            for (int p = start[block], end = start[block + 1]; p < end; p++)
+            for (int p = start[cluster], end = start[cluster + 1]; p < end; p++)
             {
-                nuint j0 = (nuint)(pairs[p] * SortedBlocks.Lanes);
-                for (nuint j = j0; j < j0 + SortedBlocks.Lanes; j++)
+                nuint j0 = (nuint)(pairs[p] * SortedClusters.Lanes);
+                for (nuint j = j0; j < j0 + SortedClusters.Lanes; j++)
                     Pair(xi, yi, vxi, vyi, Unsafe.Add(ref x, j), Unsafe.Add(ref y, j), Unsafe.Add(ref vx, j),
                         Unsafe.Add(ref vy, j), all, ref ax, ref ay);
             }
@@ -521,11 +521,11 @@ public sealed class ClusterRows
         }
     }
 
-    // The 4-wide kernel: each block as two halves of 4 i lanes, each against the 8 rows of its own block (self masked)
-    // and of every block of its list.
+    // The 4-wide kernel: each cluster as two halves of 4 i lanes, each against the 8 rows of its own cluster (self masked)
+    // and of every cluster of its list.
     private void Interact4()
     {
-        var b = Blocks;
+        var b = Clusters;
         ref float x = ref MemoryMarshal.GetArrayDataReference(b.X);
         ref float y = ref MemoryMarshal.GetArrayDataReference(b.Y);
         ref float vx = ref MemoryMarshal.GetArrayDataReference(VX);
@@ -535,10 +535,10 @@ public sealed class ClusterRows
         var start = PairStart;
         var pairs = Pairs;
         var all = Vector128<float>.AllBitsSet;
-        for (int block = 0; block < b.BlockCount; block++)
+        for (int cluster = 0; cluster < b.ClusterCount; cluster++)
         {
-            nuint b0 = (nuint)(block * SortedBlocks.Lanes);
-            for (int half = 0; half < SortedBlocks.Lanes; half += 4)
+            nuint b0 = (nuint)(cluster * SortedClusters.Lanes);
+            for (int half = 0; half < SortedClusters.Lanes; half += 4)
             {
                 nuint i0 = b0 + (nuint)half;
                 var lane = Vector128.Create(half, half + 1, half + 2, half + 3);
@@ -547,7 +547,7 @@ public sealed class ClusterRows
                 var vxi = Vector128.LoadUnsafe(ref vx, i0);
                 var vyi = Vector128.LoadUnsafe(ref vy, i0);
                 Vector128<float> ax = default, ay = default;
-                for (int j = 0; j < SortedBlocks.Lanes; j++)
+                for (int j = 0; j < SortedClusters.Lanes; j++)
                 {
                     var other = ~Vector128.Equals(lane, Vector128.Create(j)).AsSingle();      // not the row itself
                     nuint at = b0 + (nuint)j;
@@ -555,10 +555,10 @@ public sealed class ClusterRows
                         Unsafe.Add(ref vy, at), other, ref ax, ref ay);
                 }
 
-                for (int p = start[block], end = start[block + 1]; p < end; p++)
+                for (int p = start[cluster], end = start[cluster + 1]; p < end; p++)
                 {
-                    nuint j0 = (nuint)(pairs[p] * SortedBlocks.Lanes);
-                    for (nuint j = j0; j < j0 + SortedBlocks.Lanes; j++)
+                    nuint j0 = (nuint)(pairs[p] * SortedClusters.Lanes);
+                    for (nuint j = j0; j < j0 + SortedClusters.Lanes; j++)
                         Pair(xi, yi, vxi, vyi, Unsafe.Add(ref x, j), Unsafe.Add(ref y, j), Unsafe.Add(ref vx, j),
                             Unsafe.Add(ref vy, j), all, ref ax, ref ay);
                 }

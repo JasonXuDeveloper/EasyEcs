@@ -10,7 +10,7 @@ description: "每个 World 让这个组件的表按它排序的键，以及簇�
 public sealed class OrderByAttribute : Attribute
 ```
 
-每个 World 让这个组件的表按它排序的键，以及簇的包围盒要罩住的点。成对方法用到的表不需要声明就会排序：生成器从方法的距离判断推断出顺序（位置按截断距离量化后的 Morton 码，`World.OrderRows`）。`[OrderBy]` 为每个 World 覆盖这个顺序：换一个键，或者不按空间排序。写在 partial 组件的成员上（字段、属性或 record 的位置参数），成员类型是整数、`char`、`bool`、`float`、`double` 或枚举。空间顺序是组件算出的量化位置的 Morton 码，包围盒的轴写它的坐标：`public partial record struct Position(float X, float Y) : IComponent { [OrderBy(nameof(X), nameof(Y))] public readonly uint Cell => Map.Morton(X, Y); }`（`Map.Morton` 代表游戏自己的量化方式）。生成器加上 [`IOrderKey`](/zh/docs/reference/iorderkey)，显式的 `OrderKey` 返回这个成员，`BoxPoint` 返回这些轴，并注册这个顺序：每个 World 每 [`OrderByAttribute.Interval`](/zh/docs/reference/orderbyattribute#interval) 次更新重新排序一次含这个组件的每张表（从表出现后的第一次更新开始），让表的行保持键的顺序，每簇（8 行，ARM64 上 4 行）一个罩住这些轴的包围盒（[`RowBlocks`](/zh/docs/reference/rowblocks)）。两次排序之间加入的行排在表的末尾等待；移进某簇的行会扩大那簇的包围盒。一张表含两个有序组件时，按位号小的那个排序。
+每个 World 让这个组件的表按它排序的键，以及簇的包围盒要罩住的点。成对方法用到的表不需要声明就会排序：生成器从方法的距离判断推断出顺序（位置按截断距离量化后的 Morton 码，`World.OrderRows`）。`[OrderBy]` 为每个 World 覆盖这个顺序：换一个键，或者不按空间排序。写在 partial 组件的成员上（字段、属性或 record 的位置参数），成员类型是整数、`char`、`bool`、`float`、`double` 或枚举。空间顺序是组件算出的量化位置的 Morton 码，包围盒的轴写它的坐标：`public partial record struct Position(float X, float Y) : IComponent { [OrderBy(nameof(X), nameof(Y))] public readonly uint Cell => Map.Morton(X, Y); }`（`Map.Morton` 代表游戏自己的量化方式）。生成器加上 [`IOrderKey`](/zh/docs/reference/iorderkey)，显式的 `OrderKey` 返回这个成员，`BoxPoint` 返回这些轴，并注册这个顺序：每个 World 每 [`OrderByAttribute.Interval`](/zh/docs/reference/orderbyattribute#interval) 次更新重新排序一次含这个组件的每张表（从表出现后的第一次更新开始），让表的行保持键的顺序，每簇（8 行，ARM64 上 4 行）一个罩住这些轴的包围盒（[`RowClusters`](/zh/docs/reference/rowclusters)）。两次排序之间加入的行排在表的末尾等待；移进某簇的行会扩大那簇的包围盒。一张表含两个有序组件时，按位号小的那个排序。
 
 #### 参数 [#parameters]
 
@@ -24,7 +24,7 @@ public sealed class OrderByAttribute : Attribute
 public OrderByAttribute(params string[] box);
 ```
 
-每个 World 让这个组件的表按它排序的键，以及簇的包围盒要罩住的点。成对方法用到的表不需要声明就会排序：生成器从方法的距离判断推断出顺序（位置按截断距离量化后的 Morton 码，`World.OrderRows`）。`[OrderBy]` 为每个 World 覆盖这个顺序：换一个键，或者不按空间排序。写在 partial 组件的成员上（字段、属性或 record 的位置参数），成员类型是整数、`char`、`bool`、`float`、`double` 或枚举。空间顺序是组件算出的量化位置的 Morton 码，包围盒的轴写它的坐标：`public partial record struct Position(float X, float Y) : IComponent { [OrderBy(nameof(X), nameof(Y))] public readonly uint Cell => Map.Morton(X, Y); }`（`Map.Morton` 代表游戏自己的量化方式）。生成器加上 [`IOrderKey`](/zh/docs/reference/iorderkey)，显式的 `OrderKey` 返回这个成员，`BoxPoint` 返回这些轴，并注册这个顺序：每个 World 每 [`OrderByAttribute.Interval`](/zh/docs/reference/orderbyattribute#interval) 次更新重新排序一次含这个组件的每张表（从表出现后的第一次更新开始），让表的行保持键的顺序，每簇（8 行，ARM64 上 4 行）一个罩住这些轴的包围盒（[`RowBlocks`](/zh/docs/reference/rowblocks)）。两次排序之间加入的行排在表的末尾等待；移进某簇的行会扩大那簇的包围盒。一张表含两个有序组件时，按位号小的那个排序。
+每个 World 让这个组件的表按它排序的键，以及簇的包围盒要罩住的点。成对方法用到的表不需要声明就会排序：生成器从方法的距离判断推断出顺序（位置按截断距离量化后的 Morton 码，`World.OrderRows`）。`[OrderBy]` 为每个 World 覆盖这个顺序：换一个键，或者不按空间排序。写在 partial 组件的成员上（字段、属性或 record 的位置参数），成员类型是整数、`char`、`bool`、`float`、`double` 或枚举。空间顺序是组件算出的量化位置的 Morton 码，包围盒的轴写它的坐标：`public partial record struct Position(float X, float Y) : IComponent { [OrderBy(nameof(X), nameof(Y))] public readonly uint Cell => Map.Morton(X, Y); }`（`Map.Morton` 代表游戏自己的量化方式）。生成器加上 [`IOrderKey`](/zh/docs/reference/iorderkey)，显式的 `OrderKey` 返回这个成员，`BoxPoint` 返回这些轴，并注册这个顺序：每个 World 每 [`OrderByAttribute.Interval`](/zh/docs/reference/orderbyattribute#interval) 次更新重新排序一次含这个组件的每张表（从表出现后的第一次更新开始），让表的行保持键的顺序，每簇（8 行，ARM64 上 4 行）一个罩住这些轴的包围盒（[`RowClusters`](/zh/docs/reference/rowclusters)）。两次排序之间加入的行排在表的末尾等待；移进某簇的行会扩大那簇的包围盒。一张表含两个有序组件时，按位号小的那个排序。
 
 **参数**
 

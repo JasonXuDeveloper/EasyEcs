@@ -142,18 +142,23 @@ World.Groups.cs              GroupBy: tables split by the value of an IGroup com
 RowOrder.cs                  ordered tables: IRowOrder<T> (a key and a box point, static members; written by the
                              generator), RowKeys (Morton codes by a cell, key bits), IOrderKey<TKey> + DeclaredOrder
                              ([OrderBy]'s part), RowOrder (Archetype.Order: the LSD radix sort of (key, row), the boxes
-                             per block (8 rows with 256-bit vectors, 4 on ARM64, or the size a request asks), widened
+                             per cluster (8 rows with 256-bit vectors, 4 on ARM64, or the size a request asks), widened
                              where a row moves in, reset by a restore)
-RowBlocks.cs                 RowBlocks: the read path of one ordered table (blocks, boxes per axis, columns, ids,
-                             Pairs: the block pairs within a reach, a sweep) and BlockPair
+RowClusters.cs               RowClusters: the read path of one ordered table (clusters, boxes per axis, columns, ids,
+                             Pairs: the cluster pairs within a cutoff, a sweep) and ClusterPair
 Pairs.cs                     [Neighbor] (a pair method's other entity) and the pass of a pair method: IPairJob (the
                              generated job: the cutoff, per row or one, and its run over a table against another),
-                             PairRun (one table against one: windows of Vector<float>.Count rows, their lane masks,
-                             the CSR row ranges of the neighbors' windows), World.ForPairs (the order requested once,
-                             then PairState: window boxes drawn every pass and checked against the kept ones widened
-                             by an adaptive margin, a sweep of the boxes widened by the windows' reach when one left)
+                             PairRun (one table against one: clusters of Vector<float>.Count rows, their lane masks,
+                             the CSR row ranges of the neighbors' clusters, a range of them per chunk), World.ForPairs
+                             and ForPairsParallel (chunks of whole words of clusters on the chunk runner, the lists
+                             drawn first on the calling thread; a job that Merges keeps each chunk's copy, combined in
+                             chunk order; PairState.Next walks the pairs of tables) (the order requested once,
+                             then PairState: cluster boxes drawn every pass and checked against the kept ones widened
+                             by an adaptive margin, a sweep of the boxes widened by the clusters' reach when one left;
+                             lists of each row's neighbors, Verlet's, where they cost less than the ranges for the
+                             method's width: PairRun.Listed / Near, kept while the rows moved less than the margin)
 World.Order.cs               OrderRows<T, TOrder> (the request generated setup makes), the cadence (SortDue from
-                             World.Run), SortRows<T>, Blocks<T> (OrderedTables)
+                             World.Run), SortRows<T>, Clusters<T> (OrderedTables)
 Cleanup.cs                   ICleanupComponent + Retired tag (entities kept alive until their cleanup components go)
 Disabled.cs                  Disabled<T> tag (the value kept, the component hidden from queries); its bit is a
                              non-generic DisabledTag per component (ComponentInfo.DisablerOf)
