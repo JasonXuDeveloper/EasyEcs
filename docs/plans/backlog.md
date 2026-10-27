@@ -48,6 +48,9 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 
 ## Next, in this order
 
+Agent slots as they free (at most 3): item 1 (running), item 8 (running), then 11 + 12a + 12b together (one tile
+branch: padded storage, ping-pong, zero rows, edges found while stepping), 12c + 12d (core copies), 12e, 9, 10, 4.
+
 1. [ ] **L2: the generated pair form** (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
        the 8x8 (x86) / 4x4 (ARM64) cluster-pair kernel over L1's blocks with cutoff and self masks, and a nearest form
        (`NearestPlayer`, zombie targeting). Right after WP0b merges. Then L4: examples rewritten in it.
@@ -162,7 +165,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        code fix for a hand-written commit that is a plain copy. Proof: TileStencilBenchmark / TileActiveBenchmark and
        VoxelServer's TickBenchmark before / after, two rounds, 0 B; the grids page and the VoxelServer page in the
        docs pass.
-12. [ ] **Fewer memory copies** (owner, 2026-10-27: "看看还有什么类似的能做的减少内存拷贝的做法"). Each one measured
+12. [ ] **Fewer memory copies** (owner, 2026-10-27: "看看还有什么类似的能做的减少内存拷贝的做法"; a-e approved: "这些都可以做"). Each one measured
        (two rounds, 0 B, nothing slower) and done by the generator or the core where users would otherwise copy:
        a. **Tiles stored padded, halos exchanged** (MPI's ghost cells; the grids page's TODO(water overlap)): today
           `Pad()` copies the whole tile and its neighbors' edges into a thread texture every pass. Keep each tile's
