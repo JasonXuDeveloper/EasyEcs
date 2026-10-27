@@ -3,7 +3,7 @@ namespace EasyEcs.Benchmark.Locality;
 /// <summary>
 /// <see cref="Crowd"/>'s sum as a pair method (L2): the neighbor's position and velocity as [Neighbor] parameters, the
 /// cutoff test first, one term per pair. The generator writes the rest: the order of the Position tables (Morton codes
-/// quantized by the cutoff), the pair lists over windows of rows, and the vector loop of a window against each
+/// quantized by the cutoff), the pair lists over clusters of rows, and the vector loop of a cluster against each
 /// neighbor (<see cref="Separate"/>); <see cref="SeparateRows"/> takes the neighbor's entity, so it runs one pair at a
 /// time. Each pass sums into Push, so a tick resets it first.
 /// </summary>
@@ -33,7 +33,7 @@ public static class CrowdPairs
     [ForEach]
     public static void Reset(ref Crowd.Push push) => push = default;
 
-    /// <summary><see cref="Separate"/> on several threads: each chunk of windows writes its own rows.</summary>
+    /// <summary><see cref="Separate"/> on several threads: each chunk of clusters writes its own rows.</summary>
     [ForEach(Parallel = true)]
     public static void SeparateParallel(in Crowd.Position p, in Crowd.Velocity v, ref Crowd.Push push,
         [Neighbor] in Crowd.Position q, [Neighbor] in Crowd.Velocity u)

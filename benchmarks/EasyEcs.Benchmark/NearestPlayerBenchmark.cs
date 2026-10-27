@@ -7,7 +7,7 @@ namespace EasyEcs.Benchmark;
 /// <summary>
 /// docs/plans/locality.md 4.2, phase 0: BattleServer's NearestPlayer (<see cref="PlayerSearch"/>) over its 100,000 units
 /// (33,333 players), per query: the sample's scan of the players (the baseline) against a search of their sorted
-/// blocks, sorted once in setup, and with the sort paid by 64 queries. Setup checks every query finds a player at the
+/// clusters, sorted once in setup, and with the sort paid by 64 queries. Setup checks every query finds a player at the
 /// same distance.
 /// </summary>
 [MemoryDiagnoser]
@@ -30,8 +30,8 @@ public class NearestPlayerBenchmark
         foreach (var at in _at)
         {
             float scan = PlayerSearch.DistanceTo(_world, PlayerSearch.Scan(_world, at).Id, at);
-            float blocks = PlayerSearch.DistanceTo(_world, PlayerSearch.Search(_world, at), at);
-            if (scan != blocks) throw new InvalidOperationException($"at {at}: the blocks find {blocks}, the scan {scan}");
+            float clusters = PlayerSearch.DistanceTo(_world, PlayerSearch.Search(_world, at), at);
+            if (scan != clusters) throw new InvalidOperationException($"at {at}: the clusters find {clusters}, the scan {scan}");
         }
     }
 
@@ -47,7 +47,7 @@ public class NearestPlayerBenchmark
     }
 
     [Benchmark(OperationsPerInvoke = Queries)]
-    public int Blocks()
+    public int Clusters()
     {
         int sum = 0;
         foreach (var at in _at) sum += PlayerSearch.Search(_world, at).Index;
@@ -55,9 +55,9 @@ public class NearestPlayerBenchmark
     }
 
     [Benchmark(OperationsPerInvoke = Queries)]
-    public int BlocksWithSort()
+    public int ClustersWithSort()
     {
         PlayerSearch.Sort(_world);
-        return Blocks();
+        return Clusters();
     }
 }

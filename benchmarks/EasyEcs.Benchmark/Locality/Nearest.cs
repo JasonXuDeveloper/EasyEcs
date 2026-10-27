@@ -13,12 +13,12 @@ public enum Layout
 }
 
 /// <summary>
-/// The players a nearest search runs over, sorted into blocks (<see cref="SortedBlocks"/>): their ids and the tie key
+/// The players a nearest search runs over, sorted into clusters (<see cref="SortedClusters"/>): their ids and the tie key
 /// (the entity index) in sorted order. Prototype side arrays, as <see cref="ClusterRows"/>.
 /// </summary>
 public sealed class PlayerRows
 {
-    public readonly SortedBlocks Blocks = new();
+    public readonly SortedClusters Clusters = new();
     public EntityId[] Ids;
     public int[] TieKeys;
     public float[] SourceX, SourceY;
@@ -26,7 +26,7 @@ public sealed class PlayerRows
 
     public void Reserve(int capacity)
     {
-        Blocks.Reserve(capacity);
+        Clusters.Reserve(capacity);
         Ids = new EntityId[capacity];
         TieKeys = new int[capacity];
         SourceX = new float[capacity];
@@ -36,10 +36,10 @@ public sealed class PlayerRows
 
     public void Sort(int count, float extent)
     {
-        Blocks.Sort(SourceX.AsSpan(0, count), SourceY.AsSpan(0, count), extent);
+        Clusters.Sort(SourceX.AsSpan(0, count), SourceY.AsSpan(0, count), extent);
         for (int s = 0; s < count; s++)
         {
-            Ids[s] = SourceIds[Blocks.Order[s]];
+            Ids[s] = SourceIds[Clusters.Order[s]];
             TieKeys[s] = Ids[s].Index;
         }
     }
@@ -49,10 +49,10 @@ public sealed class PlayerRows
 /// The shape of samples/VoxelServer's <c>ZombieTargetSystem.Pick</c> (locality.md 4.2): each zombie finds the nearest
 /// player within its vision. The row loop as the sample writes it (the players' chunks through a value index, walked
 /// ring by ring from the zombie's chunk, stopping at the first ring that cannot hold anyone nearer; each candidate's
-/// position through a lookup) against a search of the players' sorted blocks. 2D (x, z): the sample's distance adds y.
+/// position through a lookup) against a search of the players' sorted clusters. 2D (x, z): the sample's distance adds y.
 /// The keep-the-target shortcut of the sample is left out: every zombie searches.
 /// <para>
-/// Ties: the ring walk keeps the first player found at the smallest distance; the block search the one with the
+/// Ties: the ring walk keeps the first player found at the smallest distance; the cluster search the one with the
 /// smallest entity index (its order does not follow rings). Both find the same distance; the ids differ only on ties.
 /// </para>
 /// </summary>
@@ -167,8 +167,8 @@ public static partial class ZombieHunt
     }
     // #endregion ring-walk
 
-    // #region blocks
-    /// <summary>The players copied out of the table and sorted into blocks.</summary>
+    // #region clusters
+    /// <summary>The players copied out of the table and sorted into clusters.</summary>
     public static void SortPlayers(World world)
     {
         var rows = world.GetSingleton<Players>().Rows;
@@ -184,13 +184,13 @@ public static partial class ZombieHunt
     }
 
     [ForEach(SimdMode = SimdMode.Off), With<Zombie>]
-    public static void PickInBlocks(in Position position, in Sight sight, ref Target target, in Players players)
+    public static void PickInClusters(in Position position, in Sight sight, ref Target target, in Players players)
     {
         var rows = players.Rows;
-        int slot = rows.Blocks.Nearest(position.X, position.Z, sight.Range * sight.Range, rows.TieKeys);
+        int slot = rows.Clusters.Nearest(position.X, position.Z, sight.Range * sight.Range, rows.TieKeys);
         target = new Target(slot < 0 ? default : rows.Ids[slot]);
     }
-    // #endregion blocks
+    // #endregion clusters
 
     /// <summary>Each zombie's target and the squared distance to it (-1: none), in table order.</summary>
     public static (EntityId Target, float Distance)[] Targets(World world)
@@ -217,8 +217,8 @@ public static partial class ZombieHunt
 
 /// <summary>
 /// The shape of BattleServer's <c>NearestPlayer</c> (locality.md 4.2): the nearest player to a point, no range. The
-/// sample's linear scan of the players' positions against a search of their sorted blocks (with and without the sort).
-/// Ties as <see cref="ZombieHunt"/>: the scan keeps the first in table order, the blocks the smallest entity index.
+/// sample's linear scan of the players' positions against a search of their sorted clusters (with and without the sort).
+/// Ties as <see cref="ZombieHunt"/>: the scan keeps the first in table order, the clusters the smallest entity index.
 /// </summary>
 public static class PlayerSearch
 {
@@ -281,11 +281,11 @@ public static class PlayerSearch
         rows.Sort(k, Extent);
     }
 
-    /// <summary>The search of the sorted blocks; the id of the nearest player (default when there is none).</summary>
+    /// <summary>The search of the sorted clusters; the id of the nearest player (default when there is none).</summary>
     public static EntityId Search(World world, Position at)
     {
         var rows = world.GetSingleton<Players>().Rows;
-        int slot = rows.Blocks.Nearest(at.X, at.Y, float.MaxValue, rows.TieKeys);
+        int slot = rows.Clusters.Nearest(at.X, at.Y, float.MaxValue, rows.TieKeys);
         return slot < 0 ? default : rows.Ids[slot];
     }
 

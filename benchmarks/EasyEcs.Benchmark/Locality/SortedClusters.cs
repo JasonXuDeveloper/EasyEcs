@@ -7,19 +7,19 @@ using System.Runtime.Intrinsics;
 namespace EasyEcs.Benchmark.Locality;
 
 /// <summary>
-/// Phase 0 of docs/plans/locality.md: 2D points ordered along a Morton curve, cut into blocks of 8 (one 256-bit float
-/// vector) with an axis-aligned box each, and a tree of boxes over consecutive blocks (fan-out 8: the Morton order makes
-/// consecutive blocks neighbors, so the tree is a linear BVH for free). The prototype keeps the sorted points in side
+/// Phase 0 of docs/plans/locality.md: 2D points ordered along a Morton curve, cut into clusters of 8 (one 256-bit float
+/// vector) with an axis-aligned box each, and a tree of boxes over consecutive clusters (fan-out 8: the Morton order makes
+/// consecutive clusters neighbors, so the tree is a linear BVH for free). The prototype keeps the sorted points in side
 /// arrays; the core version (L1) would permute the table's columns in place and keep only the boxes.
 /// <para>
 /// <see cref="Sort"/> computes the keys, sorts (key, source index) pairs by an LSD radix sort (4 passes of 8 bits,
-/// Polychroniou's partitioning without the vector histograms), copies X and Y into sorted order, pads the last block with
+/// Polychroniou's partitioning without the vector histograms), copies X and Y into sorted order, pads the last cluster with
 /// far points, and builds the boxes. Every array is sized by <see cref="Reserve"/>: no allocation per sort.
 /// </para>
 /// </summary>
-public sealed class SortedBlocks
+public sealed class SortedClusters
 {
-    /// <summary>The rows of a block: one Vector256 of floats.</summary>
+    /// <summary>The rows of a cluster: one Vector256 of floats.</summary>
     public const int Lanes = 8;
 
     /// <summary>Where padding rows sit: far from everything, finite so 0 * (far - x) stays 0 (no NaN).</summary>
@@ -28,13 +28,13 @@ public sealed class SortedBlocks
     private const int FanOut = 8;
 
     public int Count;               // real rows
-    public int BlockCount;          // ceil(Count / 8)
-    public float[] X, Y;            // sorted, padded to BlockCount * 8
+    public int ClusterCount;          // ceil(Count / 8)
+    public float[] X, Y;            // sorted, padded to ClusterCount * 8
     public int[] Order;             // sorted slot -> source index
     public int[] Slot;              // source index -> sorted slot
     public uint[] Keys;             // sorted Morton keys (Count of them)
 
-    // Box levels: level 0 is one box per block, level k + 1 one per 8 nodes of level k; the last level has <= 8 nodes.
+    // Box levels: level 0 is one box per cluster, level k + 1 one per 8 nodes of level k; the last level has <= 8 nodes.
     public float[][] MinX, MinY, MaxX, MaxY;
     public int[] LevelCount;
     public int Levels;
@@ -47,22 +47,22 @@ public sealed class SortedBlocks
     /// <summary>Size every array for up to <paramref name="capacity"/> rows.</summary>
     public void Reserve(int capacity)
     {
-        int blocks = (capacity + Lanes - 1) / Lanes;
-        X = new float[blocks * Lanes];
-        Y = new float[blocks * Lanes];
+        int clusters = (capacity + Lanes - 1) / Lanes;
+        X = new float[clusters * Lanes];
+        Y = new float[clusters * Lanes];
         Order = new int[capacity];
         Slot = new int[capacity];
         Keys = new uint[capacity];
         _keys2 = new uint[capacity];
         _order2 = new int[capacity];
         int levels = 1;
-        for (int n = blocks; n > FanOut; n = (n + FanOut - 1) / FanOut) levels++;
+        for (int n = clusters; n > FanOut; n = (n + FanOut - 1) / FanOut) levels++;
         MinX = new float[levels][];
         MinY = new float[levels][];
         MaxX = new float[levels][];
         MaxY = new float[levels][];
         LevelCount = new int[levels];
-        for (int level = 0, n = Math.Max(blocks, 1); level < levels; level++, n = (n + FanOut - 1) / FanOut)
+        for (int level = 0, n = Math.Max(clusters, 1); level < levels; level++, n = (n + FanOut - 1) / FanOut)
         {
             MinX[level] = new float[n];
             MinY[level] = new float[n];
@@ -73,13 +73,13 @@ public sealed class SortedBlocks
 
     /// <summary>
     /// Order the points (<paramref name="x"/>, <paramref name="y"/>) of a square map [0, <paramref name="extent"/>)
-    /// along the Morton curve and build the blocks and their boxes. O(n).
+    /// along the Morton curve and build the clusters and their boxes. O(n).
     /// </summary>
     public void Sort(ReadOnlySpan<float> x, ReadOnlySpan<float> y, float extent)
     {
         int n = x.Length;
         Count = n;
-        BlockCount = (n + Lanes - 1) / Lanes;
+        ClusterCount = (n + Lanes - 1) / Lanes;
         _scale = 65535f / extent;
 
         // Keys and the 4 byte histograms in one pass.
@@ -134,7 +134,7 @@ public sealed class SortedBlocks
             Y[s] = y[source];
         }
 
-        for (int s = n; s < BlockCount * Lanes; s++)
+        for (int s = n; s < ClusterCount * Lanes; s++)
         {
             X[s] = Far;
             Y[s] = Far;
@@ -168,7 +168,7 @@ public sealed class SortedBlocks
         var minY = MinY[0];
         var maxX = MaxX[0];
         var maxY = MaxY[0];
-        for (int b = 0; b < BlockCount; b++)
+        for (int b = 0; b < ClusterCount; b++)
         {
             int first = b * Lanes, last = Math.Min(first + Lanes, Count);
             float x0 = X[first], x1 = x0, y0 = Y[first], y1 = y0;
@@ -186,7 +186,7 @@ public sealed class SortedBlocks
             maxY[b] = y1;
         }
 
-        LevelCount[0] = BlockCount;
+        LevelCount[0] = ClusterCount;
         int level = 0;
         while (LevelCount[level] > FanOut)
         {
@@ -242,14 +242,14 @@ public sealed class SortedBlocks
     }
 
     /// <summary>
-    /// The blocks other than <paramref name="block"/> whose box is closer than <paramref name="range"/> to its box,
+    /// The clusters other than <paramref name="cluster"/> whose box is closer than <paramref name="range"/> to its box,
     /// appended to <paramref name="into"/> from <paramref name="at"/>; returns the new end. A DFS over the tree with an
     /// explicit stack (no recursion, no allocation).
     /// </summary>
-    public int BlocksNear(int block, float range, int[] into, int at)
+    public int ClustersNear(int cluster, float range, int[] into, int at)
     {
         float r2 = range * range;
-        float ax0 = MinX[0][block], ay0 = MinY[0][block], ax1 = MaxX[0][block], ay1 = MaxY[0][block];
+        float ax0 = MinX[0][cluster], ay0 = MinY[0][cluster], ax1 = MaxX[0][cluster], ay1 = MaxY[0][cluster];
         Span<int> stack = stackalloc int[2 * FanOut * 8];      // (level, node) pairs; depth <= 8 levels of 8 children
         int top = 0;
         int rootLevel = Levels - 1;
@@ -265,7 +265,7 @@ public sealed class SortedBlocks
             if (BoxDistance(ax0, ay0, ax1, ay1, MinX[level][node], MinY[level][node], MaxX[level][node], MaxY[level][node]) >= r2) continue;
             if (level == 0)
             {
-                if (node != block) into[at++] = node;
+                if (node != cluster) into[at++] = node;
                 continue;
             }
 
@@ -284,8 +284,8 @@ public sealed class SortedBlocks
     /// The sorted slot of the nearest point to (<paramref name="px"/>, <paramref name="py"/>) closer than
     /// sqrt(<paramref name="limit"/>) (squared distance strictly below it), -1 when none. Ties (equal squared distances)
     /// go to the smaller <paramref name="tieKeys"/> value (by sorted slot), so the answer does not depend on the order
-    /// the blocks are visited in. A first guess from the block holding the point's own key, then a DFS that skips nodes
-    /// whose box is farther than the best so far; each block's 8 distances in one Vector256.
+    /// the clusters are visited in. A first guess from the cluster holding the point's own key, then a DFS that skips nodes
+    /// whose box is farther than the best so far; each cluster's 8 distances in one Vector256.
     /// </summary>
     public int Nearest(float px, float py, float limit, int[] tieKeys)
     {
@@ -293,7 +293,7 @@ public sealed class SortedBlocks
         float best = limit;
         int bestSlot = -1, bestKey = int.MaxValue;
 
-        // First guess: the block where the point's key would be inserted.
+        // First guess: the cluster where the point's key would be inserted.
         int guess = Keys.AsSpan(0, Count).BinarySearch(KeyOf(px, py));
         if (guess < 0) guess = ~guess;
         int seed = Math.Min(guess, Count - 1) / Lanes;
@@ -330,12 +330,12 @@ public sealed class SortedBlocks
         return bestSlot;
     }
 
-    // The 8 squared distances of a block in one vector (two 128-bit halves where 256-bit vectors are not hardware:
+    // The 8 squared distances of a cluster in one vector (two 128-bit halves where 256-bit vectors are not hardware:
     // ARM64's NEON); the lanes at or below the best go through the exact rule.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void Leaf(int block, float px, float py, int[] tieKeys, ref float best, ref int bestSlot, ref int bestKey)
+    private void Leaf(int cluster, float px, float py, int[] tieKeys, ref float best, ref int bestSlot, ref int bestKey)
     {
-        int first = block * Lanes;
+        int first = cluster * Lanes;
         ref float x = ref MemoryMarshal.GetArrayDataReference(X);
         ref float y = ref MemoryMarshal.GetArrayDataReference(Y);
         Vector256<float> d2;
