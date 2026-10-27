@@ -58,14 +58,14 @@ Prefetching.cs               the one software prefetch (Line): x86 PREFETCHT0, A
 IndexPrefetch.cs             ValueIndex's probe prefetches (generated [ForEach] jobs finding by a key a row holds:
                              LookupExtensions.Probes / PrefetchKey): the stages by representation (a direct slot; a
                              relation's slot, then its ids; a hashed key's bucket, entry, then its ids), the gate (the
-                             index's memory past its form's cache: the last level, the L2 in parallel); HashSlots: a
+                             index's memory past the last-level cache, in parallel too); HashSlots: a
                              Dictionary's buckets and entries (UnsafeAccessor, reflection once per resize)
 CacheSizes.cs                the last-level cache and one core's L2, read once per process from the OS as the GC does
                              (Windows GetLogicalProcessorInformationEx, Linux sysfs then sysconf, macOS sysctl), where a
                              prefetch exists (Prefetching.IsSupported); 0 is unknown, which never prefetches. A gate per
-                             form: probes on one thread and vector loops' chases past the last level; the row form's
-                             chases (fused walks and buffers too), parallel probes and DestroyEntities' id list past
-                             the L2 (L2OrLastLevel)
+                             form: index probes and vector loops' chases past the last level; the row form's chases
+                             (parallel, fused walks and buffers too) and DestroyEntities' id list past the L2
+                             (L2OrLastLevel)
 Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
                              Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbors found by generated code,
                              TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,

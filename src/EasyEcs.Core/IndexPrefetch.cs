@@ -12,8 +12,7 @@ namespace EasyEcs;
 // is in the cache: a direct-indexed key's slot (one stage); a relation key's slot by the target's index, then its list
 // of ids; a hashed key's bucket, then its entry (holding a unique key's entity, or a shared key's count and list). A
 // third stage for a shared key's list of ids was measured and dropped: finding its head is a second lookup per row
-// (ProbePrefetchBenchmark.CountClan at 16M keys: 2.4 times as slow). Past the form's cache only (Probes: the last level
-// for a pass on one thread, the L2 for a parallel one).
+// (ProbePrefetchBenchmark.CountClan at 16M keys: 2.4 times as slow). Past the last-level cache only (Probes).
 public sealed partial class ValueIndex<T, TKey>
 {
     // The hash's arrays as the gate found them, for the passes that prefetch (read once per pass by Probes, on the owner
@@ -25,13 +24,15 @@ public sealed partial class ValueIndex<T, TKey>
 
     /// <summary>
     /// Whether a pass probing this index prefetches its probes: where a prefetch exists, and when the index's lines a
-    /// probe lands on (slots, buckets and entries, lists of ids) are past a cache of <paramref name="cache"/> bytes (the
-    /// form's gate, <see cref="CacheSizes"/>; 0, unknown: never); in the cache a prefetch costs more than it hides
-    /// (BatchProbeBenchmark: 1.3-1.6x at 1k and 100k keys). Reads the hash's arrays for <see cref="Prefetch"/>. Once
-    /// per pass, on the owner thread.
+    /// probe lands on (slots, buckets and entries, lists of ids) are past the last-level cache, on one thread and in
+    /// parallel alike: just past the L2 a probe's prefetch costs more than it hides, in parallel too
+    /// (ProbePrefetchBenchmark; borrowed-ideas.md item 1, "A gate per form"); in the cache it costs 1.3-1.6x
+    /// (BatchProbeBenchmark at 1k and 100k keys). Reads the hash's arrays for <see cref="Prefetch"/>. Once per pass, on
+    /// the owner thread.
     /// </summary>
-    internal bool Probes(long cache)
+    internal bool Probes()
     {
+        long cache = CacheSizes.LastLevel;
         if (!Prefetching.IsSupported || cache <= 0) return false;
         bool hashed = _heads.Count > 0 && HashSlots<TKey, IndexHead>.Works;
         int stride = hashed ? HashSlots<TKey, IndexHead>.Stride(_heads, out _probeBuckets, out _probeEntries, out _probeComparer) : 0;

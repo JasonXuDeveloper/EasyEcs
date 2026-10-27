@@ -87,15 +87,15 @@ public sealed partial class SystemGenerator
     /// <summary>
     /// The call site's gate of a pass (or a walk) chasing other entities: true when any of the lookups its chases read
     /// is past the cache of its form, once per pass. A gate per form (borrowed-ideas.md item 1): the row form's chases of
-    /// other entities (at an id a row holds or a buffer's elements, on one thread, in parallel, in a fused walk) and a
-    /// parallel pass's probes pay as soon as their data leaves one core's L2 (<c>Lookup&lt;T&gt;.PrefetchesPastL2</c>,
-    /// <c>LookupExtensions.ProbesPastL2</c>); a probe on one thread costs more than it hides until the index leaves the
-    /// last-level cache (<c>LookupExtensions.Probes</c>).
+    /// other entities (at an id a row holds or a buffer's elements, on one thread, in parallel, in a fused walk) pay as
+    /// soon as their records and rows leave one core's L2 (<c>Lookup&lt;T&gt;.PrefetchesPastL2</c>); a probe, on one
+    /// thread or in parallel, costs more than it hides until its index leaves the last-level cache
+    /// (<c>LookupExtensions.Probes</c>).
     /// </summary>
     private static string ChaseGate(IEnumerable<ForEachModel> methods, string world) =>
         string.Join(" || ", methods.SelectMany(m => m.Chases.Select(c => c.Kind == ChaseKind.Probe
                 // a probe: past the cache when its index is (the index sized by its representation)
-                ? $"global::EasyEcs.LookupExtensions.Probes{(m.Parallel ? "PastL2" : "")}<{m.Parameters[c.Lookup].Type}, {m.Parameters[c.Lookup].Key}>({world})"
+                ? $"global::EasyEcs.LookupExtensions.Probes<{m.Parameters[c.Lookup].Type}, {m.Parameters[c.Lookup].Key}>({world})"
                 : $"global::EasyEcs.Lookup<{m.Parameters[c.Lookup].Type}>.PrefetchesPastL2({world})")).Distinct());
 
     /// <summary>

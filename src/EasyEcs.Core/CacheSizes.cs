@@ -8,10 +8,10 @@ namespace EasyEcs;
 /// The sizes of the processor's caches the prefetch gates compare a pass's memory with, read once per process from the
 /// operating system the way the runtime's GC sizes its gen0 budget (dotnet/runtime <c>gcenv.windows.cpp</c> /
 /// <c>gcenv.unix.cpp</c>, GetLogicalProcessorCacheSizeFromOS); .NET has no public API for them. A gate per form
-/// (borrowed-ideas.md item 1): a probe on one thread and a vector loop's chases prefetch only past
-/// <see cref="LastLevel"/> (just past the L2 a prefetch costs them more than it hides); the forms that pay as soon as
-/// the data leaves the L2 (the row form's chases of other entities, on one thread, in parallel, in fused walks and over
-/// a buffer's elements; parallel probes; the core's lists of ids) past <see cref="L2OrLastLevel"/>.
+/// (borrowed-ideas.md item 1): index probes and a vector loop's chases prefetch only past <see cref="LastLevel"/> (just
+/// past the L2 a prefetch costs them more than it hides); the forms that pay as soon as the data leaves the L2 (the
+/// row form's chases of other entities, on one thread, in parallel, in fused walks and over a buffer's elements; the
+/// core's lists of ids) past <see cref="L2OrLastLevel"/>.
 /// Read only where a prefetch exists (<see cref="Prefetching.IsSupported"/>: x86, ARM64 with SVE): other ARM64 and
 /// WebAssembly never read them. 0 means unknown: an operating system not listed, a read that fails or returns nothing.
 /// </summary>
