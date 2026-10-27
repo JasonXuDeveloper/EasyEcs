@@ -665,16 +665,16 @@ public class OrderTests
     [TestCase(0)]
     [TestCase(4)]
     [TestCase(16)]
-    public void AClusterHoldsTheRowsTheRequestAsksFor(int clusterRows)
+    public void AClusterHoldsTheRowsTheRequestAsksFor(int clusterSize)
     {
         using var world = new World();
         var random = new Random(18);
         for (int i = 0; i < 301; i++) world.CreateEntity(new Mover(random.NextSingle() * 50, random.NextSingle() * 50));
-        world.OrderRows<Mover, MoverOrder>(2, 1, 1, 0, clusterRows);
+        world.OrderRows<Mover, MoverOrder>(2, 1, 1, 0, clusterSize);
         world.Update();
         foreach (var clusters in world.Clusters<Mover>())
         {
-            int size = clusterRows == 0 ? (System.Runtime.Intrinsics.Vector256.IsHardwareAccelerated ? 8 : 4) : clusterRows;
+            int size = clusterSize == 0 ? (System.Runtime.Intrinsics.Vector256.IsHardwareAccelerated ? 8 : 4) : clusterSize;
             Assert.That(clusters.Size, Is.EqualTo(size));
             Assert.That(clusters.Count, Is.EqualTo((301 + size - 1) / size));
             Assert.That(clusters.End(clusters.Count - 1), Is.EqualTo(301));
