@@ -356,7 +356,7 @@ public ref struct Spawner
 ### 写被追踪组件的并行遍历 [#v4-7-parallel-chunks]
 
 写被追踪组件的并行 `[ForEach]` 方法（或 `ForEachParallel` job）按 4,096 行的整数倍切块，最少 4,096 行，不再是最少 1,024 行：
-同一个 4,096 行块里的两个分块会争用它的变更摘要，可能漏打变更 tick（[D48](/zh/docs/decisions#d48-parallel-tracked-chunks)）。代码不用改；
+同一个 4,096 行的区段里的两个分块会争用它的变更摘要，可能漏打变更 tick（[D48](/zh/docs/decisions#d48-parallel-tracked-chunks)）。代码不用改；
 不超过 4,096 行的表现在只切成一块，所以小的并行遍历用到的线程可能比以前少。不写被追踪组件的遍历照旧切块。
 
 ### 改名的调用 [#v4-7-renames]

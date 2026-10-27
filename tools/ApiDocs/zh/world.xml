@@ -564,7 +564,7 @@
     <summary>
       把拥有 <c>T1, T2</c> 全部组件（并且满足 <paramref name="filter" />）的存活实体的 id 写进 <paramref name="into" />，
       顺序和 <c>Query</c>、<c>Read</c> 访问它们的顺序一样，写满为止，返回写了几个：一批有界的工作（一个 tick 的前几个请求、
-      接下来要卸载的区块），交给 <c>DestroyEntities</c>、<c>SaveEntities</c> 或者会做结构变更的循环，查询循环里不能做这些。
+      接下来要卸载的地形），交给 <c>DestroyEntities</c>、<c>SaveEntities</c> 或者会做结构变更的循环，查询循环里不能做这些。
       O(匹配的原型数)，加上写满 <paramref name="into" /> 之前读过的行（所有行都匹配的表是一次复制）。零分配。
     </summary>
   </member>

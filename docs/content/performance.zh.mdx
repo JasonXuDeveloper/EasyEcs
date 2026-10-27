@@ -341,7 +341,7 @@ public ref struct StunnedTagSystem // 最快：让过滤来做判断
 ### 变了的少数行：`[Changed<T>]` [#the-few-rows-that-changed-changedt]
 
 同步或存盘系统如果扫描每一行，就要为没人写过的行买单。把组件标成 `ITracked`，再用 `[Changed<T>]` 过滤：没写过的表、
-4,096 行的块和 64 行的字都会被跳过。用 `in` 接组件，访问才不会被算成写入。
+4,096 行的区段和 64 行的字都会被跳过。用 `in` 接组件，访问才不会被算成写入。
 
 ```csharp title="ShieldReplicationSystem.cs"
 public record struct Shield(int Value) : IComponent, ITracked;

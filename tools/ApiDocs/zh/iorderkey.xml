@@ -2,7 +2,7 @@
 <doc>
   <member name="T:EasyEcs.IOrderKey`1" source="89933c2c8478">
     <summary>
-      一个组件，含它的表让行按 <see cref="P:EasyEcs.IOrderKey`1.OrderKey" /> 排序，每块行（8 行，ARM64 上 4 行）
+      一个组件，含它的表让行按 <see cref="P:EasyEcs.IOrderKey`1.OrderKey" /> 排序，每簇（8 行，ARM64 上 4 行）
       一个包围盒，罩住 <see cref="P:EasyEcs.IOrderKey`1.BoxPoint" />（<see cref="T:EasyEcs.RowBlocks" />）。
       在键成员上写 <see cref="T:EasyEcs.OrderByAttribute">[OrderBy]</see> 来声明，生成器会显式写出这两个成员，并为每个 World
       注册这个顺序：只实现接口不会让任何表排序。
@@ -13,7 +13,7 @@
     </typeparam>
   </member>
   <member name="P:EasyEcs.IOrderKey`1.BoxPoint" source="347257637eaf">
-    <summary>块的包围盒要罩住的点：最多三个轴（声明里的），其余为 0。</summary>
+    <summary>簇的包围盒要罩住的点：最多三个轴（声明里的），其余为 0。</summary>
   </member>
   <member name="P:EasyEcs.IOrderKey`1.OrderKey" source="884ddf27ca60">
     <summary>行排序用的键，升序（键相同的行保持原来的顺序）。</summary>

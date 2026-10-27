@@ -28,6 +28,10 @@ const rules: Rule[] = [
   // 分组 is a system group or an IGroup table group; neither names a set of entities or a ChangedAny set.
   { wrong: /分组存档/g, right: '实体存档 (a save of entities)' },
   { wrong: /OR 组/g, right: 'OR 集合 (the ChangedAny / RemovedAny set)' },
+  // 块 is the parallel chunk only: an ordered table's block is a 簇, a change-tick block a 区段, a terrain chunk 地形.
+  { wrong: /区块/g, right: '地形 (a terrain chunk of a sample) or 区段 (a change-tick block of 4,096 rows)' },
+  { wrong: /4,096 行的?块/g, right: '4,096 行的区段 (a change-tick block)' },
+  { wrong: /(?<!按)块对/g, right: '簇对 (a block pair of an ordered table)' },
   // A link to a page is labelled with the page's title, as its sidebar entry is.
   {
     wrong: /\[(?:多线程|线程模型|线程)\]\(\/zh\/docs\/guide\/threading/g,

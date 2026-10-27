@@ -30,7 +30,7 @@ public QueryFilter Changed<T>(ulong since) where T : struct, IComponent, ITracke
 
 - `ArgumentException`：前面的 `Changed` 或 `Removed` 用了另一个 tick。
 
-**复杂度**（[API 表](/zh/docs/api)）：O(1)；遍历跳过 `since` 之前写过的表、4,096 行的块和 64 行的字
+**复杂度**（[API 表](/zh/docs/api)）：O(1)；遍历跳过 `since` 之前写过的表、4,096 行的区段和 64 行的字
 
 ### `ChangedAny` [#changedany]
 
