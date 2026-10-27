@@ -86,7 +86,10 @@ its own worktree.
      another agent's exclusive request;
    - A/B copies as git worktrees or `git archive` snapshots outside the repo tree (scratchpad), frozen while they run:
      BenchmarkDotNet rebuilds from source, so a tree someone edits changes under the run; two rounds, interleaved; a
-     run past about 2 h is split into one background job per round;
+     run past about 2 h is split into one background job per round; gated forms (a prefetch on and off, a switch
+     forced) are compared inside one binary, since edits made while a head run builds enter its binaries;
+   - an estimate the runtime makes on every pass or draw (a cost model, a count) is measured itself: counting every
+     cluster at every draw cost 27% of a pair pass, sampling 64 clusters every 16th draw removed it;
    - GeneratorBenchmark's corpus holds gameplay code (structural calls, generated writers, buffers), or the
      analyzer's slow paths never run in it;
    - every run under `flock /tmp/bench.lock`, nothing else running (agents' builds and samples included): parallel

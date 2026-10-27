@@ -30,7 +30,9 @@ it cannot is recorded and the form falls back to rows there:
 - Proof on this x86 machine: the tests run once more with `DOTNET_EnableAVX=0` (128-bit paths); benchmark classes
   guard every intrinsic so they run on ARM64, and result tables carry an ISA column. The owner runs ARM64 numbers.
   The .NET 10 knobs are `DOTNET_EnableAVX512=0`, `DOTNET_EnableAVX2=0`, `DOTNET_EnableAVX=0`; `DOTNET_EnableAVX512F=0`
-  is silently ignored, so read the ISA column of every result before trusting it.
+  is silently ignored, so read the ISA column of every result before trusting it. `DOTNET_EnableAVX=0` is not a
+  NEON proxy for loops that need a deinterleave (pairs of multi-field components): x86's 128-bit path runs them one
+  pair at a time where NEON's LD2-4 would not, so their ARM64 verdict waits for the M4.
 - **Compaction-shaped loops** (a mask to a list of rows or values): store whole vectors while the destination has
   room for one, then the last selected elements one write per set bit. A step that branches on its part of the mask,
   or a variable-length partial store per step, kills the 128-bit and AVX2 forms. Sparse words (12 or fewer set bits)
