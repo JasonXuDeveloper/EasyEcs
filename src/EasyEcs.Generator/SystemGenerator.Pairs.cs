@@ -56,6 +56,13 @@ public sealed partial class SystemGenerator
                 ?? "global::EasyEcs.Entity";
             string? scalar = "the method cannot run per pair (EECS105)";
             var simd = PairForm.Problem(method) == null ? ForEachModel.VectorLoop(method, syntax, model, parallel, ct, out scalar) : null;
+            if (simd != null && method.Parameters.FirstOrDefault(p => Symbols.Classify(p, outside) is Symbols.ParamKind.Reduction or Symbols.ParamKind.Mutable) is { } kept)
+            {
+                // The vector loop's pair mode broadcasts one neighbor to a cluster's lanes: it has no partial result per
+                // lane nor a stamp per written lane.
+                simd = null;
+                scalar = $"'{kept.Name}' is a {(Symbols.Classify(kept, outside) == Symbols.ParamKind.Reduction ? "Reduce<T>" : "Mut<T>")}, which the pair mode of the vector loop does not take";
+            }
             return new PairModel(position, new EquatableArray<string>(shape?.Axes ?? []), cutoff, shape?.PerRow == true, simd,
                 simd == null ? scalar ?? "" : "", noCutoff ?? "");
         }
@@ -73,6 +80,7 @@ public sealed partial class SystemGenerator
         string job = $"{forEach}.{method.Name}Job{i}";
         sb.Append($"{indent}var {local} = new {job}{Fields(method, world)};\n");
         sb.Append($"{indent}{world}.ForPairs{(method.Parallel ? "Parallel" : "")}<{pair.Position}, {forEach}.{method.Name}Order{i}, {job}>(ref {local}, in {forEach}.{method.Name}Rows{i}, in {forEach}.{method.Name}Neighbors{i}, {System.Math.Max(1, pair.Axes.Length)});\n");
+        EmitReductions(sb, method, world, local, indent);
     }
 
     /// <summary>The order, the job and the filters of a pair method.</summary>
@@ -115,7 +123,7 @@ public sealed partial class SystemGenerator
             var text = new StringBuilder();
             int k = 0;
             foreach (var p in method.Parameters)
-                if (p.Kind == Symbols.ParamKind.Component) text.Append($"{indent}ref {p.Type} r{++k} = ref run.Rows<{p.Type}>();\n");
+                if (p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.Mutable) text.Append($"{indent}ref {p.Type} r{++k} = ref run.Rows<{p.Type}>();\n");
             for (int i = 0; i < method.Parameters.Length; i++)
                 if (method.Parameters[i] is { Kind: Symbols.ParamKind.Neighbor } p && p.Type != "global::EasyEcs.Entity")
                     text.Append($"{indent}ref {p.Type} o{i} = ref run.Others<{p.Type}>();\n");
@@ -144,6 +152,8 @@ public sealed partial class SystemGenerator
         var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
         {
             Symbols.ParamKind.Component => $"{p.RefKind} {unsafeType}.Add(ref r{++column}, i)",
+            Symbols.ParamKind.Mutable => $"new global::EasyEcs.Mut<{p.Type}>(ref {unsafeType}.Add(ref r{++column}, i), in m{i}, (int)i)",
+            Symbols.ParamKind.Reduction => $"ref a{i}",
             Symbols.ParamKind.Neighbor when p.Type == "global::EasyEcs.Entity" => "run.Other(j)",
             Symbols.ParamKind.Neighbor => $"{p.RefKind} {unsafeType}.Add(ref o{i}, j)",
             Symbols.ParamKind.Entity => "run.Entity((int)i)",
@@ -166,6 +176,9 @@ public sealed partial class SystemGenerator
         bool prune = axes.Length > 0 && pair.Cutoff.Length > 0 && rowPoint > 0 && otherPoint >= 0;
         sb.Append("        private void Rows(in global::EasyEcs.PairRun run)\n        {\n");
         sb.Append(Columns("            "));
+        for (int i = 0; i < method.Parameters.Length; i++) // a Mut<T>'s stamps per write: the run's change-tick column, found once
+            if (method.Parameters[i].Kind == Symbols.ParamKind.Mutable)
+                sb.Append($"            var m{i} = run.MutRows<{method.Parameters[i].Type}>();\n");
         sb.Append("            bool skips = run.Skips, listed = run.Listed;\n");
         sb.Append("            for (int w = run.First, size = run.ClusterSize; w < run.End; w++)\n            {\n");
         sb.Append("                ulong lanes = run.Lanes(w);\n                if (lanes == 0) continue;\n");
@@ -234,6 +247,17 @@ public sealed partial class SystemGenerator
             sb.Append("\n        private void Vectors(in global::EasyEcs.PairRun run)\n        {\n");
             foreach (var line in text.Split('\n')) sb.Append(line.Length > 0 ? "            " + line : "").Append('\n');
             sb.Length--; // the split's last empty line
+            sb.Append("        }\n");
+        }
+
+        if (method.Parallel && method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Reduction))
+        {
+            // Each chunk's partial results, combined in chunk order (TSelf is this job: the pass passes its own TJob).
+            sb.Append("\n        static bool global::EasyEcs.IPairJob.Merges => true;\n\n");
+            sb.Append("        static void global::EasyEcs.IPairJob.Merge<TSelf>(ref TSelf job, in TSelf chunk)\n        {\n");
+            sb.Append($"            ref var into = ref {unsafeType}.As<TSelf, {method.Name}Job{number}>(ref job);\n");
+            sb.Append($"            ref var part = ref {unsafeType}.As<TSelf, {method.Name}Job{number}>(ref {unsafeType}.AsRef(in chunk));\n");
+            MergeLines(sb, method, "into", "part");
             sb.Append("        }\n");
         }
 

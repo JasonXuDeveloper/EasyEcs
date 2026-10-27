@@ -41,8 +41,9 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
 SystemGenerator.Pairs.cs     a pair method ([Neighbor] parameters, PairModel): the pass (world.ForPairs), the order
                              struct (Morton key of the compared component over the axes the test names), the job
                              (the cutoff from the test, per row or one; Width; Rows: the method per pair, over the row's
-                             list of neighbors when the run carries one; Vectors: a cluster's lanes against each
-                             neighbor through Kernel's pair mode, under its gate)
+                             list of neighbors when the run carries one, a Mut<T> over the run's change-tick column;
+                             Vectors: a cluster's lanes against each neighbor through Kernel's pair mode, under its
+                             gate; Reduce<T> results after the pass, a parallel job's Merges / Merge of its chunks)
 PairForm.cs                  what a pair method is, read once for the generator and the analyzer: Problem (EECS105's
                              reason), Read (the distance test: dx * dx sums, DistanceSquared, LengthSquared, and the
                              cutoff: values, singletons, the row's in components; EECS106's reason), HandWritten

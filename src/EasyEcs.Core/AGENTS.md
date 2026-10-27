@@ -151,7 +151,8 @@ Pairs.cs                     [Neighbor] (a pair method's other entity) and the p
                              PairRun (one table against one: clusters of Vector<float>.Count rows, their lane masks,
                              the CSR row ranges of the neighbors' clusters, a range of them per chunk), World.ForPairs
                              and ForPairsParallel (chunks of whole words of clusters on the chunk runner, the lists
-                             drawn first on the calling thread; PairState.Next walks the pairs of tables) (the order requested once,
+                             drawn first on the calling thread; a job that Merges keeps each chunk's copy, combined in
+                             chunk order; PairState.Next walks the pairs of tables) (the order requested once,
                              then PairState: cluster boxes drawn every pass and checked against the kept ones widened
                              by an adaptive margin, a sweep of the boxes widened by the clusters' reach when one left;
                              lists of each row's neighbors, Verlet's, where they cost less than the ranges for the

@@ -28,7 +28,9 @@ internal static class PairForm
     /// <summary>
     /// Why the declaration of pair method <paramref name="method"/> cannot run per pair (EECS105), or null. A pair
     /// pass runs over every row, on several threads only when it writes no neighbor (no Slices, change filters or [Consume]), takes components of
-    /// the row and of the neighbor, singletons and values, and writes no component the other side of a pair reads: a
+    /// the row (by <c>in</c>, <c>ref</c> or <c>Mut&lt;T&gt;</c>, a Mut&lt;T&gt; on one thread only: its stamps per write
+    /// are the row's) and of the neighbor, singletons, values and <c>Reduce&lt;T&gt;</c> results (each chunk's combined
+    /// in chunk order), and writes no component the other side of a pair reads: a
     /// row's write would reach the neighbors after it in one order and not in another, and a write of the neighbor's
     /// (<c>[Neighbor] ref T</c>) would reach the rows after it, or the row itself when it is its own neighbor. Each
     /// component of the neighbor is taken once.
@@ -42,6 +44,8 @@ internal static class PairForm
         if (method.IsGenericMethod || method.ContainingType.IsGenericType) return "is generic: a pair method's order names its component";
         if (Symbols.IsParallel(method) && method.Parameters.FirstOrDefault(p => p.RefKind == RefKind.Ref && Symbols.IsNeighbor(p)) is { } shared)
             return $"runs in parallel and writes the neighbor's {shared.Type.Name} ('{shared.Name}'): rows of two threads would write one neighbor; drop Parallel";
+        if (Symbols.IsParallel(method) && method.Parameters.FirstOrDefault(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Mutable) is { } mutable)
+            return $"runs in parallel and takes '{mutable.Name}' as a Mut<T>: its stamps per write would share the change ticks of the chunks' rows; take it by 'ref' (every row the pass runs for is stamped) or drop Parallel";
         if (Symbols.Slices(method) > 1) return "visits slices of its rows: a pair pass visits every row";
         if (Symbols.IsConsume(method)) return "has [Consume]: a pair pass destroys nothing";
         if (Symbols.AttributeFilters(method).Any(f => f.Item1 is Symbols.FilterKind.Changed or Symbols.FilterKind.Removed
@@ -59,6 +63,13 @@ internal static class PairForm
                     rows.Add(p.Type);
                     if (p.RefKind == RefKind.Ref) written.Add(p.Type);
                     break;
+                case Symbols.ParamKind.Mutable: // a component of the row written where the method writes it
+                    row = true;
+                    rows.Add(Symbols.MutElement(p.Type)!);
+                    written.Add(Symbols.MutElement(p.Type)!);
+                    break;
+                case Symbols.ParamKind.Reduction: // a partial result of the pass (of each chunk in parallel), combined when it ends
+                    break;
                 case Symbols.ParamKind.Neighbor:
                     if (Symbols.Named(p.Type, Symbols.Entity)) break;
                     neighbor = true;
@@ -71,7 +82,7 @@ internal static class PairForm
                 case Symbols.ParamKind.Invalid: // EECS002 reports it (a [Neighbor] one too)
                     break;
                 default:
-                    return $"takes '{p.Name}': a pair method takes components of its row, [Neighbor] components (by 'in', or 'ref' to write them) and the neighbor's Entity, singletons and values";
+                    return $"takes '{p.Name}': a pair method takes components of its row (by 'in', 'ref' or Mut<T>), [Neighbor] components (by 'in', or 'ref' to write them) and the neighbor's Entity, singletons, values and Reduce<T>";
             }
         if (!row) return "takes no component of its row";
         if (!neighbor) return "takes no [Neighbor] component: the neighbors are the entities holding them";

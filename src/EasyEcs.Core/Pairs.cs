@@ -84,6 +84,19 @@ public interface IPairJob
     /// its row, after <see cref="Run"/> (after every chunk of a parallel pass, on the calling thread).
     /// </summary>
     void Stamp(in PairRun run);
+
+    /// <summary>
+    /// The job keeps partial results in its fields (<see cref="Reduce{T}"/>; default false): a parallel pass keeps each
+    /// chunk's copy of the job, every one from the job as the pass began, and combines them into the caller's job in
+    /// chunk order, the pairs of tables in order (<see cref="Merge{TSelf}"/>).
+    /// </summary>
+    static virtual bool Merges => false;
+
+    /// <summary>
+    /// Combine the partial results <paramref name="chunk"/> holds into <paramref name="job"/> (both of the job's own
+    /// type; <see cref="Merges"/>). Generated parallel jobs with <see cref="Reduce{T}"/> parameters implement it.
+    /// </summary>
+    static virtual void Merge<TSelf>(ref TSelf job, in TSelf chunk) where TSelf : struct { }
 }
 
 /// <summary>
@@ -201,6 +214,13 @@ public readonly ref struct PairRun
     /// <summary>Row 0 of the method's table's column of <typeparamref name="T"/> (a component of its filter). O(1).</summary>
     public ref T Rows<T>() where T : struct, IComponent => ref _table.Data<T>(_table.ColumnIndex(ComponentType<T>.Bit));
 
+    /// <summary>
+    /// The change-tick column of <typeparamref name="T"/> in the method's table, through which a <see cref="Mut{T}"/>
+    /// of row r (index r) stamps the row it writes (default for a component that does not track changes). Made once
+    /// per run, on one thread (a pair pass with a Mut&lt;T&gt; does not run in parallel). O(1).
+    /// </summary>
+    public MutColumn MutRows<T>() where T : struct, IComponent => MutColumn.Of<T>(_table, _world);
+
     /// <summary>Row 0 of the other table's column of <typeparamref name="T"/> (a component of the neighbors' filter). O(1).</summary>
     public ref T Others<T>() where T : struct, IComponent => ref _other.Data<T>(_other.ColumnIndex(ComponentType<T>.Bit));
 
@@ -290,6 +310,7 @@ public sealed partial class World
     {
         var state = BeginPairs<T, TOrder, TJob>(ref job, in rows, in neighbors, axes, out float reach);
         var work = WorkOf<PairChunks<TJob>>();
+        var start = job; // what each chunk's copy starts from: partial results at Identity
         bool froze = Gate.FreezeAlone();
         try
         {
@@ -299,10 +320,12 @@ public sealed partial class World
                 int perWord = 64 / run.ClusterSize, clusters = run.End;
                 int size = ChunkRows(work, (long)clusters * run.ClusterSize, 0) / run.ClusterSize;
                 size = (size + perWord - 1) / perWord * perWord;
-                work.Set(job, in run, size);
+                int chunks = (clusters + size - 1) / size;
+                work.Set(start, in run, size, chunks);
                 try
                 {
-                    RunChunks(work, (clusters + size - 1) / size); // one chunk runs here, timed now and then as any pass
+                    RunChunks(work, chunks); // one chunk runs here, timed now and then as any pass
+                    if (TJob.Merges) work.MergeInto(ref job, chunks); // in chunk order, after the pairs of tables before
                 }
                 finally
                 {
@@ -341,9 +364,11 @@ public sealed partial class World
         private int[] _starts, _ranges, _nearStarts, _near;
         private float[] _reach;
         private int _end, _size, _clusters;
+        private TJob[] _parts = []; // each chunk's copy of the job when it keeps partial results (Merges)
 
-        public void Set(TJob job, in PairRun run, int clusters)
+        public void Set(TJob job, in PairRun run, int clusters, int chunks)
         {
+            if (TJob.Merges && _parts.Length < chunks) _parts = new TJob[Math.Max(chunks, _parts.Length * 2)]; // warm-up only
             _job = job;
             (_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach, _nearStarts, _near) = run.Parts();
             _end = run.End;
@@ -356,6 +381,13 @@ public sealed partial class World
             var job = _job;
             int first = index * _clusters;
             job.Run(new PairRun(_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach, first, Math.Min(first + _clusters, _end), _size, _nearStarts, _near));
+            if (TJob.Merges) _parts[index] = job; // one chunk per index: no two threads write one element
+        }
+
+        /// <summary>Combine the chunks' partial results into <paramref name="job"/> in chunk order (row order).</summary>
+        public void MergeInto(ref TJob job, int chunks)
+        {
+            for (int i = 0; i < chunks; i++) TJob.Merge(ref job, in _parts[i]);
         }
 
         /// <summary>Drop the references of the last call until the next one.</summary>
@@ -367,6 +399,7 @@ public sealed partial class World
             _rows = _neighbors = null;
             _starts = _ranges = _nearStarts = _near = null;
             _reach = null;
+            if (TJob.Merges && RuntimeHelpers.IsReferenceOrContainsReferences<TJob>()) Array.Clear(_parts); // the copies hold the job's references
         }
     }
 
