@@ -34,6 +34,9 @@ names the skill:
 - [ ] **Fewer copies c + d** ("Next" items 12c and 12d, branch `feat-fewer-copies`): Permute swaps columns with a spare,
       incremental Capture / Restore, and fix-ci's restore cost won back.
 - [ ] **Generator crash on components from another assembly** ("Next" items 8b + 8d, branch `fix-kernel-foreign`).
+- [ ] **Tiles: ping-pong, padded halos, edges while stepping** ("Next" items 11 + 12a + 12b with 8c's tile gaps and
+      `voxel-rewrite.md` GA3 / GA10 / GA12, branch `feat-tiles-pingpong`). 8c's FillPool item went to the fewer-copies
+      branch (12d).
 
 Merged since the last update: the L2 leftovers (`feat-pairs-2`: parallel pairs, `[Neighbor] ref`, nested-walk
 rewrites, neighbor lists by cost, `Reduce<T>` / `Mut<T>` in pair methods, the cluster renames; the owner's M4 run of
@@ -51,11 +54,11 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 
 ## Next, in this order
 
-Agent slots as they free (at most 3): item 1, 8b and 12c + 12d (running), then 8c, 11 + 12a + 12b together (one tile
-branch: padded storage, ping-pong, zero rows, edges found while stepping), 12e, 9, 10, 4, 7, Later, then Finish.
-Read-only beside them (no slot): the VoxelServer plan refreshed (Finish step 2a).
+Agent slots as they free (at most 3): 8b + 8d, 12c + 12d and 11 + 12a + 12b (running, the last as one tile branch:
+padded storage, ping-pong, zero rows, edges found while stepping), then 8e, 12e, 9, 10, 4, 7, Later, then Finish.
+The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a).
 
-1. [ ] **L2: the generated pair form** (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
+1. [x] **L2: the generated pair form** (merged e9c3db8, `feat-pairs-2`; open: the owner's M4 run of PairListsBenchmark) (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
        the 8x8 (x86) / 4x4 (ARM64) cluster-pair kernel over L1's blocks with cutoff and self masks, and a nearest form
        (`NearestPlayer`, zombie targeting). Right after WP0b merges. Then L4: examples rewritten in it.
        The spread map (nearest 1.06-1.31x, bar 1.5x; owner 2026-10-27: a bar is not a ship gate, a gain beyond the noise
