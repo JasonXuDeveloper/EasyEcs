@@ -19,3 +19,13 @@ leave this file; it is not published on the site.
 - **Loads issued ahead on ARM64 without SVE** (the M4): not emitted: 1.7x slower than plain rows on x86 at 16M.
   Would change: the owner's M4 run of `LookupChaseLoadAheadBenchmark` showing LoadAhead faster than Rows at 16M and
   not slower at 1k (command in `backlog.md` item 6).
+
+## Streaming stores for write-only columns past the cache (2026-10-27, feat-microarch, `microarch.md` M3)
+
+Measured, not built. Non-temporal stores of a write-only column win 1.47x past the last-level cache (64M floats a
+column: 49.3 -> 33.4 ms) and tie inside it (`StreamingStoreBenchmark`, prototype `Locality/Streams.cs`). A generated
+loop could use them only for a column the method writes without reading, behind a gate on the column's bytes against
+`LastLevelCache`. Not done: few passes write a column without reading it, 64M-row tables are rare, and the next pass
+reading that column then misses the cache. What would change the verdict: a real world (VoxelServer terrain, a
+simulation's output buffers) with write-only columns past the cache.
+

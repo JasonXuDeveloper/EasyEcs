@@ -780,3 +780,41 @@ Docs to-dos (docs pass):
   Fixes (the lambda key lookup).
 - `api.mdx`: nothing; the new members are hidden for generated code (`LookupExtensions.Probes`,
   `LookupExtensions.PrefetchKey`: names for the owner to approve).
+
+## feat-microarch (M0-M3, `docs/plans/microarch.md` section 5)
+
+What shipped (code): two accumulator sets for floating-point reductions in the loop over whole vectors
+(`SystemGenerator.Paired`, `Kernel.Code.Chains`); the masked word's skip tested on the word's bits; the loops'
+tables initialized by a module initializer (`Interleaved.InitializeTables`, internal) so a runner compiled at Tier1
+before its table had holes reads them as constants; EECS055 / EECS056's reason for a bool field ends with the tag
+advice. Tools: `tools/loopbound.sh` (llvm-mca over the Tier1 loops). No new public name.
+
+Decision drafts (numbers in microarch.md, "Numbers"):
+- **Floating-point reductions run two vectors per iteration into two sets of accumulators.** Why: a float `+`, `Min`
+  or `Max` is a 3-4 cycle chain per vector, the only chain M0 found in the generated loops; two sets halve it
+  (llvm-mca, BDN). Considered: four sets (no better than two by the model: the loop becomes port bound), integer
+  reductions (a 1-cycle chain under a port bound of 1.5+: nothing to win), unrolling every loop (under 10 % by the
+  model, the body twice against the 32 locals). Exactness: Min / Max exact in any order; a float sum only under
+  FloatMode.Fast, whose order is the code's shape, never the thread count (D68, D125).
+- **The tables of the vector loops are initialized when EasyEcs loads.** Why: Tier1 code is compiled once; a runner
+  whose first calls ran no masked word was compiled before its tables' class was initialized and called the
+  class-initialization helper per vector forever after (LateHoles numbers). Considered: vectors of literals (the AOT
+  attempt reverted for the M4's numbers, backlog), reading the table into a local before the loop (more locals,
+  still one helper call per run). Native AOT unchanged (its own item).
+- **A bool field's scalar reason says to make a state a tag**, instead of a new rule: the method is already reported
+  once by EECS055 / EECS056; the advice is the ECS principle (data instead of flags).
+- **Dropped:** unrolling loops without a chain, hoisting the broadcast reloads, branchless scalar rows (the JIT keeps
+  a branch where PGO sees it biased; the generator does not rewrite users' statements), streaming stores and the
+  prefetcher-stream split (see microarch.md for the evidence of each).
+
+Docs pass:
+- performance / why-fast pages: "a floating-point reduction keeps two chains in flight" next to the reductions'
+  lanes; the LateHoles and Spread / Energy numbers through bench.json (`tools/bench.sh KernelBenchmark
+  LateHolesBenchmark --sync`).
+- reductions guide page (`Reduce<T>`): FloatMode.Fast's sum order now also depends on whether a run has two whole
+  vectors (still fixed by the code and the table's layout, never the thread count); Min / Max unchanged and exact;
+  en + zh.
+- analyzer page EECS055 / EECS056: the bool reason's new text in the example comment (the "(...)" form still fits);
+  en + zh.
+- `audit-vector-loops` skill: the masked skip form; `tools/loopbound.sh` as the way to read a loop's bound
+  (the coordinator edits skills).

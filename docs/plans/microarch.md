@@ -161,3 +161,91 @@ What M0 says:
   never compiled again: every later masked word pays the check. Any program whose table first has no holes and
   later gets some (a component removed in place, a `[Changed<T>]` filter) runs this code. It is the JIT side of the
   Native AOT item of `backlog.md` (a class-initialization check per iteration).
+
+### M1-M3: what shipped, what was dropped (2026-10-27)
+
+A/B: base = bbd5c8a with this branch's benchmark commit, head = the branch, frozen copies outside the repository;
+`--dev` screens first, then the default job, two rounds; every row 0 B. Tables: section "Numbers" below.
+
+**Shipped**
+
+- **M1 candidate 1, two accumulator sets for floating-point reductions** (`SystemGenerator.Paired`,
+  `Kernel.Code.Chains`). A float or double `+` (FloatMode.Fast), `Min` or `Max` reduction is the only chain M0 found.
+  Before the loop over whole vectors, a loop runs two vectors per iteration into a second set of those accumulators,
+  folded into the first after it (`a = a + b`, `Vector.Min(a, b)`); the loop over whole vectors takes the vector left.
+  Not in masked words (at most four vectors), nor where a vector may run the method (a bail, a lookup) or a wide
+  component, and only while the method stays within the 32 inlined locals (counted with the body twice). Integer
+  reductions keep one set (a 1-cycle chain under a port bound of 1.5 or more). Exactness: Min / Max are exact in
+  any order (Precise); a float sum is reordered only under FloatMode.Fast, which already reassociates it (D68), and
+  the order is fixed by the code's shape, never the thread count (D125). llvm-mca: Energy 4.1 -> 2.1 c/vector (Ice
+  Lake-SP), 3.1 -> 2.1 (Zen 4); four sets measured 6.8 c per 4 vectors, no better than two.
+- **M2 candidate 5, the masked skip on the word's bits**: a vector of a masked word none of whose rows pass is
+  skipped by `pass >> i << (64 - Count) == 0` before its lane mask is built, instead of a vector compare after it
+  (Integrate's masked loop 4.39 -> 4.06 c/it on Ice Lake-SP, 4.04 -> 3.22 on Zen 4). ARM64: the same integer test
+  (Count = 4).
+- **The Tier1 class-initialization finding, fixed for the JIT** (`Interleaved.InitializeTables`, a module
+  initializer running the class constructors of `Interleaved`, `Masks`, `Tables32` and `Tables64`): a runner compiled
+  at Tier1 before its table had holes no longer calls `CORINFO_HELP_GET_GCSTATIC_BASE` per vector of a masked word
+  (LateHoles: 0 such calls in the three runners' Tier1 code, from 6 per vector in Move2's). Native AOT is not
+  changed by it (its preinitialization decides there): the backlog item stays open for AOT.
+- **M2 candidate 6, "make it a tag"**: no rule existed. A method testing a component's bool field already stays
+  scalar with EECS055 (Info) "field X is a bool, not a lane type"; that reason now ends ": a state of some rows is a
+  tag the method filters on (With<T> / Without<T>), a value a byte", the advice of the EECS056 example of the
+  analyzer page and of the ECS principles (data instead of flags). No new rule id: the method is reported once, by the
+  rule that already finds it. A rule for an `if` on an enum field was not added: an enum of a lane type vectorizes,
+  its test is a mask per vector, not a branch per row, and no frequency of change can be read from the code.
+
+**Dropped (with the reason)**
+
+- **M1 candidate 2, unrolling loops without a chain**: M0 found no loop-carried chain but the float reductions; the
+  rest are port bound, and unrolling saves only the loop's own `add` / `cmp` / `jcc`, 1-2 uops of 7-10 in the shortest
+  loops: under 10 % by the model (bar 1.2x), at the cost of every body written twice against the 32 locals.
+- **M1 candidate 3, hoisting reloads**: the per-word copy of a whole-vector loop rebroadcasts its constant each
+  iteration, 2.09 against 2.10 c/it with it hoisted: nothing to win. The reload that cost was the class-init helper
+  (shipped above).
+- **M2 candidate 4, branchless scalar rows**: the generator calls the user's method for a scalar row and does not
+  rewrite its statements. The JIT's if-conversion keeps a branch whenever profile data says it is biased: on Tier1,
+  `if (hp.Value > hp.Max) hp.Value = hp.Max;`, `if (f.On) hp.Value += f.Bonus;` and even the ternary form all compile
+  to a `jg` / `jne` with the store in a cold block (listing of a probe, 2026-10-27), which is the right code for
+  predictable data. These shapes vectorize anyway (a select per vector) when their fields are lanes; a method that
+  stays scalar does so for another reason (a bool field: candidate 6, a call), which no branch rewrite changes.
+- **M3 candidate 8, streaming stores** (prototype `Locality/Streams.cs`, `StreamingStoreBenchmark`): a write-only
+  column `dst = src * k + c` with non-temporal stores against plain ones. Past the last-level cache (64M floats, two
+  256 MB columns against 260 MB) they win 1.47x (49.3 -> 33.4 ms, default job); in the cache (1M floats) they tie
+  (271 / 260 us). Not built into the generated loops: it pays only for a column the method writes without reading
+  (`p = new P { ... }` from other components), which most passes do not (`p.X += ...` loads the line anyway, and a
+  streaming store after that load only evicts it), and only for columns of 64M rows; a pass that writes such a
+  column also leaves it out of the cache for the next pass that reads it. What would change it: a world whose
+  write-only columns exceed the last-level cache (then a gate like the prefetch gate: `LastLevelCache`, the
+  column's bytes, the method's write-only set from Kernel). Recorded in `owner-review.md`.
+- **M3 candidate 9, the hardware prefetcher's streams**: a walk reads at most nine columns (the runners' arity, fused
+  walks included: a fused walk is one runner over the union of its methods' components) plus the presence and
+  change-tick words, under the 32 streams Intel's optimization manual gives its L2 streamer (one per 4 KB page):
+  no walk can exceed them, nothing to split. Not measured on Zen 4 or ARM64 (no machine): an item for the M4 if a
+  wide fused walk ever shows a drop there.
+- **M3 candidate 7, prefetching chases**: merged before this work (item 6 of the backlog), not redone.
+
+#### Numbers (BenchmarkDotNet default job, base / head, two rounds, every row 0 B)
+
+| Benchmark | Rows | Round 1 | | Round 2 | |
+|---|---|---|---|---|---|
+| Kernel EnergyGenerated (Fast float sum) | 1k | 153.8 / 124.1 ns | 0.81 | 146.3 / 126.0 ns | 0.86 |
+| Kernel EnergyGenerated | 100k | 10.21 / 6.92 us | 0.68 | 9.87 / 6.86 us | 0.70 |
+| Kernel SpreadGenerated (float Min + Max) | 1k | 348.9 / 284.9 ns | 0.82 | 374.8 / 281.6 ns | 0.75 |
+| Kernel SpreadGenerated | 100k | 20.61 / 10.82 us | 0.53 | 20.48 / 10.82 us | 0.53 |
+| LateHoles Move2 (masked words, Tier1 before holes) | 1k | 1,429 / 515 ns | 0.36 | 1,509 / 427 ns | 0.28 |
+| LateHoles Move2 | 100k | 211.9 / 49.9 us | 0.24 | 133.3 / 55.2 us | 0.41 |
+| LateHoles Move3 | 1k | 2,898 / 715 ns | 0.25 | 2,867 / 705 ns | 0.25 |
+| LateHoles Move3 | 100k | 316.6 / 91.0 us | 0.29 | 308.6 / 96.6 us | 0.31 |
+| LateHoles Step | 1k | 643 / 580 ns | 0.90 | 702 / 686 ns | 0.98 |
+| LateHoles Step | 100k | 71.1 / 67.0 us | 0.94 | 75.5 / 64.9 us | 0.86 |
+| StreamingStore Plain / NonTemporal (prototype, head) | 1M floats | 288.5 / 263.7 us | | 273.8 / 257.9 us | |
+| StreamingStore Plain / NonTemporal (prototype, head) | 64M floats | 49.35 / 34.18 ms | | 48.26 / 34.10 ms | |
+
+The other kernels, both rounds (head / base): Cycle 1.03 / 0.97 (1k), 1.01 / 1.03 (100k); CycleHoles 1.10 / 0.89,
+1.05 / 0.97; Clamp 1.18 / 0.96, 1.04 / 0.86; Halves 1.04 / 0.99, 0.93 / 1.02; Holes 1.01 / 0.90, 1.01 / 1.04;
+Integrate 1.06 / 1.07, 1.02 / 0.95; Move2Gaps 0.97 / 0.92, 1.03 / 0.96; Move3 1.06 / 1.08, 1.06 / 0.99; Push 1.05 /
+1.09, 0.94 / 1.09; Wealth 1.00 / 1.01, 0.97 / 1.04. No kernel slower in both rounds beyond the noise of the job
+(+-10 % at 1k rows); Move3 and Push at 1k (1.06-1.09) run the same 7-instruction loop on both sides (llvm-mca over
+both Tier1 listings: 2.1 c/it Ice Lake-SP, 1.6 Zen 4): the difference is outside the loop, in the runner's layout.
+Energy's 1.43-1.47x misses the plan's bar of 1.5x by a hair; Spread's 1.89x clears it.
