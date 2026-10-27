@@ -114,6 +114,13 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        Left, the owner's: `LookupChaseGateBenchmark` and the prefetch classes on a 32 MiB-LLC x86 box; the M4's
        loads-ahead pair (`LookupChaseLoadAheadBenchmark`, below); approve the hidden names `LookupExtensions.Probes`
        and `LookupExtensions.PrefetchKey`; a gate per form on the L2 (`owner-review.md`).
+   The owner's answers (2026-10-27): the hidden names `LookupExtensions.Probes` / `PrefetchKey` stay; SVE's PRFB stays
+   and the owner runs the CI workflow by hand on the work branch (its arm64 job is the proof; if it fails,
+   `Prefetching.IsSupported` keeps x86 only); **a gate per form now** (next code item, `audit-perf`): fused walks,
+   `DestroyEntities`' id list, parallel probes and buffer chases open past the L2 (forced on at 1M here: 18.1 -> 11.5,
+   3.96 -> 3.02, 5.54 -> 4.92, 41.6 -> 39.3 ms), plain probes keep the last-level gate (20.1 -> 23.0 ms forced on);
+   the L2 size read like the LLC (sysfs index2, `GetLogicalProcessorInformationEx`, `hw.perflevel0.l2cachesize`);
+   proven per form at the size between the L2 and the LLC, nothing slower in the L2.
    ARM64 without SVE (the M4; owner, 2026-10-26: "is there another instruction or the TLB instead?"): .NET 10 exposes
    no PRFM (only SVE's PRFB/PRFD, and the M4 has SVE in streaming mode only), so the candidate is a plain load issued
    ahead (`Locality/Chase.cs` `LoadAhead`: the record of row i + k loaded into a ring, the row touched from it k / 2
