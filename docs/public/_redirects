@@ -5,3 +5,9 @@
 
 # The rules file became the agent skill (skills/easyecs/SKILL.md): its old URL serves the skill's text.
 /easyecs-rules.md  https://raw.githubusercontent.com/JasonXuDeveloper/EasyEcs/master/skills/easyecs/SKILL.md  301
+
+# API reference pages of renamed types (the reference design's vocabulary, 2026-10-27).
+/en/docs/reference/idirectindexed  /en/docs/reference/idirectmapped  301
+/zh/docs/reference/idirectindexed  /zh/docs/reference/idirectmapped  301
+/en/docs/reference/tilereads       /en/docs/reference/tilestencil    301
+/zh/docs/reference/tilereads       /zh/docs/reference/tilestencil    301
