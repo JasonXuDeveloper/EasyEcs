@@ -20,6 +20,13 @@ public sealed class WorldSnapshot
     internal SingletonBox[] Singletons = [];
     internal int TypesRemoved;     // the world's World.TypesRemoved at the capture: its tables still exist while equal
 
+    // Whether the world held exactly these rows at its StorageVersion and Rewrites below (the last capture into it or
+    // restore from it): while both still match, no entity record or table row changed but values written since, so a
+    // capture or restore copies those alone (World.InSync).
+    internal bool Synced;
+    internal int StorageVersion;
+    internal int Rewrites;
+
     /// <summary>Alive entities in the snapshot.</summary>
     public int EntityCount { get; internal set; }
 }

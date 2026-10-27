@@ -6,8 +6,10 @@ using System.Threading;
 namespace EasyEcs;
 
 // Snapshots: copies of the entity records, every table's rows and the singletons, to roll a world back (prediction,
-// replays, tests, a turn that must be undone). Both directions are O(entities × components); nothing is shared with
-// the world, so the world keeps changing freely after a capture.
+// replays, tests, a turn that must be undone). Nothing is shared with the world, so the world keeps changing freely
+// after a capture. A snapshot remembers the world it was last made equal to (a capture into it, a restore from it):
+// while no structural change happened since, a capture into it or a restore from it copies only the rows of tracked
+// columns written since (change ticks) and untracked columns whole; else O(entities × components).
 public sealed partial class World
 {
     /// <summary>
@@ -20,7 +22,10 @@ public sealed partial class World
     /// <summary>
     /// <see cref="Capture()"/> into <paramref name="into"/> (a snapshot of this world, or null for a new one),
     /// overwriting it and reusing its arrays: capturing every tick (rollback, replays) allocates nothing once they are
-    /// large enough. Returns the snapshot.
+    /// large enough. When no table changed its rows since <paramref name="into"/> was last captured or restored, only
+    /// the rows of tracked components (<see cref="ITracked"/>, buffers) written since are copied, and untracked
+    /// components whole: O(rows written + rows × untracked components). Advances <see cref="ChangeTick"/>, so writes
+    /// after the capture are newer than it. Returns the snapshot.
     /// </summary>
     public WorldSnapshot Capture(WorldSnapshot into)
     {
@@ -31,19 +36,27 @@ public sealed partial class World
             ThrowIfIterating(nameof(Capture));
             FillDirtyTables(); // left by a pass an exception interrupted: tables are dense from here
             var snapshot = into ?? NewSnapshot();
-            Fit(ref snapshot.Meta, _nextId);
-            Meta.AsSpan(0, _nextId).CopyTo(snapshot.Meta);
-            snapshot.NextId = _nextId;
-            snapshot.TypesRemoved = TypesRemoved;
-            Fit(ref snapshot.FreeIds, _freeIdCount);
-            _freeIds.AsSpan(0, _freeIdCount).CopyTo(snapshot.FreeIds);
-            snapshot.FreeCount = _freeIdCount;
-            snapshot.EntityCount = _entityCount;
+            bool same = InSync(snapshot);
+            if (!same) // else the records and free ids are the snapshot's already
+            {
+                Fit(ref snapshot.Meta, _nextId);
+                Meta.AsSpan(0, _nextId).CopyTo(snapshot.Meta);
+                snapshot.NextId = _nextId;
+                snapshot.TypesRemoved = TypesRemoved;
+                Fit(ref snapshot.FreeIds, _freeIdCount);
+                _freeIds.AsSpan(0, _freeIdCount).CopyTo(snapshot.FreeIds);
+                snapshot.FreeCount = _freeIdCount;
+                snapshot.EntityCount = _entityCount;
+            }
 
             var tables = _allArchetypes;
             if (snapshot.Tables.Length < tables.Length) Array.Resize(ref snapshot.Tables, tables.Length);
-            for (int i = 0; i < tables.Length; i++) snapshot.Tables[i] = tables[i].Capture(snapshot.Tables[i]);
+            // Writes from here on are newer than the copies: the next capture into the snapshot or restore from it
+            // copies only what they wrote, though no update moved the tick between.
+            ulong synced = ++_changeTick;
+            for (int i = 0; i < tables.Length; i++) snapshot.Tables[i] = tables[i].Capture(snapshot.Tables[i], synced, Rewrites, same);
             snapshot.TableCount = tables.Length;
+            Synced(snapshot);
 
             if (snapshot.Singletons.Length < _singletons.Length) Array.Resize(ref snapshot.Singletons, _singletons.Length);
             for (int i = 0; i < snapshot.Singletons.Length; i++)
@@ -59,6 +72,30 @@ public sealed partial class World
         }
     }
 
+    /// <summary>
+    /// Whether the world holds the rows <paramref name="snapshot"/> was last made equal to (a capture into it, a restore
+    /// from it): no structural change (<see cref="StorageVersion"/>), load or table since. Then the entity records, free
+    /// ids and every table's rows are the snapshot's, and only values written since differ.
+    /// </summary>
+    private bool InSync(WorldSnapshot snapshot) =>
+        snapshot.Synced && snapshot.StorageVersion == StorageVersion && snapshot.Rewrites == Rewrites &&
+        snapshot.TableCount == _allArchetypes.Length && snapshot.TypesRemoved == TypesRemoved;
+
+    /// <summary>The world holds the rows of <paramref name="snapshot"/> now (<see cref="InSync"/>).</summary>
+    private void Synced(WorldSnapshot snapshot)
+    {
+        snapshot.Synced = true;
+        snapshot.StorageVersion = StorageVersion;
+        snapshot.Rewrites = Rewrites;
+    }
+
+    /// <summary>
+    /// Bumped by every change of rows a snapshot cannot see through change ticks or <see cref="StorageVersion"/>: a load
+    /// (its rows replace the tables' and its ticks are cleared or stamped anew). A snapshot copy made equal to its table
+    /// before is compared again only while it matches.
+    /// </summary>
+    internal int Rewrites;
+
     /// <summary>Make <paramref name="array"/> hold at least <paramref name="length"/> elements (grown, never shrunk).</summary>
     private static void Fit<T>(ref T[] array, int length)
     {
@@ -69,8 +106,12 @@ public sealed partial class World
     /// Put the world back to <paramref name="snapshot"/> (taken from this world). Handles of entities alive in the
     /// snapshot are valid again; every other handle is stale, also handles of entities created after the capture.
     /// Archetypes created after the capture stay, empty. Singletons keep their boxes (a <see cref="SingletonRef{T}"/>
-    /// still works) and get the snapshot's values; singletons added after the capture are removed.
-    /// O(entities × components + archetypes + singletons). Not while a pass iterates.
+    /// still works) and get the snapshot's values; singletons added after the capture are removed. A table that kept its
+    /// rows since the snapshot was last captured or restored gets back only the rows of tracked components written
+    /// since (and untracked components whole), and only those count as written (<see cref="ChangedAttribute{T}"/>);
+    /// any other table is rewritten, every row counting as written. Advances <see cref="ChangeTick"/>.
+    /// O(entities × components + archetypes + singletons), or O(rows written + rows × untracked components) when no
+    /// table changed its rows. Not while a pass iterates.
     /// </summary>
     public void Restore(WorldSnapshot snapshot) => Restore(snapshot, false, true, default, nameof(Restore));
 
@@ -92,36 +133,46 @@ public sealed partial class World
             // Tombstones left by a pass an exception interrupted are closed first, while the entity records still
             // match the rows: the tables are dense, so each buffer list a table drops belongs to the row it drops.
             FillDirtyTables();
-            // Entity records. Versions only grow: a recorded id keeps the snapshot's version if its entity was alive
-            // then (its old handles work again), else it moves past every version it ever had, so no handle made after
-            // the capture can match a later incarnation.
-            var saved = snapshot.Meta.AsSpan(0, snapshot.NextId);
-            if (Meta.Length < saved.Length) Grow(swap ? Math.Max(saved.Length, Meta.Length * 2) : saved.Length, true);
-            int used = Math.Max(_nextId, snapshot.NextId);
-            var log = _destroyLog;
-            for (int id = 0; id < used; id++)
+            // Unchanged since the snapshot was last made equal to the world: the records and free ids are its own, and
+            // the tables copy back only the values written since.
+            bool same = !swap && InSync(snapshot);
+            if (!same)
             {
-                ref var meta = ref Meta[id];
-                // An entity alive now that the snapshot does not hold (that incarnation) is destroyed by the restore.
-                if (log != null && meta.Archetype != null && (id >= saved.Length || saved[id].Archetype == null || saved[id].Version != meta.Version))
-                    LogDestroy(log, new EntityId(id, meta.Version));
-                if (id < saved.Length && saved[id].Archetype != null) meta = saved[id];
-                else meta = new EntityMeta { Version = Math.Max(meta.Version, id < saved.Length ? saved[id].Version : 0) + 1 };
+                // Entity records. Versions only grow: a recorded id keeps the snapshot's version if its entity was alive
+                // then (its old handles work again), else it moves past every version it ever had, so no handle made after
+                // the capture can match a later incarnation.
+                var saved = snapshot.Meta.AsSpan(0, snapshot.NextId);
+                if (Meta.Length < saved.Length) Grow(swap ? Math.Max(saved.Length, Meta.Length * 2) : saved.Length, true);
+                int used = Math.Max(_nextId, snapshot.NextId);
+                var log = _destroyLog;
+                for (int id = 0; id < used; id++)
+                {
+                    ref var meta = ref Meta[id];
+                    // An entity alive now that the snapshot does not hold (that incarnation) is destroyed by the restore.
+                    if (log != null && meta.Archetype != null && (id >= saved.Length || saved[id].Archetype == null || saved[id].Version != meta.Version))
+                        LogDestroy(log, new EntityId(id, meta.Version));
+                    if (id < saved.Length && saved[id].Archetype != null) meta = saved[id];
+                    else meta = new EntityMeta { Version = Math.Max(meta.Version, id < saved.Length ? saved[id].Version : 0) + 1 };
+                }
+
+                _nextId = used;
+                // Ids recorded free, then ids first used after the capture; LIFO takes the recorded ones first.
+                int free = snapshot.FreeCount + (used - snapshot.NextId);
+                if (_freeIds.Length < free) _freeIds = new int[swap ? Math.Max(free, _freeIds.Length * 2) : free];
+                for (int id = used - 1, i = 0; id >= snapshot.NextId; id--, i++) _freeIds[i] = id;
+                snapshot.FreeIds.AsSpan(0, snapshot.FreeCount).CopyTo(_freeIds.AsSpan(used - snapshot.NextId));
+                _freeIdCount = free;
+                _entityCount = snapshot.EntityCount;
             }
 
-            _nextId = used;
-            // Ids recorded free, then ids first used after the capture; LIFO takes the recorded ones first.
-            int free = snapshot.FreeCount + (used - snapshot.NextId);
-            if (_freeIds.Length < free) _freeIds = new int[swap ? Math.Max(free, _freeIds.Length * 2) : free];
-            for (int id = used - 1, i = 0; id >= snapshot.NextId; id--, i++) _freeIds[i] = id;
-            snapshot.FreeIds.AsSpan(0, snapshot.FreeCount).CopyTo(_freeIds.AsSpan(used - snapshot.NextId));
-            _freeIdCount = free;
-            _entityCount = snapshot.EntityCount;
-
+            // A table in sync stamps the rows it copies back (a restore counts as a write of what it changes) and moves
+            // none; the others are rewritten whole, every row stamped (or cleared, a load's).
             var tables = _allArchetypes;
+            bool moved = !same;
             for (int i = 0; i < tables.Length; i++)
             {
-                tables[i].Restore(i < snapshot.TableCount ? snapshot.Tables[i] : null, swap);
+                if (tables[i].Restore(i < snapshot.TableCount ? snapshot.Tables[i] : null, Rewrites, same, _changeTick, swap)) continue;
+                moved = true;
                 if (markWritten) tables[i].StampTracked(_changeTick);
                 else tables[i].ClearTracked();
             }
@@ -144,7 +195,24 @@ public sealed partial class World
                     Volatile.Write(ref _singletons[i], recorded.Clone());
                 }
 
-            StorageVersion++;
+            if (moved) StorageVersion++; // rows rewritten: passes refresh their refs (none run now) and snapshots compare rows
+            if (swap || !markWritten)
+            {
+                Rewrites++; // a load: rows no change tick tells apart, which no snapshot compares against again
+                return;
+            }
+
+            // The tables hold the snapshot's rows, stamped at this tick: writes from here on are newer, so the next
+            // capture into the snapshot or restore from it copies only what they wrote.
+            _changeTick++;
+            for (int i = 0; i < snapshot.TableCount; i++)
+                if (snapshot.Tables[i] is { } rows)
+                {
+                    rows.Synced = _changeTick;
+                    rows.Rewrites = Rewrites;
+                }
+
+            Synced(snapshot);
         }
     }
 

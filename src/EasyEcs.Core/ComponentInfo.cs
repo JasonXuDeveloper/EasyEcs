@@ -255,6 +255,14 @@ internal abstract class ComponentInfo
     public abstract void CopyRows(Array source, Array target, int count, bool swap = false, bool own = false);
 
     /// <summary>
+    /// Copy the rows <paramref name="rows"/> selects (bit i: row <paramref name="first"/> + i) of a managed column
+    /// between a table and a copy of it (an incremental capture or restore, <see cref="Archetype.Capture"/>): values,
+    /// and for <see cref="DynamicBuffer{T}"/> columns copies of the elements in a list of the target row's own
+    /// (<see cref="BufferStore.AssignOwn"/>), so neither side's next write copies a shared list.
+    /// </summary>
+    public abstract void CopyWritten(Array source, Array target, int first, ulong rows);
+
+    /// <summary>
     /// Rows [0, order.Length) of managed column <paramref name="column"/> in a new order: row <c>i</c> takes the value of
     /// row <c>order[i]</c> (a permutation). Values move, nothing is copied or shared (a buffer's list goes with its row).
     /// Through a buffer of the shared array pool: allocation-free in steady state.
@@ -446,6 +454,18 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
             ref var store = ref Unsafe.As<T, BufferStore>(ref rows[i]); // a DynamicBuffer's single field (see CopyRows)
             store?.Recycle();
             store = null;
+        }
+    }
+
+    public override void CopyWritten(Array source, Array target, int first, ulong rows)
+    {
+        var from = Unsafe.As<T[]>(source);
+        var to = Unsafe.As<T[]>(target);
+        for (; rows != 0; rows &= rows - 1)
+        {
+            int i = first + System.Numerics.BitOperations.TrailingZeroCount(rows);
+            if (default(T) is not IBuffer) to[i] = from[i]; // a JIT-time constant
+            else BufferStore.AssignOwn(ref Unsafe.As<T, BufferStore>(ref to[i]), Unsafe.As<T, BufferStore>(ref from[i]));
         }
     }
 
