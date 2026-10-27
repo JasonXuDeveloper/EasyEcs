@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.NeighborAttribute" source="d7e9cbab1ee5">
+    <summary>
+      把 <see cref="T:EasyEcs.ForEachAttribute">[ForEach]</see> 方法的一个参数标成一对中的另一个实体：方法对它的实体和持有
+      <c>[Neighbor]</c> 组件的实体的每一对运行一次（行自己的实体也持有这些组件时包括它自己，和对两边各写一层循环一样），生成器写出跳过
+      方法的距离判断排除的那些对的搜索。<c>[Neighbor]</c> 参数是按 <c>in</c> 取的组件，或邻居的 <see cref="T:EasyEcs.Entity" />。
+      <code>
+      [ForEach]
+      static void Separate(in Position p, ref Push push, [Neighbor] in Position other)
+      {
+          float dx = p.X - other.X, dy = p.Y - other.Y, d2 = dx * dx + dy * dy;
+          if (d2 &gt;= Range * Range || d2 == 0) return;          // the cutoff: farther pairs never run
+          push.X += (Range * Range - d2) * dx;
+          push.Y += (Range * Range - d2) * dy;
+      }
+      </code>
+      截断距离可以是行的值（<c>if (d2 &gt;= z.Vision * z.Vision) return;</c>），邻居也可以是和方法的实体不同的实体（由
+      <c>[Neighbor]</c> 组件决定）。含被比较组件的表按空间顺序保存行（从判断推断：
+      <see cref="M:EasyEcs.World.OrderRows``2(System.Int32,System.Single,System.Int32,System.Single,System.Int32)" />），遍历只拿一个窗口的行和截断距离以内的行比较，
+      方法符合条件时一条指令处理一个向量的行。一行的各对按表中行的顺序运行（不是实体的顺序）：保留最近邻居的方法按实体打破平局（较小的
+      <see cref="F:EasyEcs.EntityId.Index" /> 胜出），这样结果和顺序无关。
+    </summary>
+  </member>
+</doc>

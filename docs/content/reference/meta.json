@@ -65,6 +65,7 @@
     "maybe",
     "minattribute",
     "mut",
+    "neighborattribute",
     "notsavedattribute",
     "orderbyattribute",
     "orderedindexextensions",

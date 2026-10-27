@@ -31,6 +31,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`LookupKeyAttribute`](/zh/docs/reference/lookupkeyattribute) | 按它查找实体的键：World 用它给组件建索引（IIndexed），一个键可以对应多个实体（只对应一个时用 UniqueKeyAttribute）。 |
 | [`MaxAttribute`](/zh/docs/reference/maxattribute) | 归约中保留较大值的字段：Identity 是类型的 MinValue（float 和 double 是 -∞），Combine 是 Math.Max(left, right)。 |
 | [`MinAttribute`](/zh/docs/reference/minattribute) | 归约中保留较小值的字段：Identity 是类型的 MaxValue（float 和 double 是 +∞），Combine 是 Math.Min(left, right)。 |
+| [`NeighborAttribute`](/zh/docs/reference/neighborattribute) | 把 [ForEach] 方法的一个参数标成一对中的另一个实体：方法对它的实体和持有 [Neighbor] 组件的实体的每一对运行一次（行自己的实体也持有这些组件时包括它自己，和对两边各写一层循环一样），生成器写出跳过方法的距离判断排除的那些对的搜索。 |
 | [`NotSavedAttribute`](/zh/docs/reference/notsavedattribute) | 不进任何存档的组件或单例：重启时会重建的运行时状态（连接、缓存、服务句柄）。 |
 | [`OrderByAttribute`](/zh/docs/reference/orderbyattribute) | 每个 World 让这个组件的表按它排序的键，以及块的包围盒要罩住的点。 |
 | [`OrderedIndexExtensions`](/zh/docs/reference/orderedindexextensions) | 键可比较（分数、截止时间、等级）的值索引的有序遍历：按区间或按顺序遍历，用于排行榜、计时器和匹配分段。 |
