@@ -355,7 +355,7 @@ internal static class HandSimd
                     if (field.IsStatic || field.IsConst) continue;
                     if (!SymbolEqualityComparer.Default.Equals(field.Type, lane)) throw No(); // mixed field types: no flat lanes
                     // A positional record's field is its property's backing field: the method reads the property.
-                    ISymbol member = field.IsImplicitlyDeclared ? field.AssociatedSymbol ?? throw No() : field;
+                    ISymbol member = Symbols.Associated(field) ?? (field.IsImplicitlyDeclared ? throw No() : field);
                     if (!model.IsAccessible(syntax.SpanStart, member)) throw No();
                     fields.Add(member.Name);
                 }
@@ -838,7 +838,7 @@ internal static class HandSimd
                 case IFieldReferenceOperation { Field: var f, Instance: var instance }:
                     return f.IsStatic ? f.IsReadOnly || f.IsConst : instance != null && IsUniform(instance, reads);
                 case IPropertyReferenceOperation { Property: { IsStatic: false, IsIndexer: false } property, Instance: { } instance }
-                    when property.ContainingType.GetMembers().OfType<IFieldSymbol>().Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, property)):
+                    when Symbols.BackingField(property) != null:
                     return IsUniform(instance, reads); // an auto-property (a positional record's): a field
                 case IBinaryOperation { OperatorMethod: null } b:
                     return IsUniform(b.LeftOperand, reads) && IsUniform(b.RightOperand, reads);

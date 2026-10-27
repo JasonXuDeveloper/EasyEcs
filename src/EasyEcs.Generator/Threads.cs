@@ -238,8 +238,7 @@ internal static class Threads
 
     /// <summary>An auto-property declared in source: its backing field is the storage a write reaches.</summary>
     private static bool IsAutoProperty(IPropertySymbol property) =>
-        property.SetMethod != null && property.ContainingType.GetMembers().OfType<IFieldSymbol>()
-            .Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, property));
+        property.SetMethod != null && Symbols.BackingField(property) != null;
 
     /// <summary>A collection made for several threads (<c>System.Collections.Concurrent</c>, channels).</summary>
     private static bool ThreadSafe(ITypeSymbol? type) =>

@@ -242,7 +242,7 @@ public static partial class EasyEcsAnalyzer
                 // reset). A total sums the others ([Accumulate, Sum]: adding 0 keeps them), so they must be numbers.
                 var data = singleton.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic && !f.IsConst).ToList();
                 covers = data.Count == fields.Count;
-                if (!covers && data.Any(f => !Numeric(f.Type) && !fields.Any(a => SymbolEqualityComparer.Default.Equals(a.Field, f.AssociatedSymbol ?? f))))
+                if (!covers && data.Any(f => !Numeric(f.Type) && !fields.Any(a => SymbolEqualityComparer.Default.Equals(a.Field, Symbols.Associated(f) ?? f))))
                     continue;
             }
 
@@ -342,7 +342,7 @@ public static partial class EasyEcsAnalyzer
     {
         IFieldSymbol field => !field.IsStatic && !field.IsConst,
         IPropertySymbol property => !property.IsStatic && !property.IsIndexer && property.SetMethod != null
-                                    && property.ContainingType.GetMembers().OfType<IFieldSymbol>().Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, property)),
+                                    && Symbols.BackingField(property) != null,
         _ => false,
     };
 

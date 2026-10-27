@@ -110,6 +110,37 @@ internal static class Symbols
     }
 
     /// <summary>
+    /// The member <paramref name="field"/> stores: the auto-property (or field-like event) it backs, or null for a field of
+    /// its own. A source field carries the link (<see cref="IFieldSymbol.AssociatedSymbol"/>); a field read from metadata
+    /// does not (Roslyn ties only events there), so a backing field the compiler named <c>&lt;Name&gt;k__BackingField</c>
+    /// (a record struct's positional property, an auto-property of a referenced assembly) is matched to the property
+    /// <c>Name</c>. Every check that maps a field to its property goes through here, so a component of another assembly
+    /// is read as it is in source.
+    /// </summary>
+    public static ISymbol? Associated(IFieldSymbol field)
+    {
+        if (field.AssociatedSymbol is { } associated) return associated;
+        const string suffix = ">k__BackingField";
+        string name = field.Name;
+        if (name.Length <= suffix.Length + 1 || name[0] != '<' || !name.EndsWith(suffix, System.StringComparison.Ordinal)) return null;
+        string property = name.Substring(1, name.Length - suffix.Length - 1);
+        foreach (var member in field.ContainingType.GetMembers(property))
+            if (member is IPropertySymbol { IsIndexer: false } p && p.IsStatic == field.IsStatic) return p;
+        return null;
+    }
+
+    /// <summary>The name code uses for <paramref name="field"/>: its property's for a backing field, its own otherwise.</summary>
+    public static string MemberName(IFieldSymbol field) => Associated(field)?.Name ?? field.Name;
+
+    /// <summary>The field that backs <paramref name="property"/> (an auto-property), or null (a computed property).</summary>
+    public static IFieldSymbol? BackingField(IPropertySymbol property)
+    {
+        foreach (var member in property.ContainingType.GetMembers())
+            if (member is IFieldSymbol field && SymbolEqualityComparer.Default.Equals(Associated(field), property)) return field;
+        return null;
+    }
+
+    /// <summary>
     /// Whether the instance fields of <paramref name="type"/> come from more than one of its parts, so their order in
     /// memory is not defined. A part without fields (a generated [LookupKey] or [Sum] part, a part of methods) does not
     /// count: the generator sees the type without the generated parts and the analyzer with them, and both must agree.

@@ -157,7 +157,7 @@ internal static class Chases
                     at = instance;
                     break;
                 case IPropertyReferenceOperation { Property: { IsStatic: false, IsIndexer: false } prop, Instance: { } instance }
-                    when prop.ContainingType.GetMembers().OfType<IFieldSymbol>().Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, prop)):
+                    when Symbols.BackingField(prop) != null:
                     members.Add(prop.Name);
                     at = instance;
                     break;

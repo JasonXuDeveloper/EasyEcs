@@ -121,7 +121,7 @@ internal sealed partial class Kernel
                 : throw FixableReason($"'{Text(op)}' has an overload of its arity: write unit.Set(new {type.Name}(...))");
         var fields = type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray();
         if (fields.Length != change.Arguments.Length) throw FixableReason($"'{Text(op)}': write unit.Set(new {type.Name} {{ ... }})");
-        return $"new {t} {{ {string.Join(", ", fields.Select((f, i) => $"{f.AssociatedSymbol?.Name ?? f.Name} = {Scalar(change.Arguments[i])}"))} }}";
+        return $"new {t} {{ {string.Join(", ", fields.Select((f, i) => $"{Symbols.MemberName(f)} = {Scalar(change.Arguments[i])}"))} }}";
     }
 
     /// <summary>A uniform value as C#: <c>default</c>, <c>new T(...) { ... }</c> of uniform values, or a scalar.</summary>
@@ -160,7 +160,7 @@ internal sealed partial class Kernel
         if (fields.Length != 1) throw FixableReason($"it emits '{Text(record)}': {Shape()}; emit a record of one field, or emit in a [ForEach] method over a tag this one sets");
         if (value is IObjectCreationOperation { Constructor: { } ctor, Arguments.Length: 1, Initializer: null } creation)
         {
-            if (Assigns(ctor) is not { Length: 1 } member || member[0] is not { } assigned || !Is(assigned, fields[0])) throw FixableReason($"it emits '{Text(record)}', whose constructor does not set {(fields[0].AssociatedSymbol ?? fields[0]).Name} alone: {Shape()}");
+            if (Assigns(ctor) is not { Length: 1 } member || member[0] is not { } assigned || !Is(assigned, fields[0])) throw FixableReason($"it emits '{Text(record)}', whose constructor does not set {Symbols.MemberName(fields[0])} alone: {Shape()}");
             value = creation.Arguments[0].Value;
             while (value is IConversionOperation { Conversion.IsIdentity: true } c) value = c.Operand;
         }
@@ -175,7 +175,7 @@ internal sealed partial class Kernel
         }
 
         if (!IsLane(fields[0].Type) || !SymbolEqualityComparer.Default.Equals(fields[0].Type, value.Type))
-            throw FixableReason($"it emits '{Text(record)}': {Shape()}, and {(fields[0].AssociatedSymbol ?? fields[0]).Name} is a {fields[0].Type.ToDisplayString()}, not a lane of {LaneSizes} bytes");
+            throw FixableReason($"it emits '{Text(record)}': {Shape()}, and {Symbols.MemberName(fields[0])} is a {fields[0].Type.ToDisplayString()}, not a lane of {LaneSizes} bytes");
         string added = Expr(value);
         Live(_active, $"{emit}.AddLanes({added}, {lanes});\n");
     }

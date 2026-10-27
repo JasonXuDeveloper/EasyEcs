@@ -48,8 +48,8 @@ internal static class Prefabs
         var seen = new Dictionary<ITypeSymbol, IFieldSymbol>(SymbolEqualityComparer.Default);
         foreach (var field in Fields(declaration))
         {
-            ISymbol where = field.AssociatedSymbol ?? field;
-            if (field.AssociatedSymbol != null)
+            ISymbol where = Symbols.Associated(field) ?? field;
+            if (!SymbolEqualityComparer.Default.Equals(where, field))
                 return (where, $"declares '{where.Name}' as a property: declare each component as a field");
             if (field.RefKind != RefKind.None)
                 return (where, $"declares '{field.Name}' as a ref field: a prefab declaration holds values ([View] declares refs)");

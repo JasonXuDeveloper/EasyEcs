@@ -46,7 +46,7 @@ internal sealed partial class Kernel
         return result;
     }
 
-    private static string Names(IFieldSymbol[] path) => string.Join(".", path.Select(f => f.AssociatedSymbol?.Name ?? f.Name));
+    private static string Names(IFieldSymbol[] path) => string.Join(".", path.Select(Symbols.MemberName));
 
     /// <summary><paramref name="op"/>, a struct of lanes, as one vector per lane.</summary>
     private string?[] StructOf(IOperation op)
@@ -209,6 +209,22 @@ internal sealed partial class Kernel
                     ?? throw new Unsupported($"the parameter '{ctor.Parameters[i].Name}' of {type.Name}'s constructor sets no positional property");
             return assigned;
         }
+        // Metadata holds no body to read, nor a mark of a record's positional constructor: what a constructor of another
+        // assembly sets is not known, and a parameter named after a property proves nothing (the body may compute it).
+        if (syntax == null)
+        {
+            string reason = $"it calls {type.Name}'s constructor, which is declared in another assembly, so the fields it sets are not known";
+            // Fixable when every field can be set by name, through itself or its property: 'x with { F = ... }' says the same.
+            var settable = type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).Select(f => Symbols.Associated(f) switch
+            {
+                IPropertySymbol { SetMethod.DeclaredAccessibility: Accessibility.Public } property => property.Name,
+                null when f is { DeclaredAccessibility: Accessibility.Public, IsReadOnly: false } => f.Name,
+                _ => null,
+            }).ToArray();
+            if (settable.Length == 0 || settable.Any(n => n == null)) throw new Unsupported(reason);
+            string fields = string.Join(", ", settable.Select(n => $"{n} = ..."));
+            throw new Unsupported($"{reason}: set them by name instead ('new {type.Name} {{ {fields} }}', or 'with {{ {fields} }}')", true);
+        }
         if (syntax is not ConstructorDeclarationSyntax { Initializer: null } declaration || _compilation == null
             || _compilation.GetSemanticModel(declaration.SyntaxTree).GetOperation(declaration) is not IConstructorBodyOperation body)
             throw new Unsupported($"{type.Name}'s constructor is not declared in this compilation, so the fields it sets are not known");
@@ -220,7 +236,7 @@ internal sealed partial class Kernel
                 || Chain(target) is not (IInstanceReferenceOperation, { Length: 1 } chain)
                 || Unwrap(value) is not IParameterReferenceOperation { Parameter: var p }
                 || !SymbolEqualityComparer.Default.Equals(p.ContainingSymbol, ctor) || assigned[p.Ordinal] != null
-                || chain[0] is IPropertySymbol property && !type.GetMembers().OfType<IFieldSymbol>().Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, property)))
+                || chain[0] is IPropertySymbol property && Symbols.BackingField(property) == null)
                 throw new Unsupported($"{type.Name}'s constructor does more than set fields from its parameters ('{Text(statement)}')");
             assigned[p.Ordinal] = chain[0];
         }

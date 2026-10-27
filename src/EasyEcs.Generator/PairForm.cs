@@ -310,7 +310,7 @@ internal static class PairForm
                 }
                 // An auto-property (a positional record's): a field read, no code of its own.
                 else if (op is IPropertyReferenceOperation { Property: { IsStatic: false, Parameters.Length: 0 } property, Instance: { } owner }
-                         && property.ContainingType.GetMembers().OfType<IFieldSymbol>().Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, property)))
+                         && Symbols.BackingField(property) != null)
                 {
                     names.Insert(0, property.Name);
                     op = owner;
