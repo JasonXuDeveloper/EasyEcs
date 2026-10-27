@@ -30,33 +30,16 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **L1 ordered rows + blocks, L3 compress** (`locality.md` section 5; worktree `agent-aef3c58e0c81ecff5`, branch
-      `feat-locality-core`): a declared key orders a table's rows, re-sorted on a cadence (radix sort, one permutation
-      of every column under the gate, `StorageVersion`), a box per block of 8 rows and a read path (`RowBlocks`) for
-      the generated pair form; compress (AVX-512 CompressStore / AVX2 table / ARM64 TBL) replaces `Lanes.Compact` in
-      the core's callers (M4: today's `Lanes.Compact` is 2-2.5x slower than the TBL table at >=50 %, `locality.md` 6.3; the helper must win every cell); the prototypes' Vector128 / NEON paths are merged (eedfeb0, pushed). L1 gives systems an order they request at
-      setup (3.4), not only `[OrderBy]`; L3's compress is one core helper the generated loops call too. New EECS id for an invalid key; decision records; naming candidates to the owner.
-      Status: built and handed back (merged the work branch at a69a7d6; full suite 2825 passed, the ISA subsets and the
-      AOT check pass); decision records D137 / D138 drafted in docs-todos.md; the M4 rerun of CompressBenchmark is the
-      owner's.
-- [x] **Lookup gathers always on: not possible, stay on request** (merged after 932913f): no form beats rows when a
-      vector's targets spread over many tables (walk, 64-bit pinned addresses, micro-adaptive choice all measured,
-      D131 rewritten with the widened table and ARM64: rows there).
+- [ ] **CI fixes** (worktree `/workspace/wt-cifix`, branch `fix-ci`): DocCheck 318 -> 0 done (7cb13db); the VoxelServer
+      steady-state allocation (bisected to the feat-views merge 63130a2) and the EECS033 findings remain.
+- [ ] **Generated code tuned for the machine** ("Next" item 5, branch `feat-microarch`): M1 paired float accumulators,
+      M2 masked skip, the Tier1 class-init fix and a streaming-store prototype committed; A/B round 2 running.
+- [ ] **L2 leftovers** ("Next" item 1, branch `feat-pairs-2`): the open list of item 1.
 
-- [x] **AMAC prefetch for lookup chases, then batch probes re-measured at 16M keys** (`borrowed-ideas.md` item 1,
-      `locality.md` 6.3; branch `feat-amac`): bar met at 16M only (1.29-1.36x), short at 1M (1.04-1.22x, the 1M world
-      sits in this machine's 260 MiB L3), 1.9-2.3x slower at 1k: not built into the generated code. Prototype and the
-      two hidden core helpers kept for a re-measure with a size gate on the owner's machines (owner's call). Batch
-      probes: vertical forms dropped again (1.25-1.63x slower at 16M); scalar group prefetching 1.33x at 16M keys,
-      1.3-1.6x slower in cache, no batch probe API to put it in.
-
-- [ ] **Vector loops through the user's own calls** (worktree agent, branch `feat-call-inliner`; "Next" item 3).
-
-- [x] **Prefetch with a cache-size gate + the 16-word locals bug** (branch `feat-prefetch-gate`, ready to merge; "Next"
-      item 6): the 16-word row's `__Loop512` within 32 locals (or the reason, `Kernel.FitLocals`); lookup chases
-      prefetched past the last-level cache (`CacheSizes`, the row form's twin job `Job{i}Chases`, the vector loop's
-      `PrefetchAhead` behind `f{i}`): 16M rows 1.36-1.43x, gathers 1.27-1.34x, nothing slower in the cache
-      (`borrowed-ideas.md` 5, item 1). Docs to-dos and the decision draft in `docs-todos.md`.
+Merged since the last update: L1 ordered rows + L3 compress (`feat-locality-core`), the pair form
+(`feat-locality-pairs`), vector loops through the user's own calls (`feat-call-inliner`), the prefetch gate per form
+(`feat-prefetch-gate`, 216e29a: row chases, fused walks, buffer chases and `DestroyEntities` past the L2; probes and
+vector loops past the last-level cache).
 
 The owner's order (2026-10-26): every code change before any docs (generator cost and ARM64 parity included).
 CI runs the unit tests on ARM64 (b1dbdb0).
@@ -92,7 +75,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        strict: a rejected shape (the test's `Brake`, 8 words, 3 fields) gets a benchmark pair with the gate forced
        open, and the gate loosens if that form wins on the M4. Gathers stay rows (D131); compress comes with L3. The 16-word locals bug (a 3-field gather's
        `__Loop512` of 34 IL locals) is fixed on `feat-prefetch-gate` (the loop cut to 32; past it the 512 form is dropped).
-3. [ ] **Vector loops through the user's own calls** (running, see above) (owner: users should not have to avoid helpers): today a call
+3. [x] **Vector loops through the user's own calls** (merged, `feat-call-inliner`) (owner: users should not have to avoid helpers): today a call
        into user code keeps the method scalar (EECS055 "it calls X.Y"); only Math, the generated members (SetX / IsX
        ...), Emit.Add, Lookup reads and view members (Kernel.Views.cs, inlined from source, depth 8) are translated.
        Extend the view inliner to any callee whose source is in the compilation: static helpers, extension methods,
