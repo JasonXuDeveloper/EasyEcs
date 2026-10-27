@@ -41,7 +41,7 @@ public ref struct ScentStepSystem<TColor> where TColor : struct, IComponent
 
     // The color is a parameter, not [With<TColor>]: an attribute cannot name a type parameter (C# CS8968), and a tag
     // parameter filters the same. By day no zombie hunts (Hunt): the step changes nothing and the chunks sleep.
-    [ForEach(Parallel = true, ChunkRows = 64), With<Spreading>]
+    [ForEach(Parallel = true, ChunkSize = 64), With<Spreading>]
     [SkipLocalsInit]
     static void Step(in TColor color, in Hunt hunt, in Ground ground, Tile<Scent, Ground> scent, Tile<Footing, Ground> footing,
         Lookup<Footprint> footprints, Mut<DynamicBuffer<NextScent>> next, Mut<DynamicBuffer<Trail>> trail, ref ScentStep step)

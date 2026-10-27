@@ -12,7 +12,7 @@ public ref struct FootingSystem
 {
     const int Columns = Terrain.Size * Terrain.Size;
 
-    [ForEach(Parallel = true, ChunkRows = 64), ChangedAny<DynamicBuffer<Surface>, DynamicBuffer<Fluid>>]
+    [ForEach(Parallel = true, ChunkSize = 64), ChangedAny<DynamicBuffer<Surface>, DynamicBuffer<Fluid>>]
     static void Update(in DynamicBuffer<Surface> surface, in DynamicBuffer<Fluid> water, in FluidCount count,
         Mut<DynamicBuffer<Footing>> footing)
     {
