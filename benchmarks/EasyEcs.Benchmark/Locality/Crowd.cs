@@ -382,7 +382,7 @@ public static partial class Crowd
                 {
                     if (j == i) continue;
                     float dx = x[i] - x[j], dy = y[i] - y[j], d2 = dx * dx + dy * dy;
-                    if (d2 >= Range2) continue;
+                    if (d2 >= Range2 || d2 == 0) continue; // two rows at one point (16M random floats repeat one): the methods skip them as themselves
                     float w = Range2 - d2, tx = w * (dx + Drag * (vx[j] - vx[i])), ty = w * (dy + Drag * (vy[j] - vy[i]));
                     px += tx;
                     py += ty;
