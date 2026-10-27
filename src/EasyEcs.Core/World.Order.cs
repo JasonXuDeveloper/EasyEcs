@@ -24,7 +24,7 @@ public sealed partial class World
     /// a generated pair method calls for the component it compares positions of (the key the Morton code of the
     /// position, <paramref name="cell"/> the cutoff). The rows are sorted at the next update, then every
     /// <paramref name="interval"/> updates; between sorts a row may move <paramref name="margin"/> and stay inside its
-    /// cluster's box. A cluster holds <paramref name="clusterRows"/> rows: 0 for the machine's vector of floats (8 where
+    /// cluster's box. A cluster holds <paramref name="clusterSize"/> rows: 0 for the machine's vector of floats (8 where
     /// 256-bit vectors are hardware, 4 on ARM64), or a power of two up to 64. The first request for a component stands; <see cref="OrderByAttribute">[OrderBy]</see> on it
     /// overrides every request; a table holding several ordered components keeps one of their orders. A table
     /// no request or declaration orders pays nothing. Owner thread, between passes (throws during one). O(tables);
@@ -32,17 +32,17 @@ public sealed partial class World
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">An axis count above 3, a cell that is not a finite size above 0, an interval below 1, a margin that is not a finite distance of 0 or more, or a cluster size that is neither 0 nor a power of two up to 64.</exception>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public void OrderRows<T, TOrder>(int axes, float cell, int interval, float margin, int clusterRows = 0)
+    public void OrderRows<T, TOrder>(int axes, float cell, int interval, float margin, int clusterSize = 0)
         where T : struct, IComponent where TOrder : struct, IRowOrder<T>
     {
         if (_disposed) throw new ObjectDisposedException(nameof(World));
         ThrowIfIterating(nameof(OrderRows));
-        RowOrder.Check(axes, cell, interval, margin, clusterRows);
+        RowOrder.Check(axes, cell, interval, margin, clusterSize);
         int bit = ComponentType<T>.Bit;
         _orderRequests ??= [];
         if (bit >= _orderRequests.Length) Array.Resize(ref _orderRequests, Math.Max(bit + 1, _orderRequests.Length * 2));
         if (_orderRequests[bit] != null) return;
-        _orderRequests[bit] = () => new RowOrder<T, TOrder>(axes, cell, interval, margin, clusterRows);
+        _orderRequests[bit] = () => new RowOrder<T, TOrder>(axes, cell, interval, margin, clusterSize);
         if (ComponentInfo.Of(bit).Defaults?.Order != null) return; // [OrderBy] orders its tables already
         foreach (var table in _allArchetypes)
             if (table.Order == null && table.ColumnIndex(bit) >= 0)

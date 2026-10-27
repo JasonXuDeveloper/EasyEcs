@@ -81,7 +81,7 @@ public interface IPairJob
 
 /// <summary>
 /// One table's rows (the method's own) against one table's rows (the neighbors': the same table or another) for a pair
-/// job (<see cref="IPairJob.Run"/>): clusters of <see cref="Size"/> rows of the first, each with the rows of the
+/// job (<see cref="IPairJob.Run"/>): clusters of <see cref="ClusterSize"/> rows of the first, each with the rows of the
 /// other to visit (<see cref="Ranges"/>), every other row farther than the cutoff from all of the cluster's.
 /// Valid during the call it is passed to.
 /// </summary>
@@ -112,9 +112,9 @@ public readonly ref struct PairRun
     }
 
     /// <summary>Rows per cluster: a vector of floats (8 where 256-bit vectors are hardware, 4 on ARM64).</summary>
-    public int Size => _size;
+    public int ClusterSize => _size;
 
-    /// <summary>The first cluster of the method's table this run covers: row <c>w * Size</c> starts cluster w.</summary>
+    /// <summary>The first cluster of the method's table this run covers: row <c>w * ClusterSize</c> starts cluster w.</summary>
     public int First => _first;
 
     /// <summary>The cluster after the last this run covers (the table's cluster count, or a chunk's end).</summary>
@@ -128,14 +128,14 @@ public readonly ref struct PairRun
 
     /// <summary>
     /// The rows of cluster <paramref name="cluster"/> the method runs for, one bit per row from its first (row
-    /// <c>cluster * Size</c>): rows of the table that pass the method's filter. A whole cluster is
-    /// <c>(1 &lt;&lt; Size) - 1</c>. O(1).
+    /// <c>cluster * ClusterSize</c>): rows of the table that pass the method's filter. A whole cluster is
+    /// <c>(1 &lt;&lt; ClusterSize) - 1</c>. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ulong Lanes(int cluster)
     {
         int row = cluster * _size;
-        // _rows holds a word per 64 rows of every cluster (Size divides 64): in bounds for every cluster.
+        // _rows holds a word per 64 rows of every cluster (ClusterSize divides 64): in bounds for every cluster.
         ulong word = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_rows), row >> 6);
         return (word >> (row & 63)) & (ulong.MaxValue >> (64 - _size));
     }
@@ -152,12 +152,12 @@ public readonly ref struct PairRun
     }
 
     /// <summary>
-    /// The reach of cluster <paramref name="cluster"/> this pass: the largest cutoff of its rows, a little over it (never
+    /// The cutoff of cluster <paramref name="cluster"/> this pass: the largest cutoff of its rows, a little over it (never
     /// below: a pair farther than it fails the method's test), infinity without a cutoff. The method per pair skips the
     /// neighbors past it without a call. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public float Reach(int cluster) => _reach[cluster];
+    public float Cutoff(int cluster) => _reach[cluster];
 
     /// <summary>Some rows of the other table fail the neighbors' filter: <see cref="Skip"/> tells which.</summary>
     public bool Skips => _neighbors != null;
@@ -266,8 +266,8 @@ public sealed partial class World
             while (state.Next<T, TOrder, TJob>(this, ref job, axes, reach, out var run))
             {
                 // Chunks of whole words of rows: a chunk's rows never share a presence or tick word with another's.
-                int perWord = 64 / run.Size, clusters = run.End;
-                int size = ChunkRows(work, (long)clusters * run.Size, 0) / run.Size;
+                int perWord = 64 / run.ClusterSize, clusters = run.End;
+                int size = ChunkRows(work, (long)clusters * run.ClusterSize, 0) / run.ClusterSize;
                 size = (size + perWord - 1) / perWord * perWord;
                 work.Set(job, in run, size);
                 try
@@ -317,7 +317,7 @@ public sealed partial class World
             _job = job;
             (_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach) = run.Parts();
             _end = run.End;
-            _size = run.Size;
+            _size = run.ClusterSize;
             _clusters = clusters;
         }
 
@@ -494,7 +494,7 @@ internal sealed class PairState
             bool skips = otherMode == RowFilter.Test || other.Count != other.AliveCount;
             if (skips) Passing(other, otherFilter, otherMode, ref _neighbors);
             var list = ListOf(own, their);
-            run = new PairRun(world, own.Table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.Reach, 0, own.ClusterCount, size);
+            run = new PairRun(world, own.Table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.Cutoff, 0, own.ClusterCount, size);
             return true;
         }
     }
@@ -520,14 +520,14 @@ internal sealed class PairState
 
     /// <summary>
     /// Each cluster's reach of <paramref name="clusters"/> (the largest of its passing rows' cutoffs; every row's
-    /// <paramref name="reach"/> unless NaN: a cutoff per row), into <see cref="Clusters.Reach"/>; true when one grew past
+    /// <paramref name="reach"/> unless NaN: a cutoff per row), into <see cref="Clusters.Cutoff"/>; true when one grew past
     /// its kept reach. O(rows).
     /// </summary>
     private bool Reaches<TJob>(World world, ref TJob job, Clusters clusters, float reach) where TJob : struct, IPairJob, allows ref struct
     {
         var table = clusters.Table;
         int count = table.Count, size = clusters.Size, n = clusters.ClusterCount;
-        var reaches = clusters.Reach;
+        var reaches = clusters.Cutoff;
         float largest = 0;
         if (!float.IsNaN(reach))
         {
@@ -556,7 +556,7 @@ internal sealed class PairState
             if (float.IsNaN(_margin)) _margin = largest * MarginShare;
         }
 
-        var kept = clusters.KeptReach;
+        var kept = clusters.KeptCutoff;
         for (int w = 0; w < n; w++)
             if (reaches[w] > kept[w]) return true;
         return false;
@@ -660,7 +660,7 @@ internal sealed class PairState
         for (int i = 0; i < na; i++)
             if (a.Low[i] <= a.High[i]) // an inverted box holds no row
             {
-                _keys[m] = a.Low[i] - a.KeptReach[i];
+                _keys[m] = a.Low[i] - a.KeptCutoff[i];
                 _ids[m++] = i;
             }
 
@@ -682,7 +682,7 @@ internal sealed class PairState
             int id = _ids[k];
             var w = id >= 0 ? a : b;
             int i = id >= 0 ? id : ~id, c = w.Capacity;
-            float r = id >= 0 ? a.KeptReach[i] : 0;
+            float r = id >= 0 ? a.KeptCutoff[i] : 0;
             high0[k] = w.High[i] + r;
             low1[k] = axes > 1 ? w.Low[c + i] - r : 0;
             high1[k] = axes > 1 ? w.High[c + i] + r : 0;
@@ -762,7 +762,7 @@ internal sealed class PairState
         public bool Kept, Escapes;
         public int Count, Size, ClusterCount, Builds, Passes, Pass, Axes, Capacity;
         public long Version;
-        public float[] Low = [], High = [], Reach = [], KeptReach = [];
+        public float[] Low = [], High = [], Cutoff = [], KeptCutoff = [];
         private float[] _low = [], _high = [];
 
         public void Reserve(int clusters)
@@ -774,8 +774,8 @@ internal sealed class PairState
             High = new float[3 * capacity];
             _low = new float[3 * capacity];
             _high = new float[3 * capacity];
-            Reach = new float[capacity];
-            KeptReach = new float[capacity];
+            Cutoff = new float[capacity];
+            KeptCutoff = new float[capacity];
             Capacity = capacity;
             Kept = false;
         }
@@ -850,7 +850,7 @@ internal sealed class PairState
                     High[k * c + w] = _high[k * c + w] + margin;
                 }
 
-            Array.Copy(Reach, KeptReach, clusters);
+            Array.Copy(Cutoff, KeptCutoff, clusters);
             Kept = true;
             Builds++;
         }

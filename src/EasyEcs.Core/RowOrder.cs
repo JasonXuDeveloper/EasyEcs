@@ -139,10 +139,10 @@ internal abstract class RowOrder
     /// coordinates in one register per axis: 8 where 256-bit vectors are hardware (8 x 8 pairs of clusters), else 4
     /// (ARM64's NEON: 4 x 4). Decision D137 has the measurement against 16.
     /// </summary>
-    public static int DefaultClusterRows => Vector256.IsHardwareAccelerated ? 8 : 4;
+    public static int DefaultClusterSize => Vector256.IsHardwareAccelerated ? 8 : 4;
 
     /// <summary>Rows per cluster of this order: a power of two from 1 to 64.</summary>
-    public readonly int ClusterRows;
+    public readonly int ClusterSize;
 
     private static int _instances;
 
@@ -178,9 +178,9 @@ internal abstract class RowOrder
 
     public int BoxCapacity;
 
-    protected RowOrder(ushort bit, int axes, float cell, int interval, float margin, int clusterRows)
+    protected RowOrder(ushort bit, int axes, float cell, int interval, float margin, int clusterSize)
     {
-        ClusterRows = clusterRows == 0 ? DefaultClusterRows : clusterRows;
+        ClusterSize = clusterSize == 0 ? DefaultClusterSize : clusterSize;
         Bit = bit;
         Axes = axes;
         Cell = cell;
@@ -189,18 +189,18 @@ internal abstract class RowOrder
     }
 
     /// <summary>Throws for an order no table can keep (cold: a request or a registration).</summary>
-    public static void Check(int axes, float cell, int interval, float margin, int clusterRows)
+    public static void Check(int axes, float cell, int interval, float margin, int clusterSize)
     {
-        if (clusterRows != 0 && (clusterRows > 64 || !BitOperations.IsPow2(clusterRows)))
-            throw new ArgumentOutOfRangeException(nameof(clusterRows), clusterRows, "A cluster holds a power of two of rows up to 64, or 0 for the machine's");
+        if (clusterSize != 0 && (clusterSize > 64 || !BitOperations.IsPow2(clusterSize)))
+            throw new ArgumentOutOfRangeException(nameof(clusterSize), clusterSize, "A cluster holds a power of two of rows up to 64, or 0 for the machine's");
         if ((uint)axes > 3) throw new ArgumentOutOfRangeException(nameof(axes), axes, "A box covers up to 3 axes");
         if (!(cell > 0) || float.IsInfinity(cell)) throw new ArgumentOutOfRangeException(nameof(cell), cell, "A cell is a finite size above 0");
         if (interval < 1) throw new ArgumentOutOfRangeException(nameof(interval), interval, "Rows are sorted every 1 update or more");
         if (!(margin >= 0) || float.IsInfinity(margin)) throw new ArgumentOutOfRangeException(nameof(margin), margin, "A margin is a finite distance, 0 or more");
     }
 
-    /// <summary>Clusters over the sorted rows (the last one may hold fewer than <see cref="ClusterRows"/>).</summary>
-    public int ClusterCount => (SortedRows + ClusterRows - 1) / ClusterRows;
+    /// <summary>Clusters over the sorted rows (the last one may hold fewer than <see cref="ClusterSize"/>).</summary>
+    public int ClusterCount => (SortedRows + ClusterSize - 1) / ClusterSize;
 
     /// <summary>Changes whenever the clusters do (a sort, a widened box, fewer sorted rows), unique across tables.</summary>
     public long Version => (long)_id << 32 | (uint)_changes;
@@ -272,8 +272,8 @@ internal abstract class RowOrder
 }
 
 /// <summary>The order of a table by <typeparamref name="T"/>, its key and point read by <typeparamref name="TOrder"/>.</summary>
-internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, float margin, int clusterRows)
-    : RowOrder(ComponentType<T>.Bit, axes, cell, interval, margin, clusterRows) where T : struct, IComponent where TOrder : struct, IRowOrder<T>
+internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, float margin, int clusterSize)
+    : RowOrder(ComponentType<T>.Bit, axes, cell, interval, margin, clusterSize) where T : struct, IComponent where TOrder : struct, IRowOrder<T>
 {
     public override bool Sort(Archetype table, EntityMeta[] meta)
     {
@@ -362,7 +362,7 @@ internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, fl
     /// <summary>The box of every cluster over the points of its rows that have the component, widened by the margin.</summary>
     private void Draw(Archetype table, int column)
     {
-        int n = table.Count, clusters = (n + ClusterRows - 1) / ClusterRows;
+        int n = table.Count, clusters = (n + ClusterSize - 1) / ClusterSize;
         Reserve(clusters);
         if (Axes == 0) return;
         ref T row0 = ref table.Data<T>(column);
@@ -373,7 +373,7 @@ internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, fl
         {
             var low = new Vector3(float.PositiveInfinity);
             var high = new Vector3(float.NegativeInfinity);
-            for (int row = b * ClusterRows, end = Math.Min(row + ClusterRows, n); row < end; row++)
+            for (int row = b * ClusterSize, end = Math.Min(row + ClusterSize, n); row < end; row++)
             {
                 if (present != null && (present[row >> 6] >> row & 1) == 0) continue;
                 var point = TOrder.Point(in Unsafe.Add(ref row0, row));
@@ -398,7 +398,7 @@ internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, fl
         int column = table.ColumnIndex(Bit);
         if (Axes == 0 || !table.Has(column, row)) return;
         var p = TOrder.Point(in Unsafe.Add(ref table.Data<T>(column), row));
-        int cluster = row / ClusterRows;
+        int cluster = row / ClusterSize;
         for (int a = 0; a < Axes; a++)
         {
             ref float low = ref Boxes[a * BoxCapacity + cluster];

@@ -124,7 +124,7 @@ public sealed partial class SystemGenerator
 
         sb.Append("        public void Run(in global::EasyEcs.PairRun run)\n        {\n");
         if (pair.Simd is { } guarded)
-            sb.Append($"            if ({vector}.IsHardwareAccelerated && run.Size == {vector}<float>.Count{(guarded.Interleaves ? " && global::EasyEcs.Interleaved.IsAccelerated" : "")}) Vectors(in run);\n            else Rows(in run);\n");
+            sb.Append($"            if ({vector}.IsHardwareAccelerated && run.ClusterSize == {vector}<float>.Count{(guarded.Interleaves ? " && global::EasyEcs.Interleaved.IsAccelerated" : "")}) Vectors(in run);\n            else Rows(in run);\n");
         else sb.Append("            Rows(in run);\n");
         sb.Append("        }\n\n");
         sb.Append("        public void Stamp(in global::EasyEcs.PairRun run)\n        {\n");
@@ -160,10 +160,10 @@ public sealed partial class SystemGenerator
         sb.Append("        private void Rows(in global::EasyEcs.PairRun run)\n        {\n");
         sb.Append(Columns("            "));
         sb.Append("            bool skips = run.Skips;\n");
-        sb.Append("            for (int w = run.First, size = run.Size; w < run.End; w++)\n            {\n");
+        sb.Append("            for (int w = run.First, size = run.ClusterSize; w < run.End; w++)\n            {\n");
         sb.Append("                ulong lanes = run.Lanes(w);\n                if (lanes == 0) continue;\n");
         sb.Append("                var ranges = run.Ranges(w);\n");
-        if (prune) sb.Append("                float reach = run.Reach(w), reach2 = reach * reach;\n");
+        if (prune) sb.Append("                float reach = run.Cutoff(w), reach2 = reach * reach;\n");
         sb.Append("                for (; lanes != 0; lanes &= lanes - 1)\n                {\n");
         sb.Append("                    nint i = (nint)w * size + global::System.Numerics.BitOperations.TrailingZeroCount(lanes);\n");
         if (prune) sb.Append($"                    ref readonly {t} at = ref {unsafeType}.Add(ref r{rowPoint}, i);\n");

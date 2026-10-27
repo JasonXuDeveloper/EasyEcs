@@ -39,7 +39,7 @@ public readonly ref struct RowClusters
     /// Rows per cluster (the last cluster of <see cref="SortedRows"/> may hold fewer): the order's, by default a vector of
     /// floats, 8 where 256-bit vectors are hardware and 4 otherwise (ARM64). O(1).
     /// </summary>
-    public int Size => _order?.ClusterRows ?? RowOrder.DefaultClusterRows;
+    public int Size => _order?.ClusterSize ?? RowOrder.DefaultClusterSize;
 
     /// <summary>Clusters: <c>ceil(SortedRows / Size)</c>; 0 for a table without an order. O(1).</summary>
     public int Count => _order?.ClusterCount ?? 0;
