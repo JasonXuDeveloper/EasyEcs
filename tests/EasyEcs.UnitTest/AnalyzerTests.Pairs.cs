@@ -110,6 +110,24 @@ public partial class AnalyzerTests
         Assert.That(found[0].Properties.ContainsKey("PairBody"), Is.EqualTo(fixable));
     }
 
+    // A walk of a query of other entities inside a [ForEach] method: the same pairs as the pair method, so a Warning
+    // with the fix when mechanical.
+    [TestCase("foreach (var o in world.Read<Spot, Drift>()) { float dx = p.X - o.Component1.X; if (dx * dx >= 1) continue; n.Value += (int)o.Component2.X; }", true)]
+    [TestCase("foreach (var o in world.Read<Spot, Drift>()) { float dx = p.X - o.Spot.X; if (dx * dx >= 1) continue; n.Value += (int)o.Drift.X; }", true)] // the generated item members
+    [TestCase("foreach (var o in world.Read<Spot>()) { ref readonly var q = ref o.Component1; if (o.Entity.Id == self.Id) continue; float dx = p.X - q.X, dy = p.Y - q.Y; if (dx * dx + dy * dy >= 1) continue; n.Value++; }", true)] // the self skip after a bound local
+    [TestCase("foreach (var o in world.Query<Spot>()) { float dx = p.X - o.Component1.X; if (dx * dx >= 1) continue; o.Component1.Y = 0; }", false)] // writes the neighbor
+    [TestCase("foreach (var o in world.Read<Spot>(QueryFilter.Create().With<Near>())) { float dx = p.X - o.Component1.X; if (dx * dx >= 1) continue; n.Value++; }", false)] // a filter
+    [TestCase("for (int k = 0; k < 2; k++) foreach (var o in world.Read<Spot>()) { float dx = p.X - o.Component1.X; if (dx * dx >= 1) continue; n.Value++; }", false)] // walked twice
+    [TestCase("int seen = 0; foreach (var o in world.Read<Spot>()) { float dx = p.X - o.Component1.X; if (dx * dx >= 1) continue; seen++; } n.Value = seen;", false)] // a total after the walk
+    public async Task QueryWalksWarnWithTheirFixOnlyWhenMechanical(string body, bool fixable)
+    {
+        string source = "[EcsSystem] public ref struct S { [ForEach] static void A(Entity self, in Spot p, ref Near n, World world) { " + body + " } }";
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, PairParts, source])).Where(d => d.Id == "EECS107").ToArray();
+        Assert.That(found, Has.Length.EqualTo(1));
+        Assert.That(found[0].Severity, Is.EqualTo(fixable ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info), found[0].GetMessage());
+        Assert.That(found[0].Properties.ContainsKey("PairBody"), Is.EqualTo(fixable));
+    }
+
     [TestCase("foreach (var id in g.Ids) { ref readonly var q = ref drifts.Read(id); float dx = p.X - q.X; if (dx * dx >= 1) continue; n.Value++; }")] // another component's read
     [TestCase("ref readonly var q = ref spots.Read(g.Ids[0]); float dx = p.X - q.X; if (dx * dx >= 1) return; n.Value++;")]                              // no loop: one other entity
     [TestCase("foreach (var id in g.Ids) { ref readonly var q = ref spots.Read(id); n.Value += (int)q.X; }")]                                             // no distance test

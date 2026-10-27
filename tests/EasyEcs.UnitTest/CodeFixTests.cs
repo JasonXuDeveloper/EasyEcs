@@ -459,6 +459,11 @@ public class CodeFixTests
         + "foreach (var id in g.Ids) { float dx = p.X - spots.Read(id).X, dy = p.Y - spots.Read(id).Y, d2 = dx * dx + dy * dy; "
         + "if (d2 >= s.Range * s.Range || d2 >= prey.D2) continue; prey = new Prey(id, d2); } } }",
         "static void A(in Spot p, in Sight s, ref Prey prey, [Neighbor] in Spot spot, [Neighbor] Entity other) {\n    float dx = p.X - spot.X, dy = p.Y - spot.Y, d2 = dx * dx + dy * dy; if (d2 >= s.Range * s.Range || d2 >= prey.D2) return; prey = new Prey(other.Id, d2);\n}")]
+    [TestCase("EECS107", "Make it a pair method",                                                                          // a walk of a query, the self skip, an unread component
+        AnalyzerTests.PairParts + "\n[EcsSystem] public ref struct S { [ForEach] static void A(Entity self, in Spot p, ref Near n, World world) { "
+        + "foreach (var o in world.Read<Spot, Drift>()) { if (o.Entity.Id == self.Id) continue; float dx = p.X - o.Component1.X, dy = p.Y - o.Component1.Y; "
+        + "if (dx * dx + dy * dy >= 1) continue; n.Value += o.Entity.Id.Index; } } }",
+        "static void A(Entity self, in Spot p, ref Near n, [Neighbor] in Spot spot, [Neighbor] in Drift drift, [Neighbor] Entity other) {\n    float dx = p.X - spot.X, dy = p.Y - spot.Y; if (dx * dx + dy * dy >= 1 || other.Id == self.Id) return; n.Value += other.Id.Index;\n}")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
