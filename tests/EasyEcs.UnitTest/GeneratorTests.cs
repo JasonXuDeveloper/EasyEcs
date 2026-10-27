@@ -157,6 +157,14 @@ public class GeneratorTests
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }",
         "[ForEach] static void A(Tile<byte, G> t, ref P p) => p.V = t.Cells.Length;",
         "public global::EasyEcs.TileNeighbors n0;", "(k0, entity, out n0);", "new global::EasyEcs.Tile<byte, global::G>(entity, in n0)")]
+    // A pair method: the pass orders and pairs the neighbors' tables (2 axes), the cutoff read from its test, a vector loop
+    // of a window of rows against each neighbor; with the neighbor's entity, one pair at a time.
+    [TestCase("public struct Fp : IComponent { public float X, Y; }",
+        "[ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o) { float dx = p.X - o.X, dy = p.Y - o.Y, d2 = dx * dx + dy * dy; if (d2 >= 4f) return; q.V++; }",
+        "world.ForPairs<global::Fp, ", ", 2);", "public double CutoffSquared => (double)(4f);", "public bool CutoffPerRow => false;", "Vectors(in run);")]
+    [TestCase("public struct Fp : IComponent { public float X, Y; } public struct Rg : IComponent { public float R; }",
+        "[ForEach] static void N(in Fp p, in Rg r, ref Q q, [Neighbor] in Fp o, [Neighbor] Entity e) { float dx = p.X - o.X; if (dx * dx >= r.R * r.R || e.Id.Index < 0) return; q.V++; }",
+        "world.ForPairs<global::Fp, ", ", 1);", "public bool CutoffPerRow => true;", "Rows(in run);")]
     public void AccessIsDeclaredFromParametersBeside(string declarations, string members, params string[] expected)
         => AccessOf(declarations, members, expected);
 
@@ -1003,6 +1011,7 @@ public class GeneratorTests
     [TestCase("static void U(World w) { _ = w.EntityCount; }", "static void U(World w) { _ = w.EntityCount + 1; }")] // a hook's body: the set stays
     [TestCase("public P P = new() { V = 3 };", "public P P = new() { V = 3 }; ")] // a prefab declaration's trivia
     [TestCase("q.V += 2 + e.Id.Index;", "q.V += 3 + e.Id.Index;")]                       // a fused (scalar) method's body: its pair stays
+    [TestCase("if (d2 >= 4f) return; q.V++;", "if (d2 >= 4f) return;  q.V++;")]                  // a pair method's trivia: its kernel and cutoff stay
     public void EditsThatChangeNoModelHitTheCache(string before, string after)
     {
         string code = "using EasyEcs;\n" + Components +
@@ -1017,7 +1026,8 @@ public class GeneratorTests
             "[View] public ref struct Vw { public ref P P; public ref readonly Q Q; public void Add(int n) { P.V += Q.V + n; } }" +
             "[EcsSystem] public ref struct VS { [ForEach] static void M(Vw v) => v.Add(1); }" +
             "[Prefab] public partial struct Kind { public P P = new() { V = 3 }; public Q Q; }" +
-            "[EcsSystem] public ref struct F1 { [ForEach] static void Fa(ref Q q, Entity e) => q.V += e.Id.Index; [ForEach] static void Fb(ref Q q, Entity e) => q.V += 2 + e.Id.Index; } [EcsSystem] public ref struct F2 { [ForEach] static void Fc(ref Q q) => q.V++; }";
+            "[EcsSystem] public ref struct F1 { [ForEach] static void Fa(ref Q q, Entity e) => q.V += e.Id.Index; [ForEach] static void Fb(ref Q q, Entity e) => q.V += 2 + e.Id.Index; } [EcsSystem] public ref struct F2 { [ForEach] static void Fc(ref Q q) => q.V++; }" +
+            "public struct Fp : IComponent { public float X, Y; } [EcsSystem] public ref struct Pr { [ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o) { float dx = p.X - o.X, dy = p.Y - o.Y, d2 = dx * dx + dy * dy; if (d2 >= 4f) return; q.V++; } }";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         // A lambda pass in a file of its own: its interceptor names the file's checksum, so an edit there is a new model.
