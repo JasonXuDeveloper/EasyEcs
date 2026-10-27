@@ -560,7 +560,7 @@ public ref struct SendPositionsSystem
 ```
 
 Arithmetic per row belongs in a per-entity method, which the generator turns into a vector loop
-([EECS103](/en/docs/guide/analyzer#eecs103) reports one written by hand over spans); a batch method is for calls that
+([EECS103](/en/docs/decisions#d134-eecs103) reports one written by hand over spans); a batch method is for calls that
 take a run of rows at once: a copy, a span API, a native call.
 
 ### Parallel methods [#parallel-methods]

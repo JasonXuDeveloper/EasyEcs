@@ -3584,8 +3584,8 @@ MemoryMarshal.GetReference(span))`; the index and its bound; uniform values: con
 readonly fields, `Math` / `MathF`, broadcasts), also inside `if (VectorN.IsHardwareAccelerated)`; one loop, from 0 by
 1 over a vector stream (`p[i]`) or by `VectorN<T>.Count` up to the lanes' length (loads `new Vector<T>(s.Slice(i))`,
 `VectorN.Create(s.Slice(i[, Count]))`, `VectorN.LoadUnsafe(ref r, (nuint)i)`; stores `v.CopyTo(s.Slice(i))`,
-`v.StoreUnsafe(ref r, (nuint)i)`); in it only lane-wise operations with a scalar twin (`+ - * /` of floats, `& | ^ ~
-<< >> >>>` of integers, `Min`, `Max`, float `Abs`, `Sqrt`, `Floor`, `Ceiling`, `FusedMultiplyAdd`, `ConditionalSelect`
+`v.StoreUnsafe(ref r, (nuint)i)`); in it only lane-wise operations with a scalar twin (`+ - * /` of floats,
+`& | ^ ~ << >> >>>` of integers, `Min`, `Max`, float `Abs`, `Sqrt`, `Floor`, `Ceiling`, `FusedMultiplyAdd`, `ConditionalSelect`
 of comparisons joined by and, or and not, `AndNot`, conversions between lanes of one size); after it, a tail that
 writes only elements of the spans and its own locals. Every component a stream reads has the same F fields, all of
 the lane type, F a power of two no larger than the narrowest vector's lanes (the flat-lane check: lane j is field

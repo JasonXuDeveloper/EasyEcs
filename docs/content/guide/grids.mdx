@@ -1,6 +1,6 @@
 ---
 title: Grid tiles
-seoTitle: "Grid stencils in a C# ECS: tiles, halos and shaders"
+seoTitle: "Grid stencils in a C# ECS: tiles, halos and ghost cells"
 description: "Update water, heat, light or a cellular automaton over a grid cut into tiles: Tile<TCell, TTile> pads each tile with its neighbors' edges, in parallel."
 icon: Grid3x3
 ---
@@ -125,9 +125,10 @@ A grid that spawns tiles often builds them from a [prefab](/en/docs/guide/prefab
 </Step>
 <Step>
 
-### Write the shader [#shader]
+### Write the stencil [#shader]
 
-A `[ForEach]` method that takes a `Tile<TCell, TTile>` is the shader. The generator finds the tile's neighbors in the
+A `[ForEach]` method that takes a `Tile<TCell, TTile>` is the stencil (a kernel in CUDA terms; it reads like a
+shader, one cell at a time). The generator finds the tile's neighbors in the
 key's index once per entity, declares the reads (the index, the cell buffer of every tile), adds the shape and the
 buffer to the method's filter, and keeps the method parallel.
 

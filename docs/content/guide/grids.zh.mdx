@@ -1,6 +1,6 @@
 ---
 title: 网格瓦片
-seoTitle: "C# ECS 网格模板计算：瓦片、光环与着色器"
+seoTitle: "C# ECS 网格模板计算：瓦片、光环与幽灵格子"
 description: "把网格切成瓦片来更新水、热量、光照或元胞自动机：Tile<TCell, TTile> 给每块瓦片填上邻居的边缘，瓦片之间并行。"
 icon: Grid3x3
 ---
@@ -119,9 +119,9 @@ plate.GetOrAddNextTemperature().SetCount(16 * 16);
 </Step>
 <Step>
 
-### 写着色器 [#shader]
+### 写模板方法 [#shader]
 
-接收 `Tile<TCell, TTile>` 的 `[ForEach]` 方法就是着色器。生成器每个实体在键的索引里找一次瓦片的邻居，声明读取（索引、每块瓦片的格子缓冲），
+接收 `Tile<TCell, TTile>` 的 `[ForEach]` 方法就是模板方法（CUDA 里叫 kernel；写起来像着色器，一次一个格子）。生成器每个实体在键的索引里找一次瓦片的邻居，声明读取（索引、每块瓦片的格子缓冲），
 把形状和缓冲加进方法的过滤条件，并让方法保持并行。
 
 - **`tile.Pad()`** 把瓦片的格子拷进这个线程的一张纹理，每层外面一圈 `Halo` 个格子，取自邻居朝向它的边（MPI 光环交换里的幽灵格子；
