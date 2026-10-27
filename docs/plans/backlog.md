@@ -4,7 +4,8 @@ The single list of open work, kept in the repository so a new session finds it (
 are committed"). Update it when an item starts, merges or is dropped. Designs live next to it (`inner-loops.md`);
 docs to-dos collected while code still changes live in `docs-todos.md`.
 
-Order: code -> exemplar pass (`audit-code`) -> docs pass (`audit-docs`) -> bench sync -> `verify` -> master.
+Order: every feature (code) -> generated-members scan and paths -> exemplar pass, the refactor (`audit-code`) -> docs
+pass (`audit-docs`) -> bench sync -> `verify` -> master.
 At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
 
 ## Order (set by the owner, 2026-10-26)
@@ -51,7 +52,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 
 Agent slots as they free (at most 3): item 1, 8b and 12c + 12d (running), then 8c, 11 + 12a + 12b together (one tile
 branch: padded storage, ping-pong, zero rows, edges found while stepping), 12e, 9, 10, 4, 7, Later, then Finish.
-Read-only beside them (no slot): the VoxelServer plan refreshed (Finish step 1a).
+Read-only beside them (no slot): the VoxelServer plan refreshed (Finish step 2a).
 
 1. [ ] **L2: the generated pair form** (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
        the 8x8 (x86) / 4x4 (ARM64) cluster-pair kernel over L1's blocks with cutoff and self masks, and a nearest form
@@ -309,9 +310,19 @@ Read-only beside them (no slot): the VoxelServer plan refreshed (Finish step 1a)
 
 ## Finish
 
-Starts only when every code item of Next and Later is done (owner, 2026-10-26: "先把代码全改完").
+Starts only when every feature is built: every code item of Next and Later is done (owner, 2026-10-26: "先把代码全改完").
+Then, in this order (owner, 2026-10-27: "重构应该排在写文档和 benchmark 前吧，等所有功能先落实好"): 1 the last code
+gaps and the paths, 2 the refactor of every example, 3 the docs, 4-5 the benchmarks and master. Nothing of a later
+step starts before the earlier one is done, so docs and numbers are written once, about the final code.
 
-- [ ] **Step 1 of Finish: the exemplar pass** (#169, `audit-code`; owner, 2026-10-27: "9 的第一步不是重构全部 sample demo
+- [ ] **1a. Generated-members scan** (roadmap "Less code through the generator", D26,
+      `audit-generator`): the API, the battle server and the guides scanned for lines users write twice;
+      what it finds is a code item, built before step 2.
+- [ ] **1b. Directory restructure of the whole repository** (owner, 2026-10-26: "调整整个项目的目录结构"): `git mv` only, before the
+  refactor so it lands in the final paths,
+  after every agent branch merges; the layout plan (old → new per file, every path reference)
+  goes to the owner first.
+- [ ] **2. The exemplar pass: the refactor** (#169, `audit-code`; owner, 2026-10-27: "9 的第一步不是重构全部 sample demo
       benchmark unit test 和文档里的代码例子吗，全用上最正确的最合适的功能（新功能也包含），尤其是 voxelserver 需要大规模重构").
       Every piece of code users read or copy is rewritten in the most correct, most fitting form, new features
       included (vector loops through plain `[ForEach]`, `[Accumulate]`, `[ForEachRecord]`, `Emit`, `Scratch`,
@@ -340,16 +351,11 @@ Starts only when every code item of Next and Later is done (owner, 2026-10-26: "
       e. Every code example of the docs (`docs/content` fences en + zh, the guide pages' full examples, the public
          skill `skills/easyecs/SKILL.md`, README), DocCheck at 0.
       Proof: outputs and README / page output blocks match, 0 B steady state, tests three ways, A/B no slower.
-- [ ] **Directory restructure of the whole repository** (owner, 2026-10-26: "调整整个项目的目录结构"): `git mv` only,
-  after every agent branch merges; the layout plan (old → new per file, every path reference)
-  goes to the owner first.
-- [ ] **EECS086, EECS109 and EECS055's "a bool among N fields" become Warnings** (owner, 2026-10-27) once the
+- [ ] **2b. EECS086, EECS109 and EECS055's "a bool among N fields" become Warnings** (owner, 2026-10-27) once the
       samples use `[Accumulate]` / `[ForEachRecord]` and VoxelServer splits its bools (Body.OnGround, Exposure.Sunlit):
-      one line each in the analyzer (pass `true`, fixable, in Kernel.cs for EECS055), with step 1 above.
-- [ ] **Generated-members scan before the release** (roadmap "Less code through the generator", D26,
-      `audit-generator`): the API, the battle server and the guides scanned for lines users write twice.
-- [ ] **Docs pass** (#141): everything in `docs-todos.md`; DocCheck and ApiDocs kept at 0 (both 0 since the fix-ci merge); decision
+      one line each in the analyzer (pass `true`, fixable, in Kernel.cs for EECS055), with step 2.
+- [ ] **3. Docs pass** (#141, after the refactor: pages describe and include the final code): everything in `docs-todos.md`; DocCheck and ApiDocs kept at 0 (both 0 since the fix-ci merge); decision
       record for the 8 declined declarations; roadmap item for inner loops; analyzer range EECS002-103.
-- [ ] The `arm64` CI job (`ci.yml`, `runs-on: ubuntu-24.04-arm`, added b1dbdb0) has never run: it runs on the next
+- [ ] **4.** The `arm64` CI job (`ci.yml`, `runs-on: ubuntu-24.04-arm`, added b1dbdb0) has never run: it runs on the next
       push to master or a manual dispatch; if the label is wrong the job fails at once and the label is fixed then.
-- [ ] `tools/bench.sh --site --sync`, README numbers, `verify`, master. The owner cuts the release.
+- [ ] **5.** `tools/bench.sh --site --sync` (after the refactor: the rewritten benchmark worlds are what the site measures), README numbers, `verify`, master. The owner cuts the release.
