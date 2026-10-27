@@ -66,6 +66,8 @@ jobs:
         run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release
       - name: The loop each [ForEach] method of the tests runs on ARM64 (a form left to rows says "rows on this hardware")
         run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release --filter "Name=EveryVectorFormRunsAsAVectorLoopOnARM64" --logger "console;verbosity=detailed"
+      - name: The prefetch this runner issues (SVE's PRFB where SVE is hardware; PrefetchTests ran its twins with the gate forced on)
+        run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release --filter "Name=ThePrefetchIsTheMachines" --logger "console;verbosity=detailed"
       - name: Every generated job is inlined by its runner on ARM64 (tools/inlining.sh)
         run: tools/inlining.sh
 
