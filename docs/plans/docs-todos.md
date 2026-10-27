@@ -960,3 +960,7 @@ names the field each term comes from (audit-naming, "The reference design's voca
   says Capture copies buffer elements.
 - EECS055 gives circular "fixable" advice for a 2-field Emit record and a conditional Remove of an `in` component
   (Info rather than Warning? owner); EECS033 suggests members a fence compiled alone does not get.
+- grids: headings and seoTitle now say stencil / ghost cells (owner: the shader analogy stays in prose). The internal
+  `TileMemory.Texels()` and its `texels` locals become the halo-padded buffer's name with backlog item 12a, which
+  rewrites that code (`Pad()` -> `ExchangeHalo()`); renaming them now would only conflict with 12a and the zombie field.
+- systems.mdx/.zh link EECS103 to D134 until the analyzer page has its EECS103 entry (then link #eecs103 again).
