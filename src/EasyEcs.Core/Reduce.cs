@@ -25,7 +25,8 @@ public interface IReduction<T> where T : struct
 /// census.Value.Alive++;</c>. Each chunk of a parallel pass (or the whole pass on one thread) accumulates into its own
 /// copy, which starts at <see cref="IReduction{T}.Identity"/>: no lock and no atomic per row. When the pass ends, the
 /// copies are combined in chunk order, which is row order, and the result replaces the world's <typeparamref name="T"/>
-/// (added when missing).
+/// (added when missing), or, for a <typeparamref name="T"/> declared <see cref="AccumulateAttribute">[Accumulate]</see>,
+/// is combined into it: a total that every pass adds to.
 /// <para>
 /// Integer results are exact and do not depend on the threads. A floating-point result depends on where chunks
 /// begin, since each chunk's sum is rounded on its own. Chunks of a pass that reduces begin where the row count alone

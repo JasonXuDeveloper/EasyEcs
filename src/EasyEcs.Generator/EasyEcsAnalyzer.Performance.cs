@@ -2104,7 +2104,7 @@ public sealed class PerformanceAnalyzer : EasyEcsAnalyzer.Area
         EasyEcsAnalyzer.RowLookup, EasyEcsAnalyzer.ScalarLoop, EasyEcsAnalyzer.ScratchEscape,
         EasyEcsAnalyzer.SomeRowsWritten, EasyEcsAnalyzer.UntrackedMut, EasyEcsAnalyzer.UnusedParameter,
         EasyEcsAnalyzer.UpdateInSystem, EasyEcsAnalyzer.WriteAccessOnlyReads, EasyEcsAnalyzer.HandWrittenEmit,
-        EasyEcsAnalyzer.HandWrittenLookup, EasyEcsAnalyzer.HandWrittenReduce, EasyEcsAnalyzer.ColdFields);
+        EasyEcsAnalyzer.HandWrittenLookup, EasyEcsAnalyzer.HandWrittenReduce, EasyEcsAnalyzer.HandWrittenTotal, EasyEcsAnalyzer.ColdFields);
 
     protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializePerformance(context);
 }

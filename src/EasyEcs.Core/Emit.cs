@@ -176,6 +176,23 @@ public struct Emitted<T> : ISingletonComponent, IBuffer where T : struct
         return world.SingletonRef<Emitted<T>>();
     }
 
+    /// <summary>
+    /// Runs <paramref name="job"/> on each record of <paramref name="world"/>'s <see cref="Emitted{T}"/> (none when it has
+    /// no such singleton), in the order they were emitted, then clears them: a <see cref="ForEachRecordAttribute"/>
+    /// method's pass. The records walked are those present when it starts: one the job adds is cleared unhandled. A job
+    /// that throws leaves every record in place. O(records), no allocation. Owner thread. Generated code calls this.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static void Consume<TJob>(World world, ref TJob job) where TJob : IForEachRecord<T>, allows ref struct
+    {
+        if (!world.HasSingleton<Emitted<T>>()) return;
+        ref var items = ref world.GetSingleton<Emitted<T>>().Items; // a box of its own: the ref outlives other singletons' adds
+        if (items.Store is not { } store) return;
+        var records = new ReadOnlySpan<T>(store.Items, 0, store.Count); // a list that grows while the job runs is a new array
+        for (int i = 0; i < records.Length; i++) job.Execute(in records[i]);
+        items.Clear();
+    }
+
     private static readonly IBuffer Buffer = default(DynamicBuffer<T>);
 
     readonly bool IBuffer.Relational => false;
@@ -188,7 +205,20 @@ public struct Emitted<T> : ISingletonComponent, IBuffer where T : struct
 
     readonly BufferStore IBuffer.Read(ref Reader reader, BufferStore reuse) => Buffer.Read(ref reader, reuse);
 
+    readonly void IBuffer.FillPool(int lists) => Buffer.FillPool(lists);
+
     readonly void IBuffer.Remap(ref BufferStore store, IdMap map) => Buffer.Remap(ref store, map);
+}
+
+/// <summary>
+/// The job of a <see cref="ForEachRecordAttribute"/> method, which the generator writes: the method called on one
+/// record with the values its pass resolved (singletons, lookups). Run by <see cref="Emitted{T}.Consume{TJob}"/>.
+/// </summary>
+/// <typeparam name="T">The record.</typeparam>
+public interface IForEachRecord<T> where T : struct
+{
+    /// <summary>Handle <paramref name="record"/>.</summary>
+    void Execute(in T record);
 }
 
 /// <summary>

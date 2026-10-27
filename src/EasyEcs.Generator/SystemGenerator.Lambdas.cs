@@ -65,7 +65,8 @@ public sealed partial class SystemGenerator
                 {
                     Symbols.ParamKind.Mutable => new ParamModel(Symbols.ParamKind.Mutable, Symbols.MutElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared,
                         Symbols.Implements(Symbols.MutElement(p.Type)!, Symbols.TrackChanges)),
-                    Symbols.ParamKind.Reduction => new ParamModel(Symbols.ParamKind.Reduction, Symbols.ReduceElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared),
+                    Symbols.ParamKind.Reduction => new ParamModel(Symbols.ParamKind.Reduction, Symbols.ReduceElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared,
+                        Accumulates: Symbols.Accumulates(Symbols.ReduceElement(p.Type)!)),
                     Symbols.ParamKind.Scratch => new ParamModel(Symbols.ParamKind.Scratch, Symbols.ScratchElement(p.Type)!.ToDisplayString(Symbols.Fqn), "", p.Name, declared),
                     Symbols.ParamKind.Emit => new ParamModel(Symbols.ParamKind.Emit, Symbols.EmitElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared),
                     Symbols.ParamKind.Lookup => new ParamModel(Symbols.ParamKind.Lookup, Symbols.LookupElement(p.Type)!.ToDisplayString(Symbols.Fqn), "in", p.Name, declared,

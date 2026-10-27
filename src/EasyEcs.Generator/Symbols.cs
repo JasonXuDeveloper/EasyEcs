@@ -17,6 +17,7 @@ internal static class Symbols
     public const string ForEachAttribute = "EasyEcs.ForEachAttribute";
     public const string ForEntityAttribute = "EasyEcs.ForEntityAttribute";
     public const string ConsumeAttribute = "EasyEcs.ConsumeAttribute";
+    public const string ForEachRecordAttribute = "EasyEcs.ForEachRecordAttribute";
     public const string UpdateIntervalAttribute = "EasyEcs.UpdateIntervalAttribute";
     public const string WithAttribute = "EasyEcs.WithAttribute<T>";
     public const string WithoutAttribute = "EasyEcs.WithoutAttribute<T>";
@@ -42,6 +43,7 @@ internal static class Symbols
     public const string GroupByAttribute = "EasyEcs.GroupByAttribute";
     public const string WhenTargetDestroyedAttribute = "EasyEcs.WhenTargetDestroyedAttribute";
     public const string NotSavedAttribute = "EasyEcs.NotSavedAttribute";
+    public const string AccumulateAttribute = "EasyEcs.AccumulateAttribute";
     public const string Cleanup = "EasyEcs.ICleanupComponent";
     public const string EntityId = "EasyEcs.EntityId";
     public const string TileShape = "EasyEcs.ITileShape";
@@ -541,10 +543,15 @@ internal static class Symbols
     /// <summary>
     /// Why <paramref name="type"/> cannot take the world setup <paramref name="attribute"/> declares, or null: [GroupBy]
     /// on a grouped component (<see cref="IsGrouped"/>), [WhenTargetDestroyed] on a relation or a component indexed by
-    /// an <c>EntityId</c> (<see cref="IndexedKey"/>), [NotSaved] on a component or a singleton. The generator registers only what this accepts; EECS068 reports the rest.
+    /// an <c>EntityId</c> (<see cref="IndexedKey"/>), [NotSaved] on a component or a singleton, [Accumulate] on a
+    /// singleton that combines with itself (<c>IReduction&lt;T&gt;</c>, by attributes or by hand). The generator registers
+    /// only what this accepts; EECS068 reports the rest.
     /// </summary>
     public static string? SetupProblem(INamedTypeSymbol type, AttributeData attribute)
     {
+        if (Named(attribute.AttributeClass, AccumulateAttribute))
+            return Implements(type, Singleton) && (Parts.Of(type) is { Fields.Count: > 0 } || ReducesItself(type)) ? null
+                : "is not a singleton that combines with itself: [Accumulate] makes a Reduce<T> pass combine its result into a singleton that implements IReduction<T> (by [Sum], [Min], ... or by hand)";
         if (Named(attribute.AttributeClass, NotSavedAttribute))
             return Implements(type, Component) || Implements(type, Singleton) ? null
                 : "is neither a component nor a singleton: [NotSaved] leaves a component or a singleton out of saves";
@@ -797,6 +804,11 @@ internal static class Symbols
         /// configuration): any type but a component, a singleton or the framework's own, by value, <c>ref</c> or <c>in</c>.
         /// </summary>
         Context,
+        /// <summary>
+        /// The first parameter of a [ForEachRecord] method, <c>in T</c>: the record of <c>Emitted&lt;T&gt;</c> it handles
+        /// (<see cref="RecordType"/>). Never returned by <see cref="Classify(IParameterSymbol)"/>: its place makes it one.
+        /// </summary>
+        Record,
     }
 
     /// <summary>
@@ -829,7 +841,64 @@ internal static class Symbols
         method.GetAttributes().Any(a => Named(a.AttributeClass, ForEntityAttribute));
 
     /// <summary>How a diagnostic names a generated job's method: "[ForEach] method 'Move'" or "[ForEntity] method 'Heal'".</summary>
-    public static string Describe(IMethodSymbol method) => (IsForEntity(method) ? "[ForEntity] method '" : "[ForEach] method '") + method.Name + "'";
+    public static string Describe(IMethodSymbol method) =>
+        (IsForEntity(method) ? "[ForEntity] method '" : IsForEachRecord(method) ? "[ForEachRecord] method '" : "[ForEach] method '") + method.Name + "'";
+
+    /// <summary>
+    /// A [ForEachRecord] method: static, its first parameter the record (<c>in T</c>) it handles once per record of
+    /// <c>Emitted&lt;T&gt;</c>, in order, before the records are cleared; in a system it runs in declaration order with the
+    /// [ForEach] methods, elsewhere through an entry point taking the world and the caller's values.
+    /// </summary>
+    public static bool IsForEachRecord(IMethodSymbol method) =>
+        method.GetAttributes().Any(a => Named(a.AttributeClass, ForEachRecordAttribute));
+
+    /// <summary>
+    /// The record a [ForEachRecord] method handles: its first parameter's type, taken by <c>in</c> (or <c>ref readonly</c>),
+    /// a struct that is no component or singleton and no ref struct; else null.
+    /// </summary>
+    public static ITypeSymbol? RecordType(IMethodSymbol method) =>
+        method.Parameters.Length > 0 && method.Parameters[0] is { RefKind: RefKind.In or RefKind.RefReadOnlyParameter, Type: { IsValueType: true, IsRefLikeType: false } type }
+        && type.TypeKind != TypeKind.TypeParameter && !IsA(type, Component) && !IsA(type, Singleton) && !IsFramework(type)
+            ? type
+            : null;
+
+    /// <summary>A type of EasyEcs itself (Entity, World, Lookup&lt;T&gt;, ...): never a record.</summary>
+    private static bool IsFramework(ITypeSymbol type) => Named(type.ContainingNamespace, "EasyEcs");
+
+    /// <summary>
+    /// Why a [ForEachRecord] method cannot be generated (EECS105), or null: it also has [ForEach] or [ForEntity], is an
+    /// instance or generic method, does not take its record first by <c>in</c>, has a filter or [Consume], or takes what
+    /// a pass over records has none of (a component, a Maybe, a Reduce, the Entity, ...) or an <c>Emit&lt;T&gt;</c> of its
+    /// own record (cleared unhandled when the pass ends).
+    /// </summary>
+    public static string? RecordProblem(IMethodSymbol method)
+    {
+        if (IsForEach(method) || IsForEntity(method))
+            return "also has [ForEach] or [ForEntity]: a method handles records, the rows of a pass or one entity";
+        if (!method.IsStatic) return "is an instance method: make it static";
+        if (method.IsGenericMethod) return "is generic: its pass handles the records of one type";
+        if (RecordType(method) is not { } record)
+            return "does not take its record first by 'in' ('in T record', where T is a struct that is no component or singleton)";
+        if (AttributeFilters(method).Any() || IsConsume(method))
+            return "has a filter or [Consume]: a record is no entity, and the pass clears the records it handled";
+        bool outside = !IsSystem(method.ContainingType);
+        foreach (var p in method.Parameters.Skip(1))
+        {
+            switch (Classify(p, outside))
+            {
+                case ParamKind.Singleton or ParamKind.Lookup or ParamKind.World or ParamKind.Context:
+                    continue;
+                case ParamKind.Emit when !SymbolEqualityComparer.Default.Equals(EmitElement(p.Type), record):
+                    continue;
+                case ParamKind.Emit:
+                    return $"takes '{p.Name}', an Emit<{record.Name}> of its own records: the pass clears Emitted<{record.Name}> when it ends, so they would be cleared unhandled";
+            }
+
+            return $"takes '{p.Name}', which a pass over records has none of: it takes the record, singletons, Lookup<T>, Emit<T> of other records, the World{(outside ? " and values the caller passes" : "")}";
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Why a [ForEntity] method cannot be generated (EECS081), or null: it is an instance method, also has [ForEach],
@@ -934,7 +1003,7 @@ internal static class Symbols
         return members.Any(m =>
             !m.GetAttributes().Any(IsGeneratorMark) // not the entry point itself
             && (m.Parameters.Select(p => (p.Type.ToDisplayString(), p.RefKind)).SequenceEqual(expected)
-                || !SymbolEqualityComparer.Default.Equals(m, method) && IsGeneratedJob(m) && EntryPoint(m).SequenceEqual(expected)));
+                || !SymbolEqualityComparer.Default.Equals(m, method) && (IsGeneratedJob(m) || IsForEachRecord(m)) && EntryPoint(m).SequenceEqual(expected)));
     }
 
     private static List<(string, RefKind)> EntryPoint(IMethodSymbol method)
@@ -942,7 +1011,7 @@ internal static class Symbols
         var parameters = new List<(string, RefKind)> { (IsForEntity(method) ? Entity : World, RefKind.None) };
         if (TracksSince(method)) parameters.Add(("ulong", RefKind.None));
         if (Slices(method) > 1) parameters.Add(("int", RefKind.None));
-        foreach (var p in method.Parameters)
+        foreach (var p in method.Parameters.Skip(IsForEachRecord(method) ? 1 : 0)) // a record method's record is no caller's value
             if (Classify(p, true) == ParamKind.Context) parameters.Add((p.Type.ToDisplayString(), p.RefKind));
         return parameters;
     }
@@ -1217,6 +1286,26 @@ internal static class Symbols
             ? named.TypeArguments[0]
             : null;
 
+    /// <summary>Whether <paramref name="type"/> implements <c>IReduction&lt;T&gt;</c> of itself (written by hand: a part's is not visible to other generators).</summary>
+    public static bool ReducesItself(ITypeSymbol type)
+    {
+        foreach (var face in type.AllInterfaces)
+            if (Named(face.OriginalDefinition, "EasyEcs.IReduction<T>") && SymbolEqualityComparer.Default.Equals(face.TypeArguments[0], type))
+                return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Whether singleton <paramref name="type"/> is declared <c>[Accumulate]</c>: a pass's <c>Reduce&lt;T&gt;</c> combines
+    /// its result into the world's value instead of replacing it.
+    /// </summary>
+    public static bool Accumulates(ITypeSymbol type)
+    {
+        foreach (var attribute in type.GetAttributes())
+            if (Named(attribute.AttributeClass, AccumulateAttribute)) return true;
+        return false;
+    }
+
     /// <summary>Value type of a <c>Scratch&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? ScratchElement(ITypeSymbol type) =>
         type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Scratch<T>")
@@ -1318,6 +1407,8 @@ internal static class Symbols
     {
         var type = method.ContainingType;
         bool outside = IsRunner(method);
+        if (IsForEachRecord(method)) // a pass over records: no components, no filter (EECS105 says why not)
+            return RecordProblem(method) == null && Unnameable(method) == null && (outside ? !EntryPointCollides(method) : IsValidSystem(type));
         if (IsForEntity(method) ? ForEntityProblem(method) != null : ConsumeProblem(method) != null) return false;
         if (!method.IsStatic || outside && EntryPointCollides(method)) return false;
         if (!outside && !IsValidSystem(type)) return false; // EECS074: no system code

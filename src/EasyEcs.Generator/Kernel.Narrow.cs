@@ -46,10 +46,10 @@ internal sealed partial class Kernel
     private long Bottom(bool signed) => signed ? -(1L << (Bits - 1)) : 0;
     private string Kind(bool signed) => signed ? SignedLane : Unsigned;
 
-    private static bool IsInt(ITypeSymbol? t) => t?.SpecialType == SpecialType.System_Int32;
+    private static bool IsInt(ITypeSymbol? t) => t != null && Under(t).SpecialType == SpecialType.System_Int32;
 
-    /// <summary>The values a lane type (or int) holds.</summary>
-    private static (long Lo, long Hi) Range(ITypeSymbol? type) => type?.SpecialType switch
+    /// <summary>The values a lane type (or int, or an enum of them) holds.</summary>
+    private static (long Lo, long Hi) Range(ITypeSymbol? type) => (type == null ? null : Under(type))?.SpecialType switch
     {
         SpecialType.System_Byte => (byte.MinValue, byte.MaxValue),
         SpecialType.System_SByte => (sbyte.MinValue, sbyte.MaxValue),
@@ -107,6 +107,8 @@ internal sealed partial class Kernel
                 return WideOf(c.Operand);
             case IConversionOperation { Conversion.IsNumeric: true, IsChecked: false, OperatorMethod: null } c when IsInt(c.Type) && (IsLane(c.Operand.Type) || PairLane(c.Operand)):
                 return FromLane(c.Operand);
+            case IConversionOperation { IsChecked: false, OperatorMethod: null } c when IsEnumConversion(c) && IsInt(c.Type) && IsLane(c.Operand.Type):
+                return FromLane(c.Operand); // (int)e of a narrow enum, or an int enum of a narrow one: its integer's value
             case ILocalReferenceOperation { Local: var local } when _wides.TryGetValue(local, out var value):
                 // inside a half (ushort lanes of byte ones), the value widened where the lanes hold it exactly
                 return _half < 0 ? value : new Wide(As(MaskOf(_size), Unsigned, HalfOf(value, op)), value.Lo, value.Hi, null);
