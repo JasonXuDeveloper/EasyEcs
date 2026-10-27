@@ -189,7 +189,10 @@ public struct Emitted<T> : ISingletonComponent, IBuffer where T : struct
         ref var items = ref world.GetSingleton<Emitted<T>>().Items; // a box of its own: the ref outlives other singletons' adds
         if (items.Store is not { } store) return;
         var records = new ReadOnlySpan<T>(store.Items, 0, store.Count); // a list that grows while the job runs is a new array
-        for (int i = 0; i < records.Length; i++) job.Execute(in records[i]);
+        // A local copy: the JIT keeps its refs in registers instead of reloading them through 'job' for every record.
+        var local = job;
+        for (int i = 0; i < records.Length; i++) local.Execute(in records[i]);
+        job = local; // what the job keeps (the records of its Emit<T> parameters) goes back to the pass
         items.Clear();
     }
 
