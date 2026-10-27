@@ -20,6 +20,9 @@ shared with the analyzer (`audit-analyzer`).
    the docs examples (a hand-written job, a reset-then-accumulate singleton, a registry call, a copy per arity): each
    is a candidate for an attribute, a parameter or a generated member, with the rule and code fix that move users to
    it.
+   The owner's rule (2026-10-27): whatever lets users write less code, less boilerplate or think less about how to
+   make it fast is done by the generator without users noticing (vector loops, component splits, schedules): if we
+   can do it, we do it. A gap is declined only when it saves users neither lines nor thought.
 2. **Users write the plain form, the generator emits the fast one** (Burst's idea, D68 / D90). A `[ForEach]` method
    becomes a vector loop (`audit-vector-loops`); a parameter does per chunk what users would do by hand (`Reduce<T>`,
    `Emit<T>`, `Scratch<T>`, `Lookup<T>`, `Tile<,>`); the schedule follows declarations (`Parallel`, `ChunkRows`,

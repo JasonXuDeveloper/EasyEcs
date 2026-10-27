@@ -139,7 +139,17 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        moved. All zombies read the gradient of one shared field (nearest player for free; ZombieTargetSystem keeps
        the target for the attack). Proof: TickBenchmark before/after at 50 and 2,000 players, zombies stuck
        before and not after, grids page and VoxelServer page sections.
-9. [ ] The rest of "Later" below.
+9. [ ] **G10: deferred consume for chunk load / save** (owner, 2026-10-27; `voxel-rewrite.md` G10): VoxelServer's
+       ChunkRead / ChunkSave load and save outside the pass by hand; the generator turns the plain form (a
+       `[ForEach]` that requests a load or a save) into the deferred one, so users write neither the queue nor the
+       drain. Analyzer rule and code fix for the hand-written form; proof: VoxelServer lines before / after, tests,
+       0 B steady state.
+10. [ ] **Streaming stores in generated loops, gated** (owner, 2026-10-27; `microarch.md` M3, prototype
+       `Locality/Streams.cs`): non-temporal stores for a column the method writes without reading, only when the
+       column's bytes are past `CacheSizes.LastLevel`. Measured in a real world with the next pass reading that column
+       counted in; ships when faster in both rounds and never slower (StreamingStoreBenchmark: 1.47x past the cache,
+       a tie inside).
+11. [ ] The rest of "Later" below.
 
 ## Done this round (for the record)
 
@@ -242,6 +252,9 @@ Starts only when every code item of Next and Later is done (owner, 2026-10-26: "
 - [ ] **Directory restructure of the whole repository** (owner, 2026-10-26: "调整整个项目的目录结构"): `git mv` only,
   after feat-prefetch-all and feat-locality-pairs merge; the layout plan (old → new per file, every path reference)
   goes to the owner first.
+- [ ] **EECS086, EECS109 and EECS055's "a bool among N fields" become Warnings** (owner, 2026-10-27) once the
+      samples use `[Accumulate]` / `[ForEachRecord]` and VoxelServer splits its bools (Body.OnGround, Exposure.Sunlit):
+      one line each in the analyzer (pass `true`, fixable, in Kernel.cs for EECS055), with the rewrite below.
 - [ ] **VoxelServer rewritten with every high-performance feature, the least user code** (owner, 2026-10-26): after
   every code item; its per-system plan is made now (read-only), and the generator or feature gaps it exposes (lines
   users would write twice) go into Later as code items, so the rewrite itself only uses what already exists.

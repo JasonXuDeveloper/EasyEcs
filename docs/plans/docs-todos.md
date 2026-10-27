@@ -907,3 +907,12 @@ Docs pass:
   en + zh.
 - `audit-vector-loops` skill: `tools/loopbound.sh` as the way to read a loop's bound
   (the coordinator edits skills).
+
+## Decided by the owner (2026-10-27): decision records for the docs pass
+
+- Declined generator gaps of the VoxelServer plan (owner agreed): G3 (`[Prefab]` with buffer and absent fields: adds
+  lines in VoxelServer), G7 (a keyed read of the found entity: the index and the value live on two components, two
+  lookups either way, no line saved), G11 (a helper for the steady-state allocation check: one sample's test
+  plumbing). The rule they were judged by: a gap is built when it saves users lines or thought (`audit-generator`).
+- G10 and gated streaming stores are code items (backlog "Next" 9, 10); EECS086 / EECS109 / EECS055's bool reason
+  become Warnings with the VoxelServer rewrite.
