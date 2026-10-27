@@ -70,7 +70,7 @@ public partial record struct Team([GroupBy] int Id) : IComponent;
 
 /// <summary>
 /// Ordered tables ([OrderBy], RowOrder): the sort and its cadence, every column, presence bit, change tick and id
-/// following its entity through it, the blocks and their boxes, churn between sorts (adds, removes, moves between
+/// following its entity through it, the clusters and their boxes, churn between sorts (adds, removes, moves between
 /// tables, group moves, recycled ids), saves and snapshots, parallel passes, the keys of every type, 0 B per update.
 /// </summary>
 public class OrderTests
@@ -110,34 +110,34 @@ public class OrderTests
 
     private static Walker RandomWalker(Random random) => new(random.NextSingle() * 1000, random.NextSingle() * 1000);
 
-    /// <summary>Every ordered table of Walker: sorted rows in key order, every row's point inside its block's box.</summary>
+    /// <summary>Every ordered table of Walker: sorted rows in key order, every row's point inside its cluster's box.</summary>
     private static void CheckOrdered(World world)
     {
         int tables = 0;
-        foreach (var blocks in world.Blocks<Walker>())
+        foreach (var clusters in world.Clusters<Walker>())
         {
             tables++;
-            var walkers = blocks.Read<Walker>();
-            Assert.That(blocks.SortedRows, Is.LessThanOrEqualTo(blocks.RowCount));
-            for (int r = 1; r < blocks.SortedRows; r++)
-                if (blocks.Has(r) && blocks.Has(r - 1))
+            var walkers = clusters.Read<Walker>();
+            Assert.That(clusters.SortedRows, Is.LessThanOrEqualTo(clusters.RowCount));
+            for (int r = 1; r < clusters.SortedRows; r++)
+                if (clusters.Has(r) && clusters.Has(r - 1))
                     Assert.That(walkers[r].Cell, Is.GreaterThanOrEqualTo(walkers[r - 1].Cell), $"row {r}");
-            CheckBoxes(blocks);
+            CheckBoxes(clusters);
         }
 
         Assert.That(tables, Is.GreaterThan(0));
     }
 
-    private static void CheckBoxes(RowBlocks blocks)
+    private static void CheckBoxes(RowClusters clusters)
     {
-        var walkers = blocks.Read<Walker>();
-        Assert.That(blocks.Count, Is.EqualTo((blocks.SortedRows + blocks.Size - 1) / blocks.Size));
-        for (int b = 0; b < blocks.Count; b++)
-            for (int r = blocks.Start(b); r < blocks.End(b); r++)
+        var walkers = clusters.Read<Walker>();
+        Assert.That(clusters.Count, Is.EqualTo((clusters.SortedRows + clusters.Size - 1) / clusters.Size));
+        for (int b = 0; b < clusters.Count; b++)
+            for (int r = clusters.Start(b); r < clusters.End(b); r++)
             {
-                if (!blocks.Has(r)) continue;
-                Assert.That(walkers[r].X, Is.InRange(blocks.Min(0)[b], blocks.Max(0)[b]), $"block {b}, row {r}");
-                Assert.That(walkers[r].Y, Is.InRange(blocks.Min(1)[b], blocks.Max(1)[b]), $"block {b}, row {r}");
+                if (!clusters.Has(r)) continue;
+                Assert.That(walkers[r].X, Is.InRange(clusters.Min(0)[b], clusters.Max(0)[b]), $"cluster {b}, row {r}");
+                Assert.That(walkers[r].Y, Is.InRange(clusters.Min(1)[b], clusters.Max(1)[b]), $"cluster {b}, row {r}");
             }
     }
 
@@ -160,19 +160,19 @@ public class OrderTests
     {
         using var world = new World();
         var expected = Populate(world, 1000, new Random(1));
-        var before = world.Blocks<Walker>().GetEnumerator();
-        Assert.That(before.MoveNext() && before.Current.Count == 0, Is.True, "no block before the first sort");
+        var before = world.Clusters<Walker>().GetEnumerator();
+        Assert.That(before.MoveNext() && before.Current.Count == 0, Is.True, "no cluster before the first sort");
 
         world.SortRows<Walker>();
         CheckOrdered(world);
         expected.Check(world);
-        foreach (var blocks in world.Blocks<Walker>())
+        foreach (var clusters in world.Clusters<Walker>())
         {
-            Assert.That(blocks.SortedRows, Is.EqualTo(1000));
-            Assert.That(blocks.Margin, Is.EqualTo(0.25f));
-            Assert.That(blocks.Axes, Is.EqualTo(2));
-            var ids = blocks.Ids;
-            for (int r = 0; r < blocks.RowCount; r++) Assert.That(blocks[r].Id, Is.EqualTo(ids[r]));
+            Assert.That(clusters.SortedRows, Is.EqualTo(1000));
+            Assert.That(clusters.Margin, Is.EqualTo(0.25f));
+            Assert.That(clusters.Axes, Is.EqualTo(2));
+            var ids = clusters.Ids;
+            for (int r = 0; r < clusters.RowCount; r++) Assert.That(clusters[r].Id, Is.EqualTo(ids[r]));
         }
     }
 
@@ -184,10 +184,10 @@ public class OrderTests
         Populate(world, 500, random);
         bool Sorted()
         {
-            foreach (var blocks in world.Blocks<Walker>())
+            foreach (var clusters in world.Clusters<Walker>())
             {
-                var walkers = blocks.Read<Walker>();
-                for (int r = 1; r < blocks.RowCount; r++)
+                var walkers = clusters.Read<Walker>();
+                for (int r = 1; r < clusters.RowCount; r++)
                     if (walkers[r].Cell < walkers[r - 1].Cell) return false;
             }
 
@@ -220,7 +220,7 @@ public class OrderTests
         var ids = expected.Rows.Keys.ToList();
         for (int round = 0; round < 6; round++)
         {
-            // Destroys (swap-removes move rows into blocks), adds (rows past the sorted ones), moves to another table
+            // Destroys (swap-removes move rows into clusters), adds (rows past the sorted ones), moves to another table
             // (a tag), group moves (a grouped component's value), recycled ids, and the ordered value itself.
             for (int i = 0; i < 150; i++)
             {
@@ -256,13 +256,13 @@ public class OrderTests
             }
 
             expected.Check(world);
-            foreach (var blocks in world.Blocks<Walker>()) // between sorts: the boxes of untouched rows and widened ones
+            foreach (var clusters in world.Clusters<Walker>()) // between sorts: the boxes of untouched rows and widened ones
             {
-                var walkers = blocks.Read<Walker>();
-                for (int b = 0; b < blocks.Count; b++)
-                    for (int r = blocks.Start(b); r < blocks.End(b); r++)
+                var walkers = clusters.Read<Walker>();
+                for (int b = 0; b < clusters.Count; b++)
+                    for (int r = clusters.Start(b); r < clusters.End(b); r++)
                     {
-                        var id = blocks.Ids[r];
+                        var id = clusters.Ids[r];
                         if (!expected.Rows.TryGetValue(id, out var row) || row.Walker != walkers[r]) continue; // moved since the sort
                     }
             }
@@ -274,7 +274,7 @@ public class OrderTests
     }
 
     [Test]
-    public void ARowThatMovesIntoABlockWidensItsBox()
+    public void ARowThatMovesIntoAClusterWidensItsBox()
     {
         using var world = new World();
         var random = new Random(4);
@@ -282,15 +282,15 @@ public class OrderTests
         for (int i = 0; i < 64; i++) near.Add(world.CreateEntity(new Walker(random.NextSingle(), random.NextSingle()), new Health(i), new Name("")));
         world.SortRows<Walker>();
         var far = world.CreateEntity(new Walker(900, 900), new Health(99), new Name("far")); // past the sorted rows
-        near[3].Destroy(); // the last row (far) moves into near[3]'s row, inside a block
+        near[3].Destroy(); // the last row (far) moves into near[3]'s row, inside a cluster
 
-        foreach (var blocks in world.Blocks<Walker>())
+        foreach (var clusters in world.Clusters<Walker>())
         {
-            Assert.That(blocks.SortedRows, Is.EqualTo(64), "the table still has 64 rows: far took near[3]'s");
-            int row = Array.IndexOf(blocks.Ids.ToArray(), far.Id);
-            Assert.That(row, Is.LessThan(blocks.SortedRows));
-            Assert.That(blocks.Max(0)[row / blocks.Size], Is.GreaterThanOrEqualTo(900f));
-            CheckBoxes(blocks);
+            Assert.That(clusters.SortedRows, Is.EqualTo(64), "the table still has 64 rows: far took near[3]'s");
+            int row = Array.IndexOf(clusters.Ids.ToArray(), far.Id);
+            Assert.That(row, Is.LessThan(clusters.SortedRows));
+            Assert.That(clusters.Max(0)[row / clusters.Size], Is.GreaterThanOrEqualTo(900f));
+            CheckBoxes(clusters);
         }
     }
 
@@ -399,7 +399,7 @@ public class OrderTests
     }
 
     [Test]
-    public void SavesAndSnapshotsKeepTheOrderAndTheNextUpdateDrawsTheBlocks()
+    public void SavesAndSnapshotsKeepTheOrderAndTheNextUpdateDrawsTheClusters()
     {
         using var world = new World();
         var random = new Random(8);
@@ -426,19 +426,19 @@ public class OrderTests
         using var loaded = new World();
         loaded.Load(output.WrittenSpan);
         Check(loaded);
-        foreach (var blocks in loaded.Blocks<Walker>()) Assert.That(blocks.Count, Is.Zero, "the boxes are not saved");
+        foreach (var clusters in loaded.Clusters<Walker>()) Assert.That(clusters.Count, Is.Zero, "the boxes are not saved");
         var walkers = new List<uint>();
         foreach (var item in loaded.Query<Walker>()) walkers.Add(item.Component1.Cell);
         Assert.That(walkers, Is.Ordered, "the rows come back in their saved order");
         loaded.Update();
         CheckOrdered(loaded);
-        foreach (var blocks in loaded.Blocks<Walker>()) Assert.That(blocks.SortedRows, Is.EqualTo(1000));
+        foreach (var clusters in loaded.Clusters<Walker>()) Assert.That(clusters.SortedRows, Is.EqualTo(1000));
 
         var snapshot = world.Capture();
         foreach (var item in world.Query<Walker>()) item.Component1 = new Walker(5, 5);
         world.Restore(snapshot);
         Check(world);
-        foreach (var blocks in world.Blocks<Walker>()) Assert.That(blocks.Count, Is.Zero);
+        foreach (var clusters in world.Clusters<Walker>()) Assert.That(clusters.Count, Is.Zero);
         world.Update();
         CheckOrdered(world);
     }
@@ -452,13 +452,13 @@ public class OrderTests
         for (int i = 0; i < 200; i++) all.Add(world.CreateEntity(RandomWalker(random), new Health(i), new Name("")));
         for (int i = 0; i < 200; i += 5) all[i].Remove<Walker>();
         world.SortRows<Walker>();
-        foreach (var blocks in world.Blocks<Walker>())
+        foreach (var clusters in world.Clusters<Walker>())
         {
-            Assert.That(blocks.AllHave, Is.False);
-            for (int r = 0; r < 160; r++) Assert.That(blocks.Has(r), Is.True, $"row {r}");
-            for (int r = 160; r < 200; r++) Assert.That(blocks.Has(r), Is.False, $"row {r}");
-            CheckBoxes(blocks);
-            Assert.That(blocks.Min(0)[^1], Is.GreaterThan(blocks.Max(0)[^1]), "a block of rows without the component has an empty box");
+            Assert.That(clusters.AllHave, Is.False);
+            for (int r = 0; r < 160; r++) Assert.That(clusters.Has(r), Is.True, $"row {r}");
+            for (int r = 160; r < 200; r++) Assert.That(clusters.Has(r), Is.False, $"row {r}");
+            CheckBoxes(clusters);
+            Assert.That(clusters.Min(0)[^1], Is.GreaterThan(clusters.Max(0)[^1]), "a cluster of rows without the component has an empty box");
         }
 
         for (int i = 0; i < 200; i++) Assert.That(all[i].Get<Health>().Value, Is.EqualTo(i));
@@ -504,19 +504,19 @@ public class OrderTests
         for (int i = 0; i < 100; i++)
             world.CreateEntity(new Swimmer { At = new Vector3(random.NextSingle() * 50, random.NextSingle() * 50, random.NextSingle() * 50) });
         world.Update();
-        foreach (var blocks in world.Blocks<Swimmer>())
+        foreach (var clusters in world.Clusters<Swimmer>())
         {
-            Assert.That(blocks.Axes, Is.EqualTo(3));
-            var swimmers = blocks.Read<Swimmer>();
-            for (int b = 0; b < blocks.Count; b++)
-                for (int r = blocks.Start(b); r < blocks.End(b); r++)
+            Assert.That(clusters.Axes, Is.EqualTo(3));
+            var swimmers = clusters.Read<Swimmer>();
+            for (int b = 0; b < clusters.Count; b++)
+                for (int r = clusters.Start(b); r < clusters.End(b); r++)
                     for (int a = 0; a < 3; a++)
-                        Assert.That(swimmers[r].At[a], Is.InRange(blocks.Min(a)[b] + 1 - 1e-4f, blocks.Max(a)[b] - 1 + 1e-4f)); // the margin of 1, within rounding
+                        Assert.That(swimmers[r].At[a], Is.InRange(clusters.Min(a)[b] + 1 - 1e-4f, clusters.Max(a)[b] - 1 + 1e-4f)); // the margin of 1, within rounding
         }
     }
 
     [Test]
-    public void ABatchMethodFindsItsRowsInTheBlocks()
+    public void ABatchMethodFindsItsRowsInTheClusters()
     {
         using var world = new World();
         Populate(world, 300, new Random(12));
@@ -527,7 +527,7 @@ public class OrderTests
     }
 
     [Test]
-    public void BlockPairsHoldEveryPairOfRowsWithinReach([Values(0f, 3f, 40f)] float reach)
+    public void ClusterPairsHoldEveryPairOfRowsWithinReach([Values(0f, 3f, 40f)] float reach)
     {
         using var world = new World();
         var random = new Random(15);
@@ -538,15 +538,15 @@ public class OrderTests
         world.SortRows<Walker>();
         var tables = new List<(Walker[] Rows, int Sorted, Dictionary<(int, int), int> Pairs)>();
         int size = 0;
-        foreach (var blocks in world.Blocks<Walker>())
+        foreach (var clusters in world.Clusters<Walker>())
         {
-            if (blocks.RowCount == 0) continue; // a table of the group no entity is in
-            var pairs = new BlockPair[4];
-            int n = blocks.Pairs(reach, pairs);
+            if (clusters.RowCount == 0) continue; // a table of the group no entity is in
+            var pairs = new ClusterPair[4];
+            int n = clusters.Pairs(reach, pairs);
             if (n > pairs.Length)
             {
-                pairs = new BlockPair[n];
-                Assert.That(blocks.Pairs(reach, pairs), Is.EqualTo(n));
+                pairs = new ClusterPair[n];
+                Assert.That(clusters.Pairs(reach, pairs), Is.EqualTo(n));
             }
 
             var set = new Dictionary<(int, int), int>();
@@ -556,8 +556,8 @@ public class OrderTests
                 set.Add((pair.First, pair.Second), 0);
             }
 
-            tables.Add((blocks.Read<Walker>().ToArray(), blocks.SortedRows, set));
-            size = blocks.Size;
+            tables.Add((clusters.Read<Walker>().ToArray(), clusters.SortedRows, set));
+            size = clusters.Size;
         }
 
         Assert.That(tables, Has.Count.EqualTo(2));
@@ -567,13 +567,13 @@ public class OrderTests
                     if (Math.Abs(rows[i].X - rows[j].X) <= reach && Math.Abs(rows[i].Y - rows[j].Y) <= reach)
                         Assert.That(pairs.ContainsKey((i / size, j / size)), $"rows {i}, {j}");
 
-        // Across the two tables: every near pair of rows has its blocks' pair, the first table's block first.
-        var e = world.Blocks<Walker>().GetEnumerator();
+        // Across the two tables: every near pair of rows has its clusters' pair, the first table's cluster first.
+        var e = world.Clusters<Walker>().GetEnumerator();
         while (e.MoveNext() && e.Current.RowCount == 0) { }
         var first = e.Current;
         while (e.MoveNext() && e.Current.RowCount == 0) { }
         var second = e.Current;
-        var cross = new BlockPair[first.Count * second.Count];
+        var cross = new ClusterPair[first.Count * second.Count];
         int found = first.Pairs(second, reach, cross);
         var crossSet = cross.Take(found).Select(p => (p.First, p.Second)).ToHashSet();
         Assert.That(crossSet, Has.Count.EqualTo(found));
@@ -583,7 +583,7 @@ public class OrderTests
             for (int j = 0; j < sb; j++)
                 if (Math.Abs(a[i].X - b[j].X) <= reach && Math.Abs(a[i].Y - b[j].Y) <= reach)
                     Assert.That(crossSet.Contains((i / size, j / size)), $"rows {i}, {j}");
-        Assert.That(found, Is.LessThan(first.Count * second.Count), "far blocks are not paired");
+        Assert.That(found, Is.LessThan(first.Count * second.Count), "far clusters are not paired");
     }
 
     private struct FindRows : IForEachBatch<Walker>, INoStructuralChanges
@@ -592,7 +592,7 @@ public class OrderTests
 
         public void Execute(EntitySpan entities, Span<Walker> walkers)
         {
-            var all = entities.Blocks.Read<Walker>();
+            var all = entities.Clusters.Read<Walker>();
             for (int i = 0; i < walkers.Length; i++, Checked++)
                 Assert.That(all[entities.FirstRow + i], Is.EqualTo(walkers[i]));
         }
@@ -617,7 +617,7 @@ public class OrderTests
             ids[world.CreateEntity(mover).Id] = mover;
         }
 
-        foreach (var _ in world.Blocks<Mover>()) Assert.Fail("no order before the request");
+        foreach (var _ in world.Clusters<Mover>()) Assert.Fail("no order before the request");
         world.OrderRows<Mover, MoverOrder>(2, 1.5f, 5, 0.1f);
         for (int i = 0; i < 300; i++)
         {
@@ -627,18 +627,18 @@ public class OrderTests
 
         world.Update();
         int tables = 0;
-        foreach (var blocks in world.Blocks<Mover>())
+        foreach (var clusters in world.Clusters<Mover>())
         {
             tables++;
-            var movers = blocks.Read<Mover>();
-            Assert.That(blocks.SortedRows, Is.EqualTo(blocks.RowCount));
-            for (int r = 1; r < blocks.RowCount; r++)
+            var movers = clusters.Read<Mover>();
+            Assert.That(clusters.SortedRows, Is.EqualTo(clusters.RowCount));
+            for (int r = 1; r < clusters.RowCount; r++)
                 Assert.That(MoverOrder.Key(movers[r], 1.5f), Is.GreaterThanOrEqualTo(MoverOrder.Key(movers[r - 1], 1.5f)));
-            for (int b = 0; b < blocks.Count; b++)
-                for (int r = blocks.Start(b); r < blocks.End(b); r++)
+            for (int b = 0; b < clusters.Count; b++)
+                for (int r = clusters.Start(b); r < clusters.End(b); r++)
                 {
-                    Assert.That(movers[r].X, Is.InRange(blocks.Min(0)[b], blocks.Max(0)[b]));
-                    Assert.That(movers[r].Y, Is.InRange(blocks.Min(1)[b], blocks.Max(1)[b]));
+                    Assert.That(movers[r].X, Is.InRange(clusters.Min(0)[b], clusters.Max(0)[b]));
+                    Assert.That(movers[r].Y, Is.InRange(clusters.Min(1)[b], clusters.Max(1)[b]));
                 }
         }
 
@@ -654,34 +654,34 @@ public class OrderTests
         for (int i = 0; i < 200; i++) world.CreateEntity(new Walker(random.NextSingle() * 100, random.NextSingle() * 100));
         world.OrderRows<Walker, WalkerByX>(1, 1, 1, 0);
         world.Update();
-        foreach (var blocks in world.Blocks<Walker>())
+        foreach (var clusters in world.Clusters<Walker>())
         {
-            Assert.That(blocks.Axes, Is.EqualTo(2), "the declared order");
-            var walkers = blocks.Read<Walker>();
-            for (int r = 1; r < blocks.RowCount; r++) Assert.That(walkers[r].Cell, Is.GreaterThanOrEqualTo(walkers[r - 1].Cell));
+            Assert.That(clusters.Axes, Is.EqualTo(2), "the declared order");
+            var walkers = clusters.Read<Walker>();
+            for (int r = 1; r < clusters.RowCount; r++) Assert.That(walkers[r].Cell, Is.GreaterThanOrEqualTo(walkers[r - 1].Cell));
         }
     }
 
     [TestCase(0)]
     [TestCase(4)]
     [TestCase(16)]
-    public void ABlockHoldsTheRowsTheRequestAsksFor(int blockRows)
+    public void AClusterHoldsTheRowsTheRequestAsksFor(int clusterRows)
     {
         using var world = new World();
         var random = new Random(18);
         for (int i = 0; i < 301; i++) world.CreateEntity(new Mover(random.NextSingle() * 50, random.NextSingle() * 50));
-        world.OrderRows<Mover, MoverOrder>(2, 1, 1, 0, blockRows);
+        world.OrderRows<Mover, MoverOrder>(2, 1, 1, 0, clusterRows);
         world.Update();
-        foreach (var blocks in world.Blocks<Mover>())
+        foreach (var clusters in world.Clusters<Mover>())
         {
-            int size = blockRows == 0 ? (System.Runtime.Intrinsics.Vector256.IsHardwareAccelerated ? 8 : 4) : blockRows;
-            Assert.That(blocks.Size, Is.EqualTo(size));
-            Assert.That(blocks.Count, Is.EqualTo((301 + size - 1) / size));
-            Assert.That(blocks.End(blocks.Count - 1), Is.EqualTo(301));
-            var movers = blocks.Read<Mover>();
-            for (int b = 0; b < blocks.Count; b++)
-                for (int r = blocks.Start(b); r < blocks.End(b); r++)
-                    Assert.That(movers[r].X, Is.InRange(blocks.Min(0)[b], blocks.Max(0)[b]));
+            int size = clusterRows == 0 ? (System.Runtime.Intrinsics.Vector256.IsHardwareAccelerated ? 8 : 4) : clusterRows;
+            Assert.That(clusters.Size, Is.EqualTo(size));
+            Assert.That(clusters.Count, Is.EqualTo((301 + size - 1) / size));
+            Assert.That(clusters.End(clusters.Count - 1), Is.EqualTo(301));
+            var movers = clusters.Read<Mover>();
+            for (int b = 0; b < clusters.Count; b++)
+                for (int r = clusters.Start(b); r < clusters.End(b); r++)
+                    Assert.That(movers[r].X, Is.InRange(clusters.Min(0)[b], clusters.Max(0)[b]));
         }
 
         Assert.Throws<ArgumentOutOfRangeException>(() => world.OrderRows<Rank2, Rank2Order>(1, 1, 1, 0, 6));
@@ -717,16 +717,16 @@ public class OrderTests
     }
 
     [Test]
-    public void AComponentWithoutAnOrderHasNoBlocks()
+    public void AComponentWithoutAnOrderHasNoClusters()
     {
         using var world = new World();
         world.CreateEntity(new Health(1));
         world.SortRows<Health>();
-        foreach (var _ in world.Blocks<Health>()) Assert.Fail("no table is ordered by Health");
+        foreach (var _ in world.Clusters<Health>()) Assert.Fail("no table is ordered by Health");
     }
 
     [Test]
-    public void TrimKeepsTheBlocks()
+    public void TrimKeepsTheClusters()
     {
         using var world = new World();
         Populate(world, 4000, new Random(13));
@@ -736,7 +736,7 @@ public class OrderTests
         foreach (var entity in all.Skip(100)) entity.Destroy();
         world.TrimExcess();
         CheckOrdered(world);
-        foreach (var blocks in world.Blocks<Walker>()) Assert.That(blocks.SortedRows, Is.EqualTo(100));
+        foreach (var clusters in world.Clusters<Walker>()) Assert.That(clusters.SortedRows, Is.EqualTo(100));
     }
 
     [Test]

@@ -26,7 +26,7 @@ public static class Neighbors
     public const float Range = 1f;
     public const float Drag = 0.5f;
 
-    /// <summary>The crowd's separation: a vector loop of a window of rows against each neighbor.</summary>
+    /// <summary>The crowd's separation: a vector loop of a cluster of rows against each neighbor.</summary>
     [ForEach]
     public static void Separate(in PairSpot p, in PairDrift v, ref PairShove push, [Neighbor] in PairSpot q, [Neighbor] in PairDrift u)
     {
@@ -137,7 +137,7 @@ public static class Neighbors
         bag.Count++;
     }
 
-    /// <summary><see cref="Separate"/> on several threads (the vector loop over each chunk's windows).</summary>
+    /// <summary><see cref="Separate"/> on several threads (the vector loop over each chunk's clusters).</summary>
     [ForEach(Parallel = true)]
     public static void SeparateParallel(in PairSpot p, in PairDrift v, ref PairShove push, [Neighbor] in PairSpot q, [Neighbor] in PairDrift u)
     {
@@ -319,7 +319,7 @@ public class NeighborTests
         var random = new Random(1);
         for (int tick = 0; tick < 40; tick++)
         {
-            // Some rows jump far (their windows' boxes are left), the others drift: every pass equals every pair.
+            // Some rows jump far (their clusters' boxes are left), the others drift: every pass equals every pair.
             foreach (var item in world.Query<PairSpot>())
             {
                 ref var p = ref item.Component1;
@@ -528,7 +528,7 @@ public class NeighborTests
 
     [TestCase(1, 30000, 60f)]
     [TestCase(4, 30000, 60f)]
-    [TestCase(4, 20000, 6f)]   // dense: heavy windows
+    [TestCase(4, 20000, 6f)]   // dense: heavy clusters
     [TestCase(4, 900, 10f)]    // one chunk
     public void ParallelPassesEqualTheSerialOnesBitForBit(int threads, int count, float extent)
     {

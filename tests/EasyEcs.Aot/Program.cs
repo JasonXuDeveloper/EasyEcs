@@ -103,24 +103,24 @@ using (var keyed = new World())
     Check(off.AsSpan().SequenceEqual(on) && off.Any(v => v != 0), "prefetched probes and buffer chases find what today's passes do");
 }
 
-// An ordered table: the sort instantiated for the key type the generated part declares, its blocks and block pairs.
+// An ordered table: the sort instantiated for the key type the generated part declares, its clusters and cluster pairs.
 using (var crowd = new World())
 {
     for (int i = 0; i < 100; i++) crowd.CreateEntity(new Spot((i * 37) % 10, i % 10));
     crowd.SortRows<Spot>();
-    int blocks = 0, pairs = 0;
-    Span<BlockPair> found = stackalloc BlockPair[1024];
-    foreach (var table in crowd.Blocks<Spot>())
+    int clusters = 0, pairs = 0;
+    Span<ClusterPair> found = stackalloc ClusterPair[1024];
+    foreach (var table in crowd.Clusters<Spot>())
     {
-        blocks += table.Count;
+        clusters += table.Count;
         pairs += table.Pairs(1, found);
     }
 
-    Check(blocks > 0 && pairs >= blocks, "an ordered table's blocks and block pairs");
+    Check(clusters > 0 && pairs >= clusters, "an ordered table's clusters and cluster pairs");
 }
 
 // A pair method: the generated order (Morton keys of the neighbors' tables), the pair lists and the vector loop of a
-// window of rows against each neighbor, in native code; each row counts the others within 1.5 of it.
+// cluster of rows against each neighbor, in native code; each row counts the others within 1.5 of it.
 using (var flock = new World())
 {
     for (int i = 0; i < 200; i++) flock.CreateEntity(new Bird(i % 20, i / 20), new Near());
