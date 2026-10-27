@@ -127,7 +127,7 @@ internal sealed class Archetype
     public bool Dirty;
 
     /// <summary>
-    /// The order the rows are kept in and their blocks (<see cref="RowOrder"/>), for a table holding a component declared
+    /// The order the rows are kept in and their clusters (<see cref="RowOrder"/>), for a table holding a component declared
     /// with <see cref="OrderByAttribute">[OrderBy]</see>; null for every other table, which pays one null check where a
     /// row moves (<see cref="MoveRow"/>) or the rows shrink.
     /// </summary>
@@ -1044,7 +1044,7 @@ internal sealed class Archetype
         var entity = Unsafe.Add(ref rows, from);
         Unsafe.Add(ref rows, to) = entity;
         Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(meta), entity.Index).Slot = to;
-        if (Order != null) Order.Moved(this, to); // a row from elsewhere in the table joins the block of its new row
+        if (Order != null) Order.Moved(this, to); // a row from elsewhere in the table joins the cluster of its new row
     }
 
     /// <summary>
@@ -1198,7 +1198,7 @@ internal sealed class Archetype
         Count = AliveCount = count;
         _holeCount = 0;
         Dirty = false;
-        Order?.Reset(); // the rows come back in the order they were saved in; the blocks are drawn again by the next update
+        Order?.Reset(); // the rows come back in the order they were saved in; the clusters are drawn again by the next update
     }
 
     /// <summary>

@@ -10,7 +10,7 @@ namespace EasyEcs.Generator;
 /// Pair methods (<c>[Neighbor]</c> parameters, PairForm.cs): the pass runs the method for every pair of a row and a
 /// neighbor within the cutoff its body tests, through <c>World.ForPairs</c>. The generator writes the order of the
 /// compared component (the Morton code of its point by the cutoff, <c>{Name}Order{i}</c>), the job
-/// (<c>IPairJob</c>: the cutoff, once per pass or per row, and the windows of rows against their neighbors, as a vector
+/// (<c>IPairJob</c>: the cutoff, once per pass or per row, and the clusters of rows against their neighbors, as a vector
 /// loop where the body translates, else the method per pair) and the filters of both sides. The model is a body fact:
 /// a system's comes from its implementation stage (<see cref="LoopModel"/>), a runner's from its declaration.
 /// </summary>
@@ -21,7 +21,7 @@ public sealed partial class SystemGenerator
     /// <param name="Axes">The paths of its float fields the test compares, 1 to 3 (none without a test: every pair runs).</param>
     /// <param name="Cutoff">The squared cutoff as C# of the job (its fields <c>s{i}</c> / <c>x{i}</c>, and per row <c>__k{i}</c> at row <c>__r</c>), or "" (every pair).</param>
     /// <param name="PerRow">The cutoff reads the row's components: read for every row once per pass.</param>
-    /// <param name="Simd">The vector loop of one neighbor against a window (Kernel.Neighbors.cs), or null.</param>
+    /// <param name="Simd">The vector loop of one neighbor against a cluster (Kernel.Neighbors.cs), or null.</param>
     /// <param name="Scalar">Why the pairs run one at a time, when they do.</param>
     /// <param name="NoCutoff">Why no cutoff was found (EECS106), or "".</param>
     private sealed record PairModel(string Position, EquatableArray<string> Axes, string Cutoff, bool PerRow, Kernel.Code? Simd, string Scalar, string NoCutoff)
@@ -63,7 +63,7 @@ public sealed partial class SystemGenerator
         /// <summary>The line of SystemInfo.Loops: the cutoff and the loop.</summary>
         public string Describe(string name) =>
             $"{name}: pairs {(Cutoff.Length == 0 ? "of every row and neighbor (no cutoff test: " + NoCutoff + ")" : PerRow ? "within each row's cutoff" : "within the cutoff")}, "
-            + (Simd != null ? "a window of rows against each neighbor (vector)" : $"one pair at a time ({Scalar})");
+            + (Simd != null ? "a cluster of rows against each neighbor (vector)" : $"one pair at a time ({Scalar})");
     }
 
     /// <summary>A pair method's pass: its job over the rows of its filter against the neighbors.</summary>
@@ -132,7 +132,7 @@ public sealed partial class SystemGenerator
             sb.Append($"            run.Stamp<{p}>(); // the rows the method ran for, as a ref parameter stamps them\n");
         sb.Append("        }\n\n");
 
-        // The method per pair: each row of a window against its neighbors, in row order.
+        // The method per pair: each row of a cluster against its neighbors, in row order.
         int column = 0;
         var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
         {
@@ -145,7 +145,7 @@ public sealed partial class SystemGenerator
             _ => "default", // EECS105 reports the parameter
         }).Prepend(owner.AccessorArgument));
         // The test's distance from the row's point and the neighbor's, in float as the method computes it: a neighbor
-        // past the window's reach (over every cutoff of its rows by a margin far above the rounding) fails the method's
+        // past the cluster's reach (over every cutoff of its rows by a margin far above the rounding) fails the method's
         // test, so it is skipped without a call. NaN never skips.
         int rowColumn = 0, rowPoint = 0, otherPoint = -1;
         foreach (var p in method.Parameters)
@@ -184,7 +184,7 @@ public sealed partial class SystemGenerator
 
         if (pair.Simd is { } simd)
         {
-            // A window of rows in the lanes against one neighbor at a time; the window's writes stored once, its rows only.
+            // A cluster of rows in the lanes against one neighbor at a time; the cluster's writes stored once, its rows only.
             var loop = new StringBuilder();
             loop.Append(Columns(""));
             var components = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Component).Select(p => p.Type).ToArray();

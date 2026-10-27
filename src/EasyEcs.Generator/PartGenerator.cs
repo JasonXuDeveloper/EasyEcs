@@ -124,7 +124,7 @@ public sealed class PartGenerator : IIncrementalGenerator
             bases.Add(face);
             body.Append($"/// <summary>The key the world keeps the entity's table ordered by: {order.Member} (from [OrderBy]).</summary>\n");
             body.Append($"{code}\n{modifier}{order.Type} {face}.OrderKey => {order.Member};\n");
-            body.Append($"/// <summary>The point the boxes of the table's blocks cover ({order.Axes} axes, from [OrderBy]).</summary>\n");
+            body.Append($"/// <summary>The point the boxes of the table's clusters cover ({order.Axes} axes, from [OrderBy]).</summary>\n");
             body.Append($"{code}\n{modifier}global::System.Numerics.Vector3 {face}.BoxPoint => {order.Point};\n");
         }
 

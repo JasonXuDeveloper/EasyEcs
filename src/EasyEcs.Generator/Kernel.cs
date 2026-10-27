@@ -115,9 +115,9 @@ internal sealed partial class Kernel
         public bool Wide128 { get; init; }
 
         /// <summary>
-        /// The loop of a pair method (Kernel.Neighbors.cs): <see cref="Setup"/> before the windows, <see cref="Body"/>
-        /// the loads of a window's rows, <see cref="MaskedBody"/> one neighbor against them (its values broadcast
-        /// first), <see cref="MaskedStores"/> the window's stores; the lanes are a window's (<c>__pass</c>).
+        /// The loop of a pair method (Kernel.Neighbors.cs): <see cref="Setup"/> before the clusters, <see cref="Body"/>
+        /// the loads of a cluster's rows, <see cref="MaskedBody"/> one neighbor against them (its values broadcast
+        /// first), <see cref="MaskedStores"/> the cluster's stores; the lanes are a cluster's (<c>__pass</c>).
         /// </summary>
         public bool Pairs { get; init; }
     }
@@ -413,7 +413,7 @@ internal sealed partial class Kernel
     /// or the method a view's desugared local function stands for (Kernel.Views.cs).</param>
     private sealed record Lane(IMethodSymbol Method, bool Outside, bool Parallel, bool Fast, SemanticModel Model, bool Stable, IMethodSymbol? Declaration = null)
     {
-        /// <summary>A pair method ([Neighbor] parameters): the loop is the body of one neighbor against a window of rows (Kernel.Neighbors.cs).</summary>
+        /// <summary>A pair method ([Neighbor] parameters): the loop is the body of one neighbor against a cluster of rows (Kernel.Neighbors.cs).</summary>
         public bool Pairs { get; init; }
     }
 

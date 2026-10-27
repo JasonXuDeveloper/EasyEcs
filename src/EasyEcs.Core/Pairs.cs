@@ -29,7 +29,7 @@ namespace EasyEcs;
 /// The cutoff may be a value of the row (<c>if (d2 &gt;= z.Vision * z.Vision) return;</c>), and the neighbors may be
 /// other entities than the method's (the <c>[Neighbor]</c> components say which). The tables holding the compared
 /// component keep their rows in space order (inferred from the test: <see cref="World.OrderRows{T, TOrder}"/>), and
-/// the pass reads a window of rows against the rows within the cutoff only, a vector of rows per instruction where the
+/// the pass reads a cluster of rows against the rows within the cutoff only, a vector of rows per instruction where the
 /// method qualifies. The pairs of a row run in the order of the tables' rows (not of the entities): a method that keeps
 /// the nearest neighbor breaks ties by the entity (the lower <see cref="EntityId.Index"/>), so its result is the same
 /// whatever the order.
@@ -40,7 +40,7 @@ public sealed class NeighborAttribute : Attribute;
 /// <summary>
 /// The job of a pair method (<see cref="NeighborAttribute">[Neighbor]</see> parameters), written by the generator:
 /// the cutoff its distance test compares against and the method over one table's rows against another's (or its own),
-/// window by window. <see cref="World.ForPairs{T, TOrder, TJob}"/> runs it.
+/// cluster by cluster. <see cref="World.ForPairs{T, TOrder, TJob}"/> runs it.
 /// </summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public interface IPairJob
@@ -60,20 +60,20 @@ public interface IPairJob
 
     /// <summary>
     /// The square of each row's cutoff (as <see cref="CutoffSquared"/>) for the rows of <paramref name="table"/>'s
-    /// table (<see cref="PairRun.Rows{T}"/>; it has no windows): row r into <paramref name="into"/>[r]. Read once per
+    /// table (<see cref="PairRun.Rows{T}"/>; it has no clusters): row r into <paramref name="into"/>[r]. Read once per
     /// pass when <see cref="CutoffPerRow"/>.
     /// </summary>
     void CutoffsSquared(in PairRun table, Span<double> into);
 
     /// <summary>
-    /// The rows of <see cref="PairRun"/>'s table against the rows of its other table, windows
+    /// The rows of <see cref="PairRun"/>'s table against the rows of its other table, clusters
     /// <see cref="PairRun.First"/> to <see cref="PairRun.End"/> - 1 (all of them, or one chunk's of a parallel pass, which
-    /// runs on several threads: each writes its windows' rows only).
+    /// runs on several threads: each writes its clusters' rows only).
     /// </summary>
     void Run(in PairRun run);
 
     /// <summary>
-    /// Stamp the rows of the method's table the run's windows ran for in the tracked components the method writes of
+    /// Stamp the rows of the method's table the run's clusters ran for in the tracked components the method writes of
     /// its row, after <see cref="Run"/> (after every chunk of a parallel pass, on the calling thread).
     /// </summary>
     void Stamp(in PairRun run);
@@ -81,8 +81,8 @@ public interface IPairJob
 
 /// <summary>
 /// One table's rows (the method's own) against one table's rows (the neighbors': the same table or another) for a pair
-/// job (<see cref="IPairJob.Run"/>): windows of <see cref="Size"/> rows of the first, each with the rows of the
-/// other to visit (<see cref="Ranges"/>), every other row farther than the cutoff from all of the window's.
+/// job (<see cref="IPairJob.Run"/>): clusters of <see cref="Size"/> rows of the first, each with the rows of the
+/// other to visit (<see cref="Ranges"/>), every other row farther than the cutoff from all of the cluster's.
 /// Valid during the call it is passed to.
 /// </summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
@@ -111,53 +111,53 @@ public readonly ref struct PairRun
         _size = size;
     }
 
-    /// <summary>Rows per window: a vector of floats (8 where 256-bit vectors are hardware, 4 on ARM64).</summary>
+    /// <summary>Rows per cluster: a vector of floats (8 where 256-bit vectors are hardware, 4 on ARM64).</summary>
     public int Size => _size;
 
-    /// <summary>The first window of the method's table this run covers: row <c>w * Size</c> starts window w.</summary>
+    /// <summary>The first cluster of the method's table this run covers: row <c>w * Size</c> starts cluster w.</summary>
     public int First => _first;
 
-    /// <summary>The window after the last this run covers (the table's window count, or a chunk's end).</summary>
+    /// <summary>The cluster after the last this run covers (the table's cluster count, or a chunk's end).</summary>
     public int End => _end;
 
-    /// <summary>The rows of the method's table (rows of the last window past it are none).</summary>
+    /// <summary>The rows of the method's table (rows of the last cluster past it are none).</summary>
     public int Count => _table.Count;
 
-    /// <summary>The neighbors' table is the method's own: a row meets itself in its own window.</summary>
+    /// <summary>The neighbors' table is the method's own: a row meets itself in its own cluster.</summary>
     public bool Same => ReferenceEquals(_table, _other);
 
     /// <summary>
-    /// The rows of window <paramref name="window"/> the method runs for, one bit per row from its first (row
-    /// <c>window * Size</c>): rows of the table that pass the method's filter. A whole window is
+    /// The rows of cluster <paramref name="cluster"/> the method runs for, one bit per row from its first (row
+    /// <c>cluster * Size</c>): rows of the table that pass the method's filter. A whole cluster is
     /// <c>(1 &lt;&lt; Size) - 1</c>. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ulong Lanes(int window)
+    public ulong Lanes(int cluster)
     {
-        int row = window * _size;
-        // _rows holds a word per 64 rows of every window (Size divides 64): in bounds for every window.
+        int row = cluster * _size;
+        // _rows holds a word per 64 rows of every cluster (Size divides 64): in bounds for every cluster.
         ulong word = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_rows), row >> 6);
         return (word >> (row & 63)) & (ulong.MaxValue >> (64 - _size));
     }
 
     /// <summary>
-    /// The rows of the other table window <paramref name="window"/> meets, as (first, end) pairs in row order; every
-    /// row outside them is farther than the cutoff from each of the window's. O(1).
+    /// The rows of the other table cluster <paramref name="cluster"/> meets, as (first, end) pairs in row order; every
+    /// row outside them is farther than the cutoff from each of the cluster's. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ReadOnlySpan<int> Ranges(int window)
+    public ReadOnlySpan<int> Ranges(int cluster)
     {
-        int start = _starts[window];
-        return _ranges.AsSpan(start, _starts[window + 1] - start);
+        int start = _starts[cluster];
+        return _ranges.AsSpan(start, _starts[cluster + 1] - start);
     }
 
     /// <summary>
-    /// The reach of window <paramref name="window"/> this pass: the largest cutoff of its rows, a little over it (never
+    /// The reach of cluster <paramref name="cluster"/> this pass: the largest cutoff of its rows, a little over it (never
     /// below: a pair farther than it fails the method's test), infinity without a cutoff. The method per pair skips the
     /// neighbors past it without a call. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public float Reach(int window) => _reach[window];
+    public float Reach(int cluster) => _reach[cluster];
 
     /// <summary>Some rows of the other table fail the neighbors' filter: <see cref="Skip"/> tells which.</summary>
     public bool Skips => _neighbors != null;
@@ -174,7 +174,7 @@ public readonly ref struct PairRun
     /// <summary>Row 0 of the other table's column of <typeparamref name="T"/> (a component of the neighbors' filter). O(1).</summary>
     public ref T Others<T>() where T : struct, IComponent => ref _other.Data<T>(_other.ColumnIndex(ComponentType<T>.Bit));
 
-    /// <summary>What a chunk of a parallel pass rebuilds the run from (its own windows).</summary>
+    /// <summary>What a chunk of a parallel pass rebuilds the run from (its own clusters).</summary>
     internal (World, Archetype, Archetype, ulong[], ulong[], int[], int[], float[]) Parts() =>
         (_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach);
 
@@ -185,7 +185,7 @@ public readonly ref struct PairRun
     public Entity Other(int row) => new(_world, _other.Slots[row]);
 
     /// <summary>
-    /// Stamp the rows the method runs for in the run's windows of the method's table as written now (a tracked
+    /// Stamp the rows the method runs for in the run's clusters of the method's table as written now (a tracked
     /// <typeparamref name="T"/> it writes; nothing for another). O(rows / 64). Calling thread only.
     /// </summary>
     public void Stamp<T>() where T : struct, IComponent
@@ -214,7 +214,7 @@ public readonly ref struct PairRun
 
 public sealed partial class World
 {
-    // The state of each pair job type this world ran (PairJobs<TJob>.Id): its windows' boxes and lists.
+    // The state of each pair job type this world ran (PairJobs<TJob>.Id): its clusters' boxes and lists.
     private PairState[] _pairStates = [];
 
     /// <summary>
@@ -222,8 +222,8 @@ public sealed partial class World
     /// <paramref name="rows"/> against the rows matching <paramref name="neighbors"/>, both holding
     /// <typeparamref name="T"/>, whose point <typeparamref name="TOrder"/> reads (<paramref name="axes"/> axes). The
     /// tables of <typeparamref name="T"/> are ordered by <typeparamref name="TOrder"/>'s key the first time (sorted at
-    /// once outside a parallel stage); windows of rows get boxes over their points, checked every pass and widened by
-    /// a margin, so the lists of windows within the cutoff hold until a row leaves its box, a table changes or a
+    /// once outside a parallel stage); clusters of rows get boxes over their points, checked every pass and widened by
+    /// a margin, so the lists of clusters within the cutoff hold until a row leaves its box, a table changes or a
     /// row's cutoff grows. Owner thread (or the system's), outside other passes; allocation-free in steady state.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
@@ -248,9 +248,9 @@ public sealed partial class World
 
     /// <summary>
     /// <see cref="ForPairs{T, TOrder, TJob}"/> on several threads (a <c>[ForEach(Parallel = true)]</c> pair method that
-    /// writes no neighbor): the boxes and lists are drawn on the calling thread as there, then each table's windows are
-    /// cut into chunks of whole 64-row words (about four per thread, or by the windows' measured cost) that the chunk
-    /// runner's threads claim, each running a copy of the job over its windows' rows: a row is written by its own window
+    /// writes no neighbor): the boxes and lists are drawn on the calling thread as there, then each table's clusters are
+    /// cut into chunks of whole 64-row words (about four per thread, or by the clusters' measured cost) that the chunk
+    /// runner's threads claim, each running a copy of the job over its clusters' rows: a row is written by its own cluster
     /// only, so the result is the serial pass's bit for bit. Stamps follow on the calling thread. Owner thread, outside
     /// other passes; allocation-free after the first call per job type.
     /// </summary>
@@ -266,13 +266,13 @@ public sealed partial class World
             while (state.Next<T, TOrder, TJob>(this, ref job, axes, reach, out var run))
             {
                 // Chunks of whole words of rows: a chunk's rows never share a presence or tick word with another's.
-                int perWord = 64 / run.Size, windows = run.End;
-                int size = ChunkRows(work, (long)windows * run.Size, 0) / run.Size;
+                int perWord = 64 / run.Size, clusters = run.End;
+                int size = ChunkRows(work, (long)clusters * run.Size, 0) / run.Size;
                 size = (size + perWord - 1) / perWord * perWord;
                 work.Set(job, in run, size);
                 try
                 {
-                    RunChunks(work, (windows + size - 1) / size); // one chunk runs here, timed now and then as any pass
+                    RunChunks(work, (clusters + size - 1) / size); // one chunk runs here, timed now and then as any pass
                 }
                 finally
                 {
@@ -301,7 +301,7 @@ public sealed partial class World
         return state;
     }
 
-    /// <summary>The chunks of a parallel pair pass over one table against one: chunk i is windows [i × Size, (i + 1) × Size).</summary>
+    /// <summary>The chunks of a parallel pair pass over one table against one: chunk i is clusters [i × Size, (i + 1) × Size).</summary>
     private sealed class PairChunks<TJob> : ParallelWork where TJob : struct, IPairJob
     {
         private TJob _job;
@@ -310,22 +310,22 @@ public sealed partial class World
         private ulong[] _rows, _neighbors;
         private int[] _starts, _ranges;
         private float[] _reach;
-        private int _end, _size, _windows;
+        private int _end, _size, _clusters;
 
-        public void Set(TJob job, in PairRun run, int windows)
+        public void Set(TJob job, in PairRun run, int clusters)
         {
             _job = job;
             (_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach) = run.Parts();
             _end = run.End;
             _size = run.Size;
-            _windows = windows;
+            _clusters = clusters;
         }
 
         public override void Run(int index)
         {
             var job = _job;
-            int first = index * _windows;
-            job.Run(new PairRun(_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach, first, Math.Min(first + _windows, _end), _size));
+            int first = index * _clusters;
+            job.Run(new PairRun(_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach, first, Math.Min(first + _clusters, _end), _size));
         }
 
         /// <summary>Drop the references of the last call until the next one.</summary>
@@ -384,9 +384,9 @@ internal static class PairJobs
 }
 
 /// <summary>
-/// What one pair job keeps in one world between passes: per table, the boxes of its windows of rows (each widened by
-/// the margin when kept) and the reach of each window (the largest cutoff of its rows), and per pair of tables, the
-/// windows of the other that each window's box widened by its reach meets (as row ranges). A pass draws every window's
+/// What one pair job keeps in one world between passes: per table, the boxes of its clusters of rows (each widened by
+/// the margin when kept) and the reach of each cluster (the largest cutoff of its rows), and per pair of tables, the
+/// clusters of the other that each cluster's box widened by its reach meets (as row ranges). A pass draws every cluster's
 /// box again and compares it with the kept one: while every box stays inside and no reach grows, the lists hold (no
 /// pair within the cutoff can be missing); a box that left, a table that grew, shrank or was sorted, or a reach that
 /// grew draws them again. Owner thread only (the job's pass); memory bounded by the tables.
@@ -402,7 +402,7 @@ internal sealed class PairState
     /// <summary>The tables of the component are ordered for this job (or by another request or [OrderBy]).</summary>
     public bool Ordered;
 
-    private Windows[] _tables = new Windows[4];
+    private Clusters[] _tables = new Clusters[4];
     private int _tableCount;
     private PairList[] _lists = new PairList[4];
     private int _listCount;
@@ -416,7 +416,7 @@ internal sealed class PairState
     private ulong[] _rows = new ulong[64], _neighbors = new ulong[64];
     private double[] _cutoffs = new double[64];
 
-    // Scratch of the sweep that finds the windows within reach.
+    // Scratch of the sweep that finds the clusters within reach.
     private float[] _keys = new float[64], _sides = new float[64 * 5];
     private int[] _ids = new int[64];
     private int[] _pairA = new int[64], _pairB = new int[64];
@@ -434,9 +434,9 @@ internal sealed class PairState
         return float.IsFinite(reach) ? reach : float.PositiveInfinity;
     }
 
-    // The pass's cursor: the tables of each side, the method's table being run (its windows) and the next neighbors' one.
+    // The pass's cursor: the tables of each side, the method's table being run (its clusters) and the next neighbors' one.
     private QueryMatch _mine, _theirs;
-    private Windows _own;
+    private Clusters _own;
     private int _a, _b;
 
     /// <summary>A pass begins: its tables, the cursor before the first pair of tables (<see cref="Next"/>).</summary>
@@ -450,8 +450,8 @@ internal sealed class PairState
     }
 
     /// <summary>
-    /// The next pair of tables of the pass (a table of rows, then each table of neighbors), its windows checked and
-    /// its lists drawn: all its windows into <paramref name="run"/>; false after the last.
+    /// The next pair of tables of the pass (a table of rows, then each table of neighbors), its clusters checked and
+    /// its lists drawn: all its clusters into <paramref name="run"/>; false after the last.
     /// </summary>
     public bool Next<T, TOrder, TJob>(World world, scoped ref TJob job, int axes, float reach, out PairRun run)
         where T : struct, IComponent where TOrder : struct, IRowOrder<T> where TJob : struct, IPairJob, allows ref struct
@@ -494,7 +494,7 @@ internal sealed class PairState
             bool skips = otherMode == RowFilter.Test || other.Count != other.AliveCount;
             if (skips) Passing(other, otherFilter, otherMode, ref _neighbors);
             var list = ListOf(own, their);
-            run = new PairRun(world, own.Table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.Reach, 0, own.WindowCount, size);
+            run = new PairRun(world, own.Table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.Reach, 0, own.ClusterCount, size);
             return true;
         }
     }
@@ -519,15 +519,15 @@ internal sealed class PairState
     }
 
     /// <summary>
-    /// Each window's reach of <paramref name="windows"/> (the largest of its passing rows' cutoffs; every row's
-    /// <paramref name="reach"/> unless NaN: a cutoff per row), into <see cref="Windows.Reach"/>; true when one grew past
+    /// Each cluster's reach of <paramref name="clusters"/> (the largest of its passing rows' cutoffs; every row's
+    /// <paramref name="reach"/> unless NaN: a cutoff per row), into <see cref="Clusters.Reach"/>; true when one grew past
     /// its kept reach. O(rows).
     /// </summary>
-    private bool Reaches<TJob>(World world, ref TJob job, Windows windows, float reach) where TJob : struct, IPairJob, allows ref struct
+    private bool Reaches<TJob>(World world, ref TJob job, Clusters clusters, float reach) where TJob : struct, IPairJob, allows ref struct
     {
-        var table = windows.Table;
-        int count = table.Count, size = windows.Size, n = windows.WindowCount;
-        var reaches = windows.Reach;
+        var table = clusters.Table;
+        int count = table.Count, size = clusters.Size, n = clusters.ClusterCount;
+        var reaches = clusters.Reach;
         float largest = 0;
         if (!float.IsNaN(reach))
         {
@@ -556,67 +556,67 @@ internal sealed class PairState
             if (float.IsNaN(_margin)) _margin = largest * MarginShare;
         }
 
-        var kept = windows.KeptReach;
+        var kept = clusters.KeptReach;
         for (int w = 0; w < n; w++)
             if (reaches[w] > kept[w]) return true;
         return false;
     }
 
     /// <summary>
-    /// The windows of <paramref name="table"/>, their boxes checked against the rows' points now (once per pass): kept
+    /// The clusters of <paramref name="table"/>, their boxes checked against the rows' points now (once per pass): kept
     /// again (and the lists of the table drawn again with them) when the table was sorted, grew or shrank, or a
-    /// window's rows left its kept box.
+    /// cluster's rows left its kept box.
     /// </summary>
-    private Windows Refresh<T, TOrder>(Archetype table, int bit, int axes, int size)
+    private Clusters Refresh<T, TOrder>(Archetype table, int bit, int axes, int size)
         where T : struct, IComponent where TOrder : struct, IRowOrder<T>
     {
-        Windows windows = null;
+        Clusters clusters = null;
         for (int i = 0; i < _tableCount; i++)
             if (ReferenceEquals(_tables[i].Table, table))
             {
-                windows = _tables[i];
+                clusters = _tables[i];
                 break;
             }
 
-        if (windows == null)
+        if (clusters == null)
         {
             if (_tableCount == _tables.Length) Array.Resize(ref _tables, _tableCount * 2);
-            _tables[_tableCount++] = windows = new Windows(table);
+            _tables[_tableCount++] = clusters = new Clusters(table);
         }
 
-        if (windows.Pass == _pass) return windows;
-        windows.Pass = _pass;
+        if (clusters.Pass == _pass) return clusters;
+        clusters.Pass = _pass;
         int count = table.Count, n = (count + size - 1) / size;
         long version = table.Order?.Version ?? 0;
-        windows.Reserve(n);
-        bool changed = !windows.Kept || windows.Count != count || windows.Version != version || windows.Size != size;
-        windows.Size = size;
-        windows.WindowCount = n;
-        windows.Axes = axes;
-        bool escaped = windows.Draw<T, TOrder>(table, bit, !changed);
-        windows.Passes++;
+        clusters.Reserve(n);
+        bool changed = !clusters.Kept || clusters.Count != count || clusters.Version != version || clusters.Size != size;
+        clusters.Size = size;
+        clusters.ClusterCount = n;
+        clusters.Axes = axes;
+        bool escaped = clusters.Draw<T, TOrder>(table, bit, !changed);
+        clusters.Passes++;
         if (float.IsFinite(_margin))
         {
-            if (escaped && windows.Passes < Interval / 2) _margin = Math.Min(_margin * 1.5f, _largest); // the rows move fast
-            else if (changed && windows.Kept && !windows.Escapes) _margin = Math.Max(_margin * 0.9f, _largest * 0.02f); // a sort came first
+            if (escaped && clusters.Passes < Interval / 2) _margin = Math.Min(_margin * 1.5f, _largest); // the rows move fast
+            else if (changed && clusters.Kept && !clusters.Escapes) _margin = Math.Max(_margin * 0.9f, _largest * 0.02f); // a sort came first
         }
 
         if (changed || escaped)
         {
-            windows.Count = count;
-            windows.Version = version;
-            windows.Passes = 0;
-            windows.Escapes = escaped;
-            Keep(windows);
+            clusters.Count = count;
+            clusters.Version = version;
+            clusters.Passes = 0;
+            clusters.Escapes = escaped;
+            Keep(clusters);
         }
 
-        return windows;
+        return clusters;
     }
 
-    private void Keep(Windows windows) => windows.Keep(float.IsFinite(_margin) ? _margin : 0);
+    private void Keep(Clusters clusters) => clusters.Keep(float.IsFinite(_margin) ? _margin : 0);
 
-    /// <summary>The windows of <paramref name="other"/> each window of <paramref name="table"/> meets, drawn again when either was kept again.</summary>
-    private PairList ListOf(Windows table, Windows other)
+    /// <summary>The clusters of <paramref name="other"/> each cluster of <paramref name="table"/> meets, drawn again when either was kept again.</summary>
+    private PairList ListOf(Clusters table, Clusters other)
     {
         PairList list = null;
         for (int i = 0; i < _listCount; i++)
@@ -637,18 +637,18 @@ internal sealed class PairState
     }
 
     /// <summary>
-    /// The pairs (window of the table, window of the other) where the table's kept box widened by the window's kept
+    /// The pairs (cluster of the table, cluster of the other) where the table's kept box widened by the cluster's kept
     /// reach meets the other's kept box on every axis (a sweep over both sets of boxes sorted by their low side on axis
-    /// 0, as <see cref="RowBlocks.Pairs(float, Span{BlockPair})"/>), then per window of the table the other's windows
-    /// in row order, as row ranges (neighboring windows merged). One table against itself sweeps its boxes twice, once
-    /// widened, once not, so a window meets itself and each direction of a pair is tested with its own reach.
-    /// O(windows log windows + pairs).
+    /// 0, as <see cref="RowClusters.Pairs(float, Span{ClusterPair})"/>), then per cluster of the table the other's clusters
+    /// in row order, as row ranges (neighboring clusters merged). One table against itself sweeps its boxes twice, once
+    /// widened, once not, so a cluster meets itself and each direction of a pair is tested with its own reach.
+    /// O(clusters log clusters + pairs).
     /// </summary>
     private void Draw(PairList list)
     {
         var a = list.Table;
         var b = list.Other;
-        int na = a.WindowCount, nb = b.WindowCount, axes = a.Axes;
+        int na = a.ClusterCount, nb = b.ClusterCount, axes = a.Axes;
         int m = 0, n = na + nb;
         if (_keys.Length < n)
         {
@@ -705,7 +705,7 @@ internal sealed class PairState
             }
         }
 
-        // Per window of a: its windows of b in row order (a counting sort by window of a, then each list sorted).
+        // Per cluster of a: its clusters of b in row order (a counting sort by cluster of a, then each list sorted).
         list.Reserve(na, found);
         var starts = list.Starts;
         Array.Clear(starts, 0, na + 2);
@@ -713,7 +713,7 @@ internal sealed class PairState
         for (int i = 0; i < na; i++) starts[i + 2] += starts[i + 1];
         var order = list.Order;
         for (int k = 0; k < found; k++) order[starts[_pairA[k] + 1]++] = _pairB[k];
-        // starts[i + 1] is now the end of window i's windows, starts[i] its start.
+        // starts[i + 1] is now the end of cluster i's clusters, starts[i] its start.
         int size = b.Size, rows = b.Count, at = 0;
         var ranges = list.Ranges;
         for (int i = 0; i < na; i++)
@@ -724,7 +724,7 @@ internal sealed class PairState
             for (int k = from; k < to; k++)
             {
                 int first = order[k] * size, end = Math.Min(first + size, rows);
-                if (at > starts[i] && ranges[at - 1] == first) ranges[at - 1] = end; // the window after the last: one range
+                if (at > starts[i] && ranges[at - 1] == first) ranges[at - 1] = end; // the cluster after the last: one range
                 else
                 {
                     ranges[at++] = first;
@@ -751,25 +751,25 @@ internal sealed class PairState
     }
 
     /// <summary>
-    /// One table's windows: the boxes kept (the margin added when kept) and the boxes of this pass, axis-major: axis k
-    /// of window w at <c>k * Capacity + w</c>, and each window's reach (this pass's and the one kept). A window whose
-    /// rows hold a NaN point gets a box over everything, so it meets every window (a NaN distance passes a test of the
+    /// One table's clusters: the boxes kept (the margin added when kept) and the boxes of this pass, axis-major: axis k
+    /// of cluster w at <c>k * Capacity + w</c>, and each cluster's reach (this pass's and the one kept). A cluster whose
+    /// rows hold a NaN point gets a box over everything, so it meets every cluster (a NaN distance passes a test of the
     /// form <c>if (d2 &gt;= r2) return</c>).
     /// </summary>
-    private sealed class Windows(Archetype table)
+    private sealed class Clusters(Archetype table)
     {
         public readonly Archetype Table = table;
         public bool Kept, Escapes;
-        public int Count, Size, WindowCount, Builds, Passes, Pass, Axes, Capacity;
+        public int Count, Size, ClusterCount, Builds, Passes, Pass, Axes, Capacity;
         public long Version;
         public float[] Low = [], High = [], Reach = [], KeptReach = [];
         private float[] _low = [], _high = [];
 
-        public void Reserve(int windows)
+        public void Reserve(int clusters)
         {
-            if (windows <= Capacity) return;
-            int capacity = Math.Max(windows, Capacity * 2);
-            // Growing means the count changed: the windows are kept again this pass, nothing to copy.
+            if (clusters <= Capacity) return;
+            int capacity = Math.Max(clusters, Capacity * 2);
+            // Growing means the count changed: the clusters are kept again this pass, nothing to copy.
             Low = new float[3 * capacity];
             High = new float[3 * capacity];
             _low = new float[3 * capacity];
@@ -781,20 +781,20 @@ internal sealed class PairState
         }
 
         /// <summary>
-        /// The box of each window over the points of its rows that hold the component, into this pass's boxes; when
-        /// <paramref name="check"/>, whether some window's box left the kept one (its rows moved past the margin).
+        /// The box of each cluster over the points of its rows that hold the component, into this pass's boxes; when
+        /// <paramref name="check"/>, whether some cluster's box left the kept one (its rows moved past the margin).
         /// O(rows).
         /// </summary>
         public bool Draw<T, TOrder>(Archetype table, int bit, bool check)
             where T : struct, IComponent where TOrder : struct, IRowOrder<T>
         {
             int column = table.ColumnIndex(bit), count = table.Count, c = Capacity, size = Size, axes = Axes;
-            if (column < 0) return Everywhere(windows: WindowCount); // no point: a method without a cutoff test, every pair runs
+            if (column < 0) return Everywhere(clusters: ClusterCount); // no point: a method without a cutoff test, every pair runs
             ref T row0 = ref table.Data<T>(column);
             var present = table.Bits(column);
             bool escaped = false;
             var infinity = Vector128.Create(float.PositiveInfinity);
-            for (int w = 0, windows = WindowCount; w < windows; w++)
+            for (int w = 0, clusters = ClusterCount; w < clusters; w++)
             {
                 var low = infinity;
                 var high = -infinity;
@@ -826,11 +826,11 @@ internal sealed class PairState
             return escaped;
         }
 
-        /// <summary>Boxes over everything for every window (their rows have no point): never left.</summary>
-        private bool Everywhere(int windows)
+        /// <summary>Boxes over everything for every cluster (their rows have no point): never left.</summary>
+        private bool Everywhere(int clusters)
         {
             for (int k = 0, c = Capacity; k < Axes; k++)
-                for (int w = 0; w < windows; w++)
+                for (int w = 0; w < clusters; w++)
                 {
                     _low[k * c + w] = float.NegativeInfinity;
                     _high[k * c + w] = float.PositiveInfinity;
@@ -842,30 +842,30 @@ internal sealed class PairState
         /// <summary>Keep this pass's boxes, widened by <paramref name="margin"/> on every side, and the reaches.</summary>
         public void Keep(float margin)
         {
-            int c = Capacity, windows = WindowCount;
+            int c = Capacity, clusters = ClusterCount;
             for (int k = 0; k < Axes; k++)
-                for (int w = 0; w < windows; w++)
+                for (int w = 0; w < clusters; w++)
                 {
                     Low[k * c + w] = _low[k * c + w] - margin;
                     High[k * c + w] = _high[k * c + w] + margin;
                 }
 
-            Array.Copy(Reach, KeptReach, windows);
+            Array.Copy(Reach, KeptReach, clusters);
             Kept = true;
             Builds++;
         }
     }
 
-    /// <summary>Per window of a table, the row ranges of another table (or its own) to visit, and the keeps they were drawn from.</summary>
-    private sealed class PairList(Windows table, Windows other)
+    /// <summary>Per cluster of a table, the row ranges of another table (or its own) to visit, and the keeps they were drawn from.</summary>
+    private sealed class PairList(Clusters table, Clusters other)
     {
-        public readonly Windows Table = table, Other = other;
+        public readonly Clusters Table = table, Other = other;
         public int Builds = -1, OtherBuilds = -1;
         public int[] Starts = [], Ranges = [], Order = [];
 
-        public void Reserve(int windows, int pairs)
+        public void Reserve(int clusters, int pairs)
         {
-            if (Starts.Length < windows + 2) Starts = new int[Math.Max(windows + 2, Starts.Length * 2)];
+            if (Starts.Length < clusters + 2) Starts = new int[Math.Max(clusters + 2, Starts.Length * 2)];
             if (Order.Length < pairs) Order = new int[Math.Max(pairs, Order.Length * 2)];
             if (Ranges.Length < 2 * pairs) Ranges = new int[Math.Max(2 * pairs, Ranges.Length * 2)];
         }

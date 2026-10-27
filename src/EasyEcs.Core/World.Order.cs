@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 namespace EasyEcs;
 
 // Ordered tables ([OrderBy], RowOrder): the cadence that re-sorts them, the sort on request, and the read path of their
-// blocks.
+// clusters.
 public sealed partial class World
 {
     // Whether any table of this world was ever ordered: an update looks for due sorts only then.
@@ -24,25 +24,25 @@ public sealed partial class World
     /// a generated pair method calls for the component it compares positions of (the key the Morton code of the
     /// position, <paramref name="cell"/> the cutoff). The rows are sorted at the next update, then every
     /// <paramref name="interval"/> updates; between sorts a row may move <paramref name="margin"/> and stay inside its
-    /// block's box. A block holds <paramref name="blockRows"/> rows: 0 for the machine's vector of floats (8 where
+    /// cluster's box. A cluster holds <paramref name="clusterRows"/> rows: 0 for the machine's vector of floats (8 where
     /// 256-bit vectors are hardware, 4 on ARM64), or a power of two up to 64. The first request for a component stands; <see cref="OrderByAttribute">[OrderBy]</see> on it
     /// overrides every request; a table holding several ordered components keeps one of their orders. A table
     /// no request or declaration orders pays nothing. Owner thread, between passes (throws during one). O(tables);
     /// allocates the request once.
     /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">An axis count above 3, a cell that is not a finite size above 0, an interval below 1, a margin that is not a finite distance of 0 or more, or a block size that is neither 0 nor a power of two up to 64.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An axis count above 3, a cell that is not a finite size above 0, an interval below 1, a margin that is not a finite distance of 0 or more, or a cluster size that is neither 0 nor a power of two up to 64.</exception>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public void OrderRows<T, TOrder>(int axes, float cell, int interval, float margin, int blockRows = 0)
+    public void OrderRows<T, TOrder>(int axes, float cell, int interval, float margin, int clusterRows = 0)
         where T : struct, IComponent where TOrder : struct, IRowOrder<T>
     {
         if (_disposed) throw new ObjectDisposedException(nameof(World));
         ThrowIfIterating(nameof(OrderRows));
-        RowOrder.Check(axes, cell, interval, margin, blockRows);
+        RowOrder.Check(axes, cell, interval, margin, clusterRows);
         int bit = ComponentType<T>.Bit;
         _orderRequests ??= [];
         if (bit >= _orderRequests.Length) Array.Resize(ref _orderRequests, Math.Max(bit + 1, _orderRequests.Length * 2));
         if (_orderRequests[bit] != null) return;
-        _orderRequests[bit] = () => new RowOrder<T, TOrder>(axes, cell, interval, margin, blockRows);
+        _orderRequests[bit] = () => new RowOrder<T, TOrder>(axes, cell, interval, margin, clusterRows);
         if (ComponentInfo.Of(bit).Defaults?.Order != null) return; // [OrderBy] orders its tables already
         foreach (var table in _allArchetypes)
             if (table.Order == null && table.ColumnIndex(bit) >= 0)
@@ -102,7 +102,7 @@ public sealed partial class World
 
     /// <summary>
     /// Sort every table holding <typeparamref name="T"/> by its key now, whatever their cadence: the rows in key order,
-    /// the boxes of their blocks drawn again (an order inferred for a pair method, <see cref="OrderRows{T, TOrder}"/>, or
+    /// the boxes of their clusters drawn again (an order inferred for a pair method, <see cref="OrderRows{T, TOrder}"/>, or
     /// <see cref="OrderByAttribute">[OrderBy]</see>). The next sort of each table comes its interval after this one. For a
     /// component no table is ordered by it does nothing. Rows move, so refs
     /// into the tables, handles' cached rows and marked rows end here, as at any structural change. Owner thread only,
@@ -121,17 +121,17 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// The blocks of every table ordered by <typeparamref name="T"/> (an inferred order or
-    /// <see cref="OrderByAttribute">[OrderBy]</see>), one <see cref="RowBlocks"/> per table:
-    /// <c>foreach (var blocks in world.Blocks&lt;Position&gt;())</c>. None for a component no table is ordered by. A
+    /// The clusters of every table ordered by <typeparamref name="T"/> (an inferred order or
+    /// <see cref="OrderByAttribute">[OrderBy]</see>), one <see cref="RowClusters"/> per table:
+    /// <c>foreach (var clusters in world.Clusters&lt;Position&gt;())</c>. None for a component no table is ordered by. A
     /// search over the boxes finds the rows near a point or a box without visiting
     /// the others. O(1) to start, O(tables) to walk; allocation-free.
     /// </summary>
-    public OrderedTables Blocks<T>() where T : struct, IComponent =>
+    public OrderedTables Clusters<T>() where T : struct, IComponent =>
         new(_ordered ? OrderedTableList() : [], ComponentType<T>.Bit, this);
 
     /// <summary>
-    /// The tables ordered by one component (<see cref="Blocks{T}"/>), each as its <see cref="RowBlocks"/>. Walk it with
+    /// The tables ordered by one component (<see cref="Clusters{T}"/>), each as its <see cref="RowClusters"/>. Walk it with
     /// <c>foreach</c>; valid until the next structural change.
     /// </summary>
     public readonly ref struct OrderedTables
@@ -174,8 +174,8 @@ public sealed partial class World
                 return false;
             }
 
-            /// <summary>The blocks of the current table.</summary>
-            public readonly RowBlocks Current => new(_world, _tables[_index]);
+            /// <summary>The clusters of the current table.</summary>
+            public readonly RowClusters Current => new(_world, _tables[_index]);
         }
     }
 }

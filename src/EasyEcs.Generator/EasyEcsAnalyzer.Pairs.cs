@@ -47,7 +47,7 @@ public static partial class EasyEcsAnalyzer
         "ids, each read through a Lookup<T>, or a walk of world.Read / Query) and tests their squared distance to the " +
         "row's is a neighbor search. A pair " +
         "method takes the neighbor's components as [Neighbor] parameters and tests the distance once: the pass keeps the " +
-        "tables in space order and visits windows of rows against the rows within the cutoff, a vector of rows per " +
+        "tables in space order and visits clusters of rows against the rows within the cutoff, a vector of rows per " +
         "instruction where the body qualifies, with no grid to build or keep. The code fix rewrites the method when the " +
         "search is its whole body and each candidate's statements read nothing of the search but the candidate: the loop " +
         "over candidates becomes [Neighbor] parameters (a 'continue' a 'return', the self skip a term of the cutoff test), " +
