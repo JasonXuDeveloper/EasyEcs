@@ -220,7 +220,9 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 Starts only when every code item of Next and Later is done (owner, 2026-10-26: "先把代码全改完").
 
 - [ ] **Exemplar pass** (#169, `audit-code`): VoxelServer / samples + templates + demo / benchmark worlds + usage
-      tests rewritten in the newest recommended forms, A/B on rewritten benchmark worlds.
+      tests rewritten in the newest recommended forms, A/B on rewritten benchmark worlds. BattleServer's Battle
+      singleton moves to [Accumulate], then GeneratorBenchmark's EECS086 filter exception is deleted (EECS086's total
+      case reports Shoot, SendFire and SendFireOut; a benchmark must not keep suppressing a rule our own example breaks).
 - [ ] **Directory restructure of the whole repository** (owner, 2026-10-26: "调整整个项目的目录结构"): `git mv` only,
   after feat-prefetch-all and feat-locality-pairs merge; the layout plan (old → new per file, every path reference)
   goes to the owner first.
