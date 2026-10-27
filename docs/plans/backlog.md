@@ -140,7 +140,15 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        worlds as an example first, streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
        owner: records in the docs pass). Vertical batch probes dropped after the 16M re-measure (record in the docs
        pass); scalar group prefetching of probes is built in item 6 (index probes).
-8. [ ] The rest of "Later" below.
+8. [ ] **VoxelServer: zombies follow a distance field** (owner's question, 2026-10-27; proposal, ask before
+       building). Today a zombie walks the straight line to its target and sticks at walls and the bots' pits. One
+       field per chunk (`DynamicBuffer<PathCost>`, 16 x 16 over the surface height map, a step up of one block
+       walkable) seeded by the players' cells, relaxed as a tile shader: each step sweeps its own tile to settle
+       inside it, red-black tiles so the front crosses two chunks a tick, `ChangedEdges` sleep where no player
+       moved. All zombies read the gradient of one shared field (nearest player for free; ZombieTargetSystem keeps
+       the target for the attack). Proof: TickBenchmark before/after at 50 and 2,000 players, zombies stuck
+       before and not after, grids page and VoxelServer page sections.
+9. [ ] The rest of "Later" below.
 
 ## Done this round (for the record)
 
