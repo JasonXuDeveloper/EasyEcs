@@ -111,7 +111,7 @@ internal sealed partial class Kernel
     /// Before a vector resolves its lookup, the chases of the vectors after it (group prefetching, AMAC): the records of
     /// the rows 2 <see cref="PrefetchDistance"/> past it and the rows of T of the rows <see cref="PrefetchDistance"/> past
     /// it (<c>Lookup&lt;T&gt;.PrefetchAhead</c>), when the pass is past the last-level cache (the job's <c>f{i}</c>, read
-    /// once per pass: <c>Lookup&lt;T&gt;.Prefetches</c>). Only for ids of a component the method takes by <c>in</c>
+    /// once per pass: <c>Lookup&lt;T&gt;.PrefetchesPastLastLevel</c>). Only for ids of a component the method takes by <c>in</c>
     /// (rows ahead hold the ids their own vectors will read) and not wide: <paramref name="index"/> names its column and lane.
     /// </summary>
     private void Prefetch(IParameterSymbol p, string lookup, string index)

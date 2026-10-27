@@ -371,31 +371,31 @@ public static class Lanes
             : $"The mask selects elements at or past the end of the source ({source} elements)");
 
     /// <summary>
-    /// The lane mask of a vector loop's condition as bits, lane j in bit j (all bits set where true): the rows a
+    /// The lane mask of a vector loop's condition as bits, lane j in bit j (CUDA's __ballot_sync) (all bits set where true): the rows a
     /// generated loop marks or emits for. Generated code uses this.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static ulong Bits(Vector<int> mask) => Vector<byte>.Count switch
+    public static ulong Ballot(Vector<int> mask) => Vector<byte>.Count switch
     {
         64 => mask.AsVector512().ExtractMostSignificantBits(),
         32 => mask.AsVector256().ExtractMostSignificantBits(),
         _ => mask.AsVector128().ExtractMostSignificantBits(),
     };
 
-    /// <inheritdoc cref="Bits(Vector{int})"/>
+    /// <inheritdoc cref="Ballot(Vector{int})"/>
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static ulong Bits(Vector<long> mask) => Vector<byte>.Count switch
+    public static ulong Ballot(Vector<long> mask) => Vector<byte>.Count switch
     {
         64 => mask.AsVector512().ExtractMostSignificantBits(),
         32 => mask.AsVector256().ExtractMostSignificantBits(),
         _ => mask.AsVector128().ExtractMostSignificantBits(),
     };
 
-    /// <inheritdoc cref="Bits(Vector{int})"/>
+    /// <inheritdoc cref="Ballot(Vector{int})"/>
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static ulong Bits(Vector512<int> mask) => mask.ExtractMostSignificantBits();
+    public static ulong Ballot(Vector512<int> mask) => mask.ExtractMostSignificantBits();
 
-    /// <inheritdoc cref="Bits(Vector{int})"/>
+    /// <inheritdoc cref="Ballot(Vector{int})"/>
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static ulong Bits(Vector512<long> mask) => mask.ExtractMostSignificantBits();
+    public static ulong Ballot(Vector512<long> mask) => mask.ExtractMostSignificantBits();
 }

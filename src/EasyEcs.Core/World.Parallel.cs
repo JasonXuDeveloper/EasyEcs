@@ -33,14 +33,14 @@ public sealed partial class World
     /// follow it instead: four per thread, unless that makes them longer than about 25 µs (heavy rows: more, smaller
     /// chunks) or shorter than 5 µs (a short pass: fewer chunks).
     /// </summary>
-    public const int ParallelChunkRows = 16384;
+    public const int MaxChunkRows = 16384;
 
     /// <summary>
     /// Rows per chunk for <paramref name="work"/>'s pass over <paramref name="tables"/> (over one of
     /// <paramref name="slices"/> slices of each, <see cref="QueryFilter.Slice"/>): <paramref name="chunkRows"/> rounded up
     /// to 64 when given (the caller knows better, OpenMP's <c>schedule(dynamic, n)</c>); else what the rows' measured cost
     /// gives (<see cref="ParallelWork.Rows"/>), or before any run about four chunks per thread, between 1,024 and
-    /// <see cref="ParallelChunkRows"/>. Always a multiple of 64: presence-bit words and change-tick words never straddle
+    /// <see cref="MaxChunkRows"/>. Always a multiple of 64: presence-bit words and change-tick words never straddle
     /// chunks. A pass that <paramref name="stamps"/> a tracked component gets a multiple of 4,096 rows unless its chunks
     /// are smaller: each block of 4,096 rows shares one change-tick summary per column (<see cref="Archetype.Blocks"/>),
     /// which chunks splitting a block share through <see cref="Archetype.OpenBlocks{T}"/>. A pass that
@@ -58,15 +58,15 @@ public sealed partial class World
             work.Items = 0; // cut by count, never by cost: nothing to learn
             long share = rows / MergedChunks;
             return stamps
-                ? (int)Math.Clamp((share + 4095) & ~4095L, 4096, ParallelChunkRows)
-                : (int)Math.Clamp((share + 63) & ~63L, 1024, ParallelChunkRows);
+                ? (int)Math.Clamp((share + 4095) & ~4095L, 4096, MaxChunkRows)
+                : (int)Math.Clamp((share + 63) & ~63L, 1024, MaxChunkRows);
         }
 
         int size = ChunkRows(work, rows, 0);
         if (!stamps) return size;
         if (work.Measured) return size >= 4096 ? (size + 4095) & ~4095 : size; // small chunks of heavy rows open their blocks
         long quarter = rows / ((Helpers + 1) * 4L);
-        return (int)Math.Clamp((quarter + 4095) & ~4095L, 4096, ParallelChunkRows);
+        return (int)Math.Clamp((quarter + 4095) & ~4095L, 4096, MaxChunkRows);
     }
 
     /// <summary>
@@ -74,7 +74,7 @@ public sealed partial class World
     /// when it does not set <c>ChunkRows</c>: a constant, so its chunk boundaries follow the row count alone and a
     /// floating-point result is the same bits at any <see cref="WorldOptions.MaxDegreeOfParallelism"/> (the threads only
     /// share the chunks out). Four per thread at four threads; tables of 262,144 rows or more get chunks of
-    /// <see cref="ParallelChunkRows"/> rows, more than enough for any thread count.
+    /// <see cref="MaxChunkRows"/> rows, more than enough for any thread count.
     /// </summary>
     private const int MergedChunks = 16;
 
@@ -82,7 +82,7 @@ public sealed partial class World
     /// Items per chunk for <paramref name="items"/> items of <paramref name="work"/> (rows of a pass, elements of
     /// <see cref="ForParallel{TJob}"/>): <paramref name="chunkRows"/> rounded up to 64 when given, else by the items'
     /// measured cost (<see cref="ParallelWork.Rows"/>), else about four chunks per thread, a multiple of 64 between
-    /// 1,024 and <see cref="ParallelChunkRows"/>.
+    /// 1,024 and <see cref="MaxChunkRows"/>.
     /// </summary>
     private int ChunkRows(ParallelWork work, long items, int chunkRows)
     {
@@ -91,7 +91,7 @@ public sealed partial class World
         int threads = Helpers + 1;
         if (work.Rows(items, threads) is var size and > 0) return size;
         long share = items / (threads * 4L);
-        return (int)Math.Clamp((share + 63) & ~63L, 1024, ParallelChunkRows);
+        return (int)Math.Clamp((share + 63) & ~63L, 1024, MaxChunkRows);
     }
 
     /// <summary>

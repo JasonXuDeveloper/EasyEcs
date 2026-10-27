@@ -85,10 +85,10 @@ public readonly ref struct Lookup<T> where T : struct, IComponent
     /// code reads it once per pass.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public static bool Prefetches(World world) => LookupLanes.Prefetches(world, Unsafe.SizeOf<T>(), CacheSizes.LastLevel);
+    public static bool PrefetchesPastLastLevel(World world) => LookupLanes.Prefetches(world, Unsafe.SizeOf<T>(), CacheSizes.LastLevel);
 
     /// <summary>
-    /// <see cref="Prefetches"/> past one core's L2 instead (the last-level cache when the L2 is unknown): the gate of
+    /// <see cref="PrefetchesPastLastLevel"/> past one core's L2 instead (the last-level cache when the L2 is unknown): the gate of
     /// the row form's chases (at an id a row holds or a buffer's elements, on one thread, in parallel, in a fused walk),
     /// which pay as soon as the records and rows leave the L2 (LookupChaseGateBenchmark, ChaseFormsPrefetchBenchmark).
     /// Generated code reads it once per pass.

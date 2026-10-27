@@ -59,8 +59,8 @@ public enum TileNeighborhood : byte
 /// </summary>
 public enum TileBoundary : byte
 {
-    /// <summary>The fill value of <see cref="Tile{TCell, TTile}.Pad(int, int, TCell, bool)"/> (default zero): a Dirichlet boundary.</summary>
-    Fill,
+    /// <summary>The border value of <see cref="Tile{TCell, TTile}.Pad(int, int, TCell, bool)"/> (default zero): a Dirichlet boundary.</summary>
+    Border,
     /// <summary>The tile's own edge cell, repeated: the halo cell at −k is cell 0.</summary>
     Clamp,
     /// <summary>The tile's own cells, mirrored at its edge: the halo cell at −k is cell k − 1 (a zero-flux, Neumann boundary).</summary>
@@ -102,8 +102,8 @@ public interface ITileShape
     /// <summary>Which tiles around are found and read into the halo's edges and corners (default <see cref="TileNeighborhood.Faces"/>).</summary>
     static virtual TileNeighborhood Neighborhood => TileNeighborhood.Faces;
 
-    /// <summary>What the halo holds where there is no neighbor (default <see cref="TileBoundary.Fill"/>).</summary>
-    static virtual TileBoundary Boundary => TileBoundary.Fill;
+    /// <summary>What the halo holds where there is no neighbor (default <see cref="TileBoundary.Border"/>).</summary>
+    static virtual TileBoundary Boundary => TileBoundary.Border;
 }
 
 /// <summary>
@@ -132,7 +132,7 @@ public interface ITile<TKey> : ITileShape, IIndexed<TKey> where TKey : IEquatabl
 /// the same result. A row's reach is the shape's <see cref="ITileShape.Halo"/>.
 /// </summary>
 [Flags]
-public enum TileReads : byte
+public enum TileStencil : byte
 {
     /// <summary>The row itself, with the cells before and after it (west and east).</summary>
     Self = 1,
@@ -325,7 +325,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     /// neighborhood has them), and, for a tile of more than one layer, r layers under <paramref name="from"/> and over
     /// <paramref name="to"/> (the tile's own, or the facing layers of the neighbors below or above). Where there is no
     /// neighbor (none in the grid, an empty buffer, or outside the shape's faces and neighborhood) the halo follows
-    /// <see cref="ITileShape.Boundary"/>: <paramref name="fill"/>, or the tile's own edge clamped or mirrored (along the
+    /// <see cref="ITileShape.Boundary"/>: <paramref name="border"/>, or the tile's own edge clamped or mirrored (along the
     /// axis that has no neighbor; a tile across an edge or corner whose axis is clamped is read from the tile beside).
     /// With <paramref name="mask"/>, it records which rows hold a cell that is not zero (every bit), for
     /// <see cref="PaddedTile{TCell, TTile}.Rows"/>.
@@ -337,14 +337,14 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     /// that is not empty holds fewer cells than the shape, or the layers are not 0 ≤ from ≤ to &lt; Height.
     /// </para>
     /// </summary>
-    public PaddedTile<TCell, TTile> Pad(int from, int to, TCell fill = default, bool mask = true)
+    public PaddedTile<TCell, TTile> Pad(int from, int to, TCell border = default, bool mask = true)
     {
         TileShapeCheck<TTile>.Check();
         if (from < 0 || from > to || to >= TTile.Height) ThrowLayers(from, to);
-        // The common shape (a five- or seven-point stencil: one cell of halo, the faces, a fill boundary) has its own
+        // The common shape (a five- or seven-point stencil: one cell of halo, the faces, a border boundary) has its own
         // loop, which the JIT keeps for that shape alone (the condition is a constant): no corner, no remapping.
-        if (TTile.Halo == 1 && TTile.Neighborhood == TileNeighborhood.Faces && TTile.Boundary == TileBoundary.Fill)
-            return mask ? LoadFaces<Masked>(from, to, fill) : LoadFaces<Unmasked>(from, to, fill);
+        if (TTile.Halo == 1 && TTile.Neighborhood == TileNeighborhood.Faces && TTile.Boundary == TileBoundary.Border)
+            return mask ? LoadFaces<Masked>(from, to, border) : LoadFaces<Unmasked>(from, to, border);
         int width = TTile.Width, depth = TTile.Depth, height = TTile.Height, r = TTile.Halo, hy = height > 1 ? r : 0;
         int row = width + 2 * r, layer = row * (depth + 2 * r), cells = width * depth * height;
         int layers = to - from + 1 + 2 * hy;
@@ -352,9 +352,9 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
         ref TileMask masks = ref TileMemory<TCell, TTile>.Masks();
 
         // The buffers around: a missing one (no tile there, an empty buffer, outside the neighborhood) is the blank,
-        // cells of the fill, so every row below is copied without a branch on which neighbors are there.
-        bool zero = TileLayout.IsZero(fill);
-        TCell[] blank = TileMemory<TCell, TTile>.Blank(fill, zero);
+        // cells of the border, so every row below is copied without a branch on which neighbors are there.
+        bool zero = TileLayout.IsZero(border);
+        TCell[] blank = TileMemory<TCell, TTile>.Blank(border, zero);
         var sources = default(TileSources<TCell>);
         for (int slot = 0; slot < 27; slot++) sources[slot] = blank;
         sources[13] = Own(cells);
@@ -370,8 +370,8 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
         }
 
         // Along x, the west and east halo of every row: the neighbor's cells, or the tile's own (clamped, mirrored).
-        bool clampWest = TTile.Boundary != TileBoundary.Fill && (present >> 12 & 1) == 0;
-        bool clampEast = TTile.Boundary != TileBoundary.Fill && (present >> 14 & 1) == 0;
+        bool clampWest = TTile.Boundary != TileBoundary.Border && (present >> 12 & 1) == 0;
+        bool clampEast = TTile.Boundary != TileBoundary.Border && (present >> 14 & 1) == 0;
 
         // The bounds: every read below is a row of a buffer in sources, each of which holds at least `cells` (Own / Of
         // checked it), at a layer 0 <= y < Height, a row 0 <= z < Depth and cells 0 <= x < Width (Map keeps the mapped
@@ -413,12 +413,12 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     }
 
     /// <summary>
-    /// <see cref="Pad(int, int, TCell, bool)"/> of a shape with a halo of one cell, the faces and a fill boundary: per row
-    /// one copy of Width cells and the two cells beside it, the corners the fill. The same texture and masks.
+    /// <see cref="Pad(int, int, TCell, bool)"/> of a shape with a halo of one cell, the faces and a border boundary: per row
+    /// one copy of Width cells and the two cells beside it, the corners the border. The same texture and masks.
     /// <typeparamref name="TMask"/> is <see cref="Masked"/> or <see cref="Unmasked"/>: the JIT compiles a loop for each,
     /// and the unmasked one (the blocks a stencil only samples) tests no cell.
     /// </summary>
-    private PaddedTile<TCell, TTile> LoadFaces<TMask>(int from, int to, TCell fill) where TMask : struct
+    private PaddedTile<TCell, TTile> LoadFaces<TMask>(int from, int to, TCell border) where TMask : struct
     {
         bool mask = typeof(TMask) == typeof(Masked);
         int width = TTile.Width, depth = TTile.Depth, height = TTile.Height, hy = height > 1 ? 1 : 0;
@@ -426,10 +426,10 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
         int layers = to - from + 1 + 2 * hy;
         ref TCell texels = ref TileMemory<TCell, TTile>.Texels();
         ref TileMask masks = ref TileMemory<TCell, TTile>.Masks();
-        bool zero = TileLayout.IsZero(fill);
-        TCell[] blank = TileMemory<TCell, TTile>.Blank(fill, zero);
+        bool zero = TileLayout.IsZero(border);
+        TCell[] blank = TileMemory<TCell, TTile>.Blank(border, zero);
 
-        // A missing neighbor reads the blank (cells of the fill), so the row loop copies without a branch on it.
+        // A missing neighbor reads the blank (cells of the border), so the row loop copies without a branch on it.
         TCell[] north = Beside(10, cells, blank), south = Beside(16, cells, blank);
         TCell[] west = Beside(12, cells, blank), east = Beside(14, cells, blank);
         ref TCell s = ref MemoryMarshal.GetArrayDataReference(Own(cells));
@@ -448,9 +448,9 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
             if ((uint)y >= (uint)height)
             {
                 // Under layer 0 or over the last: the facing layer of the tile below or above (the blank when there is
-                // none), its ring the fill.
+                // none), its ring the border.
                 var across = Beside(y < 0 ? 4 : 22, cells, blank);
-                var edge = Edge(ref at, ref MemoryMarshal.GetArrayDataReference(across), y < 0 ? height - 1 : 0, fill, zero);
+                var edge = Edge(ref at, ref MemoryMarshal.GetArrayDataReference(across), y < 0 ? height - 1 : 0, border, zero);
                 if (mask) Unsafe.Add(ref masks, t) = edge;
                 continue;
             }
@@ -467,15 +467,15 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
                 if (mask && any) rows |= 1UL << z;
             }
 
-            // The north neighbor's last row and the south neighbor's first, and the four corners (the fill).
+            // The north neighbor's last row and the south neighbor's first, and the four corners (the border).
             ref TCell top = ref Unsafe.Add(ref at, 1);
             ref TCell bottom = ref Unsafe.Add(ref at, (depth + 1) * row + 1);
             bool northWet = TileLayout.Copy(ref top, ref Unsafe.Add(ref n, first + (depth - 1) * width), width) | !zero;
             bool southWet = TileLayout.Copy(ref bottom, ref Unsafe.Add(ref so, first), width) | !zero;
-            at = fill;
-            Unsafe.Add(ref top, width) = fill;
-            Unsafe.Add(ref bottom, -1) = fill;
-            Unsafe.Add(ref bottom, width) = fill;
+            at = border;
+            Unsafe.Add(ref top, width) = border;
+            Unsafe.Add(ref bottom, -1) = border;
+            Unsafe.Add(ref bottom, width) = border;
             if (mask) Unsafe.Add(ref masks, t) = TileMask.Of<TTile>(rows, (northWet ? 1UL : 0) | (southWet ? southBand : 0));
         }
 
@@ -489,10 +489,10 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
 
     /// <summary>
     /// A layer under or over the tile for <see cref="LoadFaces"/>: <paramref name="source"/>'s layer <paramref name="y"/>
-    /// in the middle, the ring the fill; its mask.
+    /// in the middle, the ring the border; its mask.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static TileMask Edge(ref TCell at, ref TCell source, int y, TCell fill, bool zero)
+    private static TileMask Edge(ref TCell at, ref TCell source, int y, TCell border, bool zero)
     {
         int width = TTile.Width, depth = TTile.Depth, row = width + 2;
         ulong rows = 0;
@@ -500,11 +500,11 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
         {
             ref TCell into = ref Unsafe.Add(ref at, (z + 1) * row + 1);
             if (TileLayout.Copy(ref into, ref Unsafe.Add(ref source, (y * depth + z) * width), width) | !zero) rows |= 1UL << z;
-            Unsafe.Add(ref into, -1) = fill;
-            Unsafe.Add(ref into, width) = fill;
+            Unsafe.Add(ref into, -1) = border;
+            Unsafe.Add(ref into, width) = border;
         }
-        MemoryMarshal.CreateSpan(ref at, row).Fill(fill);
-        MemoryMarshal.CreateSpan(ref Unsafe.Add(ref at, (depth + 1) * row), row).Fill(fill);
+        MemoryMarshal.CreateSpan(ref at, row).Fill(border);
+        MemoryMarshal.CreateSpan(ref Unsafe.Add(ref at, (depth + 1) * row), row).Fill(border);
         return TileMask.Of<TTile>(rows, zero ? 0 : 1UL | (depth + 2 <= 64 ? 1UL << (depth + 1) : 2));
     }
 
@@ -587,7 +587,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     /// <summary>
     /// One row of the texture, at its cell 0: Width cells from <paramref name="mid"/> (the row in its buffer), the r cells
     /// before them from <paramref name="west"/>'s row (its last r, or its first clamped or mirrored), the r after
-    /// from <paramref name="east"/> (the blank of fill cells where there is no neighbor). Whether a cell is not zero.
+    /// from <paramref name="east"/> (the blank of border cells where there is no neighbor). Whether a cell is not zero.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool Row(ref TCell into, ref TCell mid, ref TCell west, ref TCell east, bool clampWest, bool clampEast)
@@ -596,7 +596,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
         bool any = TileLayout.Copy(ref into, ref mid, width);
         ref TCell before = ref Unsafe.Add(ref into, -r);
         ref TCell after = ref Unsafe.Add(ref into, width);
-        // clampWest / clampEast are false for a fill boundary, a constant: the copies are the whole row then.
+        // clampWest / clampEast are false for a border boundary, a constant: the copies are the whole row then.
         if (!clampWest) any |= TileLayout.Copy(ref before, ref Unsafe.Add(ref west, width - r), r);
         else any |= TileLayout.Edge(ref before, ref west, r, TTile.Boundary == TileBoundary.Mirror, true);
         if (!clampEast) any |= TileLayout.Copy(ref after, ref east, r);
@@ -618,10 +618,10 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
             return 0;
         }
         bool low = c < 0;
-        if (TTile.Boundary == TileBoundary.Fill || (low ? before : after))
+        if (TTile.Boundary == TileBoundary.Border || (low ? before : after))
         {
             // Past the tile beside too (a halo wider than an axis without faces, which Shape.Check allows): that tile
-            // is the blank, the same cell everywhere, so any coordinate in it reads the fill.
+            // is the blank, the same cell everywhere, so any coordinate in it reads the border.
             s = low ? c + n : c - n;
             if ((uint)s >= (uint)n) s = 0;
             return low ? -1 : 1;
@@ -764,11 +764,11 @@ public readonly ref struct PaddedTile<TCell, TTile> where TCell : unmanaged wher
 
     /// <summary>
     /// The rows of layers From to To that a stencil reading <paramref name="reads"/> must shade, layer by layer, in
-    /// order (<c>foreach (var row in padded.Rows(TileReads.Layer))</c>): those with a cell that is not zero among the
+    /// order (<c>foreach (var row in padded.Rows(TileStencil.Layer))</c>): those with a cell that is not zero among the
     /// rows it reads, up to the halo away. O(1) per row visited and per layer. Throws when the tile was loaded without
     /// its mask.
     /// </summary>
-    public TileRows<TTile> Rows(TileReads reads = TileReads.All)
+    public TileRows<TTile> Rows(TileStencil reads = TileStencil.All)
     {
         if (Unsafe.IsNullRef(ref _masks)) TileLayout.ThrowNoMask();
         return new TileRows<TTile>(ref _masks, _from, _to, reads);
@@ -822,12 +822,12 @@ public ref struct TileRows<TTile> where TTile : struct, IComponent, ITileShape
 {
     private readonly ref TileMask _masks;
     private readonly int _base, _last;
-    private readonly TileReads _reads;
+    private readonly TileStencil _reads;
     private int _layer;
     private ulong _rows;
     private int _z;
 
-    internal TileRows(ref TileMask masks, int from, int to, TileReads reads)
+    internal TileRows(ref TileMask masks, int from, int to, TileStencil reads)
     {
         int hy = TTile.Height > 1 ? TTile.Halo : 0;
         _masks = ref masks;
@@ -870,15 +870,15 @@ public ref struct TileRows<TTile> where TTile : struct, IComponent, ITileShape
         int depth = TTile.Depth, hy = TTile.Height > 1 ? TTile.Halo : 0;
         ref var here = ref Unsafe.Add(ref _masks, layer);
         ulong visit = 0;
-        if ((_reads & TileReads.Self) != 0) visit |= here.Rows;
-        if ((_reads & TileReads.NorthSouth) != 0) visit |= Spread(here);
+        if ((_reads & TileStencil.Self) != 0) visit |= here.Rows;
+        if ((_reads & TileStencil.NorthSouth) != 0) visit |= Spread(here);
         for (int k = 1; k <= hy; k++)
         {
             ref var up = ref Unsafe.Add(ref here, k);
             ref var down = ref Unsafe.Add(ref here, -k);
-            if ((_reads & TileReads.Above) != 0) visit |= up.Rows;
-            if ((_reads & TileReads.Below) != 0) visit |= down.Rows;
-            if ((_reads & TileReads.Diagonals) != 0) visit |= Spread(up) | Spread(down);
+            if ((_reads & TileStencil.Above) != 0) visit |= up.Rows;
+            if ((_reads & TileStencil.Below) != 0) visit |= down.Rows;
+            if ((_reads & TileStencil.Diagonals) != 0) visit |= Spread(up) | Spread(down);
         }
 
         return depth == 64 ? visit : visit & ((1UL << depth) - 1);
@@ -979,24 +979,24 @@ internal static class TileMemory<TCell, TTile> where TCell : unmanaged where TTi
     private static readonly TCell[] Zeros = new TCell[TileLayout.Cells<TTile>()];
 
     /// <summary>
-    /// A buffer of the tile's cell count holding <paramref name="fill"/> (<paramref name="zero"/>: it is zero): what a
-    /// load reads where there is no neighbor. One array of zeros per tile type; another fill, this thread's array,
-    /// filled again when the fill changes.
+    /// A buffer of the tile's cell count holding <paramref name="border"/> (<paramref name="zero"/>: it is zero): what a
+    /// load reads where there is no neighbor. One array of zeros per tile type; another border, this thread's array,
+    /// filled again when the border changes.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static TCell[] Blank(TCell fill, bool zero)
+    public static TCell[] Blank(TCell border, bool zero)
     {
         if (zero) return Zeros;
         var blank = t_blank;
-        if (blank != null && TileLayout.Same(blank[0], fill)) return blank;
-        return Refill(fill);
+        if (blank != null && TileLayout.Same(blank[0], border)) return blank;
+        return Refill(border);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static TCell[] Refill(TCell fill)
+    private static TCell[] Refill(TCell border)
     {
         var blank = t_blank ?? CreateBlank();
-        blank.AsSpan().Fill(fill);
+        blank.AsSpan().Fill(border);
         return blank;
     }
 

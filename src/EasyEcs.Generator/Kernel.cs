@@ -98,7 +98,7 @@ internal sealed partial class Kernel
 
         /// <summary>
         /// The Lookup parameters whose chases the loop prefetches ahead of each vector (Kernel.Lookups.cs) when the job's
-        /// <c>f{i}</c> says the pass is past the last-level cache (<c>Lookup&lt;T&gt;.Prefetches</c>, set once per pass).
+        /// <c>f{i}</c> says the pass is past the last-level cache (<c>Lookup&lt;T&gt;.PrefetchesPastLastLevel</c>, set once per pass).
         /// </summary>
         public EquatableArray<int> Prefetched { get; init; } = new([]);
 

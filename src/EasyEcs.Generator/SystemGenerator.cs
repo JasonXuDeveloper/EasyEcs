@@ -398,7 +398,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             case Symbols.ParamKind.Lookup when p.Key.Length > 0: // its index, built before the pass
                 return ($"public object k{i};", $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Type}, {p.Key}>({world})");
             case Symbols.ParamKind.Lookup when method.Prefetches(i): // whether its chases are past the last-level cache, once per pass
-                return ($"public bool f{i};", $"f{i} = global::EasyEcs.Lookup<{p.Type}>.Prefetches({world})");
+                return ($"public bool f{i};", $"f{i} = global::EasyEcs.Lookup<{p.Type}>.PrefetchesPastLastLevel({world})");
             // The grid's index, built before the pass, and the entity's neighbors: a field, not a local, which the
             // caller's zero-initialized locals would clear on every row before TileNeighbors.Of clears it again.
             case Symbols.ParamKind.Tile when method.FirstOfGrid(i):
@@ -1132,7 +1132,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// <summary>
         /// The vector loop prefetches for Lookup parameter <paramref name="i"/> (<see cref="Kernel.Code.Prefetched"/>): the
         /// job's field <c>f{i}</c> says, once per pass, whether the pass is past the last-level cache
-        /// (<c>Lookup&lt;T&gt;.Prefetches</c>).
+        /// (<c>Lookup&lt;T&gt;.PrefetchesPastLastLevel</c>).
         /// </summary>
         public bool Prefetches(int i) => Simd is { } simd && simd.Prefetched.Contains(i);
 

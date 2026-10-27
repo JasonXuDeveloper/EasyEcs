@@ -166,7 +166,7 @@ internal sealed partial class Kernel
         }
         else throw FixableReason($"it emits '{Text(record)}': {Shape()}, written new {type.Name}(value)");
         string t = type.ToDisplayString(Symbols.Fqn);
-        string lanes = $"global::EasyEcs.Lanes.Bits({LiveLanes})";
+        string lanes = $"global::EasyEcs.Lanes.Ballot({LiveLanes})";
         string emit = $"new global::EasyEcs.Emit<{t}>(ref this.e{index})";
         if (EntityId(value))
         {
@@ -212,7 +212,7 @@ internal sealed partial class Kernel
         if (_change != null)
         {
             _body.Insert(0, $"var __d0 = {Vec(_mask)}.Zero; // the rows the change marks\n");
-            _body.Append($"this.d0.Mark(in entities, {Row}, global::EasyEcs.Lanes.Bits(__d0));\n");
+            _body.Append($"this.d0.Mark(in entities, {Row}, global::EasyEcs.Lanes.Ballot(__d0));\n");
             if (_change.Value.Length > 0) _setup.Append($"this.v0 = {_change.Value};\n");
         }
     }

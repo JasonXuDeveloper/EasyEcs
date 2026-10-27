@@ -1410,7 +1410,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
         return $$"""
                 /// <summary>
                 /// <see cref="{{name}}{{{tps}}, TJob}(ref TJob, in QueryFilter)"/> on several threads: the matching rows are cut into chunks (a multiple of
-                /// 64 rows: about four per thread, at most <see cref="ParallelChunkRows"/>, until a call has measured the rows' cost,
+                /// 64 rows: about four per thread, at most <see cref="MaxChunkRows"/>, until a call has measured the rows' cost,
                 /// then chunks of about 25 µs for heavy rows and fewer for a short pass; 16 for a job that merges, whatever
                 /// the threads and the cost, so its result does not depend on them; or <paramref name="chunkRows"/> rounded
                 /// up to 64: <c>[ForEach(Parallel = true, ChunkRows = n)]</c>) that the calling thread and up to

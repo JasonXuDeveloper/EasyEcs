@@ -79,7 +79,7 @@ public static unsafe class LookupLanes
 
     /// <summary>
     /// Whether a pass reading rows of <paramref name="rowSize"/> bytes of other entities of <paramref name="world"/>
-    /// prefetches them (<see cref="Lookup{T}.Prefetches"/>, <see cref="Lookup{T}.PrefetchesPastL2"/>): only where a
+    /// prefetches them (<see cref="Lookup{T}.PrefetchesPastLastLevel"/>, <see cref="Lookup{T}.PrefetchesPastL2"/>): only where a
     /// prefetch exists (<see cref="CanPrefetch"/>) and when the records and rows a chase lands on, those of every live
     /// entity, are past a cache of <paramref name="cache"/> bytes (<see cref="CacheSizes"/>; 0, unknown: never). In the
     /// cache, a prefetch has no miss to hide and costs up to twice the chase's time (LookupChaseBenchmark at 1,000

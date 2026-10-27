@@ -29,9 +29,9 @@ public sealed partial class World
 {
     /// <summary>
     /// Run <paramref name="job"/> over indexes 0 to <paramref name="count"/> - 1 on several threads: the range is cut
-    /// into chunks (a multiple of 64 indexes: about four per thread, between 1,024 and <see cref="ParallelChunkRows"/>,
+    /// into chunks (a multiple of 64 indexes: about four per thread, between 1,024 and <see cref="MaxChunkRows"/>,
     /// until a call has measured the items' cost, then chunks of about 25 µs for heavy items and fewer for a short loop;
-    /// or <paramref name="chunkRows"/> rounded up to 64) that the calling thread and up to
+    /// or <paramref name="chunkSize"/> rounded up to 64) that the calling thread and up to
     /// <see cref="WorldOptions.MaxDegreeOfParallelism"/> - 1 helper threads claim one at a time, each running a copy
     /// of the job (what Execute writes into its fields is not merged back). The same runner as the parallel
     /// <c>[ForEach]</c> passes: helpers are woken only while they pay, and fewer than two chunks, or a runner already
@@ -39,13 +39,13 @@ public sealed partial class World
     /// write what another chunk reads. Owner thread. Allocation-free after the first call per job type.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
-    public void ForParallel<TJob>(int count, ref TJob job, int chunkRows = 0) where TJob : struct, IForRange
+    public void ForParallel<TJob>(int count, ref TJob job, int chunkSize = 0) where TJob : struct, IForRange
     {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         if (count == 0) return;
         var work = WorkOf<RangeChunks<TJob>>();
         work.Job = job;
-        RunRange(work, count, chunkRows);
+        RunRange(work, count, chunkSize);
     }
 
     /// <summary>
@@ -53,18 +53,18 @@ public sealed partial class World
     /// singleton's records, a buffer of a singleton): each chunk gets its elements as a span, which it may write. The
     /// list must not change while the call runs.
     /// </summary>
-    public void ForParallel<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkRows = 0) where TJob : struct, IForSpan<T>
+    public void ForParallel<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkSize = 0) where TJob : struct, IForSpan<T>
     {
         if (DynamicBufferExtensions.Own(ref items) is not { Count: > 0 } store) return; // the chunks write it: its own
         var work = WorkOf<SpanChunks<T, TJob>>();
         work.Job = job;
         work.Store = store;
-        RunRange(work, store.Count, chunkRows);
+        RunRange(work, store.Count, chunkSize);
     }
 
-    private void RunRange(RangeWork work, int count, int chunkRows)
+    private void RunRange(RangeWork work, int count, int chunkSize)
     {
-        int size = ChunkRows(work, count, chunkRows);
+        int size = ChunkRows(work, count, chunkSize);
         work.Count = count;
         work.Size = size;
         int chunks = (int)((count + (long)size - 1) / size);
