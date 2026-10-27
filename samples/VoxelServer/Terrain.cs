@@ -82,8 +82,8 @@ public static class Terrain
 
 // The blocks and the water around one body, read through the lookups of the system that walks the bodies: the
 // chunk of a column found by its key (Lookup<Chunk>: the direct-indexed unique index, one array read), its buffers
-// read by id. A system takes the lookups of the buffers it reads (the blocks, the water, the height map) and passes
-// the others as default, never read. The method holds no World, so it may run on several threads: every lookup reads
+// read by id. A system takes the lookups of the buffers it reads (the blocks, the water, the height map, the trail)
+// and passes the others as default, never read. The method holds no World, so it may run on several threads: every lookup reads
 // the world as it was before the pass, which no system writes while it runs. The chunk of the first block read is
 // found once, and the reads after it in the same chunk, most of them (a body is a block wide, a chunk sixteen), read
 // its buffers straight; a read across the edge finds that chunk instead. Each buffer is fetched on its first read: a
@@ -92,18 +92,21 @@ public ref struct Nearby(
     Lookup<Chunk> chunks,
     Lookup<DynamicBuffer<Block>> blocks = default,
     Lookup<DynamicBuffer<Fluid>> water = default,
-    Lookup<DynamicBuffer<Surface>> surface = default)
+    Lookup<DynamicBuffer<Surface>> surface = default,
+    Lookup<DynamicBuffer<Trail>> trail = default)
 {
     readonly Lookup<Chunk> _chunks = chunks;
     readonly Lookup<DynamicBuffer<Block>> _blockOf = blocks;
     readonly Lookup<DynamicBuffer<Fluid>> _waterOf = water;
     readonly Lookup<DynamicBuffer<Surface>> _surfaceOf = surface;
+    readonly Lookup<DynamicBuffer<Trail>> _trailOf = trail;
     ChunkPos _pos;
     bool _looked;
     EntityId _chunk;                   // default when the chunk is not loaded
     ReadOnlySpan<Block> _blocks;       // empty until read: a loaded chunk's buffers never are
     ReadOnlySpan<Fluid> _water;
     ReadOnlySpan<Surface> _surface;
+    ReadOnlySpan<Trail> _trail;
 
     // The block at a position. A chunk that is not loaded counts as stone, so nothing falls out of the world.
     public Block Block(int x, int y, int z)
@@ -137,6 +140,14 @@ public ref struct Nearby(
         return _surface[(z & 15) * Terrain.Size + (x & 15)].Top;
     }
 
+    // The side the scent leads a zombie on a column (Trail), None where its chunk is not loaded.
+    public byte Trail(int x, int z)
+    {
+        if (!Look(x, z)) return VoxelServer.Trail.None;
+        if (_trail.IsEmpty) _trail = _trailOf.Read(_chunk).AsReadOnlySpan();
+        return _trail[(z & 15) * Terrain.Size + (x & 15)].Toward;
+    }
+
     // Whether nothing solid is above a block: the sky reaches it.
     public bool UnderSky(BlockPos at) => Top(at.X, at.Z) < at.Y;
 
@@ -150,6 +161,7 @@ public ref struct Nearby(
         _blocks = default;
         _water = default;
         _surface = default;
+        _trail = default;
         _chunk = _chunks.TryFind(pos, out var chunk) ? chunk.Id : default;
         return _chunk != default;
     }

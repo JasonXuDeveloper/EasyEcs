@@ -81,32 +81,47 @@ public ref struct ZombieTargetSystem
 // #endregion target
 
 // #region chase
-// Walks a zombie toward the player it hunts while the player is within its Vision (it may have walked off since the
-// zombie looked); with none in sight, the player gone or too far, it stands. The player's position is a lookup, so the
-// zombies are split across threads.
+// Walks a zombie up the players' scent (Systems/Scent): toward the column beside it its Trail names, where the scent is
+// stronger and a step reaches, so it goes around walls and the pits it could not climb out of, toward the nearest
+// player along the ground. It aims at the middle of that column: a walk from anywhere in a block to the middle of the
+// block beside stays in those two blocks, so it never clips the corner of a third. On the column of a player it walks
+// straight at the player it hunts (the attack's Target). Where no scent leads, no player within the zombies' Vision
+// along the ground, it stands. The field is one for every zombie, as far as the prefab's Vision (Rules.ScentReach): a
+// zombie that sees further would need a field of its own. Each zombie writes its own velocity and reads the trail and
+// the player through lookups: split across threads.
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct ZombieChaseSystem
 {
     [ForEach(Parallel = true), With<Zombie>]
-    static void Chase(in Position position, in Target target, in Vision vision, ref Velocity velocity, Lookup<Position> positions)
+    static void Chase(in Position position, in Target target, ref Velocity velocity, Lookup<Position> positions, Lookup<Chunk> chunks,
+        Lookup<DynamicBuffer<Trail>> trails)
     {
+        var p = position.Value;
+        var cell = Terrain.Cell(p);
+        var to = new Nearby(chunks, trail: trails).Trail(cell.X, cell.Z) switch
+        {
+            Trail.West => new Vector2(cell.X - 0.5f - p.X, cell.Z + 0.5f - p.Z),
+            Trail.East => new Vector2(cell.X + 1.5f - p.X, cell.Z + 0.5f - p.Z),
+            Trail.North => new Vector2(cell.X + 0.5f - p.X, cell.Z - 0.5f - p.Z),
+            Trail.South => new Vector2(cell.X + 0.5f - p.X, cell.Z + 1.5f - p.Z),
+            Trail.Player => Toward(positions[target.Player], p),
+            _ => Vector2.Zero,
+        };
         var v = velocity.Value;
         v.X = v.Z = 0;
-        var player = positions[target.Player];                           // no value: the player is gone
-        if (player.HasValue)
+        float distance = to.Length();
+        if (distance > 0.1f)
         {
-            var to = player.Value.Value - position.Value;
-            var flat = new Vector2(to.X, to.Z);
-            float distance = flat.Length();
-            if (distance > 0.1f && distance <= vision.Range)
-            {
-                flat /= distance;
-                v.X = flat.X * Rules.ZombieSpeed;
-                v.Z = flat.Y * Rules.ZombieSpeed;
-            }
+            to /= distance;
+            v.X = to.X * Rules.ZombieSpeed;
+            v.Z = to.Y * Rules.ZombieSpeed;
         }
         velocity = new Velocity(v);
     }
+
+    // From `from` to the player, flat; nowhere when the player is gone (no value).
+    static Vector2 Toward(ReadOnlyMaybe<Position> player, Vector3 from) =>
+        player.HasValue ? new Vector2(player.Value.Value.X - from.X, player.Value.Value.Z - from.Z) : Vector2.Zero;
 }
 // #endregion chase
 

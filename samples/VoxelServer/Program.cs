@@ -76,6 +76,7 @@ public static class Startup
         world.SetClock(Tick: 0, DayLength: Rules.DayLength);
         world.AddSingleton<EntityRandom>() = new EntityRandom(Rules.Seed);  // each Update() draws new numbers
         world.AddSingleton<Stats>();
+        world.AddSingleton<Hunt>();
         world.SetRegions(regions);
         SetPrefabs(world);
         Reserve(world, capacity);
@@ -107,6 +108,14 @@ public static class Startup
         world.AddSystem<FloatSystem>();
         world.AddSystem<PhysicsSystem>();
         world.AddSystem<GridSystem>();
+        world.AddSystem<FootprintSystem>();
+        world.AddSystem<FootingSystem>();
+        world.AddSystem<ScentWakeSystem>();
+        world.AddSystem<HuntSystem>();
+        world.AddSystem<ScentStepSystem<Red>>();             // red-black: the red half, then the black from its edges
+        world.AddSystem<ScentSettleSystem<Red>>();
+        world.AddSystem<ScentStepSystem<Black>>();
+        world.AddSystem<ScentSettleSystem<Black>>();
         world.AddSystem<DigSystem>();
         world.AddSystem<PickupSystem>();
         world.AddSystem<ItemExpirySystem>();
@@ -137,7 +146,7 @@ public static class Startup
         for (int i = 0; i < count; i++)
         {
             var at = Rules.SpawnPoint(i);
-            world.Instantiate(player, new Player(i), new Position(at), new InChunk(Terrain.ChunkOf(at)));
+            world.Instantiate(player, new Player(i), new Position(at), new InChunk(Terrain.ChunkOf(at)), Footprint.At(at));
         }
         // #endregion players
     }
@@ -162,6 +171,13 @@ public static class Startup
         DynamicBuffer<Fluid>.FillPool(capacity.Chunks);
         DynamicBuffer<Surface>.FillPool(capacity.Chunks);
         DynamicBuffer<NextFluid>.FillPool(capacity.Flowing);
+        // The field's buffers twice over: parallel passes write them on the helper threads, and a helper keeps up to 64
+        // lists of its own, which the owner thread's chunk loads cannot take back (a snapshot restored shares every
+        // buffer until written, so Host/Steady.cs's replay writes them all again).
+        DynamicBuffer<Footing>.FillPool(2 * capacity.Chunks);
+        DynamicBuffer<Scent>.FillPool(2 * capacity.Chunks);
+        DynamicBuffer<NextScent>.FillPool(2 * capacity.Chunks);
+        DynamicBuffer<Trail>.FillPool(2 * capacity.Chunks);
         DynamicBuffer<ItemStack>.FillPool(capacity.Players);
     }
     // #endregion capacity
@@ -176,9 +192,12 @@ public static class Startup
             Chunk: new Prefab()
                 .SetChunk(default).SetBuffer<Block>().SetBuffer<Fluid>().SetBuffer<NextFluid>().SetBuffer<Surface>()
                 .SetViewers(0, 0).Set(FluidCount.Dry).SetFluidStep(StepResult.None, FluidCount.Dry, 0, 0)
-                .Set(new Fresh(), new Flowing(), new Unloading()).RemoveUnloading(),
+                .Set(new Fresh(), new Flowing(), new Unloading()).RemoveUnloading()
+                .SetGround(default).SetBuffer<Footing>().SetBuffer<Scent>().SetBuffer<NextScent>().SetBuffer<Trail>()
+                .SetScentStep(TileFaces.None, false)
+                .Set(new Spreading(), new Red(), new Black()),
             Player: new Prefab()
-                .SetPlayer(0).SetInChunk(default).SetVisible(default, false).SetScore(0)
+                .SetPlayer(0).SetInChunk(default).SetVisible(default, false).SetScore(0).SetFootprint(default, 0)
                 .SetPosition(default).SetVelocity(default).SetBody(false, false)
                 .SetHealth(Rules.PlayerHealth).SetInput(default, false).SetBuffer<ItemStack>(),
             Zombie: new Prefab()

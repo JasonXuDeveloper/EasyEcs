@@ -10,6 +10,9 @@ public static class Rules
     public const float PlayerVision = 32;      // blocks every player sees: two chunks each way, 5 x 5 chunks loaded
     public const float ZombieVision = 35;      // blocks a zombie sees a player from: its follow range in Minecraft
     public const int LookEvery = TicksPerSecond / 2;   // ticks between two looks of a zombie for a player to hunt
+    public const int ScentReach = (int)ZombieVision;   // the scent where a player stands: one less per step, 0 past Vision
+    public const int ScentEvery = 4;           // ticks between two steps of the scent: a zombie crosses a block in 8
+    public const int MaxDrop = 3;              // blocks a mob's path drops at most, as Minecraft's pathfinding
     public const int UnloadAfter = 100;        // ticks a chunk stays loaded after the last player saw it
     public const float Gravity = 0.08f;
     public const float WalkSpeed = 0.2f;
