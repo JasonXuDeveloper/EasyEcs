@@ -32,14 +32,16 @@ names the skill:
 
 - [ ] **CI fixes** (worktree `/workspace/wt-cifix`, branch `fix-ci`): DocCheck 318 -> 0 done (7cb13db); the VoxelServer
       steady-state allocation (bisected to the feat-views merge 63130a2) and the EECS033 findings remain.
-- [ ] **Generated code tuned for the machine** ("Next" item 5, branch `feat-microarch`): M1 paired float accumulators,
-      M2 masked skip, the Tier1 class-init fix and a streaming-store prototype committed; A/B round 2 running.
+- [ ] **VoxelServer: zombies follow a distance field** ("Next" item 8, branch `feat-zombie-field`).
 - [ ] **L2 leftovers** ("Next" item 1, branch `feat-pairs-2`): the open list of item 1.
 
 Merged since the last update: L1 ordered rows + L3 compress (`feat-locality-core`), the pair form
 (`feat-locality-pairs`), vector loops through the user's own calls (`feat-call-inliner`), the prefetch gate per form
 (`feat-prefetch-gate`, 216e29a: row chases, fused walks, buffer chases and `DestroyEntities` past the L2; probes and
-vector loops past the last-level cache).
+vector loops past the last-level cache); generated code tuned for the machine (`feat-microarch`, 9161797: paired
+accumulators for float Min / Max / Fast sums, Energy 1.43-1.47x and Spread 1.89x; the tables initialized at module
+load, LateHoles 2.7-4.5x; masked skip, unrolling, hoisting and branchless rows measured and dropped; streaming stores
+a prototype, `owner-review.md`).
 
 The owner's order (2026-10-26): every code change before any docs (generator cost and ARM64 parity included).
 CI runs the unit tests on ARM64 (b1dbdb0).
@@ -87,7 +89,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 4. [ ] **G1** (generator cost, the part phase 2 left): ForEachModel split into a declaration model and
        implementation-only body facts; SystemUpdates without Collect; SetFusions reruns; Systems / SystemPlaces share
        one FAWMN; Kernel's GetSemanticModel calls. G6 (C# 14 extension lookup cost) research only.
-5. [ ] **Generated code tuned for the machine** (running: worktree agent, branch `feat-microarch`) (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
+5. [x] **Generated code tuned for the machine** (merged 9161797, branch `feat-microarch`) (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
        accumulators / unrolling / hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3
        prefetch / streaming stores.
 6. [x] **Prefetched lookup chases with a size gate** (`feat-prefetch-gate`: row and vector forms; `feat-prefetch-all`,
