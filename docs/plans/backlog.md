@@ -30,12 +30,13 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **CI fixes** (worktree `/workspace/wt-cifix`, branch `fix-ci`): DocCheck 318 -> 0 done (7cb13db); the VoxelServer
-      steady-state allocation (bisected to the feat-views merge 63130a2) and the EECS033 findings remain.
+- [ ] **Fewer copies c + d** ("Next" items 12c and 12d, branch `feat-fewer-copies`): Permute swaps columns with a spare,
+      incremental Capture / Restore, and fix-ci's restore cost won back.
 - [ ] **VoxelServer: zombies follow a distance field** ("Next" item 8, branch `feat-zombie-field`).
 - [ ] **L2 leftovers** ("Next" item 1, branch `feat-pairs-2`): the open list of item 1.
 
-Merged since the last update: L1 ordered rows + L3 compress (`feat-locality-core`), the pair form
+Merged since the last update: CI fixes (`fix-ci`, ae9d525: Restore gives rows written since the capture their own
+copy on the owner thread, VoxelServer 0 B again; DocCheck 0), L1 ordered rows + L3 compress (`feat-locality-core`), the pair form
 (`feat-locality-pairs`), vector loops through the user's own calls (`feat-call-inliner`), the prefetch gate per form
 (`feat-prefetch-gate`, 216e29a: row chases, fused walks, buffer chases and `DestroyEntities` past the L2; probes and
 vector loops past the last-level cache); generated code tuned for the machine (`feat-microarch`, 9161797: paired
