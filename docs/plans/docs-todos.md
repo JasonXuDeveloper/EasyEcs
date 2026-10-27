@@ -922,7 +922,7 @@ Docs pass:
 Each needs a migration entry (old -> new), a changelog line, a README "What's new" line and a decision record that
 names the field each term comes from (audit-naming, "The reference design's vocabulary"):
 - `QueryOptions.ParallelChunkRows` -> `MaxChunkRows` (released in 4.7: migration entry required), and the
-  `chunkSize` parameter of `world.ForParallel` -> `chunkSize` (OpenMP's `schedule(static, chunk_size)`).
+  `chunkRows` parameter of `world.ForParallel` -> `chunkSize` (OpenMP's `schedule(static, chunk_size)`).
 - `TileReads` -> `TileStencil` (the cells a tile method reads: a stencil, as in stencil codes).
 - `TileBoundary.Fill` -> `TileBoundary.Border`, and `Pad(from, to, fill, mask)` -> `Pad(from, to, border, mask)`
   (a Dirichlet boundary; Clamp and Mirror unchanged).
@@ -946,9 +946,9 @@ names the field each term comes from (audit-naming, "The reference design's voca
 ## Owner answers 2026-10-27 (terminology popup)
 - `[ForEach(ChunkRows)]` / `chunkRows:` -> `ChunkSize` / `chunkSize` (applied, with a CS0246 / CS1739 migration
   code fix): migration, changelog, README, decision record (OpenMP's chunk size), alongside `MaxChunkRows`.
-- `IDirectMapped<TKey>` -> `IDirectMapped<TKey>` (a direct-mapped cache: collisions fall back to the hash).
+- `IDirectIndexed<TKey>` -> `IDirectMapped<TKey>` (a direct-mapped cache: collisions fall back to the hash).
 - `FloatMode.Exact` stays; its doc comment says "Burst's Strict + Deterministic".
-- `Lanes.Selection` -> `Lanes.Selection`, documented as the selection vector of DuckDB / Vectorwise.
+- `Lanes.RowNumbers` -> `Lanes.Selection`, documented as the selection vector of DuckDB / Vectorwise.
 - grids page: the shader/texture analogy stays in prose, names (headings, seoTitle, `Tile.Texels()`) take the HPC
   terms (stencil, tile, halo).
 - fix-ci merged with Restore 66.6 -> 84.4 us, Rollback 141 -> 177 us (correctness: 0 B steady state); the owner
@@ -964,3 +964,64 @@ names the field each term comes from (audit-naming, "The reference design's voca
   `TileMemory.Texels()` and its `texels` locals become the halo-padded buffer's name with backlog item 12a, which
   rewrites that code (`Pad()` -> `ExchangeHalo()`); renaming them now would only conflict with 12a and the zombie field.
 - systems.mdx/.zh link EECS103 to D134 until the analyzer page has its EECS103 entry (then link #eecs103 again).
+
+## feat-zombie-field (backlog item 8: VoxelServer zombies follow a distance field)
+
+What shipped: `samples/VoxelServer` Components/Scent.cs (Ground, Footing, Scent, Trail, Hunt, ScentStep, Spreading,
+Red / Black, Footprint) and Systems/Scent/ (FootingSystem, ScentWakeSystem + FootprintSystem, HuntSystem,
+ScentStepSystem<TColor>, ScentSettleSystem<TColor>); ZombieChaseSystem reads one Trail byte;
+tests/EasyEcs.UnitTest/VoxelServerTests.cs. No src/ change.
+
+- **CI: docs/content/samples/voxel-server.mdx and .zh.mdx `## Output [#output]` blocks** must take the README's new
+  expected output (check-sample.sh compares them; it fails on this branch until the docs pass, since docs pages were
+  out of this branch's scope).
+- voxel-server.mdx + zh, "Zombies and death" (or a new section "The scent [#scent]" after Water): the distance field
+  as a tile shader beside the water's, what it teaches that the water does not:
+  - a 2D tile on the entity of a 3D one: `Ground` (16 x 16 x 1, the same key as `Chunk`, `IDirectIndexed`) because a
+    tile's buffer holds Width * Depth * Height cells, so a height map cannot be a tile of the 3D chunk;
+  - a field that is only read settled: the step settles its own tile in place (Gauss-Seidel rows, the row scanned east
+    and west in doublings of 1, 2, 4, 8 columns gated by the walkable runs) until a sweep changes nothing, then sleeps
+    through ChangedEdges like the water;
+  - red / black chunks (checkerboard by parity, a presence bit each, all chunks in one table): a generic system per
+    color (`ScentStepSystem<Red>`, `<Black>`), the color as an `in TColor` parameter because an attribute cannot name a
+    type parameter (CS8968); the black half steps from the red half's new edges, the front crosses two chunks an update;
+  - step + commit (NextScent, copied by the settle) like the water. The in-place form (no NextScent, the step writes
+    Scent behind an EECS059 suppression: the checkerboard keeps every read off the rows the pass writes) gave the
+    same output and the same time, but allocated in 2 of 4 rounds at 2,000 players (312 B, 672 B per 100 ticks), so
+    it was dropped until `[ForEach, GaussSeidel]` ships it (numbers below);
+  - cold start: the chunk's own columns from nothing each step, not its last field (a stale peak counts to infinity:
+    7.5 sweeps a step against 2.7, with a long tail to the cap);
+  - seeds from an index (`Footprint`, `[LookupKey] ChunkPos`): the players of a chunk without walking InChunk;
+  - Trail, a flow field: the step writes the side each column's zombie walks toward, so the chase reads one byte, not five
+    columns and their footing (still a chunk lookup per zombie: the chase costs about twice the straight one);
+  - sleeping by day (`Hunt`), waking on a footing change, a player crossing a column, or a neighbor's changed edge;
+  - Minecraft framing: a mob path steps up one block, drops at most 3 (MaxDrop), never enters water; the field reaches
+    as far as the zombies' Vision (35 steps, in walking steps: a diamond, not a circle);
+  - the pools: the field's buffers sized on the owner thread at generation, FillPool twice the chunks (helpers park lists
+    of their own; a snapshot restore shares every buffer until written, so the steady check's replay writes them all).
+- grids.mdx + zh: three patterns the page lacks: (1) a field read only when settled, settled inside the tile per step
+  (a loop over the padded texture, copied to a stackalloc buffer first since `PaddedTile` is read-only); (2) red-black
+  tiles by hand today (generic system per color, tag parameter), pointing to `[ForEach, GaussSeidel]` once it ships;
+  (3) a 2D tile beside a 3D one on the same entity (its own key component). Also: `Footing`-style precomputed masks
+  (the rule once per step, not per sweep), and `ChangedEdges` before writing the buffer to skip unchanged writes.
+- performance pages: none (the sample's TickBenchmark is not on the site).
+- decisions.mdx + zh (sample-level, a short record or a line in the VoxelServer record): in-place red-black over
+  Jacobi step + commit for a settled field (equal time, one buffer and one copy fewer); cold start over warm start;
+  Trail over the gradient; ScentEvery 4 kept (8 measured no faster).
+
+Numbers (TickBenchmark, 100 ticks from tick 900, the second night; Xeon VM shared with other agents' benchmarks,
+load average 2.8 to 22 at a class's start, StdDev 10-40 %: only differences past about 15 % are real). Mean of the
+rounds, ms per 100 ticks, every row 0 B unless said:
+
+| Form | rounds | 50 players | 2,000 players |
+|---|---|---|---|
+| before (straight chase) | 5 | 44.4 (34.4-57.1) | 110.3 (105.4-116.0) |
+| step + commit (shipped) | 4 | 58.7 (56.3-63.2) | 132.2 (119.9-142.8) |
+| in place, red-black tiles | 3 | 55.6 (47.1-62.1) | 125.9 (116.6-136.3), 672 B in one round |
+| in place, ScentEvery 8 | 2 | 58.7 (54.0-63.4) | 126.0 (120.4-131.5) |
+
+The field costs about 0.13 ms a tick at 50 players and 0.2 ms at 2,000 (of the 50 ms budget). Part of it may be the game
+changing rather than the field's systems: zombies hunt within 35 walking steps (a diamond) instead of 35 blocks (a
+circle) and hit less (334 hits against 459 at 50 players), so the worlds compared differ. Systems measured in the sample
+(MeasureSystems, 2,000 players): the two steps 0.6 ms on average; the chase 0.9 ms against 0.47 ms straight (a
+chunk lookup per zombie).

@@ -31,7 +31,8 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                fix compiles, adds no diagnostic and is not offered again), BattleServer (the world of
                                docs/content/example.mdx as a whole, linked from EasyEcs.Benchmark), Locality (the phase 0
                                prototypes of docs/plans/locality.md and borrowed-ideas.md, benchmarks/EasyEcs.Benchmark/Locality
-                               linked: each against its plain form, 0 B per tick); Fixtures.cs holds
+                               linked: each against its plain form, 0 B per tick), VoxelServer (the sample's zombies: around a wall and
+                               a pit by the scent, stuck walking the straight line; the field's values); Fixtures.cs holds
                                the shared test components
 tests/EasyEcs.Aot/             the battle server (BattleServer.cs), an ordered table, a pair method, the prefetching twins (probes, buffer
                                chases, a parallel probe; the gate forced on against off) and the generated forms of an

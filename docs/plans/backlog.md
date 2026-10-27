@@ -136,7 +136,8 @@ branch: padded storage, ping-pong, zero rows, edges found while stepping), 12c +
        worlds as an example first, streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
        owner: records in the docs pass). Vertical batch probes dropped after the 16M re-measure (record in the docs
        pass); scalar group prefetching of probes is built in item 6 (index probes).
-8. [ ] **VoxelServer: zombies follow a distance field** (approved by the owner, 2026-10-27: "可以做，排进去"). Today a zombie walks the straight line to its target and sticks at walls and the bots' pits. One
+8. [x] **VoxelServer: zombies follow a distance field** (merged: step + commit form, the in-place form dropped for an
+       intermittent allocation; numbers in docs-todos "feat-zombie-field") (approved by the owner, 2026-10-27: "可以做，排进去"). Today a zombie walks the straight line to its target and sticks at walls and the bots' pits. One
        field per chunk (`DynamicBuffer<PathCost>`, 16 x 16 over the surface height map, a step up of one block
        walkable) seeded by the players' cells, relaxed as a tile shader: each step sweeps its own tile to settle
        inside it, red-black tiles so the front crosses two chunks a tick, `ChangedEdges` sleep where no player
