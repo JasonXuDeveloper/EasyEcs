@@ -17,6 +17,7 @@ internal static class Symbols
     public const string ForEachAttribute = "EasyEcs.ForEachAttribute";
     public const string ForEntityAttribute = "EasyEcs.ForEntityAttribute";
     public const string ConsumeAttribute = "EasyEcs.ConsumeAttribute";
+    public const string NeighborAttribute = "EasyEcs.NeighborAttribute";
     public const string UpdateIntervalAttribute = "EasyEcs.UpdateIntervalAttribute";
     public const string WithAttribute = "EasyEcs.WithAttribute<T>";
     public const string WithoutAttribute = "EasyEcs.WithoutAttribute<T>";
@@ -797,6 +798,11 @@ internal static class Symbols
         /// configuration): any type but a component, a singleton or the framework's own, by value, <c>ref</c> or <c>in</c>.
         /// </summary>
         Context,
+        /// <summary>
+        /// <c>[Neighbor] in T</c> (a component of the other entity of a pair, read) or <c>[Neighbor] Entity</c> (the other
+        /// entity): the method runs per pair (PairForm).
+        /// </summary>
+        Neighbor,
     }
 
     /// <summary>
@@ -806,7 +812,7 @@ internal static class Symbols
     public static ParamKind Classify(IParameterSymbol p, bool outside)
     {
         var kind = Classify(p);
-        if (kind != ParamKind.Invalid || !outside || p.RefKind is not (RefKind.None or RefKind.Ref or RefKind.In)) return kind;
+        if (kind != ParamKind.Invalid || !outside || IsNeighbor(p) ||p.RefKind is not (RefKind.None or RefKind.Ref or RefKind.In)) return kind;
         var element = SpanElement(p.Type) ?? MaybeElement(p.Type) ?? MutElement(p.Type) ?? p.Type;
         if (IsA(element, Component) || IsA(element, Singleton) || ReduceElement(p.Type) != null) return ParamKind.Invalid; // a component by value
         // A span or other ref struct goes into the job by value: a job holds no ref field to a ref struct.
@@ -1154,8 +1160,17 @@ internal static class Symbols
         return null;
     }
 
+    /// <summary>An Entity parameter: the row's, or a pair's other entity ([Neighbor] Entity).</summary>
+    public static bool IsEntityHandle(IParameterSymbol p) => Classify(p) is ParamKind.Entity || Classify(p) == ParamKind.Neighbor && Named(p.Type, Entity);
+
+    /// <summary>The parameter has [Neighbor]: it belongs to the other entity of a pair (<see cref="ParamKind.Neighbor"/>, or invalid).</summary>
+    public static bool IsNeighbor(IParameterSymbol p) => p.GetAttributes().Any(a => Named(a.AttributeClass, NeighborAttribute));
+
     public static ParamKind Classify(IParameterSymbol p)
     {
+        if (IsNeighbor(p)) // the other entity of a pair: read only
+            return p.RefKind == RefKind.In && p.Type.IsValueType && IsA(p.Type, Component) || p.RefKind == RefKind.None && Named(p.Type, Entity)
+                ? ParamKind.Neighbor : ParamKind.Invalid;
         if (ReduceElement(p.Type) is { } reduced) // by ref only: the pass's partial result, which the method writes
             return p.RefKind == RefKind.Ref && reduced.IsValueType && IsA(reduced, Singleton) ? ParamKind.Reduction : ParamKind.Invalid;
         if (p.RefKind is RefKind.Ref or RefKind.In or RefKind.RefReadOnlyParameter)
@@ -1388,7 +1403,7 @@ internal static class Symbols
     {
         (syntax, model) = WithBody(method, syntax, model);
         return !method.Parameters.Any(p => Classify(p) == ParamKind.World)
-            && method.Parameters.Where(p => Classify(p) == ParamKind.Entity).All(p => OnlyReads(syntax, p.Name, model));
+            && method.Parameters.Where(IsEntityHandle).All(p => OnlyReads(syntax, p.Name, model));
     }
 
     /// <summary>
@@ -1640,7 +1655,7 @@ internal static class Symbols
     {
         (syntax, model) = WithBody(method, syntax, model);
         foreach (var p in method.Parameters)
-            if (Classify(p) == ParamKind.Entity && !EveryUse(syntax, p.Name, use => IsIdentityUse(model, use)))
+            if (IsEntityHandle(p) && !EveryUse(syntax, p.Name, use => IsIdentityUse(model, use)))
                 return false;
         return true;
     }

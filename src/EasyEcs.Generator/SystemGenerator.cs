@@ -299,6 +299,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// </summary>
     private static void EmitPass(StringBuilder sb, ForEachModel method, string forEach, int i, string world, string local, string filter, string whole, string indent)
     {
+        if (method.Pair != null)
+        {
+            EmitPairPass(sb, method, forEach, i, world, local, indent); // SystemGenerator.Pairs.cs
+            return;
+        }
+
         string job = $"{forEach}.{method.Name}Job{i}{method.TypeParameters}";
         void Pass(ForEachModel m, string name, string at)
         {
@@ -511,7 +517,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         sb.Append("    public static void Access(ref global::EasyEcs.SystemAccess access)\n    {\n");
         bool alone = model.Hooks.Any(h => h.Kind == "Update") || model.Methods.Any(m => m.Consume // [Consume] destroys
             || m.Parameters.Any(p => p.Kind is Symbols.ParamKind.Entities or Symbols.ParamKind.World
-                || p.Kind == Symbols.ParamKind.Entity && !m.Identifies));
+                || p.Kind == Symbols.ParamKind.Entity && !m.Identifies
+                || p is { Kind: Symbols.ParamKind.Neighbor, Type: "global::EasyEcs.Entity" } && !m.Identifies));
         if (alone)
         {
             sb.Append("        access.RunAlone();\n    }\n");
@@ -527,7 +534,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         foreach (var field in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind == Symbols.ParamKind.View).SelectMany(p => p.Fields))
             Declare($"{(field.Access == "in" ? "Read" : "Write")}<{field.Type}>()");
 
-        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch or Symbols.ParamKind.View))
+        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch or Symbols.ParamKind.View)
+                         && p is not { Kind: Symbols.ParamKind.Neighbor, Type: "global::EasyEcs.Entity" }) // a neighbor's component is a read
                      .Select(p => (p.Kind, p.Type, p.RefKind, p.Key, p.Grid)).Distinct())
         {
             if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // a read, and its index built before a parallel stage
@@ -595,6 +603,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
     private static void EmitJob(StringBuilder sb, OwnerModel owner, ForEachModel method, int number, string suffix = "")
     {
+        if (method.Pair != null)
+        {
+            EmitPairJob(sb, owner, method, number); // SystemGenerator.Pairs.cs
+            return;
+        }
         // A vector loop that must take every row has the method's own job beside it, for hardware without its vectors.
         if (suffix.Length == 0 && method.Simd is { VectorTail: true }) EmitJob(sb, owner, method with { Simd = null }, number, "Rows");
         // A method chasing other entities has a twin prefetching them, for the passes past the last-level cache.
@@ -813,6 +826,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         sb.Append("    }\n\n");
 
         if (suffix.Length > 0) return; // the filter is the vector job's
+        EmitFilter(sb, method, number);
+    }
+
+    /// <summary>The method's filter, a field of the file's class (<c>{Name}Filter{number}</c>).</summary>
+    private static void EmitFilter(StringBuilder sb, ForEachModel method, int number)
+    {
         if (!method.HasFilter)
         {
             // A pass without a filter takes this empty one by reference: the optional default argument would be a
@@ -1003,6 +1022,13 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         public string Scalar { get; init; } = "";
 
         /// <summary>
+        /// A pair method ([Neighbor] parameters): its job runs per pair of rows within the cutoff its body tests
+        /// (SystemGenerator.Pairs.cs), with its own vector loop; null for any other method (and for a system's method
+        /// until its implementation stage puts it in: <see cref="LoopModel"/>).
+        /// </summary>
+        public PairModel? Pair { get; init; }
+
+        /// <summary>
         /// Its reads of other entities at ids its rows hold (<see cref="Generator.Chases"/>; none in parallel). Without a
         /// vector loop, a pass past the last-level cache runs its twin job (<see cref="IsChaseTwin"/>), which walks
         /// runs of rows and prefetches them <see cref="ChaseDistance"/> rows ahead; any other pass runs today's job.
@@ -1038,6 +1064,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// </summary>
         public string Describe()
         {
+            if (Pair != null) return Pair.Describe(Name);
             if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")}){(HasChaseTwin ? ", lookups prefetched past the last-level cache" : "")}";
             var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Lane}>)" };
             if (simd.Flat != null) parts.Add("flat");
@@ -1189,13 +1216,14 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     One = Symbols.IsForEntity(method), Consume = Symbols.IsConsume(method),
                     // Kernel.Vectorize decides alone (static, stable, its body; in parallel too): the analyzer reports its reasons.
                     // One entity has no run of rows to vectorize; a system's loop is its implementation's (SystemLoops).
-                    Simd = Symbols.IsForEntity(method) || !outside ? null : VectorLoop(method, syntax, model, parallel, ct, out scalar),
+                    Simd = Symbols.IsForEntity(method) || !outside || PairForm.IsPairMethod(method) ? null : VectorLoop(method, syntax, model, parallel, ct, out scalar),
                     Scalar = scalar ?? "",
+                    Pair = outside && PairForm.IsPairMethod(method) ? PairModel.Create(method, syntax, model, ct) : null,
                     // Reads of other entities at the row's ids, by EntityId (a keyed lookup finds through its index).
                     Chases = Symbols.IsForEntity(method) || parallel ? new([])
                         : new(Generator.Chases.Of(method, syntax, model, ct).Where(c => parameters[c.Lookup].Key.Length == 0).ToArray()),
                     OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LoopsOrCalls(syntax),
-                    Fusion = outside ? null : FusionSide.Of(method, stable, identifies, parallel),
+                    Fusion = outside || PairForm.IsPairMethod(method) ? null : FusionSide.Of(method, stable, identifies, parallel), // a pair pass walks windows
                 };
         }
 

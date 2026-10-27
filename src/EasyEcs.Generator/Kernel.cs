@@ -104,6 +104,13 @@ internal sealed partial class Kernel
         /// runs it where <c>Interleaved.IsWideAccelerated</c> (ARM64).
         /// </summary>
         public bool Wide128 { get; init; }
+
+        /// <summary>
+        /// The loop of a pair method (Kernel.Neighbors.cs): <see cref="Setup"/> before the windows, <see cref="Body"/>
+        /// the loads of a window's rows, <see cref="MaskedBody"/> one neighbor against them (its values broadcast
+        /// first), <see cref="MaskedStores"/> the window's stores; the lanes are a window's (<c>__pass</c>).
+        /// </summary>
+        public bool Pairs { get; init; }
     }
 
     /// <summary>
@@ -332,7 +339,8 @@ internal sealed partial class Kernel
                 (root, model) = (inlinedBody, speculative);
         }
 
-        var lane = new Lane(method, Symbols.IsRunner(declaration), Symbols.IsParallel(declaration), Symbols.FastFloats(declaration), model, stable, declaration);
+        var lane = new Lane(method, Symbols.IsRunner(declaration), Symbols.IsParallel(declaration), Symbols.FastFloats(declaration), model, stable, declaration)
+            { Pairs = PairForm.IsPairMethod(declaration) }; // a pair method's loop is the body of its j loop (Kernel.Neighbors.cs)
         var code = Vectorize(lane, root, fieldOf, ct, out reason);
         // Gathers win where a vector's targets share a table and lose a little where they spread over many (D131): where
         // they live is the data's, not the code's, so the loop that gathers is the method's to ask for.
@@ -394,7 +402,11 @@ internal sealed partial class Kernel
     /// </summary>
     /// <param name="Declaration">The method as declared, whose attributes the lane follows: <paramref name="Method"/> itself,
     /// or the method a view's desugared local function stands for (Kernel.Views.cs).</param>
-    private sealed record Lane(IMethodSymbol Method, bool Outside, bool Parallel, bool Fast, SemanticModel Model, bool Stable, IMethodSymbol? Declaration = null);
+    private sealed record Lane(IMethodSymbol Method, bool Outside, bool Parallel, bool Fast, SemanticModel Model, bool Stable, IMethodSymbol? Declaration = null)
+    {
+        /// <summary>A pair method ([Neighbor] parameters): the loop is the body of one neighbor against a window of rows (Kernel.Neighbors.cs).</summary>
+        public bool Pairs { get; init; }
+    }
 
     /// <summary>
     /// Whether a method <see cref="Vectorize"/> leaves scalar looks meant for a vector loop, so EECS055 names the reason:
@@ -505,7 +517,8 @@ internal sealed partial class Kernel
         Symbols.ParamKind.Mutable => $"it takes a Mut<{Symbols.MutElement(p.Type)?.Name}>",
         Symbols.ParamKind.Scratch => $"it takes a Scratch<{Element(p.Type)}>: working memory a row at a time, not one per lane",
         Symbols.ParamKind.Lookup => null, // its reads decide (Kernel.Lookups.cs)
-        _ => $"parameter '{p.Name}' is not a component, a singleton, a Reduce<T> or a value",
+        Symbols.ParamKind.Neighbor => NeighborRefused(p), // Kernel.Neighbors.cs
+        _ =>$"parameter '{p.Name}' is not a component, a singleton, a Reduce<T> or a value",
     };
 
     private static Code Translate(Lane lane, IOperation body, System.Func<int, Symbols.ParamKind, string> fieldOf,
@@ -555,6 +568,9 @@ internal sealed partial class Kernel
                     break;
                 case Symbols.ParamKind.Optional when !lane.Parallel:
                     optionals.Add(Lanes(Symbols.MaybeElement(p.Type)!));
+                    break;
+                case Symbols.ParamKind.Neighbor when lane.Pairs: // a value per neighbor, broadcast in its j loop
+                    if (NeighborRefused(p) is { } refusedNeighbor) throw new Unsupported(refusedNeighbor);
                     break;
                 default:
                     if (Refused(p, kind, lane.Parallel) is { } refused) throw new Unsupported(refused);
@@ -627,6 +643,11 @@ internal sealed partial class Kernel
                 if (kind == Symbols.ParamKind.Emit)
                 {
                     made._emits[p] = (i, false);
+                    continue;
+                }
+                if (kind == Symbols.ParamKind.Neighbor)
+                {
+                    made._uniformParams[p] = Neighbor(i); // the job's j loop declares it (Kernel.Neighbors.cs)
                     continue;
                 }
                 string name = $"__p{i}";
@@ -789,6 +810,7 @@ internal sealed partial class Kernel
         if (kernel._halvesPass) kept.Insert(0, $"var __pw_0 = {V}.WidenLower(__pass);\nvar __pw_1 = {V}.WidenUpper(__pass);\n");
         // Each lookup's backoff (Lookup.Resolve): after a miss, the vectors of the run to send to the method without trying.
         for (int g = 0; g < kernel._lookups.Count; g++) kernel._setup.Append($"int __b{g} = 0;\n");
+        if (lane.Pairs) return kernel.ForPairs(read.ToString() + kept, masked.ToString(), Elem(first)); // Kernel.Neighbors.cs
         return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
             kernel._setup.ToString(), prologue + read + hold + kernel._body, stores.ToString(), prologue + read + kept + maskedHold + kernel._body.Masked, masked.ToString(),
             restore.ToString(), fold.ToString(), kernel._size, kernel._mask, Elem(first), kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
