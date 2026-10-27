@@ -74,6 +74,11 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        ARM64 (owner's M4 run, `locality.md` 6.1a): crowded maps 2-8x, sparse maps only 1.1-2.1x while neighbor lists
        reach 2.5-3.4x: L2 ships clusters there too (faster is kept, owner) and optimizes: 4-row blocks and the
        neighbor-list form on ARM64, picked by density; never a slower case (no re-sort every tick on sparse maps).
+       Follow-up after L2 merges (owner, 2026-10-27: "cluster pairs + prefetch, faster?"): prefetch the j block of the
+       pair `k` pairs ahead (its rows' lines of every column the pair method reads) behind the same `LastLevelCache`
+       gate as item 6; i blocks are sequential and need none. Expected to pay only when the ordered table is past the
+       last-level cache (this machine's L3 is 260 MiB: PairsBenchmark at 4M-16M rows, plus a forced-on column just
+       under the cache); ships only if faster there and never slower in the cache (`audit-perf`, two rounds, 0 B).
 2. [x] **ARM64 parity of the generated forms** (merged 186c84d): LD2-4 / ST2-4 for multi-field components, NEON TBL /
        TBX for wide components (a gate per form), BitMask in registers, the `arm64` CI job asserting loop lines.
        Owner's M4 run (default job, one round): SteerGenerated 2.07x faster than SteerScalar at 1k, 1.55x at 100k;
