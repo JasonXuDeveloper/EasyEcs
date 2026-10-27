@@ -44,7 +44,10 @@ code duplicated across projects, a project reaching into another's internals.
   should share its core.
 
 - **tools/Inlining** runs each benchmark method once: it reads `[Params]` and `[ParamsSource]` (a gate parameter is a
-  `[ParamsSource]`); a benchmark shape it cannot run is a gap in the tool, fixed there.
+  `[ParamsSource]`); a benchmark shape it cannot run is a gap in the tool, fixed there. It takes full class names
+  (`KernelBenchmark`, not `Kernel`: a wrong name throws "Sequence contains no matching element").
+- **Scripted edits of C# keep its escapes**: a Python heredoc rewriting C# string literals broke their escapes;
+  check the result or use the Edit tool.
 
 ## Exemplar pass (before every docs pass)
 

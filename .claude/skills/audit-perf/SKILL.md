@@ -127,6 +127,12 @@ its own worktree.
      which forms would pay there (a per-form gate) and which would not;
    - a multi-stage prefetch is measured one stage at a time: a stage whose address needs a second lookup (a shared
      key's list of ids) cost 2.4x at 16M keys;
+   - a pruning step that cuts work per item (a pair window skipped by its box) can lose to the tighter loop it
+     replaces: measure it, and when it loses, revert it with its numbers in the commit message;
+   - a benchmark whose first tick reorders the data (a pair pass sorts the table) takes its reference result after
+     that tick;
+   - long benchmark queues go in a resumable per-item script (one log per item, skipping done items): background
+     waits are killed after 2 h;
    - quote BenchmarkDotNet filters (`--filter '*Iterate*'`): an unquoted pattern expands into file names in the shell
      and the run measures nothing;
    - the feature's benchmark plus WorldSimulation, BattleServer, MultiWorld and the neighbors; 0 B in steady state;
