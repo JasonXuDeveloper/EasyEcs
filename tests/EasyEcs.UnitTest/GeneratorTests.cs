@@ -282,6 +282,8 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f, Maybe<H> h) { if (!h.HasValue) return; h.Value.V = f.V; }", true)]   // written through
     [TestCase("[ForEach] static void A(ref F f, Maybe<D> d) { if (d.HasValue) f.V++; }", false)]                    // another lane size
     [TestCase("[ForEach(Parallel = true)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V++; }", false)]   // in parallel
+    // A helper whose value is target-typed (new(...)): inlined where 'var' gives no type, it keeps its return type.
+    [TestCase("public record struct Cell2(int X, int Z); static Cell2 At(float v) => new((int)v, (int)v); [ForEach] static void A(ref F f) { var c = At(f.V); f.V = c.X + c.Z; }", true)]
     public void QualifyingMethodsGetAVectorLoop(string members, bool vectorized)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"[EcsSystem] public ref struct S {{ {members} }}"),
@@ -369,6 +371,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f, in H h) { ref var v = ref f.V; v += h.V; }", "ref local 'v' is not supported: name the parameter's fields instead", true)]
     [TestCase("[ForEach] static void A(ref F f, in H h) { float v; v = h.V; f.V = v; }", "local 'v' has no initializer: give it its value where it is declared", true)]
     [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V = e.Id.Index;", "it uses the Entity in 'e.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>)", true)]
+    [TestCase("public record struct Wide2(int A, long B); static Wide2 At(float v) => new((int)v, 1); [ForEach] static void A(ref F f) { var c = At(f.V); f.V = c.A; }", "local 'c' is a S.Wide2, not a lane type of 4 or 8 bytes")] // the helper's new(...) keeps its type in 'var c'
     public void ScalarLoopsNameTheirReason(string members, string reason, bool fixable = false)
     {
         var diagnostics = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Where(d => d.Id == "EECS055").ToArray();
@@ -401,6 +404,7 @@ public class GeneratorTests
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 1 field it uses takes 9 permutes per 16 rows, more than its 1 vector operation gains; it uses 1 of Five's 5 fields (A): move it into a component of its own (a component of one field gets a vector loop)")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, Scratch<int> s) => f.V += s.Value;", "it takes a Scratch<Int32>: working memory a row at a time, not one per lane")]
     [TestCase("public struct Aim : IComponent { public EntityId Target; } [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, in Aim a, Lookup<D> d) { if (d.Has(a.Target)) f.V = 1; }", "it reads Lookup<D>, whose fields are not all lanes of 4 bytes (float, int, uint): a vector loop gathers only those")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, in Link l, Lookup<Owned> o) { if (o.TryFind(l.Target, out var e)) f.V = 1; }", "it probes an index ('o.TryFind(l.Target, out var e)'): a key probe has no vector form; a vector loop reads other entities only at an EntityId")]
     public void ARequiredVectorLoopThatDoesNotQualifyIsAnError(string members, string reason)
     {
         var diagnostics = Analyze([Components, Lanes, $"[EcsSystem] public ref struct S {{ {members} }}"]).Result.Where(d => d.Id.StartsWith("EECS05")).ToArray();
