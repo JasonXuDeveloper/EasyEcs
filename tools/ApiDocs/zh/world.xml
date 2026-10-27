@@ -686,7 +686,7 @@
   </member>
   <member name="M:EasyEcs.World.SortRows``1" source="863a6b959fad">
     <summary>
-      不管节奏，现在就按键排序含 <typeparamref name="T" /> 的每张表：行按键的顺序排好，重新画出各簇的包围盒（成对方法推断出的顺序
+      不管节奏，现在就按键排序含 <typeparamref name="T" /> 的每张表：行按键的顺序排好，重新画出各簇的包围盒（邻居对方法推断出的顺序
       <see cref="M:EasyEcs.World.OrderRows``2(System.Int32,System.Single,System.Int32,System.Single,System.Int32)" />，或
       <see cref="T:EasyEcs.OrderByAttribute">[OrderBy]</see>）。每张表的下一次排序从这次起再过它的间隔。没有表按这个组件排序时什么也不做。
       行会移动，所以指向这些表的引用、句柄缓存的行和标记的行到这里失效，和任何结构变更一样。只能在所有者线程、两次遍历之间调用

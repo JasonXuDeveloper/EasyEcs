@@ -39,6 +39,7 @@ const rules: Rule[] = [
     wrong: /分片/g,
     right: '分帧 (Slices, a pass over 1/N of the rows; 分片 reads as sharding)',
   },
+  { wrong: /成对方法|粒子对方法|配对方法/g, right: '邻居对方法 (a pair method)' },
   { wrong: /(?<!按)块对/g, right: '簇对 (a block pair of an ordered table)' },
   // A link to a page is labelled with the page's title, as its sidebar entry is.
   {

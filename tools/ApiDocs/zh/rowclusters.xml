@@ -2,7 +2,7 @@
 <doc>
   <member name="T:EasyEcs.RowClusters" source="c5e70e12f629">
     <summary>
-      一张有序表的簇（成对方法推断出的顺序，或 <see cref="T:EasyEcs.OrderByAttribute">[OrderBy]</see>）：表的行按键排序，
+      一张有序表的簇（邻居对方法推断出的顺序，或 <see cref="T:EasyEcs.OrderByAttribute">[OrderBy]</see>）：表的行按键排序，
       每 <see cref="P:EasyEcs.RowClusters.Size" /> 行一簇，每簇一个轴对齐的包围盒，盒子罩住簇里各行声明的点，再向外扩大余量。
       空间搜索读的就是它：离查询远的盒子整簇跳过，近的盒子从表的列里逐行读（或一个向量读一簇，<see cref="M:EasyEcs.RowClusters.Read``1" />）。
       从 <see cref="M:EasyEcs.World.Clusters``1" />（按某个组件排序的每张表）或 <see cref="P:EasyEcs.EntitySpan.Clusters" />
