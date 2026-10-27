@@ -148,7 +148,7 @@ public class GeneratorTests
         "world.Count<global::P>(in __ForEach.AFilter0)", "(ref job0, in __ForEach.AFilter0);")]                          // no filter: no zeroed temporary
     [TestCase("[ForEach(Slices = 3)] static void A(ref P p) { }", "access.Write<global::P>();", "(ref job0, __ForEach.AFilter0.Slice((int)(system.RunCount % 3), 3));")]
     [TestCase("[ForEach(Slices = 2, Parallel = true), Without<Q>] static void A(ref P p) { }", "ForEachBatchParallel<", "AFilter0.Slice((int)(system.RunCount % 2), 2)")]
-    [TestCase("[ForEach(Parallel = true, ChunkRows = 100)] static void A(ref P p) { }", "ForEachBatchParallel<", "(ref job0, in __ForEach.AFilter0, chunkRows: 100);")]
+    [TestCase("[ForEach(Parallel = true, ChunkSize = 100)] static void A(ref P p) { }", "ForEachBatchParallel<", "(ref job0, in __ForEach.AFilter0, chunkSize: 100);")]
     [TestCase("[ForEach(Slices = 4)] static void A(System.Span<P> p) { }", "ForEachBatch<", "Slice((int)(system.RunCount % 4), 4)")]
     public void AccessIsDeclaredFromParameters(string members, params string[] expected)
         => AccessOf("", members, expected);
@@ -923,8 +923,8 @@ public class GeneratorTests
 
     // Skipped by the generator == reported: a method the analyzer rejects gets no job.
     [TestCase("[ForEach(Slices = 0)] static void A(ref P p) { }")]                                    // EECS035
-    [TestCase("[ForEach(ChunkRows = 64)] static void A(ref P p) { }")]                                // EECS054: not parallel
-    [TestCase("[ForEach(Parallel = true, ChunkRows = -1)] static void A(ref P p) { }")]               // EECS054: below 0
+    [TestCase("[ForEach(ChunkSize = 64)] static void A(ref P p) { }")]                                // EECS054: not parallel
+    [TestCase("[ForEach(Parallel = true, ChunkSize = -1)] static void A(ref P p) { }")]               // EECS054: below 0
     public void RejectedMethodsGetNoJob(string members)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"[EcsSystem] public ref struct S {{ {members} }}"), out var output, out _);

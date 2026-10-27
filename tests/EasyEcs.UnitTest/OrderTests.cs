@@ -383,7 +383,7 @@ public class OrderTests
 
     public static class Passes
     {
-        [ForEach(Parallel = true, ChunkRows = 256)]
+        [ForEach(Parallel = true, ChunkSize = 256)]
         public static void Weigh(in Walker walker, ref Health health) => health = new Health((int)(walker.X * 7 + walker.Y));
     }
 

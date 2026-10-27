@@ -18,7 +18,7 @@ public class LookupTests
     [EcsSystem]
     public ref struct Chase
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Steer(in Place place, in Chaser chaser, ref Aim2 heading, Lookup<Place> places)
         {
             var target = places[chaser.Target];
@@ -46,7 +46,7 @@ public class LookupTests
     [EcsSystem]
     public ref struct FindLogin
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Find(in Wants wants, ref Found found, Lookup<Login> logins) =>
             found.Id = logins.TryFind(wants.Login, out var entity) ? entity : default;
     }
@@ -55,7 +55,7 @@ public class LookupTests
     [EcsSystem]
     public ref struct CountFollowers
     {
-        [ForEach(Parallel = true, ChunkRows = 64), With<Place>]
+        [ForEach(Parallel = true, ChunkSize = 64), With<Place>]
         static void Count(ref Found found, Lookup<Follows> follows) =>
             found.Followers = follows.Count(found.Id);
     }
@@ -203,7 +203,7 @@ public class LookupTests
     [EcsSystem]
     public ref struct SumFollowers
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Sum(ref Found found, Lookup<Follows> follows, Lookup<Place> places)
         {
             int total = 0;
@@ -223,7 +223,7 @@ public class LookupTests
     [EcsSystem]
     public ref struct CountThroughStatic
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Count(ref Found found) => found.Followers = Stray.Index.Count(found.Id);
     }
 

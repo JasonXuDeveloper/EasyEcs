@@ -217,8 +217,8 @@ public partial class AnalyzerTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach(Slices = 0)] static void A(ref P p) { } }", "EECS035")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach(Slices = 2), ChangedAny<T, T>] static void A(ref P p) { } }", "EECS035")]
     [TestCase("public static class R { [ForEach(Slices = -1)] static void A(ref P p) { } }", "EECS035")]
-    [TestCase("[EcsSystem] public ref struct S { [ForEach(ChunkRows = 64)] static void A(ref P p) { } }", "EECS054")]
-    [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true, ChunkRows = -1)] static void A(ref P p) { } }", "EECS054")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach(ChunkSize = 64)] static void A(ref P p) { } }", "EECS054")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true, ChunkSize = -1)] static void A(ref P p) { } }", "EECS054")]
     [TestCase("public static class R { [ForEach(Slices = 2)] static void A(ref P p) { } static void A(World w, int slice) { } }", "EECS021")]
     [TestCase("public struct Mount : IComponent, IUniqueIndexed<EntityId> { public EntityId Rider; public EntityId Key => Rider; }", "EECS036")]
     [TestCase("public struct Seat : IComponent, IUniqueIndexed<int>, IIndexed<string> { public int Id; readonly int IIndexed<int>.Key => Id; readonly string IIndexed<string>.Key => \"\"; }", "EECS036")]
@@ -270,7 +270,7 @@ public partial class AnalyzerTests
     [TestCase("[EcsSystem] public ref struct S { public const int N = 3; public static int Twice => N * 2; }")]
     [TestCase("[EcsSystem] public ref struct X { } public static class U { public static void F(World w) { if (w.TryGetSystem<X>(out var x)) x.Enabled = false; } }")] // a handle writes through
     [TestCase("[EcsSystem] public ref struct S { [ForEach(Slices = 1), Changed<T>] static void A(ref P p) { } [ForEach(Slices = 8, Parallel = true)] static void B(ref Q q) { } }")]
-    [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true, ChunkRows = 64)] static void A(ref P p) { } [ForEach(Parallel = true, ChunkRows = 0)] static void B(ref Q q) { } }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true, ChunkSize = 64)] static void A(ref P p) { } [ForEach(Parallel = true, ChunkSize = 0)] static void B(ref Q q) { } }")]
     [TestCase("public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; } public static class U { public static Entity F(World w) => w.AccountIndex.Get(1); }")]
     [TestCase("public static class U { public static bool F(ref DynamicBuffer<int> b) => System.Runtime.CompilerServices.Unsafe.IsNullRef(ref b); }")] // a 'ref readonly' argument is no copy
     [TestCase("public static class U { public static bool F(in DynamicBuffer<int> b) => System.Runtime.CompilerServices.Unsafe.IsNullRef(in b); }")]
@@ -278,7 +278,7 @@ public partial class AnalyzerTests
     [TestCase("public static class U { public static bool F(Entity e) { ref readonly var b = ref e.TryGetRef<DynamicBuffer<int>>(out _); return System.Runtime.CompilerServices.Unsafe.IsNullRef(in b); } }")]
     [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } [EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(in P p, ref Reduce<Sum> sum, in Sum last) => sum.Value.N += p.V + last.N; }")]
     [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } [EcsSystem] public ref struct S { [ForEach] static void A(in P p, Maybe<Q> q, ref Reduce<Sum> sum) => sum.Combine(new Sum { N = p.V + (q.HasValue ? q.Value.V : 0) }); }")]
-    [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public static class R { [ForEach(Parallel = true, ChunkRows = 1024)] public static void A(in P p, ref Reduce<Sum> sum) => sum.Value.N += p.V; }")]
+    [TestCase("public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } public static class R { [ForEach(Parallel = true, ChunkSize = 1024)] public static void A(in P p, ref Reduce<Sum> sum) => sum.Value.N += p.V; }")]
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; static int ITileShape.Halo => 4; static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All; }")]
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 8; static int ITileShape.Depth => 1; static int ITileShape.Halo => 3; static TileFaces ITileShape.Faces => TileFaces.West | TileFaces.East; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }")]
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { public static int H = 9; int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITileShape.Halo => H; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }")]

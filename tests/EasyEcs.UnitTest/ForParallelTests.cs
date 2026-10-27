@@ -76,7 +76,7 @@ public class ForParallelTests
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
         var census = new Visits { Chunks = new int[1], Smallest = [int.MaxValue] };
-        world.ForParallel(10_000, ref census, chunkRows: 100); // rounded up to 128
+        world.ForParallel(10_000, ref census, chunkSize: 100); // rounded up to 128
         Assert.That(census.Chunks[0], Is.EqualTo((10_000 + 127) / 128));
         Assert.That(census.Smallest[0], Is.EqualTo(10_000 % 128));
         census = new Visits { Chunks = new int[1], Smallest = [int.MaxValue] };

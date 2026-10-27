@@ -285,11 +285,11 @@ public class CodeFixTests
     [TestCase("EECS027", "Use parameter 'q'",
         "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p, in Q q) => p.V = e.Read<Q>().V + q.V; }",
         "static void A(ref P p, in Q q) => p.V = q.V + q.V; }")]
-    [TestCase("EECS054", "Remove ChunkRows",
-        "[EcsSystem] public ref struct S { [ForEach(ChunkRows = 64)] static void A(ref P p) => p.V++; }",
+    [TestCase("EECS054", "Remove ChunkSize",
+        "[EcsSystem] public ref struct S { [ForEach(ChunkSize = 64)] static void A(ref P p) => p.V++; }",
         "[ForEach] static void A(ref P p)")]
-    [TestCase("EECS054", "Remove ChunkRows",
-        "[EcsSystem] public ref struct S { [ForEach(Parallel = true, ChunkRows = -1)] static void A(ref P p) => p.V++; }",
+    [TestCase("EECS054", "Remove ChunkSize",
+        "[EcsSystem] public ref struct S { [ForEach(Parallel = true, ChunkSize = -1)] static void A(ref P p) => p.V++; }",
         "[ForEach(Parallel = true)] static void A(ref P p)")]
     [TestCase("EECS061", "Run it on one thread",
         "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
@@ -343,8 +343,8 @@ public class CodeFixTests
         "namespace N\n{\n    public readonly struct Tile : IComponent, IIndexed<Tile>, System.IEquatable<Tile>\n    {\n        public readonly int X;\n        Tile IIndexed<Tile>.Key => this;\n        public bool Equals(Tile o) => X == o.X;\n    }\n}",
         "namespace N\n{\n    [LookupKey]\n    public readonly partial struct Tile : IComponent, System.IEquatable<Tile>\n    {\n        public readonly int X;\n        public bool Equals(Tile o) => X == o.X;\n    }\n}")]
     [TestCase("EECS067", "Declare it with [UniqueKey]",
-        "public struct D : IComponent, IDirectIndexed<int> { public int Cell; public int Key { get => Cell; } public static int Slots => 8; public static int SlotOf(int key) => key; }",
-        "public partial struct D : IComponent, IDirectIndexed<int> { [UniqueKey] public int Cell; public static int Slots")]  // IDirectIndexed stays
+        "public struct D : IComponent, IDirectMapped<int> { public int Cell; public int Key { get => Cell; } public static int Slots => 8; public static int SlotOf(int key) => key; }",
+        "public partial struct D : IComponent, IDirectMapped<int> { [UniqueKey] public int Cell; public static int Slots")]  // IDirectMapped stays
     [TestCase("EECS067", "Declare it with [Group]",
         "public struct Z : IComponent, IGroup { public int Zone; public int Group => Zone; }",
         "public partial struct Z : IComponent { [Group] public int Zone; }")]
@@ -711,6 +711,10 @@ public class CodeFixTests
         "=> new EntityRandom(1);", "Drop the tick: the world advances it on every update")]
     [TestCase("CS1739", "public static class C { public static EntityRandom R() => new EntityRandom(Seed: 1, Tick: 2); }",
         "=> new EntityRandom(Seed: 1);", "Drop the tick: the world advances it on every update")]
+    [TestCase("CS0246", "[EcsSystem] public ref struct S { [ForEach(Parallel = true, ChunkRows = 64)] static void M(ref P p) { } }",
+        "[ForEach(Parallel = true, ChunkSize = 64)]", "Rename it to ChunkSize")]
+    [TestCase("CS1739", "public struct J : IForRange { public void Execute(int start, int end) { } } public static class C { public static void Go(World w) { var j = new J(); w.ForParallel(10, ref j, chunkRows: 64); } }",
+        "w.ForParallel(10, ref j, chunkSize: 64);", "Rename it to chunkSize")]
     public async Task MigratesADeclarationOfTheOldForm(string id, string source, string expected, string title)
     {
         var document = Document(Data + source);

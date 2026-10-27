@@ -55,7 +55,7 @@ public class DynamicBufferTests
     [EcsSystem]
     public ref struct Restock
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         private static void Apply(Mut<DynamicBuffer<Stock>> stock, in Health health) => stock.Write().AsSpan()[0] = new Stock(health.Value);
     }
 

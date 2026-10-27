@@ -51,7 +51,7 @@ public class WorkersTests
     [EcsSystem]
     public ref struct Busy
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Work(ref Load load)
         {
             Thread.SpinWait(200);
@@ -64,7 +64,7 @@ public class WorkersTests
     [EcsSystem]
     public ref struct Counted
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Work(in Load load, ref Done done, Scratch<long> rows)
         {
             Thread.SpinWait(200);
@@ -77,7 +77,7 @@ public class WorkersTests
     [EcsSystem]
     public ref struct CountedLater
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Work(in Load load, ref Done done, Scratch<short> rows)
         {
             Thread.SpinWait(200);

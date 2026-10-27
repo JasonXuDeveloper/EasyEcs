@@ -13,7 +13,7 @@ public class EntityRandomTests
     [EcsSystem]
     public ref struct ParallelRolls
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Roll(ref Roll roll, Entity entity, in EntityRandom random) =>
             roll = new Roll(random.Range(entity.Id, 0, 1, 7), random.Float(entity.Id, 1));
     }

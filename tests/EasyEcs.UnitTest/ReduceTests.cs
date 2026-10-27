@@ -72,7 +72,7 @@ public partial class ReduceTests
     [EcsSystem]
     public ref struct ParallelCensus
     {
-        [ForEach(Parallel = true, ChunkRows = 256)]
+        [ForEach(Parallel = true, ChunkSize = 256)]
         static void Count(in Points points, ref Reduce<Census> census)
         {
             ref var c = ref census.Value;
@@ -107,7 +107,7 @@ public partial class ReduceTests
     [EcsSystem]
     public ref struct ParallelBounds
     {
-        [ForEach(Parallel = true, ChunkRows = 1024)]
+        [ForEach(Parallel = true, ChunkSize = 1024)]
         static void Grow(in Spot spot, ref Reduce<Bounds2> box)
         {
             box.Value.MinX = MathF.Min(box.Value.MinX, spot.X);
@@ -120,7 +120,7 @@ public partial class ReduceTests
     [EcsSystem]
     public ref struct FixedChunkMass
     {
-        [ForEach(Parallel = true, ChunkRows = 4096)]
+        [ForEach(Parallel = true, ChunkSize = 4096)]
         static void Add(in Weight weight, ref Reduce<WeightSum> mass) => mass.Value.Total += weight.Value;
     }
 
@@ -135,7 +135,7 @@ public partial class ReduceTests
     [EcsSystem]
     public ref struct ParallelEnds
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Visit(in Points points, ref Reduce<Ends2> ends) =>
             ends.Combine(new Ends2 { First = points.Value, Last = points.Value, Any = true });
     }
@@ -226,7 +226,7 @@ public partial class ReduceTests
     [EcsSystem]
     public ref struct ParallelBuckets
     {
-        [ForEach(Parallel = true, ChunkRows = 1024)]
+        [ForEach(Parallel = true, ChunkSize = 1024)]
         static void Add(in Points points, ref Reduce<Buckets> all, ref Reduce<OddBuckets> odd)
         {
             all.Value.Values[points.Value % Counts.Length]++;
@@ -238,7 +238,7 @@ public partial class ReduceTests
     [EcsSystem]
     public ref struct ChangedArmor
     {
-        [ForEach(Parallel = true, ChunkRows = 64), Changed<Armor>]
+        [ForEach(Parallel = true, ChunkSize = 64), Changed<Armor>]
         static void Add(in Armor armor, ref Reduce<Scores> tally) => tally.Combine(new Scores { Count = 1, Sum = armor.Value });
     }
 
@@ -391,7 +391,7 @@ public partial class ReduceTests
     public void AFloatReductionWithFixedChunksDoesNotDependOnTheThreads() => SameMassOnAnyThreads<FixedChunkMass>(100_000);
 
     /// <summary>
-    /// Without ChunkRows too: a pass that merges cuts its chunks from the row count alone, so a float sum is the same
+    /// Without ChunkSize too: a pass that merges cuts its chunks from the row count alone, so a float sum is the same
     /// bits at 1 to 8 threads, on every run, whether the runner wakes helpers or runs alone. Table sizes below, at and
     /// above the cap of a chunk (16 chunks of 1,024 to 16,384 rows).
     /// </summary>
@@ -510,7 +510,7 @@ public partial class ReduceTests
     [EcsSystem]
     public ref struct ParallelTotals
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Add(in Points points, ref Reduce<Grand> totals)
         {
             totals.Value.Count++;
@@ -534,7 +534,7 @@ public partial class ReduceTests
     [EcsSystem]
     public ref struct ParallelEndsTotal
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Visit(in Points points, ref Reduce<EndsTotal> ends) =>
             ends.Combine(new EndsTotal { First = points.Value, Last = points.Value, Any = true });
     }

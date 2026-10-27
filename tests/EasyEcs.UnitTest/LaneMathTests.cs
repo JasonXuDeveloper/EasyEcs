@@ -93,7 +93,7 @@ public static class LoweredKernels
         o.D = y.Value != 0 && x.Value / y.Value > 3 ? 1 : 0; // the division runs only where the divisor is not 0
     }
 
-    [ForEach(Parallel = true, SimdMode = SimdMode.Require, ChunkRows = 256)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require, ChunkSize = 256)]
     internal static void DivideParallel(ref Whole4 o, in Whole x, in Divisor y)
     {
         o.A += x.Value / y.Value;

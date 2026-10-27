@@ -29,12 +29,12 @@ public record struct Handle(string Value) : IComponent, IUniqueIndexed<string> /
 {
     public string Key => Value;
 }
-public record struct GridCell(int X, int Y) : IComponent, IDirectIndexed<long> // unique, its keys in 16 slots (x, y & 3)
+public record struct GridCell(int X, int Y) : IComponent, IDirectMapped<long> // unique, its keys in 16 slots (x, y & 3)
 {
     public long Key => ((long)X << 32) | (uint)Y;
-    static int IDirectIndexed<long>.Slots => 16;
+    static int IDirectMapped<long>.Slots => 16;
     // A negative x is out of range (the hash alone); keys 4 apart share a slot.
-    static int IDirectIndexed<long>.SlotOf(long key) => (int)(key >> 32) < 0 ? -1 : (int)((key >> 32) & 3) * 4 + (int)(key & 3);
+    static int IDirectMapped<long>.SlotOf(long key) => (int)(key >> 32) < 0 ? -1 : (int)((key >> 32) & 3) * 4 + (int)(key & 3);
 }
 public struct Marked : IComponent;                        // tag
 public record struct C1(int V) : IComponent;

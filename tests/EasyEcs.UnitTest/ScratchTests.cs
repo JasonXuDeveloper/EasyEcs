@@ -25,7 +25,7 @@ public class ScratchTests
     [EcsSystem]
     public ref struct SumDigits
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Sum(in Number number, ref DigitSum sum, Scratch<Digits> scratch)
         {
             ref var digits = ref scratch.Value;

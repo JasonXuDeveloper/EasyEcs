@@ -22,7 +22,7 @@ public class ParallelTests
     [EcsSystem]
     public ref struct HeavyRows
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Work(ref Counter counter)
         {
             counter.N = Environment.CurrentManagedThreadId;
@@ -34,7 +34,7 @@ public class ParallelTests
     [EcsSystem]
     public ref struct SomeArmor
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Write(in Seen seen, Mut<Armor> armor, in Step step)
         {
             if (seen.N % step.Every == step.Phase) armor.Write().Value++;
@@ -45,14 +45,14 @@ public class ParallelTests
     [EcsSystem]
     public ref struct MaybeArmor
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Write(in Seen seen, Maybe<Armor> armor)
         {
             if (armor.HasValue) armor.Value.Value += seen.N & 1;
         }
     }
 
-    /// <summary>Few heavy rows without ChunkRows: once a run has measured their cost, chunks small enough to spread them.</summary>
+    /// <summary>Few heavy rows without ChunkSize: once a run has measured their cost, chunks small enough to spread them.</summary>
     [EcsSystem]
     public ref struct HeavyRowsMeasured
     {

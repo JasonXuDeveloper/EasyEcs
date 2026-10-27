@@ -569,7 +569,7 @@ public static class ParallelKernels
         p.Z += v.Z * FieldKernels.Dt;
     }
 
-    [ForEach(Parallel = true, SimdMode = SimdMode.Require, ChunkRows = 64)] // chunks split the blocks of 4,096 rows: opened, shared
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require, ChunkSize = 64)] // chunks split the blocks of 4,096 rows: opened, shared
     internal static void Glide(ref Spot2 p, in Drift2 v)
     {
         p.X += v.X * FieldKernels.Dt;
@@ -579,10 +579,10 @@ public static class ParallelKernels
     [ForEach(Parallel = true, SimdMode = SimdMode.Require)]
     internal static void Warm(ref Warmth warmth, in Mass mass) => warmth.Value = MathF.Min(warmth.Value + mass.Value * 0.5f, 100f);
 
-    [ForEach(Parallel = true, SimdMode = SimdMode.Require, ChunkRows = 64)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require, ChunkSize = 64)]
     internal static void WarmFine(ref Warmth warmth, in Mass mass) => warmth.Value = MathF.Max(warmth.Value - mass.Value, -100f);
 
-    [ForEach(Parallel = true, SimdMode = SimdMode.Require, ChunkRows = 128)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require, ChunkSize = 128)]
     internal static void Count(in Rank rank, ref Reduce<Headcount> headcount)
     {
         headcount.Value.Count++;
@@ -591,7 +591,7 @@ public static class ParallelKernels
         headcount.Value.High = Math.Max(rank.Value, headcount.Value.High);
     }
 
-    [ForEach(Parallel = true, SimdMode = SimdMode.Require, FloatMode = FloatMode.Fast, ChunkRows = 256)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require, FloatMode = FloatMode.Fast, ChunkSize = 256)]
     internal static void Sum(in Level level, ref Reduce<Energy> energy) => energy.Value.Total += level.Value * 0.5f;
 }
 

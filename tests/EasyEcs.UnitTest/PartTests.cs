@@ -159,8 +159,8 @@ public class PartTests
         "public partial struct R\n", "EntityId global::EasyEcs.IIndexed<global::EasyEcs.EntityId>.Key")]                        // the user's interface brings it
     [TestCase("public partial struct U : IComponent, IIndexed<int> { [UniqueKey] public int N; }",
         "public partial struct U : global::EasyEcs.IUniqueIndexed<int>", "IIndexed<int>.Key => N;")]                              // the part makes it unique
-    [TestCase("public partial struct D : IComponent, IDirectIndexed<int> { [LookupKey] public int Cell; public static int Slots => 8; public static int SlotOf(int key) => key; }",
-        "public partial struct D\n", "IIndexed<int>.Key => Cell;")]                                                               // IDirectIndexed keeps Slots and SlotOf
+    [TestCase("public partial struct D : IComponent, IDirectMapped<int> { [LookupKey] public int Cell; public static int Slots => 8; public static int SlotOf(int key) => key; }",
+        "public partial struct D\n", "IIndexed<int>.Key => Cell;")]                                                               // IDirectMapped keeps Slots and SlotOf
     [TestCase("public partial record struct Z([Group] int Zone) : IComponent;",
         "public partial record struct Z : global::EasyEcs.IGroup", "int global::EasyEcs.IGroup.Group => Zone;")]
     [TestCase("public enum B { P, D } public partial struct Z : IComponent { [Group] public B Biome; }",
@@ -317,7 +317,7 @@ public class PartTests
     [EcsSystem]
     public ref struct FindSubscriber
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Find(in LookupTests.Wants wants, ref LookupTests.Found found, Lookup<Subscriber> accounts) =>
             found.Id = accounts.TryFind(wants.Login, out var entity) ? entity : default;
     }

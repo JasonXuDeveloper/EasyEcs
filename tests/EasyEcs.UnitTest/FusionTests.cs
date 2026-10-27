@@ -124,26 +124,26 @@ public partial class FusionTests
     [EcsSystem]
     public ref struct Roster
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Weaken(ref Stamina stamina) => stamina = stamina with { Value = stamina.Value - 1 };
 
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Sum(in Stamina stamina, ref Reduce<StaminaSum> sum) => sum.Value = new StaminaSum { Total = sum.Value.Total + stamina.Value, Rows = sum.Value.Rows + 1 };
 
-        [ForEach(Parallel = true, ChunkRows = 64, SimdMode = SimdMode.Off)]
+        [ForEach(Parallel = true, ChunkSize = 64, SimdMode = SimdMode.Off)]
         static void Report(Entity unit, in Stamina stamina, Emit<Faint> low) { if (stamina.Value < 10) low.Add(new Faint(unit.Id, stamina.Value)); }
     }
 
     [EcsSystem]
     public ref struct CensusApart
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Weaken(ref Stamina stamina) => stamina = stamina with { Value = stamina.Value - 1 };
 
-        [ForEach(Parallel = true, ChunkRows = 64, FusionMode = FusionMode.Off)]
+        [ForEach(Parallel = true, ChunkSize = 64, FusionMode = FusionMode.Off)]
         static void Sum(in Stamina stamina, ref Reduce<StaminaSum> sum) => sum.Value = new StaminaSum { Total = sum.Value.Total + stamina.Value, Rows = sum.Value.Rows + 1 };
 
-        [ForEach(Parallel = true, ChunkRows = 64, FusionMode = FusionMode.Off, SimdMode = SimdMode.Off)]
+        [ForEach(Parallel = true, ChunkSize = 64, FusionMode = FusionMode.Off, SimdMode = SimdMode.Off)]
         static void Report(Entity unit, in Stamina stamina, Emit<Faint> low) { if (stamina.Value < 10) low.Add(new Faint(unit.Id, stamina.Value)); }
     }
 
@@ -519,7 +519,7 @@ public partial class FusionTests
     [TestCase("[ForEach] static void M(ref C c, in A a) { } [ForEach, Changed<C>] static void N(ref A a, in C c) { }", "")]
     [TestCase("[ForEach] static void M(ref A a) { } [ForEach, With<B>] static void N(ref A a) { }", "")]
     [TestCase("[ForEach] static void M(ref A a) { } [ForEach(Parallel = true)] static void N(ref A a) { }", "Parallel")]
-    [TestCase("[ForEach(ChunkRows = 64, Parallel = true)] static void M(ref A a) { } [ForEach(Parallel = true)] static void N(ref A a) { }", "ChunkRows")]
+    [TestCase("[ForEach(ChunkSize = 64, Parallel = true)] static void M(ref A a) { } [ForEach(Parallel = true)] static void N(ref A a) { }", "ChunkSize")]
     [TestCase("[ForEach] static void M(ref A a) { } [ForEach(Slices = 2)] static void N(ref A a) { }", "Slices")]
     [TestCase("[ForEach] static void M(ref A a) { } [ForEach(FusionMode = FusionMode.Off)] static void N(ref A a) { }", "FusionMode.Off")]
     [TestCase("[ForEach] static void M(ref A a) { } [ForEach, Consume] static void N(in A a) { }", "Consume")]
@@ -590,7 +590,7 @@ public partial class FusionTests
     [TestCase("[ForEach] static void M(ref A a) { } [ForEach, Without<B>] static void N(ref A a) { }", "EECS093")]
     [TestCase("[ForEach] static void M(ref A a) { } [ForEach, WithAny<B, C>] static void N(ref A a) { }", "EECS093")]
     [TestCase("[ForEach(Parallel = true)] static void M(ref A a) => a.V++; [ForEach] static void N(ref A a) => a.V++;", "EECS093")]     // same rows, other settings
-    [TestCase("[ForEach(Parallel = true, ChunkRows = 64)] static void M(ref A a) => a.V++; [ForEach(Parallel = true)] static void N(ref A a) => a.V++;", "EECS093")]
+    [TestCase("[ForEach(Parallel = true, ChunkSize = 64)] static void M(ref A a) => a.V++; [ForEach(Parallel = true)] static void N(ref A a) => a.V++;", "EECS093")]
     [TestCase("[ForEach] static void M(ref A a) { } [ForEach(Slices = 2)] static void N(ref A a) { }", "EECS093")]
     [TestCase("[ForEach] static void M(ref A a) => a.V++; [ForEach] static void N(ref B b, in A a, Lookup<A> all) => b.V = a.V; [ForEach] static void O(ref A a, in B b) { }", "EECS093")] // a Lookup of A
     [TestCase("[ForEach] static void M(in A a, ref Reduce<Sum> s) => s.Value.N++; [ForEach] static void N(ref A a, in Sum s) => a.V = s.N;", "EECS093")] // a pass's sum, read

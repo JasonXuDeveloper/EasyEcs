@@ -522,7 +522,7 @@ public class TileTests
     {
         public const float Rate = 0.2f;
 
-        [ForEach(Parallel = true, ChunkRows = 8)]
+        [ForEach(Parallel = true, ChunkSize = 8)]
         static void Diffuse(Tile<Heat, HeatPlate> heat, Mut<DynamicBuffer<NextHeat>> next)
         {
             var plate = heat.Pad();
@@ -680,28 +680,28 @@ public class TileTests
     [EcsSystem]
     public ref struct BlurFillSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 4)]
+        [ForEach(Parallel = true, ChunkSize = 4)]
         static void Step(Tile<Heat, BlurFill> heat, Mut<DynamicBuffer<NextHeat>> next) => Blur(heat, next);
     }
 
     [EcsSystem]
     public ref struct BlurClampSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 4)]
+        [ForEach(Parallel = true, ChunkSize = 4)]
         static void Step(Tile<Heat, BlurClamp> heat, Mut<DynamicBuffer<NextHeat>> next) => Blur(heat, next);
     }
 
     [EcsSystem]
     public ref struct BlurMirrorSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 4)]
+        [ForEach(Parallel = true, ChunkSize = 4)]
         static void Step(Tile<Heat, BlurMirror> heat, Mut<DynamicBuffer<NextHeat>> next) => Blur(heat, next);
     }
 
     [EcsSystem]
     public ref struct BlurTorusSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 4)]
+        [ForEach(Parallel = true, ChunkSize = 4)]
         static void Step(Tile<Heat, BlurTorus> heat, Mut<DynamicBuffer<NextHeat>> next) => Blur(heat, next);
     }
 
@@ -797,7 +797,7 @@ public class TileTests
     [EcsSystem]
     public ref struct LifeSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 2)]
+        [ForEach(Parallel = true, ChunkSize = 2)]
         static void Step(Tile<Life, LifePlate> life, Mut<DynamicBuffer<NextLife>> next)
         {
             var plate = life.Pad();
@@ -890,7 +890,7 @@ public class TileTests
     [EcsSystem]
     public ref struct SparseDiffuseSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 8), With<Awake>]
+        [ForEach(Parallel = true, ChunkSize = 8), With<Awake>]
         static void Diffuse(Tile<Heat, SparsePlate> heat, Mut<DynamicBuffer<NextHeat>> next, ref HeatChange change)
         {
             var plate = heat.Pad();
@@ -1002,7 +1002,7 @@ public class TileTests
     {
         public const float Rate = 0.05f;
 
-        [ForEach(Parallel = true, ChunkRows = 4)]
+        [ForEach(Parallel = true, ChunkSize = 4)]
         static void Step(Tile<Heat, WavePlate> heat, Mut<DynamicBuffer<NextHeat>> next)
         {
             var plate = heat.Pad();
@@ -1078,7 +1078,7 @@ public class TileTests
     [EcsSystem]
     public ref struct SumSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 2)]
+        [ForEach(Parallel = true, ChunkSize = 2)]
         static void Step(Tile<Cell, Box8> cells, Mut<DynamicBuffer<NextCell>> next)
         {
             var box = cells.Pad();
@@ -1186,7 +1186,7 @@ public class TileTests
     [EcsSystem]
     public ref struct SmoothSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 2)]
+        [ForEach(Parallel = true, ChunkSize = 2)]
         static void Step(Tile<Heat, Strip> heat, Mut<DynamicBuffer<NextHeat>> next)
         {
             var strip = heat.Pad();

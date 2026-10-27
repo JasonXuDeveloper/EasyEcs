@@ -40,7 +40,7 @@ public class RecordTests
     [EcsSystem]
     public ref struct Strikes
     {
-        [ForEach(Parallel = true, ChunkRows = 64, SimdMode = SimdMode.Off)]
+        [ForEach(Parallel = true, ChunkSize = 64, SimdMode = SimdMode.Off)]
         static void Strike(Entity entity, in Power power, Emit<Blow> blows)
         {
             if (power.Value % 3 != 0) blows.Add(new Blow(entity.Id, power.Value));
