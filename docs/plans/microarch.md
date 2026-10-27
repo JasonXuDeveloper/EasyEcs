@@ -152,7 +152,8 @@ What M0 says:
 - **Masked words** (candidate 5): each vector of a masked word builds its lane mask from the word (`shrx`,
   `vpbroadcastd`, `vpandd`, `vpcmpeqd`, `vpmovm2d`) and then tests it as a vector (`vptestmd`, `kortestw`) before the
   body: testing the word's bits for the vector as integers (`shrx`, `test`) moves the skip ahead of the mask and
-  drops two uops: 4.39 -> 4.06 c/it (Ice Lake), 4.04 -> 3.22 (Zen 4) on Integrate's masked loop.
+  drops two uops: 4.39 -> 4.06 c/it (Ice Lake), 4.04 -> 3.22 (Zen 4) on Integrate's masked loop. (Measured slower
+  on the worlds, reverted: M2 below.)
 - **Finding: a Tier1 runner compiled before a table had holes calls the class-initialization helper per vector.**
   The masked loop of Move2 (and of every component of 2-4 fields) calls `CORINFO_HELP_GET_GCSTATIC_BASE` six times
   per vector and spills its vectors around each call (91 instructions, 6 calls). The runner `World.Masked<P2, V2,
@@ -179,10 +180,6 @@ A/B: base = bbd5c8a with this branch's benchmark commit, head = the branch, froz
   any order (Precise); a float sum is reordered only under FloatMode.Fast, which already reassociates it (D68), and
   the order is fixed by the code's shape, never the thread count (D125). llvm-mca: Energy 4.1 -> 2.1 c/vector (Ice
   Lake-SP), 3.1 -> 2.1 (Zen 4); four sets measured 6.8 c per 4 vectors, no better than two.
-- **M2 candidate 5, the masked skip on the word's bits**: a vector of a masked word none of whose rows pass is
-  skipped by `pass >> i << (64 - Count) == 0` before its lane mask is built, instead of a vector compare after it
-  (Integrate's masked loop 4.39 -> 4.06 c/it on Ice Lake-SP, 4.04 -> 3.22 on Zen 4). ARM64: the same integer test
-  (Count = 4).
 - **The Tier1 class-initialization finding, fixed for the JIT** (`Interleaved.InitializeTables`, a module
   initializer running the class constructors of `Interleaved`, `Masks`, `Tables32` and `Tables64`): a runner compiled
   at Tier1 before its table had holes no longer calls `CORINFO_HELP_GET_GCSTATIC_BASE` per vector of a masked word
@@ -197,6 +194,14 @@ A/B: base = bbd5c8a with this branch's benchmark commit, head = the branch, froz
 
 **Dropped (with the reason)**
 
+- **M2 candidate 5, the masked skip on the word's bits**: testing `pass >> i << (64 - Count) == 0` before the lane mask
+  instead of the vector compare after it drops two uops by llvm-mca (Integrate's masked loop 4.39 -> 4.06 c/it on Ice
+  Lake-SP, 4.04 -> 3.22 on Zen 4), but measured slower where the passing rows are many: against the same head with the
+  vector test, BattleServer 1.10 / 1.09x (two rounds), WorldSimulation at 100k 1.06 / 0.92, CycleHoles at 100k 1.04 /
+  1.11, Holes 0.84 / 0.95, Move2Gaps at 1k 0.85 / 0.85. In real worlds the skip is almost never taken (a tag few
+  rows hold leaves most vectors with a passing row), so the integer test is work in front of every vector; the
+  model's loop takes the skip's cost as free. Reverted; what would change it: a world of sparse words, where whole
+  vectors fail (then a test per word, not per vector, would be the form to try).
 - **M1 candidate 2, unrolling loops without a chain**: M0 found no loop-carried chain but the float reductions; the
   rest are port bound, and unrolling saves only the loop's own `add` / `cmp` / `jcc`, 1-2 uops of 7-10 in the shortest
   loops: under 10 % by the model (bar 1.2x), at the cost of every body written twice against the 32 locals.

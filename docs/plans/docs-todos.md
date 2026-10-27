@@ -784,7 +784,7 @@ Docs to-dos (docs pass):
 ## feat-microarch (M0-M3, `docs/plans/microarch.md` section 5)
 
 What shipped (code): two accumulator sets for floating-point reductions in the loop over whole vectors
-(`SystemGenerator.Paired`, `Kernel.Code.Chains`); the masked word's skip tested on the word's bits; the loops'
+(`SystemGenerator.Paired`, `Kernel.Code.Chains`); the loops'
 tables initialized by a module initializer (`Interleaved.InitializeTables`, internal) so a runner compiled at Tier1
 before its table had holes reads them as constants; EECS055 / EECS056's reason for a bool field ends with the tag
 advice. Tools: `tools/loopbound.sh` (llvm-mca over the Tier1 loops). No new public name.
@@ -803,7 +803,8 @@ Decision drafts (numbers in microarch.md, "Numbers"):
   still one helper call per run). Native AOT unchanged (its own item).
 - **A bool field's scalar reason says to make a state a tag**, instead of a new rule: the method is already reported
   once by EECS055 / EECS056; the advice is the ECS principle (data instead of flags).
-- **Dropped:** unrolling loops without a chain, hoisting the broadcast reloads, branchless scalar rows (the JIT keeps
+- **Dropped:** the masked skip on the word's bits (fewer uops by llvm-mca, BattleServer 1.09-1.10x slower),
+  unrolling loops without a chain, hoisting the broadcast reloads, branchless scalar rows (the JIT keeps
   a branch where PGO sees it biased; the generator does not rewrite users' statements), streaming stores and the
   prefetcher-stream split (see microarch.md for the evidence of each).
 
@@ -816,5 +817,5 @@ Docs pass:
   en + zh.
 - analyzer page EECS055 / EECS056: the bool reason's new text in the example comment (the "(...)" form still fits);
   en + zh.
-- `audit-vector-loops` skill: the masked skip form; `tools/loopbound.sh` as the way to read a loop's bound
+- `audit-vector-loops` skill: `tools/loopbound.sh` as the way to read a loop's bound
   (the coordinator edits skills).
