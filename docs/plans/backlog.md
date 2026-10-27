@@ -154,14 +154,36 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        it into `DynamicBuffer<X>` (VoxelServer `WaterCommitSystem`, the grids page's `CommitHeatSystem`): one full copy
        of every stepped tile per tick. Swap the two buffers' stores instead (O(1) per tile, under the gate; X marked
        changed, so replication and `[Changed<X>]` see the write). Catch: the stencil skips zero rows (the row mask) and
-       relies on the copy making both buffers equal; after a swap the skipped rows hold the step before last. So the
-       swap either writes the rows the step skipped, or the generated step writes every row it skips as zero. Per the
+       relies on the copy making both buffers equal; after a swap the skipped rows hold the step before last. Chosen
+       (owner, 2026-10-27): the generated step writes every row it skips as zero, with vector stores (a zero row is a
+       few stores, cheaper than the copy it replaces). Per the
        owner's rule (`audit-generator`): users write the plain step and no commit system; the generator owns the step
        buffer and the swap (a `Tile` parameter that steps in place in user code's eyes), with an analyzer rule and
        code fix for a hand-written commit that is a plain copy. Proof: TileStencilBenchmark / TileActiveBenchmark and
        VoxelServer's TickBenchmark before / after, two rounds, 0 B; the grids page and the VoxelServer page in the
        docs pass.
-12. [ ] The rest of "Later" below.
+12. [ ] **Fewer memory copies** (owner, 2026-10-27: "看看还有什么类似的能做的减少内存拷贝的做法"). Each one measured
+       (two rounds, 0 B, nothing slower) and done by the generator or the core where users would otherwise copy:
+       a. **Tiles stored padded, halos exchanged** (MPI's ghost cells; the grids page's TODO(water overlap)): today
+          `Pad()` copies the whole tile and its neighbors' edges into a thread texture every pass. Keep each tile's
+          cells padded in its own buffer (the halo stored beside them), so a step reads its buffer in place and a
+          pass copies only the neighbors' edges into the halo, only the edges that changed (`ChangedEdges` already
+          knows which), and the interior can step while the ring waits (interior / ring overlap). With item 11 the
+          step and its padded buffer ping-pong. Cost to weigh: the halo's memory (27 % of a 16 x 16 tile at r = 1).
+       b. **Changed edges found while stepping**: `ChangedEdges` reads the cells and the step again after the step
+          (O(cells), both buffers). The generated step compares each row it writes with the row it read (one vector
+          compare per row it already holds in registers) and returns the faces, so no second pass.
+       c. **Re-sorts swap columns instead of copying back**: `Archetype.Permute` writes each column into a rented
+          scratch and copies it back (and the slots, the presence bits). Write into a spare pinned column and swap it
+          in; the old column becomes the spare (one spare per column size per world, kept for the next sort).
+       d. **Incremental Capture / Restore**: `Capture(into)` copies every table every time. Copy only the columns
+          (or 4,096-row blocks, `BlockTicks`) written since `into` was last captured from this world with no structural
+          change between (`StorageVersion`, `LastWrite`); Restore copies back only what changed since the capture.
+          Rollback netcode captures every tick with few writes per tick.
+       e. **Emitted<T> without the join copy**: `Emit<T>.Join` copies every chunk's list into the singleton's list.
+          Keep the chunks' lists in order as segments: `[ForEachRecord]` and `ForParallel` walk the segments (users
+          see no change); a contiguous span is joined only when user code asks for one.
+13. [ ] The rest of "Later" below.
 
 ## Done this round (for the record)
 
