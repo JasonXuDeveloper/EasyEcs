@@ -47,7 +47,7 @@
 ### 1.2 Core
 - **ForParallel** (`World.For.cs`):
   - `IForRange.Execute(int start, int end)`, `IForSpan<T>.Execute(int start, Span<T> items)`.
-  - `ForParallel(int count, ref TJob, chunkRows)` and `ForParallel<T,TJob>(ref DynamicBuffer<T>, ref TJob, chunkRows)`.
+  - `ForParallel(int count, ref TJob, chunkSize)` and `ForParallel<T,TJob>(ref DynamicBuffer<T>, ref TJob, chunkSize)`.
   - One job copy per chunk, nothing merged back (D80). **The generator never sees `Execute` bodies.**
 - **Buffers** (`DynamicBuffer.cs`): `AsReadOnlySpan()`, `GetEnumerator()` (ReadOnlySpan enumerator), `AsSpan(this ref)` (unshares the copy-on-write store, D124), `SetCount` returns a Span.
 - **Tile** (`Tile.cs`):
@@ -280,7 +280,7 @@ public readonly ref struct Cell<TCell, TTile> where TCell : unmanaged where TTil
 
 You write (replacing `TileSystems.Blur` and Life):
 ```csharp
-[ForEach(Parallel = true, ChunkRows = 16)]
+[ForEach(Parallel = true, ChunkSize = 16)]
 static void Step(Cell<Warmth, BlurPlot> w, out NextWarmth next) =>
     next = new((w[-1,0,-1].T + w[0,0,-1].T + w[1,0,-1].T + w[-1,0,0].T + w.Value.T + w[1,0,0].T
               + w[-1,0,1].T + w[0,0,1].T + w[1,0,1].T) * (1f / 9));

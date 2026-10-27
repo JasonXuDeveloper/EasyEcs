@@ -78,7 +78,7 @@ Agents' CLAUDE.md layout edits: port into src/*/CLAUDE.md maps (the root no long
 - P11: cheat sheet `class S<T> : EcsSystem` (stale since D102); D12 Considered text vs D101.
 - Placeholders LAMBDA_NUMBERS / NUMBERS_D109 must be real numbers before merge.
 - P8 (inline lambda passes refuse [Changed<T>]) + one cheat-sheet rule for the four ways to write a pass outside a system.
-- P9 ChunkRows inference: only after feat-sched autotuner tries < 1024 rows, with benchmarks.
+- P9 ChunkSize inference: only after feat-sched autotuner tries < 1024 rows, with benchmarks.
 - Owner decisions pending: P1 WithAny<A,B>, P2 hooks by name, P3 ReadOnlyMaybe param, P4 [GroupBy] on member, P6 [Archetype] name/Prefab, EntityRandom.Tick advanced by Update.
 
 ## Renumbering at merge (naming audit, sent to agents)
@@ -103,7 +103,7 @@ Kept names (decided): AsX/TryGetX (D109), FusionMode (mirrors SimdMode).
 - Declined -> one decision record in the docs pass (decisions.mdx + zh, "Declarations not added" with each reason):
   infer ITracked; infer Mut<T>; infer [Consume]; [With<A,B>]/[Without<A,B>] arity; auto Phase; ISystemGroupWithAny;
   Scan<T>; Element<T> for buffers. (Texts were in owner-review.md at d56a82d.)
-- Do: infer ChunkRows after feat-sched merges, if BDN shows inferred >= hand-set (task).
+- Do: infer ChunkSize after feat-sched merges, if BDN shows inferred >= hand-set (task).
 - Do: rename [IndexKey] -> [LookupKey] (one key, many entities); [UniqueKey] stays. After feat-declarations merges. Public rename: migration, changelog, code fix/analyzer from old name, api.mdx, ApiDocs zh, samples, docs, D record.
 - Do: retry vectorized reads of other entities: sort lookups by target table first, and AVX-512 (measure; D90 numbers 0.8-1.18 AVX2).
 - widelanes round 2 confirms round 1 (ratio to scalar, 1024 light/heavy, 100k light/heavy): Split 0.17/0.19/0.15/0.21;
@@ -128,8 +128,8 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 
 ## feat-sched merged (b3ce794) — docs to-dos
 - D22 "No spinning, no dedicated threads" is stale (Workers spin 100 µs): rewrite.
-- Changelog / README What's new / migration: float Reduce<T> without ChunkRows on a world whose MaxDegreeOfParallelism != 4 now gets different (thread-independent) bits.
-- guide threading/reductions: determinism without ChunkRows (16 chunks for merging passes).
+- Changelog / README What's new / migration: float Reduce<T> without ChunkSize on a world whose MaxDegreeOfParallelism != 4 now gets different (thread-independent) bits.
+- guide threading/reductions: determinism without ChunkSize (16 chunks for merging passes).
 - ApiDocs: 38 problems from the declarations merge (oncreate/ondestroy/onupdate attrs, QueryFilter.WithAny<T> entries to delete); rerun tools/ApiDocs and regenerate docs/content/reference.
 - Flaky allocation tests (ScratchTests.AParallelPassWithScratchDoesNotAllocateAfterWarmUp, ParallelEmits*): more frequent with the 400k-row Reduce test in the same run; investigate the measurement race (task #166).
 
@@ -203,8 +203,8 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 - roadmap.mdx + zh: one Planned item for docs/plans/inner-loops.md's goal (plain loops over buffers / inline arrays / ForParallel lambdas become vector loops; Cell<TCell,TTile> shaders; EECS103), linking D77/D90. Rewrite the stale "Vector loops: the forms left for later" item (Pow and kin partly done by D127; masked tail D126).
 
 ## feat-lookupkey-chunkrows (D129, D130, merged)
-- Changelog / migration / README What's new: [IndexKey] -> [LookupKey] (code fix), measured chunk sizes (ChunkRows only overrides).
-- threading guide #chunk-rows + line 24 (stop telling users to set ChunkRows for heavy rows); analyzer guide EECS054 "when to set it"; api.mdx complexity; performance / why-fast chunking; public skill ChunkRows line; roadmap.
+- Changelog / migration / README What's new: [IndexKey] -> [LookupKey] (code fix), measured chunk sizes (ChunkSize only overrides).
+- threading guide #chunk-rows + line 24 (stop telling users to set ChunkSize for heavy rows); analyzer guide EECS054 "when to set it"; api.mdx complexity; performance / why-fast chunking; public skill ChunkSize line; roadmap.
 - bun run lint:terms on D130 zh.
 - DocCheck had 296 pre-existing problems: 108 fences use removed [OnUpdate]/[OnCreate]/[OnDestroy]; new EECS025/EECS067 hits; EECS068/GroupBy errors in analyzer.mdx. ApiDocs 46 pre-existing problems. All for the docs pass (verify gate).
 
@@ -399,14 +399,14 @@ Docs to-dos (docs pass):
 - saves.mdx + zh, snapshots.mdx + zh: the row order is kept, boxes redrawn (D137).
 - analyzer.mdx + zh: EECS104 (section, table row; EECS range) and EECS041's list (SortRows, OrderRows).
 - high-performance.mdx + zh: Lookup targets ordered by their target read near rows (LookupOrderBenchmark: Chase 2x,
-  64-table gathers 4.6x at 1M); `Lanes.RowNumbers` for a row list from a mask; Compact on every ISA (NEON, SSSE3).
+  64-table gathers 4.6x at 1M); `Lanes.Selection` for a row list from a mask; Compact on every ISA (NEON, SSSE3).
 - architecture.mdx + zh: RowOrder in the table diagram (Archetype.Order, Permute), the block side array.
 - glossary + zh: ordered table (有序表), block (块, not the parallel chunk), box (包围盒), margin (余量), cadence (节奏);
   tools/ApiDocs/zh/README.md glossary gets the same rows.
-- changelog / README What's new: ordered tables (the read path), Lanes.RowNumbers, Compact on ARM64.
+- changelog / README What's new: ordered tables (the read path), Lanes.Selection, Compact on ARM64.
 - Benchmarks into bench.json: RowOrder, LookupOrder, Pairs (Core*), Compress (CoreCompact) after the reference run.
 - skills/easyecs/SKILL.md (public skill): ordered tables (the order is inferred; `[OrderBy]` only for orders no pair
-  method implies; refs end at a sort), `Blocks` / `Pairs` for hand-written neighbor searches, `Lanes.RowNumbers`.
+  method implies; refs end at a sort), `Blocks` / `Pairs` for hand-written neighbor searches, `Lanes.Selection`.
 - The Native AOT listing of `Lanes.Compact`'s loops on the owner's AOT check (the tables are RVA data now; no class-init
   check expected) and the M4 rerun of `CompressBenchmark` (the 128-bit TBL form against the prototypes' ShuffleTable).
 
@@ -499,7 +499,7 @@ about 10 % between A and B are noise. Every row allocates 0 B.
 
 <details><summary>D138 (en)</summary>
 
-## D138. Compaction picks its instructions at run time on every machine; `Lanes.RowNumbers` is the one row-list helper [#d138-compaction-everywhere]
+## D138. Compaction picks its instructions at run time on every machine; `Lanes.Selection` is the one row-list helper [#d138-compaction-everywhere]
 
 **Decision.** `Lanes.Compact` (the stream compaction behind `Emit.AddIds` / `AddLanes`, `CollectIds` and batch
 methods) walks a word of 64 selected bits in the first form that fits:
@@ -519,7 +519,7 @@ set bit. So every form reads nothing past the end of the source and writes only 
 store. Every intrinsic sits behind its `IsSupported`, so one build runs everywhere and the JIT drops the branches a
 machine cannot take. The tables are literal data in the assembly (`ReadOnlySpan<byte>` over constants): nothing to
 initialize, so under Native AOT a loop reading one checks no class initialization; the AVX2 permutations are a byte
-per lane widened by the load (`VPMOVZXBD`), 2 KiB. `Lanes.RowNumbers(mask, first, destination)` writes the row numbers a
+per lane widened by the load (`VPMOVZXBD`), 2 KiB. `Lanes.Selection(mask, first, destination)` writes the row numbers a
 mask selects (`Compact` over 0..63, then `first` added a vector at a time): the one call a generated loop or the core
 makes for a row list, so generated text never names an instruction set.
 
@@ -550,7 +550,7 @@ lanes keep the scalar walk). All 0 B. ARM64 (NEON `TBL`) runs the 128-bit form; 
 
 **Considered.**
 - **A public compaction API per instruction set**: users would write the dispatch the core already does;
-  `Lanes.Compact` and `Lanes.RowNumbers` stay the only entry points.
+  `Lanes.Compact` and `Lanes.Selection` stay the only entry points.
 - **A partial store per step at the destination's end** (a masked store with AVX2, a copy of a variable length on
   128-bit vectors): every step after the first few selected ones paid for it at low density; a whole-vector loop and
   the last elements one per bit cut the 128-bit form at 50 % from 1.67 to 1.36 µs (4,096 rows, screening).
@@ -611,7 +611,7 @@ lanes keep the scalar walk). All 0 B. ARM64 (NEON `TBL`) runs the 128-bit form; 
 
 <details><summary>D138 (zh)</summary>
 
-## D138. 压缩在每台机器上运行时选择指令；`Lanes.RowNumbers` 是唯一的行列表辅助 [#d138-compaction-everywhere]
+## D138. 压缩在每台机器上运行时选择指令；`Lanes.Selection` 是唯一的行列表辅助 [#d138-compaction-everywhere]
 
 **决定。** `Lanes.Compact`（`Emit.AddIds` / `AddLanes`、`CollectIds` 和批处理方法背后的流压缩）对 64 位选择字使用
 第一个适用的形式：
@@ -626,7 +626,7 @@ lanes keep the scalar walk). All 0 B. ARM64 (NEON `TBL`) runs the 128-bit form; 
 6. **其他情况**（没有 AVX2 时的 8 字节通道、其他大小）：标量遍历。
 
 每个 intrinsic 都在它的 `IsSupported` 之后，所以一份构建到处能跑，JIT 会去掉这台机器走不到的分支。每种形式都不读源末尾之后的内容，
-只写选中的个数（向量步骤留出一整步的空间，或在边上退回标量遍历）。`Lanes.RowNumbers(mask, first, destination)` 写出掩码选中的行号
+只写选中的个数（向量步骤留出一整步的空间，或在边上退回标量遍历）。`Lanes.Selection(mask, first, destination)` 写出掩码选中的行号
 （对 0..63 做 `Compact`，再按向量加上 `first`）：生成的循环或核心要行列表时只调这一个，所以生成的代码从不写出指令集的名字。
 
 **不用压缩的地方。** 生成循环里的 TZCNT 遍历（`ArityGenerator` 的掩码遍历、`SystemGenerator.Fusion`）每行或每段行调一次方法；
@@ -636,7 +636,7 @@ lanes keep the scalar walk). All 0 B. ARM64 (NEON `TBL`) runs the 128-bit form; 
 **数据。** NUMBERS
 
 **考虑过的方案。**
-- **每个指令集一个公开的压缩 API**：用户要自己写核心已经做好的分派；`Lanes.Compact` 和 `Lanes.RowNumbers` 仍是仅有的入口。
+- **每个指令集一个公开的压缩 API**：用户要自己写核心已经做好的分派；`Lanes.Compact` 和 `Lanes.Selection` 仍是仅有的入口。
 - **8 字节通道的 128 位形式**（每步两个通道，每 2 位一项的 4 项表）：每个字 32 步，输给标量遍历，没有 AVX2 时
   `CompactBenchmark` 在 1M 个 id、选中 50 % 时 1.19 ms 对 1.00 ms；放弃。
 - **跳过掩码空的部分的步骤**：每步一个分支，在混合掩码上预测失败；带这些分支的 128 位路径在选中 50 % 时比标量遍历慢 3 倍。
@@ -922,7 +922,7 @@ Docs pass:
 Each needs a migration entry (old -> new), a changelog line, a README "What's new" line and a decision record that
 names the field each term comes from (audit-naming, "The reference design's vocabulary"):
 - `QueryOptions.ParallelChunkRows` -> `MaxChunkRows` (released in 4.7: migration entry required), and the
-  `chunkRows` parameter of `world.ForParallel` -> `chunkSize` (OpenMP's `schedule(static, chunk_size)`).
+  `chunkSize` parameter of `world.ForParallel` -> `chunkSize` (OpenMP's `schedule(static, chunk_size)`).
 - `TileReads` -> `TileStencil` (the cells a tile method reads: a stencil, as in stencil codes).
 - `TileBoundary.Fill` -> `TileBoundary.Border`, and `Pad(from, to, fill, mask)` -> `Pad(from, to, border, mask)`
   (a Dirichlet boundary; Clamp and Mirror unchanged).
@@ -938,7 +938,18 @@ names the field each term comes from (audit-naming, "The reference design's voca
   Bevy `Option<&T>`/Flecs `?`; tombstone: databases/LSM, and say compaction once; stage: Bevy sync points; access set:
   Bevy `Access`; prefab: Unity/Flecs; dynamic buffer/cleanup/disabled: Unity; relation/ChildOf: Flecs; group: Flecs
   `group_by`; slice: time slicing). New entries: stencil, lanes/ballot, fusion, pair search (cutoff, neighbor list),
-  ordered tables and clusters (Morton, bounding box, margin), `[Accumulate]`, `IDirectIndexed`.
+  ordered tables and clusters (Morton, bounding box, margin), `[Accumulate]`, `IDirectMapped`.
 - zh pages: 截断距离 -> 截断半径 (7 uses) after feat-pairs-2 merges (the glossary row says 截断半径).
 - EECS093 title/message: "...that are not fused into one walk" (the setting is `FusionMode`).
 - `OrderBy.Margin` doc comment: "half of LAMMPS's skin" (both boxes widen by it); keep the name.
+
+## Owner answers 2026-10-27 (terminology popup)
+- `[ForEach(ChunkRows)]` / `chunkRows:` -> `ChunkSize` / `chunkSize` (applied, with a CS0246 / CS1739 migration
+  code fix): migration, changelog, README, decision record (OpenMP's chunk size), alongside `MaxChunkRows`.
+- `IDirectMapped<TKey>` -> `IDirectMapped<TKey>` (a direct-mapped cache: collisions fall back to the hash).
+- `FloatMode.Exact` stays; its doc comment says "Burst's Strict + Deterministic".
+- `Lanes.Selection` -> `Lanes.Selection`, documented as the selection vector of DuckDB / Vectorwise.
+- grids page: the shader/texture analogy stays in prose, names (headings, seoTitle, `Tile.Texels()`) take the HPC
+  terms (stencil, tile, halo).
+- fix-ci merged with Restore 66.6 -> 84.4 us, Rollback 141 -> 177 us (correctness: 0 B steady state); the owner
+  wants that cost won back later: backlog item.

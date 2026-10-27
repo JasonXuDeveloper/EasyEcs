@@ -194,6 +194,10 @@ branch: padded storage, ping-pong, zero rows, edges found while stepping), 12c +
           (or 4,096-row blocks, `BlockTicks`) written since `into` was last captured from this world with no structural
           change between (`StorageVersion`, `LastWrite`); Restore copies back only what changed since the capture.
           Rollback netcode captures every tick with few writes per tick.
+          Also win back the cost of fix-ci's restore (owner, 2026-10-27): rows written since the capture now take
+          copies of the snapshot's elements on the owner thread (BufferSnapshotBenchmark Restore 66.6 -> 84.4 us,
+          Rollback 141 -> 177 us, 0 B), so the first parallel write after a restore does not copy on a helper thread.
+          Bar: back to the old times or better with the 0 B steady state kept.
        e. **Emitted<T> without the join copy**: `Emit<T>.Join` copies every chunk's list into the singleton's list.
           Keep the chunks' lists in order as segments: `[ForEachRecord]` and `ForParallel` walk the segments (users
           see no change); a contiguous span is joined only when user code asks for one.

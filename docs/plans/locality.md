@@ -464,7 +464,7 @@ gate; the vertical forms stay dropped.
 - **The kernel.** `benchmarks/EasyEcs.Benchmark/Locality/CoreClusters.cs` is the body L2 generates: the 8 x 8 step
   over the table's own columns in sorted order, within 0-15 % of the prototype over copied side arrays, and 11-14x
   (crowd) / 5-6x (sparse) faster than phase 0's grid through lookups with the sort and the pairs every 10 ticks.
-- **Row lists.** `Lanes.RowNumbers(mask, first, destination)` for any row list the generated code needs.
+- **Row lists.** `Lanes.Selection(mask, first, destination)` for any row list the generated code needs.
 
 ### 6.6 L2 as built (branch `feat-locality-pairs`)
 
