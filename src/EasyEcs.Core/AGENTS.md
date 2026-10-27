@@ -161,7 +161,7 @@ DynamicBuffer.cs             DynamicBuffer<T> (a list per entity as a tracked co
                              and its BufferStore: shared by prefab instances, clones and snapshots until written
                              (copy-on-write, Shares; a prefab's uncounted)
 Prefab.cs                    a recipe of component values outside any world (one row of a private world)
-World.Snapshots.cs           Capture / Restore (WorldSnapshot.cs holds the copies)
+World.Snapshots.cs           Capture / Restore, incremental while in sync (WorldSnapshot.cs holds the copies)
 World.Serialization.cs       Save / Load of a whole world (SaveWithout(output, exclude) / LoadKeeping(input, keep) for a restart);
                              TypeRegistry.cs: the types a save may name (generated)
 ComponentSet.cs              a set of component bits and singleton slots: what SaveEntities writes, what Save leaves
@@ -191,12 +191,14 @@ TypeIndex.cs                 dense per-type index families (ComponentType bit, S
 Archetype.cs                 a table: mask, EntitySlot rows (version + id), one column per component (unmanaged
                              columns pinned and 64-byte aligned), presence bits + absent counts per column,
                              per-bit and per-signature add transitions (copy plans); swap-remove / tombstones,
-                             FillHoles, Permute (a re-sort: every column, presence bit, change tick and slot);
+                             FillHoles, Permute (a re-sort: every column, presence bit, change tick and slot,
+                             gathered into a spare and swapped in: ColumnSpares, one per array type and length);
                              change-tick summaries (LastWrite per column, WordTicks per 64 rows, BlockTicks
                              per 4,096 rows for writes and for removals), Stamp/StampRows/StampWord/SetTick,
                              MarkPresent/MarkAbsent, CloneRow; Resize (growth and Trim, which shrinks a table to a
                              power of two); TableCopy: the copy of a table's rows a snapshot or load holds, naming its
-                             table (reused for no other)
+                             table (reused for no other), and the tick it was in sync at: Capture / Restore copy only
+                             the columns, words and rows written since (CopyWritten), else the whole table
 ComponentInfo.cs             per-type column operations (size, managed, create/grow/copy/clone/clear) indexed by bit;
                              Pair links a tracked component with its change-tick column
 Annotations.cs               MeansImplicitUse (internal): Rider / ReSharper see systems and [ForEach] methods as used
