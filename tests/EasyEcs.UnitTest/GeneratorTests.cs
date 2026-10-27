@@ -694,8 +694,10 @@ public class GeneratorTests
             .And.Contain("for (nint last = rows - 2 * global::System.Numerics.Vector<float>.Count; i <= last; i += global::System.Numerics.Vector<float>.Count)")
             .And.Contain("for (nint last = rows - 2 * global::System.Runtime.Intrinsics.Vector512<float>.Count;")
             .And.Contain(fold), generated);
-        // the masked words' loop keeps one set
+        // the masked words' loop keeps one set, and skips a vector without a passing row on the word's bits
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "var __a1_0b").Count, Is.EqualTo(2), generated);
+        Assert.That(generated, Does.Contain("if (pass >> (int)i << (64 - global::System.Runtime.Intrinsics.Vector512<int>.Count) == 0) continue;")
+            .And.Not.Contain("if (__pass == "), generated);
     }
 
     // T.Combine is part of the loop: an edit of it in another file re-emits the method (here: no longer field by field).
