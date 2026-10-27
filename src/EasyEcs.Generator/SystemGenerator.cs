@@ -509,8 +509,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
     /// <summary>
     /// <c>ref</c> parameters are writes, <c>in</c> parameters reads. Anything that can reach the world beyond its
-    /// parameters (EntitySpan / World parameters, an Entity parameter used for more than its identity, [Consume], an
-    /// OnUpdate method) runs alone.
+    /// parameters (EntitySpan / World parameters, an Entity parameter used for more than its identity, [Consume], a pair
+    /// method, an OnUpdate method) runs alone.
     /// </summary>
     private static void EmitAccess(StringBuilder sb, UpdateModel model)
     {
@@ -518,7 +518,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         bool alone = model.Hooks.Any(h => h.Kind == "Update") || model.Methods.Any(m => m.Consume // [Consume] destroys
             || m.Parameters.Any(p => p.Kind is Symbols.ParamKind.Entities or Symbols.ParamKind.World
                 || p.Kind == Symbols.ParamKind.Entity && !m.Identifies
-                || p is { Kind: Symbols.ParamKind.Neighbor, Type: "global::EasyEcs.Entity" } && !m.Identifies));
+                || p.Kind == Symbols.ParamKind.Neighbor)); // a pair pass sorts its tables on its first run and keeps per-world pair state
         if (alone)
         {
             sb.Append("        access.RunAlone();\n    }\n");
@@ -534,8 +534,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         foreach (var field in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind == Symbols.ParamKind.View).SelectMany(p => p.Fields))
             Declare($"{(field.Access == "in" ? "Read" : "Write")}<{field.Type}>()");
 
-        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch or Symbols.ParamKind.View)
-                         && p is not { Kind: Symbols.ParamKind.Neighbor, Type: "global::EasyEcs.Entity" }) // a neighbor's component is a read
+        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch or Symbols.ParamKind.View))
                      .Select(p => (p.Kind, p.Type, p.RefKind, p.Key, p.Grid)).Distinct())
         {
             if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // a read, and its index built before a parallel stage
