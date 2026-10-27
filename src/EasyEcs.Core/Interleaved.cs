@@ -107,6 +107,23 @@ public static partial class Interleaved
         [ThreadStatic] public static T[] Rows;
     }
 
+    // The tables generated loops read are static readonly vectors: constants in a loop the JIT compiles once their
+    // class is initialized, a call of the class-initialization helper per use otherwise. A runner is compiled at Tier1
+    // after its first calls and never again, so if those calls ran only loops that read no table (a table without holes
+    // runs the flat loop: no permutes, no lane masks), every masked word after the first hole would pay the helper per
+    // vector and spill its vectors around each call (Move2's masked loop: 6 calls, 91 instructions against 38). The
+    // classes are initialized when the module loads instead, before any loop is compiled.
+#pragma warning disable CA2255 // a library initializer on purpose: the loops' tables must be initialized before any JIT compiles a loop
+    [ModuleInitializer]
+#pragma warning restore CA2255
+    internal static void InitializeTables()
+    {
+        RuntimeHelpers.RunClassConstructor(typeof(Interleaved).TypeHandle);
+        RuntimeHelpers.RunClassConstructor(typeof(Masks).TypeHandle);
+        RuntimeHelpers.RunClassConstructor(typeof(Tables32).TypeHandle);
+        RuntimeHelpers.RunClassConstructor(typeof(Tables64).TypeHandle);
+    }
+
     /// <summary>Lane j holds bit j: the row of each lane in a word's bits.</summary>
     private static class Masks
     {

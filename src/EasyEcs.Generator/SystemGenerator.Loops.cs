@@ -130,12 +130,16 @@ public sealed partial class SystemGenerator
         string guard = $"{Hardware(simd)} && rows - i >= {vector}.Count";
         const string body = "    ";
         foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) loop.Append(line).Append('\n');
+        if (!masked) Paired(loop, simd, vector, components.Length);
         loop.Append($"for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{{\n");
         if (masked)
         {
-            // The rows of this vector that pass, one lane each: a vector with none is skipped.
+            // A vector none of whose rows pass is skipped, tested on the word's bits for its rows (i < 64, and the lanes
+            // shifted out at the top) before their lane mask is built: two integer operations instead of a vector test
+            // after the mask (4.4 -> 4.1 cycles per vector on Ice Lake, 4.0 -> 3.2 on Zen 4, llvm-mca). Then the rows
+            // that pass, one lane each.
+            loop.Append($"{body}if (pass >> (int)i << (64 - {Kernel.V}<{simd.Mask}>.Count) == 0) continue;\n");
             loop.Append($"{body}var __pass = global::EasyEcs.Interleaved.Lanes{simd.Size * 8}{Kernel.LanesForm}(pass, (int)i);\n");
-            loop.Append($"{body}if (__pass == {Kernel.V}<{simd.Mask}>.Zero) continue;\n");
         }
         // A lane would throw (Math.Clamp with min above max): nothing is stored yet, so the method itself runs the
         // rows of this vector (that pass), and throws as written. i walks them, and is set back for the loop's own step.
@@ -165,6 +169,42 @@ public sealed partial class SystemGenerator
         if (simd.Wide == null || simd.Wide128) loops.Add(new("Loop", Narrow(guard, simd.Wide), Narrow(text, simd.Wide)));
         if (simd.VectorTail) loops.Add(TailLoop(simd, components, masked, split));
         return loops;
+    }
+
+    /// <summary>
+    /// Before the loop over whole vectors of a method whose reductions carry a floating-point chain
+    /// (<see cref="Kernel.Code.Chains"/>: one add, Min or Max of 3-4 cycles per vector, which bounds a short loop): a
+    /// loop that runs two vectors per iteration, the second into a second set of those accumulators, folded into the
+    /// first after it; the loop after it takes the vector left. The chain per vector halves (Energy, a float sum:
+    /// 4.1 -> 2.1 cycles per vector on Ice Lake, 3.1 -> 2.1 on Zen 4, llvm-mca). The body is written twice, so its
+    /// locals count twice: only while the loop's method stays within <see cref="InlinedLocals"/> (its column refs
+    /// included); not in a masked word (four vectors at most), nor where a vector may run the method (a bail, a
+    /// lookup), nor for a wide component.
+    /// </summary>
+    private static void Paired(StringBuilder loop, Kernel.Code simd, string vector, int columns)
+    {
+        if (simd.Chains.Length == 0 || simd.Bails || simd.Gathers || simd.Wide != null) return;
+        string one = string.Concat((simd.Body + simd.Stores).Split('\n').Where(l => l.Length > 0).Select(l => "        " + l + "\n"));
+        string two = one;
+        var paired = new StringBuilder();
+        foreach (var chain in simd.Chains)
+        {
+            string name = chain.Substring(0, chain.IndexOf('|'));
+            two = Regex.Replace(two, $@"\b{name}\b", name + "b");
+            paired.Append($"var {name}b = {name};\n");
+        }
+        paired.Append($"for (nint last = rows - 2 * {vector}.Count; i <= last; i += {vector}.Count)\n{{\n");
+        paired.Append("    {\n").Append(one).Append("    }\n");
+        paired.Append($"    i += {vector}.Count;\n");
+        paired.Append("    {\n").Append(two).Append("    }\n}\n");
+        foreach (var chain in simd.Chains)
+        {
+            int bar = chain.IndexOf('|');
+            string name = chain.Substring(0, bar), op = chain.Substring(bar + 1);
+            paired.Append(op == "+" ? $"{name} = {name} + {name}b;\n" : $"{name} = {Kernel.V}.{op}({name}, {name}b);\n");
+        }
+        if (Locals(loop.ToString() + paired + one + simd.Fold) + columns + 1 > InlinedLocals) return; // + the next loop's own last
+        loop.Append(paired);
     }
 
     /// <summary>
