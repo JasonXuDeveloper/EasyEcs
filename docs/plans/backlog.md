@@ -144,6 +144,19 @@ branch: padded storage, ping-pong, zero rows, edges found while stepping), 12c +
        moved. All zombies read the gradient of one shared field (nearest player for free; ZombieTargetSystem keeps
        the target for the attack). Proof: TickBenchmark before/after at 50 and 2,000 players, zombies stuck
        before and not after, grids page and VoxelServer page sections.
+8b. [ ] **Bug: a vector loop over components from another assembly crashes the generator** (found by feat-zombie-field,
+       2026-10-27): `Kernel` throws `IndexOutOfRangeException` in `StructLocalLane` (`Kernel.Struct.cs`) or `Resolve`
+       (`Kernel.Lookups.cs`), which drops every generated file of the project (hundreds of unrelated CS7036 / CS0122;
+       CS8785 in the log). Repro: VoxelServer's old straight chase in a test project that references the sample
+       (scratchpad `TmpRepro.cs.txt`, copy it into the test). Fix, regression test, and no generator exception may ever
+       drop the other files (catch per method, report it). First in line.
+8c. [ ] **Gaps the distance field met** (feat-zombie-field report; each through `audit-generator`'s rule: build it
+       when it saves users lines or thought): a 2D tile beside a 3D one on one key (today a second tile component and
+       index); colors without generic systems (`[With<TColor>]` is CS8968; `[GaussSeidel]` removes it); EECS059 as
+       an Error where a checkerboard makes the write safe (goes with `[GaussSeidel]`); `PaddedTile` read-only (settling
+       in a tile copies it into a stackalloc by hand; no halo-row or lane-shift helper; 12a's padded storage may
+       answer it); `FillPool` ignores the up to 64 lists each thread parks (a likely cause of the in-place form's
+       allocation; with 12d).
 9. [ ] **G10: deferred consume for chunk load / save** (owner, 2026-10-27; `voxel-rewrite.md` G10): VoxelServer's
        ChunkRead / ChunkSave load and save outside the pass by hand; the generator turns the plain form (a
        `[ForEach]` that requests a load or a save) into the deferred one, so users write neither the queue nor the
