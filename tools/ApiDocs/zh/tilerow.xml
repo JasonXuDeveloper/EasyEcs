@@ -1,7 +1,7 @@
 <doc>
-  <member name="T:EasyEcs.TileRow`1" source="8b65a8a6cd80">
-    <summary>分块的一行：第 <see cref="P:EasyEcs.TileRow`1.Y" /> 层的第 <see cref="P:EasyEcs.TileRow`1.Z" /> 行，来自 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" />。</summary>
-    <typeparam name="TTile">分块的组件和形状。</typeparam>
+  <member name="T:EasyEcs.TileRow`1" source="53ebd399cfb4">
+    <summary>瓦片的一行：第 <see cref="P:EasyEcs.TileRow`1.Y" /> 层的第 <see cref="P:EasyEcs.TileRow`1.Z" /> 行，来自 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" />。</summary>
+    <typeparam name="TTile">瓦片的组件和形状。</typeparam>
   </member>
   <member name="M:EasyEcs.TileRow`1.#ctor(System.Int32,System.Int32)" source="3b3f58cb6562">
     <summary>第 <paramref name="y" /> 层的第 <paramref name="z" /> 行。</summary>
@@ -13,6 +13,6 @@
     <summary>层中的行。</summary>
   </member>
   <member name="P:EasyEcs.TileRow`1.Index" source="8a67f1fa4116">
-    <summary>这一行第一个格子在分块缓冲中的位置（在同样布局的任何缓冲中也一样）：<c>(Y * Depth + Z) * Width</c>。</summary>
+    <summary>这一行第一个格子在瓦片缓冲中的位置（在同样布局的任何缓冲中也一样）：<c>(Y * Depth + Z) * Width</c>。</summary>
   </member>
 </doc>

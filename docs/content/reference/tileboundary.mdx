@@ -14,6 +14,14 @@ What the halo holds where a tile has no neighbor ([`ITileShape.Boundary`](/en/do
 
 ## Fields
 
+### `Border` [#border]
+
+```csharp
+Border = 0;
+```
+
+The border value of [`Tile.Pad`](/en/docs/reference/tile#pad-2) (default zero): a Dirichlet boundary.
+
 ### `Clamp` [#clamp]
 
 ```csharp
@@ -21,14 +29,6 @@ Clamp = 1;
 ```
 
 The tile's own edge cell, repeated: the halo cell at −k is cell 0.
-
-### `Fill` [#fill]
-
-```csharp
-Fill = 0;
-```
-
-The fill value of [`Tile.Pad`](/en/docs/reference/tile#pad-2) (default zero): a Dirichlet boundary.
 
 ### `Mirror` [#mirror]
 

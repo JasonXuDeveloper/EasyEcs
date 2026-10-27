@@ -10,7 +10,7 @@ description: "LookupKeyAttribute for a key that names one entity (IUniqueIndexed
 public sealed class UniqueKeyAttribute : Attribute
 ```
 
-[`LookupKeyAttribute`](/en/docs/reference/lookupkeyattribute) for a key that names one entity ([`IUniqueIndexed`](/en/docs/reference/iuniqueindexed)): the generator adds `IUniqueIndexed<TKey>` with the explicit `Key`. A struct that declares [`IDirectIndexed`](/en/docs/reference/idirectindexed) keeps its own `Slots` and `SlotOf`; only `Key` is generated.
+[`LookupKeyAttribute`](/en/docs/reference/lookupkeyattribute) for a key that names one entity ([`IUniqueIndexed`](/en/docs/reference/iuniqueindexed)): the generator adds `IUniqueIndexed<TKey>` with the explicit `Key`. A struct that declares [`IDirectMapped`](/en/docs/reference/idirectmapped) keeps its own `Slots` and `SlotOf`; only `Key` is generated.
 
 ## Constructors
 

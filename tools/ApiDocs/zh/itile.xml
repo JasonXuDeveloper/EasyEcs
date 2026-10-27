@@ -1,17 +1,17 @@
 <doc>
   <member name="T:EasyEcs.ITile`1" source="99d6b5caf66e">
     <summary>
-      让实体成为网格中一个分块的组件，按键查找（带索引的组件，<see cref="T:EasyEcs.IIndexed`1" />）：
+      让实体成为网格中一个瓦片的组件，按键查找（带索引的组件，<see cref="T:EasyEcs.IIndexed`1" />）：
       <c>record struct Chunk(ChunkPos Pos) : IComponent, ITile&lt;ChunkPos&gt;</c>，带着形状（<see cref="T:EasyEcs.ITileShape" />）
       和每个邻居的键（<see cref="M:EasyEcs.ITile`1.Beside(`0,EasyEcs.TileFaces)" />）。接收它的 <see cref="T:EasyEcs.Tile`2" />
       的 <c>[ForEach]</c> 方法拿到实体的格子和通过索引找到的邻居的格子。
     </summary>
-    <typeparam name="TKey">键：分块在网格中的位置。</typeparam>
+    <typeparam name="TKey">键：瓦片在网格中的位置。</typeparam>
   </member>
   <member name="M:EasyEcs.ITile`1.Beside(`0,EasyEcs.TileFaces)" source="4d3f19fdcde7">
     <summary>
-      位于 <paramref name="key" /> 的分块在 <paramref name="face" />（<see cref="P:EasyEcs.ITileShape.Faces" /> 中的一个面）对面的分块的键。
-      隔着一条棱或一个角的分块，一次跨一个面找到：先 x，再 z，最后 y。周期网格在这里回绕（最后一个分块的东边是第一个）。
+      位于 <paramref name="key" /> 的瓦片在 <paramref name="face" />（<see cref="P:EasyEcs.ITileShape.Faces" /> 中的一个面）对面的瓦片的键。
+      隔着一条棱或一个角的瓦片，一次跨一个面找到：先 x，再 z，最后 y。周期网格在这里回绕（最后一个瓦片的东边是第一个）。
     </summary>
   </member>
 </doc>

@@ -24,9 +24,9 @@
     <returns>写入的元素个数。</returns>
     <exception cref="T:System.ArgumentException"><paramref name="mask" /> 的某一位没有对应 <paramref name="source" /> 的元素，或 <paramref name="destination" /> 太短。</exception>
   </member>
-  <member name="M:EasyEcs.Lanes.Selection(System.UInt64,System.Int32,System.Span{System.Int32})" source="a75d56dada04">
+  <member name="M:EasyEcs.Lanes.Selection(System.UInt64,System.Int32,System.Span{System.Int32})" source="72e0b22bdffe">
     <summary>
-      把 <paramref name="mask" /> 选中的行号（<paramref name="first" /> 加上每个置位的下标）按顺序写到 <paramref name="destination" />
+      把 <paramref name="mask" /> 的选择向量（DuckDB 和 Vectorwise 的 selection vector：它选中的行号，<paramref name="first" /> 加上每个置位的下标）按顺序写到 <paramref name="destination" />
       开头，返回写了几个：向量条件通过的一个字的行变成行列表，生成的循环和核心不管在什么机器上都用这一次调用写出它
       （对 0 到 63 这些数做 <see cref="M:EasyEcs.Lanes.Compact``1(System.ReadOnlySpan{``0},System.UInt64,System.Span{``0})" />，再按向量加上 <paramref name="first" />）。
       O(64 / 每个向量的通道数)；零分配。

@@ -1,5 +1,5 @@
 <doc>
-  <member name="T:EasyEcs.Reduce`1" source="9885c60c47fa">
+  <member name="T:EasyEcs.Reduce`1" source="24d49f3e4b1f">
     <summary>
       把一次 <c>[ForEach]</c> 遍历归约到单例 <typeparamref name="T" />（OpenMP 的 <c>reduction</c>，MPI 的 <c>Allreduce</c>），按 <c>ref</c> 传入：
       <c>static void Count(in Health h, ref Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;</c>。并行遍历的每个块（单线程时是整次遍历）

@@ -1,13 +1,13 @@
 <doc>
   <member name="T:EasyEcs.TileCursor`2" source="f5aaebf2f8bb">
     <summary>
-      带边分块在一行第一个格子处的位置（<see cref="M:EasyEcs.PaddedTile`2.At(EasyEcs.TileRow{`1})" />）：它周围的格子，一次一个或一个向量。
-      偏移以格子计：dx 从 −r（行前第一个 halo 格子）到 Width + r − 1（行后最后一个），dy 和 dz 从 −r 到 r（2D 分块 dy 为 0），
+      带边瓦片在一行第一个格子处的位置（<see cref="M:EasyEcs.PaddedTile`2.At(EasyEcs.TileRow{`1})" />）：它周围的格子，一次一个或一个向量。
+      偏移以格子计：dx 从 −r（行前第一个 halo 格子）到 Width + r − 1（行后最后一个），dy 和 dz 从 −r 到 r（2D 瓦片 dy 为 0），
       r 是形状的 <see cref="P:EasyEcs.ITileShape.Halo" />；一个向量的格子必须在行后最后一个 halo 格子处或之前结束。
       常量偏移由 JIT 检查，其他偏移用一次比较。
     </summary>
     <typeparam name="TCell">格子。</typeparam>
-    <typeparam name="TTile">分块的组件和形状。</typeparam>
+    <typeparam name="TTile">瓦片的组件和形状。</typeparam>
   </member>
   <member name="P:EasyEcs.TileCursor`2.Item(System.Int32,System.Int32,System.Int32)" source="ead03f0cf8cc">
     <summary>从这一行第一个格子偏移 (dx, dy, dz) 处的格子。O(1)。</summary>

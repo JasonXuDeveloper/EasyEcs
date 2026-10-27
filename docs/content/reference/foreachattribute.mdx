@@ -35,10 +35,10 @@ public ForEachAttribute();
 
 ## Properties
 
-### `ChunkRows` [#chunkrows]
+### `ChunkSize` [#chunksize]
 
 ```csharp
-public int ChunkRows { get; init; }
+public int ChunkSize { get; init; }
 ```
 
 With [`ForEachAttribute.Parallel`](/en/docs/reference/foreachattribute#parallel): the rows a thread takes at a time, rounded up to a multiple of 64 (OpenMP's `schedule(dynamic, n)`). By default the runtime chooses from the rows' cost, which each pass measures: about four chunks per thread, chunks of about 25 µs when rows are heavy (a few hundred rows of a chunk of terrain or a path search each spread over every thread), fewer chunks for a short pass; before the first pass, and for a method that merges per chunk ([`Reduce`](/en/docs/reference/reduce), [`Emit`](/en/docs/reference/emit): 16 chunks, so its result does not depend on timing), the row count decides. Set it only to override that. Smaller chunks cost a claim each, and chunks that share a 4,096-row block of change ticks share its summary (atomically). Default 0: chosen by the runtime. Not without [`ForEachAttribute.Parallel`](/en/docs/reference/foreachattribute#parallel) and not below 0 (EECS054).

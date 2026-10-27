@@ -1,7 +1,7 @@
 <doc>
   <member name="T:EasyEcs.TileFaces" source="05795604abfe">
     <summary>
-      分块（<see cref="T:EasyEcs.ITileShape" />）的面：北是 −z，南 +z，西 −x，东 +x，下 −y，上 +y。一个面指一个邻居
+      瓦片（<see cref="T:EasyEcs.ITileShape" />）的面：北是 −z，南 +z，西 −x，东 +x，下 −y，上 +y。一个面指一个邻居
       （<see cref="M:EasyEcs.ITile`1.Beside(`0,EasyEcs.TileFaces)" />、<see cref="M:EasyEcs.Tile`2.Beside(EasyEcs.TileFaces)" />）；
       几个面的集合是 <see cref="P:EasyEcs.ITileShape.Faces" />，即有邻居的面。
     </summary>

@@ -1,13 +1,13 @@
 <doc>
-  <member name="T:EasyEcs.PaddedTile`2" source="5247f082451a">
+  <member name="T:EasyEcs.PaddedTile`2" source="04145d750261">
     <summary>
-      带着 halo 拷入的分块各层（<see cref="M:EasyEcs.Tile`2.Pad(System.Int32,System.Int32,`0,System.Boolean)" />）：模板采样的纹理。
+      带着 halo 拷入的瓦片各层（<see cref="M:EasyEcs.Tile`2.Pad(System.Int32,System.Int32,`0,System.Boolean)" />）：模板采样的纹理。
       用 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" /> 遍历要计算的行（活跃的行，用尾零计数找到），
       用 <see cref="M:EasyEcs.PaddedTile`2.At(EasyEcs.TileRow{`1})" /> 在一行周围采样：离它 <see cref="P:EasyEcs.ITileShape.Halo" />
-      个格子、行或层以内的样本都在纹理内，偏移不是常量时有检查，是常量时由 JIT 消掉。在线程再次加载这个分块类型之前有效。
+      个格子、行或层以内的样本都在纹理内，偏移不是常量时有检查，是常量时由 JIT 消掉。在线程再次加载这个瓦片类型之前有效。
     </summary>
     <typeparam name="TCell">格子。</typeparam>
-    <typeparam name="TTile">分块的组件和形状。</typeparam>
+    <typeparam name="TTile">瓦片的组件和形状。</typeparam>
   </member>
   <member name="P:EasyEcs.PaddedTile`2.From" source="7bdad3b3e587">
     <summary>加载的第一层（halo 在它下面再加 r 层）。</summary>
@@ -17,21 +17,21 @@
   </member>
   <member name="P:EasyEcs.PaddedTile`2.Item(System.Int32,System.Int32,System.Int32)" source="1a20e20ab59a">
     <summary>
-      纹理的格子 (x, y, z)：x 从 −r 到 Width + r − 1，z 从 −r 到 Depth + r − 1，y 从 From − r 到 To + r（2D 分块为 From 到 To），r 是 halo 宽度。
+      纹理的格子 (x, y, z)：x 从 −r 到 Width + r − 1，z 从 −r 到 Depth + r − 1，y 从 From − r 到 To + r（2D 瓦片为 From 到 To），r 是 halo 宽度。
       超出时抛出异常。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" source="129331d3cbae">
+  <member name="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" source="0529d143076b">
     <summary>
       读 <paramref name="reads" /> 的模板在 From 到 To 层中必须计算的行，逐层、按顺序
       （<c>foreach (var row in padded.Rows(TileStencil.Layer))</c>）：它读的行里（最远到 halo 宽度）有不为零格子的那些。
       每访问一行、每层 O(1)。加载时没有记录 mask 则抛出异常。
     </summary>
   </member>
-  <member name="M:EasyEcs.PaddedTile`2.At(EasyEcs.TileRow{`1})" source="406b109f60da">
+  <member name="M:EasyEcs.PaddedTile`2.At(EasyEcs.TileRow{`1})" source="1b794bf2b2c1">
     <summary>
-      纹理中 <paramref name="row" />（From 到 To 层中的一行，来自这个分块的 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" />，
-      或来自按相同层加载的另一个分块）第一个格子处的位置：它的样本。行在范围外时抛出异常。O(1)。
+      纹理中 <paramref name="row" />（From 到 To 层中的一行，来自这个瓦片的 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" />，
+      或来自按相同层加载的另一个瓦片）第一个格子处的位置：它的样本。行在范围外时抛出异常。O(1)。
     </summary>
   </member>
 </doc>

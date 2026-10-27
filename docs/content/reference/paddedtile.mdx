@@ -60,9 +60,9 @@ The texture at the first cell of `row` (a row of layers From to To, from [`Padde
 ### `Rows` [#rows]
 
 ```csharp
-public TileRows<TTile> Rows(TileReads reads = All);
+public TileRows<TTile> Rows(TileStencil reads = All);
 ```
 
-The rows of layers From to To that a stencil reading `reads` must shade, layer by layer, in order (`foreach (var row in padded.Rows(TileReads.Layer))`): those with a cell that is not zero among the rows it reads, up to the halo away. O(1) per row visited and per layer. Throws when the tile was loaded without its mask.
+The rows of layers From to To that a stencil reading `reads` must shade, layer by layer, in order (`foreach (var row in padded.Rows(TileStencil.Layer))`): those with a cell that is not zero among the rows it reads, up to the halo away. O(1) per row visited and per layer. Throws when the tile was loaded without its mask.
 
 **Complexity** ([API table](/en/docs/api)): O(1) per layer and per row visited: a trailing-zero count

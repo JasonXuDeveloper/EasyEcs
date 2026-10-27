@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.IDirectMapped`1" source="df431fa39be3">
+  <member name="T:EasyEcs.IDirectMapped`1" source="927c27bdb989">
     <summary>
       键能映射到一个有界槽位范围的唯一组件（网格格子、地块、房间、玩家席位）：它的索引在哈希旁边多存一个
       <see cref="P:EasyEcs.IDirectMapped`1.Slots" /> 项的数组，一个键的实体放在 <see cref="M:EasyEcs.IDirectMapped`1.SlotOf(`0)" /> 给出的那一项，
@@ -21,7 +21,7 @@
   <member name="P:EasyEcs.IDirectMapped`1.Slots" source="441d8d1e3951">
     <summary>槽位数组的长度（冷路径：World 创建索引时读一次）。</summary>
   </member>
-  <member name="M:EasyEcs.IDirectMapped`1.SlotOf(`0)" source="2f86f53e6890">
+  <member name="M:EasyEcs.IDirectMapped`1.SlotOf(`0)" source="7e81d53adc58">
     <summary>
       <paramref name="key" /> 的槽位，0 到 <see cref="P:EasyEcs.IDirectMapped`1.Slots" /> - 1；其他值把这个键交给哈希。
       每次查找和写入一个键都会调用：保持几条指令，不带状态。

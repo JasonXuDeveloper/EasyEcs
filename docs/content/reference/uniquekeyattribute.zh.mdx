@@ -10,7 +10,7 @@ description: "一个键只对应一个实体时用的 LookupKeyAttribute（IUniq
 public sealed class UniqueKeyAttribute : Attribute
 ```
 
-一个键只对应一个实体时用的 [`LookupKeyAttribute`](/zh/docs/reference/lookupkeyattribute)（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)）：生成器加上 `IUniqueIndexed<TKey>` 和显式的 `Key`。声明了 [`IDirectIndexed`](/zh/docs/reference/idirectindexed) 的 struct 保留自己写的 `Slots` 和 `SlotOf`，只生成 `Key`。
+一个键只对应一个实体时用的 [`LookupKeyAttribute`](/zh/docs/reference/lookupkeyattribute)（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)）：生成器加上 `IUniqueIndexed<TKey>` 和显式的 `Key`。声明了 [`IDirectMapped`](/zh/docs/reference/idirectmapped) 的 struct 保留自己写的 `Slots` 和 `SlotOf`，只生成 `Key`。
 
 ## 构造函数 [#constructors]
 
