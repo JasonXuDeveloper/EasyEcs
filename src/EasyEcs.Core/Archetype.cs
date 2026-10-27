@@ -1528,18 +1528,35 @@ internal sealed class Archetype
     /// presence bits, its change ticks (the word and block summaries rebuilt exactly from them) and its id, and the
     /// moved entities' slots rewritten. The re-sort of an ordered table (<see cref="RowOrder"/>); the other sanctioned
     /// way, beside <see cref="FillHoles"/>, to rewrite rows and slots. Absent counts and <see cref="LastWrite"/> stay
-    /// (a permutation changes neither). Inside the structural gate, outside passes, on a dense table. O(rows × columns),
-    /// allocation-free in steady state (the gathers go through buffers of the shared array pools).
+    /// (a permutation changes neither). Each column and the slots are gathered into a spare of their shape from
+    /// <paramref name="spares"/> and swapped in, the old ones becoming the spares (no copy back); the caller bumps the
+    /// world's StorageVersion, since columns change. Inside the structural gate, outside passes, on a dense table.
+    /// O(rows × columns), allocation-free in steady state (one spare per shape, made by the first sort).
     /// </summary>
-    public void Permute(ReadOnlySpan<int> order, EntityMeta[] meta)
+    public void Permute(ReadOnlySpan<int> order, EntityMeta[] meta, ColumnSpares spares)
     {
         int n = Count;
         if (order.Length != n || AliveCount != n) throw new InvalidOperationException("A permutation covers every row of a dense table");
         for (int c = 0; c < Columns.Length; c++)
         {
             var info = _infos[c];
-            if (info.Managed) info.Permute(Columns[c], order);
-            else PermuteBytes(ref Aligned(Columns[c]), info.Size, order);
+            if (info.Size == 0) continue; // a tag: no values to move
+            var old = Columns[c];
+            var into = spares.Take(old) ?? info.Create(Slots.Length);
+            if (info.Managed) info.Permute(old, into, order);
+            else
+            {
+                GatherBytes(ref Aligned(old), ref Aligned(into), info.Size, order);
+                // Change ticks past the rows stay: the summaries cover the table's capacity. Other columns' rows past
+                // Count hold nothing a reader uses (a new row writes its values).
+                if (info.Owner >= 0)
+                    Unsafe.CopyBlockUnaligned(ref Unsafe.Add(ref Aligned(into), (nint)n * info.Size), ref Unsafe.Add(ref Aligned(old), (nint)n * info.Size),
+                        (uint)((Slots.Length - n) * info.Size));
+            }
+
+            Columns[c] = into;
+            ByBit[Components[c]].Set(into, info.Managed);
+            spares.Give(old);
         }
 
         foreach (short c in _bitColumns) PermuteBits(Present[c], order);
@@ -1547,23 +1564,23 @@ internal sealed class Archetype
             for (int c = 0; c < Words.Length; c++)
                 if (Words[c] != null) RebuildTicks(c, order);
 
-        var slots = System.Buffers.ArrayPool<EntityId>.Shared.Rent(n);
+        // The slots too, the versions of the rows past Count with them (a tombstone keeps its version).
+        var slots = spares.Take(Slots) as EntityId[] ?? new EntityId[Slots.Length];
         Gather(ref Unsafe.As<EntityId, long>(ref MemoryMarshal.GetArrayDataReference(Slots)), ref Unsafe.As<EntityId, long>(ref slots[0]), order);
-        slots.AsSpan(0, n).CopyTo(Slots);
-        System.Buffers.ArrayPool<EntityId>.Shared.Return(slots);
+        Slots.AsSpan(n).CopyTo(slots.AsSpan(n));
+        spares.Give(Slots);
+        Slots = slots;
         // Rows of a dense table hold live entities, whose ids are valid meta indices.
         ref var records = ref MemoryMarshal.GetArrayDataReference(meta);
         for (int i = 0; i < n; i++) Unsafe.Add(ref records, Slots[i].Index).Slot = i;
     }
 
-    /// <summary>Rows [0, order.Length) of an unmanaged column of <paramref name="size"/>-byte rows in the new order.</summary>
-    private static void PermuteBytes(ref byte rows, int size, ReadOnlySpan<int> order)
+    /// <summary>Rows [0, order.Length) of an unmanaged column of <paramref name="size"/>-byte rows gathered into <paramref name="into"/> in the new order.</summary>
+    private static void GatherBytes(ref byte rows, ref byte into, int size, ReadOnlySpan<int> order)
     {
-        int bytes = order.Length * size;
-        var scratch = System.Buffers.ArrayPool<byte>.Shared.Rent(bytes);
-        ref byte into = ref MemoryMarshal.GetArrayDataReference(scratch);
         switch (size) // one loop per common size: a load and a store per row, no copy call
         {
+            case 0: break;
             case 1: Gather(ref rows, ref into, order); break;
             case 2: Gather(ref Unsafe.As<byte, short>(ref rows), ref Unsafe.As<byte, short>(ref into), order); break;
             case 4: Gather(ref Unsafe.As<byte, int>(ref rows), ref Unsafe.As<byte, int>(ref into), order); break;
@@ -1574,9 +1591,6 @@ internal sealed class Archetype
                     CopyBytes(ref Unsafe.Add(ref rows, (nint)order[i] * size), ref Unsafe.Add(ref into, (nint)i * size), size);
                 break;
         }
-
-        Unsafe.CopyBlockUnaligned(ref rows, ref into, (uint)bytes);
-        System.Buffers.ArrayPool<byte>.Shared.Return(scratch);
     }
 
     /// <summary>
@@ -1964,5 +1978,55 @@ internal sealed class Transition
         foreach (ref readonly var step in _plan.AsSpan())
             if (!Source.Has(step.From, slot))
                 Target.MarkAbsent(step.To, targetSlot, keep: true); // a removed managed value was cleared already; a disabled one stays
+    }
+}
+
+/// <summary>
+/// The spare columns of a world's re-sorts (<see cref="Archetype.Permute"/>): a sort gathers each column into a spare of
+/// its shape (array type and length) and swaps it in, and the old column becomes the spare, so the rows move once and
+/// nothing is copied back. One spare per shape (unmanaged columns are pinned byte arrays, so tables of one capacity and
+/// row size share one), managed ones cleared (they keep nothing alive): the memory of one column per shape of the
+/// ordered tables, given back by <see cref="World.TrimExcess"/>. Owner thread, inside the structural gate.
+/// </summary>
+internal sealed class ColumnSpares
+{
+    private Array[] _spares = [];
+    private int _count;
+
+    /// <summary>
+    /// The spare of <paramref name="like"/>'s type and length, taken out (its contents meaningless, null references for a
+    /// managed one); null when none.
+    /// </summary>
+    public Array Take(Array like)
+    {
+        for (int i = 0; i < _count; i++)
+        {
+            var spare = _spares[i];
+            if (spare.Length != like.Length || spare.GetType() != like.GetType()) continue;
+            _spares[i] = _spares[--_count];
+            _spares[_count] = null;
+            return spare;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Keep <paramref name="column"/> (a column or slots a sort replaced; a managed one cleared by the caller) as the
+    /// spare of its shape, unless one is kept already (then it goes to the GC: one spare per shape).
+    /// </summary>
+    public void Give(Array column)
+    {
+        for (int i = 0; i < _count; i++)
+            if (_spares[i].Length == column.Length && _spares[i].GetType() == column.GetType()) return;
+        if (_count == _spares.Length) Array.Resize(ref _spares, Math.Max(4, _count * 2));
+        _spares[_count++] = column;
+    }
+
+    /// <summary>Let every spare go (<see cref="World.TrimExcess"/>).</summary>
+    public void Clear()
+    {
+        _spares = [];
+        _count = 0;
     }
 }

@@ -11,6 +11,9 @@ public sealed partial class World
     // Whether any table of this world was ever ordered: an update looks for due sorts only then.
     private bool _ordered;
 
+    // The spare column of each shape the re-sorts swap in (Archetype.Permute): created by the first sort, kept for the next.
+    private readonly ColumnSpares _columnSpares = new();
+
     // The orders this world was asked for (OrderRows), by component bit; null until the first request.
     private Func<RowOrder>[] _orderRequests;
 
@@ -95,7 +98,7 @@ public sealed partial class World
         using (Structural())
         {
             if (table.Count != table.AliveCount) FillDirtyTables(); // a pass an exception interrupted left tombstones
-            if (table.Order.Sort(table, Meta)) StorageVersion++; // rows moved: passes and marks see it
+            if (table.Order.Sort(table, Meta, _columnSpares)) StorageVersion++; // rows moved: passes and marks see it
             table.Order.SortedAt = update;
         }
     }
