@@ -134,6 +134,12 @@ its own worktree.
      class's defaults;
    - a multi-stage prefetch is measured one stage at a time: a stage whose address needs a second lookup (a shared
      key's list of ids) cost 2.4x at 16M keys;
+   - a gap of about 5 % can be the assembly's layout, not a code path: before blaming a change, diff the generated
+     sources of the slower method and A/B a build whose code for it is identical to base (WorldSimulation at 100k
+     moved 1.05-1.06x with identical generated sources, from other jobs' text in the same assembly);
+   - `--filter` takes several patterns after the flag; a background wait dies at its timeout (2 h at most), so each
+     side of an A/B is its own resumable step; read `*-report.csv` (a harness guard refuses shell lines naming the
+     `github.md` report);
    - a pruning step that cuts work per item (a pair window skipped by its box) can lose to the tighter loop it
      replaces: measure it, and when it loses, revert it with its numbers in the commit message;
    - a benchmark whose first tick reorders the data (a pair pass sorts the table) takes its reference result after

@@ -197,7 +197,16 @@ form to support.
 
 Every loop is also checked against `audit-generator`, "Tuned for the machine" (chains, branches, caches, front end):
 run `llvm-mca -mcpu=icelake-server` (and `znver4`) on the Tier1 loop body to see whether it is bound by a dependency
-chain, by ports or by memory before choosing a change.
+chain, by ports or by memory before choosing a change (`tools/loopbound.sh <class>` does it for every loop of a
+benchmark class). A uop the model saves is not a win until BenchmarkDotNet shows one on the worlds: the masked skip
+tested on the word's bits modelled 8-20 % faster per vector and was 9-10 % slower on BattleServer, a branch the
+model counts as free in front of every vector while real words rarely skip. Ablate one change at a time against the
+same head.
+
+Read the Tier1 listing of a runner whose first calls ran another path (a table with no holes yet runs the flat loop):
+a static readonly table read before its class is initialized costs a class-initialization helper call per use for
+the life of the process (`Interleaved.InitializeTables` initializes the loops' tables when the module loads; a new
+table class goes there).
 
 Every round reads the Tier1 code of the samples' loops (`tools/jitdisasm.sh samples/MultiWorld 'EasyEcs.World:Masked'`)
 next to the generated text, and asks per loop: how many instructions per vector, which of them move data instead of
