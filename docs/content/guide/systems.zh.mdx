@@ -85,10 +85,10 @@ int dealt = world.BurnTotals.Damage;               // 10
 
 | 钩子 | 时机 |
 | --- | --- |
-| `[OnCreate]` | 系统被添加时调用一次（`world.AddSystem<T>()`） |
-| `[OnUpdate]` | 系统每次运行时调用，在它的 `[ForEach]` 方法之前 |
-| `[ForEach]` 方法 | 每次运行，在 `[OnUpdate]` 方法之后，按声明顺序执行 |
-| `[OnDestroy]` | `world.RemoveSystem<T>()` 或 `world.Dispose()` 时调用一次（逆序） |
+| `OnCreate` | 系统被添加时调用一次（`world.AddSystem<T>()`） |
+| `OnUpdate` | 系统每次运行时调用，在它的 `[ForEach]` 方法之前 |
+| `[ForEach]` 方法 | 每次运行，在 `OnUpdate` 方法之后，按声明顺序执行 |
+| `OnDestroy` | `world.RemoveSystem<T>()` 或 `world.Dispose()` 时调用一次（逆序） |
 
 ```csharp
 public record struct Wave(int Number) : ISingletonComponent;
@@ -96,16 +96,13 @@ public record struct Wave(int Number) : ISingletonComponent;
 [EcsSystem]
 public ref struct WaveSystem
 {
-    [OnCreate]
     static void OnCreate(World world) => world.SetWave(0);             // 它要处理的数据
 
-    [OnUpdate]
     static void OnUpdate(World world, SystemHandle system)
     {
         if (system.RunCount % 600 == 0) world.Wave.Number++;              // 每 600 次运行一次
     }
 
-    [OnDestroy]
     static void OnDestroy(World world) => world.RemoveWave();
 }
 ```
@@ -128,7 +125,7 @@ World 把它对一个系统的了解存成数据，`SystemHandle` 指向这份�
 ```csharp
 if (world.TryGetSystem<BurnSystem>(out var burn)) burn.Enabled = false;
 foreach (var system in world.Systems) Console.WriteLine(system.Name);
-world.RemoveSystem<BurnSystem>();                  // 调用它的 [OnDestroy]，它的句柄随之失效
+world.RemoveSystem<BurnSystem>();                  // 调用它的 OnDestroy，它的句柄随之失效
 long updates = world.DefaultUpdateCount;
 ```
 
@@ -138,7 +135,7 @@ long updates = world.DefaultUpdateCount;
 flowchart TB
     U["world.Update()"] --> S{"已启用且轮到它？"}
     S -- 否 --> N["下一个系统"]
-    S -- 是 --> O["[OnUpdate] 方法"]
+    S -- 是 --> O["OnUpdate 方法"]
     O --> F["[ForEach] 方法，按源码顺序"]
     F --> N
 ```
@@ -168,7 +165,6 @@ public record struct Autosave(long Count) : ISingletonComponent;
 [EcsSystem, UpdateInterval(60, Phase = 30)]        // 每 60 次更新一次，和同间隔的其他系统错开半个周期
 public ref struct SaveSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.GetOrAddAutosave().Count++;
 }
 ```
@@ -182,7 +178,6 @@ public ref struct SaveSystem
 [EcsSystem, UpdateInterval(60, Phase = 30)]
 public ref struct SaveSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.GetOrAddAutosave().Count++;
 }
 ```
@@ -199,15 +194,15 @@ internal readonly struct __SaveSystem_SystemCode : ISystemCode
 
     public static void Update(World world, SystemHandle system)
     {
-        __ForEach.OnUpdate_Update(default, world);             // [OnUpdate] 方法，经 UnsafeAccessor 调用
+        __ForEach.OnUpdate_Update(default, world);             // OnUpdate 方法，经 UnsafeAccessor 调用
     }
 
     public static void Access(ref SystemAccess access)
     {
-        access.RunAlone();                                     // [OnUpdate] 方法什么都可能碰
+        access.RunAlone();                                     // OnUpdate 方法什么都可能碰
     }
 
-    // Create 和 Destroy：空的（没有 [OnCreate]、[OnDestroy] 方法）；Loops：没有（没有 [ForEach] 方法）
+    // Create 和 Destroy：空的（没有 OnCreate、OnDestroy 方法）；Loops：没有（没有 [ForEach] 方法）
 }
 ```
 
@@ -235,7 +230,7 @@ public ref struct HungerSystem
 ```
 
 - **这次是哪一片：** 访问第 `RunCount % N` 片。`RunCount` 是系统在本次运行之前已经运行过的次数（第一次运行时为 0）；被
-  `UpdateInterval` 跳过的、停用期间的不算，抛了异常的算。接收 `SystemHandle` 的 `[OnUpdate]` 方法可以读它，知道这次运行访问哪一片。
+  `UpdateInterval` 跳过的、停用期间的不算，抛了异常的算。接收 `SystemHandle` 的 `OnUpdate` 方法可以读它，知道这次运行访问哪一片。
 - **表在哪里切：** 按 64 行的倍数切（也就是存在位的字），以遍历开始时表的行数为准：一张有 w 个字的表，第 k 片取第
   w × k / N 到 w × (k + 1) / N 个字，最后一片一直到最后一行。不足 64 行的表只有一片，N 次运行里只有一次会访问它。
 - **表之间错开：** 匹配到的第 i 张表从第 (k + i) mod N 片开始切，所以很多小表会分散到 N 次运行里，不会都挤在同一次。
@@ -275,7 +270,7 @@ public ref struct HungerSystem
 | `[ForEach]` | 对每个匹配的实体执行方法；`Parallel = true` 表示[多线程](#parallel-methods)（加上 `ChunkSize = n` 指定[一个线程每次领多少行](/zh/docs/guide/threading#chunk-rows)），`Slices = N` 表示[每次运行只处理一部分行](#slices) |
 | `[With<T>]` | 实体必须有 `T`，`T` 不作为参数传入；可重复 |
 | `[Without<T>]` | 实体不能有 `T`；可重复 |
-| `[WithAny<T>]` | 实体至少要有方法上某个 `[WithAny<T>]` 的组件 |
+| `[WithAny<T1, T2>]` | 实体至少要有方法上某个 `[WithAny<T1, T2>]` 的组件 |
 | `[Changed<T>]` | `T`（`ITracked`）在系统上次运行之后被写过（[变更追踪](/zh/docs/guide/change-tracking)） |
 | `[Removed<T>]` | 实体在系统上次运行之后失去了 `T`（`ITracked`）（[移除检测](/zh/docs/guide/change-tracking#removal-detection)） |
 | `[ChangedAny<T1, …, Tn>]` | 这些组件（2 到 9 个，`ITracked`）中至少一个在系统上次运行之后被写过（[任意一个](/zh/docs/guide/change-tracking#changed-any)） |
@@ -319,14 +314,13 @@ public ref struct CorpseCleanup
 }
 ```
 
-整个方法体只是一次结构变化、每一行都一样的方法，是一个 world 自己能跑得更快的循环：在 `[OnUpdate]` 方法里一次
+整个方法体只是一次结构变化、每一行都一样的方法，是一个 world 自己能跑得更快的循环：在 `OnUpdate` 方法里一次
 [批量调用](/zh/docs/guide/bulk)，一次改完整张表（[EECS030](/zh/docs/guide/analyzer#eecs030) 会指出这一点）：
 
 ```csharp
 [EcsSystem]
 public ref struct CorpseCleanup
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.DestroyAll<Dead>();
 }
 ```
@@ -354,8 +348,11 @@ public record struct Stamina(int Value) : IComponent;
 public ref struct Regeneration
 {
     [ForEach]
-    static void Regenerate(ref Stamina stamina, Maybe<Shield> shield) =>
+    static void Regenerate(ref Stamina stamina, Maybe<Shield> shield)
+    {
         stamina.Value += shield.HasValue ? 1 + shield.Value.Bonus : 1;
+        if (shield.HasValue && shield.Value.Bonus > 0) shield.Value.Bonus--;   // 体力恢复时护盾逐渐消耗
+    }
 }
 ```
 
@@ -380,7 +377,7 @@ public partial record struct Guild([LookupKey] int Id, int Level) : IComponent;
 public record struct Morale(int Value) : IComponent;
 ```
 
-```csharp tab="每行查找" doccheck=expect-EECS027
+```csharp tab="每行查找" doccheck=expect-EECS027,expect-EECS055
 [EcsSystem]
 public ref struct Rally
 {
@@ -505,27 +502,24 @@ int pending = world.Count<Sale>();             // 0：两笔交易都被消费�
 span 直接指向表，所以方法运行期间结构是冻结的：做结构变更会抛异常，[EECS013](/zh/docs/guide/analyzer#eecs013) 在编译期就会报出来。
 
 ```csharp
-using System.Numerics;
+using System.Buffers;
 using System.Runtime.InteropServices;
 
+// 下一个数据包要发的字节；由宿主设置，不存档。
+[NotSaved]
+public record struct Outbox(ArrayBufferWriter<byte> Bytes) : ISingletonComponent;
+
 [EcsSystem]
-public ref struct DriftSystem
+public ref struct SendPositionsSystem
 {
     [ForEach, Without<Dead>]
-    static void Drift(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
-    {
-        // JIT 不会自己向量化循环。每个组件两个 float：转成 Vector<float> 后，每条 lane 就是一个坐标
-        var p = MemoryMarshal.Cast<Position, Vector<float>>(positions);
-        var v = MemoryMarshal.Cast<Velocity, Vector<float>>(velocities);
-        for (int i = 0; i < p.Length; i++) p[i] += v[i];
-        var pf = MemoryMarshal.Cast<Position, float>(positions);
-        var vf = MemoryMarshal.Cast<Velocity, float>(velocities);
-        for (int i = p.Length * Vector<float>.Count; i < pf.Length; i++) pf[i] += vf[i];   // 剩下的行
-    }
+    static void Send(ReadOnlySpan<Position> positions, ref Outbox outbox) =>
+        outbox.Bytes.Write(MemoryMarshal.AsBytes(positions));   // 一段行一次拷贝
 }
 ```
 
-对 span 写标量循环，比逐实体方法快不了多少；要向量化才值得写批处理方法。
+逐行的算术写成逐实体方法，生成器会把它变成向量循环（对 span 手写的向量循环会报
+[EECS103](/zh/docs/guide/analyzer#eecs103)）；批处理方法用于一次接收一段行的调用：拷贝、span API、原生调用。
 
 ### 并行方法 [#parallel-methods]
 
@@ -874,9 +868,9 @@ long inputs = world.UpdateCount<InputGroup>();   // 到目前为止 Update<Input
 
 #### 分组过滤 [#group-filters]
 
-写在分组结构体上的 `[With<T>]`、`[Without<T>]`、`[WithAny<T>]` 会加到分组里所有系统的每个 `[ForEach]` 方法上：整组系统都能排除
-被冻结或未激活的实体，不用在每个方法上重复写。分组的 `[WithAny<T>]` 并入方法自己的 `[WithAny<T>]` 集合，放宽的是“至少有一个”
-这个条件：分组写 `[WithAny<A>]`、方法写 `[WithAny<B>]`，选出的是有 `A` 或有 `B` 的实体。系统在 `[OnUpdate]` 方法里自己做的查询不受影响；
+写在分组结构体上的 `[With<T>]`、`[Without<T>]`、`[WithAny<T1, T2>]` 会加到分组里所有系统的每个 `[ForEach]` 方法上：整组系统都能排除
+被冻结或未激活的实体，不用在每个方法上重复写。分组的 `[WithAny<T1, T2>]` 并入方法自己的 `WithAny` 集合，放宽的是“至少有一个”
+这个条件：分组写 `[WithAny<A, B>]`、方法写 `[WithAny<C, D>]`，选出的是 `A`、`B`、`C`、`D` 至少有一个的实体。系统在 `OnUpdate` 方法里自己做的查询不受影响；
 [`[ForEach]`](#foreach-outside-systems) runner 不属于任何分组，分组过滤也管不到它。过滤特性写在不是分组的结构体上会编译报错
 （[EECS023](/zh/docs/guide/analyzer#eecs023)）。
 
@@ -1009,7 +1003,7 @@ Census.CountAlive<Health>(world, ref alive);      // 泛型 runner：先写类�
 
 ### 统计系统耗时 [#measuring-systems]
 
-开启 `WorldOptions.MeasureSystems` 后，系统的每次运行（`[OnUpdate]` 方法加它的 `[ForEach]` 方法）都会被统计：`system.Stats` 里有 `Runs`、
+开启 `WorldOptions.MeasureSystems` 后，系统的每次运行（`OnUpdate` 方法加它的 `[ForEach]` 方法）都会被统计：`system.Stats` 里有 `Runs`、
 `LastTime`、`TotalTime`、`AverageTime`，这次运行分配的字节数（`LastAllocated`、`TotalAllocated`），以及 `[ForEach]` 方法匹配到的实体数
 （`LastEntities`、`TotalEntities`）。每次运行读两次时钟、两次线程的分配计数器，每次 `[ForEach]` 遍历数一次匹配数；
 关闭时每次运行只多一次字段判断。在两次更新之间读取，比如放在诊断接口里：
@@ -1025,7 +1019,7 @@ Console.WriteLine($"burn: {stats.LastTime.TotalMicroseconds} μs, average {stats
 
 ### 错误处理 [#errors]
 
-默认情况下，系统抛出的异常会从 `Update()` 传出去（`[OnDestroy]` 的异常从 `Dispose()` 传出）。设置
+默认情况下，系统抛出的异常会从 `Update()` 传出去（`OnDestroy` 的异常从 `Dispose()` 传出）。设置
 `SystemErrors = SystemErrorPolicy.Disable` 后，出错的系统会被停用，异常保存在它的句柄的 `Error` 里，这次更新接着跑下一个系统。
 失败也是数据：在两次更新之间读取。把 `Enabled` 设回 `true` 会清掉 `Error` 并重试。失败的系统仍算运行过：它的 `LastRunTick`
 照常前进，它的 `[Changed<T>]` 方法不会再访问失败那次之前写入的行。
@@ -1188,10 +1182,10 @@ run order: MoveSystem
 ## 开销 [#what-it-costs]
 
 - **`[ForEach]` 方法**是一个结构体 job，JIT 把它内联进行循环：没有委托，不分配内存。
-- **每个系统每次更新：** 所在程序集的系统集合直接调用一次（一个 `switch` 分支，没有虚调用），一次 `[OnUpdate]` 调用，每个生成的 job
+- **每个系统每次更新：** 所在程序集的系统集合直接调用一次（一个 `switch` 分支，没有虚调用），一次 `OnUpdate` 调用，每个生成的 job
   一次调用；job 的遍历直接读按 job 类型保存的查询，不比较过滤条件。
 - **每个系统占的内存：** World 里一条记录（启用、错误、tick、计数、统计）；没有对象。
-- **分组上的过滤条件**（分组类型上的 `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`，以及 `ISystemGroupWith<T>`、`ISystemGroupWithout<T>`）
+- **分组上的过滤条件**（分组类型上的 `[With<T>]`、`[Without<T>]`、`[WithAny<T1, T2>]`，以及 `ISystemGroupWith<T>`、`ISystemGroupWithout<T>`）
   由生成器读取，运行时没有开销。被它排除的表每次更新也不花任何代价：查询缓存里只有匹配的表，World 里其他种类实体的表
   （其他类型的 actor）不会被这个分组的系统遍历。
 - **单例组件参数**每次遍历只解析一次，不是每个实体一次。
@@ -1230,14 +1224,14 @@ run order: MoveSystem
 | 批处理方法里用 `Mut<T>` 参数 | 批处理方法拿的是 span | [EECS009](/zh/docs/guide/analyzer#eecs009) |
 | 排序形成环，或跨分组排序 | `AddSystem` 时抛异常；排序不生效 | [EECS019](/zh/docs/guide/analyzer#eecs019)、[EECS020](/zh/docs/guide/analyzer#eecs020) |
 | 方法参数用了 private 类型 | 生成的 job 引用不到它 | [EECS022](/zh/docs/guide/analyzer#eecs022) |
-| `[With<T>]`、`[Without<T>]` 或 `[WithAny<T>]` 写在不是分组的结构体上 | 编译报错：这个过滤不会起任何作用 | [EECS023](/zh/docs/guide/analyzer#eecs023) |
+| `[With<T>]`、`[Without<T>]` 或 `[WithAny<T1, T2>]` 写在不是分组的结构体上 | 编译报错：这个过滤不会起任何作用 | [EECS023](/zh/docs/guide/analyzer#eecs023) |
 | 分组的 `[With<T>]` 或 `ISystemGroupWith<T>` 碰上方法的 `[Removed<T>]` | 要求一行既有 `T` 又没有 `T`：方法永远不会运行 | [EECS016](/zh/docs/guide/analyzer#eecs016) |
 | 分组的 `[With<X>]` 碰上方法的 `[Without<X>]` | 没有实体能满足：方法永远不会运行 | [EECS049](/zh/docs/guide/analyzer#eecs049) |
-| 分组的 `[WithAny<A>]` 加方法的 `[WithAny<B>]`，当成“A 且 B” | 两个集合合并：选出有 `A` 或有 `B` 的实体 | 代码审查 |
+| 分组的 `[WithAny<A, B>]` 加方法的 `[WithAny<C, D>]`，当成“(A 或 B) 且 (C 或 D)” | 两个集合合并：选出 `A`、`B`、`C`、`D` 至少有一个的实体 | 代码审查 |
 | record struct 的 actor 键上写公开的 `Key => this` | `ToString()` 无限打印 `Key`：栈溢出 | [EECS043](/zh/docs/guide/analyzer#eecs043)（有代码修复）：类型上标 `[LookupKey]`，由它显式实现 `IIndexed<T>.Key` |
 | 只读的组件写成 `ref` | 被追踪的组件被打 tick，系统也没法共享阶段 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
 | 方法从不使用的 `Entity` 或 `World` 参数 | job 保留结构变更簿记 | [EECS026](/zh/docs/guide/analyzer#eecs026) |
-| `[OnUpdate]` 或 `[ForEach]` 方法里分配内存 | 每次更新都产生垃圾 | [EECS028](/zh/docs/guide/analyzer#eecs028) |
+| `OnUpdate` 或 `[ForEach]` 方法里分配内存 | 每次更新都产生垃圾 | [EECS028](/zh/docs/guide/analyzer#eecs028) |
 | 在系统里调用 `World.Update()` | 系统在自己的运行里再次运行 | [EECS034](/zh/docs/guide/analyzer#eecs034) |
 | 一次修改让热点方法丢了[向量循环](#vector-loops)（一个 `bool` 字段、条件之外的一次调用） | 一次一行，结果不变 | [EECS055](/zh/docs/guide/analyzer#eecs055)；`SimdMode = SimdMode.Require` 让它报 [EECS056](/zh/docs/guide/analyzer#eecs056) |
 | 要回放或对端要比较的状态用了 `FloatMode.Fast` | 不同机器之间末几位不同 | 代码审查：保持 `FloatMode.Exact`（[浮点结果](#float-mode)） |

@@ -35,7 +35,7 @@ icon: Funnel
 public static class Filters
 {
     public static readonly QueryFilter Active = QueryFilter.Create().Without<Frozen>().Without<Dead>();
-    public static readonly QueryFilter Impaired = QueryFilter.Create().WithAny<Frozen>().WithAny<Stunned>();   // 任一即可
+    public static readonly QueryFilter Impaired = QueryFilter.Create().WithAny<Frozen, Stunned>();   // 任一即可
 }
 ```
 
@@ -103,7 +103,7 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | --- | --- | --- |
 | `With<T>()` | 还拥有 `T` 的实体（`T` 不作为参数传入） | `[With<T>]` |
 | `Without<T>()` | 没有 `T` 的实体 | `[Without<T>]` |
-| `WithAny<T>()`，可重复 | 至少拥有其中一个 `WithAny` 组件的实体 | `[WithAny<T>]`，可重复 |
+| `WithAny<T1, T2>()`（2 到 9 个类型） | 至少拥有其中一个 `WithAny` 组件的实体 | `[WithAny<T1, T2>]`（2 到 9 个类型） |
 | `Changed<T>(since)` | 被追踪的 `T` 在 `since` 及之后被写过的实体 | `[Changed<T>]`（从系统上次运行算起） |
 | `Removed<T>(since)` | 在 `since` 及之后失去被追踪的 `T`、且至今没有补回的实体 | `[Removed<T>]` |
 | `ChangedAny<T1..Tn>(since)` | 自己拥有的被追踪组件中，至少一个在 `since` 及之后被写过的实体 | `[ChangedAny<T1, …, Tn>]` |
@@ -421,7 +421,6 @@ public ref struct BuryTheFallen
 {
     static readonly QueryFilter Fallen = QueryFilter.Create().With<Dead>();
 
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         Span<EntityId> batch = stackalloc EntityId[64];
@@ -467,7 +466,7 @@ using EasyEcs;
 [EcsSystem]
 public ref struct SlowSystem
 {
-    [ForEach, WithAny<Frozen>, WithAny<Burning>]
+    [ForEach, WithAny<Frozen, Burning>]
     static void Slow(ref Velocity velocity)
     {
         velocity.X /= 2;

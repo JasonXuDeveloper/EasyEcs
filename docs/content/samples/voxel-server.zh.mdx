@@ -146,7 +146,7 @@ stateDiagram-v2
 每一步是一个系统，每个状态是数据。玩家需要的地形由 [`AoiViewSystem`](#aoi) 请求，记成 `LoadRequest` 实体，每片地形一个：
 请求带 `[UniqueKey]`，第二个要它的玩家能找到它，就不再重复请求。请求创建时带着 `Saved` 标签，区域文件里没有这片地形时去掉它：
 这是存在位，所以所有请求都在同一张表里，保持到来的顺序。遍历期间不能加载或创建实体（EECS041），所以 `ChunkReadSystem`（`With<Saved>`）
-和 `ChunkGenerateSystem`（`Without<Saved>`）在遍历之后的 `[OnUpdate]` 里处理这些请求：每个 tick 各用
+和 `ChunkGenerateSystem`（`Without<Saved>`）在遍历之后的 `OnUpdate` 里处理这些请求：每个 tick 各用
 [`CollectIds`](/zh/docs/guide/queries#collect-ids) 最多取 `Rules.MaxRequests` 个，只销毁这些，其余的等下一个 tick。卸载过的地形用 `LoadEntities` 从区域文件读回，里面的僵尸和掉落物也一起回来；
 从没见过的地形是地形预制体的一个实例，方块通过 `SetCount` 返回的 span 原地写入。
 

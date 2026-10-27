@@ -91,7 +91,7 @@ world.Restore(history[(100 - 3) % Rollback.Ticks]);                             
 - **关系** 也一样重建。
 - **[销毁日志](/zh/docs/guide/change-tracking#destroy-log)** 开启时，会记下这次恢复去掉的实体（恢复前活着、快照里没有的）。日志本身不在快照里。
 
-两个调用都会进入结构闸门，查询遍历期间调用会抛异常：在两次更新之间调用，或者在系统的 `[OnUpdate]` 里、`[ForEach]` 方法之外调用。
+两个调用都会进入结构闸门，查询遍历期间调用会抛异常：在两次更新之间调用，或者在系统的 `OnUpdate` 里、`[ForEach]` 方法之外调用。
 快照只属于拍它的那个 World（否则抛 `ArgumentException`）；[`RemoveTypes`](/zh/docs/guide/migration-and-unload#remove-types) 之前拍的
 快照，之后不能再恢复（抛 `InvalidOperationException`）。但可以往里重新拍：`world.Capture(snapshot)` 会替换掉所有属于被 `RemoveTypes`
 删掉的表的副本，所以跨过一次重载保留下来的快照环，每个快照重新拍过一次之后就能接着用。
@@ -126,10 +126,9 @@ public struct PositionHistory : ISingletonComponent
 public ref struct RecordPositions
 {
     // 每个 tick 一次，在下面的方法之前：换到环里的下一帧。
-    [OnUpdate]
     static void OnUpdate(World world) => world.PositionHistory.Tick++;
 
-    [ForEach, With<Hitbox>]
+    [ForEach(SimdMode = SimdMode.Off), With<Hitbox>]   // 按实体下标写环形缓冲：逐行执行
     static void Record(Entity entity, in Position at, ref PositionHistory history)
     {
         int index = entity.Id.Index;

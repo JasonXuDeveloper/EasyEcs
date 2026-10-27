@@ -72,7 +72,7 @@ in your code. The generic calls after them (`Get<T>()`, `Set(c)`, `Remove<T>()`)
 | `new QueryDescription().WithAll<A, B>()` | the method's component parameters: `static void M(ref A a, in B b)` |
 | `.WithAll<Tag>()` (a tag the job does not read) | `[With<Tag>]` |
 | `.WithNone<C>()` | `[Without<C>]` |
-| `.WithAny<C, D>()` | `[WithAny<C>, WithAny<D>]` |
+| `.WithAny<C, D>()` | `[WithAny<C, D>]` |
 | `struct J : IForEach<A>` + `world.InlineQuery<J, A>(in q, ref job)` | `[ForEach]` method; outside systems `world.ForEach<A, J>(ref job, in filter)` with `IForEach<A>.Execute` |
 | `IForEachWithEntity<A>` + `InlineEntityQuery` | an `Entity` parameter: `static void M(Entity e, ref A a)` |
 | Chunk iteration (`GetChunkIterator`, `chunk.GetSpan<T>()`) | a batch method: `static void M(Span<A> a, ReadOnlySpan<B> b)` |
@@ -255,7 +255,6 @@ public ref struct LifetimeSystem
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.WorldStats.Tick++;
 }
 ```

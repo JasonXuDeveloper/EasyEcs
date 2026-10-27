@@ -189,7 +189,7 @@ public ref struct CorpseCleanupSystem
 }
 ```
 
-Name the component with a filter. With no component at all, use `[OnUpdate]`; with more than 9, move the extra
+Name the component with a filter. With no component at all, use `OnUpdate`; with more than 9, move the extra
 requirements to `[With<T>]` or split the method:
 
 ```csharp doccheck=expect-EECS030
@@ -202,7 +202,7 @@ public ref struct CorpseCleanupSystem
 ```
 
 This method's whole body is one structural change, so [EECS030](#eecs030) then asks for the bulk call
-`World.DestroyAll<Dead>()` in `[OnUpdate]`.
+`World.DestroyAll<Dead>()` in `OnUpdate`.
 
 ## EECS004 [#eecs004]
 
@@ -288,7 +288,6 @@ instance field is [EECS075](#eecs075).
 public ref struct SpawnSystem
 {
     static int _spawned;                                   // shared by every world, seen by no save
-    [OnUpdate]
     static void OnUpdate() => _spawned++;
 }
 ```
@@ -301,7 +300,6 @@ public record struct Spawned(int Count) : ISingletonComponent;
 [EcsSystem]
 public ref struct SpawnSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.GetOrAddSpawned().Count++;
 }
 ```
@@ -327,7 +325,6 @@ public ref struct KillSystem
 [EcsSystem]
 public ref struct ScoreSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.System<KillSystem>().Enabled = false;   // the two can no longer change apart
 }
 ```
@@ -349,7 +346,6 @@ public ref struct KillSystem
 public ref struct ScoreSystem
 {
     // One pass destroys the corpses and says how many there were: each is counted once.
-    [OnUpdate]
     static void OnUpdate(World world) => world.GetOrAddScore().Deaths += world.DestroyAll<Dead>();
 }
 ```
@@ -476,7 +472,7 @@ another generic method that stores it.
 public record struct Loot(int Item);
 ```
 
-```csharp doccheck=expect-EECS012
+```csharp doccheck=expect-EECS012,expect-EECS033
 public static class Bags
 {
     public static void Share(Entity player, Entity other)
@@ -494,11 +490,11 @@ list; a [prefab](/en/docs/guide/prefabs) gets its elements with `SetBuffer(…)`
 ```csharp
 public static class Bags
 {
-    public static int Items(Entity player) => player.Read<DynamicBuffer<Loot>>().Count;   // read through the entity
+    public static int Items(Entity player) => player.Loot.Count;                          // read through the entity
 
     public static void Give(Entity player, Loot loot)
     {
-        ref var bag = ref player.Get<DynamicBuffer<Loot>>();                               // a ref local: a tracked write
+        ref var bag = ref player.WriteLoot();                                              // a ref local: a tracked write
         bag.Add(loot);
     }
 
@@ -646,7 +642,7 @@ lack it), `Read<T>()` or the generated property, and write it with `Set` (or the
 [EcsSystem]
 public ref struct TakePortals
 {
-    [ForEach]
+    [ForEach(SimdMode = SimdMode.Off)]   // a key set per row: one row at a time
     static void Take(Entity player, in Zone zone, in Portal portal)
     {
         if (zone.Id != portal.To) player.SetZone(portal.To);         // a Set: the index moves the player at once
@@ -825,7 +821,7 @@ public ref struct HealSystem
 
 **A filter on a struct that is no system group.** Error. Code fix: removes the filter.
 
-`[With<T>]`, `[Without<T>]` and `[WithAny<T>]` on an `ISystemGroup` struct join every `[ForEach]` method of the
+`[With<T>]`, `[Without<T>]` and `[WithAny<T1, T2>]` on an `ISystemGroup` struct join every `[ForEach]` method of the
 group's systems. On any other struct, such as a component, they do nothing.
 
 ```csharp doccheck=expect-EECS023
@@ -964,7 +960,7 @@ a loop or after an early `return`), of components the method does not add or rem
 too: an `in` parameter or a [`ReadOnlyMaybe<T>`](/en/docs/guide/systems#read-only-maybe) reads them without the
 lookup and without the write EECS015 forbids.
 
-```csharp doccheck=expect-EECS027
+```csharp doccheck=expect-EECS027,expect-EECS055
 [EcsSystem]
 public ref struct Drift
 {
@@ -996,12 +992,12 @@ public ref struct Drift
 
 **An allocation in code that runs every update.** Warning. No code fix.
 
-A `[ForEach]` method runs for every entity it visits and `[OnUpdate]` once per update, so what they allocate is garbage
+A `[ForEach]` method runs for every entity it visits and `OnUpdate` once per update, so what they allocate is garbage
 of every tick, and the collections it causes pause the world. The rule names each allocating expression: an object or
 array, a lambda that captures, a method group of an instance, LINQ, a string built at run time (`$"..."`, `+`,
 `string.Format`, `ToString()`), boxing, and `foreach` over an interface. Left out: code inside a `throw`, calls the
 compiler removes (`[Conditional]`, such as `Debug.Assert`), console output (the write costs more than its string),
-and the `[OnUpdate]` of a system with its own `[UpdateInterval]` (its author chose that cadence). The rule also covers
+and the `OnUpdate` of a system with its own `[UpdateInterval]` (its author chose that cadence). The rule also covers
 the `Execute` of a hand-written job, and the cold calls that allocate by design: `TrimExcess`, `Capture()`,
 `Describe`, `DescribeTables` and `DescribeSchedule` belong to a timer, a command or a test, not to every update.
 
@@ -1059,7 +1055,7 @@ world.DestroyAll<Health>(QueryFilter.Create().With<Dead>());
 
 A `[ForEach]` method whose whole body is such a call on its entity is the same loop, written by the generator. The rule
 reports it when the call's arguments use no parameter and the method's filters are ones a `QueryFilter` holds (no
-`[Changed<T>]` or `[Removed<T>]`, no slices). There is no code fix: the call moves into the system's `[OnUpdate]` and
+`[Changed<T>]` or `[Removed<T>]`, no slices). There is no code fix: the call moves into the system's `OnUpdate` and
 the method goes.
 
 ```csharp doccheck=expect-EECS030
@@ -1077,7 +1073,6 @@ One call per update:
 [EcsSystem]
 public ref struct CorpseSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.DestroyAll<Dead>();
 }
 ```
@@ -1173,7 +1168,6 @@ its change tick. A stable `[ForEach]` method that calls it is [EECS013](#eecs013
 [EcsSystem]
 public ref struct CatchUp
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.Update();
 }
 ```
@@ -1302,7 +1296,7 @@ mana.Value -= 10;              // lost
 Keep the `ref`:
 
 ```csharp
-ref var mana = ref hero.Get<Mana>();
+ref var mana = ref hero.Mana;
 mana.Value -= 10;
 ```
 
@@ -1366,7 +1360,7 @@ public record struct Callsign(string Text) : IComponent, ITracked;   // compared
 ```
 
 ```csharp
-hero.SetIfChanged(new Callsign("Ada"));
+hero.SetCallsignIfChanged("Ada");
 ```
 
 ## EECS041 [#eecs041]
@@ -1439,14 +1433,14 @@ public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { p
 
 Declare the key with `[LookupKey]` on the type: the generator writes `Key` explicitly, so it belongs to the interface
 only and `ToString()` does not print it. The other fix implements `Key` explicitly by hand (and rewrites `.Key`
-reads):
+reads), which [EECS067](#eecs067) then reports as the line `[LookupKey]` writes:
 
 ```csharp tab="[LookupKey]" doccheck=alone
 [LookupKey]
 public readonly partial record struct Market(long Id) : IComponent;
 ```
 
-```csharp tab="Explicit Key" doccheck=alone
+```csharp tab="Explicit Key" doccheck=alone,expect-EECS067
 public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { Market IIndexed<Market>.Key => this; }
 ```
 
@@ -1491,7 +1485,7 @@ hero.Remove<Disabled<Health>>();   // the tag goes, the value stays hidden
 Call the world's own operation:
 
 ```csharp
-hero.Enable<Health>();
+hero.EnableHealth();
 ```
 
 ## EECS046 [#eecs046]
@@ -1538,16 +1532,16 @@ a generated `item.X`. `Remove<T>()` and `Enable<T>()` flip a bit of the row and 
 component the ref points at writes it in place.
 
 ```csharp doccheck=expect-EECS047
-ref var health = ref hero.Get<Health>();
-hero.Set(new Burning(3));   // hero moves to the table with Burning
+ref var health = ref hero.Health;
+hero.SetBurning(3);          // hero moves to the table with Burning
 health.Value -= 5;          // writes the row hero left
 ```
 
 Change the structure first, then take the ref:
 
 ```csharp
-hero.Set(new Burning(3));
-ref var health = ref hero.Get<Health>();
+hero.SetBurning(3);
+ref var health = ref hero.Health;
 health.Value -= 5;
 ```
 
@@ -1568,7 +1562,7 @@ unit.Disable<ChildOf>();   // InvalidOperationException
 Remove it: the entity leaves its parent, and the parent's destruction no longer reaches it.
 
 ```csharp
-unit.Remove<ChildOf>();
+unit.RemoveChildOf();
 ```
 
 ## EECS049 [#eecs049]
@@ -2282,24 +2276,23 @@ public partial record struct Room([Group] int Id) : IComponent;
 
 Each setup attribute fits certain types, and on any other type no world would apply it:
 
-- `[GroupBy]` makes every world group its tables by a grouped component (`IGroup`, or a member declared with `[Group]`).
+- `[GroupBy]` on a member of a partial component makes every world group its tables by that member (an `int` or an
+  `int` enum), or by the `Group` of a hand-written `IGroup`.
 - `[WhenTargetDestroyed]` sets what destroying an entity does to the links to it, so it goes on a relation
   (`IRelation`) or on a component indexed by an `EntityId`.
 - `[NotSaved]` leaves a component or a singleton out of saves.
 
 ```csharp tab="Reported" doccheck=alone,expect-EECS068
-[GroupBy]
-public struct Squad : IComponent
+public partial struct Squad
 {
-    public int Id;              // nothing says it is the group
+    [GroupBy] public int Id;    // no component: no table to group
 }
 ```
 
 ```csharp tab="Fixed"
-[GroupBy]
 public partial struct Squad : IComponent
 {
-    [Group] public int Id;
+    [GroupBy] public int Id;
 }
 ```
 
@@ -2355,19 +2348,18 @@ public record struct Aim(EntityId Target) : IComponent;
 [EcsSystem]
 public ref struct Strike
 {
-    [ForEach(Parallel = true)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Off)]   // two values per record: one row at a time
     static void Hit(in Aim aim, Emit<Hit> hits) => hits.Add(new Hit(aim.Target, 1));
 }
 
 [EcsSystem, UpdateAfter<Strike>]
 public ref struct ApplyHits
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
         foreach (ref readonly var hit in hits.AsReadOnlySpan())
-            if (world.TryGetEntity(hit.Target, out var target)) target.Get<Health>().Value -= hit.Amount;
+            if (world.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
         hits.Clear();   // the passes append: the reader clears
     }
 }
@@ -2552,17 +2544,16 @@ public ref struct HealSystem
 
 **An invalid system hook.** Error. No code fix.
 
-`[OnCreate]`, `[OnUpdate]` and `[OnDestroy]` mark the static methods the world calls when a system is added, on each
-of its runs and when it is removed. Each returns void and takes the `World`, the `SystemHandle`, both (in either
-order) or neither, and a system has at most one method per hook. A hook outside an `[EcsSystem]`, a generic one, one
-with several hook attributes, or one taking anything else is never called. (An instance hook is
+The static methods of an `[EcsSystem]` named `OnCreate`, `OnUpdate` and `OnDestroy` are the hooks the world calls
+when the system is added, on each of its runs and when it is removed: the name alone makes a method a hook. Each
+returns void and takes the `World`, the `SystemHandle`, both (in either order) or neither, and a system has at most
+one method per hook. A generic hook, or one returning a value or taking anything else, is never called. (An instance hook is
 [EECS075](#eecs075).)
 
 ```csharp tab="Reported" doccheck=expect-EECS076
 [EcsSystem]
 public ref struct CensusSystem
 {
-    [OnUpdate]
     static int OnUpdate(World world) => world.Count<Health>();   // who would read the result?
 }
 ```
@@ -2573,7 +2564,6 @@ public record struct Census(int Living) : ISingletonComponent;
 [EcsSystem]
 public ref struct CensusSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.SetCensus(world.Count<Health>());
 }
 ```
@@ -2773,7 +2763,7 @@ A [`ref Reduce<T>`](/en/docs/guide/threading#reductions) parameter gives each ch
 starting at `T`'s identity, and combines the partial results into `T` when the pass ends. The sums, minimums and
 maximums are the same, but `Parallel = true` and the vector loop are open to the method.
 
-The pass's result replaces `T`. So the rule reports only a singleton that system code resets outside `[OnCreate]`: a whole
+The pass's result replaces `T`. So the rule reports only a singleton that system code resets outside `OnCreate`: a whole
 assignment, a constant given to a field, `AddSingleton`, `RemoveSingleton`, or the generated `SetX` and `RemoveX`. Such
 a singleton holds one pass's result, and the reduction makes its reset redundant. A total that grows across updates
 (a score, deaths so far) is never reset, and the rule leaves it alone.
@@ -2792,7 +2782,6 @@ public struct Crowd : ISingletonComponent
 [EcsSystem]
 public ref struct CountCrowd
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.Crowd = default;   // every update counts again
 
     [ForEach]
@@ -2946,7 +2935,7 @@ public record struct Gun(float Power) : IComponent;
 [EcsSystem]
 public ref struct Fire
 {
-    [ForEach(Parallel = true)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Off)]   // two values per record: one row at a time
     static void Pull(Entity entity, in Gun gun, Emit<Shot> shots) => shots.Add(new Shot(entity.Id, gun.Power));
 }
 ```
@@ -2960,7 +2949,7 @@ so the compiler reports CS0246 on the base. The IDE offers a fix on that error t
 `[EcsSystem]` ref struct ([migration guide](/en/docs/migration#v4-8-systems)):
 
 - every member becomes static, and `private` / `protected` become `internal`;
-- the `OnCreate`, `OnUpdate` and `OnDestroy` overrides become `[OnCreate]`, `[OnUpdate]` and `[OnDestroy]` methods;
+- the `OnCreate`, `OnUpdate` and `OnDestroy` overrides become static methods of the same names (the hooks);
 - `World` becomes a `World world` parameter, and `RunCount`, `LastRunTick`, `Enabled`, `Error` and `Stats` are read
   through a `SystemHandle system` parameter, each added to the methods that use it (or call a method that does).
 
@@ -2980,7 +2969,6 @@ public record struct Wave(int Number) : ISingletonComponent;
 [EcsSystem]
 internal ref struct WaveSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world, SystemHandle system)
     {
         if (system.RunCount % 600 == 0) world.GetOrAddWave().Number++;

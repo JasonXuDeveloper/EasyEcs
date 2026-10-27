@@ -52,7 +52,7 @@ dotnet add package EasyEcs        # net10.0 · source generator, analyzer and Ni
   a pass; no command buffer to flush. Removing a status effect and adding it back flips a presence bit, the entity
   never moves. State can be tags, not flags.
 - **Write the logic, not the plumbing.** A `[ForEach]` method is the whole system; filters are attributes
-  (`[With<T>]`, `[Without<T>]`, `[WithAny<T>]`), singletons are parameters, and attributes on a type declare what it is
+  (`[With<T>]`, `[Without<T>]`, `[WithAny<T1, T2>]`), singletons are parameters, and attributes on a type declare what it is
   (`[Sum]` for a total, `[UniqueKey]` for an index key, `[Group]`, `[UpdateInterval(n)]` on a system): the generator
   writes the rest.
 - **Every core and every SIMD lane, without writing either.** A `[ForEach]` method over numbers becomes a vector loop,
@@ -318,7 +318,7 @@ Markdown copy of every page.
   Codex, Copilot and other agents; it loads when a task touches EasyEcs code
   ([AI assistants](https://ecs.xgamedev.net/en/docs/ai#agent-skill)).
 - **Systems are static code.** A system is an `[EcsSystem]` ref struct of static methods: `[ForEach]` methods and
-  `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` hooks that take the `World` or the system's `SystemHandle` when they need
+  `OnCreate` / `OnUpdate` / `OnDestroy` hooks that take the `World` or the system's `SystemHandle` when they need
   them. No object per system, no virtual call: an assembly's systems run through one generated switch, and a generated
   pass finds its query by its job type. Classes deriving from `EcsSystem` change (a code change, with a code fix on
   the compiler's error: see the [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-8-systems)), and

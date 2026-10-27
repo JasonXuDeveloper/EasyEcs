@@ -306,7 +306,7 @@ public ref struct ReplicateUnitSystem
 
     // A status ended: the burning or the poison (or both) went away since the last run.
     [ForEach, RemovedAny<Burning, Poisoned>]
-    static void Clear(ref StatusReplica status, Maybe<Burning> burning, Maybe<Poisoned> poisoned) =>
+    static void Clear(ref StatusReplica status, ReadOnlyMaybe<Burning> burning, ReadOnlyMaybe<Poisoned> poisoned) =>
         status = new StatusReplica(burning.HasValue, poisoned.HasValue);
 }
 ```
@@ -461,7 +461,7 @@ using EasyEcs;
 [EcsSystem]
 public ref struct BurnSystem
 {
-    [ForEach]
+    [ForEach(SimdMode = SimdMode.Off)]   // removes the Burning it reads: one row at a time
     static void Burn(Entity unit, ref Burning burning, ref Health health)
     {
         health.Value -= 10;

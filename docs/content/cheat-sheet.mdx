@@ -17,7 +17,7 @@ public record struct Health(int Value) : IComponent, ITracked;          // track
 public record struct Mana(int Value) : IComponent, ITracked;
 public partial record struct Team([LookupKey] int Id) : IComponent;
 public partial record struct Account([UniqueKey] int Id) : IComponent;   // one entity per key
-[GroupBy] public partial record struct Zone([Group] int Id) : IComponent;   // grouped in every world
+public partial record struct Zone([GroupBy] int Id) : IComponent;   // grouped in every world
 public partial record struct OwnedBy([LookupKey] EntityId Owner) : IComponent;
 public record struct MemberOf(EntityId Target) : IRelation;                   // many links per entity
 public record struct Loot(int Item);                                          // a DynamicBuffer element
@@ -61,10 +61,10 @@ Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an ent
 
 | Call | Does |
 | --- | --- |
-| `new World(options)` | An isolated world; `Dispose()` runs every `[OnDestroy]` |
+| `new World(options)` | An isolated world; `Dispose()` runs every `OnDestroy` |
 | `world.Update()` | Runs the default group's systems once |
 | `world.Update<TGroup>()` | Runs one system group |
-| `world.AddSystem<T>()` | Adds a system (runs `[OnCreate]`) |
+| `world.AddSystem<T>()` | Adds a system (runs `OnCreate`) |
 | `world.RemoveSystem<T>()` / `TryGetSystem<T>(out s)` / `Systems` | Removes, finds, lists systems |
 | `world.EntityCount` / `Entities` | Live entities and an allocation-free walk over them |
 | `world.ChangeTick` | The current change tick |
@@ -76,7 +76,7 @@ Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an ent
 | `world.DescribeSchedule()` | Every group's stages, each system's reads and writes, why it waits, the pairs only registration orders; `ToString()` / `ToMermaid()` |
 | `world.TrimExcess()` | Drops empty tables and shrinks the others after a peak, at a quiet moment |
 | `world.ForParallel(count, ref job)` / `ForParallel(ref buffer, ref job)` | An `IForRange` job over indexes, or an `IForSpan<T>` job over a `DynamicBuffer<T>`'s elements, in chunks on the world's runner ([ForParallel](/en/docs/guide/threading#for-parallel)) |
-| `world.SetEntityRandom(Seed: s, Tick: 0)` / `World.EntityRandom.Tick++` | The seed and tick of `EntityRandom`: each number a function of (seed, entity, tick, stream) ([EntityRandom](/en/docs/guide/threading#entity-random)) |
+| `world.SetEntityRandom(Seed: s)` | The seed of `EntityRandom`; every `Update()` advances its tick: each number a function of (seed, entity, tick, stream) ([EntityRandom](/en/docs/guide/threading#entity-random)) |
 | `world.DestroyedSince(since, into, out count)` / `DestroyLogOldestTick` | Entities destroyed since a tick, with `WorldOptions.DestroyLogCapacity`; `false`: the reader is older than the log |
 
 ```csharp
@@ -223,7 +223,7 @@ bit
 | `[ForEach(Slices = N)]` | Method | Each run visits one slice, about 1 / N of the rows: every row once per N runs (not with `Changed` / `Removed`: [EECS035](/en/docs/guide/analyzer#eecs035)) |
 | `[With<T>]` | Method, system group | Requires `T` without passing it |
 | `[Without<T>]` | Method, system group | Excludes entities with `T` |
-| `[WithAny<A>, WithAny<B>]` | Method, system group | Requires at least one of them |
+| `[WithAny<A, B>]` | Method, system group | Requires at least one of them |
 | `[Changed<T>]` | Method | Rows whose tracked `T` was written since the system last ran |
 | `[Removed<T>]` | Method | Entities that lost tracked `T` since the system last ran |
 | `[ChangedAny<A, B>]` / `[RemovedAny<A, B>]` | Method | Rows where at least one of 2 to 9 tracked components was written, or lost |
@@ -244,7 +244,7 @@ public ref struct DecaySystem
 ```
 
 `[Changed<T>]` and `[Removed<T>]` go on methods only. A system group takes `[With<T>]`, `[Without<T>]` and
-`[WithAny<T>]` ([EECS023](/en/docs/guide/analyzer#eecs023) flags them on any other struct), or `ISystemGroupWith<T>` /
+`[WithAny<T1, T2>]` ([EECS023](/en/docs/guide/analyzer#eecs023) flags them on any other struct), or `ISystemGroupWith<T>` /
 `ISystemGroupWithout<T>`, which a generic group interface needs because an attribute cannot name a type parameter:
 
 ```csharp
@@ -257,7 +257,7 @@ public struct Shop : IActorGroup<Shop>;             // the systems of [UpdateInG
 
 | Member | Does |
 | --- | --- |
-| `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` | Lifecycle; `[OnUpdate]` runs before the `[ForEach]` methods |
+| `OnCreate` / `OnUpdate` / `OnDestroy` | Lifecycle; `OnUpdate` runs before the `[ForEach]` methods |
 | `World` | The system's world |
 | `[UpdateInterval(N, Phase = P)]` | Run every N-th update, on phase 0 to N-1 |
 | `Enabled` | Skip the system; setting `true` clears `Error` |
@@ -299,7 +299,7 @@ bool anyDead = world.Any<Dead>();
 
 | `QueryFilter` | Selects |
 | --- | --- |
-| `.With<T>()` / `.Without<T>()` / `.WithAny<T>()` | Presence, as the attributes |
+| `.With<T>()` / `.Without<T>()` / `.WithAny<T1, T2>()` | Presence, as the attributes |
 | `.Changed<T>(since)` / `.Removed<T>(since)` | Written, or lost, at or after tick `since` |
 | `.ChangedAny<A, B>(since)` / `.RemovedAny<A, B>(since)` | At least one of them written, or lost, at or after `since` |
 | `.Since(tick)` | The same filter with a new tick: one filter, run with each client's tick |

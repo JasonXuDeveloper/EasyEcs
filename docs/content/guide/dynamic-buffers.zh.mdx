@@ -233,7 +233,7 @@ public static class Bags
 {
     public static int Items(Entity player)
     {
-        var copy = player.Read<DynamicBuffer<Loot>>();   // EECS012：复制了缓冲
+        var copy = player.Loot;                          // EECS012：复制了缓冲
         return copy.Count;
     }
 }
@@ -245,7 +245,9 @@ public static class Bags
 
 - 行移到另一张表（加了组件）时，列表跟着走。
 - 移除这个组件或销毁实体，列表随之丢弃；再加回组件，从空列表开始。
-- `world.Capture()` 复制元素，`Restore` 再复制回去：World 和它的[快照](/zh/docs/guide/snapshots)永远不共用列表。
+- `world.Capture()` 让每个列表与[快照](/zh/docs/guide/snapshots)共用，直到任一方写入（写时复制），所以双方都看不到对方的写入。
+  `Restore` 对之后没写过的行重新共用快照的列表，对写过的行在拥有者线程上把元素复制进去：这一行下一次写入（常在并行遍历中）
+  直接用自己的列表，不必在辅助线程上复制一份。
 - `world.Instantiate(prefab)` 和 `entity.Clone()` 给新实体一份自己的列表，元素相同。[预制体](/zh/docs/guide/prefabs)用
   `SetBuffer(...)` 设置元素：
 

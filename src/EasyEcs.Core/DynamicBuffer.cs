@@ -361,6 +361,24 @@ internal abstract class BufferStore
     }
 
     /// <summary>
+    /// <see cref="Assign"/> for a restore into a live row: a row that still shares the source's list (not written since
+    /// the capture) keeps sharing it, O(1); a row whose list changed takes copies of the source's elements, in place when
+    /// it holds its list alone, else in a list from this thread's pool; null when the source has none. A row written
+    /// since the capture is the one a replay writes again: sharing the snapshot's list, its next write would copy it,
+    /// from the pool of whichever thread writes it (a helper thread of a parallel pass, whose pool does not get back the
+    /// lists this owner thread recycles), and allocate. Copied here, on the owner thread, its list stays its own, so a
+    /// second replay from the snapshot starts from the rows the first one did and allocates nothing it did not.
+    /// O(elements of the rows written since).
+    /// </summary>
+    public static void AssignOwn(ref BufferStore target, BufferStore source)
+    {
+        if (target == source) return;
+        if (target is { Shares: 0 } && target.CopyFrom(source)) return;
+        target?.Recycle();
+        target = source?.Copy();
+    }
+
+    /// <summary>
     /// Hold copies of the elements of <paramref name="source"/> (of the same element type, or null); false, the store
     /// untouched, when it has none. For a store that is its owner's (a singleton's).
     /// </summary>

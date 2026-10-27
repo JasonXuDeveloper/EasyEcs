@@ -69,8 +69,7 @@ public ref struct DeathSystem
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
-    static void OnUpdate(World world) => world.Clock.Tick++;   // 在 [OnUpdate] 方法里：通过它的 World 参数访问
+    static void OnUpdate(World world) => world.Clock.Tick++;   // 在 OnUpdate 方法里：通过它的 World 参数访问
 }
 ```
 
@@ -158,7 +157,6 @@ using EasyEcs;
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         world.Clock.Tick++;

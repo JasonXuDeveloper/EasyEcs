@@ -245,7 +245,6 @@ public ref struct ApplyHitsSystem
 [EcsSystem, UpdateAfter<ApplyHitsSystem>]                               // after every reader
 public ref struct ClearHitsSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.DestroyAll<Hit>(); // every message, one pass
 }
 ```
@@ -328,8 +327,8 @@ private or not, through `[UnsafeAccessor]`, which compiles to a direct call
 
 Nothing in your code calls it: the generated code does, through `[UnsafeAccessor]`, by name, which the IDE's "unused
 private member" analyzers do not count as a use. EasyEcs answers both IDEs. Its analyzer package ships a diagnostic
-suppressor that hides IDE0051 and IDE0052 on `[ForEach]`, `[ForEntity]`, `[OnCreate]`, `[OnUpdate]` and
-`[OnDestroy]` methods (Visual Studio, VS Code, `dotnet build`), and those attributes and `[EcsSystem]` carry
+suppressor that hides IDE0051 and IDE0052 on `[ForEach]`, `[ForEntity]`, `OnCreate`, `OnUpdate` and
+`OnDestroy` methods (Visual Studio, VS Code, `dotnet build`), and `[ForEach]`, `[ForEntity]` and `[EcsSystem]` carry
 JetBrains' `[MeansImplicitUse]`, which Rider and ReSharper read
 ([D107](/en/docs/decisions#d107-never-used-warnings)). If the hint still shows, the project references
 EasyEcs without its analyzers (`ExcludeAssets="analyzers"` on the package, or a reference to the sources without

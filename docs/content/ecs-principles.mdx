@@ -99,7 +99,7 @@ public ref struct DeathSystem
 
 Splitting costs nothing at run time. Every `[ForEach]` method is its own inlined struct job either way, and the
 per-system cost of an update is one direct call of its generated code (a `switch` case of its assembly's system set,
-no virtual call), the `[OnUpdate]` call when it has one, and one lookup per singleton parameter; each pass reads the
+no virtual call), the `OnUpdate` call when it has one, and one lookup per singleton parameter; each pass reads the
 query kept for its job type. When in doubt, split.
 
 ### 2. Systems are stateless [#2-systems-are-stateless]
@@ -168,7 +168,6 @@ A system that calls another system's members ([EECS008](/en/docs/guide/analyzer#
 [EcsSystem, UpdateAfter<DeathSystem>]
 public ref struct CorpseSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.DestroyAll<Dead>();   // every corpse in one pass
 }
 ```

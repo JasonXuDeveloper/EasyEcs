@@ -30,7 +30,7 @@ creates one, keeps its bookkeeping (enabled, error, run count, stats) itself and
 | --- | --- |
 | `public class X : EcsSystem` | `[EcsSystem] public ref struct X` |
 | `[ForEach] void M(...)` | `[ForEach] static void M(...)` (the only form) |
-| `protected override void OnCreate()` / `OnUpdate()` / `OnDestroy()` | `[OnCreate]` / `[OnUpdate]` / `[OnDestroy] static void M(...)`, taking the `World`, the `SystemHandle`, both or neither |
+| `protected override void OnCreate()` / `OnUpdate()` / `OnDestroy()` | `static void OnCreate(...)` / `OnUpdate(...)` / `OnDestroy(...)`, named for the hook (no attribute), taking the `World`, the `SystemHandle`, both or neither |
 | the `World` property | a `World world` parameter |
 | `RunCount`, `LastRunTick`, `Enabled`, `Error`, `Stats` of the system | the same members of its `SystemHandle` |
 | `T system = world.AddSystem<T>()` | `SystemHandle system = world.AddSystem<T>()` |
@@ -72,7 +72,6 @@ public record struct MoveInbox(ConcurrentQueue<MoveRequest> Moves) : ISingletonC
 [EcsSystem]
 public ref struct ReceiveMoves
 {
-    [OnUpdate]
     static void OnUpdate(World world, SystemHandle system)
     {
         var moves = world.MoveInbox.Moves;
@@ -115,7 +114,6 @@ public class SaveSystem : EcsSystem
 [EcsSystem, UpdateInterval(60, Phase = 30)]
 public ref struct SaveSystem
 {
-    [OnUpdate]
     static void OnUpdate() { }
 }
 ```
@@ -136,7 +134,7 @@ public partial record struct Guild([LookupKey] int Id) : IComponent;
 public record struct Morale(int Value) : IComponent;
 ```
 
-```csharp tab="4.7" doccheck=expect-EECS027
+```csharp tab="4.7" doccheck=expect-EECS027,expect-EECS055
 [EcsSystem]
 public ref struct Rally
 {
@@ -170,7 +168,6 @@ public ref struct CorpseSystem
 [EcsSystem]
 public ref struct CorpseSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.DestroyAll<Dead>();
 }
 ```
@@ -294,9 +291,8 @@ public struct HealJob : IForEachBatch<Hp>, INoStructuralChanges
 `ITile<TKey>`, `ITileShape`, `TileFaces`, `TileNeighborhood`, `TileBoundary`, `TileIds`, `PaddedTile<TCell, TTile>`,
 `TileRows<TTile>`, `TileRow<TTile>`, `TileCursor<TCell, TTile>`, `TileReads`) and the attributes `ForEntityAttribute`,
 `ConsumeAttribute`, `UpdateIntervalAttribute`, `SumAttribute`, `ProductAttribute`, `MinAttribute`, `MaxAttribute`,
-`AllAttribute`, `AnyAttribute`, `IndexKeyAttribute`, `UniqueKeyAttribute`, `GroupAttribute`, `GroupByAttribute`,
-`WhenTargetDestroyedAttribute`, `NotSavedAttribute`, the system types (`EcsSystemAttribute`, `OnCreateAttribute`,
-`OnUpdateAttribute`, `OnDestroyAttribute`, `SystemHandle`, and for the generated code `ISystemCode`, `ISystemSet`,
+`AllAttribute`, `AnyAttribute`, `LookupKeyAttribute`, `UniqueKeyAttribute`, `GroupAttribute`, `GroupByAttribute`,
+`WhenTargetDestroyedAttribute`, `NotSavedAttribute`, the system types (`EcsSystemAttribute`, `SystemHandle`, and for the generated code `ISystemCode`, `ISystemSet`,
 `SystemDeclarations`, `SystemCode`, `GenericSystemCodeAttribute`, `MutColumn`) are new in `namespace EasyEcs`. A file that imports another namespace with a type of that name gets
 CS0104 (ambiguous reference): qualify the name, or alias it with a `using` directive.
 
@@ -367,7 +363,6 @@ public class Spawner : EcsSystem
 [EcsSystem]
 public ref struct Spawner
 {
-    [OnUpdate]
     static void OnUpdate(SystemHandle system)
     {
         if (system.RunCount % 10 == 0) { /* every tenth run */ }
@@ -547,7 +542,6 @@ It ran the system again inside its own run. Run updates and groups from the code
 [EcsSystem]
 public ref struct CatchUp
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.Update();
 }
 ```
@@ -831,11 +825,9 @@ public class S : SystemBase, IInitSystem, IExecuteSystem
 public ref struct S
 {
     // when added to the world
-    [OnCreate]
     static void OnCreate() { }
 
     // every update (World property available)
-    [OnUpdate]
     static void OnUpdate() { }
 
     // per entity, after OnUpdate

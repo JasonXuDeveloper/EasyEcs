@@ -26,7 +26,7 @@ icon: CircleArrowUp
 | --- | --- |
 | `public class X : EcsSystem` | `[EcsSystem] public ref struct X` |
 | `[ForEach] void M(...)` | `[ForEach] static void M(...)`（唯一的写法） |
-| `protected override void OnCreate()` / `OnUpdate()` / `OnDestroy()` | `[OnCreate]` / `[OnUpdate]` / `[OnDestroy] static void M(...)`，接收 `World`、`SystemHandle`、两者或都不接收 |
+| `protected override void OnCreate()` / `OnUpdate()` / `OnDestroy()` | `static void OnCreate(...)` / `OnUpdate(...)` / `OnDestroy(...)`，按钩子命名（不用特性），接收 `World`、`SystemHandle`、两者或都不接收 |
 | `World` 属性 | `World world` 参数 |
 | 系统的 `RunCount`、`LastRunTick`、`Enabled`、`Error`、`Stats` | 它的 `SystemHandle` 上的同名成员 |
 | `T system = world.AddSystem<T>()` | `SystemHandle system = world.AddSystem<T>()` |
@@ -67,7 +67,6 @@ public record struct MoveInbox(ConcurrentQueue<MoveRequest> Moves) : ISingletonC
 [EcsSystem]
 public ref struct ReceiveMoves
 {
-    [OnUpdate]
     static void OnUpdate(World world, SystemHandle system)
     {
         var moves = world.MoveInbox.Moves;
@@ -107,7 +106,6 @@ public class SaveSystem : EcsSystem
 [EcsSystem, UpdateInterval(60, Phase = 30)]
 public ref struct SaveSystem
 {
-    [OnUpdate]
     static void OnUpdate() { }
 }
 ```
@@ -126,7 +124,7 @@ public partial record struct Guild([LookupKey] int Id) : IComponent;
 public record struct Morale(int Value) : IComponent;
 ```
 
-```csharp tab="4.7" doccheck=expect-EECS027
+```csharp tab="4.7" doccheck=expect-EECS027,expect-EECS055
 [EcsSystem]
 public ref struct Rally
 {
@@ -160,7 +158,6 @@ public ref struct CorpseSystem
 [EcsSystem]
 public ref struct CorpseSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.DestroyAll<Dead>();
 }
 ```
@@ -278,9 +275,8 @@ public struct HealJob : IForEachBatch<Hp>, INoStructuralChanges
 `EntityRandomEcsExtensions`、`IForRange`、`IForSpan<T>`，瓦片相关类型（`Tile<TCell, TTile>`、`ITile<TKey>`、`ITileShape`、`TileFaces`、
 `TileNeighborhood`、`TileBoundary`、`TileIds`、`PaddedTile<TCell, TTile>`、`TileRows<TTile>`、`TileRow<TTile>`、`TileCursor<TCell, TTile>`、
 `TileReads`），以及特性 `ForEntityAttribute`、`ConsumeAttribute`、`UpdateIntervalAttribute`、`SumAttribute`、`ProductAttribute`、
-`MinAttribute`、`MaxAttribute`、`AllAttribute`、`AnyAttribute`、`IndexKeyAttribute`、`UniqueKeyAttribute`、`GroupAttribute`、
-`GroupByAttribute`、`WhenTargetDestroyedAttribute`、`NotSavedAttribute`，以及系统相关类型（`EcsSystemAttribute`、`OnCreateAttribute`、
-`OnUpdateAttribute`、`OnDestroyAttribute`、`SystemHandle`，供生成代码使用的 `ISystemCode`、`ISystemSet`、`SystemDeclarations`、`SystemCode`、
+`MinAttribute`、`MaxAttribute`、`AllAttribute`、`AnyAttribute`、`LookupKeyAttribute`、`UniqueKeyAttribute`、`GroupAttribute`、
+`GroupByAttribute`、`WhenTargetDestroyedAttribute`、`NotSavedAttribute`，以及系统相关类型（`EcsSystemAttribute`、`SystemHandle`，供生成代码使用的 `ISystemCode`、`ISystemSet`、`SystemDeclarations`、`SystemCode`、
 `GenericSystemCodeAttribute`、`MutColumn`）。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，
 或者用 `using` 起个别名。
 
@@ -345,7 +341,6 @@ public class Spawner : EcsSystem
 [EcsSystem]
 public ref struct Spawner
 {
-    [OnUpdate]
     static void OnUpdate(SystemHandle system)
     {
         if (system.RunCount % 10 == 0) { /* 每十次运行一次 */ }
@@ -509,7 +504,6 @@ dotnet_diagnostic.EECS028.severity = suggestion
 [EcsSystem]
 public ref struct CatchUp
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.Update();
 }
 ```
@@ -736,11 +730,9 @@ public class S : SystemBase, IInitSystem, IExecuteSystem
 public ref struct S
 {
     // 加入 World 时
-    [OnCreate]
     static void OnCreate() { }
 
     // 每次更新（可以用 World 属性）
-    [OnUpdate]
     static void OnUpdate() { }
 
     // 逐个实体，在 OnUpdate 之后

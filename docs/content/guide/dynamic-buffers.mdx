@@ -245,7 +245,7 @@ public static class Bags
 {
     public static int Items(Entity player)
     {
-        var copy = player.Read<DynamicBuffer<Loot>>();   // EECS012: a copy of the buffer
+        var copy = player.Loot;                          // EECS012: a copy of the buffer
         return copy.Count;
     }
 }
@@ -258,8 +258,10 @@ Use `ref` and `in` parameters, `ref` locals and `Get` / `Read`. A new value is `
 
 - A row that moves to another table (a component added) keeps its list.
 - Removing the component or destroying the entity drops the list; adding the component back starts with none.
-- `world.Capture()` copies the elements and `Restore` copies them back: a world and its
-  [snapshot](/en/docs/guide/snapshots) never share a list.
+- `world.Capture()` shares each list with the [snapshot](/en/docs/guide/snapshots) until either side writes it
+  (copy-on-write), so neither ever sees the other's writes. `Restore` shares the list back to a row that has not
+  written it since, and copies the elements into a row that has, on the owner thread: the next write of that row,
+  often in a parallel pass, finds its own list instead of copying one on a helper thread.
 - `world.Instantiate(prefab)` and `entity.Clone()` give the new entity a list of its own with the same elements. A
   [prefab](/en/docs/guide/prefabs) gets its elements with `SetBuffer(...)`:
 

@@ -97,7 +97,7 @@ public ref struct DeathSystem
 ```
 
 拆分在运行时没有代价。每个 `[ForEach]` 方法本来就是各自内联的结构体 job；每个系统每次更新的开销是对生成代码的一次直接调用
-（所在程序集系统集合里的一个 `switch` 分支，没有虚调用），有 `[OnUpdate]` 方法时再加一次调用，以及每个单例参数一次查找；每次遍历直接读按 job
+（所在程序集系统集合里的一个 `switch` 分支，没有虚调用），有 `OnUpdate` 方法时再加一次调用，以及每个单例参数一次查找；每次遍历直接读按 job
 类型保存的查询。拿不准就拆。
 
 ### 2. 系统不保存状态 [#2-systems-are-stateless]
@@ -163,7 +163,6 @@ public ref struct DeathSystem
 [EcsSystem, UpdateAfter<DeathSystem>]
 public ref struct CorpseSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.DestroyAll<Dead>();   // 一次遍历清掉所有尸体
 }
 ```

@@ -39,7 +39,7 @@ is allocation-free.
 public static class Filters
 {
     public static readonly QueryFilter Active = QueryFilter.Create().Without<Frozen>().Without<Dead>();
-    public static readonly QueryFilter Impaired = QueryFilter.Create().WithAny<Frozen>().WithAny<Stunned>();   // either
+    public static readonly QueryFilter Impaired = QueryFilter.Create().WithAny<Frozen, Stunned>();   // either
 }
 ```
 
@@ -108,7 +108,7 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | --- | --- | --- |
 | `With<T>()` | entities that also have `T` (not passed in) | `[With<T>]` |
 | `Without<T>()` | entities that lack `T` | `[Without<T>]` |
-| `WithAny<T>()`, repeated | entities with at least one of the `WithAny` components | `[WithAny<T>]`, repeated |
+| `WithAny<T1, T2>()` (2 to 9 types) | entities with at least one of the `WithAny` components | `[WithAny<T1, T2>]` (2 to 9 types) |
 | `Changed<T>(since)` | entities whose tracked `T` was written at or after `since` | `[Changed<T>]` (since the system's last run) |
 | `Removed<T>(since)` | entities that lost tracked `T` at or after `since` and still lack it | `[Removed<T>]` |
 | `ChangedAny<T1..Tn>(since)` | entities where at least one of the tracked components it has was written at or after `since` | `[ChangedAny<T1, …, Tn>]` |
@@ -460,7 +460,6 @@ public ref struct BuryTheFallen
 {
     static readonly QueryFilter Fallen = QueryFilter.Create().With<Dead>();
 
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         Span<EntityId> batch = stackalloc EntityId[64];
@@ -510,7 +509,7 @@ using EasyEcs;
 [EcsSystem]
 public ref struct SlowSystem
 {
-    [ForEach, WithAny<Frozen>, WithAny<Burning>]
+    [ForEach, WithAny<Frozen, Burning>]
     static void Slow(ref Velocity velocity)
     {
         velocity.X /= 2;

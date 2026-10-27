@@ -73,8 +73,7 @@ public ref struct DeathSystem
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
-    static void OnUpdate(World world) => world.Clock.Tick++;   // in an [OnUpdate] method: through its World
+    static void OnUpdate(World world) => world.Clock.Tick++;   // in an OnUpdate method: through its World
 }
 ```
 
@@ -172,7 +171,6 @@ using EasyEcs;
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         world.Clock.Tick++;

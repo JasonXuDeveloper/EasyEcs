@@ -68,7 +68,7 @@ foreach (var table in world.DescribeTables())
 
 ### 给每个系统计时 [#timing]
 
-打开 `WorldOptions.MeasureSystems` 后，每个系统的每次运行（`[OnUpdate]` 加上它的 `[ForEach]` 方法）都会被统计：`system.Stats`
+打开 `WorldOptions.MeasureSystems` 后，每个系统的每次运行（`OnUpdate` 加上它的 `[ForEach]` 方法）都会被统计：`system.Stats`
 里有 `Runs`、`LastTime`、`TotalTime`、`AverageTime`，还有下面的字节数和实体数。`world.Systems` 列出所有系统且不分配内存，状态页可以直接找出最慢的那个
 （[统计系统耗时](/zh/docs/guide/systems#measuring-systems)）。
 
@@ -99,7 +99,7 @@ foreach (var system in measured.Systems)
 实体数怎么理解：
 
 - **开始时匹配的数量，不是逐个访问的数量。** 会改结构的遍历里，这是个上限：轮到之前就被销毁或移走的实体算进去了，但没被访问。
-- **只算 `[ForEach]` 方法。** `[OnUpdate]` 里的查询和循环不算。
+- **只算 `[ForEach]` 方法。** `OnUpdate` 里的查询和循环不算。
 - **分帧的方法只报自己那一份。** `[ForEach(Slices = N)]` 方法报的是匹配数除以 N（[分帧](/zh/docs/guide/systems#slices)）。
 
 ```csharp
@@ -179,7 +179,7 @@ Group Default
 `MoveSystem` 写的 `Position`：没有任何特性规定它们的先后，复制发出去的是这个 tick 还是上个 tick 的位置，取决于它们是按什么
 顺序加进来的。这就是**只靠注册顺序的系统对**：两个系统有冲突，又没有任何一条 `[UpdateBefore]` / `[UpdateAfter]` 链给它们排序。
 反过来注册，后跑的那个看到的数据就变了，所以每一对都要给出它需要的顺序，这里是在 `ReplicateSystem` 上加
-`[UpdateAfter<MoveSystem>]`。`RunsAlone` 的系统（有 `[OnUpdate]`、`World` 参数、`[Consume]` 方法，或不只当身份用的 `Entity`）和所有系统都冲突，显示为 `runs alone`。
+`[UpdateAfter<MoveSystem>]`。`RunsAlone` 的系统（有 `OnUpdate`、`World` 参数、`[Consume]` 方法，或不只当身份用的 `Entity`）和所有系统都冲突，显示为 `runs alone`。
 
 `server.DescribeSchedule().ToMermaid()` 把同一份调度画成流程图：每个组、每个阶段一个子图，每个等待是一条实线箭头，标着冲突的
 数据，每个只靠注册顺序的系统对是一条虚线箭头：
@@ -512,7 +512,7 @@ CooldownSystem: 3 runs, off: a cooldown went below zero
 | 每个 tick 都调 `TrimExcess()` | 表被丢掉又重建，扩容重新付一遍：tick 上出现分配 | 放进维护任务里调（[常见错误](/zh/docs/guide/common-mistakes#trim-every-tick)） |
 | 在 `Query` 循环或 `[ForEach]` 方法里调 `TrimExcess()` | `InvalidOperationException` | [EECS041](/zh/docs/guide/analyzer#eecs041)：在两次更新之间调 |
 | 在导出器的线程上读 `system.Stats` | tick 正在写的结构体被读到一半 | 在所有者线程上发布一份拷贝 |
-| 以为 `LastEntities` 会算上 `[OnUpdate]` 里的查询 | 只统计 `[ForEach]` 遍历 | 真需要就在 `[OnUpdate]` 里自己数 |
+| 以为 `LastEntities` 会算上 `OnUpdate` 里的查询 | 只统计 `[ForEach]` 遍历 | 真需要就在 `OnUpdate` 里自己数 |
 | 调度里留着只靠注册顺序的系统对 | 调换 `AddSystem` 的顺序，系统看到的数据就变了 | 加上 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |
 | 测试里也开着 `SystemErrorPolicy.Disable` | 出错的系统悄悄停掉，测试却在检查别的东西 | 测试里保持默认的 `Throw`（[测试](/zh/docs/guide/testing#errors)） |
 | 日志里只记 `entity.Id.Index` | 下标会被之后的实体复用 | 记实体本身或它的 `EntityId`（`1000v1`） |

@@ -17,8 +17,8 @@ major or minor version that needs code changes? The
 - An agent skill: `npx skills add JasonXuDeveloper/EasyEcs` installs the EasyEcs rules for Claude Code, Cursor, Codex,
   GitHub Copilot and the other agents that read Agent Skills; it replaces the rules file, whose URL now serves the
   skill's text ([AI assistants](/en/docs/ai#agent-skill)).
-- Systems are `[EcsSystem]` ref structs of static methods: `[ForEach]` methods, and `[OnCreate]`, `[OnUpdate]` and
-  `[OnDestroy]` hooks that take the `World`, the `SystemHandle`, both or neither. The world keeps each system's
+- Systems are `[EcsSystem]` ref structs of static methods: `[ForEach]` methods, and `OnCreate`, `OnUpdate` and
+  `OnDestroy` hooks that take the `World`, the `SystemHandle`, both or neither. The world keeps each system's
   bookkeeping and hands out a `SystemHandle` (`Enabled`, `Error`, `RunCount`, `LastRunTick`, `Stats`, `Name`, `Type`)
   from `AddSystem<T>()`, `System<T>()`, `TryGetSystem<T>(out …)` and `world.Systems`; `HasSystem<T>()` is new. The
   generated code of an assembly's systems is one switch, run in one call per stretch of the schedule, with no
@@ -284,7 +284,7 @@ major or minor version that needs code changes? The
   that treats warnings as errors sees it: see the [migration guide](/en/docs/migration#v4-8-analyzer).
 - Analyzer rule [EECS030](/en/docs/guide/analyzer#eecs030) also reports a `[ForEach]` method whose whole body is one
   structural change of its entity, the same for every row (`[ForEach, With<Dead>] static void Bury(Entity e) =>
-  e.Destroy();`): one bulk call in an `[OnUpdate]` method (`world.DestroyAll<Dead>()`) changes each table at once
+  e.Destroy();`): one bulk call in an `OnUpdate` method (`world.DestroyAll<Dead>()`) changes each table at once
   ([migration guide](/en/docs/migration#v4-8-analyzer)).
 - The new warnings [EECS060](/en/docs/guide/analyzer#eecs060) and [EECS061](/en/docs/guide/analyzer#eecs061) report
   parallel code that races on shared memory or reads a job field the pass never wrote back; a total becomes a
@@ -293,7 +293,7 @@ major or minor version that needs code changes? The
   methods; its fix draws from an `EntityRandom` singleton ([migration guide](/en/docs/migration#v4-8-analyzer)).
 
 - The `EcsSystem` base class is removed: a system is an `[EcsSystem]` ref struct of static methods, its hooks are
-  `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` methods, `World` is a parameter and the bookkeeping (`RunCount`,
+  `OnCreate` / `OnUpdate` / `OnDestroy` methods, `World` is a parameter and the bookkeeping (`RunCount`,
   `Enabled`, `Error`, `Stats`) is read through its `SystemHandle`. `AddSystem<T>()` and `TryGetSystem<T>(out …)` hand
   out a `SystemHandle`, `AddSystem(instance)` is gone (constructor arguments become a `[NotSaved]` singleton), and
   EECS007 is a warning about mutable static fields. EECS029 and EECS082 are gone with the forms they reported. A code

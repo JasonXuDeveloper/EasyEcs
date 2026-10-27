@@ -261,9 +261,9 @@ flowchart LR
 - Each stage is cut into **segments**, consecutive systems of one set. `Update()` and `Update<TGroup>()` are
   synchronous: per segment one call through a function pointer bound once per set, which walks its systems (enabled,
   due) and calls each one's code through the set's `switch`, so the systems of one assembly call each other's code
-  directly. A system's code runs its `[OnUpdate]` method, then the generated `[ForEach]` jobs. Each stage advances
+  directly. A system's code runs its `OnUpdate` method, then the generated `[ForEach]` jobs. Each stage advances
   the change tick once, and each update once more.
-- `AddSystem` calls the `[OnCreate]` method; `RemoveSystem` and `Dispose` call the `[OnDestroy]` method, `Dispose`
+- `AddSystem` calls the `OnCreate` method; `RemoveSystem` and `Dispose` call the `OnDestroy` method, `Dispose`
   in reverse order.
 - An exception propagates out of the update, or, with `SystemErrorPolicy.Disable`, switches its system off and stays
   in `system.Error`.

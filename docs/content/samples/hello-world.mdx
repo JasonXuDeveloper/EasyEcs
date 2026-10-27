@@ -32,7 +32,7 @@ a [singleton](/en/docs/guide/singletons), one value per world.
 [Systems](/en/docs/guide/systems) have one job each and no state of their own. A `[ForEach]` method runs once per
 entity that has its component parameters, `ref` for what it writes and `in` for what it reads. `MoveSystem` moves
 every entity with a position and a velocity, `ReportSystem` prints the players only (`[With<Player>]` is a
-[filter](/en/docs/guide/queries#filters)), and `ClockSystem` advances the clock once per update in `[OnUpdate]`, not
+[filter](/en/docs/guide/queries#filters)), and `ClockSystem` advances the clock once per update in `OnUpdate`, not
 once per entity.
 
 <include lang="csharp" meta='title="Systems.cs"'>../../../samples/HelloWorld/Systems.cs</include>

@@ -13,6 +13,7 @@ public class DynamicBufferTests
     public record struct Rewind(long Value);  // and this one's only the restore test
     public record struct Stock(int Value);    // the lists shared until written (copy-on-write), below
     public record struct Spare(int Value);    // the pool of this one serves only the last-holder test
+    public record struct Replayed(int Value); // and this one's only the replay test
 
     /// <summary>Counts, per entity, the runs in which its bag had changed since the system's previous run.</summary>
     [EcsSystem]
@@ -57,6 +58,14 @@ public class DynamicBufferTests
     {
         [ForEach(Parallel = true, ChunkSize = 64)]
         private static void Apply(Mut<DynamicBuffer<Stock>> stock, in Health health) => stock.Write().AsSpan()[0] = new Stock(health.Value);
+    }
+
+    /// <summary>Each list's first element becomes its entity's health, in parallel chunks: a write of every row.</summary>
+    [EcsSystem]
+    public ref struct Replay
+    {
+        [ForEach(Parallel = true, ChunkSize = 64)]
+        private static void Apply(Mut<DynamicBuffer<Replayed>> list, in Health health) => list.Write().AsSpan()[0] = new Replayed(health.Value);
     }
 
     /// <summary>Refills every bag with one item, in place: no allocation once the capacity is reached.</summary>
@@ -220,6 +229,37 @@ public class DynamicBufferTests
         for (int i = 0; i < 50; i++) Replay(true);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
         Assert.That(world.Count<DynamicBuffer<Rewind>>(), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void AParallelPassAfterARestoreWritesWithoutAllocating()
+    {
+        // A replay (rollback, a rehearsed tick): restore a snapshot, then a parallel pass writes every list. The restore
+        // copies the snapshot's elements into each row written since, on the owner thread, so no chunk on a helper
+        // thread copies a shared list into one from its own pool (which the lists the owner thread gives back do not
+        // reach).
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4, MeasureSystems = true });
+        var rows = new Entity[64 * 7 + 13];   // chunks of 64 rows, the last one short
+        for (int i = 0; i < rows.Length; i++)
+        {
+            rows[i] = world.CreateEntity(new DynamicBuffer<Replayed>(), new Health(i));
+            for (int j = 0; j < 16; j++) rows[i].WriteReplayed().Add(new Replayed(-j));
+        }
+
+        var replay = world.AddSystem<Replay>();
+        var snapshot = world.Capture();
+        void Cycle()
+        {
+            world.Restore(snapshot);
+            world.Update();
+        }
+
+        for (int i = 0; i < 20; i++) Cycle();
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 200; i++) Cycle(); },
+            () => GC.GetAllocatedBytesForCurrentThread() + replay.Stats.TotalAllocated), Is.Zero);
+        for (int i = 0; i < rows.Length; i++) Assert.That(rows[i].Replayed[0], Is.EqualTo(new Replayed(i)));
+        world.Restore(snapshot);
+        Assert.That(rows[5].Replayed[0], Is.EqualTo(new Replayed(0)));   // the snapshot kept its own elements
     }
 
     [Test]
@@ -591,8 +631,9 @@ public class DynamicBufferTests
         Assert.That(rented, Is.Not.SameAs(list));
         rented.Recycle();
 
-        world.Restore(snapshot);                                          // back in the world, then gone for good
-        Assert.That(list.Shares, Is.EqualTo(3));
+        world.Restore(snapshot);                                          // destroyed since: the rows take copies
+        Assert.That(list.Shares, Is.EqualTo(1));
+        Assert.That(original.Get<DynamicBuffer<Spare>>().Store, Is.Not.SameAs(list));
         world.DestroyAll<DynamicBuffer<Spare>>();
         Assert.That(list.Shares, Is.EqualTo(1));
         world.Capture(snapshot);                                          // the snapshot lets it go: the last holder
@@ -611,13 +652,16 @@ public class DynamicBufferTests
         world.Restore(snapshot);                                          // nothing written: still the one list
         world.Restore(snapshot);
         Assert.That(StoreOf(e).Shares, Is.EqualTo(1));
+        BufferStore own = null;
         for (int i = 0; i < 3; i++)
         {
             e.Get<DynamicBuffer<Stock>>().AsSpan()[0] = new Stock(9 + i);
             e.Get<DynamicBuffer<Stock>>().Add(new Stock(3));
             world.Restore(snapshot);
             Assert.That(Values(e), Is.EqualTo(new[] { 1, 2 }));
-            Assert.That(StoreOf(e).Shares, Is.EqualTo(1));                // the world's row and the snapshot's
+            Assert.That(StoreOf(e).Shares, Is.Zero);                      // written since: its own list takes the elements back
+            if (i > 0) Assert.That(StoreOf(e), Is.SameAs(own));          // in place
+            own = StoreOf(e);
         }
 
         world.Capture(snapshot);                                          // captured again into the same copy

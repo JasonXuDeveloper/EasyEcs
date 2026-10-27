@@ -167,7 +167,7 @@ public ref struct CorpseCleanupSystem
 }
 ```
 
-用过滤条件指明组件。完全没有组件就用 `[OnUpdate]`；超过 9 个，就把多出来的条件挪到 `[With<T>]`，或者拆开方法：
+用过滤条件指明组件。完全没有组件就用 `OnUpdate`；超过 9 个，就把多出来的条件挪到 `[With<T>]`，或者拆开方法：
 
 ```csharp doccheck=expect-EECS030
 [EcsSystem]
@@ -178,7 +178,7 @@ public ref struct CorpseCleanupSystem
 }
 ```
 
-这个方法的整个方法体只是一次结构变化，所以接着 [EECS030](#eecs030) 会要求改成在 `[OnUpdate]` 里批量调用
+这个方法的整个方法体只是一次结构变化，所以接着 [EECS030](#eecs030) 会要求改成在 `OnUpdate` 里批量调用
 `World.DestroyAll<Dead>()`。
 
 ## EECS004 [#eecs004]
@@ -258,7 +258,6 @@ public record struct Wallet(int Gold) : IComponent;
 public ref struct SpawnSystem
 {
     static int _spawned;                                   // 所有 World 共享，存档看不到
-    [OnUpdate]
     static void OnUpdate() => _spawned++;
 }
 ```
@@ -271,7 +270,6 @@ public record struct Spawned(int Count) : ISingletonComponent;
 [EcsSystem]
 public ref struct SpawnSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.GetOrAddSpawned().Count++;
 }
 ```
@@ -295,7 +293,6 @@ public ref struct KillSystem
 [EcsSystem]
 public ref struct ScoreSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.System<KillSystem>().Enabled = false;   // 两个系统再也没法分开改
 }
 ```
@@ -316,7 +313,6 @@ public ref struct KillSystem
 public ref struct ScoreSystem
 {
     // 一次遍历销毁所有尸体并返回数量：每个只算一次
-    [OnUpdate]
     static void OnUpdate(World world) => world.GetOrAddScore().Deaths += world.DestroyAll<Dead>();
 }
 ```
@@ -433,7 +429,7 @@ public ref struct GridSystem
 public record struct Loot(int Item);
 ```
 
-```csharp doccheck=expect-EECS012
+```csharp doccheck=expect-EECS012,expect-EECS033
 public static class Bags
 {
     public static void Share(Entity player, Entity other)
@@ -451,11 +447,11 @@ public static class Bags
 ```csharp
 public static class Bags
 {
-    public static int Items(Entity player) => player.Read<DynamicBuffer<Loot>>().Count;   // 通过实体读
+    public static int Items(Entity player) => player.Loot.Count;                          // 通过实体读
 
     public static void Give(Entity player, Loot loot)
     {
-        ref var bag = ref player.Get<DynamicBuffer<Loot>>();                               // ref 局部变量：被追踪的写入
+        ref var bag = ref player.WriteLoot();                                              // ref 局部变量：被追踪的写入
         bag.Add(loot);
     }
 
@@ -593,7 +589,7 @@ public ref struct TakePortals
 [EcsSystem]
 public ref struct TakePortals
 {
-    [ForEach]
+    [ForEach(SimdMode = SimdMode.Off)]   // 每行设置不同的键：逐行执行
     static void Take(Entity player, in Zone zone, in Portal portal)
     {
         if (zone.Id != portal.To) player.SetZone(portal.To);         // Set：索引立刻把玩家移过去
@@ -763,7 +759,7 @@ public ref struct HealSystem
 
 **过滤条件放在了不是系统分组的结构体上。** 错误。代码修复：删掉过滤条件。
 
-`ISystemGroup` 结构体上的 `[With<T>]`、`[Without<T>]` 和 `[WithAny<T>]` 会加到该分组所有系统的每个 `[ForEach]` 方法上。放在其他
+`ISystemGroup` 结构体上的 `[With<T>]`、`[Without<T>]` 和 `[WithAny<T1, T2>]` 会加到该分组所有系统的每个 `[ForEach]` 方法上。放在其他
 结构体（比如组件）上则什么都不做。
 
 ```csharp doccheck=expect-EECS023
@@ -894,7 +890,7 @@ public ref struct CountSurvivors
 添加或移除的组件。带索引的组件也算在内：`in` 参数或 [`ReadOnlyMaybe<T>`](/zh/docs/guide/systems#read-only-maybe) 读它们，
 既不用逐行查找，也不会产生 EECS015 禁止的写入。
 
-```csharp doccheck=expect-EECS027
+```csharp doccheck=expect-EECS027,expect-EECS055
 [EcsSystem]
 public ref struct Drift
 {
@@ -924,11 +920,11 @@ public ref struct Drift
 
 **每次更新都会执行的代码里有分配。** 警告。无代码修复。
 
-`[ForEach]` 方法对访问到的每个实体都执行一次，`[OnUpdate]` 每次更新执行一次，所以它们分配的内存每个 tick 都会变成垃圾，
+`[ForEach]` 方法对访问到的每个实体都执行一次，`OnUpdate` 每次更新执行一次，所以它们分配的内存每个 tick 都会变成垃圾，
 由此触发的回收会让整个进程停顿。规则会指出每一个会分配的表达式：对象或数组、捕获变量的 lambda、实例方法组、LINQ、运行时拼出来的
 字符串（`$"..."`、`+`、`string.Format`、`ToString()`）、装箱，以及对接口做 `foreach`。不报告的情况：`throw` 里的代码、会被编译器
 去掉的调用（`[Conditional]`，例如 `Debug.Assert`）、控制台输出（写入本身比字符串更贵），以及自己标了 `[UpdateInterval]` 的系统的
-`[OnUpdate]`（执行频率是作者选的）。规则同样覆盖手写 job 的 `Execute`，以及本来就要分配的冷调用：`TrimExcess`、`Capture()`、
+`OnUpdate`（执行频率是作者选的）。规则同样覆盖手写 job 的 `Execute`，以及本来就要分配的冷调用：`TrimExcess`、`Capture()`、
 `Describe`、`DescribeTables` 和 `DescribeSchedule` 属于定时器、命令或测试，不属于每次更新。
 
 ```csharp doccheck=expect-EECS028
@@ -982,7 +978,7 @@ world.DestroyAll<Health>(QueryFilter.Create().With<Dead>());
 
 `[ForEach]` 方法的整个方法体只是对自己实体的这样一个调用时，它就是同一个循环，只是由生成器写出来。调用参数不用任何参数、
 方法的过滤条件都能放进 `QueryFilter`（没有 `[Changed<T>]` 或 `[Removed<T>]`，没有分帧）时，规则会报告它。没有代码修复：
-调用要挪进系统的 `[OnUpdate]`，方法本身删掉。
+调用要挪进系统的 `OnUpdate`，方法本身删掉。
 
 ```csharp doccheck=expect-EECS030
 [EcsSystem]
@@ -999,7 +995,6 @@ public ref struct CorpseSystem
 [EcsSystem]
 public ref struct CorpseSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.DestroyAll<Dead>();
 }
 ```
@@ -1090,7 +1085,6 @@ int hp = player.Health.Value;
 [EcsSystem]
 public ref struct CatchUp
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.Update();
 }
 ```
@@ -1210,7 +1204,7 @@ mana.Value -= 10;              // 丢失
 保留 `ref`：
 
 ```csharp
-ref var mana = ref hero.Get<Mana>();
+ref var mana = ref hero.Mana;
 mana.Value -= 10;
 ```
 
@@ -1272,7 +1266,7 @@ public record struct Callsign(string Text) : IComponent, ITracked;   // 通过 I
 ```
 
 ```csharp
-hero.SetIfChanged(new Callsign("Ada"));
+hero.SetCallsignIfChanged("Ada");
 ```
 
 ## EECS041 [#eecs041]
@@ -1339,14 +1333,14 @@ public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { p
 ```
 
 在类型上用 `[LookupKey]` 声明键：生成器显式实现 `Key`，它只属于接口，`ToString()` 不会打印它。另一个修复是手写显式实现的 `Key`
-（同时改写读取 `.Key` 的地方）：
+（同时改写读取 `.Key` 的地方），[EECS067](#eecs067) 接着会指出这正是 `[LookupKey]` 生成的那一行：
 
 ```csharp tab="[LookupKey]" doccheck=alone
 [LookupKey]
 public readonly partial record struct Market(long Id) : IComponent;
 ```
 
-```csharp tab="显式 Key" doccheck=alone
+```csharp tab="显式 Key" doccheck=alone,expect-EECS067
 public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { Market IIndexed<Market>.Key => this; }
 ```
 
@@ -1388,7 +1382,7 @@ hero.Remove<Disabled<Health>>();   // 标签没了，值却仍然隐藏着
 调用 World 自己的操作：
 
 ```csharp
-hero.Enable<Health>();
+hero.EnableHealth();
 ```
 
 ## EECS046 [#eecs046]
@@ -1429,16 +1423,16 @@ foreach (var item in world.Read<Rating>())
 `Remove<T>()` 和 `Enable<T>()` 只翻转行上的一个位，不移动任何东西；对 ref 指向的那个组件 `Set`，是原地写入。
 
 ```csharp doccheck=expect-EECS047
-ref var health = ref hero.Get<Health>();
-hero.Set(new Burning(3));   // hero 搬到了带 Burning 的表
+ref var health = ref hero.Health;
+hero.SetBurning(3);          // hero 搬到了带 Burning 的表
 health.Value -= 5;          // 写的是 hero 已经离开的那一行
 ```
 
 先做结构变更，再取 ref：
 
 ```csharp
-hero.Set(new Burning(3));
-ref var health = ref hero.Get<Health>();
+hero.SetBurning(3);
+ref var health = ref hero.Health;
 health.Value -= 5;
 ```
 
@@ -1458,7 +1452,7 @@ unit.Disable<ChildOf>();   // InvalidOperationException
 改为移除：实体离开它的父实体，父实体销毁时也不再波及它。
 
 ```csharp
-unit.Remove<ChildOf>();
+unit.RemoveChildOf();
 ```
 
 ## EECS049 [#eecs049]
@@ -2126,23 +2120,22 @@ public partial record struct Room([Group] int Id) : IComponent;
 
 每个设置特性只适用于某些类型，放在别的类型上，没有哪个 World 会应用它：
 
-- `[GroupBy]` 让每个 World 按一个分组组件（`IGroup`，或用 `[Group]` 声明的成员）给表分组。
+- `[GroupBy]` 放在 partial 组件的成员上，让每个 World 按这个成员（`int` 或 `int` 枚举）给表分组；也可以按手写 `IGroup` 的
+  `Group` 分组。
 - `[WhenTargetDestroyed]` 设定销毁一个实体时指向它的链接怎么办，所以它放在关系（`IRelation`）或按 `EntityId` 索引的组件上。
 - `[NotSaved]` 让存档不包含某个组件或单例。
 
 ```csharp tab="报告" doccheck=alone,expect-EECS068
-[GroupBy]
-public struct Squad : IComponent
+public partial struct Squad
 {
-    public int Id;              // 没有说明它就是分组
+    [GroupBy] public int Id;    // 不是组件：没有表可分组
 }
 ```
 
 ```csharp tab="修正"
-[GroupBy]
 public partial struct Squad : IComponent
 {
-    [Group] public int Id;
+    [GroupBy] public int Id;
 }
 ```
 
@@ -2194,19 +2187,18 @@ public record struct Aim(EntityId Target) : IComponent;
 [EcsSystem]
 public ref struct Strike
 {
-    [ForEach(Parallel = true)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Off)]   // 每条记录两个值：逐行执行
     static void Hit(in Aim aim, Emit<Hit> hits) => hits.Add(new Hit(aim.Target, 1));
 }
 
 [EcsSystem, UpdateAfter<Strike>]
 public ref struct ApplyHits
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
         foreach (ref readonly var hit in hits.AsReadOnlySpan())
-            if (world.TryGetEntity(hit.Target, out var target)) target.Get<Health>().Value -= hit.Amount;
+            if (world.TryGetEntity(hit.Target, out var target)) target.Health.Value -= hit.Amount;
         hits.Clear();   // 遍历是追加：由读的一方清空
     }
 }
@@ -2378,15 +2370,14 @@ public ref struct HealSystem
 
 **无效的系统钩子。** 错误。没有代码修复。
 
-`[OnCreate]`、`[OnUpdate]` 和 `[OnDestroy]` 标出 World 在添加系统时、系统每次运行时和移除系统时调用的静态方法。每个都返回 void，
-接收 `World`、`SystemHandle`、两者都接收（顺序不限）或都不接收，一个系统每种钩子最多一个方法。放在 `[EcsSystem]` 之外的钩子、泛型钩子、
-标了多个钩子特性的方法，或者接收其他参数的方法，永远不会被调用。（实例钩子由 [EECS075](#eecs075) 报告。）
+`[EcsSystem]` 里名为 `OnCreate`、`OnUpdate` 和 `OnDestroy` 的静态方法就是钩子，World 在添加系统时、系统每次运行时和移除系统时调用它们：
+方法名本身就让它成为钩子。每个都返回 void，接收 `World`、`SystemHandle`、两者都接收（顺序不限）或都不接收，一个系统每种钩子最多一个方法。
+泛型钩子，或者有返回值、接收其他参数的钩子，永远不会被调用。（实例钩子由 [EECS075](#eecs075) 报告。）
 
 ```csharp tab="报告" doccheck=expect-EECS076
 [EcsSystem]
 public ref struct CensusSystem
 {
-    [OnUpdate]
     static int OnUpdate(World world) => world.Count<Health>();   // 结果给谁读？
 }
 ```
@@ -2397,7 +2388,6 @@ public record struct Census(int Living) : ISingletonComponent;
 [EcsSystem]
 public ref struct CensusSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.SetCensus(world.Count<Health>());
 }
 ```
@@ -2586,7 +2576,7 @@ public ref struct CountDamage
 它的向量循环也没有通道来放这个单例。[`ref Reduce<T>`](/zh/docs/guide/threading#reductions) 参数给每一块一个自己的部分结果，
 从 `T` 的单位元开始，遍历结束时把各个部分结果合并进 `T`。和、最小值、最大值都一样，但方法可以用 `Parallel = true`，也能进向量循环。
 
-这一遍的结果会替换 `T`。所以这条规则只报告系统代码在 `[OnCreate]` 之外重置的单例：整体赋值、给字段赋常量、`AddSingleton`、
+这一遍的结果会替换 `T`。所以这条规则只报告系统代码在 `OnCreate` 之外重置的单例：整体赋值、给字段赋常量、`AddSingleton`、
 `RemoveSingleton`，或者生成的 `SetX`、`RemoveX`。这样的单例存的是一遍的结果，归约让它的重置变得多余。跨更新增长的总数（分数、
 到目前为止的死亡数）从不重置，这条规则不管它。
 
@@ -2603,7 +2593,6 @@ public struct Crowd : ISingletonComponent
 [EcsSystem]
 public ref struct CountCrowd
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.Crowd = default;   // 每次更新重新计数
 
     [ForEach]
@@ -2746,7 +2735,7 @@ public record struct Gun(float Power) : IComponent;
 [EcsSystem]
 public ref struct Fire
 {
-    [ForEach(Parallel = true)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Off)]   // 每条记录两个值：逐行执行
     static void Pull(Entity entity, in Gun gun, Emit<Shot> shots) => shots.Add(new Shot(entity.Id, gun.Power));
 }
 ```
@@ -2759,7 +2748,7 @@ public ref struct Fire
 提供一个修复，把类改写成 `[EcsSystem]` ref struct（[迁移指南](/zh/docs/migration#v4-8-systems)）：
 
 - 每个成员改成 static，`private` / `protected` 改成 `internal`；
-- `OnCreate`、`OnUpdate` 和 `OnDestroy` 的重写改成 `[OnCreate]`、`[OnUpdate]` 和 `[OnDestroy]` 方法；
+- `OnCreate`、`OnUpdate` 和 `OnDestroy` 的重写改成同名的静态方法（即钩子）；
 - `World` 改成 `World world` 参数，`RunCount`、`LastRunTick`、`Enabled`、`Error` 和 `Stats` 改为通过 `SystemHandle system` 参数读取，
   参数只加到用到它（或调用了用到它的方法）的方法上。
 
@@ -2779,7 +2768,6 @@ public record struct Wave(int Number) : ISingletonComponent;
 [EcsSystem]
 internal ref struct WaveSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world, SystemHandle system)
     {
         if (system.RunCount % 600 == 0) world.GetOrAddWave().Number++;

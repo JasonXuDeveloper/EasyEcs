@@ -173,7 +173,7 @@ Each step is one system and each state is data. The chunks a player needs are as
 asking finds it and asks nothing more. A request is created with the `Saved` tag, which it loses when the region
 files lack its chunk: a presence bit, so all requests share one table and keep the order they came in. A pass may
 not load or create entities (EECS041), so `ChunkReadSystem` (`With<Saved>`) and `ChunkGenerateSystem`
-(`Without<Saved>`) serve the requests in their `[OnUpdate]`, after the pass: each takes up to `Rules.MaxRequests` a
+(`Without<Saved>`) serve the requests in their `OnUpdate`, after the pass: each takes up to `Rules.MaxRequests` a
 tick with [`CollectIds`](/en/docs/guide/queries#collect-ids) and destroys only those; the others wait a tick. A chunk that was unloaded comes back from the region files
 with `LoadEntities`, and with it the zombies and items that were in it. A chunk never seen is an instance of the chunk
 prefab, its blocks written in place through the span `SetCount` returns.

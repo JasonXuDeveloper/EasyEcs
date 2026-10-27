@@ -33,7 +33,7 @@ available as Markdown: add `.md` to its URL.
   member is declared, not written: `[LookupKey]` (or `[UniqueKey]`) on the field or positional parameter of a partial
   struct (`public partial record struct Account([UniqueKey] int Id) : IComponent;`; `[LookupKey]` on the type when the
   value itself is the key), and the generator writes the interface and an explicit `Key` (EECS067). `[Group]` on an
-  `int` or enum member declares a table group the same way (a hand-written `Group` returning one: EECS067), and `[GroupBy]` on the type makes every world group by it
+  `int` or enum member declares a table group the same way (a hand-written `Group` returning one: EECS067), and `[GroupBy]` in its place also makes every world group by it
   (no `world.GroupBy<T>()` per world). A key computed from several members stays a hand-written `Key`. When the keys a
   world holds at once map onto bounded slots (grid cells modulo the loaded area, small ids), make it
   `IDirectMapped<TKey>` (`static Slots`, `static SlotOf(key)`, pure arithmetic) instead of keeping a grid of ids by
@@ -57,9 +57,9 @@ available as Markdown: add `.md` to its URL.
 ## Systems
 
 - A system is an `[EcsSystem] public ref struct` of static members only, never instantiated (not a ref struct:
-  EECS074; an instance member: EECS075). Code a system once ran per update goes into hooks: `[OnCreate]`,
-  `[OnUpdate]` and `[OnDestroy]` static methods taking the `World`, the `SystemHandle`, both or neither (another
-  signature: EECS076). An `[OnUpdate]` method runs before the system's `[ForEach]` methods and makes it run alone.
+  EECS074; an instance member: EECS075). Code a system once ran per update goes into hooks: `OnCreate`,
+  `OnUpdate` and `OnDestroy` static methods (the name makes the hook, no attribute) taking the `World`, the `SystemHandle`, both or neither (another
+  signature: EECS076). An `OnUpdate` method runs before the system's `[ForEach]` methods and makes it run alone.
   A system holds no state: no mutable static field (EECS007), no reach into another system or `world.System<T>()` from
   system code (EECS008). State goes into components or singletons; what the host hands in (a channel, a queue) is a
   `[NotSaved]` singleton the host sets before `AddSystem<T>()`. The system APIs (`AddSystem<T>`, `[UpdateAfter<T>]`,
@@ -74,9 +74,9 @@ available as Markdown: add `.md` to its URL.
   A `[ForEach]` method takes 1 to 9 components (or none with a `[With<T>]` / `[Changed<T>]`, EECS003), is not generic
   (EECS004) nor a local function (EECS024), and its types are visible to the generated code (EECS022); a batch method
   takes spans, singletons and an `EntitySpan` only (EECS009).
-- Filters on a `[ForEach]` method: `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`.
+- Filters on a `[ForEach]` method: `[With<T>]`, `[Without<T>]`, `[WithAny<T1, T2>]`, `[Changed<T>]`, `[Removed<T>]`.
   A `[Removed<T>]` method does not take `T` (EECS016). On a system group struct, for all its systems: `[With<T>]`,
-  `[Without<T>]`, `[WithAny<T>]` (on any other struct: EECS023), or `ISystemGroupWith<T>` / `ISystemGroupWithout<T>` implemented
+  `[Without<T>]`, `[WithAny<T1, T2>]` (on any other struct: EECS023), or `ISystemGroupWith<T>` / `ISystemGroupWithout<T>` implemented
   by the group or an interface it implements; a generic group interface needs the interfaces, as an attribute cannot
   name a type parameter. `[Changed<T>]` / `[Removed<T>]` go on methods only. A method never excludes what it or its
   group requires (EECS049), and a `QueryFilter` names one `InGroup` (EECS050).
@@ -140,7 +140,7 @@ available as Markdown: add `.md` to its URL.
   Random numbers in a `[ForEach]` method come from `in EntityRandom random` (`random.Range(entity.Id, stream, min,
   max)`, a pure function of seed, entity, tick and stream), never `Random.Shared`, a `new Random` or a `Random` field
   (EECS071). Each draw for the same entity in a pass has a stream of its own, and a draw in a loop adds the iteration
-  to its stream (`stream + (uint)i`, EECS088); the system that advances the clock advances `EntityRandom.Tick`.
+  to its stream (`stream + (uint)i`, EECS088); every `World.Update()` advances `EntityRandom.Tick`, no code needed.
   A grid of cells updated from its neighbors is tiles: a component implementing `ITile<TKey>` (static `Width`,
   `Depth`, optional `Height` / `Faces` / `Halo` / `Neighborhood` / `Boundary`, a `Key`, `Beside(key, face)`, which
   wraps on a periodic grid) beside a `DynamicBuffer<TCell>`, shaded by a

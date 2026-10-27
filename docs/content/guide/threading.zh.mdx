@@ -81,11 +81,11 @@ public static class Zones
 | `ref T` 组件或单例 | 写 `T` |
 | `Mut<T>` 组件 | 写 `T`（没写的行也算） |
 | `in T` 组件或单例 | 读 `T` |
-| `[With<T>]`、`[Without<T>]`、`[WithAny<T>]` | 无（过滤条件读的是存在性，没有哪个并行系统会改它） |
+| `[With<T>]`、`[Without<T>]`、`[WithAny<T1, T2>]` | 无（过滤条件读的是存在性，没有哪个并行系统会改它） |
 | `[Changed<T>]`、`[Removed<T>]` | 读 `T`（它的变更 tick） |
 | `[ChangedAny<T1, …, Tn>]`、`[RemovedAny<T1, …, Tn>]` | 读 `T1` 到 `Tn` 中的每一个 |
 | 只当身份用的 `Entity`（`Id`、`Version`、`IsAlive`、`==`、`EntityId`） | 无 |
-| 其他用法的 `Entity`、`World`、`[OnUpdate]` 方法、`[Consume]` 方法 | 单独运行 |
+| 其他用法的 `Entity`、`World`、`OnUpdate` 方法、`[Consume]` 方法 | 单独运行 |
 | 没有任何 `[ForEach]` 方法 | 单独运行 |
 
 一个系统写了另一个系统读或写的东西，或者其中一个要单独运行，两者就冲突。系统放在哪个阶段：先找出它必须排在后面的系统（有顺序约束的，
@@ -528,7 +528,7 @@ public record struct Aim(EntityId Target) : IComponent;
 [EcsSystem]
 public ref struct StrikeSystem
 {
-    [ForEach(Parallel = true)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Off)]   // 每条记录两个值：逐行执行
     static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits) =>
         hits.Add(new Hit(aim.Target, attack.Power));   // 这一块的列表 // [!code highlight]
 }
@@ -536,7 +536,6 @@ public ref struct StrikeSystem
 [EcsSystem]
 public ref struct ApplyHitsSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
@@ -550,7 +549,7 @@ public ref struct ApplyHitsSystem
 生成器给每块一个自己的列表，遍历结束时把列表接起来。它为 `Strike` 写的是：
 
 ```csharp tab="你写的" doccheck=skip
-[ForEach(Parallel = true)]
+[ForEach(Parallel = true, SimdMode = SimdMode.Off)]
 static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits)
 ```
 
@@ -636,20 +635,11 @@ public ref struct WanderSystem
         wander.Y = random.Range(entity.Id, 1, -1f, 1f);
     }
 }
-
-// 推进模拟时钟的系统顺便推进随机数的 tick。
-[EcsSystem, UpdateAfter<WanderSystem>]
-public ref struct TickRandomSystem
-{
-    [OnUpdate]
-    static void OnUpdate(World world) => world.EntityRandom.Tick++;
-}
 ```
 
 ```csharp
-world.SetEntityRandom(Seed: 42, Tick: 0);   // 换个种子，每个实体就是另一串数
+world.SetEntityRandom(Seed: 42);   // 换个种子，每个实体就是另一串数
 world.AddSystem<WanderSystem>();
-world.AddSystem<TickRandomSystem>();
 ```
 
 | 成员 | 返回 |
@@ -662,7 +652,8 @@ world.AddSystem<TickRandomSystem>();
 
 - **每次抽取一个流。** 同样的四个输入给出同样的数，所以同一实体在同一 tick 用同一个流抽两次，结果相等：每个调用点给自己的流（0、1、2……），
   循环里要让流随循环变化（[EECS088](/zh/docs/guide/analyzer#eecs088)，代码修复会取下一个没用过的流）。
-- **每一步推进一次 tick。** tick 不动，抽到的就还是同样的数；实体的数取决于它的 id（下标和版本号），所以回收的 id 抽到的是一串新的数。
+- **World 推进 tick。** 每次 `World.Update()` 在任何系统运行之前把 `Tick` 加一，所以每次更新抽到新的数；`Update<TGroup>()` 不动它，
+  两次更新之间运行的分组抽到的是那次更新抽到的数。实体的数取决于它的 id（下标和版本号），所以回收的 id 抽到的是一串新的数。
 - **纯函数、零分配。** 四轮 SplitMix64 的终结函数：一次抽取是几次乘法，不写任何状态，所以方法只读它（`in EntityRandom`），保持并行。
 - **分析器检查什么：** `[ForEach]` 方法里的 `Random.Shared`、`new Random()` 和 `System.Random` 字段报
   [EECS071](/zh/docs/guide/analyzer#eecs071)（警告），代码修复改成 `EntityRandom`。
@@ -718,7 +709,6 @@ public struct RollCriticals : IForSpan<Hit>
 [EcsSystem]
 public ref struct CriticalSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         var job = new RollCriticals { Random = world.EntityRandom };
@@ -755,7 +745,6 @@ public record struct MoveInbox(ConcurrentQueue<MoveRequest> Moves) : ISingletonC
 [EcsSystem]
 public ref struct ReceiveMoves
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         var moves = world.MoveInbox.Moves;
@@ -961,13 +950,12 @@ unit 0 at (7.06, 7.06) with 60 hp
 | 并行遍历里通过辅助方法碰到还没人建好的值索引 | `InvalidOperationException` | 在 `Lookup<T>` 参数本身上调用 `TryFind` / `Find` / `Count` |
 | 归约类型不是 `partial`，或有字段没加特性 | 编译错误：生成器写不出 `Identity` 和 `Combine` | [EECS062](/zh/docs/guide/analyzer#eecs062)、[EECS064](/zh/docs/guide/analyzer#eecs064) |
 | 手写的最小值 `Identity` 是 0 | 每块的最小值都变成 0 | [EECS066](/zh/docs/guide/analyzer#eecs066)：用 `[Min]` |
-| 单例在 `[OnUpdate]` 里清零，再逐行累加 | 只能单线程，也没有向量循环 | [EECS086](/zh/docs/guide/analyzer#eecs086)：`ref Reduce<T>` |
+| 单例在 `OnUpdate` 里清零，再逐行累加 | 只能单线程，也没有向量循环 | [EECS086](/zh/docs/guide/analyzer#eecs086)：`ref Reduce<T>` |
 | 发出 `T` 的方法同时读 `Emitted<T>` | 编译错误：记录在这一遍结束时才到 | [EECS070](/zh/docs/guide/analyzer#eecs070) |
 | 结算 `Emitted<T>` 之后没清空 | 下一次更新又结算同样的记录 | 代码审查：结算的系统里 `Items.Clear()` |
 | 逐行往单例的列表里追加记录 | 只能单线程 | [EECS089](/zh/docs/guide/analyzer#eecs089)：`Emit<T>` |
 | `[ForEach]` 方法里用 `Random.Shared` 或 `new Random()` | 每次运行、每种线程数抽到的数都不同 | [EECS071](/zh/docs/guide/analyzer#eecs071)：`EntityRandom` |
 | 同一实体用同一个流抽两次 | 两次是同一个数 | [EECS088](/zh/docs/guide/analyzer#eecs088)：每次抽取一个流 |
-| `EntityRandom` 的 tick 从不推进 | 每次更新抽到的都是上一次的数 | 代码审查：随时钟推进 `Tick` |
 | `ForParallel` 之后读 job 的字段 | 还是旧值：每一块跑的是副本 | [EECS061](/zh/docs/guide/analyzer#eecs061) |
 
 ## 和其他 ECS 库的对比 [#compared-with-other-ecs-libraries]

@@ -275,7 +275,7 @@ public record struct Workshop(int Recipe, int Progress, int Queue) : IComponent;
 [EcsSystem]
 public ref struct UpgradeCrafting
 {
-    [ForEach]
+    [ForEach(SimdMode = SimdMode.Off)]   // a migration that runs once: one row at a time
     static void Upgrade(Entity player, in Crafting old)
     {
         player.SetWorkshop(old.Recipe, old.Progress, Queue: 0);

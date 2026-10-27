@@ -96,7 +96,7 @@ World 最初的几次更新：建好表、查询缓存和之后反复使用的�
 
 实现 `ISystemGroup` 的结构体。标了 `[UpdateInGroup<G>]` 的系统只在 `world.Update<G>()` 时执行，所以输入、模拟和存盘可以各按各的节奏跑。
 没标这个特性的系统属于默认分组，由 `world.Update()` 执行。分组可以给它所有的系统统一过滤实体：在分组结构体上写 `[With<T>]`、
-`[Without<T>]`、`[WithAny<T>]`，或者让分组自己、它实现的接口实现 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`（一个泛型接口就这样给每种
+`[Without<T>]`、`[WithAny<T1, T2>]`，或者让分组自己、它实现的接口实现 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`（一个泛型接口就这样给每种
 actor 类型各配一个分组）。见[系统](/zh/docs/guide/systems#system-groups)。
 
 ## 更新与 tick（Update、tick） [#update]
@@ -113,7 +113,7 @@ actor 类型各配一个分组）。见[系统](/zh/docs/guide/systems#system-gr
 
 一个系统读什么、写什么，由生成器根据 `[ForEach]` 参数得出：`ref` 的组件或单例算写，`in` 的算读，`Mut<T>` 参数算写 `T`，
 `[Changed<T>]`、`[Removed<T>]` 算读 `T`。一个写了另一个读或写的东西，两个系统就冲突。能碰到整个 World 的系统（带 `Entity` 或 `World` 参数、
-有 `[OnUpdate]` 方法、有 `[Consume]` 方法）独占运行。只有互不冲突的系统才会进同一个[阶段](#stage)。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
+有 `OnUpdate` 方法、有 `[Consume]` 方法）独占运行。只有互不冲突的系统才会进同一个[阶段](#stage)。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
 
 ## 执行器（Runner） [#runner]
 
